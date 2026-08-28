@@ -99,6 +99,12 @@ module uopcache
     input  logic         inv_en,
     input  logic [IC_IDXW-1:0]   inv_set,
     input  logic         inv_way,
+    // R2-H09: a SECOND per-line invalidate (the icache's CPU-store snoop can
+    // match two lines in one clock -- a line-crossing store snoops both).
+    // Identical semantics to inv_*; either or both may fire.
+    input  logic         inv2_en,
+    input  logic [IC_IDXW-1:0]   inv2_set,
+    input  logic         inv2_way,
     // REVIEW Aug-1 H-04: the CURRENT default size. A line predecoded under one default
     // must never be READ BACK under the other, so any change to it invalidates every
     // predecoded line. CS.D changes are rare (mode switches / far transfers), so this
@@ -240,6 +246,15 @@ module uopcache
   logic [IC_IDXW-1:0]    pd_pend_set; logic pd_pend_way;
   logic [IC_LINE*8-1:0]  pd_pend_line;
   logic [31:0]           pd_pend_flags; logic pd_pend_cyc, pd_pend_d16;
+  logic                  pd_start_kill, pd_pend_kill;
+  always_comb begin
+    pd_start_kill = d16_flush
+                 || (inv_en  && (inv_set  == pd_set) && (inv_way  == pd_way))
+                 || (inv2_en && (inv2_set == pd_set) && (inv2_way == pd_way));
+    pd_pend_kill  = pd_pend && (d16_flush
+                 || (inv_en  && (inv_set  == pd_pend_set) && (inv_way  == pd_pend_way))
+                 || (inv2_en && (inv2_set == pd_pend_set) && (inv2_way == pd_pend_way)));
+  end
 
   // walker working buffers (written into the store on W_WRITE)
   logic [NSLOT*FPDW-1:0] wbuf_slots;
@@ -282,46 +297,56 @@ module uopcache
         for (int i=0;i<IC_SETS*2;i++) store_pdv[i] <= 1'b0;
       // invalidate (refill/SMC): clear predecoded-valid for the (set,way).
       if (inv_en) store_pdv[{inv_set,inv_way}] <= 1'b0;
+      if (inv2_en) store_pdv[{inv2_set,inv2_way}] <= 1'b0;   // R2-H09
       // H-14: if that invalidation (or a global d16 flush) hits the line THIS WALK is
       // building, the walk's result is stale before it is even written -- poison it so
       // W_WRITE does not resurrect it.
       if ((wst != W_IDLE) &&
-          (d16_flush || (inv_en && (inv_set == wset) && (inv_way == wway))))
+          (d16_flush || (inv_en && (inv_set == wset) && (inv_way == wway))
+          // R2-H09: the second invalidate poisons an in-flight walk the same way
+          || (inv2_en && (inv2_set == wset) && (inv2_way == wway))))
         wpz <= 1'b1;
+      // A queued walk is just as stale as the active one when its line is
+      // invalidated.  Cancel it before it can later resurrect predecode data.
+      if (pd_pend_kill) pd_pend <= 1'b0;
       // H-14: a start arriving while the walker is busy used to be dropped on the
       // floor. Hold it (1-deep) and run it when the walker goes idle. Deeper queueing
       // is unnecessary: starts are one per I-cache line fill, which cannot outrun the
       // walk by more than one in this design -- and if that ever changes, the
       // simulation warning below says so instead of silently losing predecode.
-      if (pd_start && (wst != W_IDLE)) begin
+      if (pd_start && !pd_start_kill && (wst != W_IDLE)) begin
 `ifndef SYNTHESIS
-        if (pd_pend)
-          $display("[UOPC] WARNING: second pd_start while one is pending (set %0d way %0d dropped) -- REVIEW2 H-14 skid is 1-deep",
-                   pd_pend_set, pd_pend_way);
+        if (pd_pend && !pd_pend_kill)
+          $display("[UOPC] WARNING: second pd_start while one is pending (new set %0d way %0d dropped) -- REVIEW2 H-14 skid is 1-deep",
+                   pd_set, pd_way);
 `endif
-        pd_pend       <= 1'b1;
-        pd_pend_set   <= pd_set;   pd_pend_way <= pd_way;
-        pd_pend_line  <= pd_line;
-        pd_pend_flags <= pd_flags; pd_pend_cyc <= pd_cycle_mode; pd_pend_d16 <= pd_def16;
+        // Preserve the older queued request.  The old code claimed the new
+        // request was dropped but actually overwrote the pending entry.
+        if (!pd_pend || pd_pend_kill) begin
+          pd_pend       <= 1'b1;
+          pd_pend_set   <= pd_set;   pd_pend_way <= pd_way;
+          pd_pend_line  <= pd_line;
+          pd_pend_flags <= pd_flags; pd_pend_cyc <= pd_cycle_mode; pd_pend_d16 <= pd_def16;
+        end
       end
 
       unique case (wst)
         W_IDLE: begin
           // H-14: a fresh start wins; otherwise run a held one.
-          if (pd_start || pd_pend) begin
-            residual   <= pd_start ? pd_line       : pd_pend_line;
+          if ((pd_start && !pd_start_kill) || (pd_pend && !pd_pend_kill)) begin
+            residual   <= (pd_start && !pd_start_kill) ? pd_line       : pd_pend_line;
             woff       <= 6'd0;
             wslot      <= 4'd0;
-            wset       <= pd_start ? pd_set        : pd_pend_set;
-            wway       <= pd_start ? pd_way        : pd_pend_way;
-            wflags     <= pd_start ? pd_flags      : pd_pend_flags;
-            wcyc       <= pd_start ? pd_cycle_mode : pd_pend_cyc;
-            wd16       <= pd_start ? pd_def16      : pd_pend_d16;
+            wset       <= (pd_start && !pd_start_kill) ? pd_set        : pd_pend_set;
+            wway       <= (pd_start && !pd_start_kill) ? pd_way        : pd_pend_way;
+            wflags     <= (pd_start && !pd_start_kill) ? pd_flags      : pd_pend_flags;
+            wcyc       <= (pd_start && !pd_start_kill) ? pd_cycle_mode : pd_pend_cyc;
+            wd16       <= (pd_start && !pd_start_kill) ? pd_def16      : pd_pend_d16;
             wbuf_slots <= '0;
             wbuf_bmap  <= '0;
             wpz        <= 1'b0;      // fresh transaction
             wst        <= W_WALK;
-            if (!pd_start) pd_pend <= 1'b0;   // consumed the held one
+            if (!(pd_start && !pd_start_kill)) pd_pend <= 1'b0;   // consumed the held one
           end
         end
         W_WALK: begin
@@ -369,7 +394,9 @@ module uopcache
           // global flush above for this one line.
           // H-14: also refuse to validate a walk that was invalidated mid-flight.
           store_pdv[{wset,wway}]     <= !(wpz || d16_flush || (wd16 != cur_def16)
-                                        || (inv_en && (inv_set==wset) && (inv_way==wway)));
+                                        || (inv_en && (inv_set==wset) && (inv_way==wway))
+                                        // R2-H09: the second invalidate, same refusal
+                                        || (inv2_en && (inv2_set==wset) && (inv2_way==wway)));
           wst <= W_IDLE;
         end
         default: wst <= W_IDLE;

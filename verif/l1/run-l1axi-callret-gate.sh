@@ -29,7 +29,7 @@ done
 
 say "1. build the deployed-config tb (L1AXI + KV260 REMAP + all features)"
 make -C "$TB" l1axi_kv_full >/dev/null
-BIN="$TB/obj_dir_l1axi_kvf/tb_ventium"
+BIN="$TB/${KV_FULL_OBJDIR:-obj_dir_l1axi_kvf}/tb_ventium"
 
 # run <image> [max-insn] -> prints the tb console, sets RC, and ALWAYS returns 0.
 #

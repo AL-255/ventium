@@ -1,0 +1,45 @@
+{
+  "name": "pselnull",
+  "kind": "system",
+  "src": "pselnull.S",
+  "linker": "pselnull.ld",
+  "image": "pselnull.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 1200,
+  "sys": true,
+  "paging": true,
+  "finding": "REVIEW1_Aug3 R2-C02",
+  "transitions": [
+    "real->protected via the REAL GDT lgdt'd once at linear 0x3FF8 (CR0.PE 0->1, CS far-jump to flat code 0x08 at entry 1 = linear 0x4000)",
+    "GDT entry 0 (0x3FF8-0x3FFF) is a deliberate NONZERO POISON descriptor (present data32, base 0x000A0000); entries 1-8 live at 0x4000-0x403F: code0 0x08, data0 0x10, LDT_B 0x18 (limit 0x0F), TSS1 0x20, TSS_D 0x28 (incoming LDTR=0x0004), TSS_E 0x30 (incoming DS=NULL, LDTR=null, CR3=0x11000), LDT_C 0x38 (limit 0x00)",
+    "case B: LLDT LDT_B, far JMP through LDT ENTRY 0 (selector 0x0004) to code32 base 0xF0000 -- SUCCEEDS (0x0004 is TI=1/index-0, a VALID entry, not null)",
+    "case C: LLDT LDT_C (limit 0), MOV DS <- 0x0006 out of bounds -> #GP(0x0004), the error code PRESERVING TI (selector_error, not {sel[15:3],3'b000})",
+    "case D: hardware task switch to TSS_D with incoming LDTR=0x0004 -> #TS(0x0004) (TI violation)",
+    "page tables built (PD@0x11000, PT0@0x12000); CR3 load + CR0.PG 0->1 with page 3 (GDT entry 0) NOT PRESENT and every other object on present pages",
+    "case A: MOV DS <- 0x0000 with GDT[0] nonzero AND non-present -- no descriptor read (no #PF), explicit-zero hidden cache: a read through the null DS at offset 0x9ABC lands on S1 (base 0), never on S2 at poison-base 0xA0000+0x9ABC",
+    "case E: paged hardware task switch to TSS_E (incoming DS NULL, incoming LDTR null, CR3 unchanged) completes with NO GDT[0] read and NO #PF; task_e reads S1 through the staged null DS (base 0)",
+    "isa-debug-exit (status 133) from task_e"
+  ],
+  "witnesses": {
+    "edi at exit": "0x0BABE001 -- case A: the null-DS read landed on S1 (base 0), NOT the poison base; and no #PF (pf_entry would have diverted to do_exit with edi=0)",
+    "esi at exit": "0x00010004 = (b_ok<<16)|0x0004 -- case B's LDT-entry-0 far JMP succeeded (the sentinel 0xB000B000 was verified) AND case C's error code is 0x0004 (TI preserved)",
+    "ebp at exit": "RTL 0x010A0004 = (d_espok<<24)|(vec 10 <<16)|err 0x0004 -- case D delivered #TS(0x0004) and the RTL raised it in the OUTGOING context: ESP at the fault == the pre-switch ESP (d_espok=1, nothing moved). The GOLDEN honestly pins 0x000A0004: QEMU raises the same #TS only AFTER committing the switch (oracle gap 1), so its d_espok=0",
+    "ebx at exit": "RTL 0x0000898B = (TSS_D.acc 0x89 <<8)|TSS1.acc 0x8B -- the RTL's rejected switch wrote NO busy bytes. The GOLDEN pins 0x00008B89: QEMU's commit-then-fault ordering toggled both (oracle gap 1)",
+    "ecx at exit": "0x0BABE001 -- case E: the task-switch-staged null DS has base 0 (task_e reads S1 through it); the paged switch with a null incoming DS + null LDTR raised no #PF"
+  },
+  "oracle_gaps": [
+    "oracle gap 1 (case D ordering): QEMU 8.2.2 raises the incoming-LDTR #TS(0x0004) only AFTER committing the whole switch -- outgoing state save, busy-bit toggle, CR0.TS=1, new task context (switch_tss_ra: the `new_ldt & 4` check runs after the register/CR3/TR commit, matching SDM Vol.3A 8.2 steps 9/14 'loading and qualification occur in the context of the new task'). The fix's REVIEW_Aug3 C-06 prevalidation raises #TS(0x0004) in S_TSW_READ BEFORE any state moves -- deliberately ('#TS ahead of any memory access, not after it'), so a paging #PF can never preempt the architecturally prior #TS. Both oracles deliver vector 10 with error code 0x0004, but cr0.TS / ESP / GPRs differ from the fault on, so no whole-trace differential is possible. The test is therefore a WITNESS gate (the piretgp0 pattern): the golden pins QEMU's deviant flow HONESTLY in step 5g (ebp=0x000A0004, ebx=0x00008B89) and the RTL side is graded in step 7w from the final-record GPRs + +ven_faultlog.",
+    "note (not a gap): QEMU does NOT fault on a data access through a null-loaded DS in softmmu -- there is no per-access segment validation (the same reason run-seg-gate.sh exists) -- so case A/E's base-0 reads are oracle-identical. Verified empirically: the golden shows both reads landing on S1 with no #GP."
+  ],
+  "negative_control": {
+    "method": "build the RTL TB from HEAD (git worktree add /tmp/ven_base_pselnull HEAD; make -C verif/tb rtl), run the same image --system, compare the exit witnesses (this is a WITNESS gate, so the control is the witness set, not a trace diff)",
+    "expected": "DIVERGENT witnesses: HEAD treats selectors 0x0004/0x0006 as null ([15:3] expression): case B's far JMP faults as a null-CS load (b_ok=0 -> esi loses 0x00010000), case C takes NO fault (silent load; esi loses 0x0004), case D silently invalidates the incoming LDTR and switches into task_d (which jumps to do_exit BEFORE paging is enabled -> edi=ecx=0), cases A/E (if reached) read GDT[0] on the non-present page -> #PF -> pf_entry poisons 0x2004 and diverts to do_exit with edi=0",
+    "measured": "CONFIRMED 2026-08-03: HEAD TB (4a643c1, no R2-C02 fix): case B's far JMP to LDT entry 0 (0x0004) faulted as a null-CS load -- the HEAD faultlog shows 'vec=13 err=00000000 pc=000f02e1' (which also pins the old {sel[15:3],3'b000} TI-CLEARING error form), so b_ok=0; case C took no fault; case D's incoming LDTR 0x0004 was silently swallowed and the switch COMPLETED into task_d (exit ebx=0xD00DD00D, task_d having jumped to do_exit before paging was ever enabled). HEAD's final witnesses are edi=0 esi=0 ebp=0 ebx=0xD00DD00D ecx=0 vs the required 0x0BABE001/0x00010004/0x010A0004/0x0000898B/0x0BABE001 -- every witness diverges, and HEAD stops at 473 records vs 598 for the fixed build. build/sys/pselnull.head.rtl.vtrace + build/sys/pselnull.head.faultlog"
+  },
+  "description": "REVIEW1_Aug3 R2-C02 regression: ONE definition of a null selector (sel[15:2]==0) and of a selector error code (sel & 0xFFFC), applied across S_SEGLD / S_LJMP / S_TSW_*. Five cases in one image. case B: a far JMP through LDT entry 0 (selector 0x0004) to a valid LDT-resident code segment SUCCEEDS -- 0x0004 names a VALID entry, not null (HEAD #GPs it as a null-CS load). case C: an out-of-bounds LDT selector (0x0006 against an LDT limit of 0) faults #GP(0x0004), the error code preserving TI. case D: an incoming task LDTR of 0x0004 in a TSS is #TS(0x0004) (TI violation), not a silent invalidation -- witness-only because QEMU raises the same fault only after committing the switch (oracle gap 1). case A: a null DS load with GDT[0] deliberately NONZERO (poison base 0xA0000) AND on a non-present page performs no descriptor read (no #PF) and installs explicit zeros -- proven by a read through the null DS landing on S1 at base 0, never on S2 at the poison base. case E: a PAGED task switch with a null incoming DS and a null incoming LDTR completes with no GDT[0] read and no #PF, and the staged null DS addresses base 0 (task_e reads S1 through it). Cases A/B/C/E are implemented identically by QEMU 8.2.2 (verified in the pinned harness seg_helper.c); the test is a WITNESS gate only because of case D's ordering gap. The witnesses are pulled into the GPRs before the isa-debug-exit; step 7w asserts them against the RTL run (plus +ven_faultlog: vec=10 err=00000004 and vec=13 err=00000004 exactly once each), and step 5g pins the golden's honestly-divergent case-D flow."
+}

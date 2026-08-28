@@ -1,0 +1,35 @@
+{
+  "name": "pxfrag",
+  "kind": "system",
+  "src": "pxfrag.S",
+  "linker": "pxfrag.ld",
+  "image": "pxfrag.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 3000,
+  "sys": true,
+  "paging": true,
+  "finding": "fragment-engine abort regression (fx single-ownership rework): the READ fragment phases, differential half",
+  "gate_form": "DIFFERENTIAL (full-stream compare vs the QEMU golden; CR2 is compared on every record, so both fault CR2s are graded) + the step-5f exit-witness validation. QEMU's helper_lgdt reads limit+base through the softmmu and commits env->gdt only after both succeed, so every flow here is oracle-exact.",
+  "transitions": [
+    "real->protected (boot GDT @0x500) + paging (PT0 @0x12000: identity low window except PT0[3]/PT0[4] NP-start, PT0[5]->phys 0x605000, PT0[7]->phys 0x607000; PT1 @0x13000 maps the three case GDTs at linear 0x400000/0x405000/0x406000 to non-adjacent phys frames)",
+    "case A (read frag2 abort + stale-frag1 poison): lgdt [0x2FFE] with page 3 NP -- frag1 (the limit word) lands in the engine, frag2 faults #PF CR2=0x3000 with GDTR UNCHANGED (proven behaviourally through the active GDTR: the boot-table sentinel read). The handler POISONS the limit word 0x2F->0x47, maps page 3, IRETs; the restart must re-read fragment 1 (a stale merge installs 0x2F) -- proven by selector 0x40 loading cleanly (only legal with limit 0x47) and selector 0x48 #GP-bracketing it",
+    "case B (read frag1 abort): lgdt [0x4FFE] with page 4 NP -- the initial request faults before the engine engages, CR2=0x4FFE; the handler maps page 4; the restarted lgdt completes and its GDT serves the sentinel read (the restart began at fragment 1)",
+    "case C (control): lgdt [0x6FFE] with both pages present on non-contiguous frames (page 7 -> phys 0x607000) completes first try and serves its sentinel read",
+    "exit-record witnesses; isa-debug-exit (status 133)"
+  ],
+  "witnesses": {
+    "ecx at exit": "0x00000201 -- two #PF (the two crossing lgdt aborts) + one #GP (the case-A limit bracket) all delivered",
+    "edx at exit": "0x300000F4 -- case-A CR2 (0x3000) in the high half; the low 16 bits are clobbered by the 0xF4 exit-port load (the case-B CR2 0x4FFE is graded by the differential, which compares cr2 on every record)",
+    "edi at exit": "0x600DF00D -- case A: GDTR was UNCHANGED by the rejected crossing read (no partial commit)",
+    "ebx at exit": "0xFEEDFACE -- case A: selector 0x40 committed, i.e. the restart installed the POISONED limit 0x47 (re-read fragment 1), not the aborted sequence's stale 0x2F",
+    "ebp at exit": "0xBEEFCAFE -- case B: the frag1-aborted lgdt restarted and completed; its GDTR works",
+    "esi at exit": "0xC001D00D -- case C control (both pages present, non-contiguous)"
+  },
+  "write_side_coverage": "the write phases (probe / frag A / frag B) are covered by pxc04e/pxc04f (not-present second page, probe-before-commit atomicity). Post-probe write fragments cannot page-fault by construction (the probe leaves both pages TLB-resident and writable; interrupts are sampled at instruction boundaries; segment enforcement is off by default) -- their abort machinery is covered by the reset injection in verif/fxabort, and the unreached-fault coverage is documented there.",
+  "description": "Fragment-abort regression for the single-ownership fx rework, differential half: fault the read fragment phases of a crossing GDTR read -- frag2 with a stale-frag1 poison (the handler rewrites the limit word between the abort and the restart) and frag1 (the pre-engagement miss) -- and prove the restarted instruction begins again at fragment 1 with architecturally exact results."
+}

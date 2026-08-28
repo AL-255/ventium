@@ -92,9 +92,15 @@ _start16:
      *          access(0x92) | base23:16(04) -> 0x00409204                     */
     movl    $0x0000FFFF, 40(%ebx)
     movl    $0x00409204, 44(%ebx)
+    /* idx 6 (0x30): 16-bit protected code, base=0x000F0000, limit=64KiB.
+     * This lets the test execute CWSDPMI's exact 66 67 C5 prefix/opcode shape
+     * under a D=0 protected CS rather than merely testing LDS in 32-bit code.
+     * low=base15:0(0000)|limit(FFFF); high=base23:16(0F)|access(9A). */
+    movl    $0x0000FFFF, 48(%ebx)
+    movl    $0x00009A0F, 52(%ebx)
 
     /* --- gdt pseudo-descriptor @0x0480: limit(2) base(4) --- */
-    movw    $0x002F, 0x0480     /* limit = 48-1 = 0x2F (6 entries) */
+    movw    $0x0037, 0x0480     /* limit = 56-1 = 0x37 (7 entries) */
     movl    $0x00000500, 0x0482 /* base  = 0x0500     */
 
     lgdt    0x0480
@@ -220,6 +226,25 @@ pm32_entry:
     movw    $0x10, %ax
     movw    %ax, %ds
 
+    /* ---------------- protected LDS, exact CWSDPMI instruction shape -------
+     * Prepare an m16:32 pointer at flat 0x88020: offset 0x13579BDF and based
+     * data selector 0x18. Enter a D=0 protected code segment, then execute the
+     * exact bytes seen on silicon at CWSDPMI _ring0_iret:
+     *
+     *     66 67 c5 75 10      lds esi,[ebp+0x10]
+     *
+     * Both prefixes toggle the 16-bit code defaults to 32-bit. A store through
+     * the newly loaded DS proves its hidden base is 0x20000, while ESI retains
+     * the 32-bit pointer offset. */
+    movl    $0x13579BDF, %es:0x00088020
+    movw    $0x0018,     %es:0x00088024
+    .byte   0x66, 0xEA          /* 32-bit code -> ptr16:16 far jump */
+    .word   pm16_lds_off
+    .word   0x0030
+
+pm32_after_lds:
+    movl    %es:0x00022400, %edi /* = 0x2468ACE0 iff LDS installed DS.base */
+
     /* ====================== clean exit via isa-debug-exit ================== */
     movl    $0x42, %eax
     movw    $0xF4, %dx
@@ -228,6 +253,19 @@ pm32_entry:
 hang:
     hlt
     jmp     hang
+
+    .code16
+    .global pm16_lds
+pm16_lds:
+    .byte   0x66, 0xBD
+    .long   0x00088010          /* mov ebp,0x88010 */
+    .byte   0x66, 0x67, 0xC5, 0x75, 0x10
+    movl    $0x2468ACE0, 0x00002400
+    movw    $0x0010, %ax
+    movw    %ax, %ds
+    .byte   0x66, 0xEA          /* 16-bit code -> ptr16:32 far jump */
+    .long   pm32_after_lds
+    .word   0x0008
 
     /* ===================== 16-bit reset stub @ 0xFFF0 ====================== */
     .code16

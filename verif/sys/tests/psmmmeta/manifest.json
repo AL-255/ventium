@@ -1,0 +1,51 @@
+{
+  "name": "psmmmeta",
+  "kind": "system",
+  "src": "psmmmeta.S",
+  "linker": "psmmmeta.ld",
+  "image": "psmmmeta.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 60000,
+  "sys": true,
+  "paging": false,
+  "oracle": "WITNESS",
+  "golden": null,
+  "smbase": "0x30000",
+  "smm_entry": "0x38000",
+  "smm_save_map_p5": "0x3FE00",
+  "smi_trigger": "APIC self-IPI delivery-mode=SMI (ICR-low 0x00040200) -- the psmm mechanism",
+  "description": "SMM/RSM hidden-metadata restore regression (NO paging; linear == physical). SMI entry synthesizes real-mode-like segment state and must SHADOW the interrupted context's hidden metadata (seg_pm_loaded[] provenance, seg_b[] per-segment D/B, ss_b stack width); RSM must put back the PRE-SMI values, not the SMM handler's. Five SMI rounds in one image, every check through EXTERNALLY VISIBLE behavior (never a selector/base dump): the SMM handler proves its own view works, then deliberately MUTATES the metadata -- it sets CR0.PE, far-jumps into a 32-bit protected-mode code segment, and PM-loads SS and DS with the D/B the mainline did NOT have (chosen by a round id). A restore that leaks the handler's metadata into the resumed context flips the stack width of the first post-RSM push (cases B/C, ss_b) or the legality of an expand-down DS access above 64 KiB (case D, seg_b[DS]). GDT @0x500 (code32 0x08, data32/B=1 0x10, data16/B=0 0x18, expand-down B=1 0x20, expand-down B=0 0x28 -- the expand-down pair byte-granular limit 0x0FFF), IDT @0x1000, markers @0x2000..0x2360, handler copied to SMBASE+0x8000 = 0x38000, save map @0x3FE00, APIC @0xFEE00000.",
+  "case_map": {
+    "A (provenance: unreloaded DS/SS)": "DS and SS are NEVER reloaded after CR0.PE -- they keep their real-mode hidden caches (sel=0, base=0, limit 0xFFFF, not-PM-loaded). The handler PM-loads a 16-bit SS (ss_b=0) and a flat DS (PM-marking it). After RSM, a high-ESP push must behave EXACTLY as the identical pre-SMI push did (same ESP advance, same write target), and in-bounds uses of the sel=0 segments must not fault. The check is pre/post EQUALITY, valid regardless of which width the unreloaded SS resolves to on a given implementation. On an enforcing build the high-ESP probes would #SS against the real-mode 0xFFFF limit, so the image drops ESP to 0x0000FFF0 there (the two stack forms coincide inside 64 KiB; case A degrades to still-valid vacuous equality -- its full form discrimination runs on the non-enforcing canonical build and the QEMU free-run). Fail codes: 0x01 post push != pre push, 0x02 in-bounds sel=0 DS read clobbered or faulted, 0x03 an unexpected fault fired",
+    "B (mainline 16-bit SS, handler 32-bit)": "The mainline PM-loads SS with a B=0 descriptor (16-bit stack). The handler loads a B=1 SS. After RSM the push must take the 16-bit form again (SP moves within the low 64K, ESP's high half preserved, the dword lands at SS:0x000C) -- a leaked ss_b=1 takes the 32-bit form instead. Fail codes: 0x11 pre push not 16-bit-form (control), 0x12 post push not 16-bit-form (THE ss_b discriminator)",
+    "C (mainline 32-bit SS, handler 16-bit)": "The mainline PM-loads SS with a B=1 descriptor (32-bit stack). The handler loads a B=0 SS. After RSM the push must take the 32-bit form again (the dword lands at SS:0x0001000C). Fail codes: 0x21 pre push not 32-bit-form (control), 0x22 post push not 32-bit-form (THE ss_b discriminator)",
+    "D (data-segment D/B, seg_b[DS]; TWO rounds, expand-down DS)": "An expand-down data segment's valid offsets are (limit, upper], upper = 0xFFFF for B=0 and 0xFFFFFFFF for B=1, so an access at 0x10000 against limit 0x0FFF is legal for B=1 and a #GP for B=0 -- the only consumer of seg_b[DS] (the enforcing build's expand-down upper bound reads seg_b[cur_seg_idx] for non-SS segments). Polarity 1 (round 3): mainline DS=B=1 (access legal), handler loads DS=B=0; the post-RSM access must STILL be legal -- a leaked seg_b[DS]=0 faults it (fail 0x43; 0x41 is the pre-access control). Polarity 2 (round 4): mainline DS=B=0 (access faults), handler loads DS=B=1; the post-RSM access must fault exactly as the pre-SMI one did (fail 0x44 on a mismatch -- a leaked seg_b[DS]=1 makes it spuriously legal). The discrimination exists only with segment-limit enforcement (the +VEN_SEG_ENFORCE variant build); on a non-enforcing build every access succeeds and both polarities degrade to vacuous equality. The expected faults are consumed by the GP handler's count-and-skip arm (own slots XPECT/XSKIP @0x2348/0x234C; EXPECTGP is zeroed after each SMI because the handler stashes the round id in that dword).",
+    "handler sentinels": "0x2100 = 0x5AA10001 (the handler's own SMM view worked), 0x2104 = 0x5AA20002 (the handler's own stack pushed/popped at ITS mutated width), 0x2108 = 0x5AA30003 (the handler completed its protected-mode stay and RSM'd). Fail codes: 0x30/0x31/0x32; 0x7D unexpected #GP, 0x7E unexpected #PF, 0x7F unexpected #DF"
+  },
+  "witnesses": {
+    "final record": "edi = 0x42 (pass; on failure edi holds the failing check's code from the case_map), esi = 5 (five SMI rounds completed), ebx = 0x5AA30003 (handler completed its PM stay), ebp = 0x5AA20002 (the handler's own stack worked at its mutated width), edx = 0x600D00F4 (pass magic | the isa-debug-exit port)",
+    "fault count (ecx)": "0 on the canonical (non-enforcing) build; 2 on the +VEN_SEG_ENFORCE variant (case D polarity 2's pre and post faults -- the probe's own fault is accounted for and the counter zeroed before case A). The gate asserts the per-build value.",
+    "record count": "44203 canonical / 44241 enforcing (anti-vacuity: the five SMI spin windows dominate)"
+  },
+  "oracle_notes": [
+    "WITNESS-GRADED, NO DIFFERENTIAL GOLDEN -- the psmm oracle infeasibility: the qemu-system-i386 gdbstub single-step path (gen_trace.py --system) single-steps with SSTEP_NOIRQ, which masks CPU_INTERRUPT_SMI, and the stub has no SMM awareness (no HF_SMM in the g-packet), so a golden trace can never contain the SMM context. The scenario IS expressible free-running: the APIC self-IPI fires SMI under QEMU, and QEMU implements SMM/RSM with the same architectural hidden-metadata restore, so the image runs to the isa-debug-exit under free-running qemu-system-i386 (status 133, VERIFIED 2026-08-10 with the pinned harness build). Grading: the RTL final-record witnesses + the QEMU free-run exit status (the psmm/prsmflush_smm pattern).",
+    "The image SELF-CALIBRATES segment-limit enforcement with an ES probe (an expand-down B=0 ES access at 0x10000 faults iff limits are enforced; ES because case A requires DS/SS never reloaded). Every check keys its absolute expectation off the observed pre-SMI outcome, so the SAME image is valid on the canonical build, the +VEN_SEG_ENFORCE variant, and free-running QEMU, whichever of them faults the probe. The gate runs BOTH RTL builds and asserts the per-build fault-count witness (0 canonical / 2 enforcing), so the enforcing run additionally proves the polarity-2 faults really fired (a vacuous pass on the enforcing build would read ecx=0 and be REJECTED).",
+    "Case A is deliberately graded as pre/post EQUALITY only, not an absolute width: the width of a never-reloaded SS after CR0.PE is implementation-defined territory (this RTL build keeps the reset-time 32-bit default in the width register, so both pushes take the 32-bit form on the canonical build; QEMU takes the 16-bit form for both). Both are self-consistent, and equality is exactly what a restore leak breaks. Cases B/C PM-load SS explicitly, so their absolute width forms are architectural and agree on both implementations. Case D's expand-down legality is architectural too (SDM 3.4.5.1) but only OBSERVABLE when limits are enforced.",
+    "Mutation validation: (a) `seg_b[s] <= smm_seg_b_q[s];` removed from the RSM restore (scratch build, +VEN_SEG_ENFORCE): the gate FAILS with edi=0x43 -- case D polarity 1's post-RSM access at 0x10000 faults because the handler's expand-down B=0 leaked into the resumed seg_b[DS]. This is the review-driven fix for the earlier gap where a seg_b[] deletion passed: the stack-width cases observe ss_b, not seg_b[]. (b) `ss_b <= smm_ss_b_q;` removed (scratch build): the gate FAILS with edi=0x7D -- the leaked 16-bit stack width corrupts the first post-RSM `ret` (return address pushed with the 32-bit form), EIP goes wild from 0x0000, unexpected #GP (11684 records) before the case-B discriminator (0x12) is reached. Both scratch trees were deleted after the runs; the canonical rtl/ was md5-verified untouched."
+  ],
+  "validation": {
+    "commands": [
+      "make -C verif/sys/tests/psmmmeta",
+      "qemu-system-i386 -display none -machine pc -m 32 -device isa-debug-exit,iobase=0xf4,iosize=0x04 -bios verif/sys/tests/psmmmeta/psmmmeta.bin  -> exit 133 (free-run; SMI fires via the APIC self-IPI)",
+      "verif/tb/obj_dir/tb_ventium --system --image verif/sys/tests/psmmmeta/psmmmeta.bin --out build/sys/psmmmeta.rtl.vtrace --max-insn 60000 --quiesce 400  -> quiescent after 44203 instructions; final record edi=0x42 esi=5 ebx=0x5AA30003 ebp=0x5AA20002 ecx=0 edx=0x600D00F4",
+      "make -C verif/tb rtl OBJDIR=obj_dir_segmeta VL_EXTRA_DEFINES='+define+VEN_SEG_ENFORCE' && verif/tb/obj_dir_segmeta/tb_ventium --system --image verif/sys/tests/psmmmeta/psmmmeta.bin --out build/sys/psmmmeta.rtl.seg.vtrace --max-insn 60000 --quiesce 400  -> quiescent after 44241 instructions; final record edi=0x42 esi=5 ebx=0x5AA30003 ebp=0x5AA20002 ecx=2 edx=0x600D00F4",
+      "bash verif/sys/run-psmmmeta-gate.sh  -> PSMMMETA-GATE-OK"
+    ],
+    "results_2026_08_10": "canonical: final record edi=0x42 esi=5 ebx=0x5AA30003 ebp=0x5AA20002 ecx=0 edx=0x600D00F4 (44203 records, quiescent stop); +VEN_SEG_ENFORCE variant: same witnesses with ecx=2 (44241 records) -- both case-D polarities held their pre-SMI seg_b[DS]; QEMU free-run exit 133. Negative control (seg_b[] restore dropped, enforcing scratch build): the gate's witness check FAILS with edi=0x43 (case D pol1 post-RSM access faulted on the leaked B=0). ss_b restore dropped: FAILS with edi=0x7D (wild EIP after a width-corrupted ret). Green on the working-tree RTL."
+  }
+}

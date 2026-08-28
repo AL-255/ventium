@@ -1,0 +1,47 @@
+{
+  "name": "ptaskpg",
+  "kind": "system",
+  "src": "ptaskpg.S",
+  "linker": "ptaskpg.ld",
+  "image": "ptaskpg.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 700,
+  "sys": true,
+  "paging": true,
+  "finding": "REVIEW_Aug3 C-02",
+  "transitions": [
+    "real->protected via a 3-entry boot GDT at 0x500 (CR0.PE 0->1, CS far-jump to flat code 0x08)",
+    "page tables built pre-paging (phys writes): PD@0x11000, PT0@0x12000 identity-maps the code window [0xF0000,0x100000), PT1@0x13000 maps the NON-IDENTITY window [0x400000,0x40B000) onto scattered frames (0x800000, 0x810000, 0x801000, 0x802000, 0x811000, 0x803000, 0x804000, 0x805000, 0x806000, 0x807000, 0x808000)",
+    "CR3 load + CR0.PG 0->1: paging ON with non-identity mappings",
+    "LGDT of the REAL GDT post-paging: 8 entries at LINEAR base 0x400FE0, STRADDLING phys frames 0x800FE0 (entries 0-3) and 0x810000 (entries 4-7 = TSS1 0x20/TSS2 0x28/LDT1 0x30/LDT2 0x38 descriptors, so the busy bytes live at phys 0x810005/0x81000D)",
+    "LLDT 0x30 (LDT1: base 0x405000 limit 0x17) -- the OUTGOING task's LDT, differing from the incoming LDT2 (0x406000/0x1F) in BOTH base and limit",
+    "LTR 0x20 (TSS1 @ linear 0x402000 -> phys 0x801000)",
+    "HARDWARE TASK SWITCH: ljmp $0x28,$0 to TSS2 (base linear 0x403FF0, STRADDLING phys 0x802FF0 (back-link) and 0x811000 (whole state image)); outgoing save -> linear 0x402xxx (phys 0x801xxx); incoming LDTR 0x38 descriptor read at linear 0x401018 (phys 0x810018); incoming TI=1 selectors CS=0x0C/SS=0x14/DS=ES=FS=GS=0x1C resolved through the STAGED INCOMING LDT2 (phys 0x804xxx) -- the C-02 defect reads the OUTGOING LDT1 (phys 0x803xxx, a deliberately NON-CODE trap descriptor at entry 1) and/or bounds them against the wrong limit",
+    "busy-bit toggle: incoming busy byte written at linear 0x40100D (phys 0x81000D), outgoing available at linear 0x401005 (phys 0x810005) -- the C-02(b) beat-order swap sends them to the opposite physical addresses",
+    "task2 runs on LDT2's segments (CS base 0xF0000, SS base 0x407000), records the witnesses, exits via isa-debug-exit (status 133)"
+  ],
+  "witnesses": {
+    "0x409020/0x409024/0x409028": "incoming-task reload: EAX=0xAAAAAAAA, EBX=0xBBBBBBBB, ESP=0x00001FF0 from the TSS2 image (read across the page-straddling phys 0x802FF0/0x811000 split)",
+    "0x40902c": "0x5EED0001 -- task2 read it via SS:(%esp): the sentinel was pre-seeded at PHYS 0x806FF0 = linear 0x408FF0 = LDT2-SS-base 0x407000 + ESP 0x1FF0. ONLY the correct incoming SS descriptor base (resolved through the incoming LDT2) lands on it",
+    "0x409030": "SLDT == 0x0038 -- LDTR switched to the incoming LDT2 selector",
+    "0x409034": "STR == 0x0028",
+    "0x409038": "(TSS1 access <<8)|TSS2 access == 0x898B (edi at exit), read back THROUGH PAGING at linear 0x401005/0x40100D: the busy bytes toggled on the correct PHYSICAL page (0x810005/0x81000D). The C-02(b) swapped-beat defect yields 0x8B89 or trips the PAGING/C-04 CHECK-5 $error",
+    "0x409040": "TSS1 saved EIP (linear 0x402020 -> phys 0x801020), nonzero -- the outgoing save translated correctly (edx at exit)",
+    "0x409044": "TSS1 saved EAX == 0x1A1A1A1A, the live EAX at the jmp (esi at exit)"
+  },
+  "negative_control": {
+    "method": "build the RTL TB from HEAD (git worktree add /tmp/ven_base HEAD; make -C verif/tb rtl), run the same image --system, diff against the golden; also grep the RTL stderr for PAGING/C-0 CHECK-5 $error lines",
+    "expected": "DIVERGENT (and/or CHECK-5 fires): HEAD resolves the incoming TI=1 CS through the OUTGOING LDT1 -- entry 1 is a NON-CODE trap descriptor (base 0xDEAD0000) -- and/or bounds 0x1C against LDT1's smaller limit 0x17, so S_TSW_SEG raises #TS long before task2 runs; the busy-beat swap would separately mis-target phys 0x810005/0x81000D",
+    "measured": "CONFIRMED 2026-08-03: HEAD TB (4a643c1, no fix) fires the PAGING/C-04 CHECK-5 $error at core.sv:8250 on state 46 (S_TSW_SEG): 'TLB looks up lin=0x405008, the superseded arm computes lin=0x406008' -- cur_lin resolved the incoming TI=1 CS through the live OUTGOING LDT1 base 0x405000 (entry 1 = the poison NON-CODE descriptor) instead of the staged incoming LDT2 base 0x406000. HEAD stops at 444 records vs 471 golden: DIVERGENT. build/sys/ptaskpg.head.rtl.vtrace"
+  },
+  "description": "REVIEW_Aug3 C-02 regression: a PAGED hardware task switch (far JMP to an available TSS) with NON-IDENTITY mappings everywhere the switch touches. ptask proved the switch with paging OFF (linear==physical, where the three stale cur_lin mirrors are invisible); ptaskpg makes every one of them observable: (a) the incoming task's TI=1 CS/SS/DS/ES/FS/GS must resolve through the STAGED INCOMING LDT (tsw_st_ldt_base/limit), not the live OUTGOING ldt_base/ldt_limit -- the outgoing task LLDTs LDT1 (base 0x405000, limit 0x17, entry 1 a non-code poison descriptor) while the incoming TSS2 image names LDT2 (base 0x406000, limit 0x1F; code base 0xF0000, SS data base 0x407000, flat data); (b) the S_TSW_BUSY beats must write incoming-busy at linear 0x40100D and outgoing-available at linear 0x401005 (GDT page 2, phys 0x81000D/0x810005), in the bus arm's order, not the swapped mirror order; (c) every object -- the GDT (straddling phys 0x800FE0/0x810000), TSS1 (phys 0x801000), TSS2 (straddling phys 0x802FF0/0x811000), both LDTs, both stacks -- sits on a physical frame different from its linear address, and TSS2 additionally straddles a page boundary so the back-link word and the state image live on different physical frames. QEMU (which implements the paged switch correctly) is the differential oracle: the golden shows the switch completing, task2 running with CS=0x0C/SS=0x14 from the incoming LDT2, the SS-based sentinel read returning 0x5EED0001, SLDT==0x38, the busy bytes reading back 0x898B, and the outgoing save's EIP/EAX on phys 0x801020/0x801028. Every witness is pulled into the GPRs before the isa-debug-exit so the run-sys-golden.sh step-7 RTL sys-diff compares them record-for-record.",
+  "blocking_rtl_defect": {
+    "status": "GATE CURRENTLY RED on the step-7 RTL diff (fixed build), pending an RTL correction outside this test",
+    "detail": "REVIEW_Aug3 C-06 prevalidation in rtl/core/core_tsw.svh (S_TSW_READ, tsw_step==5'd17 arm) evaluates !(|tsw_new_ldt[15:3]) / tsw_new_ldt[2] / sel_in_table(tsw_new_ldt) on the SAME clock as the nonblocking tsw_new_ldt <= mem_rdata[15:0] at beat 17, so it always sees the STALE (reset) value 0. Every task switch with a non-null incoming LDTR takes the null-LDTR path: S_TSW_LDT is skipped, tsw_st_ldt_base stays 0, and the incoming TI=1 CS (0x0C) descriptor read issues at linear 0x8 -> #PF -> cascade -> S_SHUTDOWN. VCD evidence: state sequence 0x2c (S_TSW_READ, 18 correct dword reads at 0x40400c..0x404050) -> 0x2e (S_TSW_SEG) with cur_lin=0x8, never 0x2d (S_TSW_LDT); walk_lin=0x8. QEMU reads LDTR=0x38 and completes the switch. The existing corpus (ptask/ptaskcpl/ptaskv86) has null incoming LDTRs, so the stale read is invisible there. Fix direction: test mem_rdata[15:0] (the just-arrived beat) or move the prevalidation one state later. NOT fixed here: tests must not modify rtl/."
+  }
+}

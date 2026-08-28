@@ -1,0 +1,35 @@
+{
+  "name": "pxc04e",
+  "kind": "system",
+  "src": "pxc04e.S",
+  "linker": "pxc04e.ld",
+  "image": "pxc04e.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 1400,
+  "sys": true,
+  "paging": true,
+  "finding": "REVIEW1_Aug3 R2-C03",
+  "transitions": [
+    "real->protected (CR0.PE 0->1, CS far-jump to 32-bit flat code segment 0x08)",
+    "IDT @ 0x1000 with #PF/#GP/#UD interrupt gates + lidt",
+    "page tables: PT0 identity for the low structures/stack/code window EXCEPT PT0[3]: linear 0x3000 -> phys 0x600000, starting NOT-PRESENT; PT1[0] present, PT1[1] not-present (the pfault demand-page target); CR3 load + CR0.PG 0->1",
+    "case A (atomicity): fnstenv at linear 0x2FFE (beat 0 spans 0x2FFE-0x3001) with page 3 NP -> #PF(CR2=0x3000) BEFORE any commit; the handler verifies the page-1 sentinel 0xA5A5A5A5 at 0x2FFC-0x2FFF is untouched (marker 0x2038=0x600DF00D), maps page 3 -> phys 0x600000, IRETs; the fnstenv restarts and completes",
+    "case B (correctness, non-contiguous frames): the 28-byte FENV image lands split across phys 0x2FFE / phys 0x600002+; deterministic fields after fninit+fnop: CW=0x037F (0x2FFE, the crossing beat's page-1 bytes), SW=0 (0x3002), TW=0xFFFF (0x3006); FIP/FCS/FOP recorded for the differential; word field reads only (reserved image bytes never observed)",
+    "pfault flow: demand-page #PF at 0x401000 (restart + readback 0xCAFEBABE), #GP on selector 0x38 past the GDT limit, #UD on UD2; counters accumulate to 4",
+    "witnesses pulled into ecx/edx/esi/edi/ebx/ebp; isa-debug-exit (status 133)"
+  ],
+  "witnesses": {
+    "ecx at exit": "4 -- two #PF (crossing + demand-page) + one #GP + one #UD all delivered",
+    "edx at exit": "0x004000F4 -- CR2 0x401000 captured by the demand-page #PF, low 16 bits clobbered by the 0xF4 exit-port load",
+    "esi at exit": "0xCAFEBABE -- the restarted pfault store's readback",
+    "edi at exit": "0x600DF00D -- case A: the page-1 sentinel survived the rejected crossing store (pre-probe rejected BEFORE any write)",
+    "ebx at exit": "0xFFFF037F -- (TW<<16)|CW read back through the split image (page 3 = phys 0x600006 / page 2 = phys 0x2FFE)",
+    "ebp at exit": "0x00000000 -- SW read back through page 3 (phys 0x600002)"
+  },
+  "description": "REVIEW1_Aug3 R2-C03 regression for producer S_FENV_ST: the generic page-crossing fragment engine must complete a crossing FNSTENV (28-byte 32-bit environment image, 4-byte beats, beat 0 straddling) with architecturally correct results. Differential against QEMU (cputlb.c mmu_lookup looks up BOTH pages before any byte commits). Case A: with page 3 not-present the crossing store #PFs with CR2=0x3000 and the page-1 bytes are provably untouched. Case B: with page 3 on the non-adjacent phys frame 0x600000 the restarted image's CW/SW/TW fields read back correctly through the split (poisoned wrong frame + seeded right frame make any wrong-physical-page access observable). Built on the pfault skeleton, whose #PF/#GP/#UD deliveries still run and count."
+}

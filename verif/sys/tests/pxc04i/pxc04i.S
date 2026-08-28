@@ -2,66 +2,50 @@
  * SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
  */
 
-/* Ventium M2S.3 — bare-metal HARDWARE-FAULT (IDT delivery) demonstrator.
+/* Ventium M2S.3 — bare-metal HARDWARE-FAULT (IDT delivery) demonstrator, extended
+ * for REVIEW1_Aug3 R2-C03 (the generic page-crossing FRAGMENT ENGINE).
  *
- * This is the M2S.3 pfault gate test: it bootstraps real->protected + PAGING
- * (reusing the M2S.2 ppage bootstrap), stands up an IDT with #PF / #GP / #UD
- * handlers, and then DELIBERATELY triggers each fault so the M2S.1 segmentation
- * fault DECISION (#GP) and the M2S.2 paging fault DECISION (#PF + CR2 + error
- * code) — which prior stages only COMPUTE — now actually DELIVER through the IDT.
+ * Skeleton = the M2S.3 pfault gate test (see pxc04f.S for the full story). On top
+ * of it this image converts the old xc04 reachability probe for producer
+ * S_INT_PUSH (the exception-frame write) into a CORRECTNESS gate, differential
+ * against QEMU:
  *
- *   #PF (vector 14): touch a NOT-PRESENT page.  Handler reads CR2 (the faulting
- *       linear addr), MAPS the page (sets its PTE present), increments a counter,
- *       and IRETs.  #PF is a FAULT -> the pushed EIP is the FAULTING instruction;
- *       after the handler maps the page, IRET RESTARTS it and it now succeeds.
- *   #GP (vector 13): load a data segment with a selector PAST the GDT limit
- *       (selector 0x38 when the GDT holds only 6 entries -> last valid byte 0x2F).
- *       Handler increments a counter and RESUMES past the faulting instruction
- *       (a #GP fault pushes the faulting EIP, so re-executing would re-fault; the
- *       handler overwrites the saved EIP with a precomputed resume label).
- *   #UD (vector 6): execute UD2 (0F 0B), the architecturally-undefined opcode.
- *       Handler increments a counter and RESUMES past UD2 (same EIP-skip as #GP).
+ *   ESP := 0x8E002, then UD2 (no error code): the 12-byte frame occupies
+ *   0x8DFF6..0x8E001 across the 0x8E000 boundary -- saved EIP @0x8DFF6 and CS
+ *   @0x8DFFA on page 0x8D (identity), saved EFLAGS @0x8DFFE STRADDLING: its low
+ *   half on phys 0x8DFFE, its high half on phys 0x700000 (page 0x8E is mapped
+ *   NON-CONTIGUOUS). Phys 0x8E000 (the wrong, linear-adjacent frame) is
+ *   pre-poisoned with 0x0B0B0B0B and phys 0x700000 pre-seeded with 0x5A5A5A5A,
+ *   so a wrong-physical-page tail write is observable. The #UD handler
+ *   recognizes the crossing frame by its ESP, reads all three dwords back (the
+ *   EFLAGS read itself crosses), verifies saved EIP == the ud2 address and
+ *   saved CS == 0x08 -> marker 0x2038 = 0x600DF00D, records EFLAGS/CS for the
+ *   differential, and resumes the mainline.
  *
- * The #PF case has an ERROR CODE pushed (vector 14, present/write/user bits) and
- * sets CR2; #GP (vector 13) has an error code (the selector index, 0 here for a
- * non-external #GP carrying the bad selector); #UD (vector 6) has NO error code.
- * SAME-PRIVILEGE delivery only (handlers at CPL 0 — cross-privilege via TSS is
- * M2S.4).  Interrupt gates clear IF.
+ *   NO not-present/atomicity variant for this producer: the frame push IS the
+ *   exception-delivery mechanism. A second page that rejects the push faults
+ *   the DELIVERY itself; the nested #PF's own frame push crosses into the same
+ *   rejecting page (ESP is unchanged by an aborted delivery), so #PF-during-
+ *   #PF -> #DF -> triple fault on ANY correct implementation, QEMU included.
+ *   "Fault delivers cleanly + page 1 untouched" is architecturally
+ *   unobservable for S_INT_PUSH; the correctness of the probe-before-commit
+ *   order for writes is covered by pxc04f/pxc04e/pxc04t instead.
  *
- * Freestanding "BIOS" image: qemu-system-i386 -bios pfault.bin .  Reset vector
+ * Exit-record witnesses:
+ *   ecx = 4 (#UD crossing + pfault #PF/#GP/#UD), edx = 0x004000F4 (CR2
+ *   0x401000, dx clobbered by the 0xF4 port), esi = 0xCAFEBABE (pfault flow),
+ *   edi = 0x600DF00D (frame content verified from both pages), ebp = 0x08
+ *   (saved CS), ebx = saved EFLAGS (differential-only).
+ *
+ * Freestanding "BIOS" image: qemu-system-i386 -bios pxc04i.bin .  Reset vector
  * CS:EIP=F000:FFF0; a 16-bit reset stub at image offset 0xFFF0 jumps to _start16.
  *
- * Physical/linear memory plan (machine -m 32 => 32 MiB phys; targets fit):
- *   GDT  @ 0x00000500  (null + code32 0x08 + data32 0x10 + a 5th/6th entry so the
- *                       OUT-OF-LIMIT selector 0x38 is genuinely past the limit)
- *   IDT  @ 0x00001000  (256 gates; only #PF/#GP/#UD filled)
- *   markers @ 0x00002000 (per-vector counters + the #PF CR2 capture + resume EIP)
- *   stack   @ 0x00090000
- *   Page tables (built BEFORE CR0.PG, i.e. physical writes):
- *     PD  @ 0x00011000 : PD[0]->PT0 (identity low), PD[1]->PT1 (4 MiB window)
- *     PT0 @ 0x00012000 : identity-map the CODE window [0xF0000,0x100000) + the
- *                        low structures (GDT/IDT/markers/stack/page-tables) so
- *                        every linear the running code touches is mapped.
- *     PT1 @ 0x00013000 : the demand-paging window for linear [4 MiB, 8 MiB):
- *        PT1[0] linear 0x400000 -> phys 0x800000  P|RW (0x3)  (present)
- *        PT1[1] linear 0x401000 -> phys 0x801000  NOT PRESENT (0x2: RW, P=0)
- *                                  ^ the #PF target; handler sets P -> 0x3.
+ * Memory plan: GDT @0x500, IDT @0x1000, markers @0x2000..0x2060, stack
+ * @0x90000, PD @0x11000, PT0 @0x12000 (identity; stack region override PT0[0x8E]:
+ * linear 0x8E000 -> phys 0x700000), PT1 @0x13000 (0x400000 present, 0x401000 NP
+ * = the pfault demand-page target).
  *
- * Flow (each fault observable in the golden as a CS:EIP jump into the handler
- * gate target and a return via IRET):
- *   1. real mode: flat GDT (+ extra entries) + lgdt; CR0.PE=1; far-jump to 0x08.
- *   2. flat data selectors + stack; zero markers; build IDT (#PF/#GP/#UD) + lidt.
- *   3. build PD + PT0 (identity) + PT1 (one present, one not-present); CR3; CR0.PG.
- *   4. #PF: write to linear 0x401000 (PTE not present) -> #PF -> pf_handler maps
- *      it (PT1[1] |= P) + records CR2 -> IRET -> the store RESTARTS and succeeds;
- *      read it back to prove the page is now present and mapped.
- *   5. #GP: load DS with selector 0x38 (past the GDT limit) -> #GP -> gp_handler
- *      counts + resumes past the faulting MOV.
- *   6. #UD: execute UD2 -> #UD -> ud_handler counts + resumes past UD2.
- *   7. accumulate the three counters (must be 3) + the restarted-store proof;
- *      exit via isa-debug-exit (out 0xf4, 0x42 -> qemu status 133).
- *
- * Build: gcc -m32 -ffreestanding -nostdlib -Wl,-T,pfault.ld; objcopy -O binary,
+ * Build: gcc -m32 -ffreestanding -nostdlib -Wl,-T,pxc04i.ld; objcopy -O binary,
  * padded to exactly 64 KiB.  GNU-as syntax; no nasm.
  */
 
@@ -78,10 +62,7 @@ _start16:
     movw    %ax, %ss
     movw    $0x7000, %sp
 
-    /* --- build the GDT (6 entries = 48 bytes) at linear 0x0500 ---
-     * Only idx 0/1/2 are meaningful; idx 3/4/5 are valid flat-data clones so the
-     * GDT limit is 0x2F.  The #GP selector 0x38 (idx 7) is then genuinely PAST the
-     * limit (0x38 > 0x2F) and a load of it #GPs on the limit check.            */
+    /* --- build the GDT (6 entries = 48 bytes) at linear 0x0500 --- */
     movl    $0x00000500, %ebx
     movl    $0x00000000, 0(%ebx)        /* idx0 null */
     movl    $0x00000000, 4(%ebx)
@@ -120,18 +101,15 @@ pm32_entry:
     movw    %ax, %gs
     movl    $0x00090000, %esp
 
-    /* zero the marker area at 0x2000..0x2040 */
+    /* zero the marker area at 0x2000..0x2060 */
     movl    $0x00002000, %edi
     xorl    %eax, %eax
-    movl    $16, %ecx
+    movl    $24, %ecx
 1:  movl    %eax, (%edi)
     addl    $4, %edi
     loop    1b
 
     /* ===================== build the IDT (3 fault gates) ================= */
-    /* IDT base 0x1000.  All gates selector 0x08, DPL=0.  We use INTERRUPT gates
-     * (attr 0x8E) for the fault handlers (IF cleared on entry). */
-
     /* vector 6 (#UD) -> ud_handler */
     movl    $ud_handler, %ebx
     movl    $0x00001030, %edi           /* 0x1000 + 6*8 = 0x1030 */
@@ -173,15 +151,6 @@ pm32_entry:
     lidt    0x0490
 
     /* ===================== build the 2-level page tables ================= */
-    /* PT0 @ 0x12000: identity-map only the regions the running code actually
-     * touches after CR0.PG=1, so the single-stepped golden stays short:
-     *   - [0x00000, 0x14000)  : 20 PTEs  -> GDT(0x500)/IDT(0x1000)/markers(0x2000)
-     *                                       + the page tables themselves (0x11-0x13)
-     *   - [0x8D000, 0x91000)  :  4 PTEs  -> the flat stack region (ESP=0x90000,
-     *                                       descends as frames are pushed)
-     *   - [0xF0000, 0x100000) : 16 PTEs  -> the CODE window 0x000Fxxxx (EIP/handlers)
-     * Each PTE = frame | P|RW (0x3); identity: frame == linear page.  The two
-     * PT0 slots are written directly; per-region short loops fill the rest.   */
     /* low data + page tables: PT0[0x00..0x13] = identity [0,0x14000) */
     movl    $0x00012000, %edi           /* &PT0[0] */
     movl    $0x00000003, %eax           /* frame 0 | P|RW */
@@ -190,7 +159,8 @@ pm32_entry:
     addl    $0x1000, %eax
     addl    $4, %edi
     loop    1b
-    /* stack: PT0[0x8D..0x90] = identity [0x8D000,0x91000) */
+    /* stack: PT0[0x8D..0x90] = identity [0x8D000,0x91000), EXCEPT PT0[0x8E]:
+     * linear 0x8E000 -> phys 0x700000 (the NON-CONTIGUOUS crossing target) */
     movl    $0x00012234, %edi           /* &PT0[0x8D] = 0x12000 + 0x8D*4 */
     movl    $0x0008D003, %eax           /* frame 0x8D000 | P|RW */
     movl    $4, %ecx
@@ -198,6 +168,7 @@ pm32_entry:
     addl    $0x1000, %eax
     addl    $4, %edi
     loop    1b
+    movl    $0x00700003, 0x00012238     /* PT0[0x8E] := phys 0x700000 | P|RW */
     /* code window: PT0[0xF0..0xFF] = identity [0xF0000,0x100000) */
     movl    $0x000123C0, %edi           /* &PT0[0xF0] = 0x12000 + 0xF0*4 */
     movl    $0x000F0003, %eax           /* frame 0xF0000 | P|RW */
@@ -217,6 +188,14 @@ pm32_entry:
     movl    $0x00012003, 0(%edi)        /* PD[0] -> PT0 | P|RW (identity low 1 MiB) */
     movl    $0x00013003, 4(%edi)        /* PD[1] -> PT1 | P|RW (the 4 MiB window) */
 
+    /* physical pre-seeds for the crossing window (paging still OFF) */
+    movl    $0x0B0B0B0B, %eax
+    movl    %eax, 0x0008E000            /* poison the WRONG adjacent frame */
+    movl    %eax, 0x0008E004
+    movl    $0x5A5A5A5A, %eax
+    movl    %eax, 0x00700000            /* distinct garbage on the RIGHT frame */
+    movl    %eax, 0x00700004
+
     /* enable paging */
     movl    $0x00011000, %eax
     movl    %eax, %cr3
@@ -224,37 +203,19 @@ pm32_entry:
     orl     $0x80000000, %eax
     movl    %eax, %cr0
 
-    /* ==== REVIEW2_aug2 C-04: DIRECTED page-crossing case, producer 2 (S_INT_PUSH) ====
-     * The finding says the split covers only S_LOAD/S_LOAD2/S_STORE, and that "0
-     * reachable in 68 images" establishes CORPUS COVERAGE, not architectural
-     * unreachability. This is the directed probe for one producer.
-     *
-     * S_LGDT reads SIX bytes and is absent from cross_split_capable. Linear
-     * 0x2FFE..0x3003 straddles the 4 KiB boundary at 0x3000, and BOTH pages are
-     * identity-mapped P|RW by PT0 ([0,0x14000)), so a #PF is not what is being tested
-     * -- the access is legal and simply crosses.
-     *
-     * This is built on pfault rather than pxpage precisely because pfault HAS an IDT:
-     * an earlier attempt on pxpage could not tell "crossed undetected" from "faulted
-     * with nowhere to go", since pxpage installs no handlers at all.
-     *
-     * The value written is the SAME pseudo-descriptor the bootstrap already loaded, so
-     * reloading GDTR is architecturally a no-op and the only observable is whether the
-     * core's own PAGING/C-04 assertion notices the crossing. */
-    /* SECOND PRODUCER: S_INT_PUSH. The exception FRAME is a multi-dword write, and
-     * S_INT_PUSH is likewise absent from cross_split_capable. Point ESP just past a
-     * page boundary so the descending frame straddles it: a 12-byte no-error-code
-     * frame from ESP=0x8E002 occupies 0x8DFF6..0x8E001, across 0x8E000. Both pages are
-     * identity-mapped P|RW by PT0 ([0x8D000,0x91000) is the stack region), so this is
-     * a legal write that simply crosses -- not a #PF.
-     *
-     * UD2 is used as the trigger because pfault already installs a #UD handler and it
-     * pushes NO error code, which keeps the frame arithmetic simple.
-     *
-     * One producer per image: the assertion is a $fatal, so the first crossing ends the
-     * run. pxc04 covers S_LGDT; this covers S_INT_PUSH. */
+    /* ==== REVIEW1_Aug3 R2-C03: S_INT_PUSH page-crossing CORRECTNESS ============
+     * ESP := 0x8E002, then UD2: the 12-byte no-error-code frame spans
+     * 0x8DFF6..0x8E001 across the 0x8E000 boundary. Saved EIP (0x8DFF6) and CS
+     * (0x8DFFA) land on page 0x8D (phys 0x8Dxxx); saved EFLAGS (0x8DFFE)
+     * STRADDLES: low half phys 0x8DFFE, high half phys 0x700000. The handler
+     * verifies the frame from BOTH pages. */
+    movl    $ud2x_resume, %eax
+    movl    %eax, 0x0000203C            /* resume-EIP slot for the crossing UD2 */
     movl    $0x0008E002, %esp
-    ud2
+ud2x:
+    ud2                                 /* frame push crosses the boundary */
+ud2x_resume:
+    movl    $0x00090000, %esp
 
     /* clear the visible accumulator GPRs */
     xorl    %eax, %eax
@@ -264,28 +225,16 @@ pm32_entry:
     xorl    %esi, %esi
 
     /* ============================= #PF =================================== */
-    /* Write a sentinel to linear 0x401000 whose PTE (PT1[1]) is NOT present.
-     * -> #PF (vector 14, error code = present(0)|write(1)|user(0) = 0x2), CR2 =
-     * 0x401000.  pf_handler sets PT1[1] |= P (0x801003), records CR2, IRETs;
-     * the store RESTARTS and now succeeds (writing phys 0x801000).            */
     movl    $0xCAFEBABE, %eax
     movl    %eax, 0x00401000            /* #PF here; restarted after handler maps */
-    /* read it back -> proves the page is now present + mapped to phys 0x801000 */
     movl    0x00401000, %esi            /* esi = 0xCAFEBABE (post-#PF-fixup read) */
 
     /* ============================= #GP =================================== */
-    /* Resume label for the #GP skip: the handler will overwrite the saved EIP
-     * with this address so IRET resumes PAST the faulting MOV.  We stash it in a
-     * marker slot the handler reads. */
     movl    $gp_resume, %eax
     movl    %eax, 0x00002030            /* resume-EIP slot for #GP */
-    /* load DS with selector 0x38 (idx 7) -> PAST the GDT limit (0x2F) -> #GP.
-     * (The selector is also the #GP error code.) */
     movw    $0x38, %ax
     movw    %ax, %ds                    /* #GP here; gp_handler resumes at gp_resume */
 gp_resume:
-    /* DS is unchanged (the bad load #GP'd before committing). Restore a known
-     * flat DS so the following accesses are well-defined. */
     movw    $0x10, %ax
     movw    %ax, %ds
 
@@ -298,9 +247,13 @@ ud_resume:
     /* ===================== accumulate the success proof ================== */
     movl    0x00002028, %eax            /* #PF counter */
     addl    0x0000202C, %eax            /* + #GP counter */
-    addl    0x00002024, %eax            /* + #UD counter */
-    movl    %eax, %ecx                  /* ecx = 3 if all three faults delivered */
-    movl    0x00002020, %edx            /* edx = captured CR2 from the #PF (0x401000) */
+    addl    0x00002024, %eax            /* + #UD counter (2: crossing + pfault) */
+    movl    %eax, %ecx                  /* ecx = 4 if all four faults delivered */
+    movl    0x00002020, %edx            /* edx = captured CR2 (0x401000); the exit port load
+                                         * below overwrites dx -> exit record 0x004000F4 */
+    movl    0x00002038, %edi            /* edi = 0x600DF00D (frame verified from both pages) */
+    movl    0x00002044, %ebx            /* ebx = saved EFLAGS (differential record) */
+    movl    0x00002048, %ebp            /* ebp = saved CS = 0x08 */
 
     /* ====================== clean exit via isa-debug-exit ================== */
     movl    $0x42, %eax
@@ -313,30 +266,25 @@ hang:
 
     /* ============================= HANDLERS ============================= */
 
-    /* #PF handler: read CR2 (faulting linear), map PT1[1] present, count, IRET.
-     * Stack on entry (same-priv, with error code): [esp]=errcode, [esp+4]=EIP,
-     * [esp+8]=CS, [esp+12]=EFLAGS.  We save EAX first (so +4 to those).        */
+    /* #PF handler: the pfault demand-page case only (the crossing frame push
+     * takes no #PF -- both its pages are present).  Stack on entry (same-priv,
+     * with error code): [esp]=errcode, [esp+4]=EIP, [esp+8]=CS, [+12]=EFLAGS. */
     .align 16
     .global pf_handler
 pf_handler:
     pushl   %eax
     movl    %cr2, %eax
     movl    %eax, 0x00002020            /* record CR2 (the faulting linear addr) */
-    /* map the faulting page: set P on PT1[1] (linear 0x401000's PTE) */
     movl    $0x00801003, %eax
     movl    %eax, 0x00013004            /* PT1[1] := phys 0x801000 | P|RW */
     incl    0x00002028                  /* #PF counter */
-    /* flush TLB so the restart re-walks PT1[1] and sees it present */
     movl    %cr3, %eax
     movl    %eax, %cr3
     popl    %eax
     addl    $4, %esp                    /* discard the #PF error code */
     iret                                /* RESTART the faulting store (FAULT) */
 
-    /* #GP handler: count + resume PAST the faulting MOV.  Stack on entry has an
-     * error code (the selector): [esp]=errcode,[esp+4]=EIP,[esp+8]=CS,[+12]=EFLAGS.
-     * After pushing EAX everything shifts +4.  We overwrite the saved EIP slot
-     * ([esp+8] after the push) with the precomputed resume label.            */
+    /* #GP handler: count + resume PAST the faulting MOV. */
     .align 16
     .global gp_handler
 gp_handler:
@@ -348,18 +296,43 @@ gp_handler:
     addl    $4, %esp                    /* discard the #GP error code */
     iret
 
-    /* #UD handler: count + resume PAST UD2.  #UD has NO error code, so the stack
-     * is [esp]=EIP,[esp+4]=CS,[esp+8]=EFLAGS; after pushing EAX, saved EIP is at
-     * [esp+4].                                                                  */
+    /* #UD handler: dispatch on the frame address. ESP == 0x8DFF6: the R2-C03
+     * crossing frame -- [esp]=EIP and [esp+4]=CS are on page 0x8D, [esp+8]
+     * (EFLAGS) straddles into phys 0x700000. Verify saved EIP == ud2x and saved
+     * CS == 0x08 (marker 0x2038 = 0x600DF00D), record EFLAGS + CS for the
+     * differential, resume via the 0x203C slot. Otherwise the pfault #UD case:
+     * count + resume via the 0x2034 slot. No error code either way.        */
     .align 16
     .global ud_handler
 ud_handler:
+    cmpl    $0x0008DFF6, %esp           /* the crossing frame? (BEFORE the push) */
+    je      ud_cross
     pushl   %eax
     incl    0x00002024                  /* #UD counter */
     movl    0x00002034, %eax            /* the resume EIP the mainline stashed */
     movl    %eax, 0x04(%esp)            /* overwrite saved EIP -> resume past UD2 */
     popl    %eax
     iret                                /* no error code to discard for #UD */
+
+ud_cross:
+    pushl   %eax
+    movl    4(%esp), %eax               /* saved EIP (page 0x8D) */
+    cmpl    $ud2x, %eax
+    jne     1f
+    movzwl  8(%esp), %eax               /* saved CS (page 0x8D) */
+    cmpw    $0x0008, %ax
+    jne     1f
+    movl    $0x600DF00D, 0x00002038     /* frame verified across the boundary */
+1:  movl    12(%esp), %eax              /* saved EFLAGS: low half phys 0x8DFFE,
+                                         * high half phys 0x700000 */
+    movl    %eax, 0x00002044
+    movzwl  8(%esp), %eax
+    movl    %eax, 0x00002048            /* saved CS record */
+    incl    0x00002024                  /* #UD counter */
+    movl    0x0000203C, %eax            /* the crossing UD2's resume EIP */
+    movl    %eax, 0x04(%esp)
+    popl    %eax
+    iret
 
     /* ===================== 16-bit reset stub @ 0xFFF0 ====================== */
     .code16

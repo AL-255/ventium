@@ -1,0 +1,35 @@
+{
+  "name": "pxc04",
+  "kind": "system",
+  "src": "pxc04.S",
+  "linker": "pxc04.ld",
+  "image": "pxc04.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 1400,
+  "sys": true,
+  "paging": true,
+  "finding": "REVIEW1_Aug3 R2-C03",
+  "transitions": [
+    "real->protected via the boot GDT @ 0x500 (CR0.PE 0->1, CS far-jump to flat code 0x08)",
+    "IDT @ 0x1000 with #PF/#GP/#UD interrupt gates + lidt",
+    "page tables: PT0 identity EXCEPT PT0[3]: linear 0x3000 -> phys 0x600000, starting NOT-PRESENT; PT1[0] 0x400000 -> phys 0x800000 (the new GDT), PT1[1] NP (demand-page target), PT1[2] 0x402000 -> phys 0x600000 (setup alias); CR3 + CR0.PG 0->1",
+    "case A (no partial commit): the 6-byte pseudo-descriptor at linear 0x2FFE (limit on page 2, base at 0x3000 on NP page 3) -> lgdt #PFs with CR2=0x3000 and GDTR UNCHANGED (the handler's SGDT shows base 0x500 -> marker 0x2038=0x600DF00D); the handler maps page 3 and IRETs; the lgdt restarts and completes",
+    "case B (correctness, non-contiguous frames): SGDT reads back base 0x400000 / limit 0x2F; the loaded GDTR is USED -- DS := 0x18 (data segment base 0x20F0 in the new GDT at phys 0x800000) and a read returns the sentinel 0xDEADBEEF, proving base AND limit landed from both physical frames (phys 0x3000 is poisoned 0x0B0B0B0B)",
+    "pfault flow: demand-page #PF at 0x401000 (restart + readback 0xCAFEBABE), #GP on selector 0x38 past the new GDT limit, #UD on UD2; counters accumulate to 4",
+    "witnesses pulled into ecx/edx/esi/edi/ebx/ebp; isa-debug-exit (status 133)"
+  ],
+  "witnesses": {
+    "ecx at exit": "4 -- two #PF (crossing LGDT + demand-page) + one #GP + one #UD all delivered",
+    "edx at exit": "0x004000F4 -- CR2 0x401000 captured by the demand-page #PF, low 16 bits clobbered by the 0xF4 exit-port load",
+    "esi at exit": "0xCAFEBABE -- the restarted pfault store's readback",
+    "edi at exit": "0x600DF00D -- case A: GDTR was UNCHANGED by the rejected crossing read (in-handler GS:=0x18 + gs:0x20F0 read returns the sentinel only while GDTR still names the boot table; SGDT itself is decoder-scoped to !paging_on)",
+    "ebx at exit": "0x600DF00D -- case B: the in-limit selector 0x28 (idx 5) committed through the new GDT (the #GP case on 0x38 brackets the limit from above)",
+    "ebp at exit": "0xDEADBEEF -- case B: the sentinel read through the new GDT's 0x18 descriptor (the loaded GDTR actually works)"
+  },
+  "description": "REVIEW1_Aug3 R2-C03 regression for producer S_LGDT: the generic page-crossing fragment engine must complete a 6-byte GDTR pseudo-descriptor read straddling a page boundary with architecturally correct results. Differential against QEMU (helper_lgdt reads limit+base through the softmmu and commits env->gdt only after both succeed). Case A: with page 3 not-present the lgdt #PFs with CR2=0x3000 and GDTR is provably unchanged (no partial commit of the limit half). Case B: with page 3 on the non-adjacent phys frame 0x600000 the restarted lgdt's base+limit are read back via SGDT and the new GDT is exercised with a real segment load (sentinel read). Built on the pfault skeleton, whose #PF/#GP/#UD deliveries still run and count (the new GDT keeps a valid code32 at 0x08 so IDT deliveries work through the active table)."
+}

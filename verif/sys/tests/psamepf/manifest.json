@@ -1,0 +1,61 @@
+{
+  "name": "psamepf",
+  "kind": "system",
+  "src": "psamepf.S",
+  "linker": "psamepf.ld",
+  "image": "psamepf.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 2000,
+  "sys": true,
+  "paging": true,
+  "finding": "REVIEW_Aug4 A4-H06 (same-privilege delivery partial frame: no frame pre-probe, a straddling frame faults mid-push with the landed dwords visible)",
+  "transitions": [
+    "real->protected (CR0.PE 0->1, CS far-jump to code32 0x08 -- ALL code segments BASED at 0xF0000 so the 16-bit #PF frame's word IP slots are exact)",
+    "paging ON (PT0 @ 0x12000 identity 0..0xFFFFF, PD @ 0x11000, CR3=0x11000) with CR0.WP=1; INVLPG after every PTE change (the first run of this test proved the TLB keeps present/RW translations across PTE writes in BOTH oracles)",
+    "case A (page 2 NOT PRESENT): ESP=0x800C (page 0x8000 present, page 0x7000 NP, poison 0xDEAD7000 @ 0x7FFC). ljmp to the limit-0x100 segment 0x50 at offset 0x101 -> #GP(0) (A4-C02 class). EFLAGS@0x8008, CS@0x8004, EIP@0x8000 land; the ERR push @0x7FFC #PFs: CR2=0x00007FFC, err=0x002 (P=0,W=1), ESP at the fault UNCHANGED (0x800C -- QEMU does not charge ESP for landed pushes; SET_ESP runs only after the last push)",
+    "case A delivery: the #PF goes through a 16-BIT gate (type 0x6, sel 0x18): its 8-byte word frame fits on page 0x8000 where the aborted 16-byte frame could not (a 32-bit #PF frame would re-fault, and the RTL deliberately #GPs IDT task gates). The #PF handler records err/CR2/ESP-at-fault and the SURVIVING landed EIP dword at 0x8000 (the 16-bit frame overwrites the landed EFLAGS/CS dwords but not the EIP dword below them), rewrites its saved IP word to the 32-bit fixup stub, IRETW",
+    "case A fixup: map page 0x7000 (P|RW) + INVLPG, prove the poison @ 0x7FFC intact (the err push never landed), re-fire the trigger: the delivery restarts and completes; the #GP handler records ESP=0x7FFC and the full 4-dword frame (err=0)",
+    "case B (page 2 present but READ-ONLY, WP=1): ESP=0x600C (page 0x6000 present, page 0x5000 RO, poison 0xDEAD5000 @ 0x5FFC). Same shape: #PF CR2=0x00005FFC, err=0x003 (P=1,W=1, the probe-class fault); the poison is READABLE while RO and intact; fixup makes the page RW (+INVLPG, the RO translation was cached by the verify read) and re-fires (handler ESP=0x5FFC)",
+    "isa-debug-exit (status 133) from flat CPL0 code"
+  ],
+  "witnesses": {
+    "0x2000": "case-A #PF err word == 0x0002 (composite)",
+    "0x2004": "case-A CR2 == 0x00007FFC -- the first push's address on the missing page (edi at exit)",
+    "0x2008": "case-A ESP at the fault == 0x0000800C (composite; the aborted delivery charged NOTHING)",
+    "0x200c": "case-A SURVIVING landed EIP dword @ 0x8000 == the trigger ljmp's EIP (esi at exit)",
+    "0x2010": "case-A poison @ 0x7FFC intact post-remap == 1 (composite; the err push never landed)",
+    "0x2014": "case-A completed #GP handler ESP == 0x7FFC (composite; the restarted delivery landed the full frame)",
+    "0x2018": "case-A completed frame err dword == 0 (composite)",
+    "0x2020": "case-B #PF err word == 0x0003 (composite)",
+    "0x2024": "case-B CR2 == 0x00005FFC (ebp at exit)",
+    "0x2028": "case-B ESP at the fault == 0x0000600C (composite)",
+    "0x202c": "case-B SURVIVING landed EIP dword @ 0x6000 (ecx at exit)",
+    "0x2030": "case-B poison @ 0x5FFC intact == 1 (composite)",
+    "0x2034": "case-B completed #GP handler ESP == 0x5FFC (composite)",
+    "0x2038": "case-B completed frame err dword == 0 (composite)",
+    "exit_ebx": "0xA406A406 iff every composite check passes"
+  },
+  "oracle_notes": {
+    "incremental_push_model": "QEMU 8.2.2's do_interrupt_protected pushes the frame one PUSHL at a time and calls SET_ESP only after the last push, so a mid-frame page fault leaves env->regs[R_ESP] at the ORIGINAL value and the landed dwords in memory. The fixed RTL matches this exactly (full-trace EQUIVALENT incl. CR2, the #PF error codes, and the 16-bit #PF delivery itself). NO oracle gap for any case.",
+    "partial_frame_visibility": "on a SHARED stack the #PF's own frame (which starts at the same ESP) overwrites the landed EFLAGS/CS dwords; only the landed EIP dword below the 8-byte 16-bit #PF frame survives to be read. That is why the trigger is the 16-byte errcode frame faulting at its 4th (err) push: the ESP-12 dword is the observable partial-frame byte range. A same-priv 32-bit #PF frame (16 bytes) would re-fault on the missing page -- the 16-bit gate (8-byte frame) is what makes in-guest recovery possible at all, given the RTL does not implement IDT task gates (core_int_deliver.svh A4-H05 note).",
+    "tlb_note": "PTE changes require INVLPG in BOTH oracles: the first version of this test mapped page 0x7000 NP without invalidating and the cached present translation let the trigger frame complete with no #PF at all (observed as all-zero witnesses, oracles agreeing)."
+  },
+  "negative_control": {
+    "method": "build the RTL TB from the pre-fix tree, run the same image --system, diff against the golden",
+    "expected": "DIVERGENT: a frame PRE-PROBE (the A4-H06 defect class) faults BEFORE any dword lands: no surviving EIP dword at 0x8000/0x6000 (the slots read 0), and/or a differently-charged ESP at the #PF (the 16-bit #PF frame then starts at the wrong SP and its records/flow diverge). The completed-delivery ESPs and CR2s may still match, but esi/ecx (the surviving EIP dwords) and the #PF-frame records split the traces",
+    "measured": "MEASURED 2026-08-09 (obj_dir_psameneg, defect class constructed in a scratch tree: the same-priv ESP commit moved from the final push beat to the FIRST, so a mid-frame #PF is delivered with the ESP already charged -- the 'differently-charged ESP at the #PF' member of the defect class; the pre-probe member shares the same observable signature, no recoverable surviving-frame state). compare.py --mode func --all vs build/sys/psamepf.sys.vtrace: RESULT: DIVERGENT -- the run aborts the recovery flow at n=1136 (eax=0xe0010011, 1138 records) vs the golden's completed 1239: the test never reaches its pass record. The gate FAILs on the defect class as required."
+  },
+  "description": "REVIEW_Aug4 A4-H06 regression for same-privilege interrupt delivery WITHOUT a frame pre-probe. A same-privilege delivery whose frame straddles into a not-present (or read-only) page must fault MID-FRAME with the landed dwords visible -- QEMU pushes incrementally with ESP committed only after the last push, so this is fully differential. Two cases, paging+WP on: (A) a #GP(0) trigger (offset-past-limit ljmp, 16-byte frame) at ESP=0x800C with page 0x7000 not present: EFLAGS/CS/EIP land, the err push #PFs (CR2=0x7FFC, err=0x002, ESP unchanged), the #PF runs through a 16-BIT gate whose 8-byte word frame fits on the present page (the only in-guest recovery that works on a shared stack, since the RTL #GPs IDT task gates), the handler records the SURVIVING landed EIP dword (its own frame overwrote EFLAGS/CS but not EIP), a 32-bit fixup maps the page, proves the poison at the fault address intact, and re-fires the trigger -- the restarted delivery completes (handler ESP=0x7FFC, 4 dwords). (B) the same shape with page 0x5000 read-only (err=0x003, poison readable-intact, handler ESP=0x5FFC). All code segments are based at 0xF0000 so the 16-bit frames' word IPs are exact. Witnesses fold into edi/esi/ebp/ebx/ecx before the isa-debug-exit for the record-for-record sys diff.",
+  "validation": {
+    "date": "2026-08-04",
+    "golden_records": 1239,
+    "rtl_records": 1239,
+    "result": "PASS -- compare.py --mode func --all: EQUIVALENT (1239 records match), sys compared: True, exit 0",
+    "golden_exit_record": "edi=0x00007FFC (case-A CR2) esi=0x0000016A (case-A surviving EIP dword = the trigger) ebp=0x00005FFC (case-B CR2) ebx=0xA406A406 (composite) ecx=0x000001A0 (case-B surviving EIP dword)"
+  }
+}

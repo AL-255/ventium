@@ -5,6 +5,32 @@
   "image": "tx_stack/tx_stack.flat",
   "load_addr": "0x08048000",
   "entry": "0x08048000",
-  "max_insn": 33,
-  "x87": true
+  "max_insn": 50,
+  "x87": true,
+  "x87_stkflt_arch": true,
+  "x87_stkflt_note": "R2-H06: this program drives the x87 stack past its ends. QEMU implements no stack faults, so the differential masks fstat IE|SF|C1|C0|C2|C3 (0x4741 -- the #IS response has no QEMU counterpart; C1 is the direction bit and C0/C2/C3 are implementation-defined per SDM Vol.1 Table 8-4) and the st* QNaN-indefinite substitution. The behavior itself is gated architecturally by px87stk.",
+  "x87_stkflt_fstat_ranges": [
+    [
+      20,
+      27
+    ]
+  ],
+  "x87_stkflt_fpr_ranges": [
+    [20, 20, "st7"],
+    [21, 21, "st6"],
+    [22, 22, "st5"],
+    [23, 23, "st4,st7"],
+    [24, 24, "st3,st6"],
+    [25, 25, "st2,st5"],
+    [26, 26, "st1,st4"],
+    [27, 28, "st0,st3,st7"],
+    [29, 29, "st1,st4"],
+    [30, 30, "st2,st5"],
+    [31, 31, "st3,st6"],
+    [32, 32, "st4,st7"],
+    [33, 33, "st5"],
+    [34, 34, "st6"],
+    [35, 35, "st7"]
+  ],
+  "x87_stkflt_ranges_note": "The masks are the EXACT measured divergence set of an unmasked compare vs the pinned-QEMU golden (47 records, n=0..46): the eight FSTP pops over FFREE'd slots fault at n=20..27 (fstat IE|SF; the faulted pop writes the QNaN indefinite into the popped physical slot, so st* diverges per record ONLY in the slots already substituted -- each entry's field list names exactly those registers), and n=28..35 are the resync refill (FNINIT + 8 pushes) rotating the three substituted physical slots until all eight are overwritten. Records n=36..46 (last refill push, eight valid pops, exit) compare with ZERO masks. Everything outside the listed records/fields -- fstat AND st0..st7 -- compares at full strength."
 }

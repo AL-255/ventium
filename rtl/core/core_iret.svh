@@ -41,8 +41,13 @@
                 // 16-bit pop restores only the low-16 settable flags + keeps [31:16].
                 // REVIEW2 C-10: privilege-masked, not raw. One helper for both widths
                 // and both commit sites so they cannot drift.
+                // Vivado rejects a bit-select applied directly to a function call.
+                // Merge the masked low word arithmetically instead; this is exactly
+                // the same 16-bit IRET result and keeps the old high word explicit.
                 iret_eflags <= int_gate_op16
-                  ? {eflags[31:16], iret_flags({eflags[31:16], mem_rdata[15:0]}, eflags)[15:0]}
+                  ? ((eflags & 32'hFFFF_0000)
+                     | (iret_flags({eflags[31:16], mem_rdata[15:0]}, eflags)
+                        & 32'h0000_FFFF))
                   : iret_flags(mem_rdata, eflags);
                 // M7.2: IRET from CPL0 with the popped EFLAGS.VM (bit17) set is a
                 // RETURN INTO V86. It always pops the full 9-word frame (ESP,SS +
@@ -78,7 +83,13 @@
                   else state <= S_INT_CS_RET;
                 end
               end
-              4'd3: begin iret_esp <= mem_rdata;         int_step <= 4'd4; end
+              // A 16-bit IRETW (int_gate_op16) pops the outer SP as a WORD -- the
+              // dword at that slot is the pushed SS word in the high half, which
+              // must not leak into the restored ESP (QEMU helper_ret_protected
+              // zero-extends the popped word).
+              4'd3: begin iret_esp <= int_gate_op16 ? {16'd0, mem_rdata[15:0]}
+                                                  : mem_rdata;
+                          int_step <= 4'd4; end
               4'd4: begin
                 iret_ss      <= mem_rdata[15:0];
                 if (iret_to_v86) int_step <= 4'd5;   // V86: keep popping ES,DS,FS,GS
@@ -145,6 +156,9 @@
                 seg_sel  [SG_GS] <= mem_rdata[15:0];
                 seg_base [SG_GS] <= {12'd0, mem_rdata[15:0], 4'd0};
                 seg_limit[SG_GS] <= 32'h0000_FFFF; seg_attr[SG_GS] <= 8'h93;
+                // R2-H07: the whole frame is V86-style (sel<<4, no descriptor
+                // read) -- none of the six is a PM load.
+                for (int s = 0; s < NUM_SEG; s++) seg_pm_loaded[s] <= 1'b0;
                 iret_to_v86  <= 1'b0;
                 iret_retire_nmi();      // REVIEW_aug2 H-05 (V86-return commit)
                 int_step     <= 4'd0;
@@ -197,10 +211,15 @@
                 // all-zero non-present descriptor -- raised #NP instead of the required
                 // #GP(0). Null is decided first and carries error code 0; only a
                 // well-formed-but-absent descriptor is #NP.
+                // REVIEW_Aug3 H-03: the ERROR CODE likewise depends on the reason. A
+                // valid descriptor whose popped EIP exceeds CS.limit is #GP(0), not
+                // #GP(selector) -- only a selector/table/type/privilege failure names
+                // the selector (iret_cs_desc_ok is the descriptor half of the check).
                 start_fault((int_gate_sel[15:2] == 14'd0) ? 8'd13
                             : (!cs_a[7] ? 8'd11 : 8'd13), 1'b1,
                             (int_gate_sel[15:2] == 14'd0) ? 32'd0
-                            : ({16'd0, int_gate_sel} & 32'h0000_FFFC), int_src_pc);
+                            : (iret_cs_desc_ok ? 32'd0
+                            : ({16'd0, int_gate_sel} & 32'h0000_FFFC)), int_src_pc);
               end else begin
               int_step         <= 4'd0;
               if (iret_interpriv) begin
@@ -227,6 +246,7 @@
                 seg_base [SG_CS] <= desc_base(desc);
                 seg_limit[SG_CS] <= desc_limit(desc);
                 seg_attr [SG_CS] <= desc_attr(desc);
+                seg_pm_loaded[SG_CS] <= 1'b1;   // R2-H07: validated PM load
                 cpl_r            <= int_gate_sel[1:0];
                 cs_d             <= desc[54];
                 iret_retire_nmi();      // REVIEW_aug2 H-05 (same-privilege commit)
@@ -283,6 +303,7 @@
               seg_base [SG_CS] <= iret_cs_base;
               seg_limit[SG_CS] <= iret_cs_limit;
               seg_attr [SG_CS] <= iret_cs_attr;
+              seg_pm_loaded[SG_CS] <= 1'b1;   // R2-H07: validated PM load
               cpl_r            <= int_gate_sel[1:0];
               cs_d             <= iret_cs_d;
               eip              <= iret_eip;
@@ -291,6 +312,7 @@
               seg_base [SG_SS] <= desc_base(desc);
               seg_limit[SG_SS] <= desc_limit(desc);
               seg_attr [SG_SS] <= desc_attr(desc);
+              seg_pm_loaded[SG_SS] <= 1'b1;   // R2-H07: validated PM load
               // REVIEW_aug2 C-07 (ss_b): the outer stack's B bit governs stk16(); it was
               // never updated here, so after an inter-priv return the stack width came
               // from the PREVIOUS SS descriptor -- a 16-bit outer stack was addressed as
@@ -310,6 +332,12 @@
               // descriptor with S=0 -- an unpopulated hidden cache reads as attr 0 -- is
               // not a usable data segment either and is nulled, which is what the old
               // DPL-only test already did for it.
+              //
+              // REVIEW_Aug3 H-03: the accessibility test must use the SELECTOR's RPL
+              // too, not just the new CPL. IA-32 nulls the register when
+              // DPL < max(new CPL, RPL) -- a data (or nonconforming code) selector
+              // with DPL >= new CPL but DPL < its own RPL is no longer usable at the
+              // returned privilege and must not survive the return.
               for (int s = 0; s < NUM_SEG; s++) begin
 `ifdef VEN_C03_PROBE
                 if ((s == int'(SG_DS) || s == int'(SG_ES) ||
@@ -323,11 +351,16 @@
                 if ((s == int'(SG_DS) || s == int'(SG_ES) ||
                      s == int'(SG_FS) || s == int'(SG_GS)) &&
                     !(seg_attr[s][4] && seg_attr[s][3] && seg_attr[s][2]) &&
-                    (desc_dpl(seg_attr[s]) < iret_cs[1:0])) begin
+                    ((desc_dpl(seg_attr[s]) < iret_cs[1:0]) ||
+                     (desc_dpl(seg_attr[s]) < seg_sel[s][1:0]))) begin
                   seg_sel  [s] <= 16'd0;
                   seg_base [s] <= 32'd0;
                   seg_limit[s] <= 32'd0;
                   seg_attr [s] <= 8'd0;
+                  // R2-H07: an outer-return nulling IS a PM load event (of a
+                  // null segment) -- a later use must #GP(0), which needs the
+                  // loaded bit set.
+                  seg_pm_loaded[s] <= 1'b1;
                 end
               end
               iret_interpriv   <= 1'b0;

@@ -24,7 +24,12 @@
 #   2. NEGATIVE: across every system test, the check rejects NOTHING. This is the
 #      false-positive tripwire, and it is the assertion that matters -- C-06's
 #      delivery was reverted twice for shipping false positives, so "it fires on the
-#      violation" is worth little without "it fires on nothing else".
+#      violation" is worth little without "it fires on nothing else". (Exception:
+#      pselnull DELIBERATELY uses a null-loaded DS for its REVIEW1_Aug3 R2-C02
+#      witnesses -- architecturally #GP(0), true positives, and its null-DS
+#      handler then cascades; the sweep grades its FAULT-LOG prefix instead:
+#      the enforcement-clean prefix must reach the case-A null-use catch
+#      (#GP(0)) with only the two designed faults before it.)
 #
 # Enforcement is NOT compiled into the default build (see core_fetch_decode.svh for
 # why), so this gate builds its own object directory with +define+VEN_SEG_ENFORCE.
@@ -101,16 +106,169 @@ echo "  SEG-POSITIVE-OK: limit-load, limit-store and read-only-write all faulted
 echo "                   neither violating store reached memory; test completed"
 
 echo
+echo "=== 3b. R2-H07 POSITIVE: the decoded-extent fetch limit check (pfetchlim) ==="
+# pfetchlim runs five one-case code segments with limit 0x3F, each entered by a
+# far jump at a precise offset (verif/sys/tests/pfetchlim/manifest.json):
+#   A  (0x18, entry 0x3E) 2-byte jmp ending exactly AT the limit -> legal,
+#      NO fault in EITHER build (the at-limit false-positive tripwire)
+#   B  (0x20, entry 0x3C) 5-byte movl %eax,0x30000 straddling    -> #GP(0)
+#      pre-issue, and the store must NOT commit (witness @0x30000)
+#   C1 (0x28, entry 0x3F) 2-byte mov %al,(%ebx) starting AT the limit and
+#      ending past it                                          -> #GP(0), no commit
+#   C2 (0x30, entry 0x3B) 6-byte addl %eax,0x30008 straddling    -> #GP(0), no commit
+#   C3 (0x38, entry 0x3E) 2-byte jmp +0 ending at the limit, so the next fetch
+#      STARTS past it -> #GP(0) from the older first-byte check (cs_fetch_fault,
+#      H-05), cross-checked here beside the new extent check.
+# Enforcement-build only: cs_extent_fault is compiled out of the default build,
+# and QEMU's translator checks only the fetch START address, so there is no
+# differential oracle for the extent case -- this grades against the SDM by
+# fault count, fault PCs and no-commit witnesses, exactly like section 3.
+make -s -C verif/sys/tests/pfetchlim >/dev/null 2>&1
+PFIMG="$REPO/verif/sys/tests/pfetchlim/pfetchlim.bin"
+[[ -f "$PFIMG" ]] || { echo "FATAL: pfetchlim.bin missing"; exit 1; }
+PFOUT="$REPO/build/sys/pfetchlim.seg.vtrace"
+PFLOG="$("$TB" --image "$PFIMG" --system --out "$PFOUT" --max-insn 2000 --quiesce 400 \
+        +ven_faultlog 2>&1 || true)"
+NPF="$(printf '%s\n' "$PFLOG" | grep -c 'vec=13 ' || true)"
+echo "  #GP(13) deliveries: $NPF (want 4: B/C1/C2 straddling + C3 starting past the limit)"
+if [[ "$NPF" != "4" ]]; then
+  echo "FATAL: expected exactly FOUR #GP(0); got $NPF."
+  echo "       <4 = an extent violation was not caught (enforcement inert)."
+  echo "       >4 = a legal instruction faulted. Case A ends exactly AT the limit"
+  echo "            and must not fault -- that false-positive class is how this"
+  echo "            finding's deliveries got reverted in earlier rounds."
+  printf '%s\n' "$PFLOG" | grep FAULT | head -8
+  exit 1
+fi
+# Every #GP must be stamped at the OFFENDING instruction. The stamps are
+# CS-relative offsets, so they are layout constants: B at 0x3c, C1 at 0x3f,
+# C2 at 0x3b, and C3's first-byte fetch fault at 0x40. A stamp anywhere else --
+# e.g. 0x3e, the at-limit control or C3's legal 2-byte hop -- is a mis-aimed
+# check even when the count is right.
+PFPCS="$(printf '%s\n' "$PFLOG" | sed -n 's/.*vec=13 .*pc=\([0-9a-f]*\).*/\1/p' | sort | tr '\n' ' ')"
+echo "  fault PCs (sorted): ${PFPCS}(want 0000003b 0000003c 0000003f 00000040)"
+if [[ "$PFPCS" != "0000003b 0000003c 0000003f 00000040 " ]]; then
+  echo "FATAL: a #GP was stamped somewhere other than the offending instruction."
+  echo "       0x3e in the set means a LEGAL at-limit instruction was extent-faulted"
+  echo "       -- check the (eip, d_len) pairing at the S_PIPE evaluation point"
+  echo "       with +ven_seglog ([SEGCHK-X] lines show the pair the check used)."
+  printf '%s\n' "$PFLOG" | grep FAULT | head -8
+  exit 1
+fi
+# The faults must SUPPRESS the straddling accesses, not merely follow them:
+# ebp/edi/esi carry the seeds of the three side-effect witnesses.
+PFECX="$(tail -1 "$PFOUT" | python3 -c 'import sys,json;print(json.loads(sys.stdin.read())["ecx"])')"
+PFEBP="$(tail -1 "$PFOUT" | python3 -c 'import sys,json;print(json.loads(sys.stdin.read())["ebp"])')"
+PFEDI="$(tail -1 "$PFOUT" | python3 -c 'import sys,json;print(json.loads(sys.stdin.read())["edi"])')"
+PFESI="$(tail -1 "$PFOUT" | python3 -c 'import sys,json;print(json.loads(sys.stdin.read())["esi"])')"
+echo "  ecx (#GP counter) = $PFECX (want 0x00000004)"
+echo "  witnesses: ebp=$PFEBP edi=$PFEDI esi=$PFESI (want the seeds)"
+if [[ "$PFECX" != "0x00000004" ]]; then
+  echo "FATAL: the #GPs were delivered but the program did not complete normally."
+  exit 1
+fi
+if [[ "$PFEBP" != "0x5eedb005" ]]; then
+  echo "FATAL: the case-B straddling STORE (5 bytes) committed -- 0xcafebabe means"
+  echo "       the extent #GP followed the access instead of suppressing it."
+  exit 1
+fi
+if [[ "$PFEDI" != "0x5eedc101" ]]; then
+  echo "FATAL: the case-C1 straddling byte STORE (2 bytes, starts AT the limit)"
+  echo "       committed -- low byte 0xa5 means the store reached memory."
+  exit 1
+fi
+if [[ "$PFESI" != "0x5eedc202" ]]; then
+  echo "FATAL: the case-C2 straddling RMW (6 bytes) committed -- the addend was applied."
+  exit 1
+fi
+echo "  H07-POSITIVE-OK: 2/5/6-byte straddlers and the past-limit fetch all #GP'd"
+echo "                   pre-commit; the at-limit control faulted in NEITHER build"
+
+# Anti-vacuity, default build: with both fetch checks compiled out the same
+# image must take ZERO faults and every side effect must COMMIT -- otherwise the
+# intact witnesses above prove nothing. (DEFTB is defined in section 6 below;
+# set it here if this block runs before it.)
+DEFTB="${DEFTB:-$REPO/verif/tb/obj_dir/tb_ventium}"
+if [[ -x "$DEFTB" ]]; then
+  "$DEFTB" --system --image "$PFIMG" --out "$REPO/build/sys/pfetchlim_def.vtrace" \
+      --max-insn 2000 --quiesce 400 +ven_faultlog \
+      >"$REPO/build/sys/pfetchlim_def.log" 2>&1 || true
+  PFDEFN="$(grep -c 'vec=13 ' "$REPO/build/sys/pfetchlim_def.log" || true)"
+  PFDEBP="$(tail -1 "$REPO/build/sys/pfetchlim_def.vtrace" 2>/dev/null | \
+           python3 -c 'import sys,json;print(json.loads(sys.stdin.read()).get("ebp"))' 2>/dev/null)"
+  PFDECL="$(tail -1 "$REPO/build/sys/pfetchlim_def.vtrace" 2>/dev/null | \
+           python3 -c 'import sys,json;r=json.loads(sys.stdin.read());print(r.get("edi"),r.get("esi"))' 2>/dev/null)"
+  echo "  default build: $PFDEFN #GP(s) (want 0); ebp=${PFDEBP:-<none>} edi/esi=${PFDECL:-<none>}"
+  echo "                 (want ebp=0xcafebabe edi/esi=0x5eedc1a5 0x6ffed313 -- all committed)"
+  if [[ "$PFDEFN" != "0" ]]; then
+    echo "FATAL: the DEFAULT build took a fetch-limit #GP. Both cs_fetch_fault and"
+    echo "       cs_extent_fault must be compiled out without +define+VEN_SEG_ENFORCE."
+    exit 1
+  fi
+  if [[ "$PFDEBP" != "0xcafebabe" ]]; then
+    echo "FATAL: the default build did not commit the case-B store, so the enforced"
+    echo "       run's intact witness proves nothing (anti-vacuity failure)."
+    exit 1
+  fi
+  echo "  H07-ANTIVACUITY-OK: default build faults nowhere and commits every side effect"
+else
+  echo "  SKIP: default TB missing (anti-vacuity control not run)"
+fi
+
+echo
 echo "=== 4. NEGATIVE: the check must reject NOTHING across the system corpus ==="
-TESTS="pseg pmode ppage pxpage pintr pintr16 pfault pfcpl3 pde pcpl pssiret pstk16 pdf ptask ptaskcpl ptaskv86 pdebug ppopf pv86"
+TESTS="pseg pmode ppage pxpage pintr pintr16 pfault pfcpl3 pde pcpl pssiret pstk16 pdf ptask ptaskcpl ptaskv86 pdebug ppopf pv86 pcalltss ptaskpg pretfoutpg pjmpgate pltr pretfres piopermwrap piretgp0 pxfer pselnull pxprobe pcgparam pcg16 pcgpg pxc04 pxc04i pxc04f pxc04e pxc04t pxc04m"
+# REVIEW1_Aug3 R2-C03: ALL SIX ex-xc04 producers join the sweep (none may fire a
+# PAGING/C-0* assertion now that the fragment engine covers them) -- pxc04
+# (S_LGDT read) included since the walk-freeze fix (fx_walk_hold). pxprobe
+# (R2-C04 frame probe) and the R2-H05 call-gate suites (pcgparam/pcg16/pcgpg,
+# measured SEGCHK=0 over the sweep's 1200-insn window) join the same sweep.
 TOTAL=0; NRUN=0; C03=0
 for t in $TESTS; do
   TIMG="$REPO/verif/sys/tests/$t/$t.bin"
   [[ -f "$TIMG" ]] || continue
   NRUN=$((NRUN+1))
   RAW="$("$TB" --image "$TIMG" --system --out /dev/null --max-insn 1200 --quiesce 400 \
-        +ven_seglog +ven_xpagelog 2>&1 || true)"
+        +ven_seglog +ven_xpagelog +ven_faultlog 2>&1 || true)"
   N="$(printf '%s\n' "$RAW" | grep -c SEGCHK || true)"
+  # REVIEW1_Aug3 R2-C02: pselnull is ENFORCEMENT-INCOMPATIBLE BY DESIGN past
+  # its case A: it deliberately addresses memory through a null-loaded DS
+  # (the case-A/case-E witnesses, which prove the staged hidden cache is
+  # explicit zeros and not GDT[0]'s poison base), and those uses are
+  # architecturally #GP(0) -- TRUE positives, the same reason pseglim is the
+  # POSITIVE test rather than a sweep member. Worse, its #GP handler runs
+  # with DS still null, so under enforcement the first null-use fault
+  # legitimately escalates (a faulting handler) and the run never completes.
+  # (The +ven_seglog probe does not see this access class, so it cannot be
+  # graded that way -- measured: zero SEGCHK lines for a delivered #GP(0).)
+  # So for pselnull grade the FAULT LOG instead: the run must reach its
+  # deliberate null use with the enforcement-clean prefix INTACT -- the only
+  # faults before and at the catch are, in order, case C (#GP(0x0004)), case
+  # D (#TS(0x0004)) and the case-A null-use catch (#GP(0)). Any spurious
+  # rejection of a legitimate access in the prefix would show up as an extra
+  # or earlier fault and fail the gate; the cascade after the catch is the
+  # guest's null-DS handler, out of scope.
+  if [[ "$t" == "pselnull" ]]; then
+    mapfile -t FL < <(printf '%s\n' "$RAW" | grep '\[FAULT\]' || true)
+    PF="${#FL[@]}"
+    F0="${FL[0]:-none}"; F1="${FL[1]:-none}"; F2="${FL[2]:-none}"
+    echo "  $t: enforcement run fault prefix (${PF} total faults, the cascade after the catch is out of scope):"
+    echo "      [0] $F0"
+    echo "      [1] $F1"
+    echo "      [2] $F2"
+    if [[ "$PF" -lt 3 ]] \
+      || ! grep -q 'vec=13 .*err=00000004' <<<"$F0" \
+      || ! grep -q 'vec=10 .*err=00000004' <<<"$F1" \
+      || ! grep -q 'vec=13 .*err=00000000' <<<"$F2"; then
+      echo "FATAL: pselnull: the enforcement prefix must be exactly"
+      echo "       [#GP(0x0004) case C, #TS(0x0004) case D, #GP(0) case-A null-use"
+      echo "       catch] -- anything else is a false positive in the clean prefix"
+      echo "       (or the null use was NOT caught, i.e. enforcement is inert)."
+      exit 1
+    fi
+    echo "  $t: enforcement-clean prefix intact + the deliberate null-DS use IS caught (#GP(0))"
+    N=0
+  fi
   TOTAL=$((TOTAL+N))
   # REVIEW1_Aug2 C-03: count the PAGING/C-03 assertions in the SAME sweep. Both of
   # them -- the address-mirror drift (CHECK 5) and the new unsplit page-crossing

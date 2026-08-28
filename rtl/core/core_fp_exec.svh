@@ -123,6 +123,14 @@
               if (q_fxop==FX_FPREM || q_fxop==FX_FPREM1) begin
                 state<=S_FPREM_BUSY;
               end else begin
+`else
+              // No remainder engine in this configuration, and FPREM/FPREM1 are
+              // not in the PS-trap set either: a decoded FPREM has NO
+              // implementation route. Halt loudly instead of retiring it as a
+              // silent no-op.
+              if (q_fxop==FX_FPREM || q_fxop==FX_FPREM1) begin
+                state<=S_HALT; `ifdef VEN_DBG_CORE int_vec<=8'hE3; `endif
+              end else begin
 `endif
 `ifdef VEN_TRANSCENDENTAL
               // Transcendentals (#11): run the iterative engine first
@@ -163,24 +171,38 @@
 `ifdef VEN_TRANSCENDENTAL
               end
 `endif
-`ifdef VEN_FPREM
               end
-`endif
 `ifdef VEN_FPTRAP
               end
 `endif
             end else begin
+              // An UNMASKED stack fault on a store commits NOTHING (found by
+              // R1-H01: the BCD/PS narrowing paths used to launch anyway and
+              // merge conversion results from the empty slot): skip the engine/
+              // PS request exactly like the S_FSTORE arm's suppressed retire.
+              // The flags were recorded at this dispatch clock; the #MF lands
+              // at the next waiting FP instruction. A MASKED fault proceeds --
+              // the engine/PS output is discarded for the destination-specific
+              // indefinite at the store (fstore_val).
 `ifdef VEN_FP_PS_ALL
               // FP_PS_ALL: the NARROWING stores (m32/m64/int/BCD) PS-trap so their
               // deep conversion cone is computed on the A53 (store-after-trap). Exact-
               // image stores (FST m80 / FNSTCW / FNSTSW m16) need no conversion and go
               // straight to S_FSTORE in PL.
-              if (f_ps_store_trap) state<=S_FPTRAP_WAIT;
+              if (f_ps_store_trap) begin
+                if (fp_store_suppressed) begin
+                  eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1; state<=S_PIPE;
+                end else state<=S_FPTRAP_WAIT;
+              end
               else begin state<=S_FSTORE; f_step<=4'd0; end
 `elsif VEN_BCD_ITER
               // FBSTP: run the iterative FP->BCD engine first (S_BCD_BUSY) so the
               // 18-chained-/10 conversion is multi-cycle, then store.
-              if (q_fxop==FX_FBSTP) state<=S_BCD_BUSY;
+              if (q_fxop==FX_FBSTP) begin
+                if (fp_store_suppressed) begin
+                  eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1; state<=S_PIPE;
+                end else state<=S_BCD_BUSY;
+              end
               else begin state<=S_FSTORE; f_step<=4'd0; end
 `else
               state<=S_FSTORE; f_step<=4'd0;
@@ -266,7 +288,15 @@
         // not gate-compared, but stores are implemented faithfully.
         // -------------------------------------------------------------------
         S_FSTORE: begin
-          if (mem_ack) begin
+          // REVIEW_Aug4 A4-H01: an UNMASKED stack fault on a store (FST/FIST/
+          // FBSTP of an EMPTY ST0) commits NOTHING -- no store transaction, no
+          // pop (the writeback suppression kills fp_we_pop on the same latch).
+          // The flags were recorded at S_FEXEC; retire so the #MF lands at the
+          // next waiting FP instruction. The bus arm's bd_req is gated on the
+          // same predicate, so no memory side effect leaves the core.
+          if (fp_flt_q && !fctrl[0]) begin
+            eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1; state<=S_PIPE; f_step<=4'd0;
+          end else if (mem_ack) begin
             // words needed: m16/cw/sw->1, m32->1, m64->2, m80->3
             if ((q_f_mbytes<=4'd4) ||
                 (q_f_mbytes==4'd8 && f_step==4'd1) ||

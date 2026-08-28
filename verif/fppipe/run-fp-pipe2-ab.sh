@@ -15,7 +15,9 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 TB="$ROOT/verif/tb"
 TESTS="$ROOT/verif/tests"
-OUT="$ROOT/build/fppipe2_ab"; mkdir -p "$OUT"
+OUT="${FPPIPE2_OUT:-$ROOT/build/fppipe2_ab}"; mkdir -p "$OUT"
+OBJDIR_A="${FPPIPE2_OBJDIR_A:-obj_dir_fp1}"
+OBJDIR_B="${FPPIPE2_OBJDIR_B:-obj_dir_fp2}"
 QEMU="$ROOT/ventium-refs/07-p5-emulation-harness/build/qemu/build/qemu-i386"
 P5TRACE="$ROOT/build/p5trace.so"
 COMPARE="$ROOT/verif/diff/compare.py"
@@ -27,11 +29,11 @@ say(){ echo "=== $* ==="; }
 
 # ---- build TB_A (1-stage) and TB_B (2-stage) -------------------------------
 say "build TB_A (+VEN_FP_PIPE) and TB_B (+VEN_FP_PIPE2)"
-( cd "$TB" && VL_EXTRA_DEFINES="$BASE" make rtl OBJDIR=obj_dir_fp1 ) > "$OUT/build_A.log" 2>&1 || { echo "TB_A build FAILED"; tail -5 "$OUT/build_A.log"; exit 1; }
-if [ ! -x "$TB/obj_dir_fp2/tb_ventium" ]; then
-  ( cd "$TB" && VL_EXTRA_DEFINES="$BASE +define+VEN_FP_PIPE2" make rtl OBJDIR=obj_dir_fp2 ) > "$OUT/build_B.log" 2>&1 || { echo "TB_B build FAILED"; tail -5 "$OUT/build_B.log"; exit 1; }
+( cd "$TB" && VL_EXTRA_DEFINES="$BASE" make rtl OBJDIR="$OBJDIR_A" ) > "$OUT/build_A.log" 2>&1 || { echo "TB_A build FAILED"; tail -5 "$OUT/build_A.log"; exit 1; }
+if [ ! -x "$TB/$OBJDIR_B/tb_ventium" ]; then
+  ( cd "$TB" && VL_EXTRA_DEFINES="$BASE +define+VEN_FP_PIPE2" make rtl OBJDIR="$OBJDIR_B" ) > "$OUT/build_B.log" 2>&1 || { echo "TB_B build FAILED"; tail -5 "$OUT/build_B.log"; exit 1; }
 fi
-TBA="$TB/obj_dir_fp1/tb_ventium"; TBB="$TB/obj_dir_fp2/tb_ventium"
+TBA="$TB/$OBJDIR_A/tb_ventium"; TBB="$TB/$OBJDIR_B/tb_ventium"
 echo "TB_A=$TBA  TB_B=$TBB"
 
 RC=0

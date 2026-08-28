@@ -92,19 +92,24 @@
             // loop EIP latched in S_EXEC (q_pc while REP has elements left, next_eip
             // on the last), exactly like the S_STORE string retire. Plain IN/OUT
             // keeps next_eip.
-            io_eip = (q_kind==K_STR) ? str_next_eip : next_eip;
-            // R3: the IN value -> AL/AX/eAX write moved to the gpr writeback driver
-            // (core_gpr_wb.svh, S_IO arm).
-            eip <= io_eip;
-            io_xbp = (sys_mode && !rf_at_issue) ? dr_match(seg_base[SG_CS]+io_eip, 1'b1)
-                                                : 4'd0;
-            if (sys_mode && io_xbp != 4'd0)
-              arm_db({28'd0, io_xbp}, q_pc, io_eip);     // instr breakpoint at next eip
-            else if (sys_mode && tf_at_issue)
-              arm_db(32'd1 << DR6_BS, q_pc, io_eip);     // TF single-step trap
-            else begin
-              retire_valid <= 1'b1;
-              state <= S_PIPE;
+            // A reset request is terminal for the core until the platform acts on
+            // fast_reset_req.  Do not let the normal I/O completion below win the
+            // same clock's nonblocking assignment and return the CPU to S_PIPE.
+            if (!(q_io_write && q_io_port == 16'h0092 && io_wdata[0])) begin
+              io_eip = (q_kind==K_STR) ? str_next_eip : next_eip;
+              // R3: the IN value -> AL/AX/eAX write moved to the gpr writeback driver
+              // (core_gpr_wb.svh, S_IO arm).
+              eip <= io_eip;
+              io_xbp = (sys_mode && !rf_at_issue) ? dr_match(seg_base[SG_CS]+io_eip, 1'b1)
+                                                  : 4'd0;
+              if (sys_mode && io_xbp != 4'd0)
+                arm_db({28'd0, io_xbp}, q_pc, io_eip);     // instr breakpoint at next eip
+              else if (sys_mode && tf_at_issue)
+                arm_db(32'd1 << DR6_BS, q_pc, io_eip);     // TF single-step trap
+              else begin
+                retire_valid <= 1'b1;
+                state <= S_PIPE;
+              end
             end
           end
         end

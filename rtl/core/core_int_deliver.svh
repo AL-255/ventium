@@ -86,13 +86,18 @@
               // does not implement. Faulting is the honest behaviour -- previously
               // such a gate was silently misinterpreted as an interrupt gate, which is
               // strictly worse than a diagnosable #GP.
-              if (!gattr[7]) begin
-                start_fault(8'd11, 1'b1, {21'd0, int_vec, 3'b010}, int_src_pc);
-              end else if (gattr[4] || !(gattr[3:0] inside {4'h6,4'h7,4'hE,4'hF})) begin
+              //
+              // REVIEW_Aug4 A4-H05: the architectural order -- gate S/type FIRST
+              // (#GP), then the software-INT DPL check (#GP), presence LAST (#NP).
+              // QEMU's do_interrupt_protected is the same; a not-present gate with
+              // a bad type reported #NP here, where both oracles say #GP.
+              if (gattr[4] || !(gattr[3:0] inside {4'h6,4'h7,4'hE,4'hF})) begin
                 // S must be 0 (system descriptor) and the type must be int/trap gate.
                 start_fault(8'd13, 1'b1, {21'd0, int_vec, 3'b010}, int_src_pc);
               end else if (int_sw && (gattr[6:5] < cpl_r)) begin
                 start_fault(8'd13, 1'b1, {21'd0, int_vec, 3'b010}, int_src_pc);
+              end else if (!gattr[7]) begin
+                start_fault(8'd11, 1'b1, {21'd0, int_vec, 3'b010}, int_src_pc);
               end else begin
                 state      <= S_INT_CS;
               end
@@ -139,14 +144,25 @@
               int_xpriv    = !int_tgt_conf && (tgt_dpl < eff_cpl);
               // target CS must be present, a code segment, DPL <= the EFFECTIVE
               // CPL (V86 forces eff_cpl=3, so a DPL0 monitor CS is accepted).
-              cs_bad  = !desc_present(cattr) || !desc_s(cattr) ||
-                        !seg_is_code(cattr) || (tgt_dpl > eff_cpl);
+              // REVIEW_Aug4 A4-H05: the checks are ORDERED -- S/type/privilege
+              // (#GP) before presence (#NP), QEMU's do_interrupt_protected
+              // order. The collapsed cs_bad + "NP iff P=0" form reported #NP for
+              // a not-present DATA descriptor, where both oracles say #GP.
+              cs_bad  = !desc_s(cattr) || !seg_is_code(cattr) || (tgt_dpl > eff_cpl);
               if (cs_bad) begin
-                // bad target CS -> #NP(sel) if not present, else #GP(sel). Error
-                // code = the gate's code selector with the IDT/EXT bits.
+                // bad target CS (type/privilege) -> #GP(sel). The blamed
+                // descriptor is the gate's code selector in the GDT/LDT, not
+                // the IDT entry: TI from the selector, IDT=0, EXT = the
+                // latched delivery event class (dlv_ext: 1 only for NMI/INTR
+                // -- a software INT or synchronous exception is internal).
                 int_step <= 4'd0;
-                start_fault(desc_present(cattr) ? 8'd13 : 8'd11, 1'b1,
-                            {16'd0, int_gate_sel[15:3], 3'b010}, int_src_pc);
+                start_fault(8'd13, 1'b1,
+                            selector_error_ext(int_gate_sel, dlv_ext), int_src_pc);
+              end else if (!desc_present(cattr)) begin
+                // presence is the sole failing check -> #NP(sel).
+                int_step <= 4'd0;
+                start_fault(8'd11, 1'b1,
+                            selector_error_ext(int_gate_sel, dlv_ext), int_src_pc);
               // ---- REVIEW2_aug2 C-03 (fourth bullet): the handler OFFSET was never
               // compared against the destination CS limit. A gate naming a valid,
               // present, correctly-privileged code segment but an offset past its end
@@ -243,10 +259,9 @@
                 // closes that latent path with no functional change.
                 from_v86 <= v86 && int_xpriv;
 `ifdef VEN_DBG_WD
-                // [VEN-XPL] the cross-priv-vs-same-priv decision for the Quake #PF. A
-                // nested CPL0 fault (cs=0x18) MUST be same-priv; if this prints XPL with
-                // cpl_r!=0 (or v86=1), that stale privilege is the frame-corruption bug.
-                if (creg3==32'h0007e000 && int_vec==8'd14)
+                // Cross-privilege decision trace for page faults.  This diagnostic is
+                // intentionally guest-independent and is available only in a debug build.
+                if (int_vec==8'd14)
                   $display("[VEN-XPL] vec=%0d tgt_dpl=%0d eff_cpl=%0d cpl_r=%0d v86=%b -> %s @cs:eip=%04x:%08h old_esp=%08h",
                            int_vec, tgt_dpl, eff_cpl, cpl_r, v86, int_xpriv?"XPL":"SAME",
                            seg_sel[SG_CS], eip, gpr_o[R_ESP]);
@@ -326,7 +341,9 @@
             else if (xpl_active)
               // REVIEW2_aug2 C-06: a call-gate frame is one word shorter (no EFLAGS),
               // so it ends at beat 3. It never carries an error code.
-              last = cg_xpl ? (int_step == 4'd3)
+              // REVIEW1_Aug3 R2-H05: ...plus cg_pcount parameter slots, counted by
+              // cg_beat (the frame can be 35 beats, past int_step's 4 bits).
+              last = cg_xpl ? (cg_beat == (6'd3 + {1'b0, cg_pcount}))
                             : (int_has_err ? (int_step == 4'd5) : (int_step == 4'd4));
             else
               last = int_has_err ? (int_step == 4'd3) : (int_step == 4'd2);
@@ -336,6 +353,11 @@
               // the gpr writeback driver (core_gpr_wb.svh, S_INT_PUSH arm).
               xpl_active <= 1'b0;
               cg_xpl     <= 1'b0;   // REVIEW2_aug2 C-06
+              cg_beat    <= 6'd0;   // R2-H05: retire the frame beat counter with it
+              // The frame page plan has served its delivery; retire it so a
+              // later same-priv push can never match a captured page.
+              frm_pg_val   <= 4'd0;
+              frm_pg_markd <= 1'b0;
               // ---- REVIEW2_aug2 C-03 (first bullet): THE SINGLE COMMIT POINT for the
               // handler's control context. CS's selector and hidden cache land here,
               // with eip, once the whole frame is on the stack and nothing further in
@@ -346,6 +368,7 @@
               seg_base [SG_CS] <= int_cs_base;
               seg_limit[SG_CS] <= int_cs_limit;
               seg_attr [SG_CS] <= int_cs_attr;
+              seg_pm_loaded[SG_CS] <= 1'b1;   // R2-H07: validated (staged) PM load
               cs_d             <= int_cs_d;
               eip        <= int_gate_off;
               // IA-32 6.12.1: on ANY interrupt/trap-gate entry the CPU clears TF
@@ -378,6 +401,10 @@
                     seg_base [s] <= 32'd0;
                     seg_limit[s] <= 32'd0;
                     seg_attr [s] <= 8'd0;
+                    // R2-H07: V86-entry zeroing is NOT a PM load -- a V86 guest's
+                    // null-ish selectors are ordinary real-mode-style values and
+                    // must not be caught by the PM null/not-present checks.
+                    seg_pm_loaded[s] <= 1'b0;
                   end
                 end
               end
@@ -428,6 +455,7 @@
               dlv_depth <= 2'd0; dlv_ctrb <= 1'b0; dlv_pf <= 1'b0;
             end else begin
               int_step <= int_step + 4'd1;
+              cg_beat  <= cg_beat + 6'd1;   // R2-H05: cg_xpl frames count here
             end
           end
         end

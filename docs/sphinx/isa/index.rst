@@ -1538,13 +1538,15 @@ the pre-system bit-identity), and several are deferred (undecoded → HALT).
    * - ``LDS`` / ``LES``
      - ``C5 /r``; ``C4 /r``
      - **NP**
-     - Far-pointer load into DS/ES — not decoded; ``d_unknown`` → HALT.
-     - deferred / HALTs
+     - Far-pointer load into DS/ES; m16:16 and m16:32 memory forms. Protected
+       loads share the validated, atomic descriptor-load transaction.
+     - implemented
    * - ``LSS`` / ``LFS`` / ``LGS``
      - ``0F B2/B4/B5``
      - **NP**
-     - Far-pointer load into SS/FS/GS — not decoded; ``d_unknown`` → HALT.
-     - deferred / HALTs
+     - Far-pointer load into SS/FS/GS; m16:16 and m16:32 memory forms in
+       real/V86/protected modes. Register encodings remain invalid.
+     - implemented
    * - ``CLI`` / ``STI``
      - ``FA``; ``FB``
      - **NP**
@@ -1645,13 +1647,14 @@ LTR / STR and the rest of the 0F 00 group (``0F 00 /1,/3``; ``/0,/2,/4,/5``)
     ``0F 00`` sub-ops — ``SLDT``/``LLDT`` (``/0``/``/2``) and ``VERR``/``VERW``
     (``/4``/``/5``) — and any memory form are not matched and HALT (deferred).
 
-Undecoded protection ops (``CLTS`` ``0F 06``, ``LAR``/``LSL`` ``0F 02/03``, ``ARPL`` ``63``, ``LDS``/``LES`` ``C5/C4``, ``LSS``/``LFS``/``LGS`` ``0F B2/B4/B5``)
-    All **NP** by class and *not decoded* — ``CLTS`` (clear ``CR0.TS``),
-    ``LAR``/``LSL`` (load access-rights / segment-limit), ``ARPL`` (adjust RPL),
-    and the far-pointer segment loads ``LDS``/``LES``/``LSS``/``LFS``/``LGS`` —
-    each is absent from its decode casez and resolves to ``d_unknown`` → ``S_HALT``
-    rather than mis-execute. (Segment state itself is reachable via ``MOV Sreg``
-    and far ``JMP``, but these far-pointer-load opcodes are not implemented.)
+Protection ops and far-pointer segment loads
+    ``CLTS`` (clear ``CR0.TS``), ``LAR``/``LSL`` (load access-rights / segment
+    limit), and ``ARPL`` (adjust RPL) remain **NP** and undecoded. The **NP**
+    far-pointer loads ``LDS``/``LES``/``LSS``/``LFS``/``LGS`` are implemented
+    for every legal m16:16/m16:32 form. Real/V86 loads install ``base=sel<<4``;
+    protected loads reuse ``S_SEGLD`` and commit the GPR plus selector/hidden
+    cache only after descriptor validation. Invalid register forms raise #UD in
+    system mode rather than being treated as a memory load.
 
 Flag-bit mutators (``CLI``/``STI`` ``FA/FB``, ``CLD``/``STD`` ``FC/FD``, ``CLC``/``STC``/``CMC`` ``F8/F9/F5``)
     All **NP** single-byte ops decoded by the slow FSM (never ``simple``, so

@@ -12,7 +12,7 @@ BUILD       := build
 VERILATOR   ?= verilator
 PYTHON      ?= python3
 
-.PHONY: all m0-smoke m1 m2 m3 m4 m5 m6 a20 fenv x87b l1 bus bus-sva verify verify-clean rtl plugin tests clean help verify-sys verify-srt verify-srt-iter verify-idiv verify-bcd verify-fbld verify-fppipe verify-fppipe2 verify-all coverage coverage-sys coverage-mem coverage-unit coverage-all opgen opgen-modes
+.PHONY: all m0-smoke m1 m2 m3 m4 m5 m6 a20 fenv x87stk x87b l1 bus bus-sva issue-uv verify verify-clean rtl plugin tests clean help verify-sys verify-srt verify-srt-iter verify-idiv verify-bcd verify-fbld verify-fppipe verify-fppipe2 verify-all coverage coverage-sys coverage-mem coverage-unit coverage-all opgen opgen-modes
 .DEFAULT_GOAL := help
 
 help:
@@ -24,6 +24,7 @@ help:
 	@echo "  make m4         M4 cycle gate: dual-issue U/V pipeline cycle-accuracy vs p5model"
 	@echo "  make m5         M5 cycle gate: L1 cache-miss + x87/FP cycle accuracy vs p5model"
 	@echo "  make m6         M6 errata gate: reproduce 4 documented P5 silicon errata behind a flag"
+	@echo "  make issue-uv   decoder + U/V pairer regression for ESP RAW dependencies"
 	@echo "  make verify     FAST unified m1-m5 gate (parallel + cached goldens; refactor-time gate)"
 	@echo "  make verify-clean  drop the golden cache (forces a cold regen on the next make verify)"
 	@echo "  make verify-sys M2S.0 system-mode ORACLE check: build qemu-system, gen + validate the"
@@ -34,6 +35,8 @@ help:
 	@echo "  make x87b       x87 deferred-op boundary gate (REVIEW2 M-09)"
 	@echo "  make a20        A20 gate: 1 MiB alias wrap via port 0x92 (REVIEW2 M-03)"
 	@echo "  make fenv       x87 env gate: FNSTENV masks all exceptions (REVIEW2 M-01)"
+	@echo "  make x87stk     x87 stack-fault matrix gate, 4 TB variants + the A4-H01 TR"
+	@echo "                  variant (REVIEW1_Aug3 R2-H06 + REVIEW_Aug4 A4-H01)"
 	@echo "  make l1         all L1/TLB/BTB/AXI memory-subsystem unit gates (auto-discovered)"
 	@echo "  make verify-all UMBRELLA: every routinely-runnable gate (verify + verify-sys +"
 	@echo "                  verify-srt + m6 + x87b + a20 + fenv + l1 + bus + bus-sva); one pass/fail summary"
@@ -188,6 +191,15 @@ seg:
 fenv:
 	bash verif/sys/run-fenv-gate.sh
 
+# --- x87 stack-fault gate (verif/sys/run-x87stk-gate.sh) ---------------------
+# REVIEW1_Aug3 R2-H06. The full stack-fault matrix (7 faulting shapes x
+# {masked,unmasked} + FXAM-on-empty control) in one BIOS image. Self-checked
+# against the SDM -- QEMU 8.2.2 implements NO x87 stack faults, so no golden is
+# possible. Graded by final-record witnesses + faultlog on the functional run
+# and by PC-stream identity on the cycle/FP_PIPE/FP_PIPE2 variants.
+x87stk:
+	bash verif/sys/run-x87stk-gate.sh
+
 # --- IDT gate offset vs CS limit (verif/sys/run-intlim-gate.sh) --------------
 # REVIEW2_aug2 C-03. A gate whose offset lies beyond the destination CS limit must be
 # rejected during DELIVERY, before CS/CPL are installed. Deliberately NOT differential:
@@ -231,11 +243,14 @@ callsel:
 	@$(MAKE) -s -C verif/sys/tests/pcalldesc
 	bash verif/sys/run-callsel-gate.sh
 
-# --- C-04 producer reachability (verif/sys/run-xc04-gate.sh) -----------------
-# REVIEW2_aug2 C-04's directed boundary case. ASSERTS THE PAGING/C-04 ASSERTION FIRES
-# for S_LGDT -- same shape as run-ic-alias-gate.sh, which requires the default build to
-# still exhibit its hazard. It holds the reachability answer so a later split extension
-# must restate the claim instead of going quietly green.
+# --- R2-C03 page-crossing fragment-engine correctness (verif/sys/run-xc04-gate.sh)
+# Was the REVIEW2_aug2 C-04 reachability pin (PASSED only while the six non-split
+# producers $fatal'd). The generic fragment engine landed, so the gate is now a
+# CORRECTNESS gate: each producer's crossing must complete differentially clean
+# vs QEMU (witnesses + RTL sys-diff), and the PAGING/C-04 fatal must never fire.
+# Currently RED on pxc04 (S_LGDT read): the engine's read fragment-2 walk runs
+# with the read-merge armed, corrupting walk_pde (see the gate header). Kept
+# XFAIL-PINNED in verify-all until the RTL fix lands.
 .PHONY: xc04
 xc04:
 	@$(MAKE) -s -C verif/sys/tests/pxc04
@@ -255,6 +270,24 @@ xc04:
 retfout:
 	@$(MAKE) -s -C verif/sys/tests/pretfout
 	bash verif/sys/run-retfout-gate.sh
+
+# --- documentation/source consistency (verif/sys/run-docs-status-gate.sh) -----
+# REVIEW_Aug3 M-02: the status documents must not drift from the RTL and the gates.
+# Checks the documented loud-halt tags against the halt sites, the off-by-default
+# correctness defines against the deployed KV_FULL_DEFS set, the expected-failure
+# pin classifications, and that each status row's named evidence gate exists.
+.PHONY: docs-status
+docs-status:
+	bash verif/sys/run-docs-status-gate.sh
+
+# --- lint matrix (verif/lint/run-lint-gate.sh) ---------------------------------
+# The structural warning classes (IMPLICIT/PINMISSING/UNDRIVEN/MULTIDRIVEN/
+# LATCH/UNOPTFLAT) are hard errors across five build configurations: default,
+# L1/AXI, the deployed KV260 set, iterative-BCD, and the FP_PS_ALL area-relief
+# profile. Style/width noise stays visible but non-fatal.
+.PHONY: lint
+lint:
+	bash verif/lint/run-lint-gate.sh
 
 # --- cross-privilege call gate (verif/sys/run-callxpl-gate.sh) ---------------
 # REVIEW2_aug2 C-06, call-gate half. Covers BOTH the desc[45:44] DPL misread (which
@@ -361,7 +394,10 @@ bus-sva:
 # freshly regenerated and compared, so the verdict is fully authoritative. This
 # is the refactor-time gate R1b uses after every extraction. (verif/verify.sh
 # builds the corpus ELFs + TB itself.)
-verify:
+issue-uv:
+	bash verif/issue_uv/run-issue-uv-gate.sh
+
+verify: issue-uv
 	bash verif/verify.sh
 
 # --- M2S system-mode gate (verif/sys/run-sys-golden.sh) ---------------------
@@ -421,11 +457,17 @@ verify-sys:
 	# handler's own SS:ESP), not merely that a fault occurred.
 	bash verif/sys/run-sys-golden.sh pssiret
 	# REVIEW2_aug2 C-06 prerequisite: the ONLY golden-compared far CALL/RETF in the
-	# tree. psocfarcall/psoccallfmem/psocpmretf are referenced by zero gates AND have
-	# no source (.bin/.elf/.o only), so they can be neither rebuilt nor registered;
+	# tree. psocfarcall/psocpmretf are referenced by zero gates AND have no source
+	# (.bin/.elf/.o only), so they can be neither rebuilt nor registered;
 	# pcallsel covers the reject path only. Without this, a reorder of the
 	# far-transfer path would ship unregressed.
 	bash verif/sys/run-sys-golden.sh pfarok
+	# psoccallfmem: memory-indirect far CALL (FF /3) mode split -- real/V86 far
+	# pointers carry a segment value (base = sel<<4, no descriptor table); only
+	# protected selectors are bounded and descriptor-probed. Both operand-size
+	# forms in real mode, the stack-built lcall *0(%bp) shape, 64 KiB stack-top
+	# wrap pushes, an IF=1 case, PM valid/bad-selector controls, and a V86 case.
+	bash verif/sys/run-sys-golden.sh psoccallfmem
 	# REVIEW_aug2 H-06: INVD/WBINVD are CPL0-only and RDTSC honours CR4.TSD.
 	bash verif/sys/run-sys-golden.sh ppriv
 	# REVIEW_aug2 H-01: 16-bit PROTECTED-mode stacks (address AND pointer, plus
@@ -436,6 +478,181 @@ verify-sys:
 	bash verif/sys/run-sys-golden.sh pdf
 	bash verif/sys/run-sys-golden.sh ptask
 	bash verif/sys/run-sys-golden.sh ptaskcpl
+	# REVIEW_Aug3 C-02: the paged control-flow address mirrors. ptaskpg is ptask
+	# with paging ON and EVERY switch object non-identity-mapped (straddling GDT
+	# and TSS2, outgoing/incoming LDTs differing in base AND limit, TI=1 incoming
+	# CS/SS/DS through the staged incoming LDT); pretfoutpg is pretfout with the
+	# outer ESP/SS pops landing on a different physical page than the linear
+	# page, in both 32-bit and 16-bit (H-02 zero-extension) operand sizes.
+	bash verif/sys/run-sys-golden.sh ptaskpg
+	bash verif/sys/run-sys-golden.sh pretfoutpg
+	# REVIEW_Aug3 C-04: far-transfer intent. pcalltss proves the NESTING task
+	# switch for a far CALL to an available TSS (back-link, NT, BOTH descriptors
+	# busy, saved resume EIP, NT-IRET return); pjmpgate proves a far JMP through
+	# a call gate to a more-privileged NONCONFORMING target raises #GP(selector)
+	# while the far CALL succeeds and the conforming-target JMP keeps CPL.
+	bash verif/sys/run-sys-golden.sh pcalltss
+	bash verif/sys/run-sys-golden.sh pjmpgate
+	# REVIEW_Aug3 H-11b: pltr proves LTR writes the descriptor busy byte before
+	# TR commits (readback 0x8B), a second LTR on the busy descriptor #GP(sel),
+	# and a null LLDT under paging with GDT[0] non-present commits the invalid
+	# LDTR with NO #PF. (The null-LLDT suppression initially missed the paging
+	# divert -- S_LTR stayed `translatable`; fixed by gating it and perm_fault
+	# on the same predicate as the suppressed request. See manifest rtl_blocker.)
+	bash verif/sys/run-sys-golden.sh pltr
+	# REVIEW_Aug3 H-02: pretfres proves a same-privilege RETF whose popped CS
+	# is rejected (not-present, 32- and 16-bit) faults with ESP UNCHANGED, and
+	# a 16-bit outer RETF zero-extends the popped outer SP word. (The
+	# offset-past-limit restartability case lives in piretgp0: QEMU has no
+	# return-EIP-limit check, so it is witness-graded.)
+	bash verif/sys/run-sys-golden.sh pretfres
+	# REVIEW_Aug3 H-03 (+H-02 offset-past-limit): piretgp0 is a WITNESS gate
+	# (QEMU lacks the return-EIP-vs-limit check; the H-03(b) DPL<RPL anomaly
+	# is unreachable through legal loads): #GP(0) with error code ZERO at the
+	# over-limit IRET and RETF, ESP preserved, at-limit IRET succeeds, and the
+	# reachable outer-IRET segment-cleanup boundary (step 7w).
+	bash verif/sys/run-sys-golden.sh piretgp0
+	# REVIEW_Aug3 M-01: piopermwrap proves a word/dword IN/OUT whose extent
+	# wraps past port 0xFFFF is denied #GP(0) outright (never decided by
+	# adjacent bitmap memory), with the byte-at-0xFFFF and dword-at-0xFFFC
+	# boundary cases PERMITTED. Differential: QEMU denies too, via the
+	# architecturally-required 0xFF bitmap terminator byte.
+	bash verif/sys/run-sys-golden.sh piopermwrap
+	# REVIEW1_Aug3 R2-C01: pxfer proves S_LJMP validates far transfers PER
+	# KIND: ten rejected transfers (direct CALL RPL>CPL; direct JMP conforming
+	# DPL>CPL; RETF to a system descriptor; JMP to an LDT-resident TSS; JMP to
+	# a not-present TSS (#NP); CALL through a not-present call gate (#NP);
+	# call-gate target nonconforming DPL>CPL; and from CPL3: direct JMP
+	# nonconforming DPL<CPL; CALL to a TSS DPL<CPL; RETF popped RPL<CPL) --
+	# each witnessed to perform NO stack write and NO busy-bit write -- plus
+	# three ACCEPTED controls (conforming JMP, same-level CALL/RETF, JMP to a
+	# valid available TSS). Differential vs QEMU; the one oracle gap (QEMU
+	# #TS vs SDM #GP for the LDT-resident TSS) uses the pssiret shared-
+	# handler pattern with the vector graded from +ven_faultlog (step 7d).
+	bash verif/sys/run-sys-golden.sh pxfer
+	# REVIEW1_Aug3 R2-C02: pselnull proves ONE null-selector definition
+	# (sel[15:2]==0) and TI-preserving selector error codes: a null DS load
+	# with GDT[0] NONZERO and NON-PRESENT reads nothing (no #PF) and stages
+	# explicit zeros (the poison base never leaks into a data access); a far
+	# JMP through LDT entry 0 (0x0004) succeeds; an out-of-bounds LDT
+	# selector faults #GP(0x0004); an incoming task LDTR of 0x0004 is
+	# #TS(0x0004); a paged task switch with a null incoming DS completes.
+	# WITNESS gate (case D cannot be diffed: QEMU raises the same #TS only
+	# AFTER committing the switch); graded in step 7w.
+	bash verif/sys/run-sys-golden.sh pselnull
+	# REVIEW1_Aug3 R2-C04 (pxprobe): a cross-privilege delivery whose frame
+	# straddles onto a NOT-PRESENT second page must #PF BEFORE the SS/CPL
+	# commit -- err=2 (supervisor class), CR2 = the first faulting push's
+	# address, old SS:ESP/CPL3/EFLAGS intact, no escalation cascade (the
+	# faultlog extra in step 7e). Fully differential vs the QEMU golden.
+	bash verif/sys/run-sys-golden.sh pxprobe
+	# pxwrap: the wrapped cross-privilege frame-probe matrix. A new TSS stack
+	# that wraps its stack-pointer window (B=0: SP < frame size; B=1: ESP <
+	# frame size) splits the frame into two offset chunks over up to four
+	# pages; every touched page is denied in turn (#PF err=2, push-order CR2,
+	# old context intact, zero bytes, no escalation) and then permitted (the
+	# CPL0 handler verifies every frame byte). 16-bit interrupt/trap gates
+	# with and without error code, B=1 4 GiB-wrap layouts, max-parameter call
+	# gates (70/140-byte frames), V86 permitted controls. Differential vs
+	# QEMU + the faultlog count extra. pxwrapm is the witness half: QEMU
+	# pushes incrementally while the probe commits nothing, so the
+	# zero-bytes property is graded in-guest (step 7w) with QEMU's partial
+	# pushes pinned honestly (step 5f); the V86 denials are terminal in both
+	# oracles (no #PF can leave V86 without re-probing the same stack).
+	bash verif/sys/run-sys-golden.sh pxwrap
+	bash verif/sys/run-sys-golden.sh pxwrapm
+	# pxfrag: the fragment-engine abort contract on the read side. A crossing
+	# GDTR read is faulted at fragment 2 (with the handler poisoning the
+	# fragment-1 bytes between the abort and the restart -- a stale merge
+	# installs the old limit and the case-A selector bracket flips) and at
+	# fragment 1 (the pre-engagement miss), then restarted to completion;
+	# differential vs QEMU. The write phases stay with pxc04e/pxc04f.
+	bash verif/sys/run-sys-golden.sh pxfrag
+	# pxdplan: the frame page-plan probe contract (witness gate). Deny cases
+	# on 64 KiB-colliding destination pages prove the validation phase writes
+	# nothing and sets no D bit; the success case proves the D-mark pass runs
+	# pre-commit and the pushes never walk (the colliding pages evict each
+	# other from the direct-mapped DTLB, so a DTLB-translated push would);
+	# +ven_frmpglog counters prove one probe beat per distinct page (a 35-slot
+	# call-gate frame probes 3 beats, not 35).
+	bash verif/sys/run-sys-golden.sh pxdplan
+	# fxabort: the fragment-abort phases the system images cannot reach. A
+	# focused --binary TB around the whole core drives each engine phase from
+	# a small driver image and (a) pulses reset mid-phase, proving the engine
+	# returns to the one idle state with no shaping armed, and (b) faults the
+	# probe / read-frag2 / read-frag1 phases with same-cycle and delayed acks,
+	# counting engagements/aborts and watching for stale redirect. The core's
+	# own abort assertions run in the build and must stay silent.
+	bash verif/fxabort/run-fxabort-gate.sh
+	# REVIEW1_Aug3 R2-H05: call-gate parameter copy + 16-bit gates. pcgparam:
+	# 32-bit cross-priv gates with pcount 0/1/31 (order proof, RETF imm16
+	# discard, caller-stack restore) + the same-priv no-copy control. pcg16:
+	# 16-bit gates from a 32-bit caller (same-priv word frame; cross-priv word
+	# params; SET_ESP upper-16 semantics) + a 32-bit gate from a 16-bit caller.
+	# pcgpg: caller/callee page-boundary straddles (fx split push + S_CG_PRD
+	# split read) and old-context #PFs for a denied destination/source page
+	# (both fully differential vs QEMU). All three pin the B1 (RETF imm16 outer
+	# pops) and B2 (gated CS.RPL) fixes -- RED on a pre-fix build by design
+	# (0xDA halt / 32-bit-frame defect on HEAD; see the pcgparam manifest).
+	bash verif/sys/run-sys-golden.sh pcgparam
+	bash verif/sys/run-sys-golden.sh pcg16
+	bash verif/sys/run-sys-golden.sh pcgpg
+	# REVIEW1_Aug3 R2-C03: the generic page-crossing fragment engine. All six
+	# ex-xc04 producers, converted from the reachability pin into CORRECTNESS
+	# tests: each crossing runs on NON-CONTIGUOUS physical frames (a
+	# wrong-physical-page access returns poison) and is diffed against the QEMU
+	# golden; the write producers also prove probe-before-commit atomicity (a
+	# not-present second page #PFs BEFORE page 1 is touched). pxc04i/pxc04t
+	# have no NP variant (documented in their manifests: the frame push IS
+	# delivery -> recursive fault; QEMU's TSS dummy pre-access faults at a
+	# different address than the probe -> CR2 oracle gap). pxc04 (S_LGDT read)
+	# is included: the read-frag2 S_WALK merge contamination it exposed is
+	# fixed (fx_walk_hold in rtl/core/core.sv).
+	bash verif/sys/run-sys-golden.sh pxc04
+	bash verif/sys/run-sys-golden.sh pxc04i
+	bash verif/sys/run-sys-golden.sh pxc04f
+	bash verif/sys/run-sys-golden.sh pxc04e
+	bash verif/sys/run-sys-golden.sh pxc04t
+	bash verif/sys/run-sys-golden.sh pxc04m
+	# REVIEW_Aug4: A4-C01 (crossing-store probe dirty intent; the clean-leaf
+	# hang and the probe-D-write classes) and A4-C02 (direct far JMP / same-
+	# privilege RETF target offset at limit+1 -- the pre-commit rejection).
+	bash verif/sys/run-sys-golden.sh pxwalkd
+	bash verif/sys/run-sys-golden.sh pjmpoff
+	# A4-H05: combined-invalid descriptor fault precedence (type/privilege
+	# BEFORE presence, QEMU tss_load_seg order; 7 discriminators + 7 controls).
+	bash verif/sys/run-sys-golden.sh pdescprec
+	# A4-H03: 16-bit protected-mode interrupt frames (word slots, errcode size,
+	# SS.B wrap, cross-priv; the IRETW recovery incl. the outer-SS.B ESP mask).
+	bash verif/sys/run-sys-golden.sh pint16f
+	# A4-H06: same-privilege delivery partial frames are ARCHITECTURAL (QEMU
+	# pushes incrementally too): straddling frame, page 2 NP and page 2 RO;
+	# CR2/err/partial bytes/ESP, then the delivery restarts and completes.
+	bash verif/sys/run-sys-golden.sh psamepf
+	# A4-H09: task-switch phase fault injection (WITNESS gate): save-RO,
+	# incoming NP, LDTR NP, system DS, both busy-write faults; the phase-model
+	# partial states + busy-order invariant. Pins the S_TSW_SAVE/S_TSW_BUSY
+	# missing write classification (found by this test).
+	bash verif/sys/run-sys-golden.sh ptswflt
+	# prsmflush: an executable invalidation (CR3 reload / A20 edge / RSM) must
+	# beat CONSUMPTION -- no fast-serve path may retire a line the flush is
+	# killing. Cases B+C differential vs the QEMU golden, case A (SMM/RSM)
+	# witness-graded (the gdbstub masks SMI; no golden possible).
+	bash verif/sys/run-prsmflush-gate.sh
+	# psmmmeta: RSM must restore the interrupted context's hidden segment
+	# metadata (seg_pm_loaded / seg_b / ss_b) with the PRE-SMI values, not the
+	# SMM handler's -- a leaked stack width flips the first post-RSM push, and
+	# a leaked data-segment D/B flips the legality of an expand-down DS access
+	# above 64K (discriminated on the +VEN_SEG_ENFORCE variant build; the gate
+	# runs both). Witness-graded (the gdbstub masks SMI; no golden possible).
+	bash verif/sys/run-psmmmeta-gate.sh
+	# pintslim: the cross-privilege interrupt-frame pre-probe must segment-
+	# check each frame slot with the SLOT'S width -- a 16-bit gate's word
+	# slot ending exactly at the new stack segment's bound is legal (both
+	# B bits, expand-up + expand-down); one slot-width past must #SS(0)
+	# pre-commit. Discriminated on the +VEN_SEG_ENFORCE variant build (the
+	# canonical run is additionally a full differential vs the QEMU golden).
+	bash verif/sys/run-pintslim-gate.sh
 	bash verif/sys/run-sys-golden.sh psmm
 	bash verif/sys/run-sys-golden.sh pdebug
 	bash verif/sys/run-sys-golden.sh ppopf
@@ -511,6 +728,16 @@ opgen-modes:
 # verify`/`verify-soc` tracks are unaffected.
 verify-srt:
 	bash verif/srt/run-srt-gate.sh
+
+# --- FPREM/FPREM1 differential gate (verif/srt/run-fprem-gate.sh) -----------
+# Full-core differential of the tx_fprem corpus program vs the pinned QEMU
+# golden on all three remainder-engine configurations: the canonical build
+# (dedicated fpu_fprem), the unified-engine build (+VEN_SRT_ITER +VEN_FPREM),
+# and the deployed-profile build (l1axi_kv_full, L1/AXI bus mode). One
+# documented oracle gap is masked by record-exact ranges from the test's
+# manifest (QEMU never fills FPREM1's C0/C3/C1 quotient codes).
+verify-fprem:
+	bash verif/srt/run-fprem-gate.sh
 
 # --- iterative SRT divider gate (verif/srt/run-srt-iter-gate.sh) -------------
 # Standalone clocked gate for the multi-cycle, one-step-per-clock iterative SRT

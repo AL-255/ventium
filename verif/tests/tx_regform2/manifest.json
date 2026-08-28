@@ -1,2 +1,19 @@
-{ "name":"tx_regform2","src":"tx_regform2/tx_regform2.s","elf":"tx_regform2/tx_regform2.elf",
-  "image":"tx_regform2/tx_regform2.flat","load_addr":"0x08048000","entry":"0x08048000","max_insn":50,"x87":true }
+{
+  "name": "tx_regform2",
+  "src": "tx_regform2/tx_regform2.s",
+  "elf": "tx_regform2/tx_regform2.elf",
+  "image": "tx_regform2/tx_regform2.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 50,
+  "x87": true,
+  "x87_stkflt_arch": true,
+  "x87_stkflt_note": "R2-H06: this program drives the x87 stack past its ends. QEMU implements no stack faults, so the differential masks fstat IE|SF|C1|C0|C2|C3 (0x4741 -- the #IS response has no QEMU counterpart; C1 is the direction bit and C0/C2/C3 are implementation-defined per SDM Vol.1 Table 8-4) and the st* QNaN-indefinite substitution. The behavior itself is gated architecturally by px87stk.",
+  "x87_stkflt_fstat_ranges": [
+    [
+      14,
+      14
+    ]
+  ],
+  "x87_stkflt_ranges_note": "The mask is the EXACT measured divergence set of an unmasked compare vs the pinned-QEMU golden (20 records, n=0..19): the FSTPL m64 at n=14 underflows the emptied stack (fstat IE|SF on the faulting record only; the m64 destination is not a compared field and no st* diverges). The FNINIT/FLD1/FSTP resync at n=15..17 clears the sticky IE|SF on both sides, so records n=15..19 compare with ZERO masks. st0..st7 compare at full strength on EVERY record (no fpr mask at all)."
+}

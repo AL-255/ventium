@@ -100,6 +100,11 @@
             // writeback driver (core_gpr_wb.svh, SYS_STR arm).
             flags_we=1'b0;
           end
+          else if (q_sysop==SYS_SLDT) begin
+            // SLDT r/m16 (REVIEW_Aug3). Same shape as STR: the dst-reg<-LDTR-selector
+            // write is in the gpr writeback driver (SYS_SLDT arm).
+            flags_we=1'b0;
+          end
           else if (q_sysop==SYS_INVLPG) begin
             // INVLPG m (REVIEW_Jul29 H-05). Its ONLY architectural effect is the
             // TLB invalidation, which the tlb_flush pulse in core.sv drives
@@ -125,6 +130,7 @@
               seg_base[q_sys_sreg] <= 32'd0;            // flat
             seg_limit[q_sys_sreg]<= 32'hFFFF_FFFF;
             seg_attr [q_sys_sreg]<= 8'h93;
+            seg_pm_loaded[q_sys_sreg]<= 1'b0;   // R2-H07: user-mode proxy load
 `ifdef M7_PROXY_DEBUG
             $display("[M7DBG] mov sreg=%0d sel=0x%04x gs_base_r=0x%08x -> base=0x%08x",
                      q_sys_sreg, gpr_o[q_src_reg][15:0], gs_base_r,
@@ -140,6 +146,7 @@
             seg_base[q_sys_sreg] <= {12'd0, gpr_o[q_src_reg][15:0], 4'd0};
             seg_limit[q_sys_sreg]<= 32'h0000_FFFF;
             seg_attr [q_sys_sreg]<= 8'h93;
+            seg_pm_loaded[q_sys_sreg]<= 1'b0;   // R2-H07: real-mode load
           end
           else if (q_sysop==SYS_LJMP) begin
             // REAL-MODE far jump: CS.sel = sel, CS.base = sel<<4, EIP = off.
@@ -147,6 +154,7 @@
             seg_sel [SG_CS] <= q_ljmp_sel;
             seg_base[SG_CS] <= {12'd0, q_ljmp_sel, 4'd0};
             seg_attr[SG_CS] <= 8'h9B;
+            seg_pm_loaded[SG_CS] <= 1'b0;   // R2-H07: real-mode load
             new_eip = q_ljmp_off;
           end
           else begin
@@ -192,6 +200,7 @@
                   if (seg_real) begin
                     seg_sel [q_sys_sreg] <= mem_load_data[15:0];
                     seg_base[q_sys_sreg] <= {12'd0, mem_load_data[15:0], 4'd0};
+                    seg_pm_loaded[q_sys_sreg] <= 1'b0;   // R2-H07: real-mode load
                   end else begin
                     // PM: latch the popped selector and walk the descriptor in
                     // S_SEGLD (target = q_lseg). Suppress this S_EXEC retire; the
@@ -209,8 +218,8 @@
                 // load the target segment register from the HIGH half of the SAME
                 // 4-byte far-pointer read (raw mem_load_data, not the width-masked
                 // alu_out). Real mode: base = sel<<4, the present R/W data default.
-                // Only decoded under seg_real + 16-bit operand (else HALT), so this
-                // real-mode load is the only path reached.
+                // Protected-mode loads defer both destinations to S_SEGLD; real/V86
+                // loads complete here with the ordinary MOV writeback.
                 if (q_seg_load) begin
                   if (!seg_real && q_seg_load_lo) begin
                     // PM MOV Sreg,[mem]: the loaded 2-byte value is a PROTECTED-mode
@@ -224,10 +233,10 @@
                     // PM far-ptr LSS/LFS/LGS (DOS-Quake go32 `lss esp,cs:[..]`): the
                     // selector is the HIGH half of the 4-byte read (16-bit m16:16 ptr)
                     // or the 2-byte 2nd read (32-bit m16:32 ptr, q_w==4). Walk the
-                    // GDT/LDT in S_SEGLD (target = q_lseg, e.g. SG_SS). The GPR (offset)
-                    // write ALREADY committed via q_writes_reg in THIS S_EXEC cycle
-                    // (gpr_wb runs in S_EXEC regardless of do_retire), so only the
-                    // segment load is deferred. Was real-mode-only -> PM HALTed here.
+                    // GDT/LDT in S_SEGLD (target = q_lseg, e.g. SG_SS). GPR
+                    // writeback is suppressed in S_EXEC and shares S_SEGLD's single
+                    // validated commit event with the segment hidden-cache update;
+                    // a descriptor fault therefore leaves BOTH destinations intact.
                     seg_mem_sel    <= (q_w==3'd4) ? mem_load_data2[15:0]
                                                   : mem_load_data[31:16];
                     q_seg_from_mem <= 1'b1;
@@ -248,6 +257,7 @@
                                                        : {12'd0, mem_load_data[31:16], 4'd0};
                     seg_limit[q_lseg] <= 32'h0000_FFFF;
                     seg_attr [q_lseg] <= 8'h93;
+                    seg_pm_loaded[q_lseg] <= 1'b0;   // R2-H07: real/V86-style load
                   end
                 end
               end

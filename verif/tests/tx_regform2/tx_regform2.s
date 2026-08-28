@@ -21,6 +21,14 @@ _start:
     ficoms w16                  # DE /2  FICOM m16
     ficomps w16                 # DE /3  FICOMP m16 (pop)
     fstpl  out8                 # DD /3  FSTP m64
+
+    # ---- resync: FNINIT clears the sticky IE|SF from the underflowed FSTP --
+    # on BOTH sides (QEMU never sets it), then one valid push/pop pair proves
+    # fstat and st0..st7 compare with zero masks from here on.
+    fninit
+    fld1
+    fstp  %st(0)
+
     movl  $1, %eax
     xorl  %ebx, %ebx
     int   $0x80

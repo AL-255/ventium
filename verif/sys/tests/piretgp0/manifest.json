@@ -1,0 +1,46 @@
+{
+  "name": "piretgp0",
+  "kind": "system",
+  "src": "piretgp0.S",
+  "linker": "piretgp0.ld",
+  "image": "piretgp0.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 600,
+  "sys": true,
+  "paging": false,
+  "finding": "REVIEW_Aug3 H-03 (+ the H-02 offset-past-limit restartability case)",
+  "gate_form": "WITNESS (RTL faultlog + final-record GPRs), NOT differential -- see oracle_gaps",
+  "oracle_gaps": {
+    "gap1_return_eip_limit": "QEMU 8.2.2's helper_ret_protected (pinned harness tcg/seg_helper.c:1927) performs NO check of the popped EIP against CS.limit on RETF/IRET, and TCG has no fetch-time code-limit check (translate.c). So cases A2/A3 FAULT in the RTL (#GP(0) at the return, nothing committed) but TRANSFER AND RUN in QEMU (a2_target/a3_target markers) -- the next retired record differs in pc/cs/esp and no stream reconverges record-for-record. A differential golden cannot encode the graded behaviour, so these cases are witness-graded (the golden still pins QEMU's deviant flow honestly; step 5f asserts it)",
+    "gap2_rpl_term_unreachable": "H-03(b)'s exact combination (data/nonconforming-code selector with DPL >= new CPL but DPL < its own RPL) is ARCHITECTURALLY UNREACHABLE through legal loads on BOTH oracles: MOV-to-Sreg requires DPL >= max(CPL,RPL) (ventium_sys_pkg.sv seg_load_fault; qemu helper_load_seg) and the hardware task switch enforces the identical rule (qemu tss_load_seg: dpl < cpl || dpl < rpl -> #TS). RPL <= DPL therefore holds for every loaded data segment, so QEMU's RPL-less validate_seg cannot diverge on a reachable state. Case B pins the REACHABLE boundary of the rule instead (which every oracle, including pre-fix HEAD, agrees on: it is the no-false-nulling regression)"
+  },
+  "transitions": [
+    "real->protected (CR0.PE 0->1, CS far-jump to 32-bit flat code segment 0x08)",
+    "GDT @ 0x500 (10 entries): null + code0 0x08 + data0 0x10 + code3 0x18 (0x1B) + data3 0x20 (0x23) + data DPL3 0x28 (0x2B) + conforming code DPL0 readable 0x30 + limited code 0x38 (limit = a1_int3) + limited code 0x40 (limit = a2_target-1) + limited code 0x48 (limit = a3_target-1), all base 0 byte-gran D=1 DPL0",
+    "IDT: #BP(3) -> bp_handler, #GP(13) -> gp_handler (0x8E DPL0)",
+    "A1: same-priv IRET with EIP == CS.limit exactly -> SUCCEEDS (the at-limit false-positive tripwire); the target is a one-byte int3 AT the limit; #BP -> bp_handler records 0xA1A1A1A1 and returns. Oracle-identical",
+    "A2: same-priv IRET with EIP = CS.limit+1 -> RTL: #GP(0) at the IRET with error code 0 (H-03: valid descriptor + over-limit EIP, NOT #GP(selector)) and ESP UNCHANGED. QEMU: transfers to a2_target (marker 0xA2A2A2A2) and rejoins (oracle gap 1)",
+    "A3: same-priv 32-bit RETF with EIP = CS.limit+1 (H-02 restartability, regrouped here by oracle gap 1) -> RTL: #GP(0) at the RETF with ESP UNCHANGED. QEMU: transfers to a3_target (marker 0xA3A3A3A3) and rejoins",
+    "B: outer IRET CPL0->CPL3 with DS=0x2B (data DPL3 RPL3: survives), ES=0x10 (data0 DPL0: NULLED), FS=0x30 (conforming code DPL0: survives, H-08 exemption), GS=0x20 (data3 RPL0: survives); selectors read back via mov sreg,reg",
+    "CPL3 leg packs the witnesses into edi/esi/ecx/ebp/ebx; isa-debug-exit (status 133) at CPL==IOPL==3"
+  ],
+  "witnesses": {
+    "edi": "0xA1A1A1A1 -- A1 executed: the at-limit IRET succeeded (BOTH oracles)",
+    "esi": "(gp<<16)|err0: 0x00020002 in the RTL (two #GPs, BOTH with error code 0 -- the H-03 fix); 0x00000000 in QEMU (no faults -- oracle gap 1)",
+    "ecx": "ESP-preserved confirmations: 2 in the RTL (A2/A3 faulted with ESP unchanged -- the H-02 deferral); 0 in QEMU",
+    "ebp": "(ds<<16)|es = 0x002B0000 -- case B: DS survived (DPL3 RPL3), ES nulled (DPL0). Identical in every oracle",
+    "ebx": "(fs<<16)|gs = 0x00300020 -- case B: FS survived (conforming exempt), GS survived (DPL3 RPL0). Identical in every oracle"
+  },
+  "rtl_witness_grading": "run-sys-golden.sh step 7w: the RTL trace's final record must carry edi=0xA1A1A1A1, esi=0x00020002, ecx=0x00000002, ebp=0x002B0000, ebx=0x00300020, and +ven_faultlog must show exactly 2x vec=13 err=00000000 (A2 at the IRET, A3 at the RETF) and ZERO vec=13 err=00000040 (the pre-fix H-03 selector error code for A2)",
+  "negative_control": {
+    "method": "build the RTL TB from HEAD (git worktree add /tmp/ven_base HEAD; make -C verif/tb rtl), run the same image --system +ven_faultlog, grade the same witnesses",
+    "expected": "OLD BEHAVIOUR: A2 raises #GP(0x40) (the selector as the error code -- the H-03 defect) so the err0 count stays 0 and the faultlog shows err=00000040; A3 faults with ESP already advanced (the H-02 defect) so the ESP-preserved count stays 0. Final record: esi=0x00020000, ecx=0",
+    "measured": "CONFIRMED 2026-08-03: HEAD TB (4a643c1) +ven_faultlog shows vec=13 err=00000040 at pc=0x000f019c (the A2 IRET: the selector as the error code -- the H-03 defect) and vec=13 err=00000000 at pc=0x000f01bd (A3). HEAD final record: esi=0x00020001 (only ONE zero error code), ecx=1 (A3's ESP was advanced by the H-02 defect, only the A2 IRET preserved ESP) vs the required esi=0x00020002, ecx=2 -- the witness grading FAILS on HEAD exactly as designed. build/sys/piretgp0.head.rtl.vtrace"
+  },
+  "description": "REVIEW_Aug3 H-03 regression (IRET error codes + outer-IRET segment cleanup) with the H-02 offset-past-limit restartability case regrouped in. WITNESS gate, not differential: QEMU 8.2.2 has no return-EIP-vs-limit check (oracle gap 1) and H-03(b)'s exact DPL<RPL anomaly is unreachable through legal loads on both oracles (oracle gap 2). A1 proves the at-limit IRET succeeds (oracle-identical int3 tripwire); A2/A3 prove the RTL raises #GP(0) -- error code 0, not the selector -- with ESP unchanged; B pins the reachable boundary of the DS/ES/FS/GS cleanup (DPL3/RPL3 survives, DPL0 nulled, conforming exempt, DPL3/RPL0 survives). Graded by run-sys-golden.sh step 7w against the RTL trace witnesses + faultlog; the QEMU golden is generated, validated and self-diffed as usual and step 5f asserts it pins QEMU's deviant flow (esi=ecx=0 with the A1 and case-B witnesses present)."
+}

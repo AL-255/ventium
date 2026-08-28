@@ -31,6 +31,23 @@ _start:
     fcoms flt               # FX_FCOM_M32
     fwait                   # 9B
     fstp  %st(0)
+
+    # ---- resync: FNINIT + refill all 8 physical slots ---------------------
+    # The overflow pushes above substituted the QNaN indefinite where QEMU
+    # pushes the raw constant -- the record-exact oracle gap this program's
+    # masks cover. FNINIT clears the sticky IE|SF and resets TOP/tags on BOTH
+    # sides; eight pushes then rewrite every physical slot with identical
+    # values, so from here on fstat AND st0..st7 compare with zero masks.
+    fninit
+    fld1
+    fldz
+    fld1
+    fldz
+    fld1
+    fldz
+    fld1
+    fldz
+
     movl  $1, %eax
     xorl  %ebx, %ebx
     int   $0x80

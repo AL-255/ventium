@@ -1,0 +1,45 @@
+{
+  "name": "pjmpgate",
+  "kind": "system",
+  "src": "pjmpgate.S",
+  "linker": "pjmpgate.ld",
+  "image": "pjmpgate.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 400,
+  "sys": true,
+  "paging": false,
+  "finding": "REVIEW_Aug3 C-04",
+  "transitions": [
+    "real->protected (CR0.PE 0->1, CS far-jump to 32-bit flat code 0x08)",
+    "GDT (9 entries): code0 0x08 nonconforming, data0 0x10, code3 0x18, data3 0x20, CALL GATE 0x28 -> 0x08 (DPL 3, param count 0), CALL GATE 0x30 -> 0x38 (DPL 3), code0 0x38 CONFORMING (access 0x9E), TSS 0x40 (SS0=0x10, ESP0=0x6000); LTR 0x40",
+    "IDT: gate 13 (#GP) -> gp_handler (interrupt gate, CPL0)",
+    "transfer DOWN to CPL3 via an outer RETF (SS=0x23, ESP=0x5000, CS=0x1B)",
+    "case (a): ljmp through gate 0x28 to the MORE-privileged NONCONFORMING target 0x08 -> #GP(0x28). IA-32 forbids a JMP from raising privilege through a call gate. The handler records vector 13 + error code 0x28, skips the 7-byte ljmp, IRETs back to ring 3",
+    "case (a): ljmp through gate 0x28 to the MORE-privileged NONCONFORMING target 0x08 -> #GP(0x08). IA-32 forbids a JMP from raising privilege through a call gate; the error code names the TARGET code selector (QEMU/SDM). The handler records vector 13 + error code 0x08, skips the 7-byte ljmp, IRETs back to ring 3",
+    "case (c): ljmp through gate 0x30 to the MORE-privileged CONFORMING target 0x38 -> SUCCEEDS and CPL is KEPT at 3 (conforming is not a privilege change): CS reads back 0x3B (RPL 3) and the exit OUT 0xF4 works at CPL==IOPL==3",
+    "isa-debug-exit (status 133) from the conforming target"
+  ],
+  "witnesses": {
+    "0x2000": "0x0000000D -- the #GP vector the handler recorded (case (a) fired). With the C-04 defect the JMP enters the CALL stack-switch path instead: NO #GP, and the diff diverges from the first frame push on",
+    "0x2004": "#GP error code & 0xFFFC == 0x0008 -- the fault names the TARGET code selector, not the gate (QEMU/SDM; the gate resolver has substituted it by fault time) (esi at exit)",
+    "0x2008": "k0_entry's SS == 0x0010 -- case (b) really switched to the TSS.SS0 stack, not the caller's (ebp at exit; the out sequence clobbers EAX/DX)",
+    "0x200c": "the caller's ESP recovered from the gate frame at 8(%esp) == the ring-3 stack pointer at the lcall (ecx at exit)",
+    "0x2010": "conf_entry's CS.RPL == 3 -- CPL KEPT across the JMP through the gate to the conforming segment (the trace's cs field likewise reads 0x3B)",
+    "0x2014": "0xBBBBBBBB -- case (b) returned to ring 3 via the pushed frame (ebx at exit)"
+  },
+  "negative_control": {
+    "method": "build the RTL TB from HEAD (git worktree add /tmp/ven_base HEAD; make -C verif/tb rtl), run the same image --system, diff against the golden",
+    "expected": "DIVERGENT: HEAD checks only gate_via && target_DPL<CPL, so case (a)'s far JMP wrongly enters the CALL stack-switch path -- no #GP is raised, a return frame is pushed, and k0_entry runs. The golden instead shows the #GP(0x28) delivery -> handler -> IRET sequence, so the traces diverge at the ljmp",
+    "measured": "CONFIRMED 2026-08-03: HEAD TB (4a643c1, no fix) DIVERGES at n=137 pc=0x000f01b8 field=esp: golden 0x00005fe8 (the #GP delivery switched to the TSS stack) vs HEAD 0x00005ff0 -- HEAD entered the CALL stack-switch path and pushed a return frame for case (a)'s far JMP instead of raising #GP(0x08). compare.py exits 1. (171 records vs 172 golden) build/sys/pjmpgate.head.rtl.vtrace"
+  },
+  "description": "REVIEW_Aug3 C-04 regression for call-gate far-transfer intent. The call-gate resolver sets gate_via for far JMP and far CALL alike, and HEAD's cross-privilege branch checked only gate_via && target_DPL<CPL -- so a far JMP through a call gate to a more privileged nonconforming segment entered the CALL stack-switch path and pushed a frame. This image drives all three intent combinations from CPL3 in one run: (a) ljmp through a DPL-3 gate to a DPL-0 NONCONFORMING code segment must raise #GP(gate selector) -- recorded by an IDT handler that skips the faulting ljmp and IRETs back; (b) lcall through the SAME gate to the same target must SUCCEED with a stack switch to TSS.SS0:ESP0 and return via the pushed frame; (c) ljmp through a DPL-3 gate to a DPL-0 CONFORMING code segment must SUCCEED with CPL KEPT at 3 (proven by CS.RPL reading back 3 and the CPL3 exit OUT). QEMU implements all three correctly and is the differential oracle; the five witnesses are pulled into the GPRs before the isa-debug-exit so the run-sys-golden.sh step-7 RTL sys-diff compares them record-for-record. NO paging (the intent defect is paging-independent; the paged addressing defects are ptaskpg/pretfoutpg).",
+  "blocking_rtl_defect": {
+    "status": "GATE CURRENTLY RED on the step-7 RTL diff (fixed build), pending an RTL correction outside this test",
+    "detail": "Cases (a) and (b) -- the C-04 fix proper -- are EQUIVALENT vs the golden (the #GP(0x08) fires for the JMP, and the far CALL stack-switches and returns). Case (c) diverges at n=151: on the JMP through the gate to the CONFORMING target, QEMU loads CS as 0x3B (RPL forced to the kept CPL=3, per the architectural CS.RPL==CPL invariant; qemu target/i386/tcg/seg_helper.c loads R_CS with (new_cs & 0xfffc) | cpl) while the RTL's ordinary far-transfer commit (rtl/core/core_seg_ljmp.svh, 'seg_sel[SG_CS] <= q_ljmp_sel') installs the gate's target selector verbatim as 0x38, leaving CS.RPL=0 != CPL=3. All 9 divergent fields (n=151..154: cs, eax, eflags.ZF) stem from this single selector-RPL difference. Also observed and kept OUT of this test: MOV r32,SReg in the RTL preserves the stale upper 16 bits while QEMU zero-extends (a pre-existing, unrelated gap -- pretfoutpg reads SS via memory for the same reason)."
+  }
+}

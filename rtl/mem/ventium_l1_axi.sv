@@ -38,6 +38,7 @@ module ventium_l1_axi #(
     parameter logic [39:0] REMAP_BASE = 40'h00_0000_0000,
     parameter logic [31:0] ADDR_MASK  = 32'hFFFF_FFFF,
     parameter logic [3:0]  AXI_ID     = 4'd0,
+    parameter bit          NARROW_REPLAY_SAFE = 1'b0,
     parameter int unsigned WATCHDOG   = 1024,           // #34 AXI stall watchdog cycles
     // ---- Phase B (docs/northbridge-system-spec.md §5): splice the UltraRAM L2
     // (ven_l2) into the L1 backing seam — ven_l1d.m_* → ven_l2.u_*, ven_l2.d_* →
@@ -91,6 +92,7 @@ module ventium_l1_axi #(
 
     // ---- core side (the same-cycle-ack contract; mirrors core mem_*) ----------
     input  logic        flush_all,       // #35 external L1 invalidation (clear all val)
+    output logic        smm_flush_o,     // SMM exit / SMBASE relocation pulse (I-side flush)
     input  logic        golden_l1,       // golden/L1-useless diagnostic mode (flush after each access)
     input  logic        core_req,
     input  logic        core_we,
@@ -244,14 +246,13 @@ module ventium_l1_axi #(
     input  logic              m_axi_rvalid,
     (* X_INTERFACE_INFO = "xilinx.com:interface:aximm:1.0 m_axi RREADY" *)
     output logic              m_axi_rready
-`ifdef VEN_L1_HONOR_CD
     ,
-    // live CR0.CD (bit30) threaded from the core (ventium_top: dbg_cr0[30]). CD=1 (BIOS
-    // POST runs the memory test with the cache disabled) => honor KEN# and bypass the L1
-    // D$ (no 8-beat write-allocate fill). Single-outstanding backing here => no posted-
-    // write staleness (the very reason write-allocate exists). Undefined => byte-identical.
+    // live CR0.CD (bit30) threaded from the core (ventium_top: core_cr0[30]).
+    // REVIEW1_Aug3 R2-H12: UNCONDITIONAL now (was VEN_L1_HONOR_CD) -- CD=1 is the
+    // architectural reset/POST state until software clears it, and the deployed
+    // build was caching data through it. CD=1 => honor KEN# and bypass the L1 D$
+    // (no allocation, no stale serve).
     input  logic        cr0_cd
-`endif
 `ifdef VEN_DBG_L2
     // ---- L2 observability (opt-in, gate-only define — NOT seen by ventium_top, so
     // no plumbing churn there). Surfaces ven_l2's perf counters + init-ready so the
@@ -277,8 +278,8 @@ module ventium_l1_axi #(
   logic        m_ack;
 
   // ---- post-L2 backing port (b_*): the seam between the L2 (or the bypass) and the
-  logic m_rd_narrow, m_rd_narrow_2;      // H-11: L1D -> backing, narrow read request
-  logic b_rd_narrow, b_rd_narrow_2;      // H-11: post-L2 (== m_* when EN_L2=0)
+  logic m_rd_narrow; logic [1:0] m_rd_size;  // H-11/R2-H01: L1D -> backing, narrow read request
+  logic b_rd_narrow; logic [1:0] b_rd_size;  // H-11/R2-H01: post-L2 (== m_* when EN_L2=0)
   // ===== REVIEW2_aug2 H-13: THE I-SIDE CACHEABILITY QUERY ======================
   // The finding: instruction-fetch cacheability was driven by CR0.CD alone, with no
   // notion of the MEMORY TYPE of the address being fetched. A line in a region the
@@ -302,6 +303,61 @@ module ventium_l1_axi #(
       .region(core_ic_region));
   assign core_ic_nocache = !core_ic_l1c;
 
+  // ===== REVIEW_Aug3 C-01 (item 4): THE D-SIDE CACHEABILITY QUERY =================
+  // The finding: with EN_L2=0 and without VEN_L1_HONOR_CD (the DEPLOYED l1axi_kv_full
+  // define set has neither), l1d_cacheable was tied 1'b1 in g_nol2 — so a DATA access
+  // to memory the chipset marks non-cacheable (the VGA aperture, anything at/above
+  // TOM, a closed SMRAM window) was L1-CACHED and its reads went out as amplified
+  // 8-beat line fills. The H-11 narrow path (ven_l1d's bypass FSM) was unreachable in
+  // exactly the configuration that ships. The I side got its memory-type query in
+  // H-13 (u_cmap_ic above); the D side never did.
+  //
+  // Like u_cmap_ic, this instance is DELIBERATELY OUTSIDE the EN_L2 generate: the
+  // g_l2 branch has its own D-side query (u_cmap_l1, feeding ven_l2/ven_northbridge)
+  // and is untouched. is_write=core_we so the PAM read-only/write-only attribute of
+  // a ROM window is honoured for data cycles; is_code=0 makes a read-only PAM window
+  // (shadowed BIOS) non-cacheable for data, per the 82437FX datasheet.
+  //
+  // CONSEQUENCE of the default NB_* params: the VGA aperture 0xA0000-0xBFFFF and all
+  // addresses >= TOM are now non-cacheable on the D side — parity with the I side,
+  // and CORRECT for the KV260 fold (the "VRAM" at those addresses is DDR-backed, so
+  // caching it would serve stale bytes to the very guests the aperture exists for;
+  // MMIO must never be cached regardless). It also means the narrow/bypass path is
+  // now live in the DEFAULT build — which is what the L1AXINARROW gate exercises.
+  logic core_d_l1c, core_d_dram_u, core_d_l2c_u; logic [3:0] core_d_region;
+  ven_cachemap u_cmap_dc (
+      .addr(core_addr), .is_write(core_we), .is_code(1'b0), .smm_active(smm_active),
+      .pam(NB_PAM), .dramc(NB_DRAMC), .cc(NB_CC), .tom_mb4(NB_TOM_MB4), .smram(NB_SMRAM),
+      .to_dram(core_d_dram_u), .l1_cacheable(core_d_l1c), .l2_cacheable(core_d_l2c_u),
+      .region(core_d_region));
+
+  // REVIEW1_Aug3 R2-H02: classify the access EXTENT, not just its first byte.
+  // Every cachemap region boundary is 32-byte aligned, so a cache-line FILL can
+  // never straddle one -- but an ACCESS (up to 4 bytes, e.g. a dword at 0x9FFD)
+  // can cross from cacheable RAM into the VGA aperture, a PAM window, TOM, a
+  // hole, or SMRAM. Classifying by the first byte alone allocated and cached the
+  // boundary line, hiding device bytes in the D$. Query the map at the LAST byte
+  // as well: the access is cacheable only if BOTH endpoints are, otherwise it
+  // takes the narrow path (which reads exactly its 1-2 words, never a line).
+  // The extent is the highest active strobe for reads AND writes: ven_l1d
+  // fragments a strobe'd read into byte-exact pieces, so a byte/word read must
+  // not be classified using bytes it will never touch. The +3 whole-word window
+  // survives ONLY as the fallback for a read producer that drives no strobes
+  // (the legacy whole-word narrow form, which really does span 4 bytes).
+  logic [2:0]  core_d_hi;
+  logic [31:0] core_d_last;
+  always_comb begin
+    core_d_hi = 3'd0;
+    for (int b = 0; b < 4; b++) if (core_wstrb[b]) core_d_hi = 3'(b);
+  end
+  assign core_d_last = core_addr + ((core_we || core_wstrb != 4'd0) ? {29'd0, core_d_hi} : 32'd3);
+  logic core_d_l1c_last, core_d_dram_last_u, core_d_l2c_last_u; logic [3:0] core_d_region_last;
+  ven_cachemap u_cmap_dc_last (
+      .addr(core_d_last), .is_write(core_we), .is_code(1'b0), .smm_active(smm_active),
+      .pam(NB_PAM), .dramc(NB_DRAMC), .cc(NB_CC), .tom_mb4(NB_TOM_MB4), .smram(NB_SMRAM),
+      .to_dram(core_d_dram_last_u), .l1_cacheable(core_d_l1c_last),
+      .l2_cacheable(core_d_l2c_last_u), .region(core_d_region_last));
+
   // AXI master / CDC. With EN_L2=0 these are wired straight to m_* (transparent);
   // with EN_L2=1 ven_l2 sits between m_* (its upstream u_*) and b_* (its downstream d_*).
   logic        b_req, b_we;
@@ -312,10 +368,16 @@ module ventium_l1_axi #(
   logic        l2_ready;          // 1 once the L2 finishes its post-reset valid-clear walk
   // observability wires (driven by ven_l2/ven_northbridge under VEN_DBG_CORE; 0 otherwise).
   logic [31:0] l2_hits_w, l2_misses_w, l2_wbacks_w, l2_bypass_w;
-  // KEN# for the L1 D-cache: with the northbridge present (EN_L2), a cachemap on the
-  // CORE address decides cacheability so MMIO is never L1-cached; else cache everything.
-  // Driven inside the EN_L2 generate (below) so EN_L2=0 builds don't pull in ven_cachemap.
+  // KEN# for the L1 D-cache: the D-side ven_cachemap query above (u_cmap_dc) decides
+  // cacheability from the memory type, so MMIO is never L1-cached. With the
+  // northbridge present (EN_L2) the g_l2 branch substitutes its own query feeding
+  // the L2 as well. Driven inside the EN_L2 generate (below) so each configuration
+  // has exactly one driver.
   logic l1d_cacheable;
+  // REVIEW1_Aug3 R2-H03: sticky routing fault from the no-L2 router (g_nol2 drives
+  // it; g_l2 ties it 0 -- the northbridge does its own routing there). ORed into
+  // bus_err below in both clock configurations.
+  logic route_err;
   // Phase D: northbridge → L1D snoop-invalidate (DMA coherence). Driven in the generate
   // branches (g_l2 → NB snoop; g_nol2 → 0, byte-identical).
   logic        l1d_snoop_valid;
@@ -330,14 +392,15 @@ module ventium_l1_axi #(
   // wires the existing (DMA) snoop input to the store address so the relocated-code fetch misses
   // -> refills the freshly-written bytes. Over-invalidates on data stores (harmless re-refill).
   // task #51 FIX: snoop the icache with the LINEAR store address, not the physical one.
-  // The icache is tagged by flin = seg_base[SG_CS] + eip (rtl/core/core.sv:2559-2560) and
-  // icache.sv:318-324 derives snp_set/snp_tag straight from snoop_inv_addr. Driving core_addr
-  // (PHYSICAL) here meant that with paging on and lin != phys, a self-modifying store cleared
-  // the line tagged by the physical address while the stale copy stayed resident under the
-  // linear tag -> patched code executes stale. Real mode is unaffected: paging off makes
-  // cur_lin == mem_addr, so the Win95 IO.SYS relocation fix this snoop was added for is
-  // preserved exactly. The DMA path (l1d_snoop_addr) is still physical and remains approximate
-  // for a linear-tagged icache -- that is task #37/H-10 territory, not this fix.
+  // [... historical note: the linear workaround existed because the icache was
+  // linear-TAGGED. REVIEW1_Aug3 R2-H09: the icache now also records each line's
+  // PHYSICAL page tag and matches snoops against it, so the snoop returns to the
+  // PHYSICAL domain (core_addr) and a store through ANY alias of a physical line
+  // drops every aliased copy -- the linear-alias hazard this workaround left open
+  // (REVIEW1_Aug2 H-05) is closed. Over-invalidation costs a refill, never
+  // correctness. The DMA path (port 0) is physical too and now matches EXACTLY
+  // under paging; the conservative full flush on (ic_snoop_valid && paging_on) in
+  // core.sv stays as belt-and-braces.]
   // REVIEW Aug-1 H-09: this used to be
   //     valid = l1d_snoop_valid | core_we;
   //     addr  = l1d_snoop_valid ? l1d_snoop_addr : core_lin;
@@ -355,6 +418,14 @@ module ventium_l1_axi #(
   // lands in a different 32-byte line than core_lin.
   // ===========================================================================
   // REVIEW2_aug2 C-10 -- LOCKED RMW ATOMICITY IS NOT PROVIDED ON THIS PATH.
+  //
+  // STATUS: OPEN architectural blocker. The local DMA-ownership seam holds the
+  // local requester across the window, but PS/global AXI writers do not
+  // traverse it and there is no exclusive-access protocol, so this is not
+  // architectural LOCK atomicity and must not be counted as LOCK closure. The
+  // real fix (AXI4 exclusives end to end, or a common line owner held from
+  // locked read through locked write, with explicit abort/reset/timeout
+  // release) is deferred with the L2/northbridge work.
   //
   // The core produces mem_lock and bus mode 1 carries it into biu_p5, but the L1/AXI
   // instantiation -- the configuration used for FPGA memory -- had no lock input at
@@ -374,11 +445,13 @@ module ventium_l1_axi #(
   // exclusive access properly. Both are protocol work, not a connection.
   //
   // So the gap is made MEASURABLE instead of papered over: count the locked core
-  // requests that traverse this path with no exclusion behind them. That number is
-  // what a reader needs to judge the exposure, and it is the same treatment C-03's
-  // unsplit page crossings got.
+  // requests that traverse this path. With the R2-H08 ownership FSM (below, at
+  // the DMA ingress) the local requester is held across the window in every
+  // VEN_NB_DMA configuration, so this counter now measures locked TRAFFIC, not
+  // unprotected traffic; it hits zero only on workloads with no LOCK prefix.
   logic        c10_lock_unprotected;
   assign c10_lock_unprotected = core_req && core_lock;
+
 `ifndef SYNTHESIS
   int   ven_c10_n;
   logic ven_c10log_en;
@@ -390,33 +463,125 @@ module ventium_l1_axi #(
 `endif
 
   logic [31:0] smc_last_lin;
+  logic [31:0] smc_last_phys;   // R2-H09
   logic        smc_xline;
   always_comb begin
     logic [2:0] hi;
     hi = 3'd0;
     for (int b = 0; b < 4; b++) if (core_wstrb[b]) hi = 3'(b);
-    smc_last_lin = core_lin + {29'd0, hi};
+    smc_last_lin  = core_lin  + {29'd0, hi};
+    // R2-H09: the last byte's PHYSICAL address. A line-crossing store that also
+    // crosses a PAGE is split by the fx engine into per-page beats upstream, so
+    // the bytes this beat covers are always page-contiguous and +hi is exact.
+    smc_last_phys = core_addr + {29'd0, hi};
   end
   assign smc_xline = core_we && (smc_last_lin[31:5] != core_lin[31:5]);
 
   assign icache_snoop_valid  = l1d_snoop_valid;   // port 0: DMA / northbridge
   assign icache_snoop_addr   = l1d_snoop_addr;
   assign icache_snoop_valid1 = core_we;           // port 1: SMC store, first line
-  assign icache_snoop_addr1  = core_lin;
+  assign icache_snoop_addr1  = core_addr;         // R2-H09: PHYSICAL (ic_ptag match)
   assign icache_snoop_valid2 = smc_xline;         // port 2: SMC store, second line
-  assign icache_snoop_addr2  = smc_last_lin;
+  assign icache_snoop_addr2  = smc_last_phys;     // R2-H09: PHYSICAL
 `endif
   // DMA requester into the northbridge: from the external port (VEN_NB_DMA) or tied off
   // (CPU-only). Responses (rdata/ack) are driven by the generate (NB present or 0).
   logic        nb_dma_req, nb_dma_we; logic [31:0] nb_dma_addr, nb_dma_wdata; logic [3:0] nb_dma_wstrb;
   logic [31:0] nb_dma_rdata; logic nb_dma_ack;
+
+  // ===========================================================================
+  // REVIEW1_Aug3 R2-H08 -- LOCKED-RMW OWNERSHIP of the local DMA requester.
+  // (Deliberately OUTSIDE every ifdef: the ports it reads always exist.)
+  //
+  // While a locked core sequence is in flight -- a locked READ accepted, the
+  // matching locked WRITE not yet completed -- a DMA transaction must not start:
+  // nb_dma_req is held low, so the requester's write can never land between the
+  // RMW's read and write beats. (The pin-level biu_p5 path already holds LOCK#
+  // across the pair; the pinless L1/AXI path now has the equivalent ownership.)
+  //
+  //   set:      a locked read is ACKED (its data is about to be consumed)
+  //   release:  the locked write is ACKED (sequence complete)
+  //             ANY unlocked core request (the sequence aborted -- e.g. a fault
+  //             between the beats reroutes the core to delivery traffic, which
+  //             is never lock-marked; holding the port then would wedge DMA
+  //             forever)
+  //             reset
+  //
+  // SCOPE, honestly: in this checkout's only buildable configuration (no-L2)
+  // the DMA path is tied off below, so this hold is inert today -- it exists
+  // for the VEN_NB_DMA/northbridge configurations where a second requester is
+  // real, and it is FSM-tested by run-l1axi-lock-gate.sh. AXI4-exclusive
+  // (AxLOCK/EXOKAY) is deliberately NOT asserted (see the C-10 note above): the
+  // only requesters behind this module are local, and the PS side reaches DDR
+  // without traversing this fabric at all.
+  //
+  // ACQUISITION (Aug4 follow-up). The hold used to open only at the read's
+  // ACK, so a DMA request asserted before or during the read's latency could
+  // still be granted inside the RMW. The fabric is now RESERVED the cycle the
+  // locked read is ASSERTED (combinationally for that first cycle, registered
+  // after as lock_pend), so no new DMA grant can start from the assertion
+  // onward. The reservation gates NEW selections only: a request the seam
+  // already forwarded is an ACCEPTED transaction and must run to its ack --
+  // see the dma_inflight ownership below.
+  logic lock_owned, lock_pend;
+  always_ff @(posedge core_clk or negedge core_rst_n)
+    if (!core_rst_n) begin
+      lock_owned <= 1'b0; lock_pend <= 1'b0;
+    end else begin
+      if (core_req && !core_lock) begin
+        lock_owned <= 1'b0; lock_pend <= 1'b0;            // aborted sequence
+      end else if (core_req && core_lock &&  core_we && core_ack) begin
+        lock_owned <= 1'b0; lock_pend <= 1'b0;            // done
+      end else if (core_req && core_lock && !core_we && core_ack) begin
+        lock_owned <= 1'b1; lock_pend <= 1'b0;            // window opens
+      end else if (core_req && core_lock && !core_we) begin
+        lock_pend <= 1'b1;                                // read asserted: reserve
+      end
+    end
+  logic dma_blk;
+  assign dma_blk = lock_owned || lock_pend || (core_req && core_lock);
+
 `ifdef VEN_NB_DMA
-  assign nb_dma_req = dma_req; assign nb_dma_we = dma_we; assign nb_dma_addr = dma_addr;
-  assign nb_dma_wdata = dma_wdata; assign nb_dma_wstrb = dma_wstrb;
+  // DMA IN-FLIGHT OWNERSHIP. A DMA request the seam forwards is an ACCEPTED
+  // transaction: req/ack forbids withdrawing it, so nb_dma_req and the payload
+  // hold stable from the forwarding cycle until nb_dma_ack (or reset -- the
+  // defined abort response; there is no cancel handshake on these ports).
+  // dma_blk gates NEW selections only, never the in-flight one. New-selection
+  // priority when a fresh DMA request and a locked core request arrive on the
+  // same cycle: the LOCK wins (dma_blk's combinational term) -- a lock
+  // reservation never waits behind traffic that has not started, and a locked
+  // read arriving while a DMA beat owns the seam is held out of the L1 until
+  // the drain (dma_drain_stall at the request interpose below), so no DMA
+  // completion can land inside the RMW window.
+  logic        dma_inflight;
+  logic        dma_we_q;
+  logic [31:0] dma_addr_q, dma_wdata_q;
+  logic [3:0]  dma_wstrb_q;
+  wire         dma_sel = dma_req && !dma_blk;            // a NEW selection this cycle
+  assign nb_dma_req   = dma_inflight || dma_sel;
+  assign nb_dma_we    = dma_inflight ? dma_we_q    : dma_we;
+  assign nb_dma_addr  = dma_inflight ? dma_addr_q  : dma_addr;
+  assign nb_dma_wdata = dma_inflight ? dma_wdata_q : dma_wdata;
+  assign nb_dma_wstrb = dma_inflight ? dma_wstrb_q : dma_wstrb;
+  always_ff @(posedge core_clk or negedge core_rst_n)
+    if (!core_rst_n) begin
+      dma_inflight <= 1'b0;
+      dma_we_q <= 1'b0; dma_addr_q <= 32'd0; dma_wdata_q <= 32'd0; dma_wstrb_q <= 4'd0;
+    end else if (dma_inflight) begin
+      if (nb_dma_ack) dma_inflight <= 1'b0;
+    end else if (dma_sel && !nb_dma_ack) begin
+      dma_inflight <= 1'b1;
+      dma_we_q     <= dma_we;
+      dma_addr_q   <= dma_addr;
+      dma_wdata_q  <= dma_wdata;
+      dma_wstrb_q  <= dma_wstrb;
+    end
   assign dma_rdata = nb_dma_rdata; assign dma_ack = nb_dma_ack;
+  wire dma_seam_busy = dma_inflight;
 `else
   assign nb_dma_req = 1'b0; assign nb_dma_we = 1'b0; assign nb_dma_addr = 32'd0;
   assign nb_dma_wdata = 32'd0; assign nb_dma_wstrb = 4'd0;
+  wire dma_seam_busy = 1'b0;
 `endif
 
   // ven_axi_master's backing slave + its clock/reset — a COMPILE-TIME (ifdef) alias
@@ -430,6 +595,14 @@ module ventium_l1_axi #(
   logic [3:0]  axm_wstrb;
   logic [31:0] axm_rdata;
   logic        axm_ack, axm_bus_err;
+  // REVIEW_Aug3 C-01: the H-11 narrow-read bits reach ven_axi_master through the SAME
+  // static compile-time selection as the rest of the request — latched out of the
+  // command FIFO by ven_axi_cdc in the dual-clock build, wired straight through
+  // otherwise. They USED to be consumed from b_rd_narrow directly (ventium_l1_axi's
+  // m_rd_narrow port connection): correct in the single-clock build, but under
+  // VEN_AXI_CDC the request had crossed to the axi_clk domain through the command
+  // FIFO while its shape bits had not — a metadata race.
+  logic        axm_rd_narrow;  logic [1:0] axm_rd_size;
 
   // l1d uses a domain-synchronized reset in the CDC build, the raw reset otherwise.
   logic        l1d_rst_n;
@@ -460,12 +633,18 @@ module ventium_l1_axi #(
       // core side: the post-L2 backing master (b_*; == m_* when EN_L2=0)
       .c_req      (b_req),  .c_we    (b_we),    .c_addr  (b_addr),
       .c_wdata    (b_wdata),.c_wstrb (b_wstrb), .c_rdata (b_rdata),
-      .c_ack      (b_ack),  .bus_err (bus_err),
+      // C-01: the narrow-read shape crosses INSIDE the command record
+      .c_rd_narrow(b_rd_narrow), .c_rd_size   (b_rd_size),
+      .c_ack      (b_ack),  .bus_err (cdc_bus_err_w),
       // axi side: drives ven_axi_master's backing slave
       .a_req      (axm_req),  .a_we    (axm_we),    .a_addr  (axm_addr),
       .a_wdata    (axm_wdata),.a_wstrb (axm_wstrb), .a_rdata (axm_rdata),
+      .a_rd_narrow(axm_rd_narrow), .a_rd_size   (axm_rd_size),
       .a_ack      (axm_ack),  .a_bus_err(axm_bus_err)
   );
+  // R2-H03: the no-L2 router's sticky fault joins the AXI master's errors.
+  logic cdc_bus_err_w;
+  assign bus_err = cdc_bus_err_w | route_err;
 `else
   // ---- default single-clock (CDC_BYPASS): wire the post-L2 backing straight through.
   assign l1d_rst_n = core_rst_n;
@@ -480,7 +659,11 @@ module ventium_l1_axi #(
   // untested claim about the L2 build.
   assign axm_req   = b_req;   assign axm_we    = b_we;
   assign axm_addr  = b_addr;  assign axm_wdata = b_wdata;  assign axm_wstrb = b_wstrb;
-  assign b_rdata   = axm_rdata; assign b_ack   = axm_ack;  assign bus_err   = axm_bus_err;
+  assign b_rdata   = axm_rdata; assign b_ack   = axm_ack;
+  assign bus_err   = axm_bus_err | route_err;   // R2-H03: + the no-L2 router fault
+  // C-01: same domain, so the passthrough is just a wire (the CDC build above gets
+  // them out of the command FIFO instead).
+  assign axm_rd_narrow = b_rd_narrow;  assign axm_rd_size   = b_rd_size;
 `endif
 
   // ---- L2 splice (Phase B): EN_L2=0 → transparent (b_* = m_*); EN_L2=1 → ven_l2
@@ -489,6 +672,14 @@ module ventium_l1_axi #(
   // (verif/l1/run-l2-axi-gate.sh ran it end-to-end through the real ven_axi_master).
   generate
     if (EN_L2) begin : g_l2
+      // DISABLED FOR NOW (REVIEW_Aug3 H-09): the L2/northbridge sources
+      // (ven_l2.sv / ven_northbridge.sv) are absent from this checkout and the
+      // EN_L2=1 configuration is deliberately OFF until they land. Fail loudly at
+      // elaboration rather than letting a direct +define+VEN_EN_L2 build die on
+      // missing modules with no explanation.
+`ifndef SYNTHESIS
+      initial $fatal(1, "ventium_l1_axi: EN_L2=1 is DISABLED FOR NOW -- the L2/northbridge sources are absent from this checkout (REVIEW_Aug3 H-09, task #43). Build the default EN_L2=0 configuration.");
+`endif
       // KEN# for the L1 D-cache (data path; is_code=0) — MMIO is never L1-cached.
       // REVIEW2 H-17 cited this is_code(1'b0) as evidence, and it is correct FOR THIS
       // QUERY: u_cmap_l1 feeds l1d_cacheable -> ven_l1d, i.e. the D-cache's own KEN#.
@@ -531,6 +722,7 @@ module ventium_l1_axi #(
           .to_dram(core_to_dram_u), .l1_cacheable(core_l1c), .l2_cacheable(core_l2c_u),
           .region(core_cm_region));
       assign l1d_cacheable = core_l1c;
+      assign route_err = 1'b0;   // R2-H03: the northbridge does its own routing here
       // NB downstreams: nb_d_* = DDR (L2 + DRAM-bypass), nb_mmio_* = device MMIO (D.5).
       logic        nb_d_req, nb_d_we; logic [31:0] nb_d_addr, nb_d_wdata; logic [3:0] nb_d_wstrb;
       logic [31:0] nb_d_rdata; logic nb_d_ack;
@@ -565,7 +757,7 @@ module ventium_l1_axi #(
       );
 `ifdef VEN_NB_MMIO
       // device MMIO exits on the external port; DDR path goes to the AXI master.
-      assign b_rd_narrow = 1'b0; assign b_rd_narrow_2 = 1'b0;   // H-11: not through the L2
+      assign b_rd_narrow = 1'b0; assign b_rd_size = 2'd0;   // H-11: not through the L2
       assign b_req = nb_d_req; assign b_we = nb_d_we; assign b_addr = nb_d_addr;
       assign b_wdata = nb_d_wdata; assign b_wstrb = nb_d_wstrb;
       assign nb_d_rdata = b_rdata; assign nb_d_ack = b_ack;
@@ -589,7 +781,7 @@ module ventium_l1_axi #(
       // no external device fabric in this build: MERGE the MMIO master back onto the
       // single AXI backing (device space falls through to DDR — keeps the pre-D.5 gates
       // byte-identical, since only one of nb_d_*/nb_mmio_* is ever active at a time).
-      assign b_rd_narrow = 1'b0; assign b_rd_narrow_2 = 1'b0;   // H-11: not through the L2
+      assign b_rd_narrow = 1'b0; assign b_rd_size = 2'd0;   // H-11: not through the L2
       assign b_req   = nb_d_req | nb_mmio_req;
       assign b_we    = nb_mmio_req ? nb_mmio_we    : nb_d_we;
       assign b_addr  = nb_mmio_req ? nb_mmio_addr  : nb_d_addr;
@@ -633,43 +825,105 @@ module ventium_l1_axi #(
       // 0x30000-0x3FFFF and the old 0xA0000-0xBFFFF guard protected nothing that
       // mattered: ordinary guest code could read or rewrite the SMM handler and the
       // saved CPU state.
+      //
+      // The extent is the highest active strobe, reads AND writes: the narrow
+      // path hands this seam byte-exact 1/2/4-byte pieces, so a piece wholly
+      // below the window must not be denied for bytes it never touches (the
+      // same misclassification class as the core-side extent -- a byte read at
+      // smbase-1 would otherwise return aperture zeros instead of DRAM). The
+      // +3 whole-word window survives only as the zero-strobe fallback (a
+      // legacy whole-word beat really does span 4 bytes).
+      logic [2:0] m_d_hi;
+      always_comb begin
+        m_d_hi = 3'd0;
+        for (int b = 0; b < 4; b++) if (m_wstrb[b]) m_d_hi = 3'(b);
+      end
       assign smram_deny = NB_SMRAM[3] && !NB_SMRAM[6] && !smm_active
-                       && (m_addr >= smbase) && (m_addr <= (smbase + 32'h0000_FFFF));
+                       && ((m_addr + ((m_we || m_wstrb != 4'd0) ? {29'd0, m_d_hi} : 32'd3))
+                           >= smbase)
+                       && (m_addr <= (smbase + 32'h0000_FFFF));
+      // REVIEW1_Aug3 R2-H02: the deny is EXTENT-aware -- a beat whose window
+      // straddles INTO the aperture from below it is denied, which the
+      // start-address-only check let through.
       always_ff @(posedge core_clk or negedge core_rst_n)
         if (!core_rst_n) smram_deny_q <= 1'b0;
         else             smram_deny_q <= m_req && smram_deny && !smram_deny_q;
 
+      // ===== REVIEW1_Aug3 R2-H03: THE NO-L2 ROUTER ===============================
+      // u_cmap_dc's to_dram output was produced but never consumed: every non-denied
+      // request went to DDR regardless, silently aliasing device/unmapped space (PCI
+      // aperture, memory holes, disabled-PAM windows) onto RAM. Route explicitly:
+      //   * to_dram=1                          -> DDR (the AXI master), as before;
+      //   * region == R_VID (4'd2, 0xA0000-0xBFFFF) -> DDR BY PLATFORM OVERRIDE:
+      //     the KV260 fold backs "VRAM" with the DDR carveout (fb_vnc reads it
+      //     there), so video traffic is DDR traffic here -- that is an EXPLICIT
+      //     platform choice, recorded, not a default;
+      //   * region == R_PCI (4'd6, >= TOM)     -> DDR ONLY INSIDE THE DECLARED
+      //     RAM WINDOW. This platform's "DRAM" is whatever the address fold
+      //     serves, and ven_axi_master enforces exactly that envelope at the
+      //     access (ADDR_MASK, plus the top-of-4G BIOS shadow the fold exists
+      //     for). The router now applies the SAME envelope: inside the window
+      //     (or in the shadow) region 6 is DDR; anything else in region 6 is
+      //     a genuine PCI/unmapped access and takes the loud route_bad path
+      //     instead of aliasing onto RAM. With the flat full-mask build the
+      //     whole 32-bit space is inside the window (unchanged behavior);
+      //     the KV260 256 MiB mask narrows the contract to the carveout plus
+      //     the shadow, matching the master exactly.
+      //   * anything else non-DRAM (a memory HOLE or a disabled-PAM window)
+      //     -> NO DEVICE FABRIC EXISTS in this build, so the access must fail
+      //     LOUDLY rather than read/write RAM: the request is suppressed (acked
+      //     locally like smram_deny so the pipeline never wedges) and a sticky
+      //     route_err feeds bus_err -> the core halts.
+      // NOTE: with the default NB_* params only VGA and R_PCI decode non-DRAM,
+      // so the error path is inert until a PAM/hole config creates such a region.
+      logic route_bad, route_bad_q;
+      logic ep_ok_first, ep_ok_last;
+      logic pci_ok_first, pci_ok_last;
+      assign pci_ok_first = (core_d_region == 4'd6)
+                         && ( ((core_addr    & ~ADDR_MASK) == 32'd0)
+                            || (core_addr    >= 32'hFFFE_0000) );
+      assign pci_ok_last  = (core_d_region_last == 4'd6)
+                         && ( ((core_d_last  & ~ADDR_MASK) == 32'd0)
+                            || (core_d_last  >= 32'hFFFE_0000) );
+      assign ep_ok_first = core_d_dram_u
+                        || (core_d_region      == 4'd2) || pci_ok_first;
+      assign ep_ok_last  = core_d_dram_last_u
+                        || (core_d_region_last == 4'd2) || pci_ok_last;
+      assign route_bad   = m_req && !(ep_ok_first && ep_ok_last);
+      always_ff @(posedge core_clk or negedge core_rst_n)
+        if (!core_rst_n) begin route_bad_q <= 1'b0; route_err <= 1'b0; end
+        else begin
+          route_bad_q <= m_req && route_bad && !route_bad_q;
+          if (route_bad) route_err <= 1'b1;
+`ifndef SYNTHESIS
+          if (route_bad)
+            $display("[L1AXI] R2-H03 ROUTE-ERR: request addr=%08h (last=%08h) targets non-DRAM, non-VGA space (to_dram=0) with NO device fabric in the no-L2 build -- raising bus_err instead of aliasing it onto DDR.",
+                     m_addr, core_d_last);
+`endif
+        end
+
       assign b_rd_narrow   = m_rd_narrow;      // H-11: L2 bypassed -> pass it through
-      assign b_rd_narrow_2 = m_rd_narrow_2;
-      assign b_req = m_req && !smram_deny;
-      assign b_we  = m_we  && !smram_deny;
+      assign b_rd_size    = m_rd_size;
+      assign b_req = m_req && !smram_deny && !route_bad;
+      assign b_we  = m_we  && !smram_deny && !route_bad;
       assign b_addr = m_addr;
       assign b_wdata = m_wdata;
-      assign b_wstrb = smram_deny ? 4'd0 : m_wstrb;
-      assign m_rdata = smram_deny_q ? 32'd0 : b_rdata;
-      assign m_ack   = smram_deny_q ? 1'b1  : b_ack;
+      assign b_wstrb = (smram_deny || route_bad) ? 4'd0 : m_wstrb;
+      assign m_rdata = (smram_deny_q || route_bad_q) ? 32'd0 : b_rdata;
+      assign m_ack   = (smram_deny_q || route_bad_q) ? 1'b1  : b_ack;
       assign l2_ready = 1'b1;
-`ifdef VEN_L1_HONOR_CD
-      // honor CR0.CD: when the BIOS disables the cache (CD=1, e.g. the POST memory test),
-      // bypass the L1 D$ so a write MISS goes straight write-through (no 8-beat write-
-      // allocate fill) — the architecturally-correct KEN# and the amplification ao486
-      // (no L1 dcache) never paid. CD=0 (OS) => cache everything, as before.
 `ifdef VEN_L1_IGNORE_CD
-      // EXPERIMENT (task #24). Forces write-allocate ON regardless of CR0.CD, WITHOUT disturbing
-      // the read path: VEN_L1_HONOR_CD stays defined, so the under-tested non-cacheable
-      // bypass-read FSM (L1_FILL->L1_BYP, which ven_l1d.sv:306-315 records as DEADLOCKING in the
-      // full-core+bridge context) remains disabled. This is the ONLY safe way to price honouring
-      // CD -- simply removing VEN_L1_HONOR_CD would enable that FSM and hang.
-      // WHY IT MATTERS: UPDATE 245 measured CR0=e0000019 -> CD=1 live, with PG=1. The guest runs
-      // its entire life with write caching off. NOT SHIPPABLE: ignoring CD is an architectural
-      // regression (ao486 honours it too, tlb.v:562). The honest fix, if this prices large, is to
-      // clear CD/NW in the BIOS after POST as a real 486 BIOS does.
+      // EXPERIMENT (task #24). Forces write-allocate ON regardless of CR0.CD.
+      // NOT SHIPPABLE: ignoring CD is an architectural regression (ao486 honours
+      // it too, tlb.v:562). Kept EXPERIMENT-ONLY (REVIEW1_Aug3 R2-H12).
       assign l1d_cacheable = 1'b1;
 `else
-      assign l1d_cacheable = ~cr0_cd;
-`endif
-`else
-      assign l1d_cacheable = 1'b1;       // cache everything (byte-identical to pre-L2)
+      // REVIEW1_Aug3 R2-H12 + R2-H02: the effective D-side policy is now ONE
+      // expression, unconditional (the VEN_L1_HONOR_CD define is retired to a
+      // no-op): an access is cacheable iff the MEMORY TYPE of BOTH its first and
+      // last byte allows it (R2-H02) AND CR0.CD is clear (R2-H12 -- CD=1 is the
+      // reset/POST state, and the deployed build was allocating through it).
+      assign l1d_cacheable = core_d_l1c && core_d_l1c_last && ~cr0_cd;
 `endif
       assign l1d_snoop_valid = 1'b0; assign l1d_snoop_addr = 32'd0;   // no snoop (no DMA path)
       assign nb_dma_rdata = 32'd0; assign nb_dma_ack = 1'b0;          // no DMA path
@@ -698,27 +952,73 @@ module ventium_l1_axi #(
   assign dbg_l2_bypass = l2_bypass_w;
 `endif
 
+  // Pre-lookup SMRAM enforcement. The backing-seam deny (smram_deny, on m_req)
+  // runs AFTER ven_l1d has looked up or updated its arrays, so with only that
+  // guard a non-SMM access to the window can HIT a line filled while in SMM, a
+  // write-hit can poison a line whose backing store is then denied, and a
+  // denied read-miss can fill a line of zeros. Compute the access result
+  // BEFORE the L1: a denied core access never enters ven_l1d at all -- it is
+  // acked locally with rdata=0, the same open-bus form the backing deny uses.
+  // INERT at the default NB_SMRAM=8'h00 (byte-identical, like the backing one).
+  logic core_smram_deny;
+  assign core_smram_deny = NB_SMRAM[3] && !NB_SMRAM[6] && !smm_active
+                        && (core_d_last >= smbase)
+                        && (core_addr   <= (smbase + 32'h0000_FFFF));
+  // ...and a conservative full flush on every policy-relevant transition the
+  // core reports: SMM exit (lines filled while in SMM must not stay readable
+  // or executable once the window closes) and SMBASE relocation. The runtime
+  // chipset close/lock register does not exist in this checkout (platform
+  // work); when it lands it must pulse this same trigger.
+  logic smm_active_q; logic [31:0] smbase_q;
+  always_ff @(posedge core_clk or negedge core_rst_n)
+    if (!core_rst_n) begin smm_active_q <= 1'b0; smbase_q <= 32'd0; end
+    else begin smm_active_q <= smm_active; smbase_q <= smbase; end
+  logic smm_flush;
+  assign smm_flush  = (smm_active_q && !smm_active) || (smbase_q != smbase);
+  assign smm_flush_o = smm_flush;
+
+  // the L1-side request/response interpose: denied accesses stop here. The
+  // local ack is qualified with core_req: an unqualified one stays set after
+  // the denied requester drops its request, and the NEXT access (to the same
+  // address with the policy now open) would capture the stale ack and its
+  // zero rdata instead of running its own transaction.
+  //
+  // dma_drain_stall: a locked core request must not complete while a DMA
+  // transaction owns the forwarded seam -- the RMW window opens at the read's
+  // completion, and a DMA beat draining after it would land inside the
+  // window. The locked request is held out of the L1 (and the local deny
+  // ack) until the in-flight DMA acks; dma_blk's lock_pend term already
+  // blocks new DMA selections, so the drain is the only remaining beat.
+  // (Inert without VEN_NB_DMA: dma_seam_busy is tied 0.)
+  logic dma_drain_stall;
+  assign dma_drain_stall = core_lock && dma_seam_busy;
+  logic l1d_c_req; logic l1d_c_ack; logic [31:0] l1d_c_rdata;
+  assign l1d_c_req  = core_req && !core_smram_deny && !dma_drain_stall;
+  assign core_ack   = dma_drain_stall ? 1'b0
+                    : (core_smram_deny && core_req) ? 1'b1 : l1d_c_ack;
+  assign core_rdata = core_smram_deny ? 32'd0 : l1d_c_rdata;
+
   ven_l1d #(.L1_SETS(L1_SETS), .L1_LINE(L1_LINE)) u_l1d (
       .clk      (core_clk),
       // hold the L1 (and thus the core, which stalls on c_ack) in reset until the L2
       // has finished its post-reset valid-clear walk (l2_ready). EN_L2=0 → l2_ready=1
       // → this is exactly l1d_rst_n (byte-identical).
       .rst_n    (l1d_rst_n & l2_ready),
-      .flush_all(flush_all),
+      .flush_all(flush_all || smm_flush),
       .golden   (golden_l1),
-      // Phase C: KEN# from the cachemap (EN_L2) so MMIO is never L1-cached; EN_L2=0 →
-      // 1'b1 (byte-identical). Phase D: snoop-invalidate driven by the northbridge on
-      // DMA writes (EN_L2=0 → 0, byte-identical).
+      // Phase C: KEN# from the D-side cachemap (u_cmap_dc in the default build,
+      // u_cmap_l1 with EN_L2) so MMIO is never L1-cached. Phase D: snoop-invalidate
+      // driven by the northbridge on DMA writes (EN_L2=0 → 0, byte-identical).
       .cacheable      (l1d_cacheable),
       .snoop_inv_valid(l1d_snoop_valid),
       .snoop_inv_addr (l1d_snoop_addr),
-      .c_req   (core_req),
+      .c_req   (l1d_c_req),
       .c_we    (core_we),
       .c_addr  (core_addr),
       .c_wdata (core_wdata),
       .c_wstrb (core_wstrb),
-      .c_rdata (core_rdata),
-      .c_ack   (core_ack),
+      .c_rdata (l1d_c_rdata),
+      .c_ack   (l1d_c_ack),
       .dbg_serve (l1d_dbg_serve),
       .m_req   (m_req),
       .m_we    (m_we),
@@ -727,7 +1027,7 @@ module ventium_l1_axi #(
       .m_wstrb (m_wstrb),
       .m_rdata (m_rdata),
       .m_rd_narrow   (m_rd_narrow),
-      .m_rd_narrow_2 (m_rd_narrow_2),
+      .m_rd_size   (m_rd_size),
       .m_ack   (m_ack)
   );
 
@@ -737,14 +1037,15 @@ module ventium_l1_axi #(
       .REMAP_BASE (REMAP_BASE),
       .ADDR_MASK  (ADDR_MASK),
       .AXI_ID     (AXI_ID),
+      .NARROW_REPLAY_SAFE (NARROW_REPLAY_SAFE),
       .WATCHDOG   (WATCHDOG)
   ) u_axi (
       .core_clk    (axm_clk),
       .core_rst_n  (axm_rst_n),
       .axi_clk     (axi_clk),
       .axi_rst_n   (axi_rst_n),
-      .m_rd_narrow   (b_rd_narrow),
-      .m_rd_narrow_2 (b_rd_narrow_2),
+      .m_rd_narrow   (axm_rd_narrow),     // C-01: crossed with the request, not beside it
+      .m_rd_size   (axm_rd_size),
       .m_req       (axm_req),
       .m_we        (axm_we),
       .m_addr      (axm_addr),

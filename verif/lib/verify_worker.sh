@@ -179,7 +179,57 @@ PY
         exit 0
     fi
 
-    "$PYTHON" "$COMPARE" --mode func "$GOLD" "$RTL" > "$CMP" 2>&1
+    # A program whose manifest sets "x87_stkflt_arch" deliberately drives the
+    # x87 stack past its ends, where the ARCHITECTURAL response (IE|SF in
+    # fstat; the QNaN-indefinite substitution in st*) has no QEMU counterpart
+    # (QEMU's fpush/fpop never consult the tags). Compare with exactly those
+    # two oracle gaps masked -- nothing else.
+    # The masks are RECORD- and FIELD-EXACT when the manifest carries
+    # "x87_stkflt_fstat_ranges" / "x87_stkflt_fpr_ranges" ([lo, hi|null]
+    # record-index ranges, hi inclusive; an fpr entry may add a third element,
+    # a comma-separated "st0,st3" field list that scopes the mask to those
+    # registers only). The ranges are the measured divergence set of an
+    # unmasked compare vs the pinned-QEMU golden -- every record/field outside
+    # them compares at full strength, so an unrelated x87 regression cannot
+    # hide under a program-wide mask.
+    STKMSK=""
+    # ($ROOT is NOT exported to the worker -- derive the manifest from $SRC,
+    # which is $TESTS_DIR/<name>/<name>.s by construction.)
+    STKMF="$(dirname "$SRC")/manifest.json"
+    if [ -f "$STKMF" ]; then
+      STKMSK="$("$PYTHON" - "$STKMF" <<'PY'
+import json, sys
+m = json.load(open(sys.argv[1]))
+fr, pr = m.get("x87_stkflt_fstat_ranges"), m.get("x87_stkflt_fpr_ranges")
+# FPREM1 quotient-CC oracle gap: the pinned QEMU never fills C0/C3/C1 for
+# FPREM1 (its SoftFloat call drops the quotient out-pointer), the RTL reports
+# the architectural round-nearest Q2/Q1/Q0. Mask 0x4300 (C0|C1|C3) on exactly
+# the manifest's measured record ranges; C2 and the exception bits still
+# compare at full strength. (One fstat mask value per program: a manifest
+# carries either the stkflt ranges or these, not both.)
+cc = m.get("x87_fprem1_cc_ranges")
+def fmt(r):
+    s = f"{r[0]}:{'' if len(r) < 2 or r[1] is None else r[1]}"
+    if len(r) >= 3 and r[2]:
+        s += f"={r[2]}"
+    return s
+args = []
+if cc:
+    args.append("--mask-fstat-exc 0x4300")
+    args += [f"--mask-fstat-range {fmt(r)}" for r in cc]
+if fr:
+    args.append("--mask-fstat-exc 0x4741")
+    args += [f"--mask-fstat-range {fmt(r)}" for r in fr]
+if pr:
+    args += [f"--mask-fpr-range {fmt(r)}" for r in pr]
+if not args and m.get("x87_stkflt_arch"):
+    args = ["--mask-fstat-exc 0x4741 --mask-x87-fpr"]
+print(" ".join(args))
+PY
+)"
+    fi
+
+    "$PYTHON" "$COMPARE" --mode func $STKMSK "$GOLD" "$RTL" > "$CMP" 2>&1
     RC=$?
     if [ "$RC" -eq 0 ]; then
         emit_func PASS "func-equivalent ($MAX insns max)" "$CACHEHIT"

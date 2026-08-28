@@ -1,0 +1,42 @@
+{
+  "name": "pcg16",
+  "kind": "system",
+  "src": "pcg16.S",
+  "linker": "pcg16.ld",
+  "image": "pcg16.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 6000,
+  "sys": true,
+  "paging": false,
+  "finding": "REVIEW1_Aug3 R2-H05 (16-bit call gates; gate-width vs operand-size opposition; SET_ESP masking)",
+  "gate_form": "DIFFERENTIAL (step-7 full-stream compare vs the QEMU golden). All gate-leg code segments are based at 0xF0000 (the image), so every EIP in a 16-bit gate frame is a small OFFSET that survives the word-wide IP push and the 16-bit gate offset field (pintr16's trick). The callees read every frame slot and store it to the marker page; the exit (from the case-2 callee at CPL0) pulls five markers into the GPRs.",
+  "matrix_rows": [
+    "case 1: SAME-privilege 16-bit gate (type 0x4), 32-bit caller (operand size deliberately OPPOSITE the gate width): the return frame is WORDS [IP, CS], ESP -= 4, no param copy (the caller's two dwords sit at 4/8(%esp)); callee returns with a 16-bit `lret $8` (0x66 CA) discarding them",
+    "case 4: 32-bit gate (type 0xC) from a 16-bit caller (code16 D=0, lcall ptr16:16, 0x66-free): the OTHER opposition direction -- the return frame is DWORDS [EIP, CS] on the same stack (lc_callw from the GATE, not q_w); the 32-bit callee returns with a plain 32-bit lret into the 16-bit segment",
+    "case 3: CROSS-privilege 16-bit gate CPL3->CPL0, param count 4, new stack 16-bit (B=0, base 0): word-unit frame [IP, CS, p0..p3, SP, SS] at 0x83F0, param words 0xB500|i copied off the old 32-bit stack (word reads at old_ssp + ((ESP + i*2) & old_sp_mask)); ESP commit = espN - (8+2n) = 0x83F0; callee returns with a 16-bit cross-privilege `lret $8` (16-bit outer SP pop zero-extended, H-02)",
+    "case 2: CROSS-privilege 16-bit gate, param count 1, new stack 16-bit (B=0) base 0x70000, old ESP = 0x0007F100 (upper 16 bits NONZERO): QEMU SET_ESP(sp, sp_mask) commits ESP = (old_ESP & 0xFFFF0000) | ((espN - fsz) & 0xFFFF) = 0x000781F6 -- the upper 16 bits LEAK from the old ESP while the pushes physically landed at 0x781F6..0x781FE. The committed SP cannot address the frame (and exceeds the 64K limit), so the callee verifies the frame through FLAT DS absolute reads and exits at CPL0 with esp=0x000781F6 as the final-record witness"
+  ],
+  "transitions": [
+    "real->protected (CR0.PE 0->1, far-jump to flat code0 0x08)",
+    "GDT @ 0x500 (15 entries): code0 0x08 / data0 0x10 / data3 0x20 (flat), TSS 0x28 (base 0x4000), ss16 0x30 (B=0 base 0x70000 lim 0xFFFF), ss16b 0x38 (B=0 base 0), code16 0x40 (D=0 base 0xF0000), gate16 pcount4 0x48 / gate16 pcount1 0x50 (DPL3 -> code0f), code3f 0x58 (D=1 DPL3 base 0xF0000), code0f 0x60 (D=1 DPL0 base 0xF0000), gate16 pcount0 0x68 (DPL0), gate32 pcount0 0x70 (DPL0)",
+    "IDT @ 0x1000: #GP(13) -> gp_catch (diagnostic exit; never fires on the golden path)",
+    "CPL0: case 1 (lcall code0f:caller1, gate 0x68) then case 4 (lcall code16:caller16, gate 0x70); outer RETF down to CPL3 (code3f, SS=0x23)",
+    "CPL3: case 3 (gate 0x48, TSS SS0:ESP0 = 0x38:0x8400), TSS rewrite to 0x30:0x8200, case 2 (gate 0x50); case-2 callee exits (status 133) at CPL0"
+  ],
+  "witnesses": {
+    "final_record": "edi=0x000781f6 (case 2 committed ESP -- the SET_ESP upper-16 leak), esi=0x0000b500 (case 3 param[0] word), ecx=0x16000003 (case 3 return-ESP flag: outer ESP = zero-extended SP word + imm16 = 0xF100, QEMU's double-add), ebp=0x00000040 (case 4 frame CS dword), ebx=0x16000001 (case 1 ESP-restore flag), esp=0x000781f6, cs=0x0060, ss=0x0030",
+    "markers": "0x2000=case1 ret IP word, 0x2004=0x0060 (CS word), 0x2008=0xC6000001, 0x200C=0xC6000000 (uncopied params), 0x2010=case1 callee ESP (entry-4); 0x2014=case4 ret EIP dword, 0x2018=0x00000040, 0x201C=case4 callee ESP (entry-8), 0x2024=0x16000004 (case 4 returned); 0x2028=case3 ret IP word, 0x202C=0x005B, 0x2030=0xB500, 0x2034=0xB503 (param order), 0x2038=0xF0F8 (old SP word), 0x203C=0x0023 (old SS word), 0x2040=0x000083F0 (new ESP); 0x2048..0x2058=case2 frame words [IP,CS=0x5B,param=0xB501,SP=0xF100,SS=0x23] read at 0x781F6..0x781FE, 0x2060=0x0030 (new SS)"
+  },
+  "negative_control": {
+    "method": "HEAD build (git archive HEAD rtl; OBJDIR=obj_dir_h05head) -- the pre-R2-H05 core: no lc_gate/lc_callw (a gated same-privilege call pushes the frame in the CALLER's operand size) and the 0xDA halt on any cross-privilege gate with param count != 0",
+    "measured": "CONFIRMED 2026-08-04: DIVERGENT at n=1765 (the first record after case 1's lcall through the 16-bit gate): HEAD pushed a DWORD frame (esp=0x00006FE8) where QEMU pushes the WORD frame (esp=0x00006FEC) -- the 32-bit-frame defect, a 4-byte ESP delta at the transfer. The stream then diverges hard (the callee's 0x66 lret $8 pops a bogus CS word). Cases 3/2 would 0xDA-halt but are never reached. compare: golden 1851 records vs HEAD 1781."
+  },
+  "rtl_blockers": "SAME as pcgparam (see its manifest): case 3's 16-bit cross-privilege `lret $8` trips blocker1 (the S_RETF outer ESP/SS pop addresses lack the imm16 addend): the canonical build pops the param words p0/p1 as outer SP/SS and #GPs (gp_catch records err=0x0000B500), divergence at n=1819 pc=0x000003B2 (the lretw in code0f). Everything before it -- both opposition-direction transfers, the word-unit frames, the 4-word param copy, the SET_ESP masking -- matches QEMU on the canonical build. With the two scratch patches (validated in obj_dir_h05fix) the full 1851-record stream is EQUIVALENT.",
+  "validation": "Golden: 1851 records, exit 133 from the case-2 callee at CPL0, final record carries the witnesses above. Canonical TB: DIVERGENT at n=1819 (blocker1) -- RED until the pcgparam-documented fixes land. Scratch-fixed TB: EQUIVALENT (1851/1851). HEAD TB: DIVERGENT at n=1765 (the 32-bit-frame defect), the negative control. Sweep-clean under +define+VEN_SEG_ENFORCE (obj_dir_seg, 1200-insn prefix): SEGCHK=0, no PAGING/C-0* assertions.",
+  "description": "REVIEW1_Aug3 R2-H05 regression, image 2 of 3: 16-bit call gates (type 0x4) same- and cross-privilege with param counts 0/1/4, the 32-bit-gate-from-a-16-bit-caller opposition case, word-unit frame layout, word param copy, and the QEMU SET_ESP upper-16-bits ESP-commit quirk -- all differential against the pinned QEMU golden."
+}

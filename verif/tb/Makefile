@@ -55,10 +55,22 @@ VL_CFLAGS := -I$(TB_DIR) -std=c++17
 # VL_EXTRA_DEFINES: optional +define+... passthrough (e.g. +define+VEN_SRT_ITER to
 # build the core with the iterative SRT FDIV/FSQRT engines wired in).
 VL_EXTRA_DEFINES ?=
+# The RTL-only +define is not visible to tb_main.cpp.  Keep its debug driver in
+# lockstep with the generated model, otherwise --dbg-step/--dbg-bp silently
+# parse but never drive the corresponding ventium_top ports.
+ifneq ($(filter +define+VEN_DBG_CORE,$(VL_EXTRA_DEFINES)),)
+VL_CFLAGS += -DVEN_DBG_CORE
+endif
 # OBJDIR: build dir for the `rtl` target. Default obj_dir (the canonical tb used by
 # make verify / m1..m5). A define-variant build (e.g. +VEN_FP_OVERLAP for the M5
 # fdivint band) passes OBJDIR=obj_dir_<variant> so it never clobbers obj_dir/tb_ventium.
 OBJDIR ?= obj_dir
+# The long-lived canonical object directories may be symlinked to a scratch
+# volume. Give the L1/AXI variants the same relocatability as `rtl`, so gates
+# can build current sources locally when that volume is unavailable/read-only.
+L1AXI_OBJDIR     ?= obj_dir_l1axi
+L1AXI_CDC_OBJDIR ?= obj_dir_l1axi_cdc
+KV_FULL_OBJDIR   ?= obj_dir_l1axi_kvf
 # Host-compiler optimization for the Verilated model. verilated.mk hard-sets
 # OPT_FAST=-Os (conservative), which the environment cannot override — only a
 # command-line make assignment can, which is exactly what Verilator's -MAKEFLAGS
@@ -80,10 +92,16 @@ VL_FLAGS := --cc --exe --build -j $(VL_J) $(VL_SPLIT) \
             $(VL_MAKEFLAGS) \
             -sv --top-module $(TOP) \
             -Wall -Wno-UNUSED -Wno-fatal \
+            -Werror-UNOPTFLAT \
             +define+VEN_FPREM \
             $(VL_TRACE) $(VL_EXTRA_DEFINES) \
             -CFLAGS "$(VL_CFLAGS)" \
             -o $(EXE)
+
+# -Werror-UNOPTFLAT (REVIEW1_Aug3 R2-M02): the request-path combinational cycle
+# (cur_seg_rel -> acc_usr -> perm_fault -> the bus driver block) was eliminated
+# by splitting the segment-identity drive out of the bus driver's always_comb
+# (core_bus_driver.svh). Any NEW circular combinational logic is a build error.
 
 # ---- default target: build against the real core ---------------------------
 .PHONY: all
@@ -139,9 +157,9 @@ check-nb:
 	 fi
 .PHONY: l1axi
 l1axi:
-	$(VERILATOR) $(VL_FLAGS) +define+VEN_L1_AXI -CFLAGS "-DVEN_L1_AXI" -Mdir obj_dir_l1axi \
+	$(VERILATOR) $(VL_FLAGS) +define+VEN_L1_AXI -CFLAGS "-DVEN_L1_AXI" -Mdir $(L1AXI_OBJDIR) \
 	  -F $(RTL_FILELIST) $(L1AXI_RTL) $(CPP_SRCS)
-	@echo "built (L1+AXI bus_mode=2): $(CURDIR)/obj_dir_l1axi/$(EXE)"
+	@echo "built (L1+AXI bus_mode=2): $(CURDIR)/$(L1AXI_OBJDIR)/$(EXE)"
 
 # REVIEW2_aug2 H-13 CONTROL BUILD: identical to l1axi but +VEN_IC_NO_MTYPE, which drops
 # the physical-memory-type term from ic_fill_nocache. run-mtype-gate.sh compares the two
@@ -162,14 +180,17 @@ l1axi_sf:
 	  -F $(RTL_FILELIST) $(L1AXI_RTL) $(CPP_SRCS)
 	@echo "built (L1+AXI, SINGLE FILL experiment): $(CURDIR)/obj_dir_l1axi_sf/$(EXE)"
 
-# ---- l1axi_l2: the L1+AXI build with the L2/northbridge stack ON (+VEN_EN_L2) ----
-# EN_L2=1 routes the core's backing through ven_northbridge (ven_cachemap + ven_l2 +
-# uncacheable bypass). Proves the REAL core runs through the L2 + cacheability routing.
+# ---- l1axi_l2: DISABLED FOR NOW ----------------------------------------------
+# The L2/northbridge stack (ven_l2/ven_northbridge under +define+VEN_EN_L2) is
+# OFF: the sources are absent from this checkout (check-nb below records that),
+# and the configuration is deliberately disabled until they land — do not
+# re-enable by removing this stub. Every other l1axi* target is the no-L2 build
+# (EN_L2=0), which is what all gates and the deployed KV260 image use.
 .PHONY: l1axi_l2
 l1axi_l2: check-nb
-	$(VERILATOR) $(VL_FLAGS) +define+VEN_L1_AXI +define+VEN_EN_L2 -CFLAGS "-DVEN_L1_AXI" \
-	  -Mdir obj_dir_l1axi_l2 -F $(RTL_FILELIST) $(L1AXI_RTL) $(NB_RTL) $(CPP_SRCS)
-	@echo "built (L1+AXI + L2/NB, EN_L2=1): $(CURDIR)/obj_dir_l1axi_l2/$(EXE)"
+	@echo "l1axi_l2 is DISABLED FOR NOW: the L2/northbridge sources are absent and"
+	@echo "the EN_L2=1 configuration is off (REVIEW_Aug3 H-09; task #43)."
+	@exit 1
 
 # ---- l1axi_kv: the DEPLOYED KV260 memory config (+VEN_L1_AXI +VEN_KV260_SOC) ---
 # Same as l1axi but REMAP_BASE=0x4000_0000 (the carveout) — reproduces the
@@ -184,16 +205,19 @@ l1axi_kv:
 # ---- l1axi_kv_full: the EXACT deployed linux_40 define set ------------------
 # L1AXI + KV260 REMAP + ALL fetch/cache/FP features (FE_PIPE, UOPCACHE, BTB_PIPE,
 # IC_BRAM, CACHE_HALF, FP_PIPE/2, SRT/IDIV/BCD_ITER). Reproduces the on-board build.
+# VEN_FPREM is mandatory in every full-P5 image: without it a decoded FPREM has
+# no engine (and no trap route outside FP_PS_ALL), and the unified SRT divider's
+# remainder sideband had nowhere to land.
 KV_FULL_DEFS := +define+VEN_L1_AXI +define+VEN_KV260_SOC +define+VEN_FE_PIPE \
   +define+VEN_UOPCACHE +define+VEN_BTB_PIPE +define+VEN_IC_BRAM +define+VEN_CACHE_HALF \
   +define+VEN_FP_PIPE +define+VEN_FP_PIPE2 +define+VEN_SRT_ITER +define+VEN_IDIV_ITER \
-  +define+VEN_BCD_ITER +define+VEN_FP_PC_RELAX
+  +define+VEN_BCD_ITER +define+VEN_FP_PC_RELAX +define+VEN_FPREM
 .PHONY: l1axi_kv_full
 l1axi_kv_full:
 	$(VERILATOR) $(VL_FLAGS) $(KV_FULL_DEFS) \
-	  -CFLAGS "-DVEN_L1_AXI -DVEN_KV260_SOC" -Mdir obj_dir_l1axi_kvf \
+	  -CFLAGS "-DVEN_L1_AXI -DVEN_KV260_SOC" -Mdir $(KV_FULL_OBJDIR) \
 	  -F $(RTL_FILELIST) $(L1AXI_RTL) $(CPP_SRCS)
-	@echo "built (deployed linux_40 config): $(CURDIR)/obj_dir_l1axi_kvf/$(EXE)"
+	@echo "built (deployed linux_40 config): $(CURDIR)/$(KV_FULL_OBJDIR)/$(EXE)"
 
 # ---- l1axi_kv_full_xinit: KVF + Verilator X-randomization -------------------
 # Same defines as l1axi_kv_full but with --x-initial/--x-assign unique so
@@ -355,9 +379,9 @@ L1AXICDC_RTL := $(RTL_DIR)/mem/ven_cdc_afifo.sv $(RTL_DIR)/mem/ven_reset_sync.sv
 .PHONY: l1axi_cdc
 l1axi_cdc:
 	$(VERILATOR) $(VL_FLAGS) +define+VEN_L1_AXI +define+VEN_AXI_CDC \
-	  -CFLAGS "-DVEN_L1_AXI" -Mdir obj_dir_l1axi_cdc \
+	  -CFLAGS "-DVEN_L1_AXI" -Mdir $(L1AXI_CDC_OBJDIR) \
 	  -F $(RTL_FILELIST) $(L1AXICDC_RTL) $(CPP_SRCS)
-	@echo "built (L1+AXI dual-clock CDC): $(CURDIR)/obj_dir_l1axi_cdc/$(EXE)"
+	@echo "built (L1+AXI dual-clock CDC): $(CURDIR)/$(L1AXI_CDC_OBJDIR)/$(EXE)"
 
 # ---- proxy: F4 PS-bridge int-0x80 STALL build (+VEN_PS_PROXY) ----------------
 # Same cosim, but the core parks in S_SYSCALL_WAIT on int-0x80 and commits only on

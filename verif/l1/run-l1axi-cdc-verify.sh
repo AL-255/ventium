@@ -8,7 +8,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 export L1AXI_TARGET="l1axi_cdc"
-export L1AXI_TB_BIN="$ROOT/verif/tb/obj_dir_l1axi_cdc/tb_ventium"
-export L1AXI_WORKDIR="$ROOT/build/verify-l1axi-cdc"
+export L1AXI_TB_BIN="$ROOT/verif/tb/${L1AXI_CDC_OBJDIR:-obj_dir_l1axi_cdc}/tb_ventium"
+export L1AXI_WORKDIR="${L1AXI_WORKDIR:-$ROOT/build/verify-l1axi-cdc}"
 export PORTBASE="${PORTBASE:-28000}"
 exec bash "$ROOT/verif/l1/run-l1axi-verify.sh"

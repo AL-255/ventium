@@ -1,0 +1,49 @@
+{
+  "name": "pcgparam",
+  "kind": "system",
+  "src": "pcgparam.S",
+  "linker": "pcgparam.ld",
+  "image": "pcgparam.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 8000,
+  "sys": true,
+  "paging": false,
+  "finding": "REVIEW1_Aug3 R2-H05 (32-bit call gates: parameter copy + gate-width frames)",
+  "gate_form": "DIFFERENTIAL (step-7 full-stream compare vs the QEMU golden). The byte-exact frame check IS the differential: the callees read every frame slot (return EIP/CS, all copied params, old ESP/SS) plus their own SS:ESP and store them to the marker page, and the exit pulls five markers into the GPRs for the final-record compare.",
+  "matrix_rows": [
+    "32-bit gate (type 0xC) cross-privilege CPL3->CPL0, param count 0 (control): 4-dword frame, new ESP = TSS.ESP0 - 16 = 0x8FF0",
+    "32-bit gate cross-privilege, param count 1: param[0] copied from the old stack to 8(%esp), old ESP/SS above it; callee RETF imm16 = 4 discards the copy",
+    "32-bit gate cross-privilege, param count 31 (the maximum): 31 dwords 0xA5000000|i copied, order verified EXHAUSTIVELY by the callee (param[i] at 8+4i: QEMU pushes the highest-address param first); callee RETF imm16 = 124",
+    "32-bit gate SAME-privilege (CPL3 -> code3 DPL3): return frame pushed in the GATE's width on the SAME stack, NO parameter copy (the caller's dwords are read directly above the 2-slot frame); 16-bit-operand opposition lives in pcg16"
+  ],
+  "oracle_semantics_pinned": "QEMU helper_lcall_protected (seg_helper.c:1556): push size = the GATE width; param source = old_ssp + ((ESP + i*4) & old_sp_mask), highest-address param pushed first; new ESP = espN - (16 + 4n). For the RETURN, QEMU helper_ret_protected (seg_helper.c:1919) applies the imm16 TWICE on a cross-privilege RETF: once to the inner SP before the outer ESP/SS pops (so the pops skip the copied params: outer ESP at SP+2w+imm, outer SS at SP+3w+imm) and once more to the RESTORED outer ESP (final caller ESP = popped ESP + imm16). The SDM RET pseudocode applies it only once (before the outer pops); QEMU is the project oracle, so the tests pin QEMU: after `lret $4` with a saved outer ESP of 0x4FFC the caller resumes with ESP = 0x5000.",
+  "transitions": [
+    "real->protected (CR0.PE 0->1, CS far-jump to 32-bit flat code segment 0x08)",
+    "GDT @ 0x500 (10 entries): null + code0 0x08 + data0 0x10 + code3 0x18 + data3 0x20 + TSS32 0x28 (base 0x4000) + 32-bit call gates 0x30 (pcount 0) / 0x38 (pcount 1) / 0x40 (pcount 31) -> code0, 0x48 (pcount 0) -> code3 (same privilege); all gates type 0xC DPL 3",
+    "IDT @ 0x1000: #GP(13) -> gp_catch, #PF(14) -> pf_catch (diagnostic exits with 0xBAD0FF0x sentinels; neither fires on the golden path)",
+    "TSS @ 0x4000: SS0:ESP0 = 0x10:0x00009000; LTR establishes TR",
+    "inter-priv outer RETF down to CPL3 (SS=0x23, ESP=0x5000, CS=0x1B); IOPL=3",
+    "four lcall ptr16:32 through the gates, each CPL0/CPL3 callee verifying the frame and returning with RETF imm16; isa-debug-exit (status 133) at CPL3"
+  ],
+  "witnesses": {
+    "final_record": "edi=0x00000000 (h31 order-check mismatch count), esi=0xa5000000 (h1 param[0]), ecx=0x00004f84 (h31 frame's old ESP = 0x5000 - 31*4), ebp=0x0000001b (h3same frame's return CS), ebx=0xe5905a4e (same-priv return-ESP flag), esp=0x00005000, cs=0x001b, ss=0x0023",
+    "markers": "0x2000=0x00005000 (h0 old ESP) 0x2004=0x23 (h0 old SS) 0x2008=0x10 (h0 new SS) 0x200C=0x00008FF0 (h0 new ESP) 0x2010=0xA5000000 (h1 param) 0x2014=0x00004FFC (h1 old ESP) 0x2018=0x23 0x201C=0x00008FEC (h1 new ESP) 0x2020=0 (h31 mismatches) 0x2024=0x00004F84 0x2028=0x23 0x202C=0x00008F74 (h31 new ESP = 0x9000-140) 0x2034=0xE5900001 (case-b ESP flag) 0x2038=0xE590001F (case-c ESP flag) 0x203C=0xC6000001 0x2040=0xC6000000 (h3same params, NOT copied) 0x2044=0x1B 0x2048=0x23 (h3same SS: SAME stack) 0x2058=0xE5900000 (case-a ESP flag)",
+    "faultlog": "EMPTY on the golden path (the catchers never run)"
+  },
+  "negative_control": {
+    "method": "HEAD build (git archive HEAD rtl; make -C verif/tb rtl RTL_DIR=/tmp/h05head/rtl OBJDIR=obj_dir_h05head) -- the pre-R2-H05 core",
+    "expected": "HEAD stages cg_pcount but loud-HALTs (tag 0xDA) on any cross-privilege gate with param count != 0",
+    "measured": "CONFIRMED 2026-08-04: the HEAD trace retires 1890 records and stops (quiesce) with the last retired instruction at 0x000F0267 -- the push immediately BEFORE case (b)'s lcall through the pcount-1 gate (0x000F026C): the 0xDA halt fired. compare.py: DIVERGENT (length mismatch: golden 2352 vs HEAD 1890). Case (a) (pcount 0) matched on HEAD, so the control is sensitive to exactly the param-copy machinery."
+  },
+  "rtl_blockers": {
+    "blocker1_retf_imm16_outer_pop_addresses": "FOUND BY THIS TEST (case b, canonical build): the S_RETF outer-level pop ADDRESSES (core_bus_driver.svh S_RETF retf_out arm + the cur_lin mirror in core.sv) read the outer ESP/SS at SP+2w/SP+3w WITHOUT the RET imm16 addend. QEMU (and the SDM) skip the copied params first: outer ESP at SP+2w+imm, SS at SP+3w+imm. With imm != 0 the RTL pops the param slots as ESP/SS and #GPs (case b `lret $4`: popped SS = 0x4FFC -> #GP(0x4FFC) -> gp_catch; divergence at n=1899). Pre-existing (identical in HEAD) but unreachable until H05 made param-copy gates legal: no prior test produced a cross-privilege RETF with imm != 0. FIX (validated in a scratch build, obj_dir_h05fix): add {16'd0,q_ret_imm} to both pop offsets in BOTH core_bus_driver.svh (bd_addr) and core.sv (cur_lin_nat mirror -- omitting the mirror hangs the paged form: the TLB translates the un-shifted address while the bus uses the shifted one). The iret_esp VALUE fold (mem_rdata + q_ret_imm, core_seg_ljmp.svh) already matches QEMU's double-add.",
+    "blocker2_same_priv_gate_cs_rpl": "FOUND BY THIS TEST (case d, canonical AND intermediate builds): the S_LCALL commit (core_seg_ljmp.svh) installs the CS selector as {q_ljmp_sel[15:2], conforming ? cpl_r : q_ljmp_sel[1:0]}; for a same-privilege NONCONFORMING gate target the RPL comes from the gate's embedded target selector (0), so CS=0x18 while cpl_r=3. QEMU installs (selector & ~3) | target_DPL = 0x1B (RPL = CPL, the architectural invariant). Trace-visible (cs field) from the lcall's retire record on. FIX (validated in the same scratch build): extend the RPL forcing to lc_gate: (lc_gate || (conforming && dpl<cpl)) ? cpl_r : q_ljmp_sel[1:0]."
+  },
+  "validation": "Golden: 2352 records (gen_trace --system, pinned qemu-system 8.2.2), exit 133, final record carries the witnesses above. Canonical TB (verif/tb/obj_dir/tb_ventium): DIVERGENT at n=1899 (blocker1) -- RED until the two blocker fixes land. Scratch-fixed TB (rtl + the two one-line blocker fixes): EQUIVALENT, all 2352 records. HEAD TB: DIVERGENT (0xDA halt at case b), the negative control.",
+  "description": "REVIEW1_Aug3 R2-H05 regression, image 1 of 3: 32-bit call gates with parameter counts 0/1/31 cross-privilege (CPL3->CPL0, TSS stack switch + dword param copy with order + old SS/ESP/CS/EIP frame layout + RETF imm16 parameter discard + caller stack restoration) and one same-privilege gate (dword frame on the same stack, no copy). Differential vs QEMU; two latent RTL defects found and pinned (see rtl_blockers), both validated fixable with the scratch-build patches described there."
+}

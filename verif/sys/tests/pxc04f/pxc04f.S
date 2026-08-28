@@ -2,66 +2,70 @@
  * SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
  */
 
-/* Ventium M2S.3 — bare-metal HARDWARE-FAULT (IDT delivery) demonstrator.
+/* Ventium M2S.3 — bare-metal HARDWARE-FAULT (IDT delivery) demonstrator, extended
+ * for REVIEW1_Aug3 R2-C03 (the generic page-crossing FRAGMENT ENGINE).
  *
- * This is the M2S.3 pfault gate test: it bootstraps real->protected + PAGING
- * (reusing the M2S.2 ppage bootstrap), stands up an IDT with #PF / #GP / #UD
- * handlers, and then DELIBERATELY triggers each fault so the M2S.1 segmentation
- * fault DECISION (#GP) and the M2S.2 paging fault DECISION (#PF + CR2 + error
- * code) — which prior stages only COMPUTE — now actually DELIVER through the IDT.
+ * Skeleton = the M2S.3 pfault gate test: real->protected + PAGING bootstrap, an
+ * IDT with #PF / #GP / #UD handlers, and each fault deliberately triggered so the
+ * fault DECISIONS DELIVER through the IDT (see the pfault flow at the bottom).
  *
- *   #PF (vector 14): touch a NOT-PRESENT page.  Handler reads CR2 (the faulting
- *       linear addr), MAPS the page (sets its PTE present), increments a counter,
- *       and IRETs.  #PF is a FAULT -> the pushed EIP is the FAULTING instruction;
- *       after the handler maps the page, IRET RESTARTS it and it now succeeds.
- *   #GP (vector 13): load a data segment with a selector PAST the GDT limit
- *       (selector 0x38 when the GDT holds only 6 entries -> last valid byte 0x2F).
- *       Handler increments a counter and RESUMES past the faulting instruction
- *       (a #GP fault pushes the faulting EIP, so re-executing would re-fault; the
- *       handler overwrites the saved EIP with a precomputed resume label).
- *   #UD (vector 6): execute UD2 (0F 0B), the architecturally-undefined opcode.
- *       Handler increments a counter and RESUMES past UD2 (same EIP-skip as #GP).
+ * On top of that skeleton this image converts the old xc04 reachability probe for
+ * producer S_FSTORE (x87 FSTP m64) into a CORRECTNESS gate. Before the engine,
+ * S_FSTORE translated only the page the access STARTED in and the core $fatal'd
+ * ("PAGING/C-04 UNSPLIT page-crossing") when a beat straddled. The engine now
+ * runs a probe-then-execute fragment sequence for writes: probe page 2 with
+ * write permission, then write the page-1 fragment, then the page-2 fragment --
+ * no partial commits. This test proves, DIFFERENTIALLY against QEMU (which
+ * implements page crossings correctly: cputlb.c mmu_lookup() looks up BOTH
+ * pages, "recognizing exceptions from either", before any store byte lands):
  *
- * The #PF case has an ERROR CODE pushed (vector 14, present/write/user bits) and
- * sets CR2; #GP (vector 13) has an error code (the selector index, 0 here for a
- * non-external #GP carrying the bad selector); #UD (vector 6) has NO error code.
- * SAME-PRIVILEGE delivery only (handlers at CPL 0 — cross-privilege via TSS is
- * M2S.4).  Interrupt gates clear IF.
+ *   Case A (ATOMICITY): with linear page 3 (0x3000) NOT PRESENT, `fstpl` at
+ *       0x2FFE (beat 0 spans 0x2FFE-0x3001, crossing the 0x3000 boundary) must
+ *       #PF with CR2=0x3000 BEFORE any byte is committed. The #PF handler
+ *       verifies the page-1 sentinel (0xA5A5A5A5 at 0x2FFC-0x2FFF) is UNTOUCHED
+ *       -> marker 0x2038 = 0x600DF00D, then maps page 3 -> phys 0x600000 and
+ *       IRETs; the fstpl RESTARTS and completes.
+ *   Case B (CORRECTNESS, non-contiguous frames): linear page 2 (0x2000) is
+ *       identity-mapped while linear page 3 (0x3000) is mapped to the
+ *       NON-ADJACENT phys frame 0x600000, so a wrong-physical-page tail write
+ *       is observable: after the restart the low dword of 1.0 must land at
+ *       phys 0x2FFE (linear 0x2FFE) and the high dword at phys 0x600002
+ *       (linear 0x3002). Phys 0x3000 (the wrong adjacent frame) is pre-poisoned
+ *       with 0x0B0B0B0B and phys 0x600000 pre-seeded with 0x5A5A5A5A so a tail
+ *       written to (or a tail read from) the wrong frame cannot accidentally
+ *       carry the expected value. The readbacks go to markers 0x2040/0x203C
+ *       and into ebp/ebx at exit (want 0x00000000 / 0x3FF00000).
  *
- * Freestanding "BIOS" image: qemu-system-i386 -bios pfault.bin .  Reset vector
+ * Exit-record witnesses (pulled into GPRs; the run-sys-golden.sh step-5f block
+ * asserts them on the golden and the step-7 RTL sys-diff compares them
+ * record-for-record):
+ *   ecx = 4      two #PF (crossing + the pfault demand-page case) + #GP + #UD
+ *   edx = 0x401000 (CR2 captured by the pfault demand-page #PF)
+ *   esi = 0xCAFEBABE (the restarted pfault store readback)
+ *   edi = 0x600DF00D (case A: page 1 untouched by the rejected crossing store)
+ *   ebx = 0x3FF00000 (case B: high dword of 1.0 read back through page 3)
+ *   ebp = 0x00000000 (case B: low dword of 1.0 read back through page 2)
+ *
+ * Freestanding "BIOS" image: qemu-system-i386 -bios pxc04f.bin .  Reset vector
  * CS:EIP=F000:FFF0; a 16-bit reset stub at image offset 0xFFF0 jumps to _start16.
  *
  * Physical/linear memory plan (machine -m 32 => 32 MiB phys; targets fit):
- *   GDT  @ 0x00000500  (null + code32 0x08 + data32 0x10 + a 5th/6th entry so the
- *                       OUT-OF-LIMIT selector 0x38 is genuinely past the limit)
+ *   GDT  @ 0x00000500  (null + code32 0x08 + data32 0x10 + flat clones; limit 0x2F)
  *   IDT  @ 0x00001000  (256 gates; only #PF/#GP/#UD filled)
- *   markers @ 0x00002000 (per-vector counters + the #PF CR2 capture + resume EIP)
+ *   markers @ 0x00002000 (per-vector counters + CR2 capture + resume EIPs + the
+ *                         R2-C03 markers at 0x2038/0x203C/0x2040)
  *   stack   @ 0x00090000
  *   Page tables (built BEFORE CR0.PG, i.e. physical writes):
  *     PD  @ 0x00011000 : PD[0]->PT0 (identity low), PD[1]->PT1 (4 MiB window)
- *     PT0 @ 0x00012000 : identity-map the CODE window [0xF0000,0x100000) + the
- *                        low structures (GDT/IDT/markers/stack/page-tables) so
- *                        every linear the running code touches is mapped.
+ *     PT0 @ 0x00012000 : identity low structures + stack + code window, EXCEPT
+ *        PT0[3] linear 0x3000 -> phys 0x600000, STARTING NOT-PRESENT (0x...02):
+ *        the case-A atomicity window; the #PF handler maps it present (0x...03).
  *     PT1 @ 0x00013000 : the demand-paging window for linear [4 MiB, 8 MiB):
  *        PT1[0] linear 0x400000 -> phys 0x800000  P|RW (0x3)  (present)
  *        PT1[1] linear 0x401000 -> phys 0x801000  NOT PRESENT (0x2: RW, P=0)
- *                                  ^ the #PF target; handler sets P -> 0x3.
+ *                                  ^ the pfault #PF target; handler sets P -> 0x3.
  *
- * Flow (each fault observable in the golden as a CS:EIP jump into the handler
- * gate target and a return via IRET):
- *   1. real mode: flat GDT (+ extra entries) + lgdt; CR0.PE=1; far-jump to 0x08.
- *   2. flat data selectors + stack; zero markers; build IDT (#PF/#GP/#UD) + lidt.
- *   3. build PD + PT0 (identity) + PT1 (one present, one not-present); CR3; CR0.PG.
- *   4. #PF: write to linear 0x401000 (PTE not present) -> #PF -> pf_handler maps
- *      it (PT1[1] |= P) + records CR2 -> IRET -> the store RESTARTS and succeeds;
- *      read it back to prove the page is now present and mapped.
- *   5. #GP: load DS with selector 0x38 (past the GDT limit) -> #GP -> gp_handler
- *      counts + resumes past the faulting MOV.
- *   6. #UD: execute UD2 -> #UD -> ud_handler counts + resumes past UD2.
- *   7. accumulate the three counters (must be 3) + the restarted-store proof;
- *      exit via isa-debug-exit (out 0xf4, 0x42 -> qemu status 133).
- *
- * Build: gcc -m32 -ffreestanding -nostdlib -Wl,-T,pfault.ld; objcopy -O binary,
+ * Build: gcc -m32 -ffreestanding -nostdlib -Wl,-T,pxc04f.ld; objcopy -O binary,
  * padded to exactly 64 KiB.  GNU-as syntax; no nasm.
  */
 
@@ -120,10 +124,10 @@ pm32_entry:
     movw    %ax, %gs
     movl    $0x00090000, %esp
 
-    /* zero the marker area at 0x2000..0x2040 */
+    /* zero the marker area at 0x2000..0x2060 */
     movl    $0x00002000, %edi
     xorl    %eax, %eax
-    movl    $16, %ecx
+    movl    $24, %ecx
 1:  movl    %eax, (%edi)
     addl    $4, %edi
     loop    1b
@@ -180,8 +184,17 @@ pm32_entry:
      *   - [0x8D000, 0x91000)  :  4 PTEs  -> the flat stack region (ESP=0x90000,
      *                                       descends as frames are pushed)
      *   - [0xF0000, 0x100000) : 16 PTEs  -> the CODE window 0x000Fxxxx (EIP/handlers)
-     * Each PTE = frame | P|RW (0x3); identity: frame == linear page.  The two
-     * PT0 slots are written directly; per-region short loops fill the rest.   */
+     * Then TWO overrides for the R2-C03 crossing window:
+     *   - PT0[3]: linear 0x3000 -> phys 0x600000, STARTING NOT-PRESENT (RW, P=0).
+     *     The crossing FSTP's tail page lives on a NON-CONTIGUOUS physical frame
+     *     and begins absent for the atomicity case; the #PF handler maps it.
+     * Physical pre-seeds (paging still OFF -> these are physical writes):
+     *   - phys 0x3000..0x300F  = 0x0B0B0B0B poison: the WRONG (linear-adjacent)
+     *     frame. A tail written there is invisible to the linear readback; a
+     *     tail READ from there returns poison, never the expected value.
+     *   - phys 0x600000..0x60000F = 0x5A5A5A5A: the RIGHT frame's pre-image, so an
+     *     unwritten tail reads back as garbage distinct from the expected
+     *     0x00000000 / 0x3FF00000.                                            */
     /* low data + page tables: PT0[0x00..0x13] = identity [0,0x14000) */
     movl    $0x00012000, %edi           /* &PT0[0] */
     movl    $0x00000003, %eax           /* frame 0 | P|RW */
@@ -190,6 +203,8 @@ pm32_entry:
     addl    $0x1000, %eax
     addl    $4, %edi
     loop    1b
+    /* PT0[3]: linear 0x3000 -> phys 0x600000, NOT PRESENT (case A) */
+    movl    $0x00600002, 0x0001200C
     /* stack: PT0[0x8D..0x90] = identity [0x8D000,0x91000) */
     movl    $0x00012234, %edi           /* &PT0[0x8D] = 0x12000 + 0x8D*4 */
     movl    $0x0008D003, %eax           /* frame 0x8D000 | P|RW */
@@ -217,6 +232,14 @@ pm32_entry:
     movl    $0x00012003, 0(%edi)        /* PD[0] -> PT0 | P|RW (identity low 1 MiB) */
     movl    $0x00013003, 4(%edi)        /* PD[1] -> PT1 | P|RW (the 4 MiB window) */
 
+    /* physical pre-seeds for the crossing window (paging still OFF) */
+    movl    $0x0B0B0B0B, %eax
+    movl    %eax, 0x00003000            /* poison the WRONG adjacent frame */
+    movl    %eax, 0x00003004
+    movl    $0x5A5A5A5A, %eax
+    movl    %eax, 0x00600000            /* distinct garbage on the RIGHT frame */
+    movl    %eax, 0x00600004
+
     /* enable paging */
     movl    $0x00011000, %eax
     movl    %eax, %cr3
@@ -224,40 +247,32 @@ pm32_entry:
     orl     $0x80000000, %eax
     movl    %eax, %cr0
 
-    /* ==== REVIEW2_aug2 C-04: DIRECTED page-crossing case, producer 3 (S_FSTORE) ====
-     * The finding says the split covers only S_LOAD/S_LOAD2/S_STORE, and that "0
-     * reachable in 68 images" establishes CORPUS COVERAGE, not architectural
-     * unreachability. This is the directed probe for one producer.
+    /* ==== REVIEW1_Aug3 R2-C03: S_FSTORE page-crossing CORRECTNESS ==============
+     * FSTP m64 at linear 0x2FFE: beat 0 spans 0x2FFE-0x3001 and crosses the
+     * 0x3000 boundary (at 0x2FFC every beat would sit inside one page and prove
+     * nothing -- the beat-vs-object distinction from the old probe stands).
+     * Page 2 (0x2000) is identity; page 3 (0x3000) is phys 0x600000 and starts
+     * NOT PRESENT.
      *
-     * S_LGDT reads SIX bytes and is absent from cross_split_capable. Linear
-     * 0x2FFE..0x3003 straddles the 4 KiB boundary at 0x3000, and BOTH pages are
-     * identity-mapped P|RW by PT0 ([0,0x14000)), so a #PF is not what is being tested
-     * -- the access is legal and simply crosses.
+     * Case A (atomicity): the engine must probe page 2 with write permission
+     * BEFORE committing any byte, so this fstpl raises #PF(CR2=0x3000) with the
+     * page-1 sentinel (0xA5A5A5A5 at 0x2FFC-0x2FFF) UNTOUCHED. pf_handler's
+     * CR2==0x3000 arm checks the sentinel (marker 0x2038 = 0x600DF00D), maps
+     * page 3 present, and IRETs; the fstpl restarts and now completes.
      *
-     * This is built on pfault rather than pxpage precisely because pfault HAS an IDT:
-     * an earlier attempt on pxpage could not tell "crossed undetected" from "faulted
-     * with nowhere to go", since pxpage installs no handlers at all.
-     *
-     * The value written is the SAME pseudo-descriptor the bootstrap already loaded, so
-     * reloading GDTR is architecturally a no-op and the only observable is whether the
-     * core's own PAGING/C-04 assertion notices the crossing. */
-    /* THIRD PRODUCER: S_FSTORE (x87 m64), also absent from cross_split_capable.
-     * FSTP m64 at linear 0x2FFE. The address matters: at 0x2FFC the m64 is written as two
-     * dword beats, 0x2FFC-0x2FFF and 0x3000-0x3003, and NEITHER beat itself crosses --
-     * the boundary falls cleanly between them and the assertion does not fire (measured).
-     * At 0x2FFE beat 0 spans 0x2FFE-0x3001 and does cross. This is the difference
-     * between H-05 (does the LIMIT check see the whole object) and C-04 (does any
-     * single BEAT straddle a page), which are separate questions about the same access,
-     * with both pages identity-mapped P|RW.
-     *
-     * This ALSO settles a question left open earlier: on a pxpage-based probe `fldz`
-     * did not retire at all (CR0=0xE0000011, PE|PG set, EM/TS/MP clear). I recorded
-     * that as undiagnosed rather than calling it a bug, because pxpage installs NO
-     * handlers, so an undeliverable fault and a core defect look identical there.
-     * pfault HAS handlers, so this run distinguishes them: if fldz retires here, the
-     * earlier stall was the missing IDT. */
-    fldz
-    fstpl   0x00002FFE
+     * Case B (correctness): the restarted store's 8 bytes land split across two
+     * NON-CONTIGUOUS frames: 0x00000000 at phys 0x2FFE (low half of 1.0) and
+     * 0x3FF00000 at phys 0x600002 (high half). Read both back THROUGH PAGING:
+     * a tail written to the wrong (adjacent 0x3000) frame never shows up at
+     * linear 0x3002 (its phys 0x600002 would still read 0x5A5A5A5A), and a tail
+     * read from the wrong frame returns the 0x0B0B0B0B poison. */
+    movl    $0xA5A5A5A5, 0x00002FFC     /* page-1 sentinel (bytes 0x2FFC..0x2FFF) */
+    fld1
+    fstpl   0x00002FFE                  /* #PF (page 3 NP) -> mapped -> RESTART completes */
+    movl    0x00002FFE, %eax            /* low dword via page 2 (phys 0x2FFE) */
+    movl    %eax, 0x00002040            /* want 0x00000000 */
+    movl    0x00003002, %eax            /* high dword via page 3 (phys 0x600002) */
+    movl    %eax, 0x0000203C            /* want 0x3FF00000 */
 
     /* clear the visible accumulator GPRs */
     xorl    %eax, %eax
@@ -273,7 +288,7 @@ pm32_entry:
      * the store RESTARTS and now succeeds (writing phys 0x801000).            */
     movl    $0xCAFEBABE, %eax
     movl    %eax, 0x00401000            /* #PF here; restarted after handler maps */
-    /* read it back -> proves the page is now present + mapped to phys 0x801000 */
+    /* read it back -> proves the page is now present and mapped to phys 0x801000 */
     movl    0x00401000, %esi            /* esi = 0xCAFEBABE (post-#PF-fixup read) */
 
     /* ============================= #GP =================================== */
@@ -299,11 +314,16 @@ gp_resume:
 ud_resume:
 
     /* ===================== accumulate the success proof ================== */
-    movl    0x00002028, %eax            /* #PF counter */
+    movl    0x00002028, %eax            /* #PF counter (2: crossing + demand-page) */
     addl    0x0000202C, %eax            /* + #GP counter */
     addl    0x00002024, %eax            /* + #UD counter */
-    movl    %eax, %ecx                  /* ecx = 3 if all three faults delivered */
-    movl    0x00002020, %edx            /* edx = captured CR2 from the #PF (0x401000) */
+    movl    %eax, %ecx                  /* ecx = 4 if all four faults delivered */
+    movl    0x00002020, %edx            /* edx = captured CR2 (0x401000); the exit port load
+                                         * below overwrites dx, so the exit record carries
+                                         * 0x004000F4 -- assert exactly that. */
+    movl    0x00002038, %edi            /* edi = 0x600DF00D (case A: page 1 untouched) */
+    movl    0x0000203C, %ebx            /* ebx = 0x3FF00000 (case B: high dword, phys 0x600002) */
+    movl    0x00002040, %ebp            /* ebp = 0x00000000 (case B: low dword, phys 0x2FFE) */
 
     /* ====================== clean exit via isa-debug-exit ================== */
     movl    $0x42, %eax
@@ -316,7 +336,13 @@ hang:
 
     /* ============================= HANDLERS ============================= */
 
-    /* #PF handler: read CR2 (faulting linear), map PT1[1] present, count, IRET.
+    /* #PF handler: dispatch on CR2.
+     * CR2 == 0x3000: the R2-C03 case-A crossing FSTP hit the not-present page 3.
+     *     The engine's pre-probe must have rejected the access BEFORE any byte
+     *     committed: verify the page-1 sentinel at 0x2FFC-0x2FFF is untouched,
+     *     then map PT0[3] -> phys 0x600000 P|RW and IRET (the fstpl restarts).
+     * otherwise (0x401000): the pfault demand-page case -- record CR2, map
+     *     PT1[1] present, count, IRET (the store restarts).
      * Stack on entry (same-priv, with error code): [esp]=errcode, [esp+4]=EIP,
      * [esp+8]=CS, [esp+12]=EFLAGS.  We save EAX first (so +4 to those).        */
     .align 16
@@ -324,6 +350,8 @@ hang:
 pf_handler:
     pushl   %eax
     movl    %cr2, %eax
+    cmpl    $0x00003000, %eax
+    je      pf_cross
     movl    %eax, 0x00002020            /* record CR2 (the faulting linear addr) */
     /* map the faulting page: set P on PT1[1] (linear 0x401000's PTE) */
     movl    $0x00801003, %eax
@@ -335,6 +363,19 @@ pf_handler:
     popl    %eax
     addl    $4, %esp                    /* discard the #PF error code */
     iret                                /* RESTART the faulting store (FAULT) */
+
+pf_cross:
+    /* case A: the rejected crossing store must have left page 1 UNTOUCHED */
+    cmpl    $0xA5A5A5A5, 0x00002FFC
+    jne     1f
+    movl    $0x600DF00D, 0x00002038     /* atomicity witness: pre-probe rejected first */
+1:  movl    $0x00600003, 0x0001200C     /* PT0[3] := phys 0x600000 | P|RW */
+    incl    0x00002028                  /* #PF counter */
+    movl    %cr3, %eax
+    movl    %eax, %cr3                  /* flush TLB for the restart */
+    popl    %eax
+    addl    $4, %esp                    /* discard the #PF error code */
+    iret                                /* RESTART the faulting fstpl (FAULT) */
 
     /* #GP handler: count + resume PAST the faulting MOV.  Stack on entry has an
      * error code (the selector): [esp]=errcode,[esp+4]=EIP,[esp+8]=CS,[+12]=EFLAGS.

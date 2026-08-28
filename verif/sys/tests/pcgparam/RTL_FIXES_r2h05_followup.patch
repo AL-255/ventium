@@ -1,0 +1,39 @@
+R2-H05 follow-up fixes, VALIDATED 2026-08-04 against the pinned QEMU goldens of
+pcgparam/pcg16/pcgpg (all three full streams EQUIVALENT with these applied;
+pjmpgate/pfarok/pcalltss/pcpl/pretfoutpg/pretfres stay EQUIVALENT).
+Found by the R2-H05 regression suite; see verif/sys/tests/pcgparam/manifest.json
+(rtl_blockers). Applies to the tree as of 2026-08-03 23:34 (post R2-H09 merge).
+
+--- rtl/core/core_bus_driver.svh	2026-08-03 22:31:53.702827211 -0400
++++ /tmp/h05fix2/rtl/core/core_bus_driver.svh	2026-08-03 23:56:22.478208965 -0400
+@@ -164,7 +164,7 @@
+         // REVIEW2_aug2 C-06: an OUTER-level return keeps popping -- ESP at +2w and SS
+         // at +3w. ESP is NOT bumped at beat 1 for this case (see core_gpr_wb.svh), so
+         // these stay anchored to the ORIGINAL inner ESP and the arithmetic is plain.
+-        if (retf_out)  bd_addr = seg_base[SG_SS] + stk16(gpr_o[R_ESP] +
++        if (retf_out)  bd_addr = seg_base[SG_SS] + stk16(gpr_o[R_ESP] + {16'd0,q_ret_imm} +
+                                     (retf_ob ? ({27'd0,q_w,1'b0} + {28'd0,q_w})   // 3w: SS
+                                              :  {27'd0,q_w,1'b0}));               // 2w: ESP
+         else if (!seg_step) bd_addr = seg_base[SG_SS] + stk16(gpr_o[R_ESP]);       // pop IP
+--- rtl/core/core.sv	2026-08-03 23:34:56.024678833 -0400
++++ /tmp/h05fix2/rtl/core/core.sv	2026-08-03 23:56:22.479802646 -0400
+@@ -6784,7 +6784,7 @@
+       // retf_out is set (retf_ob 0=ESP, 1=SS); this mirror had only the two-beat
+       // inner form, so under paging beats 2 and 3 translated the wrong linear.
+       S_RETF: begin
+-        if (retf_out) cur_lin_nat = seg_base[SG_SS] + stk16(gpr_o[R_ESP] +
++        if (retf_out) cur_lin_nat = seg_base[SG_SS] + stk16(gpr_o[R_ESP] + {16'd0,q_ret_imm} +
+                                 (retf_ob ? ({27'd0,q_w,1'b0} + {28'd0,q_w})   // 3w: SS
+                                          :  {27'd0,q_w,1'b0}));               // 2w: ESP
+         else          cur_lin_nat = !seg_step ? seg_base[SG_SS] + stk16(gpr_o[R_ESP])
+--- rtl/core/core_seg_ljmp.svh	2026-08-03 22:31:53.707282602 -0400
++++ /tmp/h05fix2/rtl/core/core_seg_ljmp.svh	2026-08-03 23:56:22.480214558 -0400
+@@ -662,7 +662,7 @@
+               // REVIEW_Aug3 F2: install the selector with the conforming-target RPL
+               // forcing, exactly as the S_LJMP commit does.
+               seg_sel  [SG_CS] <= {q_ljmp_sel[15:2],
+-                                   (lc_cs_attr[2] && (desc_dpl(lc_cs_attr) < cpl_r))
++                                   (lc_gate || (lc_cs_attr[2] && (desc_dpl(lc_cs_attr) < cpl_r)))
+                                    ? cpl_r : q_ljmp_sel[1:0]};
+               seg_base [SG_CS] <= lc_cs_base;
+               seg_limit[SG_CS] <= lc_cs_limit;

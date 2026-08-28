@@ -2,73 +2,99 @@
 # Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
 # SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
 #
-# REVIEW2_aug2 C-04: a DIRECTED page-crossing case for a non-split-capable producer.
+# REVIEW1_Aug3 R2-C03: page-crossing FRAGMENT ENGINE correctness gate.
 #
-# The finding says the split covers only S_LOAD/S_LOAD2/S_STORE, and that the measured
-# "0 reachable in 68 images" establishes CORPUS COVERAGE, not architectural
-# unreachability. It asks for "directed boundary cases for each request producer, not
-# only the three common states". This is that case for S_LGDT.
+# This used to be a REACHABILITY PIN: it PASSED only while each of the six
+# non-split producers $fatal'd ("PAGING/C-04 UNSPLIT page-crossing") on a
+# directed crossing access. The generic fragment engine (rtl/core/core.sv fx_*)
+# now gives every translatable FSM state a probe-then-execute fragment
+# sequence, so the fatal correctly NEVER fires -- and this gate is converted
+# into the completion-form CORRECTNESS regression, per the finding's delivery
+# note ("when the fragment engine lands, this pin must be replaced by the
+# completion-form regression in the same commit").
 #
-# THIS GATE ASSERTS THAT THE CORE'S OWN PAGING/C-04 ASSERTION FIRES. That is deliberate
-# and follows run-ic-alias-gate.sh, which likewise requires the default build to still
-# exhibit its hazard: the point is to hold the REACHABILITY answer, so that if the split
-# is ever extended to cover S_LGDT this gate FAILS and forces the claim to be restated
-# rather than quietly going green.
+# For each of the six producer images (verif/sys/tests/pxc04*/, all built on the
+# pfault skeleton, all with the crossing window on NON-CONTIGUOUS physical
+# frames so a wrong-physical-page access returns poison):
 #
-#   fires  -> S_LGDT is architecturally reachable with a crossing extent   PASS
-#   silent -> either the producer was fixed (restate this gate) or the probe
-#             stopped reaching the crossing (the test regressed)           FAIL
+#   pxc04  S_LGDT      6-byte pseudo-descriptor read at 0x2FFE (limit page 2,
+#                      base page 3 = phys 0x600000). Case A: NP page 3 -> #PF
+#                      (CR2=0x3000) with GDTR PROVABLY unchanged; case B: the
+#                      restarted LGDT's GDTR is exercised by real segment loads.
+#   pxc04i S_INT_PUSH  UD2 at ESP=0x8E002: the 12-byte frame straddles 0x8E000
+#                      (page 0x8E = phys 0x700000); the handler verifies saved
+#                      EIP/CS from both pages. (No NP variant: the push IS
+#                      delivery, so a rejecting page faults the delivery
+#                      recursively into a triple fault on ANY correct CPU.)
+#   pxc04f S_FSTORE    FSTP m64 at 0x2FFE. Case A: NP page 3 -> #PF BEFORE any
+#                      commit (page-1 sentinel untouched); case B: the restarted
+#                      store lands split across phys 0x2FFE / phys 0x600002.
+#   pxc04e S_FENV_ST   FNSTENV at 0x2FFE: same atomicity case + CW/SW/TW field
+#                      readback across the split.
+#   pxc04t S_TSW_SAVE  Outgoing TSS based at 0x2FDE so the saved-EIP dword
+#                      straddles onto phys 0x600000; the incoming task verifies
+#                      the saved fields. (No NP variant: QEMU's dummy TSS
+#                      pre-access faults at a different address than the RTL's
+#                      probe -- an oracle gap on CR2, see the manifest.)
+#   pxc04m S_INT_GATE  Misaligned IDT (base 0x4FCE) puts vector 6's gate at
+#                      0x4FFE (page 5 = phys 0x601000): UD2 must reach the real
+#                      handler; then page 5 NP + int $32 -> #PF(CR2=0x5000)
+#                      before any delivery commits, then completion.
 #
-# pxc04 is built on pfault, NOT pxpage, because pfault installs an IDT: an earlier
-# attempt on pxpage could not distinguish "crossed undetected" from "faulted with
-# nowhere to go". Both pages here are identity-mapped P|RW, so no #PF is involved.
+# Gate semantics per producer: run verif/sys/run-sys-golden.sh (QEMU golden +
+# witness validation + RTL --system diff). PASS requires SYS-GOLDEN-OK AND no
+# "PAGING/C-04" assertion anywhere in the RTL run's output.
 #
-# Kept OUT of the seg gate's corpus sweep (which fails on a nonzero PAGING/C-0* count)
-# and out of verify-sys's explicit golden list.
+# STATUS (2026-08-04): 6/6 producers GREEN. The pxc04 (S_LGDT read-path) defect
+# this gate used to pin -- a read frag2's D-TLB miss diverted to S_WALK with
+# the engine's read-merge still armed, so the walk's PDE latch sampled
+# fx_merged (measured: walk_pde := (PDE<<16)|frag1[15:0]) -- is FIXED: the
+# engine sequencer now freezes and every shaping output blanks while
+# state==S_WALK (fx_walk_hold, rtl/core/core.sv), and the frag sequence resumes
+# when the walk returns to the producer state. The pin half is deleted per its
+# own instruction; xc04 moves to the PASS class in run-verify-all.sh and pxc04
+# joins verify-sys + the seg-gate sweep in the same change.
 set -uo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TB="$REPO/verif/tb/${OBJDIR:-obj_dir}/tb_ventium"
-IMG="$REPO/verif/sys/tests/pxc04/pxc04.bin"
 
-echo "== REVIEW2_aug2 C-04: is a non-split-capable producer REACHABLE? =="
+echo "== REVIEW1_Aug3 R2-C03: page-crossing fragment engine CORRECTNESS =="
 [[ -x "$TB"  ]] || { echo "  SKIP: $TB missing"; exit 0; }
-[[ -f "$IMG" ]] || { echo "  SKIP: pxc04.bin missing"; exit 0; }
-
-probe() {   # $1 = image basename, $2 = expected state number, $3 = producer name
-  local img="$REPO/verif/sys/tests/$1/$1.bin"
-  if [[ ! -f "$img" ]]; then echo "  SKIP: $1.bin missing"; return 0; fi
-  local out line st
-  out="$("$TB" --image "$img" --system --out /dev/null --max-insn 4000 --quiesce 400 2>&1 || true)"
-  line="$(printf '%s\n' "$out" | grep -o 'PAGING/C-04: UNSPLIT page-crossing access in state [0-9]*' | head -1 || true)"
-  if [[ -z "$line" ]]; then
-    echo "  FAIL $3: the PAGING/C-04 assertion did NOT fire."
-    echo "       Either the split now covers this producer -- in which case this gate has"
-    echo "       served its purpose and must be RESTATED -- or the probe no longer reaches"
-    echo "       the crossing, which means the TEST regressed, not the core."
-    return 1
-  fi
-  st="$(printf '%s' "$line" | grep -oE '[0-9]+$')"
-  if [[ "$st" != "$2" ]]; then
-    echo "  FAIL $3: fired in state $st, expected $2 -- the probe is reaching a DIFFERENT"
-    echo "       producer than it names, so its answer is about the wrong thing."
-    return 1
-  fi
-  echo "  ok   $3 (state $st) crosses a page boundary with only the first page translated"
-  return 0
-}
 
 fails=0
-probe pxc04  23 "S_LGDT      6-byte descriptor read" || fails=1
-probe pxc04i 36 "S_INT_PUSH  exception frame write"  || fails=1
-probe pxc04f 14 "S_FSTORE    x87 FSTP m64 beat"       || fails=1
-probe pxc04e 16 "S_FENV_ST   FNSTENV image beat"      || fails=1
-probe pxc04t 43 "S_TSW_SAVE  task-switch state save"   || fails=1
-probe pxc04m 34 "S_INT_GATE  IDT gate read (microseq)" || fails=1
+probe() {   # $1 = image basename, $2 = producer description
+  local img="$REPO/verif/sys/tests/$1/$1.bin"
+  if [[ ! -f "$img" ]]; then echo "  SKIP: $1.bin missing"; return 0; fi
+  local out
+  out="$(bash "$REPO/verif/sys/run-sys-golden.sh" "$1" 2>&1)"
+  local rc=$?
+  # The C-04 fatal must NEVER appear, in any run, green or red.
+  if printf '%s\n' "$out" | grep -q 'PAGING/C-04: UNSPLIT'; then
+    echo "  FAIL $1 ($2): the PAGING/C-04 UNSPLIT fatal fired -- the fragment"
+    echo "       engine regressed to the unsplit path for this producer."
+    fails=1; return 1
+  fi
+  if [[ "$rc" == "0" ]] && printf '%s\n' "$out" | grep -q 'SYS-GOLDEN-OK'; then
+    echo "  ok   $1 ($2): crossing completes, differential EQUIVALENT"
+    return 0
+  fi
+  echo "  FAIL $1 ($2): the crossing does NOT complete correctly -- the RTL"
+  echo "       diverges from the QEMU golden (run: bash verif/sys/run-sys-golden.sh $1)."
+  printf '%s\n' "$out" | grep -E 'divergence|LENGTH MISMATCH|FATAL' | head -3 | sed 's/^/       /'
+  fails=1; return 1
+}
+
+probe pxc04  "S_LGDT      descriptor-table read"    || true
+probe pxc04i "S_INT_PUSH  exception frame write"  || true
+probe pxc04f "S_FSTORE    x87 FSTP m64 beat"       || true
+probe pxc04e "S_FENV_ST   FNSTENV image beat"      || true
+probe pxc04t "S_TSW_SAVE  task-switch state save"  || true
+probe pxc04m "S_INT_GATE  IDT gate read (microseq)" || true
 
 if [[ "$fails" == "0" ]]; then
-  echo "  => SIX producers proven reachable, covering ALL SIX categories the finding"
-  echo "     names: descriptor / stack-frame / x87 / environment / task / microsequence. \"0 in 68 images\" was corpus coverage,"
-  echo "     exactly as the finding says -- not architectural unreachability."
+  echo "  => all six producers' crossings complete differentially clean (S_LGDT,"
+  echo "     S_INT_PUSH, S_FSTORE, S_FENV_ST, S_TSW_SAVE, S_INT_GATE), incl. the"
+  echo "     read-frag2 page walk that the deleted pin used to hold."
   echo "XC04-GATE-OK"; exit 0
 fi
 echo "XC04-GATE-FAIL"; exit 1

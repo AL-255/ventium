@@ -54,6 +54,16 @@
                 seg_limit[s] <= 32'hFFFF_FFFF;
                 seg_attr [s] <= 8'h93;
               end
+              // R2-H07: SMM entry synthesizes real-mode-like state (and PE is
+              // being cleared above) -- no segment is PM-loaded in SMM.
+              // A4-H07: SHADOW the pre-SMI provenance + D/B metadata first --
+              // RSM restores these exact values, not a CR0.PE reconstruction.
+              for (int s = 0; s < NUM_SEG; s++) begin
+                smm_pml_q  [s] <= seg_pm_loaded[s];
+                smm_seg_b_q[s] <= seg_b[s];
+              end
+              smm_ss_b_q <= ss_b;
+              for (int s = 0; s < NUM_SEG; s++) seg_pm_loaded[s] <= 1'b0;
               cs_d      <= 1'b0;          // SMM default operand/addr size = 16-bit
               cpl_r     <= 2'd0;          // SMM runs at CPL0
               eip       <= 32'h0000_8000; // SMM entry point = SMBASE + 0x8000
@@ -131,7 +141,16 @@
                 seg_base [s] <= rsm_base [s];
                 seg_limit[s] <= rsm_limit[s];
                 seg_attr [s] <= rsm_attr [s];
+                // R2-H07 + A4-H07: the restored hidden state's provenance and
+                // D/B metadata are the PRE-SMI values (shadowed on entry), NOT
+                // a reconstruction from the restored CR0.PE: a PE-set-but-not-
+                // yet-reloaded window keeps its real-mode provenance even when
+                // RSM returns with PE set, and a mode-changing SMM handler
+                // cannot leak its D/B into the resumed context.
+                seg_pm_loaded[s] <= smm_pml_q[s];
+                seg_b        [s] <= smm_seg_b_q[s];
               end
+              ss_b    <= smm_ss_b_q;
               gdt_base <= rsm_gdtb; idt_base <= rsm_idtb;
               gdt_limit<= rsm_gdtl; idt_limit<= rsm_idtl;
               smbase   <= rsm_smbase;     // handler-relocatable SMBASE

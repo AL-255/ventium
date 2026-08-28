@@ -369,11 +369,11 @@ module decode_stages
 
     if (two_byte) begin
       unique casez (op1)
-        // ---- M2S.4 system 0F 00 group: /1 STR, /3 LTR ----------------------
+        // ---- M2S.4 system 0F 00 group: /0 SLDT, /1 STR, /2 LLDT, /3 LTR --------
         // 0F 00 /3 LTR r/m16 — load TR from a GDT TSS selector (reads the TSS
-        // descriptor, marks it busy). 0F 00 /1 STR r/m16 — store the TR selector.
-        // Only the register form (mod==11) is used by the corpus; SLDT(/0) and
-        // LLDT(/2)/VERR(/4)/VERW(/5) are not needed here.
+        // descriptor, marks it busy). 0F 00 /1 STR r/m16 — store the TR selector;
+        // /0 SLDT r/m16 — store the LDTR selector (REVIEW_Aug3). Register forms
+        // only; VERR(/4)/VERW(/5) and the memory forms are not needed by the corpus.
         8'h00: begin
           // LTR/STR are SYSTEM instructions: only meaningful in system mode. Gate
           // the decode on sys_mode so user mode keeps its exact pre-M2S.4 behavior
@@ -385,8 +385,15 @@ module decode_stages
             // load the LDTR from a GDT LDT descriptor (reuses the S_LTR read FSM).
             d_sysop=SYS_LLDT; d_src_reg=modrm_rm; d_w=3'd2; d_len=pfx_len+4'd3;
           end else if (sys_mode && modrm_mod==2'b11 && modrm_reg==3'd1) begin // STR r16
+            // R2-M01: destination width follows the effective operand size (the
+            // 32-bit form zero-extends -- same contract as MOV r32,Sreg).
             d_sysop=SYS_STR; d_dst_reg=modrm_rm; d_writes_reg=1'b1;
-            d_w=3'd2; d_len=pfx_len+4'd3;
+            d_w=eff_opsize?3'd2:3'd4; d_len=pfx_len+4'd3;
+          end else if (sys_mode && modrm_mod==2'b11 && modrm_reg==3'd0) begin // SLDT r16
+            // REVIEW_Aug3: store the LDTR selector (the core tracks ldt_sel since
+            // REVIEW2 M-02; the ptaskpg differential reads it back post-switch).
+            d_sysop=SYS_SLDT; d_dst_reg=modrm_rm; d_writes_reg=1'b1;
+            d_w=eff_opsize?3'd2:3'd4; d_len=pfx_len+4'd3;
           end else begin
             d_unknown=1'b1; d_len=pfx_len+4'd2;  // SLDT/LLDT/VERR/VERW/mem deferred
           end
@@ -986,13 +993,14 @@ module decode_stages
           if (modrm_mod==2'b11) begin d_src_reg=modrm_rm; d_len=pfx_len+4'd2; end
           else begin d_mem_read=1'b1; d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base); end
         end
-        // M9.5 — LES (0xC4) / LDS (0xC5): load r16 + a segment register from a
-        // m16:16 far pointer. REAL-MODE 16-bit only: a single 4-byte read returns
-        // {sel, off}; the GPR gets off (a normal MOV writeback), the segment reg
-        // gets sel (base=sel<<4) via the q_seg_load exec hook. The reg form is #UD,
-        // and 32-bit (0x66) / protected-mode are out of scope -> HALT loudly.
+        // LES (0xC4) / LDS (0xC5): load a GPR plus ES/DS from m16:16 or m16:32.
+        // The first bus beat is widened to four bytes by load_beat_w; a 32-bit
+        // offset takes a second two-byte selector beat. In protected mode S_EXEC
+        // hands the selector to the shared S_SEGLD descriptor path, which commits
+        // the GPR and segment atomically only after validation. The register form
+        // is architecturally #UD.
         8'hC4, 8'hC5: begin
-          if (modrm_mod!=2'b11 && seg_real) begin   // 16b: m16:16; 32b (0x66): m16:32 (2nd read)
+          if (modrm_mod!=2'b11) begin
             d_is_mov=1'b1; d_alu_op=ALU_MOV; d_writes_reg=1'b1; d_dst_reg=modrm_reg;
             d_mem_read=1'b1; d_w=eff_opsize?3'd2:3'd4;
             d_seg_load=1'b1; d_lseg=(op0==8'hC4)?3'(SG_ES):3'(SG_DS);
@@ -1008,7 +1016,11 @@ module decode_stages
           // from seg_sel via d_store_sreg. Gated sys_mode so the user-mode corpus keeps
           // its HALT (byte-identical); reg form unchanged.
           if (modrm_mod==2'b11) begin
-            d_sysop=SYS_MOVSREG_FROM; d_sys_sreg=sreg_idx(modrm_reg); d_w=3'd2;
+            // REVIEW1_Aug3 R2-M01: the register form's DESTINATION width follows
+            // the effective operand size -- a 32-bit destination is zero-extended
+            // (the QEMU/P5 contract), not merged with stale upper bits.
+            d_sysop=SYS_MOVSREG_FROM; d_sys_sreg=sreg_idx(modrm_reg);
+            d_w=eff_opsize?3'd2:3'd4;
             d_writes_reg=1'b1; d_dst_reg=modrm_rm; d_len=pfx_len+4'd2;
           end else if (sys_mode) begin
             d_is_mov=1'b1; d_alu_op=ALU_MOV; d_mem_write=1'b1; d_w=3'd2;

@@ -1,0 +1,40 @@
+{
+  "name": "pxc04t",
+  "kind": "system",
+  "src": "pxc04t.S",
+  "linker": "pxc04t.ld",
+  "image": "pxc04t.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 1400,
+  "sys": true,
+  "paging": true,
+  "finding": "REVIEW1_Aug3 R2-C03",
+  "transitions": [
+    "real->protected (CR0.PE 0->1, CS far-jump to 32-bit flat code segment 0x08)",
+    "GDT @ 0x500: null + code32 0x08 + data32 0x10 + TSS1 0x18 (base 0x2FDE) + TSS2 0x20 (base 0x6000) + clone 0x28, limit 0x2F",
+    "IDT @ 0x1000 with #PF/#GP/#UD interrupt gates + lidt",
+    "page tables: PT0 identity EXCEPT PT0[3]: linear 0x3000 -> phys 0x600000 (non-contiguous, present); PT1[0] present, PT1[1] NP (demand-page target); CR3 + CR0.PG 0->1",
+    "TSS2 staged at linear 0x6000 (EIP=tsw_land, EFLAGS=2, CR3, ESP=0x8F000, flat segs); LTR 0x18; EAX=0x1A1A1A1A; ljmp $0x20,$0 -> hardware task switch",
+    "S_TSW_SAVE crossing: the outgoing save writes EIP at linear 0x2FFE STRADDLING (low half phys 0x2FFE, high half phys 0x600000), EFLAGS/EAX/ESP/CS above it on phys 0x600002+; phys 0x3000 poisoned 0x0B0B0B0B, phys 0x600000 seeded 0x5A5A5A5A",
+    "incoming task verifies saved EIP == tsw_land, EAX == 0x1A1A1A1A, ESP == 0x90000, CS == 0x08 (marker 0x2038=0x600DF00D) and records saved EIP/EFLAGS for the differential",
+    "pfault flow (in the incoming task): demand-page #PF at 0x401000, #GP on selector 0x38, #UD on UD2; counters accumulate to 3",
+    "witnesses pulled into ecx/edx/esi/edi/ebx/ebp; isa-debug-exit (status 133)"
+  ],
+  "witnesses": {
+    "ecx at exit": "3 -- the pfault #PF/#GP/#UD all delivered in the incoming task",
+    "edx at exit": "0x004000F4 -- CR2 0x401000 captured by the demand-page #PF, low 16 bits clobbered by the 0xF4 exit-port load",
+    "esi at exit": "0xCAFEBABE -- the restarted pfault store's readback",
+    "edi at exit": "0x600DF00D -- saved EIP/EAX/ESP/CS verified through paging across the non-contiguous split",
+    "ebx at exit": "0x1A1A1A1A -- the live EAX at the ljmp, read back from phys 0x600006",
+    "ebp at exit": "the saved EIP (== tsw_land), read back across the straddle -- differential-only, not hard-asserted"
+  },
+  "oracle_gaps": [
+    "No not-present/atomicity variant: QEMU's switch_tss_ra pre-touches the outgoing TSS with dummy byte accesses at tr.base and tr.base+0x67 (seg_helper.c: 'we must avoid memory exceptions during the task switch'), so under QEMU an NP second page faults at the dummy access (CR2 = tr.base+0x67) while the RTL's per-fragment probe faults at the actual save write (CR2 = 0x3000). The fault-and-restart completes identically in both oracles, but CR2 is architecturally visible in the trace and genuinely differs -- the RTL does not emulate QEMU's dummy-access hack, and the SDM pins no CR2 for a fault mid-task-switch. The atomicity property (probe-before-commit) for writes is covered by pxc04f/pxc04e."
+  ],
+  "description": "REVIEW1_Aug3 R2-C03 regression for producer S_TSW_SAVE: a paged hardware task switch whose OUTGOING TSS is based at 0x2FDE so the saved-state block straddles the 0x3000 boundary onto the non-adjacent phys frame 0x600000. The incoming task reads the saved fields back through paging and verifies them (EIP/EAX/ESP/CS). Differential against QEMU, which implements the paged switch correctly (verified against the pinned harness seg_helper.c switch_tss_ra: saved EIP first at tr.base+0x20, the crossing field). Built on the pfault skeleton, whose #PF/#GP/#UD deliveries still run in the incoming task and count."
+}

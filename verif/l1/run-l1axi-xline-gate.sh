@@ -35,7 +35,7 @@ objcopy -O binary "$T/xlinetest.elf" "$T/xlinetest.bin"; truncate -s 65536 "$T/x
 
 say "1. build the deployed-config tb (L1AXI + KV260 REMAP + all features)"
 make -C "$TB" l1axi_kv_full >/dev/null
-BIN="$TB/obj_dir_l1axi_kvf/tb_ventium"
+BIN="$TB/${KV_FULL_OBJDIR:-obj_dir_l1axi_kvf}/tb_ventium"
 [ -x "$BIN" ] || { echo "FATAL: deployed-config tb not built"; exit 1; }
 
 run(){ timeout 180 "$BIN" --system --l1-axi --cosim --image "$1" --out /dev/null \

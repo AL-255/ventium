@@ -20,7 +20,7 @@ module tb_l1d;
   // backing side
   logic        m_req, m_we; logic [31:0] m_addr, m_wdata; logic [3:0] m_wstrb;
   logic [31:0] m_rdata; logic m_ack;
-  logic        m_rd_narrow, m_rd_narrow_2;
+  logic        m_rd_narrow; logic [1:0] m_rd_size;
   // REVIEW2_aug2 H-11: count backing READ beats, so a non-cacheable access can be
   // asserted to cost ONE (or two, unaligned) instead of a full 8-beat line.
   int          rbeats;
@@ -46,11 +46,12 @@ module tb_l1d;
                .dbg_serve(),                       // M-17: diagnostic only
 
                .m_req, .m_we, .m_addr, .m_wdata, .m_wstrb, .m_rdata, .m_ack,
-               // REVIEW2_aug2 H-11: the narrow-read request width. This TB has no AXI
+               // REVIEW2_aug2 H-11: the narrow-read request shape. This TB has no AXI
                // master, so it does not consume these -- but counting backing beats
                // (below) is how the fix is MEASURED, and leaving the pins unconnected
                // is what made this gate fail warning-fatal at build time.
-               .m_rd_narrow, .m_rd_narrow_2);
+               // REVIEW1_Aug3 R2-H01: m_rd_size is the per-piece ARSIZE.
+               .m_rd_narrow, .m_rd_size);
 
   // ---- behavioral backing: byte-addressable, same-cycle ack -----------------
   logic [7:0] mem [0:(1<<20)-1];
@@ -122,6 +123,42 @@ module tb_l1d;
       if (++guard > 300) begin $display("  FAIL b2b: no ack at w%0d", i); errors++; break; end
     end
     @(negedge clk); c_req<=1'b0;
+  endtask
+
+  // A delayed response belongs to the request that launched it, not merely to
+  // whatever request happens to be live when the response is served.  The core
+  // can advance c_addr while an earlier response indication is still visible
+  // (the registered cache-hit path has rd_addr_q/rd_match for exactly this
+  // reason).  Exercise the same contract on the non-cacheable L1_BYP path:
+  // abandon A after its backing beat has completed, present B with c_req held,
+  // and require A's buffered response to be discarded rather than acknowledged
+  // as B.  B must then retry normally and receive B's own data.
+  task automatic do_nc_read_retarget(input logic [31:0] a, b,
+                                     output logic [31:0] d);
+    int guard;
+    @(negedge clk);
+    c_req = 1'b1; c_we = 1'b0; c_addr = a; c_wstrb = 4'd0;
+    // L1_BYP is enum value 3.  Wait until A's private buffer is ready, then
+    // retarget within that serve clock before sampling the response.
+    wait (dut.st == 2'd3);
+    #1; c_addr = b;
+    #1;
+    if (c_ack) begin
+      $display("  FAIL bypass response for A was acknowledged as request B");
+      errors++;
+    end else begin
+      $display("  ok   bypass response ownership rejects retargeted request");
+    end
+    guard = 0;
+    forever begin
+      @(posedge clk); #1;
+      if (c_ack) begin d = c_rdata; break; end
+      if (++guard > 50) begin
+        $display("  FAIL retargeted read %08x: no retry ack", b);
+        errors++; d = 32'hx; break;
+      end
+    end
+    @(negedge clk); c_req = 1'b0;
   endtask
 
   // pulse a one-clock snoop invalidate for the line containing `a`.
@@ -206,6 +243,20 @@ module tb_l1d;
     cacheable = 1'b0;                          // CD asserted with the line still resident
     do_read(32'h0000_4200, d);
     chk("nc read of resident line is FRESH", d, 32'hDEAD_BEEF);
+    cacheable = 1'b1;
+
+    // ----- FPGA reset-state regression: L1_BYP response ownership ----------------
+    // The focused nested-IRQ ROM reproduced this in source-matched Verilator:
+    // an instruction-fetch response (bytes 06 c7 26 ...) was acknowledged as the
+    // subsequent IVT read at physical 0x20, replacing the expected f000:024d
+    // vector and escaping to CS=06c7.  This small case isolates that protocol
+    // failure without depending on the BIOS or interrupt engine.
+    $display("[9d] NON-CACHEABLE response must not be acknowledged after c_addr retargets");
+    dma_poke(32'h0000_4300, 32'h06C7_2600);  // old request A / recognizable code bytes
+    dma_poke(32'h0000_0020, 32'hF000_024D);  // new request B / expected IVT8 entry
+    cacheable = 1'b0;
+    do_nc_read_retarget(32'h0000_4300, 32'h0000_0020, d);
+    chk("retargeted request receives its own IVT data", d, 32'hF000_024D);
     cacheable = 1'b1;
 
     $display("[10] SNOOP invalidate: DMA write + snoop -> next read refills new data");

@@ -1,2 +1,26 @@
-{ "name":"tx_regform","src":"tx_regform/tx_regform.s","elf":"tx_regform/tx_regform.elf",
-  "image":"tx_regform/tx_regform.flat","load_addr":"0x08048000","entry":"0x08048000","max_insn":60,"x87":true }
+{
+  "name": "tx_regform",
+  "src": "tx_regform/tx_regform.s",
+  "elf": "tx_regform/tx_regform.elf",
+  "image": "tx_regform/tx_regform.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 60,
+  "x87": true,
+  "x87_stkflt_arch": true,
+  "x87_stkflt_note": "R2-H06: this program drives the x87 stack past its ends. QEMU implements no stack faults, so the differential masks fstat IE|SF|C1|C0|C2|C3 (0x4741 -- the #IS response has no QEMU counterpart; C1 is the direction bit and C0/C2/C3 are implementation-defined per SDM Vol.1 Table 8-4) and the st* QNaN-indefinite substitution. The behavior itself is gated architecturally by px87stk.",
+  "x87_stkflt_fstat_ranges": [
+    [
+      16,
+      23
+    ]
+  ],
+  "x87_stkflt_fpr_ranges": [
+    [16, 16, "st0"],
+    [17, 18, "st0,st1"],
+    [19, 22, "st0,st7"],
+    [23, 24, "st6,st7"],
+    [25, 25, "st7"]
+  ],
+  "x87_stkflt_ranges_note": "The masks are the EXACT measured divergence set of an unmasked compare vs the pinned-QEMU golden (35 records, n=0..34): the 9th/10th pushes (fld1 at n=15, fldl2e at n=16) overflow the full stack, so from n=16 the QNaN-indefinite substitution propagates through FSCALE/the FCOMs/the pops exactly as listed (fstat IE|SF plus the FCOM condition codes C0..C3 at n=20..23 -- all inside 0x4741), and n=24..25 are the resync refill overwriting the last substituted physical slot. Records n=26..34 (seven refill pushes, exit) compare with ZERO masks. Everything outside the listed records/fields -- fstat AND st0..st7 -- compares at full strength."
+}

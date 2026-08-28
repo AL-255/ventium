@@ -26,9 +26,9 @@ export CFLAGS_BASE="-m32 -march=pentium -nostdlib -static -Wl,--build-id=none"
 # env overrides let run-l1axi-cdc-verify.sh reuse this script verbatim for the
 # dual-clock build (L1AXI_TARGET=l1axi_cdc, a separate obj dir + workdir + portbase).
 export WORKDIR="${L1AXI_WORKDIR:-$ROOT/build/verify-l1axi}"
-export CACHE_DIR="$ROOT/build/golden-cache"          # REUSE the mode-0 QEMU goldens
+export CACHE_DIR="${L1AXI_CACHE_DIR:-$ROOT/build/golden-cache}" # REUSE mode-0 goldens
 export PORTBASE="${PORTBASE:-27000}"
-export TB_BIN="${L1AXI_TB_BIN:-$ROOT/verif/tb/obj_dir_l1axi/tb_ventium}"
+export TB_BIN="${L1AXI_TB_BIN:-$ROOT/verif/tb/${L1AXI_OBJDIR:-obj_dir_l1axi}/tb_ventium}"
 export TB_EXTRA_FLAGS="--l1-axi --quiesce ${L1AXI_QUIESCE:-200000}"
 L1AXI_TARGET="${L1AXI_TARGET:-l1axi}"
 TESTS_DIR="$ROOT/verif/tests"

@@ -1,0 +1,39 @@
+{
+  "name": "pxwrapm",
+  "kind": "system",
+  "src": "pxwrapm.S",
+  "linker": "pxwrapm.ld",
+  "image": "pxwrapm.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 20000,
+  "sys": true,
+  "paging": true,
+  "finding": "wrapped cross-privilege frame-probe: the ZERO-BYTES property and the terminal V86 denials (witness gate)",
+  "gate_form": "WITNESS gate. The graded property (a rejected frame leaves ZERO bytes on every destination page) is memory state the trace format cannot carry, and the two oracles legitimately differ there (oracle gap 1), so the image reads the frame extents in-guest: the golden pins QEMU's partial-push witnesses honestly (step 5f) and the RTL side is graded in step 7w (zero written slots, final record, faultlog).",
+  "oracle_gaps": {
+    "gap1_incremental_pushes": "QEMU 8.2.2 pushes frame slots incrementally (seg_helper.c PUSHL/PUSHW store immediately; the SS/ESP/CS/EIP commit happens only after the last push), so a mid-frame page fault leaves the first k_fault slots WRITTEN (a cross-page store is never partial -- cputlb.c mmu_lookup looks up both pages first). The RTL's S_INT_PROBE walks the whole slot plan BEFORE the commit, leaving zero bytes. Register-visible state (old context, err=2, CR2, restart) is identical -- that half is differential in pxwrap.",
+    "gap2_terminal_v86": "a V86 denial cannot recover in EITHER oracle: the #PF delivery from V86 must use a DPL0 target (a same-privilege target from V86 is #GP(selector) per the pinned QEMU seg_helper.c do_interrupt_protected), so it re-probes the SAME wrapped TSS stack. QEMU escalates #PF -> #DF -> triple-fault RESET and reboots (the image survives via the boot counter at 0x5100 and finishes m7); the RTL escalates to #DF and parks in S_SHUTDOWN at m6 (the empty #DF gate then triples). The tails are not comparable; the RTL's m6 is graded on the pre-shutdown record + faultlog."
+  },
+  "rtl_observation": "measured while bringing this image up (out of scope for the slot plan, evidence only): delivering an exception from V86 through a gate whose target CS is DPL=3 takes the SAME-PRIVILEGE path on the RTL (frame on the V86 stack), where the pinned QEMU raises #GP(selector & 0xfffc) (seg_helper.c do_interrupt_protected :724-728, the vm86 same-privilege branch). The terminal cases therefore program IDT[14] to a DPL0 target so both oracles cascade identically. If the deviation is real silicon behaviour it needs a dedicated pv86-family gate.",
+  "case_matrix": {
+    "m0": "INT16 B=0 base 0x80FFC SP=8 deny 0x80000: k_fault=2, CR2=0x80FFE (MIDDLE page -- a first/last-only probe misses it; the negative-control target)",
+    "m1": "GP16 (errcode) B=0 base 0x80FFC SP=4 deny 0x90000: k_fault=2, CR2=0x90FFA",
+    "m2": "INT32 B=1 ESP0=8 deny 0xFFFFF000: k_fault=2, CR2=0xFFFFFFFC",
+    "m3": "INT32 B=1 ESP0=4 deny 0xFFFFF000: k_fault=1, CR2=0xFFFFFFFC",
+    "m4": "CG16 pcount=31 B=0 base 0x80FFC SP=8 deny 0x90000: k_fault=4, CR2=0x90FFA",
+    "m5": "CG32 pcount=31 B=0 base 0x80FFC SP=8 deny 0x90000: k_fault=2, CR2=0x90FF8",
+    "m6": "V86 9-slot B=0 base 0x80FFC ESP0=8 deny 0x90000: k_fault=2, CR2=0x90FF8 -- TERMINAL (RTL shutdown; QEMU reset)",
+    "m7": "V86 9-slot B=0 base 0x80FFC ESP0=8 deny 0x80000: k_fault=1, CR2=0x80FFC -- QEMU-only (after the reboot)"
+  },
+  "witnesses": {
+    "qemu_exit_record": "edi=0x0000000d (13 partial slots written by QEMU over m0..m5), esi=6, ecx=0x0000000e (XOR of the written masks), ebp=0x0000005b (91 slots scanned), ebx=0x2 (m5's written count) -- asserted in step 5f along with the two reboots (56 real-mode records after the first PM entry)",
+    "rtl_final_record": "edi=0 esi=6 ecx=0 ebp=0x5b ebx=0 (ZERO slots written on the RTL), cr2=0x00090ff8 (m6's faulting slot), ss=0x2000 esp=0x8000 eflags VM=1 (the OLD V86 context intact at the shutdown) -- graded in step 7w",
+    "rtl_faultlog": "exactly 9x vec=14 err=00000002 (6 probes + the m6 cascade's three), 1x vec=13 err=00000060 (m1's trigger), 0x vec=8 -- graded in step 7w"
+  },
+  "description": "The zero-bytes witness half of the wrapped frame-probe regression. m0..m5 deny pages whose first-touch slot is not slot 0, so QEMU leaves k_fault >= 1 slots written while the probe-before-commit RTL must leave none; the CPL3 #PF handler scans every frame slot against the 0xCC sentinel before restoring the PTE. m6/m7 are the terminal V86 denials."
+}

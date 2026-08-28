@@ -274,7 +274,14 @@ module ventium_top
     input  logic        dbg_bp_en,
     input  logic [31:0] dbg_bp_addr,
     input  logic        dbg_bp_clr,
-    output logic        dbg_halted
+    output logic        dbg_halted,
+    // A narrow selector-based architectural-state readback.  The FPGA wrapper
+    // uses this only after dbg_halted has parked the core at S_DECODE, where
+    // these existing retire/state wires are stable.  The selector is seven bits
+    // so the compact core-local mux can expose the physical x87 stack without
+    // a wide cross-hierarchy state bus or routing-congestion cost.
+    input  logic [6:0]  dbg_arch_sel,
+    output logic [31:0] dbg_arch_data
 `endif
 );
 
@@ -506,33 +513,66 @@ module ventium_top
   logic a20_gate_r;
   assign a20_gate_r = 1'b1;
 
+  // The core's SMM state + cache-invalidate exports are unconditional ports;
+  // only the L1/AXI hierarchy consumes them, so they are plain sinks here and
+  // feed u_l1axi under VEN_L1_AXI.
+  logic        core_smm_active;
+  logic [31:0] core_smbase;
+  logic        core_cache_inv;
+  // The core's port-0x92 fast-reset request, sunk locally. Only the L1/AXI
+  // configuration exports it as a top-level port for the platform's reset
+  // controller.
+  logic        fast_reset_req_w;
+`ifdef VEN_L1_AXI
+  assign fast_reset_req = fast_reset_req_w;
+`endif
+`ifndef VEN_KV260_SOC
+  // No PS interrupt-injection seam in this configuration: the soc divert is
+  // tied dead. (The TB only drives the soc_en top port under VEN_KV260_SOC.)
+  logic        soc_en;
+  assign soc_en = 1'b0;
+`endif
+`ifdef VEN_FPTRAP
+`ifdef VEN_FP_PS_ALL
+  // Sinks for the generalized PS-trap operand context (see the u_core binding).
+  logic [79:0] fptrap_mem_sink;
+  logic [15:0] fptrap_fctrl_sink;
+  logic [15:0] fptrap_fstat_sink;
+  logic [2:0]  fptrap_sti_sink;
+  logic        fptrap_pop_sink;
+  logic [2:0]  fptrap_aluop_sink;
+`endif
+`endif
+
   core u_core (
       .clk          (clk),
       .rst_n        (rst_n),
       .a20_gate     (a20_gate_r),        // REVIEW2 M-03
-      // REVIEW1_Aug2 M-07: the port-0x92 fast-reset request. Left unconnected
-      // here -- this checkout has no reset controller to drive -- but it is now
-      // a real output a platform can wire, and the core stops on its own so the
-      // request cannot be silently ignored the way bit 0 was.
-      .fast_reset_req (fast_reset_req),   // REVIEW2_aug2 M-01: exported to the platform
+      // REVIEW1_Aug2 M-07: the port-0x92 fast-reset request. Exported as a top
+      // port under VEN_L1_AXI for the platform's reset controller; sunk locally
+      // in this configuration (the core stops on its own either way, so the
+      // request cannot be silently ignored the way bit 0 was).
+      .fast_reset_req (fast_reset_req_w),
       .init_eip     (init_eip),
       .init_esp     (init_esp),
       .boot_mode    (boot_mode),
       .cycle_mode   (cycle_mode),
+      // The SMM state exports are part of the unconditional core contract;
+      // only the L1/AXI memory hierarchy consumes them (declarations below).
+      .smm_active_o   (core_smm_active),
+      .smbase_o       (core_smbase),
+      .cache_inv_req  (core_cache_inv),
 `ifdef VEN_L1_AXI
       .real_bus     (l1axi_en),
       .bus_err      (l1_bus_err),
       // Phase D.6: northbridge → icache snoop (DMA-loaded code coherence).
-      .smm_active_o   (core_smm_active),   // REVIEW2 H-24
-      .smbase_o       (core_smbase),       // REVIEW2_aug2 C-08
-      .cache_inv_req  (core_cache_inv),    // REVIEW2_aug2 H-18
       .ic_snoop_valid (ic_snoop_v),
       .ic_snoop_addr  (ic_snoop_a),
       .ic_snoop_valid1(ic_snoop_v1),
       .ic_snoop_addr1 (ic_snoop_a1),   // H-09
       .ic_snoop_valid2(ic_snoop_v2),
       .ic_snoop_addr2 (ic_snoop_a2),
-      .ic_flush_all   (flush_all),        // H-12: global I-cache invalidate
+      .ic_flush_all   (flush_all || l1axi_smm_flush),        // H-12: global I-cache invalidate (+ SMM transitions)
 `endif
       .errata_en    (errata_en),
       .cpu_hung     (cpu_hung),
@@ -553,6 +593,23 @@ module ventium_top
       .fptrap_st1         (fptrap_st1),
       .fptrap_resp_valid  (fptrap_resp_valid),
       .fptrap_result      (fptrap_result),
+`ifdef VEN_FP_PS_ALL
+      // The generalized trap vector: this top's trap service answers only the
+      // simple ST0/ST1 -> result contract above (the TB's atan2 service), so the
+      // extra operand context is sunk and the generalized result inputs are
+      // tied off -- exactly the values undriven pins resolved to before these
+      // connections were made explicit. The full vector is wired on the KV260
+      // SoC top, where the PS services every trapped op.
+      .fptrap_mem         (fptrap_mem_sink),
+      .fptrap_fctrl       (fptrap_fctrl_sink),
+      .fptrap_fstat       (fptrap_fstat_sink),
+      .fptrap_sti         (fptrap_sti_sink),
+      .fptrap_pop         (fptrap_pop_sink),
+      .fptrap_aluop       (fptrap_aluop_sink),
+      .fptrap_res1        (80'd0),
+      .fptrap_res_fstat   (16'd0),
+      .fptrap_action      (4'd0),
+`endif
 `endif
       .syscall_arg_eax    (syscall_arg_eax),
       .syscall_arg_ebx    (syscall_arg_ebx),
@@ -611,19 +668,9 @@ module ventium_top
 `else
       // M8.1: the external-interrupt path is the M8 ventium_soc's; ventium_top
       // (the verification top) leaves the INTERRUPT pins tied off so every existing
-      // gate stays byte-identical -- the divert is dead whenever soc_en is 0.
-      //
-      // ---- task #73 / REVIEW2_aug2 C-07-M-02 blocker: soc_en itself was ALSO tied to
-      // 1'b0 here, so --soc-en set the top-level port and it reached nothing. Measured:
-      // the core's io_req NEVER asserted on a --system --soc-en run, so port I/O could
-      // not execute and every IN/OUT outside cosim took the "out of scope -> HALT
-      // LOUDLY" arm in core_fetch_decode.svh. That is why pioperm stops dead on its
-      // first PERMITTED out and why C-07/M-02 had no way to be validated.
-      //
-      // Passing the port through is byte-identical for every existing gate, because
-      // the TB drives soc_en=0 unless --soc-en is given (tb_main.cpp:1251). The
-      // interrupt pins below stay tied off -- this changes ONLY whether the flag can
-      // reach the core at all.
+      // gate stays byte-identical -- the divert is dead whenever soc_en is 0, and
+      // soc_en is tied 0 in this configuration (declared above; the PS injection
+      // seam exists only under VEN_KV260_SOC).
       .soc_en       (soc_en),
       .intr         (1'b0),
       .nmi          (1'b0),
@@ -640,8 +687,8 @@ module ventium_top
       .mem_lin      (core_mem_lin),
       .mem_wdata    (core_mem_wdata),
       .mem_wstrb    (core_mem_wstrb),
-      .mem_rdata    (core_mem_rdata),
-      .mem_ack      (core_mem_ack),
+      .bus_rdata    (core_mem_rdata),
+      .bus_ack      (core_mem_ack),
       .retire_valid (core_retire_valid),
       .retire_pc    (core_retire_pc),
       .retire_state (core_retire_state),
@@ -687,7 +734,9 @@ module ventium_top
       .dbg_bp_en    (dbg_bp_en),
       .dbg_bp_addr  (dbg_bp_addr),
       .dbg_bp_clr   (dbg_bp_clr),
-      .dbg_halted   (dbg_halted)
+      .dbg_halted   (dbg_halted),
+      .dbg_arch_sel (dbg_arch_sel),
+      .dbg_arch_data(dbg_arch_data)
 `endif
   );
 
@@ -752,6 +801,9 @@ module ventium_top
   assign dbg_cs           = core_retire_state.cs;
   assign dbg_esp          = core_retire_state.esp;
   assign dbg_eflags       = core_retire_state.eflags;
+
+  // The halted architectural selector mux lives inside u_core.  Keeping the
+  // physical 8x80-bit x87 state local avoids a wide debug bus through this top.
 `endif
 
   // ---------------------------------------------------------------------------
@@ -978,6 +1030,9 @@ module ventium_top
   // it the PL emits raw low addresses on HPC0, outside the declared segment.
 `ifdef VEN_KV260_SOC
   localparam logic [39:0] L1AXI_REMAP_BASE = 40'h0_4000_0000;
+  // The downstream of this AXI master is the reserved DDR carveout (including
+  // the platform's explicit VGA/BIOS folds), never a side-effectful MMIO slave.
+  localparam bit L1AXI_NARROW_REPLAY_SAFE = 1'b1;
   // 256 MiB-wrap ADDR_MASK: folds the whole x86 phys space (incl. the top-of-4G BIOS
   // shadow 0xFFFE_0000-0xFFFF_FFFF that SeaBIOS's 32-bit POST runs from) into the
   // 256 MiB carveout — phys 0xFFFE_0000 & 0x0FFF_FFFF = 0x0FFE_0000 -> DDR 0x4FFE_0000.
@@ -989,6 +1044,7 @@ module ventium_top
 `else
   localparam logic [39:0] L1AXI_REMAP_BASE = 40'h0;
   localparam logic [31:0] L1AXI_ADDR_MASK  = 32'hFFFF_FFFF;
+  localparam bit L1AXI_NARROW_REPLAY_SAFE = 1'b0;
 `endif
   logic [31:0] l1_c_rdata; logic l1_c_ack; logic l1_bus_err;
   // REVIEW2_aug2 H-13: the I-side memory type, from ven_cachemap inside ventium_l1_axi.
@@ -996,9 +1052,7 @@ module ventium_top
   // northbridge in the datapath, so its region model does not apply and those modes
   // stay byte-identical.
   logic        l1_ic_nocache;
-  logic        core_smm_active;                       // REVIEW2 H-24: core SMM state
-  logic [31:0] core_smbase;   // REVIEW2_aug2 C-08: the real SMRAM base
-  logic        core_cache_inv; // REVIEW2_aug2 H-18: INVD/WBINVD invalidate request
+  logic        l1axi_smm_flush;  // SMM exit / SMBASE relocation -> I-side flush
   logic        ic_snoop_v; logic [31:0] ic_snoop_a;   // Phase D.6: NB → icache snoop
   logic        ic_snoop_v1; logic [31:0] ic_snoop_a1; // H-09: SMC store, first line
   logic        ic_snoop_v2; logic [31:0] ic_snoop_a2; // H-09: SMC store, second line
@@ -1009,6 +1063,7 @@ module ventium_top
   // the advertised half-cache config did not shrink the cache that holds the data.
   // ventium_pkg::L1D_SETS_DEF is the single definition the core uses for DC_SETS.
   ventium_l1_axi #(.ADDR_W(40), .REMAP_BASE(L1AXI_REMAP_BASE), .ADDR_MASK(L1AXI_ADDR_MASK),
+                   .NARROW_REPLAY_SAFE(L1AXI_NARROW_REPLAY_SAFE),
                    .L1_SETS(ventium_pkg::L1D_SETS_DEF)) u_l1axi (
       .core_clk(clk), .core_rst_n(rst_n), .axi_clk(clk), .axi_rst_n(rst_n),
       .flush_all (flush_all || core_cache_inv),   // REVIEW2_aug2 H-18
@@ -1021,6 +1076,7 @@ module ventium_top
       .shutdown  (shutdown), .m_idle (m_idle),
       .smm_active         (core_smm_active),            // REVIEW2 H-24
       .smbase             (core_smbase),                // REVIEW2_aug2 C-08
+      .smm_flush_o        (l1axi_smm_flush),
       .icache_snoop_valid (ic_snoop_v), .icache_snoop_addr (ic_snoop_a),
       .icache_snoop_valid1(ic_snoop_v1), .icache_snoop_addr1(ic_snoop_a1),   // H-09
       .icache_snoop_valid2(ic_snoop_v2), .icache_snoop_addr2(ic_snoop_a2),
@@ -1049,12 +1105,10 @@ module ventium_top
       .m_axi_arready(m_axi_arready), .m_axi_rid(m_axi_rid), .m_axi_rdata(m_axi_rdata),
       .m_axi_rresp(m_axi_rresp), .m_axi_rlast(m_axi_rlast), .m_axi_rvalid(m_axi_rvalid),
       .m_axi_rready(m_axi_rready)
-`ifdef VEN_L1_HONOR_CD
       // live CR0.CD (core_cr0 = continuous `assign retire_cr0 = creg0`, so valid every
-      // cycle, not just on retire). CD=1 (BIOS POST memory test) => L1 D$ honors the
-      // cache-disable and bypasses (no 8-beat write-allocate fill amplification).
+      // cycle, not just on retire). REVIEW1_Aug3 R2-H12: unconditional -- CD=1 (the
+      // reset/POST state) disables L1 D$ allocation until software clears it.
       , .cr0_cd(core_cr0[30])
-`endif
   );
 
   assign mem_req   = l1axi_en ? 1'b0 : (bus_mode ? bus_mem_req   : core_mem_req);

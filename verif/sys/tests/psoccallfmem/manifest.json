@@ -1,0 +1,40 @@
+{
+  "name": "psoccallfmem",
+  "kind": "system",
+  "src": "psoccallfmem.S",
+  "linker": "psoccallfmem.ld",
+  "image": "psoccallfmem.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 6000,
+  "sys": true,
+  "paging": false,
+  "description": "Memory-indirect far CALL (FF /3) mode-split regression. A real-mode or V86 far pointer's second word is a SEGMENT VALUE (base = sel<<4, no descriptor table); only a protected-mode transfer bounds the selector (far_sel_bad) and probes the descriptor through S_LJMP with lcall_pend. The silicon-audit shape was SeaBIOS at F000:8B45 executing `lcall *0(%bp)` (encoding FF 5E 00) with a stack-built far pointer into an option-ROM-style segment; routing that through the protected descriptor path #GP-loops the boot. Coverage: R1 m16:16 lcall *(%si); R2 m16:16 lcall *0(%bp) with the pointer built on the stack (the audit shape); R3 m16:32 (0x66 prefix) lcall *(%si) with a 6-byte pointer and a 32-bit return frame; R4 m16:16 with SS=0x1000 SP=2 (the return-frame pushes wrap at 64 KiB: CS at offset 0x0000, IP at 0xFFFE, ESP high half preserved); R5 the m16:32 wrap variant (SP=4: CS dword at 0x0000, EIP dword at 0xFFFC); R6 the R2 shape with IF=1 (IVT installed, PIC unmasked out of reset, PIT free-running); P1 a protected m16:32 indirect far CALL through a valid code descriptor (positive control); P2 the same with an out-of-table selector 0x0F00 (#GP(0x0F00) BEFORE any push, ESP unchanged -- negative control that the split did not bypass descriptor validation); V1 a V86 task (CS=0xF000, in-image) running the R2 shape and an m16:32 lcall *(%si) -- seg_real = real_mode || v86. Every real/V86 case enters CS=0x2000 (a different real segment), the callee reads its return frame back through BP into markers (the differential traces registers, not memory, so the pushed bytes must round-trip through registers), and the caller proves exact CS/SP/ESP restoration + callee hit counts. Callee hit totals at the pass exit: A (m16:16) = 5 (R1,R2,R4,R6,V1), B (m16:32) = 3 (R3,R5,V1).",
+  "case_map": {
+    "R1/R2": "m16:16 indirect far CALL in real mode (R2 is the stack-built FF 5E 00 shape). Callee at 0x2000:0x0003 records its CS, the return IP/CS read off the stack through BP, and a hit count; lret back; the caller checks SP/CS/count/return-IP/return-CS. Fail codes: R1 0x11-0x15, R2 0x21-0x25",
+    "R3": "m16:32 (0x66 FF /3) in real mode: 6-byte pointer, 32-bit return frame (CS dword + EIP dword), callee at 0x2000:0x0070 reads all four frame words back, 0x66 lret. Fail codes 0x31-0x37 (incl. the frame's high words: EIP-hi = 0, CS-hi = 0)",
+    "R4/R5": "top-of-stack wrap: SS=0x1000 with ESP=0x11110002 (R4, m16:16) / 0x22220004 (R5, m16:32); the return-frame pushes wrap at 64 KiB and ESP[31:16] must survive. The callee reads the split frame through BP (16-bit effective addresses wrap, valid on both oracles) and returns via an indirect far JMP through a scratch pointer -- see oracle_notes. Fail codes: R4 0x44-0x47, R5 0x54-0x59",
+    "R6": "the R2 shape with IF=1. Deterministic: the golden single-step path masks CPU_INTERRUPT_HARD (SSTEP_NOIRQ), the RTL TB has no INTR source, and the PIT's first IRQ0 transition is ~27.5 ms of guest time out, far beyond the window; the PIC is unmasked out of reset (i8259 pic_init_reset: imr=0) and the IVT is installed (every vector -> a benign iret; the fault vectors -> fail exits). cli before the PM phase; the V86 frame keeps IF=0. Fail codes 0x64-0x67",
+    "P1": "protected control, positive: m16:32 lcall *disp32 through code descriptor 0x18 transfers, the target runs (sees CS=0x18), reads its frame, RETFs back; ESP exact. Fail codes 0x71-0x74",
+    "P2": "protected control, negative: lcall *disp32 with selector 0x0F00 (past the GDT limit) faults #GP(0x0F00) before any return-frame push; the handler proves ESP unchanged across the delivery and skips the 6-byte instruction. Fail codes 0x78-0x7A",
+    "V1": "V86 task (IRET entry, VM=1, IOPL=3, IF=0; CS=0xF000 in-image, SS=0x2000): the stack-built m16:16 shape and an m16:32 lcall *(%si) both take the real-mode route; INT 0x30 (DPL=3 gate) returns to the CPL0 monitor, which grades the V86 sentinel + global callee counts (A=5, B=3) and exits 0x42. In-V86 check failures ride marker 0x2054 (0x82 sp, 0x83 cs). A #GP in the V86 phase exits 0x7D."
+  },
+  "oracle_notes": [
+    "SEGMENT SUBSTITUTION: the audit's literal far pointer was C000:0003, but under the harness's qemu-system-i386 machine the 0xC0000 option-ROM window is read-only shadow -- guest writes are dropped and reads return zeros (probed via QMP xp after a free-run: 0xC0000 stays 0x00000000 while the same copy to RAM lands fine), so a callee copied there cannot exist for the oracle. The test uses segment 0x2000 (plain RAM in both environments) with the same shape (offset-3 entry into a copied blob, stack-built pointer, FF 5E 00 encoding). The mechanism under test is identical: as a selector, 0x2000 names GDT index 0x400, far past the limit, so a descriptor-table interpretation faults exactly as 0xC000 (index 0x1800) would.",
+    "QEMU ORACLE GAP (far RETURN across the 64 KiB stack boundary): QEMU 8.2.2's real-mode lret computes the first pop's address masked to the 16-bit stack size (gen_stack_A0, MO_16) but increments the linear A0 for the second pop WITHOUT re-masking (gen_add_A0_im), so with the frame split across the boundary (e.g. SP=2: IP at offset 0xFFFE, CS at 0x0000) QEMU pops CS from base+0x10000 instead of base+0x0000. Measured: the R4 callee popped CS=0x9090 (the bytes at the unwrapped address) where silicon and the RTL wrap to 0x0000. The push side wraps identically on both oracles (proven by the callee's BP reads, which DO wrap). The wrap cases therefore keep the boundary-crossing CALL (the review's requirement: the return-frame pushes wrap at 64 KiB) but normalize the RETURN leg through an indirect far JMP -- which also covers the real-mode m16:16/m16:32 indirect far JMP arms (q_jmpf_mem) on the way home.",
+    "Interrupt determinism: the differential golden (gdbstub single-step) masks CPU_INTERRUPT_HARD via SSTEP_NOIRQ (cpu-exec.c), the RTL testbench asserts no INTR in --system, and the QEMU free-run completes in microseconds of guest time, orders before the PIT's first ~27.5 ms mode-3 transition -- so the IF=1 case (R6) is deterministic under all three consumers.",
+    "The PM negative control (P2) relies on QEMU checking the selector before pushing the return frame (helper_lcall_protected validates the selector/table first), matching the RTL's far_sel_bad precheck; the handler's ESP-unchanged proof would diverge if either side pushed first."
+  ],
+  "validation": {
+    "commands": [
+      "make -C verif/sys/tests/psoccallfmem",
+      "qemu-system-i386 -display none -machine pc -m 32 -device isa-debug-exit,iobase=0xf4,iosize=0x04 -bios verif/sys/tests/psoccallfmem/psoccallfmem.bin  -> exit 133",
+      "bash verif/sys/run-sys-golden.sh psoccallfmem  -> golden + RTL --system diff EQUIVALENT"
+    ],
+    "results_2026_08_11": "QEMU free-run exit 133; golden 3824 records (V86 phase present, 46 VM=1 records; far-callee CS=0x2000 128 records; PM target CS=0x18 8 records; final record edi=0x42); RTL --system 3824 records, EQUIVALENT vs the golden (func, sys compared). Negative control: a scratch RTL with the seg_real split reverted in both q_callf_mem arms (real mode routes through far_sel_bad/S_LJMP again) DIVERGES at n=1789 -- the first real-mode lcall *(%si) faults #GP and dies in the IVT[13] fail exit (edi=0x7D) where the golden enters CS=0x2000:0x0003. Sibling gates pfarok/pintr/pv86/pxwrap all SYS-GOLDEN-OK. Green on the working-tree RTL (md5-verified untouched)."
+  }
+}

@@ -1366,17 +1366,17 @@
    "desc": "Return from procedure"
   },
   "C4": {
-   "mnem": "LES r,m16:16",
-   "status": "partial",
-   "detail": "Real-mode 16-bit LES only; PM/32-bit/reg forms HALT. (On modern CPUs C4 is also the 3-byte VEX prefix, out of P54C scope.)",
-   "evidence": "core.sv:1886-1892 8'hC4,8'hC5: implemented ONLY for mod!=11 && seg_real && eff_opsize (real-mode 16-bit). Reg form (mod==11), 32-bit (0x66/no eff_opsize) and protected mode -> else d_unknown (HALT).",
+   "mnem": "LES r,m16:16/32",
+   "status": "implemented",
+   "detail": "Memory forms support 16/32-bit offsets in real, V86, and protected mode; protected loads reuse the atomic S_SEGLD descriptor transaction. Register form is #UD. (Modern VEX use is out of P54C scope.)",
+   "evidence": "decode_stages.sv C4/C5 accepts every mod!=11 form and targets ES for C4. core_load.svh fetches the m16:32 selector beat; core_exec.svh routes protected selectors through S_SEGLD; core_gpr_wb.svh commits the offset only on segld_commit_ok.",
    "desc": "Load Far Pointer"
   },
   "C5": {
-   "mnem": "LDS r,m16:16",
-   "status": "partial",
-   "detail": "Real-mode 16-bit only; PM/32-bit/reg HALT. (Also 2-byte VEX prefix on modern CPUs, out of scope.)",
-   "evidence": "core.sv:1886-1892 8'hC4,8'hC5: same gate as LES \u2014 only mod!=11 && seg_real && eff_opsize; otherwise d_unknown (HALT). d_lseg=SG_DS for C5.",
+   "mnem": "LDS r,m16:16/32",
+   "status": "implemented",
+   "detail": "Memory forms support 16/32-bit offsets in real, V86, and protected mode; protected loads atomically commit the GPR and validated DS descriptor. Register form is #UD.",
+   "evidence": "Same shared C4/C5 path as LES with d_lseg=SG_DS. pseg executes silicon bytes 66 67 C5 75 10 in a 16-bit protected CS; pdescprec proves a rejected selector leaves ESI unchanged; both traces are QEMU-equivalent.",
    "desc": "Load Far Pointer"
   },
   "C6": {
@@ -1790,8 +1790,8 @@
   "00": {
    "mnem": "GRP6 (SLDT/STR/LLDT/LTR/VERR/VERW r/m)",
    "status": "partial",
-   "detail": "ModRM.reg group. Ventium decodes only the register-form /1 STR and /3 LTR, and ONLY when sys_mode=1; SLDT(/0), LLDT(/2), VERR(/4), VERW(/5), and ALL memory forms set d_unknown->S_HALT, and the whole opcode HALTs in user mode.",
-   "evidence": "core.sv:1412-1424 (STR /1 reg, LTR /3 reg gated on sys_mode; else d_unknown); exec core_exec.svh:103 (SYS_STR), core_fetch_decode.svh:430 (SYS_LTR)",
+   "detail": "ModRM.reg group. Ventium decodes the register forms /0 SLDT, /1 STR, /2 LLDT and /3 LTR, and ONLY when sys_mode=1; VERR(/4), VERW(/5), and ALL memory forms set d_unknown->S_HALT, and the whole opcode HALTs in user mode.",
+   "evidence": "decode_stages.sv:377-397 (SLDT /0, STR /1, LLDT /2, LTR /3 reg gated on sys_mode; else d_unknown); exec core_exec.svh (SYS_STR/SYS_SLDT), core_tss_priv.svh S_LTR (LLDT/LTR)",
    "desc": "Group 6 (SLDT/STR/LLDT/LTR/VERR/VERW)"
   },
   "01": {
@@ -3014,9 +3014,9 @@
   },
   "B2": {
    "mnem": "LSS r,m16:16/32",
-   "status": "partial",
-   "detail": "Implemented only as real-mode 16-bit m16:16 far load; PM/32-bit form HALTs.",
-   "evidence": "core.sv:1516-1523 (8'hB2): decodes (d_lseg=SG_SS) ONLY if (mod!=11 && seg_real && eff_opsize); every other case (incl. all 32-bit/protected-mode forms) sets d_unknown -> S_HALT (core.sv:1522).",
+   "status": "implemented",
+   "detail": "All legal memory forms support 16/32-bit offsets in real, V86, and protected mode; register form is #UD.",
+   "evidence": "decode_stages.sv B2/B4/B5 accepts mod!=11, selects q_w=2/4 and SG_SS; protected selectors use the shared atomic S_SEGLD path.",
    "desc": "Load Far Pointer"
   },
   "B3": {
@@ -3028,16 +3028,16 @@
   },
   "B4": {
    "mnem": "LFS r,m16:16/32",
-   "status": "partial",
-   "detail": "Real-mode 16-bit far-pointer load only; PM/32-bit HALTs.",
-   "evidence": "core.sv:1516-1523 (8'hB4): d_lseg=SG_FS only if (mod!=11 && seg_real && eff_opsize); else d_unknown -> S_HALT (core.sv:1522).",
+   "status": "implemented",
+   "detail": "All legal memory forms support 16/32-bit offsets in real, V86, and protected mode; register form is #UD.",
+   "evidence": "Shared B2/B4/B5 far-pointer path with d_lseg=SG_FS and atomic protected S_SEGLD commit.",
    "desc": "Load Far Pointer"
   },
   "B5": {
    "mnem": "LGS r,m16:16/32",
-   "status": "partial",
-   "detail": "Real-mode 16-bit far-pointer load only; PM/32-bit HALTs.",
-   "evidence": "core.sv:1516-1523 (8'hB5): d_lseg=SG_GS only if (mod!=11 && seg_real && eff_opsize); else d_unknown -> S_HALT (core.sv:1522).",
+   "status": "implemented",
+   "detail": "All legal memory forms support 16/32-bit offsets in real, V86, and protected mode; register form is #UD.",
+   "evidence": "Shared B2/B4/B5 far-pointer path with d_lseg=SG_GS and atomic protected S_SEGLD commit.",
    "desc": "Load Far Pointer"
   },
   "B6": {
@@ -3559,5 +3559,5 @@
    "desc": "Undefined Instruction (#UD)"
   }
  },
- "_decode_fingerprint": "ab08bbb22da93131c8ad8c5477e2c54f8a6660082452d58b6073f463e11d82a9"
+ "_decode_fingerprint": "5caf5e06463362d4ad85509a59abe19c52b6121d2d9d2d482738e5ec9afe6424"
 }

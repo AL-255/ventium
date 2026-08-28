@@ -68,6 +68,33 @@ _start:
     fstp    %st(0)          # pop
     fstp    %st(0)          # pop  -> TOP back to 000, stack empty
 
+    # ---- resync: FNINIT + refill all 8 physical slots ---------------------
+    # The faulted pops above substituted the QNaN indefinite into physical
+    # slots where QEMU keeps the raw stale value -- that record-exact oracle
+    # gap is what this program's masks cover. FNINIT clears the sticky IE|SF
+    # and resets TOP/tags on BOTH sides; eight pushes then rewrite every
+    # physical slot with identical values, so from here on fstat AND st0..st7
+    # compare with zero masks.
+    fninit
+    fld1
+    fldz
+    fld1
+    fldz
+    fld1
+    fldz
+    fld1
+    fldz
+    # Unwind the refill: eight valid pops fault on neither side, so every
+    # record from the last refill push to here compares with zero masks.
+    fstp    %st(0)
+    fstp    %st(0)
+    fstp    %st(0)
+    fstp    %st(0)
+    fstp    %st(0)
+    fstp    %st(0)
+    fstp    %st(0)
+    fstp    %st(0)
+
     # ---- clean exit ---------------------------------------------------------
     movl    $1, %eax        # __NR_exit
     xorl    %ebx, %ebx

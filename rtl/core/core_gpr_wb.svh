@@ -39,6 +39,20 @@
         end
 `endif
 
+        // Protected far-pointer loads (LES/LDS/LSS/LFS/LGS) have two
+        // architectural destinations. Commit the offset only on the SAME shared
+        // success event that installs the validated segment descriptor; never in
+        // S_EXEC, where a later descriptor fault would otherwise expose a partial
+        // instruction. Real/V86 loads retain the ordinary S_EXEC writeback.
+        S_SEGLD: begin
+          if (segld_commit_ok && q_seg_from_mem && q_seg_load
+              && !q_seg_load_lo && q_writes_reg) begin
+            gpr_we[q_dst_reg]=1'b1;
+            gpr_wd[q_dst_reg]=reg_merge(gpr_o[q_dst_reg],
+                                        wmask(mem_load_data,q_w), q_w, 1'b0);
+          end
+        end
+
         // -------------------------------------------------------------------
         // S_EXEC — the integer execute/commit arm. The flag-only and seg/cr/dr-
         // only sysop branches are kept as EMPTY guards so the mutual-exclusion
@@ -72,12 +86,21 @@
             endcase
           end
           else if (q_sysop==SYS_MOVSREG_FROM) begin
+            // R2-M01: a 32-bit destination zero-extends the selector (the QEMU/P5
+            // contract); a 16-bit destination merges as before.
             gpr_we[q_dst_reg]=1'b1;
-            gpr_wd[q_dst_reg]=reg_merge(gpr_o[q_dst_reg], {16'd0, seg_sel[q_sys_sreg]}, 3'd2, 1'b0);
+            gpr_wd[q_dst_reg]=(q_w==3'd4) ? {16'd0, seg_sel[q_sys_sreg]}
+                                          : reg_merge(gpr_o[q_dst_reg], {16'd0, seg_sel[q_sys_sreg]}, 3'd2, 1'b0);
           end
           else if (q_sysop==SYS_STR) begin
             gpr_we[q_dst_reg]=1'b1;
-            gpr_wd[q_dst_reg]=reg_merge(gpr_o[q_dst_reg], {16'd0, tr_sel}, 3'd2, 1'b0);
+            gpr_wd[q_dst_reg]=(q_w==3'd4) ? {16'd0, tr_sel}
+                                          : reg_merge(gpr_o[q_dst_reg], {16'd0, tr_sel}, 3'd2, 1'b0);
+          end
+          else if (q_sysop==SYS_SLDT) begin
+            gpr_we[q_dst_reg]=1'b1;
+            gpr_wd[q_dst_reg]=(q_w==3'd4) ? {16'd0, ldt_sel}
+                                          : reg_merge(gpr_o[q_dst_reg], {16'd0, ldt_sel}, 3'd2, 1'b0);
           end
           else if (q_sysop==SYS_MOVSREG_TO && !sys_mode && proxy_en) begin end
           else if (q_sysop==SYS_MOVSREG_TO) begin end
@@ -103,7 +126,8 @@
                   gpr_wd[q_dst_reg]=reg_merge(gpr_o[q_dst_reg], wmask(mem_load_data,q_w), q_w, 1'b0);
                   if (q_dst_reg!=R_ESP) begin gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=gpr_o[R_ESP]+{28'd0,q_w}; end
                 end else if (q_mem_write) begin end
-                else if (q_writes_reg) begin
+                else if (q_writes_reg
+                         && !(q_seg_load && !q_seg_load_lo && !seg_real)) begin
                   gpr_we[q_dst_reg]=1'b1; gpr_wd[q_dst_reg]=reg_merge(dst_cur, alu_out, q_w, q_dst_high8);
                 end
               end
@@ -537,8 +561,9 @@
         // -------------------------------------------------------------------
         // M9.5 real-mode far CALL / RET arms (gpr write only on beat 1).
         S_LCALL: begin
+          // R2-H05: lc_callw = the gate width for a gated call, q_w otherwise.
           if (mem_ack && seg_step) begin
-            gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=gpr_o[R_ESP] - {27'd0, q_w, 1'b0};
+            gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=gpr_o[R_ESP] - {27'd0, lc_callw, 1'b0};
           end
         end
 
@@ -549,9 +574,25 @@
           // to address the remaining ESP/SS pops, so the beat-1 detection has to
           // suppress this write on the same clock it fires. The condition is the
           // popped CS.RPL, exactly as in the S_RETF arm of core_seg_ljmp.svh.
-          if (mem_ack && seg_step && !retf_out &&
-              !(!seg_real && (mem_rdata[1:0] > cpl_r))) begin
+          // REVIEW_Aug3 H-02: a PROTECTED same-privilege RETF no longer advances ESP
+          // here either -- the popped target CS is validated only later, in S_LJMP,
+          // and a rejected target must fault with ESP untouched. The advance is
+          // staged (retf_same/retf_esp_adj at the beat-1 handoff) and fires on
+          // retf_commit_w in the S_LJMP arm below. Only the REAL-MODE form (which
+          // has no later validation stage) still advances ESP at the pop.
+          if (mem_ack && seg_step && !retf_out && seg_real) begin
             gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=gpr_o[R_ESP] + {27'd0, q_w, 1'b0} + {16'd0, q_ret_imm};
+          end
+        end
+
+        // REVIEW_Aug3 H-02: the deferred same-privilege protected RETF ESP advance.
+        // retf_commit_w is the S_LJMP arm's accept condition computed combinationally
+        // in core.sv, so this fires on exactly the clock the target CS commits --
+        // and never on a selector/descriptor/offset fault (start_fault cleared
+        // retf_same, and the commit predicate itself excludes those cases).
+        S_LJMP: begin
+          if (retf_commit_w) begin
+            gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=gpr_o[R_ESP] + retf_esp_adj;
           end
         end
 
@@ -597,34 +638,60 @@
             if (from_v86)
               last = int_has_err ? (int_step == 4'd9) : (int_step == 4'd8);
             else if (xpl_active)
-              last = cg_xpl ? (int_step == 4'd3)      // REVIEW2_aug2 C-06
+              last = cg_xpl ? (cg_beat == (6'd3 + {1'b0, cg_pcount}))   // R2-H05
                             : (int_has_err ? (int_step == 4'd5) : (int_step == 4'd4));
             else
               last = int_has_err ? (int_step == 4'd3) : (int_step == 4'd2);
             if (last) begin
               if (from_v86) begin
                 fsz = int_has_err ? 32'd40 : 32'd36;
-                gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=int_new_esp - fsz;
+                // SET_ESP through the new (SS0) stack's B mask, like every
+                // other cross-priv frame: a 16-bit SS0 replaces only ESP[15:0]
+                // and the low word WRAPS (QEMU sp_mask semantics).
+                gpr_we[R_ESP]=1'b1;
+                gpr_wd[R_ESP]= ss_b ? (int_new_esp - fsz)
+                                    : ((gpr_o[R_ESP] & 32'hFFFF_0000)
+                                       | ((int_new_esp - fsz) & 32'h0000_FFFF));
+              end else if (xpl_active && cg_xpl) begin
+                // REVIEW1_Aug3 R2-H05: the call-gate ESP commit. fsz = the 4
+                // header slots + cg_pcount params, in gate-width units; the
+                // result commits through the NEW stack's B mask (SET_ESP(sp,
+                // sp_mask) in QEMU: a 16-bit new stack replaces only ESP[15:0]).
+                fsz = cg_wide ? (32'd16 + {25'd0, cg_pcount, 2'b00})
+                              : (32'd8  + {26'd0, cg_pcount, 1'b0});
+                gpr_we[R_ESP]=1'b1;
+                gpr_wd[R_ESP]= ss_b ? (int_new_esp - fsz)
+                                    : ((gpr_o[R_ESP] & 32'hFFFF_0000)
+                                       | ((int_new_esp - fsz) & 32'h0000_FFFF));
               end else if (xpl_active) begin
-                // REVIEW2_aug2 C-06: a call-gate frame is 4 dwords (SS, ESP, CS, EIP),
-                // not 5 -- there is no EFLAGS word and never an error code.
-                fsz = cg_xpl ? 32'd16 : (int_has_err ? 32'd24 : 32'd20);
-                gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=int_new_esp - fsz;
+                // A4-H03: one frame plan. A 16-bit interrupt/trap gate (int_frm16)
+                // pushes a WORD frame: 10 bytes (SS, SP, FLAGS, CS, IP), 12 with an
+                // error code -- this used to charge the 32-bit 20/24 regardless of
+                // gate width, so a 16-bit cross-priv delivery landed the handler at
+                // the wrong ESP. The commit wraps through the NEW stack's B mask,
+                // exactly like the call-gate arm above (SET_ESP(sp, sp_mask)).
+                fsz = int_frm16 ? (int_has_err ? 32'd12 : 32'd10)
+                                : (int_has_err ? 32'd24 : 32'd20);
+                gpr_we[R_ESP]=1'b1;
+                gpr_wd[R_ESP]= ss_b ? (int_new_esp - fsz)
+                                    : ((gpr_o[R_ESP] & 32'hFFFF_0000)
+                                       | ((int_new_esp - fsz) & 32'h0000_FFFF));
 `ifdef VEN_DBG_WD
-                // [VEN-ESPWR] the cross-priv handler-ESP writeback. Golden lands the
-                // #PF handler at esp=0x384a (int_new_esp=0x3862, fsz=24). If this
-                // prints esp=0x3848, the 2-byte drop is HERE (int_new_esp or fsz).
-                if (creg3==32'h0007e000)
-                  $display("[VEN-ESPWR] XPL handler ESP<=%08h = int_new_esp(%08h) - fsz(%0d) has_err=%b vec=%0d @cs:eip=%04x:%08h",
-                           int_new_esp - fsz, int_new_esp, fsz, int_has_err, int_vec, seg_sel[SG_CS], eip);
+                // Generic cross-privilege handler-stack writeback trace.
+                $display("[VEN-ESPWR] XPL handler ESP<=%08h = int_new_esp(%08h) - fsz(%0d) has_err=%b vec=%0d @cs:eip=%04x:%08h",
+                         int_new_esp - fsz, int_new_esp, fsz, int_has_err, int_vec, seg_sel[SG_CS], eip);
 `endif
               end else if (int_gate_op16) begin
-                // SAME-PRIV 16-BIT GATE: 6-byte IP:CS:FLAGS frame (no errcode on a
-                // 16-bit same-priv delivery in this corpus); SP -= 6 (mirrors
-                // S_RMINT_PUSH). The full 32-bit ESP is decremented (SS.B controls
-                // wrap; the corpus 16-bit-PM stacks are < 64 KiB so this matches).
-                fsz = 32'd6;
-                gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=gpr_o[R_ESP] - fsz;
+                // SAME-PRIV 16-BIT GATE: 6-byte IP:CS:FLAGS frame, 8-byte with an
+                // error code (A4-H03 -- the errcode size was hard-charged 6).
+                // SP wraps in the low 16 bits on a 16-bit stack (SS.B=0),
+                // preserving ESP's upper half -- mirroring the wrap the xpl and
+                // call-gate arms already do.
+                fsz = int_has_err ? 32'd8 : 32'd6;
+                gpr_we[R_ESP]=1'b1;
+                gpr_wd[R_ESP]= ss_b ? (gpr_o[R_ESP] - fsz)
+                                    : ((gpr_o[R_ESP] & 32'hFFFF_0000)
+                                       | ((gpr_o[R_ESP] - fsz) & 32'h0000_FFFF));
               end else begin
                 fsz = int_has_err ? 32'd16 : 32'd12;
                 gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=gpr_o[R_ESP] - fsz;
@@ -673,7 +740,17 @@
         // the same expression core_iret.svh branches on (defined once, in core.sv), so
         // the two drivers cannot disagree about whether the frame was accepted.
         S_IRET_SS: begin
-          if (iret_ss_commit) begin gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=iret_esp; end
+          if (iret_ss_commit) begin
+            gpr_we[R_ESP]=1'b1;
+            // The restore's mask follows the OUTER stack's B bit (mem_rdata[22]
+            // = desc[54] of the popped SS descriptor at this commit clock):
+            // 32-bit outer stack -> full assignment; 16-bit -> the popped SP
+            // word replaces SP only, preserving the handler ESP's upper half
+            // (QEMU's SET_ESP(sp, get_sp_mask(ss_e2))). esp_arch_dst exempts
+            // the write from the generic 16-bit-stack post-process.
+            gpr_wd[R_ESP]= mem_rdata[22] ? iret_esp
+                                         : {gpr_o[R_ESP][31:16], iret_esp[15:0]};
+          end
         end
         // REVIEW1_Aug2 C-06: the SAME-PRIVILEGE ESP advance, on the validated commit
         // clock. iret_cs_commit is the same expression core_iret.svh branches on.
@@ -691,7 +768,7 @@
         end
 
         S_RMIRET: begin
-          if (mem_ack) begin
+          if (rm_read_armed && mem_ack) begin
             unique case (int_step)
               4'd0, 4'd1: ;
               default: begin gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=gpr_o[R_ESP] + 32'd6; end
@@ -704,10 +781,13 @@
         // The preceding else-if branches (no gpr write) are kept as empty guards so
         // the mutual-exclusion ordering of the proxy branch is preserved verbatim.
         S_DECODE: begin
-          if (smi_pending && sys_mode && !smm_active) begin end
-          else if (nmi_take) begin end
-          else if (intr_take) begin end
-          else if (dbg_block_issue) begin end
+          // Must mirror core_fetch_decode.svh exactly: a quiescent debugger
+          // park owns the boundary, and a host STEP defers asynchronous delivery
+          // until the one requested instruction has retired.
+          if (dbg_block_issue) begin end
+          else if (smi_pending && sys_mode && !smm_active && !dbg_step_active) begin end
+          else if (nmi_take && !dbg_step_active) begin end
+          else if (intr_take && !dbg_step_active) begin end
           else if (DBG_GD_ENABLE && sys_mode &&
                    (d_sysop==SYS_MOVDR_TO || d_sysop==SYS_MOVDR_FROM) && dr7[DR7_GD]) begin end
           else if (sys_mode && creg4[3] &&
@@ -735,7 +815,7 @@
           // clock must write no GPR. Without this arm the chain fell through to ISSUE
           // and committed a register for an instruction that never retired (and, since
           // EIP is not advanced on the divert, re-executes after IRET).
-          if (fp_irq_divert) begin end
+          if (fp_issue_block) begin end
           else if (stall_cnt!=7'd0) begin end
           else if (!pipe_bytes_ok
 `ifdef VEN_L1_AXI

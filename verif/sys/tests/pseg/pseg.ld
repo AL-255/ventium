@@ -43,6 +43,7 @@ SECTIONS
         *(.rodata*)
         *(.data*)
     }
+    pm16_lds_off = ABSOLUTE(pm16_lds - IMAGE_BASE);
 
     /* The reset stub goes at the very end: image offset 0xFFF0 == linear FFFF0. */
     . = IMAGE_BASE + 0xFFF0;

@@ -731,7 +731,8 @@ int main(int argc, char** argv) {
     int      axr = 0;                  // read FSM: 0=IDLE, 1=BEAT
     int      axw = 0;                  // write FSM: 0=IDLE, 1=DATA, 2=RESP
     uint32_t axr_addr = 0, axw_addr = 0, axr_cnt = 0;
-    struct { bool ar,r,aw,w,b; uint32_t araddr,arlen,awaddr,wdata,wstrb; } axhs{};
+    uint32_t axr_size = 2;               // R2-H01: latched ARSIZE (0=1B,1=2B,2=4B)
+    struct { bool ar,r,aw,w,b; uint32_t araddr,arlen,awaddr,wdata,wstrb,arsize; } axhs{};
     // #34: AXI_STUCK=1 freezes the slave (a dead DDR/bridge) to exercise the master
     // watchdog -> bus_err -> the core's S_HALT override (cpu_hung), end-to-end.
     const bool axi_stuck = (std::getenv("AXI_STUCK") != nullptr);
@@ -792,7 +793,17 @@ int main(int argc, char** argv) {
         const bool b_rdy = (axw==2) && (axw_lat==0);
         top->m_axi_arready = (axr==0);
         top->m_axi_rvalid  = r_rdy;
-        top->m_axi_rdata   = r_rdy ? mem.read32(axr_addr) : 0u;
+        // R2-H01: honor ARSIZE per the AXI narrow-transfer rule -- the addressed
+        // bytes on their OWN lanes, zeros elsewhere (the RTL's narrow device
+        // pieces depend on it; a 4B fill beat is the full word, as before).
+        uint32_t rd32 = 0;
+        if (r_rdy) {
+            const uint32_t nb   = 1u << axr_size;
+            const uint32_t lane = axr_addr & 3u;
+            for (uint32_t b = lane; b < lane + nb && b < 4; ++b)
+                rd32 |= (uint32_t)mem.read8(axr_addr + (b - lane)) << (8u*b);
+        }
+        top->m_axi_rdata   = rd32;
         top->m_axi_rlast   = r_rdy && (axr_cnt==0);
         top->m_axi_rid = 0; top->m_axi_rresp = 0;
         top->m_axi_awready = (axw==0);
@@ -808,6 +819,7 @@ int main(int argc, char** argv) {
         axhs.w  = (axw==1) && (bool)top->m_axi_wvalid;
         axhs.b  = (axw==2) && (axw_lat==0) && (bool)top->m_axi_bready;
         axhs.araddr = (uint32_t)top->m_axi_araddr - AXI_REMAP; axhs.arlen = (uint32_t)top->m_axi_arlen;
+        axhs.arsize = (uint32_t)top->m_axi_arsize;
         axhs.awaddr = (uint32_t)top->m_axi_awaddr - AXI_REMAP;
         axhs.wdata  = (uint32_t)top->m_axi_wdata;  axhs.wstrb = (uint32_t)top->m_axi_wstrb;
     };
@@ -823,7 +835,7 @@ int main(int argc, char** argv) {
             wpost_q.resize(k);
         }
         if (axr==0) { if (axhs.ar) {
-                          axr_addr=axhs.araddr; axr_cnt=axhs.arlen; axr=1;
+                          axr_addr=axhs.araddr; axr_cnt=axhs.arlen; axr_size=axhs.arsize; axr=1;
                           // first-beat (AR->first R) latency: fixed AXI_RLAT, plus a
                           // random 0..AXI_RFIRST under the faithful model (real DDR
                           // open-row vs precharge variance).
@@ -1866,8 +1878,10 @@ int main(int argc, char** argv) {
             }
         }
         // F4A: windowed per-commit trace of the VBR KERNEL.SYS load loop (cs=0x1FE0,
-        // ~0x7dxx) to root-cause the non-terminating rep-movsb/dec-di spin. Logs each
-        // unique committed EIP in the loop region over a 200k-cycle window at the hang.
+        // ~0x7dxx) to root-cause the non-terminating rep-movsb/dec-di spin. It consumes
+        // the DOS peripheral-model arm flag and the KV260-only interrupt port, so do
+        // not make a generic VEN_DBG_CORE build depend on those unrelated interfaces.
+#if defined(VEN_DOS_MODELS) && defined(VEN_KV260_SOC)
         {
             static uint32_t f4a_last = 0xffffffffu; static int f4a_n = 0;
             static uint64_t f4a_lo = std::getenv("VEN_F4A_CYC_LO") ? strtoull(std::getenv("VEN_F4A_CYC_LO"),0,0) : 0ull;
@@ -1886,6 +1900,7 @@ int main(int argc, char** argv) {
                     ventium::g_last_arch.gpr[5], ventium::g_last_arch.gpr[4]);
             }
         }
+#endif
         // Log every real-mode INT (vector + AX at entry). init_call_intr patches
         // `int 0`->`int N` via SMC; if Ventium's icache serves a stale opcode in the
         // kernel (INIT_TEXT) context, the WRONG vector fires -> init_readdasd's AH=15h

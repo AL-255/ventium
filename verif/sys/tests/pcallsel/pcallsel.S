@@ -53,6 +53,20 @@ _start16:
     movw    %ax, %ds
     movw    $0x7000, %sp
 
+    /* FPGA BIOS regression: SeaBIOS enters the VGA option ROM with the exact
+     * `lcall *0(%bp)` encoding below (FF 5E 00), using C000 as an ordinary
+     * real-mode segment.  C-06 once sent this through far_sel_bad(), treated
+     * C000 as a GDT selector, and looped forever through #GP before IDE POST.
+     * Keep this before LGDT/PE so the protected-only pcallsel witness below can
+     * never accidentally cover the regression. */
+    movw    $0x0460, %bp
+    movw    $(real_call_target - _start16), 0x0460
+    movw    $0xF000, 0x0462
+    movw    $0x1357, 0x0464
+    lcall   *0(%bp)                    /* must encode exactly FF 5E 00 */
+    cmpw    $0x2468, 0x0464
+    jne     real_call_failed
+
     /* GDT at 0x0500, THREE entries only -- limit 0x17. Selector 0x0F00 is far past
      * the end, which is the whole point. */
     movl    $0x00000000, 0x0500
@@ -73,6 +87,14 @@ _start16:
     .byte   0x66, 0xEA                 /* opsize-32 ljmp ptr16:32 */
     .long   pm_entry
     .word   0x08
+
+real_call_target:
+    movw    $0x2468, 0x0464
+    lret
+
+real_call_failed:
+    hlt
+    jmp     real_call_failed
 
     .code32
     .section .text32,"ax"

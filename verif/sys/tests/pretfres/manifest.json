@@ -1,0 +1,40 @@
+{
+  "name": "pretfres",
+  "kind": "system",
+  "src": "pretfres.S",
+  "linker": "pretfres.ld",
+  "image": "pretfres.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 700,
+  "sys": true,
+  "paging": false,
+  "finding": "REVIEW_Aug3 H-02",
+  "transitions": [
+    "real->protected (CR0.PE 0->1, CS far-jump to 32-bit flat code segment 0x08)",
+    "GDT @ 0x500: null + code0 0x08 + data0 0x10 + code3 0x18 (0x1B) + data3 0x20 (0x23) + code0-NOT-PRESENT 0x28 (case A) + code0-NOT-PRESENT 0x30 (case B)",
+    "IDT: #NP(11) -> np_handler, #GP(13) -> gp_handler (both 0x8E DPL0); IOPL=3",
+    "case A: 32-bit same-privilege `lret` with popped CS = 0x28 (not-present code descriptor, RPL0==CPL0) -> #NP(0x28) with ESP UNCHANGED (the fix defers the ESP advance to the target-validated commit; the handler's entry ESP sits 24 bytes below the pre-frame ESP = 8 frame + 16 fault frame)",
+    "case B: 16-bit same-privilege `lretw` with popped CS = 0x30 (not-present) -> #NP(0x30) with SP UNCHANGED (gap 20 = 4 word-frame + 16 fault frame)",
+    "case C: 16-bit OUTER `lretw` CPL0->CPL3 with a word frame (IP=0x3000, CS=0x1B, SP=0x4FF0, SS=0x23): the popped outer SP word is ZERO-EXTENDED (ESP=0x00004FF0, NOT the dword-read 0x00234FF0); SS=0x23",
+    "the CPL3 leg records SS/ESP + both restartability gaps, pulls the six witnesses into the GPRs, exits via isa-debug-exit (status 133) at CPL==IOPL==3"
+  ],
+  "witnesses": {
+    "edi": "0x000B000B -- BOTH rejected RETFs delivered #NP (vector 11), the vector QEMU raises for a not-present return CS (helper_ret_protected: EXCP0B_NOSEG with sel & 0xfffc)",
+    "esi": "0x00280030 -- (errA<<16)|errB: both error codes are the popped selector (packed because the exit clobbers DX with the port)",
+    "ebp": "0x00180014 -- (gapA<<16)|gapB = 24 and 20: ESP/SP were PRESERVED across the faults (8+16 and 4+16). The HEAD defect's early ESP advance leaves 16/16",
+    "ebx": "0x00000023 -- case-C outer SS",
+    "ecx": "0x00004FF0 -- case-C outer ESP: the 16-bit outer SP word ZERO-EXTENDED (H-02). The dword-read defect installs {SS,SP} = 0x00234FF0"
+  },
+  "oracle_note": "QEMU 8.2.2's helper_ret_protected pops into locals and commits ESP only via the final SET_ESP, so a rejected target restarts with ESP unchanged -- exactly the fixed behaviour, so cases A/B/C are graded DIFFERENTIALLY. QEMU does NOT check the popped EIP against CS.limit on a return (no limit check anywhere in helper_ret_protected, and TCG has no fetch-time code-limit check), so the offset-past-limit restartability case from H-02's required regression cannot be differentially graded and lives in the piretgp0 WITNESS gate instead",
+  "negative_control": {
+    "method": "build the RTL TB from HEAD (git worktree add /tmp/ven_base HEAD; make -C verif/tb rtl), run the same image --system, diff against the golden",
+    "expected": "DIVERGENT: HEAD advances ESP on the CS-pop acknowledgement (before target validation), so the case-A/B handler-entry gaps measure 16/16 instead of 24/20, and case C installs {SS,SP}=0x00234FF0 as ESP instead of the zero-extended 0x00004FF0",
+    "measured": "CONFIRMED 2026-08-03: HEAD TB (4a643c1, no H-02 fix) vs golden: compare.py exits 1 DIVERGENT, first divergence n=384 pc=0x000f017c esp: golden 0x0008ffe8 vs HEAD 0x0008fff0 -- HEAD advanced ESP by 2w=8 at the case-A CS-pop, before the target descriptor was validated (the H-02 restartability defect), so the case-A/B handler-entry gaps measure 16/16 instead of 24/20. Same length (447) because the flows reconverge through the handlers. build/sys/pretfres.head.rtl.vtrace"
+  },
+  "description": "REVIEW_Aug3 H-02 regression: a protected same-privilege far RETF whose popped CS is rejected must fault with ESP unchanged (restartable), and a 16-bit outer RETF must zero-extend the popped outer SP word. Bare-metal real->protected image, no paging (the paged outer-RETF variant is pretfoutpg). Case A: 32-bit lret to a not-present CS descriptor -> #NP(0x28), handler-entry ESP 24 below the pre-frame ESP. Case B: 16-bit lretw to a second not-present CS -> #NP(0x30), gap 20. Case C: 16-bit outer lretw CPL0->CPL3, ESP = 0x00004FF0 zero-extended, SS = 0x23; the CPL3 leg computes both gaps, packs the six witnesses into edi/esi/edx/ebp/ebx/ecx, and exits at CPL==IOPL==3. QEMU is the differential oracle for all three cases (its return path pops into locals and commits ESP only after validation)."
+}

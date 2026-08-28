@@ -1,0 +1,44 @@
+{
+  "name": "pintslim",
+  "kind": "system",
+  "src": "pintslim.S",
+  "linker": "pintslim.ld",
+  "image": "pintslim.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 8000,
+  "sys": true,
+  "paging": false,
+  "finding": "the cross-privilege interrupt-frame pre-probe (S_INT_PROBE) must segment-check each frame slot with the SLOT'S width (int_frm_wide ? 4 : 2), not the dword default -- a 16-bit gate's word slot ending exactly at the new stack segment's bound is legal and was being rejected. Follow-up: the same width discipline for the IRET pop path (S_IRET): the bus pops dwords but a 16-bit IRETW's architectural slot is a word, so the segment extent check charges 2 bytes via seg_ext_ovr",
+  "gate_form": "two-build witness gate + canonical differential (the psmmmeta pattern, verif/sys/run-pintslim-gate.sh). The segment-extent check is live only in the +VEN_SEG_ENFORCE variant build (canonical: diagnostic-only; QEMU: does not limit-check frame pushes at all -- the room check in do_interrupt_protected is #if 0'd out), so the discrimination is per-build. The canonical run additionally diffs the whole flow against the QEMU golden (every flow in the image is architectural and identical across oracles when enforcement is off).",
+  "case_matrix": "stack B bit (0 = 16-bit 64K-window, 1 = 32-bit) x segment form (expand-up limit 0xFFFC / expand-down limit 0xFF00) x frame width (16-bit gate = 5 word slots, 32-bit gate = 5 dword slots; a software INT has no error code) x {at-bound, one slot-width past}. 16 cases, driven from case_table. At-bound: the frame's FIRST push slot ends exactly at the bound (expand-up: ESP0 = limit+1; expand-down: ESP0 = 0, ending at 0xFFFF / 0xFFFFFFFF) and the delivery must SUCCEED. Past: the first slot is one unit beyond the bound and the delivery must raise #SS(0) PRE-COMMIT (zero frame bytes -- proven by a 32-byte sentinel over the frame window). Expand-down past cases test the OTHER bound: B=0 uses ESP0 = limit+unit (first slot starts at the limit -- out for expand-down, whose valid range is (limit, upper]); B=1 uses ESP0 = 1 (the slot's 33-bit extent wraps past 4 GiB). Past placements avoid wrapping the masked stack window so the delivered frame stays contiguous for the non-enforcing oracles' content check.",
+  "harness_notes": {
+    "ss_relative_store": "the CPL0 handlers run on the boundary stack (SS != flat DS): (%ebp) stores would go through the boundary SS and miss the marker page entirely -- the result store must use a DS-defaulted register (%edi)",
+    "saved_sp": "the ring-3 driver near-calls the `int $N; retl` stub, so the interrupted user SP is the driver's ESP minus 4 (the call's return push); the handlers compare the frame's SP slot against CUR_SP-4",
+    "iretw_off_boundary_stack": "the S_IRET pop path's bus reads are dword-granular and the segment check follows the read extent, so a cross-priv iretw whose topmost WORD ends exactly at the bound would itself be extent-4 checked past it and false-#SS under enforcement. The 16-bit-gate handler therefore reads the five frame words with word loads (legal), rebuilds the same frame on the flat CPL0 scratch stack, and iretws from there. The 32-bit handler needs no such dance (dword pops are exactly extent-4). This is a test-side accommodation, recorded honestly: see residual_rtl_note",
+    "ss_gate_dpl3": "the #SS gate is a 32-bit interrupt gate DPL3 targeting the CPL3 code segment, so the faulted delivery's own frame is same-privilege on the USER stack -- the TSS boundary stack is never re-entered and the #SS cannot cascade into #DF"
+  },
+  "r_cases": "R0..R3 (CPL0, same-privilege, before the ring-3 half): a 16-bit IRETW pops a 3-word frame whose topmost word (FLAGS at SP+4) ends exactly at the stack segment's bound -- R0/R1 expand-up limit 0xFFFC (SP=0xFFF7, B=0 and B=1), R2 expand-down B=0 (SP=0xFFFA, FLAGS ends at 0xFFFF), R3 expand-down B=1 (SP=0xFFFFFFFA, FLAGS ends at 0xFFFFFFFF). The frame (IP = a 16-bit return stub, CS = 0x18, FLAGS = 0x38D7) is written directly onto the boundary stack; the stub records the RETURNED FLAGS word (expected 0x08D5 after the 0x0FD5 mask -- the FLAGS restoration witness) and far-jumps back, so reaching the rdone block proves the CS/IP restoration. Under enforcement a build without the S_IRET extent override false-#SS's at the iretw (pop charged a dword); the #SS lands in h_ss0 (vector 12 is a CPL0 gate while the R-cases run) which exits with fail code 0x70+i. The h16 workaround from the first round stays as-is (it no longer false-#SS's either way -- it returns from a flat stack)",
+  "witnesses": {
+    "exit_edi": "0x42 = every in-image self-check passed (fail codes 0x20+i at-bound not delivered / 0x30+i past neither #SS nor delivered / 0x40+i #SS but frame bytes written / 0x50+i 'delivered' but no frame bytes / 0x60+i delivered ESP wrong, i = case index)",
+    "exit_ebx": "AT_OK bitmask (at-bound cases 0,2,..,14 -> 0x5555) | R-case pass bits 16..19 -> 0x000F5555 in EVERY build",
+    "exit_esi": "SS_SEEN bitmask (past cases 1,3,..,15 -> 0xAAAA): 0 canonical/QEMU, 0xAAAA under +VEN_SEG_ENFORCE",
+    "exit_ecx": "SENTINEL-intact bitmask: 0 canonical/QEMU (the frame overwrote it), 0xAAAA under enforcement (zero frame bytes -- the pre-commit proof)",
+    "exit_ebp": "PAST_DLVR bitmask: 0xAAAA canonical/QEMU, 0 under enforcement",
+    "exit_edx": "0x600D00F4 (pass magic | exit port)",
+    "faultlog": "+ven_faultlog: canonical 0 fault lines; +VEN_SEG_ENFORCE exactly 8x 'vec=12 err=00000000' and no other vector"
+  },
+  "residual_rtl_note": "RESOLVED 2026-08-11 (the note's first draft recorded this as an open gap with a test-side workaround). The S_IRET pop path reads dwords on the bus while a 16-bit IRETW's architectural slot is a word; the segment extent check now charges 2 bytes for 16-bit frame pops (seg_ext_ovr/seg_ext_ovr_v in the S_IRET cur_lin arm), so an IRETW whose topmost popped word ends exactly at the stack segment's bound is legal under +VEN_SEG_ENFORCE. The R0..R3 cases pin it (expand-up and expand-down, both B bits), and h16 keeps its scratch-stack return as extra cover for the cross-privilege shape. Evidence pre-fix: the at-bound word case faulted vec=12 err=0 at the handler's iretw, then cascaded vec=13 err=0x20 / err=0x42 (depths 1/2). Negative control post-fix: forcing seg_ext_ovr_v to 1'b0 re-faults R0's iretw (vec=12) and the image exits with edi=0x70 via h_ss0",
+  "validation": {
+    "commands": [
+      "make -C verif/sys/tests/pintslim",
+      "qemu-system-i386 -display none -machine pc -m 32 -device isa-debug-exit,iobase=0xf4,iosize=0x04 -bios verif/sys/tests/pintslim/pintslim.bin -> exit 133",
+      "bash verif/sys/run-pintslim-gate.sh -> PINTSLIM-GATE-OK"
+    ],
+    "results": "GATE GREEN 2026-08-11: bash verif/sys/run-pintslim-gate.sh -> PINTSLIM-GATE-OK. QEMU free-run exit 133. Canonical build: golden 1785 records, RTL --system --cosim EQUIVALENT (1785), 0 faults, final record edi=0x42 ebx=0x000F5555 esi=0 ecx=0 ebp=0xAAAA edx=0x600D00F4. +VEN_SEG_ENFORCE build: 1921 records, final record edi=0x42 ebx=0x000F5555 esi=0xAAAA ecx=0xAAAA ebp=0 edx=0x600D00F4, faultlog exactly 8x vec=12 err=00000000 (the one-past cases, all pre-commit -- sentinel intact); the four R-case IRETWs returned cleanly with FLAGS restored (0x08D5 after masking). Negative controls: (probe) a scratch build with S_INT_PROBE's cur_size forced to 4'd4 #SS's the legal at-bound word case (vec=12 at the int, image reports fail 0x20); (iret) a scratch build with S_IRET's seg_ext_ovr_v forced to 1'b0 #SS's R0's legal iretw (vec=12, image exits edi=0x70 via h_ss0)."
+  }
+}

@@ -82,16 +82,15 @@ module fpu_writeback
 
     // pipeline / cycle gating
     input  logic        xlate_miss,
-    // An accepted interrupt diverts the S_PIPE spine before anything issues. Without
-    // this the FP fast arm below still fired and committed x87 architectural state
-    // (fpr/ftop/fstat/fptag) for an op that did NOT retire -- and since the divert
-    // does not advance EIP, that op re-executes after IRET and the stack drifts.
-    // Canonical signal, driven from core.sv (see fp_irq_divert there).
-    input  logic        irq_divert,
+    // A fast-path boundary abandoned for an interrupt or external debug park
+    // must not commit x87 state for an instruction that did not retire.  This is
+    // the canonical core.sv predicate shared by every S_PIPE side-effect mirror.
+    input  logic        issue_block,
     input  logic [6:0]  stall_cnt,
     input  logic        pipe_bytes_ok,
     input  logic [6:0]  pending_mem_pen,
     input  logic        v_bytes_ok,
+    input  logic        pair_block,
     input  logic [31:0] core_cyc,
     input  logic [31:0] fp_ready_cyc,
     input  logic        fp_occ_pending,
@@ -139,13 +138,17 @@ module fpu_writeback
     input  logic [79:0] fpp_a,
     input  logic [79:0] fpp_b,
     input  logic [1:0]  fpp_rc,
+    input  logic [1:0]  fpp_pc,
     input  logic        fpp_err,
     input  logic [2:0]  fpp_dst,
+    input  logic        fpp_stkflt,     // R2-H06: masked stack fault on the capture
 `ifdef VEN_FP_PIPE2
     input  logic        fpp2_valid,
     input  fx_pipe_t    fpp2_s1,
     input  logic [1:0]  fpp2_rc,
+    input  logic [1:0]  fpp2_pc,
     input  logic [2:0]  fpp2_dst,
+    input  logic        fpp2_stkflt,    // R2-H06
 `endif
 `endif
 
@@ -165,6 +168,14 @@ module fpu_writeback
     // writeback always_comb). Exported so core.sv can count them under +ven_stklog.
     output logic        fp_stk_ovf,
     output logic        fp_stk_unf,
+    // REVIEW_Aug4 A4-H01: the ISSUE-time stack-fault decision, latched by core.sv
+    // at the S_FEXEC dispatch and replayed here so a DEFERRED commit (S_FP_BUSY /
+    // S_TRSC_BUSY / S_FPREM_BUSY / S_FPTRAP_WAIT / S_FSTORE) applies the same
+    // masked/unmasked response a direct commit would. Without it an unmasked
+    // fault recorded IE|SF at issue and the engine/trap commit wrote anyway, and
+    // a masked fault committed engine output computed from empty-slot bits.
+    input  logic        fp_flt_i,
+    input  logic        fp_flt_ovf_i,
     output logic        fp_we_push,
     output logic [79:0] fp_push_data,
     output logic        fp_we_top,
@@ -230,7 +241,11 @@ module fpu_writeback
     output logic [79:0] fp_cap_a,
     output logic [79:0] fp_cap_b,
     output logic [1:0]  fp_cap_rc,
+    output logic [1:0]  fp_cap_pc,
     output logic        fp_cap_err,
+    // R2-H06: the captured op took a MASKED stack fault at issue -- the deferred
+    // commit must substitute the QNaN indefinite and must not merge arith flags.
+    output logic        fp_cap_stkflt,
     output logic        fp_pipe_rd_haz
 `ifdef VEN_FP_PIPE2
     ,
@@ -251,6 +266,12 @@ module fpu_writeback
   // it reads module state). fst(i) = fp_st[i] (= fpr[ftop+i], TOP-relative).
   function automatic logic [79:0] fst(input logic [2:0] i); return fp_st[i]; endfunction
 
+  // Every local and every output is defaulted unconditionally at block entry
+  // (see "default: no writes this clock" below), so the block is combinational
+  // by construction. Verilator's latch analysis cannot carry that through a
+  // block this size (it reports even the unconditionally defaulted signals),
+  // so LATCH is waived here and held as a hard error everywhere else.
+  /* verilator lint_off LATCH */
   always_comb begin
     // ---- per-arm locals -------------------------------------------------------
     logic        fp_in_pipe, fp_halt4, fp_fp_arm, fp_fast_commit;
@@ -278,6 +299,18 @@ module fpu_writeback
     logic signed [63:0] s_qn;                // FSCALE: trunc(ST1); FPREM: quotient
     logic signed [17:0] s_se;                // FSCALE: ST0 biased-exp + n
     logic        fx_reads_st0, fx_reads_sti;  // H-16 operand-validity predicates
+    logic        fx_fixed_st1;                // A4-H01: fixed-ST(1) consumers
+    // REVIEW1_Aug3 R2-H06: the arm-independent operand-validity descriptor. The
+    // fast (cycle-mode) arms drive from the live U-pipe decode record (u_d.*)
+    // and never set q_fxop; the slow FSM drives from q_fxop. One validity
+    // decision must see both -- the reads-detection used to be qualified on
+    // slow_arm, so a cycle-mode D8 arith or a fast FLD ST(i) consumed empty
+    // operands unchecked, and a pipelined capture was never canceled.
+    logic        det_active, det_reads_st0, det_reads_sti, det_fold_rd;
+    logic [2:0]  det_sti, det_fold_idx;
+    logic        det_is_cmp;        // a compare op (masked #IS answers unordered)
+    logic        det_deferred;      // A4-H01: a deferred commit state (replay fp_flt_i)
+    logic        fp_commit_allowed;
     logic [79:0] s_st1v;                     // ST1
     logic [80:0] s_pr;                       // FPREM: ST0 - Q*ST1
 
@@ -285,6 +318,11 @@ module fpu_writeback
     fp_we_push=1'b0; fp_push_data=80'd0;
     fp_stk_ovf=1'b0; fp_stk_unf=1'b0;
     fx_reads_st0=1'b0; fx_reads_sti=1'b0;   // H-16
+    fx_fixed_st1=1'b0;
+    det_active=1'b0; det_reads_st0=1'b0; det_reads_sti=1'b0;   // R2-H06
+    det_fold_rd=1'b0; det_sti=3'd0; det_fold_idx=3'd0; det_is_cmp=1'b0;
+    det_deferred=1'b0;
+    fp_commit_allowed=1'b1;
     fp_we_top=1'b0;  fp_top_data=80'd0;
     fp_we_fstat=1'b0; fp_fstat_wval=16'd0;
     fp_we_sti=1'b0;  fp_wsti_idx=3'd0; fp_wsti_data=80'd0; fp_wsti_clr_tag=1'b0;
@@ -306,7 +344,8 @@ module fpu_writeback
     fp_we_wabs_fstat=1'b0; fp_wabs_fstat=16'd0;
 `ifdef VEN_FP_PIPE
     fp_pipe_cap=1'b0; fp_cap_aluop=3'd0; fp_cap_dst=3'd0;
-    fp_cap_a=80'd0; fp_cap_b=80'd0; fp_cap_rc=2'd0; fp_cap_err=1'b0;
+    fp_cap_a=80'd0; fp_cap_b=80'd0; fp_cap_rc=2'd0; fp_cap_pc=2'd0; fp_cap_err=1'b0;
+    fp_cap_stkflt=1'b0;   // R2-H06
     // Read-after-write hazard on the in-flight arith target: an FP op issuing the
     // SAME clock the deferred result is being written (we_wabs) would read the
     // PRE-edge stale fpr[fpp_dst]. Stall its issue 1 clock (the result lands this
@@ -321,7 +360,7 @@ module fpu_writeback
     // assign is safe and latch-free. VEN_FP_PIPE2 REQUIRES VEN_SRT_ITER (the engine
     // owns divide, so the split eval's div default is unreachable — same guard the
     // 1-stage split relies on).
-    fp_s1_next = f_eval_s1(fpp_aluop, fpp_a, fpp_b, fpp_rc, fctrl[9:8], fpp_err);
+    fp_s1_next = f_eval_s1(fpp_aluop, fpp_a, fpp_b, fpp_rc, fpp_pc, fpp_err);
     // The in-flight result is now 2 clocks deep, so the RAW hazard spans BOTH slots:
     // stall a role-0/1 reader of the stage-0 target (fpp_dst, commits in 2 clocks)
     // OR the stage-1 target (fpp2_dst, commits THIS edge — the same pre-edge stale
@@ -335,11 +374,14 @@ module fpu_writeback
     // commit to the absolute target. This is the SHORT back-half cone (round_pack
     // only); the front half was spent the previous clock — that is the whole split.
     if (fpp2_valid) begin
-      automatic logic [84:0] pp_arf = f_eval_s2(fpp2_s1, fpp2_rc, fctrl[9:8]);
+      automatic logic [84:0] pp_arf = f_eval_s2(fpp2_s1, fpp2_rc, fpp2_pc);
       fp_we_wabs       = 1'b1;
       fp_wabs_idx      = fpp2_dst;
-      fp_wabs_data     = pp_arf[79:0];
-      fp_we_wabs_fstat = 1'b1;
+      // R2-H06: a captured op that took a MASKED stack fault commits the QNaN
+      // indefinite (its operands were empty) and no arith flag merge (IE|SF
+      // already landed at the capture clock).
+      fp_wabs_data     = fpp2_stkflt ? QNAN_INDEF : pp_arf[79:0];
+      fp_we_wabs_fstat = !fpp2_stkflt;
       fp_wabs_fstat    = f_arith_fstat(fstat, pp_arf);
     end
 `else
@@ -361,21 +403,23 @@ module fpu_writeback
       // never deferred to this commit port), so f_eval_s1's div-returns-0 default
       // is unreachable. Without VEN_SRT_ITER, divide DOES defer here -> keep the
       // full f_eval (below). Combinational s1->s2, same 1-clock defer as before.
-      automatic logic [84:0] pp_arf = f_eval_s2(f_eval_s1(fpp_aluop, fpp_a, fpp_b, fpp_rc, fctrl[9:8], fpp_err), fpp_rc, fctrl[9:8]);
+      automatic logic [84:0] pp_arf = f_eval_s2(f_eval_s1(fpp_aluop, fpp_a, fpp_b, fpp_rc, fpp_pc, fpp_err), fpp_rc, fpp_pc);
 `else
-      automatic logic [84:0] pp_arf = f_eval(fpp_aluop, fpp_a, fpp_b, fpp_rc, fctrl[9:8], fpp_err);
+      automatic logic [84:0] pp_arf = f_eval(fpp_aluop, fpp_a, fpp_b, fpp_rc, fpp_pc, fpp_err);
 `endif
       fp_we_wabs       = 1'b1;
       fp_wabs_idx      = fpp_dst;
-      fp_wabs_data     = pp_arf[79:0];
-      fp_we_wabs_fstat = 1'b1;
+      // R2-H06: masked stack fault on the captured op -> QNaN indefinite, no
+      // arith flag merge (IE|SF landed at the capture clock).
+      fp_wabs_data     = fpp_stkflt ? QNAN_INDEF : pp_arf[79:0];
+      fp_we_wabs_fstat = !fpp_stkflt;
       fp_wabs_fstat    = f_arith_fstat(fstat, pp_arf);
     end
 `endif
 `endif
 
     // ===== FAST ARM (M5 cycle-mode FP issue+commit) — same guard as ic_fp_commit.
-    fp_in_pipe = (state==S_PIPE) && !irq_divert && !xlate_miss && (stall_cnt==7'd0) &&
+    fp_in_pipe = (state==S_PIPE) && !issue_block && !xlate_miss && (stall_cnt==7'd0) &&
                  pipe_bytes_ok && (pending_mem_pen==7'd0);
 `ifdef VEN_FP_PC_RELAX
     fp_halt4   = 1'b0;   // BUG#3: PC-relax computes FK_ARITH under PC!=11 (no fast-path halt);
@@ -417,7 +461,7 @@ module fpu_writeback
           // GAP2 fold: fld-const + a following free FXCH %st(i) in ONE write — the
           // pushed const lands in st(i), the old st(i-1) becomes the new st0 (pre-edge
           // ftop addressing: we_push->fpr[ftop-1], we_sti(i-1)->fpr[ftop+i-1]).
-          if (v_d.is_fxch_free && v_bytes_ok && v_d.fp_sti!=3'd0) begin
+          if (v_d.is_fxch_free && v_bytes_ok && !pair_block && v_d.fp_sti!=3'd0) begin
             fp_we_push=1'b1; fp_push_data=fst(v_d.fp_sti - 3'd1);
             fp_we_sti=1'b1;  fp_wsti_idx=v_d.fp_sti - 3'd1;
             fp_wsti_data=fconst(u_d.fp_sti); fp_wsti_clr_tag=1'b1;
@@ -427,7 +471,7 @@ module fpu_writeback
         end
         FK_FLDSTI: begin
 `ifdef VEN_FXCH_FREE
-          if (v_d.is_fxch_free && v_bytes_ok && v_d.fp_sti!=3'd0) begin
+          if (v_d.is_fxch_free && v_bytes_ok && !pair_block && v_d.fp_sti!=3'd0) begin
             fp_we_push=1'b1; fp_push_data=fst(v_d.fp_sti - 3'd1);
             fp_we_sti=1'b1;  fp_wsti_idx=v_d.fp_sti - 3'd1;
             fp_wsti_data=fst(u_d.fp_sti); fp_wsti_clr_tag=1'b1;
@@ -445,6 +489,7 @@ module fpu_writeback
           fp_cap_a     = fst(3'd0);
           fp_cap_b     = fst(u_d.fp_sti);
           fp_cap_rc    = fctrl[11:10];
+          fp_cap_pc    = fctrl[9:8];
           fp_cap_err   = errata_en[ERR_FDIV];
           fp_cap_dst   = ftop;            // ST0 absolute physical index
 `else
@@ -765,7 +810,7 @@ module fpu_writeback
         FX_AR_ST0_STI: if (!fp_div_elig) begin
 `ifdef VEN_FP_PIPE
           fp_pipe_cap=1'b1; fp_cap_aluop=q_f_aluop; fp_cap_a=s_fa; fp_cap_b=s_fb;
-          fp_cap_rc=s_rc; fp_cap_err=errata_en[ERR_FDIV]; fp_cap_dst=ftop;
+          fp_cap_rc=s_rc; fp_cap_pc=fctrl[9:8]; fp_cap_err=errata_en[ERR_FDIV]; fp_cap_dst=ftop;
 `else
           fp_we_top=1'b1; fp_top_data=s_arf[79:0];
           fp_we_fstat=1'b1; fp_fstat_wval=f_arith_fstat(fstat, s_arf);
@@ -775,7 +820,7 @@ module fpu_writeback
           // ST(i) op= ST0 : a=ST(i), b=ST0 (no tag write — only fpr[fri]).
 `ifdef VEN_FP_PIPE
           fp_pipe_cap=1'b1; fp_cap_aluop=q_f_aluop; fp_cap_a=s_fa; fp_cap_b=s_fb;
-          fp_cap_rc=s_rc; fp_cap_err=errata_en[ERR_FDIV];
+          fp_cap_rc=s_rc; fp_cap_pc=fctrl[9:8]; fp_cap_err=errata_en[ERR_FDIV];
           fp_cap_dst=(ftop + q_f_sti) & 3'd7;
           if (q_f_pop) fp_we_pop=1'b1;
 `else
@@ -787,7 +832,7 @@ module fpu_writeback
         FX_AR_M32, FX_AR_M64: if (!fp_div_elig) begin
 `ifdef VEN_FP_PIPE
           fp_pipe_cap=1'b1; fp_cap_aluop=q_f_aluop; fp_cap_a=s_fa; fp_cap_b=s_fb;
-          fp_cap_rc=s_rc; fp_cap_err=errata_en[ERR_FDIV]; fp_cap_dst=ftop;
+          fp_cap_rc=s_rc; fp_cap_pc=fctrl[9:8]; fp_cap_err=errata_en[ERR_FDIV]; fp_cap_dst=ftop;
 `else
           fp_we_top=1'b1; fp_top_data=s_arf[79:0];
           fp_we_fstat=1'b1; fp_fstat_wval=f_arith_fstat(fstat, s_arf);
@@ -796,7 +841,7 @@ module fpu_writeback
         FX_AR_I16, FX_AR_I32: if (!fp_div_elig) begin
 `ifdef VEN_FP_PIPE
           fp_pipe_cap=1'b1; fp_cap_aluop=q_f_aluop; fp_cap_a=s_fa; fp_cap_b=s_fb;
-          fp_cap_rc=s_rc; fp_cap_err=errata_en[ERR_FDIV]; fp_cap_dst=ftop;
+          fp_cap_rc=s_rc; fp_cap_pc=fctrl[9:8]; fp_cap_err=errata_en[ERR_FDIV]; fp_cap_dst=ftop;
 `else
           fp_we_top=1'b1; fp_top_data=s_arf[79:0];
           fp_we_fstat=1'b1; fp_fstat_wval=f_arith_fstat(fstat, s_arf);
@@ -1119,6 +1164,7 @@ module fpu_writeback
     // path FLD/FLD1/FLDPI, slow path FLD m32/m64/m80, FILD, FBLD ...) all funnel
     // through them. fptag bit i is 1 when fpr[i] is EMPTY.
     fx_reads_st0 = 1'b0; fx_reads_sti = 1'b0;   // H-16, driven below
+    fx_fixed_st1 = 1'b0; det_deferred = 1'b0;   // A4-H01, driven below
     // ---- REVIEW2_aug2 H-16: arithmetic / compare / store reading an EMPTY operand.
     //
     // CORRECTION TO MY OWN PRIOR NOTE HERE, which said this could not be done because
@@ -1160,11 +1206,69 @@ module fpu_writeback
                 || (q_fxop==FX_FSINCOS)    || (q_fxop==FX_FPTAN)
                 || (q_fxop==FX_FSCALE)     || (q_fxop==FX_FPREM)
                 || (q_fxop==FX_FPREM1);
+    // REVIEW_Aug4 A4-H01: the fixed-ST1 consumers. FPATAN/FYL2X/FYL2XP1 take
+    // y=ST(1) (and write ST1 then pop), FSCALE scales by trunc(s_st1v), and the
+    // FPREM engine's divisor is ST(1) -- NONE of them reads the decoded q_f_sti,
+    // so fx_reads_sti alone never checked their second operand: with live ST0
+    // and EMPTY ST1 they consumed stale slot bits without #IS.
+    fx_fixed_st1 = (q_fxop==FX_FPATAN) || (q_fxop==FX_FYL2X) || (q_fxop==FX_FYL2XP1)
+                || (q_fxop==FX_FSCALE) || (q_fxop==FX_FPREM) || (q_fxop==FX_FPREM1);
     fx_reads_sti = (q_fxop==FX_AR_ST0_STI) || (q_fxop==FX_AR_STI_ST0)
                 || (q_fxop==FX_FCOM_STI)   || (q_fxop==FX_FUCOM_STI)
-                || (q_fxop==FX_FST_STI)    || (q_fxop==FX_FLD_STI);
+                || (q_fxop==FX_FST_STI)    || (q_fxop==FX_FLD_STI)
+                || fx_fixed_st1;
 
-    fp_stk_ovf =  fp_we_push               && !fptag[ftop - 3'd1];  // push onto a LIVE slot
+    // REVIEW_Aug4 A4-H01: DEFERRED commits replay the issue-time decision. An
+    // operand-READ fault is detected at S_FEXEC (slow_arm) and latched by
+    // core.sv (fp_flt_i); the engine/PS/store commit happens states later,
+    // where det_active is false and the descriptor would otherwise go silent.
+    // (Destination-side faults need no replay: fp_we_push above is evaluated
+    // live at every commit clock, so a deferred push's overflow self-detects.)
+    det_deferred = (state==S_FSTORE);
+`ifdef VEN_SRT_ITER
+    det_deferred = det_deferred || (state==S_FP_BUSY);
+`endif
+`ifdef VEN_TRANSCENDENTAL
+    det_deferred = det_deferred || (state==S_TRSC_BUSY);
+`endif
+`ifdef VEN_FPREM
+    det_deferred = det_deferred || (state==S_FPREM_BUSY);
+`endif
+`ifdef VEN_FPTRAP
+    det_deferred = det_deferred || (state==S_FPTRAP_WAIT);   // VEN_FP_PS_ALL too
+`endif
+`ifdef VEN_BCD_ITER
+    // FBSTP's engine-done commit must replay the issue-time fault too: the
+    // masked response was selected at S_FEXEC; the engine's own flag merge
+    // must not replace it, and an unmasked fault never enters here at all
+    // (it is rejected at the dispatch).
+    det_deferred = det_deferred || (state==S_BCD_BUSY);
+`endif
+    fp_stk_ovf = (fp_we_push               && !fptag[ftop - 3'd1])  // push onto a LIVE slot
+              || (det_deferred && fp_flt_i && fp_flt_ovf_i);
+    // REVIEW1_Aug3 R2-H06: the descriptor is evaluated for WHICHEVER arm commits
+    // this clock. The fast arms' op identity is the live U-pipe decode record
+    // (u_d.fp_kind); the slow FSM's is q_fxop. (The GAP2 fold -- a free FXCH
+    // folded into a fast push -- reads fpr[ftop + v_d.fp_sti - 1] as the swap
+    // source; that read is covered by det_fold_rd.)
+    det_active = slow_arm || fp_fast_commit;
+    if (fp_fast_commit) begin
+      det_reads_st0 = (u_d.fp_kind == FK_ARITH);
+      det_reads_sti = (u_d.fp_kind == FK_ARITH) || (u_d.fp_kind == FK_FLDSTI);
+      det_sti       = u_d.fp_sti;
+      det_fold_rd   = v_d.is_fxch_free && v_bytes_ok && !pair_block && (v_d.fp_sti != 3'd0)
+                   && ((u_d.fp_kind == FK_FLDC) || (u_d.fp_kind == FK_FLDSTI));
+      det_fold_idx  = v_d.fp_sti - 3'd1;
+    end else begin
+      det_reads_st0 = fx_reads_st0;
+      det_reads_sti = fx_reads_sti;
+      det_sti       = fx_fixed_st1 ? 3'd1 : q_f_sti;   // A4-H01: fixed ST(1) consumers
+      det_is_cmp    = (q_fxop==FX_FCOM_M32) || (q_fxop==FX_FCOM_M64)
+                   || (q_fxop==FX_FCOM_STI) || (q_fxop==FX_FUCOM_STI)
+                   || (q_fxop==FX_FCOMPP)   || (q_fxop==FX_FUCOMPP)
+                   || (q_fxop==FX_FTST)
+                   || (q_fxop==FX_FICOM_M16) || (q_fxop==FX_FICOM_M32);
+    end
     // REVIEW2_aug2 H-16: POP2 retires TWO registers (FCOMPP/FUCOMPP pop ST(0) AND
     // ST(1)), and only ST(0)'s tag was checked. A pop2 with a LIVE ST(0) over an EMPTY
     // ST(1) is an underflow that went entirely undetected -- the common shape after a
@@ -1180,35 +1284,58 @@ module fpu_writeback
     //
     // FXCH is the one case of the review's four (arithmetic, compare, exchange, store)
     // that is EXACTLY identifiable from signals this block already produces:
-    // fp_we_fxch names the operation and fp_fxch_idx names the second register. The
-    // other three consume operands through fst()/st0/st1 reads that carry no per-op
-    // "which registers did I read" signal, so covering them needs the per-operation
-    // operand-validity layer the finding asks for and is NOT done here.
+    // fp_we_fxch names the operation and fp_fxch_idx names the second register.
+    // (R2-H06: the remaining three are covered by the det_* descriptor below,
+    // on either arm.)
               || (fp_we_fxch && (fptag[ftop] || fptag[ftop + fp_fxch_idx]))
-              || (slow_arm && fx_reads_st0 && fptag[ftop])
-              || (slow_arm && fx_reads_sti && fptag[ftop + q_f_sti]);
+              || (det_active && det_reads_st0 && fptag[ftop])
+              || (det_active && det_reads_sti && fptag[ftop + det_sti])
+              || (det_active && det_fold_rd  && fptag[ftop + det_fold_idx])
+              || (det_deferred && fp_flt_i && !fp_flt_ovf_i);   // A4-H01: deferred read fault
+    // R2-H06: the ONE commit predicate. A masked stack fault completes (with the
+    // masked response below); an unmasked one suppresses every commit path --
+    // direct writeback, TOP updates, the pipeline capture, and deferred writes.
+    // The response is UNCONDITIONAL (the review's "architectural stack-fault
+    // oracle instead of disabling correctness"): the three corpus programs that
+    // deliberately wrap the stack are compared with the two documented oracle
+    // gaps masked (fstat IE|SF; the st* QNaN substitution -- QEMU has neither),
+    // via "x87_stkflt_arch" in their manifests; the behavior itself is gated by
+    // px87stk (architectural, self-checked).
+    fp_commit_allowed = !(fp_stk_ovf || fp_stk_unf) || fctrl[0];
+    if (!fp_commit_allowed) begin
+`ifdef VEN_FP_PIPE
+      fp_pipe_cap = 1'b0;   // no deferred write after an unmasked fault
+`endif
+    end
+`ifdef VEN_FP_PIPE
+    // A MASKED fault on a pipelined arith completes with the QNaN indefinite --
+    // mark the capture so the deferred commit substitutes it (the operands are
+    // empty; evaluating them would produce garbage, not the masked response).
+    if ((fp_stk_ovf || fp_stk_unf) && fctrl[0]) fp_cap_stkflt = 1'b1;
+`endif
 
-
-    // The RESPONSE is behind VEN_X87_STKFLT; the DETECTION above is always live so
-    // +ven_stklog can measure reachability in the shipping build.
+    // The RESPONSE is UNCONDITIONAL (R2-H06); the DETECTION above is live in
+    // every build so +ven_stklog measures reachability anywhere.
     //
-    // WHY DEFAULT-OFF -- the same reason VEN_SEG_ENFORCE is (see run-seg-gate.sh).
-    // QEMU does not implement x87 stack faults at all: fpush()/fpop() in
-    // target/i386/tcg/fpu_helper.c never look at fptags, and FPUS_SF is defined on
-    // line 59 of that file and used NOWHERE in the i386 target. Three programs in the
-    // 98-program differential corpus deliberately drive the stack past its ends
-    // (tx_stack's header says "push 8 deep + wrap, then unwind to empty"), so with the
-    // response ON, a CORRECT Ventium diverges from the oracle and both `verify` and
-    // `l1` fail -- measured: tx_stack/tx_regform/tx_regform2, 95 PASS / 3 FAIL.
-    // Turning it on by default would trade a real 98-program differential for a
-    // feature correct code does not exercise (0 firings across 68 system images).
-`ifdef VEN_X87_STKFLT
+    // ON THE ORACLE (was "WHY DEFAULT-OFF"): QEMU implements no x87 stack
+    // faults (fpu_helper.c's fpush/fpop never read fptags; FPUS_SF is defined
+    // and unused), so the architectural response cannot be differentially
+    // oracled. The resolution, per the review: the response is always on; the
+    // three corpus programs that deliberately drive the stack past its ends
+    // (tx_stack/tx_regform/tx_regform2) carry "x87_stkflt_arch" in their
+    // manifests and are compared with exactly the two oracle gaps masked
+    // (fstat IE|SF; the st* QNaN-indefinite substitution), and the stack-fault
+    // matrix itself is graded architecturally by px87stk (self-checked, incl.
+    // the cycle-mode and VEN_FP_PIPE forms).
     if (fp_stk_ovf || fp_stk_unf) begin
       // IE|SF, and C1 rewritten (not OR-ed) -- a stale C1 from a previous op would
       // otherwise report an underflow as an overflow.
       fp_we_fstat   = 1'b1;
       fp_fstat_wval = ((fstat | 16'h0041) & ~16'h0200)
-                      | (fp_stk_ovf ? 16'h0200 : 16'h0000);
+                      | (fp_stk_ovf ? 16'h0200 : 16'h0000)
+                      // R2-H06: a masked #IS on a COMPARE answers "unordered"
+                      // (C3=C2=C0=1, C1=0), not the stale condition bits.
+                      | ((fp_stk_unf && fctrl[0] && det_is_cmp) ? 16'h4500 : 16'h0000);
       // MASKED overflow (CW.IM set, which is the state FNINIT leaves): the push still
       // happens, but the destination receives the QNaN indefinite instead of the value
       // -- SDM Vol.1 Table 8-4. The UNMASKED case must instead suppress the operation
@@ -1218,7 +1345,19 @@ module fpu_writeback
       // an unmasked IE sets ES and B by construction. Deferring the trap to the next
       // WAITING FP instruction is architectural, not a shortcut -- that is how x87
       // reports exceptions. The suppression is below.
-      if (fp_stk_ovf && fctrl[0]) fp_push_data = QNAN_INDEF;
+      // R2-H06: the masked response is the QNaN indefinite as the RESULT of any
+      // completing op (SDM Vol.1 Table 8-4) -- a push onto a live slot
+      // (overflow) AND a push whose SOURCE is empty (FLD ST(i) underflow;
+      // measured by px87stk: the stale slot bits were pushed instead).
+      if ((fp_stk_ovf || fp_stk_unf) && fctrl[0]) fp_push_data = QNAN_INDEF;
+      // R2-H06: the masked response is the QNaN indefinite as the RESULT of any
+      // completing op, not only a push (SDM Vol.1 Table 8-4) -- substitute it on
+      // the direct result paths too. (A pipelined capture's deferred commit
+      // substitutes through fp_cap_stkflt instead.)
+      if (fp_stk_unf && fctrl[0]) begin
+        if (fp_we_top) fp_top_data = QNAN_INDEF;
+        if (fp_we_sti) fp_wsti_data = QNAN_INDEF;
+      end
 
       // ---- REVIEW2_aug2 H-16: UNMASKED -> SUPPRESS THE OPERATION ---------------
       // A masked stack fault completes with the QNaN indefinite (above). An UNMASKED
@@ -1249,7 +1388,7 @@ module fpu_writeback
         fp_we_decstp = 1'b0;
       end
     end
-`endif
   end
+  /* verilator lint_on LATCH */
 
 endmodule

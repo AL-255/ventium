@@ -11,6 +11,7 @@
 //
 //   ven_l1d.m_*  (core_clk)            ven_axi_master.m_*  (axi_clk)
 //        │  creq/cwe/caddr/cwdata/cwstrb     ▲  areq/awe/aaddr/awdata/awstrb
+//        │  + crd_narrow/crd_size             │  + ard_narrow/ard_size
 //        ▼                                   │
 //   [ cmd afifo  core→axi ]  ──────────►  pop, drive the AXI transaction
 //        ▲  crdata/cack                      │  a_ack/a_rdata (one per AXI beat / B)
@@ -20,8 +21,20 @@
 // The backing port is SINGLE-OUTSTANDING (ven_l1d issues one line fill OR one write-
 // through and waits — fpga/L1_AXI_DESIGN.md §1; ven_axi_master's no_rw_overlap SVA).
 // So exactly one command is in flight: the command afifo never holds >1, and the
-// response afifo holds at most LINE_BEATS (the 8 read beats, if axi_clk outruns the
-// slow core drain) — RSP_DEPTH ≥ LINE_BEATS, rounded up to a power of two.
+// response afifo holds at most LINE_BEATS entries (an 8-beat fill's read beats, if
+// axi_clk outruns the slow core drain; a narrow read is 1-2 beats — strictly fewer)
+// — RSP_DEPTH ≥ LINE_BEATS, rounded up to a power of two.
+//
+// REVIEW_Aug3 C-01: the command record carries the H-11 NARROW-READ bits with the
+// rest of the request. They used to cross OUTSIDE the FIFO — ven_axi_master consumed
+// b_rd_narrow combinationally while the request it described was still queued in the
+// core clock domain: a metadata/request race (the master could sample the bits of the
+// PREVIOUS or the NEXT access) AND a beat-count disagreement, since both FSMs here
+// hard-coded LINE_BEATS responses for every read while the master correctly burst
+// only 1-2 beats (the core side then waited forever for 6-7 responses that never
+// exist). Now the expected-response counters on BOTH sides are derived from the
+// command record itself, and the a-side bits presented to ven_axi_master are
+// REGISTERS latched from the same FIFO word as the address — one atomic record.
 //
 // Ack semantics preserved EXACTLY (so ven_l1d / ven_axi_master are untouched):
 //   * read fill: ven_l1d wants 8 acks, in ascending word order, each with that word
@@ -50,6 +63,13 @@ module ven_axi_cdc #(
     input  logic [31:0] c_addr,
     input  logic [31:0] c_wdata,
     input  logic [3:0]  c_wstrb,
+    // REVIEW_Aug3 C-01: the H-11 narrow-read attributes travel INSIDE the command
+    // record (see the header): c_rd_narrow = this read is a narrow device access,
+    // not an 8-beat line fill. REVIEW1_Aug3 R2-H01: c_rd_size is the piece's exact
+    // ARSIZE (0=1B, 1=2B, 2=4B) -- each narrow piece is its OWN single-beat
+    // transaction, so the response count for a narrow read is 1 like a write's.
+    input  logic        c_rd_narrow,
+    input  logic [1:0]  c_rd_size,
     output logic [31:0] c_rdata,
     output logic        c_ack,
     output logic        bus_err,                   // sticky fault, synced to core_clk
@@ -60,12 +80,19 @@ module ven_axi_cdc #(
     output logic [31:0] a_addr,
     output logic [31:0] a_wdata,
     output logic [3:0]  a_wstrb,
+    // C-01: the narrow bits, latched from the SAME command-FIFO word as a_addr, so
+    // ven_axi_master never samples read shape from a different access (the race the
+    // direct b_rd_narrow connection had). Valid while a_req is asserted.
+    output logic        a_rd_narrow,
+    output logic [1:0]  a_rd_size,
     input  logic [31:0] a_rdata,
     input  logic        a_ack,
     input  logic        a_bus_err                  // ven_axi_master.bus_err (axi_clk)
 );
 
-  localparam int CMDW = 1 + 32 + 32 + 4;           // {we, addr, wdata, wstrb}
+  // C-01: the command record is one atomic word: rd_size is bits [1:0], rd_narrow
+  // bit 2 (R2-H01), so the a-side expected-beat count decodes straight off the word.
+  localparam int CMDW = 1 + 32 + 32 + 4 + 1 + 2;  // {we, addr, wdata, wstrb, rd_narrow, rd_size}
   localparam int CNTW = $clog2(LINE_BEATS) + 1;     // 0..LINE_BEATS
 
   // ---- command afifo: core (push) -> axi (pop) ------------------------------
@@ -91,10 +118,10 @@ module ven_axi_cdc #(
   // ==========================================================================
   typedef enum logic { C_IDLE, C_BUSY } cstate_e;
   cstate_e         cst;
-  logic [CNTW-1:0] rcnt, rexp;       // responses drained / expected (LINE_BEATS or 1)
+  logic [CNTW-1:0] rcnt, rexp;       // responses drained / expected (see C_IDLE)
 
   assign cmd_wr_en   = (cst == C_IDLE) && c_req && !cmd_full;
-  assign cmd_wr_data = {c_we, c_addr, c_wdata, c_wstrb};
+  assign cmd_wr_data = {c_we, c_addr, c_wdata, c_wstrb, c_rd_narrow, c_rd_size};
   // hand each FWFT response to ven_l1d as one ack; never over-ack past rexp.
   assign c_ack     = (cst == C_BUSY) && !rsp_empty && (rcnt < rexp);
   assign rsp_rd_en = c_ack;
@@ -105,7 +132,14 @@ module ven_axi_cdc #(
       cst <= C_IDLE; rcnt <= '0; rexp <= CNTW'(1);
     end else unique case (cst)
       C_IDLE: if (c_req && !cmd_full) begin
-                rexp <= c_we ? CNTW'(1) : CNTW'(LINE_BEATS);
+                // C-01: the expected response count comes from the REQUEST ITSELF,
+                // not the constant LINE_BEATS: a write acks once (BVALID); a narrow
+                // read is 1 or 2 beats by its straddle bit; a cacheable fill is a
+                // full line. The a-side decodes the same record, so the two FSMs and
+                // ven_axi_master cannot disagree about the burst length.
+                // R2-H01: a narrow piece is ONE single-beat transaction, like a
+                // write; only a cacheable fill is a full line.
+                rexp <= (c_we || c_rd_narrow) ? CNTW'(1) : CNTW'(LINE_BEATS);
                 rcnt <= '0;
                 cst  <= C_BUSY;
               end
@@ -136,6 +170,7 @@ module ven_axi_cdc #(
   logic            areq_q, awe_q;
   logic [31:0]     aaddr_q, awdata_q;
   logic [3:0]      awstrb_q;
+  logic            ard_narrow_q;    logic [1:0] ard_size_q;   // C-01/R2-H01: latched with the command
 
   assign cmd_rd_en   = (ast == A_IDLE) && !cmd_empty;
   assign rsp_wr_en   = (ast == A_BUSY) && a_ack;     // one push per ven_axi_master ack
@@ -145,15 +180,22 @@ module ven_axi_cdc #(
   assign a_addr  = aaddr_q;
   assign a_wdata = awdata_q;
   assign a_wstrb = awstrb_q;
+  assign a_rd_narrow   = ard_narrow_q;               // C-01: same-record read shape
+  assign a_rd_size     = ard_size_q;
 
   always_ff @(posedge axi_clk or negedge axi_rst_n)
     if (!axi_rst_n) begin
       ast <= A_IDLE; areq_q <= 1'b0; acnt <= '0; aexp <= CNTW'(1);
       awe_q <= 1'b0; aaddr_q <= '0; awdata_q <= '0; awstrb_q <= '0;
+      ard_narrow_q <= 1'b0; ard_size_q <= 2'd0;
     end else unique case (ast)
       A_IDLE: if (!cmd_empty) begin
-                {awe_q, aaddr_q, awdata_q, awstrb_q} <= cmd_rd_data;
-                aexp   <= cmd_rd_data[CMDW-1] ? CNTW'(1) : CNTW'(LINE_BEATS);
+                {awe_q, aaddr_q, awdata_q, awstrb_q, ard_narrow_q, ard_size_q} <= cmd_rd_data;
+                // C-01/R2-H01: expected acks decoded from the SAME FIFO word (bit
+                // CMDW-1 = we, bit 2 = rd_narrow) — mirroring the c-side rexp decode
+                // so both ends count the burst the master will actually run.
+                aexp   <= (cmd_rd_data[CMDW-1] || cmd_rd_data[2]) ? CNTW'(1)
+                                                                : CNTW'(LINE_BEATS);
                 acnt   <= '0;
                 areq_q <= 1'b1;
                 ast    <= A_BUSY;
@@ -190,9 +232,12 @@ module ven_axi_cdc #(
       !(rsp_wr_en && rsp_full));
   // the latched command must be stable for ven_axi_master to sample — it changes ONLY
   // on the A_IDLE->A_BUSY load edge, so require stability across CONSECUTIVE A_BUSY
-  // cycles (not the entry edge, where aaddr_q is legitimately being loaded).
+  // cycles (not the entry edge, where aaddr_q is legitimately being loaded). C-01:
+  // the narrow bits are part of the same record and get the same guarantee — the
+  // master reads them while deciding the burst length, mid-transaction.
   areq_stable:  assert property (@(posedge axi_clk) disable iff (!axi_rst_n)
-      ((ast == A_BUSY) && $past(ast == A_BUSY)) |-> $stable(aaddr_q) && $stable(awe_q));
+      ((ast == A_BUSY) && $past(ast == A_BUSY)) |-> $stable(aaddr_q) && $stable(awe_q)
+                                                && $stable(ard_narrow_q) && $stable(ard_size_q));
 `endif
 
 endmodule : ven_axi_cdc

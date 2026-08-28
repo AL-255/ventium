@@ -1,0 +1,46 @@
+{
+  "name": "pxwalkd",
+  "kind": "system",
+  "src": "pxwalkd.S",
+  "linker": "pxwalkd.ld",
+  "image": "pxwalkd.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 1200,
+  "sys": true,
+  "paging": true,
+  "finding": "REVIEW_Aug4 A4-C01",
+  "transitions": [
+    "real->protected (CR0.PE 0->1, CS far-jump to 32-bit flat code segment 0x08)",
+    "IDT @ 0x1000 with one #PF interrupt gate (vector 14) + lidt",
+    "page tables: PT0 identity low 1 MiB; PT1 window [4 MiB,8 MiB) with per-case PTEs; PD[2] = 4 MiB PSE page -> phys 0xC00000 (P|RW|A|PS, D=0); CR4.PSE; CR3 + CR0.PG 0->1 WITH CR0.WP=1 (without WP a CPL0 store to an RO page does not fault and cases 2/4 would never #PF)",
+    "case 1 (4 KiB clean-leaf probe completion): crossing dword store at 0x400FFE with page-2 PTE P|RW|A, D=0 and a COLD DTLB -- pre-fix the probe walk (walk_is_write=1, walk_set_dirty=0) neither wrote back D nor filled the TLB -> infinite walk loop (HANG); post-fix finite, the real write sets D -> PT1[1]=0x00801063; data readback 0xDEADBEEF proves both fragments landed",
+    "case 2 (4 KiB probe does not dirty on fault): page 1 P (RO), page 2 P|RW A=0 D=0; the straddling store at 0x402FFE probes page 2 (permission OK) then faults writing page 1 -> #PF(0x3, CR2=0x402FFE); the handler checks page-2's PTE with `test` ONLY: D==0 (the pin), P==1",
+    "case 4 (W/R=1 on probe permission fault): page 1 P|RW|A|D (pre-set), page 2 P (RO); the store's page-2 PROBE faults -> #PF with error code 0x3 (P=1, W/R=1 = a STORE fault, US=0), CR2=0x405000 (the page-2 probe address); the run continues to a clean exit after the handler",
+    "case 3 (4 MiB leaf): crossing dword store at 0x7FFFFE with page 2 in the 4 MiB PSE page PD[2] (D=0) -- completion + the guest reads the PDE back: D set -> PD[2]=0x00C000E3",
+    "witnesses pulled into esi/edi/ebp/ebx/edx/ecx; isa-debug-exit (status 133)"
+  ],
+  "witnesses": {
+    "esi at exit": "0x00800063 -- case 1 page-1 PTE: A|D set by the real write",
+    "edi at exit": "0x00801063 -- case 1 page-2 PTE: the clean-leaf probe COMPLETED (pre-fix: hang) and the real write set D",
+    "ebp at exit": "0x00806063 -- case 3 page-1 PTE: A|D set by the real write",
+    "ebx at exit": "0x00C000E3 -- case 3 4 MiB PDE: D set in the PDE by the real write (pre-set A, D=0 at init)",
+    "edx at exit": "0x004000F4 -- case 4 CR2 = 0x405000 = the PAGE-2 PROBE address (low 16 bits clobbered by the 0xF4 exit-port load)",
+    "ecx at exit": "0x01270303 -- packed: [7:0]=case-2 err 0x03, [15:8]=case-4 err 0x03 (W/R=1 on the probe permission fault), bit16=case-2 page-2 D==0 (the probe did NOT dirty), bit17=case-2 page-2 P==1, bit18=case-1 data landed, [22:20]=#PF count 2, [31:24]=case-4 page-2 PTE is P|RW=0|D=0 (the faulting probe wrote nothing back; checked with `test` only -- the A bit is oracle gap 4)"
+  },
+  "oracle_gaps": [
+    "oracle gap 1 (case 2 page-2 PTE A bit): QEMU 8.2.2's softmmu translates page 1 BEFORE page 2 for a page-crossing store (accel/tcg/cputlb.c mmu_lookup: two mmu_lookup1 calls in address order, each with access_type==MMU_DATA_STORE), so its page-1 lookup faults FIRST and page 2 is NEVER probed -- page 2's PTE keeps A=0,D=0 (0x00803003). The RTL's fragment engine probes page 2 FIRST (write atomicity: no byte commits unless both pages accept the store), so its probe walk sets A=1 on page 2's PTE before the page-1 fault (0x00803023; D stays 0 -- that is the A4-C01 fix). Both oracles agree on every graded fact -- the probe does NOT set D, P stays 1, and the fault is the page-1 #PF(0x3, CR2=0x402FFE) -- but the raw PTE differs, so the handler exposes ONLY the D and P bits through `test` instructions (identical EFLAGS in both oracles; no divergent value ever enters a register) and never loads the raw PTE. Verified in the pinned harness source: excp_helper.c get_physical_address sets A (and D for MMU_DATA_STORE) only on a SUCCESSFUL lookup, and the fault longjmps before any page-2 walk.",
+    "oracle note 2 (case 4 page-1 PTE, NOT a gap -- worked around): QEMU's page-1 TLB fill for a crossing store runs with access_type==MMU_DATA_STORE and marks A|D on page 1's PTE at fill time EVEN THOUGH the store then faults on page 2; the RTL's probe faults before page 1 is ever walked. Case 4 therefore pre-initializes page 1 P|RW|A|D (0x00804063) so both oracles read back the identical value.",
+    "oracle gap 4 (case 4 page-2 PTE A bit): the RTL's FAULTING probe walk of the read-only page 2 sets the PTE's A bit (0x00805021; D stays 0 -- the A4-C01 fix is what keeps D clear on a walk with walk_is_write=1, walk_set_dirty=0). QEMU's faulting second lookup longjmps out of get_physical_address BEFORE the A/D writeback (excp_helper.c: the writeback runs only on a successful translation), so its PTE keeps A=0 (0x00805001). Both oracles agree the probe faults #PF(0x3) with CR2=0x405000 and that D==0/RW==0/P==1, so the guest checks those three bits with `test` instructions only and never loads the raw PTE.",
+    "oracle note 5 (cases 1/3 final D bit, NOT a gap): QEMU sets A|D on page 2's PTE/PDE at TLB-fill time (the second lookup IS the write walk), so its final state equals the RTL's, where D is set only when the real write fragment commits. Both end PT1[1]=0x00801063 and PD[2]=0x00C000E3."
+  ],
+  "negative_control": {
+    "method": "revert the A4-C01 walk_set_dirty consumers in rtl/core/core.sv (use walk_is_write for the D-writeback, the TLB-fill predicate and the A-writeback D companion) and rerun the same image --system; also runnable by construction: the pre-fix behaviour is documented in REVIEW_Aug4 A4-C01",
+    "expected": "case 1 HANGS (the clean-leaf probe with D=0 neither writes back D nor fills the TLB -> infinite walk loop; the RTL run stops short of the exit and the step-7 diff is DIVERGENT/truncated), or, with A=0 on page 2, case 2's handler reads D==1 (bit16 of ecx lost -> ecx=0x01260303) because the probe's A-writeback also wrote D even though page 1 faults and no byte commits"
+  },
+  "description": "REVIEW_Aug4 A4-C01 regression: the page walker's walk_set_dirty intent must govern every architectural-Dirty mutation, separately from walk_is_write (the W/R permission class + #PF error code). A crossing STORE probes page 2 with walk_is_write=1, walk_set_dirty=0. Four cases in one bare-metal image. Case 1: page-2 PTE P|RW|A, D=0, cold DTLB -- the clean-leaf probe must still fill the TLB so the store completes (pre-fix: infinite walk loop); the real write then sets D (QEMU's fill-time A|D lands on the same final PTE). Case 2: page 1 RO, page 2 P|RW A=0 D=0 -- the probe's A-bit writeback must NOT write D; the page-1 write then faults #PF(0x3) and the handler verifies D==0/P==1 via `test`-only witnesses (the A bit is oracle gap 1: QEMU faults on its page-1 lookup before ever probing page 2, so it keeps A=0 while the RTL's probe-first order sets A=1 -- documented, masked out of the differential). Case 4: page 2 RO -- the probe itself faults with W/R=1 (error code 0x3, a store fault) and CR2 = the page-2 probe address 0x405000; QEMU agrees (its second lookup faults with MMU_DATA_STORE). Case 3: the 4 MiB PSE leaf variant of case 1 -- the PDE starts P|RW|A|PS D=0 and ends D=1. All witnesses are pulled into the GPRs before the isa-debug-exit; step 5f asserts them against the golden and step 7 diffs the full RTL --system trace against it."
+}

@@ -8,16 +8,44 @@
 //   S_LTR (M2S.4 load TR), S_INT_TSS (TSS.ssN:espN), S_INT_SS (new SS desc).
         // S_LTR (M2S.4): LTR r16 — read the GDT TSS descriptor named by the
         // selector in gpr_o[q_src_reg], load the TR hidden cache (base/limit/sel),
-        // and retire. IA-32 also sets the descriptor's busy bit (type 9 -> B) in
-        // the GDT; that writeback is a memory-only side effect the corpus never
-        // reads back (STR returns the SELECTOR, captured below), so it is omitted
-        // here — a documented simplification (no architectural-register effect).
+        // and retire. REVIEW_Aug3 H-11b: the architectural busy-bit write (type
+        // 9 -> B at descriptor+5) is now performed before TR commits, so software
+        // reading the descriptor sees the task in use and a second LTR on the same
+        // selector faults (#GP: type 0xB is no longer an available TSS). LLDT
+        // reuses the two descriptor-read beats only; a null LLDT performs no read.
         S_LTR: begin
-          if (mem_ack) begin
+          // REVIEW_Aug3 H-11b (null LLDT half): a null LLDT names no descriptor,
+          // so the bus arm suppresses the request (lldt_null_q) and the invalid
+          // LDTR commits directly -- GDT[0] on an unmapped page can no longer
+          // raise a #PF for an access the architecture never makes.
+          if (lldt_null_q) begin
+            ldt_sel     <= 16'd0;
+            ldt_base    <= 32'd0;
+            ldt_limit   <= 16'd0;
+            lldt_null_q <= 1'b0;
+            seg_step    <= 1'b0;
+            eip<=next_eip; retire_valid<=1'b1; state<=S_PIPE;
+          end else if (mem_ack && ltr_busy_q) begin
+            // REVIEW_Aug3 H-11b (busy half, beat 3): the busy byte has been
+            // written to the GDT; only NOW does TR commit. A fault on that write
+            // left TR at its old value -- the correct partial state for a
+            // rejected LTR.
+            tr_sel     <= ltr_sel_q;
+            tr_base    <= ltr_base_q;
+            tr_limit   <= ltr_limit_q;
+            // tr_attr mirrors the descriptor AS IT NOW STANDS in the GDT -- the
+            // busy write just made it 0xB, and the NT-return precondition
+            // (REVIEW_Aug3 H-01) and the task-switch busy-clear both read that.
+            tr_attr    <= ltr_attr_q | 8'h02;
+            tr_valid   <= 1'b1;
+            ltr_busy_q <= 1'b0;
+            seg_step   <= 1'b0;
+            eip<=next_eip; retire_valid<=1'b1; state<=S_PIPE;
+          end else if (mem_ack) begin
             if (!seg_step) begin gdt_lo<=mem_rdata; seg_step<=1'b1; end
             else begin
               logic [63:0] desc; logic [7:0] dattr; logic [15:0] dsel;
-              logic bad_sel, bad_type, not_present, lldt_null;
+              logic bad_sel, bad_type, not_present;
               desc  = {mem_rdata, gdt_lo};
               dattr = desc_attr(desc);
               dsel  = gpr_o[q_src_reg][15:0];
@@ -32,23 +60,14 @@
               //   * descriptor must be Present                    -> #NP(sel & 0xFFFC)
               // The error code for a descriptor-sourced fault is the selector with the
               // low two bits cleared (EXT=0, IDT=0 -- this is a GDT reference).
-              // REVIEW2_aug2 H-10: a NULL selector is legal for LLDT and illegal for
-              // LTR, so the two cannot share this term. `lldt $0` is the ordinary way
-              // software INVALIDATES LDTR (every task switch to a task with no LDT does
-              // it), and rejecting it with #GP breaks that outright. LTR keeps the null
-              // rejection: TR must always name a real TSS.
-              lldt_null   = (q_sysop == SYS_LLDT) && (dsel[15:3] == 13'd0) && !dsel[2];
-              bad_sel     = !lldt_null
-                         && ((dsel[15:3] == 13'd0) || dsel[2]
-                          || ({16'd0, dsel[15:3], 3'd0} + 32'd7 > {16'd0, gdt_limit}));
-              // A null LLDT names no descriptor, so there is nothing to type- or
-              // present-check; the GDT[0] bytes just read are the null descriptor and
-              // must be ignored rather than validated.
-              bad_type    = !lldt_null
-                         && (dattr[4]   // S must be 0 (system descriptor)
-                          || (q_sysop==SYS_LLDT ? (dattr[3:0] != 4'h2)
-                                                : (dattr[3:0] != 4'h9)));
-              not_present = !lldt_null && !dattr[7];
+              // (REVIEW_Aug3 H-11b: the null-LLDT terms that used to guard these are
+              // gone -- the null case is committed above before any read.)
+              bad_sel     = (dsel[15:3] == 13'd0) || dsel[2]
+                         || ({16'd0, dsel[15:3], 3'd0} + 32'd7 > {16'd0, gdt_limit});
+              bad_type    = dattr[4]   // S must be 0 (system descriptor)
+                         || (q_sysop==SYS_LLDT ? (dattr[3:0] != 4'h2)
+                                               : (dattr[3:0] != 4'h9));
+              not_present = !dattr[7];
               if (bad_sel || bad_type) begin
                 seg_step <= 1'b0;
                 start_fault(8'd13, 1'b1, {16'd0, dsel[15:2], 2'b00}, q_pc);
@@ -60,21 +79,22 @@
                 // LLDT: load the LDTR hidden base/limit from the GDT LDT descriptor.
                 // REVIEW2 M-02: also keep the SELECTOR. It was being discarded here,
                 // so the LDTR's architectural half did not exist anywhere in the core.
-                // REVIEW2_aug2 H-10: a null selector INVALIDATES LDTR -- selector 0 and
-                // a zero limit, so any later LDT-backed reference is out of range rather
-                // than resolving through a stale base.
-                ldt_sel   <= lldt_null ? 16'd0 : dsel;
-                ldt_base  <= lldt_null ? 32'd0 : desc_base(desc);
-                ldt_limit <= lldt_null ? 16'd0 : desc_limit16(desc);
+                ldt_sel   <= dsel;
+                ldt_base  <= desc_base(desc);
+                ldt_limit <= desc_limit16(desc);
+                seg_step <= 1'b0;
+                eip<=next_eip; retire_valid<=1'b1; state<=S_PIPE;
               end else begin
-                tr_sel   <= dsel;
-                tr_base  <= desc_base(desc);
-                tr_limit <= desc_limit(desc);
-                tr_attr  <= desc_attr(desc);   // M2S.4b: held for the busy-clear on a switch
-                tr_valid <= 1'b1;
+                // REVIEW_Aug3 H-11b: do NOT commit TR yet. Stage the validated
+                // descriptor and run the busy-bit write first (the bus arm's
+                // ltr_busy_q variant); the commit happens when that write lands.
+                ltr_sel_q   <= dsel;
+                ltr_base_q  <= desc_base(desc);
+                ltr_limit_q <= desc_limit(desc);
+                ltr_attr_q  <= dattr;
+                ltr_busy_q  <= 1'b1;
+                seg_step    <= 1'b0;
               end
-              seg_step <= 1'b0;
-              eip<=next_eip; retire_valid<=1'b1; state<=S_PIPE;
               end
             end
           end
@@ -96,10 +116,22 @@
         //   * the bit is set.
         S_NTRET_RD: begin
           if (mem_ack) begin
-            q_ljmp_sel <= mem_rdata[15:0];
-            q_ljmp_off <= 32'd0;
-            seg_step   <= 1'b0;
-            state      <= S_LJMP;
+            // REVIEW_Aug3 H-01: validate the back-link BEFORE it indexes the GDT.
+            // IA-32 requires a non-null, TI=0, in-GDT-bounds back-link selector --
+            // #TS(back-link) otherwise. This used to hand any popped word to the
+            // generic S_LJMP path, whose dispatch-time far_sel_bad check this entry
+            // bypasses, so an LDT or out-of-range back-link became a descriptor
+            // address (and a possible #PF) ahead of the required #TS.
+            if ((mem_rdata[15:3] == 13'd0) || mem_rdata[2]
+                || !sel_in_table(mem_rdata[15:0]))
+              start_fault(8'd10, 1'b1,
+                          {16'd0, mem_rdata[15:0]} & 32'h0000_FFFC, int_src_pc);
+            else begin
+              q_ljmp_sel <= mem_rdata[15:0];
+              q_ljmp_off <= 32'd0;
+              seg_step   <= 1'b0;
+              state      <= S_LJMP;
+            end
           end
         end
 
@@ -137,7 +169,11 @@
               // All q_io_w ports fit in the SAME read: the dword covers 32 consecutive
               // ports starting at (port & ~7), and port[2:0]+3 <= 10 < 32. So no extra
               // beat is needed; only the LIMIT check has to account for the last byte.
-              if (({16'd0, ioperm_base} + {19'd0, ioperm_last[15:3]}) > tr_limit)
+              // REVIEW_Aug3 M-01: an access whose extent wraps past port 0xFFFF is
+              // denied outright (ioperm_wrap) -- the 16-bit ioperm_last used to wrap,
+              // passing the limit check vacuously and reading ADJACENT bitmap memory.
+              if (ioperm_wrap
+                  || ({16'd0, ioperm_base} + {19'd0, ioperm_last[15:3]}) > tr_limit)
                 start_fault(8'd13, 1'b1, 32'd0, q_pc);   // past the bitmap => denied
               else if (|(io_perm_mask & mem_rdata))
                 start_fault(8'd13, 1'b1, 32'd0, q_pc);   // any covered bit SET => denied
@@ -154,12 +190,9 @@
             if (int_step == 4'd0) begin
               int_new_esp <= mem_rdata; int_step <= 4'd1;
 `ifdef VEN_DBG_WD
-              // [VEN-ESP0] the TSS.ESPn value pulled from memory for a cross-priv
-              // delivery. Compares vs golden (0x3862): 0x3860 => TSS memory corrupt
-              // (earlier bug); 0x3862 => the frame/writeback math drops the 2 bytes.
-              if (creg3==32'h0007e000)
-                $display("[VEN-ESP0] TSS.ESPn<=%08h from addr=%08h tr_base=%08h new_cpl=%0d vec=%0d @cs:eip=%04x:%08h",
-                         mem_rdata, mem_addr, tr_base, int_new_cpl, int_vec, seg_sel[SG_CS], eip);
+              // Generic TSS stack-pointer read trace for cross-privilege delivery.
+              $display("[VEN-ESP0] TSS.ESPn<=%08h from addr=%08h tr_base=%08h new_cpl=%0d vec=%0d @cs:eip=%04x:%08h",
+                       mem_rdata, mem_addr, tr_base, int_new_cpl, int_vec, seg_sel[SG_CS], eip);
 `endif
             end else begin
               int_new_ss  <= mem_rdata[15:0];
@@ -245,23 +278,243 @@
                 start_fault(ss_int_a[7] ? 8'd10 : 8'd12, 1'b1,
                             {16'd0, int_new_ss} & 32'h0000_FFFC, int_src_pc);
               end else begin
-                seg_sel  [SG_SS] <= int_new_ss;
-                seg_base [SG_SS] <= desc_base(desc);
-                seg_limit[SG_SS] <= desc_limit(desc);
-                seg_attr [SG_SS] <= desc_attr(desc);
-                // REVIEW2_aug2 C-03 (staging, CPL half): THIS is the cross-privilege
-                // CPL commit point -- the new stack has just been validated and
-                // accepted, so the privilege change and the stack it depends on now
-                // become visible together instead of a whole TSS + SS sequence apart.
-                cpl_r            <= int_new_cpl;
-                // REVIEW_aug2 H-01: capture SS.B here too. ss_b was updated ONLY on the
-                // ordinary segment-load path, so a cross-privilege delivery onto a
-                // 16-bit inner stack kept the PREVIOUS descriptor's width and pushed the
-                // frame with the wrong address size.
-                ss_b             <= desc[54];
-                int_step         <= 4'd0;
-                state            <= S_INT_PUSH;
+                // REVIEW1_Aug3 R2-C04: STAGE, do not install. The new SS hidden
+                // state and CPL used to commit HERE, before S_INT_PUSH's pageable
+                // frame writes -- so a #PF on any frame word observed the new
+                // SS/CPL with the old CS/EIP and a partially written frame. The
+                // validated descriptor parks in int_ss_*; S_INT_PROBE validates
+                // the frame's page plan and captures the translations; only
+                // then does the context commit.
+                int_ss_base   <= desc_base(desc);
+                int_ss_limit  <= desc_limit(desc);
+                int_ss_attr   <= desc_attr(desc);
+                // REVIEW_aug2 H-01: capture SS.B here too (staged now).
+                int_ss_b      <= desc[54];
+                // The frame-slot plan, latched once: S_INT_PUSH addresses by
+                // this formula (frm_slot_off). A call-gate frame is 4 header
+                // slots (SS, ESP/SP, CS, EIP/IP) + cg_pcount parameter slots,
+                // in GATE-WIDTH units (QEMU helper_lcall_protected: push size
+                // follows the gate's type, the wrap mask the NEW stack's B).
+                if (from_v86) begin
+                  int_frm_nslots <= int_has_err ? 6'd10 : 6'd9;
+                  int_frm_wide   <= 1'b1;
+                end else if (cg_xpl) begin
+                  int_frm_nslots <= 6'd4 + {1'b0, cg_pcount};
+                  int_frm_wide   <= cg_wide;
+                end else begin
+                  int_frm_nslots <= int_has_err ? 6'd6 : 6'd5;
+                  int_frm_wide   <= !int_frm16;
+                end
+                // The frame PAGE plan (core.sv has the contract): enumerate the
+                // pushes exactly as silicon performs them -- slot i at linear
+                // SS.base + ((ESP - (i+1)*unit) & mask), the OFFSET masked to
+                // the new stack's B BEFORE the base is added, the access
+                // itself spanning unit bytes linearly upward (so a slot at
+                // offset 0xFFFF covers a byte on the NEXT page) -- and collect
+                // the distinct pages in push order. A page first touched by a
+                // slot START probes at that slot's address (silicon/QEMU
+                // report CR2 = the faulting push); a page first touched by a
+                // slot's straddle byte probes at its page base (QEMU's
+                // mmu_lookup reports the second page's base for a straddling
+                // access). The whole frame is a contiguous circular offset
+                // interval of < 145 bytes (a max pcount=31 call-gate frame),
+                // so the plan holds at most four distinct pages.
+                begin
+                  logic        b32, wide, dup;
+                  logic [5:0]  nsl;
+                  logic [31:0] sp, base, unit;
+                  logic [31:0] off, ad, ad2;
+                  logic [19:0] vl [4];   // distinct linear pages, push order
+                  logic [31:0] va [4];   // probe address per page (CR2 fidelity)
+                  logic        vm [4];   // page-base (straddle) probe
+                  logic [3:0]  nv;
+                  wide = from_v86 ? 1'b1 : (cg_xpl ? cg_wide : !int_frm16);
+                  nsl  = from_v86 ? (int_has_err ? 6'd10 : 6'd9)
+                       : cg_xpl   ? (6'd4 + {1'b0, cg_pcount})
+                       :            (int_has_err ? 6'd6 : 6'd5);
+                  b32  = desc[54];
+                  base = desc_base(desc);
+                  sp   = b32 ? int_new_esp : {16'd0, int_new_esp[15:0]};
+                  unit = wide ? 32'd4 : 32'd2;
+                  nv = 4'd0;
+                  for (int s = 0; s < 36; s++) begin
+                    if (s < {26'd0, nsl}) begin
+                      off = frm_slot_off(sp, 6'(s), wide, b32);
+                      ad  = base + off;
+                      ad2 = ad + unit - 32'd1;   // the slot's last byte
+                      // the slot's start page, probed at the slot's address
+                      dup = 1'b0;
+                      for (int p = 0; p < 4; p++)
+                        if ((p < nv) && (vl[p] == ad[31:12])) dup = 1'b1;
+                      if (!dup) begin
+`ifndef SYNTHESIS
+                        if (nv == 4'd4)
+                          $fatal(1, "frame page plan overflow (>4 pages)");
+`endif
+                        if (nv < 4'd4) begin
+                          vl[nv[1:0]] = ad[31:12];
+                          va[nv[1:0]] = ad;
+                          vm[nv[1:0]] = 1'b0;
+                          nv = nv + 4'd1;
+                        end
+                      end
+                      // the straddle page, probed at its base
+                      if (ad2[31:12] != ad[31:12]) begin
+                        dup = 1'b0;
+                        for (int p = 0; p < 4; p++)
+                          if ((p < nv) && (vl[p] == ad2[31:12])) dup = 1'b1;
+                        if (!dup) begin
+`ifndef SYNTHESIS
+                          if (nv == 4'd4)
+                            $fatal(1, "frame page plan overflow (>4 pages)");
+`endif
+                          if (nv < 4'd4) begin
+                            vl[nv[1:0]] = ad2[31:12];
+                            va[nv[1:0]] = {ad2[31:12], 12'd0};
+                            vm[nv[1:0]] = 1'b1;
+                            nv = nv + 4'd1;
+                          end
+                        end
+                      end
+                    end
+                  end
+                  for (int i = 0; i < 4; i++) begin
+                    frm_pg_val[i] <= (i < nv);
+                    if (i < nv) begin
+                      frm_pg_lin [i] <= vl[i];
+                      frm_pg_addr[i] <= va[i];
+                      frm_pg_mid [i] <= vm[i];
+                    end
+                  end
+                  frm_pg_n     <= nv[2:0];
+                end
+                frm_pg_i       <= 3'd0;
+                frm_pg_markd   <= 1'b0;
+                int_step       <= 4'd0;
+                state          <= S_INT_PROBE;
               end
+            end
+          end
+        end
+
+        // S_INT_PROBE: validate the frame's PAGE PLAN before the staged stack
+        // context commits. The bus arm issues NO transaction (bd_req stays 0):
+        // the TLB lookup keys off cur_lin and the walk divert off xlate_miss,
+        // so a missing page is walked in and a protection failure raises #PF
+        // with the OLD context fully intact (the staged SS/CPL never became
+        // visible, no frame byte was written).
+        //
+        // The probe walks the plan's distinct pages in push order, one beat
+        // per page -- not per slot: every page the wrapped layout can touch
+        // is in the plan, so no frame byte can land on an unprobed page. The
+        // slot-start pages are probed AT the slot's start address (CR2 = the
+        // faulting push, silicon's attribution); a lo page at its base.
+        //
+        // Two phases. VALIDATION (frm_pg_markd=0) only proves presence +
+        // write permission: the dirty term is masked out of xlate_miss, so a
+        // clean (D=0) entry is NOT walked here -- a fault on a later plan
+        // page restarts the delivery with the old context and silicon's D
+        // bits untouched (the probe is not a write). Each page's physical
+        // frame and D bit are captured. If any validated page was clean, the
+        // D-MARK phase (frm_pg_markd=1) rewalks the plan once: the dirty
+        // term is live again, each clean entry is walked and D-set while the
+        // OLD context is still installed, so the post-commit pushes can
+        // neither fault nor walk. S_INT_PUSH then translates through the
+        // captured frames (frm_pg_hit), never the DTLB -- a direct-mapped
+        // eviction between probe and push cannot resurrect a walk.
+        S_INT_PROBE: begin
+          if (!xlate_miss && !perm_fault) begin
+            logic [19:0] lkpg;
+            logic        lkdirty;
+`ifdef VEN_FE_PIPE
+            lkpg    = fe_dtlb_phys;
+            lkdirty = fe_dtlb_dirty;
+`else
+            lkpg    = dtlb_lk_phys[31:12];
+            lkdirty = dtlb_lk_dirty;
+`endif
+            if (!frm_pg_markd) begin
+              // validation: capture this page's mapping (D as it stands)
+              frm_pg_phys [frm_pg_i[1:0]] <= lkpg;
+              frm_pg_dirty[frm_pg_i[1:0]] <= lkdirty;
+            end
+            if (frm_pg_i != frm_pg_n - 3'd1) begin
+              frm_pg_i <= frm_pg_i + 3'd1;
+            end else if (!frm_pg_markd &&
+                         !(lkdirty &&
+                           (((frm_pg_dirty | (4'b0001 << frm_pg_i[1:0])) & frm_pg_val)
+                             == frm_pg_val))) begin
+              // a validated page is clean: run the D-mark phase
+              frm_pg_i     <= 3'd0;
+              frm_pg_markd <= 1'b1;
+            end else begin
+              // Every frame page is now proven present+writable+dirty (or the
+              // D-mark phase just made it so).
+              // With parameters to copy, the staged context must NOT commit
+              // yet -- the params live on the OLD stack, whose SS this commit
+              // replaces. Read them first; S_CG_PRD runs this same commit on
+              // its last beat. (A faulting param read is then delivered with
+              // the old context fully intact and zero frame bytes written --
+              // exactly like a faulting probe page.)
+              if (cg_xpl && (cg_pcount != 5'd0)) begin
+                cg_beat      <= 6'd0;
+                frm_pg_i     <= 3'd0;
+                frm_pg_markd <= 1'b0;
+                int_step     <= 4'd0;
+                state        <= S_CG_PRD;
+              end else begin
+              // Commit the staged stack context and build the frame. The
+              // pushes cannot fault -- every page's mapping is captured in
+              // the plan (present, writable, dirty), and a straddling beat is
+              // split by the fragment engine.
+              seg_sel  [SG_SS] <= int_new_ss;
+              seg_base [SG_SS] <= int_ss_base;
+              seg_limit[SG_SS] <= int_ss_limit;
+              seg_attr [SG_SS] <= int_ss_attr;
+              seg_pm_loaded[SG_SS] <= 1'b1;   // R2-H07: validated (staged) PM load
+              // (was the S_INT_SS commit, REVIEW2_aug2 C-03): the privilege change
+              // and the stack it depends on become visible together -- now after
+              // the frame extent is also proven.
+              cpl_r            <= int_new_cpl;
+              ss_b             <= int_ss_b;
+              frm_pg_i         <= 3'd0;
+              frm_pg_markd     <= 1'b0;
+              int_step         <= 4'd0;
+              cg_beat          <= 6'd0;   // R2-H05: frame beats count from 0
+              state            <= S_INT_PUSH;
+              end
+            end
+          end
+        end
+
+        // S_CG_PRD (REVIEW1_Aug3 R2-H05): call-gate PARAMETER COPY, source half.
+        // One beat per parameter, read from the OLD stack (still installed:
+        // S_INT_PROBE diverted here instead of committing), unit = the gate
+        // width, offset wrapping per the OLD stack's B bit (QEMU
+        // helper_lcall_protected: old_ssp + ((ESP + i*u) & old_sp_mask)). The
+        // values park in cg_params[]; S_INT_PUSH's cg_xpl beats store them in
+        // push order (highest-address param first). The commit that S_INT_PROBE
+        // deferred runs on the LAST beat, once every source byte is in a
+        // register and nothing on the bus can still fault for this transfer.
+        S_CG_PRD: begin
+          if (mem_ack) begin
+            cg_params[cg_beat[4:0]] <= cg_wide ? mem_rdata
+                                               : {16'd0, mem_rdata[15:0]};
+            if (cg_beat == ({1'b0, cg_pcount} - 6'd1)) begin
+              seg_sel  [SG_SS] <= int_new_ss;
+              seg_base [SG_SS] <= int_ss_base;
+              seg_limit[SG_SS] <= int_ss_limit;
+              seg_attr [SG_SS] <= int_ss_attr;
+              seg_pm_loaded[SG_SS] <= 1'b1;   // R2-H07: validated (staged) PM load
+              cpl_r            <= int_new_cpl;
+              ss_b             <= int_ss_b;
+              frm_pg_i         <= 3'd0;
+              frm_pg_markd     <= 1'b0;
+              int_step         <= 4'd0;
+              cg_beat          <= 6'd0;
+              state            <= S_INT_PUSH;
+            end else begin
+              cg_beat <= cg_beat + 6'd1;
             end
           end
         end

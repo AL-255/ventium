@@ -1,0 +1,126 @@
+{
+  "name": "pdescprec",
+  "kind": "system",
+  "src": "pdescprec.S",
+  "linker": "pdescprec.ld",
+  "image": "pdescprec.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 3000,
+  "sys": true,
+  "paging": false,
+  "finding": "REVIEW_Aug4 A4-H05",
+  "description": "REVIEW_Aug4 A4-H05 descriptor-fault-precedence regression plus protected far-pointer-load atomicity. The original 16 cases are eight combined-invalid discriminators and eight presence-only controls across MOV Sreg, far JMP, IDT gates, interrupt target CS (GDT and LDT), and RETF. Case 17 executes LDS ESI,m16:32 with a P=0 selector and proves #NP(0x30) leaves ESI unchanged; this prevents a decoder-only LDS repair from exposing its offset half before descriptor validation. Every delivery records {handler-CS<<16|vector} and its error code, the image verifies all 34 slot dwords, and the complete 2,568-record RTL trace is differential-equivalent to pinned QEMU 8.2.2.",
+  "transitions": [
+    "real->protected via a 17-entry GDT (limit 0x87): flat code0/data0, ring-3 code3/data3, eleven P=0 test descriptors (access 0x12 = S|data, 0x72 = S|DPL3|data, 0x1A = S|code, 0x02 = LDT), one 32-bit TSS (0x78), one present LDT descriptor (0x80 -> LDT @0x3000); CR0.PE 0->1",
+    "IDT @ 0x1000: vectors 11/12/13 -> np/ss/gp handlers, 8/14 -> fail exits, 32 = P=0 LDT descriptor (illegal gate type), 33 = P=0 legal int32 gate, 34/35 = present int32 gates targeting GDT selectors 0x68 (P=0 data) / 0x70 (P=0 code), 36/37 = present int32 gates targeting LDT selectors 0x000C (P=0 data) / 0x0014 (P=0 code)",
+    "fam 1a: DS <- 0x28 (P=0 LDT desc, S=0) -> #GP(0x28); control DS <- 0x30 (P=0 valid data) -> #NP(0x30)",
+    "fam 1c: SS <- 0x48 (P=0 code desc, not writable data) -> #GP(0x48); control SS <- 0x50 (P=0 writable data, DPL=CPL=RPL=0) -> #SS(0x50)",
+    "fam 2: direct ljmp -> 0x58 (P=0 DATA) -> #GP(0x58); control ljmp -> 0x60 (P=0 code) -> #NP(0x60)",
+    "fam 3: int $32 with IDT[32] a P=0 LDT descriptor -> #GP(0x102 = 32*8+2); control int $33 with a P=0 legal int32 gate -> #NP(0x10A = 33*8+2)",
+    "fam 4: int $34 through a present gate naming P=0 DATA target CS 0x68 -> #GP(0x68); control int $35 naming P=0 code target CS 0x70 -> #NP(0x70)",
+    "fam 4b: LLDT 0x80 (LDT @0x3000: null / P=0 data / P=0 code / null); int $36 through a present gate naming LDT target CS 0x000C (TI=1, P=0 DATA) -> #GP(0x000C, TI preserved); control int $37 naming LDT target CS 0x0014 (TI=1, P=0 code) -> #NP(0x0014, TI preserved); in-guest bit asserts on both pushed codes (TI=1, IDT=0, EXT=0; fail edi = 0x94/0x95/0x96)",
+    "fam 5: same-privilege RETF popping CS=0x58 (P=0 DATA) -> #GP(0x58); control popping CS=0x60 (P=0 code) -> #NP(0x60); ESP preserved across the rejected RETFs (H-02, both oracles)",
+    "fam 7: LDS ESI,m16:32 at 0x2200 with offset 0xDEADBEEF and P=0 selector 0x30 -> #NP(0x30); ESI remains its pre-instruction sentinel 0xA55A1234 (atomic two-destination rejection)",
+    "IOPL=3 + outer RETF to ring 3 (TSS SS0:ESP0 for the cross-privilege deliveries)",
+    "fam 1b: DS <- 0x38 (P=0 data DPL=0) at CPL3 -> #GP(0x38); control DS <- 0x40 (P=0 data DPL=3) at CPL3 -> #NP(0x40)",
+    "exit: verify all 34 slot dwords against exptab (fail edi = 0x80|cases-remaining), check the delivery counters (fail edi = 0x90/0x91/0x92/0x93), fold, isa-debug-exit at CPL==IOPL==3 (status 133)"
+  ],
+  "case_map": {
+    "fam1a": {
+      "slot": "0x2000",
+      "faulting_op": "movw %ax,%ds sel 0x28 (P=0 LDT, S=0)",
+      "expect": "vector 13, err 0x00000028 -- S/type BEFORE presence",
+      "control": "slot 0x2008: sel 0x30 P=0 valid data -> vector 11, err 0x00000030"
+    },
+    "fam1c": {
+      "slot": "0x2010",
+      "faulting_op": "movw %ax,%ss sel 0x48 (P=0 code)",
+      "expect": "vector 13, err 0x00000048 -- SS must be writable data, checked before P",
+      "control": "slot 0x2018: sel 0x50 P=0 writable data DPL=CPL=RPL -> vector 12, err 0x00000050"
+    },
+    "fam2": {
+      "slot": "0x2020",
+      "faulting_op": "ljmp -> 0x58 (P=0 DATA)",
+      "expect": "vector 13, err 0x00000058 -- helper_ljmp_protected's CS check precedes the P check",
+      "control": "slot 0x2028: ljmp -> 0x60 (P=0 code) -> vector 11, err 0x00000060"
+    },
+    "fam3": {
+      "slot": "0x2030",
+      "faulting_op": "int $32, IDT[32] = P=0 LDT desc",
+      "expect": "vector 13, err 0x00000102 (vec*8+2) -- gate type check precedes the P check (do_interrupt_protected)",
+      "control": "slot 0x2038: int $33, P=0 legal int32 gate -> vector 11, err 0x0000010A"
+    },
+    "fam4": {
+      "slot": "0x2040",
+      "faulting_op": "int $34, gate -> target CS 0x68 (P=0 DATA)",
+      "expect": "vector 13, err 0x00000068 -- target-CS S/type check precedes P; the code blames the gate's TARGET CS selector (TI from the selector, IDT=0, EXT=0 for a software INT), exactly QEMU's do_interrupt_protected `selector & 0xfffc` form",
+      "control": "slot 0x2048: int $35, gate -> target CS 0x70 (P=0 code) -> vector 11, err 0x00000070"
+    },
+    "fam4b": {
+      "slot": "0x2070",
+      "faulting_op": "int $36, gate -> LDT target CS 0x000C (TI=1, P=0 DATA; LDT @0x3000 via GDT[16]=0x80, lldt)",
+      "expect": "vector 13, err 0x0000000C -- the same target-CS blame form as fam 4 with TI PRESERVED (QEMU's load_segment resolves the LDT descriptor, then the S/type check precedes P). In-guest bit asserts: TI(bit2)=1, IDT(bit1)=0, EXT(bit0)=0; fail edi = 0x94/0x95/0x96 names the bit",
+      "control": "slot 0x2078: int $37, gate -> LDT target CS 0x0014 (TI=1, P=0 code) -> vector 11, err 0x00000014 (same bit asserts)"
+    },
+    "fam4c": {
+      "status": "SKIPPED -- not feasible in this harness (oracle gap 2)",
+      "intent": "a HARDWARE interrupt delivered through an IDT gate whose target CS is bad (P=0 data) must raise #GP(sel & 0xfffc | EXT=1) per SDM Vol.3A 6.13 (EXT=1: the exception occurs during delivery of an event external to the program)",
+      "blocker": "no deterministic hardware-interrupt injection exists in the --system testbench: tb_main.cpp drives top->intr ONLY inside #ifdef VEN_DOS_MODELS + args.dos (the PIT/PIC IRQ0 pump, tb_main.cpp:1492-1543); in --system mode top->intr is tied to 0 for the whole run (tb_main.cpp:1263). The DOS models additionally need sw/ps_periph/*.c, which is absent from this checkout. And the golden side cannot observe a hardware IRQ at all: the qemu-system gdbstub single-step path masks external interrupts (the same SSTEP_NOIRQ infeasibility psmm documents for SMI). Fabricating a cycle-timed injection would be a flaky test, so fam 4c is documented here instead -- see oracle_gaps."
+    },
+    "fam5": {
+      "slot": "0x2050",
+      "faulting_op": "lret, popped CS = 0x58 (P=0 DATA)",
+      "expect": "vector 13, err 0x00000058 -- helper_ret_protected's S/CS check precedes P; ESP preserved (H-02)",
+      "control": "slot 0x2058: popped CS = 0x60 (P=0 code) -> vector 11, err 0x00000060"
+    },
+    "fam1b": {
+      "slot": "0x2060",
+      "faulting_op": "movw %ax,%ds sel 0x38 (P=0 data DPL=0) at CPL3",
+      "expect": "vector 13, err 0x00000038 -- the DPL check precedes P",
+      "control": "slot 0x2068: sel 0x40 P=0 data DPL=3 at CPL3 -> vector 11, err 0x00000040"
+    },
+    "fam7_lds_atomic": {
+      "slot": "0x2080",
+      "faulting_op": "LDS ESI,[0x2200], m16:32={offset 0xDEADBEEF, selector 0x0030 P=0 data}",
+      "expect": "vector 11, err 0x00000030, ESI remains 0xA55A1234; fail edi=0x97 if the GPR half commits before descriptor rejection"
+    }
+  },
+  "witnesses": {
+    "edi at exit": "0x00000042 on pass; 0x80|cases-remaining on an exptab mismatch (the value names the first wrong slot from the tail), 0x90/0x91/0x92/0x93 on a delivery-count mismatch (total/#GP/#NP/#SS), 0x94/0x95/0x96 on a fam-4b error-code BIT mismatch (TI/IDT/EXT respectively -- a swapped-bit regression names the bit), 0x7F/0x7E = unexpected #DF/#PF",
+    "ebx at exit": "0x0008000C -- XOR of all 17 {handler-CS<<16|vector} words (8x 0x0008000D, 8x 0x0008000B, 1x 0x0008000C)",
+    "ebp at exit": "0x00000040 -- XOR of the 17 error codes",
+    "ecx at exit": "0x00080081 -- (nGP=8 << 16) | (nNP=8 << 4) | (nSS=1)",
+    "esi at exit": "0x00000011 -- total fault deliveries (17)",
+    "edx at exit": "0x600D00F4 -- the 0x600D600D pass magic with dx clobbered by the 0xF4 exit-port load",
+    "differential grading": "QEMU golden (2568 records) vs RTL --system trace: EQUIVALENT, per-instruction register compare; every witness flows through a register twice (handler store + exit-loop verify/fold), so any vector/error-code divergence or premature LDS GPR commit breaks the diff at its first visible record"
+  },
+  "oracle_gaps": [
+    "(RETIRED 2026-08-04) the fam-4 target-CS error-code bit-1 form gap is closed: the RTL now blames the gate's target CS selector with TI from the selector / IDT=0 / EXT=0 for a software INT (selector_error_ext in ventium_sys_pkg.sv, used by core_int_deliver.svh) -- exactly QEMU's `selector & 0xfffc` form. The NOSTORE workaround is removed and fam 4 is fully differential like every other family.",
+    "(OPEN 2026-08-05, fam 4c) EXT=1 for an EXTERNALLY-delivered source: per SDM Vol.3A 6.13, a #GP/#NP raised while delivering a hardware interrupt or NMI through a gate with a bad target CS must push the target selector's error code with EXT=1 (the RTL's selector_error_ext(int_gate_sel, !int_sw) implements this). QEMU 8.2.2 cannot be the oracle: do_interrupt_protected in ventium-refs/07-p5-emulation-harness/build/qemu/target/i386/tcg/seg_helper.c pushes `selector & 0xfffc` (lines 689/699) -- EXT=0 ALWAYS, regardless of the event source (is_hw only feeds back into HF/RF handling, never the error code). A witness-graded run is ALSO infeasible in this harness: the --system testbench never drives the core's intr input (top->intr is tied to 0 outside the VEN_DOS_MODELS --dos PIT/PIC pump, tb_main.cpp:1263 vs 1492-1543, and the DOS models' sw/ps_periph sources are absent from this checkout), and the qemu-system gdbstub single-step path masks external interrupts entirely (the psmm SSTEP_NOIRQ precedent), so no deterministic injection + observation point exists on either side. Documented, not tested -- no flaky test fabricated."
+  ],
+  "scoped_down": {
+    "family 6 (task switch)": "SUPERSEDED 2026-08-05 -- the scoping rationale below is no longer the RTL's behavior. The S_LJMP system-descriptor dispatch is now a typed classifier in the pinned oracle's precedence (type/DPL before presence; the default-case #GP for outright-rejected classes; the loud halt survives only for task gate / 286 TSS / NT-return-to-non-busy, after the architecturally required faults). The combined-invalid shapes this note described as deliberately presence-first are now differentially reachable and are covered by pxfer's combined-invalid matrix (P=0+wrong-type and P=0+DPL for available/busy TSS, LDT, task gate, and call gate, each with a presence-only control). History: SKIPPED -- not differentially reachable in this core, for two independent reasons. (a) QEMU checks a direct far transfer's TSS-descriptor TYPE and DPL in helper_ljmp_protected (the case-1/9/5 switch and its default -> #GP) BEFORE switch_tss_ra's presence check, so a P=0 wrong-type or P=0 DPL-failing TSS-slot descriptor is #GP in QEMU. The RTL deliberately evaluates PRESENCE FIRST for system descriptors on a far transfer (core_seg_ljmp.svh: 'an ABSENT system descriptor is #NP(selector), not the unsupported-form halt -- presence precedes unimplemented', R2-C01) and loud-HALTs every non-TSS system descriptor form (H-19: task gate 0xD5, LDT 0xD2, 16-bit TSS -- documented in docs/unsupported-isa.md). The A4-H05 fix intentionally did not touch that order. (b) Within the implemented TSS forms (type 9/0xB), the combined-invalid shapes either hit (a)'s deliberate presence-first rule or are order-ambiguous in QEMU itself (switch_tss_ra checks P before the busy form). A #NP-only control (P=0 valid available TSS) would prove nothing about precedence, so the whole family is scoped out rather than pinned dishonestly."
+  },
+  "negative_control": {
+    "method_2026_08_05": "MEASURED for the target-CS error-code form: a scratch copy of the RTL tree (tmp/pdescneg/rtl, since removed) had core_int_deliver.svh's two `selector_error_ext(int_gate_sel, !int_sw)` calls restored to the pre-fix `{16'd0, int_gate_sel[15:3], 3'b010}` form (drops TI, forces IDT=1), built into a scratch objdir with `make -C verif/tb rtl OBJDIR=obj_dir_pdescneg RTL_DIR=<scratch>/rtl` (the canonical verif/tb/obj_dir untouched), and run on this image. Result: +ven_faultlog shows `vec=13 err=0000000a` for the fam-4b discriminator (int $36, selector 0x000C -> old form 0x000A: TI dropped, IDT set) and `vec=13 err=0000006a` / `vec=11 err=00000072` for fam 4; compare.py vs the golden is DIVERGENT from n=2136 (eax 0x6A vs 0x68) and the guest then stops at the fam-4b TI bit assert -- the negative trace's final record is edi=eax=0x00000094 (bit_ti_fail), 2189 records vs the golden's 2531. The canonical RTL was byte-identical afterwards (md5 72afe731d4f6621f5ebe2c0daa409836).",
+    "pre_fix_logic": "seg_load_fault evaluated `if (!desc_present(a)) fault = 1'b1; // #NP / #SS` FIRST, before the S/type/privilege chain; seg_fault_vec returned #NP(11)/#SS(12) for ANY non-null not-present descriptor (`if (!nullsel && !desc_present(a)) vec = is_ss ? 12 : 11; else 13`). The IDT gate arm checked the gate's Present bit before its type, and the target-CS arm was a collapsed cs_bad with 'NP iff P=0' and the `{sel[15:3],3'b010}` error form. The A4-H05 fix reordered all four sites: S/type/privilege -> #GP, presence LAST -> #NP/#SS, and the selector_error_ext error form.",
+    "expected_pre_fix": "all eight combined-invalid cases deliver #NP where the oracle says #GP (fam1a #NP(0x28), fam1b #NP(0x38), fam1c #SS(0x48) -- the is_ss form, fam2 #NP(0x58), fam3 #NP(0x102), fam4 #NP(sel), fam4b #NP(sel), fam5 #NP(0x58)): np_handler/ss_handler run instead of gp_handler, the {cs<<16|vec} slot words lose 0x0D and gain 0x0B/0x0C, the exptab verify fails at the first case (edi=0x90), and the differential diverges at np_handler's first record. The eight single-invalid controls are invisible to the precedence defect (presence is their sole failure) -- they pass pre- and post-fix, making the test non-vacuous by construction. The error-FORM half of the pre-fix state is the measured control above."
+  },
+  "validation": {
+    "commands": [
+      "make -C verif/sys/tests/pdescprec",
+      "qemu-system-i386 -display none -machine pc -m 32 -device isa-debug-exit,iobase=0xf4,iosize=0x04 -bios verif/sys/tests/pdescprec/pdescprec.bin  -> exit 133",
+      "python3 verif/qemu-trace/gen_trace.py --qemu ventium-refs/07-p5-emulation-harness/build/qemu/build-sys/qemu-system-i386 --system --image verif/sys/tests/pdescprec/pdescprec.bin --image-mode bios --out build/sys/pdescprec.sys.vtrace --port 41279 --max-insn 3000  -> 2568 records, guest exited",
+      "verif/tb/obj_dir/tb_ventium --system --image verif/sys/tests/pdescprec/pdescprec.bin --out build/sys/pdescprec.rtl.sys.vtrace --max-insn 3000 --quiesce 400",
+      "python3 verif/diff/compare.py --mode func --all --max-report 8 build/sys/pdescprec.sys.vtrace build/sys/pdescprec.rtl.sys.vtrace  -> EQUIVALENT (2568 records match)",
+      "bash verif/sys/run-sys-golden.sh pdescprec  -> SYS-GOLDEN-OK (all of the above + self-diff + witness validation)",
+      "negative control: scratch rtl copy with selector_error_ext reverted to {16'd0, int_gate_sel[15:3], 3'b010}, make -C verif/tb rtl OBJDIR=obj_dir_pdescneg RTL_DIR=<scratch>/rtl, run + compare -> DIVERGENT from n=2136, guest stops at edi=0x94 (fam-4b TI bit assert)"
+    ],
+    "results_2026_08_23": "Added fam 7 protected LDS fault-atomicity case. Pinned QEMU and an isolated current-RTL Verilator build each produced 2568 records; compare.py reported EQUIVALENT. Final record: eax=edi=0x42, ebx=0x0008000C, ebp=0x00000040, ecx=0x00080081, esi=17, edx=0x600D00F4, cs=0x001B."
+  }
+}

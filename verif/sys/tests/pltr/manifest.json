@@ -1,0 +1,45 @@
+{
+  "name": "pltr",
+  "kind": "system",
+  "src": "pltr.S",
+  "linker": "pltr.ld",
+  "image": "pltr.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 800,
+  "sys": true,
+  "paging": true,
+  "finding": "REVIEW_Aug3 H-11b",
+  "transitions": [
+    "real->protected (CR0.PE 0->1, CS far-jump to 32-bit flat code segment 0x08)",
+    "GDT @ 0x500: null + code0 0x08 + data0 0x10 + TSS 0x18 (base 0x3000, limit 0x67, access 0x89 available)",
+    "case A: LTR 0x18 -- the fix writes the busy bit (type 9 -> B at descriptor+5 = 0x51D) BEFORE committing TR; readback shows 0x8B (QEMU's helper_ltr does the same stl of e2|BUSY, so the oracles agree)",
+    "case B: LTR 0x18 a second time -- the descriptor is now busy (type 0xB, not an available TSS) -> #GP(0x18) = #GP(sel & 0xFFFC); the handler records vector 13 + error code 0x18 and resumes the mainline",
+    "page tables: PT0 identity for pages 1 (IDT), 2 (markers), 3 (TSS), 0x90 (stack), 0xF0-0xFF (image); page 0 (the GDT page, base 0x500) ABSENT; CR3 load + CR0.PG 0->1",
+    "case C: `lldt` a NULL selector under paging with GDT[0] non-present -- the fix commits the invalid LDTR with NO descriptor read (no #PF); QEMU's helper_lldt does no read either; sldt then reads 0",
+    "witnesses pulled into edi/esi/ebp/ecx/ebx; isa-debug-exit (status 133)"
+  ],
+  "witnesses": {
+    "0x2000": "TSS access byte after case A == 0x8B (edi at exit): the busy write happened before TR committed. 0x89 = no write (the HEAD defect)",
+    "0x2004": "case-B fault vector == 13 (esi): the second LTR on the busy descriptor #GPs. 0 (or 0xBADBAD0B) = the second LTR succeeded (HEAD)",
+    "0x2008": "case-B error code == 0x18 (ebp at exit) = the selector with RPL/TI cleared, exactly as QEMU raises it",
+    "0x200c": "sldt after the null lldt == 0 (ecx): LDTR is invalid",
+    "0x2010": "0xC0C0C0C0 (ebx): the null lldt completed with GDT[0] on a non-present page and NO #PF. pf_handler writes 0xEEEEEEEE here instead (a build that reads GDT[0])"
+  },
+  "negative_control": {
+    "method": "build the RTL TB from HEAD (git worktree add /tmp/ven_base HEAD; make -C verif/tb rtl), run the same image --system, diff against the golden",
+    "expected": "DIVERGENT: HEAD performs no busy-bit write (case A readback 0x89 != golden 0x8B), accepts the second LTR (no #GP, witnesses 0x2004/0x2008 stay 0), and reads GDT[0] for the null lldt -> #PF on the non-present page -> pf_handler poisons 0x2010 with 0xEEEEEEEE and truncates the stream",
+    "measured": "CONFIRMED 2026-08-03: HEAD TB (4a643c1, no H-11b fix) vs golden: compare.py exits 1 DIVERGENT, first divergence n=266 pc=0x000f0114 eax: golden 0x0000008b vs HEAD 0x00000089 -- HEAD never wrote the busy byte (case A readback). HEAD then accepts the second LTR (no #GP handler records) and reads GDT[0] for the null lldt, so its stream ends at 351 records vs 369 golden (the #PF cascade on the non-present GDT page escalates: vec=14 cr2=0x500 -> vec=14 cr2=0x508 -> shutdown). build/sys/pltr.head.rtl.vtrace. NOTE: the CURRENT (fixed) TB also fails case C -- see rtl_blocker: the fix's null-LLDT suppression does not reach the FSM under paging"
+  },
+  "rtl_blocker": {
+    "status": "RESOLVED 2026-08-03 — the residual defect this record describes was fixed in rtl/core/core.sv the same day (see resolution below); pltr is GREEN end-to-end. Record kept as the defect's history.",
+    "divergence": "step-7 RTL sys-diff: golden 369 records, RTL stops at n=356 (the xorl before the lldt) and goes quiescent. Fault log at the null lldt (pc=0x000f0199): vec=14 cr2=0x00000500 (GDT[0] page walk -> not-present #PF), then vec=14 cr2=0x00000508 (#PF delivery reading the handler CS descriptor on the SAME non-present GDT page), then vec=11 err=0x42 escalation -> shutdown.",
+    "root_cause": "lldt_null_q is set correctly and both the S_LTR FSM commit arm and the bus-arm request suppression honour it, but S_LTR was unconditionally in `translatable` and NEITHER xlate_miss NOR the S_WALK divert was gated on the suppressed request -- so with CR0.PG=1 the null LLDT still diverted to a page walk on cur_lin = gdt_base+0 = 0x500.",
+    "resolution": "fixed in rtl/core/core.sv: S_LTR is translatable only when !lldt_null_q, S_TSW_SEG only when !tsw_seg_oob (the same suppression/translation coherence for the C-06 precheck), and the data-side perm_fault is qualified on fe_translatable. Verified: bash verif/sys/run-sys-golden.sh pltr -> RTL-SYS-DIFF-OK, 369 records EQUIVALENT."
+  },
+  "description": "REVIEW_Aug3 H-11b regression: LTR must perform the architectural busy-bit write (type 9 -> B at descriptor+5) before TR commits, and a null LLDT must commit the invalid LDTR with no GDT[0] read. Bare-metal real->protected->paged image. Case A: LTR 0x18, read the GDT access byte back -- 0x8B (busy). Case B: LTR the same selector again -- #GP(0x18), recorded by the handler. Case C: paging ON with the GDT's page (linear 0x500) NOT present; `lldt` a null selector must complete with no #PF and `sldt` must read 0. QEMU 8.2.2 implements both behaviours (helper_ltr's stl of e2|DESC_TSS_BUSY_MASK; helper_lldt's (sel & 0xfffc)==0 branch with no dereference), so the test is graded DIFFERENTIALLY against the QEMU golden by the run-sys-golden.sh step-7 RTL sys-diff, with the five witnesses pulled into the GPRs for the final-record compare."
+}

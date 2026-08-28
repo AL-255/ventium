@@ -35,12 +35,16 @@ done
 
 say "1. build the deployed-config tb (L1AXI + KV260 REMAP + all features)"
 make -C "$TB" l1axi_kv_full >/dev/null
-BIN="$TB/obj_dir_l1axi_kvf/tb_ventium"
+BIN="$TB/${KV_FULL_OBJDIR:-obj_dir_l1axi_kvf}/tb_ventium"
 [ -x "$BIN" ] || { echo "FATAL: deployed-config tb not built"; exit 1; }
 
 # strip the tb's per-OUT character spam (each console byte echoes a few times).
+# REVIEW1_Aug3 R2-H12: with CR0.CD now honoured on the D side, these real-mode
+# images (which never clear CD) run every access as a narrow AXI transaction --
+# ~27 CPI, so the default 2^24-cycle TB cap truncates memtest before MOK. Give the
+# run an explicit, measured budget (memtest: 737K insns / 19.8M clocks).
 run(){ timeout 180 "$BIN" --system --l1-axi --cosim --image "$1" --out /dev/null \
-       --max-insn "${2:-2000000}" --quiesce 8000 2>&1 \
+       --max-insn "${2:-2000000}" --max-cycles "${3:-268435456}" --quiesce 8000 2>&1 \
      | grep -av '^tb:' | tr -d '\r\n' | sed 's/\(.\)\1\{2,\}/\1/g'; }
 
 say "2. xwordtest: unaligned (cross-word) 32-bit stores through L1/AXI (expect XOK)"

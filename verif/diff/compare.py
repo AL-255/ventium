@@ -172,21 +172,70 @@ def _sys_keys_intersection(keys: list, ra: list, rc: list) -> list:
     return keys + extra
 
 
+def _parse_range(s: str):
+    """'A:B' or 'A:' or 'A' -> (lo, hi) record-index range (ints, hex ok)."""
+    lo, _, hi = s.partition(":")
+    return (int(lo, 0), int(hi, 0) if hi else None)
+
+
+def _parse_fpr_range(s: str):
+    """'A:B[=st0,st3]' -> (lo, hi, fields): the optional field list scopes the
+    st* mask to the named registers inside the range -- an st* divergence in
+    any OTHER register of the same record still fails the compare. Without
+    the list every st0..st7 compare is dropped in the range."""
+    rng, _, fields = s.partition("=")
+    lo, hi = _parse_range(rng)
+    return (lo, hi, frozenset(fields.split(",")) if fields else None)
+
+
 def compare_func(a: tracefmt.Trace, c: tracefmt.Trace, x87_both: bool,
                  eflags_mask: int, show_all: bool, max_report: int,
-                 out, sys_both: bool = False) -> int:
+                 out, sys_both: bool = False,
+                 fstat_exc_mask: int = 0, x87_fpr_masked: bool = False,
+                 fstat_ranges=None, fpr_ranges=None) -> int:
     """Functional-mode compare. Returns an exit code (0/1/2).
 
     When `sys_both` is set (both headers sys:true, M2S), the system control
     registers (cr0/cr2/cr3/cr4) are compared alongside the user-mode fields, and
     any segment-hidden descriptor field present in BOTH traces is compared too
     (reserved fields a producer omits are intersected out, never a miss).
+
+    `fstat_exc_mask` (R2-H06): exception-flag bits masked out of the fstat
+    compare -- used by the corpus programs that deliberately drive the x87
+    stack past its ends, where the architectural IE|SF response has no QEMU
+    counterpart (QEMU's fpush/fpop never look at the tags). `x87_fpr_masked`
+    drops the st0..st7 value compare for the same programs (the masked
+    response's QNaN-indefinite substitution is architectural; QEMU pushes the
+    raw value). Both are exactly the documented oracle gap and nothing more.
+
+    Aug4 (A4-M02): `fstat_ranges`/`fpr_ranges` scope each mask to the named
+    record-index ranges [(lo, hi|None), ...] -- everything OUTSIDE the ranges
+    is compared at full strength, so an unrelated x87 value or condition-code
+    regression elsewhere in the program can no longer hide under the mask.
     """
     keys = tracefmt.func_compare_keys(x87_both, sys=sys_both)
+    if x87_fpr_masked and not fpr_ranges:
+        keys = [k for k in keys if k not in tracefmt.X87_REGS]
     ra, rc = a.records, c.records
     if sys_both:
         keys = _sys_keys_intersection(keys, ra, rc)
     n_common = min(len(ra), len(rc))
+
+    def in_range(ranges, n):
+        return any(lo <= n and (hi is None or n <= hi) for lo, hi in ranges)
+
+    def fpr_mask_at(n):
+        """st* compare masked at record n: True = every st*, a frozenset =
+        only the named registers, None = full-strength compare."""
+        if not fpr_ranges:
+            return True if x87_fpr_masked else None
+        out = set()
+        for lo, hi, fields in fpr_ranges:
+            if lo <= n and (hi is None or n <= hi):
+                if fields is None:
+                    return True
+                out |= fields
+        return frozenset(out) if out else None
 
     divergences = []  # list of (n, pc, field, expected, got)
 
@@ -202,6 +251,10 @@ def compare_func(a: tracefmt.Trace, c: tracefmt.Trace, x87_both: bool,
                 break
             continue
 
+        # A4-M02: is THIS record inside an oracle-gap range?
+        fstat_masked = bool(fstat_exc_mask) and in_range(fstat_ranges or [(0, None)], na)
+        fpr_mask = fpr_mask_at(na)
+
         pc_a = rec_a.get("pc", "?")
         # Recover mnemonic for EFLAGS undefined-flag masking. Prefer the golden
         # (A) bytes; fall back to C's.
@@ -210,6 +263,10 @@ def compare_func(a: tracefmt.Trace, c: tracefmt.Trace, x87_both: bool,
 
         rec_div = False
         for field in keys:
+            if field in tracefmt.X87_REGS and (
+                    fpr_mask is True or
+                    (isinstance(fpr_mask, frozenset) and field in fpr_mask)):
+                continue
             va = rec_a.get(field)
             vc = rec_c.get(field)
             # A field defined in the spec but absent from one side is itself a
@@ -230,6 +287,15 @@ def compare_func(a: tracefmt.Trace, c: tracefmt.Trace, x87_both: bool,
                 if not eq:
                     note = f"eflags(mask={tracefmt.hx(eff, 32)})"
                     divergences.append((na, pc_a, note, va, vc))
+                    rec_div = True
+                    if not show_all:
+                        break
+            elif field == "fstat" and fstat_masked:
+                # R2-H06: mask the named exception bits (IE|SF) on both sides.
+                if (int(va, 16) & ~fstat_exc_mask) != (int(vc, 16) & ~fstat_exc_mask):
+                    divergences.append((na, pc_a,
+                                        f"fstat(mask={tracefmt.hx(fstat_exc_mask, 16)})",
+                                        va, vc))
                     rec_div = True
                     if not show_all:
                         break
@@ -255,6 +321,16 @@ def compare_func(a: tracefmt.Trace, c: tracefmt.Trace, x87_both: bool,
           f"compared: {n_common}", file=out)
     print(f"eflags base mask: {tracefmt.hx(eflags_mask, 32)}   "
           f"x87 compared: {x87_both}   sys compared: {sys_both}", file=out)
+    if fstat_exc_mask or x87_fpr_masked or fstat_ranges or fpr_ranges:
+        rng = lambda rs: ",".join(f"{lo}:{'' if hi is None else hi}" for lo, hi in rs)
+        frng = lambda rs: ",".join(
+            f"{lo}:{'' if hi is None else hi}"
+            + ("" if f is None else "=" + "+".join(sorted(f)))
+            for lo, hi, f in rs)
+        print(f"R2-H06 oracle-gap masks: fstat_exc={tracefmt.hx(fstat_exc_mask, 16)}"
+              f"  x87_fpr_masked={x87_fpr_masked}"
+              + (f"  fstat_ranges={rng(fstat_ranges)}" if fstat_ranges else "")
+              + (f"  fpr_ranges={frng(fpr_ranges)}" if fpr_ranges else ""), file=out)
 
     if not divergences and not len_mismatch:
         print(f"RESULT: EQUIVALENT ({n_common} records match)", file=out)
@@ -424,6 +500,27 @@ def main(argv=None) -> int:
                         f"(default {tracefmt.hx(tracefmt.EFLAGS_DEFAULT_MASK, 32)})")
     p.add_argument("--max-report", type=int, default=20,
                    help="with --all, max divergences to print (default 20)")
+    p.add_argument("--mask-fstat-exc", type=lambda s: int(s, 0), default=0,
+                   help="func mode: mask these fstat exception bits (e.g. 0x41"
+                        " = IE|SF) on BOTH sides — the R2-H06 oracle gap for"
+                        " stack-fault-driving programs (QEMU sets neither)")
+    p.add_argument("--mask-x87-fpr", action="store_true",
+                   help="func mode: drop the st0..st7 value compare — same"
+                        " oracle gap (the masked QNaN-indefinite substitution"
+                        " has no QEMU counterpart)")
+    p.add_argument("--mask-fstat-range", action="append", type=_parse_range,
+                   default=None, metavar="A:B",
+                   help="func mode: apply --mask-fstat-exc ONLY to records"
+                        " with n in A..B (B optional = to end). Repeatable."
+                        " Everything outside compares at full strength (A4-M02).")
+    p.add_argument("--mask-fpr-range", action="append", type=_parse_fpr_range,
+                   default=None, metavar="A:B[=st0,st3]",
+                   help="func mode: drop the st0..st7 compare ONLY for records"
+                        " with n in A..B (B optional = to end). Repeatable;"
+                        " overrides --mask-x87-fpr's program-wide form."
+                        " Append =st0,st3 to mask only the named registers in"
+                        " the range — a divergence in any other st* of the"
+                        " same record still fails the compare.")
     p.add_argument("a", metavar="A.vtrace", help="golden trace (QEMU)")
     p.add_argument("c", metavar="C.vtrace", help="device-under-test (RTL)")
     args = p.parse_args(argv)
@@ -450,7 +547,11 @@ def main(argv=None) -> int:
 
     if args.mode == "func":
         return compare_func(a, c, x87_both, eflags_mask, args.all,
-                            args.max_report, sys.stdout, sys_both=sys_both)
+                            args.max_report, sys.stdout, sys_both=sys_both,
+                            fstat_exc_mask=args.mask_fstat_exc,
+                            x87_fpr_masked=args.mask_x87_fpr,
+                            fstat_ranges=args.mask_fstat_range,
+                            fpr_ranges=args.mask_fpr_range)
     else:
         return compare_cycle(a, c, args.tol_pct, args.all,
                              args.max_report, sys.stdout)

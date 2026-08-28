@@ -54,8 +54,7 @@
               default: ;
             endcase
 `ifdef VEN_DBG_WD
-            // esi is beat 9 (TSS+0x40). Log the value the READ pulls from memory for the garbage pointer
-            // 0x11b354 -> tells us if the TSS.esi MEMORY is corrupt (mem_rdata==0x11b354) vs a READ mis-load.
+            // ESI is beat 9 (TSS+0x40); retain this generic task-switch trace.
             if (tsw_step == 5'd9)
               $display("[VEN-TSWR] esi<-%08h from TSS_base=%08h untranslated_addr=%08h TRANSLATED_phys=%08h paging=%b @cs:eip=%04x:%08h",
                        mem_rdata, tsw_new_base, tsw_new_base + 32'h40,
@@ -63,15 +62,47 @@
 `endif
             // After the last TSS field, load the LDTR's hidden base/limit (S_TSW_LDT)
             // BEFORE reloading the segments, so LDT-selector CS/SS/etc. resolve right.
-            if (tsw_step == 5'd17) begin tsw_step <= 5'd0; state <= S_TSW_LDT; end
+            // REVIEW_Aug3 C-06: PREVALIDATE the incoming LDTR selector here, before
+            // S_TSW_LDT issues any descriptor read. A null LDTR skips the read
+            // entirely (the invalid LDT is staged directly -- the old flow read
+            // GDT[0] and discarded it, which under paging can #PF on an access the
+            // architecture never makes); TI=1 or out-of-GDT-bounds is #TS ahead of
+            // any memory access, not after it. The fault stamps q_pc (the far
+            // JMP/CALL that started the switch), not int_src_pc -- this switch's
+            // source is not interrupt delivery, so that register could carry stale
+            // attribution.
+            // F1 (found by the ptaskpg differential): evaluate against
+            // mem_rdata[15:0] -- beat 17 IS the LDTR read. tsw_new_ldt is captured
+            // nonblocking above and still holds the OLD value on this clock, so
+            // testing it sent every non-null incoming LDTR down the null path.
+            if (tsw_step == 5'd17) begin
+              // R2-C02: null is TI=0/index-0 ONLY. A TI=1 "null" (0x0004) names
+              // LDT entry 0 -- for the LDTR that is a TI violation -> #TS, not a
+              // silent invalidation.
+              if (is_null_selector(mem_rdata[15:0])) begin
+                tsw_st_ldt_sel   <= mem_rdata[15:0];
+                tsw_st_ldt_base  <= 32'd0;
+                tsw_st_ldt_limit <= 16'd0;
+                tsw_step <= 5'd0; state <= S_TSW_SEG;
+              end else if (mem_rdata[2] || !sel_in_table(mem_rdata[15:0])) begin
+                start_fault(8'd10, 1'b1,
+                            {16'd0, mem_rdata[15:0]} & 32'h0000_FFFC, q_pc);
+              end else begin
+                tsw_step <= 5'd0; state <= S_TSW_LDT;
+              end
+            end
             else tsw_step <= tsw_step + 5'd1;
           end
         end
 
         // S_TSW_LDT: load the new task's LDTR hidden base/limit from the GDT LDT
         // descriptor named by tsw_new_ldt (2 word reads), so the subsequent S_TSW_SEG
-        // can resolve LDT-selector segments (e.g. CWSDPMI's PM client CS). A null
-        // LDTR (index 0) leaves ldt_base unchanged. Then proceed to the seg reload.
+        // can resolve LDT-selector segments (e.g. CWSDPMI's PM client CS).
+        // REVIEW_Aug3 C-06: the SELECTOR half (null / TI / GDT bounds) is now
+        // checked in S_TSW_READ before this state issues its first read -- so only
+        // the DESCRIPTOR half remains here: the descriptor must be an LDT (S=0,
+        // type 2) and Present, else #TS(selector). A #TS stamps q_pc, not
+        // int_src_pc (the switch's source is a far JMP/CALL, not an interrupt).
         S_TSW_LDT: begin
           if (mem_ack) begin
             if (!tsw_step[0]) begin tsw_seg_lo <= mem_rdata; tsw_step <= 5'd1; end
@@ -80,39 +111,15 @@
               desc = {mem_rdata, tsw_seg_lo};
               // REVIEW2 M-02: track the LDTR selector across a task switch too, so the
               // SMM save map and any future SLDT see the LDTR the new task actually has.
-              // REVIEW2_aug2 C-05: a null incoming LDTR used to record the null
-              // SELECTOR while leaving the OUTGOING task's hidden LDT base/limit intact.
-              // With no LDTR-valid bit, every subsequent TI=1 selector in the new task
-              // then resolved through the PREVIOUS task's LDT -- reading another task's
-              // descriptors, which is precisely the isolation a task switch exists to
-              // provide. Clearing base and limit makes any such reference fall out of
-              // range instead. Same treatment H-10 gave `lldt $0`.
               tsw_st_ldt_sel <= tsw_new_ldt;   // C-05: staged, committed in S_TSW_BUSY
-              if (!(|tsw_new_ldt[15:3])) begin
-                tsw_st_ldt_base  <= 32'd0;
-                tsw_st_ldt_limit <= 16'd0;
-              end
-              if (|tsw_new_ldt[15:3]) begin
-                // ---- REVIEW1_Aug2 C-09: VALIDATE the incoming LDTR ------------------
-                // The descriptor was installed unconditionally: no table-limit check on
-                // the selector, and no type or Present check on what came back. A
-                // malformed TSS therefore handed the new task an arbitrary LDT base and
-                // limit, and every subsequent TI=1 selector resolved through it.
-                // IA-32: the selector must be a GDT selector (TI=0) inside the table,
-                // the descriptor must be an LDT (S=0, type 2), and it must be present.
-                // #TS(selector) otherwise -- the task-switch error code.
-                if (tsw_new_ldt[2] || !sel_in_table(tsw_new_ldt)
-                    || desc_s(desc_attr(desc))
-                    || (desc_attr(desc)[3:0] != 4'h2)
-                    || !desc_present(desc_attr(desc))) begin
-                  start_fault(8'd10, 1'b1,
-                              {16'd0, tsw_new_ldt} & 32'h0000_FFFC, int_src_pc);
-                end else begin
+              if (desc_s(desc_attr(desc))
+                  || (desc_type(desc_attr(desc)) != 4'h2)
+                  || !desc_present(desc_attr(desc))) begin
+                start_fault(8'd10, 1'b1,
+                            {16'd0, tsw_new_ldt} & 32'h0000_FFFC, q_pc);
+              end else begin
                 tsw_st_ldt_base  <= desc_base(desc);
                 tsw_st_ldt_limit <= desc_limit16(desc);
-                tsw_step <= 5'd0; state <= S_TSW_SEG;
-                end
-              end else begin
                 tsw_step <= 5'd0; state <= S_TSW_SEG;
               end
             end
@@ -140,7 +147,35 @@
           // so the beat cadence must advance on its own here. The two-beat-per-segment
           // structure is kept as-is so the staging logic below is untouched -- the V86
           // path simply runs it with no bus traffic and ignores tsw_seg_lo.
-          if (tsw_eflags[17] || mem_ack) begin
+          // REVIEW_Aug3 C-06: an out-of-table selector faults BEFORE its read is
+          // issued. tsw_seg_oob (module level) suppresses the bus request for
+          // exactly this beat, so the fault fires here with no memory touched --
+          // under paging the old flow could take a #PF ahead of the required #TS.
+          // The fault stamps q_pc, not int_src_pc (this switch's source is a far
+          // JMP/CALL, not interrupt delivery).
+          if (tsw_seg_oob) begin
+            start_fault(8'd10, 1'b1,
+                        {16'd0, tsw_sel[3'(tsw_step[4:1])]} & 32'h0000_FFFC, q_pc);
+          end else if (tsw_seg_null) begin
+            // REVIEW1_Aug3 R2-C02: a NULL incoming selector performs NO descriptor
+            // read (the bus arm suppresses it on this same predicate). CS/SS null
+            // is #TS(selector); a null DS/ES/FS/GS stages an explicit NULL hidden
+            // cache -- the old flow read GDT[0] and installed whatever hidden
+            // state those bytes held.
+            if ((tsw_step[4:1] == 4'd0) || (tsw_step[4:1] == 4'd1))   // CS / SS
+              start_fault(8'd10, 1'b1,
+                          selector_error(tsw_sel[3'(tsw_step[4:1])]), q_pc);
+            else begin
+              tsw_st_sel  [3'(tsw_step[4:1])] <= tsw_sel[3'(tsw_step[4:1])];
+              tsw_st_base [3'(tsw_step[4:1])] <= 32'd0;
+              tsw_st_limit[3'(tsw_step[4:1])] <= 32'd0;
+              tsw_st_attr [3'(tsw_step[4:1])] <= 8'd0;
+              tsw_st_b    [3'(tsw_step[4:1])] <= 1'b0;
+              tsw_st_pml  [3'(tsw_step[4:1])] <= 1'b1;   // R2-H07: null = loaded-null
+              if (tsw_step == 5'd10) begin tsw_step <= 5'd0; state <= S_TSW_BUSY; end
+              else                   tsw_step <= tsw_step + 5'd2;
+            end
+          end else if (tsw_eflags[17] || mem_ack) begin
             if (!tsw_step[0]) begin
               tsw_seg_lo <= mem_rdata; tsw_step <= tsw_step + 5'd1;
             end else begin
@@ -172,23 +207,55 @@
               //       present, and readable (data, or a readable code segment).
               // V86 tasks (EFLAGS.VM) bypass all of it -- their selectors are real-mode
               // paragraphs, not descriptors, which is why this sits in the else branch.
-              tsw_seg_bad = 1'b0;
+              // The failure reasons are ranked like the pinned oracle's
+              // tss_load_seg: S/type/privilege first (#TS), the Present bit
+              // LAST (#NP). A combined-invalid descriptor therefore reports
+              // #TS, and a presence-only failure reports #NP -- never one
+              // collapsed vector for both classes.
+              tsw_seg_ts = 1'b0;
+              tsw_seg_np = 1'b0;
               if (!tsw_eflags[17]) begin
-                if (!sel_in_table(tsw_sel[sidx]) && |tsw_sel[sidx][15:3])
-                  tsw_seg_bad = 1'b1;
-                else if (sidx == 3'(SG_CS))
-                  tsw_seg_bad = (tsw_sel[SG_CS][15:2] == 14'd0)
-                             || !desc_present(sattr) || !desc_s(sattr)
-                             || !seg_is_code(sattr);
-                else if (sidx == 3'(SG_SS))
-                  tsw_seg_bad = (tsw_sel[SG_SS][15:2] == 14'd0)
-                             || !desc_present(sattr) || !desc_s(sattr)
-                             ||  seg_is_code(sattr) || !sattr[1]
-                             || (tsw_sel[SG_SS][1:0]  != tsw_sel[SG_CS][1:0])
-                             || (desc_dpl(sattr)      != tsw_sel[SG_CS][1:0]);
-                else if (|tsw_sel[sidx][15:3])   // DS/ES/FS/GS, non-null only
-                  tsw_seg_bad = !desc_present(sattr) || !desc_s(sattr)
-                             || (seg_is_code(sattr) && !sattr[1]);  // execute-only code
+                // (REVIEW_Aug3 C-06: the table-bounds half is now prechecked at
+                // beat 0 via tsw_seg_oob -- before the read is issued.)
+                if (sidx == 3'(SG_CS)) begin
+                  tsw_seg_ts = (tsw_sel[SG_CS][15:2] == 14'd0)
+                            || !desc_s(sattr)
+                            || !seg_is_code(sattr)
+                            // REVIEW_Aug3 C-06: the privilege + offset rules were
+                            // missing. The new CPL is CS.RPL: a NONCONFORMING code
+                            // segment needs DPL == that RPL, a conforming one
+                            // DPL <= RPL.
+                            || (sattr[2] ? (desc_dpl(sattr) >  tsw_sel[SG_CS][1:0])
+                                         : (desc_dpl(sattr) != tsw_sel[SG_CS][1:0]));
+                  tsw_seg_np = !tsw_seg_ts && !desc_present(sattr);
+                  // The target EIP (already read from the incoming TSS) must lie
+                  // within the new CS limit. Ranks AFTER presence: the pinned
+                  // oracle runs this check post-load, so a not-present CS
+                  // reports #NP regardless of its limit field.
+                  tsw_seg_ts = tsw_seg_ts
+                            || (!tsw_seg_np && (tsw_eip > desc_limit(desc)));
+                end
+                else if (sidx == 3'(SG_SS)) begin
+                  tsw_seg_ts = (tsw_sel[SG_SS][15:2] == 14'd0)
+                            || !desc_s(sattr)
+                            ||  seg_is_code(sattr) || !sattr[1]
+                            || (tsw_sel[SG_SS][1:0]  != tsw_sel[SG_CS][1:0])
+                            || (desc_dpl(sattr)      != tsw_sel[SG_CS][1:0]);
+                  tsw_seg_np = !tsw_seg_ts && !desc_present(sattr);
+                end
+                else if (!is_null_selector(tsw_sel[sidx])) begin  // DS/ES/FS/GS, non-null only (R2-C02: TI=1 idx-0 validates like any entry)
+                  tsw_seg_ts = !desc_s(sattr)
+                            || (seg_is_code(sattr) && !sattr[1])  // execute-only code
+                            // REVIEW_Aug3 C-06: the DPL rule was missing. A data
+                            // segment or a NONCONFORMING (readable) code segment
+                            // must be accessible at the new privilege:
+                            // DPL >= max(new CPL, the selector's RPL). A conforming
+                            // code segment is exempt by definition.
+                            || (!(seg_is_code(sattr) && sattr[2])
+                                && ((desc_dpl(sattr) < tsw_sel[SG_CS][1:0])
+                                 || (desc_dpl(sattr) < tsw_sel[sidx][1:0])));
+                  tsw_seg_np = !tsw_seg_ts && !desc_present(sattr);
+                end
               end
               if (tsw_eflags[17]) begin
                 // REVIEW1_Aug2 C-09: STAGED, not installed (see the commit in
@@ -196,27 +263,36 @@
                 tsw_st_base [sidx] <= {12'd0, tsw_sel[sidx], 4'd0};
                 tsw_st_limit[sidx] <= 32'h0000_FFFF;
                 tsw_st_attr [sidx] <= (sidx == 3'(SG_CS)) ? 8'h9B : 8'h93;
+                tsw_st_b    [sidx] <= 1'b0;            // C-06: V86 is 16-bit
+                tsw_st_pml  [sidx] <= 1'b0;            // R2-H07: V86-style, not a PM load
                 if (sidx == 3'(SG_CS)) begin
                   tsw_st_cpl <= 2'd3;            // V86 runs at CPL3
                   tsw_st_cs_d<= 1'b0;            // V86 is 16-bit default
                 end
                 // REVIEW1_Aug2 M-02: a V86 stack is 16-bit.
                 if (sidx == 3'(SG_SS)) tsw_st_ss_b <= 1'b0;
-              end else if (tsw_seg_bad) begin
+              end else if (tsw_seg_ts || tsw_seg_np) begin
                 // ---- REVIEW1_Aug2 C-09: VALIDATE each incoming segment descriptor ----
                 // All six were installed with no selector, type, privilege or Present
                 // check at all, so a malformed TSS gave the new task arbitrary segment
-                // bases and limits at an arbitrary CPL. IA-32 raises #TS(selector) for
-                // each of these on a task switch (see tsw_seg_bad, which states the
-                // per-segment rules once rather than repeating them per arm).
-                start_fault(8'd10, 1'b1,
-                            {16'd0, tsw_sel[sidx]} & 32'h0000_FFFC, int_src_pc);
+                // bases and limits at an arbitrary CPL. A type/privilege failure is
+                // #TS(selector); a presence-only failure is #NP(selector) -- the
+                // per-segment rules above rank the reasons the way the pinned
+                // oracle's tss_load_seg does (S/type/privilege before P).
+                // REVIEW_Aug3 C-06: stamp q_pc (the far JMP/CALL), not int_src_pc.
+                start_fault(tsw_seg_np ? 8'd11 : 8'd10, 1'b1,
+                            {16'd0, tsw_sel[sidx]} & 32'h0000_FFFC, q_pc);
               end else begin
                 // REVIEW1_Aug2 C-09: STAGED. Nothing architectural moves until every
                 // descriptor has been read and validated.
                 tsw_st_base [sidx] <= desc_base(desc);
                 tsw_st_limit[sidx] <= desc_limit(desc);
                 tsw_st_attr [sidx] <= sattr;
+                tsw_st_pml  [sidx] <= 1'b1;   // R2-H07: validated PM descriptor load
+                // REVIEW_Aug3 C-06: stage the D/B bit for EVERY segment -- only CS.D
+                // and SS.B were carried, so a 16-bit non-SS expand-down segment kept
+                // the previous task's upper bound (seg_b[]) across the switch.
+                tsw_st_b    [sidx] <= desc[54];
                 if (sidx == 3'(SG_CS)) begin
                   tsw_st_cpl  <= tsw_sel[SG_CS][1:0];  // CPL = new CS.RPL
                   tsw_st_cs_d <= desc[54];             // D/B: 32-bit default op/addr
@@ -232,12 +308,17 @@
 
         // S_TSW_BUSY: toggle the descriptor busy bits in the GDT, then COMMIT the
         // incoming task state + retire ONCE. For a JMP the OUTGOING TSS busy bit is
-        // CLEARED (type B->9, beat 0) and the INCOMING one is SET (9->B, beat 1).
+        // CLEARED (B->9) and the INCOMING one is SET (9->B) -- beat order per the
+        // REVIEW2_aug2 C-05 note in the bus arm. For an NT return the incoming TSS
+        // is already busy and stays so. REVIEW_Aug3 C-04: for a CALL (tsw_call) the
+        // second beat instead writes the outgoing TR selector into the incoming
+        // TSS back-link, the outgoing descriptor STAYS busy, and the commit sets
+        // NT in the incoming EFLAGS image -- the nested-task semantics that let an
+        // NT-IRET return to the caller.
         // The busy bytes are written as a single byte (the access byte at descriptor
         // +5) via mem_wstrb in the bus arm. On the final beat: load the incoming
         // EIP/EFLAGS/GPRs/CR3, point TR at the new TSS, set CR0.TS=1 (every task
         // switch sets TS), and retire with q_pc = the JMP's PC (held from S_LJMP).
-        // NT / the back-link are NOT touched (a JMP, not a CALL — see deferral).
         S_TSW_BUSY: begin
           if (mem_ack) begin
             if (tsw_step == 5'd0) begin
@@ -254,6 +335,8 @@
                 seg_base [t] <= tsw_st_base [t];
                 seg_limit[t] <= tsw_st_limit[t];
                 seg_attr [t] <= tsw_st_attr [t];
+                seg_b    [t] <= tsw_st_b    [t];   // C-06: D/B for every segment
+                seg_pm_loaded[t] <= tsw_st_pml[t]; // R2-H07: staged loaded-bit
               end
               // REVIEW2_aug2 C-05: LDTR lands HERE now, with the segments it governs,
               // instead of back in S_TSW_LDT before any of them had been read.
@@ -264,15 +347,19 @@
               cs_d    <= tsw_st_cs_d;
               ss_b    <= tsw_st_ss_b;
               eip     <= tsw_eip;
-              eflags  <= tsw_eflags;
+              // REVIEW_Aug3 C-04: a CALL task switch sets NT in the INCOMING task's
+              // EFLAGS image (the back-link beat above is what makes that NT
+              // meaningful -- an NT-IRET from the nested task returns here). JMP
+              // and NT-IRET forms leave the image alone.
+              eflags  <= tsw_eflags | (tsw_call ? 32'h0000_4000 : 32'd0);
+              tsw_call<= 1'b0;
               // R3: the incoming-task GPR-file load moved to the gpr writeback driver
               // (core_gpr_wb.svh, S_TSW_BUSY arm).
               creg3   <= tsw_cr3;                 // new task CR3 (0 here; paging off)
 `ifdef VEN_DBG_WD
               $display("[VEN-CR3] TASKSW CR3 <- %08h (was %08h) @ cs:eip=%04x:%08h new_sel=%04x new_base=%08h (read cr3 @ %08h)",
                        tsw_cr3, creg3, seg_sel[SG_CS], eip, tsw_new_sel, tsw_new_base, tsw_new_base + 32'h1c);
-              // [VEN-TSWIN] the INCOMING task's loaded EIP/EFLAGS/GPRs — compare vs golden (task should
-              // start at 0x3f49, esi 0x758, and PROGRESS; a wrong entry EIP/flags => the 3-task deadlock).
+              // Incoming task state trace; no guest-specific expected values are encoded.
               $display("[VEN-TSWIN] -> sel=%04x IN eip=%08h efl=%08h esi=%08h edi=%08h esp=%08h eax=%08h",
                        tsw_new_sel, tsw_eip, tsw_eflags, tsw_gpr[R_ESI], tsw_gpr[R_EDI], tsw_gpr[R_ESP], tsw_gpr[R_EAX]);
 `endif

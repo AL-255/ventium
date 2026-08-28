@@ -1,0 +1,41 @@
+{
+  "name": "piopermwrap",
+  "kind": "system",
+  "src": "piopermwrap.S",
+  "linker": "piopermwrap.ld",
+  "image": "piopermwrap.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 600,
+  "sys": true,
+  "paging": false,
+  "finding": "REVIEW_Aug3 M-01",
+  "transitions": [
+    "real->protected (CR0.PE 0->1, CS far-jump to 32-bit flat code segment 0x08)",
+    "GDT @ 0x500: null + code0 0x08 + data0 0x10 + code3 0x18 (0x1B) + data3 0x20 (0x23) + TSS 0x28 (base 0x3000, limit 0x2068 so the FULL 8 KiB I/O bitmap + terminator fit)",
+    "TSS @ 0x3000: ESP0=0x00080000, SS0=0x10, I/O map base 0x68; bitmap byte 0x2066 = 0x01 (port 0xFFF0 denied), byte 0x2067 = 0x00 (ports 0xFFF8-0xFFFF permitted), byte 0x2068 = 0xFF (the architecturally-required bitmap TERMINATOR, SDM Vol.3A 13.5.3), byte 0x86 = 0x00 (port 0xF4 permitted)",
+    "LTR 0x28; IRET to CPL3 with IOPL=0 (every I/O access consults the bitmap)",
+    "case 1: out %ax,%dx at DX=0xFFFF (word covers 0xFFFF+0x10000) -> #GP(0) -- the fix's explicit ioperm_wrap deny; QEMU denies too, via its 16-bit check window landing in the 0xFF terminator byte",
+    "case 2: in %dx,%eax at DX=0xFFFD (dword covers 0xFFFD..0x10000) -> #GP(0); denied, so no IN data is consumed in either oracle",
+    "case 3: outb %al,%dx at DX=0xFFF0 (bitmap bit SET) -> #GP(0) -- the top-of-space bitmap bits are genuinely consulted",
+    "case 4: outb %al,%dx at DX=0xFFFF -> PERMITTED (single byte, no wrap)",
+    "case 5: out %eax,%dx at DX=0xFFFC -> PERMITTED (last port == 0xFFFF exactly: the brief's dword-wrap example corrected -- 0xFFFC+3 = 0xFFFF, nothing wraps; the wrapping dword begins at 0xFFFD)",
+    "witnesses pulled into ecx/esi/ebx; isa-debug-exit (status 133) from CPL3"
+  ],
+  "witnesses": {
+    "ecx": "0x00000003 -- #GP deliveries: the two wrapping accesses (word @0xFFFF, dword @0xFFFD) and the set-bit control (byte @0xFFF0)",
+    "esi": "0x00000003 -- handler confirmations that every denial carried error code 0 (#GP(0), never a selector, never adjacent-memory garbage)",
+    "ebx": "0x00000002 -- the two PERMITTED cases ran to completion (byte @0xFFFF: no wrap; dword @0xFFFC: the exact boundary)"
+  },
+  "oracle": "DIFFERENTIAL. QEMU 8.2.2's helper_check_io (pinned harness tcg/sysemu/seg_helper.c:193) has no wrap guard either, but evaluates a 16-bit window (lduw at map_base + port>>3, shifted by port&7); for the denied top-of-space accesses the window's high bits land in the byte after the port-0xFFFF byte -- the 0xFF bitmap terminator IA-32 requires -- so QEMU raises #GP(0) for exactly the accesses the RTL's explicit ioperm_wrap rule denies, and permits exactly the in-space ones. The differential therefore holds with the terminator present, which is the architecturally-mandated bitmap shape. This was the chosen form BECAUSE QEMU's architectural outcome agrees; the adjacent-bit mechanism vs explicit-rule difference is invisible to the differential and is documented here",
+  "negative_control": {
+    "method": "build the RTL TB from HEAD (git worktree add /tmp/ven_base HEAD; make -C verif/tb rtl), run the same image --system, diff against the golden",
+    "expected": "DIVERGENT: HEAD's 16-bit ioperm_last wraps past the limit check and the mask reads adjacent bitmap memory: case 2's covered bits (ports 0xFFFD.. shifted into the CLEAR byte 0x2067) let the wrapping dword IN through -- one fewer #GP (ecx=2) and EAX changed by consumed io_rdata -- while the golden (and the fixed RTL) deny it",
+    "measured": "CONFIRMED 2026-08-03, two-part. (1) SHIPPED image (conforming 0xFF terminator) through the HEAD TB (4a643c1, no M-01 fix): compare.py vs golden = EQUIVALENT (292 records) -- HEAD's wrapped limit check passes vacuously and its adjacent-bit read lands in the 0xFF terminator, which denies exactly like the explicit rule (and like QEMU's 16-bit window): with the architecturally-required bitmap shape the defect is architecturally invisible. (2) TERMINATOR-FREE VARIANT (same image, byte 0x5068 = 0x00) through both builds: the FIXED TB still denies both wraps (ecx=3, the explicit ioperm_wrap rule ignores the adjacent byte); the HEAD TB PERMITS both wrapping accesses (ecx=1, only the set-bit control faults -- its 16-bit ioperm_last wrapped and the mask read the clear adjacent byte, the exact M-01 defect mechanism; 275 records vs 291, the IN also consumed io_rdata). QEMU on the variant would permit too (its window reads the same adjacent byte) -- which is precisely why the shipped test carries the terminator. /tmp/iowrap_noterm (removed after the run); traces /tmp/iow_noterm.{fix,head}.vtrace"
+  },
+  "description": "REVIEW_Aug3 M-01 regression: a word or dword IN/OUT whose extent runs past port 0xFFFF must be denied #GP(0) outright, never decided by adjacent bitmap memory. CPL3 with IOPL=0; the TSS holds the full 8 KiB bitmap (limit 0x2068, map base 0x68) with ports 0xFFF8-0xFFFF permitted, port 0xFFF0 denied, and the mandatory 0xFF terminator byte. Cases: word OUT @0xFFFF (#GP), dword IN @0xFFFD (#GP, no data consumed), byte OUT @0xFFF0 (#GP, set-bit control), byte OUT @0xFFFF (permitted), dword OUT @0xFFFC (permitted, exact boundary). QEMU agrees architecturally via the terminator byte, so the test is graded DIFFERENTIALLY against the golden by the run-sys-golden.sh step-7 RTL sys-diff; the three witnesses (ecx=3 #GPs, esi=3 zero error codes, ebx=2 permitted) are pulled into the GPRs for the final-record compare."
+}

@@ -280,7 +280,33 @@ PY
     fi
 
     # --- 6) functional compare (the gate) — capture rc, don't abort ---
-    "$PYTHON" "$COMPARE" --mode func "$QEMU_VT" "$RTL_VT" > "$CMP" 2>&1
+    # the stack-fault oracle gap, record/field-exact per manifest: identical
+    # to verif/lib/verify_worker.sh's plumbing -- outside the measured
+    # records/fields, fstat and st* compare at full strength.
+    STKMSK=""
+    if [ -f "$MANIFEST" ]; then
+      STKMSK="$("$PYTHON" - "$MANIFEST" <<'PY'
+import json, sys
+m = json.load(open(sys.argv[1]))
+fr, pr = m.get("x87_stkflt_fstat_ranges"), m.get("x87_stkflt_fpr_ranges")
+def fmt(r):
+    s = f"{r[0]}:{'' if len(r) < 2 or r[1] is None else r[1]}"
+    if len(r) >= 3 and r[2]:
+        s += f"={r[2]}"
+    return s
+args = []
+if fr:
+    args.append("--mask-fstat-exc 0x4741")
+    args += [f"--mask-fstat-range {fmt(r)}" for r in fr]
+if pr:
+    args += [f"--mask-fpr-range {fmt(r)}" for r in pr]
+if not args and m.get("x87_stkflt_arch"):
+    args = ["--mask-fstat-exc 0x4741 --mask-x87-fpr"]
+print(" ".join(args))
+PY
+)"
+    fi
+    "$PYTHON" "$COMPARE" --mode func $STKMSK "$QEMU_VT" "$RTL_VT" > "$CMP" 2>&1
     RC=$?
     NAMES+=("$NAME")
     MODES+=("$MODE")

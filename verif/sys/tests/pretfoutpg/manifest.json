@@ -1,0 +1,40 @@
+{
+  "name": "pretfoutpg",
+  "kind": "system",
+  "src": "pretfoutpg.S",
+  "linker": "pretfoutpg.ld",
+  "image": "pretfoutpg.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 450,
+  "sys": true,
+  "paging": true,
+  "finding": "REVIEW_Aug3 C-02 + H-02",
+  "transitions": [
+    "real->protected (CR0.PE 0->1, CS far-jump to flat code 0x08)",
+    "IDT: gate 0x80 -> int_handler (interrupt gate DPL 3); TSS at linear 0x405000 (phys 0x803000) with SS0=0x10, ESP0=0x403FF0; LTR 0x28",
+    "page tables: PT0 identity ([0,0x6000) with markers 0x2000 / r3b code 0x3000 / ring3-B stack 0x4000 USER; [0xF0000,0x100000) USER so ring-3 A can execute from the image) + PT1 NON-IDENTITY (0x400000->0x800000, 0x401000->0x810000, 0x402000->0x801000 USER, 0x403000->0x802000, 0x404000->0x811000, 0x405000->0x803000); PD entries carry US=1 so the USER PTEs are effective",
+    "CR3 load + CR0.PG 0->1: paging ON; IOPL=3",
+    "case 1: 32-bit OUTER RETF with a STRADDLING frame: IP@0x400FF8/CS@0x400FFC (page 0x400, phys 0x800FF8/0x800FFC), outer ESP@0x401000/SS@0x401004 (page 0x401, phys 0x810000/0x810004). C-02(a)'s stale 2-beat cur_lin form translates beats 2/3 from the wrong linear. Pops to ring 3 A: SS=0x23, ESP=0x402FF0 (page 0x402, phys 0x801FF0)",
+    "ring 3 A records the SS/ESP witnesses and re-enters CPL0 with int 0x80 (cross-priv delivery, stack switch to TSS.SS0:ESP0)",
+    "case 2: 16-bit OUTER RETF (lretw) with a STRADDLING word frame at 0x403FFC: word IP/CS (page 0x403, phys 0x802FFC/0x802FFE), word SP@0x404000/SS@0x404002 (page 0x404, phys 0x811000/0x811002). Pops to ring 3 B at EIP 0x3000 (the routine was copied to the low identity page because a 16-bit IP cannot reach 0xFxxxx): SS=0x23, ESP=0x00004FF0 -- the SP word ZERO-EXTENDED (H-02; the dword-read defect installs {SS,SP}=0x00234FF0)",
+    "ring 3 B pulls every witness into the GPRs and exits via isa-debug-exit (status 133) at CPL==IOPL==3"
+  ],
+  "witnesses": {
+    "0x2000": "0x0C060023 -- case-1 ring-3 SS (edi at exit): the frame's outer SS was popped and validated",
+    "0x2004": "0x00402FF0 -- case-1 ring-3 ESP (ebp at exit): the +2w outer-ESP beat translated to the correct PHYSICAL page (phys 0x810000), not the stale 2-beat linear",
+    "0x2008": "0x80808080 -- the int 0x80 handler ran (ebx at exit)",
+    "0x200c": "0x16060023 -- case-2 ring-3 SS (esi at exit)",
+    "0x2010": "0x00004FF0 -- case-2 ring-3 ESP (ecx at exit): the 16-bit outer SP word ZERO-EXTENDED (H-02). The dword-read defect gives 0x00234FF0"
+  },
+  "negative_control": {
+    "method": "build the RTL TB from HEAD (git worktree add /tmp/ven_base HEAD; make -C verif/tb rtl), run the same image --system, diff against the golden; also grep the RTL stderr for PAGING/C-0 CHECK-5 $error lines",
+    "expected": "DIVERGENT: HEAD translates the outer ESP/SS beats (+2w/+3w) with the stale 2-beat inner cur_lin form, so under these non-identity mappings beats 2/3 read the wrong physical page (or fault) at the case-1 lret; the 16-bit case would additionally install 0x00234FF0 as ESP (H-02)",
+    "measured": "CONFIRMED 2026-08-03: HEAD TB (4a643c1, no fix) fires the PAGING/C-04 CHECK-5 $error at core.sv:8250 on state 27 (S_RETF): 'TLB looks up lin=0x400ffc, the superseded arm computes lin=0x401000' -- the stale 2-beat cur_lin form stays on the inner page while the bus arm reads the outer ESP at +2w on the next page. HEAD stops at n=249 (the case-1 lret) with 250 records vs 283 golden: DIVERGENT. build/sys/pretfoutpg.head.rtl.vtrace"
+  },
+  "description": "REVIEW_Aug3 C-02 (outer-RETF half) + H-02 regression: PAGED outer-level far RETFs whose outer ESP/SS pops land on a different physical page than the linear page. pretfout proved the outer-return mechanism with paging OFF (where the stale cur_lin mirror is invisible); pretfoutpg makes both the addressing defect (C-02(a): cur_lin had only the 2-beat inner form for S_RETF, so beats 2/3 -- the outer ESP at +2w and SS at +3w -- translated the wrong linear) and the 16-bit operand-size defect (H-02: the outer SP was read as a DWORD, carrying the adjacent SS word into ESP's upper half) observable: each frame straddles a page boundary with IP/CS on one linear page and the outer ESP/SS on the next, the two pages mapping to distant physical frames. Case 1 is a 32-bit lret CPL0->CPL3 (witness SS=0x23, ESP=0x402FF0); the ring-3 leg re-enters CPL0 via int 0x80 through the IDT/TSS; case 2 is a 16-bit lretw CPL0->CPL3 (witness SS=0x23, ESP=0x00004FF0 zero-extended). QEMU is the differential oracle; the five witnesses are pulled into the GPRs before the isa-debug-exit so the run-sys-golden.sh step-7 RTL sys-diff compares them record-for-record."
+}

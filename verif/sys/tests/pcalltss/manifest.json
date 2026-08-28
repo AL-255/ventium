@@ -1,0 +1,45 @@
+{
+  "name": "pcalltss",
+  "kind": "system",
+  "src": "pcalltss.S",
+  "linker": "pcalltss.ld",
+  "image": "pcalltss.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 600,
+  "sys": true,
+  "paging": false,
+  "finding": "REVIEW_Aug3 C-04",
+  "transitions": [
+    "real->protected (CR0.PE 0->1, CS far-jump to 32-bit flat code segment 0x08)",
+    "GDT: null + code0 0x08 + data0 0x10 + filler 0x18 + TSS1 0x20 (base 0x3000) + TSS2 0x28 (base 0x4000), both 32-bit available TSS (access 0x89, limit 0x67)",
+    "TSS1 loaded with LTR 0x20 (current task = TSS1)",
+    "TSS2 pre-initialised: EIP=task2, ESP=0x00070000, EFLAGS=0x2 (NT CLEAR in the image -- the CALL itself must set it), CS=0x08, SS/DS/ES/FS/GS=0x10, CR3=0, LDTR=0, EAX=0xAAAAAAAA, EBX=0xBBBBBBBB, back-link (TSS2+0) left 0",
+    "NESTING TASK SWITCH: lcall $0x28,$0 (far CALL to the TSS2 selector). The CPU SAVES task1 into TSS1 (resume EIP = the instruction after the lcall, live EAX = 0x1A1A1A1A), WRITES the outgoing TR selector 0x20 into TSS2's back-link (0x4000), leaves TSS1's descriptor BUSY (0x8B), sets TSS2 busy, TR<-0x28, loads task2 with EFLAGS.NT SET, resumes at task2",
+    "task2 witnesses: back-link==0x20, EFLAGS has NT (bit14), both descriptor access bytes 0x8B (0x8B8B combined), TSS1 saved EIP == task1_resumed, TSS1 saved EAX == 0x1A1A1A1A",
+    "NESTED-TASK RETURN: task2's IRET with NT=1 task-switches back through TSS2's back-link to TSS1 (NOT a frame pop); TSS2 busy cleared (0x89), TSS1 stays busy (0x8B); control resumes at task1_resumed with task1's saved context (NT clear)",
+    "task1 reads the marker page back into the GPRs and exits via isa-debug-exit (status 133)"
+  ],
+  "witnesses": {
+    "0x2020/0x2024/0x2028": "incoming-task reload proof: EAX=0xAAAAAAAA, EBX=0xBBBBBBBB, ESP=0x00070000 from the TSS2 image (same as ptask)",
+    "0x2030": "back-link: TSS2+0 == 0x00000020, the OUTGOING TR selector. 0 = the JMP form ran and no back-link was written (the C-04 defect)",
+    "0x2034": "task2 EFLAGS with NT (bit 14) SET -- a CALL task switch sets NT in the INCOMING image; the JMP form leaves it clear",
+    "0x2038": "(TSS1 access <<8)|TSS2 access == 0x00008B8B -- BOTH descriptors busy after the CALL (the caller stays an active suspended task). The JMP form clears TSS1 busy -> 0x898B",
+    "0x203c": "1 iff TSS1 saved EIP == task1_resumed (the instruction after the lcall) -- the outgoing save recorded the correct resume point",
+    "0x2040": "raw TSS1 saved EIP (nonzero, equals task1_resumed)",
+    "0x2044": "TSS1 saved EAX == 0x1A1A1A1A, the live EAX at the lcall",
+    "0x2010": "0x99999999 -- control RETURNED to task1 via task2's NT-IRET through the back-link. Only reachable if the back-link was written and NT was set",
+    "0x2014": "task1 EFLAGS after the return: NT CLEAR (the CALL sets NT only in the incoming task)",
+    "0x2018": "(TSS1 access <<8)|TSS2 access == 0x00008B89 after the NT-IRET: incoming stays busy, the IRET cleared the outgoing"
+  },
+  "negative_control": {
+    "method": "build the RTL TB from HEAD (git worktree add /tmp/ven_base HEAD; make -C verif/tb rtl), run the same image --system, diff against the golden",
+    "expected": "DIVERGENT: HEAD runs the JMP task-switch form for lcall-to-TSS (no back-link write, no NT, outgoing busy CLEARED), so task2's witnesses (0x2030/0x2034/0x2038) mismatch the golden and task2's IRET (NT clear) pops garbage as an ordinary return instead of task-switching back",
+    "measured": "CONFIRMED 2026-08-03: HEAD TB (4a643c1, no fix) gives 306 records vs 323 golden; compare.py exits 1 DIVERGENT, first divergence n=282 pc=0x000f019f eflags: golden 0x00004002 (NT set) vs HEAD 0x00000002 (NT clear -- the JMP form ran). Length mismatch follows: with NT clear task2's IRET pops garbage as an ordinary return and never reaches task1_resumed (323 vs 306). build/sys/pcalltss.head.rtl.vtrace"
+  },
+  "description": "REVIEW_Aug3 C-04 regression: a far CALL to an AVAILABLE 32-bit TSS must perform the NESTING task switch, not the JMP form. Bare-metal real->protected image (NO paging; the paged variant is ptaskpg). Boots F000:FFF0, builds a 6-entry GDT with two available TSS descriptors (TSS1 @ 0x20/base 0x3000, TSS2 @ 0x28/base 0x4000), pre-initialises TSS2 with a full incoming task-state image (EIP=task2, ESP=0x00070000, EFLAGS=0x2 with NT DELIBERATELY CLEAR, EAX=0xAAAAAAAA, EBX=0xBBBBBBBB, flat segments, back-link left 0), LTR 0x20, then `lcall $0x28,$0`. IA-32 nesting semantics (which QEMU implements, making it the differential oracle): outgoing state saved into TSS1 (resume EIP = instruction after the lcall, live EAX = 0x1A1A1A1A), outgoing TR selector 0x20 written into TSS2's back-link (TSS2+0), outgoing descriptor STAYS busy (0x8B), incoming set busy, TR<-0x28, and NT SET in the incoming EFLAGS image. task2 records the five witnesses (back-link, NT, 0x8B8B busy pair, saved EIP == task1_resumed, saved EAX), then executes IRET with NT=1 -- a nested-task RETURN through the back-link to TSS1, resuming at task1_resumed. task1 records the post-return busy pair (0x8B89) and its own NT-clear EFLAGS, pulls the witnesses into the GPRs for the final retired-record compare, and exits (status 133). The C-04 defect (HEAD) ran the JMP form: back-link never written, NT never set, outgoing busy cleared -- observably different in three independent witnesses, and the NT-IRET return path collapses. Every witness is compared record-for-record against the QEMU golden by the run-sys-golden.sh step-7 RTL sys-diff."
+}

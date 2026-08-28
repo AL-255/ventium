@@ -155,6 +155,9 @@ pm32_entry:
     movl    $0x00802003, 12(%edi)
     /* PT1[4]  linear 0x404000 -> phys 0x801000  P|RW   (0x3)  RW alias of [2] */
     movl    $0x00801003, 16(%edi)
+    /* PT1[5] gives the fast-load regression a contiguous physical successor
+     * page to PT1[4]. */
+    movl    $0x00802003, 20(%edi)   /* linear 0x405000 -> phys 0x802000 P|RW */
 
     /* --- PD @ 0x11000: two present directory entries --- */
     movl    $0x00011000, %edi   /* PD base */
@@ -181,6 +184,19 @@ pm32_entry:
     /* read it back through the ALIAS linear 0x00401000 (also -> phys 0x800000).
      * Equal iff translation actually happened; a no-translation bug diverges. */
     movl    0x00401000, %esi        /* esi = 0xCAFEBABE  (proves non-identity) */
+
+    /* Same translated read in the fast path's deliberately narrow load shape:
+     * MOV r32,[r32] with a flat 32-bit DS. This exercises S_PIPE's D-TLB
+     * classification, translation/replay and load writeback rather than the
+     * slow decoder's displacement form above. */
+    movl    $0x00401000, %edi
+    movl    (%edi), %esi             /* esi = 0xCAFEBABE through the alias */
+
+    /* The dword at 0x404ffc crosses into the next virtual page. S_PIPE must
+     * translate/read both fragments and merge them before committing EBP. */
+    movl    $0xDEADC0DE, 0x00404ffc
+    movl    $0x00404ffc, %edi
+    movl    (%edi), %ebp              /* ebp = 0xDEADC0DE across the page edge */
 
     /* a SECOND distinct value through the non-identity window to be thorough:
      * store @0x400000+0x40 = phys 0x800040, read back via alias @0x401040. */

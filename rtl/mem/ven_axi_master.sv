@@ -48,6 +48,12 @@ module ven_axi_master #(
     parameter logic [39:0] REMAP_BASE = 40'h00_0000_0000,  // DDR carveout base
     parameter logic [31:0] ADDR_MASK  = 32'hFFFF_FFFF,     // phys window mask
     parameter logic [3:0]  AXI_ID     = 4'd0,
+    // The KV260 integration connects this master only to the reserved DDR
+    // carveout. Its non-cacheable RAM reads still use the byte-exact narrow
+    // protocol, but are safe to replay; prime those just like line fills so a
+    // stale first HP0 response is discarded. Keep 0 for a backing that can
+    // contain side-effectful MMIO reads.
+    parameter bit          NARROW_REPLAY_SAFE = 1'b0,
     // #34: per-transaction watchdog. If a read/write makes no progress for WATCHDOG
     // core clocks (a stuck DDR/bridge), the FSM ABORTS — synthesizes the acks ven_l1d
     // expects (so the core never deadlocks) + raises bus_err. Default huge (a normal
@@ -69,8 +75,13 @@ module ven_axi_master #(
     // performance one: read-to-clear registers are cleared eight times over, FIFOs pop
     // repeatedly, and seven neighbouring addresses with unrelated side effects are
     // touched. Ignored for writes (the write path was never a burst).
+    // REVIEW1_Aug3 R2-H01: each narrow beat is now its OWN single-beat transaction
+    // at a byte-exact address with an exact ARSIZE (m_rd_size: 0=1B, 1=2B, 2=4B),
+    // so a device read touches exactly its own bytes. ven_l1d presents one piece
+    // per m_req and re-presents after each ack (the standard handshake), so no
+    // multi-beat narrow burst (and no 4 KiB-edge split) is ever needed.
     input  logic        m_rd_narrow,
-    input  logic        m_rd_narrow_2,   // the narrow access straddles a word -> 2 beats
+    input  logic [1:0]  m_rd_size,
     input  logic [31:0] m_wdata,
     input  logic [3:0]  m_wstrb,
     output logic [31:0] m_rdata,
@@ -155,6 +166,15 @@ module ven_axi_master #(
     remap = REMAP_BASE + ADDR_W'(a & ADDR_MASK);
   endfunction
 
+  // REVIEW1_Aug3 R2-H01: the lane mask of the current narrow piece -- the
+  // (1<<rsize_q) addressed bytes at the byte lane araddr_q[1:0].
+  logic [31:0] narrow_mask;
+  always_comb begin
+    automatic int unsigned nb;
+    nb = 32'd1 << rsize_q;                      // 1, 2, or 4 bytes
+    narrow_mask = ((32'h1 << (nb * 8)) - 32'h1) << {araddr_q[1:0], 3'b000};
+  end
+
   // REVIEW2 M-07: when ADDR_MASK is narrower than 32 bits (the KV260 build folds the
   // whole 4 GiB into a 256 MiB carveout), every physical address sharing the low mask
   // bits COLLIDES -- guest RAM above the window, PCI apertures and high aliases all
@@ -200,12 +220,23 @@ module ven_axi_master #(
   // iff the address is unaligned. Deriving the check from the same expression that
   // generates the beat is the point -- an independently-written bound is what produced
   // this bug.
+  //
+  // A byte-exact narrow read (m_rd_narrow) is different again: the piece is one
+  // aligned power-of-two single-beat transaction of (1<<m_rd_size) bytes, so it can
+  // never need a second word at all, and its true extent is m_addr+size-1 -- the
+  // legacy word-window logic rejected byte/word reads wholly inside the RAM window's
+  // last word (a 2-byte read at the top-2 bytes "spilled" to word_base+7 and wedged
+  // the requester with a false alias_err).
   logic [7:0]  alias_ssh;
   logic        alias_two;
   logic [31:0] alias_last;
   assign alias_ssh  = {4'd0, m_wstrb} << m_addr[1:0];
-  assign alias_two  = m_we ? (alias_ssh[7:4] != 4'd0) : (m_addr[1:0] != 2'b00);
-  assign alias_last = {m_addr[31:2], 2'b00} + (alias_two ? 32'd7 : 32'd3);
+  assign alias_two  = m_we ? (alias_ssh[7:4] != 4'd0)
+                    : m_rd_narrow ? 1'b0
+                    : (m_addr[1:0] != 2'b00);
+  assign alias_last = (m_rd_narrow && !m_we)
+                    ? (m_addr + ((32'd1 << m_rd_size) - 32'd1))
+                    : {m_addr[31:2], 2'b00} + (alias_two ? 32'd7 : 32'd3);
   assign alias_bad = m_req && !(m_addr >= 32'hFFFE_0000)
                            && ( ((m_addr     & ~ADDR_MASK) != 32'd0)
                              || ((alias_last & ~ADDR_MASK) != 32'd0) );
@@ -234,7 +265,28 @@ module ven_axi_master #(
   // the retire comparator on the empty branch (f000:0x490e) while DDR held the key. Issue
   // every line fill TWICE at the same address: the FIRST (priming) burst is DISCARDED, the
   // SECOND is delivered. 2x fill latency; correctness over speed (ao486 runs this way).
+  //
+  // STATUS: OPEN workaround, not a repair. The stale-burst root cause (HP/HPC
+  // reset, CDC, outstanding-ID, or channel-drain sequencing) is unidentified;
+  // until it is root-caused and proven on the board, the double fill is the
+  // default and VEN_SINGLE_FILL stays an opt-in diagnostic. The cost is real:
+  // doubled DDR read traffic and cold-miss service time on every cacheable
+  // line fill.
+  //
+  // REVIEW_Aug3 C-01: by default the workaround applies to cacheable line fills
+  // only. A narrow read may be device/MMIO, where replay would duplicate a read
+  // side effect, so it starts primed and its first burst is delivered. The KV260
+  // no-L2 router is different: this master can reach only its reserved DDR
+  // carveout, while device regions are rejected/routed outside it. Enabling
+  // NARROW_REPLAY_SAFE there also primes non-cacheable RAM reads, preventing the
+  // same stale first HP0 response from corrupting reset-state (CR0.CD=1) IVT and
+  // stack accesses. The generic default remains side-effect safe.
   logic              rd_primed;    // 0 = priming (discard) burst; 1 = the real (delivered) burst
+  // REVIEW1_Aug3 R2-H01: the latched ARSIZE of the current read transaction
+  // (0=1B, 1=2B, 2=4B) and whether it is a narrow piece (those get their rdata
+  // masked to the addressed lanes and are primed only when replay is proven safe).
+  logic [1:0]        rsize_q;
+  logic              narrow_q;
   logic              rresp_err;    // sticky: a read beat returned non-OKAY RRESP
   // REVIEW2 M-08: RLAST disagreeing with the beat count is a PROTOCOL VIOLATION by
   // the slave. Exiting on the beat count (below) is the right defensive choice -- an
@@ -298,8 +350,9 @@ module ven_axi_master #(
     // read address channel — burst base forced 32B-aligned (never crosses 4KiB).
     m_axi_arid    = AXI_ID;
     m_axi_araddr  = araddr_q;
-    m_axi_arlen   = 8'(rbeats_q - 9'd1);  // H-11: latched length (LINE_BEATS, or 1/2 narrow)
-    m_axi_arsize  = 3'b010;               // 4 bytes/beat
+    m_axi_arlen   = 8'(rbeats_q - 9'd1);  // H-11: latched length (LINE_BEATS, or 1 narrow)
+    // R2-H01: exact ARSIZE for narrow device pieces (1B/2B/4B); fills are 4B.
+    m_axi_arsize  = {1'b0, rsize_q};      // AXI encoding matches rsize_q 0/1/2
     m_axi_arburst = 2'b01;               // INCR
     m_axi_arlock  = 1'b0;
     m_axi_arcache = 4'b0011;             // Normal NON-cacheable bufferable: the BD uses NON-coherent
@@ -344,11 +397,15 @@ module ven_axi_master #(
     // a backing request that arrives while shutting-down + idle is acked locally with
     // rdata=0 (NO AXI transaction is started — the FSM start arms are gated on
     // !shutdown), so the core/L1 never deadlocks waiting for an ack we won't issue.
-    m_rdata = (shutdown && m_idle) ? 32'd0 : m_axi_rdata;
+    // REVIEW1_Aug3 R2-H01: mask a narrow piece's rdata to the addressed byte lanes
+    // (AXI leaves the other lanes undefined) so ven_l1d can OR-merge the pieces.
+    m_rdata = (shutdown && m_idle) ? 32'd0
+            : narrow_q ? (m_axi_rdata & narrow_mask) : m_axi_rdata;
     // ack the core write only after the FINAL beat (beat A of an aligned store, or
     // beat B of a straddling one) — a per-beat ack would complete the core's store
     // after only the first word landed.
-    m_ack   = ((rst == R_DATA) && m_axi_rvalid && m_axi_rready && rd_primed) ||   // deliver ONLY the 2nd (real) burst
+    m_ack   = ((rst == R_DATA) && m_axi_rvalid && m_axi_rready && rd_primed) ||   // deliver ONLY the real burst
+                                                                                  // (a fill's 2nd; a narrow read's 1st/only — C-01)
               ((wst == W_RESP) && m_axi_bvalid && (!xword_q || wbeat)) ||
               (shutdown && m_idle && m_req);          // shutdown: local ack, no DDR
     bus_err = wd_err_r | wd_err_w | rresp_err | bresp_err | rlast_err | alias_err; // #34 + M-08 + M-07
@@ -365,7 +422,7 @@ module ven_axi_master #(
   always_ff @(posedge core_clk) begin
     if (!core_rst_n) begin
       rst <= R_IDLE; araddr_q <= '0; r_beat <= 8'd0; rresp_err <= 1'b0; rlast_err <= 1'b0;
-      rbeats_q <= 9'(LINE_BEATS);
+      rbeats_q <= 9'(LINE_BEATS); rsize_q <= 2'd2; narrow_q <= 1'b0;
       r_wd <= 16'd0; wd_err_r <= 1'b0; rd_primed <= 1'b0;
     end else begin
       unique case (rst)
@@ -378,16 +435,21 @@ module ven_axi_master #(
         // window address; bus_err still halts the core, exactly as the #34 watchdog does.
         R_IDLE: if (m_req && !m_we && !shutdown && !rd_hold && !alias_bad) begin
                   // REVIEW2_aug2 H-11: a CACHEABLE backing read is a full line fill and
-                  // latches the 32B-aligned base, as before. A NARROW read latches the
-                  // WORD address instead and asks for 1 beat (2 when it straddles a
-                  // word) -- addressing the line base for a narrow access would return
-                  // the wrong word AND still touch the whole line.
+                  // latches the 32B-aligned base, as before. A NARROW read is ONE
+                  // single-beat transaction at the byte-exact address with an exact
+                  // ARSIZE (REVIEW1_Aug3 R2-H01): ven_l1d presents each aligned
+                  // power-of-two piece separately, so there is never a multi-beat
+                  // narrow burst and never a 4 KiB-edge split to make.
                   if (m_rd_narrow) begin
-                    araddr_q <= remap({m_addr[31:2], 2'd0});
-                    rbeats_q <= m_rd_narrow_2 ? 9'd2 : 9'd1;
+                    araddr_q <= remap(m_addr);
+                    rbeats_q <= 9'd1;
+                    rsize_q  <= m_rd_size;
+                    narrow_q <= 1'b1;
                   end else begin
                     araddr_q <= remap({m_addr[31:5], 5'd0});
                     rbeats_q <= 9'(LINE_BEATS);
+                    rsize_q  <= 2'd2;               // fills are always 4B beats
+                    narrow_q <= 1'b0;
                   end
                   r_beat <= 8'd0; rresp_err <= 1'b0; r_wd <= 16'd0;
 `ifdef VEN_SINGLE_FILL
@@ -398,7 +460,10 @@ module ven_axi_master #(
                   // the payoff of fixing that root cause, not to work around it.
                   rd_primed <= 1'b1;
 `else
-                  rd_primed <= 1'b0;                 // double-read: burst 1 = priming (discard)
+                  // A narrow read is replayed only when the integration proves the
+                  // AXI target is ordinary memory. Otherwise deliver its first and
+                  // only transaction so a device side effect executes exactly once.
+                  rd_primed <= m_rd_narrow && !NARROW_REPLAY_SAFE;
 `endif
                   rst <= R_AR;
                 end
@@ -411,15 +476,20 @@ module ven_axi_master #(
                   // DEFENSIVE: exit on the BEAT COUNT vs ARLEN, NOT a (possibly
                   // mis-asserted) RLAST — a non-compliant slave's early RLAST then
                   // cannot freeze ven_l1d's fill mid-line. Identical timing for a
-                  // compliant slave (RLAST lands exactly at r_beat==LINE_BEATS-1, the
+                  // compliant slave (RLAST lands exactly at r_beat==rbeats_q-1, the
                   // rlast_align SVA below checks it). Sticky-flag a non-OKAY RRESP.
                   if (m_axi_rresp != 2'b00)        rresp_err <= 1'b1;
                   // M-08: RLAST must be high exactly on the final beat. Flagging the
                   // mismatch (sticky -> bus_err) is only half of what the review asks
                   // for; the other half is to RECOVER DETERMINISTICALLY rather than
                   // leave the channel in an unknown state.
-                  if (m_axi_rlast != (r_beat == 8'(LINE_BEATS-1))) rlast_err <= 1'b1;
-                  if (m_axi_rlast && (r_beat != 8'(LINE_BEATS-1))) begin
+                  // REVIEW_Aug3 C-01: "the final beat" is rbeats_q-1, NOT the constant
+                  // LINE_BEATS-1. This used to compare against the constant, so a
+                  // COMPLIANT narrow (1- or 2-beat) response — RLAST on beat 0 or 1 —
+                  // was misclassified as an EARLY RLAST: sticky bus_err on every MMIO
+                  // read, and the FSM bailed before ven_l1d's bypass got its beats.
+                  if (m_axi_rlast != (r_beat == 8'(rbeats_q - 9'd1))) rlast_err <= 1'b1;
+                  if (m_axi_rlast && (r_beat != 8'(rbeats_q - 9'd1))) begin
                     // EARLY RLAST: the slave has ENDED the burst, so the beats this
                     // master is still counting will never arrive. Previously the FSM
                     // sat here until the #34 watchdog fired -- a timeout, not a defined
@@ -537,11 +607,28 @@ module ven_axi_master #(
   w_stable:  assert property (@(posedge core_clk) disable iff (!core_rst_n)
       (m_axi_wvalid && !m_axi_wready) |=> (m_axi_wvalid && $stable(m_axi_wdata)
                                            && $stable(m_axi_wstrb) && $stable(m_axi_wlast)));
-  // every read-burst base is 32B-aligned and the 32B burst never crosses 4KiB.
+  // burst-base alignment, by burst SHAPE (REVIEW_Aug3 C-01): a line fill
+  // (rbeats_q == LINE_BEATS) is 32B-aligned; a narrow piece is exactly
+  // SIZE-aligned to its own ARSIZE (REVIEW1_Aug3 R2-H01) — its whole point is to
+  // address the requested bytes, not a line or even a word base.
   ar_align:  assert property (@(posedge core_clk) disable iff (!core_rst_n)
-      m_axi_arvalid |-> (m_axi_araddr[4:0] == 5'd0));
+      m_axi_arvalid |-> (narrow_q
+                         ? ((m_axi_araddr[1:0] & (2'b11 >> (2'd2 - rsize_q))) == 2'd0)
+                         : (m_axi_araddr[4:0] == 5'd0)));
+`ifndef SYNTHESIS
+  // debug tap (cosim bring-up): print the offending AR when ar_align fires.
+  // Negedge: the fatal assert's $stop at the posedge would preempt a posedge tap.
+  always @(negedge core_clk)
+    if (core_rst_n && m_axi_arvalid &&
+        !(narrow_q ? ((m_axi_araddr[1:0] & (2'b11 >> (2'd2 - rsize_q))) == 2'd0)
+                   : (m_axi_araddr[4:0] == 5'd0)))
+      $display("[ARALIGN] araddr=%h narrow=%b rsize=%0d rbeats=%0d m_addr=%h m_size=%0d m_narrow=%b",
+               m_axi_araddr, narrow_q, rsize_q, rbeats_q, m_addr, m_rd_size, m_rd_narrow);
+`endif
+  // the burst's ACTUAL extent never crosses 4KiB: beats << ARSIZE (a fill is
+  // 8*4=32; a narrow piece is 1*(1|2|4) bytes, size-aligned, so it cannot cross).
   ar_4k:     assert property (@(posedge core_clk) disable iff (!core_rst_n)
-      m_axi_arvalid |-> ((13'(m_axi_araddr[11:0]) + 13'(LINE_BEATS*4)) <= 13'h1000));
+      m_axi_arvalid |-> ((13'(m_axi_araddr[11:0]) + 13'(rbeats_q << rsize_q)) <= 13'h1000));
   // no AR while a write is outstanding (single-outstanding in-order guarantee).
   no_rw_overlap: assert property (@(posedge core_clk) disable iff (!core_rst_n)
       !(m_axi_arvalid && (wst != W_IDLE)));
@@ -552,9 +639,11 @@ module ven_axi_master #(
       (wst==W_IDLE && m_req && m_we) |-> ((({4'd0, m_wstrb} << m_addr[1:0]) >> 8) == 8'd0));
   // RLAST must land exactly on the last beat (catches a slave's early/late RLAST —
   // the beat counter now ignores RLAST for the FSM exit, this SVA flags the abuse).
+  // REVIEW_Aug3 C-01: "the last beat" is rbeats_q-1 (1/2 for a narrow burst, 7 for a
+  // fill), not the constant LINE_BEATS-1 — same fix as the R_DATA compare above.
   rlast_align: assert property (@(posedge core_clk) disable iff (!core_rst_n)
       (rst==R_DATA && m_axi_rvalid && m_axi_rready && m_axi_rlast)
-      |-> (r_beat == 8'(LINE_BEATS-1)));
+      |-> (r_beat == 8'(rbeats_q - 9'd1)));
   // every consumed response is OKAY (a SLVERR/DECERR would silently corrupt a line /
   // a store — sticky-flagged in rresp_err/bresp_err; an error pin to the core is a
   // documented follow-up, see fpga/L1_AXI_DESIGN.md).

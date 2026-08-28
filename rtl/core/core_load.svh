@@ -17,7 +17,7 @@
           if (mem_ack && xp_cross) begin
             xp_lo    <= mem_rdata;
             xp_first <= 3'(13'h1000 - {1'b0, cur_lin[11:0]});
-            xp_w     <= q_w;
+            xp_w     <= load_beat_w;
             xp_pend  <= 1'b1;
           end else
           if (mem_ack) begin
@@ -82,6 +82,7 @@
                 seg_sel [SG_CS] <= ld_val[31:16];
                 seg_base[SG_CS] <= {12'd0, ld_val[31:16], 4'd0};
                 seg_attr[SG_CS] <= 8'h9B;
+                seg_pm_loaded[SG_CS] <= 1'b0;   // R2-H07: real-mode load
                 eip <= {16'd0, ld_val[15:0]};
                 retire_valid <= 1'b1; state <= S_PIPE;
               end else begin
@@ -109,9 +110,15 @@
                 // stage the target; S_LCALL then pushes CS:next_eip + loads CS:off.
                 q_ljmp_off <= {16'd0, ld_val[15:0]};
                 q_ljmp_sel <= ld_val[31:16];
-                // REVIEW2_aug2 C-06: reject a bad selector BEFORE S_LCALL pushes the
-                // return frame. The selector is already in hand here.
-                if (far_sel_bad(ld_val[31:16]))
+                // A real/V86 far pointer carries a segment value, not a descriptor
+                // selector.  The protected-mode precheck added for C-06 used to run
+                // unconditionally here, interpreting values such as the VGA ROM's
+                // C000 segment as a GDT index and trapping before BIOS POST.  Keep the
+                // real-mode route identical to the immediate far-CALL path; only a
+                // protected transfer probes a descriptor before touching the stack.
+                if (seg_real) begin
+                  seg_step <= 1'b0; lcall_pend <= 1'b0; state <= S_LCALL;
+                end else if (far_sel_bad(ld_val[31:16]))
                   start_fault(8'd13, 1'b1,
                               {16'd0, ld_val[31:16]} & 32'h0000_FFFC, q_pc);
                 // REVIEW2_aug2 C-06: validate the descriptor BEFORE pushing -- the
@@ -137,7 +144,7 @@
           if (mem_ack && xp_cross) begin
             xp_lo    <= mem_rdata;
             xp_first <= 3'(13'h1000 - {1'b0, cur_lin[11:0]});
-            xp_w     <= q_w;
+            xp_w     <= load_beat_w;
             xp_pend  <= 1'b1;
           end else
           if (mem_ack) begin
@@ -160,6 +167,7 @@
                 seg_sel [SG_CS] <= ld2_val[15:0];
                 seg_base[SG_CS] <= {12'd0, ld2_val[15:0], 4'd0};
                 seg_attr[SG_CS] <= 8'h9B;
+                seg_pm_loaded[SG_CS] <= 1'b0;   // R2-H07: real-mode load
                 eip <= q_ljmp_off;                 // full 32-bit offset (NOT truncated)
                 retire_valid <= 1'b1; state <= S_PIPE;
               end else begin
@@ -174,8 +182,11 @@
               end
             end else if (q_callf_mem) begin
               q_ljmp_sel <= ld2_val[15:0];       // q_ljmp_off already 32-bit
-              // REVIEW2_aug2 C-06: same, for the m16:32 indirect far CALL.
-              if (far_sel_bad(ld2_val[15:0]))
+              // Same mode split as the m16:16 form above.  In real/V86 mode the
+              // second word is a segment value and must never be table-checked.
+              if (seg_real) begin
+                seg_step <= 1'b0; lcall_pend <= 1'b0; state <= S_LCALL;
+              end else if (far_sel_bad(ld2_val[15:0]))
                 start_fault(8'd13, 1'b1,
                             {16'd0, ld2_val[15:0]} & 32'h0000_FFFC, q_pc);
               // REVIEW2_aug2 C-06: same probe-first routing for the m16:32 form.

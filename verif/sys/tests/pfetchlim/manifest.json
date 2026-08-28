@@ -1,0 +1,44 @@
+{
+  "name": "pfetchlim",
+  "kind": "system",
+  "src": "pfetchlim.S",
+  "linker": "pfetchlim.ld",
+  "image": "pfetchlim.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 2000,
+  "sys": true,
+  "paging": false,
+  "finding": "REVIEW1_Aug3 R2-H07 (decoded-extent instruction-fetch limit check, cs_extent_fault)",
+  "gate_form": "ENFORCEMENT-BUILD ONLY, self-checked witnesses (+ven_faultlog fault count/PCs + final-record GPRs). Requires +define+VEN_SEG_ENFORCE: the extent check is compiled out of the default build, so the image faults only on the enforcement objdir (verif/sys/run-seg-gate.sh's obj_dir_seg). NOT a QEMU differential -- see oracle_gaps.",
+  "oracle_gaps": {
+    "gap1_extent_check": "QEMU's translator checks only the instruction's START address against CS.limit (and even that only loosely); it has no decoded-extent fetch check, so the straddling cases B/C1/C2 EXECUTE under QEMU where the SDM requires #GP(0) before any side effect. There is no usable differential oracle for the extent case -- the test is graded against the SDM directly (self-checked witnesses), exactly like pseglim is for the per-access limit check (C-06).",
+    "gap2_exit_status": "The RTL TB in --system mode acknowledges port 0xf4 but the gates grade the faultlog + final-record GPRs (pseglim/pcslim convention); the isa-debug-exit status (133 pass / 135 counter wrong / 137,139,141 per-witness commit / 143 case-A false positive) is the QEMU-side encoding."
+  },
+  "layout": {
+    "segments": "Five one-case limited code segments (selectors 0x18/0x20/0x28/0x30/0x38), each base = its case*_stub label, limit = 0x3F (byte-granular, valid offsets 0x00..0x3F). Each stub has a 7-byte far-jump door at offset 0 back to the flat dispatcher (door_flat: jmp *0x704), NOP padding, the probe instruction placed against the limit boundary, and a jump-back stub past the boundary that only the enforcement-free default build ever executes.",
+    "case_A": "sel 0x18, entry 0x3E: EB C0 (2-byte jmp to the door), last byte at offset 0x3F == limit -> LEGAL, must fault in NEITHER build (the at-limit false-positive tripwire)",
+    "case_B": "sel 0x20, entry 0x3C: A3 00 00 03 00 (movl %eax,0x00030000, 5 bytes), bytes 0x3C..0x40 -> straddles; #GP(0) pre-issue, the store must NOT commit (witness 0x5EEDB005 at 0x30000)",
+    "case_C1": "sel 0x28, entry 0x3F: 88 07 (mov %al,(%ebx), 2 bytes), bytes 0x3F..0x40 -> starts AT the limit, ends past it; #GP(0), byte store must not commit (witness 0x5EEDC101 at 0x30004)",
+    "case_C2": "sel 0x30, entry 0x3B: 01 05 08 00 03 00 (addl %eax,0x00030008, 6 bytes), bytes 0x3B..0x40 -> straddles; #GP(0), the RMW must not commit (witness 0x5EEDC202 at 0x30008)",
+    "case_C3": "sel 0x38, entry 0x3E: EB 00 (jmp +0, ends exactly at the limit, legal) so the NEXT fetch starts at offset 0x40, PAST the limit -> #GP(0) from the OLDER first-byte check (cs_fetch_fault, H-05), stamped at eip=0x40. Cross-check that the first-byte check still fires beside the new extent check"
+  },
+  "transitions": [
+    "real->protected (CR0.PE 0->1, CS far-jump to 32-bit flat code segment 0x08)",
+    "five far jumps into limit-0x3F based code segments (0x18/0x20/0x28/0x30/0x38), each entered at a precise offset against the limit boundary",
+    "#GP(13) -> gp_handler through the FLAT gate (sel 0x08): counts the fault at 0x700, rewrites the saved CS:EIP to flat door_flat, IRETs; door_flat dispatches through the per-case resume EIP stashed at 0x704"
+  ],
+  "witnesses": {
+    "ecx": "final #GP counter (0x700) -- want 0x00000004 on the enforcement build (B, C1, C2, C3; case A contributes none), 0 on the default build",
+    "ebp": "case-B witness (0x30000) -- want 0x5EEDB005 (the straddling 5-byte store was suppressed); 0xCAFEBABE if the store committed",
+    "edi": "case-C1 witness (0x30004) -- want 0x5EEDC101 (the straddling 2-byte byte-store was suppressed); 0x5EEDC1A5 if it committed",
+    "esi": "case-C2 witness (0x30008) -- want 0x5EEDC202 (the straddling 6-byte RMW was suppressed); 0x6FFED313 if it committed",
+    "mem_0x708": "counter snapshot taken right after case A -- want 0 (case A, the at-limit instruction, did NOT fault). Folded into the in-guest exit status (failA -> 0x47 -> status 143)"
+  },
+  "faultlog_expectations": "enforcement build: exactly 4x [FAULT] vec=13 err=00000000 -- B stamped at the straddler's CS-relative offset 0x3C, C1 at 0x3F, C2 at 0x3B, and C3 at eip=0x40 (the first-byte check). default build: zero [FAULT] lines and zero SEGCHK/SEGCHK-X lines; all three side effects commit (the anti-vacuity control: the witnesses CAN be clobbered, so the enforcement run's intact witnesses are meaningful)",
+  "description": "REVIEW1_Aug3 R2-H07 directed test for the DECODED-EXTENT instruction-fetch limit check (cs_extent_fault, behind +define+VEN_SEG_ENFORCE). pseglim-style BIOS image: real->protected, flat code/data, an IDT with a counting #GP handler, and five limit-0x3F based code segments entered by far jump at precise offsets. Case A (last byte exactly AT the limit) is the no-fault control; cases B/C1/C2 are 5/2/6-byte instructions straddling the limit that must raise #GP(0) BEFORE their store/RMW side effects (witnessed); case C3 cross-checks the older first-byte check (fetch starting past the limit). Modelled on pseglim (handler pattern, witness discipline) and pcslim (based code segment entered by far jump). Enforcement-build-only witness gate: QEMU checks only the fetch start address, so there is no differential oracle for the extent case."
+}

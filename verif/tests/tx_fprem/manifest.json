@@ -5,6 +5,9 @@
   "image": "tx_fprem/tx_fprem.flat",
   "load_addr": "0x08048000",
   "entry": "0x08048000",
-  "max_insn": 130,
-  "x87": true
+  "max_insn": 500,
+  "x87": true,
+  "coverage": "FPREM + FPREM1 differential vs the pinned QEMU golden: complete reduction, |a|<|b| (Q=0), signed operands, fractional operands, large exponent ratios, the C2=1 partial path (single-shot AND the re-execution idiom: re-run until C2 clears, both ops), quotient condition codes (FPREM q=0..7 -> every C0/C3/C1 combination; FPREM1 nearest-quotient Q=0..7), zero/-0/NaN/+Inf operands (masked #IA -> QNaN indefinite, IE), all four control-word rounding modes (the remainder is exact, so RC is unobservable -- proven by running both ops under RC=nearest/down/up/tozero), and back-to-back engine users (FPREM;FPREM and FPREM1;FPREM1 with no reload, FPREM->FDIV, FDIV->FPREM, FPREM1->FSQRT -- the iterative configs share one unified divide/sqrt/remainder engine). The partial loops use an exponent ratio (~2^67) chosen so each engine pass stays well under the TB idle threshold.",
+  "x87_fprem1_cc_oracle_gap": "The pinned QEMU's helper_fprem1 (fpu_helper.c helper_fprem_common(mod=false)) reaches floatx80_modrem with the quotient out-pointer NULL, so an FPREM1 retirement ALWAYS reports C0=C3=C1=0 in the golden. The RTL reports the architectural Q2/Q1/Q0 of the round-nearest quotient (SDM FPREM1). These ranges are the measured set of records whose fstat differs ONLY in C0/C3/C1 (mask 0x4300): each FPREM1 retire record plus the following records until the next CC-writing instruction. C2 (partial) and every exception bit compare at full strength everywhere. Regenerate the ranges when tx_fprem.s changes (the set is n-indexed).",
+  "x87_fprem1_cc_ranges": [[77,106],[142,156],[208,213],[219,224],[230,235],[241,245],[262,269],[276,276],[294,299]]
 }

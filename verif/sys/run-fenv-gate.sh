@@ -157,8 +157,9 @@ fi
 #   S2 = ffff  ST0's sign||exponent word: the masked response is the QNaN INDEFINITE,
 #              not the pushed value. This is the response half, not just the flag.
 #   S3 = 0841  TOP=1, C1=0 (underflow), SF, IE
-# Enforcement is NOT in the default build (see fpu_writeback.sv for why), so build a
-# separate object directory with +define+VEN_X87_STKFLT and re-run the SAME image.
+# The response is UNCONDITIONAL since R2-H06 (2026-08-04); this build is kept as
+# a belt-and-braces variant (the define is now a no-op, so $STKOBJ equals the
+# default build) and the section doubles as the flip's regression.
 STKOBJ=obj_dir_stk
 STKTB="$ROOT/verif/tb/$STKOBJ/tb_ventium"
 make -s -C "$TB" rtl OBJDIR="$STKOBJ" VL_EXTRA_DEFINES="+define+VEN_X87_STKFLT" >/dev/null

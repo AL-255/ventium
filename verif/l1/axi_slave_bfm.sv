@@ -34,10 +34,30 @@ module axi_slave_bfm #(
     //   RLAST_EARLY > 0 : assert RLAST N beats EARLY and end the burst -> the master
     //                     is left waiting for beats that never arrive.
     parameter int          RLAST_EXTRA = 0,
-    parameter int          RLAST_EARLY = 0
+    parameter int          RLAST_EARLY = 0,
+    // REVIEW_Aug3 C-01: optional READ-TO-CLEAR device window + AR monitoring, for the
+    // L1AXINARROW gate's MMIO model. Addresses are x86-PHYS (post-unmap), matching
+    // poke/peek. Default window is EMPTY (LO > HI) -> byte-identical legacy behavior
+    // for every existing gate.
+    //   RTC: after a read beat whose 4 bytes lie inside [RTC_LO, RTC_HI] is ACCEPTED,
+    //        those bytes are zeroed in `mem` (a read-to-clear register). The first
+    //        read of a seeded word returns the seed; ANY second read — an illicit
+    //        priming burst, a duplicated narrow access, a stale L1 copy's refill —
+    //        returns 0, so a duplicated device access is observable in the data.
+    //   Monitoring: ar_count = total AR handshakes; burst_beats = the number of R
+    //        beats of the most recently COMPLETED burst. The TB checks "exactly one
+    //        AR per architectural read" and the response count from these.
+    parameter logic [31:0] RTC_LO     = 32'hFFFF_FFFF,
+    parameter logic [31:0] RTC_HI     = 32'h0000_0000
 ) (
     input  logic              clk,
     input  logic              rst_n,
+`ifdef AXI_BFM_MON
+    // C-01 monitoring outputs (see above). Behind a define so the other seven TBs
+    // sharing this BFM (which build with warnings fatal) need no port changes.
+    output logic [31:0]       ar_count,
+    output logic [31:0]       burst_beats,
+`endif
     // write address
     input  logic [3:0]        awid,
     input  logic [ADDR_W-1:0] awaddr,
@@ -96,14 +116,29 @@ module axi_slave_bfm #(
   rstate_e          rst_s;
   logic [ADDR_W-1:0] r_addr;  logic [7:0] r_cnt; logic [3:0] r_id; int r_timer;
   logic             bubbled;            // BUBBLE already spent this burst
+  logic [31:0]      r_bcnt;             // C-01: accepted beats of the in-flight burst
+  logic [1:0]       r_size;             // R2-H01: latched ARSIZE (0=1B, 1=2B, 2=4B)
 
   assign arready = (rst_s == R_IDLE) && (STUCK==0);   // #34: STUCK -> never ready
+`ifdef AXI_BFM_MON
+  logic [31:0]      ar_count_q, burst_beats_q;
+  assign ar_count    = ar_count_q;
+  assign burst_beats = burst_beats_q;
+`endif
   always_comb begin
+    automatic int unsigned nb;
     rvalid = 1'b0; rdata = 32'd0; rlast = 1'b0; rid = r_id; rresp = 2'b00;
     if (rst_s == R_BEAT) begin
       automatic logic [ADDR_W-1:0] ix = unmap(r_addr);
       rvalid = 1'b1;
-      rdata  = {mem[ix+3], mem[ix+2], mem[ix+1], mem[ix+0]};
+      // R2-H01: honor ARSIZE -- the addressed bytes go on their OWN lanes (the AXI
+      // narrow-transfer rule); other lanes are zero so the master's lane mask and
+      // ven_l1d's OR-merge see exactly the piece. A 4B beat (a fill word or an
+      // aligned dword piece) is the full word, as before.
+      nb = 32'd1 << r_size;
+      for (int b = 0; b < 4; b++)
+        if ((32'(b) >= 32'(r_addr[1:0])) && (32'(b) < 32'(r_addr[1:0]) + nb))
+          rdata[b*8 +: 8] = mem[ix + 32'(b) - 32'(r_addr[1:0])];
       // M-08 injection: EARLY asserts RLAST while beats remain; EXTRA withholds it
       // until the padded count is exhausted.
       rlast  = (RLAST_EARLY > 0) ? (r_cnt == 8'(RLAST_EARLY))
@@ -111,22 +146,59 @@ module axi_slave_bfm #(
     end
   end
   always_ff @(posedge clk) begin
-    if (!rst_n) begin rst_s <= R_IDLE; r_addr<=0; r_cnt<=0; r_id<=0; r_timer<=0; bubbled<=0; end
+    if (!rst_n) begin rst_s <= R_IDLE; r_addr<=0; r_cnt<=0; r_id<=0; r_timer<=0; bubbled<=0;
+`ifdef AXI_BFM_MON
+                      ar_count_q<=0; burst_beats_q<=0;
+`endif
+                      r_size<=2'd2; r_bcnt<=0; end
     else unique case (rst_s)
       R_IDLE: if (arvalid && STUCK==0) begin
                 // M-08: RLAST_EXTRA pads the burst so the slave outlives the master's
                 // own beat count -- the LATE-RLAST case.
                 r_addr <= araddr; r_cnt <= arlen + 8'(RLAST_EXTRA); r_id <= arid;
+                r_size <= arsize[1:0];   // R2-H01
                 r_timer <= RD_LAT; bubbled <= 1'b0; rst_s <= R_WAIT;
+`ifdef AXI_BFM_MON
+                // C-01: the AR handshake (arready==1 in R_IDLE) -> one more transaction.
+                ar_count_q <= ar_count_q + 32'd1;
+`endif
+                r_bcnt <= 32'd0;
               end
       R_WAIT: if (r_timer == 0) rst_s <= R_BEAT; else r_timer <= r_timer - 1;
       R_BEAT: if (rready) begin                         // beat accepted (rvalid=1)
+                // C-01 READ-TO-CLEAR: this beat's bytes, if inside the device
+                // window, are zeroed AFTER being served (rdata above is combinational
+                // off mem, so the accepted beat carried the pre-clear value). A second
+                // read of the same word — the duplicated access C-01 is about — sees 0.
+                // R2-H01: only the beat's own lanes clear (a byte read must not
+                // clear its neighbours).
+                begin
+                  automatic logic [ADDR_W-1:0] ix = unmap(r_addr);
+                  automatic int unsigned nb;
+                  nb = 32'd1 << r_size;
+                  for (int b = 0; b < 4; b++)
+                    if ((32'(b) >= 32'(r_addr[1:0])) && (32'(b) < 32'(r_addr[1:0]) + nb)
+                        && ((ix + 32'(b) - 32'(r_addr[1:0])) >= ADDR_W'(RTC_LO))
+                        && ((ix + 32'(b) - 32'(r_addr[1:0])) <= ADDR_W'(RTC_HI)))
+                      mem[ix + 32'(b) - 32'(r_addr[1:0])] <= 8'd0;
+                end
                 // M-08: with RLAST_EARLY the burst ENDS at the early RLAST -- no
                 // further beats, which is what strands a count-driven master.
-                if ((RLAST_EARLY > 0) && (r_cnt == 8'(RLAST_EARLY))) rst_s <= R_IDLE;
-                else if (r_cnt == 8'd0) rst_s <= R_IDLE;     // RLAST consumed
+                if ((RLAST_EARLY > 0) && (r_cnt == 8'(RLAST_EARLY))) begin
+                  rst_s <= R_IDLE;
+`ifdef AXI_BFM_MON
+                  burst_beats_q <= r_bcnt + 32'd1;
+`endif
+                end
+                else if (r_cnt == 8'd0) begin            // RLAST consumed
+                  rst_s <= R_IDLE;
+`ifdef AXI_BFM_MON
+                  burst_beats_q <= r_bcnt + 32'd1;
+`endif
+                end
                 else begin
                   r_cnt <= r_cnt - 8'd1; r_addr <= r_addr + 32'd4;
+                  r_bcnt <= r_bcnt + 32'd1;
                   // AFTER delivering beat 2, insert ONE genuine rvalid-low bubble
                   // before beat 3 (stresses the stream m_ack gating: fw must hold).
                   if (BUBBLE>0 && !bubbled && r_cnt==8'd5) begin

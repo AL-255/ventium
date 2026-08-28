@@ -1,0 +1,38 @@
+{
+  "name": "pxwrap",
+  "kind": "system",
+  "src": "pxwrap.S",
+  "linker": "pxwrap.ld",
+  "image": "pxwrap.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 150000,
+  "sys": true,
+  "paging": true,
+  "finding": "wrapped cross-privilege frame-probe slot plan (frm_slot_off): the regression matrix for S_INT_PROBE on wrapped new TSS stacks",
+  "gate_form": "DIFFERENTIAL (step-7 full-stream compare vs the QEMU golden) + a step-7x faultlog extra (exactly exp_pf2 supervisor-class #PFs with err=2, exp_gp60 #GP(0x60) trigger deliveries, ZERO #DF). CR2 is compared on every record by the sys diff, so every denial's CR2 is graded against QEMU's push-order fault address.",
+  "cr2_rule": "Computed from the pinned QEMU 8.2.2 source (seg_helper.c do_interrupt_protected :752-786 PUSHL/PUSHW: sp is decremented first, so slot 0 is the FIRST push at esp0-unit and slots descend; every store goes to SS.base + (sp & sp_mask), sp_mask = 0xFFFF for B=0 / 0xFFFFFFFF for B=1, SET_ESP commits only after the last push): QEMU faults on the FIRST push in push order that has a byte on the denied page, reporting CR2 = that push's start address -- or the denied page's base when the push straddles into it from a present page (cputlb.c mmu_lookup: page[1].addr = (addr+size-1) & TARGET_PAGE_MASK). S_INT_PROBE walks the same slot plan in the same order and reports the same address, so the flows are differential. Per-case CR2 expectations are enumerated in pxwrap_cases.inc (gen_cases.py).",
+  "case_matrix": {
+    "group1_b0_int_trap": "B=0 (16-bit new stack), 16-bit interrupt AND trap gates, with and without error code (int $0x30 / mov ds,#GP(0x60)); SP from 0 through the frame size; SS.base low-12 in {0x000, 0xFF0, 0xFFC}; every touched page denied in turn",
+    "group2_b1_4gib": "B=1 (32-bit new stack) with ESP0 < frame size (the 4 GiB wrap): 32-bit interrupt gate ESP0 in {0,2,4,8,12,16,20} plus the 140-byte call-gate frame at ESP0 {2,8}; the wrap window maps 0xFFFFE000/0xFFFFF000 to phys 0x400000/0x401000 (NOT 0xB/0xC0000 -- the VGA/ROM hole drops writes under QEMU)",
+    "group4_callgates": "max-parameter call gates on a B=0 stack with SP < frame size: 16-bit pcount=31 (70-byte frame) and 32-bit pcount=31 (140-byte frame), bases 0x80000/0x80FFC",
+    "group3_v86_permitted": "V86 entry permitted controls (wrapped SS0:ESP0): the 9-slot frame (int $0x30 at IOPL=3, B=0 and B=1) and the 10-slot frame (CLI #GP(0) at IOPL=0, B=0), frame bytes verified by the monitor"
+  },
+  "deny_run_protocol": "every deny case runs twice: the first trigger faults (#PF err=2, CR2 = the first denied-page slot in push order, OLD SS/CPL/ESP/EFLAGS intact, zero frame bytes), the CPL3 same-privilege #PF handler restores the PTE and the restarted trigger delivers onto the now-present wrapped stack, where the CPL0 handler verifies EVERY frame byte against the known constants (the PERMITTED control). QEMU 8.2.2 pushes incrementally and leaves partial slots on the pages it reached before the fault; that is memory-only state the trace cannot carry, so it does not disturb the differential -- the RTL's stronger zero-bytes property is graded by the pxwrapm witness image instead.",
+  "witnesses": {
+    "final_record": "edi=0x11111111 (all cases ran), esi=351 (NCASES), ecx=348 (probe faults handled == deny cases), ebp=ebx=0",
+    "faultlog": "exactly exp_pf2=348 [FAULT] vec=14 err=00000002 lines, exp_gp60=332 vec=13 err=00000060 (two per #GP-trigger case: the probe-faulted attempt and the successful refire), ZERO vec=8 (#DF) -- no escalation"
+  },
+  "exp_pf2": 348,
+  "exp_gp60": 332,
+  "oracle_notes": [
+    "The pinned QEMU 8.2.2 drops writes to the 0xB0000-0xC0000 VGA/ROM hole, so the 4 GiB-wrap window maps to phys 0x400000/0x401000 instead.",
+    "The pinned QEMU 8.2.2 has a wraparound-TLB defect (measured with a gdb backtrace into code_gen_buffer): after a cross-page store that straddles the 32-bit address-space boundary (a dword push at 0xFFFFFFFE), a subsequent PLAIN access to page 0 computes the host address with an addend off by exactly 4 GiB and the JIT SIGSEGVs. Cross-page accesses (which recompute both pages) are unaffected. The image's only plain page-0 accesses would have been the sentinel fill's low bytes, so the B=1 fill skips linear < 0x1000; every boundary-straddling push itself remains in the matrix and matches the RTL.",
+    "QEMU gen_lea_v_seg masks explicit 16-bit-address-size operands but NOT 32-bit ones, so an explicit [esp+disp] read on a B=0 stack does NOT wrap at 64 KiB (only true stack operations do); the CPL0 handlers compute wrapped slot addresses by hand. The RTL agreed with QEMU everywhere the image executes this."
+  ],
+  "description": "Regression for the cross-privilege frame-probe slot plan on WRAPPED new TSS stacks. A frame wrapping its stack-pointer window occupies two offset chunks and can touch up to four pages; S_INT_PROBE must enumerate every one in push order before the staged SS/CPL commit. 351 cases: 348 page denials (each with its permitted refire control) plus 3 V86 permitted controls, fully differential vs QEMU, with the faultlog extra for the exact #PF/#GP counts and zero #DF."
+}

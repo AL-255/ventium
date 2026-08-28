@@ -41,6 +41,8 @@
 # Usage:   bash verif/verify.sh          (or: make verify)
 #   M5_TOL_PCT   tightened abs-cyc tolerance (default 10, same as run-m5.sh)
 #   VERIFY_JOBS  parallel workers (default min(nproc-2, #jobs))
+#   VERIFY_WORKDIR / VERIFY_CACHE_DIR override writable run/cache locations
+#                 (useful when the repository build volume is read-only)
 #   PORTBASE     gdbstub port base for parallel func goldens (default 26000)
 #   FORCE_GOLDEN=1   ignore the cache (cold regen) without dropping it
 #
@@ -58,7 +60,10 @@ export ISA_VERIFY="$REFS/tools/isa_verify.py"
 export GEN_TRACE="$ROOT/verif/qemu-trace/gen_trace.py"
 export COMPARE="$ROOT/verif/diff/compare.py"
 export ELF2FLAT="$ROOT/verif/tests/elf2flat.py"
-export P5TRACE="$ROOT/build/p5trace.so"
+# Allow a freshly rebuilt oracle outside a read-only shared build volume.  The
+# default remains the canonical artifact, so ordinary gate invocations are
+# unchanged; a caller must explicitly override P5TRACE for an isolated run.
+export P5TRACE="${P5TRACE:-$ROOT/build/p5trace.so}"
 export M5_METRICS="$ROOT/verif/m5_metrics.py"
 TESTS_DIR="$ROOT/verif/tests"
 TB_DIR="$ROOT/verif/tb"
@@ -69,8 +74,8 @@ TB_DIR="$ROOT/verif/tb"
 # obj_dir_<variant> and run:  TB_BIN=verif/tb/obj_dir_<variant>/tb_ventium make verify
 export TB_BIN="${TB_BIN:-$TB_DIR/obj_dir/tb_ventium}"
 BUILD="$ROOT/build"
-export WORKDIR="$BUILD/verify"
-export CACHE_DIR="$BUILD/golden-cache"
+export WORKDIR="${VERIFY_WORKDIR:-$BUILD/verify}"
+export CACHE_DIR="${VERIFY_CACHE_DIR:-$BUILD/golden-cache}"
 WORKER="$ROOT/verif/lib/verify_worker.sh"
 
 export PYTHON="${PYTHON:-python3}"
@@ -80,7 +85,9 @@ export M5_TOL_PCT="${M5_TOL_PCT:-10}"
 export PORTBASE="${PORTBASE:-26000}"
 FORCE_GOLDEN="${FORCE_GOLDEN:-0}"
 
-NCPU="$(nproc 2>/dev/null || echo 4)"; [ "$NCPU" -gt 3 ] && NCPU=$(( NCPU - 2 ))
+NCPU="${VERIFY_JOBS:-$(nproc 2>/dev/null || echo 4)}"
+if [ -z "${VERIFY_JOBS:-}" ] && [ "$NCPU" -gt 3 ]; then NCPU=$(( NCPU - 2 )); fi
+[ "$NCPU" -gt 0 ] 2>/dev/null || NCPU=1
 
 say()  { printf '\n=== %s ===\n' "$*"; }
 info() { printf '    %s\n' "$*"; }

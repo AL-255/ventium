@@ -72,11 +72,20 @@
               nmi_pending     <= 1'b0;
               nmi_in_progress <= 1'b1;
               start_fault(8'd2, 1'b0, 32'd0, eip);
+              dlv_ext         <= 1'b1;          // NMI is an external event (EXT=1)
             end else begin
               start_fault(inta_vector, 1'b0, 32'd0, eip);
+              dlv_ext         <= 1'b1;          // INTR is an external event (EXT=1)
             end
           end else
 `endif
+          if (dbg_fast_hold) begin
+            // External execution debug parks at this fast-path instruction
+            // boundary.  This is a true no-issue bubble: all S_PIPE mirrors use
+            // fp_issue_block, and clearing AGI bookkeeping consumes a preceding
+            // instruction's one-cycle dependency without manufacturing a new one.
+            agi_wr0<=9'h100; agi_wr1<=9'h100;
+          end else
           if (stall_cnt!=7'd0) begin
             // M5: burn a materialised stall clock (D-cache miss / misalign /
             // FP-latency wait). No retirement; cyc = clock-count-at-retire thus
@@ -85,7 +94,7 @@
             // cannot create a phantom AGI hazard next clock.
             stall_cnt<=stall_cnt-7'd1;
             agi_wr0<=9'h100; agi_wr1<=9'h100;
-          end else if (!pipe_bytes_ok
+          end else if ((!pipe_bytes_ok || !exec_issue_ok)
 `ifdef VEN_L1_AXI
                        && !(real_bus && !mem_ack)   // word-0 not ready -> bubble arm below
 `endif
@@ -108,9 +117,19 @@
             // victim (ic_victim_o, the PRE-edge LRU way) is computed HERE in the
             // spine and latched into pf_fill_way so S_PF fills words 1..7 + the
             // fill-complete MRU into the SAME way (the module never recomputes it).
+            //
+            // !exec_issue_ok (an executable flush is asserted THIS cycle): a pure
+            // bubble -- nothing issues from the about-to-be-invalidated arrays,
+            // and the refill starts at word 0 only AFTER the clearing edge, so no
+            // fill word lands inside the flush window. This is the consumption
+            // half of the flush contract (the RSM stale-executable leak): the
+            // comb-residency signals must NOT be gated (that closes a real loop
+            // through the fragment engine's mem_ack -> tlb_flush), so the bubble
+            // lives here in the FSM instead.
             pf_fill_addr <= pf_miss_fa;
             pf_fill_way  <= ic_victim_o[pf_miss_fa[5 +: IC_IDXW]];
-            pf_word<=3'd1; state<=S_PF;
+            pf_word<= !exec_issue_ok ? 3'd0 : 3'd1;
+            state<=S_PF;
 `ifdef VEN_L1_AXI
           end else if (!pipe_bytes_ok) begin
             // P1-1 (real_bus): an icache miss whose fill WORD 0 the L1 has not yet
@@ -322,7 +341,7 @@
               // push absorbs it (the arith path defers under VEN_FP_PIPE); a lone or
               // post-arith FXCH falls through to its own occ=1 commit next clock.
               if ((u_d.fp_kind==FK_FLDC || u_d.fp_kind==FK_FLDSTI)
-                  && v_d.is_fxch_free && v_bytes_ok && v_d.fp_sti!=3'd0) begin
+                  && v_d.is_fxch_free && v_bytes_ok && !dbg_pair_block && v_d.fp_sti!=3'd0) begin
                 // task #56 layer 10: real mode / 16-bit address size WRAPS EIP at 64 KiB.
                 // The fast path advanced a full 32-bit EIP with no wrap. Inert at w16=0.
                 eip            <= u_d.w16 ? {16'd0, (eip[15:0] + {12'd0,u_d.len} + {12'd0,v_d.len})}

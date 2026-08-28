@@ -1,0 +1,35 @@
+{
+  "name": "pxc04i",
+  "kind": "system",
+  "src": "pxc04i.S",
+  "linker": "pxc04i.ld",
+  "image": "pxc04i.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 1400,
+  "sys": true,
+  "paging": true,
+  "finding": "REVIEW1_Aug3 R2-C03",
+  "transitions": [
+    "real->protected (CR0.PE 0->1, CS far-jump to 32-bit flat code segment 0x08)",
+    "IDT @ 0x1000 with #PF/#GP/#UD interrupt gates + lidt",
+    "page tables: PT0 identity EXCEPT PT0[0x8E]: linear 0x8E000 -> phys 0x700000 (non-contiguous); PT1[0] present, PT1[1] not-present (the pfault demand-page target); CR3 + CR0.PG 0->1",
+    "S_INT_PUSH crossing: ESP=0x8E002 + UD2 -> the 12-byte no-error-code frame spans 0x8DFF6..0x8E001: saved EIP/CS on page 0x8D (identity), saved EFLAGS straddling onto phys 0x700000; the handler verifies saved EIP == the ud2 address and saved CS == 0x08 (marker 0x2038=0x600DF00D) and records EFLAGS/CS for the differential (phys 0x8E000 poisoned 0x0B0B0B0B, phys 0x700000 seeded 0x5A5A5A5A so a wrong-physical-page tail write is observable)",
+    "NO not-present/atomicity variant: the frame push IS exception delivery -- a rejecting second page faults the delivery itself, and the nested delivery pushes onto the same stack (ESP unchanged by an aborted delivery), so #PF-during-#PF -> #DF -> triple fault on ANY correct implementation including QEMU; probe-before-commit for writes is covered by pxc04f/pxc04e/pxc04t",
+    "pfault flow: demand-page #PF at 0x401000 (restart + readback 0xCAFEBABE), #GP on selector 0x38, #UD on UD2; counters accumulate to 4",
+    "witnesses pulled into ecx/edx/esi/edi/ebx/ebp; isa-debug-exit (status 133)"
+  ],
+  "witnesses": {
+    "ecx at exit": "4 -- one #PF (demand-page) + one #GP + two #UD (crossing + pfault) all delivered",
+    "edx at exit": "0x004000F4 -- CR2 0x401000 captured by the demand-page #PF, low 16 bits clobbered by the 0xF4 exit-port load",
+    "esi at exit": "0xCAFEBABE -- the restarted pfault store's readback",
+    "edi at exit": "0x600DF00D -- the crossing frame's saved EIP (== the ud2 address) and saved CS (== 0x08) verified by the handler from both physical pages",
+    "ebp at exit": "0x00000008 -- the saved CS dword recorded from the crossing frame",
+    "ebx at exit": "the saved EFLAGS dword (low half phys 0x8DFFE, high half phys 0x700000) -- differential-only, not hard-asserted"
+  },
+  "description": "REVIEW1_Aug3 R2-C03 regression for producer S_INT_PUSH: an exception-frame push straddling a page boundary must land on the correct physical pages and be readable back from both. The trigger is UD2 at ESP=0x8E002; the 12-byte frame straddles 0x8E000, with page 0x8E mapped to the non-adjacent phys frame 0x700000 (wrong-frame poison + right-frame seed make a mis-targeted tail write observable). The handler reads all three frame dwords back and verifies EIP/CS. Differential against QEMU. The not-present variant is architecturally unobservable for this producer (the push IS delivery; a rejecting page faults the delivery recursively into a triple fault on any correct CPU), documented in the test header. Built on the pfault skeleton, whose #PF/#GP/#UD deliveries still run and count."
+}

@@ -1,0 +1,42 @@
+{
+  "name": "pxdplan",
+  "kind": "system",
+  "src": "pxdplan.S",
+  "linker": "pxdplan.ld",
+  "image": "pxdplan.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 9000,
+  "sys": true,
+  "paging": true,
+  "finding": "frame page-plan probe regression: deduplicated <=4-entry page plan, two-phase (validation / D-mark) probe, captured-frame push translation",
+  "gate_form": "WITNESS gate. The graded properties are memory/PTE state and internal beat counts the trace cannot carry, and the two oracles legitimately differ on them (oracle gap 1), so the image reads them in-guest: the golden pins QEMU's incremental-push witnesses (step 5f); the RTL side is graded in step 7w (zero bytes, D bits, the ordered +ven_frmpglog counter sequence).",
+  "oracle_gaps": {
+    "gap1_incremental_pushes": "QEMU 8.2.2 pushes frame slots incrementally and D-marks each page it writes (seg_helper.c PUSHL/PUSHW store immediately; the softmmu dirty-assist sets A|D on the first store to a clean page). The RTL's page-plan probe validates WITHOUT marking D (validation is not a write) and writes nothing before the commit. So for C1 (later page denied): QEMU leaves two slots written and D=1 on the early page; the RTL leaves zero bytes and D=0. Register-visible state (old context, err=2, CR2) is identical.",
+    "gap2_pt3_vga_hole": "QEMU aborts on stores into the 0xA0000-0xBFFFF VGA MMIO hole from the interrupt-delivery path (measured: do_st_mmio_leN -> iothread mutex assertion), so the C4 frame sits on the pre-dirtied clean-stack page 0x9F000."
+  },
+  "case_matrix": {
+    "C1": "B=0 wrapped 16-bit frame, SS.base=0x80010 ESP0=4: pages 0x80000/0x90000, exactly 64 KiB apart (same direct-mapped DTLB index, lin[15:12]=0). Page 0x90000 denied: the probe faults pre-commit (CR2=0x9000E = the first denied-page slot in push order), zero frame bytes, and the VALIDATED page 0x80000 keeps D=0",
+    "C2": "same geometry, page 0x80000 denied: the fault lands on the first plan entry (CR2=0x80012), nothing written, page 0x90000 keeps D=0 (oracle-identical)",
+    "C3": "collision success: both pages present with D=0; the D-mark pass sets D on BOTH pages pre-commit, the frame bytes verify, and the pushes perform no page walk (the colliding pages evict each other from the DTLB between probe and push, so any DTLB-translated push would walk -- counted by +ven_frmpglog pushwalk)",
+    "C4": "32-bit int frame (5 dword slots), 1 page -> val=1",
+    "C5": "16-bit int frame (5 word slots), 2 colliding pages -> val=2",
+    "C6": "V86 9-slot frame (36 bytes), 3 pages -> val=3",
+    "C7": "pcount=31 32-bit call gate (35 slots, 140 bytes), 3 pages -> val=3 (NOT 35)"
+  },
+  "witnesses": {
+    "qemu_exit_record": "edi=2 (QEMU's partial slots in C1), esi=2 (deny cases), ecx=0xD (D80=1 in C1 via the incremental pushes, D90=0 in C2, D80=D90=1 in C3), ebp=0x9000E (C1 CR2), ebx=0x80012 (C2 CR2)",
+    "rtl_exit_record": "edi=0 (ZERO slots written by the rejected probe), esi=2, ecx=0xC (D80=0 in C1 -- validation is not a write), ebp=0x9000E, ebx=0x80012",
+    "frmpg_sequence": "ordered (nslots,npages,val,dm,pushwalk) lines: (5,1,1,0,0) x2 [C1/C2 int31], (5,2,2,2,0) [C3: 2-page validation + 2-beat D-mark], (5,1,1,0,0) x2 [C4 + int31], (5,2,2,0,0) [C5], (5,1,1,0,0) [int31], (9,3,3,0,0) [C6 V86], (9,1,1,0,0) [V86 int31], (35,3,3,0,0) [C7 call gate], (5,1,1,0,0) [int31] -- one validation beat per DISTINCT page, zero walks during every push phase",
+    "rtl_faultlog": "exactly 2x vec=14 err=00000002 (the C1/C2 probe faults), no other vector"
+  },
+  "negative_controls": {
+    "dmark_bypass": "scratch RTL with the S_INT_PROBE-validation exclusion dropped from walk_set_dirty (validation D-marks eagerly): C1's D80 reads 1 and C3's D-mark beat count drops to 0 -- both graded values flip",
+    "hit_intercept_removed": "scratch RTL with frm_pg_hit forced 0 (pushes translate through the DTLB): C3's colliding pages evict each other between probe and push, so the pushes re-walk -- pushwalk != 0 in the FRMPG line"
+  },
+  "description": "Regression for the frame page-plan probe: D=0-start validation without D-marking, 64 KiB DTLB-collision deny/success cases, one probe beat per distinct page (measured 1/2/3 for int16/int32/V86/call-gate frames up to 35 slots), zero walks during S_INT_PUSH. Witness-graded (QEMU's incremental pushes pinned honestly in 5f)."
+}

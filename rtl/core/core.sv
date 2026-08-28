@@ -51,7 +51,11 @@ typedef enum logic [4:0] {
   // descriptor (reuses the S_LTR descriptor-read FSM, branched in core_tss_priv.svh).
   // CWSDPMI runs its code/handlers from LDT selectors, so every CS/SS/seg descriptor
   // read must pick (sel[2] ? ldt_base : gdt_base).
-  SYS_LLDT
+  SYS_LLDT,
+  // REVIEW_Aug3 — SLDT (0F 00 /0): store the LDTR selector. The core has tracked
+  // ldt_sel since REVIEW2 M-02; the ptaskpg differential reads it back to witness
+  // the incoming task's LDTR after a task switch. Register form only (mirrors STR).
+  SYS_SLDT
 } sysop_e;
 
 // The pipeline FSM state enum. Promoted from an in-`core` typedef to compilation-
@@ -171,7 +175,19 @@ typedef enum logic [5:0] {
     // single-step quirk: a DATA breakpoint #DB re-reports the post-delivery state
     // stamped at the handler entry PC before the handler's first instruction).
     S_DB_EXTRA,
-    S_NTRET_RD
+    S_NTRET_RD,
+    // REVIEW1_Aug3 R2-C04: probe the complete new-stack frame extent (translate +
+    // write-permission, NO bus transaction) between S_INT_SS's SS validation and
+    // S_INT_PUSH's frame writes, while SS/CPL are still STAGED. A page fault on
+    // any frame word can no longer observe new SS/CPL with old CS/EIP and a
+    // partially written frame.
+    S_INT_PROBE,
+    // REVIEW1_Aug3 R2-H05: call-gate parameter copy. Reads the caller-stack
+    // params (old SS still installed — nothing committed yet, so a faulting
+    // source read is delivered in the OLD context with zero frame bytes
+    // written) into cg_params[] before the staged SS/CPL commit, which then
+    // happens on this state's last beat.
+    S_CG_PRD
 } state_e;
 
 module core
@@ -230,11 +246,6 @@ module core
     // Phase D.6: per-line snoop-invalidate from the northbridge (a DMA write to a
     // line that may hold code) — routed to u_icache so DMA-loaded code is coherent.
     // Tied 0 in bus modes 0/1; absent in the default build → byte-identical.
-    // REVIEW2 H-24: SMRAM isolation needs the core's live SMM state at the memory
-    // hierarchy. Without it the cache map cannot open SMRAM exclusively for SMM nor
-    // protect it outside SMM, so normal code and DMA can reach the save map and the
-    // handler region, and SMM accesses get ordinary PAM/cache treatment.
-    output logic        smm_active_o,
     input  logic        ic_snoop_valid,
     input  logic [31:0] ic_snoop_addr,
     // REVIEW Aug-1 H-09: two further independent invalidation events per clock
@@ -425,6 +436,12 @@ module core
     // REVIEW2_aug2 H-18: INVD/WBINVD must reach the D-side/L2 too; flush_all is a
     // top-level input, so the core exports the request instead of driving it.
     output logic        cache_inv_req,
+    // REVIEW2 H-24: SMRAM isolation needs the core's live SMM state at the memory
+    // hierarchy (the cache map opens SMRAM exclusively for SMM and protects it
+    // outside SMM). Part of the unconditional core contract: SMM exists in every
+    // configuration, so the export does too -- configurations without a memory
+    // hierarchy sink it.
+    output logic        smm_active_o,
     output logic        mem_req,
     output logic        mem_we,
     // ---- REVIEW1_Aug2 C-10: the core now REQUESTS a locked transaction ------------
@@ -448,8 +465,11 @@ module core
     output logic [31:0] mem_lin,
     output logic [31:0] mem_wdata,
     output logic [3:0]  mem_wstrb,
-    input  logic [31:0] mem_rdata,
-    input  logic        mem_ack,
+    // REVIEW1_Aug3 R2-C03: the raw bus side. The FSM-visible mem_ack/mem_rdata
+    // are derived inside (the fragment engine gates the ack and merges read
+    // fragments); everything pre-existing reads the internal wires unchanged.
+    input  logic [31:0] bus_rdata,
+    input  logic        bus_ack,
 
     // M6: raised (and latched) when the core enters the F00F hang state
     // (Erratum 81). Lets the TB observe the documented "system hang" without the
@@ -532,14 +552,20 @@ module core
     output logic [63:0] dbg_de_info,    //   {divisor[31:0], eip[15:0], w[2:0], decnt[12:0]}
     // Single-step / instruction-breakpoint control (the ONLY debug signals that
     // affect execution, and ONLY when the PS arms them — see the dbg_hold block).
-    // Park is at the S_DECODE instruction boundary, LOWER priority than SMI/NMI/
-    // INTR so no interrupt is lost, modeled on the S_HLTWAIT resumable halt.
+    // Park owns a quiescent S_DECODE/S_PIPE/S_HLTWAIT boundary.  It has priority
+    // over external delivery, which remains pending until the debugger resumes.
     input  logic        dbg_halt_req,   // level: park at the next instruction boundary
     input  logic        dbg_step,       // pulse: release for exactly ONE instruction
     input  logic        dbg_bp_en,      // enable the PC breakpoint
     input  logic [31:0] dbg_bp_addr,    // park when the about-to-issue EIP == this
     input  logic        dbg_bp_clr,     // pulse: clear a latched breakpoint (resume)
     output logic        dbg_halted,     // 1 = parked at an instruction boundary
+    // Compact architectural-state scan port.  The selector is deliberately
+    // consumed *inside* the core so an x87 8x80-bit state dump does not create a
+    // 640-bit cross-hierarchy route to the FPGA wrapper.  It is read only while
+    // dbg_halted, after all effects of the preceding instruction have committed.
+    input  logic [6:0]  dbg_arch_sel,
+    output logic [31:0] dbg_arch_data,
     // ---- Patchable opcode-capture hook (generalises the divide-#DE tap): the PS
     // arms dbg_hook_cfg to select WHICH instruction class to record; on each match
     // the core bumps dbg_hook_seq and latches a snapshot {eip, opA, opB, meta} the PS
@@ -578,35 +604,6 @@ module core
     .gpr_wd    (gpr_wd),
     .gpr_o     (gpr_o)
   );
-
-`ifdef VEN_DBG_WD
-  // [VEN-ESIWB] Catch the EXACT writeback that sets esi := 0x11b354 (the fatal ring-3 Quake
-  // buffer-end pointer that pollutes the ring-0 handler's saved esi). Names the source path:
-  // FSM state + whether a string-op (q_str_loadsi/q_rep) or a load (q_mem_read) produced it.
-  logic [3:0] esiwb_n = 4'd0;
-  logic [3:0] espwb_n = 4'd0;
-  always_ff @(posedge clk) begin
-    if (rst_n && gpr_we[R_ESI] && gpr_wd[R_ESI]==32'h0011b354 && esiwb_n < 4'd12) begin
-      esiwb_n <= esiwb_n + 4'd1;
-      $display("[VEN-ESIWB] esi<=0011b354 state=%s @cs:eip=%04x:%08h | mem_read=%b dst=%0d q_ea=%08h fsB=%08h fsSel=%04x dsB=%08h esB=%08h EA_lin(fs)=%08h mem_load=%08h ibuf=%016h",
-               state.name(), seg_sel[SG_CS], eip, q_mem_read, q_dst_reg, q_ea,
-               seg_base[SG_FS], seg_sel[SG_FS], seg_base[SG_DS], seg_base[SG_ES],
-               seg_base[SG_FS]+q_ea, mem_load_data, dbg_ibuf);
-    end
-    // [VEN-ESPWB] catch the writeback that clobbers ESP := 0x11b354 (the buffer-end) — the TRUE root:
-    // esp=0x11b354 -> stack #PF -> the saved-esp cascade. Names the path (K_STR string op / CTRL
-    // push-pop / ALU / mov r,r) so we know WHY esp gets the buffer pointer.
-    // Exclude the task-switch RESTORE states (S_TSW_*) — those are the circular self-sustain. Catch the
-    // FIRST REAL instruction that computes esp:=0x11b354 (K_ALU mov/add/lea, push/pop, etc.).
-    if (rst_n && gpr_we[R_ESP] && gpr_wd[R_ESP]==32'h0011b354 && espwb_n < 4'd12
-        && state != S_TSW_BUSY && state != S_TSW_READ && state != S_TSW_SAVE && state != S_TSW_SEG && state != S_TSW_LDT) begin
-      espwb_n <= espwb_n + 4'd1;
-      $display("[VEN-ESPWB] ESP<=0011b354 (NON-restore) state=%s @cs:eip=%04x:%08h | q_kind=%0d q_ct=%0d q_dst_reg=%0d q_mem_read=%b q_is_push=%b q_is_pop=%b q_ea=%08h alu=%08h eax=%08h esp_pre=%08h ebp=%08h ibuf=%016h",
-               state.name(), seg_sel[SG_CS], eip, q_kind, q_ct, q_dst_reg, q_mem_read, q_is_push, q_is_pop,
-               q_ea, alu_out, gpr_o[R_EAX], gpr_o[R_ESP], gpr_o[R_EBP], dbg_ibuf);
-    end
-  end
-`endif
 
   // ===========================================================================
   // M2S.1 system-mode architectural state (docs/m2s1-segmentation-spec.md).
@@ -663,6 +660,19 @@ module core
   // M2S.4b — the OUTGOING TSS descriptor access byte (captured at LTR), so a task
   // switch can clear its busy bit (type B->9) without re-reading the descriptor.
   logic [7:0]  tr_attr;
+  // REVIEW_Aug3 H-11b: the LTR architectural side effect. IA-32 marks the loaded
+  // TSS descriptor BUSY (type 9->B) in the GDT before the instruction completes;
+  // omitting it let software read the descriptor as available and LTR the same
+  // selector twice without fault. ltr_busy_q runs the extra bus beat (the byte
+  // write at descriptor+5) and the ltr_*_q scratch holds the validated descriptor
+  // fields until the write lands -- TR commits only after it, so a fault on the
+  // busy write leaves TR untouched. lldt_null_q marks a null LLDT at dispatch:
+  // no descriptor read at all (see the S_LTR arm).
+  logic        ltr_busy_q;
+  logic [15:0] ltr_sel_q;
+  logic [31:0] ltr_base_q, ltr_limit_q;
+  logic [7:0]  ltr_attr_q;
+  logic        lldt_null_q;
   // M2S.5 — SMM / RSM (docs/m2s5-smm-spec.md). SMBASE holds the base of the SMRAM
   // region (reset default 0x30000; RSM may relocate it from the SMBASE save slot).
   // smm_active = the CPU is currently in System Management Mode (HF_SMM); set on
@@ -719,6 +729,45 @@ module core
     else        a20_on_q <= a20_on;
   assign a20_flush = (a20_on != a20_on_q);
 
+  // REVIEW_Aug4 A4-H02: ONE executable-state flush domain. The I-cache, the
+  // uopcache/predecode, and the fetch-bypass (icbp) validity must die on the
+  // same events -- the flush expression used to be written out per consumer,
+  // which is exactly how the bypass's validity drifted out of the domain
+  // (DMA writes, TLB remaps, A20 changes, and cache invalidations all left
+  // stale non-cacheable bytes executable). cache_inv_go is declared below;
+  // the assign is order-independent.
+  // invalidation must win over CONSUMPTION as well as insertion: while the flush
+  // is asserted (this cycle, before the clearing edge) the arrays still expose
+  // their pre-flush valids, so a fast path could issue/retire from a line the
+  // flush is killing -- the deterministic case is RSM, where smm_flush is high
+  // the cycle after exit and a cached SMRAM line could retire one stale
+  // instruction. exec_issue_ok gates every fast-serve decision (sfetch_fast,
+  // pipe_bytes_ok, v_bytes_ok, uop_hit) so a flush cycle always takes the
+  // refetch path. (ic_present itself stays raw: the byte-gather/decode path
+  // consumes it, and gating there closes a comb loop through cache_inv_go.)
+  //
+  // tlb_flush enters the domain through tlb_flush_q (one registered cycle):
+  // the raw signal is combinational from the delivery/RSM states' mem_ack, and
+  // gating the serve decisions on it directly closes a real loop (pipe_* ->
+  // cur_lin -> the fragment engine's mem_ack -> tlb_flush). The TLB-internal
+  // flush (fe_*_v, u_itlb/u_dtlb) keeps the raw edge; the executable arrays
+  // die one cycle later, on the same edge the remapped fetch would first
+  // consume them -- the consumption gate bridges exactly that window.
+  logic tlb_flush_q;
+  always_ff @(posedge clk or negedge rst_n)
+    if (!rst_n) tlb_flush_q <= 1'b0;
+    else        tlb_flush_q <= tlb_flush;
+`ifdef VEN_L1_AXI
+  logic exec_flush_all;
+  assign exec_flush_all = ic_flush_all || (ic_snoop_valid && paging_on)
+                       || a20_flush || cache_inv_go || tlb_flush_q;
+`else
+  logic exec_flush_all;
+  assign exec_flush_all = a20_flush || cache_inv_go || tlb_flush_q;
+`endif
+  logic exec_issue_ok;
+  assign exec_issue_ok = !exec_flush_all;
+
   // REVIEW2_aug2 H-12: SELF-MODIFYING-CODE SNOOP, GENERATED IN THE CORE.
   //
   // ic_snoop_valid1/2 (the CPU store snoop) are connected in ventium_top ONLY inside
@@ -730,18 +779,42 @@ module core
   // onto. My unit gate drove port 1 directly, so it passed while the shipping build
   // could never exercise it.
   //
-  // The core does not need the L1 to tell it about its own stores. Derive the snoop
-  // from the store this core is issuing: cur_lin is the LINEAR address, which is what
-  // the linear-tagged I-cache wants, and cur_is_w marks the write.
+  // The core does not need the L1 to tell it about its own stores. The snoop is
+  // derived from the store this core is issuing (the physical beat address --
+  // see the note at smc_a1 below), and cur_is_w marks the write.
   //
   // The second port covers a store whose bytes cross an I-cache line boundary.
   logic        smc_v1, smc_v2;
   logic [31:0] smc_a1, smc_a2;
   assign smc_v1 = mem_req_pre_sq && cur_is_w && fe_translatable;
-  assign smc_a1 = cur_lin;
+  // REVIEW1_Aug3 R2-H09: the snoop now carries the beat's PHYSICAL address --
+  // mem_addr is the post-translate bus address (the bus driver's tail runs
+  // mem_xlate in place), per-fragment under the fx engine (a page-straddling
+  // store snoops each page's physical line on that fragment's beat), and the
+  // icache matches it against the per-line PHYSICAL tag (ic_ptag). A store
+  // through ANY alias of a physical line therefore drops every aliased copy --
+  // the linear-alias stale-executable hazard is closed. Over-invalidation
+  // (a TLB-miss clock passes the linear through; the probe beat snoops page 2)
+  // costs a refill, never correctness. Supersedes task #51's linear workaround.
+  assign smc_a1 = mem_addr;
   assign smc_v2 = smc_v1 &&
-                  ((cur_lin[4:0] + {1'b0, cur_size}) > 6'd32);   // crosses the line end
-  assign smc_a2 = {cur_lin[31:5], 5'd0} + 32'd32;
+                  ((mem_addr[4:0] + {1'b0, cur_size}) > 6'd32);   // crosses the line end
+  assign smc_a2 = {mem_addr[31:5], 5'd0} + 32'd32;
+
+  // R2-H09: the muxed CPU-store snoop (the L1's external view OR the core's own),
+  // physical domain -- one definition shared by the icache port map and the
+  // non-cacheable fetch bypass clear, so the two cannot drift apart.
+  logic        icsnp_v1, icsnp_v2;
+  logic [31:0] icsnp_a1, icsnp_a2;
+`ifdef VEN_L1_AXI
+  assign icsnp_v1 = ic_snoop_valid1 || smc_v1;
+  assign icsnp_a1 = ic_snoop_valid1 ? ic_snoop_addr1 : smc_a1;
+  assign icsnp_v2 = ic_snoop_valid2 || smc_v2;
+  assign icsnp_a2 = ic_snoop_valid2 ? ic_snoop_addr2 : smc_a2;
+`else
+  assign icsnp_v1 = smc_v1;  assign icsnp_a1 = smc_a1;
+  assign icsnp_v2 = smc_v2;  assign icsnp_a2 = smc_a2;
+`endif
 `ifndef SYNTHESIS
   // A snoop that never fires is the bug this finding IS. Count it.
   int ven_smc_n; logic ven_smclog_en;
@@ -830,14 +903,12 @@ module core
   // encoding is stepping-specific / not publicly documented, so the hidden-state
   // layout here is this RTL's internal convention — see the DONE-PARTIAL note in
   // the README). All fields land in the documented map window so RSM round-trips.
-  // DONE-PARTIAL / DEFERRED (explicitly NOT in the save/restore beat list below):
   // Table 20-1 also defines DR6 @ 0x7FCC, DR7 @ 0x7FC8, TR (selector) @ 0x7FC4,
-  // and LDT Base @ 0x7FC0. This RTL omits all four across SMI#/RSM: DR6/DR7 do not
-  // exist yet (debug registers are the next stage, M2S.6) and there is no LDT-base
-  // register in the core; TR (tr_sel/tr_base, from M2S.4) IS architectural but is
-  // left unchanged through SMM (the psmm corpus does not modify TR/LDT/DR in the
-  // handler, so the round-trip still closes). These are real divergences from the
-  // full P5 save map, deferred honestly — see the README "Still deferred" list.
+  // and LDT Base @ 0x7FC0. All four are saved and restored (SMO_DR6/DR7/TR/LDTR
+  // below, filled into the real architectural slots per REVIEW2 M-02; the
+  // save/restore beats are in core_smm.svh). LDTR is the selector slot only --
+  // there is no LDT-base register field in this map, so the incoming LDT
+  // descriptor is re-read from the GDT on any later use, as outside SMM.
   localparam logic [15:0] SMO_CR0    = 16'h7FFC;
   localparam logic [15:0] SMO_CR3    = 16'h7FF8;
   localparam logic [15:0] SMO_EFLAGS = 16'h7FF4;
@@ -947,6 +1018,17 @@ module core
   //     descriptor load exactly as cs_d captures desc[54] for CS. Resets to 1 (32-bit)
   //     so user mode and pre-load PM behave exactly as before.
   logic ss_b;
+  // REVIEW_Aug4 A4-H07: the pre-SMI hidden-state shadows. RSM used to rebuild
+  // provenance from the restored CR0.PE (seg_pm_loaded <= rsm_cr0[0]) and left
+  // seg_b[]/ss_b wherever the SMM handler left them. Both are wrong: a PE-set-
+  // but-not-yet-reloaded window has real-mode hidden caches the restored PE
+  // bit would mislabel PM-loaded, and an SMM handler that changes modes or
+  // reloads segments must not leak its D/B into the resumed context. Shadowed
+  // on SMI entry, restored verbatim on RSM (the architectural map covers
+  // selector/base/limit/attr/cs_d -- provenance and D/B are not in it).
+  logic        smm_pml_q [NUM_SEG];
+  logic        smm_seg_b_q [NUM_SEG];
+  logic        smm_ss_b_q;
   // ---- REVIEW_aug2 H-01: ONE definition of "this stack is 16-bit" -------------
   // stk16() masked the stack ADDRESS on (seg_real || !ss_b), but the ESP writeback
   // masked on `real_mode` alone. Three ways for those to disagree, all of them live:
@@ -990,10 +1072,51 @@ module core
   // `real_mode`-only condition had the same flaw; it simply never showed, because
   // real-mode code writes SP, not ESP.
   logic esp_arch_dst;
-  assign esp_arch_dst = q_writes_reg && (q_dst_reg == R_ESP);
+  assign esp_arch_dst = (q_writes_reg && (q_dst_reg == R_ESP))
+                     // VEN_SYS_FASTPATH can reach the same explicit register
+                     // writes without populating q_writes_reg/q_dst_reg.  Every
+                     // GPR write produced by S_PIPE is an explicit instruction
+                     // destination (implicit push/pop/call/ret stay on the slow
+                     // FSM), so exempt an ESP destination in either issue slot
+                     // from the SS.B stack-pointer merge as well.  The outer
+                     // gpr_we[R_ESP] guard at the post-process still decides
+                     // whether this clock actually writes ESP; these decode
+                     // terms therefore do not duplicate the issue predicate or
+                     // create a gpr_we -> predicate combinational feedback path.
+                     || ((state == S_PIPE)
+                         && ((u_d.wreg && (u_d.dst == R_ESP))
+                             || (pipe_pair && v_d.wreg && (v_d.dst == R_ESP))))
+                     // The inter-privilege IRET's outer-ESP restore is an
+                     // architectural ESP write in the same sense: its masking
+                     // follows the OUTER stack's B bit (QEMU's SET_ESP(sp,
+                     // get_sp_mask(ss_e2))), applied in the S_IRET_SS arm
+                     // itself -- the generic post-process must not merge the
+                     // old handler ESP's upper half into it.
+                     || ((state == S_IRET_SS) && iret_ss_commit);
   function automatic logic [31:0] stk16(input logic [31:0] off);
     stk16 = stk_is16 ? {16'd0, off[15:0]} : off;
   endfunction
+  // REVIEW1_Aug3 R2-H05: stk16 with an EXPLICIT B bit. stk16 reads the LIVE
+  // ss_b, which during a staged cross-privilege switch (S_INT_SS/S_INT_PROBE/
+  // S_CG_PRD) is still the OLD stack's -- the new stack's B sits in int_ss_b.
+  function automatic logic [31:0] stk16b(input logic [31:0] off, input logic b);
+    stk16b = b ? off : {16'd0, off[15:0]};
+  endfunction
+  // The frame page-plan lookup: a push whose linear page matches a captured
+  // plan entry translates through the captured frame -- no DTLB lookup, no
+  // walk, no fault after the staged context commits.
+  logic        frm_pg_hit;
+  logic [19:0] frm_pg_hitphys;
+  always_comb begin
+    frm_pg_hit     = 1'b0;
+    frm_pg_hitphys = 20'd0;
+    if (state == S_INT_PUSH && paging_on)
+      for (int i = 0; i < 4; i++)
+        if (frm_pg_val[i] && (frm_pg_lin[i] == cur_lin[31:12])) begin
+          frm_pg_hit     = 1'b1;
+          frm_pg_hitphys = frm_pg_phys[i];
+        end
+  end
   // eff_cpl = the EFFECTIVE current privilege. In V86 it is architecturally 3
   // (USER) regardless of the CS selector's RPL (the CS selector is a real-mode
   // segment value, e.g. 0x1000, so cs&3 is NOT the CPL). Outside V86 it is cpl_r.
@@ -1024,8 +1147,13 @@ module core
   //   * flat bases : the fast-path AGU adds NO segment base, so every segment it can address
   //                  through must have base 0. CS/DS/SS/ES cover the fast path's operands
   //                  (FS/GS require an override prefix, which is not `simple`).
-  // A DJGPP/CWSDPMI client (DOS Quake) and Win95's 32-bit flat VxD code both satisfy this; the
-  // 16-bit real-mode BIOS/DOS side does not and keeps the slow FSM until step 2 adds bases.
+  // Most flat clients satisfy this with literal base zero.  CWSDPMI also creates
+  // a *relocated* flat client: CS/DS/SS/ES share one nonzero base.  The optional
+  // relocation profile below admits only the fast decoder's register-only subset
+  // (fast loads remain separately disabled), for which that common base cannot
+  // affect the architectural result.  It is deliberately not the broad
+  // VEN_SYS_FASTPATH_ALL experiment: real mode, 16-bit code, mixed bases, FS/GS
+  // overrides, and every memory form remain on the proven slow FSM.
   logic sys_fp_ok;
   // VEN_SYS_FASTPATH_ALL: the two things core_fastpath.svh's bail-out comment says the fast path
   // is "unaware of" turn out to be ALREADY IMPLEMENTED elsewhere:
@@ -1036,10 +1164,39 @@ module core
   // relaxed after the support landed. This variant tests that hypothesis empirically.
 `ifdef VEN_SYS_FASTPATH_ALL
   assign sys_fp_ok = 1'b1;
+`elsif VEN_SYS_FASTPATH_RELOC
+  // Every admitted integer fast form is register/immediate/relative-control
+  // only (decode.sv); LEA computes an offset and the optional fast MOV load is
+  // independently rejected by sys_fp_load_ok below.  CS fetch uses its own
+  // fbase path, so a common nonzero client base does not leak into this path.
+  // Requiring all four conventional bases equal retains the flat-client
+  // invariant and excludes a partial/heterogeneous segment setup.
+  assign sys_fp_ok = !real_mode && cs_d
+                   && (seg_base[SG_CS] == seg_base[SG_DS])
+                   && (seg_base[SG_CS] == seg_base[SG_SS])
+                   && (seg_base[SG_CS] == seg_base[SG_ES]);
 `else
   assign sys_fp_ok = !real_mode && cs_d
                    && (seg_base[SG_CS] == 32'd0) && (seg_base[SG_DS] == 32'd0)
                    && (seg_base[SG_SS] == 32'd0) && (seg_base[SG_ES] == 32'd0);
+`endif
+
+  // The original system fast path correctly keeps all memory forms on the
+  // slow FSM: its initial target included 16-bit BIOS/DPMI code, for which the
+  // fast decoder's 32-bit register-indirect load is not a faithful access.
+  // A 32-bit flat client is a materially narrower case. Its only fast-load
+  // encoding is MOV r32,[r32] (decode.sv), and the existing S_PIPE request
+  // already flows through cur_lin, the D-TLB/page walker, permissions, and the
+  // page-fragment engine. Do not widen this based merely on CS.D/base=0: a
+  // finite DS limit would still require the slow path's checked access.
+  logic sys_fp_load_ok;
+`ifdef VEN_SYS_FASTLOAD_FLAT
+  assign sys_fp_load_ok = sys_fp_ok && !real_mode && cs_d
+                     && (seg_limit[SG_DS] == 32'hFFFF_FFFF)
+                     && seg_attr[SG_DS][7] && seg_attr[SG_DS][4]
+                     && !seg_attr[SG_DS][3] && seg_attr[SG_DS][1];
+`else
+  assign sys_fp_load_ok = 1'b0;
 `endif
 
 `ifdef VEN_DBG_CORE
@@ -1093,15 +1250,13 @@ module core
   // when a PDE has PS (bit 7) set.
   logic paging_on;
   assign paging_on = sys_mode && creg0[31] && creg0[0];
-  assign mem_lin = cur_lin;   // task #51: linear mirror of mem_addr (pre-mem_xlate)
+  assign mem_lin = cur_lin_nat;   // task #51: linear mirror of mem_addr (pre-mem_xlate).
+  // R2-C03: the mirror reports the NATURAL (per-state) linear address, not the
+  // fragment engine's redirected page-2 address -- the SMC snoop's invalidation
+  // identity is the architectural access's line.
   // REVIEW2 C-03: the architectural bus address BEFORE mem_xlate (driven in
   // core_bus_driver.svh). Diagnostic only -- nothing in the datapath reads it.
   logic [31:0] mem_addr_pre;
-  // REVIEW2_aug2 C-04: what the per-state arms in core_bus_driver.svh produced, before
-  // the canonical override supersedes them for translatable states. Inert in the
-  // datapath -- it exists so CHECK 5 can keep detecting drift in those now-dead arms,
-  // which is what lets them be deleted with evidence rather than by inspection.
-  logic [31:0] mem_addr_arm;
   // ===========================================================================
   // REVIEW2 C-02: PAGE-CROSSING LOAD SPLIT.
   // ===========================================================================
@@ -1140,6 +1295,150 @@ module core
   logic [1:0]  xs_ph;          // 0=probe page2, 1=write page1, 2=write page2
   logic        xs_act;         // this store is a crossing one
   logic [2:0]  xs_first;       // bytes of the store that live in the first page
+
+  // ===========================================================================
+  // REVIEW1_Aug3 R2-C03: THE GENERIC FRAGMENT ENGINE ("fx").
+  //
+  // One byte-extent request engine below ALL FSM producers, replacing the
+  // per-state page-crossing split the review forbade extending case-by-case.
+  // Any translatable state whose current beat straddles a page boundary gets a
+  // probe-then-execute fragment sequence instead of driving the tail bytes
+  // through the physically adjacent frame:
+  //
+  //   READ  beat: frag1 at the natural linear (page 1's bytes) -> frag2 at the
+  //         page-2 base (own TLB lookup / walk / permission check) -> the FSM
+  //         sees ONE ack with the merged dword.
+  //   WRITE beat: probe page 2 (translated, WRITE-permission checked, NO bus
+  //         transaction -- xs phase 0 generalized) -> write page-1 fragment ->
+  //         write page-2 fragment. No byte is committed before both pages are
+  //         proven, so a fault never leaves a partial write.
+  //
+  // The engine interposes INSIDE the core: the bus driver's outputs are renamed
+  // bd_* and the engine produces the mem_* ports; the FSM's mem_ack/mem_rdata
+  // are gated/merged versions of the bus ack/data. S_LOAD/S_LOAD2/S_STORE keep
+  // their proven xp_pend/xs machinery (excluded below) — the engine covers the
+  // producer states the review named (S_LGDT, S_INT_GATE, S_INT_PUSH, S_FSTORE,
+  // S_FENV_ST, S_TSW_SAVE) and every other translatable slow state generically.
+  //
+  // fx_ph encoding: reads -- 0: frag1 out, 1: frag2 out.
+  //                 writes -- 0: probe page 2, 1: write frag A, 2: write frag B.
+  logic        bd_req, bd_we;
+  logic [31:0] bd_addr, bd_wdata;
+  logic [3:0]  bd_wstrb;
+  logic        fx_act;         // a fragment sequence is in flight
+  logic        fx_wr;          // 1 = write sequence, 0 = read sequence
+  logic [1:0]  fx_ph;
+  logic [31:0] fx_lo;          // read frag1 data (its low fx_first bytes are valid)
+  logic [2:0]  fx_first;       // bytes of the beat that live in page 1 (1..3)
+  logic [31:0] fx_wdata_q;     // write beat's original data/strobes (lane-0 form)
+  logic [3:0]  fx_wstrb_q;
+  // One-cycle abort request, written ONLY by the main FSM block (pulsed by
+  // start_fault, cleared by its per-cycle default) and consumed ONLY here --
+  // the fragment registers keep exactly one procedural owner each, and the
+  // abort still takes effect at the fault-taking edge (the shaping kill on
+  // the output stage covers the request cycle, so no fragment beat escapes
+  // while the state clears).
+  logic        fx_abort_q;
+
+  // the states with their own proven split machinery — the engine must NOT
+  // engage for them (their arms drive the xp_pend/xs phases themselves).
+  logic fx_state_ok;
+  assign fx_state_ok = fe_translatable
+                    && (state != S_LOAD) && (state != S_LOAD2) && (state != S_STORE)
+                    && (state != S_WALK) && (state != S_SMI_SAVE) && (state != S_RSM);
+
+  // crossing detection: reads measure by cur_size, writes by the driven strobes
+  // (lane-0 convention: the byte at cur_lin is strobe lane 0).
+  logic [2:0]  fx_wr_hi;       // highest set strobe lane of the write beat
+  always_comb begin
+    fx_wr_hi = 3'd0;
+    for (int b = 0; b < 4; b++) if (bd_wstrb[b]) fx_wr_hi = 3'(b);
+  end
+  logic [12:0] fx_rd_end;
+  assign fx_rd_end = {1'b0, cur_lin_nat[11:0]} + {9'd0, cur_size};
+  logic        fx_cross;
+  assign fx_cross = bd_we
+                 ? ({1'b0, cur_lin_nat[11:0]} + {10'd0, fx_wr_hi} > 13'hFFF)
+                 : (fx_rd_end > 13'h1000);
+  logic        fx_start;
+  assign fx_start = fx_state_ok && mem_req_pre_sq && paging_on
+                 && (!fx_act || fx_abort_q) && fx_cross
+                 && !xlate_miss && !perm_fault && !seg_access_fault && !fe_xlate_pend;
+
+  // engine phase controls (combinational `_e` forms live at the output stage,
+  // after the bus-driver include, so the first clock of a crossing beat is
+  // already shaped -- REVIEW_aug2 C-01's xs_eff lesson).
+  // the probe must not set the TLB Dirty bit (the write may still fault on page 1);
+  // consumed beside xs_probing at the walk dispatch.
+  logic fx_probing;
+
+  logic [31:0] fx_merged;
+  assign fx_merged = (fx_lo & ~(32'hFFFF_FFFF << ({2'd0, fx_first} << 3)))
+                   | (bus_rdata << ({2'd0, fx_first} << 3));
+
+  // the engine sequencer. The FSM arms are untouched: they see exactly one ack
+  // per beat (the last fragment's) with merged read data.
+  always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      fx_act <= 1'b0; fx_wr <= 1'b0; fx_ph <= 2'd0; fx_lo <= 32'd0;
+      fx_first <= 3'd0; fx_wdata_q <= 32'd0; fx_wstrb_q <= 4'd0;
+    end else if (fx_abort_q && !fx_start) begin
+      // FAULT ABORT (start_fault pulses fx_abort_q in the main FSM block):
+      // highest priority after reset. Completes as soon as no new crossing
+      // start is pending this clock; the output-stage kill (fx_abort_q terms
+      // on every fx_act-based shaping signal) covers the request cycle, so no
+      // fragment shaping hijacks the fault delivery's first beat.
+      fx_act <= 1'b0; fx_ph <= 2'd0;
+    end else if (state == S_WALK) begin
+      // FROZEN (pxc04/S_LGDT, VCD-proven by the xc04 conversion): a frag2 that
+      // misses the D-TLB diverts the FSM to S_WALK WITH THE ENGINE STILL ARMED.
+      // Unfrozen, the walk's own PDE/PTE acks advanced the frag phases (the
+      // default case disengaged on the walk's first ack) and fx_merge_e fed the
+      // walk's PDE latch the half-merged producer read -- measured
+      // walk_pde = (true PDE << 16) | frag1[15:0], so the PTE read issued at a
+      // garbage physical and the restarted access re-faulted forever. The walk
+      // is a DETOUR of the producer's beat: hold every engine register here
+      // (the output shaping is separately blanked by fx_walk_hold below), and
+      // the frag sequence resumes when the walk returns to the producer state.
+    end else if ((!fx_act || fx_abort_q) && fx_start) begin
+      // (fx_abort_q && fx_start): a delivery beat that itself crosses replaces
+      // the aborted sequence outright -- an aborted probe wrote nothing, and
+      // the new beat is shaped by the fx_start terms this same clock.
+      fx_act     <= 1'b1;
+      fx_wr      <= bd_we;
+      fx_first   <= 3'(13'h1000 - {1'b0, cur_lin_nat[11:0]});
+      fx_wdata_q <= bd_wdata;
+      fx_wstrb_q <= bd_wstrb;
+      // A write starts at the PROBE (fx_probe_e suppresses the port request
+      // combinationally on this same clock, so nothing escapes unmasked).
+      // A read's frag1 is the natural request going out this clock; if the
+      // memmodel acks combinationally (same clock), capture it NOW and move
+      // straight to frag2.
+      if (!bd_we && bus_ack) begin
+        fx_lo <= bus_rdata; fx_ph <= 2'd1;
+      end else
+        fx_ph <= 2'd0;
+    end else if (!fx_act) begin
+      // idle (no start this clock)
+    end else begin
+      unique case ({fx_wr, fx_ph})
+        // write probe: complete when page 2 resolves clean (a miss diverts to
+        // S_WALK via xlate_miss and returns here; a fault is delivered by the
+        // FSM's generic arms and start_fault resets the engine).
+        // In VEN_FE_PIPE, xlate_miss is deliberately suppressed while the
+        // registered page-2 translation is still settling.  Do not mistake
+        // that suppression for a successful write probe and advance to frag A.
+        {1'b1, 2'd0}: if (!fe_xlate_pend && !xlate_miss && !perm_fault && !seg_access_fault)
+                            fx_ph <= 2'd1;
+        {1'b1, 2'd1}: if (bus_ack) fx_ph <= 2'd2;   // frag A written
+        {1'b1, 2'd2}: if (bus_ack) begin fx_act <= 1'b0; fx_ph <= 2'd0; end  // frag B
+        // read: frag1 ack -> frag2; frag2 ack -> present merged, done.
+        {1'b0, 2'd0}: if (bus_ack) begin fx_lo <= bus_rdata; fx_ph <= 2'd1; end
+        default:      if (bus_ack) begin fx_act <= 1'b0; fx_ph <= 2'd0; end
+      endcase
+    end
+  end
+
   // Architectural crossing test for the CURRENT S_LOAD access, off the PRE-translate
   // linear. Uses the operand width, not the bus's 4-byte fetch: a 1-byte load at
   // offset 0xFFF does not architecturally cross.
@@ -1148,6 +1447,21 @@ module core
   // length) pair is exactly what a canonical byte-addressed request layer carries.
   // Declared beside cur_lin's own machinery so the two cannot drift apart.
   logic [3:0]  cur_size;
+  // Canonical width of the current S_LOAD/S_LOAD2 beat.  q_w is the decoded
+  // offset/operand width, not necessarily the memory width: an m16:16 far
+  // pointer is four bytes in its first (and only) load, while the selector beat
+  // of an m16:32 pointer is only two bytes.  One value drives translation
+  // extent, page splitting, segment checks, and the L1 narrow-read strobes.
+  logic [2:0]  load_beat_w;
+  always_comb begin
+    load_beat_w = q_w;
+    if ((state == S_LOAD) && (q_w == 3'd2)
+        && (q_jmpf_mem || q_callf_mem || (q_seg_load && !q_seg_load_lo)))
+      load_beat_w = 3'd4;
+    else if ((state == S_LOAD2)
+             && (q_jmpf_mem || q_callf_mem || (q_seg_load && !q_seg_load_lo)))
+      load_beat_w = 3'd2;
+  end
   // REVIEW2_aug2 H-05 (sixth bullet): the segment check's extent, which is NOT always
   // cur_size. cur_size is the CURRENT BEAT's byte count, which is right for the address
   // mirror and the page-crossing layer but wrong for a limit check on a MULTI-BEAT
@@ -1170,7 +1484,7 @@ module core
 
   logic        xp_cross;
   logic [12:0] xp_end;
-  assign xp_end   = {1'b0, cur_lin[11:0]} + {10'd0, q_w};
+  assign xp_end   = {1'b0, cur_lin[11:0]} + {10'd0, load_beat_w};
   // REVIEW1_Aug2 C-03: S_LOAD2 splits too. The crossing predicate was bound to a
   // single FSM state, so every other multi-byte access translated only its STARTING
   // page: bytes in page 2 were read from the frame page 1 happened to select. S_LOAD2
@@ -1230,7 +1544,7 @@ module core
                               : 3'd4;
   always_ff @(posedge clk) if (rst_n && c02_xpage_hits) c02_count <= c02_count + 1;
   final if (c02_count != 0)
-    $display("[C-02] page-crossing translated accesses (paging on): %0d -- each used the FIRST page's translation for BOTH pages", c02_count);
+    $display("[xpage] page-crossing translated accesses (paging on): %0d -- each handled by the per-page split (probe/merge machinery)", c02_count);
 `endif
   logic cr4_pse;
   assign cr4_pse = creg4[4];
@@ -1373,38 +1687,187 @@ module core
   assign dbg_ibuf     = {ibuf[7],ibuf[6],ibuf[5],ibuf[4],ibuf[3],ibuf[2],ibuf[1],ibuf[0]};
   assign dbg_seg      = {31'd0, cs_d, gdt_base};   // [31:0]=GDTR base, [32]=CS.D (PM-wedge descriptor probe)
 
+  // Halted architectural scan.  FPR words name the *physical* fpu_top slots;
+  // TOP (selector 18) converts them to logical ST(i) without introducing an
+  // 8x80-bit debug bus.  Word order is little-endian: lo[31:0], mid[63:32],
+  // hi[79:64] in bits [15:0].  This is an observer only and has no path back
+  // into decode, issue, cache, or the x87 state file.
+  always_comb begin
+    unique case (dbg_arch_sel)
+      7'd0:  dbg_arch_data = gpr_o[R_EAX];
+      7'd1:  dbg_arch_data = gpr_o[R_ECX];
+      7'd2:  dbg_arch_data = gpr_o[R_EDX];
+      7'd3:  dbg_arch_data = gpr_o[R_EBX];
+      7'd4:  dbg_arch_data = gpr_o[R_ESP];
+      7'd5:  dbg_arch_data = gpr_o[R_EBP];
+      7'd6:  dbg_arch_data = gpr_o[R_ESI];
+      7'd7:  dbg_arch_data = gpr_o[R_EDI];
+      7'd8:  dbg_arch_data = eip;
+      7'd9:  dbg_arch_data = eflags;
+      7'd10: dbg_arch_data = {seg_sel[SG_SS], seg_sel[SG_CS]};
+      7'd11: dbg_arch_data = {seg_sel[SG_ES], seg_sel[SG_DS]};
+      7'd12: dbg_arch_data = {seg_sel[SG_GS], seg_sel[SG_FS]};
+      7'd13: dbg_arch_data = creg0;
+      7'd14: dbg_arch_data = creg2;
+      7'd15: dbg_arch_data = creg3;
+      7'd16: dbg_arch_data = creg4;
+      7'd17: dbg_arch_data = {fstat, fctrl};
+      7'd18: dbg_arch_data = {21'd0, ftop, fptag};
+      7'd19: dbg_arch_data = fpr_flat[  0 +: 32];
+      7'd20: dbg_arch_data = fpr_flat[ 32 +: 32];
+      7'd21: dbg_arch_data = {16'd0, fpr_flat[ 64 +: 16]};
+      7'd22: dbg_arch_data = fpr_flat[ 80 +: 32];
+      7'd23: dbg_arch_data = fpr_flat[112 +: 32];
+      7'd24: dbg_arch_data = {16'd0, fpr_flat[144 +: 16]};
+      7'd25: dbg_arch_data = fpr_flat[160 +: 32];
+      7'd26: dbg_arch_data = fpr_flat[192 +: 32];
+      7'd27: dbg_arch_data = {16'd0, fpr_flat[224 +: 16]};
+      7'd28: dbg_arch_data = fpr_flat[240 +: 32];
+      7'd29: dbg_arch_data = fpr_flat[272 +: 32];
+      7'd30: dbg_arch_data = {16'd0, fpr_flat[304 +: 16]};
+      7'd31: dbg_arch_data = fpr_flat[320 +: 32];
+      7'd32: dbg_arch_data = fpr_flat[352 +: 32];
+      7'd33: dbg_arch_data = {16'd0, fpr_flat[384 +: 16]};
+      7'd34: dbg_arch_data = fpr_flat[400 +: 32];
+      7'd35: dbg_arch_data = fpr_flat[432 +: 32];
+      7'd36: dbg_arch_data = {16'd0, fpr_flat[464 +: 16]};
+      7'd37: dbg_arch_data = fpr_flat[480 +: 32];
+      7'd38: dbg_arch_data = fpr_flat[512 +: 32];
+      7'd39: dbg_arch_data = {16'd0, fpr_flat[544 +: 16]};
+      7'd40: dbg_arch_data = fpr_flat[560 +: 32];
+      7'd41: dbg_arch_data = fpr_flat[592 +: 32];
+      7'd42: dbg_arch_data = {16'd0, fpr_flat[624 +: 16]};
+      7'd43: dbg_arch_data = fip;
+      7'd44: dbg_arch_data = fdp;
+      7'd45: dbg_arch_data = {fds, fcs};
+      // Hidden segment cache.  The visible selectors above are insufficient
+      // to diagnose a protected-mode fault: the base/limit/attributes, not
+      // merely CS/DS values, determine the access.  Keep these at the final
+      // selector values so the established x87 map remains stable.
+      7'd46: dbg_arch_data = seg_base[SG_CS];
+      7'd47: dbg_arch_data = seg_base[SG_SS];
+      7'd48: dbg_arch_data = seg_base[SG_DS];
+      7'd49: dbg_arch_data = seg_base[SG_ES];
+      7'd50: dbg_arch_data = seg_base[SG_FS];
+      7'd51: dbg_arch_data = seg_base[SG_GS];
+      7'd52: dbg_arch_data = seg_limit[SG_CS];
+      7'd53: dbg_arch_data = seg_limit[SG_SS];
+      7'd54: dbg_arch_data = seg_limit[SG_DS];
+      7'd55: dbg_arch_data = seg_limit[SG_ES];
+      7'd56: dbg_arch_data = seg_limit[SG_FS];
+      7'd57: dbg_arch_data = seg_limit[SG_GS];
+      7'd58: dbg_arch_data = {seg_attr[SG_ES], seg_attr[SG_DS],
+                               seg_attr[SG_SS], seg_attr[SG_CS]};
+      7'd59: dbg_arch_data = {10'd0, seg_b[SG_GS], seg_b[SG_FS],
+                               seg_b[SG_ES], seg_b[SG_DS], seg_b[SG_SS], seg_b[SG_CS],
+                               seg_attr[SG_GS], seg_attr[SG_FS]};
+      7'd60: dbg_arch_data = gdt_base;
+      7'd61: dbg_arch_data = idt_base;
+      7'd62: dbg_arch_data = {idt_limit, gdt_limit};
+      7'd63: dbg_arch_data = {tr_sel, ldt_sel};
+      // Debug registers and the hidden task/LDT descriptor caches are not
+      // implied by visible selectors.  Keep them in the expanded scan bank
+      // rather than exporting another wide debug bundle through the FPGA.
+      7'd64: dbg_arch_data = dr0;
+      7'd65: dbg_arch_data = dr1;
+      7'd66: dbg_arch_data = dr2;
+      7'd67: dbg_arch_data = dr3;
+      7'd68: dbg_arch_data = dr6;
+      7'd69: dbg_arch_data = dr7;
+      7'd70: dbg_arch_data = tr_base;
+      7'd71: dbg_arch_data = tr_limit;
+      7'd72: dbg_arch_data = {23'd0, tr_valid, tr_attr};
+      7'd73: dbg_arch_data = ldt_base;
+      7'd74: dbg_arch_data = {16'd0, ldt_limit};
+      // Latched only at a debugger stop.  This is intentionally part of the
+      // compact scan rather than another FPGA-wide debug route.
+      7'd75: dbg_arch_data = {30'd0, dbg_stop_reason_q};
+      default: dbg_arch_data = 32'd0;
+    endcase
+  end
+
   // ---- single-step / instruction-breakpoint hold ---------------------------
-  // dbg_block_issue, when 1, makes the S_DECODE boundary PARK (stay in S_DECODE,
-  // eip unchanged) instead of dispatching — see the injection in
-  // core_fetch_decode.svh. The park is below SMI/NMI/INTR so interrupts are never
-  // lost; in-flight loads/stores/fills + the L1/AXI fill FSM advance in their own
-  // states untouched (parking only suppresses ISSUING a NEW instruction).
+  // dbg_block_issue, when 1, parks the NEXT instruction boundary.  That boundary
+  // is S_DECODE on the slow FSM, S_PIPE on the dual-issue fast path, or the
+  // already-idle S_HLTWAIT state.  The
+  // shared fp_issue_block predicate below gates every fast-path side-effect
+  // mirror, so a park cannot advance EIP while still writing a GPR/FPR, updating
+  // the BTB/LRU, or launching a speculative translation.  Existing multi-cycle
+  // work is allowed to retire first; the scan only advertises HALTED after its
+  // deferred x87 commit has drained.
   logic dbg_bp_latched;   // breakpoint fired; sticky until the PS pulses dbg_bp_clr
   logic dbg_step_q;       // permit exactly ONE issue while parked (single-step)
   logic dbg_bp_hit;
-  logic dbg_block_issue;  // 1 = park the S_DECODE boundary (consumed in the FSM)
-  // pre-execution PC breakpoint: the instruction about to issue sits at `eip`,
-  // at the S_DECODE boundary. Suppressed during a step so we can step OFF it.
-  assign dbg_bp_hit = dbg_bp_en && (eip == dbg_bp_addr) && (state == S_DECODE) && !dbg_step_q;
+  logic dbg_bp_v_hit;
+  logic dbg_block_issue;  // 1 = park an instruction boundary
+  logic dbg_fast_hold;    // S_PIPE may stop issuing (not an FP occupancy retire)
+  logic dbg_pair_block;   // force exactly one x86 instruction for host single-step
+  logic dbg_arch_quiescent;
+  logic dbg_step_permit;  // release the park only until the requested retire is visible
+  logic dbg_halt_req_q;   // sampled level, so a halt at an already-idle boundary records a cause
+  // 0=none/running, 1=manual halt, 2=EIP breakpoint, 3=completed host step.
+  // Kept sticky through a halt so `step` remains distinguishable from the
+  // halt-request level it necessarily leaves asserted for the re-park.
+  logic [1:0] dbg_stop_reason_q;
+  wire  dbg_step_active = dbg_step_q;
+  // pre-execution PC breakpoint: the instruction about to issue sits at `eip`
+  // at either architectural issue boundary.  A V-slot match is handled below by
+  // suppressing that pair, then catches on the following U boundary.
+  assign dbg_bp_hit = dbg_bp_en && (eip == dbg_bp_addr) &&
+                      ((state == S_DECODE) || (state == S_PIPE)) && !dbg_step_q;
   wire   dbg_park   = dbg_halt_req | dbg_bp_latched;
-  assign dbg_block_issue = (dbg_park | dbg_bp_hit) & ~dbg_step_q;
-  assign dbg_halted      = dbg_block_issue & (state == S_DECODE);
+  // retire_valid is a registered pulse.  Keep the step latch set through the
+  // execution edge (so pairing remains disabled), but reassert the hold during
+  // the following visible-retire cycle.  Without this, the clear NBA arrives
+  // one edge late and a second S_PIPE instruction can issue.
+  assign dbg_step_permit = dbg_step_q && !retire_valid;
+  assign dbg_block_issue = (dbg_park | dbg_bp_hit) & ~dbg_step_permit;
+  assign dbg_fast_hold = dbg_block_issue && (state == S_PIPE) && !fp_occ_pending;
+  assign dbg_pair_block = dbg_step_q || dbg_bp_v_hit;
+`ifdef VEN_FP_PIPE
+`ifdef VEN_FP_PIPE2
+  wire dbg_fp_commit_pending = fpp_valid || fpp2_valid;
+`else
+  wire dbg_fp_commit_pending = fpp_valid;
+`endif
+`else
+  wire dbg_fp_commit_pending = 1'b0;
+`endif
+  assign dbg_arch_quiescent = ((state == S_DECODE) || (state == S_HLTWAIT) ||
+                               ((state == S_PIPE) && !fp_occ_pending)) &&
+                              !dbg_fp_commit_pending;
+  assign dbg_halted = dbg_block_issue && dbg_arch_quiescent;
 
   always_ff @(posedge clk) begin
     if (!rst_n) begin
       dbg_bp_latched <= 1'b0;
       dbg_step_q     <= 1'b0;
+      dbg_halt_req_q <= 1'b0;
+      dbg_stop_reason_q <= 2'd0;
     end else begin
+      dbg_halt_req_q <= dbg_halt_req;
       if (dbg_bp_hit)        dbg_bp_latched <= 1'b1;        // latch a breakpoint hit
       else if (dbg_bp_clr)   dbg_bp_latched <= 1'b0;        // PS clears it to resume
       if (dbg_step && dbg_park) dbg_step_q <= 1'b1;         // arm one single-step
       else if (dbg_step_q && retire_valid) dbg_step_q <= 1'b0; // consume after one retire
+
+      // Stop cause reflects the completed stop, not merely the live request
+      // levels.  In particular, a step holds dbg_halt_req high so it re-parks;
+      // report STEP after that requested retirement rather than MANUAL.
+      if (dbg_bp_clr)                       dbg_stop_reason_q <= dbg_halt_req ? 2'd1 : 2'd0;
+      else if (dbg_step_q && retire_valid) dbg_stop_reason_q <= 2'd3;
+      else if (dbg_bp_hit)                 dbg_stop_reason_q <= 2'd2;
+      else if (dbg_halt_req && !dbg_halt_req_q) dbg_stop_reason_q <= 2'd1;
     end
   end
 `else
-  // No debug build: the S_DECODE issue-hold can never engage -> the injected
-  // `else if (dbg_block_issue)` arm is dead, keeping the FSM byte/cycle-identical.
+  // No debug build: every inserted park/pair guard is false, preserving the
+  // original fast and slow paths exactly.
   wire dbg_block_issue = 1'b0;
+  wire dbg_fast_hold = 1'b0;
+  wire dbg_pair_block = 1'b0;
+  wire dbg_step_active = 1'b0;
+  wire dbg_step_permit = 1'b0;
 `endif
 
   // M7.1 int-0x80 proxy state. gs_base_r holds the latched %gs TLS base captured
@@ -1420,12 +1883,6 @@ module core
   logic [63:0] tsc;                // F3: free-running time-stamp counter (RDTSC 0F 31)
 `ifdef VEN_DBG_WD
   logic [23:0] dbg_stall;          // sim-only: cycles since last retire (hang watchdog)
-  logic [4:0]  ff5a_wn = 5'd0;     // [VEN-FF5A] limit on 0x2ff5a-corruption watchpoint prints
-  logic [4:0]  cr3w_n  = 5'd0;     // [VEN-CR3W] limit on TSS0070.cr3-corruption watchpoint prints
-  logic [7:0]  ds_tn   = 8'd0;     // [VEN-DSTRACE] limit on the handler DS-trace prints
-  logic        cstk_armed = 1'b0;  // [VEN-DSTRACE] sticky: armed at the client esp=0x11b354 stack switch
-  logic [5:0]  csd_n   = 6'd0;     // [VEN-CSD] limit on the task-switch-resume cs_d (op/addr-size) trace
-  logic        dbg_printed;        // sim-only: one-shot for the watchdog dump
 `endif
 `ifdef VEN_TRACE_IRQ
   logic        dbg_if_q;            // sim-only: prev EFLAGS.IF, for IF-transition trace
@@ -1803,8 +2260,20 @@ module core
   // (port & ~7) + j; port p+i therefore sits at port[2:0]+i. A 4-byte access needs at
   // most bits port[2:0]..port[2:0]+3, and port[2:0]+3 <= 10, so every covered port is
   // inside the one dword already fetched.
+  // REVIEW_Aug3 M-01: the last port is computed in 17 bits. The 16-bit form
+  // WRAPPED at port 0xFFFF: a word/dword access beginning at 0xFFFE/0xFFFC
+  // produced an ioperm_last below ioperm_port, so the bitmap limit check passed
+  // vacuously and the permission mask indexed bits belonging to ADJACENT bitmap
+  // memory (ports past the end of the I/O space). An access whose extent crosses
+  // the 16-bit I/O-space boundary is rejected outright -- the wraparound form
+  // (split the check at the wrap) is the other legal reading, but no real OS
+  // depends on it and an explicit deny is the fail-safe choice.
+  logic [16:0] ioperm_last17;   // the HIGHEST port this access covers (unwrapped)
+  assign ioperm_last17 = {1'b0, ioperm_port} + {14'd0, q_io_w} - 17'd1;
+  logic        ioperm_wrap;     // the access runs past port 0xFFFF
+  assign ioperm_wrap = ioperm_last17[16];
   logic [15:0] ioperm_last;     // the HIGHEST port this access covers
-  assign ioperm_last = ioperm_port + {13'd0, q_io_w} - 16'd1;
+  assign ioperm_last = ioperm_last17[15:0];
   logic [31:0] io_perm_mask;
   always_comb begin
     io_perm_mask = 32'd0;
@@ -2101,9 +2570,10 @@ module core
   // task #57: the fast path now accepts INTR at S_PIPE instruction boundaries, so the
   // PIC's acknowledge must pulse from there too -- otherwise the 8259 never sees the
   // INTA, never advances its ISR, and the vector is delivered forever.
-  assign inta = ((state==S_DECODE) || (state==S_HLTWAIT) || (state==S_PIPE)) && intr_take;
+  assign inta = (((state==S_DECODE) || (state==S_HLTWAIT)) && intr_take && !dbg_block_issue)
+              || ((state==S_PIPE) && fp_irq_divert && intr_take);
 `else
-  assign inta = ((state==S_DECODE) || (state==S_HLTWAIT)) && intr_take;
+  assign inta = ((state==S_DECODE) || (state==S_HLTWAIT)) && intr_take && !dbg_block_issue;
 `endif
 
   // ===========================================================================
@@ -2279,6 +2749,11 @@ module core
   logic [31:0] int_err;           // the error code value (selector / #PF bits)
   logic [3:0]  int_step;          // beat counter within S_INT_GATE/_CS/_PUSH
                                   // (4-bit: the M7.2 V86 push needs 10 beats 0..9)
+  // A real-mode IVT/IRET read may immediately follow an acknowledged fetch or
+  // the preceding stack word on the shared memory response seam. Keep the new
+  // request absent for one clock before accepting a response at its new address;
+  // otherwise a lingering ack/data window can be consumed as the IVT/stack word.
+  logic        rm_read_armed;
   logic [31:0] int_gate_off;      // assembled handler offset from the IDT gate
   logic [15:0] int_gate_sel;      // gate's code selector
   // REVIEW2_aug2 C-06 (descriptor half): the far-CALL target's validated CS, STAGED.
@@ -2293,21 +2768,83 @@ module core
   // 1=SS). retf_out stays set through S_INT_CS_RET/S_IRET_SS so the shared commit
   // can tell a RETF from an IRET -- see the NMI note there.
   logic        retf_out, retf_ob;
+  // REVIEW_Aug3 H-02: a same-privilege PROTECTED RETF must be restartable. ESP used
+  // to advance on the CS-pop acknowledgement (core_gpr_wb.svh), BEFORE the popped
+  // target reached S_LJMP and was validated -- so a null, out-of-bounds, non-code,
+  // non-present, wrong-privilege, or offset-past-limit target faulted with ESP
+  // already moved and the frame already consumed. The advance is now STAGED at the
+  // beat-1 handoff (retf_same / retf_esp_adj) and fires only on retf_commit_w --
+  // the S_LJMP pass accepting the target (the iret_cs_commit pattern: one shared
+  // commit predicate consumed by both the FSM arm and the ESP writeback).
+  logic        retf_same;
+  logic [31:0] retf_esp_adj;
+  logic [63:0] retf_desc_w;
+  logic [7:0]  retf_attr_w;
+  logic        retf_commit_w;
+  assign retf_desc_w = {mem_rdata, gdt_lo};
+  assign retf_attr_w = desc_attr(retf_desc_w);
+  // The commit condition mirrors the S_LJMP final (code-descriptor) arm exactly,
+  // for the case retf_same names: present/code/privilege-validated by
+  // seg_load_fault, and the popped offset within the target limit. A RETF never
+  // sets gate_via or lcall_pend, so the gate branches cannot intervene.
+  // REVIEW1_Aug3 R2-C01: include the new DPL/RPL matrix -- without it the staged
+  // ESP advance would fire on a target the FSM now rejects.
+  assign retf_commit_w = (state == S_LJMP) && mem_ack && seg_step && retf_same
+                      && desc_s(retf_attr_w)
+                      && !seg_load_fault(1'b1, 1'b0, q_ljmp_sel, retf_attr_w, cpl_r)
+                      && (retf_attr_w[2] ? (desc_dpl(retf_attr_w) <= cpl_r)
+                                         : (desc_dpl(retf_attr_w) == q_ljmp_sel[1:0]))
+                      && ({1'b0, q_ljmp_off} <= {1'b0, desc_limit(retf_desc_w)});
   // REVIEW2_aug2 C-06 (call-gate half): this cross-privilege delivery is a far CALL
   // through a call gate, not an interrupt. It reuses S_INT_TSS/S_INT_SS/S_INT_PUSH,
-  // and cg_xpl is what tells those shared states the three things that differ:
-  // the frame has NO EFLAGS word, EFLAGS is not masked on entry, and the frame is
-  // 16 bytes rather than 20.
+  // and cg_xpl is what tells those shared states the things that differ:
+  // the frame has NO EFLAGS word and EFLAGS is not masked on entry.
+  // REVIEW1_Aug3 R2-H05: the frame is (4 + cg_pcount) slots in cg_wide units --
+  // 16 bytes for the legacy 32-bit, zero-param case.
   logic        cg_xpl;
   // The gate's PARAMETER COUNT (descriptor high dword bits [4:0]). Captured when the
   // gate is resolved, because by the time the cross-privilege arm runs the descriptor
   // being examined is the TARGET CS, not the gate.
   logic [4:0]  cg_pcount;
+  // REVIEW1_Aug3 R2-H05: the gate's WIDTH (1 = 32-bit gate, desc type 4'hC; 0 =
+  // 16-bit, type 4'h4), staged for the same reason as cg_pcount. A 16-bit gate
+  // builds a WORD-unit frame (SS, SP, params, CS, IP) regardless of the caller's
+  // operand size or the target's D bit.
+  logic        cg_wide;
+  // R2-H05: parameter copy. The caller-stack params are read into this buffer by
+  // S_CG_PRD BEFORE the staged SS/CPL commit (so a faulting source read is
+  // delivered in the old context with nothing written), then S_INT_PUSH's cg_xpl
+  // beats store them. cg_beat counts the cg_xpl frame beats (max 4+31 = 35, too
+  // wide for int_step[3:0]).
+  logic [31:0] cg_params [31];
+  logic [5:0]  cg_beat;
   logic        lcall_pend;      // 1 = this S_LJMP pass is the far CALL's probe
+  // REVIEW_Aug3 C-04: the far-transfer KIND must be explicit. The shared S_LJMP
+  // lost two distinctions: a far CALL to an available TSS ran the JMP task-switch
+  // form (no back-link, no NT, outgoing busy CLEARED -- breaking nested-task
+  // return), and a far JMP through a call gate to a more privileged target entered
+  // the CALL stack-switch path and pushed a return frame. tsw_call latches "this
+  // task switch is a CALL" from lcall_pend at the TSS-descriptor beat: S_TSW_BUSY
+  // then writes the outgoing TR selector into the incoming TSS back-link, leaves
+  // the outgoing descriptor BUSY, and the commit sets NT in the incoming EFLAGS
+  // image. (The review's full XFER_* enum replacing every boolean is the structural
+  // direction; the kind is made explicit at the decision points it affects.)
+  logic        tsw_call;
   logic [31:0] lc_cs_base, lc_cs_limit;
   logic [7:0]  lc_cs_attr;
   logic        lc_cs_d;
   logic [1:0]  lc_cs_cpl;
+  // REVIEW1_Aug3 R2-H05: a SAME-PRIVILEGE far CALL through a call gate pushes
+  // its return frame in the GATE's width, not the caller's operand size (QEMU
+  // helper_lcall_protected: PUSHW/PUSHL follow shift = gate type). gate_via is
+  // cleared at the probe->S_LCALL handoff, so park both bits with lc_cs_*.
+  logic        lc_gate;
+  logic        lc_gw;
+  // The one S_LCALL push width, shared by the bus arm, the cur_lin mirror and
+  // the ESP writeback (CHECK 5 territory -- define once). seg_real far CALLs
+  // never pass a gate; lc_gate is stale there and qualified out.
+  logic [2:0]  lc_callw;
+  assign lc_callw = (!seg_real && lc_gate) ? (lc_gw ? 3'd4 : 3'd2) : q_w;
   // REVIEW2_aug2 C-03 (first bullet): the target CS HIDDEN state, STAGED. S_INT_CS
   // used to write seg_base/limit/attr[SG_CS] and cs_d the instant the descriptor was
   // accepted, so every later step of a cross-privilege delivery -- the TSS bound
@@ -2319,6 +2856,57 @@ module core
   logic [31:0] int_cs_limit;
   logic [7:0]  int_cs_attr;
   logic        int_cs_d;
+  // REVIEW1_Aug3 R2-C04: the STAGED new-stack context for a cross-privilege (or
+  // V86-entry) delivery. S_INT_SS validates the new SS descriptor and parks the
+  // result here; S_INT_PROBE then pre-probes the COMPLETE frame extent (both
+  // pages when it straddles) before seg_*[SG_SS]/ss_b/cpl_r are installed and
+  // S_INT_PUSH writes. A page fault on any frame word can therefore no longer
+  // observe new SS/CPL with old CS/EIP and a partially written frame.
+  logic [31:0] int_ss_base, int_ss_limit;
+  logic [7:0]  int_ss_attr;
+  logic        int_ss_b;
+  // The frame-slot plan. One plan serves the probe sequencer, the push-address
+  // mirror and the ESP writeback, so a frame's shape cannot drift among
+  // formulas: slot k sits at offset (esp - (k+1)*unit), wrapped by the staged
+  // stack's B bit; nslots/wide are latched at staging (S_INT_SS) from the frame
+  // kind. A frame that wraps its SP window occupies TWO offset chunks, and
+  // because SS.base need not be page aligned each chunk can itself straddle a
+  // page -- up to four distinct pages for a <= 140-byte frame. S_INT_PROBE
+  // walks the slots in push order and probes every distinct page BEFORE the
+  // staged context commits (the old first/last-offset probe missed the middle
+  // pages of a wrapped layout).
+  logic [5:0]  int_frm_nslots;   // frame slots (header + params + errcode)
+  logic        int_frm_wide;     // slot unit: 1 = dword, 0 = word
+  // The frame PAGE plan: the distinct pages the (possibly wrapped) layout
+  // touches, in push order, deduplicated -- at most four for any current
+  // frame shape (two offset chunks, each a contiguous linear range < 145
+  // bytes, each spanning at most two pages). S_INT_PROBE validates each page
+  // ONCE and captures its physical frame; the D-mark phase then sets Dirty
+  // pre-commit where a clean page needs it; and S_INT_PUSH translates through
+  // the captured frames -- so no post-commit walk (hence no post-commit
+  // fault) is possible. Probing alone could not promise that: the two chunks
+  // of a wrapped 16-bit frame sit ~64 KiB apart and share a direct-mapped
+  // DTLB index, so a later probe could evict an earlier proof.
+  logic [19:0] frm_pg_lin   [4];   // linear page numbers (push order)
+  logic [31:0] frm_pg_addr  [4];   // probe address per entry (CR2 fidelity)
+  logic [19:0] frm_pg_phys  [4];   // captured physical frame
+  logic [3:0]  frm_pg_val;         // entry valid
+  logic [3:0]  frm_pg_mid;         // entry is a page-base probe (extent covered by the preceding slot-start entry)
+  logic [3:0]  frm_pg_dirty;       // entry's mapping had D=1 at validation
+  logic [2:0]  frm_pg_n;           // distinct page count (1..4)
+  logic [2:0]  frm_pg_i;           // S_INT_PROBE: entry under proof/mark
+  logic        frm_pg_markd;       // phase D (marking clean pages), not validation
+  // Slot k's offset under the staged SP/B. Push order is slot 0 first
+  // (highest offset). The mask is the stack window: 16-bit stacks wrap at
+  // 64 KiB, 32-bit stacks wrap naturally at 4 GiB.
+  function automatic logic [31:0] frm_slot_off(input logic [31:0] esp,
+                                               input logic [5:0]  k,
+                                               input logic        wide,
+                                               input logic        b32);
+    logic [31:0] raw;
+    raw = esp - (({26'd0, k} + 32'd1) << (wide ? 2 : 1));
+    frm_slot_off = b32 ? raw : {16'd0, raw[15:0]};
+  endfunction
   logic        int_gate_trap;     // 1 = trap gate (leave IF), 0 = interrupt gate
   logic        int_gate_op16;     // 1 = 16-bit gate/IRET (6-byte IP:CS:FLAGS frame,
                                   // 2-byte slots, ESP +/-6); 0 = 32-bit (the legacy
@@ -2326,6 +2914,14 @@ module core
                                   // 0x6/0x7 = 16-bit) on a gated INT delivery, or from
                                   // the IRET's effective operand size (eff_opsize) on
                                   // an IRET. Only the SAME-PRIV push/pop arm honours it.
+  // REVIEW_Aug4 A4-H03: ONE frame-width decision for the whole delivery. It comes
+  // from the GATE TYPE (int_gate_op16) alone -- never the caller's code size and
+  // never SS.B (a 16-bit gate onto a 32-bit TSS stack still pushes a WORD frame).
+  // V86 frames are always dword. Every consumer -- the probe extent, the cur_lin
+  // slot addresses, the push strobes/data, the ESP writeback, and the final
+  // frame size -- keys on this one wire (the call gate's own width is cg_wide).
+  logic        int_frm16;
+  assign int_frm16 = int_gate_op16 && !from_v86;
   // ---- REVIEW_aug2 H-04: delivery-depth escalation (#DF and shutdown) ---------
   // There was NO delivery-depth state at all. start_fault() could re-vector an
   // IDT-limit failure and S_INT_GATE could re-vector bad gate attributes, but each
@@ -2355,6 +2951,13 @@ module core
   logic        int_sw;            // delivery is a SOFTWARE INT n/INT3/INTO (the
                                   // gate DPL>=CPL privilege check applies; HW
                                   // faults / external INTs bypass it)
+  // The error-code EXT bit's event class, latched at the delivery origin:
+  // 1 only while the delivered event is an EXTERNAL interrupt (NMI/INTR); 0 for
+  // software INT and every synchronous exception, including a fault raised
+  // while delivering an earlier one (no inheritance). int_sw's "not software
+  // INT" is NOT this bit -- a synchronous #UD/#DE/#GP is not an external event
+  // (P5 SDM: EXT marks events such as NMI or INTR).
+  logic        dlv_ext;
   logic [31:0] int_lo;            // first dword of the in-flight 8-byte gate/desc
   logic [31:0] iret_eip;          // IRET-popped EIP (held until ESP/CS settle)
   logic [15:0] iret_cs;           // IRET-popped CS selector
@@ -2457,6 +3060,17 @@ module core
                     {17'd0, (sel[2] ? ldt_limit : gdt_limit)});
   endfunction
 
+  // REVIEW_Aug3 C-02: same bounds test but against an EXPLICITLY supplied LDT limit
+  // instead of the live one. The task-switch segment reload (S_TSW_SEG) validates
+  // the INCOMING task's TI=1 selectors while the incoming LDT is still staged --
+  // the live ldt_limit there is the OUTGOING task's, so sel_in_table() would bound
+  // the new task's selectors against the old task's table.
+  function automatic logic sel_in_table_st(input logic [15:0] sel,
+                                           input logic [15:0] ldt_lim);
+    sel_in_table_st = ({16'd0, sel[15:3], 3'd7} <=
+                       {17'd0, (sel[2] ? ldt_lim : gdt_limit)});
+  endfunction
+
   // REVIEW2_aug2 H-08: which TSS types may be switched TO. A far JMP/CALL may target
   // only an AVAILABLE TSS (0x9); an IRET-with-NT task RETURN targets its back-link,
   // which is necessarily BUSY (0xB). Stated once so the three S_LJMP arms that test it
@@ -2465,9 +3079,44 @@ module core
     tsw_type_ok = (desc_type(a) == 4'h9) || (ntret && (desc_type(a) == 4'hB));
   endfunction
 
+  // REVIEW1_Aug3 R2-C02: null is index 0 AND TI=0 (is_null_selector); a TI=1
+  // index-0 selector names LDT entry 0 and is bounded against the LDT like any
+  // other selector.
   function automatic logic far_sel_bad(input logic [15:0] sel);
-    far_sel_bad = (sel[15:3] == 13'd0) || !sel_in_table(sel);
+    far_sel_bad = is_null_selector(sel) || !sel_in_table(sel);
   endfunction
+
+  // REVIEW1_Aug3 R2-C02: a NULL protected segment load performs NO descriptor
+  // read. The old flow read GDT[0] twice and installed whatever hidden state
+  // those bytes held -- under paging an access the architecture never makes, and
+  // arbitrary hidden state if software has written GDT[0]. CS/SS null faults
+  // without a descriptor (seg_load_fault needs none for the null case); a null
+  // DS/ES/FS/GS installs an explicit null hidden cache. One predicate, used by
+  // the bus-arm suppression, the translation predicate, and the FSM commit.
+  logic [15:0] segld_sel;
+  logic [2:0]  segld_tgt;
+  logic [63:0] segld_desc;
+  logic [7:0]  segld_attr;
+  logic        segld_is_ss, seg_null_load, segld_table_oob;
+  logic        segld_desc_fault, segld_commit_ok;
+  assign segld_sel  = q_seg_from_mem ? seg_mem_sel : gpr_o[q_src_reg][15:0];
+  assign segld_tgt  = q_seg_from_mem ? q_lseg      : q_sys_sreg;
+  assign segld_desc = {mem_rdata, gdt_lo};
+  assign segld_attr = desc_attr(segld_desc);
+  assign segld_is_ss = (segld_tgt == 3'(SG_SS));
+  assign seg_null_load = (state == S_SEGLD) && is_null_selector(segld_sel);
+  // Reuse the one table-extent comparator used by the other far-transfer
+  // paths; do not synthesize a private add/compare cone for S_SEGLD.
+  assign segld_table_oob = !seg_null_load && !sel_in_table(segld_sel);
+  assign segld_desc_fault = seg_load_fault(1'b0, segld_is_ss, segld_sel,
+                                           segld_attr, cpl_r);
+  // One success predicate is consumed by BOTH architectural writeback domains.
+  // This avoids duplicating the descriptor protection cone merely to make a
+  // protected far-pointer load atomic.
+  assign segld_commit_ok = (state == S_SEGLD)
+                        && ((seg_null_load && !segld_is_ss
+                             && (segld_tgt != 3'(SG_CS)))
+                            || (mem_ack && seg_step && !segld_desc_fault));
 
 
   // H-08: the target CS limit from the descriptor BEING READ, granularity-scaled.
@@ -2478,14 +3127,20 @@ module core
   logic [31:0] iret_cs_limit_w;
   assign iret_cs_limit_w = desc_limit({mem_rdata, int_lo});
   logic [7:0] iret_cs_attr_w;
-  logic       iret_cs_ok, iret_cs_commit;
+  logic       iret_cs_ok, iret_cs_desc_ok, iret_cs_commit;
   assign iret_cs_attr_w = mem_rdata[15:8];   // access byte of {mem_rdata, int_lo}
-  assign iret_cs_ok = (int_gate_sel[15:2] != 14'd0)      // not the null selector
+  // REVIEW_Aug3 H-03: split the predicate into its two reasons. The descriptor
+  // half (selector/table/type/privilege/present) carries the SELECTOR as the
+  // error code on failure; the offset half (popped EIP past CS.limit) is #GP(0)
+  // per the SDM. The combined form reported #GP(selector) for an EIP-limit
+  // failure on a perfectly valid descriptor.
+  assign iret_cs_desc_ok = (int_gate_sel[15:2] != 14'd0)  // not the null selector
                    &&  iret_cs_attr_w[7]                  // P=1
                    &&  iret_cs_attr_w[4] && iret_cs_attr_w[3]   // S=1 and CODE
                    && (int_gate_sel[1:0] >= cpl_r)        // must not RAISE privilege
                    && (iret_cs_attr_w[2] ? (iret_cs_attr_w[6:5] <= int_gate_sel[1:0])
-                                         : (iret_cs_attr_w[6:5] == int_gate_sel[1:0]))
+                                         : (iret_cs_attr_w[6:5] == int_gate_sel[1:0]));
+  assign iret_cs_ok = iret_cs_desc_ok
                    // REVIEW2_aug2 H-08: the popped EIP must lie within the TARGET CS's
                    // limit. Class and privilege were checked; the OFFSET was not, and
                    // the commit then wrote it unconditionally -- so an IRET frame whose
@@ -2519,6 +3174,9 @@ module core
   logic [15:0] tsw_new_sel;       // incoming TSS selector (the jump target)
   logic [7:0]  tsw_new_attr;      // incoming TSS descriptor access (busy set => |2)
   logic [31:0] tsw_save_eip;      // outgoing EIP to save (next insn after the jmp)
+  // REVIEW1_Aug3 R2-H04: the outgoing EFLAGS IMAGE to save (NT cleared for an NT
+  // return, staged at the S_LJMP arm instead of mutating live eflags mid-switch).
+  logic [31:0] tsw_save_eflags;
   logic [31:0] tsw_eip;           // incoming EIP   (from new TSS @0x20)
   logic [31:0] tsw_eflags;        // incoming EFLAGS(from new TSS @0x24)
   logic [31:0] tsw_cr3;           // incoming CR3   (from new TSS @0x1C)
@@ -2702,6 +3360,11 @@ module core
   logic        ex_div_dfault;            // DIV  #DE (div-by-zero OR quotient overflow)
   logic [63:0] ex_idiv_qq, ex_idiv_rr;   // IDIV (signed)   quotient / remainder
   logic        ex_idiv_dfault;           // IDIV #DE
+  // The per-branch num/den/qq/rr scratch is declared inside conditional arms
+  // (a different width per arm), so no single path assigns every one of them;
+  // each is only read inside its own arm after assignment. Verilator's latch
+  // analysis flags the pattern anyway, so it is waived for this block only.
+  /* verilator lint_off LATCH */
   always_comb begin
     // --- DIV (unsigned) ---
     ex_div_qq=64'd0; ex_div_rr=64'd0; ex_div_dfault=1'b0;
@@ -2765,6 +3428,7 @@ module core
       end
     end
   end
+  /* verilator lint_on LATCH */
 `endif
 
   // ===========================================================================
@@ -3206,6 +3870,7 @@ module core
   // clocks (VEN_PERF_PROFILE, DISK_BOOT_STATUS UPDATE 303). Keep it as an
   // instrument. Do not ship it.
   assign sfetch_fast = (state == S_FETCH) && (fetch_word == 3'd0)
+                    && exec_issue_ok      // a flush cycle always fetches fresh
                     && ic_present(flin)
                     && ic_present(flin + 32'(IWORDS*4 - 1));
 `endif
@@ -3448,8 +4113,9 @@ module core
   // S_PIPE !uop_ready arm). uc_v_avail mirrors the old v_bytes_ok residency for
   // the chained/straddle V slot.
   // H-15: validity must come from the SAME port the slots were read from.
-  assign uop_hit    = uc_u_in_b ? (uc_pdvB && uc_bvB[flin[4:0]])
-                                : (uc_pdvA && uc_bvA[flin[4:0]]);
+  assign uop_hit    = exec_issue_ok &&   // a flush cycle is never a predecode hit
+                      (uc_u_in_b ? (uc_pdvB && uc_bvB[flin[4:0]])
+                                 : (uc_pdvA && uc_bvA[flin[4:0]]));
   assign uc_v_avail = uc_v_in_a ? (uc_uslot != 3'(NSLOT-1))
                                 : (uc_pdvB && uc_bvB[uc_voff]);
 `ifdef VEN_UOPCACHE_CHECK
@@ -3504,7 +4170,8 @@ module core
     // window can read into the next line, so require that straddle line for a SAFE
     // decode whenever the window crosses the boundary, but use the real decoded
     // length to decide whether a straddle miss is genuinely charged.
-    pipe_bytes_ok = ic_present(flin)
+    pipe_bytes_ok = exec_issue_ok         // a flush cycle forces the refetch path
+                    && ic_present(flin)
                     // window-straddle: need the next line present to decode safely
                     && (({1'b0,flin[4:0]} + 6'd5 < 6'd32) || ic_present(flin + 32'd5))
                     // instruction-straddle: its last byte's line must be resident
@@ -3521,12 +4188,12 @@ module core
     pf_miss_fa = !ic_present(flin)         ? flin
                : !ic_present(flin + 32'd5) ? (flin + 32'd5)
                : (flin + {28'd0,u_d.len} - 32'd1);
-    // !fp_irq_divert: an interrupt accepted on a MISS clock diverts the spine to the
-    // fault path, so it never enters S_PF and words 1..7 / fill_done never arrive. If
+    // !fp_issue_block: an interrupt or external debugger park abandons this clock
+    // before S_PIPE issues, so it never enters S_PF and words 1..7 / fill_done never arrive. If
     // the fill were still started, the victim way would receive word 0 of the NEW line
     // while keeping the OLD line's tag/valid -- silently corrupting the first dword of
     // a still-resident, still-valid line. Do not start a fill we cannot finish.
-    pf_miss = (state==S_PIPE) && !fp_irq_divert && (stall_cnt==7'd0) && !pipe_bytes_ok;
+    pf_miss = (state==S_PIPE) && !fp_issue_block && (stall_cnt==7'd0) && !pipe_bytes_ok;
 
     // AGI: a base/index reg used by U was written in the IMMEDIATELY-preceding
     // fast-path issue clock (tracked in agi_wr0/agi_wr1; bit8=none).
@@ -3550,7 +4217,8 @@ module core
     // require the V instruction's first byte AND its last byte to be in resident
     // lines before pairing; otherwise V is not paired this clock — it becomes the
     // next U, the cold line fills via S_PF, and it issues with correct bytes.
-    v_bytes_ok = ic_present(flin + {28'd0,u_d.len}) &&
+    v_bytes_ok = exec_issue_ok &&
+                 ic_present(flin + {28'd0,u_d.len}) &&
                  ic_present(flin + {28'd0,u_d.len} + {28'd0,v_d.len} - 32'd1);
     // REVIEW2 H-05: the STI / MOV-SS shadow protects exactly ONE instruction. If the
     // clock after the shadow is set retires a PAIR, two instructions execute inside a
@@ -3564,7 +4232,15 @@ module core
     // gather would mean sourcing V from a different cache line than U, so instead do
     // not pair across the wrap: V becomes the next U and is fetched correctly from
     // the wrapped flin. One lost pairing opportunity per 64 KiB of 16-bit code.
-    pipe_pair = cycle_mode && v_bytes_ok && pipe_pair_ok && !irq_shadow
+`ifdef VEN_DBG_CORE
+    // The host breakpoint names a single architectural EIP.  If it names the
+    // candidate V instruction, issue U alone and let V become the next U, where
+    // dbg_bp_hit parks it before execution.  Likewise a host STEP is one x86
+    // instruction, never a U/V pair.
+    dbg_bp_v_hit = dbg_bp_en && !dbg_step_q && (state == S_PIPE) &&
+                   ((eip + {28'd0, u_d.len}) == dbg_bp_addr);
+`endif
+    pipe_pair = cycle_mode && v_bytes_ok && pipe_pair_ok && !irq_shadow && !dbg_pair_block
              && !(u_d.w16 && (({1'b0,eip[15:0]} + {13'd0,u_d.len}) > 17'h0FFFF));
 
     // M6 Erratum 59 (MOV moffs A2/A3 fails to pair): when errata enabled, an
@@ -3596,9 +4272,9 @@ module core
     // canonical fp_sys_bail (which folds in `sys_mode && u_d.is_load`), so request
     // issue and issue eligibility can no longer drift apart. Bit-identical today --
     // the point is that it is now structural rather than a hand-copy.
-    // !fp_irq_divert: do not start a speculative translation/page-walk on a clock
-    // whose instruction is being abandoned for an interrupt (cf. task #25 cascade).
-    pipe_load_req  = (state==S_PIPE) && !fp_irq_divert && pipe_bytes_ok && !fp_sys_bail &&
+    // !fp_issue_block: do not start a speculative translation/page-walk on a
+    // clock whose instruction is being abandoned (cf. task #25 cascade).
+    pipe_load_req  = (state==S_PIPE) && !fp_issue_block && pipe_bytes_ok && !fp_sys_bail &&
                      u_d.is_load && !pipe_agi && (mispred_bubbles==3'd0);
     pipe_load_base = u_d.base;
 
@@ -3703,6 +4379,11 @@ module core
   // several files, extended in only one of them. So it gets the same treatment --
   // ONE signal, consumed everywhere, never re-typed.
   logic fp_irq_divert;
+  // A fast-path boundary can be abandoned either for an architecturally
+  // delivered interrupt or for the external quiescent debugger.  Every mirror
+  // of the S_PIPE issue arm consumes this one predicate; do not reproduce the
+  // guard in individual writeback/cache/request paths.
+  logic fp_issue_block;
 `ifdef VEN_SYS_FASTPATH
   // REVIEW2 H-06: an x87 op that burns occupancy clocks marks fp_occ_pending at issue
   // and only retires (advancing EIP and clearing the flag) when the occupancy is
@@ -3713,13 +4394,14 @@ module core
   // an INSTRUCTION BOUNDARY, and mid-occupancy is not one -- so hold the divert for
   // the few clocks until the op retires. Interrupts are level-held, so nothing is
   // lost; this delays acceptance, it does not drop it.
-  assign fp_irq_divert = (state == S_PIPE) && !fp_occ_pending
+  assign fp_irq_divert = (state == S_PIPE) && !fp_occ_pending && !dbg_fast_hold && !dbg_step_active
                       && (smi_take || nmi_take || intr_take);
 `else
   // Without the sys fast path the spine has no interrupt arm at all (S_PIPE is
   // user-mode only there, and intr_take is gated on soc_en=0), so this is inert.
   assign fp_irq_divert = 1'b0;
 `endif
+  assign fp_issue_block = fp_irq_divert || dbg_fast_hold;
 
   // ---- debug facilities the fast path does NOT implement --------------------
   // core_fastpath.svh contains ZERO references to TF or to DR0-3. Both are handled
@@ -3751,7 +4433,11 @@ module core
 `ifdef VEN_SYS_FASTPATH
   assign fp_sys_bail = !u_d.simple
                     || (sys_mode && !sys_fp_ok)
-                    || (sys_mode && u_d.is_load)    // H-01: no fast memory in sys mode
+                    // H-01: memory forms remain slow except the explicitly
+                    // audited flat 32-bit MOV r32,[r32] profile above. Its
+                    // bus request is translated/permission-checked exactly as
+                    // S_LOAD; this is not a physical or unchecked bypass.
+                    || (sys_mode && u_d.is_load && !sys_fp_load_ok)
                     || (sys_mode && fp_dbg_active); // TF / DR armed -> slow FSM
 `else
   assign fp_sys_bail = !u_d.simple || sys_mode;
@@ -3812,8 +4498,8 @@ module core
     logic issue_arm;
     logic u_res_taken, v_res_taken;
     logic [31:0] v_res_pc;
-    // !fp_irq_divert: a diverted clock resolves no branch, so it must not train the BTB.
-    issue_arm = (state==S_PIPE) && !fp_irq_divert && !xlate_miss && (stall_cnt==7'd0) &&
+    // !fp_issue_block: an abandoned clock resolves no branch, so it must not train the BTB.
+    issue_arm = (state==S_PIPE) && !fp_issue_block && !xlate_miss && (stall_cnt==7'd0) &&
                 pipe_bytes_ok && (pending_mem_pen==7'd0) && !u_d.is_fp &&
                 // REVIEW Aug-1 M-01: canonical predicate (was `u_d.simple && !sys_mode`,
                 // which left eligible system-fast branches untrained in the BTB).
@@ -3908,6 +4594,8 @@ module core
           // real-mode segs behave as present R/W data (attr only matters in PM):
           // P=1 DPL=0 S=1 type=writable-data (0x93).
           seg_attr[s]<=8'h93;
+          seg_b[s]<=1'b1;   // 4 GiB bound until a descriptor says otherwise
+          seg_pm_loaded[s]<=1'b0;   // R2-H07: nothing PM-loaded out of reset
         end
         seg_sel[SG_CS]<=16'hF000; seg_base[SG_CS]<=32'h000F_0000;
         seg_attr[SG_CS]<=8'h9B;   // CS: present readable code (P=1 S=1 type=0xB)
@@ -3929,6 +4617,8 @@ module core
         for (int s=0;s<NUM_SEG;s++) begin
           seg_sel[s]<=16'h0000; seg_base[s]<=32'd0; seg_limit[s]<=32'hFFFF_FFFF;
           seg_attr[s]<=8'h93;   // flat present R/W (unused in user mode; benign)
+          seg_b[s]<=1'b1;   // 4 GiB bound until a descriptor says otherwise
+          seg_pm_loaded[s]<=1'b0;   // R2-H07
         end
         // M7.1 proxy: seed the LIVE selectors to the linux-user SEG_* constants so
         // the proxy snap can report them live (a later `mov gs,0x33` updates GS).
@@ -3963,12 +4653,13 @@ module core
       dbg_if_q<=1'b0; dbg_cs_q<=16'hF000; dbg_csb_q<=32'h000F_0000;
 `endif
 `ifdef VEN_DBG_WD
-      dbg_stall<=24'd0; dbg_printed<=1'b0;
+      dbg_stall<=24'd0;
 `endif
 `ifdef VEN_PS_PROXY
       q_proxy_len<=4'd0;
 `endif
       fold_pending_r<=1'b0; fold_pc_r<=32'd0;   // M7.1: no folded syscall in flight
+      fx_abort_q<=1'b0;                         // no fragment abort in flight
       // (fpr[] cleared in u_fpu_state's rst_n arm.)
       // M4 pipeline state.
       pf_fill_addr<=32'd0; pf_word<=3'd0; pf_fill_way<='0;
@@ -3986,9 +4677,9 @@ module core
       fp_busy_cyc<=32'd0;
 `endif
 `ifdef VEN_FP_PIPE
-      fpp_valid<=1'b0;
+      fpp_valid<=1'b0; fpp_stkflt<=1'b0;
 `ifdef VEN_FP_PIPE2
-      fpp2_valid<=1'b0;
+      fpp2_valid<=1'b0; fpp2_stkflt<=1'b0;
 `endif
 `endif
       // D-cache timing arrays (dc_tag/dc_val/dc_lru) are reset inside the
@@ -4008,21 +4699,32 @@ module core
       walk_pde_addr<=32'd0; walk_pte_addr<=32'd0; walk_pf<=1'b0; pf_errcode<=3'd0;
       // M2S.3 IDT delivery state idle out of reset.
       int_vec<=8'd0; int_ret_eip<=32'd0; int_src_pc<=32'd0; int_has_err<=1'b0;
-      int_err<=32'd0; int_step<=4'd0; int_gate_off<=32'd0; int_gate_sel<=16'd0;
+      int_err<=32'd0; int_step<=4'd0; rm_read_armed<=1'b0;
+      int_gate_off<=32'd0; int_gate_sel<=16'd0;
       int_gate_trap<=1'b0; int_gate_op16<=1'b0; int_lo<=32'd0; iret_eip<=32'd0; iret_cs<=16'd0;
       int_cs_base<=32'd0; int_cs_limit<=32'd0; int_cs_attr<=8'd0; int_cs_d<=1'b0;
-      ntret_pend<=1'b0; retf_out<=1'b0; retf_ob<=1'b0; cg_xpl<=1'b0; cg_pcount<=5'd0;
-      lcall_pend<=1'b0; lc_cs_base<=32'd0; lc_cs_limit<=32'd0;
-      lc_cs_attr<=8'd0; lc_cs_d<=1'b0; lc_cs_cpl<=2'd0;
-      int_sw<=1'b0;
+      int_ss_base<=32'd0; int_ss_limit<=32'd0; int_ss_attr<=8'd0; int_ss_b<=1'b0;
+      int_frm_nslots<=6'd0; int_frm_wide<=1'b0;
+      frm_pg_val<=4'd0; frm_pg_markd<=1'b0; frm_pg_i<=3'd0; frm_pg_n<=3'd0;
+      for (int i = 0; i < 4; i++) begin
+        frm_pg_lin[i]<=20'd0; frm_pg_addr[i]<=32'd0; frm_pg_phys[i]<=20'd0;
+        frm_pg_mid[i]<=1'b0; frm_pg_dirty[i]<=1'b0;
+      end
+      ntret_pend<=1'b0; retf_out<=1'b0; retf_ob<=1'b0; retf_same<=1'b0; cg_xpl<=1'b0; cg_pcount<=5'd0;
+      cg_wide<=1'b0; cg_beat<=6'd0;   // R2-H05
+      lcall_pend<=1'b0; tsw_call<=1'b0; lc_cs_base<=32'd0; lc_cs_limit<=32'd0;
+      lc_cs_attr<=8'd0; lc_cs_d<=1'b0; lc_cs_cpl<=2'd0; lc_gate<=1'b0; lc_gw<=1'b0;
+      int_sw<=1'b0; dlv_ext<=1'b0;
       ioperm_ret<=S_IO; ioperm_port<=16'd0; ioperm_base<=16'd0;
       dlv_depth<=2'd0; dlv_ctrb<=1'b0; dlv_pf<=1'b0;  // REVIEW_aug2 H-04
       // M2S.4 TR/TSS + cross-priv + inter-priv IRET state idle out of reset.
       tr_sel<=16'd0; tr_base<=32'd0; tr_limit<=32'd0; tr_valid<=1'b0; tr_attr<=8'd0;
+      ltr_busy_q<=1'b0; ltr_sel_q<=16'd0; ltr_base_q<=32'd0; ltr_limit_q<=32'd0;
+      ltr_attr_q<=8'd0; lldt_null_q<=1'b0;
       // M2S.4b task-switch scratch idle out of reset (the tsw_* holding regs are
       // fully written by S_TSW_READ/_SEG before being committed in S_TSW_BUSY).
       tsw_step<=5'd0; tsw_new_base<=32'd0; tsw_new_limit<=32'd0; tsw_new_sel<=16'd0;
-      tsw_new_attr<=8'd0; tsw_save_eip<=32'd0; tsw_eip<=32'd0; tsw_eflags<=32'd0;
+      tsw_new_attr<=8'd0; tsw_save_eip<=32'd0; tsw_save_eflags<=32'd0; tsw_eip<=32'd0; tsw_eflags<=32'd0;
       tsw_cr3<=32'd0; tsw_seg_lo<=32'd0;
       iret_eflags<=32'd0; xpl_active<=1'b0; int_old_ss<=16'd0; int_old_esp<=32'd0;
       int_old_cs<=16'd0; int_new_cpl<=2'd0; int_new_ss<=16'd0; int_new_esp<=32'd0;
@@ -4057,6 +4759,18 @@ module core
       // M6B Erratum 79: no erroneous-#DB chain pending out of reset.
       err79_pending<=1'b0; err79_dr6_bits<=4'd0;
     end else begin
+      // per-cycle default: the fragment-abort request is a one-cycle pulse
+      // (start_fault re-raises it; the engine block only reads it).
+      fx_abort_q <= 1'b0;
+      // REVIEW1_Aug3 R2-H07: the PE-drop backstop for the now-EXPLICIT
+      // seg_pm_loaded (every load site writes it directly; see the case arms).
+      // Leaving protected mode clears every segment's loaded bit -- real-mode
+      // hidden state is legitimate until a PM reload (the measured pseg
+      // transition-window semantics). No PM load site runs with PE=0, so this
+      // never races a site write; textual order would give the site the win
+      // anyway.
+      if (!creg0[0])
+        for (int i = 0; i < NUM_SEG; i++) seg_pm_loaded[i] <= 1'b0;
       // M7.1 proxy: mirror ventium_top's retire_n on the SAME posedge it counts
       // (the registered retire_valid/retire2_valid of the PREVIOUS clock). cn thus
       // equals the number of retirements already emitted, so an int-0x80 in
@@ -4076,10 +4790,9 @@ module core
 
 `ifdef VEN_DBG_WD
       // sim-only hang watchdog (opt-in via +define+VEN_DBG_WD): dump the wedged FSM
-      // state once after a long no-retire stall (boot bring-up gap-walk diagnostic).
-      // RE-ARMS every ~1M no-retire cycles: a TRUE deadlock (Quake cs=0087:0x334) prints
-      // REPEATEDLY (unmistakable), while a transient boot gap-walk stall retires-out and
-      // prints at most once. state.name() localises the wedge (S_FETCH=icache fill hang,
+      // state after a long no-retire stall.  It re-arms periodically, so a true
+      // deadlock is distinguishable from a transient long-latency operation.
+      // state.name() localises the wedge (S_FETCH=icache fill hang,
       // S_USEQ=microcode loop, S_LOAD/2=data-load wait, S_WALK=page walk, ...).
       if (retire_valid || retire2_valid) dbg_stall <= 24'd0;
       else if (dbg_stall >= 24'd1000000) begin
@@ -4090,111 +4803,6 @@ module core
                  creg0, v86, real_mode, sys_mode, eflags, cpl_r);
       end
       else dbg_stall <= dbg_stall + 24'd1;
-      // [VEN-TSSW] watchpoint: catch the FIRST S_INT_PUSH exception-frame write that overflows into
-      // ANY of the 3 round-robin TSSes (full structures: 0068@0x2fd80-0x2fde8, 0060@0x2fe72-0x2feda,
-      // 0070@0x3157a-0x315e2). Gated to state==S_INT_PUSH so the guest's TSS zero-fill setup (S_STORE)
-      // is skipped -> this fires on the TRUE first corruption (handler stack overflow), pre-cascade.
-      // Watch EVERY write to TSS 0070's ESI field (base 0x3157a + 0x40 = 0x315ba; dword-neighborhood
-      // 0x315b8-0x315bd) — ANY state — to catch the stray write that corrupts it to 0x11b354, with the
-      // exact instruction + state (S_STORE guest / S_INT_PUSH overflow / S_TSW_SAVE) + ds:esi context.
-      // [VEN-DSTRACE] the CWSDPMI handler's DS (should oscillate 0xaf/0x33/0xaf per the golden QEMU trace).
-      // Log DS sel+base at the key handler eips; golden has DS=0xaf@10000000 at 0x3e93, Ventium is suspected
-      // to leave DS=0x20@2c700 (a failed LDT-selector segment load) -> ds:[esi]=0x147a54 fault.
-      // sticky: the UNIQUE client stack switch (cs=0xa7, esp becomes 0x11b354) arms the capture.
-      if (retire_valid && seg_sel[SG_CS]==16'h00a7 && gpr_o[R_ESP]==32'h0011b354 && !cstk_armed)
-        cstk_armed <= 1'b1;
-      if (retire_valid && cstk_armed && ds_tn < 8'd25) begin
-        ds_tn <= ds_tn + 8'd1;
-        $display("[VEN-DSTRACE] @cs:eip=%04x:%08h DS=%04x@%08h SS=%04x@%08h FS=%04x@%08h esi=%08h esp=%08h ldt_base=%08h",
-                 seg_sel[SG_CS], retire_pc, seg_sel[SG_DS], seg_base[SG_DS], seg_sel[SG_SS], seg_base[SG_SS],
-                 seg_sel[SG_FS], seg_base[SG_FS], gpr_o[R_ESI], gpr_o[R_ESP], ldt_base);
-      end
-      // [VEN-CSD] the task-switch resume: is cs_d (default op/addr size) correct (0=16b for CS=0018)?
-      // The 1st TSS0070 resume comes from cs=0018 (16b); the 2nd from cs=002b (suspected 32b). If Ventium
-      // leaves cs_d=1 the resume decodes `8b 1e` as 32b `mov ebx,[esi]` -> the spurious ds:[esi] fault.
-      if (retire_valid && cstk_armed
-          && (retire_pc==32'h00003e93 || retire_pc==32'h00003f49 || retire_pc==32'h00003f4c || retire_pc==32'h00003e80)
-          && csd_n < 6'd40) begin
-        csd_n <= csd_n + 6'd1;
-        $display("[VEN-CSD] @cs:eip=%04x:%08h cs_d=%b cs_attr=%02h esi=%08h esp=%08h state=%s",
-                 seg_sel[SG_CS], retire_pc, cs_d, seg_attr[SG_CS], gpr_o[R_ESI], gpr_o[R_ESP], state.name());
-      end
-      if (mem_req && mem_we && mem_addr>=32'h000315b8 && mem_addr<32'h000315be) begin
-        $display("[VEN-TSSW] TSS0070.esi WRITE paddr=%08h data=%08h wstrb=%b @ cs:eip=%04x:%08h state=%s | ds_base=%08h esi=%08h edi=%08h eax=%08h int_step=%0d",
-                 mem_addr, mem_wdata, mem_wstrb, seg_sel[SG_CS], eip, state.name(),
-                 seg_base[SG_DS], gpr_o[R_ESI], gpr_o[R_EDI], gpr_o[R_EAX], int_step);
-      end
-      // [VEN-FF5A] 3rd-bug root-cause: every store to phys 0x2ff58..0x2ff5e (the linked-list node whose
-      // dword@0x2ff5a `mov esi,fs:[esi]`@cs=0018:0x3f2c reads). Golden=0x11b354, Ventium=0x11b2c0 (wrong).
-      // Catch the FIRST store that writes 0x11b2c0 (or !=0x11b354) here -> that store's cs:eip/state IS the bug.
-      if (mem_req && mem_we && mem_addr>=32'h0002ff58 && mem_addr<32'h0002ff5f) begin
-        $display("[VEN-FF5A] STORE paddr=%08h data=%08h wstrb=%b @ cs:eip=%04x:%08h state=%s | esi=%08h edi=%08h esp=%08h ecx=%08h ds_base=%08h str=%b",
-                 mem_addr, mem_wdata, mem_wstrb, seg_sel[SG_CS], eip, state.name(),
-                 gpr_o[R_ESI], gpr_o[R_EDI], gpr_o[R_ESP], gpr_o[R_ECX], seg_base[SG_DS], (q_kind==K_STR));
-      end
-      // [VEN-PTR] 3rd-bug: log the client's regs at the golden comparison points. Golden @cs=00a7:0x1238
-      // has EDI=0x000db354 EAX=0x0011b354 ESP=0x768. If Ventium's EDI is 0x94-low (0xdb2c0) here, the
-      // divergence is BEFORE 0x1238 -> bisect earlier. The FIRST time (pre-deadlock ~74.6M) is the signal.
-      // FULL handler-region retire trace: every cs=0018 handler retire (pc<0x6000) and the
-      // cs=00a7 client sync window (0x1200-0x1260), gated to the Quake CR3 (0x7e000). Diffs
-      // instruction-by-instruction vs golden_boot0_reg_LONG.txt (0018:0x2b15..0x3ea9). The
-      // FIRST pc where Ventium's (esp/esi/eax) != golden's PRE-instruction row = the divergence.
-      // (Task-switch PCs 0x3e93/0x3f44 sample POST-switch here; account for that in the diff.)
-      if (retire_valid && creg3==32'h0007e000 &&
-          ((seg_sel[SG_CS]==16'h0018 &&
-            (retire_pc==32'h00003ab8 || retire_pc==32'h00003e93 || retire_pc==32'h00003f2c ||
-             retire_pc==32'h00003f31 || retire_pc==32'h00003f44 || retire_pc==32'h00002b78)) ||
-           (seg_sel[SG_CS]==16'h00a7 &&
-            (retire_pc==32'h00001240 || retire_pc==32'h00001242 || retire_pc==32'h000010bc ||
-             retire_pc==32'h0004d40e || retire_pc==32'h0000e920 || retire_pc==32'h0000e938)))) begin
-        $display("[VEN-PTR] @cs=%04x:%08h eax=%08h ebx=%08h ecx=%08h edx=%08h esi=%08h edi=%08h esp=%08h ebp=%08h efl=%08h",
-                 seg_sel[SG_CS], retire_pc, gpr_o[R_EAX], gpr_o[R_EBX], gpr_o[R_ECX], gpr_o[R_EDX],
-                 gpr_o[R_ESI], gpr_o[R_EDI], gpr_o[R_ESP], gpr_o[R_EBP], eflags);
-      end
-      // [VEN-CR3W] TERMINAL ROOT: TSS0070.cr3 @ 0x31596 gets corrupted 0x7e000 -> 0x00000002, breaking
-      // paging for the whole system. Watch its dword-neighborhood (0x31594-0x3159a) for EVERY write to
-      // capture the corrupting write (state + cs:eip + ss_base+esp so we can tell if it is an S_INT_PUSH
-      // CPL0-stack OVERFLOW into the TSS region during the fault storm).
-      // Skip the legit zero-fill (data==0) — catch the NON-ZERO write that sets cr3's low byte to 0x02.
-      // Log edi/ecx/es to tell a rep-stosb/movsb OVERRUN (huge ecx, es-relative edi into the TSS) from a
-      // segment-base error (es base wrong) from a normal store.
-      if (mem_req && mem_we && mem_addr>=32'h00031594 && mem_addr<32'h0003159a && mem_wdata!=32'd0 && cr3w_n < 5'd24) begin
-        cr3w_n <= cr3w_n + 5'd1;
-        $display("[VEN-CR3W] cr3-CORRUPT WRITE paddr=%08h data=%08h wstrb=%b @cs:eip=%04x:%08h state=%s | q_ea=%08h edi=%08h ecx=%08h esi=%08h eax=%08h esB=%08h esSel=%04x dsB=%08h ibuf=%016h",
-                 mem_addr, mem_wdata, mem_wstrb, seg_sel[SG_CS], eip, state.name(), q_ea,
-                 gpr_o[R_EDI], gpr_o[R_ECX], gpr_o[R_ESI], gpr_o[R_EAX],
-                 seg_base[SG_ES], seg_sel[SG_ES], seg_base[SG_DS], dbg_ibuf);
-      end
-      // [VEN-FF5A] the handler's esi-VARIABLE (fs:[0x385a] = linear 0x2ff5a) is the TRUE load source
-      // that first holds 0x11b354. Catch the exact write that corrupts it (data carries 0xb354 or the
-      // full 0x11b354 in the esi lanes), with the writing instruction + state + source registers. This
-      // is the origin hop before the TSS.esi save/restore self-sustain.
-      // Watch the exception-frame ESP slot (0x2ff58) AND TSS0060.ESP (0x2fea8) for the 0x11b354 SEED.
-      // Exclude the circular task-switch SAVE — the FIRST non-SAVE write of 0x11b354 to a TSS.ESP field
-      // is the true seed (a guest store / exception push whose value or address is wrong).
-      if (mem_req && mem_we && state != S_TSW_SAVE
-          && ((mem_addr>=32'h0002ff58 && mem_addr<32'h0002ff5e) || (mem_addr>=32'h0002fea8 && mem_addr<32'h0002feae))
-          && (mem_wdata==32'h0011b354 || mem_wdata[15:0]==16'hb354 || mem_wdata==32'h0000b354) && ff5a_wn < 5'd16) begin
-        ff5a_wn <= ff5a_wn + 5'd1;
-        $display("[VEN-FF5A] SEED WRITE paddr=%08h data=%08h wstrb=%b @cs:eip=%04x:%08h state=%s | q_ea=%08h ssB=%08h dsB=%08h esB=%08h esi=%08h edx=%08h eax=%08h esp=%08h ibuf=%016h",
-                 mem_addr, mem_wdata, mem_wstrb, seg_sel[SG_CS], eip, state.name(), q_ea,
-                 seg_base[SG_SS], seg_base[SG_DS], seg_base[SG_ES],
-                 gpr_o[R_ESI], gpr_o[R_EDX], gpr_o[R_EAX], gpr_o[R_ESP], dbg_ibuf);
-      end
-      // [VEN-PTE] watch writes to the PTE for lin=0x147a54 (physical 0x7d51c, dword 0x7d51c) — does
-      // the guest ever MAP it (write present)? If yes but the walk still reads 0 -> coherence/write-loss;
-      // if never -> the handler's read of 0x147a54 is from corrupted state, not a resolvable demand page.
-      if (mem_req && mem_we && mem_addr>=32'h0007d518 && mem_addr<32'h0007d520) begin
-        $display("[VEN-PTE] PTE WRITE paddr=%08h data=%08h wstrb=%b @ cs:eip=%04x:%08h state=%s cur_lin=%08h",
-                 mem_addr, mem_wdata, mem_wstrb, seg_sel[SG_CS], eip, state.name(), cur_lin);
-      end
-      // [VEN-TBLWR] watch STORES to LINEAR 0x1005c000..0x1005c00f (the Quake fn-ptr table entries) regardless
-      // of the physical page — catches the population write (or its absence). cur_lin is the pre-translate
-      // linear addr of the current data access; cur_is_d marks a data (not fetch) access.
-      if (mem_req && mem_we && cur_is_d && cur_lin>=32'h1005c000 && cur_lin<32'h1005c010) begin
-        $display("[VEN-TBLWR] STORE lin=%08h(paddr=%08h) data=%08h wstrb=%b @ cs:eip=%04x:%08h state=%s | eax=%08h ebx=%08h",
-                 cur_lin, mem_addr, mem_wdata, mem_wstrb, seg_sel[SG_CS], eip, state.name(), gpr_o[R_EAX], gpr_o[R_EBX]);
-      end
 `endif
 
 `ifdef VEN_TRACE_IRQ
@@ -4328,7 +4936,9 @@ module core
       fpp_valid <= fp_pipe_cap;
       if (fp_pipe_cap) begin
         fpp_aluop <= fp_cap_aluop; fpp_a <= fp_cap_a; fpp_b <= fp_cap_b;
-        fpp_rc    <= fp_cap_rc;    fpp_err <= fp_cap_err; fpp_dst <= fp_cap_dst;
+        fpp_rc    <= fp_cap_rc;    fpp_pc  <= fp_cap_pc;
+        fpp_err   <= fp_cap_err;   fpp_dst <= fp_cap_dst;
+        fpp_stkflt <= fp_cap_stkflt;   // R2-H06
       end
 `ifdef VEN_FP_PIPE2
       // Stage 1 -> stage 2: register the f_eval_s1 result one clock after capture.
@@ -4340,7 +4950,9 @@ module core
       if (fpp_valid) begin
         fpp2_s1  <= fp_s1_next;
         fpp2_rc  <= fpp_rc;
+        fpp2_pc  <= fpp_pc;
         fpp2_dst <= fpp_dst;
+        fpp2_stkflt <= fpp_stkflt;   // R2-H06
       end
 `endif
 `endif
@@ -4396,15 +5008,19 @@ module core
         // violation was delivered as #GP, so a handler distinguishing the two -- which
         // is the normal way software grows a stack -- saw the wrong one.
         start_fault((cur_seg_idx == 3'(SG_SS)) ? 8'd12 : 8'd13, 1'b1, 32'd0, q_pc);
-      end else if (cs_fetch_fault) begin
+      end else if (cs_fetch_fault || cs_extent_fault) begin
         // An instruction fetched from outside CS.limit is #GP(0), and like the data
         // side it precedes paging: no linear address should be translated for it.
+        // Both forms stamp eip (the offending instruction; q_pc still lags it).
         start_fault(8'd13, 1'b1, 32'd0, eip);
       end else
 `endif
       if (perm_fault) begin
         creg2 <= cur_lin;
-        start_fault(8'd14, 1'b1, perm_err, q_pc);
+        // S_PIPE has not staged q_pc: a D-TLB permission fault on a fast
+        // load (or an I-side fill fault) must save the current instruction,
+        // not the prior retired instruction.
+        start_fault(8'd14, 1'b1, perm_err, (state==S_PIPE) ? eip : q_pc);
       end else if (xlate_miss) begin
         walk_ret_state <= state;
         walk_lin       <= cur_lin;
@@ -4419,7 +5035,12 @@ module core
         // doing copy-on-write on that report would map the page read-only and loop.
         // Split the two meanings; only the Dirty decision keeps the probe suppression.
         walk_is_write  <= cur_is_w;                   // architectural class -> #PF W/R
-        walk_set_dirty <= cur_is_w && !xs_probing;    // may set D -> probe excluded
+        // R2-C03: the fragment engine's write probe is the same excluded class.
+        // The frame-probe VALIDATION phase (S_INT_PROBE, frm_pg_markd=0) is the
+        // same not-a-write class; its D-mark phase (frm_pg_markd=1) sets D
+        // deliberately, pre-commit.
+        walk_set_dirty <= cur_is_w && !(xs_probing || fx_probing
+                                        || ((state==S_INT_PROBE) && !frm_pg_markd));    // may set D -> probe excluded
         walk_usr_lat   <= acc_usr;   // REVIEW1_Aug2 C-04: latch the requester's class
         walk_step      <= 3'd0;
         walk_pf        <= 1'b0;
@@ -4590,7 +5211,12 @@ module core
           // a HLT with interrupts masked and only an SMI pending stayed halted
           // FOREVER. Priority SMI > NMI > INTR, matching both instruction boundaries.
           // smi_enter() captures the resume EIP so RSM returns after the HLT.
-          if (smi_take) begin
+          // A debugger halt owns the already-quiescent HLT state as well.  Do
+          // not acknowledge/consume an interrupt while it is stopped: the
+          // request must still be present when RUN releases this state.
+          if (dbg_block_issue) begin
+            state <= S_HLTWAIT;
+          end else if (smi_take) begin
             smi_enter(eip);
           end else if (nmi_take) begin
             nmi_pending     <= 1'b0;
@@ -4714,13 +5340,39 @@ module core
   logic        fstore_ue;        // FST m32/m64 narrowing underflow -> denormal (UE)
   always_comb begin
     logic [79:0] s0;
+    logic [81:0] rb;             // FBSTP: {ie, pe, bcd} converter result
     logic [34:0] r32;            // {oe, ue, pe, float32}
     logic [66:0] r64;            // {oe, ue, pe, float64}
     logic [65:0] ri;             // {invalid, inexact, value}
+    rb = 82'd0;
     s0 = fp_st0_phys;             // ST0 (= fpr[ftop], u_fpu_state read port)
+    // REVIEW_Aug4 A4-H01: a MASKED stack fault on a store (FST/FIST/FBSTP of an
+    // EMPTY ST0) stores the operation's masked response -- the QNaN real
+    // indefinite (the narrowing/int conversions below turn it into the f32/f64
+    // quiet NaN / the integer indefinite) -- not the stale empty-slot bits
+    // (SDM Vol.1 Table 8-4). fp_flt_q was latched at the S_FEXEC dispatch.
+    if (fp_flt_q && fctrl[0] && (state == S_FSTORE))
+      s0 = {1'b1, 15'h7fff, 1'b1, 63'h4000000000000000};   // QNaN real indefinite (fpu_writeback.sv's QNAN_INDEF)
     r32 = 35'd0; r64 = 67'd0; ri = 66'd0;
     fstore_val = 80'd0; fstore_pe = 1'b0; fstore_ie = 1'b0;
     fstore_oe = 1'b0; fstore_ue = 1'b0;
+    if (fp_flt_q && fctrl[0] && (state == S_FSTORE)) begin
+      // the destination-specific indefinite, ahead of every registered
+      // converter result -- the BCD engine's fbcd_result_q and the PS trap's
+      // f_trap_store_q are computed FROM the empty slot and must not replace
+      // the masked response. (The local conversions of the substituted s0
+      // produce these same constants; naming them keeps the PS_ALL/BCD_ITER
+      // configurations, which lack those converters, on the same response.)
+      unique case (q_fxop)
+        FX_FST_M32:  fstore_val = {48'd0, 32'hFFC00000};            // QNaN32
+        FX_FST_M64:  fstore_val = {16'd0, 64'hFFF8000000000000};    // QNaN64
+        FX_FIST_M16: fstore_val = {64'd0, 16'h8000};                // int indefinite
+        FX_FIST_M32: fstore_val = {48'd0, 32'h80000000};
+        FX_FIST_M64: fstore_val = {16'd0, 64'h8000000000000000};
+        FX_FBSTP:    fstore_val = 80'hFFFFC000000000000000;         // packed-BCD indefinite
+        default:     fstore_val = {1'b1, 15'h7fff, 1'b1, 63'h4000000000000000};
+      endcase
+    end else
 `ifdef VEN_FP_PS_ALL
     // FP_PS_ALL: the narrowing-store conversion runs on the A53 (store-after-trap).
     // fstore_val draws the converted bytes straight from the registered PS result
@@ -4756,7 +5408,6 @@ module core
         // iterative engine result, latched in S_BCD_BUSY (see ven_bcd).
         fstore_val = fbcd_result_q[79:0]; fstore_pe = fbcd_result_q[80]; fstore_ie = fbcd_result_q[81];
 `else
-        logic [81:0] rb;
         rb = fx_fx_to_bcd(s0, fctrl[11:10]);
         fstore_val = rb[79:0]; fstore_pe = rb[80]; fstore_ie = rb[81];
 `endif
@@ -4839,6 +5490,11 @@ module core
   //   full state (FNSAVE/FRSTOR): 27 dwords -> 26, or 47 words -> 46
   // REVIEW1_Aug2 H-11: x87 stack over/underflow, detected in fpu_writeback.
   logic fp_stk_ovf, fp_stk_unf;
+  // REVIEW_Aug4 A4-H01: the issue-time stack-fault decision, latched at the
+  // S_FEXEC dispatch and replayed into fpu_writeback at the DEFERRED commit
+  // (S_FP_BUSY / S_TRSC_BUSY / S_FPREM_BUSY / S_FPTRAP_WAIT / S_FSTORE) -- the
+  // writeback-local predicate cannot span those states on its own.
+  logic fp_flt_q, fp_flt_ovf_q;
 
   logic [5:0] fenv_last;
   always_comb begin
@@ -4988,6 +5644,56 @@ module core
   logic ven_faultlog_en;
   initial ven_faultlog_en = $test$plusargs("ven_faultlog") != 0;
 
+  // ---- +ven_frmpglog: per-delivery frame page-plan counters ------------------
+  // Sim-only observability for the page-plan probe contract: one validation
+  // beat per DISTINCT frame page (not per slot), one D-mark beat per plan
+  // page when any validated page was clean, and no page walk once the frame
+  // pushes run (the pushes translate through the captured plan frames). One
+  // line is printed per completed planned delivery, at the S_INT_PUSH exit:
+  //   [FRMPG] nslots=<n> npages=<n> val=<n> dm=<n> pushwalk=<n>
+  logic       ven_frmpglog_en;
+  logic [7:0] fpl_val, fpl_dm, fpl_walk;
+  logic [2:0] fpl_np;
+  logic [5:0] fpl_ns;
+  logic       fpl_push, fpl_planned;
+  initial ven_frmpglog_en = $test$plusargs("ven_frmpglog") != 0;
+  always_ff @(posedge clk) begin
+    if (!rst_n) begin
+      fpl_val <= 8'd0; fpl_dm <= 8'd0; fpl_walk <= 8'd0;
+      fpl_np  <= 3'd0; fpl_ns <= 6'd0;
+      fpl_push <= 1'b0; fpl_planned <= 1'b0;
+    end else begin
+      if (state == S_INT_GATE) begin // every delivery enters here; a faulted
+        fpl_val <= 8'd0; fpl_dm <= 8'd0; fpl_walk <= 8'd0;  // plan is gone by
+        fpl_push <= 1'b0; fpl_planned <= 1'b0;              // the new delivery
+      end
+      if (state == S_INT_SS) begin   // a planned delivery stages here (the
+        fpl_val <= 8'd0; fpl_dm <= 8'd0; fpl_walk <= 8'd0;  // call-gate path
+        fpl_push <= 1'b0;           // never passes S_INT_GATE, so reset here)
+        fpl_planned <= 1'b1;
+      end
+      // one SUCCESSFUL probe beat per plan entry (a TLB miss diverts to the
+      // walk and the beat retries; only the resolving beat counts)
+      if (state == S_INT_PROBE && !xlate_miss && !perm_fault) begin
+        if (frm_pg_markd) fpl_dm  <= fpl_dm  + 8'd1;
+        else              fpl_val <= fpl_val + 8'd1;
+        fpl_ns <= int_frm_nslots;  // latched at staging; settled by the probe
+      end
+      if (fpl_planned && state == S_INT_PUSH) begin
+        fpl_push <= 1'b1;
+        fpl_np   <= frm_pg_n;      // the plan is cleared at the last beat
+      end
+      if (fpl_push && state == S_WALK) fpl_walk <= fpl_walk + 8'd1;
+      if (fpl_push && state != S_INT_PUSH && state != S_WALK) begin
+        fpl_push    <= 1'b0;
+        fpl_planned <= 1'b0;
+        if (ven_frmpglog_en)
+          $display("[FRMPG] nslots=%0d npages=%0d val=%0d dm=%0d pushwalk=%0d",
+                   fpl_ns, fpl_np, fpl_val, fpl_dm, fpl_walk);
+      end
+    end
+  end
+
   // ---- REVIEW1_Aug2 C-03 instrumentation --------------------------------------
   // The page-crossing SPLIT exists only for S_LOAD/S_LOAD2/S_STORE. Every other
   // multi-beat state translates the page its access STARTS in and then drives the
@@ -5006,16 +5712,20 @@ module core
 
   logic [12:0] cur_ext_end;
   logic        cur_crosses, cross_split_capable, cross_unhandled;
-  assign cur_ext_end         = {1'b0, cur_lin[11:0]} + {9'd0, cur_size};
+  assign cur_ext_end         = {1'b0, cur_lin_nat[11:0]} + {9'd0, cur_size};
   assign cross_split_capable = (state == S_LOAD) || (state == S_LOAD2) ||
                                (state == S_STORE);
   // QUALIFIED ON paging_on. With PG=0 the linear address IS the physical one and a
   // straddling extent is a single contiguous access -- there is no second translation
   // to get wrong and no #PF to owe, so it is not a defect. Counting it would have
   // reported 47 "unsplit crossings" that are all harmless real-mode boot traffic.
+  // REVIEW1_Aug3 R2-C03: the fragment engine covers every translatable state
+  // outside the three with their own machinery (fx_state_ok), so an "unhandled"
+  // crossing should now be impossible; the $fatal below stays as the proof (and
+  // the guard against a future state that escapes fx_state_ok).
   assign cur_crosses         = paging_on && fe_translatable && mem_req_pre_sq &&
                                !xp_pend && (cur_ext_end > 13'h1000);
-  assign cross_unhandled     = cur_crosses && !cross_split_capable;
+  assign cross_unhandled     = cur_crosses && !cross_split_capable && !fx_state_ok;
 
 `ifndef SYNTHESIS
   logic ven_xlog_en;
@@ -5156,6 +5866,27 @@ module core
              ven_stk_ovf_n, ven_stk_unf_n);
 `endif
 
+  // ---- REVIEW_Aug4 A4-H01: the deferred stack-fault latch -------------------
+  // The operand-read fault decision is made at S_FEXEC (the writeback module's
+  // det_* descriptor), but engine/PS/store commits happen states later. Latch
+  // the decision at every S_FEXEC and replay it (fp_flt_q/fp_flt_ovf_q -> the
+  // writeback's fp_flt_i/fp_flt_ovf_i) so the deferred commit applies the same
+  // masked/unmasked response a direct commit would: an unmasked fault no
+  // longer mutates ST/TOP from S_FP_BUSY/S_TRSC_BUSY/S_FPREM_BUSY/
+  // S_FPTRAP_WAIT/S_FSTORE, and a masked fault substitutes the QNaN indefinite
+  // instead of engine output computed from empty-slot bits. Cleared on any
+  // retire; re-evaluated at every S_FEXEC, so a non-faulting op clears it too.
+  always_ff @(posedge clk) begin
+    if (!rst_n) begin
+      fp_flt_q <= 1'b0; fp_flt_ovf_q <= 1'b0;
+    end else if (state == S_FEXEC) begin
+      fp_flt_q     <= fp_stk_ovf || fp_stk_unf;
+      fp_flt_ovf_q <= fp_stk_ovf;
+    end else if (retire_valid) begin
+      fp_flt_q     <= 1'b0; fp_flt_ovf_q <= 1'b0;
+    end
+  end
+
   // ---- REVIEW_aug2 H-05 instrumentation ---------------------------------------
   // The H-05 property is "a FAULTING IRET must not re-arm NMI". Nothing in the test
   // corpus drives the core's nmi input (the sys/verify TBs leave it tied low and
@@ -5248,15 +5979,11 @@ module core
   // of pseg/pmode/ppage/pcpl/pfcpl3, and an empty descriptor cache (attr=00) is
   // indistinguishable from "a descriptor that says not-present" without this bit.
   //
-  // Derived rather than wired: a segment counts as protected-mode-loaded once its
-  // seg_attr CHANGES while PE=1. That needs no edit at any of the 15 seg_attr write
-  // sites -- and missing one of those would have left a segment permanently unchecked.
-  // Cleared wholesale on a return to real mode, where the question is moot.
-  //
-  // FAIL-OPEN by construction: a protected-mode load that happens to write the SAME
-  // attr byte is not detected, so the check simply stays off for that segment. That is
-  // the same direction as the rest of C-01's fallbacks -- it can miss a violation, never
-  // invent one, which is what got the previous attempts reverted.
+  // REVIEW1_Aug3 R2-H07: WIRED, not derived -- every hidden-state load site
+  // writes seg_pm_loaded directly (the attr-change inference could not see a
+  // same-attr reload or an already-zero null load). Cleared wholesale on a
+  // return to real mode (the backstop at the top of the FSM body), where the
+  // question is moot.
 `ifndef SYNTHESIS
   // H-06 reachability: does any test actually take the same-priv 16-bit gate?
   logic ven_h06_hit; int ven_h06_n; logic ven_h06log_en;
@@ -5267,31 +5994,29 @@ module core
   logic        seg_pm_loaded [NUM_SEG];
 `ifndef SYNTHESIS
   // A check that is "live" but whose enable never sets is just a tie-off with extra
-  // steps. Count how many segments actually reach protected-mode-loaded.
+  // steps. Count 0->1 transitions of the explicit loaded bit.
   int ven_pmld_n; logic ven_pmldlog_en;
+  logic [NUM_SEG-1:0] ven_pmld_q;
   initial begin ven_pmldlog_en = $test$plusargs("ven_pmldlog") != 0; ven_pmld_n = 0; end
-  always_ff @(posedge clk) if (rst_n && creg0[0])
-    for (int i = 0; i < NUM_SEG; i++)
-      if (creg0[0] && (seg_attr[i] != seg_attr_q[i]) && !seg_pm_loaded[i])
-        ven_pmld_n <= ven_pmld_n + 1;
+  always_ff @(posedge clk) if (rst_n) begin
+    for (int i = 0; i < NUM_SEG; i++) begin
+      if (seg_pm_loaded[i] && !ven_pmld_q[i]) ven_pmld_n <= ven_pmld_n + 1;
+      ven_pmld_q[i] <= seg_pm_loaded[i];
+    end
+  end
   final if (ven_pmldlog_en)
     $display("[PMLOAD] segments reaching protected-mode-loaded: %0d", ven_pmld_n);
 `endif
-  logic [7:0]  seg_attr_q    [NUM_SEG];
-  always_ff @(posedge clk or negedge rst_n) begin
-    if (!rst_n) begin
-      for (int i = 0; i < NUM_SEG; i++) begin
-        seg_pm_loaded[i] <= 1'b0; seg_attr_q[i] <= 8'd0;
-        seg_b[i] <= 1'b1;   // REVIEW2_aug2 H-05: 4 GiB bound until a descriptor says otherwise
-      end
-    end else begin
-      for (int i = 0; i < NUM_SEG; i++) begin
-        seg_attr_q[i] <= seg_attr[i];
-        if (!creg0[0])                          seg_pm_loaded[i] <= 1'b0;
-        else if (seg_attr[i] != seg_attr_q[i])  seg_pm_loaded[i] <= 1'b1;
-      end
-    end
-  end
+  // REVIEW1_Aug3 R2-H07: seg_pm_loaded is now EXPLICIT — written at every
+  // segment hidden-state load site (1 = the hidden state was loaded in
+  // protected mode, whether from a validated descriptor or as a null/nulled
+  // segment; 0 = real-mode/V86/SMM-style state). The attr-CHANGE inference this
+  // replaces could not see a reload whose descriptor happened to carry the
+  // same attribute byte, and had no representation of a null load whose attr
+  // was already zero. Reset and the PE-drop backstop clear live in the FSM
+  // always_ff with the load-site writes (single driver; see the reset arm and
+  // the top of the case) -- seg_b[]'s reset sits in the same two segment
+  // reset loops for the same single-owner reason.
   logic [31:0] seg_ed_upper;      // expand-down upper bound (by the segment's B bit)
   logic        seg_type_fault;    // write to non-writable / read of execute-only
   // ---- REVIEW2_Aug1 C-06: the bus driver publishes its OWN segment basis --------
@@ -5317,7 +6042,27 @@ module core
   //   * S_INT_PUSH / S_IRET stack accesses carry no segment identity, so their SS
   //     limits are not checked at all.
   // Both need the access to carry its segment INDEX, not just a base -- see #65.
-  logic        tsw_seg_bad;              // C-09: this task-switch segment is invalid
+  logic        tsw_seg_ts;               // incoming segment fails a type/privilege rule -> #TS(sel)
+  logic        tsw_seg_np;               // ...or only its Present bit            -> #NP(sel)
+  // REVIEW_Aug3 C-06: the S_TSW_SEG descriptor read must not ISSUE for a selector
+  // that is already known-bad. The beat-1 validation checked sel_in_table() AFTER
+  // the read, so an out-of-table selector became an address first -- and under
+  // paging that read can #PF ahead of the architecturally prior #TS. The selector
+  // and the staged incoming LDT limit are both stable for the beat, so the bounds
+  // test runs combinationally: the bus arm suppresses the request and the FSM
+  // faults at beat 0 with no memory touched. Null selectors (legal for
+  // DS/ES/FS/GS) still read GDT[0], matching the existing structure.
+  logic        tsw_seg_oob;
+  assign tsw_seg_oob = (state == S_TSW_SEG) && !tsw_eflags[17]
+                    && !is_null_selector(tsw_sel[3'(tsw_step[4:1])])   // R2-C02
+                    && !sel_in_table_st(tsw_sel[3'(tsw_step[4:1])], tsw_st_ldt_limit);
+  // REVIEW1_Aug3 R2-C02: an incoming NULL selector (TI=0/index-0) also performs
+  // no descriptor read -- CS/SS null faults, a null data selector stages an
+  // explicit null hidden cache. One suppression predicate for the bus arm, the
+  // translation predicate, and the FSM.
+  logic        tsw_seg_null;
+  assign tsw_seg_null = (state == S_TSW_SEG) && !tsw_eflags[17]
+                     && is_null_selector(tsw_sel[3'(tsw_step[4:1])]);
   // ---- REVIEW1_Aug2 C-09 (atomicity): stage the incoming segment state -----------
   // S_TSW_SEG wrote seg_base/seg_limit/seg_attr, cpl_r and ss_b one descriptor at a
   // time, before the EIP/EFLAGS/GPR/CR3/TR commit in S_TSW_BUSY. A descriptor rejected
@@ -5332,6 +6077,13 @@ module core
   logic [31:0] tsw_st_base  [NUM_SEG];
   logic [31:0] tsw_st_limit [NUM_SEG];
   logic [7:0]  tsw_st_attr  [NUM_SEG];
+  // REVIEW_Aug3 C-06: the D/B bit must be staged for EVERY segment, not just CS/SS.
+  // Only CS.D and SS.B were carried, so a 16-bit non-SS expand-down data segment
+  // kept the PREVIOUS task's upper bound (seg_b[]) across the switch.
+  logic        tsw_st_b     [NUM_SEG];
+  // R2-H07: the per-segment "loaded in protected mode" bit, staged with the rest
+  // of the incoming hidden state (1 for validated/null staging, 0 for V86).
+  logic        tsw_st_pml   [NUM_SEG];
   logic        tsw_st_cs_d, tsw_st_ss_b;
   logic [1:0]  tsw_st_cpl;
   // REVIEW2_aug2 C-05 (second bullet): the incoming LDTR, STAGED. S_TSW_LDT wrote
@@ -5371,14 +6123,23 @@ module core
   // outside CS is the case that matters and the one that cannot false-positive; an
   // instruction straddling the limit is still missed and is recorded as such.
   logic        cs_fetch_fault;
+  logic        cs_extent_fault;   // R2-H07: decoded-extent half (VEN_SEG_ENFORCE)
   always_comb begin
     logic [32:0] last_byte;
     logic [7:0]  a;
+    logic [15:0] chk_sel;   // R2-H07: the probed segment's selector (staged at S_INT_PROBE)
     // REVIEW1_Aug2 C-01: the descriptor comes from the access's OWN segment index,
     // published by the bus driver next to the address, not from dseg. They differ for
     // string stores (ES vs the DS the source names) and for every stack access.
-    dlimit = seg_limit[cur_seg_idx];
-    a      = seg_attr[cur_seg_idx];
+    // REVIEW1_Aug3 R2-H07: S_INT_PROBE probes the STAGED new stack (int_ss_*) --
+    // by R2-C04 design the live SS is still the OLD one in this state, so reading
+    // seg_*[SG_SS] would judge the new frame by the old segment's base/limit.
+    // Measured under VEN_SEG_ENFORCE: a V86->PM delivery's probe evaluated the
+    // monitor's frame against the V86 task's 64K paragraph SS -> false #SS
+    // cascade (ptaskv86/pv86). Source the check from the staged descriptor.
+    dlimit = (state == S_INT_PROBE) ? int_ss_limit : seg_limit[cur_seg_idx];
+    a      = (state == S_INT_PROBE) ? int_ss_attr  : seg_attr[cur_seg_idx];
+    chk_sel = (state == S_INT_PROBE) ? int_new_ss  : seg_sel[cur_seg_idx];
     // Data-segment type bits (S=1, bit4): bit3=0 data, bit2=E expand-down, bit1=W.
     seg_expand_down = a[4] && !a[3] && a[2];
     // The expand-down upper bound follows the B bit of the segment governing THIS
@@ -5394,7 +6155,7 @@ module core
     // desc[54]. A segment whose load path does not yet write seg_b[] still reads 1 and
     // therefore still gets the 4 GiB bound -- unchanged, not newly faulting.
     seg_ed_upper = (cur_seg_idx == 3'(SG_SS))
-                 ? (ss_b               ? 32'hFFFF_FFFF : 32'h0000_FFFF)
+                 ? (((state == S_INT_PROBE) ? int_ss_b : ss_b) ? 32'hFFFF_FFFF : 32'h0000_FFFF)
                  : (seg_b[cur_seg_idx] ? 32'hFFFF_FFFF : 32'h0000_FFFF);
     // MEASURED (UPDATE 355): this fired spuriously inside the Err79 #GP handler with
     // dseg=2 dlimit=00000000 attr=00 -- the hidden descriptor cache was EMPTY, not "a
@@ -5404,7 +6165,7 @@ module core
     // simply unpopulated.
     // REVIEW2_aug2 H-05: live once the descriptor was actually loaded in protected
     // mode. Before that, attr=00 means "cache unpopulated", not "not present".
-    seg_not_present = seg_pm_loaded[cur_seg_idx] && !seg_attr[cur_seg_idx][7];
+    seg_not_present = seg_pm_loaded[cur_seg_idx] && !a[7];   // a: staged for S_INT_PROBE
     // A null selector may be LOADED but never used to address memory -- #GP(0).
     //
     // BUT NOT FROM THE SELECTOR VALUE ALONE, which is what this used to test and which
@@ -5424,7 +6185,7 @@ module core
     // (the real-mode hidden descriptor still governs); it is a #GP(0) only once the
     // segment has been reloaded in protected mode and is then used to address memory.
     seg_null_sel    = seg_pm_loaded[cur_seg_idx]
-                   && (seg_sel[cur_seg_idx][15:2] == 14'd0);
+                   && (chk_sel[15:2] == 14'd0);   // chk_sel: staged for S_INT_PROBE
     // REVIEW2 C-06: the offset comes from cur_lin, NOT q_ea.
     //
     // MEASURED (UPDATE 355): trusting q_ea produced a repeating spurious #GP with
@@ -5440,7 +6201,7 @@ module core
     // state (stbase for S_STORE, opbase otherwise -- see the S_LOAD/S_STORE arms).
     // ...and so does the base, so the offset is the real segment offset rather than a
     // reconstruction that guessed stbase-or-opbase by state.
-    seg_chk_base = seg_base[cur_seg_idx];
+    seg_chk_base = (state == S_INT_PROBE) ? int_ss_base : seg_base[cur_seg_idx];
     seg_chk_off  = cur_lin - seg_chk_base;
     // Real access extent: last touched byte = offset + (width-1), not a fixed +3.
     // REVIEW2_aug2 H-05: extent from the CANONICAL access size, not q_w. cur_size is
@@ -5549,6 +6310,24 @@ module core
                   && (state == S_FETCH) && (fetch_word == 3'd0)
                   && seg_attr[SG_CS][7]                    // P: unpopulated cache reads 0
                   && ((cur_lin - seg_base[SG_CS]) > seg_limit[SG_CS]);
+    // REVIEW1_Aug3 R2-H07: the DECODED-EXTENT half. The first-byte check above
+    // misses an instruction whose LATER bytes cross CS.limit (an instruction
+    // ending exactly AT the limit is legal; one byte past it is #GP(0)).
+    // Evaluated at the pre-commit point of both issue paths, using eip -- the
+    // ABOUT-TO-EXECUTE instruction -- paired with the length source THAT PATH
+    // is using right now: u_d.len in S_PIPE (the fastpath advances eip by
+    // exactly it at issue), d_len in S_DECODE. (First attempt used q_pc/q_len:
+    // q_pc lags eip by an instruction at the issue point; second used d_len in
+    // S_PIPE, which lags eip across a far-transfer redirect -- measured by
+    // pfetchlim: the first in-segment instruction was judged with the ENTRY
+    // ljmp's 7-byte length.) A limit is an offset bound, so no base
+    // subtraction (that also dodges the PE-transition window's real-mode base).
+    cs_extent_fault = sys_mode && !real_mode && !v86
+                  && seg_attr[SG_CS][7]
+                  && ((state == S_PIPE && (stall_cnt == 7'd0) && pipe_bytes_ok
+                       && (({1'b0, eip} + {28'd0, u_d.len} - 33'd1) > {1'b0, seg_limit[SG_CS]}))
+                   || (state == S_DECODE
+                       && (({1'b0, eip} + {28'd0, d_len} - 33'd1) > {1'b0, seg_limit[SG_CS]})));
     seg_access_fault = cur_is_d && cur_seg_rel && !seg_ext_skip
                     && (seg_off_over_limit || seg_null_sel || seg_not_present
                      || seg_type_fault);
@@ -5558,6 +6337,7 @@ module core
     // access that nothing will fault.
     seg_access_fault = 1'b0;
     cs_fetch_fault   = 1'b0;
+    cs_extent_fault  = 1'b0;
 `endif
   end
 
@@ -5601,6 +6381,7 @@ module core
       // cur_lin==lin, so a guarded miss here passes the LINEAR through unchanged and
       // the FSM (xlate_miss) diverts to S_WALK to fill the right entry.
       if (!paging_on)                  mem_xlate = lin;
+      else if (is_d && frm_pg_hit)     mem_xlate = {frm_pg_hitphys, lin[11:0]};
       else if (is_d  && fe_dtlb_hit && fe_dtlb_v &&
                (fe_dtlb_page == lin[31:12]))  mem_xlate = {fe_dtlb_phys, lin[11:0]};
       else if (!is_d && fe_itlb_hit && fe_itlb_v &&
@@ -5608,6 +6389,7 @@ module core
       else                              mem_xlate = lin;   // miss: value unused
 `else
       if (!paging_on)                  mem_xlate = lin;
+      else if (is_d && frm_pg_hit)     mem_xlate = {frm_pg_hitphys, lin[11:0]};
       else if (is_d  &&  dtlb_lk_hit)   mem_xlate = dtlb_lk_phys;
       else if (!is_d &&  itlb_lk_hit)   mem_xlate = itlb_lk_phys;
       else                              mem_xlate = lin;   // miss: value unused
@@ -5650,8 +6432,11 @@ module core
         3'd0: begin
           pde    = mem_rdata;
           is_big = cr4_pse && pde[7];
-          // a present 4 MiB page with A(+D for write) already set fills directly.
-          if (pde[0] && is_big && !(!pde[5] || (walk_is_write && !pde[6]))) begin
+          // a present 4 MiB page with A(+D for a REAL write) already set fills
+          // directly. A4-C01: the D requirement keys on walk_set_dirty, NOT
+          // walk_is_write -- a probe walk (write class, no D intent) fills the
+          // CLEAN entry directly instead of walking forever.
+          if (pde[0] && is_big && !(!pde[5] || (walk_set_dirty && !pde[6]))) begin
             tlb_fill_en   = 1'b1;
             tlb_fill_big  = 1'b1;
             tlb_fill_pfn  = {pde[31:22], 10'd0};
@@ -5663,7 +6448,7 @@ module core
           is_big = cr4_pse && walk_pde[7];
           if (is_big) begin
             pde = walk_pde | 32'h0000_0020
-                | ((walk_is_write && walk_wr_ok_big) ? 32'h0000_0040 : 32'd0);  // C-04
+                | ((walk_set_dirty && walk_wr_ok_big) ? 32'h0000_0040 : 32'd0);  // C-04; A4-C01: probe never sets D
             tlb_fill_en   = 1'b1;
             tlb_fill_big  = 1'b1;
             tlb_fill_pfn  = {pde[31:22], 10'd0};
@@ -5673,8 +6458,9 @@ module core
         end
         3'd2: begin
           pte = mem_rdata;
-          // present 4 KiB page with A(+D for write) already set fills directly.
-          if (pte[0] && !(!pte[5] || (walk_is_write && !pte[6]))) begin
+          // present 4 KiB page with A(+D for a REAL write) already set fills
+          // directly (A4-C01: walk_set_dirty, like the 4 MiB arm above).
+          if (pte[0] && !(!pte[5] || (walk_set_dirty && !pte[6]))) begin
             tlb_fill_en   = 1'b1;
             tlb_fill_big  = 1'b0;
             tlb_fill_pfn  = pte[31:12];
@@ -5688,7 +6474,7 @@ module core
         end
         default: begin   // step 3: PTE writeback then fill
           pte_new = walk_pte | 32'h0000_0020
-                  | ((walk_is_write && walk_wr_ok_4k) ? 32'h0000_0040 : 32'd0);  // C-04
+                  | ((walk_set_dirty && walk_wr_ok_4k) ? 32'h0000_0040 : 32'd0);  // C-04; A4-C01: probe never sets D
           tlb_fill_en   = 1'b1;
           tlb_fill_big  = 1'b0;
           tlb_fill_pfn  = pte_new[31:12];
@@ -5753,8 +6539,17 @@ module core
   // supervisor access. cur_seg_rel already answers that -- it was added for C-01 and
   // is measured against all 19 system tests -- so no new classification is invented.
   // Instruction fetch (cur_is_d=0) keeps the plain CPL rule.
+  //
+  // REVIEW1_Aug3 R2-C04 follow-up (measured by the pxprobe witness): the frame
+  // probe and the call-gate param copy are IMPLICIT processor accesses, pushed/
+  // read as SUPERVISOR regardless of the not-yet-committed CPL -- QEMU uses
+  // cpu_stl/ldl_kernel for every frame push and param read, and silicon agrees
+  // (#PF err US=0 on a denied frame page; a supervisor-only new stack is legal).
+  // Without this exclusion a CPL3->CPL0 delivery onto supervisor-only pages
+  // false-#PF'd, and the error code carried US=1.
   logic acc_usr;
-  assign acc_usr = (eff_cpl == 2'd3) && (cur_is_d ? cur_seg_rel : 1'b1);
+  assign acc_usr = (eff_cpl == 2'd3) && (cur_is_d ? cur_seg_rel : 1'b1)
+                && (state != S_INT_PROBE) && (state != S_CG_PRD);
 
   logic walk_usr, walk_wr_ok_big, walk_wr_ok_4k;
   // The walk runs AFTER the access that missed, and its own PTE reads are not
@@ -5997,6 +6792,20 @@ module core
       // were a task return -- exactly the re-entry H-04 exists to prevent. Same shape,
       // and the same reason, as the split-transfer aborts below.
       ntret_pend <= 1'b0;
+      // REVIEW_Aug3 C-04: and an in-flight CALL task switch, for the same reason --
+      // a fault before S_TSW_BUSY must not leave the next switch writing a
+      // back-link and setting NT as if it nested.
+      tsw_call   <= 1'b0;
+      // Same class: a far-CALL probe (lcall_pend) or a call-gate re-vector
+      // (gate_via) is per-instruction arming. A fault aborts the instruction, so
+      // neither may survive into the handler to reshape its first far transfer.
+      lcall_pend <= 1'b0;
+      lc_gate    <= 1'b0;   // R2-H05: the staged gate width dies with the call
+      gate_via   <= 1'b0;
+      // REVIEW_Aug3 H-02: and a staged same-privilege RETF -- a rejected target
+      // (selector fault, or the #PF on the descriptor read) must not leave the
+      // deferred ESP advance armed to fire inside the handler.
+      retf_same  <= 1'b0;
       // REVIEW2_aug2 C-06: and an in-flight outer RETF, for the same reason -- a #PF
       // on the ESP/SS pop or on either descriptor read must not leave the sequence
       // armed across the handler, where the next RETF would consume its staged frame.
@@ -6006,6 +6815,7 @@ module core
       // SS load or the frame push must not leave the call-gate shape latched onto the
       // NEXT interrupt delivery, which would push it a frame with no EFLAGS word.
       cg_xpl     <= 1'b0;
+      cg_beat    <= 6'd0;   // R2-H05: and the param-frame beat counter with it
       // REVIEW_aug2 C-02: ABORT any in-flight split memory microsequence.
       // ===================================================================
       // xp_pend (split LOAD) and xs_act/xs_ph (split STORE) were cleared only at reset
@@ -6024,6 +6834,17 @@ module core
       xp_pend <= 1'b0;
       xs_act  <= 1'b0;
       xs_ph   <= 2'd0;
+      // REVIEW1_Aug3 R2-C03: and the generic fragment engine -- a fault mid-sequence
+      // aborts it (the FSM delivery arms take over the bus). The request register
+      // keeps the engine's registers single-owned (the engine block clears them
+      // next edge; the output-stage kill covers this cycle).
+      fx_abort_q <= 1'b1;
+      // A fault anywhere in a cross-privilege delivery (probe pages, call-gate
+      // param reads, the pushes themselves) abandons that delivery: the frame
+      // page plan is stale from here on, so a later same-priv push must never
+      // match a captured page. The restart re-stages and re-probes.
+      frm_pg_val   <= 4'd0;
+      frm_pg_markd <= 1'b0;
       // H-09: a delivery that happens while an NMI handler is running stacks a frame
       // inside it. Doing this in start_fault (rather than at each divert site) is
       // deliberate -- every exception and interrupt delivery funnels through here, so
@@ -6084,7 +6905,9 @@ module core
         end
       end
       int_step    <= 4'd0;
+      rm_read_armed <= 1'b0;
       int_sw      <= 1'b0;        // HW fault: bypass the gate DPL>=CPL check
+      dlv_ext     <= 1'b0;        // synchronous class: EXT=0 (no inheritance)
       // F3: in PURE real mode (PE=0) a hardware interrupt / exception delivers through
       // the 4-byte IVT (S_RMINT_RD), exactly like a software INT n — NOT the 8-byte
       // protected-mode gate. Without this, the first IRQ after SeaBIOS sets IF=1 (or any
@@ -6162,7 +6985,9 @@ module core
       int_has_err <= 1'b0;
       int_err     <= 32'd0;
       int_step    <= 4'd0;
+      rm_read_armed <= 1'b0;
       int_sw      <= 1'b0;               // hardware #DB: bypass the gate DPL check
+      dlv_ext     <= 1'b0;               // a trap/fault class event: EXT=0
       // F3: real-mode #DB also delivers through the IVT (see start_fault).
       state       <= real_mode ? S_RMINT_RD : S_INT_GATE;
     end
@@ -6294,10 +7119,22 @@ module core
   // the bus driver, but in LINEAR space so the page walk + #PF decision use the
   // architectural linear address. Only meaningful for the translatable states.
   logic [31:0] cur_lin;
+  // REVIEW1_Aug3 R2-C03: the NATURAL per-state linear address, before the
+  // fragment engine's page-2 redirect. The engine's crossing detection and
+  // CHECK 5 read this (testing the redirected cur_lin would be a comb loop).
+  logic [31:0] cur_lin_nat;
   logic        cur_is_w;
+  logic        cur_is_w_nat;   // R2-C03: per-state write flag, before the engine forces it
   always_comb begin
-    cur_lin  = 32'd0;
-    cur_is_w = 1'b0;
+    // Case-arm scratch (hoisted to block scope with defaults: a local declared
+    // inside a case arm is unassigned on every path that does not enter the
+    // arm, which Verilator's latch analysis reports even though the value is
+    // only read inside the arm).
+    logic [31:0] enter_koff, enter_joff;
+    logic [15:0] segld_ssel;
+    cur_lin_nat  = 32'd0;
+    cur_is_w_nat = 1'b0;
+    enter_koff = 32'd0; enter_joff = 32'd0; segld_ssel = 16'd0;
     // C-03: most beats are a full dword. The arms below narrow it where the state
     // genuinely moves fewer bytes; anything left at 4 is the conservative reading.
     cur_size = 4'd4;
@@ -6308,9 +7145,9 @@ module core
     ven_h06_hit = 1'b0;
 `endif
     unique case (state)
-      S_FETCH: cur_lin = flin + {27'd0,fetch_word,2'b00};
-      S_PF:    cur_lin = {pf_fill_addr[31:5],5'd0} + {27'd0,pf_word,2'b00};
-      S_PIPE:  cur_lin = pf_miss ? {pf_miss_fa[31:5],5'd0}
+      S_FETCH: cur_lin_nat = flin + {27'd0,fetch_word,2'b00};
+      S_PF:    cur_lin_nat = {pf_fill_addr[31:5],5'd0} + {27'd0,pf_word,2'b00};
+      S_PIPE:  cur_lin_nat = pf_miss ? {pf_miss_fa[31:5],5'd0}
                                  : (seg_base[SG_DS]+gpr_o[pipe_load_base]);
       // REVIEW_aug2 C-05: this must mirror core_bus_driver.svh's S_LOAD arm EXACTLY.
       // Two rows of the review's mismatch table were here:
@@ -6318,47 +7155,47 @@ module core
       //     16-bit stack (SS.B=0) the TLB looked up a different page than the bus drove;
       //   * XLAT had no case at all and fell through to opbase+q_ea, so a paged XLATB
       //     translated an unrelated page while the bus addressed DS+(E)BX+AL.
-      S_LOAD: begin cur_size = {1'b0, q_w};
+      S_LOAD: begin cur_size = {1'b0, load_beat_w};
         if (q_is_pop || q_ct==CT_RETN || q_ct==CT_RETN_IMM ||
-            (q_kind==K_STKMISC && q_sm==SM_POPF))      cur_lin = dbase+stk16(gpr_o[R_ESP]);
-        else if (q_kind==K_STKMISC && q_sm==SM_LEAVE)  cur_lin = dbase+stk16(gpr_o[R_EBP]);
+            (q_kind==K_STKMISC && q_sm==SM_POPF))      cur_lin_nat = dbase+stk16(gpr_o[R_ESP]);
+        else if (q_kind==K_STKMISC && q_sm==SM_LEAVE)  cur_lin_nat = dbase+stk16(gpr_o[R_EBP]);
         else if (q_kind==K_STR)
-          cur_lin = (q_st==ST_SCAS) ? dbase+str_edi : dbase+str_esi;
+          cur_lin_nat = (q_st==ST_SCAS) ? dbase+str_edi : dbase+str_esi;
         else if (q_xlat)
-          cur_lin = dbase
+          cur_lin_nat = dbase
                   + (q_cnt16 ? {16'd0, gpr_o[R_EBX][15:0]} : gpr_o[R_EBX])
                   + {24'd0, gpr_o[R_EAX][7:0]};
-        else                                           cur_lin = opbase+q_ea;  // M7.1 opbase
+        else                                           cur_lin_nat = opbase+q_ea;  // M7.1 opbase
         // REVIEW2 C-02: on the SECOND beat of a split access the TLB must look up the
         // SECOND page, not the first. Mirrors the bus driver's S_LOAD arm exactly --
         // if these two ever disagree the C-03 assertion (CHECK 5) fires, which is
         // precisely the drift this pair has suffered before.
-        if (xp_pend) cur_lin = {cur_lin[31:12] + 20'd1, 12'd0};
+        if (xp_pend) cur_lin_nat = {cur_lin_nat[31:12] + 20'd1, 12'd0};
       end
       // The paging lookup MUST translate the SAME linear the bus driver accesses in
       // S_LOAD2 (core_bus_driver.svh:50-56). Previously this only handled the CMPS
       // [EDI] 2nd operand, so under paging the far-ptr seg-load (LSS/LFS/LGS), BOUND/
-      // CMPXCHG8B, and far JMP/CALL indirect (m16:32) 2nd read had cur_lin = a STALE
+      // CMPXCHG8B, and far JMP/CALL indirect (m16:32) 2nd read had cur_lin_nat = a STALE
       // dbase_edi+str_edi -> dtlb lookup translated the wrong page -> wrong physical
       // (DOS-Quake go32 `lss esp,cs:[..]`: 2nd read read 0 -> null SS -> #GP). Mirror
       // the four bus-driver arms EXACTLY. Inert without paging (mem_xlate==lin).
       S_LOAD2: begin
-        if (q_kind==K_BOUND || q_kind==K_CX8B) cur_lin = dbase+q_ea+{28'd0,q_w};
-        else if (q_seg_load)                   cur_lin = dbase+q_ea+{28'd0,q_w};
-        else if (q_jmpf_mem || q_callf_mem)    cur_lin = opbase+q_ea+{28'd0,q_w};
-        else                                   cur_lin = dbase_edi+str_edi;
+        cur_size = {1'b0, load_beat_w};
+        if (q_kind==K_BOUND || q_kind==K_CX8B) cur_lin_nat = dbase+q_ea+{28'd0,q_w};
+        else if (q_seg_load)                   cur_lin_nat = dbase+q_ea+{28'd0,q_w};
+        else if (q_jmpf_mem || q_callf_mem)    cur_lin_nat = opbase+q_ea+{28'd0,q_w};
+        else                                   cur_lin_nat = dbase_edi+str_edi;
         // REVIEW1_Aug2 C-03: beat 2 of a page-crossing S_LOAD2 re-issues at the SECOND
         // page's base, exactly as S_LOAD does. Mirrors core_bus_driver.svh.
-        if (xp_pend) cur_lin = {cur_lin[31:12] + 20'd1, 12'd0};
+        if (xp_pend) cur_lin_nat = {cur_lin_nat[31:12] + 20'd1, 12'd0};
       end
       // nested ENTER: mirror the bus driver S_ENTER address so paging translates the same
       // linear (inert in real mode where the case is exercised; correct under paging).
       S_ENTER: begin
-        logic [31:0] koff, joff;
-        koff = {26'd0, ent_k} * {29'd0, q_w};
-        joff = ({26'd0, ent_k} - 32'd1) * {29'd0, q_w};
-        if (ent_rd) cur_lin = seg_base[SG_SS] + stk16(gpr_o[R_EBP] - joff);
-        else begin  cur_lin = seg_base[SG_SS] + stk16(gpr_o[R_ESP] - koff); cur_is_w = 1'b1; end
+        enter_koff = {26'd0, ent_k} * {29'd0, q_w};
+        enter_joff = ({26'd0, ent_k} - 32'd1) * {29'd0, q_w};
+        if (ent_rd) cur_lin_nat = seg_base[SG_SS] + stk16(gpr_o[R_EBP] - enter_joff);
+        else begin  cur_lin_nat = seg_base[SG_SS] + stk16(gpr_o[R_ESP] - enter_koff); cur_is_w_nat = 1'b1; end
       end
       // ---- REVIEW2 C-04: descriptor / TSS structures are LINEAR, so translate them.
       // These states read GDT/LDT descriptors, the TSS, and (for a task switch) write
@@ -6375,12 +7212,11 @@ module core
       // so a mismatch fails loudly on the first access instead of silently reading the
       // wrong memory. Deleting the mirror outright is #65.
       S_SEGLD: begin
-        logic [15:0] ssel;
-        ssel    = q_seg_from_mem ? seg_mem_sel : gpr_o[q_src_reg][15:0];
-        cur_lin = (ssel[2] ? ldt_base : gdt_base) + {16'd0, ssel[15:3], 3'd0}
+        segld_ssel = q_seg_from_mem ? seg_mem_sel : gpr_o[q_src_reg][15:0];
+        cur_lin_nat = (segld_ssel[2] ? ldt_base : gdt_base) + {16'd0, segld_ssel[15:3], 3'd0}
                 + {29'd0, seg_step, 2'b00};
       end
-      S_LJMP: cur_lin = (q_ljmp_sel[2] ? ldt_base : gdt_base)
+      S_LJMP: cur_lin_nat = (q_ljmp_sel[2] ? ldt_base : gdt_base)
                       + {16'd0, q_ljmp_sel[15:3], 3'd0} + {29'd0, seg_step, 2'b00};
 
       // REVIEW2 C-03: S_LCALL and S_RETF have LIVE bus accesses (core_bus_driver.svh
@@ -6390,12 +7226,24 @@ module core
       // EXACTLY, stk16() included; the assertion at the end of this file now proves
       // the two agree for every translatable state instead of trusting this comment.
       S_LCALL: begin
-        cur_is_w = 1'b1;
-        cur_lin  = !seg_step ? seg_base[SG_SS] + stk16(gpr_o[R_ESP] - {28'd0,q_w})
-                             : seg_base[SG_SS] + stk16(gpr_o[R_ESP] - {27'd0,q_w,1'b0});
+        cur_is_w_nat = 1'b1;
+        // R2-H05: lc_callw (gate width for a gated call) mirrors the bus arm.
+        cur_lin_nat = !seg_step ? seg_base[SG_SS] + stk16(gpr_o[R_ESP] - {28'd0,lc_callw})
+                             : seg_base[SG_SS] + stk16(gpr_o[R_ESP] - {27'd0,lc_callw,1'b0});
       end
-      S_RETF: cur_lin = !seg_step ? seg_base[SG_SS] + stk16(gpr_o[R_ESP])
-                                  : seg_base[SG_SS] + stk16(gpr_o[R_ESP]+{28'd0,q_w});
+      // REVIEW_Aug3 C-02: the OUTER-level return beats were missing here. The bus arm
+      // keeps popping ESP at +2w and SS at +3w off the ORIGINAL inner ESP when
+      // retf_out is set (retf_ob 0=ESP, 1=SS); this mirror had only the two-beat
+      // inner form, so under paging beats 2 and 3 translated the wrong linear.
+      S_RETF: begin
+        // R2-H05 follow-up (B1): the outer slots sit above the imm16 discard --
+        // mirrors the bus arm EXACTLY (CHECK 5).
+        if (retf_out) cur_lin_nat = seg_base[SG_SS] + stk16(gpr_o[R_ESP] + {16'd0,q_ret_imm} +
+                                (retf_ob ? ({27'd0,q_w,1'b0} + {28'd0,q_w})   // 3w: SS
+                                         :  {27'd0,q_w,1'b0}));               // 2w: ESP
+        else          cur_lin_nat = !seg_step ? seg_base[SG_SS] + stk16(gpr_o[R_ESP])
+                                          : seg_base[SG_SS] + stk16(gpr_o[R_ESP]+{28'd0,q_w});
+      end
       // REVIEW_aug2 C-05 (state selection): LGDT/LIDT and SGDT/SIDT take an ORDINARY
       // linear memory operand, but neither had a cur_lin case.
       //   * S_LGDT was additionally EXCLUDED from the post-translate stage, so under
@@ -6405,20 +7253,20 @@ module core
       //     happened to be resident the pseudo-descriptor was WRITTEN through page
       //     zero's translation; if not, the operand silently bypassed paging.
       // Both now mirror their bus-driver arms and are translatable.
-      S_LGDT:  cur_lin = dbase + q_ea + {29'd0, seg_step, 2'b00};
+      S_LGDT:  cur_lin_nat = dbase + q_ea + {29'd0, seg_step, 2'b00};
       S_SGDT: begin
-        cur_is_w = 1'b1;
-        cur_lin  = dbase + q_ea + {29'd0, seg_step, 2'b00};
+        cur_is_w_nat = 1'b1;
+        cur_lin_nat = dbase + q_ea + {29'd0, seg_step, 2'b00};
       end
       // C-03: the m80 third beat and the m16 forms move 2 bytes, not 4.
-      S_FLOAD: begin cur_lin = dbase+q_ea + {26'd0, f_step, 2'b00};
+      S_FLOAD: begin cur_lin_nat = dbase+q_ea + {26'd0, f_step, 2'b00};
                      cur_size = ((q_f_mbytes==4'd10 && f_step==4'd2) ||
                                  (q_f_mbytes==4'd2)) ? 4'd2 : 4'd4;
                      // H-05: check the WHOLE m16/m32/m64/m80 at the first beat.
                      seg_ext_ovr   = {4'd0, q_f_mbytes};
                      seg_ext_ovr_v = 1'b1;
                      seg_ext_skip  = (f_step != 4'd0); end
-      S_FSTORE: begin cur_lin = dbase+q_ea + {26'd0, f_step, 2'b00}; cur_is_w = 1'b1;
+      S_FSTORE: begin cur_lin_nat = dbase+q_ea + {26'd0, f_step, 2'b00}; cur_is_w_nat = 1'b1;
                      cur_size = ((q_f_mbytes==4'd10 && f_step==4'd2) ||
                                  (q_f_mbytes==4'd2)) ? 4'd2 : 4'd4;
                      seg_ext_ovr   = {4'd0, q_f_mbytes};
@@ -6433,14 +7281,14 @@ module core
       // (6+1)*4 = 28, 16-bit FNSAVE (46+1)*2 = 94, 32-bit (26+1)*4 = 108 -- so it is
       // the SAME override, with the size computed instead of taken from a field. The
       // extent is 8 bits because 108 does not fit in 5.
-      S_FENV_ST: begin cur_lin = dbase+q_ea + fenv_off; cur_is_w = 1'b1;
+      S_FENV_ST: begin cur_lin_nat = dbase+q_ea + fenv_off; cur_is_w_nat = 1'b1;
                        cur_size = (q_f_mbytes == 4'd2) ? 4'd2 : 4'd4;
                        seg_ext_ovr   = (q_f_mbytes == 4'd2)
                                      ? 8'((fenv_last + 6'd1) * 2)
                                      : 8'((fenv_last + 6'd1) * 4);
                        seg_ext_ovr_v = 1'b1;
                        seg_ext_skip  = (fenv_off != 32'd0); end
-      S_FENV_LD: begin cur_lin = dbase+q_ea + fenv_off;
+      S_FENV_LD: begin cur_lin_nat = dbase+q_ea + fenv_off;
                        cur_size = (q_f_mbytes == 4'd2) ? 4'd2 : 4'd4;
                        seg_ext_ovr   = (q_f_mbytes == 4'd2)
                                      ? 8'((fenv_last + 6'd1) * 2)
@@ -6448,7 +7296,7 @@ module core
                        seg_ext_ovr_v = 1'b1;
                        seg_ext_skip  = (fenv_off != 32'd0); end
       S_STORE: begin cur_size = {1'b0, q_w};
-        cur_is_w = 1'b1;
+        cur_is_w_nat = 1'b1;
         // F3/paging fix: POP r/m16 (8F) writes its operand in the operand's OWN
         // segment (DS default/override), NOT the SS that `dbase` forces for the
         // pop's stack READ. core_bus_driver.svh already uses `stbase` for the store
@@ -6457,11 +7305,11 @@ module core
         // go32's `pop ds; pop word [ds:0x4f6c]` (ds!=ss, paging on) stored the popped
         // value to SS_base+0x4f6c instead of DS_base+0x4f6c, corrupting the coroutine
         // fault-dispatch word. stbase==dbase for every non-pop store (byte-identical).
-        cur_lin = st_lin_nat;
+        cur_lin_nat = st_lin_nat;
         // REVIEW2 C-02 (store half): phases 0 (PROBE) and 2 (WRITE) address the SECOND
         // page. Mirrors core_bus_driver.svh's S_STORE arm exactly -- CHECK 5 enforces it.
         // Uses the EFFECTIVE phase so the FIRST clock is the probe (REVIEW_aug2 C-01).
-        if (xs_eff_act && (xs_eff_ph != 2'd1)) cur_lin = {cur_lin[31:12] + 20'd1, 12'd0};
+        if (xs_eff_act && (xs_eff_ph != 2'd1)) cur_lin_nat = {cur_lin_nat[31:12] + 20'd1, 12'd0};
       end
       // REVIEW_aug2 C-05: three mismatches lived here. The bus driver is width-aware
       // (q_w: PUSHAW/POPAW are 2-byte spaced) and applies stk16(); this used a HARD 4
@@ -6471,26 +7319,26 @@ module core
       // the wrong translation. Mirrors core_bus_driver.svh's S_USEQ arm exactly.
       S_USEQ: begin cur_size = {1'b0, q_w};
         if (q_kind==K_CX8B) begin
-          cur_is_w = 1'b1;
-          cur_lin = dbase + q_ea + (step==4'd0 ? 32'd0 : {28'd0,q_w});
+          cur_is_w_nat = 1'b1;
+          cur_lin_nat = dbase + q_ea + (step==4'd0 ? 32'd0 : {28'd0,q_w});
         end else if (q_sm==SM_PUSHA) begin
-          cur_is_w = 1'b1;
-          cur_lin = dbase + stk16(pusha_esp - (({28'd0,step}+32'd1)*{29'd0,q_w}));
+          cur_is_w_nat = 1'b1;
+          cur_lin_nat = dbase + stk16(pusha_esp - (({28'd0,step}+32'd1)*{29'd0,q_w}));
         end else
-          cur_lin = dbase + stk16(gpr_o[R_ESP] + ({28'd0,step}*{29'd0,q_w}));
+          cur_lin_nat = dbase + stk16(gpr_o[R_ESP] + ({28'd0,step}*{29'd0,q_w}));
       end
       // M2S.3 IDT delivery linear addresses (mirror the bus driver arms).
-      S_INT_GATE:   cur_lin = idt_base + {21'd0, int_vec, 3'd0}
+      S_INT_GATE:   cur_lin_nat = idt_base + {21'd0, int_vec, 3'd0}
                               + {29'd0, int_step[0], 2'b00};
       // REVIEW_aug2 C-05: the bus honours the selector's TI bit (GDT vs LDT) for both
       // of these; cur_lin hard-coded the GDT, so an LDT-backed interrupt/IRET CS made
       // the TLB translate a different linear page than the bus addressed.
       S_INT_CS, S_INT_CS_RET:
-                    cur_lin = (int_gate_sel[2] ? ldt_base : gdt_base)
+                    cur_lin_nat = (int_gate_sel[2] ? ldt_base : gdt_base)
                             + {16'd0, int_gate_sel[15:3], 3'd0}
                               + {29'd0, int_step[0], 2'b00};
       S_INT_PUSH: begin
-        cur_is_w = 1'b1;
+        cur_is_w_nat = 1'b1;
         // CROSS-PRIV: push descending from the NEW stack (TSS.espN). SAME-PRIV:
         // descending from the current SS:ESP. (mirror the bus driver arm.)
         //
@@ -6505,26 +7353,62 @@ module core
         // The three arms must agree exactly, which is what CHECK 5 (PAGING/C-03)
         // asserts -- it did not catch this because no corpus test takes a 16-bit gate
         // with paging on. Same shape as C-03's own finding: one address, one source.
-        if (!xpl_active && !from_v86 && int_gate_op16) begin
-          cur_lin  = seg_base[SG_SS]
-                     + (gpr_o[R_ESP] - {27'd0, (int_step + 4'd1), 1'b0});
+        // REVIEW1_Aug3 R2-H05: the cross-privilege CALL-GATE frame is cg_beat-
+        // counted, gate-width units (dword/word), wrapped per the NEW stack's
+        // B bit (installed by the time S_INT_PUSH runs, so stk16 reads it).
+        // Mirrors the cg_xpl sub-arm in core_bus_driver.svh EXACTLY (CHECK 5).
+        if (xpl_active && cg_xpl) begin
+          // the call-gate frame by the slot plan (gate-width units, wrapped per
+          // the installed new stack's B -- S_INT_PROBE walked the same slots)
+          cur_lin_nat = seg_base[SG_SS]
+                      + frm_slot_off(int_new_esp, cg_beat, cg_wide, ss_b);
+          cur_size = cg_wide ? 4'd4 : 4'd2;
+        end else if (xpl_active && !cg_xpl && int_frm16) begin
+          // REVIEW_Aug4 A4-H03: the CROSS-PRIV 16-BIT gate frame. Five/six WORD
+          // slots (old SS, old SP, FLAGS, CS, IP [, err]) descending from the
+          // TSS stack pointer, wrapped per the NEW stack's B bit (installed by
+          // S_INT_SS by the time S_INT_PUSH runs) -- this used to share the
+          // dword arm below, so a 16-bit interrupt/trap gate that changed
+          // privilege built a 32-bit frame.
+          cur_lin_nat = seg_base[SG_SS]
+                      + frm_slot_off(int_new_esp, {2'd0, int_step}, 1'b0, ss_b);
+          cur_size = 4'd2;
+        end else if (!xpl_active && !from_v86 && int_gate_op16) begin
+          // A4-H03: the SAME-PRIV 16-bit frame wraps the LOW SP on a 16-bit
+          // stack (SS.B=0) -- stk16 was missing here, so the slots marched off
+          // the 64K window instead of wrapping.
+          cur_lin_nat = seg_base[SG_SS]
+                     + stk16(gpr_o[R_ESP] - {27'd0, (int_step + 4'd1), 1'b0});
           cur_size = 4'd2;                       // low-half strobe: 2 bytes, not 4
 `ifndef SYNTHESIS
           ven_h06_hit = 1'b1;                    // reachability probe (see below)
 `endif
         end else begin
-          cur_lin = xpl_active
-                    ? (seg_base[SG_SS] + int_new_esp - ({28'd0, int_step} * 32'd4) - 32'd4)
+          // The cross-priv DWORD frame (incl. V86 entry) also wraps per the
+          // installed stack's B bit -- the slot plan, shared with the probe.
+          // (A 16-bit TSS stack for a 32-bit gate used to push unwrapped while
+          // the ESP writeback wrapped, splitting the frame across the window.)
+          cur_lin_nat = xpl_active
+                    ? (seg_base[SG_SS] + frm_slot_off(int_new_esp, {2'd0, int_step}, 1'b1, ss_b))
                     : (seg_base[SG_SS] + gpr_o[R_ESP] - ({28'd0, int_step} * 32'd4) - 32'd4);
         end
       end
       // REVIEW_aug2 C-06: S_IRET_SS reads the popped SS DESCRIPTOR from the GDT/LDT,
       // not the stack. Mirrors core_bus_driver.svh exactly (CHECK 5 enforces it).
-      S_IRET_SS:    cur_lin = (iret_ss[2] ? ldt_base : gdt_base)
+      S_IRET_SS:    cur_lin_nat = (iret_ss[2] ? ldt_base : gdt_base)
                             + {16'd0, iret_ss[15:3], 3'd0} + ({29'd0, int_step[0], 2'b00});
-      S_IRET:       cur_lin = int_gate_op16
-                            ? (seg_base[SG_SS] + gpr_o[R_ESP] + ({27'd0, int_step, 1'b0}))
+      S_IRET: begin
+                cur_lin_nat = int_gate_op16
+                            ? (seg_base[SG_SS] + stk16(gpr_o[R_ESP] + ({27'd0, int_step, 1'b0})))
                             : (seg_base[SG_SS] + gpr_o[R_ESP] + ({28'd0, int_step} * 32'd4));
+                // The bus arm pops a dword and masks; the architectural slot of
+                // a 16-bit IRETW is a WORD, so the segment extent check charges
+                // 2 bytes (a topmost word ending at the bound is legal). The
+                // override leaves cur_size -- and therefore the bus beat -- at
+                // the dword the driver reads.
+                seg_ext_ovr   = 8'd2;
+                seg_ext_ovr_v = int_gate_op16;
+              end
       // REVIEW2 C-04: S_LTR reads the GDT TSS descriptor; S_INT_TSS reads TSS.ssN:espN;
       // S_INT_SS reads the new SS descriptor. All three are architecturally LINEAR and
       // are now TRANSLATED -- the old comment here said they "address their (linear)
@@ -6536,8 +7420,10 @@ module core
       // bit (core_bus_driver.svh:351). That is one of the mismatches REVIEW2 C-03
       // lists BY NAME. Harmless while the value was unused; a wrong-table page walk the
       // moment translation was switched on. Fixed here to match the bus driver.
-      S_LTR:     cur_lin = gdt_base + {16'd0, gpr_o[q_src_reg][15:3], 3'd0}
-                           + {29'd0, seg_step, 2'b00};
+      S_LTR:     cur_lin_nat = ltr_busy_q
+                         ? (gdt_base + {16'd0, ltr_sel_q[15:3], 3'd0} + 32'd4)  // H-11b busy byte
+                         : (gdt_base + {16'd0, gpr_o[q_src_reg][15:3], 3'd0}
+                            + {29'd0, seg_step, 2'b00});
       // REVIEW1_Aug2 M-03: mirrors the S_IOPERM arm in core_bus_driver.svh verbatim.
       // ---- REVIEW1_Aug2 C-09 (paging half): the task-switch microsequence ---------
       // All five S_TSW_* states were excluded from the paging post-stage because they
@@ -6550,28 +7436,84 @@ module core
       // Each case mirrors its core_bus_driver.svh arm EXACTLY; CHECK 5 asserts the two
       // agree on every translatable request, which is the guard that makes adding a
       // mirror safe rather than the drift that produced the C-05 family.
-      S_TSW_SAVE: cur_lin = tr_base + {24'd0, tsw_save_off(tsw_step)};
-      S_TSW_READ: cur_lin = tsw_new_base + {24'd0, tsw_read_off(tsw_step)};
-      S_TSW_LDT:  cur_lin = gdt_base + {16'd0, tsw_new_ldt[15:3], 3'd0}
+      S_TSW_SAVE: begin cur_lin_nat = tr_base + {24'd0, tsw_save_off(tsw_step)};
+                        cur_is_w_nat = 1'b1; end   // the outgoing image is a WRITE
+      S_TSW_READ: cur_lin_nat = tsw_new_base + {24'd0, tsw_read_off(tsw_step)};
+      S_TSW_LDT:  cur_lin_nat = gdt_base + {16'd0, tsw_new_ldt[15:3], 3'd0}
                           + {29'd0, tsw_step[0], 2'b00};
-      S_TSW_SEG:  cur_lin = (tsw_sel[3'(tsw_step[4:1])][2] ? ldt_base : gdt_base)
+      // REVIEW_Aug3 C-02: this mirror used the LIVE outgoing ldt_base while the bus
+      // arm resolves TI=1 selectors through the STAGED incoming tsw_st_ldt_base (the
+      // incoming LDT is committed only in S_TSW_BUSY). A paged task switch whose
+      // incoming and outgoing LDTs differ therefore translated the new task's
+      // descriptor reads through the wrong table.
+      S_TSW_SEG:  cur_lin_nat = (tsw_sel[3'(tsw_step[4:1])][2] ? tsw_st_ldt_base : gdt_base)
                           + {16'd0, tsw_sel[3'(tsw_step[4:1])][15:3], 3'd0}
                           + {29'd0, tsw_step[0], 2'b00};
-      S_TSW_BUSY: cur_lin = (tsw_step == 5'd0)
-                          ? (gdt_base + {16'd0, tr_sel[15:3], 3'd0} + 32'd4)
-                          : (gdt_base + {16'd0, tsw_new_sel[15:3], 3'd0} + 32'd4);
-      S_NTRET_RD: cur_lin = tr_base;
-      S_IOPERM: cur_lin = (int_step == 4'd0)
+      // REVIEW_Aug3 C-02: the busy-write ORDER was mirrored backwards. The bus arm
+      // writes incoming-busy (tsw_new_sel) on beat 0 and outgoing-available (tr_sel)
+      // on beat 1; this mirror had them swapped, so under paging the busy byte was
+      // written to the OPPOSITE descriptor -- the outgoing task rewritten busy and
+      // the incoming one left available.
+      // REVIEW_Aug3 C-04: beat 1 of a CALL task switch is the BACK-LINK write into
+      // the incoming TSS (offset 0), not the outgoing-descriptor clear.
+      // The busy/backlink beats are WRITES too (found by ptswflt's phase-5
+      // injection: without cur_is_w the RO page check never ran and the bytes
+      // landed on a read-only GDT page).
+      S_TSW_BUSY: begin
+        cur_is_w_nat = 1'b1;
+        cur_lin_nat = (tsw_step == 5'd0)
+                          ? (gdt_base + {16'd0, tsw_new_sel[15:3], 3'd0} + 32'd4)
+                          : tsw_call ? tsw_new_base
+                                     : (gdt_base + {16'd0, tr_sel[15:3], 3'd0} + 32'd4);
+      end
+      S_NTRET_RD: cur_lin_nat = tr_base;
+      S_IOPERM: cur_lin_nat = (int_step == 4'd0)
                         ? (tr_base + 32'h64)
                         : (tr_base + {16'd0, ioperm_base} + {19'd0, ioperm_port[15:3]});
-      S_INT_TSS: cur_lin = tr_base + tss_stk_off + {29'd0, int_step[0], 2'b00};
-      S_INT_SS:  cur_lin = (int_new_ss[2] ? ldt_base : gdt_base)
+      S_INT_TSS: cur_lin_nat = tr_base + tss_stk_off + {29'd0, int_step[0], 2'b00};
+      S_INT_SS:  cur_lin_nat = (int_new_ss[2] ? ldt_base : gdt_base)
                            + {16'd0, int_new_ss[15:3], 3'd0}
                            + {29'd0, int_step[0], 2'b00};
-      default: cur_lin = 32'd0;
+      // The frame page-plan probe (see the plan contract near frm_pg_*). A
+      // WRITE permission probe; the bus arm issues NO transaction, so the TLB
+      // lookup / walk / perm check run and nothing is read or written.
+      S_INT_PROBE: begin
+        cur_is_w_nat = 1'b1;
+        // One beat per plan entry: slot-start pages probed AT the slot's
+        // first byte (silicon reports CR2 = the faulting push), lo pages at
+        // their base (frm_pg_addr carries the staged SS base + masked
+        // offset, so a wrapped 16-bit frame's pages are enumerated exactly).
+        cur_lin_nat  = frm_pg_addr[frm_pg_i[1:0]];
+        // the segment extent follows the SLOT's width, not the dword default:
+        // a word slot ending exactly at the stack segment's bound is legal
+        // and must not be rejected as a dword. A page-base (mid) entry's
+        // extent was covered by the preceding slot-start entry.
+        cur_size     = int_frm_wide ? 4'd4 : 4'd2;
+        seg_ext_skip = frm_pg_mid[frm_pg_i[1:0]];
+      end
+      // REVIEW1_Aug3 R2-H05: call-gate parameter read from the OLD (still
+      // installed) stack. Unit = dword for a 32-bit gate, word for a 16-bit
+      // gate; the source offset wraps per the OLD stack's B bit (stk16) --
+      // QEMU helper_lcall_protected: old_ssp + ((ESP + i*u) & old_sp_mask).
+      // cg_beat = param index i in this state.
+      S_CG_PRD: begin
+        cur_lin_nat = seg_base[SG_SS]
+                  + stk16(int_old_esp + (cg_wide ? {24'd0, cg_beat, 2'b00}
+                                                 : {25'd0, cg_beat, 1'b0}));
+        cur_size = cg_wide ? 4'd4 : 4'd2;
+      end
+      default: cur_lin_nat = 32'd0;
     endcase
   end
-
+  // REVIEW1_Aug3 R2-C03: the redirect/forcing boundary. cur_lin_nat (the natural
+  // per-state linear address, read by the engine's crossing detection and by
+  // CHECK 5) has NO fragment-engine dependency, so there is no combinational
+  // loop; cur_lin is what translation and the bus driver consume. An engine
+  // write beat forces cur_is_w so the probe's permission check and the
+  // Dirty-bit walk see a WRITE even in a state whose arm never set it.
+  assign cur_lin  = fx_redirect_e ? {cur_lin_nat[31:12] + 20'd1, 12'd0}
+                                  : cur_lin_nat;
+  assign cur_is_w = (fx_eng && fx_wr_e) ? 1'b1 : cur_is_w_nat;
   // xlate_miss: paging is on, the current state issues a translatable memory
   // access, and the relevant TLB MISSES -> the FSM must run a page walk (S_WALK)
   // before this access can complete. The descriptor-table reads always run with
@@ -6585,12 +7527,9 @@ module core
       // M2S.3 IDT delivery reads/writes are translated when paging is on.
       // M2S.4 adds the inter-priv IRET SS pop (S_IRET_SS) — a genuine stack pop,
       // translated like the other stack accesses.
-      // The DESCRIPTOR/TSS STRUCTURE reads are NOT translatable: S_LTR/S_INT_SS
-      // read the GDT and S_INT_TSS reads the TSS (TSS.ssN:espN). Per IA-32 the GDT
-      // and the TSS are both linear structures, but the M2S.1/.2 convention reads
-      // all descriptor-table / TSS structures PHYSICALLY under the identity-map
-      // simplification — so S_INT_TSS is excluded here exactly like its sibling
-      // S_INT_SS (the GDT read of the new SS descriptor) and S_LTR.
+      // (The descriptor/TSS structure reads are translatable too — added by
+      // REVIEW2 C-04 below; the older M2S.1/.2 physical-read convention this
+      // comment used to record here is gone.)
       S_INT_GATE, S_INT_CS, S_INT_CS_RET, S_INT_PUSH, S_IRET,
       // REVIEW2 C-03: these four were MISSING. S_FENV_ST/S_FENV_LD already had
       // cur_lin cases but were excluded here, so a TLB miss on an x87 environment
@@ -6604,12 +7543,35 @@ module core
       // NOT included: S_WALK (the page-table walk is physical by definition) and
       // S_SMI_SAVE/S_RSM (the SMM save map is architecturally physical). Those two
       // exclusions are correct and stay.
-      S_SEGLD, S_LJMP, S_LTR, S_INT_TSS, S_INT_SS,
+      S_LJMP, S_INT_TSS, S_INT_SS,
       S_IRET_SS: translatable = 1'b1;
+      // REVIEW1_Aug3 R2-C02: a null segment load performs no access (seg_null_load
+      // suppresses the request), so it must not translate either -- same
+      // suppression/translation coherence as the null-LLDT fix.
+      S_SEGLD:   translatable = !seg_null_load;
+      // REVIEW_Aug3 (the pltr blocker): a NULL LLDT performs NO access at all --
+      // lldt_null_q suppresses the bus request -- so it must not TRANSLATE either.
+      // With paging on, the unsuppressed divert walked the GDT[0] page and raised
+      // a #PF for an access the architecture never makes (and even on a present
+      // page a spurious walk dirties A bits). The suppressed request and the
+      // suppressed translation must come from the same predicate.
+      S_LTR:     translatable = !lldt_null_q;
+      // REVIEW1_Aug3 R2-C04: the frame probe translates (and walks on a miss)
+      // like any access, but issues no bus transaction (the bus arm stays idle).
+      S_INT_PROBE: translatable = 1'b1;
+      // R2-H05: the param reads are ordinary (old-)stack reads -- they page and
+      // walk like any other, delivered in the old context on a fault.
+      S_CG_PRD:    translatable = 1'b1;
       S_NTRET_RD: translatable = 1'b1;
       S_IOPERM:  translatable = 1'b1;   // REVIEW1_Aug2 M-03: a TSS read, so it pages
       // REVIEW1_Aug2 C-09: the task switch now pages like every other linear access.
-      S_TSW_SAVE, S_TSW_READ, S_TSW_LDT, S_TSW_SEG, S_TSW_BUSY: translatable = 1'b1;
+      S_TSW_SAVE, S_TSW_READ, S_TSW_LDT, S_TSW_BUSY: translatable = 1'b1;
+      // Same suppression/translation coherence as S_LTR: a beat whose request is
+      // suppressed -- out-of-bounds (tsw_seg_oob), null (tsw_seg_null, R2-C02), or
+      // a V86 incoming task (no descriptor reads at all) -- must not translate
+      // either. The V86 half of this was reachable before this change: a
+      // paragraph-indexed "GDT read" had its request suppressed but still walked.
+      S_TSW_SEG: translatable = !tsw_eflags[17] && !tsw_seg_oob && !tsw_seg_null;
       default: translatable = 1'b0;
     endcase
     // S_PIPE only reads memory when a load or an icache fill is requested.
@@ -6655,14 +7617,22 @@ module core
 
     // xlate_miss from the REGISTERED hit (off the critical path); 0 during the pend
     // stall (the FSM holds, no premature walk).
-    xlate_miss = paging_on && translatable && !fe_xlate_pend &&
-                 (cur_is_d ? (!fe_dtlb_hit || (cur_is_w && !xs_probing && !fe_dtlb_dirty))
+    // A4-C01: the fragment engine's write probe (fx_probing) is the same
+    // not-a-write class as xs_probing here -- a probe on a clean entry is NO miss.
+    // S_INT_PROBE's validation phase (frm_pg_markd=0) is the same class; its D-mark
+    // phase deliberately KEEPS the clean-entry rewalk (that is how D gets set
+    // pre-commit), and an S_INT_PUSH beat on a plan-covered page never misses.
+    xlate_miss = paging_on && translatable && !fe_xlate_pend && !frm_pg_hit &&
+                 (cur_is_d ? (!fe_dtlb_hit || (cur_is_w && !xs_probing && !fx_probing
+                                                 && !((state==S_INT_PROBE) && !frm_pg_markd)
+                                                 && !fe_dtlb_dirty))
                            : !fe_itlb_hit);
 `else
-    xlate_miss = paging_on && translatable &&
+    xlate_miss = paging_on && translatable && !frm_pg_hit &&
                  (cur_is_d
                     ? (!dtlb_lk_hit ||
-                       (cur_is_w && !xs_probing && !dtlb_lk_dirty))
+                       (cur_is_w && !xs_probing && !fx_probing
+                        && !((state==S_INT_PROBE) && !frm_pg_markd) && !dtlb_lk_dirty))
                     : !itlb_lk_hit);
 `endif
   end
@@ -6760,6 +7730,20 @@ module core
   logic [4:0]  ic_fill_off;
   logic [31:0] ic_fill_data;
   logic [IC_TAGW-1:0] ic_fill_tag;
+  // R2-H09: the filling line's PHYSICAL page tag. mem_addr is the post-translate
+  // bus address (core_bus_driver.svh's tail runs mem_xlate in place), so during
+  // any fill beat its tag slice is exactly the line's physical identity (the
+  // slice straddles the page-offset top under VEN_CACHE_HALF -- bit 11 is in the
+  // tag there -- which is consistent: translation preserves the low 12 bits in
+  // both domains). A 32-byte line never straddles a page, so all eight fill
+  // words agree on it.
+  logic [IC_TAGW-1:0] ic_fill_ptag;
+  assign ic_fill_ptag = mem_addr[5+IC_IDXW +: IC_TAGW];
+  // R2-H09: the icache's CPU-snoop PHYSICAL match (ports 1/2), forwarded to the
+  // uopcache so decoded state dies under the same physical identity.
+  logic               ic_snp1_hit, ic_snp2_hit;
+  logic [IC_IDXW-1:0] ic_snp1_hset, ic_snp2_hset;
+  logic [IC_WAYW-1:0] ic_snp1_hway, ic_snp2_hway;
   // REVIEW2 H-17: instruction cacheability. The I-cache validated EVERY fill and had
   // no cacheable input, so CR0.CD did not control I-side allocation at all -- the
   // D-side already honours it (H-18, ven_l1d .cacheable) but the I-side kept
@@ -6822,6 +7806,7 @@ module core
   logic [IC_IDXW-1:0]  icbp_set [2];
   logic [IC_WAYW-1:0]  icbp_way [2];
   logic [IC_TAGW-1:0]  icbp_tag [2];
+  logic [IC_TAGW-1:0]  icbp_ptag [2];   // R2-H09: physical identity for the snoop clear
   logic                icbp_rr;      // round-robin insert pointer
   // does entry i cover either line the fetch currently needs?
   function automatic logic icbp_needed(input int i);
@@ -6838,11 +7823,39 @@ module core
         icbp_set[icbp_rr] <= ic_fill_set;
         icbp_way[icbp_rr] <= ic_fill_way;
         icbp_tag[icbp_rr] <= ic_fill_tag;
+        icbp_ptag[icbp_rr] <= ic_fill_ptag;   // R2-H09
         icbp_rr           <= ~icbp_rr;
       end
       // retire an entry only when NEITHER fetch line needs it
       for (int i = 0; i < 2; i++)
         if (icbp_v[i] && !icbp_needed(i)) icbp_v[i] <= 1'b0;
+      // R2-H09: a CPU store through ANY alias drops the bypassed copy too --
+      // the same physical match the line snoop does (LAST, so it wins over a
+      // same-edge capture: a store to the line being bypass-filled must not
+      // leave the stale bytes consumable).
+      for (int i = 0; i < 2; i++) begin
+        if (icbp_v[i] && icsnp_v1 && (icbp_set[i] == icsnp_a1[5 +: IC_IDXW])
+            && (icbp_ptag[i] == icsnp_a1[5+IC_IDXW +: IC_TAGW])) icbp_v[i] <= 1'b0;
+        if (icbp_v[i] && icsnp_v2 && (icbp_set[i] == icsnp_a2[5 +: IC_IDXW])
+            && (icbp_ptag[i] == icsnp_a2[5+IC_IDXW +: IC_TAGW])) icbp_v[i] <= 1'b0;
+      end
+`ifdef VEN_L1_AXI
+      // A4-H02: the EXTERNAL physical snoop (a DMA/northbridge write), exact
+      // when lin == phys. With paging ON the exec_flush_all clear below already
+      // covers it conservatively, so this precise path is what paging-OFF DMA
+      // (real-mode BIOS/DOS code loading) invalidates through.
+      for (int i = 0; i < 2; i++)
+        if (icbp_v[i] && ic_snoop_valid
+            && (icbp_set[i]  == ic_snoop_addr[5 +: IC_IDXW])
+            && (icbp_ptag[i] == ic_snoop_addr[5+IC_IDXW +: IC_TAGW]))
+          icbp_v[i] <= 1'b0;
+`endif
+      // A4-H02: the bypass is EXECUTABLE VALIDITY like the I-cache/uopcache --
+      // it dies with the same flush domain (global/cache invalidation, A20
+      // edge, TLB/remap flush). LAST, so invalidation also wins over a
+      // same-edge insertion (a fill completing into a flushed domain must not
+      // leave the new entry live behind the flush's back).
+      if (exec_flush_all) icbp_v <= 2'b00;
     end
   end
 `endif
@@ -6908,10 +7921,14 @@ module core
     // (and the S_PIPE->S_PF advance, core_fastpath.svh) MUST wait for mem_ack — else
     // every cold I-line latches garbage at boot. The `(!real_bus||mem_ack)` term is
     // inert in modes 0/1 and absent in the default build.
-    // !fp_irq_divert: same reason as pf_miss -- no word-0 capture for a fill that the
-    // divert guarantees will never complete.
-    ic_pf_miss_fill = (state==S_PIPE) && !fp_irq_divert && !xlate_miss && (stall_cnt==7'd0) &&
-                      !pipe_bytes_ok
+    // !fp_issue_block: same reason as pf_miss -- no word-0 capture for a fill
+    // that an interrupt or debugger park guarantees will never complete.
+    // !exec_issue_ok (a flush cycle): the divert calls this clock a pure bubble,
+    // so no fill word may land in it either -- the capture would race the
+    // invalidating edge inside the icache. Word 0 refetches from S_PF (the
+    // divert sets pf_word=0 on a flush cycle).
+    ic_pf_miss_fill = (state==S_PIPE) && !fp_issue_block && !xlate_miss && (stall_cnt==7'd0) &&
+                      !pipe_bytes_ok && exec_issue_ok
 `ifdef VEN_L1_AXI
                       && (!real_bus || mem_ack)
 `endif
@@ -6952,9 +7969,9 @@ module core
       logic ic_in_pipe, ic_halt4, ic_fp_arm, ic_fp_commit, ic_int_issue;
       logic [31:0] ic_dep_ready, ic_straddle_a, ic_v_a;
       // common: reached the inner FP/issue else-chain (past stall/fill/defer).
-      // !fp_irq_divert: nothing issues on a diverted clock, so no LRU touch and no
+      // !fp_issue_block: nothing issues on an abandoned clock, so no LRU touch and no
       // FP commit. Gating ic_in_pipe covers ic_int_issue AND ic_fp_commit at once.
-      ic_in_pipe = (state==S_PIPE) && !fp_irq_divert && !xlate_miss && (stall_cnt==7'd0) &&
+      ic_in_pipe = (state==S_PIPE) && !fp_issue_block && !xlate_miss && (stall_cnt==7'd0) &&
                    pipe_bytes_ok && (pending_mem_pen==7'd0);
       // FK_ARITH-under-bad-PC HALT arm (no touch). BUG#3: gate by VEN_FP_PC_RELAX to
       // MATCH the fast-path spine (core_fastpath.svh) — else the FMUL retires but its
@@ -7027,6 +8044,9 @@ module core
     .fill_nocache (ic_fill_nocache),
     .fill_done (ic_fill_done),
     .fill_tag  (ic_fill_tag),
+    .fill_ptag (ic_fill_ptag),   // R2-H09: the filling line's PHYSICAL page tag
+    .snoop1_hit(ic_snp1_hit), .snoop1_hset(ic_snp1_hset), .snoop1_hway(ic_snp1_hway),
+    .snoop2_hit(ic_snp2_hit), .snoop2_hset(ic_snp2_hset), .snoop2_hway(ic_snp2_hway),
     .tch0_en   (ic_tch0_en),
     .tch0_set  (ic_tch0_set),
     .tch0_tag  (ic_tch0_tag),
@@ -7040,10 +8060,10 @@ module core
 `ifdef VEN_L1_AXI
     .snoop_inv_valid (ic_snoop_valid),
     .snoop_inv_addr  (ic_snoop_addr),
-    .snoop_inv_valid1(ic_snoop_valid1 || smc_v1),   // H-12: core-generated SMC snoop
-    .snoop_inv_addr1 (ic_snoop_valid1 ? ic_snoop_addr1 : smc_a1),
-    .snoop_inv_valid2(ic_snoop_valid2 || smc_v2),
-    .snoop_inv_addr2 (ic_snoop_valid2 ? ic_snoop_addr2 : smc_a2),   // H-12
+    .snoop_inv_valid1(icsnp_v1),   // H-12: core-generated SMC snoop
+    .snoop_inv_addr1 (icsnp_a1),   // R2-H09: PHYSICAL (both sources)
+    .snoop_inv_valid2(icsnp_v2),
+    .snoop_inv_addr2 (icsnp_a2),   // H-12
     // REVIEW2 H-16: the I-cache is LINEAR-tagged (flin = seg_base[SG_CS] + eip), but
     // snoop port 0 is the DMA / northbridge snoop and carries a PHYSICAL address. With
     // paging ON those live in different spaces, so a DMA write to physical page P
@@ -7068,22 +8088,26 @@ module core
     // storing through another): those are CPU stores on ports 1/2, exact in linear
     // space but only for the aliases that share a linear address. That needs physical
     // tags or an alias map -- see task #69.
-    .flush_all       (ic_flush_all || (ic_snoop_valid && paging_on) || a20_flush || cache_inv_go)
+    // R2-H09: the tlb_flush term covers remaps (MOV CR3 / INVLPG / CR0.PG) -- a
+    // remapped linear page's resident lines must die with the old mapping.
+    // A4-H02: the expression is exec_flush_all now, shared with every other
+    // executable-validity store (uopcache, predecode, the fetch bypass).
+    .flush_all       (exec_flush_all)
 `else
-    // REVIEW Aug-1 M-06: the non-L1-AXI branch omitted .flush_all entirely, so
-    // a PINMISSING warning was raised on the DEFAULT full-core build. The
-    // ic_flush_all core PORT itself only exists under VEN_L1_AXI (there is no
-    // northbridge / external writer in this variant), so there is genuinely no
-    // flush source here -- tie it off EXPLICITLY. Behaviour is identical to the
-    // unconnected pin; the point is that the build no longer warns, so a FUTURE
-    // real missing connection is not lost in the noise (L-01).
+    // The non-L1-AXI build has no northbridge/DMA snoop source, so the three
+    // snoop ports tie off -- but the GLOBAL flush has the same sources as the
+    // L1 build (tlb_flush_q / a20_flush / cache_inv_go / smm_flush), and the
+    // I-cache must invalidate with them: without this, a flush cycle could
+    // refill the OTHER way while the stale line stayed valid, leaving two
+    // valid ways sharing one tag (hit priority then decides which byte
+    // stream executes -- placement luck, not a contract).
     .snoop_inv_valid (1'b0),
     .snoop_inv_addr  (32'd0),
-    .snoop_inv_valid1(smc_v1),   // H-12: the core's OWN store snoop
-    .snoop_inv_addr1 (smc_a1),
-    .snoop_inv_valid2(smc_v2),
-    .snoop_inv_addr2 (smc_a2),   // H-12
-    .flush_all       (1'b0)
+    .snoop_inv_valid1(icsnp_v1),   // H-12: the core's OWN store snoop
+    .snoop_inv_addr1 (icsnp_a1),   // R2-H09: PHYSICAL
+    .snoop_inv_valid2(icsnp_v2),
+    .snoop_inv_addr2 (icsnp_a2),   // H-12
+    .flush_all       (exec_flush_all)
 `endif
   );
 
@@ -7139,8 +8163,14 @@ module core
     // REVIEW2 H-16: flush the predecode array with the I-cache, for the same reason
     // and on the same condition -- otherwise the I-cache refills correct bytes while
     // this keeps serving uops predecoded from the stale ones.
-    .flush_all(ic_flush_all || (ic_snoop_valid && paging_on) || a20_flush || cache_inv_go),
-    .inv_en(ic_fill_done), .inv_set(ic_fill_set), .inv_way(ic_fill_way),
+    .flush_all(exec_flush_all),   // A4-H02: ONE domain (was a duplicated expression)
+    // R2-H09: the icache's PHYSICAL snoop match drops the decoded state of the
+    // same {set,way} on the same edge -- a store through any alias now kills
+    // stale predecoded uops too (previously only a refill did).
+    .inv_en(ic_fill_done || ic_snp1_hit),
+    .inv_set(ic_snp1_hit ? ic_snp1_hset : ic_fill_set),
+    .inv_way(ic_snp1_hit ? ic_snp1_hway : ic_fill_way),
+    .inv2_en(ic_snp2_hit), .inv2_set(ic_snp2_hset), .inv2_way(ic_snp2_hway),
     .pd_busy()
   );
 `endif
@@ -7212,6 +8242,7 @@ module core
   logic [2:0]  fpp_aluop;            // captured f_eval inputs / target
   logic [79:0] fpp_a, fpp_b;
   logic [1:0]  fpp_rc;
+  logic [1:0]  fpp_pc;
   logic        fpp_err;
   logic [2:0]  fpp_dst;              // ABSOLUTE fpr index (ftop at issue)
   // combinational capture lines (driven by the fast-arm FK_ARITH issue, latched
@@ -7220,8 +8251,11 @@ module core
   logic [2:0]  fp_cap_aluop, fp_cap_dst;
   logic [79:0] fp_cap_a, fp_cap_b;
   logic [1:0]  fp_cap_rc;
+  logic [1:0]  fp_cap_pc;
   logic        fp_cap_err;
   logic        fp_pipe_rd_haz;       // next op reads the in-flight target -> stall
+  logic        fp_cap_stkflt;        // R2-H06: masked stack fault at capture
+  logic        fpp_stkflt;           // R2-H06: registered with the capture
 `ifdef VEN_FP_PIPE2
   // 2-STAGE FP-commit split (Fmax: K26 half-cache 60 MHz). The 1-stage +VEN_FP_PIPE
   // defer still runs the WHOLE f_eval (f_eval_s1 front -> f_eval_s2 round) in the
@@ -7238,7 +8272,9 @@ module core
   logic        fpp2_valid;           // a stage-1 result is in flight (commits N+2)
   fx_pipe_t    fpp2_s1;              // registered f_eval_s1 output (the split point)
   logic [1:0]  fpp2_rc;
+  logic [1:0]  fpp2_pc;
   logic [2:0]  fpp2_dst;             // ABSOLUTE fpr index carried from stage 0
+  logic        fpp2_stkflt;          // R2-H06: the masked-fault marker, stage 1
   fx_pipe_t    fp_s1_next;           // comb f_eval_s1 result feeding the stage reg
 `endif
 `endif
@@ -7276,6 +8312,8 @@ module core
     .f_seq_step       (f_seq_step),
     .fp_stk_ovf       (fp_stk_ovf),
     .fp_stk_unf       (fp_stk_unf),
+    .fp_flt_i         (fp_flt_q),
+    .fp_flt_ovf_i     (fp_flt_ovf_q),
     .fenv_last        (fenv_last),
     .env_tmp          (env_tmp),
     .fp_st            (fp_st),
@@ -7284,11 +8322,12 @@ module core
     .fstat            (fstat),
     .fptag            (fptag),
     .xlate_miss       (xlate_miss),
-    .irq_divert       (fp_irq_divert),
+    .issue_block      (fp_issue_block),
     .stall_cnt        (stall_cnt),
     .pipe_bytes_ok    (pipe_bytes_ok),
     .pending_mem_pen  (pending_mem_pen),
     .v_bytes_ok       (v_bytes_ok),
+    .pair_block       (dbg_pair_block),
     .core_cyc         (core_cyc),
     .fp_ready_cyc     (fp_ready_cyc),
     .fp_occ_pending   (fp_occ_pending),
@@ -7327,13 +8366,17 @@ module core
     .fpp_a            (fpp_a),
     .fpp_b            (fpp_b),
     .fpp_rc           (fpp_rc),
+    .fpp_pc           (fpp_pc),
     .fpp_err          (fpp_err),
     .fpp_dst          (fpp_dst),
+    .fpp_stkflt       (fpp_stkflt),   // R2-H06
 `ifdef VEN_FP_PIPE2
     .fpp2_valid       (fpp2_valid),
     .fpp2_s1          (fpp2_s1),
     .fpp2_rc          (fpp2_rc),
+    .fpp2_pc          (fpp2_pc),
     .fpp2_dst         (fpp2_dst),
+    .fpp2_stkflt      (fpp2_stkflt),   // R2-H06
 `endif
 `endif
 `ifdef VEN_FPTRAP
@@ -7406,7 +8449,9 @@ module core
     .fp_cap_a         (fp_cap_a),
     .fp_cap_b         (fp_cap_b),
     .fp_cap_rc        (fp_cap_rc),
+    .fp_cap_pc        (fp_cap_pc),
     .fp_cap_err       (fp_cap_err),
+    .fp_cap_stkflt    (fp_cap_stkflt),   // R2-H06
     .fp_pipe_rd_haz   (fp_pipe_rd_haz)
 `ifdef VEN_FP_PIPE2
     ,
@@ -7526,11 +8571,18 @@ module core
   assign eng_u_mode  = eng_u_rem_go ? 2'd2 : (eng_sqrt_start ? 2'd1 : 2'd0);
   assign eng_u_a     = eng_u_rem_go ? fst(3'd0) : (eng_sqrt_start ? eng_sqrt_in : eng_div_a);
   assign eng_u_b     = eng_u_rem_go ? fst(3'd1) : eng_div_b;
+  // The remainder sideband lands on private wires; eng_fprem_q012/c2/ie are
+  // driven exactly once per configuration (below under VEN_FPREM, or the
+  // tie-off where the handshake is declared) -- connecting the engine pins
+  // straight to the handshake nets made them multiply driven in the
+  // VEN_SRT_ITER-without-VEN_FPREM configuration.
+  logic [2:0] srt_rem_q012;
+  logic       srt_rem_c2, srt_rem_ie;
   fpu_srt_div u_srt_div (
     .clk(clk), .rst_n(rst_n), .start(eng_u_start), .mode(eng_u_mode),
     .prem1(eng_u_prem1), .a(eng_u_a), .b(eng_u_b), .rc(eng_rc), .pc(fctrl[9:8]), .buggy(ENG_DIV_BUGGY),
     .busy(eng_u_busy), .done(eng_u_done), .result(eng_u_result),
-    .rem_q012(eng_fprem_q012), .rem_c2(eng_fprem_c2), .rem_ie(eng_fprem_ie)
+    .rem_q012(srt_rem_q012), .rem_c2(srt_rem_c2), .rem_ie(srt_rem_ie)
   );
   assign eng_div_busy   = eng_u_busy;   assign eng_sqrt_busy   = eng_u_busy;
   assign eng_div_done   = eng_u_done;   assign eng_sqrt_done   = eng_u_done;
@@ -7539,6 +8591,9 @@ module core
   assign eng_fprem_busy   = eng_u_busy;
   assign eng_fprem_done   = eng_u_done;
   assign eng_fprem_result = eng_u_result[79:0];
+  assign eng_fprem_q012   = srt_rem_q012;
+  assign eng_fprem_c2     = srt_rem_c2;
+  assign eng_fprem_ie     = srt_rem_ie;
 `endif
 `else
   assign eng_div_busy=1'b0;  assign eng_div_done=1'b0;  assign eng_div_result='0;
@@ -7617,6 +8672,13 @@ module core
   logic        eng_bcd_start, eng_bcd_busy, eng_bcd_done;
   logic [81:0] eng_bcd_result;
   logic [81:0] fbcd_result_q;       // latched {ie,pe,bcd} store value
+  // ONE suppression decision for a store with an UNMASKED stack fault, shared by
+  // the S_FEXEC state transition (core_fp_exec.svh), the PS store-trap request,
+  // and the BCD engine start: the operation retires suppressed and NOTHING may
+  // launch -- a background engine run would complete AFTER the suppressed
+  // retire, and a second FBSTP within its ~60-cycle window would consume the
+  // stale result.
+  wire fp_store_suppressed = (fp_stk_ovf || fp_stk_unf) && !fctrl[0];
 `ifdef VEN_FP_PS_ALL
   // FP_PS_ALL store-after-trap: the floatx80->m32/m64/int/BCD narrowing CONVERSION
   // (fx_to_f32_ex / fx_to_f64_ex / fx_to_int_ex / fx_fx_to_bcd) is a deep combinational
@@ -7655,7 +8717,21 @@ module core
   logic        eng_fbld_start, eng_fbld_busy, eng_fbld_done;
   logic [79:0] eng_fbld_result;
 `ifdef VEN_BCD_ITER
-  assign eng_bcd_start = (state==S_FEXEC) && (q_fxop==FX_FBSTP);
+  assign eng_bcd_start = (state==S_FEXEC) && (q_fxop==FX_FBSTP) && !fp_store_suppressed;
+`ifndef SYNTHESIS
+  // a suppressed store must never launch the engine; the start count is
+  // observable so the back-to-back FBSTP case can prove exactly one accepted
+  // start per valid op (zero for the suppressed one).
+  int ven_bcd_starts; logic ven_bcdlog_en;
+  initial begin ven_bcdlog_en = $test$plusargs("ven_bcdlog") != 0; ven_bcd_starts = 0; end
+  always_ff @(posedge clk) begin
+    if (rst_n && eng_bcd_start) ven_bcd_starts <= ven_bcd_starts + 1;
+    if (rst_n && fp_store_suppressed && (state==S_FEXEC)
+        && (eng_bcd_start || eng_fbld_start))
+      $error("FPU/SUPPRESS: an iterative engine launched for a suppressed x87 store");
+  end
+  final if (ven_bcdlog_en) $display("[BCDLOG] ven_bcd engine starts: %0d", ven_bcd_starts);
+`endif
   ven_bcd u_bcd (
     .clk(clk), .rst_n(rst_n), .start(eng_bcd_start),
     .v(fst(3'd0)), .rc(fctrl[11:10]),
@@ -7902,7 +8978,12 @@ module core
     wp  = creg0[16];
     perm_fault   = 1'b0;
     perm_fault_i = 1'b0;
-    if (paging_on && cur_is_d && dtlb_lk_hit) begin
+    // REVIEW_Aug3: the data half must be qualified on fe_translatable, matching the
+    // fetch half -- a state whose access is SUPPRESSED (null-LLDT S_LTR, an
+    // out-of-bounds S_TSW_SEG beat, and the physical S_WALK/SMM states, none of
+    // which are translatable) must not take a permission fault for a transaction
+    // it never issues.
+    if (paging_on && cur_is_d && fe_translatable && dtlb_lk_hit) begin
       // user access to a supervisor page
       if (usr && !pd[2]) perm_fault = 1'b1;
       // write to a read-only page (user writer always; supervisor only if WP)
@@ -7923,7 +9004,72 @@ module core
   // Bus request generation (single combinational driver) — relocated VERBATIM
   // into core_bus_driver.svh (module-scope `always_comb, pasted here).
   // ===========================================================================
+  // REVIEW1_Aug3 R2-C03: the driver produces bd_*; the FRAGMENT ENGINE's output
+  // stage below drives the actual mem_* ports.
   `include "core_bus_driver.svh"
+
+  // ===========================================================================
+  // REVIEW1_Aug3 R2-C03: the fragment-engine OUTPUT STAGE + FSM-side muxes.
+  //
+  // Engagement is REGISTERED (fx_act) so no combinational path runs from
+  // xlate_miss/perm_fault through fx_start into cur_lin and back. The only two
+  // combinational intercepts, both loop-free (they never touch cur_lin or the
+  // TLB lookup): the write start clock suppresses the port request (nothing may
+  // escape unmasked on the entry clock -- the xs_eff lesson), and a same-clock
+  // combinational frag1 ack is hidden from the FSM.
+  logic        fx_eng, fx_wr_e;
+  logic [1:0]  fx_ph_e;
+  logic        fx_probe_e, fx_redirect_e, fx_shift_e, fx_maskA_e, fx_hold_e, fx_merge_e;
+  logic        fx_wrsup_e;
+  // The walk-detour blank: while the FSM is in S_WALK the engine is invisible
+  // (its registers are frozen in the sequencer above). Without this the armed
+  // read-merge leaks into the walk's PDE/PTE latches (pxc04).
+  logic        fx_walk_hold;
+  assign fx_walk_hold = (state == S_WALK);
+  // the abort-cycle kill: while fx_abort_q is set (one cycle after any
+  // start_fault), the ARMED sequence's shaping is blanked so the delivery's
+  // first beat is never hijacked; the fx_start-based terms below stay live so
+  // a delivery beat that itself crosses still fragments correctly.
+  assign fx_eng   = fx_act && !fx_walk_hold && !fx_abort_q;
+  assign fx_wr_e  = fx_wr;
+  assign fx_ph_e  = fx_ph;
+  assign fx_probe_e    = fx_act && !fx_walk_hold && !fx_abort_q &&  fx_wr && (fx_ph == 2'd0);
+  assign fx_redirect_e = fx_act && !fx_walk_hold && !fx_abort_q && ((fx_wr && (fx_ph != 2'd1))
+                                 || (!fx_wr && (fx_ph == 2'd1)));
+  assign fx_shift_e    = fx_act && !fx_walk_hold && !fx_abort_q &&  fx_wr && (fx_ph == 2'd2);
+  assign fx_maskA_e    = fx_act && !fx_walk_hold && !fx_abort_q &&  fx_wr && (fx_ph == 2'd1);
+  assign fx_hold_e     = (fx_act && !fx_walk_hold && !fx_abort_q && ((fx_wr && (fx_ph == 2'd1))
+                                  || (!fx_wr && (fx_ph == 2'd0))))
+                      || (fx_start && !bd_we);   // a same-clock frag1 ack
+  assign fx_merge_e    = fx_act && !fx_walk_hold && !fx_abort_q && !fx_wr && (fx_ph == 2'd1);
+  assign fx_wrsup_e    = fx_probe_e || (fx_start && bd_we);
+
+  // read-fragment strobe shaping (R2-H01): the L1 sizes a non-cacheable read
+  // from the strobes, so each fragment carries its own window -- frag1 the
+  // page-1 bytes, frag2 the page-2 bytes (shifted to lane 0). fx_first_nat is
+  // the start-clock (pre-register) page-1 byte count.
+  logic [2:0]  fx_first_nat;
+  logic        fx_rdfrag1_e, fx_rdfrag2_e;
+  assign fx_first_nat = 3'(13'h1000 - {1'b0, cur_lin_nat[11:0]});
+  assign fx_rdfrag1_e = (fx_act && !fx_walk_hold && !fx_abort_q && !fx_wr && (fx_ph == 2'd0)) || (fx_start && !bd_we);
+  assign fx_rdfrag2_e = fx_act && !fx_walk_hold && !fx_abort_q && !fx_wr && (fx_ph == 2'd1);
+
+  assign mem_req   = fx_wrsup_e ? 1'b0 : bd_req;   // the probe issues NO transaction
+  assign mem_we    = bd_we;
+  assign mem_addr  = bd_addr;                      // follows cur_lin (redirected)
+  assign mem_wdata = fx_shift_e ? (fx_wdata_q >> ({2'd0, fx_first} << 3)) : bd_wdata;
+  assign mem_wstrb = fx_shift_e ? (fx_wstrb_q >> fx_first)              // write frag B
+                   : fx_maskA_e ? (bd_wstrb & ((4'b1 << fx_first) - 4'b1))  // write frag A
+                   : fx_rdfrag2_e ? (fx_wstrb_q >> fx_first)            // read frag2
+                   : fx_rdfrag1_e ? (bd_wstrb & ((4'b1 << (fx_act ? fx_first : fx_first_nat)) - 4'b1))
+                   : bd_wstrb;
+  // the FSM's view of the bus: the ack is hidden until the LAST fragment, and
+  // read data is the two fragments merged at the beat's byte offset.
+  logic [31:0] mem_rdata;
+  logic        mem_ack;
+  assign mem_rdata = fx_merge_e ? fx_merged : bus_rdata;
+  assign mem_ack   = bus_ack && !fx_hold_e;
+  assign fx_probing = fx_probe_e;
 
   // ===========================================================================
   // M7.3b port-I/O bus driver (separate combinational driver) — relocated
@@ -8173,16 +9319,20 @@ module core
   logic [3:0]  fpchk_dst_q;
   logic [7:0]  fpchk_shadow_n;   // retires observed with irq_shadow still set
   logic        fpchk_dbg_q;      // CHECK 4: debug armed on the issue clock
+  logic        fpchk_fxabort_q, fpchk_fxstart_q;  // CHECK 8: abort request/start history
+  logic [1:0]  fpchk_fxph_q;
   always_ff @(posedge clk) begin
     if (!rst_n) begin
       fpchk_arm_q <= 1'b0; fpchk_we_q <= 1'b0; fpchk_wreg_q <= 1'b0;
       fpchk_dst_q <= 4'd0; fpchk_shadow_n <= 8'd0; fpchk_dbg_q <= 1'b0;
+      fpchk_fxabort_q <= 1'b0; fpchk_fxstart_q <= 1'b0; fpchk_fxph_q <= 2'd0;
     end else begin
       // ---- CHECK 1: a diverted clock must commit NOTHING ---------------------
       // Direct, same-clock, no history needed: if the spine is abandoning this
-      // instruction for an interrupt, no mirror may write a register.
-      if (fp_irq_divert && (gpr_we != '0))
-        $error("FASTPATH/irq-divert: gpr_we=%b on a clock the spine diverted to an interrupt (eip=%08h) -- a register was committed for an instruction that did not retire",
+      // instruction for an interrupt or external debugger park, no mirror may
+      // write a register.
+      if (fp_issue_block && (gpr_we != '0))
+        $error("FASTPATH/issue-block: gpr_we=%b on a clock the spine did not issue (eip=%08h) -- a register was committed for an instruction that did not retire",
                gpr_we, eip);
 
       // ---- CHECK 2: the C-01 shape -------------------------------------------
@@ -8192,7 +9342,7 @@ module core
       // spine retire a register-writing integer instruction while the mirror
       // wrote no register? That is exactly C-01, and nothing here restates the
       // guard chain.
-      fpchk_arm_q  <= (state == S_PIPE) && !fp_irq_divert;
+      fpchk_arm_q  <= (state == S_PIPE) && !fp_issue_block;
       fpchk_we_q   <= (gpr_we != '0);
       fpchk_wreg_q <= u_d.wreg && !u_d.is_branch && !u_d.is_nop && !u_d.is_fp;
       fpchk_dst_q  <= {1'b0, u_d.dst};
@@ -8201,54 +9351,79 @@ module core
         $error("FASTPATH/C-01: spine retired a register-writing fast-path insn (dst=r%0d) but the GPR writeback mirror asserted no gpr_we -- the two guard chains have drifted apart",
                fpchk_dst_q);
 
-      // ---- CHECK 5: the paging mirror must equal the real bus address ---------
-      // REVIEW2 C-03. cur_lin (what the TLB looks up and the page walk fills) and
-      // mem_addr (what the bus actually drives) are generated by two INDEPENDENT
-      // pieces of code that must agree in every translatable state. They have drifted
-      // repeatedly -- stk16() applied on one side only, fixed 4-byte strides vs q_w,
-      // GDT hard-coded vs selector.TI, and states present in one list but not the
-      // other. On a miss that walks the wrong page; on a coincidental hit it
-      // post-translates the wrong linear. Both are silent wrong-memory failures.
-      //
-      // Until the mirror is deleted outright (the real fix), this makes any drift
-      // fail loudly at the first access instead of corrupting memory quietly.
-      //
-      // ---- REVIEW2_aug2 C-04: THE MIRROR IS GONE FROM THE DATAPATH ---------------
-      // core_bus_driver.svh now overrides mem_addr with cur_lin for exactly the states
-      // `translatable` names, so the bus address for a translatable access has ONE
-      // generator and the second cannot disagree with it. That is the finding itself,
-      // not a symptom of it.
-      //
-      // THIS CHECK IS WHY THE CHANGE COULD BE MADE SAFELY. It had been comparing the
-      // two generators on every translatable request and was green throughout, so the
-      // override is a no-op on all reachable behaviour -- known, not hoped. The old
-      // claim at core.sv:1242 ("cur_lin == the bus mem_addr in every translatable
-      // state, proven verbatim across the FSM arms") rested on reading 56 arms against
-      // 62 by eye; this is the version that keeps holding.
-      //
-      // It keeps running, now against mem_addr_arm -- the value the LEGACY arms still
-      // compute -- because those arms are dead for translatable states and should be
-      // deleted. Comparing against the live mem_addr would be tautological and would
-      // destroy the evidence needed to remove them safely: each arm can go once this
-      // has stayed silent for it. Drift here is no longer a wrong-memory event (the
-      // datapath ignores these arms); it is a stale-code report.
-      //
-      // THE CHECK IS LIVE, not vacuous: a positive control (mem_addr_arm = mem_addr+4)
-      // makes it fire on pxpage; the real arms leave it silent. Worth stating, because
-      // "silent" and "cannot speak" look identical in a log, and this review has
-      // already found one fix that was entirely dead while every witness stayed green.
-      //
-      // A NOTE ON THE COMBINATIONAL CYCLE, because it nearly got this abandoned on a
-      // false premise. Adding the override draws an UNOPTFLAT on cur_seg_rel -- the
-      // bus driver's always_comb produces the segment identity cur_lin consumes and
-      // now also consumes cur_lin. MEASURED: that warning is PRE-EXISTING at HEAD,
-      // byte-identical, with no working changes at all. The override does not create
-      // it. The cycle is real and predates this work; it is recorded as its own issue
-      // rather than credited to, or used to veto, this change.
-      if (paging_on && fe_translatable && mem_req && !xlate_miss
-          && (cur_lin != mem_addr_arm))
-        $error("PAGING/C-04: DEAD bus-driver arm for state %0d disagrees with cur_lin -- TLB looks up lin=%08h, the superseded arm computes lin=%08h. The datapath now uses cur_lin, so this is not a wrong-memory event: that arm is stale and must be corrected or deleted.",
-               int'(state), cur_lin, mem_addr_arm);
+      // ---- CHECK 7: invalidation beats consumption on a flush cycle ----------
+      // exec_issue_ok gates every executable hit (ic_present, uop_hit) while
+      // exec_flush_all is asserted, so a flush cycle can neither serve a cached
+      // line nor a predecoded slot. These trip if a future change reintroduces
+      // a consumption path around the gate (the RSM leak: a cached SMRAM line
+      // retiring in the cycle after SMM closes).
+      if (exec_flush_all && sfetch_fast)
+        $error("FETCH/FLUSH: the fast fetch window is serving while exec_flush_all is asserted -- invalidation must beat consumption");
+`ifdef VEN_UOPCACHE
+      if (exec_flush_all && uop_hit)
+        $error("FETCH/FLUSH: a predecode hit is serving while exec_flush_all is asserted -- invalidation must beat consumption");
+`endif
+
+      // ---- CHECK 8: fragment abort is complete and blank -------------------
+      // start_fault only PULSES fx_abort_q (the engine's registers are
+      // single-owned by the sequencer block): the abort cycle itself must show
+      // no armed fragment shaping (the kill keeps the delivery's first beat
+      // clean), and one cycle later the engine must be disengaged unless a new
+      // crossing start already replaced the aborted sequence.
+      if (fx_abort_q && (fx_probe_e || fx_merge_e || fx_redirect_e || fx_shift_e
+                         || fx_maskA_e || fx_rdfrag2_e))
+        $error("FX/ABORT: armed fragment shaping is live during the abort cycle -- the delivery's first beat would be hijacked");
+      if (fpchk_fxabort_q && !fpchk_fxstart_q && fx_act)
+        $error("FX/ABORT: the engine is still engaged one cycle after the abort request (ph=%0d)", fpchk_fxph_q);
+      fpchk_fxabort_q <= fx_abort_q;
+      fpchk_fxstart_q <= fx_start;
+      fpchk_fxph_q    <= fx_ph;
+
+      // ---- CHECK 9: the I-cache invalidation contract -----------------------
+      // On an exec_flush_all cycle the executable arrays clear at the edge, so
+      // no fill word may land on that same clock (the capture would race the
+      // clear inside the icache, and tool-dependent NBA order would decide
+      // which one wins). The S_PIPE word-0 capture and the word-0 bus request
+      // are both gated by exec_issue_ok; this trips if a path around them
+      // appears.
+      if (exec_flush_all && ic_fill_en)
+        $error("ICACHE/FLUSH: a fill word landed on a flush cycle -- it races the invalidating edge");
+
+      // ---- CHECK 6: probe walks never set D; real writes never fill clean ----
+      // REVIEW_Aug4 A4-C01. The two write-intent notions must stay separate all
+      // the way to memory: walk_is_write (architectural class: W/R permission
+      // and the #PF error code) vs walk_set_dirty (may change architectural D
+      // state). A crossing-write probe walks with the first but not the second.
+      if (state == S_WALK && paging_on && mem_req && mem_we
+          && walk_is_write && !walk_set_dirty) begin
+        if (walk_step == 3'd1 && mem_wdata[6] && !walk_pde[6])
+          $error("WALK/A4-C01: a PROBE walk is setting PDE.D (wdata=%08h pde=%08h) -- the probe must not change architectural D state: if page 1 faults, the store never happened",
+                 mem_wdata, walk_pde);
+        if (walk_step == 3'd3 && mem_wdata[6] && !walk_pte[6])
+          $error("WALK/A4-C01: a PROBE walk is setting PTE.D (wdata=%08h pte=%08h) -- the probe must not change architectural D state",
+                 mem_wdata, walk_pte);
+      end
+      // A permitted non-probe write must not fill a CLEAN writable leaf: the
+      // entry it installs must carry the D it just wrote (or that was already
+      // set) -- otherwise the next write re-walks forever.
+      if (state == S_WALK && mem_ack && tlb_fill_en && walk_for_d
+          && walk_is_write && walk_set_dirty && !tlb_fill_dirty
+          && ((walk_step == 3'd1 && walk_wr_ok_big)
+              || (walk_step == 3'd3 && walk_wr_ok_4k)))
+        $error("WALK/A4-C01: a REAL write filled a CLEAN writable leaf (step=%0d) -- the next write to this page will miss and re-walk indefinitely",
+               walk_step);
+
+      // ---- CHECK 5: RETIRED (REVIEW1_Aug3 R2-M02 complete) ----------------------
+      // This assertion compared cur_lin (what the TLB looks up and the page walk
+      // fills) against mem_addr_arm (what the legacy per-state bus-driver arms
+      // computed) on every translatable request. It stayed green for the whole
+      // REVIEW2 C-03..C-05 era, which is what made deleting the arms safe. The
+      // migration is now COMPLETE: every translatable state's address is cur_lin,
+      // and the only remaining bus-driver address arms belong to the states that
+      // are physical by definition (S_WALK, S_SMI_SAVE/S_RSM) or run unpaged
+      // (S_RMINT_*). There is no second generator left to compare, so the check,
+      // the addr_migrated predicate, and the mem_addr_arm snapshot retire
+      // together, exactly as planned when the predicate was introduced.
 
       // ---- REVIEW2_Aug1 C-06 DIAGNOSTIC (+ven_seglog) ------------------------
       // The delivery is REMOVED (see core_fetch_decode.svh), because two earlier
@@ -8265,13 +9440,23 @@ module core
       // gated on VEN_SEG_ENFORCE (it had to be -- see its definition), so keying the
       // probe off it would make this diagnostic silent in exactly the build where you
       // most want to know what enforcement WOULD reject before flipping the default.
-      if (ven_seglog_en && mem_req_pre_sq && fe_translatable
+      // REVIEW1_Aug3 R2-H07: S_INT_PROBE issues NO bus request by design (bd_req=0),
+      // so mem_req_pre_sq never covers it -- the frame-extent probe's would-be
+      // segment rejections were invisible to this log. Include it explicitly.
+      // (Diagnostic only: no DELIVERY is added there -- QEMU does not segment-check
+      // implicit kernel pushes, so faulting would diverge from the oracle.)
+      if (ven_seglog_en && (mem_req_pre_sq || (state == S_INT_PROBE)) && fe_translatable
           && cur_is_d && cur_seg_rel
           && (seg_off_over_limit || seg_null_sel || seg_not_present || seg_type_fault))
         $display("[SEGCHK] st=%0d dseg=%0d sel=%04h base=%08h lim=%08h attr=%02h ed=%b | cur_lin=%08h off=%08h w=%0d cpl=%0d pc=%08h",
                  int'(state), int'(cur_seg_idx), seg_sel[cur_seg_idx], seg_chk_base, dlimit,
                  seg_attr[cur_seg_idx], seg_expand_down, cur_lin, seg_chk_off, q_w,
                  int'(eff_cpl), eip);
+      // R2-H07: the fetch-extent check's firings, same plusarg.
+      if (ven_seglog_en && cs_extent_fault)
+        $display("[SEGCHK-X] st=%0d eip=%08h len=%0d cs_lim=%08h cs_attr=%02h",
+                 int'(state), eip, (state == S_PIPE) ? u_d.len : d_len,
+                 seg_limit[SG_CS], seg_attr[SG_CS]);
 
       // ---- CHECK 4: the fast path must never issue while debugging is armed ---
       // The fast path implements neither single-step nor DR breakpoints, so if it

@@ -131,6 +131,30 @@ package ventium_sys_pkg;
   //   - CS (far jmp, same-priv): must be executable (code)               -> #GP
   // `is_cs` selects the CS rules, `is_ss` the SS rules; `cpl`/`rpl` are the
   // current privilege and the selector RPL.
+  // REVIEW1_Aug3 R2-C02: ONE definition of a null selector and of a selector
+  // error code, so the dozen local expressions cannot drift apart again.
+  // A NULL selector is index 0 AND TI=0 (RPL ignored): sel[15:2]==0. Selectors
+  // 0x0004..0x0007 name LDT entry 0 -- a VALID, ordinary entry, not null.
+  function automatic logic is_null_selector(input logic [15:0] sel);
+    is_null_selector = (sel[15:2] == 14'd0);
+  endfunction
+  // The architectural error code for a selector-sourced fault: the selector with
+  // only RPL cleared (index and TI PRESERVED). {sel[15:3],3'b000} clears TI as
+  // well and must not be used; a bare {16'd0,sel} keeps RPL, also wrong.
+  function automatic logic [31:0] selector_error(input logic [15:0] sel);
+    selector_error = {16'd0, sel} & 32'h0000_FFFC;
+  endfunction
+  // The error code for a fault that blames a GDT/LDT selector reached THROUGH
+  // an IDT gate (the gate's target CS / TSS): index and TI from the selector,
+  // IDT=0 (the blamed descriptor is not the IDT entry itself), EXT = whether
+  // the delivered event was external to the program (anything but a software
+  // INT). The (vec<<3)|IDT form belongs ONLY to faults about the IDT gate
+  // descriptor itself.
+  function automatic logic [31:0] selector_error_ext(input logic [15:0] sel,
+                                                     input logic        ext);
+    selector_error_ext = selector_error(sel) | {31'd0, ext};
+  endfunction
+
   function automatic logic seg_load_fault(
       input logic        is_cs, input logic is_ss,
       input logic [15:0] sel,   input logic [7:0] a,
@@ -139,7 +163,7 @@ package ventium_sys_pkg;
     logic [1:0] rpl, dpl;
     logic       fault;
     begin
-      nullsel = (sel[15:3] == 13'd0);   // selector index 0 (RPL/TI ignored)
+      nullsel = is_null_selector(sel);   // R2-C02: index 0 AND TI=0
       rpl     = sel[1:0];
       dpl     = desc_dpl(a);
       fault   = 1'b0;
@@ -147,8 +171,11 @@ package ventium_sys_pkg;
         // null in CS or SS is illegal; null in DS/ES/FS/GS is fine.
         fault = is_cs || is_ss;
       end else begin
-        if (!desc_present(a))          fault = 1'b1;            // #NP / #SS
-        else if (!desc_s(a))           fault = 1'b1;            // system desc as seg -> #GP
+        // REVIEW_Aug4 A4-H05: the architectural order -- S/type/privilege FIRST
+        // (#GP), presence LAST (#NP/#SS). QEMU's tss_load_seg implements the
+        // same order; a not-present descriptor with a bad type or insufficient
+        // privilege must fault #GP, not #NP.
+        if (!desc_s(a))                fault = 1'b1;            // system desc as seg -> #GP
         else if (is_cs) begin
           if (!seg_is_code(a))         fault = 1'b1;            // CS must be code
         end else if (is_ss) begin
@@ -160,24 +187,42 @@ package ventium_sys_pkg;
           if (!seg_readable(a))        fault = 1'b1;
           else if ((cpl > dpl) || (rpl > dpl)) fault = 1'b1;
         end
+        if (!fault && !desc_present(a)) fault = 1'b1;           // #NP / #SS (LAST)
       end
       seg_load_fault = fault;
     end
   endfunction
 
   // M2S.3 — the IDT VECTOR for a raised descriptor-load fault (companion to
-  // seg_load_fault; only meaningful when that returns 1). #NP(11) when a non-SS
-  // present check fails; #SS(12) when an SS present check fails; #GP(13) for
-  // every other descriptor-load fault (type/privilege/null-CS-SS). A NULL DS/ES/
-  // FS/GS load is legal (no fault), so it never reaches here.
+  // seg_load_fault; only meaningful when that returns 1). #GP(13) for every
+  // S/type/privilege/null failure, #NP(11)/#SS(12) ONLY when presence is the
+  // sole failing check (A4-H05: presence is evaluated LAST, so the vector
+  // follows the same class order as seg_load_fault -- a combined-invalid
+  // entry reports the FIRST architectural failure, not #NP-by-default).
+  // A NULL DS/ES/FS/GS load is legal (no fault), so it never reaches here.
   function automatic logic [7:0] seg_fault_vec(
       input logic is_cs, input logic is_ss, input logic [15:0] sel,
-      input logic [7:0] a);
+      input logic [7:0] a, input logic [1:0] cpl);
     logic nullsel;
+    logic [1:0] rpl, dpl;
     begin
-      nullsel = (sel[15:3] == 13'd0);
-      if (!nullsel && !desc_present(a)) seg_fault_vec = is_ss ? 8'd12 : 8'd11;
-      else                              seg_fault_vec = 8'd13;   // #GP
+      nullsel = is_null_selector(sel);   // R2-C02
+      rpl     = sel[1:0];
+      dpl     = desc_dpl(a);
+      if (nullsel) begin
+        seg_fault_vec = 8'd13;           // #GP(0) -- only CS/SS nulls reach here
+      end else if (!desc_s(a)) begin
+        seg_fault_vec = 8'd13;
+      end else if (is_cs && !seg_is_code(a)) begin
+        seg_fault_vec = 8'd13;
+      end else if (is_ss && (!seg_writable(a) || dpl != cpl || rpl != cpl)) begin
+        seg_fault_vec = 8'd13;
+      end else if (!is_cs && !is_ss
+                   && (!seg_readable(a) || (cpl > dpl) || (rpl > dpl))) begin
+        seg_fault_vec = 8'd13;
+      end else begin
+        seg_fault_vec = is_ss ? 8'd12 : 8'd11;   // presence is the only failure left
+      end
     end
   endfunction
 

@@ -21,6 +21,11 @@ module tb_icache_snoop;
   logic [WAYW-1:0] ic_victim_o [IC_SETS];
   logic            fill_en=0; logic [IDXW-1:0] fill_set=0; logic [WAYW-1:0] fill_way=0;
   logic [4:0]      fill_off=0; logic [31:0] fill_data=0; logic fill_done=0; logic [TAGW-1:0] fill_tag=0;
+  // R2-H09: the physical tag input. This TB has no paging (lin == phys), so the
+  // physical tag is the same slice of the same address.
+  logic [TAGW-1:0] fill_ptag=0;
+  logic            snp1_hit; logic [IDXW-1:0] snp1_hset; logic [WAYW-1:0] snp1_hway;
+  logic            snp2_hit; logic [IDXW-1:0] snp2_hset; logic [WAYW-1:0] snp2_hway;
   logic tch0_en=0, tch1_en=0, tch2_en=0; logic [IDXW-1:0] tch0_set=0, tch1_set=0, tch2_set=0;
   logic [TAGW-1:0] tch0_tag=0, tch1_tag=0, tch2_tag=0;
   logic        snoop_inv_valid=0; logic [31:0] snoop_inv_addr=0;
@@ -34,7 +39,9 @@ module tb_icache_snoop;
       .ic_tag_o(ic_tag_o), .ic_val_o(ic_val_o), .ic_victim_o(ic_victim_o),
       .fill_en(fill_en), .fill_set(fill_set), .fill_way(fill_way), .fill_off(fill_off),
       .fill_data(fill_data), .fill_nocache(fill_nocache),
-      .fill_done(fill_done), .fill_tag(fill_tag),
+      .fill_done(fill_done), .fill_tag(fill_tag), .fill_ptag(fill_ptag),
+      .snoop1_hit(snp1_hit), .snoop1_hset(snp1_hset), .snoop1_hway(snp1_hway),
+      .snoop2_hit(snp2_hit), .snoop2_hset(snp2_hset), .snoop2_hway(snp2_hway),
       .tch0_en(tch0_en), .tch0_set(tch0_set), .tch0_tag(tch0_tag),
       .tch1_en(tch1_en), .tch1_set(tch1_set), .tch1_tag(tch1_tag),
       .tch2_en(tch2_en), .tch2_set(tch2_set), .tch2_tag(tch2_tag),
@@ -60,7 +67,7 @@ module tb_icache_snoop;
     @(negedge clk);
     for (int w=0; w<8; w++) begin
       fill_en<=1; fill_set<=a[5 +: IDXW]; fill_way<=way; fill_off<=5'(w*4); fill_data<=32'hC0DE_0000+w;
-      fill_done<=(w==7); fill_tag<=a[5+IDXW +: TAGW];
+      fill_done<=(w==7); fill_tag<=a[5+IDXW +: TAGW]; fill_ptag<=a[5+IDXW +: TAGW];
       @(negedge clk);
     end
     fill_en<=0; fill_done<=0;
@@ -125,6 +132,7 @@ module tb_icache_snoop;
       fill_en<=1; fill_set<=IDXW'(0); fill_way<=1'b1; fill_off<=5'(w*4);
       fill_data<=32'hBEEF_0000+w; fill_done<=(w==7);
       fill_tag<=TAGW'(32'h0000_4000 >> (5+IDXW));
+      fill_ptag<=TAGW'(32'h0000_4000 >> (5+IDXW));   // R2-H09: lin == phys here
       fill_nocache <= (w >= 3);        // becomes non-cacheable at beat 3
       @(negedge clk);
     end
@@ -143,6 +151,7 @@ module tb_icache_snoop;
           fill_en<=1; fill_set<=IDXW'(s); fill_way<=WAYW'(wy); fill_off<=5'(w*4);
           fill_data<=(32'h1 << ((s + wy*4 + w) % 32)) ^ 32'(s*32'h0204_0801 + w);
           fill_done<=(w==7); fill_tag<=TAGW'(s*7 + wy*131 + w + 1);
+          fill_ptag<=TAGW'(s*7 + wy*131 + w + 1);   // R2-H09: lin == phys here
           @(negedge clk);
         end
         fill_en<=0; fill_done<=0;

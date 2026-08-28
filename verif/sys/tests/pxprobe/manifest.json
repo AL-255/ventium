@@ -1,0 +1,47 @@
+{
+  "name": "pxprobe",
+  "kind": "system",
+  "src": "pxprobe.S",
+  "linker": "pxprobe.ld",
+  "image": "pxprobe.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 6000,
+  "sys": true,
+  "paging": true,
+  "finding": "REVIEW1_Aug3 R2-C04 (privilege-changing delivery is non-transactional)",
+  "gate_form": "DIFFERENTIAL (step-7 full-stream compare vs the QEMU golden) + a step-7e faultlog extra (exactly one supervisor-class #PF, no escalation). Was authored as a WITNESS gate on 2026-08-03 because the probe AS FIRST IMPLEMENTED diverged from QEMU in two fields; both divergences were measured, fixed in the RTL (see resolved_oracle_gaps), and the full 3502-record stream is now EQUIVALENT.",
+  "resolved_oracle_gaps": {
+    "gap1_errcode_and_cr2": "RESOLVED 2026-08-04. The first probe implementation was classified as a USER access (cur_seg_rel=1 with cpl_r still 3 -> acc_usr=1), so the #PF carried err=6 (US=1) and CR2 was the extent's last byte (int_new_esp-1). QEMU/silicon: the frame pushes are SUPERVISOR accesses (cpu_stl_kernel), so err=2 (US=0,W=1,P=0) and CR2 = the first faulting push's start (0x8100c). Fix: acc_usr excludes S_INT_PROBE/S_CG_PRD, and the top-page probe address is the first push's start when it lies on the top page (probe_ppush, core.sv).",
+    "gap2_supervisor_stack_false_fault": "RESOLVED by the same classification fix. Measured with a variant image (bottom frame page supervisor-only): the user-classified probe falsely raised #PF(7) and the delivery never happened; the supervisor-classified probe matches QEMU (delivery completes)."
+  },
+  "transitions": [
+    "real->protected (CR0.PE 0->1, CS far-jump to 32-bit flat code segment 0x08)",
+    "GDT @ 0x500 (6 entries): null + code0 0x08 + data0 0x10 + code3 0x18 (0x1B) + data3 0x20 (0x23) + TSS32 0x28 (base 0x3000, limit 0x67, available)",
+    "IDT @ 0x1000: #PF(14) -> pf3_handler (trap gate 0x8F DPL0, CS=0x1B: SAME-priv at CPL3), 0x30 -> int0_handler (trap gate 0xEF DPL3, CS=0x08: CROSS-priv from CPL3)",
+    "TSS @ 0x3000: SS0:ESP0 = 0x10:0x00081010 -- the 20-byte cross-priv frame [0x80FFC, 0x8100F] STRADDLES the 0x81000 page boundary; LTR establishes TR",
+    "paging: PD @ 0x10000 (PD[0] -> PT0 P|RW|US), PT0 @ 0x11000 identity [0,1MiB) P|RW|US EXCEPT PT0[0x81]=0 (the frame's top page NOT PRESENT); CR3 load + CR0.PG 0->1",
+    "inter-priv IRET down to CPL3 (SS=0x23, ESP=0x70000, EFLAGS=0x3002 IOPL=3, CS=0x1B)",
+    "CPL3 `int $0x30`: S_INT_SS stages the switch, S_INT_PROBE write-probes the frame's bottom page (ok) then the top page -> the S_WALK divert finds PT0[0x81] not present and raises #PF(2) BEFORE the commit writes (seg_sel/seg_base/seg_limit/seg_attr[SS] + cpl_r exist ONLY on the probe-success path)",
+    "#PF delivered SAME-privilege to pf3_handler at CPL3 (no stack switch); handler packs the frame + context witnesses into edi/esi/ecx/ebp/ebx; isa-debug-exit (status 133) at CPL==IOPL==3"
+  ],
+  "witnesses": {
+    "edi": "0x00000002 -- the #PF error code {US=0,W=1,P=0}: a WRITE probe of a NOT-PRESENT page, classified SUPERVISOR (the frame push is an implicit supervisor access; matches QEMU/silicon)",
+    "esi": "0x0000001B -- the pushed CS is the CPL3 code selector: the fault was raised in the OLD context (pre-fix it would be raised in the CPL0 context and never reach this handler at all)",
+    "ecx": "0x000f01e2 -- the pushed EIP is &int30_insn: the faulting `int $0x30` itself (restart semantics; matches QEMU)",
+    "ebp": "0x0006fff0 -- handler-entry ESP = user ESP 0x70000 - 16 (the same-priv [err,EIP,CS,EFLAGS] frame on the USER stack): the TSS stack was never touched",
+    "ebx": "0x00000023 -- SS at the fault is the CPL3 data selector: the stack switch was NOT committed",
+    "final_record": "cr2=0x0008100c (the first faulting push's start address; matches QEMU/silicon), cs=0x001b, ss=0x0023, esp=0x0006fff0, eflags=0x00003002 (IOPL=3 unmodified)",
+    "faultlog": "exactly ONE [FAULT] line: vec=14 err=00000002 depth=0 (state=33=S_WALK, pc=0x000f01e2); ZERO vec=8/vec=13 lines (no escalation cascade) -- graded in step 7e"
+  },
+  "negative_control": {
+    "method": "sensitivity demonstrated with a variant image whose ONLY change is PT0[0x81] = 0x00081007 (the second frame page present + user + writable): sed the one line in a temp copy, build, run the identical grading",
+    "expected": "OLD BEHAVIOUR (pre-fix RTL): S_INT_SS commits SS+CPL before the pushes, the first S_INT_PUSH beat at 0x8100C #PFs with the NEW CPL0 context (supervisor err=2), #PF delivery to the DPL=3 gate is illegal from CPL0 -> #GP -> #DF -> fault during #DF -> S_SHUTDOWN; no exit, the sentinels 0xBAD0C04x survive, cascade lines in the faultlog. VARIANT (probe passes): the switch commits legally, int0_handler runs at CPL0 and exits with edi=0x11111111 esi=ecx=ebp=ebx=0, faultlog EMPTY",
+    "measured": "CONFIRMED 2026-08-03 (variant): PT0[0x81]=0x81007 -> delivery succeeds, int0_handler exits, final record edi=0x11111111 esi=ecx=ebp=ebx=0 esp=0x00080ffc ss=0x0010 cs=0x0008 (the COMMITTED TSS stack context), cr2=0, zero [FAULT] lines -- every primary witness differs, so the gate is sensitive to the probe's verdict. Variant artifacts deleted after the run"
+  },
+  "description": "REVIEW1_Aug3 R2-C04 regression: a CPL3->CPL0 interrupt delivery whose 20-byte frame straddles onto a NOT-PRESENT second page must raise #PF BEFORE the stack/privilege switch commits, leaving old SS:ESP + CPL3 + EFLAGS intact -- proven by delivering that #PF same-privilege to a CPL3 handler that records the frame and context. DIFFERENTIAL vs QEMU (the full 3502-record stream is EQUIVALENT) + the step-7e faultlog extra (exactly one vec=14 err=00000002, no #DF/#GP). The negative control (second page writable) exits from the CPL0 handler with entirely different witnesses."
+}
