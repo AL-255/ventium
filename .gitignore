@@ -82,3 +82,10 @@ verif/cov/build_cov.log
 verif/cov/opgen/tests/
 verif/cov/opgen/modes/
 verif/cov/opgen/repros/
+
+# Historical progress/review notes remain local working material rather than
+# tracked project state.
+/PROGRESS*.md
+/REVIEW*.md
+/docs_old/PROGRESS*.md
+/docs_old/REVIEW*.md
