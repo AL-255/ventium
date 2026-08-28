@@ -1,5 +1,13 @@
 # FPGA synthesis & APR (KV260 / ZU15EG)
 
+> **Historical synthesis report.** This page records the earlier KV260 flow and
+> out-of-context ZU15EG experiments. Several referenced `fpga/` scripts and
+> artifacts are absent from the current `ao486-mister-sim` checkout; its active
+> full-PC target is a different RK-XCZU15EG-F integration. Use
+> [`../HOW_TO_RUN_FPGA.md`](../HOW_TO_RUN_FPGA.md) for that build and hardware
+> verification procedure. The dated results below remain useful evidence, not
+> current sign-off data.
+
 Real Vivado out-of-context synth → place → route results for the Ventium `core`,
 with device views, the congestion analysis, and the config matrix. Summarized in
 the [README](../README.md#fpga-synthesis-kv260); full detail here.
@@ -314,4 +322,3 @@ Reproduce: `FE_PIPE=1 OUTTAG=_fe /tools/Xilinx/2025.2/Vivado/bin/vivado -mode ba
 fpga/scripts/impl_kv260_soc.tcl` (bitstream + `.xsa`); device views + congestion from the routed
 checkpoint via `DCP=<...>_routed.dcp OUT=<...> vivado -mode batch -source fpga/scripts/soc_views.tcl`
 then the `render_device_view.py` / `render_congestion*.py` scripts.
-
