@@ -1140,6 +1140,27 @@ or harness-layout changes, and do not treat an FPGA RAM capture as a simulator
 restore file. This is a hardware change, not something a board-side `/dev/mem`
 script can emulate.
 
+For a direct cold-boot forensic window that does **not** use a save-state, build
+an isolated trace-enabled cosim directory and request a bounded architectural
+retire trace. `VERILATOR_BUILD_JOBS` is explicit so this diagnostic build cannot
+silently consume all host cores; the canonical `obj_dir_ven` remains untouched:
+
+```bash
+make -C "$VENTIUM/ao486-sim" ven \
+  VEN_OBJDIR=ao486-sim/obj_dir_ven_diag \
+  VEN_EXE=ao486sim_ven_diag VERILATOR_BUILD_JOBS=4
+
+cd "$VENTIUM/ao486-sim"
+./obj_dir_ven_diag/ao486sim_ven_diag --ide /path/to/qk_td.vhd \
+  --cycles 43000000 --vtm-dump-start 422000 --vtm-dump 4096 \
+  2> retire-window.log
+```
+
+`--vtm-dump-start` is the absolute post-reset retirement number and
+`--vtm-dump` is the maximum number of `VTM` records. Omitting the start captures
+from the first retirement. The trace reflects a source-matched simulator build,
+not FPGA state, and is a diagnosis aid rather than an acceptance result.
+
 ### Quiescent execution debugger (new debug image; not deployed yet)
 
 The new debug image advertises `0x56450005` at read offset `0x2c0`. It routes

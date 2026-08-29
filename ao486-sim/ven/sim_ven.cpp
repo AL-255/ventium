@@ -42,7 +42,7 @@ static const char *g_restore_file = nullptr;        // --restore FN: load snapsh
 extern "C" { extern uint64_t g_vtm_retires; extern uint32_t g_vtm_eip,g_vtm_eflags,
     g_vtm_eax,g_vtm_esp,g_vtm_cr0,g_vtm_cr2,g_vtm_cr3; extern uint16_t g_vtm_cs;
     extern uint32_t g_vtm_ecx,g_vtm_edx,g_vtm_ebx,g_vtm_esi,g_vtm_edi; extern uint16_t g_vtm_ds,g_vtm_es;
-    extern int g_vtm_dump; }
+    extern int g_vtm_dump; extern uint64_t g_vtm_dump_start; }
 
 // Disk-read counter (bumped by ps/ide.cpp on each READ) — the COMMAND.COM open-failure point is
 // reads=71; used below to auto-enable the per-retire register trace right before the open so the
@@ -460,7 +460,11 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--ddrlat") && i+1<argc) g_ddr_lat = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--mem") && i+1<argc) g_mem_top_words = (uint64_t)atoi(argv[++i]) * 0x20000ull;
         else if (!strcmp(argv[i], "--ide") && i+1<argc) ide_path = argv[++i];
+        // Emit a bounded retire trace.  --vtm-dump-start is an absolute
+        // post-reset retire number, so a narrow window can be captured without
+        // emitting the entire cold boot before it.
         else if (!strcmp(argv[i], "--vtm-dump") && i+1<argc) g_vtm_dump = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--vtm-dump-start") && i+1<argc) g_vtm_dump_start = strtoull(argv[++i], 0, 0);
         // clk_vga divider: clk_vga toggles every g_vga_div ticks. The 0x3DA vertical-
         // retrace flag lives in the clk_vga domain; if it races the clk_sys host-bus read
         // the CPU never samples the toggle and the VGA-BIOS retrace poll (boot1.rom
@@ -556,6 +560,7 @@ int main(int argc, char **argv) {
         static int trace_armed = 0;
         if (g_open_trace && g_disk_reads >= 66 && !trace_armed) {
             trace_armed = 1;
+            g_vtm_dump_start = g_vtm_retires;
             g_vtm_dump = 700000;   // vtm_retire decrements this once per retire -> a BOUNDED, contiguous
                                    // 700k-retire trace covering reads 66->71 (the open) + the error path.
             fprintf(stderr, ">>> TRACE ON at reads=%lu retires=%llu cs=%04x:eip=%08x\n",

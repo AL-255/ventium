@@ -8,11 +8,12 @@ OBJDIR  := ao486-sim/obj_dir
 EXE     := ao486sim
 
 VERILATOR ?= verilator
+VERILATOR_BUILD_JOBS ?= 0
 DBGFLAGS := $(if $(DBG),--trace +define+AO486_TRACE_EIP,$(if $(FAST),+define+AO486_TRACE_EIP --threads 1,--threads 1))
 # Real MiSTer PS software (drives the verilated mgmt bus via ps_shim.cpp).
 PS_INC  := -I$(REPO)/ao486-sim/ps
 PS_SRCS := ao486-sim/ps/ps_shim.cpp ao486-sim/ps/support/x86/x86.cpp ao486-sim/ps/ide.cpp ao486-sim/ps/x87_cosim.cpp
-VFLAGS := -cc --exe --build -j 0 --savable \
+VFLAGS := -cc --exe --build -j $(VERILATOR_BUILD_JOBS) --savable \
           --top-module $(TOP) \
           -O3 -CFLAGS "-O2 -std=c++17 $(PS_INC)" \
           -Wno-fatal -Wno-WIDTH -Wno-UNOPTFLAT -Wno-CASEINCOMPLETE \
@@ -38,11 +39,13 @@ VEN_DEFS := +define+VEN_CORE +define+VEN_L1_AXI +define+VEN_L1_HONOR_CD \
 VEN_SRCS := ao486-sim/ven/sim_ven.cpp ao486-sim/ven/vtm_dpi.cpp \
   ao486-sim/ven/ven_ao486_shim.sv ao486-sim/ven/ven_axi2avalon.sv \
   ao486-sim/ps/ps_shim.cpp ao486-sim/ps/support/x86/x86.cpp ao486-sim/ps/ide.cpp
+VEN_OBJDIR ?= ao486-sim/obj_dir_ven
+VEN_EXE ?= ao486sim_ven
 ven:
 	cd $(REPO) && $(VERILATOR) $(VFLAGS) \
-	  -Mdir ao486-sim/obj_dir_ven -o ao486sim_ven $(VEN_DEFS) \
+	  -Mdir $(VEN_OBJDIR) -o $(VEN_EXE) $(VEN_DEFS) \
 	  -f rtl_ven_core.f -f rtl_ven_soc.f $(VEN_SRCS)
-	@echo "built (ventium-swapped cosim): $(REPO)/ao486-sim/obj_dir_ven/ao486sim_ven"
+	@echo "built (ventium-swapped cosim): $(REPO)/$(VEN_OBJDIR)/$(VEN_EXE)"
 	@echo "run from the ao486-sim/ CWD (the BIOS ROMs load via ../3rd-party paths)."
 
 run: all

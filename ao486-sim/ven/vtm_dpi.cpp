@@ -25,8 +25,10 @@ uint32_t g_vtm_eax=0,g_vtm_ecx=0,g_vtm_edx=0,g_vtm_ebx=0;
 uint32_t g_vtm_esp=0,g_vtm_ebp=0,g_vtm_esi=0,g_vtm_edi=0;
 uint16_t g_vtm_cs=0,g_vtm_ss=0,g_vtm_ds=0,g_vtm_es=0,g_vtm_fs=0,g_vtm_gs=0;
 uint32_t g_vtm_cr0=0,g_vtm_cr2=0,g_vtm_cr3=0,g_vtm_cr4=0;
-// optional: dump the first N retires to stderr (set by the harness for reset bring-up)
+// Optional bounded architectural trace, configured by the harness.  The start
+// is an absolute post-reset retire number; zero preserves the "first N" form.
 int      g_vtm_dump = 0;
+uint64_t g_vtm_dump_start = 0;
 }
 
 // DPI arm for the ven_l1d [0x607] RMW probe: active during the COMMAND.COM open (disk reads 66..72),
@@ -49,6 +51,13 @@ extern "C" void vtm_retire(
     g_vtm_eax=eax; g_vtm_ecx=ecx; g_vtm_edx=edx; g_vtm_ebx=ebx;
     g_vtm_esp=esp; g_vtm_ebp=ebp; g_vtm_esi=esi; g_vtm_edi=edi;
     g_vtm_cs=cs; g_vtm_ss=ss; g_vtm_ds=ds; g_vtm_es=es; g_vtm_fs=fs; g_vtm_gs=gs;
+    if (g_vtm_dump > 0 && g_vtm_retires >= g_vtm_dump_start) {
+        fprintf(stderr,
+                "VTM n=%llu %04x:%08x fl=%08x ax=%08x bx=%08x cx=%08x dx=%08x si=%08x di=%08x bp=%08x sp=%08x ds=%04x es=%04x ss=%04x fs=%04x gs=%04x\n",
+                (unsigned long long)g_vtm_retires, cs, pc, eflags,
+                eax, ebx, ecx, edx, esi, edi, ebp, esp, ds, es, ss, fs, gs);
+        g_vtm_dump--;
+    }
     // [PCTRACE] compact retire trace for the golden-lockstep diff (VEN_PCTRACE=<path>).
     // One line per retire: "<n> <cs>:<eip> esp=<esp> eax=<eax> ecx=<ecx>" — enough to align vs the QEMU
     // golden and spot the first register divergence (esp is the known divergent: golden 0x11b230 vs 0x11b354).
