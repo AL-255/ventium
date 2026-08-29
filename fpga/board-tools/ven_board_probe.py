@@ -555,10 +555,35 @@ def vga_capture_probe(args: argparse.Namespace) -> int:
             stream.flush()
 
         completed = 0
+        oversized_skips = 0
         while completed < args.frames:
-            sequence, cycle, width, height, pixels, payload = _capture_scanout_frame(
-                ctrl, frame_timeout=args.frame_timeout, poll_interval=args.poll_interval
-            )
+            try:
+                sequence, cycle, width, height, pixels, payload = _capture_scanout_frame(
+                    ctrl, frame_timeout=args.frame_timeout, poll_interval=args.poll_interval
+                )
+            except RuntimeError as error:
+                # The recorder deliberately has only one 64-KiB BRAM image.
+                # Firmware text/graphics modes can exceed that capacity before
+                # the guest selects its requested low-resolution mode.  The
+                # frozen overrun frame is safe but cannot be emitted as a
+                # complete image; with --skip-unmatched, discard just that
+                # frame and re-arm at the next VSYNC instead of aborting a
+                # long wait for Mode 13h.  Any other capture fault remains
+                # fatal, including a timeout or an overlapping arm.
+                if args.skip_unmatched and str(error) == "VGA recorder overflowed its 64-KiB frame BRAM":
+                    oversized_skips += 1
+                    if oversized_skips == 1 or oversized_skips % 20 == 0:
+                        print(
+                            "skipping oversized VGA scanout frame while waiting for requested dimensions "
+                            f"(count={oversized_skips})",
+                            file=sys.stderr if stream is not None else sys.stdout,
+                            flush=True,
+                        )
+                    # Do not pollute the low-rate management fabric while
+                    # firmware still owns a high-resolution display mode.
+                    time.sleep(0.25)
+                    continue
+                raise
             if args.width and (width != args.width or height != args.height):
                 message = f"skipping VGA capture seq={sequence}: got {width}x{height}, need {args.width}x{args.height}"
                 if args.skip_unmatched:
@@ -2042,7 +2067,7 @@ def parse_args() -> argparse.Namespace:
     vga_capture.add_argument(
         "--skip-unmatched",
         action="store_true",
-        help="discard frames whose dimensions do not match --width/--height while waiting for graphics mode",
+        help="discard oversized or mismatched frames while waiting for --width/--height graphics mode",
     )
     vga_capture.add_argument(
         "--frame-timeout", type=float, default=30.0,
