@@ -421,11 +421,37 @@ Acceptance criteria:
 - all user timing constraints are met;
 - routed DRC contains no Error or Critical Warning;
 - utilization is plausible and routability margin has not collapsed;
-- the reported clocks match the intended PS and divided core clocks.
+- the reported clocks match the intended PS and divided core clocks; and
+- the sign-off record states both the constrained clock frequencies and a
+  measured on-board core frequency.  WNS/WHS demonstrate timing closure at a
+  constraint; they are not a frequency measurement.
 
 Warnings still require review. The inspected routed DRC had no errors, but had
 many DSP pipelining warnings plus a clock-buffer cascade and one no-load
 warning. Do not blindly waive new warning classes.
+
+The 2026-08-29 passive-VGA-capture build is the current board image.  It has
+route/timing/DRC sign-off and its clocks were measured while the normal guest
+boot was running, but it is not a workload-acceptance result yet:
+
+| Metric | Value |
+|---|---:|
+| raw image SHA-256 | `279bc2c0caa14cbea169ddf1b25a60407ef0b44bbc3a92186d96e251895064fd` |
+| constrained PL / divided / core clock | 100.000 MHz / 12.500 MHz / **3.125 MHz** |
+| measured live core clock | **3.125179 MHz** over 2.000085 s (separate 1.000072 s sample: 3.125326 MHz) |
+| WNS / TNS | +4.521 ns / 0 |
+| WHS / THS | +0.014 ns / 0 |
+| CLB LUT | 315,981 / 341,280 (92.59%) |
+| CLB registers | 42,984 / 682,560 (6.30%) |
+| BRAM tiles | 101 / 744 (13.58%) |
+| DSP | 1,264 / 3,528 (35.83%) |
+| route | 415,938 routable nets; fully routed |
+| silicon status | passive recorder is armed; normal cold boot is in its long protected-mode memory-streaming phase |
+
+The two counter samples use the retired-cycle counter and elapsed host interval,
+so their small difference is measurement jitter rather than an overclock claim.
+Use **3.125 MHz** as the implementation frequency and quote the measured value
+with its sampling interval when reporting silicon results.
 
 The latest corrected-clock repaired candidate was built and deployed on
 2026-08-22. It is the current implementation reference, but **not a functional
