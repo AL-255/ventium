@@ -110,6 +110,31 @@ set_property -dict [list \
     {CLK3 (core) label = $c3f (actual = pl_clk0/32)} \
     {launch_runs synth_1 -jobs 4; wait_on_run synth_1} \
     $area_synth \
+    {open_run impl_1
+    set wns [get_property SLACK [get_timing_paths -max_paths 1 -nworst 1 -setup]]
+    puts "## WNS (setup worst slack) = $wns"} \
+    {open_run impl_1
+    # Frequency leads the completion record.  WNS/WHS only demonstrate timing
+    # closure at this constraint; they do not measure a board clock.  The /32
+    # divider constraints create these two clocks in the final routed design.
+    foreach {clk_name clk_role} {clk_pl_0 {PL / HP0} wr_clk_i {core (/32)}} {
+        set clk_obj [get_clocks -quiet $clk_name]
+        if {[llength $clk_obj] != 1} {
+            puts "## Frequency ($clk_role): unavailable (expected $clk_name)"
+        } else {
+            set clk_period [get_property PERIOD $clk_obj]
+            if {![string is double -strict $clk_period] || $clk_period <= 0.0} {
+                puts "## Frequency ($clk_role): unavailable (invalid period $clk_period)"
+            } else {
+                puts [format "## Frequency (%s): %.6f MHz (%.6f ns constrained period)" \
+                    $clk_role [expr {1000.0 / $clk_period}] $clk_period]
+            }
+        }
+    }
+    set wns [get_property SLACK [get_timing_paths -max_paths 1 -nworst 1 -setup]]
+    set whs [get_property SLACK [get_timing_paths -max_paths 1 -nworst 1 -hold]]
+    puts "## WNS (setup worst slack) = $wns"
+    puts "## WHS (hold worst slack) = $whs"} \
 ] $body]
 
 # The passive scan-out recorder lives in the Ventium worktree rather than the
