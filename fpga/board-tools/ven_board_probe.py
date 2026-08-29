@@ -22,6 +22,7 @@ import re
 import struct
 import sys
 import time
+import zlib
 from pathlib import Path
 
 
@@ -102,6 +103,30 @@ DBG_EXEC_BP_EN = 1 << 1
 DBG_EXEC_HALTED = 1 << 2
 DBG_EXEC_STEP = 1 << 8
 DBG_EXEC_BP_CLR = 1 << 9
+
+# Passive scan-out recorder.  Its BRAM is private to the recorder; none of
+# these registers touches guest RAM, the VGA RAM ports, or execution control.
+R_CAP_CTL = 0x300
+R_CAP_STATUS = 0x310
+R_CAP_CYCLE_LO = 0x320
+R_CAP_CYCLE_HI = 0x330
+R_CAP_DIMS = 0x340
+R_CAP_PIXELS = 0x350
+R_CAP_ADDR = 0x360
+R_CAP_DATA = 0x370
+CAP_STATUS_OVERRUN = 1 << 31
+CAP_STATUS_ACTIVE = 1 << 30
+CAP_STATUS_READY = 1 << 29
+CAP_STATUS_SEQUENCE_MASK = (1 << 29) - 1
+
+# Binary stdout protocol for ``vga-capture --stream``.  Keeping frames in an
+# SSH byte stream avoids filling the board's small root filesystem.  All human
+# progress messages go to stderr in that mode.  Each payload is packed RGB332
+# in scan order and the CRC covers only the payload bytes.
+VCAP_STREAM_MAGIC = b"VENVCAP1"
+VCAP_STREAM_VERSION = 1
+VCAP_STREAM_HEADER = struct.Struct("<8sII")
+VCAP_FRAME_HEADER = struct.Struct("<4sIQQHHII")
 
 # Values are raw 32-bit words selected by R_DBG_ARCH_SEL.  The selector is
 # only meaningful while the execution debugger reports HALTED.
@@ -431,6 +456,161 @@ def vga_text_probe(args: argparse.Namespace) -> int:
         return 0
     finally:
         lowmem.close()
+        ctrl.close()
+        os.close(fd)
+
+
+def _rgb332_to_rgb24(pixels: bytes) -> bytes:
+    """Expand RGB332 scan-out samples to packed RGB24 without dependencies."""
+    rgb = bytearray(len(pixels) * 3)
+    for index, value in enumerate(pixels):
+        red3 = (value >> 5) & 0x7
+        green3 = (value >> 2) & 0x7
+        blue2 = value & 0x3
+        base = index * 3
+        rgb[base] = (red3 << 5) | (red3 << 2) | (red3 >> 1)
+        rgb[base + 1] = (green3 << 5) | (green3 << 2) | (green3 >> 1)
+        rgb[base + 2] = (blue2 << 6) | (blue2 << 4) | (blue2 << 2) | blue2
+    return bytes(rgb)
+
+
+def _capture_scanout_frame(
+    ctrl: mmap.mmap, *, frame_timeout: float, poll_interval: float
+) -> tuple[int, int, int, int, int, bytes]:
+    """Arm the passive recorder and return one self-consistent frozen image.
+
+    This routine deliberately performs the slow AXI-Lite BRAM drain only after
+    READY has frozen the recorder.  It never pauses the guest and is safe while
+    ``ao486d`` continues to execute.
+    """
+    before = u32(ctrl, R_CAP_STATUS)
+    if before & CAP_STATUS_ACTIVE:
+        raise RuntimeError("VGA recorder is already active; refusing to overlap captures")
+    previous_sequence = before & CAP_STATUS_SEQUENCE_MASK
+
+    # CAP_CTL is a write-one pulse.  A prior READY image remains intact until
+    # this arm is accepted, so every read above has already completed.  READY
+    # is sticky between captures, so it is not itself an acknowledgement that
+    # this arm reached the recorder: an AXI-Lite read immediately following the
+    # W1P write could otherwise return the previous frozen image.  A completed
+    # arm always advances the recorder's sequence number (wraparound would
+    # require 2**29 captures), which is the unambiguous acknowledgement.
+    struct.pack_into("<I", ctrl, R_CAP_CTL, 1)
+    deadline = time.monotonic() + frame_timeout
+    while True:
+        status = u32(ctrl, R_CAP_STATUS)
+        sequence = status & CAP_STATUS_SEQUENCE_MASK
+        if status & CAP_STATUS_READY and sequence != previous_sequence:
+            break
+        if time.monotonic() >= deadline:
+            raise RuntimeError(
+                "VGA recorder did not finish before timeout "
+                f"(status={status:08x}); this bitstream may not include capture support"
+            )
+        time.sleep(poll_interval)
+
+    if status & CAP_STATUS_OVERRUN:
+        raise RuntimeError("VGA recorder overflowed its 64-KiB frame BRAM")
+    cycle = stable_u64(ctrl, R_CAP_CYCLE_LO, R_CAP_CYCLE_HI)
+    dims = u32(ctrl, R_CAP_DIMS)
+    width = dims & 0x1FF
+    height = (dims >> 9) & 0x1FF
+    pixels = u32(ctrl, R_CAP_PIXELS) & 0x1FFFF
+    if not width or not height or pixels != width * height or pixels > 65536:
+        raise RuntimeError(
+            f"invalid frozen VGA metadata seq={sequence} "
+            f"{width}x{height} pixels={pixels}"
+        )
+
+    rounded_bytes = (pixels + 3) & ~3
+    payload = bytearray(rounded_bytes)
+    for word_addr in range(rounded_bytes // 4):
+        struct.pack_into("<I", ctrl, R_CAP_ADDR, word_addr)
+        struct.pack_into("<I", payload, word_addr * 4, u32(ctrl, R_CAP_DATA))
+    return sequence, cycle, width, height, pixels, bytes(payload[:pixels])
+
+
+def vga_capture_probe(args: argparse.Namespace) -> int:
+    """Capture passive rendered-VGA frames without observing or changing RAM.
+
+    ``--stream`` emits a documented binary stream on stdout so a persistent SSH
+    session can archive frames directly on the host.  It is intentionally the
+    preferred multi-frame mode: writing 969 raw frames locally would exhaust
+    the board filesystem long before a Quake timedemo completes.
+    """
+    if args.frames < 1:
+        raise SystemExit("--frames must be positive")
+    if args.output and args.stream:
+        raise SystemExit("--output and --stream are mutually exclusive")
+    if args.output and args.frames != 1:
+        raise SystemExit("--output is only valid with --frames 1; use --stream for a sequence")
+    if args.width < 0 or args.height < 0 or bool(args.width) != bool(args.height):
+        raise SystemExit("--width and --height must be supplied together, or both omitted")
+
+    fd, ctrl, _ = open_mmio(writable=True)
+    stream = sys.stdout.buffer if args.stream else None
+    try:
+        if stream is not None:
+            stream.write(VCAP_STREAM_HEADER.pack(VCAP_STREAM_MAGIC, VCAP_STREAM_VERSION, args.frames))
+            stream.flush()
+
+        completed = 0
+        while completed < args.frames:
+            sequence, cycle, width, height, pixels, payload = _capture_scanout_frame(
+                ctrl, frame_timeout=args.frame_timeout, poll_interval=args.poll_interval
+            )
+            if args.width and (width != args.width or height != args.height):
+                message = f"skipping VGA capture seq={sequence}: got {width}x{height}, need {args.width}x{args.height}"
+                if args.skip_unmatched:
+                    print(message, file=sys.stderr, flush=True)
+                    continue
+                raise RuntimeError(message)
+
+            host_ns = time.monotonic_ns()
+            checksum = zlib.crc32(payload) & 0xFFFF_FFFF
+            if stream is not None:
+                stream.write(
+                    VCAP_FRAME_HEADER.pack(
+                        b"VFRM", sequence, host_ns, cycle, width, height, pixels, checksum
+                    )
+                )
+                stream.write(payload)
+                stream.flush()
+            elif args.output:
+                rgb = _rgb332_to_rgb24(payload)
+                output = Path(args.output)
+                output.parent.mkdir(parents=True, exist_ok=True)
+                with output.open("wb") as image:
+                    image.write(f"P6\n{width} {height}\n255\n".encode("ascii"))
+                    image.write(rgb)
+                metadata = output.with_suffix(output.suffix + ".json")
+                metadata.write_text(
+                    json.dumps(
+                        {
+                            "format": "RGB332",
+                            "sequence": sequence,
+                            "fpga_cycle": cycle,
+                            "host_monotonic_ns": host_ns,
+                            "width": width,
+                            "height": height,
+                            "pixels": pixels,
+                            "crc32": f"{checksum:08x}",
+                        },
+                        indent=2,
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+
+            completed += 1
+            print(
+                f"VGA FRAME {completed}/{args.frames} seq={sequence} "
+                f"cycle={cycle} {width}x{height} pixels={pixels} crc32={checksum:08x}",
+                file=sys.stderr if stream is not None else sys.stdout,
+                flush=True,
+            )
+        return 0
+    finally:
         ctrl.close()
         os.close(fd)
 
@@ -1851,6 +2031,37 @@ def parse_args() -> argparse.Namespace:
         "vga-text", help="read-only dump of the guest 80x25 B8000 text page"
     )
     vga_text.set_defaults(func=vga_text_probe)
+
+    vga_capture = sub.add_parser(
+        "vga-capture",
+        help="passively record frozen RGB332 scan-out frames (no guest-memory or execution access)",
+    )
+    vga_capture.add_argument("--frames", type=int, default=1)
+    vga_capture.add_argument("--width", type=int, default=0, help="require this captured width")
+    vga_capture.add_argument("--height", type=int, default=0, help="require this captured height")
+    vga_capture.add_argument(
+        "--skip-unmatched",
+        action="store_true",
+        help="discard frames whose dimensions do not match --width/--height while waiting for graphics mode",
+    )
+    vga_capture.add_argument(
+        "--frame-timeout", type=float, default=30.0,
+        help="maximum seconds to wait for each scan-out frame (default: 30)",
+    )
+    vga_capture.add_argument(
+        "--poll-interval", type=float, default=0.002,
+        help="status-poll delay in seconds while waiting for a frame (default: 0.002)",
+    )
+    vga_capture.add_argument(
+        "--stream",
+        action="store_true",
+        help="write VENVCAP1 binary frames to stdout; progress stays on stderr",
+    )
+    vga_capture.add_argument(
+        "--output",
+        help="write one expanded PPM frame and JSON metadata on the board (only with --frames 1)",
+    )
+    vga_capture.set_defaults(func=vga_capture_probe)
 
     dump_lowmem = sub.add_parser(
         "dump-lowmem",

@@ -1,0 +1,169 @@
+diff --git a/fpga/rk-ao486-system/src/ven_mgmt_axil.v b/fpga/rk-ao486-system/src/ven_mgmt_axil.v
+index 0000000..0000000 100644
+--- a/fpga/rk-ao486-system/src/ven_mgmt_axil.v
++++ b/fpga/rk-ao486-system/src/ven_mgmt_axil.v
+@@ -105,7 +105,23 @@ module ven_mgmt_axil #(parameter ADDR_W = 16)(
+     input  wire [31:0]  dbg_st_pipe,       // cycles in S_PIPE             (read @ 0x1A0)
+     input  wire [31:0]  dbg_st_walk,       // cycles in the walk state     (read @ 0x1B0)
+     input  wire [31:0]  dbg_st_fetch,      // cycles in S_FETCH            (read @ 0x1C0)
+     input  wire [31:0]  dbg_st_other,      // cycles in every other state  (read @ 0x1D0)
++    // ---- passive VGA-frame recorder ---------------------------------------
++    // CAP_CTL/ADDR live in the write bank; CAP_DATA is a synchronous BRAM
++    // read and therefore takes the R_WAIT path below.  This interface has no
++    // path back into the VGA or CPU.
++    output reg          cap_arm,            // W1P @ 0x300, starts next VSYNC frame
++    output reg  [13:0]  cap_rd_addr,        // word address, written @ 0x360
++    output reg          cap_rd_en,          // internal one-cycle BRAM read pulse
++    input  wire [31:0]  cap_rd_data,
++    input  wire         cap_frame_ready,
++    input  wire         cap_capture_active,
++    input  wire         cap_frame_overrun,
++    input  wire [31:0]  cap_frame_sequence,
++    input  wire [63:0]  cap_frame_cycle,
++    input  wire [8:0]   cap_frame_width,
++    input  wire [8:0]   cap_frame_height,
++    input  wire [16:0]  cap_frame_pixels,
+     output reg          core_reset_n,
+     output reg          irq_out
+ );
+@@ -137,8 +152,9 @@ module ven_mgmt_axil #(parameter ADDR_W = 16)(
+             dbg_cmp_cfg<=0; dbg_cmp_range<=0;
+             dbg_halt_req<=0; dbg_step<=0; dbg_bp_en<=0; dbg_bp_addr<=0; dbg_bp_clr<=0; dbg_arch_sel<=0;
++            cap_arm<=0; cap_rd_addr<=0;
+         end else begin
+             s_awready<=0; s_wready<=0; mgmt_write<=0; dbg_clear<=0; dbg_ext_freeze<=0;
+-            dbg_step<=0; dbg_bp_clr<=0; // W1P defaults
++            dbg_step<=0; dbg_bp_clr<=0; cap_arm<=0; // W1P defaults
+             case (wst)
+                 W_IDLE: if (s_awvalid && s_wvalid) begin
+                     s_awready<=1; s_wready<=1;
+@@ -157,6 +173,8 @@ module ven_mgmt_axil #(parameter ADDR_W = 16)(
+                         12'h080: begin dbg_trace_idx <= s_wdata[6:0]; dbg_clear <= s_wdata[8]; dbg_ext_freeze <= s_wdata[16]; end // DBG_CTL
+                         12'h090: dbg_freeze_thresh <= s_wdata;      // DBG_THRESH
+                         12'h0A0: dbg_cmp_cfg   <= s_wdata;          // DBG_CMP_CFG
+                         12'h0B0: dbg_cmp_range <= s_wdata;          // DBG_CMP_RANGE
++                        12'h300: cap_arm       <= s_wdata[0];       // CAP_CTL W1P
++                        12'h360: cap_rd_addr   <= s_wdata[13:0];    // CAP_ADDR (word)
+                         default: ;
+                     endcase
+@@ -186,17 +204,20 @@ module ven_mgmt_axil #(parameter ADDR_W = 16)(
+
+     // ---- read channel FSM (handles the mgmt_read settle) ----
+     localparam [1:0] R_IDLE=0, R_WAIT=1, R_RESP=2;
+-    reg [1:0] rst2; reg [1:0] rwait;
++    reg [1:0] rst2; reg [1:0] rwait; reg r_cap;
+     wire [31:0] status_w = {6'd0, cpu_hung, ctrl[1] /*running*/, fdd_request, ide1_request, ide0_request};
+     always @(posedge clk) begin
+         if (!rst_n) begin
+-            s_arready<=0; s_rvalid<=0; s_rresp<=0; s_rdata<=0; rst2<=R_IDLE; mgmt_read<=0; irq_out<=0;
++            s_arready<=0; s_rvalid<=0; s_rresp<=0; s_rdata<=0; rst2<=R_IDLE; mgmt_read<=0; irq_out<=0;
++            r_cap<=0; cap_rd_en<=0;
+         end else begin
+-            s_arready<=0; mgmt_read<=0;
++            s_arready<=0; mgmt_read<=0; cap_rd_en<=0;
+             irq_out <= (|ide0_request | |ide1_request | |fdd_request) & ctrl[8]; // IRQ_EN=ctrl[8]
+             case (rst2)
+                 R_IDLE: if (s_arvalid) begin
+                     s_arready<=1;
+-                    if (s_araddr[11:0]==12'h040) begin mgmt_read<=1'b1; rwait<=2'd2; rst2<=R_WAIT; end  // MGMT_RD
++                    if (s_araddr[11:0]==12'h040) begin mgmt_read<=1'b1; rwait<=2'd2; r_cap<=0; rst2<=R_WAIT; end  // MGMT_RD
++                    else if (s_araddr[11:0]==12'h370) begin cap_rd_en<=1'b1; rwait<=2'd1; r_cap<=1; rst2<=R_WAIT; end // CAP_DATA
+                     else begin
++                        r_cap<=0;
+                         case (s_araddr[11:0])         // lane-0 (0x10-aligned); 0x000-0x0F0 legacy, 0x100+ perf
+@@ -237,6 +259,16 @@ module ven_mgmt_axil #(parameter ADDR_W = 16)(
+                             12'h1B0: s_rdata<=dbg_st_walk;
+                             12'h1C0: s_rdata<=dbg_st_fetch;
+                             12'h1D0: s_rdata<=dbg_st_other;
++                            // ---- passive VGA frame recorder -----------------------------
++                            // Status is stable while READY=1; CAP_DATA is a separate
++                            // synchronous BRAM port below, so 0x370 is handled in R_WAIT.
++                            12'h310: s_rdata<={cap_frame_overrun, cap_capture_active,
++                                                cap_frame_ready, cap_frame_sequence[28:0]};
++                            12'h320: s_rdata<=cap_frame_cycle[31:0];
++                            12'h330: s_rdata<=cap_frame_cycle[63:32];
++                            12'h340: s_rdata<={14'd0, cap_frame_height, cap_frame_width};
++                            12'h350: s_rdata<={15'd0, cap_frame_pixels};
++                            12'h360: s_rdata<={18'd0, cap_rd_addr};
+                             // ---- versioned forensic context frame -------------------------------
+                             // This bank is deliberately read-only.  It adds no command path into the
+                             // CPU and is therefore safe for a production-style debug image.
+@@ -268,7 +299,15 @@ module ven_mgmt_axil #(parameter ADDR_W = 16)(
+                         rst2<=R_RESP;
+                     end
+                 end
+-                R_WAIT: begin mgmt_read<=1'b1; if (rwait==0) begin s_rdata<={16'd0,mgmt_readdata}; rst2<=R_RESP; end else rwait<=rwait-1'b1; end
++                R_WAIT: if (r_cap) begin
++                    // CAP_DATA: t0 issues cap_rd_en, t1 updates the BRAM
++                    // output, and this t2 response sees the settled word.
++                    if (rwait==0) begin s_rdata<=cap_rd_data; r_cap<=0; rst2<=R_RESP; end
++                    else rwait<=rwait-1'b1;
++                end else begin
++                    mgmt_read<=1'b1;
++                    if (rwait==0) begin s_rdata<={16'd0,mgmt_readdata}; rst2<=R_RESP; end else rwait<=rwait-1'b1;
++                end
+                 R_RESP: begin s_rvalid<=1; s_rresp<=0; if (s_rvalid && s_rready) begin s_rvalid<=0; rst2<=R_IDLE; end end
+             endcase
+         end
+diff --git a/fpga/rk-ao486-system/src/rk_ao486_system_pl.v b/fpga/rk-ao486-system/src/rk_ao486_system_pl.v
+index 0000000..0000000 100644
+--- a/fpga/rk-ao486-system/src/rk_ao486_system_pl.v
++++ b/fpga/rk-ao486-system/src/rk_ao486_system_pl.v
+@@ -143,7 +143,17 @@ module rk_ao486_system_pl #(
+     // ---- ven_soc_dbg forensic block: PC ring + read-beat ring + freeze snapshot ----------------
+     // Fed by the Ventium core's packed debug bundle (routed out through system.v/ven_ao486_shim);
+     // the PS reads it back over ven_mgmt_axil (0x80..0xF0) to see the instruction trail + AXI fill
+     // words INTO a derail without a sim. Layout must match ven_ao486_shim's pack.
++    // The VGA recorder is intentionally outside that bundle: it samples the
++    // final scan-out and cannot influence the CPU/VGA memory interfaces.
++    wire video_ce, video_blank_n, video_hsync, video_vsync;
++    wire [7:0] video_r, video_g, video_b;
++    wire cap_arm, cap_rd_en, cap_frame_ready, cap_capture_active, cap_frame_overrun;
++    wire [13:0] cap_rd_addr;
++    wire [31:0] cap_rd_data, cap_frame_sequence;
++    wire [63:0] cap_frame_cycle;
++    wire [8:0] cap_frame_width, cap_frame_height;
++    wire [16:0] cap_frame_pixels;
+     wire [290:0] cpu_dbg_bus; wire [127:0] cpu_dbg_cmp;
+     wire         d_inta          = cpu_dbg_bus[0];
+     wire         d_retire_valid  = cpu_dbg_bus[1];
+@@ -313,9 +323,24 @@ module rk_ao486_system_pl #(
+         .dbg_rd_beats(p_rd_beats), .dbg_ar_hs(p_ar_hs), .dbg_b_hs(p_b_hs),
+         .dbg_st_pipe(dbg_st_pipe), .dbg_st_walk(dbg_st_walk),
+         .dbg_st_fetch(dbg_st_fetch), .dbg_st_other(dbg_st_other),
++        .cap_arm(cap_arm), .cap_rd_addr(cap_rd_addr), .cap_rd_en(cap_rd_en), .cap_rd_data(cap_rd_data),
++        .cap_frame_ready(cap_frame_ready), .cap_capture_active(cap_capture_active), .cap_frame_overrun(cap_frame_overrun),
++        .cap_frame_sequence(cap_frame_sequence), .cap_frame_cycle(cap_frame_cycle),
++        .cap_frame_width(cap_frame_width), .cap_frame_height(cap_frame_height), .cap_frame_pixels(cap_frame_pixels),
+         .core_reset_n(core_reset_n), .irq_out(pl_ps_irq0)
+     );
+
++    ven_video_capture u_video_capture (
++        .clk(clk), .rst_n(resetn),
++        .arm(cap_arm), .rd_addr(cap_rd_addr), .rd_en(cap_rd_en), .rd_data(cap_rd_data),
++        .video_ce(video_ce), .video_blank_n(video_blank_n),
++        .video_hsync(video_hsync), .video_vsync(video_vsync),
++        .video_r(video_r), .video_g(video_g), .video_b(video_b),
++        .frame_ready(cap_frame_ready), .capture_active(cap_capture_active), .frame_overrun(cap_frame_overrun),
++        .frame_sequence(cap_frame_sequence), .frame_cycle(cap_frame_cycle),
++        .frame_width(cap_frame_width), .frame_height(cap_frame_height), .frame_pixels(cap_frame_pixels)
++    );
++
+     ven_ddram_axi #(.MEM_BASE(MEM_BASE)) u_ddr (
+         .clk(clk), .rst_n(resetn),
+         .DDRAM_BUSY(DDRAM_BUSY), .DDRAM_BURSTCNT(DDRAM_BURSTCNT), .DDRAM_ADDR(DDRAM_ADDR),
+@@ -360,10 +388,10 @@ module rk_ao486_system_pl #(
+         .sound_fm_mode(1'b0), .sound_cms_en(1'b0), .speaker_out(), .sbp(),
+         .vol_master_l(), .vol_master_r(), .vol_voice_l(), .vol_voice_r(), .vol_midi_l(), .vol_midi_r(),
+         .vol_cd_l(), .vol_cd_r(), .vol_line_l(), .vol_line_r(), .vol_spk(), .vol_en(),
+         .clk_vga(clk), .clock_rate_vga(28'd90000000),   // match cosim g_rate_vga
+-        .video_ce(), .video_blank_n(), .video_hsync(), .video_vsync(),
+-        .video_r(), .video_g(), .video_b(), .video_f60(1'b0),
++        .video_ce(video_ce), .video_blank_n(video_blank_n), .video_hsync(video_hsync), .video_vsync(video_vsync),
++        .video_r(video_r), .video_g(video_g), .video_b(video_b), .video_f60(1'b0),
+         .video_pal_a(), .video_pal_d(), .video_pal_we(),
+         .video_start_addr(), .video_width(), .video_height(), .video_flags(), .video_stride(), .video_off(),
+-        .video_fb_en(1'b0), .video_lores(1'b0), .video_border(1'b0),
++        .video_fb_en(1'b0), .video_lores(1'b1), .video_border(1'b0),
+         .DDRAM_CLK(), .DDRAM_BUSY(DDRAM_BUSY), .DDRAM_BURSTCNT(DDRAM_BURSTCNT), .DDRAM_ADDR(DDRAM_ADDR),
+         .DDRAM_DOUT(DDRAM_DOUT), .DDRAM_DOUT_READY(DDRAM_DOUT_READY), .DDRAM_RD(DDRAM_RD),

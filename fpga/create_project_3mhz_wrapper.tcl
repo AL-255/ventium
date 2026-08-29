@@ -112,4 +112,13 @@ set_property -dict [list \
     $area_synth \
 ] $body]
 
+# The passive scan-out recorder lives in the Ventium worktree rather than the
+# reference-platform checkout.  It is a standalone module instantiated by the
+# narrowly patched PL top (fpga/patches/0001-passive-vga-frame-capture.patch).
+set body [string map [list \
+    {add_files -norecurse $files} \
+    {lappend files "$VEN/fpga/ven_video_capture.sv"
+add_files -norecurse $files} \
+] $body]
+
 uplevel #0 $body
