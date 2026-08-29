@@ -1256,8 +1256,9 @@ debug ring's read-index selector, restores it to zero before returning, and
 never changes guest memory or execution. Its output is useful for a recent
 prompt or error (the 2026-08-29 run reconstructed `C:\QUAKE>`), but is not a
 framebuffer and must not be presented as an image. Use `vga-capture` for a
-passive rendered-pixel frame; it currently records only scanouts that fit its
-64-KiB RGB332 store, so firmware text modes intentionally report overflow.
+passive rendered-pixel frame; its 512-KiB RGB332 private BRAM holds a complete
+720x400 text scanout (288,000 bytes) as well as Mode 13h. Larger modes report
+overflow rather than emitting a truncated image.
 
 Its `perf --seconds N` mode reads the split cycle/retirement counters, AXI
 event counters, state slots, I/O-cycle counter, and external-interrupt-

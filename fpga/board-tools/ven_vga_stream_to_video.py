@@ -43,9 +43,10 @@ def _riff_list(list_type: bytes, payload: bytes) -> bytes:
 class RawAviWriter:
     """Small dependency-free AVI writer for top-down uncompressed BGR24.
 
-    The intended 320x200 x 969-frame capture is only about 186 MiB, safely
-    below AVI 1.0's 4-GiB RIFF limit.  Keeping this writer here makes a
-    validated capture usable even on a lean host without ffmpeg.
+    A 320x200 x 969-frame capture is about 186 MiB; a one-frame 720x400 text
+    capture is under 1 MiB.  Both are safely below AVI 1.0's 4-GiB RIFF limit.
+    Keeping this writer here makes a validated capture usable even on a lean
+    host without ffmpeg.
     """
 
     def __init__(self, path: Path, width: int, height: int, fps: float, frames: int):

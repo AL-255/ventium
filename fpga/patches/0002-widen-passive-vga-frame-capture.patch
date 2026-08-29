@@ -1,0 +1,64 @@
+diff --git a/fpga/rk-ao486-system/src/ven_mgmt_axil.v b/fpga/rk-ao486-system/src/ven_mgmt_axil.v
+--- a/fpga/rk-ao486-system/src/ven_mgmt_axil.v
++++ b/fpga/rk-ao486-system/src/ven_mgmt_axil.v
+@@ -107,17 +107,17 @@ module ven_mgmt_axil #(parameter ADDR_W = 16)(
+     // read and therefore takes the R_WAIT path below.  This interface has no
+     // path back into the VGA or CPU.
+     output reg          cap_arm,            // W1P @ 0x300, starts next VSYNC frame
+-    output reg  [13:0]  cap_rd_addr,        // word address, written @ 0x360
++    output reg  [16:0]  cap_rd_addr,        // word address, written @ 0x360
+     output reg          cap_rd_en,          // internal one-cycle BRAM read pulse
+     input  wire [31:0]  cap_rd_data,
+     input  wire         cap_frame_ready,
+     input  wire         cap_capture_active,
+     input  wire         cap_frame_overrun,
+     input  wire [31:0]  cap_frame_sequence,
+     input  wire [63:0]  cap_frame_cycle,
+-    input  wire [8:0]   cap_frame_width,
+-    input  wire [8:0]   cap_frame_height,
+-    input  wire [16:0]  cap_frame_pixels,
++    input  wire [11:0]  cap_frame_width,
++    input  wire [11:0]  cap_frame_height,
++    input  wire [19:0]  cap_frame_pixels,
+     output reg          core_reset_n,
+     output reg          irq_out
+ );
+@@ -173,7 +173,7 @@ module ven_mgmt_axil #(parameter ADDR_W = 16)(
+                         12'h0A0: dbg_cmp_cfg   <= s_wdata;          // DBG_CMP_CFG
+                         12'h0B0: dbg_cmp_range <= s_wdata;          // DBG_CMP_RANGE
+                         12'h300: cap_arm       <= s_wdata[0];       // CAP_CTL W1P
+-                        12'h360: cap_rd_addr   <= s_wdata[13:0];    // CAP_ADDR (word)
++                        12'h360: cap_rd_addr   <= s_wdata[16:0];    // CAP_ADDR (word)
+                         default: ;
+                     endcase
+                     // Debug execution is deliberately separate from the
+@@ -262,9 +262,9 @@ module ven_mgmt_axil #(parameter ADDR_W = 16)(
+                                                 cap_frame_ready, cap_frame_sequence[28:0]};
+                             12'h320: s_rdata<=cap_frame_cycle[31:0];
+                             12'h330: s_rdata<=cap_frame_cycle[63:32];
+-                            12'h340: s_rdata<={14'd0, cap_frame_height, cap_frame_width};
+-                            12'h350: s_rdata<={15'd0, cap_frame_pixels};
+-                            12'h360: s_rdata<={18'd0, cap_rd_addr};
++                            12'h340: s_rdata<={8'd0, cap_frame_height, cap_frame_width};
++                            12'h350: s_rdata<={12'd0, cap_frame_pixels};
++                            12'h360: s_rdata<={15'd0, cap_rd_addr};
+                             // ---- versioned forensic context frame -------------------------------
+                             // This bank is deliberately read-only.  It adds no command path into the
+                             // CPU and is therefore safe for a production-style debug image.
+diff --git a/fpga/rk-ao486-system/src/rk_ao486_system_pl.v b/fpga/rk-ao486-system/src/rk_ao486_system_pl.v
+--- a/fpga/rk-ao486-system/src/rk_ao486_system_pl.v
++++ b/fpga/rk-ao486-system/src/rk_ao486_system_pl.v
+@@ -151,10 +151,10 @@ module rk_ao486_system_pl #(
+     wire video_ce, video_blank_n, video_hsync, video_vsync;
+     wire [7:0] video_r, video_g, video_b;
+     wire cap_arm, cap_rd_en, cap_frame_ready, cap_capture_active, cap_frame_overrun;
+-    wire [13:0] cap_rd_addr;
++    wire [16:0] cap_rd_addr;
+     wire [31:0] cap_rd_data, cap_frame_sequence;
+     wire [63:0] cap_frame_cycle;
+-    wire [8:0] cap_frame_width, cap_frame_height;
+-    wire [16:0] cap_frame_pixels;
++    wire [11:0] cap_frame_width, cap_frame_height;
++    wire [19:0] cap_frame_pixels;
+     wire [290:0] cpu_dbg_bus; wire [127:0] cpu_dbg_cmp;
+     wire         d_inta          = cpu_dbg_bus[0];

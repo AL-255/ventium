@@ -4,9 +4,9 @@ module ven_video_capture_tb;
     reg clk = 1'b0; always #5 clk = ~clk;
     reg rst_n = 1'b0, arm = 1'b0, ce = 1'b0, blank_n = 1'b0, hs = 1'b0, vs = 1'b0;
     reg [7:0] r = 0, g = 0, b = 0;
-    reg [13:0] rd_addr = 0; reg rd_en = 0;
+    reg [16:0] rd_addr = 0; reg rd_en = 0;
     wire [31:0] rd_data; wire ready, active, overrun; wire [31:0] seq; wire [63:0] stamp;
-    wire [8:0] width, height; wire [16:0] pixels;
+    wire [11:0] width, height; wire [19:0] pixels;
 
     ven_video_capture dut (
         .clk(clk), .rst_n(rst_n), .arm(arm), .rd_addr(rd_addr), .rd_en(rd_en), .rd_data(rd_data),
@@ -30,6 +30,17 @@ module ven_video_capture_tb;
     task frame2x1;
         begin
             hsync; pixel(8'he0,0,0); pixel(0,8'he0,0); hsync;
+        end
+    endtask
+    integer wide_x, wide_y;
+    task frame720x400;
+        begin
+            for (wide_y=0; wide_y<400; wide_y=wide_y+1) begin
+                hsync;
+                for (wide_x=0; wide_x<720; wide_x=wide_x+1)
+                    pixel(8'he0, 8'h80, 8'h40);
+            end
+            hsync;
         end
     endtask
     initial begin
@@ -56,6 +67,16 @@ module ven_video_capture_tb;
         // shorter than four pixels may retain old upper lanes, which the
         // documented exact-pixel stream deliberately never emits.
         if (rd_data[15:0] !== 16'h1C_E0) $fatal(1, "bad rearm payload lanes %08x", rd_data);
+
+        // The practical reason for the wider private BRAM image: firmware
+        // text scanout is 720x400 (288000 RGB332 bytes), not Mode 13h's
+        // 320x200.  It must freeze as one complete rendered frame, with no
+        // overrun and no truncation of the widened metadata fields.
+        arm=1'b1; @(negedge clk); arm=1'b0;
+        vsync; frame720x400; vsync;
+        repeat (2) @(negedge clk);
+        if (!ready || active || overrun || seq != 3 || width != 720 || height != 400 || pixels != 288000)
+            $fatal(1, "wide-frame metadata r=%b a=%b o=%b seq=%0d %0dx%0d pix=%0d", ready, active, overrun, seq, width, height, pixels);
         $display("VEN_VIDEO_CAPTURE_TB_OK seq=%0d stamp=%0d", seq, stamp);
         $finish;
     end

@@ -116,6 +116,7 @@ R_CAP_DIMS = 0x340
 R_CAP_PIXELS = 0x350
 R_CAP_ADDR = 0x360
 R_CAP_DATA = 0x370
+CAPTURE_MAX_BYTES = 512 * 1024
 CAP_STATUS_OVERRUN = 1 << 31
 CAP_STATUS_ACTIVE = 1 << 30
 CAP_STATUS_READY = 1 << 29
@@ -596,13 +597,13 @@ def _capture_scanout_frame(
         time.sleep(poll_interval)
 
     if status & CAP_STATUS_OVERRUN:
-        raise RuntimeError("VGA recorder overflowed its 64-KiB frame BRAM")
+        raise RuntimeError("VGA recorder overflowed its private frame BRAM")
     cycle = stable_u64(ctrl, R_CAP_CYCLE_LO, R_CAP_CYCLE_HI)
     dims = u32(ctrl, R_CAP_DIMS)
-    width = dims & 0x1FF
-    height = (dims >> 9) & 0x1FF
-    pixels = u32(ctrl, R_CAP_PIXELS) & 0x1FFFF
-    if not width or not height or pixels != width * height or pixels > 65536:
+    width = dims & 0xFFF
+    height = (dims >> 12) & 0xFFF
+    pixels = u32(ctrl, R_CAP_PIXELS) & 0xFFFFF
+    if not width or not height or pixels != width * height or pixels > CAPTURE_MAX_BYTES:
         raise RuntimeError(
             f"invalid frozen VGA metadata seq={sequence} "
             f"{width}x{height} pixels={pixels}"
@@ -648,7 +649,7 @@ def vga_capture_probe(args: argparse.Namespace) -> int:
                     ctrl, frame_timeout=args.frame_timeout, poll_interval=args.poll_interval
                 )
             except RuntimeError as error:
-                # The recorder deliberately has only one 64-KiB BRAM image.
+                # The recorder deliberately has only one private BRAM image.
                 # Firmware text/graphics modes can exceed that capacity before
                 # the guest selects its requested low-resolution mode.  The
                 # frozen overrun frame is safe but cannot be emitted as a
@@ -656,7 +657,7 @@ def vga_capture_probe(args: argparse.Namespace) -> int:
                 # frame and re-arm at the next VSYNC instead of aborting a
                 # long wait for Mode 13h.  Any other capture fault remains
                 # fatal, including a timeout or an overlapping arm.
-                if args.skip_unmatched and str(error) == "VGA recorder overflowed its 64-KiB frame BRAM":
+                if args.skip_unmatched and str(error) == "VGA recorder overflowed its private frame BRAM":
                     oversized_skips += 1
                     if oversized_skips == 1 or oversized_skips % 20 == 0:
                         print(
