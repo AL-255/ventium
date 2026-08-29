@@ -446,12 +446,20 @@ boot was running, but it is not a workload-acceptance result yet:
 | BRAM tiles | 101 / 744 (13.58%) |
 | DSP | 1,264 / 3,528 (35.83%) |
 | route | 415,938 routable nets; fully routed |
-| silicon status | passive recorder is armed; normal cold boot is in its long protected-mode memory-streaming phase |
+| silicon status | passive recorder is armed; cold boot reached protected-mode application code, then entered a persistent INT13 retry loop (workload acceptance blocked) |
 
 The two counter samples use the retired-cycle counter and elapsed host interval,
 so their small difference is measurement jitter rather than an overclock claim.
 Use **3.125 MHz** as the implementation frequency and quote the measured value
 with its sampling interval when reporting silicon results.
+
+The workload blocker above is not a clock-rate inference: forty read-only PC-ring
+samples interleaved the BIOS INT13 entry and ATA routines (`f000:e83x`,
+`f000:44xx`--`49xx`), IO.SYS (`0070:xxxx`), and its protected-mode caller
+(`05f7:xxxx`).  A simultaneous 1.000072 s counter interval retired 181,614
+instructions but issued zero new AXI reads.  The last completed disk-read count
+was 527.  This is a live guest/IDE-path diagnosis; it neither resets nor changes
+the guest, the disk image, or the passive recorder.
 
 The latest corrected-clock repaired candidate was built and deployed on
 2026-08-22. It is the current implementation reference, but **not a functional
