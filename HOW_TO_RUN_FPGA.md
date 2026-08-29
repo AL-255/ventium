@@ -446,20 +446,23 @@ boot was running, but it is not a workload-acceptance result yet:
 | BRAM tiles | 101 / 744 (13.58%) |
 | DSP | 1,264 / 3,528 (35.83%) |
 | route | 415,938 routable nets; fully routed |
-| silicon status | passive recorder is armed; cold boot reached protected-mode application code, then entered a persistent INT13 retry loop (workload acceptance blocked) |
+| silicon status | passive recorder is armed; cold boot reaches FreeDOS, then returns to the real-mode `C:\QUAKE>` prompt without a 969-frame timedemo result (workload acceptance blocked) |
 
 The two counter samples use the retired-cycle counter and elapsed host interval,
 so their small difference is measurement jitter rather than an overclock claim.
 Use **3.125 MHz** as the implementation frequency and quote the measured value
 with its sampling interval when reporting silicon results.
 
-The workload blocker above is not a clock-rate inference: forty read-only PC-ring
-samples interleaved the BIOS INT13 entry and ATA routines (`f000:e83x`,
-`f000:44xx`--`49xx`), IO.SYS (`0070:xxxx`), and its protected-mode caller
-(`05f7:xxxx`).  A simultaneous 1.000072 s counter interval retired 181,614
-instructions but issued zero new AXI reads.  The last completed disk-read count
-was 527.  This is a live guest/IDE-path diagnosis; it neither resets nor changes
-the guest, the disk image, or the passive recorder.
+The workload blocker above is not a clock-rate inference. Read-only samples
+show the live real-mode FreeDOS/BIOS path (`CR0=0x00000010`) through firmware
+(`f000:xxxx`), IO.SYS (`0070:xxxx`), and the command interpreter (`05f7:xxxx`).
+A simultaneous 1.000071 s counter interval retired 181,638 instructions at
+**3.125329 MHz** but issued zero new AXI reads; the last completed disk-read
+count was 527. The sparse core-observation reconstruction contains a recent
+`C:\QUAKE>` prompt. It therefore establishes that the timedemo command has
+returned to DOS, not that Quake ran or that a disk/CPU hang occurred. The exact
+error/exit cause remains open. This diagnosis neither resets nor changes the
+guest, disk image, or passive recorder.
 
 The latest corrected-clock repaired candidate was built and deployed on
 2026-08-22. It is the current implementation reference, but **not a functional
@@ -942,8 +945,10 @@ Current known result: the procedure below passed on the repaired-fast
 `l1bypown` image at 3.125029 MHz on 2026-08-23. The source-controlled detector
 held `last_ar=0x001021c0` for all 1,500 samples, observed both idle EIPs
 `0x1e5/0x1e6`, 553 live transitions, correct Windows IVT values, and an advancing
-tick; `vga-text` found all 2,000 cells blank. This remains a headless control-flow
-proxy, not rendered-pixel proof.
+tick; the old `vga-text` DDR-aperture check read 2,000 zero cells. That does
+not establish a blank VGA text screen on this platform, because B8000 is VGA
+MMIO rather than guest DDR. This remains a headless control-flow proxy, not
+rendered-pixel proof.
 
 The board has `/tmp/ao486/w95fresh.vhd`; it is a sparse, mutable 2 GiB image.
 Restore it from the local pristine sparse backup before a reproducible run:
@@ -1219,11 +1224,19 @@ and enables/freeze-arms last. It accepts only a 16-bit CS plus an optional
 16-bit EIP range; it is not a general MMIO writer. Invoke the copied file with
 `python3` so deployment does not depend on its executable bit.
 
-`vga-text` reads the 80x25 B8000 page and reports printable/nonblank character
-and attribute counts plus any visible rows. A completely blank page
-corroborates the documented Win95 graphics-mode transition, but is not by
-itself desktop proof because software can clear a text page without drawing a
-valid GUI.
+`vga-text` reads the *DDR aperture* at B8000 and reports printable/nonblank
+bytes. It is not a rendered-text capture: on the deployed ao486 platform,
+B8000 is a VGA device mapping, so all-zero DDR data says nothing about the
+visible display. Do not use it as Win95/FreeDOS visual evidence.
+
+`vga-ring-text --depth 128 --allow-live` is a separate, explicitly sparse
+best-effort decoder for recent core-side B8000 accesses. It writes only the
+debug ring's read-index selector, restores it to zero before returning, and
+never changes guest memory or execution. Its output is useful for a recent
+prompt or error (the 2026-08-29 run reconstructed `C:\QUAKE>`), but is not a
+framebuffer and must not be presented as an image. Use `vga-capture` for a
+passive rendered-pixel frame; it currently records only scanouts that fit its
+64-KiB RGB332 store, so firmware text modes intentionally report overflow.
 
 Its `perf --seconds N` mode reads the split cycle/retirement counters, AXI
 event counters, state slots, I/O-cycle counter, and external-interrupt-
@@ -1237,7 +1250,9 @@ and 24 into offsets `0x1b0` and `0x1a0`; the probe therefore calls them
 `fsm_slot_1b0`/`fsm_slot_1a0`, not PF/PIPE. Also, the wrapper ties
 `io_pending` to zero, so `perf_io` is not a valid S_IO measure. Fix the hardware
 by routing semantic state flags rather than copying feature-dependent enum
-numbers.
+numbers. The PC ring samples `dbg_state` only on a retirement, so a moving ring
+of state-27 entries means normal fast-path retirement in this build; it is not
+a live FSM sample and must not be mistaken for the later F00F-hang enumerator.
 
 The explicit `clock PROFILE` subcommand is one allow-listed write mode. It
 accepts only audited `PL0_REF_CTRL` values rather than exposing a general

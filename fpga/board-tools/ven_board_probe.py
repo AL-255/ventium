@@ -30,6 +30,8 @@ CTRL_BASE = 0xA000_0000
 CTRL_SIZE = 0x1_0000
 DDR_BASE = 0x6000_0000
 LOWMEM_SIZE = 0x10_0000
+VGA_TEXT_BASE = 0xB8000
+VGA_TEXT_SIZE = 80 * 25 * 2
 IDENT_MAGIC = 0xA048_6501
 FPGA_STATE_PATH = "/sys/class/fpga_manager/fpga0/state"
 CRL_APB_BASE = 0xFF5E_0000
@@ -422,27 +424,34 @@ def win95_probe(args: argparse.Namespace) -> int:
 
 
 def vga_text_probe(args: argparse.Namespace) -> int:
-    """Read the guest 80x25 text page without changing guest or VGA state.
+    """Read the DDR backing at B8000 without changing guest or VGA state.
 
-    This is corroborating evidence only: a blank B8000 page is expected after
-    Win95 switches to graphics mode, but software can also clear a text page.
-    Nonblank output is useful because it exposes a boot prompt or error that a
-    control-flow-only desktop detector cannot distinguish from a DOS/V86 idle.
+    This is *not* a scan-out capture.  The ao486 platform can route B8000 to
+    the VGA peripheral rather than guest DDR, in which case an all-zero DDR
+    aperture says nothing about the visible text screen.  Use ``vga-ring-text``
+    for a sparse reconstruction from recent core-side B8000 accesses, or the
+    passive VGA recorder for rendered pixels.
     """
     del args
     fd, ctrl, lowmem = open_mmio(with_lowmem=True)
     assert lowmem is not None
     try:
-        page = bytes(lowmem[0xB8000:0xB8000 + 4000])
+        page = bytes(lowmem[VGA_TEXT_BASE:VGA_TEXT_BASE + VGA_TEXT_SIZE])
         chars = page[0::2]
         attrs = page[1::2]
         printable = sum(0x20 <= value < 0x7F for value in chars)
         nonblank = sum(value not in (0x00, 0x20) for value in chars)
         nonzero_attrs = sum(value != 0 for value in attrs)
         print(
-            f"vga_text printable={printable}/2000 nonblank={nonblank}/2000 "
+            f"vga_ddr_b8000 printable={printable}/2000 nonblank={nonblank}/2000 "
             f"nonzero_attrs={nonzero_attrs}/2000"
         )
+        if not any(page):
+            print(
+                "DDR B8000 is all zero; on this platform this is not a blank-screen verdict. "
+                "Use vga-ring-text or rendered VGA capture.",
+                file=sys.stderr,
+            )
         for row in range(25):
             start = row * 160
             rendered = "".join(
@@ -456,6 +465,83 @@ def vga_text_probe(args: argparse.Namespace) -> int:
         return 0
     finally:
         lowmem.close()
+        ctrl.close()
+        os.close(fd)
+
+
+def _sparse_vga_ring_lines(entries: list[dict[str, object]]) -> list[str]:
+    """Render known character cells from a short core-side B8000 observation ring.
+
+    The deployed observation ring contains a data value and no byte-enable
+    metadata.  Values narrower than a dword are zero-extended, so only bytes
+    through the most-significant nonzero byte can be trusted for each record.
+    Processing oldest to newest makes a later observed access win.  This is a
+    deliberately sparse *access reconstruction*, never a claim to be a full
+    VGA text framebuffer.
+    """
+    chars: list[int | None] = [None] * (80 * 25)
+    for entry in reversed(entries):
+        address = int(str(entry["core_address"]), 16)
+        data = int(str(entry["data"]), 16)
+        byte_count = max(1, (data.bit_length() + 7) // 8)
+        for byte_index in range(byte_count):
+            byte_address = address + byte_index
+            if not VGA_TEXT_BASE <= byte_address < VGA_TEXT_BASE + VGA_TEXT_SIZE:
+                continue
+            relative = byte_address - VGA_TEXT_BASE
+            if relative & 1:
+                continue
+            chars[relative // 2] = (data >> (byte_index * 8)) & 0xFF
+
+    lines: list[str] = []
+    for row in range(25):
+        row_cells = chars[row * 80:(row + 1) * 80]
+        col = 0
+        while col < 80:
+            while col < 80 and row_cells[col] is None:
+                col += 1
+            start = col
+            while col < 80 and row_cells[col] is not None:
+                col += 1
+            if start == col:
+                continue
+            rendered = "".join(
+                chr(value) if 0x20 <= value < 0x7F else f"\\x{value:02x}"
+                for value in row_cells[start:col]
+                if value is not None
+            )
+            lines.append(f"{row:02d}:{start:02d}-{col - 1:02d} {rendered}")
+    return lines
+
+
+def vga_ring_text_probe(args: argparse.Namespace) -> int:
+    """Reconstruct recently accessed B8000 character cells from the debug ring.
+
+    Selecting ring indices is the only write.  It affects neither guest RAM nor
+    execution, but a live ring is inherently incoherent; require an explicit
+    acknowledgement for that useful, best-effort case.
+    """
+    if args.depth < 1 or args.depth > 128:
+        raise RuntimeError("depth must be in 1..128")
+    fd, ctrl, _ = open_mmio(writable=True)
+    try:
+        info = u32(ctrl, R_DBG_FRZINFO)
+        frozen = bool((info >> 31) & 1)
+        if not frozen and not args.allow_live:
+            raise RuntimeError("core observation ring is live; freeze it first or pass --allow-live")
+        entries = read_core_observe_ring(ctrl, args.depth)
+        lines = _sparse_vga_ring_lines(entries)
+        print(
+            "vga_ring_text source=recent-core-side-b8000-accesses "
+            f"entries={len(entries)} frozen={int(frozen)} lines={len(lines)}; "
+            "not a framebuffer or rendered-pixel capture"
+        )
+        if not lines:
+            print("no character-cell bytes observed in this ring window")
+        for line in lines:
+            print(line)
+        return 0
+    finally:
         ctrl.close()
         os.close(fd)
 
@@ -991,23 +1077,28 @@ def dump_state_probe(args: argparse.Namespace) -> int:
 
 
 def read_pc_ring(ctrl: mmap.mmap, depth: int) -> list[dict[str, object]]:
-    """Copy a frozen ring after the BRAM read latency, newest entry first."""
+    """Copy a ring after BRAM latency, then restore selector zero/newest."""
     entries: list[dict[str, object]] = []
-    for index in range(depth):
-        struct.pack_into("<I", ctrl, W_DBG_CTL, index)
-        _ = u32(ctrl, R_DBG_TRPC)  # prime the synchronous BRAM read port
-        eip = u32(ctrl, R_DBG_TRPC)
-        aux = u32(ctrl, R_DBG_TRAUX)
-        cs = aux & 0xFFFF
-        entries.append(
-            {
-                "newest_offset": index,
-                "cs": f"{cs:04x}",
-                "eip": f"{eip:08x}",
-                "core_state": (aux >> 16) & 0x3F,
-                "real_mode_linear_if_applicable": f"{(cs << 4) + eip:08x}",
-            }
-        )
+    try:
+        for index in range(depth):
+            struct.pack_into("<I", ctrl, W_DBG_CTL, index)
+            _ = u32(ctrl, R_DBG_TRPC)  # prime the synchronous BRAM read port
+            eip = u32(ctrl, R_DBG_TRPC)
+            aux = u32(ctrl, R_DBG_TRAUX)
+            cs = aux & 0xFFFF
+            entries.append(
+                {
+                    "newest_offset": index,
+                    "cs": f"{cs:04x}",
+                    "eip": f"{eip:08x}",
+                    "core_state": (aux >> 16) & 0x3F,
+                    "real_mode_linear_if_applicable": f"{(cs << 4) + eip:08x}",
+                }
+            )
+    finally:
+        # ``sample`` is intentionally a read-only newest-entry probe.  Indexed
+        # diagnostics must leave that convention intact even on an exception.
+        struct.pack_into("<I", ctrl, W_DBG_CTL, 0)
     return entries
 
 
@@ -1020,23 +1111,26 @@ def read_core_observe_ring(ctrl: mmap.mmap, depth: int) -> list[dict[str, object
     it especially useful beside the architectural PC ring at a freeze.
     """
     entries: list[dict[str, object]] = []
-    for index in range(depth):
-        struct.pack_into("<I", ctrl, W_DBG_CTL, index)
-        _ = u32(ctrl, R_DBG_RDADDR)  # prime the synchronous BRAM read port
-        address = u32(ctrl, R_DBG_RDADDR)
-        data = u32(ctrl, R_DBG_RDDATA)
-        aux = u32(ctrl, R_DBG_RDDATA_HI)
-        entries.append(
-            {
-                "newest_offset": index,
-                "core_address": f"{address:08x}",
-                "data": f"{data:08x}",
-                "core_state": (aux >> 2) & 0x3F,
-                "retire_valid": bool((aux >> 1) & 1),
-                "inta": bool(aux & 1),
-                "raw_aux": f"{aux:08x}",
-            }
-        )
+    try:
+        for index in range(depth):
+            struct.pack_into("<I", ctrl, W_DBG_CTL, index)
+            _ = u32(ctrl, R_DBG_RDADDR)  # prime the synchronous BRAM read port
+            address = u32(ctrl, R_DBG_RDADDR)
+            data = u32(ctrl, R_DBG_RDDATA)
+            aux = u32(ctrl, R_DBG_RDDATA_HI)
+            entries.append(
+                {
+                    "newest_offset": index,
+                    "core_address": f"{address:08x}",
+                    "data": f"{data:08x}",
+                    "core_state": (aux >> 2) & 0x3F,
+                    "retire_valid": bool((aux >> 1) & 1),
+                    "inta": bool(aux & 1),
+                    "raw_aux": f"{aux:08x}",
+                }
+            )
+    finally:
+        struct.pack_into("<I", ctrl, W_DBG_CTL, 0)
     return entries
 
 
@@ -1673,16 +1767,11 @@ def dump_ring_probe(args: argparse.Namespace) -> int:
             f"PC-RING frozen={frozen} frz_eip={u32(ctrl, R_DBG_FRZEIP):08x} "
             f"last_eip={u32(ctrl, R_DBG_LASTEIP):08x} count={count}"
         )
-        for index in range(args.depth):
-            struct.pack_into("<I", ctrl, W_DBG_CTL, index)
-            _ = u32(ctrl, R_DBG_TRPC)  # prime the one-clock BRAM read
-            eip = u32(ctrl, R_DBG_TRPC)
-            aux = u32(ctrl, R_DBG_TRAUX)
-            cs = aux & 0xFFFF
-            state = (aux >> 16) & 0x3F
+        for entry in read_pc_ring(ctrl, args.depth):
             print(
-                f"[{index:3d}] cs={cs:04x} eip={eip:08x} "
-                f"state={state:02d} lin={(cs << 4) + eip:08x}"
+                f"[{entry['newest_offset']:3d}] cs={entry['cs']} eip={entry['eip']} "
+                f"state={entry['core_state']:02d} "
+                f"lin={entry['real_mode_linear_if_applicable']}"
             )
         return 0
     finally:
@@ -2053,9 +2142,17 @@ def parse_args() -> argparse.Namespace:
     w95.set_defaults(func=win95_probe)
 
     vga_text = sub.add_parser(
-        "vga-text", help="read-only dump of the guest 80x25 B8000 text page"
+        "vga-text", help="read-only inspection of the DDR B8000 aperture (not rendered VGA)"
     )
     vga_text.set_defaults(func=vga_text_probe)
+
+    vga_ring_text = sub.add_parser(
+        "vga-ring-text",
+        help="best-effort recent B8000 character reconstruction from the core observation ring",
+    )
+    vga_ring_text.add_argument("--depth", type=int, default=128)
+    vga_ring_text.add_argument("--allow-live", action="store_true")
+    vga_ring_text.set_defaults(func=vga_ring_text_probe)
 
     vga_capture = sub.add_parser(
         "vga-capture",
