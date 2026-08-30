@@ -1075,6 +1075,46 @@ selector allow-list. `dump-ring` requires a frozen trace unless `--allow-live`
 is explicit. Treat these as paired forensic trigger/readout tools, not as
 acceptance instrumentation.
 
+### Hosted PS/2 keyboard device
+
+The original board wrapper ties both keyboard pins high, so `--inject-keys`
+only alters the BIOS Data Area and is invisible to software such as Quake that
+reads the 8042/IRQ1 path directly. Patch
+`fpga/patches/0003-hosted-ps2-keyboard.patch` adds a versioned, device-side
+PS/2 endpoint. It serializes ordinary Set-2 make/break bytes over the existing
+8042 pins; it does not write guest RAM, alter the disk, or patch guest code.
+
+Apply the patch after the passive-capture patches to `$FLOW`, build and deploy a
+matching image, then copy the matching board probe. The probe refuses to send
+any byte unless the hardware capability at `0x3a0` is `0x564b0001`.
+
+```bash
+cd "$VENTIUM"
+git -C /home/yukidama/github/ao486_MiSTer apply --check fpga/patches/0003-hosted-ps2-keyboard.patch
+git -C /home/yukidama/github/ao486_MiSTer apply fpga/patches/0003-hosted-ps2-keyboard.patch
+
+env CCACHE_DISABLE=1 verilator --binary --timing -Wall -Wno-fatal \
+  --top-module ven_ps2_kbd_inject_tb -Mdir /tmp/ven_ps2_kbd_inject_tb_obj \
+  fpga/ven_ps2_kbd_inject_tb.sv \
+  "$FLOW/src/ven_ps2_kbd_inject.v" \
+  3rd-party/ao486_MiSTer/rtl/soc/ps2.v \
+  3rd-party/ao486_MiSTer/rtl/common/simple_fifo.v && \
+  /tmp/ven_ps2_kbd_inject_tb_obj/Vven_ps2_kbd_inject_tb
+```
+
+After programming, use the normal device transport, not `--inject-keys`:
+
+```bash
+sudo /tmp/ao486/ven_board_probe.py ps2-keys '~timedemo demo1' --enter
+```
+
+`ps2-keys` accepts the lowercase ASCII map used by the simulation keyboard;
+`ps2-raw` sends deliberate raw Set-2 bytes for diagnostic keys. Each command
+waits for the one-byte hardware transport before issuing the next byte, so it
+cannot silently reorder a make, `f0`, break sequence. It remains an operator
+input facility, not a correctness oracle: acceptance still requires the
+unmodified disk's exact 969-frame timedemo result.
+
 ### Frozen forensic capture and simulation replay
 
 The source-controlled probe now provides a capture bundle for a **frozen**
