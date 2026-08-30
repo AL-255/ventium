@@ -8900,6 +8900,7 @@ module core
   logic        eng_fy_start, eng_fy_busy, eng_fy_done, eng_fy_pe, eng_fy_ie;
   logic [79:0] eng_fy_result;
   // FPATAN is ALWAYS synthesized — Quake's only transcendental (PROGRESS.md M11).
+`ifndef VEN_FP_SHARED
   assign eng_fa_start = (state==S_FEXEC) && (q_fxop==FX_FPATAN);
   fpu_fpatan u_fpatan (
     .clk(clk), .rst_n(rst_n), .start(eng_fa_start),
@@ -8907,11 +8908,31 @@ module core
     .busy(eng_fa_busy), .done(eng_fa_done), .result(eng_fa_result),
     .inexact(eng_fa_pe), .invalid(eng_fa_ie)
   );
+`endif
   // FSIN/FCOS engine decls (referenced by the result mux regardless of gating).
   logic        eng_fs_start, eng_fs_busy, eng_fs_done, eng_fs_c2;
   logic [79:0] eng_fs_sin, eng_fs_cos;
   wire is_trig = (q_fxop==FX_FSIN) || (q_fxop==FX_FCOS) ||
                  (q_fxop==FX_FSINCOS) || (q_fxop==FX_FPTAN);
+`ifdef VEN_FP_SHARED
+  // ven_fp_top owns the one shared transcendental sequencer (and routes every
+  // arithmetic step through its common ALU/widemul/SRT services).  The legacy
+  // four-engine bank below is otherwise reachable solely through the old
+  // S_TRSC_BUSY producer, which the shared command/response path never enters.
+  // Tie every historical handshake off explicitly instead of relying on a
+  // whole-hierarchy prune: the latter retained the engines in the FPGA netlist
+  // through conservative cross-module optimization and erased the area win.
+  assign eng_f2_start=1'b0; assign eng_f2_busy=1'b0; assign eng_f2_done=1'b0;
+  assign eng_f2_pe=1'b0;    assign eng_f2_ie=1'b0;   assign eng_f2_result=80'd0;
+  assign eng_fa_start=1'b0; assign eng_fa_busy=1'b0; assign eng_fa_done=1'b0;
+  assign eng_fa_pe=1'b0;    assign eng_fa_ie=1'b0;   assign eng_fa_result=80'd0;
+  assign eng_fy_start=1'b0; assign eng_fy_busy=1'b0; assign eng_fy_done=1'b0;
+  assign eng_fy_pe=1'b0;    assign eng_fy_ie=1'b0;   assign eng_fy_result=80'd0;
+  assign eng_fs_start=1'b0; assign eng_fs_busy=1'b0; assign eng_fs_done=1'b0;
+  assign eng_fs_c2=1'b0;    assign eng_fs_sin=80'd0; assign eng_fs_cos=80'd0;
+  assign eng_trsc_done=1'b0; assign eng_trsc_result=80'd0;
+  assign eng_trsc_pe=1'b0;   assign eng_trsc_ie=1'b0; assign eng_trsc_c2=1'b0;
+`else
   // ---- PER-ENGINE synthesis control (FPGA fit) --------------------------------
   // DEFAULT: all four engines are built (that is what the cosim and `make verify`
   // compile, so they stay byte-identical). On the XCZU15EG all four land ~95% LUT,
@@ -8995,6 +9016,7 @@ module core
                            (q_fxop==FX_FPATAN) ? eng_fa_ie :
                            is_trig ? 1'b0 : eng_fy_ie;
   assign eng_trsc_c2     = is_trig ? eng_fs_c2 : 1'b0;
+`endif
 `else
   assign eng_trsc_done=1'b0; assign eng_trsc_result=80'd0;
   assign eng_trsc_pe=1'b0; assign eng_trsc_ie=1'b0; assign eng_trsc_c2=1'b0;

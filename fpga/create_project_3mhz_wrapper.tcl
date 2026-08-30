@@ -37,6 +37,30 @@ if {![string is integer -strict $synth_jobs] || $synth_jobs < 1 || $synth_jobs >
 set_param general.maxThreads $synth_jobs
 puts "Vivado synthesis concurrency: $synth_jobs"
 
+# Keep the recovered 3.125 MHz image as the default diagnostic fallback, but
+# permit a meaningful timing/bring-up candidate after an area reduction.  The
+# PS PL0 source is fixed at 100 MHz below, so the high-speed variant uses its
+# synchronous /2 derivative (50 MHz) rather than introducing an unrelated
+# clock-domain crossing.  Other rates must be expressed by a real divider and
+# are rejected instead of silently constraining the wrong frequency.
+set core_div_file_add_span {lappend files "$ROOT/$x"}
+set core_c3f_span {set c3f 3000000}
+set core_label_span {CLK3 (core) label = $c3f (actual = pl_clk0/32)}
+if {[info exists ::env(VEN_FPGA_CORE_MHZ)] && $::env(VEN_FPGA_CORE_MHZ) ne ""} {
+    if {$::env(VEN_FPGA_CORE_MHZ) ne "50"} {
+        error "VEN_FPGA_CORE_MHZ supports only 50 (omit it for the 3.125 MHz fallback)"
+    }
+    set core_div_file_add_span {
+if {$x eq "src/clk_div32.v"} {
+    lappend files "$VEN/fpga/clk_div32_50mhz.v"
+} else {
+    lappend files "$ROOT/$x"
+}}
+    set core_c3f_span {set c3f 50000000}
+    set core_label_span {CLK3 (core) label = $c3f (actual = pl_clk0/2)}
+    puts "High-speed candidate: synchronous core clock = pl_clk0/2 = 50 MHz"
+}
+
 set upstream "/home/yukidama/github/ao486_MiSTer/fpga/rk-ao486-system/hw/create_project.tcl"
 set upstream_hw [file dirname $upstream]
 set upstream_root [file dirname $upstream_hw]
@@ -95,6 +119,8 @@ set body [string map [list \
     "set THIS {$upstream}; set HW {$upstream_hw}" \
     {set ROOT [file normalize [file join $HW ..]]} \
     "set ROOT {$upstream_root}" \
+    {lappend files "$ROOT/$x"} \
+    $core_div_file_add_span \
     {CONFIG.PSU__CRL_APB__PL0_REF_CTRL__FREQMHZ {96} ] $ps} \
     {CONFIG.PSU__CRL_APB__PL0_REF_CTRL__FREQMHZ {100} ] $ps
 # Match the already-running board clock tree used by PL-only PCAP loads:
@@ -106,11 +132,11 @@ set_property -dict [list \
   CONFIG.PSU__CRL_APB__PL0_REF_CTRL__DIVISOR0 {15} \
   CONFIG.PSU__CRL_APB__PL0_REF_CTRL__DIVISOR1 {1} ] $ps} \
     {set c3f 6000000} \
-    {set c3f 3000000} \
+    $core_c3f_span \
     {VEN_FP_PC_RELAX VEN_FAST_RETRACE} \
     $define_span \
     {CLK3 (core) label = $c3f (actual = pl_clk0/16)} \
-    {CLK3 (core) label = $c3f (actual = pl_clk0/32)} \
+    $core_label_span \
     {launch_runs synth_1 -jobs 4; wait_on_run synth_1} \
     $area_synth \
     {open_run impl_1
