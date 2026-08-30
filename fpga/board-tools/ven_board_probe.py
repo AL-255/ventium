@@ -122,6 +122,17 @@ CAP_STATUS_ACTIVE = 1 << 30
 CAP_STATUS_READY = 1 << 29
 CAP_STATUS_SEQUENCE_MASK = (1 << 29) - 1
 
+# Hosted PS/2 keyboard device.  This is a physical-device-level debug path:
+# writes are serialised as Set-2 bytes on the ordinary 8042 PS/2 pins.  The
+# capability word prevents a write to an older image from being mistaken for a
+# supported keyboard event.
+R_KBD_INJECT = 0x380
+R_KBD_STATUS = 0x390
+R_KBD_CAP = 0x3A0
+KBD_INJECT_CAP = 0x564B_0001
+KBD_STATUS_READY = 1 << 0
+KBD_STATUS_BUSY = 1 << 1
+
 # Binary stdout protocol for ``vga-capture --stream``.  Keeping frames in an
 # SSH byte stream avoids filling the board's small root filesystem.  All human
 # progress messages go to stderr in that mode.  Each payload is packed RGB332
@@ -279,6 +290,80 @@ def queue_keys_probe(args: argparse.Namespace) -> int:
         return 0
     finally:
         lowmem.close()
+        ctrl.close()
+        os.close(fd)
+
+
+# The platform 8042 is configured for Set-2-to-Set-1 translation, just as the
+# normal ao486 simulation keyboard device is.  These values deliberately model
+# real key transitions: each printable character is a make, F0 prefix, break.
+SET2_ASCII = {
+    **{chr(ord("a") + index): code for index, code in enumerate((
+        0x1C, 0x32, 0x21, 0x23, 0x24, 0x2B, 0x34, 0x33, 0x43, 0x3B,
+        0x42, 0x4B, 0x3A, 0x31, 0x44, 0x4D, 0x15, 0x2D, 0x1B, 0x2C,
+        0x3C, 0x2A, 0x1D, 0x22, 0x35, 0x1A,
+    ))},
+    **{str(index + 1): code for index, code in enumerate((
+        0x16, 0x1E, 0x26, 0x25, 0x2E, 0x36, 0x3D, 0x3E, 0x46,
+    ))},
+    "0": 0x45, " ": 0x29, ".": 0x49, ",": 0x41, "/": 0x4A,
+    "-": 0x4E, "=": 0x55, ";": 0x4C, "~": 0x0E, "`": 0x0E,
+    "_": 0x4E, "\r": 0x5A,
+}
+
+
+def _kbd_wait_ready(ctrl: mmap.mmap, timeout: float) -> None:
+    deadline = time.monotonic() + timeout
+    while not (u32(ctrl, R_KBD_STATUS) & KBD_STATUS_READY):
+        if time.monotonic() >= deadline:
+            raise RuntimeError("hosted PS/2 keyboard did not become ready")
+        time.sleep(0.001)
+
+
+def _kbd_send_raw(ctrl: mmap.mmap, payload: list[int], timeout: float) -> None:
+    if u32(ctrl, R_KBD_CAP) != KBD_INJECT_CAP:
+        raise RuntimeError("this bitstream does not advertise the hosted PS/2 keyboard device")
+    for byte in payload:
+        _kbd_wait_ready(ctrl, timeout)
+        struct.pack_into("<I", ctrl, R_KBD_INJECT, 0x100 | byte)
+    _kbd_wait_ready(ctrl, timeout)
+
+
+def ps2_keys_probe(args: argparse.Namespace) -> int:
+    """Send normal make/break transitions from the hosted PS/2 device."""
+    text = args.text + ("\r" if args.enter else "")
+    if not text:
+        raise RuntimeError("text must not be empty")
+    try:
+        payload = []
+        for char in text:
+            code = SET2_ASCII[char]
+            payload.extend((code, 0xF0, code))
+    except KeyError as error:
+        raise RuntimeError(f"unsupported PS/2 text character: {error.args[0]!r}") from error
+    fd, ctrl, _ = open_mmio(writable=True)
+    try:
+        _kbd_send_raw(ctrl, payload, args.timeout)
+        print(f"sent {len(text)} PS/2 key event(s), {len(payload)} Set-2 byte(s)")
+        return 0
+    finally:
+        ctrl.close()
+        os.close(fd)
+
+
+def ps2_raw_probe(args: argparse.Namespace) -> int:
+    """Send bounded raw Set-2 bytes for diagnostic or non-ASCII keys."""
+    payload = args.bytes
+    if not payload or len(payload) > 256:
+        raise RuntimeError("supply 1..256 raw Set-2 bytes")
+    if any(byte < 0 or byte > 0xFF for byte in payload):
+        raise RuntimeError("raw PS/2 bytes must be in 0x00..0xff")
+    fd, ctrl, _ = open_mmio(writable=True)
+    try:
+        _kbd_send_raw(ctrl, payload, args.timeout)
+        print(f"sent {len(payload)} raw Set-2 byte(s)")
+        return 0
+    finally:
         ctrl.close()
         os.close(fd)
 
@@ -2259,6 +2344,23 @@ def parse_args() -> argparse.Namespace:
     queue_keys.add_argument("text", help="1..15 printable ASCII characters; append Enter with --enter")
     queue_keys.add_argument("--enter", action="store_true", help="append an Enter key")
     queue_keys.set_defaults(func=queue_keys_probe)
+
+    ps2_keys = sub.add_parser(
+        "ps2-keys",
+        help="send normal make/break events through the hosted PS/2 keyboard device (write)",
+    )
+    ps2_keys.add_argument("text", help="lowercase ASCII text accepted by the PC keyboard map")
+    ps2_keys.add_argument("--enter", action="store_true", help="append a physical Enter make/break")
+    ps2_keys.add_argument("--timeout", type=float, default=2.0, help="per-Set-2-byte transport timeout")
+    ps2_keys.set_defaults(func=ps2_keys_probe)
+
+    ps2_raw = sub.add_parser(
+        "ps2-raw",
+        help="send raw Set-2 bytes through the hosted PS/2 keyboard device (write)",
+    )
+    ps2_raw.add_argument("bytes", nargs="+", type=lambda value: int(value, 0))
+    ps2_raw.add_argument("--timeout", type=float, default=2.0, help="per-byte transport timeout")
+    ps2_raw.set_defaults(func=ps2_raw_probe)
 
     sample = sub.add_parser(
         "sample", help="read-only sampling of the newest on-die PC-ring entry"

@@ -1,0 +1,264 @@
+diff --git a/fpga/rk-ao486-system/src/ven_mgmt_axil.v b/fpga/rk-ao486-system/src/ven_mgmt_axil.v
+--- a/fpga/rk-ao486-system/src/ven_mgmt_axil.v
++++ b/fpga/rk-ao486-system/src/ven_mgmt_axil.v
+@@ -28,6 +28,8 @@
+ //   0x280 execution control/status  0x290 breakpoint EIP
+ //   0x2A0 architectural selector    0x2B0 selected architectural word
+ //   0x2C0 execution-debug capability
++//   0x380 keyboard byte submit (WO, bit8=submit, bits7:0=raw Set-2 byte)
++//   0x390 keyboard transport status  0x3A0 keyboard transport capability
+ `default_nettype wire
+ module ven_mgmt_axil #(parameter ADDR_W = 16)(
+     input  wire        clk,
+@@ -119,6 +121,13 @@
+     input  wire [11:0]  cap_frame_width,
+     input  wire [11:0]  cap_frame_height,
+     input  wire [19:0]  cap_frame_pixels,
++    // ---- hosted PS/2 keyboard device -------------------------------------
++    // A narrow external-device transport.  Raw Set-2 bytes are accepted only
++    // on the W1P submit at 0x380; guest memory and CPU control are untouched.
++    output reg  [7:0]   kbd_inject_data,
++    output reg          kbd_inject_valid,
++    input  wire         kbd_inject_ready,
++    input  wire         kbd_inject_busy,
+     output reg          core_reset_n,
+     output reg          irq_out
+ );
+@@ -134,6 +143,7 @@
+     // an old image would truncate high selectors and fabricate a misleading
+     // state dump.
+     localparam DBG_EXEC_CAP = 32'h5645_0005;     // "VE", format 5
++    localparam KBD_INJECT_CAP = 32'h564B_0001;   // "VK", format 1
+     reg [15:0] ctrl;
+ 
+     // ---- write channel FSM (handles the mgmt_write pulse) ----
+@@ -148,9 +158,10 @@
+             dbg_cmp_cfg<=0; dbg_cmp_range<=0;
+             dbg_halt_req<=0; dbg_step<=0; dbg_bp_en<=0; dbg_bp_addr<=0; dbg_bp_clr<=0; dbg_arch_sel<=0;
+             cap_arm<=0; cap_rd_addr<=0;
++            kbd_inject_data<=0; kbd_inject_valid<=0;
+         end else begin
+             s_awready<=0; s_wready<=0; mgmt_write<=0; dbg_clear<=0; dbg_ext_freeze<=0;
+-            dbg_step<=0; dbg_bp_clr<=0; cap_arm<=0; // W1P defaults
++            dbg_step<=0; dbg_bp_clr<=0; cap_arm<=0; kbd_inject_valid<=0; // W1P defaults
+             case (wst)
+                 W_IDLE: if (s_awvalid && s_wvalid) begin
+                     s_awready<=1; s_wready<=1;
+@@ -169,6 +180,10 @@
+                         12'h0B0: dbg_cmp_range <= s_wdata;          // DBG_CMP_RANGE
+                         12'h300: cap_arm       <= s_wdata[0];       // CAP_CTL W1P
+                         12'h360: cap_rd_addr   <= s_wdata[16:0];    // CAP_ADDR (word)
++                        12'h380: begin
++                            kbd_inject_data  <= s_wdata[7:0];
++                            kbd_inject_valid <= s_wdata[8] & kbd_inject_ready;
++                        end
+                         default: ;
+                     endcase
+                     // Debug execution is deliberately separate from the
+@@ -276,6 +291,9 @@
+                             12'h340: s_rdata<={8'd0, cap_frame_height, cap_frame_width};
+                             12'h350: s_rdata<={12'd0, cap_frame_pixels};
+                             12'h360: s_rdata<={15'd0, cap_rd_addr};
++                            // ---- hosted PS/2 keyboard device --------------------------
++                            12'h390: s_rdata<={30'd0,kbd_inject_busy,kbd_inject_ready};
++                            12'h3A0: s_rdata<=KBD_INJECT_CAP;
+                             // ---- versioned forensic context frame -------------------------------
+                             // This bank is deliberately read-only.  It adds no command path into the
+                             // CPU and is therefore safe for a production-style debug image.
+diff --git a/fpga/rk-ao486-system/src/rk_ao486_system_pl.v b/fpga/rk-ao486-system/src/rk_ao486_system_pl.v
+--- a/fpga/rk-ao486-system/src/rk_ao486_system_pl.v
++++ b/fpga/rk-ao486-system/src/rk_ao486_system_pl.v
+@@ -154,6 +154,17 @@
+     wire [63:0] cap_frame_cycle;
+     wire [11:0] cap_frame_width, cap_frame_height;
+     wire [19:0] cap_frame_pixels;
++    // Hosted keyboard-device transport.  These are physical PS/2 wire levels
++    // (1=release); the injector and 8042 are wire-ANDed exactly as two
++    // open-drain devices would be.  There is no guest-memory shortcut.
++    wire [7:0] kbd_inject_data;
++    wire kbd_inject_valid, kbd_inject_ready, kbd_inject_busy;
++    wire ps2_kbclk_host, ps2_kbdat_host, ps2_kbclk_dev, ps2_kbdat_dev;
++    wire ps2_kbclk_in = ps2_kbclk_host & ps2_kbclk_dev;
++    wire ps2_kbdat_in = ps2_kbdat_host & ps2_kbdat_dev;
++    // Kept in the guest reset domain below, after the forensic reset source is
++    // declared.  A queued device byte must not leak across a guest reset.
++    wire soc_reset;
+     wire [290:0] cpu_dbg_bus; wire [127:0] cpu_dbg_cmp;
+     wire         d_inta          = cpu_dbg_bus[0];
+     wire         d_retire_valid  = cpu_dbg_bus[1];
+@@ -219,6 +230,7 @@
+     wire [31:0] dbg_perf_io, dbg_perf_irq;
+     wire [31:0] dbg_st_pipe, dbg_st_walk, dbg_st_fetch, dbg_st_other;  // task #54 state bins
+     wire        dbg_frozen; wire [5:0] dbg_frozen_state; wire [7:0] dbg_frozen_vec; wire [7:0] dbg_trace_count;
++    assign soc_reset = rst | ~core_reset_n | dbg_frozen;
+ 
+     // rd-beat ring taps the M_AXI READ channel (the HP0 boundary) so it shows the exact 64-bit
+     // fill words the core fetches -> a corrupted line fill (correct DDR data, wrong HP0 return) is
+@@ -327,6 +339,8 @@
+         .cap_frame_ready(cap_frame_ready), .cap_capture_active(cap_capture_active), .cap_frame_overrun(cap_frame_overrun),
+         .cap_frame_sequence(cap_frame_sequence), .cap_frame_cycle(cap_frame_cycle),
+         .cap_frame_width(cap_frame_width), .cap_frame_height(cap_frame_height), .cap_frame_pixels(cap_frame_pixels),
++        .kbd_inject_data(kbd_inject_data), .kbd_inject_valid(kbd_inject_valid),
++        .kbd_inject_ready(kbd_inject_ready), .kbd_inject_busy(kbd_inject_busy),
+         .core_reset_n(core_reset_n), .irq_out(pl_ps_irq0)
+     );
+ 
+@@ -341,6 +355,17 @@
+         .frame_width(cap_frame_width), .frame_height(cap_frame_height), .frame_pixels(cap_frame_pixels)
+     );
+ 
++    // A normal PS/2 device endpoint for headless boards.  The AXI-Lite
++    // register only queues device-originated scan-code bytes; the actual
++    // 8042 receives them through its ordinary serial pins and raises IRQ1.
++    ven_ps2_kbd_inject u_ps2_kbd_inject (
++        .clk(clk), .rst_n(~soc_reset),
++        .inject_valid(kbd_inject_valid), .inject_data(kbd_inject_data),
++        .inject_ready(kbd_inject_ready), .inject_busy(kbd_inject_busy),
++        .host_clk_release(ps2_kbclk_host), .host_dat_release(ps2_kbdat_host),
++        .dev_clk_release(ps2_kbclk_dev), .dev_dat_release(ps2_kbdat_dev)
++    );
++
+     ven_ddram_axi #(.MEM_BASE(MEM_BASE)) u_ddr (
+         .clk(clk), .rst_n(resetn),
+         .DDRAM_BUSY(DDRAM_BUSY), .DDRAM_BURSTCNT(DDRAM_BURSTCNT), .DDRAM_ADDR(DDRAM_ADDR),
+@@ -372,7 +397,8 @@
+         .joystick_ana_1(16'd0), .joystick_ana_2(16'd0), .joystick_mode(2'd0), .joystick_timed(2'd0),
+         .mgmt_address(mgmt_address), .mgmt_read(mgmt_read), .mgmt_readdata(mgmt_readdata),
+         .mgmt_write(mgmt_write), .mgmt_writedata(mgmt_writedata),
+-        .ps2_kbclk_in(1'b1), .ps2_kbdat_in(1'b1), .ps2_kbclk_out(), .ps2_kbdat_out(),
++        .ps2_kbclk_in(ps2_kbclk_in), .ps2_kbdat_in(ps2_kbdat_in),
++        .ps2_kbclk_out(ps2_kbclk_host), .ps2_kbdat_out(ps2_kbdat_host),
+         .ps2_mouseclk_in(1'b1), .ps2_mousedat_in(1'b1), .ps2_mouseclk_out(), .ps2_mousedat_out(), .ps2_reset_n(),
+         .bootcfg(6'd0), .uma_ram(1'b0), .syscfg(),
+         .clk_uart1(clk), .uart1_rx(1'b1), .uart1_tx(), .uart1_cts_n(1'b1), .uart1_dcd_n(1'b1), .uart1_dsr_n(1'b1), .uart1_rts_n(), .uart1_dtr_n(),
+diff --git /dev/null b/fpga/rk-ao486-system/src/ven_ps2_kbd_inject.v
+--- /dev/null
++++ b/fpga/rk-ao486-system/src/ven_ps2_kbd_inject.v
+@@ -0,0 +1,114 @@
++// ven_ps2_kbd_inject.v -- Debug-hosted PS/2 keyboard device.
++//
++// The RK wrapper has no physical PS/2 connector.  This block provides a
++// deliberately narrow substitute for the missing *device* only: software
++// submits raw Set-2 bytes via the versioned AXI-Lite debug register, and this
++// module serialises them on the two existing open-drain PS/2 lines.  It is not
++// a guest-memory shortcut and has no path into the CPU or keyboard FIFO.
++//
++// One byte is accepted only while ready.  Software must wait for ready after
++// every write; this preserves byte order and naturally back-pressures while
++// the 8042 is talking to the device.  At a 3.125 MHz system clock, the 128/128
++// phase timings below produce an approximately 12 kHz PS/2 clock, within the
++// normal device range and comfortably above the receiver's 16-cycle debounce
++// requirement.  The serial framing matches the proven simulation device model
++// in ao486-sim/ven/sim_ven.cpp.
++`default_nettype none
++module ven_ps2_kbd_inject (
++    input  wire       clk,
++    input  wire       rst_n,
++    input  wire       inject_valid,
++    input  wire [7:0] inject_data,
++    output wire       inject_ready,
++    output wire       inject_busy,
++    // Release levels driven by the 8042 host side (1=release, 0=pull low).
++    input  wire       host_clk_release,
++    input  wire       host_dat_release,
++    // Device open-drain levels to wire-AND with the host signals.
++    output wire       dev_clk_release,
++    output wire       dev_dat_release
++);
++    localparam [7:0] HALF_CYCLES = 8'd128;
++    localparam [8:0] CELL_CYCLES = {1'b0, HALF_CYCLES} << 1;
++    localparam [7:0] START_IDLE_CYCLES = 8'd80;
++
++    localparam [1:0] IDLE = 2'd0, WAIT_IDLE = 2'd1, SEND = 2'd2;
++    reg [1:0] state;
++    reg [7:0] byte_q;
++    reg [10:0] frame_q;
++    reg [3:0] bit_idx;
++    reg [8:0] half_count;
++    reg [7:0] idle_count;
++
++    assign inject_ready = (state == IDLE);
++    assign inject_busy = (state != IDLE);
++    // The device leaves both lines released outside SEND.  During a send it
++    // drives data for the whole cell and supplies a high then low clock phase,
++    // exactly like the established simulation keyboard device.
++    assign dev_dat_release = (state == SEND) ? frame_q[bit_idx] : 1'b1;
++    assign dev_clk_release = (state == SEND) ? (half_count < {1'b0, HALF_CYCLES}) : 1'b1;
++
++    function [10:0] ps2_frame;
++        input [7:0] data;
++        reg parity;
++        integer i;
++        begin
++            parity = 1'b1;
++            for (i = 0; i < 8; i = i + 1) parity = parity ^ data[i];
++            ps2_frame = {1'b1, parity, data, 1'b0}; // stop, odd parity, LSB-first data, start
++        end
++    endfunction
++
++    always @(posedge clk) begin
++        if (!rst_n) begin
++            state <= IDLE;
++            byte_q <= 8'd0;
++            frame_q <= 11'h7ff;
++            bit_idx <= 4'd0;
++            half_count <= 9'd0;
++            idle_count <= 8'd0;
++        end else begin
++            case (state)
++                IDLE: begin
++                    idle_count <= 8'd0;
++                    if (inject_valid) begin
++                        byte_q <= inject_data;
++                        state <= WAIT_IDLE;
++                    end
++                end
++                WAIT_IDLE: begin
++                    // Do not begin a device frame while the host owns either
++                    // open-drain line.  Requiring a continuous idle interval
++                    // also separates back-to-back bytes cleanly.
++                    if (host_clk_release && host_dat_release) begin
++                        if (idle_count == START_IDLE_CYCLES - 1'b1) begin
++                            frame_q <= ps2_frame(byte_q);
++                            bit_idx <= 4'd0;
++                            half_count <= 9'd0;
++                            state <= SEND;
++                        end else begin
++                            idle_count <= idle_count + 1'b1;
++                        end
++                    end else begin
++                        idle_count <= 8'd0;
++                    end
++                end
++                SEND: begin
++                    if (half_count == CELL_CYCLES - 1'b1) begin
++                        half_count <= 9'd0;
++                        if (bit_idx == 4'd10) begin
++                            state <= IDLE;
++                            bit_idx <= 4'd0;
++                        end else begin
++                            bit_idx <= bit_idx + 1'b1;
++                        end
++                    end else begin
++                        half_count <= half_count + 1'b1;
++                    end
++                end
++                default: state <= IDLE;
++            endcase
++        end
++    end
++endmodule
++`default_nettype wire
+diff --git a/fpga/rk-ao486-system/hw/create_project.tcl b/fpga/rk-ao486-system/hw/create_project.tcl
+--- a/fpga/rk-ao486-system/hw/create_project.tcl
++++ b/fpga/rk-ao486-system/hw/create_project.tcl
+@@ -48,7 +48,7 @@
+     }
+     close $fh
+ }
+-foreach x [list src/ven_ddram_axi.v src/ven_mgmt_axil.v src/ven_soc_dbg.sv src/clk_div32.v src/rk_ao486_system_pl.v] { lappend files "$ROOT/$x" }
++foreach x [list src/ven_ddram_axi.v src/ven_mgmt_axil.v src/ven_soc_dbg.sv src/ven_ps2_kbd_inject.v src/clk_div32.v src/rk_ao486_system_pl.v] { lappend files "$ROOT/$x" }
+ add_files -norecurse $files
+ set_property include_dirs $incdirs [current_fileset]
+ set_property verilog_define $DEFS [current_fileset]
+
