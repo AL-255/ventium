@@ -146,7 +146,22 @@ set_property -dict [list \
     # Frequency leads the completion record.  WNS/WHS only demonstrate timing
     # closure at this constraint; they do not measure a board clock.  The /32
     # divider constraints create these two clocks in the final routed design.
-    foreach {clk_name clk_role} {clk_pl_0 {PL / HP0} wr_clk_i {core (/32)}} {
+    # Only the physical divider selected above differs.
+    set core_clk_role {core (/32)}
+    if {[info exists ::env(VEN_FPGA_CORE_MHZ)] && $::env(VEN_FPGA_CORE_MHZ) eq "50"} {
+        set core_clk_role {core (/2)}
+    }
+    # ``u_clkdiv_clk_out`` is the generated-clock name emitted by the
+    # recovered BD.  Older checkpoints called the same interface ``wr_clk_i``;
+    # accept that legacy name for reports made from those checkpoints.
+    set core_clk_name wr_clk_i
+    foreach candidate {u_clkdiv_clk_out wr_clk_i} {
+        if {[llength [get_clocks -quiet $candidate]] == 1} {
+            set core_clk_name $candidate
+            break
+        }
+    }
+    foreach {clk_name clk_role} [list clk_pl_0 {PL / HP0} $core_clk_name $core_clk_role] {
         set clk_obj [get_clocks -quiet $clk_name]
         if {[llength $clk_obj] != 1} {
             puts "## Frequency ($clk_role): unavailable (expected $clk_name)"
