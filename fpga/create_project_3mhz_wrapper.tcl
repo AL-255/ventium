@@ -144,8 +144,8 @@ set_property -dict [list \
     puts "## WNS (setup worst slack) = $wns"} \
     {open_run impl_1
     # Frequency leads the completion record.  WNS/WHS only demonstrate timing
-    # closure at this constraint; they do not measure a board clock.  The /32
-    # divider constraints create these two clocks in the final routed design.
+    # closure at this constraint; they do not measure a board clock.  The
+    # selected divider creates these two clocks in the final routed design.
     # Only the physical divider selected above differs.
     set core_clk_role {core (/32)}
     if {[info exists ::env(VEN_FPGA_CORE_MHZ)] && $::env(VEN_FPGA_CORE_MHZ) eq "50"} {
