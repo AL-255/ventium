@@ -2,13 +2,10 @@
 //
 // ven_fp_state.sv -- compact x87 architectural state for the shared FPU.
 //
-// The eight 80-bit words retain the architectural physical-register layout of
-// the proven fpu_top.  This is deliberately *not* a pointer-remapped bank:
-// although swapping two 3-bit pointers makes FXCH itself small, it puts a
-// second 8-way, 80-bit mux in front of every ST read and every full-register
-// export.  Those ports are permanently live in the core, so direct physical
-// storage is substantially smaller and faster overall.  FXCH instead uses the
-// old fpu_top's simultaneous pre-edge two-register write.
+// The eight 80-bit data words live in a bank.  A small permutation table maps
+// architectural physical register numbers onto that bank.  FXCH therefore
+// exchanges two 3-bit pointers rather than moving 160 data bits.  Tags remain
+// indexed by architectural physical register number, exactly as in fpu_top.
 
 `default_nettype none
 
@@ -80,7 +77,8 @@ module ven_fp_state (
     input  wire logic [639:0] env_regs_phys
 );
 
-  logic [79:0] fpr [8];
+  logic [79:0] bank [8];
+  logic [2:0]  map  [8];
   logic [2:0]  top;
   logic [15:0] status;
   logic [15:0] control;
@@ -92,8 +90,8 @@ module ven_fp_state (
 
   assign rd0_phys  = top + rd0_idx;
   assign rd1_phys  = top + rd1_idx;
-  assign rd0_data  = fpr[rd0_phys];
-  assign rd1_data  = fpr[rd1_phys];
+  assign rd0_data  = bank[map[rd0_phys]];
+  assign rd1_data  = bank[map[rd1_phys]];
   assign rd0_empty = tag[rd0_phys];
   assign rd1_empty = tag[rd1_phys];
 
@@ -110,8 +108,8 @@ module ven_fp_state (
     phys_flat_o = '0;
     st_flat_o   = '0;
     for (int i = 0; i < 8; i++) begin
-      phys_flat_o[i*80 +: 80] = fpr[i];
-      st_flat_o[i*80 +: 80]   = fpr[top + i[2:0]];
+      phys_flat_o[i*80 +: 80] = bank[map[i]];
+      st_flat_o[i*80 +: 80]   = bank[map[top + i[2:0]]];
     end
   end
 
@@ -136,7 +134,8 @@ module ven_fp_state (
       fdp     <= 32'd0;
       fds     <= 16'd0;
       for (int i = 0; i < 8; i++) begin
-        fpr[i] <= 80'd0;
+        bank[i] <= 80'd0;
+        map[i]  <= i[2:0];
       end
     end else begin
       // FNINIT has the same priority/order as the proven fpu_top: it resets
@@ -155,18 +154,18 @@ module ven_fp_state (
       if (commit_push) begin
         top             <= top - 3'd1;
         tag[top - 3'd1] <= 1'b0;
-        fpr[top - 3'd1] <= push_data;
+        bank[map[top - 3'd1]] <= push_data;
       end
 
       if (commit_write) begin
-        fpr[top + write_idx] <= write_data;
+        bank[map[top + write_idx]] <= write_data;
         if (write_mark_valid)
           tag[top + write_idx] <= 1'b0;
       end
 
       if (commit_swap) begin
-        fpr[top]            <= fpr[top + swap_idx];
-        fpr[top + swap_idx] <= fpr[top];
+        map[top]            <= map[top + swap_idx];
+        map[top + swap_idx] <= map[top];
       end
 
       if (commit_pop == 2'd1) begin
@@ -211,7 +210,7 @@ module ven_fp_state (
       end
       if (commit_env_regs)
         for (int i = 0; i < 8; i++)
-          fpr[i] <= env_regs_phys[i*80 +: 80];
+          bank[map[i]] <= env_regs_phys[i*80 +: 80];
     end
   end
 
