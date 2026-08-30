@@ -1,5 +1,9 @@
 # Ventium
 
+<p align="center">
+  <img src="docs/quake-timedemo.gif" alt="Quake timedemo running on the Ventium FPGA" width="640">
+</p>
+
 [![Documentation](https://img.shields.io/badge/docs-Sphinx-green)][docs]
 
 [docs]: https://al-255.github.io/ventium/
