@@ -29,6 +29,7 @@ core/ventium_x87_pkg.sv
 ventium_top.sv
 
 // ---- core -----------------------------------------------------------------
+core/ven_frame_plan.sv
 core/core.sv
 // architectural GPR file extracted VERBATIM from core.sv (R3): registered storage
 // + synchronous dual-boot-mode reset + per-register write bus. Driven by core.sv's

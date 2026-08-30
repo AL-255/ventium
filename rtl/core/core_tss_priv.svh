@@ -305,95 +305,38 @@
                   int_frm_nslots <= int_has_err ? 6'd6 : 6'd5;
                   int_frm_wide   <= !int_frm16;
                 end
-                // The frame PAGE plan (core.sv has the contract): enumerate the
-                // pushes exactly as silicon performs them -- slot i at linear
-                // SS.base + ((ESP - (i+1)*unit) & mask), the OFFSET masked to
-                // the new stack's B BEFORE the base is added, the access
-                // itself spanning unit bytes linearly upward (so a slot at
-                // offset 0xFFFF covers a byte on the NEXT page) -- and collect
-                // the distinct pages in push order. A page first touched by a
-                // slot START probes at that slot's address (silicon/QEMU
-                // report CR2 = the faulting push); a page first touched by a
-                // slot's straddle byte probes at its page base (QEMU's
-                // mmu_lookup reports the second page's base for a straddling
-                // access). The whole frame is a contiguous circular offset
-                // interval of < 145 bytes (a max pcount=31 call-gate frame),
-                // so the plan holds at most four distinct pages.
-                begin
-                  logic        b32, wide, dup;
-                  logic [5:0]  nsl;
-                  logic [31:0] sp, base, unit;
-                  logic [31:0] off, ad, ad2;
-                  logic [19:0] vl [4];   // distinct linear pages, push order
-                  logic [31:0] va [4];   // probe address per page (CR2 fidelity)
-                  logic        vm [4];   // page-base (straddle) probe
-                  logic [3:0]  nv;
-                  wide = from_v86 ? 1'b1 : (cg_xpl ? cg_wide : !int_frm16);
-                  nsl  = from_v86 ? (int_has_err ? 6'd10 : 6'd9)
-                       : cg_xpl   ? (6'd4 + {1'b0, cg_pcount})
-                       :            (int_has_err ? 6'd6 : 6'd5);
-                  b32  = desc[54];
-                  base = desc_base(desc);
-                  sp   = b32 ? int_new_esp : {16'd0, int_new_esp[15:0]};
-                  unit = wide ? 32'd4 : 32'd2;
-                  nv = 4'd0;
-                  for (int s = 0; s < 36; s++) begin
-                    if (s < {26'd0, nsl}) begin
-                      off = frm_slot_off(sp, 6'(s), wide, b32);
-                      ad  = base + off;
-                      ad2 = ad + unit - 32'd1;   // the slot's last byte
-                      // the slot's start page, probed at the slot's address
-                      dup = 1'b0;
-                      for (int p = 0; p < 4; p++)
-                        if ((p < nv) && (vl[p] == ad[31:12])) dup = 1'b1;
-                      if (!dup) begin
-`ifndef SYNTHESIS
-                        if (nv == 4'd4)
-                          $fatal(1, "frame page plan overflow (>4 pages)");
-`endif
-                        if (nv < 4'd4) begin
-                          vl[nv[1:0]] = ad[31:12];
-                          va[nv[1:0]] = ad;
-                          vm[nv[1:0]] = 1'b0;
-                          nv = nv + 4'd1;
-                        end
-                      end
-                      // the straddle page, probed at its base
-                      if (ad2[31:12] != ad[31:12]) begin
-                        dup = 1'b0;
-                        for (int p = 0; p < 4; p++)
-                          if ((p < nv) && (vl[p] == ad2[31:12])) dup = 1'b1;
-                        if (!dup) begin
-`ifndef SYNTHESIS
-                          if (nv == 4'd4)
-                            $fatal(1, "frame page plan overflow (>4 pages)");
-`endif
-                          if (nv < 4'd4) begin
-                            vl[nv[1:0]] = ad2[31:12];
-                            va[nv[1:0]] = {ad2[31:12], 12'd0};
-                            vm[nv[1:0]] = 1'b1;
-                            nv = nv + 4'd1;
-                          end
-                        end
-                      end
-                    end
-                  end
-                  for (int i = 0; i < 4; i++) begin
-                    frm_pg_val[i] <= (i < nv);
-                    if (i < nv) begin
-                      frm_pg_lin [i] <= vl[i];
-                      frm_pg_addr[i] <= va[i];
-                      frm_pg_mid [i] <= vm[i];
-                    end
-                  end
-                  frm_pg_n     <= nv[2:0];
-                end
+                // Build the page plan sequentially.  This state occurs before
+                // S_INT_PROBE and before the staged SS/CPL context commits, so
+                // its latency is architecturally invisible while removing the
+                // old 36-slot combinational cone from normal timing paths.
+                frame_plan_start <= 1'b1;
                 frm_pg_i       <= 3'd0;
                 frm_pg_markd   <= 1'b0;
                 int_step       <= 4'd0;
-                state          <= S_INT_PROBE;
+                state          <= S_INT_PLAN_ARM;
               end
             end
+          end
+        end
+
+        // The start pulse is registered.  Keep one arm state between it and
+        // completion observation so a held ``done`` from a prior frame cannot
+        // be mistaken for this plan before the planner consumes start.
+        S_INT_PLAN_ARM: state <= S_INT_PLAN;
+
+        S_INT_PLAN: begin
+          if (frame_plan_done) begin
+            for (int i = 0; i < 4; i++) begin
+              frm_pg_val[i]  <= frame_plan_val[i];
+              frm_pg_lin [i] <= frame_plan_lin[i];
+              frm_pg_addr[i] <= frame_plan_addr[i];
+              frm_pg_mid [i] <= frame_plan_mid[i];
+            end
+            frm_pg_n     <= {2'd0, frame_plan_val[0]} + {2'd0, frame_plan_val[1]}
+                         + {2'd0, frame_plan_val[2]} + {2'd0, frame_plan_val[3]};
+            frm_pg_i     <= 3'd0;
+            frm_pg_markd <= 1'b0;
+            state        <= S_INT_PROBE;
           end
         end
 

@@ -152,7 +152,7 @@ typedef enum logic [5:0] {
     //   S_INT_TSS : cross-priv delivery — read TSS.ssN:espN (N = target CS.DPL).
     //   S_INT_SS  : cross-priv delivery — read + load the new SS descriptor.
     //   S_IRET_SS : inter-priv IRET — reload the popped (outer) SS descriptor.
-    S_LTR, S_INT_TSS, S_INT_SS, S_IRET_SS,
+    S_LTR, S_INT_TSS, S_INT_SS, S_INT_PLAN_ARM, S_INT_PLAN, S_IRET_SS,
     // M2S.4b — HARDWARE TASK SWITCH micro-sequence (far JMP/CALL to a TSS, gated
     // sys_mode; IA-32 SDM Vol.3 §7.3). A far JMP whose target GDT descriptor is a
     // SYSTEM (S=0) available/busy 32-bit TSS (type 9/B) runs:
@@ -2989,6 +2989,21 @@ module core
   logic [1:0]  int_new_cpl;       // target privilege level (= target CS.DPL)
   logic [15:0] int_new_ss;        // new SS selector from TSS.ssN
   logic [31:0] int_new_esp;       // new ESP from TSS.espN
+  // The rare cross-privilege frame page plan is deliberately sequential.  Its
+  // completion is copied into the existing probe/push contract before any
+  // staged context becomes architectural state.
+  logic        frame_plan_start, frame_plan_busy, frame_plan_done;
+  logic [19:0] frame_plan_lin [4];
+  logic [31:0] frame_plan_addr [4];
+  logic [3:0]  frame_plan_val, frame_plan_mid;
+  ven_frame_plan u_frame_plan (
+      .clk(clk), .rst_n(rst_n), .start(frame_plan_start),
+      .stack_base(int_ss_base), .stack_ptr(int_new_esp),
+      .stack_b32(int_ss_b), .wide(int_frm_wide), .nslots(int_frm_nslots),
+      .busy(frame_plan_busy), .done(frame_plan_done),
+      .page_lin(frame_plan_lin), .probe_addr(frame_plan_addr),
+      .page_valid(frame_plan_val), .page_mid(frame_plan_mid)
+  );
   // M2S.4 inter-privilege IRET scratch. When the IRET-popped CS.RPL > current
   // CPL the return is to a LESS-privileged level: additionally pop ESP/SS, switch
   // to the outer stack, and null any data segment not accessible at the new CPL.
@@ -4710,7 +4725,7 @@ module core
       int_gate_trap<=1'b0; int_gate_op16<=1'b0; int_lo<=32'd0; iret_eip<=32'd0; iret_cs<=16'd0;
       int_cs_base<=32'd0; int_cs_limit<=32'd0; int_cs_attr<=8'd0; int_cs_d<=1'b0;
       int_ss_base<=32'd0; int_ss_limit<=32'd0; int_ss_attr<=8'd0; int_ss_b<=1'b0;
-      int_frm_nslots<=6'd0; int_frm_wide<=1'b0;
+      int_frm_nslots<=6'd0; int_frm_wide<=1'b0; frame_plan_start<=1'b0;
       frm_pg_val<=4'd0; frm_pg_markd<=1'b0; frm_pg_i<=3'd0; frm_pg_n<=3'd0;
       for (int i = 0; i < 4; i++) begin
         frm_pg_lin[i]<=20'd0; frm_pg_addr[i]<=32'd0; frm_pg_phys[i]<=20'd0;
@@ -4768,6 +4783,7 @@ module core
       // per-cycle default: the fragment-abort request is a one-cycle pulse
       // (start_fault re-raises it; the engine block only reads it).
       fx_abort_q <= 1'b0;
+      frame_plan_start <= 1'b0;
       // REVIEW1_Aug3 R2-H07: the PE-drop backstop for the now-EXPLICIT
       // seg_pm_loaded (every load site writes it directly; see the case arms).
       // Leaving protected mode clears every segment's loaded bit -- real-mode
