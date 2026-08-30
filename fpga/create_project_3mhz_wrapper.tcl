@@ -139,6 +139,18 @@ set_property -dict [list \
     $core_label_span \
     {launch_runs synth_1 -jobs 4; wait_on_run synth_1} \
     $area_synth \
+    {add_files -fileset constrs_1 -norecurse "$HW/bitstream.xdc" "$HW/led.xdc" "$HW/fpatan_mcp.xdc"
+# fpatan multicycle references synthesized cells: apply in implementation (post-synth netlist).
+set_property used_in_synthesis false [get_files "$HW/fpatan_mcp.xdc"]
+# ensure the timing (multicycle) xdc is processed after the clock definitions
+set_property PROCESSING_ORDER LATE [get_files "$HW/fpatan_mcp.xdc"]} \
+    {# The external project's MCP targets the legacy fpu_fpatan hierarchy.  The
+# VEN_FP_SHARED profile selected above replaces that engine entirely, so keeping
+# this XDC would create unmatched-object critical warnings and, more importantly,
+# could not legitimately relax timing on the replacement engine.  Keep only the
+# board constraints for this shared-FPU wrapper; shared transcendentals are timed
+# at their real single-cycle register boundaries.
+add_files -fileset constrs_1 -norecurse "$HW/bitstream.xdc" "$HW/led.xdc"} \
     {open_run impl_1
     set wns [get_property SLACK [get_timing_paths -max_paths 1 -nworst 1 -setup]]
     puts "## WNS (setup worst slack) = $wns"} \
