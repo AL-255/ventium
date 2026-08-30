@@ -5061,7 +5061,7 @@ module core
         // The frame-probe VALIDATION phase (S_INT_PROBE, frm_pg_markd=0) is the
         // same not-a-write class; its D-mark phase (frm_pg_markd=1) sets D
         // deliberately, pre-commit.
-        walk_set_dirty <= cur_is_w && !(xs_probing || fx_probing
+        walk_set_dirty <= cur_is_w && !(xs_probing || fx_probing || fp_store_probing
                                         || ((state==S_INT_PROBE) && !frm_pg_markd));    // may set D -> probe excluded
         walk_usr_lat   <= acc_usr;   // REVIEW1_Aug2 C-04: latch the requester's class
         walk_step      <= 3'd0;
@@ -6135,6 +6135,14 @@ module core
   logic        walk_usr_lat;             // C-04: the class of the access that missed
   logic        mem_req_pre_sq;           // mem_req before the C-01 segment squash
   logic        xs_probing;               // C-02: the crossing-store probe phase
+  // Shared-x87 stores validate their entire destination before the irrevocable
+  // command edge.  This is a write-permission probe, not a speculative read:
+  // it has no external bus transaction and must not set a leaf PTE's D bit.
+  // `second` walks the page reached by a single beat that straddles 4 KiB.
+  logic        fp_store_probing;
+  logic        fp_store_probe_second;
+  logic        fp_store_probe_cross;
+  logic        fp_store_probe_advance;
   logic        walk_set_dirty;           // H-02: may set D (probe excluded), vs
                                          //       walk_is_write = architectural W/R
   logic        cur_seg_rel;              // this access is SEGMENT-RELATIVE
@@ -7297,7 +7305,21 @@ module core
                      // H-05: check the WHOLE m16/m32/m64/m80 at the first beat.
                      seg_ext_ovr   = {4'd0, q_f_mbytes};
                      seg_ext_ovr_v = 1'b1;
-                     seg_ext_skip  = (f_step != 4'd0); end
+                     seg_ext_skip  = (f_step != 4'd0);
+                     if (fp_store_probing) begin
+                       cur_is_w_nat = 1'b1;
+                       // The first phase validates the natural beat.  When it
+                       // straddles 4 KiB, phase two validates the next page's
+                       // base.  The whole destination extent was checked on
+                       // phase one, so a one-byte page probe needs no second
+                       // segment-limit check.
+                       if (fp_store_probe_second) begin
+                         cur_lin_nat = {cur_lin_nat[31:12] + 20'd1, 12'd0};
+                         cur_size = 4'd1;
+                         seg_ext_skip = 1'b1;
+                       end
+                     end
+                   end
       S_FSTORE: begin cur_lin_nat = dbase+q_ea + {26'd0, f_step, 2'b00}; cur_is_w_nat = 1'b1;
                      cur_size = ((q_f_mbytes==4'd10 && f_step==4'd2) ||
                                  (q_f_mbytes==4'd2)) ? 4'd2 : 4'd4;
@@ -7326,7 +7348,16 @@ module core
                                      ? 8'((fenv_last + 6'd1) * 2)
                                      : 8'((fenv_last + 6'd1) * 4);
                        seg_ext_ovr_v = 1'b1;
-                       seg_ext_skip  = (fenv_off != 32'd0); end
+                       seg_ext_skip  = (fenv_off != 32'd0);
+                       if (fp_store_probing) begin
+                         cur_is_w_nat = 1'b1;
+                         if (fp_store_probe_second) begin
+                           cur_lin_nat = {cur_lin_nat[31:12] + 20'd1, 12'd0};
+                           cur_size = 4'd1;
+                           seg_ext_skip = 1'b1;
+                         end
+                       end
+                     end
       S_STORE: begin cur_size = {1'b0, q_w};
         cur_is_w_nat = 1'b1;
         // F3/paging fix: POP r/m16 (8F) writes its operand in the operand's OWN
@@ -7546,6 +7577,38 @@ module core
   assign cur_lin  = fx_redirect_e ? {cur_lin_nat[31:12] + 20'd1, 12'd0}
                                   : cur_lin_nat;
   assign cur_is_w = (fx_eng && fx_wr_e) ? 1'b1 : cur_is_w_nat;
+
+`ifdef VEN_FP_SHARED
+  // A shared-top command owns x87 state immediately.  For a destination store,
+  // S_FLOAD/S_FENV_LD is therefore a translation+write-permission sweep before
+  // command acceptance, not a data read.  q_f_mem_write distinguishes it from
+  // FLD/FRSTOR, which use these states as ordinary reads.
+  assign fp_store_probing = q_f_mem_write &&
+                            ((state == S_FLOAD) || (state == S_FENV_LD));
+`else
+  assign fp_store_probing = 1'b0;
+`endif
+  assign fp_store_probe_cross = fp_store_probing && !fp_store_probe_second &&
+                                ({1'b0, cur_lin_nat[11:0]} + {9'd0, cur_size} > 13'h1000);
+  // The FSM's paging/segment priority holds the state on a walk or FE-pipeline
+  // settle cycle and diverts it on a fault.  A phase advances only after this
+  // page has passed all of those checks.
+  assign fp_store_probe_advance = fp_store_probing && !seg_access_fault &&
+                                  !perm_fault && !xlate_miss && !fe_xlate_pend;
+`ifdef VEN_FP_SHARED
+  always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n)
+      fp_store_probe_second <= 1'b0;
+    // A translation walk is a detour of the current probe, so retain the page-2
+    // phase across it.  Any other state has left the probe transaction.
+    else if (!fp_store_probing && (state != S_WALK))
+      fp_store_probe_second <= 1'b0;
+    else if (fp_store_probe_advance)
+      fp_store_probe_second <= !fp_store_probe_second && fp_store_probe_cross;
+  end
+`else
+  assign fp_store_probe_second = 1'b0;
+`endif
   // xlate_miss: paging is on, the current state issues a translatable memory
   // access, and the relevant TLB MISSES -> the FSM must run a page walk (S_WALK)
   // before this access can complete. The descriptor-table reads always run with
@@ -7655,7 +7718,7 @@ module core
     // phase deliberately KEEPS the clean-entry rewalk (that is how D gets set
     // pre-commit), and an S_INT_PUSH beat on a plan-covered page never misses.
     xlate_miss = paging_on && translatable && !fe_xlate_pend && !frm_pg_hit &&
-                 (cur_is_d ? (!fe_dtlb_hit || (cur_is_w && !xs_probing && !fx_probing
+                 (cur_is_d ? (!fe_dtlb_hit || (cur_is_w && !xs_probing && !fx_probing && !fp_store_probing
                                                  && !((state==S_INT_PROBE) && !frm_pg_markd)
                                                  && !fe_dtlb_dirty))
                            : !fe_itlb_hit);
@@ -7663,7 +7726,7 @@ module core
     xlate_miss = paging_on && translatable && !frm_pg_hit &&
                  (cur_is_d
                     ? (!dtlb_lk_hit ||
-                       (cur_is_w && !xs_probing && !fx_probing
+                       (cur_is_w && !xs_probing && !fx_probing && !fp_store_probing
                         && !((state==S_INT_PROBE) && !frm_pg_markd) && !dtlb_lk_dirty))
                     : !itlb_lk_hit);
 `endif

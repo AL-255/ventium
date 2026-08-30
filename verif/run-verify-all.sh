@@ -79,6 +79,10 @@ GATES=(
   # behaviour) and QEMU does not implement it, so a diff would fail when Ventium is
   # right. Asserted against the SDM instead.
   "fenv      (x87 FNSTENV masks all exceptions)|fenv|PASS"
+  # Shared-FPU precision boundary: a P|W page fault on FISTP must happen before
+  # x87 state mutates. The restart value distinguishes this from a read-only
+  # preprobe that would pop ST0 and fault only on the final write.
+  "fpstore   (x87 destination store is precise across #PF)|fpstore|PASS"
   # REVIEW1_Aug3 R2-H06: the x87 stack-fault matrix. Self-checked vs the SDM
   # (QEMU implements NO stack faults -- no golden possible): func witnesses
   # (edi=0x42, ebx=7, ecx=16) + 7x vec=16 faultlog, cycle/FP_PIPE/FP_PIPE2 by

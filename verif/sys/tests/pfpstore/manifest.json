@@ -1,0 +1,14 @@
+{
+  "name": "pfpstore",
+  "kind": "system",
+  "src": "../pfault/pfault.S (FPSTORE_PROBE)",
+  "linker": "../pfault/pfault.ld",
+  "image": "pfpstore.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "max_insn": 500,
+  "sys": true,
+  "paging": true,
+  "x87": true,
+  "description": "Precise shared-x87 destination-store regression. A present/read-only PTE covers FISTP m32 at linear 0x401000. The #PF handler records error code P|W=3, makes the PTE writable, flushes CR3 and IRETs. Correct behavior leaves ST0 live until restart and stores 3; an adapter that probes with a read consumes ST0 before the write #PF, so the restart observes an empty stack and fails the ESI=3 witness."
+}

@@ -222,7 +222,14 @@
         // m80 third beat and the m16 forms are 2 bytes, everything else 4).
         bd_wstrb = ((q_f_mbytes==4'd10 && f_step==4'd2) || (q_f_mbytes==4'd2))
                  ? 4'b0011 : 4'b1111;
+`ifdef VEN_FP_SHARED
+        // Stores are pre-probed by the shared-FPU adapter.  Permission/TLB
+        // lookup is driven from cur_lin/cur_is_w, while the port stays quiet:
+        // a destination may be MMIO, so issuing a speculative read is not safe.
+        bd_req = !q_f_mem_write;
+`else
         bd_req =1'b1;   // (R2-M02: address via cur_lin)
+`endif
       end
       // M11b: env/state transfers — one full dword per wide beat (f_seq_step).
       S_FENV_ST: begin
@@ -248,7 +255,13 @@
         end
       end
       S_FENV_LD: begin
+`ifdef VEN_FP_SHARED
+        // FNSTENV/FNSAVE use this load sequencer as the same no-bus destination
+        // write-permission probe; FLDENV/FRSTOR remain real reads.
+        bd_req = !q_f_mem_write;
+`else
         bd_req =1'b1;   // (R2-M02: address via cur_lin; 2-byte beats when 16-bit)
+`endif
       end
       S_FSTORE: begin
         // A4-H01: an UNMASKED stack fault commits nothing -- suppress the

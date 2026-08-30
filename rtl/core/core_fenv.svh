@@ -36,6 +36,20 @@
         // (no masking); the tag word is re-derived from the loaded FTW.
         // ===================================================================
         S_FENV_LD: begin
+`ifdef VEN_FP_SHARED
+          if (q_f_mem_write) begin
+            // FNSTENV/FNSAVE reach this state only to prove every destination
+            // page writable before the shared FPU can mask/reset itself.  It is
+            // deliberately a no-bus probe, including a second phase for a
+            // dword that straddles a page.
+            if (fp_store_probe_advance &&
+                (fp_store_probe_second || !fp_store_probe_cross)) begin
+              if (f_seq_step == fenv_last) begin
+                state<=S_FEXEC; f_seq_step<=6'd0;
+              end else f_seq_step <= f_seq_step + 6'd1;
+            end
+          end else
+`endif
           if (mem_ack) begin
             // REVIEW1_Aug2 M-04: the 14-byte form delivers one WORD per beat, right-
             // justified by the memory subsystem. Zero-extending keeps the commit block

@@ -210,7 +210,14 @@ pm32_entry:
     /* PT1 @ 0x13000: the demand-paging window [4 MiB, 8 MiB) */
     movl    $0x00013000, %edi
     movl    $0x00800003, 0(%edi)        /* PT1[0] linear 0x400000 -> phys 0x800000 P|RW */
-    movl    $0x00801002, 4(%edi)        /* PT1[1] linear 0x401000 -> phys 0x801000 P=0 (NOT PRESENT) */
+    /* The normal pfault image leaves PT1[1] not-present.  The pfpstore
+     * derivative instead starts it present but read-only, which distinguishes
+     * a real write-permission probe from an unsafe speculative read. */
+#ifdef FPSTORE_PROBE
+    movl    $0x00801001, 4(%edi)        /* P=1, RW=0: FISTP must #PF with P|W=3 */
+#else
+    movl    $0x00801002, 4(%edi)        /* P=0, RW=1: ordinary demand-page case */
+#endif
 
     /* PD @ 0x11000 */
     movl    $0x00011000, %edi
@@ -221,7 +228,11 @@ pm32_entry:
     movl    $0x00011000, %eax
     movl    %eax, %cr3
     movl    %cr0, %eax
+#ifdef FPSTORE_PROBE
+    orl     $0x80010000, %eax           /* PG + WP: supervisor FISTP honors PTE.RW */
+#else
     orl     $0x80000000, %eax
+#endif
     movl    %eax, %cr0
 
     /* clear the visible accumulator GPRs */
@@ -236,10 +247,21 @@ pm32_entry:
      * -> #PF (vector 14, error code = present(0)|write(1)|user(0) = 0x2), CR2 =
      * 0x401000.  pf_handler sets PT1[1] |= P (0x801003), records CR2, IRETs;
      * the store RESTARTS and now succeeds (writing phys 0x801000).            */
+#ifdef FPSTORE_PROBE
+    /* A page is readable but not writable.  An adapter that reads to "probe"
+     * will accept FISTP, pop ST0, then fault on its final write.  Restart then
+     * observes an empty stack and cannot store 3.  Correct hardware reports a
+     * P|W #PF before x87 command acceptance, maps RW, restarts, and stores 3. */
+    fninit
+    fldpi
+    fistpl  0x00401000                  /* #PF here; restarted after handler maps */
+    movl    0x00401000, %esi            /* must be 3 after the one successful FISTP */
+#else
     movl    $0xCAFEBABE, %eax
     movl    %eax, 0x00401000            /* #PF here; restarted after handler maps */
     /* read it back -> proves the page is now present + mapped to phys 0x801000 */
     movl    0x00401000, %esi            /* esi = 0xCAFEBABE (post-#PF-fixup read) */
+#endif
 
     /* ============================= #GP =================================== */
     /* Resume label for the #GP skip: the handler will overwrite the saved EIP
@@ -269,6 +291,9 @@ ud_resume:
     addl    0x00002024, %eax            /* + #UD counter */
     movl    %eax, %ecx                  /* ecx = 3 if all three faults delivered */
     movl    0x00002020, %edx            /* edx = captured CR2 from the #PF (0x401000) */
+#ifdef FPSTORE_PROBE
+    movl    0x00002038, %edi            /* #PF error: P|W must be 3 */
+#endif
 
     /* ====================== clean exit via isa-debug-exit ================== */
     movl    $0x42, %eax
@@ -288,6 +313,10 @@ hang:
     .global pf_handler
 pf_handler:
     pushl   %eax
+#ifdef FPSTORE_PROBE
+    movl    0x04(%esp), %eax            /* error code before the saved EAX */
+    movl    %eax, 0x00002038
+#endif
     movl    %cr2, %eax
     movl    %eax, 0x00002020            /* record CR2 (the faulting linear addr) */
     /* map the faulting page: set P on PT1[1] (linear 0x401000's PTE) */

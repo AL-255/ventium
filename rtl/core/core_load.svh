@@ -210,6 +210,21 @@
         // m80 = 3) into f_mem80, LSB-first. Bus addresses q_ea + 4*f_step.
         // -------------------------------------------------------------------
         S_FLOAD: begin
+`ifdef VEN_FP_SHARED
+          if (q_f_mem_write) begin
+            // A shared-top store mutates x87 state at its command edge, so this
+            // is a no-bus write-permission sweep.  The page-cross phase holds
+            // f_step until both pages of this beat have passed.
+            if (fp_store_probe_advance &&
+                (fp_store_probe_second || !fp_store_probe_cross)) begin
+              if ((q_f_mbytes<=4'd4) ||
+                  (q_f_mbytes==4'd8 && f_step==4'd1) ||
+                  (q_f_mbytes==4'd10 && f_step==4'd2)) begin
+                f_step<=4'd0; state<=S_FEXEC;
+              end else f_step<=f_step+4'd1;
+            end
+          end else
+`endif
           if (mem_ack) begin
             unique case (f_step)
               4'd0: f_mem80[31:0]  <= mem_rdata;

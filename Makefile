@@ -12,7 +12,7 @@ BUILD       := build
 VERILATOR   ?= verilator
 PYTHON      ?= python3
 
-.PHONY: all m0-smoke m1 m2 m3 m4 m5 m6 a20 fenv x87stk x87b l1 bus bus-sva issue-uv verify verify-clean rtl plugin tests clean help verify-sys verify-srt verify-srt-iter verify-idiv verify-bcd verify-fbld verify-fppipe verify-fppipe2 verify-all coverage coverage-sys coverage-mem coverage-unit coverage-all opgen opgen-modes
+.PHONY: all m0-smoke m1 m2 m3 m4 m5 m6 a20 fenv fpstore x87stk x87b l1 bus bus-sva issue-uv verify verify-clean rtl plugin tests clean help verify-sys verify-srt verify-srt-iter verify-idiv verify-bcd verify-fbld verify-fppipe verify-fppipe2 verify-all coverage coverage-sys coverage-mem coverage-unit coverage-all opgen opgen-modes
 .DEFAULT_GOAL := help
 
 help:
@@ -35,6 +35,7 @@ help:
 	@echo "  make x87b       x87 deferred-op boundary gate (REVIEW2 M-09)"
 	@echo "  make a20        A20 gate: 1 MiB alias wrap via port 0x92 (REVIEW2 M-03)"
 	@echo "  make fenv       x87 env gate: FNSTENV masks all exceptions (REVIEW2 M-01)"
+	@echo "  make fpstore    x87 write-protect precision gate: FISTP must not pop before #PF"
 	@echo "  make x87stk     x87 stack-fault matrix gate, 4 TB variants + the A4-H01 TR"
 	@echo "                  variant (REVIEW1_Aug3 R2-H06 + REVIEW_Aug4 A4-H01)"
 	@echo "  make l1         all L1/TLB/BTB/AXI memory-subsystem unit gates (auto-discovered)"
@@ -190,6 +191,15 @@ seg:
 # Ventium is correct. The test clears the mask bits first and checks against the SDM.
 fenv:
 	bash verif/sys/run-fenv-gate.sh
+
+# --- x87 destination-store precision gate (verif/sys/run-pfpstore-gate.sh) --
+# A shared FPU irrevocably owns x87 state when it accepts a command.  A memory
+# destination must therefore be proven writable, not merely readable, before
+# accepting FISTP/FSTP/FNSAVE/FNSTENV.  This page-protected FISTP regression
+# checks the P|W #PF error and restart result, so an early stack pop cannot hide.
+.PHONY: fpstore
+fpstore:
+	bash verif/sys/run-pfpstore-gate.sh
 
 # --- x87 stack-fault gate (verif/sys/run-x87stk-gate.sh) ---------------------
 # REVIEW1_Aug3 R2-H06. The full stack-fault matrix (7 faulting shapes x
