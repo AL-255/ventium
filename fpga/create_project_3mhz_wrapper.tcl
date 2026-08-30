@@ -39,17 +39,20 @@ puts "Vivado synthesis concurrency: $synth_jobs"
 
 # Keep the recovered 3.125 MHz image as the default diagnostic fallback, but
 # permit a meaningful timing/bring-up candidate after an area reduction.  The
-# PS PL0 source is fixed at 100 MHz below, so the high-speed variant uses its
-# synchronous /2 derivative (50 MHz) rather than introducing an unrelated
-# clock-domain crossing.  Other rates must be expressed by a real divider and
-# are rejected instead of silently constraining the wrong frequency.
+# PS PL0 source is fixed at 100 MHz below.  The 50 MHz option is its
+# synchronous /2 derivative; the 45 MHz option is a locked UltraScale+ MMCM
+# derivative of the same source.  Both keep core and HP0 frequency-related
+# rather than introducing an unrelated clock-domain crossing.  Other rates
+# must be expressed by a real divider and are rejected instead of silently
+# constraining the wrong frequency.
 set core_div_file_add_span {lappend files "$ROOT/$x"}
 set core_c3f_span {set c3f 3000000}
 set core_label_span {CLK3 (core) label = $c3f (actual = pl_clk0/32)}
 if {[info exists ::env(VEN_FPGA_CORE_MHZ)] && $::env(VEN_FPGA_CORE_MHZ) ne ""} {
-    if {$::env(VEN_FPGA_CORE_MHZ) ne "50"} {
-        error "VEN_FPGA_CORE_MHZ supports only 50 (omit it for the 3.125 MHz fallback)"
+    if {$::env(VEN_FPGA_CORE_MHZ) ni {45 50}} {
+        error "VEN_FPGA_CORE_MHZ supports 45 or 50 (omit it for the 3.125 MHz fallback)"
     }
+    if {$::env(VEN_FPGA_CORE_MHZ) eq "50"} {
     set core_div_file_add_span {
 if {$x eq "src/clk_div32.v"} {
     lappend files "$VEN/fpga/clk_div32_50mhz.v"
@@ -59,6 +62,17 @@ if {$x eq "src/clk_div32.v"} {
     set core_c3f_span {set c3f 50000000}
     set core_label_span {CLK3 (core) label = $c3f (actual = pl_clk0/2)}
     puts "High-speed candidate: synchronous core clock = pl_clk0/2 = 50 MHz"
+    } else {
+    set core_div_file_add_span {
+if {$x eq "src/clk_div32.v"} {
+    lappend files "$VEN/fpga/clk_div32_45mhz.v"
+} else {
+    lappend files "$ROOT/$x"
+}}
+    set core_c3f_span {set c3f 45000000}
+    set core_label_span {CLK3 (core) label = $c3f (actual = MMCM(pl_clk0) = 45 MHz)}
+    puts "High-speed candidate: locked MMCM core clock = 45 MHz from pl_clk0"
+    }
 }
 
 set upstream "/home/yukidama/github/ao486_MiSTer/fpga/rk-ao486-system/hw/create_project.tcl"
@@ -162,6 +176,8 @@ add_files -fileset constrs_1 -norecurse "$HW/bitstream.xdc" "$HW/led.xdc"} \
     set core_clk_role {core (/32)}
     if {[info exists ::env(VEN_FPGA_CORE_MHZ)] && $::env(VEN_FPGA_CORE_MHZ) eq "50"} {
         set core_clk_role {core (/2)}
+    } elseif {[info exists ::env(VEN_FPGA_CORE_MHZ)] && $::env(VEN_FPGA_CORE_MHZ) eq "45"} {
+        set core_clk_role {core (MMCM)}
     }
     # ``u_clkdiv_clk_out`` is the generated-clock name emitted by the
     # recovered BD.  Older checkpoints called the same interface ``wr_clk_i``;
