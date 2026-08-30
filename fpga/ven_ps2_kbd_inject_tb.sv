@@ -21,6 +21,7 @@ module ven_ps2_kbd_inject_tb;
     wire irq_keyb, irq_mouse, output_a20_enable, output_reset_n, a20_enable;
     wire mouse_clk_out, mouse_dat_out;
     integer cycles;
+    reg [7:0] received_data;
 
     always #5 clk = ~clk;
 
@@ -67,9 +68,24 @@ module ven_ps2_kbd_inject_tb;
         io_read = 1'b0;
         if (io_readdata != 8'h1e)
             $fatal(1, "port 60h got %02x, expected translated Set-1 A (1e)", io_readdata);
+        received_data = io_readdata;
         repeat (4) @(posedge clk);
         if (irq_keyb) $fatal(1, "IRQ1 remained asserted after port-60h consume");
-        $display("VEN_PS2_KBD_INJECT_TB_OK cycles=%0d data=%02x", cycles, io_readdata);
+
+        // A device byte queued immediately before system reset belongs to the
+        // old guest.  The board wrapper resets the injector with the same
+        // soc_reset as the 8042, so it must not surface after reboot.
+        inject_data = 8'h1c;
+        inject_valid = 1'b1;
+        @(posedge clk);
+        inject_valid = 1'b0;
+        @(posedge clk);
+        rst_n = 1'b0;
+        repeat (8) @(posedge clk);
+        rst_n = 1'b1;
+        repeat (4000) @(posedge clk);
+        if (irq_keyb) $fatal(1, "pre-reset scan code leaked into the new guest");
+        $display("VEN_PS2_KBD_INJECT_TB_OK cycles=%0d data=%02x", cycles, received_data);
         $finish;
     end
 endmodule
