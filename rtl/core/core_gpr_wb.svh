@@ -597,6 +597,17 @@
         end
 
         // -------------------------------------------------------------------
+`ifdef VEN_FP_SHARED
+        // The shared top supplies FNSTSW AX on its response, after the command
+        // edge that also owns the FP-state mutation.  Capture it on the same edge
+        // as the conservative in-order x87 retirement.
+        S_FP_SHARED_WAIT: begin
+          if (fp_shared_rsp_valid && fp_shared_rsp_ax_valid) begin
+            gpr_we[R_EAX]=1'b1;
+            gpr_wd[R_EAX]={gpr_o[R_EAX][31:16], fp_shared_rsp_ax};
+          end
+        end
+`else
         // S_FEXEC: only the FNSTSW AX cross-leaf gpr[EAX] write (gated !f_pc_bad).
         S_FEXEC: begin
           logic f_is_arith, f_pc_bad;
@@ -614,6 +625,7 @@
             gpr_wd[R_EAX]={gpr_o[R_EAX][31:16], (fstat & ~16'h3800) | ({13'd0,ftop}<<11)};
           end
         end
+`endif
 
         // -------------------------------------------------------------------
         // M2S.5 RSM: restore the GPR file on the final read-back beat.

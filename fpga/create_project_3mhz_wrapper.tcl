@@ -51,9 +51,12 @@ if {[info exists ::env(VEN_FPGA_SKIP_PRESET)] && $::env(VEN_FPGA_SKIP_PRESET)} {
     puts "PCAP-only build: skipping incompatible template PS preset"
 }
 
-set define_span {VEN_FP_PC_RELAX VEN_SYS_FASTPATH VEN_FAST_RETRACE}
+# The core filelist contains both FPU implementations.  The shipped board
+# profile selects the compact shared hierarchy explicitly; non-shared test
+# configurations still elaborate the legacy owner as a control.
+set define_span {VEN_FP_PC_RELAX VEN_FP_SHARED VEN_SYS_FASTPATH VEN_FAST_RETRACE}
 if {[info exists ::env(VEN_FPGA_FASTPATH)] && !$::env(VEN_FPGA_FASTPATH)} {
-    set define_span {VEN_FP_PC_RELAX VEN_FAST_RETRACE}
+    set define_span {VEN_FP_PC_RELAX VEN_FP_SHARED VEN_FAST_RETRACE}
     puts "Diagnostic build: VEN_SYS_FASTPATH disabled by VEN_FPGA_FASTPATH=0"
 }
 # CWSDPMI's 32-bit client maps CS/DS/SS/ES at one nonzero common base.  The

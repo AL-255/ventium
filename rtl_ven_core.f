@@ -64,6 +64,16 @@ rtl/fpu/fpu_srt_div.sv
 // iterative FP->packed-BCD (FBSTP) engine — instantiated under +VEN_BCD_ITER.
 rtl/fpu/ven_bcd.sv
 rtl/fpu/ven_bcd_to_fp.sv
+// Area-shared x87 hierarchy.  The guarded VEN_FP_SHARED production profile
+// makes ven_fp_top the sole architectural owner; the legacy implementation is
+// retained only for non-shared regression configurations.
+fp_shared/ven_fp_state.sv
+fp_shared/ven_fp_alu.sv
+fp_shared/ven_fp_misc.sv
+fp_shared/ven_fp_widemul.sv
+fp_shared/ven_fp_estdiv.sv
+fp_shared/ven_fp_trans.sv
+fp_shared/ven_fp_top.sv
 // SHARED PIPELINED floatx80 add/mul ALU used BY the transcendental engines (#11
 // perf): they used to call the combinational fx_mul/fx_add inline and CHAINED,
 // which set the whole core's fmax (~167 ns path -> ~6 MHz) and cost the area that

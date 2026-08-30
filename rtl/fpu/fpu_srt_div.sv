@@ -103,6 +103,11 @@ module fpu_srt_div
   // ---- result --------------------------------------------------------------
   logic [82:0]         result_q;          // {oe, ue, pe, floatx80}
   logic                done_q;
+  // Final divide/root magnitude, selected at the last iterative step. Keeping
+  // this selection ahead of a register prevents mode_q from feeding the long
+  // leading-one/rounding cone while retaining one shared rounder.
+  logic [127:0]        round_uq_q;
+  logic signed [31:0] round_sh_q;
 
   assign busy   = (st != ST_IDLE);
   assign done   = done_q;
@@ -244,9 +249,9 @@ module fpu_srt_div
     rem_nz  = (rsum[79:0] != 80'd0) && (rsum[79:0] != {80{1'b1}});
     rs_neg  = rem_nz &&  rsum[79];
     rs_pos  = rem_nz && !rsum[79];
-    // divide: qacc (radix-4 quotient, SH=70). sqrt: root_int = R*2^72 = twoR>>1
-    // (R = twoR/2, on-the-fly; SH=72). Same remainder-sign rounding tail (sign=0).
-    uq      = (mode_q == FD_SQRT) ? 128'(twoR >> 1) : qacc;
+    // The final quotient/root choice was registered by the last iterative step:
+    // divide uses qacc with SH=70; sqrt uses root_int=(twoR>>1) with SH=72.
+    uq      = round_uq_q;
     msb     = 0;
     for (int i=127; i>=0; i--) if (uq[i]) begin msb=i; break; end
     extra   = msb - 63;
@@ -274,7 +279,7 @@ module fpu_srt_div
       keep = keep - 128'd1;                          // keep over-estimates by < 1 ULP
       if (!keep[63]) begin keep = {64'd0, 64'hFFFFFFFFFFFFFFFF}; msb = msb - 1; end
     end
-    e       = (msb - (mode_q == FD_SQRT ? 32'sd72 : 32'sd70)) + (ua - ub);
+    e       = (msb - round_sh_q) + (ua - ub);
     ebiased = e + 32'sd16383;
 
     // -------- out-of-range (over/underflow) pack via fx_round_pack_f ----------
@@ -292,7 +297,7 @@ module fpu_srt_div
     // (msb - SH) + (ua-ub), SH=70 (div) / 72 (sqrt). resid_neg's pow2-borrow drops
     // the window MSB one position, but fx_round_pack_f re-finds the MSB of sigp and
     // uses the passed weight as ITS top bit's exponent, so pass the floor MSB weight.
-    ep      = ($signed(msb) - (mode_q == FD_SQRT ? 32'sd72 : 32'sd70)) + (ua - ub);
+    ep      = ($signed(msb) - round_sh_q) + (ua - ub);
     if (resid_neg && !keepf[63]) ep = ep - 32'sd1;    // borrow crossed a power of two
     // Pass pc: the floor-window packer rounds to 24/53/64 bits. For pc<64 this also
     // serves the IN-RANGE result (single-round to PC; no double-round), so divide/
@@ -310,6 +315,7 @@ module fpu_srt_div
   always_ff @(posedge clk) begin
     if (!rst_n) begin
       st <= ST_IDLE; done_q <= 1'b0; k <= '0;
+      round_uq_q <= 128'd0; round_sh_q <= 32'sd70;
       rem_q012 <= 3'd0; rem_c2 <= 1'b0; rem_ie <= 1'b0;
     end else begin
       done_q <= 1'b0;
@@ -437,7 +443,11 @@ module fpu_srt_div
           qacc <= qacc + (qext <<< (70 - 2*int'(k)));
           S    <= sxor << 2;
           C    <= cmaj << 2;
-          if (k == NSTEP-1) st <= ST_DFIN;
+          if (k == NSTEP-1) begin
+            round_uq_q <= qacc + (qext <<< (70 - 2*int'(k)));
+            round_sh_q <= 32'sd70;
+            st         <= ST_DFIN;
+          end
           k    <= k + 7'd1;
         end
         ST_DFIN: begin
@@ -453,7 +463,13 @@ module fpu_srt_div
           // on-the-fly root: 2R += 2*r*4^-j -> r << (73-2j) == r << (corrpos+1).
           twoR    <= twoR + ($signed({{77{rsq[2]}}, rsq}) <<< (corrpos + 7'd1));
           corrpos <= corrpos - 7'd2;
-          if (k == NSTEP-1) st <= ST_QFIN;
+          if (k == NSTEP-1) begin
+            // Match twoR's 80-bit wrap before widening the captured root.
+            round_uq_q <= 128'((80'(twoR +
+                ($signed({{77{rsq[2]}}, rsq}) <<< (corrpos + 7'd1)))) >> 1);
+            round_sh_q <= 32'sd72;
+            st         <= ST_QFIN;
+          end
           k       <= k + 7'd1;
         end
         ST_QFIN: begin                          // shared remainder-sign rounder

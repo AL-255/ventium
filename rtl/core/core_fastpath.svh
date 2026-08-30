@@ -244,6 +244,16 @@
             state<=S_HALT; `ifdef VEN_DBG_CORE int_vec<=8'hE1; `endif
           end
 `endif
+`ifdef VEN_FP_SHARED
+          else if (u_d.is_fp) begin
+            // Preserve one non-speculative producer for ven_fp_top.  The shared
+            // block has no cancel port, so the cycle-mode fast commit path may not
+            // submit directly; re-decode through S_DECODE and its fully latched q_*
+            // record instead.  This is intentionally conservative during cutover.
+            agi_wr0<=9'h100; agi_wr1<=9'h100;
+            fetch_word<=3'd0; state<=S_FETCH;
+          end
+`else
           else if (u_d.is_fp) begin
             // M5: x87 FP fast path (cycle-mode whitelist). Functional execution
             // reuses the exact M3 helpers; the FP latency/throughput timing is
@@ -361,7 +371,9 @@
           // REVIEW Aug-1 C-01: this condition now lives in exactly ONE place (fp_sys_bail,
           // core.sv) and is consumed by the spine, the GPR mirror, BTB resolve, I-cache LRU,
           // and the D-side request. It must never be re-typed at a consumer again.
-          end else if (fp_sys_bail) begin
+          end
+`endif
+          else if (fp_sys_bail) begin
             // hand this one instruction to the slow functional FSM. Clear the
             // AGI write-tracking: the slow op runs many cycles, so on return to
             // (M2S.1: a SYSTEM-mode core ALWAYS takes the slow FSM — the fast-path

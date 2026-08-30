@@ -517,9 +517,25 @@
           end
           else if (d_is_x87) begin
             // M11b: env/state ops own a dedicated wide-beat sequencer.
-            if (d_fxop==FX_FNSTENV || d_fxop==FX_FNSAVE)  begin f_seq_step<=5'd0; state<=S_FENV_ST; end
+            // The shared FPU command cannot be cancelled once accepted.  Its
+            // memory stores therefore use the existing read path as a complete
+            // translation/limit/page probe before S_FEXEC accepts the command.
+            // Staying out of S_DECODE through the probe also prevents an
+            // interrupt/task-switch between proof and final store.
+            if (d_fxop==FX_FNSTENV || d_fxop==FX_FNSAVE)  begin
+              f_seq_step<=5'd0;
+`ifdef VEN_FP_SHARED
+              state<=S_FENV_LD;  // probe the whole 14/28/94/108-byte destination
+`else
+              state<=S_FENV_ST;
+`endif
+            end
             else if (d_fxop==FX_FLDENV || d_fxop==FX_FRSTOR) begin f_seq_step<=5'd0; state<=S_FENV_LD; end
-            else if (d_f_mem_read) state<=S_FLOAD;  // read mem operand first
+            else if (d_f_mem_read
+`ifdef VEN_FP_SHARED
+                     || d_f_mem_write
+`endif
+                    ) state<=S_FLOAD;  // load operand / shared-store pre-probe
             else state<=S_FEXEC;                    // reg/const/control op
           end
           // ---- M2S.3 IDT delivery: software INT n / INT3 / INTO / UD2 --------

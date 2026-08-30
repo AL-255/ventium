@@ -233,10 +233,18 @@
         // memory subsystem lane-shifts), exactly as the m16 S_FSTORE beat above.
         if (q_f_mbytes == 4'd2) begin
           bd_wstrb = 4'b0011;
+`ifdef VEN_FP_SHARED
+          bd_wdata = {16'd0, fp_shared_store_data_q[f_seq_step*16 +: 16]};
+`else
           bd_wdata = {16'd0, fenv_image16[f_seq_step*16 +: 16]};
+`endif
         end else begin
           bd_wstrb = 4'b1111;
+`ifdef VEN_FP_SHARED
+          bd_wdata = fp_shared_store_data_q[f_seq_step*32 +: 32];
+`else
           bd_wdata = fenv_image[f_seq_step*32 +: 32];
+`endif
         end
       end
       S_FENV_LD: begin
@@ -245,8 +253,14 @@
       S_FSTORE: begin
         // A4-H01: an UNMASKED stack fault commits nothing -- suppress the
         // transaction entirely (the FSM arm retires without waiting for ack).
+`ifdef VEN_FP_SHARED
+        // An unmasked stack fault returned no store response and retired from
+        // S_FP_SHARED_WAIT, so reaching this state always means pre-probed data.
+        bd_req =1'b1; bd_we =1'b1;
+`else
         bd_req =!(fp_flt_q && !fctrl[0]);
         bd_we  =!(fp_flt_q && !fctrl[0]);
+`endif
         // (R2-M02: address via cur_lin.)
         // the m80 third beat writes only 2 bytes; all others write a full word.
         if (q_f_mbytes==4'd10 && f_step==4'd2) bd_wstrb =4'b0011;

@@ -76,6 +76,12 @@ typedef enum logic [5:0] {
     S_SHUTDOWN,
     S_ENTER,    // nested ENTER (level>0): read-display + push micro-sequence
     S_FLOAD, S_FEXEC, S_FSTORE,
+`ifdef VEN_FP_SHARED
+    // The area-shared x87 owns architectural state behind an irrevocable
+    // command/response boundary.  This state waits for that response; the
+    // decoder routes every x87 op through the slow path in this profile.
+    S_FP_SHARED_WAIT,
+`endif
 `ifdef VEN_SRT_ITER
     S_FP_BUSY,   // wait for the iterative SRT FDIV/FSQRT engine
 `endif
@@ -5339,6 +5345,15 @@ module core
   logic        fstore_oe;        // FST m32/m64 narrowing overflow -> Inf (OE)
   logic        fstore_ue;        // FST m32/m64 narrowing underflow -> denormal (UE)
   always_comb begin
+`ifdef VEN_FP_SHARED
+    // Conversion, exception merging, and masked-stack indefinite selection are
+    // performed once by ven_fp_top before it emits this registered response.
+    // Keeping S_FSTORE a byte serializer removes the old wide conversion cones
+    // from the shared implementation and avoids a second status mutation.
+    fstore_val = fp_shared_store_data_q[79:0];
+    fstore_pe = 1'b0; fstore_ie = 1'b0;
+    fstore_oe = 1'b0; fstore_ue = 1'b0;
+`else
     logic [79:0] s0;
     logic [81:0] rb;             // FBSTP: {ie, pe, bcd} converter result
     logic [34:0] r32;            // {oe, ue, pe, float32}
@@ -5440,6 +5455,7 @@ module core
       FX_FNSTSW_M: fstore_val = {64'd0, (fstat & ~16'h3800) | ({13'd0,ftop}<<11)};
       default:     fstore_val = 80'd0;
     endcase
+`endif
   end
 
   // ===========================================================================
@@ -8279,6 +8295,96 @@ module core
 `endif
 `endif
 
+`ifdef VEN_FP_SHARED
+  // ===========================================================================
+  // Area-shared x87 integration.  ven_fp_top owns the architectural state and
+  // receives exactly one command from the commit-safe S_FEXEC point.  Every
+  // memory operand has already completed its read/probe path before this point;
+  // in particular a store cannot mutate FP state and then fault on a destination.
+  // ===========================================================================
+  logic        fp_shared_cmd_valid, fp_shared_cmd_ready, fp_shared_busy;
+  logic        fp_shared_rsp_valid, fp_shared_rsp_unsupported, fp_shared_rsp_stack_fault;
+  logic [84:0] fp_shared_rsp_arith;
+  logic        fp_shared_rsp_store_valid, fp_shared_rsp_ax_valid;
+  logic [863:0] fp_shared_rsp_store_data;
+  logic [7:0]   fp_shared_rsp_store_bytes;
+  logic [15:0]  fp_shared_rsp_ax;
+  logic [863:0] fp_shared_env_image;
+  logic [863:0] fp_shared_store_data_q;
+  logic [7:0]   fp_shared_store_bytes_q;
+  logic [639:0] fp_shared_st_flat;
+  logic         fp_shared_admin;
+
+  // env_tmp holds dwords for the 32-bit form and right-justified words for the
+  // 16-bit form.  Repack to the command contract's byte-contiguous image.
+  always_comb begin
+    fp_shared_env_image = '0;
+    if (q_f_mbytes == 4'd2) begin
+      for (int wi = 0; wi < 47; wi++)
+        fp_shared_env_image[wi*16 +: 16] = env_tmp[wi][15:0];
+    end else begin
+      for (int di = 0; di < 27; di++)
+        fp_shared_env_image[di*32 +: 32] = env_tmp[di];
+    end
+  end
+
+  always_comb begin
+    fp_shared_admin = (q_fxop==FX_FNINIT) || (q_fxop==FX_FNCLEX) ||
+                      (q_fxop==FX_FNSTCW) || (q_fxop==FX_FNSTSW_M) ||
+                      (q_fxop==FX_FLDCW) || (q_fxop==FX_FWAIT) ||
+                      (q_fxop==FX_FNSTENV) || (q_fxop==FX_FLDENV) ||
+                      (q_fxop==FX_FNSAVE) || (q_fxop==FX_FRSTOR);
+  end
+
+  assign fp_shared_cmd_valid = (state == S_FEXEC);
+
+  ven_fp_top u_fp_shared (
+    .clk(clk), .rst_n(rst_n),
+    .cmd_valid(fp_shared_cmd_valid), .cmd_ready(fp_shared_cmd_ready),
+    .cmd_op(q_fxop), .cmd_aluop(q_f_aluop), .cmd_sti(q_f_sti),
+    .cmd_pop(q_f_pop), .cmd_constant(q_f_const), .cmd_mem(f_mem80),
+    .cmd_mem_bytes(q_f_mbytes), .cmd_fdiv_bug(errata_en[0]),
+    .cmd_fist_bug(errata_en[1]), .cmd_env16(q_f_mbytes == 4'd2),
+    .cmd_real_mode(real_mode), .cmd_env_image(fp_shared_env_image),
+    .cmd_update_fip(!fp_shared_admin), .cmd_fip(q_pc), .cmd_fcs(SEG_CS),
+    .cmd_update_fdp(!fp_shared_admin && (q_f_mem_read || q_f_mem_write)),
+    .cmd_fdp(dbase + q_ea), .cmd_fds(SEG_DS),
+    .busy(fp_shared_busy), .rsp_valid(fp_shared_rsp_valid),
+    .rsp_unsupported(fp_shared_rsp_unsupported),
+    .rsp_stack_fault(fp_shared_rsp_stack_fault), .rsp_arith(fp_shared_rsp_arith),
+    .rsp_store_valid(fp_shared_rsp_store_valid),
+    .rsp_store_data(fp_shared_rsp_store_data),
+    .rsp_store_bytes(fp_shared_rsp_store_bytes),
+    .rsp_ax_valid(fp_shared_rsp_ax_valid), .rsp_ax(fp_shared_rsp_ax),
+    .ftop_o(ftop), .fstat_o(fstat), .fctrl_o(fctrl), .fptag_o(fptag),
+    .fip_o(fip), .fcs_o(fcs), .fdp_o(fdp), .fds_o(fds),
+    .fpr_phys_flat_o(fpr_flat), .st_flat_o(fp_shared_st_flat)
+  );
+
+  for (genvar fp_si = 0; fp_si < 8; fp_si++) begin : g_fp_shared_st
+    assign fp_st[fp_si] = fp_shared_st_flat[fp_si*80 +: 80];
+  end
+  assign fp_st0_phys = fp_st[0];
+
+  // The legacy writeback and its fast/iterative handshakes have no producer in
+  // this profile.  Tie their remaining control consumers inert; the old engines
+  // consequently have no externally observable fanout and are pruned by synth.
+  always_comb begin
+    fp_stk_ovf = 1'b0; fp_stk_unf = 1'b0;
+    fp_div_elig = 1'b0; fp_sqrt_elig = 1'b0;
+    fp_iter_go = 1'b0; fp_iter_done = 1'b0;
+    eng_div_a = '0; eng_div_b = '0; eng_sqrt_in = '0; eng_rc = '0;
+    eng_div_start = 1'b0; eng_sqrt_start = 1'b0;
+`ifdef VEN_FP_PIPE
+    fp_pipe_cap = 1'b0; fp_cap_aluop = '0; fp_cap_dst = '0;
+    fp_cap_a = '0; fp_cap_b = '0; fp_cap_rc = '0; fp_cap_pc = '0;
+    fp_cap_err = 1'b0; fp_cap_stkflt = 1'b0; fp_pipe_rd_haz = 1'b0;
+`ifdef VEN_FP_PIPE2
+    fp_s1_next = '0;
+`endif
+`endif
+  end
+`else
   // x87 FP WRITE-DRIVER — the big combinational state-mutation driver, extracted
   // VERBATIM to core/fpu_writeback.sv (R3). It reads the decode latch / fpu_top
   // readback / engine results and drives every fp_we_* / fp_*_data write port +
@@ -8524,6 +8630,7 @@ module core
     .we_wabs_fstat(fp_we_wabs_fstat),
     .wabs_fstat   (fp_wabs_fstat)
   );
+`endif
 
   // FPREM/FPREM1 (D9 F8 / F5) engine handshake. Under VEN_SRT_ITER the UNIFIED
   // fpu_srt_div handles remainder (folded in); otherwise the dedicated fpu_fprem
@@ -8531,7 +8638,14 @@ module core
   logic        eng_fprem_start, eng_fprem_busy, eng_fprem_done, eng_fprem_c2, eng_fprem_ie;
   logic [79:0] eng_fprem_result;
   logic [2:0]  eng_fprem_q012;
-`ifdef VEN_FPREM
+`ifdef VEN_FP_SHARED
+  // ven_fp_top owns the only remainder service in the shared profile.  Keeping
+  // the legacy request live would elaborate a second SRT engine, defeating the
+  // area objective even though its result has no architectural consumer.
+  assign eng_fprem_start = 1'b0; assign eng_fprem_busy = 1'b0;
+  assign eng_fprem_done  = 1'b0; assign eng_fprem_result = 80'd0;
+  assign eng_fprem_q012  = 3'd0; assign eng_fprem_c2 = 1'b0; assign eng_fprem_ie = 1'b0;
+`elsif VEN_FPREM
   assign eng_fprem_start = (state==S_FEXEC) && (q_fxop==FX_FPREM || q_fxop==FX_FPREM1);
 `else
   assign eng_fprem_start = 1'b0; assign eng_fprem_busy = 1'b0;
@@ -8540,6 +8654,13 @@ module core
 `endif
 
 `ifdef VEN_SRT_ITER
+`ifdef VEN_FP_SHARED
+  // Do not instantiate the pre-shared core SRT service beside ven_fp_top.u_srt.
+  // The adapter holds S_FEXEC until the shared completion, so these legacy
+  // completion wires are intentionally inert rather than a second producer.
+  assign eng_div_busy=1'b0;  assign eng_div_done=1'b0;  assign eng_div_result='0;
+  assign eng_sqrt_busy=1'b0; assign eng_sqrt_done=1'b0; assign eng_sqrt_result='0;
+`else
   // iterative SRT FDIV / FSQRT engines — the FPGA-synthesizable multi-cycle form
   // of fx_srt_div / fx_sqrt. Started from S_FEXEC for normal-operand divides /
   // +normal sqrts; their {inexact,result} commits in S_FP_BUSY (fp_we_* driver).
@@ -8594,6 +8715,7 @@ module core
   assign eng_fprem_q012   = srt_rem_q012;
   assign eng_fprem_c2     = srt_rem_c2;
   assign eng_fprem_ie     = srt_rem_ie;
+`endif
 `endif
 `else
   assign eng_div_busy=1'b0;  assign eng_div_done=1'b0;  assign eng_div_result='0;
@@ -8717,6 +8839,15 @@ module core
   logic        eng_fbld_start, eng_fbld_busy, eng_fbld_done;
   logic [79:0] eng_fbld_result;
 `ifdef VEN_BCD_ITER
+`ifdef VEN_FP_SHARED
+  // The shared shell contains its own BCD load/store sequencers.  Explicitly
+  // tie off the historical pair so no duplicate decimal datapath survives a
+  // conservative synthesis pass.
+  assign eng_bcd_start=1'b0; assign eng_bcd_busy=1'b0; assign eng_bcd_done=1'b0;
+  assign eng_bcd_result=82'd0;
+  assign eng_fbld_start=1'b0; assign eng_fbld_busy=1'b0; assign eng_fbld_done=1'b0;
+  assign eng_fbld_result=80'd0;
+`else
   assign eng_bcd_start = (state==S_FEXEC) && (q_fxop==FX_FBSTP) && !fp_store_suppressed;
 `ifndef SYNTHESIS
   // a suppressed store must never launch the engine; the start count is
@@ -8743,6 +8874,7 @@ module core
     .bcd(f_mem80),
     .busy(eng_fbld_busy), .done(eng_fbld_done), .result(eng_fbld_result)
   );
+`endif
 `else
   assign eng_bcd_start=1'b0; assign eng_bcd_busy=1'b0; assign eng_bcd_done=1'b0;
   assign eng_bcd_result=82'd0;

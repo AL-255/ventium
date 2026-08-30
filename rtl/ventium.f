@@ -64,6 +64,16 @@ fpu/fpu_srt_div.sv
 // iterative FP->packed-BCD (FBSTP) engine — instantiated under +VEN_BCD_ITER.
 fpu/ven_bcd.sv
 fpu/ven_bcd_to_fp.sv
+// Area-shared x87 hierarchy.  The guarded VEN_FP_SHARED production profile
+// makes ven_fp_top the sole architectural owner; the legacy implementation is
+// retained only for non-shared regression configurations.
+../fp_shared/ven_fp_state.sv
+../fp_shared/ven_fp_alu.sv
+../fp_shared/ven_fp_misc.sv
+../fp_shared/ven_fp_widemul.sv
+../fp_shared/ven_fp_estdiv.sv
+../fp_shared/ven_fp_trans.sv
+../fp_shared/ven_fp_top.sv
 // iterative x87 transcendental engine (F2XM1, #11) — instantiated by core.sv only
 // under +define+VEN_TRANSCENDENTAL; harmless (uninstantiated) in the default build.
 fpu/fpu_f2xm1.sv

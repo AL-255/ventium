@@ -44,8 +44,16 @@
             env_tmp[f_seq_step] <= (q_f_mbytes == 4'd2) ? {16'd0, mem_rdata[15:0]}
                                                         : mem_rdata;
             if (f_seq_step == fenv_last) begin   // M-04: one definition (core.sv)
+`ifdef VEN_FP_SHARED
+              // FLDENV/FRSTOR now submit the fully assembled payload to the
+              // shared x87.  FNSTENV/FNSAVE reaches this same read loop first as
+              // a destination pre-probe; in both cases no FP state has changed
+              // before all translations/limit checks have succeeded.
+              state<=S_FEXEC; f_seq_step<=6'd0;
+`else
               eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1;
               state<=S_PIPE; f_seq_step<=6'd0;
+`endif
             end else f_seq_step <= f_seq_step + 6'd1;
           end
         end

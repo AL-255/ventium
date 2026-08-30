@@ -6,6 +6,67 @@
 // always wrapper); pasted verbatim at the original FSM site, netlist identical.
 // Covers the x87 execute/commit arms:
 //   S_FEXEC (x87 compute + commit / hand off a store), S_FSTORE (store seq).
+`ifdef VEN_FP_SHARED
+        // -------------------------------------------------------------------
+        // Area-shared x87 command boundary.  S_FLOAD/S_FENV_LD have completed
+        // any operand read or complete destination pre-probe before this state;
+        // accepting the command is therefore irrevocable but still precise.
+        // -------------------------------------------------------------------
+        S_FEXEC: begin
+          if (fp_shared_cmd_ready)
+            state <= S_FP_SHARED_WAIT;
+        end
+
+        S_FP_SHARED_WAIT: begin
+          if (fp_shared_rsp_valid) begin
+            if (fp_shared_rsp_unsupported) begin
+              state <= S_HALT;
+`ifdef VEN_DBG_CORE
+              int_vec <= 8'hE4;
+`endif
+            end else if (fp_shared_rsp_store_valid) begin
+              // Completion owns the FP state.  The destination was probed before
+              // acceptance, so only the returned byte image remains to serialize.
+              fp_shared_store_data_q  <= fp_shared_rsp_store_data;
+              fp_shared_store_bytes_q <= fp_shared_rsp_store_bytes;
+              f_step <= 4'd0;
+              if (q_fxop==FX_FNSTENV || q_fxop==FX_FNSAVE) begin
+                f_seq_step <= 6'd0;
+                state <= S_FENV_ST;
+              end else begin
+                state <= S_FSTORE;
+              end
+`ifndef SYNTHESIS
+              if ((q_fxop!=FX_FNSTENV) && (q_fxop!=FX_FNSAVE) &&
+                  (fp_shared_rsp_store_bytes != {4'd0,q_f_mbytes}))
+                $error("FP_SHARED: store-byte response %0d does not match decoded width %0d",
+                       fp_shared_rsp_store_bytes, q_f_mbytes);
+`endif
+            end else begin
+              // Includes an unmasked stack fault: the shared top has committed
+              // its status-only result and intentionally emitted no store.
+              eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1; state<=S_PIPE;
+            end
+          end
+        end
+
+        // The shared top has already committed the architectural result at its
+        // response boundary.  This state only serializes that precomputed byte
+        // image over the legacy 32-bit memory port.  S_FLOAD has probed every
+        // beat before command acceptance, so there is no post-commit fault path.
+        S_FSTORE: begin
+          if (mem_ack) begin
+            if ((q_f_mbytes<=4'd4) ||
+                (q_f_mbytes==4'd8 && f_step==4'd1) ||
+                (q_f_mbytes==4'd10 && f_step==4'd2)) begin
+              eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1;
+              state<=S_PIPE; f_step<=4'd0;
+            end else begin
+              f_step<=f_step+4'd1;
+            end
+          end
+        end
+`else
         // -------------------------------------------------------------------
         // S_FEXEC: x87 execute + commit. Updates fpr/ftop/fstat/fptag, sets
         // x87_touched_r, and either retires (advance EIP) or hands a memory
@@ -308,3 +369,4 @@
             end else f_step<=f_step+4'd1;
           end
         end
+`endif

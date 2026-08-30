@@ -33,6 +33,7 @@ all:
 VEN_DEFS := +define+VEN_CORE +define+VEN_L1_AXI +define+VEN_L1_HONOR_CD \
   +define+VEN_KV260_SOC +define+VEN_TRANSCENDENTAL +define+VEN_SRT_ITER \
   +define+VEN_IDIV_ITER +define+VEN_BCD_ITER +define+VEN_FP_PIPE \
+  +define+VEN_FP_SHARED \
   +define+VEN_FPREM +define+VEN_BTB_PIPE +define+VEN_IC_NARROWB \
   +define+VEN_DBG_CORE +define+VEN_FAST_RETRACE +define+VEN_KBD_AUTOACK \
   +define+VEN_KBC_FAST
