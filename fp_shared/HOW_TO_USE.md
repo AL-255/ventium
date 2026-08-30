@@ -4,17 +4,23 @@ This is the handoff contract for the implementation in the repository's
 `fp_shared/` directory.  The public module is
 `ven_fp_top`; every other `ven_fp_*` module is its private implementation.
 
-The block is ready for a shadow integration, not an unconditional cutover.
-Its arithmetic and architectural routing have been checked against the current
-Ventium implementation, but the CPU adapter does not exist yet.  Functional
-differential gates after that adapter is connected remain the final authority.
-In particular, do not claim precise memory-fault or interrupt behavior unless
-the commit rules in this document are implemented.
+`VEN_FP_SHARED` is now an integrated, opt-in architectural path. The core
+routes every x87 instruction through one slow command producer and
+`S_FEXEC`/`S_FP_SHARED_WAIT`; `ven_fp_top` owns the x87 state under that
+profile. The default (macro-disabled) core remains available for comparison.
 
-The current hardware target is the RK-XCZU15EG-F device,
-`xczu15eg-ffvb1156-2-i`.  K26/KV260 results are legacy and must not be used for
-this integration.  Do not open or modify the board-flow project while its
-other owner is using it; the supplied synthesis flow is FP-only OOC.
+The adapter implements a conservative in-order boundary: no younger work,
+interrupt, task switch, or second x87 command can pass an accepted command.
+This is intentionally an area/timing cutover, not a claim of P5-like x87
+overlap. Differential verification remains the authority for functional
+claims, and the remaining interrupt/debug-at-every-busy-age matrix is future
+work.
+
+The production filelists reference `fp_shared/ven_fp_*.sv` directly. The
+complete-system implementation is guarded by `fpga/run_vivado_exclusive.sh`:
+there must be exactly one top-level Vivado process group, and a run started
+before an RTL correction is a timing/area baseline only, never a deployable
+image.
 
 ## What the audit establishes
 
@@ -55,16 +61,23 @@ The current proof boundary is:
 | Unsupported operation behavior | `FX_NONE` completes with `rsp_unsupported=1` | Passed |
 | Command capture | Long FDIV remains correct while every live command field changes after acceptance | Passed |
 | Environment formats | 14/28/94/108-byte forms and real-mode 16-bit field encoding | Passed |
-| Integrated CPU faults/interrupts | Requires the adapter and differential gates below | Not yet established |
-| Complete-image timing | Requires eventual placed/routed system build | Not yet established |
+| Integrated x87 command/response | Exact deployed-profile Verilator compile | Passed |
+| CPU differential subset | add/sub, mul/div, FSTP m64, and env save/restore vs pinned QEMU | Passed |
+| Write-fault precision | `make fpstore`: present/read-only `FISTP m32`, #PF `P|W=3`, restart result 3 | Passed |
+| Busy-age interrupt/debug matrix | Directed injection at every shared-FP busy age | Not yet established |
+| Complete-image timing | Full-system P&R after the latest RTL correction | Pending |
 
-No finite test suite is a mathematical guarantee.  The passed A/B and directed
-tests establish fidelity to the current Ventium oracle within the cases above;
-the shadow and QEMU phases are mandatory before architectural ownership moves.
+No finite test suite is a mathematical guarantee. The passed A/B, directed,
+and QEMU checks establish fidelity only within the cases above; do not weaken a
+gate, relax a timing constraint, or restore saved x87 state to conceal a
+divergence.
 
 ## Canonical files
 
-Copy these seven new files into `rtl/fpu/`:
+The seven implementation files intentionally remain in `fp_shared/` and are
+referenced from both ordered core filelists. Do not copy them into `rtl/fpu/`:
+duplicating the hierarchy would make it easy for simulation and FPGA builds to
+select different implementations.
 
 ```text
 ven_fp_top.sv
@@ -76,17 +89,18 @@ ven_fp_estdiv.sv
 ven_fp_trans.sv
 ```
 
-Also port the small final-result register change from the scratch
-`fpu_srt_div.sv` into `rtl/fpu/fpu_srt_div.sv`.  Inspect the patch first:
+`fp_shared/fpu_srt_div.sv` is a reference copy. The active core continues to
+use `rtl/fpu/fpu_srt_div.sv`; do not replace it wholesale. Before changing it,
+inspect the difference:
 
 ```sh
 git diff --no-index -- rtl/fpu/fpu_srt_div.sv \
   fp_shared/fpu_srt_div.sv
 ```
 
-Apply only the `round_uq_q`/`round_sh_q` register cut if the checkout's SRT file
-has changed since this audit.  Replacing a concurrently edited file wholesale
-is unsafe.
+The currently audited difference is non-functional whitespace. Any future
+functional SRT change needs its own unit and CPU-level regression; replacing a
+concurrently edited file wholesale is unsafe.
 
 The audited RTL hashes are:
 
@@ -115,20 +129,20 @@ rtl/core/ventium_x87_pkg.sv
 rtl/fpu/fpu_srt_div.sv          # with the audited register cut
 rtl/fpu/ven_bcd.sv
 rtl/fpu/ven_bcd_to_fp.sv
-rtl/fpu/ven_fp_state.sv
-rtl/fpu/ven_fp_alu.sv
-rtl/fpu/ven_fp_misc.sv
-rtl/fpu/ven_fp_widemul.sv
-rtl/fpu/ven_fp_estdiv.sv
-rtl/fpu/ven_fp_trans.sv
-rtl/fpu/ven_fp_top.sv
+fp_shared/ven_fp_state.sv
+fp_shared/ven_fp_alu.sv
+fp_shared/ven_fp_misc.sv
+fp_shared/ven_fp_widemul.sv
+fp_shared/ven_fp_estdiv.sv
+fp_shared/ven_fp_trans.sv
+fp_shared/ven_fp_top.sv
 ```
 
-Add the new files to `rtl_ven_core.f` for the Ventium-swapped ao486 build and
-to `rtl/ventium.f` for the verification top, without globbing `rtl/**`.
-`rtl_ven_soc.f` contains the surrounding ao486 platform and does not need a
-second copy of the FP modules.  The shared top does not instantiate the old
-`fpu_estdiv` or the separate old transcendental engines.
+`rtl_ven_core.f` and `rtl/ventium.f` already contain those ordered entries;
+preserve that ordering and never glob `rtl/**`. `rtl_ven_soc.f` contains the
+surrounding ao486 platform and does not need a second copy of the FP modules.
+The shared top does not instantiate the old `fpu_estdiv` or the separate old
+transcendental engines.
 
 Compile the shared hierarchy with `VEN_FPREM`; the unified SRT remainder logic
 is conditional on that define.  The new transcendental sequencer itself is not
@@ -350,36 +364,25 @@ model for that recovery/retirement record.
 
 ## Recommended integration sequence
 
-1. Copy the audited files and SRT hunk into a dedicated integration branch.
-   Add the ordered filelist entries and make lint pass before connecting the
-   block.
-2. Introduce a `VEN_FP_SHARED` integration profile.  Initially route every x87
-   operation through one registered slow command producer; do not let the
-   current `u_d` fast FP arm and `S_FEXEC` become competing producers.
-3. Instantiate `ven_fp_top` beside the old `u_fpu_wb` and `u_fpu_state`.
-   Keep the old hierarchy architecturally authoritative.
-4. Gate x87 issue on `cmd_ready`, shadow each accepted logical instruction into
-   the new top, and implement the complete load/pre-probe/store protocol above.
-5. At each logical FP retirement compare TOP, raw status, control, tags,
-   pointers, all eight physical registers, all eight logical ST views, store
-   payload/length, AX response, and unsupported/stack-fault responses.  Use
-   `tb/tb_ven_fp_arch_ab.sv` as the comparison template.
-6. Exercise both former producers: the fast `S_PIPE` x87 cases in
-   `core_fastpath.svh` and the slow/load/store/environment paths in
-   `core_fp_exec.svh`, `core_load.svh`, and `core_fenv.svh`.  A temporary
-   all-slow profile is safer for the first shadow run; reintroduce optimized
-   issue only after it produces the same single command stream.
-7. Run all gates listed below.  Investigate the first state divergence; do not
-   adjust cycle bands or mask trace fields to hide it.
-8. Move architectural ownership to `ven_fp_top` only after shadow and QEMU
-   differential runs are clean.  Reroute `fpr_flat`, metadata, debug scan,
-   FNSTSW AX, and environment/store payload consumers to the new outputs.
-9. Remove `u_fpu_wb`, `u_fpu_state`, and the old parallel ALU/SRT/BCD/
-   transcendental instances in the same cutover.  A synthesis containing both
-   generations does not demonstrate the intended area saving.
-10. Run only the guarded FP OOC synthesis while the board flow is occupied.
-    Coordinate with its owner before any complete-system implementation or
-    hardware use.
+1. Keep `VEN_FP_SHARED` opt-in until the exact-profile gates and a fresh routed
+   image pass. All fast x87 decode arms must enter the one registered slow
+   producer; there may never be a second command producer.
+2. Memory-source operations collect all bytes before acceptance. Memory-
+   destination operations perform a no-bus translation/limit/**write**-
+   permission sweep of every beat and page before acceptance. The sweep must
+   not set PTE.D; the eventual write performs the normal dirty-mark rewalk.
+3. Hold the probe phase across an `S_WALK` detour, retain the x87 instruction
+   context through the final store, and prohibit intervening interrupt, debug,
+   task-switch, or page-context changes.
+4. Run the leaf A/B suites, a `VEN_FP_SHARED` CPU differential subset, and
+   `make fpstore`. The latter is non-negotiable: a present/read-only page must
+   produce #PF error `P|W=3` before FISTP pops ST0, then restart to value 3.
+5. Run lint and a full exact-profile Verilator build. Investigate the first
+   state divergence; never adjust cycle bands, trace masks, or saved-state
+   restoration to hide it.
+6. Start the full FPGA flow only through `fpga/run_vivado_exclusive.sh`. Wait
+   until its whole process group exits before launching another run, and deploy
+   only a bitstream built after the exact RTL revision has passed its gates.
 
 Useful places to locate the current integration surface are:
 
@@ -418,9 +421,19 @@ FPPIPE-GATE-OK
 The randomized state, ALU, wide-multiply, estimator, and transcendental suites
 have also passed seeds 1, 17, and 20260830 using Verilator's seed plusarg.
 
-After connecting the adapter, run at least:
+For an integrated shared-FPU revision, run at least:
 
 ```sh
+# exact deployed macro profile; never overwrite the canonical obj_dir
+CCACHE_DISABLE=1 make -C verif/tb l1axi_kv_full \
+  KV_FULL_OBJDIR=obj_dir_l1axi_kvf_shared VL_J=1
+
+# the write-protection/restart precision proof against that exact binary
+TB_BIN="$PWD/verif/tb/obj_dir_l1axi_kvf_shared/tb_ventium" make fpstore
+
+# leaf architectural state evidence
+make -C fp_shared test-state test-arch
+
 make lint
 make verify
 make verify-sys
@@ -433,21 +446,23 @@ make verify-all
 ```
 
 Use variant object directories and never clobber the canonical Verilator test
-binary.  The functional differential result is authoritative; cycle-model
+binary. If the repository `build/` volume is read-only, direct `VERIFY_WORKDIR`
+and `VERIFY_CACHE_DIR` to a writable location. The functional differential result is authoritative; cycle-model
 changes caused by serialization must be reviewed separately from value/state
 correctness.
 
 ## OOC synthesis and measured screen
 
-The OOC launcher refuses to start if any other Vivado executable is active and
-never signals or preempts it:
+The OOC launcher delegates to `fpga/run_vivado_exclusive.sh`. Like every
+repository Vivado launch, it terminates all existing `vivado` processes before
+starting its own parent run. Do not invoke raw `vivado` directly:
 
 ```sh
 make synth-ooc-shared
 ```
 
-Do not bypass that guard while the other agent owns Vivado.  The canonical
-reports are only:
+An OOC report is a component-area screen, not a release criterion. The
+canonical reports are only:
 
 ```text
 ooc_xczu15eg_shared/utilization.rpt

@@ -123,10 +123,10 @@ proof set is:
 
 The architectural harness normalizes latency. Leaf result equivalence is
 proved by the arithmetic/transcendental/SRT/BCD suites; the command harness
-proves routing and architectural mutation. A full Ventium/QEMU differential
-gate cannot exercise this scratch block until the adapter is present, so that
-gate remains an integration acceptance condition rather than a completed
-claim here.
+proves routing and architectural mutation. `VEN_FP_SHARED` now connects this
+block to the CPU. The full exact-profile CPU differential remains an acceptance
+condition; the completed subset and the write-protected FISTP precision gate
+are recorded in `HOW_TO_USE.md`.
 
 ## FPGA target
 
@@ -135,9 +135,10 @@ The only target in this scratch flow is the current RK-XCZU15EG-F part
 3.125 MHz core constraint (320 ns) after an explicit
 `synth_design -mode out_of_context`. It never
 opens the board project, block design, PS, implementation run, bitstream flow,
-or any `fpga_run_*` directory. The two Make targets call the non-preemptive
-`run_ooc_vivado.sh` rather than the repository's full-flow launcher. It refuses
-to start if another Vivado executable is present and never signals that process.
+or any `fpga_run_*` directory. The two Make targets call
+`run_ooc_vivado.sh`, which delegates to the repository-wide exclusive launcher.
+Every new Vivado launch terminates existing `vivado` processes first; do not
+invoke raw Vivado or run this concurrently with a board build.
 
 The `old` variant is a conservative leaf-bundle baseline built from the
 deployed split units: old `fpu_top`, ordinary `fpu_fx_ppl`, the unified SRT and
