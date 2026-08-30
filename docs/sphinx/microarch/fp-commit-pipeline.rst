@@ -160,6 +160,6 @@ to **65.3 MHz** (``ExtraNetDelay_high`` placement). The remaining wall is the
 which is placement-variable — the diffuse front-end congestion that in-context
 floorplanning, not a single-cone fix, addresses.
 
-See :doc:`/microarch/l1-parametric` for the ``+VEN_CACHE_HALF`` geometry knob this
-build sits on, and ``docs/fpga-synthesis.md`` for the full place-and-route sweep,
-device views, and reproduction commands.
+See :doc:`/microarch/l1-parametric` for the fixed P5 cache geometry, and
+``docs/fpga-synthesis.md`` for the archived place-and-route sweep, device views,
+and reproduction commands.

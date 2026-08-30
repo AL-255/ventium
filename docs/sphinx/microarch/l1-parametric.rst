@@ -1,64 +1,51 @@
 =================================================
-Parametric L1 Caches
+P5 L1 Cache Geometry
 =================================================
 
 Ventium's L1 instruction and data caches are **8 KB, 2-way set-associative,
 32-byte line, 128 sets, LRU** — the Pentium silicon geometry, and the one the
-cycle model is validated against. That geometry is now **parametric**: the set
-count *and* the associativity of each L1 can be set at compile time, so the core
-can be re-built as a 4 KB direct-mapped-ish, a 16 KB 4-way, a 32 KB 8-way, or any
-power-of-two combination — for FPGA area/Fmax studies and cache design-space
-exploration. The default build is **bit- and cycle-identical** to the original.
+cycle model is validated against. Every integrated RTL, cosimulation, and FPGA
+profile is pinned to that geometry. This prevents cache-size-dependent
+performance or coherence behaviour from being mistaken for a processor
+improvement; the shipping build is **bit- and cycle-identical** to the P5
+geometry used by the oracle.
 
-Compile-time knobs
-==================
+Integrated configuration
+========================
 
-Geometry is selected by ``+define`` flags (no source edit needed). Size of each
-L1 = ``sets × ways × 32 B``.
+The processor has one L1 configuration. Size of each L1 is
+``128 sets × 2 ways × 32 B = 8 KiB``.
 
 .. list-table::
    :header-rows: 1
    :widths: 26 40 14
 
-   * - Define
-     - Effect
-     - Default
-   * - ``VEN_L1_SETS=N``
-     - set count for **both** I$ and D$
-     - 128
-   * - ``VEN_L1_WAYS=N``
-     - associativity for **both** I$ and D$
-     - 2
-   * - ``VEN_IC_SETS=N`` / ``VEN_IC_WAYS=N``
-     - I-cache only (overrides the ``VEN_L1_*`` value)
-     - —
-   * - ``VEN_DC_SETS=N`` / ``VEN_DC_WAYS=N``
-     - D-cache only (overrides the ``VEN_L1_*`` value)
-     - —
-   * - ``VEN_CACHE_HALF``
-     - legacy shortcut: 64 sets (4 KB) both L1s
-     - —
+   * - Property
+     - I$
+     - D$
+   * - Capacity
+     - 8 KiB
+     - 8 KiB
+   * - Sets / ways / line
+     - 128 / 2 / 32 B
+     - 128 / 2 / 32 B
+   * - Index / tag
+     - ``addr[11:5]`` / ``addr[31:12]``
+     - ``addr[11:5]`` / ``addr[31:12]``
 
-``N`` is a power of two. Examples (built into a private ``obj_dir`` so they never
-clobber the canonical one)::
+``VEN_CACHE_HALF`` and the integrated cache set/way value defines were
+retired. The ``icache`` and ``ven_l1d`` *leaf modules* retain module
+parameters so their derived index/tag arithmetic can be unit-tested at
+multiple legal sizes. Those tests are not alternative processor
+configurations.
 
-   # 16 KB 4-way (both L1s)
-   make -C verif/tb rtl OBJDIR=obj_dir_4way VL_EXTRA_DEFINES="+define+VEN_L1_WAYS=4"
-
-   # 8-way I$, 256-set 2-way D$
-   make -C verif/tb rtl OBJDIR=obj_dir_mix \
-        VL_EXTRA_DEFINES="+define+VEN_IC_WAYS=8 +define+VEN_DC_SETS=256"
-
-The set-index width (``$clog2(SETS)``), tag width (``32-5-idx``) and way-index
-width (``$clog2(WAYS)``) all derive automatically; the tag/valid/data arrays and
-the line store scale with the parameters.
-
-Generalising the LRU without disturbing the default
-===================================================
+Two-way P5 LRU
+==============
 
 The original 2-way replacement carried **one bit per set** — ``lru`` = the
-most-recently-used way, with ``victim = ~lru``. That does not generalise: an
-N-way victim needs the full recency order, not just the MRU way.
+most-recently-used way, with ``victim = ~lru``. The extracted cache leaf has a
+general age-rank representation internally, but the integrated P5 always has
+two ways.
 
 The replacement is a **per-way age-counter true-LRU**. Each way of a set holds a
 rank ``age[set][way]`` ∈ ``0 … WAYS-1`` (0 = MRU, WAYS-1 = LRU); the ranks of a
@@ -74,8 +61,8 @@ to 0; a hit/fill on way *k* moves *k* to MRU and the other way to LRU, exactly a
 ``lru <= k`` did. So the default build's hit test, victim sequence, and recency
 updates are byte-for-byte the same — which the cycle gates confirm below.
 
-Default is preserved; non-default is functionally correct
-==========================================================
+P5 configuration verification
+==============================
 
 **The default 8 KB / 2-way / 128-set build is bit- and cycle-identical** to the
 pre-parameterisation core:
@@ -87,9 +74,10 @@ pre-parameterisation core:
   victim sequence matches the original 2-way LRU clock-for-clock.
 * the standalone ``l1d`` RTL gate passes.
 
-**Non-default geometries are functionally correct** but are *not* matched by the
-fixed 2-way / 128-set ``p5trace.so`` cycle oracle, so ``make verify`` / M4 / M5
-certify only the default geometry. A 16 KB 4-way build was checked directly:
+Historical standalone leaf-module geometry experiments were functionally
+correct but are *not* processor configurations and are not matched by the fixed
+2-way / 128-set ``p5trace.so`` cycle oracle. ``make verify`` / M4 / M5 certify
+the fixed P5 geometry above. A 16 KB 4-way leaf experiment was checked directly:
 
 * it builds clean;
 * a CoreMark free-run on the 4-way cache produces CRC output **byte-identical to
@@ -120,9 +108,7 @@ certify only the default geometry. A 16 KB 4-way build was checked directly:
 Fidelity caveat
 ===============
 
-Only the **2-way / 128-set** geometry is silicon-accurate and cycle-validated
-against the oracle. Other geometries change the miss *sequence* (and at non-2-way
-the replacement is no longer the P5's), so they are area/perf experiments, not a
-verification config. See :doc:`l1-cache-performance` for what the cache size
-actually buys on the cycle-accurate model, and :doc:`srt-divider` for the
-broader cycle-model methodology.
+Only the **2-way / 128-set** geometry is silicon-accurate, is implemented in
+the processor, and is cycle-validated against the oracle. See
+:doc:`l1-cache-performance` for the fixed-cache performance characterization,
+and :doc:`srt-divider` for the broader cycle-model methodology.

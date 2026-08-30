@@ -124,18 +124,15 @@ ZU15EG: prepend `PART=xczu15eg-ffvb1156-2LV-e OUTTAG=_zu15eg`. Then
 `python3 fpga/scripts/render_device_view.py …` / `render_congestion.py` / `render_compare.py`.
 Full timing backlog + methodology in [`fpga/TIMING_PROBLEMS.md`](../fpga/TIMING_PROBLEMS.md).
 
-### Half-cache variant (`+VEN_CACHE_HALF`): congestion relief ≠ higher Fmax
+### Retired half-cache experiment: congestion relief ≠ higher Fmax
 
-A clean experiment to test whether the `u_icache` congestion is the Fmax wall: halve
-both L1s to **4 KB** (64 sets / 21-bit tag instead of 128 / 20), gated behind
-`+VEN_CACHE_HALF` so the default build stays byte/cycle-identical (`addr[5 +: 7]` is
-literally `addr[11:5]`). The cache is a hit/miss + data store, so smaller just means
-more fills, same bytes — **functionally bit-exact**: both the default *and* the
-`+VEN_CACHE_HALF` builds pass `make verify` **77/77** vs QEMU (the 64-set geometry is
-confirmed in the elaborated netlist). It is **not** a cycle-fidelity config — the
-fixed-128-set cycle oracle no longer matches the miss sequence — so the M4/M5 bands are
-only claimed for the default build. Run on the **µop-cache** base (`+VEN_UOPCACHE`, the
-config that routes), same KV260 part / 15 ns target:
+This is historical evidence from an experiment that halved both L1s to **4 KB**
+(64 sets / 21-bit tag instead of 128 / 20) to test whether `u_icache`
+congestion was the Fmax wall. The experiment was functionally bit-exact but
+not cycle-faithful because the fixed-128-set oracle sees a different miss
+sequence. The implementation no longer recognizes the half-cache build
+switch: every current image uses the full P5 8 KiB/2-way L1s. The data below
+is retained for the diagnosis, not as a reproduction recipe.
 
 ![Ventium KV260 µop-cache + half-cache, placed by module](fpga-device-view-kv260-halfcache.png)
 

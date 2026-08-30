@@ -1057,11 +1057,8 @@ module ventium_top
   logic        ic_snoop_v1; logic [31:0] ic_snoop_a1; // H-09: SMC store, first line
   logic        ic_snoop_v2; logic [31:0] ic_snoop_a2; // H-09: SMC store, second line
   assign bus_err = l1_bus_err;   // #34 expose the fatal AXI fault to the PS
-  // REVIEW2 M-04: pass the L1D geometry DOWN. This instantiation used to override
-  // nothing, so ventium_l1_axi (and therefore ven_l1d) stayed at its 128-set default
-  // even in a +VEN_CACHE_HALF build where the core's own D$ model had shrunk to 64 --
-  // the advertised half-cache config did not shrink the cache that holds the data.
-  // ventium_pkg::L1D_SETS_DEF is the single definition the core uses for DC_SETS.
+  // Keep the functional AXI L1D tied to the same 128-set P5 geometry as the core's
+  // timing model.  The package constant makes that single configuration explicit.
   ventium_l1_axi #(.ADDR_W(40), .REMAP_BASE(L1AXI_REMAP_BASE), .ADDR_MASK(L1AXI_ADDR_MASK),
                    .NARROW_REPLAY_SAFE(L1AXI_NARROW_REPLAY_SAFE),
                    .L1_SETS(ventium_pkg::L1D_SETS_DEF)) u_l1axi (

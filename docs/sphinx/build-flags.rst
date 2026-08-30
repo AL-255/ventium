@@ -135,26 +135,6 @@ Quick reference
      - boolean define
      - off — full-width port B
      - Halves the icache straddle read port (distributed-RAM front end only).
-   * - ``VEN_CACHE_HALF``
-     - boolean define
-     - off — 128 sets per L1
-     - Both L1s halved to 64 sets (4 KB each); FPGA area/congestion option.
-   * - ``VEN_IC_SETS``
-     - valued define (int)
-     - 128
-     - I-cache set-count override for geometry sweeps.
-   * - ``VEN_IC_WAYS``
-     - valued define (int)
-     - 2
-     - I-cache associativity override (parametric true LRU).
-   * - ``VEN_DC_SETS``
-     - valued define (int)
-     - 128
-     - D-cache timing-model set-count override.
-   * - ``VEN_DC_WAYS``
-     - valued define (int)
-     - 2
-     - D-cache timing-model associativity override.
    * - ``VEN_IC_COLLIDE_DBG``
      - boolean define
      - off (needs ``VEN_IC_BRAM``)
@@ -211,14 +191,6 @@ Quick reference
      - boolean define
      - off — BFM memory port
      - Real L1 data cache plus AXI4 master to PS-DDR (bus mode 2).
-   * - ``VEN_L1_SETS``
-     - valued define (int)
-     - 128
-     - Umbrella set-count knob for both in-core L1s at once.
-   * - ``VEN_L1_WAYS``
-     - valued define (int)
-     - 2
-     - Umbrella associativity knob for both in-core L1s at once.
    * - ``VEN_AXI_CDC``
      - boolean define
      - off — single-clock bypass
@@ -847,27 +819,24 @@ Front-end and L1 caches
 =======================
 
 This family covers the fetch/decode front end — the BTB, the icache, the
-predecoded micro-op cache, the page-keyed fetch micro-TLB — and the parametric
-L1 geometry knobs. Per project convention every flag is opt-in: the default
+predecoded micro-op cache, and the page-keyed fetch micro-TLB.  The integrated
+core always uses P5 L1 geometry: 8 KiB, 2-way, 32-byte lines, 128 sets. Per
+project convention every flag is opt-in: the default
 build is the byte/cycle-identical golden-matched reference, and each flag is
 one of (a) a bit-exact Fmax/area implementation option whose cycle behaviour
 is identical or stays inside the loose M4/M5 bands (``VEN_BTB_PIPE``,
 ``VEN_IC_NARROWB``, ``VEN_IC_BRAM``); (b) an architecturally bit-exact but
-explicitly non-cycle-faithful demonstrator (``VEN_FE_PIPE``,
-``VEN_CACHE_HALF``) plus the common-case-correct, not-yet-verify-hardened
-``VEN_UOPCACHE``; or
-(c) a numeric geometry parameter for cache sweeps (``VEN_IC_SETS``,
-``VEN_IC_WAYS``, ``VEN_DC_SETS``, ``VEN_DC_WAYS``, plus the umbrella
-``VEN_L1_SETS``/``VEN_L1_WAYS`` pair described with the SoC platform family); or
-(d) a purely observational diagnostic counter layer (``VEN_IC_COLLIDE_DBG`` on
+explicitly non-cycle-faithful demonstrator (``VEN_FE_PIPE``) plus the
+common-case-correct, not-yet-verify-hardened ``VEN_UOPCACHE``; or
+(c) a purely observational diagnostic counter layer (``VEN_IC_COLLIDE_DBG`` on
 the BRAM icache, ``VEN_UOP_PERF`` on the µop cache), documented at the end of
 this section.
 
 The deployable KV260 SoC bitstream sets ``VEN_BTB_PIPE`` + ``VEN_IC_BRAM`` +
-``VEN_UOPCACHE`` + ``VEN_CACHE_HALF`` + ``VEN_FE_PIPE`` (plus the FP and
-iterative-engine flags), via ``fpga/scripts/impl_kv260_soc.tcl``; simulation
-sweeps set the geometry knobs through ``verif/tb/Makefile``'s
-``VL_EXTRA_DEFINES`` passthrough into separate object directories. The
+``VEN_UOPCACHE`` + ``VEN_FE_PIPE`` (plus the FP and iterative-engine flags).
+Standalone ``icache`` and ``ven_l1d`` unit tests may still vary their *module*
+parameters to exercise derived index/tag logic, but no integrated RTL or FPGA
+profile has a cache-geometry build switch. The
 narrative arc documented in ``fpga/TIMING_PROBLEMS.md`` and
 ``docs/fpga-synthesis.md``: the single-cycle x86 byte-window decode's MUXF
 density is the congestion wall, the micro-op cache is the only lever that ever
@@ -948,10 +917,8 @@ predecoded boundary, reads stale or wrong slots with no stall. It is a
 synthesis/APR Fmax demonstrator (common-case correct), not a
 differential-gate-verified configuration — yet it *is* in the deployable
 KV260 bitstream. The default/narrowb build is the verified production
-reference. It also conflicts with any I-cache wider than 2 ways: the uopcache way
-ports are 1 bit and the store is sized ``IC_SETS*2``, so
-``VEN_IC_WAYS``/``VEN_L1_WAYS`` greater than 2 with ``VEN_UOPCACHE`` would
-silently alias ways (1-way is safe but wastes half the slot store).
+reference. The integrated cache is fixed at two ways, so the uopcache's two-way
+slot layout cannot be put out of agreement with the cache it serves.
 
 ``VEN_UOPCACHE_CHECK``
 ----------------------
@@ -1094,130 +1061,18 @@ scripts list it harmlessly). The safety argument depends on the 6-byte U plus
 6-byte V window geometry; if the decode window ever widens, the static bound
 must be re-derived.
 
-``VEN_CACHE_HALF``
-------------------
+P5 L1 geometry (fixed)
+-----------------------
 
-An FPGA area/congestion experiment that halves *both* L1s to 64 sets (4 KB
-I-cache + 4 KB D-cache), changing the index/tag geometry from idx 7/tag 20 to
-idx 6/tag 21. It is the third-priority arm of the ``IC_SETS`` and ``DC_SETS``
-precedence chains in ``rtl/core/core.sv``. Because the index/tag split
-changes, the hit/miss *sequence* differs from the fixed-128-set ``p5trace``
-cycle oracle, so it is explicitly **not** a verification or cycle-fidelity
-configuration — the M4/M5 bands are only claimed for the default. It stays
-functionally bit-exact (a cache is a hit/miss plus a data store; smaller means
-more fills, same bytes): both the default and ``+VEN_CACHE_HALF`` builds pass
-``make verify`` 77/77 vs QEMU, run manually via
-``VL_EXTRA_DEFINES=+define+VEN_CACHE_HALF make verify``.
-
-FPGA payoff (on the uopcache base, K26, 15 ns): ``u_icache`` placed cells
-−45 %, MUXF7/F8 −29 %/−24 %, placer congestion level 6 → 5, failing endpoints
-−23 %, TNS −38 % — but routed Fmax roughly flat (51.7 → 50.1 MHz), because the
-worst path was the FP deferred-commit cone, not the cache. It was kept as a
-free area/tail win and, combined with ``VEN_FP_PIPE2``, became the
-63–65.3 MHz OOC configuration and part of the deployable SoC image. Set by
-``impl_kv260_soc.tcl``, ``apr_run.tcl`` (``HALF=1`` env), and
-``apr_hc_pnr.tcl``; in simulation only by manual ``VL_EXTRA_DEFINES``.
-
-It is overridden by ``VEN_IC_SETS``/``VEN_DC_SETS`` and by ``VEN_L1_SETS``
-(the ``elsif`` chain ranks them above it); the geometry flows into the icache,
-uopcache and ``dcache_timing`` parameters. Under ``VEN_L1_AXI`` the D-cache
-half has no effect at all (``dcache_timing`` is compiled out). Never run the
-cycle bands on a half-cache build and call a mismatch a regression — the
-in-source comment brands it "NOT a verification config".
-
-``VEN_IC_SETS``
----------------
-
-Per-I-cache set-count override (an integer-valued define), the
-highest-priority arm of the ``IC_SETS`` chain
-(``VEN_IC_SETS`` > ``VEN_L1_SETS`` > ``VEN_CACHE_HALF`` (64) > 128). The value
-must be a power of two, since ``IC_IDXW = $clog2(IC_SETS)`` and
-``IC_TAGW = 32-5-IC_IDXW`` derive directly from it; it resizes the parametric
-``rtl/mem/icache.sv`` arrays and flows into the uopcache parameter as well.
-Non-default values stay functionally correct (the cache is
-architecture-transparent) but are *not* matched by the fixed-128-set/2-way
-``p5trace`` cycle oracle — they are area/perf experiments.
-
-Its real consumer is the L1 cache-size sweep: ``build/rerun/cache_sweep.sh``
-(dhrystone, lockstep replay) and ``build/rerun/dmiss_sweep.sh`` (``mb_dmiss``,
-pure ``--cycle``) — local working artifacts in the gitignored ``build/``
-tree, not committed — build one testbench per geometry via
-``VL_EXTRA_DEFINES="+define+VEN_IC_SETS=$SETS +define+VEN_DC_SETS=$SETS"``
-into separate ``obj_dir_sweep_*`` directories and measure CPI vs size — the
-sweep that produced the 32 KB-knee result (``mb_dmiss`` CPI 2.50 → 0.53).
-Cache timing is cycle-mode-only and cycle mode diverges on syscall/TLS
-programs, so sweeps either use flat syscall-free kernels or the PC-keyed
-lockstep replay path — that constraint is baked into the scripts. Each
-geometry must build into its own object directory or it clobbers the canonical
-``obj_dir/tb_ventium`` used by ``make verify``.
-
-``VEN_IC_WAYS``
----------------
-
-Per-I-cache associativity override (chain ``VEN_IC_WAYS`` > ``VEN_L1_WAYS``
-> 2; powers of two, with a guard so even 1-way elaborates). The icache was
-generalized from the original 1-bit MRU 2-way scheme to a per-way age-counter
-**true LRU** (rank 0 = MRU … WAYS−1 = LRU) that provably reduces to the
-original behaviour at ``WAYS == 2`` — same hit test, same victim sequence,
-same touch/fill recency; the reset encoding (age = way index, reproducing the
-old victim = way 1) was deliberately matched, and any "cleanup" there breaks
-golden identity. The replacement victim is exported per set as ``ic_victim_o``
-so the spine's fill-way selection stays uniform.
-
-No script — committed or local — sets it directly; the associativity
-demonstration used the umbrella ``VEN_L1_WAYS=4`` via the local
-``build/rerun/nway_4way.sh`` (gitignored), which proved a
-12 KB conflict working set thrashes 2-way but fits 4-way (CPI drop) and that
-4-way free-runs CoreMark with CRC output identical to qemu-native. It
-conflicts with ``VEN_UOPCACHE`` at any value greater than 2 (1-bit way ports,
-stores sized ``IC_SETS*2``; 1-way is safe but wastes half the slot store). The fixed-2-way oracle means there is no cycle
-gate for other way counts — only functional/CRC validation.
-
-``VEN_DC_SETS``
----------------
-
-Set-count override for the L1 D-cache **timing model**
-(``rtl/mem/dcache_timing.sv``) — crucially a timing-only structure: there is
-no data array; load data always comes from the BFM/``mem_rdata``, and
-``dcache_timing`` just tracks tag/valid/LRU so the spine knows *when* a load
-completes (a read miss adds the ``dmiss = 8`` penalty, misalignment +3,
-mirroring ``p5_mem()``/``l1_access()`` in the ``p5trace.c`` oracle). It can
-therefore never change architectural results — only cycle counts, and only in
-cycle mode. Like the I-side knob it is functionally safe but breaks the
-fixed-128-set cycle-oracle match; it is used by the same two cache sweeps,
-always set equal to ``VEN_IC_SETS``.
-
-It is entirely moot under ``VEN_L1_AXI``: the whole ``dcache_timing`` instance
-is compiled out and ``dc_lu_hit`` tied 1 (mode-2 timing is functional-only),
-so SoC/board builds ignore it. The D-miss penalty is also deferred one
-instruction (``pending_mem_pen``), so per-geometry cycle deltas land on the
-*following* retire — relevant when eyeballing sweep traces. Because it is
-timing-only, a functional-mode run returns identical data values regardless of
-the setting; the sweep scripts exploit exactly this, which is what makes
-fixed-``--max-insn`` CPI comparisons valid.
-
-``VEN_DC_WAYS``
----------------
-
-Associativity override for the D-cache timing model, the D-side twin of
-``VEN_IC_WAYS`` (chain ``VEN_DC_WAYS`` > ``VEN_L1_WAYS`` > 2).
-``dcache_timing`` was generalized to any power-of-two way count with a per-way
-age-counter true LRU that reduces *exactly* to the original 1-bit ``dc_lru``
-behaviour at 2-way — same hit test, victim sequence and recency update, the
-reset encoding reproducing the old ``victim = ~dc_lru``. That exact-reduction
-property is the load-bearing reason the default build needed no
-re-verification after the parameterization commit. Since the block is
-timing-only, changing ways only changes when loads complete in cycle mode,
-never what they return.
-
-No script — committed or local — sets it directly; the 4-way demonstration
-used the umbrella ``VEN_L1_WAYS=4`` via the local ``build/rerun/nway_4way.sh``
-(gitignored), which together with the I-side showed the
-conflict-kernel CPI collapse at 4-way and CRC-identical CoreMark output as the
-functional proof. Moot under ``VEN_L1_AXI``; usually swept together with the
-I-side so the two L1s stay symmetric, mirroring the oracle's single L1
-geometry parameterization. Its "differential gate" is a functional/CRC
-equivalence run plus a CPI plausibility check — never the cycle bands.
+The integrated core and every FPGA profile use the P5 geometry: 8 KiB I$ and
+8 KiB D$, each two-way set associative with 128 sets and 32-byte lines. The
+core's timing model and ``ventium_l1_axi`` consume the same package constant,
+so a build cannot silently combine two cache shapes. ``VEN_CACHE_HALF`` and
+the integrated ``VEN_{IC,DC,L1}_{SETS,WAYS}`` selectors were retired; they are
+not supported implementation switches. Parameterized ``icache`` and
+``ven_l1d`` leaf-module tests remain valuable for checking generic index/tag
+arithmetic, but are not processor configurations and do not qualify an FPGA
+image.
 
 ``VEN_IC_COLLIDE_DBG``
 ----------------------
@@ -1503,7 +1358,7 @@ Memory system and SoC platform
 
 This family is the build-time ladder that turns the verification core (BFM
 memory, same-cycle ack, DPI retire tracing) into a real KV260 FPGA SoC, plus
-the umbrella L1 geometry knobs and one physical-implementation switch. The
+one physical-implementation switch. The
 ladder is strictly layered: ``VEN_L1_AXI`` swaps the bus-functional memory
 port for a real stalling L1 data array plus an AXI4 master to PS-DDR
 (bus mode 2, runtime ``l1axi_en``); ``VEN_AXI_CDC`` optionally splits that
@@ -1521,10 +1376,9 @@ compile-time-only path swap shielded by ``l1axi_en`` at the subsystem level;
 per-flag differential gates prove architectural bit-exactness for
 ``VEN_L1_AXI``, ``VEN_AXI_CDC`` and ``VEN_PS_PROXY`` but *not* for
 ``VEN_KV260_SOC`` (board-level certification only); only cycle *timing* is
-allowed to change (mode-2 timing is explicitly functional-only). ``VEN_L1_SETS``/``VEN_L1_WAYS`` are
-valued geometry knobs for the in-core caches, and ``VEN_PBLOCK`` is not a
-Verilog define at all but an environment variable read by two Vivado Tcl
-scripts.
+allowed to change (mode-2 timing is explicitly functional-only). ``VEN_PBLOCK``
+is not a Verilog define at all but an environment variable read by two Vivado
+Tcl scripts.
 
 ``VEN_L1_AXI``
 --------------
@@ -1583,51 +1437,6 @@ backing memory model directly, bypassing the L1. The standalone unit gates
 (``run-l1axi-gate.sh``, ``run-l1d-gate.sh``, ``run-l1axi-wd-gate.sh``) do
 *not* need the define — the leaf modules are unconditional; the ``ifdef`` only
 controls wiring into ``ventium_top``/``core``.
-
-``VEN_L1_SETS``
----------------
-
-Sets the set count for *both* in-core L1s at once: ``IC_SETS`` for the
-functional I-cache and ``DC_SETS`` for the D-cache timing model. It sits in a
-precedence chain — the per-cache ``VEN_IC_SETS``/``VEN_DC_SETS`` override it,
-it overrides ``VEN_CACHE_HALF`` (the legacy 64-set shortcut), which overrides
-the 128 default (the Pentium silicon geometry the cycle oracle is validated
-against; at the default, the index/tag slices are exactly
-``addr[11:5]``/``addr[31:12]``). Set-index width, tag width and all tag/valid/
-data arrays derive automatically; the value must be a power of two.
-
-Changing it changes the miss *sequence*: the build stays functionally
-bit-exact — supported by the ``VEN_CACHE_HALF`` ``make verify`` run (the
-64-set case, 77/77), the 4-way CoreMark CRC free-run and the functional
-set-count sweeps, not by a ``make verify`` run with this define itself — but
-the cycle trace no longer matches the fixed-128-set ``p5trace`` oracle, so the
-M4/M5 bands are only claimed for the default. It is the documented
-convenience form (see :doc:`/microarch/l1-parametric`) with no recorded user:
-the cache design-space sweeps that found the 32 KB L1 knee passed the
-per-cache ``VEN_IC_SETS``/``VEN_DC_SETS`` instead, and the umbrella pair's
-only recorded use is the ways side (``VEN_L1_WAYS=4``). There is no
-production setter — the FPGA builds use ``VEN_CACHE_HALF`` instead. An important scope limit: it does
-**not** touch ``ven_l1d``, the ``VEN_L1_AXI`` data cache — that module has its
-own ``L1_SETS`` module parameter left at its 128 default by
-``ventium_l1_axi``, so a geometry sweep changes the in-core I-cache and
-D-timing model only. Always build into a private object directory so the
-canonical ``obj_dir/tb_ventium`` is never clobbered.
-
-``VEN_L1_WAYS``
----------------
-
-Sets the associativity for both in-core L1s at once, with the same precedence
-pattern (``VEN_IC_WAYS``/``VEN_DC_WAYS`` win; default 2, the P5 silicon
-associativity, at which the generalized age-rank true LRU reduces
-byte-for-byte to the original 1-bit MRU scheme — victim = ``~lru`` —
-confirmed by the cycle gates). Supporting arbitrary N required the per-way
-age-counter LRU described under ``VEN_IC_WAYS``, exposed as ``ic_victim_o`` so
-the spine's fill-way selection stays uniform. Functionally bit-exact but
-cycle-oracle-divergent for non-default values — an area/CPI exploration knob,
-e.g. the 4-way conflict-pattern experiment in ``build/rerun/nway_4way.sh``
-(local, gitignored; a 12 KB conflict set on ``+VEN_L1_WAYS=4``). No production setter; the same
-``ven_l1d`` scope limit as ``VEN_L1_SETS`` applies. The value must be a power
-of two.
 
 ``VEN_AXI_CDC``
 ---------------
@@ -2441,24 +2250,24 @@ the full production stack::
    SYNTHESIS  VTM_NO_DPI
    VEN_SRT_ITER  VEN_IDIV_ITER  VEN_BCD_ITER
    VEN_FP_PIPE  VEN_FP_PIPE2  VEN_BTB_PIPE
-   VEN_IC_BRAM  VEN_UOPCACHE  VEN_CACHE_HALF
+   VEN_IC_BRAM  VEN_UOPCACHE
    VEN_L1_AXI  VEN_KV260_SOC
    VEN_FE_PIPE          (appended by the FE_PIPE=1 environment knob)
 
 Reading it as layers: the two housekeeping tokens strip the DPI channel and
 the sim-only assertions; the three iterative engines and the two-stage FP
 commit pipeline are the bit-exact Fmax substrate; ``VEN_BTB_PIPE``,
-``VEN_IC_BRAM``, ``VEN_UOPCACHE`` and ``VEN_CACHE_HALF`` are the front-end
-congestion stack; ``VEN_L1_AXI`` + ``VEN_KV260_SOC`` are the platform layer
+``VEN_IC_BRAM`` and ``VEN_UOPCACHE`` are the front-end congestion stack;
+``VEN_L1_AXI`` + ``VEN_KV260_SOC`` are the platform layer
 (real bus, PS seams, DDR-carveout remap); and ``VEN_FE_PIPE`` is the final cut
 that lets the full SoC route. Three footnotes from the setters data:
 ``VEN_BCD_DIV100`` is **absent** from this list (and from
 ``apr_hc_pnr.tcl``) — the ÷100 step is documented in ``ven_bcd.sv`` and
 ``docs/fpga-synthesis.md``, but no committed Tcl carries the define; the
-65.3 MHz half-cache result added it ad hoc; the older
+65.3 MHz historical half-cache result added it ad hoc; the older
 ``fpga/scripts/bd_kv260_soc.tcl`` validate-and-synth flow still carries the
 pre-uopcache config (``VEN_IC_NARROWB`` instead of
-``VEN_IC_BRAM``/``VEN_UOPCACHE``/``VEN_CACHE_HALF``, and no
+``VEN_IC_BRAM``/``VEN_UOPCACHE``, and no
 ``VEN_FP_PIPE2``); and no committed Tcl consumes
 ``fpga/build/periph_split.vdefs`` yet — the board path runs all peripherals on
 the PS via ``ven_soc_axil``, so the ``VEN_<DEV>_PS`` flags are exercised only

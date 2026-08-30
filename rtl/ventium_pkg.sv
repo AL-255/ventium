@@ -164,26 +164,14 @@ package ventium_pkg;
 `endif
 
   // ===========================================================================
-  // REVIEW2 M-04: ONE definition of the L1 D-cache set count.
+  // ONE definition of the shippable L1 D-cache geometry.
   // ===========================================================================
-  // The core derived DC_SETS from its own `ifdef ladder while ventium_top
-  // instantiated ventium_l1_axi with NO L1_SETS override at all -- so a
-  // +VEN_CACHE_HALF build shrank the core's internal D$ model to 64 sets while the
-  // functional AXI L1D silently stayed at 128. The advertised half-cache
-  // configuration therefore did not shrink the thing that actually holds data.
-  //
-  // Defining the ladder ONCE here and consuming it from both places fixes the
-  // mismatch without creating a second copy to drift -- which is the same defect
-  // class as the C-03 address mirror and the m6 last-beat constant.
+  // A Pentium P5 has a 2-way, 128-set, 32-byte-line D$ (8 KiB).  This package
+  // constant is consumed by both the core timing model and the functional AXI
+  // L1D, so the implementation has one physical cache geometry rather than a
+  // define-selected model/cache mismatch.  Keep geometry experiments at the
+  // standalone leaf-module level; a shippable core always uses P5 geometry.
   localparam int L1D_SETS_DEF =
-`ifdef VEN_DC_SETS
-      `VEN_DC_SETS;
-`elsif VEN_L1_SETS
-      `VEN_L1_SETS;
-`elsif VEN_CACHE_HALF
-      64;                      // +VEN_CACHE_HALF: 4 KB D$
-`else
       128;
-`endif
 
 endpackage : ventium_pkg

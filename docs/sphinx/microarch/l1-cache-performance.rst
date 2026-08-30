@@ -123,12 +123,11 @@ The cache size is **quantized**: with a 32-byte line the set count and the
 associativity are each a power of two (the index is a clean bit-slice,
 ``addr[5 +: $clog2(SETS)]``), so a D-cache size is always ``sets × ways × 32 B``
 with both factors powers of two — there is no *arbitrary* 20 KB or 24 KB point.
-Associativity itself **is** now a compile-time knob (``VEN_L1_WAYS`` — see
-:doc:`l1-parametric`), which adds geometry points (e.g. 128 sets at 2/4/8-way =
-8/16/32 KB), but the knee is most cleanly resolved by its **dual**: since it is
-governed by **working set ÷ capacity**, hold the cache fixed and sweep the
-*working set* at arbitrary resolution (just recompiled ``mb_dmiss`` variants — no
-RTL rebuild).
+The integrated design deliberately fixes the P5 two-way associativity (see
+:doc:`l1-parametric`). The knee is therefore most cleanly resolved by its
+**dual**: since it is governed by **working set ÷ capacity**, hold the cache
+fixed and sweep the *working set* at arbitrary resolution (just recompiled
+``mb_dmiss`` variants — no RTL rebuild).
 
 Doing so at a fixed 16 KB cache exposes the internal structure the coarse sweep
 hid:
@@ -183,9 +182,8 @@ working-set/capacity, not on absolute size.
 Methodology and reproduction
 ============================
 
-Cache geometry is selected by the ``IC_SETS`` / ``DC_SETS`` localparams in
-``rtl/core/core.sv`` (default 128 sets = 8 KB; ``+VEN_CACHE_HALF`` = 64 sets =
-4 KB), which parameterise the ``icache`` and ``dcache_timing`` modules
+Cache geometry is fixed by localparams in ``rtl/core/core.sv`` (128 sets =
+8 KB), which parameterise the ``icache`` and ``dcache_timing`` modules
 (``logic [TAGW-1:0] tag [SETS][2]`` etc., so the arrays scale automatically).
 For the sweep each size was built into its own ``obj_dir`` with an extra
 ``+define`` overriding the set count, then ``mb_dmiss`` (and a many-sweep

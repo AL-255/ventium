@@ -206,8 +206,9 @@ catch drift); some gate scripts hide compile errors behind `>/dev/null` — chec
 Vivado/Vitis **2025.2**, part `xck26-sfvc784-2LV-c`.
 `vivado -mode batch -source fpga/scripts/impl_kv260_soc.tcl` (BD → synth →
 impl → `ventium_kv260.{bit,xsa}` under `fpga/build/`); knobs `PL0_MHZ`,
-`OUTTAG`, `FE_PIPE`. Shipped image: 40 MHz, half-cache config
-(`VEN_CACHE_HALF + VEN_FP_PIPE2`), WNS +0.104 ns. PS-side apps (`ven_soc_app`,
+`OUTTAG`, `FE_PIPE`. All current images use full P5 L1s (8 KiB, 2-way,
+128 sets, 32-byte lines); `VEN_FP_PIPE2` was part of the 40 MHz image with
+WNS +0.104 ns. PS-side apps (`ven_soc_app`,
 `hid_kbd`, `fb_vnc`, `venclk.sh`) cross-build with
 `make CROSS_COMPILE=aarch64-linux-gnu-`. Board deploy on stock Kria Ubuntu:
 `xmutil loadapp ventium` (dfx-mgr); the verified recipe + bring-up gotchas are

@@ -19,7 +19,7 @@
 #  build's VL_FLAGS, so the unified FDIV/FSQRT/FPREM datapath is always present.)
 #   VEN_FXCH_FREE VEN_TRANSCENDENTAL VEN_SRT_ITER VEN_IDIV_ITER
 #   VEN_BCD_ITER VEN_FPTRAP VEN_FP_PC_RELAX VEN_DIV_EXACT
-# (VEN_IC_BRAM/VEN_CACHE_HALF/VEN_KV260_SOC need L1AXI; VEN_PS_PROXY/VEN_DBG_CORE
+# (VEN_IC_BRAM/VEN_KV260_SOC need L1AXI; VEN_PS_PROXY/VEN_DBG_CORE
 #  need their own run modes — out of this lane's scope, noted in the README.)
 #
 # Usage:  bash verif/cov/run-flags-cov.sh
