@@ -452,6 +452,7 @@ verify: issue-uv
 verify-sys:
 	bash verif/sys/run-sys-golden.sh pseg
 	bash verif/sys/run-sys-golden.sh pmode
+	bash verif/sys/run-sys-golden.sh psysfpreloc
 	bash verif/sys/run-sys-golden.sh ppage
 	# REVIEW2 C-02: directed page-crossing test. XFAILs today (that divergence IS
 	# the defect); the runner fails loudly if it ever starts passing.
@@ -667,6 +668,13 @@ verify-sys:
 	bash verif/sys/run-sys-golden.sh pdebug
 	bash verif/sys/run-sys-golden.sh ppopf
 	PORT=53220 bash verif/sys/run-sys-golden.sh pv86
+
+# Generic equal-nonzero-base system client.  This uses a separate simulator
+# profile and profiler to prove the narrow relocated system fast path is taken;
+# see verif/sys/run-sysfpreloc-gate.sh.  Kept separate from verify-sys because
+# it necessarily rebuilds the define variant.
+verify-sys-fpreloc:
+	bash verif/sys/run-sysfpreloc-gate.sh
 
 # --- verify-all umbrella (verif/run-verify-all.sh) --------------------------
 # One command that runs EVERY routinely-runnable gate (verify + verify-sys +

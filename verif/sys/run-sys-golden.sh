@@ -928,7 +928,7 @@ echo "  SELF-DIFF-OK: comparator sys path engaged (sys compared: True) + EQUIVAL
 #                 OOB LDT selector error code, paged switch with a null
 #                 incoming DS) ARE QEMU-identical and are pinned by the
 #                 golden + the 7w final-GPR witnesses.
-RTL_SYS_TESTS="pseg pmode ppage pxpage psldram pintr pintr16 pfault pde pcpl pssiret pstk16 pdf ptask ptaskcpl ptaskv86 pfcpl3 pdebug pv86 ppopf pfarok pcalltss ptaskpg pjmpgate pretfoutpg pltr pretfres piopermwrap pxfer pxprobe pcgparam pcg16 pcgpg pxc04 pxc04i pxc04f pxc04e pxc04t pxc04m pxwalkd pjmpoff pdescprec pint16f psamepf pxwrap pxfrag psoccallfmem"
+RTL_SYS_TESTS="pseg pmode psysfpreloc ppage pxpage psldram pintr pintr16 pfault pde pcpl pssiret pstk16 pdf ptask ptaskcpl ptaskv86 pfcpl3 pdebug pv86 ppopf pfarok pcalltss ptaskpg pjmpgate pretfoutpg pltr pretfres piopermwrap pxfer pxprobe pcgparam pcg16 pcgpg pxc04 pxc04i pxc04f pxc04e pxc04t pxc04m pxwalkd pjmpoff pdescprec pint16f psamepf pxwrap pxfrag psoccallfmem"
 if echo " $RTL_SYS_TESTS " | grep -q " $TEST "; then
   say "7. RTL (Producer C) --system sys-diff vs golden (segmentation/paging gate)"
   TB="${TB_BIN:-$REPO/verif/tb/obj_dir/tb_ventium}"

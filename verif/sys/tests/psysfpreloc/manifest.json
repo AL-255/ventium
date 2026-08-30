@@ -1,0 +1,20 @@
+{
+  "name": "psysfpreloc",
+  "kind": "system",
+  "src": "psysfpreloc.S",
+  "linker": "psysfpreloc.ld",
+  "image": "psysfpreloc.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 1000,
+  "sys": true,
+  "transitions": [
+    "real->protected with CS/DS/SS/ES all based at 0x00080000",
+    "common-base 32-bit register/immediate/relative-control client execution"
+  ],
+  "description": "Generic protected-mode common-base client regression. The BIOS bootstrap copies a 32-bit body to physical 0x80000, enters four 4 GiB CS/DS/SS/ES segments with that shared non-zero base, then executes a register-only arithmetic loop and relative branch before isa-debug-exit. It exercises the narrowly safe VEN_SYS_FASTPATH_RELOC guard without any Quake-specific state or protected-mode data-memory operand."
+}
