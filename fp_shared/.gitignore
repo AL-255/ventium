@@ -1,0 +1,28 @@
+# Verilator build products
+/build/
+/obj_*/
+
+# Vivado project, cache, and out-of-context synthesis products
+/.Xil/
+/ooc_*/
+/vivado_synth*/
+*.dcp
+vivado*.jou
+vivado*.log
+*.backup.log
+*.rpx
+
+# Simulation traces and coverage databases
+*.vcd
+*.fst
+*.vtrace
+coverage.dat
+
+# Local editor and Python cache files
+*~
+*.bak
+*.swp
+.DS_Store
+__pycache__/
+*.pyc
+.pytest_cache/
