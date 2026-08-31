@@ -17,11 +17,19 @@ export CCACHE_DISABLE
 # host cores): it can start enough cc1plus processes to OOM the workstation.
 # A larger, bounded value is an explicit caller opt-in.
 VERILATOR_BUILD_JOBS ?= 1
+# Split oversized generated C++ functions before the host compiler sees them.
+# This keeps the peak RSS of the one permitted compiler job well below the
+# workstation limit; it changes only the simulation build partitioning.
+VERILATOR_SPLIT ?= --output-split 20000 --output-split-cfuncs 20000
+# A caller may request `make -j all ven`; those are two independent full-system
+# Verilator builds and must never overlap.  Serialise this makefile even under a
+# command-line jobserver.  This does not coordinate with or preempt FPGA tools.
+.NOTPARALLEL:
 DBGFLAGS := $(if $(DBG),--trace +define+AO486_TRACE_EIP,$(if $(FAST),+define+AO486_TRACE_EIP --threads 1,--threads 1))
 # Real MiSTer PS software (drives the verilated mgmt bus via ps_shim.cpp).
 PS_INC  := -I$(REPO)/ao486-sim/ps
 PS_SRCS := ao486-sim/ps/ps_shim.cpp ao486-sim/ps/support/x86/x86.cpp ao486-sim/ps/ide.cpp ao486-sim/ps/x87_cosim.cpp
-VFLAGS := -cc --exe --build -j $(VERILATOR_BUILD_JOBS) --savable \
+VFLAGS := -cc --exe --build -j $(VERILATOR_BUILD_JOBS) $(VERILATOR_SPLIT) --savable \
           --top-module $(TOP) \
           -O3 -CFLAGS "-O2 -std=c++17 $(PS_INC)" \
           -Wno-fatal -Wno-WIDTH -Wno-UNOPTFLAT -Wno-CASEINCOMPLETE \
