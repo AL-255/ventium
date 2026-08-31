@@ -3306,13 +3306,17 @@ module core
 `ifdef VEN_UOPCACHE
   // P0-11 predecoded µop-cache fast-path read wires (driven by u_uopcache). NSLOT
   // fast-path insns covered per 32-byte line; a denser line overflows -> those
-  // offsets read uc_bv*=0 and the spine re-predecodes (perf, not correctness).
+  // offsets read uc_bv*=0 and the spine falls back to the slow decoder (perf,
+  // never correctness). The slow decoder then seeds a walk at its known boundary.
   localparam int NSLOT = 8;
   fpd_t        uc_slotsA [NSLOT], uc_slotsB [NSLOT];
   logic        uc_bvA [IC_LINE],  uc_bvB [IC_LINE];   // byte offset is a boundary
   logic [2:0]  uc_bsA [IC_LINE],  uc_bsB [IC_LINE];   // ...maps to this slot
   logic        uc_pdvA, uc_pdvB;                      // line is predecoded-valid
   logic        uop_hit, uc_v_avail;                   // flin on boundary / V resident
+  logic [IC_IDXW-1:0] uc_rd_setA_q, uc_rd_setB_q;
+  logic [IC_WAYW-1:0] uc_rd_wayA_q, uc_rd_wayB_q;
+  logic        pd_seed_req, pd_busy;
 `endif
 
   // M2S.1: the FETCH LINEAR address. The architectural `eip` carries the
@@ -3418,7 +3422,9 @@ module core
     uc_voff  = uc_uoff + {1'b0, u_d_raw.len};
     uc_v_in_a = ({1'b0,uc_uoff} + {2'b0,u_d_raw.len}) < 6'd32;
     if (uc_v_in_a) begin
-      uc_vslot = uc_uslot + 3'd1;
+      // A seeded walk may deliberately stop after U (unknown or incomplete V).
+      // Do not infer a successor slot from U: use V's own verified byte-map entry.
+      uc_vslot = uc_bsA[uc_voff];
       v_d_raw  = uc_slotsA[uc_vslot];
     end else begin
       uc_vslot = uc_bsB[uc_voff];
@@ -3435,9 +3441,19 @@ module core
   // walked-from-line-start) is handled by the spine: stall + re-predecode (the
   // S_PIPE !uop_ready arm). uc_v_avail mirrors the old v_bytes_ok residency for
   // the chained/straddle V slot.
-  assign uop_hit    = uc_pdvA && uc_bvA[flin[4:0]];
-  assign uc_v_avail = uc_v_in_a ? (uc_uslot != 3'(NSLOT-1))
-                                : (uc_pdvB && uc_bvB[uc_voff]);
+  // The slot stores are synchronous: data observed this cycle belongs to the
+  // read address presented last cycle.  A valid bit alone is therefore unsafe
+  // after a redirect (or any line transition): stale slots can look valid and
+  // decode an unrelated instruction.  Match the registered (set,way) tags just
+  // as the IC_BRAM byte path does; a mismatch is a conservative slow-path miss.
+  assign uop_hit    = uc_pdvA &&
+                      (uc_rd_setA_q == flin[5 +: IC_IDXW]) &&
+                      (uc_rd_wayA_q == ic_hit_way(flin)) && uc_bvA[flin[4:0]];
+  assign uc_v_avail = uc_v_in_a ? (uc_bvA[uc_voff])
+                                : (uc_pdvB &&
+                                   (uc_rd_setB_q == flin_nl[5 +: IC_IDXW]) &&
+                                   (uc_rd_wayB_q == ic_hit_way(flin_nl)) &&
+                                   uc_bvB[uc_voff]);
 `ifdef VEN_UOPCACHE_CHECK
   // Structural-equivalence gate: keep the live ub/vb gather + reference decoders
   // and assert the slot read matches them for every issued flin. SIM-ONLY (this
@@ -3452,6 +3468,29 @@ module core
                        .iflags(eflags), .cycle_mode(cycle_mode), .uop(u_d_ref));
   decode v_decode_ref (.ib0(vb[0]),.ib1(vb[1]),.ib2(vb[2]),.ib3(vb[3]),.ib4(vb[4]),.ib5(vb[5]),
                        .iflags(eflags), .cycle_mode(cycle_mode), .uop(v_d_ref));
+  // This is a real equivalence assertion, not merely a second decoder.  The
+  // uop cache is allowed to decline a boundary (uop_hit=0), but an advertised
+  // boundary must never issue a different decoded instruction.  In particular,
+  // this catches the dangerous case where a line begins in the tail of an
+  // instruction from the preceding cache line and a line-origin walk happens
+  // to mark a later byte as a plausible boundary.
+  // synopsys translate_off
+  always_ff @(posedge clk) begin
+    if (rst_n && state==S_PIPE && pipe_bytes_ok && uop_hit) begin
+      // An untrusted cached decode may conservatively be non-simple, in which
+      // case fp_sys_bail routes it to the reference FSM and no cached semantics
+      // are consumed.  Every cached decode that CAN issue must be exact.
+      if (u_d.simple || u_d.is_fp)
+        assert (u_d === u_d_ref)
+          else $fatal(1, "uopcache issued-U mismatch at flin=%08x (slot=%0d map=%x cached len=%0d, reference len=%0d)",
+                      flin, uc_uslot, {uc_bvA[flin[4:0]],uc_bsA[flin[4:0]]},
+                      u_d.len, u_d_ref.len);
+      if (pipe_pair)
+        assert (v_d === v_d_ref)
+          else $fatal(1, "uopcache issued-V mismatch at flin=%08x", flin);
+    end
+  end
+  // synopsys translate_on
 `endif
 `else
   // R1 phase-3: the fast-path decoder is now the `decode` leaf module
@@ -3518,8 +3557,10 @@ module core
     end
 
     // pairing decision: V can pair only when U leads, no hazards, AND the V
-    // candidate's FULL bytes are resident in the I-cache. A V branch can pair (it
-    // fills V); a U branch never leads a pair (pairs_first=0).
+    // candidate's FULL bytes are resident in the I-cache. With the predecoded
+    // uop cache, V must additionally land on its own validated slot boundary;
+    // a sparse boundary-seeded map may legitimately contain U but not V. A V
+    // branch can pair (it fills V); a U branch never leads a pair (pairs_first=0).
     //
     // M5 (control-flow correctness): the V candidate is decoded combinationally
     // from ic_byte(), which returns whatever is in the array even for a NON-RESIDENT
@@ -3534,7 +3575,9 @@ module core
     v_bytes_ok = ic_present(flin + {28'd0,u_d.len}) &&
                  ic_present(flin + {28'd0,u_d.len} + {28'd0,v_d.len} - 32'd1);
     pipe_pair = cycle_mode && v_bytes_ok && pipe_pair_ok;
-
+`ifdef VEN_UOPCACHE
+    pipe_pair = pipe_pair && uc_v_avail;
+`endif
     // M6 Erratum 59 (MOV moffs A2/A3 fails to pair): when errata enabled, an
     // A2/A3 moffs store (the U member) followed by an instruction that uses
     // (e)AX (as a source, base/index, or destination) triggers a FALSE EAX
@@ -3548,7 +3591,7 @@ module core
       pipe_pair = 1'b0;
 
     pipe_load_req  = (state==S_PIPE) && pipe_bytes_ok && u_d.simple &&
-                     u_d.is_load && !pipe_agi && (mispred_bubbles==3'd0);
+                      u_d.is_load && !pipe_agi && (mispred_bubbles==3'd0);
     pipe_load_base = u_d.base;
 
     // U datapath (reuse the shared helpers; results are bit-identical to slow).
@@ -5057,34 +5100,53 @@ module core
 
 `ifdef VEN_UOPCACHE
   // ===========================================================================
-  // P0-11 PREDECODE-ON-FILL plumbing + the µop-cache instance.
+  // P0-11 boundary-seeded predecode plumbing + the µop-cache instance.
   //
-  // Accumulate the S_PF refill burst (word 0 from the S_PIPE-miss arm, words 1..7
-  // from S_PF) into a 256-bit line buffer; when the fill COMPLETES (ic_fill_done,
-  // word 7), pulse the predecode walker NEXT clock with the assembled line — by
-  // then word 7 has landed in pf_line_buf. The walker re-runs decode.sv over the
-  // line boundary-by-boundary (off the fast path), so this latency is part of the
-  // cold-line imiss tail. inv_en at fill_done clears the (set,way) predecode-valid
-  // so the resident-but-not-yet-predecoded window correctly reads uop_hit=0.
+  // A cache-line origin is not inherently an x86 instruction boundary: the
+  // preceding instruction may straddle into byte 0.  The former fill-origin walk
+  // decoded that tail as an instruction and could advertise a false later boundary
+  // (Quake __init_libc at 0x080985a4 is a direct witness).  Instead, after a slow
+  // S_DECODE knows the current EIP is genuine, seed the walker at flin[4:0].  The
+  // walk covers only the proven suffix within the exact 16-byte S_FETCH window;
+  // an unseeded or window-straddling byte is invalid and takes the mature slow
+  // path.  It never relies on a possibly stale registered I-cache line.
   // ===========================================================================
-  logic [IC_LINE*8-1:0] pf_line_buf;
   logic                 pd_start_r;
   logic [IC_IDXW-1:0]   pd_set_r;
   logic                 pd_way_r;
+  logic [16*8-1:0]      pd_bytes_r, pd_bytes_now;
+  logic [4:0]           pd_off_r;
+  logic [4:0]           pd_avail_r, pd_avail_now;
   logic [31:0]          pd_flags_r;
+  always_comb begin
+    pd_bytes_now = '0;
+    for (int i=0;i<16;i++) pd_bytes_now[i*8 +: 8] = ibuf[i];
+    // For a seed in the upper half of a 32-byte line the trusted S_FETCH
+    // window stops at the next line boundary: 32-off, expressed without a
+    // truncating 5'd32 literal (off is 17..31 on this arm).
+    pd_avail_now = (flin[4:0] <= 5'd16) ? 5'd16
+                                        : (5'd31 - flin[4:0] + 5'd1);
+  end
+  always_comb begin
+    pd_seed_req = cycle_mode && (state==S_DECODE) && !uop_hit && !pd_busy &&
+                  ic_present(flin);
+`ifdef VEN_IC_BRAM
+    pd_seed_req = pd_seed_req && ic_fa_avail;
+`endif
+  end
   always_ff @(posedge clk) begin
     if (!rst_n) begin
       pd_start_r <= 1'b0;
     end else begin
       pd_start_r <= 1'b0;
-      if (ic_fill_en) begin
-        pf_line_buf[{ic_fill_off,3'b000} +: 32] <= ic_fill_data;
-        if (ic_fill_done) begin
-          pd_start_r <= 1'b1;
-          pd_set_r   <= ic_fill_set;
-          pd_way_r   <= ic_fill_way;
-          pd_flags_r <= eflags;
-        end
+      if (pd_seed_req) begin
+        pd_start_r <= 1'b1;
+        pd_set_r   <= flin[5 +: IC_IDXW];
+        pd_way_r   <= ic_hit_way(flin);
+        pd_bytes_r <= pd_bytes_now;
+        pd_off_r   <= flin[4:0];
+        pd_avail_r <= pd_avail_now;
+        pd_flags_r <= eflags;
       end
     end
   end
@@ -5093,12 +5155,15 @@ module core
     .clk(clk), .rst_n(rst_n),
     .rd_setA(ic_rd_setA), .rd_wayA(ic_rd_wayA),
     .rd_slotsA(uc_slotsA), .rd_bvalidA(uc_bvA), .rd_bslotA(uc_bsA), .rd_pdvalidA(uc_pdvA),
+    .rd_setA_q(uc_rd_setA_q), .rd_wayA_q(uc_rd_wayA_q),
     .rd_setB(ic_rd_setB), .rd_wayB(ic_rd_wayB),
     .rd_slotsB(uc_slotsB), .rd_bvalidB(uc_bvB), .rd_bslotB(uc_bsB), .rd_pdvalidB(uc_pdvB),
+    .rd_setB_q(uc_rd_setB_q), .rd_wayB_q(uc_rd_wayB_q),
     .pd_start(pd_start_r), .pd_set(pd_set_r), .pd_way(pd_way_r),
-    .pd_line(pf_line_buf), .pd_flags(pd_flags_r), .pd_cycle_mode(cycle_mode),
+    .pd_bytes(pd_bytes_r), .pd_off(pd_off_r), .pd_avail(pd_avail_r),
+    .pd_flags(pd_flags_r), .pd_cycle_mode(cycle_mode),
     .inv_en(ic_fill_done), .inv_set(ic_fill_set), .inv_way(ic_fill_way),
-    .pd_busy()
+    .pd_busy(pd_busy)
   );
 `endif
 

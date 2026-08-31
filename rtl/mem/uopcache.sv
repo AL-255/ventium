@@ -65,20 +65,28 @@ module uopcache
     output logic        rd_bvalidA [IC_LINE],   // byte-offset is an insn boundary
     output logic [2:0]  rd_bslotA  [IC_LINE],   // ...and maps to this slot
     output logic        rd_pdvalidA,            // this line has been predecoded
+    output logic [IC_IDXW-1:0] rd_setA_q,       // address belonging to A's registered data
+    output logic        rd_wayA_q,
     input  logic [IC_IDXW-1:0]  rd_setB,
     input  logic        rd_wayB,
     output fpd_t        rd_slotsB [NSLOT],
     output logic        rd_bvalidB [IC_LINE],
     output logic [2:0]  rd_bslotB  [IC_LINE],
     output logic        rd_pdvalidB,
+    output logic [IC_IDXW-1:0] rd_setB_q,       // address belonging to B's registered data
+    output logic        rd_wayB_q,
 
-    // ---- predecode trigger: the spine pulses pd_start with the freshly-filled
-    // 256-bit line (assembled from the S_PF burst) + its (set,way) + the EFLAGS /
-    // cycle_mode the `decode` leaf needs (matches u_decode/v_decode inputs).
+    // ---- predecode trigger: the spine pulses pd_start from an instruction
+    // boundary it has just slow-decoded.  `pd_off` is that known boundary within
+    // the line.  A cache-line origin is NOT inherently a x86 instruction boundary:
+    // the preceding instruction may straddle into byte 0, so walking blindly from
+    // zero can manufacture a plausible but false later boundary.
     input  logic         pd_start,
     input  logic [IC_IDXW-1:0]   pd_set,
     input  logic         pd_way,
-    input  logic [IC_LINE*8-1:0] pd_line,
+    input  logic [16*8-1:0] pd_bytes,  // trusted S_FETCH window, byte 0 = pd_off
+    input  logic [$clog2(IC_LINE)-1:0] pd_off,
+    input  logic [4:0]   pd_avail,     // trusted bytes in this line (1..16)
     input  logic [31:0]  pd_flags,
     input  logic         pd_cycle_mode,
     // invalidate a (set,way)'s predecode validity (refill/SMC) — the spine pulses
@@ -90,6 +98,8 @@ module uopcache
 );
 
   localparam int FPDW = $bits(fpd_t);
+  localparam logic [5:0] IC_LINE_W = 6'(IC_LINE);
+  localparam logic [3:0] LAST_SLOT = 4'(NSLOT-1);
 
   // ---- predecoded store: NSLOT packed fpd_t per (set,way) + per-byte boundary
   // map (1 valid bit + 3-bit slot) + a per-line predecoded-valid bit.  Registered
@@ -107,12 +117,20 @@ module uopcache
   logic [IC_LINE*4-1:0]  rdbmap_a_q,  rdbmap_b_q;
   logic                  rdpdv_a_q,   rdpdv_b_q;
   always_ff @(posedge clk) begin
-    rdslots_a_q <= store_slots_a[{rd_setA, rd_wayA}];
-    rdslots_b_q <= store_slots_b[{rd_setB, rd_wayB}];
-    rdbmap_a_q  <= store_bmap_a [{rd_setA, rd_wayA}];
-    rdbmap_b_q  <= store_bmap_b [{rd_setB, rd_wayB}];
-    rdpdv_a_q   <= store_pdv[{rd_setA, rd_wayA}];
-    rdpdv_b_q   <= store_pdv[{rd_setB, rd_wayB}];
+    if (!rst_n) begin
+      rdpdv_a_q <= 1'b0; rdpdv_b_q <= 1'b0;
+      rd_setA_q <= '1;   rd_setB_q <= '1;
+      rd_wayA_q <= '1;   rd_wayB_q <= '1;
+    end else begin
+      rdslots_a_q <= store_slots_a[{rd_setA, rd_wayA}];
+      rdslots_b_q <= store_slots_b[{rd_setB, rd_wayB}];
+      rdbmap_a_q  <= store_bmap_a [{rd_setA, rd_wayA}];
+      rdbmap_b_q  <= store_bmap_b [{rd_setB, rd_wayB}];
+      rdpdv_a_q   <= store_pdv[{rd_setA, rd_wayA}];
+      rdpdv_b_q   <= store_pdv[{rd_setB, rd_wayB}];
+      rd_setA_q   <= rd_setA; rd_wayA_q <= rd_wayA;
+      rd_setB_q   <= rd_setB; rd_wayB_q <= rd_wayB;
+    end
   end
 
   // unpack the registered line into the slot/byte-map outputs.  The fast-path 8:1
@@ -135,12 +153,14 @@ module uopcache
   // ---- predecode walker (sequential; ~1 instruction/cycle) -------------------
   // Decodes the FIXED bottom 6 bytes of `residual`, records the slot + boundary,
   // then shifts `residual` right by the decoded length (the only variable op, a
-  // <=48-bit barrel shift) and advances the byte offset.  No flin-indexed wide
-  // byte select anywhere — that is what keeps the alignment MUXF off the fabric.
+  // <=48-bit barrel shift) and advances the byte offset.  It begins at pd_off,
+  // an architectural instruction boundary supplied by the slow decoder.  No
+  // flin-indexed wide byte select is reintroduced on the ISSUE path.
   typedef enum logic [1:0] { W_IDLE, W_WALK, W_WRITE } wstate_e;
   wstate_e               wst;
   logic [IC_LINE*8-1:0]  residual;     // line, shifted as bytes are consumed
   logic [5:0]            woff;         // current byte offset within the line (0..32)
+  logic [5:0]            wlimit;       // exclusive trusted-byte limit within this line
   logic [3:0]            wslot;        // current slot index
   logic [IC_IDXW-1:0]     wset; logic wway;
   logic [31:0]           wflags; logic wcyc;
@@ -157,10 +177,21 @@ module uopcache
       .iflags(wflags), .cycle_mode(wcyc), .uop(pd_uop)
   );
 
-  // decoded length, clamped to >=1 so the walk always advances (a non-simple op
-  // still has len>=1 from decode.sv's default).  This is the byte-consume amount.
+  // A decoded length is authoritative only for the fast-path subset.  `decode`
+  // intentionally leaves unsupported instructions as {simple=0,len=1}; using
+  // that placeholder to walk past (for example) CALL rel32 would poison every
+  // later boundary in the line.  Record the unsupported boundary itself so it
+  // safely falls back to S_DECODE, then stop; that slow decode re-seeds a new walk
+  // at the true post-instruction EIP.
   logic [3:0] pd_len;
+  logic       pd_known;
+  logic       pd_fits;
+  logic [5:0] pd_end;
   assign pd_len = (pd_uop.len==4'd0) ? 4'd1 : pd_uop.len;
+  assign pd_known = pd_uop.simple || pd_uop.is_fp;
+  assign pd_end = woff + {2'd0,pd_len};
+  assign pd_fits = pd_known && (pd_end <= wlimit) &&
+                   (pd_end <= IC_LINE_W);
 
   assign pd_busy = (wst != W_IDLE);
 
@@ -175,8 +206,14 @@ module uopcache
       unique case (wst)
         W_IDLE: begin
           if (pd_start) begin
-            residual   <= pd_line;
-            woff       <= 6'd0;
+            // A seeded suffix replaces the map for this (set,way).  Its read
+            // ports are synchronous, so leave the old map invalid while the new
+            // walk/write drains; otherwise a same-line redirect can consume one
+            // clock of stale slots before the replacement read returns.
+            store_pdv[{pd_set,pd_way}] <= 1'b0;
+            residual   <= {128'd0,pd_bytes};
+            woff       <= {1'b0,pd_off};
+            wlimit     <= {1'b0,pd_off} + {1'b0,pd_avail};
             wslot      <= 4'd0;
             wset       <= pd_set;  wway <= pd_way;
             wflags     <= pd_flags; wcyc <= pd_cycle_mode;
@@ -186,29 +223,22 @@ module uopcache
           end
         end
         W_WALK: begin
-          // record this instruction's slot + its start-byte boundary, then consume.
-          wbuf_slots[wslot*FPDW +: FPDW] <= pd_uop;
-          // boundary map: byte woff starts slot wslot (valid bit + slot index).
-          // ONLY record a VALID boundary when the instruction FITS ENTIRELY within
-          // this 32-byte line (woff+len <= IC_LINE). An instruction that STRADDLES the
-          // line end was decoded from `residual` whose bytes past offset 32 are ZEROS
-          // (the walker only sees one line — uopcache.sv header: straddle re-walk is
-          // follow-on), so its slot's operands/length are UNRELIABLE. Leaving its
-          // boundary INVALID makes uop_hit=0 at that offset, so the spine's !uop_hit
-          // gate (core_fastpath.svh) routes it to the slow S_FETCH path, which decodes
-          // it correctly from the real (resident) next-line bytes. Without this, a
-          // straddling insn read a zero-filled slot and issued garbage (the remaining
-          // class of the F4 board Quake cold-line fetch corruption; baseline 60 ->
-          // spine-gate 28 -> this 0 functional fails in the UOPCACHE+IC_BRAM config).
-          if (woff < IC_LINE && (woff + {2'd0, pd_len} <= 6'(IC_LINE)))
+          // Record only instructions whose entire encoding is present in the
+          // trusted S_FETCH window.  Unsupported or window-straddling operations
+          // remain invalid and are decoded by the slow FSM, which seeds again at
+          // the next architectural boundary.
+          if (pd_fits) begin
+            wbuf_slots[wslot*FPDW +: FPDW] <= pd_uop;
             wbuf_bmap[woff*4 +: 4] <= {1'b1, wslot[2:0]};
-          residual <= residual >> {pd_len, 3'b000};   // drop pd_len bytes
-          woff     <= woff + {2'd0, pd_len};
-          wslot    <= wslot + 4'd1;
-          // stop when the line is consumed or the slot capacity is reached.  A
-          // boundary at/after byte 32 belongs to the NEXT line; capacity overflow
-          // leaves the remaining bytes' map entries .valid=0 (spine re-predecodes).
-          if ((woff + {2'd0, pd_len} >= IC_LINE) || (wslot == NSLOT-1))
+            residual <= residual >> {pd_len, 3'b000}; // drop pd_len bytes
+            woff     <= woff + {2'd0, pd_len};
+            wslot    <= wslot + 4'd1;
+          end
+          // Stop on an unknown/incomplete op, when trusted bytes end, when the
+          // line ends, or when slot capacity is reached.  Invalid bytes are a
+          // conservative performance miss, never a speculative decode.
+          if (!pd_fits || (pd_end >= wlimit) ||
+              (pd_end >= IC_LINE_W) || (wslot == LAST_SLOT))
             wst <= W_WRITE;
         end
         W_WRITE: begin
