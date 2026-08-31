@@ -1938,6 +1938,23 @@ module core
   localparam int IWORDS = 4;
   logic [7:0]  ibuf [16];
   logic [2:0]  fetch_word;
+`ifndef SYNTHESIS
+  // Bounded, simulation-only provenance trace for the slow fetch path.  The
+  // L1/AXI fabric and the BRAM I-cache are intentionally separated here: when
+  // an executable stream is wrong this reports the memory word accepted by
+  // S_FETCH, the one-cycle resident-cache hand-off, and the final decode
+  // window.  It is entirely absent from synthesis and inert without
+  // +ven_fetchdbg (optionally +ven_fetchdbg_max=N).
+  logic        ven_fetchdbg_en;
+  integer      ven_fetchdbg_max;
+  integer      ven_fetchdbg_n;
+  initial begin
+    ven_fetchdbg_en  = $test$plusargs("ven_fetchdbg") != 0;
+    ven_fetchdbg_max = 64;
+    ven_fetchdbg_n   = 0;
+    void'($value$plusargs("ven_fetchdbg_max=%d", ven_fetchdbg_max));
+  end
+`endif
 `ifdef VEN_UOPCACHE
   // One-shot token for a cycle-mode uop-cache miss. It lets S_FETCH reuse the
   // exact registered I-cache window that proved the miss's bytes resident,
@@ -3952,6 +3969,41 @@ module core
 `endif
 `else
   assign sfetch_fast = 1'b0;
+`endif
+
+`ifndef SYNTHESIS
+  always_ff @(posedge clk) begin
+    if (!rst_n) begin
+      ven_fetchdbg_n <= 0;
+    end else if (ven_fetchdbg_en && (ven_fetchdbg_n < ven_fetchdbg_max)) begin
+      if ((state == S_FETCH) && mem_ack) begin
+        $display("[FETCHDBG:BUS] cn=%0d eip=%08x flin=%08x word=%0d addr=%08x data=%08x",
+                 cn, eip, flin, fetch_word, mem_addr, mem_rdata);
+        ven_fetchdbg_n <= ven_fetchdbg_n + 1;
+      end else if ((state == S_FETCH)
+                   && (sfetch_fast || sfetch_uop_fast || sfetch_resident_fast)) begin
+        $display("[FETCHDBG:CACHE] cn=%0d eip=%08x flin=%08x bytes=%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x",
+                 cn, eip, flin,
+                 ic_byte(flin + 32'd0),  ic_byte(flin + 32'd1),
+                 ic_byte(flin + 32'd2),  ic_byte(flin + 32'd3),
+                 ic_byte(flin + 32'd4),  ic_byte(flin + 32'd5),
+                 ic_byte(flin + 32'd6),  ic_byte(flin + 32'd7),
+                 ic_byte(flin + 32'd8),  ic_byte(flin + 32'd9),
+                 ic_byte(flin + 32'd10), ic_byte(flin + 32'd11),
+                 ic_byte(flin + 32'd12), ic_byte(flin + 32'd13),
+                 ic_byte(flin + 32'd14), ic_byte(flin + 32'd15));
+        ven_fetchdbg_n <= ven_fetchdbg_n + 1;
+      end else if (state == S_DECODE) begin
+        $display("[FETCHDBG:DECODE] cn=%0d eip=%08x flin=%08x bytes=%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x",
+                 cn, eip, flin,
+                 ibuf[0],  ibuf[1],  ibuf[2],  ibuf[3],
+                 ibuf[4],  ibuf[5],  ibuf[6],  ibuf[7],
+                 ibuf[8],  ibuf[9],  ibuf[10], ibuf[11],
+                 ibuf[12], ibuf[13], ibuf[14], ibuf[15]);
+        ven_fetchdbg_n <= ven_fetchdbg_n + 1;
+      end
+    end
+  end
 `endif
 
   // icache LRU update on a confirmed HIT now lives in the icache module: the spine
@@ -9651,6 +9703,10 @@ module core
   localparam int PP_NSTATE = int'(S_CG_PRD) + 1;
   localparam int PP_NBAIL  = 14;
   localparam int PP_NSBAIL = 4;
+  // Attribute V-slot availability only after the U side has reached the exact
+  // ISSUE arm below.  This keeps ordinary front-end stalls out of the pairing
+  // diagnosis: each count is one otherwise-retiring U instruction.
+  localparam int PP_NPAIR  = 9;
   // The uop-cache fallback starts one S_FETCH transaction, whose subsequent
   // clocks live in the FSM-state counters rather than the one-clock bail bucket.
   // Split the entry cause so profile data can distinguish a walker/validity
@@ -9666,6 +9722,7 @@ module core
   longint pp_mem_wait [PP_NSTATE];
   longint pp_mem_ack  [PP_NSTATE];
   longint pp_bail  [PP_NBAIL];
+  longint pp_pair  [PP_NPAIR];
   longint pp_uopmiss [PP_NUOPMISS];
   // A boundary-unavailable miss can be a dense-line overflow, or an unusual
   // branch target.  Its byte-offset distribution determines whether a small
@@ -9727,6 +9784,21 @@ module core
     endcase
   endfunction
 
+  function automatic string pp_pair_name(input int i);
+    case (i)
+      0: pp_pair_name = "!v_bytes_ok       (V instruction bytes unavailable)";
+      1: pp_pair_name = "!pipe_pair_ok      (P5 U/V pairing rule/hazard)";
+      2: pp_pair_name = "irq_shadow         (one-instruction interrupt shadow)";
+      3: pp_pair_name = "dbg_pair_block     (single-step/breakpoint guard)";
+      4: pp_pair_name = "!uc_v_avail       (V boundary absent from uop cache)";
+      5: pp_pair_name = "16-bit EIP wrap    (safe single-issue boundary)";
+      6: pp_pair_name = "Err59 moffs EAX    (documented false dependency)";
+      7: pp_pair_name = "!cycle_mode        (functional-mode U issue)";
+      8: pp_pair_name = "PAIRED             (U + V retired)";
+      default: pp_pair_name = "?";
+    endcase
+  endfunction
+
   always_ff @(posedge clk) begin
     if (!rst_n) begin
       for (int i=0;i<PP_NSTATE;i++) pp_state[i] <= 64'd0;
@@ -9735,6 +9807,7 @@ module core
         pp_mem_ack[i]  <= 64'd0;
       end
       for (int i=0;i<PP_NBAIL;i++)  pp_bail[i]  <= 64'd0;
+      for (int i=0;i<PP_NPAIR;i++)  pp_pair[i]  <= 64'd0;
       for (int i=0;i<PP_NUOPMISS;i++) pp_uopmiss[i] <= 64'd0;
       for (int i=0;i<IC_LINE;i++) pp_uopmiss_off[i] <= 64'd0;
       pp_uop_sfetch <= 64'd0;
@@ -9829,6 +9902,26 @@ module core
         else if (mispred_bubbles != 3'd0)                      b = 10;
         else if (pipe_agi)                                     b = 11;
         pp_bail[b] <= pp_bail[b] + 64'd1;
+        // V attribution applies only to an otherwise successful U-side issue.
+        // Preserve the exact `pipe_pair` predicate order (including the final
+        // Err59 override) so these buckets add to pp_bail[12] and cannot make a
+        // lack of predecode coverage look like a generic P5 pairing restriction.
+        if (b == 12) begin
+          int p;
+          p = 8;                                                // PAIRED
+          if (!cycle_mode)                                      p = 7;
+          else if (!v_bytes_ok)                                 p = 0;
+          else if (!pipe_pair_ok)                               p = 1;
+          else if (irq_shadow)                                  p = 2;
+          else if (dbg_pair_block)                              p = 3;
+`ifdef VEN_UOPCACHE
+          else if (!uc_v_avail)                                 p = 4;
+`endif
+          else if (u_d.w16 && (({1'b0,eip[15:0]} + {13'd0,u_d.len}) > 17'h0FFFF))
+                                                               p = 5;
+          else if (errata_en[ERR_MOFFS] && moffs_falsedep)      p = 6;
+          pp_pair[p] <= pp_pair[p] + 64'd1;
+        end
         if (b == 3) begin
           // Keep this order aligned with `!uop_hit || !cycle_mode` above.
           // `uop_hit` itself gates exec_issue_ok first, then line predecode
@@ -9945,6 +10038,13 @@ module core
         $display("    [%2d] %10d  %3d.%01d%%  %s", i, pp_bail[i],
                  (pp_bail[i]*1000)/pp_cycles/10, ((pp_bail[i]*1000)/pp_cycles)%10,
                  pp_bail_name(i));
+    if (pp_bail[12] != 0) begin
+      $display("");
+      $display("  -- V-slot result for U-side ISSUE clocks (sums to ISSUE) --");
+      for (int i=0;i<PP_NPAIR;i++)
+        if (pp_pair[i] != 0)
+          $display("    %10d  %s", pp_pair[i], pp_pair_name(i));
+    end
     if (pp_bail[3] != 0) begin
       $display("");
       $display("  -- uop-cache fallback cause (sums to bucket 3) --");
