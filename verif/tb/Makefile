@@ -38,7 +38,10 @@ CPP_SRCS := $(TB_DIR)/tb_main.cpp $(TB_DIR)/memmodel.cpp $(TB_DIR)/dpi_retire.cp
 # profiles.  Keep the actual binary separately configurable, so a caller can
 # select a tool version without bypassing the OOM guard.
 VERILATOR_BIN ?= verilator
-VERILATOR := $(VENTIUM_ROOT)/tools/verilator_serial.sh
+# Command-line variables are inherited by recursive make through MAKEFLAGS.
+# `override` is intentional: VERILATOR=verilator used to bypass the cross-build
+# lock precisely when a top-level gate was asked to rebuild.
+override VERILATOR := $(VENTIUM_ROOT)/tools/verilator_serial.sh
 export VERILATOR_BIN
 TOP        = ventium_top
 EXE        = tb_ventium
@@ -102,12 +105,14 @@ VL_MAKEFLAGS := -MAKEFLAGS OPT_FAST=$(VL_OPT_FAST) -MAKEFLAGS OPT=$(VL_OPT_MARCH
 # consume several GiB, so the safe default is one compiler job.  In particular,
 # never use Verilator's `-j 0` here: it maps to every host core and has OOM-killed
 # ordinary development hosts.  A deliberately provisioned CI host may opt into a
-# bounded higher value explicitly (for example, `make VL_J=4 ...`).  VL_SPLIT:
-# optional --output-split flags to chunk Verilator's generated C++ so each g++
-# invocation uses far less memory (set VL_SPLIT="--output-split 20000
-# --output-split-cfuncs 20000" for big builds).
-VL_J     ?= 1
-VL_SPLIT ?=
+# bounded higher value explicitly only with VENTIUM_ALLOW_PARALLEL_VERILATOR=1.
+# VL_SPLIT chunks generated C++ so each g++ invocation uses much less memory.
+ifeq ($(VENTIUM_ALLOW_PARALLEL_VERILATOR),1)
+VL_J ?= 1
+else
+override VL_J := 1
+endif
+VL_SPLIT ?= --output-split 20000 --output-split-cfuncs 20000
 # Do not let `make -j target_a target_b` launch multiple full-core Verilator
 # trees.  Each tree may hold a multi-GiB generated C++ translation unit while
 # compiling, so target-level parallelism defeats the bounded `VL_J` setting.

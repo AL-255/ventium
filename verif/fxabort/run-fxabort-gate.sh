@@ -18,6 +18,7 @@
 # Run from the repo root.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+. "$ROOT/verif/lib/verilator_env.sh"
 VL_J="${VL_J:-1}"
 OBJ="$(mktemp -d)"
 trap 'rm -rf "$OBJ"' EXIT

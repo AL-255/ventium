@@ -14,16 +14,23 @@
 #   make clean  -- remove obj/
 # iverilog 12 here does not parse SVA `property`; Verilator is used (it does).
 # ============================================================================
-VERILATOR ?= verilator
-VL_J      ?= 1
-CCACHE_DISABLE ?= 1
-export CCACHE_DISABLE
 HERE      := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 OBJ       := $(HERE)/obj
 VTB       := $(OBJ)/vtb
 # M5B-int: biu_p5 now lives in the canonical RTL home (rtl/bus/biu_p5.sv); this
 # standalone gate builds it DIRECTLY from there (SVA in tb_biu_p5.sv stay active).
 ROOT      := $(abspath $(HERE)/../..)
+VERILATOR_BIN ?= verilator
+# A command-line VERILATOR assignment propagates via MAKEFLAGS; never let it
+# bypass the repository-wide lock in this standalone build.
+override VERILATOR := $(ROOT)/tools/verilator_serial.sh
+ifeq ($(VENTIUM_ALLOW_PARALLEL_VERILATOR),1)
+VL_J ?= 1
+else
+override VL_J := 1
+endif
+CCACHE_DISABLE ?= 1
+export CCACHE_DISABLE VERILATOR_BIN
 DUT       := $(ROOT)/rtl/bus/biu_p5.sv
 TB        := $(HERE)/tb_biu_p5.sv
 

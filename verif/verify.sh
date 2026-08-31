@@ -86,6 +86,7 @@ WORKER="$ROOT/verif/lib/verify_worker.sh"
 
 export PYTHON="${PYTHON:-python3}"
 export CC="${CC:-gcc}"
+export VERILATOR_BIN="${VERILATOR_BIN:-verilator}"
 export CFLAGS_BASE="-m32 -march=pentium -nostdlib -static -Wl,--build-id=none"
 export M5_TOL_PCT="${M5_TOL_PCT:-10}"
 export PORTBASE="${PORTBASE:-26000}"
@@ -141,7 +142,11 @@ say "build RTL testbench ONCE (verif/tb)"
 if [ "$TB_BIN_EXPLICIT" = 1 ]; then
     info "TB_BIN supplied by caller; skipping canonical rebuild"
 else
-    make -C "$TB_DIR" > "$WORKDIR/tb_build.log" 2>&1 || {
+    # Pass the guard explicitly as defense in depth against a parent make
+    # command-line override inherited through MAKEFLAGS.  The wrapper itself
+    # also converts any accidental -j 0 into -j 1.
+    make -C "$TB_DIR" VERILATOR="$ROOT/tools/verilator_serial.sh" VL_J=1 \
+        > "$WORKDIR/tb_build.log" 2>&1 || {
         tail -12 "$WORKDIR/tb_build.log" | sed 's/^/    /'
         die "RTL testbench build failed (see $WORKDIR/tb_build.log)"
     }

@@ -11,7 +11,7 @@ trap 'rm -rf "$OBJ"' EXIT
 
 # NO blanket -Wno-WIDTH (keep the remap-truncation class visible). UNOPTFLAT would
 # flag a CDC comb loop — leave it ON so a regression in the afifo is caught at build.
-verilator -j "${VL_J:-1}" --binary -sv --assert +define+VEN_AXI_CDC \
+"$ROOT/tools/verilator_serial.sh" -j "${VL_J:-1}" --binary -sv --assert +define+VEN_AXI_CDC \
     -Wno-UNUSED -Wno-DECLFILENAME -Wno-INITIALDLY -Wno-IMPLICITSTATIC \
     --top-module tb_l1axi_cdc -Mdir "$OBJ" -o tb_l1axi_cdc \
     "$ROOT/rtl/mem/ven_cdc_afifo.sv" "$ROOT/rtl/mem/ven_reset_sync.sv" \

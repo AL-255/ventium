@@ -22,7 +22,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 OBJ="$(mktemp -d)"; trap 'rm -rf "$OBJ"' EXIT
 
 build_run() {   # $1 = extra defines, $2 = subdir
-  verilator -j "${VL_J:-1}" --binary --timing -sv --assert -Wno-UNUSED -Wno-DECLFILENAME \
+  "$ROOT/tools/verilator_serial.sh" -j "${VL_J:-1}" --binary --timing -sv --assert -Wno-UNUSED -Wno-DECLFILENAME \
       -Wno-IMPLICITSTATIC $1 --top-module tb_l2_inv -Mdir "$OBJ/$2" -o tb \
       "$ROOT/verif/l1/tb_l2_inv.sv" > "$OBJ/$2.log" 2>&1 \
       || { echo "L2INV-GATE-FAIL (build $2)"; tail -20 "$OBJ/$2.log"; exit 1; }

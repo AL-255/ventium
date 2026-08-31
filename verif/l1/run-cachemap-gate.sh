@@ -11,7 +11,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 OBJ="$(mktemp -d)"
 trap 'rm -rf "$OBJ"' EXIT
 
-verilator -j "${VL_J:-1}" --binary --assert -sv -Wno-WIDTH -Wno-UNUSED -Wno-DECLFILENAME \
+"$ROOT/tools/verilator_serial.sh" -j "${VL_J:-1}" --binary --assert -sv -Wno-WIDTH -Wno-UNUSED -Wno-DECLFILENAME \
     -Wno-INITIALDLY -Wno-IMPLICITSTATIC -Wno-TIMESCALEMOD --top-module tb_cachemap -Mdir "$OBJ" -o tb_cachemap \
     "$ROOT/rtl/northbridge/ven_cachemap.sv" "$ROOT/verif/l1/tb_cachemap.sv" > "$OBJ/build.log" 2>&1 \
     || { echo "CACHEMAP-GATE-FAIL (build)"; tail -40 "$OBJ/build.log"; exit 1; }

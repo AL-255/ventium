@@ -11,7 +11,8 @@ EXE     := ao486sim
 # verification and shared-FP builds; choose a different executable through
 # VERILATOR_BIN rather than bypassing the guard.
 VERILATOR_BIN ?= verilator
-VERILATOR := $(REPO)/tools/verilator_serial.sh
+# Recursive make command-line variables must not bypass the common guard.
+override VERILATOR := $(REPO)/tools/verilator_serial.sh
 export VERILATOR_BIN
 # This harness is frequently built from external/scratch volumes.  Do not let
 # an unavailable shared ccache fail the generated-C++ build; callers can opt
@@ -21,7 +22,11 @@ export CCACHE_DISABLE
 # Full-PC generated C++ is memory-heavy.  Do not use Verilator's `-j 0` (all
 # host cores): it can start enough cc1plus processes to OOM the workstation.
 # A larger, bounded value is an explicit caller opt-in.
+ifeq ($(VENTIUM_ALLOW_PARALLEL_VERILATOR),1)
 VERILATOR_BUILD_JOBS ?= 1
+else
+override VERILATOR_BUILD_JOBS := 1
+endif
 # Split oversized generated C++ functions before the host compiler sees them.
 # This keeps the peak RSS of the one permitted compiler job well below the
 # workstation limit; it changes only the simulation build partitioning.

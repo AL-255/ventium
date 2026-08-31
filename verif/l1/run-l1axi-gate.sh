@@ -7,6 +7,7 @@
 # x86-phys -> DDR-carveout remap end-to-end). Run from the repo root.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+. "$ROOT/verif/lib/verilator_env.sh"
 OBJ="$(mktemp -d)"
 trap 'rm -rf "$OBJ"' EXIT
 

@@ -35,7 +35,7 @@ run_mode() {  # <mode> <label>
   # testbench's own recovery checks can run. The SVA remains live in every other
   # build (and in the bus-sva gate); here the injected mismatch is the stimulus, not a
   # bug, and what is being graded is the RECOVERY.
-  verilator -j "${VL_J:-1}" --binary -sv --no-assert -Wno-UNUSED -Wno-DECLFILENAME -Wno-INITIALDLY \
+  "$ROOT/tools/verilator_serial.sh" -j "${VL_J:-1}" --binary -sv --no-assert -Wno-UNUSED -Wno-DECLFILENAME -Wno-INITIALDLY \
       -Wno-WIDTH -Wno-IMPLICITSTATIC --top-module tb_l1axi_rlast \
       -GTB_MODE="$mode" -Mdir "$dir" -o tb_l1axi_rlast \
       "$ROOT/rtl/mem/ven_l1d.sv" "$ROOT/rtl/mem/ven_axi_master.sv" \

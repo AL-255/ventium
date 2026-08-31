@@ -13,7 +13,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 OBJ="$(mktemp -d)"
 trap 'rm -rf "$OBJ"' EXIT
 
-verilator -j "${VL_J:-1}" --binary -sv --assert +define+AXI_BFM_MON \
+"$ROOT/tools/verilator_serial.sh" -j "${VL_J:-1}" --binary -sv --assert +define+AXI_BFM_MON \
     -Wno-UNUSED -Wno-DECLFILENAME -Wno-INITIALDLY -Wno-IMPLICITSTATIC \
     --top-module tb_l1axi_route -Mdir "$OBJ" -o tb_l1axi_route \
     "$ROOT/rtl/mem/ven_cdc_afifo.sv" "$ROOT/rtl/mem/ven_reset_sync.sv" \

@@ -9,7 +9,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 OBJ="$(mktemp -d)"
 trap 'rm -rf "$OBJ"' EXIT
 
-verilator -j "${VL_J:-1}" --binary --assert -sv -Wno-WIDTH -Wno-UNUSED -Wno-DECLFILENAME \
+"$ROOT/tools/verilator_serial.sh" -j "${VL_J:-1}" --binary --assert -sv -Wno-WIDTH -Wno-UNUSED -Wno-DECLFILENAME \
     -Wno-INITIALDLY -Wno-IMPLICITSTATIC -Wno-TIMESCALEMOD -Wno-CASEINCOMPLETE -Wno-UNOPTFLAT \
     --top-module tb_icache_snoop -Mdir "$OBJ" -o tb_icache_snoop \
     "$ROOT/rtl/mem/icache.sv" "$ROOT/verif/l1/tb_icache_snoop.sv" > "$OBJ/build.log" 2>&1 \

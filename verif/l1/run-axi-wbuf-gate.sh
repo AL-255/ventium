@@ -9,7 +9,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 OBJ="$(mktemp -d)"
 trap 'rm -rf "$OBJ"' EXIT
 
-verilator -j "${VL_J:-1}" --binary -sv --assert -Wno-UNUSED -Wno-DECLFILENAME -Wno-INITIALDLY \
+"$ROOT/tools/verilator_serial.sh" -j "${VL_J:-1}" --binary -sv --assert -Wno-UNUSED -Wno-DECLFILENAME -Wno-INITIALDLY \
     -Wno-IMPLICITSTATIC --top-module tb_axi_wbuf -Mdir "$OBJ" -o tb_axi_wbuf \
     "$ROOT/rtl/mem/ven_axi_master.sv" "$ROOT/verif/l1/tb_axi_wbuf.sv" \
     > "$OBJ/build.log" 2>&1 \

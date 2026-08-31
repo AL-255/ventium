@@ -4,6 +4,7 @@
 # execution.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+. "$ROOT/verif/lib/verilator_env.sh"
 OBJ="$(mktemp -d)"; trap 'rm -rf "$OBJ"' EXIT
 
 # Keep this self-contained gate safe to invoke from `make verify` on shared

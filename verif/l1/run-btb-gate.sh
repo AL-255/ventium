@@ -6,7 +6,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 OBJ="$(mktemp -d)"; trap 'rm -rf "$OBJ"' EXIT
-verilator -j "${VL_J:-1}" --binary --assert -sv -Wno-WIDTH -Wno-UNUSED -Wno-DECLFILENAME \
+"$ROOT/tools/verilator_serial.sh" -j "${VL_J:-1}" --binary --assert -sv -Wno-WIDTH -Wno-UNUSED -Wno-DECLFILENAME \
     -Wno-INITIALDLY -Wno-IMPLICITSTATIC -Wno-TIMESCALEMOD --top-module tb_btb -Mdir "$OBJ" -o tb_btb \
     "$ROOT/rtl/core/bpred_btb.sv" "$ROOT/verif/l1/tb_btb.sv" > "$OBJ/build.log" 2>&1 \
     || { echo "BTB-GATE-FAIL (build)"; tail -30 "$OBJ/build.log"; exit 1; }

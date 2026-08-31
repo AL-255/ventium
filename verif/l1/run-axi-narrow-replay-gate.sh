@@ -7,7 +7,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 OBJ="$(mktemp -d)"
 trap 'rm -rf "$OBJ"' EXIT
 
-CCACHE_DISABLE=1 verilator -j "${VL_J:-1}" --binary -sv --assert -Wno-UNUSED -Wno-DECLFILENAME \
+CCACHE_DISABLE=1 "$ROOT/tools/verilator_serial.sh" -j "${VL_J:-1}" --binary -sv --assert -Wno-UNUSED -Wno-DECLFILENAME \
     --top-module tb_axi_narrow_replay -Mdir "$OBJ/obj" -o tb_axi_narrow_replay \
     "$ROOT/rtl/mem/ven_axi_master.sv" \
     "$ROOT/verif/l1/tb_axi_narrow_replay.sv" \

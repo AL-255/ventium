@@ -33,7 +33,7 @@ VFLAGS="--binary -sv --assert -Wno-fatal -Wno-UNUSED -Wno-DECLFILENAME -Wno-IMPL
         -Wno-WIDTH -Wno-UNOPTFLAT -Wno-BLKSEQ"
 
 run() {  # $1 = defines, $2 = dir
-  verilator -j "${VL_J:-1}" $VFLAGS $1 --top-module tb_ic_alias -Mdir "$OBJ/$2" -o tb \
+  "$ROOT/tools/verilator_serial.sh" -j "${VL_J:-1}" $VFLAGS $1 --top-module tb_ic_alias -Mdir "$OBJ/$2" -o tb \
       "$ROOT/rtl/mem/icache.sv" "$ROOT/verif/l1/tb_ic_alias.sv" > "$OBJ/$2.log" 2>&1 \
       || { echo "ICALIAS-GATE-FAIL (build $2)"; tail -20 "$OBJ/$2.log"; exit 1; }
   "$OBJ/$2/tb" 2>&1 | grep -vE "^- |Verilator:"
