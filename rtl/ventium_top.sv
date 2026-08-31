@@ -316,6 +316,20 @@ module ventium_top
 `ifdef VEN_IC_NARROWB
   VEN_IC_NARROWB_IS_RETIRED__REMOVE_THIS_DEFINE u_ven_ic_narrowb_rejected ();
 `endif
+`ifdef VEN_SFETCH_RESIDENT
+  // The broad resident-window hand-off is meaningful only on the tagged,
+  // registered uop-cache/BRAM frontend.  Reject partial profiles rather than
+  // silently degrading them into a different fetch policy.
+`ifndef VEN_UOPCACHE
+  VEN_SFETCH_RESIDENT_REQUIRES_VEN_UOPCACHE u_ven_sfetch_resident_no_uop ();
+`endif
+`ifndef VEN_UOP_SFETCH
+  VEN_SFETCH_RESIDENT_REQUIRES_VEN_UOP_SFETCH u_ven_sfetch_resident_no_uop_sfetch ();
+`endif
+`ifndef VEN_IC_BRAM
+  VEN_SFETCH_RESIDENT_REQUIRES_VEN_IC_BRAM u_ven_sfetch_resident_no_ic_bram ();
+`endif
+`endif
 
   // ---------------------------------------------------------------------------
   // The M1 integer core: fetch -> decode -> execute -> mem -> retire, one insn

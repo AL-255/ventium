@@ -15,11 +15,14 @@
           // policy for subsequent slow-path instructions.
           sfetch_uop_q <= 1'b0;
 `endif
+`ifdef VEN_SFETCH_RESIDENT
+          sfetch_resident_q <= 1'b0;
+`endif
           // task #54: the whole 16-byte window is already in the I-cache -> take it
           // in ONE clock instead of four bus reads. sfetch_fast (core.sv) is the
           // residency predicate; the bus driver suppresses mem_req on the same
           // condition so this issues no transaction at all.
-          if (sfetch_fast || sfetch_uop_fast) begin
+          if (sfetch_fast || sfetch_uop_fast || sfetch_resident_fast) begin
             for (int i = 0; i < IWORDS*4; i++) ibuf[i] <= ic_byte(flin + 32'(i));
             fetch_word <= 3'd0;
             state      <= S_DECODE;

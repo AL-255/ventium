@@ -121,6 +121,11 @@ Quick reference
      - off — calibrated slow fetch
      - Full-P5-profile, cycle-mode uop-boundary-miss hand-off. It safely
        reuses the tagged BRAM window instead of rereading it over the bus.
+   * - ``VEN_SFETCH_RESIDENT``
+     - boolean define (requires ``VEN_UOPCACHE`` + ``VEN_UOP_SFETCH`` + ``VEN_IC_BRAM``)
+     - off — calibrated slow fetch
+     - Extends the identical checked hand-off to every eligible S_PIPE slow-path
+       transition, including shared-x87 and ordinary slow decode.
    * - ``VEN_UOPCACHE_CHECK``
      - boolean define
      - off
@@ -970,6 +975,22 @@ is disabled in functional mode, preserving the reference fetch timing used by
 the functional differential gate. It is enabled in every checked-in full-P5
 implementation profile; it is neither a cache-capacity reduction nor a
 guest/workload-specific shortcut.
+
+``VEN_SFETCH_RESIDENT``
+------------------------
+
+The production profile extends ``VEN_UOP_SFETCH``'s exact same checked
+mechanism to the other S_PIPE transitions that enter ``S_FETCH``: the
+area-shared x87 command hand-off and the generic decoded-slow-path hand-off.
+Those transitions occur only after ``pipe_bytes_ok`` and ``ic_fetch_ready``;
+the one-shot token is nevertheless insufficient on its own. ``S_FETCH``
+independently repeats the complete 16-byte, set-and-way, collision-free BRAM
+test before it suppresses the bus request. A failed recheck consumes the token
+and performs the mature four-word fetch unchanged.
+
+The extension remains cycle-mode-only and does not change the FPU, decoder,
+uop-cache storage, cache geometry, or guest-visible policy. It is deliberately
+one full-profile flag rather than an instruction or Quake address whitelist.
 
 ``VEN_UOPCACHE_CHECK``
 ----------------------
@@ -2303,15 +2324,15 @@ the full production stack::
    SYNTHESIS  VTM_NO_DPI
    VEN_SRT_ITER  VEN_IDIV_ITER  VEN_BCD_ITER
    VEN_FP_PIPE  VEN_FP_PIPE2  VEN_BTB_PIPE
-   VEN_IC_BRAM  VEN_UOPCACHE  VEN_UOP_SFETCH
+   VEN_IC_BRAM  VEN_UOPCACHE  VEN_UOP_SFETCH  VEN_SFETCH_RESIDENT
    VEN_L1_AXI  VEN_KV260_SOC
    VEN_FE_PIPE          (appended by the FE_PIPE=1 environment knob)
 
 Reading it as layers: the two housekeeping tokens strip the DPI channel and
 the sim-only assertions; the three iterative engines and the two-stage FP
 commit pipeline are the bit-exact Fmax substrate; ``VEN_BTB_PIPE``,
-``VEN_IC_BRAM``, ``VEN_UOPCACHE`` and ``VEN_UOP_SFETCH`` are the front-end
-congestion stack;
+``VEN_IC_BRAM``, ``VEN_UOPCACHE``, ``VEN_UOP_SFETCH`` and
+``VEN_SFETCH_RESIDENT`` are the front-end congestion stack;
 ``VEN_L1_AXI`` + ``VEN_KV260_SOC`` are the platform layer
 (real bus, PS seams, DDR-carveout remap); and ``VEN_FE_PIPE`` is the final cut
 that lets the full SoC route. Three footnotes from the setters data:

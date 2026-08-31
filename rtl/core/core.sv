@@ -1941,6 +1941,12 @@ module core
   // rather than launching the normal four-word slow fetch.
   logic        sfetch_uop_q;
 `endif
+`ifdef VEN_SFETCH_RESIDENT
+  // The full-profile extension uses the same endpoint-recheck for every
+  // S_PIPE-to-S_FETCH producer.  It is a token only: no byte data or predicted
+  // tag crosses the state boundary.
+  logic        sfetch_resident_q;
+`endif
 
   // ===========================================================================
   // M4 dual-issue fast-path pipeline state (docs/m4-pipeline-spec.md §"How to
@@ -3829,7 +3835,7 @@ module core
   // for the longer (16-byte) slow-decoder window. It is used solely by the
   // uop-overflow hand-off below; ordinary slow fetches retain P5-calibrated bus
   // timing.
-  logic sfetch_uop_fast;
+  logic sfetch_uop_fast, sfetch_resident_fast;
 `ifdef VEN_UOPCACHE
 `ifdef VEN_IC_BRAM
 `ifdef VEN_UOP_SFETCH
@@ -3852,14 +3858,29 @@ module core
                        && exec_issue_ok
                        && ic_buffered(flin)
                        && ic_buffered(flin + 32'(IWORDS*4 - 1));
+`ifdef VEN_SFETCH_RESIDENT
+  // These tokens are set only by the three S_PIPE branches below the
+  // pipe_bytes_ok/ic_fetch_ready gates.  Recheck the complete slow-decoder
+  // window here; any changed way, collision, flush, or straddle ambiguity
+  // immediately returns to the original bus fetch.
+  assign sfetch_resident_fast = sfetch_resident_q && (state == S_FETCH)
+                            && (fetch_word == 3'd0) && exec_issue_ok
+                            && ic_buffered(flin)
+                            && ic_buffered(flin + 32'(IWORDS*4 - 1));
 `else
-  assign sfetch_uop_fast = 1'b0;
+  assign sfetch_resident_fast = 1'b0;
 `endif
 `else
   assign sfetch_uop_fast = 1'b0;
+  assign sfetch_resident_fast = 1'b0;
 `endif
 `else
   assign sfetch_uop_fast = 1'b0;
+  assign sfetch_resident_fast = 1'b0;
+`endif
+`else
+  assign sfetch_uop_fast = 1'b0;
+  assign sfetch_resident_fast = 1'b0;
 `endif
 
   // ---- task #54: SERVE THE SLOW PATH'S FETCH FROM THE I-CACHE ---------------
@@ -4828,6 +4849,9 @@ module core
       fetch_word<=3'd0; retire_valid<=1'b0; step<=4'd0;
 `ifdef VEN_UOPCACHE
       sfetch_uop_q<=1'b0;
+`endif
+`ifdef VEN_SFETCH_RESIDENT
+      sfetch_resident_q<=1'b0;
 `endif
       // x87 reset = FNINIT state (control 0x037f, status 0, TOP 0, all empty) now
       // lives in u_fpu_state's own rst_n arm (rtl/fpu/fpu_top.sv) — ftop/fctrl/
@@ -9626,6 +9650,7 @@ module core
   // tail sidecar is sufficient; aggregate miss counts alone cannot answer that.
   longint pp_uopmiss_off [IC_LINE];
   longint pp_uop_sfetch;  // successful registered-window hand-offs
+  longint pp_resident_sfetch; // S_PIPE slow-path hand-offs accepted from BRAM
   // Bucket 9 (`fp_sys_bail`) is deliberately broad.  Split its actual hand-off
   // cause so an implementation change targets a demonstrated eligibility
   // limit, rather than blindly widening the system fast path.
@@ -9665,6 +9690,7 @@ module core
       for (int i=0;i<PP_NUOPMISS;i++) pp_uopmiss[i] <= 64'd0;
       for (int i=0;i<IC_LINE;i++) pp_uopmiss_off[i] <= 64'd0;
       pp_uop_sfetch <= 64'd0;
+      pp_resident_sfetch <= 64'd0;
       for (int i=0;i<PP_NSBAIL;i++) pp_sys_bail[i] <= 64'd0;
       pp_cycles <= 64'd0; pp_ret1 <= 64'd0; pp_ret2 <= 64'd0; pp_divert <= 64'd0; pp_shadow <= 64'd0; pp_shret <= 64'd0;
     end else begin
@@ -9680,6 +9706,7 @@ module core
       if (retire_valid)  pp_ret1 <= pp_ret1 + 64'd1;
       if (retire2_valid) pp_ret2 <= pp_ret2 + 64'd1;
       if (sfetch_uop_fast) pp_uop_sfetch <= pp_uop_sfetch + 64'd1;
+      if (sfetch_resident_fast) pp_resident_sfetch <= pp_resident_sfetch + 64'd1;
 
       // The S_PIPE chain, in the spine's exact priority order. Mirrors
       // core_gpr_wb.svh's guard chain one-for-one -- if that chain is edited and
@@ -9800,6 +9827,8 @@ module core
         if (pp_uopmiss_off[i] != 0)
           $display("    offset %2d                         %10d", i, pp_uopmiss_off[i]);
     end
+    if (pp_resident_sfetch != 0)
+      $display("  resident S_PIPE slow-fetch hand-offs  %10d", pp_resident_sfetch);
     if (pp_bail[9] != 0) begin
       $display("");
       $display("  -- fp_sys_bail hand-off cause (sums to bucket 9) --");
@@ -9876,7 +9905,7 @@ module core
       // line nor a predecoded slot. These trip if a future change reintroduces
       // a consumption path around the gate (the RSM leak: a cached SMRAM line
       // retiring in the cycle after SMM closes).
-      if (exec_flush_all && (sfetch_fast || sfetch_uop_fast))
+      if (exec_flush_all && (sfetch_fast || sfetch_uop_fast || sfetch_resident_fast))
         $error("FETCH/FLUSH: the fast fetch window is serving while exec_flush_all is asserted -- invalidation must beat consumption");
 `ifdef VEN_UOPCACHE
       if (exec_flush_all && uop_hit)

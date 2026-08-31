@@ -255,6 +255,9 @@
             // submit directly; re-decode through S_DECODE and its fully latched q_*
             // record instead.  This is intentionally conservative during cutover.
             agi_wr0<=9'h100; agi_wr1<=9'h100;
+`ifdef VEN_SFETCH_RESIDENT
+            sfetch_resident_q <= cycle_mode && exec_issue_ok;
+`endif
             fetch_word<=3'd0; state<=S_FETCH;
           end
 `else
@@ -388,6 +391,9 @@
             // preceding clock" and must not trigger a PHANTOM AGI stall (p5model
             // AGI checks reg_wcycle==issue-1, plugin/p5model.c:451).
             agi_wr0<=9'h100; agi_wr1<=9'h100;
+`ifdef VEN_SFETCH_RESIDENT
+            sfetch_resident_q <= cycle_mode && exec_issue_ok;
+`endif
             fetch_word<=3'd0; state<=S_FETCH;
           end else if (mispred_bubbles!=3'd0) begin
             // burn a misprediction flush bubble (no retirement this clock).

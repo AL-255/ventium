@@ -218,7 +218,7 @@ l1axi_kv:
 # no engine (and no trap route outside FP_PS_ALL), and the unified SRT divider's
 # remainder sideband had nowhere to land.
 KV_FULL_DEFS := +define+VEN_L1_AXI +define+VEN_L1_HONOR_CD +define+VEN_KV260_SOC \
-  +define+VEN_UOPCACHE +define+VEN_UOP_SFETCH +define+VEN_BTB_PIPE +define+VEN_IC_BRAM \
+  +define+VEN_UOPCACHE +define+VEN_UOP_SFETCH +define+VEN_SFETCH_RESIDENT +define+VEN_BTB_PIPE +define+VEN_IC_BRAM \
   +define+VEN_FP_PIPE +define+VEN_FP_PIPE2 +define+VEN_SRT_ITER +define+VEN_IDIV_ITER \
   +define+VEN_BCD_ITER +define+VEN_TRANSCENDENTAL +define+VEN_FP_PC_RELAX \
   +define+VEN_FPREM +define+VEN_FP_SHARED +define+VEN_DBG_CORE \
