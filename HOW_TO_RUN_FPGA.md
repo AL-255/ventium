@@ -334,8 +334,8 @@ from `SIGTERM` to `SIGKILL` if a stale process survives 45 seconds.
 The local wrapper evaluates the external authoritative Tcl after correcting
 its stale 6 MHz interface metadata to 3 MHz, models the running board's IOPLL
 `/15` 100 MHz PL clock, enables the verified `VEN_SYS_FASTPATH` plus its narrow
-equal-common-base `VEN_SYS_FASTPATH_RELOC` and full-limit `MOV r32,[r32]`
-`VEN_SYS_FASTLOAD_FLAT` extensions (the latter differential-tested with a
+equal-common-base `VEN_SYS_FASTPATH_RELOC` and full-limit DS
+`MOV r32,[base{+disp8|+disp32}]` `VEN_SYS_FASTLOAD_FLAT` extensions (the latter differential-tested with a
 common non-zero base and non-identity paging; not `VEN_SYS_FASTPATH_ALL`),
 caps Vivado at four threads, and selects `AreaOptimized_high`. The direct
 upstream script still labels the `/32` clock as `/16`/6 MHz and imports a PS

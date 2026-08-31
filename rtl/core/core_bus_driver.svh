@@ -39,8 +39,8 @@
       S_USEQ, S_RMINT_PUSH:
         cur_seg_rel = 1'b1;   // segment-relative access, dseg governs
       S_PIPE: begin
-        // VEN_SYS_FASTLOAD_FLAT permits only MOV r32,[r32] under a checked
-        // flat DS. Classify it as a guest DS access so D-TLB U/S permission
+        // VEN_SYS_FASTLOAD_FLAT permits only DS MOV r32,[base+disp] under a
+        // checked full-limit DS. Classify it as a guest DS access so D-TLB U/S permission
         // handling (acc_usr) cannot treat a CPL3 load as supervisor access.
         // Instruction-fill S_PIPE requests leave this false.
         cur_seg_rel = pipe_load_req;
@@ -84,7 +84,7 @@
       S_FETCH: begin bd_req =!sfetch_fast; end
       S_PF:    begin bd_req =1'b1; end
       S_PIPE:  begin
-        // a register-base load issued this clock reads [base] combinationally.
+        // a checked DS base+displacement load issued this clock reads combinationally.
         // M2S.1: add the DS base (0 in user mode / flat PM).
         if (pipe_load_req) begin bd_req =1'b1; end
         // I-cache miss detected this clock: fetch the fill line's WORD 0 NOW so the

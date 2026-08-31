@@ -172,21 +172,41 @@ module decode
             d.pairs_first=1'b1; d.pairs_second=1'b1;
           end
         end
-        // ---- MOV r32, r/m32 (8B /r): reg form = reg move; mod00 = reg-base load
+        // ---- MOV r32, r/m32 (8B /r): reg form = reg move; DS base+disp load
         8'h8B: begin
           if (mod==2'b11) begin
             d.simple=1'b1; d.len=4'd2; d.alu_op=ALU_MOV; d.dst=reg_f; d.src=rm;
             d.wreg=1'b1; d.reads=_onehot(rm); d.writes=_onehot(reg_f);
             d.pairs_first=1'b1; d.pairs_second=1'b1;
-          end else if (!def16 && mod==2'b00 && rm!=3'b100 && rm!=3'b101) begin
-            // MOV r32,(base) : register-indirect load, no SIB/disp.
-            // task #56 step E DEFERRED: 16-bit MODRM is a DIFFERENT table (no SIB;
-            // [BX+SI]/[BP+DI]/... encodings), so memory forms stay on the slow FSM
-            // while def16. Register forms above are unaffected.
-            d.simple=1'b1; d.is_load=1'b1; d.len=4'd2; d.dst=reg_f; d.base=rm;
-            d.wreg=1'b1; d.reads=_onehot(rm); d.writes=_onehot(reg_f);
-            d.addr_mask=_onehot(rm);
-            d.pairs_first=1'b1; d.pairs_second=1'b1;
+          end else if (!def16 && rm!=3'b100 && rm!=3'b101) begin
+            // MOV r32,[base{+disp8|+disp32}], 32-bit DS-default forms only.
+            // rm=ESP would name a SIB byte, and EBP's mod01/mod10 forms default
+            // to SS; both remain on the slow FSM.  mod00/rm=101 is absolute
+            // disp32, also excluded.  The retained six bases are unambiguously
+            // DS, so the checked system fast-load guard has one segment contract.
+            unique case (mod)
+              2'b00: begin
+                d.simple=1'b1; d.is_load=1'b1; d.len=4'd2; d.dst=reg_f; d.base=rm;
+                d.wreg=1'b1; d.reads=_onehot(rm); d.writes=_onehot(reg_f);
+                d.addr_mask=_onehot(rm);
+                d.pairs_first=1'b1; d.pairs_second=1'b1;
+              end
+              2'b01: begin
+                d.simple=1'b1; d.is_load=1'b1; d.len=4'd3; d.dst=reg_f; d.base=rm;
+                d.mem_disp={{24{b2[7]}},b2};
+                d.wreg=1'b1; d.reads=_onehot(rm); d.writes=_onehot(reg_f);
+                d.addr_mask=_onehot(rm);
+                d.pairs_first=1'b1; d.pairs_second=1'b1;
+              end
+              2'b10: begin
+                d.simple=1'b1; d.is_load=1'b1; d.len=4'd6; d.dst=reg_f; d.base=rm;
+                d.mem_disp={b5,b4,b3,b2};
+                d.wreg=1'b1; d.reads=_onehot(rm); d.writes=_onehot(reg_f);
+                d.addr_mask=_onehot(rm);
+                d.pairs_first=1'b1; d.pairs_second=1'b1;
+              end
+              default: ;
+            endcase
           end
         end
         // ---- LEA r32, m (8D /r) : register-indirect form only ----------------

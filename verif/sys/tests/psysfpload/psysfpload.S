@@ -129,6 +129,10 @@ pm32_entry:
 1:
     movl    (%esi), %edi
     addl    %edi, %eax
+    movl    4(%esi), %edi
+    xorl    %edi, %eax
+    movl    0x100(%esi), %edi
+    addl    %edi, %eax
     xorl    $0xa5a5a5a5, %eax
     decl    %ecx
     jnz     1b
@@ -144,6 +148,10 @@ pm32_entry:
     .p2align 2
 pm32_data:
     .long   0x6d31c4a7
+    .long   0x3e7a19c5
+    .zero   0x100 - (.-pm32_data)
+pm32_disp32_data:
+    .long   0x52c0ffee
 pm32_payload_end:
 
     .code16

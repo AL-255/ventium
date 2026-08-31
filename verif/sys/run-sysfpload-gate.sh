@@ -7,8 +7,9 @@
 # S_PIPE rather than the slow FSM.  This gate builds an isolated profile with
 # VEN_SYS_FASTPATH, VEN_SYS_FASTPATH_RELOC, VEN_SYS_FASTLOAD_FLAT and the
 # simulation-only profiler.  The generic client has a non-zero, shared CS/DS/
-# SS/ES base, enables a 4 KiB page mapping for the client, and only uses the
-# admitted DS:[ESI] ModR/M form in its hot loop.
+# SS/ES base, enables a non-identity 4 KiB page mapping for the client, and
+# only uses the admitted DS:[ESI], DS:[ESI+disp8], and DS:[ESI+disp32] forms
+# in its hot loop.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -39,12 +40,13 @@ fi
 
 say "3. run common-base client and require architectural equivalence"
 "$TB" --image "$TDIR/psysfpload.bin" --system --out "$RTL_OUT" \
-  --max-insn 1000 --quiesce 400 >"$LOG" 2>&1
+  --max-insn 2200 --quiesce 400 >"$LOG" 2>&1
 python3 "$REPO/verif/diff/compare.py" --mode func --all "$GOLD" "$RTL_OUT"
 
-# The client has 128 exact DS:[ESI] loads after CR3/CR0.PG enable.  With the
-# fast-load profile it leaves 195 system bails and 647 S_PIPE issues; without
-# VEN_SYS_FASTLOAD_FLAT the same QEMU-equivalent image has 323 bails and 518
+# The client has 128 iterations of each DS:[ESI], DS:[ESI+disp8], and
+# DS:[ESI+disp32] load after CR3/CR0.PG enable.  With the fast-load profile it
+# leaves 731 system bails and 1,159 S_PIPE issues; without
+# VEN_SYS_FASTLOAD_FLAT the same QEMU-equivalent image has 1,115 bails and 774
 # issues.  The two independent bounds leave room for benign accounting changes
 # while rejecting a disabled, widened-away, or merely accounting-only path.
 BAIL="$(awk '/\[ *9\].*fp_sys_bail/{for (i=1;i<=NF;i++) if ($i ~ /^[0-9]+$/) {print $i; exit}}' "$LOG")"
@@ -52,9 +54,9 @@ ISSUE="$(awk '/\[ *12\].*ISSUE/{for (i=1;i<=NF;i++) if ($i ~ /^[0-9]+$/) {print 
 [[ "$BAIL" =~ ^[0-9]+$ ]] || { echo "FATAL: profiler did not report fp_sys_bail"; exit 1; }
 [[ "$ISSUE" =~ ^[0-9]+$ ]] || { echo "FATAL: profiler did not report S_PIPE issue"; exit 1; }
 echo "  profile: fp_sys_bail=$BAIL  S_PIPE issues=$ISSUE"
-if (( BAIL >= 250 || ISSUE < 600 )); then
-  echo "FATAL: common-base DS:[ESI] load loop did not enter the fast-load path"
-  echo "       expected fp_sys_bail < 250 and S_PIPE issues >= 600; see $LOG"
+if (( BAIL >= 900 || ISSUE < 1050 )); then
+  echo "FATAL: common-base DS base+displacement load loop did not enter the fast-load path"
+  echo "       expected fp_sys_bail < 900 and S_PIPE issues >= 1050; see $LOG"
   exit 1
 fi
 

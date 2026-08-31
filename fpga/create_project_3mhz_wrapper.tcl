@@ -6,7 +6,7 @@
 # validation.  Evaluate the authoritative flow script with that stale metadata
 # corrected and, by default, with the repaired system fast path enabled for
 # literal-flat and equal-common-base 32-bit protected-mode clients, including
-# the independently verified full-limit MOV r32,[r32] load subset.  Set
+# the independently verified full-limit DS MOV r32,[base+disp] load subset.  Set
 # VEN_FPGA_FASTPATH=0 for a source-identical diagnostic A/B image with all
 # system-path defines omitted; set VEN_FPGA_RELOC_FASTPATH=0 to retain only the
 # base-zero subset; set VEN_FPGA_FASTLOAD=0 to retain the system control path
@@ -104,7 +104,7 @@ if {[info exists ::env(VEN_FPGA_FASTPATH)] && !$::env(VEN_FPGA_FASTPATH)} {
 # CWSDPMI's 32-bit client maps CS/DS/SS/ES at one nonzero common base.  The
 # default relocated profile remains much narrower than FASTPATH_ALL: only
 # non-real, D=1, common-base register/relative forms plus the independently
-# gated full-limit MOV r32,[r32] form enter S_PIPE.  Every other memory form
+# gated full-limit DS MOV r32,[base+disp] forms enter S_PIPE.  Every other memory form
 # takes the checked slow FSM.  A base-zero-only control remains available
 # without accidentally re-enabling the system path after VEN_FPGA_FASTPATH=0
 # has removed it.
@@ -116,7 +116,8 @@ if {[info exists ::env(VEN_FPGA_RELOC_FASTPATH)] && !$::env(VEN_FPGA_RELOC_FASTP
         puts "Diagnostic build: VEN_SYS_FASTPATH_RELOC already absent because VEN_FPGA_FASTPATH=0"
     }
 }
-# The default fast-load subset is one 32-bit full-limit MOV r32,[r32] encoding.
+# The default fast-load subset is the 32-bit full-limit DS MOV
+# r32,[base{+disp8|+disp32}] family (no SIB/SS-default/absolute form).
 # It retains the normal cur_lin, D-TLB/page-walk, permission and fragment-engine
 # machinery; `psysfpload` differentially covers common non-zero bases plus a
 # non-identity 4 KiB mapping.  VEN_FPGA_FASTLOAD=0 is a source-identical

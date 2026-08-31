@@ -143,6 +143,7 @@ package ventium_decode_pkg;
     logic        is_lea;
     logic        is_load;
     logic [2:0]  base;
+    logic [31:0] mem_disp;     // MOV r32,[base+disp] fast-load displacement
     logic        is_nop;
     logic        is_shift;
     logic [2:0]  shrot;

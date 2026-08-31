@@ -208,7 +208,7 @@
             agi_wr0<=9'h100; agi_wr1<=9'h100;
 `ifdef VEN_L1_AXI
           end else if (real_bus && pipe_load_req && !mem_ack) begin
-            // P1-1: bus_mode=2 stalling L1 — a register-base load MISSED (mem_ack=0
+            // P1-1: bus_mode=2 stalling L1 — a base+displacement load MISSED (mem_ack=0
             // while ven_l1d fills its line from AXI). The ISSUE arm below latches
             // gpr<=mem_rdata UNCONDITIONALLY (the same-cycle-BFM assumption), so
             // bubble the WHOLE issue until the fill completes and mem_ack rises; then
@@ -432,14 +432,14 @@
               // the next instruction, exactly as p5_mem()/p5model does. A line
               // that misses is allocated now (dc_acc_valid below) so re-references
               // hit. dc_lu_hit reads the PRE-access state (dc_lu_addr ==
-              // gpr_o[u_d.base] this clock); the allocate is the dcache_timing
+              // pipe_load_addr this clock); the allocate is the dcache_timing
               // posedge driven by dc_acc_valid/dc_acc_addr (UNGATED — this U-pipe
               // load runs the SM in func and cycle mode alike).
               begin
                 logic [6:0] pen;
                 pen = 7'd0;
                 if (!dc_lu_hit)                     pen = pen + P5_DMISS;
-                if (gpr_o[u_d.base][1:0] != 2'b00)    pen = pen + P5_MISALIGN;
+                if (pipe_load_addr[1:0] != 2'b00)     pen = pen + P5_MISALIGN;
 `ifdef VEN_L1_AXI
                 // bus_mode=2: the REAL DDR latency is the only timing source — the
                 // miss-stall gate already held the load for the actual fill. Suppress
