@@ -139,6 +139,13 @@ module uopcache
   // so the spine
   // re-walks (a perf event, never a wrong opcode). Behavior-neutral in 2-state sim.
   logic                  rd_collA_q,  rd_collB_q;
+  // A fill/invalidate updates store_pdv at the SAME edge the registered read
+  // samples its old value.  Without a returned-address invalidation guard, the
+  // following S_PIPE clock can see the NEW I-cache line together with the OLD
+  // line's predecode-valid bit and issue stale slots before the walker starts.
+  // This is the invalidate analogue of the RAMB read-during-write guard below:
+  // report the registered result as not-predecoded for that one stale cycle.
+  logic                  rd_invA_q,   rd_invB_q;
 `ifdef VEN_UOPCACHE_RDW_X
   // SIM-ONLY DECISIVE-CONFIRMATION MODEL (default OFF): emulate the real RAMB36
   // read-during-write collision the 2-state functional array model IDEALIZES away.
@@ -189,6 +196,12 @@ module uopcache
     rdpdv_b_q   <= store_pdv[{rd_setB, rd_wayB}];
     rd_collA_q  <= (wst == W_WRITE) && ({rd_setA, rd_wayA} == {wset, wway});
     rd_collB_q  <= (wst == W_WRITE) && ({rd_setB, rd_wayB} == {wset, wway});
+    rd_invA_q   <= d16_flush
+                || (inv_en  && ({rd_setA, rd_wayA} == {inv_set,  inv_way}))
+                || (inv2_en && ({rd_setA, rd_wayA} == {inv2_set, inv2_way}));
+    rd_invB_q   <= d16_flush
+                || (inv_en  && ({rd_setB, rd_wayB} == {inv_set,  inv_way}))
+                || (inv2_en && ({rd_setB, rd_wayB} == {inv2_set, inv2_way}));
   end
 
   // unpack the registered line into the slot/byte-map outputs.  The fast-path 8:1
@@ -206,8 +219,8 @@ module uopcache
     end
     // a collided registered read holds BRAM-garbage on silicon — present it as
     // not-predecoded so the spine re-walks instead of issuing a garbage uop.
-    rd_pdvalidA = rdpdv_a_q && !rd_collA_q;
-    rd_pdvalidB = rdpdv_b_q && !rd_collB_q;
+    rd_pdvalidA = rdpdv_a_q && !rd_collA_q && !rd_invA_q;
+    rd_pdvalidB = rdpdv_b_q && !rd_collB_q && !rd_invB_q;
   end
 `ifdef VEN_UOP_PERF
   // DIAGNOSTIC (sim-only, default OFF): confirm the uop cache POPULATES (pdv hits)
@@ -332,38 +345,53 @@ module uopcache
 
       unique case (wst)
         W_IDLE: begin
-          // H-14: a fresh start wins; otherwise run a held one.
-          if ((pd_start && !pd_start_kill) || (pd_pend && !pd_pend_kill)) begin
-            residual   <= (pd_start && !pd_start_kill) ? pd_line       : pd_pend_line;
+          // H-14 scheduler: when a held request and a new fill arrive together,
+          // launch the HELD request and replace the one-deep queue with the new
+          // one.  The old code let the fresh request launch but left the held
+          // request asserted; after the fresh walk wrote its line, that stale
+          // request could run and revalidate predecode data for an evicted
+          // {set,way}.  This is a real correctness issue, not just a dropped
+          // predecode/performance event.  FIFO handoff preserves both requests
+          // without adding storage or touching the fast path.
+          if ((pd_pend && !pd_pend_kill) || (pd_start && !pd_start_kill)) begin
+            residual   <= (pd_pend && !pd_pend_kill) ? pd_pend_line   : pd_line;
             woff       <= 6'd0;
             wslot      <= 4'd0;
-            wset       <= (pd_start && !pd_start_kill) ? pd_set        : pd_pend_set;
-            wway       <= (pd_start && !pd_start_kill) ? pd_way        : pd_pend_way;
-            wflags     <= (pd_start && !pd_start_kill) ? pd_flags      : pd_pend_flags;
-            wcyc       <= (pd_start && !pd_start_kill) ? pd_cycle_mode : pd_pend_cyc;
-            wd16       <= (pd_start && !pd_start_kill) ? pd_def16      : pd_pend_d16;
+            wset       <= (pd_pend && !pd_pend_kill) ? pd_pend_set    : pd_set;
+            wway       <= (pd_pend && !pd_pend_kill) ? pd_pend_way    : pd_way;
+            wflags     <= (pd_pend && !pd_pend_kill) ? pd_pend_flags  : pd_flags;
+            wcyc       <= (pd_pend && !pd_pend_kill) ? pd_pend_cyc    : pd_cycle_mode;
+            wd16       <= (pd_pend && !pd_pend_kill) ? pd_pend_d16    : pd_def16;
             wbuf_slots <= '0;
             wbuf_bmap  <= '0;
             wpz        <= 1'b0;      // fresh transaction
             wst        <= W_WALK;
-            if (!(pd_start && !pd_start_kill)) pd_pend <= 1'b0;   // consumed the held one
+            if (pd_pend && !pd_pend_kill) begin
+              if (pd_start && !pd_start_kill) begin
+                pd_pend       <= 1'b1;
+                pd_pend_set   <= pd_set;   pd_pend_way <= pd_way;
+                pd_pend_line  <= pd_line;
+                pd_pend_flags <= pd_flags; pd_pend_cyc <= pd_cycle_mode; pd_pend_d16 <= pd_def16;
+              end else begin
+                pd_pend <= 1'b0;   // consumed the held one
+              end
+            end
           end
         end
         W_WALK: begin
           // record this instruction's slot + its start-byte boundary, then consume.
           wbuf_slots[wslot*FPDW +: FPDW] <= pd_uop;
           // boundary map: byte woff starts slot wslot (valid bit + slot index).
-          // ONLY record a VALID boundary when the instruction FITS ENTIRELY within
-          // this 32-byte line (woff+len <= IC_LINE). An instruction that STRADDLES the
-          // line end was decoded from `residual` whose bytes past offset 32 are ZEROS
-          // (the walker only sees one line — uopcache.sv header: straddle re-walk is
-          // follow-on), so its slot's operands/length are UNRELIABLE. Leaving its
-          // boundary INVALID makes uop_hit=0 at that offset, so the spine's !uop_hit
-          // gate (core_fastpath.svh) routes it to the slow S_FETCH path, which decodes
-          // it correctly from the real (resident) next-line bytes. Without this, a
-          // straddling insn read a zero-filled slot and issued garbage (the remaining
-          // class of the F4 board Quake cold-line fetch corruption; baseline 60 ->
-          // spine-gate 28 -> this 0 functional fails in the UOPCACHE+IC_BRAM config).
+          // ONLY record a VALID boundary when the full six-byte decoder window
+          // fits within this 32-byte line.  Checking only `woff+pd_len` is NOT
+          // sufficient: at offset 31, for example, a Jcc's absent displacement
+          // is zero-padded and can be misdecoded as a one-byte opcode, making
+          // the bogus length appear to fit.  The walker deliberately has no
+          // next-line input, so any tail window shorter than six bytes is
+          // conservatively re-decoded by the spine from the real resident lines.
+          // That loses at most five bytes of predecode coverage per line, never
+          // executes an incomplete operand, and leaves the timing-critical fast
+          // path unchanged.
           // ...AND only when the instruction FITS ENTIRELY within the 6-byte
           // decode window (pd_len <= 6). The decode leaf (u_pd_decode) is fed the
           // FIXED bottom 6 bytes of `residual`; an instruction with len>6 has
@@ -372,7 +400,8 @@ module uopcache
           // (imm[31:0] et al) is UNRELIABLE — the same "bytes weren't seen" hazard
           // as the line-straddle case above, one scale down. Leaving the boundary
           // INVALID routes it to the slow S_FETCH path, which re-fetches all bytes.
-          if (woff < IC_LINE && (woff + {2'd0, pd_len} <= 6'(IC_LINE))
+          if ((woff < 6'(IC_LINE)) && (woff + 6'd6 <= 6'(IC_LINE))
+              && (woff + {2'd0, pd_len} <= 6'(IC_LINE))
               && (pd_len <= 4'd6))
             wbuf_bmap[woff*4 +: 4] <= {1'b1, wslot[2:0]};
           residual <= residual >> {pd_len, 3'b000};   // drop pd_len bytes

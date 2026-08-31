@@ -70,6 +70,12 @@ module tb_issue_uv;
     load_pair(8'h8b,8'h20,0,0,0,0, 8'h89,8'he7,0,0,0,0); // mov esp,[eax]; mov edi,esp
     expect_pair("LOAD ESP -> MOV EDI,ESP", 1'b0, 1'b1);
 
+    // Quake's post-init Host_Frame path: the accumulator-immediate AND must
+    // serialize its following CMP because V would otherwise compare stale EAX
+    // (the `mov al,[esi]` before it leaves stale high bits live).
+    load_pair(8'h25,8'hff,8'h00,8'h00,8'h00,0, 8'h39,8'hd0,0,0,0,0); // and eax,0xff; cmp eax,edx
+    expect_pair("AND EAX,imm -> CMP EAX,EDX", 1'b0, 1'b0);
+
     // Preserve the narrow existing performance exception: this is ESP WAW only.
     load_pair(8'h89,8'hc4,0,0,0,0, 8'h89,8'hdc,0,0,0,0); // mov esp,eax; mov esp,ebx
     expect_pair("ESP WAW-only remains pairable", 1'b1, 1'b0);

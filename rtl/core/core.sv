@@ -4137,8 +4137,16 @@ module core
   assign uop_hit    = exec_issue_ok &&   // a flush cycle is never a predecode hit
                       (uc_u_in_b ? (uc_pdvB && uc_bvB[flin[4:0]])
                                  : (uc_pdvA && uc_bvA[flin[4:0]]));
-  assign uc_v_avail = uc_v_in_a ? (uc_uslot != 3'(NSLOT-1))
-                                : (uc_pdvB && uc_bvB[uc_voff]);
+  // A V candidate is usable only when its OWN instruction boundary was stored.
+  // In particular, the 3-bit `uc_uslot + 1` arithmetic wraps slot 7 to slot 0;
+  // without this boundary check, an instruction in the final slot could pair
+  // with an unrelated first slot from the same line.  The map check also covers
+  // a sparse/overflowed walker tail, where U is covered but its successor was
+  // deliberately not predecoded.
+  assign uc_v_avail = uc_v_in_a
+                    ? ((uc_uslot != 3'(NSLOT-1)) &&
+                       (uc_u_in_b ? uc_bvB[uc_voff] : uc_bvA[uc_voff]))
+                    : (uc_pdvB && uc_bvB[uc_voff]);
 `ifdef VEN_UOPCACHE_CHECK
   // Structural-equivalence gate: keep the live ub/vb gather + reference decoders
   // and assert the slot read matches them for every issued flin. SIM-ONLY (this
@@ -4152,7 +4160,28 @@ module core
   decode u_decode_ref (.ib0(ub[0]),.ib1(ub[1]),.ib2(ub[2]),.ib3(ub[3]),.ib4(ub[4]),.ib5(ub[5]),
                        .iflags(eflags), .def16(def16), .cycle_mode(cycle_mode), .uop(u_d_ref));
   decode v_decode_ref (.ib0(vb[0]),.ib1(vb[1]),.ib2(vb[2]),.ib3(vb[3]),.ib4(vb[4]),.ib5(vb[5]),
-                       .iflags(eflags), .cycle_mode(cycle_mode), .uop(v_d_ref));
+                       .iflags(eflags), .def16(def16), .cycle_mode(cycle_mode), .uop(v_d_ref));
+
+  // The uop cache is an optional timing implementation, not an alternate ISA
+  // decoder.  When this diagnostic profile is selected, stop at the first
+  // resident predecode that is not bit-for-bit identical to the live byte
+  // decoder.  This is deliberately gated by both residency and uop_hit: during
+  // a cold fill the registered read ports hold an unrelated previous line, and
+  // that is a re-walk/performance condition rather than an incorrect issue.
+  //
+  // `VEN_UOPCACHE_CHECK is never enabled by an implementation build, so this
+  // assertion and its reference byte muxes cannot affect the FPGA netlist.
+  always_ff @(posedge clk) begin
+    if (rst_n && (state == S_PIPE) && pipe_bytes_ok && uop_hit &&
+        ((u_d !== u_d_ref) || (uc_v_avail && (v_d !== v_d_ref)))) begin
+      $display("[UOPCHECK] decode mismatch flin=%08x eip=%08x U(slot=%0d len=%0d reads=%02x writes=%02x) ref(len=%0d reads=%02x writes=%02x) V(slot=%0d len=%0d reads=%02x writes=%02x) ref(len=%0d reads=%02x writes=%02x)",
+               flin, eip, uc_uslot, u_d.len, u_d.reads, u_d.writes,
+               u_d_ref.len, u_d_ref.reads, u_d_ref.writes,
+               uc_vslot, v_d.len, v_d.reads, v_d.writes,
+               v_d_ref.len, v_d_ref.reads, v_d_ref.writes);
+      $fatal(1, "VEN_UOPCACHE_CHECK: predecoded slot differs from live decode");
+    end
+  end
 `endif
 `else
   // R1 phase-3: the fast-path decoder is now the `decode` leaf module
@@ -4262,6 +4291,12 @@ module core
                    ((eip + {28'd0, u_d.len}) == dbg_bp_addr);
 `endif
     pipe_pair = cycle_mode && v_bytes_ok && pipe_pair_ok && !irq_shadow && !dbg_pair_block
+`ifdef VEN_UOPCACHE
+             // In a predecoded build, the V slot must have a recorded boundary.
+             // `v_bytes_ok` proves the raw I-cache bytes are resident, not that
+             // the registered uop-cache slot selected above represents them.
+             && uc_v_avail
+`endif
              && !(u_d.w16 && (({1'b0,eip[15:0]} + {13'd0,u_d.len}) > 17'h0FFFF));
 
     // M6 Erratum 59 (MOV moffs A2/A3 fails to pair): when errata enabled, an
