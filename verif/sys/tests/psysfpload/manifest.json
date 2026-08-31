@@ -1,0 +1,20 @@
+{
+  "name": "psysfpload",
+  "kind": "system",
+  "src": "psysfpload.S",
+  "linker": "psysfpload.ld",
+  "image": "psysfpload.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 1000,
+  "sys": true,
+  "transitions": [
+    "real->protected with CS/DS/SS/ES all based at 0x00080000",
+    "common-base 32-bit DS:[ESI] MOV r32,[base] load"
+  ],
+  "description": "Generic protected-mode common-base fast-load regression. The BIOS bootstrap copies a 32-bit client to physical 0x80000, enters four 4 GiB CS/DS/SS/ES segments with that shared non-zero base, then repeatedly loads a client-relative sentinel using the exact no-displacement DS:[ESI] MOV r32,[base] form admitted by VEN_SYS_FASTLOAD_FLAT. The running sum is differentially checked against QEMU; no Quake-specific state or saved guest state is used."
+}

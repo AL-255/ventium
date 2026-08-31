@@ -453,6 +453,7 @@ verify-sys:
 	bash verif/sys/run-sys-golden.sh pseg
 	bash verif/sys/run-sys-golden.sh pmode
 	bash verif/sys/run-sys-golden.sh psysfpreloc
+	bash verif/sys/run-sys-golden.sh psysfpload
 	bash verif/sys/run-sys-golden.sh ppage
 	# REVIEW2 C-02: directed page-crossing test. XFAILs today (that divergence IS
 	# the defect); the runner fails loudly if it ever starts passing.
@@ -675,6 +676,13 @@ verify-sys:
 # it necessarily rebuilds the define variant.
 verify-sys-fpreloc:
 	bash verif/sys/run-sysfpreloc-gate.sh
+
+# Uses an isolated VEN_SYS_FASTLOAD_FLAT profile and profiler to prove the
+# restricted common-base MOV r32,[base] path is taken; see
+# verif/sys/run-sysfpload-gate.sh.  Kept separate from verify-sys because it
+# necessarily rebuilds the define variant.
+verify-sys-fpload:
+	bash verif/sys/run-sysfpload-gate.sh
 
 # --- verify-all umbrella (verif/run-verify-all.sh) --------------------------
 # One command that runs EVERY routinely-runnable gate (verify + verify-sys +
