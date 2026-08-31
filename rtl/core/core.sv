@@ -4567,6 +4567,13 @@ module core
 `endif
       // ----- M2S.1: dual boot-mode reset (docs/m2s1-segmentation-spec.md) -----
       sys_mode<=boot_mode;
+      // A20 is enabled after reset in every supported platform configuration.
+      // This must not be limited to system boot: the user-mode loader commonly
+      // places its initial stack above 1 MiB, and an uninitialised user-reset
+      // latch aliases that stack by clearing physical address bit 20.  Keeping
+      // the reset assignment outside the boot-mode split also makes the A20
+      // reset value agree with a20_on_q's reset baseline.
+      a20_r<=1'b1;
       if (boot_mode) begin
         // SYSTEM cold reset, matching qemu-system-i386: CS:EIP=F000:FFF0, real
         // mode (CR0.PE=0, cr0=0x60000010), EDX=0x00000663 (P5 stepping sig),
@@ -4580,7 +4587,6 @@ module core
         // GPR reset (system: EDX = CPUID sig 0x543/0x663, others 0) lives in
         // u_regfile's own synchronous rst_n arm now (R3) — driven by boot_mode/cosim_en.
         creg0<=32'h6000_0010; creg2<=32'd0; creg3<=32'd0; creg4<=32'd0;
-        a20_r<=1'b1;                       // REVIEW2 M-03: A20 enabled out of reset
         xp_pend<=1'b0; xp_lo<=32'd0; xp_first<=3'd0; xp_w<=3'd0;  // REVIEW2 C-02
         xs_ph<=2'd0; xs_act<=1'b0; xs_first<=3'd0;                // REVIEW2 C-02 store
         for (int s=0;s<NUM_SEG;s++) begin

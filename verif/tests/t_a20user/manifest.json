@@ -1,0 +1,9 @@
+{
+  "name": "t_a20user",
+  "src": "t_a20user/t_a20user.s",
+  "elf": "t_a20user/t_a20user.elf",
+  "image": "t_a20user/t_a20user.flat",
+  "load_addr": "0x08148000",
+  "entry": "0x08148000",
+  "max_insn": 3
+}
