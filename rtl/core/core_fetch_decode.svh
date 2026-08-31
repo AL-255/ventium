@@ -8,11 +8,18 @@
 //   S_FETCH (16-byte fetch window), S_DECODE (prefix/length/operand decode +
 //   the SYS_* -> S_LGDT/S_SEGLD/S_LJMP/S_LTR routing and load/exec dispatch).
         S_FETCH: begin
+`ifdef VEN_UOPCACHE
+          // Consume the overflow-only shortcut request even if its tagged-buffer
+          // recheck fails below. In that case this S_FETCH immediately resumes the
+          // original bus sequence; it must not become a persistent alternate fetch
+          // policy for subsequent slow-path instructions.
+          sfetch_uop_q <= 1'b0;
+`endif
           // task #54: the whole 16-byte window is already in the I-cache -> take it
           // in ONE clock instead of four bus reads. sfetch_fast (core.sv) is the
           // residency predicate; the bus driver suppresses mem_req on the same
           // condition so this issues no transaction at all.
-          if (sfetch_fast) begin
+          if (sfetch_fast || sfetch_uop_fast) begin
             for (int i = 0; i < IWORDS*4; i++) ibuf[i] <= ic_byte(flin + 32'(i));
             fetch_word <= 3'd0;
             state      <= S_DECODE;

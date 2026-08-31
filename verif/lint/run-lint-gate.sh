@@ -23,14 +23,14 @@ FATAL="-Werror-IMPLICIT -Werror-PINMISSING -Werror-UNDRIVEN -Werror-MULTIDRIVEN 
 BASE="--lint-only -sv -Wall -Wno-UNUSED -Wno-fatal $FATAL --top-module ventium_top -f ventium.f +define+VTM_NO_DPI"
 
 KV_DEFS="+define+VEN_L1_AXI +define+VEN_KV260_SOC +define+VEN_FE_PIPE \
-+define+VEN_UOPCACHE +define+VEN_BTB_PIPE +define+VEN_IC_BRAM \
++define+VEN_UOPCACHE +define+VEN_UOP_SFETCH +define+VEN_BTB_PIPE +define+VEN_IC_BRAM \
 +define+VEN_FP_PIPE +define+VEN_FP_PIPE2 +define+VEN_SRT_ITER +define+VEN_IDIV_ITER \
 +define+VEN_BCD_ITER +define+VEN_FP_PC_RELAX +define+VEN_FPREM +define+VEN_FP_SHARED \
 +define+VEN_SYS_FASTPATH +define+VEN_SYS_FASTPATH_RELOC +define+VEN_SYS_FASTLOAD_FLAT +define+VEN_FAST_RETRACE"
 # The deployed area-relief profile: KV minus FP_PIPE/FP_PIPE2/SRT_ITER/BCD_ITER,
 # plus FP_PS_ALL + FPTRAP (mirrors KV_FPPS_DEFS in verif/tb/Makefile).
 FPPS_DEFS="+define+VEN_L1_AXI +define+VEN_KV260_SOC +define+VEN_FE_PIPE \
-+define+VEN_UOPCACHE +define+VEN_BTB_PIPE +define+VEN_IC_BRAM \
++define+VEN_UOPCACHE +define+VEN_UOP_SFETCH +define+VEN_BTB_PIPE +define+VEN_IC_BRAM \
 +define+VEN_IDIV_ITER +define+VEN_FP_PC_RELAX +define+VEN_FP_PS_ALL +define+VEN_FPTRAP \
 +define+VEN_SYS_FASTPATH +define+VEN_SYS_FASTPATH_RELOC +define+VEN_SYS_FASTLOAD_FLAT +define+VEN_FAST_RETRACE"
 

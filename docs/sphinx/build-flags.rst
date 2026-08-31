@@ -116,6 +116,11 @@ Quick reference
      - off — live byte-window decode
      - Predecode-on-fill micro-op cache; the fix for the x86 byte-window MUXF
        congestion wall.
+   * - ``VEN_UOP_SFETCH``
+     - boolean define (requires ``VEN_UOPCACHE`` + ``VEN_IC_BRAM``)
+     - off — calibrated slow fetch
+     - Full-P5-profile, cycle-mode uop-boundary-miss hand-off. It safely
+       reuses the tagged BRAM window instead of rereading it over the bus.
    * - ``VEN_UOPCACHE_CHECK``
      - boolean define
      - off
@@ -939,18 +944,32 @@ mirrors ``VEN_IC_BRAM``, and every setter defines the two together: the
 deployable SoC, ``apr_run.tcl`` (CONFIG=uopcache), ``apr_hc_pnr.tcl``, and the
 uopcache path/probe scripts.
 
-The major caveat: **not verify-hardened**. The architectural-correctness
-backstops are unbuilt — ``uop_hit`` and ``uc_v_avail`` are computed but
-consumed *nowhere*, and the planned ``S_PIPE !uop_ready`` stall arm and
-branch-into-the-middle re-predecode are explicitly still unbuilt
-(``fpga/TIMING_PROBLEMS.md``, ``docs/fpga-synthesis.md``). A fetch from a
-resident-but-not-yet-predecoded line, or a branch into the middle of a
-predecoded boundary, reads stale or wrong slots with no stall. It is a
-synthesis/APR Fmax demonstrator (common-case correct), not a
-differential-gate-verified configuration — yet it *is* in the deployable
-KV260 bitstream. The default/narrowb build is the verified production
-reference. The integrated cache is fixed at two ways, so the uopcache's two-way
+The core consumes a predecoded slot only when the requested byte is a valid
+boundary in a valid predecode line; a cold line, a branch into a non-boundary,
+or a run past the eight stored slots follows the ordinary slow decoder instead.
+Thus the cache is an acceleration structure, not an architectural source of
+truth. The integrated cache is fixed at two ways, so the uopcache's two-way
 slot layout cannot be put out of agreement with the cache it serves.
+
+``VEN_UOP_SFETCH``
+------------------
+
+This is the full-P5 production companion to ``VEN_UOPCACHE`` and
+``VEN_IC_BRAM``. It does **not** add uop-cache entries, widen an ``fpd_t`` RAM,
+or change either L1 cache's geometry. On a cycle-mode uop-boundary fallback,
+the core records a one-cycle token and enters the ordinary ``S_FETCH`` state.
+There it rechecks that both endpoints of the slow decoder's complete 16-byte
+window are present in the *currently returned* set/way BRAM buffers, including
+the cross-port collision guards. Only after that recheck does it copy the bytes
+directly to the slow decoder and suppress the otherwise redundant four-word
+bus fetch.
+
+The predicate is conservative: an absent, stale, predicted, or colliding
+buffer consumes the token and follows the original bus sequence. The feature
+is disabled in functional mode, preserving the reference fetch timing used by
+the functional differential gate. It is enabled in every checked-in full-P5
+implementation profile; it is neither a cache-capacity reduction nor a
+guest/workload-specific shortcut.
 
 ``VEN_UOPCACHE_CHECK``
 ----------------------
@@ -2284,14 +2303,15 @@ the full production stack::
    SYNTHESIS  VTM_NO_DPI
    VEN_SRT_ITER  VEN_IDIV_ITER  VEN_BCD_ITER
    VEN_FP_PIPE  VEN_FP_PIPE2  VEN_BTB_PIPE
-   VEN_IC_BRAM  VEN_UOPCACHE
+   VEN_IC_BRAM  VEN_UOPCACHE  VEN_UOP_SFETCH
    VEN_L1_AXI  VEN_KV260_SOC
    VEN_FE_PIPE          (appended by the FE_PIPE=1 environment knob)
 
 Reading it as layers: the two housekeeping tokens strip the DPI channel and
 the sim-only assertions; the three iterative engines and the two-stage FP
 commit pipeline are the bit-exact Fmax substrate; ``VEN_BTB_PIPE``,
-``VEN_IC_BRAM`` and ``VEN_UOPCACHE`` are the front-end congestion stack;
+``VEN_IC_BRAM``, ``VEN_UOPCACHE`` and ``VEN_UOP_SFETCH`` are the front-end
+congestion stack;
 ``VEN_L1_AXI`` + ``VEN_KV260_SOC`` are the platform layer
 (real bus, PS seams, DDR-carveout remap); and ``VEN_FE_PIPE`` is the final cut
 that lets the full SoC route. Three footnotes from the setters data:

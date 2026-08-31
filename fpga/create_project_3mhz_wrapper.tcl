@@ -193,7 +193,7 @@ set_property -dict [list \
     {set c3f 6000000} \
     $core_c3f_span \
     {VEN_CACHE_HALF VEN_IC_NARROWB} \
-    {VEN_IC_BRAM VEN_UOPCACHE VEN_FP_PIPE2} \
+    {VEN_IC_BRAM VEN_UOPCACHE VEN_UOP_SFETCH VEN_FP_PIPE2} \
     {VEN_FP_PC_RELAX VEN_FAST_RETRACE} \
     $define_span \
     {CLK3 (core) label = $c3f (actual = pl_clk0/16)} \
@@ -270,7 +270,7 @@ if {[lsearch -exact $fpga_defs VEN_CACHE_HALF] >= 0} {
 if {[lsearch -exact $fpga_defs VEN_IC_NARROWB] >= 0} {
     error "refusing FPGA build: VEN_IC_NARROWB is retired; use VEN_IC_BRAM + VEN_UOPCACHE"
 }
-foreach required_def {VEN_IC_BRAM VEN_UOPCACHE VEN_FP_PIPE2} {
+foreach required_def {VEN_IC_BRAM VEN_UOPCACHE VEN_UOP_SFETCH VEN_FP_PIPE2} {
     if {[lsearch -exact $fpga_defs $required_def] < 0} {
         error "refusing FPGA build: full-P5 profile is missing $required_def"
     }

@@ -194,6 +194,12 @@
             // dependent arm so no garbage decode field is ever acted on. INERT (signal
             // absent) without VEN_UOPCACHE, so default `make verify` is byte-identical.
             agi_wr0<=9'h100; agi_wr1<=9'h100;
+            // The normal slow path remains the P5-calibrated four-word fetch. An
+            // overflowed/cold uop boundary is different: ic_fetch_ready already
+            // proved the current bytes sit in a tagged BRAM buffer. Carry that
+            // one-shot fact into S_FETCH so it may copy the safe registered window;
+            // functional mode deliberately stays on the reference bus path.
+            sfetch_uop_q <= cycle_mode && !uop_hit && exec_issue_ok;
             fetch_word<=3'd0; state<=S_FETCH;
 `endif
           end else if (pending_mem_pen!=7'd0) begin

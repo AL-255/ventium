@@ -1935,6 +1935,12 @@ module core
   localparam int IWORDS = 4;
   logic [7:0]  ibuf [16];
   logic [2:0]  fetch_word;
+`ifdef VEN_UOPCACHE
+  // One-shot token for a cycle-mode uop-cache miss. It lets S_FETCH reuse the
+  // exact registered I-cache window that proved the miss's bytes resident,
+  // rather than launching the normal four-word slow fetch.
+  logic        sfetch_uop_q;
+`endif
 
   // ===========================================================================
   // M4 dual-issue fast-path pipeline state (docs/m4-pipeline-spec.md §"How to
@@ -3817,6 +3823,45 @@ module core
     ic_byte = ln[{addr[4:0],3'b000} +: 8];
   endfunction
 
+  // A resident line is not by itself safe to read during S_FETCH with the BRAM
+  // frontend: the synchronous I-cache buffers may still hold a different way.
+  // This is the same returned-address predicate used by ic_fetch_ready, factored
+  // for the longer (16-byte) slow-decoder window. It is used solely by the
+  // uop-overflow hand-off below; ordinary slow fetches retain P5-calibrated bus
+  // timing.
+  logic sfetch_uop_fast;
+`ifdef VEN_UOPCACHE
+`ifdef VEN_IC_BRAM
+`ifdef VEN_UOP_SFETCH
+  function automatic logic ic_buffered(input logic [31:0] addr);
+    logic [IC_IDXW-1:0] ib_set;
+    logic [IC_WAYW-1:0] ib_way;
+    begin
+      ib_set = addr[5 +: IC_IDXW];
+      ib_way = ic_hit_way(addr);
+      ic_buffered = ic_present(addr)
+                 && ((rdA_set_q == ib_set && rdA_way_q == ib_way && !ic_rd_collA)
+                  || (rdB_set_q == ib_set && rdB_way_q == ib_way && !ic_rd_collB));
+    end
+  endfunction
+  // The token records a miss detected in S_PIPE only after ic_fetch_ready was
+  // true. Recheck BOTH endpoints here rather than relying on that history:
+  // S_FETCH copies 16 bytes (not the fast path's 12), and a stale/predicted B
+  // buffer must fall back to the original bus fetch, never supply old bytes.
+  assign sfetch_uop_fast = sfetch_uop_q && (state == S_FETCH) && (fetch_word == 3'd0)
+                       && exec_issue_ok
+                       && ic_buffered(flin)
+                       && ic_buffered(flin + 32'(IWORDS*4 - 1));
+`else
+  assign sfetch_uop_fast = 1'b0;
+`endif
+`else
+  assign sfetch_uop_fast = 1'b0;
+`endif
+`else
+  assign sfetch_uop_fast = 1'b0;
+`endif
+
   // ---- task #54: SERVE THE SLOW PATH'S FETCH FROM THE I-CACHE ---------------
   // VEN_PERF_PROFILE measured the booting cosim (25.5M clocks, CPI 8.26) and found
   // S_FETCH is 52.2% of ALL core clocks -- 13,308,217 of 25,499,675, which is 8.03
@@ -4781,6 +4826,9 @@ module core
         ss_b<=1'b1;   // C-07: user-mode stack is 32-bit -> stk16 stays identity
       end
       fetch_word<=3'd0; retire_valid<=1'b0; step<=4'd0;
+`ifdef VEN_UOPCACHE
+      sfetch_uop_q<=1'b0;
+`endif
       // x87 reset = FNINIT state (control 0x037f, status 0, TOP 0, all empty) now
       // lives in u_fpu_state's own rst_n arm (rtl/fpu/fpu_top.sv) — ftop/fctrl/
       // fstat/fptag/fpr[] are reset there. Only the spine-side touch flag here.
@@ -9573,6 +9621,11 @@ module core
   longint pp_mem_ack  [PP_NSTATE];
   longint pp_bail  [PP_NBAIL];
   longint pp_uopmiss [PP_NUOPMISS];
+  // A boundary-unavailable miss can be a dense-line overflow, or an unusual
+  // branch target.  Its byte-offset distribution determines whether a small
+  // tail sidecar is sufficient; aggregate miss counts alone cannot answer that.
+  longint pp_uopmiss_off [IC_LINE];
+  longint pp_uop_sfetch;  // successful registered-window hand-offs
   // Bucket 9 (`fp_sys_bail`) is deliberately broad.  Split its actual hand-off
   // cause so an implementation change targets a demonstrated eligibility
   // limit, rather than blindly widening the system fast path.
@@ -9610,6 +9663,8 @@ module core
       end
       for (int i=0;i<PP_NBAIL;i++)  pp_bail[i]  <= 64'd0;
       for (int i=0;i<PP_NUOPMISS;i++) pp_uopmiss[i] <= 64'd0;
+      for (int i=0;i<IC_LINE;i++) pp_uopmiss_off[i] <= 64'd0;
+      pp_uop_sfetch <= 64'd0;
       for (int i=0;i<PP_NSBAIL;i++) pp_sys_bail[i] <= 64'd0;
       pp_cycles <= 64'd0; pp_ret1 <= 64'd0; pp_ret2 <= 64'd0; pp_divert <= 64'd0; pp_shadow <= 64'd0; pp_shret <= 64'd0;
     end else begin
@@ -9624,6 +9679,7 @@ module core
         pp_mem_ack[int'(state) & (PP_NSTATE-1)] <= pp_mem_ack[int'(state) & (PP_NSTATE-1)] + 64'd1;
       if (retire_valid)  pp_ret1 <= pp_ret1 + 64'd1;
       if (retire2_valid) pp_ret2 <= pp_ret2 + 64'd1;
+      if (sfetch_uop_fast) pp_uop_sfetch <= pp_uop_sfetch + 64'd1;
 
       // The S_PIPE chain, in the spine's exact priority order. Mirrors
       // core_gpr_wb.svh's guard chain one-for-one -- if that chain is edited and
@@ -9670,8 +9726,10 @@ module core
           else if (!exec_issue_ok) pp_uopmiss[1] <= pp_uopmiss[1] + 64'd1;
           else if (!(uc_u_in_b ? uc_pdvB : uc_pdvA))
             pp_uopmiss[2] <= pp_uopmiss[2] + 64'd1;
-          else
+          else begin
             pp_uopmiss[3] <= pp_uopmiss[3] + 64'd1;
+            pp_uopmiss_off[flin[4:0]] <= pp_uopmiss_off[flin[4:0]] + 64'd1;
+          end
 `endif
         end
         if (b == 9) begin
@@ -9736,6 +9794,11 @@ module core
       $display("    executable-state flush             %10d", pp_uopmiss[1]);
       $display("    line not predecoded-valid          %10d", pp_uopmiss[2]);
       $display("    boundary unavailable                %10d", pp_uopmiss[3]);
+      $display("    resident uop fetch hand-offs        %10d", pp_uop_sfetch);
+      $display("  -- unavailable-boundary byte offsets (only non-zero) --");
+      for (int i=0;i<IC_LINE;i++)
+        if (pp_uopmiss_off[i] != 0)
+          $display("    offset %2d                         %10d", i, pp_uopmiss_off[i]);
     end
     if (pp_bail[9] != 0) begin
       $display("");
@@ -9813,7 +9876,7 @@ module core
       // line nor a predecoded slot. These trip if a future change reintroduces
       // a consumption path around the gate (the RSM leak: a cached SMRAM line
       // retiring in the cycle after SMM closes).
-      if (exec_flush_all && sfetch_fast)
+      if (exec_flush_all && (sfetch_fast || sfetch_uop_fast))
         $error("FETCH/FLUSH: the fast fetch window is serving while exec_flush_all is asserted -- invalidation must beat consumption");
 `ifdef VEN_UOPCACHE
       if (exec_flush_all && uop_hit)
