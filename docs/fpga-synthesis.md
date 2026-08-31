@@ -29,8 +29,9 @@ hotspot** — the bright band in the placement-density map (peak ≈ 340 cells /
 
 **Best numbers** — OOC `core`, `+VTM_NO_DPI`, 15 ns target. Two configs: the
 **verified production** config (narrowb, **bit-exact vs QEMU 75/75 + cycle bands**)
-and the **experimental predecoded µop-cache** (`+VEN_UOPCACHE`, synth/APR-valid;
-not yet verify-hardened) which deletes the byte-window decoder for a slot read:
+and the predecoded µop-cache (`+VEN_UOPCACHE`), which deletes the byte-window
+decoder for a slot read.  The active implementation uses the full P5 8 KiB,
+2-way L1 geometry in both cases:
 
 | Resource | narrowb (production) | `+VEN_UOPCACHE` | Available |
 |---|---:|---:|---:|
@@ -50,9 +51,10 @@ not yet verify-hardened) which deletes the byte-window decoder for a slot read:
 real 51.7 MHz** (0 failed nets, routed WNS −4.35 ns) — while the production byte-window config
 **cannot route at all** (the router gives up with 42,392 congestion overlaps). The µop-cache is
 the **first config to route the design legally at a tight clock**, vs the prior ~35–42 MHz
-*estimate*. Caveat: `+VEN_UOPCACHE` is an Fmax/APR demonstrator — it is **synth/route-valid and
-its FP/area changes are bit-exact, but the slot-read front-end is not yet functionally
-verify-hardened** (the `uop_ready` stall + branch-into-middle re-predecode are unbuilt); the
+*estimate*.  The µop-cache keeps a conservative fallback for an unavailable or
+incomplete predecode, and `+VEN_UOPCACHE_CHECK` is a simulation-only assertion
+that compares every issued resident slot with the live decoder.  It is a
+diagnostic complement to, not a replacement for, the differential gates.  The
 **narrowb config is the verified-bit-exact 75/75 production build**.
 
 - **Area — the FP datapath shrink ([`TIMING_PROBLEMS.md`](../fpga/TIMING_PROBLEMS.md) P0-13):
@@ -153,19 +155,21 @@ is retained for the diagnosis, not as a reproduction recipe.
 not the cache** — it is the FP deferred-commit cone `fpp_b_reg[66] → u_fpu_state/fpr_reg`,
 which the smaller cache doesn't touch. So the icache congestion gates *routability and the
 endpoint tail*, while the *single critical path* is FP-datapath-bound. Closing toward 66 MHz
-needs the FP cone pipelined, not less cache — and shrinking the cache is a real area/tail win
-that's free to keep (functionally verified), just not the Fmax lever. Reproduce:
-`HALF=1 CONFIG=uopcache MODE=full OUTTAG=_half vivado -mode batch -source fpga/scripts/apr_run.tcl`.
+needs the FP cone pipelined, not less cache.  The cache reduction was a diagnostic only and is
+deliberately not retained: `VEN_CACHE_HALF` is rejected at elaboration and no current build
+recipe accepts `HALF=1`.
 
-### Half-cache to 60 MHz: the 2-stage FP commit (`+VEN_FP_PIPE2`)
+### Historical half-cache checkpoint: the 2-stage FP commit (`+VEN_FP_PIPE2`)
 
-The half-cache section above ends on the diagnosis that the Fmax wall is the FP
-deferred-commit cone, not the cache. This closes it. Every leaf cell of the **63 MHz**
-build, colored by RTL module (luminance = sub-block):
+This retired checkpoint established that the Fmax wall is the FP deferred-commit
+cone, not cache capacity.  It is retained only to document that finding; no
+current implementation or FPGA recipe uses its reduced-cache geometry. Every leaf
+cell of the historical **63 MHz** build, colored by RTL module (luminance =
+sub-block):
 
 ![Ventium core on the KV260, half-cache + FP_PIPE2, routed 63 MHz](fpga-device-view.png)
 
-**The lever — measured, not guessed.** A timing-driven P&R sweep over the half-cache
+**The lever — measured, not guessed.** A timing-driven P&R sweep over this historical
 checkpoint (one synth, many place/route directives, all over-constrained @ 15 ns) lifts
 the routed Fmax from the production congestion directives' **50.1 → 52.6 MHz**
 (`ExtraNetDelay_high` place + `Explore` route) — but no directive, Pblock, or retiming
@@ -191,7 +195,7 @@ a cycle-model change:
 | M5 FP cycle bands (faddchain CPI ~3, fpindep < that) | **held** |
 | 1M-vector `f_eval_s2∘f_eval_s1 == f_eval` | **bit-exact** |
 
-The result (same 15 ns target, half-cache µop-cache base):
+The historical result (same 15 ns target, reduced-cache µop-cache base):
 
 | Metric (routed OOC, KV260) | half (1-stage `VEN_FP_PIPE`) | half **`+VEN_FP_PIPE2`** | Δ |
 |---|---:|---:|---:|
@@ -218,7 +222,7 @@ CARRY8 in series. Computing **one divide-by-100** instead and taking the two low
 `q%100` (a 0..99 value → a 7-bit extract) halves that cone — **bit-exact and cycle-neutral**
 (same 2-digits/clock cadence, `make verify-bcd` 40 k vectors). Synth rises **78.4 → 80.6 MHz**
 and the binder moves to the FP_PIPE2 stage-1 front (`fpp → fpp2_s1`). Routed, with
-`ExtraNetDelay_high` placement (the right placer once the wall is route-bound), the half-cache
+`ExtraNetDelay_high` placement (the right placer once the wall is route-bound), the historical
 build reaches **65.3 MHz** — the worst path now the **µop-cache fill → front-end cluster**
 (`store_bmap → eip`/`ic_age`/`store_slots`, 64–73 % routing). That cluster is route-bound and
 **placement-variable** (45–65 MHz across directives; `ExtraTimingOpt` and forced fanout
@@ -227,7 +231,7 @@ floorplan) targets, not a single combinational cone. Reproduce: `STAGE=pnr FP_PI
 STRAT=fp2b_netdelay PLACE_DIR=ExtraNetDelay_high ROUTE_DIR=Explore`; `make verify-bcd`.
 
 > The ÷100 step is now **opt-in (`+VEN_BCD_DIV100`)**: it only helps when `u_bcd` is the worst
-> path (this OOC half-cache config), and in the full SoC below the front-end cluster binds long
+> path (this historical OOC configuration), and in the full SoC below the front-end cluster binds long
 > before `u_bcd` does — so the default leaves it off (back to two chained ÷10), keeping `u_bcd`
 > smaller where it isn't critical. Both forms are bit-exact (`make verify-bcd` either way).
 
@@ -291,12 +295,13 @@ would hold 60+; on the K26, **40 MHz is the deployable we keep** — with `sw/ps
 venclk.sh` as the PS-side silicon-margin probe (steps the PL0 divider 40→50 MHz with a
 gate-proven firmware smoke test per step).
 
-**The current deployable** (`fpga/build/kv260_soc_impl_linux_40/`, the image the SD cards carry —
-uop-cache + IC-BRAM + half-cache + FP_PIPE2 + FE_PIPE + L1_AXI + the PS→core IRQ seam, with
-`REMAP_BASE=0x4000_0000`): routed at the 40 MHz target with **WNS +0.104 ns / WHS +0.008 ns, 0
+**Historical deployable checkpoint** (`fpga/build/kv260_soc_impl_linux_40/`, an earlier SD-card
+image — uop-cache + IC-BRAM + reduced-cache + FP_PIPE2 + FE_PIPE + L1_AXI + the PS→core IRQ
+seam, with `REMAP_BASE=0x4000_0000`): routed at the 40 MHz target with **WNS +0.104 ns / WHS +0.008 ns, 0
 failing endpoints** — CLB LUTs **94,712 / 117,120 (80.9 %)**, registers 31,208 (13.3 %), BRAM 40
 (27.8 %), DSP 31 (2.5 %), CLB occupancy 98.3 %. The device views below are rendered from this
-routed checkpoint.
+routed checkpoint.  It must not be used as a current build recipe: all current images use the
+full P5 8 KiB/2-way L1 configuration.
 
 Every leaf cell of the routed full SoC, colored by RTL module (core blocks + the L1/AXI + PS-bridge
 + BD interconnect that OOC views omit):

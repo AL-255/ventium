@@ -119,8 +119,9 @@ Quick reference
    * - ``VEN_UOPCACHE_CHECK``
      - boolean define
      - off
-     - Sim scaffold re-instantiating the reference decode beside the µop-cache
-       slot read.
+     - Simulation-only assertion: re-instantiates the live decoder beside the
+       µop-cache slot read and stops on a resident-slot mismatch.  It is never
+       enabled for synthesis.
    * - ``VEN_FE_PIPE``
      - boolean define
      - off — live TLB lookups
