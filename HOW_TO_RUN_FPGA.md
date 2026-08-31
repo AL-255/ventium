@@ -334,9 +334,12 @@ from `SIGTERM` to `SIGKILL` if a stale process survives 45 seconds.
 The local wrapper evaluates the external authoritative Tcl after correcting
 its stale 6 MHz interface metadata to 3 MHz, models the running board's IOPLL
 `/15` 100 MHz PL clock, enables the verified `VEN_SYS_FASTPATH` plus its narrow
-equal-common-base `VEN_SYS_FASTPATH_RELOC` and full-limit DS
-`MOV r32,[base{+disp8|+disp32}]` `VEN_SYS_FASTLOAD_FLAT` extensions (the latter differential-tested with a
-common non-zero base and non-identity paging; not `VEN_SYS_FASTPATH_ALL`),
+equal-common-base `VEN_SYS_FASTPATH_RELOC`, full-limit DS/SS
+`MOV r32,[...]` `VEN_SYS_FASTLOAD_FLAT`, and matching non-page-crossing
+`MOV [...],r32` `VEN_SYS_FASTSTORE_FLAT` extensions. The read/write forms are
+differential-tested with a common non-zero base and non-identity paging; the
+store path also has a protected #PF/restart test and deliberately leaves a
+4 KiB-crossing dword on the mature fragment engine (not `VEN_SYS_FASTPATH_ALL`),
 caps Vivado at four threads, and selects `AreaOptimized_high`. The direct
 upstream script still labels the `/32` clock as `/16`/6 MHz and imports a PS
 clock configuration that does not match stock Linux; do not bypass the wrapper
@@ -358,7 +361,10 @@ VEN_FPGA_FASTPATH=0 VEN_FPGA_JOBS=2 \
 fast-path defines. `VEN_FPGA_RELOC_FASTPATH` also defaults to `1`; setting it
 to `0` retains the stricter base-zero subset. `VEN_FPGA_FASTLOAD` defaults to
 `1`; setting it to `0` retains the system register/control path but sends all
-memory loads to the slow FSM for a source-identical diagnostic A/B.
+memory loads (and therefore dependent fast stores) to the slow FSM for a
+source-identical diagnostic A/B. `VEN_FPGA_FASTSTORE` defaults to `1`; setting
+it to `0` leaves the read path enabled but returns only the compact system
+stores to the slow FSM. It cannot be enabled when `VEN_FPGA_FASTLOAD=0`.
 `VEN_FPGA_JOBS` accepts 1 through 4 and defaults to 4. Use 2 on the current
 build host: a four-worker run lost synthesis workers under
 memory pressure, while the successful two-worker run still reached roughly

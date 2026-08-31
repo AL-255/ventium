@@ -305,11 +305,16 @@ module ventium_top
 );
 
   // A shippable Ventium image has the P5's 8 KiB, 2-way, 32-byte-line I$ and
-  // D$.  VEN_CACHE_HALF was an old timing experiment.  Do not silently accept
-  // it: an undefined module makes every simulator and synthesis elaborator
-  // reject stale build scripts before they can produce a mislabeled image.
+  // D$.  VEN_CACHE_HALF and VEN_IC_NARROWB were old congestion experiments.
+  // Do not silently accept either: undefined modules make every simulator and
+  // synthesis elaborator reject stale build scripts before they can produce a
+  // mislabeled image.  The narrow-port leaf implementation remains useful for
+  // isolated icache testing, but is not a processor configuration.
 `ifdef VEN_CACHE_HALF
   VEN_CACHE_HALF_IS_RETIRED__REMOVE_THIS_DEFINE u_ven_cache_half_rejected ();
+`endif
+`ifdef VEN_IC_NARROWB
+  VEN_IC_NARROWB_IS_RETIRED__REMOVE_THIS_DEFINE u_ven_ic_narrowb_rejected ();
 `endif
 
   // ---------------------------------------------------------------------------

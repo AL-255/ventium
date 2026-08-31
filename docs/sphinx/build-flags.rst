@@ -134,8 +134,9 @@ Quick reference
        prefetch.
    * - ``VEN_IC_NARROWB``
      - boolean define
-     - off — full-width port B
-     - Halves the icache straddle read port (distributed-RAM front end only).
+     - retired — rejected by ``ventium_top``
+     - Former distributed-RAM straddle-read pruning experiment; it is not a
+       processor or FPGA configuration.
    * - ``VEN_IC_COLLIDE_DBG``
      - boolean define
      - off (needs ``VEN_IC_BRAM``)
@@ -184,6 +185,35 @@ Quick reference
      - off
      - Sim-only ``$display`` forensic trace of IRQ entry / IF / CS / IRET
        deltas.
+   * - **System execution profile**
+     -
+     -
+     -
+   * - ``VEN_SYS_FASTPATH``
+     - boolean define
+     - off
+     - Enables the guarded S_PIPE execution profile for eligible 32-bit
+       protected-mode clients; non-eligible instructions retain the checked
+       slow FSM.
+   * - ``VEN_SYS_FASTPATH_RELOC``
+     - boolean define
+     - off
+     - Extends that profile from base-zero clients to the audited equal-common-
+       base CS/DS/SS/ES client contract.
+   * - ``VEN_SYS_FASTLOAD_FLAT``
+     - boolean define
+     - off
+     - Allows the decoder's compact DS/SS full-limit ``MOV r32,[...]`` forms
+       through S_PIPE while retaining normal segmentation, D-TLB, page-walk,
+       permission, and fragment processing.
+   * - ``VEN_SYS_FASTSTORE_FLAT``
+     - boolean define
+     - off
+     - Independently admits matching compact ``MOV [...],r32`` forms only when
+       the same full-limit segment contract holds and the dword does not cross
+       a 4 KiB linear boundary. Cross-page writes deliberately retain S_STORE's
+       probe-before-write fragment sequence. Verified by ``pfaststore`` and
+       ``psysfpload`` QEMU differential gates.
    * - **Memory system and SoC platform**
      -
      -
@@ -826,7 +856,7 @@ project convention every flag is opt-in: the default
 build is the byte/cycle-identical golden-matched reference, and each flag is
 one of (a) a bit-exact Fmax/area implementation option whose cycle behaviour
 is identical or stays inside the loose M4/M5 bands (``VEN_BTB_PIPE``,
-``VEN_IC_NARROWB``, ``VEN_IC_BRAM``); (b) an architecturally bit-exact but
+``VEN_IC_BRAM``); (b) an architecturally bit-exact but
 explicitly non-cycle-faithful demonstrator (``VEN_FE_PIPE``) plus the
 common-case-correct, not-yet-verify-hardened ``VEN_UOPCACHE``; or
 (c) a purely observational diagnostic counter layer (``VEN_IC_COLLIDE_DBG`` on
@@ -834,7 +864,8 @@ the BRAM icache, ``VEN_UOP_PERF`` on the µop cache), documented at the end of
 this section.
 
 The deployable KV260 SoC bitstream sets ``VEN_BTB_PIPE`` + ``VEN_IC_BRAM`` +
-``VEN_UOPCACHE`` + ``VEN_FE_PIPE`` (plus the FP and iterative-engine flags).
+``VEN_UOPCACHE`` (plus the FP and iterative-engine flags). ``VEN_FE_PIPE`` is
+an explicit optional route experiment, not part of the default profile.
 Standalone ``icache`` and ``ven_l1d`` unit tests may still vary their *module*
 parameters to exercise derived index/tag logic, but no integrated RTL or FPGA
 profile has a cache-geometry build switch. The
@@ -1031,7 +1062,9 @@ copies — forgetting that when reasoning about SMC/fill coherence is a trap.
 ``VEN_IC_NARROWB``
 ------------------
 
-Static width-pruning of the icache's second (straddle) read port in the
+**Retired processor configuration.** The top level rejects this define; this
+historical description is retained only to explain old reports. It was static
+width-pruning of the icache's second (straddle) read port in the
 *distributed-RAM* (non-BRAM) front end. ``rd_lineB`` is only ever byte-sliced
 at low positions — the worst case is ``flin[4:0] = 31`` plus a 6-byte U length
 plus index 5, minus 32, i.e. byte 10 — so the flag drives only the low

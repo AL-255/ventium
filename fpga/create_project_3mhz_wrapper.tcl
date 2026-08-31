@@ -6,13 +6,14 @@
 # validation.  Evaluate the authoritative flow script with that stale metadata
 # corrected and, by default, with the repaired system fast path enabled for
 # literal-flat and equal-common-base 32-bit protected-mode clients, including
-# the independently verified full-limit DS MOV r32,[base+disp] load subset.  Set
+# the independently verified full-limit DS/SS MOV r32,[...] and MOV [...],r32
+# subset. Set
 # VEN_FPGA_FASTPATH=0 for a source-identical diagnostic A/B image with all
 # system-path defines omitted; set VEN_FPGA_RELOC_FASTPATH=0 to retain only the
-# base-zero subset; set VEN_FPGA_FASTLOAD=0 to retain the system control path
-# while sending every memory load to the slow FSM.  VEN_SYS_FASTPATH_ALL remains
-# an experimental real-mode/heterogeneous-segmentation expansion and is not
-# part of any image.
+# base-zero subset; set VEN_FPGA_FASTLOAD=0 or VEN_FPGA_FASTSTORE=0 to retain
+# the system control path while sending the respective memory direction to the
+# slow FSM. VEN_SYS_FASTPATH_ALL remains an experimental
+# real-mode/heterogeneous-segmentation expansion and is not part of any image.
 # The stock Linux platform leaves pl0_ref at exactly 100 MHz even though the
 # external project asks Vivado to model 96 MHz; the previous routed image used
 # 95.456 MHz and constrained the /32 core to 2.983 MHz while silicon ran at
@@ -94,9 +95,11 @@ if {[info exists ::env(VEN_FPGA_SKIP_PRESET)] && $::env(VEN_FPGA_SKIP_PRESET)} {
 }
 
 # The core filelist contains both FPU implementations.  The shipped board
-# profile selects the compact shared hierarchy explicitly; non-shared test
-# configurations still elaborate the legacy owner as a control.
-set define_span {VEN_FP_PC_RELAX VEN_FP_SHARED VEN_SYS_FASTPATH VEN_SYS_FASTPATH_RELOC VEN_SYS_FASTLOAD_FLAT VEN_FAST_RETRACE}
+# profile selects the compact shared hierarchy, the P5's full 8 KiB L1 caches,
+# and the BRAM/uop-cache front end explicitly.  The upstream recovery script
+# still names the retired half-cache/narrow I-cache experiment, so it is
+# rewritten below before Vivado sees its definition list.
+set define_span {VEN_FP_PC_RELAX VEN_FP_SHARED VEN_SYS_FASTPATH VEN_SYS_FASTPATH_RELOC VEN_SYS_FASTLOAD_FLAT VEN_SYS_FASTSTORE_FLAT VEN_FAST_RETRACE}
 if {[info exists ::env(VEN_FPGA_FASTPATH)] && !$::env(VEN_FPGA_FASTPATH)} {
     set define_span {VEN_FP_PC_RELAX VEN_FP_SHARED VEN_FAST_RETRACE}
     puts "Diagnostic build: all VEN_SYS_FASTPATH defines disabled by VEN_FPGA_FASTPATH=0"
@@ -110,18 +113,21 @@ if {[info exists ::env(VEN_FPGA_FASTPATH)] && !$::env(VEN_FPGA_FASTPATH)} {
 # has removed it.
 if {[info exists ::env(VEN_FPGA_RELOC_FASTPATH)] && !$::env(VEN_FPGA_RELOC_FASTPATH)} {
     if {[lsearch -exact $define_span VEN_SYS_FASTPATH] >= 0} {
-        set define_span {VEN_FP_PC_RELAX VEN_FP_SHARED VEN_SYS_FASTPATH VEN_SYS_FASTLOAD_FLAT VEN_FAST_RETRACE}
+        set define_span {VEN_FP_PC_RELAX VEN_FP_SHARED VEN_SYS_FASTPATH VEN_SYS_FASTLOAD_FLAT VEN_SYS_FASTSTORE_FLAT VEN_FAST_RETRACE}
         puts "Diagnostic build: VEN_SYS_FASTPATH_RELOC disabled by VEN_FPGA_RELOC_FASTPATH=0"
     } else {
         puts "Diagnostic build: VEN_SYS_FASTPATH_RELOC already absent because VEN_FPGA_FASTPATH=0"
     }
 }
-# The default fast-load subset is the 32-bit full-limit DS MOV
-# r32,[base{+disp8|+disp32}] family (no SIB/SS-default/absolute form).
+# The default fast-memory subset is the compact 32-bit full-limit DS/SS MOV
+# r32,[...] / MOV [...],r32 family accepted by decode.sv. Store admission is
+# intentionally no wider than load admission and excludes a dword crossing a
+# 4 KiB linear boundary, which remains on the mature S_STORE fragment path.
 # It retains the normal cur_lin, D-TLB/page-walk, permission and fragment-engine
-# machinery; `psysfpload` differentially covers common non-zero bases plus a
-# non-identity 4 KiB mapping.  VEN_FPGA_FASTLOAD=0 is a source-identical
-# rollback A/B, not a path expansion knob.
+# machinery; `psysfpload` and `pfaststore` differentially cover a common
+# non-zero base/non-identity 4 KiB mapping and a #PF-restart/split-store case.
+# VEN_FPGA_FASTLOAD/FASTSTORE=0 are source-identical rollback A/B controls, not
+# path-expansion knobs.
 if {[info exists ::env(VEN_FPGA_FASTLOAD)] && $::env(VEN_FPGA_FASTLOAD)} {
     if {[lsearch -exact $define_span VEN_SYS_FASTPATH] < 0} {
         error "VEN_FPGA_FASTLOAD requires VEN_SYS_FASTPATH"
@@ -134,6 +140,28 @@ if {[info exists ::env(VEN_FPGA_FASTLOAD)] && !$::env(VEN_FPGA_FASTLOAD)} {
         puts "Diagnostic build: VEN_SYS_FASTLOAD_FLAT disabled by VEN_FPGA_FASTLOAD=0"
     } else {
         puts "Diagnostic build: VEN_SYS_FASTLOAD_FLAT already absent because VEN_FPGA_FASTPATH=0"
+    }
+    set fpga_faststore_at [lsearch -exact $define_span VEN_SYS_FASTSTORE_FLAT]
+    if {$fpga_faststore_at >= 0} {
+        set define_span [lreplace $define_span $fpga_faststore_at $fpga_faststore_at]
+        puts "Diagnostic build: VEN_SYS_FASTSTORE_FLAT disabled because it requires VEN_SYS_FASTLOAD_FLAT"
+    }
+}
+if {[info exists ::env(VEN_FPGA_FASTSTORE)] && $::env(VEN_FPGA_FASTSTORE)} {
+    if {[lsearch -exact $define_span VEN_SYS_FASTPATH] < 0} {
+        error "VEN_FPGA_FASTSTORE requires VEN_SYS_FASTPATH"
+    }
+    if {[lsearch -exact $define_span VEN_SYS_FASTLOAD_FLAT] < 0} {
+        error "VEN_FPGA_FASTSTORE requires VEN_SYS_FASTLOAD_FLAT"
+    }
+}
+if {[info exists ::env(VEN_FPGA_FASTSTORE)] && !$::env(VEN_FPGA_FASTSTORE)} {
+    set fpga_faststore_at [lsearch -exact $define_span VEN_SYS_FASTSTORE_FLAT]
+    if {$fpga_faststore_at >= 0} {
+        set define_span [lreplace $define_span $fpga_faststore_at $fpga_faststore_at]
+        puts "Diagnostic build: VEN_SYS_FASTSTORE_FLAT disabled by VEN_FPGA_FASTSTORE=0"
+    } else {
+        puts "Diagnostic build: VEN_SYS_FASTSTORE_FLAT already absent because VEN_FPGA_FASTPATH=0 or VEN_FPGA_FASTLOAD=0"
     }
 }
 
@@ -164,6 +192,8 @@ set_property -dict [list \
   CONFIG.PSU__CRL_APB__PL0_REF_CTRL__DIVISOR1 {1} ] $ps} \
     {set c3f 6000000} \
     $core_c3f_span \
+    {VEN_CACHE_HALF VEN_IC_NARROWB} \
+    {VEN_IC_BRAM VEN_UOPCACHE VEN_FP_PIPE2} \
     {VEN_FP_PC_RELAX VEN_FAST_RETRACE} \
     $define_span \
     {CLK3 (core) label = $c3f (actual = pl_clk0/16)} \
@@ -225,6 +255,26 @@ add_files -fileset constrs_1 -norecurse "$HW/bitstream.xdc" "$HW/led.xdc"} \
     puts "## WNS (setup worst slack) = $wns"
     puts "## WHS (hold worst slack) = $whs"} \
 ] $body]
+
+# A full P5 cache geometry is a release invariant, not merely a preferred
+# implementation option.  Inspect the actual `set DEFS {...}` payload (rather
+# than comments in the recovered upstream script) so an upstream-script change
+# cannot silently revive the retired experiment.
+if {![regexp {set DEFS \{([^\}]*)\}} $body -> fpga_defs_text]} {
+    error "refusing FPGA build: could not locate the upstream set DEFS payload"
+}
+set fpga_defs [split $fpga_defs_text]
+if {[lsearch -exact $fpga_defs VEN_CACHE_HALF] >= 0} {
+    error "refusing FPGA build: VEN_CACHE_HALF is retired; use the full P5 L1 configuration"
+}
+if {[lsearch -exact $fpga_defs VEN_IC_NARROWB] >= 0} {
+    error "refusing FPGA build: VEN_IC_NARROWB is retired; use VEN_IC_BRAM + VEN_UOPCACHE"
+}
+foreach required_def {VEN_IC_BRAM VEN_UOPCACHE VEN_FP_PIPE2} {
+    if {[lsearch -exact $fpga_defs $required_def] < 0} {
+        error "refusing FPGA build: full-P5 profile is missing $required_def"
+    }
+}
 
 # The passive scan-out recorder lives in the Ventium worktree rather than the
 # reference-platform checkout.  It is a standalone module instantiated by the
