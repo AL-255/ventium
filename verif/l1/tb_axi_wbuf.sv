@@ -9,7 +9,8 @@
 // AW/W independently, delays B, and emits ordered B responses.  It proves:
 //   1. exactly two CPU memory stores can be admitted while AW/W is blocked;
 //   2. a third store stalls (no unbounded "performance" queue);
-//   3. writes reach AXI in FIFO order once released; and
+//   3. AW/W acceptance alone does NOT free a P5 slot; the third store waits for
+//      the oldest B response, while the second slot may still drain; and
 //   4. a following narrow read cannot present AR until every earlier B completed.
 //
 // This is deliberately a generic memory test: no VGA/Quake address or behavior is
@@ -67,6 +68,7 @@ module tb_axi_wbuf;
   logic [31:0] r_addr_q = '0;
   logic ar_before_drain = 1'b0;
   logic write_order_bad = 1'b0;
+  logic third_aw_before_b = 1'b0;
 
   // This controlled slave can accept pipelined AXI writes.  The DUT always drives
   // AW and W from one active entry; accepting both together is legal AXI and makes
@@ -89,7 +91,7 @@ module tb_axi_wbuf;
     if (!rst_n) begin
       b_pending <= '0; b_seen <= '0; aw_seen <= '0; b_delay <= '0;
       r_pending <= 1'b0; r_addr_q <= '0;
-      ar_before_drain <= 1'b0; write_order_bad <= 1'b0;
+      ar_before_drain <= 1'b0; write_order_bad <= 1'b0; third_aw_before_b <= 1'b0;
       for (int i = 0; i < 256; i++) mem[i] <= 32'd0;
     end else begin
       if (arvalid && (b_seen != 3'd3)) ar_before_drain <= 1'b1;
@@ -99,6 +101,7 @@ module tb_axi_wbuf;
         if (awaddr[9:2] != 8'(aw_seen) + 8'd4) write_order_bad <= 1'b1;
         mem[awaddr[9:2]] <= wdata;
         aw_seen <= aw_seen + 3'd1;
+        if ((aw_seen >= 3'd2) && (b_seen == 3'd0)) third_aw_before_b <= 1'b1;
         if (b_pending == 3'd0) b_delay <= 8'd12;
         b_pending <= b_pending + 3'd1;
       end else if ((b_pending != 3'd0) && (b_delay != 8'd0)) begin
@@ -179,7 +182,7 @@ module tb_axi_wbuf;
     if (m_ack) fail("third store bypassed the fixed two-entry P54C buffer");
     else $display("  ok   third store held while both P54C entries occupied");
 
-    $display("[2] release AXI: FIFO write order and bounded third admission");
+    $display("[2] release AXI: FIFO order; B, not AW/W, frees the P54C slot");
     @(negedge clk) hold_aw <= 1'b0;
     finish_write;
 
@@ -187,6 +190,7 @@ module tb_axi_wbuf;
     do_narrow_read(32'h0000_0018, 32'h3333_3333);
     if (ar_before_drain) fail("AR issued before all earlier write responses drained");
     else $display("  ok   read AR stayed behind all queued writes");
+    if (third_aw_before_b) fail("third AXI write launched before any P54C slot received B");
     if (write_order_bad || aw_seen != 3'd3) fail("AXI write FIFO order/count was wrong");
     else $display("  ok   AXI write order preserved (3 stores)");
     if (!m_idle) fail("master not idle after read/write drain");

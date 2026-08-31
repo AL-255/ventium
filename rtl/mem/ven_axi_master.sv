@@ -335,9 +335,9 @@ module ven_axi_master #(
   // local constant rather than a feature/profile knob: the hardware configuration is
   // one P5 model, and a larger generic queue would both hide ordering mistakes and
   // make the implementation unlike the target processor.  The queue stores CPU
-  // writes before lane alignment; an active entry is one of the two slots until its
-  // final AW/W transfer has been accepted.  AXI B responses may trail that transfer,
-  // but reads wait for those as well (see R_IDLE below).
+  // writes before lane alignment; an entry stays occupied until the LAST response
+  // for its final AXI beat.  AXI B responses therefore cannot accumulate behind an
+  // arbitrarily large hidden interconnect queue (see R_IDLE below).
   localparam int unsigned P5_WBUF_DEPTH = 2;
   localparam int unsigned WBUF_PTRW = $clog2(P5_WBUF_DEPTH);
   localparam int unsigned WBUF_CNTW = $clog2(P5_WBUF_DEPTH + 1);
@@ -350,12 +350,15 @@ module ven_axi_master #(
   logic [3:0]        wq_wstrb[P5_WBUF_DEPTH];
   logic [WBUF_PTRW-1:0] wq_rp, wq_wp;
   logic [WBUF_CNTW-1:0] wq_count;
-  logic                 wr_enq, wr_dispatch, wr_busy;
+  logic [1:0]        wq_bcount[P5_WBUF_DEPTH]; // issued AXI write responses per P5 slot
+  logic [P5_WBUF_DEPTH-1:0] wq_issued;         // final AXI beat accepted for this slot
+  logic                 wr_enq, wr_dispatch, wr_busy, wr_dispatch_slot;
+  logic                 wr_active_slot, b_owner_slot, b_owner_valid, wq_head_release;
   logic [63:0]          q_dsh;
   logic [7:0]           q_ssh;
   logic                 wr_active;
   logic [B_CNTW-1:0]    b_outstanding;
-  logic                 aw_hs, w_hs, b_hs, wr_beat_sent, wr_progress;
+  logic                 aw_hs, w_hs, b_hs, wr_beat_sent, wr_store_final, wr_progress;
 
   // REVIEW2_aug2 H-11: the read burst's beat count, LATCHED with araddr_q at accept.
   // It used to be the constant LINE_BEATS, which is why the L1D could not ask for a
@@ -374,19 +377,62 @@ module ven_axi_master #(
   logic              wbeat;          // 0 = beat A in flight, 1 = beat B in flight
   logic              aw_done, w_done;  // independent handshake latches
 
-  // A write admission is the CPU-facing completion point.  Keep the full, active
-  // entry in the accounting so there are never more than two P54C write-buffer
-  // entries awaiting an AW/W transfer.  Once AXI accepts a beat it is externally
-  // owned; B remains in b_outstanding solely for ordering/error/quiesce purposes.
+  // A write admission is the CPU-facing completion point.  q_count is the P54C
+  // occupancy, not a mere launch queue: it includes unissued, active, and
+  // response-pending stores.  A second slot may begin draining while the oldest
+  // waits for B, but no third CPU write can be admitted before the oldest slot's
+  // final response returns.  This keeps the AXI interconnect from silently
+  // becoming an unbounded extension of the two architectural write buffers.
   always_comb begin
-    q_dsh = {32'd0, wq_wdata[wq_rp]} << {wq_addr[wq_rp][1:0], 3'b000};
-    q_ssh = {4'd0,  wq_wstrb[wq_rp]} << wq_addr[wq_rp][1:0];
+    wr_dispatch       = 1'b0;
+    wr_dispatch_slot  = wq_rp;
+    if (!wr_active && (wq_count != WBUF_CNTW'(0))) begin
+      if (!wq_issued[wq_rp]) begin
+        wr_dispatch = 1'b1;
+      end else if ((wq_count == WBUF_CNTW'(P5_WBUF_DEPTH)) &&
+                   !wq_issued[~wq_rp]) begin
+        // Oldest slot has launched and is awaiting B; the second P5 slot can
+        // drain concurrently, but still remains occupied until ITS B response.
+        wr_dispatch      = 1'b1;
+        wr_dispatch_slot = ~wq_rp;
+      end
+    end
+
+    q_dsh = {32'd0, wq_wdata[wr_dispatch_slot]} <<
+            {wq_addr[wr_dispatch_slot][1:0], 3'b000};
+    q_ssh = {4'd0,  wq_wstrb[wr_dispatch_slot]} <<
+            wq_addr[wr_dispatch_slot][1:0];
+
+    b_outstanding = B_CNTW'(wq_bcount[0]) + B_CNTW'(wq_bcount[1]);
+    b_owner_slot  = wq_rp;
+    b_owner_valid = 1'b0;
+    if ((wq_count != WBUF_CNTW'(0)) && (wq_bcount[wq_rp] != 2'd0)) begin
+      b_owner_valid = 1'b1;
+    end else if ((wq_count == WBUF_CNTW'(P5_WBUF_DEPTH)) &&
+                 (wq_bcount[~wq_rp] != 2'd0)) begin
+      b_owner_slot  = ~wq_rp;
+      b_owner_valid = 1'b1;
+    end
+
+    // The oldest P5 slot may be released only after it has launched its final
+    // beat AND every B response for that (possibly straddling) store has arrived.
+    // Fold the current edge's issue/B handshakes into the test so same-cycle
+    // completion is never lost.
+    wq_head_release = 1'b0;
+    if (wq_count != WBUF_CNTW'(0)) begin
+      automatic logic [1:0] head_b_after;
+      automatic logic       head_final_after;
+      head_b_after = wq_bcount[wq_rp];
+      if (wr_beat_sent && (wr_active_slot == wq_rp)) head_b_after = head_b_after + 2'd1;
+      if (b_hs && b_owner_valid && (b_owner_slot == wq_rp)) head_b_after = head_b_after - 2'd1;
+      head_final_after = wq_issued[wq_rp] ||
+                         (wr_store_final && (wr_active_slot == wq_rp));
+      wq_head_release = head_final_after && (head_b_after == 2'd0);
+    end
   end
   assign wr_enq      = (rst == R_IDLE) && m_req && m_we && !shutdown && !alias_bad &&
-                       ((wq_count + (wr_active ? WBUF_CNTW'(1) : WBUF_CNTW'(0))) < WBUF_CNTW'(P5_WBUF_DEPTH));
-  assign wr_dispatch = !wr_active && (wq_count != WBUF_CNTW'(0));
-  assign wr_busy     = wr_active || (wq_count != WBUF_CNTW'(0)) ||
-                       (b_outstanding != B_CNTW'(0));
+                       (wq_count < WBUF_CNTW'(P5_WBUF_DEPTH));
+  assign wr_busy     = wr_active || (wq_count != WBUF_CNTW'(0));
   assign wst         = wr_busy ? W_RUN : W_IDLE;
 
   // ---- AXI combinational drive ----------------------------------------------
@@ -460,6 +506,7 @@ module ven_axi_master #(
   assign w_hs        = m_axi_wvalid  && m_axi_wready;
   assign b_hs        = m_axi_bvalid  && m_axi_bready;
   assign wr_beat_sent = wr_active && (aw_done || aw_hs) && (w_done || w_hs);
+  assign wr_store_final = wr_beat_sent && (wbeat || !xword_q);
   assign wr_progress = wr_enq || wr_dispatch || aw_hs || w_hs || b_hs;
 
 `ifdef VEN_DBG_CORE
@@ -583,26 +630,27 @@ module ven_axi_master #(
 
   // ---- WRITE-buffer sequencing ----------------------------------------------
   // CPU-facing enqueue, FIFO dispatch, AXI transfer, and B response retirement
-  // are deliberately separate.  In particular, dequeuing an entry after AW/W is
-  // accepted does NOT let a read bypass it: b_outstanding remains part of wr_busy
-  // until the ordered B response has arrived.
+  // are deliberately separate.  Dispatch does NOT dequeue: the entry remains in
+  // the P54C-sized FIFO until its final B response, so a read cannot bypass it.
   always_ff @(posedge core_clk) begin
     if (!core_rst_n) begin
       wq_rp <= '0; wq_wp <= '0; wq_count <= '0;
       for (int i = 0; i < P5_WBUF_DEPTH; i++) begin
         wq_addr[i] <= '0; wq_wdata[i] <= '0; wq_wstrb[i] <= '0;
+        wq_bcount[i] <= 2'd0;
       end
+      wq_issued <= '0;
       wr_active <= 1'b0;
+      wr_active_slot <= 1'b0;
       awaddr_q <= '0; wdata_q <= 32'd0; wstrb_q <= 4'd0;
       awaddr2_q <= '0; wdata2_q <= 32'd0; wstrb2_q <= 4'd0;
       xword_q <= 1'b0; wbeat <= 1'b0; aw_done <= 1'b0; w_done <= 1'b0;
-      b_outstanding <= '0;
       bresp_err <= 1'b0; w_wd <= 16'd0; wd_err_w <= 1'b0;
     end else begin
-      // FIFO accounting permits an enqueue and a dispatch on the same edge.  The
-      // active entry is counted separately by wr_enq's capacity predicate, so this
-      // never turns the two P54C buffers into a three-entry queue.
-      unique case ({wr_enq, wr_dispatch})
+      // Only B-retirement releases a P54C slot.  Dispatch is deliberately NOT a
+      // dequeue: a slot stays counted from CPU admission through its final B.
+      // An enqueue plus a head release can share the ring in one edge.
+      unique case ({wr_enq, wq_head_release})
         2'b10: wq_count <= wq_count + WBUF_CNTW'(1);
         2'b01: wq_count <= wq_count - WBUF_CNTW'(1);
         default: ;
@@ -611,16 +659,19 @@ module ven_axi_master #(
         wq_addr[wq_wp]  <= m_addr;
         wq_wdata[wq_wp] <= m_wdata;
         wq_wstrb[wq_wp] <= m_wstrb;
+        wq_bcount[wq_wp] <= 2'd0;
+        wq_issued[wq_wp] <= 1'b0;
         wq_wp <= wq_wp + WBUF_PTRW'(1);
       end
+      if (wq_head_release) wq_rp <= wq_rp + WBUF_PTRW'(1);
       if (wr_dispatch) begin
         // BYTE-LANE ALIGN (P2 fix): the core's byte zero is shifted onto the
         // matching AXI word lane.  An unaligned 16/32-bit store can spill into
         // exactly one following word; both beats remain adjacent in FIFO order.
-        awaddr_q  <= remap({wq_addr[wq_rp][31:2], 2'b00});
+        awaddr_q  <= remap({wq_addr[wr_dispatch_slot][31:2], 2'b00});
         wdata_q   <= q_dsh[31:0];
         wstrb_q   <= q_ssh[3:0];
-        awaddr2_q <= remap({wq_addr[wq_rp][31:2], 2'b00} + 32'd4);
+        awaddr2_q <= remap({wq_addr[wr_dispatch_slot][31:2], 2'b00} + 32'd4);
         wdata2_q  <= q_dsh[63:32];
         wstrb2_q  <= q_ssh[7:4];
         xword_q   <= (q_ssh[7:4] != 4'd0);
@@ -628,7 +679,7 @@ module ven_axi_master #(
         aw_done   <= 1'b0;
         w_done    <= 1'b0;
         wr_active <= 1'b1;
-        wq_rp     <= wq_rp + WBUF_PTRW'(1);
+        wr_active_slot <= wr_dispatch_slot;
       end
 
       // AW and W complete independently (either order).  A beat becomes an AXI
@@ -658,11 +709,15 @@ module ven_axi_master #(
       // AXI4 orders B responses for one ID.  They are retired in that same order,
       // and any failure stays sticky even if later requests are still draining.
       if (b_hs && m_axi_bresp != 2'b00) bresp_err <= 1'b1;
-      unique case ({wr_beat_sent, b_hs})
-        2'b10: b_outstanding <= b_outstanding + B_CNTW'(1);
-        2'b01: b_outstanding <= b_outstanding - B_CNTW'(1);
-        default: ;
-      endcase
+      for (int i = 0; i < P5_WBUF_DEPTH; i++) begin
+        unique case ({wr_beat_sent && (wr_active_slot == WBUF_PTRW'(i)),
+                     b_hs && b_owner_valid && (b_owner_slot == WBUF_PTRW'(i))})
+          2'b10: wq_bcount[i] <= wq_bcount[i] + 2'd1;
+          2'b01: wq_bcount[i] <= wq_bcount[i] - 2'd1;
+          default: ;
+        endcase
+      end
+      if (wr_store_final) wq_issued[wr_active_slot] <= 1'b1;
 
       // One progress watchdog covers queue dispatch, independent AW/W handshakes,
       // and B retirement.  It retains the old safety property: a hung AXI target
@@ -731,6 +786,11 @@ module ven_axi_master #(
       (rst==R_DATA && m_axi_rvalid && m_axi_rready) |-> (m_axi_rresp == 2'b00));
   bresp_okay: assert property (@(posedge core_clk) disable iff (!core_rst_n)
       b_hs |-> (m_axi_bresp == 2'b00));
+  // BREADY is asserted only for a response owned by one of the two retained P54C
+  // slots.  This catches any future accounting change that would acknowledge an
+  // orphan B (and silently release/underflow the wrong queue entry).
+  bresp_owned: assert property (@(posedge core_clk) disable iff (!core_rst_n)
+      b_hs |-> b_owner_valid);
   no_resp_err: assert property (@(posedge core_clk) disable iff (!core_rst_n)
       (!rresp_err && !bresp_err));
   // every access fits the remap window — but ONLY when no aliasing is configured
