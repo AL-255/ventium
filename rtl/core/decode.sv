@@ -118,7 +118,7 @@ module decode
           d.pairs_first=1'b1;
           d.pairs_second=!(b0[5:3]==3'b010 || b0[5:3]==3'b011);
         end
-        // ---- group1 r/m32, imm8 sign-ext (83 /r ib), reg form ----------------
+        // ---- group1 r/m32, imm8 sign-ext (83 /r ib) --------------------------
         8'h83: begin
           if (mod==2'b11) begin
             d.simple=1'b1; d.len=4'd3; d.alu_op={2'b00,reg_f}; d.wflags=1'b1;
@@ -130,6 +130,58 @@ module decode
             // /2=ADC, /3=SBB are PU (U-only-pairable); never fill V (see above).
             d.pairs_first=1'b1;
             d.pairs_second=!(reg_f==3'b010 || reg_f==3'b011);
+          end else if (!def16 && reg_f==3'b111 && rm!=3'b100 &&
+                       !(mod==2'b00 && rm==3'b101)) begin
+            // CMP r/m32,imm8.  This is a checked READ, never an RMW write:
+            // mem_rdata becomes ALU operand A and the sign-extended immediate
+            // is operand B.  Retain only encodings that fit the six-byte fetch
+            // window (base, base+disp8); the disp32 form remains slow.
+            unique case (mod)
+              2'b00: begin
+                d.simple=1'b1; d.is_mem=1'b1; d.mem_lhs=1'b1; d.len=4'd3;
+                d.alu_op=ALU_CMP; d.wflags=1'b1; d.use_imm=1'b1;
+                d.imm={{24{b2[7]}},b2}; d.base=rm; d.mem_base_en=1'b1;
+                d.mem_ss=(rm==3'b101); d.reads=_onehot(rm); d.addr_mask=_onehot(rm);
+                d.pairs_first=1'b1; d.pairs_second=1'b0;
+              end
+              2'b01: begin
+                d.simple=1'b1; d.is_mem=1'b1; d.mem_lhs=1'b1; d.len=4'd4;
+                d.alu_op=ALU_CMP; d.wflags=1'b1; d.use_imm=1'b1;
+                d.imm={{24{b3[7]}},b3}; d.base=rm; d.mem_base_en=1'b1;
+                d.mem_ss=(rm==3'b101); d.mem_disp={{24{b2[7]}},b2};
+                d.reads=_onehot(rm); d.addr_mask=_onehot(rm);
+                d.pairs_first=1'b1; d.pairs_second=1'b0;
+              end
+              default: ;
+            endcase
+          end else if (!def16 && reg_f==3'b111 && rm==3'b100 &&
+                       !(mod==2'b00 && b2[2:0]==3'b101)) begin
+            // Concrete-base SIB versions of the same read-only CMP.  ESP and
+            // EBP bases select SS; index=ESP means "no index" architecturally.
+            unique case (mod)
+              2'b00: begin
+                d.simple=1'b1; d.is_mem=1'b1; d.mem_lhs=1'b1; d.len=4'd4;
+                d.alu_op=ALU_CMP; d.wflags=1'b1; d.use_imm=1'b1;
+                d.imm={{24{b3[7]}},b3}; d.base=b2[2:0]; d.mem_base_en=1'b1;
+                d.mem_ss=(b2[2:0]==3'b100)||(b2[2:0]==3'b101);
+                d.mem_index=b2[5:3]; d.mem_scale=b2[7:6]; d.mem_index_en=(b2[5:3]!=3'b100);
+                d.reads=_onehot(b2[2:0])|((b2[5:3]!=3'b100)?_onehot(b2[5:3]):8'd0);
+                d.addr_mask=_onehot(b2[2:0])|((b2[5:3]!=3'b100)?_onehot(b2[5:3]):8'd0);
+                d.pairs_first=1'b1; d.pairs_second=1'b0;
+              end
+              2'b01: begin
+                d.simple=1'b1; d.is_mem=1'b1; d.mem_lhs=1'b1; d.len=4'd5;
+                d.alu_op=ALU_CMP; d.wflags=1'b1; d.use_imm=1'b1;
+                d.imm={{24{b4[7]}},b4}; d.base=b2[2:0]; d.mem_base_en=1'b1;
+                d.mem_ss=(b2[2:0]==3'b100)||(b2[2:0]==3'b101);
+                d.mem_index=b2[5:3]; d.mem_scale=b2[7:6]; d.mem_index_en=(b2[5:3]!=3'b100);
+                d.mem_disp={{24{b3[7]}},b3};
+                d.reads=_onehot(b2[2:0])|((b2[5:3]!=3'b100)?_onehot(b2[5:3]):8'd0);
+                d.addr_mask=_onehot(b2[2:0])|((b2[5:3]!=3'b100)?_onehot(b2[5:3]):8'd0);
+                d.pairs_first=1'b1; d.pairs_second=1'b0;
+              end
+              default: ;
+            endcase
           end
         end
         // ---- group1 r/m32, imm32 (81 /r id), reg form — fast-path batch 2 -----
@@ -390,13 +442,62 @@ module decode
             endcase
           end
         end
-        // ---- LEA r32, m (8D /r) : register-indirect form only ----------------
+        // ---- LEA r32, m (8D /r): checked fast-AGU forms ----------------------
         8'h8D: begin
-          if (!def16 && mod==2'b00 && rm!=3'b100 && rm!=3'b101) begin   // step E deferred: 16-bit modrm differs
-            d.simple=1'b1; d.is_lea=1'b1; d.len=4'd2; d.dst=reg_f; d.base=rm;
-            d.wreg=1'b1; d.reads=_onehot(rm); d.writes=_onehot(reg_f);
-            d.addr_mask=_onehot(rm);
+          if (!def16 && mod==2'b00 && rm==3'b101) begin
+            // LEA r32,[disp32] is an offset literal, never an EBP read.  It
+            // exactly fills the six-byte fetch window and has no segment or
+            // translation side effect; it shares the fast AGU only as an adder.
+            d.simple=1'b1; d.is_lea=1'b1; d.len=4'd6; d.dst=reg_f;
+            d.mem_disp={b5,b4,b3,b2}; d.wreg=1'b1; d.writes=_onehot(reg_f);
             d.pairs_first=1'b1; d.pairs_second=1'b1;
+          end else if (!def16 && rm!=3'b100 && !(mod==2'b00 && rm==3'b101)) begin
+            // Non-SIB base{+disp8|+disp32}.  All of these encodings fit the
+            // fetch window; LEA ignores the default segment, but addr_mask
+            // still exposes the address input to the AGI/dependency logic.
+            unique case (mod)
+              2'b00: begin
+                d.simple=1'b1; d.is_lea=1'b1; d.len=4'd2; d.dst=reg_f; d.base=rm;
+                d.mem_base_en=1'b1; d.wreg=1'b1; d.reads=_onehot(rm);
+                d.writes=_onehot(reg_f); d.addr_mask=_onehot(rm);
+                d.pairs_first=1'b1; d.pairs_second=1'b1;
+              end
+              2'b01: begin
+                d.simple=1'b1; d.is_lea=1'b1; d.len=4'd3; d.dst=reg_f; d.base=rm;
+                d.mem_base_en=1'b1; d.mem_disp={{24{b2[7]}},b2}; d.wreg=1'b1;
+                d.reads=_onehot(rm); d.writes=_onehot(reg_f); d.addr_mask=_onehot(rm);
+                d.pairs_first=1'b1; d.pairs_second=1'b1;
+              end
+              2'b10: begin
+                d.simple=1'b1; d.is_lea=1'b1; d.len=4'd6; d.dst=reg_f; d.base=rm;
+                d.mem_base_en=1'b1; d.mem_disp={b5,b4,b3,b2}; d.wreg=1'b1;
+                d.reads=_onehot(rm); d.writes=_onehot(reg_f); d.addr_mask=_onehot(rm);
+                d.pairs_first=1'b1; d.pairs_second=1'b1;
+              end
+              default: ;
+            endcase
+          end else if (!def16 && rm==3'b100 && !(mod==2'b00 && b2[2:0]==3'b101)) begin
+            // Concrete-base SIB LEAs, with no displacement or disp8.  The
+            // disp32 SIB forms are seven bytes and remain on the slow decoder.
+            unique case (mod)
+              2'b00: begin
+                d.simple=1'b1; d.is_lea=1'b1; d.len=4'd3; d.dst=reg_f; d.base=b2[2:0];
+                d.mem_base_en=1'b1; d.mem_index=b2[5:3]; d.mem_scale=b2[7:6];
+                d.mem_index_en=(b2[5:3]!=3'b100); d.wreg=1'b1;
+                d.reads=_onehot(b2[2:0])|((b2[5:3]!=3'b100)?_onehot(b2[5:3]):8'd0);
+                d.writes=_onehot(reg_f); d.addr_mask=_onehot(b2[2:0])|((b2[5:3]!=3'b100)?_onehot(b2[5:3]):8'd0);
+                d.pairs_first=1'b1; d.pairs_second=1'b1;
+              end
+              2'b01: begin
+                d.simple=1'b1; d.is_lea=1'b1; d.len=4'd4; d.dst=reg_f; d.base=b2[2:0];
+                d.mem_base_en=1'b1; d.mem_index=b2[5:3]; d.mem_scale=b2[7:6];
+                d.mem_index_en=(b2[5:3]!=3'b100); d.mem_disp={{24{b3[7]}},b3}; d.wreg=1'b1;
+                d.reads=_onehot(b2[2:0])|((b2[5:3]!=3'b100)?_onehot(b2[5:3]):8'd0);
+                d.writes=_onehot(reg_f); d.addr_mask=_onehot(b2[2:0])|((b2[5:3]!=3'b100)?_onehot(b2[5:3]):8'd0);
+                d.pairs_first=1'b1; d.pairs_second=1'b1;
+              end
+              default: ;
+            endcase
           end
         end
         // ---- shift by imm8 (C1 /4,/5,/6,/7 ib), reg form ---------------------
@@ -426,6 +527,19 @@ module decode
             d.pairs_first=1'b1; d.pairs_second=1'b0;
           end
         end
+        // ---- shift by CL (D3 /4,/5,/6,/7), register form --------------------
+        // The variable-count sibling of D1/C1.  P5 classifies CL shifts as NP:
+        // they execute in one U-pipe cycle but cannot pair.  Keep byte/word and
+        // memory destinations on the slow FSM; the 32-bit register form reuses
+        // the existing shared shifter with an explicit live ECX dependency.
+        8'hD3: begin
+          if (!def16 && mod==2'b11 && reg_f[2]) begin
+            d.simple=1'b1; d.is_shift=1'b1; d.shift_cl=1'b1; d.len=4'd2; d.wflags=1'b1;
+            d.shrot=reg_f; d.dst=rm; d.src=R_ECX; d.wreg=1'b1;
+            d.reads=_onehot(rm)|_onehot(R_ECX); d.writes=_onehot(rm);
+            d.pairs_first=1'b0; d.pairs_second=1'b0;
+          end
+        end
         // ---- TEST eAX, imm32 (A9) --------------------------------------------
         8'hA9: begin
           d.simple=1'b1; d.len=def16?4'd3:4'd5; d.alu_op=ALU_TEST; d.wflags=1'b1;
@@ -451,6 +565,21 @@ module decode
           d.simple=1'b1; d.is_nop=1'b1; d.len=4'd1;
           d.pairs_first=1'b1; d.pairs_second=1'b1;
         end
+        // ---- MOV EAX,moffs32 (A1): checked absolute DS load -----------------
+        // A1 is the compact five-byte global-load form emitted heavily by
+        // non-PIC 32-bit code.  It is semantically the same read contract as
+        // 8B /r disp32: a literal DS offset, dword width, no GPR address input,
+        // and a real mem_ack/fragment-engine wait before the EAX writeback.
+        // A0 (byte), A2/A3 (stores) and operand-size-prefixed A1 stay on the
+        // slow FSM because they need width-specific or store-side machinery.
+        8'hA1: begin
+          if (!def16) begin
+            d.simple=1'b1; d.is_load=1'b1; d.is_mem=1'b1; d.len=4'd5;
+            d.dst=R_EAX; d.mem_disp={b4,b3,b2,b1}; d.wreg=1'b1;
+            d.writes=_onehot(R_EAX);
+            d.pairs_first=1'b1; d.pairs_second=1'b1;
+          end
+        end
         // ---- M6 Erratum 59: MOV moffs8,AL (A2) / MOV moffs,eAX (A3) ----------
         // The absolute-displacement store short forms. CYCLE-MODE ONLY (func mode
         // keeps moffs on the proven slow FSM; the store value is not traced, so
@@ -468,7 +597,9 @@ module decode
         // derails to 0x08048016. That is not a timing-model inaccuracy, it is
         // architectural corruption — and it was LIVE on the FPGA, because the
         // deployed ao486 shim hard-wires cycle_mode=1 (ven_ao486_shim.sv:180-188).
-        // A0..A3 now always take the proven slow store/load FSM. The erratum-59
+        // A0/A2/A3 always take the proven slow byte/store FSM.  The full-dword
+        // A1 load is separately admitted above through the checked load path.
+        // The erratum-59
         // false-EAX-dependency pairing model is given up until the fast path can
         // carry a real store handshake that cannot retire before the write is
         // accepted (the review's recommended shape).

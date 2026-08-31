@@ -32,7 +32,8 @@ module u_pipe
     output logic [31:0] u_flags,    // EFLAGS after the ALU op
     output logic [31:0] u_sh,       // shift/rotate result
     output logic [31:0] u_shm1,     // operand shifted by (count-1) (CC_SRC)
-    output logic        u_shcf      // shift/rotate carry-out
+    output logic        u_shcf,     // shift/rotate carry-out
+    output logic [4:0]  u_shcnt     // effective (imm8 or CL) shift count
 );
 
   // second ALU operand for a fast-path ALU/mov insn: imm, or the source reg, or
@@ -68,11 +69,15 @@ module u_pipe
     // step H. A 16-bit SHL/SHR/SAR/ROL/ROR must shift within 16 bits and take CF/OF from the
     // bit-15 boundary; at 32 bits both the result and the carry are wrong. shrot_result and
     // shrot_cf already take a width (core.sv:2010 passes q_w for the slow path).
-    u_sh    = shrot_result(u_d.shrot, u_a_w, {1'b0,u_d.shimm}, eflags[0], u_d.w16 ? 3'd2 : 3'd4);
-    u_shm1  = (u_d.shimm==5'd0) ? u_dst_val
+    // D3 shifts consume the live low five bits of ECX, supplied as u_src_val
+    // by the decoder.  C1/D1 retain their literal count.  The slow FSM makes
+    // exactly the same `& 5'h1f` selection (core.sv q_shift_cl -> ECX[4:0]).
+    u_shcnt = u_d.shift_cl ? u_src_val[4:0] : u_d.shimm;
+    u_sh    = shrot_result(u_d.shrot, u_a_w, {1'b0,u_shcnt}, eflags[0], u_d.w16 ? 3'd2 : 3'd4);
+    u_shm1  = (u_shcnt==5'd0) ? u_dst_val
               : shrot_result(u_d.shrot, u_dst_val,
-                             {1'b0,u_d.shimm}-6'd1, eflags[0], u_d.w16 ? 3'd2 : 3'd4);
-    u_shcf  = shrot_cf(u_d.shrot, u_a_w, {1'b0,u_d.shimm}, eflags[0], u_d.w16 ? 3'd2 : 3'd4);
+                             {1'b0,u_shcnt}-6'd1, eflags[0], u_d.w16 ? 3'd2 : 3'd4);
+    u_shcf  = shrot_cf(u_d.shrot, u_a_w, {1'b0,u_shcnt}, eflags[0], u_d.w16 ? 3'd2 : 3'd4);
   end
 
 endmodule : u_pipe

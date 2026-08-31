@@ -138,6 +138,48 @@ _start:
     ja      4f
     jmp     .Lfail
 4:
+    # 83 /7 ib: CMP r/m32,imm8 is a checked read-only U-pipe memory form.
+    # Base+disp8 proves the common Quake list-walk encoding and its immediate
+    # sign extension; the SIB case proves that the same AGU contract sees its
+    # index, scale and default DS segment correctly.
+    movl    $0, direct_word
+    leal    direct_word-4, %esi
+    cmpl    $0, 4(%esi)
+    jne     .Lfail
+    movl    $1, direct_word
+    cmpl    $0, 4(%esi)
+    jbe     .Lfail
+    movl    $-1, direct_word
+    cmpl    $-1, 4(%esi)
+    jne     .Lfail
+
+    leal    store_array, %edx
+    movl    $1, %ecx
+    movl    $0, 4(%edx,%ecx,4)
+    cmpl    $0, 4(%edx,%ecx,4)
+    jne     .Lfail
+
+    # A1: MOV EAX,moffs32 is the five-byte absolute global-load encoding.
+    # It is deliberately hand-encoded: GAS normally chooses 8B /r for symbols
+    # when the destination is not EAX, while Quake's EAX globals use A1.
+    movl    $0xa4f16d39, direct_word
+    .byte   0xA1
+    .long   direct_word
+    cmpl    $0xa4f16d39, %eax
+    jne     .Lfail
+
+    # Fast LEA must return the entire effective offset, not merely its base.
+    leal    direct_word-4, %esi
+    leal    4(%esi), %eax
+    cmpl    %esi, %eax
+    je      .Lfail
+    cmpl    $direct_word, %eax
+    jne     .Lfail
+    leal    store_array, %edx
+    leal    4(%edx,%ecx,4), %eax
+    cmpl    $store_array+8, %eax
+    jne     .Lfail
+
     movl    $1, %eax
     xorl    %ebx, %ebx
     int     $0x80

@@ -3905,8 +3905,10 @@ module core
   logic [2:0]  pipe_load_base;
   logic [2:0]  pipe_mem_seg;         // DS or SS selected by the decoded base
   logic [31:0] pipe_load_addr;
+  logic [31:0] v_lea_addr;
   logic [31:0] pipe_store_data;
   logic [31:0] u_alu, u_flags, u_sh, u_shm1; logic u_shcf;
+  logic [4:0]  u_shift_cnt;
   logic [31:0] v_alu, v_flags;
   logic [31:0] u_target, v_target;
   logic [31:0] u_tgt_raw, v_tgt_raw;   // task #56 step G: pre-truncation branch targets   // branch targets
@@ -4275,6 +4277,12 @@ module core
     pipe_mem_seg   = u_d.mem_ss ? 3'(SG_SS) : 3'(SG_DS);
     pipe_load_addr = (u_d.mem_base_en ? gpr_o[u_d.base] : 32'd0) + u_d.mem_disp
                    + (u_d.mem_index_en ? (gpr_o[u_d.mem_index] << u_d.mem_scale) : 32'd0);
+    // LEA uses the same integer AGU arithmetic as a checked U-side memory
+    // access, but never asserts a memory request.  Keep a V-side equivalent
+    // because LEA is UV-pairable; using only its base would silently corrupt
+    // a paired disp/SIB LEA.
+    v_lea_addr = (v_d.mem_base_en ? gpr_o[v_d.base] : 32'd0) + v_d.mem_disp
+               + (v_d.mem_index_en ? (gpr_o[v_d.mem_index] << v_d.mem_scale) : 32'd0);
     pipe_store_data = gpr_o[u_d.src];
 
     // U datapath extracted to core/u_pipe.sv (R3, behaviour-preserving):
@@ -4485,7 +4493,8 @@ module core
     .u_flags   (u_flags),
     .u_sh      (u_sh),
     .u_shm1    (u_shm1),
-    .u_shcf    (u_shcf)
+    .u_shcf    (u_shcf),
+    .u_shcnt   (u_shift_cnt)
   );
 
   // ---- V-pipe datapath (core/v_pipe.sv, R3) --------------------------------

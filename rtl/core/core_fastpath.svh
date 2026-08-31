@@ -449,7 +449,7 @@
 `endif
               end
             end else if (u_d.is_shift) begin
-              if (u_d.shimm!=5'd0) begin
+              if (u_shift_cnt!=5'd0) begin
                 logic [31:0] fl;
                 // SHL/SHR/SAL/SAR (shrot 4..7): SF/ZF/PF from result, AF=0,
                 // CF & OF per QEMU (OF = MSB(shm1) ^ MSB(result)). Matches the

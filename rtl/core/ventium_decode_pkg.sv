@@ -170,6 +170,10 @@ package ventium_decode_pkg;
     logic [31:0] mem_disp;     // MOV r32,[base+index*scale+disp] displacement
     logic        is_nop;
     logic        is_shift;
+    // D3 /4../7 register shifts take their count from CL.  They are U-only
+    // (P5 NP class) but share the exact same 32-bit shifter and flag rules as
+    // C1/D1.  The bit keeps a literal imm8 count distinct from a live ECX read.
+    logic        shift_cl;
     logic [2:0]  shrot;
     logic [4:0]  shimm;
     logic        is_branch;

@@ -858,7 +858,7 @@
           else begin
             // ---- U commit ----
             if (u_d.is_lea) begin
-              gpr_we[u_d.dst]=1'b1; gpr_wd[u_d.dst]=gpr_o[u_d.base];
+              gpr_we[u_d.dst]=1'b1; gpr_wd[u_d.dst]=pipe_load_addr;
             end else if (u_d.is_load) begin
               gpr_we[u_d.dst]=1'b1; gpr_wd[u_d.dst]=mem_rdata;
             end else if (u_d.is_shift) begin
@@ -889,7 +889,7 @@
             // ---- V commit (paired) ----
             if (pipe_pair) begin
               if (v_d.is_lea) begin
-                gpr_we[v_d.dst]=1'b1; gpr_wd[v_d.dst]=gpr_o[v_d.base];
+                gpr_we[v_d.dst]=1'b1; gpr_wd[v_d.dst]=v_lea_addr;
               end else if (v_d.is_branch || v_d.is_nop) begin
                 // no register write
               end else begin
