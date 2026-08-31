@@ -718,6 +718,45 @@ These modes are intrusive. The ring format is build-specific; decode it against
 the exact `rk_ao486_system_pl.v`, `ven_soc_dbg.sv`, and `board_shim.cpp` used to
 build the bitstream/daemon.
 
+### P5 cache-enable boot ROM bootstrap
+
+The upstream ao486 `boot0.rom` assumes a CPU that ignores the reset values of
+`CR0.CD` and `CR0.NW`. Ventium intentionally honours both cache-disable bits.
+Therefore the unmodified ROM leaves the I- and D-cache disabled indefinitely;
+do **not** paper over that firmware defect with `VEN_L1_IGNORE_CD` or a
+workload-specific RTL exception.
+
+`tools/patch_boot0_cache_enable.py` is a deliberately narrow bootstrap while
+the legacy `bcc`/`as86` firmware toolchain is unavailable. It accepts only the
+known 64 KiB release ROM (`e70c8843…84c4331e`), verifies the reset vector and
+the all-zero POST padding, inserts `WBINVD` plus a serializing `MOV CR0` that
+clears only CD/NW, replays the displaced `xor ax,ax`, and recomputes the BIOS
+checksum. It refuses any other ROM rather than silently modifying a future
+source-built image.
+
+```bash
+python3 tools/patch_boot0_cache_enable.py \
+  3rd-party/ao486_MiSTer/releases/boot0.rom \
+  /tmp/boot0-cache-enable.rom
+sha256sum /tmp/boot0-cache-enable.rom
+# dca915c5483793a710ee118c5232aad01ef3191bea7d50c2befb1a47d2dd26a3
+```
+
+The full-PC simulation must first demonstrate a post-POST CR0 with CD/NW
+clear. The 2026-08-31 hardware check likewise changed from
+`CR0=e0000019`, 0.010076 IPC at 45.0007 MHz to `CR0=80000019`, 0.0582 IPC
+during the RAM-backed Quake boot (and 0.0732 IPC after the daemon exited).
+This proves the cache transition; it is not a Quake acceptance result.
+
+If the board root filesystem is full, do not create a second ROM there or
+delete forensic artifacts speculatively. Stage the generated ROM and a rollback
+copy in `/dev/shm`, hash both, then have an operator overwrite the existing
+same-size `/tmp/ao486/boot0.rom` in place and verify its output hash before any
+reset. A normal `ao486d` cold boot is still destructive to guest RAM; use a
+copy of the VHD in `/dev/shm` for diagnostics that must not modify a persistent
+disk. Retain the original ROM hash/image until a source-built replacement is
+available.
+
 ### 11.3 Quake
 
 The board already has `/tmp/ao486/qk_td.vhd`. The current `deploy.sh quake`
