@@ -9655,6 +9655,17 @@ module core
   // cause so an implementation change targets a demonstrated eligibility
   // limit, rather than blindly widening the system fast path.
   longint pp_sys_bail [PP_NSBAIL];
+`ifndef SYNTHESIS
+`ifdef VEN_SLOWOP_PERF
+  // The slow decoder is deliberately the safe fallback.  Attribute its
+  // *non-simple* entries by their actual byte stream before widening that
+  // whitelist: a generic decoding extension is useful only when it covers a
+  // measured instruction family, and this remains entirely outside synthesis.
+  longint unsigned pp_slowop [256];
+  logic [31:0] pp_slowop_first_pc [256];
+  logic [47:0] pp_slowop_first_bytes [256];
+`endif
+`endif
   longint pp_cycles, pp_ret1, pp_ret2;
   longint pp_divert;   // clocks where an interrupt diverted the S_PIPE spine
   longint pp_shadow, pp_shret;   // clocks with irq_shadow set / retires under it
@@ -9692,6 +9703,15 @@ module core
       pp_uop_sfetch <= 64'd0;
       pp_resident_sfetch <= 64'd0;
       for (int i=0;i<PP_NSBAIL;i++) pp_sys_bail[i] <= 64'd0;
+`ifndef SYNTHESIS
+`ifdef VEN_SLOWOP_PERF
+      for (int i=0;i<256;i++) begin
+        pp_slowop[i] <= 64'd0;
+        pp_slowop_first_pc[i] <= 32'd0;
+        pp_slowop_first_bytes[i] <= 48'd0;
+      end
+`endif
+`endif
       pp_cycles <= 64'd0; pp_ret1 <= 64'd0; pp_ret2 <= 64'd0; pp_divert <= 64'd0; pp_shadow <= 64'd0; pp_shret <= 64'd0;
     end else begin
       pp_cycles <= pp_cycles + 64'd1;
@@ -9763,7 +9783,25 @@ module core
           // Keep this priority in lockstep with fp_sys_bail.  An instruction
           // may satisfy more than one conservative exclusion; classifying the
           // first term makes the totals add up exactly to bucket 9.
-          if (!u_d.simple) pp_sys_bail[0] <= pp_sys_bail[0] + 64'd1;
+          if (!u_d.simple) begin
+            pp_sys_bail[0] <= pp_sys_bail[0] + 64'd1;
+`ifndef SYNTHESIS
+`ifdef VEN_SLOWOP_PERF
+            pp_slowop[ic_byte(flin)] <= pp_slowop[ic_byte(flin)] + 64'd1;
+            // Keep a concrete byte window for each first-byte bucket.  Prefix
+            // buckets are expected, and their exemplar distinguishes an
+            // operand/address-size exclusion from the following opcode.
+            if (pp_slowop[ic_byte(flin)] == 0) begin
+              pp_slowop_first_pc[ic_byte(flin)] <= flin;
+              pp_slowop_first_bytes[ic_byte(flin)] <= {
+                ic_byte(flin + 32'd5), ic_byte(flin + 32'd4),
+                ic_byte(flin + 32'd3), ic_byte(flin + 32'd2),
+                ic_byte(flin + 32'd1), ic_byte(flin)
+              };
+            end
+`endif
+`endif
+          end
 `ifdef VEN_SYS_FASTPATH
           else if (sys_mode && !sys_fp_ok) pp_sys_bail[1] <= pp_sys_bail[1] + 64'd1;
           else if (sys_mode && u_d.is_store && !sys_fp_store_ok) pp_sys_bail[2] <= pp_sys_bail[2] + 64'd1;
@@ -9837,6 +9875,18 @@ module core
       $display("    system memory not eligible       %10d", pp_sys_bail[2]);
       $display("    system debug active              %10d", pp_sys_bail[3]);
     end
+`ifndef SYNTHESIS
+`ifdef VEN_SLOWOP_PERF
+    if (pp_sys_bail[0] != 0) begin
+      $display("");
+      $display("  -- non-simple slow-decode entry bytes (only non-zero) --");
+      for (int i=0;i<256;i++)
+        if (pp_slowop[i] != 0)
+          $display("    byte %02x count %10d first-flin=%08x bytes=%012x",
+                   i, pp_slowop[i], pp_slowop_first_pc[i], pp_slowop_first_bytes[i]);
+    end
+`endif
+`endif
     $display("==========================================================");
   end
 `endif

@@ -155,6 +155,11 @@ Quick reference
      - boolean define
      - off (needs ``VEN_UOPCACHE``)
      - µop-cache hit / collide-guard-rewalk counters (diagnostic).
+   * - ``VEN_SLOWOP_PERF``
+     - simulation-only boolean define
+     - off (needs ``VEN_PERF_PROFILE``)
+     - Attributes non-simple S_PIPE-to-slow-decoder hand-offs by first byte,
+       with a representative six-byte instruction window per byte bucket.
    * - ``VEN_L1D_PERF``
      - simulation-only boolean define
      - off
