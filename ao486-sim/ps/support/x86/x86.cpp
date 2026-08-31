@@ -488,7 +488,12 @@ static void hdd_set(int num, char* filename)
 		if (present) cd = 1;
 	}
 
-	if(!present && vhd) present = ide_img_mount(&ide_image[num], filename, 1);
+	// `ide_open()` treats an unrecognised non-CD image as a raw hard disk.  Keep
+	// the x86 full-system harness consistent with it: the checked-in FreeDOS and
+	// Quake boot images are raw `.img` files, not `.vhd` files.  Without this
+	// fallback `--ide image.img` populated CMOS but left HDD0 absent, turning a
+	// supposed cold-boot run into a BIOS no-disk loop.
+	if (!present) present = ide_img_mount(&ide_image[num], filename, 1);
 	if (!cd && is_pcxt())
 	{
 		FILE* fd;
