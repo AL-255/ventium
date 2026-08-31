@@ -62,14 +62,10 @@ set_property file_type SystemVerilog [get_files *.sv]
 add_files -norecurse [glob $ROOT/rtl/core/*.svh]
 set_property file_type {Verilog Header} [get_files *.svh]
 set_property include_dirs [list $ROOT/rtl/core] [current_fileset]
-# uop-cache + full P5 L1 caches + 2-stage FP commit + SoC seams.  The guarded
-# protected-mode fast path is the general DPMI/Win95 throughput path: it only
-# admits checked common-base loads/ALU forms and leaves real mode, stores,
-# faults, and non-flat segment contexts on the architectural slow FSM.
+# uop-cache + full P5 L1 caches + 2-stage FP commit + SoC seams.
 set DEFS {SYNTHESIS VTM_NO_DPI VEN_SRT_ITER VEN_IDIV_ITER VEN_BCD_ITER \
     VEN_FP_PIPE VEN_FP_PIPE2 VEN_IC_BRAM \
-    VEN_L1_AXI VEN_KV260_SOC VEN_SYS_FASTPATH VEN_SYS_FASTPATH_RELOC \
-    VEN_SYS_FASTLOAD_FLAT}
+    VEN_L1_AXI VEN_KV260_SOC}
 # Fetch-path feature defines are env-controllable (default ON, matching linux_40)
 # so a CALL/RET / fetch-redirect synth bug can be bisected by dropping one at a time:
 #   BTB_PIPE=0 (pipelined BTB), UOPCACHE=0 (micro-op cache), FE_PIPE=1 (fetch pipe).
