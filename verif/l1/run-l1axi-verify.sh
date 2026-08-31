@@ -37,14 +37,15 @@ export TB_EXTRA_FLAGS="--l1-axi --quiesce ${L1AXI_QUIESCE:-200000}"
 L1AXI_TARGET="${L1AXI_TARGET:-l1axi}"
 TESTS_DIR="$ROOT/verif/tests"
 WORKER="$ROOT/verif/lib/verify_worker.sh"
-# Resource caps are opt-in: the normal gate retains its historical all-core
-# defaults, while a RAM-constrained host can run the same proof with
-# `VL_J=1 L1AXI_JOBS=1`. Pass VL_J explicitly to the nested make so a
-# Verilator `-j 0` default cannot silently override a caller's cap.
-VL_J="${VL_J:-0}"
+# A whole-core Verilator compile consumes several GiB per C++ process.  Keep the
+# correctness gate safe by default: one compile job, one functional worker, and
+# ungrouped/split C++ sources.  A deliberately provisioned CI host may override
+# these three variables, but an ordinary `make l1` must not OOM the workstation.
+VL_J="${VL_J:-1}"
 [[ "$VL_J" =~ ^[0-9]+$ ]] || { echo "L1AXI-VERIFY-FAIL: VL_J must be a non-negative integer"; exit 2; }
-NCPU="$(nproc 2>/dev/null || echo 4)"; [ "$NCPU" -gt 3 ] && NCPU=$(( NCPU - 2 ))
-NCPU="${L1AXI_JOBS:-$NCPU}"
+VL_SPLIT="${VL_SPLIT:---output-groups 0 --output-split 20000 --output-split-cfuncs 20000}"
+VL_OPT_FAST="${VL_OPT_FAST:--O1}"
+NCPU="${L1AXI_JOBS:-1}"
 [[ "$NCPU" =~ ^[1-9][0-9]*$ ]] || { echo "L1AXI-VERIFY-FAIL: L1AXI_JOBS must be a positive integer"; exit 2; }
 
 [ -x "$QEMU" ]     || { echo "L1AXI-VERIFY-FAIL: qemu-i386 missing: $QEMU"; exit 1; }
@@ -52,8 +53,8 @@ NCPU="${L1AXI_JOBS:-$NCPU}"
 mkdir -p "$WORKDIR"
 rm -f "$WORKDIR"/*.result 2>/dev/null || true
 
-echo "== build the +VEN_L1_AXI tb ($L1AXI_TARGET, VL_J=$VL_J) =="
-make -C "$ROOT/verif/tb" "VL_J=$VL_J" "$L1AXI_TARGET" > "$WORKDIR/build.log" 2>&1 \
+echo "== build the +VEN_L1_AXI tb ($L1AXI_TARGET, VL_J=$VL_J, workers=$NCPU) =="
+make -C "$ROOT/verif/tb" "VL_J=$VL_J" "VL_SPLIT=$VL_SPLIT" "VL_OPT_FAST=$VL_OPT_FAST" "$L1AXI_TARGET" > "$WORKDIR/build.log" 2>&1 \
     || { echo "L1AXI-VERIFY-FAIL (build)"; tail -15 "$WORKDIR/build.log"; exit 1; }
 
 # ---- build the FUNC job list (one per manifest) ----------------------------
@@ -102,7 +103,7 @@ echo "=== L1AXI-VERIFY user-mode (mode-2 functional vs QEMU): PASS=$PASS FAIL=$F
 SYS_DIR="$ROOT/verif/sys/tests"
 SYS_TESTS="pmode ppage pseg ptask pde pcpl pfault pv86 pintr pdebug"
 TB0="$ROOT/verif/tb/obj_dir/tb_ventium"
-[ -x "$TB0" ] || make -C "$ROOT/verif/tb" rtl > "$WORKDIR/build0.log" 2>&1 || true
+[ -x "$TB0" ] || make -C "$ROOT/verif/tb" "VL_J=$VL_J" "VL_SPLIT=$VL_SPLIT" "VL_OPT_FAST=$VL_OPT_FAST" rtl > "$WORKDIR/build0.log" 2>&1 || true
 SPASS=0; SFAIL=0; SFAILED=""
 if [ -x "$TB0" ]; then
   for t in $SYS_TESTS; do
