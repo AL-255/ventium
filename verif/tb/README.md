@@ -88,7 +88,7 @@ make clean      # removes obj_dir, obj_dir_selftest, selftest.vtrace
 | `--entry <hexaddr>` | `0` | entry / reset EIP (informational at M0; recorded in the trace `note`) |
 | `--max-insn N` | `1<<20` | stop after N retired instructions |
 | `--max-cycles M` | `1<<24` | stop after M core clocks |
-| `--quiesce K` | `64` | stop after K consecutive clocks with no retire |
+| `--quiesce K` | `64` (direct/BIU), `4096` (L1/AXI) | stop after K consecutive clocks with no retire; an explicit value always overrides the backend default |
 | `--trace-vcd f` | *(off)* | write a VCD (requires `TRACE=1` build) |
 
 Exit status is `0` on a clean run (quiescence / `--max-*` / `$finish`).

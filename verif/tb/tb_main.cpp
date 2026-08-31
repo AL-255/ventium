@@ -76,6 +76,7 @@ struct Args {
     uint64_t max_insn   = 1ull << 20;
     uint64_t max_cycles = 1ull << 24;
     uint32_t quiesce    = 64;     // K consecutive no-retire cycles => done
+    bool     quiesce_set = false; // preserve an explicit CLI override per backend
     bool     x87        = false;  // emit x87 fields + header x87:true (M3)
     bool     cycle      = false;  // emit cycle-mode trace + header mode:cycle (M4)
     // M5B-int: --bus-mode drives the top bus_mode=1, routing the core memory
@@ -202,7 +203,10 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--init-esp")   a.init_esp   = parse_u32(need("--init-esp"));
         else if (k == "--max-insn")   a.max_insn   = parse_u64(need("--max-insn"));
         else if (k == "--max-cycles") a.max_cycles = parse_u64(need("--max-cycles"));
-        else if (k == "--quiesce")    a.quiesce    = parse_u32(need("--quiesce"));
+        else if (k == "--quiesce")  {
+            a.quiesce     = parse_u32(need("--quiesce"));
+            a.quiesce_set = true;
+        }
         else if (k == "--x87")        a.x87        = true;
         else if (k == "--cycle")      a.cycle      = true;
         else if (k == "--bus-mode")   a.bus_mode   = true;   // M5B-int
@@ -246,6 +250,17 @@ Args parse_args(int argc, char** argv) {
 int main(int argc, char** argv) {
     Verilated::commandArgs(argc, argv);
     Args args = parse_args(argc, argv);
+
+    // A cold L1/AXI instruction fill can legitimately span more than the legacy
+    // 64-cycle no-retirement sentinel (two adjacent 32-byte lines, eight AXI
+    // beats apiece).  Keep the short limit for the direct-memory and BIU gates,
+    // but give the integrated-L1 model enough time to complete its first fill.
+    // An explicit --quiesce remains authoritative for focused deadlock tests.
+    uint32_t quiesce_limit = args.quiesce;
+#ifdef VEN_L1_AXI
+    if (args.l1_axi && !args.quiesce_set)
+        quiesce_limit = 4096;
+#endif
 
     // ---- backing memory + image -------------------------------------------
     ventium::MemModel mem;
@@ -1134,7 +1149,7 @@ int main(int argc, char** argv) {
                 (unsigned long long)cycles);
             break;
         }
-        if (idle >= args.quiesce) {
+        if (idle >= quiesce_limit) {
             std::fprintf(stderr,
                 "tb: stop: quiescent for %u clocks (core idle)\n", idle);
             break;
