@@ -103,6 +103,12 @@ VL_MAKEFLAGS := -MAKEFLAGS OPT_FAST=$(VL_OPT_FAST) -MAKEFLAGS OPT=$(VL_OPT_MARCH
 # --output-split-cfuncs 20000" for big builds).
 VL_J     ?= 1
 VL_SPLIT ?=
+# Do not let `make -j target_a target_b` launch multiple full-core Verilator
+# trees.  Each tree may hold a multi-GiB generated C++ translation unit while
+# compiling, so target-level parallelism defeats the bounded `VL_J` setting.
+# The verification runner builds this producer once, then fans out only the
+# lightweight prebuilt test executions.
+.NOTPARALLEL:
 VL_FLAGS := --cc --exe --build -j $(VL_J) $(VL_SPLIT) \
             $(VL_MAKEFLAGS) \
             -sv --top-module $(TOP) \
