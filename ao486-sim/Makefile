@@ -42,9 +42,13 @@ VEN_SRCS := ao486-sim/ven/sim_ven.cpp ao486-sim/ven/vtm_dpi.cpp \
   ao486-sim/ps/ps_shim.cpp ao486-sim/ps/support/x86/x86.cpp ao486-sim/ps/ide.cpp
 VEN_OBJDIR ?= ao486-sim/obj_dir_ven
 VEN_EXE ?= ao486sim_ven
+# Keep the checked performance profiles explicit at invocation time.  The default
+# remains the conservative full-system build; a run that enables an experiment
+# must name its extra defines and use a separate object directory/executable.
+VEN_EXTRA_DEFS ?=
 ven:
 	cd $(REPO) && $(VERILATOR) $(VFLAGS) \
-	  -Mdir $(VEN_OBJDIR) -o $(VEN_EXE) $(VEN_DEFS) \
+	  -Mdir $(VEN_OBJDIR) -o $(VEN_EXE) $(VEN_DEFS) $(VEN_EXTRA_DEFS) \
 	  -f rtl_ven_core.f -f rtl_ven_soc.f $(VEN_SRCS)
 	@echo "built (ventium-swapped cosim): $(REPO)/$(VEN_OBJDIR)/$(VEN_EXE)"
 	@echo "run from the ao486-sim/ CWD (the BIOS ROMs load via ../3rd-party paths)."
