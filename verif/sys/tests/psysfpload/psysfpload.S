@@ -13,7 +13,9 @@
  * repeatedly executes the
  * deliberately narrow load form admitted by VEN_SYS_FASTLOAD_FLAT:
  *
- *     movl (%esi), %edi       (ModR/M mod=00, base=ESI, no SIB/disp)
+ *     movl (%esi), %edi               (ModR/M base form)
+ *     movl (%esi,%edx,4), %edi        (DS-default SIB form)
+ *     movl 4(%esi,%edx,4), %edi       (DS-default SIB+disp8 form)
  *
  * The datum and ESI are client-relative, so the access is only correct when
  * the DS base is applied.  The loop folds every observed value into EAX;
@@ -121,9 +123,10 @@ pm32_entry:
     /* ESI is an offset within the relocated client.  With paging enabled the
      * load's linear address is 0x80000+ESI and must translate via PT[128] to
      * physical 0x90000+ESI.
-     * Its ModR/M byte is 0x3e: DS:[ESI], with no displacement, SIB, or special
-     * base form. */
+     * The loop also covers DS-default SIB forms with ESI as the concrete base
+     * and EDX as the scaled index. */
     movl    $(pm32_data - pm32_payload), %esi
+    movl    $1, %edx
     xorl    %eax, %eax
     movl    $128, %ecx
 1:
@@ -132,6 +135,10 @@ pm32_entry:
     movl    4(%esi), %edi
     xorl    %edi, %eax
     movl    0x100(%esi), %edi
+    addl    %edi, %eax
+    movl    (%esi,%edx,4), %edi
+    xorl    %edi, %eax
+    movl    4(%esi,%edx,4), %edi
     addl    %edi, %eax
     xorl    $0xa5a5a5a5, %eax
     decl    %ecx
@@ -149,6 +156,8 @@ pm32_entry:
 pm32_data:
     .long   0x6d31c4a7
     .long   0x3e7a19c5
+    .long   0x4a9bf216
+    .long   0xc3817d5e
     .zero   0x100 - (.-pm32_data)
 pm32_disp32_data:
     .long   0x52c0ffee

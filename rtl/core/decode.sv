@@ -172,7 +172,7 @@ module decode
             d.pairs_first=1'b1; d.pairs_second=1'b1;
           end
         end
-        // ---- MOV r32, r/m32 (8B /r): reg form = reg move; DS base+disp load
+        // ---- MOV r32, r/m32 (8B /r): reg form = reg move; checked DS load
         8'h8B: begin
           if (mod==2'b11) begin
             d.simple=1'b1; d.len=4'd2; d.alu_op=ALU_MOV; d.dst=reg_f; d.src=rm;
@@ -203,6 +203,38 @@ module decode
                 d.mem_disp={b5,b4,b3,b2};
                 d.wreg=1'b1; d.reads=_onehot(rm); d.writes=_onehot(reg_f);
                 d.addr_mask=_onehot(rm);
+                d.pairs_first=1'b1; d.pairs_second=1'b1;
+              end
+              default: ;
+            endcase
+          end else if (!def16 && rm==3'b100 && b2[2:0]!=3'b100 && b2[2:0]!=3'b101) begin
+            // MOV r32,[base+index*scale{+disp8}], 32-bit DS-default SIB
+            // forms only. b2 is the SIB byte here. A concrete base is
+            // mandatory: ESP and EBP select SS, while mod00/base=EBP is the
+            // no-base disp32 form. The index never selects a segment, so any
+            // non-ESP index is safe after that base check; index=ESP means no
+            // index by x86 definition. Do NOT add mod10 here: SIB+disp32 is
+            // seven bytes and cannot be safely decoded from the six-byte
+            // fast-path window. Absolute, stack, 16-bit, prefixes, stores,
+            // and every other memory form stay on the slow FSM.
+            unique case (mod)
+              2'b00: begin
+                d.simple=1'b1; d.is_load=1'b1; d.len=4'd3; d.dst=reg_f; d.base=b2[2:0];
+                d.mem_index=b2[5:3]; d.mem_scale=b2[7:6]; d.mem_index_en=(b2[5:3]!=3'b100);
+                d.wreg=1'b1;
+                d.reads=_onehot(b2[2:0]) | ((b2[5:3]!=3'b100) ? _onehot(b2[5:3]) : 8'd0);
+                d.writes=_onehot(reg_f);
+                d.addr_mask=_onehot(b2[2:0]) | ((b2[5:3]!=3'b100) ? _onehot(b2[5:3]) : 8'd0);
+                d.pairs_first=1'b1; d.pairs_second=1'b1;
+              end
+              2'b01: begin
+                d.simple=1'b1; d.is_load=1'b1; d.len=4'd4; d.dst=reg_f; d.base=b2[2:0];
+                d.mem_index=b2[5:3]; d.mem_scale=b2[7:6]; d.mem_index_en=(b2[5:3]!=3'b100);
+                d.mem_disp={{24{b3[7]}},b3};
+                d.wreg=1'b1;
+                d.reads=_onehot(b2[2:0]) | ((b2[5:3]!=3'b100) ? _onehot(b2[5:3]) : 8'd0);
+                d.writes=_onehot(reg_f);
+                d.addr_mask=_onehot(b2[2:0]) | ((b2[5:3]!=3'b100) ? _onehot(b2[5:3]) : 8'd0);
                 d.pairs_first=1'b1; d.pairs_second=1'b1;
               end
               default: ;

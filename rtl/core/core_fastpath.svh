@@ -208,7 +208,7 @@
             agi_wr0<=9'h100; agi_wr1<=9'h100;
 `ifdef VEN_L1_AXI
           end else if (real_bus && pipe_load_req && !mem_ack) begin
-            // P1-1: bus_mode=2 stalling L1 — a base+displacement load MISSED (mem_ack=0
+            // P1-1: bus_mode=2 stalling L1 — a checked DS effective-address load MISSED (mem_ack=0
             // while ven_l1d fills its line from AXI). The ISSUE arm below latches
             // gpr<=mem_rdata UNCONDITIONALLY (the same-cycle-BFM assumption), so
             // bubble the WHOLE issue until the fill completes and mem_ack rises; then

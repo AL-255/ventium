@@ -143,7 +143,13 @@ package ventium_decode_pkg;
     logic        is_lea;
     logic        is_load;
     logic [2:0]  base;
-    logic [31:0] mem_disp;     // MOV r32,[base+disp] fast-load displacement
+    // The audited fast-load subset uses only 32-bit DS-default effective
+    // addresses.  mem_index_en distinguishes a SIB index field of ESP, which
+    // architecturally means "no index", from a real ESP register input.
+    logic [2:0]  mem_index;
+    logic [1:0]  mem_scale;
+    logic        mem_index_en;
+    logic [31:0] mem_disp;     // MOV r32,[base+index*scale+disp] displacement
     logic        is_nop;
     logic        is_shift;
     logic [2:0]  shrot;

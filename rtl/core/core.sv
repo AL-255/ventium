@@ -1164,7 +1164,7 @@ module core
   // VEN_SYS_FASTPATH_ALL: the two things core_fastpath.svh's bail-out comment says the fast path
   // is "unaware of" turn out to be ALREADY IMPLEMENTED elsewhere:
   //   * 16-bit defaults  -> decode_stages.sv:217-218  eff_opsize/eff_addr = pfx ^ def16
-  //   * segment bases    -> core_bus_driver.svh:23    mem_addr = seg_base[SG_DS] + gpr_o[base]
+  //   * segment bases    -> core_bus_driver.svh:23    mem_addr = seg_base[SG_DS] + checked DS EA
   //                         (and core.sv:4364 for cur_lin), comment "M2S.1: add the DS base"
   // So the sys_mode bail-out may simply be a STALE conservative guard from M2S.1 that was never
   // relaxed after the support landed. This variant tests that hypothesis empirically.
@@ -1191,8 +1191,8 @@ module core
   // slow FSM: its initial target included 16-bit BIOS/DPMI code, for which the
   // fast decoder's 32-bit register-indirect load is not a faithful access.
   // A 32-bit flat client is a materially narrower case. Its only fast-load
-  // family is DS-default MOV r32,[base{+disp8|+disp32}] (decode.sv), and the
-  // existing S_PIPE request
+  // family is DS-default MOV r32,[base{+disp8|+disp32}] plus the audited
+  // non-stack SIB no-disp/disp8 forms (decode.sv), and the existing S_PIPE request
   // already flows through cur_lin, the D-TLB/page walker, permissions, and the
   // page-fragment engine. Do not widen this based merely on CS.D/base=0: a
   // finite DS limit would still require the slow path's checked access.
@@ -3902,7 +3902,7 @@ module core
   logic        moffs_falsedep;       // M6 Err59: A2/A3 moffs U + EAX-using V follower
   logic        v_bytes_ok;           // V candidate's full bytes resident in I-cache
   logic        pipe_agi;             // U has an AGI hazard (addr reg written last clk)
-  logic        pipe_load_req;        // U is a checked DS base+disp load (drives the bus)
+  logic        pipe_load_req;        // U is a checked DS effective-address load (drives the bus)
   logic [2:0]  pipe_load_base;
   logic [31:0] pipe_load_addr;
   logic [31:0] u_alu, u_flags, u_sh, u_shm1; logic u_shcf;
@@ -4269,7 +4269,8 @@ module core
     pipe_load_req  = (state==S_PIPE) && !fp_issue_block && pipe_bytes_ok && !fp_sys_bail &&
                      u_d.is_load && !pipe_agi && (mispred_bubbles==3'd0);
     pipe_load_base = u_d.base;
-    pipe_load_addr = gpr_o[u_d.base] + u_d.mem_disp;
+    pipe_load_addr = gpr_o[u_d.base] + u_d.mem_disp
+                   + (u_d.mem_index_en ? (gpr_o[u_d.mem_index] << u_d.mem_scale) : 32'd0);
 
     // U datapath extracted to core/u_pipe.sv (R3, behaviour-preserving):
     // u_alu/u_flags/u_sh/u_shm1/u_shcf are driven by the u_pipe instance below
@@ -4337,12 +4338,12 @@ module core
   // -- was the only variant that reached POST, and why decode16 (24/24) and upipe16
   // (530/530) both passed: neither unit test drives this mirror.
   //
-  // H-01 is folded in here too. decode.sv can mark a 32-bit DS base+disp MOV load
+  // H-01 is folded in here too. decode.sv can mark a checked 32-bit DS MOV load
   // `simple`, and in protected flat 32-bit sys mode sys_fp_ok holds, so such a load
   // could reach the issue arm -- but the D-side request is separately !sys_mode-gated
   // (pipe_load_req below), so it would retire with NO bus request and commit whatever
   // was left on mem_rdata.  The narrowly checked system fast-load profile below
-  // changes that only for full-limit DS MOV r32,[base+disp] forms, which retain
+  // changes that only for full-limit DS effective-address forms, which retain
   // cur_lin, D-TLB, permission, page-walk and fragment-engine handling.
   // ---- canonical fast-path INTERRUPT DIVERT --------------------------------
   // Found by re-reviewing the fast path after C-01. Task #57 added interrupt
@@ -4427,7 +4428,7 @@ module core
   assign fp_sys_bail = !u_d.simple
                     || (sys_mode && !sys_fp_ok)
                     // H-01: memory forms remain slow except the explicitly
-                    // audited flat 32-bit DS MOV r32,[base+disp] profile above. Its
+                    // audited flat 32-bit DS effective-address profile above. Its
                     // bus request is translated/permission-checked exactly as
                     // S_LOAD; this is not a physical or unchecked bypass.
                     || (sys_mode && u_d.is_load && !sys_fp_load_ok)
@@ -7014,7 +7015,7 @@ module core
     unique case (state)
       S_FETCH, S_PF: cur_is_d = 1'b0;
       // S_PIPE issues BOTH an icache fill (pf_miss -> I-TLB, a fetch) AND a
-      // checked DS base+displacement DATA load (pipe_load_req -> D-TLB). They are mutually
+      // checked DS effective-address DATA load (pipe_load_req -> D-TLB). They are mutually
       // exclusive (pf_miss => !pipe_bytes_ok => !pipe_load_req), so classify by
       // which is active: a data load is D-side (Phase-3 [med] fix — previously
       // hardcoded I-TLB, which polluted the I-TLB with data and applied the wrong
