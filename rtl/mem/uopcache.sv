@@ -273,6 +273,41 @@ module uopcache
   logic [NSLOT*FPDW-1:0] wbuf_slots;
   logic [IC_LINE*4-1:0]  wbuf_bmap;
 
+`ifdef VEN_UOP_PERF
+  // Coverage accounting for the predecode walker.  A missing byte->slot entry
+  // is intentionally safe (the spine uses S_FETCH), but its reason determines
+  // whether a compact overflow structure is plausible or whether coverage is
+  // fundamentally limited by instruction shape.  Sample only at W_WRITE, after
+  // the final W_WALK update is visible; these counters have no datapath fanout.
+  longint unsigned uop_walks, uop_walk_poison;
+  longint unsigned uop_walk_slotcap, uop_walk_lineend, uop_walk_validsum;
+  function automatic logic [5:0] uop_valid_boundaries(
+      input logic [IC_LINE*4-1:0] bmap);
+    uop_valid_boundaries = '0;
+    for (int b=0; b<IC_LINE; b++)
+      if (bmap[b*4+3]) uop_valid_boundaries = uop_valid_boundaries + 6'd1;
+  endfunction
+
+  always_ff @(posedge clk) begin
+    if (!rst_n) begin
+      uop_walks <= 0; uop_walk_poison <= 0;
+      uop_walk_slotcap <= 0; uop_walk_lineend <= 0; uop_walk_validsum <= 0;
+    end else if (wst == W_WRITE) begin
+      uop_walks <= uop_walks + 1;
+      if (wpz) uop_walk_poison <= uop_walk_poison + 1;
+      // W_WALK increments wslot/woff before entering W_WRITE.  Equality is
+      // therefore the exact stop condition, not a heuristic based on averages.
+      if (wslot == 4'(NSLOT)) uop_walk_slotcap <= uop_walk_slotcap + 1;
+      if (woff >= 6'(IC_LINE)) uop_walk_lineend <= uop_walk_lineend + 1;
+      uop_walk_validsum <= uop_walk_validsum
+                         + {{58{1'b0}}, uop_valid_boundaries(wbuf_bmap)};
+    end
+  end
+  final $display("[UOPPERF] walks=%0d poisoned=%0d slot-cap=%0d line-end=%0d valid-boundaries=%0d",
+                 uop_walks, uop_walk_poison, uop_walk_slotcap, uop_walk_lineend,
+                 uop_walk_validsum);
+`endif
+
   // the decode leaf, fed the FIXED bottom 6 bytes of residual (no mux).
   fpd_t pd_uop;
   decode u_pd_decode (
