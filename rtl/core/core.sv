@@ -63,9 +63,12 @@ typedef enum logic [4:0] {
 // its `input state_e state` port with the SAME type core's `state`/`walk_ret_state`
 // use (core.sv precedes fpu_writeback.sv in rtl/ventium.f). Enumerators are
 // unchanged (verbatim relocation, all `ifdef members preserved; the inline copy in
-// `core` was removed). M7.3c: widened 5->6 bits to admit S_INS (the prior 32 states
-// exactly filled a [4:0] enum).
-typedef enum logic [5:0] {
+// `core` was removed). M7.3c widened 5->6 bits to admit S_INS.  The full P5
+// feature profile now contains 65 states (including the call-gate parameter-read
+// state), so a sixth bit would wrap S_CG_PRD onto S_RESET.  Keep the state encoding
+// wide enough for the complete elaborated profile; the additional bit is a state
+// register bit, not an added pipeline stage.
+typedef enum logic [6:0] {
     S_RESET, S_FETCH, S_DECODE, S_LOAD, S_LOAD2, S_EXEC, S_STORE, S_USEQ, S_HALT,
     // REVIEW1_Aug2 M-03: the TSS I/O-permission bitmap consult. Two beats -- the I/O
     // map base at TSS+0x66, then the bitmap byte that covers the port.
@@ -563,7 +566,7 @@ module core
     // (single-step / breakpoint control ports are added below once the FSM
     //  issue-boundary hold is wired — see the dbg_hold block.)
     // ------------------------------------------------------------------------
-    output logic [5:0]  dbg_state,
+    output logic [6:0]  dbg_state,
     output logic [7:0]  dbg_int_vec,
     output logic        dbg_div_fault,  // sticky: a divide #DE (vector 0) was delivered -> freeze the PC ring
     output logic [7:0]  dbg_fault_cnt,  // count of all exception deliveries (for the fault-freeze skip)
@@ -1701,7 +1704,7 @@ module core
 `ifdef VEN_DBG_CORE
   // ---- VEN_DBG_CORE observability taps (pure combinational observers) -------
   // No logic added to any datapath; these never feed back into the FSM.
-  assign dbg_state    = 6'(state);
+  assign dbg_state    = 7'(state);
   assign dbg_int_vec  = int_vec;
   assign dbg_fault_pc = int_src_pc;
   assign dbg_cr0      = creg0;
@@ -9627,7 +9630,10 @@ module core
   // Counters only; no datapath signal is read by anything else, so this is inert
   // unless +define+VEN_PERF_PROFILE.
   // ===========================================================================
-  localparam int PP_NSTATE = 64;
+  // Keep the optional profiler in lockstep with the enum.  A fixed power-of-two
+  // table previously both hid the state-width overflow and aliased a newly added
+  // state onto entry zero via the mask below.
+  localparam int PP_NSTATE = int'(S_CG_PRD) + 1;
   localparam int PP_NBAIL  = 14;
   localparam int PP_NSBAIL = 4;
   // The uop-cache fallback starts one S_FETCH transaction, whose subsequent
@@ -9747,11 +9753,11 @@ module core
       if (fp_irq_divert) pp_divert <= pp_divert + 64'd1;
       if (irq_shadow) pp_shadow <= pp_shadow + 64'd1;
       if (irq_shadow && retire_valid) pp_shret <= pp_shret + 64'd1;
-      pp_state[int'(state) & (PP_NSTATE-1)] <= pp_state[int'(state) & (PP_NSTATE-1)] + 64'd1;
+      pp_state[int'(state)] <= pp_state[int'(state)] + 64'd1;
       if (mem_req && !mem_ack)
-        pp_mem_wait[int'(state) & (PP_NSTATE-1)] <= pp_mem_wait[int'(state) & (PP_NSTATE-1)] + 64'd1;
+        pp_mem_wait[int'(state)] <= pp_mem_wait[int'(state)] + 64'd1;
       if (mem_req && mem_ack)
-        pp_mem_ack[int'(state) & (PP_NSTATE-1)] <= pp_mem_ack[int'(state) & (PP_NSTATE-1)] + 64'd1;
+        pp_mem_ack[int'(state)] <= pp_mem_ack[int'(state)] + 64'd1;
       if (retire_valid)  pp_ret1 <= pp_ret1 + 64'd1;
       if (retire2_valid) pp_ret2 <= pp_ret2 + 64'd1;
       if (sfetch_uop_fast) pp_uop_sfetch <= pp_uop_sfetch + 64'd1;
@@ -9891,7 +9897,7 @@ module core
   final begin
     longint tot_ret, slow_cyc;
     tot_ret  = pp_ret1 + pp_ret2;
-    slow_cyc = pp_cycles - pp_state[int'(S_PIPE) & (PP_NSTATE-1)];
+    slow_cyc = pp_cycles - pp_state[int'(S_PIPE)];
     $display("");
     $display("==== VEN_PERF_PROFILE (task #54: where the cycles go) ====");
     $display("  clocks              %0d", pp_cycles);
@@ -9915,7 +9921,7 @@ module core
                  i, pp_mem_wait[i], pp_mem_ack[i]);
     $display("");
     $display("  S_PIPE clocks %0d   NON-S_PIPE (slow FSM) clocks %0d  (%0d.%01d%%)",
-             pp_state[int'(S_PIPE) & (PP_NSTATE-1)], slow_cyc,
+             pp_state[int'(S_PIPE)], slow_cyc,
              (slow_cyc*1000)/pp_cycles/10, ((slow_cyc*1000)/pp_cycles)%10);
     $display("");
     $display("  -- S_PIPE clocks by FIRST bail arm (priority order) --");

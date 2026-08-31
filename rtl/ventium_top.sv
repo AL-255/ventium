@@ -253,7 +253,7 @@ module ventium_top
     output logic [15:0] dbg_cs,            // committed CS selector
     output logic [31:0] dbg_esp,           // committed ESP
     output logic [31:0] dbg_eflags,        // committed EFLAGS
-    output logic [5:0]  dbg_state,         // core FSM micro-state (state_e)
+    output logic [6:0]  dbg_state,         // core FSM micro-state (state_e)
     output logic [7:0]  dbg_int_vec,       // last delivered exception/IRQ vector
     output logic [31:0] dbg_fault_pc,      // source EIP of that exception/IRQ
     output logic [31:0] dbg_cr0,           // live CR0 (PE/PG = mode)

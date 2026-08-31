@@ -6,7 +6,12 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 OBJ="$(mktemp -d)"; trap 'rm -rf "$OBJ"' EXIT
 
-CCACHE_DISABLE=1 verilator --binary --assert -sv +define+VTM_NO_DPI \
+# Keep this self-contained gate safe to invoke from `make verify` on shared
+# hosts.  Verilator otherwise chooses its host-wide default compiler fan-out;
+# this tiny decoder proof has no throughput need for that.  Callers may still
+# explicitly request a different bounded value through VL_J.
+VL_J="${VL_J:-1}"
+CCACHE_DISABLE=1 verilator --binary -j "$VL_J" --assert -sv +define+VTM_NO_DPI \
   -Wno-WIDTH -Wno-UNUSED -Wno-DECLFILENAME -Wno-INITIALDLY \
   -Wno-IMPLICITSTATIC -Wno-TIMESCALEMOD \
   --top-module tb_issue_uv -Mdir "$OBJ" -o tb_issue_uv \
