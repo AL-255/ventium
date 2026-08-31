@@ -24,7 +24,7 @@ trap 'rm -rf "$OBJ"' EXIT
 COMMON_WNO="-Wno-UNUSED -Wno-DECLFILENAME -Wno-INITIALDLY -Wno-IMPLICITSTATIC"
 
 # ---- (a) direct single-clock (the deployed define set: none) -------------------
-verilator --binary -sv --assert +define+AXI_BFM_MON $COMMON_WNO \
+verilator -j "${VL_J:-1}" --binary -sv --assert +define+AXI_BFM_MON $COMMON_WNO \
     --top-module tb_l1axi_narrow -Mdir "$OBJ/direct" -o tb_l1axi_narrow \
     "$ROOT/rtl/mem/ven_l1d.sv" "$ROOT/rtl/mem/ven_axi_master.sv" \
     "$ROOT/rtl/northbridge/ven_cachemap.sv" "$ROOT/rtl/mem/ventium_l1_axi.sv" \
@@ -37,7 +37,7 @@ echo "$OUT"
 grep -q "L1AXINARROW-GATE-OK" <<<"$OUT" || { echo "L1AXINARROW-GATE-FAIL (direct)"; exit 1; }
 
 # ---- (b) dual-clock CDC, four core:axi ratios ----------------------------------
-verilator --binary -sv --assert +define+VEN_AXI_CDC +define+AXI_BFM_MON $COMMON_WNO \
+verilator -j "${VL_J:-1}" --binary -sv --assert +define+VEN_AXI_CDC +define+AXI_BFM_MON $COMMON_WNO \
     --top-module tb_l1axi_narrow -Mdir "$OBJ/cdc" -o tb_l1axi_narrow \
     "$ROOT/rtl/mem/ven_cdc_afifo.sv" "$ROOT/rtl/mem/ven_reset_sync.sv" \
     "$ROOT/rtl/mem/ven_axi_cdc.sv" "$ROOT/rtl/mem/ven_l1d.sv" \

@@ -12,7 +12,7 @@ trap 'rm -rf "$OBJ"' EXIT
 
 # NOTE: deliberately NO blanket -Wno-WIDTH — that would mask a remap-adder
 # truncation class. Targeted lint_off WIDTH lives in the RTL on known-safe nets.
-verilator --binary -sv --assert -Wno-UNUSED -Wno-DECLFILENAME \
+verilator -j "${VL_J:-1}" --binary -sv --assert -Wno-UNUSED -Wno-DECLFILENAME \
     -Wno-INITIALDLY -Wno-IMPLICITSTATIC --top-module tb_l1_axi -Mdir "$OBJ" -o tb_l1_axi \
     "$ROOT/rtl/mem/ven_l1d.sv" "$ROOT/rtl/mem/ven_axi_master.sv" \
     "$ROOT/rtl/northbridge/ven_cachemap.sv" "$ROOT/rtl/mem/ventium_l1_axi.sv" "$ROOT/verif/l1/axi_slave_bfm.sv" \

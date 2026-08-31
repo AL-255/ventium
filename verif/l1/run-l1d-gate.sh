@@ -17,7 +17,7 @@ run_one() {  # <sets> [extra-defines] [label]
   local sets="$1"; local defs="${2:-}"; local label="${3:-}"
   local dir="$OBJ/s${sets}${label// /_}"
   mkdir -p "$dir"
-  verilator --binary -sv -Wno-WIDTH -Wno-UNUSED -Wno-DECLFILENAME \
+  verilator -j "${VL_J:-1}" --binary -sv -Wno-WIDTH -Wno-UNUSED -Wno-DECLFILENAME \
       -Wno-INITIALDLY -Wno-IMPLICITSTATIC $defs --top-module tb_l1d \
       -GTB_L1_SETS="$sets" -Mdir "$dir" -o tb_l1d \
       "$ROOT/rtl/mem/ven_l1d.sv" "$ROOT/verif/l1/tb_l1d.sv" > "$dir/build.log" 2>&1 \
