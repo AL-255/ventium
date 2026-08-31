@@ -1377,6 +1377,13 @@ int main(int argc, char** argv) {
     // PC breakpoint and runs free until the core parks at it.
     uint32_t dbg_steps_done = 0;
     bool     dbg_step_inflight = false;
+    // `dbg_eip` is deliberately the last retired PC (the same low-cost tap the
+    // FPGA PC ring consumes), whereas a breakpoint parks BEFORE the selected
+    // instruction retires.  Sample selector 8 only after `dbg_halted` so the
+    // harness can report the actual parked EIP without adding a wide live-PC
+    // route to the hardware debug bundle.
+    uint32_t dbg_stop_eip = 0;
+    bool     dbg_stop_valid = false;
     if (args.dbg_step_n) top->dbg_halt_req = 1;                  // park at the first boundary
     if (args.dbg_bp)   { top->dbg_bp_en = 1; top->dbg_bp_addr = args.dbg_bp; }
 #endif
@@ -1513,9 +1520,23 @@ int main(int argc, char** argv) {
                 top->dbg_step = 1; dbg_step_inflight = true; dbg_steps_done++;
             }
         }
-        if (args.dbg_bp && top->dbg_halted)
-            std::fprintf(stderr, "tb: [dbg-bp] core parked: EIP=%08x bp=%08x FSM=0x%02x\n",
-                         (uint32_t)top->dbg_eip, args.dbg_bp, (unsigned)top->dbg_state);
+        if (args.dbg_bp && top->dbg_halted) {
+            top->dbg_arch_sel = 8; top->eval();
+            dbg_stop_eip = (uint32_t)top->dbg_arch_data;
+            top->dbg_arch_sel = 0; top->eval();
+            dbg_stop_valid = true;
+            std::fprintf(stderr,
+                         "tb: [dbg-bp] core parked: stop-EIP=%08x requested=%08x "
+                         "last-retired=%08x FSM=0x%02x\n",
+                         dbg_stop_eip, args.dbg_bp, (uint32_t)top->dbg_eip,
+                         (unsigned)top->dbg_state);
+            // A PC breakpoint is an explicit terminal diagnostic request.  Do
+            // not fall through to the generic no-retire timeout: long x87
+            // state restores can legitimately exceed that timeout before a
+            // later breakpoint, and once parked the old loop only printed the
+            // same line every clock.  Ordinary runs and --dbg-step are inert.
+            break;
+        }
 #endif
 
 #ifdef VEN_DOS_MODELS
@@ -2161,6 +2182,8 @@ int main(int argc, char** argv) {
         unsigned fcw = (unsigned)top->dbg_fctrl;
         unsigned pc  = (fcw >> 8) & 3;
         const char* pcs = (pc==3)?"64/ext":(pc==2)?"53/dbl":(pc==0)?"24/sgl":"rsvd";
+        if (dbg_stop_valid)
+            std::fprintf(stderr, "tb: [VEN_DBG] PARKED_EIP=%08x\n", dbg_stop_eip);
         std::fprintf(stderr,
             "tb: [VEN_DBG] EIP=%08x CS=%04x ESP=%08x EFLAGS=%08x\n"
             "tb: [VEN_DBG] FSM=S_%s(0x%02x) mode=%s%s vec=0x%02x fault_pc=%08x CR0=%08x halted=%d\n"

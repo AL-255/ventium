@@ -9557,6 +9557,12 @@ module core
   localparam int PP_NSTATE = 64;
   localparam int PP_NBAIL  = 14;
   localparam int PP_NSBAIL = 4;
+  // The uop-cache fallback starts one S_FETCH transaction, whose subsequent
+  // clocks live in the FSM-state counters rather than the one-clock bail bucket.
+  // Split the entry cause so profile data can distinguish a walker/validity
+  // problem from a deliberately uncovered instruction boundary before anyone
+  // considers changing the cache or execution policy.
+  localparam int PP_NUOPMISS = 4;
   longint pp_state [PP_NSTATE];
   // Per-state memory accounting.  `pp_mem_wait` counts clocks in which a
   // request is visibly held without an acknowledgement; `pp_mem_ack` counts
@@ -9566,6 +9572,7 @@ module core
   longint pp_mem_wait [PP_NSTATE];
   longint pp_mem_ack  [PP_NSTATE];
   longint pp_bail  [PP_NBAIL];
+  longint pp_uopmiss [PP_NUOPMISS];
   // Bucket 9 (`fp_sys_bail`) is deliberately broad.  Split its actual hand-off
   // cause so an implementation change targets a demonstrated eligibility
   // limit, rather than blindly widening the system fast path.
@@ -9602,6 +9609,7 @@ module core
         pp_mem_ack[i]  <= 64'd0;
       end
       for (int i=0;i<PP_NBAIL;i++)  pp_bail[i]  <= 64'd0;
+      for (int i=0;i<PP_NUOPMISS;i++) pp_uopmiss[i] <= 64'd0;
       for (int i=0;i<PP_NSBAIL;i++) pp_sys_bail[i] <= 64'd0;
       pp_cycles <= 64'd0; pp_ret1 <= 64'd0; pp_ret2 <= 64'd0; pp_divert <= 64'd0; pp_shadow <= 64'd0; pp_shret <= 64'd0;
     end else begin
@@ -9652,6 +9660,20 @@ module core
         else if (mispred_bubbles != 3'd0)                      b = 10;
         else if (pipe_agi)                                     b = 11;
         pp_bail[b] <= pp_bail[b] + 64'd1;
+        if (b == 3) begin
+          // Keep this order aligned with `!uop_hit || !cycle_mode` above.
+          // `uop_hit` itself gates exec_issue_ok first, then line predecode
+          // validity, then the byte-to-slot boundary map.  The categories add
+          // exactly to bail bucket 3 and are diagnostic-only.
+`ifdef VEN_UOPCACHE
+          if (!cycle_mode) pp_uopmiss[0] <= pp_uopmiss[0] + 64'd1;
+          else if (!exec_issue_ok) pp_uopmiss[1] <= pp_uopmiss[1] + 64'd1;
+          else if (!(uc_u_in_b ? uc_pdvB : uc_pdvA))
+            pp_uopmiss[2] <= pp_uopmiss[2] + 64'd1;
+          else
+            pp_uopmiss[3] <= pp_uopmiss[3] + 64'd1;
+`endif
+        end
         if (b == 9) begin
           // Keep this priority in lockstep with fp_sys_bail.  An instruction
           // may satisfy more than one conservative exclusion; classifying the
@@ -9707,6 +9729,14 @@ module core
         $display("    [%2d] %10d  %3d.%01d%%  %s", i, pp_bail[i],
                  (pp_bail[i]*1000)/pp_cycles/10, ((pp_bail[i]*1000)/pp_cycles)%10,
                  pp_bail_name(i));
+    if (pp_bail[3] != 0) begin
+      $display("");
+      $display("  -- uop-cache fallback cause (sums to bucket 3) --");
+      $display("    functional/non-cycle mode          %10d", pp_uopmiss[0]);
+      $display("    executable-state flush             %10d", pp_uopmiss[1]);
+      $display("    line not predecoded-valid          %10d", pp_uopmiss[2]);
+      $display("    boundary unavailable                %10d", pp_uopmiss[3]);
+    end
     if (pp_bail[9] != 0) begin
       $display("");
       $display("  -- fp_sys_bail hand-off cause (sums to bucket 9) --");

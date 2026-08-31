@@ -208,24 +208,48 @@ l1axi_kv:
 	  -F $(RTL_FILELIST) $(L1AXI_RTL) $(CPP_SRCS)
 	@echo "built (L1+AXI + KV260 REMAP): $(CURDIR)/obj_dir_l1axi_kv/$(EXE)"
 
-# ---- l1axi_kv_full: the EXACT deployed linux_40 define set ------------------
-# L1AXI + KV260 REMAP + ALL fetch/cache/FP features (FE_PIPE, UOPCACHE, BTB_PIPE,
-# IC_BRAM, full P5 L1 caches, FP_PIPE/2, SRT/IDIV/BCD_ITER). Reproduces the
-# on-board build's feature set while retaining the 8 KiB P5 L1 geometry.
+# ---- l1axi_kv_full: the routed full-P5 core configuration -------------------
+# L1AXI + KV260 REMAP + the full 8 KiB P5 L1 configuration (UOPCACHE, BTB_PIPE,
+# IC_BRAM, FP_PIPE/2, shared x87, SRT/IDIV/BCD_ITER, and transcendentals).  This
+# mirrors the core-relevant defines emitted by create_project_3mhz_wrapper.tcl.
+# FE_PIPE is deliberately absent: it is an explicit routing experiment, OFF in
+# the deployed default profile, rather than an implicit simulation optimization.
 # VEN_FPREM is mandatory in every full-P5 image: without it a decoded FPREM has
 # no engine (and no trap route outside FP_PS_ALL), and the unified SRT divider's
 # remainder sideband had nowhere to land.
-KV_FULL_DEFS := +define+VEN_L1_AXI +define+VEN_KV260_SOC +define+VEN_FE_PIPE \
+KV_FULL_DEFS := +define+VEN_L1_AXI +define+VEN_L1_HONOR_CD +define+VEN_KV260_SOC \
   +define+VEN_UOPCACHE +define+VEN_BTB_PIPE +define+VEN_IC_BRAM \
   +define+VEN_FP_PIPE +define+VEN_FP_PIPE2 +define+VEN_SRT_ITER +define+VEN_IDIV_ITER \
-  +define+VEN_BCD_ITER +define+VEN_FP_PC_RELAX +define+VEN_FPREM +define+VEN_FP_SHARED \
-  +define+VEN_SYS_FASTPATH +define+VEN_SYS_FASTPATH_RELOC +define+VEN_SYS_FASTLOAD_FLAT +define+VEN_FAST_RETRACE
+  +define+VEN_BCD_ITER +define+VEN_TRANSCENDENTAL +define+VEN_FP_PC_RELAX \
+  +define+VEN_FPREM +define+VEN_FP_SHARED +define+VEN_DBG_CORE \
+  +define+VEN_SYS_FASTPATH +define+VEN_SYS_FASTPATH_RELOC +define+VEN_SYS_FASTLOAD_FLAT \
+  +define+VEN_SYS_FASTSTORE_FLAT +define+VEN_FAST_RETRACE
+KV_FULL_CFLAGS := -DVEN_L1_AXI -DVEN_KV260_SOC -DVEN_DBG_CORE
 .PHONY: l1axi_kv_full
 l1axi_kv_full:
 	$(VERILATOR) $(VL_FLAGS) $(KV_FULL_DEFS) \
-	  -CFLAGS "-DVEN_L1_AXI -DVEN_KV260_SOC" -Mdir $(KV_FULL_OBJDIR) \
+	  -CFLAGS "$(KV_FULL_CFLAGS)" -Mdir $(KV_FULL_OBJDIR) \
 	  -F $(RTL_FILELIST) $(L1AXI_RTL) $(CPP_SRCS)
-	@echo "built (deployed linux_40 config): $(CURDIR)/$(KV_FULL_OBJDIR)/$(EXE)"
+	@echo "built (routed full-P5 KV260 configuration): $(CURDIR)/$(KV_FULL_OBJDIR)/$(EXE)"
+
+# ---- l1axi_full_snapshot: identity-addressed runtime instrumentation ---------
+# The snapshot loader is a simulation-only diagnostic: it restores a QEMU-captured
+# user process at a retirement boundary so profiling an established workload does
+# not require replaying BIOS/OS startup. A linux-user snapshot holds virtual stack
+# addresses near 0x4000_0000, whereas the KV260 target deliberately rejects such
+# out-of-carveout *physical* addresses to prevent fold alias corruption. Profile it
+# with the same P5 cache/front-end RTL but an identity-addressed verification fabric;
+# board/DOS tests remain on KV_FULL_DEFS. Production FPGA builds never receive
+# VEN_SNAPSHOT_RESTORE.
+FULL_P5_SNAPSHOT_DEFS := $(filter-out +define+VEN_KV260_SOC,$(KV_FULL_DEFS))
+FULL_P5_SNAPSHOT_CFLAGS := -DVEN_L1_AXI -DVEN_DBG_CORE -DVEN_SNAPSHOT_RESTORE
+FULL_P5_SNAPSHOT_OBJDIR ?= obj_dir_l1axi_full_snapshot
+.PHONY: l1axi_full_snapshot
+l1axi_full_snapshot:
+	$(VERILATOR) $(VL_FLAGS) $(FULL_P5_SNAPSHOT_DEFS) +define+VEN_SNAPSHOT_RESTORE $(VL_EXTRA_DEFINES) \
+	  -CFLAGS "$(FULL_P5_SNAPSHOT_CFLAGS)" \
+	  -Mdir $(FULL_P5_SNAPSHOT_OBJDIR) -F $(RTL_FILELIST) $(L1AXI_RTL) $(CPP_SRCS)
+	@echo "built (identity-addressed full-P5 snapshot profiler): $(CURDIR)/$(FULL_P5_SNAPSHOT_OBJDIR)/$(EXE)"
 
 # ---- l1axi_kv_full_xinit: KVF + Verilator X-randomization -------------------
 # Same defines as l1axi_kv_full but with --x-initial/--x-assign unique so
@@ -237,7 +261,7 @@ XINIT_FLAGS := --x-initial unique --x-assign unique --x-initial-edge
 .PHONY: l1axi_kv_full_xinit
 l1axi_kv_full_xinit:
 	$(VERILATOR) $(VL_FLAGS) $(XINIT_FLAGS) $(KV_FULL_DEFS) \
-	  -CFLAGS "-DVEN_L1_AXI -DVEN_KV260_SOC" -Mdir obj_dir_xinit_kvf \
+	  -CFLAGS "$(KV_FULL_CFLAGS)" -Mdir obj_dir_xinit_kvf \
 	  -F $(RTL_FILELIST) $(L1AXI_RTL) $(CPP_SRCS)
 	@echo "built (x-init KVF): $(CURDIR)/obj_dir_xinit_kvf/$(EXE)"
 
@@ -298,16 +322,15 @@ l1axi_kv_dos_q_rtlirq:
 # COMPUTE datapath is REMOVED from the PL and EVERY x87 arithmetic/compare/transcendental
 # op is PS-trapped to the A53/SoftFloat via the fptrap seam). Mirrors impl_kv260_soc.tcl
 # FP_PS_ALL=1 exactly: ADD VEN_FP_PS_ALL + VEN_FPTRAP, and STRIP the six area-bulk defines
-# VEN_TRANSCENDENTAL VEN_FPREM VEN_SRT_ITER VEN_BCD_ITER VEN_FP_PIPE VEN_FP_PIPE2 (the
-# first two are not in KV_FULL_DEFS; the latter four ARE, so build the list by filtering
-# them out of KV_FULL_DEFS rather than using it wholesale). RTL_IRQ=1 adds BOTH
+# VEN_TRANSCENDENTAL VEN_FPREM VEN_SRT_ITER VEN_BCD_ITER VEN_FP_PIPE VEN_FP_PIPE2 from
+# KV_FULL_DEFS rather than using it wholesale. RTL_IRQ=1 adds BOTH
 # VEN_RTL_IRQ and VEN_RTL_IRQ_FIXED (the dense fixed-cycle IR0 = the DOS-Quake #DE fix).
 # This is the FP-board-faithful repro: the in-PL-FPU rtlirq sim passed #DE=0 to 13M, but
 # the board (FP_PS_ALL) still faults (cs=0x2b eip=0x24e); this build sees if the FP
 # divergence is the cause. NOTE: the TB's service_fptrap (-DVEN_FPTRAP) only implements
 # FPATAN (atan2l); any other PS-trapped op is serviced as atan2 — a known faithfulness
 # gap, reported per-run. Separate obj dir so every other build stays byte-identical.
-KV_FPPS_DEFS := $(filter-out +define+VEN_FP_PIPE +define+VEN_FP_PIPE2 +define+VEN_SRT_ITER +define+VEN_BCD_ITER,$(KV_FULL_DEFS))
+KV_FPPS_DEFS := $(filter-out +define+VEN_TRANSCENDENTAL +define+VEN_FPREM +define+VEN_FP_PIPE +define+VEN_FP_PIPE2 +define+VEN_SRT_ITER +define+VEN_BCD_ITER,$(KV_FULL_DEFS))
 # VL_FLAGS hard-codes +define+VEN_FPREM (shared base, used by every target). FP_PS_ALL
 # STRIPS the iterative FPREM engine, so for THIS build the define must be absent —
 # filter it out of a target-local copy of the flags (the shared VL_FLAGS is untouched,
