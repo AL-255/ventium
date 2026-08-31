@@ -34,7 +34,12 @@ CPP_SRCS := $(TB_DIR)/tb_main.cpp $(TB_DIR)/memmodel.cpp $(TB_DIR)/dpi_retire.cp
             $(TB_DIR)/syscall_emu.cpp   # M14 free-run emulator (inert unless --emulate-syscalls)
 
 # ---- verilator invocation ---------------------------------------------------
-VERILATOR ?= verilator
+# Heavy full-core builds share a host-wide lock with the ao486 and shared-FP
+# profiles.  Keep the actual binary separately configurable, so a caller can
+# select a tool version without bypassing the OOM guard.
+VERILATOR_BIN ?= verilator
+VERILATOR := $(VENTIUM_ROOT)/tools/verilator_serial.sh
+export VERILATOR_BIN
 TOP        = ventium_top
 EXE        = tb_ventium
 # Keep a read-only shared ccache from turning an otherwise valid Verilator

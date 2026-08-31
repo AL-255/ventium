@@ -1,5 +1,10 @@
 REPO ?= $(abspath $(CURDIR)/..)
-VERILATOR ?= verilator
+# The shared-FP tests generate the same kind of multi-GiB C++ objects as the
+# system builds.  Use the common lock so separate terminals cannot overlap
+# their one-job builds and exhaust host memory.
+VERILATOR_BIN ?= verilator
+VERILATOR := $(REPO)/tools/verilator_serial.sh
+export VERILATOR_BIN
 # The shared-FP top produces several very large generated C++ translation units.
 # A parallel `make test` used to launch one Verilator build per test target, and
 # each build in turn requested four compiler jobs.  That multiplicative fan-out
