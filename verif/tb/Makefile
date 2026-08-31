@@ -37,6 +37,11 @@ CPP_SRCS := $(TB_DIR)/tb_main.cpp $(TB_DIR)/memmodel.cpp $(TB_DIR)/dpi_retire.cp
 VERILATOR ?= verilator
 TOP        = ventium_top
 EXE        = tb_ventium
+# Keep a read-only shared ccache from turning an otherwise valid Verilator
+# build into a compiler error.  CI/workstations with a writable cache may set
+# CCACHE_DISABLE=0 explicitly.
+CCACHE_DISABLE ?= 1
+export CCACHE_DISABLE
 
 # Optional VCD waveform support: `make selftest TRACE=1` (or `make TRACE=1`).
 TRACE ?= 0

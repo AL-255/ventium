@@ -8,6 +8,11 @@ OBJDIR  := ao486-sim/obj_dir
 EXE     := ao486sim
 
 VERILATOR ?= verilator
+# This harness is frequently built from external/scratch volumes.  Do not let
+# an unavailable shared ccache fail the generated-C++ build; callers can opt
+# back in with CCACHE_DISABLE=0 when their cache is writable.
+CCACHE_DISABLE ?= 1
+export CCACHE_DISABLE
 # Full-PC generated C++ is memory-heavy.  Do not use Verilator's `-j 0` (all
 # host cores): it can start enough cc1plus processes to OOM the workstation.
 # A larger, bounded value is an explicit caller opt-in.

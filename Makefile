@@ -11,6 +11,12 @@ BUILD       := build
 
 VERILATOR   ?= verilator
 PYTHON      ?= python3
+# The shared ccache directory is not guaranteed writable (for example, this
+# checkout's external build volume may be mounted read-only).  A failed cache
+# write must never prevent a functional gate from compiling.  Callers with a
+# provisioned writable cache can explicitly opt back in with CCACHE_DISABLE=0.
+CCACHE_DISABLE ?= 1
+export CCACHE_DISABLE
 
 .PHONY: all m0-smoke m1 m2 m3 m4 m5 m6 a20 fenv fpstore x87stk x87b l1 bus bus-sva issue-uv verify verify-clean rtl plugin tests clean help verify-sys verify-sys-fpreloc verify-sys-fpload verify-sys-faststore verify-srt verify-srt-iter verify-idiv verify-bcd verify-fbld verify-fppipe verify-fppipe2 verify-all coverage coverage-sys coverage-mem coverage-unit coverage-all opgen opgen-modes
 .DEFAULT_GOAL := help

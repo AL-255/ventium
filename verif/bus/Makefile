@@ -16,6 +16,8 @@
 # ============================================================================
 VERILATOR ?= verilator
 VL_J      ?= 1
+CCACHE_DISABLE ?= 1
+export CCACHE_DISABLE
 HERE      := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 OBJ       := $(HERE)/obj
 VTB       := $(OBJ)/vtb
