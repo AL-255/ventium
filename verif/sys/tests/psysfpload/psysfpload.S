@@ -11,7 +11,8 @@
  * linear address 0x00080000 to that *different* physical page, enters four
  * conventional 4 GiB segments with the 0x80000 base, enables paging, and
  * repeatedly executes the
- * deliberately narrow load form admitted by VEN_SYS_FASTLOAD_FLAT:
+ * deliberately narrow load/store forms admitted by VEN_SYS_FASTLOAD_FLAT and
+ * VEN_SYS_FASTSTORE_FLAT:
  *
  *     movl (%esi), %edi               (ModR/M base form)
  *     movl (%esi,%edx,4), %edi        (DS-default SIB form)
@@ -19,12 +20,13 @@
  *     movl disp32, %edi                (literal DS displacement)
  *     cmpl disp32, %edi / cmpl %edi, disp32 (both CMP operand orders)
  *     movl (%ebp), %edi / movl 4(%esp), %edi (SS-default base forms)
+ *     movl %ebx, [the same DS/SS base, SIB, displacement, and literal forms]
  *
  * The datum and ESI are client-relative, so the access is only correct when
  * the DS base is applied.  The loop folds every observed value into EAX;
  * QEMU-vs-RTL trace comparison therefore proves non-zero-base addressing,
- * D-TLB/page-walk handling, and the architectural result.  It has no Quake
- * dependency and restores no guest state.
+ * D-TLB/page-walk handling, read/write permission class, and the architectural
+ * result. It has no Quake dependency and restores no guest state.
  */
 
     .code16
@@ -165,14 +167,36 @@ pm32_entry:
     ja      3f
     jmp     .Lbad
 3:
+    /* Store the same complete set of compact, audited MOV r/m32,r32 forms.
+     * All offsets live in the non-identity mapped client page, and EBX is
+     * deliberately different from every original sentinel. The subsequent
+     * arithmetic consumes the SS stores; the QEMU trace validates the whole
+     * architectural sequence while the gate's S_PIPE floor rejects a fallback
+     * to the slow FSM. */
+    movl    $0x7b1d5e29, %ebx
+    movl    %ebx, (%esi)
+    movl    %ebx, 4(%esi)
+    /* Keep the store's disp32 target inside the data padding rather than on
+     * the 0x100 load/CMP sentinel, which remains a fixed oracle across all
+     * loop iterations. */
+    movl    %ebx, 0xf0(%esi)
+    movl    %ebx, (%esi,%edx,4)
+    movl    %ebx, 4(%esi,%edx,4)
+    /* The literal-store target is deliberately separate from the literal CMP
+     * sentinel above: this loop runs 128 times, so overwriting that oracle on
+     * iteration one would make QEMU itself take .Lbad on iteration two. */
+    movl    %ebx, (pm32_store_disp32_data - pm32_payload)
+
     /* EBP and ESP bases select SS by x86 definition. Both offsets are inside
      * the non-identity mapped client page, and the paged physical copy above
      * contains a distinct sentinel, so a DS/SS selection or page-walk bypass
      * is architecturally visible in the running sum. */
     movl    $(pm32_ss_data - pm32_payload), %ebp
+    movl    $(pm32_ss_data - pm32_payload - 4), %esp
+    movl    %ebx, (%ebp)
+    movl    %ebx, 4(%esp)
     movl    (%ebp), %edi
     xorl    %edi, %eax
-    movl    $(pm32_ss_data - pm32_payload - 4), %esp
     movl    4(%esp), %edi
     addl    %edi, %eax
 
@@ -205,6 +229,8 @@ pm32_data:
     .zero   0x100 - (.-pm32_data)
 pm32_disp32_data:
     .long   0x52c0ffee
+pm32_store_disp32_data:
+    .long   0x91b4c2d8
 pm32_ss_data:
     .long   0x6f5e4d3c
 pm32_payload_end:

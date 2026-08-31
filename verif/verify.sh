@@ -72,6 +72,12 @@ TB_DIR="$ROOT/verif/tb"
 # until now the only way to run the 98-program gate against one was to overwrite
 # obj_dir -- so in practice nobody did, and variants shipped ungated. Build into
 # obj_dir_<variant> and run:  TB_BIN=verif/tb/obj_dir_<variant>/tb_ventium make verify
+# Record whether the caller supplied an executable before assigning the canonical
+# default below. An explicit TB_BIN is already a build-proven artifact selected
+# by the caller; rebuilding $TB_DIR/obj_dir here both defeats the documented
+# variant contract and can clobber or resource-starve an unrelated canonical run.
+TB_BIN_EXPLICIT=0
+if [ -n "${TB_BIN+x}" ]; then TB_BIN_EXPLICIT=1; fi
 export TB_BIN="${TB_BIN:-$TB_DIR/obj_dir/tb_ventium}"
 BUILD="$ROOT/build"
 export WORKDIR="${VERIFY_WORKDIR:-$BUILD/verify}"
@@ -132,10 +138,14 @@ rm -f "$WORKDIR"/*.result 2>/dev/null
 # BUILD RTL ONCE (one verilator build — not per milestone, not per program).
 # =============================================================================
 say "build RTL testbench ONCE (verif/tb)"
-make -C "$TB_DIR" > "$WORKDIR/tb_build.log" 2>&1 || {
-    tail -12 "$WORKDIR/tb_build.log" | sed 's/^/    /'
-    die "RTL testbench build failed (see $WORKDIR/tb_build.log)"
-}
+if [ "$TB_BIN_EXPLICIT" = 1 ]; then
+    info "TB_BIN supplied by caller; skipping canonical rebuild"
+else
+    make -C "$TB_DIR" > "$WORKDIR/tb_build.log" 2>&1 || {
+        tail -12 "$WORKDIR/tb_build.log" | sed 's/^/    /'
+        die "RTL testbench build failed (see $WORKDIR/tb_build.log)"
+    }
+fi
 [ -x "$TB_BIN" ] || die "tb_ventium not built: $TB_BIN"
 info "tb_ventium : $TB_BIN"
 

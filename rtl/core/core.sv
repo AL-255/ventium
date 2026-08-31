@@ -1215,13 +1215,13 @@ module core
 
   // The original system fast path correctly keeps all memory forms on the
   // slow FSM: its initial target included 16-bit BIOS/DPMI code, for which the
-  // fast decoder's 32-bit register-indirect load is not a faithful access.
-  // A 32-bit flat client is a materially narrower case. Its only fast-load
-  // family is DS-default MOV r32,[base{+disp8|+disp32}] plus the audited
-  // non-stack SIB no-disp/disp8 forms (decode.sv), and the existing S_PIPE request
-  // already flows through cur_lin, the D-TLB/page walker, permissions, and the
-  // page-fragment engine. Do not widen this based merely on CS.D/base=0: a
-  // finite default-segment limit would still require the slow path's checked access.
+  // fast decoder's 32-bit register-indirect access is not faithful. A 32-bit
+  // flat client is a materially narrower case. Its audited MOV read/write
+  // families use DS/SS base{+disp8|+disp32} plus the non-stack SIB no-disp/
+  // disp8 forms, and the existing S_PIPE request already flows through cur_lin,
+  // the D-TLB/page walker, permissions, and the page-fragment engine. Do not
+  // widen this based merely on CS.D/base=0: a finite default-segment limit
+  // would still require the slow path's checked access.
 `ifdef VEN_DBG_CORE
   // task #102 IRET-trace plusarg gates (inert unless +ven_iretdbg is passed).
   logic        ven_iretdbg_en;
@@ -4517,20 +4517,41 @@ module core
   assign sys_fp_load_ok = 1'b0;
 `endif
 
+  // A system fast store has the same narrow segment contract as a fast load,
+  // but it is deliberately a distinct opt-in: a write must preserve precise
+  // #PF restart semantics, page-two validation before a split write, and the
+  // D-bit timing. The shared S_PIPE producer already supplies all three:
+  // pipe_store_req selects the DS/SS identity and cur_is_w drives the page walk
+  // and P|W error code. The fragment engine can probe page two before either
+  // write fragment escapes, but system-mode stores intentionally retain the
+  // mature S_STORE path at a 4 KiB boundary until a dedicated system-crossing
+  // differential workload exists. The common non-crossing case is the hot
+  // general-purpose client path. verif/sys/run-pfaststore-gate.sh and
+  // run-sysfpload-gate.sh prove both a protected-page restart and common-base,
+  // non-identity DS/SS traffic. Keep this independently defined so a build
+  // that admits fast loads cannot accidentally admit stores.
+  logic sys_fp_store_ok;
+  logic [31:0] sys_fp_store_lin;
+  // Do NOT use cur_lin here: cur_lin is driven from pipe_store_req, which is
+  // itself gated by fp_sys_bail/sys_fp_store_ok. This direct pre-request sum
+  // is the same DS/SS base-plus-offset arithmetic without a combinational loop.
+  assign sys_fp_store_lin = seg_base[pipe_mem_seg] + pipe_load_addr;
+`ifdef VEN_SYS_FASTSTORE_FLAT
+  assign sys_fp_store_ok = sys_fp_load_ok && (sys_fp_store_lin[11:0] <= 12'hFFC);
+`else
+  assign sys_fp_store_ok = 1'b0;
+`endif
+
   logic fp_sys_bail;
 `ifdef VEN_SYS_FASTPATH
   assign fp_sys_bail = !u_d.simple
                     || (sys_mode && !sys_fp_ok)
-                    // The write side deliberately remains on the mature system
-                    // FSM. The fast-store subset is a user-mode acceleration;
-                    // this prevents a new write producer entering a paged guest
-                    // before its full system fault/interrupt contract is tested.
-                    || (sys_mode && u_d.is_store)
                     // H-01: memory forms remain slow except the explicitly
-                    // audited flat 32-bit DS effective-address profile above. Its
-                    // bus request is translated/permission-checked exactly as
-                    // S_LOAD; this is not a physical or unchecked bypass.
-                    || (sys_mode && u_d.is_mem && !sys_fp_load_ok)
+                    // audited flat 32-bit DS/SS effective-address profiles above.
+                    // Their bus requests are translated/permission-checked exactly
+                    // as S_LOAD/S_STORE; neither is a physical or unchecked bypass.
+                    || (sys_mode && u_d.is_store && !sys_fp_store_ok)
+                    || (sys_mode && u_d.is_mem && !u_d.is_store && !sys_fp_load_ok)
                     || (sys_mode && fp_dbg_active); // TF / DR armed -> slow FSM
 `else
   assign fp_sys_bail = !u_d.simple || sys_mode;
@@ -9638,8 +9659,8 @@ module core
           if (!u_d.simple) pp_sys_bail[0] <= pp_sys_bail[0] + 64'd1;
 `ifdef VEN_SYS_FASTPATH
           else if (sys_mode && !sys_fp_ok) pp_sys_bail[1] <= pp_sys_bail[1] + 64'd1;
-          else if (sys_mode && u_d.is_store) pp_sys_bail[2] <= pp_sys_bail[2] + 64'd1;
-          else if (sys_mode && u_d.is_mem && !sys_fp_load_ok) pp_sys_bail[2] <= pp_sys_bail[2] + 64'd1;
+          else if (sys_mode && u_d.is_store && !sys_fp_store_ok) pp_sys_bail[2] <= pp_sys_bail[2] + 64'd1;
+          else if (sys_mode && u_d.is_mem && !u_d.is_store && !sys_fp_load_ok) pp_sys_bail[2] <= pp_sys_bail[2] + 64'd1;
           else if (sys_mode && fp_dbg_active) pp_sys_bail[3] <= pp_sys_bail[3] + 64'd1;
 `else
           else if (sys_mode) pp_sys_bail[1] <= pp_sys_bail[1] + 64'd1;
@@ -9691,7 +9712,7 @@ module core
       $display("  -- fp_sys_bail hand-off cause (sums to bucket 9) --");
       $display("    !u_d.simple                     %10d", pp_sys_bail[0]);
       $display("    system context not eligible      %10d", pp_sys_bail[1]);
-      $display("    system load not eligible         %10d", pp_sys_bail[2]);
+      $display("    system memory not eligible       %10d", pp_sys_bail[2]);
       $display("    system debug active              %10d", pp_sys_bail[3]);
     end
     $display("==========================================================");

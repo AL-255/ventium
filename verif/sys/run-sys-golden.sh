@@ -28,7 +28,10 @@ command -v "$PY" >/dev/null || PY="$(command -v python3)"
 
 TEST="${1:-pmode}"
 TDIR="$SYS/tests/$TEST"
-OUTDIR="$REPO/build/sys"
+# Permit isolated callers to keep generated goldens out of a shared or
+# read-only historical build directory. The default preserves the documented
+# repository layout used by every normal gate.
+OUTDIR="${OUTDIR:-$REPO/build/sys}"
 PORT="${PORT:-41277}"
 mkdir -p "$OUTDIR"
 

@@ -210,11 +210,12 @@ pm32_entry:
     /* PT1 @ 0x13000: the demand-paging window [4 MiB, 8 MiB) */
     movl    $0x00013000, %edi
     movl    $0x00800003, 0(%edi)        /* PT1[0] linear 0x400000 -> phys 0x800000 P|RW */
-    /* The normal pfault image leaves PT1[1] not-present.  The pfpstore
-     * derivative instead starts it present but read-only, which distinguishes
-     * a real write-permission probe from an unsafe speculative read. */
-#ifdef FPSTORE_PROBE
-    movl    $0x00801001, 4(%edi)        /* P=1, RW=0: FISTP must #PF with P|W=3 */
+    /* The normal pfault image leaves PT1[1] not-present.  The pfpstore and
+     * pfaststore derivatives instead start it present but read-only, which
+     * distinguishes a real write-permission probe from an unsafe read or an
+     * unprotected fast-store issue. */
+#if defined(FPSTORE_PROBE) || defined(FASTSTORE_PROBE)
+    movl    $0x00801001, 4(%edi)        /* P=1, RW=0: write must #PF with P|W=3 */
 #else
     movl    $0x00801002, 4(%edi)        /* P=0, RW=1: ordinary demand-page case */
 #endif
@@ -228,8 +229,8 @@ pm32_entry:
     movl    $0x00011000, %eax
     movl    %eax, %cr3
     movl    %cr0, %eax
-#ifdef FPSTORE_PROBE
-    orl     $0x80010000, %eax           /* PG + WP: supervisor FISTP honors PTE.RW */
+#if defined(FPSTORE_PROBE) || defined(FASTSTORE_PROBE)
+    orl     $0x80010000, %eax           /* PG + WP: supervisor write honors PTE.RW */
 #else
     orl     $0x80000000, %eax
 #endif
@@ -257,10 +258,32 @@ pm32_entry:
     fistpl  0x00401000                  /* #PF here; restarted after handler maps */
     movl    0x00401000, %esi            /* must be 3 after the one successful FISTP */
 #else
-    movl    $0xCAFEBABE, %eax
-    movl    %eax, 0x00401000            /* #PF here; restarted after handler maps */
+    /* EDI rather than EAX is intentional: GAS would encode EAX + an absolute
+     * destination as the special A3 moffs form, which is not the compact
+     * ModR/M MOV r/m32,r32 family this regression is meant to exercise. */
+    movl    $0xCAFEBABE, %edi
+    movl    %edi, 0x00401000            /* #PF here; restarted after handler maps */
     /* read it back -> proves the page is now present + mapped to phys 0x801000 */
     movl    0x00401000, %esi            /* esi = 0xCAFEBABE (post-#PF-fixup read) */
+#ifdef FASTSTORE_PROBE
+    /* Exercise the exact narrow system fast-store opcode after its initial
+     * write-protection #PF has restarted it. This is ordinary 32-bit
+     * MOV [disp32],r32 -- no game state, saved state, or special I/O. The
+     * profiler-backed pfaststore gate proves these retire through S_PIPE;
+     * the readback above proves the faulting first write did not commit early. */
+    movl    $128, %ebx
+1:  movl    %edi, 0x00401000
+    incl    %edi
+    decl    %ebx
+    jnz     1b
+    /* A dword at 0x400fff spans the last byte of the first mapped page and
+     * the first three bytes of the restarted second page.  It is deliberately
+     * after the sentinel read and ordinary store loop: the guarded profile
+     * must hand it to S_STORE (rather than trying to make a system S_PIPE
+     * request atomic across two translations), while the differential trace
+     * proves the mature fragment path writes it correctly. */
+    movl    %edi, 0x00400fff
+#endif
 #endif
 
     /* ============================= #GP =================================== */
@@ -291,7 +314,7 @@ ud_resume:
     addl    0x00002024, %eax            /* + #UD counter */
     movl    %eax, %ecx                  /* ecx = 3 if all three faults delivered */
     movl    0x00002020, %edx            /* edx = captured CR2 from the #PF (0x401000) */
-#ifdef FPSTORE_PROBE
+#if defined(FPSTORE_PROBE) || defined(FASTSTORE_PROBE)
     movl    0x00002038, %edi            /* #PF error: P|W must be 3 */
 #endif
 
@@ -313,7 +336,7 @@ hang:
     .global pf_handler
 pf_handler:
     pushl   %eax
-#ifdef FPSTORE_PROBE
+#if defined(FPSTORE_PROBE) || defined(FASTSTORE_PROBE)
     movl    0x04(%esp), %eax            /* error code before the saved EAX */
     movl    %eax, 0x00002038
 #endif

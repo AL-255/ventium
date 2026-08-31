@@ -1,0 +1,17 @@
+{
+  "name": "pfaststore",
+  "kind": "system",
+  "src": "../pfault/pfault.S (FASTSTORE_PROBE)",
+  "linker": "../pfault/pfault.ld",
+  "image": "pfaststore.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 1400,
+  "sys": true,
+  "paging": true,
+  "description": "Precise integer system-fast-store regression. A present/read-only PTE covers ordinary 32-bit MOV [disp32],r32 at linear 0x401000. The #PF handler records P|W=3, makes the PTE writable, flushes CR3 and IRETs. Correct behaviour leaves the first store uncommitted until its restart, preserves the sentinel readback, and then executes 128 ordinary MOV stores. A final MOV at 0x400fff crosses a 4 KiB boundary and is intentionally required to use the established slow fragment path. The dedicated gate differentially compares QEMU and requires that split plus the non-crossing S_PIPE store loop; no game-specific state or save-state is used."
+}

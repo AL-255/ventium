@@ -12,7 +12,7 @@ BUILD       := build
 VERILATOR   ?= verilator
 PYTHON      ?= python3
 
-.PHONY: all m0-smoke m1 m2 m3 m4 m5 m6 a20 fenv fpstore x87stk x87b l1 bus bus-sva issue-uv verify verify-clean rtl plugin tests clean help verify-sys verify-srt verify-srt-iter verify-idiv verify-bcd verify-fbld verify-fppipe verify-fppipe2 verify-all coverage coverage-sys coverage-mem coverage-unit coverage-all opgen opgen-modes
+.PHONY: all m0-smoke m1 m2 m3 m4 m5 m6 a20 fenv fpstore x87stk x87b l1 bus bus-sva issue-uv verify verify-clean rtl plugin tests clean help verify-sys verify-sys-fpreloc verify-sys-fpload verify-sys-faststore verify-srt verify-srt-iter verify-idiv verify-bcd verify-fbld verify-fppipe verify-fppipe2 verify-all coverage coverage-sys coverage-mem coverage-unit coverage-all opgen opgen-modes
 .DEFAULT_GOAL := help
 
 help:
@@ -29,6 +29,7 @@ help:
 	@echo "  make verify-clean  drop the golden cache (forces a cold regen on the next make verify)"
 	@echo "  make verify-sys M2S.0 system-mode ORACLE check: build qemu-system, gen + validate the"
 	@echo "                  bare-metal protected-mode/paging golden trace (no RTL yet; M2S.1 starts that)"
+	@echo "  make verify-sys-faststore  QEMU-diff precise system MOV-store #PF/restart + S_PIPE gate"
 	@echo "  make verify-srt radix-4 SRT divider gate: fx_srt_div bit-exact vs the golden model"
 	@echo "  make verify-srt-iter  iterative (1-step/clk) SRT divider engine: bit-exact vs the golden"
 	@echo "                  (correct PLA == QEMU; buggy PLA == documented Pentium FDIV flaw)"
@@ -677,12 +678,20 @@ verify-sys:
 verify-sys-fpreloc:
 	bash verif/sys/run-sysfpreloc-gate.sh
 
-# Uses an isolated VEN_SYS_FASTLOAD_FLAT profile and profiler to prove the
-# restricted common-base MOV r32,[base] path is taken; see
+# Uses an isolated VEN_SYS_FASTLOAD_FLAT/VEN_SYS_FASTSTORE_FLAT profile and
+# profiler to prove the restricted common-base MOV r32,[base] / MOV [base],r32
+# paths are taken; see
 # verif/sys/run-sysfpload-gate.sh.  Kept separate from verify-sys because it
 # necessarily rebuilds the define variant.
 verify-sys-fpload:
 	bash verif/sys/run-sysfpload-gate.sh
+
+# Precise #PF restart is the safety boundary for the system fast-store producer:
+# a present/read-only PTE must reject MOV [disp32],r32 before any write, then
+# restart it after the handler maps RW. The gate also proves the post-restart
+# loop actually uses S_PIPE; see verif/sys/run-pfaststore-gate.sh.
+verify-sys-faststore:
+	bash verif/sys/run-pfaststore-gate.sh
 
 # --- verify-all umbrella (verif/run-verify-all.sh) --------------------------
 # One command that runs EVERY routinely-runnable gate (verify + verify-sys +
