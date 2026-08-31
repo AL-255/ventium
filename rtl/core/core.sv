@@ -8365,7 +8365,8 @@ module core
   logic        fp_cap_stkflt;        // R2-H06: masked stack fault at capture
   logic        fpp_stkflt;           // R2-H06: registered with the capture
 `ifdef VEN_FP_PIPE2
-  // 2-STAGE FP-commit split (Fmax: K26 half-cache 60 MHz). The 1-stage +VEN_FP_PIPE
+  // 2-STAGE FP-commit split (Fmax relief for the K26 production configuration).
+  // The 1-stage +VEN_FP_PIPE
   // defer still runs the WHOLE f_eval (f_eval_s1 front -> f_eval_s2 round) in the
   // single commit clock N+1 -> an ~80-level / ~43-CARRY8 cone (fpp_*->fx_round_pack
   // ->fpr) that caps the routed Fmax ~52 MHz. This inserts ONE register at the
