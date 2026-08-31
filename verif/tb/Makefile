@@ -71,6 +71,7 @@ OBJDIR ?= obj_dir
 L1AXI_OBJDIR     ?= obj_dir_l1axi
 L1AXI_CDC_OBJDIR ?= obj_dir_l1axi_cdc
 KV_FULL_OBJDIR   ?= obj_dir_l1axi_kvf
+KV_PROXY_OBJDIR  ?= obj_dir_l1axi_kvproxy
 # Host-compiler optimization for the Verilated model. verilated.mk hard-sets
 # OPT_FAST=-Os (conservative), which the environment cannot override — only a
 # command-line make assignment can, which is exactly what Verilator's -MAKEFLAGS
@@ -246,9 +247,9 @@ l1axi_kv_full_xinit:
 l1axi_kv_proxy:
 	$(VERILATOR) $(VL_FLAGS) $(KV_FULL_DEFS) +define+VEN_PS_PROXY +define+VEN_DBG_CORE +define+VEN_FPTRAP +define+VEN_FPREM $(VL_EXTRA_DEFINES) \
 	  -CFLAGS "-DVEN_L1_AXI -DVEN_KV260_SOC -DVEN_PS_PROXY -DVEN_DBG_CORE -DVEN_FPTRAP" \
-	  -Mdir obj_dir_l1axi_kvproxy \
+	  -Mdir $(KV_PROXY_OBJDIR) \
 	  -F $(RTL_FILELIST) $(L1AXI_RTL) $(CPP_SRCS)
-	@echo "built (deployed PROXY config): $(CURDIR)/obj_dir_l1axi_kvproxy/$(EXE)"
+	@echo "built (deployed PROXY config): $(CURDIR)/$(KV_PROXY_OBJDIR)/$(EXE)"
 
 # ---- l1axi_kv_dos: l1axi_kv_full + the PS peripheral C models wired into the io
 # bridge (--dos). A FAITHFUL FreeDOS repro — SeaBIOS POST gets the SAME device
