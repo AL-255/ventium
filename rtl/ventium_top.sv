@@ -47,6 +47,25 @@ module ventium_top
     input  logic [31:0] init_eip,
     input  logic [31:0] init_esp,
 
+`ifdef VEN_SNAPSHOT_RESTORE
+    // Simulation-only post-init checkpoint. These pins are omitted from every
+    // normal FPGA build, so the hardware reset contract remains unchanged.
+    input  logic        snapshot_restore,
+    input  logic [31:0] snapshot_eax, snapshot_ecx, snapshot_edx, snapshot_ebx,
+    input  logic [31:0] snapshot_ebp, snapshot_esi, snapshot_edi,
+    input  logic [31:0] snapshot_eflags,
+    input  logic [15:0] snapshot_cs, snapshot_ss, snapshot_ds, snapshot_es,
+    input  logic [15:0] snapshot_fs, snapshot_gs,
+    input  logic [31:0] snapshot_ss_base, snapshot_ds_base, snapshot_es_base,
+    input  logic [31:0] snapshot_fs_base, snapshot_gs_base,
+    input  logic [15:0] snapshot_fctrl, snapshot_fstat,
+    input  logic [7:0]  snapshot_fptag,
+    input  logic [2:0]  snapshot_ftop,
+    input  logic [31:0] snapshot_fip, snapshot_fdp,
+    input  logic [15:0] snapshot_fcs, snapshot_fds,
+    input  logic [639:0] snapshot_fpr_flat,
+`endif
+
     // M2S.1: boot-mode select (TB drives 1 in --system mode). 0 = user (the
     // M0-M6 cold reset to init_eip/init_esp, flat); 1 = system (cold reset at
     // CS:EIP=F000:FFF0, real mode). Default 0 keeps make verify unchanged.
@@ -563,6 +582,24 @@ module ventium_top
       .fast_reset_req (fast_reset_req_w),
       .init_eip     (init_eip),
       .init_esp     (init_esp),
+`ifdef VEN_SNAPSHOT_RESTORE
+      .snapshot_restore(snapshot_restore),
+      .snapshot_eax(snapshot_eax), .snapshot_ecx(snapshot_ecx),
+      .snapshot_edx(snapshot_edx), .snapshot_ebx(snapshot_ebx),
+      .snapshot_ebp(snapshot_ebp), .snapshot_esi(snapshot_esi),
+      .snapshot_edi(snapshot_edi), .snapshot_eflags(snapshot_eflags),
+      .snapshot_cs(snapshot_cs), .snapshot_ss(snapshot_ss),
+      .snapshot_ds(snapshot_ds), .snapshot_es(snapshot_es),
+      .snapshot_fs(snapshot_fs), .snapshot_gs(snapshot_gs),
+      .snapshot_ss_base(snapshot_ss_base), .snapshot_ds_base(snapshot_ds_base),
+      .snapshot_es_base(snapshot_es_base), .snapshot_fs_base(snapshot_fs_base),
+      .snapshot_gs_base(snapshot_gs_base),
+      .snapshot_fctrl(snapshot_fctrl), .snapshot_fstat(snapshot_fstat),
+      .snapshot_fptag(snapshot_fptag), .snapshot_ftop(snapshot_ftop),
+      .snapshot_fip(snapshot_fip), .snapshot_fdp(snapshot_fdp),
+      .snapshot_fcs(snapshot_fcs), .snapshot_fds(snapshot_fds),
+      .snapshot_fpr_flat(snapshot_fpr_flat),
+`endif
       .boot_mode    (boot_mode),
       .cycle_mode   (cycle_mode),
       // The SMM state exports are part of the unconditional core contract;

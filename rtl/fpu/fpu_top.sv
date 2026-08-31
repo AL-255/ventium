@@ -51,6 +51,21 @@ module fpu_top (
     input  logic        clk,
     input  logic        rst_n,        // sync reset -> FNINIT power-on state
 
+`ifdef VEN_SNAPSHOT_RESTORE
+    // Simulation-only full x87 checkpoint seed. The ports and reset mux are
+    // absent from normal synthesis builds.
+    input  logic        init_restore,
+    input  logic [2:0]  init_ftop,
+    input  logic [15:0] init_fstat,   // raw: TOP field already stripped
+    input  logic [15:0] init_fctrl,
+    input  logic [7:0]  init_fptag,   // physical bit p: 1 means empty
+    input  logic [31:0] init_fip,
+    input  logic [15:0] init_fcs,
+    input  logic [31:0] init_fdp,
+    input  logic [15:0] init_fds,
+    input  logic [639:0] init_fpr_flat,
+`endif
+
     // ---- READ PORTS (combinational, zero-cycle) ----
     output logic [79:0] st0, st1, st2, st3, st4, st5, st6, st7, // fpr[(ftop+i)]
     output logic [2:0]  ftop_o,       // current TOP (for FNSTSW->gpr in spine)
@@ -240,6 +255,20 @@ module fpu_top (
       fptag <= 8'hFF;
       for (int fi = 0; fi < 8; fi++) fpr[fi] <= 80'd0;
       fip <= 32'd0; fcs <= 16'd0; fdp <= 32'd0; fds <= 16'd0;
+`ifdef VEN_SNAPSHOT_RESTORE
+      if (init_restore) begin
+        ftop  <= init_ftop;
+        fctrl <= init_fctrl;
+        fstat <= init_fstat;
+        fptag <= init_fptag;
+        fip   <= init_fip;
+        fcs   <= init_fcs;
+        fdp   <= init_fdp;
+        fds   <= init_fds;
+        for (int fi = 0; fi < 8; fi++)
+          fpr[fi] <= init_fpr_flat[fi*80 +: 80];
+      end
+`endif
     end else begin
       // FNINIT (full reset state) — takes priority, same shape as the rst arm
       // but does NOT clear fpr[] (matches the inline FX_FNINIT, which only resets

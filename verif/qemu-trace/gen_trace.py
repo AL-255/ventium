@@ -428,6 +428,27 @@ class RSPClient:
         except ValueError:
             return None
 
+    def write_mem(self, addr: int, data: bytes):
+        """Write guest bytes through GDB RSP's debug-memory path.
+
+        This is intentionally a narrow primitive for debugger tooling (breakpoint
+        probes and state capture), not an emulated guest store.  QEMU's gdbstub
+        invalidates translated code as needed.
+        """
+        self.send("M%x,%x:%s" % (addr, len(data), data.hex()))
+        return self.recv() == b"OK"
+
+    def write_register(self, layout: RegLayout, name: str, value: int):
+        """Set one named register with RSP `P`; return false if unsupported."""
+        for regno, (reg_name, bits) in enumerate(layout.regs):
+            if reg_name != name:
+                continue
+            nbytes = bits // 8
+            payload = int(value).to_bytes(nbytes, "little", signed=False).hex()
+            self.send("P%x=%s" % (regno, payload))
+            return self.recv() == b"OK"
+        return False
+
 
 def decode_g_hex(hexstr: bytes) -> bytes:
     """Decode a 'g'/'p' hex reply to raw bytes, mapping 'xx' (unavailable) -> 0.

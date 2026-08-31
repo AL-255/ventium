@@ -34,6 +34,18 @@ module regfile
     input  logic                boot_mode,   // 1 = system cold reset, 0 = user
     input  logic                cosim_en,    // selects EDX 0x543 vs 0x663 (sys)
     input  logic [31:0]         init_esp,    // user-mode ESP seed
+`ifdef VEN_SNAPSHOT_RESTORE
+    // Reset-only user-mode checkpoint seed. System resets retain their
+    // architecturally specified CPUID-signature state.
+    input  logic                init_restore,
+    input  logic [31:0]         init_eax,
+    input  logic [31:0]         init_ecx,
+    input  logic [31:0]         init_edx,
+    input  logic [31:0]         init_ebx,
+    input  logic [31:0]         init_ebp,
+    input  logic [31:0]         init_esi,
+    input  logic [31:0]         init_edi,
+`endif
     // per-register write bus (driven by the spine writeback driver)
     input  logic [NUM_GPR-1:0]  gpr_we,
     input  logic [31:0]         gpr_wd [NUM_GPR],
@@ -46,6 +58,18 @@ module regfile
   always_ff @(posedge clk) begin
     if (!rst_n) begin
       // dual boot-mode reset — VERBATIM from the original core.sv FSM arm.
+`ifdef VEN_SNAPSHOT_RESTORE
+      if (!boot_mode && init_restore) begin
+        gpr[0] <= init_eax;
+        gpr[1] <= init_ecx;
+        gpr[2] <= init_edx;
+        gpr[3] <= init_ebx;
+        gpr[4] <= init_esp;
+        gpr[5] <= init_ebp;
+        gpr[6] <= init_esi;
+        gpr[7] <= init_edi;
+      end else begin
+`endif
       gpr[0] <= 32'd0;
       gpr[1] <= 32'd0;
       // task #102: reset EDX = P5/P54C CPUID signature 0x543 for BOTH the Win95
@@ -59,6 +83,9 @@ module regfile
       gpr[5] <= 32'd0;
       gpr[6] <= 32'd0;
       gpr[7] <= 32'd0;
+`ifdef VEN_SNAPSHOT_RESTORE
+      end
+`endif
     end else begin
       for (int i = 0; i < NUM_GPR; i++)
         if (gpr_we[i]) gpr[i] <= gpr_wd[i];

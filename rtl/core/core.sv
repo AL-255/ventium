@@ -218,6 +218,25 @@ module core
     input  logic [31:0] init_eip,
     input  logic [31:0] init_esp,
 
+`ifdef VEN_SNAPSHOT_RESTORE
+    // Simulation-only checkpoint seed.  These ports exist only in the
+    // dedicated profiler build; a normal processor always cold-resets.
+    input  logic        snapshot_restore,
+    input  logic [31:0] snapshot_eax, snapshot_ecx, snapshot_edx, snapshot_ebx,
+    input  logic [31:0] snapshot_ebp, snapshot_esi, snapshot_edi,
+    input  logic [31:0] snapshot_eflags,
+    input  logic [15:0] snapshot_cs, snapshot_ss, snapshot_ds, snapshot_es,
+    input  logic [15:0] snapshot_fs, snapshot_gs,
+    input  logic [31:0] snapshot_ss_base, snapshot_ds_base, snapshot_es_base,
+    input  logic [31:0] snapshot_fs_base, snapshot_gs_base,
+    input  logic [15:0] snapshot_fctrl, snapshot_fstat,
+    input  logic [7:0]  snapshot_fptag,
+    input  logic [2:0]  snapshot_ftop,
+    input  logic [31:0] snapshot_fip, snapshot_fdp,
+    input  logic [15:0] snapshot_fcs, snapshot_fds,
+    input  logic [639:0] snapshot_fpr_flat,
+`endif
+
     // M2S.1 (docs/m2s1-segmentation-spec.md "dual-boot-mode"): selects the COLD
     // RESET state. DEFAULT 0 = USER (M0-M6 unchanged: reset to init_eip/init_esp,
     // flat 4 GB segments, the post-loader linux-user state). 1 = SYSTEM: cold
@@ -606,6 +625,13 @@ module core
     .boot_mode (boot_mode),
     .cosim_en  (cosim_en),
     .init_esp  (init_esp),
+`ifdef VEN_SNAPSHOT_RESTORE
+    .init_restore(snapshot_restore && !boot_mode),
+    .init_eax  (snapshot_eax), .init_ecx(snapshot_ecx),
+    .init_edx  (snapshot_edx), .init_ebx(snapshot_ebx),
+    .init_ebp  (snapshot_ebp), .init_esi(snapshot_esi),
+    .init_edi  (snapshot_edi),
+`endif
     .gpr_we    (gpr_we),
     .gpr_wd    (gpr_wd),
     .gpr_o     (gpr_o)
@@ -4651,7 +4677,12 @@ module core
         cs_d<=1'b0;   // real-mode CS: 16-bit default operand/address size
       ss_b<=1'b1;   // C-07: default 32-bit stack (user mode / pre-descriptor PM)
       end else begin
-        eip<=init_eip; eflags<=EFLAGS_RESET;
+        eip<=init_eip;
+`ifdef VEN_SNAPSHOT_RESTORE
+        eflags<=snapshot_restore ? snapshot_eflags : EFLAGS_RESET;
+`else
+        eflags<=EFLAGS_RESET;
+`endif
         // GPR reset (user: ESP = init_esp, others 0) lives in u_regfile's own
         // synchronous rst_n arm now (R3) — driven by boot_mode/init_esp.
         creg0<=32'd0; creg2<=32'd0; creg3<=32'd0; creg4<=32'd0;
@@ -4666,7 +4697,18 @@ module core
         // Bases stay 0 (flat) so addressing is byte-identical until GS is set.
         // INERT when proxy_en==0: seg_sel[] stay 0 (the snap uses the SEG_*
         // constants in that path), so non-proxy user runs are bit-identical.
+`ifdef VEN_SNAPSHOT_RESTORE
+        if (snapshot_restore) begin
+          seg_sel[SG_CS]<=snapshot_cs; seg_sel[SG_SS]<=snapshot_ss;
+          seg_sel[SG_DS]<=snapshot_ds; seg_sel[SG_ES]<=snapshot_es;
+          seg_sel[SG_FS]<=snapshot_fs; seg_sel[SG_GS]<=snapshot_gs;
+          seg_base[SG_SS]<=snapshot_ss_base; seg_base[SG_DS]<=snapshot_ds_base;
+          seg_base[SG_ES]<=snapshot_es_base; seg_base[SG_FS]<=snapshot_fs_base;
+          seg_base[SG_GS]<=snapshot_gs_base;
+        end else if (proxy_en) begin
+`else
         if (proxy_en) begin
+`endif
           seg_sel[SG_CS]<=SEG_CS; seg_sel[SG_SS]<=SEG_SS; seg_sel[SG_DS]<=SEG_DS;
           seg_sel[SG_ES]<=SEG_ES; seg_sel[SG_FS]<=SEG_FS; seg_sel[SG_GS]<=SEG_GS;
         end
@@ -4688,7 +4730,12 @@ module core
       // fstat/fptag/fpr[] are reset there. Only the spine-side touch flag here.
       x87_touched_r<=1'b0; f_step<=4'd0; f_seq_step<=5'd0;
       hung_r<=1'b0;   // M6 Erratum 81: not hung out of reset.
-      gs_base_r<=32'd0; cn<=64'd0;   // M7.1 proxy: no TLS base yet; retire count 0
+`ifdef VEN_SNAPSHOT_RESTORE
+      gs_base_r<=snapshot_restore && !boot_mode ? snapshot_gs_base : 32'd0;
+`else
+      gs_base_r<=32'd0;
+`endif
+      cn<=64'd0;   // M7.1 proxy: no TLS base yet; retire count 0
       tsc<=64'd0;                    // F3: time-stamp counter zeroed at reset (RDTSC)
 `ifdef VEN_TRACE_IRQ
       dbg_if_q<=1'b0; dbg_cs_q<=16'hF000; dbg_csb_q<=32'h000F_0000;
@@ -8442,6 +8489,14 @@ module core
 
   ven_fp_top u_fp_shared (
     .clk(clk), .rst_n(rst_n),
+`ifdef VEN_SNAPSHOT_RESTORE
+    .init_restore(snapshot_restore && !boot_mode),
+    .init_top(snapshot_ftop), .init_status(snapshot_fstat),
+    .init_control(snapshot_fctrl), .init_tag(snapshot_fptag),
+    .init_fip(snapshot_fip), .init_fcs(snapshot_fcs),
+    .init_fdp(snapshot_fdp), .init_fds(snapshot_fds),
+    .init_regs_phys(snapshot_fpr_flat),
+`endif
     .cmd_valid(fp_shared_cmd_valid), .cmd_ready(fp_shared_cmd_ready),
     .cmd_op(q_fxop), .cmd_aluop(q_f_aluop), .cmd_sti(q_f_sti),
     .cmd_pop(q_f_pop), .cmd_constant(q_f_const), .cmd_mem(f_mem80),
@@ -8671,6 +8726,18 @@ module core
   fpu_top u_fpu_state (
     .clk          (clk),
     .rst_n        (rst_n),
+`ifdef VEN_SNAPSHOT_RESTORE
+    .init_restore (snapshot_restore && !boot_mode),
+    .init_ftop    (snapshot_ftop),
+    .init_fstat   (snapshot_fstat),
+    .init_fctrl   (snapshot_fctrl),
+    .init_fptag   (snapshot_fptag),
+    .init_fip     (snapshot_fip),
+    .init_fcs     (snapshot_fcs),
+    .init_fdp     (snapshot_fdp),
+    .init_fds     (snapshot_fds),
+    .init_fpr_flat(snapshot_fpr_flat),
+`endif
     .st0          (fp_st[0]),
     .st1          (fp_st[1]),
     .st2          (fp_st[2]),

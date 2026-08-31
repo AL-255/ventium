@@ -50,6 +50,13 @@ inline uint8_t hex_byte(const char* p) {
     return (uint8_t)((nib(p[0]) << 4) | nib(p[1]));
 }
 
+inline int hex_nibble(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
 // Find the value of a quoted hex scalar field: "<key>":"0x........". Searches
 // from `from` and returns the parsed uint32 (0 if absent). When found, advances
 // `*next` past the value (so repeated keys, e.g. region "vaddr", scan forward).
@@ -77,6 +84,29 @@ bool scan_int_field(const std::string& s, const char* key, size_t from,
     size_t v = k + pat.size();
     *out = std::strtoll(s.c_str() + v, nullptr, 10);
     if (next) *next = v;
+    return true;
+}
+
+bool has_hex_field(const std::string& s, const char* key, size_t from = 0) {
+    return s.find(std::string("\"") + key + "\":\"0x", from) != std::string::npos;
+}
+
+// Decode canonical tracefmt 80-bit hex (most-significant nibble first) into
+// three little-endian host words: [31:0], [63:32], [79:64].
+bool scan_hex80_field(const std::string& s, const char* key, size_t from,
+                      uint32_t out[3]) {
+    std::string pat = std::string("\"") + key + "\":\"0x";
+    size_t k = s.find(pat, from);
+    if (k == std::string::npos) return false;
+    size_t v = k + pat.size();
+    if (v + 20 >= s.size() || s[v + 20] != '\"') return false;
+    out[0] = out[1] = out[2] = 0;
+    for (size_t i = 0; i < 20; ++i) {
+        int nib = hex_nibble(s[v + i]);
+        if (nib < 0) return false;
+        size_t lsb_nib = 19 - i;
+        out[lsb_nib / 8] |= (uint32_t)nib << ((lsb_nib % 8) * 4);
+    }
     return true;
 }
 
@@ -118,6 +148,58 @@ QuakeImage load_quake_image(const std::string& path, MemModel& mem) {
         }
     }
 
+    // ---- optional full post-init checkpoint --------------------------------
+    // A snapshot's ST(i) values are logical/TOP-relative. Rebuild physical
+    // slots with the authoritative FNSTENV TOP/tag fields, never from QEMU's
+    // g-packet ftag (which is known to be abridged to zero).
+    {
+        size_t fp = s.find("\"fpu\":{");
+        size_t fpend = (fp == std::string::npos) ? std::string::npos : s.find('}', fp);
+        if (fp != std::string::npos && fpend != std::string::npos) {
+            std::string fsub = s.substr(fp, fpend - fp);
+            bool complete = has_hex_field(fsub, "fctrl") && has_hex_field(fsub, "fstat") &&
+                            has_hex_field(fsub, "ftag") && has_hex_field(fsub, "fioff") &&
+                            has_hex_field(fsub, "fooff") && has_hex_field(fsub, "fiseg") &&
+                            has_hex_field(fsub, "foseg");
+            uint32_t logical[8][3] = {};
+            for (int i = 0; i < 8; ++i) {
+                char key[4]; std::snprintf(key, sizeof(key), "st%d", i);
+                complete &= scan_hex80_field(fsub, key, 0, logical[i]);
+            }
+            if (!complete) {
+                std::fprintf(stderr, "quake-image: rejecting incomplete post-init x87 checkpoint\n");
+                return QuakeImage{};
+            }
+            img.ss_base = scan_hex_field(s, "ss_base");
+            img.ds_base = scan_hex_field(s, "ds_base");
+            img.es_base = scan_hex_field(s, "es_base");
+            img.fs_base = scan_hex_field(s, "fs_base");
+            img.gs_base = scan_hex_field(s, "gs_base");
+            img.fctrl = (uint16_t)scan_hex_field(fsub, "fctrl");
+            uint16_t full_fstat = (uint16_t)scan_hex_field(fsub, "fstat");
+            uint16_t full_ftag = (uint16_t)scan_hex_field(fsub, "ftag");
+            img.ftop = (uint8_t)((full_fstat >> 11) & 7);
+            img.fstat = (uint16_t)(full_fstat & ~0x3800u);
+            img.fptag = 0;
+            for (int p = 0; p < 8; ++p)
+                if (((full_ftag >> (p * 2)) & 3u) == 3u) img.fptag |= (uint8_t)(1u << p);
+            img.fip = scan_hex_field(fsub, "fioff");
+            img.fdp = scan_hex_field(fsub, "fooff");
+            img.fcs = (uint16_t)scan_hex_field(fsub, "fiseg");
+            img.fds = (uint16_t)scan_hex_field(fsub, "foseg");
+            for (int i = 0; i < 8; ++i) {
+                int phys = (img.ftop + i) & 7;
+                for (int bit = 0; bit < 80; ++bit) {
+                    if ((logical[i][bit / 32] >> (bit % 32)) & 1u) {
+                        int dst = phys * 80 + bit;
+                        img.fpr_flat[dst / 32] |= 1u << (dst % 32);
+                    }
+                }
+            }
+            img.snapshot = true;
+        }
+    }
+
     // ---- regions ------------------------------------------------------------
     // Walk every {"vaddr":"0x...", ...} object in the "regions" array. For a hex
     // region, write its bytes into bus memory; for a zero region, skip (MemModel
@@ -156,8 +238,9 @@ QuakeImage load_quake_image(const std::string& path, MemModel& mem) {
 
     std::fprintf(stderr,
         "quake-image: loaded %ld hex regions (%lld bytes), %ld zero regions "
-        "(sparse); entry=0x%08x esp=0x%08x\n",
-        n_hex, total_bytes, n_zero, img.eip, img.esp);
+        "(sparse); entry=0x%08x esp=0x%08x%s\n",
+        n_hex, total_bytes, n_zero, img.eip, img.esp,
+        img.snapshot ? " [full snapshot]" : "");
     img.ok = true;
     return img;
 }

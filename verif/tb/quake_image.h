@@ -11,11 +11,11 @@
 //   1. QuakeImage  — the INITIAL PROCESS IMAGE sidecar JSON (one line):
 //        {"regs":{...},"seg":{...},"seg_base":{...},
 //         "regions":[ {"vaddr","hex"} | {"vaddr","len","zero":true} ], "meta":{}}
-//      The TB maps every region verbatim into the bus memory, then seeds the
-//      core's reset regs (eip=entry, esp, eflags) + the flat user selectors.
-//      (gs_base from seg_base is DELIBERATELY ignored — the producer's contract
-//      says the linux-user gdbstub mis-names the segment-base slots, so the true
-//      %gs TLS base is taken from the set_thread_area sys_call.gs_base instead.)
+//      The TB maps every region verbatim into bus memory. Ordinary initial
+//      images retain the original loader reset contract. Post-init images from
+//      tools/quake_snapshot.py include every user-mode state item modelled by
+//      this testbench (including x87) and are accepted only by the guarded
+//      +VEN_SNAPSHOT_RESTORE build.
 //
 //   2. SyscallReplay — the GOLDEN .vtrace's int-0x80 `sys_call` effects, in
 //      retire order. For each record that carries a `sys_call` field we keep
@@ -47,6 +47,16 @@ struct QuakeImage {
     uint32_t eax = 0, ecx = 0, edx = 0, ebx = 0, ebp = 0, esi = 0, edi = 0;
     // initial selectors (from "seg")
     uint16_t cs = 0, ss = 0, ds = 0, es = 0, fs = 0, gs = 0;
+    // Modelled post-init checkpoint (valid only when the producer supplied a
+    // verified `fpu` object, including the authoritative FNSTENV tag word).
+    bool     snapshot = false;
+    uint32_t ss_base = 0, ds_base = 0, es_base = 0, fs_base = 0, gs_base = 0;
+    uint16_t fctrl = 0x037f, fstat = 0;
+    uint8_t  fptag = 0xff, ftop = 0;  // bit p=1 is empty; physical slots
+    uint32_t fip = 0, fdp = 0;
+    uint16_t fcs = 0, fds = 0;
+    // Eight physical 80-bit slots, stored in Verilator VlWide word order.
+    uint32_t fpr_flat[20] = {};
     bool     ok = false;
 };
 

@@ -13,6 +13,22 @@ module ven_fp_state (
     input  wire logic         clk,
     input  wire logic         rst_n,
 
+`ifdef VEN_SNAPSHOT_RESTORE
+    // Simulation-only architectural checkpoint seed.  This is reset-only: it
+    // never adds a writable state path to a production image.
+    input  wire logic         init_restore,
+    input  wire logic [2:0]   init_top,
+    input  wire logic [15:0]  init_status,
+    input  wire logic [15:0]  init_control,
+    input  wire logic [7:0]   init_tag,
+    input  wire logic [31:0]  init_fip,
+    input  wire logic [15:0]  init_fcs,
+    input  wire logic [31:0]  init_fdp,
+    input  wire logic [15:0]  init_fds,
+    // Physical register order: p*80 +: 80 is x87 physical slot p.
+    input  wire logic [639:0] init_regs_phys,
+`endif
+
     // Two architectural ST(i) read ports.  Indices are relative to TOP.
     input  wire logic [2:0]   rd0_idx,
     input  wire logic [2:0]   rd1_idx,
@@ -137,6 +153,26 @@ module ven_fp_state (
         bank[i] <= 80'd0;
         map[i]  <= i[2:0];
       end
+`ifdef VEN_SNAPSHOT_RESTORE
+      if (init_restore) begin
+        // A checkpoint is taken at an instruction boundary, so there is no
+        // in-flight FP command to recover.  Re-establish identity mapping and
+        // materialize the architectural *physical* slots directly; this is
+        // exact even after an earlier FXCH had compacted the private bank.
+        top     <= init_top;
+        status  <= init_status;
+        control <= init_control;
+        tag     <= init_tag;
+        fip     <= init_fip;
+        fcs     <= init_fcs;
+        fdp     <= init_fdp;
+        fds     <= init_fds;
+        for (int i = 0; i < 8; i++) begin
+          bank[i] <= init_regs_phys[i*80 +: 80];
+          map[i]  <= i[2:0];
+        end
+      end
+`endif
     end else begin
       // FNINIT has the same priority/order as the proven fpu_top: it resets
       // metadata but deliberately preserves stale register contents.

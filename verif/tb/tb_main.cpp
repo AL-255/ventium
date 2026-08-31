@@ -372,6 +372,7 @@ int main(int argc, char** argv) {
     // regs (entry/esp/eflags) + flat user selectors, and ENABLE proxy_en. The
     // golden's sys_call effects (--lockstep) are replayed at each int-0x80.
     bool                          proxy_mode = false;
+    ventium::QuakeImage           quake_img;
     std::vector<ventium::SyscallEffect> syscalls;
     size_t                        sc_idx = 0;   // next syscall to replay (in order)
     // M14 free-run emulator state (captured by service_proxy + the run loop).
@@ -381,16 +382,22 @@ int main(int argc, char** argv) {
     uint64_t  last_emu_n = ~0ull;
     uint32_t  emu_eax = 0, emu_gs = 0;  bool emu_apply_gs = false;
     if (!args.quake_image.empty()) {
-        ventium::QuakeImage img = ventium::load_quake_image(args.quake_image, mem);
-        if (!img.ok) {
+        quake_img = ventium::load_quake_image(args.quake_image, mem);
+        if (!quake_img.ok) {
             std::fprintf(stderr, "tb: failed to load --quake-image '%s'\n",
                          args.quake_image.c_str());
             return 2;
         }
+#ifndef VEN_SNAPSHOT_RESTORE
+        if (quake_img.snapshot) {
+            std::fprintf(stderr, "tb: post-init snapshot requires +define+VEN_SNAPSHOT_RESTORE\n");
+            return 2;
+        }
+#endif
         // Seed the core's reset architectural state from the image (the TB plays
         // the loader: it establishes exactly QEMU's starting process image).
-        args.entry    = img.eip;
-        args.init_esp = img.esp;
+        args.entry    = quake_img.eip;
+        args.init_esp = quake_img.esp;
         proxy_mode    = true;
         if (args.emulate) {
             // M14 free-run: EMULATE int-0x80 (no golden). Slurp the optional stdin
@@ -407,14 +414,15 @@ int main(int argc, char** argv) {
             if (!args.video_path.empty()) emu->set_video_path(args.video_path);
             std::fprintf(stderr,
                 "tb: FREE-RUN emulate ON (proxy_en=1): entry=0x%08x esp=0x%08x "
-                "brk_base=0x%08x stdin=%zuB\n", img.eip, img.esp, brk0,
+                "brk_base=0x%08x stdin=%zuB\n", quake_img.eip, quake_img.esp, brk0,
                 args.user_stdin.empty() ? (size_t)0 : (size_t)1);
         } else {
             if (!args.lockstep.empty())
                 syscalls = ventium::load_syscall_replay(args.lockstep);
             std::fprintf(stderr,
                 "tb: quake lock-step ON (proxy_en=1): entry=0x%08x esp=0x%08x, "
-                "%zu syscalls to replay\n", img.eip, img.esp, syscalls.size());
+                "%zu syscalls to replay%s\n", quake_img.eip, quake_img.esp, syscalls.size(),
+                quake_img.snapshot ? " [full snapshot]" : "");
         }
     }
 
@@ -1254,6 +1262,27 @@ int main(int argc, char** argv) {
     top->rst_n  = 0;
     top->init_eip  = args.entry;
     top->init_esp  = args.init_esp;
+#ifdef VEN_SNAPSHOT_RESTORE
+    // Modelled-state injection exists only in the dedicated simulation build. The
+    // restore bit is sampled solely while reset is asserted; ordinary process
+    // images keep it low and retain their established reset behavior.
+    top->snapshot_restore = quake_img.snapshot ? 1 : 0;
+    top->snapshot_eax = quake_img.eax; top->snapshot_ecx = quake_img.ecx;
+    top->snapshot_edx = quake_img.edx; top->snapshot_ebx = quake_img.ebx;
+    top->snapshot_ebp = quake_img.ebp; top->snapshot_esi = quake_img.esi;
+    top->snapshot_edi = quake_img.edi; top->snapshot_eflags = quake_img.eflags;
+    top->snapshot_cs = quake_img.cs; top->snapshot_ss = quake_img.ss;
+    top->snapshot_ds = quake_img.ds; top->snapshot_es = quake_img.es;
+    top->snapshot_fs = quake_img.fs; top->snapshot_gs = quake_img.gs;
+    top->snapshot_ss_base = quake_img.ss_base; top->snapshot_ds_base = quake_img.ds_base;
+    top->snapshot_es_base = quake_img.es_base; top->snapshot_fs_base = quake_img.fs_base;
+    top->snapshot_gs_base = quake_img.gs_base;
+    top->snapshot_fctrl = quake_img.fctrl; top->snapshot_fstat = quake_img.fstat;
+    top->snapshot_fptag = quake_img.fptag; top->snapshot_ftop = quake_img.ftop;
+    top->snapshot_fip = quake_img.fip; top->snapshot_fdp = quake_img.fdp;
+    top->snapshot_fcs = quake_img.fcs; top->snapshot_fds = quake_img.fds;
+    for (int w = 0; w < 20; ++w) top->snapshot_fpr_flat[w] = quake_img.fpr_flat[w];
+#endif
     top->boot_mode  = args.system ? 1 : 0;  // M2S.1: system cold reset
     top->cycle_mode = args.cycle ? 1 : 0;   // M4: enable dual U/V issue
 #ifdef VEN_KV260_SOC

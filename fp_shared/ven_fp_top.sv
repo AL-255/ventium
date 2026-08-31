@@ -17,6 +17,21 @@ module ven_fp_top
     input  wire logic         clk,
     input  wire logic         rst_n,
 
+`ifdef VEN_SNAPSHOT_RESTORE
+    // Reset-only simulation checkpoint input.  The full FPU environment is
+    // carried so a post-init profile cannot hide a state-restore defect.
+    input  wire logic         init_restore,
+    input  wire logic [2:0]   init_top,
+    input  wire logic [15:0]  init_status,
+    input  wire logic [15:0]  init_control,
+    input  wire logic [7:0]   init_tag,
+    input  wire logic [31:0]  init_fip,
+    input  wire logic [15:0]  init_fcs,
+    input  wire logic [31:0]  init_fdp,
+    input  wire logic [15:0]  init_fds,
+    input  wire logic [639:0] init_regs_phys,
+`endif
+
     input  wire logic         cmd_valid,
     output      logic         cmd_ready,
     input  wire fxop_e        cmd_op,
@@ -160,6 +175,14 @@ module ven_fp_top
   ven_fp_state u_state (
       .clk(clk),
       .rst_n(rst_n),
+`ifdef VEN_SNAPSHOT_RESTORE
+      .init_restore(init_restore),
+      .init_top(init_top), .init_status(init_status),
+      .init_control(init_control), .init_tag(init_tag),
+      .init_fip(init_fip), .init_fcs(init_fcs),
+      .init_fdp(init_fdp), .init_fds(init_fds),
+      .init_regs_phys(init_regs_phys),
+`endif
       .rd0_idx(3'd0),
       .rd1_idx(state_rd1_idx),
       .rd0_data(st0_data),

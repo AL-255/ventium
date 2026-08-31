@@ -61,6 +61,11 @@ VL_EXTRA_DEFINES ?=
 ifneq ($(filter +define+VEN_DBG_CORE,$(VL_EXTRA_DEFINES)),)
 VL_CFLAGS += -DVEN_DBG_CORE
 endif
+# The reset-only checkpoint ports are generated only for this profiler build;
+# make the C++ driver see the exact same compile-time configuration.
+ifneq ($(filter +define+VEN_SNAPSHOT_RESTORE,$(VL_EXTRA_DEFINES)),)
+VL_CFLAGS += -DVEN_SNAPSHOT_RESTORE
+endif
 # OBJDIR: build dir for the `rtl` target. Default obj_dir (the canonical tb used by
 # make verify / m1..m5). A define-variant build (e.g. +VEN_FP_OVERLAP for the M5
 # fdivint band) passes OBJDIR=obj_dir_<variant> so it never clobbers obj_dir/tb_ventium.

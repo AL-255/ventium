@@ -99,6 +99,155 @@ def scan_regions(rsp, lo, hi, coarse, page, verbose):
     return regions
 
 
+def trace_from_stop(rsp, layout, raw, out_path, max_insn, want_x87, verbose):
+    """Write a lock-step golden prefix from the already-stopped QEMU process.
+
+    Capturing the image and the golden from the same stop makes a failed restore
+    diagnosable: it is either incomplete CPU/memory state or a later host-resource
+    dependency, never a race between two separately launched QEMU processes.
+    """
+    layout.anchor_tail(len(raw))
+    eip, eflags, gpr, seg, x87 = gt.regs_to_fields(layout, raw)
+    emit_x87 = want_x87 and layout.has("st0")
+    cur_brk = None
+    n_emitted = 0
+    n_syscalls = 0
+
+    def reg(name):
+        value = layout.slice(raw, name)
+        return 0 if value is None else value
+
+    with open(out_path, "w") as f:
+        f.write(tracefmt.dumps(tracefmt.header(
+            "qemu-gdbstub-postinit", "func", x87=emit_x87,
+            note="post-init snapshot companion; same stopped QEMU process")) + "\n")
+        while n_emitted < max_insn:
+            pc = eip
+            site = rsp.read_mem(pc, 2)
+            is_syscall = (site == b"\xcd\x80")
+            if is_syscall:
+                nr = reg("eax")
+                call_args = (reg("ebx"), reg("ecx"), reg("edx"),
+                             reg("esi"), reg("edi"), reg("ebp"))
+
+            stop = gt.StopReply(rsp.step())
+            while stop.kind == "output":
+                stop = gt.StopReply(rsp.recv())
+            if stop.kind in ("exit", "term"):
+                break
+
+            raw = rsp.read_g()
+            eip, eflags, gpr, seg, x87 = gt.regs_to_fields(layout, raw)
+            sys_call = None
+            if is_syscall:
+                ret = reg("eax")
+                writes, gs_base = gt._syscall_effect(rsp, nr, call_args, ret)
+                if nr == gt._NR["brk"]:
+                    requested = call_args[0]
+                    if cur_brk is None:
+                        cur_brk = ret
+                    elif requested and ret > cur_brk:
+                        writes.append({"addr": cur_brk,
+                                       "len": gt._u32(ret - cur_brk),
+                                       "zero": True})
+                    if requested and ret > cur_brk:
+                        cur_brk = ret
+                sys_call = tracefmt.sys_call_field(nr, ret, writes, gs_base)
+                n_syscalls += 1
+                if verbose:
+                    sys.stderr.write("[snap] trace int80 n=%d nr=%d ret=%#x writes=%d\n"
+                                     % (n_emitted, nr, gt._u32(ret), len(writes)))
+
+            f.write(tracefmt.dumps(tracefmt.func_record(
+                n_emitted, pc, eflags, gpr, seg,
+                x87=(x87 if emit_x87 else None), sys_call=sys_call)) + "\n")
+            n_emitted += 1
+
+    sys.stderr.write("[snap] wrote trace %s: %d instructions, %d syscalls%s\n"
+                     % (out_path, n_emitted, n_syscalls,
+                        " (x87)" if emit_x87 else ""))
+
+
+def capture_x87_env(rsp, layout, raw):
+    """Return (restored-g-packet, 32-bit FNSTENV image) without guest changes.
+
+    QEMU's i386 g-packet exposes ST values but reports an abridged zero tag word,
+    even for empty stack slots.  A debugger-only FNSTENV/FLDENV probe obtains the
+    authoritative 28-byte environment.  It saves/restores the overwritten code
+    and stack bytes, restores EIP, and verifies that GPR/flags/x87 views match
+    the pre-probe state before returning.
+    """
+    eip = layout.slice(raw, "eip")
+    esp = layout.slice(raw, "esp")
+    if eip is None or esp is None or esp < 0x100:
+        raise gt.RSPError("cannot place reversible x87 environment probe")
+    scratch = (esp - 0x100) & ~0xf
+    code_addr = scratch - 0x20
+    old_code = rsp.read_mem(code_addr, 12)
+    old_scratch = rsp.read_mem(scratch, 28)
+    if old_code is None or len(old_code) != 12 or old_scratch is None or len(old_scratch) != 28:
+        raise gt.RSPError("x87 environment probe memory is unavailable")
+    # Verify register write support before touching any guest state. `P eip=eip`
+    # is architecturally a no-op, but is required to return from the stack probe.
+    if not rsp.write_register(layout, "eip", eip):
+        raise gt.RSPError("gdbstub does not support the EIP restore needed for x87 capture")
+
+    fnstenv = b"\xd9\x35" + scratch.to_bytes(4, "little")  # FNSTENV m28byte
+    fldenv  = b"\xd9\x25" + scratch.to_bytes(4, "little")  # FLDENV  m28byte
+    env = None
+    fpu_restored = False
+    try:
+        if not rsp.write_mem(code_addr, fnstenv):
+            raise gt.RSPError("could not inject FNSTENV probe")
+        if not rsp.write_register(layout, "eip", code_addr):
+            raise gt.RSPError("could not enter FNSTENV probe")
+        stop = gt.StopReply(rsp.step())
+        while stop.kind == "output":
+            stop = gt.StopReply(rsp.recv())
+        if stop.kind != "stop":
+            raise gt.RSPError("FNSTENV probe did not stop normally")
+        env = rsp.read_mem(scratch, 28)
+        if env is None or len(env) != 28:
+            raise gt.RSPError("FNSTENV did not produce a complete 32-bit environment")
+        if not rsp.write_mem(code_addr, fldenv):
+            raise gt.RSPError("could not inject FLDENV restore")
+        if not rsp.write_register(layout, "eip", code_addr):
+            raise gt.RSPError("could not enter FLDENV restore")
+        stop = gt.StopReply(rsp.step())
+        while stop.kind == "output":
+            stop = gt.StopReply(rsp.recv())
+        if stop.kind != "stop":
+            raise gt.RSPError("FLDENV restore did not stop normally")
+        fpu_restored = True
+    finally:
+        # If the normal restore path failed after FNSTENV, make one best-effort
+        # recovery attempt before restoring ordinary memory/PC and surfacing the
+        # error.  No snapshot is ever emitted after a failed restoration.
+        if env is not None and not fpu_restored:
+            try:
+                rsp.write_mem(code_addr, fldenv)
+                rsp.write_register(layout, "eip", code_addr)
+                rsp.step()
+            except Exception:
+                pass
+        try:
+            rsp.write_mem(code_addr, old_code)
+            rsp.write_mem(scratch, old_scratch)
+            if not rsp.write_register(layout, "eip", eip):
+                raise gt.RSPError("could not restore EIP after x87 environment probe")
+        except Exception as exc:
+            raise gt.RSPError("failed to restore debugger probe bytes/state: %s" % exc)
+
+    restored = rsp.read_g()
+    # Compare every register the regular snapshot will consume.  The g-packet's
+    # tag value itself is known-abridged, but equality still detects corruption.
+    for name in (tracefmt.GPR_KEYS + ["eip", "eflags"] + tracefmt.X87_REGS +
+                 ["fctrl", "fstat", "ftag", "fioff", "fooff", "fiseg", "foseg"]):
+        if layout.has(name) and layout.slice(restored, name) != layout.slice(raw, name):
+            raise gt.RSPError("x87 environment probe failed to restore %s" % name)
+    return restored, env
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--qemu", required=True)
@@ -113,9 +262,19 @@ def main():
     ap.add_argument("--scan-lo", default="0x08000000")
     ap.add_argument("--scan-hi", default="0x41000000")
     ap.add_argument("--gs-base", default=None, help="override TLS gs_base (hex)")
+    ap.add_argument("--trace-out", default=None,
+                    help="write a lock-step golden prefix from this stopped state")
+    ap.add_argument("--trace-insns", type=int, default=0,
+                    help="positive instruction count required with --trace-out")
+    ap.add_argument("--trace-x87", action="store_true",
+                    help="include x87 state in the companion golden")
     ap.add_argument("--verbose", action="store_true")
     ap.add_argument("--args", nargs=argparse.REMAINDER, default=[])
     a = ap.parse_args()
+    if ((a.trace_out is None and a.trace_insns != 0) or
+            (a.trace_out is not None and a.trace_insns <= 0) or
+            (a.trace_x87 and a.trace_out is None)):
+        ap.error("--trace-out and a positive --trace-insns must be supplied together")
     bp = int(a.brk, 0)
 
     env = dict(os.environ)
@@ -137,7 +296,11 @@ def main():
         clr_bp(rsp, bp)
 
         raw = rsp.read_g()
-        eip, eflags, gpr, seg, _x87 = gt.regs_to_fields(layout, raw)
+        layout.anchor_tail(len(raw))
+        raw, xenv = capture_x87_env(rsp, layout, raw)
+        eip, eflags, gpr, seg, x87 = gt.regs_to_fields(layout, raw)
+        if x87 is None:
+            raise gt.RSPError("post-init snapshots require an x87-capable QEMU g-packet")
 
         # seg_base: flat (0) for ss/ds/es; fs/gs from the TLS. gs_base via the
         # TCB self-pointer at %gs:0 needs gs_base first, so try the g-packet slot,
@@ -156,18 +319,37 @@ def main():
                                0x100000, 0x1000, a.verbose)
         nbytes = sum(len(bytes.fromhex(r["hex"])) for r in regions if "hex" in r)
 
+        # ST(i) values in the g-packet are TOP-relative.  Keep all x87 fields,
+        # including the full tag word and environment pointers, so the restore
+        # consumer can reconstruct the physical register file without guessing.
+        fpu = {k: tracefmt.h80(x87[k]) for k in tracefmt.X87_REGS}
+        # Intel 32-bit FSTENV format: control/status/tag at offsets 0/4/8;
+        # FIP/FCS/FOP at 12/16; FDP/FDS at 20/24.  Prefer this authoritative
+        # image over QEMU's abridged GDB tag/pointer fields.
+        fpu["fctrl"] = tracefmt.hx(int.from_bytes(xenv[0:2], "little"), 16)
+        fpu["fstat"] = tracefmt.hx(int.from_bytes(xenv[4:6], "little"), 16)
+        fpu["ftag"]  = tracefmt.hx(int.from_bytes(xenv[8:10], "little"), 16)
+        fpu["fioff"] = tracefmt.h32(int.from_bytes(xenv[12:16], "little"))
+        fcs_fop = int.from_bytes(xenv[16:20], "little")
+        fpu["fiseg"] = tracefmt.hx(fcs_fop & 0xffff, 16)
+        fpu["fop"]   = tracefmt.hx((fcs_fop >> 16) & 0x07ff, 16)
+        fpu["fooff"] = tracefmt.h32(int.from_bytes(xenv[20:24], "little"))
+        fpu["foseg"] = tracefmt.hx(int.from_bytes(xenv[24:26], "little"), 16)
+
         img = {
             "regs": {k: tracefmt.h32(gpr[k]) for k in tracefmt.GPR_KEYS},
             "seg":  {k: "0x%04x" % seg[k] for k in tracefmt.SEG_KEYS},
             "seg_base": {k: tracefmt.h32(v) for k, v in seg_base.items()},
+            "fpu": fpu,
             "regions": regions,
             "meta": {
                 "producer": "quake_snapshot-postinit",
                 "elf": os.path.basename(a.elf),
                 "break": "0x%08x" % bp, "hits": a.hits,
                 "regions": len(regions), "bytes": nbytes,
-                "note": "post-Alpha_Init Quake snapshot: load regions + regs/seg, "
-                        "run from EIP to render without re-doing the translucency precompute.",
+                "arch_state": "ventium-modeled-user-checkpoint",
+                "note": "post-Alpha_Init Quake snapshot: load regions and Ventium-modeled "
+                        "user architectural state, then run from EIP without re-doing Alpha_Init.",
             },
         }
         img["regs"]["eip"] = tracefmt.h32(eip)
@@ -178,6 +360,9 @@ def main():
             json.dump(img, f, separators=(",", ":"))
         sys.stderr.write("[snap] wrote %s: %d regions, %.1f MiB, eip=%08x\n"
                          % (a.out, len(regions), nbytes / 1048576.0, eip))
+        if a.trace_out is not None:
+            trace_from_stop(rsp, layout, raw, a.trace_out, a.trace_insns,
+                            a.trace_x87, a.verbose)
         return 0
     finally:
         if rsp is not None:
