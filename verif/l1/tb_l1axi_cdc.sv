@@ -9,7 +9,10 @@
 // AXI4 DDR slave (axi_slave_bfm, multi-cycle + BUBBLE) is instantiated at four clock
 // ratios — axi faster, axi slower, equal, and a 5:3 coprime skew — and each runs a
 // read-fill / all-8-hit / write-through+readback / 2-way-evict / store-miss->load
-// scenario, checking every returned word. A CDC bug (lost ack, FIFO pointer/Gray
+// scenario, checking every returned word.  P54C-style stores complete at bounded
+// write-buffer admission, so direct backing-store observations explicitly wait for
+// the AXI drain; a dependent MISS instead proves the no-read-bypass rule. A CDC bug
+// (lost ack, FIFO pointer/Gray
 // error, re-triggered burst, dropped beat) corrupts data or hangs -> FAIL. Verilator
 // cannot model metastability (that is guaranteed structurally by the 2-FF Gray
 // synchronizers); it DOES prove the functional protocol across the ratios.
@@ -40,7 +43,7 @@ module cdc_harness #(
   // core side
   logic        c_req, c_we; logic [31:0] c_addr, c_wdata; logic [3:0] c_wstrb;
   logic [31:0] c_rdata; logic c_ack;
-  logic        bus_err; logic flush = 1'b0;
+  logic        bus_err; logic flush = 1'b0, m_idle;
 
   // AXI master <-> slave
   logic [3:0]        awid;   logic [ADDR_W-1:0] awaddr; logic [7:0] awlen;
@@ -55,7 +58,7 @@ module cdc_harness #(
 
   ventium_l1_axi #(.ADDR_W(ADDR_W), .REMAP_BASE(REMAP_BASE), .ADDR_MASK(ADDR_MASK)) dut (
       .core_clk(core_clk), .core_rst_n(core_rst_n), .axi_clk(axi_clk), .axi_rst_n(axi_rst_n),
-      .flush_all(flush), .golden_l1(1'b0), .shutdown(1'b0), .m_idle(),
+      .flush_all(flush), .golden_l1(1'b0), .shutdown(1'b0), .m_idle(m_idle),
       .core_req(c_req), .core_we(c_we), .core_addr(c_addr), .smm_active(1'b0),
       .smbase(32'h0003_0000), .smm_flush_o(), /* C-10 */ .core_lock(1'b0), /* REVIEW2_aug2 C-08: core reset default */ /* REVIEW2 H-24: no SMM in this unit gate */ .core_lin(c_addr), .core_wdata(c_wdata),
       .core_wstrb(c_wstrb), .core_rdata(c_rdata), .core_ack(c_ack),
@@ -129,6 +132,22 @@ module cdc_harness #(
     @(negedge core_clk); c_req<=1'b0; c_we<=1'b0;
   endtask
 
+  // The AXI master is in the AXI clock domain in this configuration.  Direct DDR
+  // inspection therefore waits there for all buffered stores/B responses to drain;
+  // a core-side store c_ack is intentionally earlier (P54C write-buffer admission).
+  task automatic wait_axi_drain(input string what);
+    int guard;
+    guard = 0;
+    while (!m_idle) begin
+      @(posedge axi_clk);
+      if (++guard > 5000) begin
+        $display("  FAIL [%s] %s: AXI write buffer never drained", TAG, what);
+        errs++;
+        break;
+      end
+    end
+  endtask
+
   logic [31:0] d;
   initial begin
     errs=0; done=1'b0;
@@ -151,6 +170,7 @@ module cdc_harness #(
     // [3] write-through then read-back (L1 array + DDR slave both updated via CDC)
     do_write(32'h0000_1008, 32'hDEAD_BEEF);
     do_read (32'h0000_1008, d); chk("read-after-write", d, 32'hDEAD_BEEF);
+    wait_axi_drain("write-through backing check");
     chk("DDR slave got the write", slv.peek(32'h0000_1008), 32'hDEAD_BEEF);
     // [4] 2-way set: a 3rd distinct line into the same set evicts LRU
     do_read(32'h0000_2000, d); chk("line@2000", d, 32'h2000 ^ 32'hA5A5_0000);
@@ -158,12 +178,14 @@ module cdc_harness #(
     do_read(32'h0000_2000, d); chk("rehit@2000", d, 32'h2000 ^ 32'hA5A5_0000);
     // [5] store-miss to a COLD line, then dependent load -> store landed in DDR
     do_write(32'h0000_6020, 32'hCAFE_F00D);
-    chk("DDR slave has the cold store", slv.peek(32'h0000_6020), 32'hCAFE_F00D);
     do_read (32'h0000_6020, d); chk("dependent load sees store", d, 32'hCAFE_F00D);
+    wait_axi_drain("cold-store backing check");
+    chk("DDR slave has the cold store", slv.peek(32'h0000_6020), 32'hCAFE_F00D);
 
     // [6] back-to-back write burst with CONTINUOUS c_req — the deadlock regression
     // (a bridge that waited for !c_req between transactions hangs here).
     do_wburst(32'h0000_7000, 6);
+    wait_axi_drain("continuous write burst backing check");
     for (int i=0;i<6;i++)
       chk($sformatf("wburst[%0d] in DDR", i), slv.peek(32'h0000_7000+32'(i)*4), 32'hB00B_0000+32'(i));
 

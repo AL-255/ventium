@@ -7,7 +7,9 @@
 // tb_l1d scenarios THROUGH the full AXI path — a cold read coalesced into one INCR8
 // burst, a whole-line fill, a write-through, 2-way LRU eviction — plus a
 // store-miss→dependent-load ordering check (the write must land in DDR before the
-// fill re-reads the line). The DUT remaps with REMAP_BASE=0x4000_0000 so the slave,
+// fill re-reads the line).  P54C-style posted writes complete at bounded write-buffer
+// admission, so explicit backing checks wait for m_idle; a cache-hit load may observe
+// its updated L1 copy before that drain, while a MISS is forbidden to bypass it.  The DUT remaps with REMAP_BASE=0x4000_0000 so the slave,
 // which un-remaps before indexing, also CHECKS the remap end-to-end (a wrong remap
 // reads the wrong backing word -> data mismatch -> FAIL). The slave's RD_LAT/WR_LAT
 // make every miss a multi-cycle stall (c_ack low for several clocks), and BUBBLE
@@ -102,6 +104,23 @@ module tb_l1_axi;
     @(negedge clk); c_req<=1'b0; c_we<=1'b0;
   endtask
 
+  // CPU-facing store acceptance and physical AXI completion are intentionally
+  // different with the P54C's two write buffers.  Use this only when a test is
+  // inspecting the backing store directly; dependent cache-miss reads exercise the
+  // ordering barrier without this helper.
+  task automatic wait_axi_drain(input string what);
+    int guard;
+    guard = 0;
+    while (!m_idle) begin
+      @(posedge clk);
+      if (++guard > 200) begin
+        $display("  FAIL %s: AXI write buffer never drained", what);
+        errors++;
+        break;
+      end
+    end
+  endtask
+
 
 
   logic [31:0] d;
@@ -124,6 +143,7 @@ module tb_l1_axi;
     $display("[3] write-through then read-back (L1 array + DDR slave both updated)");
     do_write(32'h0000_1008, 32'hDEAD_BEEF);
     do_read (32'h0000_1008, d); chk("read-after-write", d, 32'hDEAD_BEEF);
+    wait_axi_drain("write-through backing check");
     chk("DDR slave got the write", slv.peek(32'h0000_1008), 32'hDEAD_BEEF);
 
     $display("[3b] XLINE READ: 4-byte read crossing the 32B line end, NEXT line COLD");
@@ -145,8 +165,9 @@ module tb_l1_axi;
     // 0x6020 is a fresh line (not yet cached). write-through must reach DDR; the
     // subsequent load misses, fills from DDR, and must see the stored value.
     do_write(32'h0000_6020, 32'hCAFE_F00D);
-    chk("DDR slave has the cold store", slv.peek(32'h0000_6020), 32'hCAFE_F00D);
     do_read (32'h0000_6020, d); chk("dependent load sees store", d, 32'hCAFE_F00D);
+    wait_axi_drain("cold-store backing check");
+    chk("DDR slave has the cold store", slv.peek(32'h0000_6020), 32'hCAFE_F00D);
 
     $display("[6] remap end-to-end: araddr was REMAP_BASE-offset (else [1]-[5] mismatch)");
     // (implicitly proven: the slave indexes (araddr-REMAP_BASE); every read above

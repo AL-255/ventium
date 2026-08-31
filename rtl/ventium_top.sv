@@ -368,6 +368,20 @@ module ventium_top
   logic [3:0]  core_mem_wstrb;
   logic [31:0] core_mem_rdata;
   logic        core_mem_ack;
+  // P54C §2.6 write-buffer ordering: memory stores may retire into the two
+  // bounded buffers, but IN/OUT must wait until pending writes have reached the
+  // external bus.  In non-L1 modes this is a compile-time/direct-path no-op.
+`ifdef VEN_L1_AXI
+  logic        io_wbuf_drain;
+  assign io_wbuf_drain = !l1axi_en || m_idle;
+`else
+  wire         io_wbuf_drain = 1'b1;
+`endif
+`ifndef VEN_RTL_IRQ
+`ifdef VEN_L1_AXI
+  logic        core_io_req;
+`endif
+`endif
   // REVIEW2_aug2 H-13: the I-side memory type reaching the core. Declared HERE, outside
   // the VEN_L1_AXI ifdef, because the core port exists in every build; the producer
   // (l1_ic_nocache, from ven_cachemap) only exists where the northbridge does.
@@ -406,10 +420,10 @@ module ventium_top
   // cs decode off the core's io request (same ports as ventium_soc.sv).
   logic        cs_pic, cs_pit;
   always_comb begin
-    cs_pic = cio_req && (cio_addr == 16'h0020 || cio_addr == 16'h0021 ||
+    cs_pic = cio_req && io_wbuf_drain && (cio_addr == 16'h0020 || cio_addr == 16'h0021 ||
                          cio_addr == 16'h00A0 || cio_addr == 16'h00A1 ||
                          cio_addr == 16'h04D0 || cio_addr == 16'h04D1);
-    cs_pit = cio_req && (cio_addr == 16'h0040 || cio_addr == 16'h0041 ||
+    cs_pit = cio_req && io_wbuf_drain && (cio_addr == 16'h0040 || cio_addr == 16'h0041 ||
                          cio_addr == 16'h0042 || cio_addr == 16'h0043);
   end
 
@@ -541,8 +555,8 @@ module ventium_top
   // PIT/PIC access; io_we/addr/size/wdata pass through unchanged.
   assign cio_rdata = (cs_pit || cs_pic) ? {24'd0, pp_rdata}   // captured device read data
                    : io_rdata;                                // PS-returned data
-  assign cio_ack   = (cs_pit || cs_pic) ? (pp_state == PP_ACK) : io_ack;
-  assign io_req    = cio_req && !(cs_pit || cs_pic);
+  assign cio_ack   = io_wbuf_drain && ((cs_pit || cs_pic) ? (pp_state == PP_ACK) : io_ack);
+  assign io_req    = cio_req && io_wbuf_drain && !(cs_pit || cs_pic);
   assign io_we     = cio_we;
   assign io_addr   = cio_addr;
   assign io_size   = cio_size;
@@ -696,6 +710,19 @@ module ventium_top
       .io_rdata     (cio_rdata),
       .io_ack       (cio_ack),
 `else
+`ifdef VEN_L1_AXI
+      // P54C §2.6: an IN or OUT must not reach the platform until all older
+      // buffered memory writes have drained.  Gate both request and response:
+      // a level-high external io_ack cannot retire the core's S_IO/S_INS state
+      // before the device has seen its request.
+      .io_req       (core_io_req),
+      .io_we        (io_we),
+      .io_addr      (io_addr),
+      .io_size      (io_size),
+      .io_wdata     (io_wdata),
+      .io_rdata     (io_rdata),
+      .io_ack       (io_ack && io_wbuf_drain),
+`else
       .io_req       (io_req),
       .io_we        (io_we),
       .io_addr      (io_addr),
@@ -703,6 +730,7 @@ module ventium_top
       .io_wdata     (io_wdata),
       .io_rdata     (io_rdata),
       .io_ack       (io_ack),
+`endif
 `endif
 `ifdef VEN_KV260_SOC
       // F3 KV260: the PS injects maskable INTR through ven_soc_axil R_INTR. soc_en
@@ -803,6 +831,15 @@ module ventium_top
       .dbg_arch_data(dbg_arch_data)
 `endif
   );
+
+`ifdef VEN_L1_AXI
+`ifndef VEN_RTL_IRQ
+  // See the u_core I/O binding above: keep the external device quiescent while
+  // older posted memory writes drain.  io_we/addr/data may already reflect the
+  // held core request, but io_req is the sole side-effect qualifier.
+  assign io_req = core_io_req && io_wbuf_drain;
+`endif
+`endif
 
 `ifdef VEN_RTL_IRQ
   // ===========================================================================

@@ -2,11 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
 
 // verif/l1/tb_l1axi_wd.sv — #34 watchdog/abort directed gate. ventium_l1_axi with a
-// SMALL WATCHDOG, backed by a STUCK AXI slave (never responds). A core read and a
-// core write must each STILL COMPLETE (c_ack) instead of deadlocking — the master's
-// watchdog times out, ABORTS (synthesizes ven_l1d's expected acks), and raises
-// bus_err. Asserts L1AXIWD-GATE-OK. (The complement — no false-fire under a normal
-// slave — is covered by run-l1axi-gate.sh / run-l1axi-verify.sh at WATCHDOG=1024.)
+// SMALL WATCHDOG, backed by a STUCK AXI slave (never responds). A read has no
+// completion before it receives data. A P54C-style memory write may correctly receive
+// c_ack on admission to one of its two bounded write buffers, then faults when the
+// retained AXI write makes no progress. Both paths must raise bus_err. The complement
+// (no false-fire under a normal slave) is covered by run-l1axi-gate.sh /
+// run-l1axi-verify.sh at WATCHDOG=1024.
 
 module tb_l1axi_wd;
   logic ic_nocache_unused;   // REVIEW2_aug2 H-13
@@ -59,19 +60,33 @@ module tb_l1axi_wd;
   );
 
   int errors = 0;
-  // stuck access: the watchdog must raise bus_err within a bound. The AXI handshake
-  // is HELD (a master can't retract VALID), so c_ack does NOT come at the L1 level —
-  // in the real system the core's bus_err->S_HALT override abandons it + halts. So we
-  // check: bus_err asserts (the watchdog fired) AND c_ack stayed 0 (no fake completion).
+  // A buffered memory store retires into the fixed P54C queue before the AXI target
+  // responds.  Deassert its producer request at that admission edge (as the core
+  // does), then prove the retained transaction still times out rather than vanishing.
   task automatic stuck_access(input string what, input logic we, input logic [31:0] a);
-    int g; @(negedge clk); c_req<=1'b1; c_we<=we; c_addr<=a; c_wdata<=32'hDEAD_0000; c_wstrb<=4'hF;
+    int g;
+    @(negedge clk); c_req<=1'b1; c_we<=we; c_addr<=a; c_wdata<=32'hDEAD_0000; c_wstrb<=4'hF;
     g=0;
-    forever begin @(posedge clk); #1;
-      if (bus_err) begin $display("  ok   %s -> watchdog fired: bus_err=1 @%0d cyc (c_ack=%b, AXI held)", what, g, c_ack); break; end
-      if (c_ack)   begin $display("  FAIL %s: spurious c_ack with no bus_err (fake completion)", what); errors++; break; end
-      if (++g > 300) begin $display("  FAIL %s: bus_err NEVER asserted (watchdog dead -> deadlock)", what); errors++; break; end
+    if (we) begin
+      while (!c_ack) begin
+        @(posedge clk); #1;
+        if (++g > 100) begin $display("  FAIL %s: write buffer never accepted store", what); errors++; break; end
+      end
+      if (c_ack) $display("  ok   %s accepted into bounded write buffer", what);
+      @(negedge clk); c_req<=1'b0; c_we<=1'b0; c_wstrb<=4'd0;
+      while (!bus_err) begin
+        @(posedge clk); #1;
+        if (++g > 300) begin $display("  FAIL %s: bus_err NEVER asserted after write admission", what); errors++; break; end
+      end
+      if (bus_err) $display("  ok   %s -> retained AXI write watchdog fired @%0d cyc", what, g);
+    end else begin
+      forever begin @(posedge clk); #1;
+        if (bus_err) begin $display("  ok   %s -> watchdog fired: bus_err=1 @%0d cyc (c_ack=%b, AXI held)", what, g, c_ack); break; end
+        if (c_ack)   begin $display("  FAIL %s: spurious c_ack with no bus_err (fake completion)", what); errors++; break; end
+        if (++g > 300) begin $display("  FAIL %s: bus_err NEVER asserted (watchdog dead -> deadlock)", what); errors++; break; end
+      end
+      @(negedge clk); c_req<=1'b0; c_we<=1'b0;
     end
-    @(negedge clk); c_req<=1'b0; c_we<=1'b0;
   endtask
 
   initial begin
@@ -82,7 +97,7 @@ module tb_l1axi_wd;
     @(negedge clk); rst_n<=1'b0; repeat(4) @(posedge clk); rst_n<=1'b1; @(posedge clk);
     $display("[2] WRITE to a STUCK slave -> watchdog timeout -> bus_err");
     stuck_access("write", 1'b1, 32'h0000_2000);
-    if (errors==0) $display("L1AXIWD-GATE-OK (watchdog raises bus_err; AXI handshake held, no fake ack)");
+    if (errors==0) $display("L1AXIWD-GATE-OK (watchdog raises bus_err; reads stall, buffered writes stay retained)");
     else           $display("L1AXIWD-GATE-FAIL (%0d errors)", errors);
     $finish;
   end

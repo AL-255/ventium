@@ -17,11 +17,15 @@
 //     word ven_l1d's fill counter `fw` expects. The single true m_ack rule is
 //     `m_ack = (RVALID && RREADY)`: a new word this cycle, m_rdata == that word,
 //     m_ack=0 on any bubble cycle (fw then holds and resumes on the next beat).
-//   * WRITE (m_we=1): a single-beat AXI write (AWLEN=0), WSTRB = m_wstrb verbatim
-//     (32-bit bus, no lane shift). m_ack pulses on BVALID -> ven_l1d's write-through
-//     completes (c_ack follows m_ack combinationally, ven_l1d.sv:112). NEVER ack
-//     before BVALID — an early ack lets the core advance with the store still in
-//     flight = a lost write.
+//   * WRITE (m_we=1): a byte-accurate one- or two-word AXI write.  The P54C has
+//     TWO 64-bit write buffers (Intel Pentium Processor Developer's Manual,
+//     §2.6): memory stores may retire once admitted to one of those FIFO-ordered
+//     buffers, while a later cache-miss read waits until every buffered write has
+//     completed on AXI.  This module models exactly that bounded posting point:
+//     no unbounded queue, no reordering, and no read-over-write bypass.  A failed
+//     BRESP remains a sticky fatal bus error even though the CPU-side store was
+//     already accepted, just as an external bus fault cannot be undone by holding
+//     the pipe after a posted transaction has retired.
 //
 // Address remap: the L1 tags/data use the x86 PHYSICAL address; the DDR address is
 //   ddr_addr = REMAP_BASE + (phys & ADDR_MASK)  — the whole x86 phys space lands in
@@ -41,6 +45,9 @@
 //   * once asserted, *VALID + all its payload hold stable until the handshake.
 //   * AW and W handshake INDEPENDENTLY (decoupled done-latches) — never gate WVALID
 //     on AWREADY (classic write deadlock vs a W-before-AW slave).
+//   * the write-buffer queue is two P54C-sized entries.  AXI B responses may trail
+//     issued entries, but a read is held until BOTH the internal entries and every
+//     trailing response are gone, preserving P5 strong write ordering.
 
 module ven_axi_master #(
     parameter int unsigned LINE_BEATS = 8,                 // 32B line / 4B word
@@ -318,16 +325,38 @@ module ven_axi_master #(
     else if (wr_cd != 8'd0)                        wr_cd   <= wr_cd - 8'd1;
   end
 
-  // ---- WRITE FSM (write-through, decoupled AW/W; up to 2 word beats) ----------
+  // ---- P54C WRITE BUFFERS (two FIFO entries, decoupled AXI AW/W) --------------
   // A core store is byte-addressed: the byte at m_addr is lane 0 of m_wstrb/m_wdata.
   // Mapped onto a 32-bit AXI bus it occupies lanes [boff .. boff+nbytes-1]; when that
   // range spills past lane 3 (an unaligned 16/32-bit store, e.g. a dword to ..0x..2)
-  // the store straddles TWO 32-bit words and must be issued as TWO single-beat AXI
-  // writes (word A = m_addr&~3, word B = +4). The core is acked only after BOTH land,
-  // so ven_l1d's c_ack (= m_ack) completes the store exactly once. SeaBIOS POST does
-  // these unaligned stores; the byte-addressed sim BFM masked the bug on silicon.
-  typedef enum logic [1:0] { W_IDLE, W_RUN, W_RESP } wstate_e;
+  // the store straddles TWO 32-bit words (word A = m_addr&~3, word B = +4).
+  //
+  // P54C (not P55C/MMX) has exactly TWO one-quadword write buffers.  Keep this a
+  // local constant rather than a feature/profile knob: the hardware configuration is
+  // one P5 model, and a larger generic queue would both hide ordering mistakes and
+  // make the implementation unlike the target processor.  The queue stores CPU
+  // writes before lane alignment; an active entry is one of the two slots until its
+  // final AW/W transfer has been accepted.  AXI B responses may trail that transfer,
+  // but reads wait for those as well (see R_IDLE below).
+  localparam int unsigned P5_WBUF_DEPTH = 2;
+  localparam int unsigned WBUF_PTRW = $clog2(P5_WBUF_DEPTH);
+  localparam int unsigned WBUF_CNTW = $clog2(P5_WBUF_DEPTH + 1);
+  localparam int unsigned B_CNTW    = $clog2((P5_WBUF_DEPTH * 2) + 1);
+
+  typedef enum logic { W_IDLE, W_RUN } wstate_e;
   wstate_e          wst;
+  logic [31:0]       wq_addr [P5_WBUF_DEPTH];
+  logic [31:0]       wq_wdata[P5_WBUF_DEPTH];
+  logic [3:0]        wq_wstrb[P5_WBUF_DEPTH];
+  logic [WBUF_PTRW-1:0] wq_rp, wq_wp;
+  logic [WBUF_CNTW-1:0] wq_count;
+  logic                 wr_enq, wr_dispatch, wr_busy;
+  logic [63:0]          q_dsh;
+  logic [7:0]           q_ssh;
+  logic                 wr_active;
+  logic [B_CNTW-1:0]    b_outstanding;
+  logic                 aw_hs, w_hs, b_hs, wr_beat_sent, wr_progress;
+
   // REVIEW2_aug2 H-11: the read burst's beat count, LATCHED with araddr_q at accept.
   // It used to be the constant LINE_BEATS, which is why the L1D could not ask for a
   // narrower access however it addressed the request -- the master decided, and it
@@ -340,10 +369,25 @@ module ven_axi_master #(
   logic [3:0]        wstrb_q;        // current beat's strobe (lane-shifted)
   logic [ADDR_W-1:0] awaddr2_q;      // beat B address (m_addr&~3 + 4)
   logic [31:0]       wdata2_q;       // beat B data  (high 32 of the 64-bit shift)
-  logic [3:0]        wstrb2_q;       // beat B strobe (high 4  of the 8-bit  shift)
+  logic [3:0]        wstrb2_q;       // beat B strobe (high 4  of the 8-bit shift)
   logic              xword_q;        // 1 = the store straddles a word -> need beat B
   logic              wbeat;          // 0 = beat A in flight, 1 = beat B in flight
   logic              aw_done, w_done;  // independent handshake latches
+
+  // A write admission is the CPU-facing completion point.  Keep the full, active
+  // entry in the accounting so there are never more than two P54C write-buffer
+  // entries awaiting an AW/W transfer.  Once AXI accepts a beat it is externally
+  // owned; B remains in b_outstanding solely for ordering/error/quiesce purposes.
+  always_comb begin
+    q_dsh = {32'd0, wq_wdata[wq_rp]} << {wq_addr[wq_rp][1:0], 3'b000};
+    q_ssh = {4'd0,  wq_wstrb[wq_rp]} << wq_addr[wq_rp][1:0];
+  end
+  assign wr_enq      = (rst == R_IDLE) && m_req && m_we && !shutdown && !alias_bad &&
+                       ((wq_count + (wr_active ? WBUF_CNTW'(1) : WBUF_CNTW'(0))) < WBUF_CNTW'(P5_WBUF_DEPTH));
+  assign wr_dispatch = !wr_active && (wq_count != WBUF_CNTW'(0));
+  assign wr_busy     = wr_active || (wq_count != WBUF_CNTW'(0)) ||
+                       (b_outstanding != B_CNTW'(0));
+  assign wst         = wr_busy ? W_RUN : W_IDLE;
 
   // ---- AXI combinational drive ----------------------------------------------
   always_comb begin
@@ -367,7 +411,7 @@ module ven_axi_master #(
     // not inherit them.
     m_axi_rready  = (rst == R_DATA) || (rst == R_DRAIN);
 
-    // write address channel — single 4-byte beat at the raw (un-line-aligned) addr.
+    // write address channel — one aligned 4-byte beat from the active P5 buffer.
     m_axi_awid    = AXI_ID;
     m_axi_awaddr  = awaddr_q;
     m_axi_awlen   = 8'd0;
@@ -377,14 +421,14 @@ module ven_axi_master #(
     m_axi_awcache = 4'b0011;             // (same rationale as arcache — never mark HP0 traffic cacheable)
     m_axi_awprot  = 3'b000;
     m_axi_awqos   = 4'd0;
-    m_axi_awvalid = (wst == W_RUN) && !aw_done;
+    m_axi_awvalid = wr_active && !aw_done;
     // write data channel
     m_axi_wdata   = wdata_q;
     m_axi_wstrb   = wstrb_q;
     m_axi_wlast   = 1'b1;                 // single-beat write
-    m_axi_wvalid  = (wst == W_RUN) && !w_done;
+    m_axi_wvalid  = wr_active && !w_done;
     // write response channel
-    m_axi_bready  = (wst == W_RESP);
+    m_axi_bready  = (b_outstanding != B_CNTW'(0));
 
     // backing response: a read beat hands RDATA back as one m_ack; the write acks on
     // BVALID. On a watchdog timeout the AXI handshake is HELD (a master cannot retract
@@ -401,15 +445,22 @@ module ven_axi_master #(
     // (AXI leaves the other lanes undefined) so ven_l1d can OR-merge the pieces.
     m_rdata = (shutdown && m_idle) ? 32'd0
             : narrow_q ? (m_axi_rdata & narrow_mask) : m_axi_rdata;
-    // ack the core write only after the FINAL beat (beat A of an aligned store, or
-    // beat B of a straddling one) — a per-beat ack would complete the core's store
-    // after only the first word landed.
+    // A write acks when it enters one of the two P54C write buffers.  Its AW/W
+    // beats remain FIFO ordered, BRESP is still checked, and R_IDLE below blocks
+    // every read until all admitted writes have completed.  This is posting, not a
+    // speculative write: the bounded buffer is the retained architectural state.
     m_ack   = ((rst == R_DATA) && m_axi_rvalid && m_axi_rready && rd_primed) ||   // deliver ONLY the real burst
                                                                                   // (a fill's 2nd; a narrow read's 1st/only — C-01)
-              ((wst == W_RESP) && m_axi_bvalid && (!xword_q || wbeat)) ||
+              wr_enq ||
               (shutdown && m_idle && m_req);          // shutdown: local ack, no DDR
     bus_err = wd_err_r | wd_err_w | rresp_err | bresp_err | rlast_err | alias_err; // #34 + M-08 + M-07
   end
+
+  assign aw_hs       = m_axi_awvalid && m_axi_awready;
+  assign w_hs        = m_axi_wvalid  && m_axi_wready;
+  assign b_hs        = m_axi_bvalid  && m_axi_bready;
+  assign wr_beat_sent = wr_active && (aw_done || aw_hs) && (w_done || w_hs);
+  assign wr_progress = wr_enq || wr_dispatch || aw_hs || w_hs || b_hs;
 
 `ifdef VEN_DBG_CORE
   // read-beat trace taps: capture the address + data of every ACCEPTED read beat.
@@ -433,7 +484,7 @@ module ven_axi_master #(
         // the delayed bus_err halted the core. That is detection, not rejection.
         // Gating the start means no AXI transaction is ever launched for an out-of-
         // window address; bus_err still halts the core, exactly as the #34 watchdog does.
-        R_IDLE: if (m_req && !m_we && !shutdown && !rd_hold && !alias_bad) begin
+        R_IDLE: if (m_req && !m_we && !shutdown && !rd_hold && !alias_bad && !wr_busy) begin
                   // REVIEW2_aug2 H-11: a CACHEABLE backing read is a full line fill and
                   // latches the 32B-aligned base, as before. A NARROW read is ONE
                   // single-beat transaction at the byte-exact address with an exact
@@ -530,68 +581,96 @@ module ven_axi_master #(
     end
   end
 
-  // ---- WRITE sequencing ------------------------------------------------------
+  // ---- WRITE-buffer sequencing ----------------------------------------------
+  // CPU-facing enqueue, FIFO dispatch, AXI transfer, and B response retirement
+  // are deliberately separate.  In particular, dequeuing an entry after AW/W is
+  // accepted does NOT let a read bypass it: b_outstanding remains part of wr_busy
+  // until the ordered B response has arrived.
   always_ff @(posedge core_clk) begin
     if (!core_rst_n) begin
-      wst <= W_IDLE; awaddr_q <= '0; wdata_q <= 32'd0; wstrb_q <= 4'd0;
-      awaddr2_q <= '0; wdata2_q <= 32'd0; wstrb2_q <= 4'd0; xword_q <= 1'b0; wbeat <= 1'b0;
-      aw_done <= 1'b0; w_done <= 1'b0; bresp_err <= 1'b0; w_wd <= 16'd0; wd_err_w <= 1'b0;
+      wq_rp <= '0; wq_wp <= '0; wq_count <= '0;
+      for (int i = 0; i < P5_WBUF_DEPTH; i++) begin
+        wq_addr[i] <= '0; wq_wdata[i] <= '0; wq_wstrb[i] <= '0;
+      end
+      wr_active <= 1'b0;
+      awaddr_q <= '0; wdata_q <= 32'd0; wstrb_q <= 4'd0;
+      awaddr2_q <= '0; wdata2_q <= 32'd0; wstrb2_q <= 4'd0;
+      xword_q <= 1'b0; wbeat <= 1'b0; aw_done <= 1'b0; w_done <= 1'b0;
+      b_outstanding <= '0;
+      bresp_err <= 1'b0; w_wd <= 16'd0; wd_err_w <= 1'b0;
     end else begin
-      unique case (wst)
-        W_IDLE: if (m_req && m_we && !shutdown && !alias_bad) begin  // H-07: reject, do not launch
-                  // BYTE-LANE ALIGN (P2 fix): the core's mem port is byte-addressed —
-                  // the byte at m_addr sits in LANE 0 of m_wdata/m_wstrb (symmetric with
-                  // the read window c_rdata = line[boff*8 +: 32]). A 32-bit AXI write
-                  // places byte lane b at the WORD-ALIGNED address + b, so the master
-                  // word-aligns awaddr and shifts data/strobes left by m_addr[1:0] bytes
-                  // onto the correct lanes. Forwarding the raw byte address + lane-0 data
-                  // wrote the WRONG DDR bytes on silicon (the stack / CALL-RET / IVT
-                  // coherence failure); the byte-addressed sim BFM masked it.
-                  //
-                  // 2-BEAT SPLIT (P2b): shift the store into a 64-bit / 8-bit lane field.
-                  // The low 32b/4b are beat A (word m_addr&~3); if any strobe spilled into
-                  // the high 4b the store straddles the next word, captured as beat B
-                  // (word +4). SeaBIOS POST emits such unaligned (16/32-bit) stores.
-                  begin
-                    automatic logic [63:0] dsh = {32'd0, m_wdata} << {m_addr[1:0], 3'b000};
-                    automatic logic [7:0]  ssh = {4'd0, m_wstrb} << m_addr[1:0];
-                    awaddr_q  <= remap({m_addr[31:2], 2'b00});
-                    wdata_q   <= dsh[31:0];
-                    wstrb_q   <= ssh[3:0];
-                    awaddr2_q <= remap({m_addr[31:2], 2'b00} + 32'd4);
-                    wdata2_q  <= dsh[63:32];
-                    wstrb2_q  <= ssh[7:4];
-                    xword_q   <= (ssh[7:4] != 4'd0);
-                  end
-                  wbeat    <= 1'b0;
-                  aw_done  <= 1'b0;    w_done  <= 1'b0;  bresp_err <= 1'b0; w_wd <= 16'd0;
-                  wst <= W_RUN;
-                end
-        W_RUN: begin
-          // AW and W complete INDEPENDENTLY (either order) — never coupled.
-          if (m_axi_awvalid && m_axi_awready) aw_done <= 1'b1;
-          if (m_axi_wvalid  && m_axi_wready)  w_done  <= 1'b1;
-          if ((aw_done || (m_axi_awvalid && m_axi_awready)) &&
-              (w_done  || (m_axi_wvalid  && m_axi_wready)))
-                                              begin wst <= W_RESP; w_wd <= 16'd0; end
-          else if (w_wd >= 16'(WATCHDOG)) wd_err_w <= 1'b1;  // #34 stall watchdog (hold VALID)
-          else w_wd <= w_wd + 16'd1;
-        end
-        W_RESP: if (m_axi_bvalid) begin           // m_ack pulsed (comb) this cycle
-                  if (m_axi_bresp != 2'b00) bresp_err <= 1'b1;  // sticky non-OKAY BRESP
-                  if (!wbeat && xword_q) begin
-                    // straddling store: beat A landed -> issue beat B (next word).
-                    awaddr_q <= awaddr2_q; wdata_q <= wdata2_q; wstrb_q <= wstrb2_q;
-                    wbeat <= 1'b1; aw_done <= 1'b0; w_done <= 1'b0; w_wd <= 16'd0;
-                    wst <= W_RUN;
-                  end else begin
-                    wst <= W_IDLE;
-                  end
-                end
-                else if (w_wd >= 16'(WATCHDOG)) wd_err_w <= 1'b1;  // #34 stall watchdog
-                else w_wd <= w_wd + 16'd1;
-        default: wst <= W_IDLE;
+      // FIFO accounting permits an enqueue and a dispatch on the same edge.  The
+      // active entry is counted separately by wr_enq's capacity predicate, so this
+      // never turns the two P54C buffers into a three-entry queue.
+      unique case ({wr_enq, wr_dispatch})
+        2'b10: wq_count <= wq_count + WBUF_CNTW'(1);
+        2'b01: wq_count <= wq_count - WBUF_CNTW'(1);
+        default: ;
       endcase
+      if (wr_enq) begin
+        wq_addr[wq_wp]  <= m_addr;
+        wq_wdata[wq_wp] <= m_wdata;
+        wq_wstrb[wq_wp] <= m_wstrb;
+        wq_wp <= wq_wp + WBUF_PTRW'(1);
+      end
+      if (wr_dispatch) begin
+        // BYTE-LANE ALIGN (P2 fix): the core's byte zero is shifted onto the
+        // matching AXI word lane.  An unaligned 16/32-bit store can spill into
+        // exactly one following word; both beats remain adjacent in FIFO order.
+        awaddr_q  <= remap({wq_addr[wq_rp][31:2], 2'b00});
+        wdata_q   <= q_dsh[31:0];
+        wstrb_q   <= q_ssh[3:0];
+        awaddr2_q <= remap({wq_addr[wq_rp][31:2], 2'b00} + 32'd4);
+        wdata2_q  <= q_dsh[63:32];
+        wstrb2_q  <= q_ssh[7:4];
+        xword_q   <= (q_ssh[7:4] != 4'd0);
+        wbeat     <= 1'b0;
+        aw_done   <= 1'b0;
+        w_done    <= 1'b0;
+        wr_active <= 1'b1;
+        wq_rp     <= wq_rp + WBUF_PTRW'(1);
+      end
+
+      // AW and W complete independently (either order).  A beat becomes an AXI
+      // outstanding write only after BOTH handshakes, so BREADY can never consume
+      // a response without a matching accepted command.
+      if (wr_active) begin
+        if (aw_hs) aw_done <= 1'b1;
+        if (w_hs)  w_done  <= 1'b1;
+        if (wr_beat_sent) begin
+          if (!wbeat && xword_q) begin
+            // Second word of the same architectural store.  It cannot be interleaved
+            // with another store, preserving byte order across the word boundary.
+            awaddr_q <= awaddr2_q;
+            wdata_q  <= wdata2_q;
+            wstrb_q  <= wstrb2_q;
+            wbeat    <= 1'b1;
+            aw_done  <= 1'b0;
+            w_done   <= 1'b0;
+          end else begin
+            wr_active <= 1'b0;
+            aw_done   <= 1'b0;
+            w_done    <= 1'b0;
+          end
+        end
+      end
+
+      // AXI4 orders B responses for one ID.  They are retired in that same order,
+      // and any failure stays sticky even if later requests are still draining.
+      if (b_hs && m_axi_bresp != 2'b00) bresp_err <= 1'b1;
+      unique case ({wr_beat_sent, b_hs})
+        2'b10: b_outstanding <= b_outstanding + B_CNTW'(1);
+        2'b01: b_outstanding <= b_outstanding - B_CNTW'(1);
+        default: ;
+      endcase
+
+      // One progress watchdog covers queue dispatch, independent AW/W handshakes,
+      // and B retirement.  It retains the old safety property: a hung AXI target
+      // raises bus_err while all asserted VALID signals remain protocol-compliant.
+      if (!wr_busy && !wr_enq) w_wd <= 16'd0;
+      else if (wr_progress)    w_wd <= 16'd0;
+      else if (w_wd >= 16'(WATCHDOG)) wd_err_w <= 1'b1;
+      else w_wd <= w_wd + 16'd1;
     end
   end
 
@@ -629,9 +708,10 @@ module ven_axi_master #(
   // 8*4=32; a narrow piece is 1*(1|2|4) bytes, size-aligned, so it cannot cross).
   ar_4k:     assert property (@(posedge core_clk) disable iff (!core_rst_n)
       m_axi_arvalid |-> ((13'(m_axi_araddr[11:0]) + 13'(rbeats_q << rsize_q)) <= 13'h1000));
-  // no AR while a write is outstanding (single-outstanding in-order guarantee).
+  // No AR while a posted write is buffered, being driven, or awaiting B.  This is
+  // the P54C rule that cache-miss reads cannot bypass earlier write buffers.
   no_rw_overlap: assert property (@(posedge core_clk) disable iff (!core_rst_n)
-      !(m_axi_arvalid && (wst != W_IDLE)));
+      !(m_axi_arvalid && wr_busy));
   // P2b: a store straddling a 32-bit word is now SPLIT into beat A (word) + beat B
   // (word+4). A 4-byte store shifted by at most 3 bytes touches at most 8 lanes, so it
   // can never spill past beat B — guard that the strobe is exhausted by two words.
@@ -650,7 +730,7 @@ module ven_axi_master #(
   rresp_okay: assert property (@(posedge core_clk) disable iff (!core_rst_n)
       (rst==R_DATA && m_axi_rvalid && m_axi_rready) |-> (m_axi_rresp == 2'b00));
   bresp_okay: assert property (@(posedge core_clk) disable iff (!core_rst_n)
-      (wst==W_RESP && m_axi_bvalid) |-> (m_axi_bresp == 2'b00));
+      b_hs |-> (m_axi_bresp == 2'b00));
   no_resp_err: assert property (@(posedge core_clk) disable iff (!core_rst_n)
       (!rresp_err && !bresp_err));
   // every access fits the remap window — but ONLY when no aliasing is configured
@@ -661,7 +741,7 @@ module ven_axi_master #(
       (rst==R_IDLE && m_req && !m_we && (~ADDR_MASK == 32'd0))
       |-> ((m_addr & ~ADDR_MASK) == 32'd0));
   awaddr_window: assert property (@(posedge core_clk) disable iff (!core_rst_n)
-      (wst==W_IDLE && m_req &&  m_we && (~ADDR_MASK == 32'd0))
+      (wr_enq && (~ADDR_MASK == 32'd0))
       |-> ((m_addr & ~ADDR_MASK) == 32'd0));
 `endif
 
