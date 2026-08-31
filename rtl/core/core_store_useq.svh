@@ -102,7 +102,37 @@
                          q_pc, str_next_eip);
                   if (wr_hit != 4'd0) db_wp_extra <= 1'b1;
                 end
-                else begin retire_valid<=1'b1; state<=S_PIPE; end
+                else begin
+                  retire_valid<=1'b1;
+                  // REP STOS's next architectural instruction is the same
+                  // already-decoded, store-only string op.  In flat user/proxy
+                  // operation, neither interrupt delivery nor the system debug/
+                  // TF boundary exists, so returning through S_PIPE -> S_FETCH
+                  // -> S_DECODE merely refetches and redecodes that immutable
+                  // instruction between every element.  Re-enter S_EXEC directly
+                  // instead.  MOVS is deliberately excluded: each iteration must
+                  // first obtain a new source value through S_LOAD.  INS likewise
+                  // needs its per-element I/O handshake.
+                  //
+                  // Keep every boundary-observable system configuration on the
+                  // mature path: system mode may take an interrupt/SMI/#DB
+                  // precisely between REP iterations, and SoC mode exposes the
+                  // same interrupt seam.  A debug build may chain while no halt
+                  // or matching breakpoint is armed; either request returns to
+                  // S_DECODE before the next element, where its existing control
+                  // logic parks normally.  A page walk is still checked before
+                  // each S_STORE, so this does not batch or otherwise weaken
+                  // per-element fault/ordering semantics.
+                  if (!sys_mode && !soc_en && (q_st == ST_STOS) &&
+                      (q_rep || q_repne) &&
+                      (str_next_eip == q_pc)
+`ifdef VEN_DBG_CORE
+                      && !dbg_halt_req && !dbg_step_q &&
+                      !(dbg_bp_en && (dbg_bp_addr == q_pc))
+`endif
+                     ) state<=S_EXEC;
+                  else                         state<=S_PIPE;
+                end
               end
               default: begin
                 if (q_is_push) gpr[R_ESP]<=gpr[R_ESP]-{28'd0,q_w};
