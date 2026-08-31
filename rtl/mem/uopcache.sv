@@ -32,17 +32,17 @@
 // length each cycle (a small <=48-bit barrel shift), so there is no flin-indexed
 // 32:1 select anywhere — that is the whole point.
 //
-// STORE: per (set,way) a line of NSLOT packed fpd_t + a 32-entry byte->slot map
-// (a "valid boundary here" bit + the slot index). Registered (synchronous) reads
-// so the arrays infer BRAM/URAM (the 64 idle URAMs) instead of a distributed-RAM
-// read mux — mirrors the +VEN_IC_BRAM registered-line front-end timing exactly
-// (valid the clock AFTER the address), replicated A/B for the two fetch-window
-// lines. NSLOT=8: a 32-byte line of avg ~3-byte ops holds ~8 fast-path insns; a
-// denser line (many 1-byte ops) overflows -> those offsets read slotmap.valid=0
-// and the spine re-predecodes from that flin (a perf event, never a correctness
-// one). This is the SYNTH-PROBE increment (P0-11): structure faithful + common-
-// case correct so the equivalence gate runs; full SMC/partial-fill coherence and
-// branch-into-middle re-walk are the follow-on (very-large) work.
+// STORE: per (set,way) an eight-entry base bank plus a four-entry tail bank of
+// packed fpd_t, and a 32-entry byte->slot map ({valid,bank,slot[2:0]}). The split
+// matters: a dense line needs more than eight decoded boundaries, but widening the
+// fetch-path selector into a monolithic 12:1/16:1 mux would worsen its critical
+// path. The spine keeps the proven 8:1 base selector and uses one bank bit to select
+// the compact tail. Registered (synchronous) reads infer BRAM/URAM (the 64 idle
+// URAMs) rather than a distributed-RAM read mux — mirrors the +VEN_IC_BRAM
+// registered-line front-end timing exactly (valid the clock AFTER the address),
+// replicated A/B for the two fetch-window lines. A still-denser line safely leaves
+// its tail map entries invalid and re-predecodes from that flin (a performance event,
+// never a correctness one).
 
 module uopcache
   import ventium_pkg::*;
@@ -51,7 +51,8 @@ module uopcache
 #(
     parameter int IC_SETS = 128,
     parameter int IC_LINE = 32,
-    parameter int NSLOT   = 8,       // fast-path insns covered per 32-byte line
+    parameter int BASE_SLOTS = 8,    // preserves the shallow base-bank selector
+    parameter int TAIL_SLOTS = 4,    // dense-line coverage, selected by a bank bit
     parameter int IC_IDXW = $clog2(IC_SETS)  // set-index width (7 full / 6 half)
 ) (
     input  logic        clk,
@@ -62,15 +63,17 @@ module uopcache
     // T+1).  Port A = flin's line; port B = the next (straddle) line.
     input  logic [IC_IDXW-1:0]  rd_setA,
     input  logic        rd_wayA,
-    output fpd_t        rd_slotsA [NSLOT],
+    output fpd_t        rd_baseA [BASE_SLOTS],
+    output fpd_t        rd_tailA [TAIL_SLOTS],
     output logic        rd_bvalidA [IC_LINE],   // byte-offset is an insn boundary
-    output logic [2:0]  rd_bslotA  [IC_LINE],   // ...and maps to this slot
+    output logic [3:0]  rd_bslotA  [IC_LINE],   // ...and maps to {bank,slot[2:0]}
     output logic        rd_pdvalidA,            // this line has been predecoded
     input  logic [IC_IDXW-1:0]  rd_setB,
     input  logic        rd_wayB,
-    output fpd_t        rd_slotsB [NSLOT],
+    output fpd_t        rd_baseB [BASE_SLOTS],
+    output fpd_t        rd_tailB [TAIL_SLOTS],
     output logic        rd_bvalidB [IC_LINE],
-    output logic [2:0]  rd_bslotB  [IC_LINE],
+    output logic [3:0]  rd_bslotB  [IC_LINE],
     output logic        rd_pdvalidB,
 
     // ---- predecode trigger: the spine pulses pd_start with the freshly-filled
@@ -113,25 +116,30 @@ module uopcache
     output logic         pd_busy
 );
 
-  localparam int FPDW = $bits(fpd_t);
+  localparam int FPDW  = $bits(fpd_t);
+  localparam int NSLOT = BASE_SLOTS + TAIL_SLOTS;
+  localparam logic [3:0] LAST_SLOT = 4'(NSLOT-1);
 
-  // ---- predecoded store: NSLOT packed fpd_t per (set,way) + per-byte boundary
-  // map (1 valid bit + 3-bit slot) + a per-line predecoded-valid bit.  Registered
-  // reads (below) so these infer block RAM, NOT a distributed-RAM read mux.  The
-  // A/B copies are written identically (one fill predecode writes both) so the two
-  // registered read ports are each a single-read SDP RAM — same trick as ic_line_a/b.
-  (* ram_style = "block" *) logic [NSLOT*FPDW-1:0] store_slots_a [IC_SETS*2];
-  (* ram_style = "block" *) logic [NSLOT*FPDW-1:0] store_slots_b [IC_SETS*2];
-  (* ram_style = "block" *) logic [IC_LINE*4-1:0]  store_bmap_a  [IC_SETS*2]; // {valid,slot[2:0]} x32
-  (* ram_style = "block" *) logic [IC_LINE*4-1:0]  store_bmap_b  [IC_SETS*2];
+  // ---- predecoded store: base + tail fpd_t banks per (set,way), a five-bit
+  // byte-boundary map, and a per-line predecoded-valid bit. Registered reads (below)
+  // infer block RAM, NOT a distributed-RAM read mux. The A/B copies are written
+  // identically (one fill predecode writes both) so the two registered read ports are
+  // each a single-read SDP RAM — same trick as ic_line_a/b.
+  (* ram_style = "block" *) logic [BASE_SLOTS*FPDW-1:0] store_base_a [IC_SETS*2];
+  (* ram_style = "block" *) logic [BASE_SLOTS*FPDW-1:0] store_base_b [IC_SETS*2];
+  (* ram_style = "block" *) logic [TAIL_SLOTS*FPDW-1:0] store_tail_a [IC_SETS*2];
+  (* ram_style = "block" *) logic [TAIL_SLOTS*FPDW-1:0] store_tail_b [IC_SETS*2];
+  (* ram_style = "block" *) logic [IC_LINE*5-1:0]     store_bmap_a [IC_SETS*2]; // {valid,bank,slot[2:0]} x32
+  (* ram_style = "block" *) logic [IC_LINE*5-1:0]     store_bmap_b [IC_SETS*2];
   logic store_pdv [IC_SETS*2];     // small: keep in FF
 
   // ---- registered reads (valid the clock AFTER the address) -----------------
-  logic [NSLOT*FPDW-1:0] rdslots_a_q, rdslots_b_q;
-  logic [IC_LINE*4-1:0]  rdbmap_a_q,  rdbmap_b_q;
+  logic [BASE_SLOTS*FPDW-1:0] rdbase_a_q, rdbase_b_q;
+  logic [TAIL_SLOTS*FPDW-1:0] rdtail_a_q, rdtail_b_q;
+  logic [IC_LINE*5-1:0]      rdbmap_a_q, rdbmap_b_q;
   logic                  rdpdv_a_q,   rdpdv_b_q;
   // KV260 BRAM cross-port read-during-write collide flags (same hazard fixed in the
-  // icache, commit 65c1929): the store_slots and store_bmap arrays are block RAM; if a
+  // icache, commit 65c1929): the decoded banks and store_bmap arrays are block RAM; if a
   // slot read launches off rd_setA/rd_wayA the SAME cycle the walker W_WRITE writes that
   // set,way, the registered read is garbage on real RAMB36 (clean READ_FIRST under a
   // 2-state functional model). store_pdv is FF and invalidated on refill so it MOSTLY
@@ -156,13 +164,17 @@ module uopcache
   // observe the corruption — and a sim that does NOT consume it (func mode) stays
   // bit-identical. If the board fetch #DE reproduces ONLY with this define -> the
   // uopcache RDW collision is the root cause; if it does NOT reproduce -> ruled out.
-  function automatic logic [NSLOT*FPDW-1:0] rdw_x_slots(input logic coll,
-                                                         input logic [NSLOT*FPDW-1:0] clean);
-    rdw_x_slots = coll ? {NSLOT*FPDW{1'bx}} : clean;
+  function automatic logic [BASE_SLOTS*FPDW-1:0] rdw_x_base(input logic coll,
+                                                             input logic [BASE_SLOTS*FPDW-1:0] clean);
+    rdw_x_base = coll ? {BASE_SLOTS*FPDW{1'bx}} : clean;
   endfunction
-  function automatic logic [IC_LINE*4-1:0] rdw_x_bmap(input logic coll,
-                                                       input logic [IC_LINE*4-1:0] clean);
-    rdw_x_bmap = coll ? {IC_LINE*4{1'bx}} : clean;
+  function automatic logic [TAIL_SLOTS*FPDW-1:0] rdw_x_tail(input logic coll,
+                                                             input logic [TAIL_SLOTS*FPDW-1:0] clean);
+    rdw_x_tail = coll ? {TAIL_SLOTS*FPDW{1'bx}} : clean;
+  endfunction
+  function automatic logic [IC_LINE*5-1:0] rdw_x_bmap(input logic coll,
+                                                       input logic [IC_LINE*5-1:0] clean);
+    rdw_x_bmap = coll ? {IC_LINE*5{1'bx}} : clean;
   endfunction
   logic collA_pre, collB_pre;
   always_comb begin
@@ -182,13 +194,17 @@ module uopcache
 `endif
   always_ff @(posedge clk) begin
 `ifdef VEN_UOPCACHE_RDW_X
-    rdslots_a_q <= rdw_x_slots(collA_pre, store_slots_a[{rd_setA, rd_wayA}]);
-    rdslots_b_q <= rdw_x_slots(collB_pre, store_slots_b[{rd_setB, rd_wayB}]);
+    rdbase_a_q  <= rdw_x_base(collA_pre, store_base_a[{rd_setA, rd_wayA}]);
+    rdbase_b_q  <= rdw_x_base(collB_pre, store_base_b[{rd_setB, rd_wayB}]);
+    rdtail_a_q  <= rdw_x_tail(collA_pre, store_tail_a[{rd_setA, rd_wayA}]);
+    rdtail_b_q  <= rdw_x_tail(collB_pre, store_tail_b[{rd_setB, rd_wayB}]);
     rdbmap_a_q  <= rdw_x_bmap (collA_pre, store_bmap_a [{rd_setA, rd_wayA}]);
     rdbmap_b_q  <= rdw_x_bmap (collB_pre, store_bmap_b [{rd_setB, rd_wayB}]);
 `else
-    rdslots_a_q <= store_slots_a[{rd_setA, rd_wayA}];
-    rdslots_b_q <= store_slots_b[{rd_setB, rd_wayB}];
+    rdbase_a_q  <= store_base_a[{rd_setA, rd_wayA}];
+    rdbase_b_q  <= store_base_b[{rd_setB, rd_wayB}];
+    rdtail_a_q  <= store_tail_a[{rd_setA, rd_wayA}];
+    rdtail_b_q  <= store_tail_b[{rd_setB, rd_wayB}];
     rdbmap_a_q  <= store_bmap_a [{rd_setA, rd_wayA}];
     rdbmap_b_q  <= store_bmap_b [{rd_setB, rd_wayB}];
 `endif
@@ -204,18 +220,22 @@ module uopcache
                 || (inv2_en && ({rd_setB, rd_wayB} == {inv2_set, inv2_way}));
   end
 
-  // unpack the registered line into the slot/byte-map outputs.  The fast-path 8:1
-  // slot mux (slots[slot]) lives in the SPINE, off these outputs.
+  // Unpack the registered banks and byte map. The fast path retains its 8:1 base
+  // selector; the map's bank bit only selects the four-entry dense-line tail.
   always_comb begin
-    for (int s=0;s<NSLOT;s++) begin
-      rd_slotsA[s] = rdslots_a_q[s*FPDW +: FPDW];
-      rd_slotsB[s] = rdslots_b_q[s*FPDW +: FPDW];
+    for (int s=0;s<BASE_SLOTS;s++) begin
+      rd_baseA[s] = rdbase_a_q[s*FPDW +: FPDW];
+      rd_baseB[s] = rdbase_b_q[s*FPDW +: FPDW];
+    end
+    for (int s=0;s<TAIL_SLOTS;s++) begin
+      rd_tailA[s] = rdtail_a_q[s*FPDW +: FPDW];
+      rd_tailB[s] = rdtail_b_q[s*FPDW +: FPDW];
     end
     for (int b=0;b<IC_LINE;b++) begin
-      rd_bvalidA[b] = rdbmap_a_q[b*4+3];
-      rd_bslotA[b]  = rdbmap_a_q[b*4 +: 3];
-      rd_bvalidB[b] = rdbmap_b_q[b*4+3];
-      rd_bslotB[b]  = rdbmap_b_q[b*4 +: 3];
+      rd_bvalidA[b] = rdbmap_a_q[b*5+4];
+      rd_bslotA[b]  = rdbmap_a_q[b*5 +: 4];
+      rd_bvalidB[b] = rdbmap_b_q[b*5+4];
+      rd_bslotB[b]  = rdbmap_b_q[b*5 +: 4];
     end
     // a collided registered read holds BRAM-garbage on silicon — present it as
     // not-predecoded so the spine re-walks instead of issuing a garbage uop.
@@ -270,8 +290,9 @@ module uopcache
   end
 
   // walker working buffers (written into the store on W_WRITE)
-  logic [NSLOT*FPDW-1:0] wbuf_slots;
-  logic [IC_LINE*4-1:0]  wbuf_bmap;
+  logic [BASE_SLOTS*FPDW-1:0] wbuf_base;
+  logic [TAIL_SLOTS*FPDW-1:0] wbuf_tail;
+  logic [IC_LINE*5-1:0]      wbuf_bmap;
 
 `ifdef VEN_UOP_PERF
   // Coverage accounting for the predecode walker.  A missing byte->slot entry
@@ -282,10 +303,10 @@ module uopcache
   longint unsigned uop_walks, uop_walk_poison;
   longint unsigned uop_walk_slotcap, uop_walk_lineend, uop_walk_validsum;
   function automatic logic [5:0] uop_valid_boundaries(
-      input logic [IC_LINE*4-1:0] bmap);
+      input logic [IC_LINE*5-1:0] bmap);
     uop_valid_boundaries = '0;
     for (int b=0; b<IC_LINE; b++)
-      if (bmap[b*4+3]) uop_valid_boundaries = uop_valid_boundaries + 6'd1;
+      if (bmap[b*5+4]) uop_valid_boundaries = uop_valid_boundaries + 6'd1;
   endfunction
 
   always_ff @(posedge clk) begin
@@ -397,7 +418,8 @@ module uopcache
             wflags     <= (pd_pend && !pd_pend_kill) ? pd_pend_flags  : pd_flags;
             wcyc       <= (pd_pend && !pd_pend_kill) ? pd_pend_cyc    : pd_cycle_mode;
             wd16       <= (pd_pend && !pd_pend_kill) ? pd_pend_d16    : pd_def16;
-            wbuf_slots <= '0;
+            wbuf_base  <= '0;
+            wbuf_tail  <= '0;
             wbuf_bmap  <= '0;
             wpz        <= 1'b0;      // fresh transaction
             wst        <= W_WALK;
@@ -415,7 +437,13 @@ module uopcache
         end
         W_WALK: begin
           // record this instruction's slot + its start-byte boundary, then consume.
-          wbuf_slots[wslot*FPDW +: FPDW] <= pd_uop;
+          // The base bank is deliberately fixed at eight entries, so bit 3 is
+          // both the bank select stored in the map and the walker bank select.
+          // The tail's low two bits then address its four shallow entries.
+          if (!wslot[3])
+            wbuf_base[wslot*FPDW +: FPDW] <= pd_uop;
+          else
+            wbuf_tail[wslot[1:0]*FPDW +: FPDW] <= pd_uop;
           // boundary map: byte woff starts slot wslot (valid bit + slot index).
           // ONLY record a VALID boundary when the full six-byte decoder window
           // fits within this 32-byte line.  Checking only `woff+pd_len` is NOT
@@ -438,19 +466,21 @@ module uopcache
           if ((woff < 6'(IC_LINE)) && (woff + 6'd6 <= 6'(IC_LINE))
               && (woff + {2'd0, pd_len} <= 6'(IC_LINE))
               && (pd_len <= 4'd6))
-            wbuf_bmap[woff*4 +: 4] <= {1'b1, wslot[2:0]};
+            wbuf_bmap[woff*5 +: 5] <= {1'b1, wslot[3], wslot[2:0]};
           residual <= residual >> {pd_len, 3'b000};   // drop pd_len bytes
           woff     <= woff + {2'd0, pd_len};
           wslot    <= wslot + 4'd1;
           // stop when the line is consumed or the slot capacity is reached.  A
           // boundary at/after byte 32 belongs to the NEXT line; capacity overflow
           // leaves the remaining bytes' map entries .valid=0 (spine re-predecodes).
-          if ((woff + {2'd0, pd_len} >= IC_LINE) || (wslot == NSLOT-1))
+          if ((woff + {2'd0, pd_len} >= IC_LINE) || (wslot == LAST_SLOT))
             wst <= W_WRITE;
         end
         W_WRITE: begin
-          store_slots_a[{wset,wway}] <= wbuf_slots;
-          store_slots_b[{wset,wway}] <= wbuf_slots;
+          store_base_a [{wset,wway}] <= wbuf_base;
+          store_base_b [{wset,wway}] <= wbuf_base;
+          store_tail_a [{wset,wway}] <= wbuf_tail;
+          store_tail_b [{wset,wway}] <= wbuf_tail;
           store_bmap_a [{wset,wway}] <= wbuf_bmap;
           store_bmap_b [{wset,wway}] <= wbuf_bmap;
           // H-04: a walk that started under the OLD default size must not validate.

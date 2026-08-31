@@ -4012,13 +4012,16 @@ module core
   logic [7:0]  ub [6];               // U decode bytes (icache, possibly 0 if cold)
   logic [7:0]  vb [6];               // V candidate decode bytes (at eip+lenU)
 `ifdef VEN_UOPCACHE
-  // P0-11 predecoded µop-cache fast-path read wires (driven by u_uopcache). NSLOT
-  // fast-path insns covered per 32-byte line; a denser line overflows -> those
-  // offsets read uc_bv*=0 and the spine re-predecodes (perf, not correctness).
-  localparam int NSLOT = 8;
-  fpd_t        uc_slotsA [NSLOT], uc_slotsB [NSLOT];
+  // P0-11 predecoded µop-cache fast-path read wires (driven by u_uopcache). The
+  // shallow eight-entry bank covers the usual line; a small tail bank covers dense
+  // lines without turning the timing path into a monolithic wide selector. Still
+  // denser lines leave their byte-map entries invalid and safely re-predecode.
+  localparam int UC_BASE_SLOTS = 8;
+  localparam int UC_TAIL_SLOTS = 4;
+  fpd_t        uc_baseA [UC_BASE_SLOTS], uc_baseB [UC_BASE_SLOTS];
+  fpd_t        uc_tailA [UC_TAIL_SLOTS], uc_tailB [UC_TAIL_SLOTS];
   logic        uc_bvA [IC_LINE],  uc_bvB [IC_LINE];   // byte offset is a boundary
-  logic [2:0]  uc_bsA [IC_LINE],  uc_bsB [IC_LINE];   // ...maps to this slot
+  logic [3:0]  uc_bsA [IC_LINE],  uc_bsB [IC_LINE];   // ...maps to {bank,slot[2:0]}
   logic        uc_pdvA, uc_pdvB;                      // line is predecoded-valid
   logic        uop_hit, uc_v_avail;                   // flin on boundary / V resident
   logic        uc_u_in_b;                            // H-15: U's line is in port B
@@ -4104,11 +4107,11 @@ module core
   // above) — the architectural MUXF congestion wall — are DELETED from the fast
   // path. decode.sv ran on the multi-cycle fill walker (u_uopcache below) and the
   // results are stored as fixed-width fpd_t indexed by SLOT. Here the fast path
-  // just READS the slot the current flin lands in (an ~8:1 slot mux over the
-  // registered uop-line), and because predecode CHAINED the boundaries, the V
-  // candidate is literally U's NEXT slot — so the flin+lenU V-base serialization
-  // is gone too. The only flin-indexed select left is the small byte->slot map
-  // lookup (uc_bsA[flin[4:0]], 32:1 over 3 bits) — not a 32:1 over 256-bit data.
+  // just READS the mapped base or tail-bank slot for the current flin. The base
+  // bank remains an ~8:1 mux; dense-line coverage adds only a bank selection plus
+  // a four-entry tail selector. The only flin-indexed select left is the small
+  // byte->slot map lookup (uc_bsA[flin[4:0]], 32:1 over 4 bits) — not a 32:1 over
+  // 256-bit data.
   //
   // br_taken is the ONLY flag-dependent decode field (cond_true): predecode froze
   // it with the fill-time EFLAGS, so re-evaluate it from the opcode-derived cc
@@ -4135,7 +4138,7 @@ module core
 `endif
   logic [4:0]  uc_uoff, uc_voff;
   logic [2:0]  uc_uslot, uc_vslot;
-  logic        uc_v_in_a;
+  logic        uc_ubank, uc_vbank, uc_v_in_a;
   always_comb begin
     // REVIEW2 H-15: the uop cache's A/B reads are SYNCHRONOUS and carry NO returned
     // address tag, so the consumer must decide which buffer actually holds the current
@@ -4176,20 +4179,32 @@ module core
     uc_u_in_b = 1'b0;
 `endif
     uc_uoff  = flin[4:0];
-    uc_uslot = uc_u_in_b ? uc_bsB[uc_uoff]  : uc_bsA[uc_uoff];
-    u_d_raw  = uc_u_in_b ? uc_slotsB[uc_uslot] : uc_slotsA[uc_uslot];
-    // V begins right after U; predecode put it in the next slot of the SAME line,
-    // unless U+lenU crosses the 32-byte line boundary (then V's first byte is in
-    // line B, looked up by its in-B offset).
+    uc_ubank = uc_u_in_b ? uc_bsB[uc_uoff][3]   : uc_bsA[uc_uoff][3];
+    uc_uslot = uc_u_in_b ? uc_bsB[uc_uoff][2:0] : uc_bsA[uc_uoff][2:0];
+    if (uc_ubank)
+      u_d_raw = uc_u_in_b ? uc_tailB[uc_uslot[1:0]] : uc_tailA[uc_uslot[1:0]];
+    else
+      u_d_raw = uc_u_in_b ? uc_baseB[uc_uslot] : uc_baseA[uc_uslot];
+    // V begins right after U. Look up its OWN map entry even when it remains in
+    // U's line: that preserves the base->tail crossing and makes any sparse tail
+    // safely unavailable rather than wrapping a slot index.
     uc_voff  = uc_uoff + {1'b0, u_d_raw.len};
     uc_v_in_a = ({1'b0,uc_uoff} + {2'b0,u_d_raw.len}) < 6'd32;
     if (uc_v_in_a) begin
       // H-15: V in U's line -> same buffer U came from, not unconditionally A.
-      uc_vslot = uc_uslot + 3'd1;
-      v_d_raw  = uc_u_in_b ? uc_slotsB[uc_vslot] : uc_slotsA[uc_vslot];
+      uc_vbank = uc_u_in_b ? uc_bsB[uc_voff][3]   : uc_bsA[uc_voff][3];
+      uc_vslot = uc_u_in_b ? uc_bsB[uc_voff][2:0] : uc_bsA[uc_voff][2:0];
+      if (uc_vbank)
+        v_d_raw = uc_u_in_b ? uc_tailB[uc_vslot[1:0]] : uc_tailA[uc_vslot[1:0]];
+      else
+        v_d_raw = uc_u_in_b ? uc_baseB[uc_vslot] : uc_baseA[uc_vslot];
     end else begin
-      uc_vslot = uc_bsB[uc_voff];
-      v_d_raw  = uc_slotsB[uc_vslot];
+      uc_vbank = uc_bsB[uc_voff][3];
+      uc_vslot = uc_bsB[uc_voff][2:0];
+      if (uc_vbank)
+        v_d_raw = uc_tailB[uc_vslot[1:0]];
+      else
+        v_d_raw = uc_baseB[uc_vslot];
     end
     // re-evaluate the flag-dependent Jcc taken bit against the LIVE eflags.
     u_d = u_d_raw;
@@ -4207,14 +4222,11 @@ module core
                       (uc_u_in_b ? (uc_pdvB && uc_bvB[flin[4:0]])
                                  : (uc_pdvA && uc_bvA[flin[4:0]]));
   // A V candidate is usable only when its OWN instruction boundary was stored.
-  // In particular, the 3-bit `uc_uslot + 1` arithmetic wraps slot 7 to slot 0;
-  // without this boundary check, an instruction in the final slot could pair
-  // with an unrelated first slot from the same line.  The map check also covers
-  // a sparse/overflowed walker tail, where U is covered but its successor was
-  // deliberately not predecoded.
+  // The map check covers a sparse/overflowed walker tail, where U is covered but
+  // its successor was deliberately not predecoded; it also makes the base-to-tail
+  // successor explicit instead of relying on wrapping slot arithmetic.
   assign uc_v_avail = uc_v_in_a
-                    ? ((uc_uslot != 3'(NSLOT-1)) &&
-                       (uc_u_in_b ? uc_bvB[uc_voff] : uc_bvA[uc_voff]))
+                    ? (uc_u_in_b ? uc_bvB[uc_voff] : uc_bvA[uc_voff])
                     : (uc_pdvB && uc_bvB[uc_voff]);
 `ifdef VEN_UOPCACHE_CHECK
   // Structural-equivalence gate: keep the live ub/vb gather + reference decoders
@@ -4244,9 +4256,9 @@ module core
     if (rst_n && (state == S_PIPE) && pipe_bytes_ok && uop_hit &&
         ((u_d !== u_d_ref) || (uc_v_avail && (v_d !== v_d_ref)))) begin
       $display("[UOPCHECK] decode mismatch flin=%08x eip=%08x U(slot=%0d len=%0d reads=%02x writes=%02x) ref(len=%0d reads=%02x writes=%02x) V(slot=%0d len=%0d reads=%02x writes=%02x) ref(len=%0d reads=%02x writes=%02x)",
-               flin, eip, uc_uslot, u_d.len, u_d.reads, u_d.writes,
+               flin, eip, {uc_ubank,uc_uslot}, u_d.len, u_d.reads, u_d.writes,
                u_d_ref.len, u_d_ref.reads, u_d_ref.writes,
-               uc_vslot, v_d.len, v_d.reads, v_d.writes,
+               {uc_vbank,uc_vslot}, v_d.len, v_d.reads, v_d.writes,
                v_d_ref.len, v_d_ref.reads, v_d_ref.writes);
       $fatal(1, "VEN_UOPCACHE_CHECK: predecoded slot differs from live decode");
     end
@@ -8442,12 +8454,15 @@ module core
     end
   end
 
-  uopcache #(.IC_SETS(IC_SETS), .IC_LINE(IC_LINE), .NSLOT(NSLOT)) u_uopcache (
+  uopcache #(.IC_SETS(IC_SETS), .IC_LINE(IC_LINE),
+             .BASE_SLOTS(UC_BASE_SLOTS), .TAIL_SLOTS(UC_TAIL_SLOTS)) u_uopcache (
     .clk(clk), .rst_n(rst_n),
     .rd_setA(ic_rd_setA), .rd_wayA(ic_rd_wayA),
-    .rd_slotsA(uc_slotsA), .rd_bvalidA(uc_bvA), .rd_bslotA(uc_bsA), .rd_pdvalidA(uc_pdvA),
+    .rd_baseA(uc_baseA), .rd_tailA(uc_tailA),
+    .rd_bvalidA(uc_bvA), .rd_bslotA(uc_bsA), .rd_pdvalidA(uc_pdvA),
     .rd_setB(ic_rd_setB), .rd_wayB(ic_rd_wayB),
-    .rd_slotsB(uc_slotsB), .rd_bvalidB(uc_bvB), .rd_bslotB(uc_bsB), .rd_pdvalidB(uc_pdvB),
+    .rd_baseB(uc_baseB), .rd_tailB(uc_tailB),
+    .rd_bvalidB(uc_bvB), .rd_bslotB(uc_bsB), .rd_pdvalidB(uc_pdvB),
     .pd_start(pd_start_r), .pd_set(pd_set_r), .pd_way(pd_way_r),
     .pd_line(pf_line_buf), .pd_flags(pd_flags_r), .pd_cycle_mode(cycle_mode),
     // REVIEW Aug-1 H-04: the predecode walker runs the SAME decode leaf as the live
