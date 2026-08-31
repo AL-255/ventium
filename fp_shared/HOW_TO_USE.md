@@ -168,6 +168,14 @@ producer may change the command bus; this behavior is explicitly tested.
 adapter must sample every response in the cycle it is asserted.  Store and AX
 payload qualifiers are valid only with `rsp_valid`.
 
+`cmd_accept_retire` is asserted with `cmd_valid && cmd_ready` only for an
+immediate command whose complete architectural result commits on that edge and
+does not carry a store image or AX result for the adapter to consume.  A producer may retire that command
+on the acceptance edge, but it must keep the conservative response path for a
+deasserted signal.  The signal is generated inside `ven_fp_top` from the same
+command classification that owns state mutation; do not recreate its whitelist
+in the CPU adapter.
+
 `busy` reports a multi-cycle execution state.  It is not a replacement for an
 adapter-owned pending bit: immediate commands can accept and produce a response
 without asserting `busy`.  Track acceptance through completion explicitly.

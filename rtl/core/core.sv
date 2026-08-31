@@ -8579,7 +8579,7 @@ module core
   // memory operand has already completed its read/probe path before this point;
   // in particular a store cannot mutate FP state and then fault on a destination.
   // ===========================================================================
-  logic        fp_shared_cmd_valid, fp_shared_cmd_ready, fp_shared_busy;
+  logic        fp_shared_cmd_valid, fp_shared_cmd_ready, fp_shared_accept_retire, fp_shared_busy;
   logic        fp_shared_rsp_valid, fp_shared_rsp_unsupported, fp_shared_rsp_stack_fault;
   logic [84:0] fp_shared_rsp_arith;
   logic        fp_shared_rsp_store_valid, fp_shared_rsp_ax_valid;
@@ -8626,6 +8626,7 @@ module core
     .init_regs_phys(snapshot_fpr_flat),
 `endif
     .cmd_valid(fp_shared_cmd_valid), .cmd_ready(fp_shared_cmd_ready),
+    .cmd_accept_retire(fp_shared_accept_retire),
     .cmd_op(q_fxop), .cmd_aluop(q_f_aluop), .cmd_sti(q_f_sti),
     .cmd_pop(q_f_pop), .cmd_constant(q_f_const), .cmd_mem(f_mem80),
     .cmd_mem_bytes(q_f_mbytes), .cmd_fdiv_bug(errata_en[0]),
@@ -9651,6 +9652,16 @@ module core
   longint pp_uopmiss_off [IC_LINE];
   longint pp_uop_sfetch;  // successful registered-window hand-offs
   longint pp_resident_sfetch; // S_PIPE slow-path hand-offs accepted from BRAM
+`ifdef VEN_FP_SHARED
+`ifndef SYNTHESIS
+  // The shared top separately reports its service latency.  Measure the same
+  // accepted-command-to-core-observed-response interval here so a core-side
+  // wait-state change cannot be justified from a leaf-only counter.
+  longint pp_fp_shared_cmds, pp_fp_shared_roundtrip;
+  logic pp_fp_shared_pending;
+  longint pp_fp_shared_age;
+`endif
+`endif
   // Bucket 9 (`fp_sys_bail`) is deliberately broad.  Split its actual hand-off
   // cause so an implementation change targets a demonstrated eligibility
   // limit, rather than blindly widening the system fast path.
@@ -9662,6 +9673,11 @@ module core
   // whitelist: a generic decoding extension is useful only when it covers a
   // measured instruction family, and this remains entirely outside synthesis.
   longint unsigned pp_slowop [256];
+  longint unsigned pp_slowop_rr [256];
+  longint unsigned pp_slowop_rr_hi8 [256];
+  longint unsigned pp_slowop_0f [256];
+  longint unsigned pp_slowop_0f_setcc_rr [256];
+  longint unsigned pp_slowop_0f_setcc_rr_hi8 [256];
   logic [31:0] pp_slowop_first_pc [256];
   logic [47:0] pp_slowop_first_bytes [256];
 `endif
@@ -9702,11 +9718,24 @@ module core
       for (int i=0;i<IC_LINE;i++) pp_uopmiss_off[i] <= 64'd0;
       pp_uop_sfetch <= 64'd0;
       pp_resident_sfetch <= 64'd0;
+`ifdef VEN_FP_SHARED
+`ifndef SYNTHESIS
+      pp_fp_shared_cmds <= 64'd0;
+      pp_fp_shared_roundtrip <= 64'd0;
+      pp_fp_shared_pending <= 1'b0;
+      pp_fp_shared_age <= 64'd0;
+`endif
+`endif
       for (int i=0;i<PP_NSBAIL;i++) pp_sys_bail[i] <= 64'd0;
 `ifndef SYNTHESIS
 `ifdef VEN_SLOWOP_PERF
       for (int i=0;i<256;i++) begin
         pp_slowop[i] <= 64'd0;
+        pp_slowop_rr[i] <= 64'd0;
+        pp_slowop_rr_hi8[i] <= 64'd0;
+        pp_slowop_0f[i] <= 64'd0;
+        pp_slowop_0f_setcc_rr[i] <= 64'd0;
+        pp_slowop_0f_setcc_rr_hi8[i] <= 64'd0;
         pp_slowop_first_pc[i] <= 32'd0;
         pp_slowop_first_bytes[i] <= 48'd0;
       end
@@ -9727,6 +9756,22 @@ module core
       if (retire2_valid) pp_ret2 <= pp_ret2 + 64'd1;
       if (sfetch_uop_fast) pp_uop_sfetch <= pp_uop_sfetch + 64'd1;
       if (sfetch_resident_fast) pp_resident_sfetch <= pp_resident_sfetch + 64'd1;
+`ifdef VEN_FP_SHARED
+`ifndef SYNTHESIS
+      if ((state == S_FEXEC) && fp_shared_cmd_ready && !fp_shared_accept_retire) begin
+        pp_fp_shared_pending <= 1'b1;
+        pp_fp_shared_age <= 64'd0;
+      end else if (pp_fp_shared_pending) begin
+        if ((state == S_FP_SHARED_WAIT) && fp_shared_rsp_valid) begin
+          pp_fp_shared_cmds <= pp_fp_shared_cmds + 64'd1;
+          pp_fp_shared_roundtrip <= pp_fp_shared_roundtrip + pp_fp_shared_age + 64'd1;
+          pp_fp_shared_pending <= 1'b0;
+        end else begin
+          pp_fp_shared_age <= pp_fp_shared_age + 64'd1;
+        end
+      end
+`endif
+`endif
 
       // The S_PIPE chain, in the spine's exact priority order. Mirrors
       // core_gpr_wb.svh's guard chain one-for-one -- if that chain is edited and
@@ -9787,7 +9832,34 @@ module core
             pp_sys_bail[0] <= pp_sys_bail[0] + 64'd1;
 `ifndef SYNTHESIS
 `ifdef VEN_SLOWOP_PERF
-            pp_slowop[ic_byte(flin)] <= pp_slowop[ic_byte(flin)] + 64'd1;
+            // is_fp deliberately uses simple=0 to stay separate from integer
+            // pairing; those instructions have already been accepted by the
+            // compact x87 path and are not slow decoder work.
+            if (!u_d.is_fp) begin
+              pp_slowop[ic_byte(flin)] <= pp_slowop[ic_byte(flin)] + 64'd1;
+              // A register-only candidate avoids the data-side protocol entirely.
+              // Count the high-byte spelling separately: AH..BH needs the partial
+              // register read/write muxes that a low-byte-only extension would avoid.
+              if (ic_byte(flin + 32'd1)[7:6] == 2'b11) begin
+                pp_slowop_rr[ic_byte(flin)] <= pp_slowop_rr[ic_byte(flin)] + 64'd1;
+                if (ic_byte(flin + 32'd1)[5] || ic_byte(flin + 32'd1)[2])
+                  pp_slowop_rr_hi8[ic_byte(flin)] <= pp_slowop_rr_hi8[ic_byte(flin)] + 64'd1;
+              end
+              // 0F 9x is the common SETcc shape: its ModR/M byte is b2, unlike
+              // one-byte opcodes. Attribute the extension byte independently so
+              // a partial-register SETcc path is considered on measured coverage.
+              if (ic_byte(flin) == 8'h0F) begin
+                pp_slowop_0f[ic_byte(flin + 32'd1)] <= pp_slowop_0f[ic_byte(flin + 32'd1)] + 64'd1;
+                if ((ic_byte(flin + 32'd1)[7:4] == 4'h9)
+                    && (ic_byte(flin + 32'd2)[7:6] == 2'b11)) begin
+                  pp_slowop_0f_setcc_rr[ic_byte(flin + 32'd1)]
+                    <= pp_slowop_0f_setcc_rr[ic_byte(flin + 32'd1)] + 64'd1;
+                  if (ic_byte(flin + 32'd2)[2])
+                    pp_slowop_0f_setcc_rr_hi8[ic_byte(flin + 32'd1)]
+                      <= pp_slowop_0f_setcc_rr_hi8[ic_byte(flin + 32'd1)] + 64'd1;
+                end
+              end
+            end
             // Keep a concrete byte window for each first-byte bucket.  Prefix
             // buckets are expected, and their exemplar distinguishes an
             // operand/address-size exclusion from the following opcode.
@@ -9867,6 +9939,15 @@ module core
     end
     if (pp_resident_sfetch != 0)
       $display("  resident S_PIPE slow-fetch hand-offs  %10d", pp_resident_sfetch);
+`ifdef VEN_FP_SHARED
+`ifndef SYNTHESIS
+    if (pp_fp_shared_cmds != 0)
+      $display("  shared-FP core round trip: commands=%0d cycles=%0d avg=%0d.%02d",
+               pp_fp_shared_cmds, pp_fp_shared_roundtrip,
+               pp_fp_shared_roundtrip / pp_fp_shared_cmds,
+               ((pp_fp_shared_roundtrip * 100) / pp_fp_shared_cmds) % 100);
+`endif
+`endif
     if (pp_bail[9] != 0) begin
       $display("");
       $display("  -- fp_sys_bail hand-off cause (sums to bucket 9) --");
@@ -9882,8 +9963,16 @@ module core
       $display("  -- non-simple slow-decode entry bytes (only non-zero) --");
       for (int i=0;i<256;i++)
         if (pp_slowop[i] != 0)
-          $display("    byte %02x count %10d first-flin=%08x bytes=%012x",
-                   i, pp_slowop[i], pp_slowop_first_pc[i], pp_slowop_first_bytes[i]);
+          $display("    byte %02x count %10d rr=%10d rr-hi8=%10d first-flin=%08x bytes=%012x",
+                   i, pp_slowop[i], pp_slowop_rr[i], pp_slowop_rr_hi8[i],
+                   pp_slowop_first_pc[i], pp_slowop_first_bytes[i]);
+      $display("");
+      $display("  -- 0F slow-decode extensions (only non-zero) --");
+      for (int i=0;i<256;i++)
+        if (pp_slowop_0f[i] != 0)
+          $display("    0f %02x count %10d setcc-rr=%10d setcc-rr-hi8=%10d",
+                   i, pp_slowop_0f[i], pp_slowop_0f_setcc_rr[i],
+                   pp_slowop_0f_setcc_rr_hi8[i]);
     end
 `endif
 `endif

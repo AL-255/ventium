@@ -159,7 +159,14 @@ Quick reference
      - simulation-only boolean define
      - off (needs ``VEN_PERF_PROFILE``)
      - Attributes non-simple S_PIPE-to-slow-decoder hand-offs by first byte,
-       with a representative six-byte instruction window per byte bucket.
+       with a representative six-byte instruction window per byte bucket; splits
+       register-only candidates, AH--BH spellings, and 0F 9x SETcc encodings to
+       expose the real hardware cost of otherwise tempting byte fast paths.
+   * - ``VEN_FP_PERF``
+     - simulation-only boolean define
+     - off
+     - Attributes the shared x87 command engine's state residency and accepted
+       command-response latency by service class; no synthesized logic.
    * - ``VEN_L1D_PERF``
      - simulation-only boolean define
      - off

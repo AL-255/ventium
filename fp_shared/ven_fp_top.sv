@@ -34,6 +34,11 @@ module ven_fp_top
 
     input  wire logic         cmd_valid,
     output      logic         cmd_ready,
+    // Asserted only for an accepted command whose architectural result is
+    // completely committed on the acceptance edge and has no response payload
+    // that the adapter must consume.  The producer may retire this command on that
+    // edge; stores and FNSTSW AX must still await rsp_valid.
+    output      logic         cmd_accept_retire,
     input  wire fxop_e        cmd_op,
     input  wire logic [2:0]   cmd_aluop,
     input  wire logic [2:0]   cmd_sti,
@@ -166,6 +171,74 @@ module ven_fp_top
   logic issue_is_compare, issue_overflow, issue_underflow, issue_stack_fault;
 
   localparam logic [79:0] QNAN_INDEF = 80'hffffc000000000000000;
+
+`ifndef SYNTHESIS
+`ifdef VEN_FP_PERF
+  // Simulation-only command-latency attribution.  The shared top deliberately
+  // serializes all x87 work; distinguish the cheap response round trip from
+  // the one shared ALU/SRT/convert service before changing that contract.
+  localparam int FP_PERF_NCLASS = 8;
+  localparam logic [2:0] FPPC_IMMEDIATE = 3'd0;
+  localparam logic [2:0] FPPC_FAST_ALU  = 3'd1;
+  localparam logic [2:0] FPPC_SRT       = 3'd2;
+  localparam logic [2:0] FPPC_MISC      = 3'd3;
+  localparam logic [2:0] FPPC_BCD_LOAD  = 3'd4;
+  localparam logic [2:0] FPPC_BCD_STORE = 3'd5;
+  localparam logic [2:0] FPPC_TRANS     = 3'd6;
+  localparam logic [2:0] FPPC_STACKFLT  = 3'd7;
+  longint unsigned fp_perf_cycles;
+  longint unsigned fp_perf_state [7];
+  longint unsigned fp_perf_accept [FP_PERF_NCLASS];
+  longint unsigned fp_perf_latency [FP_PERF_NCLASS];
+  logic             fp_perf_active;
+  logic [2:0]       fp_perf_class_q;
+  longint unsigned  fp_perf_age;
+
+  function automatic logic [2:0] fp_perf_class;
+    begin
+      if (issue_stack_fault)
+        fp_perf_class = FPPC_STACKFLT;
+      else if (((cmd_op == FX_AR_ST0_STI) || (cmd_op == FX_AR_STI_ST0) ||
+                (cmd_op == FX_AR_M32) || (cmd_op == FX_AR_M64) ||
+                (cmd_op == FX_AR_I16) || (cmd_op == FX_AR_I32)) &&
+               is_fast_arith(cmd_aluop))
+        fp_perf_class = FPPC_FAST_ALU;
+      else if (((cmd_op == FX_AR_ST0_STI) || (cmd_op == FX_AR_STI_ST0) ||
+                (cmd_op == FX_AR_M32) || (cmd_op == FX_AR_M64) ||
+                (cmd_op == FX_AR_I16) || (cmd_op == FX_AR_I32)) &&
+               is_div_arith(cmd_aluop) && !div_special_hit)
+        fp_perf_class = FPPC_SRT;
+      else if ((cmd_op == FX_FSQRT) && !sqrt_special_hit)
+        fp_perf_class = FPPC_SRT;
+      else if ((cmd_op == FX_FPREM) || (cmd_op == FX_FPREM1))
+        fp_perf_class = FPPC_SRT;
+      else if (is_misc_op(cmd_op))
+        fp_perf_class = FPPC_MISC;
+      else if (cmd_op == FX_FBLD)
+        fp_perf_class = FPPC_BCD_LOAD;
+      else if (cmd_op == FX_FBSTP)
+        fp_perf_class = FPPC_BCD_STORE;
+      else if (is_trans_op(cmd_op))
+        fp_perf_class = FPPC_TRANS;
+      else
+        fp_perf_class = FPPC_IMMEDIATE;
+    end
+  endfunction
+
+  function automatic string fp_perf_class_name(input logic [2:0] c);
+    case (c)
+      FPPC_IMMEDIATE: fp_perf_class_name = "immediate command";
+      FPPC_FAST_ALU:  fp_perf_class_name = "shared add/sub/mul";
+      FPPC_SRT:       fp_perf_class_name = "shared SRT";
+      FPPC_MISC:      fp_perf_class_name = "shared conversion/store";
+      FPPC_BCD_LOAD:  fp_perf_class_name = "shared BCD load";
+      FPPC_BCD_STORE: fp_perf_class_name = "shared BCD store";
+      FPPC_TRANS:     fp_perf_class_name = "shared transcendental";
+      default:         fp_perf_class_name = "stack-fault shortcut";
+    endcase
+  endfunction
+`endif
+`endif
 
   wire logic accept = cmd_valid & cmd_ready;
 
@@ -1012,6 +1085,22 @@ module ven_fp_top
     endcase
   endfunction
 
+  function automatic logic has_response_payload(input fxop_e op);
+    unique case (op)
+      FX_FNSTCW, FX_FNSTSW_M, FX_FNSTSW_AX, FX_FNSTENV, FX_FNSAVE:
+        return 1'b1;
+      default:
+        return 1'b0;
+    endcase
+  endfunction
+
+  // Keep this decision beside the command decode, rather than duplicating an
+  // x87-opcode whitelist in the core.  For every asserted case the state-file
+  // mutation occurs at the same accept edge, and the registered response is
+  // informational only.  A memory image or AX result remains response-owned.
+  assign cmd_accept_retire = accept && is_immediate_supported(cmd_op)
+                     && !has_response_payload(cmd_op);
+
   always_ff @(posedge clk) begin
     if (!rst_n) begin
       top_state       <= TOP_IDLE;
@@ -1028,12 +1117,56 @@ module ven_fp_top
       rsp_ax_valid    <= 1'b0;
       rsp_ax          <= 16'd0;
       srt_bug_q       <= 1'b0;
+`ifndef SYNTHESIS
+`ifdef VEN_FP_PERF
+      fp_perf_cycles <= 64'd0;
+      fp_perf_active <= 1'b0;
+      fp_perf_class_q <= FPPC_IMMEDIATE;
+      fp_perf_age <= 64'd0;
+      for (int i = 0; i < 7; i++) fp_perf_state[i] <= 64'd0;
+      for (int i = 0; i < FP_PERF_NCLASS; i++) begin
+        fp_perf_accept[i] <= 64'd0;
+        fp_perf_latency[i] <= 64'd0;
+      end
+`endif
+`endif
     end else begin
       rsp_valid       <= 1'b0;
       rsp_unsupported <= 1'b0;
       rsp_stack_fault <= 1'b0;
       rsp_store_valid <= 1'b0;
       rsp_ax_valid    <= 1'b0;
+`ifndef SYNTHESIS
+`ifdef VEN_FP_PERF
+      fp_perf_cycles <= fp_perf_cycles + 64'd1;
+      fp_perf_state[int'(top_state)] <= fp_perf_state[int'(top_state)] + 64'd1;
+      // Responses are registered, so they observe the command accepted on a
+      // preceding edge.  The 11 case keeps the accounting well-defined for a
+      // future producer that submits a new command beside an old response.
+      unique case ({accept, rsp_valid && fp_perf_active})
+        2'b10: begin
+          fp_perf_accept[fp_perf_class()] <= fp_perf_accept[fp_perf_class()] + 64'd1;
+          fp_perf_class_q <= fp_perf_class();
+          fp_perf_age <= 64'd0;
+          fp_perf_active <= 1'b1;
+        end
+        2'b01: begin
+          fp_perf_latency[fp_perf_class_q] <= fp_perf_latency[fp_perf_class_q]
+                                             + fp_perf_age + 64'd1;
+          fp_perf_active <= 1'b0;
+        end
+        2'b11: begin
+          fp_perf_latency[fp_perf_class_q] <= fp_perf_latency[fp_perf_class_q]
+                                             + fp_perf_age + 64'd1;
+          fp_perf_accept[fp_perf_class()] <= fp_perf_accept[fp_perf_class()] + 64'd1;
+          fp_perf_class_q <= fp_perf_class();
+          fp_perf_age <= 64'd0;
+          fp_perf_active <= 1'b1;
+        end
+        default: if (fp_perf_active) fp_perf_age <= fp_perf_age + 64'd1;
+      endcase
+`endif
+`endif
 
       unique case (top_state)
         TOP_IDLE: begin
@@ -1259,6 +1392,23 @@ module ven_fp_top
   wire logic _unused_ok = &{1'b0, st0_empty, sti_empty, alu_busy, srt_busy,
                             misc_busy, bcd_load_busy, bcd_store_busy,
                             trans_busy};
+
+`ifndef SYNTHESIS
+`ifdef VEN_FP_PERF
+  final begin
+    $display("[FPPERF] shared-top clocks=%0d", fp_perf_cycles);
+    for (int i = 0; i < 7; i++)
+      if (fp_perf_state[i] != 0)
+        $display("[FPPERF] service-state=%0d clocks=%0d", i, fp_perf_state[i]);
+    for (int i = 0; i < FP_PERF_NCLASS; i++)
+      if (fp_perf_accept[i] != 0)
+        $display("[FPPERF] class=%s commands=%0d response-cycles=%0d avg=%0d.%02d",
+                 fp_perf_class_name(3'(i)), fp_perf_accept[i], fp_perf_latency[i],
+                 fp_perf_latency[i] / fp_perf_accept[i],
+                 ((fp_perf_latency[i] * 100) / fp_perf_accept[i]) % 100);
+  end
+`endif
+`endif
 
 endmodule
 

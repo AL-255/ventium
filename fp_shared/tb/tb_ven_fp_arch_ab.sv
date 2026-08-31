@@ -34,7 +34,7 @@ module tb_ven_fp_arch_ab;
   always #5 clk = ~clk;
 
   // Candidate command and response.
-  logic cmd_valid, cmd_ready;
+  logic cmd_valid, cmd_ready, cmd_accept_retire;
   fxop_e cmd_op;
   logic [2:0] cmd_aluop, cmd_sti, cmd_constant;
   logic cmd_pop, cmd_fdiv_bug, cmd_fist_bug;
@@ -60,7 +60,8 @@ module tb_ven_fp_arch_ab;
 
   ven_fp_top u_new (
       .clk(clk), .rst_n(rst_n),
-      .cmd_valid(cmd_valid), .cmd_ready(cmd_ready), .cmd_op(cmd_op),
+      .cmd_valid(cmd_valid), .cmd_ready(cmd_ready),
+      .cmd_accept_retire(cmd_accept_retire), .cmd_op(cmd_op),
       .cmd_aluop(cmd_aluop), .cmd_sti(cmd_sti), .cmd_pop(cmd_pop),
       .cmd_constant(cmd_constant), .cmd_mem(cmd_mem),
       .cmd_mem_bytes(cmd_mem_bytes), .cmd_fdiv_bug(cmd_fdiv_bug),
