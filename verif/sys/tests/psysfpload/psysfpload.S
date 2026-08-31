@@ -16,6 +16,8 @@
  *     movl (%esi), %edi               (ModR/M base form)
  *     movl (%esi,%edx,4), %edi        (DS-default SIB form)
  *     movl 4(%esi,%edx,4), %edi       (DS-default SIB+disp8 form)
+ *     movl disp32, %edi                (literal DS displacement)
+ *     cmpl disp32, %edi / cmpl %edi, disp32 (both CMP operand orders)
  *
  * The datum and ESI are client-relative, so the access is only correct when
  * the DS base is applied.  The loop folds every observed value into EAX;
@@ -53,13 +55,15 @@ _start16:
     movw    $(pm32_payload_end - pm32_payload), %cx
     rep movsb
 
-    /* Make the translated physical copy observably distinct.  If a fast load
+    /* Make the translated physical copy observably distinct.  If a fast read
      * or fetch bypasses paging it reads the 0x80000 copy's original sentinel;
      * QEMU's paged reference reads this replacement at 0x90000 instead. */
     movw    $0x9000, %ax
     movw    %ax, %es
     movw    $(pm32_data - pm32_payload), %di
     movl    $0x1badb002, %es:(%di)
+    movw    $(pm32_disp32_data - pm32_payload), %di
+    movl    $0xa4f16d39, %es:(%di)
 
     /* Build GDT @ 0x500 and its pseudo-descriptor @ 0x480 in low RAM.
      * base=0x00080000, limit=4 GiB-1, G=1, D/B=1. */
@@ -140,6 +144,24 @@ pm32_entry:
     xorl    %edi, %eax
     movl    4(%esi,%edx,4), %edi
     addl    %edi, %eax
+
+    /* A literal ModR/M disp32 is still a DS-relative OFFSET in 32-bit
+     * addressing.  It has no GPR base, so this catches an AGU accidentally
+     * adding one as well as segment-base/paging bypasses.  The asymmetric
+     * comparisons require the two opcode operand orders to set CF correctly;
+     * the Jccs immediately after them also exercise the normal flag consumer.
+     * Direct data is deliberately distinct in the paged copy above. */
+    movl    (pm32_disp32_data - pm32_payload), %edi
+    addl    %edi, %eax
+    movl    $0xa4f16d38, %edi
+    cmpl    (pm32_disp32_data - pm32_payload), %edi
+    jb      2f
+    jmp     .Lbad
+2:
+    cmpl    %edi, (pm32_disp32_data - pm32_payload)
+    ja      3f
+    jmp     .Lbad
+3:
     xorl    $0xa5a5a5a5, %eax
     decl    %ecx
     jnz     1b
@@ -151,6 +173,14 @@ pm32_entry:
 2:
     hlt
     jmp     2b
+
+.Lbad:
+    movl    $0xee, %eax
+    movw    $0xf4, %dx
+    outb    %al, %dx
+4:
+    hlt
+    jmp     4b
 
     .p2align 2
 pm32_data:

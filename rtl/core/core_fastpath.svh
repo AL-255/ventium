@@ -207,12 +207,10 @@
             pending_mem_pen<=7'd0;
             agi_wr0<=9'h100; agi_wr1<=9'h100;
 `ifdef VEN_L1_AXI
-          end else if (real_bus && pipe_load_req && !mem_ack) begin
-            // P1-1: bus_mode=2 stalling L1 — a checked DS effective-address load MISSED (mem_ack=0
-            // while ven_l1d fills its line from AXI). The ISSUE arm below latches
-            // gpr<=mem_rdata UNCONDITIONALLY (the same-cycle-BFM assumption), so
-            // bubble the WHOLE issue until the fill completes and mem_ack rises; then
-            // the load issues with valid data. Mirrors the !ic_fetch_ready bubble.
+          end else if (real_bus && (pipe_load_req || pipe_store_req) && !mem_ack) begin
+            // bus_mode=2: hold the whole U-side data operation until the L1
+            // accepts/completes it. This prevents a store from retiring before
+            // its write handshake, just as a load must not consume stale data.
             // Inert in modes 0/1 (real_bus=0), absent in the default build.
             agi_wr0<=9'h100; agi_wr1<=9'h100;
 `endif
@@ -424,21 +422,21 @@
             // stay here.
             if (u_d.is_lea) begin
               if (u_d.dst!=R_ESP) w0={6'd0,u_d.dst};
-            end else if (u_d.is_load) begin
-              if (u_d.dst!=R_ESP) w0={6'd0,u_d.dst};
-              // M5: L1 D-cache TIMING. The load data still comes from the BFM
-              // (mem_rdata, above); here we run the real 2-way LRU hit/miss SM and
-              // DEFER any miss penalty (read-allocate +dmiss) / misalign (+3) to
-              // the next instruction, exactly as p5_mem()/p5model does. A line
-              // that misses is allocated now (dc_acc_valid below) so re-references
-              // hit. dc_lu_hit reads the PRE-access state (dc_lu_addr ==
-              // pipe_load_addr this clock); the allocate is the dcache_timing
-              // posedge driven by dc_acc_valid/dc_acc_addr (UNGATED — this U-pipe
-              // load runs the SM in func and cycle mode alike).
+            end else if (u_d.is_mem) begin
+              if (u_d.is_load && u_d.dst!=R_ESP) w0={6'd0,u_d.dst};
+              // A checked read-only ALU operand (currently CMP) has no GPR
+              // destination, but it still commits its architectural flags.
+              // Keep this in the memory arm so it cannot fall through to the
+              // non-memory ALU arm and accidentally lose its D-cache timing.
+              if (u_d.wflags) eflags<=u_flags;
+              // M5: L1 D-cache timing. The BFM supplies reads and receives writes;
+              // the local 2-way LRU mirrors p5_mem(). A miss allocates for either
+              // access, but only a READ pays P5_DMISS. Both access types pay the
+              // unaligned penalty, exactly as the oracle does.
               begin
                 logic [6:0] pen;
                 pen = 7'd0;
-                if (!dc_lu_hit)                     pen = pen + P5_DMISS;
+                if (!u_d.is_store && !dc_lu_hit)    pen = pen + P5_DMISS;
                 if (pipe_load_addr[1:0] != 2'b00)     pen = pen + P5_MISALIGN;
 `ifdef VEN_L1_AXI
                 // bus_mode=2: the REAL DDR latency is the only timing source — the

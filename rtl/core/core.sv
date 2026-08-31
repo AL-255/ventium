@@ -3902,9 +3902,11 @@ module core
   logic        moffs_falsedep;       // M6 Err59: A2/A3 moffs U + EAX-using V follower
   logic        v_bytes_ok;           // V candidate's full bytes resident in I-cache
   logic        pipe_agi;             // U has an AGI hazard (addr reg written last clk)
-  logic        pipe_load_req;        // U is a checked DS effective-address load (drives the bus)
+  logic        pipe_load_req;        // U is a checked DS memory read (drives the bus)
+  logic        pipe_store_req;       // U is an audited DS MOV store (drives the bus)
   logic [2:0]  pipe_load_base;
   logic [31:0] pipe_load_addr;
+  logic [31:0] pipe_store_data;
   logic [31:0] u_alu, u_flags, u_sh, u_shm1; logic u_shcf;
   logic [31:0] v_alu, v_flags;
   logic [31:0] u_target, v_target;
@@ -4261,16 +4263,19 @@ module core
     // sys_mode this request/translation was pure never-committed speculation; suppress it
     // so the slow S_FETCH/S_DECODE/S_LOAD path (which honors CS.D) handles every sys load.
     // REVIEW Aug-1 H-01: the `u_d.simple && !sys_mode` above is now carried by the
-    // canonical fp_sys_bail (which folds in `sys_mode && u_d.is_load`), so request
+    // canonical fp_sys_bail (which folds in `sys_mode && u_d.is_mem`), so request
     // issue and issue eligibility can no longer drift apart. Bit-identical today --
     // the point is that it is now structural rather than a hand-copy.
     // !fp_issue_block: do not start a speculative translation/page-walk on a
     // clock whose instruction is being abandoned (cf. task #25 cascade).
     pipe_load_req  = (state==S_PIPE) && !fp_issue_block && pipe_bytes_ok && !fp_sys_bail &&
-                     u_d.is_load && !pipe_agi && (mispred_bubbles==3'd0);
+                     u_d.is_mem && !u_d.is_store && !pipe_agi && (mispred_bubbles==3'd0);
+    pipe_store_req = (state==S_PIPE) && !fp_issue_block && pipe_bytes_ok && !fp_sys_bail &&
+                     u_d.is_store && !pipe_agi && (mispred_bubbles==3'd0);
     pipe_load_base = u_d.base;
-    pipe_load_addr = gpr_o[u_d.base] + u_d.mem_disp
+    pipe_load_addr = (u_d.mem_base_en ? gpr_o[u_d.base] : 32'd0) + u_d.mem_disp
                    + (u_d.mem_index_en ? (gpr_o[u_d.mem_index] << u_d.mem_scale) : 32'd0);
+    pipe_store_data = gpr_o[u_d.src];
 
     // U datapath extracted to core/u_pipe.sv (R3, behaviour-preserving):
     // u_alu/u_flags/u_sh/u_shm1/u_shcf are driven by the u_pipe instance below
@@ -4338,11 +4343,11 @@ module core
   // -- was the only variant that reached POST, and why decode16 (24/24) and upipe16
   // (530/530) both passed: neither unit test drives this mirror.
   //
-  // H-01 is folded in here too. decode.sv can mark a checked 32-bit DS MOV load
-  // `simple`, and in protected flat 32-bit sys mode sys_fp_ok holds, so such a load
+  // H-01 is folded in here too. decode.sv can mark a checked 32-bit DS data read
+  // `simple`, and in protected flat 32-bit sys mode sys_fp_ok holds, so such a read
   // could reach the issue arm -- but the D-side request is separately !sys_mode-gated
   // (pipe_load_req below), so it would retire with NO bus request and commit whatever
-  // was left on mem_rdata.  The narrowly checked system fast-load profile below
+  // was left on mem_rdata.  The narrowly checked system fast-read profile below
   // changes that only for full-limit DS effective-address forms, which retain
   // cur_lin, D-TLB, permission, page-walk and fragment-engine handling.
   // ---- canonical fast-path INTERRUPT DIVERT --------------------------------
@@ -4427,11 +4432,16 @@ module core
 `ifdef VEN_SYS_FASTPATH
   assign fp_sys_bail = !u_d.simple
                     || (sys_mode && !sys_fp_ok)
+                    // The write side deliberately remains on the mature system
+                    // FSM. The fast-store subset is a user-mode acceleration;
+                    // this prevents a new write producer entering a paged guest
+                    // before its full system fault/interrupt contract is tested.
+                    || (sys_mode && u_d.is_store)
                     // H-01: memory forms remain slow except the explicitly
                     // audited flat 32-bit DS effective-address profile above. Its
                     // bus request is translated/permission-checked exactly as
                     // S_LOAD; this is not a physical or unchecked bypass.
-                    || (sys_mode && u_d.is_load && !sys_fp_load_ok)
+                    || (sys_mode && u_d.is_mem && !sys_fp_load_ok)
                     || (sys_mode && fp_dbg_active); // TF / DR armed -> slow FSM
 `else
   assign fp_sys_bail = !u_d.simple || sys_mode;
@@ -4442,8 +4452,10 @@ module core
   // exactly reg_read(idx,3'd4,1'b0) == gpr_o[idx]. The u_pipe instance drives
   // u_alu/u_flags/u_sh/u_shm1/u_shcf consumed by the eval above + S_PIPE commit.
   logic [31:0] u_dst_val, u_src_val;
-  assign u_dst_val = reg_read(u_d.dst, 3'd4, 1'b0);
-  assign u_src_val = reg_read(u_d.src, 3'd4, 1'b0);
+  assign u_dst_val = (u_d.is_mem && !u_d.is_load && !u_d.is_store && u_d.mem_lhs)
+                   ? mem_rdata : reg_read(u_d.dst, 3'd4, 1'b0);
+  assign u_src_val = (u_d.is_mem && !u_d.is_load && !u_d.is_store && !u_d.mem_lhs)
+                   ? mem_rdata : reg_read(u_d.src, 3'd4, 1'b0);
   u_pipe u_upipe (
     .u_d       (u_d),
     .u_dst_val (u_dst_val),
@@ -7027,7 +7039,7 @@ module core
       // hardcoded I-TLB, which polluted the I-TLB with data and applied the wrong
       // permission set, defeating the split I/D model and mis-targeting the M2S.3
       // permission check). The fill (or neither) is I-side.
-      S_PIPE:        cur_is_d = pipe_load_req;
+      S_PIPE:        cur_is_d = pipe_load_req || pipe_store_req;
       default:       cur_is_d = 1'b1;
     endcase
   end
@@ -7166,8 +7178,11 @@ module core
     unique case (state)
       S_FETCH: cur_lin_nat = flin + {27'd0,fetch_word,2'b00};
       S_PF:    cur_lin_nat = {pf_fill_addr[31:5],5'd0} + {27'd0,pf_word,2'b00};
-      S_PIPE:  cur_lin_nat = pf_miss ? {pf_miss_fa[31:5],5'd0}
-                                 : (seg_base[SG_DS]+pipe_load_addr);
+      S_PIPE: begin
+        cur_lin_nat = pf_miss ? {pf_miss_fa[31:5],5'd0}
+                               : (seg_base[SG_DS]+pipe_load_addr);
+        cur_is_w_nat = pipe_store_req;
+      end
       // REVIEW_aug2 C-05: this must mirror core_bus_driver.svh's S_LOAD arm EXACTLY.
       // Two rows of the review's mismatch table were here:
       //   * stack loads used RAW ESP/EBP while the bus applies stk16() -- so with a
@@ -7648,8 +7663,8 @@ module core
       S_TSW_SEG: translatable = !tsw_eflags[17] && !tsw_seg_oob && !tsw_seg_null;
       default: translatable = 1'b0;
     endcase
-    // S_PIPE only reads memory when a load or an icache fill is requested.
-    if (state==S_PIPE && !(pipe_load_req || pf_miss)) translatable = 1'b0;
+    // S_PIPE accesses memory only for a checked data read/store or an I-cache fill.
+    if (state==S_PIPE && !(pipe_load_req || pipe_store_req || pf_miss)) translatable = 1'b0;
     // Export the final predicate to module scope for the FE_PIPE micro-TLB
     // re-registration gate (below). Identical value to the local `translatable`.
     fe_translatable = translatable;
@@ -7715,32 +7730,32 @@ module core
   // L1 D-cache TIMING model ports (the state/SM live in dcache_timing, below).
   // dc_acc_valid/dc_acc_addr funnel the SINGLE per-clock LRU access (at most one
   // by construction: the FSM is a unique-case on `state`, and only the S_PIPE
-  // U-load issue arm, S_LOAD, S_LOAD2, and S_STORE access the cache — never two in
+  // U-data issue arm, S_LOAD, S_LOAD2, and S_STORE access the cache — never two in
   // one clock). dc_lu_addr drives the combinational pre-access lookup (dc_lu_hit),
   // always at the same address as this clock's access so the spine's miss penalty
   // sees PRE-access state (the dc_hit-then-dc_access read-before-write). All these
   // mirror the original inline `dc_access(X)` call sites EXACTLY (same guards, same
-  // address, same cycle_mode gating; the U-pipe load is UNGATED). A page-walk
+  // address, same cycle_mode gating; the U-pipe data read is UNGATED). A page-walk
   // diversion (xlate_miss) skips the FSM body this clock, so it gates every site.
   // ===========================================================================
   always_comb begin
-    // U-pipe fast-path load commit (S_PIPE issue arm, is_load). UNGATED by
-    // cycle_mode — the SM runs in func and cycle mode alike, exactly as the
-    // original inline dc_access(pipe_load_addr). pipe_load_req already folds in
-    // (state==S_PIPE && pipe_bytes_ok && u_d.simple && u_d.is_load && !pipe_agi &&
+    // U-pipe fast-path data access (S_PIPE issue arm). Reads run in both modes;
+    // stores mirror the legacy S_STORE timing update and only touch this model in
+    // cycle mode. pipe_load_req/pipe_store_req already fold in
+    // (state==S_PIPE && pipe_bytes_ok && u_d.simple && !pipe_agi &&
     // mispred_bubbles==0); reaching the issue+commit branch additionally requires
     // stall_cnt==0, pending_mem_pen==0, not-FP, and !sys_mode.
     // REVIEW Aug-1 M-01: the trailing `!sys_mode` was the fifth hand-copy of the bail
     // condition. pipe_load_req already carries fp_sys_bail, so drop the duplicate.
-    logic u_load_acc;
-    u_load_acc = !xlate_miss && pipe_load_req && (stall_cnt==7'd0) &&
-                 (pending_mem_pen==7'd0) && !u_d.is_fp;
+    logic u_mem_acc;
+    u_mem_acc = !xlate_miss && (pipe_load_req || pipe_store_req) &&
+                (stall_cnt==7'd0) && (pending_mem_pen==7'd0) && !u_d.is_fp;
 
     dc_acc_valid = 1'b0;
     dc_acc_addr  = 32'd0;
     unique case (state)
       S_PIPE: begin
-        dc_acc_valid = u_load_acc;
+        dc_acc_valid = u_mem_acc && (!pipe_store_req || cycle_mode);
         dc_acc_addr  = pipe_load_addr;
       end
       // Slow-path data accesses: all gated on mem_ack && cycle_mode, mirroring the
@@ -9474,7 +9489,7 @@ module core
 `endif
         else if (pending_mem_pen != 7'd0)                      b = 4;
 `ifdef VEN_L1_AXI
-        else if (real_bus && pipe_load_req && !mem_ack)        b = 5;
+        else if (real_bus && (pipe_load_req || pipe_store_req) && !mem_ack) b = 5;
 `endif
 `ifdef VEN_FP_PIPE
         else if (fp_pipe_rd_haz)                               b = 6;
@@ -9493,7 +9508,8 @@ module core
           if (!u_d.simple) pp_sys_bail[0] <= pp_sys_bail[0] + 64'd1;
 `ifdef VEN_SYS_FASTPATH
           else if (sys_mode && !sys_fp_ok) pp_sys_bail[1] <= pp_sys_bail[1] + 64'd1;
-          else if (sys_mode && u_d.is_load && !sys_fp_load_ok) pp_sys_bail[2] <= pp_sys_bail[2] + 64'd1;
+          else if (sys_mode && u_d.is_store) pp_sys_bail[2] <= pp_sys_bail[2] + 64'd1;
+          else if (sys_mode && u_d.is_mem && !sys_fp_load_ok) pp_sys_bail[2] <= pp_sys_bail[2] + 64'd1;
           else if (sys_mode && fp_dbg_active) pp_sys_bail[3] <= pp_sys_bail[3] + 64'd1;
 `else
           else if (sys_mode) pp_sys_bail[1] <= pp_sys_bail[1] + 64'd1;

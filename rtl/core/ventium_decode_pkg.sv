@@ -142,6 +142,20 @@ package ventium_decode_pkg;
     logic        wreg;
     logic        is_lea;
     logic        is_load;
+    // A fast-path data-memory operation. is_load is the MOV r32,[mem] subset
+    // that writes mem_rdata directly to a GPR; is_store is the MOV
+    // [mem],r32 subset. is_mem also covers read-only ALU operands (currently
+    // CMP) which reuse the checked read request but feed the U ALU.
+    logic        is_mem;
+    logic        is_store;
+    // Direct ModR/M disp32 addressing has no GPR base.  Keeping that fact as a
+    // decoded bit is essential: using an arbitrary architectural register as a
+    // stand-in would turn a literal address into a data-dependent address.
+    logic        mem_base_en;
+    // For a memory ALU operand, selects memory as the left (r/m) operand rather
+    // than the right (r/m) operand. Meaningful only for a non-store, non-load
+    // memory ALU operand.
+    logic        mem_lhs;
     logic [2:0]  base;
     // The audited fast-load subset uses only 32-bit DS-default effective
     // addresses.  mem_index_en distinguishes a SIB index field of ESP, which

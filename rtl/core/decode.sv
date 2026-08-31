@@ -68,7 +68,10 @@ module decode
           d.pairs_first=1'b1; d.pairs_second=1'b1;
         end
         // ---- ALU r/m32, r32 (00/08/.. /r reg form) : add/or/adc/sbb/and/sub/xor
-        8'b00??_?001: begin
+        // CMP (39 /r) is intentionally excluded: its memory forms have a
+        // dedicated checked-read arm below.  Keeping case items disjoint is
+        // essential here -- a later arm cannot override a matched casez item.
+        8'h01, 8'h09, 8'h11, 8'h19, 8'h21, 8'h29, 8'h31: begin
           if (mod==2'b11) begin
             d.simple=1'b1; d.len=4'd2; d.alu_op={2'b00,b0[5:3]}; d.wflags=1'b1;
             d.dst=rm; d.src=reg_f;
@@ -85,7 +88,8 @@ module decode
           end
         end
         // ---- ALU r32, r/m32 (02/0A/.. /r reg form) ---------------------------
-        8'b00??_?011: begin
+        // CMP (3B /r) is likewise handled below for its checked memory forms.
+        8'h03, 8'h0B, 8'h13, 8'h1B, 8'h23, 8'h2B, 8'h33: begin
           if (mod==2'b11) begin
             d.simple=1'b1; d.len=4'd2; d.alu_op={2'b00,b0[5:3]}; d.wflags=1'b1;
             d.dst=reg_f; d.src=rm; d.wreg=(b0[5:3]!=3'b111);
@@ -164,12 +168,71 @@ module decode
           d.reads=_onehot(b0[2:0]); d.writes=_onehot(b0[2:0]);
           d.pairs_first=1'b1; d.pairs_second=1'b1;
         end
-        // ---- MOV r/m32, r32 (89 /r reg form) ---------------------------------
+        // ---- MOV r/m32, r32 (89 /r): reg move or checked DS store ------------
         8'h89: begin
           if (mod==2'b11) begin
             d.simple=1'b1; d.len=4'd2; d.alu_op=ALU_MOV; d.dst=rm; d.src=reg_f;
             d.wreg=1'b1; d.reads=_onehot(reg_f); d.writes=_onehot(rm);
             d.pairs_first=1'b1; d.pairs_second=1'b1;
+          end else if (!def16 && mod==2'b00 && rm==3'b101) begin
+            // 32-bit ModR/M disp32 is a literal DS address, never EBP. The
+            // fast store is deliberately a plain full-dword MOV only; stack,
+            // prefixed, 16-bit, immediate and RMW writes stay on the slow FSM.
+            d.simple=1'b1; d.is_mem=1'b1; d.is_store=1'b1; d.len=4'd6;
+            d.src=reg_f; d.mem_disp={b5,b4,b3,b2}; d.reads=_onehot(reg_f);
+            d.pairs_first=1'b1; d.pairs_second=1'b1;
+          end else if (!def16 && rm!=3'b100 && rm!=3'b101) begin
+            // DS-default base{+disp8|+disp32}. EBP's mod01/mod10 forms use
+            // SS, so preserve the slow path for them. The base is an address
+            // input as well as an architectural read: both masks are explicit
+            // so the AGI and U/V dependency rules see the same register set.
+            unique case (mod)
+              2'b00: begin
+                d.simple=1'b1; d.is_mem=1'b1; d.is_store=1'b1; d.len=4'd2;
+                d.src=reg_f; d.base=rm; d.mem_base_en=1'b1;
+                d.reads=_onehot(reg_f)|_onehot(rm); d.addr_mask=_onehot(rm);
+                d.pairs_first=1'b1; d.pairs_second=1'b1;
+              end
+              2'b01: begin
+                d.simple=1'b1; d.is_mem=1'b1; d.is_store=1'b1; d.len=4'd3;
+                d.src=reg_f; d.base=rm; d.mem_base_en=1'b1;
+                d.mem_disp={{24{b2[7]}},b2};
+                d.reads=_onehot(reg_f)|_onehot(rm); d.addr_mask=_onehot(rm);
+                d.pairs_first=1'b1; d.pairs_second=1'b1;
+              end
+              2'b10: begin
+                d.simple=1'b1; d.is_mem=1'b1; d.is_store=1'b1; d.len=4'd6;
+                d.src=reg_f; d.base=rm; d.mem_base_en=1'b1;
+                d.mem_disp={b5,b4,b3,b2};
+                d.reads=_onehot(reg_f)|_onehot(rm); d.addr_mask=_onehot(rm);
+                d.pairs_first=1'b1; d.pairs_second=1'b1;
+              end
+              default: ;
+            endcase
+          end else if (!def16 && rm==3'b100 && b2[2:0]!=3'b100 && b2[2:0]!=3'b101) begin
+            // DS-default SIB with a concrete non-stack base. As with loads,
+            // retain only no-disp and disp8 forms: a SIB+disp32 is seven bytes
+            // and cannot be decoded safely from the six-byte fast window.
+            unique case (mod)
+              2'b00: begin
+                d.simple=1'b1; d.is_mem=1'b1; d.is_store=1'b1; d.len=4'd3;
+                d.src=reg_f; d.base=b2[2:0]; d.mem_base_en=1'b1;
+                d.mem_index=b2[5:3]; d.mem_scale=b2[7:6]; d.mem_index_en=(b2[5:3]!=3'b100);
+                d.reads=_onehot(reg_f)|_onehot(b2[2:0])|((b2[5:3]!=3'b100)?_onehot(b2[5:3]):8'd0);
+                d.addr_mask=_onehot(b2[2:0])|((b2[5:3]!=3'b100)?_onehot(b2[5:3]):8'd0);
+                d.pairs_first=1'b1; d.pairs_second=1'b1;
+              end
+              2'b01: begin
+                d.simple=1'b1; d.is_mem=1'b1; d.is_store=1'b1; d.len=4'd4;
+                d.src=reg_f; d.base=b2[2:0]; d.mem_base_en=1'b1;
+                d.mem_index=b2[5:3]; d.mem_scale=b2[7:6]; d.mem_index_en=(b2[5:3]!=3'b100);
+                d.mem_disp={{24{b3[7]}},b3};
+                d.reads=_onehot(reg_f)|_onehot(b2[2:0])|((b2[5:3]!=3'b100)?_onehot(b2[5:3]):8'd0);
+                d.addr_mask=_onehot(b2[2:0])|((b2[5:3]!=3'b100)?_onehot(b2[5:3]):8'd0);
+                d.pairs_first=1'b1; d.pairs_second=1'b1;
+              end
+              default: ;
+            endcase
           end
         end
         // ---- MOV r32, r/m32 (8B /r): reg form = reg move; checked DS load
@@ -181,18 +244,21 @@ module decode
           end else if (!def16 && rm!=3'b100 && rm!=3'b101) begin
             // MOV r32,[base{+disp8|+disp32}], 32-bit DS-default forms only.
             // rm=ESP would name a SIB byte, and EBP's mod01/mod10 forms default
-            // to SS; both remain on the slow FSM.  mod00/rm=101 is absolute
-            // disp32, also excluded.  The retained six bases are unambiguously
-            // DS, so the checked system fast-load guard has one segment contract.
+            // to SS; both remain on the slow FSM.  mod00/rm=101 (the literal
+            // DS disp32 form) is handled by the dedicated arm below.  The
+            // retained six bases are unambiguously
+            // DS, so the checked system fast-read guard has one segment contract.
             unique case (mod)
               2'b00: begin
                 d.simple=1'b1; d.is_load=1'b1; d.len=4'd2; d.dst=reg_f; d.base=rm;
+                d.is_mem=1'b1; d.mem_base_en=1'b1;
                 d.wreg=1'b1; d.reads=_onehot(rm); d.writes=_onehot(reg_f);
                 d.addr_mask=_onehot(rm);
                 d.pairs_first=1'b1; d.pairs_second=1'b1;
               end
               2'b01: begin
                 d.simple=1'b1; d.is_load=1'b1; d.len=4'd3; d.dst=reg_f; d.base=rm;
+                d.is_mem=1'b1; d.mem_base_en=1'b1;
                 d.mem_disp={{24{b2[7]}},b2};
                 d.wreg=1'b1; d.reads=_onehot(rm); d.writes=_onehot(reg_f);
                 d.addr_mask=_onehot(rm);
@@ -200,6 +266,7 @@ module decode
               end
               2'b10: begin
                 d.simple=1'b1; d.is_load=1'b1; d.len=4'd6; d.dst=reg_f; d.base=rm;
+                d.is_mem=1'b1; d.mem_base_en=1'b1;
                 d.mem_disp={b5,b4,b3,b2};
                 d.wreg=1'b1; d.reads=_onehot(rm); d.writes=_onehot(reg_f);
                 d.addr_mask=_onehot(rm);
@@ -207,6 +274,15 @@ module decode
               end
               default: ;
             endcase
+          end else if (!def16 && mod==2'b00 && rm==3'b101) begin
+            // MOV r32,[disp32].  In 32-bit ModR/M addressing this is a literal
+            // DS offset -- NOT EBP.  It is common in Quake's global-state loops;
+            // record the no-base fact explicitly so the shared AGU cannot add a
+            // coincidental GPR value.  Prefixes/16-bit addressing stay slow.
+            d.simple=1'b1; d.is_load=1'b1; d.is_mem=1'b1; d.len=4'd6;
+            d.dst=reg_f; d.mem_disp={b5,b4,b3,b2}; d.wreg=1'b1;
+            d.writes=_onehot(reg_f);
+            d.pairs_first=1'b1; d.pairs_second=1'b1;
           end else if (!def16 && rm==3'b100 && b2[2:0]!=3'b100 && b2[2:0]!=3'b101) begin
             // MOV r32,[base+index*scale{+disp8}], 32-bit DS-default SIB
             // forms only. b2 is the SIB byte here. A concrete base is
@@ -220,6 +296,7 @@ module decode
             unique case (mod)
               2'b00: begin
                 d.simple=1'b1; d.is_load=1'b1; d.len=4'd3; d.dst=reg_f; d.base=b2[2:0];
+                d.is_mem=1'b1; d.mem_base_en=1'b1;
                 d.mem_index=b2[5:3]; d.mem_scale=b2[7:6]; d.mem_index_en=(b2[5:3]!=3'b100);
                 d.wreg=1'b1;
                 d.reads=_onehot(b2[2:0]) | ((b2[5:3]!=3'b100) ? _onehot(b2[5:3]) : 8'd0);
@@ -229,12 +306,83 @@ module decode
               end
               2'b01: begin
                 d.simple=1'b1; d.is_load=1'b1; d.len=4'd4; d.dst=reg_f; d.base=b2[2:0];
+                d.is_mem=1'b1; d.mem_base_en=1'b1;
                 d.mem_index=b2[5:3]; d.mem_scale=b2[7:6]; d.mem_index_en=(b2[5:3]!=3'b100);
                 d.mem_disp={{24{b3[7]}},b3};
                 d.wreg=1'b1;
                 d.reads=_onehot(b2[2:0]) | ((b2[5:3]!=3'b100) ? _onehot(b2[5:3]) : 8'd0);
                 d.writes=_onehot(reg_f);
                 d.addr_mask=_onehot(b2[2:0]) | ((b2[5:3]!=3'b100) ? _onehot(b2[5:3]) : 8'd0);
+                d.pairs_first=1'b1; d.pairs_second=1'b1;
+              end
+              default: ;
+            endcase
+          end
+        end
+        // ---- CMP r32,r/m32 and CMP r/m32,r32: checked DS memory operands ----
+        // These forms have no architectural writeback, so they can reuse the
+        // existing U-side read handshake without introducing a store buffer or a
+        // speculative write.  The U ALU receives mem_rdata on the appropriate
+        // side and commits only EFLAGS.  Keep SS-default, prefixes, 16-bit forms,
+        // and SIB no-base forms on the slow FSM.
+        8'h3B, 8'h39: begin
+          // The broad register-only ALU arms above deliberately exclude CMP so
+          // these memory forms cannot overlap a casez item. Preserve the exact
+          // original register behaviour here before considering memory.
+          if (mod==2'b11) begin
+            d.simple=1'b1; d.len=4'd2; d.alu_op=ALU_CMP; d.wflags=1'b1;
+            d.dst=(b0==8'h3B) ? reg_f : rm;
+            d.src=(b0==8'h3B) ? rm : reg_f;
+            d.reads=_onehot(reg_f)|_onehot(rm);
+            d.pairs_first=1'b1; d.pairs_second=1'b1;
+          end else if (!def16 && mod==2'b00 && rm==3'b101) begin
+            d.simple=1'b1; d.is_mem=1'b1; d.len=4'd6; d.alu_op=ALU_CMP; d.wflags=1'b1;
+            d.dst=reg_f; d.src=reg_f; d.mem_lhs=(b0==8'h39);
+            d.mem_disp={b5,b4,b3,b2}; d.reads=_onehot(reg_f);
+            d.pairs_first=1'b1; d.pairs_second=1'b1;
+          end else if (!def16 && rm!=3'b100 && rm!=3'b101) begin
+            unique case (mod)
+              2'b00: begin
+                d.simple=1'b1; d.is_mem=1'b1; d.mem_base_en=1'b1; d.len=4'd2;
+                d.alu_op=ALU_CMP; d.wflags=1'b1; d.dst=reg_f; d.src=reg_f;
+                d.mem_lhs=(b0==8'h39); d.base=rm;
+                d.reads=_onehot(reg_f)|_onehot(rm); d.addr_mask=_onehot(rm);
+                d.pairs_first=1'b1; d.pairs_second=1'b1;
+              end
+              2'b01: begin
+                d.simple=1'b1; d.is_mem=1'b1; d.mem_base_en=1'b1; d.len=4'd3;
+                d.alu_op=ALU_CMP; d.wflags=1'b1; d.dst=reg_f; d.src=reg_f;
+                d.mem_lhs=(b0==8'h39); d.base=rm; d.mem_disp={{24{b2[7]}},b2};
+                d.reads=_onehot(reg_f)|_onehot(rm); d.addr_mask=_onehot(rm);
+                d.pairs_first=1'b1; d.pairs_second=1'b1;
+              end
+              2'b10: begin
+                d.simple=1'b1; d.is_mem=1'b1; d.mem_base_en=1'b1; d.len=4'd6;
+                d.alu_op=ALU_CMP; d.wflags=1'b1; d.dst=reg_f; d.src=reg_f;
+                d.mem_lhs=(b0==8'h39); d.base=rm; d.mem_disp={b5,b4,b3,b2};
+                d.reads=_onehot(reg_f)|_onehot(rm); d.addr_mask=_onehot(rm);
+                d.pairs_first=1'b1; d.pairs_second=1'b1;
+              end
+              default: ;
+            endcase
+          end else if (!def16 && rm==3'b100 && b2[2:0]!=3'b100 && b2[2:0]!=3'b101) begin
+            unique case (mod)
+              2'b00: begin
+                d.simple=1'b1; d.is_mem=1'b1; d.mem_base_en=1'b1; d.len=4'd3;
+                d.alu_op=ALU_CMP; d.wflags=1'b1; d.dst=reg_f; d.src=reg_f;
+                d.mem_lhs=(b0==8'h39); d.base=b2[2:0];
+                d.mem_index=b2[5:3]; d.mem_scale=b2[7:6]; d.mem_index_en=(b2[5:3]!=3'b100);
+                d.reads=_onehot(reg_f)|_onehot(b2[2:0])|((b2[5:3]!=3'b100)?_onehot(b2[5:3]):8'd0);
+                d.addr_mask=_onehot(b2[2:0])|((b2[5:3]!=3'b100)?_onehot(b2[5:3]):8'd0);
+                d.pairs_first=1'b1; d.pairs_second=1'b1;
+              end
+              2'b01: begin
+                d.simple=1'b1; d.is_mem=1'b1; d.mem_base_en=1'b1; d.len=4'd4;
+                d.alu_op=ALU_CMP; d.wflags=1'b1; d.dst=reg_f; d.src=reg_f;
+                d.mem_lhs=(b0==8'h39); d.base=b2[2:0]; d.mem_disp={{24{b3[7]}},b3};
+                d.mem_index=b2[5:3]; d.mem_scale=b2[7:6]; d.mem_index_en=(b2[5:3]!=3'b100);
+                d.reads=_onehot(reg_f)|_onehot(b2[2:0])|((b2[5:3]!=3'b100)?_onehot(b2[5:3]):8'd0);
+                d.addr_mask=_onehot(b2[2:0])|((b2[5:3]!=3'b100)?_onehot(b2[5:3]):8'd0);
                 d.pairs_first=1'b1; d.pairs_second=1'b1;
               end
               default: ;

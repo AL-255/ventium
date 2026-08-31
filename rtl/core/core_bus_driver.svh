@@ -39,11 +39,11 @@
       S_USEQ, S_RMINT_PUSH:
         cur_seg_rel = 1'b1;   // segment-relative access, dseg governs
       S_PIPE: begin
-        // VEN_SYS_FASTLOAD_FLAT permits only audited DS MOV r32,[effective-address] under a
-        // checked full-limit DS. Classify it as a guest DS access so D-TLB U/S permission
-        // handling (acc_usr) cannot treat a CPL3 load as supervisor access.
+        // The checked U-side data forms use DS. Classify them as guest segment
+        // accesses so D-TLB U/S permission handling cannot treat a CPL3 access
+        // as supervisor access. System-mode stores remain slow (core.sv).
         // Instruction-fill S_PIPE requests leave this false.
-        cur_seg_rel = pipe_load_req;
+        cur_seg_rel = pipe_load_req || pipe_store_req;
         cur_seg_idx = 3'(SG_DS);
       end
       S_LCALL, S_RETF, S_RMIRET,
@@ -84,9 +84,13 @@
       S_FETCH: begin bd_req =!sfetch_fast; end
       S_PF:    begin bd_req =1'b1; end
       S_PIPE:  begin
-        // a checked DS effective-address load issued this clock reads combinationally.
-        // M2S.1: add the DS base (0 in user mode / flat PM).
+        // A checked DS effective-address read/store issued this clock. The fast
+        // store is full-dword MOV r/m32,r32 only; its source is sampled before
+        // the clock edge that retires it.
         if (pipe_load_req) begin bd_req =1'b1; end
+        else if (pipe_store_req) begin
+          bd_req=1'b1; bd_we=1'b1; bd_wstrb=4'b1111; bd_wdata=pipe_store_data;
+        end
         // I-cache miss detected this clock: fetch the fill line's WORD 0 NOW so the
         // detection clock is productive (finding [med] I-miss off-by-one). S_PF then
         // fetches words 1..7. bd_req for the load and the fill are mutually

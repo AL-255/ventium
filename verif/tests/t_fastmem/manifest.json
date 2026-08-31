@@ -1,0 +1,9 @@
+{
+  "name": "t_fastmem",
+  "src": "t_fastmem/t_fastmem.s",
+  "elf": "t_fastmem/t_fastmem.elf",
+  "image": "t_fastmem/t_fastmem.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 80
+}

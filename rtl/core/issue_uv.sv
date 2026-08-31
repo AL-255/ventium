@@ -45,9 +45,10 @@ module issue_uv
       if ((v.reads & u.writes) != 8'd0) return 1'b0;   // RAW, incl. ESP
       if ((v.writes & (u.writes & ~ESP_MASK)) != 8'd0)
         return 1'b0;                                    // WAW, except ESP-only
-      // a load in the V slot is allowed in P5 only as the leading member; keep
-      // V-candidate loads out of the pair to stay conservative+correct.
-      if (v.is_load) return 1'b0;
+      // The one checked data-read port belongs to U.  A V memory form would
+      // otherwise consume stale mem_rdata without issuing a request, so keep all
+      // V memory operands out of the pair (MOV loads and read-only ALU operands).
+      if (v.is_mem) return 1'b0;
       return 1'b1;
     end
   endfunction
