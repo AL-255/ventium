@@ -124,6 +124,22 @@ module ven_l1d #(
   logic          dc_val  [L1_SETS][2];
   logic          dc_lru  [L1_SETS];      // way most-recently-used
 
+  // One ordered write buffer for normal cacheable RAM writes.  The P5 L1 is
+  // write-through, but a store need not hold the integer pipe until the
+  // (comparatively long) AXI B response arrives: the matching cached line is
+  // updated at enqueue and the one saved write drains before this L1 may launch
+  // any later backing transaction.  This is deliberately NOT a speculative
+  // store-to-load overlay: a CPU read sees the updated array only on an L1 hit;
+  // a read miss waits for the queued write to reach backing.  Thus the old
+  // STLD failure mode (an indefinitely-live entry masking a PS update) cannot
+  // recur.  MMIO/non-cacheable writes, global flushes, and snoop edges stay
+  // synchronous, so external side-effect and invalidation ordering is
+  // unchanged.
+  logic        wb_valid;
+  logic [31:0] wb_addr, wb_wdata;
+  logic [3:0]  wb_wstrb;
+  logic        wb_accept;
+
   // REVIEW2 M-04: this module ADVERTISED L1_SETS/L1_LINE but hard-coded seven set-index
   // bits [11:5], a 20-bit tag [31:12] and offset bit 5, so overriding L1_SETS indexed
   // dc_tag/dc_val past their end AND split the address at the wrong bit -- silently
@@ -305,6 +321,11 @@ module ven_l1d #(
   // addressed word for one clock (c_ack below), allocating NOTHING, then back to IDLE.
   typedef enum logic [1:0] { L1_IDLE, L1_FILL, L1_DONE, L1_BYP } l1_state_e;
   l1_state_e   st;
+  // An enqueue is an architectural completion only when no older store remains.
+  // Keep diagnostic golden mode synchronous: it intentionally models every
+  // completed transaction as globally complete before dropping cache state.
+  assign wb_accept = c_req && c_we && cacheable && !golden &&
+                     (st==L1_IDLE) && !wb_valid && !flush_all && !snoop_inv_valid;
   logic [2:0]  fw;                       // fill word counter 0..7
   logic [IDXW-1:0] fset; logic fway; logic [TAGW-1:0] ftag;
   // REVIEW Aug-1 H-06/H-07: a line fill is an 8-beat TRANSACTION, but its tag/valid
@@ -452,13 +473,21 @@ module ven_l1d #(
       // H-19: during the extra beat, address the NEXT line's word 0.
       m_addr = byp_hi_beat ? ({fbase[31:5], 5'd0} + 32'd32)
                            : ({fbase[31:5], 5'd0} + {27'd0, fw, 2'b00});
-    end else if (st==L1_IDLE && c_req && c_we) begin
+    end else if (st==L1_IDLE && wb_valid) begin
+      // Drain the oldest posted cacheable RAM write before issuing a new
+      // backing operation.  A core read hit may still complete from the L1 in
+      // parallel; a read miss is held in L1_IDLE until this response arrives.
+      m_req=1'b1; m_we=1'b1; m_addr=wb_addr; m_wdata=wb_wdata; m_wstrb=wb_wstrb;
+    end else if (st==L1_IDLE && c_req && c_we && !wb_accept) begin
       // write-through: forward EVERY core write to the backing verbatim (the
       // write-allocate is disabled above). This now includes the within-line cacheable
       // write MISS (!hit && !xline && cacheable) — with no allocate, its store MUST be
       // forwarded here or it would never reach backing and c_ack would never fire (the
       // core would stall forever). HIT updates the cached copy (FF below); MISS caches
       // nothing; xline invalidates + forwards; non-cacheable forwards straight through.
+      // Cacheable stores normally take wb_accept above and are posted.  The
+      // residual arm is deliberately synchronous for MMIO/non-cacheable
+      // accesses, diagnostics, and ordering edges (flush/snoop).
       m_req=1'b1; m_we=1'b1; m_addr=c_addr; m_wdata=c_wdata; m_wstrb=c_wstrb;
     end
   end
@@ -575,7 +604,7 @@ module ven_l1d #(
                            : rd_window[{1'b0,c_addr[4:0],3'b000} +: 32];   // LIVE window, LIVE offset
     c_ack   = 1'b0;
     if (c_req) begin
-      if (c_we)            c_ack = (st==L1_IDLE) ? m_ack : 1'b0;  // write-through forwards EVERY write (allocate disabled) -> ack on backing
+      if (c_we)            c_ack = wb_accept || ((st==L1_IDLE && !wb_valid) ? m_ack : 1'b0);
       // REVIEW2 H-13: same gating on the combinational-ack variant.
       // REVIEW1_Aug2 H-07: the ARRAY ack term must not fire for a non-cacheable read of
       // a RESIDENT line -- that is precisely the "resident data returned after CD is
@@ -596,7 +625,7 @@ module ven_l1d #(
                            : rd_window_q[{1'b0,rd_addr_q[4:0],3'b000} +: 32];
     c_ack   = 1'b0;
     if (c_req) begin
-      if (c_we)            c_ack = (st==L1_IDLE) ? m_ack : 1'b0;  // write-through forwards EVERY write (allocate disabled) -> ack on backing
+      if (c_we)            c_ack = wb_accept || ((st==L1_IDLE && !wb_valid) ? m_ack : 1'b0);
       // REVIEW1_Aug2 H-07: same array-ack suppression as the combinational variant
       // above -- see the comment there for why this is on the ack term, not rd_hit.
       // REVIEW2 H-13: suppressing the CAPTURE during a snoop was not enough. If a
@@ -631,6 +660,7 @@ module ven_l1d #(
   always_ff @(posedge clk) begin
     if (!rst_n) begin
       st<=L1_IDLE; fw<=3'd0; rd_armed<=1'b0; rd_window_q<='0; rd_addr_q<=32'd0;
+      wb_valid<=1'b0; wb_addr<=32'd0; wb_wdata<=32'd0; wb_wstrb<=4'd0;
       bypass_q<=1'b0; bp_line<='0; fill_poison<=1'b0; byp_n2<=1'b0;
       byp_wstrb_q<=4'd0;
       bp_hi<=32'd0; byp_need_hi<=1'b0; byp_hi_beat<=1'b0;   // H-19
@@ -639,6 +669,18 @@ module ven_l1d #(
         dc_tag[s][0]<=20'd0; dc_tag[s][1]<=20'd0;
       end
     end else begin
+      // The saved write drains only in L1_IDLE (the comb driver gives it the
+      // sole backing-master slot there).  Enqueue and drain cannot coincide:
+      // wb_accept requires the pre-edge buffer to be empty, which makes the
+      // queue's FIFO ordering explicit rather than relying on assignment order.
+      if (wb_valid && st==L1_IDLE && m_ack)
+        wb_valid <= 1'b0;
+      if (wb_accept) begin
+        wb_valid <= 1'b1;
+        wb_addr  <= c_addr;
+        wb_wdata <= c_wdata;
+        wb_wstrb <= c_wstrb;
+      end
       rd_armed <= do_rd_cap && !flush_all;
       if (do_rd_cap && !flush_all) begin
         rd_window_q <= rd_window;
@@ -665,7 +707,7 @@ module ven_l1d #(
           // ventium_l1_axi ties l1d_cacheable to 1'b1, so `!cacheable` never held. The
           // FSM was unreachable in BOTH configurations, which is why the review calls
           // it untested.
-          if (c_req && !c_we && !cacheable) begin
+          if (c_req && !c_we && !cacheable && !wb_valid) begin
             // NON-CACHEABLE READ (KEN# negated): fetch the addressed bytes into the
             // private bp_line buffer (no array touch, no LRU), then serve in L1_BYP.
             fset <= set_c; fway <= ~dc_lru[set_c]; ftag <= tag_c; fbase <= c_addr;
@@ -685,7 +727,7 @@ module ven_l1d #(
             byp_need_hi <= 1'b0;
             byp_hi_beat <= 1'b0; bp_hi <= 32'd0;
             fill_poison <= flush_all || snoop_inv_valid;   // H-06/H-07
-          end else if (c_req && !c_we && !rd_hit) begin
+          end else if (c_req && !c_we && !rd_hit && !wb_valid) begin
             // read MISS → fill the MISSING line into its not-MRU victim way. On a
             // xline-line read where L is resident but L+1 is not, fill L+1; the core
             // holds the request so the retry then fills L (if needed) -> L+1 -> hits.

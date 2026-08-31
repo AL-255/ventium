@@ -20,6 +20,9 @@ module tb_l1d;
   // backing side
   logic        m_req, m_we; logic [31:0] m_addr, m_wdata; logic [3:0] m_wstrb;
   logic [31:0] m_rdata; logic m_ack;
+  // The normal backing is zero-latency.  This switch holds write responses for
+  // the ordered-write-buffer regression without changing read/fill behaviour.
+  logic        block_writes = 1'b0;
   logic        m_rd_narrow; logic [1:0] m_rd_size;
   // REVIEW2_aug2 H-11: count backing READ beats, so a non-cacheable access can be
   // asserted to cost ONE (or two, unaligned) instead of a full 8-beat line.
@@ -61,12 +64,12 @@ module tb_l1d;
   always_comb begin
     m_rdata = 32'd0; m_ack = 1'b0;
     if (m_req) begin
-      m_ack = 1'b1;
+      m_ack = !(m_we && block_writes);
       if (!m_we) m_rdata = rd32(m_addr);
     end
   end
   // backing writes land on the clock (same edge the L1 forwards them)
-  always_ff @(posedge clk) if (m_req && m_we)
+  always_ff @(posedge clk) if (m_req && m_we && m_ack)
     for (int b=0;b<4;b++) if (m_wstrb[b]) mem[m_addr+b] <= m_wdata[b*8 +: 8];
 
   int errors = 0;
@@ -193,6 +196,33 @@ module tb_l1d;
     do_write(32'h0000_1008, 32'hDEAD_BEEF);
     do_read (32'h0000_1008, d); chk("read-after-write", d, 32'hDEAD_BEEF);
     chk("backing got the write", rd32(32'h0000_1008), 32'hDEAD_BEEF);
+
+    // A cacheable RAM store must retire into the one-entry ordered buffer even
+    // while the backing response is withheld.  Its updated L1 line is visible
+    // to a following hit; the backing remains old until the buffer drains.
+    // This is deliberately not an overlay test: the read is a normal array hit.
+    $display("[3b] ordered write buffer: early store ack, hit visibility, delayed drain");
+    block_writes = 1'b1;
+    @(negedge clk);
+    c_req <= 1'b1; c_we <= 1'b1; c_addr <= 32'h0000_100c;
+    c_wdata <= 32'h1357_9bdf; c_wstrb <= 4'hf;
+    #1;
+    if (!c_ack) begin
+      $display("  FAIL cacheable store did not ack on buffer enqueue"); errors++;
+    end else $display("  ok   cacheable store acked on enqueue");
+    @(posedge clk); #1;
+    if (!dut.wb_valid || !m_req || !m_we) begin
+      $display("  FAIL queued write was not retained/driven while B response blocked"); errors++;
+    end else $display("  ok   queued write retained while response blocked");
+    @(negedge clk); c_req <= 1'b0; c_we <= 1'b0;
+    chk("backing stays old before drain", rd32(32'h0000_100c), 32'h100c ^ 32'hA5A5_0000);
+    do_read(32'h0000_100c, d); chk("array hit sees queued store", d, 32'h1357_9bdf);
+    block_writes = 1'b0;
+    @(posedge clk); #1;
+    chk("backing receives drained store", rd32(32'h0000_100c), 32'h1357_9bdf);
+    if (dut.wb_valid) begin
+      $display("  FAIL write buffer stayed valid after B response"); errors++;
+    end else $display("  ok   write buffer drained in order");
 
     $display("[4] 2-way set: a 3rd distinct line into the same set evicts LRU");
     // set index = addr[11:5]; pick three line bases sharing a set (stride 0x1000).
