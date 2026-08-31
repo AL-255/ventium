@@ -4,11 +4,13 @@
 # create_project.tcl still carries the old /16 metadata (c3f=6 MHz).  Vivado
 # 2025.2 rejects the resulting AXI/clock-interface mismatch during BD
 # validation.  Evaluate the authoritative flow script with that stale metadata
-# corrected and, by default, with the repaired conservative system fast path
-# enabled.  Set VEN_FPGA_FASTPATH=0 for a source-identical diagnostic A/B image
-# with that one define omitted.  The enabled profile is intentionally
-# VEN_SYS_FASTPATH only: VEN_SYS_FASTPATH_ALL remains an experimental
-# real-mode/segmentation expansion and is not part of either image.
+# corrected and, by default, with the repaired system fast path enabled for
+# literal-flat and equal-common-base 32-bit protected-mode clients.  Set
+# VEN_FPGA_FASTPATH=0 for a source-identical diagnostic A/B image with both
+# system-path defines omitted; set VEN_FPGA_RELOC_FASTPATH=0 to retain only the
+# base-zero subset.  VEN_SYS_FASTPATH_ALL remains an experimental
+# real-mode/heterogeneous-segmentation expansion and is not part of either
+# image.
 # The stock Linux platform leaves pl0_ref at exactly 100 MHz even though the
 # external project asks Vivado to model 96 MHz; the previous routed image used
 # 95.456 MHz and constrained the /32 core to 2.983 MHz while silicon ran at
@@ -92,21 +94,24 @@ if {[info exists ::env(VEN_FPGA_SKIP_PRESET)] && $::env(VEN_FPGA_SKIP_PRESET)} {
 # The core filelist contains both FPU implementations.  The shipped board
 # profile selects the compact shared hierarchy explicitly; non-shared test
 # configurations still elaborate the legacy owner as a control.
-set define_span {VEN_FP_PC_RELAX VEN_FP_SHARED VEN_SYS_FASTPATH VEN_FAST_RETRACE}
+set define_span {VEN_FP_PC_RELAX VEN_FP_SHARED VEN_SYS_FASTPATH VEN_SYS_FASTPATH_RELOC VEN_FAST_RETRACE}
 if {[info exists ::env(VEN_FPGA_FASTPATH)] && !$::env(VEN_FPGA_FASTPATH)} {
     set define_span {VEN_FP_PC_RELAX VEN_FP_SHARED VEN_FAST_RETRACE}
-    puts "Diagnostic build: VEN_SYS_FASTPATH disabled by VEN_FPGA_FASTPATH=0"
+    puts "Diagnostic build: VEN_SYS_FASTPATH and VEN_SYS_FASTPATH_RELOC disabled by VEN_FPGA_FASTPATH=0"
 }
 # CWSDPMI's 32-bit client maps CS/DS/SS/ES at one nonzero common base.  The
-# optional relocated profile remains much narrower than FASTPATH_ALL: only
+# default relocated profile remains much narrower than FASTPATH_ALL: only
 # non-real, D=1, common-base register/relative forms enter S_PIPE; memory
 # forms still take the checked slow FSM unless FASTLOAD is explicitly enabled.
-if {[info exists ::env(VEN_FPGA_RELOC_FASTPATH)] && $::env(VEN_FPGA_RELOC_FASTPATH)} {
-    if {[lsearch -exact $define_span VEN_SYS_FASTPATH] < 0} {
-        error "VEN_FPGA_RELOC_FASTPATH requires VEN_SYS_FASTPATH"
+# A base-zero-only control remains available without accidentally re-enabling
+# the system path after VEN_FPGA_FASTPATH=0 has removed it.
+if {[info exists ::env(VEN_FPGA_RELOC_FASTPATH)] && !$::env(VEN_FPGA_RELOC_FASTPATH)} {
+    if {[lsearch -exact $define_span VEN_SYS_FASTPATH] >= 0} {
+        set define_span {VEN_FP_PC_RELAX VEN_FP_SHARED VEN_SYS_FASTPATH VEN_FAST_RETRACE}
+        puts "Diagnostic build: VEN_SYS_FASTPATH_RELOC disabled by VEN_FPGA_RELOC_FASTPATH=0"
+    } else {
+        puts "Diagnostic build: VEN_SYS_FASTPATH_RELOC already absent because VEN_FPGA_FASTPATH=0"
     }
-    lappend define_span VEN_SYS_FASTPATH_RELOC
-    puts "Experimental build: VEN_SYS_FASTPATH_RELOC enabled"
 }
 # Experimental but system-differentially validated extension of the conservative
 # fast path: only flat 32-bit MOV r32,[r32] keeps its existing D-TLB/page-walk

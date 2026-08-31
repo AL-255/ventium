@@ -212,7 +212,8 @@ l1axi_kv:
 KV_FULL_DEFS := +define+VEN_L1_AXI +define+VEN_KV260_SOC +define+VEN_FE_PIPE \
   +define+VEN_UOPCACHE +define+VEN_BTB_PIPE +define+VEN_IC_BRAM \
   +define+VEN_FP_PIPE +define+VEN_FP_PIPE2 +define+VEN_SRT_ITER +define+VEN_IDIV_ITER \
-  +define+VEN_BCD_ITER +define+VEN_FP_PC_RELAX +define+VEN_FPREM +define+VEN_FP_SHARED
+  +define+VEN_BCD_ITER +define+VEN_FP_PC_RELAX +define+VEN_FPREM +define+VEN_FP_SHARED \
+  +define+VEN_SYS_FASTPATH +define+VEN_SYS_FASTPATH_RELOC +define+VEN_FAST_RETRACE
 .PHONY: l1axi_kv_full
 l1axi_kv_full:
 	$(VERILATOR) $(VL_FLAGS) $(KV_FULL_DEFS) \
