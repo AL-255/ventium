@@ -30,11 +30,15 @@ all:
 # filelists (repo-root relative) + the ven main/DPI + the shared PS, keeping
 # DPI (retire trace) and adding VEN_KV260_SOC for the shim's observability
 # and interrupt pins.
+# The full-PC default follows fpga/scripts/impl_kv260_soc.tcl's production
+# cache/front-end geometry: full P5 L1s with BRAM-backed I-cache reads and the
+# uop cache.  VEN_IC_NARROWB is a historical congestion experiment; it is not
+# the routed configuration and must not be the cosim default.
 VEN_DEFS := +define+VEN_CORE +define+VEN_L1_AXI +define+VEN_L1_HONOR_CD \
   +define+VEN_KV260_SOC +define+VEN_TRANSCENDENTAL +define+VEN_SRT_ITER \
   +define+VEN_IDIV_ITER +define+VEN_BCD_ITER +define+VEN_FP_PIPE \
-  +define+VEN_FP_SHARED \
-  +define+VEN_FPREM +define+VEN_BTB_PIPE +define+VEN_IC_NARROWB \
+  +define+VEN_FP_PIPE2 +define+VEN_FP_SHARED \
+  +define+VEN_FPREM +define+VEN_BTB_PIPE +define+VEN_IC_BRAM +define+VEN_UOPCACHE \
   +define+VEN_DBG_CORE +define+VEN_FAST_RETRACE +define+VEN_KBD_AUTOACK \
   +define+VEN_KBC_FAST
 VEN_SRCS := ao486-sim/ven/sim_ven.cpp ao486-sim/ven/vtm_dpi.cpp \
