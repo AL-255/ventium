@@ -71,31 +71,61 @@ def read_u32(rsp, addr):
     return None if b is None or len(b) < 4 else int.from_bytes(b, "little")
 
 
-def scan_regions(rsp, lo, hi, coarse, page, verbose):
-    """Coarse-probe [lo,hi) for mapped memory; dump each mapped run (page-
-    aligned) as a region. read_mem -> None means unmapped (gdbstub 'E14')."""
-    regions, addr = [], lo
-    while addr < hi:
-        if rsp.read_mem(addr, 16) is None:
-            addr += coarse; continue
-        # found a mapped coarse block — walk back to its page start, then
-        # forward page-by-page to the end of the contiguous mapped run.
-        start = addr & ~(page - 1)
-        while start > lo and rsp.read_mem(start - page, 16) is not None:
+def scan_regions(rsp, lo, hi, coarse, page, verbose, anchors=()):
+    """Dump mapped ranges in [lo,hi) plus ranges containing live pointers.
+
+    A post-init image must include small, non-coarse-aligned mappings such as
+    the Linux stack.  The normal sweep therefore probes at page granularity.
+    `anchors` additionally preserves a complete mapping containing a live GPR
+    pointer (notably ESP/EBP), even when it lies outside the requested sweep.
+    read_mem -> None means unmapped (gdbstub 'E14').
+    """
+    regions, ranges = [], []
+
+    def covered(addr):
+        return any(start <= addr < end for start, end in ranges)
+
+    def dump_run(probe, min_addr, max_addr):
+        if probe < min_addr or probe >= max_addr or covered(probe):
+            return False
+        if rsp.read_mem(probe, 16) is None:
+            return False
+        start = probe & ~(page - 1)
+        while start >= min_addr + page and rsp.read_mem(start - page, 16) is not None:
             start -= page
         end = start
-        while end < hi and rsp.read_mem(end, 16) is not None:
+        while end < max_addr and rsp.read_mem(end, 16) is not None:
             end += page
+        if end <= start:
+            return False
         before = len(regions)
         gt._append_phys_region(rsp, regions, start, end - start)
         for i in range(before, len(regions)):     # _append emits {paddr,hex}; the
             r = regions[i]                         # loader scans for OBJECTS that
             regions[i] = {"vaddr": r["paddr"],     # START with "vaddr" -> rebuild
                           "hex": r["hex"]}         # vaddr-FIRST (dict order matters)
+        ranges.append((start, end))
         if verbose:
             sys.stderr.write("  region %08x..%08x (%d KiB)\n"
                              % (start, end, (end - start) // 1024))
-        addr = end + coarse
+        return True
+
+    # Pointer-anchored mappings can live below the normal executable/data sweep
+    # (Linux-user's randomized stack is the canonical example). Ignore the
+    # conventional unmapped low page and out-of-address-space scalar values.
+    for anchor in anchors:
+        if 0x1000 <= anchor < hi:
+            dump_run(anchor, 0x1000, hi)
+
+    addr = lo
+    while addr < hi:
+        containing = next((end for start, end in ranges if start <= addr < end), None)
+        if containing is not None:
+            addr = containing
+        elif dump_run(addr, lo, hi):
+            addr = ranges[-1][1]
+        else:
+            addr += coarse
     return regions
 
 
@@ -168,64 +198,68 @@ def trace_from_stop(rsp, layout, raw, out_path, max_insn, want_x87, verbose):
                         " (x87)" if emit_x87 else ""))
 
 
-def capture_x87_env(rsp, layout, raw):
-    """Return (restored-g-packet, 32-bit FNSTENV image) without guest changes.
+def capture_x87_state(rsp, layout, raw):
+    """Return (restored-g-packet, 32-bit FNSAVE image) without guest changes.
 
     QEMU's i386 g-packet exposes ST values but reports an abridged zero tag word,
-    even for empty stack slots.  A debugger-only FNSTENV/FLDENV probe obtains the
-    authoritative 28-byte environment.  It saves/restores the overwritten code
-    and stack bytes, restores EIP, and verifies that GPR/flags/x87 views match
-    the pre-probe state before returning.
+    even for empty stack slots.  Its FNSTENV tag word is likewise not reliable
+    for a live Linux-user process.  A debugger-only FNSAVE/FRSTOR probe obtains
+    the complete 108-byte P5 x87 image, including the real full tag word.  It
+    saves/restores the overwritten code and stack bytes, restores EIP, and
+    verifies that GPR/flags/x87 views match the pre-probe state before returning.
     """
     eip = layout.slice(raw, "eip")
     esp = layout.slice(raw, "esp")
     if eip is None or esp is None or esp < 0x100:
         raise gt.RSPError("cannot place reversible x87 environment probe")
-    scratch = (esp - 0x100) & ~0xf
+    scratch = (esp - 0x200) & ~0xf
     code_addr = scratch - 0x20
     old_code = rsp.read_mem(code_addr, 12)
-    old_scratch = rsp.read_mem(scratch, 28)
-    if old_code is None or len(old_code) != 12 or old_scratch is None or len(old_scratch) != 28:
-        raise gt.RSPError("x87 environment probe memory is unavailable")
+    old_scratch = rsp.read_mem(scratch, 108)
+    if old_code is None or len(old_code) != 12 or old_scratch is None or len(old_scratch) != 108:
+        raise gt.RSPError("x87 save probe memory is unavailable")
     # Verify register write support before touching any guest state. `P eip=eip`
     # is architecturally a no-op, but is required to return from the stack probe.
     if not rsp.write_register(layout, "eip", eip):
         raise gt.RSPError("gdbstub does not support the EIP restore needed for x87 capture")
 
-    fnstenv = b"\xd9\x35" + scratch.to_bytes(4, "little")  # FNSTENV m28byte
-    fldenv  = b"\xd9\x25" + scratch.to_bytes(4, "little")  # FLDENV  m28byte
-    env = None
+    # DD /6 is non-waiting FNSAVE m108byte; DD /4 is FRSTOR m108byte.  Both
+    # are P5 instructions.  FNSAVE clears the x87 after writing its image, so
+    # FRSTOR is mandatory even on a successful probe.
+    fnsave = b"\xdd\x35" + scratch.to_bytes(4, "little")
+    frstor = b"\xdd\x25" + scratch.to_bytes(4, "little")
+    saved = None
     fpu_restored = False
     try:
-        if not rsp.write_mem(code_addr, fnstenv):
-            raise gt.RSPError("could not inject FNSTENV probe")
+        if not rsp.write_mem(code_addr, fnsave):
+            raise gt.RSPError("could not inject FNSAVE probe")
         if not rsp.write_register(layout, "eip", code_addr):
-            raise gt.RSPError("could not enter FNSTENV probe")
+            raise gt.RSPError("could not enter FNSAVE probe")
         stop = gt.StopReply(rsp.step())
         while stop.kind == "output":
             stop = gt.StopReply(rsp.recv())
         if stop.kind != "stop":
-            raise gt.RSPError("FNSTENV probe did not stop normally")
-        env = rsp.read_mem(scratch, 28)
-        if env is None or len(env) != 28:
-            raise gt.RSPError("FNSTENV did not produce a complete 32-bit environment")
-        if not rsp.write_mem(code_addr, fldenv):
-            raise gt.RSPError("could not inject FLDENV restore")
+            raise gt.RSPError("FNSAVE probe did not stop normally")
+        saved = rsp.read_mem(scratch, 108)
+        if saved is None or len(saved) != 108:
+            raise gt.RSPError("FNSAVE did not produce a complete 32-bit state image")
+        if not rsp.write_mem(code_addr, frstor):
+            raise gt.RSPError("could not inject FRSTOR restore")
         if not rsp.write_register(layout, "eip", code_addr):
-            raise gt.RSPError("could not enter FLDENV restore")
+            raise gt.RSPError("could not enter FRSTOR restore")
         stop = gt.StopReply(rsp.step())
         while stop.kind == "output":
             stop = gt.StopReply(rsp.recv())
         if stop.kind != "stop":
-            raise gt.RSPError("FLDENV restore did not stop normally")
+            raise gt.RSPError("FRSTOR restore did not stop normally")
         fpu_restored = True
     finally:
-        # If the normal restore path failed after FNSTENV, make one best-effort
+        # If the normal restore path failed after FNSAVE, make one best-effort
         # recovery attempt before restoring ordinary memory/PC and surfacing the
         # error.  No snapshot is ever emitted after a failed restoration.
-        if env is not None and not fpu_restored:
+        if saved is not None and not fpu_restored:
             try:
-                rsp.write_mem(code_addr, fldenv)
+                rsp.write_mem(code_addr, frstor)
                 rsp.write_register(layout, "eip", code_addr)
                 rsp.step()
             except Exception:
@@ -244,8 +278,8 @@ def capture_x87_env(rsp, layout, raw):
     for name in (tracefmt.GPR_KEYS + ["eip", "eflags"] + tracefmt.X87_REGS +
                  ["fctrl", "fstat", "ftag", "fioff", "fooff", "fiseg", "foseg"]):
         if layout.has(name) and layout.slice(restored, name) != layout.slice(raw, name):
-            raise gt.RSPError("x87 environment probe failed to restore %s" % name)
-    return restored, env
+            raise gt.RSPError("x87 save probe failed to restore %s" % name)
+    return restored, saved
 
 
 def main():
@@ -297,7 +331,7 @@ def main():
 
         raw = rsp.read_g()
         layout.anchor_tail(len(raw))
-        raw, xenv = capture_x87_env(rsp, layout, raw)
+        raw, xsave = capture_x87_state(rsp, layout, raw)
         eip, eflags, gpr, seg, x87 = gt.regs_to_fields(layout, raw)
         if x87 is None:
             raise gt.RSPError("post-init snapshots require an x87-capable QEMU g-packet")
@@ -315,26 +349,31 @@ def main():
 
         sys.stderr.write("[snap] eip=%08x esp=%08x gs=%04x gs_base=%08x — scanning memory...\n"
                          % (eip, gpr["esp"], seg["gs"], seg_base["gs_base"]))
+        # Page granularity matters: a 1 MiB probe can skip a 4 KiB randomized
+        # stack mapping entirely.  Register anchors retain any live mapped page
+        # below --scan-lo as well (e.g. a low constrained user stack).
+        anchors = [eip] + list(gpr.values()) + list(seg_base.values())
         regions = scan_regions(rsp, int(a.scan_lo, 0), int(a.scan_hi, 0),
-                               0x100000, 0x1000, a.verbose)
+                               0x1000, 0x1000, a.verbose, anchors)
         nbytes = sum(len(bytes.fromhex(r["hex"])) for r in regions if "hex" in r)
 
         # ST(i) values in the g-packet are TOP-relative.  Keep all x87 fields,
         # including the full tag word and environment pointers, so the restore
         # consumer can reconstruct the physical register file without guessing.
         fpu = {k: tracefmt.h80(x87[k]) for k in tracefmt.X87_REGS}
-        # Intel 32-bit FSTENV format: control/status/tag at offsets 0/4/8;
+        # Intel 32-bit FSAVE format has the FSTENV-compatible control/status/tag
+        # environment at offsets 0/4/8, followed by its physical register image.
         # FIP/FCS/FOP at 12/16; FDP/FDS at 20/24.  Prefer this authoritative
         # image over QEMU's abridged GDB tag/pointer fields.
-        fpu["fctrl"] = tracefmt.hx(int.from_bytes(xenv[0:2], "little"), 16)
-        fpu["fstat"] = tracefmt.hx(int.from_bytes(xenv[4:6], "little"), 16)
-        fpu["ftag"]  = tracefmt.hx(int.from_bytes(xenv[8:10], "little"), 16)
-        fpu["fioff"] = tracefmt.h32(int.from_bytes(xenv[12:16], "little"))
-        fcs_fop = int.from_bytes(xenv[16:20], "little")
+        fpu["fctrl"] = tracefmt.hx(int.from_bytes(xsave[0:2], "little"), 16)
+        fpu["fstat"] = tracefmt.hx(int.from_bytes(xsave[4:6], "little"), 16)
+        fpu["ftag"]  = tracefmt.hx(int.from_bytes(xsave[8:10], "little"), 16)
+        fpu["fioff"] = tracefmt.h32(int.from_bytes(xsave[12:16], "little"))
+        fcs_fop = int.from_bytes(xsave[16:20], "little")
         fpu["fiseg"] = tracefmt.hx(fcs_fop & 0xffff, 16)
         fpu["fop"]   = tracefmt.hx((fcs_fop >> 16) & 0x07ff, 16)
-        fpu["fooff"] = tracefmt.h32(int.from_bytes(xenv[20:24], "little"))
-        fpu["foseg"] = tracefmt.hx(int.from_bytes(xenv[24:26], "little"), 16)
+        fpu["fooff"] = tracefmt.h32(int.from_bytes(xsave[20:24], "little"))
+        fpu["foseg"] = tracefmt.hx(int.from_bytes(xsave[24:26], "little"), 16)
 
         img = {
             "regs": {k: tracefmt.h32(gpr[k]) for k in tracefmt.GPR_KEYS},
