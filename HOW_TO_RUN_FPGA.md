@@ -334,11 +334,13 @@ from `SIGTERM` to `SIGKILL` if a stale process survives 45 seconds.
 The local wrapper evaluates the external authoritative Tcl after correcting
 its stale 6 MHz interface metadata to 3 MHz, models the running board's IOPLL
 `/15` 100 MHz PL clock, enables the verified `VEN_SYS_FASTPATH` plus its narrow
-equal-common-base `VEN_SYS_FASTPATH_RELOC` extension (not
-`VEN_SYS_FASTPATH_ALL`), caps Vivado at four threads, and selects
-`AreaOptimized_high`. The direct upstream script still labels the `/32` clock
-as `/16`/6 MHz and imports a PS clock configuration that does not match stock
-Linux; do not bypass the wrapper for this image. A BD preflight should report
+equal-common-base `VEN_SYS_FASTPATH_RELOC` and full-limit `MOV r32,[r32]`
+`VEN_SYS_FASTLOAD_FLAT` extensions (the latter differential-tested with a
+common non-zero base and non-identity paging; not `VEN_SYS_FASTPATH_ALL`),
+caps Vivado at four threads, and selects `AreaOptimized_high`. The direct
+upstream script still labels the `/32` clock as `/16`/6 MHz and imports a PS
+clock configuration that does not match stock Linux; do not bypass the wrapper
+for this image. A BD preflight should report
 approximately 99.999 MHz for `pl_clk0`; the final clock summary must report
 approximately 3.125 MHz for the divided core.
 
@@ -352,11 +354,13 @@ VEN_FPGA_FASTPATH=0 VEN_FPGA_JOBS=2 \
     -tclargs all "$VENTIUM/fpga_run_<tag>"
 ```
 
-`VEN_FPGA_FASTPATH` defaults to `1`; setting it to `0` removes both
-`VEN_SYS_FASTPATH` and `VEN_SYS_FASTPATH_RELOC`. `VEN_FPGA_RELOC_FASTPATH`
-also defaults to `1`; setting it to `0` retains the stricter base-zero subset
-for a one-knob diagnostic A/B. `VEN_FPGA_JOBS` accepts 1 through 4 and defaults to 4.
-Use 2 on the current build host: a four-worker run lost synthesis workers under
+`VEN_FPGA_FASTPATH` defaults to `1`; setting it to `0` removes the system
+fast-path defines. `VEN_FPGA_RELOC_FASTPATH` also defaults to `1`; setting it
+to `0` retains the stricter base-zero subset. `VEN_FPGA_FASTLOAD` defaults to
+`1`; setting it to `0` retains the system register/control path but sends all
+memory loads to the slow FSM for a source-identical diagnostic A/B.
+`VEN_FPGA_JOBS` accepts 1 through 4 and defaults to 4. Use 2 on the current
+build host: a four-worker run lost synthesis workers under
 memory pressure, while the successful two-worker run still reached roughly
 22.6 GiB physical memory. Always verify the generated synthesis Tcl's
 `verilog_define` line rather than trusting an output-directory label.

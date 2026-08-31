@@ -1155,9 +1155,9 @@ module core
   //                  (FS/GS require an override prefix, which is not `simple`).
   // Most flat clients satisfy this with literal base zero.  CWSDPMI also creates
   // a *relocated* flat client: CS/DS/SS/ES share one nonzero base.  The optional
-  // relocation profile below admits only the fast decoder's register-only subset
-  // (fast loads remain separately disabled), for which that common base cannot
-  // affect the architectural result.  It is deliberately not the broad
+  // relocation profile below admits the fast decoder's register-only subset;
+  // the sole load encoding is independently full-limit/DS-read checked below.
+  // It is deliberately not the broad
   // VEN_SYS_FASTPATH_ALL experiment: real mode, 16-bit code, mixed bases, FS/GS
   // overrides, and every memory form remain on the proven slow FSM.
   logic sys_fp_ok;
