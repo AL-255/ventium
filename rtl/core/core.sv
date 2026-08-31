@@ -9382,8 +9382,20 @@ module core
   // ===========================================================================
   localparam int PP_NSTATE = 64;
   localparam int PP_NBAIL  = 14;
+  localparam int PP_NSBAIL = 4;
   longint pp_state [PP_NSTATE];
+  // Per-state memory accounting.  `pp_mem_wait` counts clocks in which a
+  // request is visibly held without an acknowledgement; `pp_mem_ack` counts
+  // completed request/response handshakes.  Keeping both is important: a large
+  // S_FETCH/S_PF residency could otherwise be either real L1/AXI latency or
+  // purely core-local sequencing.
+  longint pp_mem_wait [PP_NSTATE];
+  longint pp_mem_ack  [PP_NSTATE];
   longint pp_bail  [PP_NBAIL];
+  // Bucket 9 (`fp_sys_bail`) is deliberately broad.  Split its actual hand-off
+  // cause so an implementation change targets a demonstrated eligibility
+  // limit, rather than blindly widening the system fast path.
+  longint pp_sys_bail [PP_NSBAIL];
   longint pp_cycles, pp_ret1, pp_ret2;
   longint pp_divert;   // clocks where an interrupt diverted the S_PIPE spine
   longint pp_shadow, pp_shret;   // clocks with irq_shadow set / retires under it
@@ -9411,7 +9423,12 @@ module core
   always_ff @(posedge clk) begin
     if (!rst_n) begin
       for (int i=0;i<PP_NSTATE;i++) pp_state[i] <= 64'd0;
+      for (int i=0;i<PP_NSTATE;i++) begin
+        pp_mem_wait[i] <= 64'd0;
+        pp_mem_ack[i]  <= 64'd0;
+      end
       for (int i=0;i<PP_NBAIL;i++)  pp_bail[i]  <= 64'd0;
+      for (int i=0;i<PP_NSBAIL;i++) pp_sys_bail[i] <= 64'd0;
       pp_cycles <= 64'd0; pp_ret1 <= 64'd0; pp_ret2 <= 64'd0; pp_divert <= 64'd0; pp_shadow <= 64'd0; pp_shret <= 64'd0;
     end else begin
       pp_cycles <= pp_cycles + 64'd1;
@@ -9419,6 +9436,10 @@ module core
       if (irq_shadow) pp_shadow <= pp_shadow + 64'd1;
       if (irq_shadow && retire_valid) pp_shret <= pp_shret + 64'd1;
       pp_state[int'(state) & (PP_NSTATE-1)] <= pp_state[int'(state) & (PP_NSTATE-1)] + 64'd1;
+      if (mem_req && !mem_ack)
+        pp_mem_wait[int'(state) & (PP_NSTATE-1)] <= pp_mem_wait[int'(state) & (PP_NSTATE-1)] + 64'd1;
+      if (mem_req && mem_ack)
+        pp_mem_ack[int'(state) & (PP_NSTATE-1)] <= pp_mem_ack[int'(state) & (PP_NSTATE-1)] + 64'd1;
       if (retire_valid)  pp_ret1 <= pp_ret1 + 64'd1;
       if (retire2_valid) pp_ret2 <= pp_ret2 + 64'd1;
 
@@ -9459,6 +9480,19 @@ module core
         else if (mispred_bubbles != 3'd0)                      b = 10;
         else if (pipe_agi)                                     b = 11;
         pp_bail[b] <= pp_bail[b] + 64'd1;
+        if (b == 9) begin
+          // Keep this priority in lockstep with fp_sys_bail.  An instruction
+          // may satisfy more than one conservative exclusion; classifying the
+          // first term makes the totals add up exactly to bucket 9.
+          if (!u_d.simple) pp_sys_bail[0] <= pp_sys_bail[0] + 64'd1;
+`ifdef VEN_SYS_FASTPATH
+          else if (sys_mode && !sys_fp_ok) pp_sys_bail[1] <= pp_sys_bail[1] + 64'd1;
+          else if (sys_mode && u_d.is_load && !sys_fp_load_ok) pp_sys_bail[2] <= pp_sys_bail[2] + 64'd1;
+          else if (sys_mode && fp_dbg_active) pp_sys_bail[3] <= pp_sys_bail[3] + 64'd1;
+`else
+          else if (sys_mode) pp_sys_bail[1] <= pp_sys_bail[1] + 64'd1;
+`endif
+        end
       end
     end
   end
@@ -9484,6 +9518,12 @@ module core
         $display("    state %2d %10d  %3d.%01d%%", i, pp_state[i],
                  (pp_state[i]*1000)/pp_cycles/10, ((pp_state[i]*1000)/pp_cycles)%10);
     $display("");
+    $display("  -- memory pressure by FSM state (only non-zero) --");
+    for (int i=0;i<PP_NSTATE;i++)
+      if ((pp_mem_wait[i] != 0) || (pp_mem_ack[i] != 0))
+        $display("    state %2d  req-wait clocks %10d  req/ack handshakes %10d",
+                 i, pp_mem_wait[i], pp_mem_ack[i]);
+    $display("");
     $display("  S_PIPE clocks %0d   NON-S_PIPE (slow FSM) clocks %0d  (%0d.%01d%%)",
              pp_state[int'(S_PIPE) & (PP_NSTATE-1)], slow_cyc,
              (slow_cyc*1000)/pp_cycles/10, ((slow_cyc*1000)/pp_cycles)%10);
@@ -9494,6 +9534,14 @@ module core
         $display("    [%2d] %10d  %3d.%01d%%  %s", i, pp_bail[i],
                  (pp_bail[i]*1000)/pp_cycles/10, ((pp_bail[i]*1000)/pp_cycles)%10,
                  pp_bail_name(i));
+    if (pp_bail[9] != 0) begin
+      $display("");
+      $display("  -- fp_sys_bail hand-off cause (sums to bucket 9) --");
+      $display("    !u_d.simple                     %10d", pp_sys_bail[0]);
+      $display("    system context not eligible      %10d", pp_sys_bail[1]);
+      $display("    system load not eligible         %10d", pp_sys_bail[2]);
+      $display("    system debug active              %10d", pp_sys_bail[3]);
+    end
     $display("==========================================================");
   end
 `endif
