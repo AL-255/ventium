@@ -285,6 +285,14 @@ module ventium_top
 `endif
 );
 
+  // A shippable Ventium image has the P5's 8 KiB, 2-way, 32-byte-line I$ and
+  // D$.  VEN_CACHE_HALF was an old timing experiment.  Do not silently accept
+  // it: an undefined module makes every simulator and synthesis elaborator
+  // reject stale build scripts before they can produce a mislabeled image.
+`ifdef VEN_CACHE_HALF
+  VEN_CACHE_HALF_IS_RETIRED__REMOVE_THIS_DEFINE u_ven_cache_half_rejected ();
+`endif
+
   // ---------------------------------------------------------------------------
   // The M1 integer core: fetch -> decode -> execute -> mem -> retire, one insn
   // at a time. It owns the bus and raises retire_valid with post-commit state.
