@@ -19,6 +19,10 @@ export ISA_VERIFY="$REFS/tools/isa_verify.py"
 export GEN_TRACE="$ROOT/verif/qemu-trace/gen_trace.py"
 export COMPARE="$ROOT/verif/diff/compare.py"
 export ELF2FLAT="$ROOT/verif/tests/elf2flat.py"
+# verify_worker hashes every oracle input even for a functional job.  The
+# functional golden does not load this plug-in, but it still needs a stable
+# value here so `set -u` cannot abort a wholly functional L1/AXI sweep.
+export P5TRACE="${P5TRACE:-$ROOT/build/p5trace.so}"
 export M5_METRICS="$ROOT/verif/m5_metrics.py"
 export PYTHON="${PYTHON:-python3}"
 export CC="${CC:-gcc}"
@@ -33,15 +37,23 @@ export TB_EXTRA_FLAGS="--l1-axi --quiesce ${L1AXI_QUIESCE:-200000}"
 L1AXI_TARGET="${L1AXI_TARGET:-l1axi}"
 TESTS_DIR="$ROOT/verif/tests"
 WORKER="$ROOT/verif/lib/verify_worker.sh"
+# Resource caps are opt-in: the normal gate retains its historical all-core
+# defaults, while a RAM-constrained host can run the same proof with
+# `VL_J=1 L1AXI_JOBS=1`. Pass VL_J explicitly to the nested make so a
+# Verilator `-j 0` default cannot silently override a caller's cap.
+VL_J="${VL_J:-0}"
+[[ "$VL_J" =~ ^[0-9]+$ ]] || { echo "L1AXI-VERIFY-FAIL: VL_J must be a non-negative integer"; exit 2; }
 NCPU="$(nproc 2>/dev/null || echo 4)"; [ "$NCPU" -gt 3 ] && NCPU=$(( NCPU - 2 ))
+NCPU="${L1AXI_JOBS:-$NCPU}"
+[[ "$NCPU" =~ ^[1-9][0-9]*$ ]] || { echo "L1AXI-VERIFY-FAIL: L1AXI_JOBS must be a positive integer"; exit 2; }
 
 [ -x "$QEMU" ]     || { echo "L1AXI-VERIFY-FAIL: qemu-i386 missing: $QEMU"; exit 1; }
 [ -f "$COMPARE" ]  || { echo "L1AXI-VERIFY-FAIL: compare.py missing"; exit 1; }
 mkdir -p "$WORKDIR"
 rm -f "$WORKDIR"/*.result 2>/dev/null || true
 
-echo "== build the +VEN_L1_AXI tb ($L1AXI_TARGET) =="
-make -C "$ROOT/verif/tb" "$L1AXI_TARGET" > "$WORKDIR/build.log" 2>&1 \
+echo "== build the +VEN_L1_AXI tb ($L1AXI_TARGET, VL_J=$VL_J) =="
+make -C "$ROOT/verif/tb" "VL_J=$VL_J" "$L1AXI_TARGET" > "$WORKDIR/build.log" 2>&1 \
     || { echo "L1AXI-VERIFY-FAIL (build)"; tail -15 "$WORKDIR/build.log"; exit 1; }
 
 # ---- build the FUNC job list (one per manifest) ----------------------------
