@@ -3894,6 +3894,14 @@ module core
   logic        pipe_agi;             // U has an AGI hazard (addr reg written last clk)
   logic        pipe_load_req;        // U is a checked DS/SS memory read (drives the bus)
   logic        pipe_store_req;       // U is an audited DS/SS MOV store (drives the bus)
+  // A fast U-side memory instruction may not retire until the seam has returned
+  // its architectural result.  This is normally zero in the single-cycle BFM,
+  // but the generic page-fragment engine deliberately hides the first fragment
+  // acknowledgement and exposes only the merged final beat.  Keeping this as a
+  // named issue predicate makes the spine and every commit-side mirror wait for
+  // the same completion event (rather than accidentally treating a fragment-1
+  // word, whose tail is physically adjacent garbage, as a completed load).
+  logic        pipe_mem_wait;
   logic [2:0]  pipe_load_base;
   logic [2:0]  pipe_mem_seg;         // DS or SS selected by the decoded base
   logic [31:0] pipe_load_addr;
@@ -4319,6 +4327,12 @@ module core
     // extracted to core/uv_common.sv (R3): driven by the u_uv_common instance.
   end
 
+  // `mem_ack` is the fragment-engine/FSM-visible acknowledgement, not the raw
+  // external bus acknowledgement.  For a non-crossing BFM access it is high on
+  // the request clock; for a crossing operation it remains low through fragment
+  // one and rises only with the correctly translated, merged fragment two.
+  assign pipe_mem_wait = (pipe_load_req || pipe_store_req) && !mem_ack;
+
   // ---- canonical fast-path issue predicate (REVIEW Aug-1 C-01/H-01/M-01) ----
   // ONE signal decides "this instruction bails to the slow functional FSM". Every
   // consumer of that decision -- the S_PIPE spine (core_fastpath.svh), the extracted
@@ -4511,7 +4525,7 @@ module core
     logic u_res_taken, v_res_taken;
     logic [31:0] v_res_pc;
     // !fp_issue_block: an abandoned clock resolves no branch, so it must not train the BTB.
-    issue_arm = (state==S_PIPE) && !fp_issue_block && !xlate_miss && (stall_cnt==7'd0) &&
+    issue_arm = (state==S_PIPE) && !fp_issue_block && !xlate_miss && !pipe_mem_wait && (stall_cnt==7'd0) &&
                 pipe_bytes_ok && (pending_mem_pen==7'd0) && !u_d.is_fp &&
                 // REVIEW Aug-1 M-01: canonical predicate (was `u_d.simple && !sys_mode`,
                 // which left eligible system-fast branches untrained in the BTB).
@@ -7754,7 +7768,7 @@ module core
     // REVIEW Aug-1 M-01: the trailing `!sys_mode` was the fifth hand-copy of the bail
     // condition. pipe_load_req already carries fp_sys_bail, so drop the duplicate.
     logic u_mem_acc;
-    u_mem_acc = !xlate_miss && (pipe_load_req || pipe_store_req) &&
+    u_mem_acc = !xlate_miss && !pipe_mem_wait && (pipe_load_req || pipe_store_req) &&
                 (stall_cnt==7'd0) && (pending_mem_pen==7'd0) && !u_d.is_fp;
 
     dc_acc_valid = 1'b0;
@@ -8065,7 +8079,7 @@ module core
       // common: reached the inner FP/issue else-chain (past stall/fill/defer).
       // !fp_issue_block: nothing issues on an abandoned clock, so no LRU touch and no
       // FP commit. Gating ic_in_pipe covers ic_int_issue AND ic_fp_commit at once.
-      ic_in_pipe = (state==S_PIPE) && !fp_issue_block && !xlate_miss && (stall_cnt==7'd0) &&
+      ic_in_pipe = (state==S_PIPE) && !fp_issue_block && !xlate_miss && !pipe_mem_wait && (stall_cnt==7'd0) &&
                    pipe_bytes_ok && (pending_mem_pen==7'd0);
       // FK_ARITH-under-bad-PC HALT arm (no touch). BUG#3: gate by VEN_FP_PC_RELAX to
       // MATCH the fast-path spine (core_fastpath.svh) — else the FMUL retires but its
@@ -9435,7 +9449,7 @@ module core
       2:  pp_bail_name = "ic_fetch !ready   (registered I-cache read latency)";
       3:  pp_bail_name = "uop miss/!cycle   (uop cache)";
       4:  pp_bail_name = "pending_mem_pen   (modeled P5 memory penalty)";
-      5:  pp_bail_name = "load !mem_ack     (D-side miss stall, REAL bus)";
+      5:  pp_bail_name = "pipe_mem_wait     (D-side or fragment result pending)";
       6:  pp_bail_name = "fp_pipe_rd_haz    (x87 result not ready)";
       7:  pp_bail_name = "fp arith !PC=ext  (x87 precision-control bail)";
       8:  pp_bail_name = "is_fp             (x87 issue/occupancy)";
@@ -9494,9 +9508,7 @@ module core
         else if (!uop_hit || !cycle_mode)                      b = 3;
 `endif
         else if (pending_mem_pen != 7'd0)                      b = 4;
-`ifdef VEN_L1_AXI
-        else if (real_bus && (pipe_load_req || pipe_store_req) && !mem_ack) b = 5;
-`endif
+        else if (pipe_mem_wait)                                  b = 5;
 `ifdef VEN_FP_PIPE
         else if (fp_pipe_rd_haz)                               b = 6;
 `endif

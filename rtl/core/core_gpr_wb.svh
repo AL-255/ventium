@@ -844,9 +844,7 @@
           else if (!uop_hit || !cycle_mode) begin end
 `endif
           else if (pending_mem_pen!=7'd0) begin end
-`ifdef VEN_L1_AXI
-          else if (real_bus && (pipe_load_req || pipe_store_req) && !mem_ack) begin end
-`endif
+          else if (pipe_mem_wait) begin end
 `ifdef VEN_FP_PIPE
           else if (fp_pipe_rd_haz) begin end
 `endif

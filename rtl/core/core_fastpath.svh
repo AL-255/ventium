@@ -206,14 +206,14 @@
             stall_cnt<=pending_mem_pen-7'd1;
             pending_mem_pen<=7'd0;
             agi_wr0<=9'h100; agi_wr1<=9'h100;
-`ifdef VEN_L1_AXI
-          end else if (real_bus && (pipe_load_req || pipe_store_req) && !mem_ack) begin
-            // bus_mode=2: hold the whole U-side data operation until the L1
-            // accepts/completes it. This prevents a store from retiring before
-            // its write handshake, just as a load must not consume stale data.
-            // Inert in modes 0/1 (real_bus=0), absent in the default build.
+          end else if (pipe_mem_wait) begin
+            // Hold every U-side memory operation until the ARCHITECTURAL seam
+            // result is visible.  On a normal BFM/L1 hit this is a no-op; on a
+            // delayed real bus it is the ordinary handshake stall; and on a
+            // page-crossing beat it covers fragment 1 as well, so the commit
+            // arm can only see the two-page merged value.  The fragment engine
+            // intentionally hides its intermediate acknowledgement in mem_ack.
             agi_wr0<=9'h100; agi_wr1<=9'h100;
-`endif
 `ifdef VEN_FP_PIPE
           end else if (fp_pipe_rd_haz) begin
             // +VEN_FP_PIPE: the deferred arith result is being committed to fpr
