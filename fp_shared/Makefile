@@ -1,5 +1,14 @@
 REPO ?= $(abspath $(CURDIR)/..)
 VERILATOR ?= verilator
+# The shared-FP top produces several very large generated C++ translation units.
+# A parallel `make test` used to launch one Verilator build per test target, and
+# each build in turn requested four compiler jobs.  That multiplicative fan-out
+# is enough to exhaust a normal developer workstation.  Keep both layers
+# serial by default; a deliberately provisioned runner may explicitly raise
+# VL_J for one build at a time.
+VL_J ?= 1
+CCACHE_DISABLE ?= 1
+export CCACHE_DISABLE
 BUILD := $(CURDIR)/build
 REF_FPPIPE_BUILD := $(BUILD)/reference-fppipe
 REF_BCD_BUILD := $(BUILD)/reference-bcd
@@ -13,16 +22,17 @@ PKGS := \
 	$(REPO)/rtl/core/ventium_x87_pkg.sv
 SRC := ven_fp_state.sv ven_fp_alu.sv ven_fp_misc.sv ven_fp_widemul.sv \
 	ven_fp_estdiv.sv ven_fp_trans.sv ven_fp_top.sv
-VLFLAGS := --binary -j 4 --timing -sv -Wall -Wno-fatal -Wno-UNUSED \
+VLFLAGS := --binary -j $(VL_J) --timing -sv -Wall -Wno-fatal -Wno-UNUSED \
 	-Wno-PROCASSINIT -I$(REPO)/rtl/fpu
 
 .PHONY: all lint lint-old-ooc test test-state test-alu test-widemul test-estdiv test-srt-sqrt \
 	test-trans test-top test-arch reference-bcd reference-fbld \
 	reference-srt reference-fppipe synth synth-ooc synth-ooc-old synth-ooc-shared
 
-# An A/B must never run both memory-heavy OOC variants concurrently, even if a
-# caller adds -j.  This does not coordinate with or preempt any board flow.
-.NOTPARALLEL: synth-ooc synth-ooc-old synth-ooc-shared
+# Do not let a caller's `make -j` multiply memory-heavy Verilator jobs across
+# independent tests.  This applies to every target in this makefile, including
+# the OOC A/B, and does not coordinate with or preempt any board flow.
+.NOTPARALLEL:
 
 all: test
 
@@ -148,7 +158,7 @@ $(REF_FPPIPE_BUILD)/Vtb_fppipe: \
 		$(REPO)/verif/fppipe/tb_fppipe.sv \
 		$(REPO)/rtl/fpu/fpu_x87_pkg.sv
 	mkdir -p $(REF_FPPIPE_BUILD)
-	CCACHE_DISABLE=1 $(VERILATOR) --binary --quiet -Wall -Wno-fatal \
+	$(VERILATOR) --binary -j $(VL_J) --quiet -Wall -Wno-fatal \
 		-Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-UNUSED \
 		-Wno-DECLFILENAME -Wno-IMPLICITSTATIC +define+FPPIPE_N=1000000 \
 		-Mdir $(REF_FPPIPE_BUILD) --top-module tb_fppipe \
@@ -168,7 +178,7 @@ reference-fppipe: $(REF_FPPIPE_BUILD)/Vtb_fppipe
 $(REF_BCD_BUILD)/Vtb_bcd: $(REPO)/verif/bcd/tb_bcd.sv \
 		$(REPO)/rtl/fpu/ven_bcd.sv
 	mkdir -p $(REF_BCD_BUILD)
-	CCACHE_DISABLE=1 $(VERILATOR) --binary --timing --quiet -Wall -Wno-fatal \
+	$(VERILATOR) --binary -j $(VL_J) --timing --quiet -Wall -Wno-fatal \
 		-Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-UNUSED \
 		-Wno-DECLFILENAME -Wno-IMPLICITSTATIC +define+BCD_N=40000 \
 		-Mdir $(REF_BCD_BUILD) --top-module tb_bcd \
@@ -183,7 +193,7 @@ reference-bcd: $(REF_BCD_BUILD)/Vtb_bcd
 $(REF_FBLD_BUILD)/Vtb_bcd_to_fp: $(REPO)/verif/fbld/tb_bcd_to_fp.sv \
 		$(REPO)/rtl/fpu/ven_bcd_to_fp.sv
 	mkdir -p $(REF_FBLD_BUILD)
-	CCACHE_DISABLE=1 $(VERILATOR) --binary --timing --quiet -Wall -Wno-fatal \
+	$(VERILATOR) --binary -j $(VL_J) --timing --quiet -Wall -Wno-fatal \
 		-Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-UNUSED \
 		-Wno-DECLFILENAME -Wno-IMPLICITSTATIC +define+FBLD_N=40000 \
 		-Mdir $(REF_FBLD_BUILD) --top-module tb_bcd_to_fp \
@@ -202,7 +212,7 @@ $(REF_SRT_BUILD)/vec_a.hex: $(REPO)/verif/srt/gen_vectors.py \
 $(REF_SRT_BUILD)/obj_iter/Vtb_srt_iter: $(REF_SRT_BUILD)/vec_a.hex \
 		$(REPO)/verif/srt/tb_srt_iter.sv $(SRT)
 	mkdir -p $(REF_SRT_BUILD)/obj_iter
-	CCACHE_DISABLE=1 $(VERILATOR) --binary --timing --quiet -Wall -Wno-fatal \
+	$(VERILATOR) --binary -j $(VL_J) --timing --quiet -Wall -Wno-fatal \
 		-Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-UNUSED -Wno-DECLFILENAME \
 		+define+SRT_N=609 -Mdir $(REF_SRT_BUILD)/obj_iter \
 		--top-module tb_srt_iter $(REPO)/rtl/fpu/fpu_x87_pkg.sv \
