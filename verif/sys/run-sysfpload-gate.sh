@@ -21,7 +21,7 @@ export OUTDIR
 OBJDIR="${OBJDIR:-obj_dir_sysfp_fastload_gate}"
 # Keep define-variant Verilator builds bounded unless the invoking harness
 # explicitly chooses a different host-concurrency budget.
-VL_J="${VL_J:-4}"
+VL_J="${VL_J:-1}"
 TB="${TB_BIN:-$REPO/verif/tb/$OBJDIR/tb_ventium}"
 LOG="$OUTDIR/$TEST.fastload.profile.log"
 BUILD_LOG="$OUTDIR/$TEST.fastload.build.log"

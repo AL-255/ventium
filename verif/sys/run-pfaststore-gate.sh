@@ -16,10 +16,10 @@ TDIR="$REPO/verif/sys/tests/$TEST"
 OUTDIR="${OUTDIR:-$REPO/build/sys}"
 export OUTDIR
 OBJDIR="${OBJDIR:-obj_dir_sysfp_faststore_gate}"
-# Avoid an all-core C++ rebuild exhausting a verification host. Callers can
-# raise this deliberately; four is the conservative default used by CI/manual
-# bring-up for this large generated model.
-VL_J="${VL_J:-4}"
+# Avoid a concurrent C++ rebuild exhausting a verification host. Callers can
+# raise this deliberately on a provisioned CI machine; the developer-safe
+# default is one compiler job.
+VL_J="${VL_J:-1}"
 TB="${TB_BIN:-$REPO/verif/tb/$OBJDIR/tb_ventium}"
 LOG="$OUTDIR/$TEST.faststore.profile.log"
 BUILD_LOG="$OUTDIR/$TEST.faststore.build.log"

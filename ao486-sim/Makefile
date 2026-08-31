@@ -8,7 +8,10 @@ OBJDIR  := ao486-sim/obj_dir
 EXE     := ao486sim
 
 VERILATOR ?= verilator
-VERILATOR_BUILD_JOBS ?= 0
+# Full-PC generated C++ is memory-heavy.  Do not use Verilator's `-j 0` (all
+# host cores): it can start enough cc1plus processes to OOM the workstation.
+# A larger, bounded value is an explicit caller opt-in.
+VERILATOR_BUILD_JOBS ?= 1
 DBGFLAGS := $(if $(DBG),--trace +define+AO486_TRACE_EIP,$(if $(FAST),+define+AO486_TRACE_EIP --threads 1,--threads 1))
 # Real MiSTer PS software (drives the verilated mgmt bus via ps_shim.cpp).
 PS_INC  := -I$(REPO)/ao486-sim/ps

@@ -88,11 +88,15 @@ KV_PROXY_OBJDIR  ?= obj_dir_l1axi_kvproxy
 VL_OPT_FAST  ?= -O3
 VL_OPT_MARCH ?= -march=native
 VL_MAKEFLAGS := -MAKEFLAGS OPT_FAST=$(VL_OPT_FAST) -MAKEFLAGS OPT=$(VL_OPT_MARCH)
-# VL_J: C++ build parallelism (default 0 = all cores). Override (e.g. VL_J=6) to
-# cap peak g++ memory on RAM-tight boxes. VL_SPLIT: optional --output-split flags
-# to chunk Verilator's generated C++ so each g++ invocation uses far less memory
-# (set VL_SPLIT="--output-split 20000 --output-split-cfuncs 20000" for big builds).
-VL_J     ?= 0
+# VL_J: C++ build parallelism.  A full-core generated C++ translation unit can
+# consume several GiB, so the safe default is one compiler job.  In particular,
+# never use Verilator's `-j 0` here: it maps to every host core and has OOM-killed
+# ordinary development hosts.  A deliberately provisioned CI host may opt into a
+# bounded higher value explicitly (for example, `make VL_J=4 ...`).  VL_SPLIT:
+# optional --output-split flags to chunk Verilator's generated C++ so each g++
+# invocation uses far less memory (set VL_SPLIT="--output-split 20000
+# --output-split-cfuncs 20000" for big builds).
+VL_J     ?= 1
 VL_SPLIT ?=
 VL_FLAGS := --cc --exe --build -j $(VL_J) $(VL_SPLIT) \
             $(VL_MAKEFLAGS) \
