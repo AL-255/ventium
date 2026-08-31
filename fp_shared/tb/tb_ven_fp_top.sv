@@ -212,6 +212,15 @@ module tb_ven_fp_top;
     issue(FX_AR_ST0_STI, 3'd6, 3'd1, 1'b0, '0, 0, 1'b0, 30);
     expect_st0(FP_TWO, "6/3");
 
+    // The core supplies m64real operands in f_mem80.  Keep a directed shell
+    // check here: the arithmetic-unit test alone cannot catch a byte-width or
+    // command-operand selection regression on the shared-FPU boundary.
+    issue(FX_FNINIT, 0, 0, 0, '0, 0, 0, 0);
+    load80(FP_ONE);
+    issue(FX_AR_M64, 3'd0, 3'd0, 1'b0,
+          {16'd0,64'h3ff0000000000000}, 4'd8, 1'b0, 1);
+    expect_st0(FP_TWO, "FADD m64real 1+1");
+
     issue(FX_FNINIT, 0, 0, 0, '0, 0, 0, 0);
     load80(FP_TWO);
     load80(FP_FOUR);
