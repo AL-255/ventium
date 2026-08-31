@@ -76,6 +76,7 @@ R_DBG_ST_OTHER = 0x1D0
 R_DBG_RDDATA_HI = 0x30  # read-only alias; write at this offset is MGMT_WD
 R_DBG_RDADDR = 0xD0
 R_DBG_RDDATA = 0xE0
+R_DBG_STALL = 0xF0       # cycles since clear with no architectural retirement
 
 # Debug-bitstream snapshot page (absent/zero on the currently deployed image).
 # The capability marker prevents a legacy unused read from being reported as a
@@ -1372,6 +1373,7 @@ def perf_probe(args: argparse.Namespace) -> int:
         cyc0 = stable_u64(ctrl, R_DBG_CYC_LO, R_DBG_CYC_HI)
         ret0 = stable_u64(ctrl, R_DBG_RET_LO, R_DBG_RET_HI)
         io0 = u32(ctrl, R_DBG_IO_CYC)
+        stall0 = u32(ctrl, R_DBG_STALL)
         irq0 = u32(ctrl, R_DBG_IRQ_ACK)
         rd0 = u32(ctrl, R_DBG_RD_BEATS)
         ar0 = u32(ctrl, R_DBG_AR_HS)
@@ -1385,6 +1387,7 @@ def perf_probe(args: argparse.Namespace) -> int:
         cyc1 = stable_u64(ctrl, R_DBG_CYC_LO, R_DBG_CYC_HI)
         ret1 = stable_u64(ctrl, R_DBG_RET_LO, R_DBG_RET_HI)
         io1 = u32(ctrl, R_DBG_IO_CYC)
+        stall1 = u32(ctrl, R_DBG_STALL)
         irq1 = u32(ctrl, R_DBG_IRQ_ACK)
         rd1 = u32(ctrl, R_DBG_RD_BEATS)
         ar1 = u32(ctrl, R_DBG_AR_HS)
@@ -1396,6 +1399,7 @@ def perf_probe(args: argparse.Namespace) -> int:
         dcyc = (cyc1 - cyc0) & 0xFFFF_FFFF_FFFF_FFFF
         dret = (ret1 - ret0) & 0xFFFF_FFFF_FFFF_FFFF
         dio = (io1 - io0) & 0xFFFF_FFFF
+        dstall = (stall1 - stall0) & 0xFFFF_FFFF
         dirq = (irq1 - irq0) & 0xFFFF_FFFF
         drd = (rd1 - rd0) & 0xFFFF_FFFF
         dar = (ar1 - ar0) & 0xFFFF_FFFF
@@ -1404,11 +1408,14 @@ def perf_probe(args: argparse.Namespace) -> int:
         dslot_b = (slot_b1 - slot_b0) & 0xFFFF_FFFF
         dother = (other1 - other0) & 0xFFFF_FFFF
         ipc = dret / dcyc if dcyc else 0.0
+        cpi = dcyc / dret if dret else float("inf")
         mhz = dcyc / elapsed / 1_000_000.0 if elapsed else 0.0
         io_ratio = dio / dcyc if dcyc else 0.0
+        stall_ratio = dstall / dcyc if dcyc else 0.0
         print(
             f"elapsed={elapsed:.6f}s cycles={dcyc} retired={dret} "
-            f"clock={mhz:.6f}MHz ipc={ipc:.6f} "
+            f"clock={mhz:.6f}MHz ipc={ipc:.6f} cpi={cpi:.3f} "
+            f"no_retire={dstall} no_retire_ratio={stall_ratio:.6f} "
             f"io_cycles={dio} io_ratio={io_ratio:.6f} irq_ack={dirq}"
         )
         print(
