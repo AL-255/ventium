@@ -838,38 +838,16 @@ module core
   // path decodes combinationally out of the cache; a miss triggers a line fill
   // (8 word reads = imiss penalty) in S_PF, allocating the 2-way LRU victim.
   //
-  // +VEN_CACHE_HALF (FPGA area/congestion experiment, NOT a verification config):
-  // halve both L1s to 64 sets => 4 KB I$ + 4 KB D$. This changes the index/tag
-  // geometry (idx 6 / tag 21 instead of idx 7 / tag 20) and therefore the miss
-  // SEQUENCE, so it does NOT match the fixed-128-set cycle oracle (the M4/M5
-  // mb_* bands are only claimed for the default build). It STAYS functionally
-  // bit-exact (the cache is a hit/miss + data store; smaller => more fills, same
-  // bytes), validated by `VL_EXTRA_DEFINES=+define+VEN_CACHE_HALF make verify`.
   // The default build is byte/cycle-identical: with IC_IDXW=7, addr[5 +: 7] is
   // exactly addr[11:5] and addr[12 +: 20] is exactly addr[31:12].
-  // L1 I-cache geometry knobs (default 128 sets × 2 ways = 8 KB, the silicon /
-  // cycle-validated config). Override per-cache (VEN_IC_SETS / VEN_IC_WAYS) or
-  // for both L1s at once (VEN_L1_SETS / VEN_L1_WAYS); +VEN_CACHE_HALF = 64 sets.
-  // Non-default geometries stay FUNCTIONALLY correct but are not matched by the
-  // fixed-2-way/128-set p5trace.so cycle oracle (area/perf experiments).
-`ifdef VEN_IC_SETS
-  localparam int IC_SETS = `VEN_IC_SETS;
-`elsif VEN_L1_SETS
-  localparam int IC_SETS = `VEN_L1_SETS;
-`elsif VEN_CACHE_HALF
-  localparam int IC_SETS = 64;
-`else
+  // The integrated core is deliberately pinned to the 8 KiB P5 I$ geometry.
+  // Parameterized icache leaf-module tests remain useful, but compile-time cache
+  // resizing must not create a second hardware configuration with different
+  // performance and coherence behaviour.
   localparam int IC_SETS = 128;
-`endif
-`ifdef VEN_IC_WAYS
-  localparam int IC_WAYS = `VEN_IC_WAYS;
-`elsif VEN_L1_WAYS
-  localparam int IC_WAYS = `VEN_L1_WAYS;
-`else
   localparam int IC_WAYS = 2;
-`endif
-  localparam int IC_IDXW = $clog2(IC_SETS);     // set-index width: 7 @128 / 6 @64
-  localparam int IC_TAGW = 32 - 5 - IC_IDXW;    // tag width:      20 @128 / 21 @64
+  localparam int IC_IDXW = $clog2(IC_SETS);     // set-index width: 7
+  localparam int IC_TAGW = 32 - 5 - IC_IDXW;    // tag width:      20
   localparam int IC_LINE = 32;
   localparam int IC_WAYW = (IC_WAYS <= 1) ? 1 : $clog2(IC_WAYS);  // way-index width (1 @2-way)
   // The I-cache ARRAYS + per-word fill + fill-complete MRU + up-to-3 LRU touches
@@ -988,22 +966,8 @@ module core
   // comes from the BFM (mem_rdata); this only gates WHEN a load completes. A read
   // miss adds dmiss; a misaligned access adds +3 (AP-500). Matches p5_mem() +
   // l1_access() in verif/qemu-plugins/p5trace.c (read-allocate, 2-way LRU).
-`ifdef VEN_DC_SETS
-  localparam int DC_SETS = `VEN_DC_SETS;
-`elsif VEN_L1_SETS
-  localparam int DC_SETS = `VEN_L1_SETS;
-`elsif VEN_CACHE_HALF
-  localparam int DC_SETS = 64;   // +VEN_CACHE_HALF: 4 KB D$ (see IC_SETS note above)
-`else
   localparam int DC_SETS = 128;
-`endif
-`ifdef VEN_DC_WAYS
-  localparam int DC_WAYS = `VEN_DC_WAYS;
-`elsif VEN_L1_WAYS
-  localparam int DC_WAYS = `VEN_L1_WAYS;
-`else
   localparam int DC_WAYS = 2;
-`endif
   // The dc_tag/dc_val/dc_lru state + the dc_hit() lookup + the dc_access()
   // allocate/LRU SM + the synchronous reset now live in the dcache_timing module
   // (rtl/mem/dcache.sv), instantiated below. The spine keeps the penalty policy

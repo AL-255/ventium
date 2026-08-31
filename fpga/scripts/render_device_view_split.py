@@ -25,7 +25,7 @@ suptitle = sys.argv[3] if len(sys.argv) > 3 else "Ventium Full SoC on K26 @ 40MH
 # second title line: the verilog_define option set of the deployed build
 # (fpga/build/kv260_soc_impl_linux_40, WNS +0.104 ns @ 40 MHz)
 OPTIONS = ("+SRT_ITER +IDIV_ITER +BCD_ITER +FP_PIPE +FP_PIPE2 +BTB_PIPE "
-           "+IC_BRAM +UOPCACHE +CACHE_HALF +FE_PIPE +L1_AXI +KV260_SOC")
+           "+IC_BRAM +UOPCACHE +FE_PIPE +L1_AXI +KV260_SOC (full P5 L1s)")
 
 GRAY = "#d4d4d4"
 CORE_FOCUS = set("core_spine btb icache fpu uopcache sqrt_iter bcd srt_div "

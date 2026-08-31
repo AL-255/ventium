@@ -573,7 +573,10 @@ module ventium_top
 `endif
   logic [31:0] l1_c_rdata; logic l1_c_ack; logic l1_bus_err;
   assign bus_err = l1_bus_err;   // #34 expose the fatal AXI fault to the PS
-  ventium_l1_axi #(.ADDR_W(40), .REMAP_BASE(L1AXI_REMAP_BASE), .ADDR_MASK(L1AXI_ADDR_MASK)) u_l1axi (
+  // The integrated functional L1D is explicitly the P5 8 KiB / 2-way / 32-byte
+  // geometry.  Keep any alternate set counts confined to leaf-module tests.
+  ventium_l1_axi #(.ADDR_W(40), .REMAP_BASE(L1AXI_REMAP_BASE), .ADDR_MASK(L1AXI_ADDR_MASK),
+                   .L1_SETS(128)) u_l1axi (
       .core_clk(clk), .core_rst_n(rst_n), .axi_clk(clk), .axi_rst_n(rst_n),
       .flush_all (flush_all),
       .shutdown  (shutdown), .m_idle (m_idle),

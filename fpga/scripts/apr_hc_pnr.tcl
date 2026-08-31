@@ -61,8 +61,10 @@ set RTL  $ROOT/rtl
 set BASE $ROOT/fpga/build/strathc
 file mkdir $BASE
 
-# ---- the half-cache config = production "uopcache" DEFS + VEN_CACHE_HALF -------
-set DEFS {VTM_NO_DPI VEN_SRT_ITER VEN_IDIV_ITER VEN_BCD_ITER VEN_FP_PIPE VEN_BTB_PIPE VEN_IC_BRAM VEN_UOPCACHE VEN_CACHE_HALF}
+# ---- full P5 cache config = production "uopcache" define set ------------------
+# Historical script name retained so existing sweep invocations still work.  The
+# integrated core is now always the P5 8 KiB / 2-way / 32-byte-line cache geometry.
+set DEFS {VTM_NO_DPI VEN_SRT_ITER VEN_IDIV_ITER VEN_BCD_ITER VEN_FP_PIPE VEN_BTB_PIPE VEN_IC_BRAM VEN_UOPCACHE}
 # FP_PIPE2=1 adds the 2-stage FP-commit split (+VEN_FP_PIPE2): inserts a register at
 # the f_eval_s1/f_eval_s2 boundary so the ~80-level FADD-commit cone halves. Proven
 # cycle-safe (verif/fppipe/run-fp-pipe2-ab.sh: faddchain cycle-identical, fpindep

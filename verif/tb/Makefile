@@ -130,9 +130,10 @@ l1axi_kv:
 
 # ---- l1axi_kv_full: the EXACT deployed linux_40 define set ------------------
 # L1AXI + KV260 REMAP + ALL fetch/cache/FP features (FE_PIPE, UOPCACHE, BTB_PIPE,
-# IC_BRAM, CACHE_HALF, FP_PIPE/2, SRT/IDIV/BCD_ITER). Reproduces the on-board build.
+# IC_BRAM, full P5 L1 caches, FP_PIPE/2, SRT/IDIV/BCD_ITER). Reproduces the
+# on-board build while retaining the 8 KiB P5 L1 geometry.
 KV_FULL_DEFS := +define+VEN_L1_AXI +define+VEN_KV260_SOC +define+VEN_FE_PIPE \
-  +define+VEN_UOPCACHE +define+VEN_BTB_PIPE +define+VEN_IC_BRAM +define+VEN_CACHE_HALF \
+  +define+VEN_UOPCACHE +define+VEN_BTB_PIPE +define+VEN_IC_BRAM \
   +define+VEN_FP_PIPE +define+VEN_FP_PIPE2 +define+VEN_SRT_ITER +define+VEN_IDIV_ITER \
   +define+VEN_BCD_ITER
 .PHONY: l1axi_kv_full

@@ -10,8 +10,8 @@
 # fabric leaves diffuse fill->eip routing congestion that no P&R/floorplan clears, so the
 # routed Fmax tops out ~50 MHz (FE_PIPE). 50 MHz closes with positive margin; a larger
 # part (ZU15EG) would clear 60+.
-#   * CONFIG = uop-cache + half-cache + FP_PIPE2 (VEN_UOPCACHE + VEN_IC_BRAM +
-#     VEN_CACHE_HALF + VEN_FP_PIPE2), NOT narrowb: narrowb hits the single-cycle
+#   * CONFIG = uop-cache + full P5 caches + FP_PIPE2 (VEN_UOPCACHE + VEN_IC_BRAM +
+#     VEN_FP_PIPE2), NOT narrowb: narrowb hits the single-cycle
 #     byte-window MUXF congestion wall and does NOT route on the small xck26; the
 #     uop-cache deletes that decoder (routable), FP_PIPE2 splits the FADD-commit cone
 #     (cycle-safe, make verify-fppipe2), and the BCD ÷100 step is already in ven_bcd.
@@ -62,9 +62,9 @@ set_property file_type SystemVerilog [get_files *.sv]
 add_files -norecurse [glob $ROOT/rtl/core/*.svh]
 set_property file_type {Verilog Header} [get_files *.svh]
 set_property include_dirs [list $ROOT/rtl/core] [current_fileset]
-# uop-cache + half-cache + 2-stage FP commit (routable, 65.3 MHz OOC) + SoC seams.
+# uop-cache + full P5 L1 caches + 2-stage FP commit + SoC seams.
 set DEFS {SYNTHESIS VTM_NO_DPI VEN_SRT_ITER VEN_IDIV_ITER VEN_BCD_ITER \
-    VEN_FP_PIPE VEN_FP_PIPE2 VEN_IC_BRAM VEN_CACHE_HALF \
+    VEN_FP_PIPE VEN_FP_PIPE2 VEN_IC_BRAM \
     VEN_L1_AXI VEN_KV260_SOC}
 # Fetch-path feature defines are env-controllable (default ON, matching linux_40)
 # so a CALL/RET / fetch-redirect synth bug can be bisected by dropping one at a time:
