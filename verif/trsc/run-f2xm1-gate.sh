@@ -6,7 +6,7 @@
 # `qref --sweep` (193 inputs across every branch).
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-ROOT="$(pwd)"; BUILD="$ROOT/build/trsc"; VERILATOR="${VERILATOR:-verilator}"
+ROOT="$(pwd)"; BUILD="$ROOT/build/trsc"; VERILATOR="${VERILATOR:-verilator}"; VL_J="${VL_J:-1}"
 mkdir -p "$BUILD"
 
 echo "=== F2XM1 gate: build qref ==="
@@ -21,7 +21,7 @@ for RC in 0 1 2 3; do
   awk '{print $2}' "$BUILD/sweep_$RC.txt" > "$BUILD/f2xm1_out.hex"
   N=$(wc -l < "$BUILD/sweep_$RC.txt")
   echo "=== F2XM1 gate: rc=$RC ($N vectors) — build + run ==="
-  "$VERILATOR" --binary --timing --quiet -Wall -Wno-fatal \
+  "$VERILATOR" -j "$VL_J" --binary --timing --quiet -Wall -Wno-fatal \
     -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-UNUSED -Wno-DECLFILENAME -Wno-IMPLICITSTATIC \
     +define+F2_NV="$N" +define+F2_RC="$RC" -Mdir "$BUILD/obj_$RC" --top-module tb_f2xm1 \
     -I"$ROOT/rtl/fpu" \

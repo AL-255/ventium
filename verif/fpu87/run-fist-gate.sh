@@ -18,6 +18,7 @@ FIST_ORACLE="$HERE/build/fist_oracle"
 OBJ="$HERE/obj_fist"
 VEC="$HERE/build/fist_vectors.txt"
 VERILATOR="${VERILATOR:-verilator}"
+VL_J="${VL_J:-1}"
 
 say() { printf '\n=== %s ===\n' "$*"; }
 die() { printf '\nERROR: %s\n' "$*" >&2; exit 1; }
@@ -30,7 +31,7 @@ make -C "$HERE" fist > "$HERE/build/fist_oracle_build.log" 2>&1 \
 
 say "2) Verilate fist_dut OOC (package + wrapper only)"
 mkdir -p "$OBJ"
-"$VERILATOR" --cc --exe --build -O3 -Wno-fatal \
+"$VERILATOR" --cc --exe --build -j "$VL_J" -O3 -Wno-fatal \
     -Mdir "$OBJ" --top-module fist_dut \
     "$ROOT/rtl/fpu/fpu_x87_pkg.sv" "$HERE/fist_dut.sv" \
     "$HERE/tb_fist.cpp" -o tb_fist \

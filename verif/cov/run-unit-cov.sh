@@ -26,6 +26,7 @@ cd "$ROOT"
 OUT="$ROOT/build/cov/unit"; DAT="$OUT/dat"
 PYTHON="${PYTHON:-python3}"
 VERILATOR="${VERILATOR:-verilator}"
+VL_J="${VL_J:-1}"
 VERILATOR_COVERAGE="${VERILATOR_COVERAGE:-verilator_coverage}"
 COV_SUM="$SCRIPT_DIR/cov_summary.py"
 VFLAGS="--binary --timing --assert --coverage --coverage-line --coverage-toggle --quiet \
@@ -44,7 +45,7 @@ build_run() {  # <name> <top> <tok> <define> <sources...>
     say "UNIT: $name"
     rm -rf "$bdir"; mkdir -p "$bdir"; rm -f "$ROOT/coverage.dat"
     # shellcheck disable=SC2086
-    if ! $VERILATOR $VFLAGS $def -Mdir "$bdir" --top-module "$top" -o "V$top" \
+    if ! $VERILATOR -j "$VL_J" $VFLAGS $def -Mdir "$bdir" --top-module "$top" -o "V$top" \
             "$@" > "$bdir/build.log" 2>&1; then
         info "BUILD FAIL (see $bdir/build.log)"; tail -12 "$bdir/build.log" | sed 's/^/      /'
         RESULTS+=("$name BUILD-FAIL"); ALL_OK=0; return

@@ -7,10 +7,10 @@
 # normal/zero/Inf/NaN operands. Proves the +VEN_FP_PIPE datapath split is exact.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-ROOT="$(pwd)"; BUILD="$ROOT/build/fppipe"; VERILATOR="${VERILATOR:-verilator}"
+ROOT="$(pwd)"; BUILD="$ROOT/build/fppipe"; VERILATOR="${VERILATOR:-verilator}"; VL_J="${VL_J:-1}"
 N="${FPPIPE_N:-1000000}"
 echo "=== FP-pipe split gate: build Verilator TB ==="
-"$VERILATOR" --binary --quiet -Wall -Wno-fatal \
+"$VERILATOR" -j "$VL_J" --binary --quiet -Wall -Wno-fatal \
   -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-UNUSED -Wno-DECLFILENAME -Wno-IMPLICITSTATIC \
   +define+FPPIPE_N="$N" -Mdir "$BUILD/obj" --top-module tb_fppipe \
   rtl/ventium_pkg.sv rtl/core/ventium_alu_pkg.sv rtl/core/ventium_decode_pkg.sv \

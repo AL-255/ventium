@@ -17,13 +17,14 @@ SEED="${2:-${SEED:-1234}}"
 OBJ="$HERE/obj_fcom"
 VEC="$HERE/build/fcom_vectors.txt"
 VERILATOR="${VERILATOR:-verilator}"
+VL_J="${VL_J:-1}"
 
 say() { printf '\n=== %s ===\n' "$*"; }
 die() { printf '\nERROR: %s\n' "$*" >&2; exit 1; }
 
 say "1) Verilate fcom_dut OOC (packages + wrapper only)"
 mkdir -p "$HERE/build" "$OBJ"
-"$VERILATOR" --cc --exe --build -O3 -Wno-fatal \
+"$VERILATOR" --cc --exe --build -j "$VL_J" -O3 -Wno-fatal \
     -Mdir "$OBJ" --top-module fcom_dut \
     "$ROOT/rtl/fpu/fpu_x87_pkg.sv" "$ROOT/rtl/core/ventium_x87_pkg.sv" \
     "$HERE/fcom_dut.sv" "$HERE/tb_fcom.cpp" -o tb_fcom \

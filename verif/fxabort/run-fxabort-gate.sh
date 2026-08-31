@@ -18,6 +18,7 @@
 # Run from the repo root.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+VL_J="${VL_J:-1}"
 OBJ="$(mktemp -d)"
 trap 'rm -rf "$OBJ"' EXIT
 
@@ -30,7 +31,7 @@ with open(sys.argv[2], "w") as f:
         f.write(f"{b:02x}\n")
 PYEOF
 
-verilator --binary --assert -sv -Wno-WIDTH -Wno-UNUSED -Wno-DECLFILENAME \
+verilator -j "$VL_J" --binary --assert -sv -Wno-WIDTH -Wno-UNUSED -Wno-DECLFILENAME \
     -Wno-INITIALDLY -Wno-IMPLICITSTATIC -Wno-TIMESCALEMOD -Wno-fatal \
     -Werror-UNOPTFLAT \
     --top-module tb_fxabort -Mdir "$OBJ" -o tb_fxabort \

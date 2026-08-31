@@ -17,6 +17,7 @@ QREF="$ROOT/tools/p5xtrans/qref"
 OBJ="$HERE/obj_fyl2x"
 VEC="$HERE/build/fyl2x_vectors.txt"
 VERILATOR="${VERILATOR:-verilator}"
+VL_J="${VL_J:-1}"
 
 say() { printf '\n=== %s ===\n' "$*"; }
 die() { printf '\nERROR: %s\n' "$*" >&2; exit 1; }
@@ -26,7 +27,7 @@ mkdir -p "$HERE/build"
 
 say "1) Verilate fpu_fyl2x OOC (module + ROMs; -I rtl/fpu)"
 mkdir -p "$OBJ"
-"$VERILATOR" --cc --exe --build -O3 -Wno-fatal -I"$ROOT/rtl/fpu" \
+"$VERILATOR" --cc --exe --build -j "$VL_J" -O3 -Wno-fatal -I"$ROOT/rtl/fpu" \
     -Mdir "$OBJ" --top-module fpu_fyl2x \
     "$ROOT/rtl/fpu/fpu_x87_pkg.sv" "$ROOT/rtl/fpu/fpu_fyl2x.sv" \
     "$HERE/tb_fyl2x.cpp" -o tb_fyl2x \

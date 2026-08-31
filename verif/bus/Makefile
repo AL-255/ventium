@@ -15,6 +15,7 @@
 # iverilog 12 here does not parse SVA `property`; Verilator is used (it does).
 # ============================================================================
 VERILATOR ?= verilator
+VL_J      ?= 1
 HERE      := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 OBJ       := $(HERE)/obj
 VTB       := $(OBJ)/vtb
@@ -37,7 +38,7 @@ lint:
 
 build: lint
 	@mkdir -p $(VTB)
-	$(VERILATOR) --binary --assert --timing -Wall $(TB_WAIVERS) \
+	$(VERILATOR) -j $(VL_J) --binary --assert --timing -Wall $(TB_WAIVERS) \
 	  --top-module tb_biu_p5 --Mdir $(VTB) $(DUT) $(TB) -o tb_biu_p5
 
 run: build

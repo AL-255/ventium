@@ -23,6 +23,7 @@ ORACLE="$HERE/build/ven_fpu_oracle"
 OBJ="$HERE/obj_srtdiv"
 VEC="$HERE/build/div_vectors.txt"
 VERILATOR="${VERILATOR:-verilator}"
+VL_J="${VL_J:-1}"
 
 say() { printf '\n=== %s ===\n' "$*"; }
 die() { printf '\nERROR: %s\n' "$*" >&2; exit 1; }
@@ -34,7 +35,7 @@ make -C "$HERE" oracle > "$HERE/build/srtdiv_oracle.log" 2>&1 \
 
 say "2) Verilate fpu_srt_div OOC (divider + package only)"
 mkdir -p "$OBJ"
-"$VERILATOR" --cc --exe --build -O3 -Wno-fatal \
+"$VERILATOR" --cc --exe --build -j "$VL_J" -O3 -Wno-fatal \
     -Mdir "$OBJ" --top-module fpu_srt_div \
     "$ROOT/rtl/fpu/fpu_x87_pkg.sv" "$ROOT/rtl/fpu/fpu_srt_div.sv" \
     "$HERE/tb_srt_div.cpp" -o tb_srt_div \

@@ -19,6 +19,7 @@ ORACLE="$HERE/build/ven_fpu_oracle"
 OBJ="$HERE/obj_fxdiv"
 VEC="$HERE/build/fxdiv_vectors.txt"
 VERILATOR="${VERILATOR:-verilator}"
+VL_J="${VL_J:-1}"
 
 say() { printf '\n=== %s ===\n' "$*"; }
 die() { printf '\nERROR: %s\n' "$*" >&2; exit 1; }
@@ -30,7 +31,7 @@ make -C "$HERE" oracle > "$HERE/build/fxdiv_oracle.log" 2>&1 \
 
 say "2) Verilate fx_div OOC (package + wrapper only)"
 mkdir -p "$OBJ"
-"$VERILATOR" --cc --exe --build -O3 -Wno-fatal \
+"$VERILATOR" --cc --exe --build -j "$VL_J" -O3 -Wno-fatal \
     -Mdir "$OBJ" --top-module fxdiv_dut \
     "$ROOT/rtl/fpu/fpu_x87_pkg.sv" "$HERE/fxdiv_dut.sv" "$HERE/tb_fxdiv.cpp" -o tb_fxdiv \
     > "$HERE/build/fxdiv_verilate.log" 2>&1 \

@@ -7,12 +7,12 @@
 # golden for BOTH PLAs (== the proven combinational fx_srt_div == QEMU).
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-ROOT="$(pwd)"; BUILD="$ROOT/build/srt"; VERILATOR="${VERILATOR:-verilator}"
+ROOT="$(pwd)"; BUILD="$ROOT/build/srt"; VERILATOR="${VERILATOR:-verilator}"; VL_J="${VL_J:-1}"
 echo "=== SRT-iter gate: generate golden vectors (tools/srt/srt_model.py) ==="
 N="$(python3 verif/srt/gen_vectors.py "$BUILD")"
 echo "    wrote $N vectors -> $BUILD"
 echo "=== SRT-iter gate: build Verilator TB (fpu_srt_div, --timing) ==="
-"$VERILATOR" --binary --timing --quiet -Wall -Wno-fatal \
+"$VERILATOR" -j "$VL_J" --binary --timing --quiet -Wall -Wno-fatal \
   -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-UNUSED -Wno-DECLFILENAME \
   +define+SRT_N="$N" -Mdir "$BUILD/obj_iter" --top-module tb_srt_iter \
   rtl/fpu/fpu_x87_pkg.sv rtl/fpu/fpu_srt_div.sv verif/srt/tb_srt_iter.sv >/dev/null

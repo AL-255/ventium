@@ -27,6 +27,7 @@ RTL="$ROOT/rtl"; L1="$ROOT/verif/l1"
 OUT="$ROOT/build/cov/mem"; DAT="$OUT/dat"
 PYTHON="${PYTHON:-python3}"
 VERILATOR="${VERILATOR:-verilator}"
+VL_J="${VL_J:-1}"
 VERILATOR_COVERAGE="${VERILATOR_COVERAGE:-verilator_coverage}"
 COV_SUM="$SCRIPT_DIR/cov_summary.py"
 
@@ -55,7 +56,7 @@ for entry in "${TBS[@]}"; do
     # resolve sources to absolute paths
     ABS=""; for s in $SRCS; do ABS="$ABS $ROOT/$s"; done
     # shellcheck disable=SC2086
-    if ! "$VERILATOR" --binary --assert --coverage --coverage-line --coverage-toggle \
+    if ! "$VERILATOR" -j "$VL_J" --binary --assert --coverage --coverage-line --coverage-toggle \
             $TIMING_FLAG -sv -Wno-WIDTH -Wno-UNUSED -Wno-DECLFILENAME -Wno-INITIALDLY \
             -Wno-IMPLICITSTATIC -Wno-UNOPTFLAT -Wno-PINMISSING --top-module "$TOP" -Mdir "$BDIR" -o "$TOP" \
             $ABS > "$BDIR/build.log" 2>&1; then

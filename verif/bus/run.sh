@@ -22,6 +22,7 @@ VTB="$OBJ/vtb"
 mkdir -p "$OBJ" "$VTB"
 
 VERILATOR="${VERILATOR:-verilator}"
+VL_J="${VL_J:-1}"
 
 # M5B-int: the biu_p5 DUT now lives in the canonical RTL home (rtl/bus/biu_p5.sv),
 # wired into rtl/ + the core via the gated bus subsystem (rtl/bus/biu.sv). This
@@ -39,7 +40,7 @@ echo "=== [1/2] lint biu_p5 (standalone, -Wall) ==="
 echo "    lint OK"
 
 echo "=== [2/2] build + run SVA / self-consistency testbench ==="
-"$VERILATOR" --binary --assert --timing -Wall "${TB_WAIVERS[@]}" \
+"$VERILATOR" -j "$VL_J" --binary --assert --timing -Wall "${TB_WAIVERS[@]}" \
   --top-module tb_biu_p5 --Mdir "$VTB" \
   "$DUT" "$HERE/tb_biu_p5.sv" -o tb_biu_p5 >/dev/null
 

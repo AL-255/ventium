@@ -5,10 +5,10 @@
 # bit-exact vs the combinational fx_bcd_to_fx over random valid packed-BCD.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-ROOT="$(pwd)"; BUILD="$ROOT/build/fbld"; VERILATOR="${VERILATOR:-verilator}"
+ROOT="$(pwd)"; BUILD="$ROOT/build/fbld"; VERILATOR="${VERILATOR:-verilator}"; VL_J="${VL_J:-1}"
 N="${FBLD_N:-40000}"
 echo "=== FBLD gate: build Verilator TB (ven_bcd_to_fp, --timing) ==="
-"$VERILATOR" --binary --timing --quiet -Wall -Wno-fatal \
+"$VERILATOR" -j "$VL_J" --binary --timing --quiet -Wall -Wno-fatal \
   -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-UNUSED -Wno-DECLFILENAME -Wno-IMPLICITSTATIC \
   +define+FBLD_N="$N" -Mdir "$BUILD/obj" --top-module tb_bcd_to_fp \
   rtl/fpu/fpu_x87_pkg.sv rtl/fpu/ven_bcd_to_fp.sv verif/fbld/tb_bcd_to_fp.sv >/dev/null

@@ -7,10 +7,10 @@
 # fx_sqrt (== QEMU) over a random normal-operand corpus x 4 rounding modes.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-ROOT="$(pwd)"; BUILD="$ROOT/build/srt"; VERILATOR="${VERILATOR:-verilator}"
+ROOT="$(pwd)"; BUILD="$ROOT/build/srt"; VERILATOR="${VERILATOR:-verilator}"; VL_J="${VL_J:-1}"
 N="${SQRT_N:-8000}"
 echo "=== SQRT-iter gate: build Verilator TB (fpu_sqrt_iter, --timing) ==="
-"$VERILATOR" --binary --timing --quiet -Wall -Wno-fatal \
+"$VERILATOR" -j "$VL_J" --binary --timing --quiet -Wall -Wno-fatal \
   -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-UNUSED -Wno-DECLFILENAME \
   +define+SQRT_N="$N" -Mdir "$BUILD/obj_sqrt" --top-module tb_sqrt_iter \
   rtl/fpu/fpu_x87_pkg.sv rtl/fpu/fpu_sqrt_iter.sv verif/srt/tb_sqrt_iter.sv >/dev/null

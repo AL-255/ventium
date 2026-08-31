@@ -17,6 +17,7 @@ ORACLE="$HERE/build/ven_fpu_oracle"
 OBJ="$HERE/obj_frndint"
 VEC="$HERE/build/frndint_vectors.txt"
 VERILATOR="${VERILATOR:-verilator}"
+VL_J="${VL_J:-1}"
 
 say() { printf '\n=== %s ===\n' "$*"; }
 die() { printf '\nERROR: %s\n' "$*" >&2; exit 1; }
@@ -28,7 +29,7 @@ make -C "$HERE" oracle > "$HERE/build/frndint_oracle_build.log" 2>&1 \
 
 say "2) Verilate frndint_dut OOC (package + wrapper)"
 mkdir -p "$OBJ"
-"$VERILATOR" --cc --exe --build -O3 -Wno-fatal \
+"$VERILATOR" --cc --exe --build -j "$VL_J" -O3 -Wno-fatal \
     -Mdir "$OBJ" --top-module frndint_dut \
     "$ROOT/rtl/fpu/fpu_x87_pkg.sv" "$HERE/frndint_dut.sv" "$HERE/tb_frndint.cpp" -o tb_frndint \
     > "$HERE/build/frndint_verilate.log" 2>&1 \

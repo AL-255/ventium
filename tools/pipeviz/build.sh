@@ -20,7 +20,7 @@ TB="$ROOT/verif/tb"
 VERILATOR="${VERILATOR:-verilator}"
 # Allow callers/CI to cap parallelism. Large Verilator translation units can use
 # substantial RAM, so blindly taking every host CPU makes a rebuild fragile.
-JOBS="${JOBS:-$(nproc 2>/dev/null || echo 4)}"
+JOBS="${JOBS:-1}"
 
 echo "[pipeviz] verilator: $($VERILATOR --version 2>&1 | head -1)"
 

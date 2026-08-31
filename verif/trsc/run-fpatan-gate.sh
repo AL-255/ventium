@@ -5,7 +5,7 @@
 # reference qfpatan (itself proven == real qemu-i386). All 4 rounding modes.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-ROOT="$(pwd)"; BUILD="$ROOT/build/trsc"; VERILATOR="${VERILATOR:-verilator}"
+ROOT="$(pwd)"; BUILD="$ROOT/build/trsc"; VERILATOR="${VERILATOR:-verilator}"; VL_J="${VL_J:-1}"
 mkdir -p "$BUILD"
 
 echo "=== FPATAN gate: build qref ==="
@@ -19,7 +19,7 @@ for RC in 0 1 2 3; do
   awk '{print $3}' "$BUILD/fpatan_$RC.txt" > "$BUILD/fpatan_o.hex"
   N=$(wc -l < "$BUILD/fpatan_$RC.txt")
   echo "=== FPATAN gate: rc=$RC ($N vectors) — build + run ==="
-  "$VERILATOR" --binary --timing --quiet -Wall -Wno-fatal \
+  "$VERILATOR" -j "$VL_J" --binary --timing --quiet -Wall -Wno-fatal \
     -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-UNUSED -Wno-DECLFILENAME -Wno-IMPLICITSTATIC \
     +define+FA_NV="$N" +define+FA_RC="$RC" -Mdir "$BUILD/objfa_$RC" --top-module tb_fpatan \
     -I"$ROOT/rtl/fpu" \

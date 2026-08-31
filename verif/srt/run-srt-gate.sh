@@ -6,12 +6,12 @@
 # model, build the Verilator TB against the real fpu_x87_pkg, run, assert OK.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-ROOT="$(pwd)"; BUILD="$ROOT/build/srt"; VERILATOR="${VERILATOR:-verilator}"
+ROOT="$(pwd)"; BUILD="$ROOT/build/srt"; VERILATOR="${VERILATOR:-verilator}"; VL_J="${VL_J:-1}"
 echo "=== SRT gate: generate golden vectors (tools/srt/srt_model.py) ==="
 N="$(python3 verif/srt/gen_vectors.py "$BUILD")"
 echo "    wrote $N vectors -> $BUILD"
 echo "=== SRT gate: build Verilator TB (fx_srt_div) ==="
-"$VERILATOR" --binary --quiet -Wall -Wno-fatal \
+"$VERILATOR" -j "$VL_J" --binary --quiet -Wall -Wno-fatal \
   -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-UNUSED -Wno-DECLFILENAME \
   +define+SRT_N="$N" -Mdir "$BUILD/obj" --top-module tb_srt \
   rtl/fpu/fpu_x87_pkg.sv verif/srt/tb_srt.sv >/dev/null

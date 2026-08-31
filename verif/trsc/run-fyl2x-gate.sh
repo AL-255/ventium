@@ -5,7 +5,7 @@
 # both ops x all 4 rounding modes.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-ROOT="$(pwd)"; BUILD="$ROOT/build/trsc"; VERILATOR="${VERILATOR:-verilator}"
+ROOT="$(pwd)"; BUILD="$ROOT/build/trsc"; VERILATOR="${VERILATOR:-verilator}"; VL_J="${VL_J:-1}"
 mkdir -p "$BUILD"
 echo "=== FYL2X gate: build qref ==="
 make -C tools/p5xtrans qref >/dev/null
@@ -20,7 +20,7 @@ for SPEC in "0:--sweep-fyl2x:FYL2X" "1:--sweep-fyl2xp1:FYL2XP1"; do
     awk '{print $3}' "$BUILD/fyl2x_$RC.txt" > "$BUILD/fyl2x_o.hex"
     N=$(wc -l < "$BUILD/fyl2x_$RC.txt")
     echo "=== $NAME gate: mode=$MODE rc=$RC ($N vectors) ==="
-    "$VERILATOR" --binary --timing --quiet -Wall -Wno-fatal \
+    "$VERILATOR" -j "$VL_J" --binary --timing --quiet -Wall -Wno-fatal \
       -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-UNUSED -Wno-DECLFILENAME -Wno-IMPLICITSTATIC \
       +define+FY_NV="$N" +define+FY_RC="$RC" +define+FY_MODE="$MODE" \
       -Mdir "$BUILD/objfy_${MODE}_$RC" --top-module tb_fyl2x -I"$ROOT/rtl/fpu" \
