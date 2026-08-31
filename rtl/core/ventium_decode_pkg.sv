@@ -152,6 +152,10 @@ package ventium_decode_pkg;
     // decoded bit is essential: using an arbitrary architectural register as a
     // stand-in would turn a literal address into a data-dependent address.
     logic        mem_base_en;
+    // The ModR/M/SIB default segment is SS rather than DS.  This bit is set
+    // only for the audited 32-bit EBP/ESP-base forms; overrides remain on the
+    // slow decoder path.
+    logic        mem_ss;
     // For a memory ALU operand, selects memory as the left (r/m) operand rather
     // than the right (r/m) operand. Meaningful only for a non-store, non-load
     // memory ALU operand.

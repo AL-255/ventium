@@ -18,6 +18,7 @@
  *     movl 4(%esi,%edx,4), %edi       (DS-default SIB+disp8 form)
  *     movl disp32, %edi                (literal DS displacement)
  *     cmpl disp32, %edi / cmpl %edi, disp32 (both CMP operand orders)
+ *     movl (%ebp), %edi / movl 4(%esp), %edi (SS-default base forms)
  *
  * The datum and ESI are client-relative, so the access is only correct when
  * the DS base is applied.  The loop folds every observed value into EAX;
@@ -64,6 +65,8 @@ _start16:
     movl    $0x1badb002, %es:(%di)
     movw    $(pm32_disp32_data - pm32_payload), %di
     movl    $0xa4f16d39, %es:(%di)
+    movw    $(pm32_ss_data - pm32_payload), %di
+    movl    $0x3d2c1b0a, %es:(%di)
 
     /* Build GDT @ 0x500 and its pseudo-descriptor @ 0x480 in low RAM.
      * base=0x00080000, limit=4 GiB-1, G=1, D/B=1. */
@@ -162,6 +165,17 @@ pm32_entry:
     ja      3f
     jmp     .Lbad
 3:
+    /* EBP and ESP bases select SS by x86 definition. Both offsets are inside
+     * the non-identity mapped client page, and the paged physical copy above
+     * contains a distinct sentinel, so a DS/SS selection or page-walk bypass
+     * is architecturally visible in the running sum. */
+    movl    $(pm32_ss_data - pm32_payload), %ebp
+    movl    (%ebp), %edi
+    xorl    %edi, %eax
+    movl    $(pm32_ss_data - pm32_payload - 4), %esp
+    movl    4(%esp), %edi
+    addl    %edi, %eax
+
     xorl    $0xa5a5a5a5, %eax
     decl    %ecx
     jnz     1b
@@ -191,6 +205,8 @@ pm32_data:
     .zero   0x100 - (.-pm32_data)
 pm32_disp32_data:
     .long   0x52c0ffee
+pm32_ss_data:
+    .long   0x6f5e4d3c
 pm32_payload_end:
 
     .code16

@@ -1195,17 +1195,7 @@ module core
   // non-stack SIB no-disp/disp8 forms (decode.sv), and the existing S_PIPE request
   // already flows through cur_lin, the D-TLB/page walker, permissions, and the
   // page-fragment engine. Do not widen this based merely on CS.D/base=0: a
-  // finite DS limit would still require the slow path's checked access.
-  logic sys_fp_load_ok;
-`ifdef VEN_SYS_FASTLOAD_FLAT
-  assign sys_fp_load_ok = sys_fp_ok && !real_mode && cs_d
-                     && (seg_limit[SG_DS] == 32'hFFFF_FFFF)
-                     && seg_attr[SG_DS][7] && seg_attr[SG_DS][4]
-                     && !seg_attr[SG_DS][3] && seg_attr[SG_DS][1];
-`else
-  assign sys_fp_load_ok = 1'b0;
-`endif
-
+  // finite default-segment limit would still require the slow path's checked access.
 `ifdef VEN_DBG_CORE
   // task #102 IRET-trace plusarg gates (inert unless +ven_iretdbg is passed).
   logic        ven_iretdbg_en;
@@ -3902,9 +3892,10 @@ module core
   logic        moffs_falsedep;       // M6 Err59: A2/A3 moffs U + EAX-using V follower
   logic        v_bytes_ok;           // V candidate's full bytes resident in I-cache
   logic        pipe_agi;             // U has an AGI hazard (addr reg written last clk)
-  logic        pipe_load_req;        // U is a checked DS memory read (drives the bus)
-  logic        pipe_store_req;       // U is an audited DS MOV store (drives the bus)
+  logic        pipe_load_req;        // U is a checked DS/SS memory read (drives the bus)
+  logic        pipe_store_req;       // U is an audited DS/SS MOV store (drives the bus)
   logic [2:0]  pipe_load_base;
+  logic [2:0]  pipe_mem_seg;         // DS or SS selected by the decoded base
   logic [31:0] pipe_load_addr;
   logic [31:0] pipe_store_data;
   logic [31:0] u_alu, u_flags, u_sh, u_shm1; logic u_shcf;
@@ -4273,6 +4264,7 @@ module core
     pipe_store_req = (state==S_PIPE) && !fp_issue_block && pipe_bytes_ok && !fp_sys_bail &&
                      u_d.is_store && !pipe_agi && (mispred_bubbles==3'd0);
     pipe_load_base = u_d.base;
+    pipe_mem_seg   = u_d.mem_ss ? 3'(SG_SS) : 3'(SG_DS);
     pipe_load_addr = (u_d.mem_base_en ? gpr_o[u_d.base] : 32'd0) + u_d.mem_disp
                    + (u_d.mem_index_en ? (gpr_o[u_d.mem_index] << u_d.mem_scale) : 32'd0);
     pipe_store_data = gpr_o[u_d.src];
@@ -4427,6 +4419,20 @@ module core
   // indefinitely, so later debug behaviour and every saved EFLAGS image are wrong.
   // Same class as the irq_shadow starvation, same conservative remedy.
   assign fp_dbg_active = eflags[8] || eflags[16] || (dr7[7:0] != 8'd0);
+
+  // The system fast-read profile admits a data form only when ITS decoded
+  // default segment is a present, writable, full 4 GiB 32-bit segment.  The
+  // selector is carried from decode through the bus driver and address
+  // generator, so an EBP/ESP base can never accidentally be checked as DS.
+  logic sys_fp_load_ok;
+`ifdef VEN_SYS_FASTLOAD_FLAT
+  assign sys_fp_load_ok = sys_fp_ok && !real_mode && cs_d
+                     && (seg_limit[pipe_mem_seg] == 32'hFFFF_FFFF)
+                     && seg_attr[pipe_mem_seg][7] && seg_attr[pipe_mem_seg][4]
+                     && !seg_attr[pipe_mem_seg][3] && seg_attr[pipe_mem_seg][1];
+`else
+  assign sys_fp_load_ok = 1'b0;
+`endif
 
   logic fp_sys_bail;
 `ifdef VEN_SYS_FASTPATH
@@ -7180,7 +7186,7 @@ module core
       S_PF:    cur_lin_nat = {pf_fill_addr[31:5],5'd0} + {27'd0,pf_word,2'b00};
       S_PIPE: begin
         cur_lin_nat = pf_miss ? {pf_miss_fa[31:5],5'd0}
-                               : (seg_base[SG_DS]+pipe_load_addr);
+                               : (seg_base[pipe_mem_seg]+pipe_load_addr);
         cur_is_w_nat = pipe_store_req;
       end
       // REVIEW_aug2 C-05: this must mirror core_bus_driver.svh's S_LOAD arm EXACTLY.

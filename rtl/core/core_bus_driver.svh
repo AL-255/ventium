@@ -39,12 +39,13 @@
       S_USEQ, S_RMINT_PUSH:
         cur_seg_rel = 1'b1;   // segment-relative access, dseg governs
       S_PIPE: begin
-        // The checked U-side data forms use DS. Classify them as guest segment
-        // accesses so D-TLB U/S permission handling cannot treat a CPL3 access
-        // as supervisor access. System-mode stores remain slow (core.sv).
+        // The checked U-side data forms select DS or SS from their decoded
+        // addressing base. Classify them as guest segment accesses so D-TLB
+        // U/S permission handling cannot treat a CPL3 access as supervisor.
+        // System-mode stores remain slow (core.sv).
         // Instruction-fill S_PIPE requests leave this false.
         cur_seg_rel = pipe_load_req || pipe_store_req;
-        cur_seg_idx = 3'(SG_DS);
+        cur_seg_idx = pipe_mem_seg;
       end
       S_LCALL, S_RETF, S_RMIRET,
       S_INT_PROBE, S_CG_PRD, S_INT_PUSH, S_IRET: begin
@@ -84,9 +85,9 @@
       S_FETCH: begin bd_req =!sfetch_fast; end
       S_PF:    begin bd_req =1'b1; end
       S_PIPE:  begin
-        // A checked DS effective-address read/store issued this clock. The fast
-        // store is full-dword MOV r/m32,r32 only; its source is sampled before
-        // the clock edge that retires it.
+        // A checked DS/SS effective-address read/store issued this clock. The
+        // fast store is full-dword MOV r/m32,r32 only; its source is sampled
+        // before the clock edge that retires it.
         if (pipe_load_req) begin bd_req =1'b1; end
         else if (pipe_store_req) begin
           bd_req=1'b1; bd_we=1'b1; bd_wstrb=4'b1111; bd_wdata=pipe_store_data;

@@ -5,5 +5,5 @@
   "image": "t_fastmem/t_fastmem.flat",
   "load_addr": "0x08048000",
   "entry": "0x08048000",
-  "max_insn": 80
+  "max_insn": 128
 }

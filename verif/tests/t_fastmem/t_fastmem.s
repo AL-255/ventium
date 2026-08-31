@@ -50,6 +50,41 @@ _start:
     cmpl    %eax, %edi
     jne     .Lfail
 
+    # EBP's mod=01 base form defaults to SS, not DS. Exercise load, store and
+    # both CMP operand orders through that segment selection.
+    leal    direct_word-4, %ebp
+    movl    $0x6a5a4a3a, %edi
+    movl    %edi, 4(%ebp)
+    movl    4(%ebp), %eax
+    cmpl    %edi, %eax
+    jne     .Lfail
+    decl    %edi
+    cmpl    4(%ebp), %edi
+    jb      .Lss_ebp_lhs_ok
+    jmp     .Lfail
+.Lss_ebp_lhs_ok:
+    cmpl    %edi, 4(%ebp)
+    ja      .Lss_ebp_rhs_ok
+    jmp     .Lfail
+.Lss_ebp_rhs_ok:
+
+    # ESP is represented by a SIB base, and also defaults to SS. Both no-disp
+    # and disp8 SIB encodings must use SS, while the active ECX index does not
+    # affect the segment choice.
+    subl    $8, %esp
+    movl    $0x1e2d3c4b, %edi
+    movl    %edi, (%esp)
+    movl    (%esp), %eax
+    cmpl    %edi, %eax
+    jne     .Lfail
+    movl    $1, %ecx
+    movl    $0x4b3c2d1e, %edi
+    movl    %edi, (%esp,%ecx,4)
+    movl    4(%esp), %eax
+    cmpl    %edi, %eax
+    jne     .Lfail
+    addl    $8, %esp
+
     leal    store_array, %edx
     movl    $1, %ecx
     # Concrete-base SIB with no displacement (mod=00) and an active index.

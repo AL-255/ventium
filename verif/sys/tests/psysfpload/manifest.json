@@ -10,13 +10,13 @@
   "exit_method": "isa-debug-exit",
   "exit_port": "0xf4",
   "exit_code": 133,
-  "max_insn": 4000,
+  "max_insn": 5000,
   "sys": true,
   "paging": true,
   "transitions": [
     "real->protected with CS/DS/SS/ES all based at linear 0x00080000",
     "paging enable (CR3=0x00001000, CR0.PG 0->1; PT[128] maps linear 0x00080000 to physical 0x00090000)",
-    "paged common-base 32-bit DS MOV r32,[base], MOV r32,[base+disp8], MOV r32,[base+disp32], MOV r32,[base+index*scale], MOV r32,[base+index*scale+disp8], MOV r32,[disp32], CMP r32,[disp32], and CMP [disp32],r32 reads"
+    "paged common-base 32-bit DS MOV r32,[base], MOV r32,[base+disp8], MOV r32,[base+disp32], MOV r32,[base+index*scale], MOV r32,[base+index*scale+disp8], MOV r32,[disp32], CMP r32,[disp32], CMP [disp32],r32, and SS-default EBP/ESP-base MOV reads"
   ],
-  "description": "Generic protected-mode common-base fast-read regression. The BIOS bootstrap copies a 32-bit client to physical 0x80000 for pre-paging execution and physical 0x90000 for paged execution, maps the client's non-zero linear 0x80000 page through a 4 KiB PD/PT hierarchy to that different physical page, and plants distinct data sentinels in the latter. It enters four 4 GiB CS/DS/SS/ES segments with the shared non-zero 0x80000 base, enables paging, then repeatedly uses the checked DS:[ESI] MOV r32,[base], DS:[ESI+disp8], DS:[ESI+disp32], DS:[ESI+EDX*4], DS:[ESI+EDX*4+disp8], and literal DS:[disp32] MOV/CMP read forms admitted by VEN_SYS_FASTLOAD_FLAT. Asymmetric CMP/Jcc checks prove both operand orders. The running sum is differentially checked against QEMU, so an AGU, segment-base, or non-identity D-TLB/page-walk bypass diverges; no Quake-specific state or saved guest state is used."
+  "description": "Generic protected-mode common-base fast-read regression. The BIOS bootstrap copies a 32-bit client to physical 0x80000 for pre-paging execution and physical 0x90000 for paged execution, maps the client's non-zero linear 0x80000 page through a 4 KiB PD/PT hierarchy to that different physical page, and plants distinct data sentinels in the latter. It enters four 4 GiB CS/DS/SS/ES segments with the shared non-zero 0x80000 base, enables paging, then repeatedly uses checked DS:[ESI] MOV r32,[base], DS:[ESI+disp8], DS:[ESI+disp32], DS:[ESI+EDX*4], DS:[ESI+EDX*4+disp8], literal DS:[disp32] MOV/CMP, and SS:[EBP]/SS:[ESP+disp8] MOV read forms admitted by VEN_SYS_FASTLOAD_FLAT. Asymmetric CMP/Jcc checks prove both operand orders. The running sum is differentially checked against QEMU, so an AGU, segment-base, segment-default, or non-identity D-TLB/page-walk bypass diverges; no Quake-specific state or saved guest state is used."
 }
