@@ -30,16 +30,19 @@ all:
 # filelists (repo-root relative) + the ven main/DPI + the shared PS, keeping
 # DPI (retire trace) and adding VEN_KV260_SOC for the shim's observability
 # and interrupt pins.
-# The full-PC default follows fpga/scripts/impl_kv260_soc.tcl's production
-# cache/front-end geometry: full P5 L1s with BRAM-backed I-cache reads and the
-# uop cache.  VEN_IC_NARROWB is a historical congestion experiment; it is not
-# the routed configuration and must not be the cosim default.
+# The full-PC default follows fpga/create_project_3mhz_wrapper.tcl's routed
+# production profile: the P5's full 8 KiB/2-way/32-byte-line I$ and D$,
+# BRAM-backed I-cache reads, and the uop cache.  Keep the system fast-path
+# defines here as well: validating a different execution profile than the bitstream
+# would make performance and boot evidence non-actionable.  VEN_CACHE_HALF and
+# VEN_IC_NARROWB are retired congestion experiments and must never appear here.
 VEN_DEFS := +define+VEN_CORE +define+VEN_L1_AXI +define+VEN_L1_HONOR_CD \
   +define+VEN_KV260_SOC +define+VEN_TRANSCENDENTAL +define+VEN_SRT_ITER \
   +define+VEN_IDIV_ITER +define+VEN_BCD_ITER +define+VEN_FP_PIPE \
-  +define+VEN_FP_PIPE2 +define+VEN_FP_SHARED \
+  +define+VEN_FP_PIPE2 +define+VEN_FP_PC_RELAX +define+VEN_FP_SHARED \
   +define+VEN_FPREM +define+VEN_BTB_PIPE +define+VEN_IC_BRAM +define+VEN_UOPCACHE \
-  +define+VEN_DBG_CORE +define+VEN_FAST_RETRACE +define+VEN_KBD_AUTOACK \
+  +define+VEN_DBG_CORE +define+VEN_SYS_FASTPATH +define+VEN_SYS_FASTPATH_RELOC \
+  +define+VEN_SYS_FASTLOAD_FLAT +define+VEN_FAST_RETRACE +define+VEN_KBD_AUTOACK \
   +define+VEN_KBC_FAST
 VEN_SRCS := ao486-sim/ven/sim_ven.cpp ao486-sim/ven/vtm_dpi.cpp \
   ao486-sim/ven/ven_ao486_shim.sv ao486-sim/ven/ven_axi2avalon.sv \
