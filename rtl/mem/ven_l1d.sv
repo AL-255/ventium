@@ -934,6 +934,62 @@ module ven_l1d #(
     end
   end
 
+`ifndef SYNTHESIS
+`ifdef VEN_L1D_PERF
+  // Simulation-only transaction attribution for full-system replay.  A core
+  // load can wait either for the intentional one-cycle registered hit window,
+  // an allocating line fill, a non-cacheable bypass, or the backing interface.
+  // Keep these counters beside the actual serve predicates: guessing from the
+  // core's S_LOAD residency alone cannot distinguish those cases.
+  longint unsigned perf_hit_capture, perf_hit_ack;
+  longint unsigned perf_miss_start, perf_bypass_start;
+  longint unsigned perf_read_wait_idle, perf_read_wait_fill;
+  longint unsigned perf_read_wait_done, perf_read_wait_bypass;
+  longint unsigned perf_fill_cycles, perf_fill_wait, perf_fill_ack;
+
+  always_ff @(posedge clk) begin
+    if (!rst_n) begin
+      perf_hit_capture     <= 0; perf_hit_ack         <= 0;
+      perf_miss_start      <= 0; perf_bypass_start    <= 0;
+      perf_read_wait_idle  <= 0; perf_read_wait_fill  <= 0;
+      perf_read_wait_done  <= 0; perf_read_wait_bypass<= 0;
+      perf_fill_cycles     <= 0; perf_fill_wait       <= 0; perf_fill_ack <= 0;
+    end else begin
+      if (do_rd_cap) perf_hit_capture <= perf_hit_capture + 1;
+      if (c_req && !c_we && c_ack && rd_match) perf_hit_ack <= perf_hit_ack + 1;
+      if (c_req && !c_we && st==L1_IDLE && !wb_valid) begin
+        if (!cacheable) perf_bypass_start <= perf_bypass_start + 1;
+        else if (!rd_hit) perf_miss_start <= perf_miss_start + 1;
+      end
+      if (c_req && !c_we && !c_ack) begin
+        unique case (st)
+          L1_IDLE: perf_read_wait_idle   <= perf_read_wait_idle + 1;
+          L1_FILL: perf_read_wait_fill   <= perf_read_wait_fill + 1;
+          L1_DONE: perf_read_wait_done   <= perf_read_wait_done + 1;
+          L1_BYP:  perf_read_wait_bypass <= perf_read_wait_bypass + 1;
+          default: ;
+        endcase
+      end
+      if (st==L1_FILL) begin
+        perf_fill_cycles <= perf_fill_cycles + 1;
+        if (m_ack) perf_fill_ack <= perf_fill_ack + 1;
+        else       perf_fill_wait <= perf_fill_wait + 1;
+      end
+    end
+  end
+
+  final begin
+    $display("[L1DPERF] hit-capture=%0d hit-ack=%0d miss-start=%0d bypass-start=%0d",
+             perf_hit_capture, perf_hit_ack, perf_miss_start, perf_bypass_start);
+    $display("[L1DPERF] read-wait idle=%0d fill=%0d done=%0d bypass=%0d",
+             perf_read_wait_idle, perf_read_wait_fill, perf_read_wait_done,
+             perf_read_wait_bypass);
+    $display("[L1DPERF] fill cycles=%0d backing-wait=%0d backing-ack=%0d",
+             perf_fill_cycles, perf_fill_wait, perf_fill_ack);
+  end
+`endif
+`endif
+
 `ifdef VEN_DBG_CORE
   // DEADLOCK detector (Quake cs=0087:0x334 non-retiring stall): if the core holds a request with no ack
   // for a long time, the L1D/AXI is stuck servicing it. Log the address + memory-path state ONCE so the

@@ -993,6 +993,40 @@ module ventium_l1_axi #(
   logic dma_drain_stall;
   assign dma_drain_stall = core_lock && dma_seam_busy;
   logic l1d_c_req; logic l1d_c_ack; logic [31:0] l1d_c_rdata;
+
+`ifndef SYNTHESIS
+`ifdef VEN_L1D_PERF
+  // Pair ven_l1d's transaction counters with the classification that selected
+  // its bypass path.  This is intentionally cycle-attributed (the request is
+  // held while a fill runs): it answers whether the wait is caused by CR0.CD,
+  // the first/last-byte memory type, or an explicit drain, without weakening
+  // any cacheability rule in the hardware profile.
+  longint unsigned perf_nc_cd, perf_nc_first, perf_nc_last, perf_nc_drain;
+  longint unsigned perf_nc_region [16];
+  always_ff @(posedge core_clk) begin
+    if (!core_rst_n) begin
+      perf_nc_cd <= 0; perf_nc_first <= 0; perf_nc_last <= 0; perf_nc_drain <= 0;
+      for (int r = 0; r < 16; r++) perf_nc_region[r] <= 0;
+    end else begin
+      if (core_req && !l1d_cacheable) begin
+        if (cr0_cd)              perf_nc_cd    <= perf_nc_cd + 1;
+        else if (!core_d_l1c) begin
+          perf_nc_first <= perf_nc_first + 1;
+          perf_nc_region[core_d_region] <= perf_nc_region[core_d_region] + 1;
+        end
+        else if (!core_d_l1c_last) perf_nc_last <= perf_nc_last + 1;
+      end
+      if (core_req && dma_drain_stall) perf_nc_drain <= perf_nc_drain + 1;
+    end
+  end
+  final $display("[L1DPERF] noncache wait-cycles: cr0-cd=%0d first-type=%0d last-type=%0d dma-drain=%0d",
+                 perf_nc_cd, perf_nc_first, perf_nc_last, perf_nc_drain);
+  final for (int r = 0; r < 16; r++)
+    if (perf_nc_region[r] != 0)
+      $display("[L1DPERF] noncache first-type region=%0d wait-cycles=%0d", r, perf_nc_region[r]);
+`endif
+`endif
+
   assign l1d_c_req  = core_req && !core_smram_deny && !dma_drain_stall;
   assign core_ack   = dma_drain_stall ? 1'b0
                     : (core_smram_deny && core_req) ? 1'b1 : l1d_c_ack;

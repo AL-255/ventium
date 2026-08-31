@@ -155,6 +155,11 @@ Quick reference
      - boolean define
      - off (needs ``VEN_UOPCACHE``)
      - µop-cache hit / collide-guard-rewalk counters (diagnostic).
+   * - ``VEN_L1D_PERF``
+     - simulation-only boolean define
+     - off
+     - Attributes L1D read captures, fills, backing wait, bypasses, and the
+       cache-map reason/region that selected a non-cacheable request.
    * - **Integer core and build plumbing**
      -
      -
