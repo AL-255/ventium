@@ -3,9 +3,10 @@ REPO ?= $(abspath $(CURDIR)/..)
 # system builds.  Use the common lock so separate terminals cannot overlap
 # their one-job builds and exhaust host memory.
 VERILATOR_BIN ?= verilator
+VENTIUM_VERILATOR_BIN ?= $(VERILATOR_BIN)
 # Recursive make command-line variables must not bypass the common guard.
 override VERILATOR := $(REPO)/tools/verilator_serial.sh
-export VERILATOR_BIN
+export VENTIUM_VERILATOR_BIN
 # The shared-FP top produces several very large generated C++ translation units.
 # A parallel `make test` used to launch one Verilator build per test target, and
 # each build in turn requested four compiler jobs.  That multiplicative fan-out

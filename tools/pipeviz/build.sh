@@ -20,22 +20,23 @@ OBJ="$HERE/obj_dir"
 OBJO="$HERE/build_o"
 RTL_F="$ROOT/rtl/ventium.f"
 TB="$ROOT/verif/tb"
-VERILATOR_BIN="${VERILATOR_BIN:-${VERILATOR:-verilator}}"
-export VERILATOR_BIN
+VENTIUM_VERILATOR_BIN="${VENTIUM_VERILATOR_BIN:-${VERILATOR_BIN:-${VERILATOR:-verilator}}}"
+unset VERILATOR_BIN
+export VENTIUM_VERILATOR_BIN
 VERILATOR="$ROOT/tools/verilator_serial.sh"
 # Allow callers/CI to cap parallelism. Large Verilator translation units can use
 # substantial RAM, so blindly taking every host CPU makes a rebuild fragile.
 JOBS="${JOBS:-1}"
 
-echo "[pipeviz] verilator: $($VERILATOR_BIN --version 2>&1 | head -1)"
+echo "[pipeviz] verilator: $($VENTIUM_VERILATOR_BIN --version 2>&1 | head -1)"
 
 # ---- locate the Verilator runtime include dir ------------------------------
 VINC=""
-if VR="$($VERILATOR_BIN --getenv VERILATOR_ROOT 2>/dev/null)" && [ -n "$VR" ] && [ -d "$VR/include" ]; then
+if VR="$($VENTIUM_VERILATOR_BIN --getenv VERILATOR_ROOT 2>/dev/null)" && [ -n "$VR" ] && [ -d "$VR/include" ]; then
   VINC="$VR/include"
 else
   for c in /usr/share/verilator/include /usr/local/share/verilator/include \
-           "$(dirname "$(command -v "$VERILATOR_BIN")")/../share/verilator/include"; do
+           "$(dirname "$(command -v "$VENTIUM_VERILATOR_BIN")")/../share/verilator/include"; do
     [ -d "$c" ] && { VINC="$c"; break; }
   done
 fi

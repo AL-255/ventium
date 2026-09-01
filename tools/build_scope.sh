@@ -44,6 +44,8 @@ export VENTIUM_BUILD_SCOPE_ACTIVE=1
 export MAKEFLAGS="${MAKEFLAGS:+${MAKEFLAGS} }-j1"
 scope_mem="${VENTIUM_BUILD_MEMORY_MAX:-${VENTIUM_VERILATOR_MEMORY_MAX:-6G}}"
 scope_tasks="${VENTIUM_BUILD_TASKS_MAX:-${VENTIUM_VERILATOR_TASKS_MAX:-64}}"
-exec systemd-run --user --scope --quiet \
+# Use a transient service, not --scope: systemd rejects --wait for a scope.  A
+# waited service makes the wrapper's lock lifetime exactly match the child tree.
+exec systemd-run --user --quiet --wait --collect --working-directory "$PWD" \
     -p "MemoryMax=${scope_mem}" -p "TasksMax=${scope_tasks}" \
     -- "$@"

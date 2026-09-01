@@ -94,7 +94,7 @@ WORKER="$ROOT/verif/lib/verify_worker.sh"
 
 export PYTHON="${PYTHON:-python3}"
 export CC="${CC:-gcc}"
-export VERILATOR_BIN="${VERILATOR_BIN:-verilator}"
+export VENTIUM_VERILATOR_BIN="${VENTIUM_VERILATOR_BIN:-${VERILATOR_BIN:-verilator}}"
 export CFLAGS_BASE="-m32 -march=pentium -nostdlib -static -Wl,--build-id=none"
 export M5_TOL_PCT="${M5_TOL_PCT:-10}"
 export PORTBASE="${PORTBASE:-26000}"

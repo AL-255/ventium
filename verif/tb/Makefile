@@ -38,11 +38,12 @@ CPP_SRCS := $(TB_DIR)/tb_main.cpp $(TB_DIR)/memmodel.cpp $(TB_DIR)/dpi_retire.cp
 # profiles.  Keep the actual binary separately configurable, so a caller can
 # select a tool version without bypassing the OOM guard.
 VERILATOR_BIN ?= verilator
+VENTIUM_VERILATOR_BIN ?= $(VERILATOR_BIN)
 # Command-line variables are inherited by recursive make through MAKEFLAGS.
 # `override` is intentional: VERILATOR=verilator used to bypass the cross-build
 # lock precisely when a top-level gate was asked to rebuild.
 override VERILATOR := $(VENTIUM_ROOT)/tools/verilator_serial.sh
-export VERILATOR_BIN
+export VENTIUM_VERILATOR_BIN
 TOP        = ventium_top
 EXE        = tb_ventium
 # Keep a read-only shared ccache from turning an otherwise valid Verilator

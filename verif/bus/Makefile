@@ -21,6 +21,7 @@ VTB       := $(OBJ)/vtb
 # standalone gate builds it DIRECTLY from there (SVA in tb_biu_p5.sv stay active).
 ROOT      := $(abspath $(HERE)/../..)
 VERILATOR_BIN ?= verilator
+VENTIUM_VERILATOR_BIN ?= $(VERILATOR_BIN)
 # A command-line VERILATOR assignment propagates via MAKEFLAGS; never let it
 # bypass the repository-wide lock in this standalone build.
 override VERILATOR := $(ROOT)/tools/verilator_serial.sh
@@ -30,7 +31,7 @@ else
 override VL_J := 1
 endif
 CCACHE_DISABLE ?= 1
-export CCACHE_DISABLE VERILATOR_BIN
+export CCACHE_DISABLE VENTIUM_VERILATOR_BIN
 DUT       := $(ROOT)/rtl/bus/biu_p5.sv
 TB        := $(HERE)/tb_biu_p5.sv
 

@@ -7,11 +7,13 @@
 # hatch; it retains the cross-build lock.
 
 : "${ROOT:?set ROOT before sourcing verilator_env.sh}"
-# Preserve an explicitly selected binary while making the public VERILATOR
-# command the non-bypassable project guard.  Older gate scripts commonly used
-# VERILATOR=/path/to/verilator; accepting that spelling here lets them gain the
-# lock/cgroup protection without changing their caller interface.
-export VERILATOR_BIN="${VERILATOR_BIN:-${VERILATOR:-verilator}}"
+# Preserve an explicitly selected frontend while making the public VERILATOR
+# command the non-bypassable project guard.  VERILATOR_BIN is reserved by the
+# upstream Perl frontend for its compiled backend, so consume the legacy input
+# spelling here but never pass it on.  Older gate scripts commonly used
+# VERILATOR=/path/to/verilator; accepting that spelling retains their interface.
+export VENTIUM_VERILATOR_BIN="${VENTIUM_VERILATOR_BIN:-${VERILATOR_BIN:-${VERILATOR:-verilator}}}"
+unset VERILATOR_BIN
 export VERILATOR="$ROOT/tools/verilator_serial.sh"
 verilator() {
     "$VERILATOR" "$@"

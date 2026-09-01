@@ -8,12 +8,13 @@ OBJDIR  := ao486-sim/obj_dir
 EXE     := ao486sim
 
 # Full-PC C++ compilation is multi-GiB.  Share the project-wide lock with the
-# verification and shared-FP builds; choose a different executable through
-# VERILATOR_BIN rather than bypassing the guard.
+# verification and shared-FP builds; choose a different frontend through
+# VENTIUM_VERILATOR_BIN rather than bypassing the guard.
 VERILATOR_BIN ?= verilator
+VENTIUM_VERILATOR_BIN ?= $(VERILATOR_BIN)
 # Recursive make command-line variables must not bypass the common guard.
 override VERILATOR := $(REPO)/tools/verilator_serial.sh
-export VERILATOR_BIN
+export VENTIUM_VERILATOR_BIN
 # This harness is frequently built from external/scratch volumes.  Do not let
 # an unavailable shared ccache fail the generated-C++ build; callers can opt
 # back in with CCACHE_DISABLE=0 when their cache is writable.
