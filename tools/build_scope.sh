@@ -36,16 +36,18 @@ if ! flock -n 9; then
     flock 9
 fi
 
+# A parent `make -j` exports a jobserver token in MAKEFLAGS.  Do not preserve
+# it: recursive makes can otherwise reconnect to the parent jobserver and
+# silently re-enable parallelism.  The service receives this explicit value
+# below (systemd-run does not reliably inherit caller-only exports into its
+# user-manager service).
 export VENTIUM_BUILD_SCOPE_ACTIVE=1
-# A parent `make -j` exports its jobserver through MAKEFLAGS into recursive
-# make calls.  The scope protects memory, but force those descendants to one
-# recipe as well so they fail predictably rather than accumulating thousands of
-# short-lived helper processes under the task ceiling.
-export MAKEFLAGS="${MAKEFLAGS:+${MAKEFLAGS} }-j1"
+export MAKEFLAGS="-j1"
 scope_mem="${VENTIUM_BUILD_MEMORY_MAX:-${VENTIUM_VERILATOR_MEMORY_MAX:-6G}}"
 scope_tasks="${VENTIUM_BUILD_TASKS_MAX:-${VENTIUM_VERILATOR_TASKS_MAX:-64}}"
 # Use a transient service, not --scope: systemd rejects --wait for a scope.  A
 # waited service makes the wrapper's lock lifetime exactly match the child tree.
 exec systemd-run --user --quiet --wait --collect --working-directory "$PWD" \
     -p "MemoryMax=${scope_mem}" -p "TasksMax=${scope_tasks}" \
+    --setenv=VENTIUM_BUILD_SCOPE_ACTIVE=1 --setenv=MAKEFLAGS=-j1 \
     -- "$@"
