@@ -20,7 +20,8 @@ enum : uint32_t {
     NR_ioctl = 54, NR_gettimeofday = 78, NR_munmap = 91, NR_uname = 122,
     NR_mprotect = 125, NR__llseek = 140, NR_readv = 145, NR_writev = 146,
     NR_rt_sigaction = 174, NR_rt_sigprocmask = 175, NR_mmap2 = 192,
-    NR_stat64 = 195, NR_fstat64 = 197, NR_fcntl64 = 221, NR_set_thread_area = 243,
+    NR_stat64 = 195, NR_fstat64 = 197, NR_fcntl64 = 221, NR_futex = 240,
+    NR_set_thread_area = 243,
     NR_exit_group = 252, NR_set_tid_address = 258, NR_clock_gettime = 265,
     NR_clock_getres = 266, NR_openat = 295, NR_getrandom = 355, NR_statx = 383,
     NR_clock_gettime64 = 403, NR_clock_getres_time64 = 406,
@@ -339,6 +340,16 @@ SyscallEmuResult SyscallEmulator::service(uint32_t nr, uint32_t ebx, uint32_t ec
         for (uint32_t i = 0; i < edx; ++i) mem_.write8(ebx + i, 0);  // deterministic
         r.eax = edx; break;
     }
+
+    case NR_futex:
+        // The free-run emulator is deliberately single-threaded. A wake has no
+        // waiters and no memory side effect, so Linux deterministically returns
+        // zero. Accept only FUTEX_WAKE (1) and FUTEX_WAKE_PRIVATE (1|0x80);
+        // a wait, requeue, bitset, PI, or unknown operation remains a loud
+        // unsupported stop rather than silently changing guest synchronization.
+        if (ecx == 0x01u || ecx == 0x81u) r.eax = 0;
+        else r.unsupported = true;
+        break;
 
     // --- misc benign returns ---
     case NR_gettid:          r.eax = 1000; break;
