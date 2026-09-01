@@ -18,9 +18,9 @@ work.
 
 The production filelists reference `fp_shared/ven_fp_*.sv` directly. The
 complete-system implementation is guarded by `fpga/run_vivado_exclusive.sh`:
-there must be exactly one top-level Vivado process group, and a run started
-before an RTL correction is a timing/area baseline only, never a deployable
-image.
+there must be exactly one complete Vivado process family (parent, VRS, and
+children), and a run started before an RTL correction is a timing/area baseline
+only, never a deployable image.
 
 ## What the audit establishes
 

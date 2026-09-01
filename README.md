@@ -157,10 +157,12 @@ The board integration has three source boundaries:
 | External `ao486_MiSTer/fpga/rk-ao486-system` flow | Board top, PS/PL bridges, Vivado project, daemon/deployment helpers |
 | `RK-XCZU15EG-F-Template` | Board preset, Linux/FPGA-manager reference, BSP/SD-image flow |
 
-Builds must use `fpga/run_vivado_exclusive.sh`; it prevents orphaned Vivado
-jobs from consuming memory or racing a new implementation run.  Run a clean
-source-matched implementation and review final timing, DRC, clock, and
-utilization reports before programming the board.  A generated `fpga_run_*`
+Builds must use `fpga/run_vivado_exclusive.sh`; its named cgroup and
+same-user Vivado/VRS family cleanup prevent orphaned vendor workers from
+consuming memory or racing a replacement implementation run. It permits exactly
+one Vivado process family and one synthesis worker. Run a clean source-matched
+implementation and review final timing, DRC, clock, and utilization reports
+before programming the board.  A generated `fpga_run_*`
 directory is disposable except for a deliberately retained deployable artifact
 or capture needed by the next debug session.
 

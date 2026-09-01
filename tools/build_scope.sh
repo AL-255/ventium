@@ -53,11 +53,26 @@ if [ -z "${TMPDIR:-}" ]; then
 fi
 scope_mem="${VENTIUM_BUILD_MEMORY_MAX:-${VENTIUM_VERILATOR_MEMORY_MAX:-6G}}"
 scope_tasks="${VENTIUM_BUILD_TASKS_MAX:-${VENTIUM_VERILATOR_TASKS_MAX:-64}}"
+# A caller that owns a long-lived vendor process tree can name its scope.  This
+# lets a replacement launcher stop the complete cgroup (including helpers that
+# do not retain a ``vivado`` executable name) before it starts another run.
+# Ordinary Verilator/QEMU builds intentionally retain the anonymous scope.
+scope_unit="${VENTIUM_BUILD_SCOPE_UNIT:-}"
+scope_args=(--user --scope --quiet)
+if [[ "${scope_unit}" =~ ^[A-Za-z0-9_.@:-]+$ ]]; then
+    if [ -n "${scope_unit}" ]; then
+        scope_args+=(--unit="${scope_unit}" --collect)
+    fi
+elif [ -n "${scope_unit}" ]; then
+    echo "[build-scope] invalid scope unit name: ${scope_unit}" >&2
+    exit 2
+fi
 # A synchronous scope runs the command as our child in a bounded cgroup.  That
 # is essential here: unlike a transient service, it retains the caller's PATH,
 # TB_BIN, cache locations, and the active-scope guard.  systemd-run waits for a
 # scope command by default, so FD 9 keeps the global build lock until its whole
 # process tree exits.
-exec systemd-run --user --scope --quiet \
+exec systemd-run "${scope_args[@]}" \
     -p "MemoryMax=${scope_mem}" -p "TasksMax=${scope_tasks}" \
+    -p "KillMode=control-group" \
     -- "$@"

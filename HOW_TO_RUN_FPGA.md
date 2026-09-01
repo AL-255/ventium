@@ -312,12 +312,12 @@ and PS/AXI width propagation errors. Confirm the log reports HP0 at 128 bits.
 
 #### Mandatory single-run guard
 
-Use `fpga/run_vivado_exclusive.sh` for **every** Ventium Vivado launch.  It
-holds an exclusive host lock and, before each new top-level build, terminates
-every existing `vivado` process (including stale synthesis workers), waits for
-them to disappear, then starts the replacement.  A Vivado run may still use
-its deliberately bounded internal workers selected by `VEN_FPGA_JOBS`; the
-rule is that there is only one top-level run on the host.
+Use `fpga/run_vivado_exclusive.sh` for **every** Ventium Vivado launch. It
+holds an exclusive host lock and, before each new build, stops the prior named
+Vivado cgroup and terminates any remaining same-user Vivado/VRS process family,
+including generic descendants. It waits for the complete family to disappear
+before starting the replacement. `VEN_FPGA_JOBS` must be exactly `1`: there is
+one complete Vivado process family and one synthesis worker on the host.
 
 This is intentionally host-global and destructive to another active Vivado
 job.  Do not launch `vivado -mode batch ...` directly, do not run two FPGA
@@ -351,7 +351,7 @@ Two environment knobs support controlled implementation experiments:
 
 ```bash
 # Diagnostic A/B: omit both system-fast-path defines, leave every other define unchanged.
-VEN_FPGA_FASTPATH=0 VEN_FPGA_JOBS=2 \
+VEN_FPGA_FASTPATH=0 VEN_FPGA_JOBS=1 \
   "$VENTIUM/fpga/run_vivado_exclusive.sh" -mode batch \
     -source "$VENTIUM/fpga/create_project_3mhz_wrapper.tcl" \
     -tclargs all "$VENTIUM/fpga_run_<tag>"
@@ -365,11 +365,11 @@ memory loads (and therefore dependent fast stores) to the slow FSM for a
 source-identical diagnostic A/B. `VEN_FPGA_FASTSTORE` defaults to `1`; setting
 it to `0` leaves the read path enabled but returns only the compact system
 stores to the slow FSM. It cannot be enabled when `VEN_FPGA_FASTLOAD=0`.
-`VEN_FPGA_JOBS` accepts 1 through 4 and defaults to 4. Use 2 on the current
-build host: a four-worker run lost synthesis workers under
-memory pressure, while the successful two-worker run still reached roughly
-22.6 GiB physical memory. Always verify the generated synthesis Tcl's
-`verilog_define` line rather than trusting an output-directory label.
+`VEN_FPGA_JOBS` defaults to `1` and the wrapper rejects every other value.
+The generated Tcl sets `general.maxThreads 1`; the named systemd scope uses
+`KillMode=control-group`, so a replacement launch terminates the parent, VRS,
+and every descendant together. Always verify the generated synthesis Tcl output
+rather than trusting an output-directory label.
 
 ### 8.2.1 Preset-free PCAP fallback
 
@@ -379,7 +379,7 @@ MIO/DDR settings) before RTL synthesis begins. The wrapper supports the
 upstream script's documented preset-free fallback for this **PCAP-only** case:
 
 ```bash
-VEN_FPGA_SKIP_PRESET=1 VEN_FPGA_FASTPATH=0 VEN_FPGA_JOBS=2 \
+VEN_FPGA_SKIP_PRESET=1 VEN_FPGA_FASTPATH=0 VEN_FPGA_JOBS=1 \
   "$VENTIUM/fpga/run_vivado_exclusive.sh" -mode batch \
     -source "$VENTIUM/fpga/create_project_3mhz_wrapper.tcl" \
     -tclargs bd "$VENTIUM/fpga_run_<tag>"

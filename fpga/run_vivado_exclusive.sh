@@ -3,12 +3,12 @@
 #
 # Run one *top-level* Ventium Vivado build at a time.
 #
-# Vivado itself is allowed to create the bounded synthesis workers selected by
-# VEN_FPGA_JOBS.  What must never coexist is a second parent Vivado run: two
-# runs can consume the entire host, swap heavily, and make both results
-# untrustworthy.  This launcher deliberately has host-global semantics.  Each
-# new invocation terminates every existing process whose executable name is
-# exactly "vivado", including stale task workers, before starting its run.
+# What must never coexist is a second Vivado process family: two runs can
+# consume the entire host, swap heavily, and make both results untrustworthy.
+# This launcher deliberately has host-global semantics.  Each new invocation
+# stops the named cgroup from the preceding guarded run, then finds every
+# remaining executable from the Vivado installation and its descendants.  That
+# includes VRS/task helpers whose executable name is not literally "vivado".
 #
 # Do not invoke `vivado -mode batch ...` directly for this project.  Use:
 #   fpga/run_vivado_exclusive.sh -mode batch -source ... -tclargs ...
@@ -22,13 +22,123 @@ if (( $# == 0 )); then
     exit 64
 fi
 
-lock_file="${TMPDIR:-/tmp}/ventium-vivado-exclusive.lock"
+lock_dir="${VENTIUM_VIVADO_LOCK_DIR:-${SCRIPT_DIR}/../tmp}"
+mkdir -p "$lock_dir"
+lock_file="${lock_dir}/ventium-vivado-exclusive.lock"
 terminate_timeout=45
+vivado_scope="ventium-vivado.scope"
+vivado_install="$(readlink -f "${VENTIUM_VIVADO_ROOT:-/tools/Xilinx/2025.2/Vivado}")"
+vivado_uid="$(id -u)"
 
-vivado_pids() {
-    # `-x` deliberately excludes this shell script, Tcl file names, log names,
-    # and unrelated commands whose arguments merely contain the word vivado.
-    pgrep -x vivado 2>/dev/null || true
+proc_ppid() {
+    local stat
+    local fields
+
+    [[ -r "/proc/$1/stat" ]] || return 1
+    IFS= read -r stat < "/proc/$1/stat" || return 1
+    # The second field is parenthesized and may contain spaces, so remove it
+    # before selecting field four (the parent PID) from the remaining words.
+    fields="${stat##*) }"
+    set -- $fields
+    (( $# >= 2 )) || return 1
+    printf "%s\n" "$2"
+}
+
+vivado_seed_pids() {
+    local proc
+    local pid
+    local uid
+    local exe
+
+    # Only consider our own executables below the configured Vivado tree.  A
+    # shell argument or an unrelated same-name program cannot match this test.
+    for proc in /proc/[0-9]*; do
+        pid="${proc##*/}"
+        [[ "$pid" != "$$" ]] || continue
+        uid="$(stat -c "%u" "$proc" 2>/dev/null || true)"
+        [[ "$uid" == "$vivado_uid" ]] || continue
+        exe="$(readlink -f "$proc/exe" 2>/dev/null || true)"
+        case "$exe" in
+            "$vivado_install"/*)
+                case "${exe##*/}" in
+                    vivado|vrs) printf "%s\n" "$pid" ;;
+                esac
+                ;;
+        esac
+    done
+}
+
+vivado_family_pids() {
+    local -a pids
+    local -a next
+    local proc
+    local pid
+    local ppid
+    local -A selected
+
+    mapfile -t pids < <(vivado_seed_pids)
+    for pid in "${pids[@]}"; do
+        [[ -n "$pid" ]] && selected["$pid"]=1
+    done
+
+    # Include generic descendants (shells, Java, launchers) of the selected
+    # vendor executables.  The named cgroup covers all new runs; this closes the
+    # legacy/orphan gap for a run started before the named-scope guard existed.
+    while :; do
+        next=()
+        for proc in /proc/[0-9]*; do
+            pid="${proc##*/}"
+            [[ -n "${selected[$pid]:-}" ]] && continue
+            ppid="$(proc_ppid "$pid" 2>/dev/null || true)"
+            if [[ -n "$ppid" && -n "${selected[$ppid]:-}" ]]; then
+                next+=("$pid")
+            fi
+        done
+        (( ${#next[@]} == 0 )) && break
+        for pid in "${next[@]}"; do
+            selected["$pid"]=1
+        done
+    done
+
+    if (( ${#selected[@]} != 0 )); then
+        for pid in "${!selected[@]}"; do
+            printf "%s\n" "$pid"
+        done | sort -n
+    fi
+}
+
+scope_is_live() {
+    local state
+
+    state="$(systemctl --user show "$vivado_scope" -p ActiveState --value 2>/dev/null || true)"
+    [[ "$state" == active || "$state" == activating || "$state" == deactivating ]]
+}
+
+stop_scoped_vivado() {
+    local deadline
+
+    scope_is_live || return
+    echo "[vivado-exclusive] stopping prior guarded scope: $vivado_scope" >&2
+    systemctl --user kill --kill-whom=all --signal=TERM "$vivado_scope" >/dev/null 2>&1 || true
+    systemctl --user stop --no-block "$vivado_scope" >/dev/null 2>&1 || true
+    deadline=$((SECONDS + terminate_timeout))
+    while scope_is_live; do
+        if (( SECONDS >= deadline )); then
+            echo "[vivado-exclusive] forcing prior guarded scope: $vivado_scope" >&2
+            systemctl --user kill --kill-whom=all --signal=KILL "$vivado_scope" >/dev/null 2>&1 || true
+            systemctl --user stop --no-block "$vivado_scope" >/dev/null 2>&1 || true
+            deadline=$((SECONDS + 10))
+            while scope_is_live; do
+                if (( SECONDS >= deadline )); then
+                    echo "[vivado-exclusive] ERROR: guarded scope survived SIGKILL: $vivado_scope" >&2
+                    exit 1
+                fi
+                sleep 1
+            done
+            break
+        fi
+        sleep 1
+    done
 }
 
 stop_existing_vivado() {
@@ -36,7 +146,8 @@ stop_existing_vivado() {
     local deadline
     local pid_csv
 
-    mapfile -t pids < <(vivado_pids)
+    stop_scoped_vivado
+    mapfile -t pids < <(vivado_family_pids)
     if (( ${#pids[@]} == 0 )); then
         return
     fi
@@ -48,7 +159,7 @@ stop_existing_vivado() {
 
     deadline=$((SECONDS + terminate_timeout))
     while :; do
-        mapfile -t pids < <(vivado_pids)
+        mapfile -t pids < <(vivado_family_pids)
         if (( ${#pids[@]} == 0 )); then
             echo "[vivado-exclusive] previous Vivado processes exited" >&2
             return
@@ -59,7 +170,7 @@ stop_existing_vivado() {
             # A killed parent can take a short time to reap all task workers.
             deadline=$((SECONDS + 10))
             while :; do
-                mapfile -t pids < <(vivado_pids)
+                mapfile -t pids < <(vivado_family_pids)
                 if (( ${#pids[@]} == 0 )); then
                     echo "[vivado-exclusive] all prior Vivado processes are gone" >&2
                     return
@@ -100,4 +211,5 @@ set -u
 # boundary if a vendor tool nevertheless fans out unexpectedly.
 export VENTIUM_BUILD_MEMORY_MAX="${VENTIUM_VIVADO_MEMORY_MAX:-20G}"
 export VENTIUM_BUILD_TASKS_MAX="${VENTIUM_VIVADO_TASKS_MAX:-32}"
+export VENTIUM_BUILD_SCOPE_UNIT="ventium-vivado"
 exec "$SCRIPT_DIR/../tools/build_scope.sh" -- "${VIVADO_BIN:-vivado}" "$@"
