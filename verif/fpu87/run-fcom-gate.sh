@@ -16,7 +16,7 @@ COUNT="${1:-${N:-30000}}"
 SEED="${2:-${SEED:-1234}}"
 OBJ="$HERE/obj_fcom"
 VEC="$HERE/build/fcom_vectors.txt"
-VERILATOR="${VERILATOR:-verilator}"
+. "$ROOT/verif/lib/verilator_env.sh"
 VL_J="${VL_J:-1}"
 
 say() { printf '\n=== %s ===\n' "$*"; }

@@ -17,11 +17,12 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$HERE/../.." && pwd)"
 OBJ="$HERE/obj"
 VTB="$OBJ/vtb"
 mkdir -p "$OBJ" "$VTB"
 
-VERILATOR="${VERILATOR:-verilator}"
+. "$ROOT/verif/lib/verilator_env.sh"
 VL_J="${VL_J:-1}"
 
 # M5B-int: the biu_p5 DUT now lives in the canonical RTL home (rtl/bus/biu_p5.sv),
@@ -29,7 +30,7 @@ VL_J="${VL_J:-1}"
 # standalone self-consistency gate still builds it DIRECTLY from there (the SVA
 # in tb_biu_p5.sv stay active), so the structural/SVA verification is unchanged
 # by integration. The repo root is HERE/../.. (verif/bus -> repo root).
-DUT="$(cd "$HERE/../.." && pwd)/rtl/bus/biu_p5.sv"
+DUT="$ROOT/rtl/bus/biu_p5.sv"
 
 # warnings that are stylistic-only for the *testbench* (DUT is lint-clean under -Wall)
 TB_WAIVERS=(-Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-UNUSEDPARAM -Wno-BLKSEQ

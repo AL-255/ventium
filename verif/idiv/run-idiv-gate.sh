@@ -7,7 +7,7 @@
 # predicates core_exec.svh uses, over all six forms (DIV/IDIV x r8/r16/r32).
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-ROOT="$(pwd)"; BUILD="$ROOT/build/idiv"; VERILATOR="${VERILATOR:-verilator}"; VL_J="${VL_J:-1}"
+ROOT="$(pwd)"; BUILD="$ROOT/build/idiv"; . "$ROOT/verif/lib/verilator_env.sh"; VL_J="${VL_J:-1}"
 N="${IDIV_N:-80000}"
 echo "=== IDIV gate: build Verilator TB (ven_idiv, --timing) ==="
 "$VERILATOR" -j "$VL_J" --binary --timing --quiet -Wall -Wno-fatal \

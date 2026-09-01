@@ -7,7 +7,12 @@
 # hatch; it retains the cross-build lock.
 
 : "${ROOT:?set ROOT before sourcing verilator_env.sh}"
-export VERILATOR_BIN="${VERILATOR_BIN:-verilator}"
+# Preserve an explicitly selected binary while making the public VERILATOR
+# command the non-bypassable project guard.  Older gate scripts commonly used
+# VERILATOR=/path/to/verilator; accepting that spelling here lets them gain the
+# lock/cgroup protection without changing their caller interface.
+export VERILATOR_BIN="${VERILATOR_BIN:-${VERILATOR:-verilator}}"
+export VERILATOR="$ROOT/tools/verilator_serial.sh"
 verilator() {
-    "$ROOT/tools/verilator_serial.sh" "$@"
+    "$VERILATOR" "$@"
 }

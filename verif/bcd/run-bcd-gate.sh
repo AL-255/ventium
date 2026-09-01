@@ -7,7 +7,7 @@
 # values spanning the BCD range + the int64/range overflow cases.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-ROOT="$(pwd)"; BUILD="$ROOT/build/bcd"; VERILATOR="${VERILATOR:-verilator}"; VL_J="${VL_J:-1}"
+ROOT="$(pwd)"; BUILD="$ROOT/build/bcd"; . "$ROOT/verif/lib/verilator_env.sh"; VL_J="${VL_J:-1}"
 N="${BCD_N:-40000}"
 echo "=== BCD gate: build Verilator TB (ven_bcd, --timing) ==="
 "$VERILATOR" -j "$VL_J" --binary --timing --quiet -Wall -Wno-fatal \

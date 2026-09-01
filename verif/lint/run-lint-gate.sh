@@ -17,6 +17,8 @@
 # Prints LINT-GATE-OK on success.
 set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+ROOT="$REPO"
+. "$ROOT/verif/lib/verilator_env.sh"
 cd "$REPO/rtl"
 
 FATAL="-Werror-IMPLICIT -Werror-PINMISSING -Werror-UNDRIVEN -Werror-MULTIDRIVEN -Werror-LATCH -Werror-UNOPTFLAT"
@@ -45,7 +47,7 @@ run_cfg() {
   if [[ " $* " == *"+define+VEN_L1_AXI"* ]]; then extra="$L1AXI_RTL"; fi
   local out rc
   set +e
-  out="$(verilator $BASE "$@" $extra 2>&1)"
+  out="$("$VERILATOR" $BASE "$@" $extra 2>&1)"
   rc=$?
   set -e
   if [ "$rc" -ne 0 ]; then

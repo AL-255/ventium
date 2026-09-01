@@ -16,7 +16,7 @@ SEED="${2:-1234}"
 QREF="$ROOT/tools/p5xtrans/qref"
 OBJ="$HERE/obj_fyl2x"
 VEC="$HERE/build/fyl2x_vectors.txt"
-VERILATOR="${VERILATOR:-verilator}"
+. "$ROOT/verif/lib/verilator_env.sh"
 VL_J="${VL_J:-1}"
 
 say() { printf '\n=== %s ===\n' "$*"; }

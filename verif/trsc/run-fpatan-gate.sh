@@ -5,7 +5,7 @@
 # reference qfpatan (itself proven == real qemu-i386). All 4 rounding modes.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-ROOT="$(pwd)"; BUILD="$ROOT/build/trsc"; VERILATOR="${VERILATOR:-verilator}"; VL_J="${VL_J:-1}"
+ROOT="$(pwd)"; BUILD="$ROOT/build/trsc"; . "$ROOT/verif/lib/verilator_env.sh"; VL_J="${VL_J:-1}"
 mkdir -p "$BUILD"
 
 echo "=== FPATAN gate: build qref ==="

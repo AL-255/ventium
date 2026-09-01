@@ -5,7 +5,7 @@
 # silicon model (whose accuracy is ~1.8 ulp vs quad, qref --validate-trig).
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-ROOT="$(pwd)"; BUILD="$ROOT/build/trsc"; VERILATOR="${VERILATOR:-verilator}"; VL_J="${VL_J:-1}"
+ROOT="$(pwd)"; BUILD="$ROOT/build/trsc"; . "$ROOT/verif/lib/verilator_env.sh"; VL_J="${VL_J:-1}"
 mkdir -p "$BUILD"
 echo "=== FSINCOS gate: build qref + check model accuracy ==="
 make -C tools/p5xtrans qref >/dev/null

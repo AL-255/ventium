@@ -67,14 +67,16 @@ if [ "${VENTIUM_ALLOW_PARALLEL_VERILATOR:-0}" != "1" ]; then
     set -- "${safe_args[@]}"
 fi
 
-if command -v flock >/dev/null 2>&1; then
-    exec 9>"${lock_path}"
-    if ! flock -n 9; then
-        echo "[verilator-lock] another Ventium Verilator build is active; waiting for it to finish" >&2
-        flock 9
+if [ "${VENTIUM_BUILD_SCOPE_ACTIVE:-0}" != "1" ]; then
+    if command -v flock >/dev/null 2>&1; then
+        exec 9>"${lock_path}"
+        if ! flock -n 9; then
+            echo "[verilator-lock] another Ventium Verilator build is active; waiting for it to finish" >&2
+            flock 9
+        fi
+    else
+        echo "[verilator-lock] flock unavailable; cross-build serialization disabled" >&2
     fi
-else
-    echo "[verilator-lock] flock unavailable; cross-build serialization disabled" >&2
 fi
 
 if [ "$is_build" = 1 ]; then

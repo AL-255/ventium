@@ -5,7 +5,7 @@
 # bit-exact vs the combinational fx_bcd_to_fx over random valid packed-BCD.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-ROOT="$(pwd)"; BUILD="$ROOT/build/fbld"; VERILATOR="${VERILATOR:-verilator}"; VL_J="${VL_J:-1}"
+ROOT="$(pwd)"; BUILD="$ROOT/build/fbld"; . "$ROOT/verif/lib/verilator_env.sh"; VL_J="${VL_J:-1}"
 N="${FBLD_N:-40000}"
 echo "=== FBLD gate: build Verilator TB (ven_bcd_to_fp, --timing) ==="
 "$VERILATOR" -j "$VL_J" --binary --timing --quiet -Wall -Wno-fatal \

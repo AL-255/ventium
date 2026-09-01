@@ -6,7 +6,7 @@
 # `qref --sweep` (193 inputs across every branch).
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-ROOT="$(pwd)"; BUILD="$ROOT/build/trsc"; VERILATOR="${VERILATOR:-verilator}"; VL_J="${VL_J:-1}"
+ROOT="$(pwd)"; BUILD="$ROOT/build/trsc"; . "$ROOT/verif/lib/verilator_env.sh"; VL_J="${VL_J:-1}"
 mkdir -p "$BUILD"
 
 echo "=== F2XM1 gate: build qref ==="

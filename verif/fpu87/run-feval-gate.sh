@@ -17,7 +17,7 @@ SEED="${2:-${SEED:-1234}}"
 ORACLE="$HERE/build/ven_fpu_oracle"
 OBJ="$HERE/obj_feval"
 VEC="$HERE/build/feval_vectors.txt"
-VERILATOR="${VERILATOR:-verilator}"
+. "$ROOT/verif/lib/verilator_env.sh"
 VL_J="${VL_J:-1}"
 
 say() { printf '\n=== %s ===\n' "$*"; }
