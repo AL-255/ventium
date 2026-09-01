@@ -38,16 +38,16 @@ fi
 
 # A parent `make -j` exports a jobserver token in MAKEFLAGS.  Do not preserve
 # it: recursive makes can otherwise reconnect to the parent jobserver and
-# silently re-enable parallelism.  The service receives this explicit value
-# below (systemd-run does not reliably inherit caller-only exports into its
-# user-manager service).
+# silently re-enable parallelism.
 export VENTIUM_BUILD_SCOPE_ACTIVE=1
 export MAKEFLAGS="-j1"
 scope_mem="${VENTIUM_BUILD_MEMORY_MAX:-${VENTIUM_VERILATOR_MEMORY_MAX:-6G}}"
 scope_tasks="${VENTIUM_BUILD_TASKS_MAX:-${VENTIUM_VERILATOR_TASKS_MAX:-64}}"
-# Use a transient service, not --scope: systemd rejects --wait for a scope.  A
-# waited service makes the wrapper's lock lifetime exactly match the child tree.
-exec systemd-run --user --quiet --wait --collect --working-directory "$PWD" \
+# A synchronous scope runs the command as our child in a bounded cgroup.  That
+# is essential here: unlike a transient service, it retains the caller's PATH,
+# TB_BIN, cache locations, and the active-scope guard.  systemd-run waits for a
+# scope command by default, so FD 9 keeps the global build lock until its whole
+# process tree exits.
+exec systemd-run --user --scope --quiet \
     -p "MemoryMax=${scope_mem}" -p "TasksMax=${scope_tasks}" \
-    --setenv=VENTIUM_BUILD_SCOPE_ACTIVE=1 --setenv=MAKEFLAGS=-j1 \
     -- "$@"
