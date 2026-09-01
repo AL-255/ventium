@@ -100,7 +100,7 @@ module route_harness #(
 
   logic        c_req, c_we; logic [31:0] c_addr, c_wdata; logic [3:0] c_wstrb;
   logic [31:0] c_rdata; logic c_ack;
-  logic        bus_err; logic flush = 1'b0;
+  logic        bus_err, m_idle; logic flush = 1'b0;
 
   logic [3:0]        awid;   logic [ADDR_W-1:0] awaddr; logic [7:0] awlen;
   logic [2:0]        awsize; logic [1:0] awburst; logic awlock; logic [3:0] awcache;
@@ -115,7 +115,7 @@ module route_harness #(
   ventium_l1_axi #(.ADDR_W(ADDR_W), .REMAP_BASE(REMAP_BASE), .ADDR_MASK(ADDR_MASK),
                    .NB_DRAMC(NB_DRAMC_P), .NB_PAM(NB_PAM_P)) dut (
       .core_clk(core_clk), .core_rst_n(core_rst_n), .axi_clk(axi_clk), .axi_rst_n(axi_rst_n),
-      .flush_all(flush), .golden_l1(1'b0), .shutdown(1'b0), .m_idle(),
+      .flush_all(flush), .golden_l1(1'b0), .shutdown(1'b0), .m_idle(m_idle),
       .core_req(c_req), .core_we(c_we), .core_addr(c_addr), .smm_active(1'b0),
       .smbase(32'h0003_0000), .smm_flush_o(), .core_lock(1'b0), .core_lin(c_addr), .core_wdata(c_wdata),
       .core_wstrb(c_wstrb), .core_rdata(c_rdata), .core_ack(c_ack),
@@ -212,6 +212,23 @@ module route_harness #(
     @(negedge core_clk); c_req<=1'b0; c_we<=1'b0; c_wstrb<=4'd0;
   endtask
 
+  // Stores are acknowledged at P54C queue admission, not at external AXI
+  // completion. Wait for the exported drain signal before examining external
+  // write effects; otherwise this test observes a previous posted store.
+  task automatic wait_axi_drain(input string what);
+    int guard;
+    guard = 0;
+    forever begin
+      @(posedge core_clk); #1;
+      if (m_idle) break;
+      if (++guard > 5000) begin
+        $display("  FAIL [%s] AXI write queue did not drain", TAG);
+        errs++;
+        break;
+      end
+    end
+  endtask
+
   task automatic do_flush;
     @(negedge core_clk); flush<=1'b1;
     @(negedge core_clk); flush<=1'b0;
@@ -278,6 +295,7 @@ module route_harness #(
     logic [31:0] aw0;
     aw0 = aw_count;
     do_write(a, wdata, be);
+    wait_axi_drain(what);
     chk({what, ": AW count"},      64'(aw_count - aw0), 64'(exp_aw));
     chk({what, ": backing bytes"}, 64'(slv.peek(phys)), 64'(exp_peek));
   endtask
@@ -288,6 +306,8 @@ module route_harness #(
     logic [31:0] aw0;
     aw0 = aw_count;
     do_write(a, wdata, be);
+    wait_axi_drain(what);
+    repeat (4) @(posedge axi_clk); #1;
     chk({what, ": NO AW"},              64'(aw_count - aw0), 64'd0);
     chk({what, ": backing untouched"},  64'(slv.peek(phys)), 64'(exp_peek));
     chk({what, ": route_err -> bus_err"}, 64'(bus_err),      64'd1);
@@ -579,7 +599,7 @@ module r6_harness #(
 
   logic        c_req, c_we; logic [31:0] c_addr, c_wdata; logic [3:0] c_wstrb;
   logic [31:0] c_rdata; logic c_ack;
-  logic        bus_err; logic flush = 1'b0;
+  logic        bus_err, m_idle; logic flush = 1'b0;
 
   logic [3:0]        awid;   logic [ADDR_W-1:0] awaddr; logic [7:0] awlen;
   logic [2:0]        awsize; logic [1:0] awburst; logic awlock; logic [3:0] awcache;
@@ -594,7 +614,7 @@ module r6_harness #(
   ventium_l1_axi #(.ADDR_W(ADDR_W), .REMAP_BASE(REMAP_BASE), .ADDR_MASK(ADDR_MASK_P),
                    .NB_DRAMC(NB_DRAMC_P), .NB_TOM_MB4(NB_TOM_MB4_P)) dut (
       .core_clk(core_clk), .core_rst_n(core_rst_n), .axi_clk(axi_clk), .axi_rst_n(axi_rst_n),
-      .flush_all(flush), .golden_l1(1'b0), .shutdown(1'b0), .m_idle(),
+      .flush_all(flush), .golden_l1(1'b0), .shutdown(1'b0), .m_idle(m_idle),
       .core_req(c_req), .core_we(c_we), .core_addr(c_addr), .smm_active(1'b0),
       .smbase(32'h0003_0000), .smm_flush_o(), .core_lock(1'b0), .core_lin(c_addr), .core_wdata(c_wdata),
       .core_wstrb(c_wstrb), .core_rdata(c_rdata), .core_ack(c_ack),
@@ -730,6 +750,23 @@ module r6_harness #(
     @(negedge core_clk); c_req<=1'b0; c_we<=1'b0; c_wstrb<=4'd0;
   endtask
 
+  // Stores are acknowledged at P54C queue admission, not at external AXI
+  // completion. Wait for the exported drain signal before examining external
+  // write effects; otherwise this test observes a previous posted store.
+  task automatic wait_axi_drain(input string what);
+    int guard;
+    guard = 0;
+    forever begin
+      @(posedge core_clk); #1;
+      if (m_idle) break;
+      if (++guard > 5000) begin
+        $display("  FAIL [%s] AXI write queue did not drain", TAG);
+        errs++;
+        break;
+      end
+    end
+  endtask
+
   // ---- boundary-case helpers -------------------------------------------------
   // non-cacheable-side read: ONE single-beat piece AR at the byte address and
   // ARSIZE of the access; no allocation (the re-read costs another AR).
@@ -766,6 +803,7 @@ module r6_harness #(
     logic [31:0] aw0;
     aw0 = aw_count;
     do_write(a, wdata, be);
+    wait_axi_drain(what);
     chk({what, ": ONE AW"}, 64'(aw_count - aw0), 64'd1);
     chk({what, ": AWADDR"}, 64'(mon_awaddr),     64'(exp_axi));
     chk({what, ": AWSIZE"}, 64'(mon_awsize),     64'd2);
@@ -781,6 +819,7 @@ module r6_harness #(
     logic [31:0] aw0;
     aw0 = aw_count;
     do_write(a, wdata, be);
+    wait_axi_drain(what);
     chk({what, ": TWO AWs"},   64'(aw_count - aw0), 64'd2);
     chk({what, ": p1 AWADDR"}, 64'(mon_awaddr2),    64'(exp_axi1));
     chk({what, ": p1 WSTRB"},  64'(mon_wstrb2),     64'(exp_strb1));
@@ -794,6 +833,8 @@ module r6_harness #(
     logic [31:0] aw0;
     aw0 = aw_count;
     do_write(a, wdata, be);
+    wait_axi_drain(what);
+    repeat (4) @(posedge axi_clk); #1;
     chk({what, ": NO AW"},               64'(aw_count - aw0), 64'd0);
     chk({what, ": route_err -> bus_err"}, 64'(bus_err),       64'd1);
   endtask

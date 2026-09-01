@@ -20,8 +20,10 @@ module tb_l1d;
   // backing side
   logic        m_req, m_we; logic [31:0] m_addr, m_wdata; logic [3:0] m_wstrb;
   logic [31:0] m_rdata; logic m_ack;
-  // The normal backing is zero-latency.  This switch holds write responses for
-  // the ordered-write-buffer regression without changing read/fill behaviour.
+  // The normal backing is zero-latency. This switch holds write responses so
+  // the L1D-only seam can prove it preserves a store until its downstream owner
+  // accepts it. The architectural P54C posting queue belongs to ven_axi_master
+  // and is covered separately by tb_axi_wbuf.sv.
   logic        block_writes = 1'b0;
   logic        m_rd_narrow; logic [1:0] m_rd_size;
   // REVIEW2_aug2 H-11: count backing READ beats, so a non-cacheable access can be
@@ -197,32 +199,38 @@ module tb_l1d;
     do_read (32'h0000_1008, d); chk("read-after-write", d, 32'hDEAD_BEEF);
     chk("backing got the write", rd32(32'h0000_1008), 32'hDEAD_BEEF);
 
-    // A cacheable RAM store must retire into the one-entry ordered buffer even
-    // while the backing response is withheld.  Its updated L1 line is visible
-    // to a following hit; the backing remains old until the buffer drains.
-    // This is deliberately not an overlay test: the read is a normal array hit.
-    $display("[3b] ordered write buffer: early store ack, hit visibility, delayed drain");
+    // ven_l1d deliberately has NO private write buffer: the downstream AXI
+    // master owns the architectural two-entry P54C queue. At this direct unit
+    // seam, a store must consequently remain live and unacknowledged while the
+    // backing declines it; releasing the backing must produce one acknowledgement
+    // and update both the backing and resident cache line. The dedicated AXI
+    // write-buffer gate covers early P54C admission and ordered B retirement.
+    $display("[3b] direct backing hold: store remains live until downstream ack");
     block_writes = 1'b1;
     @(negedge clk);
     c_req <= 1'b1; c_we <= 1'b1; c_addr <= 32'h0000_100c;
     c_wdata <= 32'h1357_9bdf; c_wstrb <= 4'hf;
     #1;
-    if (!c_ack) begin
-      $display("  FAIL cacheable store did not ack on buffer enqueue"); errors++;
-    end else $display("  ok   cacheable store acked on enqueue");
+    if (c_ack) begin
+      $display("  FAIL direct L1D store acked without downstream acceptance"); errors++;
+    end else $display("  ok   direct L1D store waits for downstream ack");
     @(posedge clk); #1;
-    if (!dut.wb_valid || !m_req || !m_we) begin
-      $display("  FAIL queued write was not retained/driven while B response blocked"); errors++;
-    end else $display("  ok   queued write retained while response blocked");
-    @(negedge clk); c_req <= 1'b0; c_we <= 1'b0;
+    if (!m_req || !m_we || m_addr !== 32'h0000_100c ||
+        m_wdata !== 32'h1357_9bdf || m_wstrb !== 4'hf) begin
+      $display("  FAIL held store was not retained/driven while downstream blocked"); errors++;
+    end else $display("  ok   held store remains driven while downstream blocked");
     chk("backing stays old before drain", rd32(32'h0000_100c), 32'h100c ^ 32'hA5A5_0000);
-    do_read(32'h0000_100c, d); chk("array hit sees queued store", d, 32'h1357_9bdf);
     block_writes = 1'b0;
-    @(posedge clk); #1;
+    for (int guard=0; guard<50; guard++) begin
+      @(posedge clk); #1;
+      if (c_ack) break;
+      if (guard==49) begin
+        $display("  FAIL released store did not receive downstream ack"); errors++;
+      end
+    end
+    @(negedge clk); c_req <= 1'b0; c_we <= 1'b0;
     chk("backing receives drained store", rd32(32'h0000_100c), 32'h1357_9bdf);
-    if (dut.wb_valid) begin
-      $display("  FAIL write buffer stayed valid after B response"); errors++;
-    end else $display("  ok   write buffer drained in order");
+    do_read(32'h0000_100c, d); chk("array hit sees released store", d, 32'h1357_9bdf);
 
     $display("[4] 2-way set: a 3rd distinct line into the same set evicts LRU");
     // set index = addr[11:5]; pick three line bases sharing a set (stride 0x1000).
