@@ -21,6 +21,8 @@ if [ "${VENTIUM_BUILD_SCOPE_ACTIVE:-0}" = "1" ]; then
 fi
 
 lock_path="${VENTIUM_HEAVY_BUILD_LOCK:-${VENTIUM_VERILATOR_LOCK:-/tmp/ventium-heavy-build.lock}}"
+script_dir="$(cd -- "$(dirname -- "$0")" && pwd)"
+repo_root="$(cd -- "${script_dir}/.." && pwd)"
 if ! command -v flock >/dev/null 2>&1; then
     echo "[build-scope] flock is required to serialize generated-code builds" >&2
     exit 125
@@ -41,6 +43,14 @@ fi
 # silently re-enable parallelism.
 export VENTIUM_BUILD_SCOPE_ACTIVE=1
 export MAKEFLAGS="-j1"
+# This host mounts /tmp with a per-user quota.  Generated C++ and compiler
+# temporaries used by an RTL build can exceed it despite `df` reporting free
+# tmpfs capacity, so keep the project default on the repository volume.  An
+# explicit caller choice remains authoritative.
+if [ -z "${TMPDIR:-}" ]; then
+    export TMPDIR="${VENTIUM_BUILD_TMPDIR:-${repo_root}/tmp/build-tmp}"
+    mkdir -p "${TMPDIR}"
+fi
 scope_mem="${VENTIUM_BUILD_MEMORY_MAX:-${VENTIUM_VERILATOR_MEMORY_MAX:-6G}}"
 scope_tasks="${VENTIUM_BUILD_TASKS_MAX:-${VENTIUM_VERILATOR_TASKS_MAX:-64}}"
 # A synchronous scope runs the command as our child in a bounded cgroup.  That

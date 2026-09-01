@@ -7,6 +7,14 @@
 # hatch; it retains the cross-build lock.
 
 : "${ROOT:?set ROOT before sourcing verilator_env.sh}"
+# The host's /tmp is a quota-limited tmpfs.  Most standalone Verilator gates
+# create their objdir with mktemp before invoking the guarded compiler wrapper,
+# so select the repository volume at this shared entry point.  Honor an
+# explicit TMPDIR (or a common VENTIUM_VERIFY_TMPDIR override).
+if [ -z "${TMPDIR:-}" ]; then
+    export TMPDIR="${VENTIUM_VERIFY_TMPDIR:-$ROOT/tmp/verify-tmp}"
+    mkdir -p "$TMPDIR"
+fi
 # Preserve an explicitly selected frontend while making the public VERILATOR
 # command the non-bypassable project guard.  VERILATOR_BIN is reserved by the
 # upstream Perl frontend for its compiled backend, so consume the legacy input

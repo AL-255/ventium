@@ -54,6 +54,15 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# The host's /tmp is a quota-limited tmpfs.  A full differential pass creates
+# compiler and trace temporaries even when its work/cache paths are redirected,
+# so select a repository-local default before entering the resource scope.
+# Callers can still supply TMPDIR or VENTIUM_VERIFY_TMPDIR explicitly.
+if [ -z "${TMPDIR:-}" ]; then
+    export TMPDIR="${VENTIUM_VERIFY_TMPDIR:-$ROOT/tmp/verify-tmp}"
+    mkdir -p "$TMPDIR"
+fi
+
 # This gate fans out compiler, QEMU gdbstub, Python, and RTL-simulator
 # descendants.  A task cap around only the RTL build cannot contain that tree.
 # Re-exec the complete gate in the shared resource scope before it starts.
