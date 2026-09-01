@@ -54,7 +54,18 @@
 // BIOS programming the TSC): cc={SCS=01,FLCE=1}=8'h41, dramc=8'h01 (no hole),
 // pam all-R/W/CE for the regions FreeDOS shadows, tom_mb4 = DRAM_BYTES/4MiB.
 
-module ven_cachemap (
+module ven_cachemap #(
+    // Simulation-only checkpoint profiles restore a 32-bit Linux process at its
+    // user virtual addresses. Those addresses are identity-backed by the
+    // simulation memory model, whereas the 430FX DRB4 field below can describe
+    // only up to 1020 MiB. Keep the ordinary chipset map as the default; the
+    // dedicated snapshot build alone opts into treating the high user portion
+    // of the 32-bit address space as cacheable backing memory.
+    //
+    // The parameter keeps FPGA elaboration on a constant-zero, netlist-identical
+    // path and makes the exceptional simulation contract visible at each use.
+    parameter bit SNAPSHOT_USER_HIGHMEM = 1'b0
+) (
     // ---- the cycle being classified ------------------------------------------
     input  logic [31:0] addr,          // physical address
     input  logic        is_write,      // 1 = write cycle (uses WE), 0 = read (uses RE)
@@ -172,6 +183,14 @@ module ven_cachemap (
       l1c_raw    = pam_ce && pam_re && (pam_we || is_code);
       // R/W regions are L2-cacheable; read-only regions are NOT in L2 (datasheet).
       l2c_raw    = pam_ce && pam_re && pam_we;
+    end else if (SNAPSHOT_USER_HIGHMEM
+                 && (addr >= 32'h4000_0000) && (addr < 32'hC000_0000)) begin
+      // Dedicated post-init process snapshots: Linux 32-bit user mappings can
+      // sit above the maximum encodable DRB4 TOM (notably the stack near 1 GiB).
+      // The verification fabric has no devices in this user-only range, so make
+      // it ordinary cacheable backing RAM. The real PCI/MMIO and kernel halves
+      // remain governed by the normal map below; production leaves this false.
+      region = R_EXT; dram_route = 1'b1; l1c_raw = 1'b1; l2c_raw = 1'b1;
     end else if (addr < tom) begin
       // 1M..(TOM-1) extended main memory: cacheable DRAM — unless the 15-16M hole.
       if (in_hole_hi) begin region = R_HOLE; dram_route = 1'b0; end

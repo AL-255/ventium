@@ -16,12 +16,22 @@ module tb_cachemap;
   logic [7:0]  dramc, cc, tom_mb4, smram;
   logic        to_dram, l1_cacheable, l2_cacheable;
   logic [3:0]  region;
+  logic        snapshot_to_dram, snapshot_l1_cacheable, snapshot_l2_cacheable;
+  logic [3:0]  snapshot_region;
 
   ven_cachemap dut (
       .addr(addr), .is_write(is_write), .is_code(is_code), .smm_active(smm_active),
       .pam(pam), .dramc(dramc), .cc(cc), .tom_mb4(tom_mb4), .smram(smram),
       .to_dram(to_dram), .l1_cacheable(l1_cacheable), .l2_cacheable(l2_cacheable),
       .region(region));
+
+  // The dedicated profiler maps a restored Linux-user stack above the ordinary
+  // DRB4 limit without changing the hardware default decoder.
+  ven_cachemap #(.SNAPSHOT_USER_HIGHMEM(1'b1)) snapshot_dut (
+      .addr(addr), .is_write(is_write), .is_code(is_code), .smm_active(smm_active),
+      .pam(pam), .dramc(dramc), .cc(cc), .tom_mb4(tom_mb4), .smram(smram),
+      .to_dram(snapshot_to_dram), .l1_cacheable(snapshot_l1_cacheable),
+      .l2_cacheable(snapshot_l2_cacheable), .region(snapshot_region));
 
   int errors = 0;
   int checks = 0;
@@ -40,6 +50,24 @@ module tb_cachemap;
     end else begin
       $display("  ok   %-28s addr=%08h wr=%0d code=%0d -> {dram=%0d l1=%0d l2=%0d} region=%0d",
                name, a, wr, code, to_dram, l1_cacheable, l2_cacheable, region);
+    end
+  endtask
+
+  task automatic chk_snapshot(input string name,
+                              input logic [31:0] a, input logic wr, input logic code,
+                              input logic e_dram, input logic e_l1, input logic e_l2);
+    addr = a; is_write = wr; is_code = code;
+    #1;
+    checks++;
+    if (snapshot_to_dram !== e_dram || snapshot_l1_cacheable !== e_l1 || snapshot_l2_cacheable !== e_l2) begin
+      errors++;
+      $display("  FAIL %-28s addr=%08h wr=%0d code=%0d : got {dram=%0d l1=%0d l2=%0d} exp {%0d %0d %0d} region=%0d",
+               name, a, wr, code, snapshot_to_dram, snapshot_l1_cacheable, snapshot_l2_cacheable,
+               e_dram, e_l1, e_l2, snapshot_region);
+    end else begin
+      $display("  ok   %-28s addr=%08h wr=%0d code=%0d -> {dram=%0d l1=%0d l2=%0d} region=%0d",
+               name, a, wr, code, snapshot_to_dram, snapshot_l1_cacheable, snapshot_l2_cacheable,
+               snapshot_region);
     end
   endtask
 
@@ -115,6 +143,15 @@ module tb_cachemap;
     smm_active = 1'b1;   // DEN=1, in SMM → SMM space visible → DRAM, cacheable
     chk("smram_smm",       32'h000A_8000, 0, 0, 1, 1, 1);
     smm_active = 1'b0; smram = 8'h00;
+
+    $display("[group 6] simulation-only Linux snapshot high user map");
+    // The default decoder remains the real 430FX map: above TOM is PCI.
+    chk("default_snapshot_stack_pci", 32'h407F_F4C8, 0, 0, 0, 0, 0);
+    // The profiler variant alone turns the 32-bit user half into cacheable
+    // identity-backed RAM; it must not absorb the kernel/MMIO half.
+    chk_snapshot("snapshot_stack_dram", 32'h407F_F4C8, 0, 0, 1, 1, 1);
+    chk_snapshot("snapshot_user_last", 32'hBFFF_FFFC, 1, 0, 1, 1, 1);
+    chk_snapshot("snapshot_kernel_pci",32'hC000_0000, 0, 0, 0, 0, 0);
 
     $display("== %0d checks, %0d errors ==", checks, errors);
     if (errors == 0) $display("CACHEMAP-GATE-OK");

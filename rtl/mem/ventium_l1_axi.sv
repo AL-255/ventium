@@ -280,6 +280,16 @@ module ventium_l1_axi #(
   // ---- post-L2 backing port (b_*): the seam between the L2 (or the bypass) and the
   logic m_rd_narrow; logic [1:0] m_rd_size;  // H-11/R2-H01: L1D -> backing, narrow read request
   logic b_rd_narrow; logic [1:0] b_rd_size;  // H-11/R2-H01: post-L2 (== m_* when EN_L2=0)
+`ifdef VEN_SNAPSHOT_RESTORE
+  // The post-init profiler restores a Linux-user image directly into the
+  // identity-addressed Verilator memory model. Its high user stack cannot be
+  // encoded by the 430FX's 8-bit DRB4 TOM field; isolate that simulation-only
+  // mapping at the cache-map boundary. FPGA and ordinary verification builds
+  // elaborate the constant-zero path below.
+  localparam bit CMAP_SNAPSHOT_USER_HIGHMEM = 1'b1;
+`else
+  localparam bit CMAP_SNAPSHOT_USER_HIGHMEM = 1'b0;
+`endif
   // ===== REVIEW2_aug2 H-13: THE I-SIDE CACHEABILITY QUERY ======================
   // The finding: instruction-fetch cacheability was driven by CR0.CD alone, with no
   // notion of the MEMORY TYPE of the address being fetched. A line in a region the
@@ -296,7 +306,7 @@ module ventium_l1_axi #(
   // L1-cacheable for CODE reads and not for data, which is exactly the shadowed-BIOS
   // case this decoder exists to model.
   logic core_ic_l1c, core_ic_dram_u, core_ic_l2c_u; logic [3:0] core_ic_region;
-  ven_cachemap u_cmap_ic (
+  ven_cachemap #(.SNAPSHOT_USER_HIGHMEM(CMAP_SNAPSHOT_USER_HIGHMEM)) u_cmap_ic (
       .addr(core_addr), .is_write(1'b0), .is_code(1'b1), .smm_active(smm_active),
       .pam(NB_PAM), .dramc(NB_DRAMC), .cc(NB_CC), .tom_mb4(NB_TOM_MB4), .smram(NB_SMRAM),
       .to_dram(core_ic_dram_u), .l1_cacheable(core_ic_l1c), .l2_cacheable(core_ic_l2c_u),
@@ -325,7 +335,7 @@ module ventium_l1_axi #(
   // MMIO must never be cached regardless). It also means the narrow/bypass path is
   // now live in the DEFAULT build — which is what the L1AXINARROW gate exercises.
   logic core_d_l1c, core_d_dram_u, core_d_l2c_u; logic [3:0] core_d_region;
-  ven_cachemap u_cmap_dc (
+  ven_cachemap #(.SNAPSHOT_USER_HIGHMEM(CMAP_SNAPSHOT_USER_HIGHMEM)) u_cmap_dc (
       .addr(core_addr), .is_write(core_we), .is_code(1'b0), .smm_active(smm_active),
       .pam(NB_PAM), .dramc(NB_DRAMC), .cc(NB_CC), .tom_mb4(NB_TOM_MB4), .smram(NB_SMRAM),
       .to_dram(core_d_dram_u), .l1_cacheable(core_d_l1c), .l2_cacheable(core_d_l2c_u),
@@ -352,7 +362,7 @@ module ventium_l1_axi #(
   end
   assign core_d_last = core_addr + ((core_we || core_wstrb != 4'd0) ? {29'd0, core_d_hi} : 32'd3);
   logic core_d_l1c_last, core_d_dram_last_u, core_d_l2c_last_u; logic [3:0] core_d_region_last;
-  ven_cachemap u_cmap_dc_last (
+  ven_cachemap #(.SNAPSHOT_USER_HIGHMEM(CMAP_SNAPSHOT_USER_HIGHMEM)) u_cmap_dc_last (
       .addr(core_d_last), .is_write(core_we), .is_code(1'b0), .smm_active(smm_active),
       .pam(NB_PAM), .dramc(NB_DRAMC), .cc(NB_CC), .tom_mb4(NB_TOM_MB4), .smram(NB_SMRAM),
       .to_dram(core_d_dram_last_u), .l1_cacheable(core_d_l1c_last),
@@ -716,7 +726,7 @@ module ventium_l1_axi #(
       // beside the CR0.CD term that shipped in c78c576. Steps (b) and (c) are ordinary
       // work; (a) is the decision.
       logic core_l1c, core_to_dram_u, core_l2c_u; logic [3:0] core_cm_region;
-      ven_cachemap u_cmap_l1 (
+      ven_cachemap #(.SNAPSHOT_USER_HIGHMEM(CMAP_SNAPSHOT_USER_HIGHMEM)) u_cmap_l1 (
           .addr(core_addr), .is_write(core_we), .is_code(1'b0), .smm_active(smm_active),
           .pam(NB_PAM), .dramc(NB_DRAMC), .cc(NB_CC), .tom_mb4(NB_TOM_MB4), .smram(NB_SMRAM),
           .to_dram(core_to_dram_u), .l1_cacheable(core_l1c), .l2_cacheable(core_l2c_u),
