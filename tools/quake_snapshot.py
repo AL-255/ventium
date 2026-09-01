@@ -18,15 +18,16 @@ and renders in a few million instructions.
 Reuses verif/qemu-trace/gen_trace.py's RSP client + register-layout parsing.
 
 CAVEATS (see L1C_BUG.md / the snapshot notes):
-  * gs_base (TLS) — qemu's gdbstub g-packet TLS base is unreliable for
-    linux-user; we recover it from the TCB self-pointer at %gs:0 (musl/glibc
-    store the TCB address there == gs_base). Override with --gs-base if needed.
+  * gs_base (TLS) — the QEMU target-description parser must ignore commented
+    `<reg>` examples.  With that contract honored, the linux-user g-packet
+    reports the real GS base; this tool validates it against the TCB self pointer.
+    `--gs-base` remains an explicit escape hatch for a known nonstandard target.
   * emulator-side fd state (open pak0.pak handle, the /p5q_video_capture fd) is
     NOT in a memory image; a bare restore won't capture frame writes. For a
     SIM proof-of-render, dump the framebuffer straight from Hunk memory instead.
     Full board restore needs a fd manifest + --restore-fds (TODO / F5).
 """
-import sys, os, json, time, argparse, subprocess
+import sys, os, json, time, argparse, subprocess, struct
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 "..", "verif", "qemu-trace"))
@@ -198,87 +199,144 @@ def trace_from_stop(rsp, layout, raw, out_path, max_insn, want_x87, verbose):
                         " (x87)" if emit_x87 else ""))
 
 
-def capture_x87_state(rsp, layout, raw):
-    """Return (restored-g-packet, 32-bit FNSAVE image) without guest changes.
+def _step_sigtrap(rsp, what):
+    """Single-step one known instruction and reject anything but normal #DB."""
+    stop = gt.StopReply(rsp.step())
+    while stop.kind == "output":
+        stop = gt.StopReply(rsp.recv())
+    if stop.kind != "stop" or stop.signal != 5:
+        raise gt.RSPError("%s did not complete with SIGTRAP" % what)
 
-    QEMU's i386 g-packet exposes ST values but reports an abridged zero tag word,
-    even for empty stack slots.  Its FNSTENV tag word is likewise not reliable
-    for a live Linux-user process.  A debugger-only FNSAVE/FRSTOR probe obtains
-    the complete 108-byte P5 x87 image, including the real full tag word.  It
-    saves/restores the overwritten code and stack bytes, restores EIP, and
-    verifies that GPR/flags/x87 views match the pre-probe state before returning.
+
+def _find_x87_env_pair(rsp, elf_path):
+    """Find Quake's verified FNSTENV/FLDENV scratch pair in a static ELF.
+
+    QEMU's i386 g-packet supplies logical ST values but intentionally hardcodes
+    the full tag word to zero.  The pinned static Quake image contains a
+    `MaskExceptions` helper whose two existing text instructions save and reload
+    a 32-bit x87 environment through a writable .data scratch word.  Reusing
+    those instructions avoids self-modifying stack/text probes altogether.
+    """
+    try:
+        with open(elf_path, "rb") as f:
+            elf = f.read()
+    except OSError as exc:
+        raise gt.RSPError("cannot read Quake ELF for x87 environment capture: %s" % exc)
+    if len(elf) < 52 or elf[:4] != b"\x7fELF" or elf[4:6] != b"\x01\x01":
+        raise gt.RSPError("x87 environment capture requires a 32-bit little-endian ELF")
+    e_type = struct.unpack_from("<H", elf, 16)[0]
+    if e_type != 2:                  # ET_EXEC: virtual addresses are fixed.
+        raise gt.RSPError("x87 environment capture requires a non-PIE ET_EXEC Quake ELF")
+    phoff = struct.unpack_from("<I", elf, 28)[0]
+    phentsz, phnum = struct.unpack_from("<HH", elf, 42)
+    if phentsz < 32 or phoff + phentsz * phnum > len(elf):
+        raise gt.RSPError("Quake ELF has malformed program headers")
+
+    saw_pair = False
+    for p in range(phnum):
+        off = phoff + p * phentsz
+        p_type, p_off, p_vaddr, _p_paddr, p_filesz, _p_memsz, p_flags, _p_align = \
+            struct.unpack_from("<IIIIIIII", elf, off)
+        if p_type != 1 or not (p_flags & 1) or p_off + p_filesz > len(elf):
+            continue
+        text = elf[p_off:p_off + p_filesz]
+        pos = 0
+        while True:
+            pos = text.find(b"\xd9\x35", pos)
+            if pos < 0:
+                break
+            seq = text[pos:pos + 20]
+            if (len(seq) == 20 and seq[6:8] == b"\x83\x0d" and
+                    seq[8:12] == seq[2:6] and seq[12] == 0x3f and
+                    seq[13:15] == b"\xd9\x25" and seq[15:19] == seq[2:6] and
+                    seq[19] == 0xc3):
+                saw_pair = True
+                code_addr = (p_vaddr + pos) & 0xffffffff
+                scratch = int.from_bytes(seq[2:6], "little")
+                # Never redirect the stopped guest unless every dependency is
+                # proven live: exact executable bytes, readable scratch, and a
+                # no-op RSP write/read-back to the writable scratch.
+                if rsp.read_mem(code_addr, len(seq)) != seq:
+                    pos += 1
+                    continue
+                old_scratch = rsp.read_mem(scratch, 28)
+                if old_scratch is None or len(old_scratch) != 28:
+                    pos += 1
+                    continue
+                if (not rsp.write_mem(scratch, old_scratch) or
+                        rsp.read_mem(scratch, 28) != old_scratch):
+                    pos += 1
+                    continue
+                return code_addr, code_addr + 13, scratch, old_scratch
+            pos += 1
+    if saw_pair:
+        raise gt.RSPError("Quake FNSTENV/FLDENV pair is not live or writable in this process")
+    raise gt.RSPError("could not find the verified Quake FNSTENV/FLDENV environment pair")
+
+
+def capture_x87_state(rsp, layout, raw, elf_path):
+    """Return (restored-g-packet, 28-byte x87 environment) without guest drift.
+
+    The two instructions are existing Quake instructions.  FNSTENV captures the
+    authoritative full tag/pointer environment; FLDENV restores x87 state; then
+    the original .data scratch bytes and EIP are restored and checked.  No code
+    page is ever modified, so QEMU's self-modifying-code protections cannot leave
+    a debugger stub behind in the process image.
     """
     eip = layout.slice(raw, "eip")
-    esp = layout.slice(raw, "esp")
-    if eip is None or esp is None or esp < 0x100:
-        raise gt.RSPError("cannot place reversible x87 environment probe")
-    scratch = (esp - 0x200) & ~0xf
-    code_addr = scratch - 0x20
-    old_code = rsp.read_mem(code_addr, 12)
-    old_scratch = rsp.read_mem(scratch, 108)
-    if old_code is None or len(old_code) != 12 or old_scratch is None or len(old_scratch) != 108:
-        raise gt.RSPError("x87 save probe memory is unavailable")
-    # Verify register write support before touching any guest state. `P eip=eip`
-    # is architecturally a no-op, but is required to return from the stack probe.
+    if eip is None:
+        raise gt.RSPError("cannot read EIP for x87 environment capture")
+    fnenv_addr, fldenv_addr, scratch, old_scratch = _find_x87_env_pair(rsp, elf_path)
     if not rsp.write_register(layout, "eip", eip):
         raise gt.RSPError("gdbstub does not support the EIP restore needed for x87 capture")
 
-    # DD /6 is non-waiting FNSAVE m108byte; DD /4 is FRSTOR m108byte.  Both
-    # are P5 instructions.  FNSAVE clears the x87 after writing its image, so
-    # FRSTOR is mandatory even on a successful probe.
-    fnsave = b"\xdd\x35" + scratch.to_bytes(4, "little")
-    frstor = b"\xdd\x25" + scratch.to_bytes(4, "little")
     saved = None
+    fpu_dirty = False
     fpu_restored = False
+    recovery_error = None
     try:
-        if not rsp.write_mem(code_addr, fnsave):
-            raise gt.RSPError("could not inject FNSAVE probe")
-        if not rsp.write_register(layout, "eip", code_addr):
-            raise gt.RSPError("could not enter FNSAVE probe")
-        stop = gt.StopReply(rsp.step())
-        while stop.kind == "output":
-            stop = gt.StopReply(rsp.recv())
-        if stop.kind != "stop":
-            raise gt.RSPError("FNSAVE probe did not stop normally")
-        saved = rsp.read_mem(scratch, 108)
-        if saved is None or len(saved) != 108:
-            raise gt.RSPError("FNSAVE did not produce a complete 32-bit state image")
-        if not rsp.write_mem(code_addr, frstor):
-            raise gt.RSPError("could not inject FRSTOR restore")
-        if not rsp.write_register(layout, "eip", code_addr):
-            raise gt.RSPError("could not enter FRSTOR restore")
-        stop = gt.StopReply(rsp.step())
-        while stop.kind == "output":
-            stop = gt.StopReply(rsp.recv())
-        if stop.kind != "stop":
-            raise gt.RSPError("FRSTOR restore did not stop normally")
+        if not rsp.write_register(layout, "eip", fnenv_addr):
+            raise gt.RSPError("could not enter Quake FNSTENV capture instruction")
+        _step_sigtrap(rsp, "FNSTENV capture")
+        fpu_dirty = True
+        saved = rsp.read_mem(scratch, 28)
+        if saved is None or len(saved) != 28:
+            raise gt.RSPError("FNSTENV did not produce a complete 32-bit environment")
+        if not rsp.write_register(layout, "eip", fldenv_addr):
+            raise gt.RSPError("could not enter Quake FLDENV restore instruction")
+        _step_sigtrap(rsp, "FLDENV restore")
         fpu_restored = True
     finally:
-        # If the normal restore path failed after FNSAVE, make one best-effort
-        # recovery attempt before restoring ordinary memory/PC and surfacing the
-        # error.  No snapshot is ever emitted after a failed restoration.
-        if saved is not None and not fpu_restored:
+        # A failed path after FNSTENV must attempt the paired existing FLDENV
+        # before reporting the error.  A failure here is fatal and the outer
+        # launcher kills QEMU; no JSON is emitted from a partially restored state.
+        if fpu_dirty and not fpu_restored:
             try:
-                rsp.write_mem(code_addr, frstor)
-                rsp.write_register(layout, "eip", code_addr)
-                rsp.step()
-            except Exception:
-                pass
+                if not rsp.write_register(layout, "eip", fldenv_addr):
+                    raise gt.RSPError("could not enter emergency FLDENV restore")
+                _step_sigtrap(rsp, "emergency FLDENV restore")
+                fpu_restored = True
+            except Exception as exc:
+                recovery_error = exc
         try:
-            rsp.write_mem(code_addr, old_code)
-            rsp.write_mem(scratch, old_scratch)
+            if (not rsp.write_mem(scratch, old_scratch) or
+                    rsp.read_mem(scratch, 28) != old_scratch):
+                raise gt.RSPError("could not restore Quake x87 scratch bytes")
             if not rsp.write_register(layout, "eip", eip):
-                raise gt.RSPError("could not restore EIP after x87 environment probe")
+                raise gt.RSPError("could not restore EIP after x87 environment capture")
         except Exception as exc:
-            raise gt.RSPError("failed to restore debugger probe bytes/state: %s" % exc)
+            raise gt.RSPError("failed to restore x87 debugger state: %s" % exc)
+        if recovery_error is not None:
+            raise gt.RSPError("failed to restore x87 state after capture: %s" % recovery_error)
 
     restored = rsp.read_g()
-    # Compare every register the regular snapshot will consume.  The g-packet's
-    # tag value itself is known-abridged, but equality still detects corruption.
+    # The g-packet's tag word is intentionally abridged, but equality still
+    # detects corruption of all g-packet-visible state. `saved` carries the full
+    # tag word consumed by the snapshot loader.
     for name in (tracefmt.GPR_KEYS + ["eip", "eflags"] + tracefmt.X87_REGS +
                  ["fctrl", "fstat", "ftag", "fioff", "fooff", "fiseg", "foseg"]):
         if layout.has(name) and layout.slice(restored, name) != layout.slice(raw, name):
-            raise gt.RSPError("x87 save probe failed to restore %s" % name)
+            raise gt.RSPError("x87 environment probe failed to restore %s" % name)
     return restored, saved
 
 
@@ -331,14 +389,14 @@ def main():
 
         raw = rsp.read_g()
         layout.anchor_tail(len(raw))
-        raw, xsave = capture_x87_state(rsp, layout, raw)
+        raw, xenv = capture_x87_state(rsp, layout, raw, a.elf)
         eip, eflags, gpr, seg, x87 = gt.regs_to_fields(layout, raw)
         if x87 is None:
             raise gt.RSPError("post-init snapshots require an x87-capable QEMU g-packet")
 
-        # seg_base: flat (0) for ss/ds/es; fs/gs from the TLS. gs_base via the
-        # TCB self-pointer at %gs:0 needs gs_base first, so try the g-packet slot,
-        # then fall back to reading what the user_desc/TCB exposes.
+        # seg_base: flat (0) for ss/ds/es; FS/GS come directly from the corrected
+        # QEMU g-packet layout. For the non-flat Linux TLS selector, validate the
+        # reported GS base against the TCB's ABI self pointer before accepting it.
         seg_base = {k: 0 for k in ("ss_base", "ds_base", "es_base", "fs_base", "gs_base")}
         for br in ("fs_base", "gs_base"):
             v = layout.slice(raw, br) if layout.has(br) else None
@@ -346,9 +404,18 @@ def main():
                 seg_base[br] = v & 0xFFFFFFFF
         if a.gs_base is not None:
             seg_base["gs_base"] = int(a.gs_base, 0)
+            gs_base_source = "override"
+        elif seg["gs"]:
+            tcb = read_u32(rsp, seg_base["gs_base"])
+            if seg_base["gs_base"] == 0 or tcb != seg_base["gs_base"]:
+                raise gt.RSPError("non-flat GS base is absent or fails the TCB self-pointer check; use --gs-base only with an authoritative value")
+            gs_base_source = "g-packet-tcb-validated"
+        else:
+            seg_base["gs_base"] = 0
+            gs_base_source = "flat"
 
-        sys.stderr.write("[snap] eip=%08x esp=%08x gs=%04x gs_base=%08x — scanning memory...\n"
-                         % (eip, gpr["esp"], seg["gs"], seg_base["gs_base"]))
+        sys.stderr.write("[snap] eip=%08x esp=%08x gs=%04x gs_base=%08x (%s) — scanning memory...\n"
+                         % (eip, gpr["esp"], seg["gs"], seg_base["gs_base"], gs_base_source))
         # Page granularity matters: a 1 MiB probe can skip a 4 KiB randomized
         # stack mapping entirely.  Register anchors retain any live mapped page
         # below --scan-lo as well (e.g. a low constrained user stack).
@@ -361,19 +428,19 @@ def main():
         # including the full tag word and environment pointers, so the restore
         # consumer can reconstruct the physical register file without guessing.
         fpu = {k: tracefmt.h80(x87[k]) for k in tracefmt.X87_REGS}
-        # Intel 32-bit FSAVE format has the FSTENV-compatible control/status/tag
-        # environment at offsets 0/4/8, followed by its physical register image.
-        # FIP/FCS/FOP at 12/16; FDP/FDS at 20/24.  Prefer this authoritative
-        # image over QEMU's abridged GDB tag/pointer fields.
-        fpu["fctrl"] = tracefmt.hx(int.from_bytes(xsave[0:2], "little"), 16)
-        fpu["fstat"] = tracefmt.hx(int.from_bytes(xsave[4:6], "little"), 16)
-        fpu["ftag"]  = tracefmt.hx(int.from_bytes(xsave[8:10], "little"), 16)
-        fpu["fioff"] = tracefmt.h32(int.from_bytes(xsave[12:16], "little"))
-        fcs_fop = int.from_bytes(xsave[16:20], "little")
+        # Intel's 32-bit FNSTENV image places its full control/status/tag state
+        # at offsets 0/4/8 and FIP/FCS/FOP at 12/16, FDP/FDS at 20/24. Prefer
+        # this authoritative environment over QEMU's deliberately abridged GDB
+        # tag/pointer fields.
+        fpu["fctrl"] = tracefmt.hx(int.from_bytes(xenv[0:2], "little"), 16)
+        fpu["fstat"] = tracefmt.hx(int.from_bytes(xenv[4:6], "little"), 16)
+        fpu["ftag"]  = tracefmt.hx(int.from_bytes(xenv[8:10], "little"), 16)
+        fpu["fioff"] = tracefmt.h32(int.from_bytes(xenv[12:16], "little"))
+        fcs_fop = int.from_bytes(xenv[16:20], "little")
         fpu["fiseg"] = tracefmt.hx(fcs_fop & 0xffff, 16)
         fpu["fop"]   = tracefmt.hx((fcs_fop >> 16) & 0x07ff, 16)
-        fpu["fooff"] = tracefmt.h32(int.from_bytes(xsave[20:24], "little"))
-        fpu["foseg"] = tracefmt.hx(int.from_bytes(xsave[24:26], "little"), 16)
+        fpu["fooff"] = tracefmt.h32(int.from_bytes(xenv[20:24], "little"))
+        fpu["foseg"] = tracefmt.hx(int.from_bytes(xenv[24:26], "little"), 16)
 
         img = {
             "regs": {k: tracefmt.h32(gpr[k]) for k in tracefmt.GPR_KEYS},
@@ -387,6 +454,7 @@ def main():
                 "break": "0x%08x" % bp, "hits": a.hits,
                 "regions": len(regions), "bytes": nbytes,
                 "arch_state": "ventium-modeled-user-checkpoint",
+                "gs_base_source": gs_base_source,
                 "note": "post-Alpha_Init Quake snapshot: load regions and Ventium-modeled "
                         "user architectural state, then run from EIP without re-doing Alpha_Init.",
             },

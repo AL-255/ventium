@@ -179,14 +179,23 @@ def parse_target_xml_layout(features: dict):
     file lists <reg name= bitsize= ...> in g-packet order.  We concatenate the
     regs of every included feature, in include order.
     """
-    target = features.get("target.xml", "")
+    # QEMU's i386 description documents unavailable segment-base registers by
+    # leaving literal ``<reg ...>`` examples inside XML comments.  Regexing the
+    # raw document turns those comments into phantom g-packet fields and shifts
+    # every following base (notably gs_base) by 12 bytes.  Strip comments before
+    # looking for either includes or registers; this deliberately keeps the
+    # small, dependency-free parser while honoring XML comment semantics.
+    def without_comments(xml: str) -> str:
+        return re.sub(r"<!--.*?-->", "", xml, flags=re.DOTALL)
+
+    target = without_comments(features.get("target.xml", ""))
     includes = re.findall(r'<xi:include\s+href="([^"]+)"', target)
     # Some descriptions put regs directly in target.xml too — collect those first.
     reg_re = re.compile(r'<reg\s+name="([^"]+)"\s+bitsize="(\d+)"')
     regs = []
     regs += [(n, int(b)) for n, b in reg_re.findall(target)]
     for inc in includes:
-        xml = features.get(inc, "")
+        xml = without_comments(features.get(inc, ""))
         regs += [(n, int(b)) for n, b in reg_re.findall(xml)]
     if not regs:
         return None
