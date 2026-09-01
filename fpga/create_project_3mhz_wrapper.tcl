@@ -281,7 +281,7 @@ foreach required_def {VEN_IC_BRAM VEN_UOPCACHE VEN_UOP_SFETCH VEN_SFETCH_RESIDEN
 # narrowly patched PL top (fpga/patches/0001-passive-vga-frame-capture.patch).
 set body [string map [list \
     {add_files -norecurse $files} \
-    {lappend files "$VEN/fpga/ven_video_capture.sv"
+    {lappend files "$VEN/fpga/ven_video_capture.sv" "$VEN/fpga/ven_axi_read_profiler.sv"
 add_files -norecurse $files} \
 ] $body]
 

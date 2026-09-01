@@ -1358,6 +1358,14 @@ acknowledgement counter twice and reports raw interval deltas, measured clock,
 IPC, and I/O ratio. It writes no control or ring-index register. Prefer this
 source-controlled mode over volatile board-local performance scripts.
 
+The checked `fpga/patches/0004-passive-axi-read-profiler.patch` image reuses the two invalid legacy state bins as passive outer-AXI timing counters. It observes only the existing 45 MHz `m_axi_*` handshakes: `0x1a0` is the sum of accepted-AR through accepted-RLAST occupancy cycles and `0x1b0` is the sum of accepted-AR through first accepted-R latency cycles. With `A=AR handshakes` and `B=read beats`, the residual inter-beat bubbles are `0x1a0 - 0x1b0 - (B-A)`. Read these counters only with the matching profiler bitstream:
+
+```bash
+sudo /tmp/ao486/ven_board_probe.py perf --seconds 5 --axi-read-profiler
+```
+
+The flag is deliberately opt-in so an older image is never relabeled as a latency measurement.
+
 Two current wrapper defects constrain interpretation. The deployed feature set
 numbers `S_PF=26` and `S_PIPE=27`, while `ven_soc_dbg.sv` hard-codes state 23
 and 24 into offsets `0x1b0` and `0x1a0`; the probe therefore calls them
@@ -1452,8 +1460,8 @@ in this block design.
 | `0x170` | accepted AXI read beats | — |
 | `0x180` | AXI AR handshakes, including priming reads | — |
 | `0x190` | AXI B responses | — |
-| `0x1a0` | cycles in hard-coded state 24 (not `S_PIPE` in the deployed profile) | — |
-| `0x1b0` | cycles in hard-coded state 23 (not `S_PF` in the deployed profile) | — |
+| `0x1a0` | legacy: invalid hard-coded state-24 bin; profiler image: sum of accepted AR-to-RLAST occupancy cycles | — |
+| `0x1b0` | legacy: invalid hard-coded state-23 bin; profiler image: sum of accepted AR-to-first-R latency cycles | — |
 | `0x1c0` | build-specific tagged state/value count; decode from exact source | — |
 | `0x1d0` | cycles in all other states | — |
 | `0x200` | snapshot capability (`0x56440001` = context-frame format 1) | — |

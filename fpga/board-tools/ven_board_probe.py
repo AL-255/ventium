@@ -1424,11 +1424,30 @@ def perf_probe(args: argparse.Namespace) -> int:
         )
         print(
             f"axi rd_beats={drd} ar_hs={dar} b_hs={db} "
-            f"fsm_slot_1a0={dslot_a} fsm_slot_1b0={dslot_b} "
+            f"slot_1a0={dslot_a} slot_1b0={dslot_b} "
             f"fsm_other={dother} "
             f"tagged_raw={u32(ctrl, R_DBG_ST_TAGGED):08x} "
             f"cr0={u32(ctrl, R_DBG_CR0):08x}"
         )
+        if args.axi_read_profiler:
+            # The matching profiler image defines 0x1A0 as total AR..RLAST
+            # occupancy and 0x1B0 as AR..first-R latency.  Do not infer these
+            # meanings from a legacy image: this opt-in is intentionally explicit.
+            interbeat = dslot_a - dslot_b - (drd - dar)
+            if dar and interbeat >= 0:
+                print(
+                    f"axi-read-profiler txns={dar} beats={drd} "
+                    f"busy_cycles={dslot_a} first_wait_cycles={dslot_b} "
+                    f"interbeat_gap_cycles={interbeat} "
+                    f"avg_busy={dslot_a / dar:.3f} "
+                    f"avg_first_wait={dslot_b / dar:.3f} "
+                    f"avg_interbeat_gap={interbeat / dar:.3f}"
+                )
+            else:
+                print(
+                    "axi-read-profiler unavailable/inconsistent interval: "
+                    f"txns={dar} beats={drd} busy={dslot_a} first={dslot_b}"
+                )
         return 0
     finally:
         ctrl.close()
@@ -2381,6 +2400,10 @@ def parse_args() -> argparse.Namespace:
         "perf", help="measure read-only cycle, retirement, I/O, and IRQ deltas"
     )
     perf.add_argument("--seconds", type=float, default=5.0)
+    perf.add_argument(
+        "--axi-read-profiler", action="store_true",
+        help="decode 0x1A0/0x1B0 as passive outer-AXI latency counters (matching profiler image only)",
+    )
     perf.set_defaults(func=perf_probe)
 
     clock = sub.add_parser(

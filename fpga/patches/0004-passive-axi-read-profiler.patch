@@ -1,0 +1,58 @@
+diff --git a/fpga/rk-ao486-system/src/ven_mgmt_axil.v b/fpga/rk-ao486-system/src/ven_mgmt_axil.v
+index 0000000..0000000 100644
+--- a/fpga/rk-ao486-system/src/ven_mgmt_axil.v
++++ b/fpga/rk-ao486-system/src/ven_mgmt_axil.v
+@@ -102,8 +102,11 @@ module ven_mgmt_axil #(parameter ADDR_W = 16)(
+     input  wire [31:0]  dbg_rd_beats,      // accepted AXI read beats      (read @ 0x170)
+     input  wire [31:0]  dbg_ar_hs,         // AR handshakes (bursts, incl priming) (read @ 0x180)
+     input  wire [31:0]  dbg_b_hs,          // write responses              (read @ 0x190)
+-    input  wire [31:0]  dbg_st_pipe,       // cycles in S_PIPE             (read @ 0x1A0)
+-    input  wire [31:0]  dbg_st_walk,       // cycles in the walk state     (read @ 0x1B0)
++    // Passive outer-read latency counters.  These occupy the two historical
++    // state bins whose hard-coded enum values are invalid for the deployed
++    // feature profile.  They are observation-only and have no control path.
++    input  wire [31:0]  dbg_st_pipe,       // AR..RLAST occupancy cycles   (read @ 0x1A0)
++    input  wire [31:0]  dbg_st_walk,       // AR..first-R latency cycles   (read @ 0x1B0)
+     input  wire [31:0]  dbg_st_fetch,      // cycles in S_FETCH            (read @ 0x1C0)
+     input  wire [31:0]  dbg_st_other,      // cycles in every other state  (read @ 0x1D0)
+     // ---- passive VGA-frame recorder ---------------------------------------
+diff --git a/fpga/rk-ao486-system/src/rk_ao486_system_pl.v b/fpga/rk-ao486-system/src/rk_ao486_system_pl.v
+index 0000000..0000000 100644
+--- a/fpga/rk-ao486-system/src/rk_ao486_system_pl.v
++++ b/fpga/rk-ao486-system/src/rk_ao486_system_pl.v
+@@ -99,6 +99,16 @@ module rk_ao486_system_pl #(
+     // NOTE ar_hs counts the rd_primed PRIMING burst too, so beats/ar ~= 8 with the double fill
+     // issuing two ARs per line — i.e. ar_hs is ~2x the line-fill count, by design.
+     reg [31:0] p_rd_beats, p_ar_hs, p_b_hs;
++    // Passive profiler for the outer (45 MHz) AXI boundary.  It observes only
++    // accepted handshakes and drives the otherwise-invalid 0x1A0/0x1B0
++    // diagnostics; it cannot affect the bridge or any guest-visible state.
++    wire [31:0] p_rd_busy_cyc, p_rd_firstwait_cyc;
++    ven_axi_read_profiler u_axi_read_profiler (
++        .clk(clk), .rst(rst),
++        .ar_handshake(m_axi_arvalid & m_axi_arready),
++        .r_handshake(m_axi_rvalid & m_axi_rready), .r_last(m_axi_rlast),
++        .busy_cycles(p_rd_busy_cyc), .first_wait_cycles(p_rd_firstwait_cyc)
++    );
+     always @(posedge clk) begin
+         if (rst) begin p_rd_beats<=32'd0; p_ar_hs<=32'd0; p_b_hs<=32'd0; end
+         else begin
+@@ -290,6 +300,8 @@ module rk_ao486_system_pl #(
+         .trace_pc(dbg_trace_pc), .trace_aux(dbg_trace_aux), .trace_count(dbg_trace_count),
+         .perf_cyc(dbg_perf_cyc), .perf_retired(dbg_perf_retired), .perf_stall(dbg_perf_stall), .perf_io(dbg_perf_io), .perf_irq(dbg_perf_irq),
+-        .perf_st_pipe(dbg_st_pipe), .perf_st_walk(dbg_st_walk),
++        // 0x1A0/0x1B0 are assigned to the outer AXI profiler below.  The old
++        // state-number bins were invalid once the feature defines moved them.
++        .perf_st_pipe(), .perf_st_walk(),
+         .perf_st_fetch(dbg_st_fetch), .perf_st_other(dbg_st_other),
+         // VEN DIAG (build #9, CORE LOAD-SERVE forensics): the dbg_rd path now carries the L1D's core
+         // read-serve (ventium_l1_axi retargeted dbg_rd -> c_addr/c_rdata). With the AW-to-0x80240 freeze
+@@ -332,7 +343,7 @@ module rk_ao486_system_pl #(
+         .dbg_perf_cyc(dbg_perf_cyc), .dbg_perf_retired(dbg_perf_retired),
+         .dbg_perf_io(dbg_perf_io), .dbg_perf_irq(dbg_perf_irq), .dbg_cr0_live(d_cr0),
+         .dbg_rd_beats(p_rd_beats), .dbg_ar_hs(p_ar_hs), .dbg_b_hs(p_b_hs),
+-        .dbg_st_pipe(dbg_st_pipe), .dbg_st_walk(dbg_st_walk),
++        .dbg_st_pipe(p_rd_busy_cyc), .dbg_st_walk(p_rd_firstwait_cyc),
+         .dbg_st_fetch(dbg_st_fetch), .dbg_st_other(dbg_st_other),
+         .cap_arm(cap_arm), .cap_rd_addr(cap_rd_addr), .cap_rd_en(cap_rd_en), .cap_rd_data(cap_rd_data),
+         .cap_frame_ready(cap_frame_ready), .cap_capture_active(cap_capture_active), .cap_frame_overrun(cap_frame_overrun),
