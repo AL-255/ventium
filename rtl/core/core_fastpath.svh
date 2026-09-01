@@ -251,14 +251,47 @@
 `ifdef VEN_FP_SHARED
           else if (u_d.is_fp) begin
             // Preserve one non-speculative producer for ven_fp_top.  The shared
-            // block has no cancel port, so the cycle-mode fast commit path may not
-            // submit directly; re-decode through S_DECODE and its fully latched q_*
-            // record instead.  This is intentionally conservative during cutover.
+            // block has no cancel port, so the cycle-mode path never submits
+            // directly.  VEN_FP_SHARED_DIRECT may only latch a pre-decoded,
+            // register-only command and enter S_FEXEC on the NEXT cycle; all
+            // command acceptance and retirement still happen there.  Everything
+            // outside that narrow mapping continues through the proven S_FETCH /
+            // S_DECODE path.
+`ifdef VEN_FP_SHARED_DIRECT
+            if (fp_shared_direct) begin
+              q_pc          <= eip;
+              q_len         <= u_d.len;
+              q_is_x87      <= 1'b1;
+              q_fxop        <= fp_shared_direct_fxop;
+              q_f_mem_read  <= 1'b0;
+              q_f_mem_write <= 1'b0;
+              q_f_mbytes    <= 4'd0;
+              q_f_pop       <= fp_shared_direct_pop;
+              q_f_pop2      <= 1'b0;
+              q_f_sti       <= u_d.fp_sti;
+              q_f_aluop     <= u_d.fp_aluop;
+              q_f_const     <= u_d.fp_sti;
+              f_step        <= 4'd0;
+              // This is the shadowed instruction's execution boundary.  The
+              // next interrupt is not considered until S_FEXEC has committed and
+              // returned to S_PIPE, matching the slow S_DECODE consumption.
+              irq_shadow    <= 1'b0;
+              agi_wr0       <= 9'h100;
+              agi_wr1       <= 9'h100;
+              state         <= S_FEXEC;
+            end else begin
+`endif
+            // The normal slow hand-off remains the correctness fallback for
+            // memory x87, system/debug edges, 16-bit code, and any future fast
+            // decoder kind that lacks a one-to-one shared command mapping.
             agi_wr0<=9'h100; agi_wr1<=9'h100;
 `ifdef VEN_SFETCH_RESIDENT
             sfetch_resident_q <= cycle_mode && exec_issue_ok;
 `endif
             fetch_word<=3'd0; state<=S_FETCH;
+`ifdef VEN_FP_SHARED_DIRECT
+            end
+`endif
           end
 `else
           else if (u_d.is_fp) begin

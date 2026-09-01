@@ -4690,6 +4690,48 @@ module core
   assign fp_sys_bail = !u_d.simple || sys_mode;
 `endif
 
+`ifdef VEN_FP_SHARED
+`ifdef VEN_FP_SHARED_DIRECT
+  // A compact shared-FP handoff for the cycle decoder's existing register-only
+  // whitelist.  This is deliberately NOT a second command producer: S_PIPE
+  // only captures the command record, and the sole fp_shared_cmd_valid producer
+  // remains S_FEXEC on the following edge.  That preserves stable cmd_* fields,
+  // precise x87 retirement, and the shared top's one-command ownership.
+  //
+  // The slow decoder remains mandatory for real/16-bit code (where its IP and
+  // debug bookkeeping own the boundary), active debug state, strict pending-MF
+  // delivery, and every x87 form with a memory operand or unsupported decode.
+  logic        fp_shared_direct;
+  fxop_e       fp_shared_direct_fxop;
+  logic        fp_shared_direct_pop;
+  always_comb begin
+    fp_shared_direct_fxop = FX_NONE;
+    fp_shared_direct_pop  = 1'b0;
+    unique case (u_d.fp_kind)
+      FK_FLDC:   fp_shared_direct_fxop = FX_FLDCONST;
+      FK_FLDSTI: fp_shared_direct_fxop = FX_FLD_STI;
+      FK_FXCH:   fp_shared_direct_fxop = FX_FXCH;
+      FK_ARITH:  fp_shared_direct_fxop = FX_AR_ST0_STI;
+      FK_FSTP0: begin
+        fp_shared_direct_fxop = FX_FST_STI;
+        fp_shared_direct_pop  = 1'b1;
+      end
+      default: ;
+    endcase
+    fp_shared_direct = u_d.is_fp && (fp_shared_direct_fxop != FX_NONE)
+                    && !fp_issue_block && !fp_dbg_active
+                    // The fast decoder has no 16-bit IP-wrap mechanism.  Its
+                    // system-mode use is therefore limited to the same 32-bit
+                    // protected-code shape as the deployed fast path; user-mode
+                    // is already a flat 32-bit verification environment.
+                    && (!sys_mode || (!real_mode && cs_d));
+`ifdef VEN_X87_MF_STRICT
+    fp_shared_direct = fp_shared_direct && !(fstat[7] && creg0[5]);
+`endif
+  end
+`endif
+`endif
+
   // ---- U-pipe datapath (core/u_pipe.sv, R3) --------------------------------
   // Pre-read U operands; the fast path always reads full dwords, so these are
   // exactly reg_read(idx,3'd4,1'b0) == gpr_o[idx]. The u_pipe instance drives

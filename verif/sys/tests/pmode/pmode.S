@@ -111,6 +111,28 @@ pm32_entry:
     pushl   %ecx
     popl    %esi                /* esi = 0xDEADBEEF, exercises the stack */
 
+    /* --- protected-mode x87 register forms ---------------------------------
+     * These are deliberately the compact shared-FP direct-handoff whitelist:
+     * constant push, ST(i) load, FXCH, register arithmetic, and FSTP ST(0).
+     * The sequence runs after CS has become a D=1 protected segment, so the
+     * full production profile exercises the same path as a 32-bit client.  A
+     * following FNSTENV stays on the mature slow path and exposes the prior
+     * direct FSTP instruction pointer through ESI, making a bad q_pc/q_len
+     * capture architecturally visible to the ordinary system trace.
+     */
+    fninit
+    fld1
+    fld1
+    fadd    %st(1), %st
+    fxch    %st(1)
+    fld     %st(0)
+    fstp    %st(0)
+    fsub    %st(1), %st
+    fnstenv 0x00080000
+    movl    0x0008000c, %esi
+    fstp    %st(0)
+    fstp    %st(0)
+
     /* ====================== enable paging (PSE 4 MiB) ====================== */
     /* Page directory @ 0x00010000 (4 KiB aligned).  We use one PSE large-page
      * directory entry mapping the first 4 MiB identity (linear==physical), which

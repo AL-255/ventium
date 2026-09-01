@@ -1,0 +1,10 @@
+{
+  "name": "tx_shared_direct",
+  "src": "tx_shared_direct/tx_shared_direct.s",
+  "elf": "tx_shared_direct/tx_shared_direct.elf",
+  "image": "tx_shared_direct/tx_shared_direct.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 20,
+  "x87": true
+}

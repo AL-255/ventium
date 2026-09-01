@@ -99,9 +99,9 @@ if {[info exists ::env(VEN_FPGA_SKIP_PRESET)] && $::env(VEN_FPGA_SKIP_PRESET)} {
 # and the BRAM/uop-cache front end explicitly.  The upstream recovery script
 # still names the retired half-cache/narrow I-cache experiment, so it is
 # rewritten below before Vivado sees its definition list.
-set define_span {VEN_FP_PC_RELAX VEN_FP_SHARED VEN_SYS_FASTPATH VEN_SYS_FASTPATH_RELOC VEN_SYS_FASTLOAD_FLAT VEN_SYS_FASTSTORE_FLAT VEN_FAST_RETRACE}
+set define_span {VEN_FP_PC_RELAX VEN_FP_SHARED VEN_FP_SHARED_DIRECT VEN_SYS_FASTPATH VEN_SYS_FASTPATH_RELOC VEN_SYS_FASTLOAD_FLAT VEN_SYS_FASTSTORE_FLAT VEN_FAST_RETRACE}
 if {[info exists ::env(VEN_FPGA_FASTPATH)] && !$::env(VEN_FPGA_FASTPATH)} {
-    set define_span {VEN_FP_PC_RELAX VEN_FP_SHARED VEN_FAST_RETRACE}
+    set define_span {VEN_FP_PC_RELAX VEN_FP_SHARED VEN_FP_SHARED_DIRECT VEN_FAST_RETRACE}
     puts "Diagnostic build: all VEN_SYS_FASTPATH defines disabled by VEN_FPGA_FASTPATH=0"
 }
 # CWSDPMI's 32-bit client maps CS/DS/SS/ES at one nonzero common base.  The
@@ -113,7 +113,7 @@ if {[info exists ::env(VEN_FPGA_FASTPATH)] && !$::env(VEN_FPGA_FASTPATH)} {
 # has removed it.
 if {[info exists ::env(VEN_FPGA_RELOC_FASTPATH)] && !$::env(VEN_FPGA_RELOC_FASTPATH)} {
     if {[lsearch -exact $define_span VEN_SYS_FASTPATH] >= 0} {
-        set define_span {VEN_FP_PC_RELAX VEN_FP_SHARED VEN_SYS_FASTPATH VEN_SYS_FASTLOAD_FLAT VEN_SYS_FASTSTORE_FLAT VEN_FAST_RETRACE}
+        set define_span {VEN_FP_PC_RELAX VEN_FP_SHARED VEN_FP_SHARED_DIRECT VEN_SYS_FASTPATH VEN_SYS_FASTLOAD_FLAT VEN_SYS_FASTSTORE_FLAT VEN_FAST_RETRACE}
         puts "Diagnostic build: VEN_SYS_FASTPATH_RELOC disabled by VEN_FPGA_RELOC_FASTPATH=0"
     } else {
         puts "Diagnostic build: VEN_SYS_FASTPATH_RELOC already absent because VEN_FPGA_FASTPATH=0"
