@@ -19,7 +19,8 @@
 #   profile : smoke | default | thorough     (default: default)
 #   seed    : integer RNG seed                (default: 24309)
 # Env:
-#   FPU87_JOBS    parallel workers (default nproc-2)
+#   FPU87_JOBS    parallel workers (default 1; explicit overrides remain
+#                 contained by the enclosing resource scope)
 #   FPU87_OPS     comma list to restrict ops (e.g. add,sub,mul,div)
 #   FPU87_PORTBASE  gdbstub port base (default 27000)
 #   NO_TRANS=1    skip transcendental programs

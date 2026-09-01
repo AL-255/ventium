@@ -37,6 +37,11 @@ if ! flock -n 9; then
 fi
 
 export VENTIUM_BUILD_SCOPE_ACTIVE=1
+# A parent `make -j` exports its jobserver through MAKEFLAGS into recursive
+# make calls.  The scope protects memory, but force those descendants to one
+# recipe as well so they fail predictably rather than accumulating thousands of
+# short-lived helper processes under the task ceiling.
+export MAKEFLAGS="${MAKEFLAGS:+${MAKEFLAGS} }-j1"
 scope_mem="${VENTIUM_BUILD_MEMORY_MAX:-${VENTIUM_VERILATOR_MEMORY_MAX:-6G}}"
 scope_tasks="${VENTIUM_BUILD_TASKS_MAX:-${VENTIUM_VERILATOR_TASKS_MAX:-64}}"
 exec systemd-run --user --scope --quiet \

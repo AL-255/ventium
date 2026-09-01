@@ -40,7 +40,8 @@
 #
 # Usage:   bash verif/verify.sh          (or: make verify)
 #   M5_TOL_PCT   tightened abs-cyc tolerance (default 10, same as run-m5.sh)
-#   VERIFY_JOBS  parallel workers (default min(nproc-2, #jobs))
+#   VERIFY_JOBS  parallel workers (default 1; a bounded explicit override is
+#                contained by the enclosing 6 GiB/64-task resource scope)
 #   VERIFY_WORKDIR / VERIFY_CACHE_DIR override writable run/cache locations
 #                 (useful when the repository build volume is read-only)
 #   PORTBASE     gdbstub port base for parallel func goldens (default 26000)

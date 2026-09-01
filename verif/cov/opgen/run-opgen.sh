@@ -9,13 +9,14 @@
 # mis-encoded operand shows up as ASM-FAIL, a wrong result as DIVERGE — never a
 # silent miss.
 #
-# PARALLEL: the per-opcode workload is distributed across ALL cores (xargs -P
-# $(nproc)); each worker builds its ELF, spins its OWN qemu-i386 gdbstub on a
-# name-derived port, runs the RTL TB, and diffs — fully independent.
+# PARALLEL: each independent opcode worker builds its ELF, spins its own
+# qemu-i386 gdbstub on a name-derived port, runs the RTL TB, and diffs.  The
+# default is deliberately one worker; pass JOBS=N only inside the enclosing
+# bounded resource scope.
 #
 # Usage:  bash verif/cov/opgen/run-opgen.sh            # all generated op_*
 #         bash verif/cov/opgen/run-opgen.sh op_00 ...  # subset
-#         JOBS=16 ... ; GOLDEN=0 ... (coverage only, fast)
+#         JOBS=2 ... ; GOLDEN=0 ... (coverage only, fast)
 # =============================================================================
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
