@@ -29,15 +29,15 @@
 
 # The Ventium-swapped hierarchy is large enough that Vivado's default internal
 # synthesis fan-out can exhaust this 32 GiB host (seven ~2 GiB task workers plus
-# a ~6 GiB parent were observed on the first source-matched run).  Four threads
-# are the normal cap; VEN_FPGA_JOBS permits a lower diagnostic cap after an
-# abnormal worker termination without changing the synthesized design.
-set synth_jobs 4
+# a ~6 GiB parent were observed on the first source-matched run).  Runs are
+# deliberately single-threaded: reproducibility and host safety outweigh build
+# time, and the launcher serializes whole Vivado instances as well.
+set synth_jobs 1
 if {[info exists ::env(VEN_FPGA_JOBS)]} {
-    set synth_jobs $::env(VEN_FPGA_JOBS)
+  set synth_jobs $::env(VEN_FPGA_JOBS)
 }
-if {![string is integer -strict $synth_jobs] || $synth_jobs < 1 || $synth_jobs > 4} {
-    error "VEN_FPGA_JOBS must be an integer from 1 through 4"
+if {![string is integer -strict $synth_jobs] || $synth_jobs != 1} {
+    error "VEN_FPGA_JOBS must be exactly 1"
 }
 set_param general.maxThreads $synth_jobs
 puts "Vivado synthesis concurrency: $synth_jobs"
@@ -198,7 +198,7 @@ set_property -dict [list \
     $define_span \
     {CLK3 (core) label = $c3f (actual = pl_clk0/16)} \
     $core_label_span \
-    {launch_runs synth_1 -jobs 4; wait_on_run synth_1} \
+    {launch_runs synth_1 -jobs 1; wait_on_run synth_1} \
     $area_synth \
     {add_files -fileset constrs_1 -norecurse "$HW/bitstream.xdc" "$HW/led.xdc" "$HW/fpatan_mcp.xdc"
 # fpatan multicycle references synthesized cells: apply in implementation (post-synth netlist).

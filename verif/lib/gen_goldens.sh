@@ -26,6 +26,16 @@
 # Internal: re-invokes itself with --one for each job (so xargs -P can fan out).
 set -uo pipefail
 
+# The --one worker is deliberately re-invoked by the driver.  Only the driver
+# takes the shared scope; workers inherit it and therefore neither deadlock on
+# its lock nor escape its memory/task limits.
+if [ "${1:-}" != "--one" ]; then
+    ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+    if [ "${VENTIUM_BUILD_SCOPE_ACTIVE:-0}" != "1" ]; then
+        exec "$ROOT/tools/build_scope.sh" -- "$0" "$@"
+    fi
+fi
+
 # ----- single-job worker (internal) -----------------------------------------
 if [ "${1:-}" = "--one" ]; then
     shift
@@ -66,10 +76,10 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$QEMU" ] && [ -n "$OUTDIR" ] && [ -n "$LIST" ] || { echo "gen_goldens: --qemu/--outdir/--list required" >&2; exit 2; }
 [ -f "$LIST" ] || { echo "gen_goldens: list not found: $LIST" >&2; exit 2; }
-# default worker count = min(nproc, #jobs); leave 2 cores headroom on big boxes.
-NCPU="$(nproc 2>/dev/null || echo 4)"; [ "$NCPU" -gt 3 ] && NCPU=$(( NCPU - 2 ))
 NLINES="$(grep -cvE '^\s*(#|$)' "$LIST")"
-[ -z "$JOBS" ] && JOBS=$(( NCPU < NLINES ? NCPU : NLINES )); [ "$JOBS" -lt 1 ] && JOBS=1
+[ -z "$JOBS" ] && JOBS="${GOLDEN_JOBS:-1}"
+[[ "$JOBS" =~ ^[1-9][0-9]*$ ]] || { echo "gen_goldens: --jobs/GOLDEN_JOBS must be a positive integer" >&2; exit 2; }
+[ "$JOBS" -gt "$NLINES" ] && JOBS="$NLINES"; [ "$JOBS" -lt 1 ] && JOBS=1
 mkdir -p "$OUTDIR"
 SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 

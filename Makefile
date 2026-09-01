@@ -21,6 +21,11 @@ export CCACHE_DISABLE
 .PHONY: all m0-smoke m1 m2 m3 m4 m5 m6 a20 fenv fpstore x87stk x87b l1 bus bus-sva issue-uv verify verify-clean rtl plugin tests clean help verify-sys verify-sys-fpreloc verify-sys-fpload verify-sys-faststore verify-srt verify-srt-iter verify-idiv verify-bcd verify-fbld verify-fppipe verify-fppipe2 verify-all coverage coverage-sys coverage-mem coverage-unit coverage-all opgen opgen-modes
 .DEFAULT_GOAL := help
 
+# A top-level `make -j` used to overlap independent heavyweight recipes.  The
+# individual builders have their own cgroup/lock guard, but serialising this
+# layer prevents non-Verilator helpers from forming a second process storm.
+.NOTPARALLEL:
+
 help:
 	@echo "Ventium — targets:"
 	@echo "  make m0-smoke   build RTL+plugin, gen golden traces, run TB, diff (M0 gate)"

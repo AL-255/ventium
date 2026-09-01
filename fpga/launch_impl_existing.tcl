@@ -9,11 +9,12 @@ if {$argc != 1} {
 
 set project [file normalize [lindex $argv 0]]
 open_project $project
+set_param general.maxThreads 1
 if {[get_property PROGRESS [get_runs synth_1]] ne "100%"} {
     error "synth_1 is not complete"
 }
 
-launch_runs impl_1 -to_step write_bitstream -jobs 4
+launch_runs impl_1 -to_step write_bitstream -jobs 1
 wait_on_run impl_1
 if {[get_property PROGRESS [get_runs impl_1]] ne "100%"} {
     error "impl_1 failed (PROGRESS=[get_property PROGRESS [get_runs impl_1]])"

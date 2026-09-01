@@ -20,6 +20,12 @@
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../../.." && pwd)"
+
+# Opcode coverage creates an independent assembler/QEMU/RTL process tree per
+# opcode.  Keep the whole fan-out behind the shared cgroup and process lock.
+if [ "${VENTIUM_BUILD_SCOPE_ACTIVE:-0}" != "1" ]; then
+    exec "$ROOT/tools/build_scope.sh" -- "$0" "$@"
+fi
 export OPGEN_ROOT="$ROOT" OPGEN_HERE="$HERE"
 export QEMU="$ROOT/ventium-refs/07-p5-emulation-harness/build/qemu/build/qemu-i386"
 export GEN_TRACE="$ROOT/verif/qemu-trace/gen_trace.py"
@@ -28,7 +34,8 @@ export ELF2FLAT="$ROOT/verif/tests/elf2flat.py"
 export TB="$ROOT/verif/tb/obj_dir_cov/tb_ventium"
 export OUT="$ROOT/build/cov/opgen" DAT="$ROOT/build/cov/opgen/dat" WORK="$ROOT/build/cov/opgen/work"
 export GOLDEN="${GOLDEN:-1}" PYTHON="${PYTHON:-python3}" CC="${CC:-gcc}"
-JOBS="${JOBS:-$(nproc)}"
+JOBS="${JOBS:-1}"
+[[ "$JOBS" =~ ^[1-9][0-9]*$ ]] || { echo "ERROR: JOBS must be a positive integer" >&2; exit 2; }
 say(){ printf '\n=== %s ===\n' "$*"; }
 
 [ -x "$TB" ] || { say "build coverage TB"; make -C "$ROOT/verif/tb" cov || exit 1; }

@@ -13,6 +13,12 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
+# Mode-2 verification forks a worker tree after the Verilator build.  Scope
+# the driver so the worker fan-out cannot bypass the generated-code guard.
+if [ "${VENTIUM_BUILD_SCOPE_ACTIVE:-0}" != "1" ]; then
+    exec "$ROOT/tools/build_scope.sh" -- "$0" "$@"
+fi
+
 export REFS="$ROOT/ventium-refs/07-p5-emulation-harness"
 export QEMU="$REFS/build/qemu/build/qemu-i386"
 export ISA_VERIFY="$REFS/tools/isa_verify.py"

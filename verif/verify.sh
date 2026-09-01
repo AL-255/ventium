@@ -53,6 +53,13 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# This gate fans out compiler, QEMU gdbstub, Python, and RTL-simulator
+# descendants.  A task cap around only the RTL build cannot contain that tree.
+# Re-exec the complete gate in the shared resource scope before it starts.
+if [ "${VENTIUM_BUILD_SCOPE_ACTIVE:-0}" != "1" ]; then
+    exec "$ROOT/tools/build_scope.sh" -- "$0" "$@"
+fi
+
 # ---- pinned paths (all absolute) --------------------------------------------
 REFS="$ROOT/ventium-refs/07-p5-emulation-harness"
 export QEMU="$REFS/build/qemu/build/qemu-i386"
@@ -92,8 +99,7 @@ export M5_TOL_PCT="${M5_TOL_PCT:-10}"
 export PORTBASE="${PORTBASE:-26000}"
 FORCE_GOLDEN="${FORCE_GOLDEN:-0}"
 
-NCPU="${VERIFY_JOBS:-$(nproc 2>/dev/null || echo 4)}"
-if [ -z "${VERIFY_JOBS:-}" ] && [ "$NCPU" -gt 3 ]; then NCPU=$(( NCPU - 2 )); fi
+NCPU="${VERIFY_JOBS:-1}"
 [ "$NCPU" -gt 0 ] 2>/dev/null || NCPU=1
 
 say()  { printf '\n=== %s ===\n' "$*"; }

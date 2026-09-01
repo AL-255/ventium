@@ -30,6 +30,13 @@ SEED="${2:-24309}"
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
+
+# The randomized gate runs every worker with its own QEMU/Python/RTL process
+# tree.  Keep the entire fan-out in the project resource scope, not just the
+# one Verilator invocation that builds the TB.
+if [ "${VENTIUM_BUILD_SCOPE_ACTIVE:-0}" != "1" ]; then
+    exec "$ROOT/tools/build_scope.sh" -- "$0" "$@"
+fi
 REFS="$ROOT/ventium-refs/07-p5-emulation-harness"
 
 export QEMU="$REFS/build/qemu/build/qemu-i386"
@@ -53,8 +60,8 @@ export GENDIR
 export WORKDIR="$HERE/build/work-$PROFILE"
 WORKER="$HERE/fpu87_worker.sh"
 
-NCPU="$(nproc 2>/dev/null || echo 4)"; [ "$NCPU" -gt 3 ] && NCPU=$(( NCPU - 2 ))
-JOBS="${FPU87_JOBS:-$NCPU}"
+JOBS="${FPU87_JOBS:-1}"
+[[ "$JOBS" =~ ^[1-9][0-9]*$ ]] || { echo "ERROR: FPU87_JOBS must be a positive integer" >&2; exit 2; }
 
 say()  { printf '\n=== %s ===\n' "$*"; }
 info() { printf '    %s\n' "$*"; }

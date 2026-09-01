@@ -340,7 +340,7 @@ equal-common-base `VEN_SYS_FASTPATH_RELOC`, full-limit DS/SS
 differential-tested with a common non-zero base and non-identity paging; the
 store path also has a protected #PF/restart test and deliberately leaves a
 4 KiB-crossing dword on the mature fragment engine (not `VEN_SYS_FASTPATH_ALL`),
-caps Vivado at four threads, and selects `AreaOptimized_high`. The direct
+caps Vivado at one thread, and selects `AreaOptimized_high`. The direct
 upstream script still labels the `/32` clock as `/16`/6 MHz and imports a PS
 clock configuration that does not match stock Linux; do not bypass the wrapper
 for this image. A BD preflight should report

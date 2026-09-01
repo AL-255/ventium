@@ -23,7 +23,7 @@
 # running an uncontained generated-C++ build is not an acceptable fallback.
 set -euo pipefail
 
-lock_path="${VENTIUM_VERILATOR_LOCK:-/tmp/ventium-verilator-build.lock}"
+lock_path="${VENTIUM_HEAVY_BUILD_LOCK:-${VENTIUM_VERILATOR_LOCK:-/tmp/ventium-heavy-build.lock}}"
 verilator_bin="${VERILATOR_BIN:-verilator}"
 is_build=0
 for arg in "$@"; do
@@ -79,13 +79,13 @@ if [ "${VENTIUM_BUILD_SCOPE_ACTIVE:-0}" != "1" ]; then
     fi
 fi
 
-if [ "$is_build" = 1 ]; then
+if [ "$is_build" = 1 ] && [ "${VENTIUM_BUILD_SCOPE_ACTIVE:-0}" != "1" ]; then
     command -v systemd-run >/dev/null 2>&1 || {
         echo "[verilator-lock] systemd-run is required to contain Verilator builds" >&2
         exit 125
     }
-    scope_mem="${VENTIUM_VERILATOR_MEMORY_MAX:-6G}"
-    scope_tasks="${VENTIUM_VERILATOR_TASKS_MAX:-64}"
+    scope_mem="${VENTIUM_BUILD_MEMORY_MAX:-${VENTIUM_VERILATOR_MEMORY_MAX:-6G}}"
+    scope_tasks="${VENTIUM_BUILD_TASKS_MAX:-${VENTIUM_VERILATOR_TASKS_MAX:-64}}"
     # --scope runs the child in a transient cgroup; the inherited lock FD stays
     # live until Verilator and its generated make/cc1plus descendants exit.
     exec systemd-run --user --scope --quiet \

@@ -15,6 +15,8 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 if (( $# == 0 )); then
     echo "usage: $0 <Vivado arguments>" >&2
     exit 64
@@ -92,4 +94,10 @@ echo "[vivado-exclusive] starting one Vivado run: vivado $*" >&2
 set +u
 source /tools/Xilinx/2025.2/Vivado/settings64.sh
 set -u
-exec vivado "$@"
+# Keep the sole Vivado parent and every synthesis/place/route descendant out of
+# the same resource pool used by Verilator/QEMU builds.  The Tcl flow further
+# fixes Vivado's internal worker count at one; this cgroup is the hard failure
+# boundary if a vendor tool nevertheless fans out unexpectedly.
+export VENTIUM_BUILD_MEMORY_MAX="${VENTIUM_VIVADO_MEMORY_MAX:-20G}"
+export VENTIUM_BUILD_TASKS_MAX="${VENTIUM_VIVADO_TASKS_MAX:-32}"
+exec "$SCRIPT_DIR/../tools/build_scope.sh" -- "${VIVADO_BIN:-vivado}" "$@"

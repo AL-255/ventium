@@ -20,11 +20,18 @@ set -euo pipefail
 # Resolve the qemu source tree (the same shallow clone the user-mode build used).
 # This script lives in verif/sys/ of the ventium repo.
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
+# A QEMU system build is a separate generated-code toolchain and used to take
+# every host core.  It must share the same lock/cgroup as RTL builds.
+if [ "${VENTIUM_BUILD_SCOPE_ACTIVE:-0}" != "1" ]; then
+  exec "$REPO/tools/build_scope.sh" -- "$0" "$@"
+fi
 REFS="$REPO/ventium-refs/07-p5-emulation-harness"
 QEMU_SRC="$REFS/build/qemu"
 BUILD_SYS="$QEMU_SRC/build-sys"
 LOGDIR="$REFS/build"
-JOBS="$(nproc)"
+JOBS="${QEMU_SYS_JOBS:-1}"
+[[ "$JOBS" =~ ^[1-9][0-9]*$ ]] || { echo "ERROR: QEMU_SYS_JOBS must be a positive integer" >&2; exit 2; }
 
 QEMU_REF="${QEMU_REF:-v8.2.2}"
 SYS_BIN="$BUILD_SYS/qemu-system-i386"

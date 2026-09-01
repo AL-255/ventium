@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
 #
-# Run a complete Ventium generated-code build in the same serialized, bounded
-# user scope as a normal Verilator --build.  This covers tools such as pipeviz
-# which run g++ themselves after Verilator emits C++; wrapping only the
-# Verilator front-end would leave those compilers outside the memory boundary.
+# Run a complete Ventium heavyweight build or verification fan-out in a
+# serialized, bounded user scope.  This covers tools such as pipeviz which run
+# g++ themselves after Verilator emits C++, as well as gates which fork many
+# QEMU/Python workers.  Wrapping only the Verilator front-end leaves both kinds
+# of descendants outside the resource boundary.
 set -euo pipefail
 
 if [ "$#" -lt 2 ] || [ "$1" != "--" ]; then
@@ -19,7 +20,7 @@ if [ "${VENTIUM_BUILD_SCOPE_ACTIVE:-0}" = "1" ]; then
     exec "$@"
 fi
 
-lock_path="${VENTIUM_VERILATOR_LOCK:-/tmp/ventium-verilator-build.lock}"
+lock_path="${VENTIUM_HEAVY_BUILD_LOCK:-${VENTIUM_VERILATOR_LOCK:-/tmp/ventium-heavy-build.lock}}"
 if ! command -v flock >/dev/null 2>&1; then
     echo "[build-scope] flock is required to serialize generated-code builds" >&2
     exit 125
@@ -36,8 +37,8 @@ if ! flock -n 9; then
 fi
 
 export VENTIUM_BUILD_SCOPE_ACTIVE=1
-scope_mem="${VENTIUM_VERILATOR_MEMORY_MAX:-6G}"
-scope_tasks="${VENTIUM_VERILATOR_TASKS_MAX:-64}"
+scope_mem="${VENTIUM_BUILD_MEMORY_MAX:-${VENTIUM_VERILATOR_MEMORY_MAX:-6G}}"
+scope_tasks="${VENTIUM_BUILD_TASKS_MAX:-${VENTIUM_VERILATOR_TASKS_MAX:-64}}"
 exec systemd-run --user --scope --quiet \
     -p "MemoryMax=${scope_mem}" -p "TasksMax=${scope_tasks}" \
     -- "$@"
