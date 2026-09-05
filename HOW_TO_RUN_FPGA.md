@@ -1366,6 +1366,33 @@ sudo /tmp/ao486/ven_board_probe.py perf --seconds 5 --axi-read-profiler
 
 The flag is deliberately opt-in so an older image is never relabeled as a latency measurement.
 
+### DDRAM AXI write-channel correctness gate
+
+The DDRAM-to-HP0 bridge must accept AXI write address (`AW`) and write data
+(`W`) independently.  The historical bridge advanced to `B` as soon as the
+final `W` beat handshook.  If an AXI clock converter accepted `W` before `AW`,
+that left `AWVALID` asserted in `S_B` and could issue the same address more
+than once while the response was delayed.  This is a correctness defect, not a
+throughput shortcut.
+
+Apply `fpga/patches/0005-ddram-axi-independent-aw-w.patch` to the external
+flow, then run the directed gate before synthesis:
+
+```bash
+git -C /home/yukidama/github/ao486_MiSTer apply --check \
+  fpga/patches/0005-ddram-axi-independent-aw-w.patch
+git -C /home/yukidama/github/ao486_MiSTer apply \
+  fpga/patches/0005-ddram-axi-independent-aw-w.patch
+bash fpga/run-ven-ddram-axi-aw-w-gate.sh
+```
+
+The gate compiles the exact external `ven_ddram_axi.v` and proves AW-first,
+W-first, simultaneous AW/W, and delayed-B cases.  Do not replace this with an
+AW-first-only BFM: the downstream `axi_clock_converter` is permitted to skew
+the channels.  The patch keeps the existing AW-first timing and enters `S_B`
+only after both channels have handshaken, so it fixes protocol ownership
+without adding a queue or hiding memory latency.
+
 Two current wrapper defects constrain interpretation. The deployed feature set
 numbers `S_PF=26` and `S_PIPE=27`, while `ven_soc_dbg.sv` hard-codes state 23
 and 24 into offsets `0x1b0` and `0x1a0`; the probe therefore calls them

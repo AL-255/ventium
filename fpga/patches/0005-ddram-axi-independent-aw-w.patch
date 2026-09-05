@@ -1,0 +1,41 @@
+diff --git a/fpga/rk-ao486-system/src/ven_ddram_axi.v b/fpga/rk-ao486-system/src/ven_ddram_axi.v
+--- a/fpga/rk-ao486-system/src/ven_ddram_axi.v
++++ b/fpga/rk-ao486-system/src/ven_ddram_axi.v
+@@ -81,5 +81,15 @@ module ven_ddram_axi #(
+     assign m_axi_wvalid = m_wv;
+     assign m_axi_wlast  = wl;
+     reg m_wv;
+-
++    // AXI AW and W are independent channels.  In particular, an interconnect
++    // may accept W before AW.  A write must remain in S_W until both channels
++    // have individually handshaken; entering S_B after W alone leaves AWVALID
++    // asserted, which can duplicate an address command while B is delayed.
++    wire aw_hs = m_axi_awvalid && m_axi_awready;
++    wire w_hs  = m_wv && m_axi_wready;
++    // Fold a handshake on this edge into the completion test.  For a multi-beat
++    // transfer `wl` denotes the beat presented on this edge, so only its final
++    // W handshake may complete the data channel.
++    wire write_cmd_done = (!m_axi_awvalid || aw_hs) &&
++                          (!m_wv || (w_hs && wl));
+     assign m_axi_rready = (st == S_R);
+@@ -147,12 +159,17 @@ module ven_ddram_axi #(
+                         end
+                       end
+                 S_W: begin
+-                    if (m_axi_awready) m_axi_awvalid <= 1'b0;
+-                    if (m_wv && m_axi_wready) begin
+-                        if (wl) begin m_wv <= 1'b0; st <= S_B; end
++                    if (aw_hs) m_axi_awvalid <= 1'b0;
++                    if (w_hs) begin
++                        if (wl) begin m_wv <= 1'b0; end
+                         else begin wbeats <= wbeats - 8'd1; wd <= DDRAM_DIN; ws <= DDRAM_BE;
+                                    wl <= (wbeats == 8'd2); end
+                     end
++                    // Do not let W-first acceptance advance to B while AW is
++                    // still outstanding.  Conversely, AW-first waits here
++                    // for the final W.  Both VALID signals remain asserted
++                    // until their own handshake, as AXI requires.
++                    if (write_cmd_done) st <= S_B;
+                 end
+                 S_B: if (m_axi_bvalid) begin st <= S_IDLE; wr_bar <= 8'd0; end  // build #28: barrier DISABLED (wr_bar stays 0 -> reads never latched, fire immediately = original behavior). Build #27 showed the barrier+L2-disable+golden combo is the read-response mis-sync source; revert to the proven path.
+                 default: st <= S_IDLE;
