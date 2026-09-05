@@ -147,8 +147,8 @@ int ide_img_mount(fileTYPE *f, const char *name, int rw)
 	int len = strlen(name);
 	if (len)
 	{
-		const char *ext = name + len - 4;
-		if (!strncasecmp(".chd", ext, 4))
+		const char *ext = (len >= 4) ? name + len - 4 : 0;
+		if (ext && !strncasecmp(".chd", ext, 4))
 		{
 			ret = 1;
 		}
@@ -463,7 +463,11 @@ static void fill_fake_rdb(drive_t *drive, uint32_t sector, int cnt)
 	}
 }
 
-void ide_img_set(uint32_t drvnum, fileTYPE *f, int cd, int sectors, int heads, int offset, int type)
+// `publish_to_rtl` distinguishes a normal media insertion from reconstructing
+// the daemon's volatile state around an already-running IDE device.  The latter
+// must not write presence/reset state or register contents into live hardware.
+static void ide_img_configure(uint32_t drvnum, fileTYPE *f, int cd, int sectors,
+                              int heads, int offset, int type, bool publish_to_rtl)
 {
 	int drv = (drvnum & 1);
 	int port = (drvnum >> 1);
@@ -488,7 +492,7 @@ void ide_img_set(uint32_t drvnum, fileTYPE *f, int cd, int sectors, int heads, i
 	drive->type = 0;
 
 	drive->present = f ? 1 : 0;
-	ide_inst[port].state = IDE_STATE_RESET;
+	ide_inst[port].state = publish_to_rtl ? IDE_STATE_RESET : IDE_STATE_IDLE;
 	ide_inst[port].bitoff = port * 3;
 
 	drive->cd = drive->present && cd;
@@ -506,8 +510,11 @@ void ide_img_set(uint32_t drvnum, fileTYPE *f, int cd, int sectors, int heads, i
 	if (drive->placeholder && drive->present && !drive->cd) drive->placeholder = 0;
 	if (drive->placeholder) drive->cd = 1;
 
-	ide_reg_set(&ide_inst[port], 6, ((drive->present || drive->placeholder) ? 9 : 8) << (drv * 4));
-	ide_reg_set(&ide_inst[port], 6, 0x200);
+	if (publish_to_rtl)
+	{
+		ide_reg_set(&ide_inst[port], 6, ((drive->present || drive->placeholder) ? 9 : 8) << (drv * 4));
+		ide_reg_set(&ide_inst[port], 6, 0x200);
+	}
 
 	if(drive->f)
 	{
@@ -743,6 +750,16 @@ void ide_img_set(uint32_t drvnum, fileTYPE *f, int cd, int sectors, int heads, i
 
 	printf("HDD%d:\n  present %d\n  hd_cylinders %d\n  hd_heads %d\n  hd_spt %d\n  hd_total_sectors %d\n\n",
 		drvnum, drive->present, drive->cylinders, drive->heads, drive->spt, drive->total_sectors);
+}
+
+void ide_img_set(uint32_t drvnum, fileTYPE *f, int cd, int sectors, int heads, int offset, int type)
+{
+	ide_img_configure(drvnum, f, cd, sectors, heads, offset, type, true);
+}
+
+void ide_img_rebind(uint32_t drvnum, fileTYPE *f, int cd, int sectors, int heads, int offset, int type)
+{
+	ide_img_configure(drvnum, f, cd, sectors, heads, offset, type, false);
 }
 
 static uint32_t get_lba(ide_config *ide)

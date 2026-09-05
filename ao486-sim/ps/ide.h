@@ -151,6 +151,10 @@ void ide_reg_set(ide_config *ide, uint16_t reg, uint16_t value);
 uint16_t ide_check();
 int ide_img_mount(fileTYPE *f, const char *name, int rw);
 void ide_img_set(uint32_t drvnum, fileTYPE *f, int cd, int sectors = 0, int heads = 0, int offset = 0, int type = 0);
+// Rebuild process-local image/geometry state after a daemon restart without
+// publishing a reset/presence transition into the live IDE RTL.
+void ide_img_rebind(uint32_t drvnum, fileTYPE *f, int cd, int sectors = 0, int heads = 0, int offset = 0, int type = 0);
+void ide_reattach_base();
 int ide_is_placeholder(int num);
 void ide_reset(uint8_t hotswap[4]);
 int ide_open(uint8_t unit, const char* filename);

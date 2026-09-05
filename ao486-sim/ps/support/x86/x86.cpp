@@ -782,9 +782,40 @@ void x86_poll(int only_ide)
 	}
 }
 
+void x86_poll_ide0()
+{
+	// `ide_check()` is the actual request source.  Do not pre-gate this with a
+	// sampled status register: a short command request can otherwise be missed.
+	uint16_t sd_req = ide_check();
+	ide_io(0, sd_req & 7);
+}
+
 void x86_reattach()   // after a state-load: rebuild ide_inst[] bases/drives (process-local
 {                     // state not captured by the RTL snapshot). No mem/CMOS/reset.
     for (int i = 0; i < 4; i++) hdd_set(i, config.img_name[i + 2]);
+}
+
+int x86_attach_hdd0(const char *filename)
+{
+	// This is deliberately narrower than x86_reattach(): hdd_set()/ide_img_set()
+	// advertises media and resets the daemon-side IDE state through management
+	// writes, which is appropriate after a state load but corrupts a live guest.
+	if (!filename || !filename[0]) return 0;
+
+	// Keep diagnostics/provenance useful without asking x86_set_image() to make
+	// its normal media-insertion transition.
+	snprintf(config.img_name[2], sizeof(config.img_name[2]), "%s", filename);
+	ide_reattach_base();
+
+	// HDD0 is never a CD path in the board daemon.  This is the same raw/VHD
+	// mount route used by hdd_set() for primary master, but configuration ends in
+	// ide_img_rebind() so it performs zero management-bus writes.
+	if (!ide_img_mount(&ide_image[0], filename, 1)) return 0;
+	ide_img_rebind(0, &ide_image[0], 0);
+
+	return ide_inst[0].base != 0 && ide_inst[0].bitoff == 0 &&
+	       ide_inst[0].state == IDE_STATE_IDLE &&
+	       ide_inst[0].drive[0].present && ide_inst[0].drive[0].f;
 }
 
 void x86_set_image(int num, char *filename)
