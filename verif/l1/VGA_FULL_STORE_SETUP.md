@@ -32,3 +32,28 @@ clocks are directly removable by this feature; no gameplay speedup has been
 measured for it. Latest verified gameplay IPC is **0.305049** on wave9's
 1.100–1.101B-cycle window, which predates this feature. Full-PC and FPGA
 performance and timing qualification remain open.
+
+## Qualified four-plane store
+
+`VEN_VGA_WIDE_STORE` is separately opt-in. For a full-strobe write in VGA
+chain-4 mode with the unmodified byte replacement function, the cache sends
+one 32-bit word to the four independent plane RAM write ports in one clock.
+Eligibility is checked when the write is accepted and again at commit; a VGA
+register change between those edges falls back to the byte sequencer. Map
+masks and bank selection still apply. Partial stores, other VGA write modes,
+and framebuffer/DDR traffic retain the legacy route. This does not depend on
+guest PC or data patterns.
+
+```sh
+tools/build_scope.sh -- bash verif/l1/run-vga-wide-store-gate.sh \
+  tmp/build-tmp/vga-wide-NEW
+```
+
+The September 26 gate passed both wide-only and wide-plus-setup profiles,
+comparing all four physical plane RAMs against the legacy path across 18
+cases per profile, including unsupported modes, configuration changes, and
+reset. The eligible transfer used one write clock instead of four. A full-PC
+model with `VEN_L2_STREAM_CWF` and `VEN_VGA_WIDE_STORE` compiled. Neither a
+full Quake gameplay run nor FPGA synthesis/timing has qualified this opt-in
+path; its effect on verified gameplay IPC is unknown. The 64,000 byte-write
+clocks in the wave7 sample bound its direct opportunity in that window.
