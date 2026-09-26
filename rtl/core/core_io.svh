@@ -84,6 +84,13 @@
               // unrelated 8042 command cannot leave the core primed to misread the
               // next 0x60 data byte as an A20 update.
               kbc_d1_armed <= (io_wdata[7:0] == 8'hD1);
+            // The platform also implements the direct 8042 A20 commands.
+            // Mirror completed writes before L1 lookup, just like D1/0x60;
+            // the existing a20_flush invalidates executable translation state.
+            if (q_io_write && q_io_port == 16'h0064) begin
+              if (io_wdata[7:0] == 8'hDD) a20_r <= 1'b0;
+              if (io_wdata[7:0] == 8'hDF) a20_r <= 1'b1;
+            end
             if (q_io_write && q_io_port == 16'h0060 && kbc_d1_armed) begin
               a20_r        <= io_wdata[1];
               kbc_d1_armed <= 1'b0;
