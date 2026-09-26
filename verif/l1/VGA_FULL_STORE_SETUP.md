@@ -87,3 +87,35 @@ verified gameplay IPC is 0.564642** for its 1.100–1.101B window. A completed
 timedemo, Win95 boot, matched-work A/B, and FPGA timing remain open; no >1 IPC
 claim is made. The full-PC profile still includes `VEN_FAST_RETRACE` and the
 headless keyboard defines, so this is not an on-board framerate sign-off.
+
+### Win95 boot check on the same binary
+
+The unchanged combined-profile executable cold-booted the archived Win95 disk
+to a verified 100M-clock checkpoint, then resumed with its paired disk to an
+exact 300M-clock checkpoint. At 100M, 200M, 250M and 300M its retirement counts
+were respectively 15,518,998, 31,255,534, 39,278,982 and 45,982,754: each
+matches the earlier wave9 run exactly. Both checkpoint bundles pass integrity
+validation. A ten-clock same-binary replay of the 300M snapshot exposes the
+actual text-mode screen: **“Invalid VxD dynamic link call to device number 3,
+service B”**, followed by the Windows configuration error. This reproduces the
+previously open VPICD-link symptom; the matching screen and retire counts do
+not independently prove the earlier missing-registration root cause. It is not
+a successful desktop boot or evidence that the VGA flags cause the failure.
+Evidence:
+`tmp/build-tmp/ventium-vga-wave9-win95-{cold100m,resume300m,text300m}-sep26/`.
+
+### Current gameplay cache-service exposure
+
+The same binary's 1.100–1.101B-clock state trace has exactly 1,000,000
+consecutive pre-edge observations; its final native snapshot and private disk
+compare byte-for-byte with the uninstrumented checkpoint. It records 92,349
+idle, cacheable, resident-read observations with request asserted but no ACK.
+This is a sampled service condition, not 92,349 independently removable clocks.
+During 124,955 L1 fill-state observations, the conservative optional
+hit-under-fill and already-arrived-word predicates find only 5,058 and 1,394
+potential observations respectively. They overlap their parent fill counts and
+are **not** predicted cycle savings. The bounded opportunity is too small to
+justify treating those two leaf-only flags as the main path to >1 IPC; the
+registered core-to-L1 request/response ownership remains the larger structural
+target. Trace and replay evidence:
+`tmp/build-tmp/ventium-vga-wave9-state1100-sep26/trace.log` and `end.snap`.
