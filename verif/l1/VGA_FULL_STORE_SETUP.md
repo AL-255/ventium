@@ -55,5 +55,10 @@ cases per profile, including unsupported modes, configuration changes, and
 reset. The eligible transfer used one write clock instead of four. A full-PC
 model with `VEN_L2_STREAM_CWF` and `VEN_VGA_WIDE_STORE` compiled. Neither a
 full Quake gameplay run nor FPGA synthesis/timing has qualified this opt-in
-path; its effect on verified gameplay IPC is unknown. The 64,000 byte-write
-clocks in the wave7 sample bound its direct opportunity in that window.
+path; its effect on verified gameplay IPC is unknown. Reconstruction of the
+complete wave7 1M-cycle state trace found all 16,000 full-strobe setup clocks
+and all 64,000 byte-write clocks in the eligible VGA register mode. Replacing
+four byte writes with one can directly remove at most 48,000 of those write
+clocks in that window (plus up to 16,000 setup clocks with both flags), before
+any secondary scheduling effects. This is an exposure bound, not a measured
+IPC gain.
