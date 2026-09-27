@@ -13,6 +13,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include "rep_accounting.h"
 #include "state_delta_focus.h"
 
 struct Input {
@@ -206,6 +207,10 @@ int main(int argc,char** argv) try {
     auto rv2_id=field("system__DOT__u_cpu__DOT__u_core__DOT__core_retire2_valid");
     auto qpc_id=field(core+"q_pc"), qpc2_id=field(core+"q_pc2"), snap_id=field(core+"snap");
     auto qkind_id=optional_field(core+"q_kind"), qst_id=optional_field(core+"q_st");
+    auto qrep_id=field(core+"q_rep"), qrepne_id=field(core+"q_repne");
+    auto qcnt16_id=field(core+"q_cnt16"), next_eip_id=field(core+"next_eip");
+    auto rep_gpr_id=field(core+"gpr_o");
+    if(fields[rep_gpr_id].size!=32) throw std::runtime_error("unknown GPR layout for REP accounting");
     auto movs_fuse_id=optional_field(core+"rep_movs_load_fuse");
     auto movs_stream_id=optional_field(core+"rep_movs_stream_arm");
     auto fstep_id=field(core+"f_step"), fbytes_id=field(core+"q_f_mbytes");
@@ -343,6 +348,7 @@ int main(int argc,char** argv) try {
     if(!miss_events) throw std::runtime_error("miss event output open");
     miss_events<<"cycle\tphysical_line\tset\tkind\tcore_eip\n";
     uint64_t previous_retired=scalar(ret_id), retired_start=previous_retired, stall_run=0,max_stall=0,max_stall_end=0;
+    RepAccounting rep_accounting;
     const uint64_t initial_registered_retire=scalar(rv_id) ? (scalar(rv2_id) ? 2 : 1) : 0;
     uint64_t changed_blocks=0;
     for(uint64_t index=0;index<count;++index) {
@@ -416,6 +422,18 @@ int main(int argc,char** argv) try {
         uint64_t prior_state=scalar(state_id);
         const uint64_t prior_qpc=scalar(qpc_id), prior_qkind=optional_scalar(qkind_id);
         const uint64_t prior_qst=optional_scalar(qst_id), prior_fxop=scalar(fxop_id);
+        const uint32_t prior_next_eip=uint32_t(scalar(next_eip_id));
+        uint32_t prior_ecx=0;
+        memcpy(&prior_ecx,state.data()+fields[rep_gpr_id].offset+4,4);
+        const bool prior_rep_zero=bool(scalar(qcnt16_id) ? !(prior_ecx&0xffffu) : !prior_ecx);
+        // Only an owned slow string arm can account REP callbacks. q_* may
+        // retain an earlier string descriptor while S_PIPE retires a new fast
+        // instruction, so it is never sufficient to test q_kind alone.
+        const bool prior_rep_owner=(prior_state==5 || prior_state==6 ||
+                                    prior_state==25 || prior_state==26) &&
+            prior_qkind==13 && (scalar(qrep_id) || scalar(qrepne_id));
+        const bool prior_rep_zero_element=prior_rep_zero &&
+            (prior_state==5 || prior_state==26);
         if(prior_state==12) { // S_FLOAD in this pinned full-PC elaboration
             auto& row=fp_load_service[{scalar(qpc_id),scalar(fxop_id),scalar(fbytes_id)}];
             ++row.clocks;
@@ -637,6 +655,9 @@ int main(int argc,char** argv) try {
         bool pending=scalar(pending_id), hold=scalar(hold_id), fault=scalar(fault_id);
         bool memwait=scalar(mem_id) && !scalar(ack_id), frontend=scalar(front_id);
         const uint64_t edge_retires=scalar(rv_id) ? (scalar(rv2_id) ? 2 : 1) : 0;
+        rep_accounting.observe(unsigned(edge_retires), prior_rep_owner,
+                               prior_rep_zero_element, pc, uint32_t(prior_qpc),
+                               prior_next_eip);
         ++edge_joint[{prior_state,prior_hold,uint64_t(prior_fault),
                      uint64_t(prior_full_memwait),prior_front,edge_retires}];
         totals["edge_retired"]+=edge_retires;
@@ -876,6 +897,14 @@ int main(int argc,char** argv) try {
     if(!summary || !activity || !hot || !matrix) throw std::runtime_error("output open");
     summary<<"metric\tvalue\ncycles\t"<<count<<"\nstart\t"<<first<<"\nend\t"<<first+count<<"\nfields\t"<<nf<<"\nstate_bytes\t"<<size<<"\nchanged_blocks\t"<<changed_blocks<<"\n";
     summary<<"ipc\t"<<double(previous_retired-retired_start)/count<<"\nlongest_no_retire\t"<<max_stall<<"\nlongest_no_retire_end\t"<<max_stall_end<<"\n";
+    summary<<"rep_edge_legacy_events\t"<<rep_accounting.legacy<<"\n"
+           <<"rep_edge_normalized_known\t"<<rep_accounting.rep_normalized_known<<"\n"
+           <<"rep_edge_normalized_upper_bound\t"<<rep_accounting.rep_normalized_known+rep_accounting.unresolved<<"\n"
+           <<"rep_edge_callbacks\t"<<rep_accounting.rep_callbacks<<"\n"
+           <<"rep_edge_elements\t"<<rep_accounting.rep_elements<<"\n"
+           <<"rep_edge_completed\t"<<rep_accounting.rep_completed<<"\n"
+           <<"rep_edge_zero_count\t"<<rep_accounting.rep_zero_count<<"\n"
+           <<"rep_edge_unresolved\t"<<rep_accounting.unresolved<<"\n";
     summary<<"l1_demand_miss_code\t"<<counted_misses[0]<<"\n"
            <<"l1_demand_miss_data\t"<<counted_misses[1]<<"\n"
            <<"l1_next_lookup_miss_reject\t"<<counted_misses[2]<<"\n"

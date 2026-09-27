@@ -26,6 +26,7 @@
 #include "ide_checkpoint.h"
 #include "rtc_rate.h"
 #include "profile_code.h"
+#include "../../tools/rep_accounting.h"
 #include <cerrno>
 #ifdef VEN_STATE_DELTA_HOST
 #if !__has_include("ven_state_fields.inc")
@@ -68,6 +69,11 @@ static const char *g_save_file = "ven_post.snap";  // --save-file FN (base name;
 static const char *g_restore_file = nullptr;        // --restore FN: load snapshot right after x86_init
 static bool g_snapshot_v2 = false, g_save_stop = false;
 static bool g_snapshot_v3 = false;
+// Diagnostic-only completed-instruction accounting. Native checkpoints do
+// not serialize this host observer; require a cold run when enabled.
+static bool g_rep_account_enable = false;
+static uint64_t g_rep_account_start = 0;
+static RepAccounting g_rep_account;
 // Read-only, bounded pre-edge FSM diagnostic; not checkpointed guest state.
 static uint64_t g_state_trace_start = 0, g_state_trace_cycles = 0;
 // The IDE daemon's per-register/per-sector trace is useful for an ATA wedge,
@@ -498,6 +504,21 @@ static void tick() {
     }
 #endif
     set_clocks(0); top->eval();
+    bool rep_owner = false, rep_zero_element = false;
+    uint32_t rep_qpc = 0, rep_next_eip = 0;
+    if (g_rep_account_enable && !top->reset && main_time >= g_rep_account_start) {
+        const auto *r = top->rootp;
+#define REP_OBS(name) r->system__DOT__u_cpu__DOT__u_core__DOT__u_core__DOT__##name
+        const unsigned state = REP_OBS(state);
+        const uint32_t ecx = REP_OBS(gpr_o)[1];
+        const bool count_zero = REP_OBS(q_cnt16) ? !(ecx & 0xffffu) : !ecx;
+        rep_owner = (state == 5 || state == 6 || state == 25 || state == 26) &&
+                    REP_OBS(q_kind) == 13 && (REP_OBS(q_rep) || REP_OBS(q_repne));
+        rep_zero_element = count_zero && (state == 5 || state == 26);
+        rep_qpc = REP_OBS(q_pc);
+        rep_next_eip = REP_OBS(next_eip);
+#undef REP_OBS
+    }
     if (g_state_trace_cycles && main_time >= g_state_trace_start &&
         main_time - g_state_trace_start < g_state_trace_cycles) {
         const auto *r = top->rootp;
@@ -517,6 +538,14 @@ static void tick() {
             top->rootp->system__DOT__u_cpu__DOT__u_core__DOT__u_core__DOT__state,
             top->rootp->system__DOT__u_cpu__DOT__u_core__DOT__u_core__DOT__ibuf);
     set_clocks(1); step_vga_clock(); top->eval();
+    if (g_rep_account_enable && !top->reset && main_time >= g_rep_account_start) {
+        const auto *r = top->rootp;
+        const unsigned retired = r->system__DOT__u_cpu__DOT__u_core__DOT__core_retire_valid ?
+            (r->system__DOT__u_cpu__DOT__u_core__DOT__core_retire2_valid ? 2u : 1u) : 0u;
+        g_rep_account.observe(retired, rep_owner, rep_zero_element,
+            r->system__DOT__u_cpu__DOT__u_core__DOT__u_core__DOT__eip,
+            rep_qpc, rep_next_eip);
+    }
     ddr_service(); top->eval();
     main_time++;
 #ifdef VEN_HAVE_STATE_DELTA
@@ -1050,6 +1079,16 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--ven-perf-every") && i+1<argc) {
             g_ven_perf_every = strtoull(argv[++i], 0, 0);
         }
+        else if (!strcmp(argv[i], "--ven-rep-account-start") && i+1<argc) {
+            g_rep_account_enable = true;
+            const char *value = argv[++i];
+            char *end = nullptr;
+            errno = 0;
+            const unsigned long long parsed = std::strtoull(value, &end, 0);
+            if (errno || !*value || *value == '-' || *end)
+                checkpoint_fail("--ven-rep-account-start requires a nonnegative cycle");
+            g_rep_account_start = parsed;
+        }
         else if (!strcmp(argv[i], "--ven-state-start") && i+1<argc) {
             g_state_trace_start = strtoull(argv[++i], 0, 0);
         }
@@ -1123,6 +1162,10 @@ int main(int argc, char **argv) {
         checkpoint_fail("--save-stop requires --save-at and excludes --save-every");
     if (g_stop_retire && g_save_stop)
         checkpoint_fail("--ven-stop-retire and --save-stop are mutually exclusive");
+    if (g_rep_account_enable && g_restore_file)
+        checkpoint_fail("REP accounting requires a cold run; host counters are not in native snapshots");
+    if (g_rep_account_enable && g_rep_account_start >= cycles)
+        checkpoint_fail("REP accounting start must precede the stop cycle");
     if (g_kb_script) kb_build_events(g_kb_script);
 
     top = new Vsystem;
@@ -1329,6 +1372,18 @@ int main(int argc, char **argv) {
                 fprintf(stderr, "[VEN-PERF] unavailable: build with +define+VEN_PERF_PROFILE\n");
                 g_ven_perf_every = 0;
             }
+            if (g_rep_account_enable && main_time >= g_rep_account_start)
+                fprintf(stderr, "[REP-ACCOUNT] start=%llu cycle=%llu legacy_edge=%llu rep_normalized_known=%llu rep_normalized_upper=%llu rep_callbacks=%llu rep_elements=%llu rep_completed=%llu zero_count=%llu unresolved=%llu\n",
+                    (unsigned long long)g_rep_account_start,
+                    (unsigned long long)main_time,
+                    (unsigned long long)g_rep_account.legacy,
+                    (unsigned long long)g_rep_account.rep_normalized_known,
+                    (unsigned long long)(g_rep_account.rep_normalized_known + g_rep_account.unresolved),
+                    (unsigned long long)g_rep_account.rep_callbacks,
+                    (unsigned long long)g_rep_account.rep_elements,
+                    (unsigned long long)g_rep_account.rep_completed,
+                    (unsigned long long)g_rep_account.rep_zero_count,
+                    (unsigned long long)g_rep_account.unresolved);
         }
         if (main_time - last_report >= 500000) {
             last_report = main_time;
@@ -1349,6 +1404,18 @@ int main(int argc, char **argv) {
     }
     fprintf(stderr, ">>> done: cyc=%llu retires=%llu last cs=%04x:eip=%08x\n",
             (unsigned long long)main_time, (unsigned long long)g_vtm_retires, g_vtm_cs, g_vtm_eip);
+    if (g_rep_account_enable)
+        fprintf(stderr, "[REP-ACCOUNT-FINAL] start=%llu cycle=%llu legacy_edge=%llu rep_normalized_known=%llu rep_normalized_upper=%llu rep_callbacks=%llu rep_elements=%llu rep_completed=%llu zero_count=%llu unresolved=%llu\n",
+            (unsigned long long)g_rep_account_start,
+            (unsigned long long)main_time,
+            (unsigned long long)g_rep_account.legacy,
+            (unsigned long long)g_rep_account.rep_normalized_known,
+            (unsigned long long)(g_rep_account.rep_normalized_known + g_rep_account.unresolved),
+            (unsigned long long)g_rep_account.rep_callbacks,
+            (unsigned long long)g_rep_account.rep_elements,
+            (unsigned long long)g_rep_account.rep_completed,
+            (unsigned long long)g_rep_account.rep_zero_count,
+            (unsigned long long)g_rep_account.unresolved);
     ven_debug_report_tlb();
     if (g_ven_perf_every && main_time != g_ven_perf_last) {
         ven_perf_sample(stderr, *top->rootp, main_time, g_vtm_retires, 0);
