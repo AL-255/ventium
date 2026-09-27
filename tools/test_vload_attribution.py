@@ -184,6 +184,17 @@ def main():
         chain_sample(1, 1),                       # replacement remains unproven
         chain_sample(0, 0, valid=0),
     ]
+    # A decoded slow owner is attributable after S_DECODE; its state, saved
+    # PC and opcode must be sampled before the edge rather than from the next
+    # live frontend packet. Fetch/decode themselves are intentionally excluded.
+    samples.append(sample(signals={'state': 12, 'pipe_int_commit': 0,
+                                   'pipe_frontend_ready': 0, 'uc_v_avail': 0,
+                                   'q_pc': 0x2468, 'q_kind': 8, 'q_st': 1,
+                                   'q_fxop': 23}))
+    samples.append(sample(signals={'state': 0, 'pipe_int_commit': 0,
+                                   'pipe_frontend_ready': 0, 'uc_v_avail': 0}))
+    # The inert reset-shaped post-state settles the saved owner's outgoing edge
+    # without creating a new pair opportunity in the other synthetic counters.
     # Exercise one cumulative profiler bucket-3 edge. The event recorder must
     # capture the PRE-edge state and must not emit another row at later levels.
     bail_field = by_name[core + 'pp_bail']
@@ -281,6 +292,18 @@ def main():
                 assert sum(int(row[cause]) for row in pc_rows) == int(totals.get('no_edge_retire_' + cause, '0'))
             assert all(sum(int(row[cause]) for cause in cause_names) == int(row['total'])
                        for row in pc_rows)
+            with (out/'analysis.slow_owner_no_retire.tsv').open() as f:
+                owners = list(csv.DictReader(f, delimiter='\t'))
+            assert all(int(row['state']) not in (0, 1, 2, 8, 10, 28) for row in owners)
+            assert any(row == dict(state='12', q_pc='2468', q_kind='8', q_st='1',
+                                   q_fxop='23', clocks='1') for row in owners)
+            assert sum(int(row['clocks']) for row in owners) == (
+                int(totals['no_edge_retire_outside_pipe']) -
+                int(totals.get('no_edge_retire_state_0', 0)) -
+                int(totals.get('no_edge_retire_state_1', 0)) -
+                int(totals.get('no_edge_retire_state_2', 0)) -
+                int(totals.get('no_edge_retire_state_8', 0)) -
+                int(totals.get('no_edge_retire_state_10', 0)))
             with (out/'analysis.uop_holes.tsv').open() as f:
                 holes = list(csv.DictReader(f, delimiter='\t'))
             assert len(holes) == 1

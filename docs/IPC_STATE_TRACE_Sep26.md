@@ -611,6 +611,36 @@ platform L2 as an IPC fix on this evidence. The larger remaining path is
 core/L1 request ownership and execution overlap, with any L2-capacity change
 requiring its own matched-work and hardware qualification.
 
+### Cache-policy continuation and decoded slow-owner attribution
+
+The opt-in full-PC cache-policy executable (SHA256
+`882aeeb3cde27b9ae36249d300e3f8328830003d070b5ad613f6a18fc1d36c3b`)
+continued from its own validated 1.150B cold-boot checkpoint to 1.400B. The
+source bundle and newly saved bundle both pass `checkpoint_bundle.py`; the
+source binary, ROMs and private disk were verified unchanged. Its
+1.350–1.400B gameplay window retired 20,970,796 instructions in 49,999,999
+clocks (**0.41941593 IPC**). The source-matched control executable (SHA256
+`9609e4429d6f9ded038db64e167bd2c358b845a9af863ce548df05a3f3519990`)
+retired 20,517,424 (**0.41034849 IPC**) in the same clock window. Both
+losslessly previewed frames show the same Quake scene, with a small phase
+offset. This is a 2.21% *equal-clock* lead, not a fixed-work timing result;
+the candidate still lacks fresh Win95 and completed timedemo acceptance.
+Artifacts: `tmp/build-tmp/ventium-cache-policy-1400m-sep27/` and
+`tmp/build-tmp/ventium-fair-suffix1400m-sep27/`.
+
+The offline analyzer now emits `slow_owner_no_retire.tsv`, keyed by pre-edge
+FSM state and saved decoded operation. It deliberately excludes fetch/decode,
+reset, halt and shutdown, where the saved descriptor may be stale or absent.
+Synthetic phase cases and the exact 1M-cycle reconstruction pass at
+`tmp/build-tmp/ventium-fair-1400m-slow-owner-sep27/`. In the **control's**
+1.400–1.401B phase, FILD m32 (`S_FLOAD`, `FX_FILD_M32`) accounts for 19,437
+non-retiring clocks, of which 10,551 are at `0x10f4a` and 4,355 at
+`0x10f4d`. These are observed owner clocks, not an independent saving budget;
+the earlier per-PC cache-service breakdown already shows real line fills and
+busy-fill overlap. The cache-policy gain remains small relative to the >1 IPC
+gap, so full-profile promotion needs broader correctness and fixed-work
+evidence rather than extrapolation from this interval.
+
 The later trace's `wave7.cache_backend.tsv` also narrows active downstream
 service: **54,949** settled clocks simultaneously have AXI read state 2,
 bridge read state 2, an L1 read waiting and no backing ACK. Of these, 46,499

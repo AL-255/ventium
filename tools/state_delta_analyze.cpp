@@ -308,6 +308,9 @@ int main(int argc,char** argv) try {
     // Same-edge no-retirement ownership, keyed by PRE-edge PC. Keep this
     // separate from the historical post-edge PC/host-retirement hot table.
     std::map<std::array<uint64_t,2>,uint64_t> pc_edge_no_retire;
+    // Only live states *after* S_FETCH/S_DECODE have a captured slow-operation
+    // descriptor. Reset, halt and shutdown also cannot name useful work.
+    std::map<std::array<uint64_t,5>,uint64_t> slow_owner_no_retire;
     std::map<std::array<uint64_t,5>,uint64_t> joint;
     // This report deliberately joins actual per-edge observations, not the
     // independently aggregated bail_joint and settled joint tables. Host DPI
@@ -391,6 +394,8 @@ int main(int argc,char** argv) try {
             optional_scalar(uc_wsteps_id),optional_scalar(uc_wrepair_id),optional_scalar(uc_wanchor_id),
             optional_scalar(uc_wset_id),uint64_t(prior_flin&31u)};
         uint64_t prior_state=scalar(state_id);
+        const uint64_t prior_qpc=scalar(qpc_id), prior_qkind=optional_scalar(qkind_id);
+        const uint64_t prior_qst=optional_scalar(qst_id), prior_fxop=scalar(fxop_id);
         if(prior_state==12) { // S_FLOAD in this pinned full-PC elaboration
             auto& row=fp_load_service[{scalar(qpc_id),scalar(fxop_id),scalar(fbytes_id)}];
             ++row.clocks;
@@ -628,6 +633,9 @@ int main(int argc,char** argv) try {
                 prior_full_memwait ? "memory_wait_including_admission" :
                 !prior_front ? "frontend_unavailable" : "ready_control";
             ++totals["no_edge_retire_"+reason];
+            if(prior_state!=28 && prior_state!=0 && prior_state!=1 && prior_state!=2 &&
+               prior_state!=8 && prior_state!=10)
+                ++slow_owner_no_retire[{prior_state,prior_qpc,prior_qkind,prior_qst,prior_fxop}];
             const unsigned cause=prior_state!=28 ? 0 : prior_hold ? 1 :
                 prior_fault ? 2 : prior_full_memwait ? 3 : !prior_front ? 4 : 5;
             ++pc_edge_no_retire[{prior_pc,cause}];
@@ -923,6 +931,22 @@ int main(int argc,char** argv) try {
     }
     if(pc_cause_total!=totals["no_edge_retire_total"])
         throw std::runtime_error("PC edge cause partition mismatch");
+    std::ofstream slow_owner_out(prefix+".slow_owner_no_retire.tsv");
+    if(!slow_owner_out) throw std::runtime_error("slow owner report open");
+    slow_owner_out<<"state\tq_pc\tq_kind\tq_st\tq_fxop\tclocks\n";
+    uint64_t slow_owner_total=0;
+    for(const auto& [key,clocks]:slow_owner_no_retire) {
+        slow_owner_out<<key[0]<<'\t'<<std::hex<<key[1]<<std::dec<<'\t'
+                      <<key[2]<<'\t'<<key[3]<<'\t'<<key[4]<<'\t'<<clocks<<'\n';
+        slow_owner_total+=clocks;
+    }
+    if(slow_owner_total!=totals["no_edge_retire_outside_pipe"]-
+                         totals["no_edge_retire_state_0"]-
+                         totals["no_edge_retire_state_1"]-
+                         totals["no_edge_retire_state_2"]-
+                         totals["no_edge_retire_state_8"]-
+                         totals["no_edge_retire_state_10"])
+        throw std::runtime_error("slow owner no-retirement partition mismatch");
     matrix<<"state\tasync_hold\tpipe_mem_wait\tfrontend_ready\tretired\tcycles\n";
     for(auto& kv:joint) {for(auto v:kv.first) matrix<<v<<'\t'; matrix<<kv.second<<'\n';}
     std::ofstream cj(prefix+".ready_control.tsv");
