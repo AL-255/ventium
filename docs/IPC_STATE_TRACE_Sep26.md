@@ -414,3 +414,54 @@ core-to-L1 requests/responses with exact physical identity, ordered stores,
 fault/SMC/snoop cancellation, and byte-exact MMIO; then quantify matched-work
 gameplay and hardware timing/area. Do not substitute a timing-unsafe
 combinational L1 ACK or a Quake-address-specific special case.
+
+## September 27: fairness build continued through 1.400B
+
+The frozen fairness executable (`9609e4429d6f9ded038db64e167bd2c358b845a9af863ce548df05a3f3519990`)
+restored its verified 1.150B native bundle, using a private disk, and ran
+without error to a save/stop at exactly 1.400B clocks. The new five-file
+bundle passes `CHECKPOINT-BUNDLE-OK` at
+`tmp/build-tmp/ventium-fair-1400m-bundle-sep27/`; snapshot SHA256 is
+`5f49c7aa8d3f902a9257d422b25ee0f3bcfb7f2c5a19906067e329d4510e0788`.
+The simulator stayed near 141 MB RSS. No Vivado run or RTL change was involved.
+
+Compare equal-phase profiler endpoints after restore, starting at clock
+1,150,000,001: the snapshot already held two registered retirements, so
+subtracting its save-time retirement count from the later profiler endpoint
+would incorrectly add those two to the first interval.
+
+| Clock interval | Retirements | IPC |
+| --- | ---: | ---: |
+| 1,150,000,001–1,200,000,001 | 21,278,958 / 50,000,000 | 0.42557916 |
+| 1,200,000,001–1,250,000,001 | 20,600,752 / 50,000,000 | 0.41201504 |
+| 1,250,000,001–1,300,000,001 | 21,772,634 / 50,000,000 | 0.43545268 |
+| 1,300,000,001–1,350,000,001 | 20,639,353 / 50,000,000 | 0.41278706 |
+| 1,350,000,001–1,400,000,000 | 20,517,424 / 49,999,999 | **0.41034849** |
+
+Across the whole 249,999,999-clock suffix, 104,809,121 instructions retired:
+**0.41923649 IPC**. Four successive 320×200 capture pairs differ by 115,850,
+112,302, 97,799 and 115,299 color bytes, respectively. The stopped private
+disk's `QUAKE/ID1/QCONSOLE.LOG` progressed from “You got the shells” to
+“You got the Grenade Launcher”; it has **no timedemo result line**. Thus the
+replay verifies continuing gameplay and checkpoint safety, not a completed
+timedemo or FPS. The final save occurs before the 1.400B periodic frame
+capture, so the final near-50M window has no new endpoint image.
+
+Two independent same-build restores from the 1.400B bundle to 1.401B ended
+with byte-identical native snapshots
+(`eff0d5f91b8396746e01d483667c3c2f97f4336659490a4f05ed66a1cdafd1ab`)
+and disks
+(`9e65fccb940025994a50167a6864407972d0c5e53ce44ca01c5c88a4fe8b7ad0`),
+each at 542,129,368 cumulative retirements. Their 1M-clock diagnostic suffix
+retired 629,115 instructions (**0.629115 IPC**), a different short gameplay
+phase; it does not replace the longer-window figure or establish an RTL gain.
+
+The completed 1.200–1.250B profiler interval puts the general bottleneck in
+view: S_PIPE memory-wait first-bail 8,049,780 clocks, x87 issue/occupancy
+5,859,380, and uop-map fallback 4,073,702. Outside S_PIPE, FLOAD alone
+occupies 4,725,826 clocks and integer LOAD 2,562,452. These first-bail and
+FSM-state categories are not additive savings. Slow-decode residency is
+2,311,967 clocks, with D8/D9/DB/DF x87 opcodes collectively about 38%.
+Even an idealized single-cache-flag fix cannot close the >1 IPC gap: the next
+candidate must address memory response ownership, FP admission/operand overlap,
+and frontend fallback together while preserving the differential gate.
