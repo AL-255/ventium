@@ -1027,11 +1027,7 @@ module ven_l1d #(
             // read HIT → 2-way LRU touch (both lines on a xline-line hit).
             dc_lru[set_c] <= hit_way;
             if (xline) dc_lru[set_n] <= hit_way_n;
-          end else if (c_req && c_we
-`ifdef VEN_L1D_TAG_INVALIDATE
-                       && c_ack
-`endif
-                      ) begin
+          end else if (c_req && c_we && c_ack) begin
             // WRITE (write-through). The backing received the full byte-accurate store
             // via the comb driver (ven_axi_master splits a cross-word / cross-line
             // store into per-word AXI beats); c_ack means the master retained the
@@ -1055,26 +1051,13 @@ module ven_l1d #(
               for (int i = 0; i < 4; i++)
                 if (c_wstrb[i])
                   dc_line[{set_c, hit_way}][8*(c_addr[4:0] + i[4:0]) +: 8] <= c_wdata[8*i +: 8];
-`ifdef VEN_L1D_TAG_INVALIDATE
               // Physical tags distinguish different lines occupying one set.
               // Preserve the other way unless it duplicates this exact tag.
               // Cache mutation is acceptance-qualified above, so a held then
               // withdrawn store cannot leave speculative data in a valid line.
               if (hit0 && hit1) dc_val[set_c][~hit_way] <= 1'b0;
-`else
-              dc_val[set_c][~hit_way] <= 1'b0;   // defensively drop any stale alias in the other way
-`endif
               dc_lru[set_c] <= hit_way;
             end else begin
-              // FIX A (Win95 relocation coherence, build #16): WRITE MISS or cross-line -> BLIND-
-              // invalidate BOTH ways of every set the store touches. The DCACHE has NO external-write
-              // snoop (g_nol2, ventium_l1_axi.sv:443); the hardware-proven failure is a source load of
-              // 0xb00 served stale 0x00000000 from a valid way-1 HIT while DDR held CODE (06 8b 4e 68).
-              // A hit-only invalidate (build #13) cannot catch a stale line the store MISSED, so clear
-              // BOTH ways: if the store MISSED a stale line (filled later) the set is clean so a
-              // subsequent read MISS re-fills committed DDR (write-through already waited BVALID). Also
-              // subsumes the xline __call16 iret-frame case (addressed + spilled-into lines cleared).
-`ifdef VEN_L1D_TAG_INVALIDATE
               // Nonallocating write miss: no matching cached data to change.
               // Crossing stores invalidate only resident touched physical tags;
               // ven_axi_master drains posted writes before any backing read.
@@ -1086,11 +1069,6 @@ module ven_l1d #(
                 if (hit_n0) dc_val[set_n][0] <= 1'b0;
                 if (hit_n1) dc_val[set_n][1] <= 1'b0;
               end
-`else
-              dc_val[set_c][0] <= 1'b0;
-              dc_val[set_c][1] <= 1'b0;
-              if (xline) begin dc_val[set_n][0] <= 1'b0; dc_val[set_n][1] <= 1'b0; end
-`endif
             end
             // (STLD write-capture removed with the forwarding buffer.)
           end

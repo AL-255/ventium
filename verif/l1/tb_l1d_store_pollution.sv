@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
-// Default: characterize the existing policy without changing its expectations.
-// TAG_POLICY=1: require zero unrelated eviction plus directed coherence checks.
+// Store acceptance/tag-selectivity regression for the normal L1 policy.
 `timescale 1ns/1ps
-module tb_l1d_store_pollution #(parameter bit TAG_POLICY=0);
+module tb_l1d_store_pollution;
   logic clk=0, rst_n=0;
   always #5 clk=~clk;
   logic flush_all=0, golden=0, cacheable=1, snoop_inv_valid=0;
@@ -76,10 +75,8 @@ module tb_l1d_store_pollution #(parameter bit TAG_POLICY=0);
       $fatal(1,"write-through ownership/data mismatch");
     read_at('h1000); read_at('h2000);
     $display("STORE-POLLUTION %s refill_read_beats=%0d",label,read_beats-before_reads);
-    // The baseline runner retains its original counts; the separate tag-policy
-    // runner passes TAG_POLICY=1 and additionally runs the coherence cases.
     if(read_beats-before_reads!=expected_refills)
-      $fatal(1,"baseline policy changed: inspect and remeasure");
+      $fatal(1,"store policy changed: inspect and remeasure");
   endtask
   task automatic accepted_store(input logic [31:0] addr, input logic [3:0] mask);
     @(negedge clk); c_req=1; c_we=1; c_addr=addr; c_wstrb=mask;
@@ -90,6 +87,8 @@ module tb_l1d_store_pollution #(parameter bit TAG_POLICY=0);
   task automatic tag_cases;
     int before_reads, before_writes;
     logic [255:0] old_line;
+    logic [1:0] old_valid;
+    logic old_lru;
     logic way;
     // Every byte position and nonempty byte mask, including line crossing.
     // Readback is checked against byte-accurate backing, not against DUT tags.
@@ -107,14 +106,21 @@ module tb_l1d_store_pollution #(parameter bit TAG_POLICY=0);
     // A cancelled, unaccepted store must change neither backing nor cached data.
     read_at('h6000);
     @(negedge clk); c_addr='h6000;
-    #1; way=dut.hit_way; old_line=dut.dc_line[{7'd0,way}];
+    #1;
+    way=dut.hit_way;
+    old_line=dut.dc_line[{7'd0,way}];
+    old_valid={dut.dc_val[7'd0][1],dut.dc_val[7'd0][0]};
+    old_lru=dut.dc_lru[7'd0];
     before_writes=write_beats;
     c_req=1; c_we=1; c_wdata=32'hffffffff; stall_store=1;
     repeat(4) begin
       @(posedge clk);
       if(c_ack) $fatal(1,"cancel test accepted blocked store");
       @(negedge clk);
-      if(dut.dc_line[{7'd0,way}]!==old_line) $fatal(1,"unaccepted store mutated cache");
+      if(dut.dc_line[{7'd0,way}]!==old_line ||
+         {dut.dc_val[7'd0][1],dut.dc_val[7'd0][0]}!==old_valid ||
+         dut.dc_lru[7'd0]!==old_lru)
+        $fatal(1,"unaccepted store mutated cache");
     end
     c_req=0; c_we=0; stall_store=0;
     if(write_beats!=before_writes) $fatal(1,"cancelled store reached backing");
@@ -132,13 +138,11 @@ module tb_l1d_store_pollution #(parameter bit TAG_POLICY=0);
   endtask
   initial begin
     for(int i=0;i<65536;i++) mem[i]=8'(i^(i>>8));
-    measure("store-hit-other-way",'h1004,0,TAG_POLICY ? 0 : 8);
-    measure("store-miss-same-set",'h3000,0,TAG_POLICY ? 0 : 16);
-    measure("uncached-store-same-set",'h3000,1,TAG_POLICY ? 0 : 16);
-    if(TAG_POLICY) begin
-      tag_cases();
-      $display("L1D-TAG-POLICY-OK (zero pollution, masked stores, crossing, cancellation, snoop)");
-    end else $display("STORE-POLLUTION-BASELINE-OK (characterization, not optimized hardware acceptance)");
+    measure("store-hit-other-way",'h1004,0,0);
+    measure("store-miss-same-set",'h3000,0,0);
+    measure("uncached-store-same-set",'h3000,1,0);
+    tag_cases();
+    $display("L1D-TAG-POLICY-OK (zero pollution, masked stores, crossing, cancellation, snoop)");
     $finish;
   end
   initial begin #1000000; $fatal(1,"watchdog"); end
