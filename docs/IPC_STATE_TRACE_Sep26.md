@@ -303,6 +303,9 @@ repair (source set 7/anchor 31 to set 8/anchor 5). None had a pending fill,
 poison or invalidation at that transition. In this observed phase the hot
 cross-line descriptor never reaches publication: the existing policy can
 starve optional late-anchor repairs under recurring earlier-anchor traffic.
+Across all source sets in the same phase, there are 2,133 clean late-seek
+(`anchor > 25`) preemptions to earlier anchors, all with the suffix source
+available and no pending real fill; this is not confined to one Quake address.
 This is a repair-scheduling opportunity, not missing instruction bytes or an
 I-cache refill. A general fairness change must still preserve source
 identities, invalidation, mode-change cancellation and real-fill priority;
