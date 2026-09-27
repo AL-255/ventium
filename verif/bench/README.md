@@ -49,3 +49,16 @@ or SIR-dependent FP values. Add dedicated short fixtures for those mechanisms
 as their replacement interfaces land. In particular, a faster distinct-bank
 case is **not** by itself proof of two memory retirements per clock: inspect
 the cycle trace and the accepted owner records before claiming dual issue.
+
+`run-p54-bank-arb.sh` is a bounded leaf test for the proposed eight-bank
+admission rule: physical `[4:2]` conflicts, unaligned/64-bit extents, split-line
+fallback, bank backpressure, and U-before-V priority. It runs directed cases
+plus 32,768 independent randomized cases per seed. The leaf is not connected
+to the current single-port core; passing it cannot claim V-memory pairing or
+any gameplay speedup.
+
+`run-p54-hit-return.sh` tests a two-slot owner-tagged hit-return prototype. It
+accepts two distinct-bank hits per clock, holds each owner/data pair under
+independent response backpressure, permits consume-and-replace, blocks V behind
+an unaccepted U, and cancels both slots on flush. This is still a leaf contract,
+not an integrated cache or an architectural correctness gate.
