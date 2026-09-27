@@ -594,18 +594,20 @@ the same joint predicate. These are overlapping service levels, not removable
 no-retirement clocks. They are much narrower than all L1/memory waits, so a
 backend-only latency change cannot be credited with the whole memory bucket.
 
-### Frontend map-hole ceiling in the representative suffix
+### Frontend map-hole incidence in the representative suffix
 
 The fairness build's 1.350–1.400B `cpi_interval.py --uop-map` output reports
 3,672,738 raw resident-uop-map hole observations, but only 586,737 occur in
 its fast-path context and **568,643** are classified as would-issue holes
-(1.14% of the 50M clocks). These are repeated observations of missing
-descriptors, not a count of clocks a frontend patch could save. Their end
+(1.14% of the 50M clocks). These are observations of missing descriptors,
+not a saved-clock ceiling: one hole can trigger several subsequent slow-fetch
+and decode clocks. Their end
 classes are physical-line end 375,496, foreground-step cap 62,710, unknown
 grammar 47,433 and known cross-line 83,004. The separately verified short
 1.400–1.401B full-state trace records 68,267 hole rows; the common shape is
 I-cache data and a primary decode present but no ready boundary descriptor.
-Consequently, a broad decoder/repair rewrite is not justified as a standalone
-route to >1 gameplay IPC. It may still be worth a targeted correctness-safe
-fix after a matched-work witness, and its interactions with the memory and
-FP stalls require measurement rather than adding raw counters.
+Consequently, this count does not establish a broad decoder/repair rewrite as
+a standalone route to >1 gameplay IPC. A targeted correctness-safe fix may
+still be worthwhile after a matched-work witness; its slow-fallback tail and
+interactions with memory and FP stalls require measurement, not raw-counter
+addition.
