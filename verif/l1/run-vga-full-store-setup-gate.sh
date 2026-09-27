@@ -3,12 +3,16 @@
 # Verify byte traffic, reset quiescence, and the one-cycle full-store saving.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-if [ "$#" -ne 1 ] || [ -e "$1" ]; then
-  echo "usage: $0 NEW_OUTPUT_DIRECTORY" >&2
+if [ "$#" -eq 0 ]; then
+  OUT="$(mktemp -d "${TMPDIR:-/tmp}/ventium-vga-full-store-setup.XXXXXX")"
+elif [ "$#" -eq 1 ] && [ ! -e "$1" ]; then
+  OUT="$(realpath -m -- "$1")"
+  mkdir -p "$OUT"
+else
+  echo "usage: $0 [NEW_OUTPUT_DIRECTORY]" >&2
   exit 2
 fi
-OUT="$(realpath -m -- "$1")"
-mkdir -p "$OUT"
+echo "Artifacts: $OUT"
 for profile in off on; do
   mkdir "$OUT/$profile"
   defs=()
