@@ -669,8 +669,15 @@ address RAW dependency, event/debug boundary, or busy response owner is a
 silent rejection with no backing request. The accepted load is captured as
 the ordinary memory packet, while its live checked translation (not the old
 chain's saved page) seeds the fast D-TLB page register. The feature is
-default-off. An opt-in full-PC candidate has been built; its gameplay result
-is pending.
+default-off. The opt-in full-PC candidate completed a cold 1.150B-clock run
+and a same-binary continuation to 1.400B clocks. In the selected
+1.350–1.400B gameplay window it retired 20,875,040 instructions in
+49,999,999 clocks (**0.417501 IPC**), versus 20,970,796 (**0.419416 IPC**)
+for the source-matched flag-off control. This is a 0.46% IPC loss in that
+window, so the feature is not promoted. Both runs have validated checkpoint
+bundles. Earlier 50M-clock windows alternated wins and losses; their clocks
+do not necessarily represent the same architectural work, so the result is
+not a fixed-work speedup estimate.
 
 The source-matched flag-off and flag-on full-core L1/AXI testbenches are under
 `tmp/build-tmp/ventium-reg-prime-{control-,}tb-sep27/` (SHA256
@@ -687,8 +694,13 @@ the opt-in full-core lint profile and default `make verify` pass. A pinned-QEMU
 `ppage` trace regenerated from the current image has 134 records and matches
 the flag-on core with and without `--l1-axi` (all 134); the checked-in
 128-record historical golden is stale and must not be used as the current
-oracle. Quake gameplay, timedemo, Win95 and FPGA timing/area qualification of
-this flag remain open.
+oracle. Quake gameplay is measured as above; timedemo, Win95 and FPGA
+timing/area qualification of this flag remain open. A host-only cumulative
+retirement stop was tested at 440,500,000 retirements, but the candidate and
+control already had different PCs and registers at absolute ordinal
+440,200,000. Thus an equal retirement count does **not** establish an equal
+gameplay workload for these diverged executions, and their cycle difference
+at the stop target must not be reported as an IPC gain.
 
 ### Frontend map-hole incidence in the representative suffix
 
