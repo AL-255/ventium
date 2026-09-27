@@ -542,6 +542,19 @@ therefore too small in this phase to explain the dominant memory wait and
 outside-pipeline buckets by itself. The separate cache-policy candidate has
 not been measured on an identical instruction sequence in this window.
 
+The >1 IPC requirement is necessarily a *multi-class* change. Holding the
+629,115 retired instructions in this particular 1M-clock phase fixed requires
+fewer than 629,115 clocks, i.e. saving at least 370,886. Even an impossible
+zero-cost removal of **all** 182,624 memory-admission/wait and 151,493
+outside-pipeline no-retirement edges would save only 334,117; at least 36,769
+more clocks must come from frontend, FP hold, ready-control or overlaps. The
+earlier 1.150–1.151B phase is more severe (275,738 retirements): its memory
+plus outside-pipeline buckets total 537,805 edges against a minimum 724,263
+clock saving. These are arithmetic lower bounds, not additive expected
+speedups; changing one stall source can expose another or change the guest's
+instruction mix. A single cache-hit shortcut or next-read miss tweak cannot
+establish >1 across representative gameplay by itself.
+
 ### Page-bounded stride-prefetch scope check
 
 `tools/stride_prefetch_probe.py` replays *observed* physical-line miss events
