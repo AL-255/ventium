@@ -145,3 +145,26 @@ extend independent integer/FP overlap with precise event and x87-state gates,
 and (3) pipeline registered cache-hit ownership without combinational BRAM
 acknowledgements or speculative MMIO. Keep full-system Quake/Win95 and QEMU
 differential acceptance separate from any native-checkpoint throughput result.
+
+## Pairing and cache-pipeline scope check
+
+In this same-build 1M trace, the existing attribution reports 30,226 settled
+U-register/V-memory commit opportunities after the other pairing checks. Only
+14,471 are V MOV loads (10,977 dword). Another 16,297 completed U-memory/V-memory
+read-pair observations exist, but only 3,678 show a complete same-line registered
+read window at U completion. These are *candidate descriptor observations*, not
+permission-qualified requests, recoverable clocks, or a projected IPC gain.
+`issue_uv` correctly rejects every V memory form today: the sole checked request
+and its response belong to U. Removing that guard without a slot-owned V request
+would commit stale data. The resident-read `VEN_L1D_HIT_STREAM` leaf is not wired
+through `ventium_l1_axi` or the core and cannot alone solve precise V faults,
+response cancellation or architectural retirement order. A useful integration
+needs explicit request/response owners across translation, L1 and the U/V commit
+packet, while retaining registered cache data and exact MMIO side effects.
+
+The large raw U-to-V register-RAW rejection count is likewise **not** an
+optimization budget: ordinary flow dependencies must not pair under the P5
+rules in `docs/ap500-pairing-table.md`. A same-cycle U-ALU-to-V bypass would
+violate that cycle model even if its functional result were correct. The
+short-list remains checked memory pipelining and independent integer/FP work,
+not relaxing architectural dependency or pairing guards to manufacture IPC.
