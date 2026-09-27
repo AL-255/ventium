@@ -91,6 +91,16 @@ would require eliminating more than 27.79M clocks, so no single cache or branch
 shortcut can be assumed to close the target. This is arithmetic on one window,
 not a claimed upper bound under a changed schedule.
 
+The reference L1D's cumulative counters at exactly 1.100B and 1.150B split
+that memory pressure further: 6,935,406 registered hit captures,
+341,691 miss starts, 5,299,167 idle read-wait clocks and 8,042,322
+fill-wait clocks. The fills occupy 9,052,484 L1 clocks, including
+6,484,681 backing-wait clocks. Thus both the registered-hit ownership and
+backing line-fill latency matter in the representative window. These are
+overlapping service observations; they are not removable-cycle estimates and
+must not be added to the no-retire buckets. The cache remains the specified
+full 8 KiB, two-way, 32-byte-line P5 configuration.
+
 The raw L1 read-wait level is high for 215,107 clocks, of which 118,631 are
 busy backing service and 92,349 are idle registered-hit capture. Those levels
 overlap useful retirements and other causes; they must **not** be added to the
