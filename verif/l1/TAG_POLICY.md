@@ -101,12 +101,24 @@ and disk. Later source/define validation hardening can be rerun with
   `obj_dir_p54_structural_sep27/quake_resume1400m/`, including validated
   `gameplay.sha256` bundles. These directories are ignored build artifacts,
   not source-controlled test fixtures.
-- Windows 95 desktop acceptance and further candidate system/REP/cache race
-  regressions remain open. A normal-mode boot on a pristine disk is being
-  checked against a source-matched old-binary control. The earlier writable
-  disk produced the same VxD error under both builds and is invalid evidence.
-  Neither a migrated snapshot nor the short matched prefix establishes a
-  real desktop.
+- A normal-mode Windows 95 boot on pristine disk SHA-256 `877ae318...` used
+  pinned BIOS ROMs, DDR2, 45 MHz PIT/RTC and keyboard choice `1` at 25M clocks.
+  The original structural candidate and source-matched pre-fix control have
+  identical legacy retirement counts at every 50M checkpoint through 500M,
+  ending at 109,424,862. Both reached the `059f:1e5/1e6` V86 idle path; the
+  candidate showed no VxD error through 750M. A simulator-only keyboard
+  checkpoint fix (`f8c1b4b`) preserved the exact generated RTL archive and
+  yielded a validated 300M snapshot (59,427,628 events), then validated
+  same-binary replays through 301M and 310M. The 300M snapshot contains
+  IVT13 `ee037000`, IVT19 `2f008c05`, EBDA segment `0206`; the BDA tick
+  advances from `0x8b` to `0x8f` by 310M. This is strong headless boot and
+  non-regression evidence, **not a visually confirmed desktop**: the simulator's
+  mode-12h framebuffer capture is garbled and the historical protected-mode
+  fetch-signature check has not been repeated here. Local bundles are under
+  `obj_dir_p54_structural_sep27/win95_pristine_normal_checkpoint300m_pinnedrom/`
+  and `win95_pristine_normal_replay310m/`. An older writable disk caused the
+  same VxD error under candidate and control and is invalid acceptance data.
+  Further candidate system/REP/cache race regressions remain open.
 - Investigate remaining read-hit/fill latency and FP/frontend serialization.
   0.479578 IPC is still well below the >1 IPC objective.
 - Hardware timing/area qualification when a new FPGA run is warranted; no FPGA
