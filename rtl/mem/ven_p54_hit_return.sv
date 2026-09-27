@@ -2,7 +2,9 @@
 // Two bounded response slots for checked resident D-cache hits. A caller must
 // first prove physical translation, cacheability, tag hit, extent, and fault
 // freedom for each request. A rejected request has no cache/backing side effect.
-// This leaf is not wired into the current single-port core yet.
+// The hit/data inputs are abstract: this module neither implements bank SRAMs
+// nor establishes the physical lookup timing. Do not infer a one-cycle FPGA
+// cache from this response-slot test. It is not wired into the core yet.
 module ven_p54_hit_return #(
     parameter int OWNER_W = 16
 ) (

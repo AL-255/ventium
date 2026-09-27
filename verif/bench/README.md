@@ -52,8 +52,8 @@ the cycle trace and the accepted owner records before claiming dual issue.
 
 `run-p54-bank-arb.sh` is a bounded leaf test for the proposed eight-bank
 admission rule: physical `[4:2]` conflicts, unaligned/64-bit extents, split-line
-fallback, bank backpressure, and U-before-V priority. It runs directed cases
-plus 32,768 independent randomized cases per seed. The leaf is not connected
+fallback, bank backpressure, and U-before-V priority. It exhausts all 16,384
+line-offset/width pairs, then runs 32,768 randomized cases per seed. The leaf is not connected
 to the current single-port core; passing it cannot claim V-memory pairing or
 any gameplay speedup.
 
@@ -61,4 +61,6 @@ any gameplay speedup.
 accepts two distinct-bank hits per clock, holds each owner/data pair under
 independent response backpressure, permits consume-and-replace, blocks V behind
 an unaccepted U, and cancels both slots on flush. This is still a leaf contract,
-not an integrated cache or an architectural correctness gate.
+not an integrated cache or an architectural correctness gate. Hit/data are
+supplied by the testbench; a timing-qualified bank SRAM/tag implementation and
+its FPGA area/frequency evidence remain required.

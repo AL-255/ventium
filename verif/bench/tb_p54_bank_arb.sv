@@ -73,6 +73,20 @@ module tb_p54_bank_arb;
     bank_ready = 8'hfe; // U bank zero unavailable
     check_case();
     if (req_grant[1]) $fatal(1, "V passed blocked U");
+    // Exhaust every 32-byte-line placement and supported width pair, on
+    // different physical lines. This covers all byte/word bank footprints.
+    req_valid = 2'b11;
+    bank_ready = '1;
+    for (int uoff=0; uoff<32; uoff++)
+      for (int voff=0; voff<32; voff++)
+        for (int uw=0; uw<4; uw++)
+          for (int vw=0; vw<4; vw++) begin
+            req_paddr[0]=32'h1000 + 32'(uoff);
+            req_paddr[1]=32'h1020 + 32'(voff);
+            req_size_log2[0]=2'(uw);
+            req_size_log2[1]=2'(vw);
+            check_case();
+          end
     for (int n = 0; n < 32768; n++) begin
       rng = rng * 32'd1664525 + 32'd1013904223;
       req_paddr[0] = {20'd0, rng[11:0]};
