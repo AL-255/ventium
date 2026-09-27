@@ -16,8 +16,22 @@ same private copies of the cold-boot-derived checkpoint and use identical
 clock, RTC, VGA, DDR and disk settings; the source bundle still verifies, and
 both private disks remain byte-identical to it. They are matched-start,
 fixed-clock gameplay measurements, **not** fixed-work instruction comparisons.
-The candidate has **not** been cold-booted through Quake/Win95 or completed a
-timedemo acceptance run.
+The candidate has **not** completed a cold-boot Quake timedemo or Win95 desktop
+acceptance run.
+
+The opt-in candidate has now completed an independent, resource-guarded cold
+reset from the unchanged Quake boot disk to exactly 100,000,000 clocks. It
+launched the normal FreeDOS Quake command and saved a validated same-build
+checkpoint in `tmp/build-tmp/ventium-fp-branch-cold100m-sep26/`. Against the
+source-matched flag-off cold run, both have exactly 32,212,074 retirements,
+447 host disk reads, the same final CS:EIP (`00a7:00044d60`), byte-identical
+native snapshots (SHA256 `ca0899f3bcbfea162ecc9512f094ddede948ef043dce2dc657395bad04b39a56`)
+and byte-identical private disks (SHA256
+`2df14ac9ae5f927cab2410e784d14c655f0e96644ca80ced3c0b012df7a36e4c`).
+This is strong cold-start non-regression evidence, but the branch overlap path
+apparently does not perturb this interval; it is still initialization, not a
+fresh gameplay IPC or completed timedemo result. The remaining long Quake and
+Win95 cold-boot acceptance is open.
 
 The branch experiment is `+define+VEN_FP_ASYNC_BRANCH` in
 `rtl/core/core_fp_async.svh`. Its full-PC generated-model manifest differs
