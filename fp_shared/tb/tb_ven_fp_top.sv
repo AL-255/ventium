@@ -322,6 +322,66 @@ module tb_ven_fp_top;
 `endif
   endtask
 
+`ifdef VEN_FP_ARITH_STREAM
+  // Four independent destinations isolate the multiplier initiation interval
+  // from RAW/WAW, stack, and result-port interlocks.  A held command must be
+  // accepted once, with the ADD allowed directly after the second multiply.
+  task automatic p54_multiply_initiation;
+    int accepted, completed, cycles;
+    int accept_cycle[4];
+    issue(FX_FNINIT, 0, 0, 0, '0, 0, 0, 0);
+    // A masked empty-stack FMUL completes as a stack fault, without borrowing
+    // the multiplier.  The next-cycle ready signal must not see a phantom II.
+    @(negedge clk);
+    cmd_valid=1; cmd_op=FX_AR_ST0_STI; cmd_aluop=3'd1; cmd_sti=3'd1;
+    cmd_pop=0;
+    @(posedge clk);
+    if (!cmd_ready) $fatal(1, "empty-stack FMUL was not accepted");
+    @(negedge clk);
+    cmd_valid=0;
+    if (!rsp_valid || !rsp_stack_fault || !cmd_ready)
+      $fatal(1, "stack-fault FMUL consumed multiply initiation slot");
+    issue(FX_FNINIT, 0, 0, 0, '0, 0, 0, 0);
+    repeat (8) load80(FP_TWO);
+    @(negedge clk);
+    accepted=0; completed=0; cycles=0;
+    while (completed < 4) begin
+      cmd_valid = accepted < 4;
+      cmd_op = FX_AR_STI_ST0;
+      cmd_sti = 3'(accepted+1);
+      cmd_pop = 0;
+      cmd_aluop = (accepted == 2) ? 3'd0 : 3'd1;
+      @(posedge clk);
+      if (cmd_valid && cmd_ready) begin
+        accept_cycle[accepted]=cycles;
+        accepted++;
+      end
+      @(negedge clk);
+      if (rsp_valid) begin
+        if (completed >= accepted || rsp_unsupported || rsp_stack_fault ||
+            rsp_arith[84:80] != 0 || rsp_arith[79:0] !== FP_FOUR ||
+            st_flat[(completed+1)*80 +: 80] !== FP_FOUR)
+          $fatal(1, "P54 FMUL initiation result/owner %0d", completed);
+        completed++;
+      end
+      cycles++;
+      if (cycles > 64) $fatal(1, "P54 FMUL initiation watchdog");
+    end
+    cmd_valid=0;
+    if (accept_cycle[1]-accept_cycle[0] != 2 ||
+        accept_cycle[2]-accept_cycle[1] != 1 ||
+        accept_cycle[3]-accept_cycle[2] != 1)
+      $fatal(1, "P54 FMUL initiation gaps %0d,%0d,%0d",
+             accept_cycle[1]-accept_cycle[0],
+             accept_cycle[2]-accept_cycle[1],
+             accept_cycle[3]-accept_cycle[2]);
+    if (st_flat[79:0] !== FP_TWO || fstat !== 0)
+      $fatal(1, "P54 FMUL initiation corrupted untouched state");
+    $display("P54-FMUL-II2-OK acceptance=%0d,%0d,%0d,%0d",
+             accept_cycle[0], accept_cycle[1], accept_cycle[2], accept_cycle[3]);
+  endtask
+`endif
+
   // Admission may overlap, but architectural snapshots must remain ordered:
   // the arithmetic response sees its original logical destination, and only
   // the following FXCH response sees the swapped stack. A live-file swap at
@@ -630,6 +690,13 @@ module tb_ven_fp_top;
 `endif
       $finish;
     end
+
+`ifdef VEN_FP_ARITH_STREAM
+    if ($test$plusargs("p54_fmul_ii2_only")) begin
+      p54_multiply_initiation();
+      $finish;
+    end
+`endif
 
     load80(FP_TWO);
     load80(FP_ONE);

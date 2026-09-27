@@ -277,6 +277,15 @@ module ven_fp_top
   logic [2:0] arith_owner_dst [3];
   logic [2:0] arith_owner_pop;
   logic arith_stream_eligible, arith_stream_hazard;
+  // P54's shared multiply resource cannot start consecutive FMULs.  This
+  // interlock is at command acceptance, not at result writeback: independent
+  // integer or non-multiply FP work can still occupy the intervening clock.
+  logic arith_mul_accepted_last_cycle;
+  wire logic arith_mul_interval_busy = arith_mul_accepted_last_cycle &&
+      (cmd_aluop == 3'd1) &&
+      ((cmd_op == FX_AR_ST0_STI) || (cmd_op == FX_AR_STI_ST0) ||
+       (cmd_op == FX_AR_M32) || (cmd_op == FX_AR_M64) ||
+       (cmd_op == FX_AR_I16) || (cmd_op == FX_AR_I32));
   logic [2:0] arith_cmd_dst;
   assign arith_cmd_dst = (cmd_op == FX_AR_STI_ST0) ? cmd_sti : 3'd0;
 `ifdef VEN_FP_ARITH_FWD
@@ -321,14 +330,19 @@ module ven_fp_top
       ((cmd_op == FX_AR_ST0_STI) || (cmd_op == FX_AR_STI_ST0) ||
        (cmd_op == FX_AR_M32) || (cmd_op == FX_AR_M64) ||
        (cmd_op == FX_AR_I16) || (cmd_op == FX_AR_I32));
-  assign cmd_ready = (top_state == TOP_IDLE) ||
-      ((top_state == TOP_ALU) && arith_stream_eligible && !arith_stream_hazard);
+  assign cmd_ready = !arith_mul_interval_busy &&
+      ((top_state == TOP_IDLE) ||
+       ((top_state == TOP_ALU) && arith_stream_eligible && !arith_stream_hazard));
   always_ff @(posedge clk) begin
     if (!rst_n) begin
+      arith_mul_accepted_last_cycle <= 1'b0;
       arith_owner_valid <= '0;
       arith_owner_pop <= '0;
       for (int i=0; i<3; i++) arith_owner_dst[i] <= '0;
     end else begin
+      // A masked stack-fault command is accepted but never starts the ALU;
+      // it must not consume the multiplier's initiation slot.
+      arith_mul_accepted_last_cycle <= alu_start && (cmd_aluop == 3'd1);
       arith_owner_valid <= {arith_owner_valid[1:0], alu_start};
       arith_owner_pop <= {arith_owner_pop[1:0], cmd_pop};
       arith_owner_dst[0] <= arith_cmd_dst;

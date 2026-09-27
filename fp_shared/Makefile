@@ -173,6 +173,7 @@ $(BUILD)/stream/Vtb_ven_fp_top: $(SRT) $(SRC) $(PKGS) tb/tb_ven_fp_top.sv \
 # Experimental opt-in acceptance, not part of the default production profile.
 test-stream: $(BUILD)/stream/Vtb_ven_fp_top
 	$< +fp_throughput_only +require_fp_pipeline
+	$< +p54_fmul_ii2_only
 	$< +fp_stream_mixed_only
 	$<
 
@@ -191,6 +192,7 @@ $(BUILD)/fxch-queue/Vtb_ven_fp_top: $(SRT) $(SRC) $(PKGS) ven_fp_fxch_queue.sv t
 
 test-fxch-queue: $(BUILD)/fxch-queue/Vtb_ven_fp_top
 	$< +fp_stack_queue_only +require_fxch_queue
+	$< +p54_fmul_ii2_only
 	$< +fp_stream_mixed_only
 	$<
 
