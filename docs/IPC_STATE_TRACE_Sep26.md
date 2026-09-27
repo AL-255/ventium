@@ -320,8 +320,41 @@ the 33-entry run additionally passes decode-tail invariance. The fair leaf
 also checks that a foreground fill can preempt a protected seek and that the
 fairness credit survives to its next attempt. The feature-off 33-entry
 control, full-top opt-in structural lint and the default `make verify` gate
-(105 functional programs plus cycle bands) pass. **This is not yet a measured
-gameplay improvement**: 0.680510 IPC on the favorable 1M-cycle phase and
-0.44963946 IPC on the representative 50M-cycle window remain the prior
-opt-in build's verified baseline. A same-work gameplay A/B and full-system
+(105 functional programs plus cycle bands) pass. The cold-run measurement below
+is **not** a same-state causal A/B; a matched-work comparison and full-system
 boot checks are required before enabling this policy by default.
+
+## September 27: fairness candidate cold-run gameplay
+
+The one-define `VEN_UOP_REPAIR_FAIR` full-PC build has SHA256
+`9609e4429d6f9ded038db64e167bd2c358b845a9af863ce548df05a3f3519990`.
+Its generated manifest differs from the earlier FP-branch profile by only
+that define. It cold-booted the same immutable Quake disk and ROM with the
+same 45 MHz core/RTC, 90 MHz VGA and FPGA_DDR=2 settings, and saved a
+five-file verified bundle at exactly 1.150B cycles:
+`tmp/build-tmp/ventium-fair-cold1150m-sep27/`. The 100M-cycle retire count
+was exactly 32,212,074, matching the prior flag-off/FP-branch cold checks;
+the guest then launched Quake v1.06. Lossless frame inspection shows a moving
+3D scene: 1.00B→1.05B changes 42,433 of 64,000 pixels, and
+1.05B→1.10B changes 42,228.
+
+| Cold-run gameplay clock window | Retirements | IPC |
+| --- | ---: | ---: |
+| 1.00–1.05B | 22,778,737 | 0.45557474 |
+| 1.05–1.10B | 22,769,257 | 0.45538514 |
+| 1.10–1.15B | 22,661,159 | **0.45322318** |
+
+The last row is the latest verified gameplay IPC. The older FP-branch build
+measured 0.44963946 IPC over the same clock numbers, but it replayed from
+its own 1.10B checkpoint, whereas this candidate ran cold from reset.
+Even clock-aligned windows can execute different scene/instruction mixes;
+the approximate 0.8% difference is **not a proven fairness speedup**. The
+older 1.150–1.151B 0.680510 IPC favorable phase likewise cannot be compared
+with this candidate's different 1.150–1.151B scene, which retired 275,738
+instructions (0.275738 IPC). Two independent same-build restores from the
+new 1.15B bundle, one with periodic perf/frame observation and one without,
+ended after 1M cycles with byte-identical native snapshots
+(`01faa7f89f935d53a5eded265f0287c2a9daa17f7f23532062891f3baf9b0164`)
+and private disks (`48f07a4bb1102dbc4389ecaf8602035af888842168beef73af74b08d3090a88a`).
+The source bundle still verifies. This proves deterministic same-build replay,
+not cross-build state equivalence, a completed timedemo, Win95 boot, or IPC >1.
