@@ -157,6 +157,7 @@ module ven_fp_old_ooc
       .wsti_clr_tag(state_we[3]),
       .we_fxch(state_we[4]), .fxch_idx(state_idx),
       .fxch_a(operand_a), .fxch_b(operand_b),
+      .fxch_materialize_empty(1'b0),
       .we_pop(state_we[5]), .we_pop2(state_we[6]),
       .we_ffree(state_we[7]), .ffree_idx(state_idx),
       .we_incstp(state_we[8]), .we_decstp(state_we[9]),

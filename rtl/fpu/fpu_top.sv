@@ -98,12 +98,15 @@ module fpu_top (
     input  logic [79:0] wsti_data,
     input  logic        wsti_clr_tag,
 
-    // (4) FXCH 2-SLOT SWAP: fpr[ftop]<=fxch_a, fpr[ftop+fxch_idx]<=fxch_b
-    //     (NO tag/ftop change)
+    // (4) FXCH 2-SLOT SWAP: fpr[ftop]<=fxch_a, fpr[ftop+fxch_idx]<=fxch_b.
+    //     Ordinary FXCH has no tag/TOP change.  A masked #IS exchange with
+    //     an empty operand first materializes the empty slot(s) as real
+    //     indefinite and validates both slots before the exchange.
     input  logic        we_fxch,
     input  logic [2:0]  fxch_idx,
     input  logic [79:0] fxch_a,        // -> fpr[ftop]
     input  logic [79:0] fxch_b,        // -> fpr[ftop+idx]
+    input  logic        fxch_materialize_empty,
 
     // (5) POP: fptag[ftop]<=1, ftop<=ftop+1 (co-fires with we_sti/we_top/we_fstat)
     input  logic        we_pop,
@@ -217,6 +220,7 @@ module fpu_top (
   // FOP is always 0 in this oracle, so it is not stored (hardwired 0 at emit).
   logic [31:0] fip, fdp;     // instruction-ptr offset / data-ptr offset
   logic [15:0] fcs, fds;     // code selector / data selector
+  localparam logic [79:0] QNAN_INDEF = 80'hffffc000000000000000;
 
   // ---- combinational read ports: mirror the registered fpr/ftop, ZERO latency.
   // These reflect PRE-edge state the same clock a posedge write below updates it
@@ -298,11 +302,21 @@ module fpu_top (
         if (wsti_clr_tag) fptag[ftop + wsti_idx] <= 1'b0;
       end
 
-      // (4) FXCH 2-slot swap — fpr[ftop]<=fxch_a, fpr[ftop+idx]<=fxch_b. The
-      // spine presents both PRE-edge values (read off st0/st(i)).
+      // (4) FXCH 2-slot swap — the spine presents both PRE-edge values (read
+      // off st0/st(i)).  A masked empty-operand FXCH is the sole exception:
+      // materialize each EMPTY source as the SDM real-indefinite before
+      // exchanging, and mark both affected architectural slots valid.  The
+      // qualifier is emitted only after the writeback has suppressed an
+      // unmasked #IS, so a normal exchange stays a pure data swap.
       if (we_fxch) begin
-        fpr[ftop]            <= fxch_a;
-        fpr[ftop + fxch_idx] <= fxch_b;
+        fpr[ftop]            <= (fxch_materialize_empty && fptag[ftop + fxch_idx])
+                                ? QNAN_INDEF : fxch_a;
+        fpr[ftop + fxch_idx] <= (fxch_materialize_empty && fptag[ftop])
+                                ? QNAN_INDEF : fxch_b;
+        if (fxch_materialize_empty) begin
+          fptag[ftop]            <= 1'b0;
+          fptag[ftop + fxch_idx] <= 1'b0;
+        end
       end
 
       // (5) POP — fptag[ftop]<=1, ftop<=ftop+1. Co-fires with we_sti/we_top/

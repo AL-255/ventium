@@ -13,7 +13,7 @@
 // multi-cycle FSM. Pure combinational: bytes (+ EFLAGS, + cycle_mode) -> fpd_t.
 //
 // IF (docs/rtl-refactor-plan.md §6 decode.sv): instruction bytes in -> decoded
-// uop struct + length out. b0..b5 are the 6 fast-path decode bytes; flags_in is
+// uop struct + length out. b0..b6 are the fixed fast-path decode bytes; flags_in is
 // the current EFLAGS (for the architectural Jcc taken decision); cycle_mode
 // gates the x87 reg-form whitelist exactly as the in-line version did (func runs
 // keep FP on the slow FSM). The fpd_t carries .len (decoded length).
@@ -33,6 +33,7 @@ module decode
     input  logic [7:0]  ib3,
     input  logic [7:0]  ib4,
     input  logic [7:0]  ib5,
+    input  logic [7:0]  ib6,
     input  logic [31:0] iflags,
     // task #56 step C: the 16-bit-default flag (core.sv:770, def16 = sys_mode && !cs_d).
     // decode.sv was written for 32-bit flat code and had NO operand-size concept at all,
@@ -46,9 +47,12 @@ module decode
   function automatic fpd_t fp_decode(input logic [7:0] b0, input logic [7:0] b1,
                                      input logic [7:0] b2, input logic [7:0] b3,
                                      input logic [7:0] b4, input logic [7:0] b5,
+                                     input logic [7:0] b6,
                                      input logic [31:0] flags_in);
     fpd_t d;
     logic [1:0] mod; logic [2:0] reg_f, rm;
+    logic checked_add_opcode;
+    logic fp_mem_load, fp_mem_integer, fp_mem_wide;
     begin
       d = '{default:'0};
       d.alu_op = ALU_ADD; d.len = 4'd1;
@@ -59,6 +63,31 @@ module decode
       d.w16 = def16;
 
       mod = b1[7:6]; reg_f = b1[5:3]; rm = b1[2:0];
+      fp_mem_load=1'b0; fp_mem_integer=1'b0; fp_mem_wide=1'b0;
+`ifdef VEN_FP_MEM_LOADS
+      // Only consumed by the shared/direct memory descriptor below. No new
+      // AGU, operand sequencer, conversion unit, or speculative read path.
+      if (b0==8'hD9 && reg_f==3'd0) fp_mem_load=1'b1;       // FLD m32
+      if (b0==8'hDD && reg_f==3'd0) begin
+        fp_mem_load=1'b1; fp_mem_wide=1'b1;                 // FLD m64
+      end
+      if (b0==8'hDB && reg_f==3'd0) begin
+        fp_mem_load=1'b1; fp_mem_integer=1'b1;              // FILD m32
+      end
+      if (b0==8'hDF && reg_f==3'd5) begin
+        fp_mem_load=1'b1; fp_mem_integer=1'b1; fp_mem_wide=1'b1; // FILD m64
+      end
+`endif
+      checked_add_opcode = (b0 == 8'h03);
+`ifdef VEN_FAST_MEM_ALU
+      // Register-destination dword ALU reads reuse ADD's checked transaction
+      // and existing U ALU. CMP keeps its separate read-only descriptor arm.
+      checked_add_opcode = (b0[7:6]==2'b00 && b0[2:0]==3'b011 &&
+                            b0[5:3]!=3'b111);
+`endif
+`ifdef VEN_FAST_MEM_ADC
+      checked_add_opcode = checked_add_opcode || (b0 == 8'h13);
+`endif
       unique casez (b0)
         // ---- MOV r32, imm32 (B8+r) -------------------------------------------
         8'b1011_1???: begin
@@ -99,6 +128,136 @@ module decode
             d.pairs_first=1'b1;
             d.pairs_second=!(b0[5:3]==3'b010 || b0[5:3]==3'b011);
           end
+`ifdef VEN_FAST_MEM_ADD
+          // Checked ADD r32,r/m32.  It shares the established U-side memory
+          // packet: the read must complete before EFLAGS/GPR writeback, and a
+          // miss, #PF, fragment, or executable flush retains the decoded
+          // packet rather than re-reading this frontend window. The opt-in
+          // VEN_FAST_MEM_ADC reuses these exact address forms, selecting ADC
+          // and its U-only pairing class below. VEN_FAST_MEM_ALU additionally
+          // admits OR/SBB/AND/SUB/XOR through this same address/response path.
+          // The original selected forms fit the
+          // six-byte decode window.  An independently gated seven-byte
+          // SIB+disp32 forms appear below; an ESP destination remains on the
+          // mature FSM. It needs a wider audit of the
+          // pre-existing stack-pointer AGI accounting.
+          else if (!def16 && checked_add_opcode && reg_f!=R_ESP && mod==2'b00 && rm==3'b101) begin
+            // ADD r32,[disp32]: a literal DS offset, not an EBP base.
+            d.simple=1'b1; d.is_mem=1'b1; d.len=4'd6;
+            d.alu_op=ALU_ADD; d.wflags=1'b1; d.wreg=1'b1;
+            d.dst=reg_f; d.src=reg_f; d.mem_lhs=1'b0;
+            d.mem_disp={b5,b4,b3,b2};
+            d.reads=_onehot(reg_f); d.writes=_onehot(reg_f);
+            d.pairs_first=1'b1; d.pairs_second=1'b1;
+          end else if (!def16 && checked_add_opcode && reg_f!=R_ESP && rm!=3'b100 && !(mod==2'b00 && rm==3'b101)) begin
+            // ADD r32,[base{+disp8|+disp32}].  EBP's disp forms select SS;
+            // the address inputs appear in both reads and addr_mask so the
+            // AGI and U/V RAW check describe the same operation.
+            unique case (mod)
+              2'b00: begin
+                d.simple=1'b1; d.is_mem=1'b1; d.len=4'd2;
+                d.alu_op=ALU_ADD; d.wflags=1'b1; d.wreg=1'b1;
+                d.dst=reg_f; d.src=reg_f; d.mem_lhs=1'b0;
+                d.base=rm; d.mem_base_en=1'b1; d.mem_ss=(rm==3'b101);
+                d.reads=_onehot(reg_f)|_onehot(rm); d.writes=_onehot(reg_f);
+                d.addr_mask=_onehot(rm);
+                d.pairs_first=1'b1; d.pairs_second=1'b1;
+              end
+              2'b01: begin
+                d.simple=1'b1; d.is_mem=1'b1; d.len=4'd3;
+                d.alu_op=ALU_ADD; d.wflags=1'b1; d.wreg=1'b1;
+                d.dst=reg_f; d.src=reg_f; d.mem_lhs=1'b0;
+                d.base=rm; d.mem_base_en=1'b1; d.mem_ss=(rm==3'b101);
+                d.mem_disp={{24{b2[7]}},b2};
+                d.reads=_onehot(reg_f)|_onehot(rm); d.writes=_onehot(reg_f);
+                d.addr_mask=_onehot(rm);
+                d.pairs_first=1'b1; d.pairs_second=1'b1;
+              end
+              2'b10: begin
+                d.simple=1'b1; d.is_mem=1'b1; d.len=4'd6;
+                d.alu_op=ALU_ADD; d.wflags=1'b1; d.wreg=1'b1;
+                d.dst=reg_f; d.src=reg_f; d.mem_lhs=1'b0;
+                d.base=rm; d.mem_base_en=1'b1; d.mem_ss=(rm==3'b101);
+                d.mem_disp={b5,b4,b3,b2};
+                d.reads=_onehot(reg_f)|_onehot(rm); d.writes=_onehot(reg_f);
+                d.addr_mask=_onehot(rm);
+                d.pairs_first=1'b1; d.pairs_second=1'b1;
+              end
+              default: ;
+            endcase
+`ifdef VEN_FAST_MEM_ADD7
+          end else if (!def16 && checked_add_opcode && reg_f!=R_ESP &&
+                       mod==2'b00 && rm==3'b100 && b2[2:0]==3'b101) begin
+            // SIB index*scale+disp32 has NO base. In particular, base field
+            // 101 does not read EBP or select SS. Index 100 is also absent.
+            // Reuse the same checked AGU/response packet as ordinary SIB.
+            d.simple=1'b1; d.is_mem=1'b1; d.len=4'd7;
+            d.alu_op=ALU_ADD; d.wflags=1'b1; d.wreg=1'b1;
+            d.dst=reg_f; d.src=reg_f; d.mem_lhs=1'b0;
+            d.mem_base_en=1'b0; d.mem_ss=1'b0;
+            d.mem_index=b2[5:3]; d.mem_scale=b2[7:6];
+            d.mem_index_en=(b2[5:3]!=3'b100);
+            d.mem_disp={b6,b5,b4,b3};
+            d.addr_mask=(b2[5:3]!=3'b100)?_onehot(b2[5:3]):8'd0;
+            d.reads=_onehot(reg_f)|d.addr_mask; d.writes=_onehot(reg_f);
+            d.pairs_first=1'b1; d.pairs_second=1'b1;
+`endif
+          end else if (!def16 && checked_add_opcode && reg_f!=R_ESP && rm==3'b100 && !(mod==2'b00 && b2[2:0]==3'b101)) begin
+            // ADD r32,[base+index*scale{+disp8}].  An ESP index encodes no
+            // index; ESP/EBP bases select SS.  The disp32 sibling is behind
+            // VEN_FAST_MEM_ADD7 below because it needs the seventh fixed
+            // frontend byte and a full uop-cache extent audit.
+            unique case (mod)
+              2'b00: begin
+                d.simple=1'b1; d.is_mem=1'b1; d.len=4'd3;
+                d.alu_op=ALU_ADD; d.wflags=1'b1; d.wreg=1'b1;
+                d.dst=reg_f; d.src=reg_f; d.mem_lhs=1'b0;
+                d.base=b2[2:0]; d.mem_base_en=1'b1;
+                d.mem_ss=(b2[2:0]==3'b100)||(b2[2:0]==3'b101);
+                d.mem_index=b2[5:3]; d.mem_scale=b2[7:6]; d.mem_index_en=(b2[5:3]!=3'b100);
+                d.reads=_onehot(reg_f)|_onehot(b2[2:0])|((b2[5:3]!=3'b100)?_onehot(b2[5:3]):8'd0);
+                d.writes=_onehot(reg_f);
+                d.addr_mask=_onehot(b2[2:0])|((b2[5:3]!=3'b100)?_onehot(b2[5:3]):8'd0);
+                d.pairs_first=1'b1; d.pairs_second=1'b1;
+              end
+              2'b01: begin
+                d.simple=1'b1; d.is_mem=1'b1; d.len=4'd4;
+                d.alu_op=ALU_ADD; d.wflags=1'b1; d.wreg=1'b1;
+                d.dst=reg_f; d.src=reg_f; d.mem_lhs=1'b0;
+                d.base=b2[2:0]; d.mem_base_en=1'b1;
+                d.mem_ss=(b2[2:0]==3'b100)||(b2[2:0]==3'b101);
+                d.mem_index=b2[5:3]; d.mem_scale=b2[7:6]; d.mem_index_en=(b2[5:3]!=3'b100);
+                d.mem_disp={{24{b3[7]}},b3};
+                d.reads=_onehot(reg_f)|_onehot(b2[2:0])|((b2[5:3]!=3'b100)?_onehot(b2[5:3]):8'd0);
+                d.writes=_onehot(reg_f);
+                d.addr_mask=_onehot(b2[2:0])|((b2[5:3]!=3'b100)?_onehot(b2[5:3]):8'd0);
+                d.pairs_first=1'b1; d.pairs_second=1'b1;
+              end
+`ifdef VEN_FAST_MEM_ADD7
+              // ADD r32,[base+index*scale+disp32].  This is the remaining
+              // ordinary 32-bit SIB form, not an address- or program-specific
+              // special case.  `mod==2'b10` always supplies a concrete base;
+              // unlike the mod=00 no-base encoding it therefore preserves the
+              // same DS/SS selection and AGI dependency contract as the
+              // existing no-disp/disp8 siblings.
+              2'b10: begin
+                d.simple=1'b1; d.is_mem=1'b1; d.len=4'd7;
+                d.alu_op=ALU_ADD; d.wflags=1'b1; d.wreg=1'b1;
+                d.dst=reg_f; d.src=reg_f; d.mem_lhs=1'b0;
+                d.base=b2[2:0]; d.mem_base_en=1'b1;
+                d.mem_ss=(b2[2:0]==3'b100)||(b2[2:0]==3'b101);
+                d.mem_index=b2[5:3]; d.mem_scale=b2[7:6]; d.mem_index_en=(b2[5:3]!=3'b100);
+                d.mem_disp={b6,b5,b4,b3};
+                d.reads=_onehot(reg_f)|_onehot(b2[2:0])|((b2[5:3]!=3'b100)?_onehot(b2[5:3]):8'd0);
+                d.writes=_onehot(reg_f);
+                d.addr_mask=_onehot(b2[2:0])|((b2[5:3]!=3'b100)?_onehot(b2[5:3]):8'd0);
+                d.pairs_first=1'b1; d.pairs_second=1'b1;
+              end
+`endif
+              default: ;
+            endcase
+          end
+`endif
         end
         // ---- ALU eAX, imm32 (accumulator short forms 05/0D/15/1D/25/2D/35/3D) -
         // AP-500 fast-path coverage (review Action 6, batch 1): the accumulator-
@@ -150,6 +309,10 @@ module decode
                 d.imm={{24{b3[7]}},b3}; d.base=rm; d.mem_base_en=1'b1;
                 d.mem_ss=(rm==3'b101); d.mem_disp={{24{b2[7]}},b2};
                 d.reads=_onehot(rm); d.addr_mask=_onehot(rm);
+                // P5 never pairs an instruction carrying both a displacement
+                // and an immediate.  This is metadata for issue_uv only: the
+                // packet/ALU semantics above are unchanged.
+                d.disp_imm=1'b1;
                 d.pairs_first=1'b1; d.pairs_second=1'b0;
               end
               default: ;
@@ -178,6 +341,9 @@ module decode
                 d.mem_disp={{24{b3[7]}},b3};
                 d.reads=_onehot(b2[2:0])|((b2[5:3]!=3'b100)?_onehot(b2[5:3]):8'd0);
                 d.addr_mask=_onehot(b2[2:0])|((b2[5:3]!=3'b100)?_onehot(b2[5:3]):8'd0);
+                // Same AP-500 displacement+immediate restriction as the
+                // non-SIB mod=01 form above.
+                d.disp_imm=1'b1;
                 d.pairs_first=1'b1; d.pairs_second=1'b0;
               end
               default: ;
@@ -220,8 +386,36 @@ module decode
           d.reads=_onehot(b0[2:0]); d.writes=_onehot(b0[2:0]);
           d.pairs_first=1'b1; d.pairs_second=1'b1;
         end
+        // ---- PUSH/POP r32 (50+r / 58+r) -------------------------------------
+        // These are implicit SS:ESP accesses, not ModR/M memory operations.
+        // Keep the first landing deliberately U-only: a POP plus a V-register
+        // write has three architectural write destinations (POP dst, ESP, V
+        // dst), while the existing AGI history has two entries.  The actual
+        // memory transaction still goes through S_PIPE's packet/fragment path;
+        // this descriptor only supplies the stack-specific EA and final commit.
+        // Operand-size prefixes never reach this decoder, but a 16-bit default
+        // code segment can.  Leave that form on the mature slow FSM.
+        8'b0101_0???: begin
+          if (!def16) begin
+            d.simple=1'b1; d.len=4'd1; d.is_mem=1'b1; d.is_store=1'b1;
+            d.is_stack=1'b1; d.mem_ss=1'b1; d.src=b0[2:0];
+            d.reads=_onehot(b0[2:0])|_onehot(R_ESP);
+            d.writes=_onehot(R_ESP); d.addr_mask=_onehot(R_ESP);
+            d.pairs_first=1'b0; d.pairs_second=1'b0;
+          end
+        end
+        8'b0101_1???: begin
+          if (!def16) begin
+            d.simple=1'b1; d.len=4'd1; d.is_mem=1'b1; d.is_load=1'b1;
+            d.is_stack=1'b1; d.mem_ss=1'b1; d.dst=b0[2:0]; d.wreg=1'b1;
+            d.reads=_onehot(R_ESP);
+            d.writes=_onehot(b0[2:0])|_onehot(R_ESP);
+            d.addr_mask=_onehot(R_ESP);
+            d.pairs_first=1'b0; d.pairs_second=1'b0;
+          end
+        end
         // ---- MOV r/m32, r32 (89 /r): reg move or checked DS store ------------
-        8'h89: begin
+        8'h88, 8'h89: begin
           if (mod==2'b11) begin
             d.simple=1'b1; d.len=4'd2; d.alu_op=ALU_MOV; d.dst=rm; d.src=reg_f;
             d.wreg=1'b1; d.reads=_onehot(reg_f); d.writes=_onehot(rm);
@@ -290,7 +484,7 @@ module decode
           end
         end
         // ---- MOV r32, r/m32 (8B /r): reg form = reg move; checked memory load
-        8'h8B: begin
+        8'h8A, 8'h8B: begin
           if (mod==2'b11) begin
             d.simple=1'b1; d.len=4'd2; d.alu_op=ALU_MOV; d.dst=reg_f; d.src=rm;
             d.wreg=1'b1; d.reads=_onehot(rm); d.writes=_onehot(reg_f);
@@ -570,8 +764,9 @@ module decode
         // non-PIC 32-bit code.  It is semantically the same read contract as
         // 8B /r disp32: a literal DS offset, dword width, no GPR address input,
         // and a real mem_ack/fragment-engine wait before the EAX writeback.
-        // A0 (byte), A2/A3 (stores) and operand-size-prefixed A1 stay on the
-        // slow FSM because they need width-specific or store-side machinery.
+        // A0 (byte), A2 (byte store), and operand-size-prefixed A1 stay on
+        // the slow FSM because they need width-specific machinery.  A3 is a
+        // separately gated, real packet-store extension immediately below.
         8'hA1: begin
           if (!def16) begin
             d.simple=1'b1; d.is_load=1'b1; d.is_mem=1'b1; d.len=4'd5;
@@ -580,30 +775,32 @@ module decode
             d.pairs_first=1'b1; d.pairs_second=1'b1;
           end
         end
+`ifdef VEN_FAST_MOFFS_STORE
+        // MOV moffs32,EAX (A3): checked absolute DS store.  Unlike the
+        // withdrawn cycle-model shortcut below, this is a real S_PIPE memory
+        // packet: it drives the write handshake and cannot retire before the
+        // final acknowledgement.  Keep A2 (byte width), 16-bit-default, and
+        // prefixed variants on the slow FSM.  is_moffs is architecturally
+        // significant because the Erratum-59 pairing model consumes it.
+        8'hA3: begin
+          if (!def16) begin
+            d.simple=1'b1; d.is_mem=1'b1; d.is_store=1'b1;
+            d.is_moffs=1'b1; d.len=4'd5; d.src=R_EAX;
+            d.mem_disp={b4,b3,b2,b1}; d.reads=_onehot(R_EAX);
+            d.pairs_first=1'b1; d.pairs_second=1'b1;
+          end
+        end
+`endif
         // ---- M6 Erratum 59: MOV moffs8,AL (A2) / MOV moffs,eAX (A3) ----------
-        // The absolute-displacement store short forms. CYCLE-MODE ONLY (func mode
-        // keeps moffs on the proven slow FSM; the store value is not traced, so
-        // here we model only the retire + pairing behavior). These are UV-pairable
-        // per the SDM (d.pairs_first/second=1); is_moffs lets the pairing logic
-        // reproduce the documented false-EAX-dependency non-pairing behind the
-        // errata flag. The store reads EAX (its data source) -> reads=EAX so a
-        // genuine RAW with a prior EAX writer is still honored; the ERRATUM adds a
-        // false dep on the FOLLOWING EAX reader (handled in core.sv pairing).
-        // DISABLED (REVIEW_Jul29 H-02). This arm claimed the FAST path for a STORE
-        // while modelling ONLY retire+pairing — it never issued the memory write, so
-        // `MOV moffs,AL/eAX` retired having written NOTHING. tmp/review_jul29/
-        // moffs_cycle.s reproduces it: functional mode performs four byte-enabled
-        // writes and reaches PC 0x0804801d; cycle mode performs ZERO writes and
-        // derails to 0x08048016. That is not a timing-model inaccuracy, it is
-        // architectural corruption — and it was LIVE on the FPGA, because the
-        // deployed ao486 shim hard-wires cycle_mode=1 (ven_ao486_shim.sv:180-188).
-        // A0/A2/A3 always take the proven slow byte/store FSM.  The full-dword
-        // A1 load is separately admitted above through the checked load path.
-        // The erratum-59
-        // false-EAX-dependency pairing model is given up until the fast path can
-        // carry a real store handshake that cannot retire before the write is
-        // accepted (the review's recommended shape).
-        // 8'hA2, 8'hA3: if (cycle_mode) begin ... d.simple=1'b1; d.is_moffs=1'b1; ... end
+        // A2 remains on the proven width-aware slow store path.  The historical
+        // A2/A3 cycle-only fast arm is intentionally not restored: it modeled
+        // only retirement/pairing and allowed a moffs store to retire without a
+        // memory write (REVIEW_Jul29 H-02).  The optional A3 arm above is the
+        // required replacement shape: a full-dword S_PIPE packet with a real
+        // final-acknowledgement commit.  Its is_moffs bit lets core.sv apply the
+        // documented false EAX dependency to the following instruction when
+        // ERR_MOFFS is enabled.  Do not extend A2 by copying A3; it needs byte
+        // strobes and its own functional/fault matrix.
         // ---- Jcc rel8 (70..7F) -----------------------------------------------
         8'b0111_????: begin
           d.simple=1'b1; d.is_branch=1'b1; d.br_cond=1'b1; d.len=4'd2;
@@ -641,6 +838,41 @@ module decode
             d.cc=b1[3:0]; d.br_taken=cond_true(b1[3:0],flags_in); d.rel=def16?{{16{b3[7]}},b3,b2}:{b5,b4,b3,b2};
             d.pairs_first=1'b0; d.pairs_second=1'b1;
           end
+`ifdef VEN_FAST_MEM_EXT
+          else if (!def16 && (b1==8'hB6 || b1==8'hB7 || b1==8'hBE || b1==8'hBF) &&
+                   b2[7:6]!=2'b11 && b2[5:3]!=3'd4 &&
+                   // SIB+disp32 is eight bytes with the two-byte opcode.
+                   !(b2[2:0]==3'd4 && (b2[7:6]==2'b10 ||
+                     (b2[7:6]==2'b00 && b3[2:0]==3'd5)))) begin
+            d.simple=1'b1; d.is_load=1'b1; d.is_mem=1'b1;
+            d.wreg=1'b1; d.wflags=1'b0; d.dst=b2[5:3];
+            d.alu_op=FP_LOAD_ZX8 + {3'd0,b1[3],b1[0]};
+            // Pinned P5 model: NP, occ2/lat2. Never a U/V pair participant.
+            d.pairs_first=1'b0; d.pairs_second=1'b0;
+            d.len=4'd3;
+            if (b2[2:0]==3'd4) begin
+              d.len=4'd4; d.base=b3[2:0]; d.mem_base_en=1'b1;
+              d.mem_ss=(b3[2:0]==3'd4 || b3[2:0]==3'd5);
+              d.mem_index=b3[5:3]; d.mem_scale=b3[7:6];
+              d.mem_index_en=(b3[5:3]!=3'd4);
+              if (b2[7:6]==2'b01) begin
+                d.len=4'd5; d.mem_disp={{24{b4[7]}},b4};
+              end
+            end else begin
+              d.base=b2[2:0];
+              d.mem_base_en=!(b2[7:6]==2'b00 && b2[2:0]==3'd5);
+              d.mem_ss=d.mem_base_en && (b2[2:0]==3'd5);
+              if (b2[7:6]==2'b01) begin
+                d.len=4'd4; d.mem_disp={{24{b3[7]}},b3};
+              end else if (b2[7:6]==2'b10 || !d.mem_base_en) begin
+                d.len=4'd7; d.mem_disp={b6,b5,b4,b3};
+              end
+            end
+            d.addr_mask=(d.mem_base_en ? _onehot(d.base) : 8'd0) |
+                        (d.mem_index_en ? _onehot(d.mem_index) : 8'd0);
+            d.reads=d.addr_mask; d.writes=_onehot(d.dst);
+          end
+`endif
         end
         // ---- M5: x87 register-form FP whitelist (cycle-mode only) ------------
         // These are recognised by the fast path so the FP latency/throughput
@@ -705,6 +937,46 @@ module decode
                   default: ;  // FCOM/FCOMP reg-form stay slow-path
                 endcase
               end
+`ifdef VEN_FP_SHARED
+`ifdef VEN_FP_SHARED_DIRECT
+              // The shared-FP handoff already owns the indexed destination and
+              // write-before-pop ordering for FX_AR_STI_ST0.  Admit only the
+              // registered ALU classes here: divide/divr deliberately retain
+              // the proven S_FETCH/S_DECODE -> shared-SRT route.  This whole
+              // arm is shared-direct-only so legacy fpu_writeback never sees
+              // the new FK_ARITH_STI{,_POP} encodings.
+              8'hDC: begin            // DC C0+i.. : ST(i) op= ST0
+                unique case (b1[5:3])
+                  3'd0,3'd1,3'd4,3'd5: begin
+                    d.is_fp=1'b1; d.fp_kind=FK_ARITH_STI; d.len=4'd2;
+                    // For ST(i)-destination SUB/SUBR, the architectural
+                    // opcode senses are reversed versus ST0-destination D8.
+                    // f_arith receives {a=ST(i),b=ST0}, hence invert op[0]
+                    // exactly as the slow decoder does for DC/DE.
+                    d.fp_aluop=(b1[5:3] == 3'd4 || b1[5:3] == 3'd5)
+                             ? {b1[5:4],~b1[3]} : b1[5:3];
+                    d.fp_sti=b1[2:0]; d.fp_role=3'd3; d.fp_lat=7'd3;
+                    d.fp_occ=(b1[5:3] == 3'd1) ? 7'd2 : 7'd1;
+                  end
+                  default: ; // FCOM/FCOMP and FDIV/FDIVR stay slow-path
+                endcase
+              end
+              8'hDE: begin            // DE C0+i.. : ST(i) op= ST0, then pop
+                unique case (b1[5:3])
+                  3'd0,3'd1,3'd4,3'd5: begin
+                    d.is_fp=1'b1; d.fp_kind=FK_ARITH_STI_POP; d.len=4'd2;
+                    // Same operand-sense correction as DC above.  DE D9 is
+                    // FCOMPP (reg=3), and is intentionally left slow.
+                    d.fp_aluop=(b1[5:3] == 3'd4 || b1[5:3] == 3'd5)
+                             ? {b1[5:4],~b1[3]} : b1[5:3];
+                    d.fp_sti=b1[2:0]; d.fp_role=3'd3; d.fp_lat=7'd3;
+                    d.fp_occ=(b1[5:3] == 3'd1) ? 7'd2 : 7'd1;
+                  end
+                  default: ; // FCOMPP, FCOM/FCOMP aliases, and divide remain slow
+                endcase
+              end
+`endif
+`endif
               8'hDD: begin
                 unique casez (b1)
                   // DD D8 ONLY — FSTP ST(0), i.e. "discard the top", which is a pure
@@ -733,6 +1005,83 @@ module decode
         end
         default: ;
       endcase
+`ifdef VEN_FP_SHARED
+`ifdef VEN_FP_SHARED_DIRECT
+`ifdef VEN_FP_MEM_ADMIT
+    // Read-only D8/DC arithmetic. Never expose this descriptor to the legacy
+    // FP retirement path, which treats is_fp as an executable register op.
+    // No prefixes or 16-bit address grammar are admitted. All required bytes
+    // fit the seven-byte input; publication still checks the complete extent.
+    if (cycle_mode && !def16 && mod!=2'b11 &&
+        (((b0==8'hD8 || b0==8'hDC) && reg_f!=3'd2 && reg_f!=3'd3) || fp_mem_load)) begin
+      d.is_fp=1'b1; d.fp_kind=FK_MEM; d.fp_aluop=reg_f;
+      d.fp_sti={2'd0,fp_mem_load?fp_mem_wide:b0[2]};
+      // FK_MEM-only flavor: 0 arithmetic, 1 floating load, 2 integer load.
+      // Legacy register kinds retain their existing scoreboard role encoding.
+      d.fp_role=fp_mem_load?(fp_mem_integer?3'd2:3'd1):3'd0;
+      // Leave simple/is_mem/read-write flags clear: S_FLOAD alone owns the
+      // request, after the packet has been captured and permissions checked.
+      d.base=(rm==3'b100)?b2[2:0]:rm;
+      d.mem_base_en=!((mod==2'b00) && (d.base==3'b101));
+      d.mem_ss=d.mem_base_en && (d.base==3'b100 || d.base==3'b101);
+      // Without SIB, b2 may be outside this instruction (and in a different
+      // cache line). Even disabled metadata must have a canonical encoding so
+      // cached and live descriptors do not depend on unrelated trailing bytes.
+      d.mem_index=(rm==3'b100)?b2[5:3]:3'd0;
+      d.mem_scale=(rm==3'b100)?b2[7:6]:2'd0;
+      d.mem_index_en=(rm==3'b100) && (b2[5:3]!=3'b100);
+      d.addr_mask=(d.mem_base_en?_onehot(d.base):8'd0) |
+                  (d.mem_index_en?_onehot(d.mem_index):8'd0);
+      d.reads=d.addr_mask;
+      d.len=(rm==3'b100)?4'd3:4'd2;
+      if (mod==2'b01) begin
+        d.len=d.len+4'd1;
+        d.mem_disp=(rm==3'b100)?{{24{b3[7]}},b3}:{{24{b2[7]}},b2};
+      end else if (mod==2'b10 || !d.mem_base_en) begin
+        d.len=d.len+4'd4;
+        d.mem_disp=(rm==3'b100)?{b6,b5,b4,b3}:{b5,b4,b3,b2};
+      end
+    end
+`endif
+`endif
+`endif
+`ifdef VEN_FAST_MEM_ALU
+    // Apply only to memory descriptors actually admitted by the checked arm.
+    // Address masks, segment identity and operand ordering remain unchanged.
+    if (d.simple && d.is_mem && checked_add_opcode) begin
+      d.alu_op = {2'b00,b0[5:3]};
+      d.pairs_second = !(b0[5:3]==3'b010 || b0[5:3]==3'b011);
+    end
+`elsif VEN_FAST_MEM_ADC
+    // Address/dependency metadata comes from the same checked ADD packet.
+    // The existing U ALU consumes architectural CF after the final memory
+    // response; ADC may lead a pair but cannot execute in the V slot.
+    if (d.simple && d.is_mem && b0 == 8'h13) begin
+      d.alu_op = ALU_ADC;
+      d.pairs_second = 1'b0;
+    end
+`endif
+`ifdef VEN_FAST_MEM_MOV7
+    // Generic SIB+disp32 MOV forms. Reuse the existing packet/AGU and byte
+    // normalization below; no additional memory transaction or bypass path.
+    // mod00/base5 is an absent base (DS), not EBP (SS).
+    if (!def16 && (b0==8'h88 || b0==8'h89 || b0==8'h8A || b0==8'h8B) &&
+        rm==3'b100 && (mod==2'b10 || (mod==2'b00 && b2[2:0]==3'b101))) begin
+      d.simple=1'b1; d.len=4'd7; d.alu_op=ALU_MOV;
+      d.is_mem=1'b1; d.is_load=b0[1]; d.is_store=!b0[1];
+      d.wreg=b0[1]; d.wflags=1'b0;
+      d.base=b2[2:0]; d.mem_base_en=(mod==2'b10);
+      d.mem_ss=(mod==2'b10) && (b2[2:0]==3'b100 || b2[2:0]==3'b101);
+      d.mem_index=b2[5:3]; d.mem_scale=b2[7:6]; d.mem_index_en=(b2[5:3]!=3'b100);
+      d.mem_disp={b6,b5,b4,b3};
+      d.addr_mask=((mod==2'b10)?_onehot(b2[2:0]):8'd0) |
+                  ((b2[5:3]!=3'b100)?_onehot(b2[5:3]):8'd0);
+      d.src=reg_f; d.dst=reg_f;
+      d.reads=d.addr_mask | (b0[1]?8'd0:_onehot(reg_f));
+      d.writes=b0[1]?_onehot(reg_f):8'd0;
+      d.pairs_first=1'b1; d.pairs_second=1'b1;
+    end
+`endif
     // ---- (removed) three 16-bit BISECT scaffolds ---------------------------
     // VEN_D16_MOVONLY / VEN_D16_NOWREG / VEN_D16_NOPAIR used to sit here, each
     // narrowing what `simple` admits in 16-bit mode to binary-search the boot
@@ -744,6 +1093,30 @@ module decode
     // made it look like a writeback defect. Removed rather than left gated off:
     // the comments asserted those hypotheses as live leads and would send the next
     // reader down three dead paths. (DISK_BOOT_STATUS UPDATE 301.)
+    // Byte MOV shares the same effective-address decode as word/dword MOV.
+    // Remap only DATA operands; address masks/base/index remain full GPRs.
+    // Retain w16 for code-address wrapping. Memory forms above still require
+    // 32-bit addressing; unsupported prefixes/16-bit memory forms stay slow.
+    if (d.simple && (b0 == 8'h88 || b0 == 8'h8A)) begin
+      d.w8 = 1'b1;
+      if (d.is_store) begin
+        d.src = fp_byte_parent(reg_f);
+        d.src_hi8 = reg_f[2];
+        d.reads = d.addr_mask | _onehot(d.src);
+      end else if (d.is_load) begin
+        d.dst = fp_byte_parent(reg_f);
+        d.dst_hi8 = reg_f[2];
+        d.reads = d.addr_mask;
+        d.writes = _onehot(d.dst);
+      end else begin
+        d.dst_hi8 = d.dst[2];
+        d.src_hi8 = d.src[2];
+        d.dst = fp_byte_parent(d.dst);
+        d.src = fp_byte_parent(d.src);
+        d.reads = _onehot(d.src);
+        d.writes = _onehot(d.dst);
+      end
+    end
     return d;
     end
   endfunction
@@ -758,6 +1131,6 @@ module decode
   // Drive the decoded-uop output combinationally. Bit-identical to the in-line
   // `fp_decode(...)` calls in intcore.sv (the function read cycle_mode from its
   // enclosing module's port; here it reads this module's port — same value).
-  always_comb uop = fp_decode(ib0, ib1, ib2, ib3, ib4, ib5, iflags);
+  always_comb uop = fp_decode(ib0, ib1, ib2, ib3, ib4, ib5, ib6, iflags);
 
 endmodule : decode

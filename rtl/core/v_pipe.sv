@@ -51,14 +51,14 @@ module v_pipe
     // step H) then derived CF/OF from an already-contaminated result. Mask with the SAME wmask
     // helper the slow path uses (ventium_alu_pkg:47). At w16=0 wmask(v,3'd4) is the identity, so
     // this is inert in user mode.
-    v_a_w  = wmask(v_dst_val,  v_d.w16 ? 3'd2 : 3'd4);
-    v_b_w  = wmask(fp_bop(v_d), v_d.w16 ? 3'd2 : 3'd4);
+    v_a_w  = wmask(v_dst_val, fp_operand_width(v_d));
+    v_b_w  = wmask(fp_bop(v_d), fp_operand_width(v_d));
     v_alu   = alu_result(v_d.alu_op, v_a_w, v_b_w, eflags[0]);
     // task #56 step H: the width argument was HARDCODED 3'd4 (32-bit) while the slow
     // path passes q_w (core.sv:2034). A 16-bit op therefore set ZF/SF/CF/OF from the
     // full 32-bit result -> wrong conditional branches -> guest divergence (UPDATE 279).
     // flags_next already handles width; it was simply never told.
-    v_flags = flags_next(v_d.alu_op, v_a_w, v_b_w, v_alu, eflags, v_d.w16 ? 3'd2 : 3'd4);
+    v_flags = flags_next(v_d.alu_op, v_a_w, v_b_w, v_alu, eflags, fp_operand_width(v_d));
   end
 
 endmodule : v_pipe

@@ -220,11 +220,18 @@ module icache #(
   logic [IC_TAGW-1:0] ic_ptag [IC_SETS][IC_WAYS];
 
   // REVIEW Aug-1 H-08: in-flight fill line + poison bit (see the fill block below).
+  // `fp_active_q` makes the fill a transaction rather than a sequence of
+  // adjacent returned words: an AXI/bridge response may have an inter-beat
+  // bubble, and a snoop or global flush in that bubble must still poison the
+  // later allocation.  `fpz` alone was sampled only under fill_en, so it could
+  // miss precisely that gap.  The active bit also prevents stale poison left
+  // by a completed/aborted fill from affecting an unusual single-word fill.
+  logic                fp_active_q;
   logic                fpz;                          // this fill was invalidated
   logic [IC_IDXW-1:0]  fpz_set;
   logic [IC_TAGW-1:0]  fpz_tag;
   logic [IC_TAGW-1:0]  fpz_ptag;                     // R2-H09: and its PHYSICAL tag
-  logic                snoop_hits_fill;
+  logic                snoop_hits_fill, snoop_hits_fill_now;
   // REVIEW2 H-12: this checked ONLY port 0. Ports 1 and 2 carry the CPU
   // self-modifying-store invalidations (ventium_l1_axi drives them from core_we and
   // from the second line of a store that crosses an I-line boundary), so a CPU store
@@ -235,13 +242,28 @@ module icache #(
   // R2-H09: all snoop ports carry PHYSICAL addresses, so the poison compare runs
   // against the fill's PHYSICAL tag (fpz_ptag). The set index is page-offset bits,
   // identical in the linear and physical domains (VIPT).
-  function automatic logic snp_hits(input logic en, input logic [31:0] a);
-    snp_hits = en && (a[5 +: IC_IDXW]         == fpz_set)
-                  && (a[5+IC_IDXW +: IC_TAGW] == fpz_ptag);
+  function automatic logic snp_hits_line(
+      input logic en, input logic [31:0] a,
+      input logic [IC_IDXW-1:0] match_set,
+      input logic [IC_TAGW-1:0] match_ptag);
+    snp_hits_line = en && (a[5 +: IC_IDXW]         == match_set)
+                        && (a[5+IC_IDXW +: IC_TAGW] == match_ptag);
   endfunction
-  assign snoop_hits_fill = snp_hits(snoop_inv_valid,  snoop_inv_addr)
-                        || snp_hits(snoop_inv_valid1, snoop_inv_addr1)
-                        || snp_hits(snoop_inv_valid2, snoop_inv_addr2);
+  // `snoop_hits_fill` is the registered transaction identity and stays valid
+  // through an inter-ACK gap.  The live form is needed for the interface's
+  // legal one-word fill: there is no pre-edge active identity in that case.
+  assign snoop_hits_fill = snp_hits_line(snoop_inv_valid,  snoop_inv_addr,
+                                          fpz_set, fpz_ptag)
+                        || snp_hits_line(snoop_inv_valid1, snoop_inv_addr1,
+                                         fpz_set, fpz_ptag)
+                        || snp_hits_line(snoop_inv_valid2, snoop_inv_addr2,
+                                         fpz_set, fpz_ptag);
+  assign snoop_hits_fill_now = snp_hits_line(snoop_inv_valid,  snoop_inv_addr,
+                                              fill_set, fill_ptag)
+                            || snp_hits_line(snoop_inv_valid1, snoop_inv_addr1,
+                                             fill_set, fill_ptag)
+                            || snp_hits_line(snoop_inv_valid2, snoop_inv_addr2,
+                                             fill_set, fill_ptag);
 
 `ifdef VEN_IC_BRAM
   always_ff @(posedge clk) begin
@@ -388,6 +410,7 @@ module icache #(
       // I-cache empty out of reset (data left X — only val gates correctness).
       // age = way index => initial victim (max age) = way IC_WAYS-1, matching the
       // old reset (ic_lru=0 => victim=~0=way1) at 2-way.
+      fp_active_q <= 1'b0;
       fpz <= 1'b0; fpz_set <= '0; fpz_tag <= '0; fpz_ptag <= '0;   // H-08
       for (int s=0;s<IC_SETS;s++)
         for (int w=0;w<IC_WAYS;w++) begin
@@ -434,6 +457,26 @@ module icache #(
       icfl_flush_q <= flush_all;
 `endif
       // ---- per-word line fill (S_PF + S_PIPE word-0 path; one/clock) ----
+      // Word 0 starts/reseeds the in-flight identity.  Thereafter, keep poison
+      // live on *every* clock until the final returned word, including cycles
+      // with fill_en=0.  A snoop loop can invalidate an already-valid line on a
+      // gap, but the allocation slot has no valid bit yet; without this state,
+      // the final beat would publish stale bytes as executable.
+      if (fill_en && (fill_off == 5'd0)) begin
+        fpz_set      <= fill_set;
+        fpz_tag      <= fill_tag;
+        fpz_ptag     <= fill_ptag;
+        fp_active_q  <= !fill_done;
+        // H-12: compare word 0 against its live identity because fpz_* update
+        // only at this edge.  A non-cacheable fill is likewise poison from its
+        // first beat; the line data still flows to the fetch bypass.
+        fpz <= flush_all || fill_nocache || snoop_hits_fill_now;
+      end else begin
+        if (fp_active_q && (flush_all || snoop_hits_fill || fill_nocache))
+          fpz <= 1'b1;
+        if (fp_active_q && fill_en && fill_done)
+          fp_active_q <= 1'b0;
+      end
       if (fill_en) begin
 `ifdef VEN_IC_BRAM
         // canonical UltraScale byte-write-enable template. ic_line_a uses the
@@ -463,26 +506,6 @@ module icache #(
         // invalidation between the first and last beat. Same shape as ven_l1d
         // H-06/H-07. The fill's line is latched locally rather than trusting the
         // driver to hold fill_set/fill_tag stable for all eight beats.
-        if (fill_off == 5'd0) begin
-          fpz_set <= fill_set; fpz_tag <= fill_tag; fpz_ptag <= fill_ptag;
-          // H-12: all three ports, compared against THIS beat's fill line (fpz_set/
-          // fpz_tag are only registered at the end of this clock).
-          // R2-H09: the port addresses are PHYSICAL -- compare fill_ptag.
-          fpz     <= flush_all
-                  // REVIEW2 H-17: a non-cacheable fetch poisons its own fill.
-                  || fill_nocache
-                  || (snoop_inv_valid
-                      && (snoop_inv_addr[5 +: IC_IDXW]         == fill_set)
-                      && (snoop_inv_addr[5+IC_IDXW +: IC_TAGW] == fill_ptag))
-                  || (snoop_inv_valid1
-                      && (snoop_inv_addr1[5 +: IC_IDXW]         == fill_set)
-                      && (snoop_inv_addr1[5+IC_IDXW +: IC_TAGW] == fill_ptag))
-                  || (snoop_inv_valid2
-                      && (snoop_inv_addr2[5 +: IC_IDXW]         == fill_set)
-                      && (snoop_inv_addr2[5+IC_IDXW +: IC_TAGW] == fill_ptag));
-        end else if (flush_all || snoop_hits_fill || fill_nocache) begin
-          fpz <= 1'b1;
-        end
         if (fill_done) begin
           // oracle l1_access() miss path: val[victim]=1; tag[victim]=tag; MRU=victim.
           // H-08: validate ONLY if nothing invalidated this line mid-flight. The
@@ -494,7 +517,12 @@ module icache #(
           // register, for the same reason flush_all is: on a single-beat fill (or on
           // the fill_done beat itself) the poison register is still pre-edge and has
           // not yet seen this clock's value.
-          ic_val[fill_set][fill_way]<= !(fpz || flush_all || snoop_hits_fill
+          // The normal eight-word protocol has an active registered identity
+          // by the final word.  A generic one-word fill does not, so compare
+          // that edge against its live line rather than stale fpz_* identity.
+          ic_val[fill_set][fill_way]<= !((fp_active_q && fpz) || flush_all
+                                         || (fp_active_q ? snoop_hits_fill
+                                                         : snoop_hits_fill_now)
                                          || fill_nocache);
           touch_way(fill_set, fill_way);
         end

@@ -22,16 +22,30 @@
 //   --max-insn   N        stop after N retired instructions       (default 1<<20)
 //   --max-cycles M        stop after M core clocks                (default 1<<24)
 //   --trace-vcd  f        write a Verilator VCD waveform to f      (optional)
-//   --quiesce    K        idle-cycle threshold to declare done    (default 64)
+//   --quiesce    K        idle-cycle threshold to declare done    (default 64;
+//                                                                  200000 for --l1-axi)
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
+#include <map>
 #include <string>
+#include <vector>
 
 #include "verilated.h"
 #include "Vventium_top.h"
+#include "uop_probe.h"
+#include "fp_overlap_probe.h"
+#include "irq_inject_probe.h"
+#include "debug_breakpoint_drain.h"
+#include "memory_geometry_probe.h"
+#ifdef VEN_MEM_GEOMETRY
+#include "memory_geometry_adapter.h"
+#include "memory_geometry_model_map.h"
+#endif
 #if VM_TRACE
 #  include "verilated_vcd_c.h"
 #endif
@@ -84,9 +98,21 @@ struct Args {
                                        // gate passes the golden's n=0 ESP explicitly)
     uint64_t max_insn   = 1ull << 20;
     uint64_t max_cycles = 1ull << 24;
+    // In direct-memory mode, a 64-cycle no-retire window is a useful prompt
+    // terminal-state detector.  A real L1/AXI line fill, however, may make
+    // legitimate forward progress for substantially longer without retiring.
+    // Keep the historical direct-mode default, and select the already-proven
+    // L1/AXI gate threshold only when the caller did not explicitly choose one.
     uint32_t quiesce    = 64;     // K consecutive no-retire cycles => done
+    bool     quiesce_explicit = false;
     bool     x87        = false;  // emit x87 fields + header x87:true (M3)
-    bool     cycle      = false;  // emit cycle-mode trace + header mode:cycle (M4)
+    bool     cycle      = false;  // drive cycle_mode (dual U/V fast path) (M4)
+    // Keep the core in cycle mode but emit a full functional-state trace.  This
+    // is a verification-only mode for a workload which has first PROVED that
+    // every issue is unpaired: cycle traces intentionally omit GPR/memory state,
+    // and the existing paired-retire ABI exports the post-pair state for both
+    // members.  It is therefore not a general replacement for a cycle oracle.
+    bool     cycle_func = false;
     bool     soc_en     = false;  // force core soc_en=1 for a -bios firmware (CPUID/etc. ungate)
     // M5B-int: --bus-mode drives the top bus_mode=1, routing the core memory
     // through the gated pin-level 64-bit P5 bus subsystem (rtl/bus/biu.sv ->
@@ -199,12 +225,19 @@ struct Args {
     int64_t     xover_at_eip   = -1;   // --xover-at-eip <hex> (require architectural eip==this; -1=any)
 };
 
+constexpr uint32_t kL1AxiDefaultQuiesce = 200000;
+// These are the unconditional prefix of core.sv's state_e.  Feature-selected
+// states follow them, so C++ must never assign names to later numeric values
+// without consuming the exact elaborated SystemVerilog configuration.
+constexpr unsigned kDbgStateDecode = 2;
+
 [[noreturn]] void usage(const char* prog, int code) {
     std::fprintf(stderr,
         "usage: %s --out <trace.vtrace> [--image <blob> --load <hexaddr>]\n"
         "          [--entry <hexaddr>] [--init-esp <hexaddr>]\n"
         "          [--max-insn N] [--max-cycles M]\n"
-        "          [--trace-vcd f] [--quiesce K] [--x87] [--cycle] [--bus-mode] [--system]\n"
+        "          [--trace-vcd f] [--quiesce K] [--x87] [--cycle|--cycle-func] [--bus-mode] [--system]\n"
+        "          (default quiesce: 64 direct, 200000 with --l1-axi; explicit --quiesce wins)\n"
         "          [--errata <hexmask>] [--smm-dump <file>] [--smbase <hexaddr>]\n"
         "          [--quake-image <image.json> --lockstep <golden.vtrace>]\n"
         "          [--win95-image <image.json> --lockstep <golden.vtrace>]\n", prog);
@@ -241,9 +274,13 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--init-esp")   a.init_esp   = parse_u32(need("--init-esp"));
         else if (k == "--max-insn")   a.max_insn   = parse_u64(need("--max-insn"));
         else if (k == "--max-cycles") a.max_cycles = parse_u64(need("--max-cycles"));
-        else if (k == "--quiesce")    a.quiesce    = parse_u32(need("--quiesce"));
+        else if (k == "--quiesce") {
+            a.quiesce = parse_u32(need("--quiesce"));
+            a.quiesce_explicit = true;
+        }
         else if (k == "--x87")        a.x87        = true;
         else if (k == "--cycle")      a.cycle      = true;
+        else if (k == "--cycle-func") { a.cycle = true; a.cycle_func = true; }
         else if (k == "--bus-mode")   a.bus_mode   = true;   // M5B-int
         else if (k == "--l1-axi")     a.l1_axi     = true;   // P1-1 bus_mode=2
         else if (k == "--golden")     a.golden     = true;   // ven_l1d flush-after-each-access
@@ -299,6 +336,17 @@ int main(int argc, char** argv) {
     Verilated::commandArgs(argc, argv);
     Args args = parse_args(argc, argv);
 
+    // Do this after parsing so option order does not matter.  Existing L1/AXI
+    // gates deliberately use this same threshold: a cache/AXI fill can stay
+    // retirement-silent for more than the direct-mode 64-cycle default.  Do
+    // not silently override a directed test's explicit termination contract.
+    if (args.l1_axi && !args.quiesce_explicit) {
+        args.quiesce = kL1AxiDefaultQuiesce;
+        std::fprintf(stderr,
+            "tb: --l1-axi selected default --quiesce=%u (pass --quiesce to override)\n",
+            args.quiesce);
+    }
+
     // ---- backing memory + image -------------------------------------------
     ventium::MemModel mem;
     // task #52: optional backing-store latency. The model acks in-cycle by default,
@@ -307,6 +355,9 @@ int main(int argc, char** argv) {
     // cycles passed every gate green (DISK_BOOT_STATUS UPDATE 229/230). Unset => 0 =>
     // byte-identical to before, so all existing goldens stay reproducible.
     //   VEN_MEM_RD_LAT / VEN_MEM_WR_LAT : per-access stall in core cycles.
+    //   VEN_MEM_LAT_ADDR / VEN_MEM_LAT_MASK : optional bus-visible physical
+    //       address match, useful for a data-path delay probe that must not
+    //       perturb unrelated instruction fills (mask defaults to all bits).
     // CALIBRATE from hardware (perf counters at 0x100-0x150); do not guess.
     {
         const char* rl = getenv("VEN_MEM_RD_LAT");
@@ -315,6 +366,15 @@ int main(int argc, char** argv) {
         unsigned w = wl ? (unsigned)strtoul(wl, nullptr, 0) : 0u;
         if (r || w) {
             mem.set_latency(r, w);
+            const char* ma = getenv("VEN_MEM_LAT_ADDR");
+            const char* mm = getenv("VEN_MEM_LAT_MASK");
+            if (ma) {
+                const uint32_t match = (uint32_t)strtoul(ma, nullptr, 0);
+                const uint32_t mask = mm ? (uint32_t)strtoul(mm, nullptr, 0) : ~0u;
+                mem.set_latency_match(match, mask);
+                fprintf(stderr, "[memmodel] latency match: addr=%08x mask=%08x\n",
+                        match, mask);
+            }
             fprintf(stderr, "[memmodel] latency ENABLED: read=%u write=%u core cycles "
                             "(cycle bands below are NOT comparable to the 0-latency goldens)\n", r, w);
         }
@@ -678,16 +738,19 @@ int main(int argc, char** argv) {
         trace.open_discard();
     } else {
         char note[256];
+        const bool cycle_trace = args.cycle && !args.cycle_func;
         std::snprintf(note, sizeof note,
                       "ventium tb; entry=0x%08x load=0x%08x image=%s%s%s",
                       args.entry, args.load_addr,
                       args.image.empty() ? "(none)" : args.image.c_str(),
                       args.x87   ? " x87"   : "",
-                      args.cycle ? " cycle" : "");
-        // --cycle wins over --x87: a cycle trace carries no x87 fields. open()
-        // forces x87:false in cycle mode, so the header stays well-formed.
+                      args.cycle ? (args.cycle_func ? " cycle-func" : " cycle") : "");
+        // A normal --cycle trace wins over --x87 because it carries no x87
+        // fields.  --cycle-func deliberately keeps the normal full-state
+        // format while driving the same RTL cycle-mode execution path; callers
+        // must first reject paired issue with a regular --cycle trace.
         // --system adds the sys fields (cr0..cr4) + header sys:true (func mode).
-        if (!trace.open(args.out, note, args.x87, args.cycle, args.system)) {
+        if (!trace.open(args.out, note, args.x87, cycle_trace, args.system)) {
             std::fprintf(stderr, "tb: cannot open trace '%s'\n", args.out.c_str());
             return 2;
         }
@@ -740,7 +803,62 @@ int main(int argc, char** argv) {
     int      axw = 0;                  // write FSM: 0=IDLE, 1=DATA, 2=RESP
     uint32_t axr_addr = 0, axw_addr = 0, axr_cnt = 0;
     uint32_t axr_size = 2;               // R2-H01: latched ARSIZE (0=1B,1=2B,2=4B)
-    struct { bool ar,r,aw,w,b; uint32_t araddr,arlen,awaddr,wdata,wstrb,arsize; } axhs{};
+    bool     axr_wrap = false;           // AXI WRAP8 line fill (critical word first)
+    struct { bool ar,r,aw,w,b; uint32_t araddr,arlen,arburst,awaddr,wdata,wstrb,arsize; } axhs{};
+    // Passive inner-AXI traffic monitor. The existing MemModel counters stay
+    // zero in --l1-axi mode, and dbg_rd_valid is intentionally used by board
+    // forensics rather than the raw R channel. VEN_AXI_PROFILE=1 records
+    // literal pre-edge AXI handshakes without changing BFM or RTL timing.
+    struct AxiProfile {
+        uint64_t ar_hs = 0, line_ar_hs = 0, req_beats = 0;
+        uint64_t r_hs = 0, rlast_hs = 0;
+        uint64_t aw_hs = 0, w_hs = 0, b_hs = 0;
+        uint64_t busy_cycles = 0, first_wait_cycles = 0;
+        uint64_t rvalid_gap_cycles = 0, rready_stall_cycles = 0;
+        uint64_t overlapping_ar = 0, orphan_r = 0;
+        bool read_active = false, first_r_seen = false;
+    } axi_profile_stats{};
+    const bool axi_profile = (std::getenv("VEN_AXI_PROFILE") != nullptr);
+    // Passive address histogram for the write side of the same stable AXI ABI.
+    // This is deliberately simulation-only and samples AW handshakes only: it
+    // cannot perturb the BFM's response timing or coalesce independent writes.
+    // Set VEN_AXI_WRITE_HIST=1.  VEN_AXI_WRITE_HIST_SHIFT selects the power-of-
+    // two bucket size (12 = 4 KiB, the default); keeping it bounded makes the
+    // report useful for deciding whether an end-to-end write-combining design
+    // would see adjacent traffic before touching synthesizable RTL.
+    const bool axi_write_hist = (std::getenv("VEN_AXI_WRITE_HIST") != nullptr);
+    const uint32_t axi_write_hist_shift_raw = std::getenv("VEN_AXI_WRITE_HIST_SHIFT")
+        ? (uint32_t)std::strtoul(std::getenv("VEN_AXI_WRITE_HIST_SHIFT"), nullptr, 0) : 12u;
+    const uint32_t axi_write_hist_shift =
+        (axi_write_hist_shift_raw >= 5u && axi_write_hist_shift_raw <= 24u)
+            ? axi_write_hist_shift_raw : 12u;
+    std::map<uint32_t, uint64_t> axi_write_hist_bins;
+    struct AxiWriteLocality {
+        uint64_t aw = 0, same_qword = 0, same_line = 0;
+        uint64_t next_dword = 0, next_qword = 0;
+        bool have_prev = false;
+        uint32_t prev = 0;
+    } axi_write_locality{};
+    // Narrow, simulation-only write-path trace.  It deliberately uses only the
+    // stable top-level AXI ABI: Verilator is free to coalesce private L1/core
+    // nets differently in each feature configuration.  Set
+    // VEN_AXI_STORE_TRACE=<address> to print AW/W/B transactions touching that
+    // 32-byte line.  AW, W, and B are independent AXI channels, so the tracer
+    // queues each accepted channel rather than assuming same-cycle handshakes.
+    const char* axi_store_trace_arg = std::getenv("VEN_AXI_STORE_TRACE");
+    const bool axi_store_trace = (axi_store_trace_arg != nullptr);
+    const uint32_t axi_store_trace_line = axi_store_trace
+        ? ((uint32_t)std::strtoul(axi_store_trace_arg, nullptr, 0) & ~0x1fu) : 0;
+    struct AxiTraceAw { uint32_t addr; uint64_t cycle; };
+    struct AxiTraceW { uint32_t data, strb; uint64_t cycle; };
+    struct AxiTraceTxn {
+        uint32_t addr, data, strb;
+        uint64_t aw_cycle, w_cycle;
+        bool selected;
+    };
+    std::deque<AxiTraceAw>  axi_trace_awq;
+    std::deque<AxiTraceW>   axi_trace_wq;
+    std::deque<AxiTraceTxn> axi_trace_bq;
     // #34: AXI_STUCK=1 freezes the slave (a dead DDR/bridge) to exercise the master
     // watchdog -> bus_err -> the core's S_HALT override (cpu_hung), end-to-end.
     const bool axi_stuck = (std::getenv("AXI_STUCK") != nullptr);
@@ -820,6 +938,12 @@ int main(int argc, char** argv) {
         top->m_axi_bid = 0; top->m_axi_bresp = 0;
     };
     auto axi_capture = [&]() {
+        if (!top->rst_n) {
+            if (axi_profile) axi_profile_stats = {};
+            if (axi_write_hist) axi_write_hist_bins.clear();
+            if (axi_write_hist) axi_write_locality = {};
+            axi_trace_awq.clear(); axi_trace_wq.clear(); axi_trace_bq.clear();
+        }
         if (axi_stuck) { axhs = {}; return; }   // frozen: no handshakes
         axhs.ar = (axr==0) && (bool)top->m_axi_arvalid;
         axhs.r  = (axr==1) && (axr_lat==0) && (bool)top->m_axi_rready;
@@ -828,11 +952,116 @@ int main(int argc, char** argv) {
         axhs.b  = (axw==2) && (axw_lat==0) && (bool)top->m_axi_bready;
         axhs.araddr = (uint32_t)top->m_axi_araddr - AXI_REMAP; axhs.arlen = (uint32_t)top->m_axi_arlen;
         axhs.arsize = (uint32_t)top->m_axi_arsize;
+        axhs.arburst = (uint32_t)top->m_axi_arburst;
         axhs.awaddr = (uint32_t)top->m_axi_awaddr - AXI_REMAP;
         axhs.wdata  = (uint32_t)top->m_axi_wdata;  axhs.wstrb = (uint32_t)top->m_axi_wstrb;
+        if (axi_store_trace && top->rst_n) {
+            const bool aw_hs = (bool)top->m_axi_awvalid && (bool)top->m_axi_awready;
+            const bool w_hs  = (bool)top->m_axi_wvalid  && (bool)top->m_axi_wready;
+            const bool b_hs  = (bool)top->m_axi_bvalid  && (bool)top->m_axi_bready;
+            const uint64_t cycle = half >> 1;
+            if (aw_hs)
+                axi_trace_awq.push_back({(uint32_t)top->m_axi_awaddr - AXI_REMAP, cycle});
+            if (w_hs)
+                axi_trace_wq.push_back({(uint32_t)top->m_axi_wdata,
+                                        (uint32_t)top->m_axi_wstrb, cycle});
+
+            // AXI4 preserves write-data and response order for this master's
+            // single ID.  Pair AW/W in arrival order, retaining *all* writes in
+            // the B queue so a non-selected write cannot misassociate a later
+            // selected BRESP.
+            while (!axi_trace_awq.empty() && !axi_trace_wq.empty()) {
+                const AxiTraceAw aw = axi_trace_awq.front(); axi_trace_awq.pop_front();
+                const AxiTraceW  w  = axi_trace_wq.front();  axi_trace_wq.pop_front();
+                const bool selected = ((aw.addr & ~0x1fu) == axi_store_trace_line);
+                axi_trace_bq.push_back({aw.addr, w.data, w.strb, aw.cycle, w.cycle, selected});
+                if (selected) {
+                    std::fprintf(stderr,
+                        "tb: [axi-wtrace] AW@%llu addr=%08x -> W@%llu data=%08x strb=%x\n",
+                        (unsigned long long)aw.cycle, aw.addr,
+                        (unsigned long long)w.cycle, w.data, w.strb);
+                }
+            }
+            if (b_hs) {
+                if (axi_trace_bq.empty()) {
+                    std::fprintf(stderr,
+                        "tb: [axi-wtrace] orphan B@%llu resp=%u (no accepted AW/W)\n",
+                        (unsigned long long)cycle, (unsigned)top->m_axi_bresp);
+                } else {
+                    const AxiTraceTxn txn = axi_trace_bq.front(); axi_trace_bq.pop_front();
+                    if (txn.selected) {
+                        std::fprintf(stderr,
+                            "tb: [axi-wtrace] B@%llu addr=%08x resp=%u (AW@%llu W@%llu)\n",
+                            (unsigned long long)cycle, txn.addr, (unsigned)top->m_axi_bresp,
+                            (unsigned long long)txn.aw_cycle, (unsigned long long)txn.w_cycle);
+                    }
+                }
+            }
+        }
+        if (axi_profile && top->rst_n) {
+            // Sample literal valid/ready pairs, not the BFM-state-derived axhs
+            // values used to advance the behavioral slave.
+            const bool ar_hs = (bool)top->m_axi_arvalid && (bool)top->m_axi_arready;
+            const bool r_hs  = (bool)top->m_axi_rvalid  && (bool)top->m_axi_rready;
+            const bool aw_hs = (bool)top->m_axi_awvalid && (bool)top->m_axi_awready;
+            const bool w_hs  = (bool)top->m_axi_wvalid  && (bool)top->m_axi_wready;
+            const bool b_hs  = (bool)top->m_axi_bvalid  && (bool)top->m_axi_bready;
+            const bool rlast_hs = r_hs && (bool)top->m_axi_rlast;
+
+            // Match fpga/ven_axi_read_profiler.sv: account a currently active
+            // read before consuming this edge. The BFM permits one outstanding
+            // read, so this state is unambiguous.
+            if (axi_profile_stats.read_active) {
+                axi_profile_stats.busy_cycles++;
+                if (!axi_profile_stats.first_r_seen) axi_profile_stats.first_wait_cycles++;
+                if (!top->m_axi_rvalid) axi_profile_stats.rvalid_gap_cycles++;
+                else if (!top->m_axi_rready) axi_profile_stats.rready_stall_cycles++;
+            }
+            if (ar_hs) {
+                if (axi_profile_stats.read_active) axi_profile_stats.overlapping_ar++;
+                axi_profile_stats.ar_hs++;
+                axi_profile_stats.req_beats += (uint64_t)top->m_axi_arlen + 1;
+                if ((uint32_t)top->m_axi_arlen == 7 && (uint32_t)top->m_axi_arsize == 2)
+                    axi_profile_stats.line_ar_hs++;
+                axi_profile_stats.read_active = true;
+                axi_profile_stats.first_r_seen = false;
+            }
+            if (r_hs) {
+                axi_profile_stats.r_hs++;
+                if (!axi_profile_stats.read_active) axi_profile_stats.orphan_r++;
+                else {
+                    axi_profile_stats.first_r_seen = true;
+                    if (rlast_hs) {
+                        axi_profile_stats.rlast_hs++;
+                        axi_profile_stats.read_active = false;
+                    }
+                }
+            }
+            if (aw_hs) axi_profile_stats.aw_hs++;
+            if (w_hs)  axi_profile_stats.w_hs++;
+            if (b_hs)  axi_profile_stats.b_hs++;
+        }
+        if (axi_write_hist && top->rst_n && (bool)top->m_axi_awvalid &&
+            (bool)top->m_axi_awready) {
+            const uint32_t write_addr = (uint32_t)top->m_axi_awaddr - AXI_REMAP;
+            axi_write_hist_bins[write_addr >> axi_write_hist_shift]++;
+            axi_write_locality.aw++;
+            if (axi_write_locality.have_prev) {
+                if ((axi_write_locality.prev & ~7u) == (write_addr & ~7u))
+                    axi_write_locality.same_qword++;
+                if ((axi_write_locality.prev & ~31u) == (write_addr & ~31u))
+                    axi_write_locality.same_line++;
+                if (write_addr == axi_write_locality.prev + 4u)
+                    axi_write_locality.next_dword++;
+                if (write_addr == axi_write_locality.prev + 8u)
+                    axi_write_locality.next_qword++;
+            }
+            axi_write_locality.prev = write_addr;
+            axi_write_locality.have_prev = true;
+        }
     };
     auto axi_advance = [&]() {
-        if (!top->rst_n) { axr=0; axw=0; axr_lat=0; axw_lat=0; wpost_q.clear(); return; }
+        if (!top->rst_n) { axr=0; axw=0; axr_lat=0; axw_lat=0; axr_wrap=false; wpost_q.clear(); return; }
         // drain posted writes whose visibility delay has elapsed (apply to backing).
         if (!wpost_q.empty()) {
             size_t k = 0;
@@ -843,7 +1072,13 @@ int main(int argc, char** argv) {
             wpost_q.resize(k);
         }
         if (axr==0) { if (axhs.ar) {
-                          axr_addr=axhs.araddr; axr_cnt=axhs.arlen; axr_size=axhs.arsize; axr=1;
+                          axr_addr=axhs.araddr; axr_cnt=axhs.arlen; axr_size=axhs.arsize;
+                          // ven_axi_master emits WRAP8 only for 4-byte cache-line
+                          // fills that begin at a nonzero critical word.  Treating
+                          // it as INCR silently placed words 0..5 from the following
+                          // line into the cache and invalidated all such full-core
+                          // differentials.
+                          axr_wrap=(axhs.arburst == 2u); axr=1;
                           // first-beat (AR->first R) latency: fixed AXI_RLAT, plus a
                           // random 0..AXI_RFIRST under the faithful model (real DDR
                           // open-row vs precharge variance).
@@ -853,7 +1088,11 @@ int main(int argc, char** argv) {
                       else if (axhs.r)  {                        // beat accepted (rvalid&&rready)
                           if (axr_cnt==0) axr=0;
                           else {
-                              axr_cnt--; axr_addr+=4;
+                              axr_cnt--;
+                              if (axr_wrap && ((axr_addr & 0x1cu) == 0x1cu))
+                                  axr_addr &= ~0x1fu;
+                              else
+                                  axr_addr += 4;
                               // inter-beat latency: fixed AXI_RLAT, plus under the
                               // faithful model a random gap (RVALID deasserts mid-burst)
                               // with probability AXI_RGAPPROB, size 1..AXI_RGAPMAX.
@@ -903,12 +1142,15 @@ int main(int argc, char** argv) {
     // The mem_* protocol is single-beat / combinational-OK at M0: we compute
     // (rdata, ack) from the core's current bus outputs, drive them back, and
     // re-eval so the same clock edge sees the response. (docs/rtl-interface §3)
-    auto service_bus = [&]() {
+    // `clock_tick` is asserted only for the final service immediately before a
+    // rising edge.  The zero-latency M0 bus stays combinational; optional test
+    // latency advances only on that explicit core-clock boundary.
+    auto service_bus = [&](bool clock_tick = false) {
         uint32_t rdata = 0;
         bool ack = false;
         mem.service((bool)top->mem_req, (bool)top->mem_we,
                     (uint32_t)top->mem_addr, (uint32_t)top->mem_wdata,
-                    (uint8_t)top->mem_wstrb, &rdata, &ack);
+                    (uint8_t)top->mem_wstrb, clock_tick, &rdata, &ack);
         top->mem_rdata = rdata;
         top->mem_ack   = ack;
         // VEN_BWATCH: BFM-side store/load tracer (env-gated, inert by default).
@@ -1123,6 +1365,16 @@ int main(int argc, char** argv) {
 #endif
     uint64_t cycles = 0;           // clock count (declared here so service_proxy,
                                    // M14 emulate clock, can read it by reference)
+    UopProbe uop_probe;
+    FpOverlapProbe fp_overlap_probe;
+    IrqInjectProbe irq_inject_probe;
+    MemoryGeometryProbe memory_geometry_probe;
+#ifdef VEN_MEM_GEOMETRY
+    if (memory_geometry_probe.enabled)
+        memory_geometry_probe.configure(ventium_memory_geometry_model_states());
+#else
+    memory_geometry_probe.unsupported();
+#endif
     static const bool kSyscallProbe = (std::getenv("TB_SYSCALL_PROBE") != nullptr);
     auto service_proxy = [&]() {
         if (!proxy_mode) return;
@@ -1347,6 +1599,7 @@ int main(int argc, char** argv) {
         service_bus();
         service_io();
         top->eval();
+        mem.finish_clock_tick();
 #ifdef VEN_L1_AXI
         axi_advance();               // advance the AXI slave on the rising edge
 #endif
@@ -1384,6 +1637,7 @@ int main(int argc, char** argv) {
     // route to the hardware debug bundle.
     uint32_t dbg_stop_eip = 0;
     bool     dbg_stop_valid = false;
+    DebugBreakpointDrain dbg_breakpoint_drain;
     if (args.dbg_step_n) top->dbg_halt_req = 1;                  // park at the first boundary
     if (args.dbg_bp)   { top->dbg_bp_en = 1; top->dbg_bp_addr = args.dbg_bp; }
 #endif
@@ -1520,7 +1774,17 @@ int main(int argc, char** argv) {
                 top->dbg_step = 1; dbg_step_inflight = true; dbg_steps_done++;
             }
         }
-        if (args.dbg_bp && top->dbg_halted) {
+        if (args.dbg_bp) {
+          const auto action = dbg_breakpoint_drain.observe(*top, cycles);
+          if (action == DebugBreakpointDrain::Action::Stop) {
+            std::fprintf(stderr, "tb: [dbg-bp] retirement report drained; architectural scan unchanged\n");
+            break;
+          }
+          if (action == DebugBreakpointDrain::Action::Drain) {
+            // Keep issue parked while the ordinary next edge reports the
+            // already-committed instruction through DPI. Never grant a step.
+            top->dbg_halt_req = 1;
+            top->dbg_step = 0;
             top->dbg_arch_sel = 8; top->eval();
             dbg_stop_eip = (uint32_t)top->dbg_arch_data;
             top->dbg_arch_sel = 0; top->eval();
@@ -1530,12 +1794,10 @@ int main(int argc, char** argv) {
                          "last-retired=%08x FSM=0x%02x\n",
                          dbg_stop_eip, args.dbg_bp, (uint32_t)top->dbg_eip,
                          (unsigned)top->dbg_state);
-            // A PC breakpoint is an explicit terminal diagnostic request.  Do
-            // not fall through to the generic no-retire timeout: long x87
-            // state restores can legitimately exceed that timeout before a
-            // later breakpoint, and once parked the old loop only printed the
-            // same line every clock.  Ordinary runs and --dbg-step are inert.
-            break;
+            // The next loop observes exactly one drained clock and checks all
+            // 75 architectural scan words before stopping. Ordinary runs and
+            // --dbg-step without a breakpoint never enter this path.
+          }
         }
 #endif
 
@@ -1595,6 +1857,7 @@ int main(int argc, char** argv) {
 
         // -- clk low phase: combinational settle + serve bus --
         top->clk = 0;
+        irq_inject_probe.drive(*top, cycles, 0);
 #ifdef VEN_L1_AXI
         // #35: consume a pending external-invalidation request as a one-cycle
         // flush_all pulse. service_proxy() applied a MemModel write LAST clock
@@ -1654,17 +1917,27 @@ int main(int argc, char** argv) {
         // at cyc>=1. Two retirements in this same eval (a paired issue) read the
         // same value and so share cyc. Cheap + harmless in func mode.
         trace.set_clock(cycles + 1);
+        if (uop_probe.enabled) uop_probe.sample(top->rootp, cycles + 1, 0);
+        if (fp_overlap_probe.enabled) fp_overlap_probe.sample(*top->rootp, 0);
+        irq_inject_probe.pre_edge(*top, cycles + 1, 0);
+#ifdef VEN_MEM_GEOMETRY
+        if (memory_geometry_probe.enabled)
+            memory_geometry_probe.pre_edge(
+                memory_geometry_sample(*top, *top->rootp, cycles + 1));
+#endif
 
         // -- clk high phase: rising edge; vtm_retire fires inside eval() --
         top->clk = 1;
 #ifdef VEN_L1_AXI
         axi_capture();        // snapshot the PRE-edge AXI handshakes (DUT + slave state)
 #endif
-        service_bus();
+        service_bus(true);
         service_proxy(); service_fptrap();
         service_io();
         top->eval();          // <- DPI vtm_retire calls happen here; the core
                               //    latches the proxied syscall effects here too
+        mem.finish_clock_tick();
+        irq_inject_probe.post_edge(*top, 0);
 #ifdef VEN_XOVER
         // VEN_FAULT_EA: cycle-precise #PF forensic. walk_pf is high for the cycle the
         // page-walk raises vec=14 (CR2<=walk_lin), BEFORE any handler runs — so this
@@ -1791,7 +2064,8 @@ int main(int argc, char** argv) {
             static uint64_t plo = std::getenv("VEN_PROBE_LO") ? strtoull(std::getenv("VEN_PROBE_LO"),0,0) : 0;
             static uint64_t phi = std::getenv("VEN_PROBE_HI") ? strtoull(std::getenv("VEN_PROBE_HI"),0,0) : ~0ull;
             static long probe_n = 0;
-            if ((unsigned)top->dbg_state == 2 && (unsigned)top->dbg_cs == probe_cs &&
+            if ((unsigned)top->dbg_state == kDbgStateDecode &&
+                (unsigned)top->dbg_cs == probe_cs &&
                 trace.retired() >= plo && trace.retired() <= phi && probe_n++ < 400) {
                 ventium::XoverArch px; ventium::xover_extract(top, px);
                 std::fprintf(stderr, "tb: [XPROBE] ret=%llu cyc=%llu cs=%04x dbg_eip=%08x arch_eip=%08x delta=%d cr0=%08x\n",
@@ -1808,7 +2082,7 @@ int main(int argc, char** argv) {
         // the pipeline is empty (this in-order core retires before re-entering DECODE).
         bool xsave_gate = !args.xover_save_prefix.empty() && args.xover_at_retire &&
             trace.retired() >= args.xover_at_retire &&
-            (unsigned)top->dbg_state == 2 /*S_DECODE*/ &&
+            (unsigned)top->dbg_state == kDbgStateDecode &&
             (args.xover_at_cs < 0 || (unsigned)top->dbg_cs == (unsigned)args.xover_at_cs);
         // --xover-at-eip: also require the ARCHITECTURAL next-fetch eip == target.
         // Lets us pin the snapshot to a specific instruction boundary (e.g. the
@@ -1951,59 +2225,13 @@ int main(int argc, char** argv) {
             }
         }
 #endif
-        // Log every real-mode INT (vector + AX at entry). init_call_intr patches
-        // `int 0`->`int N` via SMC; if Ventium's icache serves a stale opcode in the
-        // kernel (INIT_TEXT) context, the WRONG vector fires -> init_readdasd's AH=15h
-        // DASD probe never runs as int 0x13 -> DF_FIXED dropped. S_RMINT_RD=state 32.
-        {
-            static unsigned prev_rmst = 0;
-            static long int_log_count = 0;
-            static long idle28_count = 0;
-            unsigned dsn = (unsigned)top->dbg_state;
-            if (dsn == 32 && prev_rmst != 32) {
-                uint32_t ax = ventium::g_last_arch.gpr[0];
-                unsigned vec = (unsigned)top->dbg_int_vec;
-                if (int_log_count++ < 4000) {   // cap the [INT] spam (idle loop floods it)
-                    std::fprintf(stderr, "tb: [INT] vec=0x%02x CS:EIP=%04x:%08x AX=%04x (cyc=%llu)\n",
-                        vec, (unsigned)top->dbg_cs, (uint32_t)top->dbg_eip,
-                        (unsigned)(ax & 0xffff), (unsigned long long)cycles);
-                    std::fflush(stderr);
-                }
-                // F4A: INT 10h teletype (AH=0Eh) — capture AL UNCAPPED. The VGA BIOS's
-                // writes to video RAM don't land in the sim, but the console output IS
-                // visible via this teletype stream (FreeDOS/Quake printf -> INT10h/0Eh).
-                if (vec == 0x10 && ((ax >> 8) & 0xff) == 0x0e)
-                    std::fprintf(stderr, "tbCON %02x\n", (unsigned)(ax & 0xff));
-                // F4A: INT 0x28 = COMMAND.COM DOS-idle => Quake has exited to the C:\
-                // prompt. After enough idle ticks, dump the screen+memory (clean-exit
-                // path below) so the failure/error banner is captured, then stop.
-                if (vec == 0x28 && ++idle28_count >= 300) {
-                    std::fprintf(stderr, "tb: DOS-IDLE (300x INT 0x28) @cycle %llu retired %llu -- Quake exited to DOS; dumping+stopping\n",
-                        (unsigned long long)cycles, (unsigned long long)trace.retired());
-                    break;
-                }
-            }
-            prev_rmst = dsn;
-        }
-        // task #102: PM gate-delivery trace. The [INT] logger above only catches
-        // REAL-mode S_RMINT_RD; PROTECTED-mode interrupt/exception delivery walks
-        // S_INT_GATE (state 36) instead, so a #DE/#GP/#UD/IRQ reaching go32's PM
-        // handler is otherwise invisible. Log the vector + faulting CS:EIP at the
-        // S_INT_GATE rising entry. Env-gated (VEN_PMGATE_LOG) so it is OFF by
-        // default and adds zero output to existing runs.
-        if (std::getenv("VEN_PMGATE_LOG")) {
-            static unsigned prev_igst = 0;
-            static long pmgate_count = 0;
-            unsigned igst = (unsigned)top->dbg_state;
-            if (igst == 36 && prev_igst != 36 && pmgate_count++ < 4000) {
-                std::fprintf(stderr, "tb: [PMGATE] vec=0x%02x cs=%04x eip=%08x cr0=%08x (cyc=%llu)\n",
-                    (unsigned)top->dbg_int_vec, (unsigned)top->dbg_cs,
-                    (uint32_t)top->dbg_eip, (uint32_t)top->dbg_cr0,
-                    (unsigned long long)cycles);
-                std::fflush(stderr);
-            }
-            prev_igst = igst;
-        }
+        // Do not decode S_RMINT_RD / S_INT_GATE from a hard-coded numeric
+        // dbg_state here.  state_e inserts feature-selected states before both
+        // identifiers, and the C++ preprocessor does not see the RTL's +define+
+        // set.  The old numeric [INT]/[PMGATE] monitors therefore misidentified
+        // ordinary states in full-P5 builds and could take an incorrect DOS-idle
+        // exit.  Keep the raw state ID in the final debug report; a named decoder
+        // must be generated from the exact elaborated state_e definition.
         // F4A: capture fault deliveries (esp. the #DE vec 0 that aborts Quake). When
         // dbg_fault_pc changes the core just raised a fault; dbg_eip/ibuf still point
         // at the faulting instruction, dbg_int_vec = the vector. Logs cs:eip:ibuf:vec.
@@ -2164,21 +2392,12 @@ int main(int argc, char** argv) {
     }
 
 #ifdef VEN_DBG_CORE
-    // VEN_DBG_CORE: print the core debug bundle at the stop point. On a freeze this
-    // names WHERE + WHY the core stopped (FSM micro-state, mode, last fault) and the
-    // committed state of the last retired instruction — what previously took a
-    // faithful-sim build to recover. The vtrace is the per-PC trail alongside it.
+    // VEN_DBG_CORE: print the core debug bundle at the stop point. The raw FSM
+    // encoding, mode, fault state, and committed architectural state identify a
+    // freeze without pretending a feature-dependent numeric enum has a universal
+    // C++ name. The vtrace is the per-PC trail alongside it.
     {
-        static const char* SN[] = {
-            "RESET","FETCH","DECODE","LOAD","LOAD2","EXEC","STORE","USEQ","HALT","FLOAD",
-            "FEXEC","FSTORE","FP_BUSY","DIV_BUSY","BCD_BUSY","FBLD_BUSY","TRSC_BUSY",
-            "FEXEC_EX","SYSCALL_WAIT","FENV_ST","FENV_LD","IO","INS","PF","PIPE",
-            "F00F_HANG","LGDT","SEGLD","LJMP","LCALL","RETF","SGDT","RMINT_RD",
-            "RMINT_PUSH","RMIRET","HLTWAIT","WALK","INT_GATE","INT_CS","INT_PUSH","IRET",
-            "INT_CS_RET","LTR","INT_TSS","INT_SS","IRET_SS","TSW_SAVE","TSW_READ",
-            "TSW_SEG","TSW_BUSY","SMI_SAVE","RSM","DB_EXTRA" };
         unsigned s = (unsigned)top->dbg_state;
-        const char* sn = (s < sizeof(SN)/sizeof(SN[0])) ? SN[s] : "?";
         unsigned fcw = (unsigned)top->dbg_fctrl;
         unsigned pc  = (fcw >> 8) & 3;
         const char* pcs = (pc==3)?"64/ext":(pc==2)?"53/dbl":(pc==0)?"24/sgl":"rsvd";
@@ -2186,12 +2405,12 @@ int main(int argc, char** argv) {
             std::fprintf(stderr, "tb: [VEN_DBG] PARKED_EIP=%08x\n", dbg_stop_eip);
         std::fprintf(stderr,
             "tb: [VEN_DBG] EIP=%08x CS=%04x ESP=%08x EFLAGS=%08x\n"
-            "tb: [VEN_DBG] FSM=S_%s(0x%02x) mode=%s%s vec=0x%02x fault_pc=%08x CR0=%08x halted=%d\n"
+            "tb: [VEN_DBG] FSM=0x%02x mode=%s%s vec=0x%02x fault_pc=%08x CR0=%08x halted=%d\n"
             "tb: [VEN_DBG] FCTRL=%04x PC=%u(%s) RC=%u  q_fxop=%u\n"
             "tb: [VEN_DBG] IBUF=%016llx (8 bytes at committed EIP, little-endian)\n"
             "tb: [VEN_DBG] GDTR=%08x CS.D=%d\n",
             (uint32_t)top->dbg_eip, (unsigned)top->dbg_cs, (uint32_t)top->dbg_esp,
-            (uint32_t)top->dbg_eflags, sn, s,
+            (uint32_t)top->dbg_eflags, s,
             (top->dbg_cr0 & 1u) ? "PE" : "real", (top->dbg_cr0 & 0x80000000u) ? "+PG" : "",
             (unsigned)top->dbg_int_vec, (uint32_t)top->dbg_fault_pc, (uint32_t)top->dbg_cr0,
             (int)top->dbg_halted,
@@ -2378,6 +2597,15 @@ int main(int argc, char** argv) {
         }
     }
 
+    // A changing request during an explicitly delayed single-beat transfer is
+    // a testbench-visible protocol failure, even if a later guest self-check
+    // happens to reach an exit port.  Do not let latency experiments turn that
+    // into a plausible-looking trace.
+    if (mem.latency_protocol_error()) {
+        std::fprintf(stderr, "tb: FAIL: delayed mem_* request changed before acknowledgement\n");
+        exit_code = 2;
+    }
+
     // ---- finalize ---------------------------------------------------------
     top->final();
 #if VM_TRACE
@@ -2403,6 +2631,94 @@ int main(int argc, char** argv) {
         (unsigned long long)cycles,
         (unsigned long long)mem.reads(),
         (unsigned long long)mem.writes());
+#ifdef VEN_L1_AXI
+    if (axi_profile) {
+        // One outstanding read is permitted by this behavioral BFM. A completed
+        // burst therefore has one RLAST per AR. Do not turn a truncated run or a
+        // future overlapping-read implementation into a plausible-looking average.
+        const uint64_t nonlast_r = axi_profile_stats.r_hs - axi_profile_stats.rlast_hs;
+        const uint64_t occupied = axi_profile_stats.first_wait_cycles + nonlast_r;
+        const uint64_t nontransfer_cycles =
+            axi_profile_stats.busy_cycles > occupied ?
+                axi_profile_stats.busy_cycles - occupied : 0;
+        const bool profile_clean = !axi_profile_stats.read_active &&
+            axi_profile_stats.ar_hs == axi_profile_stats.rlast_hs &&
+            axi_profile_stats.r_hs == axi_profile_stats.req_beats &&
+            axi_profile_stats.overlapping_ar == 0 && axi_profile_stats.orphan_r == 0;
+        std::fprintf(stderr,
+            "tb: [AXI_PROFILE] read ar=%llu line-ar=%llu requested=%llu r=%llu "
+            "rlast=%llu incomplete=%u overlap=%llu orphan-r=%llu valid=%u\n",
+            (unsigned long long)axi_profile_stats.ar_hs,
+            (unsigned long long)axi_profile_stats.line_ar_hs,
+            (unsigned long long)axi_profile_stats.req_beats,
+            (unsigned long long)axi_profile_stats.r_hs,
+            (unsigned long long)axi_profile_stats.rlast_hs,
+            axi_profile_stats.read_active ? 1u : 0u,
+            (unsigned long long)axi_profile_stats.overlapping_ar,
+            (unsigned long long)axi_profile_stats.orphan_r, profile_clean ? 1u : 0u);
+        if (profile_clean && axi_profile_stats.rlast_hs) {
+            const double completed = (double)axi_profile_stats.rlast_hs;
+            // First-wait reaches the first ACCEPTED R beat, so it is a complete
+            // AR-to-first-R handshake interval, not a pure DDR latency. Likewise
+            // rvalid-low includes the initial wait; the derived non-transfer
+            // bucket is deliberately named without claiming it is only a gap.
+            std::fprintf(stderr,
+                "tb: [AXI_PROFILE] read avg-busy=%.2f ar-to-first-r-hs=%.2f "
+                "nontransfer=%.2f rvalid-low-total=%llu rready-stall=%llu\n",
+                (double)axi_profile_stats.busy_cycles / completed,
+                (double)axi_profile_stats.first_wait_cycles / completed,
+                (double)nontransfer_cycles / completed,
+                (unsigned long long)axi_profile_stats.rvalid_gap_cycles,
+                (unsigned long long)axi_profile_stats.rready_stall_cycles);
+        } else if (axi_profile_stats.ar_hs) {
+            std::fprintf(stderr,
+                "tb: [AXI_PROFILE] read averages INVALID (partial or malformed stream)\n");
+        } else {
+            std::fprintf(stderr, "tb: [AXI_PROFILE] read averages N/A (no reads)\n");
+        }
+        std::fprintf(stderr,
+            "tb: [AXI_PROFILE] write aw=%llu w=%llu b=%llu\n",
+            (unsigned long long)axi_profile_stats.aw_hs,
+            (unsigned long long)axi_profile_stats.w_hs,
+            (unsigned long long)axi_profile_stats.b_hs);
+    }
+    if (axi_write_hist) {
+        std::vector<std::pair<uint32_t, uint64_t>> bins;
+        uint64_t total = 0;
+        bins.reserve(axi_write_hist_bins.size());
+        for (const auto& kv : axi_write_hist_bins) {
+            bins.push_back(kv);
+            total += kv.second;
+        }
+        std::sort(bins.begin(), bins.end(),
+                  [](const std::pair<uint32_t, uint64_t>& a,
+                     const std::pair<uint32_t, uint64_t>& b) {
+                        return (a.second != b.second) ? (a.second > b.second)
+                                                      : (a.first < b.first);
+                  });
+        const size_t shown = std::min<size_t>(32, bins.size());
+        std::fprintf(stderr,
+            "tb: [AXI_WRITE_HIST] aw=%llu unique-bins=%zu shift=%u (top %zu)\n",
+            (unsigned long long)total, bins.size(), axi_write_hist_shift, shown);
+        const uint64_t transitions = total > 0 ? total - 1 : 0;
+        std::fprintf(stderr,
+            "tb: [AXI_WRITE_HIST] locality same-8B=%llu same-32B=%llu "
+            "next-4B=%llu next-8B=%llu / transitions=%llu\n",
+            (unsigned long long)axi_write_locality.same_qword,
+            (unsigned long long)axi_write_locality.same_line,
+            (unsigned long long)axi_write_locality.next_dword,
+            (unsigned long long)axi_write_locality.next_qword,
+            (unsigned long long)transitions);
+        for (size_t i = 0; i < shown; ++i) {
+            const uint32_t first = bins[i].first << axi_write_hist_shift;
+            const uint32_t last = first + ((1u << axi_write_hist_shift) - 1u);
+            std::fprintf(stderr,
+                "tb: [AXI_WRITE_HIST] #%zu %08x-%08x aw=%llu (%.2f%%)\n",
+                i + 1, first, last, (unsigned long long)bins[i].second,
+                total ? 100.0 * (double)bins[i].second / (double)total : 0.0);
+        }
+    }
+#endif
     if (proxy_mode && !emu) {
         std::fprintf(stderr,
             "tb: M7.1 proxy: replayed %llu / %zu int-0x80 syscalls\n",
@@ -2450,6 +2766,9 @@ int main(int argc, char** argv) {
     // make-verify corpus (those tests never touch port 0xf4 / never set io_exit).
     if (io_exit && exit_code == 0) exit_code = ((int)io_exit_al << 1) | 1;
 
+    irq_inject_probe.finish();
+    memory_geometry_probe.finish();
+    ventium::fp_trace_finish();
     ventium::g_trace = nullptr;
     trace.close();
     delete top;

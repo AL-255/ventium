@@ -47,7 +47,7 @@ public:
     long load_image(const std::string& path, uint32_t load_addr);
 
     // ---- the bus-functional model -----------------------------------------
-    // Service one bus request. Called by the testbench each clock with the
+    // Service one bus request. Called by the testbench while it settles the
     // core's current bus outputs; returns (rdata, ack). Single-beat: at M0 we
     // ack every well-formed request immediately (combinational-OK, §3).
     //   req   : mem_req
@@ -58,8 +58,18 @@ public:
     // out:
     //   rdata : value to drive on mem_rdata (valid with ack)
     //   ack   : value to drive on mem_ack
+    // `clock_tick` is true exactly once, immediately before each rising edge.
+    // It is irrelevant at zero configured latency.  With a latency enabled it
+    // is the only call allowed to start/progress a delayed transaction: the TB
+    // calls service several times per clock for combinational settling, which
+    // must never turn one programmed core-cycle delay into several decrements.
     void service(bool req, bool we, uint32_t addr, uint32_t wdata,
-                 uint8_t wstrb, uint32_t* rdata, bool* ack);
+                 uint8_t wstrb, bool clock_tick, uint32_t* rdata, bool* ack);
+
+    // Called just after the rising-edge evaluation that consumed a delayed
+    // response.  It removes the pulse before the next combinational settle so
+    // an old acknowledgement cannot be observed by a newly selected request.
+    void finish_clock_tick() { lat_resp_valid_ = false; }
 
     // ---- task #52: OPTIONAL access latency ---------------------------------
     // The model above acks in the SAME cycle, always. That makes the cycle gate's
@@ -78,9 +88,21 @@ public:
     // CALIBRATE THESE FROM HARDWARE (perf counters at 0x100-0x150), do not guess.
     void set_latency(unsigned read_cycles, unsigned write_cycles) {
         rd_lat_ = read_cycles; wr_lat_ = write_cycles;
+        lat_pending_ = false; lat_wait_ = 0;
+        lat_resp_valid_ = false; lat_resp_data_ = 0;
+        lat_protocol_error_ = false;
+    }
+    // Optional bus-visible physical-address filter for a targeted delay probe.
+    // If present, only accesses satisfying `(addr & mask) == (match & mask)`
+    // receive their configured read/write latency; all others retain their
+    // normal combinational response.  This lets a data-path regression avoid
+    // accidentally testing a separately modeled instruction-fill interface.
+    void set_latency_match(uint32_t match, uint32_t mask) {
+        lat_match_en_ = true; lat_match_ = match; lat_match_mask_ = mask;
     }
     unsigned read_latency()  const { return rd_lat_; }
     unsigned write_latency() const { return wr_lat_; }
+    bool latency_protocol_error() const { return lat_protocol_error_; }
 
     // ---- checkpoint snapshot / restore (M14 periodic-state replay) ---------
     // Dump/load every mapped page (page number + 4 KiB) to/from an open binary
@@ -95,10 +117,21 @@ public:
     uint64_t writes() const { return writes_; }
 
 private:
-    // task #52 latency state. wait_ counts down the stall for the request currently
-    // held off. Default 0 => ack in-cycle, byte-identical to the previous model.
+    // task #52 latency state. A delayed request is captured at one explicit
+    // core-clock boundary, then must remain stable until its response.  The
+    // default no-latency path never touches these fields, preserving its old
+    // combinational semantics (including its repeated settle calls).
     unsigned rd_lat_ = 0, wr_lat_ = 0;
-    unsigned wait_   = 0;
+    bool     lat_match_en_ = false;
+    uint32_t lat_match_ = 0, lat_match_mask_ = 0;
+    bool     lat_pending_ = false;
+    bool     lat_we_ = false;
+    uint32_t lat_addr_ = 0, lat_wdata_ = 0;
+    uint8_t  lat_wstrb_ = 0;
+    unsigned lat_wait_ = 0;
+    bool     lat_resp_valid_ = false;
+    uint32_t lat_resp_data_ = 0;
+    bool     lat_protocol_error_ = false;
 
     struct Page { uint8_t b[PAGE_SIZE] = {0}; };
 

@@ -8,6 +8,10 @@
 //   S_FETCH (16-byte fetch window), S_DECODE (prefix/length/operand decode +
 //   the SYS_* -> S_LGDT/S_SEGLD/S_LJMP/S_LTR routing and load/exec dispatch).
         S_FETCH: begin
+          // One-shot short descriptor state is consumed on every S_FETCH entry,
+          // whether the tagged-cache recheck succeeds or falls through to the
+          // original bus fetch below.
+          sfetch_short_len_q <= 4'd0;
 `ifdef VEN_UOPCACHE
           // Consume the overflow-only shortcut request even if its tagged-buffer
           // recheck fails below. In that case this S_FETCH immediately resumes the
@@ -19,11 +23,33 @@
           sfetch_resident_q <= 1'b0;
 `endif
           // task #54: the whole 16-byte window is already in the I-cache -> take it
-          // in ONE clock instead of four bus reads. sfetch_fast (core.sv) is the
-          // residency predicate; the bus driver suppresses mem_req on the same
-          // condition so this issues no transaction at all.
-          if (sfetch_fast || sfetch_uop_fast || sfetch_resident_fast) begin
-            for (int i = 0; i < IWORDS*4; i++) ibuf[i] <= ic_byte(flin + 32'(i));
+          // in ONE clock instead of four bus reads.  The narrow short descriptor
+          // is different: only its two verified instruction bytes are copied and
+          // the suffix is explicitly zeroed before the ordinary slow decoder runs.
+          // The bus driver uses the same predicate, so this issues no transaction.
+`ifdef VEN_UOP_SLOW_LEN_HINT
+          // CPU-store snoops depend on the bus driver's write output. Using
+          // them in sfetch_short_fast (which blanks that same bus block) would
+          // form a combinational loop. Veto only the sequential capture: hold
+          // S_FETCH with no ibuf write, consume the one-shot above, and retry
+          // through the established fetch path after invalidation takes effect.
+          if (sfetch_short_fast && (icsnp_v1 || icsnp_v2)) begin
+          end else
+`endif
+          if (sfetch_short_fast || sfetch_fast || sfetch_uop_fast || sfetch_resident_fast) begin
+            for (int i = 0; i < IWORDS*4; i++) begin
+              if (sfetch_short_fast && (
+`ifdef VEN_UOP_SLOW_LEN_HINT
+                  (i >= int'(sfetch_short_len_q))
+`else
+                  (i >= 2)
+`ifdef VEN_UOP_FWAIT_FETCH
+                  || ((i == 1) && sfetch_short_len_q == 4'd1)
+`endif
+`endif
+                  )) ibuf[i] <= 8'd0;
+              else                                ibuf[i] <= ic_byte(flin + 32'(i));
+            end
             fetch_word <= 3'd0;
             state      <= S_DECODE;
           end else if (mem_ack) begin
@@ -468,8 +494,12 @@
               // decoder gap into a mysterious wrong answer instead of an obvious stop.
               else if (sys_mode)
                 start_fault(8'd6, 1'b0, 32'd0, eip);
-              else
-                state<=S_HALT; `ifdef VEN_DBG_CORE int_vec<=8'hE6; `endif
+              else begin
+                state <= S_HALT;
+`ifdef VEN_DBG_CORE
+                int_vec <= 8'hE6;
+`endif
+              end
             end
           end
           // REVIEW2 H-23: CR0.EM / CR0.TS must trap x87 execution with #NM (vector 7).
@@ -808,19 +838,49 @@
                 else begin state<=S_HALT; `ifdef VEN_DBG_CORE int_vec<=8'hE8; `endif end
               end
               // M9.5 — SGDT/SIDT: 2-beat store of the GDTR/IDTR pseudo-descriptor.
-              // Decode already gated on !paging_on; mode-agnostic otherwise.
-              SYS_SGDT, SYS_SIDT: begin seg_step<=1'b0; state<=S_SGDT; end
+              // Validate the complete destination before the first store.
+              SYS_SGDT, SYS_SIDT: begin
+                seg_step<=1'b0; sgdt_probe_q<=1'b1; sgdt_probe_second<=1'b0;
+                state<=S_SGDT;
+              end
               default: state<=S_EXEC;  // MOV CRn to/from, MOV/STR sreg: no fetch
             endcase
           end
           else if (d_kind==K_STR) begin
-            // REP with ECX==0: degenerate single no-op record (advance EIP).
-            if ((pfx_rep!=2'd0) && (gpr_o[R_ECX]==32'd0)) state<=S_EXEC; // handled as no-op
+            // REP with its address-size-selected count equal to zero is a
+            // degenerate no-op record (advance EIP).  Test d_cnt16 here,
+            // rather than full ECX: S_LOAD must not perform a source access
+            // for 67 F3 A4/A5 with CX==0 and ECX[31:16]!=0.
+            if ((pfx_rep!=2'd0) &&
+                (d_cnt16 ? (gpr_o[R_ECX][15:0]==16'd0)
+                         : (gpr_o[R_ECX]==32'd0))) state<=S_EXEC;
             else if (d_mem_read) state<=S_LOAD;   // movs/lods/scas/cmps load first
             else state<=S_EXEC;                    // stos stores directly
           end
           else if (d_mem_read || d_is_pop ||
                    (d_kind==K_STKMISC && (d_sm==SM_LEAVE || d_sm==SM_POPF)))
             state<=S_LOAD;
+`ifdef VEN_STORE_DISPATCH
+          // These fully decoded stores have NO S_EXEC side effect: MOV's
+          // memory-destination GPR arm is empty, and near CALLREL writes ESP
+          // only at the final S_STORE ACK. Neither writes flags. The q_* NBA
+          // capture above supplies the same width/high-byte/EA/immediate and
+          // q_pc+q_len return PC before the existing store datapath is used.
+          // Keep every boundary/fault/system check above this shortcut. S_EXEC
+          // is not a debug/event boundary; a halt arriving after dispatch still
+          // drains this instruction through S_STORE before the next S_PIPE.
+          // Reject push/pop, segment-register stores/loads, LOCK and all RMW;
+          // plain 8/16/32-bit register/immediate/moffs MOVs retain their normal
+          // segment, page-crossing probe, watchpoint and store-ACK machinery.
+          else if (d_mem_write && !d_mem_read && !d_writes_reg && !d_writes_flags &&
+                   !d_lock && !d_is_push && !d_is_pop && !d_is_lea && !d_xlat &&
+                   !d_seg_load && !d_store_sreg && !d_push_sreg && !d_pop_sreg &&
+                   (d_sysop==SYS_NONE) &&
+                   (((d_kind==K_ALU) && d_is_mov && (d_alu_op==ALU_MOV) &&
+                     (d_w inside {3'd1,3'd2,3'd4})) ||
+                    ((d_kind==K_CTRL) && (d_ct==CT_CALLREL) &&
+                     (d_w inside {3'd2,3'd4}))))
+            state<=S_STORE;
+`endif
           else state<=S_EXEC;
         end

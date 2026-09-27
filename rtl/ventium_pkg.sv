@@ -61,6 +61,12 @@ package ventium_pkg;
   // core lints/elaborates standalone (no C symbol to bind) — see §2 last bullet.
   // ---------------------------------------------------------------------------
 `ifndef VTM_NO_DPI
+`ifdef VEN_FP_ASYNC
+  // event 0 begins an ordered FP owner; event 1 consumes its just-stashed
+  // committed x87 state after the shared FPU's response. Simulation only.
+  import "DPI-C" context function void vtm_fp_async_event(
+      input int unsigned event_kind, input longint unsigned owner);
+`endif
   import "DPI-C" context function void vtm_retire(
       input longint unsigned n,        // retire seq, 0-based, monotonic
       input int      unsigned pc,      // fetch vaddr of retired insn

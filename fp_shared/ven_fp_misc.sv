@@ -171,7 +171,18 @@ module ven_fp_misc
               flag_ie <= 1'b1;
             end
           endcase
+`ifdef VEN_FP_MISC_EARLY_DONE
+          // Payload and exception flags above are already registered on this
+          // edge. Publish their valid bit on that same edge; ven_fp_top samples
+          // all of them on the following edge, with unchanged registered-data
+          // setup and precise commit ordering. The old M_DONE state only
+          // delayed this notification; it performed no conversion or rounding.
+          // The shell still admits no new command until its old owner commits.
+          done  <= 1'b1;
+          state <= M_IDLE;
+`else
           state <= M_DONE;
+`endif
         end
 
         M_DONE: begin

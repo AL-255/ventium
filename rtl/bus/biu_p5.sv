@@ -35,7 +35,15 @@ module biu_p5 (
     input  wire        req,            // core wants a bus cycle
     input  wire        req_we,         // 1 = write, 0 = read
     input  wire        req_cache,      // 1 = cacheable (drives CACHE#)
-    input  wire        req_lock,       // 1 = locked cycle (drives LOCK#)
+    input  wire        req_lock,       // 1 = this physical beat belongs to a locked op
+    // Architectural locked instructions can contain several writes, no final
+    // write (CMPXCHG8B mismatch), or an internal translation detour.  The
+    // producer holds this level from the first operand beat until architectural
+    // completion/abort, so the pin FSM never guesses session end from W/R#.
+    input  wire        req_lock_hold,
+    // One-cycle terminal event from the producer.  Unlike a level hold, this
+    // cannot be lost when two locked instructions are adjacent.
+    input  wire        req_lock_end,
     input  wire        req_split,      // 1 = misaligned/>2-cycle locked group (drives SCYC)
     input  wire        req_mio,        // M/IO# value
     input  wire        req_dc,         // D/C# value
@@ -131,7 +139,7 @@ module biu_p5 (
 
   // pipelined (2nd) cycle attributes
   reg        p_valid;           // a 2nd cycle is queued/outstanding
-  reg        p_we, p_cache, p_mio, p_dc, p_lock, p_split, p_wb;
+  reg        p_we, p_cache, p_mio, p_dc, p_lock, p_lock_session, p_split, p_wb;
   reg [28:0] p_addr;
   reg [7:0]  p_be;
   reg [63:0] p_wdata;
@@ -139,8 +147,12 @@ module biu_p5 (
   // outstanding-cycle accounting (for SVA P4 / P3)
   reg [1:0]  outstanding;
 
-  // locked group tracking
-  reg        lock_active;       // a locked group is in progress (drives LOCK#)
+  // locked-session tracking.  `req_lock` starts a physical locked beat;
+  // `req_lock_hold` tells us the architectural session remains live.  Keeping
+  // them distinct prevents a crossing store's first write from releasing the
+  // bus and permits a no-write CMPXCHG8B to release cleanly.
+  reg        lock_active;
+  reg        lock_end_pending;
 
   // backoff save/restore: remember the cycle(s) that were aborted.
   // [FIX-3] BOFF# can abort up to TWO outstanding cycles (current + pipelined).
@@ -154,7 +166,8 @@ module biu_p5 (
   reg [2:0]  bsv_beats;         // beats remaining on the older saved cycle
   reg [1:0]  bsv_base, bsv_idx; // burst position of the older saved cycle
   reg        bsv2_valid;        // a SECOND (pipelined) cycle was also outstanding
-  reg        bsv2_we, bsv2_cache, bsv2_mio, bsv2_dc, bsv2_lock, bsv2_split, bsv2_wb;
+  reg        bsv2_we, bsv2_cache, bsv2_mio, bsv2_dc, bsv2_lock,
+             bsv2_lock_session, bsv2_split, bsv2_wb;
   reg [28:0] bsv2_addr;
   reg [7:0]  bsv2_be;
   reg [63:0] bsv2_wdata;
@@ -196,10 +209,9 @@ module biu_p5 (
                       (!burst_q_done && cyc_cache && !kenn && !cyc_we);
   endfunction
 
-  // locked group considered "done" when this is the write (2nd) of an RMW pair
-  function automatic logic lock_group_done;
-    lock_group_done = cyc_we; // read first (not done), write second (done)
-  endfunction
+  // Do not release immediately when the end pulse arrives: a physical beat
+  // already accepted by this FSM (or a BOFF replay) must drain first.
+  wire lock_end_seen = lock_end_pending || req_lock_end;
 
   // [FIX-5] Pentium burst order, Table 6-12 (Dev Manual Vol.1). Two-bank
   // optimized. Given the line-fill base A[4:3] and the transfer index 0..3,
@@ -255,10 +267,13 @@ module biu_p5 (
       burst_base   <= 2'd0;
       burst_idx    <= 2'd0;
       p_valid      <= 1'b0;
+      p_lock_session <= 1'b0;
       outstanding  <= 2'd0;
       lock_active  <= 1'b0;
+      lock_end_pending <= 1'b0;
       boff_pending <= 1'b0;
       bsv2_valid   <= 1'b0;
+      bsv2_lock_session <= 1'b0;
       snoop_hit    <= 1'b0;
       snoop_mod    <= 1'b0;
       snoop_inv    <= 1'b0;
@@ -267,6 +282,12 @@ module biu_p5 (
     end else begin
       // BREQ reflects an internal pending request at any time
       breq <= req | p_valid | boff_pending;
+
+      // Capture the architectural terminal event independently of the current
+      // bus phase.  S_IDLE below consumes it only after the last accepted/replayed
+      // cycle has drained, so a final response and its end event cannot race.
+      if (req_lock_end && lock_active)
+        lock_end_pending <= 1'b1;
 
       // ----------------------------------------------------------------------
       // BOFF#: highest priority. On assertion, abort & float next clock.
@@ -298,6 +319,7 @@ module biu_p5 (
             bsv2_mio   <= p_mio;
             bsv2_dc    <= p_dc;
             bsv2_lock  <= p_lock;
+            bsv2_lock_session <= p_lock_session;
             bsv2_split <= p_split;
             bsv2_wb    <= p_wb;
             bsv2_addr  <= p_addr;
@@ -318,8 +340,21 @@ module biu_p5 (
         case (st)
           // ------------------------------------------------------------------
           S_IDLE: begin
+            // A terminal event creates a visible session boundary.  Do not
+            // consume a simultaneous new request on this clock: a compliant
+            // requester holds req until req_ack, and the one-cycle gap prevents
+            // back-to-back locked instructions from being coalesced.
+            if (lock_active && lock_end_seen && !p_valid && !boff_pending &&
+                (outstanding == 2'd0)) begin
+              lock_active      <= 1'b0;
+              lock_end_pending <= 1'b0;
+              lockn            <= 1'b1;
+              adsn             <= 1'b1;
+              a_oe             <= 1'b0;
+              d_oe             <= 1'b0;
+            end
             // HOLD arbitration (only when idle and not locked)
-            if (grant_hold) begin
+            else if (grant_hold) begin
               st   <= S_HOLD;
               hlda <= 1'b1;
               a_oe <= 1'b0;
@@ -340,10 +375,14 @@ module biu_p5 (
               wrn       <= p_we;
               cachen    <= p_cache ? 1'b0 : 1'b1;
               scycn     <= (p_lock && p_split) ? 1'b0 : 1'b1;
-              if (p_lock) begin
+              if (p_lock_session) begin
                 lockn       <= 1'b0;
                 lock_active <= 1'b1;
               end else begin
+                // An unmarked detour (e.g. a page walk) remains protected by
+                // a live latched session; raw req_lock is intentionally low.
+                // p_lock_session was captured with the request, rather than
+                // sampling the producer's (possibly already-ended) live level.
                 lockn       <= lock_active ? 1'b0 : 1'b1;
               end
               cyc_we       <= p_we;
@@ -377,12 +416,18 @@ module biu_p5 (
               // [FIX-7] SCYC only for a misaligned/>2-cycle locked group; a
               // normal aligned 2-cycle locked pair leaves SCYC negated.
               scycn     <= (req_lock && req_split) ? 1'b0 : 1'b1;
-              // LOCK# asserted on first clock of first locked cycle, held
-              if (req_lock) begin
+              // Raw LOCK# starts a session only with its accompanying hold.
+              // An unmarked access inside an already-active session remains
+              // locked at the pins, but cannot create a new session itself.
+              if (req_lock && req_lock_hold) begin
                 lockn       <= 1'b0;
                 lock_active <= 1'b1;
               end else begin
-                lockn       <= lock_active ? 1'b0 : 1'b1; // keep if mid-group
+`ifndef SYNTHESIS
+                if (req_lock)
+                  $error("biu_p5: accepted req_lock without req_lock_hold");
+`endif
+                lockn       <= lock_active ? 1'b0 : 1'b1;
               end
               // latch cycle attributes
               cyc_we       <= req_we;
@@ -457,12 +502,20 @@ module biu_p5 (
                 p_mio   <= req_mio;
                 p_dc    <= req_dc;
                 p_lock  <= req_lock;
+                // Session ownership is request metadata.  It must not be
+                // re-sampled later: the architectural producer may emit its
+                // terminal event while this accepted beat waits in p_*.
+                p_lock_session <= req_lock && req_lock_hold;
                 p_split <= req_split;
                 p_wb    <= req_wb;
                 p_addr  <= req_addr;
                 p_be    <= req_be;
                 p_wdata <= req_wdata;
                 req_ack <= 1'b1;
+`ifndef SYNTHESIS
+                if (req_lock && !req_lock_hold)
+                  $error("biu_p5: accepted pipelined req_lock without req_lock_hold");
+`endif
                 st      <= S_T12;
               end
 
@@ -476,14 +529,10 @@ module biu_p5 (
                   outstanding <= outstanding - 2'd1;
                   d_oe        <= 1'b0;
                   is_burst    <= 1'b0;
-                  // close out / handle locked group / snoop writeback
-                  if (lock_active && !lock_group_done()) begin
-                    // mid locked group: keep LOCK# asserted, wait for write req
-                    lockn <= 1'b0;
-                  end else begin
-                    lock_active <= 1'b0;
-                    lockn       <= 1'b1;
-                  end
+                  // Never infer end from the current write.  The session-end
+                  // event is consumed from drained S_IDLE, after an equal
+                  // CMPXCHG8B's second write or a no-write mismatch alike.
+                  if (lock_active) lockn <= 1'b0;
                   // [FIX-6] release HITM# only when the ACTUAL writeback of the
                   // snooped line completes (cyc_wb), not on any unrelated write.
                   if (wb_req && cyc_we && cyc_wb) begin
@@ -527,6 +576,13 @@ module biu_p5 (
               wrn         <= p_we;
               cachen      <= p_cache ? 1'b0 : 1'b1;
               scycn       <= (p_lock && p_split) ? 1'b0 : 1'b1;
+              // The pipelined cycle's ADS# is the start of its pin-level
+              // locked beat. Assert here rather than waiting for promotion
+              // to S_T2P, otherwise LOCK# would be late for a pipelined lock.
+              if (p_lock_session) begin
+                lockn       <= 1'b0;
+                lock_active <= 1'b1;
+              end
               outstanding <= 2'd2;
               st          <= S_T2P;
             end
@@ -545,11 +601,6 @@ module biu_p5 (
               rsp_data    <= d_in;
               rsp_last    <= 1'b1;        // older cycle is single-beat by construction
               outstanding <= outstanding - 2'd1;
-              // older cycle was the locked read of an RMW? release per group rule
-              if (lock_active && cyc_we) begin
-                lock_active <= 1'b0;
-                lockn       <= 1'b1;
-              end
               // [FIX-6] older write that was the actual writeback -> release HITM#
               if (wb_req && cyc_we && cyc_wb) begin
                 wb_req <= 1'b0;
@@ -564,9 +615,11 @@ module biu_p5 (
               cyc_wb    <= p_wb;
               d_out     <= p_wdata;
               d_oe      <= p_we;
-              if (p_lock) begin
+              if (p_lock_session) begin
                 lock_active <= 1'b1;
                 lockn       <= 1'b0;
+              end else begin
+                lockn       <= lock_active ? 1'b0 : 1'b1;
               end
               burst_base   <= p_addr[1:0];
               burst_idx    <= 2'd0;
@@ -599,8 +652,8 @@ module biu_p5 (
                 wrn       <= bsv_we;
                 cachen    <= bsv_cache ? 1'b0 : 1'b1;
                 scycn     <= (bsv_lock && bsv_split) ? 1'b0 : 1'b1;
-                lockn     <= bsv_lock ? 1'b0 : 1'b1;
-                lock_active <= bsv_lock;
+                lockn     <= (bsv_lock || lock_active) ? 1'b0 : 1'b1;
+                lock_active <= bsv_lock || lock_active;
                 cyc_we    <= bsv_we;
                 cyc_cache <= bsv_cache;
                 cyc_addr  <= bsv_addr;
@@ -623,6 +676,7 @@ module biu_p5 (
                   p_mio   <= bsv2_mio;
                   p_dc    <= bsv2_dc;
                   p_lock  <= bsv2_lock;
+                  p_lock_session <= bsv2_lock_session;
                   p_split <= bsv2_split;
                   p_wb    <= bsv2_wb;
                   p_addr  <= bsv2_addr;

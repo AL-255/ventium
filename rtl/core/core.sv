@@ -472,13 +472,18 @@ module core
     output logic        smm_active_o,
     output logic        mem_req,
     output logic        mem_we,
-    // ---- REVIEW1_Aug2 C-10: the core now REQUESTS a locked transaction ------------
-    // LOCK was a decoder-level no-op for implemented RMW ops, and every bus wrapper
-    // hardwired its lock pin low, so the integrated core never asked the interconnect
-    // for atomicity at all. This carries the architectural intent out to the bus for
-    // the whole RMW: asserted from the read beat through the write beat of a locked
-    // read-modify-write, so a wrapper can hold the bus across both.
+    // ---- LOCK# beat qualifier + local-reservation session ------------------------
+    // `mem_lock` is the raw external LOCK# qualifier for an actual operand beat.  It
+    // must NEVER leak onto page walks, fetches, delivery traffic, or a no-request
+    // crossing-store probe.  `mem_lock_hold` is deliberately distinct: it is a
+    // local-arbiter reservation that remains asserted across legal walk/fragment
+    // detours until the locked instruction completes or aborts.  `mem_lock_end`
+    // is a one-cycle terminal event, distinct from the level hold so adjacent
+    // sessions cannot be coalesced.  The pin-level BIU consumes all three;
+    // the L1/AXI DMA seam needs only the raw qualifier and reservation hold.
     output logic        mem_lock,
+    output logic        mem_lock_hold,
+    output logic        mem_lock_end,
     // REVIEW2_aug2 H-13: the physical MEMORY TYPE of the line being fetched, from the
     // chipset cacheability map (ven_cachemap in ventium_l1_axi). 1 = do not retain this
     // line in the icache. Tied 0 in builds with no L1AXI/northbridge in front of the
@@ -498,6 +503,19 @@ module core
     // fragments); everything pre-existing reads the internal wires unchanged.
     input  logic [31:0] bus_rdata,
     input  logic        bus_ack,
+`ifdef VEN_FP_LOAD64
+    // Optional high dword of this owned registered resident-line response.
+    // Inactive on legacy/uncacheable/partial-fill response paths.
+    input  logic [31:0] bus_rdata_hi,
+    input  logic        bus_rdata_hi_valid,
+`endif
+
+`ifdef VEN_PIPE_MEM_CHAIN
+    output logic        mem_next_req, mem_next_commit,
+    output logic [31:0] mem_next_addr,
+    output logic [3:0]  mem_next_wstrb,
+    input  logic        mem_next_ready,
+`endif
 
     // M6: raised (and latched) when the core enters the F00F hang state
     // (Erratum 81). Lets the TB observe the documented "system hang" without the
@@ -714,7 +732,9 @@ module core
   // SMI# entry, cleared by RSM. It gates the addressing-context overrides AND the
   // RSM decode (RSM is #UD outside SMM). smi_pending latches a recognised SMI#
   // (the APIC self-IPI with delivery-mode=SMI in the psmm corpus) so it is taken
-  // at the NEXT instruction boundary, exactly like qemu's deferred SMI dispatch.
+  // at the NEXT instruction boundary, exactly like qemu's deferred SMI dispatch;
+  // recognition stays live during SMM, while smi_take defers that pending source
+  // until after RSM.
   // (The interrupted CR0 — incl. PE/PG — is saved to the SMRAM map at SMI# entry
   // and read back from it on RSM, so no separate "saved PE" register is kept; the
   // SMM addressing context is driven directly by CR0.PE==0 + the SMM CS/base set
@@ -821,7 +841,7 @@ module core
   // The second port covers a store whose bytes cross an I-cache line boundary.
   logic        smc_v1, smc_v2;
   logic [31:0] smc_a1, smc_a2;
-  assign smc_v1 = mem_req_pre_sq && cur_is_w && fe_translatable;
+  assign smc_v1 = mem_req_pre_sq && !sync_access_fault && cur_is_w && fe_translatable;
   // REVIEW1_Aug3 R2-H09: the snoop now carries the beat's PHYSICAL address --
   // mem_addr is the post-translate bus address (the bus driver's tail runs
   // mem_xlate in place), per-fragment under the fx engine (a page-straddling
@@ -1119,8 +1139,8 @@ module core
                      // terms therefore do not duplicate the issue predicate or
                      // create a gpr_we -> predicate combinational feedback path.
                      || ((state == S_PIPE)
-                         && ((u_d.wreg && (u_d.dst == R_ESP))
-                             || (pipe_pair && v_d.wreg && (v_d.dst == R_ESP))))
+                         && ((pipe_u_eff.wreg && (pipe_u_eff.dst == R_ESP))
+                             || (pipe_pair_eff && pipe_v_eff.wreg && (pipe_v_eff.dst == R_ESP))))
                      // The inter-privilege IRET's outer-ESP restore is an
                      // architectural ESP write in the same sense: its masking
                      // follows the OUTER stack's B bit (QEMU's SET_ESP(sp,
@@ -1389,7 +1409,7 @@ module core
   logic        fx_start;
   assign fx_start = fx_state_ok && mem_req_pre_sq && paging_on
                  && (!fx_act || fx_abort_q) && fx_cross
-                 && !xlate_miss && !perm_fault && !seg_access_fault && !fe_xlate_pend;
+                 && !xlate_miss && !perm_fault && !sync_access_fault && !fe_xlate_pend;
 
   // engine phase controls (combinational `_e` forms live at the output stage,
   // after the bus-driver include, so the first clock of a crossing beat is
@@ -1454,7 +1474,7 @@ module core
         // In VEN_FE_PIPE, xlate_miss is deliberately suppressed while the
         // registered page-2 translation is still settling.  Do not mistake
         // that suppression for a successful write probe and advance to frag A.
-        {1'b1, 2'd0}: if (!fe_xlate_pend && !xlate_miss && !perm_fault && !seg_access_fault)
+        {1'b1, 2'd0}: if (!fe_xlate_pend && !xlate_miss && !perm_fault && !sync_access_fault)
                             fx_ph <= 2'd1;
         {1'b1, 2'd1}: if (bus_ack) fx_ph <= 2'd2;   // frag A written
         {1'b1, 2'd2}: if (bus_ack) begin fx_act <= 1'b0; fx_ph <= 2'd0; end  // frag B
@@ -1481,7 +1501,12 @@ module core
   logic [2:0]  load_beat_w;
   always_comb begin
     load_beat_w = q_w;
-    if ((state == S_LOAD) && (q_w == 3'd2)
+    // MOVZX/MOVSX retain q_w for their destination register merge, but read
+    // only the byte/word source. Using q_w here falsely probed the next page
+    // or segment and amplified noncacheable reads for a narrow source.
+    if ((state == S_LOAD) && (q_kind == K_EXT))
+      load_beat_w = q_ext_srcw;
+    else if ((state == S_LOAD) && (q_w == 3'd2)
         && (q_jmpf_mem || q_callf_mem || (q_seg_load && !q_seg_load_lo)))
       load_beat_w = 3'd4;
     else if ((state == S_LOAD2)
@@ -1522,6 +1547,19 @@ module core
   // exactly as S_LOAD does.
   assign xp_cross = ((state==S_LOAD) || (state==S_LOAD2))
                  && !xp_pend && (xp_end > 13'h1000);
+  // Legacy split reads own their bus extent independently of the whole
+  // operand extent checked before fragment one. Neither beat may read bytes
+  // outside its translated page/operand (noncacheable reads have side effects).
+  // Keep load_beat_w unchanged for xp_cross and the saved xp_w merge owner.
+  // Use cur_lin_nat, not redirected cur_lin/ACK-dependent predicates, so this
+  // strobe producer cannot close a feedback path through the generic fx layer.
+  logic [2:0] xp_bus_w;
+  logic [3:0] xp_read_strb;
+  assign xp_bus_w = xp_pend ? (xp_w - xp_first)
+      : (({1'b0, cur_lin_nat[11:0]} + {10'd0, load_beat_w} > 13'h1000)
+         ? 3'(13'h1000 - {1'b0, cur_lin_nat[11:0]}) : load_beat_w);
+  // strb_of accepts architectural widths 1/2/4, not a three-byte fragment.
+  assign xp_read_strb = 4'((5'd1 << xp_bus_w) - 5'd1);
   // Crossing STORE detect. st_strb is the byte-enable the store drives, so its
   // population count is the true architectural width (POP r/m16, string stores and
   // the 8F form all differ from q_w).
@@ -1625,6 +1663,10 @@ module core
   // diverted memory state (walk_ret_state, declared with the FSM enum below).
   // walk_for_d selects the D-TLB (else I).
   logic [31:0] walk_lin;           // the linear address being translated
+  // The PC to restart if this walk discovers a #PF.  S_PIPE has not written
+  // q_pc at diversion time, and a delayed packet may have an older q_pc from
+  // the preceding retirement, so latch the fault PC with the walk itself.
+  logic [31:0] walk_fault_pc;
   logic        walk_for_d;         // 1 = data access (D-TLB), 0 = fetch (I-TLB)
   logic        walk_is_write;      // H-02: the resumed access is architecturally a
                                    // WRITE -> the #PF error code's W/R bit
@@ -1848,7 +1890,11 @@ module core
   // one edge late and a second S_PIPE instruction can issue.
   assign dbg_step_permit = dbg_step_q && !retire_valid;
   assign dbg_block_issue = (dbg_park | dbg_bp_hit) & ~dbg_step_permit;
-  assign dbg_fast_hold = dbg_block_issue && (state == S_PIPE) && !fp_occ_pending;
+  // A delayed S_PIPE memory operation is already past its instruction boundary.
+  // Do not park it mid-request: its registered packet must reach final mem_ack
+  // before the debugger advertises a quiescent architectural state.
+  assign dbg_fast_hold = dbg_block_issue && (state == S_PIPE) && !fp_occ_pending &&
+                         !pipe_mem_active_q;
   assign dbg_pair_block = dbg_step_q || dbg_bp_v_hit;
 `ifdef VEN_FP_PIPE
 `ifdef VEN_FP_PIPE2
@@ -1860,8 +1906,16 @@ module core
   wire dbg_fp_commit_pending = 1'b0;
 `endif
   assign dbg_arch_quiescent = ((state == S_DECODE) || (state == S_HLTWAIT) ||
-                               ((state == S_PIPE) && !fp_occ_pending)) &&
-                              !dbg_fp_commit_pending;
+                               ((state == S_PIPE) && !fp_occ_pending && !pipe_mem_active_q)) &&
+                              !dbg_fp_commit_pending && !fp_async_pending;
+  // An early-retired shared-FP owner may still change x87 state. Parking
+  // issue is allowed, but expose a stable debugger boundary only after drain.
+`ifndef SYNTHESIS
+  always_ff @(posedge clk) begin
+    if (rst_n && dbg_halted && fp_async_pending)
+      $fatal(1, "DEBUG: halted advertised with an unfinished shared-FP owner");
+  end
+`endif
   assign dbg_halted = dbg_block_issue && dbg_arch_quiescent;
 
   always_ff @(posedge clk) begin
@@ -1938,6 +1992,65 @@ module core
   localparam int IWORDS = 4;
   logic [7:0]  ibuf [16];
   logic [2:0]  fetch_word;
+  // A nonzero value is a one-shot, non-executable short-fetch descriptor from
+  // the uop-cache walker.  It is intentionally carried separately from the
+  // normal uop hit: S_FETCH still invokes the reference decoder and does not
+  // skip any architectural execution/retirement boundary.
+  logic [3:0]  sfetch_short_len_q;
+  // A successfully committed REP STOSD element may retain its already-decoded
+  // command for ONE following S_PIPE boundary.  This is intentionally not a
+  // store queue: the exact accepted F3 AB continuation forms the next
+  // address/data/rollback snapshot at that boundary, while every other shape
+  // returns through S_EXEC; S_STORE still waits for its final architectural
+  // acknowledgement.  The token
+  // is consumed (or discarded) on that one boundary, so an event, fault, debug
+  // stop, executable flush, or real request/occupancy timing stall returns
+  // through the proven fetch/decode path.  A deferred branch-recovery counter
+  // is the documented exception: it remains outstanding until final REP exit.
+  logic        rep_stos_cont_q;
+  // A continuation can become unsafe before the final store acknowledgement:
+  // for example, an aligned write may invalidate a matching executable line on
+  // its first delayed request clock, then see the I$ hit disappear before its
+  // acknowledgement.  Keep both the invalidation history and the requested
+  // one-shot recovery separate from the safe continuation token.  The history
+  // has one dedicated FF owner below; it is cleared only by a fresh S_DECODE
+  // entry, never merely because a store changes fragment phase or reaches ack.
+  logic        rep_stos_cont_redecode_q;
+  logic        rep_stos_cont_poison_q;
+  logic        rep_stos_cont_decode_seen_q;
+  logic        rep_stos_cont_arm;
+  logic        rep_stos_cont_redecode_arm;
+  logic        rep_stos_cont_ready_noevent;
+  logic        rep_stos_cont_would_take_noevent;
+  logic        rep_stos_cont_hold;
+  logic        rep_stos_cont_take;
+  logic        rep_stos_cont_recovery_need;
+  logic        rep_stos_cont_profile;
+  logic        rep_stos_cont_sys_ok;
+  logic        rep_stos_cont_snoop_now;
+  logic        rep_stos_cont_inval_now;
+  logic        rep_stos_cont_shape;
+  logic        rep_movs_cont_shape, rep_movs_cont_arm;
+  // The bypass window is not a valid I-cache way, so its own-store snoop
+  // match needs a companion poison source for a retained REP command.
+  logic        rep_stos_cont_icbp_snoop_hit;
+  // Optional one-entry REP STOSD stream.  This is deliberately a descriptor
+  // shadow, not a third write buffer: the current store still owns S_STORE and
+  // retires only on its final architectural acknowledgement.  `started` closes
+  // the cancellable between-element boundary as soon as the shadow has begun a
+  // real access (including a DTLB/FE translation detour).
+  logic        rep_stos_stream_q;
+  logic        rep_stos_stream_started_q;
+  logic        rep_stos_stream_arm;
+  logic        rep_stos_stream_continue;
+  logic        rep_stos_stream_pending;
+  logic        rep_stos_stream_preissue_debug;
+  logic        rep_stos_stream_preissue_event;
+  logic        rep_stos_stream_preissue_poison;
+  logic        rep_stos_stream_preissue_throttle;
+  logic        rep_stos_stream_preissue_redecode;
+  logic        rep_stos_stream_preissue_block;
+  logic        rep_stos_stream_intr_take;
 `ifndef SYNTHESIS
   // Bounded, simulation-only provenance trace for the slow fetch path.  The
   // L1/AXI fabric and the BRAM I-cache are intentionally separated here: when
@@ -1953,6 +2066,47 @@ module core
     ven_fetchdbg_max = 64;
     ven_fetchdbg_n   = 0;
     void'($value$plusargs("ven_fetchdbg_max=%d", ven_fetchdbg_max));
+  end
+`endif
+`ifndef SYNTHESIS
+  // Tiny, opt-in REP-STOS continuation witness for the standalone prepsmi
+  // structural gate.  Its only effects are the two guarded $display sites at
+  // the terminal store ACK and the following token-bearing S_PIPE boundary.
+  logic        ven_repcontlog_en;
+  initial begin
+    ven_repcontlog_en = $test$plusargs("ven_repcontlog") != 0;
+  end
+`endif
+`ifndef SYNTHESIS
+  // Opt-in proof that an APIC ICR-low SMI was observed at the store commit
+  // boundary.  This is deliberately a log-only mirror of
+  // smi_apic_store_commit: the fast-store psmm gate can distinguish a real
+  // packet completion from the slow-FSM fallback without adding test logic to
+  // the synthesizable path.
+  logic        ven_apicsmilog_en;
+  initial begin
+    ven_apicsmilog_en = $test$plusargs("ven_apicsmilog") != 0;
+  end
+`endif
+`ifndef SYNTHESIS
+  // A separate, intentionally closed log namespace for the optional direct
+  // REP-STOS stream.  This makes a performance experiment auditable without
+  // weakening the established REPCONT structural witness: PREP is a shadow
+  // capture, ISSUE is the first real access (including an immediate ACK), ACK
+  // is a committed streamed element, and CANCEL is only legal before ISSUE.
+  logic        ven_repstreamlog_en;
+  initial begin
+    ven_repstreamlog_en = $test$plusargs("ven_repstreamlog") != 0;
+  end
+`endif
+`ifndef SYNTHESIS
+  // Direct shared-x87 handoff witness.  It is deliberately an observation of
+  // the S_PIPE capture edge, rather than cmd_valid in S_FEXEC one cycle later:
+  // this makes a regression prove both that the compact decode was selected and
+  // that the I-cache LRU mirror touched the instruction's fetch line.
+  logic        ven_fpdirectlog_en;
+  initial begin
+    ven_fpdirectlog_en = $test$plusargs("ven_fpdirectlog") != 0;
   end
 `endif
 `ifdef VEN_UOPCACHE
@@ -2267,8 +2421,11 @@ module core
   // mode / dword in 32-bit). The port is an imm8 (E4-E7) or DX[15:0] (EC-EF).
   // d_io_w reuses the wmask width code (1=byte, 2=word, 4=dword). These are 0 for
   // every non-IN/OUT instruction, so the dispatch below is inert elsewhere.
-  logic        d_lock;          // REVIEW1_Aug2 C-10: LOCK prefix on this insn
-  logic        q_lock;          // ...latched for the whole RMW
+  logic        d_lock;          // decoded explicit/implicit LOCK intent for this insn
+  logic        q_lock;          // instruction-local lock descriptor, latched at decode
+  logic        lock_session_q;  // local-DMA reservation once the first operand read starts
+  logic        lock_first_read;
+  logic        lock_done_store, lock_done_cx8b_eq, lock_done_cx8b_ne, lock_done;
   logic        d_io;            // this instruction is IN/OUT
   // ---- REVIEW1_Aug2 M-03: TSS I/O-permission bitmap consult -----------------------
   // Needed only when the instruction is port I/O AND the current privilege exceeds
@@ -2594,10 +2751,11 @@ module core
   // task #57: the fast path now accepts INTR at S_PIPE instruction boundaries, so the
   // PIC's acknowledge must pulse from there too -- otherwise the 8259 never sees the
   // INTA, never advances its ISR, and the vector is delivered forever.
-  assign inta = (((state==S_DECODE) || (state==S_HLTWAIT)) && intr_take && !dbg_block_issue)
-              || ((state==S_PIPE) && fp_irq_divert && intr_take);
+  assign inta = !fp_async_hold && ((((state==S_DECODE) || (state==S_HLTWAIT)) && intr_take && !dbg_block_issue)
+              || ((state==S_PIPE) && fp_irq_divert && intr_take)
+              || ((state==S_STORE) && rep_stos_stream_intr_take));
 `else
-  assign inta = ((state==S_DECODE) || (state==S_HLTWAIT)) && intr_take && !dbg_block_issue;
+  assign inta = !fp_async_hold && ((state==S_DECODE) || (state==S_HLTWAIT)) && intr_take && !dbg_block_issue;
 `endif
 
   // ===========================================================================
@@ -2677,6 +2835,10 @@ module core
   logic        q_callf_mem;       // F3 FF /3 CALLF m16:16 latch
   logic        q_jmpf_mem;        // F3 FF /5 JMPF  m16:16 latch
   logic        seg_step;          // SEGLD descriptor-fetch beat counter (0/1)
+  logic        sgdt_probe_q, sgdt_probe_second;
+  wire         sgdt_probing = (state == S_SGDT) && sgdt_probe_q;
+  wire [31:0]  sgdt_probe_base = dbase + q_ea;
+  wire         sgdt_probe_cross = ({1'b0, sgdt_probe_base[11:0]} + 13'd6 > 13'h1000);
   // bug#6 CALL GATE: set when S_LJMP re-vectored through a call gate, so the second
   // descriptor pass knows the transfer arrived via a gate. That changes the CPL rule
   // (a gate selector's RPL is NOT the new privilege) and enables the cross-privilege
@@ -3240,6 +3402,12 @@ module core
   logic [79:0] f_mem80;            // assembled memory operand (m16/32/64/80)
 
   logic [31:0] mem_load_data, mem_load_data2;
+  // CMPXCHG8B compares the two loaded words against EDX:EAX.  Keep this as one
+  // module-scope predicate: S_EXEC consumes it for ZF/store selection and the
+  // LOCK reservation lifecycle consumes the same result for the no-write path.
+  logic        cx8b_equal;
+  assign cx8b_equal = (mem_load_data == gpr_o[R_EAX]) &&
+                       (mem_load_data2 == gpr_o[R_EDX]);
   logic [3:0]  step;            // micro-sequence step counter
   // nested ENTER (level>0) micro-sequence state: ent_k = current push index (1..level+1),
   // ent_rd = this beat reads the display source [SS:EBP-(k-1)*w] before the push,
@@ -3266,10 +3434,8 @@ module core
   // high8 selects bits [15:8] for 8-bit ops.
   function automatic logic [31:0] reg_read(input logic [2:0] r, input logic [2:0] w, input logic high8);
     begin
-      if (w==3'd1) begin
-        if (high8) reg_read = {24'd0, gpr_o[r][15:8]};
-        else       reg_read = {24'd0, gpr_o[r][7:0]};
-      end else if (w==3'd2) reg_read = {16'd0, gpr_o[r][15:0]};
+      if (w==3'd1) reg_read = fp_byte_read(gpr_o[r], high8);
+      else if (w==3'd2) reg_read = {16'd0, gpr_o[r][15:0]};
       else reg_read = gpr_o[r];
     end
   endfunction
@@ -3277,10 +3443,8 @@ module core
   function automatic logic [31:0] reg_merge(input logic [31:0] cur, input logic [31:0] res,
                                             input logic [2:0] w, input logic high8);
     begin
-      if (w==3'd1) begin
-        if (high8) reg_merge = {cur[31:16], res[7:0], cur[7:0]};
-        else       reg_merge = {cur[31:8], res[7:0]};
-      end else if (w==3'd2) reg_merge = {cur[31:16], res[15:0]};
+      if (w==3'd1) reg_merge = fp_byte_merge(cur, res, high8);
+      else if (w==3'd2) reg_merge = {cur[31:16], res[15:0]};
       else reg_merge = res;
     end
   endfunction
@@ -3495,8 +3659,8 @@ module core
     .bcd_alu_op    (q_alu_op),
     .bcd_ax        (bcd_ax),
     .bcd_flags     (bcd_flags),
-    .u_d           (u_d),
-    .v_d           (v_d),
+    .u_d           (pipe_u_eff),
+    .v_d           (pipe_v_eff),
     .u_flags       (u_flags),
     .u_sh          (u_sh),
     .u_shm1        (u_shm1),
@@ -3855,7 +4019,11 @@ module core
   // for the longer (16-byte) slow-decoder window. It is used solely by the
   // uop-overflow hand-off below; ordinary slow fetches retain P5-calibrated bus
   // timing.
-  logic sfetch_uop_fast, sfetch_resident_fast;
+  logic sfetch_uop_fast, sfetch_short_fast, sfetch_resident_fast;
+  logic pipe_sdecode_window_ok;
+`ifndef VEN_PIPE_SDECODE
+  assign pipe_sdecode_window_ok = 1'b0;
+`endif
 `ifdef VEN_UOPCACHE
 `ifdef VEN_IC_BRAM
 `ifdef VEN_UOP_SFETCH
@@ -3870,6 +4038,28 @@ module core
                   || (rdB_set_q == ib_set && rdB_way_q == ib_way && !ic_rd_collB));
     end
   endfunction
+`ifdef VEN_PIPE_SDECODE
+  // Move only the resident slow-fetch capture, never its decoder/dispatch.
+  // The task below is called solely by existing S_PIPE slow-handoff arms,
+  // after their event/debug/packet/frontend guards. Both returned identities
+  // must already be correct THIS clock, not merely the next BRAM request.
+  // Keep page crossings and system segment-edge cases on S_FETCH: its
+  // first-byte CS check precedes translation and is not an S_DECODE check.
+  // Any snoop vetoes capture, including nonpaged external DMA which does not
+  // necessarily assert exec_flush_all. These guards affect only the register
+  // capture enable; no instruction-byte decoder or BRAM read port is added.
+  assign pipe_sdecode_window_ok = (state == S_PIPE) && cycle_mode && !def16
+                       && exec_issue_ok && !icsnp_v1 && !icsnp_v2
+`ifdef VEN_L1_AXI
+                       && !ic_snoop_valid
+`endif
+                       && (flin[11:0] <= 12'(4096 - IWORDS*4))
+                       && (!sys_mode || (!real_mode && !v86 &&
+                           ({1'b0,eip} + 33'(IWORDS*4 - 1) <=
+                            {1'b0,seg_limit[SG_CS]})))
+                       && ic_buffered(flin)
+                       && ic_buffered(flin + 32'(IWORDS*4 - 1));
+`endif
   // The token records a miss detected in S_PIPE only after ic_fetch_ready was
   // true. Recheck BOTH endpoints here rather than relying on that history:
   // S_FETCH copies 16 bytes (not the fast path's 12), and a stale/predicted B
@@ -3878,6 +4068,47 @@ module core
                        && exec_issue_ok
                        && ic_buffered(flin)
                        && ic_buffered(flin + 32'(IWORDS*4 - 1));
+  // A descriptor is deliberately limited to the exact two-byte REP
+  // MOVS/STOS class emitted by ven_predecode_len.  It needs only those two
+  // bytes from the current returned BRAM line; S_FETCH explicitly zero-pads
+  // the remainder before using the ordinary slow decoder.  The usual
+  // tag/way/collision/flush recheck still decides whether it may be consumed.
+  // Optional bare FWAIT uses only byte zero, with a fresh opcode recheck.
+  // It still enters S_DECODE; no #NM/#MF decision is cached or bypassed.
+  assign sfetch_short_fast = sfetch_uop_q &&
+                           ((sfetch_short_len_q == 4'd2)
+`ifdef VEN_UOP_SLOW_LEN_HINT
+                            || ((sfetch_short_len_q >= 4'd3) &&
+                                (sfetch_short_len_q <= 4'd8))
+`endif
+`ifdef VEN_UOP_FWAIT_FETCH
+                            || ((sfetch_short_len_q == 4'd1) && ic_byte(flin) == 8'h9b)
+`endif
+                           )
+                         && (state == S_FETCH) && (fetch_word == 3'd0)
+                         && exec_issue_ok && ic_buffered(flin)
+`ifdef VEN_UOP_SLOW_LEN_HINT
+                         // The hint is not a permission or residency token.
+                         // Revalidate the same invalid map entry, reject snoops,
+                         // and keep every shortened span within its cache line,
+                         // page and protected CS limit before copying bytes.
+                         && !def16 && uc_updvalid && !uc_ubvalid
+                         && (uc_short_len == sfetch_short_len_q)
+`ifdef VEN_L1_AXI
+                         && !ic_snoop_valid
+`endif
+                         && ({1'b0,flin[4:0]} + {2'd0,sfetch_short_len_q} <= 6'd32)
+                         && (!sys_mode || (!real_mode && !v86 &&
+                             ({1'b0,eip} + {29'd0,sfetch_short_len_q} - 33'd1 <=
+                              {1'b0,seg_limit[SG_CS]})))
+                         && ic_buffered(flin + {28'd0,sfetch_short_len_q} - 32'd1);
+`else
+                         && (
+`ifdef VEN_UOP_FWAIT_FETCH
+                             (sfetch_short_len_q == 4'd1) ||
+`endif
+                             ic_buffered(flin + 32'd1));
+`endif
 `ifdef VEN_SFETCH_RESIDENT
   // These tokens are set only by the three S_PIPE branches below the
   // pipe_bytes_ok/ic_fetch_ready gates.  Recheck the complete slow-decoder
@@ -3892,15 +4123,47 @@ module core
 `endif
 `else
   assign sfetch_uop_fast = 1'b0;
+  assign sfetch_short_fast = 1'b0;
   assign sfetch_resident_fast = 1'b0;
+`ifdef VEN_PIPE_SDECODE
+  assign pipe_sdecode_window_ok = 1'b0;
+`endif
 `endif
 `else
   assign sfetch_uop_fast = 1'b0;
+  assign sfetch_short_fast = 1'b0;
   assign sfetch_resident_fast = 1'b0;
+`ifdef VEN_PIPE_SDECODE
+  assign pipe_sdecode_window_ok = 1'b0;
+`endif
 `endif
 `else
   assign sfetch_uop_fast = 1'b0;
+  assign sfetch_short_fast = 1'b0;
   assign sfetch_resident_fast = 1'b0;
+`ifdef VEN_PIPE_SDECODE
+  assign pipe_sdecode_window_ok = 1'b0;
+`endif
+`endif
+
+`ifdef VEN_PIPE_SDECODE
+  task automatic pipe_capture_slow_window;
+    if (pipe_sdecode_window_ok) begin
+      // Same gather and same ibuf register as the resident S_FETCH arm.
+      // The ordinary S_DECODE still owns q_*, RF/shadow, #NM/#MF, and events.
+      for (int i=0; i<IWORDS*4; i++)
+        ibuf[i] <= ic_byte(flin + 32'(i));
+      fetch_word <= 3'd0;
+      sfetch_short_len_q <= 4'd0;
+`ifdef VEN_UOPCACHE
+      sfetch_uop_q <= 1'b0;
+`endif
+`ifdef VEN_SFETCH_RESIDENT
+      sfetch_resident_q <= 1'b0;
+`endif
+      state <= S_DECODE;
+    end
+  endtask
 `endif
 
   // ---- task #54: SERVE THE SLOW PATH'S FETCH FROM THE I-CACHE ---------------
@@ -3976,9 +4239,31 @@ module core
     if (!rst_n) begin
       ven_fetchdbg_n <= 0;
     end else if (ven_fetchdbg_en && (ven_fetchdbg_n < ven_fetchdbg_max)) begin
+`ifdef VEN_UOP_SLOW_LEN_HINT
+      // A short-fetch offer can be vetoed sequentially by a CPU snoop or
+      // diverted by an outer precise fault. Only CAPTURE witnesses ibuf write
+      // plus S_DECODE entry; the old SHORT offer log is not such a witness.
+      if ((state == S_FETCH) && sfetch_short_fast) begin
+        if (!fsm_case_enabled)
+          $display("[FETCHDBG:SHORT-DIVERT] cn=%0d eip=%08x flin=%08x len=%0d",
+                   cn, eip, flin, sfetch_short_len_q);
+        else if (icsnp_v1 || icsnp_v2)
+          $display("[FETCHDBG:SHORT-VETO] cn=%0d eip=%08x flin=%08x len=%0d",
+                   cn, eip, flin, sfetch_short_len_q);
+        else
+          $display("[FETCHDBG:SHORT-CAPTURE] cn=%0d eip=%08x flin=%08x len=%0d",
+                   cn, eip, flin, sfetch_short_len_q);
+        ven_fetchdbg_n <= ven_fetchdbg_n + 1;
+      end else
+`endif
       if ((state == S_FETCH) && mem_ack) begin
         $display("[FETCHDBG:BUS] cn=%0d eip=%08x flin=%08x word=%0d addr=%08x data=%08x",
                  cn, eip, flin, fetch_word, mem_addr, mem_rdata);
+        ven_fetchdbg_n <= ven_fetchdbg_n + 1;
+      end else if ((state == S_FETCH) && sfetch_short_fast) begin
+        $display("[FETCHDBG:SHORT] cn=%0d eip=%08x flin=%08x len=%0d bytes=%02x%02x",
+                 cn, eip, flin, sfetch_short_len_q, ic_byte(flin),
+                 sfetch_short_len_q == 4'd1 ? 8'd0 : ic_byte(flin + 32'd1));
         ven_fetchdbg_n <= ven_fetchdbg_n + 1;
       end else if ((state == S_FETCH)
                    && (sfetch_fast || sfetch_uop_fast || sfetch_resident_fast)) begin
@@ -4033,6 +4318,46 @@ module core
   // ===========================================================================
   fpd_t        u_d, v_d;             // U insn + V candidate decodes
   logic        pipe_bytes_ok;        // U (+ V candidate) bytes resident in icache
+  // Raw byte residency is deliberately distinct from "may begin a fast
+  // side-effect".  With registered I-cache reads and/or predecoded uops, a
+  // resident line can still expose the PREVIOUS instruction's decode.
+  logic        pipe_frontend_ready;
+  // A delayed fast U-memory operation owns an admitted transaction packet.  It
+  // survives the volatile executable-valid domain (I$/uop flushes), page walks
+  // and fragment phases until the final FSM-visible acknowledgement.  Keeping
+  // the full U/V packet is necessary because a legal U-memory + V pair retires
+  // together; a request-valid latch alone would still commit stale decode fields.
+  logic        pipe_mem_active_q;
+  logic        pipe_mem_we_q;
+  logic [31:0] pipe_mem_ea_q, pipe_mem_wdata_q, pipe_mem_eip_q;
+  logic [2:0]  pipe_mem_seg_q;
+  fpd_t        pipe_mem_u_q, pipe_mem_v_q;
+  logic        pipe_mem_pair_q;
+  fpd_t        pipe_u_eff, pipe_v_eff;
+  logic        pipe_pair_eff;
+  logic [31:0] pipe_commit_eip;
+  logic        pipe_new_load_req, pipe_new_store_req, pipe_new_mem_req;
+  logic        pipe_mem_abort_now;
+  logic        pipe_cs_preissue_ok;
+  logic        pipe_cs_issue_eligible;
+  logic        pipe_int_commit;
+  // A local-APIC ICR SMI request is a side effect of the FINAL physical store,
+  // not of decode or request admission.  Keep its origin classification
+  // separate from the physical completion predicate: page-table and SMM-save
+  // writes are internal microcode traffic, not guest APIC commands.
+  logic        smi_apic_guest_store;
+  logic        smi_apic_store_commit;
+  // `bus_err` exists only with the real L1/AXI port.  Simple functional-memory
+  // builds have no fatal-response channel, so their completed store is clean.
+`ifdef VEN_L1_AXI
+  wire         smi_apic_bus_ok = !bus_err;
+`else
+  wire         smi_apic_bus_ok = 1'b1;
+`endif
+  logic        pipe_fp_live_arm;
+  logic        pipe_fp_fast_exec_ok;
+  logic        fp_fast_trap_bail;
+  logic        fp_v_fold_ok;
   logic [31:0] pf_miss_fa;           // I-cache fill line address for a current miss
   logic        pf_miss;             // a fill-word-0 fetch is needed this S_PIPE clock
   logic        pipe_pair;            // U and V issue together this clock
@@ -4061,22 +4386,149 @@ module core
   logic [31:0] u_tgt_raw, v_tgt_raw;   // task #56 step G: pre-truncation branch targets   // branch targets
   logic        u_pred_taken, v_pred_taken;
   logic        v_br_taken_eff;       // V branch taken using U's flags (uv_common)
-  logic [7:0]  ub [6];               // U decode bytes (icache, possibly 0 if cold)
-  logic [7:0]  vb [6];               // V candidate decode bytes (at eip+lenU)
+  logic [7:0]  ub [7];               // U decode bytes (icache, possibly 0 if cold)
+  logic [7:0]  vb [7];               // V candidate decode bytes (at eip+lenU)
+  // The seventh byte is an actual frontend dependency only for the opt-in
+  // seven-byte SIB+disp32 ADD/MOV. Keep the original six-byte residency cone in
+  // every other build: connecting an unused leaf input must not add an I-cache
+  // straddle bubble to the deployed baseline profile.
+`ifdef VEN_FAST_MEM_MOV7
+  localparam logic [5:0] FP_DECODE_WIN_LAST = 6'd6;
+`elsif VEN_FAST_MEM_ADD7
+`ifdef VEN_FAST_MEM_ADD
+  localparam logic [5:0] FP_DECODE_WIN_LAST = 6'd6;
+`else
+  localparam logic [5:0] FP_DECODE_WIN_LAST = 6'd5;
+`endif
+`else
+  localparam logic [5:0] FP_DECODE_WIN_LAST = 6'd5;
+`endif
+  // The seven-byte window is a dependency of the enabled seven-byte forms,
+  // not of every instruction in an extended build. In particular, requiring b6
+  // for an ordinary short instruction at offset 26..27 needlessly waits for
+  // the following I-cache line.  The raw pair front end still retains its
+  // conservative fixed 14-byte window below; this selector is only the U
+  // instruction's own decode-residency/miss path.
+`ifdef VEN_UOPCACHE
+  // A uop-cache hit consumes the descriptor prepared by the fill walker, not
+  // the raw ub[] byte muxes (which are deliberately absent outside the
+  // simulation-only checker).  Its exact `u_d.len` residency test below still
+  // covers a real instruction straddle, including a seven-byte ADD at a line
+  // tail, without adding a fixed decode-window dependency.
+  wire fp_add7_needs_byte6 = 1'b0;
+`else
+`ifdef VEN_FAST_MEM_ADD
+`ifdef VEN_FAST_MEM_ADD7
+  // ADC reuses ADD's seven-byte memory packet; its final displacement byte
+  // needs identical residency before the raw decoder may issue that packet.
+  wire fp_add7_needs_byte6 = !def16 && ((ub[0] == 8'h03)
+`ifdef VEN_FAST_MEM_ALU
+                            || (ub[0][7:6]==2'b00 && ub[0][2:0]==3'b011 &&
+                                ub[0][5:3]!=3'b111)
+`endif
+`ifdef VEN_FAST_MEM_ADC
+                            || (ub[0] == 8'h13)
+`endif
+                            ) &&
+                            ((ub[1][7:6] == 2'b10) ||
+                             ((ub[1][7:6] == 2'b00) && ub[2][2:0] == 3'b101)) &&
+                            (ub[1][2:0] == 3'b100) &&
+                            (ub[1][5:3] != R_ESP);
+`else
+  wire fp_add7_needs_byte6 = 1'b0;
+`endif
+`else
+  wire fp_add7_needs_byte6 = 1'b0;
+`endif
+`endif
+`ifdef VEN_FAST_MEM_MOV7
+`ifndef VEN_UOPCACHE
+  wire fp_mov7_needs_byte6 = !def16 &&
+      (ub[0]==8'h88 || ub[0]==8'h89 || ub[0]==8'h8A || ub[0]==8'h8B) &&
+      (ub[1][2:0]==3'b100) &&
+      ((ub[1][7:6]==2'b10) || ((ub[1][7:6]==2'b00) && ub[2][2:0]==3'b101));
+`else
+  wire fp_mov7_needs_byte6 = 1'b0;
+`endif
+`else
+  wire fp_mov7_needs_byte6 = 1'b0;
+`endif
+  wire [5:0] fp_pipe_decode_win_last = (fp_add7_needs_byte6 || fp_mov7_needs_byte6) ? 6'd6 : 6'd5;
+  // A raw U/V decode can consume two complete fixed decoder windows.  This is
+  // 12 bytes in the original six-byte profile and 14 bytes only when the
+  // seven-byte SIB+disp32 ADD profile is explicitly enabled.  A predecoded
+  // build reads descriptors rather than raw V bytes; its cross-line V is
+  // already fail-closed by uc_v_avail, so retain its established 12-byte
+  // port-B policy instead of imposing an avoidable fetch/prefetch penalty.
+`ifdef VEN_UOPCACHE
+  localparam logic [5:0] FP_PAIR_DECODE_WIN_BYTES = 6'd12;
+`else
+  localparam logic [5:0] FP_PAIR_DECODE_WIN_BYTES =
+      {FP_DECODE_WIN_LAST[4:0], 1'b0} + 6'd2;
+`endif
 `ifdef VEN_UOPCACHE
   // P0-11 predecoded µop-cache fast-path read wires (driven by u_uopcache). The
   // shallow eight-entry bank covers the usual line; a small tail bank covers dense
   // lines without turning the timing path into a monolithic wide selector. Still
   // denser lines leave their byte-map entries invalid and safely re-predecode.
   localparam int UC_BASE_SLOTS = 8;
+`ifdef VEN_UOP_16_SLOTS
+  localparam int UC_TAIL_SLOTS = 8;
+`else
   localparam int UC_TAIL_SLOTS = 4;
+`endif
+  localparam int UC_TAIL_IDXW = $clog2(UC_TAIL_SLOTS);
+`ifdef VEN_UOP_POSTPUBLISH_EXT
+  // Experimental only: the uop-cache still publishes its normal twelve-action
+  // foreground prefix, then may recover later legal boundaries while no fill is
+  // queued.  Keep this opt-in until snapshot/profile gates establish a win.
+  localparam bit UC_POSTPUBLISH_EXT = 1'b1;
+`else
+  // The larger tail must not lengthen the foreground fill service. Publish
+  // its first twelve actions normally, then extend only while refill is idle.
+  localparam bit UC_POSTPUBLISH_EXT = (UC_TAIL_SLOTS > 4);
+`endif
+`ifdef VEN_UOP_TAIL_LOCAL
+  // Experimental only: a complete descriptor near the physical I-cache-line
+  // tail may be predecoded from its actual local span instead of requiring an
+  // unrelated fixed-window suffix in the following line. The leaf-level miter
+  // proves that relaxation; keep this default-off until a whole-core lockstep
+  // and profile establish both correctness and a measurable benefit.
+  localparam bit UC_TAIL_LOCAL = 1'b1;
+`else
+  localparam bit UC_TAIL_LOCAL = 1'b0;
+`endif
+`ifdef VEN_UOP_NO_RESYNC_FIXED_UD
+  // Emergency A/B escape hatch for a hardware diagnosis.  This is deliberately
+  // a negative opt-out: the normal uop-cache profile resynchronizes over the
+  // architecturally fixed two-byte FF /7 register-form #UD encoding.  The
+  // walker never maps or executes that form; it only permits a later, separate
+  // instruction boundary in the same line to remain predecoded.
+  localparam bit UC_RESYNC_FIXED_UD = 1'b0;
+`else
+  // Promoted after the scanner, cache-geometry, exact-#UD/IRET/direct-target,
+  // and full Quake functional lockstep ladders passed.  This is independent of
+  // the optional post-publish walker extension and adds no descriptor storage
+  // or read-side timing cone.
+  localparam bit UC_RESYNC_FIXED_UD = 1'b1;
+`endif
   fpd_t        uc_baseA [UC_BASE_SLOTS], uc_baseB [UC_BASE_SLOTS];
   fpd_t        uc_tailA [UC_TAIL_SLOTS], uc_tailB [UC_TAIL_SLOTS];
   logic        uc_bvA [IC_LINE],  uc_bvB [IC_LINE];   // byte offset is a boundary
   logic [3:0]  uc_bsA [IC_LINE],  uc_bsB [IC_LINE];   // ...maps to {bank,slot[2:0]}
   logic        uc_pdvA, uc_pdvB;                      // line is predecoded-valid
+  // An invalid map entry normally carries an all-zero payload.  The walker may
+  // use payload=2 for one narrowly audited, non-executable REP-string short
+  // fetch descriptor.  Keep that payload separate from a real slot selection:
+  // an invalid entry must never steer u_d_raw to an unrelated cached uop.
+  logic        uc_ubvalid, uc_updvalid, uc_short_sfetch;
+  logic        uc_fwait_known;
+  logic [3:0]  uc_umap_payload, uc_short_len;
   logic        uop_hit, uc_v_avail;                   // flin on boundary / V resident
   logic        uc_u_in_b;                            // H-15: U's line is in port B
+`ifdef VEN_UOP_CROSSPAIR
+  logic uc_v_buffer_b, uc_v_source_valid;
+`endif
 `endif
 
   // M2S.1: the FETCH LINEAR address. The architectural `eip` carries the
@@ -4093,7 +4545,7 @@ module core
   // case) is unmodeled. The pseg corpus never exercises wrap.
   logic [31:0] fbase, flin;
   assign fbase = seg_base[SG_CS];
-  assign flin  = fbase + eip;
+  assign flin = fbase + eip;
 
   // icache addressed line-read drives: line A = flin's 32-byte line, line B = the
   // next line (the fetch/V window can straddle into it). The per-line hit way is
@@ -4146,9 +4598,12 @@ module core
                 || (rdB_set_q==fa_set && rdB_way_q==fa_way && !ic_rd_collB);
     ic_fb_avail = (rdA_set_q==fb_set && rdA_way_q==fb_way && !ic_rd_collA)
                 || (rdB_set_q==fb_set && rdB_way_q==fb_way && !ic_rd_collB);
-    // the fast-path decode window is at most 12 bytes (ub 6 + vb up to len 6 + 6);
-    // it straddles into the next line iff flin's byte offset + 12 > 32.
-    ic_win_straddle = ({1'b0,flin[4:0]} + 6'd12) > 6'd32;
+    // A raw U/V decode may inspect two fixed decoder windows.  In the normal
+    // profile this is 12 bytes; a raw VEN_FAST_MEM_ADD+VEN_FAST_MEM_ADD7
+    // profile widens it to 14.  The extra residency check prevents a V
+    // candidate whose bytes cross a line from being decoded from a stale BRAM
+    // buffer. Predecoded V candidates use tagged descriptors instead.
+    ic_win_straddle = ({1'b0,flin[4:0]} + FP_PAIR_DECODE_WIN_BYTES) > 6'd32;
     ic_fetch_ready  = ic_fa_avail && (!ic_win_straddle || ic_fb_avail);
   end
 `endif
@@ -4230,34 +4685,83 @@ module core
     // fix. Neither define is in the deployed set, so nothing shipping changes.
     uc_u_in_b = 1'b0;
 `endif
-    uc_uoff  = flin[4:0];
-    uc_ubank = uc_u_in_b ? uc_bsB[uc_uoff][3]   : uc_bsA[uc_uoff][3];
-    uc_uslot = uc_u_in_b ? uc_bsB[uc_uoff][2:0] : uc_bsA[uc_uoff][2:0];
-    if (uc_ubank)
-      u_d_raw = uc_u_in_b ? uc_tailB[uc_uslot[1:0]] : uc_tailA[uc_uslot[1:0]];
-    else
-      u_d_raw = uc_u_in_b ? uc_baseB[uc_uslot] : uc_baseA[uc_uslot];
-    // V begins right after U. Look up its OWN map entry even when it remains in
-    // U's line: that preserves the base->tail crossing and makes any sparse tail
-    // safely unavailable rather than wrapping a slot index.
+    uc_uoff         = flin[4:0];
+    uc_updvalid     = uc_u_in_b ? uc_pdvB : uc_pdvA;
+    uc_ubvalid      = uc_updvalid &&
+                       (uc_u_in_b ? uc_bvB[uc_uoff] : uc_bvA[uc_uoff]);
+    uc_umap_payload = uc_u_in_b ? uc_bsB[uc_uoff] : uc_bsA[uc_uoff];
+    uc_short_len    = uc_umap_payload;
+    // The bmap payload is meaningful as a bank/slot selector only when its
+    // valid bit is set.  This also keeps the short-fetch descriptor from
+    // contaminating u_d_raw, V lookup, branch-prefetch, or any diagnostic cone.
+    uc_ubank = uc_ubvalid ? uc_umap_payload[3]   : 1'b0;
+    uc_uslot = uc_ubvalid ? uc_umap_payload[2:0] : 3'd0;
+    u_d_raw  = '0;
+    u_d_raw.len = 4'd1;
+    v_d_raw  = '0;
+    v_d_raw.len = 4'd1;
+    if (uc_ubvalid) begin
+      if (uc_ubank)
+        u_d_raw = uc_u_in_b ? uc_tailB[uc_uslot[UC_TAIL_IDXW-1:0]] : uc_tailA[uc_uslot[UC_TAIL_IDXW-1:0]];
+      else
+        u_d_raw = uc_u_in_b ? uc_baseB[uc_uslot] : uc_baseA[uc_uslot];
+    end
+`ifdef VEN_UOP_CROSSLINE
+    if (!uc_ubvalid && uc_cross_ready) u_d_raw = uc_cross_uop;
+`endif
+    // V begins right after U.  A same-line V may use the SAME tagged BRAM
+    // buffer as U, which preserves the base->tail crossing and makes any sparse
+    // tail safely unavailable rather than wrapping a slot index.
+    //
+    // Do not infer "the next line is port B" when V crosses this line.  Port B
+    // normally holds flin+32, but a predicted-target prefetch is allowed to put
+    // an unrelated target there while port A holds flin+32 and port B holds
+    // flin.  There is no independent tagged next-line selector yet.  Reading B
+    // in that state can pair U with a descriptor from the wrong line.  Fail
+    // closed: keep V unavailable so it is fetched as the next U through the
+    // established tagged-U path.  U itself remains a valid complete-in-line
+    // descriptor; this only loses an optional cross-line pair.
     uc_voff  = uc_uoff + {1'b0, u_d_raw.len};
     uc_v_in_a = ({1'b0,uc_uoff} + {2'b0,u_d_raw.len}) < 6'd32;
+`ifdef VEN_UOP_CROSSPAIR
+    // Select V's returned line independently. A predicted target may occupy
+    // either port; never infer successor identity from a port number.
+    uc_v_buffer_b = uc_u_in_b;
+    uc_v_source_valid = uc_updvalid;
+    if (!uc_v_in_a) begin
+      uc_v_buffer_b = !(rdA_set_q==flin_nl[5 +: IC_IDXW] &&
+                        rdA_way_q==ic_hit_way(flin_nl) && !ic_rd_collA);
+      uc_v_source_valid = ic_fb_avail && ic_present(flin_nl) &&
+                         (uc_v_buffer_b ? uc_pdvB : uc_pdvA);
+    end
+    uc_vbank = 1'b0; uc_vslot = 3'd0;
+    if (uc_v_source_valid && (uc_v_buffer_b ? uc_bvB[uc_voff] : uc_bvA[uc_voff])) begin
+      uc_vbank = uc_v_buffer_b ? uc_bsB[uc_voff][3] : uc_bsA[uc_voff][3];
+      uc_vslot = uc_v_buffer_b ? uc_bsB[uc_voff][2:0] : uc_bsA[uc_voff][2:0];
+      if (uc_vbank)
+        v_d_raw = uc_v_buffer_b ? uc_tailB[uc_vslot[UC_TAIL_IDXW-1:0]] : uc_tailA[uc_vslot[UC_TAIL_IDXW-1:0]];
+      else
+        v_d_raw = uc_v_buffer_b ? uc_baseB[uc_vslot] : uc_baseA[uc_vslot];
+    end
+`else
     if (uc_v_in_a) begin
       // H-15: V in U's line -> same buffer U came from, not unconditionally A.
       uc_vbank = uc_u_in_b ? uc_bsB[uc_voff][3]   : uc_bsA[uc_voff][3];
       uc_vslot = uc_u_in_b ? uc_bsB[uc_voff][2:0] : uc_bsA[uc_voff][2:0];
-      if (uc_vbank)
-        v_d_raw = uc_u_in_b ? uc_tailB[uc_vslot[1:0]] : uc_tailA[uc_vslot[1:0]];
-      else
-        v_d_raw = uc_u_in_b ? uc_baseB[uc_vslot] : uc_baseA[uc_vslot];
+      if (uc_u_in_b ? uc_bvB[uc_voff] : uc_bvA[uc_voff]) begin
+        if (uc_vbank)
+          v_d_raw = uc_u_in_b ? uc_tailB[uc_vslot[UC_TAIL_IDXW-1:0]] : uc_tailA[uc_vslot[UC_TAIL_IDXW-1:0]];
+        else
+          v_d_raw = uc_u_in_b ? uc_baseB[uc_vslot] : uc_baseA[uc_vslot];
+      end
     end else begin
-      uc_vbank = uc_bsB[uc_voff][3];
-      uc_vslot = uc_bsB[uc_voff][2:0];
-      if (uc_vbank)
-        v_d_raw = uc_tailB[uc_vslot[1:0]];
-      else
-        v_d_raw = uc_baseB[uc_vslot];
+      // Cross-line V is intentionally unavailable until it has an independent
+      // tagged A/B select.  Keep the default one-byte inert descriptor here;
+      // all architectural V consumers are qualified by uc_v_avail below.
+      uc_vbank = 1'b0;
+      uc_vslot = 3'd0;
     end
+`endif
     // re-evaluate the flag-dependent Jcc taken bit against the LIVE eflags.
     u_d = u_d_raw;
     if (u_d_raw.is_branch && u_d_raw.br_cond) u_d.br_taken = cond_true(u_d_raw.cc, eflags);
@@ -4270,29 +4774,75 @@ module core
   // S_PIPE !uop_ready arm). uc_v_avail mirrors the old v_bytes_ok residency for
   // the chained/straddle V slot.
   // H-15: validity must come from the SAME port the slots were read from.
-  assign uop_hit    = exec_issue_ok &&   // a flush cycle is never a predecode hit
-                      (uc_u_in_b ? (uc_pdvB && uc_bvB[flin[4:0]])
-                                 : (uc_pdvA && uc_bvA[flin[4:0]]));
+  // `uc_short_sfetch` remains an invalid-map entry by design: it is only a
+  // compact hint for S_FETCH, never an executable predecoded uop.
+  // Keep all 16-bit-default code on the established raw-fetch path.  The
+  // descriptor is linear-address local, whereas a 16-bit REP can wrap IP while
+  // its string restart/next-IP machinery is still being audited.  This preserves
+  // the reference path for real mode, V86, and 16-bit protected code; the target
+  // 32-bit user/protected configurations remain eligible.
+  assign uc_short_sfetch = uc_updvalid && !uc_ubvalid &&
+                         ((uc_short_len == 4'd2)
+`ifdef VEN_UOP_SLOW_LEN_HINT
+                          || ((uc_short_len >= 4'd3) && (uc_short_len <= 4'd8))
+`endif
+`ifdef VEN_UOP_FWAIT_FETCH
+                          || (uc_short_len == 4'd1)
+`endif
+                         )
+                       && !def16;
+`ifdef VEN_UOP_FWAIT_HINT
+  assign uc_fwait_known = uc_updvalid && !uc_ubvalid && (uc_short_len == 4'd1);
+`else
+  assign uc_fwait_known = 1'b0;
+`endif
+  assign uop_hit    = exec_issue_ok && ((uc_updvalid && uc_ubvalid)
+`ifdef VEN_UOP_CROSSLINE
+                                      || uc_cross_ready
+`endif
+                                      );
   // A V candidate is usable only when its OWN instruction boundary was stored.
   // The map check covers a sparse/overflowed walker tail, where U is covered but
   // its successor was deliberately not predecoded; it also makes the base-to-tail
   // successor explicit instead of relying on wrapping slot arithmetic.
-  assign uc_v_avail = uc_v_in_a
-                    ? (uc_u_in_b ? uc_bvB[uc_voff] : uc_bvA[uc_voff])
-                    : (uc_pdvB && uc_bvB[uc_voff]);
+`ifdef VEN_UOP_CROSSPAIR
+  assign uc_v_avail = uc_v_source_valid &&
+                      (uc_v_buffer_b ? uc_bvB[uc_voff] : uc_bvA[uc_voff]);
+`else
+  assign uc_v_avail = uc_v_in_a &&
+                      (uc_u_in_b ? uc_bvB[uc_voff] : uc_bvA[uc_voff]);
+`endif
 `ifdef VEN_UOPCACHE_CHECK
   // Structural-equivalence gate: keep the live ub/vb gather + reference decoders
+`ifdef VEN_UOP_CROSSPAIR
+  // A wrong-port pairing can have plausible metadata while executing the
+  // wrong instruction. Check the identity independently of the byte miter.
+  always_ff @(posedge clk) begin
+    if (rst_n && state==S_PIPE && pipe_bytes_ok && uop_hit &&
+        uc_v_avail && !uc_v_in_a) begin
+      if (uc_v_buffer_b) begin
+        assert (rdB_set_q==flin_nl[5 +: IC_IDXW] &&
+                rdB_way_q==ic_hit_way(flin_nl) && !ic_rd_collB && uc_pdvB)
+          else $fatal(1,"cross-line V selected unrelated/collided B descriptor");
+      end else begin
+        assert (rdA_set_q==flin_nl[5 +: IC_IDXW] &&
+                rdA_way_q==ic_hit_way(flin_nl) && !ic_rd_collA && uc_pdvA)
+          else $fatal(1,"cross-line V selected unrelated/collided A descriptor");
+      end
+    end
+  end
+`endif
   // and assert the slot read matches them for every issued flin. SIM-ONLY (this
   // path is NOT in the synth-probe build — that build defines VEN_UOPCACHE alone,
   // so the byte gather is truly absent from the netlist).
   fpd_t u_d_ref, v_d_ref;
   always_comb begin
-    for (int i=0;i<6;i++) ub[i] = ic_present(flin+i[31:0]) ? ic_byte(flin+i[31:0]) : 8'd0;
-    for (int i=0;i<6;i++) vb[i] = ic_byte(flin+{28'd0,u_d_ref.len}+i[31:0]);
+    for (int i=0;i<7;i++) ub[i] = ic_present(flin+i[31:0]) ? ic_byte(flin+i[31:0]) : 8'd0;
+    for (int i=0;i<7;i++) vb[i] = ic_byte(flin+{28'd0,u_d_ref.len}+i[31:0]);
   end
-  decode u_decode_ref (.ib0(ub[0]),.ib1(ub[1]),.ib2(ub[2]),.ib3(ub[3]),.ib4(ub[4]),.ib5(ub[5]),
+  decode u_decode_ref (.ib0(ub[0]),.ib1(ub[1]),.ib2(ub[2]),.ib3(ub[3]),.ib4(ub[4]),.ib5(ub[5]),.ib6(ub[6]),
                        .iflags(eflags), .def16(def16), .cycle_mode(cycle_mode), .uop(u_d_ref));
-  decode v_decode_ref (.ib0(vb[0]),.ib1(vb[1]),.ib2(vb[2]),.ib3(vb[3]),.ib4(vb[4]),.ib5(vb[5]),
+  decode v_decode_ref (.ib0(vb[0]),.ib1(vb[1]),.ib2(vb[2]),.ib3(vb[3]),.ib4(vb[4]),.ib5(vb[5]),.ib6(vb[6]),
                        .iflags(eflags), .def16(def16), .cycle_mode(cycle_mode), .uop(v_d_ref));
 
   // The uop cache is an optional timing implementation, not an alternate ISA
@@ -4315,6 +4865,42 @@ module core
       $fatal(1, "VEN_UOPCACHE_CHECK: predecoded slot differs from live decode");
     end
   end
+`ifndef SYNTHESIS
+  // A positive, simulation-only witness for directed cache tests.  The decode
+  // equivalence check above proves the contents of a hit, but it intentionally
+  // says nothing when a requested boundary never reaches the fast path.  A test
+  // may name any linear PC with +ven_uop_hit_pc=<hex> and require this final
+  // count to be nonzero.  Count a contiguous qualifying visit once, rather than
+  // once per stalled S_PIPE clock, so the witness is an execution entry count.
+  logic             uop_watch_en;
+  logic [31:0]      uop_watch_pc;
+  logic             uop_watch_was_hit;
+  longint unsigned  uop_watch_hits;
+
+  initial begin
+    uop_watch_pc      = 32'd0;
+    uop_watch_en      = $value$plusargs("ven_uop_hit_pc=%h", uop_watch_pc);
+    uop_watch_was_hit = 1'b0;
+    uop_watch_hits    = 0;
+  end
+
+  always_ff @(posedge clk) begin
+    if (!rst_n) begin
+      uop_watch_was_hit <= 1'b0;
+      uop_watch_hits    <= 0;
+    end else begin
+      if (uop_watch_en && cycle_mode && (state == S_PIPE) && pipe_bytes_ok &&
+          uop_hit && (flin == uop_watch_pc) && !uop_watch_was_hit)
+        uop_watch_hits <= uop_watch_hits + 1;
+      uop_watch_was_hit <= uop_watch_en && cycle_mode && (state == S_PIPE) &&
+                           pipe_bytes_ok && uop_hit && (flin == uop_watch_pc);
+    end
+  end
+
+  final if (uop_watch_en)
+    $display("[UOPCHECK] watch-hit flin=%08x entries=%0d",
+             uop_watch_pc, uop_watch_hits);
+`endif
 `endif
 `else
   // R1 phase-3: the fast-path decoder is now the `decode` leaf module
@@ -4323,43 +4909,93 @@ module core
   // exactly as the in-line `fp_decode(...)` calls read them. u_d/v_d are driven
   // by the instances; everything downstream consumes them unchanged.
   always_comb begin
-    for (int i=0;i<6;i++) ub[i] = ic_present(flin+i[31:0]) ? ic_byte(flin+i[31:0]) : 8'd0;
-    for (int i=0;i<6;i++) vb[i] = ic_byte(flin+{28'd0,u_d.len}+i[31:0]);
+    for (int i=0;i<7;i++) ub[i] = ic_present(flin+i[31:0]) ? ic_byte(flin+i[31:0]) : 8'd0;
+    for (int i=0;i<7;i++) vb[i] = ic_byte(flin+{28'd0,u_d.len}+i[31:0]);
   end
 
   decode u_decode (
-      .ib0(ub[0]), .ib1(ub[1]), .ib2(ub[2]), .ib3(ub[3]), .ib4(ub[4]), .ib5(ub[5]),
+      .ib0(ub[0]), .ib1(ub[1]), .ib2(ub[2]), .ib3(ub[3]), .ib4(ub[4]), .ib5(ub[5]), .ib6(ub[6]),
       .iflags(eflags), .def16(def16), .cycle_mode(cycle_mode), .uop(u_d)
   );
   decode v_decode (
-      .ib0(vb[0]), .ib1(vb[1]), .ib2(vb[2]), .ib3(vb[3]), .ib4(vb[4]), .ib5(vb[5]),
+      .ib0(vb[0]), .ib1(vb[1]), .ib2(vb[2]), .ib3(vb[3]), .ib4(vb[4]), .ib5(vb[5]), .ib6(vb[6]),
       .iflags(eflags), .def16(def16), .cycle_mode(cycle_mode), .uop(v_d)
   );
 `endif
+
+  `include "core_mem_chain.svh"
 
   // R1 phase-3: the pairing checker is now the `issue_uv` leaf module
   // (rtl/core/issue_uv.sv). pipe_pair_ok is the bare can-pair RULES decision;
   // pipe_pair below ANDs in cycle_mode + V-bytes-resident exactly as before.
   logic pipe_pair_ok;
-  issue_uv u_issue (.iu(u_d), .iv(v_d), .pair_ok(pipe_pair_ok));
+`ifdef VEN_PERF_PROFILE
+  logic [2:0] pipe_pair_reason;
+`endif
+  issue_uv u_issue (
+      .iu(u_d), .iv(v_d), .pair_ok(pipe_pair_ok)
+`ifdef VEN_PERF_PROFILE
+    , .pair_reason(pipe_pair_reason)
+`endif
+  );
 
+  // Keep the frontend-residency/admission cone separate from the large S_PIPE
+  // producer below.  The producer also consumes fp_pipe_rd_haz, while the FPU
+  // writer consumes pipe_fp_fast_exec_ok.  Combining all of those assignments in
+  // one procedural block makes the otherwise acyclic RAW-hazard interlock look
+  // like a cross-module combinational feedback path to both lint and synthesis.
+  // These predicates are intentionally pure frontend state: no FPU output may
+  // affect them.
   always_comb begin
     // M5 finding [med] (I-cache straddle): U is decodable+chargeable correctly iff
     // the line containing eip is resident AND, only when the instruction actually
     // crosses the 32-byte line boundary, the line containing its LAST byte too.
     // The oracle charges a second I-miss exactly when (vaddr&31)+size > 32
     // (verif/qemu-plugins/p5trace.c:428); it must NOT pre-charge a second-line
-    // miss for a short instruction near the line end. The 6-byte fast-path decode
+    // miss for a short instruction near the line end. The fixed fast-path decode
     // window can read into the next line, so require that straddle line for a SAFE
     // decode whenever the window crosses the boundary, but use the real decoded
     // length to decide whether a straddle miss is genuinely charged.
     pipe_bytes_ok = exec_issue_ok         // a flush cycle forces the refetch path
                     && ic_present(flin)
                     // window-straddle: need the next line present to decode safely
-                    && (({1'b0,flin[4:0]} + 6'd5 < 6'd32) || ic_present(flin + 32'd5))
+                    && (({1'b0,flin[4:0]} + fp_pipe_decode_win_last < 6'd32) ||
+                        ic_present(flin + {26'd0,fp_pipe_decode_win_last}))
                     // instruction-straddle: its last byte's line must be resident
                     && (({1'b0,flin[4:0]} + {2'b0,u_d.len} <= 6'd32)
                         || ic_present(flin + {28'd0,u_d.len} - 32'd1));
+  end
+
+  always_comb begin
+    // Do not fold this into pipe_bytes_ok: that raw residency predicate also
+    // drives the S_PIPE I-fill decision.  This stricter permit is only for a
+    // *new* fast side-effecting instruction.
+    pipe_frontend_ready = pipe_bytes_ok;
+`ifdef VEN_IC_BRAM
+    pipe_frontend_ready = pipe_frontend_ready && ic_fetch_ready;
+`endif
+`ifdef VEN_UOPCACHE
+    pipe_frontend_ready = pipe_frontend_ready && uop_hit && cycle_mode;
+`endif
+  end
+
+  // AGI is purely a function of the registered previous-issue destinations and
+  // the current U decode.  Keep it out of the large S_PIPE producer below:
+  // that producer also consumes cs_extent_fault, whose enforcement predicate
+  // deliberately consults the fast-issue eligibility (and therefore AGI).
+  // Keeping the two unrelated cones in one procedural block makes structural
+  // analysis conservatively infer a combinational feedback path through the
+  // synchronous-fault squash.  This is the same truth table as the former
+  // in-block calculation, merely an explicit cone boundary.
+  always_comb begin
+    pipe_agi = 1'b0;
+    if (u_d.addr_mask != 8'd0) begin
+      if (!agi_wr0[8] && u_d.addr_mask[agi_wr0[2:0]]) pipe_agi = 1'b1;
+      if (!agi_wr1[8] && u_d.addr_mask[agi_wr1[2:0]]) pipe_agi = 1'b1;
+    end
+  end
+
+  always_comb begin
     // V candidate sits right after U (decoded by the v_decode instance above,
     // from the vb[] byte window gathered at flin+lenU).
 
@@ -4369,22 +5005,19 @@ module core
     // driver can issue the fill's word-0 read on the detection clock — removing
     // the wasted transition clock, finding [med] I-miss off-by-one).
     pf_miss_fa = !ic_present(flin)         ? flin
-               : !ic_present(flin + 32'd5) ? (flin + 32'd5)
+               : !ic_present(flin + {26'd0,fp_pipe_decode_win_last})
+                                                   ? (flin + {26'd0,fp_pipe_decode_win_last})
                : (flin + {28'd0,u_d.len} - 32'd1);
     // !fp_issue_block: an interrupt or external debugger park abandons this clock
     // before S_PIPE issues, so it never enters S_PF and words 1..7 / fill_done never arrive. If
     // the fill were still started, the victim way would receive word 0 of the NEW line
     // while keeping the OLD line's tag/valid -- silently corrupting the first dword of
     // a still-resident, still-valid line. Do not start a fill we cannot finish.
-    pf_miss = (state==S_PIPE) && !fp_issue_block && (stall_cnt==7'd0) && !pipe_bytes_ok;
-
-    // AGI: a base/index reg used by U was written in the IMMEDIATELY-preceding
-    // fast-path issue clock (tracked in agi_wr0/agi_wr1; bit8=none).
-    pipe_agi = 1'b0;
-    if (u_d.addr_mask != 8'd0) begin
-      if (!agi_wr0[8] && u_d.addr_mask[agi_wr0[2:0]]) pipe_agi=1'b1;
-      if (!agi_wr1[8] && u_d.addr_mask[agi_wr1[2:0]]) pipe_agi=1'b1;
-    end
+    // A delayed admitted U-memory operation owns the S_PIPE address generator.
+    // It must never be reclassified as an I-fill just because a later executable
+    // invalidation makes the raw frontend window non-resident.
+    pf_miss = (state==S_PIPE) && !pipe_mem_active_q && !fp_issue_block &&
+              (stall_cnt==7'd0) && !pipe_bytes_ok;
 
     // pairing decision: V can pair only when U leads, no hazards, AND the V
     // candidate's FULL bytes are resident in the I-cache. A V branch can pair (it
@@ -4432,6 +5065,17 @@ module core
 `endif
              && !(u_d.w16 && (({1'b0,eip[15:0]} + {13'd0,u_d.len}) > 17'h0FFFF));
 
+    // FLD{const,ST(i)} may absorb a following free FXCH outside the ordinary
+    // U/V pairing rules, but it is still a two-instruction architectural
+    // boundary. Keep the V admission conditions in one predicate shared by
+    // the spine and the x87 writer: raw I$ bytes alone are not sufficient for
+    // a predecoded V slot, and STI/MOV-SS permits exactly one instruction.
+    fp_v_fold_ok = v_bytes_ok && !dbg_pair_block && !irq_shadow
+`ifdef VEN_UOPCACHE
+                && uc_v_avail
+`endif
+                && !(u_d.w16 && (({1'b0,eip[15:0]} + {13'd0,u_d.len}) > 17'h0FFFF));
+
     // M6 Erratum 59 (MOV moffs A2/A3 fails to pair): when errata enabled, an
     // A2/A3 moffs store (the U member) followed by an instruction that uses
     // (e)AX (as a source, base/index, or destination) triggers a FALSE EAX
@@ -4463,21 +5107,58 @@ module core
     // the point is that it is now structural rather than a hand-copy.
     // !fp_issue_block: do not start a speculative translation/page-walk on a
     // clock whose instruction is being abandoned (cf. task #25 cascade).
-    pipe_load_req  = (state==S_PIPE) && !fp_issue_block && pipe_bytes_ok && !fp_sys_bail &&
-                     u_d.is_mem && !u_d.is_store && !pipe_agi && (mispred_bubbles==3'd0);
-    pipe_store_req = (state==S_PIPE) && !fp_issue_block && pipe_bytes_ok && !fp_sys_bail &&
-                     u_d.is_store && !pipe_agi && (mispred_bubbles==3'd0);
-    pipe_load_base = u_d.base;
-    pipe_mem_seg   = u_d.mem_ss ? 3'(SG_SS) : 3'(SG_DS);
-    pipe_load_addr = (u_d.mem_base_en ? gpr_o[u_d.base] : 32'd0) + u_d.mem_disp
-                   + (u_d.mem_index_en ? (gpr_o[u_d.mem_index] << u_d.mem_scale) : 32'd0);
+    // A request may BEGIN only where the S_PIPE spine can issue it.  It then
+    // becomes the registered transaction packet below and is held independent
+    // of frontend-valid bits until the final mem_ack; see pipe_mem_active_q.
+    // cs_extent_fault has no address-classification dependency, so keeping it
+    // here prevents an over-CS-limit store from escaping before its #GP.  Data
+    // segment / page faults are intentionally discovered downstream, where the
+    // common bus squash owns their precise fault/replay semantics.
+    pipe_new_load_req  = (state==S_PIPE) && !pipe_mem_active_q && !fp_issue_block &&
+                         exec_issue_ok && pipe_frontend_ready &&
+                         (stall_cnt==7'd0) && (pending_mem_pen==7'd0) &&
+                         !fp_sys_bail && !cs_extent_fault && u_d.is_mem && !u_d.is_store &&
+                         !pipe_agi && (mispred_bubbles==3'd0)
+`ifdef VEN_FP_PIPE
+                         && !fp_pipe_rd_haz
+`endif
+                         ;
+    pipe_new_store_req = (state==S_PIPE) && !pipe_mem_active_q && !fp_issue_block &&
+                         exec_issue_ok && pipe_frontend_ready &&
+                         (stall_cnt==7'd0) && (pending_mem_pen==7'd0) &&
+                         !fp_sys_bail && !cs_extent_fault && u_d.is_store &&
+                         !pipe_agi && (mispred_bubbles==3'd0)
+`ifdef VEN_FP_PIPE
+                         && !fp_pipe_rd_haz
+`endif
+                         ;
+    pipe_new_mem_req = pipe_new_load_req || pipe_new_store_req;
+    pipe_load_req  = pipe_mem_active_q ? ((state==S_PIPE) && !pipe_mem_we_q)
+                                       : pipe_new_load_req;
+    pipe_store_req = pipe_mem_active_q ? ((state==S_PIPE) &&  pipe_mem_we_q)
+                                       : pipe_new_store_req;
+    pipe_load_base = pipe_u_eff.base;
+    pipe_mem_seg   = pipe_mem_active_q ? pipe_mem_seg_q
+                                        : (u_d.is_stack ? 3'(SG_SS)
+                                                        : (u_d.mem_ss ? 3'(SG_SS) : 3'(SG_DS)));
+    // PUSH/POP must not share the generic ModR/M address sum: the architectural
+    // stack address is SS:(ESP-4) for PUSH and SS:ESP for POP.  The packet latches
+    // this offset before any delayed memory completion, so the later ESP writeback
+    // cannot perturb a page walk, a split fragment, or a replayed request.
+    pipe_load_addr = pipe_mem_active_q ? pipe_mem_ea_q
+                                        : (u_d.is_stack
+                                           ? stk16(u_d.is_store ? (gpr_o[R_ESP] - 32'd4)
+                                                                 :  gpr_o[R_ESP])
+                                           : ((u_d.mem_base_en ? gpr_o[u_d.base] : 32'd0) + u_d.mem_disp
+                                            + (u_d.mem_index_en ? (gpr_o[u_d.mem_index] << u_d.mem_scale) : 32'd0)));
     // LEA uses the same integer AGU arithmetic as a checked U-side memory
     // access, but never asserts a memory request.  Keep a V-side equivalent
     // because LEA is UV-pairable; using only its base would silently corrupt
     // a paired disp/SIB LEA.
-    v_lea_addr = (v_d.mem_base_en ? gpr_o[v_d.base] : 32'd0) + v_d.mem_disp
-               + (v_d.mem_index_en ? (gpr_o[v_d.mem_index] << v_d.mem_scale) : 32'd0);
-    pipe_store_data = gpr_o[u_d.src];
+    v_lea_addr = (pipe_v_eff.mem_base_en ? gpr_o[pipe_v_eff.base] : 32'd0) + pipe_v_eff.mem_disp
+               + (pipe_v_eff.mem_index_en ? (gpr_o[pipe_v_eff.mem_index] << pipe_v_eff.mem_scale) : 32'd0);
+    pipe_store_data = pipe_mem_active_q ? pipe_mem_wdata_q
+                       : reg_read(u_d.src, u_d.w8 ? 3'd1 : 3'd4, u_d.src_hi8);
 
     // U datapath extracted to core/u_pipe.sv (R3, behaviour-preserving):
     // u_alu/u_flags/u_sh/u_shm1/u_shcf are driven by the u_pipe instance below
@@ -4488,22 +5169,22 @@ module core
     // path added a 32-bit rel to a 32-bit EIP with NO truncation, so every taken 16-bit branch
     // landed at an untruncated address and the guest wandered -- observed as cs=f000:eip=0x16
     // with no POST progress (UPDATE 281). w16 is 0 in user mode, so this is inert there.
-    u_tgt_raw = (eip + {28'd0,u_d.len}) + u_d.rel;
-    u_target  = u_d.w16 ? {16'd0, u_tgt_raw[15:0]} : u_tgt_raw;
+    u_tgt_raw = (pipe_commit_eip + {28'd0,pipe_u_eff.len}) + pipe_u_eff.rel;
+    u_target  = pipe_u_eff.w16 ? {16'd0, u_tgt_raw[15:0]} : u_tgt_raw;
     // BTB U predict: drive the module's comb predict port at this clock's U pc
     // (= eip) and read back its PRE-update predicted-taken (bpred_btb).
-    btb_u_query_pc = eip;
+    btb_u_query_pc = pipe_commit_eip;
     u_pred_taken = btb_u_pred;
 
     // V datapath (independent of U by the pairing rule, so reading the OLD gpr
     // state is correct for both).
     // V datapath extracted to core/v_pipe.sv (R3): v_alu/v_flags are driven by
     // the v_pipe instance below. The eip-relative V target stays here.
-    v_tgt_raw = ((eip + {28'd0,u_d.len}) + {28'd0,v_d.len}) + v_d.rel;
-    v_target  = v_d.w16 ? {16'd0, v_tgt_raw[15:0]} : v_tgt_raw;
+    v_tgt_raw = ((pipe_commit_eip + {28'd0,pipe_u_eff.len}) + {28'd0,pipe_v_eff.len}) + pipe_v_eff.rel;
+    v_target  = pipe_v_eff.w16 ? {16'd0, v_tgt_raw[15:0]} : v_tgt_raw;
     // BTB V predict: drive the module's comb predict port at the V pc
     // (= eip + u_d.len) and read back its PRE-update predicted-taken (bpred_btb).
-    btb_v_query_pc = eip + {28'd0,u_d.len};
+    btb_v_query_pc = pipe_commit_eip + {28'd0,pipe_u_eff.len};
     v_pred_taken = btb_v_pred;
 
 `ifdef VEN_IC_BRAM
@@ -4516,7 +5197,16 @@ module core
     // its own (correct) decode, and so a prefetch that does not redirect cannot strand
     // the straddle line. The read is registered (next-clock effect) — no comb loop.
     pf_redir = 1'b0; pf_redir_tgt = 32'd0;
+`ifdef VEN_UOPCACHE
+    // On a map hole u_d_raw is selected before its byte-map valid bit and can
+    // describe an unrelated old slot.  It must not steer the speculative B
+    // read to that stale descriptor's target: the pending S_FETCH needs B for
+    // flin's next line when its 16-byte window straddles.  A valid cached U
+    // branch retains the original target prefetch policy.
+    if (uop_hit && !ic_win_straddle) begin
+`else
     if (!ic_win_straddle) begin
+`endif
       if (u_d.is_branch && u_pred_taken) begin
         pf_redir = 1'b1; pf_redir_tgt = u_target;
       end else if (pipe_pair && v_d.is_branch && v_pred_taken) begin
@@ -4529,11 +5219,20 @@ module core
     // extracted to core/uv_common.sv (R3): driven by the u_uv_common instance.
   end
 
+  assign pipe_u_eff    = pipe_mem_active_q ? pipe_mem_u_q    : u_d;
+  assign pipe_v_eff    = pipe_mem_active_q ? pipe_mem_v_q    : v_d;
+  assign pipe_pair_eff = pipe_mem_active_q ? pipe_mem_pair_q : pipe_pair;
+  assign pipe_commit_eip = pipe_mem_active_q ? pipe_mem_eip_q : eip;
+
   // `mem_ack` is the fragment-engine/FSM-visible acknowledgement, not the raw
   // external bus acknowledgement.  For a non-crossing BFM access it is high on
   // the request clock; for a crossing operation it remains low through fragment
   // one and rises only with the correctly translated, merged fragment two.
   assign pipe_mem_wait = (pipe_load_req || pipe_store_req) && !mem_ack;
+  // A synchronous segmentation/#PF rejection never owns a transaction packet.
+  // Once admitted, page walks and FE settles retain the packet; start_fault
+  // clears it for an actual fault delivery.
+  assign pipe_mem_abort_now = sync_access_fault || perm_fault;
 
   // ---- canonical fast-path issue predicate (REVIEW Aug-1 C-01/H-01/M-01) ----
   // ONE signal decides "this instruction bails to the slow functional FSM". Every
@@ -4601,14 +5300,14 @@ module core
   // an INSTRUCTION BOUNDARY, and mid-occupancy is not one -- so hold the divert for
   // the few clocks until the op retires. Interrupts are level-held, so nothing is
   // lost; this delays acceptance, it does not drop it.
-  assign fp_irq_divert = (state == S_PIPE) && !fp_occ_pending && !dbg_fast_hold && !dbg_step_active
+  assign fp_irq_divert = (state == S_PIPE) && !fp_occ_pending && !pipe_mem_active_q &&
+                      !dbg_fast_hold && !dbg_step_active
                       && (smi_take || nmi_take || intr_take);
 `else
   // Without the sys fast path the spine has no interrupt arm at all (S_PIPE is
   // user-mode only there, and intr_take is gated on soc_en=0), so this is inert.
   assign fp_irq_divert = 1'b0;
 `endif
-  assign fp_issue_block = fp_irq_divert || dbg_fast_hold;
 
   // ---- debug facilities the fast path does NOT implement --------------------
   // core_fastpath.svh contains ZERO references to TF or to DR0-3. Both are handled
@@ -4636,16 +5335,362 @@ module core
   // Same class as the irq_shadow starvation, same conservative remedy.
   assign fp_dbg_active = eflags[8] || eflags[16] || (dr7[7:0] != 8'd0);
 
+  // REP STOS continuation is a compact front-end optimization for the same
+  // cycle-mode uop-short-fetch profile that proved the exact two-byte F3 AB
+  // descriptor.  It is general instruction-shape behavior, not a PC/address
+  // special case, but keeping it off outside that audited profile leaves the
+  // reference frontend unchanged while the acceptance ladder is extended.
+`ifdef VEN_UOP_SFETCH
+  assign rep_stos_cont_profile = cycle_mode;
+`else
+  assign rep_stos_cont_profile = 1'b0;
+`endif
+  // A system-mode continuation needs the S_PIPE event-acceptance arm.  Builds
+  // without VEN_SYS_FASTPATH retain the ordinary slow boundary in system mode.
+`ifdef VEN_SYS_FASTPATH
+  assign rep_stos_cont_sys_ok = 1'b1;
+`else
+  assign rep_stos_cont_sys_ok = !sys_mode;
+`endif
+  // A DMA/northbridge executable snoop has no retained decoded-command
+  // contract.  Ports 1/2 are the core's own physical SMC snoops; their I$ hit
+  // results capture the important temporal case where a delayed store
+  // invalidates the line BEFORE its terminal acknowledgement.  Do NOT key this
+  // on the raw ports 1/2: they are driven from this core's live store request
+  // and would close a S_PIPE request loop.
+`ifdef VEN_L1_AXI
+  assign rep_stos_cont_snoop_now = ic_snoop_valid;
+`else
+  assign rep_stos_cont_snoop_now = 1'b0;
+`endif
+  // A global executable flush, external snoop, or exact physical hit on either
+  // CPU-store snoop port invalidates the retained command's byte provenance.
+  // This is sampled both at arm/consume time and by the sticky history FF below
+  // so an early hit cannot disappear behind a delayed final acknowledgement.
+  assign rep_stos_cont_inval_now = exec_flush_all || rep_stos_cont_snoop_now ||
+                                   ic_snp1_hit || ic_snp2_hit ||
+                                   rep_stos_cont_icbp_snoop_hit;
+
+  // `str_next_eip == q_pc` is the post-decrement non-final-REP predicate
+  // established by S_EXEC; no next iteration exists on the final element.  The
+  // exact F3 AB / default-32-bit shape avoids all prefix, address-size, and
+  // IP-wrap variants until those have their own directed proofs.  Keep the
+  // executable-validity terms OUT of this shape: an invalidated candidate needs
+  // a one-shot forced S_FETCH/S_DECODE, not a silent fall-through into the
+  // ordinary frontend.
+  assign rep_stos_cont_shape = rep_stos_cont_profile && rep_stos_cont_sys_ok &&
+                               !fp_dbg_active &&
+                               (q_kind == K_STR) && (q_st == ST_STOS) &&
+                               q_rep && !q_repne && q_str_storedi &&
+                               !q_str_loadsi && !q_str_scandi &&
+                               (q_w == 3'd4) && (q_len == 4'd2) &&
+                               !q_cnt16 && !def16 && (str_next_eip == q_pc);
+
+  // Arm only after S_STORE's final acknowledgement.  A poisoned shape does
+  // not simply drop its token: the companion recovery marker below forces the
+  // proven slow fetch/decode path before the next REP element may execute.
+  assign rep_stos_cont_arm = rep_stos_cont_shape && exec_issue_ok &&
+                              !rep_stos_cont_poison_q && !rep_stos_cont_inval_now;
+`ifdef VEN_REP_MOVS_CONT
+  // Reuse the one-boundary retained-command token and its invalidation history,
+  // but not STOS's speculative pointer update or direct store preparation.
+  // MOVS always re-enters the checked source load with live ESI/EDI/ECX intact.
+  assign rep_movs_cont_shape = rep_stos_cont_profile && rep_stos_cont_sys_ok &&
+                               !fp_dbg_active && (q_kind == K_STR) &&
+                               (q_st == ST_MOVS) && q_rep && !q_repne &&
+                               q_str_loadsi && q_str_storedi && !q_str_scandi &&
+                               (q_w == 3'd4) && (q_len == 4'd2) &&
+                               !q_cnt16 && !def16 && (str_next_eip == q_pc);
+`else
+  assign rep_movs_cont_shape = 1'b0;
+`endif
+  assign rep_movs_cont_arm = rep_movs_cont_shape && exec_issue_ok &&
+                              !rep_stos_cont_poison_q && !rep_stos_cont_inval_now;
+  // Optional MOVSD load/execute fusion. The final, fully validated source ACK
+  // already captures the element data. Prepare the same destination/rollback
+  // record and pointer writes on that edge, without issuing any earlier store.
+  // Unlike continuation admission, this is inside an instruction: executable
+  // invalidation must not cancel a decoded element that has read its source.
+  // The next-element token still owns its usual sticky invalidation checks.
+  logic rep_movs_load_fuse;
+`ifdef VEN_REP_MOVS_LOAD_FUSE
+  assign rep_movs_load_fuse = rep_stos_cont_profile && rep_stos_cont_sys_ok &&
+                              (state == S_LOAD) && mem_ack && !xp_cross &&
+                              !fp_dbg_active && !tf_at_issue && !rf_at_issue &&
+                              (q_kind == K_STR) && (q_st == ST_MOVS) &&
+                              q_rep && !q_repne && q_str_loadsi &&
+                              q_str_storedi && !q_str_scandi &&
+                              (q_w == 3'd4) && (q_len == 4'd2) &&
+                              !q_cnt16 && !def16 && (gpr_o[R_ECX] != 32'd0);
+`else
+  assign rep_movs_load_fuse = 1'b0;
+`endif
+  // A next MOVSD source owner removes the mechanical S_PIPE continuation
+  // clock, not the architectural between-element event boundary. It exists
+  // only after the previous destination ACK and remains cancellable until
+  // its first source request or translation side effect. No later source
+  // can be read before the older destination is visible (overlapping MOVS).
+  logic rep_movs_stream_pending_q, rep_movs_stream_pending;
+  logic rep_movs_stream_arm, rep_movs_stream_commit;
+  logic rep_movs_stream_preissue_block, rep_movs_stream_preissue_redecode;
+`ifdef VEN_REP_MOVS_STREAM
+`ifndef VEN_REP_MOVS_CONT
+  initial $fatal(1, "VEN_REP_MOVS_STREAM requires VEN_REP_MOVS_CONT");
+`endif
+`ifndef VEN_REP_MOVS_LOAD_FUSE
+  initial $fatal(1, "VEN_REP_MOVS_STREAM requires VEN_REP_MOVS_LOAD_FUSE");
+`endif
+  assign rep_movs_stream_arm = rep_movs_cont_arm &&
+                               !tf_at_issue && !rf_at_issue && !dbg_block_issue &&
+                               !smi_take && !nmi_take && !intr_take &&
+                               !rep_stos_cont_redecode_q &&
+                               !pipe_mem_active_q && !fp_occ_pending &&
+                               !fp_async_pending &&
+                               (stall_cnt == 7'd0) && (pending_mem_pen == 7'd0) &&
+                               (str_store_addr[1:0] == 2'b00) &&
+                               (st_lin_nat[1:0] == 2'b00) && !xs_eff_act;
+  assign rep_movs_stream_commit = (state == S_STORE) && fsm_case_enabled &&
+                                  !fp_async_fault_hold && mem_ack && rep_movs_stream_arm;
+  assign rep_movs_stream_pending = rep_movs_stream_pending_q && (state == S_LOAD);
+  // Do not use live own-store snoops here: their request feedback would close
+  // a combinational loop. The sticky history retains previous-store SMC; the
+  // remaining terms are independent external executable invalidations.
+  assign rep_movs_stream_preissue_redecode = rep_movs_stream_pending &&
+                                             (rep_stos_cont_poison_q || exec_flush_all ||
+                                              rep_stos_cont_snoop_now || (eip != q_pc));
+  assign rep_movs_stream_preissue_block = rep_movs_stream_pending &&
+                                          (dbg_block_issue || fp_dbg_active ||
+                                           smi_take || nmi_take || intr_take ||
+                                           rep_movs_stream_preissue_redecode ||
+                                           !rep_stos_cont_profile || !rep_stos_cont_sys_ok ||
+                                           !exec_issue_ok || pipe_mem_active_q ||
+                                           fp_occ_pending || fp_async_pending ||
+                                           (stall_cnt != 7'd0) || (pending_mem_pen != 7'd0));
+  always_ff @(posedge clk) begin
+    if (!rst_n)
+      rep_movs_stream_pending_q <= 1'b0;
+    else if (rep_movs_stream_commit)
+      rep_movs_stream_pending_q <= 1'b1;
+    else if ((state != S_LOAD) || rep_movs_stream_preissue_block ||
+             sync_access_fault || perm_fault || xlate_miss || fe_xlate_pend || mem_req)
+      // Walk and FE-settle count as started, even with no physical source
+      // request yet. A/D effects and an accepted MMIO read cannot be replayed
+      // merely because an event arrives before the eventual destination ACK.
+      rep_movs_stream_pending_q <= 1'b0;
+  end
+`ifndef SYNTHESIS
+  always_ff @(posedge clk) begin
+    if (rst_n) begin
+      if (rep_movs_stream_commit &&
+          (gpr_we != '0 || q_kind != K_STR || q_st != ST_MOVS ||
+           gpr_o[R_ECX] == 32'd0 || str_next_eip != q_pc || xs_eff_act))
+        $error("MOVSSTREAM: next-source arm is not a completed nonfinal element");
+      if (rep_movs_stream_preissue_block &&
+          (mem_req || mem_req_pre_sq || fsm_case_enabled || gpr_we != '0))
+        $error("MOVSSTREAM: cancelled source owner escaped an access or GPR write");
+      if (rep_movs_stream_pending_q && state != S_LOAD)
+        $error("MOVSSTREAM: source preissue token survived outside S_LOAD");
+    end
+  end
+`endif
+`else
+  assign rep_movs_stream_pending_q = 1'b0;
+  assign rep_movs_stream_pending = 1'b0;
+  assign rep_movs_stream_arm = 1'b0;
+  assign rep_movs_stream_commit = 1'b0;
+  assign rep_movs_stream_preissue_block = 1'b0;
+  assign rep_movs_stream_preissue_redecode = 1'b0;
+`endif
+  assign rep_stos_cont_redecode_arm = (rep_stos_cont_shape || rep_movs_cont_shape) &&
+                                       (rep_stos_cont_poison_q || rep_stos_cont_inval_now);
+  // Consume only at the original architectural S_PIPE boundary, after its
+  // interrupt/debug priority arms.  `mispred_bubbles` is intentionally NOT an
+  // eligibility condition here.  A branch redirect into a slow instruction
+  // leaves the timing-model counter registered while S_FETCH/S_DECODE/S_EXEC/
+  // S_STORE run.  The non-executable descriptor always sends a rejected token
+  // back to S_FETCH before the generic bubble arm can drain it, permanently
+  // defeating continuation.  The count is deliberately left intact: this is a
+  // no-issue boundary, and the normal frontend after the final REP exit drains
+  // it exactly once, preserving the branch's calibrated timing cost.
+  // `fp_issue_block` suppresses every ordinary fast-path side-effect mirror on
+  // this boundary.  An accepted exact continuation prepares its descriptor
+  // here and begins the following clock in S_STORE; a rejected token instead
+  // returns through fetch/decode/S_EXEC using the preserved q_* command.
+  assign rep_stos_cont_recovery_need = rep_stos_cont_redecode_q ||
+                                        (rep_stos_cont_q &&
+                                         (rep_stos_cont_poison_q || rep_stos_cont_inval_now));
+  // `ready_noevent` is the counterfactual continuation admission predicate:
+  // it answers whether the retained command would be eligible at this exact
+  // S_PIPE boundary absent only the accepted fast-path IRQ/NMI/SMI diversion.
+  // It deliberately retains the debugger blockers.  Keep `fp_irq_divert` and
+  // the LIVE invalidation out of this predicate.  In particular, `hold` remains
+  // deliberately independent of the LIVE snoop hit:
+  // feeding that hit into fp_issue_block would recreate the prohibited
+  // request->SMC-snoop->I$-hit->issue-block->request combinational loop.
+  assign rep_stos_cont_ready_noevent = rep_stos_cont_q && (state == S_PIPE) &&
+                                      rep_stos_cont_profile && rep_stos_cont_sys_ok &&
+                                      !dbg_fast_hold && !fp_dbg_active &&
+                                      !pipe_mem_active_q && !fp_occ_pending &&
+                                      (stall_cnt == 7'd0) && (pending_mem_pen == 7'd0) &&
+                                      exec_issue_ok && !rep_stos_cont_poison_q &&
+                                      (eip == q_pc);
+  assign rep_stos_cont_would_take_noevent = rep_stos_cont_ready_noevent &&
+                                             !rep_stos_cont_inval_now;
+  // These two equations are algebraically identical to the former hold/take
+  // logic.  Naming the no-event forms makes the SMI-priority witness prove that
+  // an otherwise-ready continuation was preempted, rather than merely absent.
+  assign rep_stos_cont_hold = rep_stos_cont_ready_noevent && !fp_irq_divert;
+  assign rep_stos_cont_take = rep_stos_cont_would_take_noevent && !fp_irq_divert;
+
+  // A true REP STOSD stream is only enabled for the fully audited F3 AB,
+  // default-32-bit form.  The descriptor prepared after an ACK is a real next
+  // instruction element, so do not admit a shape that would need the legacy
+  // address-size, alignment-debt, split-store, or debug machinery.  Check both
+  // the architectural offset (the timing model's alignment domain) and the
+  // actual ES-linear address (the page/physical access domain): non-flat ES
+  // must not silently turn an apparently aligned descriptor into a crossing
+  // store.
+`ifdef VEN_REP_STOS_STREAM
+  assign rep_stos_stream_arm = rep_stos_cont_arm && !dbg_block_issue &&
+                               !smi_take && !nmi_take && !intr_take &&
+                               !rep_stos_cont_redecode_q &&
+                               (str_store_addr[1:0] == 2'b00) &&
+                               (st_lin_nat[1:0] == 2'b00) && !xs_eff_act &&
+                               !pipe_mem_active_q && !fp_occ_pending &&
+                               (stall_cnt == 7'd0) && (pending_mem_pen == 7'd0);
+  // A shadow descriptor may be cancelled only before it has performed any
+  // architectural access.  Once a request, FE translation settle, or DTLB walk
+  // begins, its final ACK is the next precise boundary.  In particular a walk
+  // can set A/D bits before the data write, so cancelling after xlate_miss
+  // would manufacture a boundary after a visible page-table side effect.
+  assign rep_stos_stream_pending = rep_stos_stream_q &&
+                                   !rep_stos_stream_started_q &&
+                                   (state == S_STORE);
+  assign rep_stos_stream_preissue_debug = rep_stos_stream_pending && dbg_block_issue;
+  assign rep_stos_stream_preissue_event = rep_stos_stream_pending &&
+                                           !rep_stos_stream_preissue_debug &&
+                                           (smi_take || nmi_take || intr_take);
+  // Do not use rep_stos_cont_inval_now here: it includes the live own-store
+  // snoop ports and would create a request -> snoop -> block -> request loop.
+  // The sticky poison captures an earlier own-store hit; these remaining terms
+  // are external executable invalidations only.
+  assign rep_stos_stream_preissue_poison = rep_stos_stream_pending &&
+                                            !rep_stos_stream_preissue_debug &&
+                                            !rep_stos_stream_preissue_event &&
+                                            (rep_stos_cont_poison_q || exec_flush_all ||
+                                             rep_stos_cont_snoop_now || (eip != q_pc));
+  assign rep_stos_stream_preissue_redecode = rep_stos_stream_preissue_poison;
+  // These are no-issue S_PIPE conditions in the legacy path.  Falling back to
+  // that proven boundary preserves its timing/debt ordering without letting an
+  // idle-high bus ACK retire an unissued shadow descriptor.
+  assign rep_stos_stream_preissue_throttle = rep_stos_stream_pending &&
+                                              !rep_stos_stream_preissue_debug &&
+                                              !rep_stos_stream_preissue_event &&
+                                              !rep_stos_stream_preissue_poison &&
+                                              (!rep_stos_cont_profile || !rep_stos_cont_sys_ok ||
+                                               !exec_issue_ok || pipe_mem_active_q || fp_occ_pending ||
+                                               (stall_cnt != 7'd0) ||
+                                               (pending_mem_pen != 7'd0));
+  assign rep_stos_stream_preissue_block = rep_stos_stream_preissue_debug ||
+                                           rep_stos_stream_preissue_event ||
+                                           rep_stos_stream_preissue_poison ||
+                                           rep_stos_stream_preissue_throttle;
+  // This is deliberately narrower than intr_take: it is the one exact point
+  // at which the PIC vector is consumed from an unissued shadow descriptor.
+  assign rep_stos_stream_intr_take = rep_stos_stream_pending &&
+                                      !rep_stos_stream_preissue_debug && intr_take;
+  // At an ACK, current own-store invalidation is safe to inspect because it
+  // only decides whether to create the *following* descriptor.  Events and a
+  // host debugger similarly force the normal S_PIPE boundary after this
+  // already-started element completes.
+  assign rep_stos_stream_continue = rep_stos_stream_q &&
+                                    rep_stos_stream_arm && !dbg_block_issue &&
+                                    !smi_take && !nmi_take && !intr_take &&
+                                    (eip == q_pc);
+`else
+  assign rep_stos_stream_arm                = 1'b0;
+  assign rep_stos_stream_continue           = 1'b0;
+  assign rep_stos_stream_pending            = 1'b0;
+  assign rep_stos_stream_preissue_debug     = 1'b0;
+  assign rep_stos_stream_preissue_event     = 1'b0;
+  assign rep_stos_stream_preissue_poison    = 1'b0;
+  assign rep_stos_stream_preissue_throttle  = 1'b0;
+  assign rep_stos_stream_preissue_redecode  = 1'b0;
+  assign rep_stos_stream_preissue_block     = 1'b0;
+  assign rep_stos_stream_intr_take          = 1'b0;
+`endif
+  // This is a no-issue S_PIPE boundary just like an accepted interrupt or a
+  // debugger park.  Keeping one shared blocker prevents stale U/V decode,
+  // GPR/FPU writeback, I-cache fills, or speculative page walks from escaping
+  // while the continuation selects S_EXEC.  Deliberately use `hold`, not the
+  // otherwise-ready `would_take_noevent`: the latter includes a LIVE
+  // invalidation and must not enter this no-combinational-loop mirror path.
+  assign fp_issue_block = fp_async_hold || fp_irq_divert || dbg_fast_hold ||
+                          rep_stos_cont_redecode_q || rep_stos_cont_hold;
+
+  // The poison has a deliberately independent owner.  Its SET must win over a
+  // same-edge decode because an executable invalidation is later in program
+  // order than the retained bytes.  A debugger can hold S_DECODE for multiple
+  // clocks after latching q_*; clear only on the first enabled decode edge so
+  // an invalidation observed while parked is not erased on the next held clock.
+  always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      rep_stos_cont_poison_q      <= 1'b0;
+      rep_stos_cont_decode_seen_q <= 1'b0;
+    end else begin
+      if (state != S_DECODE)
+        rep_stos_cont_decode_seen_q <= 1'b0;
+      else if (fsm_case_enabled)
+        rep_stos_cont_decode_seen_q <= 1'b1;
+
+      if (rep_stos_cont_inval_now)
+        rep_stos_cont_poison_q <= 1'b1;
+      else if ((state == S_DECODE) && !rep_stos_cont_decode_seen_q &&
+               fsm_case_enabled)
+        rep_stos_cont_poison_q <= 1'b0;
+    end
+  end
+
   // The system fast-read profile admits a data form only when ITS decoded
-  // default segment is a present, writable, full 4 GiB 32-bit segment.  The
-  // selector is carried from decode through the bus driver and address
-  // generator, so an EBP/ESP base can never accidentally be checked as DS.
+  // default segment is a present, writable normal data segment.  The selector
+  // is carried from decode through the bus driver and address generator, so an
+  // EBP/ESP base can never accidentally be checked as DS.
+  //
+  // The default FASTLOAD profile retains the original full-4-GiB fence.  An
+  // optional bounded profile can additionally admit a DS access whose OFFSET
+  // is in a page strictly before the segment's final offset page AND whose
+  // dword remains in that starting page.  That is a deliberately conservative
+  // proof that this core's four-byte fast access is wholly in range, without
+  // putting an EA+3 wide adder on the S_PIPE request cone.  It is only an admission filter: an out-of-range access falls back
+  // to the established slow FSM, which preserves the behaviour of builds that
+  // have segment enforcement disabled.  Require an actual protected-mode
+  // descriptor load and non-null selector on this finite branch so the
+  // PE-transition hidden-cache window never acquires a new fast path.
   logic sys_fp_load_ok;
 `ifdef VEN_SYS_FASTLOAD_FLAT
   assign sys_fp_load_ok = sys_fp_ok && !real_mode && cs_d
-                     && (seg_limit[pipe_mem_seg] == 32'hFFFF_FFFF)
                      && seg_attr[pipe_mem_seg][7] && seg_attr[pipe_mem_seg][4]
-                     && !seg_attr[pipe_mem_seg][3] && seg_attr[pipe_mem_seg][1];
+                     && !seg_attr[pipe_mem_seg][3] && seg_attr[pipe_mem_seg][1]
+                     // A full-limit expand-down data segment has an empty
+                     // architectural offset range: valid offsets are strictly
+                     // greater than its limit but cannot exceed 0xffffffff.
+                     // It is therefore not a flat segment, even though its
+                     // base/limit fields resemble one.  Keep PUSH/POP (and any
+                     // other SS-selected fast memory form) on the checked FSM;
+                     // with VEN_SEG_ENFORCE that path raises the required #SS
+                     // before either the memory access or ESP writeback.
+                     && !seg_attr[pipe_mem_seg][2]
+                     && ((seg_limit[pipe_mem_seg] == 32'hFFFF_FFFF)
+`ifdef VEN_SYS_FASTLOAD_BOUNDED
+                         || ((pipe_mem_seg == 3'(SG_DS)) &&
+                             seg_pm_loaded[pipe_mem_seg] &&
+                             (seg_sel[pipe_mem_seg][15:2] != 14'd0) &&
+                             (pipe_load_addr[31:12] < seg_limit[pipe_mem_seg][31:12]) &&
+                             ((fp_mem_source_width(pipe_u_eff)==3'd1) ||
+                              (pipe_load_addr[11:0] <=
+                               ((fp_mem_source_width(pipe_u_eff)==3'd2) ? 12'hFFE : 12'hFFC))))
+`endif
+                        );
 `else
   assign sys_fp_load_ok = 1'b0;
 `endif
@@ -4670,7 +5715,10 @@ module core
   // is the same DS/SS base-plus-offset arithmetic without a combinational loop.
   assign sys_fp_store_lin = seg_base[pipe_mem_seg] + pipe_load_addr;
 `ifdef VEN_SYS_FASTSTORE_FLAT
-  assign sys_fp_store_ok = sys_fp_load_ok && (sys_fp_store_lin[11:0] <= 12'hFFC);
+  // One byte cannot straddle a page, including at offset FFF. Preserve the
+  // existing conservative dword filter without introducing an EA+size adder.
+  assign sys_fp_store_ok = sys_fp_load_ok &&
+                          (pipe_u_eff.w8 || (sys_fp_store_lin[11:0] <= 12'hFFC));
 `else
   assign sys_fp_store_ok = 1'b0;
 `endif
@@ -4678,6 +5726,10 @@ module core
   logic fp_sys_bail;
 `ifdef VEN_SYS_FASTPATH
   assign fp_sys_bail = !u_d.simple
+                    // The fast stack packet implements only a 32-bit SS.B=1
+                    // stack.  Real/V86 and 16-bit protected stacks retain the
+                    // mature slow path, including low-word wrap behavior.
+                    || (u_d.is_stack && stk_is16)
                     || (sys_mode && !sys_fp_ok)
                     // H-01: memory forms remain slow except the explicitly
                     // audited flat 32-bit DS/SS effective-address profiles above.
@@ -4690,59 +5742,182 @@ module core
   assign fp_sys_bail = !u_d.simple || sys_mode;
 `endif
 
+  // A CS-extent fault is a pre-issue check, not a second frontend consumer.
+  // Keep its common live-admission portion separate because register-form x87
+  // deliberately bypasses the integer `simple`/AGI/mispredict policy while
+  // still needs the same precise CS boundary fault. An already admitted memory
+  // packet was checked once and must survive executable invalidation.
+  assign pipe_cs_preissue_ok = (state == S_PIPE) && !pipe_mem_active_q &&
+                                !fp_issue_block && exec_issue_ok && pipe_frontend_ready &&
+                                (stall_cnt == 7'd0) && (pending_mem_pen == 7'd0)
+`ifdef VEN_FP_PIPE
+                                && !fp_pipe_rd_haz
+`endif
+                                ;
+  assign pipe_cs_issue_eligible = pipe_cs_preissue_ok &&
+                                  (pipe_u_eff.is_fp ||
+                                   (!fp_sys_bail && (mispred_bubbles == 3'd0) && !pipe_agi));
+
+  // The final integer S_PIPE commit event, shared by side-effect mirrors.  The
+  // admitted-memory half intentionally does not re-read frontend-valid signals:
+  // it has already passed them at admission and waits only for the FSM-visible
+  // memory completion.  The live half remains the normal fast-path issue gate.
+  assign pipe_int_commit = (state == S_PIPE) && fsm_case_enabled &&
+                           !fp_issue_block && !pipe_mem_wait &&
+                           (pipe_mem_active_q ||
+                            (!pipe_mem_active_q && exec_issue_ok && pipe_frontend_ready &&
+                             (stall_cnt == 7'd0) && (pending_mem_pen == 7'd0)
+`ifdef VEN_FP_PIPE
+                             && !fp_pipe_rd_haz
+`endif
+                             && !pipe_u_eff.is_fp && !fp_sys_bail &&
+                             (mispred_bubbles == 3'd0) && !pipe_agi));
+
+  // The deliberately narrow APIC self-SMI model samples a *full dword* ICR-low
+  // bus write exactly when that physical write completes without a backing-bus
+  // error.  It is not a general local-APIC destination router: only the self
+  // shorthand is the supported modelled source.  In particular, a byte/word
+  // store that happens to put 010 in delivery-mode bits [10:8], or an
+  // all-but-self broadcast, must not manufacture a local SMI.
+  //
+  // Keep the source fail-closed to guest instruction store sequencers.  This
+  // deliberately includes all ordinary operand families that can issue a
+  // dword MMIO write (integer/stack/string stores, ENTER/PUSHA/CMPXCHG8B,
+  // FSTP, FNSTENV/FNSAVE, and SGDT/SIDT), rather than only MOV/STOS.  It
+  // deliberately excludes physical page-table writes, SMM save-map traffic,
+  // interrupt-frame delivery, and task-switch bookkeeping: this is a narrow
+  // guest self-IPI model, not a general APIC device that snoops every internal
+  // microcode bus beat.  `fe_translatable` is a second, shared guard against
+  // physical-by-definition states accidentally entering this model.
+  assign smi_apic_guest_store = ((state == S_PIPE)  && pipe_store_req && pipe_int_commit) ||
+                                (state == S_STORE)  ||
+                                ((state == S_USEQ)  &&
+                                 ((q_kind == K_CX8B) || (q_sm == SM_PUSHA))) ||
+                                ((state == S_ENTER) && !ent_rd) ||
+                                (state == S_LCALL)  ||
+                                (state == S_SGDT)   ||
+                                (state == S_FSTORE) ||
+                                (state == S_FENV_ST);
+
+  // `mem_req` is the post-fragment physical request and `mem_ack` is its
+  // final FSM-visible acknowledgement: a page-2 probe has no request, while
+  // split-store fragments cannot pass the full-dword strobe qualifier.
+  // Recognition remains live in SMM.  `smi_take` independently blocks entry
+  // while `smm_active`, retaining a self-IPI made by an SMM handler until RSM
+  // instead of silently dropping it.
+  assign smi_apic_store_commit = sys_mode && smi_apic_guest_store &&
+                                 fe_translatable && mem_req && mem_we && mem_ack && smi_apic_bus_ok &&
+                                 (mem_addr == 32'hFEE0_0300) &&
+                                 (mem_wstrb == 4'b1111) &&
+                                 (mem_wdata[10:8] == 3'b010) &&
+                                 (mem_wdata[19:18] == 2'b01);
+
+  // The x87 writer has a distinct commit path (it may run while the integer
+  // mispredict/AGI bookkeeping is live), but its *live-arm* still must match
+  // the spine's trusted frontend and fault diversion.  The writer applies its
+  // own deferred-FP read hazard locally: feeding that output back into this
+  // core-level qualifier creates an unnecessarily fragile cross-module loop.
+  assign pipe_fp_live_arm = (state == S_PIPE) && fsm_case_enabled &&
+                            !pipe_mem_active_q && !fp_issue_block &&
+                            exec_issue_ok && pipe_frontend_ready &&
+                            (stall_cnt == 7'd0) && (pending_mem_pen == 7'd0) &&
+                            !pipe_mem_wait;
+
+  // The fast x87 paths must never consume an instruction whose architectural
+  // exception is decided in S_DECODE.  In particular, EM/TS #NM has priority
+  // over a pending #MF, and strict #MF applies to every fast-whitelisted form
+  // (all are waiting instructions).  Send them through the slow decoder rather
+  // than duplicating its fault delivery beside a state-mutating fast arm.
+  assign fp_fast_trap_bail = creg0[2] || creg0[3]
+`ifdef VEN_X87_MF_STRICT
+                           || (fstat[7] && creg0[5])
+`endif
+                           ;
+
+  // The legacy x87 fast path has no TF/RF/DR breakpoint machinery. Its
+  // documented system-mode contract is therefore a slow-FSM fallback when
+  // debugging is armed; make that final executable arm explicit so the spine,
+  // x87 writer and I-cache LRU cannot disagree. User-mode cycle kernels keep
+  // their existing x87 path because architectural debug delivery is system-only.
+  assign pipe_fp_fast_exec_ok = pipe_fp_live_arm && !(sys_mode && fp_dbg_active) &&
+                               !fp_fast_trap_bail;
+
 `ifdef VEN_FP_SHARED
 `ifdef VEN_FP_SHARED_DIRECT
   // A compact shared-FP handoff for the cycle decoder's existing register-only
   // whitelist.  This is deliberately NOT a second command producer: S_PIPE
-  // only captures the command record, and the sole fp_shared_cmd_valid producer
-  // remains S_FEXEC on the following edge.  That preserves stable cmd_* fields,
+  // normally captures the command record for S_FEXEC on the following edge.
+  // VEN_FP_SHARED_EARLY_CMD optionally accepts this same checked record at
+  // S_PIPE; it does not expand the opcode or execution-context whitelist.
+  // The baseline handoff preserves stable cmd_* fields,
   // precise x87 retirement, and the shared top's one-command ownership.
   //
   // The slow decoder remains mandatory for real/16-bit code (where its IP and
   // debug bookkeeping own the boundary), active debug state, strict pending-MF
   // delivery, and every x87 form with a memory operand or unsupported decode.
   logic        fp_shared_direct;
+  logic        fp_shared_mem_admit;
+`ifdef VEN_FP_MEM_ADMIT
+  assign fp_shared_mem_admit = pipe_u_eff.is_fp && pipe_u_eff.fp_kind==FK_MEM &&
+                              pipe_fp_fast_exec_ok && !fp_dbg_active &&
+                              (!sys_mode || (!real_mode && cs_d)) &&
+                              !pipe_agi && (mispred_bubbles==3'd0);
+`else
+  assign fp_shared_mem_admit = 1'b0;
+`endif
   fxop_e       fp_shared_direct_fxop;
   logic        fp_shared_direct_pop;
   always_comb begin
     fp_shared_direct_fxop = FX_NONE;
     fp_shared_direct_pop  = 1'b0;
-    unique case (u_d.fp_kind)
+    // Use the effective packet everywhere in this handoff.  Today the direct
+    // arm is already excluded while a delayed memory packet owns S_PIPE, but
+    // keeping the command map tied to the same descriptor that S_PIPE captures
+    // prevents a future packetized path from pairing a live eligibility test
+    // with stale raw-decode fields.
+    unique case (pipe_u_eff.fp_kind)
       FK_FLDC:   fp_shared_direct_fxop = FX_FLDCONST;
       FK_FLDSTI: fp_shared_direct_fxop = FX_FLD_STI;
       FK_FXCH:   fp_shared_direct_fxop = FX_FXCH;
       FK_ARITH:  fp_shared_direct_fxop = FX_AR_ST0_STI;
+      FK_ARITH_STI: fp_shared_direct_fxop = FX_AR_STI_ST0;
+      FK_ARITH_STI_POP: begin
+        fp_shared_direct_fxop = FX_AR_STI_ST0;
+        fp_shared_direct_pop  = 1'b1;
+      end
       FK_FSTP0: begin
         fp_shared_direct_fxop = FX_FST_STI;
         fp_shared_direct_pop  = 1'b1;
       end
       default: ;
     endcase
-    fp_shared_direct = u_d.is_fp && (fp_shared_direct_fxop != FX_NONE)
-                    && !fp_issue_block && !fp_dbg_active
+    fp_shared_direct = pipe_u_eff.is_fp && (fp_shared_direct_fxop != FX_NONE)
+                    // One authoritative fast-arm predicate also forces EM/TS
+                    // and strict pending-#MF through S_DECODE.  Keep the
+                    // historical unqualified debug exclusion as well: direct
+                    // shared-FP never owned architectural debug delivery.
+                    && pipe_fp_fast_exec_ok && !fp_dbg_active
                     // The fast decoder has no 16-bit IP-wrap mechanism.  Its
                     // system-mode use is therefore limited to the same 32-bit
                     // protected-code shape as the deployed fast path; user-mode
                     // is already a flat 32-bit verification environment.
                     && (!sys_mode || (!real_mode && cs_d));
-`ifdef VEN_X87_MF_STRICT
-    fp_shared_direct = fp_shared_direct && !(fstat[7] && creg0[5]);
-`endif
   end
 `endif
 `endif
 
   // ---- U-pipe datapath (core/u_pipe.sv, R3) --------------------------------
-  // Pre-read U operands; the fast path always reads full dwords, so these are
-  // exactly reg_read(idx,3'd4,1'b0) == gpr_o[idx]. The u_pipe instance drives
+  // Byte data operands select their low/high lane from the parent GPR.
+  // Other operands retain full-dword reads; u_pipe masks arithmetic width.
+  // The u_pipe instance drives
   // u_alu/u_flags/u_sh/u_shm1/u_shcf consumed by the eval above + S_PIPE commit.
   logic [31:0] u_dst_val, u_src_val;
-  assign u_dst_val = (u_d.is_mem && !u_d.is_load && !u_d.is_store && u_d.mem_lhs)
-                   ? mem_rdata : reg_read(u_d.dst, 3'd4, 1'b0);
-  assign u_src_val = (u_d.is_mem && !u_d.is_load && !u_d.is_store && !u_d.mem_lhs)
-                   ? mem_rdata : reg_read(u_d.src, 3'd4, 1'b0);
+  assign u_dst_val = (pipe_u_eff.is_mem && !pipe_u_eff.is_load && !pipe_u_eff.is_store && pipe_u_eff.mem_lhs)
+                   ? mem_rdata : reg_read(pipe_u_eff.dst, pipe_u_eff.w8 ? 3'd1 : 3'd4, pipe_u_eff.dst_hi8);
+  assign u_src_val = (pipe_u_eff.is_mem && !pipe_u_eff.is_load && !pipe_u_eff.is_store && !pipe_u_eff.mem_lhs)
+                   ? mem_rdata : reg_read(pipe_u_eff.src, pipe_u_eff.w8 ? 3'd1 : 3'd4, pipe_u_eff.src_hi8);
   u_pipe u_upipe (
-    .u_d       (u_d),
+    .u_d       (pipe_u_eff),
     .u_dst_val (u_dst_val),
     .u_src_val (u_src_val),
     .eflags    (eflags),
@@ -4755,16 +5930,46 @@ module core
   );
 
   // ---- V-pipe datapath (core/v_pipe.sv, R3) --------------------------------
-  // Pre-read V operands (full dwords == reg_read(idx,3'd4,1'b0)). The v_pipe
+  // Pre-read V operands with the same parent-GPR byte selection as U. The v_pipe
   // instance drives v_alu/v_flags consumed by the eval above + S_PIPE commit.
-  logic [31:0] v_dst_val, v_src_val;
-  assign v_dst_val = reg_read(v_d.dst, 3'd4, 1'b0);
-  assign v_src_val = reg_read(v_d.src, 3'd4, 1'b0);
+  logic [31:0] v_dst_val, v_src_val, v_input_flags;
+  // V executes architecturally after U. INC/DEC preserve CF and ADC/SBB
+  // consume it: the pre-pair carry is wrong when U just changed it. Forward
+  // only CF (the V ALU's sole arithmetic flag input), avoiding a second full
+  // flag-selection cone. A zero-count U shift preserves the incoming carry.
+  always_comb begin
+    v_input_flags = eflags;
+    if (pipe_pair_eff && pipe_u_eff.wflags)
+      v_input_flags[0] = pipe_u_eff.is_shift
+                      ? ((u_shift_cnt != 0) ? u_shcf : eflags[0])
+                      : u_flags[0];
+  end
+  logic [31:0] pipe_load_value;
+  assign pipe_load_value = fp_load_result(pipe_u_eff, mem_rdata);
+`ifdef VEN_LOAD_USE_FORWARD
+  logic [31:0] pipe_load_parent, v_dst_parent, v_src_parent;
+  logic pipe_load_bypass;
+  // Final fragment-engine result, not an AXI beat. Consumed only on the same
+  // pipe_int_commit as U writeback: stalls, walks and faults cannot retire V.
+  // Merge U's byte/word first, then select V's byte from the full parent GPR.
+  assign pipe_load_parent = reg_merge(gpr_o[pipe_u_eff.dst], pipe_load_value,
+                                      fp_operand_width(pipe_u_eff), pipe_u_eff.dst_hi8);
+  assign pipe_load_bypass = pipe_pair_eff && fp_load_use_forwardable(pipe_u_eff, pipe_v_eff);
+  assign v_dst_parent = (pipe_load_bypass && pipe_v_eff.dst == pipe_u_eff.dst)
+                      ? pipe_load_parent : gpr_o[pipe_v_eff.dst];
+  assign v_src_parent = (pipe_load_bypass && pipe_v_eff.src == pipe_u_eff.dst)
+                      ? pipe_load_parent : gpr_o[pipe_v_eff.src];
+  assign v_dst_val = pipe_v_eff.w8 ? fp_byte_read(v_dst_parent, pipe_v_eff.dst_hi8) : v_dst_parent;
+  assign v_src_val = pipe_v_eff.w8 ? fp_byte_read(v_src_parent, pipe_v_eff.src_hi8) : v_src_parent;
+`else
+  assign v_dst_val = reg_read(pipe_v_eff.dst, pipe_v_eff.w8 ? 3'd1 : 3'd4, pipe_v_eff.dst_hi8);
+  assign v_src_val = reg_read(pipe_v_eff.src, pipe_v_eff.w8 ? 3'd1 : 3'd4, pipe_v_eff.src_hi8);
+`endif
   v_pipe u_vpipe (
-    .v_d       (v_d),
+    .v_d       (pipe_v_eff),
     .v_dst_val (v_dst_val),
     .v_src_val (v_src_val),
-    .eflags    (eflags),
+    .eflags    (v_input_flags),
     .v_alu     (v_alu),
     .v_flags   (v_flags)
   );
@@ -4790,28 +5995,24 @@ module core
     logic issue_arm;
     logic u_res_taken, v_res_taken;
     logic [31:0] v_res_pc;
-    // !fp_issue_block: an abandoned clock resolves no branch, so it must not train the BTB.
-    issue_arm = (state==S_PIPE) && !fp_issue_block && !xlate_miss && !pipe_mem_wait && (stall_cnt==7'd0) &&
-                pipe_bytes_ok && (pending_mem_pen==7'd0) && !u_d.is_fp &&
-                // REVIEW Aug-1 M-01: canonical predicate (was `u_d.simple && !sys_mode`,
-                // which left eligible system-fast branches untrained in the BTB).
-                !fp_sys_bail && (mispred_bubbles==3'd0) && !pipe_agi;
+    // The packet-safe shared commit event is the only branch-training gate.
+    issue_arm = pipe_int_commit;
 
     // U taken: unconditional => 1, conditional => its architectural taken.
-    u_res_taken = u_d.br_cond ? u_d.br_taken : 1'b1;
+    u_res_taken = pipe_u_eff.br_cond ? pipe_u_eff.br_taken : 1'b1;
     // V member branch (paired): taken via U-forwarded flags (v_br_taken_eff).
-    v_res_pc    = eip + {28'd0,u_d.len};
+    v_res_pc    = pipe_commit_eip + {28'd0,pipe_u_eff.len};
     v_res_taken = v_br_taken_eff;
 
     btb_resolve_valid = 1'b0;
     btb_resolve_pc    = 32'd0;
     btb_resolve_taken = 1'b0;
     if (issue_arm) begin
-      if (u_d.is_branch) begin
+      if (pipe_u_eff.is_branch) begin
         btb_resolve_valid = 1'b1;
-        btb_resolve_pc    = eip;
+        btb_resolve_pc    = pipe_commit_eip;
         btb_resolve_taken = u_res_taken;
-      end else if (pipe_pair && v_d.is_branch) begin
+      end else if (pipe_pair_eff && pipe_v_eff.is_branch) begin
         btb_resolve_valid = 1'b1;
         btb_resolve_pc    = v_res_pc;
         btb_resolve_taken = v_res_taken;
@@ -4865,6 +6066,7 @@ module core
 `endif
       // ----- M2S.1: dual boot-mode reset (docs/m2s1-segmentation-spec.md) -----
       sys_mode<=boot_mode;
+      sgdt_probe_q<=1'b0; sgdt_probe_second<=1'b0;
       // A20 is enabled after reset in every supported platform configuration.
       // This must not be limited to system boot: the user-mode loader commonly
       // places its initial stack above 1 MiB, and an uninitialised user-reset
@@ -4956,6 +6158,11 @@ module core
         ss_b<=1'b1;   // C-07: user-mode stack is 32-bit -> stk16 stays identity
       end
       fetch_word<=3'd0; retire_valid<=1'b0; step<=4'd0;
+      sfetch_short_len_q<=4'd0;
+      rep_stos_cont_q<=1'b0;
+      rep_stos_cont_redecode_q<=1'b0;
+      rep_stos_stream_q<=1'b0;
+      rep_stos_stream_started_q<=1'b0;
 `ifdef VEN_UOPCACHE
       sfetch_uop_q<=1'b0;
 `endif
@@ -4998,6 +6205,21 @@ module core
 `endif
       fp_ready_cyc<=32'd0; pending_mem_pen<=7'd0; stall_cnt<=7'd0;
       fp_occ_pending<=1'b0; fp_issue_cyc<=32'd0;
+      pipe_mem_active_q <= 1'b0;
+      pipe_mem_we_q     <= 1'b0;
+      pipe_mem_ea_q     <= 32'd0;
+      pipe_mem_wdata_q  <= 32'd0;
+      pipe_mem_eip_q    <= 32'd0;
+      pipe_mem_seg_q    <= 3'(SG_DS);
+      pipe_mem_u_q      <= '0;
+      pipe_mem_v_q      <= '0;
+      pipe_mem_pair_q   <= 1'b0;
+      // A LOCK descriptor used to be left uninitialised until the first decode,
+      // which could expose an X/high lock qualifier on reset fetch traffic.  The
+      // reservation is architecturally empty at reset as well.
+      q_lock            <= 1'b0;
+      lock_session_q    <= 1'b0;
+      mem_lock_end      <= 1'b0;
 `ifdef VEN_FP_OVERLAP
       fp_busy_cyc<=32'd0;
 `endif
@@ -5019,7 +6241,7 @@ module core
       // M2S.2 paging: the TLB arrays are reset inside the tlb module's own rst_n
       // arm (rtl/mem/tlb.sv) — u_itlb / u_dtlb. Only the page-walk FSM regs (which
       // stay in the spine) are reset here.
-      walk_ret_state<=S_PIPE; walk_lin<=32'd0; walk_for_d<=1'b0;
+      walk_ret_state<=S_PIPE; walk_lin<=32'd0; walk_fault_pc<=32'd0; walk_for_d<=1'b0;
       walk_is_write<=1'b0; walk_set_dirty<=1'b0; walk_usr_lat<=1'b0; walk_step<=3'd0; walk_pde<=32'd0; walk_pte<=32'd0;
       walk_pde_addr<=32'd0; walk_pte_addr<=32'd0; walk_pf<=1'b0; pf_errcode<=3'd0;
       // M2S.3 IDT delivery state idle out of reset.
@@ -5087,7 +6309,79 @@ module core
       // per-cycle default: the fragment-abort request is a one-cycle pulse
       // (start_fault re-raises it; the engine block only reads it).
       fx_abort_q <= 1'b0;
+      // Like a completion ACK, a LOCK-session terminal event is a one-cycle
+      // notification.  The pin BIU latches it and releases only after any
+      // already-accepted physical beat has drained.
+      mem_lock_end <= 1'b0;
       frame_plan_start <= 1'b0;
+      // M2S.5: an APIC self-IPI with delivery mode SMI becomes pending only
+      // after its final physical write commits.  This is intentionally before
+      // the state machine: the current instruction still retires this edge and
+      // the normal S_DECODE/S_PIPE event boundary sees the request next clock.
+      if (smi_apic_store_commit) smi_pending <= 1'b1;
+`ifndef SYNTHESIS
+      if (smi_apic_store_commit && ven_apicsmilog_en)
+        $display("[APICSMI] COMMIT cyc=%0d fast=%0b state=%0d eip=%08x paddr=%08x data=%08x strb=%x",
+                 core_cyc, state == S_PIPE, state,
+                 (state == S_PIPE) ? pipe_commit_eip : q_pc,
+                 mem_addr, mem_wdata, mem_wstrb);
+`endif
+      // ---- admitted fast-U memory transaction --------------------------------
+      // A frontend-valid bit is an admission permit, not a level request
+      // qualifier.  Once a fast memory U op has started a page walk, FE settle,
+      // delayed L1 response, or fragment sequence, its decoded commit packet
+      // must survive executable invalidation until the final FSM-visible ack.
+      // S_WALK is intentionally not a clear condition: it is a detour of this
+      // access, and the fragment engine freezes its phase there as well.
+      if (pipe_mem_active_q && (state == S_PIPE) && !pipe_mem_abort_now &&
+          !xlate_miss && !fe_xlate_pend && mem_ack) begin
+`ifdef VEN_PIPE_MEM_CHAIN
+        if (mc_accept) begin
+          // The retiring packet remains the pre-edge owner. Only a checked,
+          // resident next read accepted by L1 may replace it on this edge.
+          pipe_mem_active_q <= 1'b1;
+          pipe_mem_we_q <= 1'b0; pipe_mem_wdata_q <= 32'd0;
+          pipe_mem_ea_q <= mc_ea_q; pipe_mem_eip_q <= mc_pc_q;
+          pipe_mem_seg_q <= mc_seg_q; pipe_mem_u_q <= mc_u_q;
+          pipe_mem_v_q <= mc_v_q; pipe_mem_pair_q <= mc_pair_q;
+        end else
+`endif
+        pipe_mem_active_q <= 1'b0;  // final completion commits this edge
+      end else if (!pipe_mem_active_q && pipe_new_mem_req && !pipe_mem_abort_now &&
+                   (xlate_miss || fe_xlate_pend || !mem_ack)) begin
+        pipe_mem_active_q <= 1'b1;
+        pipe_mem_we_q     <= pipe_new_store_req;
+        pipe_mem_ea_q     <= pipe_load_addr;
+        pipe_mem_wdata_q  <= pipe_store_data;
+        pipe_mem_eip_q    <= eip;
+        pipe_mem_seg_q    <= pipe_mem_seg;
+        pipe_mem_u_q      <= u_d;
+        pipe_mem_v_q      <= v_d;
+        pipe_mem_pair_q   <= pipe_pair;
+      end else if ((state == S_HALT) || (state == S_SHUTDOWN)) begin
+        pipe_mem_active_q <= 1'b0;
+      end
+      // A LOCK session starts only when the first real locked operand read is
+      // presented.  It deliberately survives S_WALK, frontend settle, and
+      // fragment phases: those are detours of the same RMW, not an abort.  The
+      // completion predicates use FSM-visible mem_ack, so a page-crossing store
+      // cannot release after its first fragment and CMPXCHG8B can cover two
+      // writes (or its architecturally no-write unequal result).
+      //
+      // Keep this early in the main owner block.  start_fault() and the late
+      // bus-error override below assign the clear later in the same clock, giving
+      // precise aborts priority over a speculative start/done observation.
+      if (lock_done) begin
+        q_lock         <= 1'b0;
+        lock_session_q <= 1'b0;
+        mem_lock_end   <= 1'b1;
+      end else if (lock_first_read) begin
+        lock_session_q <= 1'b1;
+      end else if ((state == S_HALT) || (state == S_SHUTDOWN)) begin
+        if (lock_session_q) mem_lock_end <= 1'b1;
+        q_lock         <= 1'b0;
+        lock_session_q <= 1'b0;
+      end
       // REVIEW1_Aug3 R2-H07: the PE-drop backstop for the now-EXPLICIT
       // seg_pm_loaded (every load site writes it directly; see the case arms).
       // Leaving protected mode clears every segment's loaded bit -- real-mode
@@ -5318,6 +6612,81 @@ module core
       // HIT, that one only on a miss -- but ordered first so the exclusion is stated,
       // not inferred. CR2 = the faulting linear address; the error code carries P=1,
       // which is what distinguishes this from the S_WALK not-present fault.
+      if (fp_async_hold || fp_async_fault_hold) begin
+        // Keep faults, walks and event delivery behind the older FP result.
+        // Its state-independent response owner continues running while held.
+      end else
+      if (rep_movs_stream_preissue_block) begin
+        // No source access has started: preserve the last element's exact
+        // post-state and let the mature S_PIPE path deliver pending events.
+        // In particular, do not consume an INTA vector here. An SMI produced
+        // by the previous store is visible here before the next source read.
+        rep_stos_cont_q <= 1'b0;
+        if (rep_movs_stream_preissue_redecode)
+          rep_stos_cont_redecode_q <= 1'b1;
+        state <= S_PIPE;
+`ifndef SYNTHESIS
+        if (ven_repcontlog_en)
+          $display("[MOVSSTREAM] CANCEL cyc=%0d pc=%08x esi=%08x edi=%08x ecx=%08x smi=%0b nmi=%0b intr=%0b dbg=%0b redecode=%0b",
+                   core_cyc, q_pc, gpr_o[R_ESI], gpr_o[R_EDI], gpr_o[R_ECX],
+                   smi_take, nmi_take, intr_take, dbg_block_issue || fp_dbg_active,
+                   rep_movs_stream_preissue_redecode);
+`endif
+      end else
+`ifdef VEN_REP_STOS_STREAM
+      // The shadow descriptor is an architectural between-element boundary only
+      // until it starts an access.  This priority sits ABOVE segment/permission/
+      // walk dispatch because an accepted event must not first create a page-walk
+      // A/D side effect for an element that has not issued.  Once `started` is
+      // set, this arm is unreachable and the normal S_STORE path completes the
+      // current descriptor before S_PIPE accepts the event.
+      if (rep_stos_stream_preissue_block) begin
+`ifndef SYNTHESIS
+        if (ven_repstreamlog_en)
+          $display("[REPSTREAM] CANCEL cyc=%0d pc=%08x dbg=%0b event=%0b poison=%0b throttle=%0b smi=%0b nmi=%0b intr=%0b exec_ok=%0b pen=%0d stall=%0d",
+                   core_cyc, q_pc, rep_stos_stream_preissue_debug,
+                   rep_stos_stream_preissue_event, rep_stos_stream_preissue_poison,
+                   rep_stos_stream_preissue_throttle, smi_take, nmi_take, intr_take,
+                   exec_issue_ok, pending_mem_pen, stall_cnt);
+`endif
+        if (rep_stos_stream_preissue_debug) begin
+          rep_stos_stream_q <= 1'b0;
+          rep_stos_stream_started_q <= 1'b0;
+          rep_stos_cont_q <= 1'b0;
+          // Preserve an independently observed executable invalidation through
+          // the debugger park; the following S_PIPE will force fresh decode.
+          if (rep_stos_cont_poison_q || exec_flush_all ||
+              rep_stos_cont_snoop_now || (eip != q_pc))
+            rep_stos_cont_redecode_q <= 1'b1;
+          state <= S_PIPE;
+        end else if (rep_stos_stream_preissue_event) begin
+          // Same boundary priority as S_DECODE/S_PIPE: SMI > NMI > INTR.
+          // `inta` is asserted only for the intr_take subcase (see its one
+          // shared assignment), so the PIC cannot consume a vector early.
+          if (smi_take) begin
+            smi_enter(eip);
+          end else if (nmi_take) begin
+            nmi_pending     <= 1'b0;
+            nmi_in_progress <= 1'b1;
+            start_fault(8'd2, 1'b0, 32'd0, eip);
+            dlv_ext         <= 1'b1;
+          end else begin
+            start_fault(inta_vector, 1'b0, 32'd0, eip);
+            dlv_ext         <= 1'b1;
+          end
+        end else begin
+          // SMC/flush recovery and timing throttles reuse the proven S_PIPE
+          // boundary.  The descriptor never reached a request, so there is no
+          // rollback or store retirement to perform here.
+          rep_stos_stream_q <= 1'b0;
+          rep_stos_stream_started_q <= 1'b0;
+          rep_stos_cont_q <= 1'b0;
+          if (rep_stos_stream_preissue_redecode)
+            rep_stos_cont_redecode_q <= 1'b1;
+          state <= S_PIPE;
+        end
+      end else
+`endif
       // ---- REVIEW2_Aug1 C-06: SEGMENT limit violation, delivered AT THE ACCESS ----
       // Ordered BEFORE the paging faults on purpose: segmentation precedes paging, so
       // an offset outside the segment must #GP without ever producing a linear address
@@ -5333,7 +6702,18 @@ module core
         // (IA-32: stack-segment limit and presence violations use vector 12). Every
         // violation was delivered as #GP, so a handler distinguishing the two -- which
         // is the normal way software grows a stack -- saw the wrong one.
-        start_fault((cur_seg_idx == 3'(SG_SS)) ? 8'd12 : 8'd13, 1'b1, 32'd0, q_pc);
+        // S_PIPE has not staged q_pc.  A delayed packet carries the restart
+        // address independently, so segment #SS/#GP has the same precise-PC
+        // rule as the D-TLB permission and walker #PF paths below.
+        // A privilege-switch frame still probes the staged NEW stack here.
+        // INT's insufficient-new-stack-room exception is #SS(selector+EXT),
+        // not the #SS(0) of an ordinary access to the installed stack (Intel
+        // 243191-001, INT, pp. 3-223/3-227). Keep its original delivery PC too.
+        start_fault((cur_seg_idx == 3'(SG_SS)) ? 8'd12 : 8'd13, 1'b1,
+                    ((state == S_INT_PROBE) && (cur_seg_idx == 3'(SG_SS)))
+                      ? selector_error_ext(int_new_ss, dlv_ext) : 32'd0,
+                    (state == S_INT_PROBE) ? int_src_pc :
+                    ((state == S_PIPE) ? pipe_commit_eip : q_pc));
       end else if (cs_fetch_fault || cs_extent_fault) begin
         // An instruction fetched from outside CS.limit is #GP(0), and like the data
         // side it precedes paging: no linear address should be translated for it.
@@ -5345,11 +6725,31 @@ module core
         creg2 <= cur_lin;
         // S_PIPE has not staged q_pc: a D-TLB permission fault on a fast
         // load (or an I-side fill fault) must save the current instruction,
-        // not the prior retired instruction.
-        start_fault(8'd14, 1'b1, perm_err, (state==S_PIPE) ? eip : q_pc);
+        // not the prior retired instruction.  An admitted delayed packet has
+        // its own captured restart PC for the same reason as a walker #PF.
+        start_fault(8'd14, 1'b1, perm_err,
+                    (state==S_PIPE) ? pipe_commit_eip : q_pc);
       end else if (xlate_miss) begin
+`ifdef VEN_REP_STOS_STREAM
+        // Starting a walk is an architectural start for a shadow descriptor:
+        // the walk can set page-table A/D bits before the store itself issues.
+        // Hold it through the eventual S_STORE ACK instead of cancelling it at
+        // a later event/SMC observation.
+        if (rep_stos_stream_pending) begin
+`ifndef SYNTHESIS
+          if (ven_repstreamlog_en)
+            $display("[REPSTREAM] START cyc=%0d pc=%08x kind=walk addr=%08x ecx=%08x",
+                     core_cyc, q_pc, mem_addr, gpr_o[R_ECX]);
+`endif
+          rep_stos_stream_started_q <= 1'b1;
+        end
+`endif
         walk_ret_state <= state;
         walk_lin       <= cur_lin;
+        // A fast packet's architectural PC is captured at admission.  Do not
+        // overwrite q_pc here: the walk remains non-retiring until it either
+        // resumes the packet or delivers the fault.
+        walk_fault_pc  <= (state == S_PIPE) ? pipe_commit_eip : q_pc;
         walk_for_d     <= cur_is_d;
         // REVIEW1_Aug2 C-02: a walk triggered BY THE PROBE must not set Dirty --
         // the store may still fault on page 1 and never happen. Phase 2 walks
@@ -5365,7 +6765,7 @@ module core
         // The frame-probe VALIDATION phase (S_INT_PROBE, frm_pg_markd=0) is the
         // same not-a-write class; its D-mark phase (frm_pg_markd=1) sets D
         // deliberately, pre-commit.
-        walk_set_dirty <= cur_is_w && !(xs_probing || fx_probing || fp_store_probing
+        walk_set_dirty <= cur_is_w && !(xs_probing || fx_probing || fp_store_probing || sgdt_probing
                                         || ((state==S_INT_PROBE) && !frm_pg_markd));    // may set D -> probe excluded
         walk_usr_lat   <= acc_usr;   // REVIEW1_Aug2 C-04: latch the requester's class
         walk_step      <= 3'd0;
@@ -5374,11 +6774,39 @@ module core
         walk_pde_addr  <= {creg3[31:12], cur_lin[31:22], 2'b00};
         state          <= S_WALK;
       end else if (fe_xlate_pend) begin
+`ifdef VEN_REP_STOS_STREAM
+        // FE_PIPE has committed to this descriptor's translation path.  Treat
+        // that registered settle as started too; it is conservative but keeps
+        // the event boundary on one side of all translation state changes.
+        if (rep_stos_stream_pending) begin
+`ifndef SYNTHESIS
+          if (ven_repstreamlog_en)
+            $display("[REPSTREAM] START cyc=%0d pc=%08x kind=fe addr=%08x ecx=%08x",
+                     core_cyc, q_pc, mem_addr, gpr_o[R_ECX]);
+`endif
+          rep_stos_stream_started_q <= 1'b1;
+        end
+`endif
         // +VEN_FE_PIPE page-crossing stall: HOLD 1 clock (no state/eip/issue/bus this
         // edge) while the fe_*_q micro-TLB register samples cur_lin's translate (the
         // separate always_ff below). Next edge the register is valid -> proceed.
         // Inert in the default build (fe_xlate_pend tied 0 -> this arm is unreachable).
       end else
+`ifdef VEN_REP_STOS_STREAM
+      // A delayed write response makes the descriptor non-cancellable on the
+      // first cycle a real request is presented.  An immediate ACK is handled
+      // by S_STORE below, which overwrites `started` while preparing (or ending)
+      // the following descriptor.
+      if (rep_stos_stream_pending && mem_req) begin
+`ifndef SYNTHESIS
+        if (ven_repstreamlog_en)
+          $display("[REPSTREAM] ISSUE cyc=%0d pc=%08x addr=%08x ecx=%08x ack=%0b xlate=%0b",
+                   core_cyc, q_pc, mem_addr, gpr_o[R_ECX], mem_ack, xlate_miss);
+`endif
+        if (!mem_ack)
+          rep_stos_stream_started_q <= 1'b1;
+      end
+`endif
       unique case (state)
         // dual-issue fast-path + icache-fill arms (S_RESET / S_PF / S_PIPE) —
         // relocated VERBATIM into core_fastpath.svh (RAW case-arms, the first run
@@ -5564,11 +6992,40 @@ module core
 
         default: begin state<=S_HALT; `ifdef VEN_DBG_CORE int_vec<=8'hED; `endif end
       endcase
+      if (fp_async_start) begin
+        // The shared FPU owns all operands/destination/pop metadata now.
+        // Integer retirement can advance; the trace observes the later result
+        // through its explicit owner/completion hooks.
+`ifdef VEN_FP_ASYNC_EARLY
+        // An early S_PIPE command captures q_pc/q_len on this very edge.
+        // next_eip still reflects the older q_* packet until the NBA update.
+        // Use the same checked current instruction extent as the direct arm.
+        eip <= fp_shared_pipe_cmd ? (eip + {28'd0, pipe_u_eff.len}) : next_eip;
+`else
+        eip <= next_eip;
+`endif
+        retire_valid <= 1'b1;
+        x87_touched_r <= 1'b1;
+        state <= S_PIPE;
+      end
 `ifdef VEN_L1_AXI
       // P1-1 #34: a fatal bus fault overrides every state arm (last-write-wins NBA) —
       // park in S_HALT + assert cpu_hung. Inert when bus_err=0 (the entire verified
       // 77/77+10/10 path), so it is byte-identical; absent in the default build.
-      if (real_bus && bus_err) begin hung_r <= 1'b1; state<=S_HALT; `ifdef VEN_DBG_CORE int_vec<=8'hEE; `endif end
+      if (real_bus && bus_err) begin
+        hung_r <= 1'b1;
+        state <= S_HALT;
+        // This is a late terminal override, so clear the RMW reservation here
+        // rather than waiting for the parked-state cleanup next clock.
+        if (lock_session_q || lock_first_read) mem_lock_end <= 1'b1;
+        q_lock <= 1'b0;
+        lock_session_q <= 1'b0;
+        rep_stos_stream_q <= 1'b0;
+        rep_stos_stream_started_q <= 1'b0;
+`ifdef VEN_DBG_CORE
+        int_vec <= 8'hEE;
+`endif
+      end
 `endif
     end
   end
@@ -5598,18 +7055,34 @@ module core
     gpr_wd = '{default:'0};
     if (!rst_n) begin
       // reset GPR seed is u_regfile's own synchronous arm; nothing to drive here.
-    end else if (perm_fault) begin
-      // REVIEW2 C-01: permission-#PF clock -- the FSM diverts to the fault, so the
-      // faulting instruction must not commit a register (it will be restarted).
-    end else if (xlate_miss) begin
-      // page-walk diversion clock: the FSM skips the whole case body -> no gpr write.
-    end else if (fe_xlate_pend) begin
-      // +VEN_FE_PIPE page-cross stall clock: FSM holds -> no gpr write.
+    end else if (!fsm_case_enabled) begin
+      // A fault, page-walk diversion, or frontend-translation settle skips the
+      // sequential case body, so it must produce no parallel GPR write either.
     end else begin
       case (state)
         `include "core_gpr_wb.svh"
         default: ;
       endcase
+    end
+    // A direct S_STORE protection/segment fault suppresses the FSM case body
+    // through fsm_case_enabled, so this cannot live only in the S_STORE case
+    // arm.  Apply the one shared restart override after the case instead.  It
+    // also replaces the old S_WALK-only !P predicate and covers the PSE-RSVD
+    // decision edge.  No other architectural GPR write is legal on any of
+    // these pre-commit fault clocks.
+    if (str_store_rollback_now) begin
+      gpr_we = '0;
+      gpr_wd = '{default:'0};
+      gpr_we[R_EDI] = 1'b1;
+      gpr_wd[R_EDI] = str_pre_edi;
+      if (q_str_loadsi) begin
+        gpr_we[R_ESI] = 1'b1;
+        gpr_wd[R_ESI] = str_pre_esi;
+      end
+      if (q_rep || q_repne) begin
+        gpr_we[R_ECX] = 1'b1;
+        gpr_wd[R_ECX] = str_pre_ecx;
+      end
     end
     // 16-bit SS: wrap the ESP writeback within 64k (SP-only changes; the high half of
     // ESP is preserved). Pairs with stk16() on the stack ADDRESS so a wrapping
@@ -5866,7 +7339,7 @@ module core
   // ===========================================================================
   // M2S.1 data segment base. For a slow-path data access the linear address is
   // seg.base + offset. The base depends on which segment the access uses:
-  //   - stack ops (push/pop/call/ret/leave/pushf/popf) use SS
+  //   - stack ops (push/pop/call/ret/enter/leave/pushf/popf) use SS
   //   - string source ([ESI]) uses DS, dest ([EDI]) uses ES
   //   - LGDT/LIDT pseudo-descriptor read uses DS
   //   - everything else uses q_seg (DS default, or a segment-override prefix)
@@ -5879,7 +7352,9 @@ module core
     if (q_is_pop || q_is_push || q_ct==CT_RETN || q_ct==CT_RETN_IMM ||
         (q_kind==K_CTRL && (q_ct==CT_CALLREL || q_ct==CT_CALLIND)) ||
         (q_kind==K_STKMISC && (q_sm==SM_POPF || q_sm==SM_PUSHF ||
-                               q_sm==SM_LEAVE || q_sm==SM_PUSHA || q_sm==SM_POPA)))
+                               q_sm==SM_ENTER || q_sm==SM_LEAVE || q_sm==SM_PUSHA || q_sm==SM_POPA)))
+      // ENTER level zero stores through stbase; nested ENTER addresses SS
+      // directly but publishes dseg. Both must ignore segment overrides.
       dseg = 3'(SG_SS);
     else if (q_kind==K_STR)
       // BUGFIX (Win95 relocation): the MOVS/LODS/CMPS SOURCE [ESI] segment is DS BY DEFAULT but is
@@ -5913,6 +7388,7 @@ module core
   // q_seg's base equals SS's base (both 0), so this is bit-identical everywhere
   // the gates run; only the user-proxy gs-override call changes.
   logic [31:0] opbase;
+  logic [2:0] opseg;
   always_comb begin
     // F3: PUSH r/m (FF /6) with a MEMORY source reads the operand from its OWN
     // segment (DS default, or an override) — only the stack WRITE uses SS. The dbase
@@ -5921,17 +7397,20 @@ module core
     // got 0 (reading SS:off instead of DS:off) -> iret to 0:0. Flat user/sys mode has
     // seg_base[q_seg]==seg_base[SS] (both 0) so make verify is bit-identical.
     if (q_is_push && q_mem_read)
-      opbase = seg_base[q_seg];
+      opseg = q_seg;
     else if ((q_ct==CT_CALLIND || q_ct==CT_JMPIND) && q_mem_read)
       // F3: the function-pointer READ of an indirect call/jmp uses the operand's
       // own segment (DS default / override / the new EBP->SS rule), NOT the SS
       // that dbase forces for the return-address PUSH. Was gated proxy_en &&
       // !sys_mode, so the SoC (sys_mode=1) read `call word [bx]` pointers from
       // SS:EA. Flat gates: seg_base[q_seg]==seg_base[SS] -> byte-identical.
-      opbase = seg_base[q_seg];
+      opseg = q_seg;
     else
-      opbase = dbase;   // unchanged path (SS for a call, etc.)
+      opseg = dseg;   // unchanged path (SS for a pop, etc.)
   end
+  // One provenance selector drives both the address base and access checks.
+  // PUSH/CALL's explicit memory read does not belong to their implicit SS.
+  assign opbase = seg_base[opseg];
 
   // F3: the STORE-side mirror of opbase. POP r/m (8F) reads the stack word (SS, via
   // the S_LOAD q_is_pop branch) but WRITES the popped value to its memory OPERAND,
@@ -5940,10 +7419,12 @@ module core
   // forward path) wrote the struct to the wrong segment. Flat mode: q_seg base == SS
   // base (0), so make verify is bit-identical. Every other store keeps dbase.
   logic [31:0] stbase;
+  logic [2:0] stseg;
   always_comb begin
-    if (q_is_pop && q_mem_write) stbase = seg_base[q_seg];
-    else                         stbase = dbase;
+    if (q_is_pop && q_mem_write) stseg = q_seg;
+    else                         stseg = dseg;
   end
+  assign stbase = seg_base[stseg];
 
   // M2S.1 — protected-mode segment LIMIT-check DECISION (spec §3, computed not
   // delivered). For an expand-up data/code segment the last byte of an access at
@@ -6468,6 +7949,12 @@ module core
   // instruction straddling the limit is still missed and is recorded as such.
   logic        cs_fetch_fault;
   logic        cs_extent_fault;   // R2-H07: decoded-extent half (VEN_SEG_ENFORCE)
+  // A synchronous access fault suppresses the bus request and every auxiliary
+  // producer fed by that request.  Keeping this one definition avoids a CS-limit
+  // fault taking #GP while an S_PIPE request still starts a fragment/snoop.
+  logic        sync_access_fault;
+  logic        fsm_case_enabled;
+  `include "core_fp_async.svh"
   always_comb begin
     logic [32:0] last_byte;
     logic [7:0]  a;
@@ -6668,8 +8155,12 @@ module core
     // subtraction (that also dodges the PE-transition window's real-mode base).
     cs_extent_fault = sys_mode && !real_mode && !v86
                   && seg_attr[SG_CS][7]
-                  && ((state == S_PIPE && (stall_cnt == 7'd0) && pipe_bytes_ok
-                       && (({1'b0, eip} + {28'd0, u_d.len} - 33'd1) > {1'b0, seg_limit[SG_CS]}))
+                  // A fast extent check is meaningful only for a trusted,
+                  // actually-admissible frontend instruction.  A delayed packet
+                  // was checked at admission, so it must not be reclassified from
+                  // a later raw uop/BRAM value while its memory seam is pending.
+                  && ((state == S_PIPE && pipe_cs_issue_eligible
+                       && (({1'b0, eip} + {28'd0, pipe_u_eff.len} - 33'd1) > {1'b0, seg_limit[SG_CS]}))
                    || (state == S_DECODE
                        && (({1'b0, eip} + {28'd0, d_len} - 33'd1) > {1'b0, seg_limit[SG_CS]})));
     seg_access_fault = cur_is_d && cur_seg_rel && !seg_ext_skip
@@ -6684,6 +8175,14 @@ module core
     cs_extent_fault  = 1'b0;
 `endif
   end
+
+  // A prepared REP-STOS shadow is still an instruction boundary.  Give an
+  // accepted event/debug/SMC cancellation precedence over a would-be access
+  // fault; the descriptor has not begun and must neither fault nor touch the
+  // bus on that clock.  Once it starts, the stream blocker is false and the
+  // ordinary precise fault machinery owns it unchanged.
+  assign sync_access_fault = (seg_access_fault || cs_fetch_fault || cs_extent_fault) &&
+                             !rep_stos_stream_preissue_block;
 
 
 
@@ -6932,15 +8431,33 @@ module core
       .clk(clk), .rst_n(rst_n),
       .lk_lin(cur_lin),  .lk_hit(itlb_lk_hit), .lk_phys(itlb_lk_phys),
       .lk_perm(itlb_lk_perm), .lk_dirty(itlb_lk_dirty),
+`ifdef VEN_PIPE_MEM_CHAIN
+      .next_lin(32'd0), .next_hit(), .next_phys(), .next_perm(), .next_dirty(),
+`endif
       .fill_en(tlb_fill_en && (tlb_fill_is_d==1'b0)),
       .fill_lin(tlb_fill_lin), .fill_pfn(tlb_fill_pfn), .fill_perm(tlb_fill_perm),
       .fill_big(tlb_fill_big), .fill_dirty(tlb_fill_dirty),
       .flush_en(tlb_flush)
   );
+  // The established default is the extracted 16-entry direct map.  A D-side
+  // associativity experiment is explicitly opt-in so its replacement policy
+  // and debug-tool geometry cannot silently change a normal verification or
+  // FPGA build.  Keep the u_dtlb instance name in every configuration: FPGA
+  // report scripts and state-crossover tooling locate it by hierarchy.
+`ifdef VEN_DTLB_ASSOC_4WAY
+  tlb_assoc #(.IS_D(1'b1), .TLB_SETS(16), .TLB_WAYS(4)) u_dtlb (
+`elsif VEN_DTLB_ASSOC_2WAY
+  tlb_assoc #(.IS_D(1'b1), .TLB_SETS(16), .TLB_WAYS(2)) u_dtlb (
+`else
   tlb #(.IS_D(1'b1), .TLB_ENTRIES(TLB_ENTRIES)) u_dtlb (
+`endif
       .clk(clk), .rst_n(rst_n),
       .lk_lin(cur_lin),  .lk_hit(dtlb_lk_hit), .lk_phys(dtlb_lk_phys),
       .lk_perm(dtlb_lk_perm), .lk_dirty(dtlb_lk_dirty),
+`ifdef VEN_PIPE_MEM_CHAIN
+      .next_lin(mc_query_lin), .next_hit(mc_lookup_hit), .next_phys(mc_lookup_phys),
+      .next_perm(mc_lookup_perm), .next_dirty(mc_lookup_dirty),
+`endif
       .fill_en(tlb_fill_en && (tlb_fill_is_d==1'b1)),
       .fill_lin(tlb_fill_lin), .fill_pfn(tlb_fill_pfn), .fill_perm(tlb_fill_perm),
       .fill_big(tlb_fill_big), .fill_dirty(tlb_fill_dirty),
@@ -6981,6 +8498,14 @@ module core
         end
         // D-side
         if (tlb_fill_en && tlb_fill_is_d) fe_dtlb_v <= 1'b0;
+`ifdef VEN_PIPE_MEM_CHAIN
+        else if (mc_accept && paging_on) begin
+          // Seed the existing page register from the accepted owner's checked
+          // lookahead translation. This is not another TLB entry.
+          fe_dtlb_page <= mc_lin_q[31:12]; fe_dtlb_phys <= mc_phys_q[31:12];
+          fe_dtlb_hit <= 1'b1; fe_dtlb_dirty <= mc_dirty_q; fe_dtlb_v <= 1'b1;
+        end
+`endif
         else if (paging_on && fe_translatable && cur_is_d &&
                  (!fe_dtlb_v || (fe_dtlb_page != cur_lin[31:12]))) begin
           fe_dtlb_page  <= cur_lin[31:12]; fe_dtlb_phys  <= dtlb_lk_phys[31:12];
@@ -7082,6 +8607,13 @@ module core
 
   task automatic smi_enter(input logic [31:0] resume_pc);
     begin
+`ifndef SYNTHESIS
+      if (fp_async_pending) $fatal(1, "FP_ASYNC: SMI before pending result drained");
+`endif
+      rep_stos_cont_q <= 1'b0;       // an SMI consumes the between-element boundary
+      rep_stos_cont_redecode_q <= 1'b0;
+      rep_stos_stream_q <= 1'b0;
+      rep_stos_stream_started_q <= 1'b0;
       smi_pending    <= 1'b0;
       smm_resume_eip <= resume_pc;   // this instruction restarts after RSM
       smm_step       <= 6'd0;        // start the save sequencer from the top
@@ -7124,11 +8656,20 @@ module core
                              input logic [31:0] err, input logic [31:0] fault_pc);
     begin
 `ifndef SYNTHESIS
+      if (fp_async_pending) $fatal(1, "FP_ASYNC: fault/event before pending result drained");
       if (ven_faultlog_en)
         $display("[FAULT] vec=%0d err=%08h pc=%08h state=%0d v86=%0b depth=%0d",
                  vec, err, fault_pc, int'(state), v86, dlv_depth);
 `endif
       // ===================================================================
+      // A continuation names an already-decoded instruction only while the
+      // immediately following S_PIPE boundary is still live.  Any delivery
+      // aborts that boundary; retaining it through a handler could execute
+      // stale code or skip a handler-visible restart point.
+      rep_stos_cont_q <= 1'b0;
+      rep_stos_cont_redecode_q <= 1'b0;
+      rep_stos_stream_q <= 1'b0;
+      rep_stos_stream_started_q <= 1'b0;
       // REVIEW2_aug2 H-08: ABORT an in-flight NT task RETURN. ntret_pend is set at the
       // IRET and consumed in S_LJMP's second descriptor beat; a fault BEFORE that beat
       // (a #PF on the back-link read or on the descriptor read itself) would otherwise
@@ -7178,6 +8719,20 @@ module core
       xp_pend <= 1'b0;
       xs_act  <= 1'b0;
       xs_ph   <= 2'd0;
+      // An admitted S_PIPE memory packet is precise like the fragment engine:
+      // a synchronous fault restarts the instruction, so no held request or
+      // stale decode may leak into the handler.
+      pipe_mem_active_q <= 1'b0;
+      // A fault aborts the decoded instruction, including a locked RMW.  This
+      // common precise-abort funnel is the only safe place to release its local
+      // DMA reservation: S_WALK is a legal lock-session detour, but every
+      // #PF/#GP/#DB delivery must abandon the interrupted instruction.
+      // Emit a distinct terminal event only after a real locked operand read
+      // began. A decode/translation fault before that point has no pin session
+      // to close; treating it as one could close an immediately following RMW.
+      if (lock_session_q || lock_first_read) mem_lock_end <= 1'b1;
+      q_lock         <= 1'b0;
+      lock_session_q <= 1'b0;
       // REVIEW1_Aug3 R2-C03: and the generic fragment engine -- a fault mid-sequence
       // aborts it (the FSM delivery arms take over the bus). The request register
       // keeps the engine's registers single-owned (the engine block clears them
@@ -7322,6 +8877,10 @@ module core
   task automatic arm_db(input logic [31:0] dr6_bits,
                         input logic [31:0] src_pc, input logic [31:0] ret_eip);
     begin
+      rep_stos_cont_q <= 1'b0;       // #DB is an architectural REP boundary
+      rep_stos_cont_redecode_q <= 1'b0;
+      rep_stos_stream_q <= 1'b0;
+      rep_stos_stream_started_q <= 1'b0;
       dr6         <= dr6 | dr6_bits;     // sticky status bits
       int_vec     <= 8'd1;
       int_ret_eip <= ret_eip;
@@ -7336,6 +8895,34 @@ module core
       state       <= real_mode ? S_RMINT_RD : S_INT_GATE;
     end
   endtask
+
+`ifdef VEN_FP_SHARED
+  // The area-shared x87 owns its architectural state at command acceptance or
+  // at its registered completion edge, so the core must launch an after-execute
+  // #DB from that same retirement boundary.  Keep the normal no-debug shared
+  // fast paths out of this helper; their callers select this only when the
+  // issue-time TF/RF/DR7 snapshot makes a debug decision necessary.  The order
+  // matches the ordinary S_EXEC and S_IO retire paths: an enabled execution
+  // breakpoint at the next EIP precedes the TF trap, while RF suppresses only
+  // the breakpoint (not TF).
+  task automatic retire_x87_shared(input logic [31:0] ret_eip);
+    logic [3:0] xbp;
+    begin
+      eip <= ret_eip;
+      x87_touched_r <= 1'b1;
+      xbp = (sys_mode && !rf_at_issue && (dr7[7:0] != 8'd0))
+          ? dr_match(seg_base[SG_CS] + ret_eip, 1'b1) : 4'd0;
+      if (sys_mode && xbp != 4'd0)
+        arm_db({28'd0, xbp}, q_pc, ret_eip);
+      else if (sys_mode && tf_at_issue)
+        arm_db(32'd1 << DR6_BS, q_pc, ret_eip);
+      else begin
+        retire_valid <= 1'b1;
+        state <= S_PIPE;
+      end
+    end
+  endtask
+`endif
 
   // Is the current bus access a DATA access (D-TLB) vs an instruction fetch
   // (I-TLB)? Fetch states are S_FETCH / S_PF / the S_PIPE icache fill; the
@@ -7495,6 +9082,10 @@ module core
         cur_lin_nat = pf_miss ? {pf_miss_fa[31:5],5'd0}
                                : (seg_base[pipe_mem_seg]+pipe_load_addr);
         cur_is_w_nat = pipe_store_req;
+        // A data packet supplies its own width; I-cache fill requests retain
+        // the default four-byte size even if stale decode bits name a byte op.
+        if (pipe_load_req || pipe_store_req)
+          cur_size = {1'b0, fp_mem_source_width(pipe_u_eff)};
       end
       // REVIEW_aug2 C-05: this must mirror core_bus_driver.svh's S_LOAD arm EXACTLY.
       // Two rows of the review's mismatch table were here:
@@ -7502,7 +9093,11 @@ module core
       //     16-bit stack (SS.B=0) the TLB looked up a different page than the bus drove;
       //   * XLAT had no case at all and fell through to opbase+q_ea, so a paged XLATB
       //     translated an unrelated page while the bus addressed DS+(E)BX+AL.
-      S_LOAD: begin cur_size = {1'b0, load_beat_w};
+      S_LOAD: begin
+        // Prove the full operand before the first access. At page two, only
+        // the remaining bytes belong to this beat; repeating the original
+        // width there spuriously rejects a legal operand ending at the limit.
+        cur_size = xp_pend ? 4'(xp_w - xp_first) : {1'b0, load_beat_w};
         if (q_is_pop || q_ct==CT_RETN || q_ct==CT_RETN_IMM ||
             (q_kind==K_STKMISC && q_sm==SM_POPF))      cur_lin_nat = dbase+stk16(gpr_o[R_ESP]);
         else if (q_kind==K_STKMISC && q_sm==SM_LEAVE)  cur_lin_nat = dbase+stk16(gpr_o[R_EBP]);
@@ -7527,7 +9122,7 @@ module core
       // (DOS-Quake go32 `lss esp,cs:[..]`: 2nd read read 0 -> null SS -> #GP). Mirror
       // the four bus-driver arms EXACTLY. Inert without paging (mem_xlate==lin).
       S_LOAD2: begin
-        cur_size = {1'b0, load_beat_w};
+        cur_size = xp_pend ? 4'(xp_w - xp_first) : {1'b0, load_beat_w};
         if (q_kind==K_BOUND || q_kind==K_CX8B) cur_lin_nat = dbase+q_ea+{28'd0,q_w};
         else if (q_seg_load)                   cur_lin_nat = dbase+q_ea+{28'd0,q_w};
         else if (q_jmpf_mem || q_callf_mem)    cur_lin_nat = opbase+q_ea+{28'd0,q_w};
@@ -7604,6 +9199,16 @@ module core
       S_SGDT: begin
         cur_is_w_nat = 1'b1;
         cur_lin_nat = dbase + q_ea + {29'd0, seg_step, 2'b00};
+        cur_size = seg_step ? 4'd2 : 4'd4;
+        seg_ext_ovr = 8'd6;
+        seg_ext_ovr_v = 1'b1;
+        seg_ext_skip = !sgdt_probe_q || sgdt_probe_second;
+        if (sgdt_probe_q) begin
+          cur_lin_nat = dbase + q_ea;
+          cur_size = 4'd1;
+          if (sgdt_probe_second)
+            cur_lin_nat = {cur_lin_nat[31:12] + 20'd1, 12'd0};
+        end
       end
       // C-03: the m80 third beat and the m16 forms move 2 bytes, not 4.
       S_FLOAD: begin cur_lin_nat = dbase+q_ea + {26'd0, f_step, 2'b00};
@@ -7874,6 +9479,14 @@ module core
       end
       default: cur_lin_nat = 32'd0;
     endcase
+    // A generic page-crossing beat proved its natural segment-relative
+    // extent before the fragment engine engaged. Subsequent page-2 phases
+    // redirect cur_lin to a page base only to translate/permission-probe that
+    // page; reapplying the original object width there spuriously extends the
+    // segment access past its already-legal end. Do not suppress paging or
+    // permissions, and keep a fault-delivery crossing (fx_abort_q) checkable.
+    if (fx_act && !fx_abort_q && (state != S_WALK))
+      seg_ext_skip = 1'b1;
   end
   // REVIEW1_Aug3 R2-C03: the redirect/forcing boundary. cur_lin_nat (the natural
   // per-state linear address, read by the engine's crossing detection and by
@@ -7978,6 +9591,12 @@ module core
     endcase
     // S_PIPE accesses memory only for a checked data read/store or an I-cache fill.
     if (state==S_PIPE && !(pipe_load_req || pipe_store_req || pf_miss)) translatable = 1'b0;
+    // A prepared stream descriptor is a genuine between-element boundary until
+    // it starts.  Do not let a simultaneous event/debug/SMC cancellation launch
+    // a DTLB walk (or report a permission fault) before the boundary can consume
+    // it.  A started descriptor never asserts this blocker and follows the
+    // ordinary translation path through final ACK.
+    if (rep_stos_stream_preissue_block || fp_async_hold) translatable = 1'b0;
     // Export the final predicate to module scope for the FE_PIPE micro-TLB
     // re-registration gate (below). Identical value to the local `translatable`.
     fe_translatable = translatable;
@@ -8025,7 +9644,7 @@ module core
     // phase deliberately KEEPS the clean-entry rewalk (that is how D gets set
     // pre-commit), and an S_INT_PUSH beat on a plan-covered page never misses.
     xlate_miss = paging_on && translatable && !fe_xlate_pend && !frm_pg_hit &&
-                 (cur_is_d ? (!fe_dtlb_hit || (cur_is_w && !xs_probing && !fx_probing && !fp_store_probing
+                 (cur_is_d ? (!fe_dtlb_hit || (cur_is_w && !xs_probing && !fx_probing && !fp_store_probing && !sgdt_probing
                                                  && !((state==S_INT_PROBE) && !frm_pg_markd)
                                                  && !fe_dtlb_dirty))
                            : !fe_itlb_hit);
@@ -8033,7 +9652,7 @@ module core
     xlate_miss = paging_on && translatable && !frm_pg_hit &&
                  (cur_is_d
                     ? (!dtlb_lk_hit ||
-                       (cur_is_w && !xs_probing && !fx_probing && !fp_store_probing
+                       (cur_is_w && !xs_probing && !fx_probing && !fp_store_probing && !sgdt_probing
                         && !((state==S_INT_PROBE) && !frm_pg_markd) && !dtlb_lk_dirty))
                     : !itlb_lk_hit);
 `endif
@@ -8061,8 +9680,9 @@ module core
     // REVIEW Aug-1 M-01: the trailing `!sys_mode` was the fifth hand-copy of the bail
     // condition. pipe_load_req already carries fp_sys_bail, so drop the duplicate.
     logic u_mem_acc;
-    u_mem_acc = !xlate_miss && !pipe_mem_wait && (pipe_load_req || pipe_store_req) &&
-                (stall_cnt==7'd0) && (pending_mem_pen==7'd0) && !u_d.is_fp;
+    // One shared commit event prevents the timing mirror from observing an
+    // admitted packet as a later raw decode after a frontend invalidation.
+    u_mem_acc = pipe_int_commit && (pipe_load_req || pipe_store_req);
 
     dc_acc_valid = 1'b0;
     dc_acc_addr  = 32'd0;
@@ -8105,9 +9725,8 @@ module core
   // VEN_L1_AXI (bus_mode=2): the D-cache TIMING model is redundant. Its only output,
   // dc_lu_hit, feeds the modeled D-miss PENALTY (`if(!dc_lu_hit) pen += P5_DMISS`) and
   // NEVER the load data/result. Under the real AXI/DDR bus that penalty is already
-  // suppressed (core_fastpath.svh `pending_mem_pen <= real_bus ? 0 : pen`) and the
-  // slow-path penalty is cycle_mode-gated (dead at the board's cycle_mode=0) — "mode-2
-  // timing is functional-only". So dropping the ~4.4k-cell dcache_timing instance is
+  // suppressed (core_fastpath.svh `pending_mem_pen <= real_bus ? 0 : pen`). So
+  // dropping the ~4.4k-cell dcache_timing instance is
   // functionally INERT here and relieves the in-context congestion (the model survived
   // synth only because cfg_cycle_mode is a runtime input). Tie dc_lu_hit=1 (always-hit
   // => no modeled D-miss penalty); the dc_acc_*/dc_lu_addr drivers prune as dead. The
@@ -8209,6 +9828,63 @@ module core
   logic [IC_TAGW-1:0]  icbp_tag [2];
   logic [IC_TAGW-1:0]  icbp_ptag [2];   // R2-H09: physical identity for the snoop clear
   logic                icbp_rr;      // round-robin insert pointer
+  // A bypass fill is a transaction too, even though it deliberately never
+  // makes an I-cache way valid.  An external DMA/northbridge write can arrive
+  // while its eight words are returning; there is no pre-edge icbp_v entry to
+  // invalidate then, so remember the matching snoop until the final word
+  // decides whether the one-shot executable window may be published.
+  logic                icbp_fill_active_q, icbp_fill_pz;
+  logic [IC_IDXW-1:0]  icbp_fill_set_q;
+  logic [IC_TAGW-1:0]  icbp_fill_ptag_q;
+  logic                icbp_fill_start;
+  logic                icbp_fill_snoop_cur, icbp_fill_snoop_live;
+
+  function automatic logic icbp_snoop_match(
+      input logic [IC_IDXW-1:0] match_set,
+      input logic [IC_TAGW-1:0] match_ptag);
+    begin
+      icbp_snoop_match = (icsnp_v1 &&
+                           (icsnp_a1[5 +: IC_IDXW] == match_set) &&
+                           (icsnp_a1[5+IC_IDXW +: IC_TAGW] == match_ptag)) ||
+                          (icsnp_v2 &&
+                           (icsnp_a2[5 +: IC_IDXW] == match_set) &&
+                           (icsnp_a2[5+IC_IDXW +: IC_TAGW] == match_ptag));
+`ifdef VEN_L1_AXI
+      icbp_snoop_match = icbp_snoop_match ||
+                         (ic_snoop_valid &&
+                          (ic_snoop_addr[5 +: IC_IDXW] == match_set) &&
+                          (ic_snoop_addr[5+IC_IDXW +: IC_TAGW] == match_ptag));
+`endif
+    end
+  endfunction
+
+  assign icbp_fill_start = ic_fill_en && (ic_fill_off == 5'd0);
+  // `cur` is used only on an actual returned fill word. `live` deliberately
+  // has an active-transaction guard so a stale identity from a completed or
+  // abandoned fill cannot poison a later, unusual single-word completion.
+  assign icbp_fill_snoop_cur = icbp_snoop_match(ic_fill_set, ic_fill_ptag);
+  assign icbp_fill_snoop_live = icbp_fill_active_q &&
+                                icbp_snoop_match(icbp_fill_set_q,
+                                                 icbp_fill_ptag_q);
+  // A bypass window is executable provenance but not a valid I-cache way, so
+  // ic_snp[12]_hit cannot report its invalidation.  Mirror the exact physical
+  // comparisons below for the REP-command poison path.  This signal is only
+  // consumed by inval_now (never by its hold/issue blocker), preserving the
+  // request-loop break in the fast path while the sticky poison retains an
+  // early match through a delayed terminal store acknowledgement.
+  always_comb begin
+    rep_stos_cont_icbp_snoop_hit = 1'b0;
+    for (int i = 0; i < 2; i++) begin
+      if (icbp_v[i] && icsnp_v1 &&
+          (icbp_set[i] == icsnp_a1[5 +: IC_IDXW]) &&
+          (icbp_ptag[i] == icsnp_a1[5+IC_IDXW +: IC_TAGW]))
+        rep_stos_cont_icbp_snoop_hit = 1'b1;
+      if (icbp_v[i] && icsnp_v2 &&
+          (icbp_set[i] == icsnp_a2[5 +: IC_IDXW]) &&
+          (icbp_ptag[i] == icsnp_a2[5+IC_IDXW +: IC_TAGW]))
+        rep_stos_cont_icbp_snoop_hit = 1'b1;
+    end
+  end
   // does entry i cover either line the fetch currently needs?
   function automatic logic icbp_needed(input int i);
     icbp_needed = ((flin[5 +: IC_IDXW]         == icbp_set[i]) &&
@@ -8217,10 +9893,56 @@ module core
                    (flin_nl[5+IC_IDXW +: IC_TAGW] == icbp_tag[i]));
   endfunction
   always_ff @(posedge clk or negedge rst_n) begin
-    if (!rst_n) begin icbp_v <= 2'b00; icbp_rr <= 1'b0; end
+    if (!rst_n) begin
+      icbp_v <= 2'b00;
+      icbp_rr <= 1'b0;
+      icbp_fill_active_q <= 1'b0;
+      icbp_fill_pz <= 1'b0;
+      icbp_fill_set_q <= '0;
+      icbp_fill_ptag_q <= '0;
+    end
     else begin
+`ifndef SYNTHESIS
+      // The regular REP continuation witness deliberately logs only ARM and
+      // token-bearing S_PIPE boundaries.  A bypass window has no valid-I$
+      // counterpart, however, so keep its physical own-store match separately
+      // observable for the CD/non-cacheable temporal-SMC regression.  This is
+      // sampled before the nonblocking clears below, exactly when the sticky
+      // continuation poison sees it.  Do not fold it into a REPCONT record:
+      // existing structural parsers deliberately treat that namespace as a
+      // closed two-event protocol.
+      if (ven_repcontlog_en && rep_stos_cont_icbp_snoop_hit)
+        $display("[REPICBP] HIT cyc=%0d q_pc=%08x snp1=%0b a1=%08x snp2=%0b a2=%08x ic_snp1_hit=%0b ic_snp2_hit=%0b",
+                 core_cyc, q_pc, icsnp_v1, icsnp_a1, icsnp_v2, icsnp_a2,
+                 ic_snp1_hit, ic_snp2_hit);
+`endif
+      // Transactional bypass-fill poison. Word 0 starts/reseeds the physical
+      // identity and clears stale history; after that, `active_q` keeps a
+      // matching snoop sticky even in a cycle where the outstanding read has
+      // not yet returned its next fill word.  That extra held-cycle behavior
+      // matters for future DMA/NB snoop sources: there is still no published
+      // bypass entry to invalidate, but the arriving bytes must not become
+      // executable later. The current-final-word term is checked again at
+      // insertion because this FF still holds its pre-edge value then.
+      if (icbp_fill_start) begin
+        icbp_fill_set_q    <= ic_fill_set;
+        icbp_fill_ptag_q   <= ic_fill_ptag;
+        icbp_fill_active_q <= !ic_fill_done;
+        icbp_fill_pz       <= exec_flush_all || icbp_fill_snoop_cur;
+      end else begin
+        if (icbp_fill_active_q && (exec_flush_all || icbp_fill_snoop_live))
+          icbp_fill_pz <= 1'b1;
+        if (icbp_fill_active_q && ic_fill_en && ic_fill_done)
+          icbp_fill_active_q <= 1'b0;
+      end
       if (ic_fill_en && ic_fill_done && ic_fill_nocache) begin
-        icbp_v  [icbp_rr] <= 1'b1;
+        // `icbp_v[icbp_rr]` was invalid before this edge, so the ordinary
+        // pre-edge entry-clear loops below cannot reject a same-edge snoop.
+        // Gate publication here, and include the current match as well as the
+        // registered fill history.  This is inert for normal fills and costs
+        // no request-side logic; a poisoned bypass simply refetches.
+        icbp_v  [icbp_rr] <= !(exec_flush_all || icbp_fill_snoop_cur ||
+                               (icbp_fill_active_q && icbp_fill_pz));
         icbp_set[icbp_rr] <= ic_fill_set;
         icbp_way[icbp_rr] <= ic_fill_way;
         icbp_tag[icbp_rr] <= ic_fill_tag;
@@ -8230,10 +9952,9 @@ module core
       // retire an entry only when NEITHER fetch line needs it
       for (int i = 0; i < 2; i++)
         if (icbp_v[i] && !icbp_needed(i)) icbp_v[i] <= 1'b0;
-      // R2-H09: a CPU store through ANY alias drops the bypassed copy too --
-      // the same physical match the line snoop does (LAST, so it wins over a
-      // same-edge capture: a store to the line being bypass-filled must not
-      // leave the stale bytes consumable).
+      // R2-H09: a CPU store through ANY alias drops an ALREADY-PUBLISHED
+      // bypassed copy too. A fresh fill-slot collision has no pre-edge entry
+      // for this loop to see; its transaction poison is handled above.
       for (int i = 0; i < 2; i++) begin
         if (icbp_v[i] && icsnp_v1 && (icbp_set[i] == icsnp_a1[5 +: IC_IDXW])
             && (icbp_ptag[i] == icsnp_a1[5+IC_IDXW +: IC_TAGW])) icbp_v[i] <= 1'b0;
@@ -8259,6 +9980,11 @@ module core
       if (exec_flush_all) icbp_v <= 2'b00;
     end
   end
+`endif
+
+`ifdef VEN_IC_NO_FETCH_BYPASS
+  // Keep the continuation poison source driven in builds without the bypass.
+  always_comb rep_stos_cont_icbp_snoop_hit = 1'b0;
 `endif
 
 `ifndef VEN_IC_NO_FETCH_BYPASS
@@ -8328,8 +10054,9 @@ module core
     // so no fill word may land in it either -- the capture would race the
     // invalidating edge inside the icache. Word 0 refetches from S_PF (the
     // divert sets pf_word=0 on a flush cycle).
-    ic_pf_miss_fill = (state==S_PIPE) && !fp_issue_block && !xlate_miss && (stall_cnt==7'd0) &&
-                      !pipe_bytes_ok && exec_issue_ok
+    ic_pf_miss_fill = (state==S_PIPE) && fsm_case_enabled && !pipe_mem_active_q &&
+                      !fp_issue_block && (stall_cnt==7'd0) &&
+                      !pipe_bytes_ok && exec_issue_ok && !exec_flush_all
 `ifdef VEN_L1_AXI
                       && (!real_bus || mem_ack)
 `endif
@@ -8342,7 +10069,7 @@ module core
     ic_fill_off  = 5'd0;
     ic_fill_data = 32'd0;
     ic_fill_tag  = '0;
-    if (state==S_PF && mem_ack) begin
+    if (state==S_PF && fsm_case_enabled && !exec_flush_all && mem_ack) begin
       // S_PF: fill the word covering pf_word; complete (allocate + MRU) on word 7.
       ic_fill_en   = 1'b1;
       ic_fill_set  = pf_fill_addr[5 +: IC_IDXW];
@@ -8367,27 +10094,29 @@ module core
     // boundary, V when paired). These two arms are mutually exclusive; replicating
     // their guards is the established pattern (cf. dc u_load_acc above).
     begin
-      logic ic_in_pipe, ic_halt4, ic_fp_arm, ic_fp_commit, ic_int_issue;
+      logic ic_halt4, ic_fp_arm, ic_fp_commit, ic_fp_touch, ic_int_issue;
       logic [31:0] ic_dep_ready, ic_straddle_a, ic_v_a;
-      // common: reached the inner FP/issue else-chain (past stall/fill/defer).
-      // !fp_issue_block: nothing issues on an abandoned clock, so no LRU touch and no
-      // FP commit. Gating ic_in_pipe covers ic_int_issue AND ic_fp_commit at once.
-      ic_in_pipe = (state==S_PIPE) && !fp_issue_block && !xlate_miss && !pipe_mem_wait && (stall_cnt==7'd0) &&
-                   pipe_bytes_ok && (pending_mem_pen==7'd0);
+      // The FP writer's live-arm is the single admission contract for an
+      // executable fast FP instruction.  Do not reconstruct it here: a flush
+      // or registered-frontend bubble must not create an LRU touch either.
       // FK_ARITH-under-bad-PC HALT arm (no touch). BUG#3: gate by VEN_FP_PC_RELAX to
       // MATCH the fast-path spine (core_fastpath.svh) — else the FMUL retires but its
       // LRU touch / result-commit is suppressed (ic_fp_arm=0) -> divergence.
 `ifdef VEN_FP_PC_RELAX
       ic_halt4   = 1'b0;
 `else
-      ic_halt4   = u_d.is_fp && (u_d.fp_kind==FK_ARITH) && (fctrl[9:8]!=2'b11);
+      ic_halt4   = pipe_u_eff.is_fp && (pipe_u_eff.fp_kind==FK_ARITH) && (fctrl[9:8]!=2'b11);
 `endif
-      ic_fp_arm  = ic_in_pipe && !ic_halt4 && u_d.is_fp;
-      ic_dep_ready = (u_d.fp_role>=3'd2) ? fp_ready_cyc : 32'd0;
+      ic_fp_arm  = pipe_fp_fast_exec_ok && !ic_halt4 && pipe_u_eff.is_fp
+`ifdef VEN_FP_PIPE
+                   && !fp_pipe_rd_haz
+`endif
+                   ;
+      ic_dep_ready = (pipe_u_eff.fp_role>=3'd2) ? fp_ready_cyc : 32'd0;
 `ifdef VEN_FP_OVERLAP
       // GAP1 mirror (matches core_fastpath.svh): a following FP op (not FXCH) waits on
       // the x87 exec unit (fp_busy_cyc), so spine + driver agree on the commit clock.
-      if (u_d.fp_kind != FK_FXCH
+      if (pipe_u_eff.fp_kind != FK_FXCH
           && $signed(fp_busy_cyc - core_cyc) > 0
           && $signed(fp_busy_cyc - ic_dep_ready) > 0)
         ic_dep_ready = fp_busy_cyc;
@@ -8396,28 +10125,48 @@ module core
       ic_fp_commit = ic_fp_arm &&
                      !(!fp_occ_pending && ($signed(ic_dep_ready - core_cyc) > 0)
                                        && ($signed(ic_dep_ready - core_cyc) < 32'sd128)) &&
-                     !(!fp_occ_pending && (u_d.fp_occ > 7'd1));
+                     !(!fp_occ_pending && (pipe_u_eff.fp_occ > 7'd1));
+      // Shared-direct x87 does not retire through the legacy fp_ready/fp_occ
+      // scoreboard above: S_PIPE merely captures a command and S_FEXEC owns
+      // the eventual architectural completion.  Therefore the LRU mirror must
+      // follow the *actual capture* predicate, rather than incidentally
+      // suppressing FMUL (occ=2) or touching a direct-ineligible slow fallback.
+      // A shared top without direct handoff similarly has no S_PIPE FP commit.
+`ifdef VEN_FP_SHARED
+`ifdef VEN_FP_SHARED_DIRECT
+      ic_fp_touch = fp_shared_direct || fp_shared_mem_admit;
+`else
+      ic_fp_touch = 1'b0;
+`endif
+`else
+      ic_fp_touch = ic_fp_commit;
+`endif
       // integer ISSUE arm = final else of the chain (not-FP, no bail, no mispred
       // bubble, no AGI). !u_d.is_fp already excludes ic_halt4/ic_fp_arm.
       // REVIEW Aug-1 M-01: canonical predicate (was a hand-copied `!u_d.simple ||
       // sys_mode`, so committed system-fast instructions never touched I-cache LRU).
-      ic_int_issue = ic_in_pipe && !u_d.is_fp && !fp_sys_bail &&
-                     (mispred_bubbles==3'd0) && !pipe_agi;
+      // An architectural packet completion may coincide with executable-array
+      // invalidation (for example a self-modifying store).  It still retires,
+      // but must not touch an I-cache LRU entry being invalidated that edge.
+      // An admitted delayed data packet also retires against pipe_commit_eip,
+      // while flin remains the volatile frontend address.  Skip that
+      // non-architectural LRU update rather than touch a stale frontend line.
+      ic_int_issue = pipe_int_commit && !pipe_mem_active_q && !exec_flush_all;
 
       // tch0: U's line — touched on EITHER commit arm (set/tag from flin).
-      ic_tch0_en  = ic_fp_commit || ic_int_issue;
+      ic_tch0_en  = ic_fp_touch || ic_int_issue;
       ic_tch0_set = flin[5 +: IC_IDXW];
       ic_tch0_tag = flin[5+IC_IDXW +: IC_TAGW];
       // tch1: U's straddle line — integer ISSUE arm only, when flin crosses the
       // 32-byte line boundary (addr = flin + u_d.len - 1). FP ops never straddle.
-      ic_straddle_a = flin + {28'd0,u_d.len} - 32'd1;
+      ic_straddle_a = flin + {28'd0,pipe_u_eff.len} - 32'd1;
       ic_tch1_en  = ic_int_issue &&
-                    (({1'b0,flin[4:0]} + {2'b0,u_d.len}) > 6'd32);
+                    (({1'b0,flin[4:0]} + {2'b0,pipe_u_eff.len}) > 6'd32);
       ic_tch1_set = ic_straddle_a[5 +: IC_IDXW];
       ic_tch1_tag = ic_straddle_a[5+IC_IDXW +: IC_TAGW];
       // tch2: paired V's line — integer ISSUE arm only, when pipe_pair (= do_v).
-      ic_v_a      = flin + {28'd0,u_d.len};
-      ic_tch2_en  = ic_int_issue && pipe_pair;
+      ic_v_a      = flin + {28'd0,pipe_u_eff.len};
+      ic_tch2_en  = ic_int_issue && pipe_pair_eff;
       ic_tch2_set = ic_v_a[5 +: IC_IDXW];
       ic_tch2_tag = ic_v_a[5+IC_IDXW +: IC_TAGW];
     end
@@ -8512,6 +10261,27 @@ module core
 `endif
   );
 
+`ifndef SYNTHESIS
+`ifdef VEN_FP_SHARED
+`ifdef VEN_FP_SHARED_DIRECT
+  // Keep this alongside the LRU-port construction so `lru=1` is an executable
+  // proof of the mirror contract, not an independently reconstructed predicate.
+  always_ff @(posedge clk) begin
+    if (ven_fpdirectlog_en && fp_shared_direct)
+      $display("[FPDIRECT] HANDOFF cyc=%0d pc=%08x kind=%0d fxop=%0d aluop=%0d pop=%0b sti=%0d lru=%0b",
+               core_cyc, eip, pipe_u_eff.fp_kind, fp_shared_direct_fxop,
+               pipe_u_eff.fp_aluop, fp_shared_direct_pop,
+               pipe_u_eff.fp_sti, ic_tch0_en);
+`ifdef VEN_FP_SHARED_EARLY_CMD
+    if (ven_fpdirectlog_en && fp_shared_pipe_cmd && fp_shared_cmd_ready)
+      $display("[FPEARLY] ACCEPT cyc=%0d pc=%08x immediate=%0b",
+               core_cyc, eip, fp_shared_accept_retire);
+`endif
+  end
+`endif
+`endif
+`endif
+
 `ifdef VEN_UOPCACHE
   // ===========================================================================
   // P0-11 PREDECODE-ON-FILL plumbing + the µop-cache instance.
@@ -8548,8 +10318,44 @@ module core
     end
   end
 
+  logic uc_repair_start;
+`ifdef VEN_UOP_CROSSLINE
+  logic uc_cross_hit, uc_cross_ready, uc_cross_sources_ready;
+  fpd_t uc_cross_uop;
+  logic [47:0] uc_cross_next_bytes;
+  // Both sources must be resident and their returned BRAM identities current.
+  // Port B is not necessarily the successor: a branch can swap the buffers.
+  assign uc_cross_sources_ready = ic_fetch_ready && ic_fb_avail &&
+                                 ic_present(flin) && ic_present(flin_nl);
+  assign uc_cross_ready = uc_cross_hit && uc_cross_sources_ready;
+  assign uc_cross_next_bytes =
+      (rdA_set_q == flin_nl[5 +: IC_IDXW] &&
+       rdA_way_q == ic_hit_way(flin_nl) && !ic_rd_collA)
+      ? ic_rd_lineA[47:0] : ic_rd_lineB[47:0];
+`endif
+`ifdef VEN_UOP_EXEC_REPAIR
+  localparam bit UC_EXEC_REPAIR = 1'b1;
+  // This hint captures bytes only after the normal returned-buffer identity
+  // checks. Never use a stale u_d to qualify a map hole. The walker validates
+  // executability at the requested boundary before replacing resident metadata.
+  assign uc_repair_start = cycle_mode && (state == S_PIPE)
+                        && !pipe_mem_active_q && !fp_issue_block && exec_issue_ok
+                        && ic_fetch_ready && ic_present(flin)
+                        && uc_updvalid && !uc_ubvalid && !uc_fwait_known
+`ifdef VEN_UOP_CROSSLINE
+                        && !uc_cross_ready
+`endif
+                        ;
+`else
+  localparam bit UC_EXEC_REPAIR = 1'b0;
+  assign uc_repair_start = 1'b0;
+`endif
   uopcache #(.IC_SETS(IC_SETS), .IC_LINE(IC_LINE),
-             .BASE_SLOTS(UC_BASE_SLOTS), .TAIL_SLOTS(UC_TAIL_SLOTS)) u_uopcache (
+             .BASE_SLOTS(UC_BASE_SLOTS), .TAIL_SLOTS(UC_TAIL_SLOTS),
+             .EXEC_REPAIR(UC_EXEC_REPAIR),
+             .POSTPUBLISH_EXT(UC_POSTPUBLISH_EXT),
+             .TAIL_LOCAL(UC_TAIL_LOCAL),
+             .RESYNC_FIXED_UD(UC_RESYNC_FIXED_UD)) u_uopcache (
     .clk(clk), .rst_n(rst_n),
     .rd_setA(ic_rd_setA), .rd_wayA(ic_rd_wayA),
     .rd_baseA(uc_baseA), .rd_tailA(uc_tailA),
@@ -8564,6 +10370,17 @@ module core
     // code with 32-bit lengths. pd_def16 is latched with the line; cur_def16 flushes
     // every resident predecode when CS.D flips.
     .pd_def16(pd_def16_r), .cur_def16(def16),
+    .repair_start(uc_repair_start), .repair_set(flin[5 +: IC_IDXW]),
+    .repair_way(ic_hit_way(flin)),
+    .repair_line(uc_u_in_b ? ic_rd_lineB : ic_rd_lineA),
+    .repair_off(flin[4:0]), .repair_flags(eflags), .repair_ready(),
+`ifdef VEN_UOP_CROSSLINE
+    .repair_next_valid(uc_cross_sources_ready), .repair_next_bytes(uc_cross_next_bytes),
+    .repair_next_set(flin_nl[5 +: IC_IDXW]), .repair_next_way(ic_hit_way(flin_nl)),
+    .cross_query_set(flin[5 +: IC_IDXW]), .cross_query_way(ic_hit_way(flin)),
+    .cross_query_next_set(flin_nl[5 +: IC_IDXW]), .cross_query_next_way(ic_hit_way(flin_nl)),
+    .cross_query_off(flin[4:0]), .cross_hit(uc_cross_hit), .cross_uop(uc_cross_uop),
+`endif
     // REVIEW2 H-16: flush the predecode array with the I-cache, for the same reason
     // and on the same condition -- otherwise the I-cache refills correct bytes while
     // this keeps serving uops predecoded from the stale ones.
@@ -8605,6 +10422,7 @@ module core
   logic        fp_wsti_clr_tag;
   logic        fp_we_fxch;   logic [2:0]  fp_fxch_idx;
   logic [79:0] fp_fxch_a;    logic [79:0] fp_fxch_b;
+  logic        fp_fxch_materialize_empty;
   logic        fp_we_pop;
   logic        fp_we_pop2;
   logic        fp_we_ffree;  logic [2:0]  fp_ffree_idx;
@@ -8703,6 +10521,16 @@ module core
   logic [7:0]   fp_shared_store_bytes_q;
   logic [639:0] fp_shared_st_flat;
   logic         fp_shared_admin;
+  logic         fp_shared_alu_commit_retire;
+  // A slow-path x87 instruction snapshots TF/RF in S_DECODE.  Do not use the
+  // one-edge response-elision when architectural debug is active: the mature
+  // rsp_valid path reaches retire_x87_shared, which performs the architecturally
+  // required #DB decision after the registered state completion.  This keeps
+  // the timing-only elision outside the debug path without costing normal
+  // workload throughput.
+  logic         fp_shared_early_retire_ok;
+  assign fp_shared_early_retire_ok = !sys_mode ||
+                                      !(tf_at_issue || rf_at_issue || (dr7[7:0] != 8'd0));
 
   // env_tmp holds dwords for the 32-bit form and right-justified words for the
   // 16-bit form.  Repack to the command contract's byte-contiguous image.
@@ -8725,9 +10553,72 @@ module core
                       (q_fxop==FX_FNSAVE) || (q_fxop==FX_FRSTOR);
   end
 
-  assign fp_shared_cmd_valid = (state == S_FEXEC);
+  // Optional zero-bubble command handoff for the already checked register-only
+  // direct packet. No additional in-flight command is allowed: cmd_ready still
+  // belongs exclusively to ven_fp_top, and non-immediate commands retire from
+  // S_FP_SHARED_WAIT. Memory operands and debug/fault fallbacks keep S_FEXEC.
+  logic fp_shared_pipe_cmd;
+`ifdef VEN_FP_SHARED_EARLY_CMD
+`ifdef VEN_FP_SHARED_DIRECT
+  assign fp_shared_pipe_cmd = fp_shared_direct
+`ifdef VEN_FP_PIPE
+                            && !fp_pipe_rd_haz
+`endif
+`ifndef VEN_FP_PC_RELAX
+                            && !(pipe_u_eff.fp_kind == FK_ARITH && fctrl[9:8] != 2'b11)
+`endif
+                            ;
+`else
+  assign fp_shared_pipe_cmd = 1'b0;
+`endif
+`else
+  assign fp_shared_pipe_cmd = 1'b0;
+`endif
+  // Experimental final-source-beat handoff. The fragment engine's ACK means
+  // the complete translated beat, not a raw AXI response. Do not admit stores,
+  // partial operands, or an FSM-diverting fault. Debug retains S_FEXEC.
+  logic fp_shared_load_cmd;
+  logic [79:0] fp_shared_cmd_mem;
+`ifdef VEN_FP_LOAD_EARLY_CMD
+  assign fp_shared_load_cmd = cycle_mode && (state == S_FLOAD) &&
+      q_f_mem_read && !q_f_mem_write && mem_ack && fsm_case_enabled &&
+      fp_shared_early_retire_ok && !fp_dbg_active &&
+      ((q_f_mbytes == 4'd4 && f_step == 4'd0) ||
+       (q_f_mbytes == 4'd8 && (f_step == 4'd1 || fp_load64_take))) &&
+      ((q_fxop == FX_FLD_M32) || (q_fxop == FX_FLD_M64) ||
+       (q_fxop == FX_FILD_M32) || (q_fxop == FX_FILD_M64) ||
+       (q_fxop == FX_AR_M32) || (q_fxop == FX_AR_M64));
+  assign fp_shared_cmd_mem = !fp_shared_load_cmd ? f_mem80 :
+`ifdef VEN_FP_LOAD64
+      fp_load64_take ? {f_mem80[79:64], bus_rdata_hi, mem_rdata} :
+`endif
+      (f_step == 4'd0 ? {f_mem80[79:32], mem_rdata} :
+                       {f_mem80[79:64], mem_rdata, f_mem80[31:0]});
+`else
+  assign fp_shared_load_cmd = 1'b0;
+  assign fp_shared_cmd_mem = f_mem80;
+`endif
+  assign fp_shared_cmd_valid =
+`ifdef VEN_FP_ASYNC_STREAM
+      (!fp_async_pending || fp_async_stream_shape
+`ifdef VEN_FP_REG_ADMIT
+       || (fp_async_reg_cmd && fsm_case_enabled &&
+           ((fp_async_count < 4) || fp_shared_rsp_valid))
+`endif
+`ifdef VEN_FP_MEM_QUEUE
+       || (fp_async_mem_cmd && ((fp_async_count < 4) || fp_shared_rsp_valid))
+`endif
+      ) &&
+`else
+      !fp_async_pending &&
+`endif
+      ((state == S_FEXEC) || fp_shared_pipe_cmd || fp_shared_load_cmd);
 
+`ifdef VEN_FP_FXCH_QUEUE
+  ven_fp_fxch_queue u_fp_shared (
+`else
   ven_fp_top u_fp_shared (
+`endif
     .clk(clk), .rst_n(rst_n),
 `ifdef VEN_SNAPSHOT_RESTORE
     .init_restore(snapshot_restore && !boot_mode),
@@ -8739,14 +10630,28 @@ module core
 `endif
     .cmd_valid(fp_shared_cmd_valid), .cmd_ready(fp_shared_cmd_ready),
     .cmd_accept_retire(fp_shared_accept_retire),
+    .alu_commit_retire(fp_shared_alu_commit_retire),
+`ifdef VEN_FP_SHARED_DIRECT
+    .cmd_op(fp_shared_pipe_cmd ? fp_shared_direct_fxop : q_fxop),
+    .cmd_aluop(fp_shared_pipe_cmd ? pipe_u_eff.fp_aluop : q_f_aluop),
+    .cmd_sti(fp_shared_pipe_cmd ? pipe_u_eff.fp_sti : q_f_sti),
+    .cmd_pop(fp_shared_pipe_cmd ? fp_shared_direct_pop : q_f_pop),
+    .cmd_constant(fp_shared_pipe_cmd ? pipe_u_eff.fp_sti : q_f_const),
+`else
     .cmd_op(q_fxop), .cmd_aluop(q_f_aluop), .cmd_sti(q_f_sti),
-    .cmd_pop(q_f_pop), .cmd_constant(q_f_const), .cmd_mem(f_mem80),
+    .cmd_pop(q_f_pop), .cmd_constant(q_f_const),
+`endif
+    .cmd_mem(fp_shared_cmd_mem),
     .cmd_mem_bytes(q_f_mbytes), .cmd_fdiv_bug(errata_en[0]),
     .cmd_fist_bug(errata_en[1]), .cmd_env16(q_f_mbytes == 4'd2),
     .cmd_real_mode(real_mode), .cmd_env_image(fp_shared_env_image),
-    .cmd_update_fip(!fp_shared_admin), .cmd_fip(q_pc), .cmd_fcs(SEG_CS),
-    .cmd_update_fdp(!fp_shared_admin && (q_f_mem_read || q_f_mem_write)),
-    .cmd_fdp(dbase + q_ea), .cmd_fds(SEG_DS),
+    .cmd_update_fip(fp_shared_pipe_cmd || !fp_shared_admin),
+    // S_PIPE owns the live CS; memory handoffs own q_* and the same dseg
+    // used by their checked bus access. Preserve proxy/live selectors and
+    // plain-user reset parameters through the existing architectural mux.
+    .cmd_fip(fp_shared_pipe_cmd ? eip : q_pc), .cmd_fcs(arch_seg_sel(3'(SG_CS))),
+    .cmd_update_fdp(!fp_shared_pipe_cmd && !fp_shared_admin && (q_f_mem_read || q_f_mem_write)),
+    .cmd_fdp(dbase + q_ea), .cmd_fds(arch_seg_sel(dseg)),
     .busy(fp_shared_busy), .rsp_valid(fp_shared_rsp_valid),
     .rsp_unsupported(fp_shared_rsp_unsupported),
     .rsp_stack_fault(fp_shared_rsp_stack_fault), .rsp_arith(fp_shared_rsp_arith),
@@ -8796,8 +10701,12 @@ module core
     // ---- inputs ----
     .state            (state),
     .errata_en        (errata_en),
-    .u_d              (u_d),
-    .v_d              (v_d),
+    // During a delayed U-memory transaction the fast spine retires the
+    // registered packet, never the volatile frontend decode.  Feed the same
+    // effective packet to the legacy FPU writer so a post-flush raw FP slot
+    // cannot mutate x87 state while the memory operation is completing.
+    .u_d              (pipe_u_eff),
+    .v_d              (pipe_v_eff),
     .q_fxop           (q_fxop),
     .q_f_mem_read     (q_f_mem_read),
     .q_f_mem_write    (q_f_mem_write),
@@ -8832,9 +10741,11 @@ module core
     .pending_mem_pen  (pending_mem_pen),
     .v_bytes_ok       (v_bytes_ok),
     .pair_block       (dbg_pair_block),
+    .fp_v_fold_ok     (fp_v_fold_ok),
     .core_cyc         (core_cyc),
     .fp_ready_cyc     (fp_ready_cyc),
     .fp_occ_pending   (fp_occ_pending),
+    .pipe_fp_live_arm    (pipe_fp_fast_exec_ok),
     .fstore_ie        (fstore_ie),
     .fstore_pe        (fstore_pe),
     .fstore_oe        (fstore_oe),
@@ -8908,6 +10819,7 @@ module core
     .fp_fxch_idx      (fp_fxch_idx),
     .fp_fxch_a        (fp_fxch_a),
     .fp_fxch_b        (fp_fxch_b),
+    .fp_fxch_materialize_empty(fp_fxch_materialize_empty),
     .fp_we_pop        (fp_we_pop),
     .fp_we_pop2       (fp_we_pop2),
     .fp_we_ffree      (fp_we_ffree),
@@ -9006,6 +10918,7 @@ module core
     .fxch_idx     (fp_fxch_idx),
     .fxch_a       (fp_fxch_a),
     .fxch_b       (fp_fxch_b),
+    .fxch_materialize_empty(fp_fxch_materialize_empty),
     .we_pop       (fp_we_pop),
     .we_pop2      (fp_we_pop2),
     .we_ffree     (fp_we_ffree),
@@ -9563,6 +11476,43 @@ module core
     perm_err = {27'd0, perm_fault_i, 1'b0, usr, cur_is_w && !perm_fault_i, 1'b1};
   end
 
+  // REP MOVS/STOS updates its pointers and count in S_EXEC, before the
+  // destination store is known to have committed.  The rollback decision must
+  // therefore cover every pre-commit fault exit, not just the old not-present
+  // page-walk subset.  Keep it deliberately scoped to MOVS/STOS: INS also uses
+  // S_STORE after advancing EDI/ECX, but does not capture str_pre_* and needs
+  // its own port-read restart proof.
+  logic str_store_rollback_shape;
+  logic str_store_direct_fault_now;
+  logic str_store_walk_fault_now;
+  logic str_store_rollback_now;
+  assign str_store_rollback_shape = (q_kind == K_STR) && q_str_storedi &&
+                                    ((q_st == ST_MOVS) || (q_st == ST_STOS));
+  assign str_store_direct_fault_now = (state == S_STORE) &&
+                                       (perm_fault || seg_access_fault);
+  // Mirror the only three page-fault exits in core_walk.svh.  `walk_pf` is a
+  // registered diagnostic latch and is not usable on the decision edge; this
+  // combinational form restores the registers on that same edge, including the
+  // 4 MiB PDE reserved-bit #PF that the old !P-only condition missed.
+  assign str_store_walk_fault_now = (state == S_WALK) && mem_ack &&
+                                     walk_is_write && (walk_ret_state == S_STORE) &&
+                                     (((walk_step == 3'd0) &&
+                                       (!mem_rdata[0] ||
+                                        (cr4_pse && mem_rdata[7] &&
+                                         (mem_rdata[21:13] != 9'd0)))) ||
+                                      ((walk_step == 3'd2) && !mem_rdata[0]));
+  assign str_store_rollback_now = str_store_rollback_shape &&
+                                  (str_store_direct_fault_now ||
+                                   str_store_walk_fault_now);
+
+  // The main sequential FSM skips its case body for all of these diversions.
+  // Independent architectural mirrors must use this shared permit rather than
+  // remembering a subset (the old GPR driver omitted segment/CS faults).
+  assign fsm_case_enabled = !fp_async_hold && !sync_access_fault && !perm_fault &&
+                            !xlate_miss && !fe_xlate_pend &&
+                            !rep_stos_stream_preissue_block &&
+                            !rep_movs_stream_preissue_block;
+
 
   // ===========================================================================
   // Bus request generation (single combinational driver) — relocated VERBATIM
@@ -9602,9 +11552,13 @@ module core
                                  || (!fx_wr && (fx_ph == 2'd1)));
   assign fx_shift_e    = fx_act && !fx_walk_hold && !fx_abort_q &&  fx_wr && (fx_ph == 2'd2);
   assign fx_maskA_e    = fx_act && !fx_walk_hold && !fx_abort_q &&  fx_wr && (fx_ph == 2'd1);
-  assign fx_hold_e     = (fx_act && !fx_walk_hold && !fx_abort_q && ((fx_wr && (fx_ph == 2'd1))
-                                  || (!fx_wr && (fx_ph == 2'd0))))
-                      || (fx_start && !bd_we);   // a same-clock frag1 ack
+  // The FSM sees an acknowledgement only for the final architectural
+  // fragment. In particular, a crossing write begins with a no-request
+  // page-2 probe; an idle-high bus ACK must not retire that store before the
+  // probe and both writes have completed.
+  assign fx_hold_e     = (fx_act && !fx_walk_hold && !fx_abort_q &&
+                          ((fx_wr && (fx_ph != 2'd2)) || (!fx_wr && (fx_ph == 2'd0))))
+                      || fx_start;
   assign fx_merge_e    = fx_act && !fx_walk_hold && !fx_abort_q && !fx_wr && (fx_ph == 2'd1);
   assign fx_wrsup_e    = fx_probe_e || (fx_start && bd_we);
 
@@ -9634,6 +11588,63 @@ module core
   assign mem_rdata = fx_merge_e ? fx_merged : bus_rdata;
   assign mem_ack   = bus_ack && !fx_hold_e;
   assign fx_probing = fx_probe_e;
+
+  // Collapse only a complete read-only m64 operand already covered by the
+  // first beat's whole-segment check and one translated page.  This never
+  // widens a bus request.  A crossing, fragment, debug owner or narrow response
+  // retains the original two-beat acquisition and its precise fault boundary.
+  logic fp_load64_take;
+`ifdef VEN_FP_LOAD64
+  assign fp_load64_take = cycle_mode && (state == S_FLOAD) &&
+      q_f_mem_read && !q_f_mem_write && (q_f_mbytes == 4'd8) &&
+      (f_step == 4'd0) && fsm_case_enabled && mem_ack && bus_rdata_hi_valid &&
+      !fx_eng && !fx_start && (cur_lin_nat[11:0] <= 12'hff8) &&
+      !fp_dbg_active && !tf_at_issue && !rf_at_issue;
+`ifndef SYNTHESIS
+  logic ven_fpload64log_en;
+  logic ven_fpload64_pc_en;
+  logic [31:0] ven_fpload64_pc;
+  longint unsigned fp_load64_takes;
+  initial begin
+    ven_fpload64log_en = $test$plusargs("ven_fpload64log");
+    ven_fpload64_pc_en = $value$plusargs("ven_fpload64_pc=%h", ven_fpload64_pc);
+    fp_load64_takes = 0;
+  end
+  always @(posedge clk) begin
+    if (!rst_n) fp_load64_takes <= 0;
+    else if (fp_load64_take && (!ven_fpload64_pc_en || q_pc == ven_fpload64_pc))
+      fp_load64_takes <= fp_load64_takes + 1;
+  end
+  final if (ven_fpload64log_en)
+    $display("[FPLOAD64] complete resident operands=%0d", fp_load64_takes);
+`endif
+`else
+  assign fp_load64_take = 1'b0;
+`endif
+
+  // Local LOCK-session lifecycle.  Raw mem_lock is deliberately narrower (the
+  // bus driver's actual operand-beat qualifier); this level keeps the L1/AXI
+  // DMA arbiter reserved through page walks and no-request probes after a real
+  // locked read has begun.  It is never opened by decode, a translation miss,
+  // or a crossing-store probe.
+  assign lock_first_read = q_lock &&
+                           ((state == S_LOAD) ||
+                            ((state == S_LOAD2) && (q_kind == K_CX8B))) &&
+                           mem_req && !mem_we;
+  // The FSM only sees the final fragment's acknowledgement.  Therefore these
+  // predicates naturally cover a generic-FX-split CX8B write and the legacy
+  // S_STORE page splitter without releasing on a preliminary ack.
+  // xs_eff_* matters on the entry clock of a crossing legacy S_STORE: xs_act
+  // has not latched yet, but the effective phase is already the no-request
+  // page-2 probe.  An idle-high bus_ack there must not release the session.
+  assign lock_done_store   = q_lock && (state == S_STORE) && mem_ack &&
+                             (!xs_eff_act || (xs_eff_ph == 2'd2));
+  assign lock_done_cx8b_eq = q_lock && (state == S_USEQ) &&
+                             (q_kind == K_CX8B) && (step == 4'd1) && mem_ack;
+  assign lock_done_cx8b_ne = q_lock && (state == S_EXEC) &&
+                             (q_kind == K_CX8B) && !cx8b_equal;
+  assign lock_done         = lock_done_store || lock_done_cx8b_eq || lock_done_cx8b_ne;
+  assign mem_lock_hold     = lock_session_q || lock_first_read;
 
   // ===========================================================================
   // M7.3b port-I/O bus driver (separate combinational driver) — relocated
@@ -9702,6 +11713,155 @@ module core
                    inta_valid};
   // verilator lint_on UNUSED
 
+`ifndef SYNTHESIS
+`ifdef VEN_TLB_PERF
+  // Page-walk attribution for full-system profiling. Count the exact event the
+  // main FSM accepts, not inferred S_WALK residency: a synchronous access fault
+  // can preempt a combinational xlate_miss. Array-victim attribution stays in
+  // tlb.sv, where it observes the pre-fill state. This block adds request-side
+  // I/D, state, index, terminal-fault, and flush-cause context only.
+  //
+  // This intentionally lives after the paging and permission definitions above:
+  // all observed signals are declared and driven before this simulation-only
+  // observer, avoiding a forward implicit-net declaration under the project-wide
+  // `default_nettype wire setting.
+  localparam int TLBP_NSTATE = int'(S_CG_PRD) + 1;
+  longint unsigned tlbp_launch;
+  longint unsigned tlbp_i_nohit;
+  longint unsigned tlbp_d_nohit;
+  longint unsigned tlbp_d_resident_rewalk;
+  longint unsigned tlbp_i_raw_disagree;
+  longint unsigned tlbp_d_raw_disagree;
+  longint unsigned tlbp_walk_fault;
+  longint unsigned tlbp_launch_state [TLBP_NSTATE];
+  longint unsigned tlbp_i_launch_idx [TLB_ENTRIES];
+  longint unsigned tlbp_d_launch_idx [TLB_ENTRIES];
+  longint unsigned tlbp_flush_total;
+  longint unsigned tlbp_flush_invlpg;
+  longint unsigned tlbp_flush_cr3;
+  longint unsigned tlbp_flush_cr0_pgpe;
+  longint unsigned tlbp_flush_cr0_other;
+  longint unsigned tlbp_flush_cr4_pse;
+  longint unsigned tlbp_flush_cr4_other;
+  longint unsigned tlbp_flush_task;
+  longint unsigned tlbp_flush_rsm;
+  longint unsigned tlbp_flush_unknown;
+  logic tlbp_walk_fault_now;
+
+  // Mirrors the three architectural #PF exits in core_walk.svh. walk_pf is a
+  // registered diagnostic latch and is one edge too late for this accounting.
+  assign tlbp_walk_fault_now = (state == S_WALK) && mem_ack &&
+                               (((walk_step == 3'd0) &&
+                                 (!mem_rdata[0] ||
+                                  (cr4_pse && mem_rdata[7] &&
+                                   (mem_rdata[21:13] != 9'd0)))) ||
+                                ((walk_step == 3'd2) && !mem_rdata[0]));
+
+  always_ff @(posedge clk) begin
+    if (!rst_n) begin
+      tlbp_launch            <= 0;
+      tlbp_i_nohit           <= 0;
+      tlbp_d_nohit           <= 0;
+      tlbp_d_resident_rewalk <= 0;
+      tlbp_i_raw_disagree    <= 0;
+      tlbp_d_raw_disagree    <= 0;
+      tlbp_walk_fault        <= 0;
+      tlbp_flush_total       <= 0;
+      tlbp_flush_invlpg      <= 0;
+      tlbp_flush_cr3         <= 0;
+      tlbp_flush_cr0_pgpe    <= 0;
+      tlbp_flush_cr0_other   <= 0;
+      tlbp_flush_cr4_pse     <= 0;
+      tlbp_flush_cr4_other   <= 0;
+      tlbp_flush_task        <= 0;
+      tlbp_flush_rsm         <= 0;
+      tlbp_flush_unknown     <= 0;
+      for (int i=0; i<TLBP_NSTATE; i++) tlbp_launch_state[i] <= 0;
+      for (int i=0; i<TLB_ENTRIES; i++) begin
+        tlbp_i_launch_idx[i] <= 0;
+        tlbp_d_launch_idx[i] <= 0;
+      end
+    end else begin
+      if (xlate_miss && !sync_access_fault && !perm_fault) begin
+        tlbp_launch <= tlbp_launch + 1;
+        tlbp_launch_state[int'(state)] <= tlbp_launch_state[int'(state)] + 1;
+        if (cur_is_d) begin
+          tlbp_d_launch_idx[cur_lin[15:12]] <= tlbp_d_launch_idx[cur_lin[15:12]] + 1;
+`ifdef VEN_FE_PIPE
+          if (fe_dtlb_hit) tlbp_d_resident_rewalk <= tlbp_d_resident_rewalk + 1;
+          else             tlbp_d_nohit           <= tlbp_d_nohit + 1;
+          if (fe_dtlb_hit != dtlb_lk_hit) tlbp_d_raw_disagree <= tlbp_d_raw_disagree + 1;
+`else
+          if (dtlb_lk_hit) tlbp_d_resident_rewalk <= tlbp_d_resident_rewalk + 1;
+          else             tlbp_d_nohit           <= tlbp_d_nohit + 1;
+`endif
+        end else begin
+          tlbp_i_launch_idx[cur_lin[15:12]] <= tlbp_i_launch_idx[cur_lin[15:12]] + 1;
+          // I-side xlate_miss has only the no-hit arm. With VEN_FE_PIPE the
+          // raw lookup can still disagree with the registered lookup; keep it
+          // separate rather than calling it an array miss.
+          tlbp_i_nohit <= tlbp_i_nohit + 1;
+`ifdef VEN_FE_PIPE
+          if (fe_itlb_hit != itlb_lk_hit) tlbp_i_raw_disagree <= tlbp_i_raw_disagree + 1;
+`endif
+        end
+      end
+      if (tlbp_walk_fault_now) tlbp_walk_fault <= tlbp_walk_fault + 1;
+
+      // The RTL deliberately takes a full flush on every MOV CR0/CR4 and
+      // INVLPG. Break that policy down before changing it functionally.
+      if (tlb_flush) begin
+        tlbp_flush_total <= tlbp_flush_total + 1;
+        if ((state == S_EXEC) && (q_sysop == SYS_INVLPG)) begin
+          tlbp_flush_invlpg <= tlbp_flush_invlpg + 1;
+        end else if ((state == S_EXEC) && (q_sysop == SYS_MOVCR_TO)) begin
+          case (q_sys_creg)
+            3'd0: begin
+              if (q_clts || (((creg0 ^ gpr_o[q_src_reg]) & 32'h8000_0001) == 32'd0))
+                tlbp_flush_cr0_other <= tlbp_flush_cr0_other + 1;
+              else
+                tlbp_flush_cr0_pgpe <= tlbp_flush_cr0_pgpe + 1;
+            end
+            3'd3: tlbp_flush_cr3 <= tlbp_flush_cr3 + 1;
+            3'd4: begin
+              if (((creg4 ^ gpr_o[q_src_reg]) & 32'h0000_0010) != 32'd0)
+                tlbp_flush_cr4_pse <= tlbp_flush_cr4_pse + 1;
+              else
+                tlbp_flush_cr4_other <= tlbp_flush_cr4_other + 1;
+            end
+            default: tlbp_flush_unknown <= tlbp_flush_unknown + 1;
+          endcase
+        end else if (tsw_cr3_commit) begin
+          tlbp_flush_task <= tlbp_flush_task + 1;
+        end else if (rsm_ctx_restore) begin
+          tlbp_flush_rsm <= tlbp_flush_rsm + 1;
+        end else begin
+          tlbp_flush_unknown <= tlbp_flush_unknown + 1;
+        end
+      end
+    end
+  end
+
+  final begin
+    $display("[TLBPERF:CORE] launch=%0d i-nohit=%0d d-nohit=%0d d-resident-rewalk=%0d walk-fault=%0d raw-disagree={i=%0d,d=%0d}",
+             tlbp_launch, tlbp_i_nohit, tlbp_d_nohit, tlbp_d_resident_rewalk,
+             tlbp_walk_fault, tlbp_i_raw_disagree, tlbp_d_raw_disagree);
+    $display("[TLBPERF:FLUSH] total=%0d invlpg=%0d cr3=%0d cr0={pgpe=%0d,other=%0d} cr4={pse=%0d,other=%0d} task=%0d rsm=%0d unknown=%0d",
+             tlbp_flush_total, tlbp_flush_invlpg, tlbp_flush_cr3,
+             tlbp_flush_cr0_pgpe, tlbp_flush_cr0_other,
+             tlbp_flush_cr4_pse, tlbp_flush_cr4_other, tlbp_flush_task,
+             tlbp_flush_rsm, tlbp_flush_unknown);
+    for (int i=0; i<TLBP_NSTATE; i++)
+      if (tlbp_launch_state[i] != 0)
+        $display("[TLBPERF:CORE] state=%0d launch=%0d", i, tlbp_launch_state[i]);
+    for (int i=0; i<TLB_ENTRIES; i++)
+      if ((tlbp_i_launch_idx[i] != 0) || (tlbp_d_launch_idx[i] != 0))
+        $display("[TLBPERF:CORE] idx=%0d i-launch=%0d d-launch=%0d", i,
+                 tlbp_i_launch_idx[i], tlbp_d_launch_idx[i]);
+  end
+`endif
+`endif
+
 `ifdef VEN_DBG_POP
   // DOS-Quake #GP triage: trace the go32 fault-dispatcher `pop word [ds:0x4f6c]`
   // (cs=2b:0x3e83) memory load (stack read) + store (operand write), to see why
@@ -9749,12 +11909,25 @@ module core
   // ISSUE arm below.  This keeps ordinary front-end stalls out of the pairing
   // diagnosis: each count is one otherwise-retiring U instruction.
   localparam int PP_NPAIR  = 9;
+  // First failing rule inside issue_uv, recorded only for a U issue whose V
+  // candidate was otherwise present.  Keep this separate from PP_NPAIR: the
+  // latter also contains frontend and one-instruction architectural guards.
+  localparam int PP_NPAIR_DENY = 7;
   // The uop-cache fallback starts one S_FETCH transaction, whose subsequent
   // clocks live in the FSM-state counters rather than the one-clock bail bucket.
   // Split the entry cause so profile data can distinguish a walker/validity
   // problem from a deliberately uncovered instruction boundary before anyone
   // considers changing the cache or execution policy.
   localparam int PP_NUOPMISS = 4;
+  localparam int PP_NUOPEND  = 6;
+  // Slow loads are a much larger CPI contributor than string stores.  Preserve
+  // the architectural decode class while the old FSM owns the request so the
+  // next fast-path candidate is selected from measured residency, not opcode
+  // frequency or a REP-specific guess.  These are profile-only counters.
+  localparam int PP_NKIND = int'(K_CX8B) + 1;
+  localparam int PP_NSTR  = int'(ST_OUTS) + 1;
+  localparam int PP_NALU  = int'(ALU_AAD) + 1;
+  localparam int PP_NW    = 8;
   longint pp_state [PP_NSTATE];
   // Per-state memory accounting.  `pp_mem_wait` counts clocks in which a
   // request is visibly held without an acknowledgement; `pp_mem_ack` counts
@@ -9765,6 +11938,7 @@ module core
   longint pp_mem_ack  [PP_NSTATE];
   longint pp_bail  [PP_NBAIL];
   longint pp_pair  [PP_NPAIR];
+  longint pp_pair_deny [PP_NPAIR_DENY];
   longint pp_uopmiss [PP_NUOPMISS];
   // A boundary-unavailable miss can be a dense-line overflow, or an unusual
   // branch target.  Its byte-offset distribution determines whether a small
@@ -9772,6 +11946,107 @@ module core
   longint pp_uopmiss_off [IC_LINE];
   longint pp_uop_sfetch;  // successful registered-window hand-offs
   longint pp_resident_sfetch; // S_PIPE slow-path hand-offs accepted from BRAM
+  longint pp_slow_load_kind [PP_NKIND], pp_slow_load_wait_kind [PP_NKIND],
+          pp_slow_load_ack_kind [PP_NKIND];
+  longint pp_slow_store_kind [PP_NKIND], pp_slow_store_wait_kind [PP_NKIND],
+          pp_slow_store_ack_kind [PP_NKIND];
+  longint pp_slow_load_str [PP_NSTR], pp_slow_store_str [PP_NSTR];
+  // The aggregate says K_ALU owns the slow-load time.  Preserve its operation
+  // and addressing shape before widening the fast decoder or system admission:
+  // a MOV-source read, an ALU source read, and an RMW are materially different
+  // correctness/PPA candidates.
+  longint pp_slow_alu_load_op [PP_NALU], pp_slow_alu_load_wait_op [PP_NALU],
+          pp_slow_alu_load_ack_op [PP_NALU];
+  longint pp_slow_alu_load_w [PP_NW];
+  longint pp_slow_alu_load_mov, pp_slow_alu_load_rmw;
+  longint pp_slow_alu_load_def16, pp_slow_alu_load_real, pp_slow_alu_load_v86;
+`ifdef VEN_UOPCACHE_CHECK
+`ifndef SYNTHESIS
+  // A raw predecode-map hole must be classified from the live reference decoder,
+  // not from u_d: on a map miss u_d_raw is selected before its validity bit and
+  // can describe an unrelated old slot.  This counter deliberately has a
+  // stricter, byte-safe trigger than pp_bail[3] below, because a stale u_d.len
+  // can make the same hole look like a pipe_bytes_ok failure first.
+  // `pp_umap_raw` deliberately excludes `fsm_case_enabled`: that aggregate
+  // reaches xlate/segment cones whose S_PIPE inputs may be the stale u_d on a
+  // map hole.  Keep the observed gate-low count separately, then classify the
+  // current byte stream from u_d_ref only.
+  longint pp_umap_raw, pp_umap_fsm_blocked, pp_umap_stale_len, pp_umap_tail;
+  longint pp_umap_ref_fp, pp_umap_ref_nonsimple, pp_umap_ref_simple_mem;
+  longint pp_umap_ref_simple_fastctx, pp_umap_ref_simple_sysblock;
+  // These five buckets are mutually exclusive and sum exactly to the
+  // simple/non-memory reference fast-context population.  They distinguish a
+  // map entry that would reach the integer ISSUE arm now from one that merely
+  // passes the canonical fp_sys_bail context test.
+  longint pp_umap_ref_late_pen, pp_umap_ref_late_mispred;
+  longint pp_umap_ref_late_agi, pp_umap_ref_late_csfault;
+  longint pp_umap_ref_would_issue;
+  // Root cause recorded by the fill walker for simple non-memory holes.  This
+  // is a simulator-only cross-tab: it distinguishes a bounded capacity/tail
+  // limit from a grammar stop before any scanner or storage redesign is tried.
+  longint pp_umap_fastend [PP_NUOPEND];
+  // For grammar-stop holes, retain the walker endpoint's opcode and a single
+  // sample.  This is the missing bridge between "unknown grammar" aggregate
+  // counts and an auditable candidate for a fail-closed resynchronization.
+  longint pp_umap_fastopaque [256];
+  longint pp_umap_fastop [256], pp_umap_memop [256], pp_umap_slowop [256];
+  longint pp_umap_slow0f [256];
+  logic [31:0] pp_umap_fastpc [256], pp_umap_mempc [256], pp_umap_slowpc [256];
+  logic [31:0] pp_umap_fastopaquepc [256];
+  logic [47:0] pp_umap_fastbytes [256], pp_umap_membytes [256], pp_umap_slowbytes [256];
+  logic [47:0] pp_umap_fastopaquebytes [256];
+  logic [2:0] pp_umap_end_reason;
+  logic [47:0] pp_umap_end_bytes;
+  // End-reason attribution restricted to holes that would issue immediately.
+  // The existing pp_umap_fastend[] remains the broader fast-context view.
+  longint pp_umap_would_issue_end [PP_NUOPEND];
+  logic pp_umap_base_safe, pp_umap_ref_fastctx, pp_umap_ref_agi;
+  logic pp_umap_ref_cs_fault, pp_umap_ref_issue_now;
+
+  // Profile-only reference admission.  The two endpoint residency checks prove
+  // the full fixed-window span for u_d_ref; do not substitute pipe_bytes_ok,
+  // uop_hit, fp_sys_bail, pipe_agi, pipe_mem_wait, cs_extent_fault, or
+  // fsm_case_enabled because each can consume the stale slot at a map hole.
+  assign pp_umap_base_safe = (state == S_PIPE) && cycle_mode && exec_issue_ok &&
+                              !fp_issue_block && !pipe_mem_active_q &&
+                              (stall_cnt == 7'd0) && ic_fetch_ready &&
+                              ic_present(flin) && ic_present(flin + fp_pipe_decode_win_last) &&
+                              (uc_u_in_b ? uc_pdvB : uc_pdvA) &&
+                              !(uc_u_in_b ? uc_bvB[flin[4:0]] : uc_bvA[flin[4:0]]);
+`ifdef VEN_SYS_FASTPATH
+  assign pp_umap_ref_fastctx = u_d_ref.simple && !u_d_ref.is_fp && !u_d_ref.is_mem &&
+                                (!sys_mode || (sys_fp_ok && !fp_dbg_active));
+`else
+  assign pp_umap_ref_fastctx = u_d_ref.simple && !u_d_ref.is_fp && !u_d_ref.is_mem &&
+                                !sys_mode;
+`endif
+  always_comb begin
+    pp_umap_ref_agi = 1'b0;
+    if (u_d_ref.addr_mask != 8'd0) begin
+      if (!agi_wr0[8] && u_d_ref.addr_mask[agi_wr0[2:0]]) pp_umap_ref_agi = 1'b1;
+      if (!agi_wr1[8] && u_d_ref.addr_mask[agi_wr1[2:0]]) pp_umap_ref_agi = 1'b1;
+    end
+  end
+`ifdef VEN_SEG_ENFORCE
+  assign pp_umap_ref_cs_fault = sys_mode && !real_mode && !v86 && seg_attr[SG_CS][7] &&
+                                 (({1'b0, eip} + {28'd0, u_d_ref.len} - 33'd1) >
+                                  {1'b0, seg_limit[SG_CS]});
+`else
+  assign pp_umap_ref_cs_fault = 1'b0;
+`endif
+  assign pp_umap_ref_issue_now = pp_umap_base_safe && pp_umap_ref_fastctx &&
+                                 (pending_mem_pen == 7'd0) &&
+                                 (mispred_bubbles == 3'd0) &&
+                                 !pp_umap_ref_agi && !pp_umap_ref_cs_fault;
+
+  always_comb begin
+    pp_umap_end_reason = uc_u_in_b ? u_uopcache.rd_end_reasonB_q
+                                   : u_uopcache.rd_end_reasonA_q;
+    pp_umap_end_bytes = uc_u_in_b ? u_uopcache.rd_end_bytesB_q
+                                  : u_uopcache.rd_end_bytesA_q;
+  end
+`endif
+`endif
 `ifdef VEN_FP_SHARED
 `ifndef SYNTHESIS
   // The shared top separately reports its service latency.  Measure the same
@@ -9780,12 +12055,21 @@ module core
   longint pp_fp_shared_cmds, pp_fp_shared_roundtrip;
   logic pp_fp_shared_pending;
   longint pp_fp_shared_age;
+`ifdef VEN_FP_ASYNC_STREAM
+  logic [1:0] pp_fp_stream_head, pp_fp_stream_tail;
+  logic [2:0] pp_fp_stream_count;
+  longint pp_fp_stream_cycle [4];
+`endif
 `endif
 `endif
   // Bucket 9 (`fp_sys_bail`) is deliberately broad.  Split its actual hand-off
   // cause so an implementation change targets a demonstrated eligibility
   // limit, rather than blindly widening the system fast path.
   longint pp_sys_bail [PP_NSBAIL];
+  // `sys_fp_ok` is a deliberately narrow proof.  Split its rejection by the
+  // exact predicate instead of treating VEN_SYS_FASTPATH_ALL as a performance
+  // solution.  The categories are mutually exclusive and sum to context bails.
+  longint pp_sysctx_real, pp_sysctx_def16, pp_sysctx_seg;
 `ifndef SYNTHESIS
 `ifdef VEN_SLOWOP_PERF
   // The slow decoder is deliberately the safe fallback.  Attribute its
@@ -9803,6 +12087,7 @@ module core
 `endif
 `endif
   longint pp_cycles, pp_ret1, pp_ret2;
+  longint pp_memwait_load, pp_memwait_store;
   longint pp_divert;   // clocks where an interrupt diverted the S_PIPE spine
   longint pp_shadow, pp_shret;   // clocks with irq_shadow set / retires under it
 
@@ -9841,6 +12126,95 @@ module core
     endcase
   endfunction
 
+  function automatic string pp_pair_deny_name(input int i);
+    case (i)
+      0: pp_pair_deny_name = "unexpected pair-ok";
+      1: pp_pair_deny_name = "non-simple U or V";
+      2: pp_pair_deny_name = "U/V pairing class";
+      3: pp_pair_deny_name = "disp+imm restriction";
+      4: pp_pair_deny_name = "U-to-V RAW";
+      5: pp_pair_deny_name = "non-ESP WAW";
+      6: pp_pair_deny_name = "V memory operand";
+      default: pp_pair_deny_name = "invalid reason";
+    endcase
+  endfunction
+
+  function automatic string pp_kind_name(input int i);
+    case (i)
+      int'(K_ALU):     pp_kind_name = "ALU";
+      int'(K_SHIFT):   pp_kind_name = "SHIFT";
+      int'(K_SHLDRD):  pp_kind_name = "SHLDRD";
+      int'(K_MULDIV):  pp_kind_name = "MULDIV";
+      int'(K_IMUL2):   pp_kind_name = "IMUL2";
+      int'(K_EXT):     pp_kind_name = "EXT";
+      int'(K_SETCC):   pp_kind_name = "SETCC";
+      int'(K_BITTEST): pp_kind_name = "BITTEST";
+      int'(K_BITSCAN): pp_kind_name = "BITSCAN";
+      int'(K_XCHG):    pp_kind_name = "XCHG";
+      int'(K_BSWAP):   pp_kind_name = "BSWAP";
+      int'(K_CONV):    pp_kind_name = "CONV";
+      int'(K_STKMISC): pp_kind_name = "STKMISC";
+      int'(K_STR):     pp_kind_name = "STR";
+      int'(K_CTRL):    pp_kind_name = "CTRL";
+      int'(K_CMPXCHG): pp_kind_name = "CMPXCHG";
+      int'(K_CPUID):   pp_kind_name = "CPUID";
+      int'(K_RDTSC):   pp_kind_name = "RDTSC";
+      int'(K_XADD):    pp_kind_name = "XADD";
+      int'(K_BOUND):   pp_kind_name = "BOUND";
+      int'(K_CX8B):    pp_kind_name = "CX8B";
+      default:         pp_kind_name = "?";
+    endcase
+  endfunction
+
+  function automatic string pp_str_name(input int i);
+    case (i)
+      int'(ST_MOVS): pp_str_name = "MOVS";
+      int'(ST_STOS): pp_str_name = "STOS";
+      int'(ST_LODS): pp_str_name = "LODS";
+      int'(ST_SCAS): pp_str_name = "SCAS";
+      int'(ST_CMPS): pp_str_name = "CMPS";
+      int'(ST_INS):  pp_str_name = "INS";
+      int'(ST_OUTS): pp_str_name = "OUTS";
+      default:       pp_str_name = "?";
+    endcase
+  endfunction
+
+  function automatic string pp_alu_name(input int i);
+    case (i)
+      int'(ALU_ADD): pp_alu_name = "ADD";
+      int'(ALU_OR):  pp_alu_name = "OR";
+      int'(ALU_ADC): pp_alu_name = "ADC";
+      int'(ALU_SBB): pp_alu_name = "SBB";
+      int'(ALU_AND): pp_alu_name = "AND";
+      int'(ALU_SUB): pp_alu_name = "SUB";
+      int'(ALU_XOR): pp_alu_name = "XOR";
+      int'(ALU_CMP): pp_alu_name = "CMP";
+      int'(ALU_INC): pp_alu_name = "INC";
+      int'(ALU_DEC): pp_alu_name = "DEC";
+      int'(ALU_TEST):pp_alu_name = "TEST";
+      int'(ALU_MOV): pp_alu_name = "MOV";
+      int'(ALU_NEG): pp_alu_name = "NEG";
+      int'(ALU_NOT): pp_alu_name = "NOT";
+      default:       pp_alu_name = "BCD";
+    endcase
+  endfunction
+
+`ifdef VEN_UOPCACHE_CHECK
+`ifndef SYNTHESIS
+  function automatic string pp_umap_end_name(input int i);
+    case (i)
+      0: pp_umap_end_name = "none/invalid";
+      1: pp_umap_end_name = "physical line end";
+      2: pp_umap_end_name = "slot capacity";
+      3: pp_umap_end_name = "foreground step cap";
+      4: pp_umap_end_name = "unknown grammar";
+      5: pp_umap_end_name = "known cross-line form";
+      default: pp_umap_end_name = "?";
+    endcase
+  endfunction
+`endif
+`endif
+
   always_ff @(posedge clk) begin
     if (!rst_n) begin
       for (int i=0;i<PP_NSTATE;i++) pp_state[i] <= 64'd0;
@@ -9850,19 +12224,87 @@ module core
       end
       for (int i=0;i<PP_NBAIL;i++)  pp_bail[i]  <= 64'd0;
       for (int i=0;i<PP_NPAIR;i++)  pp_pair[i]  <= 64'd0;
+      for (int i=0;i<PP_NPAIR_DENY;i++) pp_pair_deny[i] <= 64'd0;
       for (int i=0;i<PP_NUOPMISS;i++) pp_uopmiss[i] <= 64'd0;
       for (int i=0;i<IC_LINE;i++) pp_uopmiss_off[i] <= 64'd0;
+      for (int i=0;i<PP_NKIND;i++) begin
+        pp_slow_load_kind[i] <= 64'd0;
+        pp_slow_load_wait_kind[i] <= 64'd0;
+        pp_slow_load_ack_kind[i] <= 64'd0;
+        pp_slow_store_kind[i] <= 64'd0;
+        pp_slow_store_wait_kind[i] <= 64'd0;
+        pp_slow_store_ack_kind[i] <= 64'd0;
+      end
+      for (int i=0;i<PP_NSTR;i++) begin
+        pp_slow_load_str[i] <= 64'd0;
+        pp_slow_store_str[i] <= 64'd0;
+      end
+      for (int i=0;i<PP_NALU;i++) begin
+        pp_slow_alu_load_op[i] <= 64'd0;
+        pp_slow_alu_load_wait_op[i] <= 64'd0;
+        pp_slow_alu_load_ack_op[i] <= 64'd0;
+      end
+      for (int i=0;i<PP_NW;i++) pp_slow_alu_load_w[i] <= 64'd0;
+      pp_slow_alu_load_mov <= 64'd0;
+      pp_slow_alu_load_rmw <= 64'd0;
+      pp_slow_alu_load_def16 <= 64'd0;
+      pp_slow_alu_load_real <= 64'd0;
+      pp_slow_alu_load_v86 <= 64'd0;
       pp_uop_sfetch <= 64'd0;
       pp_resident_sfetch <= 64'd0;
+`ifdef VEN_UOPCACHE_CHECK
+`ifndef SYNTHESIS
+      pp_umap_raw <= 64'd0;
+      pp_umap_fsm_blocked <= 64'd0;
+      pp_umap_stale_len <= 64'd0;
+      pp_umap_tail <= 64'd0;
+      pp_umap_ref_fp <= 64'd0;
+      pp_umap_ref_nonsimple <= 64'd0;
+      pp_umap_ref_simple_mem <= 64'd0;
+      pp_umap_ref_simple_fastctx <= 64'd0;
+      pp_umap_ref_simple_sysblock <= 64'd0;
+      pp_umap_ref_late_pen <= 64'd0;
+      pp_umap_ref_late_mispred <= 64'd0;
+      pp_umap_ref_late_agi <= 64'd0;
+      pp_umap_ref_late_csfault <= 64'd0;
+      pp_umap_ref_would_issue <= 64'd0;
+      for (int i=0;i<PP_NUOPEND;i++) begin
+        pp_umap_fastend[i] <= 64'd0;
+        pp_umap_would_issue_end[i] <= 64'd0;
+      end
+      for (int i=0;i<256;i++) begin
+        pp_umap_fastopaque[i] <= 64'd0;
+        pp_umap_fastop[i] <= 64'd0;
+        pp_umap_memop[i] <= 64'd0;
+        pp_umap_slowop[i] <= 64'd0;
+        pp_umap_slow0f[i] <= 64'd0;
+        pp_umap_fastpc[i] <= 32'd0;
+        pp_umap_fastopaquepc[i] <= 32'd0;
+        pp_umap_mempc[i] <= 32'd0;
+        pp_umap_slowpc[i] <= 32'd0;
+        pp_umap_fastbytes[i] <= 48'd0;
+        pp_umap_fastopaquebytes[i] <= 48'd0;
+        pp_umap_membytes[i] <= 48'd0;
+        pp_umap_slowbytes[i] <= 48'd0;
+      end
+`endif
+`endif
 `ifdef VEN_FP_SHARED
 `ifndef SYNTHESIS
       pp_fp_shared_cmds <= 64'd0;
       pp_fp_shared_roundtrip <= 64'd0;
       pp_fp_shared_pending <= 1'b0;
       pp_fp_shared_age <= 64'd0;
+`ifdef VEN_FP_ASYNC_STREAM
+      pp_fp_stream_head <= 0; pp_fp_stream_tail <= 0; pp_fp_stream_count <= 0;
+      for (int i=0; i<4; i++) pp_fp_stream_cycle[i] <= 0;
+`endif
 `endif
 `endif
       for (int i=0;i<PP_NSBAIL;i++) pp_sys_bail[i] <= 64'd0;
+      pp_sysctx_real <= 64'd0;
+      pp_sysctx_def16 <= 64'd0;
+      pp_sysctx_seg <= 64'd0;
 `ifndef SYNTHESIS
 `ifdef VEN_SLOWOP_PERF
       for (int i=0;i<256;i++) begin
@@ -9877,7 +12319,9 @@ module core
       end
 `endif
 `endif
-      pp_cycles <= 64'd0; pp_ret1 <= 64'd0; pp_ret2 <= 64'd0; pp_divert <= 64'd0; pp_shadow <= 64'd0; pp_shret <= 64'd0;
+      pp_cycles <= 64'd0; pp_ret1 <= 64'd0; pp_ret2 <= 64'd0;
+      pp_memwait_load <= 64'd0; pp_memwait_store <= 64'd0;
+      pp_divert <= 64'd0; pp_shadow <= 64'd0; pp_shret <= 64'd0;
     end else begin
       pp_cycles <= pp_cycles + 64'd1;
       if (fp_irq_divert) pp_divert <= pp_divert + 64'd1;
@@ -9888,17 +12332,165 @@ module core
         pp_mem_wait[int'(state)] <= pp_mem_wait[int'(state)] + 64'd1;
       if (mem_req && mem_ack)
         pp_mem_ack[int'(state)] <= pp_mem_ack[int'(state)] + 64'd1;
+      if (((state == S_LOAD) || (state == S_LOAD2)) && (int'(q_kind) < PP_NKIND)) begin
+        pp_slow_load_kind[int'(q_kind)] <= pp_slow_load_kind[int'(q_kind)] + 64'd1;
+        if (mem_req && !mem_ack)
+          pp_slow_load_wait_kind[int'(q_kind)] <= pp_slow_load_wait_kind[int'(q_kind)] + 64'd1;
+        if (mem_req && mem_ack)
+          pp_slow_load_ack_kind[int'(q_kind)] <= pp_slow_load_ack_kind[int'(q_kind)] + 64'd1;
+        if ((q_kind == K_STR) && (int'(q_st) < PP_NSTR))
+          pp_slow_load_str[int'(q_st)] <= pp_slow_load_str[int'(q_st)] + 64'd1;
+        if (q_kind == K_ALU) begin
+          if (int'(q_alu_op) < PP_NALU) begin
+            pp_slow_alu_load_op[int'(q_alu_op)] <= pp_slow_alu_load_op[int'(q_alu_op)] + 64'd1;
+            if (mem_req && !mem_ack)
+              pp_slow_alu_load_wait_op[int'(q_alu_op)] <= pp_slow_alu_load_wait_op[int'(q_alu_op)] + 64'd1;
+            if (mem_req && mem_ack)
+              pp_slow_alu_load_ack_op[int'(q_alu_op)] <= pp_slow_alu_load_ack_op[int'(q_alu_op)] + 64'd1;
+          end
+          if (int'(q_w) < PP_NW) pp_slow_alu_load_w[int'(q_w)] <= pp_slow_alu_load_w[int'(q_w)] + 64'd1;
+          if (q_is_mov) pp_slow_alu_load_mov <= pp_slow_alu_load_mov + 64'd1;
+          if (q_mem_dst) pp_slow_alu_load_rmw <= pp_slow_alu_load_rmw + 64'd1;
+          if (def16) pp_slow_alu_load_def16 <= pp_slow_alu_load_def16 + 64'd1;
+          if (real_mode) pp_slow_alu_load_real <= pp_slow_alu_load_real + 64'd1;
+          if (v86) pp_slow_alu_load_v86 <= pp_slow_alu_load_v86 + 64'd1;
+        end
+      end
+      if ((state == S_STORE) && (int'(q_kind) < PP_NKIND)) begin
+        pp_slow_store_kind[int'(q_kind)] <= pp_slow_store_kind[int'(q_kind)] + 64'd1;
+        if (mem_req && !mem_ack)
+          pp_slow_store_wait_kind[int'(q_kind)] <= pp_slow_store_wait_kind[int'(q_kind)] + 64'd1;
+        if (mem_req && mem_ack)
+          pp_slow_store_ack_kind[int'(q_kind)] <= pp_slow_store_ack_kind[int'(q_kind)] + 64'd1;
+        if ((q_kind == K_STR) && (int'(q_st) < PP_NSTR))
+          pp_slow_store_str[int'(q_st)] <= pp_slow_store_str[int'(q_st)] + 64'd1;
+      end
       if (retire_valid)  pp_ret1 <= pp_ret1 + 64'd1;
       if (retire2_valid) pp_ret2 <= pp_ret2 + 64'd1;
       if (sfetch_uop_fast) pp_uop_sfetch <= pp_uop_sfetch + 64'd1;
       if (sfetch_resident_fast) pp_resident_sfetch <= pp_resident_sfetch + 64'd1;
+`ifdef VEN_UOPCACHE_CHECK
+`ifndef SYNTHESIS
+      // Latent uop-map eligibility cross-tab.  pp_umap_base_safe is formed
+      // only from byte-safe/current-state signals; it deliberately excludes
+      // fsm_case_enabled because its fault/translation cones can observe the
+      // stale u_d.  The two resident endpoint checks plus ic_fetch_ready prove
+      // u_d_ref is decoding the current buffered byte window.
+      if (pp_umap_base_safe) begin
+        pp_umap_raw <= pp_umap_raw + 64'd1;
+        if (!fsm_case_enabled) pp_umap_fsm_blocked <= pp_umap_fsm_blocked + 64'd1;
+        // This is an observed consequence, never an admission predicate.
+        if (!pipe_bytes_ok) pp_umap_stale_len <= pp_umap_stale_len + 64'd1;
+        // The walker intentionally refuses a raw fixed-window boundary that
+        // crosses the line; adding slots cannot cover this class.
+        if ({1'b0,flin[4:0]} + fp_pipe_decode_win_last >= 6'd32)
+          pp_umap_tail <= pp_umap_tail + 64'd1;
+        if (u_d_ref.is_fp)
+          pp_umap_ref_fp <= pp_umap_ref_fp + 64'd1;
+        else if (!u_d_ref.simple) begin
+          pp_umap_ref_nonsimple <= pp_umap_ref_nonsimple + 64'd1;
+          pp_umap_slowop[ic_byte(flin)] <= pp_umap_slowop[ic_byte(flin)] + 64'd1;
+          if (ic_byte(flin) == 8'h0F)
+            pp_umap_slow0f[ic_byte(flin + 32'd1)]
+              <= pp_umap_slow0f[ic_byte(flin + 32'd1)] + 64'd1;
+          if (pp_umap_slowop[ic_byte(flin)] == 0) begin
+            pp_umap_slowpc[ic_byte(flin)] <= flin;
+            pp_umap_slowbytes[ic_byte(flin)] <= {
+              ic_byte(flin + 32'd5), ic_byte(flin + 32'd4),
+              ic_byte(flin + 32'd3), ic_byte(flin + 32'd2),
+              ic_byte(flin + 32'd1), ic_byte(flin)
+            };
+          end
+        end
+        else if (u_d_ref.is_mem) begin
+          pp_umap_ref_simple_mem <= pp_umap_ref_simple_mem + 64'd1;
+          pp_umap_memop[ic_byte(flin)] <= pp_umap_memop[ic_byte(flin)] + 64'd1;
+          if (pp_umap_memop[ic_byte(flin)] == 0) begin
+            pp_umap_mempc[ic_byte(flin)] <= flin;
+            pp_umap_membytes[ic_byte(flin)] <= {
+              ic_byte(flin + 32'd5), ic_byte(flin + 32'd4),
+              ic_byte(flin + 32'd3), ic_byte(flin + 32'd2),
+              ic_byte(flin + 32'd1), ic_byte(flin)
+            };
+          end
+        end
+        else if (pp_umap_ref_fastctx) begin
+          pp_umap_ref_simple_fastctx <= pp_umap_ref_simple_fastctx + 64'd1;
+          // These are the only lower-priority blockers for a reference simple,
+          // non-FP, non-memory U op.  Keep the priority identical to the
+          // counterfactual S_PIPE path: pending penalty, then branch flush,
+          // then AGI; the reference CS check is live only after all three.
+          if (pending_mem_pen != 7'd0)
+            pp_umap_ref_late_pen <= pp_umap_ref_late_pen + 64'd1;
+          else if (mispred_bubbles != 3'd0)
+            pp_umap_ref_late_mispred <= pp_umap_ref_late_mispred + 64'd1;
+          else if (pp_umap_ref_agi)
+            pp_umap_ref_late_agi <= pp_umap_ref_late_agi + 64'd1;
+          else if (pp_umap_ref_cs_fault)
+            pp_umap_ref_late_csfault <= pp_umap_ref_late_csfault + 64'd1;
+          else if (pp_umap_ref_issue_now) begin
+            pp_umap_ref_would_issue <= pp_umap_ref_would_issue + 64'd1;
+            if (pp_umap_end_reason <= 3'd5)
+              pp_umap_would_issue_end[pp_umap_end_reason]
+                <= pp_umap_would_issue_end[pp_umap_end_reason] + 64'd1;
+          end
+          if (pp_umap_end_reason <= 3'd5)
+            pp_umap_fastend[pp_umap_end_reason] <= pp_umap_fastend[pp_umap_end_reason] + 64'd1;
+          if (pp_umap_end_reason == 3'd4) begin
+            pp_umap_fastopaque[pp_umap_end_bytes[7:0]]
+              <= pp_umap_fastopaque[pp_umap_end_bytes[7:0]] + 64'd1;
+            if (pp_umap_fastopaque[pp_umap_end_bytes[7:0]] == 0) begin
+              pp_umap_fastopaquepc[pp_umap_end_bytes[7:0]] <= flin;
+              pp_umap_fastopaquebytes[pp_umap_end_bytes[7:0]] <= pp_umap_end_bytes;
+            end
+          end
+          pp_umap_fastop[ic_byte(flin)] <= pp_umap_fastop[ic_byte(flin)] + 64'd1;
+          if (pp_umap_fastop[ic_byte(flin)] == 0) begin
+            pp_umap_fastpc[ic_byte(flin)] <= flin;
+            pp_umap_fastbytes[ic_byte(flin)] <= {
+              ic_byte(flin + 32'd5), ic_byte(flin + 32'd4),
+              ic_byte(flin + 32'd3), ic_byte(flin + 32'd2),
+              ic_byte(flin + 32'd1), ic_byte(flin)
+            };
+          end
+        end else
+          pp_umap_ref_simple_sysblock <= pp_umap_ref_simple_sysblock + 64'd1;
+      end
+`endif
+`endif
 `ifdef VEN_FP_SHARED
 `ifndef SYNTHESIS
-      if ((state == S_FEXEC) && fp_shared_cmd_ready && !fp_shared_accept_retire) begin
+`ifdef VEN_FP_ASYNC_STREAM
+      // Ordered registered-response latency, including simultaneous accept and
+      // completion. The old scalar age would silently overwrite older owners.
+      if (fp_shared_cmd_valid && fp_shared_cmd_ready && !fp_shared_accept_retire) begin
+        if (pp_fp_stream_count == 4 && !fp_shared_rsp_valid)
+          $fatal(1, "FP core perf owner overflow");
+        pp_fp_stream_cycle[pp_fp_stream_tail] <= pp_cycles;
+        pp_fp_stream_tail <= pp_fp_stream_tail + 1'b1;
+      end
+      if (fp_shared_rsp_valid && pp_fp_stream_count != 0) begin
+        pp_fp_shared_cmds <= pp_fp_shared_cmds + 1;
+        pp_fp_shared_roundtrip <= pp_fp_shared_roundtrip +
+            (pp_cycles - pp_fp_stream_cycle[pp_fp_stream_head]);
+        pp_fp_stream_head <= pp_fp_stream_head + 1'b1;
+      end
+      case ({fp_shared_cmd_valid && fp_shared_cmd_ready && !fp_shared_accept_retire,
+             fp_shared_rsp_valid && (pp_fp_stream_count != 0)})
+        2'b10: pp_fp_stream_count <= pp_fp_stream_count + 1'b1;
+        2'b01: pp_fp_stream_count <= pp_fp_stream_count - 1'b1;
+        default: begin end
+      endcase
+      pp_fp_shared_pending <= (pp_fp_stream_count != 0);
+`else
+      if (fp_shared_cmd_valid && fp_shared_cmd_ready && !fp_shared_accept_retire) begin
         pp_fp_shared_pending <= 1'b1;
         pp_fp_shared_age <= 64'd0;
       end else if (pp_fp_shared_pending) begin
-        if ((state == S_FP_SHARED_WAIT) && fp_shared_rsp_valid) begin
+        if ((fp_async_pending && fp_shared_rsp_valid) ||
+            ((state == S_FP_SHARED_WAIT) &&
+            (fp_shared_rsp_valid ||
+             (fp_shared_alu_commit_retire && fp_shared_early_retire_ok)))) begin
           pp_fp_shared_cmds <= pp_fp_shared_cmds + 64'd1;
           pp_fp_shared_roundtrip <= pp_fp_shared_roundtrip + pp_fp_shared_age + 64'd1;
           pp_fp_shared_pending <= 1'b0;
@@ -9906,6 +12498,7 @@ module core
           pp_fp_shared_age <= pp_fp_shared_age + 64'd1;
         end
       end
+`endif
 `endif
 `endif
 
@@ -9918,6 +12511,7 @@ module core
         int b;
         b = 12;                                                        // ISSUE
         if      (stall_cnt != 7'd0)                            b = 0;
+        else if (pending_mem_pen != 7'd0)                      b = 4;
         else if (!pipe_bytes_ok
 `ifdef VEN_L1_AXI
                  && !(real_bus && !mem_ack)
@@ -9932,7 +12526,6 @@ module core
 `ifdef VEN_UOPCACHE
         else if (!uop_hit || !cycle_mode)                      b = 3;
 `endif
-        else if (pending_mem_pen != 7'd0)                      b = 4;
         else if (pipe_mem_wait)                                  b = 5;
 `ifdef VEN_FP_PIPE
         else if (fp_pipe_rd_haz)                               b = 6;
@@ -9944,6 +12537,14 @@ module core
         else if (mispred_bubbles != 3'd0)                      b = 10;
         else if (pipe_agi)                                     b = 11;
         pp_bail[b] <= pp_bail[b] + 64'd1;
+        if (b == 5) begin
+          // Once a packet is admitted its registered direction is the source
+          // of truth; on the admission clock use the live store predicate.
+          if (pipe_mem_active_q ? pipe_mem_we_q : pipe_store_req)
+            pp_memwait_store <= pp_memwait_store + 64'd1;
+          else
+            pp_memwait_load <= pp_memwait_load + 64'd1;
+        end
         // V attribution applies only to an otherwise successful U-side issue.
         // Preserve the exact `pipe_pair` predicate order (including the final
         // Err59 override) so these buckets add to pp_bail[12] and cannot make a
@@ -9963,6 +12564,13 @@ module core
                                                                p = 5;
           else if (errata_en[ERR_MOFFS] && moffs_falsedep)      p = 6;
           pp_pair[p] <= pp_pair[p] + 64'd1;
+          if (p == 1) begin
+            if ((pipe_pair_reason == 3'd0) || (pipe_pair_reason >= PP_NPAIR_DENY))
+              $error("PERF/pair: pair_ok=%0b reason=%0d", pipe_pair_ok, pipe_pair_reason);
+            else
+              pp_pair_deny[int'(pipe_pair_reason)] <=
+                  pp_pair_deny[int'(pipe_pair_reason)] + 64'd1;
+          end
         end
         if (b == 3) begin
           // Keep this order aligned with `!uop_hit || !cycle_mode` above.
@@ -10031,7 +12639,12 @@ module core
 `endif
           end
 `ifdef VEN_SYS_FASTPATH
-          else if (sys_mode && !sys_fp_ok) pp_sys_bail[1] <= pp_sys_bail[1] + 64'd1;
+          else if (sys_mode && !sys_fp_ok) begin
+            pp_sys_bail[1] <= pp_sys_bail[1] + 64'd1;
+            if (real_mode) pp_sysctx_real <= pp_sysctx_real + 64'd1;
+            else if (!cs_d) pp_sysctx_def16 <= pp_sysctx_def16 + 64'd1;
+            else pp_sysctx_seg <= pp_sysctx_seg + 64'd1;
+          end
           else if (sys_mode && u_d.is_store && !sys_fp_store_ok) pp_sys_bail[2] <= pp_sys_bail[2] + 64'd1;
           else if (sys_mode && u_d.is_mem && !u_d.is_store && !sys_fp_load_ok) pp_sys_bail[2] <= pp_sys_bail[2] + 64'd1;
           else if (sys_mode && fp_dbg_active) pp_sys_bail[3] <= pp_sys_bail[3] + 64'd1;
@@ -10070,6 +12683,35 @@ module core
         $display("    state %2d  req-wait clocks %10d  req/ack handshakes %10d",
                  i, pp_mem_wait[i], pp_mem_ack[i]);
     $display("");
+    $display("  -- slow data FSM by decoded class (clocks / wait / ack) --");
+    for (int i=0;i<PP_NKIND;i++)
+      if ((pp_slow_load_kind[i] != 0) || (pp_slow_store_kind[i] != 0))
+        $display("    %-8s load %10d / %10d / %10d   store %10d / %10d / %10d",
+                 pp_kind_name(i), pp_slow_load_kind[i], pp_slow_load_wait_kind[i],
+                 pp_slow_load_ack_kind[i], pp_slow_store_kind[i],
+                 pp_slow_store_wait_kind[i], pp_slow_store_ack_kind[i]);
+    if ((pp_slow_load_kind[int'(K_STR)] != 0) ||
+        (pp_slow_store_kind[int'(K_STR)] != 0)) begin
+      $display("  -- slow string FSM residency (load / store clocks) --");
+      for (int i=0;i<PP_NSTR;i++)
+        if ((pp_slow_load_str[i] != 0) || (pp_slow_store_str[i] != 0))
+          $display("    %-8s %10d / %10d", pp_str_name(i), pp_slow_load_str[i],
+                   pp_slow_store_str[i]);
+    end
+    if (pp_slow_load_kind[int'(K_ALU)] != 0) begin
+      $display("  -- K_ALU slow-load operation (clocks / wait / ack) --");
+      for (int i=0;i<PP_NALU;i++)
+        if (pp_slow_alu_load_op[i] != 0)
+          $display("    %-5s %10d / %10d / %10d", pp_alu_name(i),
+                   pp_slow_alu_load_op[i], pp_slow_alu_load_wait_op[i],
+                   pp_slow_alu_load_ack_op[i]);
+      $display("    MOV-shape=%0d RMW-shape=%0d def16=%0d real=%0d v86=%0d",
+               pp_slow_alu_load_mov, pp_slow_alu_load_rmw,
+               pp_slow_alu_load_def16, pp_slow_alu_load_real, pp_slow_alu_load_v86);
+      $display("    widths: byte=%0d word=%0d dword=%0d",
+               pp_slow_alu_load_w[1], pp_slow_alu_load_w[2], pp_slow_alu_load_w[4]);
+    end
+    $display("");
     $display("  S_PIPE clocks %0d   NON-S_PIPE (slow FSM) clocks %0d  (%0d.%01d%%)",
              pp_state[int'(S_PIPE)], slow_cyc,
              (slow_cyc*1000)/pp_cycles/10, ((slow_cyc*1000)/pp_cycles)%10);
@@ -10086,7 +12728,16 @@ module core
       for (int i=0;i<PP_NPAIR;i++)
         if (pp_pair[i] != 0)
           $display("    %10d  %s", pp_pair[i], pp_pair_name(i));
+      if (pp_pair[1] != 0) begin
+        $display("  -- pairing-rule first rejection (sums to !pipe_pair_ok) --");
+        for (int i=1;i<PP_NPAIR_DENY;i++)
+          if (pp_pair_deny[i] != 0)
+            $display("    %10d  %s", pp_pair_deny[i], pp_pair_deny_name(i));
+      end
     end
+    if (pp_bail[5] != 0)
+      $display("  D-side fast-path wait: loads=%0d stores=%0d", pp_memwait_load,
+               pp_memwait_store);
     if (pp_bail[3] != 0) begin
       $display("");
       $display("  -- uop-cache fallback cause (sums to bucket 3) --");
@@ -10102,6 +12753,70 @@ module core
     end
     if (pp_resident_sfetch != 0)
       $display("  resident S_PIPE slow-fetch hand-offs  %10d", pp_resident_sfetch);
+`ifdef VEN_UOPCACHE_CHECK
+`ifndef SYNTHESIS
+    if (pp_umap_raw != 0) begin
+      $display("");
+      $display("  -- raw resident uop-map holes (live reference classification) --");
+      $display("    raw holes (stale-free qualification) %10d", pp_umap_raw);
+      $display("    current fsm gate low (observed only) %10d", pp_umap_fsm_blocked);
+      $display("    stale-length pipe_bytes_ok first     %10d", pp_umap_stale_len);
+      $display("    tail-window holes (fixed decode)     %10d", pp_umap_tail);
+      $display("  -- reference class (sums to raw holes) --");
+      $display("    reference x87                         %10d", pp_umap_ref_fp);
+      $display("    reference non-simple integer          %10d", pp_umap_ref_nonsimple);
+      $display("    reference simple memory               %10d", pp_umap_ref_simple_mem);
+      $display("    reference simple non-memory b9-pass   %10d", pp_umap_ref_simple_fastctx);
+      $display("    reference simple non-memory sys block %10d", pp_umap_ref_simple_sysblock);
+      $display("    reference class total                 %10d",
+               pp_umap_ref_fp + pp_umap_ref_nonsimple + pp_umap_ref_simple_mem +
+               pp_umap_ref_simple_fastctx + pp_umap_ref_simple_sysblock);
+      $display("  -- b9-pass late disposition (sums to b9-pass) --");
+      $display("    pending memory penalty                %10d", pp_umap_ref_late_pen);
+      $display("    branch-mispredict bubbles             %10d", pp_umap_ref_late_mispred);
+      $display("    reference AGI                         %10d", pp_umap_ref_late_agi);
+      $display("    reference CS-extent fault             %10d", pp_umap_ref_late_csfault);
+      $display("    would reach U integer ISSUE now       %10d", pp_umap_ref_would_issue);
+      $display("    late disposition total                %10d",
+               pp_umap_ref_late_pen + pp_umap_ref_late_mispred +
+               pp_umap_ref_late_agi + pp_umap_ref_late_csfault +
+               pp_umap_ref_would_issue);
+      $display("  -- simple non-memory hole root (walker end reason) --");
+      for (int i=0;i<PP_NUOPEND;i++)
+        if (pp_umap_fastend[i] != 0)
+          $display("    %-28s %10d", pp_umap_end_name(i), pp_umap_fastend[i]);
+      $display("  -- immediately issuable hole root (subset above) --");
+      for (int i=0;i<PP_NUOPEND;i++)
+        if (pp_umap_would_issue_end[i] != 0)
+          $display("    %-28s %10d", pp_umap_end_name(i), pp_umap_would_issue_end[i]);
+      $display("  -- opaque endpoints behind fast-context holes --");
+      for (int i=0;i<256;i++)
+        if (pp_umap_fastopaque[i] != 0)
+          $display("    byte %02x count %10d first-hole-flin=%08x stop-bytes=%012x",
+                   i, pp_umap_fastopaque[i], pp_umap_fastopaquepc[i],
+                   pp_umap_fastopaquebytes[i]);
+      $display("  -- actionable simple non-memory hole opcodes --");
+      for (int i=0;i<256;i++)
+        if (pp_umap_fastop[i] != 0)
+          $display("    byte %02x count %10d first-flin=%08x bytes=%012x",
+                   i, pp_umap_fastop[i], pp_umap_fastpc[i], pp_umap_fastbytes[i]);
+      $display("  -- simple-memory hole opcodes --");
+      for (int i=0;i<256;i++)
+        if (pp_umap_memop[i] != 0)
+          $display("    byte %02x count %10d first-flin=%08x bytes=%012x",
+                   i, pp_umap_memop[i], pp_umap_mempc[i], pp_umap_membytes[i]);
+      $display("  -- non-simple slow-path hole opcodes --");
+      for (int i=0;i<256;i++)
+        if (pp_umap_slowop[i] != 0)
+          $display("    byte %02x count %10d first-flin=%08x bytes=%012x",
+                   i, pp_umap_slowop[i], pp_umap_slowpc[i], pp_umap_slowbytes[i]);
+      $display("  -- non-simple 0F extensions --");
+      for (int i=0;i<256;i++)
+        if (pp_umap_slow0f[i] != 0)
+          $display("    0f %02x count %10d", i, pp_umap_slow0f[i]);
+    end
+`endif
+`endif
 `ifdef VEN_FP_SHARED
 `ifndef SYNTHESIS
     if (pp_fp_shared_cmds != 0)
@@ -10116,6 +12831,9 @@ module core
       $display("  -- fp_sys_bail hand-off cause (sums to bucket 9) --");
       $display("    !u_d.simple                     %10d", pp_sys_bail[0]);
       $display("    system context not eligible      %10d", pp_sys_bail[1]);
+      $display("      real mode                       %10d", pp_sysctx_real);
+      $display("      16-bit CS default               %10d", pp_sysctx_def16);
+      $display("      segment-layout predicate        %10d", pp_sysctx_seg);
       $display("    system memory not eligible       %10d", pp_sys_bail[2]);
       $display("    system debug active              %10d", pp_sys_bail[3]);
     end
@@ -10167,6 +12885,12 @@ module core
 `ifndef SYNTHESIS
   logic        fpchk_arm_q, fpchk_we_q, fpchk_wreg_q;
   logic [3:0]  fpchk_dst_q;
+  // PUSH/POP r32 are memory packets but have implicit ESP writes, so their
+  // writeback contract is not covered by C-01's explicit-wreg predicate.
+  // Keep an independent sampled shape for the registered-retire check below.
+  logic        fpchk_stack_q, fpchk_stack_store_q;
+  logic [2:0]  fpchk_stack_dst_q;
+  logic [7:0]  fpchk_stack_we_q;
   logic [7:0]  fpchk_shadow_n;   // retires observed with irq_shadow still set
   logic        fpchk_dbg_q;      // CHECK 4: debug armed on the issue clock
   logic        fpchk_fxabort_q, fpchk_fxstart_q;  // CHECK 8: abort request/start history
@@ -10174,14 +12898,48 @@ module core
   always_ff @(posedge clk) begin
     if (!rst_n) begin
       fpchk_arm_q <= 1'b0; fpchk_we_q <= 1'b0; fpchk_wreg_q <= 1'b0;
-      fpchk_dst_q <= 4'd0; fpchk_shadow_n <= 8'd0; fpchk_dbg_q <= 1'b0;
+      fpchk_dst_q <= 4'd0;
+      fpchk_stack_q <= 1'b0; fpchk_stack_store_q <= 1'b0;
+      fpchk_stack_dst_q <= 3'd0; fpchk_stack_we_q <= 8'd0;
+      fpchk_shadow_n <= 8'd0; fpchk_dbg_q <= 1'b0;
       fpchk_fxabort_q <= 1'b0; fpchk_fxstart_q <= 1'b0; fpchk_fxph_q <= 2'd0;
     end else begin
       // ---- CHECK 1: a diverted clock must commit NOTHING ---------------------
+      if (fsm_case_enabled && rep_movs_load_fuse) begin
+        if (gpr_we != ((8'b0000_0001 << R_ESI) |
+                       (8'b0000_0001 << R_EDI) |
+                       (8'b0000_0001 << R_ECX)) ||
+            gpr_wd[R_ESI] != (gpr_o[R_ESI] + str_step) ||
+            gpr_wd[R_EDI] != (gpr_o[R_EDI] + str_step) ||
+            gpr_wd[R_ECX] != dec_cx)
+          $error("MOVSFUSE: source completion and pointer writeback disagree");
+      end
       // Direct, same-clock, no history needed: if the spine is abandoning this
       // instruction for an interrupt or external debugger park, no mirror may
-      // write a register.
-      if (fp_issue_block && (gpr_we != '0))
+      // write a register.  The one exception is the audited REP STOSD boundary:
+      // it keeps fp_issue_block high specifically to exclude stale U/V issue,
+      // while it prepares the *next* already-decoded element with exactly EDI
+      // and ECX writes.  Assert that exception's complete shape instead of
+      // weakening the general no-write invariant.
+      if (fsm_case_enabled && rep_stos_cont_take) begin
+        if (q_st == ST_MOVS) begin
+          if (!rep_movs_cont_shape || pipe_int_commit || gpr_we != '0 ||
+              gpr_o[R_ECX] == 32'd0)
+            $error("REPCONT/MOVS: invalid source-load continuation or premature GPR write");
+        end else if (pipe_int_commit || gpr_o[R_ECX] == 32'd0 ||
+            q_kind != K_STR || q_st != ST_STOS ||
+            !q_rep || q_repne || !q_str_storedi ||
+            q_str_loadsi || q_str_scandi ||
+            q_w != 3'd4 || q_len != 4'd2 ||
+            q_cnt16 || def16 || str_next_eip != q_pc ||
+            gpr_we != ((8'b0000_0001 << R_EDI) | (8'b0000_0001 << R_ECX)) ||
+            gpr_wd[R_EDI] != (gpr_o[R_EDI] + str_step) ||
+            gpr_wd[R_ECX] != dec_cx)
+          $error("REPCONT/fuse: invalid continuation shape or EDI/ECX setup (we=%b edi=%08h ecx=%08h pipe_commit=%0b)",
+                 gpr_we, gpr_wd[R_EDI], gpr_wd[R_ECX], pipe_int_commit);
+      end
+      if (fp_issue_block && (gpr_we != '0) &&
+          !(fsm_case_enabled && rep_stos_cont_take))
         $error("FASTPATH/issue-block: gpr_we=%b on a clock the spine did not issue (eip=%08h) -- a register was committed for an instruction that did not retire",
                gpr_we, eip);
 
@@ -10192,14 +12950,70 @@ module core
       // spine retire a register-writing integer instruction while the mirror
       // wrote no register? That is exactly C-01, and nothing here restates the
       // guard chain.
-      fpchk_arm_q  <= (state == S_PIPE) && !fp_issue_block;
+      fpchk_arm_q  <= pipe_int_commit;
       fpchk_we_q   <= (gpr_we != '0);
-      fpchk_wreg_q <= u_d.wreg && !u_d.is_branch && !u_d.is_nop && !u_d.is_fp;
-      fpchk_dst_q  <= {1'b0, u_d.dst};
+      fpchk_wreg_q <= pipe_u_eff.wreg && !pipe_u_eff.is_branch &&
+                      !pipe_u_eff.is_nop && !pipe_u_eff.is_fp;
+      fpchk_dst_q  <= {1'b0, pipe_u_eff.dst};
       if (fpchk_arm_q && retire_valid && retire_pipe_valid
           && fpchk_wreg_q && !fpchk_we_q)
         $error("FASTPATH/C-01: spine retired a register-writing fast-path insn (dst=r%0d) but the GPR writeback mirror asserted no gpr_we -- the two guard chains have drifted apart",
                fpchk_dst_q);
+
+      // ---- CHECK 2a: implicit stack writes ---------------------------------
+      // The decoder intentionally makes these forms U-only: PUSH r32 writes
+      // ESP; POP r32 writes its destination plus ESP, except POP ESP where the
+      // popped value itself is the sole ESP result.  Assert the exact mirror
+      // shape at the final packet acknowledgement, then retain it until the
+      // registered retirement is visible.  This covers the fault/retry and
+      // delayed-ack boundary without duplicating the admission guard chain.
+      fpchk_stack_q       <= pipe_int_commit && pipe_u_eff.is_stack;
+      fpchk_stack_store_q <= pipe_u_eff.is_store;
+      fpchk_stack_dst_q   <= pipe_u_eff.dst;
+      fpchk_stack_we_q    <= gpr_we;
+      // A memory packet may be accepted on this clock before
+      // pipe_mem_active_q becomes true at the edge.  Qualify directly on the
+      // live wait predicate (rather than the registered packet bit) so a
+      // future mirror cannot write ESP or POP's destination on that first
+      // delayed-request clock.  Fault/retry has the same requirement: only
+      // the terminal acknowledgement is architecturally visible.
+      if (pipe_mem_wait && pipe_u_eff.is_stack && (gpr_we != '0))
+        $error("FASTPATH/stack: gpr_we=%b while implicit-stack packet waits for memory -- writeback must wait for final acknowledgement",
+               gpr_we);
+      if (pipe_int_commit && pipe_u_eff.is_stack) begin
+        if (pipe_pair_eff)
+          $error("FASTPATH/stack: implicit-stack packet paired with V -- decoder must keep its two-register result U-only");
+        if (pipe_u_eff.is_store) begin
+          if (gpr_we != (8'b0000_0001 << R_ESP))
+            $error("FASTPATH/push: expected only ESP write, got gpr_we=%b", gpr_we);
+          if (gpr_wd[R_ESP] != gpr_o[R_ESP]-32'd4)
+            $error("FASTPATH/push: ESP result=%08h expected oldESP-4=%08h",
+                   gpr_wd[R_ESP], gpr_o[R_ESP]-32'd4);
+        end else if (pipe_u_eff.dst == R_ESP) begin
+          if (gpr_we != (8'b0000_0001 << R_ESP))
+            $error("FASTPATH/pop-esp: expected only ESP write, got gpr_we=%b", gpr_we);
+          if (gpr_wd[R_ESP] != mem_rdata)
+            $error("FASTPATH/pop-esp: ESP result=%08h differs from popped value=%08h",
+                   gpr_wd[R_ESP], mem_rdata);
+        end else begin
+          if (gpr_we != ((8'b0000_0001 << R_ESP) |
+                         (8'b0000_0001 << pipe_u_eff.dst)))
+            $error("FASTPATH/pop: expected dst+ESP writes (dst=r%0d), got gpr_we=%b",
+                   pipe_u_eff.dst, gpr_we);
+          if (gpr_wd[pipe_u_eff.dst] != mem_rdata ||
+              gpr_wd[R_ESP] != gpr_o[R_ESP]+32'd4)
+            $error("FASTPATH/pop: dst=%08h ESP=%08h expected data=%08h oldESP+4=%08h",
+                   gpr_wd[pipe_u_eff.dst], gpr_wd[R_ESP], mem_rdata,
+                   gpr_o[R_ESP]+32'd4);
+        end
+      end
+      if (fpchk_stack_q && retire_valid && retire_pipe_valid) begin
+        if (!fpchk_stack_we_q[R_ESP])
+          $error("FASTPATH/stack: spine retired implicit-stack instruction without an ESP mirror write");
+        if (!fpchk_stack_store_q && !fpchk_stack_we_q[fpchk_stack_dst_q])
+          $error("FASTPATH/pop: spine retired POP r%0d without its destination mirror write",
+                 fpchk_stack_dst_q);
+      end
 
       // ---- CHECK 7: invalidation beats consumption on a flush cycle ----------
       // exec_issue_ok gates every executable hit (ic_present, uop_hit) while
@@ -10207,7 +13021,7 @@ module core
       // line nor a predecoded slot. These trip if a future change reintroduces
       // a consumption path around the gate (the RSM leak: a cached SMRAM line
       // retiring in the cycle after SMM closes).
-      if (exec_flush_all && (sfetch_fast || sfetch_uop_fast || sfetch_resident_fast))
+      if (exec_flush_all && (sfetch_fast || sfetch_uop_fast || sfetch_short_fast || sfetch_resident_fast))
         $error("FETCH/FLUSH: the fast fetch window is serving while exec_flush_all is asserted -- invalidation must beat consumption");
 `ifdef VEN_UOPCACHE
       if (exec_flush_all && uop_hit)

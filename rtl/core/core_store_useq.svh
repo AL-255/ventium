@@ -36,21 +36,6 @@
             if (xs_act) begin xs_act <= 1'b0; xs_ph <= 2'd0; end
             begin
             logic [3:0] wr_hit;   // M2S.6: data-write breakpoint hit (DR6.Bn) bits
-            // M2S.5 — SMI# source (gated sys_mode). The psmm corpus fires SMI by
-            // writing the local-APIC ICR-low (physical 0xFEE00300) with delivery
-            // mode = SMI (bits[10:8]==010). QEMU's APIC honours APIC_DM_SMI ->
-            // cpu_interrupt(CPU_INTERRUPT_SMI) (hw/intc/apic.c) and the SMI is taken
-            // at the next instruction boundary. We model that EXACTLY: on the ICR
-            // write whose value carries the SMI delivery mode, latch smi_pending so
-            // the SMI is recognised at the next S_DECODE boundary (it is NOT taken
-            // mid-instruction). This is the RTL SMI-sourcing path that lets the same
-            // bare-metal psmm.bin drive the RTL SMM round-trip (the gdbstub single-
-            // step oracle masks SMI, so this is structurally self-checked — README).
-            // mem_addr here is the post-translate physical address (paging off in
-            // the corpus => linear==physical), so comparing it directly is correct.
-            if (sys_mode && !smm_active && mem_we &&
-                mem_addr == 32'hFEE0_0300 && mem_wdata[10:8] == 3'b010)
-              smi_pending <= 1'b1;
             // M2S.6 — DATA-WRITE breakpoint detection (gated sys_mode). This store
             // is committing; if its LINEAR address matches an armed DR7 write
             // breakpoint (R/W=01 or 11), the store completes but a #DB TRAP fires
@@ -147,7 +132,145 @@
                          q_pc, str_next_eip);
                   if (wr_hit != 4'd0) db_wp_extra <= 1'b1;
                 end
-                else begin retire_valid<=1'b1; state<=S_PIPE; end
+                else begin
+`ifdef VEN_REP_STOS_STREAM
+                  // A streamed descriptor is already the NEXT REP element: it
+                  // did not visit S_EXEC, so its GPR commit happens through the
+                  // S_STORE writeback mirror on this very ACK.  Build only one
+                  // further shadow from those post-current values; do not expose
+                  // them in gpr_o before this element's retire snapshot.
+                  if (rep_stos_stream_q && rep_stos_stream_continue) begin
+`ifndef SYNTHESIS
+                    if (ven_repstreamlog_en)
+                      $display("[REPSTREAM] ACK cyc=%0d pc=%08x addr=%08x ecx=%08x dec=%08x continue=1 arm=%0b shape=%0b valid=%0b align=%0b/%0b pen=%0d stall=%0d",
+                               core_cyc, q_pc, mem_addr, gpr_o[R_ECX], dec_cx,
+                               rep_stos_stream_arm, rep_stos_cont_shape,
+                               !rep_stos_cont_inval_now,
+                               (str_store_addr[1:0] == 2'b00),
+                               (st_lin_nat[1:0] == 2'b00), pending_mem_pen,
+                               stall_cnt);
+`endif
+                    rep_stos_cont_q <= 1'b0;
+                    rep_stos_cont_redecode_q <= 1'b0;
+                    rep_stos_stream_q <= 1'b1;
+                    rep_stos_stream_started_q <= 1'b0;
+                    str_store_addr <= gpr_o[R_EDI] + str_step;
+                    str_pre_esi <= gpr_o[R_ESI];
+                    str_pre_edi <= gpr_o[R_EDI] + str_step;
+                    str_pre_ecx <= dec_cx;
+                    str_store_data <= str_wdata;
+                    // `dec_cx` is the just-ACKed descriptor's post-count.  It
+                    // is the NEXT shadow's pre-count, so that next descriptor
+                    // is final exactly when dec_cx==1.
+                    str_next_eip <= (dec_cx == 32'd1) ? next_eip : q_pc;
+                    retire_valid<=1'b1;
+                    state<=S_STORE;
+                  end else if (!rep_stos_stream_q && rep_stos_stream_arm) begin
+                    // D0 followed the mature S_EXEC->S_STORE path and has
+                    // already advanced live EDI/ECX.  Retire D0, but capture D1
+                    // only in the existing store descriptor registers; this is
+                    // the one-entry shadow that enables one ACK per clock.
+                    rep_stos_cont_q <= 1'b0;
+                    rep_stos_cont_redecode_q <= 1'b0;
+                    rep_stos_stream_q <= 1'b1;
+                    rep_stos_stream_started_q <= 1'b0;
+                    str_store_addr <= gpr_o[R_EDI];
+                    str_pre_esi <= gpr_o[R_ESI];
+                    str_pre_edi <= gpr_o[R_EDI];
+                    str_pre_ecx <= gpr_o[R_ECX];
+                    str_store_data <= str_wdata;
+                    str_next_eip <= (gpr_o[R_ECX] == 32'd1) ? next_eip : q_pc;
+`ifndef SYNTHESIS
+                    if (ven_repstreamlog_en)
+                      $display("[REPSTREAM] PREP cyc=%0d pc=%08x addr=%08x ecx=%08x next=%08x",
+                               core_cyc, q_pc, gpr_o[R_EDI], gpr_o[R_ECX],
+                               (gpr_o[R_ECX] == 32'd1) ? next_eip : q_pc);
+`endif
+                    retire_valid<=1'b1;
+                    state<=S_STORE;
+                  end else begin
+                    // A started descriptor may have seen an event, debugger
+                    // park, timing debt, or executable invalidation.  It has
+                    // committed, so fall back to the ordinary S_PIPE boundary
+                    // rather than cancelling/replaying it.
+                    if (rep_stos_stream_q) begin
+`ifndef SYNTHESIS
+                      if (ven_repstreamlog_en)
+                        if (!rep_stos_cont_shape)
+                          $display("[REPSTREAM] END cyc=%0d pc=%08x addr=%08x ecx=%08x arm=%0b cont_arm=%0b shape=%0b eip_eq=%0b dbg=%0b smi=%0b nmi=%0b intr=%0b poison=%0b inval=%0b align=%0b/%0b xseff=%0b exec_ok=%0b pen=%0d stall=%0d pipe=%0b occ=%0b",
+                                   core_cyc, q_pc, mem_addr, gpr_o[R_ECX],
+                                   rep_stos_stream_arm, rep_stos_cont_arm,
+                                   rep_stos_cont_shape, (eip == q_pc), dbg_block_issue,
+                                   smi_take, nmi_take, intr_take,
+                                   rep_stos_cont_poison_q, rep_stos_cont_inval_now,
+                                   (str_store_addr[1:0] == 2'b00),
+                                   (st_lin_nat[1:0] == 2'b00), xs_eff_act,
+                                   exec_issue_ok, pending_mem_pen, stall_cnt,
+                                   pipe_mem_active_q, fp_occ_pending);
+                        else
+                          $display("[REPSTREAM] FALLBACK cyc=%0d pc=%08x addr=%08x ecx=%08x arm=%0b cont_arm=%0b shape=%0b eip_eq=%0b dbg=%0b smi=%0b nmi=%0b intr=%0b poison=%0b inval=%0b align=%0b/%0b xseff=%0b exec_ok=%0b pen=%0d stall=%0d pipe=%0b occ=%0b",
+                                   core_cyc, q_pc, mem_addr, gpr_o[R_ECX],
+                                   rep_stos_stream_arm, rep_stos_cont_arm,
+                                   rep_stos_cont_shape, (eip == q_pc), dbg_block_issue,
+                                   smi_take, nmi_take, intr_take,
+                                   rep_stos_cont_poison_q, rep_stos_cont_inval_now,
+                                   (str_store_addr[1:0] == 2'b00),
+                                   (st_lin_nat[1:0] == 2'b00), xs_eff_act,
+                                   exec_issue_ok, pending_mem_pen, stall_cnt,
+                                   pipe_mem_active_q, fp_occ_pending);
+`endif
+                      rep_stos_stream_q <= 1'b0;
+                      rep_stos_stream_started_q <= 1'b0;
+                    end
+`endif
+                  // The continuation is armed only AFTER this final store
+                  // acknowledgement and only for the audited non-final F3 AB
+                  // shape.  It still returns through S_PIPE, where events,
+                  // debug, flushes, and real memory/occupancy timing stalls
+                  // take priority before the next iteration enters S_EXEC.
+                  // A deferred branch-recovery count is deliberately carried
+                  // through the continuation and charged once after final REP.
+`ifndef SYNTHESIS
+                  // This site is inside the final S_STORE acknowledgement and
+                  // adjacent to the actual token write, so ARM cannot merely
+                  // describe an earlier combinationally eligible string shape.
+                  if (ven_repcontlog_en && !rep_movs_stream_arm &&
+                      (rep_stos_cont_arm || rep_movs_cont_arm))
+                    $display("[REPCONT] ARM cyc=%0d q_pc=%08x paddr=%08x store_ack=1 arm=1",
+                             core_cyc, q_pc, mem_addr);
+`endif
+                  rep_stos_cont_q <= rep_stos_cont_arm || rep_movs_cont_arm;
+                  // An invalidation can precede this terminal ACK by several
+                  // request clocks, so an unsafe candidate gets an explicit
+                  // one-shot slow-path recovery marker rather than falling into
+                  // the ordinary S_PIPE frontend with stale q_* provenance.
+                  rep_stos_cont_redecode_q <= rep_stos_cont_redecode_arm;
+                  retire_valid<=1'b1;
+                  state<=S_PIPE;
+                  if (rep_movs_stream_arm) begin
+                    // Only the previous element's final store ACK creates this
+                    // next source owner. Live ESI/EDI/ECX already describe the
+                    // precise boundary; do not advance them a second time.
+                    // S_LOAD's preissue gate still yields to events/SMC before
+                    // any read or page-walk side effect can occur.
+                    rep_stos_cont_q <= 1'b0;
+                    rep_stos_cont_redecode_q <= 1'b0;
+                    agi_wr0 <= 9'h100;
+                    agi_wr1 <= 9'h100;
+                    irq_shadow <= 1'b0;
+                    step <= 4'd0;
+                    f_step <= 4'd0;
+                    state <= S_LOAD;
+`ifndef SYNTHESIS
+                    if (ven_repcontlog_en)
+                      $display("[MOVSSTREAM] ARM cyc=%0d pc=%08x esi=%08x edi=%08x ecx=%08x",
+                               core_cyc, q_pc, gpr_o[R_ESI], gpr_o[R_EDI], gpr_o[R_ECX]);
+`endif
+                  end
+`ifdef VEN_REP_STOS_STREAM
+                  end
+`endif
+                end
               end
               default: begin
                 // R3: the push/pop ESP adjust moved to the gpr writeback driver

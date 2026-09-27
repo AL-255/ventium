@@ -23,6 +23,7 @@
 #include "Vventium_top___024root.h"
 #include "memmodel.h"
 
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
 
@@ -95,11 +96,22 @@ uint8_t xover_read_fault_state(Vventium_top* top, XoverFaultState& fs) {
     fs.walk_lin      = (uint32_t)CORE(walk_lin);
     fs.walk_is_write = (uint8_t)CORE(walk_is_write);
     fs.walk_step     = (uint8_t)CORE(walk_step);
+#ifdef VEN_XOVER_FE_PIPE
     fs.fe_dtlb_hit   = (uint8_t)CORE(fe_dtlb_hit);
     fs.fe_dtlb_v     = (uint8_t)CORE(fe_dtlb_v);
     fs.fe_dtlb_dirty = (uint8_t)CORE(fe_dtlb_dirty);
     fs.fe_dtlb_page  = (uint32_t)CORE(fe_dtlb_page);
     fs.fe_dtlb_phys  = (uint32_t)CORE(fe_dtlb_phys);
+#else
+    // The diagnostic structure is stable across profile builds.  These flops
+    // are optimized out when the RTL has no FE_PIPE, so report their inert
+    // state rather than trying to access a hierarchy member that does not exist.
+    fs.fe_dtlb_hit = 0;
+    fs.fe_dtlb_v = 0;
+    fs.fe_dtlb_dirty = 0;
+    fs.fe_dtlb_page = 0;
+    fs.fe_dtlb_phys = 0;
+#endif
     fs.dtlb_lk_hit   = (uint8_t)CORE(dtlb_lk_hit);
     fs.dtlb_lk_dirty = (uint8_t)CORE(dtlb_lk_dirty);
     fs.dtlb_lk_phys  = (uint32_t)CORE(dtlb_lk_phys);
@@ -165,7 +177,28 @@ void xover_inject(Vventium_top* top, const XoverArch& a) {
     // hit a stale D-TLB entry -> wrong phys -> spurious #PF. Clearing the `val`
     // bits forces a fresh page walk over the injected page tables (exactly what
     // a real MOV CR3 does: IA-32 §4.10 invalidates non-global TLB entries).
-    for (int i = 0; i < 16; ++i) { ITLB(tlb_val)[i] = 0; DTLB(tlb_val)[i] = 0; }
+    //
+    // Do NOT encode the historical 16-entry geometry here.  The default D-TLB
+    // is 16 direct-mapped entries, while the optional associative experiment
+    // exposes 32 or 64 flat entries at the same hierarchy path.  Derive each
+    // capacity from the generated Verilator array so a crossover cannot leave
+    // an upper associative way live across the direct CR3 injection.
+    constexpr std::size_t itlb_entries = sizeof(ITLB(tlb_val)) / sizeof(ITLB(tlb_val)[0]);
+    constexpr std::size_t dtlb_entries = sizeof(DTLB(tlb_val)) / sizeof(DTLB(tlb_val)[0]);
+    for (std::size_t i = 0; i < itlb_entries; ++i) ITLB(tlb_val)[i] = 0;
+    for (std::size_t i = 0; i < dtlb_entries; ++i) DTLB(tlb_val)[i] = 0;
+
+    // FE_PIPE may satisfy a translation from its registered micro-TLB before
+    // consulting the raw arrays above.  Its cache is not architectural state
+    // and is absent from XoverArch, so it must be invalidated with the raw
+    // arrays; otherwise a restored same-VA entry can retain the old CR3's PFN.
+    // In a non-FE_PIPE build Verilator optimizes these hierarchy members away;
+    // the Makefile defines VEN_XOVER_FE_PIPE only when its RTL counterpart is
+    // enabled.
+#ifdef VEN_XOVER_FE_PIPE
+    CORE(fe_itlb_v) = 0;
+    CORE(fe_dtlb_v) = 0;
+#endif
 
     // Force the FSM to S_FETCH so the very next step re-fetches the instruction
     // stream from the injected cs:eip (the pipeline is otherwise stale).

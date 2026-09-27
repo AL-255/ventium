@@ -2,6 +2,8 @@
 `default_nettype none
 
 module tb_ven_fp_state;
+  localparam logic [79:0] QNAN_INDEF = 80'hffffc000000000000000;
+
   logic clk = 1'b0;
   logic rst_n = 1'b0;
   always #5 clk = ~clk;
@@ -17,6 +19,7 @@ module tb_ven_fp_state;
   logic [15:0] fcs_new, fcs_old, fds_new, fds_old;
 
   logic c_init, c_push, c_write, c_write_valid, c_swap, c_free;
+  logic c_swap_materialize_empty;
   logic c_inc, c_dec, c_status, c_control;
   logic c_eptr, c_dptr, c_env, c_envregs;
   logic [79:0] push_data, write_data;
@@ -57,7 +60,9 @@ module tb_ven_fp_state;
       .commit_init(c_init), .commit_push(c_push), .push_data(push_data),
       .commit_write(c_write), .write_idx(write_idx), .write_data(write_data),
       .write_mark_valid(c_write_valid), .commit_swap(c_swap),
-      .swap_idx(swap_idx), .commit_pop(c_pop), .commit_free(c_free),
+      .swap_idx(swap_idx),
+      .commit_swap_materialize_empty(c_swap_materialize_empty),
+      .commit_pop(c_pop), .commit_free(c_free),
       .free_idx(free_idx), .commit_inc_top(c_inc), .commit_dec_top(c_dec),
       .commit_status(c_status), .status_data(status_data),
       .commit_control(c_control), .control_data(control_data),
@@ -81,6 +86,7 @@ module tb_ven_fp_state;
       .wsti_clr_tag(c_write_valid),
       .we_fxch(c_swap), .fxch_idx(swap_idx), .fxch_a(old_st(swap_idx)),
       .fxch_b(os0),
+      .fxch_materialize_empty(c_swap_materialize_empty),
       .we_pop(c_pop==2'd1), .we_pop2(c_pop==2'd2),
       .we_ffree(c_free), .ffree_idx(free_idx),
       .we_incstp(c_inc), .we_decstp(c_dec),
@@ -101,6 +107,7 @@ module tb_ven_fp_state;
   task automatic clear_commit();
     begin
       c_init=0; c_push=0; c_write=0; c_write_valid=0; c_swap=0;
+      c_swap_materialize_empty=0;
       c_free=0; c_inc=0; c_dec=0; c_status=0; c_control=0;
       c_eptr=0; c_dptr=0; c_env=0; c_envregs=0;
       c_pop=0; push_data='0; write_data='0; write_idx='0;
@@ -139,6 +146,75 @@ module tb_ven_fp_state;
     repeat (3) @(negedge clk);
     rst_n = 1'b1;
     compare(-1);
+
+    // The compact candidate normally implements FXCH by swapping two map
+    // pointers.  The masked-#IS exception is deliberately different: EMPTY
+    // operands must first become real-indefinite and valid, then those banks
+    // are exchanged.  Exercise that sideband here rather than relying only on
+    // the command-shell regression, so a disconnected qualifier cannot hide
+    // behind ordinary pointer-swap A/B traffic.
+    @(negedge clk);
+    clear_commit();
+    c_push = 1'b1;
+    push_data = 80'h4001_8000_0000_0000_0000;  // 4.0, becomes ST(0)
+    @(posedge clk);
+    compare(-2);
+
+    @(negedge clk);
+    clear_commit();
+    c_swap = 1'b1;
+    c_swap_materialize_empty = 1'b1;
+    swap_idx = 3'd1;                         // ST(1) is EMPTY
+    @(posedge clk);
+    compare(-3);
+    if (st_new[79:0] !== QNAN_INDEF ||
+        st_new[159:80] !== 80'h4001_8000_0000_0000_0000 ||
+        tag_new[3'd7] !== 1'b0 || tag_new[3'd0] !== 1'b0)
+      $fatal(1, "masked-FXCH materialization did not produce two valid exchanged operands");
+
+    // Exercise the inverse physical direction too: ST(0) begins EMPTY while
+    // ST(1) is live.  This reaches both the compact-map state file and the
+    // direct legacy oracle with the complementary pre-edge tags, catching a
+    // repair that materializes the correct bank but attaches validity to the
+    // old logical slot after the exchange.
+    @(negedge clk);
+    clear_commit();
+    c_init = 1'b1;
+    @(posedge clk);
+    compare(-4);
+
+    @(negedge clk);
+    clear_commit();
+    c_push = 1'b1;
+    push_data = 80'h3fff_8000_0000_0000_0000;  // 1.0, ST(0)
+    @(posedge clk);
+    compare(-5);
+
+    @(negedge clk);
+    clear_commit();
+    c_push = 1'b1;
+    push_data = 80'h4001_8000_0000_0000_0000;  // 4.0, ST(0); 1.0 -> ST(1)
+    @(posedge clk);
+    compare(-6);
+
+    @(negedge clk);
+    clear_commit();
+    c_free = 1'b1;
+    free_idx = 3'd0;                            // ST(0) EMPTY, ST(1) live
+    @(posedge clk);
+    compare(-7);
+
+    @(negedge clk);
+    clear_commit();
+    c_swap = 1'b1;
+    c_swap_materialize_empty = 1'b1;
+    swap_idx = 3'd1;
+    @(posedge clk);
+    compare(-8);
+    if (st_new[79:0] !== 80'h3fff_8000_0000_0000_0000 ||
+        st_new[159:80] !== QNAN_INDEF ||
+        tag_new[top_new] !== 1'b0 || tag_new[top_new + 3'd1] !== 1'b0)
+      $fatal(1, "reverse masked-FXCH materialization lost data or validity");
 
     for (int step=0; step<5000; step++) begin
       int sel;

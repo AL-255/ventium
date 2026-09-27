@@ -62,6 +62,11 @@ module ven_fp_state (
     input  wire logic         write_mark_valid,
     input  wire logic         commit_swap,
     input  wire logic [2:0]   swap_idx,
+    // A masked FXCH stack underflow must first materialize every EMPTY
+    // operand as the x87 real-indefinite, then exchange the two values.
+    // Keep this as an explicit commit qualifier: ordinary FXCH is still just
+    // the compact map-pointer swap below.
+    input  wire logic         commit_swap_materialize_empty,
     input  wire logic [1:0]   commit_pop,
     input  wire logic         commit_free,
     input  wire logic [2:0]   free_idx,
@@ -101,6 +106,8 @@ module ven_fp_state (
   logic [7:0]  tag;
   logic [31:0] fip, fdp;
   logic [15:0] fcs, fds;
+
+  localparam logic [79:0] QNAN_INDEF = 80'hffffc000000000000000;
 
   logic [2:0] rd0_phys, rd1_phys;
 
@@ -197,6 +204,21 @@ module ven_fp_state (
         bank[map[top + write_idx]] <= write_data;
         if (write_mark_valid)
           tag[top + write_idx] <= 1'b0;
+      end
+
+      // IA-32 SDM Vol. 1, FXCH stack-underflow response: with #IS masked,
+      // empty operands are loaded with real indefinite *before* the exchange.
+      // The bank writes deliberately use the pre-edge map/tags, then the
+      // normal pointer exchange moves each materialized value to its final
+      // logical slot.  This preserves the compact normal-FXCH implementation
+      // and makes FXCH ST(0) harmless (both indexed writes name the same bank).
+      if (commit_swap && commit_swap_materialize_empty) begin
+        if (tag[top])
+          bank[map[top]] <= QNAN_INDEF;
+        if (tag[top + swap_idx])
+          bank[map[top + swap_idx]] <= QNAN_INDEF;
+        tag[top]            <= 1'b0;
+        tag[top + swap_idx] <= 1'b0;
       end
 
       if (commit_swap) begin

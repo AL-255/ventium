@@ -13,6 +13,7 @@
 #include <cstring>
 #include <cstdlib>
 extern uint64_t *ddr;   // cosim guest memory (sim_ven.cpp)
+extern double sc_time_stamp();  // absolute harness cycle, including restored time
 extern "C" int ao486_peek_guest(unsigned int phys, void *dst, int nbytes);  // guest-RAM read (sim_ven.cpp)
 
 // ---- last-retired architectural snapshot (read by the harness trace) ----------
@@ -53,9 +54,10 @@ extern "C" void vtm_retire(
     g_vtm_cs=cs; g_vtm_ss=ss; g_vtm_ds=ds; g_vtm_es=es; g_vtm_fs=fs; g_vtm_gs=gs;
     if (g_vtm_dump > 0 && g_vtm_retires >= g_vtm_dump_start) {
         fprintf(stderr,
-                "VTM n=%llu %04x:%08x fl=%08x ax=%08x bx=%08x cx=%08x dx=%08x si=%08x di=%08x bp=%08x sp=%08x ds=%04x es=%04x ss=%04x fs=%04x gs=%04x\n",
+                "VTM n=%llu %04x:%08x fl=%08x ax=%08x bx=%08x cx=%08x dx=%08x si=%08x di=%08x bp=%08x sp=%08x ds=%04x es=%04x ss=%04x fs=%04x gs=%04x cyc=%llu\n",
                 (unsigned long long)g_vtm_retires, cs, pc, eflags,
-                eax, ebx, ecx, edx, esi, edi, ebp, esp, ds, es, ss, fs, gs);
+                eax, ebx, ecx, edx, esi, edi, ebp, esp, ds, es, ss, fs, gs,
+                (unsigned long long)sc_time_stamp());
         g_vtm_dump--;
     }
     // [PCTRACE] compact retire trace for the golden-lockstep diff (VEN_PCTRACE=<path>).
@@ -315,6 +317,22 @@ extern "C" void vtm_retire_sys(
 
 extern "C" void vtm_retire_cycle(unsigned long long n, unsigned int pipe, unsigned int paired)
 { (void)n; (void)pipe; (void)paired; }
+
+// The full-PC harness observes live retirement counters/GPRs; it does not emit
+// architectural x87 .vtrace records (the x87 callback below is intentionally
+// inert). Therefore it has no deferred record queue to begin or complete.
+// Keep this observer stateless so a native restore does not depend on an
+// unserialized host-side FP owner. The differential TB implements the actual
+// record buffering contract separately in verif/tb/dpi_retire.cpp.
+extern "C" void vtm_fp_async_event(unsigned int event_kind,
+                                    unsigned long long owner)
+{
+    (void)owner;
+    if (event_kind > 2) {
+        fprintf(stderr, "invalid FP async observation event: %u\n", event_kind);
+        std::abort();
+    }
+}
 
 extern "C" void vtm_retire_x87(
     unsigned long long n,

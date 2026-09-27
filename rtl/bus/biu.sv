@@ -72,10 +72,19 @@ module biu (
     // ----- FRONT: core-side 32-bit single-beat mem request (mirrors core.sv) --
     input  logic        c_req,          // core mem_req
     input  logic        c_we,           // core mem_we (1 = write)
-    // REVIEW1_Aug2 C-10: the core's locked-RMW request. Was hardwired 0 below, so
-    // the integrated core never asked the back end for atomicity even though
-    // biu_p5 has always had the pin and the standalone gate exercises it.
+    // Raw current-beat LOCK# qualifier plus the architectural session hold
+    // and terminal event. The latter two are needed because one locked
+    // instruction may have multiple physical writes (or none for a failed
+    // CMPXCHG8B); the pin FSM must not infer completion from W/R#.
+    //
+    // This wrapper remains a same-cycle *protocol exerciser*: c_ack comes
+    // directly from m2_ack, so it does not backpressure the core until its
+    // pin FSM accepts/replays a record. These fields make a proper queued BIU
+    // integration possible and validate biu_p5's session behavior, but do not
+    // by themselves claim external-bus atomicity in bus_mode=1.
     input  logic        c_lock,
+    input  logic        c_lock_hold,
+    input  logic        c_lock_end,
     input  logic [31:0] c_addr,         // core mem_addr (byte address)
     input  logic [31:0] c_wdata,        // core mem_wdata
     input  logic [3:0]  c_wstrb,        // core mem_wstrb (per-byte enables)
@@ -165,6 +174,8 @@ module biu (
   // does NOT by itself make the sequence atomic against every requester (see the
   // commit message for what remains).
   wire         bp_req_lock  = c_lock;
+  wire         bp_req_lock_hold = c_lock_hold;
+  wire         bp_req_lock_end = c_lock_end;
   wire         bp_req_split = 1'b0;
   wire         bp_req_mio   = 1'b1;     // memory cycle (M/IO# = 1 = memory)
   wire         bp_req_dc    = 1'b1;     // data cycle (D/C# = 1 = data)
@@ -213,6 +224,8 @@ module biu (
       .req_we     (bp_req_we),
       .req_cache  (bp_req_cache),
       .req_lock   (bp_req_lock),
+      .req_lock_hold(bp_req_lock_hold),
+      .req_lock_end(bp_req_lock_end),
       .req_split  (bp_req_split),
       .req_mio    (bp_req_mio),
       .req_dc     (bp_req_dc),

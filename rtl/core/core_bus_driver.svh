@@ -30,14 +30,34 @@
   // its address from a segment base MUST have a matching arm here (the seg
   // gates grade exactly this).
   // ===========================================================================
+  // Keep the instruction/state classification separate from the physical-beat
+  // qualifier.  The fragment engine may blank bd_req for a crossing-store
+  // page-2 probe, and translation/permission logic can squash a request after
+  // this driver has selected its state arm.  LOCK# must never escape on either
+  // kind of non-transaction; `mem_req` is the final, post-fragment request.
+  // There is no feedback path: mem_req depends on bd_req and fragment shaping,
+  // never on either lock signal.
+  logic bd_lock_beat;
+  assign bd_lock_beat = q_lock && ((state == S_LOAD) ||
+                                   ((state == S_LOAD2) && (q_kind == K_CX8B)) ||
+                                   (state == S_STORE) ||
+                                   ((state == S_USEQ) && (q_kind == K_CX8B)));
+  assign mem_lock = bd_lock_beat && mem_req;
+
   always_comb begin
     cur_seg_rel = 1'b0;
     cur_seg_idx = dseg;
     unique case (state)
-      S_LOAD, S_LGDT, S_SGDT, S_ENTER,
+      S_LGDT, S_SGDT, S_ENTER,
       S_FLOAD, S_FENV_ST, S_FENV_LD, S_FSTORE,
       S_USEQ, S_RMINT_PUSH:
         cur_seg_rel = 1'b1;   // segment-relative access, dseg governs
+      S_LOAD: begin
+        cur_seg_rel = 1'b1;
+        // The same selector supplies opbase: an explicit PUSH/CALL operand
+        // uses its own segment; POP/RET's implicit stack read stays on SS.
+        cur_seg_idx = opseg;
+      end
       S_PIPE: begin
         // The checked U-side data forms select DS or SS from their decoded
         // addressing base. Classify them as guest segment accesses so D-TLB
@@ -62,6 +82,9 @@
       end
       S_STORE: begin
         cur_seg_rel = 1'b1;
+        // POP m writes its explicit operand, not the SS used for its read.
+        // Follow stbase's canonical selector; strings retain their ES side.
+        cur_seg_idx = stseg;
         if (q_kind==K_STR)
           cur_seg_idx = 3'(SG_ES);   // C-01: MOVS/STOS write ES:[EDI]
       end
@@ -75,22 +98,32 @@
   // ===========================================================================
   always_comb begin
     bd_req =1'b0; bd_we =1'b0; bd_addr =32'd0; bd_wdata =32'd0; bd_wstrb =4'd0;
-    // REVIEW1_Aug2 C-10: assert LOCK for every beat of a locked RMW. q_lock is latched
-    // at decode and held until the next instruction, so the read beat AND the write
-    // beat both carry it -- which is what lets a wrapper keep the bus across the pair.
-    mem_lock = q_lock;
+    // LOCK# is a qualifier for actual RMW OPERAND beats, not a sticky property of
+    // the decoded instruction.  q_lock may legally survive a page walk, a no-request
+    // cross-page store probe, or fault delivery until the common abort funnel clears
+    // it; leaking it there makes a pin-level wrapper lock unrelated traffic and makes
+    // the L1/AXI seam mistake a walk for an aborted RMW.  The separate
+    // mem_lock_hold output preserves local-DMA exclusion across those detours.
+    //
+    // S_LOAD2/S_USEQ are only operand beats for CMPXCHG8B.  CMPS/far-pointer/
+    // PUSHA traffic must never inherit LOCK# just because an older descriptor was
+    // still latched.
     unique case (state)
       // task #54: no bus transaction when the window is served from the I-cache.
       // (R2-M02 family 6: the fetch addresses are cur_lin too.)
-      S_FETCH: begin bd_req =!(sfetch_fast || sfetch_uop_fast || sfetch_resident_fast); end
+      S_FETCH: begin bd_req =!(sfetch_fast || sfetch_uop_fast || sfetch_short_fast || sfetch_resident_fast); end
       S_PF:    begin bd_req =1'b1; end
       S_PIPE:  begin
         // A checked DS/SS effective-address read/store issued this clock. The
-        // fast store is full-dword MOV r/m32,r32 only; its source is sampled
-        // before the clock edge that retires it.
-        if (pipe_load_req) begin bd_req =1'b1; end
+        // source and byte-width metadata belong to the same transaction packet.
+        // Read strobes are equally important: a byte MMIO read must not fetch
+        // three adjacent registers or invent a cross-page access at offset FFF.
+        if (pipe_load_req) begin
+          bd_req=1'b1; bd_wstrb=fp_mem_read_strobe(pipe_u_eff);
+        end
         else if (pipe_store_req) begin
-          bd_req=1'b1; bd_we=1'b1; bd_wstrb=4'b1111; bd_wdata=pipe_store_data;
+          bd_req=1'b1; bd_we=1'b1;
+          bd_wstrb=pipe_u_eff.w8 ? 4'b0001 : 4'b1111; bd_wdata=pipe_store_data;
         end
         // I-cache miss detected this clock: fetch the fill line's WORD 0 NOW so the
         // detection clock is productive (finding [med] I-miss off-by-one). S_PF then
@@ -105,13 +138,13 @@
         // REVIEW1_Aug3 R2-H01: carry the read SIZE on the seam (strobe form), so a
         // non-cacheable/MMIO read can be issued at its exact byte extent instead
         // of a conservative full word. Inert for every cacheable/BBM consumer.
-        bd_wstrb = strb_of(load_beat_w);
+        bd_wstrb = xp_read_strb; // exact first/remaining page fragment, including three bytes
         // (R2-M02 family 7: ALL address shapes -- pop/LEAVE/string/XLAT/plain and
         // the xp_pend second-page re-issue -- via cur_lin. The selection logic
         // lives only in the cur_lin_nat mirror in core.sv now.)
       end
       S_LOAD2: begin bd_req =1'b1;
-        bd_wstrb = strb_of(load_beat_w);   // exact far-pointer selector/data beat width
+        bd_wstrb = xp_read_strb;   // exact far-pointer selector/data page fragment
         // BOUND / CMPXCHG8B: the SECOND word is the upper bound / high dword at
         // [mem + w] (w=4 for 32-bit BOUND & CMPXCHG8B, 2 for a 16-bit BOUND).
         // 32-bit far-ptr load (LDS/LES/LSS/LFS/LGS): selector is 2 bytes at [mem+4].
@@ -183,7 +216,7 @@
       // reverse of S_LGDT's read layout). beat 0 @[mem] = {base[15:0], limit[15:0]}
       // (4 bytes); beat 1 @[mem+4] = base[31:16] (2 bytes). SYS_SGDT -> GDTR, else IDTR.
       S_SGDT: begin
-        bd_req =1'b1; bd_we =1'b1;
+        bd_req =!sgdt_probe_q; bd_we =!sgdt_probe_q;
         // (R2-M02: address via cur_lin.)
         if (!seg_step) begin
           bd_wstrb = 4'b1111;
@@ -193,6 +226,7 @@
           bd_wstrb = 4'b0011;
           bd_wdata = (q_sysop==SYS_SGDT) ? {16'd0, gdt_base[31:16]}
                                           : {16'd0, idt_base[31:16]};
+          if (q_w == 3'd2) bd_wdata[15:8] = 8'd0;
         end
       end
       // F3 — real-mode IVT delivery. S_RMINT_RD: read the 4-byte IVT entry
@@ -738,8 +772,14 @@
     // Snapshot the request BEFORE suppressing it, so the +ven_seglog diagnostic can
     // still see that an access was attempted (qualifying it on the post-squash
     // bd_req makes it silent exactly when it matters).
-    mem_req_pre_sq = bd_req;
-    if (seg_access_fault) begin
+    // A cancellable REP-STOS shadow is not an attempted access yet.  Keep it
+    // out of the pre-squash observation too: otherwise fragment/SMC auxiliary
+    // logic could treat an event-cancelled descriptor as a real request while
+    // the final bus pins are blanked below.
+    mem_req_pre_sq = bd_req && !rep_stos_stream_preissue_block &&
+                              !rep_movs_stream_preissue_block;
+    if (sync_access_fault || rep_stos_stream_preissue_block ||
+        rep_movs_stream_preissue_block) begin
       bd_req =1'b0; bd_we =1'b0; bd_addr =32'd0; bd_wdata =32'd0; bd_wstrb =4'd0;
     end
     // =========================================================================
@@ -770,6 +810,7 @@
     // in the core's S_IO arm). Both default and reset to 1 = A20 ENABLED = no masking,
     // so every existing configuration is bit-identical until software clears it.
     if (bd_req && !a20_on) bd_addr[20] = 1'b0;
+    if (fp_async_hold) bd_req = 1'b0;
 
 `ifndef SYNTHESIS
     // =========================================================================

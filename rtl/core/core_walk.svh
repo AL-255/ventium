@@ -30,7 +30,7 @@
                   // PDE not present -> #PF (vector 14). M2S.3: DELIVER through the
                   // IDT. Set CR2 (the faulting linear addr) + the error code
                   // {US,RW,P} (P=0 here, RW from the access, US from the real CPL),
-                  // then vector. #PF is a FAULT -> push the FAULTING EIP (q_pc) so
+                  // then vector. #PF is a FAULT -> push the latched faulting EIP so
                   // IRET restarts the access after the handler maps the page.
                   creg2  <= walk_lin;
                   // US bit = the EFFECTIVE CPL (V86 forces 3) at the faulting access.
@@ -38,10 +38,10 @@
                   walk_pf <= 1'b1;
 `ifdef VEN_DBG_WD
                   $display("[VEN-PFW] #PF PDE-np lin=%08h pde=%08h pde_addr=%08h @cs:eip=%04x:%08h cr3=%08h w=%b",
-                           walk_lin, pde, {creg3[31:12], walk_lin[31:22], 2'b00}, seg_sel[SG_CS], q_pc, creg3, walk_is_write);
+                           walk_lin, pde, {creg3[31:12], walk_lin[31:22], 2'b00}, seg_sel[SG_CS], walk_fault_pc, creg3, walk_is_write);
 `endif
                   start_fault(8'd14, 1'b1,
-                              {29'd0, walk_usr_lat, walk_is_write, 1'b0}, q_pc);   // H-03
+                              {29'd0, walk_usr_lat, walk_is_write, 1'b0}, walk_fault_pc);   // H-03
                 end else if (is_big && (pde[21:13] != 9'd0)) begin
                   // ---- REVIEW1_Aug2 H-03: RESERVED BITS in a 4 MiB PDE ------------
                   // For 32-bit (non-PAE) paging without PSE-36, bits 21:13 of a
@@ -65,7 +65,7 @@
                   // wrong page entirely. Every #PF exit from this walker must set it.
                   creg2   <= walk_lin;
                   start_fault(8'd14, 1'b1,
-                              {28'd0, 1'b1, walk_usr_lat, walk_is_write, 1'b1}, q_pc);   // H-03
+                              {28'd0, 1'b1, walk_usr_lat, walk_is_write, 1'b1}, walk_fault_pc);   // H-03
                 end else if (is_big) begin
                   // 4 MiB large page: PDE is the leaf. Write A/D back if needed,
                   // else fill the TLB directly (reuse step-1's PDE writeback arm).
@@ -106,7 +106,7 @@
                 walk_pte <= pte;
                 if (!pte[0]) begin
                   // PTE not present -> #PF (vector 14): DELIVER. CR2 + error code
-                  // {US,RW,P=0}; push the FAULTING EIP (q_pc) so IRET restarts the
+                  // {US,RW,P=0}; push the latched FAULTING EIP so IRET restarts the
                   // access once the handler maps the page (the pfault demand-page).
                   creg2  <= walk_lin;
                   // US bit = the EFFECTIVE CPL (V86 forces 3) at the faulting access.
@@ -114,14 +114,14 @@
                   walk_pf <= 1'b1;
 `ifdef VEN_DBG_WD
                   $display("[VEN-PFW] #PF PTE-np lin=%08h @cs:eip=%04x:%08h w=%b for_d=%b ret_state=%s q_mrd=%b q_mwr=%b q_ea=%08h ibuf=%016h | eax=%08h ebx=%08h ecx=%08h edx=%08h esi=%08h edi=%08h ebp=%08h esp=%08h | segsel cs=%04x ss=%04x ds=%04x es=%04x fs=%04x gs=%04x | segbase ss=%08h ds=%08h es=%08h fs=%08h gs=%08h",
-                           walk_lin, seg_sel[SG_CS], q_pc, walk_is_write, walk_for_d, walk_ret_state.name(), q_mem_read, q_mem_write, q_ea, dbg_ibuf,
+                           walk_lin, seg_sel[SG_CS], walk_fault_pc, walk_is_write, walk_for_d, walk_ret_state.name(), q_mem_read, q_mem_write, q_ea, dbg_ibuf,
                            gpr_o[R_EAX], gpr_o[R_EBX], gpr_o[R_ECX], gpr_o[R_EDX],
                            gpr_o[R_ESI], gpr_o[R_EDI], gpr_o[R_EBP], gpr_o[R_ESP],
                            seg_sel[SG_CS], seg_sel[SG_SS], seg_sel[SG_DS], seg_sel[SG_ES], seg_sel[SG_FS], seg_sel[SG_GS],
                            seg_base[SG_SS], seg_base[SG_DS], seg_base[SG_ES], seg_base[SG_FS], seg_base[SG_GS]);
 `endif
                   start_fault(8'd14, 1'b1,
-                              {29'd0, walk_usr_lat, walk_is_write, 1'b0}, q_pc);   // H-03
+                              {29'd0, walk_usr_lat, walk_is_write, 1'b0}, walk_fault_pc);   // H-03
                 end else if (!pte[5] || (walk_set_dirty && !pte[6])) begin
                   walk_step <= 3'd3;   // set A (+D on write) in the PTE
                 end else begin

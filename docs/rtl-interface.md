@@ -50,6 +50,47 @@ import "DPI-C" context function void vtm_retire(
 
 ### 2.1 x87 retire callback (M3+)
 
+Experimental `VEN_FP_ASYNC` builds additionally import
+`vtm_fp_async_event(event_kind, owner)`: kind 0 begins the pending FP record
+immediately before its ordinary retirement callbacks; kind 1 completes it
+after `vtm_retire_x87(owner, ...)` supplies the actual committed result.
+Only final functional x87 record formatting is deferred; live counters,
+diagnostics, integer state and cycle observations are not delayed. A second
+owner, missing completion snapshot or unfinished trace is an error. This
+default-off integration is not yet behaviorally qualified; see
+`verif/issue_uv/FP_INTEGER_OVERLAP.md` for its acceptance gates and limitations.
+The full-PC `ao486-sim/ven/vtm_dpi.cpp` observer does not format architectural
+x87 traces and leaves both valid events inert, just like its x87 snapshot
+callback. It must not delay live retirement counters or substitute FP results.
+Architectural x87 equivalence is checked by the differential testbench above,
+not by the full-PC observer.
+
+The experimental arithmetic-stream observer additionally accepts event kind 2
+to begin an ordered multi-owner record. It supports at most four outstanding
+owners, consumes completions strictly oldest-first, and applies each RTL-supplied
+completion state only to that owner's record and following integer records up
+to the next FP owner. Kind 0 retains the original single-owner rejection; the
+two begin modes cannot be mixed while work is pending. This is formatter-only
+bookkeeping: it neither supplies FP results nor delays live clocks, retire
+counters, syscalls or architectural debug observations. The full-PC observer
+accepts kind 2 statelessly. The experimental `VEN_FP_ASYNC_STREAM` core generates
+these events and retains an ordered four-entry DPI owner FIFO. This requires
+the shared arithmetic stream and checked early-command path; it is not a default
+configuration or a claim of full-system compatibility.
+
+`VEN_FP_FXCH_QUEUE` adds one ordered FXCH admission slot in front of the shared
+FPU and requires `VEN_FP_ASYNC_STREAM` in the core. A busy-leaf, masked FXCH
+can be accepted into that slot without changing the architectural stack yet.
+It generates the same kind-2 deferred owner as an asynchronous arithmetic
+command, and completes from the actual ordered leaf response. In particular,
+`cmd_accept_retire` is false for a queued exchange and remains false when that
+queued command is later dispatched internally. An idle, immediately executed
+exchange retains the original immediate-retirement contract. No synthetic FP
+snapshot or delayed live retirement counter is used. Interrupt/fault/debug drain
+gates remain in force. Leaf ordering/reset/metadata tests and the core QEMU
+overlap/INT3 gates are documented in `verif/issue_uv/FP_INTEGER_OVERLAP.md`;
+the profile remains opt-in pending full-system qualification.
+
 For x87 floating-point instructions the core calls `vtm_retire(...)` (integer
 state, unchanged) **and**, on the *same retirement* (same `n`), a second DPI-C
 import `vtm_retire_x87(...)` carrying the **post-commit x87 state**. The
@@ -119,6 +160,20 @@ port is deliberately minimal at M0 and grows toward the real 64-bit P5 bus
 The testbench preloads the flat memory from the test image (§4) and services
 `mem_req` each cycle. This is a placeholder protocol; M2 adds instruction fetch
 width/lines, M5 replaces it with the modeled P5 bus FSM.
+
+### Backing memory replay policy
+
+`ventium_l1_axi` and `ven_axi_master` expose `LINE_REPLAY` (default 1).
+This integration policy controls the historical stale-first-burst workaround:
+1 discards a priming cache-line burst; 0 delivers the first burst. It does not
+change `NARROW_REPLAY_SAFE`, narrow access widths, posted-write ordering,
+response-ID checks or fatal error handling. Disable it only for a qualified
+backend; HP/HPC deployments retain replay. `ventium_top.AXI_LINE_REPLAY` passes
+this policy through. The ao486 shim's opt-in `VEN_AO486_SINGLE_FILL` sets it to
+zero for that backend only; it is not a default or gameplay-qualified profile.
+`VEN_SINGLE_FILL` remains a separate unsafe diagnostic
+override. `verif/l1/run-axi-line-replay-gate.sh` tests both healthy policies and
+requires the stale-response negative controls to fail visibly.
 
 ## 4. Image loading
 

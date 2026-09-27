@@ -179,7 +179,15 @@ module ven_ao486_shim
     wire l1_flush_pulse = 1'b0;
 `endif
 
-    ventium_top u_core (
+    // Opt-in only for the tested ao486 cache/Avalon backend. Do not use this
+    // as a global HP/HPC workaround override: narrow replay is independent,
+    // and direct PS-port integrations retain their existing line policy.
+`ifdef VEN_AO486_SINGLE_FILL
+    localparam bit AO486_LINE_REPLAY = 1'b0;
+`else
+    localparam bit AO486_LINE_REPLAY = 1'b1;
+`endif
+    ventium_top #(.AXI_LINE_REPLAY(AO486_LINE_REPLAY)) u_core (
         .clk        (clk),
         .rst_n      (rst_n),
         .init_eip   (32'h0),

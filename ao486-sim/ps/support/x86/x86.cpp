@@ -373,6 +373,12 @@ static fileTYPE fdd1_image = {};
 static fileTYPE ide_image[4] = {};
 static bool boot_from_floppy = 1;
 
+// The first native host-state checkpoint profile covers ATA only. Do not
+// silently drop attached floppy state, even if no request is currently active.
+bool x86_checkpoint_no_floppy() {
+    return !fdd0_image.filp && !fdd1_image.filp;
+}
+
 static int img_read(fileTYPE *f, uint32_t lba, void *buf, uint32_t cnt)
 {
 	if (!FileSeekLBA(f, lba)) return 0;
@@ -579,7 +585,19 @@ void x86_init()
 	translate_mode = (translate_mode << 6) | (translate_mode << 4) | (translate_mode << 2) | translate_mode;
 
 	time_t t = time(NULL);
-	struct tm tm = *localtime(&t);
+	const char *fixed_epoch = getenv("AO486_RTC_EPOCH");
+	if (fixed_epoch) {
+		char *end = nullptr;
+		long long value = strtoll(fixed_epoch, &end, 10);
+		if (!*fixed_epoch || *end || value < 0 || value > 253402300799LL ||
+		    static_cast<long long>(static_cast<time_t>(value)) != value) {
+			fprintf(stderr, "Invalid AO486_RTC_EPOCH\n");
+			exit(2);
+		}
+		t = static_cast<time_t>(value);
+	}
+	// An explicit epoch is UTC so test hosts need not share a timezone.
+	struct tm tm = *(fixed_epoch ? gmtime(&t) : localtime(&t));
 
 	//rtc contents 0-127
 	uint8_t cmos[128] =

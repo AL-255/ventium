@@ -25,6 +25,12 @@ module ven_fp_alu
     input  wire logic [1:0]   pc,
     output      logic         busy,
     output      logic         done,
+    // `commit_next` is asserted one clock before `done`.  Unlike a
+    // combinational look-ahead it is sourced from the registered stage-1
+    // validity bit, so a consumer may use it only to prepare for the following
+    // architectural commit edge; it never exposes an unregistered arithmetic
+    // result.
+    output      logic         commit_next,
     output      logic [84:0]  result
 );
 
@@ -90,6 +96,7 @@ module ven_fp_alu
 
   assign busy   = s0_valid | s1_valid | s2_valid;
   assign done   = s2_valid;
+  assign commit_next = s1_valid;
   assign result = result_q;
 
   always_ff @(posedge clk) begin

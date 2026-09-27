@@ -7,7 +7,11 @@
 // keeps doing all DDR / VGA-aperture / BIOS-shadow routing). See VENTIUM_SWAP.md §4.1.
 //
 // Ventium's ven_axi_master issues (docs/rtl-interface.md, ven_axi_master.sv):
-//   READ  = one INCR burst, ARLEN=7 (8 beats), ARSIZE=2 (4 B/beat)  → a 32 B line fill
+//   READ  = one INCR or WRAP8 burst, ARLEN=7 (8 beats), ARSIZE=2 (4 B/beat)
+//           → a 32 B line fill.  A WRAP8 begins at the critical dword; Avalon
+//             only has incrementing bursts, so this bridge emits the high and
+//             low line fragments as two Avalon commands while keeping one AXI R
+//             response stream.
 //   WRITE = one single beat, AWLEN=0, AWSIZE=2, WSTRB verbatim
 // and issues them serially (one outstanding), with registered VALIDs. So this bridge
 // handles one read OR one write at a time — sufficient and simplest; pipeline later.
@@ -84,7 +88,10 @@ module ven_axi2avalon (
     logic [3:0]   id_q;          // captured AWID/ARID for the response
     logic [29:0]  addr_q;        // captured DWORD address
     logic [3:0]   len_q;         // beats remaining to return on a read (1..8)
-    logic [3:0]   rbeats;        // total read beats (arlen+1)
+    logic [3:0]   cmd_beats;     // current Avalon command's read beats
+    logic [3:0]   cmd_left;      // beats still owed by that Avalon command
+    logic [3:0]   wrap_low_beats;// low fragment after the first WRAP8 fragment
+    logic         wrap_pending;  // issue the low line fragment after this command
 
     // ---- Address-phase acceptance: only when idle, read has priority. -------
     assign s_axi_arready = (state == S_IDLE);
@@ -93,7 +100,7 @@ module ven_axi2avalon (
 
     // ---- Avalon command outputs (registered address, combinational strobes) -
     assign avm_address    = addr_q;
-    assign avm_burstcount = (state == S_RD_CMD) ? rbeats : 4'd1;
+    assign avm_burstcount = (state == S_RD_CMD) ? cmd_beats : 4'd1;
     assign avm_read       = (state == S_RD_CMD);
     assign avm_write      = (state == S_WR_CMD) && s_axi_wvalid;
 
@@ -120,7 +127,10 @@ module ven_axi2avalon (
             id_q   <= '0;
             addr_q <= '0;
             len_q  <= '0;
-            rbeats <= '0;
+            cmd_beats <= '0;
+            cmd_left <= '0;
+            wrap_low_beats <= '0;
+            wrap_pending <= 1'b0;
         end else begin
             unique case (state)
                 // ---------------------------------------------------------------
@@ -128,8 +138,21 @@ module ven_axi2avalon (
                     if (s_axi_arvalid) begin                 // read wins
                         id_q   <= s_axi_arid;
                         addr_q <= s_axi_araddr[31:2];        // byte→dword
-                        rbeats <= s_axi_arlen[3:0] + 4'd1;   // 8 (or 1)
                         len_q  <= s_axi_arlen[3:0] + 4'd1;
+                        // AXI WRAP8 at dword N is {N..7,0..N-1}.  Translate it
+                        // into two incrementing Avalon commands, but do not split
+                        // the AXI response: RVALID may pause between commands.
+                        if (s_axi_arburst == 2'b10) begin
+                            cmd_beats      <= 4'd8 - {1'b0, s_axi_araddr[4:2]};
+                            cmd_left       <= 4'd8 - {1'b0, s_axi_araddr[4:2]};
+                            wrap_low_beats <= {1'b0, s_axi_araddr[4:2]};
+                            wrap_pending   <= (s_axi_araddr[4:2] != 3'd0);
+                        end else begin
+                            cmd_beats      <= s_axi_arlen[3:0] + 4'd1;
+                            cmd_left       <= s_axi_arlen[3:0] + 4'd1;
+                            wrap_low_beats <= '0;
+                            wrap_pending   <= 1'b0;
+                        end
                         state  <= S_RD_CMD;
                     end else if (s_axi_awvalid) begin        // else write
                         id_q   <= s_axi_awid;
@@ -142,10 +165,21 @@ module ven_axi2avalon (
                 S_RD_CMD: begin
                     if (!avm_waitrequest) state <= S_RD_DATA;
                 end
-                // Forward each returned dword as an R beat; count down to rlast.
+                // Forward each returned dword as an R beat.  A WRAP8 may need a
+                // second, low-address Avalon fragment after this command drains.
                 S_RD_DATA: begin
                     if (avm_readdatavalid && s_axi_rready) begin
-                        if (len_q == 4'd1) state <= S_IDLE;  // last beat consumed
+                        if (len_q == 4'd1) begin
+                            state <= S_IDLE;                  // AXI RLAST consumed
+                        end else if (cmd_left == 4'd1 && wrap_pending) begin
+                            addr_q       <= {addr_q[29:3], 3'd0}; // line word 0
+                            cmd_beats    <= wrap_low_beats;
+                            cmd_left     <= wrap_low_beats;
+                            wrap_pending <= 1'b0;
+                            state        <= S_RD_CMD;
+                        end else begin
+                            cmd_left <= cmd_left - 4'd1;
+                        end
                         len_q <= len_q - 4'd1;
                     end
                     // NOTE: assumes the AXI master keeps rready high through the
@@ -171,8 +205,10 @@ module ven_axi2avalon (
     // 4 B writes. Flag anything else loudly so a protocol drift is caught early.
     always_ff @(posedge clk) if (rst_n) begin
         if (s_axi_arvalid && s_axi_arready)
-            assert (s_axi_arsize == 3'd2 && (s_axi_arlen == 8'd7 || s_axi_arlen == 8'd0))
-              else $error("ven_axi2avalon: unexpected AR len=%0d size=%0d", s_axi_arlen, s_axi_arsize);
+            assert (s_axi_arsize == 3'd2 && (s_axi_arlen == 8'd7 || s_axi_arlen == 8'd0) &&
+                    ((s_axi_arburst == 2'b01) || (s_axi_arburst == 2'b10 && s_axi_arlen == 8'd7)))
+              else $error("ven_axi2avalon: unexpected AR len=%0d size=%0d burst=%0d",
+                          s_axi_arlen, s_axi_arsize, s_axi_arburst);
         if (s_axi_awvalid && s_axi_awready)
             assert (s_axi_awsize == 3'd2 && s_axi_awlen == 8'd0)
               else $error("ven_axi2avalon: unexpected AW len=%0d size=%0d", s_axi_awlen, s_axi_awsize);

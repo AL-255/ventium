@@ -26,9 +26,24 @@ module issue_uv
     input  fpd_t iu,       // U-member decode
     input  fpd_t iv,       // V-candidate decode (the instruction right after U)
     output logic pair_ok   // 1 => U and V may issue together this clock
+`ifdef VEN_PERF_PROFILE
+    // Simulation-only first-rejection attribution.  It is deliberately an
+    // output of the same leaf that decides pair_ok, rather than a second copy
+    // of the P5 table in the profiler.  No production build enables it.
+  , output logic [2:0] pair_reason
+`endif
 );
 
   localparam logic [7:0] ESP_MASK = 8'h10;
+`ifdef VEN_PERF_PROFILE
+  localparam logic [2:0] PR_OK       = 3'd0;
+  localparam logic [2:0] PR_SIMPLE   = 3'd1;
+  localparam logic [2:0] PR_CLASS    = 3'd2;
+  localparam logic [2:0] PR_DISPIMM  = 3'd3;
+  localparam logic [2:0] PR_RAW      = 3'd4;
+  localparam logic [2:0] PR_WAW      = 3'd5;
+  localparam logic [2:0] PR_VMEM     = 3'd6;
+`endif
 
   // pairing checker (mirrors p5model can_pair RULES, not its formula): both
   // simple, V is a V-candidate, U is a U-member, no disp+imm, no prefixes
@@ -39,10 +54,10 @@ module issue_uv
       if (!u.simple || !v.simple) return 1'b0;
       if (!u.pairs_first || !v.pairs_second) return 1'b0;
       if (u.disp_imm || v.disp_imm) return 1'b0;
-      // V reads pre-issue architectural registers, so every RAW dependency
-      // (including ESP) must serialize.  Existing stack write/write pairing
-      // is safe because V does not consume U's result; retain it for density.
-      if ((v.reads & u.writes) != 8'd0) return 1'b0;   // RAW, incl. ESP
+      // RAW serializes unless the optional checked-load bypass supplies the
+      // V ALU operand. ESP has no general arithmetic/stack bypass. Existing
+      // write/write pairing is safe when V does not consume U's result.
+      if (((v.reads & u.writes) != 8'd0) && !fp_load_use_forwardable(u, v)) return 1'b0;
       if ((v.writes & (u.writes & ~ESP_MASK)) != 8'd0)
         return 1'b0;                                    // WAW, except ESP-only
       // The one checked data-read port belongs to U.  A V memory form would
@@ -56,5 +71,20 @@ module issue_uv
   // Combinational pairing decision. Bit-identical to the in-line
   // fp_can_pair(u_d, v_d) call in intcore.sv.
   always_comb pair_ok = fp_can_pair(iu, iv);
+
+`ifdef VEN_PERF_PROFILE
+  // Preserve fp_can_pair as the only functional predicate above.  This
+  // priority-matched classification has diagnostic fanout only, and the
+  // profiler checks that it is non-OK whenever pair_ok is low.
+  always_comb begin
+    pair_reason = PR_OK;
+    if (!iu.simple || !iv.simple) pair_reason = PR_SIMPLE;
+    else if (!iu.pairs_first || !iv.pairs_second) pair_reason = PR_CLASS;
+    else if (iu.disp_imm || iv.disp_imm) pair_reason = PR_DISPIMM;
+    else if (((iv.reads & iu.writes) != 8'd0) && !fp_load_use_forwardable(iu, iv)) pair_reason = PR_RAW;
+    else if ((iv.writes & (iu.writes & ~ESP_MASK)) != 8'd0) pair_reason = PR_WAW;
+    else if (iv.is_mem) pair_reason = PR_VMEM;
+  end
+`endif
 
 endmodule : issue_uv

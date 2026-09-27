@@ -1508,7 +1508,7 @@
   "D8": {
    "mnem": "FADD/FMUL/FCOM/FSUB/FDIV m32/st(i)",
    "status": "partial",
-   "detail": "All D8 sub-forms decode; PARTIAL only because x87 is bit-exact ONLY for normal finite values/+-0 at default 64-bit PC/RNE; Inf/NaN/denormal/non-default RC/PC paths HALT (isa-coverage.md:121-127,157). d_is_x87 cleared if d_unknown.",
+   "detail": "All D8 sub-forms decode; PARTIAL only because x87 is bit-exact ONLY for normal finite values/+-0 at default 64-bit PC/RNE; Inf/NaN/denormal/non-default RC/PC paths HALT (isa-coverage.md:121-127,157). d_is_x87 cleared if d_unknown. Default-off VEN_FP_MEM_ADMIT prototypes shared-FP direct memory admission for unprefixed 32-bit-address arithmetic /0,/1,/4-/7; not yet verified or promoted.",
    "evidence": "core.sv:2363-2379 (under 8'b1101_1??? at 2355). Mem form: reg 0,1,4,5,6,7 -> FX_AR_M32; reg2 FCOM_M32; default FCOMP. Reg form: 0,1,4,5,6,7 FX_AR_ST0_STI; 2 FCOM_STI; default FCOMP. No d_unknown arm \u2014 every ModRM handled.",
    "desc": "x87 floating-point arithmetic/compare (m32real or st(i))"
   },
@@ -1517,7 +1517,8 @@
    "status": "partial",
    "detail": "Reg-form FRNDINT (FC) and FSCALE (FD) now implemented (libm floor/ceil/rint, ldexp). Still HALT: FPREM/FPREM1 (F8/F5 \u2014 need an exact-remainder engine), FXTRACT (F4); transcendentals (F0-F3/F9-FF) only under +VEN_TRANSCENDENTAL else d_unknown.",
    "evidence": "core.sv:2381-2429. Reg adds 8h FC FRNDINT / FD FSCALE (exec FX_FRNDINT/FX_FSCALE); F8 FPREM deferred -> d_unknown.",
-   "desc": "x87 load/store real, control word, and constants"
+   "desc": "x87 load/store real, control word, and constants",
+   "experiment": "VEN_FP_MEM_LOADS: unverified default-off FLD m32 admission via the existing shared-FP operand-load path. Requires VEN_FP_MEM_ADMIT."
   },
   "DA": {
    "mnem": "FIADD/FICOM m32; FUCOMPP",
@@ -1531,12 +1532,13 @@
    "status": "partial",
    "detail": "FILD/FIST/FLD-m80/FNCLEX/FNINIT implemented; FCMOVNB/NE/NBE/NU + FCOMI/FUCOMI HALT (isa-coverage.md:154); mem /1,/4,/6 -> d_unknown. Plus finite-value caveat.",
    "evidence": "core.sv:2440-2457. Mem: /0 FILD_M32,/2 FIST,/3 FISTP,/5 FLD_M80,/7 FSTP_M80; default d_unknown. Reg: mrm E2 FNCLEX, E3 FNINIT; default d_unknown (FCMOVcc/FCOMI/FUCOMI deferred).",
-   "desc": "x87 integer load/store; FNINIT/FNCLEX; FUCOMI"
+   "desc": "x87 integer load/store; FNINIT/FNCLEX; FUCOMI",
+   "experiment": "VEN_FP_MEM_LOADS: unverified default-off FILD m32 admission via the existing shared-FP operand-load path. Requires VEN_FP_MEM_ADMIT."
   },
   "DC": {
    "mnem": "FADD/FMUL/FSUB/FDIV m64/st(i)-dest",
    "status": "partial",
-   "detail": "Arith m64 + ST(i)-dest arith implemented; reg form reg=2/3 (FCOM/FCOMP st(i) via DC, non-canonical) -> d_unknown. Plus finite-value caveat.",
+   "detail": "Arith m64 + ST(i)-dest arith implemented; reg form reg=2/3 (FCOM/FCOMP st(i) via DC, non-canonical) -> d_unknown. Plus finite-value caveat. Default-off VEN_FP_MEM_ADMIT prototypes shared-FP direct memory admission for unprefixed 32-bit-address arithmetic /0,/1,/4-/7; not yet verified or promoted.",
    "evidence": "core.sv:2459-2479. Mem: reg 0,1,4,5,6,7 FX_AR_M64; reg2 FCOM_M64; default FCOMP. Reg form: 0,1 + 4,5,6,7 (with SUBR/SUB DIVR/DIV bit0 flipped) -> FX_AR_STI_ST0; reg2/3 -> d_unknown.",
    "desc": "x87 floating-point arithmetic (m64real or st(i))"
   },
@@ -1545,7 +1547,8 @@
    "status": "partial",
    "detail": "FRSTOR/FNSAVE present in enum (M11b) but isa-coverage.md:155 lists them deferred in default build; mem /1,/5 -> d_unknown; reg F0+/F8+ -> d_unknown. Plus finite-value caveat.",
    "evidence": "core.sv:2481-2502. Mem: /0 FLD_M64,/2 FST,/3 FSTP,/4 FRSTOR,/6 FNSAVE,/7 FNSTSW_M; default d_unknown. Reg: FFREE(C0+),FST st(i)(D0+),FSTP st(i)(D8+),FUCOM(E0+),FUCOMP(E8+); default d_unknown.",
-   "desc": "x87 load/store real; FFREE/FUCOM; FRSTOR/FNSAVE"
+   "desc": "x87 load/store real; FFREE/FUCOM; FRSTOR/FNSAVE",
+   "experiment": "VEN_FP_MEM_LOADS: unverified default-off FLD m64 admission via the existing shared-FP operand-load path. Requires VEN_FP_MEM_ADMIT."
   },
   "DE": {
    "mnem": "FIADD m16; FADDP/FCOMPP",
@@ -1559,7 +1562,8 @@
    "status": "partial",
    "detail": "FILD/FIST m16/m64, FBLD/FBSTP (M10), FNSTSW AX implemented; mem /1 -> d_unknown; reg forms other than E0 (incl FCOMIP/FUCOMIP) -> d_unknown. Plus finite-value caveat.",
    "evidence": "core.sv:2525-2541. Mem: /0 FILD_M16,/2 FIST_M16,/3 FISTP_M16,/4 FBLD,/5 FILD_M64,/6 FBSTP,/7 FISTP_M64; default(/1) d_unknown. Reg: mrm E0 FNSTSW_AX; else d_unknown (FCOMIP/FUCOMIP deferred).",
-   "desc": "x87 integer load/store; FBLD/FBSTP; FNSTSW AX"
+   "desc": "x87 integer load/store; FBLD/FBSTP; FNSTSW AX",
+   "experiment": "VEN_FP_MEM_LOADS: unverified default-off FILD m64 admission via the existing shared-FP operand-load path. Requires VEN_FP_MEM_ADMIT."
   },
   "E0": {
    "mnem": "LOOPNE rel8",
@@ -3043,15 +3047,15 @@
   "B6": {
    "mnem": "MOVZX r,r/m8",
    "status": "implemented",
-   "detail": "isa-coverage.md:94.",
-   "evidence": "core.sv:1524-1534 (8'hB6): K_EXT, unsigned, srcw=1; reg and mem (d_mem_read) forms both handled.",
+   "detail": "Default-off VEN_FAST_MEM_EXT adds NP executable descriptors for unprefixed default32/address32 memory forms, destination32 excluding ESP, length <=7; all other forms retain slow decode. Whole-core experiment qualification pending.",
+   "evidence": "decode_stages.sv: 0F B6 K_EXT unsigned srcw=1; decode.sv VEN_FAST_MEM_EXT and ventium_decode_pkg.sv FP_LOAD_ZX8 keep source bytes independent of destination width. Isolated decoder/helper miter PASS; verif/bytemov/FAST_EXT_MEMORY.md.",
    "desc": "Move with Zero-Extend"
   },
   "B7": {
    "mnem": "MOVZX r,r/m16",
    "status": "implemented",
-   "detail": "",
-   "evidence": "core.sv:1524-1534 (8'hB7): K_EXT, unsigned, srcw=2; reg and mem forms both handled.",
+   "detail": "Same default-off bounded VEN_FAST_MEM_EXT memory subset as 0F B6; source width2, destination32. Remaining encodings retain slow decode; whole-core experiment qualification pending.",
+   "evidence": "decode_stages.sv: 0F B7 K_EXT unsigned srcw=2; decode.sv VEN_FAST_MEM_EXT and ventium_decode_pkg.sv FP_LOAD_ZX16. Isolated decoder/helper miter PASS; verif/bytemov/FAST_EXT_MEMORY.md.",
    "desc": "Move with Zero-Extend"
   },
   "B8": {
@@ -3099,15 +3103,15 @@
   "BE": {
    "mnem": "MOVSX r,r/m8",
    "status": "implemented",
-   "detail": "isa-coverage.md:94.",
-   "evidence": "core.sv:1524-1534 (8'hBE): K_EXT, signed (d_ext_signed), srcw=1; reg and mem forms both handled.",
+   "detail": "Same default-off bounded VEN_FAST_MEM_EXT memory subset as 0F B6; sign extends source byte independently of destination32. Remaining encodings retain slow decode; whole-core experiment qualification pending.",
+   "evidence": "decode_stages.sv: 0F BE K_EXT signed srcw=1; decode.sv VEN_FAST_MEM_EXT and ventium_decode_pkg.sv FP_LOAD_SX8. Isolated decoder/helper miter PASS; verif/bytemov/FAST_EXT_MEMORY.md.",
    "desc": "Move with Sign-Extension"
   },
   "BF": {
    "mnem": "MOVSX r,r/m16",
    "status": "implemented",
-   "detail": "",
-   "evidence": "core.sv:1524-1534 (8'hBF): K_EXT, signed, srcw=2; reg and mem forms both handled.",
+   "detail": "Same default-off bounded VEN_FAST_MEM_EXT memory subset as 0F B6; sign extends source word independently of destination32. Remaining encodings retain slow decode; whole-core experiment qualification pending.",
+   "evidence": "decode_stages.sv: 0F BF K_EXT signed srcw=2; decode.sv VEN_FAST_MEM_EXT and ventium_decode_pkg.sv FP_LOAD_SX16. Isolated decoder/helper miter PASS; verif/bytemov/FAST_EXT_MEMORY.md.",
    "desc": "Move with Sign-Extension"
   },
   "C0": {

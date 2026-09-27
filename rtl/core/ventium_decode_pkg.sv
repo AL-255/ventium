@@ -148,6 +148,12 @@ package ventium_decode_pkg;
     // CMP) which reuse the checked read request but feed the U ALU.
     logic        is_mem;
     logic        is_store;
+    // Implicit 32-bit stack access (PUSH/POP register form).  This must not
+    // use the generic ModR/M base+index AGU: it selects SS and derives its
+    // offset from ESP with PUSH's pre-decrement / POP's post-increment rules.
+    // The core keeps the update behind the normal checked memory packet so a
+    // delayed access, page walk, fragment, or fault remains restartable.
+    logic        is_stack;
     // Direct ModR/M disp32 addressing has no GPR base.  Keeping that fact as a
     // decoded bit is essential: using an arbitrary architectural register as a
     // stand-in would turn a literal address into a data-dependent address.
@@ -187,14 +193,14 @@ package ventium_decode_pkg;
     logic        pairs_first;
     logic        pairs_second;
     logic        disp_imm;
-    // ---- M6 Erratum 59 (cycle-mode only): MOV moffs short forms A2/A3 --------
+    // ---- M6 Erratum 59: MOV moffs short forms A2/A3 -------------------------
     // The absolute-displacement store forms (opcodes 0xA2 MOV moffs8,AL and 0xA3
-    // MOV moffs,eAX). They ARE UV-pairable per the SDM, but the P5 instruction
-    // unit falsely fails to pair them when the NEXT instruction references EAX.
-    // is_moffs flags the U-member so the pairing logic can reproduce that defect
-    // behind errata_en[ERR_MOFFS]. Cycle-mode only (func mode keeps moffs on the
-    // proven slow FSM) -> no functional risk; the store value is not traced.
-    logic        is_moffs;     // A2/A3 absolute-displacement MOV store (cycle-mode)
+    // MOV moffs,eAX) are pairable in the clean model, but a P5 can falsely fail
+    // to pair them when the NEXT instruction references EAX.  is_moffs marks a
+    // real packetized A3 store when VEN_FAST_MOFFS_STORE admits it; the pairing
+    // logic consumes the mark only on a cycle-mode U/V issue.  A2 remains on the
+    // width-aware slow path until it has an independent byte-store audit.
+    logic        is_moffs;     // A3 absolute-displacement dword MOV store
     // ---- task #56 step A: OPERAND-SIZE support for the fast path ------------
     // The fast-path datapath has never had a width concept -- every arm is hardwired
     // 32-bit, which is why core_fastpath.svh:288 must send ALL sys_mode instructions
@@ -205,6 +211,13 @@ package ventium_decode_pkg;
     // bit-identical; decode.sv starts setting it in step B, once it can derive
     // eff_opsize (which needs prefix recognition it does not yet have).
     logic        w16;         // 1 = 16-bit operand size (upper half of dst preserved)
+    // Byte operands are independent of CS.D / operand-size prefixes. src/dst
+    // hold parent GPR indices (0..3 for AL..BH), never the encoded AH=4 etc.
+    // Keep high-byte selection separate from address base/index registers.
+    // No decoder arm sets these until byte memory and commit plumbing lands.
+    logic        w8;
+    logic        src_hi8;
+    logic        dst_hi8;
     // ---- M5 x87/FP cycle-accuracy fast-path fields (cycle-mode only) --------
     // A small whitelist of register-form x87 ops is recognised here so the FP
     // *cycle* model (latency/throughput, the p5model fp_role scoreboard) is
@@ -223,12 +236,109 @@ package ventium_decode_pkg;
                               // the preceding push's commit clock (no own cycle)
   } fpd_t;
 
+  // Load-only descriptor flavors, not new ALU operations. All existing
+  // arithmetic encodings occupy 0..19. No fpd_t/cache entry width increase.
+  localparam logic [4:0] FP_LOAD_ZX8  = 5'd20;
+  localparam logic [4:0] FP_LOAD_ZX16 = 5'd21;
+  localparam logic [4:0] FP_LOAD_SX8  = 5'd22;
+  localparam logic [4:0] FP_LOAD_SX16 = 5'd23;
+
+  function automatic logic fp_is_ext_load(input fpd_t d);
+`ifdef VEN_FAST_MEM_EXT
+    return d.is_mem && d.is_load && !d.is_store &&
+           (d.alu_op >= FP_LOAD_ZX8) && (d.alu_op <= FP_LOAD_SX16);
+`else
+    return 1'b0;
+`endif
+  endfunction
+
+  // Request extent is independent of destination register merge width.
+  // Generic byte/dword MOV/ALU/store behavior stays exactly as before.
+  function automatic logic [2:0] fp_mem_source_width(input fpd_t d);
+    if (fp_is_ext_load(d)) return d.alu_op[0] ? 3'd2 : 3'd1;
+    return d.w8 ? 3'd1 : 3'd4;
+  endfunction
+
+  function automatic logic [3:0] fp_mem_read_strobe(input fpd_t d);
+    case (fp_mem_source_width(d))
+      3'd1: return 4'b0001;
+      3'd2: return 4'b0011;
+      default: return 4'b1111;
+    endcase
+  endfunction
+
+  // Consumed only behind the established final checked packet ACK. Not an
+  // AXI-beat converter; fragment merge/extraction remains upstream unchanged.
+  function automatic logic [31:0] fp_load_result(input fpd_t d, input logic [31:0] raw);
+    if (fp_is_ext_load(d)) begin
+      case (d.alu_op)
+        FP_LOAD_ZX8:  return {24'd0, raw[7:0]};
+        FP_LOAD_ZX16: return {16'd0, raw[15:0]};
+        FP_LOAD_SX8:  return {{24{raw[7]}}, raw[7:0]};
+        FP_LOAD_SX16: return {{16{raw[15]}}, raw[15:0]};
+        default: return raw;
+      endcase
+    end
+    return raw;
+  endfunction
+
+  function automatic logic [2:0] fp_operand_width(input fpd_t d);
+    return d.w8 ? 3'd1 : (d.w16 ? 3'd2 : 3'd4);
+  endfunction
+
+  // Checked-load -> V register-ALU bypass capability, not permission to issue
+  // another memory request. Both slots wait for the captured packet's final
+  // checked ack. Address consumers have separate datapaths. Exclude ALL WAW,
+  // including ESP and disjoint bytes: V writeback merges against pre-U state.
+  function automatic logic fp_load_use_forwardable(input fpd_t u, input fpd_t v);
+`ifdef VEN_LOAD_USE_FORWARD
+    return u.is_mem && u.is_load && u.wreg && !u.is_stack && !u.is_store
+        && !u.is_fp && !u.is_lea && !u.is_shift && !u.is_branch
+        && (u.writes == (8'h01 << u.dst))
+        && !v.is_mem && !v.is_stack && !v.is_lea && !v.is_fp
+        && !v.is_shift && !v.is_branch && !v.is_nop
+        && (v.addr_mask == 8'd0) && ((v.writes & u.writes) == 8'd0);
+`else
+    return 1'b0;
+`endif
+  endfunction
+
+  // Convert an x86 byte-register encoding to the parent architectural GPR.
+  // Only DATA register fields use this: an EA base of ESP remains register 4.
+  function automatic logic [2:0] fp_byte_parent(input logic [2:0] encoded);
+    return {1'b0, encoded[1:0]};
+  endfunction
+
+  function automatic logic [31:0] fp_byte_read(input logic [31:0] value,
+                                               input logic high_byte);
+    return high_byte ? {24'd0, value[15:8]} : {24'd0, value[7:0]};
+  endfunction
+
+  function automatic logic [31:0] fp_byte_merge(input logic [31:0] previous,
+                                                input logic [31:0] value,
+                                                input logic high_byte);
+    return high_byte ? {previous[31:16], value[7:0], previous[7:0]}
+                     : {previous[31:8], value[7:0]};
+  endfunction
+
   // FP fast-path op kinds (the cycle-mode x87 whitelist).
   localparam logic [2:0] FK_NONE   = 3'd0;
+  // Shared-only memory admission reuses the otherwise non-executable zero
+  // kind. is_fp distinguishes it from an unknown instruction. fp_sti[0]
+  // carries m64 versus m32; it is NOT a stack index for this kind.
+  // fp_role is then a memory flavor (0 arithmetic, 1 FLD, 2 FILD), not a
+  // legacy FP scoreboard role. VEN_FP_MEM_LOADS adds only the load flavors.
+  localparam logic [2:0] FK_MEM    = FK_NONE;
   localparam logic [2:0] FK_FLDC   = 3'd1;   // FLD const (e.g. FLD1) — push
   localparam logic [2:0] FK_ARITH  = 3'd2;   // ST0 op= ST(i) (reg form)
   localparam logic [2:0] FK_FSTP0  = 3'd3;   // FSTP %st(0) — pop (discard)
   localparam logic [2:0] FK_FLDSTI = 3'd4;   // FLD ST(i) — push copy
   localparam logic [2:0] FK_FXCH   = 3'd5;   // FXCH ST(i)
+  // These two encodings are intentionally consumed only by the compact
+  // VEN_FP_SHARED_DIRECT handoff.  Keeping them distinct from FK_ARITH avoids
+  // teaching the legacy fast writeback an indexed-destination/pop datapath.
+  // Without that shared-direct profile they are never emitted by decode.sv.
+  localparam logic [2:0] FK_ARITH_STI     = 3'd6; // ST(i) op= ST0, no pop (DC)
+  localparam logic [2:0] FK_ARITH_STI_POP = 3'd7; // ST(i) op= ST0, then pop (DE)
 
 endpackage : ventium_decode_pkg

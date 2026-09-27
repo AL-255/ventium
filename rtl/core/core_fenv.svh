@@ -23,8 +23,22 @@
             if (f_seq_step == fenv_last) begin   // M-04: one definition (core.sv)
               // last beat: advance EIP + retire (FNSAVE's FNINIT reinit rides
               // fp_we_fninit from the fp_we_* block on this same beat).
+`ifdef VEN_FP_SHARED
+              // In the shared implementation the state update preceded this
+              // serialized image store, but this remains the architectural
+              // completion boundary.  Route debug-active cases through the
+              // same x87 retire helper as S_FEXEC/S_FSTORE.
+              if (fp_shared_early_retire_ok) begin
+                eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1;
+                state<=S_PIPE;
+              end else begin
+                retire_x87_shared(next_eip);
+              end
+`else
               eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1;
-              state<=S_PIPE; f_seq_step<=6'd0;
+              state<=S_PIPE;
+`endif
+              f_seq_step<=6'd0;
             end else f_seq_step <= f_seq_step + 6'd1;
           end
         end

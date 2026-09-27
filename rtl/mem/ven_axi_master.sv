@@ -5,14 +5,15 @@
 // mem/ven_axi_master.sv — ven_l1d backing port -> AXI4 master (P1-1 step 2).
 //
 // ven_l1d's backing port (m_*) is WORD-granular: on a line fill it holds m_req
-// and walks 8 sequential, line-aligned word addresses, one m_ack per word
+// and walks 8 circular word addresses in a line (the faulting word first, then
+// wrapping through the rest of that line), one m_ack per word
 // (ven_l1d.sv:99,151,158 — fw advances on EVERY posedge where m_ack==1, with NO
 // per-beat valid and NO backpressure); on a write-through it presents one word
 // with byte strobes. This module converts that word stream into AXI4 transactions
 // to the PS DDR (S_AXI_HPC0_FPD):
 //   * READ  (m_we=0): ven_l1d only ever reads during a FILL, and a fill is ALWAYS
-//     a full 32-byte line (8 words, base-aligned, ascending) — so a backing read is
-//     COALESCED into ONE AXI INCR burst of LINE_BEATS beats (ARLEN=7). Each
+//     a full 32-byte line (8 words) — so a backing read is COALESCED into ONE
+//     AXI INCR8 or critical-word AXI WRAP8 burst (ARLEN=7). Each
 //     returned R beat is handed back as ONE m_ack + m_rdata, in order — exactly the
 //     word ven_l1d's fill counter `fw` expects. The single true m_ack rule is
 //     `m_ack = (RVALID && RREADY)`: a new word this cycle, m_rdata == that word,
@@ -31,7 +32,8 @@
 //   ddr_addr = REMAP_BASE + (phys & ADDR_MASK)  — the whole x86 phys space lands in
 // one reserved DDR carveout (REMAP_BASE/ADDR_MASK = the PetaLinux reserved-memory
 // node's base/size). The remap is done in ADDR_W width (no 32-bit truncation), and
-// REMAP_BASE must be 32-byte aligned so an INCR8 burst never crosses a 4KiB page.
+// REMAP_BASE must be 32-byte aligned so either 32-byte burst shape stays within
+// its AXI 4KiB boundary.
 //
 // Single clock domain (CDC_BYPASS=1, the clean low-risk bring-up): core_clk ==
 // axi_clk == the PS PL clock. The async dual-clock CDC variant (core clk vs a
@@ -61,6 +63,11 @@ module ven_axi_master #(
     // stale first HP0 response is discarded. Keep 0 for a backing that can
     // contain side-effectful MMIO reads.
     parameter bit          NARROW_REPLAY_SAFE = 1'b0,
+    // Backend policy, not an ISA/cache-size option. Leave enabled for HP/HPC
+    // targets until their stale-response cause is repaired. A synchronous,
+    // ownership-qualified backend may deliver the first cacheable burst.
+    // This does not alter the independent narrow/MMIO replay policy above.
+    parameter bit          LINE_REPLAY = 1'b1,
     // #34: per-transaction watchdog. If a read/write makes no progress for WATCHDOG
     // core clocks (a stuck DDR/bridge), the FSM ABORTS — synthesizes the acks ven_l1d
     // expects (so the core never deadlocks) + raises bus_err. Default huge (a normal
@@ -258,12 +265,13 @@ module ven_axi_master #(
     end
   end
 
-  // ---- READ FSM (coalesced INCR line fill) ----------------------------------
+  // ---- READ FSM (coalesced cache-line fill) ---------------------------------
   // REVIEW2 M-08: R_DRAIN deterministically resynchronises the R channel after an
   // RLAST/beat-count mismatch (see the R_DATA arm).
-  typedef enum logic [1:0] { R_IDLE, R_AR, R_DATA, R_DRAIN } rstate_e;
+  typedef enum logic [2:0] { R_IDLE, R_AR, R_DATA, R_DRAIN, R_FAULT } rstate_e;
   rstate_e          rst;
-  logic [ADDR_W-1:0] araddr_q;     // line-aligned burst base (registered, stable)
+  logic [ADDR_W-1:0] araddr_q;     // first beat address (registered, stable)
+  logic              rwrap_q;      // cache fill starts away from word 0 -> AXI WRAP8
   logic [7:0]        r_beat;       // accepted-R-beat counter (exit on count, not RLAST)
   // HP0 DOUBLE-READ (port of the proven ven_ddram_axi build-#31 workaround): the PS S_AXI_HP
   // async DDR read FIFO can return a STALE prior burst. PROVEN on the VEN path too: with a
@@ -295,6 +303,12 @@ module ven_axi_master #(
   logic [1:0]        rsize_q;
   logic              narrow_q;
   logic              rresp_err;    // sticky: a read beat returned non-OKAY RRESP
+  // A response bearing another master's ID, or appearing when this master owns
+  // no matching response phase, is not merely an errored completion.  It cannot
+  // be associated safely with an outstanding request.  The terminal fault state
+  // drains the AXI channel without advancing the fill/write accounting, then
+  // requires the normal coupled-reset recovery path to resynchronise the fabric.
+  logic              rid_err;      // sticky: R channel ID/ownership protocol fault
   // REVIEW2 M-08: RLAST disagreeing with the beat count is a PROTOCOL VIOLATION by
   // the slave. Exiting on the beat count (below) is the right defensive choice -- an
   // early RLAST must not freeze ven_l1d's fill mid-line -- but silently tolerating
@@ -305,9 +319,35 @@ module ven_axi_master #(
   // running on data the bus never agreed about. A compliant slave never sets this.
   logic              rlast_err;    // sticky: RLAST did not match the beat count
   logic              bresp_err;    // sticky: a write returned non-OKAY BRESP
+  logic              bid_err;      // sticky: B channel ID/ownership protocol fault
   logic              wd_err_r;     // sticky: a READ watchdog timeout aborted (read-FF driven)
   logic              wd_err_w;     // sticky: a WRITE watchdog timeout aborted (write-FF driven)
   logic [15:0]       r_wd, w_wd;   // #34 read/write watchdog cycle counters (since last progress)
+  // A response failure is only recorded into the sticky flags at the active clock
+  // edge.  The backing/L1 acknowledgement, however, is consumed on that *same*
+  // edge.  Keep raw handshake-time fault terms so an erroneous R beat is never
+  // presented as data before its sticky error can become visible.  `fatal_now`
+  // also blocks a same-edge new request when a BRESP fails; already admitted
+  // writes continue draining so clean shutdown cannot strand a retained P5 slot.
+  logic              r_hs, rlast_exp, r_bad_now, b_bad_now;
+  logic              rid_bad_now, bid_bad_now, r_unowned_now, b_unowned_now;
+  logic              rproto_bad_now, bproto_bad_now;
+  logic              fatal_latched, fatal_now, rd_deliver;
+`ifndef SYNTHESIS
+`ifdef VEN_AXI_ADMISSION_PERF
+  // Simulation-only accounting for the R_IDLE admission predicate. A line
+  // fill may legally wait behind retained P54C stores; price that barrier
+  // explicitly before considering any read-after-write ordering change.
+  longint unsigned perf_rd_candidate;
+  longint unsigned perf_rd_admitted;
+  longint unsigned perf_rd_block_rproto;
+  longint unsigned perf_rd_block_shutdown;
+  longint unsigned perf_rd_block_hold;
+  longint unsigned perf_rd_block_alias;
+  longint unsigned perf_rd_block_fatal;
+  longint unsigned perf_rd_block_write;
+`endif
+`endif
 
   // ---- write->read landing barrier (build-#21 class, CORE path) ---------------
   // The CPU write-through's BVALID fires BEFORE the store lands in PS-DDR (HP0 posted). A
@@ -319,7 +359,9 @@ module ven_axi_master #(
   localparam logic [7:0] WRBAR = 8'd0;   // DIAGNOSTIC build: barrier DISABLED (didn't help; slowed boot)
   logic [26:0] wr_line; logic [7:0] wr_cd;
   wire rd_hold = (wr_cd != 8'd0) && (m_addr[31:5] == wr_line);
-  always_ff @(posedge core_clk) begin
+  // This retained landing-barrier state is part of the same reset domain as the
+  // write FSM below; reset it asynchronously with the coupled AXI seam.
+  always_ff @(posedge core_clk or negedge core_rst_n) begin
     if (!core_rst_n)                         begin wr_line <= 27'd0; wr_cd <= 8'd0; end
     else if (m_req && m_we && !shutdown && !alias_bad) begin wr_line <= m_addr[31:5]; wr_cd <= WRBAR; end  // C-01/H-07
     else if (wr_cd != 8'd0)                        wr_cd   <= wr_cd - 8'd1;
@@ -358,7 +400,8 @@ module ven_axi_master #(
   logic [7:0]           q_ssh;
   logic                 wr_active;
   logic [B_CNTW-1:0]    b_outstanding;
-  logic                 aw_hs, w_hs, b_hs, wr_beat_sent, wr_store_final, wr_progress;
+  logic                 aw_hs, w_hs, b_hs, b_retire_hs;
+  logic                 wr_beat_sent, wr_store_final, wr_progress;
 
   // REVIEW2_aug2 H-11: the read burst's beat count, LATCHED with araddr_q at accept.
   // It used to be the constant LINE_BEATS, which is why the L1D could not ask for a
@@ -381,12 +424,20 @@ module ven_axi_master #(
   // occupancy, not a mere launch queue: it includes unissued, active, and
   // response-pending stores.  A second slot may begin draining while the oldest
   // waits for B, but no third CPU write can be admitted before the oldest slot's
-  // final response returns.  This keeps the AXI interconnect from silently
-  // becoming an unbounded extension of the two architectural write buffers.
+  // final response returns.  On that exact B handshake the released slot may be
+  // refilled immediately: rejecting it until the following clock creates an
+  // artificial bubble in a full P5 queue, even though the architectural depth
+  // never exceeds two.  This keeps the AXI interconnect from silently becoming
+  // an unbounded extension of the two architectural write buffers.
   always_comb begin
     wr_dispatch       = 1'b0;
     wr_dispatch_slot  = wq_rp;
-    if (!wr_active && (wq_count != WBUF_CNTW'(0))) begin
+    // A wrong/unowned BID is a terminal fabric fault.  Existing AW/W VALID must
+    // still complete (AXI VALID cannot be retracted), but do not LAUNCH another
+    // buffered store once the fault is observed.  Matching BRESP errors retain
+    // their historical drain behavior; only the ambiguous-ID case is terminal.
+    if (!bid_err && !bproto_bad_now && !wr_active &&
+        (wq_count != WBUF_CNTW'(0))) begin
       if (!wq_issued[wq_rp]) begin
         wr_dispatch = 1'b1;
       end else if ((wq_count == WBUF_CNTW'(P5_WBUF_DEPTH)) &&
@@ -424,26 +475,32 @@ module ven_axi_master #(
       automatic logic       head_final_after;
       head_b_after = wq_bcount[wq_rp];
       if (wr_beat_sent && (wr_active_slot == wq_rp)) head_b_after = head_b_after + 2'd1;
-      if (b_hs && b_owner_valid && (b_owner_slot == wq_rp)) head_b_after = head_b_after - 2'd1;
+      if (b_retire_hs && b_owner_valid && (b_owner_slot == wq_rp))
+        head_b_after = head_b_after - 2'd1;
       head_final_after = wq_issued[wq_rp] ||
                          (wr_store_final && (wr_active_slot == wq_rp));
       wq_head_release = head_final_after && (head_b_after == 2'd0);
     end
   end
-  assign wr_enq      = (rst == R_IDLE) && m_req && m_we && !shutdown && !alias_bad &&
-                       (wq_count < WBUF_CNTW'(P5_WBUF_DEPTH));
+  assign wr_enq      = (rst == R_IDLE) && m_req && m_we && !shutdown && !alias_bad && !fatal_now &&
+                       ((wq_count < WBUF_CNTW'(P5_WBUF_DEPTH)) || wq_head_release);
   assign wr_busy     = wr_active || (wq_count != WBUF_CNTW'(0));
   assign wst         = wr_busy ? W_RUN : W_IDLE;
 
   // ---- AXI combinational drive ----------------------------------------------
   always_comb begin
-    // read address channel — burst base forced 32B-aligned (never crosses 4KiB).
+    // read address channel.  WRAP8 fills still remain within one 32-byte line.
     m_axi_arid    = AXI_ID;
     m_axi_araddr  = araddr_q;
     m_axi_arlen   = 8'(rbeats_q - 9'd1);  // H-11: latched length (LINE_BEATS, or 1 narrow)
     // R2-H01: exact ARSIZE for narrow device pieces (1B/2B/4B); fills are 4B.
     m_axi_arsize  = {1'b0, rsize_q};      // AXI encoding matches rsize_q 0/1/2
-    m_axi_arburst = 2'b01;               // INCR
+    // A cache-line fill whose first requested word is not word zero uses a
+    // legal AXI WRAP8 burst.  That returns the critical word first while still
+    // enumerating precisely the same 32-byte line; narrow reads always remain
+    // single-beat INCR transactions.  rwrap_q is latched with araddr_q, so the
+    // priming replay repeats the identical burst shape.
+    m_axi_arburst = rwrap_q ? 2'b10 : 2'b01; // WRAP / INCR
     m_axi_arlock  = 1'b0;
     m_axi_arcache = 4'b0011;             // Normal NON-cacheable bufferable: the BD uses NON-coherent
                                          // HP0, and cacheable attrs legally let the SmartConnect width
@@ -452,10 +509,11 @@ module ven_axi_master #(
     m_axi_arprot  = 3'b000;
     m_axi_arqos   = 4'd0;
     m_axi_arvalid = (rst == R_AR);
-    // M-08: RREADY is also asserted while DRAINING -- the whole point of the drain is
-    // to consume the beats a late-RLAST slave still owes, so the next transaction does
-    // not inherit them.
-    m_axi_rready  = (rst == R_DATA) || (rst == R_DRAIN);
+    // RREADY is a registered-state-only response sink.  Do NOT make READY depend
+    // combinationally on RID/VALID: AXI forbids input->output interface paths and
+    // a wrong response must still be drainable.  R_FAULT consumes traffic after an
+    // ID/ownership fault but never returns it to the L1 or resumes normal state.
+    m_axi_rready  = (rst == R_DATA) || (rst == R_DRAIN) || (rst == R_FAULT);
 
     // write address channel — one aligned 4-byte beat from the active P5 buffer.
     m_axi_awid    = AXI_ID;
@@ -473,8 +531,11 @@ module ven_axi_master #(
     m_axi_wstrb   = wstrb_q;
     m_axi_wlast   = 1'b1;                 // single-beat write
     m_axi_wvalid  = wr_active && !w_done;
-    // write response channel
-    m_axi_bready  = (b_outstanding != B_CNTW'(0));
+    // write response channel.  Normal BREADY is occupancy-only.  After an
+    // ID/ownership fault it remains asserted to drain the response channel, but
+    // b_retire_hs below prevents every such beat from releasing a write slot.
+    // This stays free of AXI input->output combinational paths.
+    m_axi_bready  = (b_outstanding != B_CNTW'(0)) || bid_err;
 
     // backing response: a read beat hands RDATA back as one m_ack; the write acks on
     // BVALID. On a watchdog timeout the AXI handshake is HELD (a master cannot retract
@@ -483,7 +544,14 @@ module ven_axi_master #(
     // violating abort, no drain.
     // clean-shutdown quiesce: both FSMs idle == no outstanding AXI (every *VALID is
     // gated on a non-IDLE state above, so IDLE is the protocol-safe drained state).
-    m_idle  = (rst == R_IDLE) && (wst == W_IDLE);
+    // This is meaningful only for the planned shutdown protocol. An independently
+    // asserted reset clears local bookkeeping and may have aborted posted traffic,
+    // so the reset seam must never be treated as a clean-drain acknowledgement.
+    // A response-ID/ownership fault is terminal until the coupled core/AXI reset
+    // path.  Do not advertise a clean quiesce merely because a foreign response
+    // was physically drained.  (Owned RRESP/BRESP errors still use normal drain.)
+    m_idle  = (rst == R_IDLE) && (wst == W_IDLE) &&
+              !rid_err && !bid_err && !rproto_bad_now && !bproto_bad_now;
     // a backing request that arrives while shutting-down + idle is acked locally with
     // rdata=0 (NO AXI transaction is started — the FSM start arms are gated on
     // !shutdown), so the core/L1 never deadlocks waiting for an ack we won't issue.
@@ -495,34 +563,110 @@ module ven_axi_master #(
     // beats remain FIFO ordered, BRESP is still checked, and R_IDLE below blocks
     // every read until all admitted writes have completed.  This is posting, not a
     // speculative write: the bounded buffer is the retained architectural state.
-    m_ack   = ((rst == R_DATA) && m_axi_rvalid && m_axi_rready && rd_primed) ||   // deliver ONLY the real burst
-                                                                                  // (a fill's 2nd; a narrow read's 1st/only — C-01)
-              wr_enq ||
-              (shutdown && m_idle && m_req);          // shutdown: local ack, no DDR
-    bus_err = wd_err_r | wd_err_w | rresp_err | bresp_err | rlast_err | alias_err; // #34 + M-08 + M-07
+    m_ack   = !fatal_now && (rd_deliver ||                 // deliver ONLY a good real burst
+                                               // (a fill's 2nd; a narrow read's 1st/only — C-01)
+                              wr_enq ||
+                              (shutdown && m_idle && m_req)); // shutdown: local ack, no DDR
+    bus_err = fatal_now; // #34 + M-08 + M-07, including the current bad AXI handshake
   end
 
   assign aw_hs       = m_axi_awvalid && m_axi_awready;
   assign w_hs        = m_axi_wvalid  && m_axi_wready;
   assign b_hs        = m_axi_bvalid  && m_axi_bready;
+  // Observe malformed response ownership independently of READY.  The fixed-ID
+  // master must never see a different ID.  A matching-ID response before this
+  // master has issued/owned a response phase is also terminal: it is stale or
+  // misrouted, and must not be inherited by a later transaction.  The one
+  // unavoidable limitation of a single reusable AXI ID is a stale matching-ID
+  // response that appears *during* a newly owned response phase; a conforming
+  // interconnect cannot create that ambiguity, and the coupled reset contract
+  // handles an already-detected fabric fault.
+  assign rid_bad_now = m_axi_rvalid && (m_axi_rid != AXI_ID);
+  assign bid_bad_now = m_axi_bvalid && (m_axi_bid != AXI_ID);
+  // An R response is not owned until an AR handshake has completed on a prior
+  // clock edge.  In particular, RVALID concurrent with an R_AR/ARREADY edge is
+  // still stale or misrouted: state has not entered R_DATA yet and RREADY is
+  // deliberately low.  Treating that cycle as owned would let a matching-ID
+  // stale beat survive into R_DATA and be consumed as the new request's data.
+  assign r_unowned_now = m_axi_rvalid && ((rst == R_IDLE) || (rst == R_AR));
+  assign b_unowned_now = m_axi_bvalid && (b_outstanding == B_CNTW'(0)) && !bid_err;
+  assign rproto_bad_now = rid_bad_now || r_unowned_now;
+  assign bproto_bad_now = bid_bad_now || b_unowned_now;
+  assign r_hs        = (rst == R_DATA) && m_axi_rvalid && m_axi_rready;
+  assign rlast_exp   = (r_beat == 8'(rbeats_q - 9'd1));
+  assign r_bad_now   = rproto_bad_now ||
+                       (r_hs && ((m_axi_rresp != 2'b00) || (m_axi_rlast != rlast_exp)));
+  assign b_bad_now   = bproto_bad_now || (b_hs && (m_axi_bresp != 2'b00));
+  assign fatal_latched = wd_err_r | wd_err_w | rresp_err | rid_err |
+                         bresp_err | bid_err | rlast_err | alias_err;
+  assign fatal_now   = fatal_latched | r_bad_now | b_bad_now;
+  assign rd_deliver  = r_hs && rd_primed && !fatal_now;
+  assign b_retire_hs = b_hs && !bid_err && !bproto_bad_now;
   assign wr_beat_sent = wr_active && (aw_done || aw_hs) && (w_done || w_hs);
   assign wr_store_final = wr_beat_sent && (wbeat || !xword_q);
   assign wr_progress = wr_enq || wr_dispatch || aw_hs || w_hs || b_hs;
 
 `ifdef VEN_DBG_CORE
   // read-beat trace taps: capture the address + data of every ACCEPTED read beat.
-  assign dbg_rd_valid = (rst == R_DATA) && m_axi_rvalid && m_axi_rready && rd_primed;  // real burst only
-  assign dbg_rd_addr  = araddr_q[31:0] + {22'd0, r_beat, 2'b00};
+  assign dbg_rd_valid = rd_deliver;  // real, error-free burst only
+  assign dbg_rd_addr  = rwrap_q
+                      ? {araddr_q[31:5], araddr_q[4:2] + r_beat[2:0], 2'b00}
+                      :  araddr_q[31:0] + {22'd0, r_beat, 2'b00};
   assign dbg_rd_data  = m_axi_rdata;
 `endif
 
   // ---- READ sequencing -------------------------------------------------------
-  always_ff @(posedge core_clk) begin
+  // The enclosing seam couples core_rst_n to axi_rst_n.  Async assertion must
+  // quiesce held ARVALID/RREADY and terminal response-fault state even if AXI
+  // reset falls between core clock edges.
+  always_ff @(posedge core_clk or negedge core_rst_n) begin
     if (!core_rst_n) begin
-      rst <= R_IDLE; araddr_q <= '0; r_beat <= 8'd0; rresp_err <= 1'b0; rlast_err <= 1'b0;
+      rst <= R_IDLE; araddr_q <= '0; rwrap_q <= 1'b0; r_beat <= 8'd0;
+      rresp_err <= 1'b0; rid_err <= 1'b0; rlast_err <= 1'b0;
       rbeats_q <= 9'(LINE_BEATS); rsize_q <= 2'd2; narrow_q <= 1'b0;
       r_wd <= 16'd0; wd_err_r <= 1'b0; rd_primed <= 1'b0;
+`ifndef SYNTHESIS
+`ifdef VEN_AXI_ADMISSION_PERF
+      perf_rd_candidate <= 64'd0;
+      perf_rd_admitted <= 64'd0;
+      perf_rd_block_rproto <= 64'd0;
+      perf_rd_block_shutdown <= 64'd0;
+      perf_rd_block_hold <= 64'd0;
+      perf_rd_block_alias <= 64'd0;
+      perf_rd_block_fatal <= 64'd0;
+      perf_rd_block_write <= 64'd0;
+`endif
+`endif
     end else begin
+      // A wrong/unowned R response may handshake because RREADY is deliberately
+      // state-only.  Latch it immediately, but never retract an ARVALID that is
+      // already held in R_AR: AXI requires that address VALID/payload stay stable
+      // until ARREADY accepts them.  Once that compulsory AR handshake completes,
+      // enter R_FAULT without executing normal fill/replay accounting.
+      if (rproto_bad_now) rid_err <= 1'b1;
+`ifndef SYNTHESIS
+`ifdef VEN_AXI_ADMISSION_PERF
+      if ((rst == R_IDLE) && m_req && !m_we) begin
+        perf_rd_candidate <= perf_rd_candidate + 64'd1;
+        // Keep this priority identical to the R_IDLE fault/start arms so the
+        // displayed buckets sum to candidate cycles exactly.
+        if (rproto_bad_now)
+          perf_rd_block_rproto <= perf_rd_block_rproto + 64'd1;
+        else if (shutdown)
+          perf_rd_block_shutdown <= perf_rd_block_shutdown + 64'd1;
+        else if (rd_hold)
+          perf_rd_block_hold <= perf_rd_block_hold + 64'd1;
+        else if (alias_bad)
+          perf_rd_block_alias <= perf_rd_block_alias + 64'd1;
+        else if (fatal_now)
+          perf_rd_block_fatal <= perf_rd_block_fatal + 64'd1;
+        else if (wr_busy)
+          perf_rd_block_write <= perf_rd_block_write + 64'd1;
+        else
+          perf_rd_admitted <= perf_rd_admitted + 64'd1;
+      end
+`endif
+`endif
       unique case (rst)
         // REVIEW_aug2 H-07: an ALIASING request must be REJECTED, not merely recorded.
         // alias_err was sticky and fed bus_err, but neither FSM start tested it -- the
@@ -531,7 +675,10 @@ module ven_axi_master #(
         // the delayed bus_err halted the core. That is detection, not rejection.
         // Gating the start means no AXI transaction is ever launched for an out-of-
         // window address; bus_err still halts the core, exactly as the #34 watchdog does.
-        R_IDLE: if (m_req && !m_we && !shutdown && !rd_hold && !alias_bad && !wr_busy) begin
+        R_IDLE: if (rproto_bad_now) begin
+                  rst  <= R_FAULT;
+                  r_wd <= 16'd0;
+                end else if (m_req && !m_we && !shutdown && !rd_hold && !alias_bad && !fatal_now && !wr_busy) begin
                   // REVIEW2_aug2 H-11: a CACHEABLE backing read is a full line fill and
                   // latches the 32B-aligned base, as before. A NARROW read is ONE
                   // single-beat transaction at the byte-exact address with an exact
@@ -543,13 +690,19 @@ module ven_axi_master #(
                     rbeats_q <= 9'd1;
                     rsize_q  <= m_rd_size;
                     narrow_q <= 1'b1;
+                    rwrap_q  <= 1'b0;
                   end else begin
-                    araddr_q <= remap({m_addr[31:5], 5'd0});
+                    // ven_l1d presents a circular cache-line stream whose
+                    // beat zero is the faulting aligned word.  Preserve that
+                    // word here and select WRAP8 when it is not line word 0.
+                    // AXI WRAP8 is 32 bytes, so it cannot cross a 4 KiB page.
+                    araddr_q <= remap({m_addr[31:2], 2'd0});
                     rbeats_q <= 9'(LINE_BEATS);
                     rsize_q  <= 2'd2;               // fills are always 4B beats
                     narrow_q <= 1'b0;
+                    rwrap_q  <= (m_addr[4:2] != 3'd0);
                   end
-                  r_beat <= 8'd0; rresp_err <= 1'b0; r_wd <= 16'd0;
+                  r_beat <= 8'd0; r_wd <= 16'd0;
 `ifdef VEN_SINGLE_FILL
                   // EXPERIMENT ONLY (task #24). Skips the priming burst so a fill costs ONE
                   // burst instead of two. NOT SAFE TO SHIP as-is: the priming read exists
@@ -561,16 +714,26 @@ module ven_axi_master #(
                   // A narrow read is replayed only when the integration proves the
                   // AXI target is ordinary memory. Otherwise deliver its first and
                   // only transaction so a device side effect executes exactly once.
-                  rd_primed <= m_rd_narrow && !NARROW_REPLAY_SAFE;
+                  rd_primed <= m_rd_narrow ? !NARROW_REPLAY_SAFE : !LINE_REPLAY;
 `endif
                   rst <= R_AR;
                 end
-        R_AR:   if (m_axi_arready) begin rst <= R_DATA; r_wd <= 16'd0; end // AR accepted
+        R_AR:   if (m_axi_arready) begin
+                  // If an earlier bad R arrived while ARREADY was low, this
+                  // handshake is mandatory for AXI legality but its response is
+                  // terminally discarded rather than treated as a fresh fill.
+                  rst <= (rid_err || rproto_bad_now) ? R_FAULT : R_DATA;
+                  r_wd <= 16'd0;
+                end
+                else if (rid_err || rproto_bad_now) r_wd <= 16'd0;
                 // #34 watchdog: a stall of WATCHDOG cycles with no progress -> raise
                 // the sticky fault (bus_err) but HOLD arvalid (AXI: VALID can't retract).
                 else if (r_wd >= 16'(WATCHDOG)) wd_err_r <= 1'b1;
                 else r_wd <= r_wd + 16'd1;
-        R_DATA: if (m_axi_rvalid && m_axi_rready) begin       // beat accepted (progress)
+        R_DATA: if (rproto_bad_now) begin
+                  rst  <= R_FAULT;
+                  r_wd <= 16'd0;
+                end else if (r_hs) begin       // beat accepted (progress)
                   // DEFENSIVE: exit on the BEAT COUNT vs ARLEN, NOT a (possibly
                   // mis-asserted) RLAST — a non-compliant slave's early RLAST then
                   // cannot freeze ven_l1d's fill mid-line. Identical timing for a
@@ -586,15 +749,15 @@ module ven_axi_master #(
                   // COMPLIANT narrow (1- or 2-beat) response — RLAST on beat 0 or 1 —
                   // was misclassified as an EARLY RLAST: sticky bus_err on every MMIO
                   // read, and the FSM bailed before ven_l1d's bypass got its beats.
-                  if (m_axi_rlast != (r_beat == 8'(rbeats_q - 9'd1))) rlast_err <= 1'b1;
-                  if (m_axi_rlast && (r_beat != 8'(rbeats_q - 9'd1))) begin
+                  if (m_axi_rlast != rlast_exp) rlast_err <= 1'b1;
+                  if (m_axi_rlast && !rlast_exp) begin
                     // EARLY RLAST: the slave has ENDED the burst, so the beats this
                     // master is still counting will never arrive. Previously the FSM
                     // sat here until the #34 watchdog fired -- a timeout, not a defined
                     // recovery. Terminate now; bus_err is already sticky, so the core
                     // halts on a known cycle instead of an arbitrary one.
                     r_beat <= 8'd0; rst <= R_IDLE;
-                  end else if (r_beat == 8'(rbeats_q - 9'd1)) begin
+                  end else if (rlast_exp) begin
                     if (!m_axi_rlast) begin
                       // LATE RLAST: our count is satisfied but the slave still owes
                       // beats. Returning to IDLE here would let the NEXT AR be issued
@@ -602,7 +765,7 @@ module ven_axi_master #(
                       // the new burst's data -- silent cross-transaction corruption.
                       // Drain to the real RLAST first.
                       rst <= R_DRAIN;
-                    end else if (!rd_primed) begin
+                    end else if (!rd_primed && !fatal_now) begin
                       // priming burst done (all beats DISCARDED): re-issue the SAME
                       // burst (araddr_q preserved); the second one is delivered.
                       rd_primed <= 1'b1; r_beat <= 8'd0; rst <= R_AR;
@@ -617,12 +780,19 @@ module ven_axi_master #(
         // M-08: consume the remaining beats of an over-long burst until the slave's
         // real RLAST, then return to IDLE with the channel resynchronised. The #34
         // watchdog still backstops a slave that never asserts RLAST at all.
-        R_DRAIN: if (m_axi_rvalid && m_axi_rready) begin
+        R_DRAIN: if (rproto_bad_now) begin
+                   rst  <= R_FAULT;
+                   r_wd <= 16'd0;
+                 end else if (m_axi_rvalid && m_axi_rready) begin
                    if (m_axi_rlast) begin r_beat <= 8'd0; rst <= R_IDLE; end
                    r_wd <= 16'd0;
                  end
                  else if (r_wd >= 16'(WATCHDOG)) wd_err_r <= 1'b1;
                  else r_wd <= r_wd + 16'd1;
+        // Terminal ID/ownership fault: channel handshakes are intentionally
+        // discarded so a foreign response cannot clog the shared interconnect,
+        // but state/accounting never returns to normal without reset.
+        R_FAULT: if (m_axi_rvalid && m_axi_rready) r_wd <= 16'd0;
         default: rst <= R_IDLE;
       endcase
     end
@@ -632,7 +802,9 @@ module ven_axi_master #(
   // CPU-facing enqueue, FIFO dispatch, AXI transfer, and B response retirement
   // are deliberately separate.  Dispatch does NOT dequeue: the entry remains in
   // the P54C-sized FIFO until its final B response, so a read cannot bypass it.
-  always_ff @(posedge core_clk) begin
+  // Match the read-side asynchronous reset contract so AW/W VALID, BREADY and
+  // retained P5 write state cannot outlive an AXI-only reset.
+  always_ff @(posedge core_clk or negedge core_rst_n) begin
     if (!core_rst_n) begin
       wq_rp <= '0; wq_wp <= '0; wq_count <= '0;
       for (int i = 0; i < P5_WBUF_DEPTH; i++) begin
@@ -645,7 +817,7 @@ module ven_axi_master #(
       awaddr_q <= '0; wdata_q <= 32'd0; wstrb_q <= 4'd0;
       awaddr2_q <= '0; wdata2_q <= 32'd0; wstrb2_q <= 4'd0;
       xword_q <= 1'b0; wbeat <= 1'b0; aw_done <= 1'b0; w_done <= 1'b0;
-      bresp_err <= 1'b0; w_wd <= 16'd0; wd_err_w <= 1'b0;
+      bresp_err <= 1'b0; bid_err <= 1'b0; w_wd <= 16'd0; wd_err_w <= 1'b0;
     end else begin
       // Only B-retirement releases a P54C slot.  Dispatch is deliberately NOT a
       // dequeue: a slot stays counted from CPU admission through its final B.
@@ -706,18 +878,32 @@ module ven_axi_master #(
         end
       end
 
-      // AXI4 orders B responses for one ID.  They are retired in that same order,
-      // and any failure stays sticky even if later requests are still draining.
-      if (b_hs && m_axi_bresp != 2'b00) bresp_err <= 1'b1;
+      // AXI4 orders B responses for one ID.  Matching-ID completions retire in
+      // that order and matching BRESP faults retain the normal drain behavior.
+      // An ID/ownership fault may still handshake to keep AXI live, but it never
+      // decrements B accounting or releases a P5 slot; bid_err makes that state
+      // terminal until reset.
+      if (bproto_bad_now) bid_err <= 1'b1;
+      if (b_retire_hs && m_axi_bresp != 2'b00) bresp_err <= 1'b1;
       for (int i = 0; i < P5_WBUF_DEPTH; i++) begin
-        unique case ({wr_beat_sent && (wr_active_slot == WBUF_PTRW'(i)),
-                     b_hs && b_owner_valid && (b_owner_slot == WBUF_PTRW'(i))})
-          2'b10: wq_bcount[i] <= wq_bcount[i] + 2'd1;
-          2'b01: wq_bcount[i] <= wq_bcount[i] - 2'd1;
-          default: ;
-        endcase
+        // A full-queue B response may free wq_wp and admit a new CPU store on
+        // the same edge.  Its freshly allocated response count must remain zero;
+        // applying the OLD owner's B retirement after the allocation would wrap
+        // it to three and make the new entry permanently busy.
+        if (!(wr_enq && (wq_wp == WBUF_PTRW'(i)))) begin
+          unique case ({wr_beat_sent && (wr_active_slot == WBUF_PTRW'(i)),
+                       b_retire_hs && b_owner_valid && (b_owner_slot == WBUF_PTRW'(i))})
+            2'b10: wq_bcount[i] <= wq_bcount[i] + 2'd1;
+            2'b01: wq_bcount[i] <= wq_bcount[i] - 2'd1;
+            default: ;
+          endcase
+        end
       end
-      if (wr_store_final) wq_issued[wr_active_slot] <= 1'b1;
+      // Same ownership rule as bcount above.  It is unreachable for the normal
+      // FIFO schedule, but makes a replacement edge robust if an implementation
+      // later permits a completion and reuse of the same slot together.
+      if (wr_store_final && !(wr_enq && (wq_wp == wr_active_slot)))
+        wq_issued[wr_active_slot] <= 1'b1;
 
       // One progress watchdog covers queue dispatch, independent AW/W handshakes,
       // and B retirement.  It retains the old safety property: a hung AXI target
@@ -734,35 +920,46 @@ module ven_axi_master #(
   // VALID held with stable payload until the handshake.
   ar_stable: assert property (@(posedge core_clk) disable iff (!core_rst_n)
       (m_axi_arvalid && !m_axi_arready) |=> (m_axi_arvalid && $stable(m_axi_araddr)
-                                             && $stable(m_axi_arlen)));
+                                             && $stable(m_axi_arlen) && $stable(m_axi_arburst)));
   aw_stable: assert property (@(posedge core_clk) disable iff (!core_rst_n)
       (m_axi_awvalid && !m_axi_awready) |=> (m_axi_awvalid && $stable(m_axi_awaddr)));
   // W payload stable independent of AW (decoupling check).
   w_stable:  assert property (@(posedge core_clk) disable iff (!core_rst_n)
       (m_axi_wvalid && !m_axi_wready) |=> (m_axi_wvalid && $stable(m_axi_wdata)
                                            && $stable(m_axi_wstrb) && $stable(m_axi_wlast)));
-  // burst-base alignment, by burst SHAPE (REVIEW_Aug3 C-01): a line fill
-  // (rbeats_q == LINE_BEATS) is 32B-aligned; a narrow piece is exactly
-  // SIZE-aligned to its own ARSIZE (REVIEW1_Aug3 R2-H01) — its whole point is to
-  // address the requested bytes, not a line or even a word base.
+  // Burst start alignment, by burst SHAPE (REVIEW_Aug3 C-01): a normal line
+  // fill starts on a 32B boundary, while a critical-word WRAP8 starts on any
+  // 4B-aligned dword of its 32B line.  A narrow piece is exactly SIZE-aligned
+  // to its own ARSIZE (REVIEW1_Aug3 R2-H01) — its whole point is to address the
+  // requested bytes, not a line or even a word base.
   ar_align:  assert property (@(posedge core_clk) disable iff (!core_rst_n)
       m_axi_arvalid |-> (narrow_q
                          ? ((m_axi_araddr[1:0] & (2'b11 >> (2'd2 - rsize_q))) == 2'd0)
-                         : (m_axi_araddr[4:0] == 5'd0)));
+                         : (rwrap_q ? (m_axi_araddr[1:0] == 2'd0)
+                                    : (m_axi_araddr[4:0] == 5'd0))));
+  wrap_shape: assert property (@(posedge core_clk) disable iff (!core_rst_n)
+      (m_axi_arvalid && rwrap_q) |->
+      (m_axi_arburst == 2'b10 && rbeats_q == 9'(LINE_BEATS) && rsize_q == 2'd2 && !narrow_q));
 `ifndef SYNTHESIS
   // debug tap (cosim bring-up): print the offending AR when ar_align fires.
   // Negedge: the fatal assert's $stop at the posedge would preempt a posedge tap.
   always @(negedge core_clk)
     if (core_rst_n && m_axi_arvalid &&
         !(narrow_q ? ((m_axi_araddr[1:0] & (2'b11 >> (2'd2 - rsize_q))) == 2'd0)
-                   : (m_axi_araddr[4:0] == 5'd0)))
+                   : (rwrap_q ? (m_axi_araddr[1:0] == 2'd0)
+                              : (m_axi_araddr[4:0] == 5'd0))))
       $display("[ARALIGN] araddr=%h narrow=%b rsize=%0d rbeats=%0d m_addr=%h m_size=%0d m_narrow=%b",
                m_axi_araddr, narrow_q, rsize_q, rbeats_q, m_addr, m_rd_size, m_rd_narrow);
 `endif
-  // the burst's ACTUAL extent never crosses 4KiB: beats << ARSIZE (a fill is
-  // 8*4=32; a narrow piece is 1*(1|2|4) bytes, size-aligned, so it cannot cross).
+  // The burst's actual extent never crosses 4 KiB.  A WRAP8's start may be near
+  // the end of its line, so test from the 32B wrap base rather than treating its
+  // cyclic order as a linear +32 range.
   ar_4k:     assert property (@(posedge core_clk) disable iff (!core_rst_n)
-      m_axi_arvalid |-> ((13'(m_axi_araddr[11:0]) + 13'(rbeats_q << rsize_q)) <= 13'h1000));
+      m_axi_arvalid |-> (rwrap_q
+                          ? ((13'({m_axi_araddr[11:5], 5'd0}) +
+                              13'(rbeats_q << rsize_q)) <= 13'h1000)
+                          : ((13'(m_axi_araddr[11:0]) +
+                              13'(rbeats_q << rsize_q)) <= 13'h1000)));
   // No AR while a posted write is buffered, being driven, or awaiting B.  This is
   // the P54C rule that cache-miss reads cannot bypass earlier write buffers.
   no_rw_overlap: assert property (@(posedge core_clk) disable iff (!core_rst_n)
@@ -781,18 +978,61 @@ module ven_axi_master #(
       |-> (r_beat == 8'(rbeats_q - 9'd1)));
   // every consumed response is OKAY (a SLVERR/DECERR would silently corrupt a line /
   // a store — sticky-flagged in rresp_err/bresp_err; an error pin to the core is a
-  // documented follow-up, see fpga/L1_AXI_DESIGN.md).
+  // documented follow-up, see fpga/L1_AXI_DESIGN.md).  The two focused status-fault
+  // regressions deliberately violate this environmental condition, but retain every
+  // other assertion under VEN_AXI_RESP_FAULT_INJECT.
+`ifndef VEN_AXI_RESP_FAULT_INJECT
   rresp_okay: assert property (@(posedge core_clk) disable iff (!core_rst_n)
       (rst==R_DATA && m_axi_rvalid && m_axi_rready) |-> (m_axi_rresp == 2'b00));
+`endif
+`ifndef VEN_AXI_FAULT_INJECT
+  // This master owns one fixed AXI ID.  Wrong-ID responses are terminal fabric
+  // containment faults.  They may be physically drained, but must never advance
+  // a fill or release a write-buffer slot.  The focused fault-injection TB
+  // deliberately violates these environment assumptions, but keeps all other
+  // protocol assertions enabled under VEN_AXI_FAULT_INJECT.
+  rid_matches: assert property (@(posedge core_clk) disable iff (!core_rst_n)
+      m_axi_rvalid |-> (m_axi_rid == AXI_ID));
+  rresp_owned: assert property (@(posedge core_clk) disable iff (!core_rst_n)
+      (m_axi_rvalid && !rid_err) |-> ((rst == R_DATA) || (rst == R_DRAIN)));
+`endif
+  // The architectural/L1-facing acknowledgement is sampled on this same edge,
+  // not one clock after the sticky response flags update.  A malformed response
+  // may be drained for AXI protocol recovery, but it must never be delivered as
+  // backing data.  The focused fault-injection gates suppress only their
+  // deliberately violated ID/ownership or response-status assumptions; this
+  // containment invariant remains active in every assertion build.
+  no_bad_r_delivery: assert property (@(posedge core_clk) disable iff (!core_rst_n)
+      r_bad_now |-> !m_ack);
+  no_fatal_delivery: assert property (@(posedge core_clk) disable iff (!core_rst_n)
+      fatal_latched |-> !m_ack);
+`ifndef VEN_AXI_RESP_FAULT_INJECT
   bresp_okay: assert property (@(posedge core_clk) disable iff (!core_rst_n)
-      b_hs |-> (m_axi_bresp == 2'b00));
+      b_retire_hs |-> (m_axi_bresp == 2'b00));
+`endif
+`ifndef VEN_AXI_FAULT_INJECT
+  bid_matches: assert property (@(posedge core_clk) disable iff (!core_rst_n)
+      m_axi_bvalid |-> (m_axi_bid == AXI_ID));
+`endif
+`ifndef VEN_AXI_B_ORPHAN_INJECT
+  // The matching-ID orphan-B containment TB is the sole assertion build that
+  // intentionally violates this environment contract.  Keep it active for the
+  // ordinary wrong-ID fault test: a foreign BID presented while a real command
+  // is outstanding must still prove that the response phase existed.
+  bresp_present_owned: assert property (@(posedge core_clk) disable iff (!core_rst_n)
+      (m_axi_bvalid && !bid_err) |-> (b_outstanding != B_CNTW'(0)));
+`endif
   // BREADY is asserted only for a response owned by one of the two retained P54C
   // slots.  This catches any future accounting change that would acknowledge an
   // orphan B (and silently release/underflow the wrong queue entry).
   bresp_owned: assert property (@(posedge core_clk) disable iff (!core_rst_n)
-      b_hs |-> b_owner_valid);
+      b_retire_hs |-> b_owner_valid);
+`ifndef VEN_AXI_FAULT_INJECT
+`ifndef VEN_AXI_RESP_FAULT_INJECT
   no_resp_err: assert property (@(posedge core_clk) disable iff (!core_rst_n)
-      (!rresp_err && !bresp_err));
+      (!rresp_err && !rid_err && !bresp_err && !bid_err));
+`endif
+`endif
   // every access fits the remap window — but ONLY when no aliasing is configured
   // (~ADDR_MASK==0). Under the KV260 4 GiB-top alias (ADDR_MASK=0x0FFF_FFFF) the high
   // bits ARE intentionally folded by remap() (SeaBIOS POSTs from 0xFFFFxxxx -> the
@@ -805,11 +1045,20 @@ module ven_axi_master #(
       |-> ((m_addr & ~ADDR_MASK) == 32'd0));
 `endif
 
-  // lint sinks: RID/BID not consulted (single in-flight, AxID=0); axi_clk/axi_rst_n
-  // are tied to the core domain in the CDC_BYPASS build. (RRESP/BRESP ARE consulted
-  // now — the sticky rresp_err/bresp_err flags + the resp SVAs above.)
+  // axi_clk/axi_rst_n are tied to the core domain in the CDC_BYPASS build.
   // verilator lint_off UNUSED
-  wire _unused = &{1'b0, m_axi_bid, m_axi_rid, axi_clk, axi_rst_n};
+  wire _unused = &{1'b0, axi_clk, axi_rst_n};
   // verilator lint_on UNUSED
+
+`ifndef SYNTHESIS
+`ifdef VEN_AXI_ADMISSION_PERF
+  final begin
+    $display("[AXI_ADMIT_PERF] candidate=%0d admitted=%0d rproto=%0d shutdown=%0d hold=%0d alias=%0d fatal=%0d wr_busy=%0d",
+             perf_rd_candidate, perf_rd_admitted, perf_rd_block_rproto,
+             perf_rd_block_shutdown, perf_rd_block_hold, perf_rd_block_alias,
+             perf_rd_block_fatal, perf_rd_block_write);
+  end
+`endif
+`endif
 
 endmodule : ven_axi_master

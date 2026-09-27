@@ -91,6 +91,12 @@ L1AXI_OBJDIR     ?= obj_dir_l1axi
 L1AXI_CDC_OBJDIR ?= obj_dir_l1axi_cdc
 KV_FULL_OBJDIR   ?= obj_dir_l1axi_kvf
 KV_PROXY_OBJDIR  ?= obj_dir_l1axi_kvproxy
+# Keep expensive crossover elaborations relocatable too.  These builds expose
+# large public hierarchy tables and should normally be directed to /tmp rather
+# than consuming the repository volume.
+XOVER_OBJDIR     ?= obj_dir_l1axi_kvdosq_xover
+XOVER_FP_OBJDIR  ?= obj_dir_l1axi_kvdosq_xover_fp
+XOVER_FPX_OBJDIR ?= obj_dir_l1axi_kvdosq_xover_fpx
 # Host-compiler optimization for the Verilated model. verilated.mk hard-sets
 # OPT_FAST=-Os (conservative), which the environment cannot override — only a
 # command-line make assignment can, which is exactly what Verilator's -MAKEFLAGS
@@ -105,15 +111,16 @@ VL_MAKEFLAGS := -MAKEFLAGS OPT_FAST=$(VL_OPT_FAST) -MAKEFLAGS OPT=$(VL_OPT_MARCH
 # VL_J: C++ build parallelism.  A full-core generated C++ translation unit can
 # consume several GiB, so the safe default is one compiler job.  In particular,
 # never use Verilator's `-j 0` here: it maps to every host core and has OOM-killed
-# ordinary development hosts.  A deliberately provisioned CI host may opt into a
-# bounded higher value explicitly only with VENTIUM_ALLOW_PARALLEL_VERILATOR=1.
-# VL_SPLIT chunks generated C++ so each g++ invocation uses much less memory.
-ifeq ($(VENTIUM_ALLOW_PARALLEL_VERILATOR),1)
-VL_J ?= 1
-else
+# ordinary development hosts.  This repository has a strict one-compiler policy:
+# changing it requires an explicit reviewed build-profile change, never an
+# inherited environment variable.
+# `--output-split` alone only splits included fragments: without
+# `--output-groups 0` Verilator still feeds the compiler one aggregate
+# `V*_vm_classes_0.cpp` translation unit.  That unit has repeatedly grown past
+# 3.5 GiB at -O3.  Keep the high-performance host model, but emit independent
+# C++ classes so the one permitted compiler job stays bounded.
 override VL_J := 1
-endif
-VL_SPLIT ?= --output-split 20000 --output-split-cfuncs 20000
+VL_SPLIT ?= --output-groups 0 --output-split 20000 --output-split-cfuncs 20000
 # Do not let `make -j target_a target_b` launch multiple full-core Verilator
 # trees.  Each tree may hold a multi-GiB generated C++ translation unit while
 # compiling, so target-level parallelism defeats the bounded `VL_J` setting.
@@ -244,13 +251,19 @@ l1axi_kv:
 # no engine (and no trap route outside FP_PS_ALL), and the unified SRT divider's
 # remainder sideband had nowhere to land.
 KV_FULL_DEFS := +define+VEN_L1_AXI +define+VEN_L1_HONOR_CD +define+VEN_KV260_SOC \
-  +define+VEN_UOPCACHE +define+VEN_UOP_SFETCH +define+VEN_SFETCH_RESIDENT +define+VEN_BTB_PIPE +define+VEN_IC_BRAM \
+  +define+VEN_UOPCACHE +define+VEN_UOP_SFETCH +define+VEN_SFETCH_RESIDENT +define+VEN_UOP_TAIL_LOCAL +define+VEN_BTB_PIPE +define+VEN_IC_BRAM \
   +define+VEN_FP_PIPE +define+VEN_FP_PIPE2 +define+VEN_SRT_ITER +define+VEN_IDIV_ITER \
   +define+VEN_BCD_ITER +define+VEN_TRANSCENDENTAL +define+VEN_FP_PC_RELAX \
   +define+VEN_FPREM +define+VEN_FP_SHARED +define+VEN_FP_SHARED_DIRECT +define+VEN_DBG_CORE \
   +define+VEN_SYS_FASTPATH +define+VEN_SYS_FASTPATH_RELOC +define+VEN_SYS_FASTLOAD_FLAT \
-  +define+VEN_SYS_FASTSTORE_FLAT +define+VEN_FAST_RETRACE
+  +define+VEN_SYS_FASTLOAD_BOUNDED +define+VEN_SYS_FASTSTORE_FLAT \
+  +define+VEN_FAST_MEM_ADD +define+VEN_FAST_MOFFS_STORE +define+VEN_FAST_RETRACE
 KV_FULL_CFLAGS := -DVEN_L1_AXI -DVEN_KV260_SOC -DVEN_DBG_CORE
+# The crossover driver reaches optional FE_PIPE flops through Verilator's
+# public-flat hierarchy.  Keep its C++ view exactly matched to the RTL defines:
+# in a non-FE_PIPE build those flops are optimized out, while in an FE_PIPE
+# build xover.cpp must invalidate them after a direct CR3 injection.
+XOVER_CPP_DEFS = $(if $(filter +define+VEN_FE_PIPE,$(KV_FULL_DEFS) $(VL_EXTRA_DEFINES)),-DVEN_XOVER_FE_PIPE,)
 .PHONY: l1axi_kv_full
 l1axi_kv_full:
 	$(VERILATOR) $(VL_FLAGS) $(KV_FULL_DEFS) \
@@ -383,10 +396,10 @@ l1axi_kv_dos_q_rtlirq_fpps:
 .PHONY: l1axi_kv_dos_q_xover
 l1axi_kv_dos_q_xover:
 	$(VERILATOR) $(VL_FLAGS) --savable --public-flat-rw $(KV_FULL_DEFS) +define+VEN_DBG_CORE $(VL_EXTRA_DEFINES) \
-	  -CFLAGS "-DVEN_L1_AXI -DVEN_KV260_SOC -DVEN_DOS_MODELS -DVEN_DBG_CORE -DVEN_SAVABLE -DVEN_XOVER -DVEN_RTC_EXTMEM_KB=64512 -I$(VENTIUM_ROOT)/sw/ps_periph" \
-	  -Mdir obj_dir_l1axi_kvdosq_xover \
+	  -CFLAGS "-DVEN_L1_AXI -DVEN_KV260_SOC -DVEN_DOS_MODELS -DVEN_DBG_CORE -DVEN_SAVABLE -DVEN_XOVER $(XOVER_CPP_DEFS) -DVEN_RTC_EXTMEM_KB=64512 -I$(VENTIUM_ROOT)/sw/ps_periph" \
+	  -Mdir $(XOVER_OBJDIR) \
 	  -F $(RTL_FILELIST) $(L1AXI_RTL) $(CPP_SRCS) $(TB_DIR)/xover.cpp $(DOS_PERIPH)
-	@echo "built (DOS Quake + public-flat-rw crossover): $(CURDIR)/obj_dir_l1axi_kvdosq_xover/$(EXE)"
+	@echo "built (DOS Quake + public-flat-rw crossover): $(CURDIR)/$(XOVER_OBJDIR)/$(EXE)"
 
 # ---- l1axi_kv_dos_q_xover_fp: the crossover build + the IN-RTL x87 transcendental
 # engine (+VEN_TRANSCENDENTAL) and the iterative FPREM engine (+VEN_FPREM). The plain
@@ -401,10 +414,10 @@ l1axi_kv_dos_q_xover:
 l1axi_kv_dos_q_xover_fp:
 	$(VERILATOR) $(VL_FLAGS) --savable --public-flat-rw $(KV_FULL_DEFS) \
 	  +define+VEN_DBG_CORE +define+VEN_TRANSCENDENTAL +define+VEN_FPREM $(VL_EXTRA_DEFINES) \
-	  -CFLAGS "-DVEN_L1_AXI -DVEN_KV260_SOC -DVEN_DOS_MODELS -DVEN_DBG_CORE -DVEN_SAVABLE -DVEN_XOVER -DVEN_RTC_EXTMEM_KB=64512 -I$(VENTIUM_ROOT)/sw/ps_periph" \
-	  -Mdir obj_dir_l1axi_kvdosq_xover_fp \
+	  -CFLAGS "-DVEN_L1_AXI -DVEN_KV260_SOC -DVEN_DOS_MODELS -DVEN_DBG_CORE -DVEN_SAVABLE -DVEN_XOVER $(XOVER_CPP_DEFS) -DVEN_RTC_EXTMEM_KB=64512 -I$(VENTIUM_ROOT)/sw/ps_periph" \
+	  -Mdir $(XOVER_FP_OBJDIR) \
 	  -F $(RTL_FILELIST) $(L1AXI_RTL) $(CPP_SRCS) $(TB_DIR)/xover.cpp $(DOS_PERIPH)
-	@echo "built (crossover + in-RTL x87 transcendentals): $(CURDIR)/obj_dir_l1axi_kvdosq_xover_fp/$(EXE)"
+	@echo "built (crossover + in-RTL x87 transcendentals): $(CURDIR)/$(XOVER_FP_OBJDIR)/$(EXE)"
 
 # ---- l1axi_kv_dos_q_xover_fpx: the transcendental crossover build with BIT-EXACT
 # FDIV/FSQRT. F5 root-cause was FP-divergence: the area-optimized iterative SRT
@@ -420,10 +433,10 @@ KV_FULL_DEFS_BITEXACT := $(filter-out +define+VEN_SRT_ITER +define+VEN_IDIV_ITER
 l1axi_kv_dos_q_xover_fpx:
 	$(VERILATOR) $(VL_FLAGS) --savable --public-flat-rw $(KV_FULL_DEFS_BITEXACT) \
 	  +define+VEN_DBG_CORE +define+VEN_TRANSCENDENTAL +define+VEN_FPREM $(VL_EXTRA_DEFINES) \
-	  -CFLAGS "-DVEN_L1_AXI -DVEN_KV260_SOC -DVEN_DOS_MODELS -DVEN_DBG_CORE -DVEN_SAVABLE -DVEN_XOVER -DVEN_RTC_EXTMEM_KB=64512 -I$(VENTIUM_ROOT)/sw/ps_periph" \
-	  -Mdir obj_dir_l1axi_kvdosq_xover_fpx \
+	  -CFLAGS "-DVEN_L1_AXI -DVEN_KV260_SOC -DVEN_DOS_MODELS -DVEN_DBG_CORE -DVEN_SAVABLE -DVEN_XOVER $(XOVER_CPP_DEFS) -DVEN_RTC_EXTMEM_KB=64512 -I$(VENTIUM_ROOT)/sw/ps_periph" \
+	  -Mdir $(XOVER_FPX_OBJDIR) \
 	  -F $(RTL_FILELIST) $(L1AXI_RTL) $(CPP_SRCS) $(TB_DIR)/xover.cpp $(DOS_PERIPH)
-	@echo "built (crossover + transcendentals + BIT-EXACT FDIV): $(CURDIR)/obj_dir_l1axi_kvdosq_xover_fpx/$(EXE)"
+	@echo "built (crossover + transcendentals + BIT-EXACT FDIV): $(CURDIR)/$(XOVER_FPX_OBJDIR)/$(EXE)"
 
 # ---- l1axi_cdc: P1-3 dual-clock build (+VEN_L1_AXI +VEN_AXI_CDC) -------------
 # Same bus_mode=2 path, but the L1<->AXI backing port crosses through ven_axi_cdc

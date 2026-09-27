@@ -11,13 +11,9 @@ export VENTIUM_VERILATOR_BIN
 # A parallel `make test` used to launch one Verilator build per test target, and
 # each build in turn requested four compiler jobs.  That multiplicative fan-out
 # is enough to exhaust a normal developer workstation.  Keep both layers
-# serial by default; a deliberately provisioned runner may explicitly raise
-# VL_J for one build at a time.
-ifeq ($(VENTIUM_ALLOW_PARALLEL_VERILATOR),1)
-VL_J ?= 1
-else
+# serial.  The global policy is one compiler job; changing it requires an
+# explicit reviewed build-profile change.
 override VL_J := 1
-endif
 CCACHE_DISABLE ?= 1
 export CCACHE_DISABLE
 BUILD := $(CURDIR)/build
@@ -37,7 +33,7 @@ VLFLAGS := --binary -j $(VL_J) --timing -sv -Wall -Wno-fatal -Wno-UNUSED \
 	-Wno-PROCASSINIT -I$(REPO)/rtl/fpu
 
 .PHONY: all lint lint-old-ooc test test-state test-alu test-widemul test-estdiv test-srt-sqrt \
-	test-trans test-top test-arch reference-bcd reference-fbld \
+	test-trans test-top test-arch test-stream reference-bcd reference-fbld \
 	reference-srt reference-fppipe synth synth-ooc synth-ooc-old synth-ooc-shared
 
 # Do not let a caller's `make -j` multiply memory-heavy Verilator jobs across
@@ -160,6 +156,42 @@ test-trans: $(BUILD)/trans/Vtb_ven_fp_trans
 	$<
 
 test-top: $(BUILD)/top/Vtb_ven_fp_top
+	$<
+
+$(BUILD)/stream/Vtb_ven_fp_top: $(SRT) $(SRC) $(PKGS) tb/tb_ven_fp_top.sv \
+		$(REPO)/rtl/fpu/ven_bcd.sv $(REPO)/rtl/fpu/ven_bcd_to_fp.sv \
+		$(REPO)/rtl/fpu/fpu_estdiv.sv
+	mkdir -p $(BUILD)/stream
+	CCACHE_DISABLE=1 $(VERILATOR) $(VLFLAGS) --top-module tb_ven_fp_top \
+		-Werror-IMPLICIT -Werror-PINMISSING -Werror-UNDRIVEN \
+		-Werror-MULTIDRIVEN -Werror-LATCH -Werror-UNOPTFLAT \
+		+define+VEN_FPREM +define+VEN_FP_ARITH_STREAM +define+VEN_FP_PERF \
+		--Mdir $(BUILD)/stream $(PKGS) $(SRT) \
+		$(REPO)/rtl/fpu/ven_bcd.sv $(REPO)/rtl/fpu/ven_bcd_to_fp.sv \
+		$(REPO)/rtl/fpu/fpu_estdiv.sv $(SRC) tb/tb_ven_fp_top.sv
+
+# Experimental opt-in acceptance, not part of the default production profile.
+test-stream: $(BUILD)/stream/Vtb_ven_fp_top
+	$< +fp_throughput_only +require_fp_pipeline
+	$< +fp_stream_mixed_only
+	$<
+
+.PHONY: test-fxch-queue
+$(BUILD)/fxch-queue/Vtb_ven_fp_top: $(SRT) $(SRC) $(PKGS) ven_fp_fxch_queue.sv tb/tb_ven_fp_top.sv \
+		$(REPO)/rtl/fpu/ven_bcd.sv $(REPO)/rtl/fpu/ven_bcd_to_fp.sv \
+		$(REPO)/rtl/fpu/fpu_estdiv.sv
+	mkdir -p $(BUILD)/fxch-queue
+	$(VERILATOR) $(VLFLAGS) --top-module tb_ven_fp_top \
+		-Werror-IMPLICIT -Werror-PINMISSING -Werror-UNDRIVEN \
+		-Werror-MULTIDRIVEN -Werror-LATCH -Werror-UNOPTFLAT \
+		+define+VEN_FPREM +define+VEN_FP_ARITH_STREAM +define+VEN_FP_FXCH_QUEUE \
+		--Mdir $(BUILD)/fxch-queue $(PKGS) $(SRT) \
+		$(REPO)/rtl/fpu/ven_bcd.sv $(REPO)/rtl/fpu/ven_bcd_to_fp.sv \
+		$(REPO)/rtl/fpu/fpu_estdiv.sv $(SRC) ven_fp_fxch_queue.sv tb/tb_ven_fp_top.sv
+
+test-fxch-queue: $(BUILD)/fxch-queue/Vtb_ven_fp_top
+	$< +fp_stack_queue_only +require_fxch_queue
+	$< +fp_stream_mixed_only
 	$<
 
 test-arch: $(BUILD)/arch/Vtb_ven_fp_arch_ab

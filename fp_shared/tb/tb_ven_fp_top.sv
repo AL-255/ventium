@@ -20,7 +20,7 @@ module tb_ven_fp_top;
   logic rst_n = 1'b0;
   always #5 clk = ~clk;
 
-  logic cmd_valid, cmd_ready, cmd_accept_retire;
+  logic cmd_valid, cmd_ready, cmd_accept_retire, alu_commit_retire;
   fxop_e cmd_op;
   logic [2:0] cmd_aluop, cmd_sti, cmd_constant;
   logic cmd_pop, cmd_fdiv_bug;
@@ -48,10 +48,15 @@ module tb_ven_fp_top;
   logic [2:0] saved_top;
   int checks;
 
+`ifdef VEN_FP_FXCH_QUEUE
+  ven_fp_fxch_queue dut (
+`else
   ven_fp_top dut (
+`endif
       .clk(clk), .rst_n(rst_n),
       .cmd_valid(cmd_valid), .cmd_ready(cmd_ready),
-      .cmd_accept_retire(cmd_accept_retire), .cmd_op(cmd_op),
+      .cmd_accept_retire(cmd_accept_retire), .alu_commit_retire(alu_commit_retire),
+      .cmd_op(cmd_op),
       .cmd_aluop(cmd_aluop), .cmd_sti(cmd_sti), .cmd_pop(cmd_pop),
       .cmd_constant(cmd_constant), .cmd_mem(cmd_mem),
       .cmd_mem_bytes(cmd_mem_bytes), .cmd_fdiv_bug(cmd_fdiv_bug),
@@ -102,6 +107,51 @@ module tb_ven_fp_top;
         $fatal(1, "unsupported mismatch op=%0d", op);
       if (waited < min_busy_cycles)
         $fatal(1, "operation completed too early op=%0d waited=%0d", op, waited);
+      checks++;
+    end
+  endtask
+
+  // A normal shared-ALU result still commits through the ordinary TOP_ALU
+  // state-file edge.  The adapter-facing pulse is deliberately one edge ahead
+  // of rsp_valid, allowing the core to retire *with* that commit rather than
+  // one clock after it.  Check both sides of the edge here so a later change
+  // cannot accidentally turn this into an early data/result bypass.
+  task automatic issue_fast_add_with_commit_token;
+    int waited;
+    begin
+      while (!cmd_ready) @(negedge clk);
+      @(negedge clk);
+      cmd_valid     = 1'b1;
+      cmd_op        = FX_AR_ST0_STI;
+      cmd_aluop     = 3'd0;
+      cmd_sti       = 3'd1;
+      cmd_pop       = 1'b0;
+      cmd_mem       = '0;
+      cmd_mem_bytes = '0;
+      @(negedge clk);
+      cmd_valid = 1'b0;
+
+      waited = 0;
+      while (!alu_commit_retire && waited < 8) begin
+        if (rsp_valid)
+          $fatal(1, "normal ALU rsp_valid preceded commit-token");
+        waited++;
+        @(negedge clk);
+      end
+      if (!alu_commit_retire)
+        $fatal(1, "normal ALU did not produce its registered commit-token");
+      if (rsp_valid)
+        $fatal(1, "normal ALU token overlapped rsp_valid instead of leading it");
+      if (st_flat[79:0] !== FP_ONE)
+        $fatal(1, "normal ALU result became visible before its commit edge");
+
+      @(negedge clk);
+      if (alu_commit_retire)
+        $fatal(1, "normal ALU commit-token was not one cycle wide");
+      if (!rsp_valid)
+        $fatal(1, "normal ALU did not retain the registered rsp_valid contract");
+      if (st_flat[79:0] !== FP_THREE)
+        $fatal(1, "normal ALU result did not commit alongside the response edge");
       checks++;
     end
   endtask
@@ -174,6 +224,25 @@ module tb_ven_fp_top;
              expected, st_flat[79:0]);
   endtask
 
+  // A masked stack underflow must materialize a real-indefinite result in a
+  // *valid* stack slot.  Checking data alone is insufficient: an empty slot
+  // can retain the same stale bits and a subsequent x87 read would synthesize
+  // another indefinite response.  Keep this leaf-level assertion beside the
+  // system FXAM gate so both the state-file contract and core integration are
+  // protected.
+  task automatic expect_st_valid(
+      input logic [2:0] idx,
+      input string label
+  );
+    logic [2:0] phys;
+    begin
+      phys = ftop + idx;
+      if (fptag[phys] !== 1'b0)
+        $fatal(1, "%s expected ST(%0d) valid at physical slot %0d, tag=%02h",
+               label, idx, phys, fptag);
+    end
+  endtask
+
   task automatic expect_store(
       input logic [79:0] expected,
       input logic [7:0] bytes,
@@ -186,6 +255,333 @@ module tb_ven_fp_top;
                label, bytes, expected, rsp_store_valid, rsp_store_bytes,
                rsp_store_data[79:0]);
     end
+  endtask
+
+  // Keep the producer continuously ready: independent destinations ST(1..6)
+  // all read the unchanged ST(0), with no pop/control-word mutation. This
+  // characterizes dispatcher throughput independently of the arithmetic leaf.
+  task automatic independent_arithmetic_throughput;
+    int accepted, completed, cycles, first_accept, last_accept, peak_pending;
+    logic [79:0] expected;
+    issue(FX_FNINIT, 0, 0, 0, '0, 0, 0, 0);
+    repeat (8) load80(FP_TWO);
+    @(negedge clk); // discard the final immediate-load response
+    accepted=0; completed=0; cycles=0; first_accept=-1; last_accept=-1;
+    peak_pending=0;
+    while (completed < 6) begin
+      cmd_valid = accepted < 6;
+      cmd_op = FX_AR_STI_ST0;
+      cmd_sti = 3'(accepted+1);
+      cmd_pop = 0;
+      case (accepted % 4)
+        0: cmd_aluop=0;
+        1: cmd_aluop=1;
+        2: cmd_aluop=4;
+        3: cmd_aluop=5;
+      endcase
+      @(posedge clk);
+      if (cmd_valid && cmd_ready) begin
+        if (first_accept < 0) first_accept=cycles;
+        last_accept=cycles;
+        accepted++;
+        if (accepted-completed > peak_pending) peak_pending=accepted-completed;
+      end
+      @(negedge clk);
+      if (rsp_valid) begin
+        if (completed >= accepted || rsp_unsupported || rsp_stack_fault ||
+            rsp_store_valid || rsp_ax_valid || rsp_arith[84:80] != 0)
+          $fatal(1, "independent FP response ownership/payload");
+        expected = ((completed % 4) < 2) ? FP_FOUR : FP_ZERO;
+        if (rsp_arith[79:0] !== expected ||
+            st_flat[(completed+1)*80 +: 80] !== expected)
+          $fatal(1, "independent FP result/physical destination %0d", completed+1);
+        completed++;
+      end
+      cycles++;
+      if (cycles > 128) $fatal(1, "independent FP throughput watchdog");
+    end
+    cmd_valid=0;
+    repeat (3) begin
+      @(negedge clk);
+      if (rsp_valid) $fatal(1, "duplicate independent FP response");
+    end
+    if (ftop !== 0 || fptag !== 0 || st_flat[79:0] !== FP_TWO ||
+        st_flat[639:560] !== FP_TWO || fstat !== 0 || fctrl !== 16'h037f)
+      $fatal(1, "independent FP corrupted untouched architectural state");
+    $display("FP-INDEPENDENT-THROUGHPUT accepted=%0d responses=%0d clocks=%0d acceptance_span=%0d peak_pending=%0d",
+             accepted, completed, cycles, last_accept-first_accept, peak_pending);
+    // An explicit acceptance criterion, not a correctness pass for today's
+    // serialized baseline. Future pipelined implementations must pass both.
+    if ($test$plusargs("require_fp_pipeline") &&
+        ((last_accept-first_accept != 5) || (peak_pending < 2)))
+      $fatal(1, "FP pipeline throughput requirement unmet");
+    $display("FP-INDEPENDENT-VALUES-OK");
+`ifdef VEN_FP_PERF
+    if (dut.fp_perf_accept[1] != 6 || dut.fp_perf_latency[1] != 24)
+      $fatal(1, "overlapping FP performance attribution lost an owner");
+`endif
+  endtask
+
+  // Admission may overlap, but architectural snapshots must remain ordered:
+  // the arithmetic response sees its original logical destination, and only
+  // the following FXCH response sees the swapped stack. A live-file swap at
+  // queue acceptance would fail this even if the eventual numeric sum is right.
+  task automatic queued_fxch_contract(input bit divide, input bit unmasked=0,
+                                     input bit empty_partner=0);
+    int accepted, completed, cycles, exchange_accept, arithmetic_response;
+    logic [79:0] arithmetic_result;
+    issue(FX_FNINIT, 0, 0, 0, '0, 0, 0, 0);
+    load80(FP_TWO); load80(FP_ONE);
+    if(unmasked) issue(FX_FLDCW, 0, 0, 0, 80'h037e, 2, 0, 0);
+    @(negedge clk);
+    arithmetic_result = divide ? 80'h3ffe8000000000000000 : FP_THREE;
+    accepted=0; completed=0; cycles=0;
+    exchange_accept=-1; arithmetic_response=-1;
+    while(completed<2) begin
+      cmd_valid=(accepted<2);
+      cmd_op=(accepted==0) ? FX_AR_ST0_STI : FX_FXCH;
+      cmd_aluop=divide ? 3'd6 : 3'd0;
+      cmd_sti=(accepted==0) ? 3'd1 :
+              ((accepted==1) ? (empty_partner ? 3'd2 : 3'd1) : 3'd7);
+      cmd_pop=0;
+      cmd_update_fip=(accepted<2); cmd_update_fdp=(accepted<2);
+      cmd_fip=(accepted==0) ? 32'h1110 : ((accepted==1) ? 32'h2220 : 32'hdeadbeef);
+      cmd_fdp=(accepted==0) ? 32'h3330 : ((accepted==1) ? 32'h4440 : 32'hcafebabe);
+      cmd_fcs=16'h1234; cmd_fds=16'h5678;
+      @(posedge clk);
+      if(cmd_valid && cmd_ready) begin
+        if(accepted==1) exchange_accept=cycles;
+        accepted++;
+      end
+      @(negedge clk);
+      if(rsp_valid) begin
+        if(completed>=accepted || rsp_unsupported ||
+           rsp_stack_fault !== (empty_partner && completed==1) ||
+           rsp_store_valid || rsp_ax_valid) $fatal(1,"FXCH queue response ownership");
+        if(completed==0) begin
+          arithmetic_response=cycles;
+          if(st_flat[79:0] !== arithmetic_result || st_flat[159:80] !== FP_TWO)
+            $fatal(1,"FXCH changed architectural stack before its response");
+          if(fip!==32'h1110 || fdp!==32'h3330)
+            $fatal(1,"queued metadata committed before its owner");
+        end else begin
+          if(empty_partner) begin
+            if(st_flat[79:0] !== FP_INDEF || st_flat[159:80] !== FP_TWO ||
+               st_flat[239:160] !== arithmetic_result)
+              $fatal(1,"queued empty FXCH lost ordered result or indefinite");
+            expect_st_valid(0,"queued empty FXCH ST0");
+            expect_st_valid(2,"queued empty FXCH ST2");
+          end else if(st_flat[79:0] !== FP_TWO || st_flat[159:80] !== arithmetic_result)
+            $fatal(1,"FXCH result routed to wrong logical destination");
+          if(fip!==32'h2220 || fdp!==32'h4440 || fcs!==16'h1234 || fds!==16'h5678)
+            $fatal(1,"queued FXCH metadata not retained");
+        end
+        completed++;
+      end
+      if(++cycles>128) $fatal(1,"FXCH queue timeout");
+    end
+    cmd_valid=0; cmd_update_fip=0; cmd_update_fdp=0;
+    repeat(3) begin @(negedge clk); if(rsp_valid) $fatal(1,"duplicate FXCH response"); end
+    if(ftop!==6 || (fstat & 16'h82c1)!==(empty_partner ? 16'h0041 : 16'h0000) ||
+       fstat[7:0]!==(empty_partner ? 8'h41 : 8'h00) ||
+       fptag!==(empty_partner ? 8'h3e : 8'h3f) ||
+       fctrl!==(unmasked ? 16'h037e : 16'h037f))
+      $fatal(1,"FXCH queue corrupted environment");
+    $display("FP-FXCH-ORDER-OK divide=%0d empty=%0d fxch_accept=%0d arithmetic_response=%0d clocks=%0d",
+             divide,empty_partner,exchange_accept,arithmetic_response,cycles);
+    if(unmasked && exchange_accept<arithmetic_response)
+      $fatal(1,"FXCH queued across unmasked exception mode");
+    if($test$plusargs("require_fxch_queue") && !unmasked && exchange_accept>=arithmetic_response)
+      $fatal(1,"FXCH early-admission requirement unmet");
+  endtask
+
+`ifdef VEN_FP_FXCH_QUEUE
+  task automatic cancel_queued_fxch;
+    issue(FX_FNINIT,0,0,0,'0,0,0,0);
+    load80(FP_TWO); load80(FP_ONE);
+    @(negedge clk); cmd_valid=1; cmd_op=FX_AR_ST0_STI; cmd_sti=1; cmd_aluop=6; cmd_pop=0;
+    @(posedge clk); if(!cmd_ready) $fatal(1,"reset probe divide not accepted");
+    @(negedge clk); cmd_op=FX_FXCH;
+    @(posedge clk); if(!cmd_ready) $fatal(1,"reset probe exchange not queued");
+    @(negedge clk); cmd_valid=0; rst_n=0;
+    repeat(3) @(negedge clk);
+    rst_n=1;
+    repeat(48) begin
+      @(negedge clk);
+      if(rsp_valid || busy) $fatal(1,"reset resurrected a queued FP owner");
+    end
+    if(ftop!==0 || fptag!==8'hff || fctrl!==16'h037f)
+      $fatal(1,"queued reset environment");
+    $display("FP-FXCH-QUEUE-RESET-OK");
+  endtask
+`endif
+
+  task automatic arithmetic_interlock(input int kind);
+    int waited;
+    logic [79:0] expected;
+    issue(FX_FNINIT, 0, 0, 0, '0, 0, 0, 0);
+    repeat (8) load80(FP_TWO);
+    if (kind == 4) issue(FX_FLDCW, 0, 0, 0, 80'h037e, 2, 0, 0);
+    @(negedge clk);
+    cmd_valid=1; cmd_op=FX_AR_STI_ST0; cmd_aluop=0; cmd_sti=1;
+    cmd_pop=(kind == 3);
+    @(posedge clk);
+    if (!cmd_ready) $fatal(1, "interlock first command not accepted");
+    @(negedge clk);
+    cmd_op = (kind == 2) ? FX_FXCH :
+             ((kind == 0 || kind == 3) ? FX_AR_ST0_STI : FX_AR_STI_ST0);
+    cmd_sti = (kind >= 4) ? 2 : 1;
+    cmd_pop = (kind == 5);
+    // Allow combinational decode of the new command before observing ready.
+    #1;
+    if (cmd_ready) $fatal(1, "missing arithmetic interlock kind=%0d",kind);
+    waited=0;
+    while (!cmd_ready) begin
+      @(negedge clk);
+      waited++;
+      if (waited > 16) $fatal(1, "arithmetic interlock failed to drain");
+    end
+    if (!rsp_valid || rsp_arith[79:0] !== FP_FOUR)
+      $fatal(1, "interlock released without first architectural result");
+    @(posedge clk);
+    @(negedge clk); cmd_valid=0;
+    waited=0;
+    while (!rsp_valid) begin
+      @(negedge clk);
+      if (++waited > 16) $fatal(1, "second interlocked response missing");
+    end
+    if (rsp_unsupported || rsp_stack_fault) $fatal(1, "interlock response fault");
+    expected = (kind == 2 || kind >= 4) ? FP_FOUR : FP_SIX;
+    if (kind == 1 || kind == 5) begin
+      if (st_flat[159:80] !== expected) $fatal(1, "interlock destination ST1");
+    end else if (kind == 4) begin
+      if (st_flat[239:160] !== expected) $fatal(1, "unmasked drain destination");
+    end else if (st_flat[79:0] !== expected)
+      $fatal(1, "interlock destination ST0 kind=%0d",kind);
+    if (ftop !== ((kind == 3 || kind == 5) ? 3'd1 : 3'd0))
+      $fatal(1, "interlock stack order kind=%0d",kind);
+    $display("FP-ARITH-INTERLOCK-OK kind=%0d",kind);
+  endtask
+
+`ifdef VEN_FP_ARITH_STREAM
+  task automatic reset_arithmetic_owners;
+    issue(FX_FNINIT, 0, 0, 0, '0, 0, 0, 0);
+    repeat (8) load80(FP_TWO);
+    @(negedge clk);
+    for (int i=1; i<=3; i++) begin
+      cmd_valid=1; cmd_op=FX_AR_STI_ST0; cmd_aluop=0;
+      cmd_sti=3'(i); cmd_pop=0;
+      @(posedge clk);
+      if (!cmd_ready) $fatal(1, "reset fixture failed to fill arithmetic pipeline");
+      @(negedge clk);
+    end
+    // All three stages own work; reset wins over the oldest result's commit.
+    rst_n=0; cmd_valid=0;
+    repeat (2) @(negedge clk);
+    rst_n=1;
+    repeat (5) begin
+      @(negedge clk);
+      if (rsp_valid || busy || !cmd_ready || alu_commit_retire)
+        $fatal(1, "arithmetic owner survived reset");
+    end
+    if ({ftop,fstat,fctrl,fptag} !== {3'd0,16'h0000,16'h037f,8'hff})
+      $fatal(1, "arithmetic reset state mismatch");
+    $display("FP-ARITH-RESET-OK");
+  endtask
+`endif
+
+  function automatic logic [79:0] stream_operand(input int n);
+    case (n % 12)
+      0: return FP_ZERO;
+      1: return 80'h80000000000000000000;
+      2: return FP_ONE;
+      3: return FP_NEG1;
+      4: return FP_1P5;
+      5: return 80'h00000000000000000001;
+      6: return 80'h7ffeffffffffffffffff;
+      7: return 80'h00018000000000000000;
+      8: return 80'h7fff8000000000000001;
+      9: return 80'h7fffc000000000000123;
+      10: return FP_INF;
+      default: return 80'h3ffdaaaaaaaaaaaaaaab;
+    endcase
+  endfunction
+
+  // Sequential architectural oracle at each accepted command, with snapshots
+  // queued until the corresponding response. The DUT may overlap independent
+  // commands, but cannot change their values, order, flags or destinations.
+  task automatic mixed_arithmetic_stream(input int rc, input int pc, input int seed);
+    logic [639:0] spec_regs, expected_regs[64];
+    logic [15:0] spec_status, expected_status[64], control_word;
+    logic [84:0] expected_result[64];
+    logic [79:0] a, b;
+    logic [31:0] choice;
+    int accepted, completed, cycles, dst;
+    issue(FX_FNINIT, 0, 0, 0, '0, 0, 0, 0);
+    spec_regs='0;
+    for (int i=7; i>=0; i--) begin
+      load80(stream_operand(seed+i));
+      spec_regs[i*80 +: 80]=stream_operand(seed+i);
+    end
+    control_word=16'h007f | (16'(pc) << 8) | (16'(rc) << 10);
+    issue(FX_FLDCW, 0, 0, 0, {64'd0,control_word}, 2, 0, 0);
+    @(negedge clk);
+    spec_status=0; accepted=0; completed=0; cycles=0;
+    while (completed < 64) begin
+      choice=32'(accepted+1) * 32'h9e3779b9 ^ (32'(seed+1) * 32'h85ebca6b);
+      choice=choice ^ (choice >> 13);
+      cmd_valid=(accepted < 64) && ((cycles % 7) != 3);
+      cmd_sti=choice[2:0]; cmd_pop=0;
+      case (choice[4:3])
+        0: cmd_aluop=0;
+        1: cmd_aluop=1;
+        2: cmd_aluop=4;
+        3: cmd_aluop=5;
+      endcase
+      cmd_op=choice[5] ? FX_AR_STI_ST0 : FX_AR_ST0_STI;
+      // Alternate register operations with real64 and signed integer32 sources.
+      cmd_mem=0; cmd_mem_bytes=0;
+      if (choice[7:6] == 2) begin
+        cmd_op=FX_AR_M64; cmd_mem_bytes=8;
+        cmd_mem={16'd0,choice[8],11'h3ff,20'habcde,choice};
+      end else if (choice[7:6] == 3) begin
+        cmd_op=FX_AR_I32; cmd_mem_bytes=4; cmd_mem={48'd0,choice};
+      end
+      @(posedge clk);
+      if (cmd_valid && cmd_ready) begin
+        dst=(cmd_op == FX_AR_STI_ST0) ? int'(cmd_sti) : 0;
+        a=spec_regs[0 +: 80]; b=spec_regs[int'(cmd_sti)*80 +: 80];
+        if (cmd_op == FX_AR_STI_ST0) begin
+          a=spec_regs[int'(cmd_sti)*80 +: 80]; b=spec_regs[0 +: 80];
+        end else if (cmd_op == FX_AR_M64)
+          b=ventium_x87_pkg::f_mem_as_float(cmd_mem,cmd_mem_bytes);
+        else if (cmd_op == FX_AR_I32)
+          b=ventium_x87_pkg::f_mem_as_int(cmd_mem,cmd_mem_bytes);
+        expected_result[accepted]=ventium_x87_pkg::f_eval(cmd_aluop,a,b,2'(rc),2'(pc),0);
+        spec_regs[dst*80 +: 80]=expected_result[accepted][79:0];
+        spec_status=ventium_x87_pkg::f_arith_fstat(spec_status,expected_result[accepted]);
+        expected_regs[accepted]=spec_regs;
+        expected_status[accepted]=spec_status;
+        accepted++;
+      end
+      @(negedge clk);
+      if (rsp_valid) begin
+        if (completed >= accepted || rsp_unsupported || rsp_stack_fault ||
+            rsp_store_valid || rsp_ax_valid || rsp_arith !== expected_result[completed] ||
+            st_flat !== expected_regs[completed] || fstat !== expected_status[completed] ||
+            fctrl !== control_word || ftop !== 0 || fptag !== 0)
+          $fatal(1, "mixed FP stream mismatch seed=%0d rc=%0d pc=%0d response=%0d arith=%022x expected=%022x",
+                 seed,rc,pc,completed,rsp_arith,expected_result[completed]);
+        completed++;
+      end
+      if (++cycles > 1024) $fatal(1, "mixed FP stream watchdog");
+    end
+    cmd_valid=0;
+    repeat (3) begin
+      @(negedge clk);
+      if (rsp_valid) $fatal(1, "mixed FP stream duplicate response");
+    end
+    checks+=completed;
   endtask
 
   initial begin
@@ -201,9 +597,43 @@ module tb_ven_fp_top;
     if ({ftop,fstat,fctrl,fptag} !== {3'd0,16'h0000,16'h037f,8'hff})
       $fatal(1, "reset state mismatch");
 
+    if ($test$plusargs("fp_stream_mixed_only")) begin
+      for (int rc=0; rc<4; rc++)
+        for (int pc=0; pc<4; pc++)
+          if (pc != 1)
+            for (int seed=0; seed<12; seed++) mixed_arithmetic_stream(rc,pc,seed);
+      $display("FP-MIXED-STREAM-OK checks=%0d (includes initialization commands)",checks);
+      $finish;
+    end
+
+    if ($test$plusargs("fp_stack_queue_only")) begin
+      queued_fxch_contract(0);
+      queued_fxch_contract(1);
+      queued_fxch_contract(1,1);
+      queued_fxch_contract(0,0,1);
+      queued_fxch_contract(1,0,1);
+`ifdef VEN_FP_FXCH_QUEUE
+      cancel_queued_fxch();
+      queued_fxch_contract(0); // reuse after cancellation
+`endif
+      $display("FP-STACK-QUEUE-CONTRACT-OK");
+      $finish;
+    end
+
+    if ($test$plusargs("fp_throughput_only")) begin
+      independent_arithmetic_throughput();
+      for (int kind=0; kind<6; kind++) arithmetic_interlock(kind);
+      repeat (2) @(negedge clk); // performance observer consumes final response
+`ifdef VEN_FP_ARITH_STREAM
+      reset_arithmetic_owners();
+      independent_arithmetic_throughput(); // clean reuse after cancel/reset
+`endif
+      $finish;
+    end
+
     load80(FP_TWO);
     load80(FP_ONE);
-    issue(FX_AR_ST0_STI, 3'd0, 3'd1, 1'b0, '0, 0, 1'b0, 1);
+    issue_fast_add_with_commit_token();
     expect_st0(FP_THREE, "1+2");
 
     load80(FP_TWO);
@@ -392,6 +822,91 @@ module tb_ven_fp_top;
     if (!rsp_stack_fault || st_flat[79:0] !== FP_INDEF ||
         (fstat & 16'h82c1) !== 16'h0041)
       $fatal(1, "masked empty arithmetic response mismatch");
+    expect_st_valid(3'd0, "masked empty arithmetic result");
+
+    // DE-style destination/write followed by pop: ST(0) is live, ST(1) is
+    // empty, so the real-indefinite written into ST(1) becomes the new ST(0).
+    // This catches a data-only write that leaves the post-pop destination tag
+    // EMPTY, the exact failure mode of REP-independent shared FPU state.
+    issue(FX_FNINIT, 0, 0, 0, '0, 0, 0, 0);
+    load80(FP_ONE);
+    issue(FX_AR_STI_ST0, 3'd0, 3'd1, 1'b1, '0, 0, 1'b0, 0);
+    if (!rsp_stack_fault || st_flat[79:0] !== FP_INDEF || ftop !== 3'd0 ||
+        (fstat & 16'h82c1) !== 16'h0041)
+      $fatal(1, "masked DE-style arithmetic-pop response mismatch");
+    expect_st_valid(3'd0, "masked DE-style post-pop destination");
+
+    // FABS has an already-formed direct c_write before the stack-fault
+    // override; it must receive the same valid-tag treatment as deferred
+    // arithmetic.
+    issue(FX_FNINIT, 0, 0, 0, '0, 0, 0, 0);
+    issue(FX_FABS, 0, 0, 0, '0, 0, 0, 0);
+    if (!rsp_stack_fault || st_flat[79:0] !== FP_INDEF ||
+        (fstat & 16'h82c1) !== 16'h0041)
+      $fatal(1, "masked empty FABS response mismatch");
+    expect_st_valid(3'd0, "masked empty FABS result");
+
+    // FXCH has no normal result-write port: it is a map rename in the shared
+    // state file.  A masked empty source is nevertheless architectural data,
+    // not a tag-only event: load each empty operand with real-indefinite and
+    // then exchange.  Exercise one empty partner, both empty partners, and
+    // the aliased FXCH ST(0) form so a data-only or tag-only repair cannot
+    // pass by accident.
+    issue(FX_FNINIT, 0, 0, 0, '0, 0, 0, 0);
+    load80(FP_FOUR);
+    issue(FX_FXCH, 0, 3'd1, 0, '0, 0, 0, 0);
+    if (!rsp_stack_fault || st_flat[79:0] !== FP_INDEF ||
+        st_flat[159:80] !== FP_FOUR || ftop !== 3'd7 ||
+        (fstat & 16'h82c1) !== 16'h0041)
+      $fatal(1, "masked FXCH one-empty response mismatch");
+    expect_st_valid(3'd0, "masked FXCH one-empty ST0");
+    expect_st_valid(3'd1, "masked FXCH one-empty ST1");
+
+    // Reverse the empty/live direction.  This is not redundant with the
+    // preceding case: a compact-map implementation can accidentally leave
+    // the source's tag attached to its old physical bank, which only becomes
+    // visible when the EMPTY operand started at ST(0).
+    issue(FX_FNINIT, 0, 0, 0, '0, 0, 0, 0);
+    load80(FP_ONE);                      // ST(1), physical slot 7
+    load80(FP_FOUR);                     // ST(0), physical slot 6
+    issue(FX_FFREE, 0, 0, 0, '0, 0, 0, 0); // ST(0) EMPTY; ST(1) live
+    issue(FX_FXCH, 0, 3'd1, 0, '0, 0, 0, 0);
+    if (!rsp_stack_fault || st_flat[79:0] !== FP_ONE ||
+        st_flat[159:80] !== FP_INDEF || ftop !== 3'd6 ||
+        (fstat & 16'h82c1) !== 16'h0041)
+      $fatal(1, "masked FXCH reverse-empty response mismatch");
+    expect_st_valid(3'd0, "masked FXCH reverse-empty ST0");
+    expect_st_valid(3'd1, "masked FXCH reverse-empty ST1");
+
+    issue(FX_FNINIT, 0, 0, 0, '0, 0, 0, 0);
+    issue(FX_FXCH, 0, 3'd1, 0, '0, 0, 0, 0);
+    if (!rsp_stack_fault || st_flat[79:0] !== FP_INDEF ||
+        st_flat[159:80] !== FP_INDEF || ftop !== 3'd0 ||
+        (fstat & 16'h82c1) !== 16'h0041)
+      $fatal(1, "masked FXCH both-empty response mismatch");
+    expect_st_valid(3'd0, "masked FXCH both-empty ST0");
+    expect_st_valid(3'd1, "masked FXCH both-empty ST1");
+
+    issue(FX_FNINIT, 0, 0, 0, '0, 0, 0, 0);
+    issue(FX_FXCH, 0, 3'd0, 0, '0, 0, 0, 0);
+    if (!rsp_stack_fault || st_flat[79:0] !== FP_INDEF || ftop !== 3'd0 ||
+        (fstat & 16'h82c1) !== 16'h0041)
+      $fatal(1, "masked FXCH ST0 response mismatch");
+    expect_st_valid(3'd0, "masked FXCH ST0 result");
+
+    issue(FX_FNINIT, 0, 0, 0, '0, 0, 0, 0);
+    load80(FP_FOUR);
+    issue(FX_FLDCW, 0, 0, 0, {64'd0,16'h037e}, 2, 0, 0);
+    saved_st  = st_flat;
+    saved_tag = fptag;
+    saved_top = ftop;
+    issue(FX_FXCH, 0, 3'd1, 0, '0, 0, 0, 0);
+    // FXCH with an EMPTY operand is a stack *underflow*: SF/IE and the
+    // unmasked ES/B summary set, but C1 remains clear (C1=1 is reserved for
+    // stack overflow).  The data, tags and TOP must otherwise be untouched.
+    if (!rsp_stack_fault || st_flat !== saved_st || fptag !== saved_tag ||
+        ftop !== saved_top || (fstat & 16'h80c1) !== 16'h80c1)
+      $fatal(1, "unmasked FXCH one-empty was not fully suppressed");
 
     issue(FX_FNINIT, 0, 0, 0, '0, 0, 0, 0);
     issue(FX_FCOM_STI, 0, 1, 0, '0, 0, 0, 0);
@@ -419,11 +934,63 @@ module tb_ven_fp_top;
       $fatal(1, "FXAM empty incorrectly raised a stack fault");
 
     issue(FX_FNINIT, 0, 0, 0, '0, 0, 0, 0);
-    load80(FP_ONE);
+    load80(FP_ONE);                       // becomes ST(1)
+    load80(FP_TWO);                       // ST(0), then deliberately empty it
+    issue(FX_FFREE, 0, 0, 0, '0, 0, 0, 0);
     issue(FX_FSCALE, 0, 0, 0, '0, 0, 0, 0);
     if (!rsp_stack_fault || st_flat[79:0] !== FP_INDEF ||
         (fstat & 16'h0241) !== 16'h0041)
       $fatal(1, "fixed-ST1 masked underflow mismatch");
+    expect_st_valid(3'd0, "fixed-ST1 masked result");
+
+    // The fixed-ST1 transcendental shape writes ST(1) and then pops ST(0).
+    // Its underflow shortcut is distinct from the normal ALU and direct top
+    // write paths, so prove the new architectural ST(0) is valid as well.
+    issue(FX_FNINIT, 0, 0, 0, '0, 0, 0, 0);
+    load80(FP_ONE);
+    load80(FP_TWO);
+    issue(FX_FFREE, 0, 0, 0, '0, 0, 0, 0);
+    issue(FX_FPATAN, 0, 0, 0, '0, 0, 0, 0);
+    if (!rsp_stack_fault || st_flat[79:0] !== FP_INDEF ||
+        (fstat & 16'h0241) !== 16'h0041 || ftop !== 3'd7)
+      $fatal(1, "fixed-ST1 masked arithmetic-pop mismatch");
+    expect_st_valid(3'd0, "fixed-ST1 masked post-pop result");
+
+    // The prior FPATAN case leaves the encoded destination (old ST(1))
+    // live.  Reverse that condition so the write-before-pop path must clear
+    // the formerly EMPTY destination tag; after the pop it becomes ST(0).
+    issue(FX_FNINIT, 0, 0, 0, '0, 0, 0, 0);
+    load80(FP_ONE);                      // ST(1)
+    load80(FP_TWO);                      // ST(0)
+    issue(FX_FFREE, 0, 3'd1, 0, '0, 0, 0, 0); // destination ST(1) EMPTY
+    issue(FX_FPATAN, 0, 0, 0, '0, 0, 0, 0);
+    if (!rsp_stack_fault || st_flat[79:0] !== FP_INDEF ||
+        (fstat & 16'h0241) !== 16'h0041 || ftop !== 3'd7)
+      $fatal(1, "fixed-ST1 masked destination-empty arithmetic-pop mismatch");
+    expect_st_valid(3'd0, "fixed-ST1 masked destination-empty post-pop result");
+
+    // FSINCOS and FPTAN each have a two-result stack shape: their masked
+    // empty-ST(0) response must materialize both logical results as VALID
+    // real-indefinites.  These return directly from the stack-fault path, so
+    // the check also proves neither iterative/transcendental engine was
+    // accidentally allowed to consume stale empty-slot payloads.
+    issue(FX_FNINIT, 0, 0, 0, '0, 0, 0, 0);
+    issue(FX_FSINCOS, 0, 0, 0, '0, 0, 0, 0);
+    if (!rsp_stack_fault || st_flat[79:0] !== FP_INDEF ||
+        st_flat[159:80] !== FP_INDEF || ftop !== 3'd7 ||
+        (fstat & 16'h82c1) !== 16'h0041)
+      $fatal(1, "masked empty FSINCOS response mismatch");
+    expect_st_valid(3'd0, "masked FSINCOS ST0 result");
+    expect_st_valid(3'd1, "masked FSINCOS ST1 result");
+
+    issue(FX_FNINIT, 0, 0, 0, '0, 0, 0, 0);
+    issue(FX_FPTAN, 0, 0, 0, '0, 0, 0, 0);
+    if (!rsp_stack_fault || st_flat[79:0] !== FP_INDEF ||
+        st_flat[159:80] !== FP_INDEF || ftop !== 3'd7 ||
+        (fstat & 16'h82c1) !== 16'h0041)
+      $fatal(1, "masked empty FPTAN response mismatch");
+    expect_st_valid(3'd0, "masked FPTAN ST0 result");
+    expect_st_valid(3'd1, "masked FPTAN ST1 result");
 
     issue(FX_FNINIT, 0, 0, 0, '0, 0, 0, 0);
     issue(FX_FST_M32, 0, 0, 1, '0, 4, 0, 0);

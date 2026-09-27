@@ -91,9 +91,17 @@ module fpu_writeback
     input  logic [6:0]  pending_mem_pen,
     input  logic        v_bytes_ok,
     input  logic        pair_block,
+    // Exact V-slot admission for the optional FLD+FXCH fold. This is stricter
+    // than raw V byte residency when a uop-cache boundary, debug stop, or
+    // STI/MOV-SS one-instruction shadow is active.
+    input  logic        fp_v_fold_ok,
     input  logic [31:0] core_cyc,
     input  logic [31:0] fp_ready_cyc,
     input  logic        fp_occ_pending,
+    // Exact live S_PIPE FP-arm admission from the spine.  This covers the
+    // registered frontend-valid contract and page/fault diversion; this module
+    // adds its own deferred-FP read hazard below, where the hazard is produced.
+    input  logic        pipe_fp_live_arm,
 
     // FP-store sticky-exception inputs
     input  logic        fstore_ie,
@@ -190,6 +198,10 @@ module fpu_writeback
     output logic [2:0]  fp_fxch_idx,
     output logic [79:0] fp_fxch_a,
     output logic [79:0] fp_fxch_b,
+    // A masked FXCH #IS needs state-file-local real-indefinite materialization
+    // before the compact exchange.  Kept separate from ordinary FXCH so its
+    // timing/area profile remains a pointer/data swap.
+    output logic        fp_fxch_materialize_empty,
     output logic        fp_we_pop,
     output logic        fp_we_pop2,
     output logic        fp_we_ffree,
@@ -266,6 +278,27 @@ module fpu_writeback
   // it reads module state). fst(i) = fp_st[i] (= fpr[ftop+i], TOP-relative).
   function automatic logic [79:0] fst(input logic [2:0] i); return fp_st[i]; endfunction
 
+`ifdef VEN_FP_PIPE
+  // The deferred-result RAW interlock is a pure observation of registered pipe
+  // state plus the current decode.  Keep it outside the large x87 write-driver
+  // block below: that block consumes the fast-arm predicate, while core.sv uses
+  // this hazard to suppress unrelated request producers.  Co-locating both in
+  // one always_comb made an acyclic interlock appear as a cross-module feedback
+  // loop to lint/synthesis under the fast-FP profile.
+  always_comb begin
+`ifdef VEN_FP_PIPE2
+    // Two-stage commit: either registered slot can still hold the stale value
+    // for a role-0/1 reader on this clock.
+    fp_pipe_rd_haz = u_d.is_fp &&
+        ((fpp_valid  && ((ftop == fpp_dst)  || (((ftop + u_d.fp_sti) & 3'd7) == fpp_dst))) ||
+         (fpp2_valid && ((ftop == fpp2_dst) || (((ftop + u_d.fp_sti) & 3'd7) == fpp2_dst))));
+`else
+    fp_pipe_rd_haz = fpp_valid && u_d.is_fp &&
+                     ((ftop == fpp_dst) || (((ftop + u_d.fp_sti) & 3'd7) == fpp_dst));
+`endif
+  end
+`endif
+
   // Every local and every output is defaulted unconditionally at block entry
   // (see "default: no writes this clock" below), so the block is combinational
   // by construction. Verilator's latch analysis cannot carry that through a
@@ -327,6 +360,7 @@ module fpu_writeback
     fp_we_fstat=1'b0; fp_fstat_wval=16'd0;
     fp_we_sti=1'b0;  fp_wsti_idx=3'd0; fp_wsti_data=80'd0; fp_wsti_clr_tag=1'b0;
     fp_we_fxch=1'b0; fp_fxch_idx=3'd0; fp_fxch_a=80'd0; fp_fxch_b=80'd0;
+    fp_fxch_materialize_empty=1'b0;
     fp_we_pop=1'b0;  fp_we_pop2=1'b0;
     fp_we_ffree=1'b0; fp_ffree_idx=3'd0;
     fp_we_incstp=1'b0; fp_we_decstp=1'b0;
@@ -361,15 +395,6 @@ module fpu_writeback
     // owns divide, so the split eval's div default is unreachable — same guard the
     // 1-stage split relies on).
     fp_s1_next = f_eval_s1(fpp_aluop, fpp_a, fpp_b, fpp_rc, fpp_pc, fpp_err);
-    // The in-flight result is now 2 clocks deep, so the RAW hazard spans BOTH slots:
-    // stall a role-0/1 reader of the stage-0 target (fpp_dst, commits in 2 clocks)
-    // OR the stage-1 target (fpp2_dst, commits THIS edge — the same pre-edge stale
-    // read the 1-stage guarded). Role>=2 consumers are scoreboard-stalled to issue+3
-    // (= this commit clock), so the throughput kernels never hit it and the FP bands
-    // are preserved; it only bites FXCH/FLDSTI/slow FST/FCOM, as before.
-    fp_pipe_rd_haz = u_d.is_fp &&
-        ( (fpp_valid  && ((ftop==fpp_dst)  || (((ftop + u_d.fp_sti) & 3'd7)==fpp_dst)))
-        ||(fpp2_valid && ((ftop==fpp2_dst) || (((ftop + u_d.fp_sti) & 3'd7)==fpp2_dst))) );
     // Stage 2 (cycle N+2): finish f_eval_s2 from the REGISTERED stage-1 result and
     // commit to the absolute target. This is the SHORT back-half cone (round_pack
     // only); the front half was spent the previous clock — that is the whole split.
@@ -385,8 +410,6 @@ module fpu_writeback
       fp_wabs_fstat    = f_arith_fstat(fstat, pp_arf);
     end
 `else
-    fp_pipe_rd_haz = fpp_valid && u_d.is_fp &&
-                     ((ftop==fpp_dst) || (((ftop + u_d.fp_sti) & 3'd7)==fpp_dst));
     // Deferred FK_ARITH commit (cycle N+1): the captured op's f_eval is computed
     // HERE (from the registered fpp_* operands — the short, post-register path)
     // and written to the absolute target via we_wabs. f_arith_fstat merges into
@@ -419,15 +442,18 @@ module fpu_writeback
 `endif
 
     // ===== FAST ARM (M5 cycle-mode FP issue+commit) — same guard as ic_fp_commit.
-    fp_in_pipe = (state==S_PIPE) && !issue_block && !xlate_miss && (stall_cnt==7'd0) &&
-                 pipe_bytes_ok && (pending_mem_pen==7'd0);
+    fp_in_pipe = pipe_fp_live_arm;
 `ifdef VEN_FP_PC_RELAX
     fp_halt4   = 1'b0;   // BUG#3: PC-relax computes FK_ARITH under PC!=11 (no fast-path halt);
                          // must match core_fastpath.svh + ic_halt4 so the result IS written.
 `else
     fp_halt4   = u_d.is_fp && (u_d.fp_kind==FK_ARITH) && (fctrl[9:8]!=2'b11);
 `endif
-    fp_fp_arm  = fp_in_pipe && !fp_halt4 && u_d.is_fp;
+    fp_fp_arm  = fp_in_pipe && !fp_halt4 && u_d.is_fp
+`ifdef VEN_FP_PIPE
+                 && !fp_pipe_rd_haz
+`endif
+                 ;
     fp_dep_ready = (u_d.fp_role>=3'd2) ? fp_ready_cyc : 32'd0;
 `ifdef VEN_FP_OVERLAP
     // GAP1 mirror (matches core_fastpath.svh + ic_dep_ready): following FP op waits
@@ -461,7 +487,7 @@ module fpu_writeback
           // GAP2 fold: fld-const + a following free FXCH %st(i) in ONE write — the
           // pushed const lands in st(i), the old st(i-1) becomes the new st0 (pre-edge
           // ftop addressing: we_push->fpr[ftop-1], we_sti(i-1)->fpr[ftop+i-1]).
-          if (v_d.is_fxch_free && v_bytes_ok && !pair_block && v_d.fp_sti!=3'd0) begin
+          if (v_d.is_fxch_free && fp_v_fold_ok && v_d.fp_sti!=3'd0) begin
             fp_we_push=1'b1; fp_push_data=fst(v_d.fp_sti - 3'd1);
             fp_we_sti=1'b1;  fp_wsti_idx=v_d.fp_sti - 3'd1;
             fp_wsti_data=fconst(u_d.fp_sti); fp_wsti_clr_tag=1'b1;
@@ -471,7 +497,7 @@ module fpu_writeback
         end
         FK_FLDSTI: begin
 `ifdef VEN_FXCH_FREE
-          if (v_d.is_fxch_free && v_bytes_ok && !pair_block && v_d.fp_sti!=3'd0) begin
+          if (v_d.is_fxch_free && fp_v_fold_ok && v_d.fp_sti!=3'd0) begin
             fp_we_push=1'b1; fp_push_data=fst(v_d.fp_sti - 3'd1);
             fp_we_sti=1'b1;  fp_wsti_idx=v_d.fp_sti - 3'd1;
             fp_wsti_data=fst(u_d.fp_sti); fp_wsti_clr_tag=1'b1;
@@ -1256,7 +1282,7 @@ module fpu_writeback
       det_reads_st0 = (u_d.fp_kind == FK_ARITH);
       det_reads_sti = (u_d.fp_kind == FK_ARITH) || (u_d.fp_kind == FK_FLDSTI);
       det_sti       = u_d.fp_sti;
-      det_fold_rd   = v_d.is_fxch_free && v_bytes_ok && !pair_block && (v_d.fp_sti != 3'd0)
+      det_fold_rd   = v_d.is_fxch_free && fp_v_fold_ok && (v_d.fp_sti != 3'd0)
                    && ((u_d.fp_kind == FK_FLDC) || (u_d.fp_kind == FK_FLDSTI));
       det_fold_idx  = v_d.fp_sti - 3'd1;
     end else begin
@@ -1357,6 +1383,12 @@ module fpu_writeback
       if (fp_stk_unf && fctrl[0]) begin
         if (fp_we_top) fp_top_data = QNAN_INDEF;
         if (fp_we_sti) fp_wsti_data = QNAN_INDEF;
+        // FXCH has no ordinary result-write port: its two pre-edge data
+        // sources are exchanged directly.  Tell fpu_top to replace EMPTY
+        // sources with real indefinite and clear both tags before it performs
+        // that exchange.  The unmasked arm below deasserts fp_we_fxch, so this
+        // qualifier cannot alter a suppressed instruction.
+        if (fp_we_fxch) fp_fxch_materialize_empty = 1'b1;
       end
 
       // ---- REVIEW2_aug2 H-16: UNMASKED -> SUPPRESS THE OPERATION ---------------

@@ -57,14 +57,14 @@ module u_pipe
     // step H) then derived CF/OF from an already-contaminated result. Mask with the SAME wmask
     // helper the slow path uses (ventium_alu_pkg:47). At w16=0 wmask(v,3'd4) is the identity, so
     // this is inert in user mode.
-    u_a_w  = wmask(u_dst_val,  u_d.w16 ? 3'd2 : 3'd4);
-    u_b_w  = wmask(fp_bop(u_d), u_d.w16 ? 3'd2 : 3'd4);
+    u_a_w  = wmask(u_dst_val, fp_operand_width(u_d));
+    u_b_w  = wmask(fp_bop(u_d), fp_operand_width(u_d));
     u_alu   = alu_result(u_d.alu_op, u_a_w, u_b_w, eflags[0]);
     // task #56 step H: the width argument was HARDCODED 3'd4 (32-bit) while the slow
     // path passes q_w (core.sv:2034). A 16-bit op therefore set ZF/SF/CF/OF from the
     // full 32-bit result -> wrong conditional branches -> guest divergence (UPDATE 279).
     // flags_next already handles width; it was simply never told.
-    u_flags = flags_next(u_d.alu_op, u_a_w, u_b_w, u_alu, eflags, u_d.w16 ? 3'd2 : 3'd4);
+    u_flags = flags_next(u_d.alu_op, u_a_w, u_b_w, u_alu, eflags, fp_operand_width(u_d));
     // task #56 step I: the shift/rotate width was HARDCODED 3'd4, exactly like flags_next in
     // step H. A 16-bit SHL/SHR/SAR/ROL/ROR must shift within 16 bits and take CF/OF from the
     // bit-15 boundary; at 32 bits both the result and the carry are wrong. shrot_result and

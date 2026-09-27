@@ -12,6 +12,19 @@
 // from module-level signals (pure functions of the pre-edge state). Reads are
 // gpr_o[] (the registered value), matching the FSM exactly.
 
+        // Enclosed by fsm_case_enabled, exactly like the sequential S_LOAD arm:
+        // faults/walk detours cannot expose speculative pointer writes.
+        S_LOAD: begin
+          if (rep_movs_load_fuse) begin
+            gpr_we[R_ESI]=1'b1;
+            gpr_wd[R_ESI]=gpr_o[R_ESI] + str_step;
+            gpr_we[R_EDI]=1'b1;
+            gpr_wd[R_EDI]=gpr_o[R_EDI] + str_step;
+            gpr_we[R_ECX]=1'b1;
+            gpr_wd[R_ECX]=dec_cx;
+          end
+        end
+
 `ifdef VEN_IDIV_ITER
         // S_DIV_BUSY: commit quotient/remainder to EAX(/EDX) when the iterative
         // divider finishes without a #DE.
@@ -487,7 +500,21 @@
                 gpr_we[q_src_reg]=1'b1;
                 gpr_wd[q_src_reg]=reg_merge(gpr_o[q_src_reg], wmask(mem_load_data,q_w), q_w, q_src_high8);
               end
-              K_STR: begin end  // string store: pointer/count already updated in S_EXEC
+              K_STR: begin
+`ifdef VEN_REP_STOS_STREAM
+                // The first element follows the ordinary S_EXEC writeback.  A
+                // streamed shadow, however, has never visited S_EXEC: commit
+                // its EDI/ECX only with this descriptor's FINAL S_STORE ACK.
+                // That timing is also what keeps the previous element's DPI
+                // retire snapshot from observing one iteration too far ahead.
+                if (rep_stos_stream_q && mem_ack) begin
+                  gpr_we[R_EDI]=1'b1;
+                  gpr_wd[R_EDI]=gpr_o[R_EDI] + str_step;
+                  gpr_we[R_ECX]=1'b1;
+                  gpr_wd[R_ECX]=dec_cx;
+                end
+`endif
+              end  // ordinary string store: pointer/count updated in S_EXEC
               default: begin
                 if (q_is_push) begin gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=gpr_o[R_ESP]-{28'd0,q_w}; end
                 if (q_is_pop)  begin gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=gpr_o[R_ESP]+{28'd0,q_w}; end // POP m
@@ -496,28 +523,11 @@
           end
         end
 
-        // -------------------------------------------------------------------
-        // S_WALK — string-store fault-restart ROLLBACK (Quake task #20 2nd bug).
-        // A REP MOVS/STOS advances ESI/EDI/ECX in S_EXEC, BEFORE the element's store
-        // commits in S_STORE. If that store demand-page-faults, S_STORE diverts to the
-        // page walk (walk_ret_state==S_STORE) and the PDE-np(step0)/PTE-np(step2) #PF is
-        // decided HERE. Left as-is, ESI/EDI/ECX are one element PAST the faulter, so the
-        // IA-32 string RESTART (IRET back to the same REP prefix) SKIPS the faulting
-        // element — the store is silently lost (the Quake page-table writer dropped
-        // table[0], null-crashing the client). Roll them back to the pre-advance snapshot
-        // latched in S_EXEC (str_store_addr = pre-advance EDI, str_pre_esi/ecx) so the
-        // restart re-does exactly that element. xlate_miss==0 during S_WALK (S_WALK is a
-        // non-translatable state), so this arm is reached; gpr_we defaults to 0 on every
-        // other walk clock, so it is a no-op except on the fault-decision clock.
-        S_WALK: begin
-          if (mem_ack && walk_is_write && (walk_ret_state==S_STORE)
-              && (q_kind==K_STR) && q_str_storedi
-              && ((walk_step==3'd0 && !mem_rdata[0]) || (walk_step==3'd2 && !mem_rdata[0]))) begin
-            gpr_we[R_EDI]=1'b1; gpr_wd[R_EDI]=str_pre_edi;                          // pre-advance EDI (full)
-            if (q_str_loadsi)         begin gpr_we[R_ESI]=1'b1; gpr_wd[R_ESI]=str_pre_esi; end  // MOVS src ptr
-            if (q_rep || q_repne)     begin gpr_we[R_ECX]=1'b1; gpr_wd[R_ECX]=str_pre_ecx; end  // REP count
-          end
-        end
+        // String-store restart is deliberately owned by the post-case common
+        // override in core.sv.  It must also run on direct S_STORE permission /
+        // segment faults, where fsm_case_enabled suppresses this include, and
+        // it includes the 4 MiB PDE reserved-bit #PF decision as well as !P.
+        S_WALK: begin end
 
         S_USEQ: begin
           if (mem_ack) begin
@@ -823,52 +833,57 @@
         // if chain is reproduced as empty guards so the ISSUE arm is reached under
         // the SAME condition (every bubble/miss/stall path falls through to it).
         S_PIPE: begin
+          // The decoded F3 AB continuation deliberately occupies an S_PIPE
+          // boundary without issuing a U/V instruction.  Its descriptor setup
+          // in core_fastpath.svh is exactly the normal S_EXEC K_STR setup for
+          // the next default-32 STOSD element; commit the matching EDI/ECX
+          // update on that same edge.  fp_issue_block remains asserted for
+          // this boundary, so it cannot fall into the generic fast-path mirror
+          // below or accidentally commit a stale decoded U/V instruction.
+          if (rep_stos_cont_take && q_st == ST_STOS) begin
+            gpr_we[R_EDI]=1'b1;
+            gpr_wd[R_EDI]=gpr_o[R_EDI] + str_step;
+            gpr_we[R_ECX]=1'b1;
+            gpr_wd[R_ECX]=dec_cx;
+          end
           // An accepted interrupt diverts the spine BEFORE anything issues, so this
           // clock must write no GPR. Without this arm the chain fell through to ISSUE
           // and committed a register for an instruction that never retired (and, since
           // EIP is not advanced on the divert, re-executes after IRET).
-          if (fp_issue_block) begin end
-          else if (stall_cnt!=7'd0) begin end
-          else if (!pipe_bytes_ok
-`ifdef VEN_L1_AXI
-                       && !(real_bus && !mem_ack)
-`endif
-                      ) begin end
-`ifdef VEN_L1_AXI
-          else if (!pipe_bytes_ok) begin end
-`endif
-`ifdef VEN_IC_BRAM
-          else if (!ic_fetch_ready) begin end
-`endif
-`ifdef VEN_UOPCACHE
-          else if (!uop_hit || !cycle_mode) begin end
-`endif
-          else if (pending_mem_pen!=7'd0) begin end
-          else if (pipe_mem_wait) begin end
-`ifdef VEN_FP_PIPE
-          else if (fp_pipe_rd_haz) begin end
-`endif
-          else if (u_d.is_fp && u_d.fp_kind==FK_ARITH && fctrl[9:8]!=2'b11) begin end
-          else if (u_d.is_fp) begin end   // FP path writes no GP register
-          // REVIEW Aug-1 C-01: was a hand-copied `!u_d.simple || sys_mode`, which went
-          // stale when task #55 relaxed the spine. Consume the canonical predicate.
-          else if (fp_sys_bail) begin end
-          else if (mispred_bubbles!=3'd0) begin end
-          else if (pipe_agi) begin end
-          else begin
+          // The shared commit predicate is the only entry to this mirror.  It
+          // covers both a normal trusted frontend issue and final completion of
+          // an admitted U-memory packet; no hand-copied fallback guard may turn
+          // a stale decode into a GPR write.
+          else if (pipe_int_commit) begin
             // ---- U commit ----
-            if (u_d.is_lea) begin
-              gpr_we[u_d.dst]=1'b1; gpr_wd[u_d.dst]=pipe_load_addr;
-            end else if (u_d.is_load) begin
-              gpr_we[u_d.dst]=1'b1; gpr_wd[u_d.dst]=mem_rdata;
-            end else if (u_d.is_shift) begin
+            if (pipe_u_eff.is_lea) begin
+              gpr_we[pipe_u_eff.dst]=1'b1; gpr_wd[pipe_u_eff.dst]=pipe_load_addr;
+            end else if (pipe_u_eff.is_stack) begin
+              // The shared S_PIPE commit predicate fires only after the final
+              // fragment-engine acknowledgement.  Thus a #PF/#SS, a delayed
+              // cache access, or the first half of a split request leaves ESP
+              // and POP's destination untouched and restarts architecturally.
+              if (pipe_u_eff.is_store) begin
+                gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=gpr_o[R_ESP]-32'd4;
+              end else begin
+                gpr_we[pipe_u_eff.dst]=1'b1; gpr_wd[pipe_u_eff.dst]=mem_rdata;
+                // POP ESP writes the popped value, not old ESP+4.
+                if (pipe_u_eff.dst!=R_ESP) begin
+                  gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=gpr_o[R_ESP]+32'd4;
+                end
+              end
+            end else if (pipe_u_eff.is_load) begin
+              gpr_we[pipe_u_eff.dst]=1'b1;
+              gpr_wd[pipe_u_eff.dst]=reg_merge(gpr_o[pipe_u_eff.dst], pipe_load_value,
+                                             fp_operand_width(pipe_u_eff), pipe_u_eff.dst_hi8);
+            end else if (pipe_u_eff.is_shift) begin
               // REVIEW Aug-1 (H-02 companion): a 16-bit shift must PRESERVE the upper
               // half of its destination. This wrote all 32 bits unconditionally, which
               // is the same defect class as C-01 one arm over. Use the slow path's
               // canonical width-aware merge, exactly as the ALU arm below does.
-              gpr_we[u_d.dst]=1'b1;
-              gpr_wd[u_d.dst]= reg_merge(gpr_o[u_d.dst], u_sh, u_d.w16 ? 3'd2 : 3'd4, 1'b0);
-            end else if (u_d.is_branch || u_d.is_nop) begin
+              gpr_we[pipe_u_eff.dst]=1'b1;
+              gpr_wd[pipe_u_eff.dst]= reg_merge(gpr_o[pipe_u_eff.dst], u_sh, fp_operand_width(pipe_u_eff), pipe_u_eff.dst_hi8);
+            end else if (pipe_u_eff.is_branch || pipe_u_eff.is_nop) begin
               // no register write
             end else begin
               // 16-bit ops must PRESERVE the destination's upper half, so use the SLOW
@@ -883,18 +898,18 @@
               // (C-01) -- the write VALUE was never wrong. The hand-rolled concat was in
               // fact bit-identical to reg_merge at w==2, so that change could not have
               // altered behaviour either way. Kept for the shared-helper reason above.
-              if (u_d.wreg) begin gpr_we[u_d.dst]=1'b1;
-                gpr_wd[u_d.dst]= reg_merge(gpr_o[u_d.dst], u_alu, u_d.w16 ? 3'd2 : 3'd4, 1'b0); end
+              if (pipe_u_eff.wreg) begin gpr_we[pipe_u_eff.dst]=1'b1;
+                gpr_wd[pipe_u_eff.dst]= reg_merge(gpr_o[pipe_u_eff.dst], u_alu, fp_operand_width(pipe_u_eff), pipe_u_eff.dst_hi8); end
             end
             // ---- V commit (paired) ----
-            if (pipe_pair) begin
-              if (v_d.is_lea) begin
-                gpr_we[v_d.dst]=1'b1; gpr_wd[v_d.dst]=v_lea_addr;
-              end else if (v_d.is_branch || v_d.is_nop) begin
+            if (pipe_pair_eff) begin
+              if (pipe_v_eff.is_lea) begin
+                gpr_we[pipe_v_eff.dst]=1'b1; gpr_wd[pipe_v_eff.dst]=v_lea_addr;
+              end else if (pipe_v_eff.is_branch || pipe_v_eff.is_nop) begin
                 // no register write
               end else begin
-                if (v_d.wreg) begin gpr_we[v_d.dst]=1'b1;
-                  gpr_wd[v_d.dst]= reg_merge(gpr_o[v_d.dst], v_alu, v_d.w16 ? 3'd2 : 3'd4, 1'b0); end
+                if (pipe_v_eff.wreg) begin gpr_we[pipe_v_eff.dst]=1'b1;
+                  gpr_wd[pipe_v_eff.dst]= reg_merge(gpr_o[pipe_v_eff.dst], v_alu, fp_operand_width(pipe_v_eff), pipe_v_eff.dst_hi8); end
               end
             end
           end

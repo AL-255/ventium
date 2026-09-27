@@ -831,7 +831,15 @@
         // {base[15:0],limit} word, beat 1 the base[31:16] half; then retire.
         // -------------------------------------------------------------------
         S_SGDT: begin
-          if (mem_ack) begin
+          // Walk detours leave these phase latches intact. The main FSM's
+          // fault/walk priority prevents advance until this page is validated.
+          if (sgdt_probe_q) begin
+            if (!seg_access_fault && !perm_fault && !xlate_miss && !fe_xlate_pend) begin
+              if (paging_on && sgdt_probe_cross && !sgdt_probe_second)
+                sgdt_probe_second <= 1'b1;
+              else begin sgdt_probe_q<=1'b0; sgdt_probe_second<=1'b0; end
+            end
+          end else if (mem_ack) begin
             if (!seg_step) seg_step <= 1'b1;
             else begin
               eip<=next_eip; retire_valid<=1'b1; state<=S_PIPE; seg_step<=1'b0;

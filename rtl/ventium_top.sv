@@ -35,6 +35,7 @@
 
 module ventium_top
   import ventium_pkg::*;
+#(parameter bit AXI_LINE_REPLAY = 1'b1)
 (
     input  logic        clk,
     input  logic        rst_n,     // active-low synchronous reset, held ≥1 cycle
@@ -362,12 +363,24 @@ module ventium_top
   // to the bus subsystem FRONT and the response side comes back from it. The mux
   // is below the core instance. (Declared here so the core can bind to them.)
   logic        core_mem_req, core_mem_we;
-  logic core_mem_lock;   // REVIEW1_Aug2 C-10
+  logic        core_mem_lock;       // raw external LOCK# qualifier for this beat
+  logic        core_mem_lock_hold;  // local L1/AXI reservation across RMW detours
+  logic        core_mem_lock_end;   // one-cycle architectural session completion/abort
   logic [31:0] core_mem_addr, core_mem_wdata;
   logic [31:0] core_mem_lin;   // task #51: pre-translate linear addr for the SMC snoop
   logic [3:0]  core_mem_wstrb;
   logic [31:0] core_mem_rdata;
   logic        core_mem_ack;
+`ifdef VEN_PIPE_MEM_CHAIN
+  logic core_mem_next_req, core_mem_next_commit, core_mem_next_ready;
+  logic [31:0] core_mem_next_addr;
+  logic [3:0] core_mem_next_wstrb;
+  logic l1_next_ready;
+`endif
+`ifdef VEN_FP_LOAD64
+  logic [31:0] core_mem_rdata_hi;
+  logic        core_mem_rdata_hi_valid;
+`endif
   // P54C §2.6 write-buffer ordering: memory stores may retire into the two
   // bounded buffers, but IN/OUT must wait until pending writes have reached the
   // external bus.  In non-L1 modes this is a compile-time/direct-path no-op.
@@ -772,8 +785,12 @@ module ventium_top
 `endif
       .mem_req      (core_mem_req),
       .mem_we       (core_mem_we),
-      // REVIEW1_Aug2 C-10: the locked-RMW request, carried to the bus wrapper.
+      // Raw LOCK# qualifies an individual physical beat.  The distinct session
+      // hold feeds both the L1/AXI local-DMA arbiter and the pin BIU, which
+      // cannot infer a multi-write/no-write RMW completion from W/R# alone.
       .mem_lock     (core_mem_lock),
+      .mem_lock_hold(core_mem_lock_hold),
+      .mem_lock_end (core_mem_lock_end),
       .ic_mtype_nc  (core_ic_nc),          // REVIEW2_aug2 H-13
       .mem_addr     (core_mem_addr),
       .mem_lin      (core_mem_lin),
@@ -781,6 +798,15 @@ module ventium_top
       .mem_wstrb    (core_mem_wstrb),
       .bus_rdata    (core_mem_rdata),
       .bus_ack      (core_mem_ack),
+`ifdef VEN_PIPE_MEM_CHAIN
+      .mem_next_req(core_mem_next_req), .mem_next_commit(core_mem_next_commit),
+      .mem_next_addr(core_mem_next_addr), .mem_next_wstrb(core_mem_next_wstrb),
+      .mem_next_ready(core_mem_next_ready),
+`endif
+`ifdef VEN_FP_LOAD64
+      .bus_rdata_hi (core_mem_rdata_hi),
+      .bus_rdata_hi_valid(core_mem_rdata_hi_valid),
+`endif
       .retire_valid (core_retire_valid),
       .retire_pc    (core_retire_pc),
       .retire_state (core_retire_state),
@@ -958,11 +984,62 @@ module ventium_top
   end
 `endif
 
+`ifdef VEN_FP_ASYNC
+`ifndef VTM_NO_DPI
+`ifdef VEN_FP_ASYNC_STREAM
+  logic [63:0] fp_async_trace_owners [4];
+  logic [1:0] fp_async_trace_head, fp_async_trace_tail;
+  logic [2:0] fp_async_trace_count;
+  wire fp_async_trace_begin = core_retire_valid && u_core.fp_async_retire_q;
+  wire fp_async_trace_done = u_core.fp_async_pending && u_core.fp_shared_rsp_valid;
+  wire [63:0] fp_async_complete_owner = (fp_async_trace_count != 0) ?
+      fp_async_trace_owners[fp_async_trace_head] : retire_n;
+  always_ff @(posedge clk) begin
+    if (!rst_n) begin
+      fp_async_trace_head <= 0; fp_async_trace_tail <= 0; fp_async_trace_count <= 0;
+      for (int i=0; i<4; i++) fp_async_trace_owners[i] <= 0;
+    end else begin
+      if (fp_async_trace_begin) begin
+        if (fp_async_trace_count == 4 && !fp_async_trace_done)
+          $fatal(1, "FP trace owner overflow");
+        fp_async_trace_owners[fp_async_trace_tail] <= retire_n;
+        fp_async_trace_tail <= fp_async_trace_tail + 1'b1;
+      end
+      if (fp_async_trace_done) begin
+        if (fp_async_trace_count == 0 && !fp_async_trace_begin)
+          $fatal(1, "FP trace completion without owner");
+        fp_async_trace_head <= fp_async_trace_head + 1'b1;
+      end
+      case ({fp_async_trace_begin, fp_async_trace_done})
+        2'b10: fp_async_trace_count <= fp_async_trace_count + 1'b1;
+        2'b01: fp_async_trace_count <= fp_async_trace_count - 1'b1;
+        default: begin end
+      endcase
+    end
+  end
+`else
+  logic [63:0] fp_async_trace_owner;
+  wire [63:0] fp_async_complete_owner = u_core.fp_async_retire_q ?
+                                          retire_n : fp_async_trace_owner;
+`endif
+`endif
+`endif
   always_ff @(posedge clk) begin
     if (!rst_n) begin
       retire_n <= 64'd0;
-    end else if (core_retire_valid) begin
+    end else begin
+      if (core_retire_valid) begin
 `ifndef VTM_NO_DPI
+`ifdef VEN_FP_ASYNC
+      if (u_core.fp_async_retire_q) begin
+`ifdef VEN_FP_ASYNC_STREAM
+        vtm_fp_async_event(32'd2, retire_n);
+`else
+        fp_async_trace_owner <= retire_n;
+        vtm_fp_async_event(32'd0, retire_n);
+`endif
+      end
+`endif
       // ---- M2S.1 system hook: stash cr0..cr4 keyed by `n` BEFORE vtm_retire ---
       // Only a system-mode core raises core_retire_sys; the TB (under --system)
       // drains the stash on the matching vtm_retire and emits the sys fields.
@@ -1004,6 +1081,11 @@ module ventium_top
       // n increments by one; the V insn shares the TB clock (same cyc) and
       // carries pipe=V paired=true. x87 state is the same snapshot.
       if (core_retire2_valid) begin
+        // V cannot change control registers. Supply the same system snapshot
+        // under V's own retirement index; otherwise cycle-func emits zero CRs
+        // for every V instruction because only U's index has a stashed record.
+        if (core_retire_sys)
+          vtm_retire_sys(retire_n + 64'd1, core_cr0, core_cr2, core_cr3, core_cr4);
         vtm_retire_x87(
             retire_n + 64'd1,
             {16'd0, core_fctrl}, {16'd0, core_fstat}, {16'd0, core_ftag},
@@ -1027,6 +1109,23 @@ module ventium_top
       end
 `endif
       retire_n <= retire_n + (core_retire2_valid ? 64'd2 : 64'd1);
+      end
+`ifdef VEN_FP_ASYNC
+`ifndef VTM_NO_DPI
+      // Run after any integer retire callbacks from this edge. Their snapshots
+      // remain queued until the real committed x87 state is supplied here.
+      if (u_core.fp_async_pending && u_core.fp_shared_rsp_valid) begin
+        vtm_retire_x87(
+          fp_async_complete_owner,
+          {16'd0, core_fctrl}, {16'd0, core_fstat}, {16'd0, core_ftag},
+          core_st0[63:0], core_st0[79:64], core_st1[63:0], core_st1[79:64],
+          core_st2[63:0], core_st2[79:64], core_st3[63:0], core_st3[79:64],
+          core_st4[63:0], core_st4[79:64], core_st5[63:0], core_st5[79:64],
+          core_st6[63:0], core_st6[79:64], core_st7[63:0], core_st7[79:64]);
+        vtm_fp_async_event(32'd1, fp_async_complete_owner);
+      end
+`endif
+`endif
     end
   end
 
@@ -1093,7 +1192,9 @@ module ventium_top
       // FRONT: core 32b request (gated by bus_mode so the subsystem is inert at 0)
       .c_req    (bus_mode ? core_mem_req : 1'b0),
       .c_we     (core_mem_we),
-      .c_lock   (core_mem_lock),   // REVIEW1_Aug2 C-10
+      .c_lock   (core_mem_lock),
+      .c_lock_hold(bus_mode ? core_mem_lock_hold : 1'b0),
+      .c_lock_end (bus_mode ? core_mem_lock_end : 1'b0),
       .c_addr   (core_mem_addr),
       .c_wdata  (core_mem_wdata),
       .c_wstrb  (core_mem_wstrb),
@@ -1148,6 +1249,10 @@ module ventium_top
   localparam bit L1AXI_NARROW_REPLAY_SAFE = 1'b0;
 `endif
   logic [31:0] l1_c_rdata; logic l1_c_ack; logic l1_bus_err;
+`ifdef VEN_FP_LOAD64
+  logic [31:0] l1_c_rdata_hi;
+  logic        l1_c_rdata_hi_valid;
+`endif
   // REVIEW2_aug2 H-13: the I-side memory type, from ven_cachemap inside ventium_l1_axi.
   // Gated on l1axi_en for the same reason core_req is: in bus modes 0/1 there is no
   // northbridge in the datapath, so its region model does not apply and those modes
@@ -1162,6 +1267,7 @@ module ventium_top
   // timing model.  The package constant makes that single configuration explicit.
   ventium_l1_axi #(.ADDR_W(40), .REMAP_BASE(L1AXI_REMAP_BASE), .ADDR_MASK(L1AXI_ADDR_MASK),
                    .NARROW_REPLAY_SAFE(L1AXI_NARROW_REPLAY_SAFE),
+                   .LINE_REPLAY(AXI_LINE_REPLAY),
                    .L1_SETS(ventium_pkg::L1D_SETS_DEF)) u_l1axi (
       .core_clk(clk), .core_rst_n(rst_n), .axi_clk(clk), .axi_rst_n(rst_n),
       .flush_all (flush_all || core_cache_inv),   // REVIEW2_aug2 H-18
@@ -1169,7 +1275,12 @@ module ventium_top
       // the configuration used for FPGA memory has no lock information at all. Passed
       // in now -- see ventium_l1_axi for why it is MEASURED rather than driven onto
       // AxLOCK.
-      .core_lock (core_mem_lock),
+      // Keep the physically instantiated L1/DMA arbiter completely inert in
+      // direct and bus-protocol-exerciser modes.  Passing a live lock session
+      // while core_req is gated off would otherwise reserve its local DMA
+      // ingress even though this L1 is not the active memory path.
+      .core_lock (l1axi_en ? core_mem_lock : 1'b0),
+      .core_lock_hold (l1axi_en ? core_mem_lock_hold : 1'b0),
       .golden_l1 (golden_l1),
       .shutdown  (shutdown), .m_idle (m_idle),
       .smm_active         (core_smm_active),            // REVIEW2 H-24
@@ -1187,8 +1298,18 @@ module ventium_top
       .core_wdata(core_mem_wdata),
       .core_wstrb(core_mem_wstrb),
       .core_rdata(l1_c_rdata),
+`ifdef VEN_FP_LOAD64
+      .core_rdata_hi(l1_c_rdata_hi),
+      .core_rdata_hi_valid(l1_c_rdata_hi_valid),
+`endif
       .core_ic_nocache (l1_ic_nocache),      // REVIEW2_aug2 H-13
       .core_ack  (l1_c_ack),
+`ifdef VEN_PIPE_MEM_CHAIN
+      .core_next_req(l1axi_en && core_mem_next_req),
+      .core_next_commit(l1axi_en && core_mem_next_commit),
+      .core_next_addr(core_mem_next_addr), .core_next_wstrb(core_mem_next_wstrb),
+      .core_next_ready(l1_next_ready),
+`endif
       .bus_err   (l1_bus_err),
       .m_axi_awid(m_axi_awid), .m_axi_awaddr(m_axi_awaddr), .m_axi_awlen(m_axi_awlen),
       .m_axi_awsize(m_axi_awsize), .m_axi_awburst(m_axi_awburst), .m_axi_awlock(m_axi_awlock),
@@ -1217,6 +1338,13 @@ module ventium_top
 
   assign core_mem_rdata = l1axi_en ? l1_c_rdata : (bus_mode ? bus_c_rdata : mem_rdata);
   assign core_mem_ack   = l1axi_en ? l1_c_ack   : (bus_mode ? bus_c_ack   : mem_ack);
+`ifdef VEN_PIPE_MEM_CHAIN
+  assign core_mem_next_ready = l1axi_en && l1_next_ready;
+`endif
+`ifdef VEN_FP_LOAD64
+  assign core_mem_rdata_hi = l1axi_en ? l1_c_rdata_hi : 32'd0;
+  assign core_mem_rdata_hi_valid = l1axi_en && l1_c_rdata_hi_valid;
+`endif
   assign core_ic_nc     = l1axi_en ? l1_ic_nocache : 1'b0;    // REVIEW2_aug2 H-13
 `else
   assign mem_req   = bus_mode ? bus_mem_req   : core_mem_req;
@@ -1227,6 +1355,10 @@ module ventium_top
 
   assign core_mem_rdata = bus_mode ? bus_c_rdata : mem_rdata;
   assign core_mem_ack   = bus_mode ? bus_c_ack   : mem_ack;
+`ifdef VEN_FP_LOAD64
+  assign core_mem_rdata_hi = 32'd0;
+  assign core_mem_rdata_hi_valid = 1'b0;
+`endif
   // H-13: no L1AXI/northbridge in this build, so there is no region information to
   // have. Tied 0 rather than guessed.
   assign core_ic_nc     = 1'b0;

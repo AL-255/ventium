@@ -129,8 +129,16 @@ module ventium_l1_axi_top #(
       .axi_clk     (axi_clk),    .axi_rst_n   (axi_rst_n),
       .flush_all   (flush_all),
       .shutdown    (shutdown),   .m_idle      (m_idle),
+      .core_lock   (1'b0),       .core_lock_hold(1'b0),
       .core_req    (core_req),   .core_we     (core_we),    .core_addr  (core_addr),
       .core_wdata  (core_wdata), .core_wstrb  (core_wstrb), .core_rdata (core_rdata),
+`ifdef VEN_FP_LOAD64
+      .core_rdata_hi(), .core_rdata_hi_valid(),
+`endif
+`ifdef VEN_PIPE_MEM_CHAIN
+      .core_next_req(1'b0), .core_next_commit(1'b0),
+      .core_next_addr(32'd0), .core_next_wstrb(4'd0), .core_next_ready(),
+`endif
       .core_ack    (core_ack),
       .bus_err     (bus_err),
       .m_axi_awid    (m_axi_awid),    .m_axi_awaddr  (m_axi_awaddr),

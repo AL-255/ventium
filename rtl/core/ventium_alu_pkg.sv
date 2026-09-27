@@ -168,8 +168,11 @@ package ventium_alu_pkg;
     begin
       bits=(w==3'd2)?6'd16:6'd32;
       if (cnt==0) r=dst;
-      else if (is_shrd) r=(dst>>cnt)|(src<<(bits-cnt));
-      else              r=(dst<<cnt)|(src>>(bits-cnt));
+      // Mask BEFORE shifting: upper GPR halves are not operand bits for
+      // 16-bit forms. Masking only the result leaks dst[31:16] into SHRD
+      // (VMM32's CX=5074, ECX=00015074 witness) or src[31:16] into SHLD.
+      else if (is_shrd) r=(wmask(dst,w)>>cnt)|(wmask(src,w)<<(bits-cnt));
+      else              r=(wmask(dst,w)<<cnt)|(wmask(src,w)>>(bits-cnt));
       return wmask(r,w);
     end
   endfunction

@@ -11,7 +11,7 @@ module tb_ven_fp_alu;
   logic [2:0] subop;
   logic [79:0] operand_a, operand_b;
   logic [1:0] rc, pc;
-  logic busy, done;
+  logic busy, done, commit_next;
   logic [84:0] result;
   logic ref_vld, ref_pe;
   logic [79:0] ref_y;

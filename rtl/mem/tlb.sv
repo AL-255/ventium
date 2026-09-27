@@ -54,6 +54,14 @@ module tlb #(
     output logic [31:0] lk_phys,
     output logic [2:0]  lk_perm,            // effective {US, RW, P}
     output logic        lk_dirty,           // D-TLB only (I-TLB: always 0)
+`ifdef VEN_PIPE_MEM_CHAIN
+    // Read-only lookahead query; shares entries, never walks/touches/replaces.
+    input  logic [31:0] next_lin,
+    output logic        next_hit,
+    output logic [31:0] next_phys,
+    output logic [2:0]  next_perm,
+    output logic        next_dirty,
+`endif
 
     // ---- Pulsed fill-commit (from S_WALK ONLY, gated walk_for_d==IS_D in the
     // spine): when fill_en is high at a posedge, commit one entry for fill_lin.
@@ -112,6 +120,15 @@ module tlb #(
     lk_dirty = tlb_dirty[ix];
   end
 
+`ifdef VEN_PIPE_MEM_CHAIN
+  always_comb begin
+    next_hit = IS_D && hit_of(next_lin);
+    next_phys = phys_of(next_lin);
+    next_perm = tlb_perm[tlb_idx(next_lin)];
+    next_dirty = IS_D && tlb_dirty[tlb_idx(next_lin)];
+  end
+`endif
+
   // Fill-commit / CR3-flush / reset — the SINGLE write port. Mutually exclusive
   // by construction (reset || flush(S_EXEC) || fill(S_WALK), never concurrent).
   // The fill commits the spine-computed pfn/perm (the PDE&PTE AND and the 4 MiB
@@ -134,5 +151,118 @@ module tlb #(
       tlb_big[ix]   <= fill_big;         tlb_dirty[ix] <= IS_D ? fill_dirty : 1'b0;
     end
   end
+
+`ifndef SYNTHESIS
+`ifdef VEN_TLB_PERF
+  // Simulation-only replacement attribution.  Keep this beside the arrays so
+  // a fill observes the PRE-NBA victim state, exactly as lookup does.  Nothing
+  // here feeds a functional signal: it is deliberately excluded from synthesis
+  // and does not add a port to the small standalone TLB testbench.
+  longint unsigned tlbp_fill;
+  longint unsigned tlbp_cold;
+  longint unsigned tlbp_postflush;
+  longint unsigned tlbp_invalid_other;
+  longint unsigned tlbp_same_vpn;
+  longint unsigned tlbp_conflict;
+  longint unsigned tlbp_dirty_fill;
+  longint unsigned tlbp_big_fill;
+  longint unsigned tlbp_flush;
+  longint unsigned tlbp_fill_idx          [TLB_ENTRIES];
+  longint unsigned tlbp_cold_idx          [TLB_ENTRIES];
+  longint unsigned tlbp_postflush_idx     [TLB_ENTRIES];
+  longint unsigned tlbp_same_vpn_idx      [TLB_ENTRIES];
+  longint unsigned tlbp_conflict_idx      [TLB_ENTRIES];
+  logic            tlbp_ever_filled       [TLB_ENTRIES];
+  logic            tlbp_flush_pending     [TLB_ENTRIES];
+  logic            tlbp_first_conflict_v  [TLB_ENTRIES];
+  logic [19:0]     tlbp_first_conflict_old[TLB_ENTRIES];
+  logic [19:0]     tlbp_first_conflict_new[TLB_ENTRIES];
+
+  always_ff @(posedge clk) begin
+    if (!rst_n) begin
+      tlbp_fill          <= 0;
+      tlbp_cold          <= 0;
+      tlbp_postflush     <= 0;
+      tlbp_invalid_other <= 0;
+      tlbp_same_vpn      <= 0;
+      tlbp_conflict      <= 0;
+      tlbp_dirty_fill    <= 0;
+      tlbp_big_fill      <= 0;
+      tlbp_flush         <= 0;
+      for (int t=0; t<TLB_ENTRIES; t++) begin
+        tlbp_fill_idx[t]           <= 0;
+        tlbp_cold_idx[t]           <= 0;
+        tlbp_postflush_idx[t]      <= 0;
+        tlbp_same_vpn_idx[t]       <= 0;
+        tlbp_conflict_idx[t]       <= 0;
+        tlbp_ever_filled[t]        <= 1'b0;
+        tlbp_flush_pending[t]      <= 1'b0;
+        tlbp_first_conflict_v[t]   <= 1'b0;
+        tlbp_first_conflict_old[t] <= 20'd0;
+        tlbp_first_conflict_new[t] <= 20'd0;
+      end
+    end else if (flush_en) begin
+      // Mirror the functional writer's priority.  Only an actually valid slot
+      // can later be classified as a refill caused by this flush; stale data
+      // intentionally left behind by the architectural val-clear is not an
+      // eviction and must not be counted as one.
+      tlbp_flush <= tlbp_flush + 1;
+      for (int t=0; t<TLB_ENTRIES; t++)
+        if (tlb_val[t]) tlbp_flush_pending[t] <= 1'b1;
+    end else if (fill_en) begin
+      logic [3:0] ix;
+      ix = tlb_idx(fill_lin);
+      tlbp_fill         <= tlbp_fill + 1;
+      tlbp_fill_idx[ix] <= tlbp_fill_idx[ix] + 1;
+      if (!tlb_val[ix]) begin
+        if (!tlbp_ever_filled[ix]) begin
+          tlbp_cold          <= tlbp_cold + 1;
+          tlbp_cold_idx[ix]  <= tlbp_cold_idx[ix] + 1;
+        end else if (tlbp_flush_pending[ix]) begin
+          tlbp_postflush         <= tlbp_postflush + 1;
+          tlbp_postflush_idx[ix] <= tlbp_postflush_idx[ix] + 1;
+        end else begin
+          // No functional path invalidates one entry today.  Retain this
+          // bucket so a future invalidation feature cannot masquerade as a
+          // cold miss in profiling output.
+          tlbp_invalid_other <= tlbp_invalid_other + 1;
+        end
+      end else if (tlb_vpn[ix] == fill_lin[31:12]) begin
+        // On the D side this is normally the clean-to-dirty rewalk; retain the
+        // neutral name because page-table edits may also legitimately refill
+        // an existing linear page.
+        tlbp_same_vpn         <= tlbp_same_vpn + 1;
+        tlbp_same_vpn_idx[ix] <= tlbp_same_vpn_idx[ix] + 1;
+      end else begin
+        tlbp_conflict         <= tlbp_conflict + 1;
+        tlbp_conflict_idx[ix] <= tlbp_conflict_idx[ix] + 1;
+        if (!tlbp_first_conflict_v[ix]) begin
+          tlbp_first_conflict_v[ix]   <= 1'b1;
+          tlbp_first_conflict_old[ix] <= tlb_vpn[ix];
+          tlbp_first_conflict_new[ix] <= fill_lin[31:12];
+        end
+      end
+      if (IS_D && fill_dirty) tlbp_dirty_fill <= tlbp_dirty_fill + 1;
+      if (fill_big)           tlbp_big_fill   <= tlbp_big_fill + 1;
+      tlbp_ever_filled[ix]    <= 1'b1;
+      tlbp_flush_pending[ix]  <= 1'b0;
+    end
+  end
+
+  final begin
+    $display("[TLBPERF:ARRAY] side=%0d fill=%0d cold=%0d postflush=%0d invalid-other=%0d same-vpn=%0d conflict=%0d dirty-fill=%0d big-fill=%0d flush=%0d",
+             IS_D, tlbp_fill, tlbp_cold, tlbp_postflush, tlbp_invalid_other,
+             tlbp_same_vpn, tlbp_conflict, tlbp_dirty_fill, tlbp_big_fill,
+             tlbp_flush);
+    for (int t=0; t<TLB_ENTRIES; t++)
+      if (tlbp_fill_idx[t] != 0)
+        $display("[TLBPERF:ARRAY] side=%0d idx=%0d fill=%0d cold=%0d postflush=%0d same-vpn=%0d conflict=%0d first-conflict=%05x->%05x",
+                 IS_D, t, tlbp_fill_idx[t], tlbp_cold_idx[t],
+                 tlbp_postflush_idx[t], tlbp_same_vpn_idx[t],
+                 tlbp_conflict_idx[t], tlbp_first_conflict_old[t],
+                 tlbp_first_conflict_new[t]);
+  end
+`endif
+`endif
 
 endmodule : tlb

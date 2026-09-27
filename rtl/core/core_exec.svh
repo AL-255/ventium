@@ -613,11 +613,12 @@
                 // Equal iff EDX:EAX == high:low. ONLY ZF is affected (CF/PF/AF/SF/OF
                 // unchanged). Equal -> store ECX:EBX to [mem]:[mem+4] (2 beats via
                 // S_USEQ) and ZF=1. Not equal -> EDX:EAX <- [mem64], ZF=0, no store.
-                logic eq;
-                eq = (mem_load_data == gpr_o[R_EAX]) && (mem_load_data2 == gpr_o[R_EDX]);
-                eflags <= (eflags & ~(32'd1 << 6)) | (eq ? (32'd1 << 6) : 32'd0);
+                // cx8b_equal is shared with the LOCK-session lifecycle so the
+                // no-write result releases the local reservation on this same edge.
+                eflags <= (eflags & ~(32'd1 << 6)) |
+                          (cx8b_equal ? (32'd1 << 6) : 32'd0);
                 flags_we=1'b0;
-                if (eq) begin
+                if (cx8b_equal) begin
                   do_retire=1'b0; state<=S_USEQ; step<=4'd0;   // conditional 2-word store
                 end
                 // R3: not-equal EDX:EAX <- [mem64] load moved to the gpr writeback

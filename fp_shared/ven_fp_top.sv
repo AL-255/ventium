@@ -39,6 +39,12 @@ module ven_fp_top
     // that the adapter must consume.  The producer may retire this command on that
     // edge; stores and FNSTSW AX must still await rsp_valid.
     output      logic         cmd_accept_retire,
+    // One-cycle-ahead notification for a normal shared-ALU result.  It is
+    // registered here, and means the state-file will commit that result on the
+    // *current consumer edge*.  It is deliberately not a response/data path:
+    // payload-producing, SRT, misc, BCD, and transcendental commands continue
+    // to retire solely through rsp_valid.
+    output      logic         alu_commit_retire,
     input  wire fxop_e        cmd_op,
     input  wire logic [2:0]   cmd_aluop,
     input  wire logic [2:0]   cmd_sti,
@@ -95,6 +101,7 @@ module ven_fp_top
 
   // State commit wires.
   logic        c_init, c_push, c_write, c_swap, c_free;
+  logic        c_swap_materialize_empty;
   logic        c_inc_top, c_dec_top, c_status, c_control;
   logic        c_eptr, c_dptr, c_env, c_env_regs;
   logic [79:0] c_push_data, c_write_data;
@@ -108,7 +115,7 @@ module ven_fp_top
   logic [639:0] c_env_regs_phys;
 
   // Shared arithmetic pipeline.
-  logic        alu_start, alu_busy, alu_done;
+  logic        alu_start, alu_busy, alu_done, alu_commit_next;
   logic [2:0]  alu_subop;
   logic [79:0] alu_a, alu_b;
   logic [84:0] alu_result;
@@ -193,6 +200,21 @@ module ven_fp_top
   logic             fp_perf_active;
   logic [2:0]       fp_perf_class_q;
   longint unsigned  fp_perf_age;
+`ifdef VEN_FP_ARITH_STREAM
+  // Four owners include the registered response-observation cycle. These are
+  // simulation-only counters, not an extra hardware command/result queue.
+  logic [1:0] fp_perf_head, fp_perf_tail;
+  logic [2:0] fp_perf_count;
+  logic [2:0] fp_perf_owner_class [4];
+  longint unsigned fp_perf_owner_cycle [4];
+`endif
+  // Census the one proposed low-area fast-path candidate separately from the
+  // aggregate MISC class before changing its command/response contract.  The
+  // plain and pop forms have different architectural commit rules; a stack
+  // fault must never be counted as a normal direct-store opportunity.
+  longint unsigned fp_perf_fst_m80_plain;
+  longint unsigned fp_perf_fst_m80_pop;
+  longint unsigned fp_perf_fst_m80_stack_fault;
 
   function automatic logic [2:0] fp_perf_class;
     begin
@@ -241,8 +263,96 @@ module ven_fp_top
 `endif
 
   wire logic accept = cmd_valid & cmd_ready;
+`ifdef VEN_FP_ARITH_FWD
+`ifndef VEN_FP_ARITH_STREAM
+  initial $fatal(1, "VEN_FP_ARITH_FWD requires VEN_FP_ARITH_STREAM");
+`endif
+`endif
 
+`ifdef VEN_FP_ARITH_STREAM
+  // Metadata follows the three registered arithmetic stages; the existing
+  // state-file write port consumes stage 2 alongside alu_done. No extra
+  // arithmetic unit, speculative stack map or out-of-order write.
+  logic [2:0] arith_owner_valid;
+  logic [2:0] arith_owner_dst [3];
+  logic [2:0] arith_owner_pop;
+  logic arith_stream_eligible, arith_stream_hazard;
+  logic [2:0] arith_cmd_dst;
+  assign arith_cmd_dst = (cmd_op == FX_AR_STI_ST0) ? cmd_sti : 3'd0;
+`ifdef VEN_FP_ARITH_FWD
+  logic arith_forward_eligible, arith_forward_st0, arith_forward_sti;
+  logic [79:0] arith_operand_st0, arith_operand_sti;
+  // alu_result is the existing final REGISTER. Its owner commits on the
+  // same edge that a dependent command may capture these operands. Never
+  // forward an earlier arithmetic cone, a popped stack, or an empty source.
+  assign arith_forward_eligible = (top_state == TOP_ALU) && alu_done &&
+      arith_owner_valid[2] && !arith_owner_pop[2] && arith_stream_eligible &&
+      ((cmd_op == FX_AR_ST0_STI) || (cmd_op == FX_AR_STI_ST0));
+  assign arith_forward_st0 = arith_forward_eligible &&
+                             (arith_owner_dst[2] == 3'd0);
+  assign arith_forward_sti = arith_forward_eligible && issue_reads_sti &&
+                             (arith_owner_dst[2] == cmd_sti);
+  assign arith_operand_st0 = arith_forward_st0 ? alu_result[79:0] : st0_data;
+  assign arith_operand_sti = arith_forward_sti ? alu_result[79:0] : sti_data;
+`endif
+  always_comb begin
+    arith_stream_hazard = 1'b0;
+    for (int i=0; i<3; i++) begin
+      if (arith_owner_valid[i] &&
+          (arith_owner_pop[i] || arith_owner_dst[i] == 3'd0 ||
+           arith_owner_dst[i] == arith_cmd_dst ||
+           (issue_reads_sti && arith_owner_dst[i] == cmd_sti))
+`ifdef VEN_FP_ARITH_FWD
+          // Resolve only stage 2, and only if EVERY aliased read takes the
+          // registered result. Register arithmetic's WAW destination is also
+          // a source; it cannot bypass the corresponding RAW select.
+          && !((i == 2) && arith_forward_eligible &&
+               ((arith_owner_dst[i] != 3'd0) || arith_forward_st0) &&
+               ((!issue_reads_sti || arith_owner_dst[i] != cmd_sti) ||
+                arith_forward_sti))
+`endif
+         )
+        arith_stream_hazard = 1'b1;
+    end
+  end
+  assign arith_stream_eligible = !cmd_pop && !issue_stack_fault &&
+      (fctrl_o[5:0] == 6'h3f) && !fstat_o[7] &&
+      is_fast_arith(cmd_aluop) &&
+      ((cmd_op == FX_AR_ST0_STI) || (cmd_op == FX_AR_STI_ST0) ||
+       (cmd_op == FX_AR_M32) || (cmd_op == FX_AR_M64) ||
+       (cmd_op == FX_AR_I16) || (cmd_op == FX_AR_I32));
+  assign cmd_ready = (top_state == TOP_IDLE) ||
+      ((top_state == TOP_ALU) && arith_stream_eligible && !arith_stream_hazard);
+  always_ff @(posedge clk) begin
+    if (!rst_n) begin
+      arith_owner_valid <= '0;
+      arith_owner_pop <= '0;
+      for (int i=0; i<3; i++) arith_owner_dst[i] <= '0;
+    end else begin
+      arith_owner_valid <= {arith_owner_valid[1:0], alu_start};
+      arith_owner_pop <= {arith_owner_pop[1:0], cmd_pop};
+      arith_owner_dst[0] <= arith_cmd_dst;
+      arith_owner_dst[1] <= arith_owner_dst[0];
+      arith_owner_dst[2] <= arith_owner_dst[1];
+`ifndef SYNTHESIS
+      if ((top_state == TOP_ALU) && (alu_done != arith_owner_valid[2]))
+        $fatal(1, "FP arithmetic result lost its owner");
+`ifdef VEN_FP_ARITH_FWD
+      if (accept && arith_forward_eligible) begin
+        if ((arith_owner_dst[2] == 3'd0) &&
+            ((cmd_op == FX_AR_STI_ST0 ? alu_b : alu_a) != alu_result[79:0]))
+          $fatal(1, "FP_ARITH_FWD: ST0 alias did not select registered result");
+        if ((arith_owner_dst[2] == cmd_sti) &&
+            ((cmd_op == FX_AR_STI_ST0 ? alu_a : alu_b) != alu_result[79:0]))
+          $fatal(1, "FP_ARITH_FWD: STi alias did not select registered result");
+      end
+`endif
+`endif
+    end
+  end
+`else
   assign cmd_ready = (top_state == TOP_IDLE);
+`endif
   assign busy      = (top_state != TOP_IDLE);
 
   ven_fp_state u_state (
@@ -281,6 +391,7 @@ module ven_fp_top
       .write_mark_valid(c_write_valid),
       .commit_swap(c_swap),
       .swap_idx(c_swap_idx),
+      .commit_swap_materialize_empty(c_swap_materialize_empty),
       .commit_pop(c_pop),
       .commit_free(c_free),
       .free_idx(c_free_idx),
@@ -327,6 +438,7 @@ module ven_fp_top
       .pc((top_state == TOP_TRANS) ? trans_fx_pc : fctrl_o[9:8]),
       .busy(alu_busy),
       .done(alu_done),
+      .commit_next(alu_commit_next),
       .result(alu_result)
   );
 
@@ -512,12 +624,22 @@ module ven_fp_top
   // Operand selection mirrors fpu_writeback's proven instruction forms.
   always_comb begin
     alu_subop = cmd_aluop;
+`ifdef VEN_FP_ARITH_FWD
+    alu_a = arith_operand_st0;
+    alu_b = arith_operand_sti;
+`else
     alu_a = st0_data;
     alu_b = sti_data;
+`endif
     unique case (cmd_op)
       FX_AR_STI_ST0: begin
+`ifdef VEN_FP_ARITH_FWD
+        alu_a = arith_operand_sti;
+        alu_b = arith_operand_st0;
+`else
         alu_a = sti_data;
         alu_b = st0_data;
+`endif
       end
       FX_AR_M32, FX_AR_M64: begin
         alu_b = f_mem_as_float(cmd_mem, cmd_mem_bytes);
@@ -704,6 +826,7 @@ module ven_fp_top
     c_write_valid= 1'b0;
     c_swap       = 1'b0;
     c_swap_idx   = 3'd0;
+    c_swap_materialize_empty = 1'b0;
     c_pop        = 2'd0;
     c_free       = 1'b0;
     c_free_idx   = 3'd0;
@@ -947,17 +1070,44 @@ module ven_fp_top
             FX_FBSTP: c_pop = 2'd1;
             default: begin end
           endcase
+
+          // A masked stack underflow materializes the real-indefinite result
+          // in its architectural destination.  That destination can itself
+          // have been EMPTY (notably DE FADDP/ST(i),ST(0) followed by a pop),
+          // so writing its bits alone is insufficient: the state file must
+          // clear the EMPTY tag on the same commit.  Keep this after the
+          // table, since several deferred forms create c_write there.  The
+          // state file applies the write before c_pop; for i==0 a same-edge
+          // pop still correctly leaves the popped slot EMPTY.
+          if (issue_underflow && c_write)
+            c_write_valid = 1'b1;
+
+          // FXCH is unlike the other direct-result forms: it is normally a
+          // map-pointer exchange, so neither operand passes through c_write.
+          // SDM requires a masked empty operand to become real-indefinite
+          // before that exchange.  Tell the state file to materialize only
+          // this rare faulting form; normal FXCH retains its compact swap.
+          if (issue_underflow && c_swap)
+            c_swap_materialize_empty = 1'b1;
         end
       end
     end
 
     if ((top_state == TOP_ALU) && alu_done) begin
       c_write       = 1'b1;
+`ifdef VEN_FP_ARITH_STREAM
+      c_write_idx   = arith_owner_dst[2];
+`else
       c_write_idx   = pending_dst;
+`endif
       c_write_data  = alu_result[79:0];
       c_status      = 1'b1;
       c_status_data = f_arith_fstat(fstat_o, alu_result);
+`ifdef VEN_FP_ARITH_STREAM
+      c_pop         = arith_owner_pop[2] ? 2'd1 : 2'd0;
+`else
       c_pop         = pending_pop ? 2'd1 : 2'd0;
+`endif
     end
 
     if ((top_state == TOP_SRT) && srt_done) begin
@@ -1107,6 +1257,7 @@ module ven_fp_top
       pending_dst     <= 3'd0;
       pending_pop     <= 1'b0;
       pending_op      <= FX_NONE;
+      alu_commit_retire <= 1'b0;
       rsp_valid       <= 1'b0;
       rsp_unsupported <= 1'b0;
       rsp_stack_fault <= 1'b0;
@@ -1123,6 +1274,18 @@ module ven_fp_top
       fp_perf_active <= 1'b0;
       fp_perf_class_q <= FPPC_IMMEDIATE;
       fp_perf_age <= 64'd0;
+`ifdef VEN_FP_ARITH_STREAM
+      fp_perf_head <= 0;
+      fp_perf_tail <= 0;
+      fp_perf_count <= 0;
+      for (int i=0; i<4; i++) begin
+        fp_perf_owner_class[i] <= 0;
+        fp_perf_owner_cycle[i] <= 0;
+      end
+`endif
+      fp_perf_fst_m80_plain <= 64'd0;
+      fp_perf_fst_m80_pop <= 64'd0;
+      fp_perf_fst_m80_stack_fault <= 64'd0;
       for (int i = 0; i < 7; i++) fp_perf_state[i] <= 64'd0;
       for (int i = 0; i < FP_PERF_NCLASS; i++) begin
         fp_perf_accept[i] <= 64'd0;
@@ -1131,6 +1294,13 @@ module ven_fp_top
 `endif
 `endif
     end else begin
+      // The registered ALU's stage-1 valid predicts the next architectural
+      // state-file commit one edge ahead.  Register that fact instead of
+      // forwarding it combinationally: a core observing this pulse on its
+      // next edge retires precisely alongside the existing TOP_ALU c_write.
+      // This removes only the adapter's obsolete response-observation bubble;
+      // `rsp_valid` remains the complete, registered response contract.
+      alu_commit_retire <= (top_state == TOP_ALU) && alu_commit_next;
       rsp_valid       <= 1'b0;
       rsp_unsupported <= 1'b0;
       rsp_stack_fault <= 1'b0;
@@ -1140,9 +1310,39 @@ module ven_fp_top
 `ifdef VEN_FP_PERF
       fp_perf_cycles <= fp_perf_cycles + 64'd1;
       fp_perf_state[int'(top_state)] <= fp_perf_state[int'(top_state)] + 64'd1;
+      if (accept && (cmd_op == FX_FST_M80)) begin
+        if (issue_stack_fault)
+          fp_perf_fst_m80_stack_fault <= fp_perf_fst_m80_stack_fault + 64'd1;
+        else if (cmd_pop)
+          fp_perf_fst_m80_pop <= fp_perf_fst_m80_pop + 64'd1;
+        else
+          fp_perf_fst_m80_plain <= fp_perf_fst_m80_plain + 64'd1;
+      end
       // Responses are registered, so they observe the command accepted on a
       // preceding edge.  The 11 case keeps the accounting well-defined for a
       // future producer that submits a new command beside an old response.
+`ifdef VEN_FP_ARITH_STREAM
+      if (accept) begin
+        if (fp_perf_count == 4 && !rsp_valid)
+          $fatal(1, "FP perf owner overflow");
+        fp_perf_accept[fp_perf_class()] <= fp_perf_accept[fp_perf_class()] + 1;
+        fp_perf_owner_class[fp_perf_tail] <= fp_perf_class();
+        fp_perf_owner_cycle[fp_perf_tail] <= fp_perf_cycles;
+        fp_perf_tail <= fp_perf_tail + 1'b1;
+      end
+      if (rsp_valid) begin
+        if (fp_perf_count == 0) $fatal(1, "FP perf response without owner");
+        fp_perf_latency[fp_perf_owner_class[fp_perf_head]] <=
+            fp_perf_latency[fp_perf_owner_class[fp_perf_head]] +
+            (fp_perf_cycles - fp_perf_owner_cycle[fp_perf_head]);
+        fp_perf_head <= fp_perf_head + 1'b1;
+      end
+      case ({accept, rsp_valid})
+        2'b10: fp_perf_count <= fp_perf_count + 1'b1;
+        2'b01: fp_perf_count <= fp_perf_count - 1'b1;
+        default: begin end
+      endcase
+`else
       unique case ({accept, rsp_valid && fp_perf_active})
         2'b10: begin
           fp_perf_accept[fp_perf_class()] <= fp_perf_accept[fp_perf_class()] + 64'd1;
@@ -1165,6 +1365,7 @@ module ven_fp_top
         end
         default: if (fp_perf_active) fp_perf_age <= fp_perf_age + 64'd1;
       endcase
+`endif
 `endif
 `endif
 
@@ -1315,6 +1516,9 @@ module ven_fp_top
           if (alu_done) begin
             rsp_valid   <= 1'b1;
             rsp_arith   <= alu_result;
+`ifdef VEN_FP_ARITH_STREAM
+            if (!(arith_owner_valid[0] || arith_owner_valid[1] || alu_start))
+`endif
             top_state   <= TOP_IDLE;
           end
         end
@@ -1406,6 +1610,11 @@ module ven_fp_top
                  fp_perf_class_name(3'(i)), fp_perf_accept[i], fp_perf_latency[i],
                  fp_perf_latency[i] / fp_perf_accept[i],
                  ((fp_perf_latency[i] * 100) / fp_perf_accept[i]) % 100);
+    if ((fp_perf_fst_m80_plain != 0) || (fp_perf_fst_m80_pop != 0) ||
+        (fp_perf_fst_m80_stack_fault != 0))
+      $display("[FPPERF] FST m80 census: plain=%0d pop=%0d stack-fault=%0d",
+               fp_perf_fst_m80_plain, fp_perf_fst_m80_pop,
+               fp_perf_fst_m80_stack_fault);
   end
 `endif
 `endif

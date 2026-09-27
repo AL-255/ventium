@@ -34,7 +34,7 @@ module tb_ven_fp_arch_ab;
   always #5 clk = ~clk;
 
   // Candidate command and response.
-  logic cmd_valid, cmd_ready, cmd_accept_retire;
+  logic cmd_valid, cmd_ready, cmd_accept_retire, new_alu_commit_retire;
   fxop_e cmd_op;
   logic [2:0] cmd_aluop, cmd_sti, cmd_constant;
   logic cmd_pop, cmd_fdiv_bug, cmd_fist_bug;
@@ -61,7 +61,8 @@ module tb_ven_fp_arch_ab;
   ven_fp_top u_new (
       .clk(clk), .rst_n(rst_n),
       .cmd_valid(cmd_valid), .cmd_ready(cmd_ready),
-      .cmd_accept_retire(cmd_accept_retire), .cmd_op(cmd_op),
+      .cmd_accept_retire(cmd_accept_retire),
+      .alu_commit_retire(new_alu_commit_retire), .cmd_op(cmd_op),
       .cmd_aluop(cmd_aluop), .cmd_sti(cmd_sti), .cmd_pop(cmd_pop),
       .cmd_constant(cmd_constant), .cmd_mem(cmd_mem),
       .cmd_mem_bytes(cmd_mem_bytes), .cmd_fdiv_bug(cmd_fdiv_bug),
@@ -98,9 +99,10 @@ module tb_ven_fp_arch_ab;
   logic [31:0] env_tmp [47];
   logic xlate_miss, issue_block;
   logic [6:0] stall_cnt, pending_mem_pen;
-  logic pipe_bytes_ok, v_bytes_ok, pair_block;
+  logic pipe_bytes_ok, v_bytes_ok, pair_block, fp_v_fold_ok;
   logic [31:0] core_cyc, fp_ready_cyc;
   logic fp_occ_pending;
+  logic pipe_fp_live_arm;
   logic fstore_ie, fstore_pe, fstore_oe, fstore_ue;
   logic eng_div_done, eng_sqrt_done;
   logic [82:0] eng_div_result, eng_sqrt_result;
@@ -144,6 +146,7 @@ module tb_ven_fp_arch_ab;
   logic [79:0] fp_wsti_data; logic fp_wsti_clr_tag;
   logic fp_we_fxch; logic [2:0] fp_fxch_idx;
   logic [79:0] fp_fxch_a, fp_fxch_b;
+  logic fp_fxch_materialize_empty;
   logic fp_we_pop, fp_we_pop2, fp_we_ffree;
   logic [2:0] fp_ffree_idx;
   logic fp_we_incstp, fp_we_decstp;
@@ -181,6 +184,7 @@ module tb_ven_fp_arch_ab;
       .wsti_clr_tag(fp_wsti_clr_tag),
       .we_fxch(fp_we_fxch), .fxch_idx(fp_fxch_idx),
       .fxch_a(fp_fxch_a), .fxch_b(fp_fxch_b),
+      .fxch_materialize_empty(fp_fxch_materialize_empty),
       .we_pop(fp_we_pop), .we_pop2(fp_we_pop2),
       .we_ffree(fp_we_ffree), .ffree_idx(fp_ffree_idx),
       .we_incstp(fp_we_incstp), .we_decstp(fp_we_decstp),
@@ -467,8 +471,8 @@ module tb_ven_fp_arch_ab;
     q_pc=32'h1000; q_ea=32'h2000; dbase=32'h3000;
     mem_rdata=0; f_mem80=0; fenv_last=6'd26;
     xlate_miss=0; issue_block=0; stall_cnt=0; pipe_bytes_ok=1;
-    pending_mem_pen=0; v_bytes_ok=1; pair_block=0;
-    core_cyc=0; fp_ready_cyc=0; fp_occ_pending=0;
+    pending_mem_pen=0; v_bytes_ok=1; pair_block=0; fp_v_fold_ok=1;
+    core_cyc=0; fp_ready_cyc=0; fp_occ_pending=0; pipe_fp_live_arm=1;
     eng_div_result=0; eng_sqrt_result=0; eng_bcd_result=0;
     eng_fbld_result=0; eng_trsc_result=0; eng_fs_sin=0; eng_fs_cos=0;
     eng_fprem_result=0; eng_fprem_q012=0;

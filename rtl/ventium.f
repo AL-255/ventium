@@ -75,6 +75,7 @@ fpu/ven_bcd_to_fp.sv
 ../fp_shared/ven_fp_estdiv.sv
 ../fp_shared/ven_fp_trans.sv
 ../fp_shared/ven_fp_top.sv
+../fp_shared/ven_fp_fxch_queue.sv
 // iterative x87 transcendental engine (F2XM1, #11) — instantiated by core.sv only
 // under +define+VEN_TRANSCENDENTAL; harmless (uninstantiated) in the default build.
 fpu/fpu_f2xm1.sv
@@ -88,8 +89,12 @@ mem/dcache_timing.sv
 mem/icache.sv
 // predecoded micro-op cache (predecode-on-fill, P0-11). Instantiated by core.sv
 // only under +define+VEN_UOPCACHE; harmless (uninstantiated) in the default build.
+mem/ven_predecode_len.sv
 mem/uopcache.sv
 mem/tlb.sv
+// Default-off associative D-TLB experiment; core.sv selects it only under an
+// explicit VEN_DTLB_ASSOC_{2,4}WAY define.
+mem/tlb_assoc.sv
 
 // ---- bus ------------------------------------------------------------------
 // M5B-int: biu_p5 (the standalone pin-level 64-bit P5 bus FSM, M5B) is now in

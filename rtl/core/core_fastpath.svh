@@ -18,7 +18,11 @@
         // amortisation the p5model uses).
         // -------------------------------------------------------------------
         S_PF: begin
-          if (mem_ack) begin
+          // The fill port below uses this exact capture admission.  Advancing
+          // pf_word on a fault/flush-diverted acknowledgement would leave a
+          // valid cache line with an unwritten hole, so the sequencer holds the
+          // word until the cache can actually accept it.
+          if (fsm_case_enabled && !exec_flush_all && mem_ack) begin
             // The word write into ic_data (+ the fill-complete tag/val/MRU on the
             // last word) lands in the icache module via the ic_fill_* driver below
             // (set=pf_fill_addr[11:5], way=pf_fill_way, off={pf_word,2'b00}). This
@@ -37,6 +41,26 @@
         // prefetch buffer hand control to the proven multi-cycle FSM / refill.
         // -------------------------------------------------------------------
         S_PIPE: begin
+`ifndef SYNTHESIS
+          // Sample before the one-shot clear below, while this boundary still
+          // carries the token written by S_STORE.  prepsmi requires its first
+          // such boundary to show SMI diversion winning over token consumption.
+          if (ven_repcontlog_en && rep_stos_cont_q)
+            $display("[REPCONT] BOUNDARY cyc=%0d q_pc=%08x cont=%0b ready_noevent=%0b would_take_noevent=%0b profile=%0b sysok=%0b pen=%0d stall=%0d pipe_mem=%0b occ=%0b exec_ok=%0b eip_eq=%0b dbg=%0b poison=%0b inval=%0b smi_take=%0b fp_irq_divert=%0b rep_stos_cont_take=%0b recovery_need=%0b",
+                     core_cyc, q_pc, rep_stos_cont_q,
+                     rep_stos_cont_ready_noevent, rep_stos_cont_would_take_noevent,
+                     rep_stos_cont_profile, rep_stos_cont_sys_ok,
+                     pending_mem_pen, stall_cnt, pipe_mem_active_q, fp_occ_pending,
+                     exec_issue_ok, (eip == q_pc), (dbg_fast_hold || fp_dbg_active),
+                     rep_stos_cont_poison_q, rep_stos_cont_inval_now,
+                     smi_take, fp_irq_divert, rep_stos_cont_take,
+                     rep_stos_cont_recovery_need);
+`endif
+          // One-shot decoded REP-STOS continuation.  Clear the SAFE token on
+          // every visit.  Its unsafe-redecode companion is deliberately NOT
+          // cleared here: a debugger may park this boundary, and resuming must
+          // still force S_FETCH/S_DECODE rather than issue through stale q_*.
+          rep_stos_cont_q <= 1'b0;
 `ifdef VEN_SYS_FASTPATH
           // ---- task #57: INTERRUPT ACCEPTANCE IN THE FAST PATH ----------------------
           // The fast path previously contained NO reference to smi_take/nmi_take/intr_take
@@ -85,8 +109,20 @@
             // fp_issue_block, and clearing AGI bookkeeping consumes a preceding
             // instruction's one-cycle dependency without manufacturing a new one.
             agi_wr0<=9'h100; agi_wr1<=9'h100;
+            // A consume-edge invalidation may arrive while the safe token is
+            // still high.  Preserve the forced-redecode request through the
+            // debugger hold; `rep_stos_cont_q` itself is cleared above.
+            if (rep_stos_cont_recovery_need)
+              rep_stos_cont_redecode_q <= 1'b1;
           end else
-          if (stall_cnt!=7'd0) begin
+          // An admitted U-memory operation is no longer a frontend decode.  Its
+          // packet must hold through any later I$/uop invalidation and commit only
+          // on the final architectural acknowledgement.  Test its wait *before*
+          // the volatile frontend / timing-bubble arms below; otherwise a flush
+          // can withdraw the request from S_PIPE or commit a newer raw decode.
+          if (pipe_mem_active_q && pipe_mem_wait) begin
+            agi_wr0<=9'h100; agi_wr1<=9'h100;
+          end else if (!pipe_mem_active_q && stall_cnt!=7'd0) begin
             // M5: burn a materialised stall clock (D-cache miss / misalign /
             // FP-latency wait). No retirement; cyc = clock-count-at-retire thus
             // grows by exactly the penalty for the instruction that issues once
@@ -94,11 +130,91 @@
             // cannot create a phantom AGI hazard next clock.
             stall_cnt<=stall_cnt-7'd1;
             agi_wr0<=9'h100; agi_wr1<=9'h100;
-          end else if ((!pipe_bytes_ok || !exec_issue_ok)
+          end else if (!pipe_mem_active_q && pending_mem_pen!=7'd0) begin
+            // A data-side penalty belongs to the NEXT instruction boundary,
+            // before any REP recovery or optional frontend policy.  In
+            // particular, F3 AB is deliberately an INVALID two-byte uop
+            // descriptor: allowing either its SMC-recovery or !uop_hit path to
+            // enter S_FETCH first left a prior STOSD's +3 misalignment debt live
+            // until the next element added another +3.  Fold the debt after an
+            // admitted packet and existing stall, but before all fetch/redecode
+            // work, matching p5_insn_exec()'s pending-mem fold.
+`ifndef SYNTHESIS
+            // The temporal-SMC REP witness needs to distinguish this selected
+            // drain arm from merely observing a nonzero penalty at the prior
+            // boundary.  This has no hardware effect.
+            if (ven_repcontlog_en && rep_stos_cont_recovery_need)
+              $display("[REPCONT] DRAIN cyc=%0d q_pc=%08x pen=%0d recovery_need=1",
+                       core_cyc, q_pc, pending_mem_pen);
+`endif
+            stall_cnt<=pending_mem_pen-7'd1;
+            pending_mem_pen<=7'd0;
+            agi_wr0<=9'h100; agi_wr1<=9'h100;
+          end else if (rep_stos_cont_recovery_need) begin
+            // The retained F3 AB command lost executable-byte provenance.
+            // This is a boundary, not an issue: suppress all fast mirrors,
+            // discard every short-fetch/resident hint, and make the ordinary
+            // slow decoder establish the replacement command before element 2.
+            // It follows the pending-mem fold above so an invalidated unaligned
+            // store cannot carry timing debt into the replacement S_STORE.
+            agi_wr0<=9'h100; agi_wr1<=9'h100;
+            rep_stos_cont_redecode_q <= 1'b0;
+            fetch_word <= 3'd0;
+            sfetch_short_len_q <= 4'd0;
+`ifdef VEN_UOPCACHE
+            sfetch_uop_q <= 1'b0;
+`endif
+`ifdef VEN_SFETCH_RESIDENT
+            sfetch_resident_q <= 1'b0;
+`endif
+            state <= S_FETCH;
+          end else if (rep_stos_cont_take) begin
+            // The preceding S_STORE has acknowledged and retired exactly one
+            // F3 AB element.  Keep this S_PIPE clock as its architectural
+            // event/debug boundary, but fold the next element's otherwise
+            // mechanical S_EXEC preparation into it.  The terminal ACK still
+            // happens only in S_STORE: this is NOT the speculative direct
+            // stream (and never bypasses segment/DTLB/fragment handling).
+            //
+            // This candidate is deliberately the exact existing continuation
+            // shape: F3 AB, default address/count size, STOSD, non-final.
+            // Therefore the normal K_STR formulas reduce to the assignments
+            // below.  Capture the same pre-update rollback snapshot as S_EXEC,
+            // then let the paired GPR writeback arm commit EDI/ECX on this edge.
+            // If the following store faults, S_WALK restores these snapshots
+            // and re-executes the precise next REP element from q_pc.
+            // This mirrors S_DECODE's shadow consumption for the (normally
+            // already-cleared) STI/MOV-SS case without issuing a U/V command.
+            agi_wr0<=9'h100; agi_wr1<=9'h100;
+            irq_shadow <= 1'b0;
+            // Leave a pre-existing branch-recovery count intact.  The special
+            // non-executable descriptor reaches S_FETCH before the generic
+            // bubble arm can consume it; the normal final REP exit will drain
+            // that count once, preserving the calibrated branch penalty rather
+            // than incorrectly charging it once per string element.
+            if (q_st == ST_MOVS) begin
+              // Only skip redundant fetch/decode. The next element still
+              // reads its source through S_LOAD, including segment/page checks
+              // and fragment merging, before S_EXEC prepares any pointer/count
+              // updates or destination rollback snapshot. This preserves forward
+              // overlap semantics and never pre-reads a later element.
+              step <= 4'd0;
+              f_step <= 4'd0;
+              state <= S_LOAD;
+            end else begin
+            str_store_addr <= str_edi;
+            str_pre_esi    <= gpr_o[R_ESI];
+            str_pre_edi    <= gpr_o[R_EDI];
+            str_pre_ecx    <= gpr_o[R_ECX];
+            str_store_data <= str_wdata;
+            str_next_eip   <= (dec_cx == 32'd0) ? next_eip : q_pc;
+            state          <= S_STORE;
+            end
+          end else if (!pipe_mem_active_q && ((!pipe_bytes_ok || !exec_issue_ok)
 `ifdef VEN_L1_AXI
                        && !(real_bus && !mem_ack)   // word-0 not ready -> bubble arm below
 `endif
-                      ) begin
+                      )) begin
             // icache miss on the line(s) covering the current insn: fill the
             // missing line (eip's line first, else the straddle line — the line of
             // either the decode-window end or the instruction's last byte). Each
@@ -131,7 +247,7 @@
             pf_word<= !exec_issue_ok ? 3'd0 : 3'd1;
             state<=S_PF;
 `ifdef VEN_L1_AXI
-          end else if (!pipe_bytes_ok) begin
+          end else if (!pipe_mem_active_q && !pipe_bytes_ok) begin
             // P1-1 (real_bus): an icache miss whose fill WORD 0 the L1 has not yet
             // returned (mem_ack=0 while ven_l1d bursts the line from AXI). Bubble in
             // S_PIPE — capture nothing (ic_pf_miss_fill is gated the same way), do
@@ -141,7 +257,7 @@
             agi_wr0<=9'h100; agi_wr1<=9'h100;
 `endif
 `ifdef VEN_IC_BRAM
-          end else if (!ic_fetch_ready) begin
+          end else if (!pipe_mem_active_q && !ic_fetch_ready) begin
             // +VEN_IC_BRAM: the line(s) for this insn are RESIDENT (pipe_bytes_ok) but
             // not yet in the registered BRAM read buffer (the synchronous read of them
             // is in flight THIS clock; the data lands on the next edge). Burn a
@@ -153,17 +269,17 @@
             agi_wr0<=9'h100; agi_wr1<=9'h100;   // bubble writes nothing
 `endif
 `ifdef VEN_UOPCACHE
-          end else if (!uop_hit || !cycle_mode) begin
+          end else if (!pipe_mem_active_q && (!uop_hit || !cycle_mode)) begin
             // PREDECODE-VALID GATE + ROBUST FUNCTIONAL-MODE FALLBACK.
-            // `!cycle_mode`: in FUNCTIONAL (single-issue) mode — the board's Quake
-            // run (cycle_mode=0) and the m3 func verify — route EVERY fetch to the
+            // `!cycle_mode`: in FUNCTIONAL (single-issue) verification mode — the
+            // m3 functional gate — route EVERY fetch to the
             // proven slow S_FETCH/S_DECODE decode, NOT the predecoded uop-cache slot.
             // The uop-cache predecode is only "common-case correct" (uopcache.sv:42:
             // the SMC/partial-fill/straddle-rewalk cases are follow-on), so in
             // functional mode (where correctness, not the M5 cycle model, is the
             // verdict) we DON'T TRUST the slot and use the reference decoder. This
-            // drops the uop-cache *fast-path issue* at runtime in func mode (slower,
-            // but the board only needs first-frame correctness for F4) WHILE KEEPING
+            // drops the uop-cache *fast-path issue* at runtime in func mode (slower)
+            // WHILE KEEPING
             // the uop-cache HARDWARE synthesized — the twelve 32:1 byte-alignment
             // MUXF stay deleted (the congestion win), so timing/area are unchanged;
             // the slot BRAM is simply unused in func mode. cycle_mode=1 (the M5 cycle
@@ -200,18 +316,18 @@
             // one-shot fact into S_FETCH so it may copy the safe registered window;
             // functional mode deliberately stays on the reference bus path.
             sfetch_uop_q <= cycle_mode && !uop_hit && exec_issue_ok;
+            // A map hole normally carries no payload.  Only an audited
+            // non-executable REP MOVS/STOS descriptor has length two here;
+            // S_FETCH will recheck the returned I-cache line and then use the
+            // ordinary slow decoder/state machine.  Every other hole keeps the
+            // original four-word fetch policy.
+            sfetch_short_len_q <= (cycle_mode && !uop_hit && exec_issue_ok &&
+                                   uc_short_sfetch) ? uc_short_len : 4'd0;
             fetch_word<=3'd0; state<=S_FETCH;
+`ifdef VEN_PIPE_SDECODE
+            pipe_capture_slow_window();
 `endif
-          end else if (pending_mem_pen!=7'd0) begin
-            // M5: a previous load's D-cache miss/misalign penalty is DEFERRED to
-            // the next instruction (p5model g.pending_mem_pen folded into the next
-            // insn's pipe_free_at, verif/qemu-plugins/p5trace.c:420). Materialise
-            // it as real stall clocks so the next retire's cyc carries the +dmiss
-            // delta exactly where the oracle places it. This clock + the stall_cnt
-            // countdown together burn `pending_mem_pen` clocks before any issue.
-            stall_cnt<=pending_mem_pen-7'd1;
-            pending_mem_pen<=7'd0;
-            agi_wr0<=9'h100; agi_wr1<=9'h100;
+`endif
           end else if (pipe_mem_wait) begin
             // Hold every U-side memory operation until the ARCHITECTURAL seam
             // result is visible.  On a normal BFM/L1 hit this is a no-op; on a
@@ -221,7 +337,7 @@
             // intentionally hides its intermediate acknowledgement in mem_ack.
             agi_wr0<=9'h100; agi_wr1<=9'h100;
 `ifdef VEN_FP_PIPE
-          end else if (fp_pipe_rd_haz) begin
+          end else if (!pipe_mem_active_q && fp_pipe_rd_haz) begin
             // +VEN_FP_PIPE: the deferred arith result is being committed to fpr
             // THIS clock (we_wabs); an FP op that reads that target must wait one
             // clock to see it. Burn a no-issue bubble — the commit lands on this
@@ -230,7 +346,7 @@
 `endif
           end
 `ifndef VEN_FP_PC_RELAX
-          else if (u_d.is_fp && u_d.fp_kind==FK_ARITH && fctrl[9:8]!=2'b11) begin
+          else if (!pipe_mem_active_q && pipe_fp_fast_exec_ok && pipe_u_eff.is_fp && pipe_u_eff.fp_kind==FK_ARITH && fctrl[9:8]!=2'b11) begin
             // M5 finding [low]: an FK_ARITH (D8 reg-form fadd/fsub/fmul/fdiv) under
             // a non-extended precision control word (PC != 11) must NOT silently
             // compute the full extended-precision result (the datapath only
@@ -249,7 +365,7 @@
           end
 `endif
 `ifdef VEN_FP_SHARED
-          else if (u_d.is_fp) begin
+          else if (!pipe_mem_active_q && pipe_u_eff.is_fp) begin
             // Preserve one non-speculative producer for ven_fp_top.  The shared
             // block has no cancel port, so the cycle-mode path never submits
             // directly.  VEN_FP_SHARED_DIRECT may only latch a pre-decoded,
@@ -258,9 +374,41 @@
             // outside that narrow mapping continues through the proven S_FETCH /
             // S_DECODE path.
 `ifdef VEN_FP_SHARED_DIRECT
-            if (fp_shared_direct) begin
+            if (fp_shared_mem_admit) begin
+              // Reuse the existing U AGU and checked slow operand sequencer.
+              // No command is accepted until S_FLOAD has assembled every beat.
+              q_pc<=eip; q_len<=pipe_u_eff.len;
+              q_kind<=K_ALU; q_ct<=CT_CALLREL;
+              q_is_push<=1'b0; q_is_pop<=1'b0;
+              q_ea<=pipe_load_addr; q_seg<=pipe_mem_seg;
+              q_pfx_seg_en<=1'b0; q_lock<=1'b0;
+              q_mem_read<=1'b0; q_mem_write<=1'b0;
+              q_w<=3'd4; q_cnt16<=1'b0;
+              q_is_x87<=1'b1;
+              if (pipe_u_eff.fp_role==3'd1)
+                q_fxop<=pipe_u_eff.fp_sti[0]?FX_FLD_M64:FX_FLD_M32;
+              else if (pipe_u_eff.fp_role==3'd2)
+                q_fxop<=pipe_u_eff.fp_sti[0]?FX_FILD_M64:FX_FILD_M32;
+              else
+                q_fxop<=pipe_u_eff.fp_sti[0]?FX_AR_M64:FX_AR_M32;
+              q_f_mem_read<=1'b1; q_f_mem_write<=1'b0;
+              q_f_mbytes<=pipe_u_eff.fp_sti[0]?4'd8:4'd4;
+              q_f_pop<=1'b0; q_f_pop2<=1'b0;
+              q_f_sti<=3'd0; q_f_const<=3'd0;
+              q_f_aluop<=pipe_u_eff.fp_aluop;
+              f_step<=4'd0; step<=4'd0;
+              irq_shadow<=1'b0;
+              agi_wr0<=9'h100; agi_wr1<=9'h100;
+              state<=S_FLOAD;
+`ifndef SYNTHESIS
+              if (ven_fpdirectlog_en)
+                $display("[FPMEM] ADMIT cyc=%0d pc=%08x len=%0d ea=%08x seg=%0d bytes=%0d op=%0d",
+                         core_cyc, eip, pipe_u_eff.len, pipe_load_addr,
+                         pipe_mem_seg, pipe_u_eff.fp_sti[0]?8:4, pipe_u_eff.fp_aluop);
+`endif
+            end else if (fp_shared_direct) begin
               q_pc          <= eip;
-              q_len         <= u_d.len;
+              q_len         <= pipe_u_eff.len;
               q_is_x87      <= 1'b1;
               q_fxop        <= fp_shared_direct_fxop;
               q_f_mem_read  <= 1'b0;
@@ -268,9 +416,9 @@
               q_f_mbytes    <= 4'd0;
               q_f_pop       <= fp_shared_direct_pop;
               q_f_pop2      <= 1'b0;
-              q_f_sti       <= u_d.fp_sti;
-              q_f_aluop     <= u_d.fp_aluop;
-              q_f_const     <= u_d.fp_sti;
+              q_f_sti       <= pipe_u_eff.fp_sti;
+              q_f_aluop     <= pipe_u_eff.fp_aluop;
+              q_f_const     <= pipe_u_eff.fp_sti;
               f_step        <= 4'd0;
               // This is the shadowed instruction's execution boundary.  The
               // next interrupt is not considered until S_FEXEC has committed and
@@ -279,6 +427,22 @@
               agi_wr0       <= 9'h100;
               agi_wr1       <= 9'h100;
               state         <= S_FEXEC;
+`ifdef VEN_FP_SHARED_EARLY_CMD
+              if (fp_shared_pipe_cmd && fp_shared_cmd_ready) begin
+                // q_* above captures this same packet for later completion.
+                // An immediate command mutates FP state on this edge, so its
+                // retirement may accompany that mutation. No payload-producing
+                // command is in the direct map; all delayed results retain the
+                // existing precise wait/retire path. If not ready, S_FEXEC owns
+                // the captured packet and retries without accepting it twice.
+                if (fp_shared_accept_retire) begin
+                  eip <= eip + {28'd0, pipe_u_eff.len};
+                  retire_valid <= 1'b1;
+                  x87_touched_r <= 1'b1;
+                  state <= S_PIPE;
+                end else state <= S_FP_SHARED_WAIT;
+              end
+`endif
             end else begin
 `endif
             // The normal slow hand-off remains the correctness fallback for
@@ -289,12 +453,17 @@
             sfetch_resident_q <= cycle_mode && exec_issue_ok;
 `endif
             fetch_word<=3'd0; state<=S_FETCH;
+`ifdef VEN_SFETCH_RESIDENT
+`ifdef VEN_PIPE_SDECODE
+            pipe_capture_slow_window();
+`endif
+`endif
 `ifdef VEN_FP_SHARED_DIRECT
             end
 `endif
           end
 `else
-          else if (u_d.is_fp) begin
+          else if (!pipe_mem_active_q && pipe_fp_fast_exec_ok && pipe_u_eff.is_fp) begin
             // M5: x87 FP fast path (cycle-mode whitelist). Functional execution
             // reuses the exact M3 helpers; the FP latency/throughput timing is
             // emergent from TWO distinct mechanisms, both mirroring the p5model
@@ -310,13 +479,13 @@
             logic [31:0] dep_ready;
             // RAW on the x87 top-of-stack: a consumer/rmw (fp_role>=2) must wait
             // until the most recent FP producer's result is ready (fp_ready_cyc).
-            dep_ready = (u_d.fp_role>=3'd2) ? fp_ready_cyc : 32'd0;
+            dep_ready = (pipe_u_eff.fp_role>=3'd2) ? fp_ready_cyc : 32'd0;
 `ifdef VEN_FP_OVERLAP
             // GAP1: a FOLLOWING FP op (any is_fp that uses the x87 exec unit — i.e.
             // everything in this arm EXCEPT FXCH, which is a rename) waits until the
             // unit is free (fp_busy_cyc). Mirrors oracle ready=max(...,fp_busy_until)
             // for is_fp (fp_role>=1). Integer ops never reach this arm, so they overlap.
-            if (u_d.fp_kind != FK_FXCH
+            if (pipe_u_eff.fp_kind != FK_FXCH
                 && $signed(fp_busy_cyc - core_cyc) > 0
                 && $signed(fp_busy_cyc - dep_ready) > 0)
               dep_ready = fp_busy_cyc;
@@ -334,7 +503,7 @@
               // stall until core_cyc reaches dep_ready (materialise the latency).
               stall_cnt <= 7'(dep_ready - core_cyc) - 7'd1;
               agi_wr0<=9'h100; agi_wr1<=9'h100;
-            end else if (!fp_occ_pending && u_d.fp_occ > 7'd1) begin
+            end else if (!fp_occ_pending && pipe_u_eff.fp_occ > 7'd1) begin
               // deps satisfied; begin burning the pipe-occupancy clocks. Record the
               // issue cycle so the result-latency scoreboard is anchored to issue
               // (not to the later retire). THIS clock is the issue clock (occupancy
@@ -350,9 +519,9 @@
               // integer ops issue in the FDIV shadow. Reuses the PROVEN occ-burn cadence
               // (retire after the burn), just with effective occ=2.
               stall_cnt   <= P5_FP_ISSUE_OCC - 7'd2;        // = 0 -> commit on issue+2
-              fp_busy_cyc <= core_cyc + {25'd0, u_d.fp_occ}; // exec window (issue+39 for fdiv)
+              fp_busy_cyc <= core_cyc + {25'd0, pipe_u_eff.fp_occ}; // exec window (issue+39 for fdiv)
 `else
-              stall_cnt <= u_d.fp_occ - 7'd2;   // occ>=2 here; occ==2 => no stall
+              stall_cnt <= pipe_u_eff.fp_occ - 7'd2;   // occ>=2 here; occ==2 => no stall
 `endif
               agi_wr0<=9'h100; agi_wr1<=9'h100;
             end else begin
@@ -367,9 +536,9 @@
               // scoreboard: a producer/rmw publishes its result at ISSUE+lat. For
               // an occ-burned op the issue cycle was recorded above; for an occ==1
               // op issue==commit clock (core_cyc) — both anchor to the real issue.
-              if (u_d.fp_role==3'd1 || u_d.fp_role==3'd3)
+              if (pipe_u_eff.fp_role==3'd1 || pipe_u_eff.fp_role==3'd3)
                 fp_ready_cyc <= (fp_occ_pending ? fp_issue_cyc : core_cyc)
-                                + {25'd0, u_d.fp_lat};
+                                + {25'd0, pipe_u_eff.fp_lat};
               fp_occ_pending <= 1'b0;
               // I-cache LRU: mark this fetched line MRU (2-way LRU, per the oracle
               // per-fetch l1_access). FP ops are 2 bytes (no straddle in practice).
@@ -390,21 +559,21 @@
               // here we retire it as the V member and advance eip past BOTH. Only a
               // push absorbs it (the arith path defers under VEN_FP_PIPE); a lone or
               // post-arith FXCH falls through to its own occ=1 commit next clock.
-              if ((u_d.fp_kind==FK_FLDC || u_d.fp_kind==FK_FLDSTI)
-                  && v_d.is_fxch_free && v_bytes_ok && !dbg_pair_block && v_d.fp_sti!=3'd0) begin
+              if ((pipe_u_eff.fp_kind==FK_FLDC || pipe_u_eff.fp_kind==FK_FLDSTI)
+                  && pipe_v_eff.is_fxch_free && fp_v_fold_ok && pipe_v_eff.fp_sti!=3'd0) begin
                 // task #56 layer 10: real mode / 16-bit address size WRAPS EIP at 64 KiB.
                 // The fast path advanced a full 32-bit EIP with no wrap. Inert at w16=0.
-                eip            <= u_d.w16 ? {16'd0, (eip[15:0] + {12'd0,u_d.len} + {12'd0,v_d.len})}
-                                          :         (eip + {28'd0,u_d.len} + {28'd0,v_d.len});
+                eip            <= pipe_u_eff.w16 ? {16'd0, (eip[15:0] + {12'd0,pipe_u_eff.len} + {12'd0,pipe_v_eff.len})}
+                                                 :         (eip + {28'd0,pipe_u_eff.len} + {28'd0,pipe_v_eff.len});
                 // REVIEW2 H-07: was unwrapped, unlike the integer arm's q_pc2 (:578).
-                q_pc2          <= u_d.w16 ? {16'd0, (eip[15:0] + {12'd0,u_d.len})}
-                                          :         (eip     + {28'd0,u_d.len});
+                q_pc2          <= pipe_u_eff.w16 ? {16'd0, (eip[15:0] + {12'd0,pipe_u_eff.len})}
+                                                 :         (eip     + {28'd0,pipe_u_eff.len});
                 retire2_valid  <= 1'b1; retire2_pipe<=2'd1; retire2_paired<=1'b1;
               end else
 `endif
               // task #56 layer 10: 16-bit address size wraps EIP at 64 KiB (real mode).
-              eip <= u_d.w16 ? {16'd0, (eip[15:0] + {12'd0,u_d.len})}
-                             :         (eip + {28'd0,u_d.len});
+              eip <= pipe_u_eff.w16 ? {16'd0, (eip[15:0] + {12'd0,pipe_u_eff.len})}
+                                    :         (eip + {28'd0,pipe_u_eff.len});
             end
           // task #55: sys_mode alone no longer forces the slow FSM -- only sys_mode WITHOUT the
           // fast path's assumptions holding (see sys_fp_ok in core.sv).
@@ -413,7 +582,7 @@
           // and the D-side request. It must never be re-typed at a consumer again.
           end
 `endif
-          else if (fp_sys_bail) begin
+          else if (!pipe_mem_active_q && fp_sys_bail) begin
             // hand this one instruction to the slow functional FSM. Clear the
             // AGI write-tracking: the slow op runs many cycles, so on return to
             // (M2S.1: a SYSTEM-mode core ALWAYS takes the slow FSM — the fast-path
@@ -428,11 +597,16 @@
             sfetch_resident_q <= cycle_mode && exec_issue_ok;
 `endif
             fetch_word<=3'd0; state<=S_FETCH;
-          end else if (mispred_bubbles!=3'd0) begin
+`ifdef VEN_SFETCH_RESIDENT
+`ifdef VEN_PIPE_SDECODE
+            pipe_capture_slow_window();
+`endif
+`endif
+          end else if (!pipe_mem_active_q && mispred_bubbles!=3'd0) begin
             // burn a misprediction flush bubble (no retirement this clock).
             mispred_bubbles<=mispred_bubbles-3'd1;
             agi_wr0<=9'h100; agi_wr1<=9'h100;   // bubble writes nothing
-          end else if (pipe_agi) begin
+          end else if (!pipe_mem_active_q && pipe_agi) begin
             // AGI 1-cycle interlock: stall this clock. The double-charge across
             // the immediately-following clock is prevented STRUCTURALLY by
             // clearing agi_wr0/agi_wr1 here (the stall clock writes nothing), so
@@ -450,7 +624,7 @@
             logic [31:0] eip_nx;          // H-03: U-only next IP, 16-bit-wrapped
             logic        u_is_br, redirect, u_taken;
             logic [31:0] redir_tgt;
-            do_v   = pipe_pair;
+            do_v   = pipe_pair_eff;
             w0=9'h100; w1=9'h100;
 
             // ---- I-cache LRU: mark the fetched line(s) MRU (2-way LRU, mirroring
@@ -465,24 +639,54 @@
             // to the gpr writeback driver (core_gpr_wb.svh, S_PIPE ISSUE arm). The
             // AGI write-tracking (w0/w1), the D-cache penalty, and the flag commits
             // stay here.
-            if (u_d.is_lea) begin
-              if (u_d.dst!=R_ESP) w0={6'd0,u_d.dst};
-            end else if (u_d.is_mem) begin
-              if (u_d.is_load && u_d.dst!=R_ESP) w0={6'd0,u_d.dst};
+            if (pipe_u_eff.is_lea) begin
+              if (pipe_u_eff.dst!=R_ESP) w0={6'd0,pipe_u_eff.dst};
+            end else if (pipe_u_eff.is_mem) begin
+              // A stack packet changes ESP implicitly.  Keep its AGI history
+              // even though ESP is normally omitted from the two explicit GPR
+              // slots.  The decoder makes stack forms U-only, so POP dst!=ESP
+              // fits exactly in w0/w1 (dst plus ESP) without colliding with V.
+              if (pipe_u_eff.is_stack) begin
+                if (pipe_u_eff.is_store || pipe_u_eff.dst==R_ESP)
+                  w0={6'd0,R_ESP};
+                else begin
+                  w0={6'd0,pipe_u_eff.dst};
+                  w1={6'd0,R_ESP};
+                end
+              // A read-side memory ALU writes its register destination through
+              // the same final packet commit as a MOV load.  It therefore
+              // creates the same next-cycle address-generation interlock;
+              // recording only is_load would let `add eax,[mem]` followed by
+              // an EAX-addressed access use the stale base.
+              end else if ((pipe_u_eff.is_load
+`ifdef VEN_FAST_MEM_ADD
+                            || (!pipe_u_eff.is_store && pipe_u_eff.wreg)
+`endif
+                           ) && pipe_u_eff.dst!=R_ESP)
+                w0={6'd0,pipe_u_eff.dst};
               // A checked read-only ALU operand (currently CMP) has no GPR
               // destination, but it still commits its architectural flags.
               // Keep this in the memory arm so it cannot fall through to the
               // non-memory ALU arm and accidentally lose its D-cache timing.
-              if (u_d.wflags) eflags<=u_flags;
+              if (pipe_u_eff.wflags) eflags<=u_flags;
+`ifdef VEN_FAST_MEM_EXT
+              // EXT is NP with minimum two-clock occupancy. An admitted
+              // packet already spent an earlier wait/walk/fragment edge;
+              // only same-first-edge completion needs one residual clock.
+              if (cycle_mode && fp_is_ext_load(pipe_u_eff) && !pipe_mem_active_q)
+                stall_cnt <= 7'd1;
+`endif
               // M5: L1 D-cache timing. The BFM supplies reads and receives writes;
               // the local 2-way LRU mirrors p5_mem(). A miss allocates for either
-              // access, but only a READ pays P5_DMISS. Both access types pay the
-              // unaligned penalty, exactly as the oracle does.
+              // access, but only a READ pays P5_DMISS. A byte is aligned at
+              // every address; retain the existing dword rule for other packets.
               begin
                 logic [6:0] pen;
                 pen = 7'd0;
-                if (!u_d.is_store && !dc_lu_hit)    pen = pen + P5_DMISS;
-                if (pipe_load_addr[1:0] != 2'b00)     pen = pen + P5_MISALIGN;
+                if (!pipe_u_eff.is_store && !dc_lu_hit) pen = pen + P5_DMISS;
+                if (((fp_mem_source_width(pipe_u_eff)==3'd2) && pipe_load_addr[0]) ||
+                    ((fp_mem_source_width(pipe_u_eff)==3'd4) && pipe_load_addr[1:0]!=2'b00))
+                  pen = pen + P5_MISALIGN;
 `ifdef VEN_L1_AXI
                 // bus_mode=2: the REAL DDR latency is the only timing source — the
                 // miss-stall gate already held the load for the actual fill. Suppress
@@ -493,7 +697,7 @@
                 pending_mem_pen <= pen;
 `endif
               end
-            end else if (u_d.is_shift) begin
+            end else if (pipe_u_eff.is_shift) begin
               if (u_shift_cnt!=5'd0) begin
                 logic [31:0] fl;
                 // SHL/SHR/SAL/SAR (shrot 4..7): SF/ZF/PF from result, AF=0,
@@ -513,7 +717,7 @@
                 // C-01 pattern; one shared formula parameterised by width cannot
                 // drift. Byte-identical to the slow path arm, term for term.
                 logic [2:0] shw;
-                shw = u_d.w16 ? 3'd2 : 3'd4;
+                shw = pipe_u_eff.w16 ? 3'd2 : 3'd4;
                 fl=eflags & 32'hFFFF_F72A;
                 fl[0]=u_shcf; fl[2]=parity8(u_sh[7:0]); fl[4]=1'b0;
                 fl[6]=(wmask(u_sh,shw)==32'd0);
@@ -522,29 +726,29 @@
                 fl[1]=1'b1;
                 eflags<=fl;
               end
-              if (u_d.dst!=R_ESP) w0={6'd0,u_d.dst};
-            end else if (u_d.is_branch || u_d.is_nop) begin
+              if (pipe_u_eff.dst!=R_ESP) w0={6'd0,pipe_u_eff.dst};
+            end else if (pipe_u_eff.is_branch || pipe_u_eff.is_nop) begin
               // no register/flag write
             end else begin
-              if (u_d.wreg) begin
-                if (u_d.dst!=R_ESP) w0={6'd0,u_d.dst};
+              if (pipe_u_eff.wreg) begin
+                if (pipe_u_eff.dst!=R_ESP) w0={6'd0,pipe_u_eff.dst};
               end
-              if (u_d.wflags) eflags<=u_flags;
+              if (pipe_u_eff.wflags) eflags<=u_flags;
             end
 
             // ---- V commit (paired) ----
             if (do_v) begin
-              if (v_d.is_lea) begin
-                if (v_d.dst!=R_ESP) w1={6'd0,v_d.dst};
-              end else if (v_d.is_branch || v_d.is_nop) begin
+              if (pipe_v_eff.is_lea) begin
+                if (pipe_v_eff.dst!=R_ESP) w1={6'd0,pipe_v_eff.dst};
+              end else if (pipe_v_eff.is_branch || pipe_v_eff.is_nop) begin
                 // V branch: handled via branch logic below
               end else begin
-                if (v_d.wreg) begin
-                  if (v_d.dst!=R_ESP) w1={6'd0,v_d.dst};
+                if (pipe_v_eff.wreg) begin
+                  if (pipe_v_eff.dst!=R_ESP) w1={6'd0,pipe_v_eff.dst};
                 end
                 // a paired V that writes flags overrides U's flags (program
                 // order: V is later). Only ALU/inc/dec reach here.
-                if (v_d.wflags) eflags<=v_flags;
+                if (pipe_v_eff.wflags) eflags<=v_flags;
               end
             end
 
@@ -552,7 +756,7 @@
             // Determine the architectural taken decision + predicted target and
             // whether we mispredicted -> flush bubbles. The branch can be U
             // (unpaired) or the V member of a pair.
-            u_is_br  = u_d.is_branch;
+            u_is_br  = pipe_u_eff.is_branch;
             u_taken  = 1'b0; redirect=1'b0; redir_tgt=32'd0;
             // REVIEW Aug-1 H-03: 16-bit sequential flow WRAPS IP at 64 KiB. Taken branch
             // targets got this in task #56 step G and the FP retire arm got it in layer
@@ -562,17 +766,17 @@
             // fixed taken path is what made it easy to miss.
             //   eip_nx  = U-only next IP        (also the U not-taken fallthrough)
             //   post_eip= U(+V) next IP         (the no-branch advance)
-            eip_nx   = u_d.w16 ? {16'd0, (eip[15:0] + {12'd0,u_d.len})}
-                               :         (eip     + {28'd0,u_d.len});
-            post_eip = u_d.w16
-                     ? {16'd0, (eip[15:0] + {12'd0,u_d.len}
-                                          + (do_v ? {12'd0,v_d.len} : 16'd0))}
-                     :         (eip       + {28'd0,u_d.len}
-                                          + (do_v ? {28'd0,v_d.len} : 32'd0));
+            eip_nx   = pipe_u_eff.w16 ? {16'd0, (pipe_commit_eip[15:0] + {12'd0,pipe_u_eff.len})}
+                                      :         (pipe_commit_eip + {28'd0,pipe_u_eff.len});
+            post_eip = pipe_u_eff.w16
+                     ? {16'd0, (pipe_commit_eip[15:0] + {12'd0,pipe_u_eff.len}
+                                          + (do_v ? {12'd0,pipe_v_eff.len} : 16'd0))}
+                     :         (pipe_commit_eip + {28'd0,pipe_u_eff.len}
+                                          + (do_v ? {28'd0,pipe_v_eff.len} : 32'd0));
 
             if (u_is_br) begin
               // U is the (sole) branch this clock.
-              u_taken = u_d.br_cond ? u_d.br_taken : 1'b1;
+              u_taken = pipe_u_eff.br_cond ? pipe_u_eff.br_taken : 1'b1;
               // H-03: not-taken fallthrough wraps (u_target is already truncated).
               redir_tgt = u_taken ? u_target : eip_nx;
               if (u_taken != u_pred_taken) begin
@@ -582,7 +786,7 @@
               // BTB update for this U branch is applied by the bpred_btb module
               // on this posedge via the comb resolve port (btb_resolve_valid/
               // pc/taken), driven from the mirrored issue-gate + U arm above.
-            end else if (do_v && v_d.is_branch) begin
+            end else if (do_v && pipe_v_eff.is_branch) begin
               // V member is a simple branch (e.g. a jcc paired into V). Use the
               // flags FORWARDED from U (cmp/dec/test + jcc pairing case).
               logic v_taken; logic [31:0] vpc;
@@ -590,8 +794,8 @@
               vpc = eip_nx;
               v_taken = v_br_taken_eff;
               redir_tgt = v_taken ? v_target
-                                  : (v_d.w16 ? {16'd0, (vpc[15:0] + {12'd0,v_d.len})}
-                                             :         (vpc       + {28'd0,v_d.len}));
+                                  : (pipe_v_eff.w16 ? {16'd0, (vpc[15:0] + {12'd0,pipe_v_eff.len})}
+                                                    :         (vpc       + {28'd0,pipe_v_eff.len}));
               if (v_taken != v_pred_taken) begin
                 // Mispredict penalty matches the oracle resolve_pending_branch
                 // (verif/qemu-plugins/p5trace.c:402-403): an UNCONDITIONAL taken
@@ -599,7 +803,7 @@
                 // (the `!pend_cond` case is checked first); only a CONDITIONAL Jcc
                 // in the V pipe pays P5_MISPREDICT_V=4. The old code charged 4 for
                 // a V jmp too (now V-pairable per finding [med]) -> +1 over oracle.
-                mispred_bubbles <= v_d.br_cond ? 3'd4 : 3'd3;
+                mispred_bubbles <= pipe_v_eff.br_cond ? 3'd4 : 3'd3;
                 redirect=1'b1;
               end else if (v_taken) redirect=1'b1;
               // BTB update for this paired-V branch is applied by the bpred_btb
@@ -611,7 +815,7 @@
             agi_wr0<=w0; agi_wr1<=w1;
 
             // ---- retire records (cyc/pipe/paired emerge from the cadence) --
-            q_pc <= eip;                       // primary (U) retire pc
+            q_pc <= pipe_commit_eip;           // primary (U) retire pc
             retire_valid <= 1'b1;
             // ---- STI / MOV-SS interrupt shadow ---------------------------
             // irq_shadow is SET in S_EXEC (core_exec.svh:32) by STI/MOV SS and was

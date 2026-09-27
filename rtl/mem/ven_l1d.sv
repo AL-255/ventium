@@ -84,6 +84,37 @@ module ven_l1d #(
     input  logic [3:0]  c_wstrb,
     output logic [31:0] c_rdata,
     output logic        c_ack,
+`ifdef VEN_PIPE_MEM_CHAIN
+    // Independent next-request address. The old c_addr/c_ack/rdata retain
+    // their owner until the commit edge; next_ready never depends on commit.
+    input  logic        c_next_req, c_next_commit, c_next_cacheable,
+    input  logic [31:0] c_next_addr,
+    input  logic [3:0]  c_next_wstrb,
+    output logic        c_next_ready,
+`endif
+`ifdef VEN_FP_LOAD64
+    // High half of the SAME owned, registered response, not another request.
+    // Valid only for a complete resident 8-byte extent in one physical line.
+    output logic [31:0] c_rdata_hi,
+    output logic        c_rdata_hi_valid,
+`endif
+`ifdef VEN_L1D_HIT_STREAM
+    // Experimental resident-read interface, NOT yet connected to core issue.
+    // In stream mode c_req/c_addr describe a NEW request; acceptance is
+    // c_req && c_req_ready. c_rdata/c_rsp_addr describe the independently held
+    // response; c_ack is its consume edge (c_rsp_valid && c_rsp_ready).
+    // Only cacheable, non-crossing dword hits are accepted. A rejected request
+    // causes no backing access or LRU change. Drain responses before leaving
+    // stream mode; misses/MMIO/stores then use the unchanged legacy protocol.
+    // Flush/snoop/golden cancels the pending response explicitly; caller must
+    // replay its owner, never retire the canceled data. No speculative MMIO.
+    input  logic        c_hit_stream,
+    output logic        c_req_ready,
+    output logic        c_rsp_valid,
+    input  logic        c_rsp_ready,
+    output logic [31:0] c_rsp_addr,
+    output logic        c_rsp_cancel,
+`endif
     // VEN DIAG (load-serve forensics): expose the read-serve hit state so the dbg ring can show WHY a
     // load got its data. {1'b0,st[1:0],flush_all,rd_match,hit_way,hit1,hit0} sampled at the current request.
     output logic [7:0]  dbg_serve,
@@ -154,8 +185,30 @@ module ven_l1d #(
   // ---- combinational lookup off the registered arrays (PRE-update) ----------
   logic [IDXW-1:0] set_c; logic [TAGW-1:0] tag_c;
   logic        hit0, hit1, hit; logic hit_way;
-  assign set_c   = c_addr[OFFW +: IDXW];
-  assign tag_c   = c_addr[OFFW+IDXW +: TAGW];
+  logic mc_lookup_next, mc_capture_next;
+  logic [31:0] lookup_addr;
+  logic [3:0] lookup_wstrb;
+`ifdef VEN_PIPE_MEM_CHAIN
+`ifdef VEN_L1D_COMB_ACK
+  initial $fatal(1, "VEN_PIPE_MEM_CHAIN requires registered L1 responses");
+`endif
+  assign mc_lookup_next = c_next_req && c_req && !c_we && rd_match &&
+      (st == L1_IDLE) && !early_armed && !stream_path;
+  assign lookup_addr = mc_lookup_next ? c_next_addr : c_addr;
+  assign lookup_wstrb = mc_lookup_next ? c_next_wstrb : c_wstrb;
+  assign c_next_ready = mc_lookup_next && c_next_cacheable && cacheable &&
+      !golden && !flush_all && !snoop_inv_valid && hit &&
+      ((c_next_wstrb == 4'b0001) ||
+       ((c_next_wstrb == 4'b1111) && c_next_addr[4:0] <= 5'd28));
+  assign mc_capture_next = c_next_ready && c_next_commit;
+`else
+  assign mc_lookup_next = 1'b0;
+  assign mc_capture_next = 1'b0;
+  assign lookup_addr = c_addr;
+  assign lookup_wstrb = c_wstrb;
+`endif
+  assign set_c   = lookup_addr[OFFW +: IDXW];
+  assign tag_c   = lookup_addr[OFFW+IDXW +: TAGW];
   assign hit0    = dc_val[set_c][0] && dc_tag[set_c][0]==tag_c;
   assign hit1    = dc_val[set_c][1] && dc_tag[set_c][1]==tag_c;
   assign hit     = hit0 || hit1;
@@ -170,7 +223,7 @@ module ven_l1d #(
   logic [31:0] addr_n;
   logic [IDXW-1:0] set_n; logic [TAGW-1:0] tag_n;
   logic        hit_n0, hit_n1, hit_n, hit_way_n, xline, rd_hit;
-  assign addr_n    = c_addr + 32'd32;          // the next 32-byte line
+  assign addr_n    = lookup_addr + 32'd32;     // the next 32-byte line
   assign set_n     = addr_n[OFFW +: IDXW];
   assign tag_n     = addr_n[OFFW+IDXW +: TAGW];
   assign hit_n0    = dc_val[set_n][0] && dc_tag[set_n][0]==tag_n;
@@ -187,10 +240,10 @@ module ven_l1d #(
   logic [2:0] c_x_hi;
   always_comb begin
     c_x_hi = 3'd0;
-    for (int b = 0; b < 4; b++) if (c_wstrb[b]) c_x_hi = 3'(b);
+    for (int b = 0; b < 4; b++) if (lookup_wstrb[b]) c_x_hi = 3'(b);
   end
-  assign xline     = ({1'b0, c_addr[4:0]}
-                      + ((c_we || c_wstrb != 4'd0) ? {3'd0, c_x_hi} : 6'd3)) > 6'd31;
+  assign xline     = ({1'b0, lookup_addr[4:0]}
+                      + ((c_we || lookup_wstrb != 4'd0) ? {3'd0, c_x_hi} : 6'd3)) > 6'd31;
   // ---- REVIEW1_Aug2 H-07: a non-cacheable READ must not be served from the array ---
   // NOT FIXED. The analysis below is correct and the fix attempt is recorded because it
   // failed in an instructive way.
@@ -234,10 +287,19 @@ module ven_l1d #(
   logic [LW-1:0]   rd_line, rd_line_next;
   logic [2*LW-1:0] rd_window;                          // {L+1, L} cross-line read window
   logic [4:0]      boff;
-  assign rd_line      = dc_line[{set_c, hit_way}];
+  // An opt-in fill-forward response below may capture a word that has already
+  // landed in the line currently being allocated.  Its tag is intentionally
+  // not valid until the tail drains, so the ordinary `hit_way` mux cannot name
+  // it.  The response remains registered through rd_window_q; this selector is
+  // only its capture source, never a combinational core-data path.
+  logic              fill_forward_hit;
+  logic [WORDS-1:0]  fill_word_valid;
+  logic [LW-1:0]      fill_forward_line;
+  assign rd_line      = fill_forward_hit ? fill_forward_line
+                                        : dc_line[{set_c, hit_way}];
   assign rd_line_next = dc_line[{set_n, hit_way_n}];   // the L+1 line (for a cross-line read)
   assign rd_window    = {rd_line_next, rd_line};       // named temp: xsim can't index a concat
-  assign boff         = c_addr[4:0];
+  assign boff         = lookup_addr[4:0];
 
   // ---- PIPELINED READ (timing-closure): register the high-fanout async line read.
   // The async read of dc_line (256-bit-wide distributed RAM, 256 entries) has huge
@@ -259,7 +321,58 @@ module ven_l1d #(
   logic [31:0]     rd_addr_q;       // address rd_window_q was captured for
   logic            rd_match;        // captured window is valid for the CURRENT request
   logic            do_rd_cap;
-  assign rd_match  = rd_armed && (rd_addr_q == c_addr);
+  logic            stream_path;
+  logic            window_reuse;
+`ifdef VEN_FP_LOAD64
+  // A fill-forward capture may contain only the requested dword; a later
+  // completed fill does not retroactively refresh that saved window.  Record
+  // full-line provenance on its capture edge instead of guessing from hit now.
+  logic            rd_full_line_q;
+  assign c_rdata_hi = rd_window_q[{1'b0,c_addr[4:0],3'b000} + 9'd32 +: 32];
+  assign c_rdata_hi_valid = (L1_LINE == 32) && rst_n && c_req && !c_we &&
+      c_ack && (c_wstrb == 4'hf) && cacheable && !golden &&
+      !flush_all && !snoop_inv_valid && !stream_path && !early_armed &&
+      (st == L1_IDLE) && hit && rd_full_line_q &&
+      (rd_match || window_reuse) && (c_addr[31:5] == rd_addr_q[31:5]) &&
+      (c_addr[4:0] <= 5'd24)
+`ifdef VEN_PIPE_MEM_CHAIN
+      && !mc_lookup_next
+`endif
+`ifdef VEN_L1D_COMB_ACK
+      && 1'b0 // never attach a registered high half to an asynchronous low half
+`endif
+      ;
+`endif
+`ifdef VEN_L1D_WINDOW_REUSE
+  // Reuse the first complete resident line of the existing registered window.
+  // Require a current hit: this is not an extra cache entry. Never serve MMIO,
+  // a crossing, or data captured from an incomplete fill through this path.
+  logic window_valid_q;
+  assign window_reuse = window_valid_q && !mc_lookup_next && !stream_path && !early_armed &&
+      (st == L1_IDLE) && c_req && !c_we && cacheable && !golden &&
+      !flush_all && !snoop_inv_valid && hit &&
+      (c_addr[31:5] == rd_addr_q[31:5]) && (c_addr[4:0] <= 5'd28);
+`else
+  assign window_reuse = 1'b0;
+`endif
+`ifdef VEN_L1D_HIT_STREAM
+  logic            rd_stream_q;
+  // Keep ownership until consumption/cancel, even if the caller attempts to
+  // switch back early. The legacy FSM must not overwrite a held response.
+  assign stream_path = c_hit_stream || rd_stream_q;
+  assign c_rsp_cancel = rd_stream_q && rd_armed &&
+                        (flush_all || snoop_inv_valid || golden);
+  assign c_rsp_valid = rd_stream_q && rd_armed && !c_rsp_cancel;
+  assign c_rsp_addr = rd_addr_q;
+  assign c_req_ready = c_hit_stream && (st == L1_IDLE) &&
+                       !c_we && cacheable && !golden && !flush_all &&
+                       !snoop_inv_valid && !early_armed &&
+                       (c_wstrb == 4'hf) && (c_addr[4:0] <= 5'd28) && hit &&
+                       (!rd_armed || (rd_stream_q && c_rsp_ready));
+`else
+  assign stream_path = 1'b0;
+`endif
+  assign rd_match  = rd_armed && !stream_path && (rd_addr_q == c_addr);
   // REVIEW Aug-1 H-05: do_rd_cap is derived from the COMBINATIONAL hit, which reads
   // pre-edge tag/valid. If a snoop for that same line lands on the same clock, the
   // array's valid bit is cleared at the edge but the OLD window has already been
@@ -288,9 +401,72 @@ module ven_l1d #(
 // suppressing read side effects. It is now 1 in both builds; see the L1_IDLE arm and
 // the c_ack gating below for the two changes that make that non-deadlocking.
   localparam bit BYPASS_RD_EN = 1'b1;
-  assign do_rd_cap = c_req && !c_we && rd_hit && (st==L1_IDLE) && !rd_match
+  // A fill owns the sole backing stream until all of its burst beats have
+  // drained.  It need not, however, stall an already-resident read in a
+  // *different* set: that read uses only the local array and the existing
+  // registered response window.  Keep this deliberately narrow while the
+  // contract is exercised: no cross-line read (two replacement domains), no
+  // same-set read (the fill's terminal LRU write), no bypass, and no new
+  // backing operation.  The default remains the conservative one-request
+  // policy until the opt-in has full-system evidence.
+  logic fill_independent_hit;
+`ifdef VEN_L1D_HIT_UNDER_FILL
+  assign fill_independent_hit = (st == L1_FILL) && !bypass_q && !xline &&
+                               (set_c != fset);
+`else
+  assign fill_independent_hit = 1'b0;
+`endif
+  // A critical word can be returned before its line finishes filling, but the
+  // historical conservative policy then blocked every subsequent request until
+  // all eight backing beats drained.  That turns one miss into a long train of
+  // avoidable waits when a load stream reuses words already received in the
+  // same line.  VEN_L1D_FILL_FORWARD admits only an aligned-within-line read
+  // whose exact physical word has landed in *this* unpoisoned cacheable fill.
+  // It neither allocates a tag early nor starts a second backing transaction;
+  // the ordinary registered read window owns the response identity.  A flush
+  // or matching snoop poisons the transaction and blocks both same-edge and
+  // later forwarding, so partially received stale data cannot escape.  The
+  // fill owner itself is excluded: without a request ID, holding its address
+  // through the critical-response sampling edge is indistinguishable from a
+  // new access and must never yield a second acknowledgement.
+  assign do_rd_cap =
+                     mc_lookup_next ? mc_capture_next :
+`ifdef VEN_L1D_HIT_STREAM
+                     stream_path ? (c_req && c_req_ready) :
+`endif
+                     c_req && !c_we && (rd_hit || fill_forward_hit) &&
+                     ((st==L1_IDLE) || fill_independent_hit || fill_forward_hit) && !rd_match && !window_reuse
                      && !snoop_inv_valid
                      && !(BYPASS_RD_EN && !cacheable);   // H-18: CD/KEN# read bypass
+
+  // ---- CRITICAL-WORD-FIRST MISS RESPONSE ------------------------------------
+  // A cache-line miss used to hold the core until all eight words had returned,
+  // even when the requested aligned dword was already present at the backing
+  // port.  For a normal AXI INCR fill that word may arrive anywhere in the line,
+  // so releasing it early would either require an unbounded response buffer or
+  // serve the wrong word.  Cacheable fills now start an AXI WRAP8 burst at this
+  // word (the backing-side address generator below presents the same circular
+  // sequence), which makes fill beat zero the requested word.
+  //
+  // Keep the response REGISTERED.  This is deliberately not VEN_L1D_COMB_ACK:
+  // no asynchronous LUTRAM path is reintroduced, and the data arrives from the
+  // already-registered AXI R channel.  The fill nevertheless stays active until
+  // every remaining beat is consumed and the line is validated.  A later memory
+  // request is therefore still backpressured; only independent ALU work after a
+  // load can overlap the tail of its fill.
+  //
+  // The owner check is mandatory.  The core may retarget c_addr while a response
+  // is visible, just as the ordinary registered-hit path requires rd_addr_q /
+  // rd_match.  Do not acknowledge A's returned word as B.  Flush/snoop wins both
+  // on the arrival edge and on the serve edge; a late invalidation may make the
+  // line nonresident, but it cannot retroactively change a load already sampled.
+  logic            early_armed;
+  logic            early_ok_q;
+  logic [31:0]     early_addr_q, early_rdata_q;
+  logic [3:0]      early_wstrb_q;
+  logic            early_match;
+  assign early_match = early_armed && c_req && !c_we &&
+                       (c_addr == early_addr_q) && (c_wstrb == early_wstrb_q);
   assign dbg_serve = {1'b0, st[1:0], flush_all, rd_match, hit_way, hit1, hit0};  // mini-ILA: L1D FSM + serve state
 
   // H-06/H-07: does an in-flight snoop hit the line currently being allocated?
@@ -304,10 +480,15 @@ module ven_l1d #(
   // ---- fill FSM --------------------------------------------------------------
   // L1_BYP: a non-cacheable read has finished its line fetch into bp_line; serve the
   // addressed word for one clock (c_ack below), allocating NOTHING, then back to IDLE.
+  // Keep the L1_DONE encoding reserved: it is exposed in the diagnostic state field
+  // and retaining the values leaves the deployed L1_BYP encoding stable.  Cacheable
+  // fills no longer enter it; the registered rd_window_q capture provides the full
+  // post-write settling cycle that L1_DONE predates.
   typedef enum logic [1:0] { L1_IDLE, L1_FILL, L1_DONE, L1_BYP } l1_state_e;
   l1_state_e   st;
   logic [2:0]  fw;                       // fill word counter 0..7
   logic [IDXW-1:0] fset; logic fway; logic [TAGW-1:0] ftag;
+  assign fill_forward_line = dc_line[{fset, fway}];
   // REVIEW Aug-1 H-06/H-07: a line fill is an 8-beat TRANSACTION, but its tag/valid
   // are installed only on the LAST beat. An invalidation arriving during beats 0..6
   // therefore has nothing to match and is silently lost; the last beat then validates
@@ -366,6 +547,7 @@ module ven_l1d #(
     unique case (c_wstrb)
       4'b0001, 4'b0010, 4'b0100, 4'b1000: byp_sz = 3'd1;
       4'b0011, 4'b0110, 4'b1100:          byp_sz = 3'd2;
+      4'b0111, 4'b1110:                   byp_sz = 3'd3;
       4'b1111:                            byp_sz = 3'd4;
       default:                            byp_sz = 3'd0;
     endcase
@@ -400,6 +582,16 @@ module ven_l1d #(
                       byp_off_c[1] = 3'd4; byp_siz_c[1] = 2'd0;
                     end
             endcase
+      // A page-split dword can leave a three-byte fragment. It is not the
+      // strobe-zero legacy request: touch exactly those bytes, including at
+      // odd offsets, using one aligned halfword and one byte.
+      3'd3: begin
+              byp_cnt_c = 3'd2;
+              byp_off_c[0] = {1'b0, o};
+              byp_siz_c[0] = o[0] ? 2'd0 : 2'd1;
+              byp_off_c[1] = {1'b0, o} + (o[0] ? 3'd1 : 3'd2);
+              byp_siz_c[1] = o[0] ? 2'd1 : 2'd0;
+            end
       3'd4: unique case (o)
               2'd0: ;   // one 4B piece at 0 (the defaults)
               2'd1: begin
@@ -429,8 +621,27 @@ module ven_l1d #(
   end
   logic          bypass_q;
 
+`ifdef VEN_L1D_FILL_FORWARD
+  // Only one returned word is validated below. An unaligned dword also reads
+  // the following word from rd_window_q, which may not have arrived yet.
+  // Keep such accesses on the ordinary completed-line registered read path.
+  assign fill_forward_hit = (st == L1_FILL) && !bypass_q && cacheable &&
+                            (c_addr[1:0] == 2'b00) &&
+                            !xline && !fill_poison && !flush_all &&
+                            !snoop_inv_valid && (set_c == fset) &&
+                            (tag_c == ftag) && (c_addr != early_addr_q) &&
+                            fill_word_valid[c_addr[4:2]];
+`else
+  assign fill_forward_hit = 1'b0;
+`endif
+
   // backing-side drive: during a FILL, burst-read the 8 line words; on a
   // write-through (IDLE), pass the core write straight to the backing.
+  // Cacheable fills are circular so word zero is the faulting aligned word.
+  // ven_axi_master recognizes a nonzero first word as AXI WRAP8; word zero keeps
+  // the existing INCR8 shape.  Both enumerate exactly the same line once.
+  logic [2:0] fill_word;
+  assign fill_word = fbase[4:2] + fw;
   always_comb begin
     m_req=1'b0; m_we=1'b0; m_addr=32'd0; m_wdata=32'd0; m_wstrb=4'd0;
     m_rd_narrow=1'b0; m_rd_size=2'd0;
@@ -452,8 +663,8 @@ module ven_l1d #(
       end else
       // H-19: during the extra beat, address the NEXT line's word 0.
       m_addr = byp_hi_beat ? ({fbase[31:5], 5'd0} + 32'd32)
-                           : ({fbase[31:5], 5'd0} + {27'd0, fw, 2'b00});
-    end else if (st==L1_IDLE && c_req && c_we) begin
+                           : ({fbase[31:5], 5'd0} + {27'd0, fill_word, 2'b00});
+    end else if (st==L1_IDLE && c_req && c_we && !stream_path) begin
       // write-through: forward EVERY core write to the backing verbatim (the
       // write-allocate is disabled above). This now includes the within-line cacheable
       // write MISS (!hit && !xline && cacheable) — with no allocate, its store MUST be
@@ -597,7 +808,9 @@ module ven_l1d #(
     // 0x41C forever, so daemon-injected keys were invisible. The coherence problem it was
     // built for was actually the LGDT base bug. Clean registered serve restored.)
     c_rdata = (st==L1_BYP) ? bp_line_x[{4'd0,fbase[1:0],3'b000} +: 32]   // saved request offset
-                           : rd_window_q[{1'b0,rd_addr_q[4:0],3'b000} +: 32];
+                           : window_reuse ? rd_window_q[{1'b0,c_addr[4:0],3'b000} +: 32]
+                           : early_armed ? early_rdata_q
+                                         : rd_window_q[{1'b0,rd_addr_q[4:0],3'b000} +: 32];
     c_ack   = 1'b0;
     if (c_req) begin
       if (c_we)            c_ack = (st==L1_IDLE) ? m_ack : 1'b0;
@@ -609,9 +822,18 @@ module ven_l1d #(
       // tag/valid) and the core's sequential logic samples c_ack=1 with the stale
       // rd_window_q at that very edge, while the array clears valid. Gate the
       // RESPONSE itself, not just the capture.
-      else                 c_ack = (rd_match && !flush_all && !snoop_inv_valid
+      else                 c_ack = window_reuse || (early_match && !flush_all && !snoop_inv_valid)
+                                 || (rd_match && !flush_all && !snoop_inv_valid
                                     && !(BYPASS_RD_EN && !cacheable))
                                  || ((st==L1_BYP) && byp_match); // owned non-cacheable response
+    end
+`endif
+`ifdef VEN_L1D_HIT_STREAM
+    if (stream_path) begin
+      c_rdata = rd_window_q[{1'b0,rd_addr_q[4:0],3'b000} +: 32];
+      // A premature mode switch must not mislabel the old stream response
+      // as the completion of a newly presented legacy store/read.
+      c_ack = c_hit_stream && c_rsp_valid && c_rsp_ready;
     end
 `endif
   end
@@ -635,6 +857,18 @@ module ven_l1d #(
   always_ff @(posedge clk) begin
     if (!rst_n) begin
       st<=L1_IDLE; fw<=3'd0; rd_armed<=1'b0; rd_window_q<='0; rd_addr_q<=32'd0;
+`ifdef VEN_FP_LOAD64
+      rd_full_line_q <= 1'b0;
+`endif
+`ifdef VEN_L1D_WINDOW_REUSE
+      window_valid_q <= 1'b0;
+`endif
+`ifdef VEN_L1D_HIT_STREAM
+      rd_stream_q <= 1'b0;
+`endif
+      fill_word_valid <= '0;
+      early_armed<=1'b0; early_ok_q<=1'b0; early_addr_q<=32'd0;
+      early_rdata_q<=32'd0; early_wstrb_q<=4'd0;
       bypass_q<=1'b0; bp_line<='0; fill_poison<=1'b0; byp_n2<=1'b0;
       byp_wstrb_q<=4'd0;
       bp_hi<=32'd0; byp_need_hi<=1'b0; byp_hi_beat<=1'b0;   // H-19
@@ -643,10 +877,52 @@ module ven_l1d #(
         dc_tag[s][0]<=20'd0; dc_tag[s][1]<=20'd0;
       end
     end else begin
-      rd_armed <= do_rd_cap && !flush_all;
+`ifdef VEN_FP_LOAD64
+      if (do_rd_cap)
+        rd_full_line_q <= (st == L1_IDLE) && hit && !fill_forward_hit && !stream_path;
+      if (flush_all || snoop_inv_valid || golden || stream_path ||
+          (c_req && (c_we || !cacheable)))
+        rd_full_line_q <= 1'b0;
+`endif
+`ifdef VEN_L1D_WINDOW_REUSE
+      if (do_rd_cap)
+        window_valid_q <= (st == L1_IDLE) && hit && !stream_path;
+      // All window writers participate; invalidation wins over capture.
+      if (flush_all || snoop_inv_valid || golden || stream_path ||
+`ifdef VEN_L1D_WINDOW_KEEP_STORE
+          // Preserve only the FIRST registered physical line across unrelated
+          // cacheable stores. No window data/owner or store ACK is changed.
+          // xline honors the actual store strobes (zero writes no bytes).
+          // Any NC access, overlapping store, miss/fill or external writer
+          // retains the conservative invalidation. Current hit still gates use.
+          (st != L1_IDLE) || (c_req && (!cacheable ||
+            (c_we ? ((c_addr[31:5] == rd_addr_q[31:5]) ||
+                     (xline && (addr_n[31:5] == rd_addr_q[31:5]))) : !rd_hit))))
+`else
+          (st != L1_IDLE) || (c_req && (c_we || !cacheable || !rd_hit)))
+`endif
+        window_valid_q <= 1'b0;
+`endif
+      rd_armed <= (do_rd_cap && !flush_all)
+`ifdef VEN_PIPE_MEM_CHAIN
+                  || (mc_lookup_next && !c_next_commit &&
+                      !flush_all && !snoop_inv_valid && !golden)
+`endif
+`ifdef VEN_L1D_HIT_STREAM
+                  || (rd_stream_q && rd_armed && !c_rsp_ready && !c_rsp_cancel)
+`endif
+                  ;
+`ifdef VEN_L1D_HIT_STREAM
+      rd_stream_q <= do_rd_cap ? c_hit_stream :
+                     (rd_stream_q && rd_armed && !c_rsp_ready && !c_rsp_cancel);
+`endif
+      // A response is intentionally one full core clock wide.  Clearing by
+      // default consumes it even if the producer retargeted away before the
+      // sampling edge; retaining it could otherwise misattribute it later.
+      early_armed <= 1'b0;
       if (do_rd_cap && !flush_all) begin
         rd_window_q <= rd_window;
-        rd_addr_q   <= c_addr;        // remember which address this window serves
+        rd_addr_q   <= lookup_addr;   // independently accepted response owner
       end
       unique case (st)
         L1_IDLE: begin
@@ -669,7 +945,16 @@ module ven_l1d #(
           // ventium_l1_axi ties l1d_cacheable to 1'b1, so `!cacheable` never held. The
           // FSM was unreachable in BOTH configurations, which is why the review calls
           // it untested.
-          if (c_req && !c_we && !cacheable) begin
+          if (mc_lookup_next) begin
+            // Old registered response is untouched until this edge. A
+            // rejected next read causes no replacement or backing access.
+            if (mc_capture_next) dc_lru[set_c] <= hit_way;
+          end else if (stream_path) begin
+            // The same async lookup and registered read window serve both
+            // protocols. Stream misses are rejected without allocation; only
+            // an accepted resident dword read changes replacement state.
+            if (do_rd_cap) dc_lru[set_c] <= hit_way;
+          end else if (c_req && !c_we && !cacheable) begin
             // NON-CACHEABLE READ (KEN# negated): fetch the addressed bytes into the
             // private bp_line buffer (no array touch, no LRU), then serve in L1_BYP.
             fset <= set_c; fway <= ~dc_lru[set_c]; ftag <= tag_c; fbase <= c_addr;
@@ -689,6 +974,7 @@ module ven_l1d #(
             byp_need_hi <= 1'b0;
             byp_hi_beat <= 1'b0; bp_hi <= 32'd0;
             fill_poison <= flush_all || snoop_inv_valid;   // H-06/H-07
+            early_ok_q  <= 1'b0;
           end else if (c_req && !c_we && !rd_hit) begin
             // read MISS → fill the MISSING line into its not-MRU victim way. On a
             // xline-line read where L is resident but L+1 is not, fill L+1; the core
@@ -700,7 +986,14 @@ module ven_l1d #(
               fset <= set_n; fway <= ~dc_lru[set_n]; ftag <= tag_n; fbase <= addr_n;
             end
             fw <= 3'd0;  st <= L1_FILL;
+            fill_word_valid <= '0;
             fill_poison <= flush_all || snoop_inv_valid;   // H-06/H-07
+            // Only a within-line aligned dword has a complete architectural
+            // result in the first wrapped word.  Unaligned/cross-line reads
+            // retain the established fill-then-window path.
+            early_ok_q    <= cacheable && !xline && (c_addr[1:0] == 2'd0);
+            early_addr_q  <= c_addr;
+            early_wstrb_q <= c_wstrb;
           end else if (1'b0 && c_req && c_we && !xline && !hit && cacheable) begin
             // DISABLED (Win95 REP-MOVSB relocation fix): the write-allocate STALLS the core
             // (c_ack=0) through an 8-beat fill on every write MISS. Under real FPGA DDR latency a
@@ -724,7 +1017,11 @@ module ven_l1d #(
             // read HIT → 2-way LRU touch (both lines on a xline-line hit).
             dc_lru[set_c] <= hit_way;
             if (xline) dc_lru[set_n] <= hit_way_n;
-          end else if (c_req && c_we) begin
+          end else if (c_req && c_we
+`ifdef VEN_L1D_TAG_INVALIDATE
+                       && c_ack
+`endif
+                      ) begin
             // WRITE (write-through). The backing received the full byte-accurate store
             // via the comb driver (ven_axi_master splits a cross-word / cross-line
             // store into per-word AXI beats); c_ack means the master retained the
@@ -748,7 +1045,15 @@ module ven_l1d #(
               for (int i = 0; i < 4; i++)
                 if (c_wstrb[i])
                   dc_line[{set_c, hit_way}][8*(c_addr[4:0] + i[4:0]) +: 8] <= c_wdata[8*i +: 8];
+`ifdef VEN_L1D_TAG_INVALIDATE
+              // Physical tags distinguish different lines occupying one set.
+              // Preserve the other way unless it duplicates this exact tag.
+              // Cache mutation is acceptance-qualified above, so a held then
+              // withdrawn store cannot leave speculative data in a valid line.
+              if (hit0 && hit1) dc_val[set_c][~hit_way] <= 1'b0;
+`else
               dc_val[set_c][~hit_way] <= 1'b0;   // defensively drop any stale alias in the other way
+`endif
               dc_lru[set_c] <= hit_way;
             end else begin
               // FIX A (Win95 relocation coherence, build #16): WRITE MISS or cross-line -> BLIND-
@@ -759,18 +1064,48 @@ module ven_l1d #(
               // BOTH ways: if the store MISSED a stale line (filled later) the set is clean so a
               // subsequent read MISS re-fills committed DDR (write-through already waited BVALID). Also
               // subsumes the xline __call16 iret-frame case (addressed + spilled-into lines cleared).
+`ifdef VEN_L1D_TAG_INVALIDATE
+              // Nonallocating write miss: no matching cached data to change.
+              // Crossing stores invalidate only resident touched physical tags;
+              // ven_axi_master drains posted writes before any backing read.
+              // External writers still require the independent snoop/flush
+              // contract below. Unrelated stores cannot repair missing snoops.
+              if (hit0) dc_val[set_c][0] <= 1'b0;
+              if (hit1) dc_val[set_c][1] <= 1'b0;
+              if (xline) begin
+                if (hit_n0) dc_val[set_n][0] <= 1'b0;
+                if (hit_n1) dc_val[set_n][1] <= 1'b0;
+              end
+`else
               dc_val[set_c][0] <= 1'b0;
               dc_val[set_c][1] <= 1'b0;
               if (xline) begin dc_val[set_n][0] <= 1'b0; dc_val[set_n][1] <= 1'b0; end
+`endif
             end
             // (STLD write-capture removed with the forwarding buffer.)
           end
         end
         L1_FILL: begin
+`ifdef VEN_L1D_HIT_UNDER_FILL
+          // fill_independent_hit proves set_c != fset, so this local LRU
+          // touch cannot race the fill's terminal allocation/LRU update.
+          // The read itself still takes the normal registered capture/serve
+          // path; this is hit-under-fill, not a combinational bypass.
+          if (do_rd_cap)
+            dc_lru[set_c] <= hit_way;
+`endif
           // H-06/H-07: an invalidation arriving MID-fill (beats 0..6) has no allocated
           // line to match, so it must be remembered instead of dropped.
           if (flush_all || snoop_hits_fill) fill_poison <= 1'b1;
           if (m_ack) begin
+            // AXI WRAP8/INCR8 beat zero is the saved faulting dword.  Latch it
+            // before the regular line write so the response remains a short
+            // FF-to-core path.  Never arm through an invalidate boundary.
+            if (!bypass_q && (fw == 3'd0) && early_ok_q &&
+                !flush_all && !snoop_inv_valid) begin
+              early_armed   <= 1'b1;
+              early_rdata_q <= m_rdata;
+            end
             // capture the returned word: into the PRIVATE buffer for a non-cacheable
             // bypass (no array write), else into the victim line being allocated.
             // REVIEW2_aug2 C-09: A BYPASS BEAT MUST NEVER WRITE THE ARRAY.
@@ -796,7 +1131,14 @@ module ven_l1d #(
               if (!byp_off_q[fw[1:0]][2]) bp_line[31:0]  <= bp_line[31:0]  | m_rdata;
               else                         bp_line[63:32] <= bp_line[63:32] | m_rdata;
             end else begin
-              dc_line[{fset,fway}][{fw,5'b00000} +: 32] <= m_rdata;
+              // The backing stream starts at the critical word and wraps; map
+              // each returned beat back to its physical dword slot in the line.
+              dc_line[{fset,fway}][{fill_word,5'b00000} +: 32] <= m_rdata;
+              // The data array write is visible on the following clock.  Mark
+              // precisely that physical WRAP-word ready so a later same-line
+              // load can use the existing registered capture/ack path while
+              // the remaining fill beats continue to drain.
+              fill_word_valid[fill_word] <= 1'b1;
             end
             if (byp_hi_beat) begin
               // H-19: the extra request returns the NEXT line's word 0, which is beat 0
@@ -850,7 +1192,12 @@ module ven_l1d #(
                 // line). The tag is written either way; val is what gates it.
                 dc_tag[fset][fway]<=ftag; dc_lru[fset]<=fway;
                 dc_val[fset][fway]<= !(fill_poison || flush_all || snoop_hits_fill);
-                st<=L1_DONE;
+                // The line/tag/valid RAM writes commit on this edge.  Returning
+                // directly to IDLE gives the existing registered read window the
+                // following full cycle to observe the new line, then a further
+                // registered response cycle.  This removes only the obsolete
+                // L1_DONE bubble; it does NOT create a same-edge async-RAM ack.
+                st<=L1_IDLE;
               end
             end else fw<=fw+3'd1;
           end
@@ -902,7 +1249,8 @@ module ven_l1d #(
   // an allocating line fill, a non-cacheable bypass, or the backing interface.
   // Keep these counters beside the actual serve predicates: guessing from the
   // core's S_LOAD residency alone cannot distinguish those cases.
-  longint unsigned perf_hit_capture, perf_hit_ack;
+  longint unsigned perf_hit_capture, perf_hit_ack, perf_critical_ack, perf_hit_under_fill;
+  longint unsigned perf_fill_forward;
   longint unsigned perf_miss_start, perf_bypass_start;
   longint unsigned perf_read_wait_idle, perf_read_wait_fill;
   longint unsigned perf_read_wait_done, perf_read_wait_bypass;
@@ -910,14 +1258,20 @@ module ven_l1d #(
 
   always_ff @(posedge clk) begin
     if (!rst_n) begin
-      perf_hit_capture     <= 0; perf_hit_ack         <= 0;
+      perf_hit_capture     <= 0; perf_hit_ack         <= 0; perf_critical_ack <= 0;
+      perf_hit_under_fill  <= 0; perf_fill_forward     <= 0;
       perf_miss_start      <= 0; perf_bypass_start    <= 0;
       perf_read_wait_idle  <= 0; perf_read_wait_fill  <= 0;
       perf_read_wait_done  <= 0; perf_read_wait_bypass<= 0;
       perf_fill_cycles     <= 0; perf_fill_wait       <= 0; perf_fill_ack <= 0;
     end else begin
       if (do_rd_cap) perf_hit_capture <= perf_hit_capture + 1;
+      if (do_rd_cap && fill_independent_hit)
+        perf_hit_under_fill <= perf_hit_under_fill + 1;
+      if (do_rd_cap && fill_forward_hit)
+        perf_fill_forward <= perf_fill_forward + 1;
       if (c_req && !c_we && c_ack && rd_match) perf_hit_ack <= perf_hit_ack + 1;
+      if (c_req && !c_we && c_ack && early_match) perf_critical_ack <= perf_critical_ack + 1;
       if (c_req && !c_we && st==L1_IDLE) begin
         if (!cacheable) perf_bypass_start <= perf_bypass_start + 1;
         else if (!rd_hit) perf_miss_start <= perf_miss_start + 1;
@@ -940,8 +1294,9 @@ module ven_l1d #(
   end
 
   final begin
-    $display("[L1DPERF] hit-capture=%0d hit-ack=%0d miss-start=%0d bypass-start=%0d",
-             perf_hit_capture, perf_hit_ack, perf_miss_start, perf_bypass_start);
+    $display("[L1DPERF] hit-capture=%0d hit-ack=%0d critical-ack=%0d hit-under-fill=%0d fill-forward=%0d miss-start=%0d bypass-start=%0d",
+             perf_hit_capture, perf_hit_ack, perf_critical_ack, perf_hit_under_fill,
+             perf_fill_forward, perf_miss_start, perf_bypass_start);
     $display("[L1DPERF] read-wait idle=%0d fill=%0d done=%0d bypass=%0d",
              perf_read_wait_idle, perf_read_wait_fill, perf_read_wait_done,
              perf_read_wait_bypass);

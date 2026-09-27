@@ -75,6 +75,7 @@ fp_shared/ven_fp_widemul.sv
 fp_shared/ven_fp_estdiv.sv
 fp_shared/ven_fp_trans.sv
 fp_shared/ven_fp_top.sv
+fp_shared/ven_fp_fxch_queue.sv
 // SHARED PIPELINED floatx80 add/mul ALU used BY the transcendental engines (#11
 // perf): they used to call the combinational fx_mul/fx_add inline and CHAINED,
 // which set the whole core's fmax (~167 ns path -> ~6 MHz) and cost the area that
@@ -97,8 +98,12 @@ rtl/mem/dcache_timing.sv
 rtl/mem/icache.sv
 // predecoded micro-op cache (predecode-on-fill, P0-11). Instantiated by core.sv
 // only under +define+VEN_UOPCACHE; harmless (uninstantiated) in the default build.
+rtl/mem/ven_predecode_len.sv
 rtl/mem/uopcache.sv
 rtl/mem/tlb.sv
+// Default-off associative D-TLB experiment; core.sv selects it only under an
+// explicit VEN_DTLB_ASSOC_{2,4}WAY define.
+rtl/mem/tlb_assoc.sv
 
 // ---- bus ------------------------------------------------------------------
 // M5B-int: biu_p5 (the standalone pin-level 64-bit P5 bus FSM, M5B) is now in

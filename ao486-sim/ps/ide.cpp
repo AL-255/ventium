@@ -22,21 +22,16 @@
 #include "hardware.h"
 #include "ide.h"
 
-#if 1
-	#define dbg_printf     printf
-	#define dbg_print_regs ide_print_regs
-	#define dbg_hexdump    hexdump
-#else
-	#define dbg_printf(...)   void()
-	#define dbg_print_regs    void
-	#define dbg_hexdump(...)  void()
-#endif
-
-#if 1
-	#define dbg2_printf     printf
-#else
-	#define dbg2_printf(...)   void()
-#endif
+// sim_ven owns this runtime flag.  ATA device diagnostics are intentionally
+// opt-in: host-side printf traffic is not a hardware event, yet per-sector
+// logs make long FreeDOS/Quake profiling dramatically slower and can exhaust
+// a terminal's output quota.  `--ide-verbose` restores the complete trace for
+// an IDE/BIOS wedge investigation.
+extern bool g_ide_verbose;
+#define dbg_printf(...)       do { if (g_ide_verbose) printf(__VA_ARGS__); } while (0)
+#define dbg_print_regs(...)   do { if (g_ide_verbose) ide_print_regs(__VA_ARGS__); } while (0)
+#define dbg_hexdump(...)      do { if (g_ide_verbose) hexdump(__VA_ARGS__); } while (0)
+#define dbg2_printf(...)      do { if (g_ide_verbose) printf(__VA_ARGS__); } while (0)
 
 #define IDE0_BASE 0xF000
 #define IDE1_BASE 0xF100
@@ -419,7 +414,19 @@ static void fill_fake_rdb(drive_t *drive, uint32_t sector, int cnt)
 			rdb->rdb_CylBlocks = rdb->rdb_Heads * rdb->rdb_Sectors;
 			rdb->rdb_AutoParkSeconds = 0;
 			rdb->rdb_HighRDSKBlock = 1;
-			strcpy(rdb->rdb_DiskVendor, "DON'T   REPARTITION!    0.00");
+			// RDB identity is three fixed-size fields, not one C string.  A
+			// former strcpy crossed those subobjects to lay them out and wrote
+			// its terminating NUL into ControllerVendor[0].  The byte result
+			// happened to match the preceding memset, but the write is UB.
+			static constexpr char kRdbVendor[]   = "DON'T   ";
+			static constexpr char kRdbProduct[]  = "REPARTITION!    ";
+			static constexpr char kRdbRevision[] = "0.00";
+			static_assert(sizeof(kRdbVendor) - 1 == sizeof(rdb->rdb_DiskVendor), "RDB vendor field size");
+			static_assert(sizeof(kRdbProduct) - 1 == sizeof(rdb->rdb_DiskProduct), "RDB product field size");
+			static_assert(sizeof(kRdbRevision) - 1 == sizeof(rdb->rdb_DiskRevision), "RDB revision field size");
+			memcpy(rdb->rdb_DiskVendor,   kRdbVendor,   sizeof(rdb->rdb_DiskVendor));
+			memcpy(rdb->rdb_DiskProduct,  kRdbProduct,  sizeof(rdb->rdb_DiskProduct));
+			memcpy(rdb->rdb_DiskRevision, kRdbRevision, sizeof(rdb->rdb_DiskRevision));
 			uint32_t *p = (uint32_t*)buff;
 			for (int i = 0; i < 40; i++) p[i] = SWAP(p[i]);
 		}
@@ -847,8 +854,9 @@ static void process_read(ide_config *ide, int multi)
 	// LBA, requested sector_count, and per-block cnt. If the FreeDOS boot uses multi-sector (cnt>1) a
 	// single block push of cnt*256 words may overflow the IDE FIFO -> only 1 sector reaches the core ->
 	// partial IO.SYS load -> the relocation copies incomplete source -> cs=8000:0x3a0.
-	printf("[VEN-DISK] rd cmd=%02x drv=%d lba=%u sec_cnt=%u blk_cnt=%u multi=%d\n",
-	       ide->regs.cmd, ide->regs.drv, lba, ide->regs.sector_count, cnt, multi);
+	if (g_ide_verbose)
+		printf("[VEN-DISK] rd cmd=%02x drv=%d lba=%u sec_cnt=%u blk_cnt=%u multi=%d\n",
+		       ide->regs.cmd, ide->regs.drv, lba, ide->regs.sector_count, cnt, multi);
 	extern volatile unsigned long g_disk_reads;   // PC-trajectory disk-idle trigger
 	g_disk_reads++;
 	ide->null = !FileSeekLBA(ide->drive[ide->regs.drv].f, (lba <= ide->drive[ide->regs.drv].offset) ? 0 : (lba - ide->drive[ide->regs.drv].offset));
@@ -884,7 +892,7 @@ static void process_read(ide_config *ide, int multi)
 				// Readback garbage/uniform => the mgmt READOUT path (mgmt_cnt/mux) is broken (the
 				// disk-WRITE 0x1c38 corruption source); readback OK => the guest OUT data path is.
 				static int rb_done = 0;
-				if (!rb_done && cnt >= 1) { rb_done = 1;
+				if (g_ide_verbose && !rb_done && cnt >= 1) { rb_done = 1;
 					static uint16_t rb[256]; uint16_t *w = (uint16_t*)ide_buf;
 					ide_recvbuf(ide, 255, 256, rb);
 					int mm = -1; for (int k = 0; k < 256; k++) if (rb[k] != w[k]) { mm = k; break; }

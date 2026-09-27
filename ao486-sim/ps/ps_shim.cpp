@@ -44,6 +44,15 @@ static int      txn_dir = 0;   // 0=write, 1=read
 static int      txn_pos = 0;   // 0=expect cmd, 1=expect addr, 2=expect addr-hi/data
 static uint32_t txn_addr = 0;
 
+// Native same-build snapshot support. Called outside synchronous PS transfers.
+void ps_checkpoint_spi(uint32_t words[3], bool restore) {
+    if (restore) {
+        txn_dir = int(words[0]); txn_pos = int(words[1]); txn_addr = words[2];
+    } else {
+        words[0] = uint32_t(txn_dir); words[1] = uint32_t(txn_pos); words[2] = txn_addr;
+    }
+}
+
 // constructed by sim_main from the raw request outputs (set each poll)
 extern "C" uint16_t ps_sd_req();
 

@@ -22,16 +22,14 @@ CCACHE_DISABLE ?= 1
 export CCACHE_DISABLE
 # Full-PC generated C++ is memory-heavy.  Do not use Verilator's `-j 0` (all
 # host cores): it can start enough cc1plus processes to OOM the workstation.
-# A larger, bounded value is an explicit caller opt-in.
-ifeq ($(VENTIUM_ALLOW_PARALLEL_VERILATOR),1)
-VERILATOR_BUILD_JOBS ?= 1
-else
+# Keep the generated-C++ build strictly single-threaded; changing this policy
+# requires an explicit reviewed build-profile change.
 override VERILATOR_BUILD_JOBS := 1
-endif
-# Split oversized generated C++ functions before the host compiler sees them.
-# This keeps the peak RSS of the one permitted compiler job well below the
-# workstation limit; it changes only the simulation build partitioning.
-VERILATOR_SPLIT ?= --output-split 20000 --output-split-cfuncs 20000
+# `--output-split` alone only makes included fragments; an aggregate
+# `V*_vm_classes_0.cpp` can still consume several GiB at host-compiler time.
+# Ungroup the generated classes as well, preserving the -O3 simulation model
+# while keeping the one permitted compiler job bounded.
+VERILATOR_SPLIT ?= --output-groups 0 --output-split 20000 --output-split-cfuncs 20000
 # A caller may request `make -j all ven`; those are two independent full-system
 # Verilator builds and must never overlap.  Serialise this makefile even under a
 # command-line jobserver.  This does not coordinate with or preempt FPGA tools.
@@ -67,9 +65,10 @@ VEN_DEFS := +define+VEN_CORE +define+VEN_L1_AXI +define+VEN_L1_HONOR_CD \
   +define+VEN_KV260_SOC +define+VEN_TRANSCENDENTAL +define+VEN_SRT_ITER \
   +define+VEN_IDIV_ITER +define+VEN_BCD_ITER +define+VEN_FP_PIPE \
   +define+VEN_FP_PIPE2 +define+VEN_FP_PC_RELAX +define+VEN_FP_SHARED +define+VEN_FP_SHARED_DIRECT \
-  +define+VEN_FPREM +define+VEN_BTB_PIPE +define+VEN_IC_BRAM +define+VEN_UOPCACHE +define+VEN_UOP_SFETCH +define+VEN_SFETCH_RESIDENT \
+  +define+VEN_FPREM +define+VEN_BTB_PIPE +define+VEN_IC_BRAM +define+VEN_UOPCACHE +define+VEN_UOP_SFETCH +define+VEN_SFETCH_RESIDENT +define+VEN_UOP_TAIL_LOCAL \
   +define+VEN_DBG_CORE +define+VEN_SYS_FASTPATH +define+VEN_SYS_FASTPATH_RELOC \
-  +define+VEN_SYS_FASTLOAD_FLAT +define+VEN_SYS_FASTSTORE_FLAT \
+  +define+VEN_SYS_FASTLOAD_FLAT +define+VEN_SYS_FASTLOAD_BOUNDED \
+  +define+VEN_SYS_FASTSTORE_FLAT +define+VEN_FAST_MEM_ADD +define+VEN_FAST_MOFFS_STORE \
   +define+VEN_FAST_RETRACE +define+VEN_KBD_AUTOACK \
   +define+VEN_KBC_FAST
 VEN_SRCS := ao486-sim/ven/sim_ven.cpp ao486-sim/ven/vtm_dpi.cpp \
@@ -83,6 +82,7 @@ VEN_EXE ?= ao486sim_ven
 VEN_EXTRA_DEFS ?=
 ven:
 	cd $(REPO) && $(VERILATOR) $(VFLAGS) \
+	  -LDFLAGS "-lz" \
 	  -Mdir $(VEN_OBJDIR) -o $(VEN_EXE) $(VEN_DEFS) $(VEN_EXTRA_DEFS) \
 	  -f rtl_ven_core.f -f rtl_ven_soc.f $(VEN_SRCS)
 	@echo "built (ventium-swapped cosim): $(REPO)/$(VEN_OBJDIR)/$(VEN_EXE)"
@@ -94,4 +94,7 @@ run: all
 clean:
 	rm -rf $(OBJDIR)
 
-.PHONY: all ven run clean
+ven-state-profiler:
+	cd $(REPO) && tools/build_scope.sh -- python3 tools/build_state_delta.py $(VEN_OBJDIR)
+
+.PHONY: all ven ven-state-profiler run clean

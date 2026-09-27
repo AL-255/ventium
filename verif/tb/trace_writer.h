@@ -259,6 +259,14 @@ private:
 // Defined in dpi_retire.cpp; set by tb_main before clocking begins.
 extern TraceWriter* g_trace;
 
+// Asynchronous-FP observation hooks, implemented in dpi_retire.cpp. These do
+// not change the CPU or synthesize a result. Completion supplies committed RTL
+// state; finish must run before detaching/closing the writer.
+void fp_trace_begin(uint64_t owner);
+void fp_trace_begin_stream(uint64_t owner);
+void fp_trace_complete(uint64_t owner, const X87State& committed);
+void fp_trace_finish();
+
 }  // namespace ventium
 
 #endif  // VENTIUM_TRACE_WRITER_H

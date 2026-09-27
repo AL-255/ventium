@@ -213,43 +213,109 @@ long MemModel::load_image(const std::string& path, uint32_t load_addr) {
 }
 
 void MemModel::service(bool req, bool we, uint32_t addr, uint32_t wdata,
-                       uint8_t wstrb, uint32_t* rdata, bool* ack) {
-    if (!req) {
-        *rdata = 0;
-        *ack   = false;
-        wait_  = 0;          // request withdrawn: drop any pending stall
-        return;
-    }
+                       uint8_t wstrb, bool clock_tick,
+                       uint32_t* rdata, bool* ack) {
+    auto complete = [&](bool c_we, uint32_t c_addr, uint32_t c_wdata,
+                        uint8_t c_wstrb) -> uint32_t {
+        if (c_we) {
+            // Honour per-byte write strobes (mem_wstrb). docs/rtl-interface.md §3.
+            for (int i = 0; i < 4; ++i) {
+                if (c_wstrb & (1u << i)) {
+                    write8(c_addr + (uint32_t)i,
+                           (uint8_t)((c_wdata >> (8 * i)) & 0xff));
+                }
+            }
+            ++writes_;
+            return 0;           // read data undefined on writes; drive 0
+        }
+        ++reads_;
+        return read32(c_addr);
+    };
 
-    // task #52: optional access latency. rd_lat_/wr_lat_ default to 0, in which
-    // case this whole block is skipped and the model acks in-cycle exactly as
-    // before (so every existing golden stays bit-reproducible). When set, we hold
-    // ack low for N cycles first, WITHOUT performing the access -- the read must
-    // observe memory as of the cycle it completes, not the cycle it was issued.
-    const unsigned lat = we ? wr_lat_ : rd_lat_;
-    if (lat) {
-        if (wait_ == 0) wait_ = lat;      // first cycle of this request
-        if (--wait_ > 0) {                // still stalling
+    // Preserve the established zero-latency model exactly.  In particular, the
+    // simulator intentionally re-services it while resolving combinational
+    // feedback around an edge; changing that path would invalidate all existing
+    // functional/cycle gates for a test feature that is normally disabled.
+    if (rd_lat_ == 0 && wr_lat_ == 0) {
+        if (!req) {
             *rdata = 0;
             *ack   = false;
             return;
         }
+        *rdata = complete(we, addr, wdata, wstrb);
+        *ack = true;
+        return;
     }
 
-    if (we) {
-        // Honour per-byte write strobes (mem_wstrb). docs/rtl-interface.md §3.
-        for (int i = 0; i < 4; ++i) {
-            if (wstrb & (1u << i)) {
-                write8(addr + (uint32_t)i, (uint8_t)((wdata >> (8 * i)) & 0xff));
+    // A delayed response is a one-edge pulse.  It remains driven through the
+    // intervening combinational settles, but is cleared before the following
+    // rising edge so it cannot acknowledge a different request.
+    if (clock_tick) lat_resp_valid_ = false;
+
+    if (lat_pending_) {
+        // Once a delayed transfer has begun, the single-beat master must hold
+        // its complete request stable until acknowledgement.  Do not silently
+        // complete whichever address happens to be visible after a stall: that
+        // was the old model's phase-dependent corruption bug.
+        if (clock_tick) {
+            if (!req) {
+                lat_pending_ = false;     // architecturally cancelled request
+                lat_wait_ = 0;
+            } else if (we != lat_we_ || addr != lat_addr_ ||
+                       (lat_we_ && (wdata != lat_wdata_ || wstrb != lat_wstrb_))) {
+                if (!lat_protocol_error_) {
+                    std::fprintf(stderr,
+                        "[memmodel] PROTOCOL ERROR: delayed request changed before ack "
+                        "old={we=%u addr=%08x data=%08x strb=%x} "
+                        "new={we=%u addr=%08x data=%08x strb=%x}\n",
+                        lat_we_ ? 1u : 0u, lat_addr_, lat_wdata_, lat_wstrb_,
+                        we ? 1u : 0u, addr, wdata, wstrb);
+                }
+                lat_protocol_error_ = true;
+                lat_pending_ = false;
+                lat_wait_ = 0;
+            } else if (lat_wait_ > 1) {
+                --lat_wait_;
+            } else {
+                lat_resp_data_ = complete(lat_we_, lat_addr_, lat_wdata_, lat_wstrb_);
+                lat_resp_valid_ = true;
+                lat_pending_ = false;
+                lat_wait_ = 0;
             }
         }
-        ++writes_;
-        *rdata = 0;             // read data undefined on writes; drive 0
-    } else {
-        *rdata = read32(addr);
-        ++reads_;
+        *rdata = lat_resp_data_;
+        *ack = lat_resp_valid_;
+        return;
     }
-    *ack = true;               // single-beat: ack immediately (M0, §3)
+
+    if (!req) {
+        *rdata = 0;
+        *ack = lat_resp_valid_;
+        return;
+    }
+
+    const bool match = !lat_match_en_ ||
+                       ((addr & lat_match_mask_) == (lat_match_ & lat_match_mask_));
+    const unsigned lat = match ? (we ? wr_lat_ : rd_lat_) : 0;
+    if (lat == 0) {
+        // Leave the unaffected direction combinational even when the opposite
+        // direction is delayed.  This keeps a read-latency experiment from
+        // accidentally changing the write-side protocol (and vice versa).
+        *rdata = complete(we, addr, wdata, wstrb);
+        *ack = true;
+        return;
+    }
+
+    if (clock_tick) {
+        lat_pending_ = true;
+        lat_we_ = we;
+        lat_addr_ = addr;
+        lat_wdata_ = wdata;
+        lat_wstrb_ = wstrb;
+        lat_wait_ = lat;
+    }
+    *rdata = 0;
+    *ack = false;
 }
 
 // ---- checkpoint snapshot / restore -----------------------------------------

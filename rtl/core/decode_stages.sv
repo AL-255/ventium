@@ -433,10 +433,10 @@ module decode_stages
             // the descriptor read lands ~48.5MB off (the Win95 AH=87 PM-entry hang).
             d_w=eff_opsize?3'd2:3'd4;
             d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base);
-          end else if ((modrm_reg==3'd0 || modrm_reg==3'd1) && modrm_mod!=2'b11 && !paging_on) begin
+          end else if ((modrm_reg==3'd0 || modrm_reg==3'd1) && modrm_mod!=2'b11) begin
             // M9.5 SGDT (/0) / SIDT (/1): STORE the 6-byte pseudo-descriptor. Not
-            // privileged (any CPL). Scoped to !paging_on (the SoC boot path; the
-            // 2-beat S_SGDT store does not integrate page translation) -> else HALT.
+            // privileged (any CPL). S_SGDT preflights the destination and uses
+            // the ordinary translated/fragmented store path for both beats.
             d_sysop=(modrm_reg==3'd0)?SYS_SGDT:SYS_SIDT;
             d_mem_write=1'b1;
             d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base);
@@ -1799,8 +1799,15 @@ module decode_stages
     // correct in core_fetch_decode.svh: the F00F erratum arm is tested BEFORE the #UD
     // arm, so with errata_en[ERR_F00F] set the documented hang still wins.
     if (pfx_lock && !(d_mem_read || d_mem_write)) d_unknown = 1'b1;
-    // REVIEW1_Aug2 C-10: a LOCK on a memory RMW is the case that must reach the bus.
-    d_lock = pfx_lock && (d_mem_read || d_mem_write);
+    // A F0 LOCK prefix reaches the bus/session path for its decoded memory
+    // operation (including CMPXCHG8B, whose conditional write is not known at
+    // decode).  Separately, x86 makes memory-form XCHG implicitly locked even
+    // without F0; treating it as an ordinary read-then-write lets another local
+    // bus master interleave between the two beats.  Register XCHG is excluded by
+    // its absent memory flags.  Illegal F0 uses still route through d_unknown
+    // below before any operand beat can issue.
+    d_lock = (pfx_lock && (d_mem_read || d_mem_write)) ||
+             ((d_kind == K_XCHG) && d_mem_read && d_mem_write);
 
     // ---- REVIEW1_Aug2 M-01: LOCK is legal only on specific opcodes ---------------
     // The rule above rejects LOCK when there is no memory operand at all. It does not

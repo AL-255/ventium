@@ -133,6 +133,23 @@
             // 32-bit far-ptr load (LDS/LES/LSS/LFS/LGS, m16:32): off=mem_load_data
             // (@[mem]); the SELECTOR is 2 bytes @[mem+4] -> a 2nd S_LOAD2 read.
             else if (q_seg_load && !q_seg_load_lo && q_w==3'd4) state<=S_LOAD2;
+            else if (rep_movs_load_fuse) begin
+              // str_store_data above is THIS element's merged source, including
+              // page-crossing loads. No partial source beat may reach this arm.
+              // GPR writeback mirrors this edge; S_STORE retains all destination
+              // permission/fragment checks and the original fault rollback.
+              str_store_addr <= str_edi;
+              str_pre_esi <= gpr_o[R_ESI];
+              str_pre_edi <= gpr_o[R_EDI];
+              str_pre_ecx <= gpr_o[R_ECX];
+              str_next_eip <= (dec_cx == 32'd0) ? next_eip : q_pc;
+              state <= S_STORE;
+`ifndef SYNTHESIS
+              if (ven_repcontlog_en)
+                $display("[MOVSFUSE] LOAD cyc=%0d pc=%08x esi=%08x edi=%08x ecx=%08x split=%0b",
+                         core_cyc, q_pc, gpr_o[R_ESI], gpr_o[R_EDI], gpr_o[R_ECX], xp_pend);
+`endif
+            end
             else state<=S_EXEC;
           end
         end
@@ -226,16 +243,40 @@
           end else
 `endif
           if (mem_ack) begin
-            unique case (f_step)
-              4'd0: f_mem80[31:0]  <= mem_rdata;
-              4'd1: f_mem80[63:32] <= mem_rdata;
-              default: f_mem80[79:64] <= mem_rdata[15:0];
-            endcase
+`ifdef VEN_FP_LOAD64
+            // The optional high half belongs to this same registered, complete
+            // resident-line response.  fp_load64_take proves the entire operand
+            // was checked and stays in one translated page.  MMIO, crossings,
+            // partial fills and debug-active instructions keep both old beats.
+            if (fp_load64_take) begin
+              f_mem80[63:0] <= {bus_rdata_hi, mem_rdata};
+            end else
+`endif
+            begin
+              unique case (f_step)
+                4'd0: f_mem80[31:0]  <= mem_rdata;
+                4'd1: f_mem80[63:32] <= mem_rdata;
+                default: f_mem80[79:64] <= mem_rdata[15:0];
+              endcase
+            end
             // total words needed: m16/m32->1, m64->2, m80->3
-            if ((q_f_mbytes<=4'd4) ||
+            if (fp_load64_take || (q_f_mbytes<=4'd4) ||
                 (q_f_mbytes==4'd8 && f_step==4'd1) ||
                 (q_f_mbytes==4'd10 && f_step==4'd2)) begin
               f_step<=4'd0; state<=S_FEXEC;
+`ifdef VEN_FP_SHARED
+              if (fp_shared_load_cmd && fp_shared_cmd_valid && fp_shared_cmd_ready) begin
+                if (fp_shared_accept_retire) begin
+                  eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1;
+                  state<=S_PIPE;
+                end else state<=S_FP_SHARED_WAIT;
+`ifndef SYNTHESIS
+                if (ven_fpdirectlog_en)
+                  $display("[FPLOADCMD] ACCEPT cyc=%0d pc=%08x bytes=%0d immediate=%0b",
+                           core_cyc, q_pc, q_f_mbytes, fp_shared_accept_retire);
+`endif
+              end
+`endif
             end else f_step<=f_step+4'd1;
           end
         end

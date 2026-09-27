@@ -16,9 +16,18 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <unordered_map>
 
 #include "trace_writer.h"
+#include "fp_trace_pending.h"
+
+// Formatter only: it must not read the live clock, drain stashes, update
+// architectural observers, or count retirements. Those happen synchronously
+// in vtm_retire even when a future asynchronous FP owner defers formatting.
+static void emit_trace_record(ventium::TraceWriter* writer,
+                             const ventium::FPTraceRecord& record,
+                             const ventium::X87State& fp);
 
 // --exec-written-check: flag the first retired insn fetched from a byte that was
 // written (as data) at/after g_exec_floor — the F3 divergence point where the core
@@ -60,7 +69,71 @@ LastArch g_last_arch;
 // task #102 RETDUMP: the latest post-commit CR0 (captured by vtm_retire_sys
 // UNCONDITIONALLY so the no-trace RD window can print PE/PG). Inert otherwise.
 unsigned int g_last_cr0 = 0;
+
+static std::optional<FPTracePending> fp_pending;
+static TraceWriter* fp_pending_writer = nullptr;
+
+static void check_fp_writer() {
+    if (fp_pending && g_trace != fp_pending_writer)
+        throw std::logic_error("trace writer changed with unresolved FP owner");
+}
+
+void fp_trace_begin(uint64_t owner) {
+    check_fp_writer();
+    // Cycle-only and discarded traces have no sequential x87 state to fix up.
+    if (!g_trace || !g_trace->ok() || !g_trace->x87()) return;
+    if (fp_pending) throw std::logic_error("second outstanding FP trace owner");
+    fp_pending.emplace();
+    fp_pending->begin(owner);
+    fp_pending_writer = g_trace;
+}
+
+void fp_trace_begin_stream(uint64_t owner) {
+    check_fp_writer();
+    if (!g_trace || !g_trace->ok() || !g_trace->x87()) return;
+    if (!fp_pending) fp_pending.emplace();
+    fp_pending->begin_stream(owner);
+    fp_pending_writer = g_trace;
+}
+
+void fp_trace_complete(uint64_t owner, const X87State& committed) {
+    check_fp_writer();
+    if (!g_trace || !g_trace->ok() || !g_trace->x87()) return;
+    if (!fp_pending) throw std::logic_error("FP trace completion without owner");
+    fp_pending->complete(owner, committed,
+        [](const FPTraceRecord& record, const X87State& fp) {
+            emit_trace_record(g_trace, record, fp);
+        });
+    if (!fp_pending->pending()) {
+        fp_pending.reset();
+        fp_pending_writer = nullptr;
+    }
+}
+
+void fp_trace_finish() {
+    check_fp_writer();
+    if (fp_pending) fp_pending->finish(); // never discard an unresolved owner
+}
 }  // namespace ventium
+
+extern "C" void vtm_fp_async_event(unsigned int event_kind,
+                                    unsigned long long owner) {
+    using namespace ventium;
+    if (event_kind == 0) {
+        fp_trace_begin(owner);
+    } else if (event_kind == 2) {
+        fp_trace_begin_stream(owner);
+    } else if (event_kind == 1) {
+        check_fp_writer();
+        if (!g_trace || !g_trace->ok() || !g_trace->x87()) return;
+        bool present = false;
+        const X87State committed = g_trace->take_x87(owner, &present);
+        if (!present) throw std::logic_error("FP completion missing RTL x87 snapshot");
+        fp_trace_complete(owner, committed);
+    } else {
+        throw std::logic_error("invalid FP trace event");
+    }
+}
 
 // Match the SystemVerilog import signatures from docs/rtl-interface.md §2.
 // When Verilator's generated header is present it already declares these with
@@ -414,10 +487,52 @@ extern "C" void vtm_retire(
         }
     }
 
+    check_fp_writer();
     if (!g_trace || !g_trace->ok()) return;
     // --no-trace (free-run fast path): count the retirement so the TB loop can
     // make progress, but skip ALL record formatting (the per-instruction cost).
     if (g_trace->discard()) { g_trace->note_retire(); return; }
+
+    FPTraceRecord record;
+    record.arch = g_last_arch;
+    record.clock = g_trace->clock();
+    X87State fp;
+    if (g_trace->cycle()) {
+        record.pipe = g_trace->take_cycle(n, &record.pipe_present);
+        static const bool pipe_witness = std::getenv("VEN_PIPE_RETIRE_WITNESS") != nullptr;
+        if (pipe_witness)
+            std::fprintf(stderr, "[PIPE-RETIRE] pc=%08x explicit=%u pipe=%u paired=%u\n",
+                         pc, unsigned(record.pipe_present), unsigned(record.pipe.pipe),
+                         unsigned(record.pipe.paired));
+    }
+    if (g_trace->sys())
+        record.sys = g_trace->take_sys(n, &record.sys_present);
+    if (g_trace->x87()) {
+        bool present = false;
+        fp = g_trace->take_x87(n, &present);
+    }
+    // Progress belongs to the live retirement, not a later output flush.
+    g_trace->note_retire();
+    if (fp_pending)
+        fp_pending->push(record, fp,
+            [](const FPTraceRecord& r, const X87State& f) {
+                emit_trace_record(g_trace, r, f);
+            });
+    else
+        emit_trace_record(g_trace, record, fp);
+}
+
+static void emit_trace_record(ventium::TraceWriter* g_trace,
+                             const ventium::FPTraceRecord& record,
+                             const ventium::X87State& fp) {
+    using namespace ventium;
+    const auto& a = record.arch;
+    const auto n = a.n;
+    const auto pc = a.pc, eflags = a.eflags;
+    const auto eax = a.gpr[0], ecx = a.gpr[1], edx = a.gpr[2], ebx = a.gpr[3];
+    const auto esp = a.gpr[4], ebp = a.gpr[5], esi = a.gpr[6], edi = a.gpr[7];
+    const auto cs = a.seg[0], ss = a.seg[1], ds = a.seg[2];
+    const auto es = a.seg[3], fs = a.seg[4], gs = a.seg[5];
 
     // --- cycle mode (M4): emit a cycle-mode record instead of the func one ---
     // The integer/system architectural state is irrelevant in cycle mode; we
@@ -430,8 +545,7 @@ extern "C" void vtm_retire(
     // — the cycle comparator aligns by n and sanity-checks pc, neither of which
     // needs bytes.
     if (g_trace->cycle()) {
-        bool present = false;
-        CycleInfo ci = g_trace->take_cycle((uint64_t)n, &present);
+        const CycleInfo ci = record.pipe;
         const char* pipe_str = (ci.pipe == 0) ? "U"
                              : (ci.pipe == 1) ? "V"
                                               : "-";
@@ -440,11 +554,9 @@ extern "C" void vtm_retire(
             "\"pipe\":\"%s\",\"paired\":%s}\n",
             (unsigned long long)n,
             pc,
-            (unsigned long long)g_trace->clock(),
+            (unsigned long long)record.clock,
             pipe_str,
             ci.paired ? "true" : "false");
-        (void)present;  // absence already yields pipe=U paired=false
-        g_trace->note_retire();
         return;
     }
 
@@ -478,8 +590,7 @@ extern "C" void vtm_retire(
     // hi(16)<<64 | lo(64); fctrl/fstat/ftag = 16-bit (4 digits); the untracked
     // pointer fields fop/fiseg/foseg = 16-bit 0, fioff/fooff = 32-bit 0.
     if (g_trace->x87()) {
-        bool present = false;
-        X87State s = g_trace->take_x87((uint64_t)n, &present);
+        const X87State& s = fp;
         for (int i = 0; i < 8; ++i) {
             // 80-bit canonical floatx80: print high 16 bits then low 64 bits,
             // zero-padded to 4 + 16 = 20 hex digits.
@@ -494,7 +605,6 @@ extern "C" void vtm_retire(
             "\"fiseg\":\"0x%04x\",\"foseg\":\"0x%04x\"",
             (unsigned)s.fctrl, (unsigned)s.fstat, (unsigned)s.ftag,
             0u, 0u, 0u, 0u, 0u);
-        (void)present;  // absence already yields zeros; nothing else to do
     }
 
     // M2S.1 system fields (only when the trace header declares sys:true). Drain
@@ -504,16 +614,13 @@ extern "C" void vtm_retire(
     // path compares cr0..cr4 + selectors + GPRs + eflags + eip. Field names +
     // 0x%08x formatting MUST match tracefmt.py (SYS_CR).
     if (g_trace->sys()) {
-        bool present = false;
-        SysState s = g_trace->take_sys((uint64_t)n, &present);
+        const SysState& s = record.sys;
         std::fprintf(g_trace->fp(),
             ",\"cr0\":\"0x%08x\",\"cr2\":\"0x%08x\","
             "\"cr3\":\"0x%08x\",\"cr4\":\"0x%08x\"",
             s.cr0, s.cr2, s.cr3, s.cr4);
-        (void)present;
     }
 
     std::fprintf(g_trace->fp(), "}\n");
 
-    g_trace->note_retire();
 }
