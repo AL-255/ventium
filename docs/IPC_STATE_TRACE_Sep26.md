@@ -164,7 +164,10 @@ packet, while retaining registered cache data and exact MMIO side effects.
 
 The large raw U-to-V register-RAW rejection count is likewise **not** an
 optimization budget: ordinary flow dependencies must not pair under the P5
-rules in `docs/ap500-pairing-table.md`. A same-cycle U-ALU-to-V bypass would
-violate that cycle model even if its functional result were correct. The
-short-list remains checked memory pipelining and independent integer/FP work,
-not relaxing architectural dependency or pairing guards to manufacture IPC.
+rules in `docs/ap500-pairing-table.md`. This gameplay profile already opts into
+the separately checked `VEN_LOAD_USE_FORWARD` load-to-V exception; that
+throughput extension is not evidence that arbitrary P5 RAW pairs are legal.
+A same-cycle U-ALU-to-V bypass would further diverge from the P5 cycle model
+even if its functional result were correct. The short-list remains checked
+memory pipelining and independent integer/FP work, not broadly relaxing
+dependency or pairing guards to manufacture IPC.
