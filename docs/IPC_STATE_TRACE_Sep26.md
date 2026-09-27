@@ -114,12 +114,16 @@ not a claimed upper bound under a changed schedule.
 
 The reference L1D's cumulative counters at exactly 1.100B and 1.150B split
 that memory pressure further: 6,935,406 registered hit captures,
-341,691 miss starts, 5,299,167 idle read-wait clocks and 8,042,322
+341,691 increments of the **legacy** miss-start counter, 5,299,167 idle
+read-wait clocks and 8,042,322
 fill-wait clocks. The fills occupy 9,052,484 L1 clocks, including
 6,484,681 backing-wait clocks. Thus both the registered-hit ownership and
 backing line-fill latency matter in the representative window. These are
 overlapping service observations; they are not removable-cycle estimates and
-must not be added to the no-retire buckets. The cache remains the specified
+must not be added to the no-retire buckets. The legacy miss counter also
+includes failed *unissued* read-chain next-address lookups, so 341,691 must
+not be reported as actual backing fills; the 50M trace lacks the per-edge
+split. The cache remains the specified
 full 8 KiB, two-way, 32-byte-line P5 configuration.
 
 The raw L1 read-wait level is high for 215,107 clocks, of which 118,631 are
@@ -221,6 +225,25 @@ fill-forward, hit-under-fill and store-window policies expose only 1,612,
 opportunity level, not a predicted gain. V-memory attribution still sees
 30,205 U-register/V-memory commit levels, only 11,889 V MOV loads, while
 only 2,272 read/read observations have a complete matching same-line window.
+An exact lookup-address histogram reconciles the legacy L1 counter's 5,912
+increments into **5,453 actual demand misses** (335 instruction, 5,118 data)
+and **459 rejected, unissued read-chain next lookups**. The earlier apparent
+236-miss hot physical line `0x15f560` was almost entirely a *next-query*
+artifact misattributed to the old request address; it was not evidence of
+236 backing refills. The histogram is at
+`tmp/build-tmp/ventium-fp-branch-1150m-misses5-sep26/`; its sum is checked
+against the recorded L1 counter and synthetic old-address/next-address cases.
+`VEN_L1D_PERF` now excludes such lookahead rejects from future `miss-start`
+reports, with a failing-before/passing-after chain-leaf witness. This only
+repairs a simulation counter; the cache's request, data and ACK paths did not
+change. The old 50M build's published counter value above remains labeled
+legacy rather than retroactively reinterpreted. The corrected counter has no
+new gameplay IPC measurement; the 0.44963946 IPC representative result still
+predates it. Validation: `make verify` passed its 105 functional programs and
+cycle bands, `make l1` passed all 46 memory-subsystem gates, `make lint` passed
+all five configurations, and the state-focus analyzer passed synthetic legacy
+and corrected-counter fixtures plus lossless reconstruction of the 1M-cycle
+recording. This is measurement hygiene, not an IPC improvement claim.
 
 This phase makes the next investigation concrete: measured memory-service
 ownership, especially registered data-hit turnover and backing latency, is
