@@ -75,6 +75,15 @@ loop_body:
     # a 32-byte I-cache line. This exposes persistent-uop-cache fallback cost.
     addl $1, %eax
     incl %ebx
+.elseif CASE == 11
+    # Two independent dword loads from one resident line. Reuse may serve
+    # the second without another registered 256-bit-line capture.
+    movl (%esi), %eax
+    movl 4(%esi), %edx
+.elseif CASE == 12
+    # Same instruction classes but a second physical line is required.
+    movl (%esi), %eax
+    movl 32(%esi), %edx
 .else
     .error "unsupported CASE"
 .endif

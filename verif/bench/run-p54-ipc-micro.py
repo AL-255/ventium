@@ -29,6 +29,8 @@ CASES = {
     "integer_only_control": (BASE, 8),
     "frontend_aligned": (BASE, 9),
     "frontend_line_straddle": (BASE, 10),
+    "resident_same_line_loads": (BASE, 11),
+    "resident_two_line_loads": (BASE, 12),
 }
 
 
