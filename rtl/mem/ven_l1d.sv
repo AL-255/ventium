@@ -1274,7 +1274,11 @@ module ven_l1d #(
       if (c_req && !c_we && c_ack && early_match) perf_critical_ack <= perf_critical_ack + 1;
       if (c_req && !c_we && st==L1_IDLE) begin
         if (!cacheable) perf_bypass_start <= perf_bypass_start + 1;
-        else if (!rd_hit) perf_miss_start <= perf_miss_start + 1;
+        // Read-chain lookahead redirects rd_hit to the unissued NEXT address.
+        // Rejection there starts no fill, so it is not a demand miss. The
+        // old c_req remains acknowledged from its registered response.
+        else if (!mc_lookup_next && !rd_hit)
+          perf_miss_start <= perf_miss_start + 1;
       end
       if (c_req && !c_we && !c_ack) begin
         unique case (st)

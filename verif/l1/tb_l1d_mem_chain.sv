@@ -22,6 +22,9 @@ module tb_l1d_mem_chain;
   ven_l1d dut(.*);
   byte unsigned mem[65536];
   int ticks=0, accepted=0, backing=0;
+`ifdef VEN_L1D_PERF
+  longint unsigned misses_before_next;
+`endif
   function automatic logic [31:0] word_at(input logic [31:0] addr);
     return {mem[addr+3],mem[addr+2],mem[addr+1],mem[addr]};
   endfunction
@@ -62,6 +65,9 @@ module tb_l1d_mem_chain;
     for(int i=0;i<65536;i++) mem[i]=8'(i^(i>>8));
     repeat(3) @(negedge clk); rst_n=1;
     read_at('h1000); read_at('h2020);
+`ifdef VEN_L1D_PERF
+    if(dut.perf_miss_start!=2) $fatal(1,"real demand misses not counted");
+`endif
     arm_old('h1000);
     // No gaps: old response belongs to c_addr while lookup already addresses
     // an unrelated set. Every edge consumes one old read and accepts one new.
@@ -88,8 +94,16 @@ module tb_l1d_mem_chain;
     end
     // Miss, uncacheable, crossing and unsupported strobe are silent rejection.
     c_next_addr='h4000;
+`ifdef VEN_L1D_PERF
+    misses_before_next=dut.perf_miss_start;
+`endif
     @(posedge clk); if(c_next_ready || m_req) $fatal(1,"next miss allocated");
-    @(negedge clk); c_next_addr='h1000; c_next_cacheable=0;
+    @(negedge clk);
+`ifdef VEN_L1D_PERF
+    if(dut.perf_miss_start!=misses_before_next)
+      $fatal(1,"rejected next lookup counted as backing miss");
+`endif
+    c_next_addr='h1000; c_next_cacheable=0;
     @(posedge clk); if(c_next_ready || m_req) $fatal(1,"speculative MMIO");
     @(negedge clk); c_next_cacheable=1; c_next_addr='h101f;
     @(posedge clk); if(c_next_ready || m_req) $fatal(1,"crossing admitted");
