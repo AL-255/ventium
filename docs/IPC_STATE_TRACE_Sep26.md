@@ -219,7 +219,15 @@ The same-edge exclusive no-retirement partition sums to 467,609 edges:
 Raw L1 read-wait levels total 260,994 clocks: 146,891 busy backing service,
 108,650 idle registered-hit capture and 5,453 idle miss detection; 251,456
 are data-side and 9,538 instruction-side. These levels overlap the exclusive
-causes above, so they are **not** additional saved clocks. The existing optional
+causes above, so they are **not** additional saved clocks. On the 146,891 busy
+read-wait levels, the joined transport state finds 126,698
+with the AXI master in read-data, 109,757 with the AXI-to-Avalon bridge in
+read-data, and 76,141 with the **ao486 platform's** L2 cache in stream-fill;
+these three subsets overlap, and 71,553 levels satisfy all three predicates.
+The model's L2 stream-fill is not the FPGA's direct PS-AXI route, so this does
+not isolate hardware AXI latency or imply that bypassing the bridge would save
+71,553 core clocks. Registered-hit capture (108,650 levels) has no backing
+transaction at all. The existing optional
 fill-forward, hit-under-fill and store-window policies expose only 1,612,
 9,138 and 8,416 eligible clocks respectively in this phase; each is an
 opportunity level, not a predicted gain. V-memory attribution still sees
