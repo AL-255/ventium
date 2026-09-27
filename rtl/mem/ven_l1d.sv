@@ -185,24 +185,34 @@ module ven_l1d #(
   // ---- combinational lookup off the registered arrays (PRE-update) ----------
   logic [IDXW-1:0] set_c; logic [TAGW-1:0] tag_c;
   logic        hit0, hit1, hit; logic hit_way;
-  logic mc_lookup_next, mc_capture_next;
+  logic mc_lookup_next, mc_lookup_old, mc_lookup_prime, mc_capture_next;
   logic [31:0] lookup_addr;
   logic [3:0] lookup_wstrb;
 `ifdef VEN_PIPE_MEM_CHAIN
 `ifdef VEN_L1D_COMB_ACK
   initial $fatal(1, "VEN_PIPE_MEM_CHAIN requires registered L1 responses");
 `endif
-  assign mc_lookup_next = c_next_req && c_req && !c_we && rd_match &&
+  assign mc_lookup_old = c_next_req && c_req && !c_we && rd_match &&
       (st == L1_IDLE) && !early_armed && !stream_path;
+`ifdef VEN_PIPE_REG_LOAD_PRIME
+  assign mc_lookup_prime = c_next_req && !c_req && !rd_armed &&
+      (st == L1_IDLE) && !early_armed && !stream_path;
+`else
+  assign mc_lookup_prime = 1'b0;
+`endif
+  assign mc_lookup_next = mc_lookup_old || mc_lookup_prime;
   assign lookup_addr = mc_lookup_next ? c_next_addr : c_addr;
   assign lookup_wstrb = mc_lookup_next ? c_next_wstrb : c_wstrb;
-  assign c_next_ready = mc_lookup_next && c_next_cacheable && cacheable &&
+  assign c_next_ready = mc_lookup_next && c_next_cacheable &&
+      (mc_lookup_prime || cacheable) &&
       !golden && !flush_all && !snoop_inv_valid && hit &&
       ((c_next_wstrb == 4'b0001) ||
        ((c_next_wstrb == 4'b1111) && c_next_addr[4:0] <= 5'd28));
   assign mc_capture_next = c_next_ready && c_next_commit;
 `else
   assign mc_lookup_next = 1'b0;
+  assign mc_lookup_old = 1'b0;
+  assign mc_lookup_prime = 1'b0;
   assign mc_capture_next = 1'b0;
   assign lookup_addr = c_addr;
   assign lookup_wstrb = c_wstrb;
@@ -905,7 +915,7 @@ module ven_l1d #(
 `endif
       rd_armed <= (do_rd_cap && !flush_all)
 `ifdef VEN_PIPE_MEM_CHAIN
-                  || (mc_lookup_next && !c_next_commit &&
+                  || (mc_lookup_old && !c_next_commit &&
                       !flush_all && !snoop_inv_valid && !golden)
 `endif
 `ifdef VEN_L1D_HIT_STREAM

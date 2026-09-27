@@ -628,6 +628,15 @@ the candidate still lacks fresh Win95 and completed timedemo acceptance.
 Artifacts: `tmp/build-tmp/ventium-cache-policy-1400m-sep27/` and
 `tmp/build-tmp/ventium-fair-suffix1400m-sep27/`.
 
+The same frozen cache-policy executable independently cold-booted the
+unchanged Win95 disk/ROMs to exactly 300,000,000 clocks. It retired 46,511,471
+instructions, logged `Starting Windows 95...`, and saved a validated native
+checkpoint plus private disk at
+`tmp/build-tmp/ventium-cache-policy-win95-cold300m-sep27/`. This is a
+same-build boot-progress check, **not** desktop acceptance; the 300M frame is
+still the startup splash. It also predates the later opt-in register-to-load
+prime experiment and says nothing about that experiment's Win95 behavior.
+
 The offline analyzer now emits `slow_owner_no_retire.tsv`, keyed by pre-edge
 FSM state and saved decoded operation. It deliberately excludes fetch/decode,
 reset, halt and shutdown, where the saved descriptor may be stale or absent.
@@ -649,6 +658,36 @@ and 102 in `SCWF_DRAIN`; the earlier REP-heavy phase has 121,201 clocks under
 the same joint predicate. These are overlapping service levels, not removable
 no-retirement clocks. They are much narrower than all L1/memory waits, so a
 backend-only latency change cannot be credited with the whole memory bucket.
+
+### Opt-in register-to-load resident prime (directed only)
+
+`VEN_PIPE_REG_LOAD_PRIME` lets an independently retiring integer register
+packet use the otherwise idle D-cache lookup slot for its next checked,
+resident U-side load. It reuses the existing memory-chain descriptor/AGU/TLB
+proof and registered L1 response. A miss, MMIO region, unsupported extent,
+address RAW dependency, event/debug boundary, or busy response owner is a
+silent rejection with no backing request. The accepted load is captured as
+the ordinary memory packet, while its live checked translation (not the old
+chain's saved page) seeds the fast D-TLB page register. The feature is
+default-off and has **not** been enabled in a full-PC gameplay build.
+
+The source-matched flag-off and flag-on full-core L1/AXI testbenches are under
+`tmp/build-tmp/ventium-reg-prime-{control-,}tb-sep27/` (SHA256
+`88577cba6705ceb778426e55cf66d7cfdd4fa469ece27861c8c14c5016294e83`
+and `b1424fb78b0c4114d0b8f5e346f460396945ffe70ab3906abe027b5bf2c77936`).
+Both pass the complete eight-case load-issue QEMU architectural comparison.
+In each dependent load/register/load variant, exactly 5,394 measured
+instructions take 6,293 clocks flag-off (**0.857143 IPC**) and 5,394 clocks
+flag-on (**1.000000 IPC**): one clock saved per warm loop, 899 clocks total.
+The independent variant remains 5,394/3,596 = **1.500000 IPC** in both.
+These are fixed-work directed microbenchmarks, **not** Quake gameplay IPC.
+The three L1 memory-chain policy profiles, both core lookahead policy profiles,
+the opt-in full-core lint profile and default `make verify` pass. A pinned-QEMU
+`ppage` trace regenerated from the current image has 134 records and matches
+the flag-on core with and without `--l1-axi` (all 134); the checked-in
+128-record historical golden is stale and must not be used as the current
+oracle. Quake gameplay, timedemo, Win95 and FPGA timing/area qualification of
+this flag remain open.
 
 ### Frontend map-hole incidence in the representative suffix
 

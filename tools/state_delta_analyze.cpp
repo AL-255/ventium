@@ -94,6 +94,8 @@ int main(int argc,char** argv) try {
     const auto chain_accept=lookup.find(core+"mc_accept");
     const auto chain_offer=lookup.find(core+"mc_offer");
     const auto chain_prepare=lookup.find(core+"mc_prepare_ok");
+    const auto prime_accept=lookup.find(core+"mc_prime_accept");
+    const auto prime_offer=lookup.find(core+"mc_prime_offer");
     auto ack_id=field(core+"mem_ack"), pair_id=field(core+"pipe_pair_reason");
     auto commit_id=field(core+"pipe_int_commit");
     auto front_id=field(core+"pipe_frontend_ready");
@@ -344,6 +346,8 @@ int main(int argc,char** argv) try {
         if(chain_accept!=lookup.end()) totals["memory_chain_accept_edges"]+=bool(scalar(chain_accept->second));
         if(chain_offer!=lookup.end()) totals["memory_chain_offer_levels"]+=bool(scalar(chain_offer->second));
         if(chain_prepare!=lookup.end()) totals["memory_chain_prepare_levels"]+=bool(scalar(chain_prepare->second));
+        if(prime_accept!=lookup.end()) totals["register_load_prime_accept_edges"]+=bool(scalar(prime_accept->second));
+        if(prime_offer!=lookup.end()) totals["register_load_prime_offer_levels"]+=bool(scalar(prime_offer->second));
         if(chain_offer!=lookup.end() && scalar(chain_offer->second) && scalar(commit_id)) {
             ++totals["memory_chain_commit_offer_edges"];
             if(chain_next_ready!=lookup.end() && !scalar(chain_next_ready->second)) {

@@ -43,7 +43,8 @@ module tb_l1d_mem_chain;
         $fatal(1,"old-response owner/data changed: %08x got=%08x",c_addr,c_rdata);
     end
     if(c_next_req && c_next_commit && c_next_ready) begin
-      if(!c_ack || m_req) $fatal(1,"next accepted without old response / with backing request");
+      if((c_req && !c_ack) || m_req)
+        $fatal(1,"next accepted without old response / with backing request");
       accepted++;
     end
   end
@@ -149,7 +150,35 @@ module tb_l1d_mem_chain;
     @(negedge clk); rst_n=0;
     @(negedge clk); rst_n=1; c_req=0;
     if(dut.rd_armed) $fatal(1,"reset retained response");
+`ifdef VEN_PIPE_REG_LOAD_PRIME
+    // No old read owner: a preceding register instruction can prime only an
+    // already-resident, cacheable line.  The next clock must own the ordinary
+    // registered ACK, without having allocated a backing transaction.
+    read_at('h2020);
+    @(negedge clk); c_next_req=1; c_next_commit=0; c_next_addr='h2020;
+    @(posedge clk); if(!c_next_ready || c_ack || m_req || dut.rd_armed)
+      $fatal(1,"uncommitted prime changed L1 ownership");
+    @(negedge clk); c_next_commit=1;
+    @(posedge clk); if(!c_next_ready || c_ack || m_req)
+      $fatal(1,"resident standalone prime rejected");
+    @(negedge clk); c_next_req=0; c_next_commit=0;
+    c_req=1; c_we=0; c_addr='h2020; c_wstrb=4'hf;
+    @(posedge clk); if(!c_ack || c_rdata!==word_at('h2020))
+      $fatal(1,"primed response missing/wrong owner");
+    @(negedge clk); c_req=0;
+    @(negedge clk); c_next_req=1; c_next_commit=1; c_next_addr='h4000;
+    @(posedge clk); if(c_next_ready || m_req)
+      $fatal(1,"standalone prime miss allocated");
+    @(negedge clk); c_next_addr='h2020; c_next_cacheable=0;
+    @(posedge clk); if(c_next_ready || m_req)
+      $fatal(1,"standalone prime MMIO admitted");
+    @(negedge clk); c_next_req=0; c_next_commit=0; c_next_cacheable=1;
+`endif
+`ifdef VEN_PIPE_REG_LOAD_PRIME
+    if(accepted!=146) $fatal(1,"wrong accepted count %0d",accepted);
+`else
     if(accepted!=145) $fatal(1,"wrong accepted count %0d",accepted);
+`endif
     $display("L1D-MEM-CHAIN-OK accepted=%0d backing=%0d",accepted,backing);
     $finish;
   end

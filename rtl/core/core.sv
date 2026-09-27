@@ -6336,7 +6336,7 @@ module core
       if (pipe_mem_active_q && (state == S_PIPE) && !pipe_mem_abort_now &&
           !xlate_miss && !fe_xlate_pend && mem_ack) begin
 `ifdef VEN_PIPE_MEM_CHAIN
-        if (mc_accept) begin
+        if (mc_chain_accept) begin
           // The retiring packet remains the pre-edge owner. Only a checked,
           // resident next read accepted by L1 may replace it on this edge.
           pipe_mem_active_q <= 1'b1;
@@ -6347,6 +6347,18 @@ module core
         end else
 `endif
         pipe_mem_active_q <= 1'b0;  // final completion commits this edge
+`ifdef VEN_PIPE_MEM_CHAIN
+`ifdef VEN_PIPE_REG_LOAD_PRIME
+      end else if (mc_prime_accept) begin
+        // The preceding independent register packet retires on this edge;
+        // the next checked resident load already owns a registered L1 read.
+        pipe_mem_active_q <= 1'b1;
+        pipe_mem_we_q <= 1'b0; pipe_mem_wdata_q <= 32'd0;
+        pipe_mem_ea_q <= mc_query_ea; pipe_mem_eip_q <= mc_query_pc;
+        pipe_mem_seg_q <= mc_query_seg; pipe_mem_u_q <= mc_query_u;
+        pipe_mem_v_q <= mc_query_v; pipe_mem_pair_q <= mc_query_pair;
+`endif
+`endif
       end else if (!pipe_mem_active_q && pipe_new_mem_req && !pipe_mem_abort_now &&
                    (xlate_miss || fe_xlate_pend || !mem_ack)) begin
         pipe_mem_active_q <= 1'b1;
@@ -8499,6 +8511,17 @@ module core
         // D-side
         if (tlb_fill_en && tlb_fill_is_d) fe_dtlb_v <= 1'b0;
 `ifdef VEN_PIPE_MEM_CHAIN
+`ifdef VEN_PIPE_REG_LOAD_PRIME
+        else if (mc_prime_accept && paging_on) begin
+          // Stand-alone lookahead has no registered mc_* candidate. Seed the
+          // page cache from the live checked query that L1 accepted instead.
+          fe_dtlb_page <= mc_query_lin[31:12];
+          fe_dtlb_phys <= mc_query_phys[31:12];
+          fe_dtlb_hit <= 1'b1;
+          fe_dtlb_dirty <= mc_lookup_dirty;
+          fe_dtlb_v <= 1'b1;
+        end
+`endif
         else if (mc_accept && paging_on) begin
           // Seed the existing page register from the accepted owner's checked
           // lookahead translation. This is not another TLB entry.
