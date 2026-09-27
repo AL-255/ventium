@@ -52,6 +52,9 @@ timeout 540s env VENTIUM_BUILD_SCOPE_PROFILE=ipc_parallel32 \
 | `resident_memory_alu` / `register_alu_control` | Does a resident ALU-memory instruction retain its P54 resource occupancy instead of accidentally collapsing to register-ALU timing? |
 | `fp_integer_overlap` / `integer_only_control` | Can independent integer work proceed while a real x87 arithmetic operation is outstanding? The integer control has a nonpairable leading EAX dependency so a freely-paired NOP cannot fake a larger FP penalty. |
 | `frontend_{aligned,line_straddle}` | Do resident raw instruction bytes cross a 32-byte I-line without persistent decoded-cache repair stalls? |
+| `resident_{same_line,two_line}_loads` | Does the registered D-cache window serve a later hit in the same physical line without a second capture, and does a different line correctly require its own lookup? |
+| `register_u_memory_v` / `memory_u_register_v` | Can an independent V load issue when U has no memory operand, contrasted with the existing U-load/V-register case? |
+| `memory_alu_integer_v` | Does a resident ALU-memory U retain its execution occupancy while an independent integer V follows? |
 
 These cases expose bottlenecks, not the full acceptance matrix. They do not
 cover paging/TLB geometry, dirty-line coherence, precise faults, interrupts,
@@ -81,4 +84,27 @@ of the present 256-bit-line array. The 128 × 2 tag/valid structure is small
 enough to examine for replicated read lookup or dual-read RAM. A line fill
 writes its addressed bank per backing beat; a hit sharing that bank must wait
 unless the RAM's read-during-write behavior is proved. These are implementation
-constraints, not synthesis results or permission to enable V-memory pairing.
+constraints, not permission to enable V-memory pairing.
+
+`run-p54-banked-l1d-micro.sh` exercises the default-off physical striping of
+the existing L1 data array at 128/64 sets, plus coherence, registered-window
+reuse, and hit-stream leaf cases. It preserves the original single-port
+interface and therefore has no direct IPC gain. In particular, equivalent
+logical data capacity is not evidence of equal LUT/BRAM area. The ordinary
+32-bit cross-line window now reads only next-line bank zero, not all eight
+banks, but that bank still needs an extra read port; synthesis must qualify
+its physical mapping before promoting it. A synchronous true-dual-port BRAM
+variant is worth measuring, but its read latency and read-during-write result
+must be reflected in the core handshake rather than assumed invisible.
+The bounded [Vivado leaf probe](../../fpga/P54_L1D_LEAF_SYNTH_2026-09-27.md)
+confirms eight separate banks infer `RAM256X1D` and save 1,187 leaf LUTs
+versus packed data; this does not establish full-core timing or gameplay IPC.
+
+`run-p54-l1d-pair-hit.sh` exercises the default-off `VEN_P54_DUAL_HIT` cache
+interface atop `VEN_L1D_BANKED_DATA`. It checks simultaneous distinct-bank
+read hits, serialized same-bank hits, width/offset assembly, split-line and
+uncached rejection, independent held owner responses, consume/replace, and
+flush/snoop cancellation. A legacy write hit must be visible to a subsequent
+pair read. The interface is not connected to the core's EA/DTLB/issue path,
+so these results establish cache-local behavior only—not paired retirements,
+architectural correctness, area, timing, or gameplay throughput.

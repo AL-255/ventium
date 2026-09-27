@@ -3,12 +3,13 @@ module tb_p54_hit_return;
   logic clk=0, rst_n=0, flush=0;
   always #5 clk=~clk;
   logic [1:0] req_valid=0, req_hit=2'b11, req_ready, req_split;
+  logic [1:0][7:0] req_bank_mask;
   logic [1:0][15:0] req_owner=0, rsp_owner;
   logic [1:0][31:0] req_paddr=0, req_data=0, rsp_paddr, rsp_data;
   logic [1:0][1:0] req_size_log2=0;
   logic [7:0] bank_ready=8'hff;
   logic bank_conflict;
-  logic [1:0] rsp_valid, rsp_ready=0;
+  logic [1:0] rsp_valid, rsp_ready=0, rsp_cancel;
   logic [1:0] accepted, canceled;
   logic [15:0] exp_owner[2];
   logic [31:0] exp_addr[2], exp_data[2];
@@ -58,6 +59,7 @@ module tb_p54_hit_return;
       end
       if (flush) begin
         if (req_ready != 0) $fatal(1,"accepted request during flush");
+        if (rsp_cancel !== canceled) $fatal(1,"cancellation owner mismatch");
         cancels += $countones(canceled);
         exp_valid = '0;
         flushes++;

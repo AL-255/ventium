@@ -115,6 +115,24 @@ module ven_l1d #(
     output logic [31:0] c_rsp_addr,
     output logic        c_rsp_cancel,
 `endif
+`ifdef VEN_P54_DUAL_HIT
+    // Checked, cacheable hit-only U/V read port. Rejected requests have no
+    // effect; the caller must retry a miss/split through the legacy owner path.
+    input  logic [1:0]       pair_req_valid,
+    input  logic [1:0]       pair_cacheable,
+    input  logic [1:0][31:0] pair_paddr,
+    input  logic [1:0][1:0]  pair_size_log2,
+    input  logic [1:0][15:0] pair_owner,
+    output logic [1:0]       pair_req_ready,
+    output logic [1:0]       pair_req_split,
+    output logic             pair_bank_conflict,
+    output logic [1:0]       pair_rsp_valid,
+    output logic [1:0]       pair_rsp_cancel,
+    input  logic [1:0]       pair_rsp_ready,
+    output logic [1:0][15:0] pair_rsp_owner,
+    output logic [1:0][31:0] pair_rsp_paddr,
+    output logic [1:0][31:0] pair_rsp_data,
+`endif
     // VEN DIAG (load-serve forensics): expose the read-serve hit state so the dbg ring can show WHY a
     // load got its data. {1'b0,st[1:0],flush_all,rd_match,hit_way,hit1,hit0} sampled at the current request.
     output logic [7:0]  dbg_serve,
@@ -150,11 +168,62 @@ module ven_l1d #(
   // ---- arrays ----------------------------------------------------------------
   // Data: packed 256-bit lines, flat {set,way} index → distributed RAM (async
   // read for the same-cycle hit). tag/val/lru: 2-way LRU (== dcache_timing).
+`ifdef VEN_L1D_BANKED_DATA
+  // Eight independent word banks hold the same 8 KiB. Each generated bank
+  // owns a 256x32 array and one byte-enabled write port; a multidimensional
+  // dc_bank[bank][row] with dynamic bank writes does NOT infer Xilinx RAM.
+  logic bank_fill_we, bank_store_we;
+  assign bank_fill_we = rst_n && (st == L1_FILL) && m_ack && !bypass_q;
+  assign bank_store_we = rst_n && (st == L1_IDLE) && !mc_lookup_next &&
+      !stream_path && c_req && c_we && c_ack && !xline && hit;
+`else
   (* ram_style = "distributed" *)
   logic [LW-1:0] dc_line [L1_SETS*2];
+`endif
   logic [TAGW-1:0] dc_tag [L1_SETS][2];  // addr[31 -: TAGW]
   logic          dc_val  [L1_SETS][2];
   logic          dc_lru  [L1_SETS];      // way most-recently-used
+
+`ifdef VEN_P54_DUAL_HIT
+`ifndef VEN_L1D_BANKED_DATA
+  initial $fatal(1, "VEN_P54_DUAL_HIT requires VEN_L1D_BANKED_DATA");
+`endif
+  logic pair_lookup_active;
+  logic [1:0][IDXW-1:0] pair_set;
+  logic [1:0][TAGW-1:0] pair_tag;
+  logic [1:0] pair_hit0, pair_hit1, pair_way, pair_hit;
+  logic [1:0][7:0] pair_bank_mask;
+  logic [1:0][31:0] pair_read_data;
+  logic [7:0] pair_bank_ready;
+  assign pair_lookup_active = (|pair_req_valid) && (st == L1_IDLE) &&
+      !c_req && !rd_armed && !early_armed && !stream_path &&
+      !flush_all && !snoop_inv_valid && !golden;
+  assign pair_bank_ready = pair_lookup_active ? 8'hff : 8'h00;
+  for (genvar lane = 0; lane < 2; lane++) begin : g_pair_tags
+    assign pair_set[lane] = pair_paddr[lane][OFFW +: IDXW];
+    assign pair_tag[lane] = pair_paddr[lane][OFFW+IDXW +: TAGW];
+    assign pair_hit0[lane] = dc_val[pair_set[lane]][0] &&
+                             dc_tag[pair_set[lane]][0] == pair_tag[lane];
+    assign pair_hit1[lane] = dc_val[pair_set[lane]][1] &&
+                             dc_tag[pair_set[lane]][1] == pair_tag[lane];
+    assign pair_way[lane] = pair_hit1[lane];
+    assign pair_hit[lane] = pair_lookup_active && pair_cacheable[lane] &&
+                            (pair_hit0[lane] || pair_hit1[lane]) &&
+                            (pair_size_log2[lane] != 2'd3);
+  end
+  ven_p54_hit_return u_pair_return (
+      .clk, .rst_n,
+      .flush(flush_all || snoop_inv_valid || golden),
+      .req_valid(pair_req_valid), .req_hit(pair_hit),
+      .req_owner(pair_owner), .req_paddr(pair_paddr),
+      .req_size_log2(pair_size_log2), .req_data(pair_read_data),
+      .bank_ready(pair_bank_ready), .req_ready(pair_req_ready),
+      .req_split(pair_req_split), .req_bank_mask(pair_bank_mask),
+      .bank_conflict(pair_bank_conflict), .rsp_valid(pair_rsp_valid),
+      .rsp_cancel(pair_rsp_cancel), .rsp_ready(pair_rsp_ready),
+      .rsp_owner(pair_rsp_owner), .rsp_paddr(pair_rsp_paddr),
+      .rsp_data(pair_rsp_data));
+`endif
 
   // REVIEW2 M-04: this module ADVERTISED L1_SETS/L1_LINE but hard-coded seven set-index
   // bits [11:5], a 20-bit tag [31:12] and offset bit 5, so overriding L1_SETS indexed
@@ -295,6 +364,7 @@ module ven_l1d #(
   // whose 4 bytes cross the 32-byte line end (c_addr[4:0] > 28) is NOT handled here
   // (it would need the next line too) — see the cross-line note in P1-1.
   logic [LW-1:0]   rd_line, rd_line_next;
+  logic [LW-1:0]   rd_line_raw, rd_line_next_raw, fill_forward_line_raw;
   logic [2*LW-1:0] rd_window;                          // {L+1, L} cross-line read window
   logic [4:0]      boff;
   // An opt-in fill-forward response below may capture a word that has already
@@ -305,11 +375,85 @@ module ven_l1d #(
   logic              fill_forward_hit;
   logic [WORDS-1:0]  fill_word_valid;
   logic [LW-1:0]      fill_forward_line;
-  assign rd_line      = fill_forward_hit ? fill_forward_line
-                                        : dc_line[{set_c, hit_way}];
-  assign rd_line_next = dc_line[{set_n, hit_way_n}];   // the L+1 line (for a cross-line read)
+`ifdef VEN_L1D_BANKED_DATA
+  for (genvar bank = 0; bank < WORDS; bank++) begin : g_banked_read
+    (* ram_style = "distributed" *) logic [31:0] data [L1_SETS*2];
+    logic [3:0] wr_mask;
+    logic [31:0] wr_data;
+    logic [IDXW:0] wr_row;
+    logic [4:0] line_byte;
+    always_comb begin
+      wr_mask = 4'd0;
+      wr_data = 32'd0;
+      wr_row = bank_fill_we ? {fset, fway} : {set_c, hit_way};
+      line_byte = 5'd0;
+      if (bank_fill_we && fill_word == 3'(bank)) begin
+        wr_mask = 4'hf;
+        wr_data = m_rdata;
+      end else if (bank_store_we) begin
+        for (int i = 0; i < 4; i++) begin
+          line_byte = c_addr[4:0] + 5'(i);
+          if (c_wstrb[i] && line_byte[4:2] == 3'(bank)) begin
+            wr_mask[line_byte[1:0]] = 1'b1;
+            wr_data[8*line_byte[1:0] +: 8] = c_wdata[8*i +: 8];
+          end
+        end
+      end
+    end
+    always_ff @(posedge clk) begin
+      for (int byte_lane = 0; byte_lane < 4; byte_lane++)
+        if (wr_mask[byte_lane])
+          data[wr_row][8*byte_lane +: 8] <= wr_data[8*byte_lane +: 8];
+    end
+    // Fill-forward and ordinary U access are mutually exclusive. Select the
+    // row BEFORE the bank read so they do not infer two copies/read ports of
+    // the entire data array merely to choose one result afterward.
+    assign rd_line_raw[32*bank +: 32] = data[
+`ifdef VEN_P54_DUAL_HIT
+        (pair_req_ready[0] && pair_bank_mask[0][bank]) ?
+            {pair_set[0], pair_way[0]} :
+        (pair_req_ready[1] && pair_bank_mask[1][bank]) ?
+            {pair_set[1], pair_way[1]} :
+`endif
+        fill_forward_hit ? {fset, fway} : {set_c, hit_way}];
+    // A 32-bit legacy read can cross into only word zero of the following
+    // line. FP_LOAD64 explicitly rejects the crossing high-half shortcut and
+    // retries through the ordinary path. Do not give all eight LUTRAM banks a
+    // second async read port for seven words that no response can observe.
+    if (bank == 0) begin : g_cross_word
+      assign rd_line_next_raw[31:0] = data[{set_n, hit_way_n}];
+    end else begin : g_no_cross_word
+      assign rd_line_next_raw[32*bank +: 32] = 32'd0;
+    end
+  end
+  assign fill_forward_line_raw = rd_line_raw;
+`else
+  assign rd_line_raw = dc_line[{set_c, hit_way}];
+  assign rd_line_next_raw = dc_line[{set_n, hit_way_n}];
+  assign fill_forward_line_raw = dc_line[{fset, fway}];
+`endif
+  assign rd_line      = fill_forward_hit ? fill_forward_line : rd_line_raw;
+  assign rd_line_next = rd_line_next_raw;   // the L+1 line (for a cross-line read)
   assign rd_window    = {rd_line_next, rd_line};       // named temp: xsim can't index a concat
   assign boff         = lookup_addr[4:0];
+
+`ifdef VEN_P54_DUAL_HIT
+  for (genvar lane = 0; lane < 2; lane++) begin : g_pair_data
+    logic [31:0] first_word, second_word, shifted;
+    logic [63:0] two_words;
+    logic [2:0] first_bank, second_bank;
+    assign first_bank = pair_paddr[lane][4:2];
+    assign second_bank = first_bank + 3'd1;
+    assign first_word = rd_line_raw[32*first_bank +: 32];
+    assign second_word = rd_line_raw[32*second_bank +: 32];
+    assign two_words = {second_word, first_word};
+    assign shifted = 32'(two_words >> {pair_paddr[lane][1:0], 3'b000});
+    assign pair_read_data[lane] = pair_size_log2[lane] == 2'd0 ?
+                                  {24'd0, shifted[7:0]} :
+                                  pair_size_log2[lane] == 2'd1 ?
+                                  {16'd0, shifted[15:0]} : shifted;
+  end
+`endif
 
   // ---- PIPELINED READ (timing-closure): register the high-fanout async line read.
   // The async read of dc_line (256-bit-wide distributed RAM, 256 entries) has huge
@@ -498,7 +642,7 @@ module ven_l1d #(
   l1_state_e   st;
   logic [2:0]  fw;                       // fill word counter 0..7
   logic [IDXW-1:0] fset; logic fway; logic [TAGW-1:0] ftag;
-  assign fill_forward_line = dc_line[{fset, fway}];
+  assign fill_forward_line = fill_forward_line_raw;
   // REVIEW Aug-1 H-06/H-07: a line fill is an 8-beat TRANSACTION, but its tag/valid
   // are installed only on the LAST beat. An invalidation arriving during beats 0..6
   // therefore has nothing to match and is silently lost; the last beat then validates
@@ -1048,9 +1192,14 @@ module ven_l1d #(
               // [0x607] at offset 23 spanning 23,24 — is handled naturally; xline stores that spill
               // to the NEXT line keep the blind-invalidate arm below). The store is still
               // write-through (comb driver), so the backing stays authoritative.
-              for (int i = 0; i < 4; i++)
+`ifndef VEN_L1D_BANKED_DATA
+              for (int i = 0; i < 4; i++) begin
+                logic [4:0] line_byte;
+                line_byte = c_addr[4:0] + 5'(i);
                 if (c_wstrb[i])
-                  dc_line[{set_c, hit_way}][8*(c_addr[4:0] + i[4:0]) +: 8] <= c_wdata[8*i +: 8];
+                  dc_line[{set_c, hit_way}][8*line_byte +: 8] <= c_wdata[8*i +: 8];
+              end
+`endif
               // Physical tags distinguish different lines occupying one set.
               // Preserve the other way unless it duplicates this exact tag.
               // Cache mutation is acceptance-qualified above, so a held then
@@ -1121,7 +1270,9 @@ module ven_l1d #(
             end else begin
               // The backing stream starts at the critical word and wraps; map
               // each returned beat back to its physical dword slot in the line.
+`ifndef VEN_L1D_BANKED_DATA
               dc_line[{fset,fway}][{fill_word,5'b00000} +: 32] <= m_rdata;
+`endif
               // The data array write is visible on the following clock.  Mark
               // precisely that physical WRAP-word ready so a later same-line
               // load can use the existing registered capture/ack path while
@@ -1202,6 +1353,14 @@ module ven_l1d #(
         end
         default: st<=L1_IDLE;
       endcase
+`ifdef VEN_P54_DUAL_HIT
+      // Both owner responses captured this edge; the younger V touch wins if
+      // both physical lines map to the same set, matching program order.
+      if (pair_req_valid[0] && pair_req_ready[0])
+        dc_lru[pair_set[0]] <= pair_way[0];
+      if (pair_req_valid[1] && pair_req_ready[1])
+        dc_lru[pair_set[1]] <= pair_way[1];
+`endif
       // #35 external flush: clear every valid bit (last-write-wins over the case's
       // tag/val writes, so an invalidation always takes priority). The next reads
       // miss + refill the now-current backing. Tags/data are left (val gates them).

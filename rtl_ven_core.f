@@ -116,6 +116,8 @@ rtl/bus/biu.sv
 rtl/mem/ven_cdc_afifo.sv
 rtl/mem/ven_reset_sync.sv
 rtl/mem/ven_axi_cdc.sv
+rtl/mem/ven_p54_bank_arb.sv
+rtl/mem/ven_p54_hit_return.sv
 rtl/mem/ven_l1d.sv
 rtl/mem/ven_axi_master.sv
 rtl/northbridge/ven_cachemap.sv

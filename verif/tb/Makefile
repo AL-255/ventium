@@ -191,7 +191,9 @@ rtl:
 # memory-type query that drives ic_fill_nocache, outside the EN_L2 generate. That was
 # blocker (2) of the finding: an is_code query added inside that generate would have
 # been neither built nor tested by anything in verify-all.
-L1AXI_RTL := $(RTL_DIR)/mem/ven_l1d.sv $(RTL_DIR)/mem/ven_axi_master.sv \
+L1AXI_RTL := $(RTL_DIR)/mem/ven_p54_bank_arb.sv \
+             $(RTL_DIR)/mem/ven_p54_hit_return.sv \
+             $(RTL_DIR)/mem/ven_l1d.sv $(RTL_DIR)/mem/ven_axi_master.sv \
              $(RTL_DIR)/mem/ventium_l1_axi.sv $(RTL_DIR)/northbridge/ven_cachemap.sv
 
 NB_RTL := $(RTL_DIR)/northbridge/ven_l2.sv \

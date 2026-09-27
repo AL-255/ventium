@@ -20,26 +20,28 @@ module ven_p54_hit_return #(
     input  wire logic [7:0] bank_ready,
     output      logic [1:0] req_ready,
     output      logic [1:0] req_split,
+    output      logic [1:0][7:0] req_bank_mask,
     output      logic bank_conflict,
     output      logic [1:0] rsp_valid,
+    output      logic [1:0] rsp_cancel,
     input  wire logic [1:0] rsp_ready,
     output      logic [1:0][OWNER_W-1:0] rsp_owner,
     output      logic [1:0][31:0] rsp_paddr,
     output      logic [1:0][31:0] rsp_data
 );
   logic [1:0] bank_grant, valid_q;
-  logic [1:0][7:0] req_banks;
   logic [7:0] used_banks;
   logic [1:0][OWNER_W-1:0] owner_q;
   logic [1:0][31:0] addr_q, data_q;
 
   ven_p54_bank_arb u_banks (
       .req_valid, .req_paddr, .req_size_log2, .bank_ready,
-      .req_grant(bank_grant), .req_split, .req_banks,
+      .req_grant(bank_grant), .req_split, .req_banks(req_bank_mask),
       .used_banks, .bank_conflict);
 
   always_comb begin
     rsp_valid = valid_q & {2{!flush}};
+    rsp_cancel = valid_q & {2{flush}};
     rsp_owner = owner_q;
     rsp_paddr = addr_q;
     rsp_data = data_q;
