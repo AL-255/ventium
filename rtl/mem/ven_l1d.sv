@@ -401,6 +401,8 @@ module ven_l1d #(
   // it.  The response remains registered through rd_window_q; this selector is
   // only its capture source, never a combinational core-data path.
   logic              fill_forward_hit;
+  logic              fill_forward_data_hit;
+  logic              fill_forward_code_hit;
   logic [WORDS-1:0]  fill_word_valid;
   logic [LW-1:0]      fill_forward_line;
 `ifdef VEN_L1D_BANKED_DATA
@@ -831,7 +833,7 @@ module ven_l1d #(
   // Only one returned word is validated below. An unaligned dword also reads
   // the following word from rd_window_q, which may not have arrived yet.
   // Keep such accesses on the ordinary completed-line registered read path.
-  assign fill_forward_hit = (st == L1_FILL) && !bypass_q && cacheable &&
+  assign fill_forward_data_hit = (st == L1_FILL) && !bypass_q && cacheable &&
 `ifdef VEN_L1D_CODE_BUFFER
                             !code_fill_q && !code_access &&
 `endif
@@ -841,8 +843,25 @@ module ven_l1d #(
                             (tag_c == ftag) && (c_addr != early_addr_q) &&
                             fill_word_valid[c_addr[4:2]];
 `else
-  assign fill_forward_hit = 1'b0;
+  assign fill_forward_data_hit = 1'b0;
 `endif
+`ifdef VEN_L1D_CODE_STREAM
+`ifndef VEN_L1D_CODE_BUFFER
+  initial $fatal(1, "VEN_L1D_CODE_STREAM requires VEN_L1D_CODE_BUFFER");
+`endif
+  // Once a returned instruction word has landed in the staging line, a later
+  // S_PF word request may use it before the rest of the line arrives. Keep the
+  // registered response owner: this is neither a comb AXI-to-core shortcut nor
+  // a speculative line validation. The initial critical-word owner remains
+  // exclusively on early_armed; it must not be acknowledged twice.
+  assign fill_forward_code_hit = (st == L1_FILL) && code_fill_q &&
+      code_access && c_req && !bypass_q && !fill_poison && !flush_all &&
+      !snoop_inv_valid && (c_addr[31:5] == fbase[31:5]) &&
+      (c_addr != early_addr_q) && fill_word_valid[c_addr[4:2]];
+`else
+  assign fill_forward_code_hit = 1'b0;
+`endif
+  assign fill_forward_hit = fill_forward_data_hit || fill_forward_code_hit;
 
   // backing-side drive: during a FILL, burst-read the 8 line words; on a
   // write-through (IDLE), pass the core write straight to the backing.

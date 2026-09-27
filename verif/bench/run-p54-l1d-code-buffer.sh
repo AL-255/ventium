@@ -3,7 +3,7 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 out="$(mktemp -d /tmp/ventium-p54-l1d-code-buffer.XXXXXX)"
 echo "Artifacts: $out"
-for variant in packed banked banked_window banked_forward; do
+for variant in packed banked banked_window banked_forward banked_code_stream banked_both_forward; do
     defines=(+define+VEN_L1D_CODE_BUFFER)
     if [[ "$variant" == banked* ]]; then
         defines+=(+define+VEN_L1D_BANKED_DATA)
@@ -12,6 +12,12 @@ for variant in packed banked banked_window banked_forward; do
         defines+=(+define+VEN_L1D_WINDOW_REUSE)
     fi
     if [[ "$variant" == banked_forward ]]; then
+        defines+=(+define+VEN_L1D_FILL_FORWARD)
+    fi
+    if [[ "$variant" == banked_code_stream || "$variant" == banked_both_forward ]]; then
+        defines+=(+define+VEN_L1D_CODE_STREAM)
+    fi
+    if [[ "$variant" == banked_both_forward ]]; then
         defines+=(+define+VEN_L1D_FILL_FORWARD)
     fi
     timeout 240s "$root/tools/verilator_serial.sh" --binary --assert -sv \

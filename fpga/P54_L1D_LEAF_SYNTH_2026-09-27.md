@@ -5,10 +5,11 @@ clock. Source `rtl/mem/ven_l1d.sv` SHA-256:
 `99f001307df6b604f459c1f615b26e9e114d075af9c03592b2798d2db47f6d84`.
 Each run used `fpga/run_vivado_exclusive.sh` and finished below the 10-minute
 limit. Artifacts are under `/tmp/p54-l1d-synth-{packed,banked,paired}-r3/`.
-The code-buffer row uses the later source SHA-256
-`137dbd919cd0f6c8fb344035fcd6991b0317426ddc2bcae948a120449ea0d46d`
-and `/tmp/p54-l1d-synth-code-buffer-r5/`; its extra logic is guarded by
-`VEN_L1D_CODE_BUFFER`, so the preceding three configurations are unaffected.
+The code-buffer and code-stream rows use the later source SHA-256
+`5a74539a1732538401dc1b086a8d94a51c62f90a1842e231cf6754c61b94d33b`
+and `/tmp/p54-l1d-synth-{code-buffer,code-stream}-r6/`; their extra logic is
+guarded by the corresponding defines, so the preceding three configurations
+are unaffected. Both later rows were synthesized from this exact source.
 
 | Define set | Total LUTs | Logic LUTs | LUTRAMs | FFs | BRAMs | Synthesis WNS at 45 MHz |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -16,6 +17,7 @@ and `/tmp/p54-l1d-synth-code-buffer-r5/`; its extra logic is guarded by
 | `VEN_L1D_BANKED_DATA` | 10,828 | 8,588 | 2,240 | 6,089 | 0 | +17.544 ns |
 | banked + `VEN_P54_DUAL_HIT` | 14,252 | 12,012 | 2,240 | 6,274 | 0 | +16.799 ns |
 | banked + `VEN_L1D_CODE_BUFFER` | 10,884 | 8,644 | 2,240 | 6,391 | 0 | +17.584 ns |
+| banked + code buffer + `VEN_L1D_CODE_STREAM` | 10,647 | 8,407 | 2,240 | 6,402 | 0 | +17.621 ns |
 
 The banked single-port layout saves **1,187 LUTs (9.9%)** versus packed while
 preserving the logical 8 KiB, two-way, 32-byte-line geometry. Its eight 256×32
@@ -28,6 +30,12 @@ processor's total utilization.
 The one-line code-fill staging buffer adds **56 LUTs and 302 FFs** to banked
 L1D. It prevents instruction fills from evicting D-cache lines, but is not a
 second architectural I-cache and does not increase the P5 L1 capacity.
+Streaming already-arrived code words from that buffer lets the following
+instruction-fill beats overlap the rest of the backing burst. The isolated
+streaming variant uses **237 fewer LUTs and 11 more FFs** than the non-streaming
+code buffer in this synthesis run; synthesis sharing explains why adding a
+control path need not increase mapped LUT count. It does not remove the
+platform's default line-replay policy.
 
 An earlier `dc_bank[bank][row]` array with dynamic bank writes **failed** RAM
 inference (`Synth 8-7186`, 65,536 data registers). That invalid probe was

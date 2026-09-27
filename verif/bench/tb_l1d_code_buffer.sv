@@ -120,6 +120,40 @@ module tb_l1d_code_buffer;
     // The terminal case exercises same-edge allocation/invalidation ordering.
     poison_code_fill(32'h4000,3'd3);
     poison_code_fill(32'h5000,3'd7);
+`ifdef VEN_L1D_CODE_STREAM
+    // A later word of a code line can be returned while the backing burst is
+    // still in progress. Without streaming it waits until the whole line
+    // validates; the ACK must still be owned by the current word address.
+    @(negedge clk); c_addr=32'h6000; c_code=1; c_we=0; c_req=1; c_wstrb=4'h0;
+    begin
+      int guard;
+      guard=0;
+      do begin
+        @(posedge clk);
+        if (++guard>100) $fatal(1,"stream first word timeout");
+      end while (!c_ack);
+      if (c_rdata!==word_at(32'h6000)) $fatal(1,"stream first word mismatch");
+      @(negedge clk);
+      #1;
+      if (c_ack) $fatal(1,"held critical word was acknowledged twice");
+      @(posedge clk);
+      if (c_ack) $fatal(1,"held critical word was acknowledged twice");
+      @(negedge clk); c_addr=32'h6004;
+      guard=0;
+      do begin
+        @(posedge clk);
+        if (++guard>100) $fatal(1,"stream second word timeout");
+      end while (!c_ack);
+      if (c_rdata!==word_at(32'h6004)) $fatal(1,"stream second word mismatch");
+      if (dut.st!=dut.L1_FILL)
+        $fatal(1,"stream second word did not overlap the remaining fill");
+    end
+    @(negedge clk); c_req=0; c_code=0; c_wstrb=4'hf;
+    while (dut.st!=dut.L1_IDLE) @(negedge clk);
+    before_code=backing;
+    read_word(32'h6008,1);
+    if (backing!=before_code) $fatal(1,"streaming line failed to validate");
+`endif
 
     // An armed D response at the identical physical address cannot satisfy a
     // retargeted I request. Address-only ownership would acknowledge stale

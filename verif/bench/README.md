@@ -125,3 +125,14 @@ The residual two ARs per cache-line read are the platform's default-on replay
 policy; do not disable it on the HP/HPC backend solely to improve the number.
 `VEN_AXI_READ_TRACE=N` on the simulator prints at most N accepted AXI AR
 addresses for a short diagnostic run without changing RTL timing.
+
+`VEN_L1D_CODE_STREAM` (requires the code buffer) allows a later aligned code
+word to use the already-landed beat through the registered hit-return window
+while the line fill continues. It excludes the original critical-word owner
+from a second ACK and honors fill poison, same-edge snoops, and response
+identity. The two extra leaf variants test it alone and alongside data
+fill-forwarding. Against the non-streaming code-buffer build, the collision
+loop improves from **138 to 120 cycles per 8 instructions** with the same six
+ARs per loop and equal architectural traces. With deterministic AXI read
+latency/gaps (`AXI_RLAT=3 AXI_RGAP=1`), the same A/B is **344.669 versus
+308.669 cycles/loop**, also trace-equal. Neither number is gameplay IPC.
