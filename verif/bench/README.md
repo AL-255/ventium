@@ -113,7 +113,8 @@ architectural correctness, area, timing, or gameplay throughput.
 configurations, including banked/window/forward variants. Code reads with the
 core's zero-strobe convention stage a separate physical line without touching
 the two D ways; it checks data residency, same-address response ownership,
-store/snoop/flush invalidation, and golden/noncacheable fallback. The bounded
+store/snoop/flush invalidation (including mid-fill and terminal-beat snoops),
+and golden/noncacheable fallback. The bounded
 `run-p54-code-data-collision.py` runs candidate and control full-core binaries
 against a synthetic loop with three instruction lines and two data lines in
 the same set, then compares their architectural traces. With the banked cache

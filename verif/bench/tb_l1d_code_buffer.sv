@@ -58,6 +58,21 @@ module tb_l1d_code_buffer;
     repeat(2) @(negedge clk);
   endtask
 
+  task automatic poison_code_fill(input logic [31:0] addr,
+                                  input logic [2:0] beat);
+    int before_fill;
+    @(negedge clk); c_addr=addr; c_code=1; c_we=0; c_req=1; c_wstrb=4'h0;
+    do @(negedge clk); while (dut.st!=dut.L1_FILL || dut.fw!=beat);
+    snoop_inv_addr=addr; snoop_inv_valid=1;
+    @(negedge clk); snoop_inv_valid=0; c_req=0; c_code=0; c_wstrb=4'hf;
+    while (dut.st!=dut.L1_IDLE) @(negedge clk);
+    if (dut.code_valid_q) $fatal(1,"snoop at beat %0d validated poisoned I fill",beat);
+    before_fill=backing;
+    read_word(addr,1);
+    if (backing-before_fill!=8)
+      $fatal(1,"snoop at beat %0d did not cause a fresh I fill",beat);
+  endtask
+
   initial begin
     int before_code, after_code;
     for (int i=0;i<65536;i++) mem[i]=8'(i ^ (i>>8) ^ 8'h5a);
@@ -100,6 +115,11 @@ module tb_l1d_code_buffer;
     read_word(32'h3000,1);
     if (dut.code_valid_q) $fatal(1,"uncacheable I read retained staging line");
     cacheable=1;
+
+    // Both mid-fill and terminal-beat snoops must poison the staged line.
+    // The terminal case exercises same-edge allocation/invalidation ordering.
+    poison_code_fill(32'h4000,3'd3);
+    poison_code_fill(32'h5000,3'd7);
 
     // An armed D response at the identical physical address cannot satisfy a
     // retargeted I request. Address-only ownership would acknowledge stale
