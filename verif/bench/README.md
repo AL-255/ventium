@@ -34,6 +34,16 @@ timeout 540s env VENTIUM_BUILD_SCOPE_PROFILE=ipc_parallel32 \
   VL_EXTRA_DEFINES='+define+VEN_UOPCACHE +define+VEN_IC_BRAM +define+VEN_UOP_SFETCH +define+VEN_SFETCH_RESIDENT +define+VEN_PIPE_MEM_CHAIN +define+VEN_L1D_WINDOW_REUSE +define+VEN_SYS_FASTPATH +define+VEN_PIPE_REG_LOAD_PRIME'
 ```
 
+The full-PC `ao486-sim` Makefile uses the same bounded profile. Always select a
+noncanonical output directory when experimenting:
+
+```sh
+timeout 540s env VENTIUM_BUILD_SCOPE_PROFILE=ipc_parallel32 \
+  VENTIUM_BUILD_SCOPE_UNIT=ventium-ipc-parallel32 \
+  make -C ao486-sim ven VEN_OBJDIR=ao486-sim/obj_dir_ven_ipc_candidate \
+  VEN_EXE=ao486sim_ven_ipc_candidate
+```
+
 | Cases | Exact structural question from the [P54 plan](../../docs/P54_SUB1_CPI_MASTER_PLAN_2026-09-27.md) |
 | --- | --- |
 | `reg_load_prime` | Can an independent register packet lend its idle D-cache lookup cycle to the next load, eliminating the registered-hit capture bubble? The load alternates resident lines to defeat same-line window reuse. |
@@ -64,3 +74,11 @@ an unaccepted U, and cancels both slots on flush. This is still a leaf contract,
 not an integrated cache or an architectural correctness gate. Hit/data are
 supplied by the testbench; a timing-qualified bank SRAM/tag implementation and
 its FPGA area/frequency evidence remain required.
+
+The intended physical cache is eight 32-bit data banks, each holding the
+128-set × 2-way word for its line position (8 KiB total data), not two copies
+of the present 256-bit-line array. The 128 × 2 tag/valid structure is small
+enough to examine for replicated read lookup or dual-read RAM. A line fill
+writes its addressed bank per backing beat; a hit sharing that bank must wait
+unless the RAM's read-during-write behavior is proved. These are implementation
+constraints, not synthesis results or permission to enable V-memory pairing.

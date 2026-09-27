@@ -22,14 +22,30 @@ CCACHE_DISABLE ?= 1
 export CCACHE_DISABLE
 # Full-PC generated C++ is memory-heavy.  Do not use Verilator's `-j 0` (all
 # host cores): it can start enough cc1plus processes to OOM the workstation.
-# Keep the generated-C++ build strictly single-threaded; changing this policy
-# requires an explicit reviewed build-profile change.
-override VERILATOR_BUILD_JOBS := 1
+# The portable/default build stays single-threaded. The explicitly named,
+# cgroup-bounded IPC profiles can use their reviewed compiler limits. Fine
+# splitting is mandatory in the 32-job profile; the wrapper independently
+# enforces it for callers that bypass this Makefile.
+ifeq ($(VENTIUM_BUILD_SCOPE_PROFILE),ipc_parallel32)
+  VERILATOR_BUILD_JOBS ?= 32
+  ifneq ($(filter-out $(shell seq 1 32),$(VERILATOR_BUILD_JOBS)),)
+    $(error VERILATOR_BUILD_JOBS must be 1..32 in ipc_parallel32)
+  endif
+  VERILATOR_SPLIT ?= --output-groups 0 --output-split 3000 --output-split-cfuncs 3000
+else ifeq ($(VENTIUM_BUILD_SCOPE_PROFILE),ipc_parallel)
+  VERILATOR_BUILD_JOBS ?= 4
+  ifneq ($(filter-out 1 2 3 4,$(VERILATOR_BUILD_JOBS)),)
+    $(error VERILATOR_BUILD_JOBS must be 1..4 in ipc_parallel)
+  endif
+  VERILATOR_SPLIT ?= --output-groups 0 --output-split 20000 --output-split-cfuncs 20000
+else
+  override VERILATOR_BUILD_JOBS := 1
+  VERILATOR_SPLIT ?= --output-groups 0 --output-split 20000 --output-split-cfuncs 20000
+endif
 # `--output-split` alone only makes included fragments; an aggregate
 # `V*_vm_classes_0.cpp` can still consume several GiB at host-compiler time.
 # Ungroup the generated classes as well, preserving the -O3 simulation model
 # while keeping the one permitted compiler job bounded.
-VERILATOR_SPLIT ?= --output-groups 0 --output-split 20000 --output-split-cfuncs 20000
 # A caller may request `make -j all ven`; those are two independent full-system
 # Verilator builds and must never overlap.  Serialise this makefile even under a
 # command-line jobserver.  This does not coordinate with or preempt FPGA tools.
