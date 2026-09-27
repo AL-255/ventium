@@ -702,8 +702,8 @@
                 logic [31:0] fl;
                 // SHL/SHR/SAL/SAR (shrot 4..7): SF/ZF/PF from result, AF=0,
                 // CF & OF per QEMU (OF = MSB(shm1) ^ MSB(result)). Matches the
-                // slow path's K_SHIFT block exactly (only this group reaches the
-                // fast path; rotates fall back to the slow FSM).
+                // slow path's K_SHIFT block. Optional ROR /1 uses the separate
+                // rotate-flags arm below; other rotates remain slow.
                 // REVIEW Aug-1 H-02: SF/OF/ZF are WIDTH-dependent. This block hard-coded
                 // bit 31 and an all-32-bit zero test, so a 16-bit shift committed SF and
                 // OF from bit 31 of a value whose architectural MSB is bit 15, and ZF
@@ -718,12 +718,26 @@
                 // drift. Byte-identical to the slow path arm, term for term.
                 logic [2:0] shw;
                 shw = pipe_u_eff.w16 ? 3'd2 : 3'd4;
-                fl=eflags & 32'hFFFF_F72A;
-                fl[0]=u_shcf; fl[2]=parity8(u_sh[7:0]); fl[4]=1'b0;
-                fl[6]=(wmask(u_sh,shw)==32'd0);
-                fl[7]=sbit(u_sh,shw);
-                fl[11]=sbit(u_shm1,shw) ^ sbit(u_sh,shw);
-                fl[1]=1'b1;
+`ifdef VEN_FAST_ROR_IMM
+                if (pipe_u_eff.shrot == 3'd1) begin
+                  // ROR changes only CF/OF. Match the slow K_SHIFT formula
+                  // even for multi-bit counts whose OF is architecturally
+                  // undefined; QEMU comparison masks that undefined bit.
+                  fl=eflags;
+                  fl[0]=u_shcf;
+                  fl[11]=sbit(u_sh,shw) ^ sbit2(u_sh,shw);
+                  fl[1]=1'b1;
+                end else begin
+`endif
+                  fl=eflags & 32'hFFFF_F72A;
+                  fl[0]=u_shcf; fl[2]=parity8(u_sh[7:0]); fl[4]=1'b0;
+                  fl[6]=(wmask(u_sh,shw)==32'd0);
+                  fl[7]=sbit(u_sh,shw);
+                  fl[11]=sbit(u_shm1,shw) ^ sbit(u_sh,shw);
+                  fl[1]=1'b1;
+`ifdef VEN_FAST_ROR_IMM
+                end
+`endif
                 eflags<=fl;
               end
               if (pipe_u_eff.dst!=R_ESP) w0={6'd0,pipe_u_eff.dst};

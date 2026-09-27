@@ -695,11 +695,15 @@ module decode
           end
         end
         // ---- shift by imm8 (C1 /4,/5,/6,/7 ib), reg form ---------------------
-        // Only the SHL/SHR/SAL/SAR group is fast-pathed (its flag rules are
-        // simple + matched to the slow path); ROL/ROR/RCL/RCR (/0../3) keep
-        // their richer OF semantics on the slow path (simple=0 -> fallback).
+        // SHL/SHR/SAL/SAR are fast-pathed. Optional 32-bit register ROR /1
+        // reuses the same shifter but needs rotate-specific CF/OF preservation.
+        // The other rotates remain on the slow architectural path.
         8'hC1: begin
-          if (mod==2'b11 && reg_f[2]) begin   // reg_f in 4..7
+          if (mod==2'b11 && (reg_f[2]
+`ifdef VEN_FAST_ROR_IMM
+                              || (!def16 && reg_f==3'd1)
+`endif
+                             )) begin
             d.simple=1'b1; d.is_shift=1'b1; d.len=4'd3; d.wflags=1'b1;
             d.shrot=reg_f; d.shimm=b2[4:0]; d.dst=rm; d.wreg=1'b1;
             d.reads=_onehot(rm); d.writes=_onehot(rm);
