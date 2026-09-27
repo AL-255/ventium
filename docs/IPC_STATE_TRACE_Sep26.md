@@ -8,9 +8,16 @@ same-build 1,050–1,100M window records **0.44577548 IPC**; the short trace is
 not a substitute for that representative window. An opt-in FP-branch candidate
 has since measured **0.578894 IPC** (578,894 edge retirements) on the exact
 same 1,100,000,000–1,101,000,000 snapshot workload, an improvement of 14,252
-retirements or 2.52%. It has **not** been measured over a representative 50M
-gameplay window or cold-booted through Quake/Win95; neither short result proves
-timedemo completion.
+retirements or 2.52%. A subsequent 50M-cycle A/B replay over
+1,100,000,000–1,150,000,000 measured **0.44414178 IPC** for the reference
+(22,207,089 retirements) and **0.44963946 IPC** for the opt-in branch candidate
+(22,481,973 retirements), a 1.24% IPC gain. The 50M results start from the
+same private copies of the cold-boot-derived checkpoint and use identical
+clock, RTC, VGA, DDR and disk settings; the source bundle still verifies, and
+both private disks remain byte-identical to it. They are matched-start,
+fixed-clock gameplay measurements, **not** fixed-work instruction comparisons.
+The candidate has **not** been cold-booted through Quake/Win95 or completed a
+timedemo acceptance run.
 
 The branch experiment is `+define+VEN_FP_ASYNC_BRANCH` in
 `rtl/core/core_fp_async.svh`. Its full-PC generated-model manifest differs
@@ -22,10 +29,19 @@ candidate replay log and build are in
 `tmp/build-tmp/ventium-vga-wave9-fp-branch-replay-sep26/` and
 `tmp/build-tmp/ventium-vga-wave9-fp-branch-sep26/obj/`. This is a
 cross-build performance diagnostic, **not** the same-binary checkpoint or
-full-system acceptance policy. The opt-in candidate passes the six-case
+full-system acceptance policy. The 50M replay logs/endpoints are under
+`tmp/build-tmp/ventium-vga-wave9-50m-{control,fp-branch}-sep26/`. The opt-in
+candidate passes the six-case
 FDIV/FSQRT × JMP/taken-Jcc/not-taken-Jcc QEMU differential/overlap gate,
 the 12-case integer/FP overlap gate, shared x87 stream/trap and delayed-#MF
 gates, default `make verify`, and five-profile `make lint`.
+An additional private A/B replay from the same 1.100B snapshot compared the
+first 50,000 full-PC retirements by ordinal, PC, EFLAGS, all reported GPRs and
+segment selectors (ignoring only cycle stamps): all records matched exactly.
+The 50,000th retirement occurred at clock 1,100,098,997 in the reference and
+1,100,096,681 in the candidate (2,316 clocks sooner). These VTM records do
+not include full x87/memory state and are supporting evidence, not a substitute
+for the directed x87 differential or cold-boot guest acceptance.
 
 Evidence: `tmp/build-tmp/ventium-state-delta.7sh8i_6b/` is a same-model,
 cold-boot-derived checkpoint replay. The 1,000-cycle host-only relink pilot
@@ -51,6 +67,19 @@ priority bucket. They sum to 100%; overlapping raw signal levels do not:
 | Ready but control-limited | 54,343 | 9.74% |
 | Frontend unavailable | 51,239 | 9.18% |
 | Deferred fault | 748 | 0.13% |
+
+The broader reference 1.100–1.150B profiler gives a useful scale check:
+S_PIPE occupies 33,401,346 of 50M clocks (66.80%), S_FLOAD 3,769,757,
+S_LOAD 3,395,530, S_DECODE 2,311,264, S_FEXEC 1,503,903 and
+S_FP_SHARED_WAIT 1,209,497. Per-state outstanding-memory observations total
+14,088,563 clocks (28.18%); inside S_PIPE the first-firing profiler buckets
+are memory-packet wait 7,861,566, FP descriptor/slow handoff 4,050,808 and
+uop-map miss 3,694,684 clocks. State residency, memory-wait levels and bail
+buckets are **different views of overlapping clocks**, not additive savings.
+For the reference's 22,207,089 retirements in 50M clocks, fixed-work IPC >1
+would require eliminating more than 27.79M clocks, so no single cache or branch
+shortcut can be assumed to close the target. This is arithmetic on one window,
+not a claimed upper bound under a changed schedule.
 
 The raw L1 read-wait level is high for 215,107 clocks, of which 118,631 are
 busy backing service and 92,349 are idle registered-hit capture. Those levels
