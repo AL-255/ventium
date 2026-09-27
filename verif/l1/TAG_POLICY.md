@@ -88,9 +88,25 @@ and disk. Later source/define validation hardening can be rerun with
 
 ## Integrated acceptance still required
 
-- Further candidate system/REP/cache race regressions, and cold boot through
-  Quake timedemo completion and a real Windows95 desktop. Neither a migrated
-  snapshot nor the short matched prefix establishes those acceptance results.
+- An independent DDR2 cold boot of the integrated structural candidate
+  (binary SHA-256 `229c4cd52cba44734335ecb77b3250bee6648c2d153db0f07903060f78160c02`)
+  reached Quake gameplay at 1.15B clocks with 439,870,516 legacy retire events.
+  Its validated same-binary continuation reached 1.40B with 546,463,392
+  retire events. The gameplay-window IPC is **0.426371504** over 1.15–1.40B:
+  exactly the historical cache-policy control's count, so this wide window
+  does not establish a throughput gain. Five paired gameplay frames match the
+  historical control byte-for-byte. This is not timedemo completion, and REP
+  per-element callbacks have not yet been normalized to completed instructions.
+  Local evidence: `obj_dir_p54_structural_sep27/quake_ddr2/` and
+  `obj_dir_p54_structural_sep27/quake_resume1400m/`, including validated
+  `gameplay.sha256` bundles. These directories are ignored build artifacts,
+  not source-controlled test fixtures.
+- Windows 95 desktop acceptance and further candidate system/REP/cache race
+  regressions remain open. A normal-mode boot on a pristine disk is being
+  checked against a source-matched old-binary control. The earlier writable
+  disk produced the same VxD error under both builds and is invalid evidence.
+  Neither a migrated snapshot nor the short matched prefix establishes a
+  real desktop.
 - Investigate remaining read-hit/fill latency and FP/frontend serialization.
   0.479578 IPC is still well below the >1 IPC objective.
 - Hardware timing/area qualification when a new FPGA run is warranted; no FPGA
