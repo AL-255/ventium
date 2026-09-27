@@ -117,10 +117,16 @@ package ventium_alu_pkg;
   // ===========================================================================
   function automatic logic [31:0] shrot_result(input logic [2:0] subop, input logic [31:0] v,
                                                input logic [5:0] cnt, input logic cfin, input logic [2:0] w);
-    logic [31:0] x; logic [5:0] bits; logic carry, nc; int i; logic [4:0] ihi;
+    logic [31:0] x; logic [5:0] bits, rot; logic carry, nc; int i; logic [4:0] ihi;
     begin
       x=wmask(v,w); bits=(w==3'd1)?6'd8:((w==3'd2)?6'd16:6'd32);
       ihi=5'(bits-6'd1);
+      // The architectural count is masked to five bits at the callers. Keep
+      // the old helper's full six-bit behavior too: its 32-step loop leaves
+      // any count >=32 unrotated, while narrower widths wrap modulo 8/16.
+      rot = cnt[5] ? 6'd0 :
+            (w==3'd1) ? {3'd0,cnt[2:0]} :
+            (w==3'd2) ? {2'd0,cnt[3:0]} : {1'd0,cnt[4:0]};
       unique case (subop)
         3'd4,3'd6: x = wmask(x << cnt, w);
         3'd5:      x = x >> cnt;
@@ -130,8 +136,10 @@ package ventium_alu_pkg;
           else              x=$unsigned($signed(v)>>>cnt);
           x=wmask(x,w);
         end
-        3'd0: for (i=0;i<32;i++) if (i<cnt) x=wmask((x<<1)|{31'd0,x[ihi]},w);
-        3'd1: for (i=0;i<32;i++) if (i<cnt) x=wmask((x>>1)|({31'd0,x[0]}<<(bits-6'd1)),w);
+        // A pair of bounded barrel shifts replaces a 32-stage conditional
+        // loop. This is the same masked rotate for 8/16/32-bit operands.
+        3'd0: x = wmask((x << rot) | (x >> (bits-rot)), w);
+        3'd1: x = wmask((x >> rot) | (x << (bits-rot)), w);
         3'd2: begin carry=cfin; for(i=0;i<32;i++) if(i<cnt) begin nc=x[ihi]; x=wmask((x<<1)|{31'd0,carry},w); carry=nc; end end
         3'd3: begin carry=cfin; for(i=0;i<32;i++) if(i<cnt) begin nc=x[0]; x=wmask((x>>1)|({31'd0,carry}<<(bits-6'd1)),w); carry=nc; end end
         default: ;
