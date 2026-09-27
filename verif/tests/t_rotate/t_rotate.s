@@ -70,6 +70,16 @@ _start:
     movl    $0x12345678, %eax
     rorl    $4, %eax                # eax = 0x81234567 (OF undefined)
 
+    # Force C1 /1 encodings: GAS may shorten an immediate-one rotate to D1.
+    # These cover the optional register-ROR fast path's defined OF, masked
+    # zero-count no-op, and count masking without relying on assembler choice.
+    movl    $0x80000001, %eax
+    .byte   0xc1, 0xc8, 0x01       # ROR EAX,imm8=1; CF/OF defined
+    movl    $0x12345678, %eax
+    .byte   0xc1, 0xc8, 0x00       # ROR EAX,imm8=0; flags unchanged
+    .byte   0xc1, 0xc8, 0x20       # ROR EAX,imm8=32; masked to zero
+    .byte   0xc1, 0xc8, 0x21       # ROR EAX,imm8=33; masked to one
+
     movl    $0xabcdef01, %eax
     movl    $16, %ecx
     rorl    %cl, %eax               # eax = 0xef01abcd
@@ -130,6 +140,13 @@ _start:
     # ---- 8-bit rotate (D0 /0): partial register preserved -------------------
     movl    $0x11223381, %eax       # AL=0x81
     rolb    $1, %al                 # AL = 0x03, CF=1. [31:8] preserved = 0x112233
+
+    # Narrow-width ROL/ROR exercise the same shared helper with partial writes.
+    movl    $0x11223381, %eax
+    rorb    $5, %al
+    movl    $0x89abcdef, %eax
+    rorw    $9, %ax
+    rolw    $7, %ax
 
     # ---- clean exit: Linux i386 _exit(0) ------------------------------------
     movl    $1, %eax                # __NR_exit
