@@ -204,6 +204,11 @@ int main(int argc,char** argv) try {
     auto qkind_id=optional_field(core+"q_kind"), qst_id=optional_field(core+"q_st");
     auto movs_fuse_id=optional_field(core+"rep_movs_load_fuse");
     auto movs_stream_id=optional_field(core+"rep_movs_stream_arm");
+    auto fstep_id=field(core+"f_step"), fbytes_id=field(core+"q_f_mbytes");
+    auto fxop_id=field(core+"q_fxop");
+    auto fp_load_cmd_id=field(core+"fp_shared_load_cmd");
+    auto fp_cmd_valid_id=field(core+"fp_shared_cmd_valid");
+    auto fp_cmd_ready_id=field(core+"fp_shared_cmd_ready");
     if(fields[snap_id].size!=48) throw std::runtime_error("unknown integer retire snapshot layout");
     std::ofstream commits(std::string(argv[2])+".commit_observations.bin",std::ios::binary);
     if(!commits) throw std::runtime_error("commit observation output open");
@@ -289,6 +294,12 @@ int main(int argc,char** argv) try {
         uint64_t load_busy=0, load_hit_capture=0, load_miss=0, store_wait=0;
     };
     std::map<std::array<uint64_t,2>,StringService> string_service;
+    struct FPLoadService {
+        uint64_t clocks=0, no_request=0, ack=0, busy=0, miss=0;
+        uint64_t hit_capture=0, idle_other=0, command_accept=0;
+        std::array<uint64_t,4> step_clocks{};
+    };
+    std::map<std::array<uint64_t,3>,FPLoadService> fp_load_service;
     // Same-edge no-retirement ownership, keyed by PRE-edge PC. Keep this
     // separate from the historical post-edge PC/host-retirement hot table.
     std::map<std::array<uint64_t,2>,uint64_t> pc_edge_no_retire;
@@ -353,6 +364,20 @@ int main(int argc,char** argv) try {
             optional_scalar(uc_wsteps_id),optional_scalar(uc_wrepair_id),optional_scalar(uc_wanchor_id),
             optional_scalar(uc_wset_id),uint64_t(prior_flin&31u)};
         uint64_t prior_state=scalar(state_id);
+        if(prior_state==12) { // S_FLOAD in this pinned full-PC elaboration
+            auto& row=fp_load_service[{scalar(qpc_id),scalar(fxop_id),scalar(fbytes_id)}];
+            ++row.clocks;
+            ++row.step_clocks[std::min<unsigned>(unsigned(scalar(fstep_id)),3)];
+            if(scalar(ack_id)) ++row.ack;
+            else if(scalar(req_id) && !scalar(we_id)) {
+                if(scalar(l1state_id)!=0) ++row.busy;
+                else if(scalar(cacheable_id) && !scalar(rd_hit_id)) ++row.miss;
+                else if(scalar(capture_id)) ++row.hit_capture;
+                else ++row.idle_other;
+            } else ++row.no_request;
+            row.command_accept+=bool(scalar(fp_load_cmd_id) &&
+                                     scalar(fp_cmd_valid_id) && scalar(fp_cmd_ready_id));
+        }
         // K_STR=13 and ST_MOVS=0 in this trace's pinned decode package. Leave
         // the subtype in the output so other string ops remain distinguishable.
         if(qkind_id!=nf && qst_id!=nf && scalar(qkind_id)==13) {
@@ -836,6 +861,26 @@ int main(int argc,char** argv) try {
                   <<row.fused_load_ack<<'\t'<<row.streamed_store_ack<<'\t'
                   <<row.load_busy<<'\t'<<row.load_hit_capture<<'\t'
                   <<row.load_miss<<'\t'<<row.store_wait<<'\n';
+    std::ofstream fp_load_out(prefix+".fp_load_service.tsv");
+    if(!fp_load_out) throw std::runtime_error("FP load service output open");
+    fp_load_out<<"q_pc\tq_fxop\tbytes\tclocks\tno_request\tack\tbusy\tmiss\t"
+               <<"hit_capture\tidle_other\tcommand_accept\tstep0\tstep1\tstep2\tstep3plus\n";
+    uint64_t fp_load_clocks=0;
+    for(const auto& [key,row]:fp_load_service) {
+        if(row.no_request+row.ack+row.busy+row.miss+row.hit_capture+
+           row.idle_other!=row.clocks ||
+           row.step_clocks[0]+row.step_clocks[1]+row.step_clocks[2]+
+           row.step_clocks[3]!=row.clocks || row.command_accept>row.ack)
+            throw std::runtime_error("FP load service partition mismatch");
+        fp_load_clocks+=row.clocks;
+        fp_load_out<<std::hex<<key[0]<<std::dec<<'\t'<<key[1]<<'\t'<<key[2]
+                   <<'\t'<<row.clocks<<'\t'<<row.no_request<<'\t'<<row.ack
+                   <<'\t'<<row.busy<<'\t'<<row.miss<<'\t'<<row.hit_capture
+                   <<'\t'<<row.idle_other<<'\t'<<row.command_accept;
+        for(auto n:row.step_clocks) fp_load_out<<'\t'<<n;
+        fp_load_out<<'\n';
+    }
+    if(fp_load_clocks!=states[12]) throw std::runtime_error("FP load state clocks mismatch");
     std::ofstream pc_causes(prefix+".pc_edge_causes.tsv");
     if(!pc_causes) throw std::runtime_error("PC edge cause output open");
     pc_causes<<"eip\toutside_pipe\tasync_hold\tasync_fault\tmemory_wait_including_admission\tfrontend_unavailable\tready_control\ttotal\n";

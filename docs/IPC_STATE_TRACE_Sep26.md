@@ -512,3 +512,19 @@ alone are 66.55% of no-retirement edges; a code-fill-only policy cannot
 plausibly solve both. A next RTL candidate should target checked memory
 response latency or slow x87 operand/admission transitions and then measure
 the exact same work, retaining full Quake/Win95 and differential gates.
+
+The added pre-edge `wave7.fp_load_service.tsv` splits every S_FLOAD clock by
+its captured x87 command and request-service phase, and checks that each row
+and all rows together conserve the FSM's 49,794 S_FLOAD clocks in this later
+trace. At `0x10f4a` (FILD m32), 339 operand ACKs require 10,890 S_FLOAD
+clocks: 338 new L1 line misses and 10,195 clocks while the array is busy
+filling. The miss event addresses move largely down through distinct physical
+lines, rather than repeatedly thrashing one line. The nearby `0x10f4d`
+(another FILD m32) has 339 operand ACKs, **zero** new misses, but still 4,017
+busy-fill clocks and 338 registered-hit capture clocks. Its waits can overlap
+the earlier fill tail; these two PC totals are not independent DDR latency
+savings. This is direct evidence that line-fill occupancy and serialized x87
+operand acquisition matter more at this hotspot than code-fill eviction or a
+missing FILD converter. It does not justify a Quake-address prefetch rule: a
+general solution must preserve exact translation, cacheability, coherence,
+fault and MMIO behavior and be checked with a matched-work A/B run.
