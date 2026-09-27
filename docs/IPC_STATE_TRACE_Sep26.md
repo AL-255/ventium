@@ -584,3 +584,12 @@ stores, replacement interference or changed scheduling. Do not duplicate the
 platform L2 as an IPC fix on this evidence. The larger remaining path is
 core/L1 request ownership and execution overlap, with any L2-capacity change
 requiring its own matched-work and hardware qualification.
+
+The later trace's `wave7.cache_backend.tsv` also narrows active downstream
+service: **54,949** settled clocks simultaneously have AXI read state 2,
+bridge read state 2, an L1 read waiting and no backing ACK. Of these, 46,499
+are in the already-enabled platform `SCWF_STREAM` state, 8,348 in `READONE`,
+and 102 in `SCWF_DRAIN`; the earlier REP-heavy phase has 121,201 clocks under
+the same joint predicate. These are overlapping service levels, not removable
+no-retirement clocks. They are much narrower than all L1/memory waits, so a
+backend-only latency change cannot be credited with the whole memory bucket.
