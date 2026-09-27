@@ -7,15 +7,15 @@
 # Reuses verify_worker.sh verbatim (ELF build, golden gen/CACHE, init-esp, compare)
 # with TB_BIN pointed at obj_dir_l1axi/tb_ventium + TB_EXTRA_FLAGS="--l1-axi
 # --quiesce ...". The golden is QEMU (mode-independent) so the mode-0 golden cache
-# is reused as-is. A high --quiesce is REQUIRED: a multi-cycle mode-2 access (an
-# icache/L1 fill, a 27-beat FNSAVE) can go many clocks without retiring, which the
-# default --quiesce 64 would mistake for an idle core. Runs parallel across cores.
+# is reused as-is. The TB now selects 200000 automatically for --l1-axi when the
+# caller omits --quiesce; retain this explicit value for every worker so the intended
+# long-fill bound is visible in the gate invocation. Runs parallel across cores.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 # Mode-2 verification forks a worker tree after the Verilator build.  Scope
 # the driver so the worker fan-out cannot bypass the generated-code guard.
-if [ "${VENTIUM_BUILD_SCOPE_ACTIVE:-0}" != "1" ]; then
+if ! "$ROOT/tools/build_scope.sh" --is-active; then
     exec "$ROOT/tools/build_scope.sh" -- "$0" "$@"
 fi
 
@@ -56,12 +56,77 @@ NCPU="${L1AXI_JOBS:-1}"
 
 [ -x "$QEMU" ]     || { echo "L1AXI-VERIFY-FAIL: qemu-i386 missing: $QEMU"; exit 1; }
 [ -f "$COMPARE" ]  || { echo "L1AXI-VERIFY-FAIL: compare.py missing"; exit 1; }
-mkdir -p "$WORKDIR"
+mkdir -p "$WORKDIR" "$CACHE_DIR"
 rm -f "$WORKDIR"/*.result 2>/dev/null || true
 
 echo "== build the +VEN_L1_AXI tb ($L1AXI_TARGET, VL_J=$VL_J, workers=$NCPU) =="
 make -C "$ROOT/verif/tb" "VL_J=$VL_J" "VL_SPLIT=$VL_SPLIT" "VL_OPT_FAST=$VL_OPT_FAST" "$L1AXI_TARGET" > "$WORKDIR/build.log" 2>&1 \
     || { echo "L1AXI-VERIFY-FAIL (build)"; tail -15 "$WORKDIR/build.log"; exit 1; }
+
+# ---- default-quiesce regression --------------------------------------------
+# A real L1/AXI line fill can be retirement-silent for far longer than the
+# direct-memory default of 64 clocks.  The normal corpus passes an explicit
+# 200000 threshold, so it cannot prove the CLI's context-sensitive default.
+# Reuse the producer just built above and make a deterministic 93-clock first
+# R-beat delay.  It is long enough to expose the old false stop, yet far below
+# the master's watchdog.  The explicit 64-clock case is deliberately expected
+# to stop early: it proves a caller's directed termination contract still wins.
+quiesce_regression() {
+    local smoke="$TESTS_DIR/smoke/smoke.flat"
+    local def_log="$WORKDIR/quiesce-default.log"
+    local exp_log="$WORKDIR/quiesce-explicit.log"
+    local def_trace="$WORKDIR/quiesce-default.vtrace"
+    local exp_trace="$WORKDIR/quiesce-explicit.vtrace"
+    local expected_retires=21
+    local def_records exp_records
+
+    make -C "$TESTS_DIR" smoke/smoke.flat >"$WORKDIR/quiesce-smoke-build.log" 2>&1 \
+        || { echo "L1AXI-QUIESCE-DEFAULT-FAIL (smoke build)";
+             tail -15 "$WORKDIR/quiesce-smoke-build.log"; return 1; }
+    [ -f "$smoke" ] || { echo "L1AXI-QUIESCE-DEFAULT-FAIL (missing smoke image)"; return 1; }
+
+    # xorshift32(seed=1) % 101 = 93.  AXI_RLAT is intentionally not used: it
+    # delays every beat and can turn this focused first-response regression into
+    # a watchdog test instead.
+    local -a latency_env=(
+        env -u AXI_RLAT -u AXI_WLAT -u AXI_STUCK -u AXI_WPOST -u AXI_WPOST_DELAY
+        AXI_RGAP=1 AXI_RSEED=1 AXI_RFIRST=100 AXI_RGAPPROB=0 AXI_RGAPMAX=0
+    )
+    "${latency_env[@]}" "$TB_BIN" --l1-axi --image "$smoke" \
+        --load 0x08048000 --entry 0x08048000 --init-esp 0x40c34910 \
+        --out "$def_trace" --max-insn "$expected_retires" --max-cycles 10000 \
+        >"$def_log" 2>&1 \
+        || { echo "L1AXI-QUIESCE-DEFAULT-FAIL (default run)"; tail -30 "$def_log"; return 1; }
+    "${latency_env[@]}" "$TB_BIN" --l1-axi --quiesce 64 --image "$smoke" \
+        --load 0x08048000 --entry 0x08048000 --init-esp 0x40c34910 \
+        --out "$exp_trace" --max-insn "$expected_retires" --max-cycles 10000 \
+        >"$exp_log" 2>&1 \
+        || { echo "L1AXI-QUIESCE-DEFAULT-FAIL (explicit run)"; tail -30 "$exp_log"; return 1; }
+
+    def_records="$(python3 - "$def_trace" <<'PY'
+import json, sys
+print(sum(1 for line in open(sys.argv[1]) if line.startswith('{') and 'n' in json.loads(line)))
+PY
+)"
+    exp_records="$(python3 - "$exp_trace" <<'PY'
+import json, sys
+print(sum(1 for line in open(sys.argv[1]) if line.startswith('{') and 'n' in json.loads(line)))
+PY
+)"
+    grep -qF "tb: --l1-axi selected default --quiesce=200000" "$def_log" \
+        && grep -qF "tb: stop: reached --max-insn ($expected_retires)" "$def_log" \
+        && ! grep -qF "tb: stop: quiescent" "$def_log" \
+        && [ "$def_records" -eq "$expected_retires" ] \
+        || { echo "L1AXI-QUIESCE-DEFAULT-FAIL (automatic default)";
+             tail -30 "$def_log"; return 1; }
+    ! grep -qF "selected default --quiesce=" "$exp_log" \
+        && grep -qF "tb: stop: quiescent for 64 clocks" "$exp_log" \
+        && [ "$exp_records" -lt "$expected_retires" ] \
+        || { echo "L1AXI-QUIESCE-DEFAULT-FAIL (explicit override)";
+             tail -30 "$exp_log"; return 1; }
+    echo "L1AXI-QUIESCE-DEFAULT-OK (93-cycle first response; explicit override preserved)"
+}
+quiesce_regression
 
 # ---- build the FUNC job list (one per manifest) ----------------------------
 JOBS="$WORKDIR/jobs.txt"; : > "$JOBS"; IDX=0

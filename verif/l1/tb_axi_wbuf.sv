@@ -68,7 +68,9 @@ module tb_axi_wbuf;
   logic [31:0] r_addr_q = '0;
   logic ar_before_drain = 1'b0;
   logic write_order_bad = 1'b0;
+  logic second_aw_before_b = 1'b0;
   logic third_aw_before_b = 1'b0;
+  logic third_admitted_on_head_b = 1'b0;
 
   // This controlled slave can accept pipelined AXI writes.  The DUT always drives
   // AW and W from one active entry; accepting both together is legal AXI and makes
@@ -91,7 +93,9 @@ module tb_axi_wbuf;
     if (!rst_n) begin
       b_pending <= '0; b_seen <= '0; aw_seen <= '0; b_delay <= '0;
       r_pending <= 1'b0; r_addr_q <= '0;
-      ar_before_drain <= 1'b0; write_order_bad <= 1'b0; third_aw_before_b <= 1'b0;
+      ar_before_drain <= 1'b0; write_order_bad <= 1'b0;
+      second_aw_before_b <= 1'b0; third_aw_before_b <= 1'b0;
+      third_admitted_on_head_b <= 1'b0;
       for (int i = 0; i < 256; i++) mem[i] <= 32'd0;
     end else begin
       if (arvalid && (b_seen != 3'd3)) ar_before_drain <= 1'b1;
@@ -101,6 +105,11 @@ module tb_axi_wbuf;
         if (awaddr[9:2] != 8'(aw_seen) + 8'd4) write_order_bad <= 1'b1;
         mem[awaddr[9:2]] <= wdata;
         aw_seen <= aw_seen + 3'd1;
+        // This is the positive half of the fixed two-entry P54C contract: the
+        // second retained store must be able to reach AXI before the first B.
+        // Merely checking that a third write does *not* do so would let a
+        // one-deep accidental serialization regression pass unnoticed.
+        if ((aw_seen == 3'd1) && (b_seen == 3'd0)) second_aw_before_b <= 1'b1;
         if ((aw_seen >= 3'd2) && (b_seen == 3'd0)) third_aw_before_b <= 1'b1;
         if (b_pending == 3'd0) b_delay <= 8'd12;
         b_pending <= b_pending + 3'd1;
@@ -108,6 +117,12 @@ module tb_axi_wbuf;
         b_delay <= b_delay - 8'd1;
       end
       if (bvalid && bready) begin
+        // The third CPU request has been held since the queue became full.  A
+        // retiring head B response frees precisely one architectural P5 slot,
+        // so the request must be accepted on THIS edge rather than one cycle
+        // later.  This catches a throughput bubble without increasing depth.
+        if (m_req && m_we && (m_addr == 32'h0000_0018))
+          third_admitted_on_head_b <= m_ack;
         b_pending <= b_pending - 3'd1;
         b_seen <= b_seen + 3'd1;
       end
@@ -190,7 +205,9 @@ module tb_axi_wbuf;
     do_narrow_read(32'h0000_0018, 32'h3333_3333);
     if (ar_before_drain) fail("AR issued before all earlier write responses drained");
     else $display("  ok   read AR stayed behind all queued writes");
+    if (!second_aw_before_b) fail("second AXI write did not launch before first P54C B");
     if (third_aw_before_b) fail("third AXI write launched before any P54C slot received B");
+    if (!third_admitted_on_head_b) fail("third CPU write was not admitted on the head B handshake");
     if (write_order_bad || aw_seen != 3'd3) fail("AXI write FIFO order/count was wrong");
     else $display("  ok   AXI write order preserved (3 stores)");
     if (!m_idle) fail("master not idle after read/write drain");

@@ -52,15 +52,23 @@ module tb_l1d_coherence;
   logic [31:0] m_addr;
   logic [31:0] m_wdata;
   logic [3:0] m_wstrb;
+  logic m_rd_narrow;
+  logic [1:0] m_rd_size;
   logic [31:0] m_rdata;
   logic m_ack;
 
   ven_l1d dut (
+`ifdef VEN_PIPE_MEM_CHAIN
+      .c_next_req(1'b0), .c_next_commit(1'b0), .c_next_cacheable(1'b0),
+      .c_next_addr(32'd0), .c_next_wstrb(4'd0), .c_next_ready(),
+`endif
+
       .clk, .rst_n, .flush_all, .golden(1'b0), .cacheable,
       .snoop_inv_valid, .snoop_inv_addr,
       .c_req, .c_we, .c_addr, .c_wdata, .c_wstrb, .c_rdata, .c_ack,
       .dbg_serve(),
-      .m_req, .m_we, .m_addr, .m_wdata, .m_wstrb, .m_rdata, .m_ack);
+      .m_req, .m_we, .m_addr, .m_wdata, .m_wstrb, .m_rdata, .m_ack,
+      .m_rd_narrow, .m_rd_size);
 
   logic [7:0] mem [0:65535];
 
@@ -130,6 +138,62 @@ module tb_l1d_coherence;
     end else begin
       $display("ok   %-18s %08x", what, got);
     end
+  endtask
+
+  // Land an invalidation on the *terminal* fill beat.  Mid-fill poison is a
+  // different condition: the line does not exist in the tag RAM yet.  On this
+  // exact edge the allocation and the invalidation contend, and an L1_DONE ->
+  // L1_IDLE optimization must neither acknowledge the old fill nor revive it.
+  // Keep the original request held so its retry also proves response ownership.
+  task automatic final_fill_invalidation(input bit use_flush);
+    int guard;
+    @(negedge clk);
+    c_req = 1'b1;
+    c_we = 1'b0;
+    c_addr = A;
+    c_wstrb = 4'd0;
+    // Sample at negedges so the signal is asserted before the following
+    // posedge consumes fill word seven (waiting on fw at a posedge would be
+    // one delta too late to affect the final allocation).
+    forever begin
+      @(negedge clk);
+      if ((dut.st == 2'd1) && (dut.fw == 3'd7)) break;
+    end
+    seed_line(A, NEW);
+    if (use_flush) begin
+      flush_all = 1'b1;
+    end else begin
+      snoop_inv_valid = 1'b1;
+      snoop_inv_addr = A;
+    end
+    @(posedge clk);
+    #1;
+    checks++;
+    if (c_ack) begin
+      fails++;
+      $display("FAIL terminal_%s_fill stale c_ack on invalidated final beat",
+               use_flush ? "flush" : "snoop");
+    end else begin
+      $display("ok   terminal_%s_fill no stale terminal response",
+               use_flush ? "flush" : "snoop");
+    end
+    @(negedge clk);
+    flush_all = 1'b0;
+    snoop_inv_valid = 1'b0;
+
+    guard = 0;
+    forever begin
+      @(posedge clk);
+      #1;
+      if (c_ack) break;
+      guard++;
+      if (guard > 100) $fatal(1, "terminal fill invalidation retry timeout");
+    end
+    // c_rdata is the registered response for the still-held request.
+    expect_eq(use_flush ? "terminal_flush_refill" : "terminal_snoop_refill",
+              c_rdata, NEW);
+    @(negedge clk);
+    c_req = 1'b0;
   endtask
 
   logic [31:0] d;
@@ -229,6 +293,62 @@ module tb_l1d_coherence;
     c_req = 1'b0;
     read_word(A, d);
     expect_eq("snoop_during_fill", d, NEW);
+
+    // ---- critical-word response vs the FIRST fill-beat snoop ---------------
+    // Critical-word-first may expose beat zero before the line allocates.  A
+    // snoop on that exact edge must suppress the pending response as well as
+    // poison the eventual allocation; otherwise the core samples OLD while the
+    // DMA write is logically simultaneous with the read completion.
+    reset_dut();
+    seed_line(A, OLD);
+    @(negedge clk);
+    c_req = 1'b1;
+    c_we = 1'b0;
+    c_addr = A;
+    c_wstrb = 4'd0;
+    forever begin
+      @(negedge clk);
+      if ((dut.st == 2'd1) && (dut.fw == 3'd0)) break;
+    end
+    seed_line(A, NEW);
+    snoop_inv_valid = 1'b1;
+    snoop_inv_addr = A;
+    @(posedge clk);
+    #1;
+    checks++;
+    if (c_ack) begin
+      fails++;
+      $display("FAIL critical_first_snoop stale early response %08x", c_rdata);
+    end else begin
+      $display("ok   critical_first_snoop no early response through snoop");
+    end
+    @(negedge clk);
+    snoop_inv_valid = 1'b0;
+    begin
+      int guard = 0;
+      forever begin
+        @(posedge clk);
+        #1;
+        if (c_ack) break;
+        guard++;
+        if (guard > 100) $fatal(1, "critical first-beat snoop retry timeout");
+      end
+    end
+    expect_eq("critical_first_refill", c_rdata, NEW);
+    @(negedge clk);
+    c_req = 1'b0;
+
+    // ---- final-beat allocation vs invalidation -----------------------------
+    // The preceding H-06/H-07 cases poison an already-running fill.  These two
+    // cases deliberately hit the edge on which tag/valid are installed, which
+    // is the boundary affected by removing L1_DONE's obsolete settle cycle.
+    reset_dut();
+    seed_line(A, OLD);
+    final_fill_invalidation(1'b1);
+
+    reset_dut();
+    seed_line(A, OLD);
+    final_fill_invalidation(1'b0);
 
     // ---- H-05b: snoop on the SERVE clock, not the capture clock ------------
     // The fix above suppresses the CAPTURE while a snoop is in flight. The read

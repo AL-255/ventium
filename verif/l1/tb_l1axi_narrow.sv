@@ -73,10 +73,15 @@ module narrow_harness #(
   logic [3:0]        rid;    logic [31:0] rdata; logic [1:0] rresp; logic rlast, rvalid, rready;
 
   ventium_l1_axi #(.ADDR_W(ADDR_W), .REMAP_BASE(REMAP_BASE), .ADDR_MASK(ADDR_MASK)) dut (
+`ifdef VEN_PIPE_MEM_CHAIN
+      .core_next_req(1'b0), .core_next_commit(1'b0),
+      .core_next_addr(32'd0), .core_next_wstrb(4'd0), .core_next_ready(),
+`endif
+
       .core_clk(core_clk), .core_rst_n(core_rst_n), .axi_clk(axi_clk), .axi_rst_n(axi_rst_n),
       .flush_all(flush), .golden_l1(1'b0), .shutdown(1'b0), .m_idle(),
       .core_req(c_req), .core_we(c_we), .core_addr(c_addr), .smm_active(1'b0),
-      .smbase(32'h0003_0000), .smm_flush_o(), .core_lock(1'b0), .core_lin(c_addr), .core_wdata(c_wdata),
+      .smbase(32'h0003_0000), .smm_flush_o(), .core_lock(1'b0), .core_lock_hold(1'b0), .core_lin(c_addr), .core_wdata(c_wdata),
       .core_wstrb(c_wstrb), .core_rdata(c_rdata), .core_ack(c_ack),
       .core_ic_nocache (ic_nocache_unused), .bus_err(bus_err), .cr0_cd(1'b0),
       .m_axi_awid(awid), .m_axi_awaddr(awaddr), .m_axi_awlen(awlen), .m_axi_awsize(awsize),
@@ -279,7 +284,9 @@ module narrow_harness #(
     do_read(32'h0000_1004, 4'hF, d);
     chk("fill data", 64'(d), 64'hA5A5_1004);
     chk("fill ARs (priming pair)", 64'(ar_count - ar0), 64'd2);
-    chk("fill ARADDR (line base)", 64'(mon_araddr), 64'(REMAP_BASE + 40'h0000_1000));
+    // The current cache starts at the requested critical word and wraps
+    // within its 32-byte line; it no longer starts every fill at word zero.
+    chk("fill ARADDR (critical word)", 64'(mon_araddr), 64'(REMAP_BASE + 40'h0000_1004));
     chk("fill ARLEN", 64'(mon_arlen), 64'd7);
     chk("fill ARSIZE", 64'(mon_arsize), 64'd2);
     chk("fill R beats", 64'(burst_beats), 64'd8);

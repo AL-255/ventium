@@ -45,10 +45,15 @@ module tb_l1_axi;
   // monitor: any AXI AR/AW asserted while shutting-down is a quiesce violation.
   always @(posedge clk) if (shutdown && (arvalid || awvalid)) shutdown_viol <= 1'b1;
   ventium_l1_axi #(.ADDR_W(ADDR_W), .REMAP_BASE(REMAP_BASE), .ADDR_MASK(ADDR_MASK)) dut (
+`ifdef VEN_PIPE_MEM_CHAIN
+      .core_next_req(1'b0), .core_next_commit(1'b0),
+      .core_next_addr(32'd0), .core_next_wstrb(4'd0), .core_next_ready(),
+`endif
+
       .core_clk(clk), .core_rst_n(rst_n), .axi_clk(clk), .axi_rst_n(rst_n),
       .flush_all(flush), .golden_l1(1'b0), .shutdown(shutdown), .m_idle(m_idle),
       .core_req(c_req), .core_we(c_we), .core_addr(c_addr), .smm_active(1'b0),
-      .smbase(32'h0003_0000), .smm_flush_o(), /* C-10 */ .core_lock(1'b0), /* REVIEW2_aug2 C-08: core reset default */ /* REVIEW2 H-24: no SMM in this unit gate */ .core_lin(c_addr), .core_wdata(c_wdata),
+      .smbase(32'h0003_0000), .smm_flush_o(), /* C-10 */ .core_lock(1'b0), .core_lock_hold(1'b0), /* REVIEW2_aug2 C-08: core reset default */ /* REVIEW2 H-24: no SMM in this unit gate */ .core_lin(c_addr), .core_wdata(c_wdata),
       .core_wstrb(c_wstrb), .core_rdata(c_rdata), .core_ack(c_ack),
       // REVIEW2_aug2 H-13: the I-side memory type. Not exercised by this
       // memory-subsystem gate; connected so the build stays warning-clean.

@@ -8,10 +8,12 @@
 // The pin-level biu_p5 path holds LOCK# across a locked read-modify-write; the
 // L1/AXI path had no equivalent, so a DMA requester could interleave a write
 // between the locked read and the locked write (a lost update). The fix is
-// arbitration ownership in ventium_l1_axi: once a locked READ is acked,
-// lock_owned holds the DMA requester off (nb_dma_req forced low) until the
-// locked WRITE completes, the sequence aborts (any unlocked core request --
-// e.g. fault delivery after the read), or reset.
+// arbitration ownership in ventium_l1_axi: the core supplies a distinct
+// lock-hold session level.  It starts with the first locked operand read and
+// remains high across unmarked page-walk/delivery traffic, split-store
+// fragments, and both equal-CMPXCHG8B writes.  It drops only at the core's
+// architectural completion/abort boundary; the L1 must not try to infer that
+// boundary from raw core_lock or the first write ack.
 //
 // The reservation gates NEW selections only. A DMA request the seam already
 // forwarded is an accepted transaction: dma_inflight holds nb_dma_req and the
@@ -33,21 +35,24 @@
 //      modeled ack, then clears
 //   A2 a same-cycle (combinational) downstream ack completes without the
 //      ownership latch -- no second-cycle ghost
-//   B  locked read acked -> lock_owned=1; a DMA write requested on every cycle
-//      of the window must NEVER forward while the window is open
-//   C  the locked write completes -> ownership releases -> the pending DMA
-//      request forwards (and drains)
+//   B  locked read acked -> lock hold=1; a DMA write requested on every cycle
+//      of the window must NEVER forward while the session is open
+//   C  an unmarked pseudo-walker request does NOT release the session; an
+//      explicit hold drop does -> the pending DMA forwards (and drains)
+//   D  two locked writes retain the session through the first ack (CX8B-equal
+//      shape), then release only after the final hold drop
+//   E  a no-write completion retains then drops the hold (CX8B-unequal shape)
 //   C2 DMA forwarded first, locked read asserted mid-flight: the in-flight
 //      request is NOT withdrawn, the locked read acks only after the drain,
 //      and no NEW DMA grant lands before the locked write completes
 //   G  simultaneous first-cycle DMA + locked read: the LOCK wins the new
 //      selection (documented priority); the read is not stalled; the DMA
 //      forwards after the window
-//   D  abort: locked read, then an UNLOCKED core request (fault-delivery
-//      traffic is never lock-marked) -> ownership releases, DMA forwards
-//      (the unlocked request itself completes normally -- the hold must not
-//      touch the core's own path)
-//   E  abort: locked read, then RESET -> ownership releases; also reset
+//   F  abort: locked read, then an UNLOCKED core request (fault-delivery /
+//      page-walk traffic is never lock-marked) -> session remains reserved
+//      until the explicit precise-abort hold drop; that unmarked request itself
+//      completes normally
+//   G  reset: locked read, then RESET -> ownership releases; also reset
 //      MID-FLIGHT clears a forwarded-but-unacked DMA request
 
 module tb_l1axi_lock;
@@ -55,7 +60,7 @@ module tb_l1axi_lock;
   localparam int ADDR_W = 40;
   logic clk=0, rst_n=0; always #5 clk=~clk;
 
-  logic        c_req=0, c_we=0, c_lock=0;
+  logic        c_req=0, c_we=0, c_lock=0, c_lock_hold=0;
   logic [31:0] c_addr=0, c_wdata=0; logic [3:0] c_wstrb=0;
   logic [31:0] c_rdata; logic c_ack, bus_err;
   logic        smm_active = 0;
@@ -74,10 +79,15 @@ module tb_l1axi_lock;
 
   ventium_l1_axi #(.ADDR_W(ADDR_W), .REMAP_BASE(40'h0), .ADDR_MASK(32'h0FFF_FFFF),
                    .WATCHDOG(1024)) dut (
+`ifdef VEN_PIPE_MEM_CHAIN
+      .core_next_req(1'b0), .core_next_commit(1'b0),
+      .core_next_addr(32'd0), .core_next_wstrb(4'd0), .core_next_ready(),
+`endif
+
       .core_clk(clk), .core_rst_n(rst_n), .axi_clk(clk), .axi_rst_n(rst_n),
       .flush_all(1'b0), .golden_l1(1'b1), .shutdown(1'b0), .m_idle(),
       .core_req(c_req), .core_we(c_we), .core_addr(c_addr), .smm_active(smm_active),
-      .smbase(32'h0003_0000), .smm_flush_o(), .core_lock(c_lock),
+      .smbase(32'h0003_0000), .smm_flush_o(), .core_lock(c_lock), .core_lock_hold(c_lock_hold),
       .core_lin(c_addr), .core_wdata(c_wdata),
       .core_wstrb(c_wstrb), .core_rdata(c_rdata), .core_ack(c_ack),
       .core_ic_nocache (ic_nocache_unused), .bus_err(bus_err), .cr0_cd(1'b0),
@@ -106,13 +116,16 @@ module tb_l1axi_lock;
 
   int fails = 0;
 
-  // one core access; lock = the LOCK prefix marker. Waits for the ack.
-  task automatic core_acc(input logic [31:0] a, input logic wr, input logic lk);
+  // One core access.  lk is the raw operand-beat LOCK# qualifier; hold models
+  // the core's architectural local-reservation level and deliberately remains
+  // asserted after this request until the caller models completion/abort.
+  task automatic core_acc(input logic [31:0] a, input logic wr, input logic lk,
+                          input logic hold);
     int guard;
     begin
       @(negedge clk);
       c_addr = a; c_wdata = 32'hA5A5_0001; c_wstrb = 4'b1111;
-      c_we = wr; c_lock = lk; c_req = 1'b1;
+      c_we = wr; c_lock = lk; c_lock_hold = hold; c_req = 1'b1;
       guard = 0;
       while (guard < 400 && !c_ack) begin @(posedge clk); guard++; end
       if (guard >= 400) begin
@@ -121,6 +134,16 @@ module tb_l1axi_lock;
       end
       @(negedge clk); c_req = 1'b0; c_we = 1'b0; c_lock = 1'b0; c_wstrb = 4'd0;
       repeat (2) @(posedge clk);
+    end
+  endtask
+
+  // Model the core's completion/precise-abort edge.  The hold remains high
+  // through the final operand ack and falls immediately afterward; a pending
+  // DMA request may be selected on the following cycle.
+  task automatic release_lock_session;
+    begin
+      @(negedge clk); c_lock_hold = 1'b0;
+      @(posedge clk); #1;
     end
   endtask
 
@@ -200,7 +223,7 @@ module tb_l1axi_lock;
     end else $display("  ok   same-cycle ack completes without latching ownership");
 
     // B -- the locked read opens the window; DMA must not forward inside it.
-    core_acc(32'h0001_0000, 1'b0, 1'b1);          // locked read
+    core_acc(32'h0001_0000, 1'b0, 1'b1, 1'b1);    // locked read, session opens
     @(posedge clk); #1;
     if (dut.lock_owned !== 1'b1) begin
       $display("  FAIL lock_owned not set after the locked read's ack");
@@ -220,17 +243,66 @@ module tb_l1axi_lock;
       end else $display("  ok   no DMA forward on any of 24 window cycles (adversarial write)");
     end
 
-    // C -- the locked write completes: ownership releases, the pending DMA forwards.
-    core_acc(32'h0001_0000, 1'b1, 1'b1);          // locked write (d_req still high)
+    // C -- a raw final write ACK alone must NOT release the local session: the
+    // core hold remains high through the completion edge.  This catches the old
+    // first-write-ack heuristic directly.
+    core_acc(32'h0001_0000, 1'b1, 1'b1, 1'b1);
     @(posedge clk); #1;
+    if (dut.lock_owned !== 1'b1 || dut.nb_dma_req !== 1'b0) begin
+      $display("  FAIL a locked write ACK released the session before core_lock_hold dropped");
+      fails++;
+    end else $display("  ok   raw final-write ACK alone leaves the session reserved");
+    release_lock_session();
     if (dut.lock_owned !== 1'b0) begin
-      $display("  FAIL lock_owned still set after the locked write's ack");
+      $display("  FAIL explicit lock-session release did not clear observability state");
       fails++;
     end else if (dut.nb_dma_req !== 1'b1) begin
-      $display("  FAIL the pending DMA request did not forward after release");
+      $display("  FAIL the pending DMA request did not forward after explicit release");
       fails++;
-    end else $display("  ok   locked write released ownership; pending DMA forwards");
+    end else $display("  ok   explicit completion release lets pending DMA forward");
     dma_drain(2, "post-window");
+
+    // D -- equal CMPXCHG8B shape: two raw locked writes.  The first ACK must
+    // remain reserved, and the second remains reserved until the core presents
+    // its architectural completion level drop.
+    core_acc(32'h0001_0040, 1'b0, 1'b1, 1'b1);
+    @(negedge clk); d_req = 1'b1; d_we = 1'b1; d_addr = 32'h0001_0040; d_wdata = 32'hBAD0_C8B0;
+    core_acc(32'h0001_0040, 1'b1, 1'b1, 1'b1);
+    @(posedge clk); #1;
+    if (dut.nb_dma_req !== 1'b0) begin
+      $display("  FAIL equal-CX8B first write released DMA exclusion");
+      fails++;
+    end
+    core_acc(32'h0001_0044, 1'b1, 1'b1, 1'b1);
+    @(posedge clk); #1;
+    if (dut.nb_dma_req !== 1'b0) begin
+      $display("  FAIL equal-CX8B second write released before core completion level dropped");
+      fails++;
+    end
+    release_lock_session();
+    if (dut.nb_dma_req !== 1'b1) begin
+      $display("  FAIL equal-CX8B pending DMA did not forward after explicit completion");
+      fails++;
+    end else $display("  ok   equal-CX8B retains DMA exclusion through both writes");
+    dma_drain(2, "cx8b-equal");
+
+    // E -- unequal CMPXCHG8B has NO write.  A write-ack-derived ownership FSM
+    // leaks forever here; the authoritative core hold release must unblock DMA.
+    core_acc(32'h0001_0080, 1'b0, 1'b1, 1'b1);
+    @(negedge clk); d_req = 1'b1; d_we = 1'b1; d_addr = 32'h0001_0080; d_wdata = 32'hBAD0_0E00;
+    repeat (3) begin
+      @(posedge clk); #1;
+      if (dut.nb_dma_req !== 1'b0) begin
+        $display("  FAIL unequal-CX8B DMA forwarded before no-write completion release");
+        fails++;
+      end
+    end
+    release_lock_session();
+    if (dut.nb_dma_req !== 1'b1) begin
+      $display("  FAIL unequal-CX8B DMA stayed blocked after no-write completion release");
+      fails++;
+    end else $display("  ok   unequal-CX8B no-write completion releases DMA exclusion");
+    dma_drain(2, "cx8b-unequal");
 
     // C2 -- IN-FLIGHT vs LOCK: the DMA request is forwarded FIRST, then the
     // locked read arrives while the beat still owns the seam. The forwarded
@@ -245,7 +317,7 @@ module tb_l1axi_lock;
     end
     @(negedge clk);
     c_addr = 32'h0001_1000; c_wdata = 32'hA5A5_0002; c_wstrb = 4'b1111;
-    c_we = 1'b0; c_lock = 1'b1; c_req = 1'b1;   // locked read, DMA in flight
+    c_we = 1'b0; c_lock = 1'b1; c_lock_hold = 1'b1; c_req = 1'b1;   // locked read, DMA in flight
     repeat (4) begin
       @(posedge clk); #1;
       if (dut.nb_dma_req !== 1'b1) begin
@@ -285,7 +357,8 @@ module tb_l1axi_lock;
         fails++;
       end
     end
-    core_acc(32'h0001_1000, 1'b1, 1'b1);          // locked write (d_req still high)
+    core_acc(32'h0001_1000, 1'b1, 1'b1, 1'b1);    // locked write (d_req still high)
+    release_lock_session();
     @(posedge clk); #1;
     if (dut.nb_dma_req !== 1'b1) begin
       $display("  FAIL the post-window DMA did not forward after the locked write");
@@ -299,7 +372,7 @@ module tb_l1axi_lock;
     @(negedge clk);
     d_req = 1'b1; d_we = 1'b1; d_addr = 32'h0001_2000; d_wdata = 32'hBAD0_2222; d_wstrb = 4'hF;
     c_addr = 32'h0001_2000; c_wdata = 32'hA5A5_0003; c_wstrb = 4'b1111;
-    c_we = 1'b0; c_lock = 1'b1; c_req = 1'b1;
+    c_we = 1'b0; c_lock = 1'b1; c_lock_hold = 1'b1; c_req = 1'b1;
     @(posedge clk); #1;
     if (dut.nb_dma_req !== 1'b0 || dut.dma_inflight !== 1'b0) begin
       $display("  FAIL priority: a DMA request simultaneous with a locked read was selected");
@@ -315,7 +388,8 @@ module tb_l1axi_lock;
     end
     @(negedge clk); c_req = 1'b0; c_we = 1'b0; c_lock = 1'b0; c_wstrb = 4'd0;
     repeat (2) @(posedge clk);
-    core_acc(32'h0001_2000, 1'b1, 1'b1);          // locked write releases
+    core_acc(32'h0001_2000, 1'b1, 1'b1, 1'b1);    // final raw write; explicit hold release follows
+    release_lock_session();
     @(posedge clk); #1;
     if (dut.nb_dma_req !== 1'b1) begin
       $display("  FAIL priority: the simultaneous DMA did not forward after the window");
@@ -323,26 +397,33 @@ module tb_l1axi_lock;
     end
     dma_drain(2, "priority");
 
-    // D -- ABORT by an unlocked core request (the fault-delivery shape): a locked
-    // read, then ordinary core traffic must release the port -- and complete.
-    core_acc(32'h0001_0040, 1'b0, 1'b1);          // locked read
+    // F -- an unmarked pseudo-walker/fault-delivery request must complete but
+    // MUST NOT release the still-live locked session.  Only the explicit core
+    // abort level drop may let the waiting DMA proceed.
+    core_acc(32'h0001_0040, 1'b0, 1'b1, 1'b1);    // locked read
     @(negedge clk); d_req = 1'b1;
-    core_acc(32'h0002_0040, 1'b0, 1'b0);          // UNLOCKED core read (must also ack)
+    core_acc(32'h0002_0040, 1'b0, 1'b0, 1'b1);    // unmarked pseudo-walker read (must also ack)
     @(posedge clk); #1;
-    if (dut.lock_owned !== 1'b0 || dut.nb_dma_req !== 1'b1) begin
-      $display("  FAIL abort-by-unlocked-request did not release ownership");
+    if (dut.lock_owned !== 1'b1 || dut.nb_dma_req !== 1'b0) begin
+      $display("  FAIL unmarked pseudo-walker request released the live lock session");
       fails++;
-    end else $display("  ok   an unlocked core request releases ownership (abort path)");
-    dma_drain(2, "abort");
+    end else $display("  ok   unmarked pseudo-walker request completes without releasing session");
+    release_lock_session();
+    if (dut.nb_dma_req !== 1'b1) begin
+      $display("  FAIL precise-abort session release did not forward pending DMA");
+      fails++;
+    end else $display("  ok   precise-abort hold drop releases the DMA port");
+    dma_drain(2, "precise-abort");
 
-    // E -- ABORT by reset (also covers reset MID-FLIGHT: the defined abort
+    // G -- ABORT by reset (also covers reset MID-FLIGHT: the defined abort
     // response -- a reset may drop a forwarded request).
-    core_acc(32'h0001_0080, 1'b0, 1'b1);          // locked read
+    core_acc(32'h0001_0080, 1'b0, 1'b1, 1'b1);    // locked read
     @(posedge clk); #1;
     if (dut.lock_owned !== 1'b1) begin
       $display("  FAIL setup for the reset case: ownership not taken");
       fails++;
     end
+    c_lock_hold = 1'b0;  // model the core output's architectural reset value
     rst_n = 1'b0; repeat (3) @(posedge clk); rst_n = 1'b1; repeat (3) @(posedge clk);
     if (dut.lock_owned !== 1'b0) begin
       $display("  FAIL reset did not release ownership");

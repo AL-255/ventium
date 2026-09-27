@@ -3,7 +3,7 @@
 
 // verif/l1/axi_slave_bfm.sv — a behavioral AXI4 slave standing in for the PS DDR,
 // used by tb_l1_axi to verify ventium_l1_axi end-to-end. Byte-addressable backing
-// store; honors INCR bursts (AR/R) with RLAST, single/burst writes (AW/W/B) with
+// store; honors INCR and 4B-WRAP8 bursts (AR/R) with RLAST, single/burst writes (AW/W/B) with
 // WSTRB. A programmable AR->R / AW->B latency (RD_LAT/WR_LAT) models DDR delay so
 // the test exercises the L1 MISS STALL (c_ack low for multiple clocks during fill);
 // BUBBLE>0 deasserts RVALID for a cycle mid-burst to exercise the stream m_ack
@@ -111,13 +111,14 @@ module axi_slave_bfm #(
     mem[phys+0]=d[7:0]; mem[phys+1]=d[15:8]; mem[phys+2]=d[23:16]; mem[phys+3]=d[31:24];
   endtask
 
-  // ---- READ channel: latch AR, wait RD_LAT, stream arlen+1 INCR beats ---------
+  // ---- READ channel: latch AR, wait RD_LAT, stream arlen+1 beats --------------
   typedef enum logic [1:0] { R_IDLE, R_WAIT, R_BEAT, R_BUB } rstate_e;
   rstate_e          rst_s;
   logic [ADDR_W-1:0] r_addr;  logic [7:0] r_cnt; logic [3:0] r_id; int r_timer;
   logic             bubbled;            // BUBBLE already spent this burst
   logic [31:0]      r_bcnt;             // C-01: accepted beats of the in-flight burst
   logic [1:0]       r_size;             // R2-H01: latched ARSIZE (0=1B, 1=2B, 2=4B)
+  logic             r_wrap8;            // cache fill: AXI WRAP, 8 beats x 4 bytes
 
   assign arready = (rst_s == R_IDLE) && (STUCK==0);   // #34: STUCK -> never ready
 `ifdef AXI_BFM_MON
@@ -150,13 +151,22 @@ module axi_slave_bfm #(
 `ifdef AXI_BFM_MON
                       ar_count_q<=0; burst_beats_q<=0;
 `endif
-                      r_size<=2'd2; r_bcnt<=0; end
+                      r_size<=2'd2; r_bcnt<=0; r_wrap8<=1'b0; end
     else unique case (rst_s)
       R_IDLE: if (arvalid && STUCK==0) begin
                 // M-08: RLAST_EXTRA pads the burst so the slave outlives the master's
                 // own beat count -- the LATE-RLAST case.
                 r_addr <= araddr; r_cnt <= arlen + 8'(RLAST_EXTRA); r_id <= arid;
                 r_size <= arsize[1:0];   // R2-H01
+                // The only WRAP shape emitted by ven_axi_master is the AXI-legal
+                // cache-line form: 8 beats of 4 bytes.  Fail a TB loudly if a
+                // future master changes that contract instead of quietly acting
+                // like INCR and masking a data-order bug.
+                if ((arburst != 2'b01) && (arburst != 2'b10))
+                  $fatal(1, "axi_slave_bfm: unsupported ARBURST %0d", arburst);
+                if ((arburst == 2'b10) && ((arlen != 8'd7) || (arsize != 3'd2)))
+                  $fatal(1, "axi_slave_bfm: only 4B WRAP8 supported (len=%0d size=%0d)", arlen, arsize);
+                r_wrap8 <= (arburst == 2'b10);
                 r_timer <= RD_LAT; bubbled <= 1'b0; rst_s <= R_WAIT;
 `ifdef AXI_BFM_MON
                 // C-01: the AR handshake (arready==1 in R_IDLE) -> one more transaction.
@@ -197,7 +207,14 @@ module axi_slave_bfm #(
 `endif
                 end
                 else begin
-                  r_cnt <= r_cnt - 8'd1; r_addr <= r_addr + 32'd4;
+                  r_cnt <= r_cnt - 8'd1;
+                  // A WRAP8 line burst begins at the critical dword and wraps
+                  // to line word zero after word seven.  The cache's fill
+                  // counter follows this identical circular order.
+                  if (r_wrap8 && (r_addr[4:2] == 3'd7))
+                    r_addr <= {r_addr[ADDR_W-1:5], 5'd0};
+                  else
+                    r_addr <= r_addr + 32'd4;
                   r_bcnt <= r_bcnt + 32'd1;
                   // AFTER delivering beat 2, insert ONE genuine rvalid-low bubble
                   // before beat 3 (stresses the stream m_ack gating: fw must hold).

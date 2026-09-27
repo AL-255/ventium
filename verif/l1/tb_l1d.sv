@@ -45,7 +45,12 @@ module tb_l1d;
   // regardless of L1_SETS, so any override silently indexed past the arrays and split
   // the address at the wrong bit. run-l1d-gate.sh runs this at 128 AND at 64; the
   // second run is what actually proves the split follows the parameter.
-  ven_l1d #(.L1_SETS(TB_L1_SETS)) dut (.clk, .rst_n, .flush_all(1'b0), .golden(1'b0),
+  ven_l1d #(.L1_SETS(TB_L1_SETS)) dut (
+`ifdef VEN_PIPE_MEM_CHAIN
+      .c_next_req(1'b0), .c_next_commit(1'b0), .c_next_cacheable(1'b0),
+      .c_next_addr(32'd0), .c_next_wstrb(4'd0), .c_next_ready(),
+`endif
+.clk, .rst_n, .flush_all(1'b0), .golden(1'b0),
                .cacheable, .snoop_inv_valid, .snoop_inv_addr,
                .c_req, .c_we, .c_addr, .c_wdata, .c_wstrb, .c_rdata, .c_ack,
                .dbg_serve(),                       // M-17: diagnostic only
@@ -104,6 +109,430 @@ module tb_l1d;
       if (++guard>50) begin $display("  FAIL write %08x: no ack",a); errors++; break; end end
     @(negedge clk); c_req<=1'b0; c_we<=1'b0;
   endtask
+
+  // A cacheable fill writes its final word on the terminal backing-ack edge.
+  // The production L1D deliberately keeps the data response registered, so
+  // this test does *not* allow a combinational same-edge c_ack.  It does,
+  // however, require the newly valid line to be captured on the immediately
+  // following clock: there must be no obsolete L1_DONE settle bubble between
+  // the allocation and the existing registered read window.  Pick word seven
+  // so the requested value is also the final fill beat, rather than merely a
+  // word written earlier in the burst.
+  task automatic do_final_fill_response(input logic [31:0] a,
+                                        input logic [31:0] exp);
+    int guard;
+    bit saw_final;
+    @(negedge clk);
+    c_req <= 1'b1; c_we <= 1'b0; c_addr <= a; c_wstrb <= 4'd0;
+    guard = 0;
+    saw_final = 1'b0;
+    forever begin
+      @(posedge clk);
+      // Sample the old state at the active edge: this is the final accepted
+      // backing beat.  Nonblocking updates below then install the line.
+      // A prior retargeted request is allowed to still be draining when this
+      // task starts.  Its terminal beat is not evidence about *this* request:
+      // require the L1's saved fill base to belong to the line under test.
+      if ((dut.st == 2'd1) && (dut.fbase[31:5] == a[31:5]) &&
+          (dut.fw == 3'd7) && m_req && !m_we && m_ack) begin
+        saw_final = 1'b1;
+        #1;
+        if (dut.st !== 2'd0) begin
+          $display("  FAIL final-fill: state after terminal beat=%0d, want L1_IDLE", dut.st);
+          errors++;
+        end else begin
+          $display("  ok   final-fill: terminal allocation returns directly to L1_IDLE");
+        end
+        if (c_ack) begin
+          $display("  FAIL final-fill: c_ack asserted on terminal backing beat");
+          errors++;
+        end else begin
+          $display("  ok   final-fill: no same-edge combinational c_ack");
+        end
+        break;
+      end
+      #1;
+      if (++guard > 50) begin
+        $display("  FAIL final-fill: terminal backing beat not observed");
+        errors++;
+        break;
+      end
+    end
+    if (saw_final) begin
+      // This edge captures the just-filled line into rd_window_q.  The core
+      // sees the resulting c_ack at its subsequent sampling edge; at #1 the
+      // response signal is correctly visible for the original held request.
+      @(posedge clk); #1;
+      if (!c_ack) begin
+        $display("  FAIL final-fill: registered response lost the direct post-fill capture");
+        errors++;
+      end else begin
+        chk("final-fill word 7 response", c_rdata, exp);
+      end
+    end
+    @(negedge clk);
+    c_req <= 1'b0;
+  endtask
+
+  // Critical-word-first is a registered response from the backing R channel,
+  // not an async array shortcut.  The requested aligned word must acknowledge
+  // after fill beat zero, remain owned by its original request for exactly one
+  // sampling edge, and leave the other seven beats draining in L1_FILL.
+  task automatic do_critical_fill_response(input logic [31:0] a,
+                                           input logic [31:0] exp);
+    int guard;
+    bit saw_early;
+    @(negedge clk);
+    c_req <= 1'b1; c_we <= 1'b0; c_addr <= a; c_wstrb <= 4'd0;
+    guard = 0; saw_early = 1'b0;
+    forever begin
+      @(posedge clk); #1;
+      if (dut.early_armed) begin
+        saw_early = 1'b1;
+        if (dut.st != 2'd1) begin
+          $display("  FAIL critical-fill: response escaped L1_FILL (st=%0d)", dut.st);
+          errors++;
+        end
+        if (!c_ack) begin
+          $display("  FAIL critical-fill: armed response did not acknowledge");
+          errors++;
+        end else begin
+          chk("critical-first response", c_rdata, exp);
+        end
+        break;
+      end
+      if (++guard > 50) begin
+        $display("  FAIL critical-fill: first returned word never armed a response");
+        errors++;
+        break;
+      end
+    end
+    if (saw_early) begin
+      // This is the core's sampling edge for the registered response.  The
+      // L1 consumes it here; holding it longer could acknowledge a retarget.
+      @(posedge clk); #1;
+      if (c_ack) begin
+        $display("  FAIL critical-fill: early response persisted past one sampling edge");
+        errors++;
+      end else begin
+        $display("  ok   critical-fill: response is one registered clock wide");
+      end
+    end
+    @(negedge clk); c_req <= 1'b0;
+    guard = 0;
+    while (dut.st != 2'd0) begin
+      @(posedge clk); #1;
+      if (++guard > 50) begin
+        $display("  FAIL critical-fill: tail did not drain");
+        errors++;
+        break;
+      end
+    end
+    // The circular backing order must still have populated all eight physical
+    // words, not just the dword returned early.
+    for (int w = 0; w < 8; w++) begin
+      automatic logic [31:0] wa = {a[31:5], 5'd0} + 32'(w)*4;
+      logic [31:0] wd;
+      do_read(wa, wd);
+      chk($sformatf("critical tail word %0d", w), wd, wa ^ 32'hA5A5_0000);
+    end
+  endtask
+
+  // Retarget in the cycle in which A's critical word is visible.  A response
+  // has no value without its request identity: B must not consume A's data,
+  // but must be serviced normally after A's line drains.
+  task automatic do_critical_retarget(input logic [31:0] a, b,
+                                      input logic [31:0] exp_b);
+    int guard;
+    @(negedge clk);
+    c_req <= 1'b1; c_we <= 1'b0; c_addr <= a; c_wstrb <= 4'd0;
+    guard = 0;
+    forever begin
+      @(posedge clk); #1;
+      if (dut.early_armed) break;
+      if (++guard > 50) begin
+        $display("  FAIL critical-retarget: A never armed"); errors++; break;
+      end
+    end
+    if (dut.early_armed) begin
+      // Before the next posedge (the core's sampling edge), substitute B.
+      c_addr <= b;
+      @(posedge clk); #1;
+      if (c_ack) begin
+        $display("  FAIL critical-retarget: A response acknowledged as B"); errors++;
+      end else begin
+        $display("  ok   critical-retarget: stale response ownership rejected");
+      end
+      guard = 0;
+      forever begin
+        @(posedge clk); #1;
+        if (c_ack) begin chk("critical retarget B", c_rdata, exp_b); break; end
+        if (++guard > 100) begin
+          $display("  FAIL critical-retarget: B did not complete"); errors++; break;
+        end
+      end
+    end
+    @(negedge clk); c_req <= 1'b0;
+  endtask
+
+`ifdef VEN_L1D_HIT_UNDER_FILL
+  // A fill retains ownership of the backing stream, but an unrelated resident
+  // read must be able to use the normal registered array-read path while the
+  // remaining fill beats drain.  A and B intentionally occupy different sets:
+  // same-set accesses are excluded by the implementation so that this test
+  // never masks a replacement/LRU collision as a throughput improvement.
+  task automatic do_hit_under_fill(input logic [31:0] a, b,
+                                   input logic [31:0] exp_a, exp_b);
+    int guard;
+    bit saw_critical, saw_b;
+    // Prime B before launching A's cold miss.  The local B hit is the only
+    // request admitted during A's fill tail.
+    do_read(b, d); chk("hit-under-fill prime B", d, exp_b);
+    if (b[11:5] == a[11:5]) begin
+      $display("  FAIL hit-under-fill test setup aliases A/B sets"); errors++;
+    end
+
+    @(negedge clk);
+    c_req <= 1'b1; c_we <= 1'b0; c_addr <= a; c_wstrb <= 4'd0;
+    guard = 0; saw_critical = 1'b0; saw_b = 1'b0;
+    // Wait for A's owned critical-word response.  It proves A remains the
+    // live request until the response sampling edge.
+    forever begin
+      @(posedge clk); #1;
+      if (dut.early_armed && c_ack) begin
+        chk("hit-under-fill critical A", c_rdata, exp_a);
+        saw_critical = 1'b1;
+        break;
+      end
+      if (++guard > 80) begin
+        $display("  FAIL hit-under-fill: A never received critical response"); errors++;
+        break;
+      end
+    end
+    if (saw_critical) begin
+      // Retarget only after A's response has been sampled.  B must be served
+      // before A's terminal beat, through rd_window_q (not early_armed), while
+      // m_addr continues to describe A's fill stream.
+      @(negedge clk); c_addr <= b;
+      guard = 0;
+      forever begin
+        @(posedge clk); #1;
+        if (m_req && (!m_we) && (m_addr[31:5] != a[31:5])) begin
+          $display("  FAIL hit-under-fill: B changed A backing request to %08x", m_addr);
+          errors++;
+        end
+        if (c_ack) begin
+          if (dut.st != 2'd1) begin
+            $display("  FAIL hit-under-fill: B acknowledged after fill completed"); errors++;
+          end
+          if (dut.early_armed) begin
+            $display("  FAIL hit-under-fill: B used critical-response path"); errors++;
+          end
+          chk("hit-under-fill resident B", c_rdata, exp_b);
+          saw_b = 1'b1;
+          break;
+        end
+        if (++guard > 20) begin
+          $display("  FAIL hit-under-fill: B did not acknowledge during A tail"); errors++;
+          break;
+        end
+      end
+    end
+    @(negedge clk); c_req <= 1'b0;
+    // The owning fill still completes and installs every physical word.
+    guard = 0;
+    while (dut.st != 2'd0) begin
+      @(posedge clk); #1;
+      if (++guard > 80) begin
+        $display("  FAIL hit-under-fill: A tail did not drain"); errors++;
+        break;
+      end
+    end
+    if (saw_b) begin
+      do_read(a, d); chk("hit-under-fill completed A resident", d, exp_a);
+      do_read(b, d); chk("hit-under-fill B remains resident", d, exp_b);
+    end
+  endtask
+
+  // The allowed capture must retain the exact coherency rule of an IDLE hit:
+  // a snoop on B at the proposed capture edge rejects the pre-snoop array
+  // value.  B remains held until A's tail drains, then refills from the new
+  // backing value.  This is the failure mode that a convenient but unsafe
+  // local "hit while busy" shortcut would otherwise hide.
+  task automatic do_hit_under_fill_snoop(input logic [31:0] a, b,
+                                         input logic [31:0] exp_b_new);
+    int guard;
+    bit saw_critical, saw_stale_ack;
+    do_read(b, d); chk("hit-under-fill snoop prime B", d, b ^ 32'hA5A5_0000);
+    dma_poke(b, exp_b_new);
+    @(negedge clk);
+    c_req <= 1'b1; c_we <= 1'b0; c_addr <= a; c_wstrb <= 4'd0;
+    guard = 0; saw_critical = 1'b0; saw_stale_ack = 1'b0;
+    forever begin
+      @(posedge clk); #1;
+      if (dut.early_armed && c_ack) begin saw_critical = 1'b1; break; end
+      if (++guard > 80) begin
+        $display("  FAIL hit-under-fill snoop: A never received critical response"); errors++;
+        break;
+      end
+    end
+    if (saw_critical) begin
+      // Present B and its snoop together at the first would-be capture edge.
+      // No old-B acknowledgement may escape while the invalidation is active.
+      @(negedge clk); c_addr <= b; snoop_inv_addr <= b; snoop_inv_valid <= 1'b1;
+      @(posedge clk); #1;
+      if (c_ack) begin
+        $display("  FAIL hit-under-fill snoop: stale B acknowledged on snoop edge");
+        errors++; saw_stale_ack = 1'b1;
+      end else $display("  ok   hit-under-fill snoop blocks the capture edge");
+      @(negedge clk); snoop_inv_valid <= 1'b0;
+      guard = 0;
+      forever begin
+        @(posedge clk); #1;
+        if (c_ack) begin
+          if (saw_stale_ack) begin
+            $display("  FAIL hit-under-fill snoop: request had already completed stale"); errors++;
+          end
+          chk("hit-under-fill snoop refills fresh B", c_rdata, exp_b_new);
+          break;
+        end
+        if (++guard > 120) begin
+          $display("  FAIL hit-under-fill snoop: B did not refill after A tail"); errors++;
+          break;
+        end
+      end
+    end
+    @(negedge clk); c_req <= 1'b0;
+  endtask
+
+`endif
+
+`ifdef VEN_L1D_FILL_FORWARD
+  // A cacheable WRAP fill owns the backing stream to its terminal beat, but a
+  // later aligned read of a word that has already arrived in that *same* line
+  // may use the normal registered L1 response window.  This must not become a
+  // combinational response, start a second request, or wait for the tail to
+  // install the tag/valid bit.
+  task automatic do_fill_forward(input logic [31:0] a, b,
+                                 input logic [31:0] exp_a, exp_b,
+                                 input bit expect_early = 1'b1);
+    int guard;
+    bit saw_b;
+    @(negedge clk);
+    c_req <= 1'b1; c_we <= 1'b0; c_addr <= a; c_wstrb <= 4'd0;
+    guard = 0; saw_b = 1'b0;
+    forever begin
+      @(posedge clk); #1;
+      if (dut.early_armed && c_ack) begin
+        chk("fill-forward critical A", c_rdata, exp_a);
+        break;
+      end
+      if (++guard > 80) begin
+        $display("  FAIL fill-forward: A never received critical response"); errors++;
+        break;
+      end
+    end
+    // Word 3 is not the critical word.  Its response is legal only after that
+    // physical word has landed, and must arrive while the old fill still drains.
+    @(negedge clk); c_addr <= b;
+    guard = 0;
+    forever begin
+      @(posedge clk); #1;
+      if (m_req && (!m_we) && (m_addr[31:5] != a[31:5])) begin
+        $display("  FAIL fill-forward: B changed A backing request to %08x", m_addr);
+        errors++;
+      end
+      if (c_ack) begin
+        if (expect_early && dut.st != 2'd1) begin
+          $display("  FAIL fill-forward: B acknowledged after fill completed"); errors++;
+        end
+        if (dut.early_armed) begin
+          $display("  FAIL fill-forward: B used A's critical response"); errors++;
+        end
+        chk("fill-forward returned word", c_rdata, exp_b);
+        saw_b = 1'b1;
+        break;
+      end
+      if (++guard > 32) begin
+        $display("  FAIL fill-forward: returned word did not acknowledge"); errors++;
+        break;
+      end
+    end
+    @(negedge clk); c_req <= 1'b0;
+    guard = 0;
+    while (dut.st != 2'd0) begin
+      @(posedge clk); #1;
+      if (++guard > 80) begin
+        $display("  FAIL fill-forward: A tail did not drain"); errors++; break;
+      end
+    end
+    if (saw_b) begin
+      do_read(b, d); chk("fill-forward completed line remains resident", d, exp_b);
+    end
+  endtask
+
+  // A same-line snoop at the first eligible forwarding edge must poison the
+  // active transaction.  The partially filled word is not allowed to escape;
+  // after the old tail drains, the held request must refill normally.
+  task automatic do_fill_forward_snoop(input logic [31:0] a, b,
+                                       input logic [31:0] exp_b);
+    int guard;
+    bit word_ready;
+    @(negedge clk);
+    c_req <= 1'b1; c_we <= 1'b0; c_addr <= a; c_wstrb <= 4'd0;
+    guard = 0;
+    forever begin
+      @(posedge clk); #1;
+      if (dut.early_armed && c_ack) break;
+      if (++guard > 80) begin
+        $display("  FAIL fill-forward snoop: A never received critical response"); errors++;
+        break;
+      end
+    end
+    @(negedge clk); c_addr <= b;
+    guard = 0; word_ready = 1'b0;
+    // Wait for B's physical word to land.  The following snoop is deliberately
+    // timed at the next would-be registered capture edge.
+    forever begin
+      @(posedge clk); #1;
+      if (dut.fill_word_valid[b[4:2]]) begin word_ready = 1'b1; break; end
+      if (++guard > 32) begin
+        $display("  FAIL fill-forward snoop: B word never arrived in active fill"); errors++;
+        break;
+      end
+    end
+    if (word_ready) begin
+      @(negedge clk); snoop_inv_addr <= b; snoop_inv_valid <= 1'b1;
+      @(posedge clk); #1;
+      if (c_ack) begin
+        $display("  FAIL fill-forward snoop: poisoned word acknowledged on snoop edge");
+        errors++;
+      end else $display("  ok   fill-forward snoop blocks the ready-word capture");
+      @(negedge clk); snoop_inv_valid <= 1'b0;
+      // The old transaction must drain without serving its now-stale partial line.
+      guard = 0;
+      while (dut.st == 2'd1) begin
+        @(posedge clk); #1;
+        if (c_ack) begin
+          $display("  FAIL fill-forward snoop: stale word escaped during poisoned tail");
+          errors++;
+        end
+        if (++guard > 80) begin
+          $display("  FAIL fill-forward snoop: poisoned tail did not drain"); errors++; break;
+        end
+      end
+      guard = 0;
+      forever begin
+        @(posedge clk); #1;
+        if (c_ack) begin chk("fill-forward snoop refills B", c_rdata, exp_b); break; end
+        if (++guard > 100) begin
+          $display("  FAIL fill-forward snoop: B did not refill after poisoned tail"); errors++; break;
+        end
+      end
+    end
+    @(negedge clk); c_req <= 1'b0;
+  endtask
+`endif
 
   // back-to-back reads with c_req HELD (mimics the core's S_FETCH 4-word burst): advance
   // c_addr on each c_ack, NEVER dropping c_req. do_read drops c_req between reads, so it
@@ -184,6 +613,48 @@ module tb_l1d;
     for (logic [31:0] a=0; a<32'h4400; a+=4)
       {mem[a+3],mem[a+2],mem[a+1],mem[a+0]} = a ^ 32'hA5A5_0000;
     repeat(4) @(posedge clk); rst_n<=1'b1; @(posedge clk);
+
+    $display("[0] critical word returns from the first cache-fill beat while the tail drains");
+    do_critical_fill_response(32'h0000_3f14, 32'h0000_3f14 ^ 32'hA5A5_0000);
+
+    $display("[0a] critical response remains request-owned when the core retargets");
+    do_critical_retarget(32'h0000_3e14, 32'h0000_3d0c,
+                         32'h0000_3d0c ^ 32'hA5A5_0000);
+
+`ifdef VEN_L1D_HIT_UNDER_FILL
+    $display("[0aa] independent resident hit completes while a critical-word fill drains");
+    do_hit_under_fill(32'h0000_1424, 32'h0000_0814,
+                      32'h0000_1424 ^ 32'hA5A5_0000,
+                      32'h0000_0814 ^ 32'hA5A5_0000);
+
+    $display("[0ab] a snoop at the admitted-hit edge rejects stale data and refills");
+    do_hit_under_fill_snoop(32'h0000_1a24, 32'h0000_0c14, 32'h5A5A_0C14);
+`endif
+
+`ifdef VEN_L1D_FILL_FORWARD
+    $display("[0ac] a returned word is served through the registered path while its line fill drains");
+    do_fill_forward(32'h0000_2620, 32'h0000_262c,
+                    32'h0000_2620 ^ 32'hA5A5_0000,
+                    32'h0000_262c ^ 32'hA5A5_0000);
+
+    $display("[0ad] a same-line snoop poisons a would-be fill-forward response");
+    do_fill_forward_snoop(32'h0000_2820, 32'h0000_282c,
+                          32'h0000_282c ^ 32'hA5A5_0000);
+
+    $display("[0ae] unaligned dwords must not forward a missing next word");
+    // Each request begins in word 3 and also consumes word 4. A valid bit for
+    // word 3 alone cannot authorize the captured four-byte window. Fresh lines
+    // avoid an ordinary resident hit masking the optional fill-forward path.
+    for (int off = 1; off <= 3; off++) begin
+      do_fill_forward(32'h0000_2a00 + 32'(off*32),
+                      32'h0000_2a0c + 32'(off*32+off),
+                      rd32(32'h0000_2a00 + 32'(off*32)),
+                      rd32(32'h0000_2a0c + 32'(off*32+off)), 1'b0);
+    end
+`endif
+
+    $display("[0b] final cache-fill response uses the registered window without a settle bubble");
+    do_final_fill_response(32'h0000_3b1c, 32'h0000_3b1c ^ 32'hA5A5_0000);
 
     $display("[1] cold read -> miss -> line fill -> hit");
     do_read(32'h0000_1004, d); chk("read 0x1004", d, 32'h1004 ^ 32'hA5A5_0000);

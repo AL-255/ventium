@@ -31,6 +31,23 @@ run_one() {  # <sets> [extra-defines] [label]
 
 run_one 128
 run_one 64
+# The default policy keeps fills fully serialized.  The opt-in candidate must
+# prove that a resident, different-set hit uses the existing registered read
+# path while the active fill continues to own every backing beat.
+run_one 128 "-DVEN_L1D_HIT_UNDER_FILL" "HIT_UNDER_FILL"
+run_one 64  "-DVEN_L1D_HIT_UNDER_FILL" "HIT_UNDER_FILL"
+# Same-line fill-forward is deliberately a separate opt-in from the resident
+# different-set HUF path.  It may use only physical words already returned by
+# the active WRAP fill, must retain the registered response timing, and must
+# suppress that response when a snoop poisons the transaction.
+run_one 128 "-DVEN_L1D_FILL_FORWARD" "FILL_FORWARD"
+run_one 64  "-DVEN_L1D_FILL_FORWARD" "FILL_FORWARD"
+# The two opt-ins use the same registered capture window but distinct access
+# domains (other resident set vs. already-arrived word of the filling line).
+# Exercise their conjunction explicitly so a future predicate refactor cannot
+# accidentally make one path steal or duplicate the other's response.
+run_one 128 "-DVEN_L1D_HIT_UNDER_FILL -DVEN_L1D_FILL_FORWARD" "HUF_PLUS_FILL_FORWARD"
+run_one 64  "-DVEN_L1D_HIT_UNDER_FILL -DVEN_L1D_FILL_FORWARD" "HUF_PLUS_FILL_FORWARD"
 # REVIEW1_Aug2 H-07: the finding lives in the VEN_L1_HONOR_CD build -- that is the
 # configuration where BYPASS_RD_EN was 0 and a non-cacheable read of a resident line
 # was served from the ARRAY (stale post-CD data; for MMIO, duplicated or suppressed

@@ -29,6 +29,7 @@ module tb_icache_snoop;
   logic tch0_en=0, tch1_en=0, tch2_en=0; logic [IDXW-1:0] tch0_set=0, tch1_set=0, tch2_set=0;
   logic [TAGW-1:0] tch0_tag=0, tch1_tag=0, tch2_tag=0;
   logic        snoop_inv_valid=0; logic [31:0] snoop_inv_addr=0;
+  logic        flush_all=0;
   logic        fill_nocache=0;   // REVIEW2 H-17
 
   icache #(.IC_SETS(IC_SETS), .IC_LINE(IC_LINE), .IC_WAYS(IC_WAYS)) dut (
@@ -55,7 +56,7 @@ module tb_icache_snoop;
       .snoop_inv_valid2(1'b0), .snoop_inv_addr2(32'd0),
       // REVIEW_Jul29 H-12 added a global-invalidate port; this TB exercises the
       // per-line snoop path only, so tie it off rather than leave it floating.
-      .flush_all(1'b0));
+      .flush_all(flush_all));
 
   int errors=0;
   task automatic chk(input string what, input logic got, exp);
@@ -139,6 +140,70 @@ module tb_icache_snoop;
     fill_en<=0; fill_done<=0; fill_nocache<=1'b0;
     @(posedge clk); #1;
     chk("mid-fill nocache left set0/way1 INVALID", ic_val_o[0][1], 1'b0);
+
+    // A fill is not guaranteed to return one word every clock.  The allocation
+    // slot remains invalid during an inter-ACK gap, so an ordinary valid-bit
+    // snoop cannot see it.  Both a matching snoop and a global executable flush
+    // must remain poisonous until the final returned word.
+    $display("[9] matching snoop in an inter-word fill gap -> final allocation stays INVALID");
+    @(negedge clk);
+    fill_en<=1; fill_set<=IDXW'(1); fill_way<=1'b0; fill_off<=5'd0;
+    fill_data<=32'hCAFE_0000; fill_done<=0;
+    fill_tag<=TAGW'(32'h0000_0020 >> (5+IDXW));
+    fill_ptag<=TAGW'(32'h0000_0020 >> (5+IDXW)); fill_nocache<=0;
+    @(negedge clk);
+    fill_en<=0; fill_done<=0; snoop_inv_valid<=1; snoop_inv_addr<=32'h0000_0020;
+    @(negedge clk);
+    snoop_inv_valid<=0; fill_en<=1; fill_set<=IDXW'(1); fill_way<=1'b0; fill_off<=5'd28;
+    fill_data<=32'hCAFE_0007; fill_done<=1;
+    fill_tag<=TAGW'(32'h0000_0020 >> (5+IDXW));
+    fill_ptag<=TAGW'(32'h0000_0020 >> (5+IDXW));
+    @(negedge clk); fill_en<=0; fill_done<=0;
+    @(posedge clk); #1;
+    chk("gap-snooped set1/way0 INVALID", ic_val_o[1][0], 1'b0);
+
+    $display("[10] global flush in an inter-word fill gap -> final allocation stays INVALID");
+    @(negedge clk);
+    fill_en<=1; fill_set<=IDXW'(2); fill_way<=1'b0; fill_off<=5'd0;
+    fill_data<=32'hD00D_0000; fill_done<=0;
+    fill_tag<=TAGW'(32'h0000_0040 >> (5+IDXW));
+    fill_ptag<=TAGW'(32'h0000_0040 >> (5+IDXW)); fill_nocache<=0;
+    @(negedge clk);
+    fill_en<=0; fill_done<=0; flush_all<=1;
+    @(negedge clk);
+    flush_all<=0; fill_en<=1; fill_set<=IDXW'(2); fill_way<=1'b0; fill_off<=5'd28;
+    fill_data<=32'hD00D_0007; fill_done<=1;
+    fill_tag<=TAGW'(32'h0000_0040 >> (5+IDXW));
+    fill_ptag<=TAGW'(32'h0000_0040 >> (5+IDXW));
+    @(negedge clk); fill_en<=0; fill_done<=0;
+    @(posedge clk); #1;
+    chk("gap-flushed set2/way0 INVALID", ic_val_o[2][0], 1'b0);
+
+    // The production fetch protocol returns eight words, but the icache is a
+    // generic per-word interface.  A one-word fill has no pre-edge transaction
+    // identity on its allocation clock, so it must use the live fill-line
+    // comparator; a clean one-word control also proves stale prior poison is
+    // not spuriously carried into the new allocation.
+    $display("[11] matching snoop on a one-word fill -> allocation stays INVALID");
+    @(negedge clk);
+    fill_en<=1; fill_set<=IDXW'(3); fill_way<=1'b0; fill_off<=5'd0;
+    fill_data<=32'hFACE_0000; fill_done<=1;
+    fill_tag<=TAGW'(32'h0000_0060 >> (5+IDXW));
+    fill_ptag<=TAGW'(32'h0000_0060 >> (5+IDXW));
+    snoop_inv_valid<=1; snoop_inv_addr<=32'h0000_0060;
+    @(negedge clk); fill_en<=0; fill_done<=0; snoop_inv_valid<=0;
+    @(posedge clk); #1;
+    chk("one-word snooped set3/way0 INVALID", ic_val_o[3][0], 1'b0);
+
+    $display("[12] clean one-word fill -> allocation is VALID");
+    @(negedge clk);
+    fill_en<=1; fill_set<=IDXW'(4); fill_way<=1'b0; fill_off<=5'd0;
+    fill_data<=32'hFACE_0001; fill_done<=1;
+    fill_tag<=TAGW'(32'h0000_0080 >> (5+IDXW));
+    fill_ptag<=TAGW'(32'h0000_0080 >> (5+IDXW));
+    @(negedge clk); fill_en<=0; fill_done<=0;
+    @(posedge clk); #1;
+    chk("one-word clean set4/way0 VALID", ic_val_o[4][0], 1'b1);
 
     // [COV] full breadth sweep: fill EVERY set x way with walking-bit data + diverse
     //       tags, read every line, touch diverse (age/LRU), then snoop-invalidate all

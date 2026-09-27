@@ -13,7 +13,12 @@ module tb_l1d;
   logic [31:0] m_rdata; logic m_ack;
   logic        cacheable;
 
-  ven_l1d dut (.clk, .rst_n, .flush_all(1'b0), .golden(1'b0),
+  ven_l1d dut (
+`ifdef VEN_PIPE_MEM_CHAIN
+      .c_next_req(1'b0), .c_next_commit(1'b0), .c_next_cacheable(1'b0),
+      .c_next_addr(32'd0), .c_next_wstrb(4'd0), .c_next_ready(),
+`endif
+.clk, .rst_n, .flush_all(1'b0), .golden(1'b0),
     .cacheable(cacheable), .snoop_inv_valid(1'b0), .snoop_inv_addr(32'd0),
     .c_req, .c_we, .c_addr, .c_wdata, .c_wstrb, .c_rdata, .c_ack, .dbg_serve,
     .m_req, .m_we, .m_addr, .m_wdata, .m_wstrb, .m_rdata, .m_ack);

@@ -114,10 +114,15 @@ module route_harness #(
 
   ventium_l1_axi #(.ADDR_W(ADDR_W), .REMAP_BASE(REMAP_BASE), .ADDR_MASK(ADDR_MASK),
                    .NB_DRAMC(NB_DRAMC_P), .NB_PAM(NB_PAM_P)) dut (
+`ifdef VEN_PIPE_MEM_CHAIN
+      .core_next_req(1'b0), .core_next_commit(1'b0),
+      .core_next_addr(32'd0), .core_next_wstrb(4'd0), .core_next_ready(),
+`endif
+
       .core_clk(core_clk), .core_rst_n(core_rst_n), .axi_clk(axi_clk), .axi_rst_n(axi_rst_n),
       .flush_all(flush), .golden_l1(1'b0), .shutdown(1'b0), .m_idle(m_idle),
       .core_req(c_req), .core_we(c_we), .core_addr(c_addr), .smm_active(1'b0),
-      .smbase(32'h0003_0000), .smm_flush_o(), .core_lock(1'b0), .core_lin(c_addr), .core_wdata(c_wdata),
+      .smbase(32'h0003_0000), .smm_flush_o(), .core_lock(1'b0), .core_lock_hold(1'b0), .core_lin(c_addr), .core_wdata(c_wdata),
       .core_wstrb(c_wstrb), .core_rdata(c_rdata), .core_ack(c_ack),
       .core_ic_nocache (ic_nocache_unused), .bus_err(bus_err), .cr0_cd(CD_P),
       .m_axi_awid(awid), .m_axi_awaddr(awaddr), .m_axi_awlen(awlen), .m_axi_awsize(awsize),
@@ -151,12 +156,14 @@ module route_harness #(
   // read is up to three single-beat pieces; a fill's priming pair is identical).
   logic [ADDR_W-1:0] mon_araddr, mon_araddr2, mon_araddr3;
   logic [7:0]        mon_arlen;
+  logic [1:0]        mon_arburst;
   logic [2:0]        mon_arsize, mon_arsize2, mon_arsize3;
   always @(posedge axi_clk)
     if (arvalid && arready) begin
       mon_araddr3 <= mon_araddr2; mon_arsize3 <= mon_arsize2;
       mon_araddr2 <= mon_araddr;  mon_arsize2 <= mon_arsize;
       mon_araddr <= araddr; mon_arlen <= arlen; mon_arsize <= arsize;
+      mon_arburst <= arburst;
     end
 
   // AW shape monitor: a core store is one single-beat write, or two when its
@@ -191,7 +198,9 @@ module route_harness #(
       if (c_ack) begin d = c_rdata; break; end
       if (++guard > 5000) begin $display("  FAIL [%s] read %08x: no ack", TAG, a); errs++; d=32'hx; break; end
     end
-    @(negedge core_clk); c_req<=1'b0; c_wstrb<=4'd0;
+    // After completion the producer may expose an unrelated/unmapped address.
+    // Critical-word-first fills can still be issuing backing requests here.
+    @(negedge core_clk); c_req<=1'b0; c_wstrb<=4'd0; c_addr<=32'h5000_0004;
   endtask
 
   task automatic do_read(input logic [31:0] a, output logic [31:0] d);
@@ -209,7 +218,7 @@ module route_harness #(
       if (c_ack) break;
       if (++guard > 5000) begin $display("  FAIL [%s] write %08x: no ack", TAG, a); errs++; break; end
     end
-    @(negedge core_clk); c_req<=1'b0; c_we<=1'b0; c_wstrb<=4'd0;
+    @(negedge core_clk); c_req<=1'b0; c_we<=1'b0; c_wstrb<=4'd0; c_addr<=32'h5000_0004;
   endtask
 
   // Stores are acknowledged at P54C queue admission, not at external AXI
@@ -250,7 +259,11 @@ module route_harness #(
     chk({what, " data"},               64'(d & msk),          64'(exp_data));
     chk({what, ": fill ARs"},          64'(ar_count - ar0),   64'd2);
     chk({what, ": fill ARLEN"},        64'(mon_arlen),        64'd7);
-    chk({what, ": fill ARADDR (line)"},64'(mon_araddr),       64'(exp_line));
+    // Critical-word-first fills start at the requested word, then WRAP within
+    // the same line. A line-base INCR expectation predates that implementation.
+    chk({what, ": fill ARADDR (critical word)"}, 64'(mon_araddr),
+        64'(exp_line + {35'd0, a[4:2], 2'b00}));
+    chk({what, ": fill burst"}, 64'(mon_arburst), a[4:2] == 0 ? 64'd1 : 64'd2);
     ar0 = ar_count;
     do_read_be(a, be, d);
     chk({what, ": re-read data"},      64'(d & msk),          64'(exp_data));
@@ -613,10 +626,15 @@ module r6_harness #(
 
   ventium_l1_axi #(.ADDR_W(ADDR_W), .REMAP_BASE(REMAP_BASE), .ADDR_MASK(ADDR_MASK_P),
                    .NB_DRAMC(NB_DRAMC_P), .NB_TOM_MB4(NB_TOM_MB4_P)) dut (
+`ifdef VEN_PIPE_MEM_CHAIN
+      .core_next_req(1'b0), .core_next_commit(1'b0),
+      .core_next_addr(32'd0), .core_next_wstrb(4'd0), .core_next_ready(),
+`endif
+
       .core_clk(core_clk), .core_rst_n(core_rst_n), .axi_clk(axi_clk), .axi_rst_n(axi_rst_n),
       .flush_all(flush), .golden_l1(1'b0), .shutdown(1'b0), .m_idle(m_idle),
       .core_req(c_req), .core_we(c_we), .core_addr(c_addr), .smm_active(1'b0),
-      .smbase(32'h0003_0000), .smm_flush_o(), .core_lock(1'b0), .core_lin(c_addr), .core_wdata(c_wdata),
+      .smbase(32'h0003_0000), .smm_flush_o(), .core_lock(1'b0), .core_lock_hold(1'b0), .core_lin(c_addr), .core_wdata(c_wdata),
       .core_wstrb(c_wstrb), .core_rdata(c_rdata), .core_ack(c_ack),
       .core_ic_nocache (ic_nocache_unused), .bus_err(bus_err), .cr0_cd(1'b0),
       .m_axi_awid(awid), .m_axi_awaddr(awaddr), .m_axi_awlen(awlen), .m_axi_awsize(awsize),
@@ -635,6 +653,7 @@ module r6_harness #(
   logic [31:0] ar_count;
   logic [ADDR_W-1:0] mon_araddr, mon_araddr2, mon_araddr3;
   logic [7:0] mon_arlen;
+  logic [1:0] mon_arburst;
   logic [2:0] mon_arsize, mon_arsize2, mon_arsize3;
   typedef enum logic [0:0] {R_IDLE, R_BEAT} rstate_e;
   rstate_e rs; logic [7:0] beats; logic [ADDR_W-1:0] r_addr; logic [3:0] r_id;
@@ -654,13 +673,14 @@ module r6_harness #(
     if (!axi_rst_n) begin
       rs <= R_IDLE; beats <= 8'd0; r_addr <= '0; r_id <= '0;
       ar_count <= 32'd0; mon_araddr <= '0; mon_araddr2 <= '0; mon_araddr3 <= '0;
-      mon_arlen <= '0; mon_arsize <= '0; mon_arsize2 <= '0; mon_arsize3 <= '0;
+      mon_arlen <= '0; mon_arburst <= '0; mon_arsize <= '0; mon_arsize2 <= '0; mon_arsize3 <= '0;
     end else begin
       case (rs)
         R_IDLE: if (arvalid) begin
           mon_araddr3 <= mon_araddr2; mon_arsize3 <= mon_arsize2;
           mon_araddr2 <= mon_araddr;  mon_arsize2 <= mon_arsize;
           mon_araddr <= araddr; mon_arlen <= arlen; mon_arsize <= arsize;
+          mon_arburst <= arburst;
           ar_count   <= ar_count + 32'd1;
           r_addr     <= araddr; beats <= arlen + 8'd1; r_id <= arid;
           rs         <= R_BEAT;
@@ -896,7 +916,8 @@ module r6_harness #(
       chk("tom-lo byte  rd data", 64'(d & 32'hFF), 64'h25);
       chk("tom-lo byte  rd: fill ARs", 64'(ar_count - ar0), 64'd2);
       chk("tom-lo byte  rd: fill ARLEN", 64'(mon_arlen), 64'd7);
-      chk("tom-lo byte  rd: fill ARADDR (line)", 64'(mon_araddr), 64'(REMAP_BASE + 40'h3FBFFFE0));
+      chk("tom-lo byte  rd: fill ARADDR (critical word)", 64'(mon_araddr), 64'(REMAP_BASE + 40'h3FBFFFFC));
+      chk("tom-lo byte  rd: WRAP8", 64'(mon_arburst), 64'd2);
       ar0 = ar_count; do_read_be(32'h3FBF_FFFE, 4'h3, d);
       chk("tom-lo word  rd data", 64'(d & 32'hFFFF), 64'h25E5);
       chk("tom-lo word  rd: hit, no AR", 64'(ar_count - ar0), 64'd0);
@@ -1023,7 +1044,8 @@ module r6_harness #(
       chk("kv tom-lo byte  rd data", 64'(d & 32'hFF), 64'h14);
       chk("kv tom-lo byte  rd: fill ARs", 64'(ar_count - ar0), 64'd2);
       chk("kv tom-lo byte  rd: fill ARLEN", 64'(mon_arlen), 64'd7);
-      chk("kv tom-lo byte  rd: fill ARADDR (line)", 64'(mon_araddr), 64'(REMAP_BASE + 40'h0EFFFFE0));
+      chk("kv tom-lo byte  rd: fill ARADDR (critical word)", 64'(mon_araddr), 64'(REMAP_BASE + 40'h0EFFFFFC));
+      chk("kv tom-lo byte  rd: WRAP8", 64'(mon_arburst), 64'd2);
       ar0 = ar_count; do_read_be(32'h0EFF_FFFE, 4'h3, d);
       chk("kv tom-lo word  rd data", 64'(d & 32'hFFFF), 64'h14A5);
       chk("kv tom-lo word  rd: hit, no AR", 64'(ar_count - ar0), 64'd0);

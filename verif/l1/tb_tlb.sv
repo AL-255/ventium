@@ -17,6 +17,10 @@ module tb_tlb;
   int errors = 0;
 
   tlb #(.IS_D(1), .TLB_ENTRIES(N)) dut (
+`ifdef VEN_PIPE_MEM_CHAIN
+      .next_lin(32'd0), .next_hit(), .next_phys(), .next_perm(), .next_dirty(),
+`endif
+
       .clk, .rst_n, .lk_lin, .lk_hit, .lk_phys, .lk_perm, .lk_dirty,
       .fill_en, .fill_lin, .fill_pfn, .fill_perm, .fill_big, .fill_dirty, .flush_en);
 

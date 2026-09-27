@@ -11,10 +11,20 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 OBJ="$(mktemp -d)"
 trap 'rm -rf "$OBJ"' EXIT
 
+# Keep the default regression byte-identical while allowing a candidate cache
+# policy to be compiled through the real AXI seam (for example,
+# VL_EXTRA_DEFINES='-DVEN_L1D_HIT_UNDER_FILL').  These are Verilator options,
+# deliberately separate from the RTL +define+ strings used by Make targets.
+EXTRA_DEFINES=()
+if [[ -n "${VL_EXTRA_DEFINES:-}" ]]; then
+    read -r -a EXTRA_DEFINES <<<"${VL_EXTRA_DEFINES}"
+fi
+
 # NOTE: deliberately NO blanket -Wno-WIDTH — that would mask a remap-adder
 # truncation class. Targeted lint_off WIDTH lives in the RTL on known-safe nets.
 verilator -j "${VL_J:-1}" --binary -sv --assert -Wno-UNUSED -Wno-DECLFILENAME \
     -Wno-INITIALDLY -Wno-IMPLICITSTATIC --top-module tb_l1_axi -Mdir "$OBJ" -o tb_l1_axi \
+    "${EXTRA_DEFINES[@]}" \
     "$ROOT/rtl/mem/ven_l1d.sv" "$ROOT/rtl/mem/ven_axi_master.sv" \
     "$ROOT/rtl/northbridge/ven_cachemap.sv" "$ROOT/rtl/mem/ventium_l1_axi.sv" "$ROOT/verif/l1/axi_slave_bfm.sv" \
     "$ROOT/verif/l1/tb_l1_axi.sv" > "$OBJ/build.log" 2>&1 \

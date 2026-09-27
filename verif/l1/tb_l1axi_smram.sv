@@ -59,10 +59,15 @@ module tb_l1axi_smram;
   logic        smm_flush_w;
   ventium_l1_axi #(.ADDR_W(ADDR_W), .REMAP_BASE(40'h0), .ADDR_MASK(32'h0FFF_FFFF),
                    .WATCHDOG(1024), .NB_SMRAM(8'h08)) dut (
+`ifdef VEN_PIPE_MEM_CHAIN
+      .core_next_req(1'b0), .core_next_commit(1'b0),
+      .core_next_addr(32'd0), .core_next_wstrb(4'd0), .core_next_ready(),
+`endif
+
       .core_clk(clk), .core_rst_n(rst_n), .axi_clk(clk), .axi_rst_n(rst_n),
       .flush_all(1'b0), .golden_l1(golden_r), .shutdown(1'b0), .m_idle(),
       .core_req(c_req), .core_we(c_we), .core_addr(c_addr), .smm_active(smm_active),
-      .smbase(smbase_r), .smm_flush_o(smm_flush_w), /* C-10 */ .core_lock(1'b0),   // REVIEW2_aug2 C-08: the core's ACTUAL default SMBASE
+      .smbase(smbase_r), .smm_flush_o(smm_flush_w), /* C-10 */ .core_lock(1'b0), .core_lock_hold(1'b0),   // REVIEW2_aug2 C-08: the core's ACTUAL default SMBASE
       .core_lin(c_addr), .core_wdata(c_wdata),
       .core_wstrb(c_wstrb), .core_rdata(c_rdata), .core_ack(c_ack),
       // REVIEW2_aug2 H-13: the I-side memory type. Not exercised by this
