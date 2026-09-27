@@ -719,9 +719,16 @@ and the gated M4/M5 cycle bands; the default system-mode suite and five-profile
 lint matrix pass as well. The first full-PC opt-in build used the conservative
 Makefile profile, not the measured gameplay profile, so its cold run was stopped
 and its rejected cross-build restore is not performance evidence. A build with
-the source-matched gameplay define set plus `VEN_FAST_ROR_IMM` is underway;
-checkpoint compatibility and gameplay IPC remain unmeasured for it. No FPGA
-area/timing or Win95 acceptance has been claimed for the opt-in flag.
+the source-matched gameplay define set plus `VEN_FAST_ROR_IMM` and its flag-off
+control have completed. Their generated define sets differ only by that one
+flag; both use the same archived BIOS ROMs and byte-identical private copies
+of the Quake or Win95 boot disk. At 100M Quake startup clocks, both report
+exactly 32,406,406 retirements and byte-identical `[VEN-PERF]` lines. At 50M
+Win95 startup clocks, both also have byte-identical profiler lines. These are
+startup checks, not gameplay or desktop acceptance. The generated native
+snapshot serializers differ, so a cross-build restore is invalid; independent
+cold runs are underway. Current-build gameplay IPC, FPGA area/timing and Win95
+desktop acceptance remain unmeasured for the opt-in flag.
 
 ### Frontend map-hole incidence in the representative suffix
 
