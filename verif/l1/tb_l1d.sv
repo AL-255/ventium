@@ -534,6 +534,77 @@ module tb_l1d;
   endtask
 `endif
 
+`ifdef VEN_L1D_HIT_UNDER_FILL
+`ifdef VEN_L1D_FILL_FORWARD
+  // Interleave the two opt-in read paths during ONE fill.  Each path alone can
+  // pass while the shared registered response owner is accidentally reused
+  // across a different-set resident hit and a same-line returned-word read.
+  task automatic do_huf_forward_interleave(input logic [31:0] a, b);
+    int guard, reads_before;
+    do_read(b, d);
+    chk("interleave prime resident B", d, b ^ 32'hA5A5_0000);
+    while (dut.st != 2'd0) @(negedge clk);
+    if (a[11:5] == b[11:5]) begin
+      $display("  FAIL interleave: A/B alias a set"); errors++;
+    end
+    reads_before = rbeats;
+    @(negedge clk); c_req <= 1'b1; c_we <= 1'b0; c_addr <= a; c_wstrb <= 4'd0;
+    guard = 0;
+    forever begin
+      @(posedge clk); #1;
+      if (dut.early_armed && c_ack) begin
+        chk("interleave critical A", c_rdata, a ^ 32'hA5A5_0000);
+        break;
+      end
+      if (++guard > 80) begin
+        $display("  FAIL interleave: A critical response absent"); errors++; break;
+      end
+    end
+    @(negedge clk); c_addr <= b;
+    guard = 0;
+    forever begin
+      @(posedge clk); #1;
+      if (c_ack) begin
+        if (dut.st != 2'd1 || dut.early_armed) begin
+          $display("  FAIL interleave: B did not use resident hit-under-fill"); errors++;
+        end
+        chk("interleave resident B", c_rdata, b ^ 32'hA5A5_0000);
+        break;
+      end
+      if (++guard > 40) begin
+        $display("  FAIL interleave: resident B response absent"); errors++; break;
+      end
+    end
+    @(negedge clk); c_addr <= a + 32'd8;
+    guard = 0;
+    forever begin
+      @(posedge clk); #1;
+      if (c_ack) begin
+        if (dut.st != 2'd1 || dut.early_armed) begin
+          $display("  FAIL interleave: returned word not forwarded during fill"); errors++;
+        end
+        chk("interleave forwarded A+8", c_rdata, (a + 32'd8) ^ 32'hA5A5_0000);
+        break;
+      end
+      if (++guard > 40) begin
+        $display("  FAIL interleave: A+8 response absent"); errors++; break;
+      end
+    end
+    @(negedge clk); c_req <= 1'b0;
+    guard = 0;
+    while (dut.st != 2'd0) begin
+      @(posedge clk); #1;
+      if (++guard > 80) begin
+        $display("  FAIL interleave: fill tail did not drain"); errors++; break;
+      end
+    end
+    chk("interleave single backing fill", 32'(rbeats - reads_before), 32'd8);
+    do_read(a, d); chk("interleave final A", d, a ^ 32'hA5A5_0000);
+    do_read(b, d); chk("interleave final B", d, b ^ 32'hA5A5_0000);
+  endtask
+`endif
+`endif
+
   // back-to-back reads with c_req HELD (mimics the core's S_FETCH 4-word burst): advance
   // c_addr on each c_ack, NEVER dropping c_req. do_read drops c_req between reads, so it
   // misses the read-after-read protocol — exactly where a pipelined/1-cycle read FSM can
@@ -651,6 +722,13 @@ module tb_l1d;
                       rd32(32'h0000_2a00 + 32'(off*32)),
                       rd32(32'h0000_2a0c + 32'(off*32+off)), 1'b0);
     end
+`endif
+
+`ifdef VEN_L1D_HIT_UNDER_FILL
+`ifdef VEN_L1D_FILL_FORWARD
+    $display("[0af] resident-hit and returned-word forwarding share one fill safely");
+    do_huf_forward_interleave(32'h0000_36a0, 32'h0000_0834);
+`endif
 `endif
 
     $display("[0b] final cache-fill response uses the registered window without a settle bubble");

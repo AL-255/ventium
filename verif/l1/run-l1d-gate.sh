@@ -5,6 +5,9 @@
 # write-through, 2-way LRU eviction). Run from the repo root.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+if ! "$ROOT/tools/build_scope.sh" --is-active; then
+  exec "$ROOT/tools/build_scope.sh" -- bash "$0" "$@"
+fi
 OBJ="$(mktemp -d)"
 trap 'rm -rf "$OBJ"' EXIT
 
@@ -48,6 +51,16 @@ run_one 64  "-DVEN_L1D_FILL_FORWARD" "FILL_FORWARD"
 # accidentally make one path steal or duplicate the other's response.
 run_one 128 "-DVEN_L1D_HIT_UNDER_FILL -DVEN_L1D_FILL_FORWARD" "HUF_PLUS_FILL_FORWARD"
 run_one 64  "-DVEN_L1D_HIT_UNDER_FILL -DVEN_L1D_FILL_FORWARD" "HUF_PLUS_FILL_FORWARD"
+# The full-PC candidate also preserves complete resident windows across
+# unrelated stores. Exercise all three policies together at both geometries;
+# the standalone window-keep suite covers its more targeted store races.
+run_one 128 "-DVEN_L1D_HIT_UNDER_FILL -DVEN_L1D_FILL_FORWARD -DVEN_L1D_WINDOW_REUSE -DVEN_L1D_WINDOW_KEEP_STORE" "HUF_FF_KEEP_STORE"
+run_one 64  "-DVEN_L1D_HIT_UNDER_FILL -DVEN_L1D_FILL_FORWARD -DVEN_L1D_WINDOW_REUSE -DVEN_L1D_WINDOW_KEEP_STORE" "HUF_FF_KEEP_STORE"
+# Full-PC gameplay also enables tag-selective store invalidation.  Verify that
+# exact policy conjunction separately; the non-tagged configuration is retained
+# because it has materially different replacement/invalidation behavior.
+run_one 128 "-DVEN_L1D_HIT_UNDER_FILL -DVEN_L1D_FILL_FORWARD -DVEN_L1D_WINDOW_REUSE -DVEN_L1D_WINDOW_KEEP_STORE -DVEN_L1D_TAG_INVALIDATE" "HUF_FF_KEEP_STORE_TAG"
+run_one 64  "-DVEN_L1D_HIT_UNDER_FILL -DVEN_L1D_FILL_FORWARD -DVEN_L1D_WINDOW_REUSE -DVEN_L1D_WINDOW_KEEP_STORE -DVEN_L1D_TAG_INVALIDATE" "HUF_FF_KEEP_STORE_TAG"
 # REVIEW1_Aug2 H-07: the finding lives in the VEN_L1_HONOR_CD build -- that is the
 # configuration where BYPASS_RD_EN was 0 and a non-cacheable read of a resident line
 # was served from the ARRAY (stale post-CD data; for MMIO, duplicated or suppressed

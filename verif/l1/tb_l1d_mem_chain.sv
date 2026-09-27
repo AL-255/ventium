@@ -121,17 +121,31 @@ module tb_l1d_mem_chain;
     do begin @(posedge clk); if(c_next_ready) $fatal(1,"store accepted next read"); end while(!c_ack);
     @(negedge clk); c_req=0; c_we=0; c_next_req=0; c_next_commit=0;
     read_at('h1000);
+`ifdef VEN_L1D_WINDOW_REUSE
+    // A second read of the same line can complete directly from the saved
+    // window, without creating the rd_match owner this chain fixture needs.
+    // Touch an unrelated resident line first so arm_old checks the registered
+    // response path in both policy configurations.
+    read_at('h2020);
+`endif
     arm_old('h1000);
     c_next_req=1; c_next_commit=1; c_next_addr='h2020;
     snoop_inv_valid=1; snoop_inv_addr='h1000; mem['h1000]=8'h76;
     @(posedge clk); if(c_ack || c_next_ready) $fatal(1,"snoop-edge stale handoff");
     @(negedge clk); c_req=0; c_next_req=0; c_next_commit=0; snoop_inv_valid=0;
     read_at('h1000);
+`ifdef VEN_L1D_WINDOW_REUSE
+    read_at('h2020);
+`endif
     arm_old('h1000);
     c_next_req=1; c_next_commit=1; c_next_addr='h2020; flush_all=1;
     @(posedge clk); if(c_ack || c_next_ready) $fatal(1,"flush-edge handoff");
     @(negedge clk); c_req=0; c_next_req=0; c_next_commit=0; flush_all=0;
-    read_at('h1000); arm_old('h1000);
+    read_at('h1000);
+`ifdef VEN_L1D_WINDOW_REUSE
+    read_at('h2020);
+`endif
+    arm_old('h1000);
     @(negedge clk); rst_n=0;
     @(negedge clk); rst_n=1; c_req=0;
     if(dut.rd_armed) $fatal(1,"reset retained response");
