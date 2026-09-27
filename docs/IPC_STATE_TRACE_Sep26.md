@@ -528,3 +528,27 @@ operand acquisition matter more at this hotspot than code-fill eviction or a
 missing FILD converter. It does not justify a Quake-address prefetch rule: a
 general solution must preserve exact translation, cacheability, coherence,
 fault and MMIO behavior and be checked with a matched-work A/B run.
+
+### Page-bounded stride-prefetch scope check
+
+`tools/stride_prefetch_probe.py` replays *observed* physical-line miss events
+with a per-instruction-PC stride predictor. It predicts only after two equal
+nonzero strides, stays inside the source 4 KiB physical page, and credits a
+prediction only if a later data miss names exactly that line with at least 60
+cycles of lead time. This is a generous eligibility probe: it does **not**
+model bus availability, fill completion, cache replacement, stores, snoops,
+translation changes or a changed instruction schedule. In the 1.400–1.401B
+phase it credits 592 of 4,517 data misses (13.1%); in the REP-heavy
+1.150–1.151B phase it credits 1,765 of 7,729 (22.8%), 986 from `0x10574`
+alone. A prefetch request would itself occupy the single backing path and
+could hurt demand service, so these are not avoidable-miss counts.
+
+For perspective, the later 1M phase retired 629,115 instructions in 1M
+clocks. Fixed-work IPC >1 requires saving **more than 370,885 clocks**; even
+an illustrative 30-clock saving for every one of the 592 credited line
+matches would total only 17,760 clocks before interference. Stride prefetch
+may help a particular memory-bound phase, but it is not a standalone path to
+the requested gameplay IPC. The larger requirement is a general pipeline
+that overlaps independent work with cache and x87 latency while maintaining
+ordered retirement and precise exceptions; speculative prefetch alone does
+not provide that execution overlap.
