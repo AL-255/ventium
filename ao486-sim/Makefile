@@ -69,7 +69,8 @@ VEN_DEFS := +define+VEN_CORE +define+VEN_L1_AXI +define+VEN_L1_HONOR_CD \
   +define+VEN_DBG_CORE +define+VEN_SYS_FASTPATH +define+VEN_SYS_FASTPATH_RELOC \
   +define+VEN_SYS_FASTLOAD_FLAT +define+VEN_SYS_FASTLOAD_BOUNDED \
   +define+VEN_SYS_FASTSTORE_FLAT +define+VEN_FAST_MEM_ADD +define+VEN_FAST_MOFFS_STORE \
-  +define+VEN_FAST_RETRACE +define+VEN_KBD_AUTOACK \
+  +define+VEN_FAST_RETRACE +define+VEN_PIPE_MEM_CHAIN \
+  +define+VEN_PIPE_REG_LOAD_PRIME +define+VEN_KBD_AUTOACK \
   +define+VEN_KBC_FAST
 VEN_SRCS := ao486-sim/ven/sim_ven.cpp ao486-sim/ven/vtm_dpi.cpp \
   ao486-sim/ven/ven_ao486_shim.sv ao486-sim/ven/ven_axi2avalon.sv \
