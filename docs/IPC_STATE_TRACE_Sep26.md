@@ -569,10 +569,18 @@ match the analyzer's 8,647 and 5,070 actual demand misses:
 
 This is a capacity/reuse screen, **not** simulated L2 traffic, saved clocks or
 gameplay IPC. It omits stores, bypass/MMIO and other requesters, starts empty
-mid-gameplay, and does not model L2 latency, backpressure or overlap. The L2
-RTL is absent/disabled in this checkout. A general L2 could address a sizable
-fraction of the observed backing fills, but even perfect service of these
-particular hits cannot be counted as removed no-retirement edges without a
-transactional implementation and matched-work replay. It is another candidate
-alongside core/L1 request pipelining, not a replacement for that larger path
-to >1 IPC.
+mid-gameplay, and does not model L2 latency, backpressure or overlap. Crucially,
+the full-PC ao486 route **already includes an enabled 32 KiB, four-way,
+64-byte-line platform L2** (`system.v` → `l2_cache.v`; the simulator's
+`g_l2dis` defaults to zero and this capture did not pass `--l2dis`). Only the
+separate Ventium northbridge/L2 RTL is absent from this checkout. Thus the
+32 KiB column is a capacity analogue of an *existing* stage, not a predicted
+benefit from adding one. The control's 1.150B cold-run `[L2PERF]` record
+confirms live platform tag lookups (51,074,598 hits, 5,027,192 misses
+cumulatively across all requesters); those are not the one-million-cycle
+trace-model counts above. Raising the model from 32 to 256 KiB yields only 557
+and 278 additional hits in these respective million-cycle streams, before
+stores, replacement interference or changed scheduling. Do not duplicate the
+platform L2 as an IPC fix on this evidence. The larger remaining path is
+core/L1 request ownership and execution overlap, with any L2-capacity change
+requiring its own matched-work and hardware qualification.
