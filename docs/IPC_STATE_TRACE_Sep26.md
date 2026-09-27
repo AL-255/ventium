@@ -669,7 +669,8 @@ address RAW dependency, event/debug boundary, or busy response owner is a
 silent rejection with no backing request. The accepted load is captured as
 the ordinary memory packet, while its live checked translation (not the old
 chain's saved page) seeds the fast D-TLB page register. The feature is
-default-off and has **not** been enabled in a full-PC gameplay build.
+default-off. An opt-in full-PC candidate has been built; its gameplay result
+is pending.
 
 The source-matched flag-off and flag-on full-core L1/AXI testbenches are under
 `tmp/build-tmp/ventium-reg-prime-{control-,}tb-sep27/` (SHA256
@@ -706,3 +707,20 @@ a standalone route to >1 gameplay IPC. A targeted correctness-safe fix may
 still be worthwhile after a matched-work witness; its slow-fallback tail and
 interactions with memory and FP stalls require measurement, not raw-counter
 addition.
+
+The prior fairness build's 1.350–1.400B interval also spent **2,638,220**
+clocks in slow decode (5.28% of that window), including holds/retries; this is
+residency, not a recoverable-clock estimate. In the verified 1.400–1.401B
+full-state trace, EIPs `0x3e260`, `0x3e29f`, and `0x3e2a1` each have exactly
+1,980 uop-hole rows. Sampled rows have I-cache data ready but no usable
+boundary descriptor, including an instruction at physical-line offset 31.
+The boot disk's `QUAKE/QUAKE.EXE` has SHA256
+`7cdb244122cc607cc6f162524bfcac60f6d11d8ca2ff07473d6cd962311161fb`,
+identical to `tmp/quake.exe`; its embedded COFF `.text` mapping identifies
+these PCs as `ROR EAX,16`, `ADD EDX,EBP`, and a byte load, respectively. This
+is a reproducible dense-loop witness for directed map-repair tests, not a
+Quake-PC RTL special case or evidence that removing the holes saves 1,980
+clocks per instruction. Any general repair must still prove code-page
+permission, complete instruction extent, coherent invalidation, and bounded
+foreground progress, then pass the differential gate and matched-work IPC
+measurement.
