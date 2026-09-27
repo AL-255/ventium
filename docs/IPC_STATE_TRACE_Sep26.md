@@ -716,11 +716,12 @@ gate passes all 79 records with the opt-in testbench. This short directed
 speedup is **not** a gameplay IPC result. Both default and flag-on
 `make verify` pass all 105 QEMU functional programs
 and the gated M4/M5 cycle bands; the default system-mode suite and five-profile
-lint matrix pass as well. A full-PC opt-in build exists, but
-Verilator correctly rejects a restore of the older build's native checkpoint
-as a different saved model; a same-build cold-reset Quake measurement remains
-necessary and is underway. No FPGA area/timing or Win95 acceptance has been
-claimed for the opt-in flag.
+lint matrix pass as well. The first full-PC opt-in build used the conservative
+Makefile profile, not the measured gameplay profile, so its cold run was stopped
+and its rejected cross-build restore is not performance evidence. A build with
+the source-matched gameplay define set plus `VEN_FAST_ROR_IMM` is underway;
+checkpoint compatibility and gameplay IPC remain unmeasured for it. No FPGA
+area/timing or Win95 acceptance has been claimed for the opt-in flag.
 
 ### Frontend map-hole incidence in the representative suffix
 
