@@ -724,3 +724,19 @@ clocks per instruction. Any general repair must still prove code-page
 permission, complete instruction extent, coherent invalidation, and bounded
 foreground progress, then pass the differential gate and matched-work IPC
 measurement.
+
+The lossless state analyzer now emits `l1_read_wait_pc.tsv` and
+`memory_chain_pc.tsv`, partitioned by state/source and pre-edge offer owner,
+respectively. Their totals are checked against the existing L1/chain counters;
+the synthetic phase test and the same 1.400–1.401B million-cycle trace pass
+with exact reconstruction. In that trace, **91,666** S_PIPE data-read wait
+levels are idle registered-hit captures. **25,802** of them have post-edge
+EIPs in the dense `0x3e239`–`0x3e33e` code range (33 PC rows). The same range
+also has working lookahead: chain acceptance occurs 1,971 times with pre-edge
+PC `0x3e24a` and 1,975 times at `0x3e2a7`. Thus the recurring capture levels
+cannot all be attributed to a rejected load-to-load chain; other producer
+shapes and slow-path boundaries still need separate ownership checks. These
+are observed request-service levels, not unique instructions or recoverable
+clocks, and a post-edge EIP is not always the physical request owner. The
+opt-in register-load-prime candidate must be measured in gameplay before
+crediting any of these levels as an IPC improvement.

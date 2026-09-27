@@ -322,6 +322,13 @@ int main(int argc,char** argv) try {
     std::map<std::array<uint64_t,12>,uint64_t> edge_control;
     std::map<std::array<uint64_t,6>,uint64_t> edge_joint;
     std::map<std::array<uint64_t,6>,uint64_t> cache_backend;
+    // Request-service attribution at the post-edge PC. This is not always
+    // the architectural load owner (for example, a physical sequencer may
+    // drive the seam), so retain the state and I/D source alongside the PC.
+    std::map<std::array<uint64_t,4>,uint64_t> l1_read_wait_pc;
+    struct ChainPC { uint64_t prepare=0, offer=0, commit_offer=0, accept=0,
+                     prime_offer=0, prime_accept=0; };
+    std::map<uint32_t,ChainPC> chain_pc;
     std::ofstream uop_holes(std::string(argv[2])+".uop_holes.tsv");
     if(!uop_holes) throw std::runtime_error("uop hole output open");
     uop_holes<<"cycle\teip\tflin\toffset\tic_ready\tpd_valid\tboundary_valid\tcross_ready\tcross_sources_ready\tic_fb_avail\trepair_start\trepair_ready\tfill_start\tfill_pending\twalker_state\twalker_offset\twalker_slot\twalker_steps\twalker_repair\twalker_anchor\twalker_set\tprimary_valid\tprimary_set\tprimary_off\tindex_slot_valid\tindex_meta\n";
@@ -348,6 +355,15 @@ int main(int argc,char** argv) try {
         if(chain_prepare!=lookup.end()) totals["memory_chain_prepare_levels"]+=bool(scalar(chain_prepare->second));
         if(prime_accept!=lookup.end()) totals["register_load_prime_accept_edges"]+=bool(scalar(prime_accept->second));
         if(prime_offer!=lookup.end()) totals["register_load_prime_offer_levels"]+=bool(scalar(prime_offer->second));
+        auto& chain_row=chain_pc[uint32_t(scalar(pc_id))];
+        if(chain_prepare!=lookup.end()) chain_row.prepare+=bool(scalar(chain_prepare->second));
+        if(chain_offer!=lookup.end()) {
+            chain_row.offer+=bool(scalar(chain_offer->second));
+            chain_row.commit_offer+=bool(scalar(chain_offer->second) && scalar(commit_id));
+        }
+        if(chain_accept!=lookup.end()) chain_row.accept+=bool(scalar(chain_accept->second));
+        if(prime_offer!=lookup.end()) chain_row.prime_offer+=bool(scalar(prime_offer->second));
+        if(prime_accept!=lookup.end()) chain_row.prime_accept+=bool(scalar(prime_accept->second));
         if(chain_offer!=lookup.end() && scalar(chain_offer->second) && scalar(commit_id)) {
             ++totals["memory_chain_commit_offer_edges"];
             if(chain_next_ready!=lookup.end() && !scalar(chain_next_ready->second)) {
@@ -700,11 +716,14 @@ int main(int argc,char** argv) try {
         // instruction fetch and physical sequencers share this seam too.
         if(waiting_read) {
             ++totals["l1_read_wait_total"];
-            const char* category = scalar(l1state_id)!=0 ? "busy" :
-                !scalar(cacheable_id) ? "idle_uncacheable" :
-                scalar(flush_id) ? "idle_flush" :
-                !scalar(rd_hit_id) ? "idle_miss" :
-                scalar(capture_id) ? "idle_hit_capture" : "idle_hit_not_capturing";
+            const unsigned category_index = scalar(l1state_id)!=0 ? 0 :
+                !scalar(cacheable_id) ? 1 : scalar(flush_id) ? 2 :
+                !scalar(rd_hit_id) ? 3 : scalar(capture_id) ? 4 : 5;
+            constexpr const char* categories[] = {"busy", "idle_uncacheable",
+                "idle_flush", "idle_miss", "idle_hit_capture",
+                "idle_hit_not_capturing"};
+            const char* category = categories[category_index];
+            ++l1_read_wait_pc[{st,pc,uint64_t(bool(scalar(data_access_id))),category_index}];
             ++totals[std::string("l1_read_wait_")+category];
             ++totals[std::string("l1_read_wait_state_")+std::to_string(st)+"_"+category];
             // The core's retained translation selector distinguishes the
@@ -875,6 +894,43 @@ int main(int argc,char** argv) try {
         for(auto value:kv.first) backend<<value<<'\t';
         backend<<kv.second<<'\n';
     }
+    std::ofstream l1_pc(prefix+".l1_read_wait_pc.tsv");
+    if(!l1_pc) throw std::runtime_error("L1 read-wait PC report open");
+    l1_pc<<"state\tpost_eip\tdata_source\tcategory\tclocks\n";
+    constexpr const char* l1_categories[] = {"busy", "idle_uncacheable",
+        "idle_flush", "idle_miss", "idle_hit_capture",
+        "idle_hit_not_capturing"};
+    uint64_t l1_pc_total=0;
+    for(const auto& [key,clocks]:l1_read_wait_pc) {
+        l1_pc<<key[0]<<'\t'<<std::hex<<key[1]<<std::dec<<'\t'
+             <<key[2]<<'\t'<<l1_categories[key[3]]<<'\t'<<clocks<<'\n';
+        l1_pc_total+=clocks;
+    }
+    if(l1_pc_total!=totals["l1_read_wait_total"])
+        throw std::runtime_error("L1 read-wait PC partition mismatch");
+    std::ofstream chain_pc_out(prefix+".memory_chain_pc.tsv");
+    if(!chain_pc_out) throw std::runtime_error("memory-chain PC report open");
+    chain_pc_out<<"pre_eip\tprepare_levels\toffer_levels\tcommit_offers\taccept_edges\tprime_offer_levels\tprime_accept_edges\n";
+    ChainPC chain_totals{};
+    for(const auto& [pc,row]:chain_pc) {
+        chain_totals.prepare+=row.prepare;
+        chain_totals.offer+=row.offer;
+        chain_totals.commit_offer+=row.commit_offer;
+        chain_totals.accept+=row.accept;
+        chain_totals.prime_offer+=row.prime_offer;
+        chain_totals.prime_accept+=row.prime_accept;
+        if(row.prepare || row.offer || row.prime_offer)
+            chain_pc_out<<std::hex<<pc<<std::dec<<'\t'<<row.prepare<<'\t'
+                        <<row.offer<<'\t'<<row.commit_offer<<'\t'<<row.accept
+                        <<'\t'<<row.prime_offer<<'\t'<<row.prime_accept<<'\n';
+    }
+    if(chain_totals.prepare!=totals["memory_chain_prepare_levels"] ||
+       chain_totals.offer!=totals["memory_chain_offer_levels"] ||
+       chain_totals.commit_offer!=totals["memory_chain_commit_offer_edges"] ||
+       chain_totals.accept!=totals["memory_chain_accept_edges"] ||
+       chain_totals.prime_offer!=totals["register_load_prime_offer_levels"] ||
+       chain_totals.prime_accept!=totals["register_load_prime_accept_edges"])
+        throw std::runtime_error("memory-chain PC partition mismatch");
     std::ofstream miss_set_out(prefix+".miss_sets.tsv"), miss_line_out(prefix+".miss_lines.tsv");
     if(!miss_set_out || !miss_line_out) throw std::runtime_error("miss histogram output open");
     miss_set_out<<"set\tcode_misses\tdata_misses\tnext_rejects\ttotal\n";
