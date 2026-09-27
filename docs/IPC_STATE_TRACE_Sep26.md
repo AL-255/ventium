@@ -702,6 +702,26 @@ control already had different PCs and registers at absolute ordinal
 gameplay workload for these diverged executions, and their cycle difference
 at the stop target must not be reported as an IPC gain.
 
+### Compact rotate and opt-in immediate ROR
+
+The shared ROL/ROR helper has since been changed from a 32-stage conditional
+loop to bounded barrel shifts; a 3,072-case leaf test compares all 8/16/32-bit
+widths and counts 0–63 against the frozen loop. Separately,
+`VEN_FAST_ROR_IMM` optionally classifies 32-bit register `C1 /1` ROR as a
+simple packet while retaining its rotate-only CF/OF semantics. It is
+default-off. The expanded 79-instruction rotate test (including explicit
+`C1 /1` counts 0/1/32/33 and narrow rotates) takes 316 clocks flag-off and
+286 flag-on, with the same 79-PC retire sequence. The pinned-QEMU functional
+gate passes all 79 records with the opt-in testbench. This short directed
+speedup is **not** a gameplay IPC result. Both default and flag-on
+`make verify` pass all 105 QEMU functional programs
+and the gated M4/M5 cycle bands; the default system-mode suite and five-profile
+lint matrix pass as well. A full-PC opt-in build exists, but
+Verilator correctly rejects a restore of the older build's native checkpoint
+as a different saved model; a same-build cold-reset Quake measurement remains
+necessary and is underway. No FPGA area/timing or Win95 acceptance has been
+claimed for the opt-in flag.
+
 ### Frontend map-hole incidence in the representative suffix
 
 The fairness build's 1.350–1.400B `cpi_interval.py --uop-map` output reports

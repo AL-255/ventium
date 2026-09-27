@@ -5,5 +5,5 @@
   "image": "t_rotate/t_rotate.flat",
   "load_addr": "0x08048000",
   "entry": "0x08048000",
-  "max_insn": 68
+  "max_insn": 79
 }
