@@ -9,7 +9,8 @@
 # a cross-privilege interrupt frame whose FIRST push slot ends exactly at the
 # new stack segment's bound is legal in both frame widths (16-bit gate word
 # slots, 32-bit gate dword slots), both stack B bits, and expand-up +
-# expand-down forms, while one slot-width past the bound raises #SS(0)
+# expand-down forms, while one slot-width past the bound raises
+# #SS(staged-SS-selector) (software INT: EXT=0)
 # pre-commit (zero frame bytes). The segment-extent check is live only in
 # the +VEN_SEG_ENFORCE variant build, so the discrimination is graded per
 # build (the psmmmeta pattern):
@@ -18,11 +19,14 @@
 #                     not limit-check frame pushes, so every case delivers);
 #                     witnesses: all 16 cases delivered, zero faults.
 #   +VEN_SEG_ENFORCE: the 8 at-bound cases deliver, the 8 one-past cases
-#                     raise #SS(0) pre-commit; +ven_faultlog must show
-#                     exactly 8x vec=12 err=0.
+#                     raise #SS(staged-SS-selector) pre-commit; +ven_faultlog
+#                     must show two each of err=0x40/0x48/0x50/0x58.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
+if ! "$ROOT/tools/build_scope.sh" --is-active; then
+  exec "$ROOT/tools/build_scope.sh" -- bash "$0" "$@"
+fi
 SYS="$ROOT/verif/sys"
 REFS="$ROOT/ventium-refs/07-p5-emulation-harness"
 QSYS="$REFS/build/qemu/build-sys/qemu-system-i386"
@@ -99,7 +103,7 @@ assert H("edx") >> 16 == 0x600D, f"edx={last['edx']} != 0x600D.... (pass magic)"
 print(f"  canonical final record: edi=0x42 ebx=0xF5555 esi=0 ecx=0 ebp=0xAAAA ({len(recs)} records)")
 PYEOF
 
-# --- 4. +VEN_SEG_ENFORCE build: 8 deliver, 8 #SS(0) pre-commit -----------------
+# --- 4. +VEN_SEG_ENFORCE build: 8 deliver, 8 #SS(selector) pre-commit ----------
 SEG_OUT="$OUT/pintslim.rtl.seg.vtrace"
 SEG_FLOG="$OUT/pintslim.seg.faultlog"
 "$TB_SEG" --system --image "$T/pintslim.bin" --out "$SEG_OUT" \
@@ -120,10 +124,12 @@ assert H("edx") >> 16 == 0x600D, f"edx={last['edx']} != 0x600D.... (pass magic)"
 print(f"  +VEN_SEG_ENFORCE final record: edi=0x42 ebx=0xF5555 esi=0xAAAA ecx=0xAAAA ebp=0 ({len(recs)} records)")
 PYEOF
 
-SS0="$(grep -c 'vec=12 .*err=00000000' "$SEG_FLOG" || true)"
 TOT="$(grep -c 'vec=' "$SEG_FLOG" || true)"
-echo "  +VEN_SEG_ENFORCE fault log: #SS(0)=$SS0 (want 8: the one-past cases)  total=$TOT (want 8)"
-[[ "$SS0" == "8" ]] || { echo "PINTSLIM-GATE-FAIL (want exactly 8 #SS(0); see $SEG_FLOG)"; exit 1; }
+for SEL in 40 48 50 58; do
+  COUNT="$(grep -c "vec=12 err=000000$SEL " "$SEG_FLOG" || true)"
+  echo "  +VEN_SEG_ENFORCE #SS(0x$SEL): $COUNT (want 2)"
+  [[ "$COUNT" == "2" ]] || { echo "PINTSLIM-GATE-FAIL (wrong #SS selector 0x$SEL; see $SEG_FLOG)"; exit 1; }
+done
 [[ "$TOT" == "8" ]] || { echo "PINTSLIM-GATE-FAIL (unexpected other faults; see $SEG_FLOG)"; exit 1; }
 
 echo "PINTSLIM-GATE-OK"

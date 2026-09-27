@@ -42,19 +42,20 @@
  * the frame window, and invokes the gate through a per-vector stub. The
  * CPL0 handlers record the delivered frame (ESP + the CS/SP/SS slots) and
  * stamp the case slot 0xAA; under enforcement the probe instead raises
- * #SS(0) pre-commit, delivered to a CPL3 #SS handler through a DPL3 gate
+ * #SS(new-SS-selector) pre-commit, delivered to a CPL3 #SS handler through a DPL3 gate
  * (same-privilege frame on the USER stack -- the TSS stack is not involved,
  * so the faulting delivery cannot cascade), which stamps 0x55 after checking
- * err == 0 and the saved EIP == the int instruction, then resumes past it.
+ * err == the staged TSS.SS0 selector (RPL cleared) and the saved EIP == the
+ * int instruction, then resumes past it. A software INT has EXT=0.
  *
  * PER-BUILD EXPECTATIONS (asserted by run-pintslim-gate.sh):
  *   canonical + QEMU free-run : every case delivers (the limit check is
  *                               inert); esi (SS_SEEN) = 0, ebp (PAST_DLVR)
  *                               = 0xAAAA, ecx (SENTINEL intact) = 0.
  *   +VEN_SEG_ENFORCE          : the 8 at-bound cases deliver, the 8 past
- *                               cases #SS(0) pre-commit: esi = 0xAAAA,
+ *                               cases #SS(selector) pre-commit: esi = 0xAAAA,
  *                               ecx = 0xAAAA, ebp = 0, and +ven_faultlog
- *                               shows exactly 8x vec=12 err=0.
+ *                               shows two each of err=0x40/48/50/58.
  * Every build           : ebx (AT_OK | R-case bits) = 0x000F5555, edi = 0x42 (the
  *                               in-image self-checks all passed),
  *                               edx = 0x600D00F4.
@@ -522,14 +523,17 @@ i43: int $0x43
 
 /* ===================== ring-3 #SS handler (32-bit) ======================= *
  * Same-privilege frame on the user stack: [0]=err [4]=EIP [8]=CS
- * [12]=EFLAGS. The contract: err == 0 and the saved EIP is the int
+ * [12]=EFLAGS. The contract: err names the staged new SS selector (RPL
+ * cleared, EXT=0 for software INT) and the saved EIP is the int
  * instruction (the delivery restarts it). DS is still 0x2B (a same-priv
  * delivery nulls nothing). */
     .align 16
     .global h_ss
 h_ss:
     movl    $0xE5, %eax
-    cmpl    $0, 0(%esp)                /* error code 0 */
+    movl    4(%esi), %ecx              /* case_table SS0 selector */
+    andl    $0xFFFC, %ecx              /* selector error code, no EXT */
+    cmpl    %ecx, 0(%esp)
     jne     1f
     movl    CUR_EIP, %ecx
     cmpl    %ecx, 4(%esp)              /* saved EIP == the int instruction */
