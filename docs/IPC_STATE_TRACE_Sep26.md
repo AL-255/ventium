@@ -35,6 +35,13 @@ candidate passes the six-case
 FDIV/FSQRT × JMP/taken-Jcc/not-taken-Jcc QEMU differential/overlap gate,
 the 12-case integer/FP overlap gate, shared x87 stream/trap and delayed-#MF
 gates, default `make verify`, and five-profile `make lint`.
+The system-mode branch→INT3 variant now also passes the pinned-QEMU complete
+state comparison: 64 trap entries, 63 edge-aligned branches retiring while
+masked FP owners are busy, with the trap still draining all owners. The
+source-matched flag-off control has zero busy-FP branch retirements and fails
+the overlap witness as intended; the original plain and FXCH-queue stream
+variants still pass. This closes that directed trap-order corner, not all
+interrupt/debug/SMC cases.
 An additional private A/B replay from the same 1.100B snapshot compared the
 first 50,000 full-PC retirements by ordinal, PC, EFLAGS, all reported GPRs and
 segment selectors (ignoring only cycle stamps): all records matched exactly.
