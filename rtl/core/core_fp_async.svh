@@ -153,8 +153,12 @@ logic fp_async_fault_hold;
 `endif
 
   // Only resident, ordinary integer register packets may pass an unfinished
-  // result in this first experiment. Memory, stack, branch, slow decode, x87,
-  // invalidated code, debug and external events drain at the issue boundary.
+  // result by default. Memory, stack, branch, slow decode, x87, invalidated
+  // code, debug and external events drain at the issue boundary. The opt-in
+  // branch profile admits only the decoder's simple, non-memory, non-stack
+  // Jcc/JMP forms: they read integer flags, not x87 state, and have no data
+  // side effect. A later target fault/event still waits for the older FP
+  // owner through the existing fault and event gates.
   // Use raw descriptor properties, not pipe_int_commit/fsm_case_enabled:
   // those consume this hold and would create a combinational feedback loop.
   assign fp_async_hold = fp_async_pending &&
@@ -186,7 +190,10 @@ logic fp_async_fault_hold;
 `ifndef VEN_FP_ASYNC_MEM
        u_d.is_mem ||
 `endif
-       u_d.is_stack || u_d.is_branch ||
+       u_d.is_stack ||
+`ifndef VEN_FP_ASYNC_BRANCH
+       u_d.is_branch ||
+`endif
        fp_dbg_active || dbg_block_issue || smi_take || nmi_take || intr_take);
 
   // Keep this separate from the request/translation hold above: permission

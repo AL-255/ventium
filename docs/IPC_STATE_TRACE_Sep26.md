@@ -1,12 +1,31 @@
 # Gameplay IPC: current-build full-state attribution (2026-09-26)
 
-The measured combined wave9+VGA executable is SHA256
+The measured combined wave9+VGA reference executable is SHA256
 `b278c988be64f7eaae0ab56b21faafd5dfcee250984136c9dd628a332513c247`.
 At clocks 1,100,000,000–1,101,000,000 its 1,000,000-cycle native state trace
 records **0.564642 gameplay IPC** (564,642 edge retirements). The broader
 same-build 1,050–1,100M window records **0.44577548 IPC**; the short trace is
-not a substitute for that representative window. No new RTL candidate has a
-gameplay measurement yet, and neither figure proves Quake timedemo completion.
+not a substitute for that representative window. An opt-in FP-branch candidate
+has since measured **0.578894 IPC** (578,894 edge retirements) on the exact
+same 1,100,000,000–1,101,000,000 snapshot workload, an improvement of 14,252
+retirements or 2.52%. It has **not** been measured over a representative 50M
+gameplay window or cold-booted through Quake/Win95; neither short result proves
+timedemo completion.
+
+The branch experiment is `+define+VEN_FP_ASYNC_BRANCH` in
+`rtl/core/core_fp_async.svh`. Its full-PC generated-model manifest differs
+from the reference in only that source file and define, and the generated
+root, symbols and package snapshot serializers are byte-identical. A private
+copy of the verified 1.100B bundle restored at the same retire count and
+settings, and saved at 1.101B without modifying the source bundle. The
+candidate replay log and build are in
+`tmp/build-tmp/ventium-vga-wave9-fp-branch-replay-sep26/` and
+`tmp/build-tmp/ventium-vga-wave9-fp-branch-sep26/obj/`. This is a
+cross-build performance diagnostic, **not** the same-binary checkpoint or
+full-system acceptance policy. The opt-in candidate passes the six-case
+FDIV/FSQRT × JMP/taken-Jcc/not-taken-Jcc QEMU differential/overlap gate,
+the 12-case integer/FP overlap gate, shared x87 stream/trap and delayed-#MF
+gates, default `make verify`, and five-profile `make lint`.
 
 Evidence: `tmp/build-tmp/ventium-state-delta.7sh8i_6b/` is a same-model,
 cold-boot-derived checkpoint replay. The 1,000-cycle host-only relink pilot
@@ -47,9 +66,10 @@ descriptor observations while held include 66,608 branch-level observations,
 42,532 frontend-unavailable observations and 28,753 register-FP descriptor
 observations. They are not a proven branch-overlap savings estimate: after a
 branch, another FP dependency or frontend repair may become the next blocker.
-The source deliberately blocks branch and slow/dependent issue until the older
-shared-FP result is complete; removing that interlock requires fault, event,
-debug, SMC and x87 retirement-order proofs, not just a throughput microbench.
+The reference source blocks branch and slow/dependent issue until the older
+shared-FP result is complete. The opt-in branch experiment safely establishes
+the checked direct branch cases but still needs cold-boot/full-system event,
+debug and SMC acceptance before it can become a production profile.
 
 The outside-pipeline bucket includes slow decode, load, FP operand, execution
 and shared-response states. In the raw state residency, S_FLOAD is 83,498 clocks,

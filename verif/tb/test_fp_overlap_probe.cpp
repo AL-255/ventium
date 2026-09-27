@@ -11,6 +11,11 @@ struct SharedRoot {
     unsigned ventium_top__DOT__core_retire_pc=0x100;
     bool ventium_top__DOT__core_retire_valid=true;
 };
+struct NestedSharedRoot {
+    unsigned ventium_top__DOT__u_core__DOT__u_fp_shared__DOT__u_fp__DOT__top_state=0;
+    unsigned ventium_top__DOT__core_retire_pc=0x100;
+    bool ventium_top__DOT__core_retire_valid=true;
+};
 struct OtherRoot {};
 
 template<class F> void rejects(F action) {
@@ -73,5 +78,11 @@ int main() {
     assert(aligned.overlap==1 && aligned.overlap_at_commit==1);
     aligned.sample(root,0);
     assert(aligned.overlap_at_commit==1);
+    FpOverlapProbe nested_probe;
+    NestedSharedRoot nested;
+    nested_probe.sample(nested,0);
+    nested.ventium_top__DOT__u_core__DOT__u_fp_shared__DOT__u_fp__DOT__top_state=1;
+    nested_probe.sample(nested,0);
+    assert(nested_probe.busy==1 && nested_probe.integer==2 && nested_probe.overlap==1);
     std::puts("FP-OVERLAP-PROBE-OK");
 }

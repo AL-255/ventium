@@ -30,10 +30,8 @@ struct FpOverlapProbe {
         if (lo>=hi) std::abort();
         enabled=true;
     }
-    template<class T> auto sample(const T& r,int) -> decltype(
-        (void)r.ventium_top__DOT__u_core__DOT__u_fp_shared__DOT__top_state,void()) {
+    template<class T> void record(const T& r,bool pending) {
         if (!enabled) return;
-        const bool pending=r.ventium_top__DOT__u_core__DOT__u_fp_shared__DOT__top_state!=0;
         busy+=pending;
         const uint32_t pc=r.ventium_top__DOT__core_retire_pc;
         if (r.ventium_top__DOT__core_retire_valid && pc>=lo && pc<hi) {
@@ -47,7 +45,18 @@ struct FpOverlapProbe {
         }
         previous_busy=pending;
     }
-    template<class T> void sample(const T&,long) {
+    // The shared-FP wrapper now contains a u_fp leaf. Keep the old hierarchy
+    // for archived testbench builds; an absent busy signal must fail loudly,
+    // never turn a throughput gate into a zero-overlap false measurement.
+    template<class T> auto sample(const T& r,int) -> decltype(
+        (void)r.ventium_top__DOT__u_core__DOT__u_fp_shared__DOT__u_fp__DOT__top_state,void()) {
+        record(r,r.ventium_top__DOT__u_core__DOT__u_fp_shared__DOT__u_fp__DOT__top_state!=0);
+    }
+    template<class T> auto sample(const T& r,long) -> decltype(
+        (void)r.ventium_top__DOT__u_core__DOT__u_fp_shared__DOT__top_state,void()) {
+        record(r,r.ventium_top__DOT__u_core__DOT__u_fp_shared__DOT__top_state!=0);
+    }
+    template<class T> void sample(const T&,...) {
         if (enabled) { std::fprintf(stderr,"FP overlap probe requires shared-FPU model\n"); std::abort(); }
     }
     ~FpOverlapProbe() {
