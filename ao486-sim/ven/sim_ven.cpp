@@ -61,6 +61,7 @@ static int      g_mem_mb = 0;
 static uint32_t g_clock_rate = 4000000, g_rtc_rate = 80000, g_rate_vga = 90000000;
 static int      g_l1dis = 0, g_l2dis = 0;
 static uint64_t g_save_at = 0;                     // --save-at N: snapshot at cycle N (one-shot), then continue
+static uint64_t g_stop_retire = 0;                 // --ven-stop-retire N: stop after N cumulative retirements
 static uint64_t g_save_every = 0;                  // --save-every N: re-snapshot every N cycles (cycle-stamped)
 static uint64_t g_next_save = 0;                   // internal: next --save-every threshold
 static const char *g_save_file = "ven_post.snap";  // --save-file FN (base name; --save-every appends .<cyc>)
@@ -1075,6 +1076,15 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--vga-div") && i+1<argc) g_vga_div = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--vga-jit") && i+1<argc) g_vga_jit = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--save-at") && i+1<argc) g_save_at = strtoull(argv[++i], 0, 0);
+        else if (!strcmp(argv[i], "--ven-stop-retire") && i+1<argc) {
+            const char* value = argv[++i];
+            char* end = nullptr;
+            errno = 0;
+            const unsigned long long parsed = std::strtoull(value, &end, 0);
+            if (errno || !*value || *value == '-' || *end || parsed == 0)
+                checkpoint_fail("--ven-stop-retire requires a positive integer");
+            g_stop_retire = parsed;
+        }
         else if (!strcmp(argv[i], "--save-every") && i+1<argc) { g_save_every = strtoull(argv[++i], 0, 0); g_next_save = g_save_every; }
         else if (!strcmp(argv[i], "--save-file") && i+1<argc) g_save_file = argv[++i];
         else if (!strcmp(argv[i], "--snapshot-v2")) g_snapshot_v2 = true;
@@ -1102,6 +1112,8 @@ int main(int argc, char **argv) {
                 double(g_clock_rate) / g_rtc_rate);
     if (g_save_stop && (!g_save_at || g_save_every))
         checkpoint_fail("--save-stop requires --save-at and excludes --save-every");
+    if (g_stop_retire && g_save_stop)
+        checkpoint_fail("--ven-stop-retire and --save-stop are mutually exclusive");
     if (g_kb_script) kb_build_events(g_kb_script);
 
     top = new Vsystem;
@@ -1131,6 +1143,8 @@ int main(int argc, char **argv) {
     // overwrites DDR + RTL + FIFO + FPU + time with the snapshot (must be QUIESCENT).
     if (g_restore_file) {
         load_state(g_restore_file);
+        if (g_stop_retire && g_vtm_retires >= g_stop_retire)
+            checkpoint_fail("--ven-stop-retire must exceed restored retirement count");
         reschedule_periodic_save_after_restore();
         // Optional, const snapshot-memory observation; never arms a hardware
         // breakpoint, changes guest state, or evaluates the DUT an extra time.
@@ -1313,6 +1327,16 @@ int main(int argc, char **argv) {
                     (unsigned long long)main_time, (unsigned long long)g_vtm_retires,
                     g_vtm_cs, g_vtm_eip, g_vtm_cr0, g_vtm_cr3, g_vtm_eflags);
         }
+        // A dual-issue edge may cross the exact target by one instruction.
+        // Report the actual count so fixed-work comparisons can account for it.
+        if (g_stop_retire && g_vtm_retires >= g_stop_retire) {
+            fprintf(stderr, "RETIRE-STOP target=%llu actual=%llu overshoot=%llu cycle=%llu\n",
+                    (unsigned long long)g_stop_retire,
+                    (unsigned long long)g_vtm_retires,
+                    (unsigned long long)(g_vtm_retires - g_stop_retire),
+                    (unsigned long long)main_time);
+            break;
+        }
     }
     fprintf(stderr, ">>> done: cyc=%llu retires=%llu last cs=%04x:eip=%08x\n",
             (unsigned long long)main_time, (unsigned long long)g_vtm_retires, g_vtm_cs, g_vtm_eip);
@@ -1325,6 +1349,12 @@ int main(int argc, char **argv) {
 #ifdef VEN_HAVE_STATE_DELTA
     if (g_delta_armed && !g_state_delta.complete()) checkpoint_fail("incomplete state-delta capture");
 #endif
+    const bool retire_target_met = !g_stop_retire || g_vtm_retires >= g_stop_retire;
+    if (!retire_target_met)
+        fprintf(stderr, "RETIRE-STOP-FAIL target=%llu actual=%llu cycle=%llu\n",
+                (unsigned long long)g_stop_retire,
+                (unsigned long long)g_vtm_retires,
+                (unsigned long long)main_time);
     top->final(); delete top; free(ddr);
-    return 0;
+    return retire_target_met ? 0 : 2;
 }
