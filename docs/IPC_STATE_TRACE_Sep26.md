@@ -290,14 +290,20 @@ every observed uop fallback would be less than 7% of this 1M-cycle window,
 so it is a contributing target, not a route to >1 IPC by itself.
 
 A pre-edge `wave7.uop_holes.tsv` event dump under
-`tmp/build-tmp/ventium-fp-branch-1150m-uopholes3-sep27/` narrows the
+`tmp/build-tmp/ventium-fp-branch-1150m-uoprepair2-sep27/` narrows the
 offset-31 case without guessing from aggregate counters. For EIP `0x110ff`
 (`FXCH ST(1)`), all 7,690 first-priority fallback observations have a valid
 predecode line, both returned code sources available, no boundary entry and
 no published cross-line match. Exactly 1,538 show a repair-start pulse;
-6,385 see the repair walker in `W_SEEK`, commonly at another anchor. This is
-consistent with a repair-service/contention problem, not missing instruction
-bytes, but the dump does not yet distinguish repair acceptance, preemption and
-publication outcomes. A future optimization must preserve source identities,
-invalidation and mode-change cancellation; a PC-specific cache entry is not a
-general processor fix.
+6,385 see the repair walker in `W_SEEK`, commonly at another anchor. The
+same-edge `wave7.uop_repair_transitions.tsv` resolves acceptance and
+preemption: only 260 of those 1,538 pulses find `repair_ready`, and **all 260**
+accepted offset-31 seeks are yielded at walker offset 8 to an earlier-anchor
+repair (source set 7/anchor 31 to set 8/anchor 5). None had a pending fill,
+poison or invalidation at that transition. In this observed phase the hot
+cross-line descriptor never reaches publication: the existing policy can
+starve optional late-anchor repairs under recurring earlier-anchor traffic.
+This is a repair-scheduling opportunity, not missing instruction bytes or an
+I-cache refill. A general fairness change must still preserve source
+identities, invalidation, mode-change cancellation and real-fill priority;
+a PC-specific cache entry is not a general processor fix.

@@ -225,6 +225,21 @@ int main(int argc,char** argv) try {
     auto uc_wslot_id=optional_field(uc+"wslot"), uc_wsteps_id=optional_field(uc+"wsteps");
     auto uc_wrepair_id=optional_field(uc+"wrepair"), uc_wanchor_id=optional_field(uc+"wanchor");
     auto uc_wset_id=optional_field(uc+"wset");
+    auto uc_repair_ready_id=optional_field(uc+"repair_ready");
+    auto uc_fill_start_id=optional_field(uc+"pd_start_live");
+    auto uc_fill_pending_id=optional_field(uc+"pd_pend_live");
+    auto uc_next_valid_id=optional_field(uc+"wnext_valid");
+    auto uc_next_kill_id=optional_field(uc+"wnext_kill");
+    auto uc_poison_id=optional_field(uc+"wpz");
+    auto uc_pd_exec_id=optional_field(uc+"pd_exec");
+    auto uc_pd_len_id=optional_field(uc+"pd_len");
+    auto uc_primary_valid_id=optional_field(uc+"cross_valid_q");
+    auto uc_primary_set_id=optional_field(uc+"cross_set_q");
+    auto uc_primary_off_id=optional_field(uc+"cross_off_q");
+    auto uc_index_valid_id=optional_field(uc+"cross_index_valid");
+    auto uc_index_meta_id=optional_field(uc+"cross_index_meta");
+    if(uc_index_meta_id!=nf && fields[uc_index_meta_id].size!=128)
+        throw std::runtime_error("unknown cross-index metadata geometry");
     auto bypass_id=field(l1+"u_l1d__DOT__bypass_q"), fset_id=field(l1+"u_l1d__DOT__fset");
     auto ftag_id=field(l1+"u_l1d__DOT__ftag"), fbase_id=field(l1+"u_l1d__DOT__fbase");
     auto fw_id=field(l1+"u_l1d__DOT__fw"), poison_id=field(l1+"u_l1d__DOT__fill_poison");
@@ -265,7 +280,10 @@ int main(int argc,char** argv) try {
     std::map<std::array<uint64_t,6>,uint64_t> cache_backend;
     std::ofstream uop_holes(std::string(argv[2])+".uop_holes.tsv");
     if(!uop_holes) throw std::runtime_error("uop hole output open");
-    uop_holes<<"cycle\teip\tflin\toffset\tic_ready\tpd_valid\tboundary_valid\tcross_ready\tcross_sources_ready\tic_fb_avail\trepair_start\twalker_state\twalker_offset\twalker_slot\twalker_steps\twalker_repair\twalker_anchor\twalker_set\n";
+    uop_holes<<"cycle\teip\tflin\toffset\tic_ready\tpd_valid\tboundary_valid\tcross_ready\tcross_sources_ready\tic_fb_avail\trepair_start\trepair_ready\tfill_start\tfill_pending\twalker_state\twalker_offset\twalker_slot\twalker_steps\twalker_repair\twalker_anchor\twalker_set\tprimary_valid\tprimary_set\tprimary_off\tindex_slot_valid\tindex_meta\n";
+    std::ofstream repair_events(std::string(argv[2])+".uop_repair_transitions.tsv");
+    if(!repair_events) throw std::runtime_error("uop repair transition output open");
+    repair_events<<"cycle\tpre_state\tpost_state\tpre_repair\tpost_repair\tpre_set\tpost_set\tpre_anchor\tpost_anchor\tpre_offset\tpre_next_valid\tpre_next_kill\tpre_poison\tpre_fill_start\tpre_fill_pending\tpre_pd_exec\tpre_pd_len\tpre_primary_set\tpre_primary_off\tpost_primary_set\tpost_primary_off\n";
     // Kind 0: current instruction-fetch miss; 1: current data miss;
     // 2: rejected read-chain NEXT query (not a backing transaction).
     std::map<std::array<uint32_t,2>,uint64_t> miss_lines;
@@ -289,6 +307,22 @@ int main(int argc,char** argv) try {
         ReadGeometry prior_geometry=prior_pair_class.empty() ? ReadGeometry{} : read_geometry();
         uint64_t prior_hold=scalar(hold_id), prior_front=scalar(front_id), prior_pc=scalar(pc_id);
         const uint64_t prior_flin=scalar(flin_id);
+        const unsigned prior_cross_index=unsigned((prior_flin>>5)&31u);
+        uint32_t prior_cross_meta=0;
+        if(uc_index_meta_id!=nf)
+            memcpy(&prior_cross_meta,state.data()+fields[uc_index_meta_id].offset+4*prior_cross_index,4);
+        const uint64_t prior_index_valid=(optional_scalar(uc_index_valid_id)>>prior_cross_index)&1u;
+        const uint64_t prior_primary_valid=optional_scalar(uc_primary_valid_id);
+        const uint64_t prior_primary_set=optional_scalar(uc_primary_set_id);
+        const uint64_t prior_primary_off=optional_scalar(uc_primary_off_id);
+        const uint64_t prior_repair_ready=optional_scalar(uc_repair_ready_id);
+        const uint64_t prior_fill_start=optional_scalar(uc_fill_start_id);
+        const uint64_t prior_fill_pending=optional_scalar(uc_fill_pending_id);
+        const uint64_t prior_next_valid=optional_scalar(uc_next_valid_id);
+        const uint64_t prior_next_kill=optional_scalar(uc_next_kill_id);
+        const uint64_t prior_poison=optional_scalar(uc_poison_id);
+        const uint64_t prior_pd_exec=optional_scalar(uc_pd_exec_id);
+        const uint64_t prior_pd_len=optional_scalar(uc_pd_len_id);
         const std::array<uint64_t,15> prior_uop{scalar(ic_ready_id),scalar(uc_pd_id),
             scalar(uc_boundary_id),scalar(uc_cross_id),optional_scalar(uc_sources_id),
             optional_scalar(ic_fb_id),scalar(uc_repair_id),
@@ -366,6 +400,26 @@ int main(int argc,char** argv) try {
         }
         changed_blocks+=nc;
         focus.after(scalar);
+        const uint64_t post_wst=optional_scalar(uc_wst_id);
+        const uint64_t post_wrepair=optional_scalar(uc_wrepair_id);
+        const uint64_t post_wset=optional_scalar(uc_wset_id);
+        const uint64_t post_wanchor=optional_scalar(uc_wanchor_id);
+        if(prior_uop[11] != post_wrepair ||
+           (prior_uop[11] && (prior_uop[7] != post_wst ||
+                              prior_uop[13] != post_wset ||
+                              prior_uop[12] != post_wanchor))) {
+            repair_events<<cycle<<'\t'<<prior_uop[7]<<'\t'<<post_wst
+                         <<'\t'<<prior_uop[11]<<'\t'<<post_wrepair
+                         <<'\t'<<prior_uop[13]<<'\t'<<post_wset
+                         <<'\t'<<prior_uop[12]<<'\t'<<post_wanchor
+                         <<'\t'<<prior_uop[8]<<'\t'<<prior_next_valid
+                         <<'\t'<<prior_next_kill<<'\t'<<prior_poison
+                         <<'\t'<<prior_fill_start<<'\t'<<prior_fill_pending
+                         <<'\t'<<prior_pd_exec<<'\t'<<prior_pd_len
+                         <<'\t'<<prior_primary_set<<'\t'<<prior_primary_off
+                         <<'\t'<<optional_scalar(uc_primary_set_id)
+                         <<'\t'<<optional_scalar(uc_primary_off_id)<<'\n';
+        }
         if(prior_branch)
             branches<<cycle<<'\t'<<std::hex<<prior_branch_pc<<std::dec<<'\t'<<prior_taken<<'\n';
         if(!prior_mem_active && scalar(mem_id)) {held_pair_class=prior_pair_class; held_geometry=prior_geometry;}
@@ -407,8 +461,13 @@ int main(int argc,char** argv) try {
         if(edge_bail==3) {
             uop_holes<<cycle<<'\t'<<std::hex<<prior_pc<<'\t'<<prior_flin<<std::dec
                      <<'\t'<<prior_uop[14];
-            for(unsigned i=0;i<14;++i) uop_holes<<'\t'<<prior_uop[i];
-            uop_holes<<'\n';
+            for(unsigned i=0;i<7;++i) uop_holes<<'\t'<<prior_uop[i];
+            uop_holes<<'\t'<<prior_repair_ready<<'\t'<<prior_fill_start
+                     <<'\t'<<prior_fill_pending;
+            for(unsigned i=7;i<14;++i) uop_holes<<'\t'<<prior_uop[i];
+            uop_holes<<'\t'<<prior_primary_valid<<'\t'<<prior_primary_set
+                     <<'\t'<<prior_primary_off<<'\t'<<prior_index_valid
+                     <<'\t'<<std::hex<<prior_cross_meta<<std::dec<<'\n';
         }
         unsigned st=scalar(state_id); uint32_t pc=scalar(pc_id);
         ++states[st]; ++pc_clocks[pc];

@@ -275,9 +275,14 @@ def main():
                        dict(cycle='5', eip='0', flin='0', offset='0', ic_ready='0',
                             pd_valid='0', boundary_valid='0', cross_ready='0',
                             cross_sources_ready='0', ic_fb_avail='0',
-                            repair_start='0', walker_state='0', walker_offset='0',
+                            repair_start='0', repair_ready='0', fill_start='0',
+                            fill_pending='0', walker_state='0', walker_offset='0',
                             walker_slot='0', walker_steps='0', walker_repair='0',
-                            walker_anchor='0', walker_set='0').items())
+                            walker_anchor='0', walker_set='0', primary_valid='0',
+                            primary_set='0', primary_off='0', index_slot_valid='0',
+                            index_meta='0').items())
+            with (out/'analysis.uop_repair_transitions.tsv').open() as f:
+                assert list(csv.DictReader(f, delimiter='\t')) == []
             with (out/'analysis.miss_sets.tsv').open() as f:
                 sets = {int(row['set']): row for row in csv.DictReader(f, delimiter='\t')}
             assert sets[26] == dict(set='26', code_misses='0', data_misses='1',
