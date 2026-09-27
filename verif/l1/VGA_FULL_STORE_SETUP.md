@@ -119,3 +119,18 @@ justify treating those two leaf-only flags as the main path to >1 IPC; the
 registered core-to-L1 request/response ownership remains the larger structural
 target. Trace and replay evidence:
 `tmp/build-tmp/ventium-vga-wave9-state1100-sep26/trace.log` and `end.snap`.
+
+The same trace's 4,127 cacheable L1 fill starts were used for a limited
+64-byte-line, four-way LRU capacity probe (`tools/l2_reuse_profile.py`). Its
+estimated misses are 1,788 at the platform's 32 KiB geometry, 1,576 at
+64 KiB, 1,521 at 128 KiB and 1,518 at 256 KiB. These are **not** actual L2
+transactions: the probe omits stores, split commands and other requesters.
+The hardware L2 performance counters themselves advance by 2,000 misses and
+72,842 streaming-fill clocks over this replay. Thus simply enlarging the L2
+has a modest measured-stream reuse opportunity but an obvious area cost; no
+capacity change or claimed IPC gain follows from this estimate.
+
+At EIP offset `0003e3f5`, the trace has 18,866 L1 fill/no-ACK observations,
+577 idle misses, and 1,166 registered-hit capture observations. This is an
+address/service hotspot, not a proven single-instruction latency: EIP offsets
+can alias across code segments and the sampled request may be a held owner.
