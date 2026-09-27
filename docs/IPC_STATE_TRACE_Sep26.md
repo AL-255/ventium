@@ -722,8 +722,8 @@ and its rejected cross-build restore is not performance evidence. A build with
 the source-matched gameplay define set plus `VEN_FAST_ROR_IMM` and its flag-off
 control have completed. Their generated define sets differ only by that one
 flag; both use the same archived BIOS ROMs and byte-identical private copies
-of the Quake or Win95 boot disk. At 100M Quake startup clocks, both report
-exactly 32,406,406 retirements and byte-identical `[VEN-PERF]` lines. At 50M
+of the Quake or Win95 boot disk. At 300M Quake startup clocks, both report
+exactly 136,398,634 retirements and byte-identical `[VEN-PERF]` lines. At 200M
 Win95 startup clocks, both also have byte-identical profiler lines. These are
 startup checks, not gameplay or desktop acceptance. The generated native
 snapshot serializers differ, so a cross-build restore is invalid; independent
@@ -780,3 +780,15 @@ are observed request-service levels, not unique instructions or recoverable
 clocks, and a post-edge EIP is not always the physical request owner. The
 opt-in register-load-prime candidate must be measured in gameplay before
 crediting any of these levels as an IPC improvement.
+
+A second-line reuse of the already registered two-line D-cache read window was
+checked against that same lossless million-cycle trace before any RTL change.
+Of 211,217 read-capture *levels*, 17,596 presented an address in the saved
+window's next line while that line was resident when captured and still hit.
+Only 5,351 of these are current-request captures to which the existing
+`window_reuse` path could apply; the other 12,245 are lookahead captures and
+would need a separate next-request ownership change. Even treating each of the
+5,351 current-request levels as one removable clock gives only a 0.54% ceiling
+for this one-million-cycle phase, before overlap with retirement or other
+stalls. This is an opportunity screen, not a measured IPC gain or permission
+to serve a stale second line. No second-line RTL change was made.
