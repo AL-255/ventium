@@ -642,11 +642,21 @@ module uopcache
   assign pd_busy = (wst != W_IDLE);
 `ifdef VEN_UOP_CROSSLINE
   logic cross_seek_yield;
+`ifdef VEN_UOP_REPAIR_FAIR
+  // A late cross-line seek may yield once to an earlier map repair, but a
+  // recurring earlier anchor must not prevent every cross-line publication.
+  // This bit protects the next late seek only; fills and invalidations still
+  // have their normal priority and can discard the disposable repair.
+  logic cross_yield_recent_q;
+`endif
   // A cross-line attempt admitted ONLY by the optional floor exception must
   // not block the baseline's useful earlier-anchor map repairs. Both are
   // disposable; real fills retain their existing higher priority below.
   assign cross_seek_yield = EXEC_REPAIR && wrepair && wst==W_SEEK &&
       ({1'b0,wanchor} >= repair_floor[{wset,wway}]) && repair_start &&
+`ifdef VEN_UOP_REPAIR_FAIR
+      !(cross_yield_recent_q && wanchor > 5'd25) &&
+`endif
       !pd_start_live && !pd_pend_live && !d16_flush &&
       store_pdv[{repair_set,repair_way}] &&
       ({1'b0,repair_off} < repair_floor[{repair_set,repair_way}]) &&
@@ -702,6 +712,9 @@ module uopcache
       wanchor <= 5'd0;
 `ifdef VEN_UOP_CROSSLINE
       cross_valid_q <= 1'b0; cross_uop_q <= '0; cross_mode_q <= 1'b0;
+`ifdef VEN_UOP_REPAIR_FAIR
+      cross_yield_recent_q <= 1'b0;
+`endif
 `ifdef VEN_UOP_CROSS2
 `ifdef VEN_UOP_CROSS_INDEX
       cross_index_valid <= '0;
@@ -730,6 +743,18 @@ module uopcache
     end else begin
       d16_q <= cur_def16;
 `ifdef VEN_UOP_CROSSLINE
+`ifdef VEN_UOP_REPAIR_FAIR
+      // Keep the credit across the intervening local repair (and across a
+      // foreground fill). Consume it only when a late seek reaches its anchor
+      // or is cancelled by the normal coherence/mode fences.
+      if (wrepair && wst==W_SEEK && wanchor > 5'd25 &&
+          (woff >= {1'b0,wanchor} || wpz || d16_flush || wnext_kill ||
+           (inv_en && inv_set==wset && inv_way==wway) ||
+           (inv2_en && inv2_set==wset && inv2_way==wway)))
+        cross_yield_recent_q <= 1'b0;
+      if (cross_seek_yield && wanchor > 5'd25)
+        cross_yield_recent_q <= 1'b1;
+`endif
       if (cross_kill) cross_valid_q <= 1'b0;
 `ifdef VEN_UOP_CROSS2
 `ifdef VEN_UOP_CROSS_INDEX

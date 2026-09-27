@@ -307,3 +307,18 @@ This is a repair-scheduling opportunity, not missing instruction bytes or an
 I-cache refill. A general fairness change must still preserve source
 identities, invalidation, mode-change cancellation and real-fill priority;
 a PC-specific cache entry is not a general processor fix.
+
+An experimental, default-off `VEN_UOP_REPAIR_FAIR` policy now allows one
+late-anchor seek to yield to an earlier map repair, then protects the next
+late-anchor seek until publication or cancellation. It adds one scheduling bit
+and does not bypass source checks, mode/invalidation fences or real-fill
+priority. The cross-line leaf gate passes with 1, 2 and 33 descriptor entries;
+the 33-entry run additionally passes decode-tail invariance. The fair leaf
+also checks that a foreground fill can preempt a protected seek and that the
+fairness credit survives to its next attempt. The feature-off 33-entry
+control, full-top opt-in structural lint and the default `make verify` gate
+(105 functional programs plus cycle bands) pass. **This is not yet a measured
+gameplay improvement**: 0.680510 IPC on the favorable 1M-cycle phase and
+0.44963946 IPC on the representative 50M-cycle window remain the prior
+opt-in build's verified baseline. A same-work gameplay A/B and full-system
+boot checks are required before enabling this policy by default.
