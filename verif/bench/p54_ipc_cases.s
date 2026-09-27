@@ -84,6 +84,20 @@ loop_body:
     # Same instruction classes but a second physical line is required.
     movl (%esi), %eax
     movl 32(%esi), %edx
+.elseif CASE == 13
+    # A register U followed by an independent memory V. This distinguishes
+    # V-memory admission from a U-only load path even when only one bank fires.
+    movl %ebx, %eax
+    movl (%esi), %edx
+.elseif CASE == 14
+    # Reverse order of CASE 13: U load and independent V register operation.
+    movl (%esi), %eax
+    movl %ebx, %edx
+.elseif CASE == 15
+    # A resident read/modify ALU operand followed by independent integer work.
+    # The arithmetic's EX occupancy may not be collapsed by cache-window reuse.
+    addl (%esi), %eax
+    incl %edx
 .else
     .error "unsupported CASE"
 .endif

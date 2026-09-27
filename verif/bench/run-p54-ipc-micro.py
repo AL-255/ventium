@@ -31,6 +31,9 @@ CASES = {
     "frontend_line_straddle": (BASE, 10),
     "resident_same_line_loads": (BASE, 11),
     "resident_two_line_loads": (BASE, 12),
+    "register_u_memory_v": (BASE, 13),
+    "memory_u_register_v": (BASE, 14),
+    "memory_alu_integer_v": (BASE, 15),
 }
 
 
