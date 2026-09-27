@@ -841,14 +841,23 @@ static void checkpoint_config(uint32_t words[9]) {
     words[6] = g_vga_div; words[7] = g_vga_jit;
     words[8] = sizeof(ven_checkpoint::AtaState);
 }
-static void checkpoint_require_supported() {
-    if (!x86_checkpoint_no_floppy() || g_kb_script || g_ven_break_enable || g_rmtest)
-        checkpoint_fail("versioned snapshots require no floppy, keyboard script, breakpoint or RM test mode");
+#include "kb_checkpoint.h"
+static void checkpoint_require_supported(bool restoring) {
+    if (!x86_checkpoint_no_floppy() || g_ven_break_enable || g_rmtest)
+        checkpoint_fail("versioned snapshots require no floppy, breakpoint or RM test mode");
+    if (restoring) {
+        if (!kb_checkpoint_restore_supported(g_kb_script != nullptr))
+            checkpoint_fail("restoring with a keyboard script would replay input");
+    } else if (!kb_checkpoint_save_quiescent(g_kb_script != nullptr, g_kb_started,
+                                             g_kb_ev_idx, g_kb_events.size(),
+                                             g_kbfifo.size(), g_kb_phase)) {
+        checkpoint_fail("keyboard input is still pending; save after the script finishes");
+    }
 }
 static void save_state(const char *fn) {
     ven_checkpoint::AtaState ata;
     if (g_snapshot_v2) {
-        checkpoint_require_supported();
+        checkpoint_require_supported(false);
         if (!ven_checkpoint::capture_ata(ide_inst, ide_buf, ata))
             checkpoint_fail("unsupported ATA state or disk flush/position failure");
     }
@@ -889,7 +898,7 @@ static void load_state(const char *fn) {
     uint32_t spi[3]{};
     uint32_t read_edge = 0;
     if (v2) {
-        checkpoint_require_supported();
+        checkpoint_require_supported(true);
         uint32_t saved[9], expected[9]; checkpoint_config(expected);
         is.read(saved, sizeof(saved));
         if (std::memcmp(saved, expected, sizeof(saved)))
