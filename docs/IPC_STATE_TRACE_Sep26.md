@@ -465,3 +465,27 @@ FSM-state categories are not additive savings. Slow-decode residency is
 Even an idealized single-cache-flag fix cannot close the >1 IPC gap: the next
 candidate must address memory response ownership, FP admission/operand overlap,
 and frontend fallback together while preserving the differential gate.
+
+## September 27: measured instruction/data contention in the shared L1 array
+
+The same fairness-build 1.150–1.151B full-state trace has **0.275738 IPC** in
+that particular 1M-cycle phase. It predates, and must not replace, the
+1.350–1.400B **0.41034849 IPC** verified gameplay window or the 250M-cycle
+**0.41923649 IPC** suffix above. A lossless replay of the array's tag, valid,
+fill-owner and request-source fields (`STATE-FOCUS-PASS` in
+`tmp/build-tmp/ventium-fair-1150m-provenance2-sep27/`) identifies 918
+instruction-origin fills and 7,729 data-origin misses. Although the core has
+an I-cache, its refill traffic also allocates in the shared `ven_l1d` array.
+
+Of the 918 instruction fills, 649 evicted a valid line whose data-fill origin
+was observed **within this trace**; 51 evicted valid lines of unknown pre-trace
+origin. Only 315 subsequent data misses (4.08% of 7,729) targeted a line
+previously witnessed being evicted by an instruction fill, with intervening
+global flushes and writes to that line excluded. A later snoop or changed
+request schedule could still alter that attribution; these are observed trace
+relationships, **not** a counterfactual saved-cycle or IPC estimate. The other
+data misses dominate numerically in this phase. Splitting I/D allocation may
+be a valid architectural improvement, but this evidence does not support
+making it the first high-risk performance rewrite or claiming it can close the
+>1 IPC target. The analyzer adds only offline provenance counters; no RTL or
+FPGA image changed.

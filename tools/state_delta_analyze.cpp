@@ -244,6 +244,7 @@ int main(int argc,char** argv) try {
     if(uc_index_meta_id!=nf && fields[uc_index_meta_id].size!=128)
         throw std::runtime_error("unknown cross-index metadata geometry");
     auto bypass_id=field(l1+"u_l1d__DOT__bypass_q"), fset_id=field(l1+"u_l1d__DOT__fset");
+    auto fway_id=field(l1+"u_l1d__DOT__fway");
     auto ftag_id=field(l1+"u_l1d__DOT__ftag"), fbase_id=field(l1+"u_l1d__DOT__fbase");
     auto fw_id=field(l1+"u_l1d__DOT__fw"), poison_id=field(l1+"u_l1d__DOT__fill_poison");
     auto early_addr_id=field(l1+"u_l1d__DOT__early_addr_q");
@@ -259,6 +260,17 @@ int main(int argc,char** argv) try {
     auto win_addr_id=field(l1+"u_l1d__DOT__rd_addr_q"), capture_id=field(l1+"u_l1d__DOT__do_rd_cap");
     bool kept_window=scalar(win_valid_id);
     if(fields[val_id].size!=256 || fields[tag_id].size!=1024) throw std::runtime_error("not full P5 cache geometry");
+    // The L1 array also receives instruction fills. Attribute only a
+    // *witnessed* data-origin line evicted by an instruction-origin fill;
+    // pre-trace resident ways have unknown provenance and are not guessed.
+    std::array<std::array<uint8_t,2>,128> line_origin{}; // 0 unknown, 1 I, 2 D
+    std::map<uint32_t,uint64_t> code_evicted_data;
+    uint8_t active_fill_origin=0;
+    auto resident_line = [&](unsigned set,unsigned way) -> uint32_t {
+        uint32_t tag;
+        memcpy(&tag,state.data()+fields[tag_id].offset+4*(2*set+way),4);
+        return (tag<<12)|(set<<5);
+    };
     std::vector<std::array<uint64_t,5>> eviction_examples;
     auto bail_id=field(core+"pp_bail");
     if(fields[bail_id].size!=14*8) throw std::runtime_error("unknown pp_bail layout");
@@ -381,6 +393,22 @@ int main(int argc,char** argv) try {
         memcpy(retire_snapshot.data(),state.data()+fields[snap_id].offset,48);
         bool prior_store=scalar(req_id) && scalar(we_id) && scalar(l1state_id)==0 && !scalar(flush_id);
         uint32_t prior_addr=scalar(addr_id);
+        if(scalar(flush_id)) code_evicted_data.clear();
+        if(prior_store) {
+            // A write to an evicted line changes its backing contents, so a
+            // later read miss cannot be ascribed to the earlier I-fill alone.
+            const uint32_t physical=uint32_t(scalar(lookup_addr_id));
+            code_evicted_data.erase(physical&~31u);
+            code_evicted_data.erase(uint32_t(physical+3u)&~31u);
+        }
+        const unsigned prior_l1state=unsigned(scalar(l1state_id));
+        const unsigned prior_fset=unsigned(scalar(fset_id));
+        const unsigned prior_fway=unsigned(scalar(fway_id));
+        const uint8_t prior_request_origin=scalar(data_access_id) ? 2 : 1;
+        const bool prior_fill_bypass=scalar(bypass_id);
+        const bool prior_victim_valid=state[fields[val_id].offset+2*prior_fset+prior_fway];
+        const uint32_t prior_victim_line=resident_line(prior_fset,prior_fway);
+        const uint32_t prior_fill_line=(uint32_t(scalar(ftag_id))<<12)|(prior_fset<<5);
         // Match ven_l1d's existing perf_miss_start predicate exactly, then
         // separate actual demand misses from failed read-chain NEXT queries.
         // rd_hit and the tag arrays refer to lookup_addr, which is redirected
@@ -393,6 +421,8 @@ int main(int argc,char** argv) try {
                                 unsigned(bool(scalar(data_access_id)));
             ++miss_lines[{line,kind}];
             ++miss_sets[(line>>5)&127u][kind];
+            if(kind==1 && code_evicted_data.erase(line))
+                ++totals["l1_data_miss_after_witnessed_code_eviction"];
             miss_events<<first+index+1<<'\t'<<std::hex<<line<<std::dec<<'\t'
                        <<((line>>5)&127u)<<'\t'<<kind<<'\t'
                        <<std::hex<<prior_pc<<std::dec<<'\n';
@@ -431,6 +461,30 @@ int main(int argc,char** argv) try {
             }
         }
         changed_blocks+=nc;
+        if(prior_l1state==0 && scalar(l1state_id)==1 && !scalar(bypass_id)) {
+            active_fill_origin=prior_request_origin;
+            ++totals[active_fill_origin==1 ? "l1_code_fill_started" : "l1_data_fill_started"];
+        }
+        if(prior_l1state==1 && !prior_fill_bypass && scalar(l1state_id)==0) {
+            const unsigned set=prior_fset, way=prior_fway;
+            if(prior_victim_valid && prior_victim_line!=prior_fill_line) {
+                const uint8_t victim_origin=line_origin[set][way];
+                if(active_fill_origin==1 && victim_origin==2) {
+                    ++totals["l1_code_fill_evicted_witnessed_data_line"];
+                    code_evicted_data[prior_victim_line]=cycle;
+                } else if(active_fill_origin==1 && victim_origin==0)
+                    ++totals["l1_code_fill_evicted_unknown_origin_line"];
+            }
+            if(state[fields[val_id].offset+2*set+way]) {
+                line_origin[set][way]=active_fill_origin;
+                code_evicted_data.erase(prior_fill_line);
+                ++totals[active_fill_origin==1 ? "l1_code_fill_completed" : "l1_data_fill_completed"];
+            } else {
+                line_origin[set][way]=0;
+                ++totals["l1_fill_completed_invalid"];
+            }
+            active_fill_origin=0;
+        }
         focus.after(scalar);
         const uint64_t post_wst=optional_scalar(uc_wst_id);
         const uint64_t post_wrepair=optional_scalar(uc_wrepair_id);
