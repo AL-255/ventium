@@ -92,6 +92,8 @@ int main(int argc,char** argv) try {
     const auto stream_count=lookup.find(core+"fp_async_count");
     auto fault_id=field(core+"fp_async_fault_hold"), mem_id=field(core+"pipe_mem_active_q");
     const auto chain_accept=lookup.find(core+"mc_accept");
+    const auto chain_offer=lookup.find(core+"mc_offer");
+    const auto chain_prepare=lookup.find(core+"mc_prepare_ok");
     auto ack_id=field(core+"mem_ack"), pair_id=field(core+"pipe_pair_reason");
     auto commit_id=field(core+"pipe_int_commit");
     auto front_id=field(core+"pipe_frontend_ready");
@@ -213,6 +215,9 @@ int main(int argc,char** argv) try {
     std::ofstream commits(std::string(argv[2])+".commit_observations.bin",std::ios::binary);
     if(!commits) throw std::runtime_error("commit observation output open");
     const std::string l1="system__DOT__u_cpu__DOT__u_core__DOT__u_l1axi__DOT__";
+    const auto chain_next_ready=lookup.find(l1+"mc_next_ready");
+    const auto chain_window_reuse=lookup.find(l1+"u_l1d__DOT__window_reuse");
+    const auto chain_rd_match=lookup.find(l1+"u_l1d__DOT__rd_match");
     auto val_id=field(l1+"u_l1d__DOT__dc_val"), tag_id=field(l1+"u_l1d__DOT__dc_tag");
     auto req_id=field(l1+"l1d_c_req"), we_id=field(core+"bd_we"), addr_id=field(core+"bd_addr");
     auto data_access_id=field(core+"cur_is_d");
@@ -330,6 +335,28 @@ int main(int argc,char** argv) try {
     uint64_t changed_blocks=0;
     for(uint64_t index=0;index<count;++index) {
         focus.before(scalar);
+        // Count PRE-edge handshakes, not field transitions. A one-cycle
+        // mc_accept pulse normally changes twice in the delta stream, so the
+        // fields.tsv changed_cycles column is not an acceptance count.
+        if(chain_accept!=lookup.end()) totals["memory_chain_accept_edges"]+=bool(scalar(chain_accept->second));
+        if(chain_offer!=lookup.end()) totals["memory_chain_offer_levels"]+=bool(scalar(chain_offer->second));
+        if(chain_prepare!=lookup.end()) totals["memory_chain_prepare_levels"]+=bool(scalar(chain_prepare->second));
+        if(chain_offer!=lookup.end() && scalar(chain_offer->second) && scalar(commit_id)) {
+            ++totals["memory_chain_commit_offer_edges"];
+            if(chain_next_ready!=lookup.end() && !scalar(chain_next_ready->second)) {
+                ++totals["memory_chain_commit_offer_rejected_edges"];
+                if(chain_rd_match!=lookup.end() && !scalar(chain_rd_match->second))
+                    ++totals["memory_chain_commit_offer_no_old_match_edges"];
+            }
+        }
+        // A legacy same-line window may serve the old read without arming
+        // rd_match. The leaf's next-read lookup then stays off even if the
+        // core offers a prepared successor. This is an eligibility level,
+        // not proof the unqueried next address would hit in the L1.
+        if(chain_offer!=lookup.end() && chain_window_reuse!=lookup.end() &&
+           chain_rd_match!=lookup.end() && scalar(chain_offer->second) &&
+           scalar(chain_window_reuse->second) && !scalar(chain_rd_match->second) &&
+           scalar(commit_id)) ++totals["memory_chain_offer_window_reuse_levels"];
         bool prior_mem_active=scalar(mem_id);
         // Active may remain asserted while a chained successor replaces its
         // owner. Old schemas without mc_accept fail closed at a committing

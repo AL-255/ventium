@@ -163,6 +163,10 @@ def main():
                        pipe_frontend_ready=valid, uc_v_avail=valid)
         if core + 'mc_accept' in by_name:
             signals['mc_accept'] = replace
+        if core + 'mc_offer' in by_name:
+            signals['mc_offer'] = replace
+        if core + 'mc_prepare_ok' in by_name:
+            signals['mc_prepare_ok'] = replace
         return sample(signals=signals, u=read_u if u is None else u,
                       v=read_v if v is None else v)
 
@@ -251,6 +255,15 @@ def main():
             assert int(totals['read_pair_completed_u']) == 4
             assert int(totals['read_pair_same_segment_line_contained']) == 4
             assert int(totals['v_memory_attribution_unproven_chain_replacements']) == 3
+            if core + 'mc_accept' in by_name:
+                assert int(totals['memory_chain_accept_edges']) == 3
+            else:
+                assert 'memory_chain_accept_edges' not in totals
+            if core + 'mc_offer' in by_name:
+                assert int(totals['memory_chain_offer_levels']) == 3
+                assert int(totals['memory_chain_commit_offer_edges']) == 3
+            if core + 'mc_prepare_ok' in by_name:
+                assert int(totals['memory_chain_prepare_levels']) == 3
             assert int(totals.get('read_pair_same_line_complete_registered_window', '0')) == 0
             assert int(totals['l1_read_wait_total']) == 6
             assert int(totals['l1_demand_miss_code']) == 0

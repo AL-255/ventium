@@ -529,6 +529,19 @@ missing FILD converter. It does not justify a Quake-address prefetch rule: a
 general solution must preserve exact translation, cacheability, coherence,
 fault and MMIO behavior and be checked with a matched-work A/B run.
 
+The pre-edge memory-chain handshake counters for this same 1.400–1.401B
+sample report 143,359 offer *levels*, but only 100,404 offers coincide with
+an integer commit. Of those committed offers, 98,111 are accepted and 2,293
+are rejected by the L1 next-read lookup (2.28%); 1,479 of the rejected edges
+lack the old read's registered `rd_match` owner. Offer levels held before a
+commit must not be counted as failed transfers. These are observed handshakes,
+not saved-cycle estimates, and the analyzer's synthetic pre-edge cases and
+lossless full-state reconstruction pass in
+`tmp/build-tmp/ventium-fair-1400m-chain-count-r3-sep27/`. Rejected chaining is
+therefore too small in this phase to explain the dominant memory wait and
+outside-pipeline buckets by itself. The separate cache-policy candidate has
+not been measured on an identical instruction sequence in this window.
+
 ### Page-bounded stride-prefetch scope check
 
 `tools/stride_prefetch_probe.py` replays *observed* physical-line miss events
