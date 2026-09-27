@@ -14,6 +14,15 @@ set -euo pipefail
 # explicit profile below.
 normal_memory_max="4G"
 normal_tasks_max="64"
+# Explicit four-compiler IPC development scope. The normal 4G/one-job profile
+# remains unchanged; this larger cap is available only under one named unit.
+ipc_parallel_memory_max="10G"
+ipc_parallel_tasks_max="64"
+# Finer generated-C++ splitting permits a larger, still bounded compile fanout.
+# Keep this distinct from the four-job profile so ordinary builds cannot inherit
+# a machine-wide -j32 or bypass the fixed process/memory envelope.
+ipc_parallel32_memory_max="16G"
+ipc_parallel32_tasks_max="128"
 vivado_memory_max="20G"
 vivado_tasks_max="32"
 # One fixed lock is part of the safety boundary.  Permitting a caller to choose
@@ -65,6 +74,10 @@ scope_required_limits() {
     local unit="$1"
     if [ "$unit" = "ventium-vivado" ]; then
         printf '%s %s\n' "$vivado_memory_max" "$vivado_tasks_max"
+    elif [ "$unit" = "ventium-ipc-parallel" ]; then
+        printf '%s %s\n' "$ipc_parallel_memory_max" "$ipc_parallel_tasks_max"
+    elif [ "$unit" = "ventium-ipc-parallel32" ]; then
+        printf '%s %s\n' "$ipc_parallel32_memory_max" "$ipc_parallel32_tasks_max"
     else
         printf '%s %s\n' "$normal_memory_max" "$normal_tasks_max"
     fi
@@ -277,8 +290,9 @@ fi
 scope_profile="${VENTIUM_BUILD_SCOPE_PROFILE:-default}"
 case "$scope_profile" in
     default|"")
-        if [ "$scope_unit" = "ventium-vivado" ]; then
-            echo "[build-scope] scope unit ventium-vivado is reserved for the Vivado profile" >&2
+        if [ "$scope_unit" = "ventium-vivado" ] || [ "$scope_unit" = "ventium-ipc-parallel" ] || \
+           [ "$scope_unit" = "ventium-ipc-parallel32" ]; then
+            echo "[build-scope] scope unit ${scope_unit} is reserved for its explicit profile" >&2
             exit 2
         fi
         if [ "${VENTIUM_BUILD_MEMORY_MAX:-$normal_memory_max}" != "$normal_memory_max" ] || \
@@ -287,6 +301,22 @@ case "$scope_profile" in
         fi
         scope_mem="$normal_memory_max"
         scope_tasks="$normal_tasks_max"
+        ;;
+    ipc_parallel)
+        if [ "$scope_unit" != "ventium-ipc-parallel" ]; then
+            echo "[build-scope] ipc_parallel profile requires unit ventium-ipc-parallel" >&2
+            exit 2
+        fi
+        scope_mem="$ipc_parallel_memory_max"
+        scope_tasks="$ipc_parallel_tasks_max"
+        ;;
+    ipc_parallel32)
+        if [ "$scope_unit" != "ventium-ipc-parallel32" ]; then
+            echo "[build-scope] ipc_parallel32 profile requires unit ventium-ipc-parallel32" >&2
+            exit 2
+        fi
+        scope_mem="$ipc_parallel32_memory_max"
+        scope_tasks="$ipc_parallel32_tasks_max"
         ;;
     vivado)
         if [ "$scope_unit" != "ventium-vivado" ]; then

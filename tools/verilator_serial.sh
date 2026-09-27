@@ -10,7 +10,9 @@
 # process releases it automatically.  Set VENTIUM_VERILATOR_BIN to select another
 # Verilator frontend; do not bypass this wrapper for normal project builds.
 #
-# It also caps each Verilator C++ build at one compiler by default.  `-j 0`
+# It also caps each Verilator C++ build at one compiler by default. The explicit
+# ipc_parallel permits four jobs under 10G; ipc_parallel32 permits 32 with
+# finer generated-C++ splitting under 16G. `-j 0`
 # means every host core and has repeatedly OOM-killed developer machines when a
 # full-core generated translation unit is being optimised.  There is no runtime
 # escape hatch: a larger build needs an explicitly reviewed tool/profile change,
@@ -59,11 +61,26 @@ safe_makeflags() {
     [[ "$makeflags_arg" =~ ^OPT=-march=[[:alnum:]_.+-]+$ ]]
 }
 
+bounded_build_jobs() {
+    local requested="$1"
+    if [ "${VENTIUM_BUILD_SCOPE_PROFILE:-default}" = "ipc_parallel" ] &&
+       [[ "$requested" =~ ^[1-4]$ ]]; then
+        printf '%s\n' "$requested"
+    elif [ "${VENTIUM_BUILD_SCOPE_PROFILE:-default}" = "ipc_parallel32" ] &&
+         [[ "$requested" =~ ^([1-9]|[12][0-9]|3[012])$ ]]; then
+        printf '%s\n' "$requested"
+    else
+        printf '1\n'
+    fi
+}
+
 safe_args=()
 need_build_job=0
 need_safe_layout=0
 saw_job=0
 saw_output_groups=0
+saw_output_split=0
+saw_output_split_cfuncs=0
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --build|--binary)
@@ -80,19 +97,19 @@ while [ "$#" -gt 0 ]; do
             ;;
         -j)
             saw_job=1
-            safe_args+=("-j" "1")
             shift
             if [ "$#" -eq 0 ]; then
                 echo "[verilator-lock] malformed -j argument" >&2
                 exit 2
             fi
+            safe_args+=("-j" "$(bounded_build_jobs "$1")")
             ;;
         -j[0-9]*)
             saw_job=1
             # Verilator accepts the compact input spelling, but its frontend
-            # requires the normalized form as two argv tokens (`-j 1`), not
+            # requires the normalized form as two argv tokens (`-j N`), not
             # GCC-style `-j1`.
-            safe_args+=("-j" "1")
+            safe_args+=("-j" "$(bounded_build_jobs "${1#-j}")")
             ;;
         --build-jobs|--verilate-jobs)
             saw_job=1
@@ -146,6 +163,37 @@ while [ "$#" -gt 0 ]; do
             fi
             safe_args+=("--output-groups" "0")
             ;;
+        --output-split|--output-split-cfuncs)
+            split_arg="$1"
+            if [ "$#" -lt 2 ]; then
+                echo "[verilator-lock] malformed ${split_arg} argument" >&2
+                exit 2
+            fi
+            if [ "${VENTIUM_BUILD_SCOPE_PROFILE:-default}" = "ipc_parallel32" ]; then
+                safe_args+=("$split_arg" "3000")
+            else
+                safe_args+=("$split_arg" "$2")
+            fi
+            if [ "$split_arg" = "--output-split" ]; then
+                saw_output_split=1
+            else
+                saw_output_split_cfuncs=1
+            fi
+            shift
+            ;;
+        --output-split=*|--output-split-cfuncs=*)
+            split_arg="${1%%=*}"
+            if [ "${VENTIUM_BUILD_SCOPE_PROFILE:-default}" = "ipc_parallel32" ]; then
+                safe_args+=("$split_arg" "3000")
+            else
+                safe_args+=("$1")
+            fi
+            if [ "$split_arg" = "--output-split" ]; then
+                saw_output_split=1
+            else
+                saw_output_split_cfuncs=1
+            fi
+            ;;
         *)
             safe_args+=("$1")
             ;;
@@ -161,6 +209,11 @@ fi
 # cannot reintroduce the monolithic OOM failure mode.
 if [ "$need_safe_layout" = 1 ] && [ "$saw_output_groups" = 0 ]; then
     safe_args+=("--output-groups" "0")
+fi
+if [ "$need_safe_layout" = 1 ] &&
+   [ "${VENTIUM_BUILD_SCOPE_PROFILE:-default}" = "ipc_parallel32" ]; then
+    if [ "$saw_output_split" = 0 ]; then safe_args+=("--output-split" "3000"); fi
+    if [ "$saw_output_split_cfuncs" = 0 ]; then safe_args+=("--output-split-cfuncs" "3000"); fi
 fi
 set -- "${safe_args[@]}"
 

@@ -108,19 +108,33 @@ XOVER_FPX_OBJDIR ?= obj_dir_l1axi_kvdosq_xover_fpx
 VL_OPT_FAST  ?= -O3
 VL_OPT_MARCH ?= -march=native
 VL_MAKEFLAGS := -MAKEFLAGS OPT_FAST=$(VL_OPT_FAST) -MAKEFLAGS OPT=$(VL_OPT_MARCH)
-# VL_J: C++ build parallelism.  A full-core generated C++ translation unit can
-# consume several GiB, so the safe default is one compiler job.  In particular,
-# never use Verilator's `-j 0` here: it maps to every host core and has OOM-killed
-# ordinary development hosts.  This repository has a strict one-compiler policy:
-# changing it requires an explicit reviewed build-profile change, never an
-# inherited environment variable.
+# VL_J: C++ build parallelism. A generated translation unit can consume several
+# GiB, so the portable default stays one compiler. Directed IPC builds may
+# explicitly select 2-4 jobs on a host with sufficient available memory, or
+# up to 32 only inside the fixed ipc_parallel32 scope with finer C++ splitting.
+# Reject unbounded `-j 0` and accidental large values (the old OOM failure mode).
 # `--output-split` alone only splits included fragments: without
 # `--output-groups 0` Verilator still feeds the compiler one aggregate
 # `V*_vm_classes_0.cpp` translation unit.  That unit has repeatedly grown past
 # 3.5 GiB at -O3.  Keep the high-performance host model, but emit independent
-# C++ classes so the one permitted compiler job stays bounded.
-override VL_J := 1
-VL_SPLIT ?= --output-groups 0 --output-split 20000 --output-split-cfuncs 20000
+# C++ classes so compiler jobs stay bounded.
+VL_J ?= 1
+ifeq ($(VENTIUM_BUILD_SCOPE_PROFILE),ipc_parallel32)
+  ifneq ($(filter-out $(shell seq 1 32),$(VL_J)),)
+    $(error VL_J must be 1..32 in the ipc_parallel32 scope)
+  endif
+  VL_SPLIT ?= --output-groups 0 --output-split 3000 --output-split-cfuncs 3000
+else ifeq ($(VENTIUM_BUILD_SCOPE_PROFILE),ipc_parallel)
+  ifneq ($(filter-out 1 2 3 4,$(VL_J)),)
+    $(error VL_J must be 1..4 in the ipc_parallel scope)
+  endif
+  VL_SPLIT ?= --output-groups 0 --output-split 20000 --output-split-cfuncs 20000
+else
+  ifneq ($(VL_J),1)
+    $(error VL_J >1 requires an explicit ipc_parallel or ipc_parallel32 scope)
+  endif
+  VL_SPLIT ?= --output-groups 0 --output-split 20000 --output-split-cfuncs 20000
+endif
 # Do not let `make -j target_a target_b` launch multiple full-core Verilator
 # trees.  Each tree may hold a multi-GiB generated C++ translation unit while
 # compiling, so target-level parallelism defeats the bounded `VL_J` setting.
@@ -257,7 +271,8 @@ KV_FULL_DEFS := +define+VEN_L1_AXI +define+VEN_L1_HONOR_CD +define+VEN_KV260_SOC
   +define+VEN_FPREM +define+VEN_FP_SHARED +define+VEN_FP_SHARED_DIRECT +define+VEN_DBG_CORE \
   +define+VEN_SYS_FASTPATH +define+VEN_SYS_FASTPATH_RELOC +define+VEN_SYS_FASTLOAD_FLAT \
   +define+VEN_SYS_FASTLOAD_BOUNDED +define+VEN_SYS_FASTSTORE_FLAT \
-  +define+VEN_FAST_MEM_ADD +define+VEN_FAST_MOFFS_STORE +define+VEN_FAST_RETRACE
+  +define+VEN_FAST_MEM_ADD +define+VEN_FAST_MOFFS_STORE +define+VEN_FAST_RETRACE \
+  +define+VEN_PIPE_MEM_CHAIN +define+VEN_PIPE_REG_LOAD_PRIME
 KV_FULL_CFLAGS := -DVEN_L1_AXI -DVEN_KV260_SOC -DVEN_DBG_CORE
 # The crossover driver reaches optional FE_PIPE flops through Verilator's
 # public-flat hierarchy.  Keep its C++ view exactly matched to the RTL defines:
