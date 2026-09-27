@@ -72,15 +72,28 @@ def read_u32(rsp, addr):
     return None if b is None or len(b) < 4 else int.from_bytes(b, "little")
 
 
-def scan_regions(rsp, lo, hi, coarse, page, verbose, anchors=()):
+def scan_regions(rsp, lo, hi, coarse, page, verbose, anchors=(), scan_max=None):
     """Dump mapped ranges in [lo,hi) plus ranges containing live pointers.
 
     A post-init image must include small, non-coarse-aligned mappings such as
     the Linux stack.  The normal sweep therefore probes at page granularity.
     `anchors` additionally preserves a complete mapping containing a live GPR
     pointer (notably ESP/EBP), even when it lies outside the requested sweep.
+    A mapping found by either route is followed to its actual end, up to
+    `scan_max`: treating `hi` as an artificial end silently truncated Quake's
+    Hunk heap when it grew across the old 0x41000000 default.
+
+    `hi` remains the sparse page-probe sweep limit, rather than turning every
+    checkpoint into a scan of the whole user address space.  `scan_max` is only
+    used to finish a discovered contiguous mapping and to bound pointer anchors.
     read_mem -> None means unmapped (gdbstub 'E14').
     """
+    if scan_max is None:
+        scan_max = hi
+    if not (0x1000 <= lo < hi <= scan_max <= 0xFFFFFFFF):
+        raise ValueError("invalid snapshot scan bounds")
+    if any(v & (page - 1) for v in (lo, hi, scan_max)):
+        raise ValueError("snapshot scan bounds must be page aligned")
     regions, ranges = [], []
 
     def covered(addr):
@@ -97,6 +110,15 @@ def scan_regions(rsp, lo, hi, coarse, page, verbose, anchors=()):
         end = start
         while end < max_addr and rsp.read_mem(end, 16) is not None:
             end += page
+        # A mapping that continues beyond the explicit safety ceiling is not a
+        # usable checkpoint: emitting the prefix would merely move the silent
+        # missing-page failure further into the later replay.  Probe the first
+        # address above the ceiling to distinguish an exact-end mapping from a
+        # clipped one and fail loudly in the latter case.
+        if end == max_addr and rsp.read_mem(end, 16) is not None:
+            raise gt.RSPError(
+                "mapped region at %08x reaches --scan-max %08x; increase --scan-max"
+                % (start, max_addr))
         if end <= start:
             return False
         before = len(regions)
@@ -111,19 +133,19 @@ def scan_regions(rsp, lo, hi, coarse, page, verbose, anchors=()):
                              % (start, end, (end - start) // 1024))
         return True
 
-    # Pointer-anchored mappings can live below the normal executable/data sweep
+    # Pointer-anchored mappings can live outside the normal executable/data sweep
     # (Linux-user's randomized stack is the canonical example). Ignore the
     # conventional unmapped low page and out-of-address-space scalar values.
     for anchor in anchors:
-        if 0x1000 <= anchor < hi:
-            dump_run(anchor, 0x1000, hi)
+        if 0x1000 <= anchor < scan_max:
+            dump_run(anchor, 0x1000, scan_max)
 
     addr = lo
     while addr < hi:
         containing = next((end for start, end in ranges if start <= addr < end), None)
         if containing is not None:
             addr = containing
-        elif dump_run(addr, lo, hi):
+        elif dump_run(addr, lo, scan_max):
             addr = ranges[-1][1]
         else:
             addr += coarse
@@ -352,7 +374,10 @@ def main():
     ap.add_argument("--port", type=int, default=51099)
     ap.add_argument("--timeout", type=float, default=180.0)
     ap.add_argument("--scan-lo", default="0x08000000")
-    ap.add_argument("--scan-hi", default="0x41000000")
+    ap.add_argument("--scan-hi", default="0x41000000",
+                    help="upper bound of the sparse page-probe sweep")
+    ap.add_argument("--scan-max", default="0xC0000000",
+                    help="maximum address while completing a discovered mapping")
     ap.add_argument("--gs-base", default=None, help="override TLS gs_base (hex)")
     ap.add_argument("--trace-out", default=None,
                     help="write a lock-step golden prefix from this stopped state")
@@ -368,6 +393,13 @@ def main():
             (a.trace_x87 and a.trace_out is None)):
         ap.error("--trace-out and a positive --trace-insns must be supplied together")
     bp = int(a.brk, 0)
+    scan_lo = int(a.scan_lo, 0)
+    scan_hi = int(a.scan_hi, 0)
+    scan_max = int(a.scan_max, 0)
+    if not (0x1000 <= scan_lo < scan_hi <= scan_max <= 0xFFFFFFFF):
+        ap.error("require 0x1000 <= --scan-lo < --scan-hi <= --scan-max <= 0xffffffff")
+    if any(v & 0xfff for v in (scan_lo, scan_hi, scan_max)):
+        ap.error("--scan-lo, --scan-hi and --scan-max must be 4 KiB aligned")
 
     env = dict(os.environ)
     env.setdefault("P5Q_VIDEO", "/p5q_video_capture")
@@ -420,8 +452,8 @@ def main():
         # stack mapping entirely.  Register anchors retain any live mapped page
         # below --scan-lo as well (e.g. a low constrained user stack).
         anchors = [eip] + list(gpr.values()) + list(seg_base.values())
-        regions = scan_regions(rsp, int(a.scan_lo, 0), int(a.scan_hi, 0),
-                               0x1000, 0x1000, a.verbose, anchors)
+        regions = scan_regions(rsp, scan_lo, scan_hi, 0x1000, 0x1000,
+                               a.verbose, anchors, scan_max)
         nbytes = sum(len(bytes.fromhex(r["hex"])) for r in regions if "hex" in r)
 
         # ST(i) values in the g-packet are TOP-relative.  Keep all x87 fields,
@@ -452,6 +484,9 @@ def main():
                 "producer": "quake_snapshot-postinit",
                 "elf": os.path.basename(a.elf),
                 "break": "0x%08x" % bp, "hits": a.hits,
+                "scan": {"lo": "0x%08x" % scan_lo,
+                         "hi": "0x%08x" % scan_hi,
+                         "max": "0x%08x" % scan_max},
                 "regions": len(regions), "bytes": nbytes,
                 "arch_state": "ventium-modeled-user-checkpoint",
                 "gs_base_source": gs_base_source,
