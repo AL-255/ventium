@@ -472,6 +472,9 @@ module core
     output logic        smm_active_o,
     output logic        mem_req,
     output logic        mem_we,
+`ifdef VEN_L1D_CODE_BUFFER
+    output logic        mem_code,
+`endif
     // ---- LOCK# beat qualifier + local-reservation session ------------------------
     // `mem_lock` is the raw external LOCK# qualifier for an actual operand beat.  It
     // must NEVER leak onto page walks, fetches, delivery traffic, or a no-request
@@ -8966,6 +8969,11 @@ module core
       default:       cur_is_d = 1'b1;
     endcase
   end
+`ifdef VEN_L1D_CODE_BUFFER
+  // Only actual post-translation fetch beats may enter the separate I-fill
+  // staging line. Page-table walks and descriptor traffic are data beats.
+  assign mem_code = mem_req && !cur_is_d;
+`endif
 
   // M2S.4 — byte offset into the 32-bit TSS of the privilege-N stack pointer pair
   // (ESPn then SSn). 32-bit TSS layout: ESP0@0x04, SS0@0x08, ESP1@0x0C, SS1@0x10,

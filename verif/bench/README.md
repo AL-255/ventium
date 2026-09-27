@@ -108,3 +108,19 @@ flush/snoop cancellation. A legacy write hit must be visible to a subsequent
 pair read. The interface is not connected to the core's EA/DTLB/issue path,
 so these results establish cache-local behavior only—not paired retirements,
 architectural correctness, area, timing, or gameplay throughput.
+
+`run-p54-l1d-code-buffer.sh` tests `VEN_L1D_CODE_BUFFER` in four cache
+configurations, including banked/window/forward variants. Code reads with the
+core's zero-strobe convention stage a separate physical line without touching
+the two D ways; it checks data residency, same-address response ownership,
+store/snoop/flush invalidation, and golden/noncacheable fallback. The bounded
+`run-p54-code-data-collision.py` runs candidate and control full-core binaries
+against a synthetic loop with three instruction lines and two data lines in
+the same set, then compares their architectural traces. With the banked cache
+and historical AXI replay enabled, the code-buffer candidate took **138 vs
+150 cycles per 8-instruction loop** and **6 vs 10 AXI ARs per loop**. This is
+a directed collision result, not gameplay performance or a general speedup.
+The residual two ARs per cache-line read are the platform's default-on replay
+policy; do not disable it on the HP/HPC backend solely to improve the number.
+`VEN_AXI_READ_TRACE=N` on the simulator prints at most N accepted AXI AR
+addresses for a short diagnostic run without changing RTL timing.

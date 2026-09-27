@@ -79,6 +79,9 @@ module ven_l1d #(
     // ---- core side (the same-cycle-ack contract; mirrors core mem_*) ----------
     input  logic        c_req,
     input  logic        c_we,
+`ifdef VEN_L1D_CODE_BUFFER
+    input  logic        c_code, // physical instruction-fill beat, never a data operand
+`endif
     input  logic [31:0] c_addr,
     input  logic [31:0] c_wdata,
     input  logic [3:0]  c_wstrb,
@@ -173,7 +176,11 @@ module ven_l1d #(
   // owns a 256x32 array and one byte-enabled write port; a multidimensional
   // dc_bank[bank][row] with dynamic bank writes does NOT infer Xilinx RAM.
   logic bank_fill_we, bank_store_we;
-  assign bank_fill_we = rst_n && (st == L1_FILL) && m_ack && !bypass_q;
+  assign bank_fill_we = rst_n && (st == L1_FILL) && m_ack && !bypass_q
+`ifdef VEN_L1D_CODE_BUFFER
+      && !code_fill_q
+`endif
+      ;
   assign bank_store_we = rst_n && (st == L1_IDLE) && !mc_lookup_next &&
       !stream_path && c_req && c_we && c_ack && !xline && hit;
 `else
@@ -302,6 +309,23 @@ module ven_l1d #(
   logic [31:0] addr_n;
   logic [IDXW-1:0] set_n; logic [TAGW-1:0] tag_n;
   logic        hit_n0, hit_n1, hit_n, hit_way_n, xline, rd_hit;
+`ifdef VEN_L1D_CODE_BUFFER
+  // One physical I-line staging buffer. The upstream I-cache retains code;
+  // this is only its fill source and never participates in D-cache replacement.
+  logic code_access, code_hit, code_valid_q, code_fill_q;
+  logic [26:0] code_line_tag_q;
+  logic [LW-1:0] code_line_q;
+  // Aligned 4-byte reads cannot cross the 32-byte line. Use the live c_addr,
+  // not xline/lookup_addr: the latter can be redirected by mc_lookup_next,
+  // which itself depends on the owned rd_match response (comb-loop hazard).
+  // The core's instruction-fill arms leave read strobes at zero (the legacy
+  // cacheable-read convention); explicit full-word reads use 4'hf. Both mean
+  // one aligned dword here. Narrow nonzero strobes remain on the D path.
+  assign code_access = c_code && !c_we && cacheable && !golden &&
+      (c_addr[1:0] == 2'd0) && ((c_wstrb == 4'h0) || (c_wstrb == 4'hf));
+  assign code_hit = code_access && code_valid_q &&
+      (code_line_tag_q == c_addr[31:5]);
+`endif
   assign addr_n    = lookup_addr + 32'd32;     // the next 32-byte line
   assign set_n     = addr_n[OFFW +: IDXW];
   assign tag_n     = addr_n[OFFW+IDXW +: TAGW];
@@ -353,7 +377,11 @@ module ven_l1d #(
   // why H-07 needs an actual SERVE path that does not depend on a cacheable hit --
   // exactly the "non-deadlocking read bypass" the review asks for. Left as the plain
   // array hit; the [9c] case below documents the property a correct fix must satisfy.
-  assign rd_hit    = hit && (!xline || hit_n); // a READ hits iff both needed lines resident
+  assign rd_hit    =
+`ifdef VEN_L1D_CODE_BUFFER
+                     code_access ? code_hit :
+`endif
+                     hit && (!xline || hit_n); // a READ hits iff both needed lines resident
 
   // addressed line read (the hit way) + the BYTE offset within it. The core's mem
   // port is BYTE-addressable (the sim BFM reads the 4 bytes starting at the exact
@@ -432,7 +460,11 @@ module ven_l1d #(
   assign rd_line_next_raw = dc_line[{set_n, hit_way_n}];
   assign fill_forward_line_raw = dc_line[{fset, fway}];
 `endif
-  assign rd_line      = fill_forward_hit ? fill_forward_line : rd_line_raw;
+  assign rd_line      =
+`ifdef VEN_L1D_CODE_BUFFER
+                        code_access ? code_line_q :
+`endif
+                        fill_forward_hit ? fill_forward_line : rd_line_raw;
   assign rd_line_next = rd_line_next_raw;   // the L+1 line (for a cross-line read)
   assign rd_window    = {rd_line_next, rd_line};       // named temp: xsim can't index a concat
   assign boff         = lookup_addr[4:0];
@@ -473,6 +505,9 @@ module ven_l1d #(
   logic            rd_armed;
   logic [2*LW-1:0] rd_window_q;
   logic [31:0]     rd_addr_q;       // address rd_window_q was captured for
+`ifdef VEN_L1D_CODE_BUFFER
+  logic            rd_code_q;
+`endif
   logic            rd_match;        // captured window is valid for the CURRENT request
   logic            do_rd_cap;
   logic            stream_path;
@@ -503,6 +538,9 @@ module ven_l1d #(
   // a crossing, or data captured from an incomplete fill through this path.
   logic window_valid_q;
   assign window_reuse = window_valid_q && !mc_lookup_next && !stream_path && !early_armed &&
+`ifdef VEN_L1D_CODE_BUFFER
+      !code_access &&
+`endif
       (st == L1_IDLE) && c_req && !c_we && cacheable && !golden &&
       !flush_all && !snoop_inv_valid && hit &&
       (c_addr[31:5] == rd_addr_q[31:5]) && (c_addr[4:0] <= 5'd28);
@@ -526,7 +564,11 @@ module ven_l1d #(
 `else
   assign stream_path = 1'b0;
 `endif
-  assign rd_match  = rd_armed && !stream_path && (rd_addr_q == c_addr);
+  assign rd_match  = rd_armed && !stream_path && (rd_addr_q == c_addr)
+`ifdef VEN_L1D_CODE_BUFFER
+      && (rd_code_q == code_access)
+`endif
+      ;
   // REVIEW Aug-1 H-05: do_rd_cap is derived from the COMBINATIONAL hit, which reads
   // pre-edge tag/valid. If a snoop for that same line lands on the same clock, the
   // array's valid bit is cleared at the edge but the OLD window has already been
@@ -566,6 +608,9 @@ module ven_l1d #(
   logic fill_independent_hit;
 `ifdef VEN_L1D_HIT_UNDER_FILL
   assign fill_independent_hit = (st == L1_FILL) && !bypass_q && !xline &&
+`ifdef VEN_L1D_CODE_BUFFER
+                               !code_fill_q &&
+`endif
                                (set_c != fset);
 `else
   assign fill_independent_hit = 1'b0;
@@ -618,9 +663,16 @@ module ven_l1d #(
   logic            early_ok_q;
   logic [31:0]     early_addr_q, early_rdata_q;
   logic [3:0]      early_wstrb_q;
+`ifdef VEN_L1D_CODE_BUFFER
+  logic            early_code_q;
+`endif
   logic            early_match;
   assign early_match = early_armed && c_req && !c_we &&
-                       (c_addr == early_addr_q) && (c_wstrb == early_wstrb_q);
+                       (c_addr == early_addr_q) && (c_wstrb == early_wstrb_q)
+`ifdef VEN_L1D_CODE_BUFFER
+                       && (early_code_q == code_access)
+`endif
+                       ;
   assign dbg_serve = {1'b0, st[1:0], flush_all, rd_match, hit_way, hit1, hit0};  // mini-ILA: L1D FSM + serve state
 
   // H-06/H-07: does an in-flight snoop hit the line currently being allocated?
@@ -780,6 +832,9 @@ module ven_l1d #(
   // the following word from rd_window_q, which may not have arrived yet.
   // Keep such accesses on the ordinary completed-line registered read path.
   assign fill_forward_hit = (st == L1_FILL) && !bypass_q && cacheable &&
+`ifdef VEN_L1D_CODE_BUFFER
+                            !code_fill_q && !code_access &&
+`endif
                             (c_addr[1:0] == 2'b00) &&
                             !xline && !fill_poison && !flush_all &&
                             !snoop_inv_valid && (set_c == fset) &&
@@ -1011,6 +1066,9 @@ module ven_l1d #(
   always_ff @(posedge clk) begin
     if (!rst_n) begin
       st<=L1_IDLE; fw<=3'd0; rd_armed<=1'b0; rd_window_q<='0; rd_addr_q<=32'd0;
+`ifdef VEN_L1D_CODE_BUFFER
+      rd_code_q<=1'b0; early_code_q<=1'b0;
+`endif
 `ifdef VEN_FP_LOAD64
       rd_full_line_q <= 1'b0;
 `endif
@@ -1024,6 +1082,9 @@ module ven_l1d #(
       early_armed<=1'b0; early_ok_q<=1'b0; early_addr_q<=32'd0;
       early_rdata_q<=32'd0; early_wstrb_q<=4'd0;
       bypass_q<=1'b0; bp_line<='0; fill_poison<=1'b0; byp_n2<=1'b0;
+`ifdef VEN_L1D_CODE_BUFFER
+      code_valid_q<=1'b0; code_fill_q<=1'b0; code_line_tag_q<='0;
+`endif
       byp_wstrb_q<=4'd0;
       bp_hi<=32'd0; byp_need_hi<=1'b0; byp_hi_beat<=1'b0;   // H-19
       for (int s=0;s<L1_SETS;s++) begin
@@ -1077,6 +1138,9 @@ module ven_l1d #(
       if (do_rd_cap && !flush_all) begin
         rd_window_q <= rd_window;
         rd_addr_q   <= lookup_addr;   // independently accepted response owner
+`ifdef VEN_L1D_CODE_BUFFER
+        rd_code_q   <= code_access;
+`endif
       end
       unique case (st)
         L1_IDLE: begin
@@ -1134,7 +1198,15 @@ module ven_l1d #(
             // xline-line read where L is resident but L+1 is not, fill L+1; the core
             // holds the request so the retry then fills L (if needed) -> L+1 -> hits.
             bypass_q <= 1'b0;
-            if (!hit) begin
+`ifdef VEN_L1D_CODE_BUFFER
+            code_fill_q <= code_access;
+            if (code_access) code_valid_q <= 1'b0;
+`endif
+            if (
+`ifdef VEN_L1D_CODE_BUFFER
+                code_access ||
+`endif
+                !hit) begin
               fset <= set_c; fway <= ~dc_lru[set_c]; ftag <= tag_c; fbase <= c_addr;
             end else begin            // hit_L but xline && !hit_n -> fill the next line
               fset <= set_n; fway <= ~dc_lru[set_n]; ftag <= tag_n; fbase <= addr_n;
@@ -1148,6 +1220,9 @@ module ven_l1d #(
             early_ok_q    <= cacheable && !xline && (c_addr[1:0] == 2'd0);
             early_addr_q  <= c_addr;
             early_wstrb_q <= c_wstrb;
+`ifdef VEN_L1D_CODE_BUFFER
+            early_code_q <= code_access;
+`endif
           end else if (1'b0 && c_req && c_we && !xline && !hit && cacheable) begin
             // DISABLED (Win95 REP-MOVSB relocation fix): the write-allocate STALLS the core
             // (c_ack=0) through an 8-beat fill on every write MISS. Under real FPGA DDR latency a
@@ -1169,8 +1244,14 @@ module ven_l1d #(
             fill_poison <= flush_all || snoop_inv_valid;   // H-06/H-07
           end else if (c_req && !c_we && rd_hit) begin
             // read HIT → 2-way LRU touch (both lines on a xline-line hit).
+`ifdef VEN_L1D_CODE_BUFFER
+            if (!code_access) begin
+`endif
             dc_lru[set_c] <= hit_way;
             if (xline) dc_lru[set_n] <= hit_way_n;
+`ifdef VEN_L1D_CODE_BUFFER
+            end
+`endif
           end else if (c_req && c_we && c_ack) begin
             // WRITE (write-through). The backing received the full byte-accurate store
             // via the comb driver (ven_axi_master splits a cross-word / cross-line
@@ -1223,6 +1304,9 @@ module ven_l1d #(
           end
         end
         L1_FILL: begin
+`ifdef VEN_L1D_CODE_BUFFER
+          if (golden && code_fill_q) fill_poison <= 1'b1;
+`endif
 `ifdef VEN_L1D_HIT_UNDER_FILL
           // fill_independent_hit proves set_c != fset, so this local LRU
           // touch cannot race the fill's terminal allocation/LRU update.
@@ -1270,7 +1354,14 @@ module ven_l1d #(
             end else begin
               // The backing stream starts at the critical word and wraps; map
               // each returned beat back to its physical dword slot in the line.
+`ifdef VEN_L1D_CODE_BUFFER
+              if (code_fill_q)
+                code_line_q[32*fill_word +: 32] <= m_rdata;
+`endif
 `ifndef VEN_L1D_BANKED_DATA
+`ifdef VEN_L1D_CODE_BUFFER
+              else
+`endif
               dc_line[{fset,fway}][{fill_word,5'b00000} +: 32] <= m_rdata;
 `endif
               // The data array write is visible on the following clock.  Mark
@@ -1329,8 +1420,17 @@ module ven_l1d #(
                 // same-cycle invalidation cannot be caught by the pre-edge guards in the
                 // flush/snoop blocks below (they see valid=0 for this not-yet-allocated
                 // line). The tag is written either way; val is what gates it.
-                dc_tag[fset][fway]<=ftag; dc_lru[fset]<=fway;
-                dc_val[fset][fway]<= !(fill_poison || flush_all || snoop_hits_fill);
+`ifdef VEN_L1D_CODE_BUFFER
+                if (code_fill_q) begin
+                  code_line_tag_q <= fbase[31:5];
+                  code_valid_q <= !(fill_poison || flush_all || snoop_hits_fill || golden);
+                end else begin
+`endif
+                  dc_tag[fset][fway]<=ftag; dc_lru[fset]<=fway;
+                  dc_val[fset][fway]<= !(fill_poison || flush_all || snoop_hits_fill);
+`ifdef VEN_L1D_CODE_BUFFER
+                end
+`endif
                 // The line/tag/valid RAM writes commit on this edge.  Returning
                 // directly to IDLE gives the existing registered read window the
                 // following full cycle to observe the new line, then a further
@@ -1386,6 +1486,15 @@ module ven_l1d #(
         if (dc_val[snp_set][0] && dc_tag[snp_set][0]==snp_tag) dc_val[snp_set][0]<=1'b0;
         if (dc_val[snp_set][1] && dc_tag[snp_set][1]==snp_tag) dc_val[snp_set][1]<=1'b0;
       end
+`ifdef VEN_L1D_CODE_BUFFER
+      // The I-fill copy must not outlive any external mutation or an accepted
+      // CPU store. A conservative all-store invalidate costs no extra backing
+      // traffic in the normal fill sequence and avoids an untracked code alias.
+      if (flush_all || snoop_inv_valid || golden || txn_done ||
+          (c_req && c_code && !cacheable) ||
+          (c_req && c_we && c_ack))
+        code_valid_q <= 1'b0;
+`endif
     end
   end
 

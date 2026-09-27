@@ -363,6 +363,9 @@ module ventium_top
   // to the bus subsystem FRONT and the response side comes back from it. The mux
   // is below the core instance. (Declared here so the core can bind to them.)
   logic        core_mem_req, core_mem_we;
+`ifdef VEN_L1D_CODE_BUFFER
+  logic        core_mem_code;
+`endif
   logic        core_mem_lock;       // raw external LOCK# qualifier for this beat
   logic        core_mem_lock_hold;  // local L1/AXI reservation across RMW detours
   logic        core_mem_lock_end;   // one-cycle architectural session completion/abort
@@ -785,6 +788,9 @@ module ventium_top
 `endif
       .mem_req      (core_mem_req),
       .mem_we       (core_mem_we),
+`ifdef VEN_L1D_CODE_BUFFER
+      .mem_code     (core_mem_code),
+`endif
       // Raw LOCK# qualifies an individual physical beat.  The distinct session
       // hold feeds both the L1/AXI local-DMA arbiter and the pin BIU, which
       // cannot infer a multi-write/no-write RMW completion from W/R# alone.
@@ -1294,6 +1300,9 @@ module ventium_top
 `endif
       .core_req  (l1axi_en ? core_mem_req : 1'b0),   // L1 inert in modes 0/1
       .core_we   (core_mem_we),
+`ifdef VEN_L1D_CODE_BUFFER
+      .core_code (l1axi_en && core_mem_code),
+`endif
       .core_addr (core_mem_addr), .core_lin (core_mem_lin),
       .core_wdata(core_mem_wdata),
       .core_wstrb(core_mem_wstrb),

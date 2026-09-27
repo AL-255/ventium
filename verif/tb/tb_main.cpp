@@ -819,6 +819,11 @@ int main(int argc, char** argv) {
         bool read_active = false, first_r_seen = false;
     } axi_profile_stats{};
     const bool axi_profile = (std::getenv("VEN_AXI_PROFILE") != nullptr);
+    // Optional bounded AR-address trace for classifying I/D line-fill traffic.
+    // A count (rather than an unbounded toggle) keeps long IPC runs usable.
+    const uint64_t axi_read_trace_limit = std::getenv("VEN_AXI_READ_TRACE")
+        ? std::strtoull(std::getenv("VEN_AXI_READ_TRACE"), nullptr, 0) : 0;
+    uint64_t axi_read_trace_count = 0;
     // Passive address histogram for the write side of the same stable AXI ABI.
     // This is deliberately simulation-only and samples AW handshakes only: it
     // cannot perturb the BFM's response timing or coalesce independent writes.
@@ -953,6 +958,13 @@ int main(int argc, char** argv) {
         axhs.araddr = (uint32_t)top->m_axi_araddr - AXI_REMAP; axhs.arlen = (uint32_t)top->m_axi_arlen;
         axhs.arsize = (uint32_t)top->m_axi_arsize;
         axhs.arburst = (uint32_t)top->m_axi_arburst;
+        if (top->rst_n && axhs.ar && axi_read_trace_count < axi_read_trace_limit) {
+            std::fprintf(stderr,
+                "tb: [axi-rtrace] AR@%llu addr=%08x len=%u size=%u burst=%u\n",
+                (unsigned long long)(half >> 1), axhs.araddr, axhs.arlen,
+                axhs.arsize, axhs.arburst);
+            ++axi_read_trace_count;
+        }
         axhs.awaddr = (uint32_t)top->m_axi_awaddr - AXI_REMAP;
         axhs.wdata  = (uint32_t)top->m_axi_wdata;  axhs.wstrb = (uint32_t)top->m_axi_wstrb;
         if (axi_store_trace && top->rst_n) {

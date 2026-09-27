@@ -97,6 +97,9 @@ module ventium_l1_axi #(
     input  logic        golden_l1,       // golden/L1-useless diagnostic mode (flush after each access)
     input  logic        core_req,
     input  logic        core_we,
+`ifdef VEN_L1D_CODE_BUFFER
+    input  logic        core_code,
+`endif
     input  logic [31:0] core_addr,
     input  logic [31:0] core_lin,    // task #51: pre-translate linear addr of the same access
     // REVIEW2 H-24: the core's live SMM state, for SMRAM open/close in the cache map
@@ -1187,6 +1190,9 @@ module ventium_l1_axi #(
       .snoop_inv_addr (l1d_snoop_addr),
       .c_req   (l1d_c_req),
       .c_we    (core_we),
+`ifdef VEN_L1D_CODE_BUFFER
+      .c_code  (core_code),
+`endif
       .c_addr  (core_addr),
       .c_wdata (core_wdata),
       .c_wstrb (core_wstrb),
