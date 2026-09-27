@@ -261,3 +261,30 @@ it were the FPGA's direct AXI path. Any L1/core pipeline change must keep its
 checked physical request identity, page/segment faults, snoop/SMC cancellation
 and exact MMIO behavior, then pass a same-work gameplay A/B and hardware
 timing/area qualification.
+
+## September 27: same-edge PC and uop-map localization
+
+The extended analyzer reconstructs the same candidate-only 1.150–1.151B
+recording exactly and emits `wave7.pc_edge_causes.tsv` under
+`tmp/build-tmp/ventium-fp-branch-1150m-pccauses2-sep27/`. Every row uses the
+**pre-edge EIP** and a mutually exclusive no-retirement cause; each row and
+column sum is checked against the global partition by synthetic legacy- and
+corrected-counter fixtures. EIP need not be the owning `q_pc` in a slow FSM
+state, so an `outside_pipe` EIP hotspot is not by itself a decoded slow-op
+hotspot or a recoverable-cycle estimate.
+
+The full-state `pp_bail[3]` delta is **67,013** uop-map fallback observations:
+66,422 unavailable instruction boundaries and only 591 invalid predecode
+lines. The unavailable-boundary offset histogram has 15,554 observations at
+byte offset 31 and 8,954 at offset 5. These are repeated first-priority
+pipeline observations, not 67,013 independent cache misses or guaranteed
+saved clocks. In particular, the existing `VEN_UOP_CROSSLINE` and
+`VEN_UOP_CROSS_INDEX` features were enabled in this measured build; simply
+enabling them again cannot address the residual holes. The source-bundle
+checksum gate passes. Read-only page-table translation of its saved CR3
+`0x3d000` and CS base `0x10000000` shows hot pre-edge PCs `0x110ff` and
+`0x112ff` at byte offset 31; they decode as `FXCH ST(1)` and
+`MOV AL,[ESI]`, respectively. Their repeated fallback needs a boundary-owner
+diagnosis before changing the uop cache or live decoder. Even eliminating
+every observed uop fallback would be less than 7% of this 1M-cycle window,
+so it is a contributing target, not a route to >1 IPC by itself.

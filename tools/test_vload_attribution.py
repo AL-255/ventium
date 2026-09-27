@@ -252,6 +252,16 @@ def main():
             assert int(totals['l1_next_lookup_miss_reject']) == 1
             assert int(totals['l1_reported_miss_counter_delta']) == (1 if a.corrected_perf else 2)
             assert int(totals['l1_miss_counter_includes_next']) == int(not a.corrected_perf)
+            with (out/'analysis.pc_edge_causes.tsv').open() as f:
+                pc_rows = list(csv.DictReader(f, delimiter='\t'))
+            cause_names = ('outside_pipe', 'async_hold', 'async_fault',
+                           'memory_wait_including_admission', 'frontend_unavailable',
+                           'ready_control')
+            assert sum(int(row['total']) for row in pc_rows) == int(totals['no_edge_retire_total'])
+            for cause in cause_names:
+                assert sum(int(row[cause]) for row in pc_rows) == int(totals.get('no_edge_retire_' + cause, '0'))
+            assert all(sum(int(row[cause]) for cause in cause_names) == int(row['total'])
+                       for row in pc_rows)
             with (out/'analysis.miss_sets.tsv').open() as f:
                 sets = {int(row['set']): row for row in csv.DictReader(f, delimiter='\t')}
             assert sets[26] == dict(set='26', code_misses='0', data_misses='1',

@@ -237,6 +237,9 @@ int main(int argc,char** argv) try {
     std::map<std::string,uint64_t> totals;
     std::map<unsigned,uint64_t> states, nostates, pairs, holdstates;
     std::map<uint32_t,uint64_t> pc_clocks, pc_no_retire;
+    // Same-edge no-retirement ownership, keyed by PRE-edge PC. Keep this
+    // separate from the historical post-edge PC/host-retirement hot table.
+    std::map<std::array<uint64_t,2>,uint64_t> pc_edge_no_retire;
     std::map<std::array<uint64_t,5>,uint64_t> joint;
     // This report deliberately joins actual per-edge observations, not the
     // independently aggregated bail_joint and settled joint tables. Host DPI
@@ -398,6 +401,9 @@ int main(int argc,char** argv) try {
                 prior_full_memwait ? "memory_wait_including_admission" :
                 !prior_front ? "frontend_unavailable" : "ready_control";
             ++totals["no_edge_retire_"+reason];
+            const unsigned cause=prior_state!=28 ? 0 : prior_hold ? 1 :
+                prior_fault ? 2 : prior_full_memwait ? 3 : !prior_front ? 4 : 5;
+            ++pc_edge_no_retire[{prior_pc,cause}];
             if(reason=="ready_control") {
                 std::array<uint64_t,12> key{};
                 key[0]=edge_bail;
@@ -643,6 +649,21 @@ int main(int argc,char** argv) try {
     for(const auto& f:fields) activity<<f.name<<'\t'<<f.size<<'\t'<<f.changes<<'\t'<<f.bytes<<'\n';
     hot<<"eip\tclocks\tno_retire\n";
     for(auto& kv:pc_clocks) hot<<std::hex<<kv.first<<std::dec<<'\t'<<kv.second<<'\t'<<pc_no_retire[kv.first]<<'\n';
+    std::ofstream pc_causes(prefix+".pc_edge_causes.tsv");
+    if(!pc_causes) throw std::runtime_error("PC edge cause output open");
+    pc_causes<<"eip\toutside_pipe\tasync_hold\tasync_fault\tmemory_wait_including_admission\tfrontend_unavailable\tready_control\ttotal\n";
+    std::map<uint64_t,std::array<uint64_t,6>> pc_cause_rows;
+    for(const auto& kv:pc_edge_no_retire) pc_cause_rows[kv.first[0]][kv.first[1]]+=kv.second;
+    uint64_t pc_cause_total=0;
+    for(const auto& kv:pc_cause_rows) {
+        pc_causes<<std::hex<<kv.first<<std::dec;
+        uint64_t row_total=0;
+        for(uint64_t value:kv.second) {pc_causes<<'\t'<<value; row_total+=value;}
+        pc_causes<<'\t'<<row_total<<'\n';
+        pc_cause_total+=row_total;
+    }
+    if(pc_cause_total!=totals["no_edge_retire_total"])
+        throw std::runtime_error("PC edge cause partition mismatch");
     matrix<<"state\tasync_hold\tpipe_mem_wait\tfrontend_ready\tretired\tcycles\n";
     for(auto& kv:joint) {for(auto v:kv.first) matrix<<v<<'\t'; matrix<<kv.second<<'\n';}
     std::ofstream cj(prefix+".ready_control.tsv");
