@@ -43,6 +43,16 @@ The 50,000th retirement occurred at clock 1,100,098,997 in the reference and
 not include full x87/memory state and are supporting evidence, not a substitute
 for the directed x87 differential or cold-boot guest acceptance.
 
+A separate Win95 continuation check used the verified cold-boot-derived 300M
+bundle with the same original executable and serializer. Baseline and candidate
+both reached clock 301M with 46,112,625 retirements; their final native
+snapshots and private disk bytes are SHA256-identical, and their first 50,000
+VTM architectural records match exactly (including cycle stamps). The source
+Win95 bundle still verifies. This proves no difference in that interval, but
+does not demonstrate that the new branch path was exercised there, nor count
+as a new Win95 cold boot. Artifacts are under
+`tmp/build-tmp/ventium-win95-fp-branch-{control,candidate}-sep26/`.
+
 Evidence: `tmp/build-tmp/ventium-state-delta.7sh8i_6b/` is a same-model,
 cold-boot-derived checkpoint replay. The 1,000-cycle host-only relink pilot
 matches the frozen executable's native snapshot and private disk byte-for-byte.
