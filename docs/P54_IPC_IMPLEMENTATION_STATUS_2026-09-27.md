@@ -45,3 +45,31 @@ full FP SIR/FXCH timing. Each needs its own directed witnesses, differential
 gate, integrated Win95/Quake run, and eventually FPGA area/timing qualification.
 The current fixes are correctness/fidelity repairs, not evidence that those
 larger performance mechanisms have been implemented.
+
+## Next measurement and feasibility work
+
+`tools/rep_accounting.h` and the full-PC harness now provide a diagnostic
+REP-normalized callback count, separate from legacy retire events and completed
+REP elements. The unit gate exercises paired, zero-count, multi-element,
+mid-window and unresolved cases. A 100k-cycle BIOS smoke had 2,278 legacy
+events, 128 REP-element callbacks, one completed REP instruction and 2,151
+REP-normalized callbacks; the uninstrumented and instrumented models matched
+retirement count and final PC. This is **not yet canonical instruction IPC**:
+asynchronous FP issue/completion and window-boundary owners require their own
+reconciliation. A separate 1M-cycle historical Quake trace at 1.400–1.401B
+had no REP callback at all, so its 0.629115 legacy IPC is not REP-inflated.
+The candidate is being cold-rerun to the 1.15B gameplay checkpoint, where this
+round will stop at the user's request. Its observer starts at 1.15B, so this
+bounded run cannot yield a broad-window REP-normalized gameplay IPC. That
+measurement remains deferred; no new gameplay result is claimed here.
+
+The historical 1M-cycle trace supplies a useful but limited throughput bound:
+629,115 callbacks were issued on 497,907 productive clocks (131,208 clocks
+retired two), leaving 502,093 no-retirement clocks. With the **same** pairing
+schedule and work, strict legacy IPC >1 would require saving at least 370,886
+clocks, or 73.87% of all no-retirement clocks; a 0.90 legacy CPI would require
+at least 433,797 saved clocks, or 86.40%. This is not a forecast or a canonical
+target. It demonstrates why the memory-service, slow-FSM and front-end gaps
+cannot be treated as independent small patches. The controlling M0/M1 plan
+still requires a normalized broad-window trace and an independent P54 timing
+model before choosing the complete pipeline/memory replacement configuration.
