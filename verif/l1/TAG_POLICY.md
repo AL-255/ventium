@@ -26,9 +26,10 @@ P5 8 KiB / 2-way cache geometry.
   store-miss→dependent-load visibility and remapping. Two-entry P5 write-buffer
   capacity/response-drain gate: PASS. Original baseline pollution counts remain
   8/16/16 backing dwords under the default policy; candidate requires 0/0/0.
-- Historical `make verify`: PASS, 105 functional programs vs pinned QEMU and
-  all M4/M5 metric bands on the earlier source. A fresh build is required for
-  the promoted normal policy; the old pass is not candidate evidence.
+- Promoted normal-policy source: `make verify` PASS (105 pinned-QEMU functional
+  programs and M4/M5 metric bands), `make verify-sys` PASS, `make lint` PASS,
+  `run-l1axi-gate.sh` PASS, and `run-l1d-gate.sh` PASS. These checks exercise
+  the source after the default-policy change; they are not a full-PC boot.
 - Candidate full-core L1/AXI build `obj_dir_sep14_tag_policy`: FP/integer overlap,
   deferred #NM/#MF and the FADD memory-fault regression all PASS. Logs:
   `tmp/build-tmp/sep14_tag_core_qualification/`.
