@@ -552,3 +552,27 @@ the requested gameplay IPC. The larger requirement is a general pipeline
 that overlaps independent work with cache and x87 latency while maintaining
 ordered retirement and precise exceptions; speculative prefetch alone does
 not provide that execution overlap.
+
+### L2 capacity sensitivity from the same demand-miss traces
+
+`tools/l2_reuse_profile.py --miss-events` replays the state analyzer's actual
+instruction- and data-origin L1 demand misses in order, excluding rejected
+next-address lookups (kind 2). It models a **cold**, four-way LRU cache with
+64-byte lines; two adjacent 32-byte L1 fills can therefore share one modeled
+L2 line. The five parser/LRU unit tests pass. The input totals independently
+match the analyzer's 8,647 and 5,070 actual demand misses:
+
+| Gameplay trace | 32 KiB hits / fills | 256 KiB hits / fills |
+| --- | ---: | ---: |
+| 1.150–1.151B | 4,160 / 8,647 (48.1%) | 4,717 / 8,647 (54.6%) |
+| 1.400–1.401B | 3,222 / 5,070 (63.6%) | 3,500 / 5,070 (69.0%) |
+
+This is a capacity/reuse screen, **not** simulated L2 traffic, saved clocks or
+gameplay IPC. It omits stores, bypass/MMIO and other requesters, starts empty
+mid-gameplay, and does not model L2 latency, backpressure or overlap. The L2
+RTL is absent/disabled in this checkout. A general L2 could address a sizable
+fraction of the observed backing fills, but even perfect service of these
+particular hits cannot be counted as removed no-retirement edges without a
+transactional implementation and matched-work replay. It is another candidate
+alongside core/L1 request pipelining, not a replacement for that larger path
+to >1 IPC.
