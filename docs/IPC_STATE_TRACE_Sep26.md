@@ -288,3 +288,16 @@ checksum gate passes. Read-only page-table translation of its saved CR3
 diagnosis before changing the uop cache or live decoder. Even eliminating
 every observed uop fallback would be less than 7% of this 1M-cycle window,
 so it is a contributing target, not a route to >1 IPC by itself.
+
+A pre-edge `wave7.uop_holes.tsv` event dump under
+`tmp/build-tmp/ventium-fp-branch-1150m-uopholes3-sep27/` narrows the
+offset-31 case without guessing from aggregate counters. For EIP `0x110ff`
+(`FXCH ST(1)`), all 7,690 first-priority fallback observations have a valid
+predecode line, both returned code sources available, no boundary entry and
+no published cross-line match. Exactly 1,538 show a repair-start pulse;
+6,385 see the repair walker in `W_SEEK`, commonly at another anchor. This is
+consistent with a repair-service/contention problem, not missing instruction
+bytes, but the dump does not yet distinguish repair acceptance, preemption and
+publication outcomes. A future optimization must preserve source identities,
+invalidation and mode-change cancellation; a PC-specific cache entry is not a
+general processor fix.

@@ -64,6 +64,10 @@ int main(int argc,char** argv) try {
         const auto& f=fields[id]; if(f.size>8) throw std::runtime_error("not scalar: "+f.name);
         uint64_t v=0; memcpy(&v,state.data()+f.offset,f.size); return v;
     };
+    auto optional_field = [&](const std::string& name) -> unsigned {
+        auto it=lookup.find(name); return it==lookup.end() ? nf : it->second;
+    };
+    auto optional_scalar = [&](unsigned id) -> uint64_t {return id==nf ? 0 : scalar(id);};
     StateDeltaFocus focus([&](const std::string& name) -> int {
         // Verilator canonicalizes the core's output port onto its parent's
         // connected net. This is .mem_req(core_mem_req), NOT bd_req or the
@@ -211,6 +215,16 @@ int main(int argc,char** argv) try {
     auto next_lookup_id=field(l1+"u_l1d__DOT__mc_lookup_next");
     auto miss_perf_id=field(l1+"u_l1d__DOT__perf_miss_start");
     const uint64_t initial_miss_perf=scalar(miss_perf_id);
+    auto flin_id=field(core+"flin"), ic_ready_id=field(core+"ic_fetch_ready");
+    auto uc_pd_id=field(core+"uc_updvalid"), uc_boundary_id=field(core+"uc_ubvalid");
+    auto uc_cross_id=field(core+"uc_cross_ready"), uc_repair_id=field(core+"uc_repair_start");
+    auto uc_sources_id=optional_field(core+"uc_cross_sources_ready");
+    auto ic_fb_id=optional_field(core+"ic_fb_avail");
+    const std::string uc=core+"u_uopcache__DOT__";
+    auto uc_wst_id=optional_field(uc+"wst"), uc_woff_id=optional_field(uc+"woff");
+    auto uc_wslot_id=optional_field(uc+"wslot"), uc_wsteps_id=optional_field(uc+"wsteps");
+    auto uc_wrepair_id=optional_field(uc+"wrepair"), uc_wanchor_id=optional_field(uc+"wanchor");
+    auto uc_wset_id=optional_field(uc+"wset");
     auto bypass_id=field(l1+"u_l1d__DOT__bypass_q"), fset_id=field(l1+"u_l1d__DOT__fset");
     auto ftag_id=field(l1+"u_l1d__DOT__ftag"), fbase_id=field(l1+"u_l1d__DOT__fbase");
     auto fw_id=field(l1+"u_l1d__DOT__fw"), poison_id=field(l1+"u_l1d__DOT__fill_poison");
@@ -249,6 +263,9 @@ int main(int argc,char** argv) try {
     std::map<std::array<uint64_t,12>,uint64_t> edge_control;
     std::map<std::array<uint64_t,6>,uint64_t> edge_joint;
     std::map<std::array<uint64_t,6>,uint64_t> cache_backend;
+    std::ofstream uop_holes(std::string(argv[2])+".uop_holes.tsv");
+    if(!uop_holes) throw std::runtime_error("uop hole output open");
+    uop_holes<<"cycle\teip\tflin\toffset\tic_ready\tpd_valid\tboundary_valid\tcross_ready\tcross_sources_ready\tic_fb_avail\trepair_start\twalker_state\twalker_offset\twalker_slot\twalker_steps\twalker_repair\twalker_anchor\twalker_set\n";
     // Kind 0: current instruction-fetch miss; 1: current data miss;
     // 2: rejected read-chain NEXT query (not a backing transaction).
     std::map<std::array<uint32_t,2>,uint64_t> miss_lines;
@@ -271,6 +288,13 @@ int main(int argc,char** argv) try {
         std::string prior_pair_class=prior_mem_active ? std::string{} : memory_pair_class();
         ReadGeometry prior_geometry=prior_pair_class.empty() ? ReadGeometry{} : read_geometry();
         uint64_t prior_hold=scalar(hold_id), prior_front=scalar(front_id), prior_pc=scalar(pc_id);
+        const uint64_t prior_flin=scalar(flin_id);
+        const std::array<uint64_t,15> prior_uop{scalar(ic_ready_id),scalar(uc_pd_id),
+            scalar(uc_boundary_id),scalar(uc_cross_id),optional_scalar(uc_sources_id),
+            optional_scalar(ic_fb_id),scalar(uc_repair_id),
+            optional_scalar(uc_wst_id),optional_scalar(uc_woff_id),optional_scalar(uc_wslot_id),
+            optional_scalar(uc_wsteps_id),optional_scalar(uc_wrepair_id),optional_scalar(uc_wanchor_id),
+            optional_scalar(uc_wset_id),uint64_t(prior_flin&31u)};
         uint64_t prior_state=scalar(state_id);
         bool prior_memwait=scalar(mem_id) && !scalar(ack_id);
         bool prior_full_memwait=scalar(full_memwait_id), prior_fault=scalar(fault_id);
@@ -379,6 +403,12 @@ int main(int argc,char** argv) try {
                 ++pc_bail[{prior_pc,bucket}];
             }
             old_bail[bucket]=value;
+        }
+        if(edge_bail==3) {
+            uop_holes<<cycle<<'\t'<<std::hex<<prior_pc<<'\t'<<prior_flin<<std::dec
+                     <<'\t'<<prior_uop[14];
+            for(unsigned i=0;i<14;++i) uop_holes<<'\t'<<prior_uop[i];
+            uop_holes<<'\n';
         }
         unsigned st=scalar(state_id); uint32_t pc=scalar(pc_id);
         ++states[st]; ++pc_clocks[pc];

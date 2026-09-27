@@ -180,6 +180,12 @@ def main():
         chain_sample(1, 1),                       # replacement remains unproven
         chain_sample(0, 0, valid=0),
     ]
+    # Exercise one cumulative profiler bucket-3 edge. The event recorder must
+    # capture the PRE-edge state and must not emit another row at later levels.
+    bail_field = by_name[core + 'pp_bail']
+    bail_offset = int(bail_field['offset']) + 3 * 8
+    for state in samples[4:]:
+        state[bail_offset:bail_offset + 8] = (1).to_bytes(8, 'little')
     # Model the L1's registered miss counter at the same pre-edge sampling
     # phase as the analyzer. The explicit idle cacheable miss above increments
     # the NEXT sample's counter, never the miss sample's own value.
@@ -262,6 +268,16 @@ def main():
                 assert sum(int(row[cause]) for row in pc_rows) == int(totals.get('no_edge_retire_' + cause, '0'))
             assert all(sum(int(row[cause]) for cause in cause_names) == int(row['total'])
                        for row in pc_rows)
+            with (out/'analysis.uop_holes.tsv').open() as f:
+                holes = list(csv.DictReader(f, delimiter='\t'))
+            assert len(holes) == 1
+            assert all(holes[0][key] == value for key, value in
+                       dict(cycle='5', eip='0', flin='0', offset='0', ic_ready='0',
+                            pd_valid='0', boundary_valid='0', cross_ready='0',
+                            cross_sources_ready='0', ic_fb_avail='0',
+                            repair_start='0', walker_state='0', walker_offset='0',
+                            walker_slot='0', walker_steps='0', walker_repair='0',
+                            walker_anchor='0', walker_set='0').items())
             with (out/'analysis.miss_sets.tsv').open() as f:
                 sets = {int(row['set']): row for row in csv.DictReader(f, delimiter='\t')}
             assert sets[26] == dict(set='26', code_misses='0', data_misses='1',
