@@ -17,6 +17,19 @@ run_timeout="${RUN_TIMEOUT:-10800}"
 (( 10#$save_cycle > 0 && 10#$run_timeout > 0 )) || exit 2
 save_cycle=$((10#$save_cycle))
 run_timeout=$((10#$run_timeout))
+kb_script="${KB_SCRIPT:-}"
+kb_start=0
+kb_gap=0
+kb_args=()
+if [[ -n "$kb_script" ]]; then
+    kb_start="${KB_START:-3000000}"
+    kb_gap="${KB_GAP:-6000000}"
+    [[ "$kb_script" != *$'\n'* && "$kb_script" != *$'\r'* ]] || exit 2
+    [[ "$kb_start" =~ ^[0-9]{1,12}$ && "$kb_gap" =~ ^[0-9]{1,12}$ ]] || exit 2
+    kb_start=$((10#$kb_start))
+    kb_gap=$((10#$kb_gap))
+    kb_args=(--kb "$kb_script" --kb-start "$kb_start" --kb-gap "$kb_gap")
+fi
 [[ -x "$SIM" && -f "$DISK" && -f "$ROM/boot0.rom" && -f "$ROM/boot1.rom" ]] || exit 2
 if [[ -n "${OUTDIR:-}" ]]; then
     # No overwrites or reuse of a disk modified by an earlier run.
@@ -36,8 +49,8 @@ cp --reflink=auto --sparse=always boot.vhd guest.vhd
 # Immutable archived inputs may be mode 0444. IDE opens only this new private
 # copy read/write; never change the source disk or the boot-input copy's mode.
 chmod u+w -- guest.vhd
-printf 'cold_reset=1\nsnapshot_version=3\nrate=45000000\nrate_rtc=45000000\nrate_vga=90000000\nrtc_epoch=1789257600\nfpga_ddr=2\nsave_cycle=%s\nrun_timeout=%s\n' \
-    "$save_cycle" "$run_timeout" > settings.txt
+printf 'cold_reset=1\nsnapshot_version=3\nrate=45000000\nrate_rtc=45000000\nrate_vga=90000000\nrtc_epoch=1789257600\nfpga_ddr=2\nsave_cycle=%s\nrun_timeout=%s\nkb_script=%s\nkb_start=%s\nkb_gap=%s\n' \
+    "$save_cycle" "$run_timeout" "${kb_script:-none}" "$kb_start" "$kb_gap" > settings.txt
 cd "$ROOT/ao486-sim"
 AO486_BIOS_DIR="$OUT/rom" AO486_RTC_EPOCH=1789257600 FPGA_DDR=2 \
 timeout "$run_timeout" "$OUT/ao486sim_ven" --ide "$OUT/guest.vhd" \
@@ -46,6 +59,7 @@ timeout "$run_timeout" "$OUT/ao486sim_ven" --ide "$OUT/guest.vhd" \
     --snapshot-v3 --save-at "$save_cycle" --save-stop \
     --save-file "$OUT/gameplay.snap" --ven-perf-every 50000000 \
     --vgatext-every 50000000 --fb-every 50000000 --fb-out "$OUT/frame" \
+    "${kb_args[@]}" \
     > "$OUT/capture.log" 2>&1
 cd "$OUT"
 test -s gameplay.snap
