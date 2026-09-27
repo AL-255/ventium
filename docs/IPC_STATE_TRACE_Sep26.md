@@ -489,3 +489,26 @@ be a valid architectural improvement, but this evidence does not support
 making it the first high-risk performance rewrite or claiming it can close the
 >1 IPC target. The analyzer adds only offline provenance counters; no RTL or
 FPGA image changed.
+
+The later 1.400–1.401B **same-build** phase was independently recaptured from
+the verified 1.400B bundle with the host-only state observer. Its 1,000-cycle
+pilot matches the frozen executable, and recorder OFF/ON at 1M clocks end with
+byte-identical native snapshots and private disks. All fields reconstruct
+exactly and the phase/attribution tests pass at
+`tmp/build-tmp/ventium-fair-1400m-analysis-sep27/`. This trace confirms the
+previously reported **0.629115 IPC** for this short phase; the longer
+1.350–1.400B window remains **0.41034849 IPC**. It has 553 code-origin fills,
+4,517 data misses, 411 observed code fills evicting a witnessed data-origin
+line, and only 105 data misses (2.32%) after such an eviction with an
+intervening flush/write excluded. The result is phase-dependent but again
+does not identify code/data contention as the main lost-IPC source.
+
+For this later trace the same-edge *exclusive* no-retirement accounting is
+182,624 memory-admission/wait edges, 151,493 outside-pipeline edges, 68,381
+frontend-unavailable edges, 48,627 pending-FP-hold edges, 49,121 ready but
+control-limited edges, and 1,846 deferred-fault edges (502,092 total).
+These are priority buckets, not independent potential savings. The first two
+alone are 66.55% of no-retirement edges; a code-fill-only policy cannot
+plausibly solve both. A next RTL candidate should target checked memory
+response latency or slow x87 operand/admission transitions and then measure
+the exact same work, retaining full Quake/Win95 and differential gates.
