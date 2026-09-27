@@ -23,6 +23,8 @@ def main():
     p.add_argument('--analyzer', type=Path)
     p.add_argument('--omit-chain-accept', action='store_true',
                    help='exercise older schemas without the optional mc_accept field')
+    p.add_argument('--corrected-perf', action='store_true',
+                   help='synthetic L1 counter excludes unissued next-lookup rejects')
     a = p.parse_args()
     with a.schema.open() as f:
         fields = list(csv.DictReader(f, delimiter='\t'))
@@ -102,7 +104,25 @@ def main():
             field = by_name[l1 + name]
             off, width = int(field['offset']), int(field['size'])
             state[off:off + width] = value.to_bytes(width, 'little')
+        if case_index == 3:
+            put(state, 'bd_addr', 0x12340)  # one data miss in physical set 26
+            lookup = by_name[l1 + 'u_l1d__DOT__lookup_addr']
+            offset, width = int(lookup['offset']), int(lookup['size'])
+            state[offset:offset + width] = (0x12340).to_bytes(width, 'little')
         samples.append(state)
+    # A failed read-chain next lookup is counted by the legacy L1 PERF name,
+    # but the current owner ACKs and NO backing fill starts. Its lookup line
+    # differs from bd_addr, detecting accidental old-address attribution.
+    state = bytearray(size)
+    put(state, 'cur_is_d', 1)
+    put(state, 'bd_addr', 0x12340)
+    for name, item in dict(l1d_c_req=1, l1d_c_ack=1, l1d_cacheable=1,
+                           u_l1d__DOT__rd_hit=0, u_l1d__DOT__mc_lookup_next=1,
+                           u_l1d__DOT__lookup_addr=0x56780).items():
+        field = by_name[l1 + name]
+        offset, width = int(field['offset']), int(field['size'])
+        state[offset:offset + width] = item.to_bytes(width, 'little')
+    samples.append(state)
     # FP hold classification uses a priority partition of settled levels, not
     # estimated saved clocks. Deliberately overlap predicates to check precedence:
     # outside PIPE wins over frontend, frontend over FP, FP over non-simple,
@@ -160,6 +180,24 @@ def main():
         chain_sample(1, 1),                       # replacement remains unproven
         chain_sample(0, 0, valid=0),
     ]
+    # Model the L1's registered miss counter at the same pre-edge sampling
+    # phase as the analyzer. The explicit idle cacheable miss above increments
+    # the NEXT sample's counter, never the miss sample's own value.
+    miss_field = by_name[l1 + 'u_l1d__DOT__perf_miss_start']
+    miss_offset, miss_width = int(miss_field['offset']), int(miss_field['size'])
+    def value(state, name):
+        field = by_name[name]
+        offset, width = int(field['offset']), int(field['size'])
+        return int.from_bytes(state[offset:offset + width], 'little')
+    miss_count = 0
+    for state in samples:
+        state[miss_offset:miss_offset + miss_width] = miss_count.to_bytes(miss_width, 'little')
+        if (value(state, l1 + 'l1d_c_req') and not value(state, core + 'bd_we') and
+                value(state, l1 + 'u_l1d__DOT__st') == 0 and
+                value(state, l1 + 'l1d_cacheable') and
+                not value(state, l1 + 'u_l1d__DOT__rd_hit') and
+                (not a.corrected_perf or not value(state, l1 + 'u_l1d__DOT__mc_lookup_next'))):
+            miss_count += 1
     initial = bytes(size)
     with tempfile.TemporaryDirectory(prefix='ventium-vload-fixture.') as directory:
         out = Path(directory)
@@ -209,6 +247,29 @@ def main():
             assert int(totals['v_memory_attribution_unproven_chain_replacements']) == 3
             assert int(totals.get('read_pair_same_line_complete_registered_window', '0')) == 0
             assert int(totals['l1_read_wait_total']) == 6
+            assert int(totals['l1_demand_miss_code']) == 0
+            assert int(totals['l1_demand_miss_data']) == 1
+            assert int(totals['l1_next_lookup_miss_reject']) == 1
+            assert int(totals['l1_reported_miss_counter_delta']) == (1 if a.corrected_perf else 2)
+            assert int(totals['l1_miss_counter_includes_next']) == int(not a.corrected_perf)
+            with (out/'analysis.miss_sets.tsv').open() as f:
+                sets = {int(row['set']): row for row in csv.DictReader(f, delimiter='\t')}
+            assert sets[26] == dict(set='26', code_misses='0', data_misses='1',
+                                    next_rejects='0', total='1')
+            assert sets[60] == dict(set='60', code_misses='0', data_misses='0',
+                                    next_rejects='1', total='1')
+            assert sum(int(row['total']) for row in sets.values()) == 2
+            with (out/'analysis.miss_lines.tsv').open() as f:
+                lines = list(csv.DictReader(f, delimiter='\t'))
+            assert lines == [dict(physical_line='12340', kind='1', count='1'),
+                             dict(physical_line='56780', kind='2', count='1')]
+            with (out/'analysis.miss_events.tsv').open() as f:
+                events = list(csv.DictReader(f, delimiter='\t'))
+            assert len(events) == 2
+            assert all(events[0][key] == expected for key, expected in
+                       dict(physical_line='12340', set='26', kind='1', core_eip='0').items())
+            assert all(events[1][key] == expected for key, expected in
+                       dict(physical_line='56780', set='60', kind='2', core_eip='0').items())
             for case_index, category in enumerate(('busy', 'idle_uncacheable', 'idle_flush',
                              'idle_miss', 'idle_hit_capture', 'idle_hit_not_capturing')):
                 assert int(totals['l1_read_wait_' + category]) == 1

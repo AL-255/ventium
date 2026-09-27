@@ -207,6 +207,10 @@ int main(int argc,char** argv) try {
     auto l1state_id=field(l1+"u_l1d__DOT__st"), flush_id=field(l1+"__Vcellinp__u_l1d__flush_all");
     auto cacheable_id=field(l1+"l1d_cacheable"), l1ack_id=field(l1+"l1d_c_ack");
     auto rd_hit_id=field(l1+"u_l1d__DOT__rd_hit"), xline_id=field(l1+"u_l1d__DOT__xline");
+    auto lookup_addr_id=field(l1+"u_l1d__DOT__lookup_addr");
+    auto next_lookup_id=field(l1+"u_l1d__DOT__mc_lookup_next");
+    auto miss_perf_id=field(l1+"u_l1d__DOT__perf_miss_start");
+    const uint64_t initial_miss_perf=scalar(miss_perf_id);
     auto bypass_id=field(l1+"u_l1d__DOT__bypass_q"), fset_id=field(l1+"u_l1d__DOT__fset");
     auto ftag_id=field(l1+"u_l1d__DOT__ftag"), fbase_id=field(l1+"u_l1d__DOT__fbase");
     auto fw_id=field(l1+"u_l1d__DOT__fw"), poison_id=field(l1+"u_l1d__DOT__fill_poison");
@@ -242,6 +246,13 @@ int main(int argc,char** argv) try {
     std::map<std::array<uint64_t,12>,uint64_t> edge_control;
     std::map<std::array<uint64_t,6>,uint64_t> edge_joint;
     std::map<std::array<uint64_t,6>,uint64_t> cache_backend;
+    // Kind 0: current instruction-fetch miss; 1: current data miss;
+    // 2: rejected read-chain NEXT query (not a backing transaction).
+    std::map<std::array<uint32_t,2>,uint64_t> miss_lines;
+    std::array<std::array<uint64_t,3>,128> miss_sets{};
+    std::ofstream miss_events(std::string(argv[2])+".miss_events.tsv");
+    if(!miss_events) throw std::runtime_error("miss event output open");
+    miss_events<<"cycle\tphysical_line\tset\tkind\tcore_eip\n";
     uint64_t previous_retired=scalar(ret_id), retired_start=previous_retired, stall_run=0,max_stall=0,max_stall_end=0;
     const uint64_t initial_registered_retire=scalar(rv_id) ? (scalar(rv2_id) ? 2 : 1) : 0;
     uint64_t changed_blocks=0;
@@ -277,6 +288,22 @@ int main(int argc,char** argv) try {
         memcpy(retire_snapshot.data(),state.data()+fields[snap_id].offset,48);
         bool prior_store=scalar(req_id) && scalar(we_id) && scalar(l1state_id)==0 && !scalar(flush_id);
         uint32_t prior_addr=scalar(addr_id);
+        // Match ven_l1d's existing perf_miss_start predicate exactly, then
+        // separate actual demand misses from failed read-chain NEXT queries.
+        // rd_hit and the tag arrays refer to lookup_addr, which is redirected
+        // to the next request while mc_lookup_next is high. The legacy perf
+        // name does not distinguish these non-transactional lookup rejects.
+        if(scalar(req_id) && !scalar(we_id) && scalar(l1state_id)==0 &&
+           scalar(cacheable_id) && !scalar(rd_hit_id)) {
+            const uint32_t line=uint32_t(scalar(lookup_addr_id))&~31u;
+            const unsigned kind=scalar(next_lookup_id) ? 2u :
+                                unsigned(bool(scalar(data_access_id)));
+            ++miss_lines[{line,kind}];
+            ++miss_sets[(line>>5)&127u][kind];
+            miss_events<<first+index+1<<'\t'<<std::hex<<line<<std::dec<<'\t'
+                       <<((line>>5)&127u)<<'\t'<<kind<<'\t'
+                       <<std::hex<<prior_pc<<std::dec<<'\n';
+        }
         // Shadow only the validity bit, retaining the trace's actual capture
         // data/address. This measures eligibility on the observed request
         // sequence, not the timing of a counterfactual faster core.
@@ -559,6 +586,19 @@ int main(int argc,char** argv) try {
     std::vector<uint8_t> final(size); in.read(final.data(),size);
     if(state!=final) throw std::runtime_error("lossless reconstruction failed");
     const uint64_t final_registered_retire=scalar(rv_id) ? (scalar(rv2_id) ? 2 : 1) : 0;
+    std::array<uint64_t,3> counted_misses{};
+    for(const auto& set:miss_sets)
+        for(unsigned kind=0;kind<counted_misses.size();++kind)
+            counted_misses[kind]+=set[kind];
+    const uint64_t reported_misses=scalar(miss_perf_id)-initial_miss_perf;
+    const uint64_t demand_misses=counted_misses[0]+counted_misses[1];
+    // Traces built before the counter repair include rejected read-chain
+    // lookups; current builds exclude them. Both schedules must reconcile
+    // exactly, never silently accept an unrelated counter mismatch.
+    const bool legacy_miss_counter=counted_misses[2] &&
+        (reported_misses==demand_misses+counted_misses[2]);
+    if(!legacy_miss_counter && reported_misses!=demand_misses)
+        throw std::runtime_error("lookup-miss histogram disagrees with L1 counter");
     totals["initial_registered_retire"]=initial_registered_retire;
     totals["final_registered_retire"]=final_registered_retire;
     if(totals["edge_retired"]+initial_registered_retire!=
@@ -572,6 +612,11 @@ int main(int argc,char** argv) try {
     if(!summary || !activity || !hot || !matrix) throw std::runtime_error("output open");
     summary<<"metric\tvalue\ncycles\t"<<count<<"\nstart\t"<<first<<"\nend\t"<<first+count<<"\nfields\t"<<nf<<"\nstate_bytes\t"<<size<<"\nchanged_blocks\t"<<changed_blocks<<"\n";
     summary<<"ipc\t"<<double(previous_retired-retired_start)/count<<"\nlongest_no_retire\t"<<max_stall<<"\nlongest_no_retire_end\t"<<max_stall_end<<"\n";
+    summary<<"l1_demand_miss_code\t"<<counted_misses[0]<<"\n"
+           <<"l1_demand_miss_data\t"<<counted_misses[1]<<"\n"
+           <<"l1_next_lookup_miss_reject\t"<<counted_misses[2]<<"\n"
+           <<"l1_reported_miss_counter_delta\t"<<reported_misses<<"\n"
+           <<"l1_miss_counter_includes_next\t"<<legacy_miss_counter<<"\n";
     for(auto& kv:totals) summary<<kv.first<<'\t'<<kv.second<<'\n';
     for(auto& kv:states) summary<<"state_"<<kv.first<<'\t'<<kv.second<<'\n';
     for(auto& kv:nostates) summary<<"no_retire_state_"<<kv.first<<'\t'<<kv.second<<'\n';
@@ -585,6 +630,16 @@ int main(int argc,char** argv) try {
         for(auto value:kv.first) backend<<value<<'\t';
         backend<<kv.second<<'\n';
     }
+    std::ofstream miss_set_out(prefix+".miss_sets.tsv"), miss_line_out(prefix+".miss_lines.tsv");
+    if(!miss_set_out || !miss_line_out) throw std::runtime_error("miss histogram output open");
+    miss_set_out<<"set\tcode_misses\tdata_misses\tnext_rejects\ttotal\n";
+    for(unsigned set=0;set<miss_sets.size();++set)
+        miss_set_out<<set<<'\t'<<miss_sets[set][0]<<'\t'<<miss_sets[set][1]<<'\t'
+                    <<miss_sets[set][2]<<'\t'
+                    <<miss_sets[set][0]+miss_sets[set][1]+miss_sets[set][2]<<'\n';
+    miss_line_out<<"physical_line\tkind\tcount\n";
+    for(const auto& kv:miss_lines)
+        miss_line_out<<std::hex<<kv.first[0]<<std::dec<<'\t'<<kv.first[1]<<'\t'<<kv.second<<'\n';
     for(const auto& f:fields) activity<<f.name<<'\t'<<f.size<<'\t'<<f.changes<<'\t'<<f.bytes<<'\n';
     hot<<"eip\tclocks\tno_retire\n";
     for(auto& kv:pc_clocks) hot<<std::hex<<kv.first<<std::dec<<'\t'<<kv.second<<'\t'<<pc_no_retire[kv.first]<<'\n';

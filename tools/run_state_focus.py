@@ -77,6 +77,8 @@ def main():
         run('phase', [sys.executable, ROOT / 'tools/test_state_delta_control.py', out / 'analyze'])
         run('vload', [sys.executable, ROOT / 'tools/test_vload_attribution.py', schema_path,
                       '--analyzer', out / 'analyze'])
+        run('vload-corrected-perf', [sys.executable, ROOT / 'tools/test_vload_attribution.py',
+                                     schema_path, '--analyzer', out / 'analyze', '--corrected-perf'])
         run('vload-old-schema', [sys.executable, ROOT / 'tools/test_vload_attribution.py', schema_path,
                                  '--analyzer', out / 'analyze', '--omit-chain-accept'])
         run('reconstruct', [out / 'analyze', trace, out / 'wave7', layout])
