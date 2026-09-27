@@ -185,3 +185,48 @@ A same-cycle U-ALU-to-V bypass would further diverge from the P5 cycle model
 even if its functional result were correct. The short-list remains checked
 memory pipelining and independent integer/FP work, not broadly relaxing
 dependency or pairing guards to manufacture IPC.
+
+## Latest candidate-only gameplay phase: 1.150–1.151B
+
+The opt-in FP-branch build's *own* 1.150B endpoint (after its 50M A/B replay)
+was repackaged with that same build's executable, ROM and private disk, and
+passed `checkpoint_bundle.py`. A host-only full-state observer relink left the
+compiled RTL archive and every generated model source unchanged; frozen-binary
+versus relinked 1,000-cycle replay and recorder OFF versus ON 1M-cycle replay
+ended with byte-identical snapshots and disks. The candidate-only trace is
+`tmp/build-tmp/ventium-state-delta.y3h3nao3/on/state.delta.gz`; its complete
+reconstruction and phase/attribution tests pass in
+`tmp/build-tmp/ventium-fp-branch-1150m-analysis-sep26/`. It records **680,510
+retirements / 1,000,000 clocks = 0.680510 IPC**. This different, favorable
+1M gameplay phase is not an A/B speedup and does **not** supersede the
+representative 1.100–1.150B result of **0.44963946 IPC**.
+
+The same-edge exclusive no-retirement partition sums to 467,609 edges:
+
+| Cause | Edges | Share |
+| --- | ---: | ---: |
+| Memory wait, including admission | 217,967 | 46.61% |
+| Outside fast pipeline | 120,155 | 25.70% |
+| Frontend unavailable | 54,065 | 11.56% |
+| Pending-FP hold | 44,583 | 9.53% |
+| Ready but control-limited | 30,628 | 6.55% |
+| Deferred fault | 211 | 0.05% |
+
+Raw L1 read-wait levels total 260,994 clocks: 146,891 busy backing service,
+108,650 idle registered-hit capture and 5,453 idle miss detection; 251,456
+are data-side and 9,538 instruction-side. These levels overlap the exclusive
+causes above, so they are **not** additional saved clocks. The existing optional
+fill-forward, hit-under-fill and store-window policies expose only 1,612,
+9,138 and 8,416 eligible clocks respectively in this phase; each is an
+opportunity level, not a predicted gain. V-memory attribution still sees
+30,205 U-register/V-memory commit levels, only 11,889 V MOV loads, while
+only 2,272 read/read observations have a complete matching same-line window.
+
+This phase makes the next investigation concrete: measured memory-service
+ownership, especially registered data-hit turnover and backing latency, is
+larger than remaining FP holds. Do not extrapolate the phase's 0.680510 IPC
+to the 50M window or optimize the ao486/Avalon simulation bridge alone as if
+it were the FPGA's direct AXI path. Any L1/core pipeline change must keep its
+checked physical request identity, page/segment faults, snoop/SMC cancellation
+and exact MMIO behavior, then pass a same-work gameplay A/B and hardware
+timing/area qualification.
