@@ -82,6 +82,33 @@ def main():
         run('vload-old-schema', [sys.executable, ROOT / 'tools/test_vload_attribution.py', schema_path,
                                  '--analyzer', out / 'analyze', '--omit-chain-accept'])
         run('reconstruct', [out / 'analyze', trace, out / 'wave7', layout])
+        # The new per-PC string service must conserve the independent generic
+        # slow-memory table's K_STR load/store clocks and acknowledgements.
+        slow_string = {}
+        for row in rows('wave7.slow_memory_service.tsv'):
+            if int(row['q_kind']) != 13:
+                continue
+            key = (int(row['q_pc']), int(row['core_state']))
+            counts = slow_string.setdefault(key, [0, 0])
+            clocks = int(row['clocks'])
+            counts[0] += clocks
+            counts[1] += clocks * int(row['ack'])
+        measured_string = {}
+        for row in rows('wave7.string_service.tsv'):
+            pc = int(row['q_pc'], 16)
+            for state, prefix in ((3, 'load'), (6, 'store')):
+                if int(row[prefix]) == 0:
+                    continue
+                counts = measured_string.setdefault((pc, state), [0, 0])
+                counts[0] += int(row[prefix])
+                counts[1] += int(row[prefix + '_ack'])
+            if (int(row['fused_load_ack']) > int(row['load_ack']) or
+                    int(row['streamed_store_ack']) > int(row['store_ack']) or
+                    int(row['load_busy']) + int(row['load_hit_capture']) +
+                    int(row['load_miss']) > int(row['load'])):
+                raise RuntimeError('string service subset exceeds its parent')
+        if measured_string != slow_string:
+            raise RuntimeError('string service disagrees with generic slow-memory table')
         status = rows('wave7.focus_status.tsv')[0]
         if status['available']!='1':
             raise RuntimeError('recording lacks required focus fields')

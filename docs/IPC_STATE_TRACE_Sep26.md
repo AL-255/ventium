@@ -358,3 +358,59 @@ ended after 1M cycles with byte-identical native snapshots
 and private disks (`48f07a4bb1102dbc4389ecaf8602035af888842168beef73af74b08d3090a88a`).
 The source bundle still verifies. This proves deterministic same-build replay,
 not cross-build state equivalence, a completed timedemo, Win95 boot, or IPC >1.
+
+## September 27: current-build full-state string-service attribution
+
+The current fairness build's deterministic 1.150–1.151B replay produced a
+lossless 1,000,000-cycle full-state trace at
+`tmp/build-tmp/ventium-fair-1150m-delta-sep27/state.delta.gz`. Its endpoint
+snapshot and disk are byte-identical to two frozen-binary replays without the
+recorder. The verified **gameplay** result remains **0.45322318 IPC** over the
+larger 1.100–1.150B window; this differently composed 1M window is only
+**0.275738 IPC** and must not be used as a matched A/B comparison.
+
+The same-edge, mutually exclusive no-retirement partition of this 1M phase
+has 419,252 outside-pipeline, 118,553 memory-admission/wait, 93,065 frontend,
+61,543 ready-control and 49,499 asynchronous-FP-hold edges. These sum to
+741,912 no-retirement edges. The L1 counted 8,647 actual demand misses
+(7,729 data and 918 code), with 589 rejected next-lookups excluded; 99,871
+waiting reads reached an idle registered-hit capture edge. None of these
+overlapping service levels is a guaranteed saving.
+
+The guest bytes at EIP `0x10574` are `F3 A5` (REP MOVSD). New
+`wave7.string_service.tsv` groups the **pre-edge** string controls by decoded
+PC/subtype and checks their load/store clocks and ACKs against the independent
+slow-memory table. The complete reconstruction and synthetic phase tests pass
+at `tmp/build-tmp/ventium-fair-1150m-string3-sep27/` (`STATE-FOCUS-PASS`).
+
+| REP MOVSD PC | Elements (load/store ACKs) | Source-load clocks | Destination-store clocks | Fused source ACKs | Streamed store ACKs |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `0x10574` | 16,000 | 70,026 | 31,028 | 16,000 | 15,800 |
+| `0x55efd` | 16,668 | 35,987 | 17,636 | 16,668 | 15,600 |
+
+The `0x10574` decoded string instruction occupies 101,472 clocks overall.
+Its 70,026 source-load clocks contain 38,012 waiting for a busy L1, 13,999
+idle resident-hit capture clocks, 2,001 idle miss-detection clocks, and
+16,000 ACK clocks (14 other clocks). There are 2,006 actual data-line miss
+events recorded at this EIP, close to the roughly 2,000 lines in 16,000
+sequential dword reads; the event count and miss-detection levels have
+different predicates and need not be identical. The destination-store state
+has 15,012 request-without-ACK clocks and 16,000 ACK clocks. The 200
+non-streamed terminal ACKs correspond to next-element ineligibility; no
+unsupported claim about their individual causes is needed here. By contrast,
+`0x55efd` has only 148 source miss-detection clocks and 2,580 busy-wait
+clocks, so conflating these two REP sites would hide the cold-stream cost.
+
+**Decision:** do not add another REP MOVSD loop shortcut. Source-load fusion
+is used on every sampled element and next-source streaming on nearly all
+eligible elements. The remaining `0x10574` cost is predominantly registered
+cache-hit capture, fill occupancy and store admission. The existing optional
+`VEN_L1D_FILL_FORWARD` / `VEN_L1D_HIT_UNDER_FILL` and
+`VEN_L1D_WINDOW_KEEP_STORE` policies need precise same-work full-PC A/B before
+promotion, but their current-phase eligibility counts (5,076 / 20,848 /
+26,541 clocks across **all** PCs) are not additive or remotely sufficient
+alone to reach >1 IPC. The general fix path is independently owned, registered
+core-to-L1 requests/responses with exact physical identity, ordered stores,
+fault/SMC/snoop cancellation, and byte-exact MMIO; then quantify matched-work
+gameplay and hardware timing/area. Do not substitute a timing-unsafe
+combinational L1 ACK or a Quake-address-specific special case.

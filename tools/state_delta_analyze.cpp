@@ -201,6 +201,9 @@ int main(int argc,char** argv) try {
     auto rv_id=field("system__DOT__u_cpu__DOT__u_core__DOT__core_retire_valid");
     auto rv2_id=field("system__DOT__u_cpu__DOT__u_core__DOT__core_retire2_valid");
     auto qpc_id=field(core+"q_pc"), qpc2_id=field(core+"q_pc2"), snap_id=field(core+"snap");
+    auto qkind_id=optional_field(core+"q_kind"), qst_id=optional_field(core+"q_st");
+    auto movs_fuse_id=optional_field(core+"rep_movs_load_fuse");
+    auto movs_stream_id=optional_field(core+"rep_movs_stream_arm");
     if(fields[snap_id].size!=48) throw std::runtime_error("unknown integer retire snapshot layout");
     std::ofstream commits(std::string(argv[2])+".commit_observations.bin",std::ios::binary);
     if(!commits) throw std::runtime_error("commit observation output open");
@@ -266,6 +269,14 @@ int main(int argc,char** argv) try {
     std::map<std::string,uint64_t> totals;
     std::map<unsigned,uint64_t> states, nostates, pairs, holdstates;
     std::map<uint32_t,uint64_t> pc_clocks, pc_no_retire;
+    // Pre-edge string service, grouped by the retained instruction PC. These
+    // are actual levels/ACKs, never a prediction of clocks saved by a policy.
+    struct StringService {
+        uint64_t clocks=0, load=0, store=0, load_ack=0, store_ack=0;
+        uint64_t fused_load_ack=0, streamed_store_ack=0;
+        uint64_t load_busy=0, load_hit_capture=0, load_miss=0, store_wait=0;
+    };
+    std::map<std::array<uint64_t,2>,StringService> string_service;
     // Same-edge no-retirement ownership, keyed by PRE-edge PC. Keep this
     // separate from the historical post-edge PC/host-retirement hot table.
     std::map<std::array<uint64_t,2>,uint64_t> pc_edge_no_retire;
@@ -330,6 +341,27 @@ int main(int argc,char** argv) try {
             optional_scalar(uc_wsteps_id),optional_scalar(uc_wrepair_id),optional_scalar(uc_wanchor_id),
             optional_scalar(uc_wset_id),uint64_t(prior_flin&31u)};
         uint64_t prior_state=scalar(state_id);
+        // K_STR=13 and ST_MOVS=0 in this trace's pinned decode package. Leave
+        // the subtype in the output so other string ops remain distinguishable.
+        if(qkind_id!=nf && qst_id!=nf && scalar(qkind_id)==13) {
+            auto& row=string_service[{scalar(qpc_id),scalar(qst_id)}];
+            ++row.clocks;
+            if(prior_state==3) {
+                ++row.load;
+                row.load_ack+=bool(scalar(ack_id));
+                row.fused_load_ack+=bool(scalar(ack_id) && optional_scalar(movs_fuse_id));
+                if(scalar(req_id) && !scalar(we_id) && !scalar(l1ack_id)) {
+                    if(scalar(l1state_id)!=0) ++row.load_busy;
+                    else if(scalar(cacheable_id) && !scalar(rd_hit_id)) ++row.load_miss;
+                    else if(scalar(capture_id)) ++row.load_hit_capture;
+                }
+            } else if(prior_state==6) {
+                ++row.store;
+                row.store_ack+=bool(scalar(ack_id));
+                row.streamed_store_ack+=bool(scalar(ack_id) && optional_scalar(movs_stream_id));
+                row.store_wait+=bool(scalar(req_id) && !scalar(ack_id));
+            }
+        }
         bool prior_memwait=scalar(mem_id) && !scalar(ack_id);
         bool prior_full_memwait=scalar(full_memwait_id), prior_fault=scalar(fault_id);
         std::array<uint64_t,11> prior_control{scalar(mem_id),scalar(stall_id),
@@ -738,6 +770,18 @@ int main(int argc,char** argv) try {
     for(const auto& f:fields) activity<<f.name<<'\t'<<f.size<<'\t'<<f.changes<<'\t'<<f.bytes<<'\n';
     hot<<"eip\tclocks\tno_retire\n";
     for(auto& kv:pc_clocks) hot<<std::hex<<kv.first<<std::dec<<'\t'<<kv.second<<'\t'<<pc_no_retire[kv.first]<<'\n';
+    std::ofstream string_out(prefix+".string_service.tsv");
+    if(!string_out) throw std::runtime_error("string service output open");
+    string_out<<"q_pc\tq_st\tclocks\tload\tstore\tload_ack\tstore_ack\t"
+              <<"fused_load_ack\tstreamed_store_ack\tload_busy\t"
+              <<"load_hit_capture\tload_miss\tstore_wait\n";
+    for(const auto& [key,row]:string_service)
+        string_out<<std::hex<<key[0]<<std::dec<<'\t'<<key[1]<<'\t'
+                  <<row.clocks<<'\t'<<row.load<<'\t'<<row.store<<'\t'
+                  <<row.load_ack<<'\t'<<row.store_ack<<'\t'
+                  <<row.fused_load_ack<<'\t'<<row.streamed_store_ack<<'\t'
+                  <<row.load_busy<<'\t'<<row.load_hit_capture<<'\t'
+                  <<row.load_miss<<'\t'<<row.store_wait<<'\n';
     std::ofstream pc_causes(prefix+".pc_edge_causes.tsv");
     if(!pc_causes) throw std::runtime_error("PC edge cause output open");
     pc_causes<<"eip\toutside_pipe\tasync_hold\tasync_fault\tmemory_wait_including_admission\tfrontend_unavailable\tready_control\ttotal\n";
