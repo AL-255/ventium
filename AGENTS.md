@@ -14,6 +14,31 @@ to ~71.4 MHz overclocked).
 **The differential gate is the authority.** Any RTL change must keep the gates
 below green; never trade functional correctness for cycle matches.
 
+## Mandatory IPC reporting
+
+Every progress report to the user, including intermediate updates and final
+status reports, must state the current verified gameplay IPC. Identify the
+measured build/window and whether it predates the current candidate. If the
+candidate has no gameplay measurement yet, explicitly say so and retain the
+last verified gameplay number as a labelled baseline; never present startup,
+directed microbenchmark, or target IPC as measured gameplay performance.
+When a newer verified gameplay measurement is available, use that measurement.
+
+## Standard test suite
+
+From now on, the **standard test suite** means all three of the following:
+
+1. CoreMark correctness: both standard seed configurations complete without
+   error and their data CRCs match the reference (performance scoring is
+   separate).
+2. Windows 95 boots to the desktop without error.
+3. Quake timedemo completes without error (reaching gameplay or saving a
+   snapshot alone does not count).
+
+Run and pass the entire standard test suite after any major core or cache-system
+modification before declaring that modification complete. Keep the differential
+gates green as well; the suite does not replace them.
+
 ## ⚠️ Current checkout state (branch `ao486-mister-sim`)
 
 The `README.md` describes the `main`-branch state. On **this** branch:
