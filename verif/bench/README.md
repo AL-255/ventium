@@ -179,6 +179,12 @@ proves this checked fast-path packet survives the split-page #PF; it is **not**
 the complete full-PC production configuration or a substitute for the full
 system gate. Both diagnostic pairs additionally used `VEN_UOP_CROSSLINE` and
 `--public-flat-rw` so the read-only `MEMOWNER` probe survives optimization.
+The same guarded fast-system profile also passes `--memory-chain`: an older
+independently owned warm load precedes the faulting ALU read in all 14
+operator/carry cases. Both binaries have one precise #PF/retry, pre-fault
+ownership where admitted, and full-state equality with 218 QEMU groups per
+case. This checks one overlapping-memory fault ordering corner, not all
+backpressure or interrupt schedules.
 The matched [FPGA decoder leaf probe](../../fpga/P54_DECODE_LEAF_SYNTH_2026-09-27.md)
 measures a five-LUT cost for `VEN_FAST_MEM_ALU` and no material isolated
 synthesis timing loss; it does not establish full-core routed timing.
