@@ -230,6 +230,13 @@ loop_body:
     fistpl (%edi)
     incl %eax
     incl %ebx
+.elseif CASE == 36
+    # A and B are resident; a write to independent line C must not discard
+    # A's shadow read window. The final read observes any saved capture clock.
+    movl (%esi), %eax
+    movl 32(%esi), %edx
+    movl %ebx, 64(%esi)
+    movl (%esi), %eax
 .else
     .error "unsupported CASE"
 .endif

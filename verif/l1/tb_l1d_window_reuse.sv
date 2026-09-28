@@ -99,6 +99,32 @@ module tb_l1d_window_reuse;
     if(dut.shadow_valid_q) $fatal(1,"flush retained shadow");
     warm();
 `ifdef VEN_L1D_WINDOW_KEEP_STORE
+`ifdef VEN_L1D_TWO_WINDOW_KEEP_STORE
+    // Keep both complete windows when a write names neither physical line.
+    // The older shadow must still be served on its original request edge.
+    read_at('h1080);
+    read_at('h10a0);
+    read_at('h1080);
+    read_at('h10a0);
+    if (!dut.window_valid_q || !dut.shadow_valid_q ||
+        dut.rd_addr_q[31:5] != (32'h10a0 >> 5) ||
+        dut.shadow_line_addr_q != (32'h1080 >> 5))
+      $fatal(1,"two-window unrelated-store setup failed primary=%b %08x shadow=%b %08x",
+             dut.window_valid_q, dut.rd_addr_q, dut.shadow_valid_q,
+             {dut.shadow_line_addr_q,5'd0});
+    @(negedge clk); c_req=1; c_we=1; c_addr='h5000; c_wdata='h65748392;
+    do @(posedge clk); while(!c_ack);
+    @(negedge clk); c_req=0; c_we=0;
+    if (!dut.window_valid_q || !dut.shadow_valid_q)
+      $fatal(1,"unrelated store discarded a complete read window");
+    c_req=1; c_addr='h1084;
+    #1;
+    if (!c_ack || !dut.shadow_reuse || dut.do_rd_cap || m_req ||
+        c_rdata !== word_at('h1084))
+      $fatal(1,"retained shadow did not save the next read capture");
+    @(posedge clk);
+    @(negedge clk); c_req=0;
+`endif
     // KEEP_STORE checks only the primary address. A write to the older
     // shadow line must clear that shadow even though the primary survives.
     read_at('h1020);

@@ -712,6 +712,11 @@ module ven_l1d #(
   // rules are still required before its bytes can be observed.
   logic [31:5] shadow_line_addr_q;
   logic shadow_valid_q, shadow_reuse;
+`ifdef VEN_L1D_TWO_WINDOW_KEEP_STORE
+`ifndef VEN_L1D_WINDOW_KEEP_STORE
+  initial $fatal(1, "two-window store retention requires VEN_L1D_WINDOW_KEEP_STORE");
+`endif
+`endif
 `ifdef VEN_PIPE_MEM_CHAIN
   // Re-arm a checked prime from the already registered primary line without
   // overwriting it (and hence without throwing away the second hot line).
@@ -1379,10 +1384,19 @@ module ven_l1d #(
         shadow_line_addr_q <= rd_addr_q[31:5];
         shadow_valid_q <= 1'b1;
       end
-      // WINDOW_KEEP_STORE only compares a store with the primary owner.
-      // Clearing the shadow on *every* store avoids retaining stale bytes
-      // when a non-overlapping-primary store actually writes the shadow line.
-      if (c_req && c_we)
+      // An unrelated store need not discard either complete resident window.
+      // Compare both write owners: V can touch the shadow even when U does
+      // not. A crossing U write can touch its following physical line.
+      if (c_req && c_we
+`ifdef VEN_L1D_TWO_WINDOW_KEEP_STORE
+          && (!cacheable || (c_addr[31:5] == shadow_line_addr_q) ||
+              (xline && (addr_n[31:5] == shadow_line_addr_q))
+`ifdef VEN_P54_DUAL_STORE_PAIR
+              || (c_pair_req && (c_pair_addr[31:5] == shadow_line_addr_q))
+`endif
+             )
+`endif
+         )
         shadow_valid_q <= 1'b0;
 `endif
       // All window writers participate; invalidation wins over capture.
@@ -1395,7 +1409,11 @@ module ven_l1d #(
           // retains the conservative invalidation. Current hit still gates use.
           (st != L1_IDLE) || (c_req && (!cacheable ||
             (c_we ? ((c_addr[31:5] == rd_addr_q[31:5]) ||
-                     (xline && (addr_n[31:5] == rd_addr_q[31:5]))) : !rd_hit))))
+                     (xline && (addr_n[31:5] == rd_addr_q[31:5]))
+`ifdef VEN_P54_DUAL_STORE_PAIR
+                     || (c_pair_req && (c_pair_addr[31:5] == rd_addr_q[31:5]))
+`endif
+                    ) : !rd_hit))))
 `else
           (st != L1_IDLE) || (c_req && (c_we || !cacheable || !rd_hit)))
 `endif

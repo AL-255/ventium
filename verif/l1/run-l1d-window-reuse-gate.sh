@@ -11,8 +11,11 @@ if [[ "${1:-}" == "--two-window" ]]; then
     extra_window+=(+define+VEN_L1D_TWO_WINDOW_REUSE)
 elif [[ "${1:-}" == "--two-window-keep-store" ]]; then
     extra_window+=(+define+VEN_L1D_TWO_WINDOW_REUSE +define+VEN_L1D_WINDOW_KEEP_STORE)
+elif [[ "${1:-}" == "--two-window-preserve-store" ]]; then
+    extra_window+=(+define+VEN_L1D_TWO_WINDOW_REUSE +define+VEN_L1D_WINDOW_KEEP_STORE
+                   +define+VEN_L1D_TWO_WINDOW_KEEP_STORE)
 elif [[ $# -ne 0 ]]; then
-    echo "usage: $0 [--two-window|--two-window-keep-store]" >&2
+    echo "usage: $0 [--two-window|--two-window-keep-store|--two-window-preserve-store]" >&2
     exit 2
 fi
 for top in tb_l1d_window_reuse tb_l1d_coherence tb_l1d_hit_stream; do

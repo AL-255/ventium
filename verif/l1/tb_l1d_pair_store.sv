@@ -272,6 +272,59 @@ module tb_l1d_pair_store;
     read_word(32'h40, 32'h7777_0000);
     read_word(32'he4, 32'h8888_1111);
 
+`ifdef VEN_L1D_WINDOW_KEEP_STORE
+    // U names an unrelated resident line while V updates the primary read
+    // window's line. A stale primary must never survive just because only U
+    // was consulted by the historical KEEP_STORE predicate.
+    read_word(32'h80, mem[32]);
+    read_word(32'h60, mem[24]);
+    read_word(32'h40, 32'h7777_0000);
+    wait_idle();
+    if (!dut.window_valid_q || dut.rd_addr_q[31:5] != (32'h40 >> 5))
+      fail("paired-store primary-window setup failed");
+    @(negedge clk);
+    c_req <= 1'b1; c_we <= 1'b1;
+    c_addr <= 32'h80; c_wdata <= 32'h1111_8080; c_wstrb <= 4'hf;
+    c_pair_req <= 1'b1;
+    c_pair_addr <= 32'h44; c_pair_wdata <= 32'h2222_4444;
+    c_pair_wstrb <= 4'hf;
+    #1;
+    if (!c_pair_ready || !c_ack || !c_pair_ack)
+      fail("paired-store window witness was not accepted");
+    @(posedge clk);
+    @(negedge clk); c_req <= 1'b0; c_we <= 1'b0; c_pair_req <= 1'b0;
+    if (dut.window_valid_q)
+      fail("V store left stale primary read window valid");
+    read_word(32'h44, 32'h2222_4444);
+    read_word(32'h80, 32'h1111_8080);
+`ifdef VEN_L1D_TWO_WINDOW_KEEP_STORE
+    // The symmetric case: V touches only the older shadow. Keep the still
+    // correct primary but discard the shadow before any subsequent read.
+    read_word(32'ha0, 32'h3333_cccc);
+    read_word(32'h60, mem[24]);
+    read_word(32'h40, 32'h7777_0000);
+    if (!dut.window_valid_q || !dut.shadow_valid_q ||
+        dut.rd_addr_q[31:5] != (32'h40 >> 5) ||
+        dut.shadow_line_addr_q != (32'h60 >> 5))
+      fail("paired-store shadow-window setup failed");
+    @(negedge clk);
+    c_req <= 1'b1; c_we <= 1'b1;
+    c_addr <= 32'h80; c_wdata <= 32'h3333_8080; c_wstrb <= 4'hf;
+    c_pair_req <= 1'b1;
+    c_pair_addr <= 32'h64; c_pair_wdata <= 32'h4444_6464;
+    c_pair_wstrb <= 4'hf;
+    #1;
+    if (!c_pair_ready || !c_ack || !c_pair_ack)
+      fail("paired shadow-store witness was not accepted");
+    @(posedge clk);
+    @(negedge clk); c_req <= 1'b0; c_we <= 1'b0; c_pair_req <= 1'b0;
+    if (!dut.window_valid_q || dut.shadow_valid_q)
+      fail("V store to shadow discarded primary or retained stale shadow");
+    read_word(32'h40, 32'h7777_0000);
+    read_word(32'h64, 32'h4444_6464);
+`endif
+`endif
+
     if (errors == 0) $display("L1D-PAIR-STORE-GATE-OK");
     else             $display("L1D-PAIR-STORE-GATE-FAIL (%0d errors)", errors);
     $finish;

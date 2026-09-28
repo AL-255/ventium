@@ -55,6 +55,7 @@ CASES = {
     "regmem_prime_after_store": (BASE, 33),
     "regmem_prime_dep_reject": (BASE, 34),
     "fp_fistp_integer_overlap": (BASE, 35),
+    "two_window_store_reuse": (BASE, 36),
 }
 
 

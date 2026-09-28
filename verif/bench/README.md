@@ -217,10 +217,10 @@ branch-direction reversal cases 26/27 match pinned QEMU full state and retain
 their prior cycle counts. This still needs FPGA routed area/frequency and
 gameplay verification before it can be promoted to a deployed profile.
 
-`VEN_L1D_TWO_WINDOW_REUSE` is a separate, default-off registered-data
-experiment. It retains the *previous* complete 32-byte read line alongside
-the existing primary window; every reuse still requires a live L1 tag hit.
-Stores, fills, snoops, flushes, non-cacheable accesses and reset invalidate
+`VEN_L1D_TWO_WINDOW_REUSE` is a separate registered-data experiment. It
+retains the *previous* complete 32-byte read line alongside the existing
+primary window; every reuse still requires a live L1 tag hit. By default,
+stores, fills, snoops, flushes, non-cacheable accesses and reset invalidate
 the shadow, so it adds no cache capacity or async SRAM read port. A checked
 prime of the already-current primary line now re-arms the response owner
 without rereading the bank or evicting the other hot line. This costs one
@@ -236,6 +236,20 @@ improve from **4→3** cycles per four-instruction loop (directed IPC
 directed architectural traces match, and cases 1/2/28/29 plus terminal
 branch-reversal cases 26/27 match pinned QEMU full state. These are not
 gameplay or routed-FPGA results.
+
+`VEN_L1D_TWO_WINDOW_KEEP_STORE` retains the shadow across a store to an
+unrelated physical line; U crossing stores and both U/V paired-store addresses
+are checked against the primary and shadow owners. A V write to the primary
+now invalidates that window even without this opt-in, preventing a stale
+registered read. The new `two_window_store_reuse` core microbenchmark takes
+**5 rather than 6 clocks** per six-instruction warm loop (directed IPC
+**1.00→1.20**) with matched-source candidate/control architectural traces;
+5,007/6,009 cycle-mode groups also match pinned QEMU. All 36 directed
+candidate/control traces match, with the other 35 warm cycle counts unchanged.
+The window, coherence, stream and paired-store leaf gates pass, including
+unrelated-store retention and both V-overlap cases. This costs line-address
+comparisons, not an SRAM port, but FPGA timing and gameplay impact are still
+unmeasured.
 
 `VEN_PIPE_BRANCH_LOAD_PRIME` is an opt-in extension of the registered
 `VEN_PIPE_REG_LOAD_PRIME`/`VEN_PIPE_MEM_CHAIN` path. It may probe a

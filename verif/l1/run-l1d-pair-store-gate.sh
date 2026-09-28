@@ -4,9 +4,19 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 OBJ="$(mktemp -d "${TMPDIR:-/tmp}/ventium-l1d-pair-store.XXXXXX")"
 trap 'rm -rf "$OBJ"' EXIT
+EXTRA=()
+if [[ "${WINDOW_KEEP:-0}" == basic ]]; then
+    EXTRA+=(+define+VEN_L1D_WINDOW_REUSE +define+VEN_L1D_WINDOW_KEEP_STORE)
+elif [[ "${WINDOW_KEEP:-0}" == 1 ]]; then
+    EXTRA+=(+define+VEN_L1D_WINDOW_REUSE +define+VEN_L1D_WINDOW_KEEP_STORE
+            +define+VEN_L1D_TWO_WINDOW_REUSE +define+VEN_L1D_TWO_WINDOW_KEEP_STORE)
+elif [[ "${WINDOW_KEEP:-0}" != 0 ]]; then
+    echo "WINDOW_KEEP must be 0, basic or 1" >&2; exit 2
+fi
 timeout 300s "$ROOT/tools/verilator_serial.sh" -j "${VL_J:-1}" --binary -sv --assert \
     -Wno-WIDTH -Wno-UNUSED -Wno-DECLFILENAME -Wno-INITIALDLY -Wno-IMPLICITSTATIC \
     +define+VEN_L1D_BANKED_DATA +define+VEN_P54_DUAL_STORE_PAIR \
+    "${EXTRA[@]}" \
     --top-module tb_l1d_pair_store -Mdir "$OBJ" -o tb_l1d_pair_store \
     "$ROOT/rtl/mem/ven_l1d.sv" "$ROOT/verif/l1/tb_l1d_pair_store.sv" \
     > "$OBJ/build.log" 2>&1 \
