@@ -42,7 +42,9 @@ class AnalyzeFastTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="p54-fast-annotate.") as temp:
             path = Path(temp) / "fast.tsv"
             path.write_text(header + contiguous)
-            self.assertEqual(analyze(path)["selected_adjacent_pairs_conservative"], 1)
+            result = analyze(path)
+            self.assertEqual(result["selected_adjacent_pairs_conservative"], 1)
+            self.assertEqual(result["selected_pair_classes"]["reg_reg"], 1)
             path.write_text(header + contiguous.replace("\t2\t1002", "\t3\t1002"))
             self.assertEqual(analyze(path)["selected_adjacent_pairs_conservative"], 0)
 

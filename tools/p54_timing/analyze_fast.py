@@ -17,7 +17,7 @@ from pathlib import Path
 import capstone
 from capstone import x86
 
-from pair_bound import Insn, max_adjacent_pairs
+from pair_bound import Insn, bank_conflict, matching_pairs
 
 DECODERS = {mode: capstone.Cs(capstone.CS_ARCH_X86, mode)
             for mode in (capstone.CS_MODE_16, capstone.CS_MODE_32)}
@@ -146,11 +146,18 @@ def analyze(path: Path, total_legacy: int | None = None) -> dict:
                     insns[-1] = Insn(**{**old.__dict__, "boundary_after": True})
             insns.append(insn)
             previous_row = (pc, len(raw), ordinal, name in JCC or name in {"jmp", "call", "ret"})
-    count, pairs, bank_known, bank_unknown = max_adjacent_pairs(insns)
+    selected = matching_pairs(insns)
+    classes = Counter(("mem" if u.memory else "reg") + "_" +
+                      ("mem" if v.memory else "reg") for u, v in selected)
+    bank_known = sum(bank_conflict(u, v) is True for u, v in selected)
+    bank_unknown = sum(bank_conflict(u, v) is None for u, v in selected)
+    count, pairs = len(insns), len(selected)
     result = {"scope": "verified-byte fast-retire subset only", "exported_instructions": count,
               "nonpairable_or_unclassified": names["nonpairable_or_unclassified"],
               "memory_data_physical_unknown": names["memory_without_physical_data_address"],
               "selected_adjacent_pairs_conservative": pairs,
+              "selected_pair_classes": {key: classes[key] for key in
+                                        ("reg_reg", "reg_mem", "mem_reg", "mem_mem")},
               "selected_bank_conflicts_known": bank_known,
               "selected_bank_conflicts_unknown": bank_unknown,
               "is_full_gameplay_bound": False, "is_cycle_forecast": False}

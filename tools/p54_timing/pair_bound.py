@@ -104,28 +104,41 @@ def bank_conflict(u: Insn, v: Insn) -> bool | None:
     return ((u.physical_address >> 2) & 7) == ((v.physical_address >> 2) & 7)
 
 
-def max_adjacent_pairs(trace: Iterable[Insn]) -> tuple[int, int, int, int]:
-    """Maximum non-overlapping pairs on this fixed path, independent of timing.
+def matching_pairs(insns: list[Insn]) -> list[tuple[Insn, Insn]]:
+    """Select one maximum-cardinality non-overlapping adjacent matching.
 
     A greedy issue scheduler is not an optimistic upper bound: choosing pair
     (i,i+1) may sacrifice pair (i+1,i+2).  This dynamic program considers both.
     """
-    insns = list(trace)
     best = [0] * (len(insns) + 2)
-    conflict_pairs = [0] * (len(insns) + 2)
-    unknown_banks = [0] * (len(insns) + 2)
+    take = [False] * len(insns)
     for i in range(len(insns) - 1, -1, -1):
         best[i] = best[i + 1]
-        conflict_pairs[i] = conflict_pairs[i + 1]
-        unknown_banks[i] = unknown_banks[i + 1]
         if i + 1 < len(insns) and pairable(insns[i], insns[i + 1]):
             candidate = 1 + best[i + 2]
             if candidate > best[i]:
                 best[i] = candidate
-                conflict = bank_conflict(insns[i], insns[i + 1])
-                conflict_pairs[i] = int(conflict is True) + conflict_pairs[i + 2]
-                unknown_banks[i] = int(conflict is None) + unknown_banks[i + 2]
-    return len(insns), best[0], conflict_pairs[0], unknown_banks[0]
+                take[i] = True
+    selected = []
+    i = 0
+    while i < len(insns):
+        if take[i]:
+            selected.append((insns[i], insns[i + 1]))
+            i += 2
+        else:
+            i += 1
+    if len(selected) != best[0]:
+        raise AssertionError("matching reconstruction mismatch")
+    return selected
+
+
+def max_adjacent_pairs(trace: Iterable[Insn]) -> tuple[int, int, int, int]:
+    """Count the selected optimistic adjacent pairing, independent of timing."""
+    insns = list(trace)
+    selected = matching_pairs(insns)
+    conflicts = [bank_conflict(u, v) for u, v in selected]
+    return (len(insns), len(selected), sum(conflict is True for conflict in conflicts),
+            sum(conflict is None for conflict in conflicts))
 
 
 def main() -> None:

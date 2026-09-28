@@ -40,7 +40,11 @@ and implicit GPR/flag uses to the AP-500 pair classes, and runs the adjacent
 matching bound only within contiguous verified ordinals. Control transfers,
 PC discontinuities and ordinal gaps terminate a chain. Unrecognized forms are
 nonpairable in this diagnostic; actual *data* physical addresses are not yet
-available, so two-memory bank conflicts are reported as unknown. Its JSON
-labels explicitly say `is_full_gameplay_bound: false` and
+available, so two-memory bank conflicts are reported as unknown. The output
+also breaks the selected matching into reg/reg, reg/mem, mem/reg and mem/mem
+classes. Ties select one matching, so the class mix is a diagnostic, not a
+unique property of the instruction stream. Unobserved events whose handler
+returns before the next retire may remain invisible at a sequential PC edge.
+Its JSON labels explicitly say `is_full_gameplay_bound: false` and
 `is_cycle_forecast: false`. It cannot establish CPI < 1 or replace the required
 complete instruction-instance trace and realistic timing scheduler.
