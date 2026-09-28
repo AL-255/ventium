@@ -105,7 +105,15 @@ module issue_uv
        || (!iv.is_load && !iv.mem_lhs && iv.wflags)
 `endif
        ) &&
-      !iu.w8 && !iv.w8 && !iu.w16 && !iv.w16 &&
+`ifdef VEN_P54_DUAL_BYTE_LOAD_PAIR
+      // A resident byte MOV load needs only its addressed byte bank. Its
+      // separately tagged V response is width-merged at ordered commit.
+      // Byte ALU-memory operands keep the older dword-only EX contract.
+      (!iu.w8 || iu.is_load) && (!iv.w8 || iv.is_load) &&
+`else
+      !iu.w8 && !iv.w8 &&
+`endif
+      !iu.w16 && !iv.w16 &&
       !fp_is_ext_load(iu) && !fp_is_ext_load(iv) &&
       ((iv.reads & iu.writes) == 8'd0) &&
       ((iv.addr_mask & iu.writes) == 8'd0);

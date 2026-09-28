@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Bounded full-state QEMU proof for the fresh-capture U/V load pair."""
+"""Bounded full-state QEMU proof for owned and same-window U/V load pairs."""
 import argparse
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -26,15 +27,18 @@ def main():
     p.add_argument('--candidate', type=Path, required=True)
     p.add_argument('--control', type=Path, required=True)
     p.add_argument('--iterations', type=int, default=256)
-    p.add_argument('--case', type=int, choices=(1, 2, 28, 29), default=28)
+    p.add_argument('--case', type=int,
+                   choices=(1, 2, 28, 29, 37, 38, 39, 40, 41, 42, 43), default=28)
     p.add_argument('--expect', choices=('faster', 'equal'),
                    help='default: distinct-bank faster, same-bank equal')
     args = p.parse_args()
     if not 64 <= args.iterations <= 1000:
         p.error('--iterations must be 64..1000')
-    per_loop = 4 if args.case in (1, 2) else 5
+    per_loop = (18 if args.case in (37, 38, 39, 40, 41, 42, 43) else
+                4 if args.case in (1, 2) else 5)
     deadline = time.monotonic() + 540
-    out = Path(tempfile.mkdtemp(prefix=f'ventium-dual-load-pair-{args.case}.'))
+    out = Path(tempfile.mkdtemp(prefix=f'ventium-dual-load-pair-{args.case}.',
+                                    dir=os.environ.get('P54_BENCH_OUTBASE')))
     print(f'Artifacts: {out}', flush=True)
     qemu = ROOT / 'ventium-refs/07-p5-emulation-harness/build/qemu/build/qemu-i386'
     if not all(x.is_file() for x in (qemu, args.candidate, args.control)):
@@ -97,7 +101,8 @@ def main():
                           'cycles_per_iteration': clocks / (args.iterations - 33)}
         print(f'{label}: {results[label]["cycles_per_iteration"]:.3f} cycles/loop, '
               f'directed IPC {results[label]["ipc"]:.6f}', flush=True)
-    expected = args.expect or ('faster' if args.case in (1, 28) else 'equal')
+    expected = args.expect or ('faster' if args.case in (1, 28, 37, 38, 39, 40,
+                                                        41, 42, 43) else 'equal')
     if expected == 'faster' and results['candidate']['clocks'] >= results['control']['clocks']:
         raise RuntimeError('distinct-bank load pair did not save an exposed clock')
     if expected == 'equal' and results['candidate']['clocks'] != results['control']['clocks']:

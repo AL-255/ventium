@@ -145,6 +145,16 @@ module ven_l1d #(
     output logic [1:0][15:0] pair_rsp_owner,
     output logic [1:0][31:0] pair_rsp_paddr,
     output logic [1:0][31:0] pair_rsp_data,
+`ifdef VEN_P54_DUAL_BYTE_LOAD_PAIR
+    // Same-line MOV V can be read directly from U's already registered
+    // complete line window, with no second array access or queued response.
+    input  logic             pair_now_req,
+    input  logic             pair_now_cacheable,
+    input  logic [31:0]      pair_now_paddr,
+    input  logic [1:0]       pair_now_size_log2,
+    output logic             pair_now_valid,
+    output logic [31:0]      pair_now_data,
+`endif
 `endif
     // VEN DIAG (load-serve forensics): expose the read-serve hit state so the dbg ring can show WHY a
     // load got its data. {1'b0,st[1:0],flush_all,rd_match,hit_way,hit1,hit0} sampled at the current request.
@@ -281,8 +291,17 @@ module ven_l1d #(
   // for a rejected speculative next lookup or an uncommitted predecessor.
   logic pair_prime_capture;
   assign pair_prime_capture = (pair_req_valid == 2'b10) && mc_lookup_prime &&
-      mc_capture_next && !golden && (c_next_wstrb == 4'hf) &&
+      mc_capture_next && !golden &&
+`ifdef VEN_P54_DUAL_BYTE_LOAD_PAIR
+      // The lookahead U owns one bank for a byte, including line byte 31.
+      // c_next_ready has already checked the hit and exact byte extent.
+      ((c_next_wstrb == 4'h1) ||
+       ((c_next_wstrb == 4'hf) &&
+        (c_next_addr[1:0] == 2'd0) && (c_next_addr[4:0] <= 5'd28)));
+`else
+      (c_next_wstrb == 4'hf) &&
       (c_next_addr[1:0] == 2'd0) && (c_next_addr[4:0] <= 5'd28);
+`endif
   assign pair_reserved_bank = pair_prime_capture ? c_next_addr[4:2] : c_addr[4:2];
 `else
   wire pair_prime_capture = 1'b0;
@@ -292,8 +311,18 @@ module ven_l1d #(
   assign pair_legacy_capture = (pair_req_valid == 2'b10) &&
       c_req && !c_we && cacheable && !golden && !rd_armed &&
       (st == L1_IDLE) && !mc_lookup_next && !early_armed && !stream_path &&
+`ifdef VEN_P54_DUAL_BYTE_LOAD_PAIR
+      // A one-byte U read owns exactly c_addr[4:2], even at byte 31. The
+      // registered U window may contain undefined upper bytes there, but
+      // ordered byte writeback consumes only the addressed low byte. Keep
+      // full-dword U reads on their old aligned, noncrossing path.
+      (((c_wstrb == 4'h1) && !xline) ||
+       ((c_wstrb == 4'hf) && (c_addr[1:0] == 2'd0) &&
+        (c_addr[4:0] <= 5'd28))) && do_rd_cap
+`else
       (c_wstrb == 4'hf) && (c_addr[1:0] == 2'd0) &&
       (c_addr[4:0] <= 5'd28) && do_rd_cap
+`endif
 `ifdef VEN_L1D_CODE_BUFFER
       && !code_access
 `endif
@@ -339,8 +368,27 @@ module ven_l1d #(
     assign pair_way[lane] = pair_hit1[lane];
     assign pair_hit[lane] = pair_lookup_active && pair_cacheable[lane] &&
                             (pair_hit0[lane] || pair_hit1[lane]) &&
-                            (pair_size_log2[lane] != 2'd3);
+                            (pair_size_log2[lane] != 2'd3)
+`ifdef VEN_P54_DUAL_BYTE_LOAD_PAIR
+                            && !((lane == 1) && pair_now_valid)
+`endif
+                            ;
   end
+`ifdef VEN_P54_DUAL_BYTE_LOAD_PAIR
+  logic [LW-1:0] pair_now_line;
+  assign pair_now_valid = pair_now_req && pair_now_cacheable &&
+      ((pair_now_size_log2 == 2'd0) ||
+       ((pair_now_size_log2 == 2'd2) &&
+        (pair_now_paddr[4:0] <= 5'd28))) &&
+      !pair_rsp_valid[1] && c_req && !c_we && cacheable && c_ack &&
+      (window_reuse || shadow_reuse) &&
+      (pair_now_paddr[31:5] == c_addr[31:5]);
+  assign pair_now_line = shadow_reuse ? shadow_line_q : rd_window_q[LW-1:0];
+  assign pair_now_data = !pair_now_valid ? 32'd0 :
+      (pair_now_size_log2 == 2'd0) ?
+      {24'd0, pair_now_line[{1'b0,pair_now_paddr[4:0],3'b000} +: 8]} :
+      pair_now_line[{1'b0,pair_now_paddr[4:0],3'b000} +: 32];
+`endif
   ven_p54_hit_return u_pair_return (
       .clk, .rst_n,
       .flush(flush_all || snoop_inv_valid || golden),

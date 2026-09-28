@@ -237,6 +237,49 @@ loop_body:
     movl 32(%esi), %edx
     movl %ebx, 64(%esi)
     movl (%esi), %eax
+.elseif CASE == 37
+    # Independent byte loads touch distinct 32-bit data banks (0 and 1).
+    .rept 8
+    movb (%esi), %al
+    movb 4(%esi), %dl
+    .endr
+.elseif CASE == 38
+    # Same-bank byte loads must keep V behind U, even at different byte lanes.
+    .rept 8
+    movb (%esi), %al
+    movb 1(%esi), %dl
+    .endr
+.elseif CASE == 39
+    # V's last byte in a resident line needs bank 7 only; it neither crosses
+    # the line nor reads the undefined bytes beyond it.
+    .rept 8
+    movl (%esi), %eax
+    movb 31(%esi), %dl
+    .endr
+.elseif CASE == 40
+    # High-byte register writes must merge against the correct parent GPRs.
+    .rept 8
+    movb (%esi), %ah
+    movb 7(%esi), %dh
+    .endr
+.elseif CASE == 41
+    # Same registered line serves two independent aligned dword MOV loads.
+    .rept 8
+    movl (%esi), %eax
+    movl 4(%esi), %edx
+    .endr
+.elseif CASE == 42
+    # Reusing the identical word needs no second physical bank port.
+    .rept 8
+    movl (%esi), %eax
+    movl (%esi), %edx
+    .endr
+.elseif CASE == 43
+    # V's aligned final dword is wholly inside the resident line.
+    .rept 8
+    movl (%esi), %eax
+    movl 28(%esi), %edx
+    .endr
 .else
     .error "unsupported CASE"
 .endif

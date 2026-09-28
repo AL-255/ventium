@@ -56,6 +56,13 @@ CASES = {
     "regmem_prime_dep_reject": (BASE, 34),
     "fp_fistp_integer_overlap": (BASE, 35),
     "two_window_store_reuse": (BASE, 36),
+    "dual_byte_load_distinct_bank": (BASE, 37),
+    "dual_byte_load_same_bank": (BASE, 38),
+    "dual_byte_load_line_edge": (BASE, 39),
+    "dual_byte_load_high_regs": (BASE, 40),
+    "dual_dword_load_window": (BASE, 41),
+    "dual_dword_load_same_word": (BASE, 42),
+    "dual_dword_load_line_edge": (BASE, 43),
 }
 
 

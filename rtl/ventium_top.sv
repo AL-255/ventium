@@ -396,6 +396,13 @@ module ventium_top
   logic core_pair_bank_conflict;
   logic [1:0] core_pair_rsp_valid, core_pair_rsp_cancel, core_pair_rsp_ready;
   logic [1:0][31:0] core_pair_rsp_paddr, core_pair_rsp_data;
+`ifdef VEN_P54_DUAL_BYTE_LOAD_PAIR
+  logic core_pair_now_valid, l1_pair_now_valid;
+  logic core_pair_now_req;
+  logic [31:0] core_pair_now_paddr;
+  logic [1:0] core_pair_now_size_log2;
+  logic [31:0] core_pair_now_data, l1_pair_now_data;
+`endif
   logic [1:0] l1_pair_req_ready, l1_pair_req_split;
   logic l1_pair_bank_conflict;
   logic [1:0] l1_pair_rsp_valid, l1_pair_rsp_cancel;
@@ -853,6 +860,13 @@ module ventium_top
       .mem_pair_rsp_owner(core_pair_rsp_owner),
       .mem_pair_rsp_paddr(core_pair_rsp_paddr),
       .mem_pair_rsp_data(core_pair_rsp_data),
+`ifdef VEN_P54_DUAL_BYTE_LOAD_PAIR
+      .mem_pair_now_req(core_pair_now_req),
+      .mem_pair_now_paddr(core_pair_now_paddr),
+      .mem_pair_now_size_log2(core_pair_now_size_log2),
+      .mem_pair_now_valid(core_pair_now_valid),
+      .mem_pair_now_data(core_pair_now_data),
+`endif
 `endif
 `ifdef VEN_FP_LOAD64
       .bus_rdata_hi (core_mem_rdata_hi),
@@ -1389,6 +1403,13 @@ module ventium_top
       .core_pair_rsp_owner(l1_pair_rsp_owner),
       .core_pair_rsp_paddr(l1_pair_rsp_paddr),
       .core_pair_rsp_data(l1_pair_rsp_data),
+`ifdef VEN_P54_DUAL_BYTE_LOAD_PAIR
+      .core_pair_now_req(l1axi_en && core_pair_now_req),
+      .core_pair_now_paddr(core_pair_now_paddr),
+      .core_pair_now_size_log2(core_pair_now_size_log2),
+      .core_pair_now_valid(l1_pair_now_valid),
+      .core_pair_now_data(l1_pair_now_data),
+`endif
 `endif
       .bus_err   (l1_bus_err),
       .m_axi_awid(m_axi_awid), .m_axi_awaddr(m_axi_awaddr), .m_axi_awlen(m_axi_awlen),
@@ -1434,6 +1455,10 @@ module ventium_top
   assign core_pair_rsp_owner = l1_pair_rsp_owner;
   assign core_pair_rsp_paddr = l1_pair_rsp_paddr;
   assign core_pair_rsp_data = l1_pair_rsp_data;
+`ifdef VEN_P54_DUAL_BYTE_LOAD_PAIR
+  assign core_pair_now_valid = l1axi_en && l1_pair_now_valid;
+  assign core_pair_now_data = l1_pair_now_data;
+`endif
 `endif
 `ifdef VEN_FP_LOAD64
   assign core_mem_rdata_hi = l1axi_en ? l1_c_rdata_hi : 32'd0;

@@ -25,8 +25,18 @@ module tb_p54_dual_load_issue;
     check(1'b0, "dependent address");
     v0=8'h89; v1=8'h56; v2=8'd4; // store is not a V load
     check(1'b0, "V store");
-    v0=8'h8a; v1=8'h56; v2=8'd4; // byte V load needs a different return path
+    v0=8'h8a; v1=8'h56; v2=8'd4; // MOV DL,[ESI+4]
+`ifdef VEN_P54_DUAL_BYTE_LOAD_PAIR
+    check(1'b1, "independent byte V load");
+    u0=8'h8a; u1=8'h06; u2=0; // MOV AL,[ESI]
+    check(1'b1, "independent byte U/V loads");
+    v1=8'h10; v2=0; // MOV DL,[EAX] depends on U's parent register
+    check(1'b0, "byte dependent address");
+    u0=8'h8b; u1=8'h06; u2=0;
+    v1=8'h56; v2=8'd4;
+`else
     check(1'b0, "V byte load");
+`endif
     v0=8'h8b; v1=8'h06; v2=0; // EAX WAW
     check(1'b0, "WAW");
     $display("P54-DUAL-LOAD-ISSUE-OK");

@@ -150,6 +150,13 @@ module ventium_l1_axi #(
     output logic [1:0][15:0] core_pair_rsp_owner,
     output logic [1:0][31:0] core_pair_rsp_paddr,
     output logic [1:0][31:0] core_pair_rsp_data,
+`ifdef VEN_P54_DUAL_BYTE_LOAD_PAIR
+    input  logic             core_pair_now_req,
+    input  logic [31:0]      core_pair_now_paddr,
+    input  logic [1:0]       core_pair_now_size_log2,
+    output logic             core_pair_now_valid,
+    output logic [31:0]      core_pair_now_data,
+`endif
 `endif
     // REVIEW2_aug2 H-13: the INSTRUCTION-side memory type for the address currently on
     // the core's bus. 1 = this line must not be retained in the icache. The core ORs it
@@ -439,6 +446,10 @@ module ventium_l1_axi #(
   logic [1:0] pair_leaf_rsp_valid, pair_leaf_rsp_cancel;
   logic [1:0][15:0] pair_leaf_rsp_owner;
   logic [1:0][31:0] pair_leaf_rsp_paddr, pair_leaf_rsp_data;
+`ifdef VEN_P54_DUAL_BYTE_LOAD_PAIR
+  logic pair_leaf_now_valid;
+  logic [31:0] pair_leaf_now_data;
+`endif
   // Independent physical cache-type lookups are required even for a tagged
   // resident hit. The current bus address describes U only; using its map
   // decision for V could turn an MMIO read into a cache hit.
@@ -464,6 +475,15 @@ module ventium_l1_axi #(
   assign core_pair_rsp_owner = pair_leaf_rsp_owner;
   assign core_pair_rsp_paddr = pair_leaf_rsp_paddr;
   assign core_pair_rsp_data = pair_leaf_rsp_data;
+`ifdef VEN_P54_DUAL_BYTE_LOAD_PAIR
+  // The leaf proves V is in U's exact physical cache line. Cache-map,
+  // CD/SMRAM and backing-route policy are therefore shared with the U hit;
+  // only the independent V TLB/segment permission is checked by the core.
+  assign core_pair_now_valid = seam_core_rst_n && !EN_L2 && !shutdown &&
+      !dma_drain_stall && !core_lock_hold && !core_smram_deny &&
+      !core_route_deny && pair_leaf_now_valid;
+  assign core_pair_now_data = pair_leaf_now_data;
+`endif
 `endif
   logic core_d_l1c_last, core_d_dram_last_u, core_d_l2c_last_u; logic [3:0] core_d_region_last;
   ven_cachemap #(.SNAPSHOT_USER_HIGHMEM(CMAP_SNAPSHOT_USER_HIGHMEM)) u_cmap_dc_last (
@@ -1367,6 +1387,14 @@ module ventium_l1_axi #(
       .pair_rsp_owner(pair_leaf_rsp_owner),
       .pair_rsp_paddr(pair_leaf_rsp_paddr),
       .pair_rsp_data(pair_leaf_rsp_data),
+`ifdef VEN_P54_DUAL_BYTE_LOAD_PAIR
+      .pair_now_req(core_pair_now_req),
+      .pair_now_cacheable(l1d_cacheable),
+      .pair_now_paddr(core_pair_now_paddr),
+      .pair_now_size_log2(core_pair_now_size_log2),
+      .pair_now_valid(pair_leaf_now_valid),
+      .pair_now_data(pair_leaf_now_data),
+`endif
 `endif
 `ifdef VEN_FP_LOAD64
       .c_rdata_hi(l1d_c_rdata_hi),

@@ -10,16 +10,34 @@ if [[ "${1:-}" == "--comb-ack" ]]; then
     extra_defines=(+define+VEN_L1D_COMB_ACK)
 elif [[ "${1:-}" == "--legacy-capture-pair" ]]; then
     extra_defines=(+define+VEN_P54_DUAL_HIT_LEGACY_CAPTURE +define+VEN_L1D_WINDOW_REUSE)
+elif [[ "${1:-}" == "--byte-pair" ]]; then
+    extra_defines=(+define+VEN_P54_DUAL_HIT_LEGACY_CAPTURE +define+VEN_L1D_WINDOW_REUSE
+                   +define+VEN_P54_DUAL_BYTE_LOAD_PAIR)
 elif [[ "${1:-}" == "--prime-pair" ]]; then
     extra_defines=(+define+VEN_P54_DUAL_HIT_LEGACY_CAPTURE +define+VEN_L1D_WINDOW_REUSE
                    +define+VEN_PIPE_MEM_CHAIN +define+VEN_PIPE_REG_LOAD_PRIME
                    +define+VEN_P54_DUAL_LOAD_PRIME)
+elif [[ "${1:-}" == "--byte-prime-pair" ]]; then
+    extra_defines=(+define+VEN_P54_DUAL_HIT_LEGACY_CAPTURE +define+VEN_L1D_WINDOW_REUSE
+                   +define+VEN_PIPE_MEM_CHAIN +define+VEN_PIPE_REG_LOAD_PRIME
+                   +define+VEN_P54_DUAL_LOAD_PRIME +define+VEN_P54_DUAL_BYTE_LOAD_PAIR)
 elif [[ "${1:-}" == "--two-window" ]]; then
     extra_defines=(+define+VEN_P54_DUAL_HIT_LEGACY_CAPTURE +define+VEN_L1D_WINDOW_REUSE
                    +define+VEN_L1D_TWO_WINDOW_REUSE +define+VEN_PIPE_MEM_CHAIN
                    +define+VEN_PIPE_REG_LOAD_PRIME +define+VEN_P54_DUAL_LOAD_PRIME)
+elif [[ "${1:-}" == "--byte-two-window" ]]; then
+    extra_defines=(+define+VEN_P54_DUAL_HIT_LEGACY_CAPTURE +define+VEN_L1D_WINDOW_REUSE
+                   +define+VEN_L1D_TWO_WINDOW_REUSE +define+VEN_PIPE_MEM_CHAIN
+                   +define+VEN_PIPE_REG_LOAD_PRIME +define+VEN_P54_DUAL_LOAD_PRIME
+                   +define+VEN_P54_DUAL_BYTE_LOAD_PAIR)
+elif [[ "${1:-}" == "--byte-two-window-store" ]]; then
+    extra_defines=(+define+VEN_P54_DUAL_HIT_LEGACY_CAPTURE +define+VEN_L1D_WINDOW_REUSE
+                   +define+VEN_L1D_TWO_WINDOW_REUSE +define+VEN_L1D_WINDOW_KEEP_STORE
+                   +define+VEN_L1D_TWO_WINDOW_KEEP_STORE +define+VEN_PIPE_MEM_CHAIN
+                   +define+VEN_PIPE_REG_LOAD_PRIME +define+VEN_P54_DUAL_LOAD_PRIME
+                   +define+VEN_P54_DUAL_BYTE_LOAD_PAIR)
 elif [[ $# -ne 0 ]]; then
-    echo "usage: $0 [--comb-ack|--legacy-capture-pair|--prime-pair|--two-window]" >&2
+    echo "usage: $0 [--comb-ack|--legacy-capture-pair|--byte-pair|--prime-pair|--byte-prime-pair|--two-window|--byte-two-window|--byte-two-window-store]" >&2
     exit 2
 fi
 if [[ "${VEN_L1D_SHARED_BANK0:-0}" == "1" ]]; then

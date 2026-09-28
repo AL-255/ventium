@@ -545,6 +545,13 @@ module core
     input  logic [1:0][15:0] mem_pair_rsp_owner,
     input  logic [1:0][31:0] mem_pair_rsp_paddr,
     input  logic [1:0][31:0] mem_pair_rsp_data,
+`ifdef VEN_P54_DUAL_BYTE_LOAD_PAIR
+    output logic             mem_pair_now_req,
+    output logic [31:0]      mem_pair_now_paddr,
+    output logic [1:0]       mem_pair_now_size_log2,
+    input  logic             mem_pair_now_valid,
+    input  logic [31:0]      mem_pair_now_data,
+`endif
 `endif
 
     // M6: raised (and latched) when the core enters the F00F hang state
@@ -4381,6 +4388,9 @@ module core
   logic        pipe_mem_v_hit_q;
   logic [31:0] pipe_mem_v_phys_q;
   logic        pipe_v_pair_eligible, pipe_v_pair_request, pipe_v_pair_accept;
+`ifdef VEN_P54_DUAL_BYTE_LOAD_PAIR
+  logic        pipe_v_pair_now_accept;
+`endif
   logic        pipe_v_pair_rsp_good;
   logic [31:0] pipe_v_pair_phys;
   logic [2:0]  pipe_v_pair_seg;
@@ -4397,6 +4407,7 @@ module core
 `endif
   fpd_t        pipe_u_eff, pipe_v_eff;
   logic        pipe_pair_base;
+  logic        pipe_pair_lookahead;
   logic        pipe_pair_eff;
   logic [31:0] pipe_commit_eip;
   logic        pipe_new_load_req, pipe_new_store_req, pipe_new_mem_req;
@@ -5023,9 +5034,23 @@ module core
       (!sys_mode || ({1'b0, eip} + {29'd0, u_d.len} +
                      {29'd0, v_d.len} - 33'd1 <=
                      {1'b0, seg_limit[SG_CS]})) &&
-      ({1'b0, pipe_v_modrm_ea} + 33'd3 <=
+      ({1'b0, pipe_v_modrm_ea} +
+`ifdef VEN_P54_DUAL_BYTE_LOAD_PAIR
+       (pipe_v_eff.w8 ? 33'd0 : 33'd3) <=
+`else
+       33'd3 <=
+`endif
        {1'b0, seg_limit[pipe_v_pair_seg]}) &&
+`ifdef VEN_P54_DUAL_BYTE_LOAD_PAIR
+      // A byte at offset 31 is wholly inside this line/page; the return
+      // arbiter reserves only its one physical word bank. Dword requests
+      // retain the aligned, full-width boundary restriction.
+      (pipe_v_eff.w8 ||
+       ((pipe_v_mem_lin[1:0] == 2'b00) &&
+        (pipe_v_mem_lin[4:0] <= 5'd28))) &&
+`else
       (pipe_v_mem_lin[1:0] == 2'b00) && (pipe_v_mem_lin[4:0] <= 5'd28) &&
+`endif
       (!paging_on || (v_dtlb_lk_hit && v_dtlb_lk_perm[0] &&
                      ((eff_cpl != 2'd3) || v_dtlb_lk_perm[2]))) &&
       (!sys_mode || (sys_fp_ok && !real_mode && cs_d &&
@@ -5041,6 +5066,14 @@ module core
       && !(errata_en[ERR_MOFFS] && moffs_falsedep);
   assign pipe_v_pair_request = pipe_v_pair_eligible && pipe_new_load_req;
   assign pipe_v_pair_accept = pipe_v_pair_request && mem_pair_req_ready[1];
+`ifdef VEN_P54_DUAL_BYTE_LOAD_PAIR
+  assign pipe_v_pair_now_accept = pipe_v_pair_request && mem_pair_now_valid &&
+      mem_ack && !pipe_mem_active_q;
+  assign mem_pair_now_req = pipe_v_pair_request &&
+      pipe_u_eff.is_load && pipe_v_eff.is_load;
+  assign mem_pair_now_paddr = pipe_v_pair_phys;
+  assign mem_pair_now_size_log2 = pipe_v_eff.w8 ? 2'd0 : 2'd2;
+`endif
 `ifdef VEN_P54_DUAL_LOAD_PRIME
 `ifndef VEN_PIPE_BRANCH_LOAD_PRIME
   initial $fatal(1, "dual-load prime requires branch/register load prime");
@@ -5052,8 +5085,20 @@ module core
   assign mc_prime_v_lin = seg_base[mc_prime_v_seg] + mc_prime_v_ea;
   assign mc_prime_v_phys = paging_on ? v_dtlb_lk_phys : mc_prime_v_lin;
   assign mc_prime_v_checked =
-      ({1'b0, mc_prime_v_ea} + 33'd3 <= {1'b0, seg_limit[mc_prime_v_seg]}) &&
+      ({1'b0, mc_prime_v_ea} +
+`ifdef VEN_P54_DUAL_BYTE_LOAD_PAIR
+       (mc_query_v.w8 ? 33'd0 : 33'd3) <=
+`else
+       33'd3 <=
+`endif
+       {1'b0, seg_limit[mc_prime_v_seg]}) &&
+`ifdef VEN_P54_DUAL_BYTE_LOAD_PAIR
+      (mc_query_v.w8 ||
+       ((mc_prime_v_lin[1:0] == 2'd0) &&
+        (mc_prime_v_lin[4:0] <= 5'd28))) &&
+`else
       (mc_prime_v_lin[1:0] == 2'd0) && (mc_prime_v_lin[4:0] <= 5'd28) &&
+`endif
       (!paging_on || (v_dtlb_lk_hit && v_dtlb_lk_perm[0] &&
                      ((eff_cpl != 2'd3) || v_dtlb_lk_perm[2]))) &&
       (!sys_mode || (sys_fp_ok && !real_mode && cs_d &&
@@ -5105,7 +5150,15 @@ module core
   assign mem_pair_paddr = {pipe_v_pair_phys, 32'd0};
   assign mem_pair_owner = {pipe_commit_eip[15:0], 16'd0};
 `endif
+`ifdef VEN_P54_DUAL_BYTE_LOAD_PAIR
+  // The fresh and predecessor-prime owners use different decode slots. Size
+  // must follow the address/owner mux above, never a newer live V decode.
+  assign mem_pair_size_log2 = {(mc_prime_v_request ? mc_query_v.w8 :
+                                pipe_v_pair_request && pipe_v_eff.w8)
+                                ? 2'd0 : 2'd2, 2'd0};
+`else
   assign mem_pair_size_log2 = {2'd2, 2'd0};
+`endif
   assign pipe_v_pair_rsp_good = pipe_mem_v_hit_q && mem_pair_rsp_valid[1] &&
       !mem_pair_rsp_cancel[1] &&
       (mem_pair_rsp_owner[1] == pipe_mem_eip_q[15:0]) &&
@@ -5142,6 +5195,12 @@ module core
           !pipe_mem_abort_now))
       $fatal(1, "fresh V hit lacks an admitted registered U owner");
   end
+`ifdef VEN_P54_DUAL_BYTE_LOAD_PAIR
+  always_ff @(posedge clk) if (rst_n && pipe_v_pair_now_accept) begin
+    if (!pipe_int_commit || mem_pair_req_ready[1])
+      $fatal(1, "immediate V pair lacks U commit or double-enqueued V");
+  end
+`endif
 `ifdef VEN_P54_DUAL_LOAD_PRIME
   always_ff @(posedge clk) if (rst_n && mc_prime_v_accept) begin
     if (!(mc_prime_accept && !pipe_mem_active_q && !pipe_new_mem_req))
@@ -5163,6 +5222,11 @@ module core
   assign mem_pair_size_log2 = '0;
   assign mem_pair_owner = '0;
   assign mem_pair_rsp_ready = '0;
+`ifdef VEN_P54_DUAL_BYTE_LOAD_PAIR
+  assign mem_pair_now_req = 1'b0;
+  assign mem_pair_now_paddr = 32'd0;
+  assign mem_pair_now_size_log2 = 2'd0;
+`endif
 `endif
 `endif
 
@@ -5536,15 +5600,25 @@ module core
   assign pipe_u_eff    = pipe_mem_active_q ? pipe_mem_u_q    : u_d;
   assign pipe_v_eff    = pipe_mem_active_q ? pipe_mem_v_q    : v_d;
 `ifdef VEN_P54_DUAL_LOAD_PAIR
-  assign pipe_pair_base = pipe_mem_active_q ?
+  // The speculative next-read AGU must not feed from this edge's immediate
+  // V return. That would close a cache-hit -> issue -> AGU -> cache-hit loop.
+  // The lookahead owner is discarded on an immediate pair below. Use one
+  // common cone for ordinary/registered pairing rather than duplicating it.
+  assign pipe_pair_lookahead = pipe_mem_active_q ?
       (pipe_mem_pair_q && (!pipe_mem_v_hit_q || pipe_v_pair_rsp_good)) :
       (pipe_pair
 `ifdef VEN_P54_REGMEM_PRIME
        || pipe_regmem_pair_good
 `endif
        );
+`ifdef VEN_P54_DUAL_BYTE_LOAD_PAIR
+  assign pipe_pair_base = pipe_pair_lookahead || pipe_v_pair_now_accept;
+`else
+  assign pipe_pair_base = pipe_pair_lookahead;
+`endif
 `else
   assign pipe_pair_base = pipe_mem_active_q ? pipe_mem_pair_q : pipe_pair;
+  assign pipe_pair_lookahead = pipe_pair_base;
 `endif
   // The older store's ordinary completion is not enough to retire V. Both
   // bounded backing slots must acknowledge on this edge or V remains next U.

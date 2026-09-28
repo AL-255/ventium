@@ -13,6 +13,13 @@ module tb_l1d_pair_hit;
   logic [1:0][15:0] pair_owner=0, pair_rsp_owner;
   logic [1:0] pair_req_ready, pair_req_split, pair_rsp_valid;
   logic [1:0] pair_rsp_cancel, pair_rsp_ready=2'b11;
+`ifdef VEN_P54_DUAL_BYTE_LOAD_PAIR
+  logic pair_now_req=0, pair_now_cacheable=1;
+  logic [31:0] pair_now_paddr=0;
+  logic [1:0] pair_now_size_log2=0;
+  logic pair_now_valid;
+  logic [31:0] pair_now_data;
+`endif
   logic pair_bank_conflict;
   logic [7:0] dbg_serve;
 `ifdef VEN_PIPE_MEM_CHAIN
@@ -77,7 +84,9 @@ module tb_l1d_pair_hit;
   task automatic expect_pair(input logic [1:0] expected_ready);
     #1;
     if (pair_req_ready !== expected_ready)
-      $fatal(1,"pair ready got=%b expected=%b",pair_req_ready,expected_ready);
+      $fatal(1,"pair ready got=%b expected=%b c_addr=%08x window=%b shadow=%b",
+             pair_req_ready,expected_ready,c_addr,
+             dut.window_reuse,dut.shadow_reuse);
   endtask
 
   initial begin
@@ -278,9 +287,108 @@ module tb_l1d_pair_hit;
     if (!c_ack || c_rdata!==word_at(32'h1000) || pair_rsp_valid!=0)
       $fatal(1,"same-bank V rejection disturbed U");
     @(posedge clk); @(negedge clk); c_req=0;
+`ifdef VEN_P54_DUAL_BYTE_LOAD_PAIR
+    // A byte U owns only its physical bank, including the last byte of a
+    // line. A younger byte V in another bank must receive its own response;
+    // a same-bank V must remain unaccepted without delaying U.
+`ifdef VEN_L1D_TWO_WINDOW_REUSE
+    // The preceding dword test can leave U's line in the shadow. Refresh its
+    // identical word to invalidate that shadow without changing memory data;
+    // this block is specifically testing a fresh bank capture, not reuse.
+    legacy_write(32'h1000, word_at(32'h1000));
+    backing_before=backing;
+`endif
+    legacy_read(32'h1024);
+    @(negedge clk); c_req=1; c_we=0; c_addr=32'h1001; c_wstrb=4'h1;
+    pair_req_valid=2'b10; pair_paddr[1]=32'h1024;
+    pair_size_log2[1]=2'd0; pair_owner[1]=16'h6801;
+    expect_pair(2'b10);
+    if (c_ack) $fatal(1,"fresh byte U acknowledged before capture");
+    @(posedge clk); @(negedge clk); pair_req_valid=0;
+    if (!c_ack || c_rdata[7:0]!==mem[32'h1001] ||
+        pair_rsp_valid!==2'b10 || pair_rsp_owner[1]!==16'h6801 ||
+        pair_rsp_data[1]!=={24'd0,mem[32'h1024]})
+      $fatal(1,"fresh byte U/V response ownership or data mismatch");
+    @(posedge clk); @(negedge clk); c_req=0; c_wstrb=4'hf;
+    legacy_read(32'h1024);
+
+    @(negedge clk); c_req=1; c_addr=32'h101f; c_wstrb=4'h1;
+    pair_req_valid=2'b10; pair_paddr[1]=32'h1020;
+    pair_size_log2[1]=2'd0; pair_owner[1]=16'h6802;
+    expect_pair(2'b10);
+    @(posedge clk); @(negedge clk); pair_req_valid=0;
+    if (!c_ack || c_rdata[7:0]!==mem[32'h101f] ||
+        pair_rsp_valid!==2'b10 || pair_rsp_owner[1]!==16'h6802 ||
+        pair_rsp_data[1]!=={24'd0,mem[32'h1020]})
+      $fatal(1,"line-end byte U/V response mismatch");
+    @(posedge clk); @(negedge clk); c_req=0; c_wstrb=4'hf;
+    legacy_read(32'h1024);
+
+    @(negedge clk); c_req=1; c_addr=32'h1001; c_wstrb=4'h1;
+    pair_req_valid=2'b10; pair_paddr[1]=32'h1020;
+    pair_size_log2[1]=2'd0;
+    expect_pair(2'b00);
+    if (!pair_bank_conflict)
+      $fatal(1,"same-bank byte V conflict not reported");
+    @(posedge clk); @(negedge clk); pair_req_valid=0;
+    if (!c_ack || c_rdata[7:0]!==mem[32'h1001] || pair_rsp_valid!=0)
+      $fatal(1,"same-bank byte V rejection disturbed U");
+    @(posedge clk); @(negedge clk); c_req=0; c_wstrb=4'hf;
+    pair_size_log2[1]=2'd2;
+
+    // A complete registered line window can serve both bytes immediately.
+    // It must not also enqueue the V on the older registered sideband.
+    legacy_read(32'h1000);
+    @(negedge clk); c_req=1; c_addr=32'h1004; c_wstrb=4'h1;
+    pair_req_valid=2'b10; pair_paddr[1]=32'h1008;
+    pair_size_log2[1]=2'd0; pair_owner[1]=16'h6803;
+    pair_now_req=1; pair_now_paddr=32'h1008;
+    #1;
+    if (!c_ack || !pair_now_valid ||
+        pair_now_data!=={24'd0,mem[32'h1008]} || pair_req_ready[1])
+      $fatal(1,"same-window byte return not immediate or double accepted");
+    pair_now_cacheable=0; #1;
+    if (pair_now_valid) $fatal(1,"uncacheable V used immediate window");
+    pair_now_cacheable=1; pair_now_paddr=32'h1028; #1;
+    if (pair_now_valid) $fatal(1,"different-line V used U window");
+    pair_now_paddr=32'h1008; snoop_inv_valid=1; #1;
+    if (pair_now_valid) $fatal(1,"snooped window served immediate V");
+    snoop_inv_valid=0; flush_all=1; #1;
+    if (pair_now_valid) $fatal(1,"flushed window served immediate V");
+    flush_all=0; #1;
+    if (!pair_now_valid) $fatal(1,"unpoisoned same-window V lost");
+    @(posedge clk); @(negedge clk); c_req=0; pair_req_valid=0;
+    pair_now_req=0;
+    c_wstrb=4'hf; pair_size_log2[1]=2'd2;
+    if (pair_rsp_valid[1])
+      $fatal(1,"immediate byte return enqueued a duplicate V response");
+
+    legacy_read(32'h1000);
+    @(negedge clk); c_req=1; c_addr=32'h1004;
+    pair_req_valid=2'b10; pair_paddr[1]=32'h1008;
+    pair_size_log2[1]=2'd2; pair_owner[1]=16'h6804;
+    pair_now_req=1; pair_now_paddr=32'h1008; pair_now_size_log2=2'd2;
+    #1;
+    if (!c_ack || !pair_now_valid ||
+        pair_now_data!==word_at(32'h1008) || pair_req_ready[1])
+      $fatal(1,"same-window dword return not immediate or double accepted");
+    pair_now_paddr=32'h101d; #1;
+    if (pair_now_valid) $fatal(1,"cross-line dword used immediate window");
+    pair_now_paddr=32'h1008;
+    @(posedge clk); @(negedge clk); c_req=0; pair_req_valid=0;
+    pair_now_req=0; pair_now_size_log2=0;
+    if (pair_rsp_valid[1])
+      $fatal(1,"immediate dword return enqueued a duplicate V response");
+`endif
 `ifdef VEN_P54_DUAL_LOAD_PRIME
     // A checked lookahead captures U without a live c_req. It may reserve
     // U's bank and capture V on another bank only if commit is authorized.
+`ifdef VEN_L1D_TWO_WINDOW_REUSE
+`ifdef VEN_P54_DUAL_BYTE_LOAD_PAIR
+    legacy_write(32'h1000, word_at(32'h1000));
+    backing_before=backing;
+`endif
+`endif
     legacy_read(32'h1024);
     @(negedge clk); c_next_req=1; c_next_commit=0;
     c_next_addr=32'h1000; pair_req_valid=2'b10;
@@ -297,8 +405,34 @@ module tb_l1d_pair_hit;
     if (!c_ack || c_rdata!==word_at(32'h1000) ||
         pair_rsp_valid!==2'b10 || pair_rsp_owner[1]!==16'h7701 ||
         pair_rsp_data[1]!==word_at(32'h1024) || dut.window_valid_q)
-      $fatal(1,"primed U/V owner, data or mixed-window failure");
+      $fatal(1,"primed U/V owner, data or mixed-window failure ack=%b data=%08x vrsp=%b owner=%x vdata=%08x window=%b",
+             c_ack,c_rdata,pair_rsp_valid,pair_rsp_owner[1],
+             pair_rsp_data[1],dut.window_valid_q);
     @(posedge clk); @(negedge clk); c_req=0;
+
+`ifdef VEN_P54_DUAL_BYTE_LOAD_PAIR
+    legacy_read(32'h1024);
+    @(negedge clk); c_next_req=1; c_next_commit=0;
+    c_next_addr=32'h1001; c_next_wstrb=4'h1;
+    pair_req_valid=2'b10; pair_paddr[1]=32'h1024;
+    pair_size_log2[1]=2'd0; pair_owner[1]=16'h7801;
+    #1;
+    if (!c_next_ready || pair_req_ready[1])
+      $fatal(1,"uncommitted byte prime admitted V");
+    c_next_commit=1;
+    expect_pair(2'b10);
+    @(posedge clk); @(negedge clk);
+    c_next_req=0; c_next_commit=0; pair_req_valid=0;
+    c_req=1; c_addr=32'h1001; c_wstrb=4'h1;
+    #1;
+    if (!c_ack || c_rdata[7:0]!==mem[32'h1001] ||
+        pair_rsp_valid!==2'b10 || pair_rsp_owner[1]!==16'h7801 ||
+        pair_rsp_data[1]!=={24'd0,mem[32'h1024]} || dut.window_valid_q)
+      $fatal(1,"primed byte U/V ownership or data failure");
+    @(posedge clk); @(negedge clk); c_req=0; c_wstrb=4'hf;
+    c_next_wstrb=4'hf; pair_size_log2[1]=2'd2;
+
+`endif
 
     legacy_read(32'h1024);
     @(negedge clk); c_next_req=1; c_next_commit=1;
@@ -335,6 +469,19 @@ module tb_l1d_pair_hit;
     if (!c_ack || !dut.shadow_reuse || c_rdata!==word_at(32'h1020))
       $fatal(1,"second resident line missed the preserved shadow");
     @(posedge clk); @(negedge clk); c_req=0;
+`ifdef VEN_P54_DUAL_BYTE_LOAD_PAIR
+    @(negedge clk); c_req=1; c_addr=32'h1024; c_wstrb=4'h1;
+    pair_req_valid=2'b10; pair_paddr[1]=32'h1027;
+    pair_size_log2[1]=2'd0; pair_owner[1]=16'h7803;
+    pair_now_req=1; pair_now_paddr=32'h1027;
+    #1;
+    if (!dut.shadow_reuse || !c_ack || !pair_now_valid ||
+        pair_now_data!=={24'd0,mem[32'h1027]} || pair_req_ready[1])
+      $fatal(1,"shadow-window byte return failed");
+    @(posedge clk); @(negedge clk); c_req=0; pair_req_valid=0;
+    pair_now_req=0; c_wstrb=4'hf; pair_size_log2[1]=2'd2;
+    if (pair_rsp_valid[1]) $fatal(1,"shadow byte return duplicated V");
+`endif
 `endif
 
     // A missing U tag or a simultaneous snoop cannot manufacture a V
