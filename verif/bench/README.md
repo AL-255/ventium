@@ -218,6 +218,10 @@ synthesis timing loss; it does not establish full-core routed timing.
 The separate [uop-cache leaf probe](../../fpga/P54_UOPCACHE_LEAF_SYNTH_2026-09-27.md)
 measures the much larger cross-line repair cost at the same 45 MHz synthesis
 constraint. It excludes core-side cross-pair logic and routed timing.
+The [resident slow-decode handoff A/B](P54_SDECODE_DIRECTED_2026-09-27.md)
+also passes QEMU-aligned directed windows at all 32 instruction-line offsets
+and a separate boundary/snoop guard; it remains default-off and has no
+gameplay or routed-FPGA timing result.
 
 The cross-line memory-ALU self-modifying-code fixture
 (`verif/issue_uv/t_alu_memory_smc.s`) passes the existing
