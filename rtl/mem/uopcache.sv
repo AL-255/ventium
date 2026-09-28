@@ -379,12 +379,16 @@ module uopcache
   } cross_meta_t;
   logic [31:0] cross_index_valid;
   cross_meta_t cross_index_meta [32];
-  (* ram_style = "distributed" *) fpd_t cross_index_data [32];
+  // Vivado expands an unpacked array of packed structs into per-field FFs,
+  // despite ram_style. Keep the same bit layout and single indexed write/read
+  // as a plain vector array so the payload can infer FPGA distributed SRAM;
+  // coherence metadata remains in FFs for exact two-source invalidation.
+  (* ram_style = "distributed" *) logic [FPDW-1:0] cross_index_data [32];
   logic [4:0] cross_read_index, cross_write_index;
   assign cross_read_index = 5'(cross_query_set);
   assign cross_write_index = 5'(cross_set_q);
   assign cross_victim_valid = cross_index_valid[cross_read_index];
-  assign cross_victim_uop = cross_index_data[cross_read_index];
+  assign cross_victim_uop = fpd_t'(cross_index_data[cross_read_index]);
   assign cross_victim_mode = cross_index_meta[cross_read_index].mode16;
   assign cross_victim_way = cross_index_meta[cross_read_index].way;
   assign cross_victim_next_way = cross_index_meta[cross_read_index].next_way;

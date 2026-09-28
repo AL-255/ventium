@@ -1,7 +1,7 @@
 # Bounded uop-cache FPGA storage/control probe. Crosspair is core-side and is
 # not represented in this leaf; the report is not routed whole-core timing.
 if {[llength $argv] != 2} {
-    error "usage: -tclargs base|crossline OUTPUT_DIRECTORY"
+    error "usage: -tclargs base|crossline|crossline_local|cross2_local|cross33_local OUTPUT_DIRECTORY"
 }
 set variant [lindex $argv 0]
 set output_dir [file normalize [lindex $argv 1]]
@@ -16,6 +16,18 @@ switch -- $variant {
     crossline {
         lappend defines VEN_UOP_CROSSLINE
         set generics {EXEC_REPAIR=1}
+    }
+    crossline_local {
+        lappend defines VEN_UOP_CROSSLINE VEN_UOP_REPAIR_FAIR
+        set generics {EXEC_REPAIR=1 TAIL_LOCAL=1}
+    }
+    cross2_local {
+        lappend defines VEN_UOP_CROSSLINE VEN_UOP_CROSS2 VEN_UOP_REPAIR_FAIR
+        set generics {EXEC_REPAIR=1 TAIL_LOCAL=1}
+    }
+    cross33_local {
+        lappend defines VEN_UOP_CROSSLINE VEN_UOP_CROSS2 VEN_UOP_CROSS_INDEX VEN_UOP_REPAIR_FAIR
+        set generics {EXEC_REPAIR=1 TAIL_LOCAL=1}
     }
     default {error "unknown variant $variant"}
 }

@@ -51,9 +51,15 @@ both achieve **5,394 instructions in 5,394 cycles** on the separate two-seam
 test. The indexed record helps a synthetic 12-seam pressure test further:
 **11,821 to 8,955 cycles** for the same 3,582 warm instructions versus the
 two-entry record, with QEMU-equivalent retirement groups. The indexed payload
-alone is 6,720 logical bits plus metadata and has no routed FPGA area/timing
-result; do not assume the 12-seam gain justifies it on silicon. These numbers
-are directed microbenchmarks, not verified gameplay IPC or full qualification.
+alone is 6,720 logical bits plus metadata. A [bounded FPGA leaf
+probe](../../fpga/P54_UOPCACHE_LEAF_SYNTH_2026-09-27.md) found that expressing
+those bits as a packed vector array, rather than an unpacked array of structs,
+is necessary for Vivado to infer distributed RAM: the mapped indexed leaf
+drops from 17,019 LUTs / 10,759 FFs to 13,055 LUTs / 4,562 FFs, with 120
+more LUTRAMs and unchanged BRAM count. There is still no routed whole-core
+area/timing result; do not assume the 12-seam gain justifies it on silicon.
+These numbers are directed microbenchmarks, not verified gameplay IPC or full
+qualification.
 The canonical cross-page fetch gate remains blocked by the pinned free-running
 QEMU's known two-page TB-bookkeeping defect; an isolated corrected-QEMU
 diagnostic matched 1,601 stepped groups and observed the expected fault/retry,
