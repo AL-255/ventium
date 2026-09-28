@@ -40,6 +40,8 @@ CASES = {
     "resident_memory_and": (BASE, 19),
     "resident_memory_sub": (BASE, 20),
     "resident_memory_xor": (BASE, 21),
+    "branch_target_load": (BASE, 22),
+    "v_branch_target_load": (BASE, 23),
 }
 
 

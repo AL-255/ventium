@@ -14,6 +14,7 @@
   fpd_t mc_u_q, mc_v_q;
   logic mc_accept, mc_any_accept, mc_offer, mc_chain_accept, mc_prime_offer;
   logic mc_prime_accept, mc_prime_base, mc_boundary_ok, mc_prepare_ok;
+  logic mc_prime_branch, mc_prime_u_branch, mc_prime_v_branch;
   logic [31:0] mc_query_pc, mc_query_vpc, mc_query_ea, mc_query_lin;
   logic [31:0] mc_query_phys, mc_lookup_phys;
   logic [2:0] mc_query_seg, mc_lookup_perm;
@@ -62,8 +63,35 @@
   // While a candidate is waiting, prepare its successor independently of
   // response data. On consume+replace its AGU/translation result is registered
   // for the following cycle. No response-data -> AGU -> cache-array path.
+`ifdef VEN_PIPE_BRANCH_LOAD_PRIME
+`ifndef VEN_PIPE_REG_LOAD_PRIME
+  initial $fatal(1, "VEN_PIPE_BRANCH_LOAD_PRIME requires VEN_PIPE_REG_LOAD_PRIME");
+`endif
+  // A predicted-taken U or paired V branch may lend its commit edge to a checked resident
+  // load at its target. Speculative TAG lookup does not capture data or mutate
+  // cache state. The actual branch decision gates c_next_commit below: if the
+  // branch resolves not taken, no request/response owner is created. Keeping
+  // the speculative address independent of U's ALU result is essential: the
+  // ordinary ALU input mux also reads mem_rdata, and a result-driven address
+  // would close a real query -> L1 data -> U flags -> query comb cycle.
+  assign mc_prime_u_branch = !mc_valid_q && !pipe_mem_active_q &&
+      pipe_u_eff.simple && pipe_u_eff.is_branch && pipe_u_eff.br_cond &&
+      !pipe_u_eff.w16 && u_pred_taken;
+  assign mc_prime_v_branch = !mc_valid_q && !pipe_mem_active_q &&
+      pipe_u_eff.simple && !pipe_u_eff.is_mem && !pipe_u_eff.is_store &&
+      !pipe_u_eff.is_stack && !pipe_u_eff.is_fp && !pipe_u_eff.is_branch &&
+      pipe_pair_eff && pipe_v_eff.is_branch && pipe_v_eff.br_cond &&
+      v_pred_taken && !pipe_v_eff.w16;
+  assign mc_prime_branch = mc_prime_u_branch || mc_prime_v_branch;
+`else
+  assign mc_prime_u_branch = 1'b0;
+  assign mc_prime_v_branch = 1'b0;
+  assign mc_prime_branch = 1'b0;
+`endif
   assign mc_query_pc = mc_valid_q
       ? mc_pc_q + {28'd0, mc_u_q.len} + (mc_pair_q ? {28'd0, mc_v_q.len} : 32'd0)
+      : mc_prime_u_branch ? u_target
+      : mc_prime_v_branch ? v_target
       : pipe_commit_eip + {28'd0, pipe_u_eff.len}
           + (pipe_pair_eff ? {28'd0, pipe_v_eff.len} : 32'd0);
   assign mc_query_u = mc_descriptor(mc_query_pc);
@@ -106,17 +134,18 @@
 `endif
       ;
 `ifdef VEN_PIPE_REG_LOAD_PRIME
-  // A committed, side-effect-free integer packet can lend its otherwise idle
-  // D-cache lookup slot to the next checked resident load.  This is never a
+  // A committed, side-effect-free integer packet (or a predicted taken branch
+  // with an outcome-checked commit) can lend its otherwise idle D-cache lookup
+  // slot to the next checked resident load. This is never a
   // backing transaction: MMIO, TLB misses and dependent addresses fall back
   // to ordinary admission on the following clock.
   assign mc_prime_base = !mc_valid_q && !pipe_mem_active_q &&
       !pipe_new_mem_req && pipe_u_eff.simple && !pipe_u_eff.is_mem &&
       !pipe_u_eff.is_store && !pipe_u_eff.is_stack && !pipe_u_eff.is_fp &&
-      !pipe_u_eff.is_branch &&
+      (!pipe_u_eff.is_branch || mc_prime_u_branch) &&
       !(pipe_pair_eff && (pipe_v_eff.is_mem || pipe_v_eff.is_store ||
                           pipe_v_eff.is_stack || pipe_v_eff.is_fp ||
-                          pipe_v_eff.is_branch));
+                          (pipe_v_eff.is_branch && !mc_prime_v_branch)));
 `else
   assign mc_prime_base = 1'b0;
 `endif
@@ -124,8 +153,9 @@
     mc_prepare_ok = mc_boundary_ok &&
         !fp_is_ext_load(pipe_u_eff) && !fp_is_ext_load(mc_query_u) &&
         (pipe_mem_active_q || pipe_new_load_req || mc_prime_base) &&
-        !pipe_u_eff.is_store && !pipe_u_eff.is_branch &&
-        !(pipe_pair_eff && pipe_v_eff.is_branch) &&
+        !pipe_u_eff.is_store &&
+        (!pipe_u_eff.is_branch || mc_prime_u_branch) &&
+        !(pipe_pair_eff && pipe_v_eff.is_branch && !mc_prime_v_branch) &&
         mc_query_u.simple && mc_query_u.is_mem && !mc_query_u.is_store &&
         !mc_query_u.is_stack && !mc_query_u.is_fp && !mc_query_u.is_branch &&
         !mc_query_u.w16 && (mc_query_u.len != 0) &&
@@ -164,7 +194,10 @@
                          + (pipe_pair_eff ? {28'd0, pipe_v_eff.len} : 32'd0));
   assign mc_prime_offer = mc_prime_base && mc_prepare_ok;
   assign mem_next_req = mc_offer || mc_prime_offer;
-  assign mem_next_commit = (mc_offer || mc_prime_offer) && pipe_int_commit;
+  assign mem_next_commit = (mc_offer ||
+      (mc_prime_offer && (!mc_prime_branch ||
+          (mc_prime_u_branch ? pipe_u_eff.br_taken : v_br_taken_eff)))) &&
+      pipe_int_commit;
   assign mem_next_addr = mc_prime_offer ? mc_query_phys : mc_phys_q;
   assign mem_next_wstrb = (mc_prime_offer ? mc_query_u.w8 : mc_u_q.w8)
       ? 4'b0001 : 4'b1111;
@@ -220,9 +253,16 @@
             !fx_act && !exec_flush_all && !tlb_flush && !tlb_fill_en &&
             !smi_take && !nmi_take && !intr_take && !irq_shadow)
       else $fatal(1, "register-load prime ownership/event violation");
-    assert (mc_query_pc == pipe_commit_eip + {28'd0, pipe_u_eff.len}
+    assert (mc_prime_branch ||
+            mc_query_pc == pipe_commit_eip + {28'd0, pipe_u_eff.len}
                          + (pipe_pair_eff ? {28'd0, pipe_v_eff.len} : 32'd0))
       else $fatal(1, "register-load prime nonsequential owner");
+    if (mc_prime_branch)
+      assert ((mc_prime_u_branch && pipe_u_eff.is_branch &&
+               pipe_u_eff.br_taken && u_pred_taken && mc_query_pc == u_target) ||
+              (mc_prime_v_branch && pipe_pair_eff && pipe_v_eff.is_branch &&
+               v_br_taken_eff && v_pred_taken && mc_query_pc == v_target))
+        else $fatal(1, "branch-target load prime lost taken owner");
   end
 `endif
 `endif

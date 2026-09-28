@@ -116,6 +116,24 @@ loop_body:
 .elseif CASE == 21
     xorl (%esi), %eax
     xorl 4(%esi), %edx
+.elseif CASE == 22
+    # The last data read is from a different line than the branch target's
+    # first read. A dependent register op after the target load gives the
+    # ordinary next-load lookahead an independent edge; a branch-target prime
+    # must save its own capture clock, not merely move it to the second load.
+    movl (%esi), %eax
+    addl %ebx, %edi
+    movl %eax, %ebx
+    movl 32(%esi), %edx
+.elseif CASE == 23
+    # A dependent register consumer prevents each load from pairing with it.
+    # The final DEC/JNZ can then form a V-branch pair, whose target is the
+    # resident load in the other data line. Both branches use the same general
+    # prediction/actual-outcome ownership rule.
+    movl (%esi), %eax
+    movl %eax, %ebx
+    movl 32(%esi), %edx
+    movl %edx, %edi
 .else
     .error "unsupported CASE"
 .endif

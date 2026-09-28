@@ -67,6 +67,7 @@ timeout 540s env VENTIUM_BUILD_SCOPE_PROFILE=ipc_parallel32 \
 | `register_u_memory_v` / `memory_u_register_v` | Can an independent V load issue when U has no memory operand, contrasted with the existing U-load/V-register case? |
 | `memory_alu_integer_v` | Does a resident ALU-memory U retain its execution occupancy while an independent integer V follows? |
 | `resident_memory_{or,adc,sbb,and,sub,xor}` | Does the checked register-destination memory-ALU admission avoid recurring slow fetch/decode/load FSM visits without changing full architectural state? ADD is the separate `resident_memory_alu` control. Carry operators retain their real CF dependency. |
+| `branch_target_load` / `v_branch_target_load` | Can a predicted-taken U/V branch prime a checked resident load on its target edge, without changing the final not-taken iteration or merely moving a capture bubble to another load? |
 
 These cases expose bottlenecks, not the full acceptance matrix. They do not
 cover paging/TLB geometry, dirty-line coherence, precise faults, interrupts,
@@ -81,6 +82,23 @@ fallback, bank backpressure, and U-before-V priority. It exhausts all 16,384
 line-offset/width pairs, then runs 32,768 randomized cases per seed. The leaf is not connected
 to the current single-port core; passing it cannot claim V-memory pairing or
 any gameplay speedup.
+
+`VEN_PIPE_BRANCH_LOAD_PRIME` is an opt-in extension of the registered
+`VEN_PIPE_REG_LOAD_PRIME`/`VEN_PIPE_MEM_CHAIN` path. It may probe a
+predicted-taken branch target, but `c_next_commit` requires the actual branch
+outcome and the normal checked resident-load gates. `run-p54-branch-target-prime.py`
+checks both U-branch (`--case 22`) and paired V-branch (`--case 23`) against
+pinned QEMU full-state traces, including the terminal not-taken branch. On
+the matched 256-iteration fixtures, directed IPC improves **1.20→1.50**
+(5→4 cycles per six-instruction loop) and **1.00→1.20** (6→5 cycles),
+respectively. The other 22 directed microcases are cycle-identical and all
+24 architectural A/B traces match. This is a core-consumed microbenchmark
+gain, not gameplay IPC or routed FPGA timing.
+The branch prime shares the existing D-cache lookup slot on a branch edge;
+it adds no cache-data read port. For the FPGA target, wider simultaneous
+access should use banked or true-dual-port Xilinx BRAM where it wins timing,
+not replicated combinational multi-read arrays. This branch path still needs
+routed timing evaluation before enabling it in a hardware build.
 
 `run-p54-hit-return.sh` tests a two-slot owner-tagged hit-return prototype. It
 accepts two distinct-bank hits per clock, holds each owner/data pair under
