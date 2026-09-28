@@ -69,6 +69,16 @@ improve. The current full-PC profile does **not** enable window reuse, and no
 new gameplay IPC result exists. See
 `verif/bench/P54_SDECODE_DIRECTED_2026-09-27.md` for the composed microprofile.
 
+A second, reverted FPGA area probe tried selecting the byte offset before the
+registered-window data slice (source SHA-256
+`46ec1986a884e57de837377e695c08e6c3eaf9ee3bf3c7c9064b0254da8695e8`).
+All three bounded cache-local window/coherence/stream benches passed, but the
+matched `code_stream_reuse` leaf grew from **11,305 to 11,668 LUTs** (+363)
+at the same 45 MHz constraint. Synthesis WNS improved from +16.908 to
++17.882 ns, but this did not justify the area increase or prove routed timing.
+The original RTL remains in the tree; the rejected report is at
+`/tmp/p54-l1d-code-stream-reuse-compact-r1/`.
+
 Reproduce a single variant (do not run two Vivado instances):
 
 ```sh
