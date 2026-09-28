@@ -54,6 +54,19 @@ workload improvement large enough to justify its LUT cost. An isolated
 synchronous BRAM bank has now been measured below; an integrated BRAM L1D
 remains unmeasured and must include read latency and collision semantics.
 
+The later owner-tagged L1/AXI sideband and registered-ACK overlap source
+(`ven_l1d.sv` SHA-256 `c1b2500168fd6b6424bcd8416c5b6412c27c2a1bda1b7bb72f9b8526b4fca171`)
+was synthesized with the same `paired` OOC recipe at 45 MHz. It uses
+**14,819 LUTs** (12,579 logic, 2,240 LUTRAM), **6,251 FFs**, and **zero
+BRAMs**; synthesis WNS is **+16.632 ns**, implying an isolated constrained
+register-path limit of roughly **179 MHz** (22.222 − 16.632 ns). Reports are
+under `/tmp/p54-l1d-paired-overlap-r1/`. The previous paired row is **not a
+matched source A/B**, so its 567-LUT difference cannot be attributed solely
+to overlap. Neither figure is placed-and-routed core Fmax. The 32-pair
+back-to-back microbench proves two resident bank-distinct returns per clock,
+but the core's sideband requests remain tied low pending checked D2/DTLB and
+retirement ownership; this is not a gameplay IPC gain.
+
 The window-reuse row is a matched rerun of code stream using the same
 `ven_l1d.sv` source SHA-256 as the preceding code-buffer/stream rows. Both
 variants used single-threaded Vivado 2025.2 synthesis and the same 45.0 MHz
