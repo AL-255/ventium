@@ -29,6 +29,9 @@ module issue_uv
 `ifdef VEN_P54_DUAL_LOAD_PAIR
   , output logic pair_mem_ok // same P54 rules, two independent MOV loads only
 `endif
+`ifdef VEN_P54_DUAL_STORE_PAIR
+  , output logic pair_store_ok // two independent full-dword register stores
+`endif
 `ifdef VEN_PERF_PROFILE
     // Simulation-only first-rejection attribution.  It is deliberately an
     // output of the same leaf that decides pair_ok, rather than a second copy
@@ -86,6 +89,18 @@ module issue_uv
       !fp_is_ext_load(iu) && !fp_is_ext_load(iv) &&
       ((iv.reads & iu.writes) == 8'd0) &&
       ((iv.addr_mask & iu.writes) == 8'd0);
+`endif
+`ifdef VEN_P54_DUAL_STORE_PAIR
+  // Keep store admission out of the ordinary pair_ok path until both checked
+  // physical requests and both backing slots are owned. Only plain full-dword
+  // register stores fit the first L1 pair lane: no RMW, byte/word, implicit
+  // stack, FP, flag, or immediate side effect may retire through it.
+  always_comb pair_store_ok = fp_can_pair(iu, iv, 1'b1) &&
+      iu.is_mem && iu.is_store && !iu.is_load && !iu.is_stack && !iu.is_fp &&
+      iv.is_mem && iv.is_store && !iv.is_load && !iv.is_stack && !iv.is_fp &&
+      !iu.mem_lhs && !iv.mem_lhs && !iu.wreg && !iv.wreg &&
+      !iu.wflags && !iv.wflags && !iu.use_imm && !iv.use_imm &&
+      !iu.w8 && !iv.w8 && !iu.w16 && !iv.w16;
 `endif
 
 `ifdef VEN_PERF_PROFILE
