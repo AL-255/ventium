@@ -797,6 +797,29 @@ module tb_l1d;
     do_read_b2b(32'h0000_1c1a, 6);   // 0x1c1a unaligned: words at boff 26,30(xline),2,6,10,14
     $display("[8] same burst over a COLD next line (xline fills L+1 mid-burst)");
     do_read_b2b(32'h0000_201a, 6);   // 0x201a: line 0x2000 + crosses into cold 0x2020 @boff=30
+`ifdef VEN_L1D_BANK0_SHARED_XLINE
+    // Bank 0 is borrowed from the NEXT line for the crossing response. The
+    // saved first-line image must not then masquerade as reusable complete
+    // data when a later request returns to word zero of the first line.
+    do_read(32'h0000_201e, d);
+    chk("shared-bank0 crossing byte window", d, rd32(32'h0000_201e));
+`ifdef VEN_L1D_WINDOW_REUSE
+    if (dut.window_valid_q !== 1'b0) begin
+      $display("  FAIL shared-bank0 crossing was marked as a complete reusable line");
+      errors++;
+    end
+`endif
+    do_read(32'h0000_2000, d);
+    chk("shared-bank0 first-line word after crossing", d, rd32(32'h0000_2000));
+`ifdef VEN_L1D_WINDOW_REUSE
+    if (dut.window_valid_q !== 1'b1) begin
+      $display("  FAIL shared-bank0 ordinary capture did not restore line reuse");
+      errors++;
+    end
+`endif
+    do_read(32'h0000_2020, d);
+    chk("shared-bank0 next-line word after crossing", d, rd32(32'h0000_2020));
+`endif
 
     // ----- NEW Phase A behavior: KEN# bypass + snoop invalidate ---------------
     $display("[9] NON-CACHEABLE read (cacheable=0): no allocate, fresh data each time");

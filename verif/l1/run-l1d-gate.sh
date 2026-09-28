@@ -61,6 +61,11 @@ run_one 64  "-DVEN_L1D_HIT_UNDER_FILL -DVEN_L1D_FILL_FORWARD -DVEN_L1D_WINDOW_RE
 # because it has materially different replacement/invalidation behavior.
 run_one 128 "-DVEN_L1D_HIT_UNDER_FILL -DVEN_L1D_FILL_FORWARD -DVEN_L1D_WINDOW_REUSE -DVEN_L1D_WINDOW_KEEP_STORE -DVEN_L1D_TAG_INVALIDATE" "HUF_FF_KEEP_STORE_TAG"
 run_one 64  "-DVEN_L1D_HIT_UNDER_FILL -DVEN_L1D_FILL_FORWARD -DVEN_L1D_WINDOW_REUSE -DVEN_L1D_WINDOW_KEEP_STORE -DVEN_L1D_TAG_INVALIDATE" "HUF_FF_KEEP_STORE_TAG"
+# Sharing bank zero's ordinary read port with a crossing dword changes the
+# captured first-line image. Run the same crossing/return tests with window
+# reuse enabled, at both supported set counts.
+run_one 128 "-DVEN_L1D_BANKED_DATA -DVEN_L1D_BANK0_SHARED_XLINE -DVEN_L1D_WINDOW_REUSE" "BANK0_SHARED_XLINE"
+run_one 64  "-DVEN_L1D_BANKED_DATA -DVEN_L1D_BANK0_SHARED_XLINE -DVEN_L1D_WINDOW_REUSE" "BANK0_SHARED_XLINE"
 # REVIEW1_Aug2 H-07: the finding lives in the VEN_L1_HONOR_CD build -- that is the
 # configuration where BYPASS_RD_EN was 0 and a non-cacheable read of a resident line
 # was served from the ARRAY (stale post-CD data; for MMIO, duplicated or suppressed

@@ -22,7 +22,10 @@ elif [[ $# -ne 0 ]]; then
     echo "usage: $0 [--comb-ack|--legacy-capture-pair|--prime-pair|--two-window]" >&2
     exit 2
 fi
-timeout 420s "$root/tools/verilator_serial.sh" --binary --assert -sv \
+if [[ "${VEN_L1D_SHARED_BANK0:-0}" == "1" ]]; then
+    extra_defines+=(+define+VEN_L1D_BANK0_SHARED_XLINE)
+fi
+timeout 420s "$root/tools/verilator_serial.sh" -j "${VL_J:-1}" --binary --assert -sv \
     -Wall -Wno-UNUSED -Wno-fatal \
     -Werror-IMPLICIT -Werror-PINMISSING -Werror-UNDRIVEN \
     -Werror-MULTIDRIVEN -Werror-LATCH -Werror-UNOPTFLAT \

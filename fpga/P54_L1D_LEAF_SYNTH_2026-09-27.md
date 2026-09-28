@@ -170,3 +170,42 @@ timeout --signal=TERM --kill-after=15s 540s \
   -source fpga/synth_p54_bram_data.tcl \
   -tclargs /tmp/p54-bram-data-synth-example
 ```
+
+## Shared bank-zero crossing read (September 28 opt-in)
+
+`VEN_L1D_BANK0_SHARED_XLINE` makes a crossing dword use bank zero's ordinary
+read address for the *next* line, instead of inferring a second asynchronous
+read port. A crossing dword consumes bank seven of its first line and bank
+zero of the next; first-line bank zero is not needed for that response. The
+registered first-line image is incomplete on such a capture, so the existing
+full-line window-reuse and FP high-half qualifiers are cleared for that owner.
+The option requires `VEN_L1D_BANKED_DATA` and is **not enabled by default**.
+
+Matched Vivado 2025.2 out-of-context runs at a 45 MHz constraint, same source
+SHA-256 `7bddab07f48b96206c8e16b20ca4fed521cf76caf047562810258b7b69b38628`:
+
+| Define profile | Total LUTs | LUTRAMs | FFs | BRAMs | Synthesis WNS | Implied constrained leaf register-path frequency |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| code stream + window reuse | 11,305 | 2,240 | 6,399 | 0 | +16.908 ns | ~188 MHz |
+| same + shared bank zero | 10,785 | 2,048 | 6,404 | 0 | +17.635 ns | ~218 MHz |
+
+The opt-in saves **520 LUTs**, including **192 LUTRAMs**, while adding five
+FFs. The frequency figures are derived only from constrained internal leaf
+paths (`1/(22.222 ns - WNS)`), **not** routed core or board frequencies; I/O
+paths and whole-system fanout remain unconstrained. Reports are under
+`/home/yukidama/ventium-background-sep28.B3cxzoKA/l1d_bank0_{base,shared}/`.
+Each synthesis completed inside its nine-minute cap, sequentially under the
+exclusive Vivado launcher; no Vivado process remained afterward.
+
+The complete L1D gate passed at both 64 and 128 sets, including the opt-in
+crossing/return data, cache coherence, fills and bypass. The gate was rerun
+with scratch on a filesystem with free space after an earlier run stopped
+while compiling an unrelated configuration on a nearly full scratch volume.
+Paired-hit tests passed fresh U/V capture (153
+checks), primed U/V capture (171), and two-window ownership (187). A matched
+31-case full-core candidate/control microbenchmark showed identical
+architectural traces and exact cycles in every case, including a new resident
+crossing-read → first-line word-zero → next-line word-zero loop (5.000 cycles
+per five-instruction iteration in both builds). This does not establish
+no regression for every gameplay access pattern: a crossing capture cannot
+be reused as a complete first line, and no candidate gameplay result exists.

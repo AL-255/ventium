@@ -185,6 +185,14 @@ loop_body:
     movl %ebx, (%esi)
     movl (%esi), %eax
     movl 32(%esi), %edx
+.elseif CASE == 30
+    # A dword at byte 30 uses bank 7 of this line and bank 0 of the next.
+    # Return immediately to bank 0 of the first line, then read bank 0 of
+    # the next line. This exposes any false complete-window reuse after the
+    # shared-bank0 crossing capture and measures its one-clock tradeoff.
+    movl 30(%esi), %eax
+    movl (%esi), %edx
+    movl 32(%esi), %edi
 .else
     .error "unsupported CASE"
 .endif

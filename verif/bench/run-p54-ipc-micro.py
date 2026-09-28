@@ -48,6 +48,7 @@ CASES = {
     "v_branch_fallthrough_mispredict": (BASE, 27),
     "dual_load_after_store": (BASE, 28),
     "dual_load_after_store_same_bank": (BASE, 29),
+    "resident_xline_return": (BASE, 30),
 }
 
 

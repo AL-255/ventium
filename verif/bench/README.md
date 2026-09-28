@@ -418,3 +418,13 @@ specific counter was emitted. Without executable repair the fixture also
 matched QEMU, but its crossing instruction stayed on the slow path and did
 not qualify the fast-path SMC corner. This remains directed evidence, not
 gameplay or full-system acceptance.
+
+`resident_xline_return` (case 30 in `run-p54-ipc-micro.py`) checks the FPGA
+bank-zero read-port-sharing experiment against its matched control. The loop
+reads an unaligned crossing dword, then word zero of each resident line. The
+31-case A/B had full architectural trace equality and exact cycle equality;
+this case took 5.000 cycles per five-instruction iteration in both builds.
+The isolated L1D and paired-owner suites additionally cover crossing data,
+first-line reuse rejection and U/V ownership. See the matched
+[L1D synthesis report](../../fpga/P54_L1D_LEAF_SYNTH_2026-09-27.md) for FPGA
+resource/timing evidence and the remaining gameplay qualification caveat.

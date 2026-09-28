@@ -481,6 +481,15 @@ module ven_l1d #(
   logic [WORDS-1:0]  fill_word_valid;
   logic [LW-1:0]      fill_forward_line;
 `ifdef VEN_L1D_BANKED_DATA
+`ifdef VEN_L1D_BANK0_SHARED_XLINE
+  // A crossing dword consumes banks 7 and 0 of the next line; it never
+  // consumes bank 0 of the first line. Share bank 0's one LUTRAM read address
+  // instead of inferring a second asynchronous port for that exceptional
+  // access. The captured first-line bank 0 is then NOT a complete line, so
+  // the full-line reuse/FP high-half qualifiers below must reject it.
+  logic bank0_next_read;
+  assign bank0_next_read = xline && !fill_forward_hit;
+`endif
   for (genvar bank = 0; bank < WORDS; bank++) begin : g_banked_read
     (* ram_style = "distributed" *) logic [31:0] data [L1_SETS*2];
     logic [3:0] wr_mask;
@@ -520,19 +529,29 @@ module ven_l1d #(
         (pair_req_ready[1] && pair_bank_mask[1][bank]) ?
             {pair_set[1], pair_way[1]} :
 `endif
+`ifdef VEN_L1D_BANK0_SHARED_XLINE
+        ((bank == 0) && bank0_next_read) ? {set_n, hit_way_n} :
+`endif
         fill_forward_hit ? {fset, fway} : {set_c, hit_way}];
     // A 32-bit legacy read can cross into only word zero of the following
     // line. FP_LOAD64 explicitly rejects the crossing high-half shortcut and
     // retries through the ordinary path. Do not give all eight LUTRAM banks a
     // second async read port for seven words that no response can observe.
     if (bank == 0) begin : g_cross_word
+`ifdef VEN_L1D_BANK0_SHARED_XLINE
+      assign rd_line_next_raw[31:0] = rd_line_raw[31:0];
+`else
       assign rd_line_next_raw[31:0] = data[{set_n, hit_way_n}];
+`endif
     end else begin : g_no_cross_word
       assign rd_line_next_raw[32*bank +: 32] = 32'd0;
     end
   end
   assign fill_forward_line_raw = rd_line_raw;
 `else
+`ifdef VEN_L1D_BANK0_SHARED_XLINE
+  initial $fatal(1, "VEN_L1D_BANK0_SHARED_XLINE requires VEN_L1D_BANKED_DATA");
+`endif
   assign rd_line_raw = dc_line[{set_c, hit_way}];
   assign rd_line_next_raw = dc_line[{set_n, hit_way_n}];
   assign fill_forward_line_raw = dc_line[{fset, fway}];
@@ -1239,6 +1258,9 @@ module ven_l1d #(
 `ifdef VEN_FP_LOAD64
       if (do_rd_cap)
         rd_full_line_q <= (st == L1_IDLE) && hit && !fill_forward_hit && !stream_path &&
+`ifdef VEN_L1D_BANK0_SHARED_XLINE
+                          !xline &&
+`endif
 `ifdef VEN_P54_DUAL_HIT
                           !((pair_legacy_capture || pair_prime_capture) &&
                             pair_req_ready[1]);
@@ -1252,6 +1274,9 @@ module ven_l1d #(
 `ifdef VEN_L1D_WINDOW_REUSE
       if (do_rd_cap)
         window_valid_q <= (st == L1_IDLE) && hit && !stream_path &&
+`ifdef VEN_L1D_BANK0_SHARED_XLINE
+                          !xline &&
+`endif
 `ifdef VEN_P54_DUAL_HIT
                           !((pair_legacy_capture || pair_prime_capture) &&
                             pair_req_ready[1]);
