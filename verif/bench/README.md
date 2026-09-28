@@ -480,3 +480,15 @@ Longer cold Win95 and Quake runs were then launched on that exact binary, one
 CPU each, under `win95_ipc_cold/` and `quake_ipc_cold/` in the same artifact
 root. Their outcomes and gameplay IPC are **not yet known**; neither the
 directed IPC nor the smoke runs satisfy gameplay or full gate acceptance.
+
+An exploratory add-on using the earlier opt-in FP async/queue path plus
+`VEN_FP_REG_ADMIT` and `VEN_FP_ARITH_FWD` was tested separately, **not added to
+`ven-ipc`**. Against the combined profile, all 33 architectural A/B traces
+matched and only `fp_integer_overlap` changed: 8 to 6 clocks per six-instruction
+iteration, with 2,411 architectural groups matching pinned QEMU. However the
+stricter 12-case FP/integer overlap gate failed its unchanged FADD-memory and
+FMUL-memory timing requirements: both serial and overlap schedules took 1,485
+warm clocks despite witnessed concurrent integer retirement. Do not promote
+this add-on as a general performance fix based on the one faster loop.
+Artifacts: `p54_ipc_fp_ab/` and `fp_overlap_combined.log` in the same artifact
+root.
