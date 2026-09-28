@@ -153,13 +153,16 @@ are **not** gameplay IPC or a reason to promote the flag without full-system
 and FPGA-timing qualification.
 
 The split-page protected-mode fault/retry gate (`run-alu-memory-fault.py`)
-also passed all 14 operator/carry cases for both matched binaries: each had
-one precise #PF, a successful retry, and full-state equality with 213 QEMU
-groups. The gate explicitly requires **no** fast memory owner for the faulting
-instruction, because the current decoder excludes system-mode memory access
-through `fp_sys_bail` (it does not support all CS.D=0 instructions). This gate
-therefore checks that the optional ALU admission does **not** bypass that safety
-boundary; it does not prove fast-path handling of a paged fault. For this
-diagnostic, both Verilator models used `VEN_UOP_CROSSLINE` and
-`--public-flat-rw` so the read-only `MEMOWNER` probe signal survives
-optimization. Neither flag set matches the full-PC production profile.
+also passed all 14 operator/carry cases for both matched binaries in two
+profiles. Without `VEN_SYS_FASTLOAD_FLAT`, the gate requires **no** fast memory
+owner for the faulting instruction, and each run had one precise #PF, a
+successful retry, and full-state equality with 213 QEMU groups. With the
+production-like guarded `VEN_SYS_FASTPATH_RELOC`, `VEN_SYS_FASTLOAD_FLAT`,
+`VEN_SYS_FASTLOAD_BOUNDED`, and `VEN_SYS_FASTSTORE_FLAT` flags, use
+`--fast-system-memory`: the gate requires pre-fault fast ownership for
+candidate ALU operations and for control ADD, then checks the same precise
+fault/retry and full-state equality with 211 QEMU groups. That second profile
+proves this checked fast-path packet survives the split-page #PF; it is **not**
+the complete full-PC production configuration or a substitute for the full
+system gate. Both diagnostic pairs additionally used `VEN_UOP_CROSSLINE` and
+`--public-flat-rw` so the read-only `MEMOWNER` probe survives optimization.

@@ -14,7 +14,7 @@ import compare
 import tracefmt
 
 
-def validate_source_events(log):
+def validate_source_events(log, expect_fast_owner, fault_cycle):
     faults = re.findall(r'^\[FAULT\].*$', log, re.M)
     assert len(faults)==1 and re.match(
         r'\[FAULT\] vec=14 err=00000000 pc=00008013\b', faults[0]), 'wrong fault count or identity'
@@ -24,14 +24,17 @@ def validate_source_events(log):
     # architectural instruction completion. Do not compare textual positions
     # across FAULT (stdout) and PIPE-RETIRE (stderr): buffering can reorder them.
     assert len(commits)==2 and commits[0]=='0', 'wrong fault snapshot/retry metadata'
-    # The fixture uses protected, paged system mode. The current fast decoder
-    # cannot represent every CS.D=0 instruction, so fp_sys_bail must keep this
-    # access on the common slow/fragment path even with VEN_FAST_MEM_ALU set.
-    # This is a fault/retry and system-mode exclusion test, not evidence that
-    # the memory-ALU fast path can handle a paged fault itself.
-    owners = re.findall(r'^\[MEMOWNER\] cyc=\d+ state=\d+ active=1 '
+    # Whether a system-mode source may use the fast path is a build-profile
+    # decision. Without VEN_SYS_FASTLOAD_FLAT it must bail; with the guarded
+    # flat/32-bit profile, require ownership of the ORIGINAL faulting packet
+    # before the exception snapshot, not just a later successful retry.
+    owners = re.findall(r'^\[MEMOWNER\] cyc=(\d+) state=\d+ active=1 '
                         r'pc=00008013 ea=00404fff write=0$', log, re.M)
-    assert not owners, 'system-mode faulting read entered the fast memory path'
+    if expect_fast_owner:
+        assert any(int(c) < fault_cycle for c in owners), \
+            'original faulting read lacked pre-fault fast ownership'
+    else:
+        assert not owners, 'unadmitted system-mode read entered the fast path'
 
 
 def main():
@@ -42,6 +45,8 @@ def main():
                    help='precede the split-page access with normal-operand FDIV; compare x87 too')
     p.add_argument('--memory-chain', action='store_true',
                    help='precede faulting source with an independently owned warm integer load')
+    p.add_argument('--fast-system-memory', action='store_true',
+                   help='both models have guarded VEN_SYS_FASTLOAD_FLAT; candidate has VEN_FAST_MEM_ALU')
     args = p.parse_args()
     if args.fp_overlap and args.memory_chain:
         p.error('--fp-overlap and --memory-chain are separate predecessor fixtures')
@@ -98,7 +103,10 @@ def main():
                     assert compare.compare_func(tracefmt.Trace(gold.hdr,[gold.records[i] for i in ends]),
                         tracefmt.Trace(state.hdr,[state.records[i] for i in ends]),args.fp_overlap,0xffffffff,False,20,log)==0
                 log = (case/f'{name}.cycle.log').read_text()
-                validate_source_events(log)
+                source_fault = next(r for r in cyc.records if int(r['pc'],0)==0x8013)
+                validate_source_events(log,
+                    args.fast_system_memory and (name=='candidate' or op==0),
+                    int(source_fault['cyc']))
                 if args.fp_overlap and name == 'candidate':
                     assert re.search(r'^\[FP-ASYNC-DRAIN\] pc=00008013 pending=1 ', log, re.M), \
                         'no pending-FP fault/walk drain at the source instruction'
