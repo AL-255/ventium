@@ -12,6 +12,16 @@ module tb_l1d_code_buffer;
   logic [31:0] m_addr, m_wdata, m_rdata;
   logic [3:0] m_wstrb;
   logic [1:0] m_rd_size;
+`ifdef VEN_P54_DUAL_STORE_PAIR
+  logic c_pair_req=0, c_pair_ready, c_pair_ack;
+  logic [31:0] c_pair_addr=0, c_pair_wdata=0;
+  logic [3:0] c_pair_wstrb=4'hf;
+  logic m_pair_req, m_pair_ready, m_pair_ack;
+  logic [31:0] m_pair_addr, m_pair_wdata;
+  logic [3:0] m_pair_wstrb;
+  assign m_pair_ready=1'b1;
+  assign m_pair_ack=m_pair_req;
+`endif
   byte unsigned mem[65536];
   int backing=0;
   ven_l1d dut(.*);
@@ -27,6 +37,13 @@ module tb_l1d_code_buffer;
       for (int b=0;b<4;b++)
         if (m_wstrb[b]) mem[m_addr+b]=m_wdata[8*b +: 8];
   end
+`ifdef VEN_P54_DUAL_STORE_PAIR
+  always @(posedge clk) if (rst_n && m_pair_req && m_pair_ack) begin
+    backing++;
+    for (int b=0;b<4;b++)
+      if (m_pair_wstrb[b]) mem[m_pair_addr+b]=m_pair_wdata[8*b +: 8];
+  end
+`endif
 
   task automatic read_word(input logic [31:0] addr, input bit is_code);
     int guard;
@@ -44,6 +61,21 @@ module tb_l1d_code_buffer;
     while (dut.st!=0) @(negedge clk);
     repeat(2) @(negedge clk);
   endtask
+
+`ifdef VEN_P54_DUAL_STORE_PAIR
+  task automatic paired_write(input logic [31:0] uaddr, vaddr);
+    @(negedge clk); c_addr=uaddr; c_wdata=32'h10203040;
+    c_we=1; c_req=1; c_wstrb=4'hf;
+    c_pair_addr=vaddr; c_pair_wdata=32'h50607080;
+    c_pair_wstrb=4'hf; c_pair_req=1;
+    #1;
+    if (!c_pair_ready || !c_ack || !c_pair_ack)
+      $fatal(1,"paired store not accepted U=%08x V=%08x",uaddr,vaddr);
+    @(posedge clk);
+    @(negedge clk); c_req=0; c_we=0; c_pair_req=0;
+    repeat(2) @(negedge clk);
+  endtask
+`endif
 
   task automatic write_word(input logic [31:0] addr,
                             input logic [31:0] data);
@@ -91,6 +123,43 @@ module tb_l1d_code_buffer;
     read_word(32'h2000,0);
     if (backing!=after_code)
       $fatal(1,"code fill evicted a resident data line or missed its staging hit");
+
+`ifdef VEN_L1D_CODE_TAG_INVALIDATE
+    write_word(32'h4000,32'hdeadbeef);
+    if (!dut.code_valid_q)
+      $fatal(1,"unrelated U store discarded I staging line");
+    before_code=backing;
+    read_word(32'h3004,1);
+    if (backing!=before_code)
+      $fatal(1,"unrelated U store caused a code refill");
+    @(negedge clk); snoop_inv_valid=1; snoop_inv_addr=32'h5000;
+    @(negedge clk); snoop_inv_valid=0;
+    if (!dut.code_valid_q)
+      $fatal(1,"unrelated physical snoop discarded I staging line");
+    before_code=backing;
+    read_word(32'h3004,1);
+    if (backing!=before_code)
+      $fatal(1,"unrelated physical snoop caused a code refill");
+
+    // The first byte of this U store is in 0x2fe0; the last reaches 0x3000.
+    write_word(32'h2ffd,32'h12345678);
+    if (dut.code_valid_q)
+      $fatal(1,"crossing U store left changed I line valid");
+    read_word(32'h3000,1);
+`ifdef VEN_P54_DUAL_STORE_PAIR
+    paired_write(32'h4000,32'h5004);
+    if (!dut.code_valid_q)
+      $fatal(1,"unrelated paired stores discarded I staging line");
+    before_code=backing;
+    read_word(32'h3004,1);
+    if (backing!=before_code)
+      $fatal(1,"unrelated paired stores caused a code refill");
+    paired_write(32'h4000,32'h3004);
+    if (dut.code_valid_q)
+      $fatal(1,"paired V store left changed I line valid");
+    read_word(32'h3004,1);
+`endif
+`endif
 
     // A CPU store must kill the staged copy even when the code line was never
     // allocated in D-cache. A subsequent I read must see the new backing data.

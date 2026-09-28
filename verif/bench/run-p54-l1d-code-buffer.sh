@@ -3,7 +3,13 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 out="$(mktemp -d "${P54_CODE_BUFFER_OUTBASE:-/tmp}/ventium-p54-l1d-code-buffer.XXXXXX")"
 echo "Artifacts: $out"
-for variant in packed banked banked_window banked_forward banked_code_stream banked_both_forward; do
+SECONDS=0
+run() {
+    local remaining=$((540 - SECONDS))
+    (( remaining > 0 )) || { echo "nine-minute code-buffer gate budget expired" >&2; exit 1; }
+    timeout --signal=TERM --kill-after=10s "$remaining" "$@"
+}
+for variant in packed banked banked_window banked_forward banked_code_stream banked_both_forward banked_tag banked_tag_pair; do
     defines=(+define+VEN_L1D_CODE_BUFFER)
     if [[ "$variant" == banked* ]]; then
         defines+=(+define+VEN_L1D_BANKED_DATA)
@@ -20,7 +26,13 @@ for variant in packed banked banked_window banked_forward banked_code_stream ban
     if [[ "$variant" == banked_both_forward ]]; then
         defines+=(+define+VEN_L1D_FILL_FORWARD)
     fi
-    timeout 240s "$root/tools/verilator_serial.sh" --binary --assert -sv \
+    if [[ "$variant" == banked_tag || "$variant" == banked_tag_pair ]]; then
+        defines+=(+define+VEN_L1D_CODE_TAG_INVALIDATE +define+VEN_L1D_CODE_STREAM)
+    fi
+    if [[ "$variant" == banked_tag_pair ]]; then
+        defines+=(+define+VEN_P54_DUAL_STORE_PAIR)
+    fi
+    run "$root/tools/verilator_serial.sh" --binary --assert -sv \
         -Wall -Wno-UNUSED -Wno-fatal \
         -Werror-IMPLICIT -Werror-PINMISSING -Werror-UNDRIVEN \
         -Werror-MULTIDRIVEN -Werror-LATCH -Werror-UNOPTFLAT \
@@ -31,5 +43,5 @@ for variant in packed banked banked_window banked_forward banked_code_stream ban
             tail -60 "$out/$variant.build.log"
             exit 1
         }
-    timeout 30s "$out/$variant/Vtb_l1d_code_buffer"
+    run "$out/$variant/Vtb_l1d_code_buffer"
 done

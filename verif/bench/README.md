@@ -437,7 +437,7 @@ The earlier pair-port-only opt-in full-core build also matched all 22 fixed-work
 candidate/control traces and exact cycle counts (`/tmp/p54-pair-dtlb-core-micro-r1/`),
 as expected while V sideband admission remains disabled.
 
-`run-p54-l1d-code-buffer.sh` tests `VEN_L1D_CODE_BUFFER` in six cache
+`run-p54-l1d-code-buffer.sh` tests `VEN_L1D_CODE_BUFFER` in eight cache
 configurations, including banked/window/forward/stream variants. Its generated
 builds default to `/tmp`; set `P54_CODE_BUFFER_OUTBASE` to an existing directory
 on a larger filesystem if the tmpfs quota cannot hold the precompiled headers.
@@ -456,6 +456,22 @@ The residual two ARs per cache-line read are the platform's default-on replay
 policy; do not disable it on the HP/HPC backend solely to improve the number.
 `VEN_AXI_READ_TRACE=N` on the simulator prints at most N accepted AXI AR
 addresses for a short diagnostic run without changing RTL timing.
+
+`VEN_L1D_CODE_TAG_INVALIDATE` keeps the physical I-fill staging line after
+accepted CPU stores or DMA snoops to *other* lines. It checks the exact U
+store extent, including a 32-byte crossing, and the separately accepted V
+store address; matching mutations still invalidate. The eight-variant leaf
+suite above covers packed/banked controls and the tag-selective single/pair
+cases. The matched full-core `run-p54-code-tag-micro.sh` uses a protected-mode
+loop with an unrelated data store and ordinary MOV CR3 I-cache invalidation.
+With L1/AXI active, the same five-instruction warm body takes **43→31**
+clocks/iteration; 200 iterations remove **1,600 backing read beats** and all
+**1,041** architectural records match pinned QEMU. All 36 existing user-mode
+directed traces match and retain their previous cycle counts. Artifacts:
+`/home/yukidama/ventium-p54-code-tag-core-sep28/` and
+`/home/yukidama/ventium-code-tag-full-micro-sep28/`. This is a targeted
+cache-maintenance microbenchmark, not measured gameplay IPC or routed FPGA
+timing. The option is in the IPC development profile only.
 
 `VEN_L1D_CODE_STREAM` (requires the code buffer) allows a later aligned code
 word to use the already-landed beat through the registered hit-return window

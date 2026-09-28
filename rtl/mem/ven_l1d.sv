@@ -442,6 +442,18 @@ module ven_l1d #(
   logic code_access, code_hit, code_valid_q, code_fill_q;
   logic [26:0] code_line_tag_q;
   logic [LW-1:0] code_line_q;
+`ifdef VEN_L1D_CODE_TAG_INVALIDATE
+  // Store strobes are byte-relative to c_addr. A crossing U store can change
+  // the following code line even when its first byte is on another line.
+  // Paired V stores are independently addressed and accepted on the same edge.
+  logic code_store_overlap;
+  assign code_store_overlap = (code_line_tag_q == c_addr[31:5]) ||
+      (xline && (code_line_tag_q == (c_addr[31:5] + 27'd1)))
+`ifdef VEN_P54_DUAL_STORE_PAIR
+      || (c_pair_ack && (code_line_tag_q == c_pair_addr[31:5]))
+`endif
+      ;
+`endif
   // Aligned 4-byte reads cannot cross the 32-byte line. Use the live c_addr,
   // not xline/lookup_addr: the latter can be redirected by mc_lookup_next,
   // which itself depends on the owned rd_match response (comb-loop hazard).
@@ -1808,12 +1820,18 @@ module ven_l1d #(
         if (dc_val[snp_set][1] && dc_tag[snp_set][1]==snp_tag) dc_val[snp_set][1]<=1'b0;
       end
 `ifdef VEN_L1D_CODE_BUFFER
-      // The I-fill copy must not outlive any external mutation or an accepted
-      // CPU store. A conservative all-store invalidate costs no extra backing
-      // traffic in the normal fill sequence and avoids an untracked code alias.
-      if (flush_all || snoop_inv_valid || golden || txn_done ||
+      // The I-fill copy must not outlive a matching physical mutation. The
+      // default retains conservative all-store/all-snoop invalidation; the
+      // opt-in rule preserves unrelated code lines after accepted stores and
+      // external snoops, including the separately accepted paired V address.
+      if (flush_all || golden || txn_done ||
           (c_req && c_code && !cacheable) ||
-          (c_req && c_we && c_ack))
+`ifdef VEN_L1D_CODE_TAG_INVALIDATE
+          (snoop_inv_valid && (code_line_tag_q == snoop_inv_addr[31:5])) ||
+          (c_req && c_we && c_ack && code_store_overlap))
+`else
+          snoop_inv_valid || (c_req && c_we && c_ack))
+`endif
         code_valid_q <= 1'b0;
 `endif
     end
