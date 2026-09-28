@@ -146,6 +146,50 @@ int main(int argc,char** argv) try {
         }
         return value;
     };
+    // Export only fresh S_PIPE issue bytes whose actual physical I-cache tag,
+    // way and returned BRAM buffer can all be proved from the preserved state.
+    // This is a deliberately incomplete producer for the independent timing
+    // model: delayed memory owners, slow instructions, and bypass-only lines
+    // are omitted rather than guessed from a live frontend descriptor.
+    const auto pair_eff_id=optional_field(core+"pipe_pair_eff");
+    const auto ic_tag_id=optional_field(core+"ic_tag_o");
+    const auto ic_val_id=optional_field(core+"ic_val_o");
+    const auto ic_a_id=optional_field(core+"ic_rd_lineA");
+    const auto ic_b_id=optional_field(core+"ic_rd_lineB");
+    const auto ic_aset_id=optional_field(core+"rdA_set_q");
+    const auto ic_bset_id=optional_field(core+"rdB_set_q");
+    const auto ic_away_id=optional_field(core+"rdA_way_q");
+    const auto ic_bway_id=optional_field(core+"rdB_way_q");
+    const auto ic_acoll_id=optional_field(core+"ic_rd_collA");
+    const auto ic_bcoll_id=optional_field(core+"ic_rd_collB");
+    const auto def16_id=optional_field(core+"def16");
+    const bool fast_bytes_layout=argc==4 && pair_eff_id!=nf && ic_tag_id!=nf &&
+        ic_val_id!=nf && ic_a_id!=nf && ic_b_id!=nf && ic_aset_id!=nf &&
+        ic_bset_id!=nf && ic_away_id!=nf && ic_bway_id!=nf &&
+        ic_acoll_id!=nf && ic_bcoll_id!=nf && def16_id!=nf &&
+        fields[ic_tag_id].size==1024 && fields[ic_val_id].size==256 &&
+        fields[ic_a_id].size==32 && fields[ic_b_id].size==32;
+    std::ofstream fast_bytes(std::string(argv[2])+".fast_issue_bytes.tsv");
+    if(!fast_bytes) throw std::runtime_error("fast issue bytes output open");
+    fast_bytes<<"cycle\tlegacy_ordinal\tpc\tphysical_start\tslot\tmode16\tbytes\n";
+    auto buffered_byte = [&](uint32_t physical) -> int {
+        if(!fast_bytes_layout) return -1;
+        const unsigned set=(physical>>5)&127u, tag=physical>>12;
+        int way=-1;
+        for(int w=0;w<2;++w) {
+            const unsigned row=2*set+unsigned(w);
+            uint32_t resident=0;
+            memcpy(&resident,state.data()+fields[ic_tag_id].offset+4*row,4);
+            if(state[fields[ic_val_id].offset+row] && resident==tag) way=w;
+        }
+        if(way<0) return -1;  // Includes non-allocating I-cache bypass.
+        const bool a=scalar(ic_aset_id)==set && scalar(ic_away_id)==unsigned(way) &&
+                     !scalar(ic_acoll_id);
+        const bool b=scalar(ic_bset_id)==set && scalar(ic_bway_id)==unsigned(way) &&
+                     !scalar(ic_bcoll_id);
+        if(a==b) return -1;  // Neither buffer, or an ambiguous duplicate.
+        return state[fields[a ? ic_a_id : ic_b_id].offset+(physical&31u)];
+    };
     auto memory_pair_class = [&]() -> std::string {
         if(argc!=4 || !scalar(front_id) || !scalar(vbytes_id) ||
            !scalar(vavail_id) || scalar(pair_id)!=6) return {};
@@ -397,6 +441,46 @@ int main(int argc,char** argv) try {
         ReadGeometry prior_geometry=prior_pair_class.empty() ? ReadGeometry{} : read_geometry();
         uint64_t prior_hold=scalar(hold_id), prior_front=scalar(front_id), prior_pc=scalar(pc_id);
         const uint64_t prior_flin=scalar(flin_id);
+        const uint64_t prior_report_count=scalar(rv_id) ?
+            (scalar(rv2_id) ? 2u : 1u) : 0u;
+        std::string prior_fast_rows;
+        unsigned prior_fast_count=0;
+        if(fast_bytes_layout && scalar(state_id)==28 && !prior_mem_active &&
+           scalar(commit_id)) {
+            const unsigned count_u=descriptor(ud_id,"len");
+            const unsigned count_v=scalar(pair_eff_id) ? descriptor(vd_id,"len") : 0;
+            const unsigned count_all=count_u+count_v;
+            if(count_u && count_u<=15 && count_v<=15 && count_all<=30 &&
+               (prior_flin&4095u)+count_all<=4096u) {
+                static constexpr char hex[]="0123456789abcdef";
+                std::string encoded;
+                bool valid=true;
+                for(unsigned k=0;k<count_all;++k) {
+                    const int value=buffered_byte(uint32_t(prior_flin+k));
+                    if(value<0) { valid=false; break; }
+                    encoded.push_back(hex[(value>>4)&15]);
+                    encoded.push_back(hex[value&15]);
+                }
+                if(valid) {
+                    const uint64_t edge=first+index+1;
+                    std::ostringstream rows;
+                    rows<<edge<<'\t'<<(previous_retired+prior_report_count+1)<<'\t'
+                        <<std::hex<<prior_pc<<'\t'<<prior_flin
+                        <<std::dec<<"\tU\t"<<scalar(def16_id)<<'\t'
+                        <<encoded.substr(0,2*count_u)<<'\n';
+                    prior_fast_count=1;
+                    if(count_v) {
+                        rows<<edge<<'\t'<<(previous_retired+prior_report_count+2)<<'\t'
+                            <<std::hex<<uint32_t(prior_pc+count_u)
+                            <<'\t'<<uint32_t(prior_flin+count_u)<<std::dec
+                            <<"\tV\t"<<scalar(def16_id)<<'\t'
+                            <<encoded.substr(2*count_u)<<'\n';
+                        prior_fast_count=2;
+                    }
+                    prior_fast_rows=rows.str();
+                }
+            }
+        }
         const unsigned prior_cross_index=unsigned((prior_flin>>5)&31u);
         uint32_t prior_cross_meta=0;
         if(uc_index_meta_id!=nf)
@@ -619,6 +703,17 @@ int main(int argc,char** argv) try {
         // The generated DPI caller consumes the PRE-edge registered valid,
         // q_pc/q_pc2 and snap. Validate that phase against the actual host count.
         if(delta!=retire_count) throw std::runtime_error("retirement observation phase mismatch");
+        if(prior_fast_count) {
+            // The producer is permitted to omit unsupported bytes, never to
+            // emit an uncommitted or miscounted fast-path instruction.
+            const unsigned new_registered=scalar(rv_id) ?
+                (scalar(rv2_id) ? 2u : 1u) : 0u;
+            if(new_registered!=prior_fast_count)
+                throw std::runtime_error("fast issue byte/retire phase mismatch");
+            fast_bytes<<prior_fast_rows;
+            totals["fast_issue_bytes_instructions"]+=prior_fast_count;
+            ++totals["fast_issue_bytes_edges"];
+        }
         if(retire_count) {
             commits.write(reinterpret_cast<const char*>(&retired),8);
             commits.write(reinterpret_cast<const char*>(&cycle),8);

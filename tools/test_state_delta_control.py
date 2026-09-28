@@ -19,7 +19,7 @@ source = Path(__file__).with_name("state_delta_analyze.cpp").read_text()
 # Include every mandatory field, independent of its position in the schema.
 names = sorted({{"core+": CORE, "l1+": L1, "": ""}[prefix] + name
                 for prefix, name in re.findall(r'field\((core\+|l1\+)?"([^"]+)"\)', source)})
-sizes = {CORE + "pp_bail": 112, CORE + "snap": 48,
+sizes = {CORE + "pp_bail": 112, CORE + "snap": 48, CORE + "gpr_o": 32,
          L1 + "u_l1d__DOT__dc_val": 256, L1 + "u_l1d__DOT__dc_tag": 1024}
 layout = {}
 offset = 0
@@ -132,4 +132,8 @@ with tempfile.TemporaryDirectory(prefix="ventium-control-fixture.") as tmp:
             {"cycle": "101", "pc": "1234", "taken": "1"}]
     assert (path / "analysis.initial.bin").read_bytes() == initial
     assert (path / "analysis.final.bin").read_bytes() == state
+    # The minimal fixture has no I-cache tag/BRAM layout. The new byte
+    # producer must fail closed, not manufacture an instruction from q_pc.
+    with (path / "analysis.fast_issue_bytes.tsv").open() as stream:
+        assert list(csv.DictReader(stream, delimiter="\t")) == []
 print("STATE-DELTA-CONTROL-TEST-OK (phase, disjoint partition, counter join, exact bookends)")
