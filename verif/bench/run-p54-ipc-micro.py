@@ -79,6 +79,9 @@ CASES = {
     "load_store_same_line": (BASE, 57),
     "load_store_spaced_distinct": (BASE, 58),
     "load_store_spaced_same_bank": (BASE, 59),
+    "store_load_spaced_distinct": (BASE, 60),
+    "store_load_spaced_same_bank": (BASE, 61),
+    "store_load_spaced_alias": (BASE, 62),
 }
 
 

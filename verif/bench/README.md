@@ -40,6 +40,21 @@ isolated L1 gate additionally tests accepted V writes, backpressure, same-bank
 rejection, saved-window invalidation and code-buffer invalidation. These are
 bounded directed results, not full-system or gameplay qualification.
 
+Cases 60–62 now isolate the opposite U-store/V-load order: a paced
+distinct-bank read, a same-bank nonalias read, and an alias that must observe
+U's store. The current core issues no such pair: with 300 iterations they
+take 9, 9, and 10 clocks per five-instruction iteration respectively, and
+all three match pinned QEMU architecturally
+(`/home/yukidama/p54-store-load-baseline/`). An opt-in
+`VEN_P54_STORE_LOAD_PAIR` L1/AXI **leaf only** can capture a checked resident V
+read in a different bank on U's posted-store acceptance edge. The focused
+`run-l1axi-pair-hit-micro.sh --store-load-capture` and
+`--store-load-profile` variants cover owner/data, same-bank rejection, store
+visibility and the code-buffer/two-window profile. No core owner or retirement
+path is wired yet, so the leaf is not in the gameplay profile and claims no
+IPC improvement; completion requires precise U-store/V-load ownership and a
+matched candidate/control fixed-work run.
+
 The opt-in `VEN_ITLB_ASSOC_4WAY` configuration changes only the I-TLB from
 16 direct-mapped entries to 32 entries in eight four-way sets. It is not in the
 default or gameplay profile. Its dedicated PSE/alias witness is

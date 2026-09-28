@@ -195,6 +195,11 @@ module ven_l1d #(
   localparam int OFFW  = $clog2(L1_LINE);              // 5 for 32-byte lines
   localparam int IDXW  = $clog2(L1_SETS);              // 7 for 128 sets
   localparam int TAGW  = 32 - OFFW - IDXW;             // 20 for the 128x32 geometry
+`ifdef VEN_P54_STORE_LOAD_PAIR
+`ifndef VEN_P54_DUAL_HIT
+  initial $fatal(1, "store/load capture requires the owner-tagged dual-hit port");
+`endif
+`endif
 
   // ---- arrays ----------------------------------------------------------------
   // Data: packed 256-bit lines, flat {set,way} index → distributed RAM (async
@@ -279,6 +284,11 @@ module ven_l1d #(
 `ifndef VEN_L1D_BANKED_DATA
   initial $fatal(1, "VEN_P54_DUAL_HIT requires VEN_L1D_BANKED_DATA");
 `endif
+`ifdef VEN_P54_STORE_LOAD_PAIR
+`ifndef VEN_P54_DUAL_HIT_LEGACY_CAPTURE
+  initial $fatal(1, "store/load pair needs the bank-reserving legacy capture port");
+`endif
+`endif
   logic pair_lookup_active;
   logic [1:0][IDXW-1:0] pair_set;
   logic [1:0][TAGW-1:0] pair_tag;
@@ -298,6 +308,24 @@ module ven_l1d #(
   // held response. The separately checked prime path below is an exception.
   logic pair_legacy_capture;
   logic [2:0] pair_reserved_bank;
+`ifdef VEN_P54_STORE_LOAD_PAIR
+  // A posted, aligned U store occupies its data bank on the acceptance edge.
+  // A checked resident younger load may capture a different bank through the
+  // existing owner-tagged read port. The store's backing ACK is mandatory:
+  // V never becomes an owner before U is irrevocably accepted.
+  logic pair_store_read_capture;
+  assign pair_store_read_capture = (pair_req_valid == 2'b10) &&
+      c_req && c_we && c_ack && cacheable && !golden &&
+      (st == L1_IDLE) && !mc_lookup_next && !stream_path &&
+      !early_armed && !flush_all && !snoop_inv_valid &&
+`ifdef VEN_P54_DUAL_STORE_PAIR
+      !c_pair_req &&
+`endif
+      !xline && (c_addr[1:0] == 2'd0) &&
+      (c_wstrb == 4'hf);
+`else
+  wire pair_store_read_capture = 1'b0;
+`endif
 `ifdef VEN_P54_DUAL_LOAD_PRIME
 `ifndef VEN_PIPE_REG_LOAD_PRIME
   initial $fatal(1, "dual-load prime needs registered load priming");
@@ -345,12 +373,14 @@ module ven_l1d #(
 `endif
       ;
   assign pair_bank_conflict = pair_arb_conflict ||
-      ((pair_legacy_capture || pair_prime_capture) && pair_req_valid[1] &&
+      ((pair_legacy_capture || pair_prime_capture || pair_store_read_capture) &&
+       pair_req_valid[1] &&
        !pair_req_split[1] &&
        pair_bank_mask[1][pair_reserved_bank]);
 `else
   wire pair_legacy_capture = 1'b0;
   wire pair_prime_capture = 1'b0;
+  wire pair_store_read_capture = 1'b0;
   wire [2:0] pair_reserved_bank = 3'd0;
 `endif
   // A registered legacy read response is served from rd_window_q, not from
@@ -368,11 +398,11 @@ module ven_l1d #(
   assign pair_lookup_active = (|pair_req_valid) && (st == L1_IDLE) &&
       (((!c_req && !rd_armed) && !mc_lookup_next) ||
        (pair_legacy_overlap && !mc_lookup_next) || pair_legacy_capture ||
-       pair_prime_capture) &&
+       pair_prime_capture || pair_store_read_capture) &&
       !early_armed && !stream_path &&
       !flush_all && !snoop_inv_valid && !golden;
   assign pair_bank_ready = pair_lookup_active ?
-      ((pair_legacy_capture || pair_prime_capture) ?
+      ((pair_legacy_capture || pair_prime_capture || pair_store_read_capture) ?
        ~(8'b1 << pair_reserved_bank) :
        8'hff) : 8'h00;
   for (genvar lane = 0; lane < 2; lane++) begin : g_pair_tags

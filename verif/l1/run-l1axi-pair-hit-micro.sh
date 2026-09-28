@@ -12,10 +12,22 @@ echo "Artifacts: $out"
 extra_defines=()
 if [[ "${1:-}" == "--legacy-capture-pair" ]]; then
   extra_defines=(+define+VEN_P54_DUAL_HIT_LEGACY_CAPTURE)
+elif [[ "${1:-}" == "--store-load-capture" ]]; then
+  extra_defines=(+define+VEN_P54_DUAL_HIT_LEGACY_CAPTURE
+                 +define+VEN_P54_STORE_LOAD_PAIR)
+elif [[ "${1:-}" == "--store-load-profile" ]]; then
+  extra_defines=(+define+VEN_P54_DUAL_HIT_LEGACY_CAPTURE
+                 +define+VEN_P54_STORE_LOAD_PAIR +define+VEN_P54_DUAL_STORE_PAIR
+                 +define+VEN_L1_AXI
+                 +define+VEN_L1D_CODE_BUFFER +define+VEN_L1D_CODE_STREAM
+                 +define+VEN_L1D_CODE_TAG_INVALIDATE
+                 +define+VEN_L1D_WINDOW_REUSE +define+VEN_L1D_WINDOW_KEEP_STORE
+                 +define+VEN_L1D_TWO_WINDOW_REUSE
+                 +define+VEN_L1D_TWO_WINDOW_KEEP_STORE)
 elif [[ "${1:-}" == "--store-pair-map" ]]; then
   extra_defines=(+define+VEN_P54_DUAL_STORE_PAIR +define+VEN_L1_AXI)
 elif [[ $# -ne 0 ]]; then
-  echo "usage: $0 [--legacy-capture-pair|--store-pair-map]" >&2
+  echo "usage: $0 [--legacy-capture-pair|--store-load-capture|--store-load-profile|--store-pair-map]" >&2
   exit 2
 fi
 timeout --signal=TERM --kill-after=10s 300s "$root/tools/verilator_serial.sh" \

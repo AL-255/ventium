@@ -391,6 +391,22 @@ mixed_v:
     movl %edx, 32(%esi)
 .endif
     imull %ebx, %ebx
+.elseif CASE == 60 || CASE == 61 || CASE == 62
+    # Ordered U store followed by a V load. CASE 60 is independent and
+    # distinct-bank; CASE 61 conflicts in bank 0 without aliasing; CASE 62
+    # aliases the U address and must read the newly stored value. Keep the
+    # same fixed-work IMUL spacer as the reverse-direction pair cases.
+mixed_u:
+    movl %edx, (%esi)
+mixed_v:
+.if CASE == 60
+    movl 36(%esi), %eax
+.elseif CASE == 61
+    movl 32(%esi), %eax
+.else
+    movl (%esi), %eax
+.endif
+    imull %ebx, %ebx
 .else
     .error "unsupported CASE"
 .endif
@@ -412,6 +428,8 @@ loop_end:
     movl 36(%esi), %ebx
 .elseif CASE == 59
     movl 32(%esi), %ebx
+.elseif CASE == 60 || CASE == 61 || CASE == 62
+    movl (%esi), %edx
 .endif
     movl $1, %eax
     xorl %ebx, %ebx

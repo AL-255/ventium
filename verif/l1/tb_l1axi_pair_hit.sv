@@ -4,6 +4,9 @@ module tb_l1axi_pair_hit;
   logic clk = 0, rst_n = 0, flush = 0, cd = 0;
   always #5 clk = !clk;
   logic core_req = 0, core_we = 0;
+`ifdef VEN_L1D_CODE_BUFFER
+  logic core_code = 0;
+`endif
   logic [31:0] core_addr = 0, core_wdata = 0, core_rdata;
   logic [3:0] core_wstrb = 0;
   logic core_ack, bus_err, m_idle, core_ic_nocache;
@@ -43,6 +46,9 @@ module tb_l1axi_pair_hit;
       .smm_active(1'b0), .smbase(32'h0003_0000), .smm_flush_o(),
       .core_lock(1'b0), .core_lock_hold(1'b0),
       .core_req, .core_we, .core_addr, .core_lin(core_addr),
+`ifdef VEN_L1D_CODE_BUFFER
+      .core_code,
+`endif
       .core_wdata, .core_wstrb, .core_rdata, .core_ack,
       .core_pair_req_valid(pair_req_valid), .core_pair_paddr(pair_paddr),
       .core_pair_size_log2(pair_size_log2), .core_pair_owner(pair_owner),
@@ -149,7 +155,8 @@ module tb_l1axi_pair_hit;
     @(negedge clk); core_req = 1; core_addr = 32'h1000;
     pair_req_valid = 2'b10; pair_paddr[1] = 32'h1020;
     #1;
-    if (pair_req_ready != 0 || !pair_bank_conflict)
+    if (pair_req_ready != 0 ||
+        (dut.u_l1d.pair_legacy_capture && !pair_bank_conflict))
       $fatal(1, "same-bank V escaped U's capture reservation");
     step();
     if (!core_ack || core_rdata != slv.peek(32'h1000) || |pair_rsp_valid)
@@ -265,6 +272,74 @@ module tb_l1axi_pair_hit;
       $fatal(1, "closed relocated SMRAM V store borrowed U's access");
     core_req = 0; core_we = 0;
     checks += 4;
+`endif
+`ifdef VEN_P54_STORE_LOAD_PAIR
+    // A resident V bank can be captured on the exact U-store acceptance edge.
+    // The pending write may still await B, but no younger read may alias it.
+    @(negedge clk); flush = 0;
+    fill_line(32'h1000);
+    fill_line(32'h1024);
+    @(negedge clk);
+    core_req = 1; core_we = 1; core_addr = 32'h1000;
+    core_wdata = 32'hd00d_feed; core_wstrb = 4'hf;
+    pair_req_valid = 2'b10; pair_paddr[1] = 32'h1024;
+    pair_size_log2[1] = 2'd2; pair_owner[1] = 16'h5a5a;
+    force dut.u_l1d.m_ack = 1'b0;
+    #1;
+    if (core_ack || pair_req_ready != 0)
+      $fatal(1, "V read captured before U store had backing credit");
+    release dut.u_l1d.m_ack;
+    #1;
+    if (!core_ack || pair_req_ready != 2'b10 || pair_bank_conflict)
+      $fatal(1, "U store/V resident read did not overlap");
+    step();
+    if (pair_rsp_valid != 2'b10 || pair_rsp_owner[1] != 16'h5a5a ||
+        pair_rsp_data[1] != slv.peek(32'h1024))
+      $fatal(1, "store/read captured wrong V owner or data");
+    checks++;
+    @(negedge clk); core_req = 0; core_we = 0;
+    pair_req_valid = 0; pair_rsp_ready = 2'b10;
+    step();
+    @(negedge clk); pair_rsp_ready = 0;
+    if (|pair_rsp_valid) $fatal(1, "store/read V response duplicated");
+    begin
+      int guard = 0;
+      while (!m_idle) begin
+        step();
+        if (++guard > 300) $fatal(1, "posted U store did not drain");
+      end
+    end
+    if (slv.peek(32'h1000) != 32'hd00d_feed)
+      $fatal(1, "U store lost while V read captured");
+    checks++;
+    @(negedge clk);
+    core_req = 1; core_we = 1; core_addr = 32'h1000;
+    pair_req_valid = 2'b10; pair_paddr[1] = 32'h1020;
+    #1;
+    if (!core_ack || pair_req_ready != 0 || !pair_bank_conflict)
+      $fatal(1, "same-bank store/read capture escaped reservation");
+    step();
+    if (|pair_rsp_valid) $fatal(1, "rejected V load produced a response");
+    checks++;
+    @(negedge clk); core_req = 0; core_we = 0; pair_req_valid = 0;
+    begin
+      int guard = 0;
+      while (!m_idle) begin
+        step();
+        if (++guard > 300) $fatal(1, "same-bank U store did not drain");
+      end
+    end
+    @(negedge clk);
+    core_req = 1; core_we = 1; core_addr = 32'h1000;
+    pair_req_valid = 2'b10; pair_paddr[1] = 32'h1000;
+    #1;
+    if (!core_ack || pair_req_ready != 0 || !pair_bank_conflict)
+      $fatal(1, "aliasing V load bypassed U store's physical bank");
+    step();
+    if (|pair_rsp_valid) $fatal(1, "aliasing V load became an early owner");
+    checks++;
+    @(negedge clk); core_req = 0; core_we = 0; pair_req_valid = 0;
+    fill_line(32'h1000);
 `endif
     $display("L1AXI-PAIR-HIT-OK checks=%0d", checks);
     $finish;
