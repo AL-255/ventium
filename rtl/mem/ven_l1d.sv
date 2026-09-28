@@ -87,6 +87,16 @@ module ven_l1d #(
     input  logic [3:0]  c_wstrb,
     output logic [31:0] c_rdata,
     output logic        c_ack,
+`ifdef VEN_P54_DUAL_STORE_PAIR
+    // A checked younger store to a different 32-bit bank in the same resident
+    // line. Both stores are admitted by the backing write buffers on one edge.
+    input  logic        c_pair_req,
+    input  logic [31:0] c_pair_addr,
+    input  logic [31:0] c_pair_wdata,
+    input  logic [3:0]  c_pair_wstrb,
+    output logic        c_pair_ready,
+    output logic        c_pair_ack,
+`endif
 `ifdef VEN_PIPE_MEM_CHAIN
     // Independent next-request address. The old c_addr/c_ack/rdata retain
     // their owner until the commit edge; next_ready never depends on commit.
@@ -147,6 +157,13 @@ module ven_l1d #(
     output logic [31:0] m_wdata,
     output logic [3:0]  m_wstrb,
     input  logic [31:0] m_rdata,
+`ifdef VEN_P54_DUAL_STORE_PAIR
+    output logic        m_pair_req,
+    output logic [31:0] m_pair_addr,
+    output logic [31:0] m_pair_wdata,
+    output logic [3:0]  m_pair_wstrb,
+    input  logic        m_pair_ack,
+`endif
     // REVIEW2_aug2 H-11: tell the backing this READ is NARROW -- NOT a 32-byte
     // line fill. See the H-11 note below for why an amplified non-cacheable read
     // is an MMIO CORRECTNESS bug.
@@ -176,6 +193,11 @@ module ven_l1d #(
   // owns a 256x32 array and one byte-enabled write port; a multidimensional
   // dc_bank[bank][row] with dynamic bank writes does NOT infer Xilinx RAM.
   logic bank_fill_we, bank_store_we;
+`ifdef VEN_P54_DUAL_STORE_PAIR
+  logic bank_pair_store_we;
+  assign bank_pair_store_we = bank_store_we && c_pair_req && c_pair_ready &&
+                              m_pair_ack;
+`endif
   assign bank_fill_we = rst_n && (st == L1_FILL) && m_ack && !bypass_q
 `ifdef VEN_L1D_CODE_BUFFER
       && !code_fill_q
@@ -186,6 +208,22 @@ module ven_l1d #(
 `else
   (* ram_style = "distributed" *)
   logic [LW-1:0] dc_line [L1_SETS*2];
+`endif
+`ifdef VEN_P54_DUAL_STORE_PAIR
+`ifndef VEN_L1D_BANKED_DATA
+  initial $fatal(1, "VEN_P54_DUAL_STORE_PAIR requires banked L1D data");
+`endif
+  // Limiting this first admission class to one resident physical line makes
+  // U's tag/cacheability decision valid for V as well. No second tag RAM read,
+  // replacement decision, or noncacheable/MMIO side effect is guessed here.
+  assign c_pair_ready = rst_n && c_req && c_we && cacheable && !golden &&
+      !flush_all && !snoop_inv_valid && (st == L1_IDLE) &&
+      !mc_lookup_next && !stream_path && hit && !xline &&
+      (c_addr[31:5] == c_pair_addr[31:5]) &&
+      (c_addr[1:0] == 2'd0) && (c_pair_addr[1:0] == 2'd0) &&
+      (c_addr[4:2] != c_pair_addr[4:2]) &&
+      (c_wstrb == 4'hf) && (c_pair_wstrb == 4'hf);
+  assign c_pair_ack = c_pair_req && c_pair_ready && c_ack && m_pair_ack;
 `endif
   logic [TAGW-1:0] dc_tag [L1_SETS][2];  // addr[31 -: TAGW]
   logic          dc_val  [L1_SETS][2];
@@ -504,6 +542,15 @@ module ven_l1d #(
       if (bank_fill_we && fill_word == 3'(bank)) begin
         wr_mask = 4'hf;
         wr_data = m_rdata;
+`ifdef VEN_P54_DUAL_STORE_PAIR
+      end else if (bank_pair_store_we &&
+                   c_pair_addr[4:2] == 3'(bank)) begin
+        // The pair-ready predicate proves aligned, full-word, distinct-bank
+        // stores to this same resident row. Each LUTRAM bank still has one
+        // physical write port; V owns only its bank on the acceptance edge.
+        wr_mask = c_pair_wstrb;
+        wr_data = c_pair_wdata;
+`endif
       end else if (bank_store_we) begin
         for (int i = 0; i < 4; i++) begin
           line_byte = c_addr[4:0] + 5'(i);
@@ -1010,6 +1057,10 @@ module ven_l1d #(
   always_comb begin
     m_req=1'b0; m_we=1'b0; m_addr=32'd0; m_wdata=32'd0; m_wstrb=4'd0;
     m_rd_narrow=1'b0; m_rd_size=2'd0;
+`ifdef VEN_P54_DUAL_STORE_PAIR
+    m_pair_req=1'b0; m_pair_addr=32'd0;
+    m_pair_wdata=32'd0; m_pair_wstrb=4'd0;
+`endif
     if (st==L1_FILL) begin
       m_req  = 1'b1; m_we = 1'b0;
       // REVIEW2_aug2 H-11: a NON-CACHEABLE read is a narrow access at the requested
@@ -1040,6 +1091,17 @@ module ven_l1d #(
       // no second staging register here is intentional: an L1-local entry plus
       // two AXI entries would silently make the CPU three-deep.
       m_req=1'b1; m_we=1'b1; m_addr=c_addr; m_wdata=c_wdata; m_wstrb=c_wstrb;
+`ifdef VEN_P54_DUAL_STORE_PAIR
+      // An invalid pair holds U too; the producer can drop c_pair_req and
+      // retry U alone. Never post U while V is still being qualified.
+      if (c_pair_req) begin
+        m_req = c_pair_ready;
+        m_pair_req = c_pair_ready;
+        m_pair_addr = c_pair_addr;
+        m_pair_wdata = c_pair_wdata;
+        m_pair_wstrb = c_pair_wstrb;
+      end
+`endif
     end
   end
 
@@ -1155,7 +1217,12 @@ module ven_l1d #(
                            : rd_window[{1'b0,c_addr[4:0],3'b000} +: 32];   // LIVE window, LIVE offset
     c_ack   = 1'b0;
     if (c_req) begin
-      if (c_we)            c_ack = (st==L1_IDLE) ? m_ack : 1'b0;
+      if (c_we) begin
+        c_ack = (st==L1_IDLE) ? m_ack : 1'b0;
+`ifdef VEN_P54_DUAL_STORE_PAIR
+        if (c_pair_req) c_ack = c_pair_ready && m_ack && m_pair_ack;
+`endif
+      end
       // REVIEW2 H-13: same gating on the combinational-ack variant.
       // REVIEW1_Aug2 H-07: the ARRAY ack term must not fire for a non-cacheable read of
       // a RESIDENT line -- that is precisely the "resident data returned after CD is
@@ -1179,7 +1246,12 @@ module ven_l1d #(
                                          : rd_window_q[{1'b0,rd_addr_q[4:0],3'b000} +: 32];
     c_ack   = 1'b0;
     if (c_req) begin
-      if (c_we)            c_ack = (st==L1_IDLE) ? m_ack : 1'b0;
+      if (c_we) begin
+        c_ack = (st==L1_IDLE) ? m_ack : 1'b0;
+`ifdef VEN_P54_DUAL_STORE_PAIR
+        if (c_pair_req) c_ack = c_pair_ready && m_ack && m_pair_ack;
+`endif
+      end
       // REVIEW1_Aug2 H-07: same array-ack suppression as the combinational variant
       // above -- see the comment there for why this is on the ack term, not rd_hit.
       // REVIEW2 H-13: suppressing the CAPTURE during a snoop was not enough. If a
