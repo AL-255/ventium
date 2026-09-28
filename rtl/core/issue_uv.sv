@@ -125,11 +125,17 @@ module issue_uv
   // A register U may pair with a V read only when a separately translated,
   // owner-tagged resident response has already been captured. This predicate
   // checks instruction classes and dependencies; core.sv proves that response.
+  // The V ALU read uses the same checked D2 response as the existing dual-read
+  // pair; the V datapath consumes it only on the ordered commit edge.
   always_comb pair_regmem_ok = fp_can_pair(iu, iv, 1'b1) &&
       !iu.is_mem && !iu.is_store && !iu.is_stack && !iu.is_fp &&
       !iu.is_branch && !iu.is_shift && !iu.w16 &&
-      iv.is_mem && iv.is_load && !iv.is_store && !iv.is_stack && !iv.is_fp &&
-      iv.wreg && !iv.w8 && !iv.w16 &&
+      iv.is_mem && !iv.is_store && !iv.is_stack && !iv.is_fp &&
+      ((iv.is_load && iv.wreg)
+`ifdef VEN_P54_DUAL_READ_ALU_PAIR
+       || (!iv.is_load && !iv.mem_lhs && iv.wflags)
+`endif
+       ) && !iv.w8 && !iv.w16 &&
       ((iv.addr_mask & iu.writes) == 8'd0);
 `endif
 `ifdef VEN_P54_DUAL_STORE_PAIR

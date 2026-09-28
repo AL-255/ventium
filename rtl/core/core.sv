@@ -5144,20 +5144,21 @@ module core
       mem_next_commit && mem_next_ready;
   assign mc_prime_v_accept = mc_prime_v_request && mem_pair_req_ready[1];
 `ifdef VEN_P54_REGMEM_PRIME
-  // D2-style pre-read of V's resident data on the preceding predicted U or
-  // paired-V conditional branch. The target's U is register-only, so this
-  // edge has no ordinary D request.
+  // D2-style pre-read of V's resident data on the preceding register-only
+  // issue or predicted U/paired-V conditional branch. The next U is also
+  // register-only, so this edge has no ordinary D request.
   // A wrong prediction, faultable address, missing translation, or rejected
   // cache hit creates no owner. This is read-only tag/data capture, never MMIO.
   assign regmem_prime_v_eligible = mc_prime_base && mc_boundary_ok &&
-      mc_prime_branch && mc_query_pair_regmem_ok &&
+      mc_query_pair_regmem_ok &&
       !fp_is_ext_load(mc_query_v) &&
       ((mc_query_v.addr_mask & mc_older_writes) == 8'd0) &&
       mc_prime_v_checked;
   assign regmem_prime_v_request = regmem_prime_v_eligible &&
       pipe_int_commit &&
-      (mc_prime_u_branch ? (pipe_u_eff.br_taken == u_pred_taken)
-                         : (v_br_taken_eff == v_pred_taken));
+      (!mc_prime_branch ||
+       (mc_prime_u_branch ? (pipe_u_eff.br_taken == u_pred_taken)
+                          : (v_br_taken_eff == v_pred_taken)));
   assign regmem_prime_v_accept = regmem_prime_v_request && mem_pair_req_ready[1];
   assign mem_pair_req_valid = {pipe_v_pair_request || mc_prime_v_request ||
                                regmem_prime_v_request, 1'b0};
@@ -5238,9 +5239,9 @@ module core
 `endif
 `ifdef VEN_P54_REGMEM_PRIME
   always_ff @(posedge clk) if (rst_n && regmem_prime_v_accept) begin
-    if (!(mc_prime_branch && pipe_int_commit && !pipe_mem_active_q &&
+    if (!(mc_prime_base && mc_boundary_ok && pipe_int_commit && !pipe_mem_active_q &&
           !pipe_new_mem_req && !mc_prime_v_accept && !pipe_v_pair_accept))
-      $fatal(1, "register/V-load prime lost its branch or exclusive bank owner");
+      $fatal(1, "register/V-read prime lost its predecessor or exclusive bank owner");
   end
 `endif
 `endif

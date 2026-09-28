@@ -21,6 +21,11 @@ _start:
     xorl %eax, %eax
     xorl %ebx, %ebx
     xorl %edx, %edx
+.if CASE == 89
+    # The V address deliberately depends on U's newly written EAX. EBX is a
+    # stable mapped pointer, so rejecting the pair still completes normally.
+    movl $arena, %ebx
+.endif
 .if CASE >= 75 && CASE <= 83
     # Exercise signed overflow and low-word writes after multiplier sharing.
     movl $0x70010081, %eax
@@ -518,6 +523,62 @@ mixed_v:
     pushl %eax
     popl %eax
     incl %ebx
+.elseif CASE == 87
+    # A predicted loop branch can pre-read the target's V ALU memory source.
+    # U is a one-clock register MOV, independent of V's dword address/value;
+    # the ADD result and flags still commit after U on the paired edge.
+mixed_u:
+    movl %ebx, %eax
+mixed_v:
+    addl 4(%esi), %edx
+    movl %edi, %ebx
+    incl %edi
+.elseif CASE == 88
+    # A preceding store mutates the next iteration's V ALU source. A branch
+    # prime must observe the ordered new word or decline pairing.
+mixed_u:
+    movl %ebx, %eax
+mixed_v:
+    addl (%esi), %edx
+    movl %eax, (%esi)
+    incl %ebx
+.elseif CASE == 89
+    # U changes the register naming V's address. A speculative pre-read from
+    # old EAX would be stale even if its cached physical word were resident.
+mixed_u:
+    movl %ebx, %eax
+mixed_v:
+    addl (%eax), %edx
+    incl %edi
+    xorl %edi, %edi
+.elseif CASE == 90
+    # The first register MOV occupies the otherwise idle D port. Its dependent
+    # successor U can pair with a separately pre-read, independent V ALU word.
+    movl %eax, %ebx
+mixed_u:
+    movl %ebx, %eax
+mixed_v:
+    addl 4(%esi), %edx
+    incl %edi
+.elseif CASE == 91
+    # Predecessor changes the V address register. Pre-reading old ESI would
+    # be wrong even though the target U is register-only and can pair in
+    # principle; the next instruction must take the ordinary checked path.
+    leal 4(%esi), %esi
+mixed_u:
+    movl %esi, %eax
+mixed_v:
+    addl (%esi), %edx
+    leal -4(%esi), %esi
+.elseif CASE == 92
+    # The V result feeds the next instruction, so the control cannot hide
+    # the V memory-ALU clock by shifting an independent trailing pair.
+    movl %eax, %ebx
+mixed_u:
+    movl %ebx, %eax
+mixed_v:
+    addl 4(%esi), %edx
+    movl %edx, %edi
 .else
     .error "unsupported CASE"
 .endif

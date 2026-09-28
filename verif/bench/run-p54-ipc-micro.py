@@ -106,6 +106,12 @@ CASES = {
     "fp_stack_overlap": (BASE, 84),
     "fp_pushesp_overlap": (BASE, 85),
     "fp_pop_same_overlap": (BASE, 86),
+    "regmem_prime_alu_v": (BASE, 87),
+    "regmem_prime_alu_after_store": (BASE, 88),
+    "regmem_prime_alu_dep_reject": (BASE, 89),
+    "regmem_prime_alu_sequential": (BASE, 90),
+    "regmem_prime_alu_prev_addr_reject": (BASE, 91),
+    "regmem_prime_alu_seq_dependent": (BASE, 92),
 }
 
 
@@ -327,6 +333,21 @@ def main():
                 if row["candidate"]["mixed_pairs"] > row["control"]["mixed_pairs"]:
                     assert row["candidate"]["clocks"] < row["control"]["clocks"], \
                         "spaced mixed pair did not save fixed-work clocks"
+            for accelerated in ("regmem_prime_alu_v",
+                                "regmem_prime_alu_after_store",
+                                "regmem_prime_alu_seq_dependent"):
+                if accelerated in results:
+                    row = results[accelerated]
+                    if row["candidate"]["mixed_pairs"] > row["control"]["mixed_pairs"]:
+                        assert row["candidate"]["mixed_pairs"] >= args.iterations - 2, \
+                            (accelerated, "insufficient V ALU pairing")
+                        assert row["candidate"]["clocks"] < row["control"]["clocks"], \
+                            (accelerated, "pairing did not save fixed-work clocks")
+            for rejected in ("regmem_prime_alu_dep_reject",
+                             "regmem_prime_alu_prev_addr_reject"):
+                if rejected in results:
+                    assert results[rejected]["candidate"]["mixed_pairs"] == 0, \
+                        (rejected, "dependent V address was speculatively paired")
             for rejected in ("load_store_same_bank", "load_store_dependent_reject",
                              "load_store_spaced_same_bank"):
                 if rejected in results:
