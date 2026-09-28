@@ -1,0 +1,17 @@
+{
+  "name": "pdualreadalu",
+  "kind": "system",
+  "src": "../pfault/pfault.S (DUALREADALU_PROBE)",
+  "linker": "../pfault/pfault.ld",
+  "image": "pdualreadalu.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 5000,
+  "sys": true,
+  "paging": true,
+  "description": "Protected paging: V read-only ALU faults before mapping, then 128 cache-resident U-MOV/V-ADD-memory pairs with independent translations."
+}

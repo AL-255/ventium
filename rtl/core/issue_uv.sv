@@ -27,7 +27,7 @@ module issue_uv
     input  fpd_t iv,       // V-candidate decode (the instruction right after U)
     output logic pair_ok   // 1 => U and V may issue together this clock
 `ifdef VEN_P54_DUAL_LOAD_PAIR
-  , output logic pair_mem_ok // same P54 rules, two independent MOV loads only
+  , output logic pair_mem_ok // two independently owned read operands
 `endif
 `ifdef VEN_P54_DUAL_STORE_PAIR
   , output logic pair_store_ok // two independent full-dword register stores
@@ -84,7 +84,16 @@ module issue_uv
   // retire only after both separately owned resident responses are present.
   always_comb pair_mem_ok = fp_can_pair(iu, iv, 1'b1) &&
       iu.is_mem && iu.is_load && iu.wreg && !iu.is_store && !iu.is_stack &&
-      iv.is_mem && iv.is_load && iv.wreg && !iv.is_store && !iv.is_stack &&
+      iv.is_mem && !iv.is_store && !iv.is_stack &&
+      ((iv.is_load && iv.wreg)
+`ifdef VEN_P54_DUAL_READ_ALU_PAIR
+       // P54 ALU reg,[mem] occupies two EX clocks; the registered L1 hit
+       // supplies the second clock.  Exclude memory-destination forms (three
+       // clocks, and potentially a write), ADC/SBB (not V-pairable), and any
+       // form without the flags/result contract handled by the V ALU.
+       || (!iv.is_load && !iv.mem_lhs && iv.wflags)
+`endif
+       ) &&
       !iu.w8 && !iv.w8 && !iu.w16 && !iv.w16 &&
       !fp_is_ext_load(iu) && !fp_is_ext_load(iv) &&
       ((iv.reads & iu.writes) == 8'd0) &&

@@ -210,6 +210,10 @@ pm32_entry:
     /* PT1 @ 0x13000: the demand-paging window [4 MiB, 8 MiB) */
     movl    $0x00013000, %edi
     movl    $0x00800003, 0(%edi)        /* PT1[0] linear 0x400000 -> phys 0x800000 P|RW */
+#ifdef DUALREADALU_PROBE
+    /* V's first read will fault. Prepare the physical backing before paging. */
+    movl    $0x00001234, 0x00801000
+#endif
     /* The normal pfault image leaves PT1[1] not-present.  The pfpstore and
      * pfaststore derivatives instead start it present but read-only, which
      * distinguishes a real write-permission probe from an unsafe read or an
@@ -248,6 +252,42 @@ pm32_entry:
      * -> #PF (vector 14, error code = present(0)|write(1)|user(0) = 0x2), CR2 =
      * 0x401000.  pf_handler sets PT1[1] |= P (0x801003), records CR2, IRETs;
      * the store RESTARTS and now succeeds (writing phys 0x801000).            */
+#ifdef DUALREADALU_PROBE
+    /* U read may retire; younger V ALU read must fault without an ALU/flag
+     * side effect, then restart with the now-present mapping. */
+    movl    $0x00400000, %esi
+    movl    $0x00401000, %edi
+    movl    $0x10, %ebx
+.globl pdualreadalu_fault_u, pdualreadalu_fault_v
+pdualreadalu_fault_u:
+    movl    (%esi), %eax
+pdualreadalu_fault_v:
+    addl    (%edi), %ebx               /* #PF, then EBX=0x1244 on restart */
+    movl    %ebx, 0x0000203c          /* exact post-fault V result witness */
+    /* The resident loop uses two dwords of one cacheable line, in independent
+     * banks and through two separately translated V/U DTLB ports. */
+    movl    %cr0, %eax
+    andl    $0x9fffffff, %eax          /* clear CD and NW, keep PG and PE */
+    movl    %eax, %cr0
+    movl    $5, 0x00401000
+    movl    $7, 0x00401004
+    movl    0x00401000, %eax
+    movl    0x00401004, %edx
+    xorl    %ebx, %ebx
+    movl    $128, %ecx
+    .globl pdualreadalu_loop_u, pdualreadalu_loop_v
+pdualreadalu_loop_u:
+    movl    0x00401000, %eax
+pdualreadalu_loop_v:
+    addl    0x00401004, %ebx
+    .rept   16
+    nop
+    .endr
+    decl    %ecx
+    jnz     pdualreadalu_loop_u
+    movl    %ebx, %ebp                 /* 128*7 = 896 */
+    movl    0x0000203c, %esi           /* post-#PF V result = 0x1244 */
+#else
 #ifdef FPSTORE_PROBE
     /* A page is readable but not writable.  An adapter that reads to "probe"
      * will accept FISTP, pop ST0, then fault on its final write.  Restart then
@@ -315,6 +355,7 @@ pdualstore_loop_v:
 #endif
 #endif
 #endif
+#endif
 
     /* ============================= #GP =================================== */
     /* Resume label for the #GP skip: the handler will overwrite the saved EIP
@@ -344,7 +385,7 @@ ud_resume:
     addl    0x00002024, %eax            /* + #UD counter */
     movl    %eax, %ecx                  /* ecx = 3 if all three faults delivered */
     movl    0x00002020, %edx            /* edx = captured CR2 from the #PF (0x401000) */
-#if defined(FPSTORE_PROBE) || defined(FASTSTORE_PROBE) || defined(DUALSTORE_PROBE)
+#if defined(FPSTORE_PROBE) || defined(FASTSTORE_PROBE) || defined(DUALSTORE_PROBE) || defined(DUALREADALU_PROBE)
     movl    0x00002038, %edi            /* #PF error: P|W must be 3 */
 #endif
 

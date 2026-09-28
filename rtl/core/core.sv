@@ -6216,7 +6216,7 @@ module core
   // ---- V-pipe datapath (core/v_pipe.sv, R3) --------------------------------
   // Pre-read V operands with the same parent-GPR byte selection as U. The v_pipe
   // instance drives v_alu/v_flags consumed by the eval above + S_PIPE commit.
-  logic [31:0] v_dst_val, v_src_val, v_input_flags;
+  logic [31:0] v_dst_val, v_src_val, v_dst_reg_val, v_src_reg_val, v_input_flags;
   // V executes architecturally after U. INC/DEC preserve CF and ADC/SBB
   // consume it: the pre-pair carry is wrong when U just changed it. Forward
   // only CF (the V ALU's sole arithmetic flag input), avoiding a second full
@@ -6243,11 +6243,23 @@ module core
                       ? pipe_load_parent : gpr_o[pipe_v_eff.dst];
   assign v_src_parent = (pipe_load_bypass && pipe_v_eff.src == pipe_u_eff.dst)
                       ? pipe_load_parent : gpr_o[pipe_v_eff.src];
-  assign v_dst_val = pipe_v_eff.w8 ? fp_byte_read(v_dst_parent, pipe_v_eff.dst_hi8) : v_dst_parent;
-  assign v_src_val = pipe_v_eff.w8 ? fp_byte_read(v_src_parent, pipe_v_eff.src_hi8) : v_src_parent;
+  assign v_dst_reg_val = pipe_v_eff.w8 ? fp_byte_read(v_dst_parent, pipe_v_eff.dst_hi8) : v_dst_parent;
+  assign v_src_reg_val = pipe_v_eff.w8 ? fp_byte_read(v_src_parent, pipe_v_eff.src_hi8) : v_src_parent;
 `else
-  assign v_dst_val = reg_read(pipe_v_eff.dst, pipe_v_eff.w8 ? 3'd1 : 3'd4, pipe_v_eff.dst_hi8);
-  assign v_src_val = reg_read(pipe_v_eff.src, pipe_v_eff.w8 ? 3'd1 : 3'd4, pipe_v_eff.src_hi8);
+  assign v_dst_reg_val = reg_read(pipe_v_eff.dst, pipe_v_eff.w8 ? 3'd1 : 3'd4, pipe_v_eff.dst_hi8);
+  assign v_src_reg_val = reg_read(pipe_v_eff.src, pipe_v_eff.w8 ? 3'd1 : 3'd4, pipe_v_eff.src_hi8);
+`endif
+  assign v_dst_val = v_dst_reg_val;
+`ifdef VEN_P54_DUAL_READ_ALU_PAIR
+  // The V hit carries its own translated, owner-tagged data.  It is not the
+  // U bus's mem_rdata and cannot be consumed unless the pair completion check
+  // above has accepted this V response.  For an unpaired V this value is never
+  // architecturally committed.
+  assign v_src_val = (pipe_mem_v_hit_q && pipe_v_eff.is_mem &&
+                      !pipe_v_eff.is_load && !pipe_v_eff.is_store &&
+                      !pipe_v_eff.mem_lhs) ? mem_pair_rsp_data[1] : v_src_reg_val;
+`else
+  assign v_src_val = v_src_reg_val;
 `endif
   v_pipe u_vpipe (
     .v_d       (pipe_v_eff),
