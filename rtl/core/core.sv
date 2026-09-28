@@ -3571,7 +3571,8 @@ module core
   // ---------------------------------------------------------------------------
   logic [31:0]        ex_srcv;          // MUL/DIV source operand (`/7 sign-ext base)
   logic [63:0]        ex_mul_p;         // MUL (unsigned) 64-bit product
-  logic signed [63:0] ex_imul_p;        // IMUL (one-operand, signed) product
+  logic signed [63:0] ex_imul_p;        // shared signed MUL/IMUL2 product
+  logic signed [31:0] ex_imul_a, ex_imul_b;
   logic [31:0]        ex_shld_r;        // SHLD/SHRD result word
   // SHLD/SHRD shift count (q_shift_cl ? CL : imm8); used by both the FSM arm
   // (cnt==0 guard + flags) and the driver (cnt==0 guard + ex_shld_r select).
@@ -3585,10 +3586,32 @@ module core
     else if (q_w==3'd2) ex_mul_p = {32'd0, ({16'd0,gpr_o[R_EAX][15:0]}*{16'd0,ex_srcv[15:0]})};
     else                ex_mul_p = {32'd0,gpr_o[R_EAX]}*{32'd0,ex_srcv};
 
-    // ---- IMUL one-operand (signed, /5) : ONE multiplier shared
-    if (q_w==3'd1)      ex_imul_p = $signed({{8{ex_srcv[7]}},ex_srcv[7:0]}) * $signed({{8{gpr_o[R_EAX][7]}},gpr_o[R_EAX][7:0]});
-    else if (q_w==3'd2) ex_imul_p = $signed({{16{ex_srcv[15]}},ex_srcv[15:0]}) * $signed({{16{gpr_o[R_EAX][15]}},gpr_o[R_EAX][15:0]});
-    else                ex_imul_p = $signed(ex_srcv) * $signed(gpr_o[R_EAX]);
+    // ---- One signed multiplier for one-operand IMUL and IMUL2.  Their
+    // execute and writeback arms are mutually exclusive; selecting operands
+    // here avoids synthesizing a second 16/32-bit multiply for IMUL2 flags.
+    // Sign extension precedes multiplication so the full product works for
+    // both overflow detection and the architectural low-word writeback.
+    ex_imul_a = (q_w==3'd1) ? $signed({{24{ex_srcv[7]}},ex_srcv[7:0]}) :
+                (q_w==3'd2) ? $signed({{16{ex_srcv[15]}},ex_srcv[15:0]}) :
+                              $signed(ex_srcv);
+    if (q_kind==K_IMUL2) begin
+      if (q_imul_3op) begin
+        ex_imul_b = (q_w==3'd2) ?
+            $signed({{16{q_imul_imm[15]}},q_imul_imm[15:0]}) :
+            $signed(q_imul_imm);
+      end else begin
+        ex_imul_b = (q_w==3'd2) ?
+            $signed({{16{gpr_o[q_dst_reg][15]}},gpr_o[q_dst_reg][15:0]}) :
+            $signed(gpr_o[q_dst_reg]);
+      end
+    end else begin
+      ex_imul_b = (q_w==3'd1) ?
+          $signed({{24{gpr_o[R_EAX][7]}},gpr_o[R_EAX][7:0]}) :
+          (q_w==3'd2) ?
+          $signed({{16{gpr_o[R_EAX][15]}},gpr_o[R_EAX][15:0]}) :
+          $signed(gpr_o[R_EAX]);
+    end
+    ex_imul_p = ex_imul_a * ex_imul_b;
 
     // ---- SHLD/SHRD result : ONE shifter shared by flags(core_exec) + dst(driver)
     ex_shld_r = shld_result(q_shrd, dst_cur, reg_read(q_src_reg,q_w,1'b0), ex_shld_cnt, q_w);

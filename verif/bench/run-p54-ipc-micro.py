@@ -94,6 +94,15 @@ CASES = {
     "mem_zx16_dependent": (BASE, 72),
     "mem_sx8_dependent": (BASE, 73),
     "mem_sx16_dependent": (BASE, 74),
+    "imul2_reg32": (BASE, 75),
+    "imul2_mem32": (BASE, 76),
+    "imul2_reg16": (BASE, 77),
+    "imul2_mem16": (BASE, 78),
+    "imul3_imm32": (BASE, 79),
+    "imul3_imm16": (BASE, 80),
+    "imul1_reg32": (BASE, 81),
+    "imul1_reg16": (BASE, 82),
+    "imul1_mem8": (BASE, 83),
 }
 
 

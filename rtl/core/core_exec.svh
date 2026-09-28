@@ -452,18 +452,15 @@
               end
 
               K_IMUL2: begin
-                logic [31:0] s1,s2,lo; logic ov; logic [31:0] fl;
-                s1 = q_mem_read ? wmask(mem_load_data,q_w) : reg_read(q_src_reg,q_w,1'b0);
-                s2 = q_imul_3op ? q_imul_imm : reg_read(q_dst_reg,q_w,1'b0);
-                // R3: the dst-reg IMUL2 result write moved to the gpr writeback
-                // driver (core_gpr_wb.svh, K_IMUL2 arm); lo/ov stay (feed flags).
-                if (q_w==3'd2) begin logic signed [31:0] pp;
-                  pp=$signed({{16{s1[15]}},s1[15:0]})*$signed({{16{s2[15]}},s2[15:0]});
-                  lo={16'd0,pp[15:0]};
-                  ov=(pp!=$signed({{16{pp[15]}},pp[15:0]}));
-                end else begin logic signed [63:0] pp; pp=$signed(s1)*$signed(s2);
-                  lo=pp[31:0];
-                  ov=(pp!=$signed({{32{pp[31]}},pp[31:0]}));
+                logic [31:0] lo; logic ov; logic [31:0] fl;
+                // The same signed product drives flags and the GPR writeback.
+                // The one-operand IMUL arm uses this multiplier on other clocks.
+                if (q_w==3'd2) begin
+                  lo={16'd0,ex_imul_p[15:0]};
+                  ov=(ex_imul_p!=$signed({{48{ex_imul_p[15]}},ex_imul_p[15:0]}));
+                end else begin
+                  lo=ex_imul_p[31:0];
+                  ov=(ex_imul_p!=$signed({{32{ex_imul_p[31]}},ex_imul_p[31:0]}));
                 end
                 // QEMU CC_OP_MUL: ZF/SF/PF from low result, AF=0, CF=OF=ov.
                 fl=eflags&32'hFFFF_F72A; fl[1]=1'b1;

@@ -21,6 +21,10 @@ _start:
     xorl %eax, %eax
     xorl %ebx, %ebx
     xorl %edx, %edx
+.if CASE >= 75 && CASE <= 83
+    # Exercise signed overflow and low-word writes after multiplier sharing.
+    movl $0x70010081, %eax
+.endif
 .if CASE == 7 || CASE == 8
     # ST0=1, ST1=0. FADD ST1 is an exact no-op with a real FP dependency.
     fldz
@@ -461,6 +465,33 @@ mixed_v:
     movswl 32(%esi), %eax
 .endif
     addl %eax, %edx
+    incl %ebx
+.elseif CASE == 75
+    imull %edi, %eax
+    incl %ebx
+.elseif CASE == 76
+    imull (%esi), %eax
+    incl %ebx
+.elseif CASE == 77
+    imulw %di, %ax
+    incl %ebx
+.elseif CASE == 78
+    imulw (%esi), %ax
+    incl %ebx
+.elseif CASE == 79
+    imull $-7, %eax, %ebx
+    incl %edx
+.elseif CASE == 80
+    imulw $-7, %ax, %bx
+    incl %edx
+.elseif CASE == 81
+    imull %edi
+    incl %ebx
+.elseif CASE == 82
+    imulw %di
+    incl %ebx
+.elseif CASE == 83
+    imulb (%esi)
     incl %ebx
 .else
     .error "unsupported CASE"
