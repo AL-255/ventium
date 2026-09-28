@@ -19,12 +19,14 @@ branch recovery, and exact completed-instruction accounting remain required
 for experiments B–D and final qualification.
 
 `tools/state_delta_analyze.cpp` can also emit `<prefix>.fast_issue_bytes.tsv`
-when passed the exact-build `fpd_layout.tsv`. Each row is a fresh S_PIPE U/V
+when passed the exact-build `fpd_layout.tsv`. Each row is an S_PIPE U/V
 retire with a verified physical I-cache tag, selected way and BRAM return
-buffer. Page-crossing byte spans are excluded; `mode16` records the code-size
-mode for independent decoding. `legacy_ordinal` is the absolute callback ordinal; gaps are expected
-because delayed memory owners, slow instructions and non-allocating bypasses
-are excluded. `validate_fast_bytes.py <prefix>` checks those ordinals against
+buffer. `owner` distinguishes a fresh descriptor from a registered memory
+owner; the latter is admitted only while its saved PC still equals the live PC.
+Page-crossing byte spans are excluded; `mode16` records the code-size mode for
+independent decoding. `legacy_ordinal` is the absolute callback ordinal; gaps
+are expected because slow instructions, unbuffered code and other unproven
+owners are excluded. `validate_fast_bytes.py <prefix>` checks those ordinals against
 the analyzer's binary retire observations and independently decodes every
 exported byte span with Capstone. The last registered edge may be outside the
 host-callback window; it is checked against `final_registered_retire`. This

@@ -163,15 +163,20 @@ int main(int argc,char** argv) try {
     const auto ic_acoll_id=optional_field(core+"ic_rd_collA");
     const auto ic_bcoll_id=optional_field(core+"ic_rd_collB");
     const auto def16_id=optional_field(core+"def16");
+    const auto held_u_id=optional_field(core+"pipe_mem_u_q");
+    const auto held_v_id=optional_field(core+"pipe_mem_v_q");
+    const auto held_pc_id=optional_field(core+"pipe_mem_eip_q");
     const bool fast_bytes_layout=argc==4 && pair_eff_id!=nf && ic_tag_id!=nf &&
         ic_val_id!=nf && ic_a_id!=nf && ic_b_id!=nf && ic_aset_id!=nf &&
         ic_bset_id!=nf && ic_away_id!=nf && ic_bway_id!=nf &&
         ic_acoll_id!=nf && ic_bcoll_id!=nf && def16_id!=nf &&
+        held_u_id!=nf && held_v_id!=nf && held_pc_id!=nf &&
         fields[ic_tag_id].size==1024 && fields[ic_val_id].size==256 &&
-        fields[ic_a_id].size==32 && fields[ic_b_id].size==32;
+        fields[ic_a_id].size==32 && fields[ic_b_id].size==32 &&
+        fields[held_u_id].size==28 && fields[held_v_id].size==28;
     std::ofstream fast_bytes(std::string(argv[2])+".fast_issue_bytes.tsv");
     if(!fast_bytes) throw std::runtime_error("fast issue bytes output open");
-    fast_bytes<<"cycle\tlegacy_ordinal\tpc\tphysical_start\tslot\tmode16\tbytes\n";
+    fast_bytes<<"cycle\tlegacy_ordinal\tpc\tphysical_start\tslot\towner\tmode16\tbytes\n";
     auto buffered_byte = [&](uint32_t physical) -> int {
         if(!fast_bytes_layout) return -1;
         const unsigned set=(physical>>5)&127u, tag=physical>>12;
@@ -445,10 +450,12 @@ int main(int argc,char** argv) try {
             (scalar(rv2_id) ? 2u : 1u) : 0u;
         std::string prior_fast_rows;
         unsigned prior_fast_count=0;
-        if(fast_bytes_layout && scalar(state_id)==28 && !prior_mem_active &&
-           scalar(commit_id)) {
-            const unsigned count_u=descriptor(ud_id,"len");
-            const unsigned count_v=scalar(pair_eff_id) ? descriptor(vd_id,"len") : 0;
+        if(fast_bytes_layout && scalar(state_id)==28 && scalar(commit_id) &&
+           (!prior_mem_active || scalar(held_pc_id)==prior_pc)) {
+            const unsigned owner_u=prior_mem_active ? held_u_id : ud_id;
+            const unsigned owner_v=prior_mem_active ? held_v_id : vd_id;
+            const unsigned count_u=descriptor(owner_u,"len");
+            const unsigned count_v=scalar(pair_eff_id) ? descriptor(owner_v,"len") : 0;
             const unsigned count_all=count_u+count_v;
             if(count_u && count_u<=15 && count_v<=15 && count_all<=30 &&
                (prior_flin&4095u)+count_all<=4096u) {
@@ -466,14 +473,16 @@ int main(int argc,char** argv) try {
                     std::ostringstream rows;
                     rows<<edge<<'\t'<<(previous_retired+prior_report_count+1)<<'\t'
                         <<std::hex<<prior_pc<<'\t'<<prior_flin
-                        <<std::dec<<"\tU\t"<<scalar(def16_id)<<'\t'
+                        <<std::dec<<"\tU\t"<<(prior_mem_active ? "held" : "fresh")
+                        <<'\t'<<scalar(def16_id)<<'\t'
                         <<encoded.substr(0,2*count_u)<<'\n';
                     prior_fast_count=1;
                     if(count_v) {
                         rows<<edge<<'\t'<<(previous_retired+prior_report_count+2)<<'\t'
                             <<std::hex<<uint32_t(prior_pc+count_u)
                             <<'\t'<<uint32_t(prior_flin+count_u)<<std::dec
-                            <<"\tV\t"<<scalar(def16_id)<<'\t'
+                            <<"\tV\t"<<(prior_mem_active ? "held" : "fresh")
+                            <<'\t'<<scalar(def16_id)<<'\t'
                             <<encoded.substr(2*count_u)<<'\n';
                         prior_fast_count=2;
                     }
