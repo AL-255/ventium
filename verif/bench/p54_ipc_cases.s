@@ -306,6 +306,20 @@ loop_body:
 .elseif CASE == 47
     movb 4(%esi), %al
     movb 36(%esi), %dl
+.elseif CASE == 48
+    # P54 immediate register ROR is a one-clock U operation and may lead
+    # an independent integer V instruction. This is a generic throughput
+    # witness, not a workload-address-specific shortcut.
+    rorl $16, %eax
+    incl %ebx
+    incl %edx
+.elseif CASE == 49
+    # Effective counts 0/1/0/1 exercise CF/OF preservation and count masking
+    # through the same fast decode that CASE 48 measures.
+    rorl $0, %eax
+    rorl $1, %eax
+    rorl $32, %eax
+    rorl $33, %eax
 .else
     .error "unsupported CASE"
 .endif

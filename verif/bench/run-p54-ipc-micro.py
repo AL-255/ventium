@@ -67,6 +67,8 @@ CASES = {
     "dual_byte_cross_window_same_bank": (BASE, 45),
     "dual_byte_cross_window_steady": (BASE, 46),
     "dual_byte_cross_window_steady_same_bank": (BASE, 47),
+    "ror_immediate_pipeline": (BASE, 48),
+    "ror_immediate_count_edges": (BASE, 49),
 }
 
 
