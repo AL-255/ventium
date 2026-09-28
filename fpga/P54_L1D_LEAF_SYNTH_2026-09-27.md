@@ -18,6 +18,7 @@ are unaffected. Both later rows were synthesized from this exact source.
 | banked + `VEN_P54_DUAL_HIT` | 14,252 | 12,012 | 2,240 | 6,274 | 0 | +16.799 ns |
 | banked + `VEN_L1D_CODE_BUFFER` | 10,884 | 8,644 | 2,240 | 6,391 | 0 | +17.584 ns |
 | banked + code buffer + `VEN_L1D_CODE_STREAM` | 10,647 | 8,407 | 2,240 | 6,402 | 0 | +17.621 ns |
+| banked + code buffer + code stream + `VEN_L1D_WINDOW_REUSE` | 11,305 | 9,065 | 2,240 | 6,399 | 0 | +16.908 ns |
 
 The banked single-port layout saves **1,187 LUTs (9.9%)** versus packed while
 preserving the logical 8 KiB, two-way, 32-byte-line geometry. Its eight 256×32
@@ -52,6 +53,21 @@ promotion requires a real dual EA/DTLB/issue/commit integration and a measured
 workload improvement large enough to justify its LUT cost. An isolated
 synchronous BRAM bank has now been measured below; an integrated BRAM L1D
 remains unmeasured and must include read latency and collision semantics.
+
+The window-reuse row is a matched rerun of code stream using the same
+`ven_l1d.sv` source SHA-256 as the preceding code-buffer/stream rows. Both
+variants used single-threaded Vivado 2025.2 synthesis and the same 45.0 MHz
+constraint; reports are in `/tmp/p54-l1d-code-stream-reuse-{base,candidate}-r1/`.
+Retaining an already captured, tag-checked full line costs **658 LUTs (+6.2%)**
+and 3 fewer FFs in this isolated leaf, with no BRAM change. Synthesis WNS is
+0.713 ns lower but remains positive at the 45.0 MHz constraint. This is not
+routed core maximum frequency. In a separate 22-case fixed-work, matched
+full-core simulation it improved resident same-line loads and seven memory-ALU
+families from 4 to 3 clocks per four-instruction loop without an architectural
+trace difference; distinct-line loads, stores and frontend straddles did not
+improve. The current full-PC profile does **not** enable window reuse, and no
+new gameplay IPC result exists. See
+`verif/bench/P54_SDECODE_DIRECTED_2026-09-27.md` for the composed microprofile.
 
 Reproduce a single variant (do not run two Vivado instances):
 

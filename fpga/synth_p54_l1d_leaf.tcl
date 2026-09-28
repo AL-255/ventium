@@ -2,11 +2,12 @@
 # Invoke only through fpga/run_vivado_exclusive.sh, with an outer timeout.
 # This does not close top-level timing or establish gameplay performance.
 if {[llength $argv] != 2} {
-    error "usage: -tclargs packed|banked|paired|code_buffer|code_stream OUTPUT_DIRECTORY"
+    error "usage: -tclargs packed|banked|paired|code_buffer|code_stream|code_stream_reuse OUTPUT_DIRECTORY"
 }
 set variant [lindex $argv 0]
 set output_dir [file normalize [lindex $argv 1]]
 set repo [file normalize [file join [file dirname [info script]] ..]]
+set_param general.maxThreads 1
 set defines {}
 switch -- $variant {
     packed {}
@@ -14,6 +15,7 @@ switch -- $variant {
     paired {set defines {VEN_L1D_BANKED_DATA VEN_P54_DUAL_HIT}}
     code_buffer {set defines {VEN_L1D_BANKED_DATA VEN_L1D_CODE_BUFFER}}
     code_stream {set defines {VEN_L1D_BANKED_DATA VEN_L1D_CODE_BUFFER VEN_L1D_CODE_STREAM}}
+    code_stream_reuse {set defines {VEN_L1D_BANKED_DATA VEN_L1D_CODE_BUFFER VEN_L1D_CODE_STREAM VEN_L1D_WINDOW_REUSE}}
     default {error "unknown variant $variant"}
 }
 file mkdir $output_dir

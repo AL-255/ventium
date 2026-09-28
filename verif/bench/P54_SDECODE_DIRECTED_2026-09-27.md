@@ -82,3 +82,43 @@ though the banked L1D has an isolated dual-hit interface. Six new memory-ALU
 families improve from 11 to 5 clocks / four instructions. These observations
 identify the next structural throughput work; they do not predict gameplay IPC
 or justify bypassing P54 pairing, translation, or fault rules.
+
+## Resident memory pipeline ladder
+
+The next matched builds add the **already full-PC-enabled**
+`VEN_PIPE_MEM_CHAIN` and then `VEN_PIPE_REG_LOAD_PRIME` to the composed profile.
+The separate sustained twelve-packet memory-chain gate passes complete pinned
+QEMU PC/group/state comparison, including U/V address-RAW drain witnesses:
+24,273 fixed-work instructions take **35,061 control versus 27,869 candidate
+clocks**, or 0.6923 versus 0.8710 directed IPC. The candidate has a six-packet
+consecutive memory-retirement witness; the control has one. This is an
+interaction check, **not** a new production/gameplay improvement, because the
+historical full-PC profile already includes chain and priming. Log:
+`/tmp/p54-sdecode-memalu-chain-ab.log`.
+
+With the chain already present, adding only priming changes two of the 22
+fixed-work loops: register-to-load goes **5→4 clocks** and register-U/memory-V
+goes **4→3 clocks** per four-instruction iteration; all candidate/control
+architectural traces match. Those builds hash to
+`472b97fe72102830c3af5a99ed787174d25f37bf18ca44027e4144489f8f0a15`
+(chain) and
+`499495c6834dbbdd523145add3bfb86994ccc3ca76416db8bcc51c6dd9c062a8`
+(chain+prime). Artifacts: `/tmp/p54-ipc-sdecode-chain-prime-r1/`.
+
+The one **new, still default-off** cache option in this ladder is
+`VEN_L1D_WINDOW_REUSE`. Adding it to chain+prime improves seven resident
+memory-ALU families and same-line loads **4→3 clocks**, and memory-U/register-V
+and memory-ALU-U/integer-V **3→2 clocks** per four-instruction loop; the other
+cases are unchanged and all architectural A/B traces match. The reuse binary
+hashes to
+`7052a66205e567aabe1fdb9e7282ff29e7d162febde7bcdd9f428bc4376fcf94`;
+artifacts are `/tmp/p54-ipc-sdecode-reuse-r1/`. Its separate current-source
+cache-local window/coherence/stream gate passes. The matched FPGA L1D leaf
+cost is **+658 LUTs, −3 FFs**, with synthesis WNS +16.908 ns at a 45.0 MHz
+constraint versus base +17.621 ns; see the
+[L1D synthesis record](../../fpga/P54_L1D_LEAF_SYNTH_2026-09-27.md).
+This is not routed core Fmax or gameplay throughput. Even with reuse, two
+distinct-bank loads remain at **4 clocks / four instructions**, two stores at
+**6**, and a line-straddling frontend loop at **7**. A genuine V memory lane,
+ordered store admissions, and a staged byte frontend remain the structural
+work, not another same-line response shortcut.
