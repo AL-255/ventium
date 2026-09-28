@@ -143,7 +143,8 @@ interface atop `VEN_L1D_BANKED_DATA`. It checks simultaneous distinct-bank
 read hits, serialized same-bank hits, width/offset assembly, split-line and
 uncached rejection, independent held owner responses, consume/replace, and
 flush/snoop cancellation. A legacy write hit must be visible to a subsequent
-pair read. The registered-ACK variant also checks a distinct-bank pair on the
+pair read, plus 32 consecutive two-bank pairs with consume/replace on every
+edge and no backing reads. The registered-ACK variant also checks a distinct-bank pair on the
 same edge that an older legacy read consumes its captured response; the
 `--comb-ack` variant confirms that the live-bank response retains exclusive
 ownership until its request leaves. `verif/l1/run-l1axi-pair-hit-micro.sh`

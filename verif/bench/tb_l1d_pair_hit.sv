@@ -94,6 +94,27 @@ module tb_l1d_pair_hit;
       $fatal(1,"distinct-bank pair response mismatch");
     @(posedge clk); @(negedge clk);
 
+    // Both response slots consume and replace on every edge. This is the
+    // throughput contract for two bank-distinct resident reads per clock,
+    // independent of whether the current core can issue V memory yet.
+    pair_req_valid=2'b11;
+    pair_paddr[0]=32'h1000; pair_paddr[1]=32'h1004;
+    for (int i=0; i<32; i++) begin
+      pair_owner[0]=16'(2*i+16); pair_owner[1]=16'(2*i+17);
+      expect_pair(2'b11);
+      @(posedge clk); @(negedge clk);
+      if (pair_rsp_valid!==2'b11 ||
+          pair_rsp_owner[0]!==16'(2*i+16) ||
+          pair_rsp_owner[1]!==16'(2*i+17) ||
+          pair_rsp_data[0]!==word_at(32'h1000) ||
+          pair_rsp_data[1]!==word_at(32'h1004))
+        $fatal(1,"back-to-back two-bank response mismatch iteration=%0d",i);
+    end
+    pair_req_valid=0;
+    @(posedge clk); @(negedge clk);
+    if (pair_rsp_valid!=0 || backing!=backing_before)
+      $fatal(1,"back-to-back pairs stalled or reached backing memory");
+
     pair_req_valid=2'b11; pair_paddr[0]=32'h1000;
     pair_paddr[1]=32'h1020; pair_owner='{16'd4,16'd3};
     expect_pair(2'b01);
