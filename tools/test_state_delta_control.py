@@ -136,4 +136,6 @@ with tempfile.TemporaryDirectory(prefix="ventium-control-fixture.") as tmp:
     # producer must fail closed, not manufacture an instruction from q_pc.
     with (path / "analysis.fast_issue_bytes.tsv").open() as stream:
         assert list(csv.DictReader(stream, delimiter="\t")) == []
+    with (path / "analysis.slow_candidate_bytes.tsv").open() as stream:
+        assert list(csv.DictReader(stream, delimiter="\t")) == []
 print("STATE-DELTA-CONTROL-TEST-OK (phase, disjoint partition, counter join, exact bookends)")

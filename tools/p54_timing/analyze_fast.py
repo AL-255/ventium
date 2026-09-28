@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Classify *verified-byte* fast retires against AP-500, without guessing gaps.
+"""Classify *verified-byte* retires against AP-500, without guessing gaps.
 
 This is a partial-trace diagnostic, not experiment A on the whole gameplay
-stream: slow/event owners omitted by the exporter remain explicit gaps. Memory
+stream: omitted owners remain explicit gaps. Memory
 bank conflicts are unknown until actual physical *data* addresses are traced.
 """
 
@@ -152,7 +152,7 @@ def analyze(path: Path, total_legacy: int | None = None) -> dict:
     bank_known = sum(bank_conflict(u, v) is True for u, v in selected)
     bank_unknown = sum(bank_conflict(u, v) is None for u, v in selected)
     count, pairs = len(insns), len(selected)
-    result = {"scope": "verified-byte fast-retire subset only", "exported_instructions": count,
+    result = {"scope": "verified-byte retire subset only", "exported_instructions": count,
               "nonpairable_or_unclassified": names["nonpairable_or_unclassified"],
               "memory_data_physical_unknown": names["memory_without_physical_data_address"],
               "selected_adjacent_pairs_conservative": pairs,

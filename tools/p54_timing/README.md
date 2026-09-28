@@ -48,3 +48,14 @@ returns before the next retire may remain invisible at a sequential PC edge.
 Its JSON labels explicitly say `is_full_gameplay_bound: false` and
 `is_cycle_forecast: false`. It cannot establish CPI < 1 or replace the required
 complete instruction-instance trace and realistic timing scheduler.
+
+The analyzer additionally writes `<prefix>.slow_candidate_bytes.tsv` from
+slow-path `q_pc/q_len/ibuf` owners. These are **candidates**: some FPU and
+microsequence states retain a stale `q_len` or buffer. Run
+`merge_verified.py <prefix>` to reject any candidate lacking a matching
+retire-observation PC or an exact one-instruction Capstone decode. It writes
+`<prefix>.verified_issue_bytes.tsv` in ordinal order and reports every reject
+reason. This improves coverage but still does not establish that every byte
+owner is semantically identical to a separate architectural trace. REP
+callbacks remain unnormalized, asynchronous FP completion is unaccounted, and
+unobserved interrupts or code mutation still require independent checks.

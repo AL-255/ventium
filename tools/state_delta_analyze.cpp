@@ -177,6 +177,13 @@ int main(int argc,char** argv) try {
     std::ofstream fast_bytes(std::string(argv[2])+".fast_issue_bytes.tsv");
     if(!fast_bytes) throw std::runtime_error("fast issue bytes output open");
     fast_bytes<<"cycle\tlegacy_ordinal\tpc\tphysical_start\tslot\towner\tmode16\tbytes\n";
+    const auto slow_ibuf_id=optional_field(core+"ibuf");
+    const auto slow_qlen_id=optional_field(core+"q_len");
+    const bool slow_bytes_layout=slow_ibuf_id!=nf && slow_qlen_id!=nf &&
+        def16_id!=nf && fields[slow_ibuf_id].size==16;
+    std::ofstream slow_candidates(std::string(argv[2])+".slow_candidate_bytes.tsv");
+    if(!slow_candidates) throw std::runtime_error("slow candidate bytes output open");
+    slow_candidates<<"cycle\tlegacy_ordinal\tpc\tstate\tmode16\tbytes\n";
     auto buffered_byte = [&](uint32_t physical) -> int {
         if(!fast_bytes_layout) return -1;
         const unsigned set=(physical>>5)&127u, tag=physical>>12;
@@ -514,6 +521,18 @@ int main(int argc,char** argv) try {
             optional_scalar(uc_wset_id),uint64_t(prior_flin&31u)};
         uint64_t prior_state=scalar(state_id);
         const uint64_t prior_qpc=scalar(qpc_id), prior_qkind=optional_scalar(qkind_id);
+        std::string prior_slow_bytes;
+        if(slow_bytes_layout && prior_state!=28) {
+            const unsigned length=unsigned(scalar(slow_qlen_id));
+            if(length>=1 && length<=15) {
+                static constexpr char hex[]="0123456789abcdef";
+                for(unsigned k=0;k<length;++k) {
+                    const auto value=state[fields[slow_ibuf_id].offset+k];
+                    prior_slow_bytes.push_back(hex[value>>4]);
+                    prior_slow_bytes.push_back(hex[value&15]);
+                }
+            }
+        }
         const uint64_t prior_qst=optional_scalar(qst_id), prior_fxop=scalar(fxop_id);
         const uint32_t prior_next_eip=uint32_t(scalar(next_eip_id));
         uint32_t prior_ecx=0;
@@ -722,6 +741,17 @@ int main(int argc,char** argv) try {
             fast_bytes<<prior_fast_rows;
             totals["fast_issue_bytes_instructions"]+=prior_fast_count;
             ++totals["fast_issue_bytes_edges"];
+        }
+        if(!prior_slow_bytes.empty()) {
+            const unsigned new_registered=scalar(rv_id) ?
+                (scalar(rv2_id) ? 2u : 1u) : 0u;
+            if(new_registered==1) {
+                slow_candidates<<first+index+1<<'\t'
+                    <<(previous_retired+1)<<'\t'
+                    <<std::hex<<prior_qpc<<std::dec<<'\t'<<prior_state<<'\t'
+                    <<scalar(def16_id)<<'\t'<<prior_slow_bytes<<'\n';
+                ++totals["slow_candidate_bytes_instructions"];
+            }
         }
         if(retire_count) {
             commits.write(reinterpret_cast<const char*>(&retired),8);
