@@ -28,6 +28,8 @@ class Insn:
     flags_write: bool
     addr_reads: int
     memory: bool
+    # Address may be absent in a byte-only trace. That cannot change pair
+    # legality, but it makes the bank-conflict diagnosis unknown.
     physical_address: int | None
     # A prefix does not automatically prohibit U pairing (AP-500 §5.5).
     # It does consume decode time, which this optimistic bound omits.
@@ -49,16 +51,21 @@ class Insn:
         insn = cls(**row)
         if insn.pipe not in {"NP", "UV", "PU", "PV"}:
             raise ValueError(f"invalid pipe class {insn.pipe!r}")
-        if insn.prefixes < 0 or insn.instance < 0:
+        for name in ("flags_read", "flags_write", "memory", "displacement_and_immediate", "boundary_after"):
+            if type(getattr(insn, name)) is not bool:
+                raise ValueError(f"{name} must be boolean")
+        if type(insn.prefixes) is not int or type(insn.instance) is not int or \
+           insn.prefixes < 0 or insn.instance < 0:
             raise ValueError("negative prefix count or instruction instance")
         for mask in (insn.gpr_reads, insn.gpr_writes, insn.addr_reads):
-            if not isinstance(mask, int) or not 0 <= mask < 256:
+            if type(mask) is not int or not 0 <= mask < 256:
                 raise ValueError("GPR masks must be unsigned 8-bit")
-        if insn.memory != (insn.physical_address is not None):
-            raise ValueError("memory instruction needs a physical address")
-        if insn.physical_address is not None and not 0 <= insn.physical_address < 2**32:
+        if not insn.memory and insn.physical_address is not None:
+            raise ValueError("non-memory instruction has a data physical address")
+        if insn.physical_address is not None and \
+           (type(insn.physical_address) is not int or not 0 <= insn.physical_address < 2**32):
             raise ValueError("physical address out of range")
-        if insn.special not in {None, "cmp_jcc", "add_jne", "push_push", "push_call", "pop_pop"}:
+        if insn.special not in {None, "cmp", "add", "jcc", "jne", "push", "pop", "call"}:
             raise ValueError(f"unknown special-pair classification {insn.special!r}")
         return insn
 
@@ -72,9 +79,10 @@ def pairable(u: Insn, v: Insn) -> bool:
     if u.displacement_and_immediate or v.displacement_and_immediate:
         return False
     # AP-500 §5.6.4 explicitly permits these otherwise dependent pairs.
-    special = u.special is not None and u.special == v.special
-    stack_special = special and u.special in {"push_push", "push_call", "pop_pop"}
-    flag_special = special and u.special in {"cmp_jcc", "add_jne"}
+    stack_special = (u.special, v.special) in {
+        ("push", "push"), ("push", "call"), ("pop", "pop")}
+    flag_special = (u.special == "cmp" and v.special in {"jcc", "jne"}) or \
+                   (u.special == "add" and v.special == "jne")
     # The stack exception is confined to the *implicit ESP* contention.
     # It cannot legalize an unrelated GPR RAW/WAW in the same pair.
     ignored_gpr = 1 << 4 if stack_special else 0
@@ -87,13 +95,16 @@ def pairable(u: Insn, v: Insn) -> bool:
     return True
 
 
-def bank_conflict(u: Insn, v: Insn) -> bool:
+def bank_conflict(u: Insn, v: Insn) -> bool | None:
     """P54 D-cache banks select physical address bits 4:2 (AP-500 §5.6.5)."""
-    return bool(u.memory and v.memory and
-                ((u.physical_address >> 2) & 7) == ((v.physical_address >> 2) & 7))
+    if not (u.memory and v.memory):
+        return False
+    if u.physical_address is None or v.physical_address is None:
+        return None
+    return ((u.physical_address >> 2) & 7) == ((v.physical_address >> 2) & 7)
 
 
-def max_adjacent_pairs(trace: Iterable[Insn]) -> tuple[int, int, int]:
+def max_adjacent_pairs(trace: Iterable[Insn]) -> tuple[int, int, int, int]:
     """Maximum non-overlapping pairs on this fixed path, independent of timing.
 
     A greedy issue scheduler is not an optimistic upper bound: choosing pair
@@ -102,15 +113,19 @@ def max_adjacent_pairs(trace: Iterable[Insn]) -> tuple[int, int, int]:
     insns = list(trace)
     best = [0] * (len(insns) + 2)
     conflict_pairs = [0] * (len(insns) + 2)
+    unknown_banks = [0] * (len(insns) + 2)
     for i in range(len(insns) - 1, -1, -1):
         best[i] = best[i + 1]
         conflict_pairs[i] = conflict_pairs[i + 1]
+        unknown_banks[i] = unknown_banks[i + 1]
         if i + 1 < len(insns) and pairable(insns[i], insns[i + 1]):
             candidate = 1 + best[i + 2]
             if candidate > best[i]:
                 best[i] = candidate
-                conflict_pairs[i] = int(bank_conflict(insns[i], insns[i + 1])) + conflict_pairs[i + 2]
-    return len(insns), best[0], conflict_pairs[0]
+                conflict = bank_conflict(insns[i], insns[i + 1])
+                conflict_pairs[i] = int(conflict is True) + conflict_pairs[i + 2]
+                unknown_banks[i] = int(conflict is None) + unknown_banks[i + 2]
+    return len(insns), best[0], conflict_pairs[0], unknown_banks[0]
 
 
 def main() -> None:
@@ -119,11 +134,12 @@ def main() -> None:
     args = parser.parse_args()
     with args.jsonl.open(encoding="utf-8") as src:
         insns = [Insn.from_json(json.loads(line)) for line in src if line.strip()]
-    count, pairs, conflicts = max_adjacent_pairs(insns)
+    count, pairs, conflicts, unknown = max_adjacent_pairs(insns)
     print(json.dumps({"instructions": count, "max_adjacent_pairs": pairs,
                       "min_issue_groups_optimistic": count - pairs,
                       "max_v_slot_fraction": pairs / count if count else 0,
                       "bank_conflicts_in_selected_matching": conflicts,
+                      "bank_conflicts_unknown_in_selected_matching": unknown,
                       "is_cycle_forecast": False}, sort_keys=True))
 
 

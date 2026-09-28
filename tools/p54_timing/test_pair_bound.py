@@ -36,16 +36,18 @@ class PairBoundTests(unittest.TestCase):
     def test_flags_and_special_pairs(self):
         self.assertTrue(pairable(op(0, flags_write=True), op(1, flags_write=True)))
         self.assertFalse(pairable(op(0, flags_write=True), op(1, flags_read=True)))
-        self.assertTrue(pairable(op(0, flags_write=True, special="cmp_jcc"),
-                                 op(1, pipe="PV", flags_read=True, special="cmp_jcc")))
+        self.assertTrue(pairable(op(0, flags_write=True, special="cmp"),
+                                 op(1, pipe="PV", flags_read=True, special="jcc")))
         self.assertFalse(pairable(op(0, pipe="PV"), op(1)))
         self.assertFalse(pairable(op(0), op(1, pipe="PU")))
-        self.assertFalse(pairable(op(0, gpr_writes=1, special="cmp_jcc"),
-                                  op(1, pipe="PV", gpr_reads=1, special="cmp_jcc")))
-        self.assertTrue(pairable(op(0, gpr_writes=16, special="push_push"),
-                                 op(1, gpr_reads=16, gpr_writes=16, special="push_push")))
-        self.assertFalse(pairable(op(0, gpr_writes=17, special="push_push"),
-                                  op(1, gpr_reads=17, special="push_push")))
+        self.assertFalse(pairable(op(0, gpr_writes=1, special="cmp"),
+                                  op(1, pipe="PV", gpr_reads=1, special="jcc")))
+        self.assertTrue(pairable(op(0, gpr_writes=16, special="push"),
+                                 op(1, gpr_reads=16, gpr_writes=16, special="push")))
+        self.assertFalse(pairable(op(0, gpr_writes=17, special="push"),
+                                  op(1, gpr_reads=17, special="push")))
+        self.assertTrue(pairable(op(0, flags_write=True, special="add"),
+                                 op(1, pipe="PV", flags_read=True, special="jne")))
 
     def test_prefix_and_disp_imm(self):
         # AP-500 §5.5: U prefix decode costs clocks but can still pair.
@@ -57,18 +59,21 @@ class PairBoundTests(unittest.TestCase):
         v = op(1, memory=True, physical_address=0x2020)
         self.assertTrue(pairable(u, v))
         self.assertTrue(bank_conflict(u, v))
+        self.assertIsNone(bank_conflict(replace(u, physical_address=None), v))
 
     def test_matching_not_greedy_and_boundaries(self):
         # 0-1 and 1-2 are legal; 2-3 is legal. Optimal is two pairs.
-        self.assertEqual(max_adjacent_pairs([op(i) for i in range(4)]), (4, 2, 0))
-        self.assertEqual(max_adjacent_pairs([op(0, boundary_after=True), op(1)]), (2, 0, 0))
-        self.assertEqual(max_adjacent_pairs([op(0), op(0)]), (2, 0, 0))
+        self.assertEqual(max_adjacent_pairs([op(i) for i in range(4)]), (4, 2, 0, 0))
+        self.assertEqual(max_adjacent_pairs([op(0, boundary_after=True), op(1)]), (2, 0, 0, 0))
+        self.assertEqual(max_adjacent_pairs([op(0), op(0)]), (2, 0, 0, 0))
 
     def test_annotations_fail_closed(self):
         with self.assertRaises(ValueError):
             Insn.from_json({"pipe": "UV"})
         with self.assertRaises(ValueError):
-            Insn.from_json({**op(0).__dict__, "memory": True})
+            Insn.from_json({**op(0).__dict__, "physical_address": 10})
+        with self.assertRaises(ValueError):
+            Insn.from_json({**op(0).__dict__, "memory": "false"})
 
 
 if __name__ == "__main__":

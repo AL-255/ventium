@@ -33,3 +33,14 @@ host-callback window; it is checked against `final_registered_retire`. This
 export is a provenance tool, **not** yet a complete gameplay timing-model
 input. Never close ordinal gaps or treat the covered subset as representative
 without measuring coverage and the omitted classes.
+
+`analyze_fast.py <prefix>.fast_issue_bytes.tsv --legacy-retire-events N`
+independently decodes those verified spans with Capstone, maps their explicit
+and implicit GPR/flag uses to the AP-500 pair classes, and runs the adjacent
+matching bound only within contiguous verified ordinals. Control transfers,
+PC discontinuities and ordinal gaps terminate a chain. Unrecognized forms are
+nonpairable in this diagnostic; actual *data* physical addresses are not yet
+available, so two-memory bank conflicts are reported as unknown. Its JSON
+labels explicitly say `is_full_gameplay_bound: false` and
+`is_cycle_forecast: false`. It cannot establish CPI < 1 or replace the required
+complete instruction-instance trace and realistic timing scheduler.
