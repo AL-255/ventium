@@ -105,6 +105,32 @@ ven:
 	@echo "built (ventium-swapped cosim): $(REPO)/$(VEN_OBJDIR)/$(VEN_EXE)"
 	@echo "run from the ao486-sim/ CWD (the BIOS ROMs load via ../3rd-party paths)."
 
+# IPC development candidate, deliberately separate from the conservative
+# `ven` boot/bitstream profile and its native snapshot ABI.  Each option has
+# passed bounded directed architectural tests; their conjunction and broad
+# gameplay performance have NOT yet been qualified.  Keep this build in a
+# dedicated object directory so a short experiment cannot overwrite the
+# canonical full-PC binary or make old native snapshots appear compatible.
+VEN_IPC_DEFS := +define+VEN_L1D_BANKED_DATA +define+VEN_L1D_BANK0_SHARED_XLINE \
+  +define+VEN_L1D_FILL_FORWARD +define+VEN_L1D_CODE_BUFFER \
+  +define+VEN_L1D_CODE_STREAM +define+VEN_L1D_WINDOW_REUSE \
+  +define+VEN_L1D_TWO_WINDOW_REUSE +define+VEN_P54_DUAL_HIT \
+  +define+VEN_P54_DUAL_HIT_LEGACY_CAPTURE +define+VEN_P54_DUAL_LOAD_PAIR \
+  +define+VEN_P54_DUAL_LOAD_PRIME +define+VEN_PIPE_BRANCH_LOAD_PRIME \
+  +define+VEN_FAST_MEM_ALU +define+VEN_PIPE_SDECODE \
+  +define+VEN_UOP_EXEC_REPAIR +define+VEN_UOP_CROSSLINE \
+  +define+VEN_UOP_CROSS2 +define+VEN_UOP_CROSS_INDEX \
+  +define+VEN_UOP_CROSSPAIR +define+VEN_UOP_REPAIR_FAIR \
+  +define+VEN_UOPCACHE_CHECK
+.PHONY: ven-ipc
+ven-ipc:
+	cd $(REPO) && $(VERILATOR) $(VFLAGS) \
+	  -LDFLAGS "-lz" \
+	  -Mdir ao486-sim/obj_dir_ven_ipc -o ao486sim_ven_ipc \
+	  $(VEN_DEFS) $(VEN_IPC_DEFS) \
+	  -f rtl_ven_core.f -f rtl_ven_soc.f $(VEN_SRCS)
+	@echo "built IPC candidate: $(REPO)/ao486-sim/obj_dir_ven_ipc/ao486sim_ven_ipc"
+
 run: all
 	$(REPO)/$(OBJDIR)/$(EXE) --cycles 400000
 

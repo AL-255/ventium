@@ -455,3 +455,28 @@ performance evidence, **not measured gameplay IPC**. The matched
 area-favorable in both storage layouts, but hit-under-fill expensive. Neither
 option has yet passed full-PC cold boot, Win95, Quake or routed timing on the
 exact candidate, so neither was added to a release define set.
+
+## Combined full-PC IPC development profile (September 28)
+
+`make -C ao486-sim ven-ipc` builds a separate `obj_dir_ven_ipc` executable with
+the banked/port-shared L1D, fill forwarding, code stream/window reuse, checked
+U/V load pairing and branch-load prime, fast memory ALU, and cross-line uop
+repair. It does not change the conservative `ven` target or make old native
+snapshots compatible with the new model. This is a diagnostic candidate, not a
+release or FPGA define set.
+
+The matched full-P5 `l1axi_kv_full` microbenchmark build (candidate with these
+extra defines, control without them) passed all 33 cases at 400 iterations and
+32 simulator jobs: **22 faster, 11 unchanged, 0 slower**, with complete
+candidate/control architectural trace equality. Eight selected cases (distinct-
+and same-bank loads, loads after stores, both terminal branch reversals,
+cross-line return, and fill forwarding) also matched **16,468** pinned-QEMU
+architectural groups in total. Artifacts are under
+`/home/yukidama/ventium-background-sep28.B3cxzoKA/p54_ipc_combined_{ab,qemu}/`.
+The combined full-PC binary SHA-256 is
+`c415fceed23beefbbcc21be0ce9a7e9c3f01bba16f363652a300328074154cf4`;
+it completed a five-million-clock cold-start smoke run on each guest disk.
+Longer cold Win95 and Quake runs were then launched on that exact binary, one
+CPU each, under `win95_ipc_cold/` and `quake_ipc_cold/` in the same artifact
+root. Their outcomes and gameplay IPC are **not yet known**; neither the
+directed IPC nor the smoke runs satisfy gameplay or full gate acceptance.
