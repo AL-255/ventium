@@ -28,14 +28,18 @@ build_run control & control_pid=$!
 build_run master_only -DVEN_P54_WBUF_PIPE_DISPATCH & master_pid=$!
 build_run bridge_only -DVEN_AXI2AVL_BPIPE & bridge_pid=$!
 build_run candidate -DVEN_P54_WBUF_PIPE_DISPATCH -DVEN_AXI2AVL_BPIPE & candidate_pid=$!
+build_run direct -DVEN_P54_WBUF_PIPE_DISPATCH -DVEN_AXI2AVL_BPIPE -DVEN_AXI2AVL_WRITE_THROUGH & direct_pid=$!
 wait "$control_pid"
 wait "$master_pid"
 wait "$bridge_pid"
 wait "$candidate_pid"
+wait "$direct_pid"
 control=$(sed -n 's/.*AXI-AO486-WRITE-PIPE clocks=\([0-9]*\).*/\1/p' "$OBJ/control.run.log")
 master_only=$(sed -n 's/.*AXI-AO486-WRITE-PIPE clocks=\([0-9]*\).*/\1/p' "$OBJ/master_only.run.log")
 bridge_only=$(sed -n 's/.*AXI-AO486-WRITE-PIPE clocks=\([0-9]*\).*/\1/p' "$OBJ/bridge_only.run.log")
 candidate=$(sed -n 's/.*AXI-AO486-WRITE-PIPE clocks=\([0-9]*\).*/\1/p' "$OBJ/candidate.run.log")
-[[ -n "$control" && -n "$master_only" && -n "$bridge_only" && -n "$candidate" && "$candidate" -lt "$control" ]] \
-  || { echo "AXI-AO486-WRITE-PIPE-FAIL: control=$control master_only=$master_only bridge_only=$bridge_only candidate=$candidate"; exit 1; }
-echo "AXI-AO486-WRITE-PIPE-GATE-OK control=$control master_only=$master_only bridge_only=$bridge_only candidate=$candidate"
+direct=$(sed -n 's/.*AXI-AO486-WRITE-PIPE clocks=\([0-9]*\).*/\1/p' "$OBJ/direct.run.log")
+[[ -n "$control" && -n "$master_only" && -n "$bridge_only" && -n "$candidate" && -n "$direct" &&
+   "$candidate" -lt "$control" && "$direct" -lt "$candidate" ]] \
+  || { echo "AXI-AO486-WRITE-PIPE-FAIL: control=$control master_only=$master_only bridge_only=$bridge_only candidate=$candidate direct=$direct"; exit 1; }
+echo "AXI-AO486-WRITE-PIPE-GATE-OK control=$control master_only=$master_only bridge_only=$bridge_only candidate=$candidate direct=$direct"

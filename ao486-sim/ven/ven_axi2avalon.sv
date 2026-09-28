@@ -103,15 +103,37 @@ module ven_axi2avalon (
     logic b_rp, b_wp;
     logic [1:0] b_count;
     logic b_push, b_pop;
+`ifdef VEN_AXI2AVL_WRITE_THROUGH
+    // With the P54 master both AW and W are registered and may be presented
+    // together. Accept their first Avalon beat on that same edge, while still
+    // holding both AXI channels under Avalon backpressure. A missing W takes
+    // the original address-first path; a two-beat write retains its second
+    // beat in S_WR_CMD. This is not speculative write acknowledgement.
+    logic idle_write_offer, idle_write_accept;
+    assign idle_write_offer = (state == S_IDLE) && (b_count != 2'd2) &&
+                              !s_axi_arvalid && s_axi_awvalid && s_axi_wvalid;
+    assign idle_write_accept = idle_write_offer && !avm_waitrequest;
+    assign b_push = ((state == S_WR_CMD) && s_axi_wvalid &&
+                     !avm_waitrequest && (wr_left == 2'd1)) ||
+                    (idle_write_accept && (s_axi_awlen == 8'd0));
+`else
     assign b_push = (state == S_WR_CMD) && s_axi_wvalid &&
                     !avm_waitrequest && (wr_left == 2'd1);
+`endif
     assign b_pop = s_axi_bvalid && s_axi_bready;
     always_ff @(posedge clk) begin
         if (!rst_n) begin
             b_rp <= 1'b0; b_wp <= 1'b0; b_count <= 2'd0;
             b_id_q[0] <= 4'd0; b_id_q[1] <= 4'd0;
         end else begin
-            if (b_push) begin b_id_q[b_wp] <= id_q; b_wp <= ~b_wp; end
+            if (b_push) begin
+`ifdef VEN_AXI2AVL_WRITE_THROUGH
+                b_id_q[b_wp] <= idle_write_accept ? s_axi_awid : id_q;
+`else
+                b_id_q[b_wp] <= id_q;
+`endif
+                b_wp <= ~b_wp;
+            end
             if (b_pop) b_rp <= ~b_rp;
             unique case ({b_push, b_pop})
                 2'b10: b_count <= b_count + 2'd1;
@@ -126,7 +148,11 @@ module ven_axi2avalon (
 `ifdef VEN_AXI2AVL_BPIPE
     assign s_axi_arready = (state == S_IDLE) && (b_count == 2'd0);
     assign s_axi_awready = (state == S_IDLE) && (b_count != 2'd2) &&
-                           !s_axi_arvalid;
+                           !s_axi_arvalid
+`ifdef VEN_AXI2AVL_WRITE_THROUGH
+                           && (!s_axi_wvalid || !s_axi_awvalid || !avm_waitrequest)
+`endif
+                           ;
 `else
     assign s_axi_arready = (state == S_IDLE);
     // Accept the write-address only when idle AND no read is competing this cycle.
@@ -134,16 +160,28 @@ module ven_axi2avalon (
 `endif
 
     // ---- Avalon command outputs (registered address, combinational strobes) -
+`ifdef VEN_AXI2AVL_WRITE_THROUGH
+    assign avm_address    = idle_write_offer ? s_axi_awaddr[31:2] : addr_q;
+`else
     assign avm_address    = addr_q;
+`endif
     assign avm_burstcount = (state == S_RD_CMD) ? cmd_beats : 4'd1;
     assign avm_read       = (state == S_RD_CMD);
-    assign avm_write      = (state == S_WR_CMD) && s_axi_wvalid;
+    assign avm_write      = ((state == S_WR_CMD) && s_axi_wvalid)
+`ifdef VEN_AXI2AVL_WRITE_THROUGH
+                            || idle_write_offer
+`endif
+                            ;
 
     // Avalon accepts one dword at a time; hold each AXI W until that write
     // command is accepted, then advance the dword address for burst beat 2.
     assign avm_writedata  = s_axi_wdata;
     assign avm_byteenable = s_axi_wstrb;
-    assign s_axi_wready   = (state == S_WR_CMD) && !avm_waitrequest;
+    assign s_axi_wready   = ((state == S_WR_CMD)
+`ifdef VEN_AXI2AVL_WRITE_THROUGH
+                             || idle_write_offer
+`endif
+                             ) && !avm_waitrequest;
 
     // Read-data (R) channel
     assign s_axi_rdata    = avm_readdata;
@@ -201,9 +239,24 @@ module ven_axi2avalon (
                         state  <= S_RD_CMD;
                     end else if (s_axi_awvalid && s_axi_awready) begin // else write
                         id_q   <= s_axi_awid;
-                        addr_q <= s_axi_awaddr[31:2];
-                        wr_left <= {1'b0, s_axi_awlen[0]} + 2'd1;
-                        state  <= S_WR_CMD;
+`ifdef VEN_AXI2AVL_WRITE_THROUGH
+                        if (idle_write_accept) begin
+                            if (s_axi_awlen == 8'd0) begin
+                                wr_left <= 2'd0;
+                                state <= S_IDLE;
+                            end else begin
+                                addr_q <= s_axi_awaddr[31:2] + 30'd1;
+                                wr_left <= 2'd1;
+                                state <= S_WR_CMD;
+                            end
+                        end else begin
+`endif
+                            addr_q <= s_axi_awaddr[31:2];
+                            wr_left <= {1'b0, s_axi_awlen[0]} + 2'd1;
+                            state <= S_WR_CMD;
+`ifdef VEN_AXI2AVL_WRITE_THROUGH
+                        end
+`endif
                     end
                 end
                 // ---------------------------------------------------------------
@@ -258,6 +311,11 @@ module ven_axi2avalon (
     // Sanity: the Ventium master only ever issues 8-beat (or 1) 4 B reads,
     // and 1- or 2-beat 4 B writes. Flag protocol drift loudly.
     always_ff @(posedge clk) if (rst_n) begin
+`ifdef VEN_AXI2AVL_WRITE_THROUGH
+        assert (!(idle_write_accept && (!s_axi_awready || !s_axi_wready ||
+                                        !avm_write || avm_address != s_axi_awaddr[31:2])))
+          else $error("ven_axi2avalon: direct AW/W/Avalon handshake disagreed");
+`endif
 `ifdef VEN_AXI2AVL_BPIPE
         assert (!(b_push && b_count == 2'd2 && !b_pop))
           else $error("ven_axi2avalon: completed write overflowed B response queue");
@@ -274,7 +332,15 @@ module ven_axi2avalon (
                     s_axi_awburst == 2'b01)
               else $error("ven_axi2avalon: unexpected AW len=%0d size=%0d", s_axi_awlen, s_axi_awsize);
         if (s_axi_wvalid && s_axi_wready)
-            assert (s_axi_wlast == (wr_left == 2'd1))
+            assert (s_axi_wlast ==
+`ifdef VEN_AXI2AVL_WRITE_THROUGH
+                    (idle_write_accept ? (s_axi_awlen == 8'd0) :
+`endif
+                    (wr_left == 2'd1)
+`ifdef VEN_AXI2AVL_WRITE_THROUGH
+                    )
+`endif
+                    )
               else $error("ven_axi2avalon: wrong WLAST left=%0d last=%b", wr_left, s_axi_wlast);
     end
 `endif

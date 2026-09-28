@@ -138,12 +138,20 @@ microbenchmark took 48 clocks in the control and 33 with B pipelining. The
 full-PC IPC candidate compiles with both flags; no current-candidate gameplay
 IPC or FPGA timing measurement is available yet.
 
-`bash verif/l1/run-axi-ao486-write-pipe.sh` now measures both flags through
-the production master, bridge, and actual ao486 L2. It checks 32 ordered
-aligned writes plus readback in all four flag combinations: control 99 clocks,
-master-only 99, bridge-only 99, and both flags 68. The combined 31-clock
-reduction removes a two-sided serialization bottleneck; neither half alone
-helps this fixed stream. This is a bounded seam test, not gameplay IPC.
+`VEN_AXI2AVL_WRITE_THROUGH` additionally accepts simultaneous AW and first W
+on the Avalon acceptance edge, preserving the address-first fallback when W
+is delayed. Directed tests hold both channels under Avalon backpressure,
+exercise a two-beat write, and check ordered B and real-L2 readback. The
+16-store bridge-only stream takes 17 clocks with this flag (33 with B
+pipelining alone), but this local result does not translate directly into
+system throughput.
+
+`bash verif/l1/run-axi-ao486-write-pipe.sh` measures the production master,
+bridge, and actual ao486 L2. Its 32 ordered aligned writes plus readback take
+99 clocks in control, master-only, and bridge-only configurations, 68 with
+master dispatch and B pipelining, and 67 with write-through too. The latter
+saves only one clock in this integrated stream. All variants check exact
+readback; these are bounded seam tests, not gameplay IPC or FPGA results.
 
 The fixed-work `fp_fistp_integer_overlap` probe on the September 28 full IPC
 profile takes 12 clocks for its four-instruction FILD/FISTP/INC/INC body plus

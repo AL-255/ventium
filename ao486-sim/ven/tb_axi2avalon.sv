@@ -350,6 +350,63 @@ module tb_axi2avalon;
       line_base = 808; start_word = 0; read_line();
     end
 `endif
+`ifdef VEN_AXI2AVL_WRITE_THROUGH
+    // Simultaneous AW+first W of a fused quadword must remain stable during
+    // Avalon backpressure, then accept both together. B waits for beat two.
+    begin
+      int held, guard;
+      bit first_done, second_done;
+      jitter = 1; bready = 0;
+`ifndef VEN_BRIDGE_REAL_L2
+      // The synthetic Avalon responder uses jitter to force waitrequest.
+      // The real cache is ready at idle; it is not driven by this test knob.
+      while (!avm_waitrequest) @(negedge clk);
+`endif
+      awid = 4'hd; awaddr = 40'(640 * 4); awlen = 1;
+      awsize = 3'd2; awburst = 2'b01; awvalid = 1;
+      wdata = 32'h1234_5678; wstrb = 4'hf; wlast = 0; wvalid = 1;
+      held = 0; guard = 0; first_done = 0;
+      while (!first_done) begin
+        @(posedge clk);
+        if (awready != wready || !avm_write || avm_address != 30'(640))
+          $fatal(1, "direct first beat lost AW/W/Avalon alignment");
+        if (awready) first_done = 1;
+        else held++;
+        @(negedge clk);
+        if (++guard > 32) $fatal(1, "direct first beat stalled");
+      end
+`ifndef VEN_BRIDGE_REAL_L2
+      if (held == 0) $fatal(1, "direct write did not exercise backpressure");
+`endif
+      awvalid = 0; wdata = 32'h89ab_cdef; wlast = 1;
+      guard = 0; second_done = 0;
+      while (!second_done) begin
+        @(posedge clk);
+        if (wready) second_done = 1;
+        @(negedge clk);
+        if (++guard > 32) $fatal(1, "direct second beat stalled");
+      end
+      wvalid = 0;
+      if (!bvalid || bid != 4'hd)
+        $fatal(1, "direct fused write returned wrong BID");
+`ifndef VEN_BRIDGE_REAL_L2
+      if (memory[640] != 32'h1234_5678 || memory[641] != 32'h89ab_cdef)
+        $fatal(1, "direct fused write committed wrong data");
+`endif
+      bready = 1;
+      @(posedge clk);
+      @(negedge clk);
+      if (bvalid) $fatal(1, "direct fused B did not drain");
+      expected_memory[640] = 32'h1234_5678;
+      expected_memory[641] = 32'h89ab_cdef;
+      jitter = 0; line_base = 640; start_word = 0; read_line();
+`ifdef VEN_BRIDGE_REAL_L2
+      $display("AXI2AVALON-BWRITE-GATE-OK (real-L2 fused WLAST, ordered B, readback)");
+`else
+      $display("AXI2AVALON-BWRITE-GATE-OK (held AW/W, fused WLAST, ordered B)");
+`endif
+    end
+`endif
 `ifdef VEN_AXI2AVL_BPIPE
     // Hold the first B response while a second AW/W completes.  The first BID
     // must not change when the bridge captures the younger AWID; two pending
