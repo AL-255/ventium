@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-out="$(mktemp -d /tmp/ventium-p54-l1d-code-buffer.XXXXXX)"
+out="$(mktemp -d "${P54_CODE_BUFFER_OUTBASE:-/tmp}/ventium-p54-l1d-code-buffer.XXXXXX")"
 echo "Artifacts: $out"
 for variant in packed banked banked_window banked_forward banked_code_stream banked_both_forward; do
     defines=(+define+VEN_L1D_CODE_BUFFER)

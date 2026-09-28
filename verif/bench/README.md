@@ -310,8 +310,11 @@ The corresponding opt-in full-core build also matched all 22 fixed-work
 candidate/control traces and exact cycle counts (`/tmp/p54-pair-dtlb-core-micro-r1/`),
 as expected while V sideband admission remains disabled.
 
-`run-p54-l1d-code-buffer.sh` tests `VEN_L1D_CODE_BUFFER` in four cache
-configurations, including banked/window/forward variants. Code reads with the
+`run-p54-l1d-code-buffer.sh` tests `VEN_L1D_CODE_BUFFER` in six cache
+configurations, including banked/window/forward/stream variants. Its generated
+builds default to `/tmp`; set `P54_CODE_BUFFER_OUTBASE` to an existing directory
+on a larger filesystem if the tmpfs quota cannot hold the precompiled headers.
+Code reads with the
 core's zero-strobe convention stage a separate physical line without touching
 the two D ways; it checks data residency, same-address response ownership,
 store/snoop/flush invalidation (including mid-fill and terminal-beat snoops),
