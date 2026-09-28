@@ -14,6 +14,13 @@ module tb_l1axi_pair_hit;
   logic pair_bank_conflict;
   logic [1:0] pair_rsp_valid, pair_rsp_cancel, pair_rsp_ready = 0;
   logic [1:0][31:0] pair_rsp_paddr, pair_rsp_data;
+`ifdef VEN_P54_DUAL_STORE_PAIR
+  logic store_pair_req = 0, store_pair_ready, store_pair_ack;
+  logic [31:0] store_pair_addr = 0, store_pair_wdata = 0;
+  logic [3:0] store_pair_wstrb = 4'hf;
+  logic ic_snoop2_valid;
+  logic [31:0] ic_snoop2_addr;
+`endif
   logic [3:0] awid, awcache, awqos, awprot, bid, arid, arcache, arqos, arprot, rid;
   logic [39:0] awaddr, araddr;
   logic [7:0] awlen, arlen;
@@ -27,6 +34,9 @@ module tb_l1axi_pair_hit;
   int checks = 0;
 
   ventium_l1_axi #(.ADDR_W(40), .REMAP_BASE(REMAP_BASE),
+`ifdef VEN_P54_DUAL_STORE_PAIR
+                   .NB_SMRAM(8'h08),
+`endif
                    .ADDR_MASK(32'h3fff_ffff)) dut (
       .core_clk(clk), .core_rst_n(rst_n), .axi_clk(clk), .axi_rst_n(rst_n),
       .flush_all(flush), .golden_l1(1'b0), .shutdown(1'b0), .m_idle,
@@ -41,6 +51,16 @@ module tb_l1axi_pair_hit;
       .core_pair_rsp_valid(pair_rsp_valid), .core_pair_rsp_cancel(pair_rsp_cancel),
       .core_pair_rsp_ready(pair_rsp_ready), .core_pair_rsp_owner(pair_rsp_owner),
       .core_pair_rsp_paddr(pair_rsp_paddr), .core_pair_rsp_data(pair_rsp_data),
+`ifdef VEN_P54_DUAL_STORE_PAIR
+      .core_store_pair_req(store_pair_req), .core_store_pair_addr(store_pair_addr),
+      .core_store_pair_wdata(store_pair_wdata),
+      .core_store_pair_wstrb(store_pair_wstrb),
+      .core_store_pair_ready(store_pair_ready),
+      .core_store_pair_ack(store_pair_ack),
+      .icache_snoop_valid(), .icache_snoop_addr(),
+      .icache_snoop_valid1(), .icache_snoop_addr1(),
+      .icache_snoop_valid2(ic_snoop2_valid), .icache_snoop_addr2(ic_snoop2_addr),
+`endif
       .core_ic_nocache, .bus_err, .cr0_cd(cd),
       .m_axi_awid(awid), .m_axi_awaddr(awaddr), .m_axi_awlen(awlen),
       .m_axi_awsize(awsize), .m_axi_awburst(awburst), .m_axi_awlock(awlock),
@@ -222,6 +242,30 @@ module tb_l1axi_pair_hit;
     step();
     if (|pair_rsp_valid || |pair_rsp_cancel) $fatal(1, "canceled pair retained");
     checks++;
+`ifdef VEN_P54_DUAL_STORE_PAIR
+    // Ready is independent of V's request-valid. It must classify V's own
+    // address instead of borrowing U's cacheability and route result.
+    @(negedge clk);
+    flush = 0; core_req = 1; core_we = 1; core_addr = 32'h1000;
+    core_wstrb = 4'hf; store_pair_addr = 32'h1024;
+    #1;
+    if (!store_pair_ready || !dut.store_pair_l1c || !dut.store_pair_dram)
+      $fatal(1, "different-line DRAM V store was not independently admitted");
+    store_pair_addr = 32'h000a_0000;
+    #1;
+    if (store_pair_ready || dut.store_pair_l1c || dut.store_pair_dram)
+      $fatal(1, "VGA/MMIO V store borrowed U's cacheable DRAM result");
+    store_pair_addr = 32'h4000_0000;
+    #1;
+    if (store_pair_ready || dut.store_pair_l1c || dut.store_pair_dram)
+      $fatal(1, "unrouted high V store borrowed U's DRAM result");
+    store_pair_addr = 32'h0003_0004;
+    #1;
+    if (store_pair_ready || !dut.store_pair_smram_deny)
+      $fatal(1, "closed relocated SMRAM V store borrowed U's access");
+    core_req = 0; core_we = 0;
+    checks += 4;
+`endif
     $display("L1AXI-PAIR-HIT-OK checks=%0d", checks);
     $finish;
   end

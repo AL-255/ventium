@@ -5015,7 +5015,10 @@ module core
   assign pipe_v_pair_eligible = cycle_mode && v_bytes_ok && pipe_pair_mem_ok &&
       !irq_shadow && !dbg_pair_block && !pipe_mem_active_q &&
       !exec_flush_all && !ic_snoop_valid && !ic_snoop_valid1 &&
-      !ic_snoop_valid2 && !fx_act && !fx_abort_q && !bus_err &&
+      // Port 2 can be this same edge's paired V store. An older U load and
+      // a paired U/V store are mutually exclusive; a veto here would make
+      // V-store acceptance feed back into the U-read pair request.
+      !fx_act && !fx_abort_q && !bus_err &&
       !pipe_mem_abort_now &&
       (!sys_mode || ({1'b0, eip} + {29'd0, u_d.len} +
                      {29'd0, v_d.len} - 33'd1 <=
@@ -5115,7 +5118,9 @@ module core
       (state == S_PIPE) && (pipe_regmem_pc_q == eip) &&
       cycle_mode && !def16 && v_bytes_ok && pipe_pair_regmem_ok &&
       !irq_shadow && !dbg_pair_block && !exec_flush_all &&
-      !ic_snoop_valid && !ic_snoop_valid1 && !ic_snoop_valid2 &&
+      // A register-U primed read cannot coincide with a paired U/V store.
+      // Port 2 may carry that store, so it cannot feed this issue predicate.
+      !ic_snoop_valid && !ic_snoop_valid1 &&
       !fx_act && !fx_abort_q && !bus_err &&
 `ifdef VEN_UOPCACHE
       uc_v_avail &&
@@ -5182,8 +5187,8 @@ module core
   assign pipe_v_store_phys = paging_on ? v_dtlb_lk_phys : pipe_v_mem_lin;
   // V never starts a page walk or raises a fault speculatively. An absent,
   // clean, or permission-denied V mapping leaves U on its ordinary port and
-  // retries V as the next architectural instruction. Same physical line means
-  // the L1's U cacheability and router decision also apply to V.
+  // retries V as the next architectural instruction. The L1/AXI seam checks
+  // V's physical memory type and resident tag independently of U's.
   assign pipe_store_pair_offer = pipe_store_req && pipe_store_pair_shape &&
       (state == S_PIPE) && !fp_issue_block && !dbg_pair_block &&
       !exec_flush_all && !ic_snoop_valid &&
@@ -5191,7 +5196,6 @@ module core
       !bus_err && !pipe_mem_abort_now && !xlate_miss && !fe_xlate_pend &&
       mem_req && mem_we && !mem_lock_hold &&
       (mem_addr[1:0] == 2'd0) && (pipe_v_store_phys[1:0] == 2'd0) &&
-      (mem_addr[31:5] == pipe_v_store_phys[31:5]) &&
       (mem_addr[4:2] != pipe_v_store_phys[4:2]) &&
       ({1'b0, pipe_v_modrm_ea} + 33'd3 <= {1'b0, seg_limit[pipe_v_store_seg]}) &&
       (!paging_on || (v_dtlb_lk_hit && v_dtlb_lk_dirty &&

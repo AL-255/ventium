@@ -150,7 +150,10 @@
       // real_bus retirement does not create modeled misalignment debt.
       // Candidate extent checks below still forbid a split-line request.
       !dbg_step_active && !fp_issue_block && !smi_take && !nmi_take && !intr_take &&
-      !exec_flush_all && !ic_snoop_valid && !ic_snoop_valid1 && !ic_snoop_valid2 &&
+      // Port 2 may carry this same clock's paired V store. A store already
+      // excludes read lookahead below, and feeding its acceptance back here
+      // would close ready -> store -> snoop -> ready.
+      !exec_flush_all && !ic_snoop_valid && !ic_snoop_valid1 &&
       !fx_act && !fx_abort_q && !bus_err
 `ifdef VEN_DBG_CORE
       && !dbg_block_issue && !dbg_bp_en

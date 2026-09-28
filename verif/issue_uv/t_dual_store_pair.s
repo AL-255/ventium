@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
 # Two adjacent full-dword stores. SECOND_OFFSET=4 is the eligible same-line,
-# different-bank case; 0 aliases U and 32 crosses the physical cache line.
+# different-bank case; 0 aliases U, 32 crosses to the same bank, and 36
+# crosses to a different bank/line.
 .ifndef SECOND_OFFSET
 .set SECOND_OFFSET, 4
 .endif

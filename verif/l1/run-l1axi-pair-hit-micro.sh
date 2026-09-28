@@ -12,8 +12,10 @@ echo "Artifacts: $out"
 extra_defines=()
 if [[ "${1:-}" == "--legacy-capture-pair" ]]; then
   extra_defines=(+define+VEN_P54_DUAL_HIT_LEGACY_CAPTURE)
+elif [[ "${1:-}" == "--store-pair-map" ]]; then
+  extra_defines=(+define+VEN_P54_DUAL_STORE_PAIR +define+VEN_L1_AXI)
 elif [[ $# -ne 0 ]]; then
-  echo "usage: $0 [--legacy-capture-pair]" >&2
+  echo "usage: $0 [--legacy-capture-pair|--store-pair-map]" >&2
   exit 2
 fi
 timeout --signal=TERM --kill-after=10s 300s "$root/tools/verilator_serial.sh" \

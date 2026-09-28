@@ -196,8 +196,21 @@ module ven_l1d #(
   logic bank_fill_we, bank_store_we;
 `ifdef VEN_P54_DUAL_STORE_PAIR
   logic bank_pair_store_we;
-  assign bank_pair_store_we = bank_store_we && c_pair_req && c_pair_ready &&
-                              m_pair_ack;
+  logic [IDXW-1:0] store_pair_set;
+  logic [TAGW-1:0] store_pair_tag;
+  logic store_pair_hit0, store_pair_hit1, store_pair_hit, store_pair_way;
+  assign store_pair_set = c_pair_addr[OFFW +: IDXW];
+  assign store_pair_tag = c_pair_addr[OFFW+IDXW +: TAGW];
+  assign store_pair_hit0 = dc_val[store_pair_set][0] &&
+                           dc_tag[store_pair_set][0] == store_pair_tag;
+  assign store_pair_hit1 = dc_val[store_pair_set][1] &&
+                           dc_tag[store_pair_set][1] == store_pair_tag;
+  assign store_pair_hit = store_pair_hit0 || store_pair_hit1;
+  assign store_pair_way = store_pair_hit1;
+  // V writes only its own resident physical tag. A nonallocating V miss is
+  // posted to the ordered backing buffer without touching a different line.
+  assign bank_pair_store_we = rst_n && (st == L1_IDLE) && !mc_lookup_next &&
+      !stream_path && c_pair_req && c_pair_ready && c_ack && store_pair_hit;
 `endif
   assign bank_fill_we = rst_n && (st == L1_FILL) && m_ack && !bypass_q
 `ifdef VEN_L1D_CODE_BUFFER
@@ -214,14 +227,13 @@ module ven_l1d #(
 `ifndef VEN_L1D_BANKED_DATA
   initial $fatal(1, "VEN_P54_DUAL_STORE_PAIR requires banked L1D data");
 `endif
-  // Limiting this first admission class to one resident physical line makes
-  // U's tag/cacheability decision valid for V as well. No second tag RAM read,
-  // replacement decision, or noncacheable/MMIO side effect is guessed here.
+  // Each aligned store has its own physical tag lookup. The upstream seam
+  // independently checks V's cacheability and route; both writes are posted
+  // atomically in U/V order, whether either line is resident or not.
   assign c_pair_ready = rst_n && c_req && c_we && cacheable && !golden &&
       !flush_all && !snoop_inv_valid && (st == L1_IDLE) &&
       m_pair_ready &&
-      !mc_lookup_next && !stream_path && hit && !xline &&
-      (c_addr[31:5] == c_pair_addr[31:5]) &&
+      !mc_lookup_next && !stream_path && !xline &&
       (c_addr[1:0] == 2'd0) && (c_pair_addr[1:0] == 2'd0) &&
       (c_addr[4:2] != c_pair_addr[4:2]) &&
       (c_wstrb == 4'hf) && (c_pair_wstrb == 4'hf);
@@ -539,7 +551,12 @@ module ven_l1d #(
     always_comb begin
       wr_mask = 4'd0;
       wr_data = 32'd0;
-      wr_row = bank_fill_we ? {fset, fway} : {set_c, hit_way};
+      wr_row = bank_fill_we ? {fset, fway} :
+`ifdef VEN_P54_DUAL_STORE_PAIR
+             (bank_pair_store_we && c_pair_addr[4:2] == 3'(bank)) ?
+                 {store_pair_set, store_pair_way} :
+`endif
+                 {set_c, hit_way};
       line_byte = 5'd0;
       if (bank_fill_we && fill_word == 3'(bank)) begin
         wr_mask = 4'hf;
@@ -547,9 +564,8 @@ module ven_l1d #(
 `ifdef VEN_P54_DUAL_STORE_PAIR
       end else if (bank_pair_store_we &&
                    c_pair_addr[4:2] == 3'(bank)) begin
-        // The pair-ready predicate proves aligned, full-word, distinct-bank
-        // stores to this same resident row. Each LUTRAM bank still has one
-        // physical write port; V owns only its bank on the acceptance edge.
+        // Distinct banks each have one write port; V selects its own physical
+        // set/way rather than borrowing U's row on a different-line hit.
         wr_mask = c_pair_wstrb;
         wr_data = c_pair_wdata;
 `endif
@@ -1577,6 +1593,16 @@ module ven_l1d #(
                 if (hit_n1) dc_val[set_n][1] <= 1'b0;
               end
             end
+`ifdef VEN_P54_DUAL_STORE_PAIR
+            // V's distinct physical line has its own resident tag and way.
+            // The banked data write above is qualified by this exact hit and
+            // by the atomic backing ACK; a V miss remains nonallocating.
+            if (c_pair_req && c_pair_ready && store_pair_hit) begin
+              if (store_pair_hit0 && store_pair_hit1)
+                dc_val[store_pair_set][~store_pair_way] <= 1'b0;
+              dc_lru[store_pair_set] <= store_pair_way;
+            end
+`endif
             // (STLD write-capture removed with the forwarding buffer.)
           end
         end

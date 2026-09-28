@@ -596,8 +596,20 @@ module ventium_l1_axi #(
   assign icache_snoop_addr   = l1d_snoop_addr;
   assign icache_snoop_valid1 = core_we;           // port 1: SMC store, first line
   assign icache_snoop_addr1  = core_addr;         // R2-H09: PHYSICAL (ic_ptag match)
+`ifdef VEN_P54_DUAL_STORE_PAIR
+  // A pair's U store is aligned and cannot cross a line, leaving port 2 for
+  // V's independently addressed line. Never leave executable V bytes stale.
+  assign icache_snoop_valid2 = smc_xline || core_store_pair_req;
+  assign icache_snoop_addr2  = core_store_pair_req ? core_store_pair_addr :
+                               smc_last_phys;
+`ifndef SYNTHESIS
+  always_ff @(posedge core_clk) if (seam_core_rst_n && core_store_pair_req && smc_xline)
+    $fatal(1, "paired V store collided with U crossing-line I-snoop");
+`endif
+`else
   assign icache_snoop_valid2 = smc_xline;         // port 2: SMC store, second line
   assign icache_snoop_addr2  = smc_last_phys;     // R2-H09: PHYSICAL
+`endif
 `endif
   // DMA requester into the northbridge: from the external port (VEN_NB_DMA) or tied off
   // (CPU-only). Responses (rdata/ack) are driven by the generate (NB present or 0).
@@ -1224,8 +1236,21 @@ module ventium_l1_axi #(
   logic l1d_c_req; logic l1d_c_ack; logic [31:0] l1d_c_rdata;
 `ifdef VEN_P54_DUAL_STORE_PAIR
   logic l1d_store_pair_ready, l1d_store_pair_ack;
+  logic store_pair_l1c, store_pair_dram, store_pair_smram_deny;
+  // Store pairs may touch different lines or pages. U's KEN#/route/SMRAM
+  // decision is never an oracle for V's physical address.
+  ven_cachemap #(.SNAPSHOT_USER_HIGHMEM(CMAP_SNAPSHOT_USER_HIGHMEM)) u_cmap_store_pair (
+      .addr(core_store_pair_addr), .is_write(1'b1), .is_code(1'b0),
+      .smm_active(smm_active), .pam(NB_PAM), .dramc(NB_DRAMC), .cc(NB_CC),
+      .tom_mb4(NB_TOM_MB4), .smram(NB_SMRAM),
+      .to_dram(store_pair_dram), .l1_cacheable(store_pair_l1c),
+      .l2_cacheable(), .region());
+  assign store_pair_smram_deny = NB_SMRAM[3] && !NB_SMRAM[6] && !smm_active &&
+      (core_store_pair_addr + 32'd3 >= smbase) &&
+      (core_store_pair_addr <= smbase + 32'h0000_FFFF);
   assign core_store_pair_ready = l1d_c_req && !core_smram_deny &&
-      !core_route_deny && !dma_drain_stall && l1d_store_pair_ready;
+      !core_route_deny && !dma_drain_stall && !store_pair_smram_deny &&
+      store_pair_l1c && store_pair_dram && !cr0_cd && l1d_store_pair_ready;
   assign core_store_pair_ack = core_store_pair_ready && l1d_store_pair_ack;
 `endif
 `ifdef VEN_FP_LOAD64

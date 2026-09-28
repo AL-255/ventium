@@ -118,6 +118,15 @@ The U callback of a same-cycle U/V pair is not an intermediate architectural
 state; the group's last callback is compared to pinned QEMU. This check remains
 a bounded microbenchmark, not full-system differential verification.
 
+The dual-store extension admits independently mapped, cacheable DRAM lines
+when their physical word banks differ. `run-dual-store-core-gate.sh` checks
+same-line, different-line, alias and conflicting-bank issue against pinned
+QEMU; `run-dual-store-smc.py` checks V's separate executable snoop. The bounded
+open-slot different-line case saved 899 clocks in 900 warm loops relative to
+a pair-disabled control. The saturated two-store loop did **not** improve
+(6 clocks/iteration in both profiles): its two-entry write buffer was already
+full. These are not gameplay IPC or FPGA timing measurements.
+
 `run-p54-bank-arb.sh` is a bounded leaf test for the proposed eight-bank
 admission rule: physical `[4:2]` conflicts, unaligned/64-bit extents, split-line
 fallback, bank backpressure, and U-before-V priority. It exhausts all 16,384

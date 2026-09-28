@@ -69,6 +69,14 @@ module tb_l1d_pair_store;
       fail($sformatf("read %08x got %08x expected %08x", addr, c_rdata, expected));
     @(negedge clk); c_req <= 1'b0;
   endtask
+  task automatic wait_idle;
+    int guard;
+    guard = 0;
+    while (dut.st != 2'd0) begin
+      @(posedge clk); #1;
+      if (++guard > 40) begin fail("L1 fill did not drain"); break; end
+    end
+  endtask
 
   initial begin
     for (int i = 0; i < 64; i++) mem[i] = 32'hbeef_0000 + 32'(i);
@@ -192,6 +200,77 @@ module tb_l1d_pair_store;
     c_req <= 1'b0; c_we <= 1'b0; block_credit <= 1'b0;
     if (writes != 6 || mem[17] != 32'h9999_9999 || mem[18] != 32'h3333_3333)
       fail("credit fallback changed younger data or omitted older write");
+
+    $display("[pair] different resident lines update each physical tag/row");
+    read_word(32'h40, 32'h5555_5555);
+    read_word(32'h64, mem[25]);
+    wait_idle();
+    @(negedge clk);
+    c_req <= 1'b1; c_we <= 1'b1;
+    c_addr <= 32'h40; c_wdata <= 32'h1111_aaaa; c_wstrb <= 4'hf;
+    c_pair_req <= 1'b1;
+    c_pair_addr <= 32'h64; c_pair_wdata <= 32'h2222_bbbb; c_pair_wstrb <= 4'hf;
+    #1;
+    if (!c_pair_ready || !c_ack || !c_pair_ack)
+      fail("different-line resident pair did not admit atomically");
+    @(posedge clk);
+    @(negedge clk); c_req <= 1'b0; c_we <= 1'b0; c_pair_req <= 1'b0;
+    if (writes != 8 || mem[16] != 32'h1111_aaaa || mem[25] != 32'h2222_bbbb)
+      fail("different-line pair did not post both writes");
+    read_word(32'h40, 32'h1111_aaaa);
+    read_word(32'h64, 32'h2222_bbbb);
+    wait_idle();
+
+    $display("[pair] two nonresident lines post without cache allocation");
+    @(negedge clk);
+    c_req <= 1'b1; c_we <= 1'b1;
+    c_addr <= 32'ha0; c_wdata <= 32'h3333_cccc; c_wstrb <= 4'hf;
+    c_pair_req <= 1'b1;
+    c_pair_addr <= 32'hc4; c_pair_wdata <= 32'h4444_dddd; c_pair_wstrb <= 4'hf;
+    #1;
+    if (!c_pair_ready || !c_ack || !c_pair_ack || dut.hit || dut.store_pair_hit)
+      fail("nonresident different-line pair did not post cleanly");
+    @(posedge clk);
+    @(negedge clk); c_req <= 1'b0; c_we <= 1'b0; c_pair_req <= 1'b0;
+    if (writes != 10 || mem[40] != 32'h3333_cccc || mem[49] != 32'h4444_dddd)
+      fail("nonresident pair changed the wrong backing words");
+    read_word(32'ha0, 32'h3333_cccc);
+    read_word(32'hc4, 32'h4444_dddd);
+
+    $display("[pair] U miss/V hit updates only V's resident way");
+    read_word(32'h64, 32'h2222_bbbb);
+    wait_idle();
+    @(negedge clk);
+    c_req <= 1'b1; c_we <= 1'b1;
+    c_addr <= 32'he0; c_wdata <= 32'h5555_eeee; c_wstrb <= 4'hf;
+    c_pair_req <= 1'b1;
+    c_pair_addr <= 32'h64; c_pair_wdata <= 32'h6666_ffff; c_pair_wstrb <= 4'hf;
+    #1;
+    if (!c_pair_ready || !c_ack || !c_pair_ack || dut.hit || !dut.store_pair_hit)
+      fail("U-miss/V-hit pair was not independently qualified");
+    @(posedge clk);
+    @(negedge clk); c_req <= 1'b0; c_we <= 1'b0; c_pair_req <= 1'b0;
+    if (writes != 12 || mem[56] != 32'h5555_eeee || mem[25] != 32'h6666_ffff)
+      fail("U-miss/V-hit backing words were incorrect");
+    read_word(32'h64, 32'h6666_ffff);
+
+    $display("[pair] U hit/V miss leaves V nonresident until read fill");
+    read_word(32'h40, 32'h1111_aaaa);
+    wait_idle();
+    @(negedge clk);
+    c_req <= 1'b1; c_we <= 1'b1;
+    c_addr <= 32'h40; c_wdata <= 32'h7777_0000; c_wstrb <= 4'hf;
+    c_pair_req <= 1'b1;
+    c_pair_addr <= 32'he4; c_pair_wdata <= 32'h8888_1111; c_pair_wstrb <= 4'hf;
+    #1;
+    if (!c_pair_ready || !c_ack || !c_pair_ack || !dut.hit || dut.store_pair_hit)
+      fail("U-hit/V-miss pair was not independently qualified");
+    @(posedge clk);
+    @(negedge clk); c_req <= 1'b0; c_we <= 1'b0; c_pair_req <= 1'b0;
+    if (writes != 14 || mem[16] != 32'h7777_0000 || mem[57] != 32'h8888_1111)
+      fail("U-hit/V-miss backing words were incorrect");
+    read_word(32'h40, 32'h7777_0000);
+    read_word(32'he4, 32'h8888_1111);
 
     if (errors == 0) $display("L1D-PAIR-STORE-GATE-OK");
     else             $display("L1D-PAIR-STORE-GATE-FAIL (%0d errors)", errors);

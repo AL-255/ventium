@@ -11,7 +11,7 @@ QEMU="$ROOT/ventium-refs/07-p5-emulation-harness/build/qemu/build/qemu-i386"
 OUT="${OUTDIR:-$(mktemp -d /tmp/ventium-dual-store.XXXXXX)}"
 mkdir -p "$OUT"
 ulimit -v 1048576
-for spec in eligible_sat:4:0 eligible_open:4:16 alias:0:0 crossline:32:0; do
+for spec in eligible_sat:4:0 eligible_open:4:16 crossline_bank:36:16 alias:0:0 crossline:32:0; do
     variant="${spec%%:*}"
     fields="${spec#*:}"
     offset="${fields%%:*}"
@@ -49,7 +49,7 @@ import sys
 out = pathlib.Path(sys.argv[1])
 keys = ('eax', 'ebx', 'ecx', 'edx', 'esi', 'edi', 'esp', 'ebp',
         'eflags', 'cs', 'ss', 'ds', 'es', 'fs', 'gs')
-for variant in ('eligible_sat', 'eligible_open', 'alias', 'crossline'):
+for variant in ('eligible_sat', 'eligible_open', 'crossline_bank', 'alias', 'crossline'):
     directory = out
     symbols = {p[2]: int(p[0], 16)
                for line in (directory / f'{variant}.sym').read_text().splitlines()
@@ -73,7 +73,7 @@ for variant in ('eligible_sat', 'eligible_open', 'alias', 'crossline'):
     assert len(first) == len(second) == 1000
     pairs = sum(cycle[i]['cyc'] == cycle[j]['cyc'] for i, j in zip(first[100:], second[100:]))
     quad = os.environ.get('EXPECT_QUAD') == '1'
-    if variant == 'eligible_open' or (quad and variant == 'eligible_sat'):
+    if variant in ('eligible_open', 'crossline_bank') or (quad and variant == 'eligible_sat'):
         assert pairs > 0, 'eligible resident stores never paired'
     else:
         assert pairs == 0, (variant, pairs)
@@ -90,7 +90,7 @@ for variant in ('eligible_sat', 'eligible_open', 'alias', 'crossline'):
         control_clocks = control[starts[-1]]['cyc'] - control[starts[100]]['cyc']
         if quad and variant == 'eligible_sat':
             assert clocks < control_clocks, (variant, 'quadword buffer gave no gain', clocks, control_clocks)
-        elif variant == 'eligible_open' and not quad:
+        elif variant in ('eligible_open', 'crossline_bank') and not quad:
             assert clocks < control_clocks, (variant, 'no pair throughput gain', clocks, control_clocks)
         else:
             assert clocks <= control_clocks, (variant, 'fallback regression', clocks, control_clocks)
