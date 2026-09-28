@@ -22,6 +22,17 @@ cycles per loop in `results.json`. It checks loop and exit completion. With a
 control binary, it also compares the full architectural traces for every case.
 This A/B check is **not** QEMU differential verification or a gameplay IPC result.
 
+The matched frontend ladder on the banked code-buffer/stream L1 is especially
+diagnostic. With the same fast-ADD and system-fastpath base flags, raw decode
+takes **2 cycles per four-instruction** line-straddling loop. Adding only
+`VEN_UOPCACHE`/`VEN_IC_BRAM` makes it **23**, while the aligned loop remains
+2. Adding `VEN_UOP_CROSSLINE`/`VEN_UOP_EXEC_REPAIR` brings the straddle to
+**3**; adding `VEN_UOP_CROSSPAIR` brings it to **2**. Each step's 22-case
+candidate/control architectural traces match. The first pair has no memory
+chain flags, because that mechanism requires the uop cache. These are fixed
+synthetic loops, not gameplay IPC, and the cross-line options remain
+default-off pending FPGA/resource and broader fault/SMC qualification.
+
 For a full-core microbenchmark binary on a 32-core host, the separately named
 `ipc_parallel32` scope permits at most 32 C++ compiler jobs with 3,000-statement
 generated-C++ splitting and a fixed 16 GiB cgroup limit. The ordinary build
