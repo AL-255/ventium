@@ -266,7 +266,14 @@ module tb_l1d_pair_hit;
     @(negedge clk); c_req=1; c_addr=32'h1000;
     pair_req_valid=2'b10; pair_paddr[1]=32'h1020;
     expect_pair(2'b00);
+`ifdef VEN_L1D_TWO_WINDOW_REUSE
+    // The previous complete U line may be served by the shadow on this edge;
+    // that is not a bank capture and must not fabricate a V owner.
+    if (!pair_bank_conflict && !dut.shadow_reuse)
+      $fatal(1,"same-bank V rejection has no U owner");
+`else
     if (!pair_bank_conflict) $fatal(1,"legacy U/V bank conflict not reported");
+`endif
     @(posedge clk); @(negedge clk); pair_req_valid=0;
     if (!c_ack || c_rdata!==word_at(32'h1000) || pair_rsp_valid!=0)
       $fatal(1,"same-bank V rejection disturbed U");
@@ -307,6 +314,28 @@ module tb_l1d_pair_hit;
     if (!c_ack || c_rdata!==word_at(32'h1000) || pair_rsp_valid!=0)
       $fatal(1,"same-bank prime disturbed U result");
     @(posedge clk); @(negedge clk); c_req=0;
+`ifdef VEN_L1D_TWO_WINDOW_REUSE
+    // A same-line prime must register its new owner without recapturing A
+    // and evicting the independent hot B line from the shadow.
+    legacy_write(32'h5000, 32'h5a5aa5a5);
+    legacy_read(32'h1020);
+    legacy_read(32'h1000);
+    @(negedge clk); c_next_req=1; c_next_commit=1;
+    c_next_addr=32'h1004;
+    #1;
+    if (!c_next_ready || !dut.mc_prime_window_reuse || dut.do_rd_cap)
+      $fatal(1,"same-line prime reread the SRAM and lost the shadow");
+    @(posedge clk); @(negedge clk);
+    c_next_req=0; c_next_commit=0; c_req=1; c_addr=32'h1004;
+    #1;
+    if (!c_ack || c_rdata!==word_at(32'h1004) || !dut.shadow_valid_q)
+      $fatal(1,"same-line prime lost its registered owner or shadow");
+    @(posedge clk); @(negedge clk); c_addr=32'h1020;
+    #1;
+    if (!c_ack || !dut.shadow_reuse || c_rdata!==word_at(32'h1020))
+      $fatal(1,"second resident line missed the preserved shadow");
+    @(posedge clk); @(negedge clk); c_req=0;
+`endif
 
     // A missing U tag or a simultaneous snoop cannot manufacture a V
     // response from an otherwise resident younger address.

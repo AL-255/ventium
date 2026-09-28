@@ -57,6 +57,11 @@ module tb_l1d_window_reuse;
     repeat(3) @(negedge clk);
     rst_n=1;
     warm();
+`ifdef VEN_L1D_TWO_WINDOW_REUSE
+    // Both lines must be resident before the one-cycle capture experiment.
+    read_at('h1020);
+    read_at('h1000);
+`endif
     // Repeated same-address and unaligned reads, no gaps between requests.
     for(int i=0;i<128;i++) begin
       @(negedge clk); c_req=1; c_addr=32'h1000+32'(i%29);
@@ -64,6 +69,59 @@ module tb_l1d_window_reuse;
       if(!c_ack || !dut.window_reuse || m_req) $fatal(1,"resident reuse bubble");
     end
     @(negedge clk); c_req=0;
+`ifdef VEN_L1D_TWO_WINDOW_REUSE
+    // B displaces A from the primary read window, not from the cache. Both
+    // resident lines must then serve on their own request edges without a
+    // second array capture. A third line may replace only the older shadow.
+    read_at('h1020);
+    @(negedge clk); c_req=1; c_addr='h1004;
+    #1;
+    if(!c_ack || !dut.shadow_reuse || dut.do_rd_cap || m_req)
+      $fatal(1,"prior resident line was not reused");
+    @(posedge clk);
+    @(negedge clk); c_addr='h1024;
+    #1;
+    if(!c_ack || !dut.window_reuse || dut.do_rd_cap || m_req)
+      $fatal(1,"newer resident line lost its window");
+    @(negedge clk); c_req=0;
+    read_at('h1040);
+    @(negedge clk); c_req=1; c_addr='h1004;
+    #1;
+    if(c_ack || dut.shadow_reuse)
+      $fatal(1,"shadow became a third cache entry");
+    @(negedge clk); c_req=0;
+    read_at('h1000);
+    read_at('h1020);
+    @(negedge clk); flush_all=1; c_req=1; c_addr='h1000;
+    #1;
+    if(c_ack) $fatal(1,"flush served stale shadow");
+    @(negedge clk); flush_all=0; c_req=0;
+    if(dut.shadow_valid_q) $fatal(1,"flush retained shadow");
+    warm();
+`ifdef VEN_L1D_WINDOW_KEEP_STORE
+    // KEEP_STORE checks only the primary address. A write to the older
+    // shadow line must clear that shadow even though the primary survives.
+    read_at('h1020);
+    read_at('h1000);
+    @(negedge clk); c_req=1; c_we=1; c_addr='h5000; c_wdata='h65748392;
+    do @(posedge clk); while(!c_ack);
+    @(negedge clk); c_req=0; c_we=0;
+    read_at('h1020);
+    read_at('h1000);
+    if(!dut.shadow_valid_q) $fatal(1,"shadow not established before store");
+    if(dut.rd_addr_q[31:5] != 32'h1020 >> 5 ||
+       dut.shadow_line_addr_q != 32'h1000 >> 5)
+      $fatal(1,"store witness lost primary/shadow ownership");
+    @(negedge clk); c_req=1; c_we=1; c_addr='h1004; c_wdata='h76543210;
+    do @(posedge clk); while(!c_ack);
+    @(negedge clk); c_req=0; c_we=0;
+    if(dut.shadow_valid_q || !dut.window_valid_q)
+      $fatal(1,"store to shadow line retained stale shadow or lost primary shadow=%b primary=%b primary_addr=%08x shadow_addr=%08x",
+             dut.shadow_valid_q,dut.window_valid_q,dut.rd_addr_q,
+             {dut.shadow_line_addr_q,5'd0});
+    read_at('h1004);
+`endif
+`endif
     read_at('h101f); // crossing must use the original two-line machinery
     read_at('h2000); // unrelated line must never use the previous window
     warm();

@@ -589,17 +589,22 @@ module ven_l1d #(
   logic            do_rd_cap;
   logic            stream_path;
   logic            window_reuse;
+  logic [LW-1:0]   shadow_line_q;
+  logic            mc_prime_window_reuse;
 `ifdef VEN_FP_LOAD64
   // A fill-forward capture may contain only the requested dword; a later
   // completed fill does not retroactively refresh that saved window.  Record
   // full-line provenance on its capture edge instead of guessing from hit now.
   logic            rd_full_line_q;
-  assign c_rdata_hi = rd_window_q[{1'b0,c_addr[4:0],3'b000} + 9'd32 +: 32];
+  assign c_rdata_hi = shadow_reuse ?
+      shadow_line_q[{1'b0,c_addr[4:0],3'b000} + 9'd32 +: 32] :
+      rd_window_q[{1'b0,c_addr[4:0],3'b000} + 9'd32 +: 32];
   assign c_rdata_hi_valid = (L1_LINE == 32) && rst_n && c_req && !c_we &&
       c_ack && (c_wstrb == 4'hf) && cacheable && !golden &&
       !flush_all && !snoop_inv_valid && !stream_path && !early_armed &&
-      (st == L1_IDLE) && hit && rd_full_line_q &&
-      (rd_match || window_reuse) && (c_addr[31:5] == rd_addr_q[31:5]) &&
+      (st == L1_IDLE) && hit &&
+      ((rd_full_line_q && (rd_match || window_reuse) &&
+        (c_addr[31:5] == rd_addr_q[31:5])) || shadow_reuse) &&
       (c_addr[4:0] <= 5'd24)
 `ifdef VEN_PIPE_MEM_CHAIN
       && !mc_lookup_next
@@ -614,6 +619,37 @@ module ven_l1d #(
   // Require a current hit: this is not an extra cache entry. Never serve MMIO,
   // a crossing, or data captured from an incomplete fill through this path.
   logic window_valid_q;
+`ifdef VEN_L1D_TWO_WINDOW_REUSE
+`ifdef VEN_L1D_COMB_ACK
+  initial $fatal(1, "two-window reuse requires registered L1 responses");
+`endif
+  // Keep only the previously captured complete line. This is a read buffer,
+  // never a cache entry: a current tag hit and the normal window invalidation
+  // rules are still required before its bytes can be observed.
+  logic [31:5] shadow_line_addr_q;
+  logic shadow_valid_q, shadow_reuse;
+`ifdef VEN_PIPE_MEM_CHAIN
+  // Re-arm a checked prime from the already registered primary line without
+  // overwriting it (and hence without throwing away the second hot line).
+  // The new owner is still registered; only the redundant SRAM read vanishes.
+  assign mc_prime_window_reuse = mc_lookup_prime && c_next_ready &&
+      window_valid_q && (c_next_addr[31:5] == rd_addr_q[31:5]);
+`else
+  assign mc_prime_window_reuse = 1'b0;
+`endif
+  assign shadow_reuse = shadow_valid_q && !mc_lookup_next && !stream_path &&
+      !early_armed && (st == L1_IDLE) && c_req && !c_we && cacheable &&
+      !golden && !flush_all && !snoop_inv_valid && hit &&
+      (c_addr[31:5] == shadow_line_addr_q) && (c_addr[4:0] <= 5'd28)
+`ifdef VEN_L1D_CODE_BUFFER
+      && !code_access
+`endif
+      ;
+`else
+  assign mc_prime_window_reuse = 1'b0;
+  assign shadow_line_q = '0;
+  wire shadow_reuse = 1'b0;
+`endif
   assign window_reuse = window_valid_q && !mc_lookup_next && !stream_path && !early_armed &&
 `ifdef VEN_L1D_CODE_BUFFER
       !code_access &&
@@ -622,7 +658,13 @@ module ven_l1d #(
       !flush_all && !snoop_inv_valid && hit &&
       (c_addr[31:5] == rd_addr_q[31:5]) && (c_addr[4:0] <= 5'd28);
 `else
+`ifdef VEN_L1D_TWO_WINDOW_REUSE
+  initial $fatal(1, "two-window reuse requires VEN_L1D_WINDOW_REUSE");
+`endif
   assign window_reuse = 1'b0;
+  assign mc_prime_window_reuse = 1'b0;
+  assign shadow_line_q = '0;
+  wire shadow_reuse = 1'b0;
 `endif
 `ifdef VEN_L1D_HIT_STREAM
   logic            rd_stream_q;
@@ -706,12 +748,13 @@ module ven_l1d #(
   // through the critical-response sampling edge is indistinguishable from a
   // new access and must never yield a second acknowledgement.
   assign do_rd_cap =
-                     mc_lookup_next ? mc_capture_next :
+                     mc_lookup_next ? (mc_capture_next && !mc_prime_window_reuse) :
 `ifdef VEN_L1D_HIT_STREAM
                      stream_path ? (c_req && c_req_ready) :
 `endif
                      c_req && !c_we && (rd_hit || fill_forward_hit) &&
-                     ((st==L1_IDLE) || fill_independent_hit || fill_forward_hit) && !rd_match && !window_reuse
+                     ((st==L1_IDLE) || fill_independent_hit || fill_forward_hit) &&
+                     !rd_match && !window_reuse && !shadow_reuse
                      && !snoop_inv_valid
                      && !(BYPASS_RD_EN && !cacheable);   // H-18: CD/KEN# read bypass
 
@@ -1111,6 +1154,7 @@ module ven_l1d #(
     // 0x41C forever, so daemon-injected keys were invisible. The coherence problem it was
     // built for was actually the LGDT base bug. Clean registered serve restored.)
     c_rdata = (st==L1_BYP) ? bp_line_x[{4'd0,fbase[1:0],3'b000} +: 32]   // saved request offset
+                           : shadow_reuse ? shadow_line_q[{1'b0,c_addr[4:0],3'b000} +: 32]
                            : window_reuse ? rd_window_q[{1'b0,c_addr[4:0],3'b000} +: 32]
                            : early_armed ? early_rdata_q
                                          : rd_window_q[{1'b0,rd_addr_q[4:0],3'b000} +: 32];
@@ -1125,7 +1169,8 @@ module ven_l1d #(
       // tag/valid) and the core's sequential logic samples c_ack=1 with the stale
       // rd_window_q at that very edge, while the array clears valid. Gate the
       // RESPONSE itself, not just the capture.
-      else                 c_ack = window_reuse || (early_match && !flush_all && !snoop_inv_valid)
+      else                 c_ack = window_reuse || shadow_reuse ||
+                                 (early_match && !flush_all && !snoop_inv_valid)
                                  || (rd_match && !flush_all && !snoop_inv_valid
                                     && !(BYPASS_RD_EN && !cacheable))
                                  || ((st==L1_BYP) && byp_match); // owned non-cacheable response
@@ -1168,6 +1213,11 @@ module ven_l1d #(
 `endif
 `ifdef VEN_L1D_WINDOW_REUSE
       window_valid_q <= 1'b0;
+`ifdef VEN_L1D_TWO_WINDOW_REUSE
+      shadow_line_q <= '0;
+      shadow_line_addr_q <= '0;
+      shadow_valid_q <= 1'b0;
+`endif
 `endif
 `ifdef VEN_L1D_HIT_STREAM
       rd_stream_q <= 1'b0;
@@ -1189,8 +1239,12 @@ module ven_l1d #(
 `ifdef VEN_FP_LOAD64
       if (do_rd_cap)
         rd_full_line_q <= (st == L1_IDLE) && hit && !fill_forward_hit && !stream_path &&
+`ifdef VEN_P54_DUAL_HIT
                           !((pair_legacy_capture || pair_prime_capture) &&
                             pair_req_ready[1]);
+`else
+                          1'b1;
+`endif
       if (flush_all || snoop_inv_valid || golden || stream_path ||
           (c_req && (c_we || !cacheable)))
         rd_full_line_q <= 1'b0;
@@ -1198,8 +1252,24 @@ module ven_l1d #(
 `ifdef VEN_L1D_WINDOW_REUSE
       if (do_rd_cap)
         window_valid_q <= (st == L1_IDLE) && hit && !stream_path &&
+`ifdef VEN_P54_DUAL_HIT
                           !((pair_legacy_capture || pair_prime_capture) &&
                             pair_req_ready[1]);
+`else
+                          1'b1;
+`endif
+`ifdef VEN_L1D_TWO_WINDOW_REUSE
+      if (do_rd_cap && window_valid_q) begin
+        shadow_line_q <= rd_window_q[LW-1:0];
+        shadow_line_addr_q <= rd_addr_q[31:5];
+        shadow_valid_q <= 1'b1;
+      end
+      // WINDOW_KEEP_STORE only compares a store with the primary owner.
+      // Clearing the shadow on *every* store avoids retaining stale bytes
+      // when a non-overlapping-primary store actually writes the shadow line.
+      if (c_req && c_we)
+        shadow_valid_q <= 1'b0;
+`endif
       // All window writers participate; invalidation wins over capture.
       if (flush_all || snoop_inv_valid || golden || stream_path ||
 `ifdef VEN_L1D_WINDOW_KEEP_STORE
@@ -1214,9 +1284,15 @@ module ven_l1d #(
 `else
           (st != L1_IDLE) || (c_req && (c_we || !cacheable || !rd_hit)))
 `endif
-        window_valid_q <= 1'b0;
+        begin
+          window_valid_q <= 1'b0;
+`ifdef VEN_L1D_TWO_WINDOW_REUSE
+          shadow_valid_q <= 1'b0;
 `endif
-      rd_armed <= (do_rd_cap && !flush_all)
+        end
+`endif
+      rd_armed <= (do_rd_cap && !flush_all) ||
+                  (mc_prime_window_reuse && mc_capture_next)
 `ifdef VEN_PIPE_MEM_CHAIN
                   || (mc_lookup_old && !c_next_commit &&
                       !flush_all && !snoop_inv_valid && !golden)
@@ -1240,6 +1316,10 @@ module ven_l1d #(
         rd_code_q   <= code_access;
 `endif
       end
+`ifdef VEN_PIPE_MEM_CHAIN
+      if (mc_prime_window_reuse && mc_capture_next)
+        rd_addr_q <= c_next_addr;
+`endif
       unique case (st)
         L1_IDLE: begin
           // REVIEW1_Aug2 H-07: this branch was `if (1'b0)` under VEN_L1_HONOR_CD, on the

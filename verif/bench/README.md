@@ -133,6 +133,26 @@ branch-direction reversal cases 26/27 match pinned QEMU full state and retain
 their prior cycle counts. This still needs FPGA routed area/frequency and
 gameplay verification before it can be promoted to a deployed profile.
 
+`VEN_L1D_TWO_WINDOW_REUSE` is a separate, default-off registered-data
+experiment. It retains the *previous* complete 32-byte read line alongside
+the existing primary window; every reuse still requires a live L1 tag hit.
+Stores, fills, snoops, flushes, non-cacheable accesses and reset invalidate
+the shadow, so it adds no cache capacity or async SRAM read port. A checked
+prime of the already-current primary line now re-arms the response owner
+without rereading the bank or evicting the other hot line. This costs one
+256-bit line register plus tag/control logic; FPGA area and timing are not yet
+measured. Bounded checks are
+`bash verif/l1/run-l1d-window-reuse-gate.sh --two-window`,
+`bash verif/l1/run-l1d-window-reuse-gate.sh --two-window-keep-store`,
+`bash verif/l1/run-l1d-load64-gate.sh --two-window` and
+`bash verif/bench/run-p54-l1d-pair-hit.sh --two-window`.
+Against the prior dual-load-prime core, same-bank resident two-line loads
+improve from **4→3** cycles per four-instruction loop (directed IPC
+**1.00→1.33**); distinct-bank loads remain **2→2**. All 30 candidate/control
+directed architectural traces match, and cases 1/2/28/29 plus terminal
+branch-reversal cases 26/27 match pinned QEMU full state. These are not
+gameplay or routed-FPGA results.
+
 `VEN_PIPE_BRANCH_LOAD_PRIME` is an opt-in extension of the registered
 `VEN_PIPE_REG_LOAD_PRIME`/`VEN_PIPE_MEM_CHAIN` path. It may probe a
 predicted-taken target or predicted-not-taken fall-through, but

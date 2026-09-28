@@ -76,6 +76,19 @@ module tb_l1d_load64;
     read_at('h1000,0); // critical-word response is NOT a complete line
     drain(); read_at('h1000,1);
     read_at('h1020,0); drain(); read_at('h1020,1);
+`ifdef VEN_L1D_TWO_WINDOW_REUSE
+    @(negedge clk); c_req=1; c_we=1; c_addr='h5000; c_wdata='h12345678;
+    do @(posedge clk); while(!c_ack);
+    @(negedge clk); c_req=0; c_we=0;
+    read_at('h1000,1);
+    read_at('h1020,1);
+    @(negedge clk); c_req=1; c_addr='h1004;
+    #1;
+    if(!dut.shadow_reuse || !c_ack || !c_rdata_hi_valid ||
+       c_rdata_hi!==word_at('h1008))
+      $fatal(1,"shadow lost complete eight-byte response");
+    @(posedge clk); @(negedge clk); c_req=0;
+`endif
     // All within-line offsets, including exactly-eight-bytes-left and each
     // crossing shape. Retargeting may reuse only a complete captured line.
     for(int offset=0;offset<32;offset++) read_at(32'h1000+32'(offset),offset<=24 ? 1 : 0);
@@ -84,7 +97,7 @@ module tb_l1d_load64;
     // New address must never inherit the old response's high bytes.
     @(negedge clk); c_req=1; c_addr='h1000;
     @(posedge clk); if(!c_rdata_hi_valid) $fatal(1,"warm source not wide");
-    @(negedge clk); c_addr='h2000;
+    @(negedge clk); c_addr='h4000;
     #1; if(c_rdata_hi_valid) $fatal(1,"retarget stole old window");
     @(negedge clk); c_req=0;
     // Invalidation on a response edge cancels both halves, then backing wins.
