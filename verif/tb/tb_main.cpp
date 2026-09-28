@@ -809,10 +809,10 @@ int main(int argc, char** argv) {
     // Inert in modes 0/1 (the master never issues -> the slave stays IDLE).
     int      axr = 0;                  // read FSM: 0=IDLE, 1=BEAT
     int      axw = 0;                  // write FSM: 0=IDLE, 1=DATA, 2=RESP
-    uint32_t axr_addr = 0, axw_addr = 0, axr_cnt = 0;
+    uint32_t axr_addr = 0, axw_addr = 0, axr_cnt = 0, axw_left = 0;
     uint32_t axr_size = 2;               // R2-H01: latched ARSIZE (0=1B,1=2B,2=4B)
     bool     axr_wrap = false;           // AXI WRAP8 line fill (critical word first)
-    struct { bool ar,r,aw,w,b; uint32_t araddr,arlen,arburst,awaddr,wdata,wstrb,arsize; } axhs{};
+    struct { bool ar,r,aw,w,b,wlast; uint32_t araddr,arlen,arburst,awaddr,awlen,wdata,wstrb,arsize; } axhs{};
     // Passive inner-AXI traffic monitor. The existing MemModel counters stay
     // zero in --l1-axi mode, and dbg_rd_valid is intentionally used by board
     // forensics rather than the raw R channel. VEN_AXI_PROFILE=1 records
@@ -862,8 +862,8 @@ int main(int argc, char** argv) {
     const bool axi_store_trace = (axi_store_trace_arg != nullptr);
     const uint32_t axi_store_trace_line = axi_store_trace
         ? ((uint32_t)std::strtoul(axi_store_trace_arg, nullptr, 0) & ~0x1fu) : 0;
-    struct AxiTraceAw { uint32_t addr; uint64_t cycle; };
-    struct AxiTraceW { uint32_t data, strb; uint64_t cycle; };
+    struct AxiTraceAw { uint32_t addr, base; uint64_t cycle; bool last; };
+    struct AxiTraceW { uint32_t data, strb; uint64_t cycle; bool last; };
     struct AxiTraceTxn {
         uint32_t addr, data, strb;
         uint64_t aw_cycle, w_cycle;
@@ -974,17 +974,24 @@ int main(int argc, char** argv) {
             ++axi_read_trace_count;
         }
         axhs.awaddr = (uint32_t)top->m_axi_awaddr - AXI_REMAP;
+        axhs.awlen  = (uint32_t)top->m_axi_awlen;
         axhs.wdata  = (uint32_t)top->m_axi_wdata;  axhs.wstrb = (uint32_t)top->m_axi_wstrb;
+        axhs.wlast  = (bool)top->m_axi_wlast;
         if (axi_store_trace && top->rst_n) {
             const bool aw_hs = (bool)top->m_axi_awvalid && (bool)top->m_axi_awready;
             const bool w_hs  = (bool)top->m_axi_wvalid  && (bool)top->m_axi_wready;
             const bool b_hs  = (bool)top->m_axi_bvalid  && (bool)top->m_axi_bready;
             const uint64_t cycle = half >> 1;
-            if (aw_hs)
-                axi_trace_awq.push_back({(uint32_t)top->m_axi_awaddr - AXI_REMAP, cycle});
+            if (aw_hs) {
+                const uint32_t base = (uint32_t)top->m_axi_awaddr - AXI_REMAP;
+                const uint32_t beats = (uint32_t)top->m_axi_awlen + 1u;
+                for (uint32_t beat = 0; beat < beats; ++beat)
+                    axi_trace_awq.push_back({base + 4u*beat, base, cycle, beat + 1u == beats});
+            }
             if (w_hs)
                 axi_trace_wq.push_back({(uint32_t)top->m_axi_wdata,
-                                        (uint32_t)top->m_axi_wstrb, cycle});
+                                        (uint32_t)top->m_axi_wstrb, cycle,
+                                        (bool)top->m_axi_wlast});
 
             // AXI4 preserves write-data and response order for this master's
             // single ID.  Pair AW/W in arrival order, retaining *all* writes in
@@ -994,12 +1001,16 @@ int main(int argc, char** argv) {
                 const AxiTraceAw aw = axi_trace_awq.front(); axi_trace_awq.pop_front();
                 const AxiTraceW  w  = axi_trace_wq.front();  axi_trace_wq.pop_front();
                 const bool selected = ((aw.addr & ~0x1fu) == axi_store_trace_line);
-                axi_trace_bq.push_back({aw.addr, w.data, w.strb, aw.cycle, w.cycle, selected});
+                if (aw.last != w.last)
+                    std::fprintf(stderr, "tb: [axi-wtrace] WLAST mismatch addr=%08x AWlast=%u Wlast=%u\n",
+                                 aw.addr, (unsigned)aw.last, (unsigned)w.last);
+                if (w.last)
+                    axi_trace_bq.push_back({aw.base, w.data, w.strb, aw.cycle, w.cycle, selected});
                 if (selected) {
                     std::fprintf(stderr,
-                        "tb: [axi-wtrace] AW@%llu addr=%08x -> W@%llu data=%08x strb=%x\n",
+                        "tb: [axi-wtrace] AW@%llu addr=%08x -> W@%llu data=%08x strb=%x last=%u\n",
                         (unsigned long long)aw.cycle, aw.addr,
-                        (unsigned long long)w.cycle, w.data, w.strb);
+                        (unsigned long long)w.cycle, w.data, w.strb, (unsigned)w.last);
                 }
             }
             if (b_hs) {
@@ -1081,7 +1092,7 @@ int main(int argc, char** argv) {
         }
     };
     auto axi_advance = [&]() {
-        if (!top->rst_n) { axr=0; axw=0; axr_lat=0; axw_lat=0; axr_wrap=false; wpost_q.clear(); return; }
+        if (!top->rst_n) { axr=0; axw=0; axr_lat=0; axw_lat=0; axw_left=0; axr_wrap=false; wpost_q.clear(); return; }
         // drain posted writes whose visibility delay has elapsed (apply to backing).
         if (!wpost_q.empty()) {
             size_t k = 0;
@@ -1122,8 +1133,13 @@ int main(int argc, char** argv) {
                               axr_lat = AXI_RLAT + g;
                           }
                       } }
-        if (axw==0) { if (axhs.aw) { axw_addr=axhs.awaddr; axw=1; } }
+        if (axw==0) { if (axhs.aw) { axw_addr=axhs.awaddr; axw_left=axhs.awlen; axw=1; } }
         else if (axw==1) { if (axhs.w) {
+            if (axhs.wlast != (axw_left == 0)) {
+                std::fprintf(stderr, "tb: AXI WLAST mismatch addr=%08x left=%u last=%u\n",
+                             axw_addr, axw_left, (unsigned)axhs.wlast);
+                std::abort();
+            }
             // FAITHFUL DDR/AXI write: a 32-bit-bus write places byte lane b at the
             // WORD-ALIGNED address + b, selected by WSTRB. (A real DDR controller
             // ignores awaddr[1:0] for lane placement — the address's low bits must be
@@ -1153,7 +1169,9 @@ int main(int argc, char** argv) {
                              aligned, (unsigned)axhs.wstrb, (uint32_t)axhs.wdata, old, nw,
                              (uint32_t)ventium::g_last_arch.pc); }
 #endif
-            axw=2; axw_lat=AXI_WLAT; } }
+            if (axw_left != 0) { axw_addr += 4; --axw_left; }
+            else { axw=2; axw_lat=AXI_WLAT; }
+        } }
         else { if (axw_lat>0) axw_lat--; else if (axhs.b) axw=0; }
     };
 #endif

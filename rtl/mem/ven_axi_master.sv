@@ -424,6 +424,11 @@ module ven_axi_master #(
   logic [31:0]       wq_addr [P5_WBUF_DEPTH];
   logic [31:0]       wq_wdata[P5_WBUF_DEPTH];
   logic [3:0]        wq_wstrb[P5_WBUF_DEPTH];
+`ifdef VEN_P54_WBUF_QUAD_COMBINE
+  logic [P5_WBUF_DEPTH-1:0] wq_fused;
+  logic [31:0]       wq_hi_data[P5_WBUF_DEPTH];
+  logic              wr_fused_q, wr_quad_enq, pair_quad_ok;
+`endif
   logic [WBUF_PTRW-1:0] wq_rp, wq_wp;
   logic [WBUF_CNTW-1:0] wq_count;
   logic [1:0]        wq_bcount[P5_WBUF_DEPTH]; // issued AXI write responses per P5 slot
@@ -439,7 +444,7 @@ module ven_axi_master #(
   logic                 wr_active;
   logic [B_CNTW-1:0]    b_outstanding;
   logic                 aw_hs, w_hs, b_hs, b_retire_hs;
-  logic                 wr_beat_sent, wr_store_final, wr_progress;
+  logic                 wr_beat_sent, wr_resp_issue, wr_store_final, wr_progress;
 `ifdef VEN_AXI_READ_ON_FINAL_B
   logic                 rd_last_b_now;
 `endif
@@ -515,7 +520,7 @@ module ven_axi_master #(
       automatic logic [1:0] head_b_after;
       automatic logic       head_final_after;
       head_b_after = wq_bcount[wq_rp];
-      if (wr_beat_sent && (wr_active_slot == wq_rp)) head_b_after = head_b_after + 2'd1;
+      if (wr_resp_issue && (wr_active_slot == wq_rp)) head_b_after = head_b_after + 2'd1;
       if (b_retire_hs && b_owner_valid && (b_owner_slot == wq_rp))
         head_b_after = head_b_after - 2'd1;
       head_final_after = wq_issued[wq_rp] ||
@@ -524,6 +529,15 @@ module ven_axi_master #(
     end
   end
 `ifdef VEN_P54_DUAL_STORE_PAIR
+`ifdef VEN_P54_WBUF_QUAD_COMBINE
+  // Only forward adjacent, aligned, full dwords.  In particular, swapping
+  // their physical order in a burst would violate P54 strong write ordering.
+  // The address hint is independent of m_pair_req so ready has no feedback.
+  assign pair_quad_ok = (m_addr[2:0] == 3'd0) &&
+                        (m_pair_addr[31:3] == m_addr[31:3]) &&
+                        (m_pair_addr[2:0] == 3'd4) &&
+                        (m_wstrb == 4'hf) && (m_pair_wstrb == 4'hf);
+`endif
   // Two free slots are required atomically. A same-edge head B may contribute
   // one slot, but a full queue with only one released slot cannot accept a pair.
   assign wr_can_pair = (wq_count == WBUF_CNTW'(0)) ||
@@ -533,16 +547,32 @@ module ven_axi_master #(
   // waiting for a second slot would make the dual-store path slower.
   assign m_pair_ready = !fatal_now &&
                         ((shutdown && m_idle) ||
-                         (!shutdown && (rst == R_IDLE) && wr_can_pair));
+                         (!shutdown && (rst == R_IDLE) &&
+`ifdef VEN_P54_WBUF_QUAD_COMBINE
+                          (wr_can_pair || (pair_quad_ok &&
+                           ((wq_count < WBUF_CNTW'(P5_WBUF_DEPTH)) || wq_head_release)))));
+`else
+                          wr_can_pair));
+`endif
   assign wr_enq      = (rst == R_IDLE) && m_req && m_we && !shutdown &&
                        !alias_bad && !fatal_now &&
-                       (m_pair_req ? wr_can_pair :
+                       (m_pair_req ? (wr_can_pair
+`ifdef VEN_P54_WBUF_QUAD_COMBINE
+                                     || (pair_quad_ok &&
+                                        ((wq_count < WBUF_CNTW'(P5_WBUF_DEPTH)) || wq_head_release))
+`endif
+                                     ) :
                         ((wq_count < WBUF_CNTW'(P5_WBUF_DEPTH)) || wq_head_release));
+`ifdef VEN_P54_WBUF_QUAD_COMBINE
+  assign wr_quad_enq = wr_enq && m_pair_req && pair_quad_ok;
+  assign wr_pair_enq = wr_enq && m_pair_req && !pair_quad_ok;
+`else
   assign wr_pair_enq = wr_enq && m_pair_req;
+`endif
   // Quiesce acknowledges requests locally without issuing AXI; do so for
   // both pair members together, matching the established single-store rule.
   assign m_pair_ack  = !fatal_now &&
-                       (wr_pair_enq ||
+                       ((wr_enq && m_pair_req) ||
                         (shutdown && m_idle && m_req && m_we && m_pair_req));
 `else
   assign wr_enq      = (rst == R_IDLE) && m_req && m_we && !shutdown && !alias_bad && !fatal_now &&
@@ -590,7 +620,11 @@ module ven_axi_master #(
     // write address channel — one aligned 4-byte beat from the active P5 buffer.
     m_axi_awid    = AXI_ID;
     m_axi_awaddr  = awaddr_q;
+`ifdef VEN_P54_WBUF_QUAD_COMBINE
+    m_axi_awlen   = wr_fused_q ? 8'd1 : 8'd0;
+`else
     m_axi_awlen   = 8'd0;
+`endif
     m_axi_awsize  = 3'b010;
     m_axi_awburst = 2'b01;
     m_axi_awlock  = 1'b0;
@@ -601,7 +635,11 @@ module ven_axi_master #(
     // write data channel
     m_axi_wdata   = wdata_q;
     m_axi_wstrb   = wstrb_q;
+`ifdef VEN_P54_WBUF_QUAD_COMBINE
+    m_axi_wlast   = !wr_fused_q || wbeat;
+`else
     m_axi_wlast   = 1'b1;                 // single-beat write
+`endif
     m_axi_wvalid  = wr_active && !w_done;
     // write response channel.  Normal BREADY is occupancy-only.  After an
     // ID/ownership fault it remains asserted to drain the response channel, but
@@ -675,6 +713,11 @@ module ven_axi_master #(
   assign rd_deliver  = r_hs && rd_primed && !fatal_now;
   assign b_retire_hs = b_hs && !bid_err && !bproto_bad_now;
   assign wr_beat_sent = wr_active && (aw_done || aw_hs) && (w_done || w_hs);
+`ifdef VEN_P54_WBUF_QUAD_COMBINE
+  assign wr_resp_issue = wr_beat_sent && (!wr_fused_q || wbeat);
+`else
+  assign wr_resp_issue = wr_beat_sent;
+`endif
   assign wr_store_final = wr_beat_sent && (wbeat || !xword_q);
   assign wr_progress = wr_enq || wr_dispatch || aw_hs || w_hs || b_hs;
 
@@ -891,6 +934,9 @@ module ven_axi_master #(
       for (int i = 0; i < P5_WBUF_DEPTH; i++) begin
         wq_addr[i] <= '0; wq_wdata[i] <= '0; wq_wstrb[i] <= '0;
         wq_bcount[i] <= 2'd0;
+`ifdef VEN_P54_WBUF_QUAD_COMBINE
+        wq_fused[i] <= 1'b0; wq_hi_data[i] <= '0;
+`endif
       end
       wq_issued <= '0;
       wr_active <= 1'b0;
@@ -898,6 +944,9 @@ module ven_axi_master #(
       awaddr_q <= '0; wdata_q <= 32'd0; wstrb_q <= 4'd0;
       awaddr2_q <= '0; wdata2_q <= 32'd0; wstrb2_q <= 4'd0;
       xword_q <= 1'b0; wbeat <= 1'b0; aw_done <= 1'b0; w_done <= 1'b0;
+`ifdef VEN_P54_WBUF_QUAD_COMBINE
+      wr_fused_q <= 1'b0;
+`endif
       bresp_err <= 1'b0; bid_err <= 1'b0; w_wd <= 16'd0; wd_err_w <= 1'b0;
     end else begin
       // Only B-retirement releases a P54C slot.  Dispatch is deliberately NOT a
@@ -917,6 +966,10 @@ module ven_axi_master #(
         wq_addr[wq_wp]  <= m_addr;
         wq_wdata[wq_wp] <= m_wdata;
         wq_wstrb[wq_wp] <= m_wstrb;
+`ifdef VEN_P54_WBUF_QUAD_COMBINE
+        wq_fused[wq_wp] <= wr_quad_enq;
+        wq_hi_data[wq_wp] <= m_pair_wdata;
+`endif
         wq_bcount[wq_wp] <= 2'd0;
         wq_issued[wq_wp] <= 1'b0;
 `ifdef VEN_P54_DUAL_STORE_PAIR
@@ -946,6 +999,14 @@ module ven_axi_master #(
         wdata2_q  <= q_dsh[63:32];
         wstrb2_q  <= q_ssh[7:4];
         xword_q   <= (q_ssh[7:4] != 4'd0);
+`ifdef VEN_P54_WBUF_QUAD_COMBINE
+        wr_fused_q <= wq_fused[wr_dispatch_slot];
+        if (wq_fused[wr_dispatch_slot]) begin
+          wdata2_q <= wq_hi_data[wr_dispatch_slot];
+          wstrb2_q <= 4'hf;
+          xword_q <= 1'b1;
+        end
+`endif
         wbeat     <= 1'b0;
         aw_done   <= 1'b0;
         w_done    <= 1'b0;
@@ -963,11 +1024,19 @@ module ven_axi_master #(
           if (!wbeat && xword_q) begin
             // Second word of the same architectural store.  It cannot be interleaved
             // with another store, preserving byte order across the word boundary.
+`ifdef VEN_P54_WBUF_QUAD_COMBINE
+            if (!wr_fused_q) awaddr_q <= awaddr2_q;
+`else
             awaddr_q <= awaddr2_q;
+`endif
             wdata_q  <= wdata2_q;
             wstrb_q  <= wstrb2_q;
             wbeat    <= 1'b1;
+`ifdef VEN_P54_WBUF_QUAD_COMBINE
+            aw_done  <= wr_fused_q;
+`else
             aw_done  <= 1'b0;
+`endif
             w_done   <= 1'b0;
           end else begin
             wr_active <= 1'b0;
@@ -994,7 +1063,7 @@ module ven_axi_master #(
             && !(wr_pair_enq && (~wq_wp == WBUF_PTRW'(i)))
 `endif
             ) begin
-          unique case ({wr_beat_sent && (wr_active_slot == WBUF_PTRW'(i)),
+          unique case ({wr_resp_issue && (wr_active_slot == WBUF_PTRW'(i)),
                        b_retire_hs && b_owner_valid && (b_owner_slot == WBUF_PTRW'(i))})
             2'b10: wq_bcount[i] <= wq_bcount[i] + 2'd1;
             2'b01: wq_bcount[i] <= wq_bcount[i] - 2'd1;
@@ -1029,7 +1098,9 @@ module ven_axi_master #(
       (m_axi_arvalid && !m_axi_arready) |=> (m_axi_arvalid && $stable(m_axi_araddr)
                                              && $stable(m_axi_arlen) && $stable(m_axi_arburst)));
   aw_stable: assert property (@(posedge core_clk) disable iff (!core_rst_n)
-      (m_axi_awvalid && !m_axi_awready) |=> (m_axi_awvalid && $stable(m_axi_awaddr)));
+      (m_axi_awvalid && !m_axi_awready) |=>
+      (m_axi_awvalid && $stable(m_axi_awaddr) && $stable(m_axi_awlen) &&
+       $stable(m_axi_awsize) && $stable(m_axi_awburst)));
   // W payload stable independent of AW (decoupling check).
   w_stable:  assert property (@(posedge core_clk) disable iff (!core_rst_n)
       (m_axi_wvalid && !m_axi_wready) |=> (m_axi_wvalid && $stable(m_axi_wdata)
@@ -1071,6 +1142,16 @@ module ven_axi_master #(
   // the P54C rule that cache-miss reads cannot bypass earlier write buffers.
   no_rw_overlap: assert property (@(posedge core_clk) disable iff (!core_rst_n)
       !(m_axi_arvalid && wr_busy));
+`ifdef VEN_P54_WBUF_QUAD_COMBINE
+  quad_aw_shape: assert property (@(posedge core_clk) disable iff (!core_rst_n)
+      (m_axi_awvalid && wr_fused_q) |->
+      (m_axi_awlen == 8'd1 && m_axi_awsize == 3'd2 &&
+       m_axi_awburst == 2'b01 && m_axi_awaddr[2:0] == 3'd0));
+  quad_w_shape: assert property (@(posedge core_clk) disable iff (!core_rst_n)
+      (m_axi_wvalid && wr_fused_q) |-> (m_axi_wlast == wbeat && m_axi_wstrb == 4'hf));
+  quad_credit: assert property (@(posedge core_clk) disable iff (!core_rst_n)
+      wr_quad_enq |-> ((wq_count < WBUF_CNTW'(P5_WBUF_DEPTH)) || wq_head_release));
+`endif
   // P2b: a store straddling a 32-bit word is now SPLIT into beat A (word) + beat B
   // (word+4). A 4-byte store shifted by at most 3 bytes touches at most 8 lanes, so it
   // can never spill past beat B — guard that the strobe is exhausted by two words.

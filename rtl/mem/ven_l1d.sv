@@ -1060,8 +1060,11 @@ module ven_l1d #(
     m_req=1'b0; m_we=1'b0; m_addr=32'd0; m_wdata=32'd0; m_wstrb=4'd0;
     m_rd_narrow=1'b0; m_rd_size=2'd0;
 `ifdef VEN_P54_DUAL_STORE_PAIR
-    m_pair_req=1'b0; m_pair_addr=32'd0;
-    m_pair_wdata=32'd0; m_pair_wstrb=4'd0;
+    // Credit may depend on whether U/V fit in one physical quadword.  Publish
+    // the V address independently of the request/ready handshake: otherwise
+    // m_pair_ready -> c_pair_ready -> m_pair_req -> address forms a comb loop.
+    m_pair_req=1'b0; m_pair_addr=c_pair_addr;
+    m_pair_wdata=c_pair_wdata; m_pair_wstrb=c_pair_wstrb;
 `endif
     if (st==L1_FILL) begin
       m_req  = 1'b1; m_we = 1'b0;
@@ -1099,9 +1102,6 @@ module ven_l1d #(
       if (c_pair_req) begin
         m_req = c_pair_ready;
         m_pair_req = c_pair_ready;
-        m_pair_addr = c_pair_addr;
-        m_pair_wdata = c_pair_wdata;
-        m_pair_wstrb = c_pair_wstrb;
       end
 `endif
     end

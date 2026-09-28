@@ -12,7 +12,7 @@
 //             only has incrementing bursts, so this bridge emits the high and
 //             low line fragments as two Avalon commands while keeping one AXI R
 //             response stream.
-//   WRITE = one single beat, AWLEN=0, AWSIZE=2, WSTRB verbatim
+//   WRITE = one or two INCR beats, AWLEN=0/1, AWSIZE=2, WSTRB verbatim
 // and issues them serially (one outstanding), with registered VALIDs. So this bridge
 // handles one read OR one write at a time — sufficient and simplest; pipeline later.
 //
@@ -30,7 +30,7 @@ module ven_axi2avalon (
     // Write address
     input  logic [3:0]  s_axi_awid,
     input  logic [39:0] s_axi_awaddr,     // byte address (identity == x86 phys)
-    input  logic [7:0]  s_axi_awlen,      // expect 0 (single)
+    input  logic [7:0]  s_axi_awlen,      // 0=single, 1=fused quadword pair
     input  logic [2:0]  s_axi_awsize,     // expect 2 (4 B)
     input  logic [1:0]  s_axi_awburst,
     input  logic        s_axi_awvalid,
@@ -92,6 +92,7 @@ module ven_axi2avalon (
     logic [3:0]   cmd_left;      // beats still owed by that Avalon command
     logic [3:0]   wrap_low_beats;// low fragment after the first WRAP8 fragment
     logic         wrap_pending;  // issue the low line fragment after this command
+    logic [1:0]   wr_left;       // remaining W beats in current AXI write
 
     // ---- Address-phase acceptance: only when idle, read has priority. -------
     assign s_axi_arready = (state == S_IDLE);
@@ -104,7 +105,8 @@ module ven_axi2avalon (
     assign avm_read       = (state == S_RD_CMD);
     assign avm_write      = (state == S_WR_CMD) && s_axi_wvalid;
 
-    // Write data path (single beat)
+    // Avalon accepts one dword at a time; hold each AXI W until that write
+    // command is accepted, then advance the dword address for burst beat 2.
     assign avm_writedata  = s_axi_wdata;
     assign avm_byteenable = s_axi_wstrb;
     assign s_axi_wready   = (state == S_WR_CMD) && !avm_waitrequest;
@@ -131,6 +133,7 @@ module ven_axi2avalon (
             cmd_left <= '0;
             wrap_low_beats <= '0;
             wrap_pending <= 1'b0;
+            wr_left <= '0;
         end else begin
             unique case (state)
                 // ---------------------------------------------------------------
@@ -157,6 +160,7 @@ module ven_axi2avalon (
                     end else if (s_axi_awvalid) begin        // else write
                         id_q   <= s_axi_awid;
                         addr_q <= s_axi_awaddr[31:2];
+                        wr_left <= {1'b0, s_axi_awlen[0]} + 2'd1;
                         state  <= S_WR_CMD;
                     end
                 end
@@ -187,10 +191,14 @@ module ven_axi2avalon (
                     // while readdatavalid is asserted, a skid buffer is needed.
                 end
                 // ---------------------------------------------------------------
-                // Single-beat write: drive avm_write while W data is valid; advance
-                // when the slave accepts it.
+                // One Avalon write per AXI W beat.  Return ONE B only after
+                // WLAST (not after the first beat of a fused pair).
                 S_WR_CMD: begin
-                    if (s_axi_wvalid && !avm_waitrequest) state <= S_WR_RESP;
+                    if (s_axi_wvalid && !avm_waitrequest) begin
+                        wr_left <= wr_left - 2'd1;
+                        if (wr_left == 2'd1) state <= S_WR_RESP;
+                        else addr_q <= addr_q + 30'd1;
+                    end
                 end
                 S_WR_RESP: begin
                     if (s_axi_bready) state <= S_IDLE;
@@ -201,8 +209,8 @@ module ven_axi2avalon (
     end
 
 `ifdef VEN_AXI2AVL_ASSERT
-    // Sanity: the Ventium master only ever issues 8-beat (or 1) 4 B reads / 1-beat
-    // 4 B writes. Flag anything else loudly so a protocol drift is caught early.
+    // Sanity: the Ventium master only ever issues 8-beat (or 1) 4 B reads,
+    // and 1- or 2-beat 4 B writes. Flag protocol drift loudly.
     always_ff @(posedge clk) if (rst_n) begin
         if (s_axi_arvalid && s_axi_arready)
             assert (s_axi_arsize == 3'd2 && (s_axi_arlen == 8'd7 || s_axi_arlen == 8'd0) &&
@@ -210,8 +218,12 @@ module ven_axi2avalon (
               else $error("ven_axi2avalon: unexpected AR len=%0d size=%0d burst=%0d",
                           s_axi_arlen, s_axi_arsize, s_axi_arburst);
         if (s_axi_awvalid && s_axi_awready)
-            assert (s_axi_awsize == 3'd2 && s_axi_awlen == 8'd0)
+            assert (s_axi_awsize == 3'd2 && s_axi_awlen <= 8'd1 &&
+                    s_axi_awburst == 2'b01)
               else $error("ven_axi2avalon: unexpected AW len=%0d size=%0d", s_axi_awlen, s_axi_awsize);
+        if (s_axi_wvalid && s_axi_wready)
+            assert (s_axi_wlast == (wr_left == 2'd1))
+              else $error("ven_axi2avalon: wrong WLAST left=%0d last=%b", wr_left, s_axi_wlast);
     end
 `endif
 

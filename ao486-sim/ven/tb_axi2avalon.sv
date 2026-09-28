@@ -228,6 +228,41 @@ module tb_axi2avalon;
       if (mask[lane]) expected_memory[address_word][8*lane+:8] = value[8*lane+:8];
   endtask
 
+  task automatic write_quad(input int address_word, input logic [31:0] low_word,
+                            input logic [31:0] high_word);
+    @(negedge clk);
+    awaddr = 40'(address_word) << 2; awid = 4'ha;
+    awlen = 8'd1; awsize = 3'd2; awburst = 2'b01;
+    awvalid = 1'b1; bready = 1'b0;
+    @(posedge clk);
+    if (!awready) $fatal(1, "quad AW not accepted");
+    @(negedge clk); awvalid = 1'b0;
+    for (int beat = 0; beat < 2; beat++) begin
+      wdata = (beat == 0) ? low_word : high_word;
+      wstrb = 4'hf; wlast = (beat == 1); wvalid = 1'b1;
+      begin
+        bit accepted = 0;
+        for (int guard = 0; guard < 64 && !accepted; guard++) begin
+          @(posedge clk); accepted = wready;
+        end
+        if (!accepted) $fatal(1, "quad W timeout beat=%0d", beat);
+      end
+      @(negedge clk);
+      wvalid = 1'b0;
+      if (beat == 0 && bvalid) $fatal(1, "B before final quad W");
+      // A gap between W beats also tests that the bridge retains its address
+      // and does not release AW ownership after the first Avalon dword.
+      repeat (2) @(negedge clk);
+    end
+    for (int guard = 0; guard < 64 && !bvalid; guard++) @(negedge clk);
+    if (!bvalid || bid != 4'ha || bresp != 0) $fatal(1, "quad B missing/wrong");
+    bready = 1'b1;
+    @(negedge clk);
+    awlen = 8'd0;
+    expected_memory[address_word] = low_word;
+    expected_memory[address_word+1] = high_word;
+  endtask
+
   initial begin
     for (int i = 0; i < 1024; i++) begin
       memory[i] = 32'hCAFE_0000 | 32'(i);
@@ -264,6 +299,11 @@ module tb_axi2avalon;
       read_line();
     end
     $display("AXI2AVALON coverage: all 16 write strobes, delayed W, held B, immediate single-read visibility");
+    jitter = 1;
+    write_quad(520, 32'h2468_ace0, 32'h1357_9bdf);
+    line_base = 520; start_word = 0;
+    read_line();
+    $display("AXI2AVALON coverage: two-beat quadword write, W gap, one B, Avalon waitrequest");
 `ifdef VEN_BRIDGE_REAL_L2
     // Invalidate a resident line after two words of an eight-word cache-hit
     // response. The miss/refill must continue at the remaining-word cursor.

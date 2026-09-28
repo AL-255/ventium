@@ -42,6 +42,7 @@ for spec in eligible_sat:4:0 eligible_open:4:16 alias:0:0 crossline:32:0; do
 done
 python3 - "$OUT" <<'PY'
 import json
+import os
 import pathlib
 import sys
 
@@ -71,7 +72,8 @@ for variant in ('eligible_sat', 'eligible_open', 'alias', 'crossline'):
     second = [i for i, r in enumerate(cycle) if int(r['pc'], 0) == symbols['second_store']]
     assert len(first) == len(second) == 1000
     pairs = sum(cycle[i]['cyc'] == cycle[j]['cyc'] for i, j in zip(first[100:], second[100:]))
-    if variant == 'eligible_open':
+    quad = os.environ.get('EXPECT_QUAD') == '1'
+    if variant == 'eligible_open' or (quad and variant == 'eligible_sat'):
         assert pairs > 0, 'eligible resident stores never paired'
     else:
         assert pairs == 0, (variant, pairs)
@@ -86,7 +88,9 @@ for variant in ('eligible_sat', 'eligible_open', 'alias', 'crossline'):
         control.pop()
         assert [r['pc'] for r in control] == [r['pc'] for r in cycle]
         control_clocks = control[starts[-1]]['cyc'] - control[starts[100]]['cyc']
-        if variant == 'eligible_open':
+        if quad and variant == 'eligible_sat':
+            assert clocks < control_clocks, (variant, 'quadword buffer gave no gain', clocks, control_clocks)
+        elif variant == 'eligible_open' and not quad:
             assert clocks < control_clocks, (variant, 'no pair throughput gain', clocks, control_clocks)
         else:
             assert clocks <= control_clocks, (variant, 'fallback regression', clocks, control_clocks)
