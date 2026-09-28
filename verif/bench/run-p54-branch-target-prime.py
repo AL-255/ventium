@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bounded QEMU full-state and fixed-work A/B for branch-target load priming."""
+"""Bounded QEMU full-state and fixed-work A/B for branch-successor load priming."""
 import argparse
 import hashlib
 import json
@@ -49,7 +49,7 @@ def measured_trace(path, gold, sym, iterations):
               if int(r['pc'], 0) == sym['loop_body']]
     require(len(starts) == iterations, f'{path}: incomplete loop')
     require(all(b - a == 6 for a, b in zip(starts, starts[1:])),
-            f'{path}: wrong six-instruction loop work')
+            f'{path}: wrong six-instruction warm-loop work')
     if 'cyc' not in trace.records[0]:
         return trace, None
     begin, end = starts[32], starts[-1]
@@ -65,8 +65,9 @@ def main():
     parser.add_argument('--control', type=Path, required=True)
     parser.add_argument('--candidate', type=Path, required=True)
     parser.add_argument('--iterations', type=int, default=256)
-    parser.add_argument('--case', type=int, choices=(22, 23), default=22,
-                        help='22: U branch; 23: paired V branch')
+    parser.add_argument('--case', type=int, choices=(22, 23, 24, 25, 26, 27), default=22,
+                        help='22/23: taken U/V; 24/25: not-taken V/U; '
+                             '26/27: terminal fall-through mispredict U/V')
     args = parser.parse_args()
     require(64 <= args.iterations <= 1000, 'iterations must be 64..1000')
     subprocess.run([ROOT / 'tools/build_scope.sh', '--is-active'], pass_fds=(9,), check=True)
@@ -98,6 +99,14 @@ def main():
     require('guest exited, code=0' in (out / 'qemu.log').read_text(),
             'QEMU did not exit(0)')
     gold = tracefmt.read_trace(str(out / 'qemu.vtrace'))
+    if args.case in (26, 27):
+        starts = [i for i, r in enumerate(gold.records)
+                  if int(r['pc'], 0) == sym['loop_body']]
+        require(len(starts) == args.iterations, 'QEMU terminal-mispredict fixture did not finish')
+        final_work = sum(sym['loop_body'] <= int(r['pc'], 0) < sym['loop_end']
+                         for r in gold.records[starts[-1]:])
+        require(final_work == (3 if args.case == 26 else 5),
+                f'QEMU did not take the terminal branch: {final_work} instructions')
     results = {}
     for label, binary in binaries.items():
         traces = {}
@@ -125,8 +134,12 @@ def main():
         print(f'{label}: {results[label]["cycles_per_iteration"]:.3f} '
               f'cycles/iteration, directed IPC {results[label]["ipc"]:.6f}',
               flush=True)
-    require(results['candidate']['clocks'] < results['control']['clocks'],
-            'branch-target prime did not save an exposed clock')
+    if args.case in (26, 27):
+        require(results['candidate']['clocks'] <= results['control']['clocks'],
+                'terminal-mispredict fixture regressed warm-loop clocks')
+    else:
+        require(results['candidate']['clocks'] < results['control']['clocks'],
+                'branch-successor prime did not save an exposed clock')
     (out / 'results.json').write_text(json.dumps(results, indent=2) + '\n')
     print('P54-BRANCH-TARGET-PRIME-OK (full-state QEMU; not gameplay)', flush=True)
 

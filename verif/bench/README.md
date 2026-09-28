@@ -68,6 +68,8 @@ timeout 540s env VENTIUM_BUILD_SCOPE_PROFILE=ipc_parallel32 \
 | `memory_alu_integer_v` | Does a resident ALU-memory U retain its execution occupancy while an independent integer V follows? |
 | `resident_memory_{or,adc,sbb,and,sub,xor}` | Does the checked register-destination memory-ALU admission avoid recurring slow fetch/decode/load FSM visits without changing full architectural state? ADD is the separate `resident_memory_alu` control. Carry operators retain their real CF dependency. |
 | `branch_target_load` / `v_branch_target_load` | Can a predicted-taken U/V branch prime a checked resident load on its target edge, without changing the final not-taken iteration or merely moving a capture bubble to another load? |
+| `branch_fallthrough_load` / `v_branch_fallthrough_load` | Can correctly predicted not-taken U/V branches prime a checked resident load on the sequential path? The V fixture crosses data lines so window reuse cannot hide its capture bubble. |
+| `branch_fallthrough_mispredict` / `v_branch_fallthrough_mispredict` | Does a final not-taken→taken direction reversal skip the speculative load without creating a response owner, while all preceding warm iterations remain correct? |
 
 These cases expose bottlenecks, not the full acceptance matrix. They do not
 cover paging/TLB geometry, dirty-line coherence, precise faults, interrupts,
@@ -85,15 +87,18 @@ any gameplay speedup.
 
 `VEN_PIPE_BRANCH_LOAD_PRIME` is an opt-in extension of the registered
 `VEN_PIPE_REG_LOAD_PRIME`/`VEN_PIPE_MEM_CHAIN` path. It may probe a
-predicted-taken branch target, but `c_next_commit` requires the actual branch
-outcome and the normal checked resident-load gates. `run-p54-branch-target-prime.py`
-checks both U-branch (`--case 22`) and paired V-branch (`--case 23`) against
-pinned QEMU full-state traces, including the terminal not-taken branch. On
-the matched 256-iteration fixtures, directed IPC improves **1.20→1.50**
-(5→4 cycles per six-instruction loop) and **1.00→1.20** (6→5 cycles),
-respectively. The other 22 directed microcases are cycle-identical and all
-24 architectural A/B traces match. This is a core-consumed microbenchmark
-gain, not gameplay IPC or routed FPGA timing.
+predicted-taken target or predicted-not-taken fall-through, but
+`c_next_commit` requires the actual direction to match the prediction and
+the normal checked resident-load gates. The bounded
+`run-p54-branch-target-prime.py --case 22..27` checks U and paired V branches
+against pinned-QEMU full-state traces. Cases 26/27 reverse direction only on
+the terminal iteration; the script checks that QEMU skips the load and the
+candidate does not retire or capture a wrong owner. The 256-iteration
+directed cycles per six-instruction warm loop are: 22 **5→4**, 23 **6→5**,
+24 **6→4**, 25 **6→5**, 26 **5→5**, and 27 **6→4**. All 28-case architectural
+A/B traces match; the other 23 cases are cycle-identical. This is a
+core-consumed microbenchmark gain, not gameplay IPC or routed FPGA timing.
+
 The branch prime shares the existing D-cache lookup slot on a branch edge;
 it adds no cache-data read port. For the FPGA target, wider simultaneous
 access should use banked or true-dual-port Xilinx BRAM where it wins timing,

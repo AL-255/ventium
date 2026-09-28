@@ -20,6 +20,10 @@ _start:
     fldz
     fld1
 .endif
+.if CASE == 25
+    # The first loop entry must have the same not-taken ZF as later entries.
+    testl %ecx, %ecx
+.endif
     jmp loop_body
 .if CASE == 9
     .balign 32
@@ -134,6 +138,40 @@ loop_body:
     movl %eax, %ebx
     movl 32(%esi), %edx
     movl %edx, %edi
+.elseif CASE == 24
+    # The first load uses a different data line and cannot pair with the
+    # following WAW XOR. XOR/JNZ then forms a V conditional branch, always
+    # predicted/resolved not taken, ahead of the fall-through resident load.
+    movl 32(%esi), %eax
+    xorl %eax, %eax
+    jnz 1f
+    movl (%esi), %edi
+1:
+.elseif CASE == 25
+    # The first JZ is U and always not taken: startup TEST and each loop's
+    # nonterminal DEC leave ZF clear. This is the U fall-through counterpart.
+    jz 1f
+    movl (%esi), %eax
+    movl %eax, %ebx
+    movl 32(%esi), %edx
+1:
+.elseif CASE == 26
+    # U JC predicts fall-through through the warm loop, then resolves taken
+    # on the terminal iteration. CMP sets CF when ECX=2; DEC/JNZ preserve CF,
+    # so only the next/final loop entry skips the candidate load.
+    jc 1f
+    movl (%esi), %eax
+    movl 32(%esi), %edx
+    cmpl $3, %ecx
+1:
+.elseif CASE == 27
+    # CMP consumes the first load, so CMP/JE forms a V branch. The alternate
+    # arena word is one; only the terminal iteration takes JE.
+    movl 32(%esi), %eax
+    cmpl %eax, %ecx
+    je 1f
+    movl (%esi), %edx
+1:
 .else
     .error "unsupported CASE"
 .endif
@@ -152,6 +190,10 @@ exit_syscall:
 arena:
     .long 0x10203040
     .space 28
+.if CASE == 27
+    .long 1
+.else
     .long 0x90abcdef
+.endif
     .long 0x50607080
 .section .note.GNU-stack,"",@progbits

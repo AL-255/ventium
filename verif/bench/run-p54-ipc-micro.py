@@ -42,6 +42,10 @@ CASES = {
     "resident_memory_xor": (BASE, 21),
     "branch_target_load": (BASE, 22),
     "v_branch_target_load": (BASE, 23),
+    "v_branch_fallthrough_load": (BASE, 24),
+    "branch_fallthrough_load": (BASE, 25),
+    "branch_fallthrough_mispredict": (BASE, 26),
+    "v_branch_fallthrough_mispredict": (BASE, 27),
 }
 
 
