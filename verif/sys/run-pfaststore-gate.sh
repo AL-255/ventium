@@ -11,6 +11,9 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+if ! "$REPO/tools/build_scope.sh" --is-active; then
+  exec "$REPO/tools/build_scope.sh" -- bash "$0" "$@"
+fi
 TEST=pfaststore
 TDIR="$REPO/verif/sys/tests/$TEST"
 OUTDIR="${OUTDIR:-$REPO/build/sys}"
@@ -25,6 +28,15 @@ LOG="$OUTDIR/$TEST.faststore.profile.log"
 BUILD_LOG="$OUTDIR/$TEST.faststore.build.log"
 RTL_OUT="$OUTDIR/$TEST.faststore.rtl.sys.vtrace"
 GOLD="$OUTDIR/$TEST.sys.vtrace"
+CYCLE_OUT="$OUTDIR/$TEST.faststore.rtl.cycle.vtrace"
+CYCLE_FUNC_OUT="$OUTDIR/$TEST.faststore.rtl.cycle-func.vtrace"
+CYCLE_LOG="$OUTDIR/$TEST.faststore.cycle.profile.log"
+memory_args=()
+case "${PFASTSTORE_L1_AXI:-0}" in
+  0) ;;
+  1) memory_args=(--l1-axi) ;;
+  *) echo 'PFASTSTORE_L1_AXI must be 0 or 1' >&2; exit 2 ;;
+esac
 
 say(){ echo; echo "=== $* ==="; }
 
@@ -48,7 +60,7 @@ else
 fi
 
 say "3. compare the protection-fault/restart trace against QEMU"
-"$TB" --system --image "$TDIR/$TEST.bin" --out "$RTL_OUT" --max-insn 1400 \
+timeout 45s "$TB" --system "${memory_args[@]}" --image "$TDIR/$TEST.bin" --out "$RTL_OUT" --max-insn 1400 \
   --quiesce 8000 +ven_faultlog >"$LOG" 2>&1
 python3 "$REPO/verif/diff/compare.py" --mode func --all "$GOLD" "$RTL_OUT"
 
@@ -66,6 +78,41 @@ assert h("esi") == 0xCAFEBABE, f"esi={r['esi']}: faulting store escaped before r
 print(f"  final witnesses: ecx=3 edx={r['edx']} edi=3 esi=cafebabe")
 PY
 
+# The functional run above proves every architectural record, but it does not
+# enter the dual-issue fast path. A second cycle-mode run owns the path witness.
+# The core's current paired callback snapshots V's post-state only at the pair
+# boundary; compare QEMU at each *completed group*, never treat U's mid-pair
+# callback as an independently committed post-state.
+say "4. cycle-mode fast-store path and completed-group architecture"
+timeout 45s "$TB" --cycle --system "${memory_args[@]}" --image "$TDIR/$TEST.bin" \
+  --out "$CYCLE_OUT" --max-insn 1400 --quiesce 8000 >"$CYCLE_LOG" 2>&1
+timeout 45s "$TB" --cycle-func --system "${memory_args[@]}" --image "$TDIR/$TEST.bin" \
+  --out "$CYCLE_FUNC_OUT" --max-insn 1400 --quiesce 8000 \
+  >"$OUTDIR/$TEST.faststore.cycle-func.log" 2>&1
+python3 - "$GOLD" "$CYCLE_OUT" "$CYCLE_FUNC_OUT" <<'PY'
+import json, sys
+
+def records(path):
+    return [row for line in open(path) if 'pc' in (row := json.loads(line))]
+
+gold, cycle, state = map(records, sys.argv[1:])
+assert len(gold) == len(cycle) == len(state) == 865
+assert [r['pc'] for r in gold] == [r['pc'] for r in cycle] == [r['pc'] for r in state]
+keys = ('eax', 'ebx', 'ecx', 'edx', 'esi', 'edi', 'esp', 'ebp',
+        'cs', 'ss', 'ds', 'es', 'fs', 'gs', 'cr0', 'cr2', 'cr3', 'cr4')
+compared = 0
+for i, (expected, observed) in enumerate(zip(gold, state)):
+    if i + 1 < len(cycle) and cycle[i]['cyc'] == cycle[i + 1]['cyc']:
+        continue
+    for key in keys:
+        assert expected[key] == observed[key], (i, key, expected[key], observed[key])
+    assert (int(expected['eflags'], 0) & 0x003f7fd5) == \
+           (int(observed['eflags'], 0) & 0x003f7fd5), (i, 'eflags')
+    compared += 1
+assert compared > 0
+print(f'  cycle-mode QEMU-equivalent completed groups={compared}')
+PY
+
 PF=$(grep -c '^\[FAULT\] vec=14 .*err=00000003' "$LOG" || true)
 GP=$(grep -c '^\[FAULT\] vec=13 .*err=00000038' "$LOG" || true)
 ALL=$(grep -c '^\[FAULT\] vec=' "$LOG" || true)
@@ -74,7 +121,7 @@ ALL=$(grep -c '^\[FAULT\] vec=' "$LOG" || true)
   exit 1
 }
 
-ISSUE="$(awk '/\[ *12\].*ISSUE/{for (i=1;i<=NF;i++) if ($i ~ /^[0-9]+$/) {print $i; exit}}' "$LOG")"
+ISSUE="$(awk '/\[ *12\].*ISSUE/{for (i=1;i<=NF;i++) if ($i ~ /^[0-9]+$/) {print $i; exit}}' "$CYCLE_LOG")"
 [[ "$ISSUE" =~ ^[0-9]+$ ]] || { echo "FATAL: profiler did not report S_PIPE issue"; exit 1; }
 echo "  profile: S_PIPE issues=$ISSUE"
 if (( ISSUE < 120 )); then
@@ -83,7 +130,7 @@ if (( ISSUE < 120 )); then
   exit 1
 fi
 
-MEM_BAIL="$(awk '/system memory not eligible/{for (i=1;i<=NF;i++) if ($i ~ /^[0-9]+$/) {print $i; exit}}' "$LOG")"
+MEM_BAIL="$(awk '/system memory not eligible/{for (i=1;i<=NF;i++) if ($i ~ /^[0-9]+$/) {print $i; exit}}' "$CYCLE_LOG")"
 [[ "$MEM_BAIL" =~ ^[0-9]+$ ]] || { echo "FATAL: profiler did not report system-memory bail"; exit 1; }
 if (( MEM_BAIL != 1 )); then
   echo "FATAL: page-crossing MOV [0x400fff],r32 was not the one slow-path memory fallback (got $MEM_BAIL)"
