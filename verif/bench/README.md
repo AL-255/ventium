@@ -101,6 +101,12 @@ The bounded [Vivado leaf probe](../../fpga/P54_L1D_LEAF_SYNTH_2026-09-27.md)
 confirms eight separate banks infer `RAM256X1D` and save 1,187 leaf LUTs
 versus packed data; this does not establish full-core timing or gameplay IPC.
 
+`run-p54-bram-bank.sh` separately checks a 256×32 FPGA BRAM bank with two
+registered read ports and byte writes. Vivado infers one `RAMB36E2` for that
+isolated bank (zero LUTRAMs/FFs). This is a possible FPGA storage organization,
+not an integrated L1D: synchronous row-address timing and same-row write/read
+arbitration remain explicit design obligations.
+
 `run-p54-l1d-pair-hit.sh` exercises the default-off `VEN_P54_DUAL_HIT` cache
 interface atop `VEN_L1D_BANKED_DATA`. It checks simultaneous distinct-bank
 read hits, serialized same-bank hits, width/offset assembly, split-line and

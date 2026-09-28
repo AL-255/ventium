@@ -49,9 +49,9 @@ top-level clock skew, I/O delays, memory-system fanout and placement. Vivado
 warns `HD.CLK_SRC` is unset. Neither an isolated timing pass nor the
 single-port area saving proves a full-core 45 MHz implementation. Paired-hit
 promotion requires a real dual EA/DTLB/issue/commit integration and a measured
-workload improvement large enough to justify its LUT cost. A synchronous
-BRAM/true-dual-port option remains unmeasured; it must include the added read
-latency and collision semantics in functional tests before comparison.
+workload improvement large enough to justify its LUT cost. An isolated
+synchronous BRAM bank has now been measured below; an integrated BRAM L1D
+remains unmeasured and must include read latency and collision semantics.
 
 Reproduce a single variant (do not run two Vivado instances):
 
@@ -60,4 +60,36 @@ timeout --signal=TERM --kill-after=15s 540s \
   fpga/run_vivado_exclusive.sh -mode batch \
   -source fpga/synth_p54_l1d_leaf.tcl \
   -tclargs banked /tmp/p54-l1d-synth-banked-example
+```
+
+## Synchronous dual-port BRAM feasibility (not integrated)
+
+`ven_p54_bram_bank.sv` is an isolated 256×32, byte-write, two-registered-read
+macro for one of the eight physical P54 word banks. Its bounded cycle test
+(`verif/bench/run-p54-bram-bank.sh`) passes all 256 rows on both read ports,
+back-to-back requests and byte-write readback. Vivado 2025.2 synthesized the
+source SHA-256 `e383c9b7fe82afbdf0780da0b4cad69e69785d5b404e1159b67c3c85906c763c`
+to **one `RAMB36E2`, zero LUTs, zero LUTRAMs and zero external FFs** in
+`/tmp/p54-bram-bank-synth-r1/`. Eight such data banks would nominally use
+eight RAMB36 tiles, before tags, address/byte selection, arbiter, or any
+additional storage. The output registers were absorbed into the BRAM; the
+report has **no WNS** because standalone I/O paths are unconstrained. Its
+1.960 ns primitive minimum period is not a routed processor Fmax.
+
+This is a resource-feasibility result, **not** a replacement for the current
+L1D or a gameplay speedup. An integrated variant must present the row address
+one cycle before consumption, preserve the existing registered-hit handshake,
+and arbitrate a same-row fill/store write against port-B reads. The macro
+deliberately rejects that write/read collision in simulation rather than
+depending on vendor-specific read-during-write data. It must pass the full
+cache/coherence and two-lane ownership tests before its area can be compared
+with the current `RAM256X1D` implementation.
+
+Reproduce the leaf probe, with no other Vivado instance running:
+
+```sh
+timeout --signal=TERM --kill-after=15s 540s \
+  fpga/run_vivado_exclusive.sh -mode batch \
+  -source fpga/synth_p54_bram_bank.tcl \
+  -tclargs /tmp/p54-bram-bank-synth-example
 ```
