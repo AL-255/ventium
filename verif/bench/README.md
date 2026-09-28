@@ -486,6 +486,20 @@ The earlier pair-port-only opt-in full-core build also matched all 22 fixed-work
 candidate/control traces and exact cycle counts (`/tmp/p54-pair-dtlb-core-micro-r1/`),
 as expected while V sideband admission remains disabled.
 
+`VEN_FP_ASYNC_STACK` lets checked integer PUSH/POP packets overlap an older
+masked, already-issued FP result. On the current-source L1/AXI candidate,
+three six-instruction FP/stack loops take **11→7 clocks/iteration** (300
+iterations each), with candidate/control architectural equality and pinned-QEMU
+differentials. The 64-iteration ADD/MUL/DIV/SQRT fixture matches QEMU x87 and
+integer state and observes busy-FPU integer retirement; the split-page POP
+fault/retry fixture matches **222** QEMU system-mode groups and shows a
+pending-FP drain before the page walk. All **87** bounded IPC microcases retain
+candidate/control architectural equality; only the three FP/stack cases change
+timing. Artifacts: `/home/yukidama/p54-fpstack-allmicro-sep28/`,
+`/home/yukidama/ventium-fp-integer-overlap.ypo_4t7z/`, and
+`/home/yukidama/ventium-alu-memory-fault.9u1v4r_1/`. This is not a measured
+gameplay or full-system qualification result.
+
 `run-p54-l1d-code-buffer.sh` tests `VEN_L1D_CODE_BUFFER` in eight cache
 configurations, including banked/window/forward/stream variants. Its generated
 builds default to `/tmp`; set `P54_CODE_BUFFER_OUTBASE` to an existing directory

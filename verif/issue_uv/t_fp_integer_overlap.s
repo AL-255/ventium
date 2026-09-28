@@ -12,6 +12,9 @@ _start:
     xorl %ebx,%ebx
     movl $64,%ecx
     movl $source,%esi
+.if INT_KIND==6
+    movl $stack_top,%esp
+.endif
 .balign 32
 loop_body:
 .if INT_KIND==4 || INT_KIND==5
@@ -37,7 +40,7 @@ fp_site:
     nop
 .endif
 integer_start:
-.if INT_KIND>=3
+.if INT_KIND>=3 && INT_KIND<=5
     # No preceding NOP: the branch must be the U owner, not a V partner of
     # an integer instruction that was already permitted under the FP hold.
 .if INT_KIND==3
@@ -53,6 +56,12 @@ integer_end:
 .endif
 1:
     addl $1,%eax
+.else
+.if INT_KIND==6
+    pushl %eax
+    popl %edx
+    addl $1,%eax
+    addl %edx,%ebx
 .else
 .rept 4
 .if INT_KIND==0
@@ -70,6 +79,7 @@ integer_end:
 .error "bad INT_KIND"
 .endif
 .endr
+.endif
 integer_end:
 .endif
 .if !SERIAL
@@ -90,4 +100,8 @@ pass_exit:
 source: .long 7
 sink: .long 0
 result: .double 0
+.if INT_KIND==6
+    .space 512
+stack_top:
+.endif
 .section .note.GNU-stack,"",@progbits

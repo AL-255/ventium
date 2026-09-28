@@ -67,6 +67,11 @@ alu_warmed:
     pushfl
     popl 0x2104
     movl $0x7fffffff,%eax
+.ifdef FP_STACK
+    /* POP reads 0x404fff..0x405002 across the missing page. Its exception
+     * frame pushes BELOW ESP into the still-present first page. */
+    movl $0x404fff,%esp
+.endif
 .ifdef FP_OVERLAP
     /* Enter the relocated FDIV immediately before the source. A jump AFTER
      * FDIV would drain it under the current branch policy and miss the race. */
@@ -82,6 +87,9 @@ alu_return:
 .ifdef FP_OVERLAP
     fwait
 .endif
+.ifdef FP_STACK
+    cmpl $0x80000001,%eax
+.else
 .if ALU_OP==0
     cmpl $0,%eax
 .elseif ALU_OP==1
@@ -98,6 +106,7 @@ alu_return:
     cmpl $0xfffffffe,%eax
 .else
 .error "ALU_OP must be 0..6"
+.endif
 .endif
     jne alu_fail
     cmpl $1,0x2100
@@ -156,7 +165,11 @@ alu_image:
 .endif
     .global alu_source
     .set alu_source,0x8013
+.ifdef FP_STACK
+    .byte 0x58,0x90           /* POP EAX, pad to retain branch at 0x8015 */
+.else
     .byte (3+8*ALU_OP),0x06
+.endif
     .byte 0xe9
     .long alu_return-0x801a
 alu_image_end:

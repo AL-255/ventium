@@ -72,6 +72,11 @@ logic fp_async_fault_hold;
 `endif
 `ifdef VEN_FP_ASYNC
 `ifdef VEN_FP_SHARED
+`ifdef VEN_FP_ASYNC_STACK
+`ifndef VEN_FP_ASYNC_MEM
+  initial $fatal(1, "VEN_FP_ASYNC_STACK requires checked async integer memory");
+`endif
+`endif
 `ifdef VEN_FP_ASYNC_STREAM
 `ifndef VEN_FP_ARITH_STREAM
   initial $fatal(1, "VEN_FP_ASYNC_STREAM requires VEN_FP_ARITH_STREAM");
@@ -153,8 +158,9 @@ logic fp_async_fault_hold;
 `endif
 
   // Only resident, ordinary integer register packets may pass an unfinished
-  // result by default. Memory, stack, branch, slow decode, x87, invalidated
-  // code, debug and external events drain at the issue boundary. The opt-in
+  // result by default. Opt-in checked memory/stack and direct-branch profiles
+  // widen that set; slow decode, x87, invalidated code, debug and external
+  // events still drain at the issue boundary. The opt-in
   // branch profile admits only the decoder's simple, non-memory, non-stack
   // Jcc/JMP forms: they read integer flags, not x87 state, and have no data
   // side effect. A later target fault/event still waits for the older FP
@@ -190,7 +196,14 @@ logic fp_async_fault_hold;
 `ifndef VEN_FP_ASYNC_MEM
        u_d.is_mem ||
 `endif
+`ifndef VEN_FP_ASYNC_STACK
        u_d.is_stack ||
+`else
+       // A simple PUSH/POP uses the same checked, held memory owner as MOV.
+       // Async FP admission requires every FP exception masked; the younger
+       // integer stack access may therefore overlap until a fault/event gate
+       // demands an ordered drain. No slow or 16-bit stack form is admitted.
+`endif
 `ifndef VEN_FP_ASYNC_BRANCH
        u_d.is_branch ||
 `endif

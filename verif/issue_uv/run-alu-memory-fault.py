@@ -43,11 +43,15 @@ def main():
     p.add_argument('--candidate', type=Path, required=True)
     p.add_argument('--fp-overlap', action='store_true',
                    help='precede the split-page access with normal-operand FDIV; compare x87 too')
+    p.add_argument('--fp-stack', action='store_true',
+                   help='one split-page POP EAX fault/retry while masked FDIV is pending')
     p.add_argument('--memory-chain', action='store_true',
                    help='precede faulting source with an independently owned warm integer load')
     p.add_argument('--fast-system-memory', action='store_true',
                    help='both models have guarded VEN_SYS_FASTLOAD_FLAT; candidate has VEN_FAST_MEM_ALU')
     args = p.parse_args()
+    if args.fp_stack and not args.fp_overlap:
+        p.error('--fp-stack requires --fp-overlap')
     if args.fp_overlap and args.memory_chain:
         p.error('--fp-overlap and --memory-chain are separate predecessor fixtures')
     subprocess.run([ROOT/'tools/build_scope.sh','--is-active'],pass_fds=(9,),check=True)
@@ -59,13 +63,14 @@ def main():
                            check=True,timeout=180,**kwargs)
     qemu = ROOT/'ventium-refs/07-p5-emulation-harness/build/qemu/build-sys/qemu-system-i386'
     run(['sha256sum',qemu,args.control.resolve(),args.candidate.resolve()],out/'binaries.sha256')
-    for op in range(7):
-        for carry in range(2):
+    for op in ((0,) if args.fp_stack else range(7)):
+        for carry in ((0,) if args.fp_stack else range(2)):
             case = out/f'op{op}-cf{carry}'
             case.mkdir()
             obj,elf,image = (case/f'test.{suffix}' for suffix in ('o','elf','bin'))
             run(['as','--32','--defsym',f'ALU_OP={op}','--defsym',f'INITIAL_CF={carry}',
                  *(['--defsym','FP_OVERLAP=1'] if args.fp_overlap else []),
+                 *(['--defsym','FP_STACK=1'] if args.fp_stack else []),
                  *(['--defsym','MEMORY_CHAIN=1'] if args.memory_chain else []),
                  ROOT/'verif/issue_uv/t_alu_memory_fault.S','-o',obj],case/'as.log',
                 cwd=ROOT/'verif/sys/tests/pbytemovpg')
@@ -111,8 +116,11 @@ def main():
                     assert re.search(r'^\[FP-ASYNC-DRAIN\] pc=00008013 pending=1 ', log, re.M), \
                         'no pending-FP fault/walk drain at the source instruction'
                 print(f'op={op} CF={carry} {name}: {len(ends)} QEMU groups; precise source fault/retry',flush=True)
-    print(('FP-' if args.fp_overlap else 'MEM-CHAIN-' if args.memory_chain else '') +
-          'ALU-MEMORY-FAULT-OK (14 cases, both binaries; no saved state)')
+    if args.fp_stack:
+        print('FP-STACK-FAULT-OK (split-page POP with pending FP, both binaries; no saved state)')
+    else:
+        print(('FP-' if args.fp_overlap else 'MEM-CHAIN-' if args.memory_chain else '') +
+              'ALU-MEMORY-FAULT-OK (14 cases, both binaries; no saved state)')
 
 
 if __name__=='__main__':

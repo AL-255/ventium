@@ -103,6 +103,9 @@ CASES = {
     "imul1_reg32": (BASE, 81),
     "imul1_reg16": (BASE, 82),
     "imul1_mem8": (BASE, 83),
+    "fp_stack_overlap": (BASE, 84),
+    "fp_pushesp_overlap": (BASE, 85),
+    "fp_pop_same_overlap": (BASE, 86),
 }
 
 

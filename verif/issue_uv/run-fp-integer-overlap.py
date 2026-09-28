@@ -18,7 +18,11 @@ def main():
     p.add_argument('--tb',type=Path,required=True)
     p.add_argument('--branch-only',action='store_true',
                    help='grade direct Jcc/JMP U-branch overlap after long-latency FP')
+    p.add_argument('--stack-only',action='store_true',
+                   help='grade checked PUSH/POP memory overlap after masked FP')
     args=p.parse_args()
+    if args.branch_only and args.stack_only:
+        p.error('--branch-only and --stack-only are mutually exclusive')
     subprocess.run([ROOT/'tools/build_scope.sh','--is-active'],pass_fds=(9,),check=True)
     out=Path(tempfile.mkdtemp(prefix='ventium-fp-integer-overlap.'))
     print(f'Artifacts: {out}',flush=True)
@@ -31,8 +35,10 @@ def main():
     for op,opname in enumerate(('fadd','fmul','fdiv','fsqrt')):
         if args.branch_only and op<2:
             continue
-        kinds=list(enumerate(('branch-jmp','branch-jcc-taken','branch-jcc-not-taken'),3)) \
-            if args.branch_only else list(enumerate(('pairs','memory','carry')))
+        kinds=(list(enumerate(('branch-jmp','branch-jcc-taken','branch-jcc-not-taken'),3))
+               if args.branch_only else
+               [(6,'stack')] if args.stack_only else
+               list(enumerate(('pairs','memory','carry'))))
         for kind,kindname in kinds:
             timings={}
             for serial in (1,0):
@@ -105,14 +111,16 @@ def main():
             # Long-latency engines must hide at least four clocks per warm loop;
             # ADD/MUL at least one. These are conservative overlap requirements,
             # not assertions of exact silicon instruction latency.
-            required=55 if kind>=3 else 55*(4 if op>=2 else 1)
+            required=55 if 3<=kind<=5 else 55*(4 if op>=2 else 1)
             if saved<required:
                 failures.append(f'{opname}/{kindname}: saved {saved}, require >= {required}')
     for failure in failures: print('OVERLAP-FAIL:',failure)
     if failures:
         print('FP-INTEGER-OVERLAP-FAIL (architectural checks passed; required cycle hiding absent)')
         return 1
-    if args.branch_only:
+    if args.stack_only:
+        print('FP-STACK-OVERLAP-OK (4 matched-work cases, checked stack busy-FP witness, full x87/integer differential)')
+    elif args.branch_only:
         print('FP-BRANCH-OVERLAP-OK (6 matched-work cases, U-branch busy-FP witness, full x87/integer differential)')
     else:
         print('FP-INTEGER-OVERLAP-OK (12 matched-work cases, full x87/integer differential)')

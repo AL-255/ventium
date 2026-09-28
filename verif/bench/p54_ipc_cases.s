@@ -25,7 +25,12 @@ _start:
     # Exercise signed overflow and low-word writes after multiplier sharing.
     movl $0x70010081, %eax
 .endif
-.if CASE == 7 || CASE == 8
+.if CASE >= 84 && CASE <= 86
+    # Keep the complete PUSH/POP transaction in mapped ordinary RAM in both
+    # the standalone RTL memory model and QEMU's user-mode ELF mapping.
+    movl $arena+256, %esp
+.endif
+.if CASE == 7 || CASE == 8 || (CASE >= 84 && CASE <= 86)
     # ST0=1, ST1=0. FADD ST1 is an exact no-op with a real FP dependency.
     fldz
     fld1
@@ -493,6 +498,26 @@ mixed_v:
 .elseif CASE == 83
     imulb (%esi)
     incl %ebx
+.elseif CASE == 84
+    # A masked outstanding x87 add is independent of an integer SS stack
+    # transaction. The popped value must equal the prior EAX on every loop.
+    fadd %st(1), %st(0)
+    pushl %eax
+    popl %edi
+    incl %ebx
+.elseif CASE == 85
+    # PUSH ESP stores the pre-decrement value; POP must restore that exact
+    # value while the older FP owner is still in flight.
+    fadd %st(1), %st(0)
+    pushl %esp
+    popl %edi
+    incl %ebx
+.elseif CASE == 86
+    # POP into the same GPR read by PUSH exercises the writeback boundary.
+    fadd %st(1), %st(0)
+    pushl %eax
+    popl %eax
+    incl %ebx
 .else
     .error "unsupported CASE"
 .endif
@@ -545,5 +570,7 @@ arena:
     .space 327680
 .elseif CASE == 53
     .space 8192
+.elseif CASE >= 84 && CASE <= 86
+    .space 512
 .endif
 .section .note.GNU-stack,"",@progbits
