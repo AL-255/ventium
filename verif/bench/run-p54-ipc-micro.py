@@ -69,6 +69,10 @@ CASES = {
     "dual_byte_cross_window_steady_same_bank": (BASE, 47),
     "ror_immediate_pipeline": (BASE, 48),
     "ror_immediate_count_edges": (BASE, 49),
+    "fp_fistp_fractional_store": (BASE, 50),
+    "fp_fist_fractional_nopop": (BASE, 51),
+    "fp_fistp_empty_masked": (BASE, 52),
+    "fp_fistp_split_page": (BASE, 53),
 }
 
 
@@ -130,7 +134,8 @@ def assemble(name, source, case_id, iterations, out, deadline):
 def measure(name, label, binary, flat, sym, per_loop, iterations, out, deadline):
     directory = out / name
     trace_path = directory / f"{label}.vtrace"
-    run([binary, "--cycle", "--l1-axi", "--image", flat,
+    x87_args = ["--x87"] if name.startswith("fp_") else []
+    run([binary, "--cycle", *x87_args, "--l1-axi", "--image", flat,
          "--load", "0x08048000", "--entry", "0x08048000",
          "--out", trace_path, "--max-insn", iterations * per_loop + 128,
          "--max-cycles", "200000", "--quiesce", "1000"],
@@ -256,14 +261,15 @@ def main():
             directory = out / name
             golden = directory / "qemu.vtrace"
             functional = directory / "candidate_func.vtrace"
+            x87_args = ["--x87"] if name.startswith("fp_") else []
             run([sys.executable, ROOT / "verif/qemu-trace/gen_trace.py",
                  "--qemu", args.qemu.resolve(), "--elf", directory / "test.elf",
                  "--out", golden, "--max-insn", args.iterations * per_loop + 128,
-                 "--port", 28351 + index], deadline, directory / "qemu.log")
+                 "--port", 28351 + index, *x87_args], deadline, directory / "qemu.log")
             golden_records = tracefmt.read_trace(str(golden)).records
             assert golden_records, (name, "empty QEMU trace")
             init_esp = golden_records[0]["esp"]
-            run([args.binary.resolve(), "--l1-axi", "--image", flat,
+            run([args.binary.resolve(), *x87_args, "--l1-axi", "--image", flat,
                  "--load", "0x08048000", "--entry", "0x08048000",
                  "--init-esp", init_esp, "--out", functional,
                  "--max-insn", args.iterations * per_loop + 128,
@@ -278,7 +284,7 @@ def main():
             # same-clock pair sees both committed writes, so its intermediate
             # snapshot is not a standalone architectural comparison point.
             cycle_state = directory / "candidate_cycle_func.vtrace"
-            run([args.binary.resolve(), "--cycle-func", "--l1-axi", "--image", flat,
+            run([args.binary.resolve(), "--cycle-func", *x87_args, "--l1-axi", "--image", flat,
                  "--load", "0x08048000", "--entry", "0x08048000",
                  "--init-esp", init_esp, "--out", cycle_state,
                  "--max-insn", args.iterations * per_loop + 128,
@@ -292,6 +298,9 @@ def main():
                        for row in (cycles[-1], states[-1])), name
             fields = ("eax", "ebx", "ecx", "edx", "esi", "edi", "esp", "ebp",
                       "cs", "ss", "ds", "es", "fs", "gs")
+            if x87_args:
+                fields += tuple(f"st{index}" for index in range(8)) + \
+                          ("fctrl", "fstat", "ftag")
             checked = 0
             for i, expected in enumerate(golden_records):
                 assert int(cycles[i]["pc"], 0) == \

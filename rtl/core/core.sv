@@ -11172,7 +11172,21 @@ module core
   // the complete translated beat, not a raw AXI response. Do not admit stores,
   // partial operands, or an FSM-diverting fault. Debug retains S_FEXEC.
   logic fp_shared_load_cmd;
+  logic fp_shared_store_probe_cmd;
   logic [79:0] fp_shared_cmd_mem;
+`ifdef VEN_FP_STORE_EARLY_CMD
+  // The last destination probe has completed every segment/page permission
+  // check.  A scalar FIST m32 may hand off to the shared converter on this
+  // same edge; its store image and architectural retirement still wait for
+  // the normal ordered response and S_FSTORE write acknowledgement.
+  assign fp_shared_store_probe_cmd = cycle_mode && (state == S_FLOAD) &&
+      q_f_mem_write && (q_fxop == FX_FIST_M32) && (q_f_mbytes == 4'd4) &&
+      (f_step == 4'd0) && fp_store_probe_advance &&
+      (fp_store_probe_second || !fp_store_probe_cross) &&
+      fsm_case_enabled && fp_shared_early_retire_ok && !fp_dbg_active;
+`else
+  assign fp_shared_store_probe_cmd = 1'b0;
+`endif
 `ifdef VEN_FP_LOAD_EARLY_CMD
   assign fp_shared_load_cmd = cycle_mode && (state == S_FLOAD) &&
       q_f_mem_read && !q_f_mem_write && mem_ack && fsm_case_enabled &&
@@ -11206,7 +11220,8 @@ module core
 `else
       !fp_async_pending &&
 `endif
-      ((state == S_FEXEC) || fp_shared_pipe_cmd || fp_shared_load_cmd);
+      ((state == S_FEXEC) || fp_shared_pipe_cmd || fp_shared_load_cmd ||
+       fp_shared_store_probe_cmd);
 
 `ifdef VEN_FP_FXCH_QUEUE
   ven_fp_fxch_queue u_fp_shared (

@@ -120,6 +120,9 @@ timeout 540s env VENTIUM_BUILD_SCOPE_PROFILE=ipc_parallel32 \
 | `resident_memory_alu` / `register_alu_control` | Does a resident ALU-memory instruction retain its P54 resource occupancy instead of accidentally collapsing to register-ALU timing? |
 | `fp_integer_overlap` / `integer_only_control` | Can independent integer work proceed while a real x87 arithmetic operation is outstanding? The integer control has a nonpairable leading EAX dependency so a freely-paired NOP cannot fake a larger FP penalty. |
 | `fp_fistp_integer_overlap` | Can independent integer work proceed past an ordered FILD/FISTP memory pair without losing the integer-store result? The destination is read after the loop; this diagnoses the slow FP-store ownership path, not gameplay IPC. |
+| `fp_fistp_fractional_store` / `fp_fist_fractional_nopop` | Do fractional m32 integer stores retain rounding, destination visibility, and correct pop/non-pop x87 state when command acceptance moves to the final permission-probe edge? |
+| `fp_fistp_split_page` | Does a crossing m32 destination wait for the second page's probe before early command acceptance, with the same architectural result? |
+| `fp_fistp_empty_masked` | A/B-only masked stack-underflow corner; the pinned QEMU currently returns zero where both matched RTL builds store integer indefinite, so this is not a QEMU differential pass. |
 | `frontend_{aligned,line_straddle}` | Do resident raw instruction bytes cross a 32-byte I-line without persistent decoded-cache repair stalls? |
 | `resident_{same_line,two_line}_loads` | Does the registered D-cache window serve a later hit in the same physical line without a second capture, and does a different line correctly require its own lookup? |
 | `register_u_memory_v` / `memory_u_register_v` | Can an independent V load issue when U has no memory operand, contrasted with the existing U-load/V-register case? |
@@ -137,6 +140,12 @@ or SIR-dependent FP values. Add dedicated short fixtures for those mechanisms
 as their replacement interfaces land. In particular, a faster distinct-bank
 case is **not** by itself proof of two memory retirements per clock: inspect
 the cycle trace and the accepted owner records before claiming dual issue.
+The FP cases emit x87 fields for both A/B traces and selected QEMU comparisons;
+the grouped cycle-mode check includes ST0–ST7, control, status, and tag state.
+The opt-in `VEN_FP_STORE_EARLY_CMD` FIST m32 candidate saves one clock per
+conversion in four 300-iteration directed cases, including split-page writes.
+Its exact-profile full-PC binary builds, but these microbenchmarks do not
+qualify a boot, gameplay IPC, exceptional trap delivery, or FPGA timing.
 For selected `--qemu-cases`, the runner checks both ordinary functional mode
 and the actual `--cycle-func` candidate at each completed issue-group boundary.
 The U callback of a same-cycle U/V pair is not an intermediate architectural

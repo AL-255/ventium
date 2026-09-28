@@ -10,7 +10,13 @@
 .globl _start
 _start:
     movl $arena, %esi
+.if CASE == 53
+    # A dword destination straddles two mapped pages; early command issue is
+    # forbidden until the second page's write permission probe completes.
+    movl $arena+4094, %edi
+.else
     movl $arena+32, %edi
+.endif
     movl $ITERATIONS, %ecx
     xorl %eax, %eax
     xorl %ebx, %ebx
@@ -19,6 +25,10 @@ _start:
     # ST0=1, ST1=0. FADD ST1 is an exact no-op with a real FP dependency.
     fldz
     fld1
+.endif
+.if CASE == 51
+    # Keep one fractional x87 source live across the non-pop FIST loop.
+    flds (%esi)
 .endif
 .if CASE == 25
     # The first loop entry must have the same not-taken ZF as later entries.
@@ -320,6 +330,31 @@ loop_body:
     rorl $1, %eax
     rorl $32, %eax
     rorl $33, %eax
+.elseif CASE == 50
+    # Fractional conversion, pop, store visibility, and independent integer
+    # work.  The result is read back on every iteration, not merely at exit.
+    flds (%esi)
+    fistpl (%edi)
+    movl (%edi), %edx
+    incl %eax
+.elseif CASE == 51
+    # Same probed m32 destination with non-pop FIST; TOP/tag must remain live.
+    fistl (%edi)
+    movl (%edi), %edx
+    incl %eax
+    incl %ebx
+.elseif CASE == 52
+    # Masked empty-stack store emits the integer indefinite and retains the
+    # same ordered destination-store ownership as an ordinary conversion.
+    fistpl (%edi)
+    movl (%edi), %edx
+    incl %eax
+    incl %ebx
+.elseif CASE == 53
+    fildl (%esi)
+    fistpl (%edi)
+    movl (%edi), %edx
+    incl %eax
 .else
     .error "unsupported CASE"
 .endif
@@ -341,7 +376,11 @@ exit_syscall:
 .balign 32
 .globl arena
 arena:
+.if CASE == 50 || CASE == 51
+    .long 0x3fc00000
+.else
     .long 0x10203040
+.endif
     .space 28
 .if CASE == 27
     .long 1
@@ -354,5 +393,7 @@ arena:
 .elseif CASE == 34
     # The directed runner permits up to 10,000 iterations of +32-byte ESI.
     .space 327680
+.elseif CASE == 53
+    .space 8192
 .endif
 .section .note.GNU-stack,"",@progbits

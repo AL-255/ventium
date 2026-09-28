@@ -238,6 +238,13 @@
                   (q_f_mbytes==4'd8 && f_step==4'd1) ||
                   (q_f_mbytes==4'd10 && f_step==4'd2)) begin
                 f_step<=4'd0; state<=S_FEXEC;
+                if (fp_shared_store_probe_cmd && fp_shared_cmd_valid &&
+                    fp_shared_cmd_ready) begin
+                  // Command acceptance is irrevocable only after the final
+                  // probe.  This response-producing store keeps its normal
+                  // ordered wait and cannot retire from the probe edge.
+                  state<=S_FP_SHARED_WAIT;
+                end
               end else f_step<=f_step+4'd1;
             end
           end else
