@@ -42,3 +42,18 @@ The flag remains default-off. Before promotion it needs the deferred full
 differential/system gates, exact-build Quake/Win95 qualification, a gameplay
 IPC comparison, and FPGA area/routed-timing evidence. Resident handoff must
 never bypass page/segment/fault checks merely to save a cycle.
+
+## Composed memory-ALU check
+
+A third build added only `VEN_FAST_MEM_ALU` to the slow-handoff candidate
+(binary SHA-256
+`8f116e66eb8ccc995c5d07f90ba6006ffced507745a2f29905f9cfeb6b325445`).
+The existing 14-case pinned-QEMU memory-ALU A/B passed with full architectural
+state. Each case retired the same 2,090 instructions and matched 2,442 QEMU
+completion groups. ADD was unchanged at **6,985 cycles**; each other operator
+and both carry inputs took **7,810 control versus 6,985 candidate cycles**.
+Thus the two opt-in mechanisms compose in this bounded profile without a
+directed regression. This is still neither a gameplay measurement nor a
+general P54 timing claim. Log:
+`/tmp/p54-sdecode-memalu-ab-r1.log`; artifacts:
+`tmp/build-tmp/ventium-alu-memory-ab.hsrlpihk/`.
