@@ -66,6 +66,9 @@ pm32_entry:
     movl $PD, %eax
     movl %eax, %cr3
     movl %cr0, %eax
+    /* BIOS reset leaves CD/NW set. Use normal cache-enabled DRAM here so a
+     * TLB-capacity result is not dominated by uncached line service. */
+    andl $0x9fffffff, %eax
     orl $0x80000000, %eax
     movl %eax, %cr0
 

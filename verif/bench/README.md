@@ -41,7 +41,9 @@ is **not promoted** into the gameplay or FPGA profile. A workload with more
 than I-cache capacity and enough conflicting I-TLB pages, plus FPGA area/timing
 and full-PC qualification, is needed before promotion. `tools/pipeviz` displays
 only the first 16 TLB entries, so it cannot fully visualize this optional
-geometry; crossover state injection invalidates all entries dynamically.
+geometry; crossover state injection invalidates all entries dynamically. The
+cache-enabled QEMU/A-B artifact is
+`/home/yukidama/ventium-p54-itlb-cacheon-sep28/`.
 
 The matched frontend ladder on the banked code-buffer/stream L1 is especially
 diagnostic. With the same fast-ADD and system-fastpath base flags, raw decode
@@ -408,6 +410,13 @@ build completes the same **1,188 warm instructions** in **6,097→4,663**
 clocks (**61.586→47.101** clocks/iteration). All **3,477** system-mode
 architectural records match pinned QEMU and the A/B traces are equivalent.
 Artifacts: `/home/yukidama/ventium-background-sep28.B3cxzoKA/tmpbuild/ventium-p54-large-dtlb-core.kZTduQ/`.
+That original BIOS fixture retained reset CR0.CD/NW, so it was an uncached
+stress case. The corrected cache-enabled fixture, run against matched current
+shadow-window-profile binaries on September 28, completed the same **1,188**
+warm instructions in **2,673→1,089** clocks (**27→11** clocks/iteration), with
+QEMU functional state and A/B architectural traces matching. Its result is
+under `/home/yukidama/ventium-p54-large-dtlb-cacheon-sep28/`. The large-page D-TLB gain
+persists when memory caching is enabled, unlike the I-TLB alias witness above.
 This is a deliberately adversarial TLB microbenchmark, not measured gameplay
 IPC or an FPGA area/timing result. The I-TLB and replacement policy are not
 yet fully P54-faithful; do not promote the option solely from this fixture.
