@@ -9,16 +9,16 @@ CONTROL="$(realpath "$CONTROL_TB")"
 OUT="${OUTDIR:-$(mktemp -d /tmp/ventium-dual-read-alu.XXXXXX)}"
 mkdir -p "$OUT"
 QEMU="$ROOT/ventium-refs/07-p5-emulation-harness/build/qemu/build/qemu-i386"
-for spec in add_bank:0:4 add_alias:0:0 add_crossline:0:32 cmp_bank:1:4 cmp_alias:1:0 cmp_crossline:1:32 back2back:0:4; do
-    variant="${spec%%:*}"
-    fields="${spec#*:}"
-    mode="${fields%%:*}"
-    offset="${fields##*:}"
+for spec in add_bank:0:0:4 add_alias:0:0:0 add_crossline:0:0:32 \
+            cmp_bank:0:1:4 cmp_alias:0:1:0 cmp_crossline:0:1:32 \
+            uadd_bank:1:0:4 uadd_alias:1:0:0 uadd_crossline:1:0:32 \
+            ucmp_bank:2:0:4 back2back:0:0:4 alu_back2back:1:0:4; do
+    IFS=: read -r variant umode mode offset <<< "$spec"
     source="$ROOT/verif/issue_uv/t_dual_read_alu_pair.s"
-    if [[ "$variant" == back2back ]]; then
+    if [[ "$variant" == *back2back ]]; then
         source="$ROOT/verif/issue_uv/t_dual_read_alu_back2back.s"
     fi
-    as --32 --defsym "MODE=$mode" --defsym "SECOND_OFFSET=$offset" \
+    as --32 --defsym "UMODE=$umode" --defsym "MODE=$mode" --defsym "SECOND_OFFSET=$offset" \
         "$source" -o "$OUT/$variant.o"
     ld -m elf_i386 -Ttext 0x08048000 "$OUT/$variant.o" -o "$OUT/$variant.elf"
     nm -n "$OUT/$variant.elf" > "$OUT/$variant.sym"
@@ -53,7 +53,9 @@ out = Path(sys.argv[1])
 keys = ('eax', 'ebx', 'ecx', 'edx', 'esi', 'edi', 'esp', 'ebp',
         'eflags', 'cs', 'ss', 'ds', 'es', 'fs', 'gs')
 for variant in ('add_bank', 'add_alias', 'add_crossline',
-                'cmp_bank', 'cmp_alias', 'cmp_crossline', 'back2back'):
+                'cmp_bank', 'cmp_alias', 'cmp_crossline',
+                'uadd_bank', 'uadd_alias', 'uadd_crossline',
+                'ucmp_bank', 'back2back', 'alu_back2back'):
     symbols = {parts[2]: int(parts[0], 16)
                for line in (out / f'{variant}.sym').read_text().splitlines()
                if len(parts := line.split()) == 3}
@@ -78,12 +80,14 @@ for variant in ('add_bank', 'add_alias', 'add_crossline',
     pairs = sum(cycle[i]['cyc'] == cycle[j]['cyc'] for i, j in zip(first[100:], second[100:]))
     clocks = cycle[starts[-1]]['cyc'] - cycle[starts[100]]['cyc']
     baseline = control[starts[-1]]['cyc'] - control[starts[100]]['cyc']
-    if variant.endswith('_bank') or variant == 'back2back':
-        assert pairs > 0 and clocks < baseline, (variant, pairs, clocks, baseline)
+    if variant.endswith('_bank') or variant.endswith('back2back'):
+        assert pairs == 900 and clocks <= baseline, (variant, pairs, clocks, baseline)
+        if variant.startswith('u') or variant == 'alu_back2back':
+            assert clocks < baseline, (variant, pairs, clocks, baseline)
     else:
         assert pairs == 0 and clocks <= baseline, (variant, pairs, clocks, baseline)
     print(f'{variant}: QEMU-equivalent, paired={pairs}/900, candidate={clocks}, control={baseline} clocks')
-    if variant == 'back2back':
+    if variant.endswith('back2back'):
         third = [i for i, r in enumerate(cycle) if int(r['pc'], 0) == symbols['third_load']]
         fourth = [i for i, r in enumerate(cycle) if int(r['pc'], 0) == symbols['fourth_alu']]
         assert len(third) == len(fourth) == 1000
@@ -93,7 +97,7 @@ for variant in ('add_bank', 'add_alias', 'add_crossline',
                            for i, j in zip(first[100:], third[100:])}
         assert second_pairs == 900, second_pairs
         assert first_to_second == {2}, first_to_second
-        print(f'back2back: second pairs={second_pairs}/900, first-to-second gaps={sorted(first_to_second)}')
+        print(f'{variant}: second pairs={second_pairs}/900, first-to-second gaps={sorted(first_to_second)}')
 print('DUAL-READ-ALU-CORE-GATE-OK (directed, not gameplay)')
 PY
 printf 'Artifacts: %s\n' "$OUT"

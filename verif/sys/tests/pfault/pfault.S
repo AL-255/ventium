@@ -213,6 +213,9 @@ pm32_entry:
 #ifdef DUALREADALU_PROBE
     /* V's first read will fault. Prepare the physical backing before paging. */
     movl    $0x00001234, 0x00801000
+#ifdef DUALREADALU_UALU_PROBE
+    movl    $5, 0x00800000             /* known U ADD source for exact-once proof */
+#endif
 #endif
     /* The normal pfault image leaves PT1[1] not-present.  The pfpstore and
      * pfaststore derivatives instead start it present but read-only, which
@@ -258,12 +261,22 @@ pm32_entry:
     movl    $0x00400000, %esi
     movl    $0x00401000, %edi
     movl    $0x10, %ebx
+#ifdef DUALREADALU_UALU_PROBE
+    movl    $3, %eax
+#endif
 .globl pdualreadalu_fault_u, pdualreadalu_fault_v
 pdualreadalu_fault_u:
+#ifdef DUALREADALU_UALU_PROBE
+    addl    (%esi), %eax               /* must commit once, before younger #PF */
+#else
     movl    (%esi), %eax
+#endif
 pdualreadalu_fault_v:
     addl    (%edi), %ebx               /* #PF, then EBX=0x1244 on restart */
     movl    %ebx, 0x0000203c          /* exact post-fault V result witness */
+#ifdef DUALREADALU_UALU_PROBE
+    movl    %eax, 0x00002040          /* must be 3+5, not replayed to 13 */
+#endif
     /* The resident loop uses two dwords of one cacheable line, in independent
      * banks and through two separately translated V/U DTLB ports. */
     movl    %cr0, %eax
@@ -275,9 +288,20 @@ pdualreadalu_fault_v:
     movl    0x00401004, %edx
     xorl    %ebx, %ebx
     movl    $128, %ecx
+#ifdef DUALREADALU_UALU_PROBE
+    /* Avoid the 31-byte I$ boundary for this longer fault/restart prelude.
+     * Fixed short padding keeps U and V in the same resident decode line. */
+    .rept   4
+    nop
+    .endr
+#endif
     .globl pdualreadalu_loop_u, pdualreadalu_loop_v
 pdualreadalu_loop_u:
+#ifdef DUALREADALU_UALU_PROBE
+    addl    0x00401000, %eax
+#else
     movl    0x00401000, %eax
+#endif
 pdualreadalu_loop_v:
     addl    0x00401004, %ebx
     .rept   16
@@ -287,6 +311,11 @@ pdualreadalu_loop_v:
     jnz     pdualreadalu_loop_u
     movl    %ebx, %ebp                 /* 128*7 = 896 */
     movl    0x0000203c, %esi           /* post-#PF V result = 0x1244 */
+#ifdef DUALREADALU_UALU_PROBE
+    movl    0x00002040, %eax
+    shll    $16, %eax
+    orl     %eax, %ebp                 /* high half carries exact-once U result */
+#endif
 #else
 #ifdef FPSTORE_PROBE
     /* A page is readable but not writable.  An adapter that reads to "probe"

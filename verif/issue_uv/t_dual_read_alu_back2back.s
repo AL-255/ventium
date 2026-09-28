@@ -1,6 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
 # Two independent U-load/V-ALU-memory pairs with no intervening register group.
 # Detects a design that retires memory ALUs at one pair per EX clock.
+.ifndef UMODE
+.set UMODE, 0
+.endif
 .text
 .globl _start
 _start:
@@ -9,18 +12,28 @@ _start:
     movl $1000, %ecx
     movl $3, %ebx
     movl $7, %ebp
+    xorl %eax, %eax
+    xorl %edx, %edx
 .balign 32
 .globl loop_body
 loop_body:
 .globl first_load
 first_load:
+.if UMODE == 0
     movl (%esi), %eax
+.else
+    addl (%esi), %eax
+.endif
 .globl second_alu
 second_alu:
     addl 4(%edi), %ebx
 .globl third_load
 third_load:
+.if UMODE == 0
     movl 8(%esi), %edx
+.else
+    addl 8(%esi), %edx
+.endif
 .globl fourth_alu
 fourth_alu:
     xorl 12(%edi), %ebp

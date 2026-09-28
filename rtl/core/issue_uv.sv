@@ -83,7 +83,15 @@ module issue_uv
   // address or payload. This path has two independent D2 addresses and may
   // retire only after both separately owned resident responses are present.
   always_comb pair_mem_ok = fp_can_pair(iu, iv, 1'b1) &&
-      iu.is_mem && iu.is_load && iu.wreg && !iu.is_store && !iu.is_stack &&
+      iu.is_mem && !iu.is_store && !iu.is_stack &&
+      ((iu.is_load && iu.wreg)
+`ifdef VEN_P54_DUAL_READ_ALU_PAIR
+       // Both pipes have a separately owned read. The older U may itself be
+       // a read-only ALU reg,[mem] or CMP reg,[mem]; its result/flags commit
+       // before V's result/flags on the shared two-clock EX schedule.
+       || (!iu.is_load && !iu.mem_lhs && iu.wflags)
+`endif
+       ) &&
       iv.is_mem && !iv.is_store && !iv.is_stack &&
       ((iv.is_load && iv.wreg)
 `ifdef VEN_P54_DUAL_READ_ALU_PAIR

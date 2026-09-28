@@ -9,35 +9,38 @@ TB="$(realpath "$TB_BIN")"
 CONTROL="$(realpath "$CONTROL_TB")"
 OUTDIR="${OUTDIR:-$(mktemp -d /tmp/ventium-pdualreadalu.XXXXXX)}"
 mkdir -p "$OUTDIR"
-TDIR="$ROOT/verif/sys/tests/pdualreadalu"
-timeout 180s bash "$ROOT/verif/sys/run-sys-golden.sh" pdualreadalu \
+TEST_NAME="${TEST_NAME:-pdualreadalu}"
+case "$TEST_NAME" in pdualreadalu|pdualalu) ;; *) echo "bad TEST_NAME" >&2; exit 2;; esac
+TDIR="$ROOT/verif/sys/tests/$TEST_NAME"
+timeout 180s bash "$ROOT/verif/sys/run-sys-golden.sh" "$TEST_NAME" \
     >"$OUTDIR/golden.log" 2>&1 || { tail -60 "$OUTDIR/golden.log"; exit 1; }
-nm -n "$TDIR/pdualreadalu.elf" > "$OUTDIR/pdualreadalu.sym"
+nm -n "$TDIR/$TEST_NAME.elf" > "$OUTDIR/$TEST_NAME.sym"
 for mode in cycle cycle-func; do
     timeout 45s "$TB" "--$mode" --system --l1-axi \
-        --image "$TDIR/pdualreadalu.bin" \
-        --out "$OUTDIR/pdualreadalu.$mode.vtrace" --max-insn 5000 --quiesce 8000 \
-        >"$OUTDIR/pdualreadalu.$mode.log" 2>&1 || {
-            tail -60 "$OUTDIR/pdualreadalu.$mode.log"; exit 1;
+        --image "$TDIR/$TEST_NAME.bin" \
+        --out "$OUTDIR/$TEST_NAME.$mode.vtrace" --max-insn 5000 --quiesce 8000 \
+        >"$OUTDIR/$TEST_NAME.$mode.log" 2>&1 || {
+            tail -60 "$OUTDIR/$TEST_NAME.$mode.log"; exit 1;
         }
 done
 timeout 45s "$CONTROL" --cycle --system --l1-axi \
-    --image "$TDIR/pdualreadalu.bin" \
-    --out "$OUTDIR/pdualreadalu.control.vtrace" --max-insn 5000 --quiesce 8000 \
-    >"$OUTDIR/pdualreadalu.control.log" 2>&1 || {
-        tail -60 "$OUTDIR/pdualreadalu.control.log"; exit 1;
+    --image "$TDIR/$TEST_NAME.bin" \
+    --out "$OUTDIR/$TEST_NAME.control.vtrace" --max-insn 5000 --quiesce 8000 \
+    >"$OUTDIR/$TEST_NAME.control.log" 2>&1 || {
+        tail -60 "$OUTDIR/$TEST_NAME.control.log"; exit 1;
     }
-python3 - "$OUTDIR" <<'PY'
+python3 - "$OUTDIR" "$TEST_NAME" <<'PY'
 import json
 from pathlib import Path
 import sys
 
 out = Path(sys.argv[1])
+name = sys.argv[2]
 def rows(mode):
-    return [r for line in (out / f'pdualreadalu.{mode}.vtrace').read_text().splitlines()
+    return [r for line in (out / f'{name}.{mode}.vtrace').read_text().splitlines()
             if 'pc' in (r := json.loads(line))]
 symbols = {parts[2]: int(parts[0], 16)
-           for line in (out / 'pdualreadalu.sym').read_text().splitlines()
+           for line in (out / f'{name}.sym').read_text().splitlines()
            if len(parts := line.split()) == 3}
 gold, cycle, state, control = (rows(m) for m in ('sys', 'cycle', 'cycle-func', 'control'))
 assert len(gold) == len(cycle) == len(state) == len(control), \
@@ -57,7 +60,8 @@ for i, (expected, observed) in enumerate(zip(gold, state)):
     compared += 1
 assert compared > 0
 last = state[-1]
-for key, want in (('ebp', 896), ('esi', 0x1244), ('ecx', 3),
+for key, want in (('ebp', 0x80380 if name == 'pdualalu' else 896),
+                  ('esi', 0x1244), ('ecx', 3),
                   ('edx', 0x4000f4), ('edi', 0), ('cr2', 0x401000)):
     assert int(last[key], 0) == want, (key, last[key], want)
 fault_u = [i for i, r in enumerate(cycle)
@@ -67,6 +71,9 @@ fault_v = [i for i, r in enumerate(cycle)
 assert len(fault_u) == 1 and len(fault_v) == 2
 assert cycle[fault_u[0]]['cyc'] != cycle[fault_v[0]]['cyc'], 'faulting V paired with U'
 assert int(state[fault_v[0]]['ebx'], 0) == 0x10, 'faulting V changed destination'
+if name == 'pdualalu':
+    assert int(state[fault_u[0]]['eax'], 0) == 8, 'U ALU did not retire once'
+    assert int(state[fault_v[0]]['eax'], 0) == 8, 'faulting V replayed U ALU'
 assert int(state[fault_v[0]]['cr2'], 0) == 0x401000, 'wrong faulting address'
 assert int(state[fault_v[1]]['ebx'], 0) == 0x1244, 'V restart lost the ALU result'
 u = [i for i, r in enumerate(cycle)
@@ -79,7 +86,9 @@ assert pairs >= 100, ('too few protected/paged V ALU pairs', pairs)
 clocks = cycle[u[-1]]['cyc'] - cycle[u[8]]['cyc']
 baseline = control[u[-1]]['cyc'] - control[u[8]]['cyc']
 assert clocks <= baseline, ('throughput regression', clocks, baseline)
-print(f'pdualreadalu: QEMU-equivalent groups={compared}, paired={pairs}/128, '
+if name == 'pdualalu':
+    assert clocks < baseline, ('U-ALU/V-ALU pair gave no gain', clocks, baseline)
+print(f'{name}: QEMU-equivalent groups={compared}, paired={pairs}/128, '
       f'candidate={clocks}, control={baseline} clocks')
 print('PDUALREADALU-GATE-OK (paging, fault/restart, V flags/data; not gameplay)')
 PY
