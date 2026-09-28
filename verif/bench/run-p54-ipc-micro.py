@@ -46,6 +46,8 @@ CASES = {
     "branch_fallthrough_load": (BASE, 25),
     "branch_fallthrough_mispredict": (BASE, 26),
     "v_branch_fallthrough_mispredict": (BASE, 27),
+    "dual_load_after_store": (BASE, 28),
+    "dual_load_after_store_same_bank": (BASE, 29),
 }
 
 

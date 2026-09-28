@@ -26,6 +26,9 @@ module issue_uv
     input  fpd_t iu,       // U-member decode
     input  fpd_t iv,       // V-candidate decode (the instruction right after U)
     output logic pair_ok   // 1 => U and V may issue together this clock
+`ifdef VEN_P54_DUAL_LOAD_PAIR
+  , output logic pair_mem_ok // same P54 rules, two independent MOV loads only
+`endif
 `ifdef VEN_PERF_PROFILE
     // Simulation-only first-rejection attribution.  It is deliberately an
     // output of the same leaf that decides pair_ok, rather than a second copy
@@ -49,7 +52,8 @@ module issue_uv
   // simple, V is a V-candidate, U is a U-member, no disp+imm, no prefixes
   // (the fast path only decodes unprefixed forms), no RAW/WAW on GP regs
   // (ESP RAW included; only an ESP-only WAW is deliberately retained).
-  function automatic logic fp_can_pair(input fpd_t u, input fpd_t v);
+  function automatic logic fp_can_pair(input fpd_t u, input fpd_t v,
+                                        input logic allow_v_mem);
     begin
       if (!u.simple || !v.simple) return 1'b0;
       if (!u.pairs_first || !v.pairs_second) return 1'b0;
@@ -63,14 +67,26 @@ module issue_uv
       // The one checked data-read port belongs to U.  A V memory form would
       // otherwise consume stale mem_rdata without issuing a request, so keep all
       // V memory operands out of the pair (MOV loads and read-only ALU operands).
-      if (v.is_mem) return 1'b0;
+      if (v.is_mem && !allow_v_mem) return 1'b0;
       return 1'b1;
     end
   endfunction
 
   // Combinational pairing decision. Bit-identical to the in-line
   // fp_can_pair(u_d, v_d) call in intcore.sv.
-  always_comb pair_ok = fp_can_pair(iu, iv);
+  always_comb pair_ok = fp_can_pair(iu, iv, 1'b0);
+`ifdef VEN_P54_DUAL_LOAD_PAIR
+  // Never use the checked-load-to-register bypass to admit a dependent V
+  // address or payload. This path has two independent D2 addresses and may
+  // retire only after both separately owned resident responses are present.
+  always_comb pair_mem_ok = fp_can_pair(iu, iv, 1'b1) &&
+      iu.is_mem && iu.is_load && iu.wreg && !iu.is_store && !iu.is_stack &&
+      iv.is_mem && iv.is_load && iv.wreg && !iv.is_store && !iv.is_stack &&
+      !iu.w8 && !iv.w8 && !iu.w16 && !iv.w16 &&
+      !fp_is_ext_load(iu) && !fp_is_ext_load(iv) &&
+      ((iv.reads & iu.writes) == 8'd0) &&
+      ((iv.addr_mask & iu.writes) == 8'd0);
+`endif
 
 `ifdef VEN_PERF_PROFILE
   // Preserve fp_can_pair as the only functional predicate above.  This

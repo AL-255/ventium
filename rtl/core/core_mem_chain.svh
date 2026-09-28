@@ -98,6 +98,9 @@
   assign mc_query_vpc = mc_query_pc + {28'd0, mc_query_u.len};
   assign mc_query_v = mc_descriptor(mc_query_vpc);
   issue_uv u_mc_issue (.iu(mc_query_u), .iv(mc_query_v), .pair_ok(mc_query_pair_ok)
+`ifdef VEN_P54_DUAL_LOAD_PAIR
+                      , .pair_mem_ok()
+`endif
 `ifdef VEN_PERF_PROFILE
                       , .pair_reason()
 `endif

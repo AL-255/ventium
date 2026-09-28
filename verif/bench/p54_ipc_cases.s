@@ -172,6 +172,19 @@ loop_body:
     je 1f
     movl (%esi), %edx
 1:
+.elseif CASE == 28
+    # A preceding ordered store leaves no register/branch load-prime slot.
+    # The following two resident MOV loads must share a fresh U capture edge
+    # using separate banks; this isolates the core V-owner path from priming.
+    movl %ebx, (%esi)
+    movl (%esi), %eax
+    movl 36(%esi), %edx
+.elseif CASE == 29
+    # Identical issue opportunity, but the two physical word indices are
+    # bank 0 in different lines. V must be rejected and retry as U.
+    movl %ebx, (%esi)
+    movl (%esi), %eax
+    movl 32(%esi), %edx
 .else
     .error "unsupported CASE"
 .endif

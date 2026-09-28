@@ -4358,6 +4358,14 @@ module core
   logic [2:0]  pipe_mem_seg_q;
   fpd_t        pipe_mem_u_q, pipe_mem_v_q;
   logic        pipe_mem_pair_q;
+`ifdef VEN_P54_DUAL_LOAD_PAIR
+  logic        pipe_mem_v_hit_q;
+  logic [31:0] pipe_mem_v_phys_q;
+  logic        pipe_v_pair_eligible, pipe_v_pair_request, pipe_v_pair_accept;
+  logic        pipe_v_pair_rsp_good;
+  logic [31:0] pipe_v_pair_phys;
+  logic [2:0]  pipe_v_pair_seg;
+`endif
   fpd_t        pipe_u_eff, pipe_v_eff;
   logic        pipe_pair_eff;
   logic [31:0] pipe_commit_eip;
@@ -4955,24 +4963,82 @@ module core
 `ifndef VEN_L1_AXI
   initial $fatal(1, "VEN_P54_DUAL_HIT requires VEN_L1_AXI");
 `endif
-  // Tie off until the checked D2 translation/issue packet is connected.
-  // No cache request may be generated merely by decoding a V memory form.
+`ifdef VEN_P54_DUAL_LOAD_PAIR
+`ifndef VEN_P54_DUAL_HIT_LEGACY_CAPTURE
+  initial $fatal(1, "VEN_P54_DUAL_LOAD_PAIR requires legacy-capture pair banks");
+`endif
+  // The older U remains on its ordinary, checked read port. V's independent
+  // D2 query is a hit-only sideband, accepted only if L1 captured U on this
+  // same edge in a different bank. A rejected V leaves U's legacy transaction
+  // untouched and becomes the next U instruction after its retirement.
+  assign pipe_v_pair_seg = pipe_v_eff.mem_ss ? 3'(SG_SS) : 3'(SG_DS);
+  assign pipe_v_pair_phys = paging_on ? v_dtlb_lk_phys : pipe_v_mem_lin;
+  assign pipe_v_pair_eligible = cycle_mode && v_bytes_ok && pipe_pair_mem_ok &&
+      !irq_shadow && !dbg_pair_block && !pipe_mem_active_q &&
+      !exec_flush_all && !ic_snoop_valid && !ic_snoop_valid1 &&
+      !ic_snoop_valid2 && !fx_act && !fx_abort_q && !bus_err &&
+      !pipe_mem_abort_now &&
+      (!sys_mode || ({1'b0, eip} + {29'd0, u_d.len} +
+                     {29'd0, v_d.len} - 33'd1 <=
+                     {1'b0, seg_limit[SG_CS]})) &&
+      ({1'b0, pipe_v_modrm_ea} + 33'd3 <=
+       {1'b0, seg_limit[pipe_v_pair_seg]}) &&
+      (pipe_v_mem_lin[1:0] == 2'b00) && (pipe_v_mem_lin[4:0] <= 5'd28) &&
+      (!paging_on || (v_dtlb_lk_hit && v_dtlb_lk_perm[0] &&
+                     ((eff_cpl != 2'd3) || v_dtlb_lk_perm[2]))) &&
+      (!sys_mode || (sys_fp_ok && !real_mode && cs_d &&
+          seg_pm_loaded[pipe_v_pair_seg] &&
+          (seg_sel[pipe_v_pair_seg][15:2] != 14'd0) &&
+          seg_attr[pipe_v_pair_seg][7] && seg_attr[pipe_v_pair_seg][4] &&
+          !seg_attr[pipe_v_pair_seg][3] && seg_attr[pipe_v_pair_seg][1] &&
+          !seg_attr[pipe_v_pair_seg][2] &&
+          (seg_limit[pipe_v_pair_seg] == 32'hffff_ffff)))
+`ifdef VEN_UOPCACHE
+      && uc_v_avail
+`endif
+      && !(errata_en[ERR_MOFFS] && moffs_falsedep);
+  assign pipe_v_pair_request = pipe_v_pair_eligible && pipe_new_load_req;
+  assign pipe_v_pair_accept = pipe_v_pair_request && mem_pair_req_ready[1];
+  assign mem_pair_req_valid = {pipe_v_pair_request, 1'b0};
+  assign mem_pair_paddr = {pipe_v_pair_phys, 32'd0};
+  assign mem_pair_size_log2 = {2'd2, 2'd0};
+  assign mem_pair_owner = {pipe_commit_eip[15:0], 16'd0};
+  assign pipe_v_pair_rsp_good = pipe_mem_v_hit_q && mem_pair_rsp_valid[1] &&
+      !mem_pair_rsp_cancel[1] &&
+      (mem_pair_rsp_owner[1] == pipe_mem_eip_q[15:0]) &&
+      (mem_pair_rsp_paddr[1] == pipe_mem_v_phys_q);
+  // An accepted V is younger. If a snoop/flush cancels its hit while U's
+  // registered response survives, U alone retires and V retries normally.
+  // Drain an orphan one clock after a precise fault/abort clears the owner.
+  // Otherwise a held V response would permanently block later sideband hits.
+  // While U is pending, hold the separately tagged V result until U commits.
+  assign mem_pair_rsp_ready = {mem_pair_rsp_valid[1] &&
+                               (!pipe_mem_v_hit_q || pipe_int_commit), 1'b0};
+`else
+  // Without the dual-load owner, decoding a V memory form is never a request.
   assign mem_pair_req_valid = '0;
   assign mem_pair_paddr = '0;
   assign mem_pair_size_log2 = '0;
   assign mem_pair_owner = '0;
   assign mem_pair_rsp_ready = '0;
 `endif
+`endif
 
   // R1 phase-3: the pairing checker is now the `issue_uv` leaf module
   // (rtl/core/issue_uv.sv). pipe_pair_ok is the bare can-pair RULES decision;
   // pipe_pair below ANDs in cycle_mode + V-bytes-resident exactly as before.
   logic pipe_pair_ok;
+`ifdef VEN_P54_DUAL_LOAD_PAIR
+  logic pipe_pair_mem_ok;
+`endif
 `ifdef VEN_PERF_PROFILE
   logic [2:0] pipe_pair_reason;
 `endif
   issue_uv u_issue (
       .iu(u_d), .iv(v_d), .pair_ok(pipe_pair_ok)
+`ifdef VEN_P54_DUAL_LOAD_PAIR
+    , .pair_mem_ok(pipe_pair_mem_ok)
+`endif
 `ifdef VEN_PERF_PROFILE
     , .pair_reason(pipe_pair_reason)
 `endif
@@ -5258,7 +5324,12 @@ module core
 
   assign pipe_u_eff    = pipe_mem_active_q ? pipe_mem_u_q    : u_d;
   assign pipe_v_eff    = pipe_mem_active_q ? pipe_mem_v_q    : v_d;
+`ifdef VEN_P54_DUAL_LOAD_PAIR
+  assign pipe_pair_eff = pipe_mem_active_q ?
+      (pipe_mem_pair_q && (!pipe_mem_v_hit_q || pipe_v_pair_rsp_good)) : pipe_pair;
+`else
   assign pipe_pair_eff = pipe_mem_active_q ? pipe_mem_pair_q : pipe_pair;
+`endif
   assign pipe_commit_eip = pipe_mem_active_q ? pipe_mem_eip_q : eip;
   // Physically separate U/V AGUs. U retains its established checked memory
   // owner; V is presently consumed by LEA and is ready for a future translated
@@ -6264,6 +6335,10 @@ module core
       pipe_mem_u_q      <= '0;
       pipe_mem_v_q      <= '0;
       pipe_mem_pair_q   <= 1'b0;
+`ifdef VEN_P54_DUAL_LOAD_PAIR
+      pipe_mem_v_hit_q  <= 1'b0;
+      pipe_mem_v_phys_q <= 32'd0;
+`endif
       // A LOCK descriptor used to be left uninitialised until the first decode,
       // which could expose an X/high lock qualifier on reset fetch traffic.  The
       // reservation is architecturally empty at reset as well.
@@ -6369,6 +6444,20 @@ module core
       // the state machine: the current instruction still retires this edge and
       // the normal S_DECODE/S_PIPE event boundary sees the request next clock.
       if (smi_apic_store_commit) smi_pending <= 1'b1;
+`ifdef VEN_P54_DUAL_LOAD_PAIR
+      // Only a fresh U capture can create a V owner. Completion, replacement,
+      // and terminal states discard the speculative younger response.
+      if (pipe_v_pair_accept) begin
+        pipe_mem_v_hit_q <= 1'b1;
+        pipe_mem_v_phys_q <= pipe_v_pair_phys;
+      end else if ((pipe_mem_active_q && (state == S_PIPE) &&
+                   !pipe_mem_abort_now && !xlate_miss && !fe_xlate_pend && mem_ack) ||
+`ifdef VEN_PIPE_REG_LOAD_PRIME
+                   mc_prime_accept ||
+`endif
+                   (state == S_HALT) || (state == S_SHUTDOWN))
+        pipe_mem_v_hit_q <= 1'b0;
+`endif
 `ifndef SYNTHESIS
       if (smi_apic_store_commit && ven_apicsmilog_en)
         $display("[APICSMI] COMMIT cyc=%0d fast=%0b state=%0d eip=%08x paddr=%08x data=%08x strb=%x",
@@ -6419,7 +6508,11 @@ module core
         pipe_mem_seg_q    <= pipe_mem_seg;
         pipe_mem_u_q      <= u_d;
         pipe_mem_v_q      <= v_d;
-        pipe_mem_pair_q   <= pipe_pair;
+        pipe_mem_pair_q   <= pipe_pair
+`ifdef VEN_P54_DUAL_LOAD_PAIR
+                             || pipe_v_pair_accept
+`endif
+                             ;
       end else if ((state == S_HALT) || (state == S_SHUTDOWN)) begin
         pipe_mem_active_q <= 1'b0;
       end
@@ -8804,6 +8897,9 @@ module core
       // a synchronous fault restarts the instruction, so no held request or
       // stale decode may leak into the handler.
       pipe_mem_active_q <= 1'b0;
+`ifdef VEN_P54_DUAL_LOAD_PAIR
+      pipe_mem_v_hit_q <= 1'b0;
+`endif
       // A fault aborts the decoded instruction, including a locked RMW.  This
       // common precise-abort funnel is the only safe place to release its local
       // DMA reservation: S_WALK is a legal lock-session detour, but every

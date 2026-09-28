@@ -59,6 +59,7 @@ timeout 540s env VENTIUM_BUILD_SCOPE_PROFILE=ipc_parallel32 \
 | --- | --- |
 | `reg_load_prime` | Can an independent register packet lend its idle D-cache lookup cycle to the next load, eliminating the registered-hit capture bubble? The load alternates resident lines to defeat same-line window reuse. |
 | `dual_load_{distinct,same}_bank` | Can two independent loads from different lines overlap when their physical `[4:2]` bank indices differ, and does the same-bank case correctly serialize? |
+| `dual_load_after_store{,_same_bank}` | Can a fresh U capture and distinct-bank V hit pair when a preceding ordered store leaves no register/branch prime slot, while same-bank V serializes? This isolates V ownership from load priming. |
 | `dual_store_{distinct,same}_bank` | Are two store admissions possible while preserving order and the two-entry write-buffer limit? Both cases cross cache lines. |
 | `resident_memory_alu` / `register_alu_control` | Does a resident ALU-memory instruction retain its P54 resource occupancy instead of accidentally collapsing to register-ALU timing? |
 | `fp_integer_overlap` / `integer_only_control` | Can independent integer work proceed while a real x87 arithmetic operation is outstanding? The integer control has a nonpairable leading EAX dependency so a freely-paired NOP cannot fake a larger FP penalty. |
@@ -81,9 +82,36 @@ the cycle trace and the accepted owner records before claiming dual issue.
 `run-p54-bank-arb.sh` is a bounded leaf test for the proposed eight-bank
 admission rule: physical `[4:2]` conflicts, unaligned/64-bit extents, split-line
 fallback, bank backpressure, and U-before-V priority. It exhausts all 16,384
-line-offset/width pairs, then runs 32,768 randomized cases per seed. The leaf is not connected
-to the current single-port core; passing it cannot claim V-memory pairing or
-any gameplay speedup.
+line-offset/width pairs, then runs 32,768 randomized cases per seed. The leaf
+alone cannot establish core-level V-memory retirement or any gameplay speedup.
+
+`VEN_P54_DUAL_LOAD_PAIR` is an opt-in core consumer of the banked L1's
+`VEN_P54_DUAL_HIT_LEGACY_CAPTURE` lane. It adds a separately translated,
+hit-only V request only for independent dword MOV loads while U is taking a
+fresh registered hit; same-bank, miss, MMIO, segment/page-fault and snoop
+cases retry V as the next U. The data banks retain one read per bank rather
+than replicating the whole L1 into multiple async-read copies. Run
+`bash verif/bench/run-p54-dual-load-issue.sh` for decode/dependency cases,
+`bash verif/bench/run-p54-l1d-pair-hit.sh --legacy-capture-pair` and
+`bash verif/l1/run-l1axi-pair-hit-micro.sh --legacy-capture-pair` for cache
+arbitration/seam cases, then the bounded pinned-QEMU full-state microcases:
+
+```sh
+python3 verif/bench/run-p54-dual-load-pair.py --case 28 \
+  --candidate verif/tb/obj_dir_p54_dual_load_r1/tb_ventium \
+  --control verif/tb/obj_dir_p54_branch_prime_r1/tb_ventium
+python3 verif/bench/run-p54-dual-load-pair.py --case 29 \
+  --candidate verif/tb/obj_dir_p54_dual_load_r1/tb_ventium \
+  --control verif/tb/obj_dir_p54_branch_prime_r1/tb_ventium
+```
+
+The post-store distinct-bank case 28 saves one clock per five-instruction
+loop (**5→4**, directed IPC **1.00→1.25**), while same-bank case 29 remains
+**5→5**. Both builds match pinned QEMU full state in both cases. The original
+`dual_load_distinct_bank` loop remains **4→4** with the branch-prime profile:
+the preceding branch primes U's capture one cycle early, so this fresh-U
+sideband opportunity is absent. These are directed measurements, not gameplay
+IPC or routed FPGA timing.
 
 `VEN_PIPE_BRANCH_LOAD_PRIME` is an opt-in extension of the registered
 `VEN_PIPE_REG_LOAD_PRIME`/`VEN_PIPE_MEM_CHAIN` path. It may probe a

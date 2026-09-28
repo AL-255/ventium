@@ -903,6 +903,14 @@
             end
             // ---- V commit (paired) ----
             if (pipe_pair_eff) begin
+`ifdef VEN_P54_DUAL_LOAD_PAIR
+              if (pipe_mem_v_hit_q && pipe_v_eff.is_load) begin
+                gpr_we[pipe_v_eff.dst]=1'b1;
+                gpr_wd[pipe_v_eff.dst]=reg_merge(gpr_o[pipe_v_eff.dst],
+                    mem_pair_rsp_data[1], fp_operand_width(pipe_v_eff),
+                    pipe_v_eff.dst_hi8);
+              end else
+`endif
               if (pipe_v_eff.is_lea) begin
                 gpr_we[pipe_v_eff.dst]=1'b1; gpr_wd[pipe_v_eff.dst]=v_lea_addr;
               end else if (pipe_v_eff.is_branch || pipe_v_eff.is_nop) begin
