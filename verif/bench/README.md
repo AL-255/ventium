@@ -456,39 +456,45 @@ area-favorable in both storage layouts, but hit-under-fill expensive. Neither
 option has yet passed full-PC cold boot, Win95, Quake or routed timing on the
 exact candidate, so neither was added to a release define set.
 
-## Combined full-PC IPC development profile (September 28)
+## Measured-profile-matched IPC development (September 28)
 
-`make -C ao486-sim ven-ipc` builds a separate `obj_dir_ven_ipc` executable with
-the banked/port-shared L1D, fill forwarding, code stream/window reuse, checked
-U/V load pairing and branch-load prime, fast memory ALU, and cross-line uop
-repair. It does not change the conservative `ven` target or make old native
-snapshots compatible with the new model. This is a diagnostic candidate, not a
-release or FPGA define set.
+`make -C ao486-sim ven-gameplay-base` now rebuilds the **exact 85 effective
+defines** of the measured `229c4cd5` Quake binary, against current sources.
+`make -C ao486-sim ven-ipc` adds only 11 cache/dual-load/branch-prime defines
+in a separate object directory. The inventory comparison with
+`obj_dir_p54_structural_sep27/model/Vsystem__verFiles.dat` has zero missing or
+extra defines for the matched base. In particular both builds retain ao486
+single-fill, downstream critical-word streaming, x87 overlap, REP acceleration,
+and the original 8 KiB P5 L1 geometry. The experimental binary cannot restore
+native snapshots made by the historical binary; it must cold-boot a private
+disk. Neither target changes the conservative `ven` or the FPGA release set.
 
-The matched full-P5 `l1axi_kv_full` microbenchmark build (candidate with these
-extra defines, control without them) passed all 33 cases at 400 iterations and
-32 simulator jobs: **22 faster, 11 unchanged, 0 slower**, with complete
-candidate/control architectural trace equality. Eight selected cases (distinct-
-and same-bank loads, loads after stores, both terminal branch reversals,
-cross-line return, and fill forwarding) also matched **16,468** pinned-QEMU
-architectural groups in total. Artifacts are under
-`/home/yukidama/ventium-background-sep28.B3cxzoKA/p54_ipc_combined_{ab,qemu}/`.
-The combined full-PC binary SHA-256 is
-`c415fceed23beefbbcc21be0ce9a7e9c3f01bba16f363652a300328074154cf4`;
-it completed a five-million-clock cold-start smoke run on each guest disk.
-Longer cold Win95 and Quake runs were then launched on that exact binary, one
-CPU each, under `win95_ipc_cold/` and `quake_ipc_cold/` in the same artifact
-root. Their outcomes and gameplay IPC are **not yet known**; neither the
-directed IPC nor the smoke runs satisfy gameplay or full gate acceptance.
+The matched-source full-P5 `l1axi_kv_full` A/B, built with these exact base and
+candidate define inventories, passed all 33 cases at 400 iterations and 32
+simulator jobs: **12 faster, 21 unchanged, 0 slower**, with full
+candidate/control architectural trace equality. Ten selected cases matched
+**21,288** pinned-QEMU architectural groups, including dual loads, post-store
+loads, FP/integer overlap, terminal branch reversals, cross-line return and
+fill overlap. Directed examples: distinct-bank loads **4→2**, same-bank loads
+**4→3**, target branch plus load **6→4** clocks/iteration. Artifacts are under
+`/home/yukidama/ventium-background-sep28.B3cxzoKA/p54_ipc_matched_ab/`.
+The current-source matched control binary SHA-256 is
+`5fb608a1cf8ca51a9d8cd80c57110f2f2c1fc7fee9d64585b0d639c1310d20d8`;
+the corrected candidate is
+`1c042ed92c62198cbb44b2e290e46839095be59180f3b2d246cd557174ed83f4`.
+Cold Win95 and Quake runs on the corrected candidate are in
+`win95_ipc_matched/` and `quake_ipc_matched/`, one CPU each. Their outcomes
+and gameplay IPC are **not yet known**. This is not full verification or
+routed-FPGA timing evidence.
 
-An exploratory add-on using the earlier opt-in FP async/queue path plus
-`VEN_FP_REG_ADMIT` and `VEN_FP_ARITH_FWD` was tested separately, **not added to
-`ven-ipc`**. Against the combined profile, all 33 architectural A/B traces
-matched and only `fp_integer_overlap` changed: 8 to 6 clocks per six-instruction
-iteration, with 2,411 architectural groups matching pinned QEMU. However the
-stricter 12-case FP/integer overlap gate failed its unchanged FADD-memory and
-FMUL-memory timing requirements: both serial and overlap schedules took 1,485
-warm clocks despite witnessed concurrent integer retirement. Do not promote
-this add-on as a general performance fix based on the one faster loop.
-Artifacts: `p54_ipc_fp_ab/` and `fp_overlap_combined.log` in the same artifact
-root.
+The earlier `c415fcee...` preliminary build and its
+`p54_ipc_combined_{ab,qemu}/`, `p54_ipc_fp_ab/`, and `fp_overlap_combined.log`
+artifacts used the conservative `ven` define base. It omitted **54** defines
+present in the measured gameplay build, including single-fill and the FP
+queue. Its 22 faster directed loops and the separate FP loop's 8→6 result
+remain local diagnostics, **not a gameplay-comparable A/B**. Its two cold jobs
+were stopped at approximately 123M/124M clocks after the mismatch was found;
+they are not boot or gameplay evidence. The preliminary 12-case FP overlap
+gate also failed its existing FADD/FMUL-memory savings requirements, despite
+architectural equality and observed concurrent integer retirement. Retain
+that failure; do not reinterpret the single faster loop as a gate pass.

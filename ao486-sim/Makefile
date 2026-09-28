@@ -105,29 +105,79 @@ ven:
 	@echo "built (ventium-swapped cosim): $(REPO)/$(VEN_OBJDIR)/$(VEN_EXE)"
 	@echo "run from the ao486-sim/ CWD (the BIOS ROMs load via ../3rd-party paths)."
 
-# IPC development candidate, deliberately separate from the conservative
-# `ven` boot/bitstream profile and its native snapshot ABI.  Each option has
-# passed bounded directed architectural tests; their conjunction and broad
-# gameplay performance have NOT yet been qualified.  Keep this build in a
-# dedicated object directory so a short experiment cannot overwrite the
-# canonical full-PC binary or make old native snapshots appear compatible.
+# Exact effective-define inventory of the measured 229c4cd5 gameplay binary
+# (obj_dir_p54_structural_sep27/model/Vsystem__verFiles.dat).  This is separate
+# from the conservative `ven` target: in particular, the ao486 DDR backend was
+# already qualified with a single fill and downstream critical-word streaming.
+# Accidentally falling back to `ven` doubles cache-line reads and would make a
+# new gameplay IPC comparison meaningless. Keep the measured set frozen here;
+# new experiments belong in VEN_IPC_DEFS below.
+VEN_GAMEPLAY_229C_DEFS := +define+VEN_AO486_SINGLE_FILL +define+VEN_BCD_ITER \
+  +define+VEN_BTB_PIPE +define+VEN_CORE +define+VEN_DBG_CORE \
+  +define+VEN_DTLB_ASSOC_2WAY +define+VEN_FAST_MEM_ADC \
+  +define+VEN_FAST_MEM_ADD +define+VEN_FAST_MEM_ADD7 \
+  +define+VEN_FAST_MEM_ALU +define+VEN_FAST_MEM_MOV7 \
+  +define+VEN_FAST_MOFFS_STORE +define+VEN_FAST_RETRACE \
+  +define+VEN_FPREM +define+VEN_FP_ARITH_FWD +define+VEN_FP_ARITH_STREAM \
+  +define+VEN_FP_ASYNC +define+VEN_FP_ASYNC_BRANCH \
+  +define+VEN_FP_ASYNC_EARLY +define+VEN_FP_ASYNC_MEM \
+  +define+VEN_FP_ASYNC_STREAM +define+VEN_FP_FXCH_QUEUE \
+  +define+VEN_FP_LOAD64 +define+VEN_FP_LOAD_EARLY_CMD \
+  +define+VEN_FP_MEM_ADMIT +define+VEN_FP_MEM_LOADS \
+  +define+VEN_FP_MEM_QUEUE +define+VEN_FP_MISC_EARLY_DONE \
+  +define+VEN_FP_OPERAND_OVERLAP +define+VEN_FP_PC_RELAX \
+  +define+VEN_FP_PIPE +define+VEN_FP_PIPE2 +define+VEN_FP_REG_ADMIT \
+  +define+VEN_FP_SHARED +define+VEN_FP_SHARED_DIRECT \
+  +define+VEN_FP_SHARED_EARLY_CMD +define+VEN_IC_BRAM \
+  +define+VEN_IDIV_ITER +define+VEN_KBC_FAST +define+VEN_KBD_AUTOACK \
+  +define+VEN_KV260_SOC +define+VEN_L1D_FILL_FORWARD \
+  +define+VEN_L1D_HIT_UNDER_FILL +define+VEN_L1D_PERF \
+  +define+VEN_L1D_TAG_INVALIDATE +define+VEN_L1D_WINDOW_KEEP_STORE \
+  +define+VEN_L1D_WINDOW_REUSE +define+VEN_L1_AXI \
+  +define+VEN_L1_HONOR_CD +define+VEN_L2_PERF +define+VEN_L2_STREAM_ANY \
+  +define+VEN_L2_STREAM_CWF +define+VEN_LOAD_USE_FORWARD \
+  +define+VEN_PERF_PROFILE +define+VEN_PIPE_MEM_CHAIN \
+  +define+VEN_PIPE_SDECODE +define+VEN_REP_MOVS_CONT \
+  +define+VEN_REP_MOVS_LOAD_FUSE +define+VEN_REP_MOVS_STREAM \
+  +define+VEN_SEG_ENFORCE +define+VEN_SFETCH_RESIDENT \
+  +define+VEN_SLOWOP_PERF +define+VEN_SRT_ITER \
+  +define+VEN_STORE_DISPATCH +define+VEN_SYS_FASTLOAD_BOUNDED \
+  +define+VEN_SYS_FASTLOAD_FLAT +define+VEN_SYS_FASTPATH \
+  +define+VEN_SYS_FASTPATH_RELOC +define+VEN_SYS_FASTSTORE_FLAT \
+  +define+VEN_TRANSCENDENTAL +define+VEN_UOPCACHE \
+  +define+VEN_UOPCACHE_CHECK +define+VEN_UOP_16_SLOTS \
+  +define+VEN_UOP_CROSS2 +define+VEN_UOP_CROSSLINE \
+  +define+VEN_UOP_CROSSPAIR +define+VEN_UOP_CROSS_INDEX \
+  +define+VEN_UOP_EXEC_REPAIR +define+VEN_UOP_FWAIT_FETCH \
+  +define+VEN_UOP_FWAIT_HINT +define+VEN_UOP_REPAIR_FAIR \
+  +define+VEN_UOP_SFETCH +define+VEN_UOP_TAIL_LOCAL \
+  +define+VEN_VGA_FULL_STORE_SETUP +define+VEN_VGA_WIDE_STORE
+
+.PHONY: ven-gameplay-base
+ven-gameplay-base:
+	cd $(REPO) && $(VERILATOR) $(VFLAGS) \
+	  -LDFLAGS "-lz" \
+	  -Mdir ao486-sim/obj_dir_ven_gameplay_base -o ao486sim_ven_gameplay_base \
+	  $(VEN_GAMEPLAY_229C_DEFS) \
+	  -f rtl_ven_core.f -f rtl_ven_soc.f $(VEN_SRCS)
+	@echo "built matched-source gameplay base: $(REPO)/ao486-sim/obj_dir_ven_gameplay_base/ao486sim_ven_gameplay_base"
+
+# IPC development candidate: the exact measured gameplay profile plus only
+# these new structural cache/dual-load options. Native snapshots of the older
+# binary are incompatible; qualification must cold-boot private disk copies.
+# This does not change `ven` or claim the new options are FPGA-routed.
 VEN_IPC_DEFS := +define+VEN_L1D_BANKED_DATA +define+VEN_L1D_BANK0_SHARED_XLINE \
-  +define+VEN_L1D_FILL_FORWARD +define+VEN_L1D_CODE_BUFFER \
-  +define+VEN_L1D_CODE_STREAM +define+VEN_L1D_WINDOW_REUSE \
+  +define+VEN_L1D_CODE_BUFFER +define+VEN_L1D_CODE_STREAM \
   +define+VEN_L1D_TWO_WINDOW_REUSE +define+VEN_P54_DUAL_HIT \
   +define+VEN_P54_DUAL_HIT_LEGACY_CAPTURE +define+VEN_P54_DUAL_LOAD_PAIR \
   +define+VEN_P54_DUAL_LOAD_PRIME +define+VEN_PIPE_BRANCH_LOAD_PRIME \
-  +define+VEN_FAST_MEM_ALU +define+VEN_PIPE_SDECODE \
-  +define+VEN_UOP_EXEC_REPAIR +define+VEN_UOP_CROSSLINE \
-  +define+VEN_UOP_CROSS2 +define+VEN_UOP_CROSS_INDEX \
-  +define+VEN_UOP_CROSSPAIR +define+VEN_UOP_REPAIR_FAIR \
-  +define+VEN_UOPCACHE_CHECK
+  +define+VEN_PIPE_REG_LOAD_PRIME
 .PHONY: ven-ipc
 ven-ipc:
 	cd $(REPO) && $(VERILATOR) $(VFLAGS) \
 	  -LDFLAGS "-lz" \
 	  -Mdir ao486-sim/obj_dir_ven_ipc -o ao486sim_ven_ipc \
-	  $(VEN_DEFS) $(VEN_IPC_DEFS) \
+	  $(VEN_GAMEPLAY_229C_DEFS) $(VEN_IPC_DEFS) \
 	  -f rtl_ven_core.f -f rtl_ven_soc.f $(VEN_SRCS)
 	@echo "built IPC candidate: $(REPO)/ao486-sim/obj_dir_ven_ipc/ao486sim_ven_ipc"
 
