@@ -2,7 +2,7 @@
 # Invoke only through fpga/run_vivado_exclusive.sh, with an outer timeout.
 # This does not close top-level timing or establish gameplay performance.
 if {[llength $argv] != 2} {
-    error "usage: -tclargs packed|banked|banked_shared0|paired|code_buffer|code_stream|code_stream_reuse|code_stream_reuse_shared0 OUTPUT_DIRECTORY"
+    error "usage: -tclargs packed|packed_ff|banked|banked_shared0|paired|code_buffer|code_stream|code_stream_reuse|code_stream_reuse_shared0|code_stream_reuse_shared0_huf|code_stream_reuse_shared0_ff|code_stream_reuse_shared0_huf_ff OUTPUT_DIRECTORY"
 }
 set variant [lindex $argv 0]
 set output_dir [file normalize [lindex $argv 1]]
@@ -11,6 +11,7 @@ set_param general.maxThreads 1
 set defines {}
 switch -- $variant {
     packed {}
+    packed_ff {set defines {VEN_L1D_FILL_FORWARD}}
     banked {set defines {VEN_L1D_BANKED_DATA}}
     banked_shared0 {set defines {VEN_L1D_BANKED_DATA VEN_L1D_BANK0_SHARED_XLINE}}
     paired {set defines {VEN_L1D_BANKED_DATA VEN_P54_DUAL_HIT}}
@@ -18,6 +19,9 @@ switch -- $variant {
     code_stream {set defines {VEN_L1D_BANKED_DATA VEN_L1D_CODE_BUFFER VEN_L1D_CODE_STREAM}}
     code_stream_reuse {set defines {VEN_L1D_BANKED_DATA VEN_L1D_CODE_BUFFER VEN_L1D_CODE_STREAM VEN_L1D_WINDOW_REUSE}}
     code_stream_reuse_shared0 {set defines {VEN_L1D_BANKED_DATA VEN_L1D_CODE_BUFFER VEN_L1D_CODE_STREAM VEN_L1D_WINDOW_REUSE VEN_L1D_BANK0_SHARED_XLINE}}
+    code_stream_reuse_shared0_huf {set defines {VEN_L1D_BANKED_DATA VEN_L1D_CODE_BUFFER VEN_L1D_CODE_STREAM VEN_L1D_WINDOW_REUSE VEN_L1D_BANK0_SHARED_XLINE VEN_L1D_HIT_UNDER_FILL}}
+    code_stream_reuse_shared0_ff {set defines {VEN_L1D_BANKED_DATA VEN_L1D_CODE_BUFFER VEN_L1D_CODE_STREAM VEN_L1D_WINDOW_REUSE VEN_L1D_BANK0_SHARED_XLINE VEN_L1D_FILL_FORWARD}}
+    code_stream_reuse_shared0_huf_ff {set defines {VEN_L1D_BANKED_DATA VEN_L1D_CODE_BUFFER VEN_L1D_CODE_STREAM VEN_L1D_WINDOW_REUSE VEN_L1D_BANK0_SHARED_XLINE VEN_L1D_HIT_UNDER_FILL VEN_L1D_FILL_FORWARD}}
     default {error "unknown variant $variant"}
 }
 file mkdir $output_dir

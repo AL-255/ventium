@@ -428,3 +428,30 @@ The isolated L1D and paired-owner suites additionally cover crossing data,
 first-line reuse rejection and U/V ownership. See the matched
 [L1D synthesis report](../../fpga/P54_L1D_LEAF_SYNTH_2026-09-27.md) for FPGA
 resource/timing evidence and the remaining gameplay qualification caveat.
+
+The next two cases isolate L1 fill overlap without changing cache size or
+instruction work. `resident_hit_under_fill` (31) thrashes three same-set
+lines, then reads a resident different-set line while the last fill drains.
+`landed_word_forward` (32) reads the next word of a newly filling line before
+starting the other misses. Use `--iterations 400 --jobs 32` with a matched
+`--control` binary for the bounded cycle A/B. Passing `--qemu` with the pinned
+QEMU binary and `--qemu-cases resident_hit_under_fill landed_word_forward`
+additionally emits functional
+RTL traces and checks their complete architectural state against QEMU; the
+driver seeds RTL's initial ESP from the QEMU trace, rather than incorrectly
+comparing two different process stacks.
+
+In the September 28 banked and packed storage A/B runs, fill-forward alone
+reduced case 32 from **62 to 60 cycles per six-instruction iteration**;
+case 31 stayed at 63. Enabling hit-under-fill as well reduced case 31 from
+**63 to 60**, with case 32 still at 60. All 33 candidate/control traces
+matched architecturally, and the other 31 cases had identical cycles. Both
+new cases matched **2,409** pinned-QEMU records each in functional mode for
+the FF-only builds. Artifacts are in
+`/home/yukidama/ventium-background-sep28.B3cxzoKA/p54_{huf_ff,ff_only,packed_ff}_ab/`.
+These loops deliberately overrepresent cache misses; their IPC is directed
+performance evidence, **not measured gameplay IPC**. The matched
+[FPGA leaf report](../../fpga/P54_L1D_LEAF_SYNTH_2026-09-27.md) finds FF
+area-favorable in both storage layouts, but hit-under-fill expensive. Neither
+option has yet passed full-PC cold boot, Win95, Quake or routed timing on the
+exact candidate, so neither was added to a release define set.

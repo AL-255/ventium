@@ -49,6 +49,8 @@ CASES = {
     "dual_load_after_store": (BASE, 28),
     "dual_load_after_store_same_bank": (BASE, 29),
     "resident_xline_return": (BASE, 30),
+    "resident_hit_under_fill": (BASE, 31),
+    "landed_word_forward": (BASE, 32),
 }
 
 
@@ -133,6 +135,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", type=Path, help="candidate tb_ventium with VEN_L1_AXI")
     parser.add_argument("--control", type=Path, help="matched A/B control binary")
+    parser.add_argument("--qemu", type=Path, help="pinned qemu-i386 for selected functional differential cases")
+    parser.add_argument("--qemu-cases", nargs="+", choices=CASES,
+                        help="cases to compare against full architectural QEMU traces")
     parser.add_argument("--assemble-only", action="store_true")
     parser.add_argument("--iterations", type=int, default=1000)
     parser.add_argument("--jobs", type=int, default=min(32, os.cpu_count() or 1),
@@ -141,6 +146,8 @@ def main():
     args = parser.parse_args()
     if not args.assemble_only and args.binary is None:
         parser.error("--binary is required unless --assemble-only is used")
+    if args.qemu_cases and (args.assemble_only or args.qemu is None):
+        parser.error("--qemu-cases needs --qemu and an RTL --binary")
     if not 102 <= args.iterations <= 10000:
         parser.error("iterations must be between 102 and 10000")
     if not 1 <= args.jobs <= 32:
@@ -215,6 +222,29 @@ def main():
                     deadline, directory / "architectural-ab.log")
                 results[name]["architectural_ab_equal"] = True
             print("All directed candidate/control architectural traces match.", flush=True)
+        for index, name in enumerate(args.qemu_cases or []):
+            flat, _, per_loop = prepared[name]
+            directory = out / name
+            golden = directory / "qemu.vtrace"
+            functional = directory / "candidate_func.vtrace"
+            run([sys.executable, ROOT / "verif/qemu-trace/gen_trace.py",
+                 "--qemu", args.qemu.resolve(), "--elf", directory / "test.elf",
+                 "--out", golden, "--max-insn", args.iterations * per_loop + 128,
+                 "--port", 28351 + index], deadline, directory / "qemu.log")
+            golden_records = tracefmt.read_trace(str(golden)).records
+            assert golden_records, (name, "empty QEMU trace")
+            init_esp = golden_records[0]["esp"]
+            run([args.binary.resolve(), "--l1-axi", "--image", flat,
+                 "--load", "0x08048000", "--entry", "0x08048000",
+                 "--init-esp", init_esp, "--out", functional,
+                 "--max-insn", args.iterations * per_loop + 128,
+                 "--max-cycles", "200000", "--quiesce", "1000"],
+                deadline, directory / "candidate_func.log")
+            run([sys.executable, ROOT / "verif/diff/compare_stream.py",
+                 golden, functional], deadline, directory / "qemu_diff.log")
+            results[name]["qemu_architectural_equal"] = True
+            print(f"{name}: {len(golden_records)} architectural groups match pinned QEMU",
+                  flush=True)
         (out / "results.json").write_text(json.dumps(results, indent=2) + "\n")
         print("Diagnostic only: no full verification or gameplay claim.", flush=True)
     print("P54-IPC-MICRO-OK", flush=True)

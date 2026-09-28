@@ -209,3 +209,47 @@ crossing-read → first-line word-zero → next-line word-zero loop (5.000 cycle
 per five-instruction iteration in both builds). This does not establish
 no regression for every gameplay access pattern: a crossing capture cannot
 be reused as a complete first line, and no candidate gameplay result exists.
+
+## Fill overlap cost split (September 28)
+
+The existing default-off `VEN_L1D_FILL_FORWARD` and
+`VEN_L1D_HIT_UNDER_FILL` were measured separately before any production
+promotion. These are matched Vivado 2025.2 OOC syntheses of the same RTL hash
+above, with the same 45 MHz clock constraint. All rows have zero BRAM.
+
+| Storage / option | Total LUTs | LUTRAMs | FFs | Synth WNS | Implied constrained leaf register-path MHz |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| packed baseline | 12,015 | 2,480 | 6,155 | +17.500 ns | ~212 |
+| packed + fill-forward | 11,399 | 2,480 | 6,166 | +17.620 ns | ~217 |
+| banked shared-zero baseline, code stream/window | 10,785 | 2,048 | 6,404 | +17.635 ns | ~218 |
+| same + fill-forward | 10,705 | 2,048 | 6,408 | +17.640 ns | ~218 |
+| same + hit-under-fill | 12,008 | 2,048 | 6,415 | +17.557 ns | ~214 |
+| same + both | 12,021 | 2,048 | 6,414 | +17.561 ns | ~215 |
+
+The packed pair and banked group are separate matched comparisons; do not
+attribute their between-group difference solely to storage because the banked
+group also enables code buffering/streaming and window reuse. `fill-forward`
+costs **616 fewer LUTs** than packed baseline or **80 fewer LUTs** than its
+banked baseline, whereas hit-under-fill costs **1,223 more LUTs** in the banked
+profile. Synthesis-only frequency and slack are not routed core/board Fmax.
+Artifacts: `/home/yukidama/ventium-background-sep28.B3cxzoKA/l1d_{packed_base,packed_ff,huf_leaf,ff_leaf,huf_ff_leaf}/`, with banked baseline in
+`l1d_bank0_shared/`. Each run was single-Vivado and capped below ten minutes;
+no orphan Vivado process remained afterward.
+
+Two new six-instruction fixed-work loops force three lines into one two-way
+set. With both options, the resident different-set load after a miss falls
+from **63 to 60** clocks/iteration; the already-landed same-line word falls
+from **62 to 60**. With fill-forward *alone*, only the landed-word loop
+improves (62→60); the other remains 63. All 33 full-core candidate/control
+cycle benchmarks have architectural trace equality; the other 31 have exact
+cycle equality. In both the packed and banked full-core FF-only profiles,
+each new case additionally matched **2,409** pinned-QEMU architectural
+records. The full L1D gate passed with packed and banked FF/window/code-buffer
+combinations, including snoop and partial-fill checks. Details and commands
+are in [`verif/bench/README.md`](../verif/bench/README.md).
+
+**Decision:** fill-forward alone is the area-efficient option to carry into
+the next full-PC/FPGA candidate; leave hit-under-fill opt-in pending stronger
+gameplay value or a substantial logic reduction. Neither option is promoted
+to the boot/bitstream default by these leaf and short-loop results. No new
+gameplay IPC, routed frequency, Win95 boot or Quake result is claimed.

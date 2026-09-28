@@ -66,6 +66,12 @@ run_one 64  "-DVEN_L1D_HIT_UNDER_FILL -DVEN_L1D_FILL_FORWARD -DVEN_L1D_WINDOW_RE
 # reuse enabled, at both supported set counts.
 run_one 128 "-DVEN_L1D_BANKED_DATA -DVEN_L1D_BANK0_SHARED_XLINE -DVEN_L1D_WINDOW_REUSE" "BANK0_SHARED_XLINE"
 run_one 64  "-DVEN_L1D_BANKED_DATA -DVEN_L1D_BANK0_SHARED_XLINE -DVEN_L1D_WINDOW_REUSE" "BANK0_SHARED_XLINE"
+# Qualify landed-word forwarding against the complete resident-window and
+# code-buffer datapaths, in both the packed release storage and banked FPGA
+# candidate. This TB keeps c_code low; code-fill stream behavior has its own
+# gate, while these runs stress data fill/snoop/response ownership.
+run_one 128 "-DVEN_L1D_FILL_FORWARD -DVEN_L1D_WINDOW_REUSE -DVEN_L1D_CODE_BUFFER -DVEN_L1D_CODE_STREAM" "PACKED_FF_WINDOW_CODE"
+run_one 128 "-DVEN_L1D_BANKED_DATA -DVEN_L1D_BANK0_SHARED_XLINE -DVEN_L1D_FILL_FORWARD -DVEN_L1D_WINDOW_REUSE -DVEN_L1D_CODE_BUFFER -DVEN_L1D_CODE_STREAM" "BANKED_FF_WINDOW_CODE"
 # REVIEW1_Aug2 H-07: the finding lives in the VEN_L1_HONOR_CD build -- that is the
 # configuration where BYPASS_RD_EN was 0 and a non-cacheable read of a resident line
 # was served from the ARRAY (stale post-CD data; for MMIO, duplicated or suppressed

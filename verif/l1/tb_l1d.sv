@@ -52,7 +52,11 @@ module tb_l1d;
 `endif
 .clk, .rst_n, .flush_all(1'b0), .golden(1'b0),
                .cacheable, .snoop_inv_valid, .snoop_inv_addr,
-               .c_req, .c_we, .c_addr, .c_wdata, .c_wstrb, .c_rdata, .c_ack,
+               .c_req, .c_we,
+`ifdef VEN_L1D_CODE_BUFFER
+               .c_code(1'b0),
+`endif
+               .c_addr, .c_wdata, .c_wstrb, .c_rdata, .c_ack,
                .dbg_serve(),                       // M-17: diagnostic only
 
                .m_req, .m_we, .m_addr, .m_wdata, .m_wstrb, .m_rdata, .m_ack,

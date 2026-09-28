@@ -193,6 +193,21 @@ loop_body:
     movl 30(%esi), %eax
     movl (%esi), %edx
     movl 32(%esi), %edi
+.elseif CASE == 31
+    # Three same-set lines exceed the 2-way P5 L1D, so the third source
+    # starts a fill each iteration. The final load is a resident different-
+    # set line: hit-under-fill should serve it while the tail drains.
+    movl (%esi), %eax
+    movl 4096(%esi), %edx
+    movl 8192(%esi), %eax
+    movl (%edi), %edx
+.elseif CASE == 32
+    # Same three-line thrash, but consume the just-returned line's next word
+    # before starting the second miss. This isolates landed-word forwarding.
+    movl (%esi), %eax
+    movl 4(%esi), %ebx
+    movl 4096(%esi), %edx
+    movl 8192(%esi), %eax
 .else
     .error "unsupported CASE"
 .endif
@@ -217,4 +232,7 @@ arena:
     .long 0x90abcdef
 .endif
     .long 0x50607080
+.if CASE == 31 || CASE == 32
+    .space 8192
+.endif
 .section .note.GNU-stack,"",@progbits
