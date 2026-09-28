@@ -7,7 +7,9 @@
 // geometries through its top-level WAYS parameter.
 
 module tb_tlb_assoc #(
-    parameter int WAYS = 2
+    parameter int WAYS = 2,
+    parameter int I_SETS = 16,
+    parameter int I_WAYS = 2
 );
   localparam int SETS = 16;
   logic clk = 0;
@@ -54,7 +56,7 @@ module tb_tlb_assoc #(
       .fill_perm(d_fill_perm), .fill_big(d_fill_big), .fill_dirty(d_fill_dirty),
       .flush_en(d_flush_en)
   );
-  tlb_assoc #(.IS_D(1'b0), .TLB_SETS(SETS), .TLB_WAYS(2)) u_itlb (
+  tlb_assoc #(.IS_D(1'b0), .TLB_SETS(I_SETS), .TLB_WAYS(I_WAYS)) u_itlb (
 `ifdef VEN_PIPE_MEM_CHAIN
       .next_lin(32'd0), .next_hit(), .next_phys(), .next_perm(), .next_dirty(),
 `endif
@@ -321,6 +323,19 @@ module tb_tlb_assoc #(
     // not share D-side state.
     i_fill(mk_lin(4'h2, 16'h6600, 12'h111), 20'h19000, 3'b100, 1'b0, 1'b1);
     i_probe("I dirty suppression", mk_lin(4'h2, 16'h6600, 12'h111), 32'h19000111, 3'b100);
+    if (I_SETS == 8 && I_WAYS == 4) begin
+      for (int w = 0; w < 4; w++)
+        i_fill(32'((w+1)*'h10000), 20'('h1a000+w), 3'b101, 1'b0, 1'b0);
+      for (int w = 0; w < 4; w++)
+        i_probe($sformatf("four-way I alias %0d", w),
+                32'((w+1)*'h10000), 32'(('h1a000+w)<<12), 3'b101);
+      i_fill(32'h50000, 20'h1a005, 3'b101, 1'b0, 1'b0);
+      @(negedge clk); i_lk_lin <= 32'h10000;
+      #1;
+      ck_bit("four-way I victim miss", i_lk_hit, 1'b0);
+      i_probe("four-way I newcomer", 32'h50000, 32'h1a005000, 3'b101);
+      $display("ITLB-ASSOC-GATE-OK (8-set, 4-way conflict and replacement)");
+    end
 
     // Short deterministic randomized model sweep: mixed sets, fills, lookups,
     // same-VPN refills, big entries, and flushes.  Every lookup compares all

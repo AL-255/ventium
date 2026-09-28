@@ -6,9 +6,9 @@
 //
 // This is deliberately a SEPARATE module from tlb.sv.  The deployed/default
 // core continues to instantiate the 16-entry direct-map array verbatim; the
-// core selects this module only under VEN_DTLB_ASSOC_2WAY or
-// VEN_DTLB_ASSOC_4WAY.  That makes a capacity/associativity experiment unable
-// to perturb the established baseline through a refactor of its lookup or
+// core selects this module only under VEN_DTLB_ASSOC_2WAY,
+// VEN_DTLB_ASSOC_4WAY, or VEN_ITLB_ASSOC_4WAY. That keeps an associative
+// capacity experiment from perturbing the established baseline lookup or
 // write-port semantics.
 //
 // The original experiment is D-only 16 sets x {2,4} ways. Its set selector is

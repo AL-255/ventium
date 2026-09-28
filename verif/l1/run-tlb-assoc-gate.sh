@@ -20,4 +20,16 @@ for ways in 2 4; do
     grep -q "TLB-ASSOC-GATE-OK (${ways}-way)" <<<"$OUT" \
         || { echo "TLB-ASSOC-GATE-FAIL (${ways}-way run)"; exit 1; }
 done
-echo "== associative TLB gate PASS (2-way + 4-way) =="
+exe=tb_tlb_assoc_itlb_4way
+log="$OBJ/${exe}.log"
+"$ROOT/tools/verilator_serial.sh" -j "${VL_J:-1}" --binary --assert -sv \
+    -Wno-WIDTH -Wno-UNUSED -Wno-DECLFILENAME -Wno-INITIALDLY \
+    -Wno-IMPLICITSTATIC -Wno-TIMESCALEMOD --top-module tb_tlb_assoc \
+    -GWAYS=4 -GI_SETS=8 -GI_WAYS=4 -Mdir "$OBJ/$exe" -o "$exe" \
+    "$ROOT/rtl/mem/tlb_assoc.sv" "$ROOT/verif/l1/tb_tlb_assoc.sv" \
+    >"$log" 2>&1 \
+    || { echo "TLB-ASSOC-GATE-FAIL (I four-way build)"; tail -30 "$log"; exit 1; }
+OUT="$("$OBJ/$exe/$exe" 2>&1)"; echo "$OUT"
+grep -q 'ITLB-ASSOC-GATE-OK' <<<"$OUT" \
+    || { echo "TLB-ASSOC-GATE-FAIL (I four-way run)"; exit 1; }
+echo "== associative TLB gate PASS (D 2-way/4-way + I 4-way) =="

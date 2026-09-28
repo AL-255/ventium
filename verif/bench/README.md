@@ -22,6 +22,27 @@ cycles per loop in `results.json`. It checks loop and exit completion. With a
 control binary, it also compares the full architectural traces for every case.
 This A/B check is **not** QEMU differential verification or a gameplay IPC result.
 
+The opt-in `VEN_ITLB_ASSOC_4WAY` configuration changes only the I-TLB from
+16 direct-mapped entries to 32 entries in eight four-way sets. It is not in the
+default or gameplay profile. Its dedicated PSE/alias witness is
+`run-p54-itlb-assoc-micro.sh CONTROL_TB CANDIDATE_TB [ITERATIONS]`: the binaries
+must be matched except for that define. The script builds a four-page BIOS
+workload, compares candidate retirement state with pinned QEMU, checks
+control/candidate architectural equivalence, and measures a warm fixed-work
+window. With the September 28 shadow-window and four-way D-TLB profile, the
+cache-enabled 200-iteration witness measured **21 to 21 clocks/iteration**
+(2,079 warm clocks, 1,386 warm retired instructions), and the 36-case user-mode
+A/B matrix was unchanged. An earlier fixture left CR0.CD/NW set at reset and
+appeared to improve 95 to 87 clocks/iteration (9,405 to 8,613 warm clocks), but
+that was an uncached-I-fetch stress test, not representative cached code. With
+caching enabled, both configurations do only the initial I-side walks; the
+larger TLB has no steady-state benefit in this witness. Therefore the option
+is **not promoted** into the gameplay or FPGA profile. A workload with more
+than I-cache capacity and enough conflicting I-TLB pages, plus FPGA area/timing
+and full-PC qualification, is needed before promotion. `tools/pipeviz` displays
+only the first 16 TLB entries, so it cannot fully visualize this optional
+geometry; crossover state injection invalidates all entries dynamically.
+
 The matched frontend ladder on the banked code-buffer/stream L1 is especially
 diagnostic. With the same fast-ADD and system-fastpath base flags, raw decode
 takes **2 cycles per four-instruction** line-straddling loop. Adding only

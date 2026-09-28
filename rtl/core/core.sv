@@ -8897,7 +8897,13 @@ module core
   // by xlate_miss / perm_fault AND, via mem_xlate, the bus post-translate, since
   // cur_lin == mem_addr in every translatable state). The fill is routed to the
   // matching side by walk_for_d (tlb_fill_is_d); flush hits both on a CR3 write.
+  // The P54 I-side option uses 32 entries in eight four-way sets. Keep its
+  // instance name stable for the debug and state-crossover surfaces.
+`ifdef VEN_ITLB_ASSOC_4WAY
+  tlb_assoc #(.IS_D(1'b0), .TLB_SETS(8), .TLB_WAYS(4)) u_itlb (
+`else
   tlb #(.IS_D(1'b0), .TLB_ENTRIES(TLB_ENTRIES)) u_itlb (
+`endif
       .clk(clk), .rst_n(rst_n),
       .lk_lin(cur_lin),  .lk_hit(itlb_lk_hit), .lk_phys(itlb_lk_phys),
       .lk_perm(itlb_lk_perm), .lk_dirty(itlb_lk_dirty),
