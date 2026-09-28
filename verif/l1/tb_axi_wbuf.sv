@@ -28,7 +28,7 @@ module tb_axi_wbuf;
   logic [1:0]  m_rd_size = 2'd2;
   logic        m_ack, bus_err, shutdown = 1'b0, m_idle;
 `ifdef VEN_P54_DUAL_STORE_PAIR
-  logic m_pair_req = 1'b0, m_pair_ack;
+  logic m_pair_req = 1'b0, m_pair_ready, m_pair_ack;
   logic [31:0] m_pair_addr = '0, m_pair_wdata = '0;
   logic [3:0] m_pair_wstrb = '0;
 `endif
@@ -57,7 +57,8 @@ module tb_axi_wbuf;
       .core_clk(clk), .core_rst_n(rst_n), .axi_clk(clk), .axi_rst_n(rst_n),
       .m_req, .m_we, .m_addr, .m_rd_narrow, .m_rd_size, .m_wdata, .m_wstrb,
 `ifdef VEN_P54_DUAL_STORE_PAIR
-      .m_pair_req, .m_pair_addr, .m_pair_wdata, .m_pair_wstrb, .m_pair_ack,
+      .m_pair_req, .m_pair_addr, .m_pair_wdata, .m_pair_wstrb,
+      .m_pair_ready, .m_pair_ack,
 `endif
       .m_rdata, .m_ack, .bus_err, .shutdown, .m_idle,
       .m_axi_awid(awid), .m_axi_awaddr(awaddr), .m_axi_awlen(awlen), .m_axi_awsize(awsize),
@@ -213,7 +214,7 @@ module tb_axi_wbuf;
     m_pair_addr <= 32'h0000_0014;
     m_pair_wdata <= 32'h2222_2222; m_pair_wstrb <= 4'hf;
     #1;
-    if (!m_ack || !m_pair_ack) fail("initial pair not admitted");
+    if (!m_pair_ready || !m_ack || !m_pair_ack) fail("initial pair not admitted");
     @(posedge clk);
     @(negedge clk);
     m_req <= 1'b0; m_we <= 1'b0; m_pair_req <= 1'b0;
@@ -234,7 +235,7 @@ module tb_axi_wbuf;
     m_pair_addr <= 32'h0000_001c;
     m_pair_wdata <= 32'h4444_4444;
     repeat (3) @(posedge clk);
-    if (m_ack || m_pair_ack || aw_seen != 3'd2)
+    if (m_pair_ready || m_ack || m_pair_ack || aw_seen != 3'd2)
       fail("bad B allowed a younger pair to admit or launch");
     if (errors == 0) $display("AXIWBUF-PAIR-ERROR-GATE-OK");
     else             $display("AXIWBUF-PAIR-ERROR-GATE-FAIL (%0d errors)", errors);
@@ -323,7 +324,8 @@ module tb_axi_wbuf;
     m_pair_wdata <= 32'h2222_2222;
     m_pair_wstrb <= 4'hf;
     #1;
-    if (!m_ack || !m_pair_ack) fail("empty two-slot pair was not admitted atomically");
+    if (!m_pair_ready || !m_ack || !m_pair_ack)
+      fail("empty two-slot pair was not admitted atomically");
     @(posedge clk);
     @(negedge clk);
     m_req <= 1'b0; m_we <= 1'b0; m_pair_req <= 1'b0;
@@ -356,7 +358,7 @@ module tb_axi_wbuf;
     m_pair_wdata <= 32'h3333_3333;
     m_pair_wstrb <= 4'hf;
     repeat (4) @(posedge clk);
-    if (m_ack || m_pair_ack || dut.wq_count != 1)
+    if (m_pair_ready || m_ack || m_pair_ack || dut.wq_count != 1)
       fail("single free slot accepted one or both members of a pair");
     @(negedge clk) hold_aw <= 1'b0;
     begin
@@ -366,7 +368,8 @@ module tb_axi_wbuf;
         @(posedge clk);
         if (++guard > 80) begin fail("pair not admitted on released head B"); break; end
       end
-      if (m_pair_ack && !m_ack) fail("younger store acked without older store");
+      if (m_pair_ack && (!m_pair_ready || !m_ack))
+        fail("younger store acked without older store or two-slot credit");
     end
     @(negedge clk);
     m_req <= 1'b0; m_we <= 1'b0; m_pair_req <= 1'b0;
@@ -395,7 +398,7 @@ module tb_axi_wbuf;
     m_pair_addr <= 32'h0000_001c;
     m_pair_wdata <= 32'h4444_4444;
     repeat (4) @(posedge clk);
-    if (m_ack || m_pair_ack || dut.wq_count != 2)
+    if (m_pair_ready || m_ack || m_pair_ack || dut.wq_count != 2)
       fail("full two-slot queue accepted another pair");
     @(negedge clk) hold_aw <= 1'b0;
     begin

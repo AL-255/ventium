@@ -370,6 +370,14 @@ module ventium_top
   logic        core_mem_lock_hold;  // local L1/AXI reservation across RMW detours
   logic        core_mem_lock_end;   // one-cycle architectural session completion/abort
   logic [31:0] core_mem_addr, core_mem_wdata;
+`ifdef VEN_P54_DUAL_STORE_PAIR
+`ifndef VEN_L1_AXI
+  initial $fatal(1, "dual-store pair requires VEN_L1_AXI");
+`endif
+  logic        core_store_pair_req, core_store_pair_ready, core_store_pair_ack;
+  logic [31:0] core_store_pair_addr, core_store_pair_wdata;
+  logic [3:0]  core_store_pair_wstrb;
+`endif
   logic [31:0] core_mem_lin;   // task #51: pre-translate linear addr for the SMC snoop
   logic [3:0]  core_mem_wstrb;
   logic [31:0] core_mem_rdata;
@@ -816,6 +824,14 @@ module ventium_top
       .mem_lin      (core_mem_lin),
       .mem_wdata    (core_mem_wdata),
       .mem_wstrb    (core_mem_wstrb),
+`ifdef VEN_P54_DUAL_STORE_PAIR
+      .mem_store_pair_req(core_store_pair_req),
+      .mem_store_pair_addr(core_store_pair_addr),
+      .mem_store_pair_wdata(core_store_pair_wdata),
+      .mem_store_pair_wstrb(core_store_pair_wstrb),
+      .mem_store_pair_ready(core_store_pair_ready),
+      .mem_store_pair_ack(core_store_pair_ack),
+`endif
       .bus_rdata    (core_mem_rdata),
       .bus_ack      (core_mem_ack),
 `ifdef VEN_PIPE_MEM_CHAIN
@@ -1284,6 +1300,9 @@ module ventium_top
   localparam bit L1AXI_NARROW_REPLAY_SAFE = 1'b0;
 `endif
   logic [31:0] l1_c_rdata; logic l1_c_ack; logic l1_bus_err;
+`ifdef VEN_P54_DUAL_STORE_PAIR
+  logic l1_store_pair_ready, l1_store_pair_ack;
+`endif
 `ifdef VEN_FP_LOAD64
   logic [31:0] l1_c_rdata_hi;
   logic        l1_c_rdata_hi_valid;
@@ -1335,6 +1354,14 @@ module ventium_top
       .core_addr (core_mem_addr), .core_lin (core_mem_lin),
       .core_wdata(core_mem_wdata),
       .core_wstrb(core_mem_wstrb),
+`ifdef VEN_P54_DUAL_STORE_PAIR
+      .core_store_pair_req(l1axi_en && core_store_pair_req),
+      .core_store_pair_addr(core_store_pair_addr),
+      .core_store_pair_wdata(core_store_pair_wdata),
+      .core_store_pair_wstrb(core_store_pair_wstrb),
+      .core_store_pair_ready(l1_store_pair_ready),
+      .core_store_pair_ack(l1_store_pair_ack),
+`endif
       .core_rdata(l1_c_rdata),
 `ifdef VEN_FP_LOAD64
       .core_rdata_hi(l1_c_rdata_hi),
@@ -1391,6 +1418,10 @@ module ventium_top
 
   assign core_mem_rdata = l1axi_en ? l1_c_rdata : (bus_mode ? bus_c_rdata : mem_rdata);
   assign core_mem_ack   = l1axi_en ? l1_c_ack   : (bus_mode ? bus_c_ack   : mem_ack);
+`ifdef VEN_P54_DUAL_STORE_PAIR
+  assign core_store_pair_ready = l1axi_en && l1_store_pair_ready;
+  assign core_store_pair_ack = l1axi_en && l1_store_pair_ack;
+`endif
 `ifdef VEN_PIPE_MEM_CHAIN
   assign core_mem_next_ready = l1axi_en && l1_next_ready;
 `endif

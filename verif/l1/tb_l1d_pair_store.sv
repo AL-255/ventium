@@ -13,11 +13,13 @@ module tb_l1d_pair_store;
   logic c_ack, c_pair_ready, c_pair_ack;
   logic snoop_inv_valid = 1'b0;
   logic [31:0] snoop_inv_addr = '0;
-  logic m_req, m_we, m_pair_req, m_rd_narrow, m_ack, m_pair_ack;
+  logic m_req, m_we, m_pair_req, m_rd_narrow, m_ack, m_pair_ready, m_pair_ack;
   logic [31:0] m_addr, m_wdata, m_pair_addr, m_pair_wdata, m_rdata;
   logic [3:0] m_wstrb, m_pair_wstrb;
   logic [1:0] m_rd_size;
   logic block_pair = 1'b0;
+  logic block_credit = 1'b0;
+  assign m_pair_ready = !block_credit;
   logic [31:0] mem [0:63];
   int errors = 0, writes = 0;
 
@@ -28,7 +30,8 @@ module tb_l1d_pair_store;
       .c_pair_req, .c_pair_addr, .c_pair_wdata, .c_pair_wstrb,
       .c_pair_ready, .c_pair_ack, .dbg_serve(),
       .m_req, .m_we, .m_addr, .m_wdata, .m_wstrb, .m_rdata, .m_ack,
-      .m_pair_req, .m_pair_addr, .m_pair_wdata, .m_pair_wstrb, .m_pair_ack,
+      .m_pair_req, .m_pair_addr, .m_pair_wdata, .m_pair_wstrb,
+      .m_pair_ready, .m_pair_ack,
       .m_rd_narrow, .m_rd_size);
 
   always_comb begin
@@ -174,6 +177,21 @@ module tb_l1d_pair_store;
     @(negedge clk); c_req <= 1'b0; c_we <= 1'b0;
     if (writes != 5 || mem[16] != 32'h5555_5555 || mem[24] != 32'hbeef_0018)
       fail("fallback store changed the wrong backing word");
+
+    $display("[pair] absent backing credit lets producer select a solo U store");
+    @(negedge clk);
+    block_credit <= 1'b1;
+    c_req <= 1'b1; c_we <= 1'b1; c_pair_req <= 1'b0;
+    c_addr <= 32'h44; c_wdata <= 32'h9999_9999; c_wstrb <= 4'hf;
+    c_pair_addr <= 32'h48; c_pair_wstrb <= 4'hf;
+    #1;
+    if (c_pair_ready || !c_ack || !m_req || m_pair_req)
+      fail("one-slot backing pressure stalled an otherwise available U store");
+    @(posedge clk);
+    @(negedge clk);
+    c_req <= 1'b0; c_we <= 1'b0; block_credit <= 1'b0;
+    if (writes != 6 || mem[17] != 32'h9999_9999 || mem[18] != 32'h3333_3333)
+      fail("credit fallback changed younger data or omitted older write");
 
     if (errors == 0) $display("L1D-PAIR-STORE-GATE-OK");
     else             $display("L1D-PAIR-STORE-GATE-FAIL (%0d errors)", errors);

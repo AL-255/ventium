@@ -162,6 +162,7 @@ module ven_l1d #(
     output logic [31:0] m_pair_addr,
     output logic [31:0] m_pair_wdata,
     output logic [3:0]  m_pair_wstrb,
+    input  logic        m_pair_ready,
     input  logic        m_pair_ack,
 `endif
     // REVIEW2_aug2 H-11: tell the backing this READ is NARROW -- NOT a 32-byte
@@ -218,6 +219,7 @@ module ven_l1d #(
   // replacement decision, or noncacheable/MMIO side effect is guessed here.
   assign c_pair_ready = rst_n && c_req && c_we && cacheable && !golden &&
       !flush_all && !snoop_inv_valid && (st == L1_IDLE) &&
+      m_pair_ready &&
       !mc_lookup_next && !stream_path && hit && !xline &&
       (c_addr[31:5] == c_pair_addr[31:5]) &&
       (c_addr[1:0] == 2'd0) && (c_pair_addr[1:0] == 2'd0) &&

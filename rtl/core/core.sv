@@ -501,6 +501,16 @@ module core
     output logic [31:0] mem_lin,
     output logic [31:0] mem_wdata,
     output logic [3:0]  mem_wstrb,
+`ifdef VEN_P54_DUAL_STORE_PAIR
+    // Younger checked store. The ordinary bus remains U; this sideband may
+    // commit only when the L1 and both ordered backing slots ack together.
+    output logic        mem_store_pair_req,
+    output logic [31:0] mem_store_pair_addr,
+    output logic [31:0] mem_store_pair_wdata,
+    output logic [3:0]  mem_store_pair_wstrb,
+    input  logic        mem_store_pair_ready,
+    input  logic        mem_store_pair_ack,
+`endif
     // REVIEW1_Aug3 R2-C03: the raw bus side. The FSM-visible mem_ack/mem_rdata
     // are derived inside (the fragment engine gates the ack and merges read
     // fragments); everything pre-existing reads the internal wires unchanged.
@@ -4359,6 +4369,14 @@ module core
   logic [2:0]  pipe_mem_seg_q;
   fpd_t        pipe_mem_u_q, pipe_mem_v_q;
   logic        pipe_mem_pair_q;
+`ifdef VEN_P54_DUAL_STORE_PAIR
+  logic        pipe_mem_store_pair_q;
+  logic        pipe_pair_store_ok;
+  logic        pipe_store_pair_shape, pipe_store_pair_offer;
+  logic        pipe_store_pair_accept;
+  logic [2:0]  pipe_v_store_seg;
+  logic [31:0] pipe_v_store_phys;
+`endif
 `ifdef VEN_P54_DUAL_LOAD_PAIR
   logic        pipe_mem_v_hit_q;
   logic [31:0] pipe_mem_v_phys_q;
@@ -4373,6 +4391,7 @@ module core
 `endif
 `endif
   fpd_t        pipe_u_eff, pipe_v_eff;
+  logic        pipe_pair_base;
   logic        pipe_pair_eff;
   logic [31:0] pipe_commit_eip;
   logic        pipe_new_load_req, pipe_new_store_req, pipe_new_mem_req;
@@ -5080,6 +5099,67 @@ module core
 `endif
 `endif
 
+`ifdef VEN_P54_DUAL_STORE_PAIR
+`ifndef VEN_P54_DUAL_HIT
+  initial $fatal(1, "dual-store pairing requires V's independent DTLB port");
+`endif
+`ifndef VEN_L1_AXI
+  initial $fatal(1, "dual-store pairing requires the banked L1/AXI seam");
+`endif
+  // A delayed U store retains its decoded V candidate. Executable invalidation
+  // cancels the younger candidate, never the already-owned U transaction.
+  assign pipe_store_pair_shape = pipe_mem_active_q ? pipe_mem_store_pair_q :
+      (pipe_pair_store_ok && cycle_mode && v_bytes_ok && !irq_shadow &&
+       !dbg_pair_block &&
+`ifdef VEN_UOPCACHE
+       uc_v_avail &&
+`endif
+       !(u_d.w16 && (({1'b0,eip[15:0]} + {13'd0,u_d.len}) > 17'h0FFFF)) &&
+       !(errata_en[ERR_MOFFS] && moffs_falsedep));
+  assign pipe_v_store_seg = pipe_v_eff.mem_ss ? 3'(SG_SS) : 3'(SG_DS);
+  assign pipe_v_store_phys = paging_on ? v_dtlb_lk_phys : pipe_v_mem_lin;
+  // V never starts a page walk or raises a fault speculatively. An absent,
+  // clean, or permission-denied V mapping leaves U on its ordinary port and
+  // retries V as the next architectural instruction. Same physical line means
+  // the L1's U cacheability and router decision also apply to V.
+  assign pipe_store_pair_offer = pipe_store_req && pipe_store_pair_shape &&
+      (state == S_PIPE) && !fp_issue_block && !dbg_pair_block &&
+      !exec_flush_all && !ic_snoop_valid &&
+      !fx_act && !fx_start && !fx_abort_q &&
+      !bus_err && !pipe_mem_abort_now && !xlate_miss && !fe_xlate_pend &&
+      mem_req && mem_we && !mem_lock_hold &&
+      (mem_addr[1:0] == 2'd0) && (pipe_v_store_phys[1:0] == 2'd0) &&
+      (mem_addr[31:5] == pipe_v_store_phys[31:5]) &&
+      (mem_addr[4:2] != pipe_v_store_phys[4:2]) &&
+      ({1'b0, pipe_v_modrm_ea} + 33'd3 <= {1'b0, seg_limit[pipe_v_store_seg]}) &&
+      (!paging_on || (v_dtlb_lk_hit && v_dtlb_lk_dirty &&
+          v_dtlb_lk_perm[0] &&
+          ((eff_cpl != 2'd3) || v_dtlb_lk_perm[2]) &&
+          (v_dtlb_lk_perm[1] || ((eff_cpl != 2'd3) && !creg0[16])))) &&
+      (!sys_mode || (sys_fp_ok && !real_mode && cs_d &&
+          seg_pm_loaded[pipe_v_store_seg] &&
+          (seg_sel[pipe_v_store_seg][15:2] != 14'd0) &&
+          seg_attr[pipe_v_store_seg][7] && seg_attr[pipe_v_store_seg][4] &&
+          !seg_attr[pipe_v_store_seg][3] && seg_attr[pipe_v_store_seg][1] &&
+          !seg_attr[pipe_v_store_seg][2] &&
+          (seg_limit[pipe_v_store_seg] == 32'hffff_ffff) &&
+          ({1'b0, pipe_commit_eip} + {29'd0, pipe_u_eff.len} +
+           {29'd0, pipe_v_eff.len} - 33'd1 <= {1'b0, seg_limit[SG_CS]})));
+  assign mem_store_pair_req = pipe_store_pair_offer && mem_store_pair_ready;
+  assign mem_store_pair_addr = pipe_v_store_phys;
+  assign mem_store_pair_wdata = reg_read(pipe_v_eff.src, 3'd4, 1'b0);
+  assign mem_store_pair_wstrb = 4'hf;
+  assign pipe_store_pair_accept = mem_store_pair_req && mem_store_pair_ack &&
+                                  mem_ack && !pipe_mem_abort_now;
+`ifndef SYNTHESIS
+  always_ff @(posedge clk) if (rst_n && pipe_store_pair_accept) begin
+    if (!(pipe_store_req && pipe_pair_store_ok ||
+          (pipe_mem_active_q && pipe_mem_store_pair_q)))
+      $fatal(1, "store pair retired without an owned decoded V store");
+  end
+`endif
+`endif
+
   // R1 phase-3: the pairing checker is now the `issue_uv` leaf module
   // (rtl/core/issue_uv.sv). pipe_pair_ok is the bare can-pair RULES decision;
   // pipe_pair below ANDs in cycle_mode + V-bytes-resident exactly as before.
@@ -5094,6 +5174,9 @@ module core
       .iu(u_d), .iv(v_d), .pair_ok(pipe_pair_ok)
 `ifdef VEN_P54_DUAL_LOAD_PAIR
     , .pair_mem_ok(pipe_pair_mem_ok)
+`endif
+`ifdef VEN_P54_DUAL_STORE_PAIR
+    , .pair_store_ok(pipe_pair_store_ok)
 `endif
 `ifdef VEN_PERF_PROFILE
     , .pair_reason(pipe_pair_reason)
@@ -5381,11 +5464,18 @@ module core
   assign pipe_u_eff    = pipe_mem_active_q ? pipe_mem_u_q    : u_d;
   assign pipe_v_eff    = pipe_mem_active_q ? pipe_mem_v_q    : v_d;
 `ifdef VEN_P54_DUAL_LOAD_PAIR
-  assign pipe_pair_eff = pipe_mem_active_q ?
+  assign pipe_pair_base = pipe_mem_active_q ?
       (pipe_mem_pair_q && (!pipe_mem_v_hit_q || pipe_v_pair_rsp_good)) : pipe_pair;
 `else
-  assign pipe_pair_eff = pipe_mem_active_q ? pipe_mem_pair_q : pipe_pair;
+  assign pipe_pair_base = pipe_mem_active_q ? pipe_mem_pair_q : pipe_pair;
 `endif
+  // The older store's ordinary completion is not enough to retire V. Both
+  // bounded backing slots must acknowledge on this edge or V remains next U.
+  assign pipe_pair_eff = pipe_pair_base
+`ifdef VEN_P54_DUAL_STORE_PAIR
+      || pipe_store_pair_accept
+`endif
+      ;
   assign pipe_commit_eip = pipe_mem_active_q ? pipe_mem_eip_q : eip;
   // Physically separate U/V AGUs. U retains its established checked memory
   // owner; V supplies LEA and the opt-in separately translated load lane.
@@ -5407,7 +5497,12 @@ module core
   // Select on the *preparation shape*, not the translated U offer. This
   // prevents the U lookahead TLB result from feeding the V TLB input mux and
   // lengthening the FPGA issue path through two serial TLB lookups.
+`ifdef VEN_P54_DUAL_STORE_PAIR
+  assign v_dtlb_query_lin = pipe_store_req ? pipe_v_mem_lin :
+                            mc_prime_base ? mc_prime_v_lin : pipe_v_mem_lin;
+`else
   assign v_dtlb_query_lin = mc_prime_base ? mc_prime_v_lin : pipe_v_mem_lin;
+`endif
 `else
   assign v_dtlb_query_lin = pipe_v_mem_lin;
 `endif
@@ -6403,6 +6498,9 @@ module core
       pipe_mem_u_q      <= '0;
       pipe_mem_v_q      <= '0;
       pipe_mem_pair_q   <= 1'b0;
+`ifdef VEN_P54_DUAL_STORE_PAIR
+      pipe_mem_store_pair_q <= 1'b0;
+`endif
 `ifdef VEN_P54_DUAL_LOAD_PAIR
       pipe_mem_v_hit_q  <= 1'b0;
       pipe_mem_v_phys_q <= 32'd0;
@@ -6512,6 +6610,24 @@ module core
       // the state machine: the current instruction still retires this edge and
       // the normal S_DECODE/S_PIPE event boundary sees the request next clock.
       if (smi_apic_store_commit) smi_pending <= 1'b1;
+`ifdef VEN_P54_DUAL_STORE_PAIR
+      if ((state == S_HALT) || (state == S_SHUTDOWN) || pipe_mem_abort_now ||
+          (pipe_mem_active_q && (exec_flush_all || ic_snoop_valid)))
+        pipe_mem_store_pair_q <= 1'b0;
+      else if (pipe_mem_active_q && (state == S_PIPE) &&
+               !xlate_miss && !fe_xlate_pend && mem_ack)
+        pipe_mem_store_pair_q <= 1'b0;
+      else if (!pipe_mem_active_q && pipe_new_store_req &&
+               (xlate_miss || fe_xlate_pend || !mem_ack))
+        pipe_mem_store_pair_q <= pipe_pair_store_ok && cycle_mode &&
+            v_bytes_ok && !irq_shadow && !dbg_pair_block &&
+`ifdef VEN_UOPCACHE
+            uc_v_avail &&
+`endif
+            !(u_d.w16 && (({1'b0,eip[15:0]} + {13'd0,u_d.len}) > 17'h0FFFF)) &&
+            !exec_flush_all && !ic_snoop_valid &&
+            !(errata_en[ERR_MOFFS] && moffs_falsedep);
+`endif
 `ifdef VEN_P54_DUAL_LOAD_PAIR
       // Only a fresh U capture can create a V owner. Completion, replacement,
       // and terminal states discard the speculative younger response.
@@ -8989,6 +9105,9 @@ module core
       // a synchronous fault restarts the instruction, so no held request or
       // stale decode may leak into the handler.
       pipe_mem_active_q <= 1'b0;
+`ifdef VEN_P54_DUAL_STORE_PAIR
+      pipe_mem_store_pair_q <= 1'b0;
+`endif
 `ifdef VEN_P54_DUAL_LOAD_PAIR
       pipe_mem_v_hit_q <= 1'b0;
 `endif

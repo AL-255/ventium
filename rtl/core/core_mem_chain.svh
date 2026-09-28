@@ -1,6 +1,10 @@
 // Registered resident-read lookahead. Included at module scope in core.sv.
 // No architectural PC is advanced here: mc_pc_q is an unissued candidate,
 // and becomes the ordinary admitted memory owner only at mc_accept.
+// This read-only lookahead consumes pipe_pair_base (the pre-store-sideband
+// pairing decision). A U store cannot prime the next read, so feeding the
+// store pair's final AXI acknowledgment back into this query would only close
+// a combinational L1-ready -> pair-ack -> lookahead -> L1-ready loop.
 `ifdef VEN_PIPE_MEM_CHAIN
 `ifndef VEN_UOPCACHE
   initial $fatal(1, "VEN_PIPE_MEM_CHAIN requires VEN_UOPCACHE");
@@ -83,7 +87,7 @@
   assign mc_prime_v_branch = !mc_valid_q && !pipe_mem_active_q &&
       pipe_u_eff.simple && !pipe_u_eff.is_mem && !pipe_u_eff.is_store &&
       !pipe_u_eff.is_stack && !pipe_u_eff.is_fp && !pipe_u_eff.is_branch &&
-      pipe_pair_eff && pipe_v_eff.is_branch && pipe_v_eff.br_cond &&
+      pipe_pair_base && pipe_v_eff.is_branch && pipe_v_eff.br_cond &&
       !pipe_v_eff.w16;
   assign mc_prime_branch = mc_prime_u_branch || mc_prime_v_branch;
 `else
@@ -96,7 +100,7 @@
       : (mc_prime_u_branch && u_pred_taken) ? u_target
       : (mc_prime_v_branch && v_pred_taken) ? v_target
       : pipe_commit_eip + {28'd0, pipe_u_eff.len}
-          + (pipe_pair_eff ? {28'd0, pipe_v_eff.len} : 32'd0);
+          + (pipe_pair_base ? {28'd0, pipe_v_eff.len} : 32'd0);
   assign mc_query_u = mc_descriptor(mc_query_pc);
   assign mc_query_vpc = mc_query_pc + {28'd0, mc_query_u.len};
   assign mc_query_v = mc_descriptor(mc_query_vpc);
@@ -107,6 +111,9 @@
 `else
                       , .pair_mem_ok()
 `endif
+`endif
+`ifdef VEN_P54_DUAL_STORE_PAIR
+                      , .pair_store_ok()
 `endif
 `ifdef VEN_PERF_PROFILE
                       , .pair_reason()
@@ -125,7 +132,7 @@
   // The query uses pre-retirement GPRs. Exclude address dependencies on BOTH
   // the oldest owner and the candidate whose successor is being prepared.
   assign mc_older_writes = pipe_u_eff.writes |
-      (pipe_pair_eff ? pipe_v_eff.writes : 8'd0) |
+      (pipe_pair_base ? pipe_v_eff.writes : 8'd0) |
       (mc_valid_q ? (mc_u_q.writes | (mc_pair_q ? mc_v_q.writes : 8'd0)) : 8'd0);
 
   // Raw pending events, not fp_irq_divert (which is masked by active owner),
@@ -153,7 +160,7 @@
       !pipe_new_mem_req && pipe_u_eff.simple && !pipe_u_eff.is_mem &&
       !pipe_u_eff.is_store && !pipe_u_eff.is_stack && !pipe_u_eff.is_fp &&
       (!pipe_u_eff.is_branch || mc_prime_u_branch) &&
-      !(pipe_pair_eff && (pipe_v_eff.is_mem || pipe_v_eff.is_store ||
+      !(pipe_pair_base && (pipe_v_eff.is_mem || pipe_v_eff.is_store ||
                           pipe_v_eff.is_stack || pipe_v_eff.is_fp ||
                           (pipe_v_eff.is_branch && !mc_prime_v_branch)));
 `else
@@ -165,7 +172,7 @@
         (pipe_mem_active_q || pipe_new_load_req || mc_prime_base) &&
         !pipe_u_eff.is_store &&
         (!pipe_u_eff.is_branch || mc_prime_u_branch) &&
-        !(pipe_pair_eff && pipe_v_eff.is_branch && !mc_prime_v_branch) &&
+        !(pipe_pair_base && pipe_v_eff.is_branch && !mc_prime_v_branch) &&
         mc_query_u.simple && mc_query_u.is_mem && !mc_query_u.is_store &&
         !mc_query_u.is_stack && !mc_query_u.is_fp && !mc_query_u.is_branch &&
         !mc_query_u.w16 && (mc_query_u.len != 0) &&
@@ -201,7 +208,7 @@
   assign mc_offer = mc_valid_q && mc_boundary_ok && pipe_mem_active_q &&
       !fp_is_ext_load(pipe_u_eff) && !fp_is_ext_load(mc_u_q) &&
       !pipe_mem_we_q && (mc_pc_q == pipe_commit_eip + {28'd0, pipe_u_eff.len}
-                         + (pipe_pair_eff ? {28'd0, pipe_v_eff.len} : 32'd0));
+                         + (pipe_pair_base ? {28'd0, pipe_v_eff.len} : 32'd0));
   assign mc_prime_offer = mc_prime_base && mc_prepare_ok;
   assign mem_next_req = mc_offer || mc_prime_offer;
   assign mem_next_commit = (mc_offer ||
@@ -255,7 +262,7 @@
             !smi_take && !nmi_take && !intr_take && !irq_shadow)
       else $fatal(1, "memory-chain ownership/event violation");
     assert (mc_pc_q == pipe_commit_eip + {28'd0, pipe_u_eff.len}
-                         + (pipe_pair_eff ? {28'd0, pipe_v_eff.len} : 32'd0))
+                         + (pipe_pair_base ? {28'd0, pipe_v_eff.len} : 32'd0))
       else $fatal(1, "memory-chain nonsequential owner");
   end
 `ifdef VEN_PIPE_REG_LOAD_PRIME
@@ -266,15 +273,15 @@
       else $fatal(1, "register-load prime ownership/event violation");
     assert (mc_prime_branch ||
             mc_query_pc == pipe_commit_eip + {28'd0, pipe_u_eff.len}
-                         + (pipe_pair_eff ? {28'd0, pipe_v_eff.len} : 32'd0))
+                         + (pipe_pair_base ? {28'd0, pipe_v_eff.len} : 32'd0))
       else $fatal(1, "register-load prime nonsequential owner");
     if (mc_prime_branch)
       assert ((mc_prime_u_branch && pipe_u_eff.is_branch &&
                (pipe_u_eff.br_taken == u_pred_taken) &&
                mc_query_pc == (u_pred_taken ? u_target :
                    pipe_commit_eip + {28'd0, pipe_u_eff.len} +
-                   (pipe_pair_eff ? {28'd0, pipe_v_eff.len} : 32'd0))) ||
-              (mc_prime_v_branch && pipe_pair_eff && pipe_v_eff.is_branch &&
+                   (pipe_pair_base ? {28'd0, pipe_v_eff.len} : 32'd0))) ||
+              (mc_prime_v_branch && pipe_pair_base && pipe_v_eff.is_branch &&
                (v_br_taken_eff == v_pred_taken) &&
                mc_query_pc == (v_pred_taken ? v_target :
                    pipe_commit_eip + {28'd0, pipe_u_eff.len} +

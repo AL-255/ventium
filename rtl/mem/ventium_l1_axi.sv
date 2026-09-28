@@ -117,6 +117,14 @@ module ventium_l1_axi #(
     input  logic        core_lock_hold,
     input  logic [31:0] core_wdata,
     input  logic [3:0]  core_wstrb,
+`ifdef VEN_P54_DUAL_STORE_PAIR
+    input  logic        core_store_pair_req,
+    input  logic [31:0] core_store_pair_addr,
+    input  logic [31:0] core_store_pair_wdata,
+    input  logic [3:0]  core_store_pair_wstrb,
+    output logic        core_store_pair_ready,
+    output logic        core_store_pair_ack,
+`endif
     output logic [31:0] core_rdata,
 `ifdef VEN_FP_LOAD64
     output logic [31:0] core_rdata_hi,
@@ -313,6 +321,14 @@ module ventium_l1_axi #(
   logic [3:0]  m_wstrb;
   logic [31:0] m_rdata;
   logic        m_ack;
+`ifdef VEN_P54_DUAL_STORE_PAIR
+  logic        m_pair_req, m_pair_ready, m_pair_ack;
+  logic [31:0] m_pair_addr, m_pair_wdata;
+  logic [3:0]  m_pair_wstrb;
+  logic        b_pair_req, b_pair_ready, b_pair_ack;
+  logic [31:0] b_pair_addr, b_pair_wdata;
+  logic [3:0]  b_pair_wstrb;
+`endif
 
   // ---- post-L2 backing port (b_*): the seam between the L2 (or the bypass) and the
   logic m_rd_narrow; logic [1:0] m_rd_size;  // H-11/R2-H01: L1D -> backing, narrow read request
@@ -735,6 +751,11 @@ module ventium_l1_axi #(
   logic [3:0]  axm_wstrb;
   logic [31:0] axm_rdata;
   logic        axm_ack, axm_bus_err;
+`ifdef VEN_P54_DUAL_STORE_PAIR
+  logic        axm_pair_req, axm_pair_ready, axm_pair_ack;
+  logic [31:0] axm_pair_addr, axm_pair_wdata;
+  logic [3:0]  axm_pair_wstrb;
+`endif
   // REVIEW_Aug3 C-01: the H-11 narrow-read bits reach ven_axi_master through the SAME
   // static compile-time selection as the rest of the request — latched out of the
   // command FIFO by ven_axi_cdc in the dual-clock build, wired straight through
@@ -747,6 +768,15 @@ module ventium_l1_axi #(
   // l1d uses a domain-synchronized reset in the CDC build, the raw reset otherwise.
 
 `ifdef VEN_AXI_CDC
+`ifdef VEN_P54_DUAL_STORE_PAIR
+  initial $fatal(1, "dual-store pair requires the same-clock AXI backing seam");
+  assign axm_pair_req = 1'b0;
+  assign axm_pair_addr = 32'd0;
+  assign axm_pair_wdata = 32'd0;
+  assign axm_pair_wstrb = 4'd0;
+  assign b_pair_ready = 1'b0;
+  assign b_pair_ack = 1'b0;
+`endif
   // ---- dual-clock: synchronize each domain's reset, then bridge the backing port.
   // #36 RESET COUPLING (review HIGH): a reset in EITHER domain must reset BOTH. An
   // asymmetric reset mid-transaction (e.g. an AXI soft-reset / MMCM lock loss drops
@@ -806,6 +836,14 @@ module ventium_l1_axi #(
   assign axm_req   = b_req;   assign axm_we    = b_we;
   assign axm_addr  = b_addr;  assign axm_wdata = b_wdata;  assign axm_wstrb = b_wstrb;
   assign b_rdata   = axm_rdata; assign b_ack   = axm_ack;
+`ifdef VEN_P54_DUAL_STORE_PAIR
+  assign axm_pair_req = b_pair_req;
+  assign axm_pair_addr = b_pair_addr;
+  assign axm_pair_wdata = b_pair_wdata;
+  assign axm_pair_wstrb = b_pair_wstrb;
+  assign b_pair_ready = axm_pair_ready;
+  assign b_pair_ack = axm_pair_ack;
+`endif
   assign bus_err   = axm_bus_err | route_err;   // R2-H03: + the no-L2 router fault
   // C-01: same domain, so the passthrough is just a wire (the CDC build above gets
   // them out of the command FIFO instead).
@@ -818,6 +856,14 @@ module ventium_l1_axi #(
   // (verif/l1/run-l2-axi-gate.sh ran it end-to-end through the real ven_axi_master).
   generate
     if (EN_L2) begin : g_l2
+`ifdef VEN_P54_DUAL_STORE_PAIR
+      assign b_pair_req = 1'b0;
+      assign b_pair_addr = 32'd0;
+      assign b_pair_wdata = 32'd0;
+      assign b_pair_wstrb = 4'd0;
+      assign m_pair_ready = 1'b0;
+      assign m_pair_ack = 1'b0;
+`endif
       // DISABLED FOR NOW (REVIEW_Aug3 H-09): the L2/northbridge sources
       // (ven_l2.sv / ven_northbridge.sv) are absent from this checkout and the
       // EN_L2=1 configuration is deliberately OFF until they land. Fail loudly at
@@ -1065,6 +1111,16 @@ module ventium_l1_axi #(
       assign b_wstrb = smram_deny ? 4'd0 : m_wstrb;
       assign m_rdata = smram_deny_q ? 32'd0 : b_rdata;
       assign m_ack   = smram_deny_q ? 1'b1  : b_ack;
+`ifdef VEN_P54_DUAL_STORE_PAIR
+      // U/V share a resident physical line, hence the same SMRAM/routing
+      // decision. The pair response follows the same local-deny ownership.
+      assign b_pair_req = m_pair_req && !smram_deny;
+      assign b_pair_addr = m_pair_addr;
+      assign b_pair_wdata = m_pair_wdata;
+      assign b_pair_wstrb = smram_deny ? 4'd0 : m_pair_wstrb;
+      assign m_pair_ready = !smram_deny && b_pair_ready;
+      assign m_pair_ack = smram_deny_q ? 1'b1 : b_pair_ack;
+`endif
       assign l2_ready = 1'b1;
 `ifdef VEN_L1_IGNORE_CD
       // EXPERIMENT (task #24). Forces write-allocate ON regardless of CR0.CD.
@@ -1166,6 +1222,12 @@ module ventium_l1_axi #(
   logic dma_drain_stall;
   assign dma_drain_stall = core_req && core_lock && dma_seam_busy;
   logic l1d_c_req; logic l1d_c_ack; logic [31:0] l1d_c_rdata;
+`ifdef VEN_P54_DUAL_STORE_PAIR
+  logic l1d_store_pair_ready, l1d_store_pair_ack;
+  assign core_store_pair_ready = l1d_c_req && !core_smram_deny &&
+      !core_route_deny && !dma_drain_stall && l1d_store_pair_ready;
+  assign core_store_pair_ack = core_store_pair_ready && l1d_store_pair_ack;
+`endif
 `ifdef VEN_FP_LOAD64
   logic [31:0] l1d_c_rdata_hi;
   logic        l1d_c_rdata_hi_valid;
@@ -1246,6 +1308,14 @@ module ventium_l1_axi #(
       .c_wstrb (core_wstrb),
       .c_rdata (l1d_c_rdata),
       .c_ack   (l1d_c_ack),
+`ifdef VEN_P54_DUAL_STORE_PAIR
+      .c_pair_req(core_store_pair_req && l1d_c_req),
+      .c_pair_addr(core_store_pair_addr),
+      .c_pair_wdata(core_store_pair_wdata),
+      .c_pair_wstrb(core_store_pair_wstrb),
+      .c_pair_ready(l1d_store_pair_ready),
+      .c_pair_ack(l1d_store_pair_ack),
+`endif
 `ifdef VEN_PIPE_MEM_CHAIN
       .c_next_req(core_next_req && mc_next_enable),
       .c_next_commit(core_next_commit && mc_next_enable),
@@ -1284,6 +1354,12 @@ module ventium_l1_axi #(
       .m_wdata (m_wdata),
       .m_wstrb (m_wstrb),
       .m_rdata (m_rdata),
+`ifdef VEN_P54_DUAL_STORE_PAIR
+      .m_pair_req(m_pair_req), .m_pair_addr(m_pair_addr),
+      .m_pair_wdata(m_pair_wdata), .m_pair_wstrb(m_pair_wstrb),
+      .m_pair_ready(m_pair_ready),
+      .m_pair_ack(m_pair_ack),
+`endif
       .m_rd_narrow   (m_rd_narrow),
       .m_rd_size   (m_rd_size),
       .m_ack   (m_ack)
@@ -1310,6 +1386,12 @@ module ventium_l1_axi #(
       .m_addr      (axm_addr),
       .m_wdata     (axm_wdata),
       .m_wstrb     (axm_wstrb),
+`ifdef VEN_P54_DUAL_STORE_PAIR
+      .m_pair_req(axm_pair_req), .m_pair_addr(axm_pair_addr),
+      .m_pair_wdata(axm_pair_wdata), .m_pair_wstrb(axm_pair_wstrb),
+      .m_pair_ready(axm_pair_ready),
+      .m_pair_ack(axm_pair_ack),
+`endif
       .m_rdata     (axm_rdata),
       .m_ack       (axm_ack),
       .bus_err     (axm_bus_err),

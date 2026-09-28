@@ -105,6 +105,7 @@ module ven_axi_master #(
     input  logic [31:0] m_pair_addr,
     input  logic [31:0] m_pair_wdata,
     input  logic [3:0]  m_pair_wstrb,
+    output logic        m_pair_ready,
     output logic        m_pair_ack,
 `endif
     output logic [31:0] m_rdata,
@@ -524,6 +525,12 @@ module ven_axi_master #(
   // one slot, but a full queue with only one released slot cannot accept a pair.
   assign wr_can_pair = (wq_count == WBUF_CNTW'(0)) ||
                        ((wq_count == WBUF_CNTW'(1)) && wq_head_release);
+  // Credit is independent of m_pair_req. The core uses it to fall back to
+  // ordinary serial U/V issue when only one write-buffer slot is available;
+  // waiting for a second slot would make the dual-store path slower.
+  assign m_pair_ready = !fatal_now &&
+                        ((shutdown && m_idle) ||
+                         (!shutdown && (rst == R_IDLE) && wr_can_pair));
   assign wr_enq      = (rst == R_IDLE) && m_req && m_we && !shutdown &&
                        !alias_bad && !fatal_now &&
                        (m_pair_req ? wr_can_pair :
