@@ -98,6 +98,24 @@ loop_body:
     # The arithmetic's EX occupancy may not be collapsed by cache-window reuse.
     addl (%esi), %eax
     incl %edx
+.elseif CASE == 16
+    orl (%esi), %eax
+    orl 4(%esi), %edx
+.elseif CASE == 17
+    adcl (%esi), %eax
+    adcl 4(%esi), %edx
+.elseif CASE == 18
+    sbbl (%esi), %eax
+    sbbl 4(%esi), %edx
+.elseif CASE == 19
+    andl (%esi), %eax
+    andl 4(%esi), %edx
+.elseif CASE == 20
+    subl (%esi), %eax
+    subl 4(%esi), %edx
+.elseif CASE == 21
+    xorl (%esi), %eax
+    xorl 4(%esi), %edx
 .else
     .error "unsupported CASE"
 .endif

@@ -55,6 +55,7 @@ timeout 540s env VENTIUM_BUILD_SCOPE_PROFILE=ipc_parallel32 \
 | `resident_{same_line,two_line}_loads` | Does the registered D-cache window serve a later hit in the same physical line without a second capture, and does a different line correctly require its own lookup? |
 | `register_u_memory_v` / `memory_u_register_v` | Can an independent V load issue when U has no memory operand, contrasted with the existing U-load/V-register case? |
 | `memory_alu_integer_v` | Does a resident ALU-memory U retain its execution occupancy while an independent integer V follows? |
+| `resident_memory_{or,adc,sbb,and,sub,xor}` | Does the checked register-destination memory-ALU admission avoid recurring slow fetch/decode/load FSM visits without changing full architectural state? ADD is the separate `resident_memory_alu` control. Carry operators retain their real CF dependency. |
 
 These cases expose bottlenecks, not the full acceptance matrix. They do not
 cover paging/TLB geometry, dirty-line coherence, precise faults, interrupts,
@@ -136,3 +137,29 @@ loop improves from **138 to 120 cycles per 8 instructions** with the same six
 ARs per loop and equal architectural traces. With deterministic AXI read
 latency/gaps (`AXI_RLAT=3 AXI_RGAP=1`), the same A/B is **344.669 versus
 308.669 cycles/loop**, also trace-equal. Neither number is gameplay IPC.
+
+The six `resident_memory_{or,adc,sbb,and,sub,xor}` cases specifically compare
+the optional checked `VEN_FAST_MEM_ALU` admission against a control that
+already has `VEN_FAST_MEM_ADD`/`VEN_FAST_MEM_ADD7`. This matters because the
+full-PC default **already enables fast ADD**; a fast-ADD-versus-slow-ADD
+microbenchmark is not a new production improvement. All six additional
+families improve from **11 to 3 cycles per four-instruction loop** in this
+directed L1/AXI profile, while ADD stays at 3 and all 22 candidate/control
+architectural traces agree. The separate 14-case pinned-QEMU fixed-work check
+(`run-alu-memory-ab.py`, both carry inputs) also passed: each newly admitted
+family took 9,570 control versus 8,525 candidate cycles for 2,090
+instructions, with full-state equality at 2,441 compared QEMU groups. These
+are **not** gameplay IPC or a reason to promote the flag without full-system
+and FPGA-timing qualification.
+
+The split-page protected-mode fault/retry gate (`run-alu-memory-fault.py`)
+also passed all 14 operator/carry cases for both matched binaries: each had
+one precise #PF, a successful retry, and full-state equality with 213 QEMU
+groups. The gate explicitly requires **no** fast memory owner for the faulting
+instruction, because the current decoder excludes system-mode memory access
+through `fp_sys_bail` (it does not support all CS.D=0 instructions). This gate
+therefore checks that the optional ALU admission does **not** bypass that safety
+boundary; it does not prove fast-path handling of a paged fault. For this
+diagnostic, both Verilator models used `VEN_UOP_CROSSLINE` and
+`--public-flat-rw` so the read-only `MEMOWNER` probe signal survives
+optimization. Neither flag set matches the full-PC production profile.

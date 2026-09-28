@@ -34,6 +34,12 @@ CASES = {
     "register_u_memory_v": (BASE, 13),
     "memory_u_register_v": (BASE, 14),
     "memory_alu_integer_v": (BASE, 15),
+    "resident_memory_or": (BASE, 16),
+    "resident_memory_adc": (BASE, 17),
+    "resident_memory_sbb": (BASE, 18),
+    "resident_memory_and": (BASE, 19),
+    "resident_memory_sub": (BASE, 20),
+    "resident_memory_xor": (BASE, 21),
 }
 
 
