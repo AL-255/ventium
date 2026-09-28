@@ -38,6 +38,7 @@ core/regfile.sv
 core/bpred_btb.sv
 core/decode.sv
 core/issue_uv.sv
+core/ven_p54_dual_agu.sv
 // shared U/V integer-execution building blocks (BCD/ASCII-adjust datapath, ...)
 // extracted from core.sv (R3). One module per file; behaviour-preserving.
 core/uv_common.sv

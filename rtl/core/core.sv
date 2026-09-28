@@ -4381,6 +4381,7 @@ module core
   logic [2:0]  pipe_mem_seg;         // DS or SS selected by the decoded base
   logic [31:0] pipe_load_addr;
   logic [31:0] v_lea_addr;
+  logic [31:0] pipe_u_modrm_ea, pipe_v_modrm_ea;
   logic [31:0] pipe_store_data;
   logic [31:0] u_alu, u_flags, u_sh, u_shm1; logic u_shcf;
   logic [4:0]  u_shift_cnt;
@@ -5152,14 +5153,12 @@ module core
                                         : (u_d.is_stack
                                            ? stk16(u_d.is_store ? (gpr_o[R_ESP] - 32'd4)
                                                                  :  gpr_o[R_ESP])
-                                           : ((u_d.mem_base_en ? gpr_o[u_d.base] : 32'd0) + u_d.mem_disp
-                                            + (u_d.mem_index_en ? (gpr_o[u_d.mem_index] << u_d.mem_scale) : 32'd0)));
+                                           : pipe_u_modrm_ea);
     // LEA uses the same integer AGU arithmetic as a checked U-side memory
     // access, but never asserts a memory request.  Keep a V-side equivalent
     // because LEA is UV-pairable; using only its base would silently corrupt
     // a paired disp/SIB LEA.
-    v_lea_addr = (pipe_v_eff.mem_base_en ? gpr_o[pipe_v_eff.base] : 32'd0) + pipe_v_eff.mem_disp
-               + (pipe_v_eff.mem_index_en ? (gpr_o[pipe_v_eff.mem_index] << pipe_v_eff.mem_scale) : 32'd0);
+    v_lea_addr = pipe_v_modrm_ea;
     pipe_store_data = pipe_mem_active_q ? pipe_mem_wdata_q
                        : reg_read(u_d.src, u_d.w8 ? 3'd1 : 3'd4, u_d.src_hi8);
 
@@ -5226,6 +5225,12 @@ module core
   assign pipe_v_eff    = pipe_mem_active_q ? pipe_mem_v_q    : v_d;
   assign pipe_pair_eff = pipe_mem_active_q ? pipe_mem_pair_q : pipe_pair;
   assign pipe_commit_eip = pipe_mem_active_q ? pipe_mem_eip_q : eip;
+  // Physically separate U/V AGUs. U retains its established checked memory
+  // owner; V is presently consumed by LEA and is ready for a future translated
+  // V-memory lane without borrowing U's address adder.
+  ven_p54_dual_agu u_dual_agu (
+      .u(pipe_u_eff), .v(pipe_v_eff), .gpr(gpr_o),
+      .u_ea(pipe_u_modrm_ea), .v_ea(pipe_v_modrm_ea));
 
   // `mem_ack` is the fragment-engine/FSM-visible acknowledgement, not the raw
   // external bus acknowledgement.  For a non-crossing BFM access it is high on

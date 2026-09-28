@@ -125,6 +125,19 @@ ordered distinct-bank pairs. Vivado maps its isolated storage to eight
 connection and cannot yet claim a gameplay IPC gain; see the same
 [synthesis record](../../fpga/P54_L1D_LEAF_SYNTH_2026-09-27.md).
 
+`run-p54-dual-agu.sh` checks both independently computed ModR/M/SIB effective
+addresses over 1,024 base/index/scale/enable/overflow combinations. The U/V
+AGUs are now connected to the existing U-memory and V-LEA paths, respectively;
+V-memory issue remains disabled pending a second checked request/translation
+and precise response owner. A same-flag full-core candidate (binary SHA-256
+`ce372ee06de445ad3c1ef951e74b7a73d8f8a2ef9efeeecd1c48f6e6c62ff05f`)
+matches its pre-AGU control in all 22 fixed-work architectural traces and
+cycle counts (`/tmp/p54-dualagu-core-micro-r1/`). The 14-case pinned-QEMU
+memory-ALU full-state check also matches every control cycle count using
+`run-alu-memory-ab.py --expect-equal-cycles` (log
+`/tmp/p54-dualagu-alu-memory-equal-r1.log`). This stage does not improve IPC by
+itself; it removes the shared-EA assumption before admitting a V memory lane.
+
 `run-p54-l1d-pair-hit.sh` exercises the default-off `VEN_P54_DUAL_HIT` cache
 interface atop `VEN_L1D_BANKED_DATA`. It checks simultaneous distinct-bank
 read hits, serialized same-bank hits, width/offset assembly, split-line and
