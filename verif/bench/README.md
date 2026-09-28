@@ -164,6 +164,14 @@ including 28,224 seven-byte forms. It checks operand/address metadata against
 the ADD packet and rejects unsafe admitted descriptors. This optional
 ADD7/MOV7 leaf profile is broader than the production flag set, not a whole-core
 correctness or timing claim.
+The same 14-case QEMU A/B also passes with the **raw-byte decoder** (no
+uop cache, no seven-byte ADD extension) and banked code-buffer/stream L1:
+2,090 fixed-work instructions take 24,530 control versus 18,425 candidate
+clocks for each newly admitted operator, while ADD stays at 18,425. All
+candidate/control traces match pinned QEMU at complete retirement groups.
+The raw profile must omit `VEN_PIPE_MEM_CHAIN` and
+`VEN_PIPE_REG_LOAD_PRIME`: the former requires `VEN_UOPCACHE`, and the latter
+requires the former. This is independent directed evidence, not gameplay IPC.
 
 The split-page protected-mode fault/retry gate (`run-alu-memory-fault.py`)
 also passed all 14 operator/carry cases for both matched binaries in two
