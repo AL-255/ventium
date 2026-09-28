@@ -47,6 +47,13 @@ module tlb_assoc #(
     output logic [2:0]  next_perm,
     output logic        next_dirty,
 `endif
+`ifdef VEN_P54_DUAL_HIT
+    input  logic [31:0] pair_lin,
+    output logic        pair_hit,
+    output logic [31:0] pair_phys,
+    output logic [2:0]  pair_perm,
+    output logic        pair_dirty,
+`endif
 
     // One pulsed fill from S_WALK, followed by the same broad CR3-side flush
     // already used by tlb.sv.  The caller guarantees at most one fill/clock.
@@ -132,6 +139,30 @@ module tlb_assoc #(
         next_phys = tlb_big[ix] ? {tlb_pfn[ix][19:10], next_lin[21:0]}
                                 : {tlb_pfn[ix], next_lin[11:0]};
         next_perm = tlb_perm[ix]; next_dirty = tlb_dirty[ix];
+      end
+    end
+  end
+`endif
+`ifdef VEN_P54_DUAL_HIT
+  // The V packet has its own pre-fill lookup. Keep all payload fields from one
+  // matching way; independently varying U/next addresses must not steer it.
+  always_comb begin : pair_lookup_comb
+    logic [SET_BITS-1:0] set;
+    int ix;
+    set = tlb_set(pair_lin);
+    pair_hit = 1'b0;
+    pair_phys = 32'd0;
+    pair_perm = 3'd0;
+    pair_dirty = 1'b0;
+    for (int w = 0; w < TLB_WAYS; w++) begin
+      ix = slot_of(set, w);
+      if (IS_D && !pair_hit && tlb_val[ix] &&
+          (tlb_vpn[ix] == pair_lin[31:12])) begin
+        pair_hit = 1'b1;
+        pair_phys = tlb_big[ix] ? {tlb_pfn[ix][19:10], pair_lin[21:0]}
+                                 : {tlb_pfn[ix], pair_lin[11:0]};
+        pair_perm = tlb_perm[ix];
+        pair_dirty = tlb_dirty[ix];
       end
     end
   end

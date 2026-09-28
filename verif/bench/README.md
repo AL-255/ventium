@@ -165,6 +165,15 @@ The rebuilt post-overlap binary (`977ad608b74b12efcbe4108ed79f80fc04fc4499533e12
 also matched all 22 directed fixed-work candidate/control architectural traces
 and exact cycle counts at 32 concurrent micro jobs; results are under
 `/tmp/p54-dualhit-overlap-core-micro-r1/`.
+`run-p54-pair-dtlb.sh` checks the independent V translation lookup on both
+direct-mapped and four-way D-TLBs with the existing lookahead port enabled:
+pre-fill visibility, three independently addressed query payloads, same-set
+way selection, large-page offset, and flush. This is only a side-effect-free
+read port; it does not yet authorize V issue, suppress faults, or implement a
+second page walker.
+The corresponding opt-in full-core build also matched all 22 fixed-work
+candidate/control traces and exact cycle counts (`/tmp/p54-pair-dtlb-core-micro-r1/`),
+as expected while V sideband admission remains disabled.
 
 `run-p54-l1d-code-buffer.sh` tests `VEN_L1D_CODE_BUFFER` in four cache
 configurations, including banked/window/forward variants. Code reads with the

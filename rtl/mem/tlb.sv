@@ -62,6 +62,15 @@ module tlb #(
     output logic [2:0]  next_perm,
     output logic        next_dirty,
 `endif
+`ifdef VEN_P54_DUAL_HIT
+    // Independent V D2 translation query. No fill, walk or replacement side
+    // effect; the caller must still check permissions and exact access extent.
+    input  logic [31:0] pair_lin,
+    output logic        pair_hit,
+    output logic [31:0] pair_phys,
+    output logic [2:0]  pair_perm,
+    output logic        pair_dirty,
+`endif
 
     // ---- Pulsed fill-commit (from S_WALK ONLY, gated walk_for_d==IS_D in the
     // spine): when fill_en is high at a posedge, commit one entry for fill_lin.
@@ -126,6 +135,14 @@ module tlb #(
     next_phys = phys_of(next_lin);
     next_perm = tlb_perm[tlb_idx(next_lin)];
     next_dirty = IS_D && tlb_dirty[tlb_idx(next_lin)];
+  end
+`endif
+`ifdef VEN_P54_DUAL_HIT
+  always_comb begin
+    pair_hit = IS_D && hit_of(pair_lin);
+    pair_phys = phys_of(pair_lin);
+    pair_perm = tlb_perm[tlb_idx(pair_lin)];
+    pair_dirty = IS_D && tlb_dirty[tlb_idx(pair_lin)];
   end
 `endif
 

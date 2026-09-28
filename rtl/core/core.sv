@@ -1655,6 +1655,11 @@ module core
   // D-TLB (data accesses) lookup outputs — Dirty tracked so a write marks D.
   logic        dtlb_lk_hit;   logic [31:0] dtlb_lk_phys;
   logic [2:0]  dtlb_lk_perm;  logic        dtlb_lk_dirty;
+`ifdef VEN_P54_DUAL_HIT
+  logic [31:0] pipe_v_mem_lin, v_dtlb_lk_phys;
+  logic [2:0] v_dtlb_lk_perm;
+  logic v_dtlb_lk_hit, v_dtlb_lk_dirty;
+`endif
 
   // +VEN_FE_PIPE: page-keyed micro-TLB register. Translation is per-4 KiB-page, so
   // we register the {i,d}tlb lookup keyed on the page (cur_lin[31:12]); xlate_miss /
@@ -5261,6 +5266,13 @@ module core
   ven_p54_dual_agu u_dual_agu (
       .u(pipe_u_eff), .v(pipe_v_eff), .gpr(gpr_o),
       .u_ea(pipe_u_modrm_ea), .v_ea(pipe_v_modrm_ea));
+`ifdef VEN_P54_DUAL_HIT
+  // Keep V's segment-base addition separate from U's cur_lin/fragment-engine
+  // address. Reading the TLB is side-effect-free; the issue owner must still
+  // prove the segment extent, PTE permissions, cache type and restart point.
+  assign pipe_v_mem_lin = seg_base[pipe_v_eff.mem_ss ? SG_SS : SG_DS] +
+                          pipe_v_modrm_ea;
+`endif
 
   // `mem_ack` is the fragment-engine/FSM-visible acknowledgement, not the raw
   // external bus acknowledgement.  For a non-crossing BFM access it is high on
@@ -8484,6 +8496,9 @@ module core
 `ifdef VEN_PIPE_MEM_CHAIN
       .next_lin(32'd0), .next_hit(), .next_phys(), .next_perm(), .next_dirty(),
 `endif
+`ifdef VEN_P54_DUAL_HIT
+      .pair_lin(32'd0), .pair_hit(), .pair_phys(), .pair_perm(), .pair_dirty(),
+`endif
       .fill_en(tlb_fill_en && (tlb_fill_is_d==1'b0)),
       .fill_lin(tlb_fill_lin), .fill_pfn(tlb_fill_pfn), .fill_perm(tlb_fill_perm),
       .fill_big(tlb_fill_big), .fill_dirty(tlb_fill_dirty),
@@ -8507,6 +8522,11 @@ module core
 `ifdef VEN_PIPE_MEM_CHAIN
       .next_lin(mc_query_lin), .next_hit(mc_lookup_hit), .next_phys(mc_lookup_phys),
       .next_perm(mc_lookup_perm), .next_dirty(mc_lookup_dirty),
+`endif
+`ifdef VEN_P54_DUAL_HIT
+      .pair_lin(pipe_v_mem_lin), .pair_hit(v_dtlb_lk_hit),
+      .pair_phys(v_dtlb_lk_phys), .pair_perm(v_dtlb_lk_perm),
+      .pair_dirty(v_dtlb_lk_dirty),
 `endif
       .fill_en(tlb_fill_en && (tlb_fill_is_d==1'b1)),
       .fill_lin(tlb_fill_lin), .fill_pfn(tlb_fill_pfn), .fill_perm(tlb_fill_perm),
