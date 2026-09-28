@@ -24,6 +24,12 @@ _start:
     # The first loop entry must have the same not-taken ZF as later entries.
     testl %ecx, %ecx
 .endif
+.if CASE == 46 || CASE == 47
+    # Populate both read windows before measuring the loop. The second line
+    # remains in the shadow while the first is the registered primary.
+    movl 32(%esi), %ebx
+    movl (%esi), %edi
+.endif
     jmp loop_body
 .if CASE == 9
     .balign 32
@@ -269,7 +275,7 @@ loop_body:
     movl 4(%esi), %edx
     .endr
 .elseif CASE == 42
-    # Reusing the identical word needs no second physical bank port.
+    # Identical-word U/V loads still conflict in the P54's physical bank.
     .rept 8
     movl (%esi), %eax
     movl (%esi), %edx
@@ -280,6 +286,26 @@ loop_body:
     movl (%esi), %eax
     movl 28(%esi), %edx
     .endr
+.elseif CASE == 44
+    # Prime two resident line windows, then pair independent byte MOVs from
+    # distinct physical banks in those different lines (2 and 1).
+    movl 32(%esi), %ebx
+    movl (%esi), %edi
+    movb 8(%esi), %al
+    movb 36(%esi), %dl
+.elseif CASE == 45
+    # The same two windows, but both final loads use bank 1. A saved window
+    # must not bypass the P54 bank restriction.
+    movl 32(%esi), %ebx
+    movl (%esi), %edi
+    movb 4(%esi), %al
+    movb 36(%esi), %dl
+.elseif CASE == 46
+    movb 8(%esi), %al
+    movb 36(%esi), %dl
+.elseif CASE == 47
+    movb 4(%esi), %al
+    movb 36(%esi), %dl
 .else
     .error "unsupported CASE"
 .endif

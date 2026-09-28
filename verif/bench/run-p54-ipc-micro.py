@@ -63,6 +63,10 @@ CASES = {
     "dual_dword_load_window": (BASE, 41),
     "dual_dword_load_same_word": (BASE, 42),
     "dual_dword_load_line_edge": (BASE, 43),
+    "dual_byte_cross_window": (BASE, 44),
+    "dual_byte_cross_window_same_bank": (BASE, 45),
+    "dual_byte_cross_window_steady": (BASE, 46),
+    "dual_byte_cross_window_steady_same_bank": (BASE, 47),
 }
 
 
@@ -106,7 +110,12 @@ def assemble(name, source, case_id, iterations, out, deadline):
     sym = symbols(directory / "nm.log")
     assert all(key in sym for key in ("loop_body", "loop_end", "exit_syscall")), name
     count = body_instruction_count(directory / "disasm.log", sym["loop_body"], sym["loop_end"])
-    assert 4 <= count <= 6, (name, count)
+    # The byte/dword stress loops deliberately repeat eight U/V pairs. The
+    # other directed loops keep the original short 4–6 instruction body.
+    if case_id is not None and 37 <= case_id <= 43:
+        assert count == 18, (name, count)
+    else:
+        assert 4 <= count <= 6, (name, count)
     if name == "frontend_aligned":
         assert sym["loop_body"] % 32 == 0
     if name == "frontend_line_straddle":

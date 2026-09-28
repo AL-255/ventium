@@ -349,9 +349,10 @@ module tb_l1d_pair_hit;
       $fatal(1,"same-window byte return not immediate or double accepted");
     pair_now_cacheable=0; #1;
     if (pair_now_valid) $fatal(1,"uncacheable V used immediate window");
-    pair_now_cacheable=1; pair_now_paddr=32'h1028; #1;
-    if (pair_now_valid) $fatal(1,"different-line V used U window");
-    pair_now_paddr=32'h1008; snoop_inv_valid=1; #1;
+    pair_now_cacheable=1; pair_now_paddr=32'h1048; pair_paddr[1]=32'h1048; #1;
+    if (pair_now_valid) $fatal(1,"uncaptured line used immediate window");
+    pair_now_paddr=32'h1008; pair_paddr[1]=32'h1008;
+    snoop_inv_valid=1; #1;
     if (pair_now_valid) $fatal(1,"snooped window served immediate V");
     snoop_inv_valid=0; flush_all=1; #1;
     if (pair_now_valid) $fatal(1,"flushed window served immediate V");
@@ -362,6 +363,17 @@ module tb_l1d_pair_hit;
     c_wstrb=4'hf; pair_size_log2[1]=2'd2;
     if (pair_rsp_valid[1])
       $fatal(1,"immediate byte return enqueued a duplicate V response");
+
+    legacy_read(32'h1000);
+    @(negedge clk); c_req=1; c_addr=32'h1004; c_wstrb=4'h1;
+    pair_req_valid=2'b10; pair_paddr[1]=32'h1005;
+    pair_size_log2[1]=2'd0; pair_now_req=1;
+    pair_now_paddr=32'h1005; pair_now_size_log2=2'd0;
+    #1;
+    if (!c_ack || pair_now_valid || pair_req_ready[1])
+      $fatal(1,"same-bank byte V bypassed P54 bank conflict");
+    @(posedge clk); @(negedge clk); c_req=0; pair_req_valid=0;
+    pair_now_req=0; c_wstrb=4'hf; pair_size_log2[1]=2'd2;
 
     legacy_read(32'h1000);
     @(negedge clk); c_req=1; c_addr=32'h1004;
@@ -471,12 +483,12 @@ module tb_l1d_pair_hit;
     @(posedge clk); @(negedge clk); c_req=0;
 `ifdef VEN_P54_DUAL_BYTE_LOAD_PAIR
     @(negedge clk); c_req=1; c_addr=32'h1024; c_wstrb=4'h1;
-    pair_req_valid=2'b10; pair_paddr[1]=32'h1027;
+    pair_req_valid=2'b10; pair_paddr[1]=32'h1028;
     pair_size_log2[1]=2'd0; pair_owner[1]=16'h7803;
-    pair_now_req=1; pair_now_paddr=32'h1027;
+    pair_now_req=1; pair_now_paddr=32'h1028;
     #1;
     if (!dut.shadow_reuse || !c_ack || !pair_now_valid ||
-        pair_now_data!=={24'd0,mem[32'h1027]} || pair_req_ready[1])
+        pair_now_data!=={24'd0,mem[32'h1028]} || pair_req_ready[1])
       $fatal(1,"shadow-window byte return failed");
     @(posedge clk); @(negedge clk); c_req=0; pair_req_valid=0;
     pair_now_req=0; c_wstrb=4'hf; pair_size_log2[1]=2'd2;

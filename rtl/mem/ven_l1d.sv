@@ -376,10 +376,15 @@ module ven_l1d #(
   end
 `ifdef VEN_P54_DUAL_BYTE_LOAD_PAIR
   logic [LW-1:0] pair_now_line;
+  // A registered line window saves an SRAM read, not the P54 word-bank
+  // occupancy. Equal-bank U/V loads still issue on separate clocks.
   assign pair_now_valid = pair_now_req && pair_now_cacheable &&
+      pair_req_valid[1] && (pair_now_paddr == pair_paddr[1]) &&
+      (pair_now_size_log2 == pair_size_log2[1]) &&
       ((pair_now_size_log2 == 2'd0) ||
        ((pair_now_size_log2 == 2'd2) &&
         (pair_now_paddr[4:0] <= 5'd28))) &&
+      (c_addr[4:2] != pair_now_paddr[4:2]) &&
       !pair_rsp_valid[1] && c_req && !c_we && cacheable && c_ack &&
       (window_reuse || shadow_reuse) &&
       (pair_now_paddr[31:5] == c_addr[31:5]);
