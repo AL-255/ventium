@@ -27,6 +27,11 @@ module tb_axi_wbuf;
   logic [3:0]  m_wstrb = '0;
   logic [1:0]  m_rd_size = 2'd2;
   logic        m_ack, bus_err, shutdown = 1'b0, m_idle;
+`ifdef VEN_P54_DUAL_STORE_PAIR
+  logic m_pair_req = 1'b0, m_pair_ack;
+  logic [31:0] m_pair_addr = '0, m_pair_wdata = '0;
+  logic [3:0] m_pair_wstrb = '0;
+`endif
 
   // AXI wires
   logic [3:0] awid, arid, bid, rid;
@@ -43,9 +48,17 @@ module tb_axi_wbuf;
   logic bvalid, bready, arvalid, arready, rvalid, rready, rlast;
   logic [1:0] bresp, rresp;
 
-  ven_axi_master #(.ADDR_W(ADDR_W), .WATCHDOG(128)) dut (
+`ifdef VEN_P54_PAIR_ALIAS_TEST
+  localparam logic [31:0] TEST_ADDR_MASK = 32'h0000_001f;
+`else
+  localparam logic [31:0] TEST_ADDR_MASK = 32'hffff_ffff;
+`endif
+  ven_axi_master #(.ADDR_W(ADDR_W), .ADDR_MASK(TEST_ADDR_MASK), .WATCHDOG(128)) dut (
       .core_clk(clk), .core_rst_n(rst_n), .axi_clk(clk), .axi_rst_n(rst_n),
       .m_req, .m_we, .m_addr, .m_rd_narrow, .m_rd_size, .m_wdata, .m_wstrb,
+`ifdef VEN_P54_DUAL_STORE_PAIR
+      .m_pair_req, .m_pair_addr, .m_pair_wdata, .m_pair_wstrb, .m_pair_ack,
+`endif
       .m_rdata, .m_ack, .bus_err, .shutdown, .m_idle,
       .m_axi_awid(awid), .m_axi_awaddr(awaddr), .m_axi_awlen(awlen), .m_axi_awsize(awsize),
       .m_axi_awburst(awburst), .m_axi_awlock(awlock), .m_axi_awcache(awcache),
@@ -79,7 +92,11 @@ module tb_axi_wbuf;
   assign wready  = rst_n && !hold_aw;
   assign bvalid  = (b_pending != 3'd0) && (b_delay == 8'd0);
   assign bid     = 4'd0;
+`ifdef VEN_P54_PAIR_ERROR_TEST
+  assign bresp   = (b_seen == 3'd0) ? 2'b10 : 2'b00;
+`else
   assign bresp   = 2'b00;
+`endif
 
   // A single narrow read response is sufficient to prove the read barrier.
   assign arready = rst_n && !r_pending;
@@ -187,6 +204,84 @@ module tb_axi_wbuf;
     repeat (4) @(posedge clk);
     rst_n <= 1'b1;
 
+`ifdef VEN_P54_PAIR_ERROR_TEST
+    $display("[error] bad B after pair admission blocks all future pair admission");
+    @(negedge clk);
+    m_req <= 1'b1; m_we <= 1'b1;
+    m_addr <= 32'h0000_0010; m_wdata <= 32'h1111_1111; m_wstrb <= 4'hf;
+    m_pair_req <= 1'b1;
+    m_pair_addr <= 32'h0000_0014;
+    m_pair_wdata <= 32'h2222_2222; m_pair_wstrb <= 4'hf;
+    #1;
+    if (!m_ack || !m_pair_ack) fail("initial pair not admitted");
+    @(posedge clk);
+    @(negedge clk);
+    m_req <= 1'b0; m_we <= 1'b0; m_pair_req <= 1'b0;
+    hold_aw <= 1'b0;
+    begin
+      int guard;
+      guard = 0;
+      while (b_seen == 3'd0) begin
+        @(posedge clk);
+        if (++guard > 100) begin fail("first error response did not arrive"); break; end
+      end
+    end
+    @(negedge clk);
+    if (!bus_err) fail("bad B did not raise sticky bus error");
+    m_req <= 1'b1; m_we <= 1'b1;
+    m_addr <= 32'h0000_0018; m_wdata <= 32'h3333_3333;
+    m_pair_req <= 1'b1;
+    m_pair_addr <= 32'h0000_001c;
+    m_pair_wdata <= 32'h4444_4444;
+    repeat (3) @(posedge clk);
+    if (m_ack || m_pair_ack || aw_seen != 3'd2)
+      fail("bad B allowed a younger pair to admit or launch");
+    if (errors == 0) $display("AXIWBUF-PAIR-ERROR-GATE-OK");
+    else             $display("AXIWBUF-PAIR-ERROR-GATE-FAIL (%0d errors)", errors);
+    $finish;
+`elsif VEN_P54_PAIR_ALIAS_TEST
+    $display("[alias] pair V address outside remap window rejects the whole pair");
+    @(negedge clk);
+    m_req <= 1'b1; m_we <= 1'b1;
+    m_addr <= 32'h0000_0010; m_wdata <= 32'h1111_1111; m_wstrb <= 4'hf;
+    m_pair_req <= 1'b1;
+    m_pair_addr <= 32'h0000_0020;
+    m_pair_wdata <= 32'h2222_2222; m_pair_wstrb <= 4'hf;
+    #1;
+    if (m_ack || m_pair_ack || dut.wq_count != 0)
+      fail("out-of-window V store admitted either pair member");
+    @(posedge clk);
+    #1;
+    if (!bus_err || dut.wq_count != 0 || aw_seen != 0)
+      fail("out-of-window V store did not raise sticky alias fault");
+    @(negedge clk);
+    shutdown <= 1'b1;
+    #1;
+    if (m_ack || m_pair_ack)
+      fail("shutdown acknowledged a pair after a fatal alias fault");
+
+    $display("[alias] V straddle beyond remap window rejects the whole pair");
+    @(negedge clk);
+    rst_n <= 1'b0; shutdown <= 1'b0; m_req <= 1'b0; m_pair_req <= 1'b0;
+    repeat (3) @(negedge clk);
+    rst_n <= 1'b1;
+    @(negedge clk);
+    m_req <= 1'b1; m_we <= 1'b1;
+    m_addr <= 32'h0000_0010; m_wstrb <= 4'hf;
+    m_pair_req <= 1'b1;
+    m_pair_addr <= 32'h0000_001f; m_pair_wstrb <= 4'hf;
+    #1;
+    if (m_ack || m_pair_ack || dut.wq_count != 0)
+      fail("V store crossing remap-window end admitted either pair member");
+    @(posedge clk);
+    #1;
+    if (!bus_err || dut.wq_count != 0 || aw_seen != 0)
+      fail("V store crossing remap-window end did not raise sticky alias fault");
+
+    if (errors == 0) $display("AXIWBUF-PAIR-ALIAS-GATE-OK");
+    else             $display("AXIWBUF-PAIR-ALIAS-GATE-FAIL (%0d errors)", errors);
+    $finish;
+`else
     $display("[1] P54C capacity: two stores admitted while AXI AW/W is blocked");
     send_write(32'h0000_0010, 32'h1111_1111);
     // Let the first saved entry become active, then occupy the second P54C slot.
@@ -213,9 +308,138 @@ module tb_axi_wbuf;
     if (!m_idle) fail("master not idle after read/write drain");
     if (bus_err) fail("unexpected AXI bus error");
 
+`ifdef VEN_P54_DUAL_STORE_PAIR
+    $display("[4] pair consumes exactly two slots atomically in U/V order");
+    @(negedge clk);
+    rst_n <= 1'b0;
+    hold_aw <= 1'b1;
+    repeat (3) @(negedge clk);
+    rst_n <= 1'b1;
+    @(negedge clk);
+    m_req <= 1'b1; m_we <= 1'b1;
+    m_addr <= 32'h0000_0010; m_wdata <= 32'h1111_1111; m_wstrb <= 4'hf;
+    m_pair_req <= 1'b1;
+    m_pair_addr <= 32'h0000_0014;
+    m_pair_wdata <= 32'h2222_2222;
+    m_pair_wstrb <= 4'hf;
+    #1;
+    if (!m_ack || !m_pair_ack) fail("empty two-slot pair was not admitted atomically");
+    @(posedge clk);
+    @(negedge clk);
+    m_req <= 1'b0; m_we <= 1'b0; m_pair_req <= 1'b0;
+    if (dut.wq_count != 2 || dut.wq_addr[dut.wq_rp] != 32'h10 ||
+        dut.wq_addr[~dut.wq_rp] != 32'h14)
+      fail("pair did not occupy exactly two ordered slots");
+    start_blocked_write(32'h0000_0018, 32'h3333_3333);
+    repeat (4) @(posedge clk);
+    if (m_ack) fail("third write admitted while atomic pair held both slots");
+    @(negedge clk) hold_aw <= 1'b0;
+    finish_write;
+    do_narrow_read(32'h0000_0018, 32'h3333_3333);
+    if (write_order_bad || aw_seen != 3'd3 || b_seen != 3'd3 ||
+        mem[4] != 32'h1111_1111 || mem[5] != 32'h2222_2222 ||
+        mem[6] != 32'h3333_3333 || ar_before_drain || bus_err)
+      fail("atomic pair changed AXI order, data, read barrier, or error state");
+
+    $display("[5] one free slot rejects the whole pair until head B retires");
+    @(negedge clk);
+    rst_n <= 1'b0;
+    hold_aw <= 1'b1;
+    repeat (3) @(negedge clk);
+    rst_n <= 1'b1;
+    send_write(32'h0000_0010, 32'h1111_1111);
+    @(negedge clk);
+    m_req <= 1'b1; m_we <= 1'b1;
+    m_addr <= 32'h0000_0014; m_wdata <= 32'h2222_2222; m_wstrb <= 4'hf;
+    m_pair_req <= 1'b1;
+    m_pair_addr <= 32'h0000_0018;
+    m_pair_wdata <= 32'h3333_3333;
+    m_pair_wstrb <= 4'hf;
+    repeat (4) @(posedge clk);
+    if (m_ack || m_pair_ack || dut.wq_count != 1)
+      fail("single free slot accepted one or both members of a pair");
+    @(negedge clk) hold_aw <= 1'b0;
+    begin
+      int guard;
+      guard = 0;
+      while (!m_pair_ack) begin
+        @(posedge clk);
+        if (++guard > 80) begin fail("pair not admitted on released head B"); break; end
+      end
+      if (m_pair_ack && !m_ack) fail("younger store acked without older store");
+    end
+    @(negedge clk);
+    m_req <= 1'b0; m_we <= 1'b0; m_pair_req <= 1'b0;
+    do_narrow_read(32'h0000_0018, 32'h3333_3333);
+    if (write_order_bad || aw_seen != 3'd3 || b_seen != 3'd3 ||
+        mem[4] != 32'h1111_1111 || mem[5] != 32'h2222_2222 ||
+        mem[6] != 32'h3333_3333 || ar_before_drain || bus_err)
+      fail("released-head pair violated order, capacity, data or read drain");
+
+    $display("[6] full pair needs both B releases; shutdown acks both locally");
+    @(negedge clk);
+    rst_n <= 1'b0;
+    hold_aw <= 1'b1;
+    repeat (3) @(negedge clk);
+    rst_n <= 1'b1;
+    @(negedge clk);
+    m_req <= 1'b1; m_we <= 1'b1;
+    m_addr <= 32'h0000_0010; m_wdata <= 32'h1111_1111; m_wstrb <= 4'hf;
+    m_pair_req <= 1'b1;
+    m_pair_addr <= 32'h0000_0014;
+    m_pair_wdata <= 32'h2222_2222;
+    m_pair_wstrb <= 4'hf;
+    @(posedge clk);
+    @(negedge clk);
+    m_addr <= 32'h0000_0018; m_wdata <= 32'h3333_3333;
+    m_pair_addr <= 32'h0000_001c;
+    m_pair_wdata <= 32'h4444_4444;
+    repeat (4) @(posedge clk);
+    if (m_ack || m_pair_ack || dut.wq_count != 2)
+      fail("full two-slot queue accepted another pair");
+    @(negedge clk) hold_aw <= 1'b0;
+    begin
+      int guard;
+      guard = 0;
+      while (!m_pair_ack) begin
+        @(posedge clk);
+        if (bvalid && bready && b_seen == 3'd0 && (m_ack || m_pair_ack))
+          fail("pair admitted when only first B response freed one slot");
+        if (++guard > 100) begin fail("second pair never admitted after both B responses"); break; end
+      end
+      if (m_pair_ack && !m_ack) fail("second pair was not atomic");
+    end
+    @(negedge clk);
+    m_req <= 1'b0; m_we <= 1'b0; m_pair_req <= 1'b0;
+    begin
+      int guard;
+      guard = 0;
+      while (!m_idle) begin
+        @(posedge clk);
+        if (++guard > 100) begin fail("four-store pair sequence never drained"); break; end
+      end
+    end
+    if (write_order_bad || aw_seen != 3'd4 || b_seen != 3'd4 ||
+        mem[4] != 32'h1111_1111 || mem[5] != 32'h2222_2222 ||
+        mem[6] != 32'h3333_3333 || mem[7] != 32'h4444_4444 || bus_err)
+      fail("two-pair sequence lost AXI order, data or completion");
+    @(negedge clk);
+    shutdown <= 1'b1;
+    m_req <= 1'b1; m_we <= 1'b1;
+    m_addr <= 32'h0000_0020; m_wdata <= 32'h5555_5555;
+    m_pair_req <= 1'b1;
+    m_pair_addr <= 32'h0000_0024; m_pair_wdata <= 32'h6666_6666;
+    #1;
+    if (!m_ack || !m_pair_ack || !m_idle || dut.wq_count != 0)
+      fail("shutdown did not locally ack both pair members without enqueue");
+    @(negedge clk);
+    m_req <= 1'b0; m_we <= 1'b0; m_pair_req <= 1'b0; shutdown <= 1'b0;
+`endif
+
     if (errors == 0) $display("AXIWBUF-GATE-OK (P54C two-buffer capacity + FIFO + read drain)");
     else             $display("AXIWBUF-GATE-FAIL (%0d errors)", errors);
     $finish;
+`endif
   end
 
   initial begin

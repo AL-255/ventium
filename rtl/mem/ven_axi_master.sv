@@ -98,6 +98,15 @@ module ven_axi_master #(
     input  logic [1:0]  m_rd_size,
     input  logic [31:0] m_wdata,
     input  logic [3:0]  m_wstrb,
+`ifdef VEN_P54_DUAL_STORE_PAIR
+    // Atomic younger store admission. The older m_* store is never acked alone
+    // while m_pair_req is asserted; both consume the two P5 slots in U/V order.
+    input  logic        m_pair_req,
+    input  logic [31:0] m_pair_addr,
+    input  logic [31:0] m_pair_wdata,
+    input  logic [3:0]  m_pair_wstrb,
+    output logic        m_pair_ack,
+`endif
     output logic [31:0] m_rdata,
     output logic        m_ack,
     output logic        bus_err,        // #34: sticky FATAL fault (timeout or SLVERR/DECERR)
@@ -244,6 +253,11 @@ module ven_axi_master #(
   logic [7:0]  alias_ssh;
   logic        alias_two;
   logic [31:0] alias_last;
+`ifdef VEN_P54_DUAL_STORE_PAIR
+  logic [7:0] pair_alias_ssh;
+  logic [31:0] pair_alias_last;
+  logic pair_alias_bad;
+`endif
   assign alias_ssh  = {4'd0, m_wstrb} << m_addr[1:0];
   assign alias_two  = m_we ? (alias_ssh[7:4] != 4'd0)
                     : m_rd_narrow ? 1'b0
@@ -253,12 +267,31 @@ module ven_axi_master #(
                     : {m_addr[31:2], 2'b00} + (alias_two ? 32'd7 : 32'd3);
   assign alias_bad = m_req && !(m_addr >= 32'hFFFE_0000)
                            && ( ((m_addr     & ~ADDR_MASK) != 32'd0)
-                             || ((alias_last & ~ADDR_MASK) != 32'd0) );
+                             || ((alias_last & ~ADDR_MASK) != 32'd0) )
+`ifdef VEN_P54_DUAL_STORE_PAIR
+      || pair_alias_bad
+`endif
+      ;
+`ifdef VEN_P54_DUAL_STORE_PAIR
+  assign pair_alias_ssh = {4'd0, m_pair_wstrb} << m_pair_addr[1:0];
+  assign pair_alias_last = {m_pair_addr[31:2], 2'b00} +
+                           ((pair_alias_ssh[7:4] != 4'd0) ? 32'd7 : 32'd3);
+  assign pair_alias_bad = m_req && m_we && m_pair_req &&
+                          !(m_pair_addr >= 32'hFFFE_0000) &&
+                          (((m_pair_addr & ~ADDR_MASK) != 32'd0) ||
+                           ((pair_alias_last & ~ADDR_MASK) != 32'd0));
+`endif
   always_ff @(posedge core_clk or negedge core_rst_n) begin
     if (!core_rst_n) alias_err <= 1'b0;
     else if (alias_bad) begin
       alias_err <= 1'b1;
 `ifndef SYNTHESIS
+`ifdef VEN_P54_DUAL_STORE_PAIR
+      if (pair_alias_bad)
+        $display("[AXI] M-07 PAIR ALIAS: addr=%08h extent=%08h outside ADDR_MASK=%08h. Raising bus_err.",
+                 m_pair_addr, pair_alias_last, ADDR_MASK);
+      else
+`endif
       $display("[AXI] M-07 ALIAS: addr=%08h has bits outside ADDR_MASK=%08h -- would fold onto %08h, which belongs to a different physical address. Raising bus_err.",
                m_addr, ADDR_MASK, (m_addr & ADDR_MASK));
 `endif
@@ -395,6 +428,10 @@ module ven_axi_master #(
   logic [1:0]        wq_bcount[P5_WBUF_DEPTH]; // issued AXI write responses per P5 slot
   logic [P5_WBUF_DEPTH-1:0] wq_issued;         // final AXI beat accepted for this slot
   logic                 wr_enq, wr_dispatch, wr_busy, wr_dispatch_slot;
+`ifdef VEN_P54_DUAL_STORE_PAIR
+  logic                 wr_pair_enq;
+  logic                 wr_can_pair;
+`endif
   logic                 wr_active_slot, b_owner_slot, b_owner_valid, wq_head_release;
   logic [63:0]          q_dsh;
   logic [7:0]           q_ssh;
@@ -482,8 +519,25 @@ module ven_axi_master #(
       wq_head_release = head_final_after && (head_b_after == 2'd0);
     end
   end
+`ifdef VEN_P54_DUAL_STORE_PAIR
+  // Two free slots are required atomically. A same-edge head B may contribute
+  // one slot, but a full queue with only one released slot cannot accept a pair.
+  assign wr_can_pair = (wq_count == WBUF_CNTW'(0)) ||
+                       ((wq_count == WBUF_CNTW'(1)) && wq_head_release);
+  assign wr_enq      = (rst == R_IDLE) && m_req && m_we && !shutdown &&
+                       !alias_bad && !fatal_now &&
+                       (m_pair_req ? wr_can_pair :
+                        ((wq_count < WBUF_CNTW'(P5_WBUF_DEPTH)) || wq_head_release));
+  assign wr_pair_enq = wr_enq && m_pair_req;
+  // Quiesce acknowledges requests locally without issuing AXI; do so for
+  // both pair members together, matching the established single-store rule.
+  assign m_pair_ack  = !fatal_now &&
+                       (wr_pair_enq ||
+                        (shutdown && m_idle && m_req && m_we && m_pair_req));
+`else
   assign wr_enq      = (rst == R_IDLE) && m_req && m_we && !shutdown && !alias_bad && !fatal_now &&
                        ((wq_count < WBUF_CNTW'(P5_WBUF_DEPTH)) || wq_head_release);
+`endif
   assign wr_busy     = wr_active || (wq_count != WBUF_CNTW'(0));
   assign wst         = wr_busy ? W_RUN : W_IDLE;
 
@@ -822,19 +876,37 @@ module ven_axi_master #(
       // Only B-retirement releases a P54C slot.  Dispatch is deliberately NOT a
       // dequeue: a slot stays counted from CPU admission through its final B.
       // An enqueue plus a head release can share the ring in one edge.
+`ifdef VEN_P54_DUAL_STORE_PAIR
+      wq_count <= wq_count + WBUF_CNTW'(wr_enq) +
+                  WBUF_CNTW'(wr_pair_enq) - WBUF_CNTW'(wq_head_release);
+`else
       unique case ({wr_enq, wq_head_release})
         2'b10: wq_count <= wq_count + WBUF_CNTW'(1);
         2'b01: wq_count <= wq_count - WBUF_CNTW'(1);
         default: ;
       endcase
+`endif
       if (wr_enq) begin
         wq_addr[wq_wp]  <= m_addr;
         wq_wdata[wq_wp] <= m_wdata;
         wq_wstrb[wq_wp] <= m_wstrb;
         wq_bcount[wq_wp] <= 2'd0;
         wq_issued[wq_wp] <= 1'b0;
+`ifdef VEN_P54_DUAL_STORE_PAIR
+        wq_wp <= wq_wp + WBUF_PTRW'(1) + WBUF_PTRW'(wr_pair_enq);
+`else
         wq_wp <= wq_wp + WBUF_PTRW'(1);
+`endif
       end
+`ifdef VEN_P54_DUAL_STORE_PAIR
+      if (wr_pair_enq) begin
+        wq_addr[~wq_wp] <= m_pair_addr;
+        wq_wdata[~wq_wp] <= m_pair_wdata;
+        wq_wstrb[~wq_wp] <= m_pair_wstrb;
+        wq_bcount[~wq_wp] <= 2'd0;
+        wq_issued[~wq_wp] <= 1'b0;
+      end
+`endif
       if (wq_head_release) wq_rp <= wq_rp + WBUF_PTRW'(1);
       if (wr_dispatch) begin
         // BYTE-LANE ALIGN (P2 fix): the core's byte zero is shifted onto the
@@ -890,7 +962,11 @@ module ven_axi_master #(
         // the same edge.  Its freshly allocated response count must remain zero;
         // applying the OLD owner's B retirement after the allocation would wrap
         // it to three and make the new entry permanently busy.
-        if (!(wr_enq && (wq_wp == WBUF_PTRW'(i)))) begin
+        if (!(wr_enq && (wq_wp == WBUF_PTRW'(i)))
+`ifdef VEN_P54_DUAL_STORE_PAIR
+            && !(wr_pair_enq && (~wq_wp == WBUF_PTRW'(i)))
+`endif
+            ) begin
           unique case ({wr_beat_sent && (wr_active_slot == WBUF_PTRW'(i)),
                        b_retire_hs && b_owner_valid && (b_owner_slot == WBUF_PTRW'(i))})
             2'b10: wq_bcount[i] <= wq_bcount[i] + 2'd1;
@@ -902,7 +978,11 @@ module ven_axi_master #(
       // Same ownership rule as bcount above.  It is unreachable for the normal
       // FIFO schedule, but makes a replacement edge robust if an implementation
       // later permits a completion and reuse of the same slot together.
-      if (wr_store_final && !(wr_enq && (wq_wp == wr_active_slot)))
+      if (wr_store_final && !(wr_enq && (wq_wp == wr_active_slot))
+`ifdef VEN_P54_DUAL_STORE_PAIR
+          && !(wr_pair_enq && (~wq_wp == wr_active_slot))
+`endif
+          )
         wq_issued[wr_active_slot] <= 1'b1;
 
       // One progress watchdog covers queue dispatch, independent AW/W handshakes,
@@ -1006,6 +1086,12 @@ module ven_axi_master #(
       r_bad_now |-> !m_ack);
   no_fatal_delivery: assert property (@(posedge core_clk) disable iff (!core_rst_n)
       fatal_latched |-> !m_ack);
+`ifdef VEN_P54_DUAL_STORE_PAIR
+  pair_atomic_ack: assert property (@(posedge core_clk) disable iff (!core_rst_n)
+      m_pair_ack |-> (m_ack && m_req && m_we && m_pair_req));
+  pair_no_fatal_delivery: assert property (@(posedge core_clk) disable iff (!core_rst_n)
+      fatal_now |-> !m_pair_ack);
+`endif
 `ifndef VEN_AXI_RESP_FAULT_INJECT
   bresp_okay: assert property (@(posedge core_clk) disable iff (!core_rst_n)
       b_retire_hs |-> (m_axi_bresp == 2'b00));
