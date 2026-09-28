@@ -215,6 +215,9 @@ default, and this is not a broad FP/event qualification.
 The matched [FPGA decoder leaf probe](../../fpga/P54_DECODE_LEAF_SYNTH_2026-09-27.md)
 measures a five-LUT cost for `VEN_FAST_MEM_ALU` and no material isolated
 synthesis timing loss; it does not establish full-core routed timing.
+The separate [uop-cache leaf probe](../../fpga/P54_UOPCACHE_LEAF_SYNTH_2026-09-27.md)
+measures the much larger cross-line repair cost at the same 45 MHz synthesis
+constraint. It excludes core-side cross-pair logic and routed timing.
 
 The cross-line memory-ALU self-modifying-code fixture
 (`verif/issue_uv/t_alu_memory_smc.s`) passes the existing
