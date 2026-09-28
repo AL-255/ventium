@@ -182,3 +182,16 @@ system gate. Both diagnostic pairs additionally used `VEN_UOP_CROSSLINE` and
 The matched [FPGA decoder leaf probe](../../fpga/P54_DECODE_LEAF_SYNTH_2026-09-27.md)
 measures a five-LUT cost for `VEN_FAST_MEM_ALU` and no material isolated
 synthesis timing loss; it does not establish full-core routed timing.
+
+The cross-line memory-ALU self-modifying-code fixture
+(`verif/issue_uv/t_alu_memory_smc.s`) passes the existing
+`run-crossline-smc.py --fast-retire-only` differential runner on the combined
+`VEN_FAST_MEM_ALU` + banked code-buffer/stream + executable-repair candidate:
+1,221 complete QEMU-equivalent groups and fast retirement in all three
+100-iteration phases (original SUB, patched displacement, patched XOR opcode).
+The default runner still requires its stronger final descriptor-hit counter;
+the alternate-fixture option checks fast retirement without claiming that
+specific counter was emitted. Without executable repair the fixture also
+matched QEMU, but its crossing instruction stayed on the slow path and did
+not qualify the fast-path SMC corner. This remains directed evidence, not
+gameplay or full-system acceptance.
