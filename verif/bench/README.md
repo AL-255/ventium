@@ -118,6 +118,13 @@ isolated bank (zero LUTRAMs/FFs). This is a possible FPGA storage organization,
 not an integrated L1D: synchronous row-address timing and same-row write/read
 arbitration remain explicit design obligations.
 
+`run-p54-bram-data.sh` checks the eight-bank dual-read composition with 62
+directed admission/response/collision/cancel witnesses, including all 56
+ordered distinct-bank pairs. Vivado maps its isolated storage to eight
+`RAMB36` tiles (212 LUTs outside the RAMs). This leaf has no tags or core
+connection and cannot yet claim a gameplay IPC gain; see the same
+[synthesis record](../../fpga/P54_L1D_LEAF_SYNTH_2026-09-27.md).
+
 `run-p54-l1d-pair-hit.sh` exercises the default-off `VEN_P54_DUAL_HIT` cache
 interface atop `VEN_L1D_BANKED_DATA`. It checks simultaneous distinct-bank
 read hits, serialized same-bank hits, width/offset assembly, split-line and

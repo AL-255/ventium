@@ -119,3 +119,41 @@ timeout --signal=TERM --kill-after=15s 540s \
   -source fpga/synth_p54_bram_bank.tcl \
   -tclargs /tmp/p54-bram-bank-synth-example
 ```
+
+## Eight-bank dual-read BRAM data-array feasibility (not integrated)
+
+`ven_p54_bram_data.sv` composes eight of the byte-write 256×32 BRAM banks.
+It accepts translated, tag-checked U/V dword-read requests to distinct banks
+in one cycle and returns separately owned, registered responses on the next
+edge. Same-bank U/V requests serialize; a write excludes reads of its bank.
+It retains an output-register response under backpressure and blocks a write
+that would overwrite the held U response. Flush cancels held owners. These
+rules avoid relying on unspecified same-address BRAM read-during-write data.
+
+The bounded microbench (`verif/bench/run-p54-bram-data.sh`) passes **62 checks**:
+all 56 ordered distinct-bank pairs, same-bank replay, separate owner/data
+returns, held-response stability, independent write versus blocked collision,
+consumption and flush cancellation. Vivado 2025.2 synthesized the data-array
+source SHA-256
+`6b79b1ec66080813775402641f3fe42cf5dde5c46d64aa36545226ea09215e95`
+on `xck26-sfvc784-2LV-c` to **8 RAMB36, 212 LUTs, 40 external FFs, zero
+LUTRAMs**, with synthesis WNS **+19.847 ns** against a 45 MHz clock. Artifacts:
+`/tmp/p54-bram-data-synth-r1/`. No orphan Vivado remained after the run.
+
+The small LUT count is **not** directly comparable to the complete L1D rows
+above: this leaf omits tags, valid/LRU, byte extraction, split extents,
+cacheability, fill/control FSM, translation, and the real core request path.
+Its synchronous BRAM reads require an address one edge ahead of consumption;
+the present single-ack L1D cannot be replaced by this module without a
+request/response pipeline and collision-safe fill/store integration. The
+out-of-context WNS constrains only internal register paths, not external
+input/output paths or routed processor Fmax. There is no gameplay IPC result.
+
+Reproduce this leaf (one Vivado instance only):
+
+```sh
+timeout --signal=TERM --kill-after=15s 540s \
+  fpga/run_vivado_exclusive.sh -mode batch \
+  -source fpga/synth_p54_bram_data.tcl \
+  -tclargs /tmp/p54-bram-data-synth-example
+```
