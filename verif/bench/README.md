@@ -143,9 +143,23 @@ interface atop `VEN_L1D_BANKED_DATA`. It checks simultaneous distinct-bank
 read hits, serialized same-bank hits, width/offset assembly, split-line and
 uncached rejection, independent held owner responses, consume/replace, and
 flush/snoop cancellation. A legacy write hit must be visible to a subsequent
-pair read. The interface is not connected to the core's EA/DTLB/issue path,
-so these results establish cache-local behavior only—not paired retirements,
-architectural correctness, area, timing, or gameplay throughput.
+pair read. The registered-ACK variant also checks a distinct-bank pair on the
+same edge that an older legacy read consumes its captured response; the
+`--comb-ack` variant confirms that the live-bank response retains exclusive
+ownership until its request leaves. `verif/l1/run-l1axi-pair-hit-micro.sh`
+checks six end-to-end wrapper cases, including per-lane memory-type rejection,
+U-before-V ordering, and flush cancellation. The sideband is wired through the
+top and L1/AXI wrapper, but the core deliberately drives request-valid low
+until D2/DTLB issue and retirement ownership are implemented. Thus these
+checks establish cache/protocol behavior only—not paired retirements,
+architectural correctness, area, timing, or gameplay throughput. The active
+cache banks remain asynchronous distributed RAM; the separate synchronous
+eight-bank BRAM leaf is an FPGA organization experiment, not an integrated
+latency or area win.
+The opt-in full-core sideband build also matched the preceding dual-AGU build
+in 14 pinned-QEMU memory-ALU full-state/cycle cases. Because the core does not
+yet issue sideband requests, that equality is a no-regression check, not an
+IPC improvement or proof of V-memory retirement.
 
 `run-p54-l1d-code-buffer.sh` tests `VEN_L1D_CODE_BUFFER` in four cache
 configurations, including banked/window/forward variants. Code reads with the

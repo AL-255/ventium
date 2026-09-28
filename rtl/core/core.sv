@@ -519,6 +519,23 @@ module core
     output logic [3:0]  mem_next_wstrb,
     input  logic        mem_next_ready,
 `endif
+`ifdef VEN_P54_DUAL_HIT
+    // Independent, owner-tagged resident D-cache hit path. The current spine
+    // leaves it idle until V-memory D2/commit ownership is integrated.
+    output logic [1:0]       mem_pair_req_valid,
+    output logic [1:0][31:0] mem_pair_paddr,
+    output logic [1:0][1:0]  mem_pair_size_log2,
+    output logic [1:0][15:0] mem_pair_owner,
+    input  logic [1:0]       mem_pair_req_ready,
+    input  logic [1:0]       mem_pair_req_split,
+    input  logic             mem_pair_bank_conflict,
+    input  logic [1:0]       mem_pair_rsp_valid,
+    input  logic [1:0]       mem_pair_rsp_cancel,
+    output logic [1:0]       mem_pair_rsp_ready,
+    input  logic [1:0][15:0] mem_pair_rsp_owner,
+    input  logic [1:0][31:0] mem_pair_rsp_paddr,
+    input  logic [1:0][31:0] mem_pair_rsp_data,
+`endif
 
     // M6: raised (and latched) when the core enters the F00F hang state
     // (Erratum 81). Lets the TB observe the documented "system hang" without the
@@ -4928,6 +4945,19 @@ module core
 `endif
 
   `include "core_mem_chain.svh"
+
+`ifdef VEN_P54_DUAL_HIT
+`ifndef VEN_L1_AXI
+  initial $fatal(1, "VEN_P54_DUAL_HIT requires VEN_L1_AXI");
+`endif
+  // Tie off until the checked D2 translation/issue packet is connected.
+  // No cache request may be generated merely by decoding a V memory form.
+  assign mem_pair_req_valid = '0;
+  assign mem_pair_paddr = '0;
+  assign mem_pair_size_log2 = '0;
+  assign mem_pair_owner = '0;
+  assign mem_pair_rsp_ready = '0;
+`endif
 
   // R1 phase-3: the pairing checker is now the `issue_uv` leaf module
   // (rtl/core/issue_uv.sv). pipe_pair_ok is the bare can-pair RULES decision;

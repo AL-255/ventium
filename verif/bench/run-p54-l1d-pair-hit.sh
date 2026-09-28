@@ -3,11 +3,19 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 out="$(mktemp -d /tmp/ventium-p54-l1d-pair-hit.XXXXXX)"
 echo "Artifacts: $out"
+extra_defines=()
+if [[ "${1:-}" == "--comb-ack" ]]; then
+    extra_defines=(+define+VEN_L1D_COMB_ACK)
+elif [[ $# -ne 0 ]]; then
+    echo "usage: $0 [--comb-ack]" >&2
+    exit 2
+fi
 timeout 420s "$root/tools/verilator_serial.sh" --binary --assert -sv \
     -Wall -Wno-UNUSED -Wno-fatal \
     -Werror-IMPLICIT -Werror-PINMISSING -Werror-UNDRIVEN \
     -Werror-MULTIDRIVEN -Werror-LATCH -Werror-UNOPTFLAT \
     +define+VEN_L1D_BANKED_DATA +define+VEN_P54_DUAL_HIT \
+    "${extra_defines[@]}" \
     --top-module tb_l1d_pair_hit -Mdir "$out" \
     "$root/rtl/mem/ven_p54_bank_arb.sv" \
     "$root/rtl/mem/ven_p54_hit_return.sv" \

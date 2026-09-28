@@ -202,8 +202,21 @@ module ven_l1d #(
   logic [1:0][7:0] pair_bank_mask;
   logic [1:0][31:0] pair_read_data;
   logic [7:0] pair_bank_ready;
+  logic pair_legacy_overlap;
+  // A registered legacy read response is served from rd_window_q, not from
+  // the data-bank read ports. Admit a new pair on its consume edge, provided
+  // the old address/ACK still match and the separate single-next lookahead
+  // is not using those banks. A new legacy capture, write, bypass or held
+  // unmatched response retains exclusive ownership.
+`ifdef VEN_L1D_COMB_ACK
+  // The cosim-only combinational response still reads the live banks.
+  assign pair_legacy_overlap = 1'b0;
+`else
+  assign pair_legacy_overlap = c_req && !c_we && rd_match && c_ack && cacheable;
+`endif
   assign pair_lookup_active = (|pair_req_valid) && (st == L1_IDLE) &&
-      !c_req && !rd_armed && !early_armed && !stream_path &&
+      ((!c_req && !rd_armed) || pair_legacy_overlap) &&
+      !mc_lookup_next && !early_armed && !stream_path &&
       !flush_all && !snoop_inv_valid && !golden;
   assign pair_bank_ready = pair_lookup_active ? 8'hff : 8'h00;
   for (genvar lane = 0; lane < 2; lane++) begin : g_pair_tags

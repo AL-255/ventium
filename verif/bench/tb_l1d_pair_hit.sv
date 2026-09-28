@@ -175,16 +175,41 @@ module tb_l1d_pair_hit;
     if (pair_rsp_valid!=0) $fatal(1,"canceled owner resurrected");
     pair_rsp_ready=2'b11;
 
-    // The old bus port retains exclusive ownership; no pair probe may steal
-    // its data-row selection or start backing traffic on a rejected miss.
+    // A new legacy read's first capture edge owns the banks exclusively.
+    // Once its registered response is ready, the old data comes from the
+    // captured window and a distinct-bank pair can read the arrays on the
+    // SAME consumption edge without changing the old owner or data.
     legacy_read(32'h1000);
     @(negedge clk); c_req=1; c_addr=32'h1004;
     pair_req_valid=2'b11; pair_paddr[0]=32'h1000;
-    pair_paddr[1]=32'h1024;
+    pair_paddr[1]=32'h1008;
     expect_pair(2'b00);
     @(posedge clk); if (c_ack && c_rdata!==word_at(32'h1004))
       $fatal(1,"legacy response corrupted by pair probe");
+    @(negedge clk);
+    if (!c_ack || c_rdata!==word_at(32'h1004))
+      $fatal(1,"registered legacy response not ready before overlap");
+`ifdef VEN_L1D_COMB_ACK
+    // Its response still uses the LIVE banks, so V must wait until U leaves.
+    expect_pair(2'b00);
+    @(posedge clk);
+    if (!c_ack || c_rdata!==word_at(32'h1004))
+      $fatal(1,"combinational legacy response corrupted by pair probe");
+    @(negedge clk); c_req=0;
+    expect_pair(2'b11);
+    @(posedge clk);
+    @(negedge clk); pair_req_valid=0;
+`else
+    expect_pair(2'b11);
+    @(posedge clk);
+    if (!c_ack || c_rdata!==word_at(32'h1004))
+      $fatal(1,"legacy response corrupted on pair acceptance edge");
     @(negedge clk); c_req=0; pair_req_valid=0;
+`endif
+    if (pair_rsp_valid!==2'b11 ||
+        pair_rsp_data[0]!==word_at(32'h1000) ||
+        pair_rsp_data[1]!==word_at(32'h1008))
+      $fatal(1,"overlapped pair response mismatch");
     repeat(2) @(negedge clk);
 
     // A rejected request must neither touch the cache nor enqueue a response.

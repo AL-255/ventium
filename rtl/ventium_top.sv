@@ -380,6 +380,20 @@ module ventium_top
   logic [3:0] core_mem_next_wstrb;
   logic l1_next_ready;
 `endif
+`ifdef VEN_P54_DUAL_HIT
+  logic [1:0] core_pair_req_valid, core_pair_req_ready, core_pair_req_split;
+  logic [1:0][31:0] core_pair_paddr;
+  logic [1:0][1:0] core_pair_size_log2;
+  logic [1:0][15:0] core_pair_owner, core_pair_rsp_owner;
+  logic core_pair_bank_conflict;
+  logic [1:0] core_pair_rsp_valid, core_pair_rsp_cancel, core_pair_rsp_ready;
+  logic [1:0][31:0] core_pair_rsp_paddr, core_pair_rsp_data;
+  logic [1:0] l1_pair_req_ready, l1_pair_req_split;
+  logic l1_pair_bank_conflict;
+  logic [1:0] l1_pair_rsp_valid, l1_pair_rsp_cancel;
+  logic [1:0][15:0] l1_pair_rsp_owner;
+  logic [1:0][31:0] l1_pair_rsp_paddr, l1_pair_rsp_data;
+`endif
 `ifdef VEN_FP_LOAD64
   logic [31:0] core_mem_rdata_hi;
   logic        core_mem_rdata_hi_valid;
@@ -808,6 +822,21 @@ module ventium_top
       .mem_next_req(core_mem_next_req), .mem_next_commit(core_mem_next_commit),
       .mem_next_addr(core_mem_next_addr), .mem_next_wstrb(core_mem_next_wstrb),
       .mem_next_ready(core_mem_next_ready),
+`endif
+`ifdef VEN_P54_DUAL_HIT
+      .mem_pair_req_valid(core_pair_req_valid),
+      .mem_pair_paddr(core_pair_paddr),
+      .mem_pair_size_log2(core_pair_size_log2),
+      .mem_pair_owner(core_pair_owner),
+      .mem_pair_req_ready(core_pair_req_ready),
+      .mem_pair_req_split(core_pair_req_split),
+      .mem_pair_bank_conflict(core_pair_bank_conflict),
+      .mem_pair_rsp_valid(core_pair_rsp_valid),
+      .mem_pair_rsp_cancel(core_pair_rsp_cancel),
+      .mem_pair_rsp_ready(core_pair_rsp_ready),
+      .mem_pair_rsp_owner(core_pair_rsp_owner),
+      .mem_pair_rsp_paddr(core_pair_rsp_paddr),
+      .mem_pair_rsp_data(core_pair_rsp_data),
 `endif
 `ifdef VEN_FP_LOAD64
       .bus_rdata_hi (core_mem_rdata_hi),
@@ -1319,6 +1348,21 @@ module ventium_top
       .core_next_addr(core_mem_next_addr), .core_next_wstrb(core_mem_next_wstrb),
       .core_next_ready(l1_next_ready),
 `endif
+`ifdef VEN_P54_DUAL_HIT
+      .core_pair_req_valid(l1axi_en ? core_pair_req_valid : 2'b00),
+      .core_pair_paddr(core_pair_paddr),
+      .core_pair_size_log2(core_pair_size_log2),
+      .core_pair_owner(core_pair_owner),
+      .core_pair_req_ready(l1_pair_req_ready),
+      .core_pair_req_split(l1_pair_req_split),
+      .core_pair_bank_conflict(l1_pair_bank_conflict),
+      .core_pair_rsp_valid(l1_pair_rsp_valid),
+      .core_pair_rsp_cancel(l1_pair_rsp_cancel),
+      .core_pair_rsp_ready(l1axi_en ? core_pair_rsp_ready : 2'b00),
+      .core_pair_rsp_owner(l1_pair_rsp_owner),
+      .core_pair_rsp_paddr(l1_pair_rsp_paddr),
+      .core_pair_rsp_data(l1_pair_rsp_data),
+`endif
       .bus_err   (l1_bus_err),
       .m_axi_awid(m_axi_awid), .m_axi_awaddr(m_axi_awaddr), .m_axi_awlen(m_axi_awlen),
       .m_axi_awsize(m_axi_awsize), .m_axi_awburst(m_axi_awburst), .m_axi_awlock(m_axi_awlock),
@@ -1349,6 +1393,16 @@ module ventium_top
   assign core_mem_ack   = l1axi_en ? l1_c_ack   : (bus_mode ? bus_c_ack   : mem_ack);
 `ifdef VEN_PIPE_MEM_CHAIN
   assign core_mem_next_ready = l1axi_en && l1_next_ready;
+`endif
+`ifdef VEN_P54_DUAL_HIT
+  assign core_pair_req_ready = l1axi_en ? l1_pair_req_ready : 2'b00;
+  assign core_pair_req_split = l1axi_en ? l1_pair_req_split : 2'b00;
+  assign core_pair_bank_conflict = l1axi_en && l1_pair_bank_conflict;
+  assign core_pair_rsp_valid = l1axi_en ? l1_pair_rsp_valid : 2'b00;
+  assign core_pair_rsp_cancel = l1axi_en ? l1_pair_rsp_cancel : 2'b00;
+  assign core_pair_rsp_owner = l1_pair_rsp_owner;
+  assign core_pair_rsp_paddr = l1_pair_rsp_paddr;
+  assign core_pair_rsp_data = l1_pair_rsp_data;
 `endif
 `ifdef VEN_FP_LOAD64
   assign core_mem_rdata_hi = l1axi_en ? l1_c_rdata_hi : 32'd0;

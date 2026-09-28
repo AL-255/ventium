@@ -128,6 +128,21 @@ module ventium_l1_axi #(
     input  logic [3:0]  core_next_wstrb,
     output logic        core_next_ready,
 `endif
+`ifdef VEN_P54_DUAL_HIT
+    input  logic [1:0]       core_pair_req_valid,
+    input  logic [1:0][31:0] core_pair_paddr,
+    input  logic [1:0][1:0]  core_pair_size_log2,
+    input  logic [1:0][15:0] core_pair_owner,
+    output logic [1:0]       core_pair_req_ready,
+    output logic [1:0]       core_pair_req_split,
+    output logic             core_pair_bank_conflict,
+    output logic [1:0]       core_pair_rsp_valid,
+    output logic [1:0]       core_pair_rsp_cancel,
+    input  logic [1:0]       core_pair_rsp_ready,
+    output logic [1:0][15:0] core_pair_rsp_owner,
+    output logic [1:0][31:0] core_pair_rsp_paddr,
+    output logic [1:0][31:0] core_pair_rsp_data,
+`endif
     // REVIEW2_aug2 H-13: the INSTRUCTION-side memory type for the address currently on
     // the core's bus. 1 = this line must not be retained in the icache. The core ORs it
     // into ic_fill_nocache beside the CR0.CD term, and consumes it only during a fetch
@@ -400,6 +415,39 @@ module ventium_l1_axi #(
       (({1'b0, core_next_addr} < {1'b0, smbase}) ||
        ({1'b0, core_next_addr} >= {1'b0, smbase} + 33'h10000));
   assign core_next_ready = mc_next_enable && mc_next_ready;
+`endif
+`ifdef VEN_P54_DUAL_HIT
+  logic [1:0] pair_map_l1c, pair_map_dram, pair_enable;
+  logic [1:0] pair_leaf_req_ready, pair_leaf_req_split;
+  logic pair_leaf_bank_conflict;
+  logic [1:0] pair_leaf_rsp_valid, pair_leaf_rsp_cancel;
+  logic [1:0][15:0] pair_leaf_rsp_owner;
+  logic [1:0][31:0] pair_leaf_rsp_paddr, pair_leaf_rsp_data;
+  // Independent physical cache-type lookups are required even for a tagged
+  // resident hit. The current bus address describes U only; using its map
+  // decision for V could turn an MMIO read into a cache hit.
+  for (genvar lane = 0; lane < 2; lane++) begin : g_pair_cachemap
+    ven_cachemap #(.SNAPSHOT_USER_HIGHMEM(CMAP_SNAPSHOT_USER_HIGHMEM)) u_map (
+        .addr(core_pair_paddr[lane]), .is_write(1'b0), .is_code(1'b0),
+        .smm_active(smm_active),
+        .pam(NB_PAM), .dramc(NB_DRAMC), .cc(NB_CC), .tom_mb4(NB_TOM_MB4),
+        .smram(NB_SMRAM),
+        .to_dram(pair_map_dram[lane]), .l1_cacheable(pair_map_l1c[lane]),
+        .l2_cacheable(), .region());
+    assign pair_enable[lane] = seam_core_rst_n && !EN_L2 && !shutdown &&
+        !dma_drain_stall && !core_lock_hold && !cr0_cd && pair_map_l1c[lane] &&
+        pair_map_dram[lane] &&
+        (({1'b0, core_pair_paddr[lane]} < {1'b0, smbase}) ||
+         ({1'b0, core_pair_paddr[lane]} >= {1'b0, smbase} + 33'h10000));
+  end
+  assign core_pair_req_ready = pair_leaf_req_ready & pair_enable;
+  assign core_pair_req_split = pair_leaf_req_split;
+  assign core_pair_bank_conflict = pair_leaf_bank_conflict;
+  assign core_pair_rsp_valid = seam_core_rst_n ? pair_leaf_rsp_valid : 2'b00;
+  assign core_pair_rsp_cancel = seam_core_rst_n ? pair_leaf_rsp_cancel : 2'b00;
+  assign core_pair_rsp_owner = pair_leaf_rsp_owner;
+  assign core_pair_rsp_paddr = pair_leaf_rsp_paddr;
+  assign core_pair_rsp_data = pair_leaf_rsp_data;
 `endif
   logic core_d_l1c_last, core_d_dram_last_u, core_d_l2c_last_u; logic [3:0] core_d_region_last;
   ven_cachemap #(.SNAPSHOT_USER_HIGHMEM(CMAP_SNAPSHOT_USER_HIGHMEM)) u_cmap_dc_last (
@@ -1204,6 +1252,26 @@ module ventium_l1_axi #(
       .c_next_cacheable(mc_next_l1c && mc_next_dram && !cr0_cd),
       .c_next_addr(core_next_addr), .c_next_wstrb(core_next_wstrb),
       .c_next_ready(mc_next_ready),
+`endif
+`ifdef VEN_P54_DUAL_HIT
+      // Preserve BOTH request-valid bits even when U is uncacheable. Clearing
+      // a rejected U's valid bit here would let younger V pass the return
+      // arbiter's age check and accept ahead of U. Cacheability, not validity,
+      // is the side-effect-free rejection mechanism.
+      .pair_req_valid(core_pair_req_valid),
+      .pair_cacheable(pair_enable),
+      .pair_paddr(core_pair_paddr),
+      .pair_size_log2(core_pair_size_log2),
+      .pair_owner(core_pair_owner),
+      .pair_req_ready(pair_leaf_req_ready),
+      .pair_req_split(pair_leaf_req_split),
+      .pair_bank_conflict(pair_leaf_bank_conflict),
+      .pair_rsp_valid(pair_leaf_rsp_valid),
+      .pair_rsp_cancel(pair_leaf_rsp_cancel),
+      .pair_rsp_ready(core_pair_rsp_ready),
+      .pair_rsp_owner(pair_leaf_rsp_owner),
+      .pair_rsp_paddr(pair_leaf_rsp_paddr),
+      .pair_rsp_data(pair_leaf_rsp_data),
 `endif
 `ifdef VEN_FP_LOAD64
       .c_rdata_hi(l1d_c_rdata_hi),
