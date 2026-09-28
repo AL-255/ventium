@@ -48,6 +48,21 @@ class AnalyzeFastTests(unittest.TestCase):
             path.write_text(header + contiguous.replace("\t2\t1002", "\t3\t1002"))
             self.assertEqual(analyze(path)["selected_adjacent_pairs_conservative"], 0)
 
+    def test_page_offset_bank_evidence_is_used(self):
+        header = "cycle\tlegacy_ordinal\tpc\tphysical_start\tslot\towner\tmode16\tbytes\tdata_bank\n"
+        # mov eax,[esi]; mov edx,[esi+4] are independent P54 memory reads.
+        rows = ("1\t1\t1000\t2000\tU\tfresh\t0\t8b06\t3\n"
+                "1\t2\t1002\t2002\tV\tfresh\t0\t8b5604\t3\n")
+        with tempfile.TemporaryDirectory(prefix="p54-fast-bank.") as temp:
+            path = Path(temp) / "bank.tsv"
+            path.write_text(header + rows)
+            result = analyze(path)
+            self.assertEqual(result["selected_pair_classes"]["mem_mem"], 1)
+            self.assertEqual(result["selected_bank_conflicts_known"], 1)
+            self.assertEqual(result["selected_bank_conflicts_unknown"], 0)
+            path.write_text(header + rows.replace("\t3\n", "\t\n", 1))
+            self.assertEqual(analyze(path)["selected_bank_conflicts_unknown"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

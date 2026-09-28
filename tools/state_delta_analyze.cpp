@@ -176,7 +176,7 @@ int main(int argc,char** argv) try {
         fields[held_u_id].size==28 && fields[held_v_id].size==28;
     std::ofstream fast_bytes(std::string(argv[2])+".fast_issue_bytes.tsv");
     if(!fast_bytes) throw std::runtime_error("fast issue bytes output open");
-    fast_bytes<<"cycle\tlegacy_ordinal\tpc\tphysical_start\tslot\towner\tmode16\tbytes\n";
+    fast_bytes<<"cycle\tlegacy_ordinal\tpc\tphysical_start\tslot\towner\tmode16\tbytes\tdata_bank\n";
     const auto slow_ibuf_id=optional_field(core+"ibuf");
     const auto slow_qlen_id=optional_field(core+"q_len");
     const bool slow_bytes_layout=slow_ibuf_id!=nf && slow_qlen_id!=nf &&
@@ -251,6 +251,26 @@ int main(int argc,char** argv) try {
         g.same_line=(u>>5)==(v>>5);
         g.contained=(u&31)+bytes(ud_id)<=32 && (v&31)+bytes(vd_id)<=32;
         return g;
+    };
+    // Physical bits 4:2 equal linear bits 4:2 under ordinary 4 KiB paging.
+    // Export only explicit integer-memory operands: stack/FP addresses have
+    // different generation paths, and 16-bit addressing is not reconstructed
+    // by the 32-bit descriptor AGU below.  Empty means unknown, never bank 0.
+    auto explicit_data_bank = [&](unsigned id) -> std::string {
+        if(argc!=4 || scalar(def16_id) || !descriptor(id,"is_mem") ||
+           descriptor(id,"is_stack") || descriptor(id,"is_fp")) return {};
+        auto word = [&](unsigned array_id,unsigned index) -> uint32_t {
+            uint32_t value;
+            memcpy(&value,state.data()+fields[array_id].offset+4*index,4);
+            return value;
+        };
+        uint32_t address=descriptor(id,"mem_disp");
+        if(descriptor(id,"mem_base_en")) address+=word(gpr_id,descriptor(id,"base"));
+        if(descriptor(id,"mem_index_en"))
+            address+=word(gpr_id,descriptor(id,"mem_index"))<<descriptor(id,"mem_scale");
+        if(scalar(sysmode_id))
+            address+=word(segbase_id,descriptor(id,"mem_ss") ? 1 : 2);
+        return std::to_string((address>>2)&7u);
     };
     ReadGeometry held_geometry;
     auto intr_id=field(core+"intr_take"), irq0_id=field("system__DOT__irq_0");
@@ -482,7 +502,8 @@ int main(int argc,char** argv) try {
                         <<std::hex<<prior_pc<<'\t'<<prior_flin
                         <<std::dec<<"\tU\t"<<(prior_mem_active ? "held" : "fresh")
                         <<'\t'<<scalar(def16_id)<<'\t'
-                        <<encoded.substr(0,2*count_u)<<'\n';
+                        <<encoded.substr(0,2*count_u)<<'\t'
+                        <<explicit_data_bank(owner_u)<<'\n';
                     prior_fast_count=1;
                     if(count_v) {
                         rows<<edge<<'\t'<<(previous_retired+prior_report_count+2)<<'\t'
@@ -490,7 +511,8 @@ int main(int argc,char** argv) try {
                             <<'\t'<<uint32_t(prior_flin+count_u)<<std::dec
                             <<"\tV\t"<<(prior_mem_active ? "held" : "fresh")
                             <<'\t'<<scalar(def16_id)<<'\t'
-                            <<encoded.substr(2*count_u)<<'\n';
+                            <<encoded.substr(2*count_u)<<'\t'
+                            <<explicit_data_bank(owner_v)<<'\n';
                         prior_fast_count=2;
                     }
                     prior_fast_rows=rows.str();

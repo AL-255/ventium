@@ -40,12 +40,15 @@ class Insn:
     instance: int
     # Branch/event boundaries separate streams; a pair may not cross them.
     boundary_after: bool
+    # P54 bank select uses only physical bits 4:2.  A trace can prove these
+    # from the linear page offset without knowing the full physical address.
+    data_bank: int | None = None
 
     @classmethod
     def from_json(cls, row: dict) -> "Insn":
-        required = {f.name for f in cls.__dataclass_fields__.values()}
+        required = {f.name for f in cls.__dataclass_fields__.values()} - {"data_bank"}
         missing = required - row.keys()
-        extra = row.keys() - required
+        extra = row.keys() - (required | {"data_bank"})
         if missing or extra:
             raise ValueError(f"instruction annotation missing={sorted(missing)} extra={sorted(extra)}")
         insn = cls(**row)
@@ -60,11 +63,17 @@ class Insn:
         for mask in (insn.gpr_reads, insn.gpr_writes, insn.addr_reads):
             if type(mask) is not int or not 0 <= mask < 256:
                 raise ValueError("GPR masks must be unsigned 8-bit")
-        if not insn.memory and insn.physical_address is not None:
-            raise ValueError("non-memory instruction has a data physical address")
+        if not insn.memory and (insn.physical_address is not None or insn.data_bank is not None):
+            raise ValueError("non-memory instruction has a data physical address/bank")
         if insn.physical_address is not None and \
            (type(insn.physical_address) is not int or not 0 <= insn.physical_address < 2**32):
             raise ValueError("physical address out of range")
+        if insn.data_bank is not None and \
+           (type(insn.data_bank) is not int or not 0 <= insn.data_bank < 8):
+            raise ValueError("data bank out of range")
+        if insn.data_bank is not None and insn.physical_address is not None and \
+           insn.data_bank != ((insn.physical_address >> 2) & 7):
+            raise ValueError("data bank conflicts with physical address")
         if insn.special not in {None, "cmp", "add", "jcc", "jne", "push", "pop", "call"}:
             raise ValueError(f"unknown special-pair classification {insn.special!r}")
         return insn
@@ -99,9 +108,13 @@ def bank_conflict(u: Insn, v: Insn) -> bool | None:
     """P54 D-cache banks select physical address bits 4:2 (AP-500 §5.6.5)."""
     if not (u.memory and v.memory):
         return False
-    if u.physical_address is None or v.physical_address is None:
+    u_bank = u.data_bank if u.data_bank is not None else \
+             None if u.physical_address is None else (u.physical_address >> 2) & 7
+    v_bank = v.data_bank if v.data_bank is not None else \
+             None if v.physical_address is None else (v.physical_address >> 2) & 7
+    if u_bank is None or v_bank is None:
         return None
-    return ((u.physical_address >> 2) & 7) == ((v.physical_address >> 2) & 7)
+    return u_bank == v_bank
 
 
 def matching_pairs(insns: list[Insn]) -> list[tuple[Insn, Insn]]:

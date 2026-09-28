@@ -134,10 +134,17 @@ def analyze(path: Path, total_legacy: int | None = None) -> dict:
             if mode16 not in (0, 1):
                 raise ValueError(f"invalid code mode at ordinal {ordinal}")
             insn, name = classify(raw, pc, bool(mode16))
-            insn = Insn(**{**insn.__dict__, "instance": ordinal})
+            bank_field = row.get("data_bank", "")
+            data_bank = None if not bank_field else int(bank_field)
+            if data_bank is not None and not 0 <= data_bank < 8:
+                raise ValueError(f"invalid data bank at ordinal {ordinal}")
+            if data_bank is not None and not insn.memory:
+                raise ValueError(f"bank on non-memory instruction at ordinal {ordinal}")
+            insn = Insn(**{**insn.__dict__, "instance": ordinal,
+                           "data_bank": data_bank})
             names["all"] += 1
             names["nonpairable_or_unclassified"] += insn.pipe == "NP"
-            names["memory_without_physical_data_address"] += insn.memory
+            names["memory_without_bank_evidence"] += insn.memory and data_bank is None
             if previous_row is not None:
                 old_pc, old_len, old_ordinal, old_control = previous_row
                 separated = ordinal != old_ordinal + 1 or pc != ((old_pc + old_len) & 0xffffffff)
@@ -154,7 +161,7 @@ def analyze(path: Path, total_legacy: int | None = None) -> dict:
     count, pairs = len(insns), len(selected)
     result = {"scope": "verified-byte retire subset only", "exported_instructions": count,
               "nonpairable_or_unclassified": names["nonpairable_or_unclassified"],
-              "memory_data_physical_unknown": names["memory_without_physical_data_address"],
+              "memory_data_bank_unknown": names["memory_without_bank_evidence"],
               "selected_adjacent_pairs_conservative": pairs,
               "selected_pair_classes": {key: classes[key] for key in
                                         ("reg_reg", "reg_mem", "mem_reg", "mem_mem")},

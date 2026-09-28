@@ -60,6 +60,12 @@ class PairBoundTests(unittest.TestCase):
         self.assertTrue(pairable(u, v))
         self.assertTrue(bank_conflict(u, v))
         self.assertIsNone(bank_conflict(replace(u, physical_address=None), v))
+        # A 4 KiB page translation preserves bits 4:2 even when the page
+        # frame differs; partial bank evidence is sufficient for this test.
+        self.assertTrue(bank_conflict(replace(u, physical_address=None, data_bank=0), v))
+        self.assertFalse(bank_conflict(replace(u, physical_address=None, data_bank=1), v))
+        with self.assertRaises(ValueError):
+            Insn.from_json({**u.__dict__, "data_bank": 1})
 
     def test_matching_not_greedy_and_boundaries(self):
         # 0-1 and 1-2 are legal; 2-3 is legal. Optimal is two pairs.

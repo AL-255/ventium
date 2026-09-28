@@ -20,7 +20,7 @@ from validate_fast_bytes import owners, validate
 
 
 FIELDNAMES = ("cycle", "legacy_ordinal", "pc", "physical_start", "slot",
-              "owner", "mode16", "bytes")
+              "owner", "mode16", "bytes", "data_bank")
 
 
 def slow_reason(row: dict, known: dict[int, int], decoders: dict) -> str:
@@ -49,6 +49,7 @@ def merge(prefix: Path) -> dict:
     counts = Counter()
     with Path(str(prefix) + ".fast_issue_bytes.tsv").open(newline="", encoding="utf-8") as stream:
         for row in csv.DictReader(stream, delimiter="\t"):
+            row.setdefault("data_bank", "")
             rows.append(row)
             counts["fast_accepted"] += 1
     with Path(str(prefix) + ".slow_candidate_bytes.tsv").open(newline="", encoding="utf-8") as stream:
@@ -60,7 +61,8 @@ def merge(prefix: Path) -> dict:
                              "legacy_ordinal": candidate["legacy_ordinal"],
                              "pc": candidate["pc"], "physical_start": "",
                              "slot": "U", "owner": "slow",
-                             "mode16": candidate["mode16"], "bytes": candidate["bytes"]})
+                             "mode16": candidate["mode16"], "bytes": candidate["bytes"],
+                             "data_bank": ""})
     rows.sort(key=lambda row: int(row["legacy_ordinal"]))
     previous = -1
     for row in rows:
