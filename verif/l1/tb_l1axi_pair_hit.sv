@@ -99,6 +99,47 @@ module tb_l1axi_pair_hit;
     fill_line(32'h1000);
     ar_before = ar_count;
 
+`ifdef VEN_P54_DUAL_HIT_LEGACY_CAPTURE
+    for (int i = 0; i < 8; i++)
+      slv.poke(32'h1020 + 32'(4*i), 32'h88000000 + 32'(i));
+    fill_line(32'h1024);
+    ar_before = ar_count;
+    @(negedge clk);
+    core_req = 1; core_we = 0; core_addr = 32'h1000; core_wstrb = 4'hf;
+    pair_req_valid = 2'b10; pair_paddr[1] = 32'h1024;
+    pair_size_log2[1] = 2'd2; pair_owner[1] = 16'h6677;
+    #1;
+    if (pair_req_ready != 2'b10 || core_ack)
+      $fatal(1, "fresh U/V distinct-bank capture not admitted");
+    step();
+    if (!core_ack || core_rdata != slv.peek(32'h1000) ||
+        pair_rsp_valid != 2'b10 || pair_rsp_owner[1] != 16'h6677 ||
+        pair_rsp_data[1] != slv.peek(32'h1024) || ar_count != ar_before)
+      $fatal(1, "fresh U/V wrapper response or backing mismatch");
+    checks++;
+    @(negedge clk); pair_req_valid = 0; pair_rsp_ready = 2'b10;
+    step();
+    @(negedge clk); core_req = 0; pair_rsp_ready = 0;
+    if (|pair_rsp_valid) $fatal(1, "fresh V wrapper response duplicated");
+    fill_line(32'h1004); // rejects reuse of a mixed U/V line window
+    if (ar_count != ar_before) $fatal(1, "fresh U/V overlap caused a miss");
+    checks++;
+
+    fill_line(32'h1024); // move the registered window off U's line
+    @(negedge clk); core_req = 1; core_addr = 32'h1000;
+    pair_req_valid = 2'b10; pair_paddr[1] = 32'h1020;
+    #1;
+    if (pair_req_ready != 0 || !pair_bank_conflict)
+      $fatal(1, "same-bank V escaped U's capture reservation");
+    step();
+    if (!core_ack || core_rdata != slv.peek(32'h1000) || |pair_rsp_valid)
+      $fatal(1, "same-bank V rejection disturbed U wrapper response");
+    checks++;
+    @(negedge clk); pair_req_valid = 0;
+    step();
+    @(negedge clk); core_req = 0;
+`endif
+
     // A real two-bank resident read through the entire L1/AXI wrapper.
     @(negedge clk);
     pair_req_valid = 2'b11;

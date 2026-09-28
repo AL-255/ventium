@@ -180,6 +180,18 @@ architectural correctness, area, timing, or gameplay throughput. The active
 cache banks remain asynchronous distributed RAM; the separate synchronous
 eight-bank BRAM leaf is an FPGA organization experiment, not an integrated
 latency or area win.
+
+The opt-in `VEN_P54_DUAL_HIT_LEGACY_CAPTURE` lets a fresh, aligned legacy U
+hit reserve its word bank while one younger V hit uses a distinct bank on the
+same capture edge. A rejected V leaves U unchanged. The captured full-line
+window is marked nonreusable when V borrows a bank, so later U reads cannot
+see a mixed U/V line. `run-p54-l1d-pair-hit.sh --legacy-capture-pair` and
+`verif/l1/run-l1axi-pair-hit-micro.sh --legacy-capture-pair` cover accepted
+data/owner, same-bank rejection, window-reuse safety, and no extra AXI read;
+default and combinational-ACK controls remain unchanged. This removes a
+cache-port obstacle to core U/V memory issue but does not yet improve retired
+IPC: the core still ties its pair-request outputs low.
+
 The opt-in full-core sideband build also matched the preceding dual-AGU build
 in 14 pinned-QEMU memory-ALU full-state/cycle cases. Because the core does not
 yet issue sideband requests, that equality is a no-regression check, not an

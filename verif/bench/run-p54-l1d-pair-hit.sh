@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-out="$(mktemp -d /tmp/ventium-p54-l1d-pair-hit.XXXXXX)"
+scratch="${TMPDIR:-$root/tmp/build-tmp}"
+mkdir -p "$scratch"
+out="$(mktemp -d "$scratch/ventium-p54-l1d-pair-hit.XXXXXX")"
 echo "Artifacts: $out"
 extra_defines=()
 if [[ "${1:-}" == "--comb-ack" ]]; then
     extra_defines=(+define+VEN_L1D_COMB_ACK)
+elif [[ "${1:-}" == "--legacy-capture-pair" ]]; then
+    extra_defines=(+define+VEN_P54_DUAL_HIT_LEGACY_CAPTURE +define+VEN_L1D_WINDOW_REUSE)
 elif [[ $# -ne 0 ]]; then
-    echo "usage: $0 [--comb-ack]" >&2
+    echo "usage: $0 [--comb-ack|--legacy-capture-pair]" >&2
     exit 2
 fi
 timeout 420s "$root/tools/verilator_serial.sh" --binary --assert -sv \

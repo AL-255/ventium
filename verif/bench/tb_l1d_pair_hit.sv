@@ -233,6 +233,41 @@ module tb_l1d_pair_hit;
       $fatal(1,"overlapped pair response mismatch");
     repeat(2) @(negedge clk);
 
+`ifdef VEN_P54_DUAL_HIT_LEGACY_CAPTURE
+    // A fresh aligned U hit captures its normal registered response while
+    // the otherwise idle bank reads a younger V from a DIFFERENT line.
+    // The mixed full-line window must not be reused at U's next offset.
+    legacy_read(32'h1000); legacy_read(32'h1024);
+    @(negedge clk); c_req=1; c_we=0; c_addr=32'h1000;
+    pair_req_valid=2'b10; pair_paddr[1]=32'h1024;
+    pair_size_log2[1]=2'd2; pair_owner[1]=16'h6601;
+    expect_pair(2'b10);
+    if (c_ack) $fatal(1,"fresh U read unexpectedly acknowledged before capture");
+    @(posedge clk); @(negedge clk);
+    pair_req_valid=0;
+    if (!c_ack || c_rdata!==word_at(32'h1000) ||
+        pair_rsp_valid!==2'b10 || pair_rsp_owner[1]!==16'h6601 ||
+        pair_rsp_data[1]!==word_at(32'h1024))
+      $fatal(1,"fresh U/V registered response ownership or data mismatch");
+    if (dut.window_valid_q)
+      $fatal(1,"mixed-bank capture left a reusable full-line window");
+    @(posedge clk); @(negedge clk); c_req=0;
+    if (pair_rsp_valid!=0) $fatal(1,"fresh V response duplicated");
+    legacy_read(32'h1004);
+
+    // A same-bank V cannot steal U's word, but rejection cannot slow or
+    // corrupt U's ordinary hit response.
+    legacy_read(32'h1024); // move reusable window off U's line
+    @(negedge clk); c_req=1; c_addr=32'h1000;
+    pair_req_valid=2'b10; pair_paddr[1]=32'h1020;
+    expect_pair(2'b00);
+    if (!pair_bank_conflict) $fatal(1,"legacy U/V bank conflict not reported");
+    @(posedge clk); @(negedge clk); pair_req_valid=0;
+    if (!c_ack || c_rdata!==word_at(32'h1000) || pair_rsp_valid!=0)
+      $fatal(1,"same-bank V rejection disturbed U");
+    @(posedge clk); @(negedge clk); c_req=0;
+`endif
+
     // A rejected request must neither touch the cache nor enqueue a response.
     // In particular 8-byte reads, uncached addresses and absent tags use the
     // existing checked slow path, not a truncated dword fast-path result.

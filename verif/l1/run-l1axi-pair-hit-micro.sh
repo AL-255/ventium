@@ -5,11 +5,21 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 if ! "$root/tools/build_scope.sh" --is-active; then
   exec "$root/tools/build_scope.sh" -- bash "$0" "$@"
 fi
-out="$(mktemp -d "${TMPDIR:-/tmp}/ventium-l1axi-pair-hit.XXXXXX")"
+scratch="${TMPDIR:-$root/tmp/build-tmp}"
+mkdir -p "$scratch"
+out="$(mktemp -d "$scratch/ventium-l1axi-pair-hit.XXXXXX")"
 echo "Artifacts: $out"
+extra_defines=()
+if [[ "${1:-}" == "--legacy-capture-pair" ]]; then
+  extra_defines=(+define+VEN_P54_DUAL_HIT_LEGACY_CAPTURE)
+elif [[ $# -ne 0 ]]; then
+  echo "usage: $0 [--legacy-capture-pair]" >&2
+  exit 2
+fi
 timeout --signal=TERM --kill-after=10s 300s "$root/tools/verilator_serial.sh" \
   --binary --timing --assert -sv +define+AXI_BFM_MON \
   +define+VEN_P54_DUAL_HIT +define+VEN_L1D_BANKED_DATA \
+  "${extra_defines[@]}" \
   -Wall -Wno-UNUSED -Wno-DECLFILENAME -Wno-INITIALDLY -Wno-fatal \
   -Werror-IMPLICIT -Werror-PINMISSING -Werror-UNDRIVEN -Werror-MULTIDRIVEN \
   -Werror-LATCH -Werror-UNOPTFLAT \
