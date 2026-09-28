@@ -169,6 +169,7 @@ ven-gameplay-base:
 # This does not change `ven` or claim the new options are FPGA-routed.
 VEN_IPC_DEFS := +define+VEN_L1D_BANKED_DATA +define+VEN_L1D_BANK0_SHARED_XLINE \
   +define+VEN_AXI_READ_ON_FINAL_B \
+  +define+VEN_P54_WBUF_PIPE_DISPATCH +define+VEN_AXI2AVL_BPIPE \
   +define+VEN_L1D_CODE_BUFFER +define+VEN_L1D_CODE_STREAM \
   +define+VEN_L1D_TWO_WINDOW_REUSE +define+VEN_P54_DUAL_HIT \
   +define+VEN_UOP_SLOW_LEN_HINT \

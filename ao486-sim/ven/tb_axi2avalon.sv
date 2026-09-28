@@ -133,6 +133,11 @@ module tb_axi2avalon;
 `endif
 
   int errs = 0, cmd_n = 0, rsp_n = 0, rlast_n = 0;
+`ifdef VEN_BRIDGE_WRITE_PERF
+  int b_seen_total = 0;
+  always_ff @(posedge clk) if (rst_n && bvalid && bready)
+    b_seen_total <= b_seen_total + 1;
+`endif
   function automatic logic [31:0] expect_data(input int n);
     logic [2:0] word;
     word = (start_word[2:0] + n[2:0]);
@@ -219,7 +224,11 @@ module tb_axi2avalon;
     @(negedge clk); wvalid = 1'b0;
     repeat (4) begin
       if (!bvalid || bid != mask || bresp != 0) $fatal(1, "lost/stale write response");
+`ifdef VEN_AXI2AVL_BPIPE
+      if (arready || avm_write) $fatal(1, "read/command escaped held B response");
+`else
       if (arready || awready || avm_write) $fatal(1, "ownership released before B handshake");
+`endif
       @(negedge clk);
     end
     bready = 1'b1;
@@ -304,6 +313,102 @@ module tb_axi2avalon;
     line_base = 520; start_word = 0;
     read_line();
     $display("AXI2AVALON coverage: two-beat quadword write, W gap, one B, Avalon waitrequest");
+`ifdef VEN_BRIDGE_WRITE_PERF
+    // A fixed stream of independent aligned stores uses ordinary AXI
+    // handshakes and drains all B responses. This reports bridge throughput,
+    // not CPU/gameplay IPC; both profiles perform the same visible writes.
+    begin
+      int begin_tick, begin_b, guard;
+      bit got_aw, got_w;
+      jitter = 0; bready = 1;
+      repeat (2) @(negedge clk);
+      begin_tick = tick; begin_b = b_seen_total;
+      for (int i = 0; i < 16; i++) begin
+        awid = 4'(i); awaddr = (40'(800) + 40'(i)) << 2; awlen = 0;
+        awsize = 3'd2; awburst = 2'b01; awvalid = 1;
+        wdata = 32'h5555_0000 | 32'(i); wstrb = 4'hf;
+        wlast = 1; wvalid = 1;
+        got_aw = 0; got_w = 0; guard = 0;
+        while (!got_aw || !got_w) begin
+          @(posedge clk);
+          if (awvalid && awready) got_aw = 1;
+          if (wvalid && wready) got_w = 1;
+          @(negedge clk);
+          if (got_aw) awvalid = 0;
+          if (got_w) wvalid = 0;
+          if (++guard > 128) $fatal(1, "stream write %0d stalled", i);
+        end
+        expected_memory[800+i] = 32'h5555_0000 | 32'(i);
+      end
+      guard = 0;
+      while (b_seen_total != begin_b + 16) begin
+        @(negedge clk);
+        if (++guard > 128) $fatal(1, "stream B responses stalled");
+      end
+      $display("AXI2AVALON-WRITE-PERF clocks=%0d stores=16", tick-begin_tick);
+      line_base = 800; start_word = 0; read_line();
+      line_base = 808; start_word = 0; read_line();
+    end
+`endif
+`ifdef VEN_AXI2AVL_BPIPE
+    // Hold the first B response while a second AW/W completes.  The first BID
+    // must not change when the bridge captures the younger AWID; two pending
+    // responses consume both bounded slots, then drain in exact FIFO order.
+    jitter = 0;
+    repeat (2) @(negedge clk);
+    bready = 0;
+    awid = 4'h1; awaddr = 40'(600 * 4); awlen = 0;
+    awsize = 3'd2; awburst = 2'b01; awvalid = 1;
+    @(posedge clk); if (!awready) $fatal(1, "first pipelined AW rejected");
+    @(negedge clk); awvalid = 0; wdata = 32'h1111_aaaa;
+    wstrb = 4'hf; wlast = 1; wvalid = 1;
+    @(posedge clk); if (!wready) $fatal(1, "first pipelined W rejected");
+    @(negedge clk); wvalid = 0;
+    if (!bvalid || bid != 4'h1 || !awready || arready)
+      $fatal(1, "first held B did not free ordered AW issue");
+    awid = 4'h2; awaddr = 40'(601 * 4); awvalid = 1;
+    @(posedge clk); if (!awready || bid != 4'h1)
+      $fatal(1, "second AW did not overlap held first B");
+    @(negedge clk); awvalid = 0; wdata = 32'h2222_bbbb; wvalid = 1;
+    @(posedge clk); if (!wready || bid != 4'h1)
+      $fatal(1, "second W changed older BID");
+    @(negedge clk); wvalid = 0;
+    if (!bvalid || bid != 4'h1 || awready || arready)
+      $fatal(1, "full B queue did not retain ordered responses");
+    bready = 1;
+    @(posedge clk); if (!bvalid || bid != 4'h1)
+      $fatal(1, "first B drain order wrong");
+    @(negedge clk);
+    if (!bvalid || bid != 4'h2)
+      $fatal(1, "second B drain order wrong");
+    @(posedge clk);
+    @(negedge clk);
+    if (bvalid || memory[600] != 32'h1111_aaaa || memory[601] != 32'h2222_bbbb)
+      $fatal(1, "B queue or Avalon writes did not drain exactly");
+    expected_memory[600] = 32'h1111_aaaa;
+    expected_memory[601] = 32'h2222_bbbb;
+    line_base = 600; start_word = 0;
+    read_line();
+    // A reset cancels queued responses, even when the Avalon write already
+    // reached memory. It must not leak an old BID into the next guest epoch.
+    @(negedge clk);
+    bready = 0; awid = 4'h3; awaddr = 40'(602 * 4); awvalid = 1;
+    @(posedge clk); if (!awready) $fatal(1, "reset probe AW rejected");
+    @(negedge clk); awvalid = 0; wdata = 32'h3333_cccc; wvalid = 1;
+    @(posedge clk); if (!wready) $fatal(1, "reset probe W rejected");
+    @(negedge clk); wvalid = 0;
+    if (!bvalid || bid != 4'h3) $fatal(1, "reset probe B not queued");
+    rst_n = 0;
+    repeat (2) @(negedge clk);
+    if (bvalid) $fatal(1, "queued B survived reset");
+    rst_n = 1; bready = 1;
+`ifdef VEN_BRIDGE_REAL_L2
+    // l2_cache walks its tag RAM after reset; the next read must not start
+    // until that platform-specific recovery has finished.
+    repeat (160) @(negedge clk);
+`endif
+    $display("AXI2AVALON-BPIPE-GATE-OK (two held ordered B responses; reset cancellation)");
+`endif
 `ifdef VEN_BRIDGE_REAL_L2
     // Invalidate a resident line after two words of an eight-word cache-hit
     // response. The miss/refill must continue at the remaining-word cursor.

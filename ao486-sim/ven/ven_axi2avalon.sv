@@ -14,7 +14,8 @@
 //             response stream.
 //   WRITE = one or two INCR beats, AWLEN=0/1, AWSIZE=2, WSTRB verbatim
 // and issues them serially (one outstanding), with registered VALIDs. So this bridge
-// handles one read OR one write at a time — sufficient and simplest; pipeline later.
+// handles one Avalon command at a time. VEN_AXI2AVL_BPIPE decouples completed
+// Avalon writes from AXI B backpressure with two ordered response slots.
 //
 // Avalon-MM master semantics (ao486 avalon_mem.v / l2_cache CPU port):
 //   address = 30-bit DWORD address (byte>>2); burstcount = beats; command accepted
@@ -93,11 +94,44 @@ module ven_axi2avalon (
     logic [3:0]   wrap_low_beats;// low fragment after the first WRAP8 fragment
     logic         wrap_pending;  // issue the low line fragment after this command
     logic [1:0]   wr_left;       // remaining W beats in current AXI write
+`ifdef VEN_AXI2AVL_BPIPE
+    // The CPU-facing P54 master has exactly two occupied write slots. Holding
+    // at most two completed B responses lets its next ordered AW start while
+    // an older B is pending, without acknowledging a write before Avalon took
+    // its final data beat. Read AR still waits for the complete B drain.
+    logic [3:0] b_id_q [0:1];
+    logic b_rp, b_wp;
+    logic [1:0] b_count;
+    logic b_push, b_pop;
+    assign b_push = (state == S_WR_CMD) && s_axi_wvalid &&
+                    !avm_waitrequest && (wr_left == 2'd1);
+    assign b_pop = s_axi_bvalid && s_axi_bready;
+    always_ff @(posedge clk) begin
+        if (!rst_n) begin
+            b_rp <= 1'b0; b_wp <= 1'b0; b_count <= 2'd0;
+            b_id_q[0] <= 4'd0; b_id_q[1] <= 4'd0;
+        end else begin
+            if (b_push) begin b_id_q[b_wp] <= id_q; b_wp <= ~b_wp; end
+            if (b_pop) b_rp <= ~b_rp;
+            unique case ({b_push, b_pop})
+                2'b10: b_count <= b_count + 2'd1;
+                2'b01: b_count <= b_count - 2'd1;
+                default: ;
+            endcase
+        end
+    end
+`endif
 
     // ---- Address-phase acceptance: only when idle, read has priority. -------
+`ifdef VEN_AXI2AVL_BPIPE
+    assign s_axi_arready = (state == S_IDLE) && (b_count == 2'd0);
+    assign s_axi_awready = (state == S_IDLE) && (b_count != 2'd2) &&
+                           !s_axi_arvalid;
+`else
     assign s_axi_arready = (state == S_IDLE);
     // Accept the write-address only when idle AND no read is competing this cycle.
     assign s_axi_awready = (state == S_IDLE) && !s_axi_arvalid;
+`endif
 
     // ---- Avalon command outputs (registered address, combinational strobes) -
     assign avm_address    = addr_q;
@@ -119,9 +153,17 @@ module ven_axi2avalon (
     assign s_axi_rlast    = (state == S_RD_DATA) && avm_readdatavalid && (len_q == 4'd1);
 
     // Write-response (B) channel
+`ifdef VEN_AXI2AVL_BPIPE
+    assign s_axi_bid      = b_id_q[b_rp];
+    assign s_axi_bvalid   = (b_count != 2'd0);
+`else
     assign s_axi_bid      = id_q;
     assign s_axi_bresp    = RESP_OKAY;
     assign s_axi_bvalid   = (state == S_WR_RESP);
+`endif
+`ifdef VEN_AXI2AVL_BPIPE
+    assign s_axi_bresp    = RESP_OKAY;
+`endif
 
     always_ff @(posedge clk) begin
         if (!rst_n) begin
@@ -138,7 +180,7 @@ module ven_axi2avalon (
             unique case (state)
                 // ---------------------------------------------------------------
                 S_IDLE: begin
-                    if (s_axi_arvalid) begin                 // read wins
+                    if (s_axi_arvalid && s_axi_arready) begin // read wins
                         id_q   <= s_axi_arid;
                         addr_q <= s_axi_araddr[31:2];        // byte→dword
                         len_q  <= s_axi_arlen[3:0] + 4'd1;
@@ -157,7 +199,7 @@ module ven_axi2avalon (
                             wrap_pending   <= 1'b0;
                         end
                         state  <= S_RD_CMD;
-                    end else if (s_axi_awvalid) begin        // else write
+                    end else if (s_axi_awvalid && s_axi_awready) begin // else write
                         id_q   <= s_axi_awid;
                         addr_q <= s_axi_awaddr[31:2];
                         wr_left <= {1'b0, s_axi_awlen[0]} + 2'd1;
@@ -196,7 +238,11 @@ module ven_axi2avalon (
                 S_WR_CMD: begin
                     if (s_axi_wvalid && !avm_waitrequest) begin
                         wr_left <= wr_left - 2'd1;
+`ifdef VEN_AXI2AVL_BPIPE
+                        if (wr_left == 2'd1) state <= S_IDLE;
+`else
                         if (wr_left == 2'd1) state <= S_WR_RESP;
+`endif
                         else addr_q <= addr_q + 30'd1;
                     end
                 end
@@ -212,6 +258,12 @@ module ven_axi2avalon (
     // Sanity: the Ventium master only ever issues 8-beat (or 1) 4 B reads,
     // and 1- or 2-beat 4 B writes. Flag protocol drift loudly.
     always_ff @(posedge clk) if (rst_n) begin
+`ifdef VEN_AXI2AVL_BPIPE
+        assert (!(b_push && b_count == 2'd2 && !b_pop))
+          else $error("ven_axi2avalon: completed write overflowed B response queue");
+        assert (!(b_pop && b_count == 2'd0))
+          else $error("ven_axi2avalon: B response underflow");
+`endif
         if (s_axi_arvalid && s_axi_arready)
             assert (s_axi_arsize == 3'd2 && (s_axi_arlen == 8'd7 || s_axi_arlen == 8'd0) &&
                     ((s_axi_arburst == 2'b01) || (s_axi_arburst == 2'b10 && s_axi_arlen == 8'd7)))

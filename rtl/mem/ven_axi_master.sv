@@ -494,6 +494,19 @@ module ven_axi_master #(
         wr_dispatch_slot = ~wq_rp;
       end
     end
+`ifdef VEN_P54_WBUF_PIPE_DISPATCH
+    // The final W beat of one occupied P5 slot releases the AXI issue
+    // registers, not the architectural slot (that still waits for B).  Load
+    // an already-queued younger slot on this edge so its AW/W can launch on
+    // the next clock.  Never dispatch a same-edge enqueue: its payload is not
+    // registered yet, and the queue must remain exactly two slots deep.
+    if (!bid_err && !bproto_bad_now && wr_store_final &&
+        (wq_count == WBUF_CNTW'(P5_WBUF_DEPTH)) &&
+        !wq_issued[~wr_active_slot]) begin
+      wr_dispatch      = 1'b1;
+      wr_dispatch_slot = ~wr_active_slot;
+    end
+`endif
 
     q_dsh = {32'd0, wq_wdata[wr_dispatch_slot]} <<
             {wq_addr[wr_dispatch_slot][1:0], 3'b000};
@@ -1039,7 +1052,10 @@ module ven_axi_master #(
 `endif
             w_done   <= 1'b0;
           end else begin
-            wr_active <= 1'b0;
+            // A same-edge pipelined dispatch has already loaded the next
+            // registered AW/W payload above.  It must stay active; the old
+            // slot's final W/B accounting below still uses old ownership.
+            if (!wr_dispatch) wr_active <= 1'b0;
             aw_done   <= 1'b0;
             w_done    <= 1'b0;
           end

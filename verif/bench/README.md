@@ -128,6 +128,16 @@ a pair-disabled control. The saturated two-store loop did **not** improve
 (6 clocks/iteration in both profiles): its two-entry write buffer was already
 full. These are not gameplay IPC or FPGA timing measurements.
 
+The opt-in `VEN_P54_WBUF_PIPE_DISPATCH` removes the AXI master's issue-clock
+gap between an older store's final W beat and an already-queued younger AW/W.
+The full-PC bridge's matching `VEN_AXI2AVL_BPIPE` decouples two ordered B
+responses from Avalon command admission; it still waits for both responses
+before accepting a read. Directed bridge tests check backpressure, BID order,
+reset cancellation, and real-L2 read recovery. A 16-aligned-store bridge-only
+microbenchmark took 48 clocks in the control and 33 with B pipelining. The
+full-PC IPC candidate compiles with both flags; no current-candidate gameplay
+IPC or FPGA timing measurement is available yet.
+
 The fixed-work `fp_fistp_integer_overlap` probe on the September 28 full IPC
 profile takes 12 clocks for its four-instruction FILD/FISTP/INC/INC body plus
 loop control (directed body IPC 0.5). Its functional trace and all 4,008

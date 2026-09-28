@@ -13,8 +13,10 @@ if [[ "${1:-}" == "--error" && $# == 1 ]]; then
 elif [[ "${1:-}" == "--split" && $# == 1 ]]; then
     extra=(+define+VEN_AXI_QUAD_SPLIT_TEST)
     marker=AXI-QUAD-SPLIT-GATE-OK
+elif [[ "${1:-}" == "--pipe-dispatch" && $# == 1 ]]; then
+    extra=(+define+VEN_P54_WBUF_PIPE_DISPATCH)
 elif [[ $# != 0 ]]; then
-    echo "usage: $0 [--error|--split]" >&2; exit 2
+    echo "usage: $0 [--error|--split|--pipe-dispatch]" >&2; exit 2
 fi
 "$ROOT/tools/verilator_serial.sh" -j "${VL_J:-1}" --binary -sv --assert \
     -Wno-UNUSED -Wno-DECLFILENAME -Wno-INITIALDLY \

@@ -5,6 +5,12 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 OBJ="$(mktemp -d "${TMPDIR:-/tmp}/ventium-axi2avalon-wrap.XXXXXX")"
 trap 'rm -rf "$OBJ"' EXIT
 EXTRA=()
+if [[ "${BPIPE:-0}" == 1 ]]; then
+  EXTRA+=(-DVEN_AXI2AVL_BPIPE -DVEN_AXI2AVL_ASSERT)
+fi
+if [[ "${WRITE_PERF:-0}" == 1 ]]; then
+  EXTRA+=(-DVEN_BRIDGE_WRITE_PERF)
+fi
 if [[ "${STREAM_ANY:-0}" == 1 && ( "${REAL_L2:-0}" != 1 || "${STREAM_L2:-0}" != 1 ) ]]; then
   echo "STREAM_ANY requires REAL_L2=1 STREAM_L2=1"; exit 2
 fi
@@ -31,4 +37,7 @@ OUT="$("$OBJ/tb_axi2avalon" 2>&1)" || {
 }
 echo "$OUT"
 grep -q "AXI2AVALON-WRAP-GATE-OK" <<<"$OUT" || { echo "AXI2AVALON-WRAP-GATE-FAIL"; exit 1; }
+if [[ "${BPIPE:-0}" == 1 ]]; then
+  grep -q "AXI2AVALON-BPIPE-GATE-OK" <<<"$OUT" || { echo "AXI2AVALON-BPIPE-GATE-FAIL"; exit 1; }
+fi
 echo "== AXI2AVALON WRAP gate PASS =="

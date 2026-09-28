@@ -85,6 +85,9 @@ module tb_axi_wbuf;
   logic second_aw_before_b = 1'b0;
   logic third_aw_before_b = 1'b0;
   logic third_admitted_on_head_b = 1'b0;
+`ifdef VEN_P54_WBUF_PIPE_DISPATCH_TEST
+  int cycle_q = 0, first_aw_cycle = -1, second_aw_cycle = -1;
+`endif
 
   // This controlled slave can accept pipelined AXI writes.  The DUT always drives
   // AW and W from one active entry; accepting both together is legal AXI and makes
@@ -118,8 +121,15 @@ module tb_axi_wbuf;
       third_admitted_on_head_b <= 1'b0;
       for (int i = 0; i < 256; i++) mem[i] <= 32'd0;
     end else begin
+`ifdef VEN_P54_WBUF_PIPE_DISPATCH_TEST
+      cycle_q <= cycle_q + 1;
+`endif
       if (arvalid && (b_seen != 3'd3)) ar_before_drain <= 1'b1;
       if (awvalid && awready && wvalid && wready) begin
+`ifdef VEN_P54_WBUF_PIPE_DISPATCH_TEST
+        if (aw_seen == 3'd0) first_aw_cycle <= cycle_q;
+        if (aw_seen == 3'd1) second_aw_cycle <= cycle_q;
+`endif
         // All writes in this regression are aligned dwords; if FIFO order is lost,
         // the addresses/data below make it immediately visible.
         if (awaddr[9:2] != 8'(aw_seen) + 8'd4) write_order_bad <= 1'b1;
@@ -395,6 +405,13 @@ module tb_axi_wbuf;
     else $display("  ok   AXI write order preserved (3 stores)");
     if (!m_idle) fail("master not idle after read/write drain");
     if (bus_err) fail("unexpected AXI bus error");
+`ifdef VEN_P54_WBUF_PIPE_DISPATCH_TEST
+    if (second_aw_cycle != first_aw_cycle + 1)
+      fail($sformatf("queued second AW/W had issue bubble: %0d -> %0d",
+                     first_aw_cycle, second_aw_cycle));
+    if (errors == 0) $display("AXIWBUF-PIPE-DISPATCH-GATE-OK");
+    else             $display("AXIWBUF-PIPE-DISPATCH-GATE-FAIL (%0d errors)", errors);
+`endif
 
 `ifdef VEN_P54_DUAL_STORE_PAIR
     $display("[4] pair consumes exactly two slots atomically in U/V order");

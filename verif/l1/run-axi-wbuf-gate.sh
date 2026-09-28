@@ -21,8 +21,10 @@ elif [[ "${1:-}" == "--read-on-b-error" && $# == 1 ]]; then
            +define+VEN_AXI_READ_ON_FINAL_B_ERROR_TEST +define+VEN_AXI_RESP_FAULT_INJECT)
 elif [[ "${1:-}" == "--read-on-b-two" && $# == 1 ]]; then
     extra=(+define+VEN_AXI_READ_ON_FINAL_B +define+VEN_AXI_READ_ON_FINAL_B_TWOSLOT_TEST)
+elif [[ "${1:-}" == "--pipe-dispatch" && $# == 1 ]]; then
+    extra=(+define+VEN_P54_WBUF_PIPE_DISPATCH +define+VEN_P54_WBUF_PIPE_DISPATCH_TEST)
 elif [[ $# != 0 ]]; then
-    echo "usage: $0 [--pair|--pair-alias|--pair-error|--read-on-b|--read-on-b-error|--read-on-b-two]" >&2
+    echo "usage: $0 [--pair|--pair-alias|--pair-error|--read-on-b|--read-on-b-error|--read-on-b-two|--pipe-dispatch]" >&2
     exit 2
 fi
 OBJ="$(mktemp -d "${TMPDIR:-/tmp}/ventium-axi-wbuf.XXXXXX")"
@@ -46,6 +48,8 @@ elif [[ "${1:-}" == "--read-on-b-error" ]]; then
     marker=AXIWBUF-READ-ON-B-ERROR-GATE-OK
 elif [[ "${1:-}" == "--read-on-b-two" ]]; then
     marker=AXIWBUF-READ-ON-B-TWOSLOT-GATE-OK
+elif [[ "${1:-}" == "--pipe-dispatch" ]]; then
+    marker=AXIWBUF-PIPE-DISPATCH-GATE-OK
 else
     marker=AXIWBUF-GATE-OK
 fi
