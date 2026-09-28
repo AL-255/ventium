@@ -138,6 +138,13 @@ microbenchmark took 48 clocks in the control and 33 with B pipelining. The
 full-PC IPC candidate compiles with both flags; no current-candidate gameplay
 IPC or FPGA timing measurement is available yet.
 
+`bash verif/l1/run-axi-ao486-write-pipe.sh` now measures both flags through
+the production master, bridge, and actual ao486 L2. It checks 32 ordered
+aligned writes plus readback in all four flag combinations: control 99 clocks,
+master-only 99, bridge-only 99, and both flags 68. The combined 31-clock
+reduction removes a two-sided serialization bottleneck; neither half alone
+helps this fixed stream. This is a bounded seam test, not gameplay IPC.
+
 The fixed-work `fp_fistp_integer_overlap` probe on the September 28 full IPC
 profile takes 12 clocks for its four-instruction FILD/FISTP/INC/INC body plus
 loop control (directed body IPC 0.5). Its functional trace and all 4,008

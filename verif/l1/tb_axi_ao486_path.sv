@@ -211,6 +211,23 @@ module tb_axi_ao486_path #(parameter bit REPLAY = 0);
       write_word(512+strobe%8,4'(strobe),32'h12345678^(32'(strobe)*32'h01010101));
       read_line(512,strobe%8);
     end
+`ifdef VEN_P54_WRITE_PIPE_TEST
+    // Saturate the actual P54 two-slot write buffer through the production
+    // master, bridge, and ao486 L2. The control and candidate must perform
+    // identical visible writes; this clock count is a seam microbenchmark,
+    // not CPU instruction throughput or gameplay IPC.
+    begin
+      int began;
+      began=clocks;
+      for(int word_addr=600;word_addr<632;word_addr++)
+        write_word(word_addr,4'hf,32'h45a5_0000|32'(word_addr));
+      for(int guard=0;guard<1024 && !idle;guard++) @(negedge clk);
+      if(!idle) $fatal(1,"streamed stores did not drain");
+      $display("AXI-AO486-WRITE-PIPE clocks=%0d stores=32",clocks-began);
+      for(int base=600;base<632;base+=8)
+        read_line(base,0);
+    end
+`endif
     for(int guard=0;guard<1024 && !idle;guard++) @(negedge clk);
     if(!idle) $fatal(1,"master not idle");
     $display("AXI-AO486-PATH-OK replay=%0d reads=%0d writes=%0d AR=%0d read_clocks=%0d",
