@@ -222,6 +222,14 @@ loop_body:
     decl %ecx
     leal 32(%esi), %esi
     jnz loop_body
+.elseif CASE == 35
+    # Model the recurrent game shape without depending on game addresses:
+    # integer-to-x87 load, x87 integer store/pop, then independent integer
+    # work. The result is consumed after the loop so stores are observable.
+    fildl (%esi)
+    fistpl (%edi)
+    incl %eax
+    incl %ebx
 .else
     .error "unsupported CASE"
 .endif
@@ -231,6 +239,9 @@ loop_body:
 .endif
 .globl loop_end
 loop_end:
+.if CASE == 35
+    movl (%edi), %edx
+.endif
     movl $1, %eax
     xorl %ebx, %ebx
 .globl exit_syscall

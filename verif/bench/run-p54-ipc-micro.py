@@ -54,6 +54,7 @@ CASES = {
     "landed_word_forward": (BASE, 32),
     "regmem_prime_after_store": (BASE, 33),
     "regmem_prime_dep_reject": (BASE, 34),
+    "fp_fistp_integer_overlap": (BASE, 35),
 }
 
 
@@ -141,6 +142,8 @@ def main():
     parser.add_argument("--qemu", type=Path, help="pinned qemu-i386 for selected functional differential cases")
     parser.add_argument("--qemu-cases", nargs="+", choices=CASES,
                         help="cases to compare against full architectural QEMU traces")
+    parser.add_argument("--cases", nargs="+", choices=CASES,
+                        help="run only these named microbenchmarks (default: all)")
     parser.add_argument("--assemble-only", action="store_true")
     parser.add_argument("--iterations", type=int, default=1000)
     parser.add_argument("--jobs", type=int, default=min(32, os.cpu_count() or 1),
@@ -151,6 +154,9 @@ def main():
         parser.error("--binary is required unless --assemble-only is used")
     if args.qemu_cases and (args.assemble_only or args.qemu is None):
         parser.error("--qemu-cases needs --qemu and an RTL --binary")
+    selected = args.cases or list(CASES)
+    if args.qemu_cases and not set(args.qemu_cases).issubset(selected):
+        parser.error("--qemu-cases must be included in --cases")
     if not 102 <= args.iterations <= 10000:
         parser.error("iterations must be between 102 and 10000")
     if not 1 <= args.jobs <= 32:
@@ -163,7 +169,8 @@ def main():
     print(f"Artifacts: {out}", flush=True)
     results = {}
     prepared = {}
-    for name, (source, case_id) in CASES.items():
+    for name in selected:
+        source, case_id = CASES[name]
         flat, sym, per_loop = assemble(name, source, case_id, args.iterations, out, deadline)
         prepared[name] = (flat, sym, per_loop)
         if args.assemble_only:

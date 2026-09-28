@@ -95,6 +95,7 @@ timeout 540s env VENTIUM_BUILD_SCOPE_PROFILE=ipc_parallel32 \
 | `dual_store_{distinct,same}_bank` | Are two store admissions possible while preserving order and the two-entry write-buffer limit? Both cases cross cache lines. |
 | `resident_memory_alu` / `register_alu_control` | Does a resident ALU-memory instruction retain its P54 resource occupancy instead of accidentally collapsing to register-ALU timing? |
 | `fp_integer_overlap` / `integer_only_control` | Can independent integer work proceed while a real x87 arithmetic operation is outstanding? The integer control has a nonpairable leading EAX dependency so a freely-paired NOP cannot fake a larger FP penalty. |
+| `fp_fistp_integer_overlap` | Can independent integer work proceed past an ordered FILD/FISTP memory pair without losing the integer-store result? The destination is read after the loop; this diagnoses the slow FP-store ownership path, not gameplay IPC. |
 | `frontend_{aligned,line_straddle}` | Do resident raw instruction bytes cross a 32-byte I-line without persistent decoded-cache repair stalls? |
 | `resident_{same_line,two_line}_loads` | Does the registered D-cache window serve a later hit in the same physical line without a second capture, and does a different line correctly require its own lookup? |
 | `register_u_memory_v` / `memory_u_register_v` | Can an independent V load issue when U has no memory operand, contrasted with the existing U-load/V-register case? |
@@ -126,6 +127,16 @@ open-slot different-line case saved 899 clocks in 900 warm loops relative to
 a pair-disabled control. The saturated two-store loop did **not** improve
 (6 clocks/iteration in both profiles): its two-entry write buffer was already
 full. These are not gameplay IPC or FPGA timing measurements.
+
+The fixed-work `fp_fistp_integer_overlap` probe on the September 28 full IPC
+profile takes 12 clocks for its four-instruction FILD/FISTP/INC/INC body plus
+loop control (directed body IPC 0.5). Its functional trace and all 4,008
+completed cycle-mode issue groups match pinned QEMU. This is a throughput
+diagnostic, **not** proof of an avoidable bubble: Intel-Pentium timing tables
+list FILD memory at three clocks and FIST(P) memory at six, with FIST(P)
+nonpairable and no integer overlap. Do not remove the ordered FP-store wait
+solely to improve this loop; a proposed overlap must first identify a
+P54-legal independent owner and retain its precise memory effect.
 
 `run-p54-bank-arb.sh` is a bounded leaf test for the proposed eight-bank
 admission rule: physical `[4:2]` conflicts, unaligned/64-bit extents, split-line
