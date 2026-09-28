@@ -228,6 +228,28 @@ module tb_l1d_code_buffer;
     if (dut.code_valid_q)
       $fatal(1,"paired V store left changed I line valid");
     read_word(32'h3004,1);
+`ifdef VEN_P54_LOAD_STORE_PAIR
+    // U consumes an already registered data hit while V writes the staged
+    // instruction line. Its write is one backing request, not a second pair
+    // request, and the copied code bytes must be invalidated on acceptance.
+    read_word(32'h1000,0);
+    read_word(32'h3004,1);
+    @(negedge clk); c_addr=32'h1000; c_code=0; c_we=0;
+    c_req=1; c_wstrb=4'hf; c_pair_req=0;
+    @(posedge clk);
+    @(negedge clk); c_pair_addr=32'h3004;
+    c_pair_wdata=32'ha1b2c3d4; c_pair_wstrb=4'hf; c_pair_req=1;
+    #1;
+    if (!c_pair_ready || !c_ack || !c_pair_ack || !m_req || !m_we || m_pair_req)
+      $fatal(1,"load/store code mutation was not accepted as one V write");
+    @(posedge clk);
+    @(negedge clk); c_req=0; c_pair_req=0;
+    if (dut.code_valid_q)
+      $fatal(1,"load/store V write left stale code staging valid");
+    read_word(32'h3004,1);
+    if (word_at(32'h3004) != 32'ha1b2c3d4)
+      $fatal(1,"load/store V write did not reach backing code bytes");
+`endif
 `endif
 `endif
 

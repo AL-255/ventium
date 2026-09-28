@@ -355,6 +355,42 @@ loop_body:
     fistpl (%edi)
     movl (%edi), %edx
     incl %eax
+.elseif CASE == 54
+mixed_u:
+    movl (%esi), %eax
+mixed_v:
+    movl %edx, 36(%esi)
+.elseif CASE == 55
+mixed_u:
+    movl (%esi), %eax
+mixed_v:
+    movl %edx, 32(%esi)
+.elseif CASE == 56
+    # V consumes U's loaded EAX and must not pair despite distinct banks.
+mixed_u:
+    movl (%esi), %eax
+mixed_v:
+    movl %eax, 36(%esi)
+.elseif CASE == 57
+    # Same resident line, distinct word banks: U must observe the old bank-0
+    # value while V updates bank 1 and posts the write exactly once.
+mixed_u:
+    movl (%esi), %eax
+mixed_v:
+    movl %edx, 4(%esi)
+.elseif CASE == 58 || CASE == 59
+    # Nonpairable integer multiply leaves enough service time for the two
+    # physical write-buffer slots. This isolates issue-group savings from a
+    # saturated write-through backend, with equal work in both bank controls.
+mixed_u:
+    movl (%esi), %eax
+mixed_v:
+.if CASE == 58
+    movl %edx, 36(%esi)
+.else
+    movl %edx, 32(%esi)
+.endif
+    imull %ebx, %ebx
 .else
     .error "unsupported CASE"
 .endif
@@ -366,6 +402,16 @@ loop_body:
 loop_end:
 .if CASE == 35
     movl (%edi), %edx
+.elseif CASE == 54 || CASE == 56
+    movl 36(%esi), %ebx
+.elseif CASE == 55
+    movl 32(%esi), %ebx
+.elseif CASE == 57
+    movl 4(%esi), %ebx
+.elseif CASE == 58
+    movl 36(%esi), %ebx
+.elseif CASE == 59
+    movl 32(%esi), %ebx
 .endif
     movl $1, %eax
     xorl %ebx, %ebx

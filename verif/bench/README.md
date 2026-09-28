@@ -22,6 +22,24 @@ cycles per loop in `results.json`. It checks loop and exit completion. With a
 control binary, it also compares the full architectural traces for every case.
 This A/B check is **not** QEMU differential verification or a gameplay IPC result.
 
+The opt-in `VEN_P54_LOAD_STORE_PAIR` path (requiring the existing
+`VEN_P54_DUAL_STORE_PAIR` sideband) lets an independent, aligned U dword MOV
+load retire with a V dword register store when the U read is already resident
+and registered, V has a checked translation, their data banks differ, and the
+backing write buffer accepts V. The V write has its own physical tag and is
+not speculative. Cases 54–59 in `p54_ipc_cases.s` cover distinct/same bank,
+same-line tags, register dependency rejection, and a paced loop that leaves
+write-buffer credit. With 300 iterations, the paced distinct-bank loop paired
+299/300 times and fell from **9 to 8 clocks per five-instruction iteration**;
+the paced same-bank control stayed at 9 clocks with zero pairs. The unpaced
+loop paired only 3/300 times and stayed at 3 clocks per four-instruction
+iteration because the write-through backend was saturated. All six final
+candidate/control architectural traces matched, and their cycle-mode group
+states matched pinned QEMU (`/home/yukidama/p54-load-store-qemu-final/`). The
+isolated L1 gate additionally tests accepted V writes, backpressure, same-bank
+rejection, saved-window invalidation and code-buffer invalidation. These are
+bounded directed results, not full-system or gameplay qualification.
+
 The opt-in `VEN_ITLB_ASSOC_4WAY` configuration changes only the I-TLB from
 16 direct-mapped entries to 32 entries in eight four-way sets. It is not in the
 default or gameplay profile. Its dedicated PSE/alias witness is

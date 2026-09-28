@@ -26,6 +26,9 @@
 `ifdef VEN_P54_DUAL_LOAD_PRIME
   logic mc_query_pair_mem_ok;
 `endif
+`ifdef VEN_P54_LOAD_STORE_PAIR
+  logic mc_query_pair_load_store_ok;
+`endif
 `ifdef VEN_P54_REGMEM_PRIME
   logic mc_query_pair_regmem_ok;
 `endif
@@ -120,6 +123,9 @@
 `endif
 `ifdef VEN_P54_DUAL_STORE_PAIR
                       , .pair_store_ok()
+`endif
+`ifdef VEN_P54_LOAD_STORE_PAIR
+                      , .pair_load_store_ok(mc_query_pair_load_store_ok)
 `endif
 `ifdef VEN_PERF_PROFILE
                       , .pair_reason()

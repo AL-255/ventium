@@ -73,6 +73,12 @@ CASES = {
     "fp_fist_fractional_nopop": (BASE, 51),
     "fp_fistp_empty_masked": (BASE, 52),
     "fp_fistp_split_page": (BASE, 53),
+    "load_store_distinct_bank": (BASE, 54),
+    "load_store_same_bank": (BASE, 55),
+    "load_store_dependent_reject": (BASE, 56),
+    "load_store_same_line": (BASE, 57),
+    "load_store_spaced_distinct": (BASE, 58),
+    "load_store_spaced_same_bank": (BASE, 59),
 }
 
 
@@ -155,8 +161,16 @@ def measure(name, label, binary, flat, sym, per_loop, iterations, out, deadline)
     clocks = clock(records[end]) - clock(records[begin])
     work = (iterations - 101) * per_loop
     assert clocks > 0
-    return {"instructions": work, "clocks": clocks,
-            "ipc": work / clocks, "cycles_per_iteration": clocks / (iterations - 101)}
+    result = {"instructions": work, "clocks": clocks,
+              "ipc": work / clocks,
+              "cycles_per_iteration": clocks / (iterations - 101)}
+    if "mixed_u" in sym and "mixed_v" in sym:
+        result["mixed_pairs"] = sum(
+            pc(records[index]) == sym["mixed_u"] and
+            pc(records[index + 1]) == sym["mixed_v"] and
+            clock(records[index]) == clock(records[index + 1])
+            for index in range(len(records) - 1))
+    return result
 
 
 def main():
@@ -244,7 +258,9 @@ def main():
                 results.setdefault(name, {})[label] = future.result()
                 row = results[name][label]
                 print(f"{name}/{label}: {row['cycles_per_iteration']:.3f} "
-                      f"cycles/iteration; IPC {row['ipc']:.6f}", flush=True)
+                      f"cycles/iteration; IPC {row['ipc']:.6f}" +
+                      (f"; mixed pairs {row['mixed_pairs']}" if
+                       "mixed_pairs" in row else ""), flush=True)
         if args.control:
             # Performance is meaningful only for identical architectural work.
             # This short A/B check is not a substitute for the QEMU differential
@@ -256,6 +272,16 @@ def main():
                     deadline, directory / "architectural-ab.log")
                 results[name]["architectural_ab_equal"] = True
             print("All directed candidate/control architectural traces match.", flush=True)
+            if "load_store_spaced_distinct" in results:
+                row = results["load_store_spaced_distinct"]
+                assert row["candidate"]["mixed_pairs"] >= args.iterations - 2, \
+                    "spaced mixed pair did not issue on warmed iterations"
+                assert row["candidate"]["clocks"] < row["control"]["clocks"], \
+                    "spaced mixed pair did not save fixed-work clocks"
+            for rejected in ("load_store_same_bank", "load_store_dependent_reject",
+                             "load_store_spaced_same_bank"):
+                if rejected in results:
+                    assert results[rejected]["candidate"]["mixed_pairs"] == 0, rejected
         for index, name in enumerate(args.qemu_cases or []):
             flat, sym, per_loop = prepared[name]
             directory = out / name

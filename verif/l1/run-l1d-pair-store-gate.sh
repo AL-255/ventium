@@ -13,6 +13,11 @@ elif [[ "${WINDOW_KEEP:-0}" == 1 ]]; then
 elif [[ "${WINDOW_KEEP:-0}" != 0 ]]; then
     echo "WINDOW_KEEP must be 0, basic or 1" >&2; exit 2
 fi
+if [[ "${LOAD_STORE:-0}" == 1 ]]; then
+    EXTRA+=(+define+VEN_P54_LOAD_STORE_PAIR)
+elif [[ "${LOAD_STORE:-0}" != 0 ]]; then
+    echo "LOAD_STORE must be 0 or 1" >&2; exit 2
+fi
 timeout 300s "$ROOT/tools/verilator_serial.sh" -j "${VL_J:-1}" --binary -sv --assert \
     -Wno-WIDTH -Wno-UNUSED -Wno-DECLFILENAME -Wno-INITIALDLY -Wno-IMPLICITSTATIC \
     +define+VEN_L1D_BANKED_DATA +define+VEN_P54_DUAL_STORE_PAIR \

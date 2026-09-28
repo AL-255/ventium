@@ -220,7 +220,7 @@ module ven_l1d #(
   // V writes only its own resident physical tag. A nonallocating V miss is
   // posted to the ordered backing buffer without touching a different line.
   assign bank_pair_store_we = rst_n && (st == L1_IDLE) && !mc_lookup_next &&
-      !stream_path && c_pair_req && c_pair_ready && c_ack && store_pair_hit;
+      !stream_path && c_pair_ack && store_pair_hit;
 `endif
   assign bank_fill_we = rst_n && (st == L1_FILL) && m_ack && !bypass_q
 `ifdef VEN_L1D_CODE_BUFFER
@@ -240,14 +240,31 @@ module ven_l1d #(
   // Each aligned store has its own physical tag lookup. The upstream seam
   // independently checks V's cacheability and route; both writes are posted
   // atomically in U/V order, whether either line is resident or not.
-  assign c_pair_ready = rst_n && c_req && c_we && cacheable && !golden &&
+  assign c_pair_ready = rst_n && c_req && cacheable && !golden &&
       !flush_all && !snoop_inv_valid && (st == L1_IDLE) &&
-      m_pair_ready &&
+`ifdef VEN_P54_LOAD_STORE_PAIR
+      (c_we ? m_pair_ready :
+       // The older U is a complete registered resident read.  V may post
+       // one store while U consumes that saved response, never on a miss,
+       // partial fill, device read, or a stale/unmatched response.
+       ((rd_match || window_reuse || shadow_reuse) && hit && !early_armed
+`ifdef VEN_L1D_CODE_BUFFER
+        && !code_access
+`endif
+       )) &&
+`else
+      c_we && m_pair_ready &&
+`endif
       !mc_lookup_next && !stream_path && !xline &&
       (c_addr[1:0] == 2'd0) && (c_pair_addr[1:0] == 2'd0) &&
       (c_addr[4:2] != c_pair_addr[4:2]) &&
       (c_wstrb == 4'hf) && (c_pair_wstrb == 4'hf);
-  assign c_pair_ack = c_pair_req && c_pair_ready && c_ack && m_pair_ack;
+  assign c_pair_ack = c_pair_req && c_pair_ready && c_ack &&
+`ifdef VEN_P54_LOAD_STORE_PAIR
+      (c_we ? m_pair_ack : m_ack);
+`else
+      m_pair_ack;
+`endif
 `endif
   logic [TAGW-1:0] dc_tag [L1_SETS][2];  // addr[31 -: TAGW]
   logic          dc_val  [L1_SETS][2];
@@ -1193,6 +1210,16 @@ module ven_l1d #(
         m_pair_req = c_pair_ready;
       end
 `endif
+`ifdef VEN_P54_LOAD_STORE_PAIR
+    end else if (st==L1_IDLE && c_req && !c_we && !stream_path) begin
+      // U's read response is already registered.  V alone consumes one
+      // write-buffer slot; its backing acceptance gates V cache mutation and
+      // ordered paired retirement without changing U's read ACK/data. Keep
+      // the address hint independent of pair ready: the master's two-slot
+      // credit logic reads m_addr even when this edge has no write request.
+      m_req=c_pair_req && c_pair_ready; m_we=m_req; m_addr=c_pair_addr;
+      m_wdata=c_pair_wdata; m_wstrb=c_pair_wstrb;
+`endif
     end
   end
 
@@ -1455,7 +1482,7 @@ module ven_l1d #(
       // An unrelated store need not discard either complete resident window.
       // Compare both write owners: V can touch the shadow even when U does
       // not. A crossing U write can touch its following physical line.
-      if (c_req && c_we
+      if ((c_req && c_we
 `ifdef VEN_L1D_TWO_WINDOW_KEEP_STORE
           && (!cacheable || (c_addr[31:5] == shadow_line_addr_q) ||
               (xline && (addr_n[31:5] == shadow_line_addr_q))
@@ -1463,6 +1490,11 @@ module ven_l1d #(
               || (c_pair_req && (c_pair_addr[31:5] == shadow_line_addr_q))
 `endif
              )
+`endif
+         )
+`ifdef VEN_P54_LOAD_STORE_PAIR
+          || (c_pair_ack && !c_we &&
+              (c_pair_addr[31:5] == shadow_line_addr_q))
 `endif
          )
         shadow_valid_q <= 1'b0;
@@ -1481,9 +1513,18 @@ module ven_l1d #(
 `ifdef VEN_P54_DUAL_STORE_PAIR
                      || (c_pair_req && (c_pair_addr[31:5] == rd_addr_q[31:5]))
 `endif
-                    ) : !rd_hit))))
+                    ) : !rd_hit)))
+`ifdef VEN_P54_LOAD_STORE_PAIR
+          || (c_pair_ack && !c_we &&
+              (c_pair_addr[31:5] == rd_addr_q[31:5]))
+`endif
+          )
 `else
-          (st != L1_IDLE) || (c_req && (c_we || !cacheable || !rd_hit)))
+          (st != L1_IDLE) || (c_req && (c_we || !cacheable || !rd_hit))
+`ifdef VEN_P54_LOAD_STORE_PAIR
+          || c_pair_ack
+`endif
+          )
 `endif
         begin
           window_valid_q <= 1'b0;
@@ -1679,18 +1720,18 @@ module ven_l1d #(
                 if (hit_n1) dc_val[set_n][1] <= 1'b0;
               end
             end
-`ifdef VEN_P54_DUAL_STORE_PAIR
-            // V's distinct physical line has its own resident tag and way.
-            // The banked data write above is qualified by this exact hit and
-            // by the atomic backing ACK; a V miss remains nonallocating.
-            if (c_pair_req && c_pair_ready && store_pair_hit) begin
-              if (store_pair_hit0 && store_pair_hit1)
-                dc_val[store_pair_set][~store_pair_way] <= 1'b0;
-              dc_lru[store_pair_set] <= store_pair_way;
-            end
-`endif
             // (STLD write-capture removed with the forwarding buffer.)
           end
+`ifdef VEN_P54_DUAL_STORE_PAIR
+          // V may follow either a U store or a registered U load.  Only its
+          // own backing ACK authorizes a tag/data mutation; a rejected V has
+          // no L1 side effect even if U's read completed on this edge.
+          if (c_pair_ack && store_pair_hit) begin
+            if (store_pair_hit0 && store_pair_hit1)
+              dc_val[store_pair_set][~store_pair_way] <= 1'b0;
+            dc_lru[store_pair_set] <= store_pair_way;
+          end
+`endif
         end
         L1_FILL: begin
 `ifdef VEN_L1D_CODE_BUFFER
@@ -1888,9 +1929,17 @@ module ven_l1d #(
           (c_req && c_code && !cacheable) ||
 `ifdef VEN_L1D_CODE_TAG_INVALIDATE
           (snoop_inv_valid && (code_line_tag_q == snoop_inv_addr[31:5])) ||
-          (c_req && c_we && c_ack && code_store_overlap))
+          ((c_req && c_we && c_ack
+`ifdef VEN_P54_LOAD_STORE_PAIR
+            || (c_pair_ack && !c_we)
+`endif
+           ) && code_store_overlap))
 `else
-          snoop_inv_valid || (c_req && c_we && c_ack))
+          snoop_inv_valid || (c_req && c_we && c_ack)
+`ifdef VEN_P54_LOAD_STORE_PAIR
+          || c_pair_ack
+`endif
+          )
 `endif
         code_valid_q <= 1'b0;
 `endif

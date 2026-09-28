@@ -22,6 +22,7 @@ module tb_l1d_pair_store;
   assign m_pair_ready = !block_credit;
   logic [31:0] mem [0:63];
   int errors = 0, writes = 0;
+  int load_store_write_base;
 
   ven_l1d #(.L1_SETS(64)) dut (
       .clk, .rst_n, .flush_all(1'b0), .golden(1'b0), .cacheable(1'b1),
@@ -76,6 +77,18 @@ module tb_l1d_pair_store;
       @(posedge clk); #1;
       if (++guard > 40) begin fail("L1 fill did not drain"); break; end
     end
+  endtask
+  task automatic prepare_load_store_u(input logic [31:0] addr);
+`ifndef VEN_L1D_WINDOW_REUSE
+    // Without the saved hit window, the U response is available only after
+    // its registered capture edge. Keep the same owner/address into serve.
+    @(negedge clk);
+    c_req <= 1'b1; c_we <= 1'b0; c_addr <= addr; c_wstrb <= 4'hf;
+    c_pair_req <= 1'b0;
+    @(posedge clk); #1;
+    if (!dut.rd_armed || dut.rd_addr_q != addr)
+      fail("U read was not captured before mixed pair serve");
+`endif
   endtask
 
   initial begin
@@ -323,6 +336,68 @@ module tb_l1d_pair_store;
     read_word(32'h40, 32'h7777_0000);
     read_word(32'h64, 32'h4444_6464);
 `endif
+`endif
+
+`ifdef VEN_P54_LOAD_STORE_PAIR
+    $display("[load/store] registered U hit posts exactly one V store");
+    read_word(32'h40, 32'h7777_0000);
+    wait_idle();
+    load_store_write_base = writes;
+    prepare_load_store_u(32'h40);
+    @(negedge clk);
+    c_req <= 1'b1; c_we <= 1'b0; c_addr <= 32'h40; c_wstrb <= 4'hf;
+    c_pair_req <= 1'b1; c_pair_addr <= 32'h44;
+    c_pair_wdata <= 32'h1234_5678; c_pair_wstrb <= 4'hf;
+    #1;
+    if (!c_pair_ready || !c_ack || !c_pair_ack || !m_req || !m_we ||
+        m_pair_req || m_addr != 32'h44 || c_rdata != 32'h7777_0000)
+      fail("load/store pair did not preserve U response and single V write");
+    @(posedge clk);
+    @(negedge clk); c_req <= 1'b0; c_pair_req <= 1'b0;
+    if (writes != load_store_write_base + 1 || mem[17] != 32'h1234_5678)
+      fail("load/store pair did not post V exactly once");
+    read_word(32'h44, 32'h1234_5678);
+
+    $display("[load/store] denied V backing credit leaves U readable");
+    read_word(32'h40, 32'h7777_0000);
+    prepare_load_store_u(32'h40);
+    @(negedge clk);
+    block_pair <= 1'b1;
+    c_req <= 1'b1; c_we <= 1'b0; c_addr <= 32'h40; c_wstrb <= 4'hf;
+    c_pair_req <= 1'b1; c_pair_addr <= 32'h48;
+    c_pair_wdata <= 32'hdead_beef; c_pair_wstrb <= 4'hf;
+    #1;
+    if (!c_pair_ready || !c_ack || c_pair_ack || !m_req || m_ack ||
+        c_rdata != 32'h7777_0000)
+      fail("backpressured V incorrectly stalled or changed U read");
+    @(posedge clk);
+    @(negedge clk);
+    c_req <= 1'b0; c_pair_req <= 1'b0; block_pair <= 1'b0;
+    if (writes != load_store_write_base + 1 || mem[18] != 32'h3333_3333)
+      fail("unaccepted V changed backing state");
+    read_word(32'h48, 32'h3333_3333);
+
+    $display("[load/store] equal bank and snoop reject V without posting");
+    read_word(32'h40, 32'h7777_0000);
+    prepare_load_store_u(32'h40);
+    @(negedge clk);
+    c_req <= 1'b1; c_we <= 1'b0; c_addr <= 32'h40; c_wstrb <= 4'hf;
+    c_pair_req <= 1'b1; c_pair_addr <= 32'h60;
+    c_pair_wdata <= 32'hfeed_cafe; c_pair_wstrb <= 4'hf;
+    #1;
+    if (c_pair_ready || c_pair_ack || m_req || !c_ack)
+      fail("equal-bank V store escaped or blocked U read");
+    @(negedge clk);
+    c_pair_addr <= 32'h44;
+    snoop_inv_valid <= 1'b1; snoop_inv_addr <= 32'h40;
+    #1;
+    if (c_pair_ready || c_pair_ack || m_req || c_ack)
+      fail("same-edge snoop admitted stale U/V pair");
+    @(posedge clk);
+    @(negedge clk);
+    c_req <= 1'b0; c_pair_req <= 1'b0; snoop_inv_valid <= 1'b0;
+    if (writes != load_store_write_base + 1 || mem[17] != 32'h1234_5678)
+      fail("rejected V changed backing state");
 `endif
 
     if (errors == 0) $display("L1D-PAIR-STORE-GATE-OK");

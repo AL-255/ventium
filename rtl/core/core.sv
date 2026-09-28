@@ -4384,6 +4384,12 @@ module core
   logic [2:0]  pipe_v_store_seg;
   logic [31:0] pipe_v_store_phys;
 `endif
+`ifdef VEN_P54_LOAD_STORE_PAIR
+`ifndef VEN_P54_DUAL_STORE_PAIR
+  initial $fatal(1, "load/store pairing requires the owned V-store sideband");
+`endif
+  logic pipe_pair_load_store_ok;
+`endif
 `ifdef VEN_P54_DUAL_LOAD_PAIR
   logic        pipe_mem_v_hit_q;
   logic [31:0] pipe_mem_v_phys_q;
@@ -5240,7 +5246,11 @@ module core
   // A delayed U store retains its decoded V candidate. Executable invalidation
   // cancels the younger candidate, never the already-owned U transaction.
   assign pipe_store_pair_shape = pipe_mem_active_q ? pipe_mem_store_pair_q :
-      (pipe_pair_store_ok && cycle_mode && v_bytes_ok && !irq_shadow &&
+      ((pipe_pair_store_ok
+`ifdef VEN_P54_LOAD_STORE_PAIR
+        || pipe_pair_load_store_ok
+`endif
+       ) && cycle_mode && v_bytes_ok && !irq_shadow &&
        !dbg_pair_block &&
 `ifdef VEN_UOPCACHE
        uc_v_avail &&
@@ -5253,12 +5263,21 @@ module core
   // clean, or permission-denied V mapping leaves U on its ordinary port and
   // retries V as the next architectural instruction. The L1/AXI seam checks
   // V's physical memory type and resident tag independently of U's.
-  assign pipe_store_pair_offer = pipe_store_req && pipe_store_pair_shape &&
+  assign pipe_store_pair_offer = (pipe_store_req
+`ifdef VEN_P54_LOAD_STORE_PAIR
+       || pipe_load_req
+`endif
+       ) && pipe_store_pair_shape &&
       (state == S_PIPE) && !fp_issue_block && !dbg_pair_block &&
       !exec_flush_all && !ic_snoop_valid &&
       !fx_act && !fx_start && !fx_abort_q &&
       !bus_err && !pipe_mem_abort_now && !xlate_miss && !fe_xlate_pend &&
-      mem_req && mem_we && !mem_lock_hold &&
+      mem_req && !mem_lock_hold &&
+`ifdef VEN_P54_LOAD_STORE_PAIR
+      (mem_we == pipe_store_req) &&
+`else
+      mem_we &&
+`endif
       (mem_addr[1:0] == 2'd0) && (pipe_v_store_phys[1:0] == 2'd0) &&
       (mem_addr[4:2] != pipe_v_store_phys[4:2]) &&
       ({1'b0, pipe_v_modrm_ea} + 33'd3 <= {1'b0, seg_limit[pipe_v_store_seg]}) &&
@@ -5283,7 +5302,11 @@ module core
                                   mem_ack && !pipe_mem_abort_now;
 `ifndef SYNTHESIS
   always_ff @(posedge clk) if (rst_n && pipe_store_pair_accept) begin
-    if (!(pipe_store_req && pipe_pair_store_ok ||
+    if (!((pipe_store_req && pipe_pair_store_ok)
+`ifdef VEN_P54_LOAD_STORE_PAIR
+          || (pipe_load_req && pipe_pair_load_store_ok)
+`endif
+          ||
           (pipe_mem_active_q && pipe_mem_store_pair_q)))
       $fatal(1, "store pair retired without an owned decoded V store");
   end
@@ -5313,6 +5336,9 @@ module core
 `endif
 `ifdef VEN_P54_DUAL_STORE_PAIR
     , .pair_store_ok(pipe_pair_store_ok)
+`endif
+`ifdef VEN_P54_LOAD_STORE_PAIR
+    , .pair_load_store_ok(pipe_pair_load_store_ok)
 `endif
 `ifdef VEN_PERF_PROFILE
     , .pair_reason(pipe_pair_reason)
@@ -6781,12 +6807,28 @@ module core
       if ((state == S_HALT) || (state == S_SHUTDOWN) || pipe_mem_abort_now ||
           (pipe_mem_active_q && (exec_flush_all || ic_snoop_valid)))
         pipe_mem_store_pair_q <= 1'b0;
+`ifdef VEN_P54_LOAD_STORE_PAIR
+`ifdef VEN_PIPE_MEM_CHAIN
+      else if (mc_any_accept)
+        // A primed or consume-and-replace U load becomes the new registered
+        // owner on this edge.  Its decoded V store travels with that owner.
+        pipe_mem_store_pair_q <= mc_query_pair_load_store_ok;
+`endif
+`endif
       else if (pipe_mem_active_q && (state == S_PIPE) &&
                !xlate_miss && !fe_xlate_pend && mem_ack)
         pipe_mem_store_pair_q <= 1'b0;
-      else if (!pipe_mem_active_q && pipe_new_store_req &&
+      else if (!pipe_mem_active_q && (pipe_new_store_req
+`ifdef VEN_P54_LOAD_STORE_PAIR
+               || pipe_new_load_req
+`endif
+              ) &&
                (xlate_miss || fe_xlate_pend || !mem_ack))
-        pipe_mem_store_pair_q <= pipe_pair_store_ok && cycle_mode &&
+        pipe_mem_store_pair_q <= (pipe_pair_store_ok
+`ifdef VEN_P54_LOAD_STORE_PAIR
+            || pipe_pair_load_store_ok
+`endif
+            ) && cycle_mode &&
             v_bytes_ok && !irq_shadow && !dbg_pair_block &&
 `ifdef VEN_UOPCACHE
             uc_v_avail &&

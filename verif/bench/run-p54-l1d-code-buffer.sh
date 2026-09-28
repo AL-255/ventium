@@ -9,7 +9,8 @@ run() {
     (( remaining > 0 )) || { echo "nine-minute code-buffer gate budget expired" >&2; exit 1; }
     timeout --signal=TERM --kill-after=10s "$remaining" "$@"
 }
-for variant in packed banked banked_window banked_forward banked_code_stream banked_both_forward banked_hit_under_fill banked_hit_under_fill_tag banked_tag banked_tag_pair; do
+for variant in packed banked banked_window banked_forward banked_code_stream banked_both_forward banked_hit_under_fill banked_hit_under_fill_tag banked_tag banked_tag_pair banked_tag_mixed; do
+    if [[ -n "${P54_CODE_BUFFER_ONLY:-}" && "$variant" != "$P54_CODE_BUFFER_ONLY" ]]; then continue; fi
     defines=(+define+VEN_L1D_CODE_BUFFER)
     if [[ "$variant" == banked* ]]; then
         defines+=(+define+VEN_L1D_BANKED_DATA)
@@ -26,7 +27,7 @@ for variant in packed banked banked_window banked_forward banked_code_stream ban
     if [[ "$variant" == banked_both_forward ]]; then
         defines+=(+define+VEN_L1D_FILL_FORWARD)
     fi
-    if [[ "$variant" == banked_tag || "$variant" == banked_tag_pair ]]; then
+    if [[ "$variant" == banked_tag || "$variant" == banked_tag_pair || "$variant" == banked_tag_mixed ]]; then
         defines+=(+define+VEN_L1D_CODE_TAG_INVALIDATE +define+VEN_L1D_CODE_STREAM)
     fi
     if [[ "$variant" == banked_hit_under_fill || "$variant" == banked_hit_under_fill_tag ]]; then
@@ -35,8 +36,11 @@ for variant in packed banked banked_window banked_forward banked_code_stream ban
     if [[ "$variant" == banked_hit_under_fill_tag ]]; then
         defines+=(+define+VEN_L1D_CODE_TAG_INVALIDATE +define+VEN_L1D_CODE_STREAM)
     fi
-    if [[ "$variant" == banked_tag_pair ]]; then
+    if [[ "$variant" == banked_tag_pair || "$variant" == banked_tag_mixed ]]; then
         defines+=(+define+VEN_P54_DUAL_STORE_PAIR)
+    fi
+    if [[ "$variant" == banked_tag_mixed ]]; then
+        defines+=(+define+VEN_P54_LOAD_STORE_PAIR)
     fi
     run "$root/tools/verilator_serial.sh" --binary --assert -sv \
         -Wall -Wno-UNUSED -Wno-fatal \
