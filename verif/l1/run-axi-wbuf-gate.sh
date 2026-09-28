@@ -14,8 +14,15 @@ elif [[ "${1:-}" == "--pair-alias" && $# == 1 ]]; then
 elif [[ "${1:-}" == "--pair-error" && $# == 1 ]]; then
     extra=(+define+VEN_P54_DUAL_STORE_PAIR +define+VEN_P54_PAIR_ERROR_TEST
            +define+VEN_AXI_RESP_FAULT_INJECT)
+elif [[ "${1:-}" == "--read-on-b" && $# == 1 ]]; then
+    extra=(+define+VEN_AXI_READ_ON_FINAL_B +define+VEN_AXI_READ_ON_FINAL_B_TEST)
+elif [[ "${1:-}" == "--read-on-b-error" && $# == 1 ]]; then
+    extra=(+define+VEN_AXI_READ_ON_FINAL_B +define+VEN_AXI_READ_ON_FINAL_B_TEST
+           +define+VEN_AXI_READ_ON_FINAL_B_ERROR_TEST +define+VEN_AXI_RESP_FAULT_INJECT)
+elif [[ "${1:-}" == "--read-on-b-two" && $# == 1 ]]; then
+    extra=(+define+VEN_AXI_READ_ON_FINAL_B +define+VEN_AXI_READ_ON_FINAL_B_TWOSLOT_TEST)
 elif [[ $# != 0 ]]; then
-    echo "usage: $0 [--pair|--pair-alias|--pair-error]" >&2
+    echo "usage: $0 [--pair|--pair-alias|--pair-error|--read-on-b|--read-on-b-error|--read-on-b-two]" >&2
     exit 2
 fi
 OBJ="$(mktemp -d "${TMPDIR:-/tmp}/ventium-axi-wbuf.XXXXXX")"
@@ -33,6 +40,12 @@ if [[ "${1:-}" == "--pair-alias" ]]; then
     marker=AXIWBUF-PAIR-ALIAS-GATE-OK
 elif [[ "${1:-}" == "--pair-error" ]]; then
     marker=AXIWBUF-PAIR-ERROR-GATE-OK
+elif [[ "${1:-}" == "--read-on-b" ]]; then
+    marker=AXIWBUF-READ-ON-B-GATE-OK
+elif [[ "${1:-}" == "--read-on-b-error" ]]; then
+    marker=AXIWBUF-READ-ON-B-ERROR-GATE-OK
+elif [[ "${1:-}" == "--read-on-b-two" ]]; then
+    marker=AXIWBUF-READ-ON-B-TWOSLOT-GATE-OK
 else
     marker=AXIWBUF-GATE-OK
 fi

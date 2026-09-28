@@ -93,7 +93,9 @@ module tb_axi_wbuf;
   assign wready  = rst_n && !hold_aw;
   assign bvalid  = (b_pending != 3'd0) && (b_delay == 8'd0);
   assign bid     = 4'd0;
-`ifdef VEN_P54_PAIR_ERROR_TEST
+`ifdef VEN_AXI_READ_ON_FINAL_B_ERROR_TEST
+  assign bresp = (b_seen == 3'd0) ? 2'b10 : 2'b00;
+`elsif VEN_P54_PAIR_ERROR_TEST
   assign bresp   = (b_seen == 3'd0) ? 2'b10 : 2'b00;
 `else
   assign bresp   = 2'b00;
@@ -205,7 +207,92 @@ module tb_axi_wbuf;
     repeat (4) @(posedge clk);
     rst_n <= 1'b1;
 
-`ifdef VEN_P54_PAIR_ERROR_TEST
+`ifdef VEN_AXI_READ_ON_FINAL_B_TEST
+    $display("[read-on-B] final B response and a read request share one admission edge");
+    send_write(32'h0000_0010, 32'h1111_1111);
+    @(negedge clk) hold_aw <= 1'b0;
+    begin
+      int guard = 0;
+      while (!(b_pending == 3'd1 && b_delay == 8'd0)) begin
+        @(negedge clk);
+        if (++guard > 80) begin fail("write did not reach held final B"); break; end
+      end
+    end
+    // BVALID is now high, but no B handshake has occurred yet. A registered
+    // ARVALID after the very next edge is legal: the last B retired on it.
+    m_req <= 1'b1; m_we <= 1'b0; m_addr <= 32'h0000_0010;
+    m_rd_narrow <= 1'b1; m_rd_size <= 2'd2;
+    #1;
+    if (arvalid || b_seen != 3'd0) fail("read started before the final B edge");
+    @(posedge clk);
+    #1;
+`ifdef VEN_AXI_READ_ON_FINAL_B_ERROR_TEST
+    if (b_seen != 3'd1 || arvalid || !bus_err)
+      fail("bad final B launched a younger read or missed the fatal error");
+    if (errors == 0) $display("AXIWBUF-READ-ON-B-ERROR-GATE-OK");
+    else             $display("AXIWBUF-READ-ON-B-ERROR-GATE-FAIL (%0d errors)", errors);
+    $finish;
+`else
+    if (b_seen != 3'd1 || !arvalid)
+      fail("read AR did not start on final-B retirement edge");
+    begin
+      int guard = 0;
+      while (!m_ack) begin
+        @(negedge clk);
+        if (++guard > 40) begin fail("read never completed after final B"); break; end
+      end
+    end
+    if (m_rdata !== 32'h1111_1111) fail("read returned wrong posted-store data");
+    @(negedge clk);
+    m_req <= 1'b0; m_rd_narrow <= 1'b0;
+    repeat (3) @(negedge clk);
+    if (bus_err || !m_idle || aw_seen != 3'd1)
+      fail("read-on-B changed AXI ownership or final drain");
+    if (errors == 0) $display("AXIWBUF-READ-ON-B-GATE-OK");
+    else             $display("AXIWBUF-READ-ON-B-GATE-FAIL (%0d errors)", errors);
+    $finish;
+`endif
+`elsif VEN_AXI_READ_ON_FINAL_B_TWOSLOT_TEST
+    $display("[read-on-B] first of two B responses cannot release the read");
+    send_write(32'h0000_0010, 32'h1111_1111);
+    send_write(32'h0000_0014, 32'h2222_2222);
+    @(negedge clk) hold_aw <= 1'b0;
+    begin
+      int guard = 0;
+      while (!(b_pending == 3'd2 && b_delay == 8'd0)) begin
+        @(negedge clk);
+        if (++guard > 80) begin fail("two writes did not reach held B responses"); break; end
+      end
+    end
+    m_req <= 1'b1; m_we <= 1'b0; m_addr <= 32'h0000_0014;
+    m_rd_narrow <= 1'b1; m_rd_size <= 2'd2;
+    #1;
+    if (arvalid || b_seen != 3'd0) fail("read started before either B edge");
+    @(posedge clk);
+    #1;
+    if (b_seen != 3'd1 || arvalid)
+      fail("first B released read while the second slot was occupied");
+    @(posedge clk);
+    #1;
+    if (b_seen != 3'd2 || !arvalid)
+      fail("read failed to start on the second, final B edge");
+    begin
+      int guard = 0;
+      while (!m_ack) begin
+        @(negedge clk);
+        if (++guard > 40) begin fail("read never completed after both B responses"); break; end
+      end
+    end
+    if (m_rdata !== 32'h2222_2222) fail("two-slot read returned wrong data");
+    @(negedge clk);
+    m_req <= 1'b0; m_rd_narrow <= 1'b0;
+    repeat (3) @(negedge clk);
+    if (bus_err || !m_idle || aw_seen != 3'd2)
+      fail("two-slot read-on-B changed AXI ownership or final drain");
+    if (errors == 0) $display("AXIWBUF-READ-ON-B-TWOSLOT-GATE-OK");
+    else             $display("AXIWBUF-READ-ON-B-TWOSLOT-GATE-FAIL (%0d errors)", errors);
+    $finish;
+`elsif VEN_P54_PAIR_ERROR_TEST
     $display("[error] bad B after pair admission blocks all future pair admission");
     @(negedge clk);
     m_req <= 1'b1; m_we <= 1'b1;

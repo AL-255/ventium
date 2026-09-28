@@ -440,6 +440,9 @@ module ven_axi_master #(
   logic [B_CNTW-1:0]    b_outstanding;
   logic                 aw_hs, w_hs, b_hs, b_retire_hs;
   logic                 wr_beat_sent, wr_store_final, wr_progress;
+`ifdef VEN_AXI_READ_ON_FINAL_B
+  logic                 rd_last_b_now;
+`endif
 
   // REVIEW2_aug2 H-11: the read burst's beat count, LATCHED with araddr_q at accept.
   // It used to be the constant LINE_BEATS, which is why the L1D could not ask for a
@@ -547,6 +550,14 @@ module ven_axi_master #(
 `endif
   assign wr_busy     = wr_active || (wq_count != WBUF_CNTW'(0));
   assign wst         = wr_busy ? W_RUN : W_IDLE;
+`ifdef VEN_AXI_READ_ON_FINAL_B
+  // On the edge that accepts the FINAL B response, the older P54 write slot
+  // is empty before a newly registered ARVALID can appear. Start R_AR on that
+  // edge instead of spending an extra R_IDLE clock observing the old count.
+  // A younger queued write, an in-flight AW/W, or an errored B still blocks.
+  assign rd_last_b_now = (wq_count == WBUF_CNTW'(1)) &&
+                         !wr_active && wq_head_release && b_retire_hs;
+`endif
 
   // ---- AXI combinational drive ----------------------------------------------
   always_comb begin
@@ -721,7 +732,11 @@ module ven_axi_master #(
           perf_rd_block_alias <= perf_rd_block_alias + 64'd1;
         else if (fatal_now)
           perf_rd_block_fatal <= perf_rd_block_fatal + 64'd1;
-        else if (wr_busy)
+        else if (wr_busy
+`ifdef VEN_AXI_READ_ON_FINAL_B
+                 && !rd_last_b_now
+`endif
+                )
           perf_rd_block_write <= perf_rd_block_write + 64'd1;
         else
           perf_rd_admitted <= perf_rd_admitted + 64'd1;
@@ -739,7 +754,12 @@ module ven_axi_master #(
         R_IDLE: if (rproto_bad_now) begin
                   rst  <= R_FAULT;
                   r_wd <= 16'd0;
-                end else if (m_req && !m_we && !shutdown && !rd_hold && !alias_bad && !fatal_now && !wr_busy) begin
+                end else if (m_req && !m_we && !shutdown && !rd_hold && !alias_bad && !fatal_now &&
+`ifdef VEN_AXI_READ_ON_FINAL_B
+                             (!wr_busy || rd_last_b_now)) begin
+`else
+                             !wr_busy) begin
+`endif
                   // REVIEW2_aug2 H-11: a CACHEABLE backing read is a full line fill and
                   // latches the 32B-aligned base, as before. A NARROW read is ONE
                   // single-beat transaction at the byte-exact address with an exact
