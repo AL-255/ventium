@@ -185,6 +185,14 @@ operator/carry cases. Both binaries have one precise #PF/retry, pre-fault
 ownership where admitted, and full-state equality with 218 QEMU groups per
 case. This checks one overlapping-memory fault ordering corner, not all
 backpressure or interrupt schedules.
+The `--fp-overlap` variant additionally passes all 14 cases on a matched
+`VEN_FP_ASYNC_STREAM` + `VEN_FP_ASYNC_MEM` profile: the candidate emits a
+pending-FP drain at the fault/walk boundary, both models preserve the x87 and
+integer state against 221 QEMU groups per case, and the ALU read still has
+pre-fault fast ownership. With `VEN_FP_ASYNC_MEM` disabled, the same fixture
+matches QEMU but intentionally serializes before the memory access, so it
+cannot satisfy the overlap witness. Neither profile is the current full-PC
+default, and this is not a broad FP/event qualification.
 The matched [FPGA decoder leaf probe](../../fpga/P54_DECODE_LEAF_SYNTH_2026-09-27.md)
 measures a five-LUT cost for `VEN_FAST_MEM_ALU` and no material isolated
 synthesis timing loss; it does not establish full-core routed timing.
