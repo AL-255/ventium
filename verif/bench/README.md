@@ -481,6 +481,10 @@ loads, FP/integer overlap, terminal branch reversals, cross-line return and
 fill overlap. Directed examples: distinct-bank loads **4→2**, same-bank loads
 **4→3**, target branch plus load **6→4** clocks/iteration. Artifacts are under
 `/home/yukidama/ventium-background-sep28.B3cxzoKA/p54_ipc_matched_ab/`.
+The separate matched-source code/data set-collision witness took **135→113**
+cycles per fixed eight-instruction loop, with identical architectural traces
+(`/tmp/p54-code-data-collision-qx_p4r2w/`). This synthetic collision workload
+is not representative gameplay IPC.
 The current-source matched control binary SHA-256 is
 `5fb608a1cf8ca51a9d8cd80c57110f2f2c1fc7fee9d64585b0d639c1310d20d8`;
 the corrected candidate is
