@@ -163,7 +163,8 @@ ven-gameplay-base:
 	@echo "built matched-source gameplay base: $(REPO)/ao486-sim/obj_dir_ven_gameplay_base/ao486sim_ven_gameplay_base"
 
 # IPC development candidate: the exact measured gameplay profile plus the
-# staged cache, pairing, and short slow-decode improvements below. Native
+# staged cache, pairing, P54-sized D-TLB, and short slow-decode improvements.
+# Native
 # snapshots of the older binary are incompatible; qualification must cold-boot
 # private disk copies.
 # This does not change `ven` or claim the new options are FPGA-routed.
@@ -189,19 +190,22 @@ VEN_IPC_DEFS := +define+VEN_L1D_BANKED_DATA +define+VEN_L1D_BANK0_SHARED_XLINE \
   +define+VEN_P54_DUAL_LOAD_PRIME +define+VEN_P54_REGMEM_PRIME \
   +define+VEN_PIPE_BRANCH_LOAD_PRIME \
   +define+VEN_PIPE_REG_LOAD_PRIME
+# The frozen gameplay baseline has a 2-way data TLB. The IPC candidate uses
+# the P54 64-entry 4 KiB / 8-entry 4 MiB data-TLB geometry. Keep the baseline
+# unchanged for comparisons; do not define both associativity choices.
+VEN_IPC_P54_TLB_DEFS := $(filter-out +define+VEN_DTLB_ASSOC_2WAY,$(VEN_GAMEPLAY_229C_DEFS)) \
+  $(VEN_IPC_DEFS) +define+VEN_DTLB_ASSOC_4WAY +define+VEN_DTLB_P54_LARGE
 .PHONY: ven-ipc
 ven-ipc:
 	cd $(REPO) && $(VERILATOR) $(VFLAGS) \
 	  -LDFLAGS "-lz" \
 	  -Mdir ao486-sim/obj_dir_ven_ipc -o ao486sim_ven_ipc \
-	  $(VEN_GAMEPLAY_229C_DEFS) $(VEN_IPC_DEFS) \
+	  $(VEN_IPC_P54_TLB_DEFS) \
 	  -f rtl_ven_core.f -f rtl_ven_soc.f $(VEN_SRCS)
 	@echo "built IPC candidate: $(REPO)/ao486-sim/obj_dir_ven_ipc/ao486sim_ven_ipc"
 
-# A separate P54 D-TLB geometry experiment; leave the running 2-way IPC
-# candidate and its cold-boot identity untouched until full-PC qualification.
-VEN_IPC_P54_TLB_DEFS := $(filter-out +define+VEN_DTLB_ASSOC_2WAY,$(VEN_GAMEPLAY_229C_DEFS)) \
-  $(VEN_IPC_DEFS) +define+VEN_DTLB_ASSOC_4WAY +define+VEN_DTLB_P54_LARGE
+# Retain the earlier separate object directory for reproducibility. It now
+# builds the same P54 D-TLB IPC profile as ven-ipc, not a second configuration.
 .PHONY: ven-ipc-p54-tlb
 ven-ipc-p54-tlb:
 	cd $(REPO) && $(VERILATOR) $(VFLAGS) \
@@ -209,7 +213,7 @@ ven-ipc-p54-tlb:
 	  -Mdir ao486-sim/obj_dir_ven_ipc_p54_tlb -o ao486sim_ven_ipc_p54_tlb \
 	  $(VEN_IPC_P54_TLB_DEFS) \
 	  -f rtl_ven_core.f -f rtl_ven_soc.f $(VEN_SRCS)
-	@echo "built opt-in P54 D-TLB IPC experiment: $(REPO)/ao486-sim/obj_dir_ven_ipc_p54_tlb/ao486sim_ven_ipc_p54_tlb"
+	@echo "built P54 D-TLB IPC candidate copy: $(REPO)/ao486-sim/obj_dir_ven_ipc_p54_tlb/ao486sim_ven_ipc_p54_tlb"
 
 run: all
 	$(REPO)/$(OBJDIR)/$(EXE) --cycles 400000

@@ -468,8 +468,15 @@ larger I-TLB alias witness still shows no cache-enabled gain.
 This is a deliberately adversarial TLB microbenchmark, not measured gameplay
 IPC or an FPGA area/timing result. The I-TLB and replacement policy are not
 yet fully P54-faithful; do not promote the option solely from this fixture.
-`make -C ao486-sim ven-ipc-p54-tlb` builds this option in a separate full-PC
-object directory without changing the running two-way candidate. Its first
+The P54-sized D-TLB is now selected by the `ven-ipc` development candidate;
+the frozen gameplay baseline and its running binary remain two-way. The
+current-source bounded L1/AXI A/B repeated the fixed-work 1,188-instruction
+result at **17,424→15,840 clocks**, with pinned-QEMU architectural equality
+and candidate/control trace equality (`/home/yukidama/ventium-p54-large-dtlb-core.XKcz8x/`).
+This is a directed translation-stress improvement, not measured gameplay IPC;
+FPGA area/timing and the deferred full-system gates still need qualification.
+`make -C ao486-sim ven-ipc-p54-tlb` retains a separate build directory for
+reproducing this same candidate profile. Its first
 bounded build completed (SHA-256
 `02826908c7d2976f6200a06ab0d078b1a607aaffccfb0ac44e5dc701758aeb2d`);
 it has not cold-booted Win95 or Quake. The exact 97-define whole-core microbench
