@@ -161,6 +161,10 @@ The opt-in full-core sideband build also matched the preceding dual-AGU build
 in 14 pinned-QEMU memory-ALU full-state/cycle cases. Because the core does not
 yet issue sideband requests, that equality is a no-regression check, not an
 IPC improvement or proof of V-memory retirement.
+The rebuilt post-overlap binary (`977ad608b74b12efcbe4108ed79f80fc04fc4499533e1257ffb150df9a135eb2`)
+also matched all 22 directed fixed-work candidate/control architectural traces
+and exact cycle counts at 32 concurrent micro jobs; results are under
+`/tmp/p54-dualhit-overlap-core-micro-r1/`.
 
 `run-p54-l1d-code-buffer.sh` tests `VEN_L1D_CODE_BUFFER` in four cache
 configurations, including banked/window/forward variants. Code reads with the
