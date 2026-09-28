@@ -98,6 +98,8 @@ timeout 540s env VENTIUM_BUILD_SCOPE_PROFILE=ipc_parallel32 \
 | `frontend_{aligned,line_straddle}` | Do resident raw instruction bytes cross a 32-byte I-line without persistent decoded-cache repair stalls? |
 | `resident_{same_line,two_line}_loads` | Does the registered D-cache window serve a later hit in the same physical line without a second capture, and does a different line correctly require its own lookup? |
 | `register_u_memory_v` / `memory_u_register_v` | Can an independent V load issue when U has no memory operand, contrasted with the existing U-load/V-register case? |
+| `regmem_prime_after_store` | Can a predicted branch pre-read the next register-U/load-V pair after an older store changed the cached source word, without returning stale data? |
+| `regmem_prime_dep_reject` | If the paired predecessor writes the next V address register, does speculative pre-read reject the stale pre-write address and leave ordinary execution intact? |
 | `memory_alu_integer_v` | Does a resident ALU-memory U retain its execution occupancy while an independent integer V follows? |
 | `resident_memory_{or,adc,sbb,and,sub,xor}` | Does the checked register-destination memory-ALU admission avoid recurring slow fetch/decode/load FSM visits without changing full architectural state? ADD is the separate `resident_memory_alu` control. Carry operators retain their real CF dependency. |
 | `branch_target_load` / `v_branch_target_load` | Can a predicted-taken U/V branch prime a checked resident load on its target edge, without changing the final not-taken iteration or merely moving a capture bubble to another load? |
@@ -110,6 +112,11 @@ or SIR-dependent FP values. Add dedicated short fixtures for those mechanisms
 as their replacement interfaces land. In particular, a faster distinct-bank
 case is **not** by itself proof of two memory retirements per clock: inspect
 the cycle trace and the accepted owner records before claiming dual issue.
+For selected `--qemu-cases`, the runner checks both ordinary functional mode
+and the actual `--cycle-func` candidate at each completed issue-group boundary.
+The U callback of a same-cycle U/V pair is not an intermediate architectural
+state; the group's last callback is compared to pinned QEMU. This check remains
+a bounded microbenchmark, not full-system differential verification.
 
 `run-p54-bank-arb.sh` is a bounded leaf test for the proposed eight-bank
 admission rule: physical `[4:2]` conflicts, unaligned/64-bit extents, split-line

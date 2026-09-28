@@ -4387,7 +4387,12 @@ module core
 `ifdef VEN_P54_DUAL_LOAD_PRIME
   logic [31:0] mc_prime_v_ea, mc_prime_v_lin, mc_prime_v_phys;
   logic [2:0] mc_prime_v_seg;
-  logic mc_prime_v_eligible, mc_prime_v_request, mc_prime_v_accept;
+  logic mc_prime_v_checked, mc_prime_v_eligible, mc_prime_v_request, mc_prime_v_accept;
+`endif
+`ifdef VEN_P54_REGMEM_PRIME
+  logic pipe_regmem_v_hit_q, pipe_regmem_pair_good;
+  logic [31:0] pipe_regmem_pc_q;
+  logic regmem_prime_v_eligible, regmem_prime_v_request, regmem_prime_v_accept;
 `endif
 `endif
   fpd_t        pipe_u_eff, pipe_v_eff;
@@ -4992,6 +4997,11 @@ module core
 `ifndef VEN_L1_AXI
   initial $fatal(1, "VEN_P54_DUAL_HIT requires VEN_L1_AXI");
 `endif
+`ifdef VEN_P54_REGMEM_PRIME
+`ifndef VEN_P54_DUAL_LOAD_PRIME
+  initial $fatal(1, "VEN_P54_REGMEM_PRIME requires VEN_P54_DUAL_LOAD_PRIME");
+`endif
+`endif
 `ifdef VEN_P54_DUAL_LOAD_PAIR
 `ifndef VEN_P54_DUAL_HIT_LEGACY_CAPTURE
   initial $fatal(1, "VEN_P54_DUAL_LOAD_PAIR requires legacy-capture pair banks");
@@ -5038,8 +5048,7 @@ module core
   assign mc_prime_v_seg = mc_query_v.mem_ss ? 3'(SG_SS) : 3'(SG_DS);
   assign mc_prime_v_lin = seg_base[mc_prime_v_seg] + mc_prime_v_ea;
   assign mc_prime_v_phys = paging_on ? v_dtlb_lk_phys : mc_prime_v_lin;
-  assign mc_prime_v_eligible = mc_prime_offer && mc_query_pair_mem_ok &&
-      ((mc_query_v.addr_mask & mc_older_writes) == 8'd0) &&
+  assign mc_prime_v_checked =
       ({1'b0, mc_prime_v_ea} + 33'd3 <= {1'b0, seg_limit[mc_prime_v_seg]}) &&
       (mc_prime_v_lin[1:0] == 2'd0) && (mc_prime_v_lin[4:0] <= 5'd28) &&
       (!paging_on || (v_dtlb_lk_hit && v_dtlb_lk_perm[0] &&
@@ -5051,14 +5060,43 @@ module core
           !seg_attr[mc_prime_v_seg][3] && seg_attr[mc_prime_v_seg][1] &&
           !seg_attr[mc_prime_v_seg][2] &&
           (seg_limit[mc_prime_v_seg] == 32'hffff_ffff)));
+  assign mc_prime_v_eligible = mc_prime_offer && mc_query_pair_mem_ok &&
+      ((mc_query_v.addr_mask & mc_older_writes) == 8'd0) &&
+      mc_prime_v_checked;
   assign mc_prime_v_request = mc_prime_v_eligible &&
       mem_next_commit && mem_next_ready;
   assign mc_prime_v_accept = mc_prime_v_request && mem_pair_req_ready[1];
+`ifdef VEN_P54_REGMEM_PRIME
+  // D2-style pre-read of V's resident data on the preceding predicted U or
+  // paired-V conditional branch. The target's U is register-only, so this
+  // edge has no ordinary D request.
+  // A wrong prediction, faultable address, missing translation, or rejected
+  // cache hit creates no owner. This is read-only tag/data capture, never MMIO.
+  assign regmem_prime_v_eligible = mc_prime_base && mc_boundary_ok &&
+      mc_prime_branch && mc_query_pair_regmem_ok &&
+      !fp_is_ext_load(mc_query_v) &&
+      ((mc_query_v.addr_mask & mc_older_writes) == 8'd0) &&
+      mc_prime_v_checked;
+  assign regmem_prime_v_request = regmem_prime_v_eligible &&
+      pipe_int_commit &&
+      (mc_prime_u_branch ? (pipe_u_eff.br_taken == u_pred_taken)
+                         : (v_br_taken_eff == v_pred_taken));
+  assign regmem_prime_v_accept = regmem_prime_v_request && mem_pair_req_ready[1];
+  assign mem_pair_req_valid = {pipe_v_pair_request || mc_prime_v_request ||
+                               regmem_prime_v_request, 1'b0};
+  assign mem_pair_paddr = {(mc_prime_v_request || regmem_prime_v_request)
+                            ? mc_prime_v_phys : pipe_v_pair_phys,
+                           32'd0};
+  assign mem_pair_owner = {(mc_prime_v_request || regmem_prime_v_request)
+                           ? mc_query_pc[15:0] :
+                           pipe_commit_eip[15:0], 16'd0};
+`else
   assign mem_pair_req_valid = {pipe_v_pair_request || mc_prime_v_request, 1'b0};
   assign mem_pair_paddr = {mc_prime_v_request ? mc_prime_v_phys : pipe_v_pair_phys,
                            32'd0};
   assign mem_pair_owner = {mc_prime_v_request ? mc_query_pc[15:0] :
                            pipe_commit_eip[15:0], 16'd0};
+`endif
 `else
   assign mem_pair_req_valid = {pipe_v_pair_request, 1'b0};
   assign mem_pair_paddr = {pipe_v_pair_phys, 32'd0};
@@ -5069,6 +5107,23 @@ module core
       !mem_pair_rsp_cancel[1] &&
       (mem_pair_rsp_owner[1] == pipe_mem_eip_q[15:0]) &&
       (mem_pair_rsp_paddr[1] == pipe_mem_v_phys_q);
+`ifdef VEN_P54_REGMEM_PRIME
+  // The pre-read belongs to the branch target's exact U/V issue boundary.
+  // It is never a general forwarding cache: a redirect, executable change,
+  // event, or different decoded pair falls back to the ordinary U-only path.
+  assign pipe_regmem_pair_good = pipe_regmem_v_hit_q && pipe_mem_v_hit_q &&
+      (state == S_PIPE) && (pipe_regmem_pc_q == eip) &&
+      cycle_mode && !def16 && v_bytes_ok && pipe_pair_regmem_ok &&
+      !irq_shadow && !dbg_pair_block && !exec_flush_all &&
+      !ic_snoop_valid && !ic_snoop_valid1 && !ic_snoop_valid2 &&
+      !fx_act && !fx_abort_q && !bus_err &&
+`ifdef VEN_UOPCACHE
+      uc_v_avail &&
+`endif
+      mem_pair_rsp_valid[1] && !mem_pair_rsp_cancel[1] &&
+      (mem_pair_rsp_owner[1] == pipe_regmem_pc_q[15:0]) &&
+      (mem_pair_rsp_paddr[1] == pipe_mem_v_phys_q);
+`endif
   // An accepted V is younger. If a snoop/flush cancels its hit while U's
   // registered response survives, U alone retires and V retries normally.
   // Drain an orphan one clock after a precise fault/abort clears the owner.
@@ -5086,6 +5141,13 @@ module core
   always_ff @(posedge clk) if (rst_n && mc_prime_v_accept) begin
     if (!(mc_prime_accept && !pipe_mem_active_q && !pipe_new_mem_req))
       $fatal(1, "primed V hit lacks a checked successor U owner");
+  end
+`endif
+`ifdef VEN_P54_REGMEM_PRIME
+  always_ff @(posedge clk) if (rst_n && regmem_prime_v_accept) begin
+    if (!(mc_prime_branch && pipe_int_commit && !pipe_mem_active_q &&
+          !pipe_new_mem_req && !mc_prime_v_accept && !pipe_v_pair_accept))
+      $fatal(1, "register/V-load prime lost its branch or exclusive bank owner");
   end
 `endif
 `endif
@@ -5167,6 +5229,9 @@ module core
 `ifdef VEN_P54_DUAL_LOAD_PAIR
   logic pipe_pair_mem_ok;
 `endif
+`ifdef VEN_P54_REGMEM_PRIME
+  logic pipe_pair_regmem_ok;
+`endif
 `ifdef VEN_PERF_PROFILE
   logic [2:0] pipe_pair_reason;
 `endif
@@ -5174,6 +5239,9 @@ module core
       .iu(u_d), .iv(v_d), .pair_ok(pipe_pair_ok)
 `ifdef VEN_P54_DUAL_LOAD_PAIR
     , .pair_mem_ok(pipe_pair_mem_ok)
+`endif
+`ifdef VEN_P54_REGMEM_PRIME
+    , .pair_regmem_ok(pipe_pair_regmem_ok)
 `endif
 `ifdef VEN_P54_DUAL_STORE_PAIR
     , .pair_store_ok(pipe_pair_store_ok)
@@ -5465,7 +5533,12 @@ module core
   assign pipe_v_eff    = pipe_mem_active_q ? pipe_mem_v_q    : v_d;
 `ifdef VEN_P54_DUAL_LOAD_PAIR
   assign pipe_pair_base = pipe_mem_active_q ?
-      (pipe_mem_pair_q && (!pipe_mem_v_hit_q || pipe_v_pair_rsp_good)) : pipe_pair;
+      (pipe_mem_pair_q && (!pipe_mem_v_hit_q || pipe_v_pair_rsp_good)) :
+      (pipe_pair
+`ifdef VEN_P54_REGMEM_PRIME
+       || pipe_regmem_pair_good
+`endif
+       );
 `else
   assign pipe_pair_base = pipe_mem_active_q ? pipe_mem_pair_q : pipe_pair;
 `endif
@@ -6516,6 +6589,10 @@ module core
 `ifdef VEN_P54_DUAL_LOAD_PAIR
       pipe_mem_v_hit_q  <= 1'b0;
       pipe_mem_v_phys_q <= 32'd0;
+`ifdef VEN_P54_REGMEM_PRIME
+      pipe_regmem_v_hit_q <= 1'b0;
+      pipe_regmem_pc_q <= 32'd0;
+`endif
 `endif
       // A LOCK descriptor used to be left uninitialised until the first decode,
       // which could expose an X/high lock qualifier on reset fetch traffic.  The
@@ -6647,11 +6724,18 @@ module core
 `ifdef VEN_P54_DUAL_LOAD_PRIME
           || mc_prime_v_accept
 `endif
+`ifdef VEN_P54_REGMEM_PRIME
+          || regmem_prime_v_accept
+`endif
           ) begin
         pipe_mem_v_hit_q <= 1'b1;
         pipe_mem_v_phys_q <=
 `ifdef VEN_P54_DUAL_LOAD_PRIME
-            mc_prime_v_accept ? mc_prime_v_phys :
+            (mc_prime_v_accept
+`ifdef VEN_P54_REGMEM_PRIME
+             || regmem_prime_v_accept
+`endif
+             ) ? mc_prime_v_phys :
 `endif
             pipe_v_pair_phys;
       end else if ((pipe_mem_active_q && (state == S_PIPE) &&
@@ -6659,8 +6743,26 @@ module core
 `ifdef VEN_PIPE_REG_LOAD_PRIME
                    mc_prime_accept ||
 `endif
+`ifdef VEN_P54_REGMEM_PRIME
+                   (pipe_regmem_v_hit_q &&
+                    ((state != S_PIPE) || pipe_int_commit ||
+                     (eip != pipe_regmem_pc_q) || exec_flush_all ||
+                     ic_snoop_valid || ic_snoop_valid1 || ic_snoop_valid2 ||
+                     mem_pair_rsp_cancel[1])) ||
+`endif
                    (state == S_HALT) || (state == S_SHUTDOWN))
         pipe_mem_v_hit_q <= 1'b0;
+`ifdef VEN_P54_REGMEM_PRIME
+      if (regmem_prime_v_accept) begin
+        pipe_regmem_v_hit_q <= 1'b1;
+        pipe_regmem_pc_q <= mc_query_pc;
+      end else if (pipe_regmem_v_hit_q &&
+                   ((state != S_PIPE) || pipe_int_commit ||
+                    (eip != pipe_regmem_pc_q) || exec_flush_all ||
+                    ic_snoop_valid || ic_snoop_valid1 || ic_snoop_valid2 ||
+                    mem_pair_rsp_cancel[1]))
+        pipe_regmem_v_hit_q <= 1'b0;
+`endif
 `endif
 `ifndef SYNTHESIS
       if (smi_apic_store_commit && ven_apicsmilog_en)
@@ -9122,6 +9224,9 @@ module core
 `endif
 `ifdef VEN_P54_DUAL_LOAD_PAIR
       pipe_mem_v_hit_q <= 1'b0;
+`ifdef VEN_P54_REGMEM_PRIME
+      pipe_regmem_v_hit_q <= 1'b0;
+`endif
 `endif
       // A fault aborts the decoded instruction, including a locked RMW.  This
       // common precise-abort funnel is the only safe place to release its local

@@ -208,11 +208,27 @@ loop_body:
     movl 4(%esi), %ebx
     movl 4096(%esi), %edx
     movl 8192(%esi), %eax
+.elseif CASE == 33
+    # The load's backing word changes after each iteration. A branch-target
+    # V pre-read must see the preceding ordered store, not a held old result.
+    movl %ebx, %eax
+    movl (%esi), %edx
+    movl %eax, (%esi)
+.elseif CASE == 34
+    # LEA and JNZ may pair in the preceding issue group, but LEA changes the
+    # next V load's address. Pre-reading from the pre-LEA ESI is forbidden.
+    movl %ebx, %eax
+    movl (%esi), %edx
+    decl %ecx
+    leal 32(%esi), %esi
+    jnz loop_body
 .else
     .error "unsupported CASE"
 .endif
+.if CASE != 34
     decl %ecx
     jnz loop_body
+.endif
 .globl loop_end
 loop_end:
     movl $1, %eax
@@ -234,5 +250,8 @@ arena:
     .long 0x50607080
 .if CASE == 31 || CASE == 32
     .space 8192
+.elseif CASE == 34
+    # The directed runner permits up to 10,000 iterations of +32-byte ESI.
+    .space 327680
 .endif
 .section .note.GNU-stack,"",@progbits

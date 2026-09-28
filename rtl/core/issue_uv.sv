@@ -29,6 +29,9 @@ module issue_uv
 `ifdef VEN_P54_DUAL_LOAD_PAIR
   , output logic pair_mem_ok // two independently owned read operands
 `endif
+`ifdef VEN_P54_REGMEM_PRIME
+  , output logic pair_regmem_ok // independent register U + checked read V
+`endif
 `ifdef VEN_P54_DUAL_STORE_PAIR
   , output logic pair_store_ok // two independent full-dword register stores
 `endif
@@ -105,6 +108,17 @@ module issue_uv
       !iu.w8 && !iv.w8 && !iu.w16 && !iv.w16 &&
       !fp_is_ext_load(iu) && !fp_is_ext_load(iv) &&
       ((iv.reads & iu.writes) == 8'd0) &&
+      ((iv.addr_mask & iu.writes) == 8'd0);
+`endif
+`ifdef VEN_P54_REGMEM_PRIME
+  // A register U may pair with a V read only when a separately translated,
+  // owner-tagged resident response has already been captured. This predicate
+  // checks instruction classes and dependencies; core.sv proves that response.
+  always_comb pair_regmem_ok = fp_can_pair(iu, iv, 1'b1) &&
+      !iu.is_mem && !iu.is_store && !iu.is_stack && !iu.is_fp &&
+      !iu.is_branch && !iu.is_shift && !iu.w16 &&
+      iv.is_mem && iv.is_load && !iv.is_store && !iv.is_stack && !iv.is_fp &&
+      iv.wreg && !iv.w8 && !iv.w16 &&
       ((iv.addr_mask & iu.writes) == 8'd0);
 `endif
 `ifdef VEN_P54_DUAL_STORE_PAIR

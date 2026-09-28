@@ -14,6 +14,7 @@ import time
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "verif/diff"))
 import tracefmt
+import compare as trace_compare
 
 BASE = ROOT / "verif/bench/p54_ipc_cases.s"
 PRIME = ROOT / "verif/issue_uv/t_reg_load_prime_ipc.s"
@@ -51,6 +52,8 @@ CASES = {
     "resident_xline_return": (BASE, 30),
     "resident_hit_under_fill": (BASE, 31),
     "landed_word_forward": (BASE, 32),
+    "regmem_prime_after_store": (BASE, 33),
+    "regmem_prime_dep_reject": (BASE, 34),
 }
 
 
@@ -223,7 +226,7 @@ def main():
                 results[name]["architectural_ab_equal"] = True
             print("All directed candidate/control architectural traces match.", flush=True)
         for index, name in enumerate(args.qemu_cases or []):
-            flat, _, per_loop = prepared[name]
+            flat, sym, per_loop = prepared[name]
             directory = out / name
             golden = directory / "qemu.vtrace"
             functional = directory / "candidate_func.vtrace"
@@ -243,8 +246,47 @@ def main():
             run([sys.executable, ROOT / "verif/diff/compare_stream.py",
                  golden, functional], deadline, directory / "qemu_diff.log")
             results[name]["qemu_architectural_equal"] = True
-            print(f"{name}: {len(golden_records)} architectural groups match pinned QEMU",
-                  flush=True)
+            # The new pairing paths are active in cycle mode, not in the
+            # functional-mode run above. Check the actual cycle-mode post-state
+            # at each completed issue group against QEMU. The U callback in a
+            # same-clock pair sees both committed writes, so its intermediate
+            # snapshot is not a standalone architectural comparison point.
+            cycle_state = directory / "candidate_cycle_func.vtrace"
+            run([args.binary.resolve(), "--cycle-func", "--l1-axi", "--image", flat,
+                 "--load", "0x08048000", "--entry", "0x08048000",
+                 "--init-esp", init_esp, "--out", cycle_state,
+                 "--max-insn", args.iterations * per_loop + 128,
+                 "--max-cycles", "200000", "--quiesce", "1000"],
+                deadline, directory / "candidate_cycle_func.log")
+            cycles = tracefmt.read_trace(str(directory / "candidate.vtrace")).records
+            states = tracefmt.read_trace(str(cycle_state)).records
+            assert len(cycles) == len(states) == len(golden_records) + 1, \
+                (name, "cycle/group trace length")
+            assert all(int(row["pc"], 0) == sym["exit_syscall"]
+                       for row in (cycles[-1], states[-1])), name
+            fields = ("eax", "ebx", "ecx", "edx", "esi", "edi", "esp", "ebp",
+                      "cs", "ss", "ds", "es", "fs", "gs")
+            checked = 0
+            for i, expected in enumerate(golden_records):
+                assert int(cycles[i]["pc"], 0) == \
+                       int(states[i]["pc"], 0) == int(expected["pc"], 0), \
+                    (name, i, "pc")
+                if i + 1 < len(golden_records) and \
+                   cycles[i]["cyc"] == cycles[i + 1]["cyc"]:
+                    continue
+                for key in fields:
+                    assert states[i][key] == expected[key], \
+                        (name, i, key, states[i][key], expected[key])
+                flags_match, mask = trace_compare._eflags_equal(
+                    expected["eflags"], states[i]["eflags"],
+                    tracefmt.EFLAGS_DEFAULT_MASK,
+                    trace_compare._mnemonic_from_bytes(expected.get("bytes")))
+                assert flags_match, \
+                    (name, i, "eflags", states[i]["eflags"], expected["eflags"], mask)
+                checked += 1
+            results[name]["qemu_cycle_group_states_equal"] = checked
+            print(f"{name}: {checked}/{len(golden_records)} cycle-mode group states "
+                  "match pinned QEMU", flush=True)
         (out / "results.json").write_text(json.dumps(results, indent=2) + "\n")
         print("Diagnostic only: no full verification or gameplay claim.", flush=True)
     print("P54-IPC-MICRO-OK", flush=True)
