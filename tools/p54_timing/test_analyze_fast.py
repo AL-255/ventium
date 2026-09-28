@@ -58,6 +58,8 @@ class AnalyzeFastTests(unittest.TestCase):
             path.write_text(header + rows)
             result = analyze(path)
             self.assertEqual(result["selected_pair_classes"]["mem_mem"], 1)
+            self.assertEqual(result["top_mem_mem_forms"][0],
+                             {"u": "mov:8b", "v": "mov:8b", "pairs": 1})
             self.assertEqual(result["selected_bank_conflicts_known"], 1)
             self.assertEqual(result["selected_bank_conflicts_unknown"], 0)
             path.write_text(header + rows.replace("\t3\n", "\t\n", 1))

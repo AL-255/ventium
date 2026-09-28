@@ -124,6 +124,7 @@ def classify(raw: bytes, pc: int, mode16: bool) -> tuple[Insn, str]:
 def analyze(path: Path, total_legacy: int | None = None) -> dict:
     insns = []
     names = Counter()
+    identity = {}
     previous_row = None
     with path.open(newline="", encoding="utf-8") as stream:
         for row in csv.DictReader(stream, delimiter="\t"):
@@ -152,10 +153,14 @@ def analyze(path: Path, total_legacy: int | None = None) -> dict:
                     old = insns[-1]
                     insns[-1] = Insn(**{**old.__dict__, "boundary_after": True})
             insns.append(insn)
+            identity[ordinal] = (name, raw.hex()[:2])
             previous_row = (pc, len(raw), ordinal, name in JCC or name in {"jmp", "call", "ret"})
     selected = matching_pairs(insns)
     classes = Counter(("mem" if u.memory else "reg") + "_" +
                       ("mem" if v.memory else "reg") for u, v in selected)
+    mem_pair_forms = Counter(
+        (identity[u.instance], identity[v.instance])
+        for u, v in selected if u.memory and v.memory)
     bank_known = sum(bank_conflict(u, v) is True for u, v in selected)
     bank_unknown = sum(bank_conflict(u, v) is None for u, v in selected)
     count, pairs = len(insns), len(selected)
@@ -165,6 +170,10 @@ def analyze(path: Path, total_legacy: int | None = None) -> dict:
               "selected_adjacent_pairs_conservative": pairs,
               "selected_pair_classes": {key: classes[key] for key in
                                         ("reg_reg", "reg_mem", "mem_reg", "mem_mem")},
+              "top_mem_mem_forms": [
+                  {"u": f"{u_name}:{u_op}", "v": f"{v_name}:{v_op}", "pairs": n}
+                  for ((u_name, u_op), (v_name, v_op)), n in
+                  mem_pair_forms.most_common(20)],
               "selected_bank_conflicts_known": bank_known,
               "selected_bank_conflicts_unknown": bank_unknown,
               "is_full_gameplay_bound": False, "is_cycle_forecast": False}
