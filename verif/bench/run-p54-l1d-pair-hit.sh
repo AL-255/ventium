@@ -10,8 +10,12 @@ if [[ "${1:-}" == "--comb-ack" ]]; then
     extra_defines=(+define+VEN_L1D_COMB_ACK)
 elif [[ "${1:-}" == "--legacy-capture-pair" ]]; then
     extra_defines=(+define+VEN_P54_DUAL_HIT_LEGACY_CAPTURE +define+VEN_L1D_WINDOW_REUSE)
+elif [[ "${1:-}" == "--prime-pair" ]]; then
+    extra_defines=(+define+VEN_P54_DUAL_HIT_LEGACY_CAPTURE +define+VEN_L1D_WINDOW_REUSE
+                   +define+VEN_PIPE_MEM_CHAIN +define+VEN_PIPE_REG_LOAD_PRIME
+                   +define+VEN_P54_DUAL_LOAD_PRIME)
 elif [[ $# -ne 0 ]]; then
-    echo "usage: $0 [--comb-ack|--legacy-capture-pair]" >&2
+    echo "usage: $0 [--comb-ack|--legacy-capture-pair|--prime-pair]" >&2
     exit 2
 fi
 timeout 420s "$root/tools/verilator_serial.sh" --binary --assert -sv \

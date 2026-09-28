@@ -26,10 +26,13 @@ def main():
     p.add_argument('--candidate', type=Path, required=True)
     p.add_argument('--control', type=Path, required=True)
     p.add_argument('--iterations', type=int, default=256)
-    p.add_argument('--case', type=int, choices=(28, 29), default=28)
+    p.add_argument('--case', type=int, choices=(1, 2, 28, 29), default=28)
+    p.add_argument('--expect', choices=('faster', 'equal'),
+                   help='default: distinct-bank faster, same-bank equal')
     args = p.parse_args()
     if not 64 <= args.iterations <= 1000:
         p.error('--iterations must be 64..1000')
+    per_loop = 4 if args.case in (1, 2) else 5
     deadline = time.monotonic() + 540
     out = Path(tempfile.mkdtemp(prefix=f'ventium-dual-load-pair-{args.case}.'))
     print(f'Artifacts: {out}', flush=True)
@@ -50,7 +53,8 @@ def main():
          '--out', flat, '--base', '0x08048000'], out / 'flat.log', deadline)
     run([sys.executable, ROOT / 'verif/qemu-trace/gen_trace.py', '--qemu', qemu,
          '--elf', elf, '--out', out / 'qemu.vtrace', '--max-insn',
-         args.iterations * 5 + 64, '--port', '41975'], out / 'qemu.log', deadline)
+         args.iterations * per_loop + 64, '--port', str(41975 + args.case)],
+        out / 'qemu.log', deadline)
     if 'guest exited, code=0' not in (out / 'qemu.log').read_text():
         raise RuntimeError('QEMU did not exit(0)')
     gold = tracefmt.read_trace(str(out / 'qemu.vtrace'))
@@ -62,7 +66,7 @@ def main():
             run([binary, f'--{mode}', '--l1-axi', '--image', flat,
                  '--load', '0x08048000', '--entry', '0x08048000',
                  '--init-esp', gold.records[0]['esp'], '--out', path,
-                 '--max-insn', args.iterations * 5 + 64,
+                 '--max-insn', args.iterations * per_loop + 64,
                  '--max-cycles', '200000', '--quiesce', '1000'],
                 out / f'{label}.{mode}.log', deadline)
             traces[mode] = tracefmt.read_trace(str(path))
@@ -85,18 +89,19 @@ def main():
             raise RuntimeError(f'{label}: full-state QEMU mismatch')
         starts = [i for i, row in enumerate(cyc.records)
                   if int(row['pc'], 0) == symbols['loop_body']]
-        if len(starts) != args.iterations or any(b - a != 5 for a, b in zip(starts, starts[1:])):
+        if len(starts) != args.iterations or any(b - a != per_loop for a, b in zip(starts, starts[1:])):
             raise RuntimeError(f'{label}: wrong loop work')
         clocks = cyc.records[starts[-1]]['cyc'] - cyc.records[starts[32]]['cyc']
-        results[label] = {'instructions': (args.iterations - 33) * 5,
-                          'clocks': clocks, 'ipc': (args.iterations - 33) * 5 / clocks,
+        results[label] = {'instructions': (args.iterations - 33) * per_loop,
+                          'clocks': clocks, 'ipc': (args.iterations - 33) * per_loop / clocks,
                           'cycles_per_iteration': clocks / (args.iterations - 33)}
         print(f'{label}: {results[label]["cycles_per_iteration"]:.3f} cycles/loop, '
               f'directed IPC {results[label]["ipc"]:.6f}', flush=True)
-    if args.case == 28 and results['candidate']['clocks'] >= results['control']['clocks']:
+    expected = args.expect or ('faster' if args.case in (1, 28) else 'equal')
+    if expected == 'faster' and results['candidate']['clocks'] >= results['control']['clocks']:
         raise RuntimeError('distinct-bank load pair did not save an exposed clock')
-    if args.case == 29 and results['candidate']['clocks'] != results['control']['clocks']:
-        raise RuntimeError('same-bank load pair must remain serialized')
+    if expected == 'equal' and results['candidate']['clocks'] != results['control']['clocks']:
+        raise RuntimeError('case must preserve control cycle count')
     (out / 'results.json').write_text(json.dumps(results, indent=2) + '\n')
     print('P54-DUAL-LOAD-PAIR-OK (full-state QEMU; not gameplay)', flush=True)
 

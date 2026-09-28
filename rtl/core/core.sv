@@ -1657,6 +1657,7 @@ module core
   logic [2:0]  dtlb_lk_perm;  logic        dtlb_lk_dirty;
 `ifdef VEN_P54_DUAL_HIT
   logic [31:0] pipe_v_mem_lin, v_dtlb_lk_phys;
+  logic [31:0] v_dtlb_query_lin;
   logic [2:0] v_dtlb_lk_perm;
   logic v_dtlb_lk_hit, v_dtlb_lk_dirty;
 `endif
@@ -4365,6 +4366,11 @@ module core
   logic        pipe_v_pair_rsp_good;
   logic [31:0] pipe_v_pair_phys;
   logic [2:0]  pipe_v_pair_seg;
+`ifdef VEN_P54_DUAL_LOAD_PRIME
+  logic [31:0] mc_prime_v_ea, mc_prime_v_lin, mc_prime_v_phys;
+  logic [2:0] mc_prime_v_seg;
+  logic mc_prime_v_eligible, mc_prime_v_request, mc_prime_v_accept;
+`endif
 `endif
   fpd_t        pipe_u_eff, pipe_v_eff;
   logic        pipe_pair_eff;
@@ -4999,10 +5005,43 @@ module core
       && !(errata_en[ERR_MOFFS] && moffs_falsedep);
   assign pipe_v_pair_request = pipe_v_pair_eligible && pipe_new_load_req;
   assign pipe_v_pair_accept = pipe_v_pair_request && mem_pair_req_ready[1];
+`ifdef VEN_P54_DUAL_LOAD_PRIME
+`ifndef VEN_PIPE_BRANCH_LOAD_PRIME
+  initial $fatal(1, "dual-load prime requires branch/register load prime");
+`endif
+  // A checked prime captures the NEXT U on the predecessor's retirement edge.
+  // The candidate V is decoded from the same resident uop window, translated
+  // independently, and cannot read a register written by that predecessor or U.
+  assign mc_prime_v_seg = mc_query_v.mem_ss ? 3'(SG_SS) : 3'(SG_DS);
+  assign mc_prime_v_lin = seg_base[mc_prime_v_seg] + mc_prime_v_ea;
+  assign mc_prime_v_phys = paging_on ? v_dtlb_lk_phys : mc_prime_v_lin;
+  assign mc_prime_v_eligible = mc_prime_offer && mc_query_pair_mem_ok &&
+      ((mc_query_v.addr_mask & mc_older_writes) == 8'd0) &&
+      ({1'b0, mc_prime_v_ea} + 33'd3 <= {1'b0, seg_limit[mc_prime_v_seg]}) &&
+      (mc_prime_v_lin[1:0] == 2'd0) && (mc_prime_v_lin[4:0] <= 5'd28) &&
+      (!paging_on || (v_dtlb_lk_hit && v_dtlb_lk_perm[0] &&
+                     ((eff_cpl != 2'd3) || v_dtlb_lk_perm[2]))) &&
+      (!sys_mode || (sys_fp_ok && !real_mode && cs_d &&
+          seg_pm_loaded[mc_prime_v_seg] &&
+          (seg_sel[mc_prime_v_seg][15:2] != 14'd0) &&
+          seg_attr[mc_prime_v_seg][7] && seg_attr[mc_prime_v_seg][4] &&
+          !seg_attr[mc_prime_v_seg][3] && seg_attr[mc_prime_v_seg][1] &&
+          !seg_attr[mc_prime_v_seg][2] &&
+          (seg_limit[mc_prime_v_seg] == 32'hffff_ffff)));
+  assign mc_prime_v_request = mc_prime_v_eligible &&
+      mem_next_commit && mem_next_ready;
+  assign mc_prime_v_accept = mc_prime_v_request && mem_pair_req_ready[1];
+  assign mem_pair_req_valid = {pipe_v_pair_request || mc_prime_v_request, 1'b0};
+  assign mem_pair_paddr = {mc_prime_v_request ? mc_prime_v_phys : pipe_v_pair_phys,
+                           32'd0};
+  assign mem_pair_owner = {mc_prime_v_request ? mc_query_pc[15:0] :
+                           pipe_commit_eip[15:0], 16'd0};
+`else
   assign mem_pair_req_valid = {pipe_v_pair_request, 1'b0};
   assign mem_pair_paddr = {pipe_v_pair_phys, 32'd0};
-  assign mem_pair_size_log2 = {2'd2, 2'd0};
   assign mem_pair_owner = {pipe_commit_eip[15:0], 16'd0};
+`endif
+  assign mem_pair_size_log2 = {2'd2, 2'd0};
   assign pipe_v_pair_rsp_good = pipe_mem_v_hit_q && mem_pair_rsp_valid[1] &&
       !mem_pair_rsp_cancel[1] &&
       (mem_pair_rsp_owner[1] == pipe_mem_eip_q[15:0]) &&
@@ -5014,6 +5053,19 @@ module core
   // While U is pending, hold the separately tagged V result until U commits.
   assign mem_pair_rsp_ready = {mem_pair_rsp_valid[1] &&
                                (!pipe_mem_v_hit_q || pipe_int_commit), 1'b0};
+`ifndef SYNTHESIS
+  always_ff @(posedge clk) if (rst_n && pipe_v_pair_accept) begin
+    if (!(pipe_new_load_req && !pipe_mem_active_q && !mem_ack &&
+          !pipe_mem_abort_now))
+      $fatal(1, "fresh V hit lacks an admitted registered U owner");
+  end
+`ifdef VEN_P54_DUAL_LOAD_PRIME
+  always_ff @(posedge clk) if (rst_n && mc_prime_v_accept) begin
+    if (!(mc_prime_accept && !pipe_mem_active_q && !pipe_new_mem_req))
+      $fatal(1, "primed V hit lacks a checked successor U owner");
+  end
+`endif
+`endif
 `else
   // Without the dual-load owner, decoding a V memory form is never a request.
   assign mem_pair_req_valid = '0;
@@ -5332,17 +5384,29 @@ module core
 `endif
   assign pipe_commit_eip = pipe_mem_active_q ? pipe_mem_eip_q : eip;
   // Physically separate U/V AGUs. U retains its established checked memory
-  // owner; V is presently consumed by LEA and is ready for a future translated
-  // V-memory lane without borrowing U's address adder.
+  // owner; V supplies LEA and the opt-in separately translated load lane.
   ven_p54_dual_agu u_dual_agu (
       .u(pipe_u_eff), .v(pipe_v_eff), .gpr(gpr_o),
       .u_ea(pipe_u_modrm_ea), .v_ea(pipe_v_modrm_ea));
+`ifdef VEN_P54_DUAL_LOAD_PRIME
+  ven_p54_dual_agu u_prime_v_agu (
+      .u(mc_query_u), .v(mc_query_v), .gpr(gpr_o),
+      .u_ea(), .v_ea(mc_prime_v_ea));
+`endif
 `ifdef VEN_P54_DUAL_HIT
   // Keep V's segment-base addition separate from U's cur_lin/fragment-engine
   // address. Reading the TLB is side-effect-free; the issue owner must still
   // prove the segment extent, PTE permissions, cache type and restart point.
   assign pipe_v_mem_lin = seg_base[pipe_v_eff.mem_ss ? SG_SS : SG_DS] +
                           pipe_v_modrm_ea;
+`ifdef VEN_P54_DUAL_LOAD_PRIME
+  // Select on the *preparation shape*, not the translated U offer. This
+  // prevents the U lookahead TLB result from feeding the V TLB input mux and
+  // lengthening the FPGA issue path through two serial TLB lookups.
+  assign v_dtlb_query_lin = mc_prime_base ? mc_prime_v_lin : pipe_v_mem_lin;
+`else
+  assign v_dtlb_query_lin = pipe_v_mem_lin;
+`endif
 `endif
 
   // `mem_ack` is the fragment-engine/FSM-visible acknowledgement, not the raw
@@ -6447,9 +6511,17 @@ module core
 `ifdef VEN_P54_DUAL_LOAD_PAIR
       // Only a fresh U capture can create a V owner. Completion, replacement,
       // and terminal states discard the speculative younger response.
-      if (pipe_v_pair_accept) begin
+      if (pipe_v_pair_accept
+`ifdef VEN_P54_DUAL_LOAD_PRIME
+          || mc_prime_v_accept
+`endif
+          ) begin
         pipe_mem_v_hit_q <= 1'b1;
-        pipe_mem_v_phys_q <= pipe_v_pair_phys;
+        pipe_mem_v_phys_q <=
+`ifdef VEN_P54_DUAL_LOAD_PRIME
+            mc_prime_v_accept ? mc_prime_v_phys :
+`endif
+            pipe_v_pair_phys;
       end else if ((pipe_mem_active_q && (state == S_PIPE) &&
                    !pipe_mem_abort_now && !xlate_miss && !fe_xlate_pend && mem_ack) ||
 `ifdef VEN_PIPE_REG_LOAD_PRIME
@@ -6495,7 +6567,12 @@ module core
         pipe_mem_we_q <= 1'b0; pipe_mem_wdata_q <= 32'd0;
         pipe_mem_ea_q <= mc_query_ea; pipe_mem_eip_q <= mc_query_pc;
         pipe_mem_seg_q <= mc_query_seg; pipe_mem_u_q <= mc_query_u;
-        pipe_mem_v_q <= mc_query_v; pipe_mem_pair_q <= mc_query_pair;
+        pipe_mem_v_q <= mc_query_v;
+        pipe_mem_pair_q <= mc_query_pair
+`ifdef VEN_P54_DUAL_LOAD_PRIME
+                           || mc_prime_v_accept
+`endif
+                           ;
 `endif
 `endif
       end else if (!pipe_mem_active_q && pipe_new_mem_req && !pipe_mem_abort_now &&
@@ -8617,7 +8694,7 @@ module core
       .next_perm(mc_lookup_perm), .next_dirty(mc_lookup_dirty),
 `endif
 `ifdef VEN_P54_DUAL_HIT
-      .pair_lin(pipe_v_mem_lin), .pair_hit(v_dtlb_lk_hit),
+      .pair_lin(v_dtlb_query_lin), .pair_hit(v_dtlb_lk_hit),
       .pair_phys(v_dtlb_lk_phys), .pair_perm(v_dtlb_lk_perm),
       .pair_dirty(v_dtlb_lk_dirty),
 `endif

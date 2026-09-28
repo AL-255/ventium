@@ -19,6 +19,9 @@
   logic [31:0] mc_query_phys, mc_lookup_phys;
   logic [2:0] mc_query_seg, mc_lookup_perm;
   logic mc_lookup_hit, mc_lookup_dirty, mc_query_pair, mc_query_pair_ok;
+`ifdef VEN_P54_DUAL_LOAD_PRIME
+  logic mc_query_pair_mem_ok;
+`endif
   logic [7:0] mc_older_writes;
   fpd_t mc_query_u, mc_query_v;
 
@@ -99,7 +102,11 @@
   assign mc_query_v = mc_descriptor(mc_query_vpc);
   issue_uv u_mc_issue (.iu(mc_query_u), .iv(mc_query_v), .pair_ok(mc_query_pair_ok)
 `ifdef VEN_P54_DUAL_LOAD_PAIR
+`ifdef VEN_P54_DUAL_LOAD_PRIME
+                      , .pair_mem_ok(mc_query_pair_mem_ok)
+`else
                       , .pair_mem_ok()
+`endif
 `endif
 `ifdef VEN_PERF_PROFILE
                       , .pair_reason()

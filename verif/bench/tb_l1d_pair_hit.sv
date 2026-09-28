@@ -15,6 +15,11 @@ module tb_l1d_pair_hit;
   logic [1:0] pair_rsp_cancel, pair_rsp_ready=2'b11;
   logic pair_bank_conflict;
   logic [7:0] dbg_serve;
+`ifdef VEN_PIPE_MEM_CHAIN
+  logic c_next_req=0, c_next_commit=0, c_next_cacheable=1, c_next_ready;
+  logic [31:0] c_next_addr=0;
+  logic [3:0] c_next_wstrb=4'hf;
+`endif
   logic m_req, m_we, m_ack, m_rd_narrow;
   logic [31:0] m_addr, m_wdata, m_rdata;
   logic [3:0] m_wstrb;
@@ -266,6 +271,59 @@ module tb_l1d_pair_hit;
     if (!c_ack || c_rdata!==word_at(32'h1000) || pair_rsp_valid!=0)
       $fatal(1,"same-bank V rejection disturbed U");
     @(posedge clk); @(negedge clk); c_req=0;
+`ifdef VEN_P54_DUAL_LOAD_PRIME
+    // A checked lookahead captures U without a live c_req. It may reserve
+    // U's bank and capture V on another bank only if commit is authorized.
+    legacy_read(32'h1024);
+    @(negedge clk); c_next_req=1; c_next_commit=0;
+    c_next_addr=32'h1000; pair_req_valid=2'b10;
+    pair_paddr[1]=32'h1024; pair_owner[1]=16'h7701;
+    #1;
+    if (!c_next_ready || pair_req_ready[1])
+      $fatal(1,"uncommitted lookahead admitted V");
+    c_next_commit=1;
+    expect_pair(2'b10);
+    @(posedge clk); @(negedge clk);
+    c_next_req=0; c_next_commit=0; pair_req_valid=0;
+    c_req=1; c_addr=32'h1000;
+    #1;
+    if (!c_ack || c_rdata!==word_at(32'h1000) ||
+        pair_rsp_valid!==2'b10 || pair_rsp_owner[1]!==16'h7701 ||
+        pair_rsp_data[1]!==word_at(32'h1024) || dut.window_valid_q)
+      $fatal(1,"primed U/V owner, data or mixed-window failure");
+    @(posedge clk); @(negedge clk); c_req=0;
+
+    legacy_read(32'h1024);
+    @(negedge clk); c_next_req=1; c_next_commit=1;
+    c_next_addr=32'h1000; pair_req_valid=2'b10;
+    pair_paddr[1]=32'h1020;
+    expect_pair(2'b00);
+    if (!c_next_ready || !pair_bank_conflict)
+      $fatal(1,"same-bank prime must leave U lookahead intact");
+    @(posedge clk); @(negedge clk);
+    c_next_req=0; c_next_commit=0; pair_req_valid=0;
+    c_req=1; c_addr=32'h1000;
+    #1;
+    if (!c_ack || c_rdata!==word_at(32'h1000) || pair_rsp_valid!=0)
+      $fatal(1,"same-bank prime disturbed U result");
+    @(posedge clk); @(negedge clk); c_req=0;
+
+    // A missing U tag or a simultaneous snoop cannot manufacture a V
+    // response from an otherwise resident younger address.
+    c_next_req=1; c_next_commit=1; c_next_addr=32'h3000;
+    pair_req_valid=2'b10; pair_paddr[1]=32'h1024;
+    #1;
+    if (c_next_ready || pair_req_ready[1])
+      $fatal(1,"missed prime admitted V");
+    @(posedge clk); @(negedge clk);
+    c_next_addr=32'h1000; snoop_inv_valid=1;
+    #1;
+    if (c_next_ready || pair_req_ready[1])
+      $fatal(1,"snooped prime admitted V");
+    @(posedge clk); @(negedge clk);
+    c_next_req=0; c_next_commit=0; pair_req_valid=0; snoop_inv_valid=0;
+    if (pair_rsp_valid!=0) $fatal(1,"rejected prime left a V owner");
+`endif
 `endif
 
     // A rejected request must neither touch the cache nor enqueue a response.

@@ -215,8 +215,27 @@ module ven_l1d #(
   // A new aligned U hit still uses the ordinary registered response window.
   // Its one word bank is reserved while the otherwise idle banks may capture
   // ONE younger V owner. Rejection leaves U's existing read path unchanged.
-  // Do not admit an instruction fill, next-read lookahead, or a held response.
+  // Do not admit an instruction fill, an unrelated next-read lookahead, or a
+  // held response. The separately checked prime path below is an exception.
   logic pair_legacy_capture;
+  logic [2:0] pair_reserved_bank;
+`ifdef VEN_P54_DUAL_LOAD_PRIME
+`ifndef VEN_PIPE_REG_LOAD_PRIME
+  initial $fatal(1, "dual-load prime needs registered load priming");
+`endif
+  // A branch/register predecessor can capture the next U from c_next_addr.
+  // The primed U owns its bank exactly like an ordinary fresh capture; only
+  // an independent V bank may be read on that edge. Do not open the pair port
+  // for a rejected speculative next lookup or an uncommitted predecessor.
+  logic pair_prime_capture;
+  assign pair_prime_capture = (pair_req_valid == 2'b10) && mc_lookup_prime &&
+      mc_capture_next && !golden && (c_next_wstrb == 4'hf) &&
+      (c_next_addr[1:0] == 2'd0) && (c_next_addr[4:0] <= 5'd28);
+  assign pair_reserved_bank = pair_prime_capture ? c_next_addr[4:2] : c_addr[4:2];
+`else
+  wire pair_prime_capture = 1'b0;
+  assign pair_reserved_bank = c_addr[4:2];
+`endif
   logic pair_arb_conflict;
   assign pair_legacy_capture = (pair_req_valid == 2'b10) &&
       c_req && !c_we && cacheable && !golden && !rd_armed &&
@@ -228,10 +247,13 @@ module ven_l1d #(
 `endif
       ;
   assign pair_bank_conflict = pair_arb_conflict ||
-      (pair_legacy_capture && pair_req_valid[1] && !pair_req_split[1] &&
-       pair_bank_mask[1][c_addr[4:2]]);
+      ((pair_legacy_capture || pair_prime_capture) && pair_req_valid[1] &&
+       !pair_req_split[1] &&
+       pair_bank_mask[1][pair_reserved_bank]);
 `else
   wire pair_legacy_capture = 1'b0;
+  wire pair_prime_capture = 1'b0;
+  wire [2:0] pair_reserved_bank = 3'd0;
 `endif
   // A registered legacy read response is served from rd_window_q, not from
   // the data-bank read ports. Admit a new pair on its consume edge, provided
@@ -246,11 +268,15 @@ module ven_l1d #(
   assign pair_legacy_overlap = c_req && !c_we && rd_match && c_ack && cacheable;
 `endif
   assign pair_lookup_active = (|pair_req_valid) && (st == L1_IDLE) &&
-      ((!c_req && !rd_armed) || pair_legacy_overlap || pair_legacy_capture) &&
-      !mc_lookup_next && !early_armed && !stream_path &&
+      (((!c_req && !rd_armed) && !mc_lookup_next) ||
+       (pair_legacy_overlap && !mc_lookup_next) || pair_legacy_capture ||
+       pair_prime_capture) &&
+      !early_armed && !stream_path &&
       !flush_all && !snoop_inv_valid && !golden;
   assign pair_bank_ready = pair_lookup_active ?
-      (pair_legacy_capture ? ~(8'b1 << c_addr[4:2]) : 8'hff) : 8'h00;
+      ((pair_legacy_capture || pair_prime_capture) ?
+       ~(8'b1 << pair_reserved_bank) :
+       8'hff) : 8'h00;
   for (genvar lane = 0; lane < 2; lane++) begin : g_pair_tags
     assign pair_set[lane] = pair_paddr[lane][OFFW +: IDXW];
     assign pair_tag[lane] = pair_paddr[lane][OFFW+IDXW +: TAGW];
@@ -1163,7 +1189,8 @@ module ven_l1d #(
 `ifdef VEN_FP_LOAD64
       if (do_rd_cap)
         rd_full_line_q <= (st == L1_IDLE) && hit && !fill_forward_hit && !stream_path &&
-                          !(pair_legacy_capture && pair_req_ready[1]);
+                          !((pair_legacy_capture || pair_prime_capture) &&
+                            pair_req_ready[1]);
       if (flush_all || snoop_inv_valid || golden || stream_path ||
           (c_req && (c_we || !cacheable)))
         rd_full_line_q <= 1'b0;
@@ -1171,7 +1198,8 @@ module ven_l1d #(
 `ifdef VEN_L1D_WINDOW_REUSE
       if (do_rd_cap)
         window_valid_q <= (st == L1_IDLE) && hit && !stream_path &&
-                          !(pair_legacy_capture && pair_req_ready[1]);
+                          !((pair_legacy_capture || pair_prime_capture) &&
+                            pair_req_ready[1]);
       // All window writers participate; invalidation wins over capture.
       if (flush_all || snoop_inv_valid || golden || stream_path ||
 `ifdef VEN_L1D_WINDOW_KEEP_STORE

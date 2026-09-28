@@ -89,8 +89,9 @@ alone cannot establish core-level V-memory retirement or any gameplay speedup.
 `VEN_P54_DUAL_HIT_LEGACY_CAPTURE` lane. It adds a separately translated,
 hit-only V request only for independent dword MOV loads while U is taking a
 fresh registered hit; same-bank, miss, MMIO, segment/page-fault and snoop
-cases retry V as the next U. The data banks retain one read per bank rather
-than replicating the whole L1 into multiple async-read copies. Run
+cases retry V as the next U. The V path adds no whole-cache async-read
+replica; the pre-existing next-line bank-zero read remains a separate FPGA
+mapping cost. Run
 `bash verif/bench/run-p54-dual-load-issue.sh` for decode/dependency cases,
 `bash verif/bench/run-p54-l1d-pair-hit.sh --legacy-capture-pair` and
 `bash verif/l1/run-l1axi-pair-hit-micro.sh --legacy-capture-pair` for cache
@@ -112,6 +113,25 @@ loop (**5→4**, directed IPC **1.00→1.25**), while same-bank case 29 remains
 the preceding branch primes U's capture one cycle early, so this fresh-U
 sideband opportunity is absent. These are directed measurements, not gameplay
 IPC or routed FPGA timing.
+
+`VEN_P54_DUAL_LOAD_PRIME` extends that opt-in owner to the existing checked
+register/branch successor lookahead. A separately computed V effective address
+uses the independent V D-TLB query; the L1 reserves primed U's word bank and
+captures a resident V from another bank only when U's speculative lookahead
+actually commits. The decoder rejects U/V register hazards and V addresses
+dependent on the predecessor. The new V path shares the existing per-bank
+read mux; it does not replicate the whole-cache async read array. The
+`--prime-pair` leaf
+mode checks accepted/rejected lookahead, bank conflict, data, owner and mixed
+window behavior. Cases 1/2 of `run-p54-dual-load-pair.py` compare both
+candidate and control against pinned QEMU full architectural state. Case 1's
+distinct-bank loop improves **4→2** cycles per four-instruction loop (directed
+IPC **1.00→2.00**); same-bank case 2 stays **4→4**. All 30 directed cases have
+matching candidate/control architectural traces, with no other cycle
+regressions; same-line resident loads also improve **3→2**. Terminal
+branch-direction reversal cases 26/27 match pinned QEMU full state and retain
+their prior cycle counts. This still needs FPGA routed area/frequency and
+gameplay verification before it can be promoted to a deployed profile.
 
 `VEN_PIPE_BRANCH_LOAD_PRIME` is an opt-in extension of the registered
 `VEN_PIPE_REG_LOAD_PRIME`/`VEN_PIPE_MEM_CHAIN` path. It may probe a
@@ -178,8 +198,8 @@ connection and cannot yet claim a gameplay IPC gain; see the same
 
 `run-p54-dual-agu.sh` checks both independently computed ModR/M/SIB effective
 addresses over 1,024 base/index/scale/enable/overflow combinations. The U/V
-AGUs are now connected to the existing U-memory and V-LEA paths, respectively;
-V-memory issue remains disabled pending a second checked request/translation
+At the dual-AGU extraction stage, the AGUs connected to U memory and V LEA;
+V-memory issue was still disabled pending a second checked request/translation
 and precise response owner. A same-flag full-core candidate (binary SHA-256
 `ce372ee06de445ad3c1ef951e74b7a73d8f8a2ef9efeeecd1c48f6e6c62ff05f`)
 matches its pre-AGU control in all 22 fixed-work architectural traces and
@@ -201,9 +221,9 @@ same edge that an older legacy read consumes its captured response; the
 ownership until its request leaves. `verif/l1/run-l1axi-pair-hit-micro.sh`
 checks six end-to-end wrapper cases, including per-lane memory-type rejection,
 U-before-V ordering, and flush cancellation. The sideband is wired through the
-top and L1/AXI wrapper, but the core deliberately drives request-valid low
-until D2/DTLB issue and retirement ownership are implemented. Thus these
-checks establish cache/protocol behavior only—not paired retirements,
+top and L1/AXI wrapper. The default core drives request-valid low; the
+opt-in checked dual-load configurations below consume lane 1. These leaf
+checks alone establish cache/protocol behavior—not paired retirements,
 architectural correctness, area, timing, or gameplay throughput. The active
 cache banks remain asynchronous distributed RAM; the separate synchronous
 eight-bank BRAM leaf is an FPGA organization experiment, not an integrated
@@ -217,12 +237,12 @@ see a mixed U/V line. `run-p54-l1d-pair-hit.sh --legacy-capture-pair` and
 `verif/l1/run-l1axi-pair-hit-micro.sh --legacy-capture-pair` cover accepted
 data/owner, same-bank rejection, window-reuse safety, and no extra AXI read;
 default and combinational-ACK controls remain unchanged. This removes a
-cache-port obstacle to core U/V memory issue but does not yet improve retired
-IPC: the core still ties its pair-request outputs low.
+cache-port obstacle to core U/V memory issue. The fresh-capture core consumer
+and its directed IPC/full-state evidence are described above.
 
-The opt-in full-core sideband build also matched the preceding dual-AGU build
+The initial, pre-consumer full-core sideband build also matched the preceding dual-AGU build
 in 14 pinned-QEMU memory-ALU full-state/cycle cases. Because the core does not
-yet issue sideband requests, that equality is a no-regression check, not an
+yet issue sideband requests, that historical equality was a no-regression check, not an
 IPC improvement or proof of V-memory retirement.
 The rebuilt post-overlap binary (`977ad608b74b12efcbe4108ed79f80fc04fc4499533e1257ffb150df9a135eb2`)
 also matched all 22 directed fixed-work candidate/control architectural traces

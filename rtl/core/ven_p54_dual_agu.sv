@@ -1,7 +1,7 @@
 `default_nettype none
 // Two independent 32-bit ModR/M/SIB effective-address generators. The U
-// address feeds the existing checked memory owner; the V address currently
-// feeds LEA and is also the address source for a future checked V memory lane.
+// address feeds the existing checked memory owner; the V address feeds LEA and
+// the optional checked V-memory lane (including a separate prime query).
 // Segment selection, limits, translation and stack-pointer special cases stay
 // with their architectural owners in core.sv. Neither EA is a memory request.
 module ven_p54_dual_agu
