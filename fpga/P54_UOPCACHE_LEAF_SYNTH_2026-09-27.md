@@ -44,3 +44,28 @@ timeout --signal=TERM --kill-after=15s 540s \
 
 Replace `base` with `crossline` and use a different output directory for the
 second row. Do not run the two Vivado instances concurrently.
+
+## Rejected true-dual-port storage trial
+
+A subsequent **temporary, discarded** `VEN_UOP_SHARED_BRAM` variant replaced
+the duplicate A/B descriptor arrays with one Xilinx true-dual-port array:
+port A remained readable; port B was a read port except on the walker's atomic
+publication edge, when it wrote the new line. A same-row A read and every B
+read on that edge were suppressed by registered validity guards. A new
+seven-check collision/port test, the 4,398-check repair test, and the 4/8-tail
+capacity tests passed under that variant. Vivado explicitly reported a
+“true dual port RAM template” for all three descriptor/map arrays.
+
+Nevertheless, the temporary variant in
+`/tmp/p54-uopcache-shared-r1/` mapped to **13,107 LUTs, 3,608 FFs, 74
+RAMB36 and 4 RAMB18**, with synthesis WNS +16.366 ns at the same 45 MHz
+constraint. Relative to the retained base, it used **1,123 more LUTs, 15
+more FFs and exactly the same BRAM count**. The two-read/one-write port
+schedule also makes the B result unavailable for one publication cycle. The
+temporary RTL and gate were therefore removed, not promoted or included in
+the production filelists. The preserved `/tmp` report is a diagnostic record,
+not a reproducible variant in the current source tree. The measured result is
+consistent with BRAM port-width/packing limits offsetting the removed logical
+copy; that explanation is an inference, not a demonstrated primitive-level
+proof. Future FPGA memory changes must show an actual mapped resource or
+throughput win before accepting new port conflicts.
