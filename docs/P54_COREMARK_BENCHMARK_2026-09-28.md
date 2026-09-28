@@ -39,16 +39,17 @@ synthetic time is 0.001 s, below its required 10 s. This is *not* an
 EEMBC-reportable score. Raw logs and QEMU-derived image are under
 `/home/yukidama/ventium-bg-sep28/coremark_candidate_ff0a803/`.
 
-A 1500-iteration run has been launched to exceed the 10-second guest-time
-threshold. Its measured result should replace the short-run estimate only
-after normal exit, expected CRC validation, and a check that the elapsed
-synthetic guest time is at least 10 seconds.
+Two 1500-iteration runs (performance and validation seeds) were launched to
+exceed the 10-second guest-time threshold, but were stopped before completion
+when work returned to the active IPC objective's 10-minute microbenchmark
+limit. They produced no valid score; the short-run figure above remains an
+estimate, not an EEMBC-reportable measurement.
 
 A short, independent validation-seed RTL run (`0x3415,0x3415,0x66`, 10
 iterations) also exited normally after 5,643,162 clocks; `crclist=e3c1`,
 `crcmatrix=0747`, `crcstate=8d84`, `crcfinal=c64e` all match pinned QEMU for
-the same 10 iterations. A 1500-iteration validation-seed run is proceeding
-concurrently. Neither short run satisfies the required duration by itself.
+the same 10 iterations. Neither short run satisfies the required duration by
+itself.
 
 Enabling `--l1-axi` for the QEMU Linux-user image is not valid in this TB:
 the guest stack starts at `0x407ff510`, outside the no-L2 DRAM routing
