@@ -175,6 +175,10 @@ package ventium_decode_pkg;
     logic        mem_index_en;
     logic [31:0] mem_disp;     // MOV r32,[base+index*scale+disp] displacement
     logic        is_nop;
+`ifdef VEN_FAST_XCHG_R
+    // One-byte XCHG eAX,r: two GPR destinations, U-only and two clocks.
+    logic        is_xchg_r;
+`endif
     logic        is_shift;
     // D3 /4../7 register shifts take their count from CL.  They are U-only
     // (P5 NP class) but share the exact same 32-bit shifter and flag rules as

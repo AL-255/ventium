@@ -82,6 +82,9 @@ CASES = {
     "store_load_spaced_distinct": (BASE, 60),
     "store_load_spaced_same_bank": (BASE, 61),
     "store_load_spaced_alias": (BASE, 62),
+    "xchg_eax_edi": (BASE, 63),
+    "xchg_eax_ecx": (BASE, 64),
+    "xchg_eax_esp": (BASE, 65),
 }
 
 
@@ -279,8 +282,12 @@ def main():
                 row = results["load_store_spaced_distinct"]
                 assert row["candidate"]["mixed_pairs"] >= args.iterations - 2, \
                     "spaced mixed pair did not issue on warmed iterations"
-                assert row["candidate"]["clocks"] < row["control"]["clocks"], \
-                    "spaced mixed pair did not save fixed-work clocks"
+                # Another A/B experiment may use two binaries that already
+                # enable this mixed-pair feature. Require a speedup only when
+                # candidate actually adds pairs relative to its control.
+                if row["candidate"]["mixed_pairs"] > row["control"]["mixed_pairs"]:
+                    assert row["candidate"]["clocks"] < row["control"]["clocks"], \
+                        "spaced mixed pair did not save fixed-work clocks"
             for rejected in ("load_store_same_bank", "load_store_dependent_reject",
                              "load_store_spaced_same_bank"):
                 if rejected in results:

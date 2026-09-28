@@ -856,6 +856,18 @@
           // a stale decode into a GPR write.
           else if (pipe_int_commit) begin
             // ---- U commit ----
+`ifdef VEN_FAST_XCHG_R
+            if (pipe_u_eff.is_xchg_r) begin
+              // Both values are from the pre-edge GPR file. A paired V is
+              // forbidden by the descriptor's NP classification.
+              gpr_we[R_EAX]=1'b1;
+              gpr_wd[R_EAX]=reg_merge(gpr_o[R_EAX], gpr_o[pipe_u_eff.src],
+                                      fp_operand_width(pipe_u_eff), 1'b0);
+              gpr_we[pipe_u_eff.src]=1'b1;
+              gpr_wd[pipe_u_eff.src]=reg_merge(gpr_o[pipe_u_eff.src], gpr_o[R_EAX],
+                                               fp_operand_width(pipe_u_eff), 1'b0);
+            end else
+`endif
             if (pipe_u_eff.is_lea) begin
               gpr_we[pipe_u_eff.dst]=1'b1; gpr_wd[pipe_u_eff.dst]=pipe_load_addr;
             end else if (pipe_u_eff.is_stack) begin

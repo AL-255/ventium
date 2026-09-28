@@ -1011,49 +1011,49 @@
   "91": {
    "mnem": "XCHG eAX, eCX",
    "status": "implemented",
-   "detail": "K_XCHG with dst=EAX, src=op0[2:0]=ECX (wildcard 8'b1001_0???).",
+   "detail": "K_XCHG with dst=EAX, src=op0[2:0]=ECX; optional VEN_FAST_XCHG_R maps the unprefixed register form to a non-pairable two-clock fast U exchange.",
    "evidence": "core.sv:1942-1944",
    "desc": "Exchange Register/Memory with Register"
   },
   "92": {
    "mnem": "XCHG eAX, eDX",
    "status": "implemented",
-   "detail": "K_XCHG dst=EAX src=EDX.",
+   "detail": "K_XCHG dst=EAX src=EDX; optional VEN_FAST_XCHG_R uses the two-clock fast U exchange.",
    "evidence": "core.sv:1942-1944",
    "desc": "Exchange Register/Memory with Register"
   },
   "93": {
    "mnem": "XCHG eAX, eBX",
    "status": "implemented",
-   "detail": "K_XCHG dst=EAX src=EBX.",
+   "detail": "K_XCHG dst=EAX src=EBX; optional VEN_FAST_XCHG_R uses the two-clock fast U exchange.",
    "evidence": "core.sv:1942-1944",
    "desc": "Exchange Register/Memory with Register"
   },
   "94": {
    "mnem": "XCHG eAX, eSP",
    "status": "implemented",
-   "detail": "K_XCHG dst=EAX src=ESP.",
+   "detail": "K_XCHG dst=EAX src=ESP; optional VEN_FAST_XCHG_R uses the two-clock fast U exchange.",
    "evidence": "core.sv:1942-1944",
    "desc": "Exchange Register/Memory with Register"
   },
   "95": {
    "mnem": "XCHG eAX, eBP",
    "status": "implemented",
-   "detail": "K_XCHG dst=EAX src=EBP.",
+   "detail": "K_XCHG dst=EAX src=EBP; optional VEN_FAST_XCHG_R uses the two-clock fast U exchange.",
    "evidence": "core.sv:1942-1944",
    "desc": "Exchange Register/Memory with Register"
   },
   "96": {
    "mnem": "XCHG eAX, eSI",
    "status": "implemented",
-   "detail": "K_XCHG dst=EAX src=ESI.",
+   "detail": "K_XCHG dst=EAX src=ESI; optional VEN_FAST_XCHG_R uses the two-clock fast U exchange.",
    "evidence": "core.sv:1942-1944",
    "desc": "Exchange Register/Memory with Register"
   },
   "97": {
    "mnem": "XCHG eAX, eDI",
    "status": "implemented",
-   "detail": "K_XCHG dst=EAX src=EDI.",
+   "detail": "K_XCHG dst=EAX src=EDI; optional VEN_FAST_XCHG_R uses the two-clock fast U exchange.",
    "evidence": "core.sv:1942-1944",
    "desc": "Exchange Register/Memory with Register"
   },

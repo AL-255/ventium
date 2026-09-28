@@ -639,6 +639,15 @@
             // to the gpr writeback driver (core_gpr_wb.svh, S_PIPE ISSUE arm). The
             // AGI write-tracking (w0/w1), the D-cache penalty, and the flag commits
             // stay here.
+`ifdef VEN_FAST_XCHG_R
+            if (pipe_u_eff.is_xchg_r) begin
+              w0={6'd0,R_EAX};
+              w1={6'd0,pipe_u_eff.src};
+              // Appendix F gives two clocks and NP. Commit the exchange on
+              // this edge, then reserve the second U execution clock.
+              if (cycle_mode) stall_cnt<=7'd1;
+            end else
+`endif
             if (pipe_u_eff.is_lea) begin
               if (pipe_u_eff.dst!=R_ESP) w0={6'd0,pipe_u_eff.dst};
             end else if (pipe_u_eff.is_mem) begin

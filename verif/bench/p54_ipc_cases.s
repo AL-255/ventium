@@ -407,6 +407,23 @@ mixed_v:
     movl (%esi), %eax
 .endif
     imull %ebx, %ebx
+.elseif CASE == 63 || CASE == 64 || CASE == 65
+    # Register exchange is NP/two clocks on P54. Two exchanges restore both
+    # registers so the loop count and final architectural state stay stable;
+    # the variant changes only which real GPR pair is exercised.
+.if CASE == 63
+    xchgl %eax, %edi
+    xchgl %eax, %edi
+.elseif CASE == 64
+    xchgl %eax, %ecx
+    xchgl %eax, %ecx
+.else
+    # ESP is a second architectural destination, not just an AGU input.
+    # Keep the stack invalid only between two adjacent atomic exchanges.
+    xchgl %eax, %esp
+    xchgl %eax, %esp
+.endif
+    incl %ebx
 .else
     .error "unsupported CASE"
 .endif

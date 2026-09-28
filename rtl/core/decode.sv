@@ -763,6 +763,17 @@ module decode
           d.simple=1'b1; d.is_nop=1'b1; d.len=4'd1;
           d.pairs_first=1'b1; d.pairs_second=1'b1;
         end
+`ifdef VEN_FAST_XCHG_R
+        8'h91, 8'h92, 8'h93, 8'h94, 8'h95, 8'h96, 8'h97: begin
+          // P54 Appendix F: XCHG eAX,r is NP, two clocks. The two old
+          // register values are captured by the single ordered U commit;
+          // no flags or memory transaction is involved.
+          d.simple=1'b1; d.is_xchg_r=1'b1; d.len=4'd1;
+          d.dst=R_EAX; d.src=b0[2:0]; d.wreg=1'b1;
+          d.reads=_onehot(R_EAX)|_onehot(b0[2:0]);
+          d.writes=d.reads;
+        end
+`endif
         // ---- MOV EAX,moffs32 (A1): checked absolute DS load -----------------
         // A1 is the compact five-byte global-load form emitted heavily by
         // non-PIC 32-bit code.  It is semantically the same read contract as
