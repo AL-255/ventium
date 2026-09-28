@@ -490,8 +490,10 @@ gate, including full pinned-QEMU x87/integer architectural comparisons and
 required sustained cycle hiding for FADD, FMUL, FDIV and FSQRT against their
 FWAIT-serialized controls. Artifacts:
 `/home/yukidama/ventium-background-sep28.B3cxzoKA/tmpbuild/ventium-fp-integer-overlap.rp14gfan/`.
-This supersedes the preliminary underconfigured profile's failed FP gate;
-neither result measures gameplay.
+The six-case busy-FP branch/Jcc overlap extension also passed with QEMU
+architectural comparisons (`tmpbuild/ventium-fp-integer-overlap.mhm1a9dz/`
+under the same artifact root). This supersedes the preliminary
+underconfigured profile's failed FP gate; neither result measures gameplay.
 The current-source matched control binary SHA-256 is
 `5fb608a1cf8ca51a9d8cd80c57110f2f2c1fc7fee9d64585b0d639c1310d20d8`;
 the corrected candidate is
