@@ -8683,8 +8683,19 @@ module core
   // and debug-tool geometry cannot silently change a normal verification or
   // FPGA build.  Keep the u_dtlb instance name in every configuration: FPGA
   // report scripts and state-crossover tooling locate it by hierarchy.
+`ifdef VEN_DTLB_P54_LARGE
+`ifndef VEN_DTLB_ASSOC_4WAY
+  initial $fatal(1, "VEN_DTLB_P54_LARGE requires VEN_DTLB_ASSOC_4WAY");
+`endif
+`endif
 `ifdef VEN_DTLB_ASSOC_4WAY
-  tlb_assoc #(.IS_D(1'b1), .TLB_SETS(16), .TLB_WAYS(4)) u_dtlb (
+  tlb_assoc #(.IS_D(1'b1), .TLB_SETS(16), .TLB_WAYS(4),
+`ifdef VEN_DTLB_P54_LARGE
+              .P54_LARGE(1'b1)
+`else
+              .P54_LARGE(1'b0)
+`endif
+              ) u_dtlb (
 `elsif VEN_DTLB_ASSOC_2WAY
   tlb_assoc #(.IS_D(1'b1), .TLB_SETS(16), .TLB_WAYS(2)) u_dtlb (
 `else

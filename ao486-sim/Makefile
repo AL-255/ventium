@@ -181,6 +181,19 @@ ven-ipc:
 	  -f rtl_ven_core.f -f rtl_ven_soc.f $(VEN_SRCS)
 	@echo "built IPC candidate: $(REPO)/ao486-sim/obj_dir_ven_ipc/ao486sim_ven_ipc"
 
+# A separate P54 D-TLB geometry experiment; leave the running 2-way IPC
+# candidate and its cold-boot identity untouched until full-PC qualification.
+VEN_IPC_P54_TLB_DEFS := $(filter-out +define+VEN_DTLB_ASSOC_2WAY,$(VEN_GAMEPLAY_229C_DEFS)) \
+  $(VEN_IPC_DEFS) +define+VEN_DTLB_ASSOC_4WAY +define+VEN_DTLB_P54_LARGE
+.PHONY: ven-ipc-p54-tlb
+ven-ipc-p54-tlb:
+	cd $(REPO) && $(VERILATOR) $(VFLAGS) \
+	  -LDFLAGS "-lz" \
+	  -Mdir ao486-sim/obj_dir_ven_ipc_p54_tlb -o ao486sim_ven_ipc_p54_tlb \
+	  $(VEN_IPC_P54_TLB_DEFS) \
+	  -f rtl_ven_core.f -f rtl_ven_soc.f $(VEN_SRCS)
+	@echo "built opt-in P54 D-TLB IPC experiment: $(REPO)/ao486-sim/obj_dir_ven_ipc_p54_tlb/ao486sim_ven_ipc_p54_tlb"
+
 run: all
 	$(REPO)/$(OBJDIR)/$(EXE) --cycles 400000
 

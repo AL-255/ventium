@@ -306,7 +306,32 @@ pre-fill visibility, three independently addressed query payloads, same-set
 way selection, large-page offset, and flush. This is only a side-effect-free
 read port; it does not yet authorize V issue, suppress faults, or implement a
 second page walker.
-The corresponding opt-in full-core build also matched all 22 fixed-work
+The opt-in `VEN_DTLB_ASSOC_4WAY` plus `VEN_DTLB_P54_LARGE` configuration adds
+the manual's separate eight-entry, two-set/four-way 4 MiB data-TLB bank beside
+the 64-entry, four-way 4 KiB bank. It matches large pages by their 10-bit
+page number, retains three independent lookup ports, refills a dirty/matching
+tag in place, and invalidates both banks on flush. The established 2-way and
+4-way behavior remains unchanged without the new option. `run-tlb-p54-large-micro.sh`
+passes 28 focused lookup/allocation/priority/flush checks; the old 2-way and
+4-way associative gates also pass. The bounded full-core
+`run-p54-large-dtlb-micro.sh CONTROL_TB CANDIDATE_TB` fixture traverses eight
+4 KiB offsets within one identity-mapped PSE page. Against the same-source
+measured-profile IPC build with the 2-way D-TLB, the opt-in four-way-plus-large
+build completes the same **1,188 warm instructions** in **6,097→4,663**
+clocks (**61.586→47.101** clocks/iteration). All **3,477** system-mode
+architectural records match pinned QEMU and the A/B traces are equivalent.
+Artifacts: `/home/yukidama/ventium-background-sep28.B3cxzoKA/tmpbuild/ventium-p54-large-dtlb-core.kZTduQ/`.
+This is a deliberately adversarial TLB microbenchmark, not measured gameplay
+IPC or an FPGA area/timing result. The I-TLB and replacement policy are not
+yet fully P54-faithful; do not promote the option solely from this fixture.
+`make -C ao486-sim ven-ipc-p54-tlb` builds this option in a separate full-PC
+object directory without changing the running two-way candidate. Its first
+bounded build completed (SHA-256
+`02826908c7d2976f6200a06ab0d078b1a607aaffccfb0ac44e5dc701758aeb2d`);
+it has not cold-booted Win95 or Quake. The exact 97-define whole-core microbench
+configuration also passed structural lint with the specified hard-error
+classes. Both new source-level scripts are bounded below ten minutes per run.
+The earlier pair-port-only opt-in full-core build also matched all 22 fixed-work
 candidate/control traces and exact cycle counts (`/tmp/p54-pair-dtlb-core-micro-r1/`),
 as expected while V sideband admission remains disabled.
 

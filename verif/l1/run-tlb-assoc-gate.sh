@@ -4,7 +4,7 @@
 # 16-set x 4-way instances; the normal direct-map TLB gate remains separate.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-OBJ="$(mktemp -d)"; trap 'rm -rf "$OBJ"' EXIT
+OBJ="$(mktemp -d "${TMPDIR:-/tmp}/ventium-tlb-assoc.XXXXXX")"; trap 'rm -rf "$OBJ"' EXIT
 
 for ways in 2 4; do
     exe="tb_tlb_assoc_${ways}way"
