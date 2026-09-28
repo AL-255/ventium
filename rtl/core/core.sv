@@ -4529,11 +4529,15 @@ module core
   localparam bit UC_POSTPUBLISH_EXT = (UC_TAIL_SLOTS > 4);
 `endif
 `ifdef VEN_UOP_TAIL_LOCAL
-  // Experimental only: a complete descriptor near the physical I-cache-line
-  // tail may be predecoded from its actual local span instead of requiring an
-  // unrelated fixed-window suffix in the following line. The leaf-level miter
-  // proves that relaxation; keep this default-off until a whole-core lockstep
-  // and profile establish both correctness and a measurable benefit.
+  // A complete descriptor near the physical I-cache-line tail is mapped from
+  // its actual local span, without requiring unrelated successor-line bytes.
+  localparam bit UC_TAIL_LOCAL = 1'b1;
+`elsif VEN_UOP_CROSSLINE
+  // Cross-line repair also needs exact local-tail coverage. Without it, an
+  // executable instruction at offset 27..31 can repeatedly request a futile
+  // legacy-window repair and monopolize W_SEEK ahead of a hot crossing
+  // instruction. The cross-line mode therefore implies the already-gated
+  // local-tail predicate, even when its separate opt-in define was omitted.
   localparam bit UC_TAIL_LOCAL = 1'b1;
 `else
   localparam bit UC_TAIL_LOCAL = 1'b0;

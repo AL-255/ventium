@@ -33,6 +33,32 @@ chain flags, because that mechanism requires the uop cache. These are fixed
 synthetic loops, not gameplay IPC, and the cross-line options remain
 default-off pending FPGA/resource and broader fault/SMC qualification.
 
+The September 28 combined-profile check found a necessary interaction:
+`VEN_UOP_CROSSLINE` now implies exact local-tail mapping in `core.sv`. Without
+that mapping, a valid instruction at byte 27 could repeatedly launch a futile
+legacy-window repair, occupying the sole repair walker before a hot byte-31
+crossing instruction. The pre-fix combined build matched QEMU state but never
+fast-retired the crossing in the three-phase writable-code test. The implied
+tail profile passes `run-crossline-smc.py` (QEMU state, descriptor hit and fast
+retirement after changes to either source line) and the six exact-tail core
+witnesses. No workload address is special-cased.
+
+With the two-window L1 profile as control, the opt-in cross-line profile's
+30-case fixed-work matrix keeps every architectural trace identical and changes
+the four-instruction line-straddle loop from **7 to 2 cycles**; the aligned
+loop stays at 2. A two-entry cross-line record and a 33-entry indexed record
+both achieve **5,394 instructions in 5,394 cycles** on the separate two-seam
+test. The indexed record helps a synthetic 12-seam pressure test further:
+**11,821 to 8,955 cycles** for the same 3,582 warm instructions versus the
+two-entry record, with QEMU-equivalent retirement groups. The indexed payload
+alone is 6,720 logical bits plus metadata and has no routed FPGA area/timing
+result; do not assume the 12-seam gain justifies it on silicon. These numbers
+are directed microbenchmarks, not verified gameplay IPC or full qualification.
+The canonical cross-page fetch gate remains blocked by the pinned free-running
+QEMU's known two-page TB-bookkeeping defect; an isolated corrected-QEMU
+diagnostic matched 1,601 stepped groups and observed the expected fault/retry,
+but deliberately does not count as a canonical pass.
+
 For a full-core microbenchmark binary on a 32-core host, the separately named
 `ipc_parallel32` scope permits at most 32 C++ compiler jobs with 3,000-statement
 generated-C++ splitting and a fixed 16 GiB cgroup limit. The ordinary build
