@@ -41,11 +41,11 @@ rg -q 'guest exited, code=0' "$out/qemu.log" || {
 }
 for name in control candidate; do
   if [[ "$name" == control ]]; then binary="$control"; else binary="$candidate"; fi
-  run "$binary" --cycle --system --image "$out/test.bin" \
+  run "$binary" --cycle --system --l1-axi --image "$out/test.bin" \
     --out "$out/$name.vtrace" --max-insn "$max_insn" \
     --max-cycles "$max_cycles" --quiesce 400 > "$out/$name.log" 2>&1
 done
-run "$candidate" --system --image "$out/test.bin" \
+run "$candidate" --system --l1-axi --image "$out/test.bin" \
   --out "$out/candidate.func.vtrace" --max-insn "$max_insn" \
   --max-cycles "$max_cycles" --quiesce 400 > "$out/candidate.func.log" 2>&1
 run python3 "$root/verif/diff/compare_stream.py" \
