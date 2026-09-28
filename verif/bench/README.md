@@ -157,6 +157,13 @@ family took 9,570 control versus 8,525 candidate cycles for 2,090
 instructions, with full-state equality at 2,441 compared QEMU groups. These
 are **not** gameplay IPC or a reason to promote the flag without full-system
 and FPGA-timing qualification.
+An exhaustive decoder-leaf gate (`verif/issue_uv/run-alu-memory-decode-gate.sh`)
+also passes 1,835,008 descriptor comparisons across opcode, ModR/M, SIB,
+default-size and cycle-mode combinations; 602,112 are admitted memory forms,
+including 28,224 seven-byte forms. It checks operand/address metadata against
+the ADD packet and rejects unsafe admitted descriptors. This optional
+ADD7/MOV7 leaf profile is broader than the production flag set, not a whole-core
+correctness or timing claim.
 
 The split-page protected-mode fault/retry gate (`run-alu-memory-fault.py`)
 also passed all 14 operator/carry cases for both matched binaries in two
