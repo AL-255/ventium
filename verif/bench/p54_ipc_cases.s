@@ -579,6 +579,34 @@ mixed_u:
 mixed_v:
     addl 4(%esi), %edx
     movl %edx, %edi
+.elseif CASE == 93
+    # The final byte of a line is a complete byte request; the checked V
+    # owner must not fetch a dword across the line. High-byte destination and
+    # nonpairable consumer make the saved issue clock visible.
+mixed_u:
+    movl %ebx, %eax
+mixed_v:
+    movb 31(%esi), %dh
+    imull $3, %edx, %edi
+.elseif CASE == 94
+    # Sequential pre-read of a low-lane byte into a high-byte register. The
+    # old load-use path may reclaim this pair, so this is a correctness case,
+    # not a required throughput speedup.
+    movl %eax, %ebx
+mixed_u:
+    movl %ebx, %eax
+mixed_v:
+    movb 1(%esi), %dh
+    movl %edx, %edi
+.elseif CASE == 95
+    # The byte result feeds a nonpairable multiply. This prevents the old
+    # U-byte-load/load-use path from reclaiming the same issue group.
+    movl %eax, %ebx
+mixed_u:
+    movl %ebx, %eax
+mixed_v:
+    movb 1(%esi), %dh
+    imull $3, %edx, %edi
 .else
     .error "unsupported CASE"
 .endif
@@ -617,7 +645,12 @@ arena:
 .else
     .long 0x10203040
 .endif
+.if CASE == 93
+    .space 27
+    .byte 0x6d
+.else
     .space 28
+.endif
 .if CASE == 27
     .long 1
 .else

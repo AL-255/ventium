@@ -5183,7 +5183,13 @@ module core
 `ifdef VEN_P54_DUAL_BYTE_LOAD_PAIR
   // The fresh and predecessor-prime owners use different decode slots. Size
   // must follow the address/owner mux above, never a newer live V decode.
-  assign mem_pair_size_log2 = {(mc_prime_v_request ? mc_query_v.w8 :
+  // A register-U/V-memory pre-read also uses mc_query_v; requesting a dword
+  // for its byte MOV could cross a checked line edge.
+  assign mem_pair_size_log2 = {((mc_prime_v_request
+`ifdef VEN_P54_REGMEM_PRIME
+                                 || regmem_prime_v_request
+`endif
+                                ) ? mc_query_v.w8 :
                                 pipe_v_pair_request && pipe_v_eff.w8)
                                 ? 2'd0 : 2'd2, 2'd0};
 `else

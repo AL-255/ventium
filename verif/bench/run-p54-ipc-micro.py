@@ -112,6 +112,9 @@ CASES = {
     "regmem_prime_alu_sequential": (BASE, 90),
     "regmem_prime_alu_prev_addr_reject": (BASE, 91),
     "regmem_prime_alu_seq_dependent": (BASE, 92),
+    "regmem_prime_byte_mov_edge": (BASE, 93),
+    "regmem_prime_byte_mov_high": (BASE, 94),
+    "regmem_prime_byte_mov_mul": (BASE, 95),
 }
 
 
@@ -335,7 +338,9 @@ def main():
                         "spaced mixed pair did not save fixed-work clocks"
             for accelerated in ("regmem_prime_alu_v",
                                 "regmem_prime_alu_after_store",
-                                "regmem_prime_alu_seq_dependent"):
+                                "regmem_prime_alu_seq_dependent",
+                                "regmem_prime_byte_mov_edge",
+                                "regmem_prime_byte_mov_mul"):
                 if accelerated in results:
                     row = results[accelerated]
                     if row["candidate"]["mixed_pairs"] > row["control"]["mixed_pairs"]:

@@ -126,7 +126,9 @@ module issue_uv
   // owner-tagged resident response has already been captured. This predicate
   // checks instruction classes and dependencies; core.sv proves that response.
   // The V ALU read uses the same checked D2 response as the existing dual-read
-  // pair; the V datapath consumes it only on the ordered commit edge.
+  // pair; the V datapath consumes it only on the ordered commit edge. Byte MOV
+  // loads require the byte-capable owner/return path, including its exact
+  // size and lane extraction. Byte ALU and 16-bit forms remain ordinary.
   always_comb pair_regmem_ok = fp_can_pair(iu, iv, 1'b1) &&
       !iu.is_mem && !iu.is_store && !iu.is_stack && !iu.is_fp &&
       !iu.is_branch && !iu.is_shift && !iu.w16 &&
@@ -135,7 +137,13 @@ module issue_uv
 `ifdef VEN_P54_DUAL_READ_ALU_PAIR
        || (!iv.is_load && !iv.mem_lhs && iv.wflags)
 `endif
-       ) && !iv.w8 && !iv.w16 &&
+       ) &&
+`ifndef VEN_P54_DUAL_BYTE_LOAD_PAIR
+      !iv.w8 &&
+`else
+      (!iv.w8 || iv.is_load) &&
+`endif
+      !iv.w16 &&
       ((iv.addr_mask & iu.writes) == 8'd0);
 `endif
 `ifdef VEN_P54_DUAL_STORE_PAIR

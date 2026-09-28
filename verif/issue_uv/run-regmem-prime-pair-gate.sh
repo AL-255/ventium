@@ -6,7 +6,8 @@ OUTDIR="${OUTDIR:-$(mktemp -d "$ROOT/tmp/regmem-prime-pair.XXXXXX")}"
 mkdir -p "$OUTDIR"
 timeout 180s verilator --binary --timing -j 2 -sv -Wno-fatal \
   --top-module tb_regmem_prime_pair \
-  +define+VEN_P54_DUAL_LOAD_PAIR +define+VEN_P54_DUAL_READ_ALU_PAIR \
+  +define+VEN_P54_DUAL_LOAD_PAIR +define+VEN_P54_DUAL_BYTE_LOAD_PAIR \
+  +define+VEN_P54_DUAL_READ_ALU_PAIR \
   +define+VEN_P54_REGMEM_PRIME \
   --Mdir "$OUTDIR/obj" \
   "$ROOT/rtl/core/ventium_decode_pkg.sv" \

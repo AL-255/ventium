@@ -61,11 +61,31 @@ module tb_regmem_prime_pair;
     v.mem_lhs = 1'b0;
     v.w8 = 1'b1;
     #1;
-    assert (!pair_regmem_ok) else $fatal(1, "byte ALU read used dword owner");
+    assert (!pair_regmem_ok) else $fatal(1, "byte ALU read used MOV-only owner");
     v.w8 = 1'b0;
+    v.w16 = 1'b1;
+    #1;
+    assert (!pair_regmem_ok) else $fatal(1, "word ALU read used byte/dword owner");
+    v.w16 = 1'b0;
     v.addr_mask = 8'h01;          // speculative EA depends on U EAX
     #1;
     assert (!pair_regmem_ok) else $fatal(1, "dependent ALU address paired");
+`endif
+`ifdef VEN_P54_DUAL_BYTE_LOAD_PAIR
+    v.addr_mask = 8'h40;
+    v.reads = 8'd0;
+    v.wflags = 1'b0;
+    v.is_load = 1'b1;
+    v.w8 = 1'b1;
+    #1;
+    assert (pair_regmem_ok) else $fatal(1, "independent byte MOV rejected");
+    v.addr_mask = 8'h01;
+    #1;
+    assert (!pair_regmem_ok) else $fatal(1, "dependent byte MOV address paired");
+    v.addr_mask = 8'h40;
+    v.w16 = 1'b1;
+    #1;
+    assert (!pair_regmem_ok) else $fatal(1, "word MOV used byte owner");
 `endif
     $display("REGMEM-PAIR-CLASS-OK");
     $finish;
