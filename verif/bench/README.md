@@ -485,6 +485,13 @@ The separate matched-source code/data set-collision witness took **135→113**
 cycles per fixed eight-instruction loop, with identical architectural traces
 (`/tmp/p54-code-data-collision-qx_p4r2w/`). This synthetic collision workload
 is not representative gameplay IPC.
+The corrected candidate also passed the 12-case `run-fp-integer-overlap.py`
+gate, including full pinned-QEMU x87/integer architectural comparisons and
+required sustained cycle hiding for FADD, FMUL, FDIV and FSQRT against their
+FWAIT-serialized controls. Artifacts:
+`/home/yukidama/ventium-background-sep28.B3cxzoKA/tmpbuild/ventium-fp-integer-overlap.rp14gfan/`.
+This supersedes the preliminary underconfigured profile's failed FP gate;
+neither result measures gameplay.
 The current-source matched control binary SHA-256 is
 `5fb608a1cf8ca51a9d8cd80c57110f2f2c1fc7fee9d64585b0d639c1310d20d8`;
 the corrected candidate is
