@@ -162,14 +162,16 @@ ven-gameplay-base:
 	  -f rtl_ven_core.f -f rtl_ven_soc.f $(VEN_SRCS)
 	@echo "built matched-source gameplay base: $(REPO)/ao486-sim/obj_dir_ven_gameplay_base/ao486sim_ven_gameplay_base"
 
-# IPC development candidate: the exact measured gameplay profile plus only
-# these new structural cache/dual-load options. Native snapshots of the older
-# binary are incompatible; qualification must cold-boot private disk copies.
+# IPC development candidate: the exact measured gameplay profile plus the
+# staged cache, pairing, and short slow-decode improvements below. Native
+# snapshots of the older binary are incompatible; qualification must cold-boot
+# private disk copies.
 # This does not change `ven` or claim the new options are FPGA-routed.
 VEN_IPC_DEFS := +define+VEN_L1D_BANKED_DATA +define+VEN_L1D_BANK0_SHARED_XLINE \
   +define+VEN_AXI_READ_ON_FINAL_B \
   +define+VEN_L1D_CODE_BUFFER +define+VEN_L1D_CODE_STREAM \
   +define+VEN_L1D_TWO_WINDOW_REUSE +define+VEN_P54_DUAL_HIT \
+  +define+VEN_UOP_SLOW_LEN_HINT \
   +define+VEN_P54_DUAL_HIT_LEGACY_CAPTURE +define+VEN_P54_DUAL_LOAD_PAIR \
   +define+VEN_P54_DUAL_READ_ALU_PAIR \
   +define+VEN_P54_DUAL_STORE_PAIR \
