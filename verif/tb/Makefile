@@ -75,6 +75,12 @@ VL_EXTRA_DEFINES ?=
 ifneq ($(filter +define+VEN_DBG_CORE,$(VL_EXTRA_DEFINES)),)
 VL_CFLAGS += -DVEN_DBG_CORE
 endif
+# The KV260 RTL remaps AXI addresses into the PS DDR carveout. The behavioral
+# slave must subtract the same base; without this C++ define it reads zeros and
+# the CPU executes a false zero-filled instruction stream from its entry PC.
+ifneq ($(filter +define+VEN_KV260_SOC,$(VL_EXTRA_DEFINES)),)
+VL_CFLAGS += -DVEN_KV260_SOC
+endif
 # The reset-only checkpoint ports are generated only for this profiler build;
 # make the C++ driver see the exact same compile-time configuration.
 ifneq ($(filter +define+VEN_SNAPSHOT_RESTORE,$(VL_EXTRA_DEFINES)),)
