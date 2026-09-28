@@ -57,3 +57,28 @@ directed regression. This is still neither a gameplay measurement nor a
 general P54 timing claim. Log:
 `/tmp/p54-sdecode-memalu-ab-r1.log`; artifacts:
 `tmp/build-tmp/ventium-alu-memory-ab.hsrlpihk/`.
+
+The 22-case 32-job cache/front-end/resource sweep also completed after a
+host-only correction: the single-threaded Verilated model now requests one
+runtime thread instead of silently creating a 32-thread pool per simulator.
+The named build scope retained its **16 GiB memory and 128-task limits**; the
+first attempts hit `pids.max` (with `oom=0`), while the corrected run passed
+with all candidate/control architectural traces equal. The diagnostic runner
+now prints exact cgroup pressure if thread creation ever fails again. This
+change affects only simulator concurrency, not RTL clocks or architectural
+behavior. Corrected binary SHA-256s are
+`2be07098f7ba1067d49171296f5d639dd7e7e6482a1e47563e95e13346d0ee4e`
+(slow-decode control) and
+`f537374a3ca27d3ba0a7cfeb306b09d043e408a4c13c612e1499d8a1e026`
+(slow-decode plus memory-ALU); see
+`/tmp/p54-ipc-sdecode-memalu-r7/results.json`.
+
+For that latter candidate, fixed-work loop costs remain **5 clocks / four
+instructions for independent paired-load candidates**, **6 clocks / four
+instructions for paired-store candidates**, and **7 clocks / four instructions
+for the resident line-straddling frontend case**. Distinct-bank and same-bank
+load/store cases are identical: the core still rejects V-memory pairing even
+though the banked L1D has an isolated dual-hit interface. Six new memory-ALU
+families improve from 11 to 5 clocks / four instructions. These observations
+identify the next structural throughput work; they do not predict gameplay IPC
+or justify bypassing P54 pairing, translation, or fault rules.

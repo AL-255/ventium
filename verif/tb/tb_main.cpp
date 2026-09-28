@@ -334,6 +334,14 @@ Args parse_args(int argc, char** argv) {
 
 int main(int argc, char** argv) {
     Verilated::commandArgs(argc, argv);
+#if !VM_THREADS
+    // Verilator's context otherwise defaults to hardware_concurrency() worker
+    // threads (32 on the IPC host) even for this single-threaded generated
+    // model. The workers do no model work but exhaust the bounded task scope
+    // when 32 independent microbenchmarks run concurrently. Set this before
+    // constructing the first model; multithreaded builds retain their setting.
+    Verilated::threadContextp()->threads(1);
+#endif
     Args args = parse_args(argc, argv);
 
     // Do this after parsing so option order does not matter.  Existing L1/AXI

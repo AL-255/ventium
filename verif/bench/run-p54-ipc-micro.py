@@ -157,8 +157,37 @@ def main():
                 if args.control:
                     binaries["control"] = args.control.resolve()
                 for label, binary in binaries.items():
-                    future = pool.submit(measure, name, label, binary, flat, sym,
-                                         per_loop, args.iterations, out, deadline)
+                    try:
+                        future = pool.submit(measure, name, label, binary, flat, sym,
+                                             per_loop, args.iterations, out, deadline)
+                    except RuntimeError:
+                        # Thread creation can fail before the first completed
+                        # result when the bounded scope's task cap is too low.
+                        # Emit the exact cgroup pressure rather than guessing
+                        # whether this was memory, host, or scope PID pressure.
+                        cg = next((line.split(':', 2)[2] for line in
+                                   Path('/proc/self/cgroup').read_text().splitlines()
+                                   if line.startswith('0::')), '')
+                        for metric in ('pids.current', 'pids.max', 'memory.current',
+                                       'memory.max', 'memory.events'):
+                            path = Path('/sys/fs/cgroup') / cg.lstrip('/') / metric
+                            if path.exists():
+                                print(f'build scope {metric}: {path.read_text().strip()}',
+                                      file=sys.stderr, flush=True)
+                        procs = Path('/sys/fs/cgroup') / cg.lstrip('/') / 'cgroup.procs'
+                        if procs.exists():
+                            counts = []
+                            for pid in procs.read_text().splitlines():
+                                status = Path('/proc') / pid / 'status'
+                                if not status.exists():
+                                    continue
+                                fields = dict(line.split(':', 1) for line in
+                                              status.read_text().splitlines() if ':' in line)
+                                counts.append((int(fields.get('Threads', '0')), pid,
+                                               fields.get('Name', '').strip()))
+                            print(f'build scope process/thread owners: {sorted(counts, reverse=True)[:12]}',
+                                  file=sys.stderr, flush=True)
+                        raise
                     tasks[future] = (name, label)
             for future in as_completed(tasks):
                 name, label = tasks[future]
