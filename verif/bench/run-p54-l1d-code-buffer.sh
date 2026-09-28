@@ -9,7 +9,7 @@ run() {
     (( remaining > 0 )) || { echo "nine-minute code-buffer gate budget expired" >&2; exit 1; }
     timeout --signal=TERM --kill-after=10s "$remaining" "$@"
 }
-for variant in packed banked banked_window banked_forward banked_code_stream banked_both_forward banked_tag banked_tag_pair; do
+for variant in packed banked banked_window banked_forward banked_code_stream banked_both_forward banked_hit_under_fill banked_hit_under_fill_tag banked_tag banked_tag_pair; do
     defines=(+define+VEN_L1D_CODE_BUFFER)
     if [[ "$variant" == banked* ]]; then
         defines+=(+define+VEN_L1D_BANKED_DATA)
@@ -27,6 +27,12 @@ for variant in packed banked banked_window banked_forward banked_code_stream ban
         defines+=(+define+VEN_L1D_FILL_FORWARD)
     fi
     if [[ "$variant" == banked_tag || "$variant" == banked_tag_pair ]]; then
+        defines+=(+define+VEN_L1D_CODE_TAG_INVALIDATE +define+VEN_L1D_CODE_STREAM)
+    fi
+    if [[ "$variant" == banked_hit_under_fill || "$variant" == banked_hit_under_fill_tag ]]; then
+        defines+=(+define+VEN_L1D_HIT_UNDER_FILL)
+    fi
+    if [[ "$variant" == banked_hit_under_fill_tag ]]; then
         defines+=(+define+VEN_L1D_CODE_TAG_INVALIDATE +define+VEN_L1D_CODE_STREAM)
     fi
     if [[ "$variant" == banked_tag_pair ]]; then

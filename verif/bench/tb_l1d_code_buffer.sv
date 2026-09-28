@@ -124,6 +124,76 @@ module tb_l1d_code_buffer;
     if (backing!=after_code)
       $fatal(1,"code fill evicted a resident data line or missed its staging hit");
 
+    // The next D miss occupies the SAME set as the staged code line. Its
+    // critical word retires first; the following code read must be captured
+    // from the private I staging buffer before the D fill has drained when
+    // hit-under-fill is enabled. The control waits for the fill to finish.
+    // A same-set D-array read would need separate replacement arbitration.
+    before_code=backing;
+    @(negedge clk); c_addr=32'h4000; c_code=0; c_we=0; c_req=1; c_wstrb=4'hf;
+    begin
+      int guard;
+      guard=0;
+      do begin
+        @(posedge clk);
+        if (++guard>100) $fatal(1,"data critical word timeout");
+      end while (!c_ack);
+      if (c_rdata!==word_at(32'h4000)) $fatal(1,"data critical word mismatch");
+      @(negedge clk); c_addr=32'h3004; c_code=1; c_wstrb=4'h0;
+      guard=0;
+      do begin
+        @(posedge clk);
+        if (++guard>100) $fatal(1,"code hit-under-fill timeout");
+      end while (!c_ack);
+      if (c_rdata!==word_at(32'h3004)) $fatal(1,"code hit-under-fill mismatch");
+      $display("P54-L1D-CODE-D-FILL code_wait_clocks=%0d fill_active_at_ack=%0b",
+               guard,dut.st==dut.L1_FILL);
+`ifdef VEN_L1D_HIT_UNDER_FILL
+      if (dut.st!=dut.L1_FILL)
+        $fatal(1,"same-set code hit waited for the data fill to drain");
+`endif
+    end
+    @(negedge clk); c_req=0; c_code=0; c_wstrb=4'hf;
+    while (dut.st!=dut.L1_IDLE) @(negedge clk);
+    if (backing-before_code!=8)
+      $fatal(1,"code hit under D fill issued backing traffic");
+    if (!dut.code_valid_q)
+      $fatal(1,"D fill discarded independent I staging line");
+
+`ifdef VEN_L1D_HIT_UNDER_FILL
+    // Cancel an already captured I response on its serve edge when DMA writes
+    // that physical code line. The D fill is still active and must not make the
+    // stale registered window visible one clock later.
+    @(negedge clk); c_addr=32'h5000; c_code=0; c_we=0; c_req=1; c_wstrb=4'hf;
+    begin
+      int guard;
+      guard=0;
+      do begin
+        @(posedge clk);
+        if (++guard>100) $fatal(1,"second data critical word timeout");
+      end while (!c_ack);
+      @(negedge clk); c_addr=32'h3004; c_code=1; c_wstrb=4'h0;
+      @(posedge clk); // capture the old code word
+      @(negedge clk);
+      mem[32'h3004]=8'h12; mem[32'h3005]=8'h34;
+      mem[32'h3006]=8'h56; mem[32'h3007]=8'h78;
+      snoop_inv_addr=32'h3004; snoop_inv_valid=1;
+      #1;
+      if (c_ack) $fatal(1,"snoop did not cancel captured I response");
+      @(posedge clk);
+      @(negedge clk); snoop_inv_valid=0;
+      guard=0;
+      do begin
+        @(posedge clk);
+        if (++guard>100) $fatal(1,"post-snoop I refill timeout");
+      end while (!c_ack);
+      if (c_rdata!==word_at(32'h3004))
+        $fatal(1,"post-snoop I refill returned stale data");
+    end
+    @(negedge clk); c_req=0; c_code=0; c_wstrb=4'hf;
+    while (dut.st!=dut.L1_IDLE) @(negedge clk);
+`endif
+
 `ifdef VEN_L1D_CODE_TAG_INVALIDATE
     write_word(32'h4000,32'hdeadbeef);
     if (!dut.code_valid_q)

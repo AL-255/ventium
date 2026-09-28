@@ -820,18 +820,21 @@ module ven_l1d #(
   // A fill owns the sole backing stream until all of its burst beats have
   // drained.  It need not, however, stall an already-resident read in a
   // *different* set: that read uses only the local array and the existing
-  // registered response window.  Keep this deliberately narrow while the
-  // contract is exercised: no cross-line read (two replacement domains), no
-  // same-set read (the fill's terminal LRU write), no bypass, and no new
-  // backing operation.  The default remains the conservative one-request
-  // policy until the opt-in has full-system evidence.
+  // registered response window. An already staged instruction word uses the
+  // separate code buffer instead of the D array, so it may be captured even
+  // when its physical set equals the data fill's set. Keep D-array reads
+  // narrow: no cross-line or same-set read (the fill's terminal LRU write),
+  // no bypass, and no new backing operation. The default remains the
+  // conservative one-request policy until the opt-in has full-system evidence.
   logic fill_independent_hit;
 `ifdef VEN_L1D_HIT_UNDER_FILL
   assign fill_independent_hit = (st == L1_FILL) && !bypass_q && !xline &&
 `ifdef VEN_L1D_CODE_BUFFER
                                !code_fill_q &&
-`endif
+                               (code_access || (set_c != fset));
+`else
                                (set_c != fset);
+`endif
 `else
   assign fill_independent_hit = 1'b0;
 `endif
@@ -1641,11 +1644,15 @@ module ven_l1d #(
           if (golden && code_fill_q) fill_poison <= 1'b1;
 `endif
 `ifdef VEN_L1D_HIT_UNDER_FILL
-          // fill_independent_hit proves set_c != fset, so this local LRU
-          // touch cannot race the fill's terminal allocation/LRU update.
-          // The read itself still takes the normal registered capture/serve
-          // path; this is hit-under-fill, not a combinational bypass.
-          if (do_rd_cap)
+          // A data-array hit still proves set_c != fset, so this LRU touch
+          // cannot race terminal allocation. A code-buffer hit has no D-array
+          // replacement side effect, even when it names the fill's set.
+          // Both responses retain the registered capture/serve path.
+          if (do_rd_cap
+`ifdef VEN_L1D_CODE_BUFFER
+              && !code_access
+`endif
+             )
             dc_lru[set_c] <= hit_way;
 `endif
           // H-06/H-07: an invalidation arriving MID-fill (beats 0..6) has no allocated
