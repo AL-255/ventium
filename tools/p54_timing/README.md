@@ -54,6 +54,17 @@ Its JSON labels explicitly say `is_full_gameplay_bound: false` and
 `is_cycle_forecast: false`. It cannot establish CPI < 1 or replace the required
 complete instruction-instance trace and realistic timing scheduler.
 
+One September 28 verified-byte sample exported 602,734 of 629,117 legacy
+events and selected 255,048 adjacent legal pairs; 93,218 selected pairs had
+two memory operands. This is an optimistic opportunity count, not an EX-stage
+throughput estimate. The directed `adc_add_dual_read_{distinct,same_bank}`
+cases both take three clocks per five-instruction iteration on the current
+candidate, despite a positive decoder/issue-unit pairing-class check and
+QEMU-equivalent state. Two read/ALU EX occupancies already fit those clocks;
+counting the pair as one saved clock would be a false CPI projection. The
+store/load no-spacer cases similarly take three clocks when non-aliasing and
+four when aliasing. Artifacts are under `/home/yukidama/p54-{adc-add-dual-read,store-load-nospacer}-sep28/`.
+
 The analyzer additionally writes `<prefix>.slow_candidate_bytes.tsv` from
 slow-path `q_pc/q_len/ibuf` owners. These are **candidates**: some FPU and
 microsequence states retain a stale `q_len` or buffer. Run

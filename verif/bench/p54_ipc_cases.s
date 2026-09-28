@@ -424,6 +424,44 @@ mixed_v:
     xchgl %eax, %esp
 .endif
     incl %ebx
+.elseif CASE == 66 || CASE == 67
+    # Observed gameplay class: an ADC register/memory U followed by an
+    # independent ADD register/memory V. V overwrites flags in program order;
+    # only the source-bank placement differs between these two fixtures.
+    adcl (%esi), %eax
+.if CASE == 66
+    addl 36(%esi), %edx
+.else
+    addl 32(%esi), %edx
+.endif
+    incl %ebx
+.elseif CASE == 68 || CASE == 69 || CASE == 70
+    # Isolate the ordered store/read pair without the longer IMUL spacer in
+    # cases 60-62. An unrelated INC leaves a five-instruction fixed-work loop.
+    movl %edx, (%esi)
+.if CASE == 68
+    movl 36(%esi), %eax
+.elseif CASE == 69
+    movl 32(%esi), %eax
+.else
+    movl (%esi), %eax
+.endif
+    incl %ebx
+.elseif CASE == 71 || CASE == 72 || CASE == 73 || CASE == 74
+    # Four read-only EXT flavors, all from a negative byte/word in resident
+    # ordinary RAM. The dependent ADD checks the extended 32-bit result, not
+    # merely the low source byte/word; V pairing must remain disabled (NP).
+.if CASE == 71
+    movzbl 32(%esi), %eax
+.elseif CASE == 72
+    movzwl 32(%esi), %eax
+.elseif CASE == 73
+    movsbl 32(%esi), %eax
+.else
+    movswl 32(%esi), %eax
+.endif
+    addl %eax, %edx
+    incl %ebx
 .else
     .error "unsupported CASE"
 .endif

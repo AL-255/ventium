@@ -85,6 +85,15 @@ CASES = {
     "xchg_eax_edi": (BASE, 63),
     "xchg_eax_ecx": (BASE, 64),
     "xchg_eax_esp": (BASE, 65),
+    "adc_add_dual_read_distinct": (BASE, 66),
+    "adc_add_dual_read_same_bank": (BASE, 67),
+    "store_load_nospacer_distinct": (BASE, 68),
+    "store_load_nospacer_same_bank": (BASE, 69),
+    "store_load_nospacer_alias": (BASE, 70),
+    "mem_zx8_dependent": (BASE, 71),
+    "mem_zx16_dependent": (BASE, 72),
+    "mem_sx8_dependent": (BASE, 73),
+    "mem_sx16_dependent": (BASE, 74),
 }
 
 
@@ -267,6 +276,24 @@ def main():
                       f"cycles/iteration; IPC {row['ipc']:.6f}" +
                       (f"; mixed pairs {row['mixed_pairs']}" if
                        "mixed_pairs" in row else ""), flush=True)
+        if {"adc_add_dual_read_distinct", "adc_add_dual_read_same_bank"} <= results.keys():
+            distinct = results["adc_add_dual_read_distinct"]["candidate"]
+            same_bank = results["adc_add_dual_read_same_bank"]["candidate"]
+            assert distinct["cycles_per_iteration"] <= 3.0, \
+                "independent ADC/ADD reads regressed behind separate EX clocks"
+            assert same_bank["clocks"] >= distinct["clocks"], \
+                "same-bank read unexpectedly beat the distinct-bank case"
+        if {"store_load_nospacer_distinct", "store_load_nospacer_same_bank",
+            "store_load_nospacer_alias"} <= results.keys():
+            distinct = results["store_load_nospacer_distinct"]["candidate"]
+            same_bank = results["store_load_nospacer_same_bank"]["candidate"]
+            alias = results["store_load_nospacer_alias"]["candidate"]
+            assert distinct["cycles_per_iteration"] <= 3.0, \
+                "ordered non-alias store/load regressed"
+            assert same_bank["clocks"] >= distinct["clocks"], \
+                "same-bank store/load unexpectedly beat the distinct-bank case"
+            assert alias["clocks"] >= distinct["clocks"], \
+                "alias store/load unexpectedly beat the non-alias case"
         if args.control:
             # Performance is meaningful only for identical architectural work.
             # This short A/B check is not a substitute for the QEMU differential
