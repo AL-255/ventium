@@ -214,7 +214,7 @@ pm32_entry:
      * pfaststore derivatives instead start it present but read-only, which
      * distinguishes a real write-permission probe from an unsafe read or an
      * unprotected fast-store issue. */
-#if defined(FPSTORE_PROBE) || defined(FASTSTORE_PROBE)
+#if defined(FPSTORE_PROBE) || defined(FASTSTORE_PROBE) || defined(DUALSTORE_PROBE)
     movl    $0x00801001, 4(%edi)        /* P=1, RW=0: write must #PF with P|W=3 */
 #else
     movl    $0x00801002, 4(%edi)        /* P=0, RW=1: ordinary demand-page case */
@@ -229,7 +229,7 @@ pm32_entry:
     movl    $0x00011000, %eax
     movl    %eax, %cr3
     movl    %cr0, %eax
-#if defined(FPSTORE_PROBE) || defined(FASTSTORE_PROBE)
+#if defined(FPSTORE_PROBE) || defined(FASTSTORE_PROBE) || defined(DUALSTORE_PROBE)
     orl     $0x80010000, %eax           /* PG + WP: supervisor write honors PTE.RW */
 #else
     orl     $0x80000000, %eax
@@ -262,17 +262,44 @@ pm32_entry:
      * destination as the special A3 moffs form, which is not the compact
      * ModR/M MOV r/m32,r32 family this regression is meant to exercise. */
     movl    $0xCAFEBABE, %edi
+#ifdef DUALSTORE_PROBE
+    movl    $0x13579BDF, %ebp
+#endif
     movl    %edi, 0x00401000            /* #PF here; restarted after handler maps */
+#ifdef DUALSTORE_PROBE
+    /* V on the same physical line must not escape U's write-protection fault. */
+    movl    %ebp, 0x00401004
+#endif
     /* read it back -> proves the page is now present + mapped to phys 0x801000 */
     movl    0x00401000, %esi            /* esi = 0xCAFEBABE (post-#PF-fixup read) */
-#ifdef FASTSTORE_PROBE
+#ifdef DUALSTORE_PROBE
+    /* This system image inherits reset CD|NW=1. The pair path intentionally
+     * requires a cacheable resident line, so turn caching on as a normal
+     * protected-mode OS would and explicitly warm the target before timing. */
+    movl    %cr0, %eax
+    andl    $0x9fffffff, %eax            /* clear CD and NW; preserve PG/WP/PE */
+    movl    %eax, %cr0
+    movl    0x00401000, %eax
+#endif
+#if defined(FASTSTORE_PROBE) || defined(DUALSTORE_PROBE)
     /* Exercise the exact narrow system fast-store opcode after its initial
      * write-protection #PF has restarted it. This is ordinary 32-bit
      * MOV [disp32],r32 -- no game state, saved state, or special I/O. The
      * profiler-backed pfaststore gate proves these retire through S_PIPE;
      * the readback above proves the faulting first write did not commit early. */
     movl    $128, %ebx
+#ifdef DUALSTORE_PROBE
+    .globl pdualstore_loop_u, pdualstore_loop_v
+pdualstore_loop_u:
+#endif
 1:  movl    %edi, 0x00401000
+#ifdef DUALSTORE_PROBE
+pdualstore_loop_v:
+    movl    %ebp, 0x00401004            /* independently translated V bank */
+    .rept 16                           /* leave both P54 write slots free */
+    nop
+    .endr
+#endif
     incl    %edi
     decl    %ebx
     jnz     1b
@@ -283,6 +310,9 @@ pm32_entry:
      * request atomic across two translations), while the differential trace
      * proves the mature fragment path writes it correctly. */
     movl    %edi, 0x00400fff
+#ifdef DUALSTORE_PROBE
+    movl    0x00401004, %ebp            /* V payload witness at final retire */
+#endif
 #endif
 #endif
 
@@ -314,7 +344,7 @@ ud_resume:
     addl    0x00002024, %eax            /* + #UD counter */
     movl    %eax, %ecx                  /* ecx = 3 if all three faults delivered */
     movl    0x00002020, %edx            /* edx = captured CR2 from the #PF (0x401000) */
-#if defined(FPSTORE_PROBE) || defined(FASTSTORE_PROBE)
+#if defined(FPSTORE_PROBE) || defined(FASTSTORE_PROBE) || defined(DUALSTORE_PROBE)
     movl    0x00002038, %edi            /* #PF error: P|W must be 3 */
 #endif
 
@@ -336,7 +366,7 @@ hang:
     .global pf_handler
 pf_handler:
     pushl   %eax
-#if defined(FPSTORE_PROBE) || defined(FASTSTORE_PROBE)
+#if defined(FPSTORE_PROBE) || defined(FASTSTORE_PROBE) || defined(DUALSTORE_PROBE)
     movl    0x04(%esp), %eax            /* error code before the saved EAX */
     movl    %eax, 0x00002038
 #endif

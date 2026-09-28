@@ -1,0 +1,17 @@
+{
+  "name": "pdualstore",
+  "kind": "system",
+  "src": "../pfault/pfault.S (DUALSTORE_PROBE)",
+  "linker": "../pfault/pfault.ld",
+  "image": "pdualstore.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 5000,
+  "sys": true,
+  "paging": true,
+  "description": "Protected paging and 128 same-line independent full-dword U/V stores with a writable-page restart, distinct V payload, and a cross-page store fallback. QEMU supplies architectural state; the focused gate requires resident system-mode pair retirement and exact final memory data."
+}
