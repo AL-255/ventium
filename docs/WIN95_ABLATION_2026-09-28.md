@@ -1313,3 +1313,41 @@ protected mode (`CR0=80000011`, `CR3=00308000`, `CPL=3`). It has **not**
 yet shown a desktop. QEMU uses a different BIOS/platform and therefore can
 establish disk viability if it reaches a desktop, but cannot by itself
 identify the ao486/Ventium fault.
+
+## Handoff snapshot — 2026-09-29 18:11 EDT
+
+No Win95 run has a visually verified desktop, no Quake timedemo has completed,
+and the introducing change is **not yet isolated**. The last verified Quake
+gameplay IPC remains **0.45746656** over cycles
+1,150,151,638–1,400,151,638 on frozen full-PC binary `3237b652...`;
+that binary predates the current working-tree candidate, which has no newer
+verified gameplay measurement. The same cold Quake service is still active
+at about 1.448B cycles, with gameplay previously inspected. The same-build
+CoreMark validation seed passed with CRC `0xe230`; its performance seed is
+still active, so the full standard suite is open.
+
+All cycle values below are the latest log samples at the handoff, not caps or
+desktop claims. Existing services were confirmed active through the user
+service manager; **no new runs should be launched pending further direction**.
+
+| Live comparison / probe | Latest observation | What it establishes |
+|---|---|---|
+| Ventium, mouse-enabled current disk, no keys (`w95_root_mouse_long`) | 908.4M cycles, protected-mode VMM; no graphics/desktop | Longer than the prior 350M mouse probe, but not a pass. The separate 3.005B cap is at 618.4M. |
+| Original ao486, documented stock-ROM 4 MHz / 80 kHz RTC (`w95_ao486_repro4b`) | 468.2M cycles, graphics mode has not yielded a desktop | Current disk viability on this platform remains open; the earlier 1.1B-cap control ended with a black frame. |
+| Original ao486, July display-fixed disk (`w95_ao486_jul13_disk4b`) | 524.3M cycles, graphics mode with `pas=0`, all-black capture | Disk-content comparison remains open. |
+| Original-core stock-ROM PS/2 read-hold vs historical read behavior | Matched current read-hold control reached graphics mode by 428.3M and ended black at 1.1B; historical-read variant is still in text mode at 610.8M | Read-hold changes boot trajectory but is not proven to cause the blank screen. The separate patched-ROM current control is at 826.3M and is not the matched PS/2 comparator. |
+| Historical IDE host-only variant, current/July disks | 604.0M / 612.4M cycles; both reached graphics mode with blank output | Old host IDE logic alone has not produced a desktop. Historical IDE RTL-only variants are much earlier at 107.5M / 114.3M. |
+| Exact July-20 historical platform, current/July disks | 189.8M / 161.0M cycles | Still too early to establish a known-good ancestor. |
+| Historical `iobus.v` one-file variant (`w95_ao486_oldiobus_current`) | 24.1M cycles on CPU 11; binary `e6248c83...` | Build and isolated run are valid; no boot comparison yet. |
+| Same-source Win95 v4 mouse snapshot source | 244.4M of 258M cycles on CPU 10 | The 260M uninterrupted control saved successfully; 258M→260M full-state and disk replay is still pending. |
+| V86 predecessor/stack breakpoint probes | source `0193` at 156.4M, source `22E0` at 140.9M, stack `0190` at 73.9M, stack `2C1E` at 76.4M | No breakpoint report yet; do not attribute the invalid BIOS-font fetch to the core until its input frame is inspected. |
+| Pinned-QEMU `-cpu pentium` disk controls | Current and July disks both active on separate snapshot overlays; latest screens still show text startup, not a desktop | Current-disk QEMU reached paging/V86 execution. A different BIOS/platform limits causal interpretation even if it later boots. |
+
+The source images and active Quake/CoreMark inputs were left intact. After
+removing 18 completed failed runs' *private* disk copies from the old home
+archive, its logs/results remain. At handoff, `/tmp` had about 5.9 GiB free;
+host memory reported about 15 GiB available and 1.6 GiB swap used. The
+repository's `tmp` symlink points to an external volume that is full and
+read-only, so any future scratch must use `/tmp` until that condition changes.
+Existing services were left running; this handoff neither qualifies Win95
+nor authorizes treating a cycle-cap exit as a desktop.
