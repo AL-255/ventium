@@ -243,6 +243,9 @@ gap blocks interrupt-driven real-mode guests — see README "On silicon".
 
 ## Conventions
 
+- Keep generated runs, temporary builds, and scratch files out of `~/`.
+  Use `/tmp` or `ventium/tmp` after checking available space; do not create
+  new top-level home-directory work folders.
 - One module per file, filename == module name; packages are `*_pkg.sv`;
   `ven_*`/`vtm_*` prefixes for ventium-specific blocks; `core_*.svh` are raw
   `` `include ``d case-arm fragments of core.sv (netlist-identical — keep them so).
