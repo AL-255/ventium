@@ -981,12 +981,14 @@ active, not a result yet. A desktop there would isolate a PS/2 regression in
 the original platform; another black cap would leave the disk/build
 difference unresolved. This source copy and build live in `/tmp`, not `~/`.
 Their sampled original-core trajectories are identical through 259.5M
-cycles, then diverge near 260M when the PS/2 command path is active. At the
-matched 324,009,983-cycle sample the current read-hold control has entered
-VGA graphics mode (`gfx=1`, but palette-address source off and no desktop),
-while the historical-read variant remains in text mode (`gfx=0`). This is
-evidence that the change matters on the current disk and does not show it
-introduced the all-black desktop failure. Await the cap and frame evidence
+cycles, then diverge near 260M when the PS/2 command path is active. Both
+are still in VGA text mode at the matched 324,009,983-cycle sample. At the
+matched 428,343,295-cycle sample the current read-hold control has entered
+graphics mode (`gfx=1`, palette-address source off, no desktop), while the
+historical-read variant remains in text mode (`gfx=0`); it is still text
+mode past 505M cycles. This is evidence that the change matters on the current
+disk, but does not show that it introduced the all-black desktop failure.
+Await the cap and frame evidence
 before accepting or rejecting the read-hold fix.
 
 An additional disk-viability control uses the July 13 image
@@ -1284,3 +1286,30 @@ The CPU-11 uninterrupted control has now cleanly saved its complete v4 state
 at exactly 260,000,000 cycles (70,470,218 retirements; 134,918,905-byte
 snapshot) with no VxD error; this is still not a desktop result. The CPU-10
 258M source is still live, so the decisive replay comparison is pending.
+
+## September 29 additional disk and I/O-bus controls (pending)
+
+An original-ao486-core, one-file I/O-bus ablation is now live on CPU 11 at
+`/tmp/ventium_w95_ao486_oldiobus_current_sep29`. Its binary SHA-256 is
+`e6248c8311b3e8cd35d02488e83c24c758bfb40f7c98b7496b22999cddb760ac`.
+The scratch filelist differs from `ao486-sim/rtl.f` only in the `iobus.v`
+entry, which points to the pinned historical ao486 submodule commit
+`e1bd7673f6dc485de615d09abe6df9d4ae654f9b`; all other current RTL and
+host sources match the reference build's source timestamps. The run uses the
+same current disk SHA `cc68b005...`, stock ROMs, 4 MHz CPU / 80 kHz RTC,
+connected mouse, four Enter keys and 4B-cycle cap as the active current
+original-core control on CPU 29. It has no result yet. The old I/O-bus read
+FSM predates the added `S_READ_W2` settle cycle and single-strobe correction;
+an early IDE regression is possible and would not be a reason to revert a
+known-good read protocol. Only a matched boot outcome can identify a causal
+platform difference.
+
+For an independent disk-viability check, pinned QEMU 8.2.2 `-cpu pentium`
+runs on CPU 0 with the current source disk behind `snapshot=on` (no source
+disk writes), 32 MiB RAM and a 2000-01-01 guest RTC. The monitor socket and
+captures are under `/tmp/ventium_w95_qemu_disk_sep29*`. Its first captured
+screen showed DOS/Windows text startup; a later register sample was in
+protected mode (`CR0=80000011`, `CR3=00308000`, `CPL=3`). It has **not**
+yet shown a desktop. QEMU uses a different BIOS/platform and therefore can
+establish disk viability if it reaches a desktop, but cannot by itself
+identify the ao486/Ventium fault.
