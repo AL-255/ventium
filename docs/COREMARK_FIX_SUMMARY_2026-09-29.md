@@ -135,12 +135,12 @@ evidence paths and remaining work are in
 
 ## September 30: standard-suite continuation (not yet qualified)
 
-Latest status at **18:20 UTC**: the previous candidate passed both complete
-CoreMark seeds; two fresh seeds are running for the V86-corrected candidate.
+Latest status at **18:55 UTC**: the V86-corrected candidate independently passes
+both complete CoreMark seeds, with every reference CRC and cycle count unchanged.
 Cold Windows 95 has not reached a verified desktop. Cold DOS Quake on the
 previous candidate has reached clear gameplay but has not completed its
-969-frame timedemo. **Latest measured gameplay IPC is 0.42089513**, frozen
-`2e63e532…`, cycles **3.0B–3.1B**. This predates the current candidate
+969-frame timedemo. **Latest measured gameplay IPC is 0.41817053**, frozen
+`2e63e532…`, cycles **3.3B–3.4B**. This predates the current candidate
 `cdcb6faa…`, which has no gameplay measurement yet. It is not timedemo FPS,
 a measured gain from either correctness fix or full-suite PASS.
 
@@ -904,6 +904,13 @@ No RTL or golden masking was changed for that invocation. All four controls
 are reaped with stable build inputs; artifacts are
 `verif/tb/obj_dir_system_controls_v86_sep30.BS7xJV/`.
 Both models were built sequentially under one 32-job/16-GiB/no-swap scope.
+The canonical five-profile structural lint matrix passes. Separately, the
+actual candidate's 107 defines pass strict core lint with all six structural
+classes fatal (`raw-profile-lint.retry.log` in the direct build directory).
+The first scratch lint driver timed out before frontend launch because Python
+closed the inherited lock FD. That attempt was reaped; retaining the FD fixes
+the driver without changing the resource guard or RTL. The retry frontend
+completed in 2.129 seconds, allocating 214.762 MB. No synthesis was launched.
 The new manifest captures **340 path entries / 227 distinct files**, including
 the previously omitted C++ headers, and all checks before/after both builds
 pass. Reversing only the predicate and three comment blocks reproduces both
@@ -919,7 +926,7 @@ restore, save-state shortcut or guest modification:
 
 - CoreMark: user unit `ventium-standard-coremark-v86-iop3-sep30`, CPUs 4/5,
   two untouched 1,500-iteration seeds, **3,600 seconds per seed**, 2 GiB/no swap.
-  Results belong to `verif/tb/obj_dir_v86_iop3_sep30.nhltiM/`; both are pending.
+  Both now pass; results belong to `verif/tb/obj_dir_v86_iop3_sep30.nhltiM/`.
 - Win95: `ventium-standard-win95-v86-iop3-sep30`, CPU 6, 2 GiB/no swap/32 tasks,
   9B cycles/24 hours. The old 3B cap represents only 66.7 seconds at the fixed
   45-MHz guest clock; raising the cap does not change guest time or qualify boot.
@@ -949,8 +956,42 @@ claim to close those cases or qualify strings/REP/VME. No speculative repair
 or guest-specific bypass has been folded into the current candidate.
 
 Latest verified gameplay window: old `2e63`, profile clocks
-2,999,999,637–3,099,999,637, retirements 1,080,413,113–1,122,502,626.
-31,510,842 U plus 10,578,671 V sum to 42,089,513 retirements:
-**0.42089513 IPC**. Raw frames 22/23 visibly advance gameplay and the private
+3,299,999,637–3,399,999,637, retirements 1,207,857,190–1,249,674,243.
+31,933,105 U plus 9,883,948 V sum to 41,817,053 retirements:
+**0.41817053 IPC**. Raw frames 25/26 visibly advance gameplay and the private
 binary hash matches. The current `cdcb` candidate remains unmeasured;
 **Win95 desktop and completed Quake timedemo are still not qualified**.
+
+### Closed V86-candidate CoreMark result
+
+Both fresh `8c3b6954…` seeds completed, matched all five reference CRCs and
+reported correct operation. Performance: **713,805,640 clocks / 542,165,430
+retirements / 2.101412 CM/MHz**, 10.888 guest seconds, 38.81 host minutes.
+Validation: **712,760,043 / 541,458,819 / 2.104495 CM/MHz**, 10.871 guest
+seconds, 39.34 host minutes. These exactly reproduce the prior candidate's
+whole-clock counts, retirements and CRCs: **0% measured CoreMark gain or
+regression** from the V86 permission fix. Supplementary query windows remain
+713,731,763 / 712,693,215 clocks. CoreMark IPC is 0.75954209 / 0.75966495,
+not gameplay IPC and not CPI<1. The conservative whole-program score remains
+authoritative; neither guest timer startup bias nor host wall speed is credited.
+
+Artifacts: `ventium-coremark-matrix.6_ao0gm2/` in the direct build directory;
+summary SHA-256 `13805d8d065061c3dc9570fc7c52a803eac28b438ba584c4e40d4a8535234daf`.
+Both child wait returncodes and guest exits are zero; both logs are closed,
+all three actual supervisor/simulator PIDs are absent, and binary, images,
+compile record, generated headers and 86 source inputs remain hash-stable.
+Every mandatory edge evaluation is retained and settle counts reconcile.
+Runtime `resources.json` records the actual 2-GiB/32-task cgroup envelope.
+The live invocation ID was `b4a6d83394c941b5875832a4eb011f23`.
+Its user journal records startup at 18:03:31 UTC and normal terminal resource
+accounting at 18:42:52 UTC, 39m20.737s wall / 17.2 MB peak. The transient unit
+has since been collected: its default inactive/dead/zero-status object is
+**not** a retained exit-status or resource-cap witness. Qualification rests
+on the actual completed child results, integrity proofs and process closure.
+
+Current Win95 passed the former 383M corruption and 425M terminal VDD points,
+but its 450M/491M samples still show the VMM polling region, with no graphics
+capture or desktop. Counters differ from old `2e63`; identical control flow is
+not claimed. The early sixteen-event fault ring is exhausted and cannot prove
+absence of later #GPs. The CoreMark suite member passes independently; the
+**full standard suite remains incomplete**, and cold Win95/Quake continue.
