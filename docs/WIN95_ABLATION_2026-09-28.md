@@ -1728,6 +1728,33 @@ caller/register/return evidence is still needed. The old `FLT` print's CR2
 is sampled before its nonblocking update, so it describes the previous
 fault, not necessarily the operand of the instruction printed beside it.
 
+### Prepared V86 byte-restart coverage
+
+`verif/sys/tests/pv86movrestart/` adds four reset-booted architectural fixtures,
+not an RTL fix or a claimed passing gate. All four images assemble/link;
+shell syntax and checker AST checks pass. Disassembly confirms `26 8A 07`,
+`43` and a 16-bit `E2` loop. No QEMU/RTL execution has been launched. The
+fixtures are deliberately not yet registered in the system/standard suite.
+
+They read nine known bytes via `ES:[BX]` with nonidentity page mappings and
+high-half register sentinels. A byte at the first page's last address must
+succeed; the next read faults with error 4 and CR2 `21000`. The handler
+checks the actual saved frame/GPRs, changes live ES and 32-bit operand context,
+maps only the missing page, and IRETD retries without reloading guest ES.
+Three cases add deterministic software interrupt gates after the MOV,
+INC group, or LOOP; these are **not hardware-IRQ witnesses**. This targets a
+test-design gap: existing return tests either do not consume restored ES or
+explicitly reload it before their memory check.
+
+The checker was corrected before execution: canonical system `.vtrace` PCs
+are pre-instruction **EIP offsets**, not linker VMAs. Retained QEMU/RTL
+`pv86iretstack_4` traces show `CS=1000, PC=0/6`, while its ELF places the V86
+entry at `10000`. The new checker normalizes `read_byte - v86_entry` rather
+than falsely treating a correct processor trace as nine missing loads.
+The bounded invocation and exact limitations are in the fixture README;
+execution still awaits the requested approval. Assembly-only artifacts:
+`/tmp/ventium-pv86movrestart-assemble.2xrZgu/`.
+
 Win95 desktop and the standard suite remain unqualified. Gameplay IPC
 remains **0.45746656** on older `3237b652...`, cycles
 1,150,151,638–1,400,151,638; this candidate has no gameplay measurement.
