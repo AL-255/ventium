@@ -164,6 +164,17 @@ module ventium_top
     input  logic        l1axi_en,           // 1 = mode 2 (L1+AXI); 0 = modes 0/1
     input  logic        flush_all,           // #35 pulse to invalidate the L1 (cosim coherency)
     input  logic        golden_l1,           // golden/L1-useless diagnostic mode (flush after each access)
+`ifdef VEN_L1D_STORE_POLICY
+    // A platform can conservatively prohibit cached-store updates at the
+    // queried physical bytes without dropping/faulting their actual writes.
+    // Query addresses are independent of request/ACK/policy to avoid feedback.
+    output logic [31:0] store_policy_addr,
+    input  logic [3:0]  store_policy_update_mask,
+`ifdef VEN_P54_DUAL_STORE_PAIR
+    output logic [31:0] store_pair_policy_addr,
+    input  logic [3:0]  store_pair_policy_update_mask,
+`endif
+`endif
     output logic [3:0]  m_axi_awid,
     output logic [39:0] m_axi_awaddr,
     output logic [7:0]  m_axi_awlen,
@@ -1336,6 +1347,12 @@ module ventium_top
   logic        ic_snoop_v1; logic [31:0] ic_snoop_a1; // H-09: SMC store, first line
   logic        ic_snoop_v2; logic [31:0] ic_snoop_a2; // H-09: SMC store, second line
   assign bus_err = l1_bus_err;   // #34 expose the fatal AXI fault to the PS
+`ifdef VEN_L1D_STORE_POLICY
+  assign store_policy_addr = core_mem_addr;
+`ifdef VEN_P54_DUAL_STORE_PAIR
+  assign store_pair_policy_addr = core_store_pair_addr;
+`endif
+`endif
   // Keep the functional AXI L1D tied to the same 128-set P5 geometry as the core's
   // timing model.  The package constant makes that single configuration explicit.
   ventium_l1_axi #(.ADDR_W(40), .REMAP_BASE(L1AXI_REMAP_BASE), .ADDR_MASK(L1AXI_ADDR_MASK),
@@ -1373,11 +1390,17 @@ module ventium_top
       .core_addr (core_mem_addr), .core_lin (core_mem_lin),
       .core_wdata(core_mem_wdata),
       .core_wstrb(core_mem_wstrb),
+`ifdef VEN_L1D_STORE_POLICY
+      .core_store_update_mask(store_policy_update_mask),
+`endif
 `ifdef VEN_P54_DUAL_STORE_PAIR
       .core_store_pair_req(l1axi_en && core_store_pair_req),
       .core_store_pair_addr(core_store_pair_addr),
       .core_store_pair_wdata(core_store_pair_wdata),
       .core_store_pair_wstrb(core_store_pair_wstrb),
+`ifdef VEN_L1D_STORE_POLICY
+      .core_store_pair_update_mask(store_pair_policy_update_mask),
+`endif
       .core_store_pair_ready(l1_store_pair_ready),
       .core_store_pair_ack(l1_store_pair_ack),
 `endif

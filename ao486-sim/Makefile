@@ -78,6 +78,7 @@ all:
 # would make performance and boot evidence non-actionable.  VEN_CACHE_HALF and
 # VEN_IC_NARROWB are retired congestion experiments and must never appear here.
 VEN_DEFS := +define+VEN_CORE +define+VEN_L1_AXI +define+VEN_L1_HONOR_CD \
+  +define+VEN_L1D_STORE_POLICY \
   +define+VEN_KV260_SOC +define+VEN_TRANSCENDENTAL +define+VEN_SRT_ITER \
   +define+VEN_IDIV_ITER +define+VEN_BCD_ITER +define+VEN_FP_PIPE \
   +define+VEN_FP_PIPE2 +define+VEN_FP_PC_RELAX +define+VEN_FP_SHARED +define+VEN_FP_SHARED_DIRECT \
@@ -169,6 +170,7 @@ ven-gameplay-base:
 # private disk copies.
 # This does not change `ven` or claim the new options are FPGA-routed.
 VEN_IPC_DEFS := +define+VEN_L1D_BANKED_DATA +define+VEN_L1D_BANK0_SHARED_XLINE \
+  +define+VEN_L1D_STORE_POLICY \
   +define+VEN_AXI_READ_ON_FINAL_B \
   +define+VEN_P54_WBUF_PIPE_DISPATCH +define+VEN_AXI2AVL_BPIPE \
   +define+VEN_AXI2AVL_WRITE_THROUGH \

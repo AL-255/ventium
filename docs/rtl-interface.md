@@ -175,6 +175,33 @@ zero for that backend only; it is not a default or gameplay-qualified profile.
 override. `verif/l1/run-axi-line-replay-gate.sh` tests both healthy policies and
 requires the stale-response negative controls to fail visibly.
 
+### Cached-store effect policy
+
+`VEN_L1D_STORE_POLICY` adds an optional platform advisory, separate from memory
+access permission. `ventium_top.store_policy_addr` exposes the actual physical
+U request address; `store_policy_update_mask[3:0]` controls whether each
+producer-relative byte may update a resident cached copy. The independently
+qualified paired V store has its own address and mask. A mask bit applies only
+when the corresponding original write strobe is active.
+
+A disabled active byte does **not** drop, narrow or fault the bus write, change
+its acknowledgement, or suppress write-buffer admission/combining. It suppresses
+that cached byte update and invalidates the touched resident physical tag on
+the accepted edge. The next read misses, drains ordered older writes and refills
+the actual backing bytes. Both packed and banked arrays follow this rule, as do
+crossing U writes and independently acknowledged V stores. The policy must not
+depend on ACK or request shaping; query addresses are independent outputs.
+Without the define, the previous interface and update path are unchanged.
+
+The ao486 shim conservatively disables cached updates for effective backend
+bytes `C0000–FFFFF`, applying the existing 28-bit address fold and A20 gate
+**per byte**. These windows may discard ROM writes or become writable through
+UMA/shared-folder policy. Sampling that deferred policy at local posted ACK
+would be unsafe: an older queued enable can reach the backend first. Targeted
+invalidation handles either outcome without guessing, changing read cacheability,
+globally flushing the cache, or disabling ordinary RAM updates. The original
+ao486 backend remains the authority on the write's actual memory effect.
+
 ## 4. Image loading
 
 The testbench loads a flat memory image and a load address from the test

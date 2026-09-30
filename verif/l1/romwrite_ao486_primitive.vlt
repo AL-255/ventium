@@ -1,0 +1,4 @@
+`verilator_config
+// Only the real ao486 cache's three Intel altsyncram instances omit the
+// optional vendor primitive pins. Never waive missing new L1/bridge ports.
+lint_off -rule PINMISSING -file "*/3rd-party/ao486_MiSTer/rtl/cache/l2_cache.v" -lines 950-1060

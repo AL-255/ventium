@@ -404,7 +404,8 @@ Stores requiring backend-authoritative handling invalidate only their touched
 resident physical tags; the next read drains older writes and refills. Ordinary
 RAM remains on the existing in-place update path. This also handles writable
 UMA/shared windows without sampling their deferred policy at local posted ACK.
-The repair is not yet implemented or standard-suite qualified at this checkpoint.
+The repair is now implemented and leaf-qualified; the new cold standard-suite
+round remains running and is not yet qualified.
 
 The mutation observer is host-only and default off. It matches all 80,000
 control retirements byte-for-byte, the exact endpoint, five L1 profiler rows and
@@ -490,8 +491,8 @@ reference-CRC checks. Their printed elapsed time still includes that finite
 startup-offset bias; the actual-cycle denominators above remain authoritative
 for modeled CM/MHz. Neither timer values nor guest code were modified.
 
-Current cold raw-P54 full-PC gameplay IPC is **0.41310006** over cycles
-2,100,000,000–2,200,000,000 on binary
+Current verified cold raw-P54 full-PC gameplay IPC is **0.45078423** over cycles
+2,700,000,000–2,800,000,000 on binary
 `b7cfbec7ee31c7ff7f81abf994995431f3c660b913ae2a9d3176c6d22a2db0ae`.
 The actual private executable's SHA-256 was rechecked at the end of this window.
 The retained earlier same-build interval below measured **0.42750217** over
@@ -536,13 +537,79 @@ and retirements 623,538,067–668,418,001. Its 44,879,934 retirements equal
 the loading console. The frozen private binary remains `b7cfbec7…`; this is
 another scene-dependent gameplay measurement, not timedemo completion or FPS.
 
-The latest verified 2.1B–2.2B window has clocks 2,099,999,637–2,199,999,637
+The prior verified 2.1B–2.2B window has clocks 2,099,999,637–2,199,999,637
 and retirements 711,661,379–752,971,385: **41,310,006 / 100,000,000 =
 0.41310006 IPC**. Its 31,533,079 U plus 9,776,927 V retirements reconcile
 exactly. Raw captures 13/14 show combat followed by an advancing corpse/health/
 rocket scene, with world, weapon and HUD and no startup console. This measurement
 precedes the quota logging gap and any proposed cache-policy change; it is
 not an isolated performance improvement, timedemo completion or FPS.
+
+The latest verified 2.7B–2.8B window has clocks 2,699,999,637–2,799,999,637
+and retirements 970,383,698–1,015,462,121: **45,078,423 / 100,000,000 =
+0.45078423 IPC**. The 33,872,781 U plus 11,205,642 V retirements reconcile
+exactly, and raw endpoint captures 19/20 show advancing gameplay. It is fully
+after quota logging recovered and still predates the cache-policy candidate.
+
+### Cache-policy implementation and new cold acceptance round
+
+The generic, optional `VEN_L1D_STORE_POLICY` interface separates cached-byte
+updates from actual write permission. Disabled active bytes suppress local data
+updates and invalidate only their accepted resident physical tags. Both arrays,
+crossing writes and independent U/V store owners are covered. The ao486 shim
+classifies each effective backend byte after the existing address fold and A20
+gate; all `C0000–FFFFF` stores use backend-authoritative refill. No write strobe,
+posted ordering, acknowledgement, read cacheability or ordinary RAM fast path
+is changed. No application-specific address/opcode recognition, snapshot repair, global flush or
+pairing disable is introduced. See [the interface contract](rtl-interface.md).
+
+The actual L1/AXI/bridge/ao486-L2 composition has a clean negative witness in both
+packed and banked modes: **907 ROM-value mismatches each, zero ordinary-RAM
+errors**. After the fix, packed and banked modes each pass **20,948 checks**;
+the paired-store profile passes **21,216**, all with zero errors. Coverage
+includes all strobes, crossing and RAM/ROM boundary accesses, code/data reads,
+both saved windows, independent channel backpressure, UMA and older queued
+shared-window enable ordering, 18 atomic U/V cases, inactive/zero-strobe policy,
+128 zero-extra-RAM-read checks and same-set unrelated-way preservation.
+The source-extracted real shim helper/calls pass **186,880 strobe checks** over
+5,840 address/A20/fold cases. These are directed regressions, not OS acceptance.
+Clean negative evidence remains `/tmp/ventium-l1axi-ao486-romwrite.Vxr4Q9/`;
+green evidence is
+`verif/l1/obj_dir_store_policy_scratch/ventium-l1axi-ao486-romwrite.vhhQql/`.
+Disposable precompiled-header caches were removed from closed negative builds;
+their frozen source, executable and logs remain and the caches are regenerable.
+
+Exact **107-macro shim** strict structural lint passes. Sixteen pre-existing
+omitted pins were made explicit: unused debug/reset outputs remain open, and
+the inactive debug hook input is tied to zero; reset behavior is unchanged.
+The direct-memory raw-standard TB passes 107 functional QEMU comparisons and
+19 hard timing bands after an active-source equivalence proof: 85 other compiled
+inputs are unchanged, and the sole changed top preprocesses identically under
+its exact 25 macros (neither L1/AXI nor the store-policy define is enabled).
+All 20 non-gating exact cycle comparisons still diverge. This fast result does
+not provide cache-path coverage or qualify the complete standard suite.
+
+New full-PC candidate SHA-256:
+`2e63e532a8866e101cecbcdf56ebf66c186a0c0d88ffd91e0f4f554ab24c9b83`;
+compile record:
+`13900362ff9cee6e2d850c8c5afef29e8e9296a47c8e4ef83e4157de544a84a5`.
+All **204** captured inputs stayed unchanged through the 37.067-second,
+32-job finely split build in the serialized 16-GiB/128-task scope. Generated
+output and compiler scratch use the root filesystem, not the full external
+scratch volume or quota-limited `/tmp`. The build is a frozen dirty-worktree
+artifact, not a claim that unrelated pending changes are all committed.
+
+Cold Win95 and DOS Quake runs now use that candidate, private fresh disk copies,
+the unchanged pinned ROM pair and guest clock configuration. They run on CPUs
+12/14, each with 2 GiB, no swap and 32 tasks; the older Quake baseline on CPU 13
+is retained unchanged for now. Win95 has a 3B-cycle/12-hour safety bound; Quake
+has a 30B-cycle/72-hour bound so a short cap cannot substitute for completing
+969 frames. Both runs remain **unqualified**: no desktop or completed timedemo
+has been established. Their artifacts are under
+`ao486-sim/obj_dir_standard_acceptance_sep30.Au6tZL/`. Candidate `2e63e532…`
+has no verified gameplay IPC yet. The two unchanged 1,500-iteration CoreMark
+seed images are also being rerun on CPUs 2/3 with the approved 60-minute cap,
+using the source-equivalent direct-memory TB; they do not exercise L1/AXI.
 
 Evidence: `/tmp/ventium-standard-sep30.qUCAcQ/` (full-PC inputs and logs),
 `/tmp/ventium-coremark-matrix.kpjs_mph/` (long seeds),

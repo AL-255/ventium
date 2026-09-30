@@ -106,6 +106,32 @@ module ven_ao486_shim
         return a20_enable ? phys : (phys & ~40'h0000_0010_0000);   // A20 mask bit 20
     endfunction
 
+`ifdef VEN_L1D_STORE_POLICY
+    // ao486's C0000-FFFFF backing can ignore writes (ROM) or become writable
+    // under UMA/shared-folder policy. Never speculate its deferred bus outcome
+    // into the L1: suppress local updates and invalidate only the written line.
+    // Keep normal RAM updates and all posted bus writes/ACKs unchanged.
+    function automatic logic [3:0] pc_store_update_mask(
+        input logic [31:0] phys_addr, input logic a20_on);
+        logic [31:0] byte_addr, backend_addr;
+        for (int byte_lane = 0; byte_lane < 4; byte_lane++) begin
+            byte_addr = phys_addr + 32'(byte_lane);
+            backend_addr = {4'd0, byte_addr[27:0]}; // KV260 physical address fold
+            if (!a20_on) backend_addr[20] = 1'b0;
+            pc_store_update_mask[byte_lane] =
+                (backend_addr < 32'h000C_0000) || (backend_addr >= 32'h0010_0000);
+        end
+    endfunction
+    logic [31:0] store_policy_addr;
+    logic [3:0] store_policy_update_mask;
+    assign store_policy_update_mask = pc_store_update_mask(store_policy_addr, a20_enable);
+`ifdef VEN_P54_DUAL_STORE_PAIR
+    logic [31:0] store_pair_policy_addr;
+    logic [3:0] store_pair_policy_update_mask;
+    assign store_pair_policy_update_mask = pc_store_update_mask(store_pair_policy_addr, a20_enable);
+`endif
+`endif
+
     // -------------------------------------------------------- I/O split adapter
     // The ao486 iobus FSM (soc/iobus.v) re-triggers a NEW bus transaction every time it
     // returns to S_IDLE with cpu_read_do/cpu_write_do still asserted. Ventium HOLDS v_io_req
@@ -219,6 +245,14 @@ module ven_ao486_shim
                               // read-response mis-sync (HP0 fill of 0x700 returns stale QUAKE/WIN95 dirents),
                               // NOT L1D staleness. golden's ~0x600 per-byte re-fills only STRESS that mis-sync.
                               // Reverting to the proven ao486 path: golden off + L2 enabled + no barrier.
+`ifdef VEN_L1D_STORE_POLICY
+        .store_policy_addr(store_policy_addr),
+        .store_policy_update_mask(store_policy_update_mask),
+`ifdef VEN_P54_DUAL_STORE_PAIR
+        .store_pair_policy_addr(store_pair_policy_addr),
+        .store_pair_policy_update_mask(store_pair_policy_update_mask),
+`endif
+`endif
         .m_axi_awid(m_awid), .m_axi_awaddr(m_awaddr), .m_axi_awlen(m_awlen),
         .m_axi_awsize(m_awsize), .m_axi_awburst(m_awburst), .m_axi_awlock(m_awlock),
         .m_axi_awcache(m_awcache), .m_axi_awprot(m_awprot), .m_axi_awqos(m_awqos),
@@ -232,7 +266,7 @@ module ven_ao486_shim
         .m_axi_arvalid(m_arvalid), .m_axi_arready(m_arready),
         .m_axi_rid(m_rid), .m_axi_rdata(m_rdata), .m_axi_rresp(m_rresp),
         .m_axi_rlast(m_rlast), .m_axi_rvalid(m_rvalid), .m_axi_rready(m_rready),
-        .bus_err(v_bus_err), .shutdown(1'b0), .m_idle(v_m_idle),
+        .bus_err(v_bus_err), .fast_reset_req(), .shutdown(1'b0), .m_idle(v_m_idle),
         // KV260 observability + external interrupt seam
         .retire_count(v_retire_count),
         .soc_en     (1'b1),
@@ -245,7 +279,11 @@ module ven_ao486_shim
         , .dbg_retire_valid(d_retire_valid), .dbg_eip(d_eip), .dbg_cs(d_cs), .dbg_esp(d_esp),
         .dbg_eflags(d_eflags), .dbg_state(d_state), .dbg_int_vec(d_int_vec), .dbg_fault_pc(d_fault_pc),
         .dbg_cr0(d_cr0), .dbg_rd_valid(d_rd_valid), .dbg_rd_addr(d_rd_addr), .dbg_rd_data(d_rd_data),
+        .dbg_fctrl(), .dbg_fxop(), .dbg_ibuf(), .dbg_seg(), .dbg_de_num(), .dbg_de_info(),
+        .dbg_hook_cfg(16'd0), .dbg_hook_seq(), .dbg_hook_eip(),
+        .dbg_hook_opa(), .dbg_hook_opb(), .dbg_hook_meta(),
         .dbg_cmp_cfg(dbg_cmp[31:0]), .dbg_cmp_range(dbg_cmp[63:32]), .dbg_cmp_freeze(d_cmp_freeze),
+        .dbg_div_eip(), .dbg_div_eip70(), .dbg_div_info(),
         .dbg_halt_req(dbg_cmp[64]), .dbg_step(dbg_cmp[65]), .dbg_bp_en(dbg_cmp[66]),
         .dbg_bp_addr(dbg_cmp[98:67]), .dbg_bp_clr(dbg_cmp[99]),
         .dbg_arch_sel(dbg_cmp[106:100]), .dbg_arch_data(d_arch_data), .dbg_halted(d_halted)

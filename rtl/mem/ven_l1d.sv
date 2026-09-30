@@ -85,6 +85,12 @@ module ven_l1d #(
     input  logic [31:0] c_addr,
     input  logic [31:0] c_wdata,
     input  logic [3:0]  c_wstrb,
+`ifdef VEN_L1D_STORE_POLICY
+    // Cached-store advisory, not a bus permission: zero suppresses a local
+    // byte update and invalidates its resident line after the accepted store.
+    // The original write/strobes still reach the ordered backing interface.
+    input  logic [3:0]  c_store_update_mask,
+`endif
     output logic [31:0] c_rdata,
     output logic        c_ack,
 `ifdef VEN_P54_DUAL_STORE_PAIR
@@ -94,6 +100,9 @@ module ven_l1d #(
     input  logic [31:0] c_pair_addr,
     input  logic [31:0] c_pair_wdata,
     input  logic [3:0]  c_pair_wstrb,
+`ifdef VEN_L1D_STORE_POLICY
+    input  logic [3:0]  c_pair_store_update_mask,
+`endif
     output logic        c_pair_ready,
     output logic        c_pair_ack,
 `endif
@@ -679,12 +688,19 @@ module ven_l1d #(
         // Distinct banks each have one write port; V selects its own physical
         // set/way rather than borrowing U's row on a different-line hit.
         wr_mask = c_pair_wstrb;
+`ifdef VEN_L1D_STORE_POLICY
+        wr_mask = c_pair_wstrb & c_pair_store_update_mask;
+`endif
         wr_data = c_pair_wdata;
 `endif
       end else if (bank_store_we) begin
         for (int i = 0; i < 4; i++) begin
           line_byte = c_addr[4:0] + 5'(i);
-          if (c_wstrb[i] && line_byte[4:2] == 3'(bank)) begin
+          if (c_wstrb[i] && line_byte[4:2] == 3'(bank)
+`ifdef VEN_L1D_STORE_POLICY
+              && c_store_update_mask[i]
+`endif
+             ) begin
             wr_mask[line_byte[1:0]] = 1'b1;
             wr_data[8*line_byte[1:0] +: 8] = c_wdata[8*i +: 8];
           end
@@ -1436,6 +1452,33 @@ module ven_l1d #(
   // speed -> the boot can actually reach the desktop.
   assign txn_done = golden && c_req && c_ack && (c_addr[31:20] == 12'h000);
 
+`ifdef VEN_L1D_STORE_POLICY
+  // Policy decisions are byte-relative to the producer, just like its strobes.
+  // Do not turn an unwritten zero-mask lane into an invalidation. A crossing
+  // write may disable bytes in either physical line independently.
+  logic store_policy_drop_first, store_policy_drop_next;
+`ifdef VEN_P54_DUAL_STORE_PAIR
+  logic store_pair_policy_drop;
+`endif
+  always_comb begin
+    store_policy_drop_first = 1'b0;
+    store_policy_drop_next = 1'b0;
+    for (int byte_lane = 0; byte_lane < 4; byte_lane++) begin
+      if (c_wstrb[byte_lane] && !c_store_update_mask[byte_lane]) begin
+        if (({1'b0,c_addr[OFFW-1:0]} + (OFFW+1)'(byte_lane)) >= (OFFW+1)'(L1_LINE))
+          store_policy_drop_next = 1'b1;
+        else
+          store_policy_drop_first = 1'b1;
+      end
+    end
+`ifdef VEN_P54_DUAL_STORE_PAIR
+    // The existing pair admission accepts only aligned, within-line dwords.
+    // Its independent physical lookup must not borrow U's tag or policy.
+    store_pair_policy_drop = |(c_pair_wstrb & ~c_pair_store_update_mask);
+`endif
+  end
+`endif
+
   // (STLD store-to-load forwarding REMOVED — see the serve-path note above. It was built
   // for a misdiagnosed coherence theory (the real bug was the 16-bit LGDT base) and its
   // indefinite-lifetime entries overlaid stale CPU-write data onto PS-updated lines.)
@@ -1727,7 +1770,11 @@ module ven_l1d #(
               for (int i = 0; i < 4; i++) begin
                 logic [4:0] line_byte;
                 line_byte = c_addr[4:0] + 5'(i);
-                if (c_wstrb[i])
+                if (c_wstrb[i]
+`ifdef VEN_L1D_STORE_POLICY
+                    && c_store_update_mask[i]
+`endif
+                   )
                   dc_line[{set_c, hit_way}][8*line_byte +: 8] <= c_wdata[8*i +: 8];
               end
 `endif
@@ -1924,6 +1971,30 @@ module ven_l1d #(
         dc_lru[pair_set[0]] <= pair_way[0];
       if (pair_req_valid[1] && pair_req_ready[1])
         dc_lru[pair_set[1]] <= pair_way[1];
+`endif
+`ifdef VEN_L1D_STORE_POLICY
+      // Acceptance-qualified, targeted invalidation wins over the ordinary
+      // write-hit/MRU handling. The backing may ignore a ROM write, or its
+      // dynamic policy may allow that write after an older posted enable.
+      // Either way, a later miss drains the ordered write buffers and refills
+      // the actual backing bytes; retaining the old tag/data would be stale.
+      if ((st == L1_IDLE) && !mc_lookup_next && !stream_path &&
+          c_req && c_we && c_ack) begin
+        if (store_policy_drop_first) begin
+          if (hit0) dc_val[set_c][0] <= 1'b0;
+          if (hit1) dc_val[set_c][1] <= 1'b0;
+        end
+        if (store_policy_drop_next) begin
+          if (hit_n0) dc_val[set_n][0] <= 1'b0;
+          if (hit_n1) dc_val[set_n][1] <= 1'b0;
+        end
+      end
+`ifdef VEN_P54_DUAL_STORE_PAIR
+      if (c_pair_ack && store_pair_policy_drop) begin
+        if (store_pair_hit0) dc_val[store_pair_set][0] <= 1'b0;
+        if (store_pair_hit1) dc_val[store_pair_set][1] <= 1'b0;
+      end
+`endif
 `endif
       // #35 external flush: clear every valid bit (last-write-wins over the case's
       // tag/val writes, so an invalidation always takes priority). The next reads

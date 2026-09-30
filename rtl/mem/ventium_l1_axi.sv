@@ -117,11 +117,18 @@ module ventium_l1_axi #(
     input  logic        core_lock_hold,
     input  logic [31:0] core_wdata,
     input  logic [3:0]  core_wstrb,
+`ifdef VEN_L1D_STORE_POLICY
+    // Local cache-update policy only. Original bus writes remain unchanged.
+    input  logic [3:0]  core_store_update_mask,
+`endif
 `ifdef VEN_P54_DUAL_STORE_PAIR
     input  logic        core_store_pair_req,
     input  logic [31:0] core_store_pair_addr,
     input  logic [31:0] core_store_pair_wdata,
     input  logic [3:0]  core_store_pair_wstrb,
+`ifdef VEN_L1D_STORE_POLICY
+    input  logic [3:0]  core_store_pair_update_mask,
+`endif
     output logic        core_store_pair_ready,
     output logic        core_store_pair_ack,
 `endif
@@ -1351,6 +1358,9 @@ module ventium_l1_axi #(
       .c_addr  (core_addr),
       .c_wdata (core_wdata),
       .c_wstrb (core_wstrb),
+`ifdef VEN_L1D_STORE_POLICY
+      .c_store_update_mask(core_store_update_mask),
+`endif
       .c_rdata (l1d_c_rdata),
       .c_ack   (l1d_c_ack),
 `ifdef VEN_P54_DUAL_STORE_PAIR
@@ -1358,6 +1368,9 @@ module ventium_l1_axi #(
       .c_pair_addr(core_store_pair_addr),
       .c_pair_wdata(core_store_pair_wdata),
       .c_pair_wstrb(core_store_pair_wstrb),
+`ifdef VEN_L1D_STORE_POLICY
+      .c_pair_store_update_mask(core_store_pair_update_mask),
+`endif
       .c_pair_ready(l1d_store_pair_ready),
       .c_pair_ack(l1d_store_pair_ack),
 `endif
