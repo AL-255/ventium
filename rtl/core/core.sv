@@ -1184,7 +1184,12 @@ module core
                      // get_sp_mask(ss_e2))), applied in the S_IRET_SS arm
                      // itself -- the generic post-process must not merge the
                      // old handler ESP's upper half into it.
-                     || ((state == S_IRET_SS) && iret_ss_commit);
+                     || ((state == S_IRET_SS) && iret_ss_commit)
+                     // A validated nine-dword return into V86 restores FULL
+                     // ESP, even when the old monitor stack has SS.B=0. The
+                     // old stack's implicit-SP merge must not corrupt it.
+                     || ((state == S_IRET) && mem_ack && (int_step == 4'd8)
+                         && iret_to_v86);
   function automatic logic [31:0] stk16(input logic [31:0] off);
     stk16 = stk_is16 ? {16'd0, off[15:0]} : off;
   endfunction
@@ -10282,16 +10287,19 @@ module core
       S_IRET_SS:    cur_lin_nat = (iret_ss[2] ? ldt_base : gdt_base)
                             + {16'd0, iret_ss[15:3], 3'd0} + ({29'd0, int_step[0], 2'b00});
       S_IRET: begin
-                cur_lin_nat = int_gate_op16
-                            ? (seg_base[SG_SS] + stk16(gpr_o[R_ESP] + ({27'd0, int_step, 1'b0})))
-                            : (seg_base[SG_SS] + gpr_o[R_ESP] + ({28'd0, int_step} * 32'd4));
-                // The bus arm pops a dword and masks; the architectural slot of
-                // a 16-bit IRETW is a WORD, so the segment extent check charges
-                // 2 bytes (a topmost word ending at the bound is legal). The
-                // override leaves cur_size -- and therefore the bus beat -- at
-                // the dword the driver reads.
-                seg_ext_ovr   = 8'd2;
-                seg_ext_ovr_v = int_gate_op16;
+                // Operand size selects slot width, not stack-address size.
+                // SS.B=0 (including V86) wraps every IRET slot through SP,
+                // even for 66 CF and an explicitly written high ESP half.
+                // pv86iretstack case 1 previously raised #SS before its first
+                // pop at DEAD:EFFC although the legal frame was at SS:EFFC.
+                cur_lin_nat = seg_base[SG_SS]
+                            + stk16(gpr_o[R_ESP] + (int_gate_op16
+                                ? {27'd0, int_step, 1'b0}
+                                : {26'd0, int_step, 2'b00}));
+                // The physical read, fragment plan and segment extent all
+                // use the architectural slot width. A FLAGS word at page-2
+                // must not probe the following (possibly absent) page.
+                cur_size = int_gate_op16 ? 4'd2 : 4'd4;
               end
       // REVIEW2 C-04: S_LTR reads the GDT TSS descriptor; S_INT_TSS reads TSS.ssN:espN;
       // S_INT_SS reads the new SS descriptor. All three are architecturally LINEAR and

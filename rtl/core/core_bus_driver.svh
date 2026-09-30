@@ -568,12 +568,10 @@
       end
       S_IRET: begin bd_req =1'b1;                // pop EIP/CS/EFLAGS[+ESP/SS] asc
         // (REVIEW1_Aug2 C-01: SS-relative -- the segment identity block above.)
-        // 16-bit IRETW (same-priv only): ascending 2-byte pop IP @SP, CS @SP+2,
-        // FLAGS @SP+4 (mirrors S_RMIRET). The memmodel returns a 32-bit dword at the
-        // byte address (read32 @ addr), so the low 16 bits carry the popped word; the
-        // S_IRET arm masks to [15:0] for IP/CS and merges FLAGS' high half. Inter-priv
-        // / V86 IRET is never 16-bit in this corpus, so S_IRET_SS keeps the *4 stride.
-        // (R2-M02: addresses via cur_lin.)
+        // Read only the current word/dword slot, matching cur_size. In
+        // particular, uncached/MMIO stack reads may not consume two extra
+        // bytes. Addresses and SS.B wrapping come from cur_lin (R2-M02).
+        bd_wstrb = int_gate_op16 ? 4'b0011 : 4'b1111;
       end
       S_INT_CS_RET: begin bd_req =1'b1;          // reload returned-to CS descriptor (TI: GDT/LDT; cur_lin)
       end
