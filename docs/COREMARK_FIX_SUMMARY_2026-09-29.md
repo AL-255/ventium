@@ -624,12 +624,22 @@ has a 30B-cycle/72-hour bound so a short cap cannot substitute for completing
 has been established. Their artifacts are under
 `ao486-sim/obj_dir_standard_acceptance_sep30.Au6tZL/`. Candidate `2e63e532…`
 has no verified gameplay IPC yet. The two unchanged 1,500-iteration CoreMark
-seed images are also being rerun on CPUs 2/3 with the approved 60-minute cap,
-using the source-equivalent direct-memory TB; they do not exercise L1/AXI.
+seed images completed their new runs on CPUs 2/3 within the approved 60-minute
+cap: **38.84 / 38.97 minutes**, simulator and guest exit zero, all five CRCs
+matching reference, and guest durations **10.888 / 10.871 seconds**. The
+performance seed used **713,805,640 clocks / 542,165,430 retirements**, scoring
+**2.1014123677 CM/MHz**; validation used **712,760,043 / 541,458,819**, scoring
+**2.1044950748 CM/MHz**. Every clock/retirement/clock-query/CRC/guest-time field
+matches the prior same-binary run exactly. Binary, images, compile record and
+generated headers stayed unchanged. These are the source-equivalent
+direct-memory core tests, not L1/AXI policy acceptance. Closed receipts:
+`verif/tb/obj_dir_coremark_standard_store_policy_sep30/ventium-coremark-matrix.n6rkp_jg/`.
 At the 13:47 UTC observation, cold Win95 had passed 442M cycles without the
 control's 425M VDD/protection error, but had not emitted an inspectable desktop
 capture. Both CoreMark seeds had passed 603M clocks without a terminal error;
-those intermediate counters are not completed correctness results or scores.
+those intermediate counters were not completed correctness results or scores.
+The subsequently closed CoreMark results above supersede that pending status;
+Windows desktop and Quake timedemo are still unqualified.
 
 Evidence: `/tmp/ventium-standard-sep30.qUCAcQ/` (full-PC inputs and logs),
 `/tmp/ventium-coremark-matrix.kpjs_mph/` (long seeds),
