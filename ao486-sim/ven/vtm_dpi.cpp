@@ -12,9 +12,12 @@
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
+#include "../../tools/retire_fault_ring.h"
 extern uint64_t *ddr;   // cosim guest memory (sim_ven.cpp)
 extern double sc_time_stamp();  // absolute harness cycle, including restored time
 extern "C" int ao486_peek_guest(unsigned int phys, void *dst, int nbytes);  // guest-RAM read (sim_ven.cpp)
+// Disabled by default; the cold-run harness owns this passive bounded observer.
+ven_host::RetireFaultRing *g_vtm_fault_ring = nullptr;
 
 // ---- last-retired architectural snapshot (read by the harness trace) ----------
 extern "C" {
@@ -52,6 +55,17 @@ extern "C" void vtm_retire(
     g_vtm_eax=eax; g_vtm_ecx=ecx; g_vtm_edx=edx; g_vtm_ebx=ebx;
     g_vtm_esp=esp; g_vtm_ebp=ebp; g_vtm_esi=esi; g_vtm_edi=edi;
     g_vtm_cs=cs; g_vtm_ss=ss; g_vtm_ds=ds; g_vtm_es=es; g_vtm_fs=fs; g_vtm_gs=gs;
+    if (g_vtm_fault_ring && g_vtm_fault_ring->enabled()) {
+        ven_host::FaultRetireSnapshot snapshot;
+        snapshot.retire = g_vtm_retires;
+        snapshot.core_n = n;
+        snapshot.cycle = uint64_t(sc_time_stamp());
+        snapshot.fetch_pc = pc;
+        snapshot.eflags = eflags;
+        snapshot.gpr = {eax, ecx, edx, ebx, esp, ebp, esi, edi};
+        snapshot.seg = {cs, ss, ds, es, fs, gs};
+        g_vtm_fault_ring->retire(snapshot);
+    }
     if (g_vtm_dump > 0 && g_vtm_retires >= g_vtm_dump_start) {
         fprintf(stderr,
                 "VTM n=%llu %04x:%08x fl=%08x ax=%08x bx=%08x cx=%08x dx=%08x si=%08x di=%08x bp=%08x sp=%08x ds=%04x es=%04x ss=%04x fs=%04x gs=%04x cyc=%llu\n",

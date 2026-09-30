@@ -28,6 +28,7 @@
 #include "profile_code.h"
 #include "../../tools/rep_accounting.h"
 #include "../../tools/sim_stop_request.h"
+#include "../../tools/retire_fault_ring.h"
 #include <cerrno>
 #ifdef VEN_STATE_DELTA_HOST
 #if !__has_include("ven_state_fields.inc")
@@ -65,6 +66,13 @@ static int      g_l1dis = 0, g_l2dis = 0;
 static uint64_t g_save_at = 0;                     // --save-at N: snapshot at cycle N (one-shot), then continue
 static uint64_t g_stop_retire = 0;                 // --ven-stop-retire N: stop after N cumulative retirements
 static const char *g_stop_request_path = nullptr;  // --stop-request PATH: host-only graceful stop, not a pass
+static ven_host::FaultRingOptions g_fault_ring_options;
+static ven_host::RetireFaultRing g_fault_ring;
+extern ven_host::RetireFaultRing *g_vtm_fault_ring;
+static void fault_ring_fail(const char *reason) {
+    fprintf(stderr, "[FAULT-RING-ERROR] %s\n", reason);
+    std::exit(2);
+}
 static uint64_t g_save_every = 0;                  // --save-every N: re-snapshot every N cycles (cycle-stamped)
 static uint64_t g_next_save = 0;                   // internal: next --save-every threshold
 static const char *g_save_file = "ven_post.snap";  // --save-file FN (base name; --save-every appends .<cyc>)
@@ -494,6 +502,67 @@ static auto state_trace_fp_response(const Root &r, int)
 }
 template<class Root>
 static int state_trace_fp_response(const Root &, long) { return -1; }
+
+// Generated model fields are read-only. Fail closed if a build optimizes away
+// any required observer input; adding this host tool must not add RTL probes.
+#define FR_CORE(name) r.system__DOT__u_cpu__DOT__u_core__DOT__u_core__DOT__##name
+#define FR_TOP(name) r.system__DOT__u_cpu__DOT__u_core__DOT__##name
+template<class Root>
+static auto fault_ring_edge(const Root &r, ven_host::FaultCoreEdge &e, int)
+    -> decltype((void)FR_CORE(state), (void)FR_CORE(eip), (void)FR_CORE(eflags),
+                (void)FR_CORE(q_pc), (void)FR_CORE(q_kind),
+                (void)FR_CORE(int_src_pc), (void)FR_CORE(int_ret_eip),
+                (void)FR_CORE(int_vec), (void)FR_CORE(int_err),
+                (void)FR_CORE(int_has_err), (void)FR_CORE(int_step),
+                (void)FR_CORE(int_gate_op16), (void)FR_CORE(iret_eip),
+                (void)FR_CORE(iret_cs), (void)FR_CORE(iret_eflags),
+                (void)FR_CORE(creg0), (void)FR_CORE(creg2),
+                (void)FR_CORE(creg3), (void)FR_CORE(creg4),
+                (void)FR_CORE(cur_lin_nat), (void)FR_CORE(cur_lin),
+                (void)FR_CORE(bd_addr), (void)FR_CORE(bd_we),
+                (void)FR_CORE(mem_ack), (void)FR_CORE(mem_rdata),
+                (void)FR_CORE(cur_size), (void)FR_CORE(ss_b),
+                (void)FR_CORE(dbg_fault_cnt_q), (void)FR_CORE(gpr_we),
+                (void)FR_CORE(gpr_wd)[4], (void)FR_CORE(gpr_o)[7],
+                (void)FR_CORE(seg_sel)[5], (void)FR_CORE(seg_base)[5],
+                (void)FR_CORE(ibuf)[15], (void)FR_TOP(core_mem_req),
+                (void)FR_TOP(core_mem_wstrb), bool()) {
+    e.cycle = main_time;
+    e.retires = g_vtm_retires;
+    e.state = FR_CORE(state); e.eip = FR_CORE(eip); e.eflags = FR_CORE(eflags);
+    e.q_pc = FR_CORE(q_pc); e.q_kind = FR_CORE(q_kind);
+    e.int_src_pc = FR_CORE(int_src_pc); e.int_ret_eip = FR_CORE(int_ret_eip);
+    e.int_vec = FR_CORE(int_vec); e.int_err = FR_CORE(int_err);
+    e.int_has_err = FR_CORE(int_has_err); e.int_step = FR_CORE(int_step);
+    e.int_gate_op16 = FR_CORE(int_gate_op16);
+    e.iret_eip = FR_CORE(iret_eip); e.iret_cs = FR_CORE(iret_cs);
+    e.iret_eflags = FR_CORE(iret_eflags);
+    e.cr0 = FR_CORE(creg0); e.cr2 = FR_CORE(creg2);
+    e.cr3 = FR_CORE(creg3); e.cr4 = FR_CORE(creg4);
+    e.cur_lin_nat = FR_CORE(cur_lin_nat); e.cur_lin = FR_CORE(cur_lin);
+    // core.sv assigns mem_addr=bd_addr and mem_we=bd_we. Record the actual
+    // shaped request strobes, not an invented size-derived mask.
+    e.mem_addr = e.bd_addr = FR_CORE(bd_addr); e.mem_we = FR_CORE(bd_we);
+    e.mem_req = FR_TOP(core_mem_req); e.mem_ack = FR_CORE(mem_ack);
+    e.mem_rdata = FR_CORE(mem_rdata); e.cur_size = FR_CORE(cur_size);
+    const uint8_t strobes = FR_TOP(core_mem_wstrb);
+    e.read_strobes = e.mem_we ? 0 : strobes;
+    e.write_strobes = e.mem_we ? strobes : 0;
+    e.esp_write_enable = (FR_CORE(gpr_we) >> 4) & 1u;
+    e.esp_write_data = FR_CORE(gpr_wd)[4];
+    e.ss_b = FR_CORE(ss_b); e.fault_count = FR_CORE(dbg_fault_cnt_q);
+    for (unsigned k = 0; k < 8; ++k) e.gpr[k] = FR_CORE(gpr_o)[k];
+    for (unsigned k = 0; k < 6; ++k) {
+        e.seg[k] = FR_CORE(seg_sel)[k]; e.base[k] = FR_CORE(seg_base)[k];
+    }
+    for (unsigned k = 0; k < 16; ++k) e.ibuf[k] = FR_CORE(ibuf)[k];
+    return true;
+}
+template<class Root>
+static bool fault_ring_edge(const Root &, ven_host::FaultCoreEdge &, long) { return false; }
+#undef FR_CORE
+#undef FR_TOP
+
 static void tick() {
 #ifdef VEN_HAVE_STATE_DELTA
     if (g_delta_armed && !g_delta_open && main_time >= g_delta_start) {
@@ -506,6 +575,13 @@ static void tick() {
     }
 #endif
     set_clocks(0); top->eval();
+    if (g_fault_ring.enabled()) {
+        ven_host::FaultCoreEdge before;
+        if (!fault_ring_edge(*top->rootp, before, 0))
+            fault_ring_fail("required model fields are unavailable");
+        if (top->reset) g_fault_ring.reset(before.fault_count);
+        else g_fault_ring.prepare(before);
+    }
     bool rep_owner = false, rep_zero_element = false;
     uint32_t rep_qpc = 0, rep_next_eip = 0;
     if (g_rep_account_enable && !top->reset && main_time >= g_rep_account_start) {
@@ -540,6 +616,14 @@ static void tick() {
             top->rootp->system__DOT__u_cpu__DOT__u_core__DOT__u_core__DOT__state,
             top->rootp->system__DOT__u_cpu__DOT__u_core__DOT__u_core__DOT__ibuf);
     set_clocks(1); step_vga_clock(); top->eval();
+    // Sample registered start_fault outputs on this edge, before any handler
+    // clock or DDR-service eval. DPI callbacks above already filled the ring.
+    if (g_fault_ring.enabled() && !top->reset) {
+        ven_host::FaultCoreEdge after;
+        if (!fault_ring_edge(*top->rootp, after, 0))
+            fault_ring_fail("required model fields are unavailable");
+        g_fault_ring.observe_fault(after);
+    }
     if (g_rep_account_enable && !top->reset && main_time >= g_rep_account_start) {
         const auto *r = top->rootp;
         const unsigned retired = r->system__DOT__u_cpu__DOT__u_core__DOT__core_retire_valid ?
@@ -1042,6 +1126,11 @@ int main(int argc, char **argv) {
     if (const char *e = getenv("FPGA_DDR")) { g_fpga_ddr = atoi(e); fprintf(stderr, "[FPGA_DDR=%d] ven_ddram_axi-like DDRAM (BUSY + %s)\n", g_fpga_ddr, g_fpga_ddr>=2?"HP0 latency/gaps":"golden latency"); }
     uint64_t cycles = 200000000; const char *ide_path = nullptr;
     for (int i = 1; i < argc; i++) {
+        const char *fault_error = nullptr;
+        const int fault_option = ven_host::parse_fault_ring_option(
+            argc, argv, i, g_fault_ring_options, fault_error);
+        if (fault_option < 0) { fprintf(stderr, "%s\n", fault_error); return 2; }
+        if (fault_option) continue;
         if (!strcmp(argv[i], "--cycles") && i+1<argc) cycles = strtoull(argv[++i], 0, 0);
         else if (!strcmp(argv[i], "--rate") && i+1<argc) g_clock_rate = strtoul(argv[++i], 0, 0);
         else if (!strcmp(argv[i], "--rate-rtc")) {
@@ -1173,11 +1262,25 @@ int main(int argc, char **argv) {
         checkpoint_fail("--ven-stop-retire and --save-stop are mutually exclusive");
     if (g_rep_account_enable && g_restore_file)
         checkpoint_fail("REP accounting requires a cold run; host counters are not in native snapshots");
+    if (const char *error = ven_host::validate_fault_ring_options(g_fault_ring_options,
+                                                                g_restore_file != nullptr))
+        fault_ring_fail(error);
     if (g_rep_account_enable && g_rep_account_start >= cycles)
         checkpoint_fail("REP accounting start must precede the stop cycle");
     if (g_kb_script) kb_build_events(g_kb_script);
 
     top = new Vsystem;
+    if (g_fault_ring_options.path) {
+        ven_host::FaultCoreEdge edge;
+        if (!fault_ring_edge(*top->rootp, edge, 0))
+            fault_ring_fail("required model fields are unavailable");
+        if (!g_fault_ring.open(g_fault_ring_options))
+            fault_ring_fail("cannot create the new diagnostic file");
+        g_vtm_fault_ring = &g_fault_ring;
+        fprintf(stderr, "[FAULT-RING] passive cold-run observer: 256 retires, 64 edges, "
+                        "max %u events / 4 MiB; requires VEN_DBG_CORE fault counter\n",
+                g_fault_ring_options.max_events);
+    }
     if (g_delta_path) {
 #ifndef VEN_HAVE_STATE_DELTA
         checkpoint_fail("state-delta requires generated observer; see docs/STATE_DELTA.md");
@@ -1461,6 +1564,15 @@ int main(int argc, char **argv) {
     }
 #endif
     const bool retire_target_met = !g_stop_retire || g_vtm_retires >= g_stop_retire;
+    if (g_fault_ring_options.path) {
+        if (!g_fault_ring.close()) {
+            fprintf(stderr, "[FAULT-RING-ERROR] bounded diagnostic write failed\n");
+            stop_request_exit = 2;
+        }
+        fprintf(stderr, "[FAULT-RING-END] events=%u bytes=%zu\n",
+                g_fault_ring.events(), g_fault_ring.bytes());
+        g_vtm_fault_ring = nullptr;
+    }
     if (!retire_target_met)
         fprintf(stderr, "RETIRE-STOP-FAIL target=%llu actual=%llu cycle=%llu\n",
                 (unsigned long long)g_stop_retire,
