@@ -27,6 +27,7 @@
 #include "rtc_rate.h"
 #include "profile_code.h"
 #include "../../tools/rep_accounting.h"
+#include "../../tools/sim_stop_request.h"
 #include <cerrno>
 #ifdef VEN_STATE_DELTA_HOST
 #if !__has_include("ven_state_fields.inc")
@@ -63,6 +64,7 @@ static uint32_t g_clock_rate = 4000000, g_rtc_rate = 80000, g_rate_vga = 9000000
 static int      g_l1dis = 0, g_l2dis = 0;
 static uint64_t g_save_at = 0;                     // --save-at N: snapshot at cycle N (one-shot), then continue
 static uint64_t g_stop_retire = 0;                 // --ven-stop-retire N: stop after N cumulative retirements
+static const char *g_stop_request_path = nullptr;  // --stop-request PATH: host-only graceful stop, not a pass
 static uint64_t g_save_every = 0;                  // --save-every N: re-snapshot every N cycles (cycle-stamped)
 static uint64_t g_next_save = 0;                   // internal: next --save-every threshold
 static const char *g_save_file = "ven_post.snap";  // --save-file FN (base name; --save-every appends .<cyc>)
@@ -1064,6 +1066,13 @@ int main(int argc, char **argv) {
             g_mem_top_words = (uint64_t)g_mem_mb * 0x20000ull;
         }
         else if (!strcmp(argv[i], "--ide") && i+1<argc) ide_path = argv[++i];
+        else if (!strcmp(argv[i], "--stop-request")) {
+            if (i+1 == argc || !argv[i+1][0]) {
+                fprintf(stderr, "--stop-request requires a nonempty path\n");
+                return 2;
+            }
+            g_stop_request_path = argv[++i];
+        }
         else if (!strcmp(argv[i], "--ven-break-eip") && i+1<argc) {
             g_ven_break_enable = true; g_ven_break_eip = strtoul(argv[++i], 0, 0);
         }
@@ -1223,6 +1232,8 @@ int main(int argc, char **argv) {
             (unsigned long long)cycles);
 
     uint64_t last_report = 0;
+    [[maybe_unused]] bool stop_request_seen = false; // used by optional delta validation
+    int stop_request_exit = 0;
     g_delta_armed = g_delta_path != nullptr;
     while (main_time < cycles && !Verilated::gotFinish()) {
         if (g_ven_break_enable && !g_ven_break_armed &&
@@ -1390,6 +1401,24 @@ int main(int argc, char **argv) {
             fprintf(stderr, "[%10llu] retires=%llu cs=%04x:eip=%08x cr0=%08x cr3=%08x eflags=%08x\n",
                     (unsigned long long)main_time, (unsigned long long)g_vtm_retires,
                     g_vtm_cs, g_vtm_eip, g_vtm_cr0, g_vtm_cr3, g_vtm_eflags);
+            // Check only at the existing progress boundary: no host syscall
+            // per simulated clock, no guest modification or success inference.
+            if (g_stop_request_path) {
+                const auto stop = ven_host::poll_sim_stop_request(g_stop_request_path);
+                if (stop.status == ven_host::SimStopStatus::requested) {
+                    stop_request_seen = true;
+                    fprintf(stderr, "[HOST-STOP] request=%s cycle=%llu; host control only, not a benchmark pass\n",
+                            g_stop_request_path, (unsigned long long)main_time);
+                    break;
+                }
+                if (stop.status == ven_host::SimStopStatus::error) {
+                    stop_request_seen = true;
+                    fprintf(stderr, "[HOST-STOP-ERROR] request=%s: %s\n",
+                            g_stop_request_path, std::strerror(stop.error));
+                    stop_request_exit = 2;
+                    break;
+                }
+            }
         }
         // A dual-issue edge may cross the exact target by one instruction.
         // Report the actual count so fixed-work comparisons can account for it.
@@ -1423,7 +1452,13 @@ int main(int argc, char **argv) {
     }
     if (g_rmtest) rmtest_dump();
 #ifdef VEN_HAVE_STATE_DELTA
-    if (g_delta_armed && !g_state_delta.complete()) checkpoint_fail("incomplete state-delta capture");
+    if (g_delta_armed && !g_state_delta.complete()) {
+        // Host stopping may truncate an optional observation, never make it
+        // valid. Still finalize normally; preserve old behavior without stop.
+        if (!stop_request_seen) checkpoint_fail("incomplete state-delta capture");
+        fprintf(stderr, "SNAPSHOT-ERROR: incomplete state-delta capture after host stop\n");
+        stop_request_exit = 2;
+    }
 #endif
     const bool retire_target_met = !g_stop_retire || g_vtm_retires >= g_stop_retire;
     if (!retire_target_met)
@@ -1432,5 +1467,5 @@ int main(int argc, char **argv) {
                 (unsigned long long)g_vtm_retires,
                 (unsigned long long)main_time);
     top->final(); delete top; free(ddr);
-    return retire_target_met ? 0 : 2;
+    return stop_request_exit ? stop_request_exit : (retire_target_met ? 0 : 2);
 }
