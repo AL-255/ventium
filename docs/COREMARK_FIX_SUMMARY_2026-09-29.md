@@ -135,12 +135,12 @@ evidence paths and remaining work are in
 
 ## September 30: standard-suite continuation (not yet qualified)
 
-Latest status at **18:55 UTC**: the V86-corrected candidate independently passes
+Latest status at **20:03 UTC**: the V86-corrected candidate independently passes
 both complete CoreMark seeds, with every reference CRC and cycle count unchanged.
 Cold Windows 95 has not reached a verified desktop. Cold DOS Quake on the
 previous candidate has reached clear gameplay but has not completed its
-969-frame timedemo. **Latest measured gameplay IPC is 0.41817053**, frozen
-`2e63e532…`, cycles **3.3B–3.4B**. This predates the current candidate
+969-frame timedemo. **Latest measured gameplay IPC is 0.40805858**, frozen
+`2e63e532…`, cycles **4.0B–4.1B**. This predates the current candidate
 `cdcb6faa…`, which has no gameplay measurement yet. It is not timedemo FPS,
 a measured gain from either correctness fix or full-suite PASS.
 
@@ -995,3 +995,125 @@ capture or desktop. Counters differ from old `2e63`; identical control flow is
 not claimed. The early sixteen-event fault ring is exhausted and cannot prove
 absence of later #GPs. The CoreMark suite member passes independently; the
 **full standard suite remains incomplete**, and cold Win95/Quake continue.
+
+### Same-model Win95 transition recorder preparation
+
+The cold `cdcb6faa…` Win95 and Quake acceptance runs are unchanged. A separate
+one-CPU, 2-GiB/no-swap diagnostic cold boot requests a native v4 snapshot at
+393.8M cycles, before the observed first persistent VMM polling region. It uses
+the same original Win95 disk, ROM pair, mouse and 45/45/90-MHz settings. Its
+closed checkpoint plus paired private disk will support a 1M-cycle transition
+trace; neither a saved checkpoint nor a diagnostic replay counts as desktop
+acceptance. No semaphore, virtual-IRQ bit, timer or EOI is patched.
+
+The host-only recorder was relinked in private copy
+`ao486-sim/obj_dir_ven_state_v86_sep30.sLMWqy/`, without Verilator or an FPGA
+build. Its actual compile/link log is `state-relink.retry.log`; the new profiler
+SHA-256 is `b4e835f8b04c0b5be9fdcd9dd3caf25510dd8c8b084af9ee4d7808d0d3538669`.
+All **120 generated model-file/archive hashes** match both this copy and the
+original frozen model. The original `cdcb` executable, host object and sources
+remain unchanged. The generated field audit covers **12,767 retained numeric
+fields**, including all **12,762 serializer fields**. Scheduler queue effects
+are retained in destination arrays; external DDR/host/disk state is not in the
+internal delta file. This is not a standalone full-machine checkpoint.
+
+The first private relink attempt incorrectly treated an up-to-date Make target
+as success. It was rejected, and its log/receipt are retained as
+`state-relink.log` / `ven_state_relink.first-no-rebuild.json`. The helper now
+keeps the real relative dependency spelling, requires actual object rebuild and
+link evidence, accepts only the exact generated legacy/standard target shapes,
+and forwards the real inherited build-lock descriptors. Seventeen host tests
+pass, including actual GNU Make negative/positive reproduction. The successful
+receipt SHA-256 is
+`941b0399cc89034436a6819a890d8e7e06545bd8a096ed5fa4d20441fa320f5d`.
+This proves model identity and host compilation, **not yet recorder
+noninterference**: frozen-executable pilot, OFF/ON native-state/disk comparisons
+and complete trace reconstruction remain required before using trace evidence.
+
+The diagnostic cold run closed normally at **393,800,000 clocks / 71,933,995
+retires**, with actual child exit/wait zero and supervisor/child PIDs absent.
+Its journal records completion at 19:49:20 UTC, 36m50.352s wall, no OOM kill;
+the 2-GiB peak includes charged file cache and generated reclaim events. It is
+`clean_exit_unqualified`, not desktop PASS. Snapshot SHA-256:
+`feaf09d900a763fd6d83edfa9b73669edae7cd2a15f6d609dec0369143241cde`;
+closed paired disk SHA-256:
+`0dbb5b8d2f893a14df3201e3d7d98d52331e950742003f3554378f9e1517c50b`.
+The native v4 envelope independently checks the current root checksum
+`0x7d41468ce8a23b50`, 424,182 serialized bytes, 12,762 fields, ATA extent 18,760,
+matching 56-byte contexts and trailer. The ATA host ABI is unchanged; the
+earlier IDE sidecar removal changed retained RTL serialization. Older `2e63`
+native snapshots remain incompatible and are not used.
+
+The verified pair is preserved as `before-wait.bundle/` under that diagnostic
+directory; its canonical `gameplay.snap` filename does **not** imply gameplay.
+The unchanged `cdcb` reference is compared with the host-only `b4e835f8…`
+profiler. The capture wrapper now validates target/receipt/executable and every
+model hash before staging, supports standard-only targets without stale legacy
+aliases, forwards v4/mouse settings to all four passes, and reconstructs both
+pilot and full trace with exact requested start/count/footer before success.
+All **29 host tests** pass, including real miniature corrupt/truncated streams.
+Tooling commits `8c82650` and `1232bb9` are pushed; no RTL change is included.
+The bounded transition capture completed cycles **393.9M–394.9M**, on one CPU
+with private disk copies under the 4-GiB serialized guard. Its frozen-source
+pilot, full trace and noninterference checks all pass. The window diagnoses the
+first wait transition, not the whole preceding boot history.
+
+The verified gameplay baseline at recorder preparation was old `2e63`, profile clocks
+3,699,999,637–3,799,999,637, retirements 1,380,266,095–1,423,284,136:
+**0.43018041 IPC**. U and V contribute 32,750,980 and 10,267,061 retirements,
+which sum exactly. Raw endpoint frames 29/30 advance gameplay. The current
+`cdcb` candidate is still unmeasured; this is not a fix gain or timedemo FPS.
+
+The latest completed older-build window is **3.8B–3.9B**: profile clocks
+3,799,999,637–3,899,999,637 and retirements
+1,423,284,136–1,466,412,425, **0.43128289 IPC**. U contributes 32,212,142
+and V 10,916,147 retirements, summing exactly to 43,128,289. Raw frames 30/31
+advance into the Nails pickup. The private executable remains full SHA-256
+`2e63e532a8866e101cecbcdf56ebf66c186a0c0d88ffd91e0f4f554ab24c9b83`.
+Its counters also match the older b7 control at these windows; both logs and
+binary identities were independently checked, not substituted. Current `cdcb`
+gameplay, Win95 desktop and timedemo completion remain unqualified.
+
+### Qualified million-cycle Win95 transition capture
+
+Artifacts: `capture-tmp/ventium-state-delta.cb8zyvwg/` below the current Win95
+diagnostic directory. The guard/driver was reaped with actual exit zero. The
+pilot independently reconstructs all 1,000 cycles and matches the original
+`cdcb` executable's terminal native state and disk byte-for-byte. The full OFF
+and ON passes end at **394,900,000 clocks / 72,080,758 retires**, in the VMM
+polling region, and likewise match both native terminal state and disk.
+The original cold-derived input bundle was reverified after completion.
+
+Full trace: **1,000,000 consecutive cycles, 12,768 fields / 426,746 packed bytes**
+(12,767 retained model fields plus the host retirement counter). The independent
+streaming reader reconstructs every field/cycle, verifies the exact requested
+window, complete footer, independent terminal image and no trailing data before
+success. Compressed size is **368,354,018 bytes (351.3 MiB)**; caches and arrays
+are recorded differentially. The original model/executable/guest state is not
+patched. Internal state still excludes external host DDR/PS/ATA/disk state.
+
+| Qualified evidence | SHA-256 |
+| --- | --- |
+| Full `on/state.delta.gz` | `ae61491877e4857226378b005c132b47d46f17353c33006798e46837355a93d3` |
+| Full OFF/ON `end.snap`, identical | `32eaa576492d6f43b3c1d36d6395f48ef03152a034515bb78421d904b8bdf2e6` |
+| Full OFF/ON `guest.vhd`, identical | `8256ceafdc21f4b1fa15dc3a0386fd6dfd7f8615e4009bfbe2d28ed157fbf7c2` |
+| Frozen-reference/observer pilot `end.snap`, identical | `3ac17bcf60f496462a959fe6d2b4ed7bf4d3aa064a557a599b3353d62c813c7a` |
+| Capture driver log | `ad6966495bf1deeb9b6ba7a2426e44a952f2f428a1e8169f6e86e1c3e30fcb92` |
+| Current native-layout/preflight receipt | `04cd301c69ab7c47a7dd2966f04e5959d0f11ecb8b8cd3a3ab0191c61bcf73ec` |
+
+The live capture scope showed 4-GiB/64-task caps and zero OOM/kill events.
+Near its cap, a sampled memory breakdown was about 14 MiB anonymous versus
+3.75 GiB charged file cache, with reclaim; the cap peak is not a 4-GiB DUT RSS.
+Root-volume disk copies have sufficient checked space. Independent full-trace
+I/O/PIC/interrupt analyses are now underway; no remaining wait cause is claimed
+from a correlated settled level alone. A record at cycle c is post-edge state:
+its ACK level must be confirmed by the appropriate transition on c→c+1. The
+actual physical PIC byte strobe is distinct from later aggregate core I/O ACK.
+
+Latest verified gameplay baseline is older `2e63`, **4.0B–4.1B**: profile clocks
+3,999,999,637–4,099,999,637, retirements 1,508,193,850–1,548,999,708,
+**0.40805858 IPC**. U contributes 31,949,492 and V 8,856,366 retirements,
+summing exactly to 40,805,858. Unprocessed frames 32/33 visibly advance through
+the corridor, and the private executable retains its verified `2e63` hash.
+Current `cdcb` remains unmeasured. **CoreMark passes; Win95 desktop and completed
+Quake timedemo remain unqualified**, so the goal and cold acceptance runs continue.

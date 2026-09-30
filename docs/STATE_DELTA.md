@@ -36,8 +36,10 @@ actual cumulative counters are also retained and analyzed independently.
 ## Build without recompiling RTL
 
 Requires an **already compiled, savable** full-PC model, Python 3.11+, g++, and
-zlib development headers/library. The model used for a native restore must match
-the checkpoint; a different RTL elaboration is not interchangeable.
+zlib development headers/library. Work on a **private independent copy of its
+object directory**, preserving the frozen acceptance executable. The model used
+for a native restore must match the checkpoint; a different RTL elaboration is
+not interchangeable. Do not use symlinks or hard-linked host outputs for this copy.
 
 ```sh
 make -C ao486-sim ven-state-profiler \
@@ -50,6 +52,17 @@ field include, enables the host-only `VEN_STATE_DELTA_HOST` macro, and recompile
 headers/sources and `Vsystem__ALL.a` before/after and requires them unchanged.
 The receipt is `ven_state_relink.json`. Never reuse an old field include for a
 changed model; use this target again. No FPGA build is involved.
+
+The relinker recognizes only the generated `ao486sim_ven` or
+`ao486sim_ven_standard` default/link rule. It preserves the actual relative
+source-dependency spelling when forcing host recompilation: an absolute `make
+-W` alias can return success without rebuilding a relative prerequisite. A
+success receipt now requires evidence that **both** `sim_ven.o` and the selected
+executable were rebuilt/relinked, as well as unchanged model hashes. Inherited
+descriptors for the guard's fixed build lock are discovered and forwarded rather
+than assuming a particular descriptor number. Unsafe targets and aliased outputs
+fail before generation writes. Seventeen host tests, including an actual GNU Make
+reproduction on a tiny copied fixture, cover this contract; they are not RTL tests.
 
 ## Capture
 
@@ -72,6 +85,12 @@ and disks. **This driver's timing profile is explicitly 45 MHz core/RTC, 90 MHz
 VGA, 32 MiB configured RAM, DDR model 2, RTC epoch 1789257600.** Do not apply it
 to checkpoints with a different saved configuration.
 
+Native snapshot version defaults to **v3**. For a checkpoint saved with PS/2
+mouse state, pass **`--snapshot-version 4 --mouse`**; v3 plus mouse is rejected
+before staging or starting a simulator. All four replay invocations use the
+same selected version and mouse setting. This does not migrate a checkpoint or
+change its guest state.
+
 The driver also runs the frozen source executable for the same 1,000-cycle
 pilot and requires its final native snapshot and disk to match the host-only
 profiler (`host_relink_check.json`). This catches host behavior drift that
@@ -80,11 +99,24 @@ pilot comparison prevents the million-cycle run. The input bundle is
 reverified after completion as well. Earlier capture receipts may not contain
 this additional check.
 
-`python3 tools/test_state_delta_capture.py` passes seven host-only orchestration
-tests: success, frozen-executable snapshot/disk drift, observer snapshot/disk
-drift, and failed source-bundle revalidation. Frozen-executable drift prevents
-both full-length runs; every failure suppresses the final success marker. These
-tests mock simulator subprocesses and are not RTL or guest equivalence evidence.
+The capture driver validates the relink receipt, exact generated target,
+profiler executable hash and complete current model manifest **before staging**.
+It accepts a standard-only object directory without a legacy-name alias and
+ignores any stale coexisting executable. The input bundle still stores the
+byte-identical frozen reference under its canonical `ao486sim_ven` filename.
+Both pilot and full trace are reconstructed to their independent terminal
+image/footer, with exact requested start/count, before final observer success.
+An exit-zero simulator or identical terminal disk alone is not trace validation.
+
+`python3 tools/test_state_delta_capture.py` exercises host-only orchestration:
+matching replay, frozen-executable snapshot/disk drift, observer snapshot/disk
+drift, failed source-bundle revalidation and snapshot-version/mouse propagation.
+The current suite has **29 passing tests**, including strict receipt/target/hash
+selection, stale coexisting binaries, exact trace-window checks and actual tiny
+truncated/corrupt streams rejected by the reader.
+Frozen-executable drift prevents both full-length runs; every failure suppresses
+the final success marker. These tests mock simulator subprocesses and are not RTL
+or guest equivalence evidence.
 
 ```sh
 tools/build_scope.sh -- python3 tools/run_state_delta_capture.py \
@@ -95,6 +127,10 @@ tools/build_scope.sh -- python3 tools/run_state_delta_capture.py \
 Artifacts go to a new `ventium-state-delta.*` directory under the guarded TMPDIR.
 The source checkpoint/disk are never modified. Snapshots skip boot only; they are
 not processor fixes or substitutes for cold-boot compatibility tests.
+Check space first: the driver currently makes four independent disk copies and
+four native terminal snapshots, in addition to its compressed trace. Budget for
+the disks' full logical sizes; do not assume sparse-copy savings. Keep TMPDIR on
+a healthy volume under `/tmp` or the repository, not a new home-directory folder.
 
 ## Preserve a stopped checkpoint before long validation windows
 
