@@ -50,7 +50,7 @@ for profile in packed banked banked_pair; do
     mkdir -p "$OUT/$profile"
     printf '%s\n' "${defs[@]}" "${extra[@]}" > "$OUT/$profile/defines.txt"
     "$ROOT/tools/verilator_serial.sh" -j1 --binary --timing --assert -sv -Wall \
-        -Wno-UNUSED -Wno-fatal -Wno-DECLFILENAME -Wno-INITIALDLY \
+        -Wno-UNUSED -Wno-fatal \
         -Werror-IMPLICIT -Werror-PINMISSING -Werror-UNDRIVEN -Werror-MULTIDRIVEN \
         -Werror-LATCH -Werror-UNOPTFLAT "${defs[@]}" "${extra[@]}" \
         --top-module tb_l1axi_ao486_romwrite -Mdir "$OUT/$profile" -o test \

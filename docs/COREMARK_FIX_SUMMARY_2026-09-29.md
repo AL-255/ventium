@@ -545,11 +545,19 @@ rocket scene, with world, weapon and HUD and no startup console. This measuremen
 precedes the quota logging gap and any proposed cache-policy change; it is
 not an isolated performance improvement, timedemo completion or FPS.
 
-The latest verified 2.7B–2.8B window has clocks 2,699,999,637–2,799,999,637
+The prior verified 2.7B–2.8B window has clocks 2,699,999,637–2,799,999,637
 and retirements 970,383,698–1,015,462,121: **45,078,423 / 100,000,000 =
 0.45078423 IPC**. The 33,872,781 U plus 11,205,642 V retirements reconcile
 exactly, and raw endpoint captures 19/20 show advancing gameplay. It is fully
 after quota logging recovered and still predates the cache-policy candidate.
+
+The latest verified gameplay window is **3.0B–3.1B**, on the same immutable b7
+binary: clocks 2,999,999,637–3,099,999,637 and retirements
+1,080,413,113–1,122,502,626. Thus **42,089,513 / 100,000,000 = 0.42089513 IPC**;
+31,510,842 U plus 10,578,671 V retirements reconcile exactly. Raw captures
+22/23 show advancing gameplay, including the nailgun pickup. This is another
+scene-dependent measurement, not an isolated code-change gain, FPS or completed
+timedemo. The cache-policy candidate remains unmeasured.
 
 ### Cache-policy implementation and new cold acceptance round
 
@@ -573,6 +581,14 @@ shared-window enable ordering, 18 atomic U/V cases, inactive/zero-strobe policy,
 128 zero-extra-RAM-read checks and same-set unrelated-way preservation.
 The source-extracted real shim helper/calls pass **186,880 strobe checks** over
 5,840 address/A20/fold cases. These are directed regressions, not OS acceptance.
+An additional actual-bank-array `VEN_P54_LOAD_STORE_PAIR` leaf checks an owned
+U load consuming its correct value while a younger V store is accepted,
+stalled/withdrawn or rejected. Two fixed profiles pass **539 checks**; the
+policy-off control produces **six actual wrong ROM reads**, with zero control
+or RAM errors. Its saved-window profile witnesses 12 primary U owners, eight
+shadow V owners and 12 primed code owners. See
+[the paired-load/store regression](../verif/l1/LOAD_STORE_POLICY.md); it is not
+a replacement for the real delayed-AXI/ao486 composition or OS acceptance.
 Clean negative evidence remains `/tmp/ventium-l1axi-ao486-romwrite.Vxr4Q9/`;
 green evidence is
 `verif/l1/obj_dir_store_policy_scratch/ventium-l1axi-ao486-romwrite.vhhQql/`.
@@ -610,6 +626,10 @@ has been established. Their artifacts are under
 has no verified gameplay IPC yet. The two unchanged 1,500-iteration CoreMark
 seed images are also being rerun on CPUs 2/3 with the approved 60-minute cap,
 using the source-equivalent direct-memory TB; they do not exercise L1/AXI.
+At the 13:47 UTC observation, cold Win95 had passed 442M cycles without the
+control's 425M VDD/protection error, but had not emitted an inspectable desktop
+capture. Both CoreMark seeds had passed 603M clocks without a terminal error;
+those intermediate counters are not completed correctness results or scores.
 
 Evidence: `/tmp/ventium-standard-sep30.qUCAcQ/` (full-PC inputs and logs),
 `/tmp/ventium-coremark-matrix.kpjs_mph/` (long seeds),

@@ -79,6 +79,16 @@ def inspect_run(artifact, profiles, expect_red):
                 "status": "PASS_IDENTICAL_COUNTS_NO_REBUILD",
                 "log_sha256": digest(cached_log),
             }
+        lint_log = artifact / "lint-finalflags" / f"{profile}.log"
+        if lint_log.exists():
+            lint = lint_log.read_text()
+            if expect_red or re.search(r"^%Error", lint, re.M):
+                raise ValueError(f"final-flags lint failed: {profile}")
+            result["profiles"][profile]["final_flags_lint"] = {
+                "status": "PASS_LINT_ONLY_NO_CPP_REBUILD",
+                "log_sha256": digest(lint_log),
+                "warning_classes": sorted(set(re.findall(r"^%Warning-(\w+):", lint, re.M))),
+            }
     return result
 
 
@@ -98,6 +108,7 @@ def main():
         raise ValueError("current runner must default to the GREEN feature-on gate")
     result["current_runner"] = {"path": str(runner.resolve()), "sha256": digest(runner),
                                 "default_store_policy": 1, "default_expect_red": 0,
+                                "only_general_warning_suppression": "UNUSED",
                                 "frozen_executed_runner_is_recorded_separately": True}
     if args.red:
         # The preserved initial clean RED predates the paired/extra controls.

@@ -73,7 +73,10 @@ controls. All frozen GREEN inputs are verified in its `summary.json`:
 
 The later runner default/setup change was checked with `bash -n` and all three
 cached executables: every result count matched exactly, without recompilation.
-The summary distinguishes the current runner from the frozen executed script.
+All three frozen profiles also passed lint-only after removing DECLFILENAME
+and INITIALDLY suppressions. Their warnings remain visible; the six structural
+classes remain errors. The summary separates these checks and the current
+runner from the frozen executed script; no final-flags C++ rebuild is claimed.
 
 ```sh
 python3 -B verif/l1/summarize_l1axi_ao486_romwrite.py \
@@ -86,5 +89,5 @@ This focused contract gate is not the standard suite or an exhaustive
 32-offset/full-core/paired-load/MMIO test. Windows desktop, Quake timedemo,
 CoreMark correctness and FPGA timing require separate acceptance.
 
-Latest verified gameplay IPC is 0.45078423 on immutable build b7, cycles
-2.7B–2.8B. It predates this store-policy candidate, which is not yet measured.
+Latest verified gameplay IPC is 0.42089513 on immutable build b7, cycles
+3.0B–3.1B. It predates this store-policy candidate, which is not yet measured.
