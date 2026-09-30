@@ -30,6 +30,7 @@
 #include "../../tools/rep_accounting.h"
 #include "../../tools/sim_stop_request.h"
 #include "../../tools/retire_fault_ring.h"
+#include "../../tools/retire_pc_snapshot.h"
 #include <cerrno>
 #ifdef VEN_STATE_DELTA_HOST
 #if !__has_include("ven_state_fields.inc")
@@ -70,6 +71,9 @@ static const char *g_stop_request_path = nullptr;  // --stop-request PATH: host-
 static ven_host::FaultRingOptions g_fault_ring_options;
 static ven_host::RetireFaultRing g_fault_ring;
 extern ven_host::RetireFaultRing *g_vtm_fault_ring;
+static ven_host::RetirePcSnapshotOptions g_pc_snapshot_options;
+static ven_host::RetirePcSnapshot g_pc_snapshot;
+extern ven_host::RetirePcSnapshot *g_vtm_pc_snapshot;
 static void fault_ring_fail(const char *reason) {
     fprintf(stderr, "[FAULT-RING-ERROR] %s\n", reason);
     std::exit(2);
@@ -1194,7 +1198,7 @@ static void checkpoint_require_supported(bool restoring) {
         checkpoint_fail("keyboard input is still pending; save after the script finishes");
     }
 }
-static void save_state(const char *fn) {
+static void save_state(const char *fn, const char *report_fn = nullptr) {
     ven_checkpoint::AtaState ata;
     if (g_snapshot_v2) {
         checkpoint_require_supported(false);
@@ -1226,7 +1230,7 @@ static void save_state(const char *fn) {
     os.write(&g_vga_phase, sizeof(g_vga_phase)); os.write(&g_vga_lcg, sizeof(g_vga_lcg));
     os << *top;   // Ventium x87 state lives inside the RTL (no linked C-side FPU co-sim)
     os.close();
-    fprintf(stderr, ">>> STATE SAVED to %s @cyc=%llu retires=%llu disk_reads_host=%lu\n", fn,
+    fprintf(stderr, ">>> STATE SAVED to %s @cyc=%llu retires=%llu disk_reads_host=%lu\n", report_fn ? report_fn : fn,
             (unsigned long long)main_time, (unsigned long long)g_vtm_retires, g_disk_reads);
 }
 static void load_state(const char *fn) {
@@ -1355,6 +1359,11 @@ int main(int argc, char **argv) {
     if (const char *e = getenv("FPGA_DDR")) { g_fpga_ddr = atoi(e); fprintf(stderr, "[FPGA_DDR=%d] ven_ddram_axi-like DDRAM (BUSY + %s)\n", g_fpga_ddr, g_fpga_ddr>=2?"HP0 latency/gaps":"golden latency"); }
     uint64_t cycles = 200000000; const char *ide_path = nullptr;
     for (int i = 1; i < argc; i++) {
+        const char *pc_error = nullptr;
+        const int pc_option = ven_host::parse_retire_pc_snapshot_option(
+            argc, argv, i, g_pc_snapshot_options, pc_error);
+        if (pc_option < 0) { fprintf(stderr, "%s\n", pc_error); return 2; }
+        if (pc_option) continue;
         const char *fault_error = nullptr;
         const int fault_option = ven_host::parse_fault_ring_option(
             argc, argv, i, g_fault_ring_options, fault_error);
@@ -1500,8 +1509,8 @@ int main(int argc, char **argv) {
                 "For a NEW cold run use --rate-rtc equal to --rate. "
                 "Native restores must retain their saved configuration.\n",
                 double(g_clock_rate) / g_rtc_rate);
-    if (g_save_stop && (!g_save_at || g_save_every))
-        checkpoint_fail("--save-stop requires --save-at and excludes --save-every");
+    if (g_save_stop && ((!g_save_at && !g_pc_snapshot_options.enabled) || g_save_every))
+        checkpoint_fail("--save-stop requires --save-at or --save-at-retired-pc and excludes --save-every");
     if (g_stop_retire && g_save_stop)
         checkpoint_fail("--ven-stop-retire and --save-stop are mutually exclusive");
     if (g_rep_account_enable && g_restore_file)
@@ -1517,6 +1526,14 @@ int main(int argc, char **argv) {
         fault_ring_fail(error);
     if (g_mouse_en && (g_restore_file || g_save_at || g_save_every) && !g_snapshot_v4)
         checkpoint_fail("--mouse snapshots require --snapshot-v4");
+    const ven_host::RetirePcSnapshotContext pc_context{
+        g_restore_file != nullptr, g_save_at, g_save_every, g_stop_retire,
+        g_save_stop, g_mouse_en, g_snapshot_v4, g_save_file};
+    if (const char *error = ven_host::validate_retire_pc_snapshot_options(
+            g_pc_snapshot_options, pc_context))
+        checkpoint_fail(error);
+    if (g_pc_snapshot_options.enabled && (!g_snapshot_v3 || g_ven_break_enable || g_rmtest))
+        checkpoint_fail("PC snapshots require --snapshot-v3/v4 without breakpoint or RM test mode");
     if (g_rep_account_enable && g_rep_account_start >= cycles)
         checkpoint_fail("REP accounting start must precede the stop cycle");
     if (g_kb_script) kb_build_events(g_kb_script);
@@ -1562,6 +1579,14 @@ int main(int argc, char **argv) {
 #endif
         if (!g_delta_cycles || g_delta_cycles > 1000000)
             checkpoint_fail("state-delta cycle count must be 1..1000000");
+    }
+    if (g_pc_snapshot_options.enabled) {
+        const char *error = nullptr;
+        if (!g_pc_snapshot.open(g_pc_snapshot_options, pc_context, error))
+            checkpoint_fail(error);
+        g_vtm_pc_snapshot = &g_pc_snapshot;
+        fprintf(stderr, "[PC-SNAPSHOT] passive cold-run trigger; post-commit CS/fetch offset, "
+                        "max256 prior retires; save at normal settled checkpoint point\n");
     }
     ddr = (uint64_t *)calloc(DDR_WORDS, sizeof(uint64_t));
     tie_static_inputs();
@@ -1741,6 +1766,25 @@ int main(int argc, char **argv) {
                 }
             }
         }
+        // The actual DPI callback can match U even if V retires afterward on
+        // the same edge. Never save from that callback or add a model eval.
+        // PS polling can tick internally before this existing settled point;
+        // report the real trigger-to-save overshoot, not an exact-PC snapshot.
+        if (g_pc_snapshot.failed()) checkpoint_fail(g_pc_snapshot.finish_error());
+        if (g_pc_snapshot.pending()) {
+            const char *error = nullptr;
+            if (!g_pc_snapshot.prepare_save(main_time, g_vtm_retires, error))
+                checkpoint_fail(error);
+            // Write only the held, exclusively reserved inode. A concurrent
+            // pathname replacement must never truncate somebody else's file.
+            save_state(g_pc_snapshot.serialization_path(), g_pc_snapshot.path());
+            if (!g_pc_snapshot.complete_save(main_time, g_vtm_retires, error))
+                checkpoint_fail(error);
+            if (!g_pc_snapshot.report(stderr))
+                checkpoint_fail("PC snapshot history report failed");
+            g_vtm_pc_snapshot = nullptr;
+            if (g_save_stop) break;
+        }
         // One-shot POST snapshot for fast debug-iteration resume (--save-at).
         if (g_save_at && main_time >= g_save_at) {
             save_state(g_save_file); g_save_at = 0;
@@ -1854,6 +1898,11 @@ int main(int argc, char **argv) {
                 (unsigned long long)g_stop_retire,
                 (unsigned long long)g_vtm_retires,
                 (unsigned long long)main_time);
+    if (const char *error = g_pc_snapshot.finish_error()) {
+        fprintf(stderr, "PC-SNAPSHOT-ERROR: %s\n", error);
+        stop_request_exit = 2;
+    }
+    g_vtm_pc_snapshot = nullptr;
     top->final(); delete top; free(ddr);
     return stop_request_exit ? stop_request_exit : (retire_target_met ? 0 : 2);
 }
