@@ -5404,12 +5404,15 @@ module core
   // must follow the address/owner mux above, never a newer live V decode.
   // A register-U/V-memory pre-read also uses mc_query_v; requesting a dword
   // for its byte MOV could cross a checked line edge.
-  assign mem_pair_size_log2 = {((mc_prime_v_request
+  assign mem_pair_size_log2 = {(
+`ifdef VEN_P54_DUAL_LOAD_PRIME
+                               (mc_prime_v_request
 `ifdef VEN_P54_REGMEM_PRIME
                                  || regmem_prime_v_request
 `endif
                                 ) ? mc_query_v.w8 :
-                                pipe_v_pair_request && pipe_v_eff.w8)
+`endif
+                               pipe_v_pair_request && pipe_v_eff.w8)
                                 ? 2'd0 : 2'd2, 2'd0};
 `else
   assign mem_pair_size_log2 = {2'd2, 2'd0};

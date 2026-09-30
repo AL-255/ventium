@@ -216,6 +216,34 @@ ven-ipc-p54-tlb:
 	  -f rtl_ven_core.f -f rtl_ven_soc.f $(VEN_SRCS)
 	@echo "built P54 D-TLB IPC candidate copy: $(REPO)/ao486-sim/obj_dir_ven_ipc_p54_tlb/ao486sim_ven_ipc_p54_tlb"
 
+# Standard-suite qualification of the corrected, in-order raw-byte P54 core.
+# Preserve the frozen historical gameplay profiles above for diagnostics;
+# neither a decoded-op cache nor dependent same-pair load forwarding belongs
+# to this profile. The memory-chain/prime family requires uop descriptors, so
+# remove its complete dependency closure rather than enabling a partial mode.
+# FAST_MEM_EXT still has a legacy two-EX timing path; the reference EXT path
+# under P54_INT_EXEC_OCC retains the required three execution clocks.
+VEN_STANDARD_P54_DEFS := $(filter-out +define+VEN_UOP% \
+  +define+VEN_LOAD_USE_FORWARD +define+VEN_PIPE_MEM_CHAIN \
+  +define+VEN_PIPE_REG_LOAD_PRIME +define+VEN_PIPE_BRANCH_LOAD_PRIME \
+  +define+VEN_P54_DUAL_LOAD_PRIME +define+VEN_P54_REGMEM_PRIME \
+  +define+VEN_FAST_MEM_EXT,$(VEN_IPC_P54_TLB_DEFS)) \
+  +define+VEN_FAST_BYTE_ALU +define+VEN_FAST_BYTE_SHIFT +define+VEN_FAST_UNARY_R \
+  +define+VEN_PIPE_SDISPATCH +define+VEN_PIPE_SDISPATCH_SHORT \
+  +define+VEN_P54_INT_EXEC_OCC +define+VEN_P54_SDISPATCH_AGI \
+  +define+VEN_P54_PREFIX_AGI +define+VEN_P54_AGI_WRITE_MASK \
+  +define+VEN_P54_PREFIX66_REG +define+VEN_P54_MOV_ACK_RETIRE \
+  +define+VEN_P54_CTRL_TARGET_READ
+VEN_STANDARD_OBJDIR ?= ao486-sim/obj_dir_ven_standard
+VEN_STANDARD_EXE ?= ao486sim_ven_standard
+.PHONY: ven-standard
+ven-standard:
+	cd $(REPO) && $(VERILATOR) $(VFLAGS) --assert \
+	  -LDFLAGS "-lz" -Mdir $(VEN_STANDARD_OBJDIR) -o $(VEN_STANDARD_EXE) \
+	  $(VEN_STANDARD_P54_DEFS) \
+	  -f rtl_ven_core.f -f rtl_ven_soc.f $(VEN_SRCS)
+	@echo "built raw P54 standard-suite candidate: $(REPO)/$(VEN_STANDARD_OBJDIR)/$(VEN_STANDARD_EXE)"
+
 run: all
 	$(REPO)/$(OBJDIR)/$(EXE) --cycles 400000
 
