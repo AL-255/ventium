@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
-# Prepared only. Requires explicit authorization plus an existing bounded
+# Requires explicit authorization plus an existing bounded
 # build_scope, and a frozen prebuilt TB. Never launches a model rebuild.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
@@ -64,7 +64,26 @@ for case_id in ${CASES:-1 2 3 4}; do
         --symbols "$image.sym" "$image.qemu.vtrace" > "$image.qemu.check.log" 2>&1
     for mode in functional cycle; do
         extra=()
-        [[ "$mode" != cycle ]] || extra+=(--cycle)
+        if [[ "$mode" == cycle ]]; then
+            # --cycle emits timing-only records. Establish that this fixture
+            # has no U/V pairs before comparing full post-retirement state
+            # from the same cycle-mode core with --cycle-func.
+            set +e
+            run_bounded 35 "$TB" --system --cosim --image "$image.bin" \
+                --max-insn 5000 --max-cycles 2000000 --quiesce 400 \
+                --out "$image.timing.vtrace" --cycle +ven_faultlog \
+                > "$image.timing.log" 2>&1
+            timing_status=$?
+            set -e
+            [[ "$timing_status" == 133 ]] || {
+                printf 'PV86-MOVRESTART-FAIL case=%s timing_exit=%s\n' "$case_id" "$timing_status"
+                exit 1
+            }
+            run_bounded 10 python3 "$HERE/check_trace.py" --case "$case_id" \
+                --symbols "$image.sym" --timing-only --reference "$image.qemu.vtrace" \
+                "$image.timing.vtrace" > "$image.timing.check.log" 2>&1
+            extra+=(--cycle-func)
+        fi
         set +e
         run_bounded 35 "$TB" --system --cosim --image "$image.bin" \
             --max-insn 5000 --max-cycles 2000000 --quiesce 400 \

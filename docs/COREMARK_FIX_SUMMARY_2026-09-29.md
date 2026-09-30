@@ -295,8 +295,37 @@ replays; it is **not** a boot acceptance run, and no restored state will
 qualify the standard suite. Artifacts: `/tmp/ventium-win95-vdd-checkpoint-sep30/`.
 The existing walker observer hard-codes another profile's numeric FSM state;
 do not treat it as a valid page-walk probe on this candidate without checking
-the elaborated enumeration. Focused new QEMU/RTL tests remain awaiting explicit
-approval after auto-review rejected a launch under the older no-new-runs rule.
+the elaborated enumeration. The subsequently approved, bounded
+`pv86movrestart` regression now passes all four pinned-QEMU cases in functional
+and cycle mode (1188/1773/1773/1804 exact records). It checks nonidentity ES
+mapping, a precise single-byte page fault, repaired-PTE IRETD retry without
+reloading ES, AH/BX/CX/high-half preservation, and three software-gate event
+placements. Separate timing traces establish no paired issue before full-state
+`--cycle-func` comparison. The first runner exposed a timing-vs-system trace
+format mismatch; correcting that harness required no RTL or oracle relaxation.
+Artifacts: `/tmp/ventium-pv86movrestart.JLymRE/`. This does not cover external
+IRQ injection or establish VDD causality. An unrelated RF fixture remains unrun.
+
+A single same-build native V4 diagnostic replay completed under its 600-second,
+one-CPU/2-GiB bound, using private snapshot/disk copies and the checkpoint's
+exact clock, RTC, mouse and VGA configuration. Its 80,000 consecutive retirement
+records are 70,250,000–70,329,999; the exact stop was retirement 70,330,000 at
+cycle 386,304,015, overshoot zero, process exit zero. This clean diagnostic exit
+is not a cold boot or a performance qualification. Artifacts:
+`/tmp/ventium-win95-vdd-window-sep30.zJYMIp/`; closed log SHA-256
+`4fbf26269c286478d6e70ef2bfba9a240fbbd5698cf5812542c958f260f4cc6b`.
+
+The first in-window contradiction with the stock VGA-ROM instruction stream is
+retirement 70,279,256 / cycle 385,465,306 at `C000:0631`: expected `8A C4`
+(`MOV AL,AH`), but the observed SP increment and ES=`0111` match popping the
+preceding CALL's return address into ES. Addresses `0635` (`JMP`), `0639`
+(`RET`) and `063F` (`CALL 0626`) exhibit the same POP-ES-like state change.
+The actual loop subsequently retires `063C,063F,0640,0642,0644,0645`, with no
+`0626` helper execution in the entire captured window. LOOP correctly decrements
+low CX; the corrupted fallthrough bypasses count-setting callers. This is an
+instruction-stream mismatch against the original ROM, not proof that the live
+translated/shadowed executable bytes equal that ROM. Actual fetch ACK/decoder
+bytes are the next required witness before attributing an RTL cause or fixing it.
 
 The final post-IRET CoreMark candidate independently **passes both complete
 1,500-iteration seeds**, not merely the earlier build's results. Performance
@@ -357,9 +386,34 @@ reference-CRC checks. Their printed elapsed time still includes that finite
 startup-offset bias; the actual-cycle denominators above remain authoritative
 for modeled CM/MHz. Neither timer values nor guest code were modified.
 
-Current candidate gameplay IPC is **unmeasured**. Retained older binary
+Current cold raw-P54 full-PC gameplay IPC is **0.42750217** over cycles
+1,400,000,000–1,500,000,000 on binary
+`b7cfbec7ee31c7ff7f81abf994995431f3c660b913ae2a9d3176c6d22a2db0ae`.
+The actual private executable's SHA-256 was rechecked at the end of this window.
+Retained older binary
 `3237b652…` baseline is **0.45746656**, cycles
-1,150,151,638–1,400,151,638; it predates these builds.
+1,150,151,638–1,400,151,638; it predates these builds and is not a matched-scene
+A/B comparison.
+
+The measured-window receipt is the existing cold run's `quake/run.log` under
+`/tmp/ventium-standard-iret-axi-sep30.dTKJW7/`:
+
+| Simulated cycle | Profile clocks | Retirements | U retirements | V retirements |
+| ---: | ---: | ---: | ---: | ---: |
+| 1,400,000,000 | 1,399,999,637 | 407,258,224 | 320,677,922 | 86,580,302 |
+| 1,500,000,000 | 1,499,999,637 | 450,008,441 | 352,529,208 | 97,479,233 |
+
+Thus 42,750,217 actual retirements / 100,000,000 clocks = 0.42750217 IPC;
+31,851,286 U + 10,898,931 V retirements independently reconcile the total.
+Both raw captures, `quake/frame_00006.ppm` and `quake/frame_00007.ppm`, were
+visually inspected using lossless PNG copies: clear advancing Necropolis
+gameplay, weapon/HUD, shell pickup then grenade-launcher pickup. The earlier
+1.3B scene still had the descending startup console and is excluded. The guest
+console also contains fresh demo1/Necropolis/pickup output after its unchanged
+pre-run prefix. No fatal simulator/engine error was found through this window.
+This is a gameplay-window measurement, **not FPS, a completed 969-frame timedemo
+or standard-suite PASS**. The cold run continues unchanged; capture cadence
+does not count rendered frames.
 
 Evidence: `/tmp/ventium-standard-sep30.qUCAcQ/` (full-PC inputs and logs),
 `/tmp/ventium-coremark-matrix.kpjs_mph/` (long seeds),

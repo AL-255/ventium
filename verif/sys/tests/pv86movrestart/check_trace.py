@@ -25,6 +25,30 @@ def read_symbols(path: Path) -> dict[str, int]:
     return result
 
 
+def check_timing(path: Path, reference: Path) -> None:
+    trace = read_trace(str(path))
+    golden = read_trace(str(reference))
+    rows = trace.records
+    if (trace.hdr.get("mode") != "cycle" or golden.hdr.get("mode") != "func"
+            or golden.hdr.get("sys") is not True):
+        raise ValueError("timing trace plus full system reference required")
+    if not rows or len(rows) >= MAX_INSN or len(rows) != len(golden.records):
+        raise ValueError("limited/incomplete timing trace or instruction-count mismatch")
+    previous_cycle = -1
+    for ordinal, (row, ref) in enumerate(zip(rows, golden.records)):
+        if row["paired"] is not False or row["pipe"] != "U":
+            raise ValueError("paired issue requires a different architectural oracle")
+        cycle = row["cyc"]
+        if (type(row["n"]) is not int or type(ref["n"]) is not int
+                or type(cycle) is not int or row["n"] != ordinal
+                or ref["n"] != ordinal or cycle <= previous_cycle):
+            raise ValueError("noncontiguous retirement index or equal/nonmonotonic clocks")
+        if parse_hex(row["pc"]) != parse_hex(ref["pc"]):
+            raise ValueError(f"timing execution changed instruction PC at {ordinal}")
+        previous_cycle = cycle
+    print(f"PV86-MOVRESTART-TIMING-OK records={len(rows)} paired=0 last_cycle={previous_cycle}")
+
+
 def check(path: Path, symbols: Path, case: int) -> None:
     trace = read_trace(str(path))
     rows = trace.records
@@ -80,10 +104,19 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--case", required=True, type=int, choices=range(1, 5))
     parser.add_argument("--symbols", required=True, type=Path)
+    parser.add_argument("--timing-only", action="store_true")
+    parser.add_argument("--reference", type=Path)
     parser.add_argument("trace", type=Path)
     args = parser.parse_args()
     try:
-        check(args.trace, args.symbols, args.case)
+        if args.timing_only:
+            if args.reference is None:
+                raise ValueError("--timing-only requires --reference")
+            check_timing(args.trace, args.reference)
+        else:
+            if args.reference is not None:
+                raise ValueError("--reference requires --timing-only")
+            check(args.trace, args.symbols, args.case)
     except (KeyError, OSError, ValueError) as error:
         print(f"PV86-MOVRESTART-TRACE-FAIL: {error}", file=sys.stderr)
         return 1

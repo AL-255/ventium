@@ -1,11 +1,18 @@
 # V86 byte-read restart fixture
 
-Status: **all four BIOS images assemble and link; not executed**. No test
-PASS is claimed. Shell syntax and Python AST checks also pass. This directory
-is intentionally not yet registered in the standard/system suite. Assembly-only
-artifacts: `/tmp/ventium-pv86movrestart-assemble.2xrZgu/`; no simulator or QEMU
-was launched for those checks. The usual bare-metal RWX ELF-segment linker
-warning remains visible.
+Status: **all four cases pass pinned-QEMU architectural comparison in both
+functional and cycle mode**, on the frozen TB below. Every case also passes
+the independent timing-trace no-pair/order check, nine-byte state checks and
+guest debug-exit 133. Cases 1–4 compare 1188/1773/1773/1804 records respectively.
+Executed artifacts: `/tmp/ventium-pv86movrestart.JLymRE/`; the bounded driver
+was reaped with exit zero. This directory is not yet registered in the umbrella
+system suite. The usual bare-metal RWX ELF-segment linker warning remains visible.
+
+The first execution (`/tmp/ventium-pv86movrestart.04Jmph/`) passed case 1's
+functional comparison and cycle-mode guest self-check, then rejected the
+timing-only trace as lacking system-state fields. This was a harness-format
+error, not a DUT failure. The corrected runner separates the timing proof from
+the `--cycle-func` architectural trace; no RTL or differential mask was changed.
 
 This generic architectural regression checks `MOV AL, ES:[BX]`, `INC AH`,
 `INC BX` and 16-bit `LOOP` around a precise user-read page fault and V86
@@ -46,7 +53,7 @@ context. They are **not external/hardware-IRQ injection tests**. Guest IF is
 clear. A hardware-IRQ witness needs a separately approved injection-capable
 TB and golden producer; the current raw frozen TB has no such interface.
 
-## Prepared invocation (do not run without authorization)
+## Bounded invocation (do not run without authorization)
 
 Use the existing bounded launcher and an outer deadline no longer than 600s:
 
@@ -67,15 +74,28 @@ all hashes, argv, images, symbols, logs and canonical traces.
 
 The gate deadline is 540s plus at most 5s termination grace, with smaller
 per-command caps, 5000 instruction and 2M cycle caps. QEMU is the pinned
-`qemu-system-i386 -cpu pentium` producer. Both RTL functional and cycle-mode
-runs compare architectural traces with `compare.py --mode func --all`; this
-does not claim cycle-exact timing. The checker imports `tracefmt.py`, verifies
+`qemu-system-i386 -cpu pentium` producer. A separate `--cycle` timing trace
+must establish zero paired retirements and identical instruction order/count
+before `--cycle-func` architectural comparison is allowed. Both RTL functional
+and cycle-mode full-state runs compare with `compare.py --mode func --all`;
+this does not claim cycle-exact timing. The checker imports `tracefmt.py`, verifies
 the completion marker and all nine successful read states, and checks hidden
 segment bases only when those optional canonical fields are present. The
 assembly checks the actual saved fault frame rather than inferring it from
 the legacy pre-NBA CR2 log. Default differential masks/tolerances are untouched.
 
+The timing-trace qualifier also has 22 passing host-only tests, including
+read-only rechecks of the retained four-case traces:
+
+```bash
+PV86MOVRESTART_ARTIFACT_DIR=/tmp/ventium-pv86movrestart.JLymRE \
+  python3 -B verif/sys/tests/pv86movrestart/test_check_trace.py -v
+```
+
+The synthetic negative cases use canonical `tracefmt.py` builders/serializer;
+no DUT, compiler or QEMU is launched by these tests.
+
 No full-PC launch, standard-suite pass, VDD causality claim, or performance
-claim follows from preparing or later passing this focused fixture. Frozen
+claim follows from passing this focused fixture. Frozen
 full-PC b7 lacks `VEN_DBG_WD`; its `VEN-PFW` walker diagnostic must not be
 promised as a plusarg-only observer.
