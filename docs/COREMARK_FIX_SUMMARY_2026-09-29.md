@@ -283,11 +283,20 @@ and 32 tasks. Both used untouched original source images, not the previous
 runs' writable guests. Receipts are under
 `/tmp/ventium-standard-iret-axi-sep30.dTKJW7/`. Neither full-PC test is qualified;
 a cycle cap or clean host exit is not a desktop/timedemo PASS.
-A new same-binary cold diagnostic on CPU 12 will save-stop at 350M cycles
-with a version-4 mouse/ATA/RTL checkpoint and its stopped private disk, under
-2 GiB/32 tasks and a 90-minute wall bound. This permits bounded same-build
-VDD replays; it is **not** a boot acceptance run, and no restored state will
+A separate same-binary cold diagnostic on CPU 12 **saved and stopped cleanly**
+at exactly 350,000,000 cycles / 64,048,077 retirements. Its version-4
+mouse/ATA/RTL checkpoint and stopped private disk passed read-only extent,
+layout-checksum, repeated-context and unchanged-hash checks. The service is
+inactive/dead with MainPID 0. CPU state is `0028:C001223B`, `S_STORE`,
+CR3 `00306000`; zero backing-memory VDD hook globals are consistent with
+capture before hook installation, but are not live cache-coherent operands.
+This permits bounded same-build VDD
+replays; it is **not** a boot acceptance run, and no restored state will
 qualify the standard suite. Artifacts: `/tmp/ventium-win95-vdd-checkpoint-sep30/`.
+The existing walker observer hard-codes another profile's numeric FSM state;
+do not treat it as a valid page-walk probe on this candidate without checking
+the elaborated enumeration. Focused new QEMU/RTL tests remain awaiting explicit
+approval after auto-review rejected a launch under the older no-new-runs rule.
 
 The final post-IRET CoreMark candidate independently **passes both complete
 1,500-iteration seeds**, not merely the earlier build's results. Performance

@@ -1669,6 +1669,65 @@ new ring. These immutable references establish the intended callback
 design; they do not substitute for new-run ACK evidence of a particular
 callback-table entry or prove the later VDD initialization succeeds.
 
+### Sep30 repeatable pre-VDD diagnostic checkpoint
+
+An independent cold diagnostic used the same frozen `b7cfbec7...` binary,
+untouched `cc68b005...` source disk and cache-enabled ROMs, with a private
+writable guest and version-4 mouse/ATA/RTL checkpoint. It saved at exactly
+**350,000,000 cycles / 64,048,077 retirements**, after 309 host disk reads,
+then exited zero and was reaped. Wrapper status is `clean_exit_unqualified`,
+not desktop success; its service is inactive/dead with MainPID 0.
+
+Bundle: `/tmp/ventium-win95-vdd-checkpoint-sep30/`. Snapshot SHA-256:
+`7c2e75d1c7f8cb02e293e3beb2cfbe3cfec86b45e4ffd102abd1e19e49417215`;
+paired stopped private-disk SHA-256:
+`f09340bae3807c173c852898981316030340c99457218aa9ed277435574ccd3a`.
+Read-only inspection using the exact generated serializer checked 12,767
+fields / 424,194 root-payload bytes, root checksum `37cbd860d382fbdf`,
+empty-package checksum `e3b0c44298fc1c14`, identical repeated 56-byte contexts,
+all host-field extents and the final trailer. The binary, serializer inputs,
+snapshot and paired disk were unchanged before/after inspection.
+
+CPU: CS `0028`, EIP `C001223B`, EFLAGS `00000212`, CR0 `80000011`,
+CR3 `00306000`, SS/DS/ES/FS/GS `0030` with zero bases, state `S_STORE`.
+ESP `C13ADE68`, EBP `C13ADF70`, ECX `000000B8`, EBX `C15200E8`.
+Backing DDR's BDA pointer `000004A8` resolves through `C000:009F` to
+`C000:64D2`, the correct frozen-ROM table. VDD-related backing globals
+`C00356C0`, `C0035EA8`, `C0035EAC` are zero, consistent with capture before
+hook installation, not the later failing BIOS loop. These DDR observations
+are not claimed cache-coherent operands, nor does static checkpoint parsing
+qualify restored execution equivalence or identify the VDD cause.
+
+Do not enable the old `--ven-watch-walk-eip` probe blindly: its host observer
+hard-codes `state == 40` for an older profile, whereas this candidate's
+conditional FSM enumeration has `S_WALK == 41`. A missing walk report would
+therefore be instrumentation error, not evidence that no page walk occurred.
+Frozen generated C++ independently uses `0x29` for walker tracking
+(`Vsystem___024root__24.cpp`, lines 533/539); state 40 is `S_HLTWAIT`.
+The pending bounded instruction trace must use compatible observations;
+breakpoint/fault-ring restore modes are separately rejected by the harness.
+New focused QEMU/RTL launches await explicit approval after auto-review
+rejected the RF fault-restart microtest under the older no-new-runs rule.
+
+The frozen ROM provenance is intentionally explicit: `boot1.rom`
+(`fb0d673a...`) matches the stock release; cache-enabled `boot0.rom`
+(`dca915c5...`) does **not** match stock `e70c8843...`. Its reset trampoline
+performs global WBINVD and clears CR0.CD/NW, with the accompanying checksum
+change. This is not a VGA/Quake-specific guest workaround, but neither should
+it be described as an unmodified stock BIOS. The acceptance commands boot
+cold, without `--restore`; snapshot support is an opt-in host diagnostic,
+not an execution prerequisite.
+
+Static inspection of the current BIOS loop found no demonstrated register
+width defect: `26 8A 07` reads `ES:[BX]` into AL, `43` increments BX16,
+and `E2` decrements/tests CX16. These V86 operations use the reference FSM
+in the frozen full-PC profile, not the functional-only prefix/MOV shortcut.
+The IRQ/IRET engine does not implicitly write EBX/ECX. This does not exclude
+incorrect handler software state or an unobserved restart defect; live
+caller/register/return evidence is still needed. The old `FLT` print's CR2
+is sampled before its nonblocking update, so it describes the previous
+fault, not necessarily the operand of the instruction printed beside it.
+
 Win95 desktop and the standard suite remain unqualified. Gameplay IPC
 remains **0.45746656** on older `3237b652...`, cycles
 1,150,151,638–1,400,151,638; this candidate has no gameplay measurement.
