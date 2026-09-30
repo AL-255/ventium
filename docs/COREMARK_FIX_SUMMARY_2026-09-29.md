@@ -135,13 +135,14 @@ evidence paths and remaining work are in
 
 ## September 30: standard-suite continuation (not yet qualified)
 
-Latest status at **17:18 UTC**: both complete CoreMark seeds pass; cold Windows
-95 has not reached a verified desktop; cold DOS Quake has reached clear gameplay
-but has not completed its 969-frame timedemo. **Latest measured gameplay IPC is
-0.44240609**, frozen `2e63e532…`, cycles **2.4B–2.5B**. This predates the new
-IDE-interrupt correction (`3120b065…`), which has no gameplay measurement yet.
-It supersedes the older measurement windows below, but is not timedemo FPS,
-a measured gain from the IDE fix or full-suite PASS.
+Latest status at **18:20 UTC**: the previous candidate passed both complete
+CoreMark seeds; two fresh seeds are running for the V86-corrected candidate.
+Cold Windows 95 has not reached a verified desktop. Cold DOS Quake on the
+previous candidate has reached clear gameplay but has not completed its
+969-frame timedemo. **Latest measured gameplay IPC is 0.42089513**, frozen
+`2e63e532…`, cycles **3.0B–3.1B**. This predates the current candidate
+`cdcb6faa…`, which has no gameplay measurement yet. It is not timedemo FPS,
+a measured gain from either correctness fix or full-suite PASS.
 
 The user authorized 60 minutes per CoreMark seed. Both untouched 1,500-iteration
 seed images **completed without error**, matched all five reference CRCs and
@@ -787,7 +788,7 @@ this is not a claim of complete historical C++ input identity. Receipt:
 Removing the two IDE sidecar fields changes native serialization checksum;
 old `2e63` native snapshots **must not be restored into `3120`**.
 
-Fresh `3120` cold acceptance jobs are now running on CPUs 2/3 under user units
+Fresh `3120` cold acceptance jobs were launched on CPUs 2/3 under user units
 `ventium-standard-win95-ide-irq-sep30` and
 `ventium-standard-quake-ide-irq-sep30`. Their private disk, binary and ROM copies
 are under `ao486-sim/obj_dir_standard_ide_acceptance_sep30.BkKjWt/`.
@@ -795,7 +796,9 @@ Both have 2 GiB/no-swap/32-task/one-CPU limits; Win95 has a 3B-cycle/12-hour
 bound and Quake a 30B-cycle/72-hour bound. They use the original source disks,
 unchanged clock/ROM settings and no restore or guest modifications. The new
 Quake supervisor loaded the current acceptance checker at startup. A cap or
-ordinary exit is not acceptance. Older control runs remain untouched.
+ordinary exit is not acceptance. They have since been gracefully stopped and
+reaped after replacement by the V86-corrected candidate below; neither qualifies
+desktop or timedemo completion. Logs, private disks and inputs remain preserved.
 
 The cold `2e63` Win95 run passed 2.1B cycles without the former terminal VDD
 error but has no desktop. Offline diagnosis now identifies its zero-count
@@ -819,7 +822,7 @@ acceptance runs remain preserved. Replays accelerate diagnosis only; they do
 not count as Windows desktop or cold timedemo acceptance. The standard suite
 remains incomplete; the IDE-corrected binary also needs system acceptance.
 
-The newest measured `2e63` gameplay window is 2.4B–2.5B: clocks
+The retained `2e63` gameplay window at 2.4B–2.5B has clocks
 2,399,999,637–2,499,999,637; retirements 840,136,348–884,376,957.
 33,816,593 U plus 10,424,016 V retirements sum to 44,240,609,
 giving **0.44240609 IPC**. Raw frames 16/17 visibly advance gameplay.
@@ -847,7 +850,107 @@ PYTHONPATH=tools python3 -B -m unittest \
   tools/test_check_quake_timedemo.py tools/test_run_quake_standard.py
 ```
 
-Evidence: `/tmp/ventium-standard-sep30.qUCAcQ/` (full-PC inputs and logs),
+Earlier evidence: `/tmp/ventium-standard-sep30.qUCAcQ/` (full-PC inputs and logs),
 `/tmp/ventium-coremark-matrix.kpjs_mph/` (long seeds),
 `/tmp/ventium-pair-size-profile-fhvp3cac/` (pair-size regression), and
 `/tmp/ventium-win95-qemu-control-ablmz2cv/` (noncausal control).
+
+### V86 bitmap correction and fresh candidate qualification
+
+The old core incorrectly bypasses the TSS I/O bitmap in V86 when IOPL=3.
+P5's V86 rule and pinned QEMU's `gen_check_io()` require the bitmap whenever
+VM=1, regardless of IOPL. The one functional change is
+`ioperm_needed = sys_mode && !real_mode && d_io && (v86 || (eff_cpl > iopl))`.
+It reuses the existing permission FSM; protected non-V86 CPL<=IOPL still
+bypasses it. No new states, global stalls, cache flush, guest patch or
+benchmark-specific exception are introduced. Required V86 permission reads
+are architectural work, not an invented performance delay.
+
+[The focused gate](../verif/sys/tests/pv86iop3/README.md) has 15 cases:
+12 denied V86/IOPL3 scalar IN/OUT byte/word/dword forms, DX and immediate;
+allowed V86/IOPL3 OUT; protected CPL3/IOPL3 denied-map bypass; and denied
+V86/IOPL0 OUT. Only the trailing port bit is denied for word/dword cases.
+All 15 identical images pass QEMU self-checks. The old frozen TB produces
+exactly 12 negative witnesses: illegal I/O retirement, missing #GP(0), and
+the forbidden actual device transaction. The three controls pass. The new
+TB passes **all 15 exact functional comparisons / 4,389 records**, with
+zero I/O port/width desynchronization and no denied device transaction.
+Both matrix drivers are closed/reaped; a known RED is not a correctness pass.
+
+Subsequent runner-only validation rejects duplicate case IDs and a RED matrix
+containing no negative case. All 23 bounded host-only checks pass. Those checks
+run before scope/artifact creation and change no assembly or DUT behavior;
+the historical RED/GREEN receipts correctly retain their earlier runner hash.
+
+Evidence is `verif/sys/tests/pv86iop3/obj_dir_artifacts/`:
+RED `pv86iop3.RnGPxU/receipt.json`, SHA-256 `63861ea1…`;
+GREEN `pv86iop3.U7a53q/receipt.json`, SHA-256 `944d70a8…`.
+All ELF/image hashes match between RED and GREEN. Tests check fault EIP,
+error code, saved VM/IOPL/flags, GPRs, V86 segment frame and SS:SP; final
+HLT checks state preservation again. No DUT state is forced.
+
+Fresh direct TB SHA-256:
+`8c3b6954ff139b8e8b535e57e6401798ccbd09170d2444f7cf2184c618292e35`.
+Fresh full-PC SHA-256:
+`cdcb6faa8599124f9e1c6b663d04cd23206a31a7a88bc325f49381fbb5479c56`.
+The fresh fast gate passes **107 functional comparisons / 19 gated metric
+bands**; one kernel is informational and 20 instruction-cycle comparisons
+remain non-gating divergences. This is not a full `verify-all` claim.
+Existing `pv86`, `piopermwrap` and `pcpl` controls also pass exact system-state
+comparisons (949/292/304 records). The canonical `ppriv` runner still skips its
+RTL half; a separate bounded invocation using its supported `--cosim` decode
+interface passes **353 exact records**, including all three expected #GPs.
+No RTL or golden masking was changed for that invocation. All four controls
+are reaped with stable build inputs; artifacts are
+`verif/tb/obj_dir_system_controls_v86_sep30.BS7xJV/`.
+Both models were built sequentially under one 32-job/16-GiB/no-swap scope.
+The new manifest captures **340 path entries / 227 distinct files**, including
+the previously omitted C++ headers, and all checks before/after both builds
+pass. Reversing only the predicate and three comment blocks reproduces both
+old full-file hashes while retaining unrelated dirty-worktree code. Direct
+and full-PC Verilator profiles match their predecessors except output paths;
+the full-PC profile retains all 107 defines. Audit:
+`verif/tb/obj_dir_v86_iop3_sep30.nhltiM/v86-iop3-build-audit.json`
+(SHA-256 `c142d71a…`). The committed checkpoint is still not claimed to include
+all older unrelated source changes present in the measured worktree builds.
+
+Fresh standard-suite runs use original source disks/ROM settings and no native
+restore, save-state shortcut or guest modification:
+
+- CoreMark: user unit `ventium-standard-coremark-v86-iop3-sep30`, CPUs 4/5,
+  two untouched 1,500-iteration seeds, **3,600 seconds per seed**, 2 GiB/no swap.
+  Results belong to `verif/tb/obj_dir_v86_iop3_sep30.nhltiM/`; both are pending.
+- Win95: `ventium-standard-win95-v86-iop3-sep30`, CPU 6, 2 GiB/no swap/32 tasks,
+  9B cycles/24 hours. The old 3B cap represents only 66.7 seconds at the fixed
+  45-MHz guest clock; raising the cap does not change guest time or qualify boot.
+- Quake: `ventium-standard-quake-v86-iop3-sep30`, CPU 7, the same resource
+  limits, 30B cycles/72 hours. Its fresh supervisor loads the current checker.
+
+The full-PC pair's private inputs/logs are
+`ao486-sim/obj_dir_standard_v86_iop3_sep30.W6RkaF/`. The superseded IDE-only
+pair closed after normal stop requests; neither is an acceptance result.
+Its 268 sampled Win95 states at 400M–540M match old `2e63` exactly, so the
+IDE fix is **not** established as the remaining wait cause. The original
+`2e63` Win95 run naturally closed at 3B cycles with zero host exit but no
+desktop capture: explicitly `clean_exit_unqualified`, not PASS.
+
+Offline Win95 evidence identifies virtual IRQ0 in service and VPICD ownership
+of the private VM bit excluding the queued RMM callback. Real timer IRQ entry,
+V86 return and VMM time advancement are observed. The saved 450M bitmap permits
+PIC ports 20h/21h/A0h/A1h; therefore the V86 permission defect is **not a causal
+witness for this Win95 wait**. No semaphore, virtual-IRQ bit or EOI is forced.
+The evidence remains in the closed diagnostic's `analysis.md` and
+`virtual-irq-receipt.json` under `obj_dir_win95_policy_wait_sep30.yUIBxo/`.
+
+Unqualified I/O issues remain: OUTS has a separate permission-dispatch bypass;
+the bitmap FSM's four-byte read versus two-byte reference extent, TSS validity
+and page-fault priority require separate witnesses. This scalar fix does not
+claim to close those cases or qualify strings/REP/VME. No speculative repair
+or guest-specific bypass has been folded into the current candidate.
+
+Latest verified gameplay window: old `2e63`, profile clocks
+2,999,999,637–3,099,999,637, retirements 1,080,413,113–1,122,502,626.
+31,510,842 U plus 10,578,671 V sum to 42,089,513 retirements:
+**0.42089513 IPC**. Raw frames 22/23 visibly advance gameplay and the private
+binary hash matches. The current `cdcb` candidate remains unmeasured;
+**Win95 desktop and completed Quake timedemo are still not qualified**.
