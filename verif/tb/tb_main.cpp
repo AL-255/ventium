@@ -37,6 +37,9 @@
 
 #include "verilated.h"
 #include "Vventium_top.h"
+#ifdef VEN_TB_INPUT_SNAPSHOT
+#include "model_input_snapshot.h"
+#endif
 #include "uop_probe.h"
 #include "fp_overlap_probe.h"
 #include "irq_inject_probe.h"
@@ -186,6 +189,10 @@ struct Args {
     // is a large free-run speedup for runs that discard the trace anyway (e.g.
     // the Quake framebuffer demo, which only wants the captured frame stream).
     bool        no_trace    = false;   // --no-trace
+    // Host-only acceleration: omit a same-clock combinational re-evaluation
+    // only when EVERY generated DUT input still matches the last full eval.
+    // Clock-edge evals, bus service and retire callbacks are never omitted.
+    bool        skip_unchanged_settle = false;
 
     // M14 periodic complete-state checkpoints (free-run "replay mechanism"):
     // every N retired insns, dump {arch regs + full MemModel} to a 2-deep ring in
@@ -240,6 +247,7 @@ constexpr unsigned kDbgStateDecode = 2;
         "          (default quiesce: 64 direct, 200000 with --l1-axi; explicit --quiesce wins)\n"
         "          [--errata <hexmask>] [--smm-dump <file>] [--smbase <hexaddr>]\n"
         "          [--quake-image <image.json> --lockstep <golden.vtrace>]\n"
+        "          [--no-trace --skip-unchanged-settle] (requires VL_INPUT_SNAPSHOT=1)\n"
         "          [--win95-image <image.json> --lockstep <golden.vtrace>]\n", prog);
     std::exit(code);
 }
@@ -298,6 +306,7 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--lockstep")    a.lockstep    = need("--lockstep");
         else if (k == "--emulate-syscalls") a.emulate = true;
         else if (k == "--no-trace")         a.no_trace = true;
+        else if (k == "--skip-unchanged-settle") a.skip_unchanged_settle = true;
         else if (k == "--user-stdin")  a.user_stdin  = need("--user-stdin");
         else if (k == "--user-stdout") a.user_stdout = need("--user-stdout");
         else if (k == "--brk-base")    a.brk_base    = parse_u32(need("--brk-base"));
@@ -334,15 +343,42 @@ Args parse_args(int argc, char** argv) {
 
 int main(int argc, char** argv) {
     Verilated::commandArgs(argc, argv);
-#if !VM_THREADS
-    // Verilator's context otherwise defaults to hardware_concurrency() worker
-    // threads (32 on the IPC host) even for this single-threaded generated
-    // model. The workers do no model work but exhaust the bounded task scope
-    // when 32 independent microbenchmarks run concurrently. Set this before
-    // constructing the first model; multithreaded builds retain their setting.
-    Verilated::threadContextp()->threads(1);
+#ifndef VEN_TB_MODEL_THREADS
+#define VEN_TB_MODEL_THREADS 1
 #endif
+    static_assert(VEN_TB_MODEL_THREADS == 1 || VEN_TB_MODEL_THREADS == 2 ||
+                  VEN_TB_MODEL_THREADS == 4 || VEN_TB_MODEL_THREADS == 8,
+                  "unsupported compiled testbench model thread count");
+    // Match the exact elaborated model BEFORE its constructor creates the
+    // runtime pool. Verilator 5.046 does not define the historical VM_THREADS
+    // macro; using it forced threaded models into a one-thread context.
+    Verilated::threadContextp()->threads(VEN_TB_MODEL_THREADS);
     Args args = parse_args(argc, argv);
+    if (args.skip_unchanged_settle) {
+#ifndef VEN_TB_INPUT_SNAPSHOT
+        std::fprintf(stderr, "tb: --skip-unchanged-settle requires VL_INPUT_SNAPSHOT=1\n");
+        return 2;
+#else
+#if defined(VEN_L1_AXI) || defined(VEN_DBG_CORE) || defined(VEN_DOS_MODELS) || defined(VEN_RTL_IRQ) || defined(VEN_XOVER) || defined(VEN_SAVABLE) || defined(VEN_PS_PROXY) || defined(VEN_FPTRAP) || defined(VEN_MEM_GEOMETRY) || VM_TRACE || VM_COVERAGE || VM_TIMING
+        std::fprintf(stderr, "tb: unchanged-input acceleration is not supported with this debug/device/timing build\n");
+        return 2;
+#endif
+        if (args.system || args.cosim || args.dos || args.soc_en || args.bus_mode || args.l1_axi ||
+            !args.emulate || !args.no_trace || !args.cycle || args.cycle_func ||
+            args.quake_image.empty() || !args.image.empty() || !args.win95_image.empty() ||
+            !args.lockstep.empty() || !args.vcd.empty() || args.dbg_step_n || args.dbg_bp ||
+            args.checkpoint_every || !args.checkpoint_dir.empty() || !args.save_state.empty() ||
+            !args.restore_state.empty() || args.save_at_cycle || args.save_exit ||
+            !args.xover_save_prefix.empty() || !args.xover_load_prefix.empty() ||
+            !args.video_out.empty() || !args.video_path.empty() || !args.dump_fb.empty() ||
+            std::getenv("VEN_TEST_IRQ_PC") || std::getenv("VEN_UOP_PROBE_PC") ||
+            std::getenv("VEN_FP_OVERLAP_LO") || std::getenv("VEN_FP_OVERLAP_HI") ||
+            std::getenv("VEN_MEM_GEOM_LOG")) {
+            std::fprintf(stderr, "tb: unchanged-input acceleration currently supports direct user-mode cycle emulation without tracing, probes or state injection\n");
+            return 2;
+        }
+#endif
+    }
 
     // Do this after parsing so option order does not matter.  Existing L1/AXI
     // gates deliberately use this same threshold: a cache/AXI fill can stay
@@ -1414,6 +1450,10 @@ int main(int argc, char** argv) {
     memory_geometry_probe.unsupported();
 #endif
     static const bool kSyscallProbe = (std::getenv("TB_SYSCALL_PROBE") != nullptr);
+    // Record actual cycle boundaries of guest clock queries without changing
+    // their synthetic return values. Enable only for timing-window analysis;
+    // logging is below the once-per-syscall guard, not the eval/re-drive path.
+    static const bool kClockCycleProbe = (std::getenv("TB_CLOCK_CYCLE_PROBE") != nullptr);
     auto service_proxy = [&]() {
         if (!proxy_mode) return;
         if (!top->syscall_active) return;
@@ -1441,6 +1481,14 @@ int main(int argc, char** argv) {
                 wpost_q.clear();
 #endif
                 emu->set_cycles(cycles);   // drive the synthetic wall clock
+                if (kClockCycleProbe &&
+                    (top->syscall_arg_eax == 265 || top->syscall_arg_eax == 403)) {
+                    std::fprintf(stderr,
+                        "[clock-cycle] n=%llu nr=%u clock_id=%u cycle=%llu\n",
+                        (unsigned long long)top->syscall_n,
+                        top->syscall_arg_eax, top->syscall_arg_ebx,
+                        (unsigned long long)cycles);
+                }
                 ventium::SyscallEmuResult r = emu->service(
                     top->syscall_arg_eax, top->syscall_arg_ebx, top->syscall_arg_ecx,
                     top->syscall_arg_edx, top->syscall_arg_esi, top->syscall_arg_edi,
@@ -1790,6 +1838,23 @@ int main(int argc, char** argv) {
     }
 #endif
 
+#ifdef VEN_TB_INPUT_SNAPSHOT
+    ModelInputSnapshot input_snapshot;
+    uint64_t mandatory_edge_evals = 0, full_settle_evals = 0, skipped_settle_evals = 0;
+    auto same_clock_settle = [&]() {
+        // This is NEVER called instead of either mandatory clock-edge eval.
+        // BFM/device calls have already run, preserving every side effect.
+        if (args.skip_unchanged_settle && !top->eventsPending() && input_snapshot.matches(*top)) {
+            ++skipped_settle_evals;
+            return;
+        }
+        top->eval();
+        if (args.skip_unchanged_settle) {
+            ++full_settle_evals;
+            input_snapshot.capture(*top);
+        }
+    };
+#endif
     while (true) {
         uint64_t before = trace.retired();
 #ifdef VEN_SAVABLE
@@ -1935,12 +2000,22 @@ int main(int argc, char** argv) {
                               //       (may re-arm flush_l1_pending for next clock)
         service_io();         // M7.3b: serve the port-I/O bus if io_req
         top->eval();
+#ifdef VEN_TB_INPUT_SNAPSHOT
+        if (args.skip_unchanged_settle) {
+            ++mandatory_edge_evals;
+            input_snapshot.capture(*top);
+        }
+#endif
         // syscall_active settles combinationally this phase (state==S_DECODE);
         // re-serve so the inputs propagate, then sample whether we proxied.
         service_bus();
         service_proxy(); service_fptrap();
         service_io();
+#ifdef VEN_TB_INPUT_SNAPSHOT
+        same_clock_settle();
+#else
         top->eval();
+#endif
         bool saw_active = proxy_mode && (bool)top->syscall_active;
         // Sample whether THIS clock the core is reading an IN off the io bus (so we
         // advance the dev_in cursor exactly once per IN, after the rising edge
@@ -1974,6 +2049,12 @@ int main(int argc, char** argv) {
         service_io();
         top->eval();          // <- DPI vtm_retire calls happen here; the core
                               //    latches the proxied syscall effects here too
+#ifdef VEN_TB_INPUT_SNAPSHOT
+        if (args.skip_unchanged_settle) {
+            ++mandatory_edge_evals;
+            input_snapshot.capture(*top);
+        }
+#endif
         mem.finish_clock_tick();
         irq_inject_probe.post_edge(*top, 0);
 #ifdef VEN_XOVER
@@ -2015,7 +2096,11 @@ int main(int argc, char** argv) {
         // Re-serve in case the edge changed the request (combinational ack).
         service_bus();
         service_io();
+#ifdef VEN_TB_INPUT_SNAPSHOT
+        same_clock_settle();
+#else
         top->eval();
+#endif
         dump(half++);
 
 #ifdef VEN_DOS_MODELS
@@ -2645,6 +2730,15 @@ int main(int argc, char** argv) {
     }
 
     // ---- finalize ---------------------------------------------------------
+#ifdef VEN_TB_INPUT_SNAPSHOT
+    if (args.skip_unchanged_settle) {
+        std::fprintf(stderr,
+            "[input-settle] ports=%zu cells=%zu mandatory_edge_evals=%llu full_settle_evals=%llu skipped_settle_evals=%llu\n",
+            ModelInputSnapshot::input_ports, ModelInputSnapshot::input_cells,
+            (unsigned long long)mandatory_edge_evals, (unsigned long long)full_settle_evals,
+            (unsigned long long)skipped_settle_evals);
+    }
+#endif
     top->final();
 #if VM_TRACE
     if (vcd) { vcd->close(); delete vcd; }

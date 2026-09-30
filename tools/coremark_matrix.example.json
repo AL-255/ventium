@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "note": "Replace binary paths with separately built/frozen strict-P54 experiment profiles. Runtime always enables --cycle and direct memory. These 10-iteration inputs are diagnostic only. Add both 1500-iteration seed images and their reference final CRCs only for final scoring; set timeout_seconds to a realistic walltime then.",
+  "cases": [
+    {
+      "label": "strict_p54_control",
+      "binary": "/tmp/obj_dir_coremark_p54_control/tb_ventium",
+      "memory_backend": "direct",
+      "p54_fidelity_review": "Pending: no decoded-op cache, no dependent same-pair load forwarding; verify instruction latencies against Intel Appendix F/AP-500."
+    },
+    {
+      "label": "strict_p54_decoder_candidate",
+      "binary": "/tmp/obj_dir_coremark_p54_decoder/tb_ventium",
+      "memory_backend": "direct",
+      "clock_cycle_probe": true,
+      "clock_cycle_probe_nr": 403,
+      "clock_cycle_probe_clock_id": 0,
+      "p54_fidelity_review": "Pending: independent byte-decoder refactor only; verify pair classes, prefix costs and branch/AGI timing."
+    }
+  ],
+  "workloads": [
+    {
+      "label": "performance10",
+      "seed": "performance",
+      "iterations": 10,
+      "image": "/home/yukidama/ventium-bg-sep28/coremark_candidate_ff0a803/coremark_10.image.json",
+      "crcfinal": "fcaf",
+      "max_insn": 10000000,
+      "max_cycles": 30000000,
+      "timeout_seconds": 600
+    },
+    {
+      "label": "validation10",
+      "seed": "validation",
+      "iterations": 10,
+      "image": "/home/yukidama/ventium-bg-sep28/coremark_candidate_ff0a803/coremark_validation_10.image.json",
+      "crcfinal": "c64e",
+      "max_insn": 10000000,
+      "max_cycles": 30000000,
+      "timeout_seconds": 600
+    }
+  ]
+}

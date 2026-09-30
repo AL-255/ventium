@@ -34,8 +34,12 @@ struct UopProbe {
         if (const char* s=std::getenv("VEN_UOP_PROBE_START")) start=number(s);
     }
     template<class T>
+    // These hierarchy names are optional after Verilator optimizes an RTL
+    // variant. Require every field used below before selecting this overload.
     auto sample(T* r,uint64_t cycle,int) ->
-        decltype((void)r->ventium_top__DOT__u_core__DOT__uc_cross_sources_ready,void()) {
+        decltype((void)r->ventium_top__DOT__u_core__DOT__uc_cross_sources_ready,
+                 (void)r->ventium_top__DOT__u_core__DOT__uc_updvalid,
+                 (void)r->ventium_top__DOT__u_core__DOT__uc_ubvalid,void()) {
         if (!enabled || emitted>=512 || cycle<start) return;
         if (!all && r->ventium_top__DOT__u_core__DOT__flin!=pc) return;
         ++emitted;
@@ -57,7 +61,7 @@ struct UopProbe {
     }
     template<class T> void sample(T*,uint64_t,long) {
         if (enabled) {
-            std::fprintf(stderr,"VEN_UOP_PROBE requires a cross-line model\n");
+            std::fprintf(stderr,"VEN_UOP_PROBE requires an instrumented cross-line model with the internal uop signals retained\n");
             std::exit(2);
         }
     }

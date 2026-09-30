@@ -49,17 +49,57 @@ esac
 # `-MAKEFLAGS` is forwarded verbatim to Verilator's generated GNU makefile.
 # Looking only for a whitespace-separated `-j` is not enough: an assignment
 # such as `MAKEFLAGS=-j8` reaches GNU make and silently restores parallel
-# compilation.  Normal Ventium builds need exactly the two single-token host
-# optimization assignments below.  Keep this a whitelist rather than trying to
+# compilation. Normal builds use the two single-token host optimization
+# assignments below. The one exact snapshot fragment is also reviewed: it only
+# generates an input header and adds a tb_main.o prerequisite, without recipes
+# that launch another compiler pool. The serial LTO bundle below is likewise
+# exact and confined to the fixed ipc_parallel32 scope. Keep a whitelist rather than trying to
 # blacklist every GNU-make spelling that can create a jobserver or worker pool.
+# BEGIN serial LTO flag policy (also exercised independently by unit tests).
+serial_lto_cpp_seen=0
+serial_lto_ld_seen=0
+serial_lto_ar_seen=0
+note_serial_lto_makeflag() {
+    local makeflags_arg="$1"
+    case "$makeflags_arg" in
+        USER_CPPFLAGS=-flto=1) serial_lto_cpp_seen=$((serial_lto_cpp_seen + 1)) ;;
+        USER_LDFLAGS=-flto=1) serial_lto_ld_seen=$((serial_lto_ld_seen + 1)) ;;
+        AR=gcc-ar) serial_lto_ar_seen=$((serial_lto_ar_seen + 1)) ;;
+        *flto*)
+            echo "[verilator-lock] rejecting unapproved LTO make flag: $makeflags_arg" >&2
+            return 1 ;;
+        *) return 0 ;;
+    esac
+    if [ "${VENTIUM_BUILD_SCOPE_PROFILE:-default}" != "ipc_parallel32" ]; then
+        echo "[verilator-lock] serial LTO requires the fixed ipc_parallel32 scope" >&2
+        return 1
+    fi
+}
+validate_serial_lto_makeflags() {
+    if (( serial_lto_cpp_seen == 0 && serial_lto_ld_seen == 0 && serial_lto_ar_seen == 0 )); then
+        return 0
+    fi
+    if (( serial_lto_cpp_seen != 1 || serial_lto_ld_seen != 1 || serial_lto_ar_seen != 1 )); then
+        echo "[verilator-lock] serial LTO requires exactly one compile/link/archive flag bundle" >&2
+        return 1
+    fi
+}
 safe_makeflags() {
     local makeflags_arg="$1"
     [[ "$makeflags_arg" =~ ^OPT_FAST=-O(0|1|2|3|g|s|fast)$ ]] && return 0
+    [[ "$makeflags_arg" == "-f ${script_dir}/../verif/tb/model_input_snapshot.mk" ]] && return 0
+    [[ "$makeflags_arg" == "-f $(cd -- "${script_dir}/../verif/tb" && pwd)/model_input_snapshot.mk" ]] && return 0
+    if [ "${VENTIUM_BUILD_SCOPE_PROFILE:-default}" = "ipc_parallel32" ]; then
+        case "$makeflags_arg" in
+            USER_CPPFLAGS=-flto=1|USER_LDFLAGS=-flto=1|AR=gcc-ar) return 0 ;;
+        esac
+    fi
     # OPT carries exactly the one reviewed target-architecture option (today
-    # `-march=native`).  In particular do not permit -flto: its final link can
-    # create an independent worker pool outside Verilator's `-j 1` control.
+    # `-march=native`). General LTO flags remain forbidden: they could create
+    # an independent worker pool outside Verilator's compiler-job control.
     [[ "$makeflags_arg" =~ ^OPT=-march=[[:alnum:]_.+-]+$ ]]
 }
+# END serial LTO flag policy.
 
 bounded_build_jobs() {
     local requested="$1"
@@ -129,6 +169,7 @@ while [ "$#" -gt 0 ]; do
                 echo "[verilator-lock] malformed -MAKEFLAGS argument" >&2
                 exit 2
             fi
+            note_serial_lto_makeflag "$2" || exit 2
             if ! safe_makeflags "$2"; then
                 echo "[verilator-lock] dropping unapproved generated-make flag: $2" >&2
             else
@@ -138,6 +179,7 @@ while [ "$#" -gt 0 ]; do
             ;;
         -MAKEFLAGS=*)
             makeflags_arg="${1#-MAKEFLAGS=}"
+            note_serial_lto_makeflag "$makeflags_arg" || exit 2
             if ! safe_makeflags "$makeflags_arg"; then
                 echo "[verilator-lock] dropping unapproved generated-make flag: $makeflags_arg" >&2
             else
@@ -200,6 +242,7 @@ while [ "$#" -gt 0 ]; do
     esac
     shift
 done
+validate_serial_lto_makeflags || exit 2
 if [ "$need_build_job" = 1 ] && [ "$saw_job" = 0 ]; then
     safe_args+=("-j" "1")
 fi

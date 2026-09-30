@@ -114,6 +114,37 @@ XOVER_FPX_OBJDIR ?= obj_dir_l1axi_kvdosq_xover_fpx
 VL_OPT_FAST  ?= -O3
 VL_OPT_MARCH ?= -march=native
 VL_MAKEFLAGS := -MAKEFLAGS OPT_FAST=$(VL_OPT_FAST) -MAKEFLAGS OPT=$(VL_OPT_MARCH)
+# Serial link-time optimization is an opt-in HOST compiler experiment. Keep
+# each generated-make assignment one token: Verilator renders -MAKEFLAGS into
+# a shell command, so whitespace inside an assignment is not safe here. GCC
+# inherits the highest object optimization (-O3) when the link has no -O;
+# gcc-ar supplies the matching archive plugin. Numeric 1, never auto/jobserver,
+# also caps GCC's independent LTO worker pool. Only the fixed 16-GiB scope may
+# enable this; the shared guard validates the complete three-argument bundle.
+VL_LTO_SERIAL ?= 0
+ifneq ($(filter-out 0 1,$(VL_LTO_SERIAL)),)
+  $(error VL_LTO_SERIAL must be 0 or 1)
+endif
+ifeq ($(VL_LTO_SERIAL),1)
+  ifneq ($(VENTIUM_BUILD_SCOPE_PROFILE),ipc_parallel32)
+    $(error VL_LTO_SERIAL=1 requires the fixed ipc_parallel32 build scope)
+  endif
+  VL_MAKEFLAGS += -MAKEFLAGS USER_CPPFLAGS=-flto=1 \
+                  -MAKEFLAGS USER_LDFLAGS=-flto=1 -MAKEFLAGS AR=gcc-ar
+endif
+# Optional input-snapshot helper for skipping unchanged SAME-clock settles.
+# Its generated port list comes from the exact Verilated header, not a manual
+# list that could miss a new feature's input. The auxiliary makefile runs only
+# after that header exists and before compiling the harness. Runtime opt-in
+# remains separate; default builds retain the old evaluation schedule.
+VL_INPUT_SNAPSHOT ?= 0
+ifneq ($(filter-out 0 1,$(VL_INPUT_SNAPSHOT)),)
+  $(error VL_INPUT_SNAPSHOT must be 0 or 1)
+endif
+ifeq ($(VL_INPUT_SNAPSHOT),1)
+  VL_CFLAGS += -DVEN_TB_INPUT_SNAPSHOT -I.
+  VL_MAKEFLAGS += -MAKEFLAGS "-f $(TB_DIR)/model_input_snapshot.mk"
+endif
 # VL_J: C++ build parallelism. A generated translation unit can consume several
 # GiB, so the portable default stays one compiler. Directed IPC builds may
 # explicitly select 2-4 jobs on a host with sufficient available memory, or
@@ -147,7 +178,39 @@ endif
 # The verification runner builds this producer once, then fans out only the
 # lightweight prebuilt test executions.
 .NOTPARALLEL:
+# Model parallelism is independent of C++ build jobs. Keep the default
+# single-threaded, and serialize every DPI import: retirement/trace observers
+# and the syscall harness are not thread-safe. Alternate CoreMark models must
+# reproduce the single-threaded architectural counts and exact clock window.
+# The run launcher must reserve this many CPUs/tasks per simulation rather
+# than pinning a multi-threaded model to one CPU.
+VL_MODEL_THREADS ?= 1
+ifneq ($(filter-out 1 2 4 8,$(VL_MODEL_THREADS)),)
+  $(error VL_MODEL_THREADS must be 1, 2, 4, or 8)
+endif
+VL_CFLAGS += -DVEN_TB_MODEL_THREADS=$(VL_MODEL_THREADS)
+VL_MODEL_THREAD_FLAGS :=
+ifneq ($(VL_MODEL_THREADS),1)
+  VL_MODEL_THREAD_FLAGS := --threads $(VL_MODEL_THREADS) --threads-dpi none
+endif
+# Verilator frontend optimization is distinct from C++ OPT_FAST=-O3. Default
+# emits no new option and preserves current code generation; opt-in 3 requests
+# stronger module inlining. This changes HOST code shape, not guest RTL timing.
+# Large-function experiments must still use the existing bounded build scope.
+VL_FRONTEND_OPT ?= default
+ifneq ($(words $(VL_FRONTEND_OPT)),1)
+  $(error VL_FRONTEND_OPT must be default or 3)
+endif
+ifneq ($(filter-out default 3,$(VL_FRONTEND_OPT)),)
+  $(error VL_FRONTEND_OPT must be default or 3)
+endif
+VL_FRONTEND_OPT_FLAGS :=
+ifeq ($(VL_FRONTEND_OPT),3)
+  VL_FRONTEND_OPT_FLAGS := -O3
+endif
 VL_FLAGS := --cc --exe --build -j $(VL_J) $(VL_SPLIT) \
+            $(VL_MODEL_THREAD_FLAGS) \
+            $(VL_FRONTEND_OPT_FLAGS) \
             $(VL_MAKEFLAGS) \
             -sv --top-module $(TOP) \
             -Wall -Wno-UNUSED -Wno-fatal \
