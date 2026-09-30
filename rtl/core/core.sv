@@ -2263,6 +2263,11 @@ module core
   // AGI tracking: gpr index written in the immediately-PREVIOUS issue clock.
   // -1 (bit8 set) = none. Updated each fast-path issue clock.
   logic [8:0]  agi_wr0, agi_wr1;     // up to two regs written last fast clock
+`ifdef VEN_P54_AGI_WRITE_MASK
+  // Exact prior-clock writes (including slow EX and explicit ESP), with only
+  // the documented implicit PUSH/POP ESP exception. No new writeback mirror.
+  `include "core_agi_write_mask.svh"
+`endif
 
   logic [2:0]  mispred_bubbles;      // remaining flush bubbles to burn
 
@@ -2412,6 +2417,8 @@ module core
                   || (d_fxop == FX_FNSTCW)   || (d_fxop == FX_FNSTENV)
                   || (d_fxop == FX_FNSAVE);
   logic [31:0] d_ea;
+  logic [7:0]  d_addr_mask;
+  logic        d_addr_mask_known;
   logic [2:0]  d_w;
   logic        d_dst_high8;
   logic        d_src_high8;
@@ -2590,9 +2597,33 @@ module core
   // eff_opsize/eff_addr) the q_* latch + FSM consume. Pure refactor (netlist-
   // identical; gated byte-for-byte vs the QEMU goldens).
   // ===========================================================================
+`ifdef VEN_PIPE_SDISPATCH
+  // The reference decoder is also D1 for integer slow-path handoffs. Select
+  // live raw bytes by FSM state alone; admission is a separate sequential
+  // decision. Gating this mux with exec_issue_ok would feed d_cacheinv back
+  // through executable flush and create a combinational loop.
+  logic [7:0] refdecode_ibuf [IWORDS*4];
+  always_comb begin
+    for (int i=0; i<IWORDS*4; i++) begin
+`ifdef VEN_P54_PREFIX_EX_CHAIN
+      // A retiring NP instruction may overlap ONE following prefix's D1
+      // clock. Never select these bytes using capture/flush/fault permits:
+      // that would feed d_cacheinv back through the executable-flush cone.
+      if (state == S_EXEC)
+        refdecode_ibuf[i] = ic_byte(p54_prefix_ex_flin + 32'(i));
+      else
+`endif
+      refdecode_ibuf[i] = (state == S_PIPE) ? ic_byte(flin + 32'(i)) : ibuf[i];
+    end
+  end
+`endif
   decode_stages u_decode_stages (
     // inputs (architectural + fetch state the decoder reads)
+`ifdef VEN_PIPE_SDISPATCH
+    .ibuf          (refdecode_ibuf),
+`else
     .ibuf          (ibuf),
+`endif
     .gpr           (gpr_o),
     .eflags        (eflags),
     .sys_mode      (sys_mode),
@@ -2644,6 +2675,8 @@ module core
     .d_is_nop      (d_is_nop),
     .d_is_fwait    (d_is_fwait),
     .d_ea          (d_ea),
+    .d_addr_mask   (d_addr_mask),
+    .d_addr_mask_known(d_addr_mask_known),
     .d_w           (d_w),
     .d_dst_high8   (d_dst_high8),
     .d_src_high8   (d_src_high8),
@@ -3780,7 +3813,11 @@ module core
   // M7.1: a folded-syscall retire (the instruction after cd80) is stamped with the
   // int-0x80's pc (fold_pc_r) so it aligns with the golden int-0x80 record. Inert
   // unless proxy_en && fold_pending_r, so non-proxy retires use q_pc verbatim.
-  assign retire_pc = (proxy_en && fold_pending_r) ? fold_pc_r : q_pc;
+  assign retire_pc = (proxy_en && fold_pending_r) ? fold_pc_r :
+`ifdef VEN_P54_PREFIX_EX_CHAIN
+                     p54_prefix_ex_retire_pc_valid_q ? p54_prefix_ex_retire_pc_q :
+`endif
+                     q_pc;
 
   // M2S.1 system retire payload. retire_sys mirrors retire_valid in system mode
   // (every retirement carries the control-register block); 0 in user mode.
@@ -4004,6 +4041,17 @@ module core
     else fp_bop = reg_read(d.src, 3'd4, 1'b0);
   endfunction
 
+  // Code width and operand width are identical only for prefix-free decode.
+  // Current S_PIPE packets cannot change CS.D while owned; initial PREFIX66
+  // is register-only userflat. Branch TARGET masks remain operand-width based.
+  function automatic logic fp_code16(input fpd_t d);
+`ifdef VEN_P54_PREFIX66_REG
+    fp_code16=def16;
+`else
+    fp_code16=d.w16;
+`endif
+  endfunction
+
   // pairing checker — extracted to the `issue_uv` leaf module
   // (rtl/core/issue_uv.sv), instantiated as u_issue near the decode instances.
   // It takes the U decode + V candidate decode and drives `pipe_pair_ok`.
@@ -4082,17 +4130,13 @@ module core
   // A resident line is not by itself safe to read during S_FETCH with the BRAM
   // frontend: the synchronous I-cache buffers may still hold a different way.
   // This is the same returned-address predicate used by ic_fetch_ready, factored
-  // for the longer (16-byte) slow-decoder window. It is used solely by the
-  // uop-overflow hand-off below; ordinary slow fetches retain P5-calibrated bus
-  // timing.
+  // for the longer (16-byte) slow-decoder window. Both the raw-byte frontend
+  // and the optional uop frontend use the same returned-line ownership check;
+  // the raw frontend must not depend on a persistent decoded-op cache merely
+  // to pass its already fetched bytes to the reference decoder.
   logic sfetch_uop_fast, sfetch_short_fast, sfetch_resident_fast;
   logic pipe_sdecode_window_ok;
-`ifndef VEN_PIPE_SDECODE
-  assign pipe_sdecode_window_ok = 1'b0;
-`endif
-`ifdef VEN_UOPCACHE
 `ifdef VEN_IC_BRAM
-`ifdef VEN_UOP_SFETCH
   function automatic logic ic_buffered(input logic [31:0] addr);
     logic [IC_IDXW-1:0] ib_set;
     logic [IC_WAYW-1:0] ib_way;
@@ -4104,7 +4148,9 @@ module core
                   || (rdB_set_q == ib_set && rdB_way_q == ib_way && !ic_rd_collB));
     end
   endfunction
+`endif
 `ifdef VEN_PIPE_SDECODE
+`ifdef VEN_IC_BRAM
   // Move only the resident slow-fetch capture, never its decoder/dispatch.
   // The task below is called solely by existing S_PIPE slow-handoff arms,
   // after their event/debug/packet/frontend guards. Both returned identities
@@ -4125,7 +4171,15 @@ module core
                             {1'b0,seg_limit[SG_CS]})))
                        && ic_buffered(flin)
                        && ic_buffered(flin + 32'(IWORDS*4 - 1));
+`else
+  assign pipe_sdecode_window_ok = 1'b0;
 `endif
+`else
+  assign pipe_sdecode_window_ok = 1'b0;
+`endif
+`ifdef VEN_UOPCACHE
+`ifdef VEN_IC_BRAM
+`ifdef VEN_UOP_SFETCH
   // The token records a miss detected in S_PIPE only after ic_fetch_ready was
   // true. Recheck BOTH endpoints here rather than relying on that history:
   // S_FETCH copies 16 bytes (not the fast path's 12), and a stale/predicted B
@@ -4191,34 +4245,164 @@ module core
   assign sfetch_uop_fast = 1'b0;
   assign sfetch_short_fast = 1'b0;
   assign sfetch_resident_fast = 1'b0;
-`ifdef VEN_PIPE_SDECODE
-  assign pipe_sdecode_window_ok = 1'b0;
-`endif
 `endif
 `else
   assign sfetch_uop_fast = 1'b0;
   assign sfetch_short_fast = 1'b0;
   assign sfetch_resident_fast = 1'b0;
-`ifdef VEN_PIPE_SDECODE
-  assign pipe_sdecode_window_ok = 1'b0;
-`endif
 `endif
 `else
   assign sfetch_uop_fast = 1'b0;
   assign sfetch_short_fast = 1'b0;
   assign sfetch_resident_fast = 1'b0;
-`ifdef VEN_PIPE_SDECODE
-  assign pipe_sdecode_window_ok = 1'b0;
+`endif
+
+`ifdef VEN_P54_PREFIX_EX_CHAIN
+  `include "core_prefix_ex_chain.svh"
+`endif
+  `include "core_refdecode_latch.svh"
+  `include "core_int_retire.svh"
+`ifdef VEN_P54_MOV_ACK_RETIRE
+  `include "core_mov_ack_retire.svh"
+`endif
+
+`ifdef VEN_PIPE_SDISPATCH
+`ifndef VEN_PIPE_SDECODE
+  initial $fatal(1, "VEN_PIPE_SDISPATCH requires VEN_PIPE_SDECODE");
+`endif
+`ifdef VEN_P54_PREFIX_AGI
+`ifndef VEN_P54_SDISPATCH_AGI
+  initial $fatal(1, "VEN_P54_PREFIX_AGI requires VEN_P54_SDISPATCH_AGI");
+`endif
+`endif
+  logic pipe_sdispatch_shape_ok;
+  always_comb begin
+    int npfx;
+    logic prefix_run;
+    logic prefix_agi_clock;
+    npfx = 0;
+    prefix_run = 1'b1;
+    for (int i=0; i<15; i++) begin
+      if (prefix_run && is_prefix(refdecode_ibuf[i])) npfx = npfx + 1;
+      else prefix_run = 1'b0;
+    end
+    prefix_agi_clock=1'b0;
+`ifdef VEN_P54_PREFIX_AGI
+    // AP-500 5.5: a paid prefix D1 clock may overlap the one-clock AGI.
+    // This capture still costs one clock before any S_LOAD/S_EXEC access.
+    // An ordinary prefix plus 0F needs TWO D1 clocks, never this credit;
+    // near Jcc's 0F has no prefix delay and branches remain excluded.
+    prefix_agi_clock=!d_is_branch &&
+      (((npfx==1) && (refdecode_ibuf[1]!=8'h0f)) ||
+       ((npfx==0) && (refdecode_ibuf[0]==8'h0f)));
+`endif
+    // Initial integer admission shares the existing execution/operand paths.
+    // Full system, string/control, LOCK, x87, and multi-cycle instruction
+    // timing stay with S_DECODE. SHLD/SHRD cannot borrow fetch clocks from
+    // their specified occupancy. MUL/DIV/IMUL and MOVSX/MOVZX may enter
+    // directly only with the explicit pre-writeback P54 execution hold.
+    // Ordinary P54 prefixes each consume one D1 clock. The handoff and
+    // S_EXEC consume two clocks, covering at most one ordinary prefix of a
+    // one-clock base operation. The default retains the old decode clock
+    // after any preceding GPR write. The optional exact-mask admission keeps
+    // that clock only for a known base/index dependency, using metadata from
+    // the SAME reference EA generator. The default retains legacy token
+    // writers; optional P54_AGI_WRITE_MASK uses actual prior-clock GPR writes.
+    pipe_sdispatch_shape_ok = !sys_mode && !soc_en && !cosim_en && !def16
+                           && !d_unknown && !d_halt && !d_is_x87 && !d_is_fwait
+                           && !d_int && !d_int80 && !d_iret && !d_ud2 && !d_rsm
+                           && !d_cacheinv && !d_lock && !d_io && !d_is_branch
+                           && (d_sysop == SYS_NONE) && !d_is_push && !d_is_pop
+                           && !d_seg_load && !d_store_sreg && !d_push_sreg && !d_xlat
+                           && !d_pop_sreg && !d_callf_mem && !d_jmpf_mem
+                           && !d_cld && !d_std && !d_cli && !d_sti
+                           && !d_clc && !d_stc && !d_cmc && !d_clts
+                           && !pfx_addr && (pfx_rep == 2'd0)
+                           && (npfx <= 1)
+                           && (!(d_mem_read || d_mem_write || d_is_lea) ||
+`ifdef VEN_P54_SDISPATCH_AGI
+                               (d_addr_mask_known &&
+                                (prefix_agi_clock ||
+`ifdef VEN_P54_AGI_WRITE_MASK
+                                 ((d_addr_mask & p54_prior_write_mask)==8'd0))))
+`else
+                                 (!(!agi_wr0[8] && d_addr_mask[agi_wr0[2:0]]) &&
+                                  !(!agi_wr1[8] && d_addr_mask[agi_wr1[2:0]])))))
+`endif
+`else
+                               ((agi_wr0 == 9'h100) && (agi_wr1 == 9'h100)))
+`endif
+                           && (((d_kind == K_ALU) && (d_alu_op <= ALU_NOT)) ||
+                               ((d_kind == K_SHIFT) && !d_shift_cl &&
+                                (d_shrot inside {3'd0,3'd1,3'd4,3'd5,3'd6,3'd7})) ||
+                               ((d_kind inside {K_SETCC,K_BSWAP}) &&
+                                !d_mem_read && !d_mem_write && (npfx == 0)) ||
+`ifdef VEN_P54_INT_EXEC_OCC
+                               // 0F costs one decode clock; EX owns three,
+                               // with a source-read ACK credited as one EX.
+                               // An ordinary prefix still needs S_DECODE.
+                               ((d_kind == K_EXT) && (npfx == 0)) ||
+                               // F6/F7 and immediate IMUL have no 0F decode
+                               // prefix, so the capture clock covers one
+                               // ordinary prefix. Two-operand 0F AF consumes
+                               // that clock itself and admits no extra prefix.
+                               (d_kind == K_MULDIV) ||
+                               ((d_kind == K_IMUL2) &&
+                                ((refdecode_ibuf[npfx] != 8'h0f) || (npfx == 0))) ||
+`endif
+                               ((d_kind == K_CONV) && d_conv_cdq && (npfx == 0)) ||
+                               ((d_kind == K_XCHG) && (npfx == 0) &&
+                                (refdecode_ibuf[0] inside {[8'h91:8'h97]})));
+  end
+`ifdef VEN_PIPE_SDISPATCH_SHORT
+  logic pipe_sdispatch_short_window_ok;
+`ifndef VEN_IC_BRAM
+  initial $fatal(1, "VEN_PIPE_SDISPATCH_SHORT requires VEN_IC_BRAM");
+  assign pipe_sdispatch_short_window_ok = 1'b0;
+`else
+  // This is a capture permit, not an input to the live decoder. Only direct
+  // integer shapes use their actual encoding extent; the universal slow
+  // fetch retains its old complete 16-byte window. For the admitted grammar,
+  // every consumed prefix/opcode/ModR/M/SIB/displacement/immediate is inside
+  // d_len, and both endpoint buffers cover all of that at most 15-byte span.
+  // A stale suffix may change unused decoder scratch, never an operand field.
+  assign pipe_sdispatch_short_window_ok = (state == S_PIPE) && cycle_mode && !def16
+                       && pipe_sdispatch_shape_ok && (d_len != 4'd0)
+                       && exec_issue_ok && !icsnp_v1 && !icsnp_v2
+`ifdef VEN_L1_AXI
+                       && !ic_snoop_valid
+`endif
+                       && ({1'b0,flin[11:0]} + {9'd0,d_len} <= 13'd4096)
+                       && (!sys_mode || (!real_mode && !v86 &&
+                           ({1'b0,eip} + {29'd0,d_len} - 33'd1 <=
+                            {1'b0,seg_limit[SG_CS]})))
+                       && ic_buffered(flin)
+                       && ic_buffered(flin + {28'd0,d_len} - 32'd1);
+`endif
+`endif
+`else
+`ifdef VEN_PIPE_SDISPATCH_SHORT
+  initial $fatal(1, "VEN_PIPE_SDISPATCH_SHORT requires VEN_PIPE_SDISPATCH");
 `endif
 `endif
 
 `ifdef VEN_PIPE_SDECODE
   task automatic pipe_capture_slow_window;
-    if (pipe_sdecode_window_ok) begin
+    if (pipe_sdecode_window_ok
+`ifdef VEN_PIPE_SDISPATCH_SHORT
+        || pipe_sdispatch_short_window_ok
+`endif
+       ) begin
       // Same gather and same ibuf register as the resident S_FETCH arm.
       // The ordinary S_DECODE still owns q_*, RF/shadow, #NM/#MF, and events.
-      for (int i=0; i<IWORDS*4; i++)
+      for (int i=0; i<IWORDS*4; i++) begin
+`ifdef VEN_PIPE_SDISPATCH_SHORT
+        if (!pipe_sdecode_window_ok && (i >= int'(d_len)))
+          ibuf[i] <= 8'd0;
+        else
+`endif
         ibuf[i] <= ic_byte(flin + 32'(i));
+      end
       fetch_word <= 3'd0;
       sfetch_short_len_q <= 4'd0;
 `ifdef VEN_UOPCACHE
@@ -4228,6 +4412,15 @@ module core
       sfetch_resident_q <= 1'b0;
 `endif
       state <= S_DECODE;
+`ifdef VEN_PIPE_SDISPATCH
+      if (pipe_sdispatch_shape_ok) begin
+        // q_* captures this same live byte window on this edge. S_LOAD still
+        // owns all operand accesses and S_EXEC owns execution/retirement.
+        // No result, architectural write or memory request is issued here.
+        capture_reference_decode(eip);
+        state <= d_mem_read ? S_LOAD : S_EXEC;
+      end
+`endif
     end
   endtask
 `endif
@@ -4661,15 +4854,32 @@ module core
   // stable continuous signal, so flin -> addr -> line -> ic_byte settles cleanly.
   logic [31:0] flin_nl;
   assign flin_nl    = {flin[31:5], 5'd0} + 32'd32;     // next aligned 32-byte line
+`ifdef VEN_P54_CTRL_TARGET_READ
+  `include "core_ctrl_target_read.svh"
+  // Two existing registered ports, no added SRAM port or retained descriptor.
+  // Only a resolved slow owner can override these speculative read addresses.
+  assign ic_rd_setA = p54_ctrl_target_read
+                         ? p54_ctrl_target_addr[5 +: IC_IDXW] : flin[5 +: IC_IDXW];
+  assign ic_rd_wayA = ic_hit_way(p54_ctrl_target_read ? p54_ctrl_target_addr : flin);
+`else
   assign ic_rd_setA = flin[5 +: IC_IDXW];
   assign ic_rd_wayA = ic_hit_way(flin);
+`endif
 `ifdef VEN_IC_BRAM
   // port B normally prefetches flin's next (straddle) line; 2b repurposes it to the
   // predicted branch target when pf_redir (set in the fast-path comb block). The read
   // is REGISTERED in the icache module, so this drives NEXT clock's rd_lineB — no
   // combinational loop through the decode that computes pf_redir.
+`ifdef VEN_P54_CTRL_TARGET_READ
+  assign ic_rd_setB = p54_ctrl_target_read
+                       ? p54_ctrl_target_next_line[5 +: IC_IDXW]
+                       : (pf_redir ? pf_redir_tgt[5 +: IC_IDXW] : flin_nl[5 +: IC_IDXW]);
+  assign ic_rd_wayB = ic_hit_way(p54_ctrl_target_read ? p54_ctrl_target_next_line
+                                 : (pf_redir ? pf_redir_tgt : flin_nl));
+`else
   assign ic_rd_setB = pf_redir ? pf_redir_tgt[5 +: IC_IDXW] : flin_nl[5 +: IC_IDXW];
   assign ic_rd_wayB = pf_redir ? ic_hit_way(pf_redir_tgt) : ic_hit_way(flin_nl);
+`endif
 `else
   assign ic_rd_setB = flin_nl[5 +: IC_IDXW];
   assign ic_rd_wayB = ic_hit_way(flin_nl);
@@ -5021,10 +5231,14 @@ module core
     for (int i=0;i<7;i++) vb[i] = ic_byte(flin+{28'd0,u_d.len}+i[31:0]);
   end
 
+`ifdef VEN_P54_PREFIX66_REG
+  `include "core_prefix66_decode.svh"
+`else
   decode u_decode (
       .ib0(ub[0]), .ib1(ub[1]), .ib2(ub[2]), .ib3(ub[3]), .ib4(ub[4]), .ib5(ub[5]), .ib6(ub[6]),
       .iflags(eflags), .def16(def16), .cycle_mode(cycle_mode), .uop(u_d)
   );
+`endif
   decode v_decode (
       .ib0(vb[0]), .ib1(vb[1]), .ib2(vb[2]), .ib3(vb[3]), .ib4(vb[4]), .ib5(vb[5]), .ib6(vb[6]),
       .iflags(eflags), .def16(def16), .cycle_mode(cycle_mode), .uop(v_d)
@@ -5285,7 +5499,7 @@ module core
 `ifdef VEN_UOPCACHE
        uc_v_avail &&
 `endif
-       !(u_d.w16 && (({1'b0,eip[15:0]} + {13'd0,u_d.len}) > 17'h0FFFF)) &&
+       !(fp_code16(u_d) && (({1'b0,eip[15:0]} + {13'd0,u_d.len}) > 17'h0FFFF)) &&
        !(errata_en[ERR_MOFFS] && moffs_falsedep));
   assign pipe_v_store_seg = pipe_v_eff.mem_ss ? 3'(SG_SS) : 3'(SG_DS);
   assign pipe_v_store_phys = paging_on ? v_dtlb_lk_phys : pipe_v_mem_lin;
@@ -5424,11 +5638,15 @@ module core
   // synchronous-fault squash.  This is the same truth table as the former
   // in-block calculation, merely an explicit cone boundary.
   always_comb begin
+`ifdef VEN_P54_AGI_WRITE_MASK
+    pipe_agi = |(u_d.addr_mask & p54_prior_write_mask);
+`else
     pipe_agi = 1'b0;
     if (u_d.addr_mask != 8'd0) begin
       if (!agi_wr0[8] && u_d.addr_mask[agi_wr0[2:0]]) pipe_agi = 1'b1;
       if (!agi_wr1[8] && u_d.addr_mask[agi_wr1[2:0]]) pipe_agi = 1'b1;
     end
+`endif
   end
 
   always_comb begin
@@ -5499,7 +5717,15 @@ module core
              // the registered uop-cache slot selected above represents them.
              && uc_v_avail
 `endif
-             && !(u_d.w16 && (({1'b0,eip[15:0]} + {13'd0,u_d.len}) > 17'h0FFFF));
+`ifdef VEN_P54_PREFIX66_REG
+             && (!p54_prefix66_candidate ||
+                 (!v_d.is_mem && !v_d.is_fp && !v_d.is_stack && !v_d.is_lea &&
+                  // issue_uv's ESP exception is for implicit stack pairs.
+                  // Both members here are explicit register writes, so no
+                  // parent-register WAW (including SP/ESP) is permitted.
+                  ((u_d.writes & v_d.writes)==8'd0)))
+`endif
+             && !(fp_code16(u_d) && (({1'b0,eip[15:0]} + {13'd0,u_d.len}) > 17'h0FFFF));
 
     // FLD{const,ST(i)} may absorb a following free FXCH outside the ordinary
     // U/V pairing rules, but it is still a two-instruction architectural
@@ -5510,7 +5736,7 @@ module core
 `ifdef VEN_UOPCACHE
                 && uc_v_avail
 `endif
-                && !(u_d.w16 && (({1'b0,eip[15:0]} + {13'd0,u_d.len}) > 17'h0FFFF));
+                && !(fp_code16(u_d) && (({1'b0,eip[15:0]} + {13'd0,u_d.len}) > 17'h0FFFF));
 
     // M6 Erratum 59 (MOV moffs A2/A3 fails to pair): when errata enabled, an
     // A2/A3 moffs store (the U member) followed by an instruction that uses
@@ -6116,8 +6342,18 @@ module core
   // while the continuation selects S_EXEC.  Deliberately use `hold`, not the
   // otherwise-ready `would_take_noevent`: the latter includes a LIVE
   // invalidation and must not enter this no-combinational-loop mirror path.
-  assign fp_issue_block = fp_async_hold || fp_irq_divert || dbg_fast_hold ||
-                          rep_stos_cont_redecode_q || rep_stos_cont_hold;
+  logic fp_issue_block_base;
+  assign fp_issue_block_base = fp_async_hold || fp_irq_divert || dbg_fast_hold ||
+                               rep_stos_cont_redecode_q || rep_stos_cont_hold;
+`ifdef VEN_P54_PREFIX66_REG
+`ifdef VEN_UOPCACHE
+  initial $fatal(1,"VEN_P54_PREFIX66_REG requires raw decode, not VEN_UOPCACHE");
+`endif
+  `include "core_prefix66_d1.svh"
+  assign fp_issue_block=fp_issue_block_base || p54_prefix66_hold;
+`else
+  assign fp_issue_block=fp_issue_block_base;
+`endif
 
   // The poison has a deliberately independent owner.  Its SET must win over a
   // same-edge decode because an executable invalidation is later in program
@@ -6863,7 +7099,7 @@ module core
 `ifdef VEN_UOPCACHE
             uc_v_avail &&
 `endif
-            !(u_d.w16 && (({1'b0,eip[15:0]} + {13'd0,u_d.len}) > 17'h0FFFF)) &&
+            !(fp_code16(u_d) && (({1'b0,eip[15:0]} + {13'd0,u_d.len}) > 17'h0FFFF)) &&
             !exec_flush_all && !ic_snoop_valid &&
             !(errata_en[ERR_MOFFS] && moffs_falsedep);
 `endif
@@ -7423,6 +7659,11 @@ module core
           rep_stos_stream_started_q <= 1'b1;
       end
 `endif
+`ifdef VEN_P54_INT_EXEC_OCC
+      // Keep every architectural effect of integer execute (including flags,
+      // EIP and retire_valid) behind the same pre-commit hold as the GPR bus.
+      if (fsm_case_enabled)
+`endif
       unique case (state)
         // dual-issue fast-path + icache-fill arms (S_RESET / S_PF / S_PIPE) —
         // relocated VERBATIM into core_fastpath.svh (RAW case-arms, the first run
@@ -7469,7 +7710,9 @@ module core
               // P5 occupancy residual so issue->next-issue == occ (DIV 17/25/41,
               // IDIV 22/30/46). The engine's real clocks cover most of it; top up
               // (tuned vs make m5). q_md 3'd7 = IDIV.
+`ifndef VEN_P54_INT_EXEC_OCC
               pending_mem_pen <= (q_md==3'd7) ? 7'd6 : 7'd1;
+`endif
               eip<=next_eip; retire_valid<=1'b1; state<=S_PIPE;
             end
           end
@@ -11766,7 +12009,11 @@ module core
     eng_int_start=1'b0; eng_int_signed=1'b0; eng_int_w=q_w;
     eng_int_num=64'd0; eng_int_den=32'd0;
     srcv_drv = q_mem_read ? wmask(mem_load_data, q_w) : reg_read(q_src_reg, q_w, q_src_high8);
-    if (state==S_EXEC && q_kind==K_MULDIV && (q_md==3'd6 || q_md==3'd7)) begin
+    if (state==S_EXEC && q_kind==K_MULDIV && (q_md==3'd6 || q_md==3'd7)
+`ifdef VEN_P54_INT_EXEC_OCC
+        && fsm_case_enabled
+`endif
+        ) begin
       eng_int_start  = 1'b1;
       eng_int_signed = (q_md==3'd7);
       eng_int_w      = q_w;
@@ -12189,10 +12436,12 @@ module core
   // The main sequential FSM skips its case body for all of these diversions.
   // Independent architectural mirrors must use this shared permit rather than
   // remembering a subset (the old GPR driver omitted segment/CS faults).
-  assign fsm_case_enabled = !fp_async_hold && !sync_access_fault && !perm_fault &&
+  `include "core_int_exec_occ.svh"
+  assign fsm_case_ready = !fp_async_hold && !sync_access_fault && !perm_fault &&
                             !xlate_miss && !fe_xlate_pend &&
                             !rep_stos_stream_preissue_block &&
                             !rep_movs_stream_preissue_block;
+  assign fsm_case_enabled = fsm_case_ready && !p54_int_exec_hold;
 
 
   // ===========================================================================
@@ -12589,7 +12838,11 @@ module core
   // Attribute V-slot availability only after the U side has reached the exact
   // ISSUE arm below.  This keeps ordinary front-end stalls out of the pairing
   // diagnosis: each count is one otherwise-retiring U instruction.
+`ifdef VEN_P54_PREFIX66_REG
+  localparam int PP_NPAIR  = 10;
+`else
   localparam int PP_NPAIR  = 9;
+`endif
   // First failing rule inside issue_uv, recorded only for a U issue whose V
   // candidate was otherwise present.  Keep this separate from PP_NPAIR: the
   // latter also contains frontend and one-instruction architectural guards.
@@ -12609,6 +12862,72 @@ module core
   localparam int PP_NSTR  = int'(ST_OUTS) + 1;
   localparam int PP_NALU  = int'(ALU_AAD) + 1;
   localparam int PP_NW    = 8;
+`ifndef SYNTHESIS
+  // Compact producer-side evidence for injected D-cache timing debt. Record
+  // the *source* width (not MOVSX/MOVZX's destination), address low bits, and
+  // pre-access cache hit. These are completed producer events, not clocks:
+  // frontend/occupancy/wait clocks remain in the exclusive tables below.
+  localparam int PP_NMEMSITE = 5;
+  localparam int PP_NMEMCELL = PP_NMEMSITE * PP_NW * 4 * 2;
+  longint unsigned pp_mem_producer [PP_NMEMSITE];
+  longint unsigned pp_mem_shape [PP_NMEMCELL];
+  function automatic string pp_mem_site_name(input int site);
+    case (site)
+      0: pp_mem_site_name = "S_LOAD";
+      1: pp_mem_site_name = "S_LOAD2";
+      2: pp_mem_site_name = "S_STORE";
+      3: pp_mem_site_name = "FAST_READ";
+      4: pp_mem_site_name = "FAST_WRITE";
+      default: pp_mem_site_name = "?";
+    endcase
+  endfunction
+  function automatic int pp_mem_cell(input int site, input int width,
+                                      input int low, input int hit);
+    pp_mem_cell = (((site * PP_NW + width) * 4 + low) * 2 + hit);
+  endfunction
+  function automatic logic pp_mem_true_misalign(input int width, input int low);
+    // Intel Vol.1 defines a 2-/4-byte access as misaligned only when it
+    // crosses a four-byte boundary. A byte has no misalignment penalty.
+    pp_mem_true_misalign = ((width == 2) && (low == 3)) ||
+                           ((width == 4) && (low != 0));
+  endfunction
+  always_ff @(posedge clk) begin
+    if (!rst_n) begin
+      for (int site = 0; site < PP_NMEMSITE; site++)
+        pp_mem_producer[site] <= 64'd0;
+      for (int idx = 0; idx < PP_NMEMCELL; idx++)
+        pp_mem_shape[idx] <= 64'd0;
+    end else if (cycle_mode && dc_acc_valid && fsm_case_enabled) begin
+      int site, width, low, hit, idx;
+      site = -1;
+      width = 0;
+      // Split-page first reads/writes and permission-only probes do not
+      // produce the deferred timing debt; observe its final producer edge.
+      case (state)
+        S_LOAD: if (!xp_cross) begin site = 0; width = int'(load_beat_w); end
+        S_LOAD2: if (!xp_cross && !q_jmpf_mem && !q_callf_mem) begin
+          site = 1; width = int'(load_beat_w);
+        end
+        S_STORE: if (!(xs_cross_now && !xs_act) &&
+                     !(xs_act && (xs_ph == 2'd1))) begin
+          site = 2; width = int'(q_w);
+        end
+        S_PIPE: if (pipe_int_commit && pipe_u_eff.is_mem) begin
+          site = pipe_u_eff.is_store ? 4 : 3;
+          width = int'(fp_mem_source_width(pipe_u_eff));
+        end
+        default: ;
+      endcase
+      if ((site >= 0) && (width < PP_NW)) begin
+        low = int'(dc_acc_addr[1:0]);
+        hit = int'(dc_lu_hit);
+        idx = pp_mem_cell(site, width, low, hit);
+        pp_mem_producer[site] <= pp_mem_producer[site] + 64'd1;
+        pp_mem_shape[idx] <= pp_mem_shape[idx] + 64'd1;
+      end
+    end
+  end
+`endif
   longint pp_state [PP_NSTATE];
   // Per-state memory accounting.  `pp_mem_wait` counts clocks in which a
   // request is visibly held without an acknowledgement; `pp_mem_ack` counts
@@ -12702,11 +13021,15 @@ module core
                                 !sys_mode;
 `endif
   always_comb begin
+`ifdef VEN_P54_AGI_WRITE_MASK
+    pp_umap_ref_agi = |(u_d_ref.addr_mask & p54_prior_write_mask);
+`else
     pp_umap_ref_agi = 1'b0;
     if (u_d_ref.addr_mask != 8'd0) begin
       if (!agi_wr0[8] && u_d_ref.addr_mask[agi_wr0[2:0]]) pp_umap_ref_agi = 1'b1;
       if (!agi_wr1[8] && u_d_ref.addr_mask[agi_wr1[2:0]]) pp_umap_ref_agi = 1'b1;
     end
+`endif
   end
 `ifdef VEN_SEG_ENFORCE
   assign pp_umap_ref_cs_fault = sys_mode && !real_mode && !v86 && seg_attr[SG_CS][7] &&
@@ -12788,6 +13111,9 @@ module core
       10: pp_bail_name = "mispred_bubbles   (branch mispredict penalty)";
       11: pp_bail_name = "pipe_agi          (address-generation interlock)";
       12: pp_bail_name = "ISSUE             (retired 1 or 2 this clock)";
+`ifdef VEN_P54_PREFIX66_REG
+      13: pp_bail_name = "PREFIX_D1         (paid operand-size prefix clock)";
+`endif
       default: pp_bail_name = "?";
     endcase
   endfunction
@@ -12803,6 +13129,9 @@ module core
       6: pp_pair_name = "Err59 moffs EAX    (documented false dependency)";
       7: pp_pair_name = "!cycle_mode        (functional-mode U issue)";
       8: pp_pair_name = "PAIRED             (U + V retired)";
+`ifdef VEN_P54_PREFIX66_REG
+      9: pp_pair_name = "prefix V subset   (register/Jcc V only)";
+`endif
       default: pp_pair_name = "?";
     endcase
   endfunction
@@ -13216,6 +13545,9 @@ module core
         else if (u_d.is_fp)                                    b = 8;
         else if (fp_sys_bail)                                  b = 9;
         else if (mispred_bubbles != 3'd0)                      b = 10;
+`ifdef VEN_P54_PREFIX66_REG
+        else if (p54_prefix66_hold)                            b = 13;
+`endif
         else if (pipe_agi)                                     b = 11;
         pp_bail[b] <= pp_bail[b] + 64'd1;
         if (b == 5) begin
@@ -13241,7 +13573,13 @@ module core
 `ifdef VEN_UOPCACHE
           else if (!uc_v_avail)                                 p = 4;
 `endif
-          else if (u_d.w16 && (({1'b0,eip[15:0]} + {13'd0,u_d.len}) > 17'h0FFFF))
+`ifdef VEN_P54_PREFIX66_REG
+          else if (p54_prefix66_candidate &&
+                   (v_d.is_mem || v_d.is_fp || v_d.is_stack || v_d.is_lea ||
+                    ((u_d.writes & v_d.writes)!=8'd0)))
+                                                               p = 9;
+`endif
+          else if (fp_code16(u_d) && (({1'b0,eip[15:0]} + {13'd0,u_d.len}) > 17'h0FFFF))
                                                                p = 5;
           else if (errata_en[ERR_MOFFS] && moffs_falsedep)      p = 6;
           pp_pair[p] <= pp_pair[p] + 64'd1;
@@ -13363,6 +13701,39 @@ module core
       if ((pp_mem_wait[i] != 0) || (pp_mem_ack[i] != 0))
         $display("    state %2d  req-wait clocks %10d  req/ack handshakes %10d",
                  i, pp_mem_wait[i], pp_mem_ack[i]);
+`ifndef SYNTHESIS
+    begin
+      longint unsigned count, cells, old_mis, true_mis, false_mis, read_miss;
+      logic old_bad, true_bad;
+      $display("");
+      $display("  -- D-memory producer shape (events, not exclusive clocks) --");
+      for (int site = 0; site < PP_NMEMSITE; site++) begin
+        cells = 0; old_mis = 0; true_mis = 0; false_mis = 0; read_miss = 0;
+        for (int width = 0; width < PP_NW; width++)
+          for (int low = 0; low < 4; low++)
+            for (int hit = 0; hit < 2; hit++) begin
+              count = pp_mem_shape[pp_mem_cell(site, width, low, hit)];
+              old_bad = (low != 0); // historical slow-path dword predicate
+              true_bad = pp_mem_true_misalign(width, low);
+              cells += count;
+              if (old_bad) old_mis += count;
+              if (true_bad) true_mis += count;
+              if (old_bad && !true_bad) false_mis += count;
+              if ((site != 2) && (site != 4) && (hit == 0)) read_miss += count;
+              if (count != 0)
+                $display("    mem-shape site=%s width=%0d low=%0d hit=%0d events=%0d old_dword_bad=%0d true_boundary_bad=%0d",
+                         pp_mem_site_name(site), width, low, hit, count, old_bad, true_bad);
+            end
+        $display("    mem-producer site=%s events=%0d cells=%0d old_dword_bad=%0d true_boundary_bad=%0d false_old_bad=%0d read_misses=%0d",
+                 pp_mem_site_name(site), pp_mem_producer[site], cells,
+                 old_mis, true_mis, false_mis, read_miss);
+        if (cells != pp_mem_producer[site])
+          $error("PERF/mem-shape: producer histogram does not reconcile for %s",
+                 pp_mem_site_name(site));
+      end
+      $display("    mem-shape predicates are counterfactual comparisons, not a claim that the current profile injects either penalty; read-miss cost is backend-dependent.");
+    end
+`endif
     $display("");
     $display("  -- slow data FSM by decoded class (clocks / wait / ack) --");
     for (int i=0;i<PP_NKIND;i++)
@@ -13634,7 +14005,13 @@ module core
       fpchk_arm_q  <= pipe_int_commit;
       fpchk_we_q   <= (gpr_we != '0);
       fpchk_wreg_q <= pipe_u_eff.wreg && !pipe_u_eff.is_branch &&
-                      !pipe_u_eff.is_nop && !pipe_u_eff.is_fp;
+                      !pipe_u_eff.is_nop && !pipe_u_eff.is_fp
+`ifdef VEN_P54_AGI_WRITE_MASK
+                      // A masked-zero shift retires without modifying its
+                      // destination. Its intentional WE=0 is not C-01 drift.
+                      && (!pipe_u_eff.is_shift || u_shift_cnt!=5'd0)
+`endif
+                      ;
       fpchk_dst_q  <= {1'b0, pipe_u_eff.dst};
       if (fpchk_arm_q && retire_valid && retire_pipe_valid
           && fpchk_wreg_q && !fpchk_we_q)

@@ -60,7 +60,8 @@
               // The LRU access is the dcache_timing posedge (dc_acc_valid driven
               // to this S_STORE access, dc_acc_addr == sa). Stores add no miss
               // penalty (skip the dc_lu_hit test) but a misaligned store costs +3.
-              if (sa[1:0] != 2'b00) pending_mem_pen <= pending_mem_pen + P5_MISALIGN;
+              if (p5_data_misaligned(sa, {1'b0,q_w}))
+                pending_mem_pen <= pending_mem_pen + P5_MISALIGN;
             end
             unique case (q_kind)
               K_CTRL: begin // CALL: push done, set EIP (width-aware ESP adjust)

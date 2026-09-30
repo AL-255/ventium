@@ -14,6 +14,19 @@
 
 package ventium_alu_pkg;
 
+  // P54 cache-transfer alignment, NOT the architectural #AC test. Intel's
+  // Vol.1 basic-memory model and AP-500 5.4.3 allow a word at offsets 0/1/2
+  // inside one aligned dword. A byte never crosses a transfer boundary.
+  function automatic logic p5_data_misaligned(input logic [31:0] addr,
+                                              input logic [3:0] bytes);
+    case (bytes)
+      4'd2: return addr[1:0] == 2'b11;
+      4'd4: return addr[1:0] != 2'b00;
+      4'd8: return addr[2:0] != 3'b000;
+      default: return 1'b0;
+    endcase
+  endfunction
+
   // ALU op encoding (low 3 bits mirror the x86 ALU group order 0..7).
   localparam logic [4:0] ALU_ADD = 5'd0;
   localparam logic [4:0] ALU_OR  = 5'd1;

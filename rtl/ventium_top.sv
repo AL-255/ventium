@@ -318,14 +318,19 @@ module ventium_top
   VEN_IC_NARROWB_IS_RETIRED__REMOVE_THIS_DEFINE u_ven_ic_narrowb_rejected ();
 `endif
 `ifdef VEN_SFETCH_RESIDENT
-  // The broad resident-window hand-off is meaningful only on the tagged,
-  // registered uop-cache/BRAM frontend.  Reject partial profiles rather than
-  // silently degrading them into a different fetch policy.
+  // Resident-window handoffs require tagged registered I-cache bytes. The
+  // raw-byte D1 path can capture these directly in S_PIPE; the legacy uop
+  // profile instead carries its one-shot token into S_FETCH. Neither mode
+  // needs to infer byte provenance from an untagged cache read.
 `ifndef VEN_UOPCACHE
+`ifndef VEN_PIPE_SDECODE
   VEN_SFETCH_RESIDENT_REQUIRES_VEN_UOPCACHE u_ven_sfetch_resident_no_uop ();
 `endif
+`endif
 `ifndef VEN_UOP_SFETCH
+`ifndef VEN_PIPE_SDECODE
   VEN_SFETCH_RESIDENT_REQUIRES_VEN_UOP_SFETCH u_ven_sfetch_resident_no_uop_sfetch ();
+`endif
 `endif
 `ifndef VEN_IC_BRAM
   VEN_SFETCH_RESIDENT_REQUIRES_VEN_IC_BRAM u_ven_sfetch_resident_no_ic_bram ();

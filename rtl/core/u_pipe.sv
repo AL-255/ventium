@@ -73,11 +73,11 @@ module u_pipe
     // by the decoder.  C1/D1 retain their literal count.  The slow FSM makes
     // exactly the same `& 5'h1f` selection (core.sv q_shift_cl -> ECX[4:0]).
     u_shcnt = u_d.shift_cl ? u_src_val[4:0] : u_d.shimm;
-    u_sh    = shrot_result(u_d.shrot, u_a_w, {1'b0,u_shcnt}, eflags[0], u_d.w16 ? 3'd2 : 3'd4);
+    u_sh    = shrot_result(u_d.shrot, u_a_w, {1'b0,u_shcnt}, eflags[0], fp_operand_width(u_d));
     u_shm1  = (u_shcnt==5'd0) ? u_dst_val
               : shrot_result(u_d.shrot, u_dst_val,
-                             {1'b0,u_shcnt}-6'd1, eflags[0], u_d.w16 ? 3'd2 : 3'd4);
-    u_shcf  = shrot_cf(u_d.shrot, u_a_w, {1'b0,u_shcnt}, eflags[0], u_d.w16 ? 3'd2 : 3'd4);
+                             {1'b0,u_shcnt}-6'd1, eflags[0], fp_operand_width(u_d));
+    u_shcf  = shrot_cf(u_d.shrot, u_a_w, {1'b0,u_shcnt}, eflags[0], fp_operand_width(u_d));
   end
 
 endmodule : u_pipe

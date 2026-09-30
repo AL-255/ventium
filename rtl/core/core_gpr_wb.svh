@@ -15,6 +15,10 @@
         // Enclosed by fsm_case_enabled, exactly like the sequential S_LOAD arm:
         // faults/walk detours cannot expose speculative pointer writes.
         S_LOAD: begin
+`ifdef VEN_P54_MOV_ACK_RETIRE
+          // Same width/high-byte merge, final whole operand, one WB authority.
+          `include "core_mov_ack_gpr.svh"
+`endif
           if (rep_movs_load_fuse) begin
             gpr_we[R_ESI]=1'b1;
             gpr_wd[R_ESI]=gpr_o[R_ESI] + str_step;
@@ -886,8 +890,17 @@
               // half of its destination. This wrote all 32 bits unconditionally, which
               // is the same defect class as C-01 one arm over. Use the slow path's
               // canonical width-aware merge, exactly as the ALU arm below does.
+`ifdef VEN_P54_AGI_WRITE_MASK
+              // Count zero does not execute a register/flags modification.
+              // Match the canonical slow shift and existing fast flag guard;
+              // expose the resulting actual WE to the common AGI history.
+              if (u_shift_cnt!=5'd0) begin
+`endif
               gpr_we[pipe_u_eff.dst]=1'b1;
               gpr_wd[pipe_u_eff.dst]= reg_merge(gpr_o[pipe_u_eff.dst], u_sh, fp_operand_width(pipe_u_eff), pipe_u_eff.dst_hi8);
+`ifdef VEN_P54_AGI_WRITE_MASK
+              end
+`endif
             end else if (pipe_u_eff.is_branch || pipe_u_eff.is_nop) begin
               // no register write
             end else begin

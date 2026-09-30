@@ -5,11 +5,11 @@
 `timescale 1ns/1ps
 module tb_decode16;
   import ventium_decode_pkg::*;
-  logic [7:0] b [0:5];
+  logic [7:0] b [0:6];
   logic [31:0] fl = 32'h2;
   logic d16 = 1'b1;
   fpd_t uop;
-  decode dut(.ib0(b[0]),.ib1(b[1]),.ib2(b[2]),.ib3(b[3]),.ib4(b[4]),.ib5(b[5]),
+  decode dut(.ib0(b[0]),.ib1(b[1]),.ib2(b[2]),.ib3(b[3]),.ib4(b[4]),.ib5(b[5]),.ib6(b[6]),
              .iflags(fl), .def16(d16), .cycle_mode(1'b0), .uop(uop));
   int fails = 0;
   task automatic chk(string name, int exp_len, logic exp_simple, int exp_imm);
@@ -36,6 +36,10 @@ module tb_decode16;
   endtask
   int checks_d = 0;
   initial begin
+    // The decoder's seventh input is inactive for every 16-bit-default form,
+    // but drive it deterministically so this operand-size fence cannot mask an
+    // accidental future dependence on an uninitialised byte.
+    b[6] = 8'd0;
     // MOV AX,imm16      B8 34 12          -> len 3, imm 0x1234
     b[0]=8'hB8; b[1]=8'h34; b[2]=8'h12; b[3]=0; b[4]=0; b[5]=0;
     chk("MOV AX,imm16", 3, 1'b1, 32'h1234);

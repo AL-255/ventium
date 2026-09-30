@@ -89,6 +89,109 @@ module decode
       checked_add_opcode = checked_add_opcode || (b0 == 8'h13);
 `endif
       unique casez (b0)
+`ifdef VEN_FAST_BYTE_ALU
+        // Byte register arithmetic uses the same width-aware U/V ALUs and
+        // parent-register merge as byte MOV. x86 encodes AH..BH as 4..7;
+        // these are EAX..EBX aliases, never ESP..EDI dependencies.
+        8'h00, 8'h08, 8'h10, 8'h18, 8'h20, 8'h28, 8'h30, 8'h38,
+        8'h02, 8'h0A, 8'h12, 8'h1A, 8'h22, 8'h2A, 8'h32, 8'h3A: begin
+          if (mod==2'b11) begin
+            d.simple=1'b1; d.len=4'd2; d.w8=1'b1;
+            d.alu_op={2'b00,b0[5:3]}; d.wflags=1'b1;
+            d.dst=fp_byte_parent(b0[1] ? reg_f : rm);
+            d.src=fp_byte_parent(b0[1] ? rm : reg_f);
+            d.dst_hi8=b0[1] ? reg_f[2] : rm[2];
+            d.src_hi8=b0[1] ? rm[2] : reg_f[2];
+            d.wreg=(b0[5:3]!=3'b111);
+            d.reads=_onehot(d.dst)|_onehot(d.src);
+            d.writes=d.wreg ? _onehot(d.dst) : 8'd0;
+            d.pairs_first=1'b1;
+            d.pairs_second=!(b0[5:3]==3'b010 || b0[5:3]==3'b011);
+          end
+        end
+        // Accumulator-immediate byte forms (ADD/OR/ADC/SBB/AND/SUB/XOR/CMP).
+        8'b00??_?100: begin
+          d.simple=1'b1; d.len=4'd2; d.w8=1'b1;
+          d.alu_op={2'b00,b0[5:3]}; d.wflags=1'b1;
+          d.dst=R_EAX; d.src=R_EAX; d.use_imm=1'b1; d.imm={24'd0,b1};
+          d.wreg=(b0[5:3]!=3'b111); d.reads=_onehot(R_EAX);
+          d.writes=d.wreg ? _onehot(R_EAX) : 8'd0;
+          d.pairs_first=1'b1;
+          d.pairs_second=!(b0[5:3]==3'b010 || b0[5:3]==3'b011);
+        end
+        8'h80: begin
+          if (mod==2'b11) begin
+            d.simple=1'b1; d.len=4'd3; d.w8=1'b1;
+            d.alu_op={2'b00,reg_f}; d.wflags=1'b1;
+            d.dst=fp_byte_parent(rm); d.dst_hi8=rm[2];
+            d.src=d.dst; d.src_hi8=d.dst_hi8;
+            d.use_imm=1'b1; d.imm={24'd0,b2};
+            d.wreg=(reg_f!=3'b111); d.reads=_onehot(d.dst);
+            d.writes=d.wreg ? _onehot(d.dst) : 8'd0;
+            d.pairs_first=1'b1;
+            d.pairs_second=!(reg_f==3'b010 || reg_f==3'b011);
+          end
+        end
+        8'h84: begin
+          if (mod==2'b11) begin
+            d.simple=1'b1; d.len=4'd2; d.w8=1'b1;
+            d.alu_op=ALU_TEST; d.wflags=1'b1;
+            d.dst=fp_byte_parent(rm); d.dst_hi8=rm[2];
+            d.src=fp_byte_parent(reg_f); d.src_hi8=reg_f[2];
+            d.reads=_onehot(d.dst)|_onehot(d.src);
+            d.pairs_first=1'b1; d.pairs_second=1'b1;
+          end
+        end
+        8'hA8: begin
+          d.simple=1'b1; d.len=4'd2; d.w8=1'b1;
+          d.alu_op=ALU_TEST; d.wflags=1'b1;
+          d.dst=R_EAX; d.src=R_EAX; d.use_imm=1'b1;
+          d.imm={24'd0,b1}; d.reads=_onehot(R_EAX);
+          d.pairs_first=1'b1; d.pairs_second=1'b1;
+        end
+        8'b1011_0???: begin
+          d.simple=1'b1; d.len=4'd2; d.w8=1'b1;
+          d.alu_op=ALU_MOV; d.wreg=1'b1; d.use_imm=1'b1;
+          d.dst=fp_byte_parent(b0[2:0]); d.dst_hi8=b0[2];
+          d.imm={24'd0,b1}; d.writes=_onehot(d.dst);
+          d.pairs_first=1'b1; d.pairs_second=1'b1;
+        end
+        8'hFE: begin
+          if (mod==2'b11 && (reg_f==3'd0 || reg_f==3'd1)) begin
+            d.simple=1'b1; d.len=4'd2; d.w8=1'b1;
+            d.alu_op=reg_f[0] ? ALU_DEC : ALU_INC;
+            d.wflags=1'b1; d.wreg=1'b1;
+            d.dst=fp_byte_parent(rm); d.dst_hi8=rm[2];
+            d.src=d.dst; d.src_hi8=d.dst_hi8;
+            d.reads=_onehot(d.dst); d.writes=_onehot(d.dst);
+            d.pairs_first=1'b1; d.pairs_second=1'b1;
+          end
+        end
+`endif
+`ifdef VEN_FAST_UNARY_R
+        // Register-only group 3 TEST/NOT/NEG. These are NP on P54C even
+        // though their existing ALU datapath has one-clock occupancy.
+        // MUL/DIV and every memory form keep the ordered slow sequencer.
+        8'hF6, 8'hF7: begin
+          if (mod==2'b11 && (reg_f==3'd0 || reg_f==3'd2 || reg_f==3'd3)) begin
+            d.simple=1'b1; d.w8=!b0[0];
+            d.dst=d.w8 ? fp_byte_parent(rm) : rm;
+            d.dst_hi8=d.w8 && rm[2]; d.src=d.dst; d.src_hi8=d.dst_hi8;
+            d.reads=_onehot(d.dst);
+            d.alu_op=(reg_f==3'd0) ? ALU_TEST :
+                     (reg_f==3'd2) ? ALU_NOT : ALU_NEG;
+            d.wreg=(reg_f!=3'd0); d.wflags=(reg_f!=3'd2);
+            d.writes=d.wreg ? _onehot(d.dst) : 8'd0;
+            d.len=4'd2;
+            if (reg_f==3'd0) begin
+              d.use_imm=1'b1;
+              d.len=d.w8 ? 4'd3 : (def16 ? 4'd4 : 4'd6);
+              d.imm=d.w8 ? {24'd0,b2} :
+                    (def16 ? {16'd0,b3,b2} : {b5,b4,b3,b2});
+            end
+          end
+        end
+`endif
         // ---- MOV r32, imm32 (B8+r) -------------------------------------------
         8'b1011_1???: begin
           d.simple=1'b1; d.len=def16?4'd3:4'd5; d.alu_op=ALU_MOV; d.wreg=1'b1; d.use_imm=1'b1;
@@ -694,6 +797,22 @@ module decode
             endcase
           end
         end
+`ifdef VEN_FAST_BYTE_SHIFT
+        // Byte shifts reuse the U barrel shifter. AH/CH/DH/BH alias their
+        // containing GPR for AP-500 register contention, exactly like byte ALU.
+        // Only by-one/by-immediate register shifts are PU; CL and memory forms
+        // keep their existing sequencer and execution timing.
+        8'hC0, 8'hD0: begin
+          if (mod==2'b11 && reg_f[2]) begin
+            d.simple=1'b1; d.is_shift=1'b1; d.w8=1'b1; d.w16=1'b0;
+            d.len=(b0==8'hC0) ? 4'd3 : 4'd2; d.wflags=1'b1;
+            d.shrot=reg_f; d.shimm=(b0==8'hC0) ? b2[4:0] : 5'd1;
+            d.dst={1'b0,rm[1:0]}; d.dst_hi8=rm[2]; d.wreg=1'b1;
+            d.reads=_onehot(d.dst); d.writes=_onehot(d.dst);
+            d.pairs_first=1'b1; d.pairs_second=1'b0;
+          end
+        end
+`endif
         // ---- shift by imm8 (C1 /4,/5,/6,/7 ib), reg form ---------------------
         // SHL/SHR/SAL/SAR are fast-pathed. Optional 32-bit register ROR /1
         // reuses the same shifter but needs rotate-specific CF/OF preservation.
@@ -726,12 +845,16 @@ module decode
           end
         end
         // ---- shift by CL (D3 /4,/5,/6,/7), register form --------------------
-        // The variable-count sibling of D1/C1.  P5 classifies CL shifts as NP:
-        // they execute in one U-pipe cycle but cannot pair.  Keep byte/word and
-        // memory destinations on the slow FSM; the 32-bit register form reuses
-        // the existing shared shifter with an explicit live ECX dependency.
+        // The reference profile retains the historical one-clock fast path.
+        // P54 CL shifts are actually four-clock NP instructions (Appendix F);
+        // the explicit execution-occupancy profile uses the shared reference
+        // path, holding BEFORE GPR/flags/EIP commit, never after retirement.
         8'hD3: begin
-          if (!def16 && mod==2'b11 && reg_f[2]) begin
+          if (!def16 && mod==2'b11 && reg_f[2]
+`ifdef VEN_P54_INT_EXEC_OCC
+              && !cycle_mode
+`endif
+              ) begin
             d.simple=1'b1; d.is_shift=1'b1; d.shift_cl=1'b1; d.len=4'd2; d.wflags=1'b1;
             d.shrot=reg_f; d.dst=rm; d.src=R_ECX; d.wreg=1'b1;
             d.reads=_onehot(rm)|_onehot(R_ECX); d.writes=_onehot(rm);
@@ -748,8 +871,8 @@ module decode
         end
         // ---- TEST r/m32, r32 (85 /r), reg form — fast-path batch 4 -----------
         // Reuses the ALU_TEST datapath (like A9): AND-for-flags only, writes no
-        // reg. UV-pairable. (The byte form 84 is left to the slow FSM — byte-width
-        // flags are not in the 32-bit fast-path datapath.)
+        // reg. UV-pairable. VEN_FAST_BYTE_ALU admits its 84 register sibling
+        // through the same width-aware ALUs above.
         8'h85: begin
           if (mod==2'b11) begin
             d.simple=1'b1; d.len=4'd2; d.alu_op=ALU_TEST; d.wflags=1'b1;

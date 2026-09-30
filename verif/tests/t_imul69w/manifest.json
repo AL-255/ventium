@@ -1,0 +1,2 @@
+{ "name":"t_imul69w","src":"t_imul69w/t_imul69w.s","elf":"t_imul69w/t_imul69w.elf",
+  "image":"t_imul69w/t_imul69w.flat","load_addr":"0x08048000","entry":"0x08048000","max_insn":100 }

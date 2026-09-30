@@ -30,6 +30,9 @@
             // page-crossing MOVSW/MOVSD/OUTSW/OUTSD or far pointer forwarded page 2's
             // beat instead of the reconstructed operand. Compute it once here and read
             // ld_val everywhere; the raw mem_rdata must not be consumed in this arm.
+`ifdef VEN_P54_MOV_ACK_RETIRE
+            ld_val = p54_mov_ack_load_value;
+`else
             begin
               logic [5:0] sh;
               sh = 6'(xp_first) << 3;
@@ -37,6 +40,7 @@
                                   | (mem_rdata << sh))             // second page supplies the rest
                                : mem_rdata;
             end
+`endif
             if (xp_pend) xp_pend <= 1'b0;
             mem_load_data <= ld_val;
             // VEN FIX (Win95 REP MOVSB relocation): capture the MOVS store byte SINGLE-HOP, directly at
@@ -66,7 +70,10 @@
               la = slow_dmem_addr; pen = 7'd0;
               // dc_lu_hit/dc_acc_* are driven to `la` (slow_dmem_addr) this clock.
               if (!dc_lu_hit)            pen = pen + P5_DMISS;
-              if (la[1:0] != 2'b00)      pen = pen + P5_MISALIGN;
+              // Use the memory SOURCE extent, not the destination q_w:
+              // MOVSX/MOVZX word+2 is one bank access, and bytes never split.
+              if (p5_data_misaligned(la, {1'b0,load_beat_w}))
+                pen = pen + P5_MISALIGN;
               pending_mem_pen <= pen;
             end
             // F3 — FF /5 JMPF / FF /3 CALLF (far indirect through memory): mem_rdata
@@ -150,6 +157,10 @@
                          core_cyc, q_pc, gpr_o[R_ESI], gpr_o[R_EDI], gpr_o[R_ECX], xp_pend);
 `endif
             end
+`ifdef VEN_P54_MOV_ACK_RETIRE
+            else if (p54_mov_ack_take)
+              retire_reference_integer(next_eip,1'b0,eflags);
+`endif
             else state<=S_EXEC;
           end
         end
@@ -215,7 +226,8 @@
               if (cycle_mode) begin
                 logic [6:0] pen; pen=7'd0;
                 if (!dc_lu_hit)               pen = pen + P5_DMISS;
-                if (gpr_o[R_EDI][1:0]!=2'b00)   pen = pen + P5_MISALIGN;
+                if (p5_data_misaligned(gpr_o[R_EDI], {1'b0,load_beat_w}))
+                  pen = pen + P5_MISALIGN;
                 pending_mem_pen <= pen;
               end
             end

@@ -352,7 +352,9 @@
                     // U-pipe). The native `*` (now ex_mul_p) is the bit-exact result;
                     // the modeled occupancy is the deferred penalty occ-7 = 3 (same
                     // mechanism + measured slow-FSM base as the DIV occupancy below).
+`ifndef VEN_P54_INT_EXEC_OCC
                     pending_mem_pen <= 7'd3;
+`endif
                   end
                   3'd5: begin // IMUL one-operand (signed)
                     logic [31:0] lo; logic ovf; logic [31:0] fl;
@@ -365,7 +367,9 @@
                     fl[0]=ovf; fl[11]=ovf; fl[2]=parity8(lo[7:0]); fl[4]=1'b0;
                     fl[6]=(wmask(lo,q_w)==32'd0); fl[7]=sbit(lo,q_w);
                     eflags<=fl; flags_we=1'b0;
-                    pending_mem_pen <= 7'd3;   // P5 IMUL occupancy (occ=10, occ-7)
+`ifndef VEN_P54_INT_EXEC_OCC
+                    pending_mem_pen <= 7'd3;   // reference-profile occ-7
+`endif
                   end
                   3'd6: begin // DIV (unsigned) — with #DE (divide-by-zero / overflow)
 `ifdef VEN_IDIV_ITER
@@ -401,7 +405,7 @@
 `endif
                       if (sys_mode) start_fault(8'd0, 1'b0, 32'd0, q_pc);
                       else begin state<=S_HALT; `ifdef VEN_DBG_CORE int_vec<=8'hE9; `endif end
-                    end else
+                    end else begin
                       // P5 DIVIDE OCCUPANCY (cycle-modeled, p5model occ DIV
                       // 17/25/41 for r/m8/16/32). The native helper above produces
                       // the bit-exact quotient/remainder; the modeled non-pipelined
@@ -411,7 +415,10 @@
                       // (the same way a D-cache miss penalty is folded into the next
                       // insn's pipe_free_at). Holds the U pipe so a dependent EDX:EAX
                       // consumer cannot issue until the divide latency elapses.
+`ifndef VEN_P54_INT_EXEC_OCC
                       pending_mem_pen <= (q_w==3'd4) ? 7'd34 : (q_w==3'd2) ? 7'd18 : 7'd10;
+`endif
+                    end
 `endif
                   end
                   default: begin // IDIV /7 (signed) — with #DE (div-by-zero / overflow)
@@ -441,11 +448,14 @@
 `endif
                       if (sys_mode) start_fault(8'd0, 1'b0, 32'd0, q_pc);
                       else begin state<=S_HALT; `ifdef VEN_DBG_CORE int_vec<=8'hEA; `endif end
-                    end else
+                    end else begin
                       // P5 IDIV OCCUPANCY (cycle-modeled, p5model occ IDIV 22/30/46
                       // for r/m8/16/32 — a few clocks over DIV for the sign handling).
                       // Same deferred-penalty mechanism as DIV above (occ - 7).
+`ifndef VEN_P54_INT_EXEC_OCC
                       pending_mem_pen <= (q_w==3'd4) ? 7'd39 : (q_w==3'd2) ? 7'd23 : 7'd15;
+`endif
+                    end
 `endif
                   end
                 endcase
@@ -468,7 +478,9 @@
                 fl[6]=(wmask(lo,q_w)==32'd0); fl[7]=sbit(lo,q_w);
                 eflags<=fl;
                 flags_we=1'b0;
-                pending_mem_pen <= 7'd3;   // P5 IMUL (2/3-operand) occupancy (occ=10)
+`ifndef VEN_P54_INT_EXEC_OCC
+                pending_mem_pen <= 7'd3;   // reference-profile occ-7
+`endif
               end
 
               K_EXT: begin
@@ -873,34 +885,13 @@
           // commit (non-store, non-microseq path)
           if (do_retire) begin
             logic [31:0] cmt_eip;       // the EIP this instruction commits / fetches next
-            logic [3:0]  xbp;           // instruction-breakpoint hit on the committed EIP
             cmt_eip = (q_is_branch && q_branch_taken) ? (next_eip+q_rel) : new_eip;
             // M7.3b: a 16-bit-operand-size near branch masks the taken target to 16
             // bits (IA-32: a near JMP/Jcc under a 16-bit operand size truncates EIP
             // to IP). q_br16 is 0 in 32-bit mode, so every prior gate is unchanged.
             if (q_br16 && q_is_branch && q_branch_taken)
               cmt_eip = {16'd0, cmt_eip[15:0]};
-            if (flags_we) eflags<=flags_val;
-            eip<=cmt_eip;
-            // ---- M2S.6 #DB at the retire boundary (gated sys_mode). Checked in P5
-            // priority: an INSTRUCTION breakpoint on the NEXT eip (FAULT, restart)
-            // takes precedence over a TF single-step trap (so RF can be honoured);
-            // else a TF single-step trap (TRAP, resume at cmt_eip). The triggering
-            // instruction does NOT retire separately — arm_db fuses it (q_pc stamp).
-            xbp = (sys_mode && !rf_at_issue) ? dr_match(seg_base[SG_CS]+cmt_eip, 1'b1)
-                                             : 4'd0;
-            if (sys_mode && xbp != 4'd0) begin
-              // FAULT before cmt_eip; push cmt_eip (restart), stamp this insn's PC.
-              arm_db({28'd0, xbp}, q_pc, cmt_eip);
-            end
-            else if (sys_mode && tf_at_issue) begin
-              // TF single-step TRAP after this instruction; push cmt_eip (resume).
-              arm_db(32'd1 << DR6_BS, q_pc, cmt_eip);
-            end
-            else begin
-              retire_valid<=1'b1;
-              state<=S_PIPE;   // re-enter fast path
-            end
+            retire_reference_integer(cmt_eip,flags_we,flags_val);
           end else if (do_store) begin
             state<=S_STORE;
           end

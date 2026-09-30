@@ -453,10 +453,8 @@
             sfetch_resident_q <= cycle_mode && exec_issue_ok;
 `endif
             fetch_word<=3'd0; state<=S_FETCH;
-`ifdef VEN_SFETCH_RESIDENT
 `ifdef VEN_PIPE_SDECODE
             pipe_capture_slow_window();
-`endif
 `endif
 `ifdef VEN_FP_SHARED_DIRECT
             end
@@ -563,16 +561,16 @@
                   && pipe_v_eff.is_fxch_free && fp_v_fold_ok && pipe_v_eff.fp_sti!=3'd0) begin
                 // task #56 layer 10: real mode / 16-bit address size WRAPS EIP at 64 KiB.
                 // The fast path advanced a full 32-bit EIP with no wrap. Inert at w16=0.
-                eip            <= pipe_u_eff.w16 ? {16'd0, (eip[15:0] + {12'd0,pipe_u_eff.len} + {12'd0,pipe_v_eff.len})}
+                eip            <= fp_code16(pipe_u_eff) ? {16'd0, (eip[15:0] + {12'd0,pipe_u_eff.len} + {12'd0,pipe_v_eff.len})}
                                                  :         (eip + {28'd0,pipe_u_eff.len} + {28'd0,pipe_v_eff.len});
                 // REVIEW2 H-07: was unwrapped, unlike the integer arm's q_pc2 (:578).
-                q_pc2          <= pipe_u_eff.w16 ? {16'd0, (eip[15:0] + {12'd0,pipe_u_eff.len})}
+                q_pc2          <= fp_code16(pipe_u_eff) ? {16'd0, (eip[15:0] + {12'd0,pipe_u_eff.len})}
                                                  :         (eip     + {28'd0,pipe_u_eff.len});
                 retire2_valid  <= 1'b1; retire2_pipe<=2'd1; retire2_paired<=1'b1;
               end else
 `endif
               // task #56 layer 10: 16-bit address size wraps EIP at 64 KiB (real mode).
-              eip <= pipe_u_eff.w16 ? {16'd0, (eip[15:0] + {12'd0,pipe_u_eff.len})}
+              eip <= fp_code16(pipe_u_eff) ? {16'd0, (eip[15:0] + {12'd0,pipe_u_eff.len})}
                                     :         (eip + {28'd0,pipe_u_eff.len});
             end
           // task #55: sys_mode alone no longer forces the slow FSM -- only sys_mode WITHOUT the
@@ -597,15 +595,19 @@
             sfetch_resident_q <= cycle_mode && exec_issue_ok;
 `endif
             fetch_word<=3'd0; state<=S_FETCH;
-`ifdef VEN_SFETCH_RESIDENT
 `ifdef VEN_PIPE_SDECODE
             pipe_capture_slow_window();
-`endif
 `endif
           end else if (!pipe_mem_active_q && mispred_bubbles!=3'd0) begin
             // burn a misprediction flush bubble (no retirement this clock).
             mispred_bubbles<=mispred_bubbles-3'd1;
             agi_wr0<=9'h100; agi_wr1<=9'h100;   // bubble writes nothing
+`ifdef VEN_P54_PREFIX66_REG
+          end else if (p54_prefix66_hold) begin
+            // Real prefix D1, before AGI/EX. One shared blocker fences every
+            // mirror; the separate token FF records only this owner PC.
+            agi_wr0<=9'h100; agi_wr1<=9'h100;
+`endif
           end else if (!pipe_mem_active_q && pipe_agi) begin
             // AGI 1-cycle interlock: stall this clock. The double-charge across
             // the immediately-following clock is prevented STRUCTURALLY by
@@ -693,8 +695,7 @@
                 logic [6:0] pen;
                 pen = 7'd0;
                 if (!pipe_u_eff.is_store && !dc_lu_hit) pen = pen + P5_DMISS;
-                if (((fp_mem_source_width(pipe_u_eff)==3'd2) && pipe_load_addr[0]) ||
-                    ((fp_mem_source_width(pipe_u_eff)==3'd4) && pipe_load_addr[1:0]!=2'b00))
+                if (p5_data_misaligned(pipe_load_addr, {1'b0,fp_mem_source_width(pipe_u_eff)}))
                   pen = pen + P5_MISALIGN;
 `ifdef VEN_L1_AXI
                 // bus_mode=2: the REAL DDR latency is the only timing source — the
@@ -726,7 +727,7 @@
                 // C-01 pattern; one shared formula parameterised by width cannot
                 // drift. Byte-identical to the slow path arm, term for term.
                 logic [2:0] shw;
-                shw = pipe_u_eff.w16 ? 3'd2 : 3'd4;
+                shw = fp_operand_width(pipe_u_eff);
 `ifdef VEN_FAST_ROR_IMM
                 if (pipe_u_eff.shrot == 3'd1) begin
                   // ROR changes only CF/OF. Match the slow K_SHIFT formula
@@ -789,9 +790,9 @@
             // fixed taken path is what made it easy to miss.
             //   eip_nx  = U-only next IP        (also the U not-taken fallthrough)
             //   post_eip= U(+V) next IP         (the no-branch advance)
-            eip_nx   = pipe_u_eff.w16 ? {16'd0, (pipe_commit_eip[15:0] + {12'd0,pipe_u_eff.len})}
+            eip_nx   = fp_code16(pipe_u_eff) ? {16'd0, (pipe_commit_eip[15:0] + {12'd0,pipe_u_eff.len})}
                                       :         (pipe_commit_eip + {28'd0,pipe_u_eff.len});
-            post_eip = pipe_u_eff.w16
+            post_eip = fp_code16(pipe_u_eff)
                      ? {16'd0, (pipe_commit_eip[15:0] + {12'd0,pipe_u_eff.len}
                                           + (do_v ? {12'd0,pipe_v_eff.len} : 16'd0))}
                      :         (pipe_commit_eip + {28'd0,pipe_u_eff.len}
@@ -817,7 +818,7 @@
               vpc = eip_nx;
               v_taken = v_br_taken_eff;
               redir_tgt = v_taken ? v_target
-                                  : (pipe_v_eff.w16 ? {16'd0, (vpc[15:0] + {12'd0,pipe_v_eff.len})}
+                                  : (fp_code16(pipe_v_eff) ? {16'd0, (vpc[15:0] + {12'd0,pipe_v_eff.len})}
                                                     :         (vpc       + {28'd0,pipe_v_eff.len}));
               if (v_taken != v_pred_taken) begin
                 // Mispredict penalty matches the oracle resolve_pending_branch

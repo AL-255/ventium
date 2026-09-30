@@ -96,6 +96,11 @@ module decode_stages
     output logic        d_is_mov,
     output logic        d_is_nop,
     output logic [31:0] d_ea,
+    // Exact address-GPR ownership emitted by the existing EA selections below.
+    // Only audited ModR/M/moffs integer families may use known metadata;
+    // implicit/string/system address producers remain on their existing path.
+    output logic [7:0]  d_addr_mask,
+    output logic        d_addr_mask_known,
     output logic [2:0]  d_w,
     output logic        d_dst_high8,
     output logic        d_src_high8,
@@ -246,6 +251,7 @@ module decode_stages
   // Combinational decoder (moved VERBATIM from core.sv)
   // ===========================================================================
   always_comb begin
+    d_addr_mask=8'd0; d_addr_mask_known=1'b1;
     d_len=4'd1; d_halt=1'b0; d_cacheinv=1'b0; d_lock=1'b0; d_int80=1'b0; d_unknown=1'b0; d_f00f=1'b0; d_is_branch=1'b0; d_branch_taken=1'b0;
     d_rel=32'd0; d_alu_op=ALU_ADD; d_writes_reg=1'b0; d_writes_flags=1'b0;
     d_mem_read=1'b0; d_mem_write=1'b0; d_mem_dst=1'b0; d_dst_reg=3'd0; d_src_reg=3'd0;
@@ -296,12 +302,12 @@ module decode_stages
       if (has_sib) begin
         disp_idx=m_idx+4'd2;
         if (sib_base==3'b101 && modrm_mod==2'b00) no_base=1'b1;
-        else base_val=gpr[sib_base];
+        else begin base_val=gpr[sib_base]; d_addr_mask[sib_base]=1'b1; end
         if (sib_index==3'b100) no_index=1'b1;
-        else index_val=gpr[sib_index]<<sib_scale;
+        else begin index_val=gpr[sib_index]<<sib_scale; d_addr_mask[sib_index]=1'b1; end
       end else begin
         if (modrm_mod==2'b00 && modrm_rm==3'b101) no_base=1'b1;
-        else base_val=gpr[modrm_rm];
+        else begin base_val=gpr[modrm_rm]; d_addr_mask[modrm_rm]=1'b1; end
       end
       if (modrm_mod==2'b01) disp_val={{24{ibuf[disp_idx][7]}}, ibuf[disp_idx]};
       else if (modrm_mod==2'b10 ||
@@ -340,14 +346,17 @@ module decode_stages
     if (eff_addr) begin
       logic [15:0] ea16_base, ea16_disp;
       unique case (modrm_rm)
-        3'b000:  ea16_base = gpr[3][15:0] + gpr[6][15:0];                 // BX+SI
-        3'b001:  ea16_base = gpr[3][15:0] + gpr[7][15:0];                 // BX+DI
-        3'b010:  ea16_base = gpr[5][15:0] + gpr[6][15:0];                 // BP+SI
-        3'b011:  ea16_base = gpr[5][15:0] + gpr[7][15:0];                 // BP+DI
-        3'b100:  ea16_base = gpr[6][15:0];                                // SI
-        3'b101:  ea16_base = gpr[7][15:0];                                // DI
-        3'b110:  ea16_base = (modrm_mod==2'b00) ? 16'd0 : gpr[5][15:0];   // disp16 / BP
-        default: ea16_base = gpr[3][15:0];                               // BX (rm=111)
+        3'b000: begin ea16_base=gpr[3][15:0]+gpr[6][15:0]; d_addr_mask=8'h48; end // BX+SI
+        3'b001: begin ea16_base=gpr[3][15:0]+gpr[7][15:0]; d_addr_mask=8'h88; end // BX+DI
+        3'b010: begin ea16_base=gpr[5][15:0]+gpr[6][15:0]; d_addr_mask=8'h60; end // BP+SI
+        3'b011: begin ea16_base=gpr[5][15:0]+gpr[7][15:0]; d_addr_mask=8'ha0; end // BP+DI
+        3'b100: begin ea16_base=gpr[6][15:0]; d_addr_mask=8'h40; end // SI
+        3'b101: begin ea16_base=gpr[7][15:0]; d_addr_mask=8'h80; end // DI
+        3'b110: begin
+          ea16_base=(modrm_mod==2'b00)?16'd0:gpr[5][15:0]; // disp16 / BP
+          d_addr_mask=(modrm_mod==2'b00)?8'd0:8'h20;
+        end
+        default: begin ea16_base=gpr[3][15:0]; d_addr_mask=8'h08; end // BX
       endcase
       if (modrm_mod==2'b01)
         ea16_disp = {{8{ibuf[m_idx+1][7]}}, ibuf[m_idx+1]};              // disp8 (sext)
@@ -840,18 +849,31 @@ module decode_stages
           d_is_push=1'b1; d_mem_write=1'b1; d_use_imm=1'b1; d_w=eff_opsize?3'd2:3'd4;
           d_imm={{24{ibuf[pfx_len+1][7]}},ibuf[pfx_len+1]}; d_len=pfx_len+4'd2;
         end
-        8'h69: begin // IMUL r, r/m, imm32
+        8'h69: begin // IMUL r16/32, r/m16/32, imm16/32
           d_kind=K_IMUL2; d_imul_3op=1'b1; d_writes_reg=1'b1; d_writes_flags=1'b1; d_dst_reg=modrm_reg;
           if (modrm_mod==2'b11) begin
-            d_src_reg=modrm_rm; d_imul_imm={ibuf[m_idx+4],ibuf[m_idx+3],ibuf[m_idx+2],ibuf[m_idx+1]};
-            d_len=pfx_len+4'd6;
+            d_src_reg=modrm_rm;
+            if (eff_opsize) begin
+              d_imul_imm={{16{ibuf[m_idx+2][7]}},ibuf[m_idx+2],ibuf[m_idx+1]};
+              d_len=pfx_len+4'd4;
+            end else begin
+              d_imul_imm={ibuf[m_idx+4],ibuf[m_idx+3],ibuf[m_idx+2],ibuf[m_idx+1]};
+              d_len=pfx_len+4'd6;
+            end
           end else begin
             d_mem_read=1'b1;
-            d_imul_imm={ibuf[m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)+3],
+            if (eff_opsize) begin
+              d_imul_imm={{16{ibuf[m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)+1][7]}},
+                          ibuf[m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)+1],
+                          ibuf[m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)+0]};
+              d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)+4'd2;
+            end else begin
+              d_imul_imm={ibuf[m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)+3],
                         ibuf[m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)+2],
                         ibuf[m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)+1],
                         ibuf[m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)+0]};
-            d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)+4'd4;
+              d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)+4'd4;
+            end
           end
         end
         8'h6B: begin // IMUL r, r/m, imm8
@@ -1853,6 +1875,22 @@ module decode_stages
       // Only fault when there IS a memory operand -- the no-memory case is already
       // handled above, and doubling it up would just obscure which rule fired.
       if (pfx_lock && (d_mem_read || d_mem_write) && !lock_legal) d_unknown = 1'b1;
+    end
+    // The generic EA scratch also observes bytes on register/absolute/implicit
+    // forms. Never turn those unused reads into an architectural dependency.
+    if (!(d_mem_read || d_mem_write || d_is_lea)) begin
+      d_addr_mask=8'd0;
+      d_addr_mask_known=1'b1;
+    end else if (!two_byte && (op0 inside {8'ha0,8'ha1,8'ha2,8'ha3})) begin
+      d_addr_mask=8'd0; // absolute moffs overrides the ModR/M scratch EA
+      d_addr_mask_known=1'b1;
+    end else begin
+      d_addr_mask_known=(modrm_mod!=2'b11) && !d_is_push && !d_is_pop &&
+        !d_xlat && !d_is_x87 && !d_seg_load && !d_store_sreg &&
+        !d_callf_mem && !d_jmpf_mem &&
+        (((d_kind==K_ALU) && (d_alu_op<=ALU_NOT)) ||
+         (d_kind inside {K_SHIFT,K_EXT,K_MULDIV,K_IMUL2}));
+      if (!d_addr_mask_known) d_addr_mask=8'd0;
     end
   end
 
