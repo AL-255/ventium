@@ -17,11 +17,15 @@
 // Returns -1 for unsupported generated hierarchy/geometry, 0 for no relevant
 // mutation, 1 for an accepted fill/store or resident target-bank mutation.
 // Caller owns the time/event cap. Ordinary read hits are not events here.
+// mutation_only suppresses code-buffer/bypass fills and requires actual D-bank
+// fill enables; accepted stores and resident-bank writes remain observable.
 // Paired V stores are observed through actual resident-bank writes; a V-store
 // miss without an available acceptance signal is not inferred from ready.
 template<class Root>
-auto ven_cache_line_event(const Root &r, uint32_t physical_line, int)
+auto ven_cache_line_event(const Root &r, uint32_t physical_line, int, bool mutation_only = false)
     -> decltype((void)VEN_CS_D(st), (void)VEN_CS_D(fbase),
+                (void)VEN_CS_D(code_fill_q), (void)VEN_CS_D(bypass_q),
+                (void)VEN_CS_D(bank_fill_we),
                 (void)VEN_CS_L1(m_ack), (void)VEN_CS_L1(l1d_c_req),
                 (void)VEN_CS_L1(l1d_c_ack), (void)VEN_CS_C(bd_we),
                 (void)VEN_CS_C(bd_addr), (void)VEN_CS_T(core_mem_wstrb),
@@ -35,7 +39,9 @@ auto ven_cache_line_event(const Root &r, uint32_t physical_line, int)
         VEN_CS_D(dc_tag)[0].size() != 2 || VEN_CS_D(dc_val)[0].size() != 2) return -1;
     const uint32_t line = physical_line & ~uint32_t(31);
     if (VEN_CS_L1(m_ack) && VEN_CS_D(st) == 1 &&
-        (uint32_t(VEN_CS_D(fbase)) & ~uint32_t(31)) == line) return 1;
+        (uint32_t(VEN_CS_D(fbase)) & ~uint32_t(31)) == line &&
+        (!mutation_only || (!VEN_CS_D(code_fill_q) && !VEN_CS_D(bypass_q) &&
+                            VEN_CS_D(bank_fill_we)))) return 1;
     if (VEN_CS_L1(l1d_c_req) && VEN_CS_C(bd_we) && VEN_CS_L1(l1d_c_ack)) {
         for (unsigned byte = 0; byte < 4; ++byte)
             if ((VEN_CS_T(core_mem_wstrb) & (1u << byte)) &&
@@ -54,7 +60,7 @@ auto ven_cache_line_event(const Root &r, uint32_t physical_line, int)
     return 0;
 }
 template<class Root>
-int ven_cache_line_event(const Root &, uint32_t, long) { return -1; }
+int ven_cache_line_event(const Root &, uint32_t, long, bool = false) { return -1; }
 
 template<class Root>
 auto ven_cache_source_probe(FILE *out, const Root &r, uint64_t cycle, uint32_t physical_addr, int)

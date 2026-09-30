@@ -359,10 +359,10 @@ tag `C0` contains eight `07200720` words in the actual bank arrays;
 `rd_line_raw` and the saved window agree. Thus this is a resident-line data
 mutation, not merely a mislabeled response window. Neither L1D nor upstream
 ao486 L2 held the target ROM line at the validated 350M checkpoint; DDR backing
-was stock. The first corrupting transaction is **not yet captured**: the
+was stock. In this third replay the first corrupting transaction was **not yet captured**: the
 256-event budget expired at cycle 383,628,987 on repeated code-buffer fills.
-Absence of later store records cannot reject a ROM-write or other mutation
-hypothesis. A mutation-only watch is the next bounded diagnostic, not a fix.
+Absence of later store records could not reject a ROM-write or other mutation
+hypothesis. The subsequent mutation-only diagnostic below supersedes that limit.
 
 This third replay also matches all 80,000 retirements, exact endpoint, all five
 L1 profiler summary rows and final private-disk hash of both controls.
@@ -374,6 +374,62 @@ state was changed. Artifacts: `/tmp/ventium-win95-vdd-cache-sep30.3GiRyk/`;
 closed log SHA-256
 `e21e31db8b303c18575683cdef44cb250d7019a09b5f310d37073e82afdbc94c`.
 Its exit-zero diagnostic stop is not a Win95 desktop or standard-suite pass.
+
+The fourth, mutation-only replay captures the **first corrupting store** and
+all 32 byte writes to physical `C0620–C063F`. At cycle **383,982,139**, retirement
+70,148,481, a real `STOSB` at protected-mode PC `C0256BBA` writes byte `20`
+through linear `C129B620` to physical `C0620`; its acknowledged L1 bank write
+selects set `0x31`, way 0, row `0x62` (98 decimal), byte mask 1. The next store
+at cycle 383,982,146 writes byte `07`, and the sequence alternates `20/07`
+through cycle 383,982,416. These accepted writes produce exactly the later
+eight `07200720` bank words. All 40 watched events fit the bounded budget.
+
+A separate unchanged-model native V4 replay stopped immediately before that
+first edge, at cycle **383,982,139**, with retirement count 70,148,481. Passive
+inspection proves the translation is correct: CR3 `00306000`, PDE at `00306C10`
+equal to `00168267`, and PTE at `00168A6C` equal to `000C0A67`, independently
+identical in DDR, resident ao486 L2 and L1D. The valid DTLB entry maps VPN
+`C129B` to PFN `C0`, permission 7, dirty bit 1; the actual bus address is
+`C0620`. The original 350M checkpoint already has the same mapping. No posted
+write, pending L2 write or DDR read overlaps this inspection, and all three
+memory layers still hold stock ROM bytes immediately before the first store.
+
+This identifies a **generic cache/platform write-effect contract defect**, not
+bad paging or decoding: ao486's `rom_rgn && !shr_rgn` predicate discards the
+write while acknowledging the transaction, but the upstream cache treats the
+ROM window as ordinary writable cached memory and modifies its resident bytes.
+The proposed repair qualifies cached byte updates separately from bus write
+permission, preserving all original write strobes, ordering and acknowledgements.
+Stores requiring backend-authoritative handling invalidate only their touched
+resident physical tags; the next read drains older writes and refills. Ordinary
+RAM remains on the existing in-place update path. This also handles writable
+UMA/shared windows without sampling their deferred policy at local posted ACK.
+The repair is not yet implemented or standard-suite qualified at this checkpoint.
+
+The mutation observer is host-only and default off. It matches all 80,000
+control retirements byte-for-byte, the exact endpoint, five L1 profiler rows and
+closed guest-disk hash; generated RTL archive `157a4fe9…` is unchanged.
+Its executable is `10b0b57c…`, not a new RTL-performance candidate. Host tests
+pass 93 assertions and 20 static integration checks. Mutation log SHA-256:
+`ae329f344e9b29a649b32552e51a499a7b5cfeb31780cc36c66c81a22bced5ed`;
+artifacts `/tmp/ventium-win95-vdd-mutations-sep30.erfQPU/`.
+Pre-store snapshot SHA-256:
+`1095df712643322ee48a1c9abb72a7f16eb74f4b3b4f3389de84ed39f366e7e9`;
+coherent inspection receipt is
+`/tmp/ventium-win95-prestore-checkpoint-sep30.q2aVcz/translation_validation.json`.
+Neither replay is a cold Win95 acceptance run.
+
+`/tmp` exhausted its per-user quota despite available global space. The failed
+first pre-store preparation did not launch the simulator; a fresh private
+retry completed cleanly after reclaiming about 740 MiB. Only an obsolete,
+byte-identical generated-model clone and four duplicate closed-replay snapshots
+were removed. Their original model and snapshot, frozen executables, diagnostic
+logs and guest disks remain; recreate the removed snapshot copies from the
+authoritative `ventium-win95-vdd-checkpoint-sep30/before_vdd.snap` if replaying.
+Live Quake logging had a quota-truncated interval near 2.365B cycles. Logging
+and guest-disk writes recovered after cleanup, but absence of errors inside
+that unlogged interval is not established. Completion still requires closed-disk
+qualification and must not be inferred from continued CPU activity.
 
 The final post-IRET CoreMark candidate independently **passes both complete
 1,500-iteration seeds**, not merely the earlier build's results. Performance
@@ -434,8 +490,8 @@ reference-CRC checks. Their printed elapsed time still includes that finite
 startup-offset bias; the actual-cycle denominators above remain authoritative
 for modeled CM/MHz. Neither timer values nor guest code were modified.
 
-Current cold raw-P54 full-PC gameplay IPC is **0.44879934** over cycles
-1,900,000,000–2,000,000,000 on binary
+Current cold raw-P54 full-PC gameplay IPC is **0.41310006** over cycles
+2,100,000,000–2,200,000,000 on binary
 `b7cfbec7ee31c7ff7f81abf994995431f3c660b913ae2a9d3176c6d22a2db0ae`.
 The actual private executable's SHA-256 was rechecked at the end of this window.
 The retained earlier same-build interval below measured **0.42750217** over
@@ -473,12 +529,20 @@ Raw captures `frame_00010.ppm`/`frame_00011.ppm` show active grenade combat
 and advancing world/weapon/HUD without the loading console. This newer
 scene-dependent IPC is not evidence of a code-change gain or timedemo FPS.
 
-The latest fully captured 1.9B–2.0B window has clocks 1,899,999,637–1,999,999,637
+The intervening 1.9B–2.0B window has clocks 1,899,999,637–1,999,999,637
 and retirements 623,538,067–668,418,001. Its 44,879,934 retirements equal
 33,930,910 U plus 10,949,024 V retirements, over 100,000,000 clocks, hence
 **0.44879934 IPC**. Raw endpoint captures 11/12 show advancing gameplay without
 the loading console. The frozen private binary remains `b7cfbec7…`; this is
 another scene-dependent gameplay measurement, not timedemo completion or FPS.
+
+The latest verified 2.1B–2.2B window has clocks 2,099,999,637–2,199,999,637
+and retirements 711,661,379–752,971,385: **41,310,006 / 100,000,000 =
+0.41310006 IPC**. Its 31,533,079 U plus 9,776,927 V retirements reconcile
+exactly. Raw captures 13/14 show combat followed by an advancing corpse/health/
+rocket scene, with world, weapon and HUD and no startup console. This measurement
+precedes the quota logging gap and any proposed cache-policy change; it is
+not an isolated performance improvement, timedemo completion or FPS.
 
 Evidence: `/tmp/ventium-standard-sep30.qUCAcQ/` (full-PC inputs and logs),
 `/tmp/ventium-coremark-matrix.kpjs_mph/` (long seeds),

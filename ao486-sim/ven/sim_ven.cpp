@@ -93,6 +93,7 @@ static constexpr unsigned STATE_TRACE_FETCH_LIMIT = 256;
 // Address-selected, event-only cache provenance. No guest state is changed;
 // the caller's run limit bounds time and this lifetime cap bounds output.
 static bool g_cache_watch_enabled = false;
+static bool g_cache_watch_mutations_only = false;
 static uint32_t g_cache_watch_line = 0;
 static unsigned g_cache_watch_events = 0;
 static constexpr unsigned CACHE_WATCH_LIMIT = 256;
@@ -643,7 +644,8 @@ static void tick() {
 #endif
     set_clocks(0); top->eval();
     if (g_cache_watch_enabled && !top->reset && g_cache_watch_events < CACHE_WATCH_LIMIT) {
-        const int event = ven_cache_line_event(*top->rootp, g_cache_watch_line, 0);
+        const int event = ven_cache_line_event(*top->rootp, g_cache_watch_line, 0,
+                                             g_cache_watch_mutations_only);
         if (event < 0) {
             fprintf(stderr, "--ven-cache-line required model fields are unavailable\n");
             std::exit(2);
@@ -1299,6 +1301,7 @@ int main(int argc, char **argv) {
             g_state_trace_start = strtoull(argv[++i], 0, 0);
         }
         else if (!strcmp(argv[i], "--ven-state-fetch")) g_state_trace_fetch = true;
+        else if (!strcmp(argv[i], "--ven-cache-line-mutations")) g_cache_watch_mutations_only = true;
         else if (!strcmp(argv[i], "--ven-cache-line")) {
             if (i+1 >= argc) checkpoint_fail("--ven-cache-line requires a physical address");
             const char *value = argv[++i];
@@ -1382,6 +1385,8 @@ int main(int argc, char **argv) {
         checkpoint_fail("--ven-stop-retire and --save-stop are mutually exclusive");
     if (g_rep_account_enable && g_restore_file)
         checkpoint_fail("REP accounting requires a cold run; host counters are not in native snapshots");
+    if (g_cache_watch_mutations_only && !g_cache_watch_enabled)
+        checkpoint_fail("--ven-cache-line-mutations requires --ven-cache-line");
     if (g_state_trace_fetch && (!g_state_trace_cycles || g_state_trace_cycles > 1000000)) {
         fprintf(stderr, "--ven-state-fetch requires --ven-state-cycles in 1..1000000\n");
         return 2;
@@ -1404,8 +1409,9 @@ int main(int argc, char **argv) {
             fprintf(stderr, "--ven-cache-line required model fields are unavailable\n");
             return 2;
         }
-        fprintf(stderr, "[VENCACHE-WATCH] passive pre-edge events for line=%08x, max256; "
-                        "no extra evaluation or guest memory reads\n", g_cache_watch_line);
+        fprintf(stderr, "[VENCACHE-WATCH] passive pre-edge events for line=%08x, max256, mutations_only=%u; "
+                        "no extra evaluation or guest memory reads\n", g_cache_watch_line,
+                        unsigned(g_cache_watch_mutations_only));
     }
     if (g_state_trace_fetch) {
         ven_host::FaultCoreEdge edge;

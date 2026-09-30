@@ -129,6 +129,37 @@ static void test_store_events() {
     r.C(bd_we) = 1; r.C(bd_addr) = 0xFFFFFFFF; r.T(core_mem_wstrb) = 2;
     check(ven_cache_line_event(r, 0, 0) == 1, "physical address wraps at32 bits");
 }
+static void test_mutation_only() {
+    Full r;
+    const uint32_t line = 0xC0620;
+    r.D(st) = 1; r.D(fbase) = line; r.L1(m_ack) = 1;
+    check(ven_cache_line_event(r, line, 0) == 1, "default API still observes ordinary fill");
+    check(ven_cache_line_event(r, line, 0, true) == 0,
+          "mutation-only fill requires actual D-bank enable");
+    r.D(bank_fill_we) = 1;
+    check(ven_cache_line_event(r, line, 0, true) == 1, "mutation-only D-bank fill observed");
+    r.D(code_fill_q) = 1; r.D(bank_fill_we) = 0;
+    check(ven_cache_line_event(r, line, 0, false) == 1, "normal observer retains code-buffer fill");
+    check(ven_cache_line_event(r, line, 0, true) == 0, "mutation-only code-buffer fill suppressed");
+    r.D(code_fill_q) = 0; r.D(bypass_q) = 1;
+    check(ven_cache_line_event(r, line, 0, false) == 1, "normal observer retains bypass fill");
+    check(ven_cache_line_event(r, line, 0, true) == 0, "mutation-only bypass fill suppressed");
+    r.D(bypass_q) = 0; r.D(st) = 0; r.L1(m_ack) = 0;
+    r.L1(l1d_c_req) = r.L1(l1d_c_ack) = r.C(bd_we) = 1;
+    r.C(bd_addr) = line + 3; r.T(core_mem_wstrb) = 1;
+    check(ven_cache_line_event(r, line, 0, true) == 1, "mutation-only accepted U-store retained");
+    r.L1(l1d_c_req) = 0;
+    const unsigned set = (line >> 5) & 127;
+    r.D(dc_tag)[set][1] = line >> 12; r.D(dc_val)[set][1] = 1;
+    r.B(7, wr_row) = (set << 1) | 1; r.B(7, wr_mask) = 4;
+    r.D(bank_pair_store_we) = 1;
+    check(ven_cache_line_event(r, line, 0, true) == 1,
+          "mutation-only paired resident bank write retained");
+    check(ven_cache_line_event(Missing{}, line, 0, true) == -1,
+          "mutation-only unsupported model unavailable");
+    check(ven_cache_line_event(Model<128, 1>{}, line, 0, true) == -1,
+          "mutation-only malformed inner geometry unavailable");
+}
 static void test_bank_events() {
     const uint32_t line = 0xC0620;
     const unsigned set = (line >> 5) & 127;
@@ -225,6 +256,7 @@ static void test_optional_flush() {
 int main() {
     try {
         test_geometry(); test_fill_events(); test_store_events(); test_bank_events();
+        test_mutation_only();
         test_output_and_neutrality(); test_optional_flush();
         std::printf("CACHE-SOURCE-HOST-OK checks=%u\n", checks);
         return 0;

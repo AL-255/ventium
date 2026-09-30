@@ -43,6 +43,15 @@ class CacheWatchIntegrationTests(unittest.TestCase):
         self.assertIn("if (g_cache_watch_events == CACHE_WATCH_LIMIT)", tick)
         self.assertIn("later events not observed", tick)
 
+    def test_mutation_filter_is_opt_in_and_requires_an_address(self):
+        self.assertIn("static bool g_cache_watch_mutations_only = false;", SOURCE)
+        main = function_body("main")
+        self.assertIn('!strcmp(argv[i], "--ven-cache-line-mutations")', main)
+        self.assertIn("if (g_cache_watch_mutations_only && !g_cache_watch_enabled)", main)
+        tick = function_body("tick")
+        self.assertRegex(tick, r"ven_cache_line_event\(\*top->rootp, g_cache_watch_line, 0,\s*"
+                              r"g_cache_watch_mutations_only\)")
+
     def test_core_owner_and_sources_share_the_same_pre_edge(self):
         tick = function_body("tick")
         for capture in ("fault_ring_edge(*top->rootp, owner, 0)",
