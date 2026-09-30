@@ -1288,3 +1288,25 @@ At the trigger, the canonical balanced stack convention puts the original
 callback return at ESP+8; native-save overshoot must be checked before using
 that convention. Receipt `before-vpicd-trigger-code.json`, SHA-256
 `25459d719ddc218b93be3d698f88cb111dbce227b45b5092af7c04e67d2325ec`.
+
+### First-setter launch approval blocker
+
+The proposed **one private cold Win95 diagnostic** is prepared, but approval
+review rejects its launch, citing the older instruction to finish without
+starting new runs. **No service, model process or first-setter output was
+created.** The request is for unchanged original media/model/clocks, passive
+`0028:C002A7BC` first-retirement trigger, save-and-stop, one CPU, 2 GiB/no-swap,
+32 tasks, **400M guest-clock / 45-minute wall limits**. No alternate/indirect
+launch is attempted. Explicit user approval of this run is requested before
+retrying. The existing acceptance jobs are not interrupted; their ongoing
+progress is not permission for a replacement diagnostic.
+
+Latest verified current `cdcb` gameplay is **0.43243378 IPC**, clocks
+**1,999,999,637–2,099,999,637**, retirements **668,418,001–711,661,379**.
+U adds 33,049,747 and V 10,193,631, summing exactly to 43,243,378. Raw frames
+12/13 advance the firing/projectile/explosion scene; endpoint SHA-256 values
+are `576287e3dc5d16cb2ffb2be0c83c184bd8b895f995204de0ceefcb602b8351b2` /
+`071f0d0031dfa7b8485a4674ac16dc09291d73acf2a10fb6b0f57b46f6740588`.
+The `edda` model-identical host diagnostic has no gameplay measurement.
+**CoreMark correctness passes; Win95 desktop and Quake timedemo are still
+incomplete.** No full standard-suite PASS is claimed.
