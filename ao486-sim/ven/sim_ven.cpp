@@ -20,6 +20,7 @@
 #include "tlb_probe.h"
 #include "perf_sample.h"
 #include "l1_fill_probe.h"
+#include "cache_source_probe.h"
 #include "fp_async_probe.h"
 #include "slow_decode_profile.h"
 #include "vga_text_address.h"
@@ -86,6 +87,15 @@ static uint64_t g_rep_account_start = 0;
 static RepAccounting g_rep_account;
 // Read-only, bounded pre-edge FSM diagnostic; not checkpointed guest state.
 static uint64_t g_state_trace_start = 0, g_state_trace_cycles = 0;
+static bool g_state_trace_fetch = false;          // --ven-state-fetch; existing window required
+static unsigned g_state_trace_fetch_events = 0;  // host-only lifetime cap, not restored
+static constexpr unsigned STATE_TRACE_FETCH_LIMIT = 256;
+// Address-selected, event-only cache provenance. No guest state is changed;
+// the caller's run limit bounds time and this lifetime cap bounds output.
+static bool g_cache_watch_enabled = false;
+static uint32_t g_cache_watch_line = 0;
+static unsigned g_cache_watch_events = 0;
+static constexpr unsigned CACHE_WATCH_LIMIT = 256;
 // The IDE daemon's per-register/per-sector trace is useful for an ATA wedge,
 // but thousands of host printf calls alter profiler wall time and can exhaust
 // an attached terminal's output quota.  It has no simulated hardware effect;
@@ -563,6 +573,63 @@ static bool fault_ring_edge(const Root &, ven_host::FaultCoreEdge &, long) { ret
 #undef FR_CORE
 #undef FR_TOP
 
+// Optional generated fields: -1 is explicitly unavailable, never a guessed
+// fetch/decode value. Required ibuf/register/bus fields use fault_ring_edge's
+// fail-closed const-member capture instead of adding RTL visibility or probes.
+#define STATE_FETCH_FIELD(name) \
+template<class Root> \
+static auto state_trace_##name(const Root &r, int) \
+    -> decltype((void)r.system__DOT__u_cpu__DOT__u_core__DOT__u_core__DOT__##name, int()) { \
+    return int(r.system__DOT__u_cpu__DOT__u_core__DOT__u_core__DOT__##name); \
+} \
+template<class Root> \
+static int state_trace_##name(const Root &, long) { return -1; }
+STATE_FETCH_FIELD(fetch_word)
+STATE_FETCH_FIELD(d_len)
+STATE_FETCH_FIELD(d_pop_sreg)
+STATE_FETCH_FIELD(d_ct)
+#undef STATE_FETCH_FIELD
+
+template<class Root>
+static bool state_trace_fetch_snapshot(const Root &r) {
+    ven_host::FaultCoreEdge edge;
+    if (!fault_ring_edge(r, edge, 0)) return false;
+    // S_FETCH=1/S_DECODE=2 precede conditional enum entries in every profile.
+    // Idle-high ACK is not a fetch response: require the actual read request.
+    const bool fetch_ack = edge.state == 1 && edge.mem_req && !edge.mem_we && edge.mem_ack;
+    if (!fetch_ack && edge.state != 2) return true;
+    char bytes[33];
+    for (unsigned k = 0; k < edge.ibuf.size(); ++k)
+        std::snprintf(bytes + 2 * k, 3, "%02x", unsigned(edge.ibuf[k]));
+    ++g_state_trace_fetch_events;
+    // At FETCH_ACK ibuf16_pre has NOT consumed this edge's rdata. DECODE shows
+    // the installed buffer. Keep fetch_word separate from instruction bytes.
+    fprintf(stderr, "VENFETCH phase=%s pre_edge=1 cyc=%llu n=%llu state=%u "
+            "cs=%04x csb=%08x eip=%08x flags=%08x cr2=%08x "
+            "ax=%08x cx=%08x dx=%08x bx=%08x sp=%08x bp=%08x si=%08x di=%08x "
+            "ss=%04x ssb=%08x ds=%04x dsb=%08x es=%04x esb=%08x "
+            "nat=%08x lin=%08x addr=%08x req=%u we=%u ack=%u size=%u "
+            "rstrb=%x wstrb=%x rdata=%08x ibuf16_pre=%s "
+            "fetch_word=%d d_len=%d d_pop_sreg=%d d_ct=%d event=%u\n",
+            fetch_ack ? "FETCH_ACK" : "DECODE", (unsigned long long)edge.cycle,
+            (unsigned long long)edge.retires, unsigned(edge.state),
+            unsigned(edge.seg[0]), edge.base[0], edge.eip, edge.eflags, edge.cr2,
+            edge.gpr[0], edge.gpr[1], edge.gpr[2], edge.gpr[3],
+            edge.gpr[4], edge.gpr[5], edge.gpr[6], edge.gpr[7],
+            unsigned(edge.seg[1]), edge.base[1], unsigned(edge.seg[2]), edge.base[2],
+            unsigned(edge.seg[3]), edge.base[3], edge.cur_lin_nat, edge.cur_lin,
+            edge.mem_addr, unsigned(edge.mem_req), unsigned(edge.mem_we),
+            unsigned(edge.mem_ack), unsigned(edge.cur_size), unsigned(edge.read_strobes),
+            unsigned(edge.write_strobes), edge.mem_rdata, bytes,
+            state_trace_fetch_word(r, 0), state_trace_d_len(r, 0),
+            state_trace_d_pop_sreg(r, 0), state_trace_d_ct(r, 0),
+            g_state_trace_fetch_events);
+    if (!ven_cache_source_probe(stderr, r, edge.cycle, edge.mem_addr, 0))
+        fprintf(stderr, "VENCACHE available=0 cyc=%llu\n",
+                (unsigned long long)edge.cycle);
+    return true;
+}
+
 static void tick() {
 #ifdef VEN_HAVE_STATE_DELTA
     if (g_delta_armed && !g_delta_open && main_time >= g_delta_start) {
@@ -575,6 +642,41 @@ static void tick() {
     }
 #endif
     set_clocks(0); top->eval();
+    if (g_cache_watch_enabled && !top->reset && g_cache_watch_events < CACHE_WATCH_LIMIT) {
+        const int event = ven_cache_line_event(*top->rootp, g_cache_watch_line, 0);
+        if (event < 0) {
+            fprintf(stderr, "--ven-cache-line required model fields are unavailable\n");
+            std::exit(2);
+        }
+        if (event) {
+            ++g_cache_watch_events;
+            ven_host::FaultCoreEdge owner;
+            if (!fault_ring_edge(*top->rootp, owner, 0)) {
+                fprintf(stderr, "--ven-cache-line core owner fields are unavailable\n");
+                std::exit(2);
+            }
+            fprintf(stderr, "VENCACHE-WATCH pre_edge=1 cyc=%llu line=%08x event=%u\n",
+                    (unsigned long long)main_time, g_cache_watch_line, g_cache_watch_events);
+            fprintf(stderr, "VENCACHE-CORE pre_edge=1 cyc=%llu n=%llu state=%u qpc=%08x "
+                    "kind=%u eip=%08x cs=%04x csb=%08x es=%04x esb=%08x "
+                    "ds=%04x dsb=%08x flags=%08x ax=%08x cx=%08x dx=%08x bx=%08x "
+                    "sp=%08x bp=%08x si=%08x di=%08x nat=%08x lin=%08x\n",
+                    (unsigned long long)main_time, (unsigned long long)owner.retires,
+                    unsigned(owner.state), owner.q_pc, unsigned(owner.q_kind), owner.eip,
+                    unsigned(owner.seg[0]), owner.base[0], unsigned(owner.seg[3]), owner.base[3],
+                    unsigned(owner.seg[2]), owner.base[2], owner.eflags,
+                    owner.gpr[0], owner.gpr[1], owner.gpr[2], owner.gpr[3],
+                    owner.gpr[4], owner.gpr[5], owner.gpr[6], owner.gpr[7],
+                    owner.cur_lin_nat, owner.cur_lin);
+            if (!ven_cache_source_probe(stderr, *top->rootp, main_time, g_cache_watch_line, 0)) {
+                fprintf(stderr, "--ven-cache-line source fields are unavailable\n");
+                std::exit(2);
+            }
+            if (g_cache_watch_events == CACHE_WATCH_LIMIT)
+                fprintf(stderr, "VENCACHE-WATCH cap_reached=%u cyc=%llu; later events not observed\n",
+                        CACHE_WATCH_LIMIT, (unsigned long long)main_time);
+        }
+    }
     if (g_fault_ring.enabled()) {
         ven_host::FaultCoreEdge before;
         if (!fault_ring_edge(*top->rootp, before, 0))
@@ -610,6 +712,12 @@ static void tick() {
 #undef CORE_OBS
         ven_l1_fill_probe(stderr, *r, main_time, 0);
         ven_fp_async_probe(stderr, *r, main_time, 0);
+        if (g_state_trace_fetch && !top->reset &&
+            g_state_trace_fetch_events < STATE_TRACE_FETCH_LIMIT &&
+            !state_trace_fetch_snapshot(*r)) {
+            fprintf(stderr, "--ven-state-fetch required model fields are unavailable\n");
+            std::exit(2);
+        }
     }
     if (g_ven_perf_every && !top->reset)
         g_slow_decode_profile.observe(
@@ -1190,6 +1298,18 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--ven-state-start") && i+1<argc) {
             g_state_trace_start = strtoull(argv[++i], 0, 0);
         }
+        else if (!strcmp(argv[i], "--ven-state-fetch")) g_state_trace_fetch = true;
+        else if (!strcmp(argv[i], "--ven-cache-line")) {
+            if (i+1 >= argc) checkpoint_fail("--ven-cache-line requires a physical address");
+            const char *value = argv[++i];
+            char *end = nullptr;
+            errno = 0;
+            const unsigned long long parsed = std::strtoull(value, &end, 0);
+            if (errno || !*value || *value == '-' || *end || parsed > UINT32_MAX)
+                checkpoint_fail("--ven-cache-line requires a 32-bit physical address");
+            g_cache_watch_line = uint32_t(parsed) & ~uint32_t(31);
+            g_cache_watch_enabled = true;
+        }
         else if (!strcmp(argv[i], "--ven-delta-out") && i+1<argc) g_delta_path = argv[++i];
         else if (!strcmp(argv[i], "--ven-delta-start") && i+1<argc) g_delta_start = strtoull(argv[++i], 0, 0);
         else if (!strcmp(argv[i], "--ven-delta-cycles") && i+1<argc) g_delta_cycles = strtoull(argv[++i], 0, 0);
@@ -1262,6 +1382,10 @@ int main(int argc, char **argv) {
         checkpoint_fail("--ven-stop-retire and --save-stop are mutually exclusive");
     if (g_rep_account_enable && g_restore_file)
         checkpoint_fail("REP accounting requires a cold run; host counters are not in native snapshots");
+    if (g_state_trace_fetch && (!g_state_trace_cycles || g_state_trace_cycles > 1000000)) {
+        fprintf(stderr, "--ven-state-fetch requires --ven-state-cycles in 1..1000000\n");
+        return 2;
+    }
     if (const char *error = ven_host::validate_fault_ring_options(g_fault_ring_options,
                                                                 g_restore_file != nullptr))
         fault_ring_fail(error);
@@ -1270,6 +1394,28 @@ int main(int argc, char **argv) {
     if (g_kb_script) kb_build_events(g_kb_script);
 
     top = new Vsystem;
+    if (g_cache_watch_enabled) {
+        ven_host::FaultCoreEdge owner;
+        if (!fault_ring_edge(*top->rootp, owner, 0)) {
+            fprintf(stderr, "--ven-cache-line core owner fields are unavailable\n");
+            return 2;
+        }
+        if (ven_cache_line_event(*top->rootp, g_cache_watch_line, 0) < 0) {
+            fprintf(stderr, "--ven-cache-line required model fields are unavailable\n");
+            return 2;
+        }
+        fprintf(stderr, "[VENCACHE-WATCH] passive pre-edge events for line=%08x, max256; "
+                        "no extra evaluation or guest memory reads\n", g_cache_watch_line);
+    }
+    if (g_state_trace_fetch) {
+        ven_host::FaultCoreEdge edge;
+        if (!fault_ring_edge(*top->rootp, edge, 0)) {
+            fprintf(stderr, "--ven-state-fetch required model fields are unavailable\n");
+            return 2;
+        }
+        fprintf(stderr, "[VENSTATE-FETCH] passive pre-edge observer, max256 events; "
+                        "optional unavailable fields=-1; no extra evaluation\n");
+    }
     if (g_fault_ring_options.path) {
         ven_host::FaultCoreEdge edge;
         if (!fault_ring_edge(*top->rootp, edge, 0))

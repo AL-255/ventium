@@ -324,8 +324,56 @@ The actual loop subsequently retires `063C,063F,0640,0642,0644,0645`, with no
 `0626` helper execution in the entire captured window. LOOP correctly decrements
 low CX; the corrupted fallthrough bypasses count-setting callers. This is an
 instruction-stream mismatch against the original ROM, not proof that the live
-translated/shadowed executable bytes equal that ROM. Actual fetch ACK/decoder
-bytes are the next required witness before attributing an RTL cause or fixing it.
+translated/shadowed executable bytes equal that ROM.
+
+A second bounded replay now captures actual **pre-edge fetch ACKs** with a
+default-off, host-only observer: all 205 observed read requests have
+CS=`C000`, base=`000C0000` and the correct physical request address. At cycle
+385,465,282, physical `000C0631` returns `20072007`; `C0635` and `C0639`
+return the same word. `C063D` returns `E4072007` and the crossing `C063F`
+request returns `FEFFE407`, isolating bad bytes in line `C0620–C063F` while
+the following line remains consistent with the stock ROM. The installed decode
+buffer contains those returned bytes and correctly selects one-byte POP ES.
+This establishes incorrect memory-path data **before decoding**, not a decoder
+or LOOP-counter failure. Static address routing does not alias this BIOS line
+to VGA. The exact cache array/window/fill or accepted-store provenance is still
+required before a root-cause fix; no address-specific bypass or blanket flush
+has been introduced.
+
+The observer changes neither the generated RTL model nor guest state: its
+cached model archive is byte-identical to the original (`157a4fe9…`), all
+80,000 retirement records match the first replay byte-for-byte (concatenated
+SHA-256 `d51e116f3807441e62b524614d29dcaa46045932c42967293e096f8059d4539d`),
+both runs stop at the identical cycle/retirement endpoint, and both final private
+disks hash `0dbb5b8d2f893a14df3201e3d7d98d52331e950742003f3554378f9e1517c50b`.
+The diagnostic host executable is `3f60b62b…`, not a new RTL-performance build.
+Artifacts: `/tmp/ventium-win95-vdd-fetch-sep30.HDNdFR/`; closed log SHA-256
+`9942ce3d82ac11bb48f7cf521e38cfac40fc3962d710cd3c9bff0e54cb0f7f4e`.
+Neither replay qualifies a cold Win95 boot or the standard suite.
+
+The next cache-source replay distinguishes the actual data array from saved
+windows. Its first D-array fill at cycles **383,610,666–383,610,675** is
+correct: critical-word order 4,5,6,7,0,1,2,3, stock ROM payloads, set `31`,
+way 0, bank row `62`. At the bad fetch, cycle **385,465,282**, that still-valid
+tag `C0` contains eight `07200720` words in the actual bank arrays;
+`rd_line_raw` and the saved window agree. Thus this is a resident-line data
+mutation, not merely a mislabeled response window. Neither L1D nor upstream
+ao486 L2 held the target ROM line at the validated 350M checkpoint; DDR backing
+was stock. The first corrupting transaction is **not yet captured**: the
+256-event budget expired at cycle 383,628,987 on repeated code-buffer fills.
+Absence of later store records cannot reject a ROM-write or other mutation
+hypothesis. A mutation-only watch is the next bounded diagnostic, not a fix.
+
+This third replay also matches all 80,000 retirements, exact endpoint, all five
+L1 profiler summary rows and final private-disk hash of both controls.
+The generated RTL archive remains `157a4fe9…`; only the passive host executable
+changed, to `6746af9f…`. Host observer tests pass 82 assertions and 19 static
+integration checks. An optimized-away flush alias now prints unavailable `-1`
+instead of silently disabling the entire existing L1 probe. No RTL or guest
+state was changed. Artifacts: `/tmp/ventium-win95-vdd-cache-sep30.3GiRyk/`;
+closed log SHA-256
+`e21e31db8b303c18575683cdef44cb250d7019a09b5f310d37073e82afdbc94c`.
+Its exit-zero diagnostic stop is not a Win95 desktop or standard-suite pass.
 
 The final post-IRET CoreMark candidate independently **passes both complete
 1,500-iteration seeds**, not merely the earlier build's results. Performance
@@ -386,16 +434,18 @@ reference-CRC checks. Their printed elapsed time still includes that finite
 startup-offset bias; the actual-cycle denominators above remain authoritative
 for modeled CM/MHz. Neither timer values nor guest code were modified.
 
-Current cold raw-P54 full-PC gameplay IPC is **0.42750217** over cycles
-1,400,000,000–1,500,000,000 on binary
+Current cold raw-P54 full-PC gameplay IPC is **0.44879934** over cycles
+1,900,000,000–2,000,000,000 on binary
 `b7cfbec7ee31c7ff7f81abf994995431f3c660b913ae2a9d3176c6d22a2db0ae`.
 The actual private executable's SHA-256 was rechecked at the end of this window.
+The retained earlier same-build interval below measured **0.42750217** over
+1.4B–1.5B; it is historical evidence, not the current reported window.
 Retained older binary
 `3237b652…` baseline is **0.45746656**, cycles
 1,150,151,638–1,400,151,638; it predates these builds and is not a matched-scene
 A/B comparison.
 
-The measured-window receipt is the existing cold run's `quake/run.log` under
+The earlier measured-window receipt is the existing cold run's `quake/run.log` under
 `/tmp/ventium-standard-iret-axi-sep30.dTKJW7/`:
 
 | Simulated cycle | Profile clocks | Retirements | U retirements | V retirements |
@@ -414,6 +464,21 @@ pre-run prefix. No fatal simulator/engine error was found through this window.
 This is a gameplay-window measurement, **not FPS, a completed 969-frame timedemo
 or standard-suite PASS**. The cold run continues unchanged; capture cadence
 does not count rendered frames.
+
+The intervening receipt is `quake/gameplay_ipc_1800M_1900M.json` in that same run.
+Its profile-clock endpoints are 1,799,999,637 and 1,899,999,637; retirements
+578,364,995 and 623,538,067. The 45,173,072-retirement difference equals
+33,960,715 U plus 11,212,357 V retirements, over exactly 100,000,000 clocks.
+Raw captures `frame_00010.ppm`/`frame_00011.ppm` show active grenade combat
+and advancing world/weapon/HUD without the loading console. This newer
+scene-dependent IPC is not evidence of a code-change gain or timedemo FPS.
+
+The latest fully captured 1.9B–2.0B window has clocks 1,899,999,637–1,999,999,637
+and retirements 623,538,067–668,418,001. Its 44,879,934 retirements equal
+33,930,910 U plus 10,949,024 V retirements, over 100,000,000 clocks, hence
+**0.44879934 IPC**. Raw endpoint captures 11/12 show advancing gameplay without
+the loading console. The frozen private binary remains `b7cfbec7…`; this is
+another scene-dependent gameplay measurement, not timedemo completion or FPS.
 
 Evidence: `/tmp/ventium-standard-sep30.qUCAcQ/` (full-PC inputs and logs),
 `/tmp/ventium-coremark-matrix.kpjs_mph/` (long seeds),
