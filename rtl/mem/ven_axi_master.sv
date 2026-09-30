@@ -996,6 +996,13 @@ module ven_axi_master #(
         wq_addr[~wq_wp] <= m_pair_addr;
         wq_wdata[~wq_wp] <= m_pair_wdata;
         wq_wstrb[~wq_wp] <= m_pair_wstrb;
+`ifdef VEN_P54_WBUF_QUAD_COMBINE
+        // A non-fused pair allocates both slots.  The second slot can retain
+        // sidecar state from an earlier fused owner after B retirement; clear
+        // it at allocation so this single word cannot emit a stale second W.
+        wq_fused[~wq_wp] <= 1'b0;
+        wq_hi_data[~wq_wp] <= 32'd0;
+`endif
         wq_bcount[~wq_wp] <= 2'd0;
         wq_issued[~wq_wp] <= 1'b0;
       end
