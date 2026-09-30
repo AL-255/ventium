@@ -784,7 +784,7 @@ index 2d8d08a..db525ba 100644
   * Copyright (c) 2014, Aleksander Osman
   * Copyright (c) 2020, Alexey Melnikov
 diff --git a/rtl/soc/ide.v b/rtl/soc/ide.v
-index 3efe611..9fc1145 100644
+index 3efe611..64020fd 100644
 --- a/rtl/soc/ide.v
 +++ b/rtl/soc/ide.v
 @@ -1,3 +1,4 @@
@@ -846,7 +846,7 @@ index 3efe611..9fc1145 100644
  end
  
  always @(posedge clk) begin
-@@ -170,19 +191,20 @@ always @(posedge clk) begin
+@@ -170,17 +191,20 @@ always @(posedge clk) begin
  	else if(sw_reset)                        io_wait <= use_wait;
  	else if(mgmt_write && mgmt_address == 5) io_wait <= 1'd0;
  	else if(io_wr && io_address == 7)        io_wait <= use_wait;
@@ -863,13 +863,13 @@ index 3efe611..9fc1145 100644
  end
  
  always @(posedge clk) begin
++	// Word 5 owns IRQ publication, including backend WRITE completion.
++	// Draining a data-in buffer is not a second completion interrupt: after
++	// regular status acknowledges its data-ready IRQ, it must stay cleared.
  	if(reset)                                                                      irq <= 1'b0;
  	else if(mgmt_write && mgmt_address == 5 && mgmt_writedata[10] && ~disable_irq) irq <= 1'b1;
-+	else if(block_done_pending && block_done_last && block_done_irq && ~disable_irq) irq <= 1'b1;
  	else if((io_read | io_wr) && io_address == 7)                                  irq <= 1'b0;
- end
- 
-@@ -194,6 +216,27 @@ always @(posedge clk) begin
+@@ -194,6 +218,27 @@ always @(posedge clk) begin
  			3: mgmt_readdata <= {sector[15:8], sector_count[15:8]};
  			4: mgmt_readdata <= {cylinder[31:16]};
  			5: mgmt_readdata <= {cmd, drv_addr};
@@ -897,7 +897,7 @@ index 3efe611..9fc1145 100644
  	default: mgmt_readdata <= (mgmt_cnt[0]) ? buf_readdata[31:16] : buf_readdata[15:0];
  	endcase
  end
-@@ -223,6 +266,8 @@ always @(posedge clk) begin
+@@ -223,6 +268,8 @@ always @(posedge clk) begin
  end
  
  reg sw_reset;
@@ -906,7 +906,7 @@ index 3efe611..9fc1145 100644
  always @(posedge clk) begin
  	if(~rst_n)                         sw_reset <= 1'b0;
  	else if(io_wr && io_address == 14) sw_reset <= io_writedata[2];
-@@ -246,6 +291,56 @@ wire       io_done = (blk_size && io_cnt >= blk_size);
+@@ -246,6 +293,50 @@ wire       io_done = (blk_size && io_cnt >= blk_size);
  reg [13:0] io_cnt;
  wire       io_stb = read_data_io | write_data_io;
  
@@ -920,23 +920,17 @@ index 3efe611..9fc1145 100644
 +reg block_done_seen;
 +reg block_done_pending;
 +reg block_done_last;
-+reg block_done_irq;
 +reg [7:0] block_done_status;
 +always @(posedge clk) begin
 +	if(reset) begin
 +		block_done_seen    <= 1'b0;
 +		block_done_pending <= 1'b0;
 +		block_done_last    <= 1'b0;
-+		block_done_irq     <= 1'b0;
 +		block_done_status  <= 8'h00;
 +	end
 +	else if(mgmt_write && mgmt_address == 5) begin
 +		block_done_seen    <= 1'b0;
 +		block_done_pending <= 1'b0;
-+		// ATA_STATUS_IRQ is transported out-of-band (word-5 bit 10), not in
-+		// the visible status register.  Retain it with this descriptor until
-+		// its terminal PIO drain completes.
-+		block_done_irq     <= mgmt_writedata[10];
 +	end
 +	// A new command supersedes a completed descriptor even before the daemon
 +	// publishes its next word-5 descriptor.  Keep `seen` set: io_done still
@@ -963,7 +957,7 @@ index 3efe611..9fc1145 100644
  always @(posedge clk) begin
  	reg old_stb, r_32;
  	old_stb <= io_stb;
-@@ -310,5 +405,55 @@ dpram #(12,16) io_buf1
+@@ -310,5 +401,55 @@ dpram #(12,16) io_buf1
  );
  
  //------------------------------------------------------------------------------
