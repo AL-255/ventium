@@ -1107,10 +1107,12 @@ records beginning at retire 88M. Its purpose is to identify the later
 runs. It too is not yet a completed result.
 
 The bounded V86 trace later exposed two suspicious transfers into BIOS-shadow
-addresses. `FCBF:0193` maps to physical `0xFCD83`, which contains a ROM
-error-message string in the frozen boot image; `FCB2:22E0` maps to
-`0xFEE00`, zero-filled in that image. Live shadow RAM may differ, so the
-predecessor breakpoints must read the guest's actual bytes. Both transfers
+addresses. **Interpretation corrected September 30:** the VTM callback reports
+the retired instruction PC alongside **post-commit** segment selectors. Thus
+the printed `FCBF:0193` and `FCB2:22E0` combinations cannot be mapped as source
+instruction addresses without reconstructing their pre-execution CS. The
+earlier ROM-string/zero-byte source interpretation is withdrawn. Predecessor
+breakpoints must capture the original CS and actually fetched bytes. Both transfers
 lead into the Windows fault handler and the guest continues; they are not by
 themselves a terminal halt or proof of a core fault.
 The existing breakpoint observer has one non-mutating linear-memory probe.
@@ -1118,9 +1120,11 @@ CPUs 6 and 5 now stop just before their respective predecessor instructions
 at `04CB:0190` and `FFFF:2C1E`, probing `SS:SP` at linear `0x8EFF0` and
 `0x8EFFA`. Their private cold-run roots are
 `/tmp/ventium_w95_font_stack_{0190,2c1e}_sep29`. If a probed frame already
-contains the odd destination, the bug is upstream of the transfer; if it
-contains a valid destination, the transfer/decode or memory-read path is
-suspect. Both are active, not findings yet.
+contains the odd destination, it is only a backing-memory observation: the
+debugger reads DDR directly, which may omit dirty L1D/write-buffer data. Capture
+the translated stack ACKs and latched return targets, ESP and SS.B before
+deciding whether the input frame or transfer is wrong. These historical probes
+were stopped without qualification; they are not active September 30.
 
 The history narrows when this particular platform omission arose: the
 legacy ao486 simulator's opt-in pin-level `ps2_mouse_drive()` was present
@@ -1174,9 +1178,12 @@ A new concrete V86 symptom is visible in the long run's debug-fault log:
 `#UD` reports at `FCBF:2F27`, `FCB2:2FF7`, `FD4D:2647`, and other aliases
 all form linear `0x000FFB17` (`CS<<4 + EIP`). The frozen 64 KiB `boot0.rom`
 has bytes `63 38 6c 6c 38 cc 78 00` at offset `0xFB17`; these are in its
-font-data area, not a BIOS instruction sequence. This is evidence of an
-invalid V86 control transfer or state reconstruction, **not yet evidence of
-which instruction or RTL change caused it**. The first such messages appear
+font-data area, not an ordinary BIOS instruction sequence. **September 30
+correction:** this alone is not an invalid transfer: Windows deliberately
+uses a ROM `ARPL` byte as a V86-to-VxD callback trap, with different CS:IP
+aliases selecting different callbacks. The actual-frame evidence and primary
+documentation are recorded below; no processor defect follows from these
+targets alone. The first such messages appear
 near the ~175M protected/V86 transition in the current log, but mixed
 stdout/stderr buffering makes that timestamp approximate. To capture the
 precise entry state, two same-binary, mouse-enabled, CPU-pinned runs on CPUs
@@ -1187,7 +1194,8 @@ active, not yet results.
 
 The CPU-18 bounded trace has since finished its 27M–30.5M retirement
 window. At retire 28,478,697/cycle 169,522,819, it records a V86
-`FCB2:22E0` retirement, followed by entry to the protected-mode exception
+retirement at PC `22E0` with post-commit CS `FCB2` (not a proven source CS),
+followed by entry to the protected-mode exception
 handler at `0028:00002FF7` and then the VMM's `C00012xx`/`C0001Axx`
 handler code. The latter computes the fault linear address `000FFB17` from
 `FCB2:2FF7` before continuing; the same pattern recurs at retire 28,707,869.
@@ -1340,7 +1348,7 @@ service manager; **no new runs should be launched pending further direction**.
 | Exact July-20 historical platform, current/July disks | 189.8M / 161.0M cycles | Still too early to establish a known-good ancestor. |
 | Historical `iobus.v` one-file variant (`w95_ao486_oldiobus_current`) | 24.1M cycles on CPU 11; binary `e6248c83...` | Build and isolated run are valid; no boot comparison yet. |
 | Same-source Win95 v4 mouse snapshot source | 244.4M of 258M cycles on CPU 10 | The 260M uninterrupted control saved successfully; 258M→260M full-state and disk replay is still pending. |
-| V86 predecessor/stack breakpoint probes | source `0193` at 156.4M, source `22E0` at 140.9M, stack `0190` at 73.9M, stack `2C1E` at 76.4M | No breakpoint report yet; do not attribute the invalid BIOS-font fetch to the core until its input frame is inspected. |
+| V86 predecessor/stack breakpoint probes | source `0193` at 156.4M, source `22E0` at 140.9M, stack `0190` at 73.9M, stack `2C1E` at 76.4M | Historical handoff only; September 30 actual-ACK ring evidence below supersedes the inference of an invalid BIOS-font fetch. |
 | Pinned-QEMU `-cpu pentium` disk controls | Current and July disks both active on separate snapshot overlays; latest screens still show text startup, not a desktop | Current-disk QEMU reached paging/V86 execution. A different BIOS/platform limits causal interpretation even if it later boots. |
 
 The source images and active Quake/CoreMark inputs were left intact. After
@@ -1351,3 +1359,316 @@ repository's `tmp` symlink points to an external volume that is full and
 read-only, so any future scratch must use `/tmp` until that condition changes.
 Existing services were left running; this handoff neither qualifies Win95
 nor authorizes treating a cycle-cap exit as a desktop.
+
+## September 30 standard-candidate cold Win95 result — FAIL
+
+The `ventium-standard-win95-sep30` service used the newly frozen raw-profile
+full-PC binary SHA-256
+`122d9e0f61f054af80639fd7e0edf8189663dbe6c3aa6f9bab4fc4e751c5186d`,
+with a private copy of the same source disk
+`cc68b00539f878de8b75b09d9b24a5eab00a763f2a015d4ef402bd80c971ccef`
+and the pinned cache-enabled ROM hashes recorded above (`dca915c5...` /
+`fb0d673a...`, not the original CD/NW-set stock boot ROM). It ran cold at 45 MHz CPU/RTC,
+90 MHz VGA, 32 MiB RAM, with a connected PS/2 mouse and no injected keys.
+The original source disk and ROMs were not changed. The invocation and input
+hashes are recorded in
+`/tmp/ventium-standard-sep30.qUCAcQ/win95/external__ao486sim_ven_standard/case.json`.
+
+The first paged protected-mode progress sample was at 288,905,999 cycles.
+The VGA character capture at 400,026,424 cycles began displaying
+`While initializing device VDD:`. The next capture at **425,026,424 cycles**
+displayed the complete terminal message:
+
+```text
+While initializing device VDD:
+Windows protection error.  You need to restart your computer.
+Press any key to continue...
+```
+
+There was no graphics frame and no recognizable desktop. This is a **failed
+Win95 desktop gate**, not an inconclusive idle-loop observation. The visible
+message identifies the failing boot stage, not the introducing RTL defect;
+no stale progress-log PC/CS pair is used to attribute the cause.
+
+A corrected independent media control used pinned QEMU 8.2.2, `-cpu pentium`,
+the same `cc68b005...` source disk on a disposable overlay, 32 MiB RAM and
+standard VGA, with `-icount shift=4,sleep=off`. At its bounded 180-second
+capture, `/tmp/ventium-win95-qemu-control-3ieaz1iu/screen_180.png` visibly
+shows the graphical Windows Display dialog explaining that the display
+adapter is not configured properly, with OK/Cancel buttons. This is not
+yet a verified desktop, but it proves that this media advances into a GUI
+on the reference PC, without the Ventium run's terminal protection message.
+The sampled BIOS `HLT` at physical `0xF6A0A` is normal GUI idle, not evidence
+of boot failure. The earlier five-minute QEMU control omitted the required
+instruction-count clock setting and is inconclusive. QEMU's different BIOS
+and VGA platform prevent this comparison from assigning the RTL failure to
+either the CPU or VGA implementation alone; the corrected control narrows
+the investigation away from a media-only explanation. A separate bounded
+reference UI continuation is pending and does not qualify the RTL.
+
+Only after confirming that complete error message, the monitor created the
+authorized generic host stop request at
+`/tmp/ventium-standard-sep30.qUCAcQ/win95/stop.request`. The simulator honored
+it at **437,410,973 cycles / 73,933,723 retirements**, printed `[HOST-STOP]`
+and its normal `>>> done:` receipt, and finalized normally. The service was
+subsequently confirmed inactive/dead with MainPID 0 and exit status 0; its old
+process was no longer present. The full log scan found no engine fatal or
+state-restore marker, but did find the guest protection error. Clean host
+finalization does not erase the guest failure. The legacy wrapper's
+`result.json` says `clean_exit_unqualified`, `exit_code: 0`, and
+`vxd_error: false`; its narrow VxD detector missed this VDD/protection text,
+so those fields must not be promoted to PASS.
+
+The preserved log is
+`/tmp/ventium-standard-sep30.qUCAcQ/win95/external__ao486sim_ven_standard/run.log`
+(SHA-256 `ed8a0d15293d3e2b6a5dca54dbe48b6290e8ce2bce4bc005a63a6d62ac720f63`);
+the complete error text is at lines 6817–6819 and the normal stop receipt
+at lines 6845–6846. The private disk, case manifest, log, and wrapper result
+remain available for diagnosis. No new run or RTL fix was started by this
+monitor.
+
+The latest verified gameplay IPC remains **0.45746656** on the older
+`3237b652...` binary over cycles 1,150,151,638–1,400,151,638. It predates this
+standard candidate, which has no gameplay measurement yet. The standard
+suite is not complete while this Win95 desktop failure remains open.
+
+### Focused IRET stack defects — independently reproduced, VDD causality open
+
+Read-only inspection following the VDD failure found three generic IRET
+defects. The pinned P5 manual (241430-004, Volume 3, section 21.1, printed
+pages 21-1/21-2; PDF pages 532/533) distinguishes the stack descriptor's B
+bit, which selects SP/ESP for implicit stack references, from 66H/67H
+operation/address prefixes. The pinned QEMU `seg_helper.c` likewise wraps
+the V86 IRET pop addresses with mask `0xffff`, and its `return_to_vm86`
+path assigns the full popped `new_esp`.
+
+The new generic `verif/sys/tests/pv86iretstack` fixtures boot cold into
+paging-on V86 at IOPL=3. Relevant stack pages have nonidentity mappings;
+physical-alias reads verify the actual frame contents rather than allowing
+consistently untranslated stores/loads to pass. The success trap checks the
+saved source CS:EIP, VM/IOPL and completion marker before issuing the host
+debug exit. A V86 port write is not incorrectly assumed to bypass the TSS
+I/O bitmap. Every golden completes its self-check; no snapshot, BIOS/guest
+patch, relaxed comparison, or workload-specific condition is involved.
+
+The **unchanged pre-fix** standalone binary is SHA-256
+`3ef25add322d2b23f78a26be22c41164623c5b3e380e7de4843f5ceae5a41764`.
+The final four-case red capture is `/tmp/ventium-pv86iretstack.vmBBiN/`,
+using `--system --cosim`, actual port-debug-exit handling, and pinned QEMU
+on port 41431. All cases together took seconds, inside the shared bounded
+build scope with a 540-second outer limit; no RTL build was launched by
+this gate.
+
+| Case | Correct reference outcome | Pre-fix RTL evidence | Narrow general correction |
+|---|---|---|---|
+| 1: IRETD with ESP `DEADF008` | 727 records; returns with full ESP preserved | 699 matching prefix records, then `#SS(0)` at `66 CF`, source offset `0018`, state `S_IRET` | Apply the existing `stk16()` address mask to every 32-bit pop slot as well as word slots; keep the four-byte operation width. |
+| 2: IRETD with ESP `00000008`, frame wrapping SP | 734 records; slots wrap `FFFC → 0000 → 0004` | 704 matching prefix records, then `#SS(0)` at source offset `0018` | The same address correction; this case has zero high ESP and independently checks slot wrap. |
+| 3: word IRET FLAGS at the final two bytes of a mapped page, next page absent | 707 records; returns with ESP `DEADF000`, VM/IOPL unchanged | First divergence at record 679/source offset `0011`: false user-read `#PF`, CR2 `0002F000`; RTL exits failure 199 | Publish the actual two-byte `cur_size` **and** read strobes `0011`; dword pops remain size 4/strobes `1111`. Masking only the final value or segment extent does not prevent page overfetch. |
+| 4: full nine-dword CPL0 → V86 return from SS.B=0 | 647 records; installs guest ESP `CAFEF000` | First divergence at record 626/source PC `000F0229`: ESP becomes `0000F000`; RTL exits failure 201 | Exempt only the successful final `S_IRET` V86-entry ESP restore from the generic old-stack high-half merge. Ordinary implicit updates and protected outer-stack rules remain unchanged. |
+
+The separate ordinary low-ESP, nonwrapping IRETD control (case 5) already
+passes on that same **pre-fix** binary: 727/727 complete architectural
+records and actual RTL debug-exit status 133, under
+`/tmp/ventium-pv86iretstack.kSFF0C/`. This qualifies the corrected fixture
+exit and comparator handling independently of the new fixes. Earlier
+initial fixture diagnostics remain preserved, but the final red bundle and
+passing ordinary control are the authoritative harness evidence.
+
+The root agent applied those three narrowly scoped RTL corrections without
+adding FSM states or changing cache configuration. A fresh same-profile
+testbench, SHA-256
+`12851ddf6d2110b6d68acd2c317eaf3fa96e3c83c528f51cda5c3f64f1366a80`,
+now passes **all five cases** under `/tmp/ventium-pv86iretstack.Fph7M6/`:
+complete QEMU/RTL record counts are 727, 734, 707, 647 and 727 respectively,
+all functionally equivalent, with actual RTL debug-exit status 133 in every
+case. Every case has only its one deliberately expected terminal INT20
+`#GP(0x102)`; the spurious stack/page faults are gone. Cases 1–3 also pass
+all physical-alias frame-content checks, and case 4 preserves the full
+`CAFEF000` guest ESP. The entire five-case qualification took seconds under
+the same bounded scope, with no extra comparison masks or length exceptions.
+
+These directed red-to-green results prove architectural fixes; they **do not
+yet prove** that any one caused the live VDD protection error. That requires
+a cold candidate run and a precommit fault/frame witness, not the older
+mixed-owner post-retirement PC/CS reports. Win95 desktop and the complete
+standard suite remain open. These witnesses are microbenchmarks, not a new
+gameplay IPC measurement: the baseline remains **0.45746656** on older
+`3237b652...` over cycles 1,150,151,638–1,400,151,638, and the current
+candidate is unmeasured.
+
+### IRET-fixed candidate — existing system-regression controls
+
+The same new standalone binary (`12851ddf6d2110b6d68acd2c317eaf3fa96e3c83c528f51cda5c3f64f1366a80`)
+also passes the following **ten existing test programs** against the pinned
+QEMU 8.2.2 `-cpu pentium` reference. Every pair has complete equivalent
+architectural traces under `compare.py --mode func --all`, with system-field
+comparison engaged, and actual debug-exit status **133** from both simulators.
+This is focused system regression evidence, not a full `verify-sys` or standard
+suite pass.
+
+| Existing image | QEMU / RTL records | Relevant regression coverage |
+|---|---:|---|
+| `pv86iret` | 899 / 899 | Paged nonidentity V86 stack, word/dword intra-V86 IRET; exactly one intentional final `#GP`. |
+| `pv86far` | 1226 / 1226 | Word/dword direct/indirect far CALL/RETF, immediate stack adjustment, translated cross-page stack; exactly six intentional I/O `#GP`s. |
+| `pseg` | 90 / 90 | Protected segmentation, hidden bases, POP DS, 16-bit protected-code LDS with 66/67 prefixes. |
+| `plar` | 78 / 78 | Register/memory LAR/LSL, operand widths, selector eligibility and unchanged invalid destinations. |
+| `pcpl` | 304 / 304 | Protected CPL0/CPL3 interrupt-stack switching and outer IRET. |
+| `pssiret` | 656 / 656 | Rejected outer SS frames remain restartable; valid outer IRET control. |
+| `pstk16` | 159 / 159 | SS.B=0 protected-stack address/pointer wrap and cross-privilege stack installation. |
+| `pretfres` | 447 / 447 | Rejected same-privilege RETF preserves ESP; word outer return zero-extends SP. |
+| `pretfoutpg` | 283 / 283 | Word/dword outer RETF with frame slots on nonidentity translated pages. |
+| `pint16f` | 419 / 419 | Word protected interrupt/trap frames, cross-privilege IRETW, B=0 wrap, dword controls. |
+
+The `pssiret` fault log separately confirms `#GP(0x30)`, `#GP(0x38)` and
+SDM-correct `#SS(0x40)`, with no copied QEMU `#NP(0x40)` deviation. Its
+additional `+ven_nmi_arm` probe exits 133 and records exactly **five** rejected
+IRET faults with NMI still armed, as required by the existing gate.
+
+All receipts are preserved under `/tmp/ventium-iret-controls.BWY8u3/` (4.4 MiB):
+each case has its build log, exact golden/RTL traces, full fault log, comparator
+output and `receipt.json`. The reviewed existing scripts support `TB_BIN`, but
+the standalone V86 wrappers erase their temporary receipts and the generic
+runner builds images into the source tree. For this qualification, the unchanged
+fixture sources, linker scripts and Makefiles were copied into the receipt
+directory, and the same pinned producer/comparator and original caps/checks
+were applied there. No RTL/QEMU/canonical testbench build or processor-source
+edit occurred. The complete invocation finished in seconds inside one shared
+bounded build scope with a **540-second** outer limit; child QEMU generation
+and RTL runs were individually capped at 90/30 seconds. The scope and session
+were reaped normally and QEMU ports 41431–41440 released.
+
+Source and binary provenance is recorded losslessly in `inputs.sha256`,
+`fixtures.sha256`, `images.sha256` and the copied `compiled-verFiles.dat`.
+All fixture-source hashes were checked again after the run. Aggregate SHA-256s:
+
+- `inputs.sha256`: `02e9b5ad6400d55fb5f6b9a21f78ac9ceda1c4d13708bd3efa790ef7c61a3785`.
+- `fixtures.sha256`: `60bb842db06fdca445c2901d824acecb00ad075b2cba87bbf9e194aa464f6190`.
+- `images.sha256`: `99466e20a2b0c98acdafb541d213f59d15543a67db68607df9cf6d03bb661fe3`.
+- `compiled-verFiles.dat`: `7ea9be11d60612f9936d67aeff808f6aaf7747ffed716fdd4b0c8c44f2db1711`.
+- Isolated command script `run-controls.sh`: `eb575d227fa4659002583635c120d31c423064df23a528f47a5153c5d6d5c399`.
+
+The run-start source hashes for the relevant RTL files were
+`core.sv=3f657199264ead3e69fe46c82a1ff801c3fc7f7651ffa35fba04a1381faaaa35`,
+`core_bus_driver.svh=03a8c23861c6983126412765d0ed4cf76db53c4f377916a96a471fd45c224ee8`,
+`core_iret.svh=3a7a5839232093bbbdc98da46cf162fee6b2274831c98ca04e70783b25cbf2b1`
+and `core_gpr_wb.svh=18d87225f85b528eb2c7abc6af789b2911370c84e8aa10a37a4a06df99db9e39`.
+The shared V86 fixture source is
+`pv86.S=adeb7ad136307f1388cf430e95e0327b3f98e20a98291b846e171f90c7d03448`;
+the pinned QEMU executable is
+`b42b70e5109638df22ff736c18b93c40881faa30dc5f52f4d119dda3be3467fd`.
+
+These controls show no regression in the surrounding verified stack/return
+paths; they do not establish a causal explanation or cold-boot fix for VDD.
+Win95 desktop remains unqualified. Gameplay IPC remains **0.45746656** on the
+older `3237b652...` binary over cycles 1,150,151,638–1,400,151,638; this new
+candidate still has no gameplay measurement.
+
+### Sep30 cold fault ring — ROM callback witness, not a font-corruption diagnosis
+
+The new cold full-PC candidate, SHA-256
+`b7cfbec7ee31c7ff7f81abf994995431f3c660b913ae2a9d3176c6d22a2db0ae`,
+includes the three generic IRET fixes and the separately qualified AXI
+quad-combiner correction. Its receipts are under
+`/tmp/ventium-standard-iret-axi-sep30.dTKJW7/win95/`. It still displays the
+complete **VDD Windows protection error** at `VGATEXT @425026424`; the
+nested `external__ao486sim_ven_standard/result.json` reports
+`status=terminal_error`, `terminal_error="Windows protection error"` and
+`exit_code=-15`. The wrapper stopped and reaped the simulator after observing
+the error; this is not a normal simulator-finalization receipt or a desktop
+pass. The IRET fixes therefore do not resolve this cold-boot failure.
+
+The passive `faults.log` captured sixteen complete vector-6 events, then
+reached its configured event cap. All sixteen actual pre-fault linear
+addresses are `000FFB17`, starting at cycle **298,751,228**. The final file is
+2,071,609 bytes, SHA-256
+`1b127ceccd95daa081f407cc167f390ad7dfe6d308f05b136fab0f6338f7477a`.
+These observations correct the earlier suggestion in this document that
+executing the ROM font byte itself demonstrates an invalid control transfer.
+Microsoft's [KB71264](https://ftp.zx.net.nz/pub/archive/ftp.microsoft.com/MISC/KB/en-us/71/264.HTM)
+documents Windows searching the permanently available ROM range for a system
+breakpoint. NuMega's primary [Using SoftICE manual, printed page 103](https://gbppr.net/cracking/softice/NuMega_-_Using_SoftICE.pdf)
+explains that Windows 95 uses one ROM `ARPL` byte for V86-to-VxD callbacks,
+varying the segment:offset alias to select callbacks. Microsoft's
+[DDK, chapter 23](https://www.pcjs.org/documents/books/mspl13/win/w3ddkvxd/)
+also documents the V86 callback segment:offset mechanism. Consequently,
+`0x63` in BIOS font data and multiple aliases of that address are strongly
+consistent with an **intentional callback trap**, not by themselves a CPU
+corruption witness. No guest `SystemROMBreakPoint` workaround was applied.
+
+Actual pre-rising-edge context and FSM-visible ACK operands establish the
+following transfers without combining a retired PC with post-commit CS:
+
+| Event | Actual IRET source / source stack | Final acknowledged frame slots | Observed return |
+|---|---|---|---|
+| 1 | `04CB:0193`, SS `8E00`, SP `0FF0` | Cycles 298751145/146/147, linear `8EFF0/8EFF2/8EFF4`, size 2/strobes `0011`, read data `FCBF2F27/0287FCBF/006D0287`; consumed low words `2F27/FCBF/0287` | `FCBF:2F27`, VM flags `23287`, ESP `0FF6`; actual pre-CS base `FCBF0` gives `FFB17`. |
+| 2 | `FFFF:22E0`, SS `8E00`, SP `0FFA` | Cycles 298755737/738/740, linear `8EFFA/8EFFC/8EFFE`, size 2/strobes `0011`, read data `FCB22FF7/0046FCB2/69720046`; consumed low words `2FF7/FCB2/0046` | `FCB2:2FF7`, VM flags `23046`, ESP `1000`; actual pre-CS base `FCB20` again gives `FFB17`. |
+| 4 | Protected `0028:C0001350`, SS `0030`, ESP `C13ADF94`, SS.B=1 | Cycles 315714933/934/935, linear `C13ADF94/98/9C` (physical `198F94/98/9C`), size 4/strobes `1111`, values `00002FF7/0000FCB2/00023000`; following six acknowledged slots restore ESP `1000`, SS `8E00`, and zero ES/DS/FS/GS | The same `FCB2:2FF7` ROM callback is explicitly installed by protected-mode IRETD; final successful restore is cycle 315714942. |
+
+The return fields follow the acknowledged operands exactly. Events 4–16
+repeat the protected-mode return to this fixed callback with VM flags
+`23002`; this is not merely the BIOS word-IRET sequence recurring. Retained
+protected-mode retirements also show the upstream `C000347F`/`C00034C4`–
+`C000350D` path manipulating packed `ECX=FCB22FF7`, then its CS half
+`0000FCB2` and IP `00002FF7`. No incorrectly consumed frame operand has
+been identified in these events.
+
+State numbers were decoded using this exact full-PC profile, including
+`VEN_DBG_CORE` and the shared-FP conditional states: **45 is `S_IRET`**,
+42 is `S_INT_GATE`, 41 is `S_WALK`, 28 is `S_PIPE`, and 2 is `S_DECODE`.
+The frozen `Vsystem__verFiles.dat` is SHA-256
+`d4abefdaa05f390d073c4cf52ee6602083dc1d6bba8c622a0321dc5e63e1ae2b`;
+its compiled `core.sv` matches SHA-256
+`3f657199264ead3e69fe46c82a1ff801c3fc7f7651ffa35fba04a1381faaaa35`.
+Default standalone-testbench numeric state constants would misidentify
+these records. The ring's DPI retirement selectors are explicitly
+post-commit; only its edge/pre-fault context owns the source CS/base.
+
+Each event retains 256 retirements and 64 changed-edge snapshots. The
+first two frame producers and the early vector-6 handler lookup are outside
+those windows; none of the 4,096 retained retirement entries covers
+`C0001Axx`. The ring therefore does **not** independently qualify the full
+callback dispatch, prove its owner, or identify the cause of VDD's later
+failure. It does rule out treating this font-byte `#UD` alone as evidence
+that IRET fetched a corrupted frame. Handler code references must remain
+distinct from live cache/ACK operand evidence; no DDR-only stack read or
+new run was used for this conclusion.
+
+Preserved native snapshots provide a separate, stronger **code-reference**
+confirmation of the callback mechanism, without restoring a model or treating
+DDR-only stack/table data as current operands. The read-only host-prefix parser
+in `tools/inspect_win95_ddb.py` identifies these historical snapshots:
+
+- `/home/yukidama/ventium-bg-sep28/win95_modeguard_replay_169519925_sep29/handler.snap`,
+  cycle 169,519,925 / retirements 28,478,151, SHA-256
+  `9fab89408eec02b00c241699baa69d20eb34d9cf14a1d3e8a7cfbaf49576b10e`.
+- `/home/yukidama/ventium-bg-sep28/win95_v86iret_cold300_sep29/after300.snap`,
+  cycle 300,000,000 / retirements 80,173,207, SHA-256
+  `446d58f00a40dcec1ea78a570d9485fdbe72e70718fb3aef6b6c2dec8177397f`.
+
+Using their recorded protected context, CR3 `00306000` maps code
+`C0001A00` to physical `0022BA00`. In **both** snapshots the first 28 code
+bytes are identical (SHA-256
+`30cf5140e157c84d00d394d30fe527ccb0fc3d36847d9b09676c8bb9db828936`):
+`C0001A01` loads source CS from `[EBP+28]`, `C0001A07` loads source IP
+from `[EBP+24]`, `C0001A0A/0D` computes `CS*16+IP`, and `C0001A0F`
+explicitly compares that address with **`000FFB17`**. The matching path
+subtracts `FCB1` from source CS at `C0001A16`, obtains callback refdata at
+`C0001A1C`, then jumps through the corresponding eight-byte table entry at
+`C0001A23`. Thus `FCB2` and `FCBF` select indices 1 and 14 respectively;
+the ROM address and aliases are explicitly recognized by guest VMM code.
+The allocation/dispatch code later in the page contains relocated table
+addresses, so the entire 512-byte page excerpt is not claimed identical.
+
+The upstream `C0003400`–`C000353F` code is byte-identical in the two
+snapshots (320 bytes, SHA-256
+`fbd972d966355685687c72325a7b9424dd8221786115a031b3842f973fba9276`).
+It loads the packed callback pointer at `C000347F`, then explicitly swaps
+its IP and CS halves into the saved client frame at `C0003507` and
+`C0003510`. This explains the packed-pointer operations observed in the
+new ring. These immutable references establish the intended callback
+design; they do not substitute for new-run ACK evidence of a particular
+callback-table entry or prove the later VDD initialization succeeds.
+
+Win95 desktop and the standard suite remain unqualified. Gameplay IPC
+remains **0.45746656** on older `3237b652...`, cycles
+1,150,151,638–1,400,151,638; this candidate has no gameplay measurement.
