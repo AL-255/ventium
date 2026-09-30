@@ -135,12 +135,12 @@ evidence paths and remaining work are in
 
 ## September 30: standard-suite continuation (not yet qualified)
 
-Latest status at **20:32 UTC**: the V86-corrected candidate independently passes
+Latest status at **21:17 UTC**: the V86-corrected candidate independently passes
 both complete CoreMark seeds, with every reference CRC and cycle count unchanged.
 Cold Windows 95 has not reached a verified desktop. Cold DOS Quake on the
 current candidate has reached clear gameplay but has not completed its
-969-frame timedemo. **Latest measured gameplay IPC is 0.42750217**, frozen
-current candidate `cdcb6faa…`, cycles **1.4B–1.5B**. It is not timedemo FPS,
+969-frame timedemo. **Latest measured gameplay IPC is 0.45173072**, frozen
+current candidate `cdcb6faa…`, cycles **1.8B–1.9B**. It is not timedemo FPS,
 a measured gain from either correctness fix or full-suite PASS.
 
 The user authorized 60 minutes per CoreMark seed. Both untouched 1,500-iteration
@@ -1194,3 +1194,97 @@ profile rows at cycles 1.4B and 1.5B. Its private executable retains full SHA-25
 These different-scene windows do not measure a fix gain. Cold Win95 is still
 polling at approximately 1.45B; Quake has no fresh 969-frame completion yet.
 **CoreMark correctness PASS; Win95 desktop and Quake timedemo incomplete.**
+
+### Later current gameplay and passive checkpoint qualification
+
+The latest verified **current `cdcb` gameplay** window is clocks
+**1,799,999,637–1,899,999,637**, harness retirements
+**578,364,995–623,538,067**: **0.45173072 IPC**. U contributes 33,960,715
+and V 11,212,357, summing exactly to 45,173,072. Raw frames 10/11 advance
+from close-monster combat to an explosion/firing corridor. Their SHA-256 values
+are `b4172271f12eaf0dc49d40096281c99f518ca84913a337338275033c7e42deae` /
+`2184e43859b1c7a966bd2f26a909f9536efd759c141616bdc3d5e4125d822fc3`.
+The same private executable still hashes to `cdcb6faa…`; log rows are 5500/5773
+in `obj_dir_standard_v86_iop3_sep30.W6RkaF/quake/run.log`. Across all five
+contiguous clear windows **1.4B–1.9B**, 216,279,843 retirements / 500M clocks
+give **0.432559686 IPC**. Neither scene-dependent measurement establishes a
+fix gain, FPS or timedemo completion. Win95 remains polling without a desktop.
+
+Two more passive current-native findings narrow the Win95 investigation:
+
+- Both represented active nested execution frames are **INT 21h**, not an
+  inferred INT 1Ch timer handler. The qualified saved kernel frames contain
+  EAX=21h and actual returns C0232CF2h / C0259190h, with independently decoded
+  VMM restore/POP/RET layout and Exec_Int callers. An earlier unrepresented
+  hardware-interrupt ancestor is not ruled out. Receipt:
+  `kernel-return-classification.json`, SHA-256
+  `4bd02f754273f4fa6975e1d910e48a8eb86cb408370d5e780183f1d30103fba1`.
+- A second strict full-trace parser sees **zero accepted U/V guest stores**
+  to physical 172106h, 17312Ch or 17312Eh during the entire recorded million
+  clocks (36,675 U / 133 V stores elsewhere). All nine apparent bank intents
+  involve replacement fills for unrelated new line addresses, not target
+  writes. Initial pending store queues also do not overlap those bytes.
+  This establishes neither the preceding origin nor absence of all backend
+  writes. Parser source SHA-256:
+  `f38833e2c513138e3cf78ef66481dd79e4678727730b760a8ba883b8cb38602a`;
+  qualification receipt `store-origin.qualification.json` in the same ePtDku
+  diagnostic directory.
+
+Commit **4be941d** preserves the existing connected mouse protocol/queue in
+native **V4** snapshots; older versions remain explicitly separate. Five
+bounded tests exercise the actual production save/load functions: 12 protocol
+and queue round trips, disabled/presence mismatch, all scalar bounds, every
+payload truncation and queue capacity. These host tests supplement the earlier
+actual frozen-model pilot/full-capture noninterference proof; they are not
+Win95 desktop acceptance or a CPU/peripheral workaround.
+
+A new **optional host-only retired-PC checkpoint** is being qualified to
+capture the earlier origin rather than guess another clock window. It observes
+each real U/V DPI callback, retains 256 prior retirements and requests a native
+save only at the existing settled loop checkpoint point. It adds no model eval,
+guest state write or RTL breakpoint. The report labels post-commit CS/fetch
+offset and any PS-polling cycle/retirement overshoot; it is not a pre-instruction
+snapshot or an architectural `.vtrace`. Cold-only, strict callback continuity,
+fresh output reservation and held-inode serialization fail closed. The held
+`/proc/self/fd` writer prevents a replaced pathname from truncating a foreign
+symlink/hardlink target.
+
+The helper passes **19 host methods**, independently rerun by the parent;
+**four more tests compile the actual production DPI callback** and verify U
+matching, V matching, simultaneous fault/PC observers and disabled neutrality.
+Production compilation retains its existing unused-variable warning waiver
+for historical probes; the synthetic fixture remains strict. A private
+**host-only relink** actually recompiles both host objects and links executable
+`eddafd22fbcd1759398644772ff5e6898bd1017d6086531890adf2158a4bc082`, while
+all **120 generated model/header/archive hashes remain unchanged**. Original
+`cdcb` executable and host object remain unchanged. Actual native/disk
+noninterference pilots now pass, and the scoped feature is committed as
+**5481618**; this feature has **not** fixed or qualified Win95. The first
+planned diagnostic trigger is ordinary retired
+`0028:C002A7BC`; canonical bytes encode `OR WORD [EBX+ESI],2020h`, so its
+captured dynamic EBX/ESI and coherent memory must identify the VM flag rather
+than assuming a hardcoded operand address.
+
+The native pilot ran six actual waited/reaped children in a 4 GiB / 64-task
+scope. Disabled-observer restore reproduces the earlier **393.8M→393.901M**
+endpoint exactly (101,000 clocks, not 1,000): native `3ac17bcf…` and closed
+paired disk `0dbb5b8d…`. A short ordinary BIOS trigger F000:E061 at retirement
+11 / clock 1,305 saves at clock **1,306**, with **one-clock / zero-retirement
+overshoot**. Its native image is byte-identical to the original control saving
+at that cycle (`0c68febfa5cb7e29c620fcf64f22cc1cc5f495cc31b01b1118a08a15078c3916`);
+both paired disks retain source `cc68b005…`. The unreached target exits 2 with
+only an empty reservation, and an existing sentinel is rejected before guest
+start without modification. Receipt:
+`pc-snapshot-native-pilot.1tza98n7/qualification.json`, SHA-256
+`cb9bf4daab2baf4ed1ac4c156274f45e2fdc1b227d081faeba4f237453213963`.
+The parent independently rechecks all 120 original and 120 relinked model
+hashes after the pilot, plus the prior pilot's paired disk hash; all match.
+
+Additional passive current-native code extraction qualifies 15 × 64 bytes
+around the earlier VPICD path. A773h first updates virtual ISR via
+`OR WORD [EDI+12h],CX`; A7B6h loads ESI=1Eh before A7BCh updates the VM flag.
+This is a scheduled event callback, not automatically a hardware-IRQ handler.
+At the trigger, the canonical balanced stack convention puts the original
+callback return at ESP+8; native-save overshoot must be checked before using
+that convention. Receipt `before-vpicd-trigger-code.json`, SHA-256
+`25459d719ddc218b93be3d698f88cb111dbce227b45b5092af7c04e67d2325ec`.
