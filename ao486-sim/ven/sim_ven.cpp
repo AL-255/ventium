@@ -80,6 +80,7 @@ static const char *g_save_file = "ven_post.snap";  // --save-file FN (base name;
 static const char *g_restore_file = nullptr;        // --restore FN: load snapshot right after x86_init
 static bool g_snapshot_v2 = false, g_save_stop = false;
 static bool g_snapshot_v3 = false;
+static bool g_snapshot_v4 = false;
 // Diagnostic-only completed-instruction accounting. Native checkpoints do
 // not serialize this host observer; require a cold run when enabled.
 static bool g_rep_account_enable = false;
@@ -374,6 +375,64 @@ static void ps2_kb_drive() {
     }
     top->ps2_kbclk_in = clk & (top->ps2_kbclk_out ? 1 : 0);
     top->ps2_kbdat_in = dat & (top->ps2_kbdat_out ? 1 : 0);
+}
+
+// Optional external PS/2 mouse, ported from the legacy ao486 simulator's
+// ps2_mouse_drive(). The controller is otherwise wired to idle pins. Keep this
+// opt-in: it models a *connected device*, not a substitute for a controller or
+// CPU fix. Version 4 native snapshots include this external device state.
+static bool g_mouse_en = false;
+enum { MS_IDLE, MS_RECV, MS_SEND };
+static int g_ms_state = MS_IDLE, g_ms_pclkout = 1;
+static int g_ms_edge = 0, g_ms_sub = 0;
+static uint8_t g_ms_rxbyte = 0;
+static bool g_ms_expect_param = false, g_ms_streaming = false;
+static std::deque<uint8_t> g_ms_txq;
+static int g_ms_txbits[11], g_ms_txphase = -1, g_ms_txsub = 0, g_ms_txgap = 0;
+static void ms_process_cmd(uint8_t b) {
+    if (g_ms_expect_param) { g_ms_expect_param = false; g_ms_txq.push_back(0xFA); return; }
+    g_ms_txq.push_back(0xFA);
+    switch (b) {
+        case 0xFF: g_ms_txq.push_back(0xAA); g_ms_txq.push_back(0x00); g_ms_streaming = false; break;
+        case 0xF2: g_ms_txq.push_back(0x00); break;
+        case 0xF4: g_ms_streaming = true; break;
+        case 0xF5: g_ms_streaming = false; break;
+        case 0xF3: case 0xE8: g_ms_expect_param = true; break;
+        default: break;
+    }
+    fprintf(stderr, ">>> [mouse] rx cmd 0x%02x -> reply %zu byte(s)\n", b, g_ms_txq.size());
+}
+static void ms_tx_load(uint8_t b) {
+    int par = 1; g_ms_txbits[0] = 0;
+    for (int k = 0; k < 8; k++) { int bit = (b >> k) & 1; g_ms_txbits[1+k] = bit; par ^= bit; }
+    g_ms_txbits[9] = par; g_ms_txbits[10] = 1; g_ms_txphase = 0; g_ms_txsub = 0;
+}
+static void ps2_mouse_drive() {
+    if (!g_mouse_en) return;
+    int co = top->ps2_mouseclk_out ? 1 : 0;
+    int dou = top->ps2_mousedat_out ? 1 : 0;
+    int my_clk = 1, my_dat = 1;
+    if (g_ms_state == MS_SEND) {
+        my_dat = g_ms_txbits[g_ms_txphase];
+        my_clk = (g_ms_txsub < 24) ? 1 : 0;
+        if (++g_ms_txsub >= 48) { g_ms_txsub = 0; if (++g_ms_txphase > 10) { g_ms_txphase = -1; g_ms_state = MS_IDLE; } }
+    } else if (g_ms_state == MS_RECV) {
+        my_dat = (g_ms_edge == 10) ? 0 : 1;
+        my_clk = (g_ms_sub < 24) ? 1 : 0;
+        if (g_ms_sub == 44 && g_ms_edge <= 7 && dou) g_ms_rxbyte |= (1 << g_ms_edge);
+        if (++g_ms_sub >= 48) { g_ms_sub = 0;
+            if (++g_ms_edge > 10) { g_ms_state = MS_IDLE; ms_process_cmd(g_ms_rxbyte); g_ms_rxbyte = 0; }
+        }
+    } else {
+        if (g_ms_pclkout == 0 && co == 1 && dou == 0) {
+            g_ms_state = MS_RECV; g_ms_edge = 0; g_ms_sub = 0; g_ms_rxbyte = 0;
+        } else if (!g_ms_txq.empty() && co == 1 && dou == 1) {
+            if (++g_ms_txgap >= 80) { g_ms_txgap = 0; ms_tx_load(g_ms_txq.front()); g_ms_txq.pop_front(); g_ms_state = MS_SEND; }
+        }
+    }
+    g_ms_pclkout = co;
+    top->ps2_mouseclk_in = my_clk & co;
+    top->ps2_mousedat_in = my_dat & dou;
 }
 
 // ---- PS-facing helpers ps_shim.cpp / x86.cpp expect --------------------------
@@ -1053,12 +1112,66 @@ static void ven_debug_report_tlb() {
 // (POST done, no in-flight ide/fdd transaction) or PS-side transfer state would be lost.
 static constexpr uint64_t SNAPSHOT_V2_MAGIC = 0x3250414e534e4556ull;
 static constexpr uint64_t SNAPSHOT_V3_MAGIC = 0x3350414e534e4556ull;
+static constexpr uint64_t SNAPSHOT_V4_MAGIC = 0x3450414e534e4556ull;
 extern uint8_t ide_buf[32 * 512];
 extern void ps_checkpoint_spi(uint32_t words[3], bool restore);
 extern bool x86_checkpoint_no_floppy();
 static void checkpoint_fail(const char *reason) {
     fprintf(stderr, "SNAPSHOT-ERROR: %s\n", reason);
     std::exit(2);
+}
+static void mouse_checkpoint_save(VerilatedSave &os) {
+    const uint32_t enabled = g_mouse_en ? 1u : 0u;
+    const int32_t words[] = {
+        g_ms_state, g_ms_pclkout, g_ms_edge, g_ms_sub, g_ms_rxbyte,
+        g_ms_expect_param ? 1 : 0, g_ms_streaming ? 1 : 0,
+        g_ms_txphase, g_ms_txsub, g_ms_txgap,
+        g_ms_txbits[0], g_ms_txbits[1], g_ms_txbits[2], g_ms_txbits[3],
+        g_ms_txbits[4], g_ms_txbits[5], g_ms_txbits[6], g_ms_txbits[7],
+        g_ms_txbits[8], g_ms_txbits[9], g_ms_txbits[10]
+    };
+    const uint32_t queued = static_cast<uint32_t>(g_ms_txq.size());
+    if (queued > 1024u) checkpoint_fail("mouse response queue exceeds snapshot limit");
+    os.write(&enabled, sizeof(enabled));
+    os.write(words, sizeof(words));
+    os.write(&queued, sizeof(queued));
+    for (uint8_t byte : g_ms_txq) os.write(&byte, sizeof(byte));
+}
+static void mouse_checkpoint_load(VerilatedRestore &is) {
+    uint32_t enabled = 0, queued = 0;
+    int32_t words[21]{};
+    is.read(&enabled, sizeof(enabled));
+    is.read(words, sizeof(words));
+    is.read(&queued, sizeof(queued));
+    if (enabled > 1u || enabled != static_cast<uint32_t>(g_mouse_en))
+        checkpoint_fail("mouse presence differs from saved snapshot");
+    if (words[0] < MS_IDLE || words[0] > MS_SEND ||
+        words[1] < 0 || words[1] > 1 ||
+        words[2] < 0 || words[2] > 11 ||
+        words[3] < 0 || words[3] > 47 ||
+        words[4] < 0 || words[4] > 255 ||
+        words[5] < 0 || words[5] > 1 ||
+        words[6] < 0 || words[6] > 1 ||
+        words[7] < -1 || words[7] > 10 ||
+        words[8] < 0 || words[8] > 47 ||
+        words[9] < 0 || words[9] > 80 || queued > 1024u)
+        checkpoint_fail("invalid mouse device snapshot state");
+    for (int i = 10; i < 21; ++i)
+        if (words[i] < 0 || words[i] > 1)
+            checkpoint_fail("invalid mouse serial bit in snapshot");
+    std::deque<uint8_t> response_queue;
+    for (uint32_t i = 0; i < queued; ++i) {
+        uint8_t byte = 0;
+        is.read(&byte, sizeof(byte));
+        response_queue.push_back(byte);
+    }
+    g_ms_state = words[0]; g_ms_pclkout = words[1];
+    g_ms_edge = words[2]; g_ms_sub = words[3];
+    g_ms_rxbyte = static_cast<uint8_t>(words[4]);
+    g_ms_expect_param = words[5] != 0; g_ms_streaming = words[6] != 0;
+    g_ms_txphase = words[7]; g_ms_txsub = words[8]; g_ms_txgap = words[9];
+    for (int i = 0; i < 11; ++i) g_ms_txbits[i] = words[10 + i];
+    g_ms_txq.swap(response_queue);
 }
 static void checkpoint_config(uint32_t words[9]) {
     words[0] = g_clock_rate; words[1] = g_rtc_rate; words[2] = g_rate_vga;
@@ -1070,6 +1183,8 @@ static void checkpoint_config(uint32_t words[9]) {
 static void checkpoint_require_supported(bool restoring) {
     if (!x86_checkpoint_no_floppy() || g_ven_break_enable || g_rmtest)
         checkpoint_fail("versioned snapshots require no floppy, breakpoint or RM test mode");
+    if (g_mouse_en && !g_snapshot_v4)
+        checkpoint_fail("PS/2 mouse requires --snapshot-v4 for native snapshots");
     if (restoring) {
         if (!kb_checkpoint_restore_supported(g_kb_script != nullptr))
             checkpoint_fail("restoring with a keyboard script would replay input");
@@ -1088,7 +1203,8 @@ static void save_state(const char *fn) {
     }
     VerilatedSave os; os.open(fn);
     if (g_snapshot_v2) {
-        const uint64_t magic = g_snapshot_v3 ? SNAPSHOT_V3_MAGIC : SNAPSHOT_V2_MAGIC;
+        const uint64_t magic = g_snapshot_v4 ? SNAPSHOT_V4_MAGIC :
+            g_snapshot_v3 ? SNAPSHOT_V3_MAGIC : SNAPSHOT_V2_MAGIC;
         os.write(&magic, sizeof(magic));
         uint32_t config[9], spi[3]; checkpoint_config(config); ps_checkpoint_spi(spi, false);
         os.write(config, sizeof(config)); os.write(spi, sizeof(spi));
@@ -1098,6 +1214,7 @@ static void save_state(const char *fn) {
             const uint32_t read_edge = prev_rd ? 1u : 0u;
             os.write(&read_edge, sizeof(read_edge));
         }
+        if (g_snapshot_v4) mouse_checkpoint_save(os);
         os.write(&ata, sizeof(ata));
     }
     os.write(&main_time, sizeof(main_time));
@@ -1115,10 +1232,11 @@ static void save_state(const char *fn) {
 static void load_state(const char *fn) {
     VerilatedRestore is; is.open(fn);
     uint64_t first; is.read(&first, sizeof(first));
-    const bool v3 = first == SNAPSHOT_V3_MAGIC;
+    const bool v4 = first == SNAPSHOT_V4_MAGIC;
+    const bool v3 = first == SNAPSHOT_V3_MAGIC || v4;
     const bool v2 = first == SNAPSHOT_V2_MAGIC || v3;
-    if (v2 != g_snapshot_v2 || v3 != g_snapshot_v3)
-        checkpoint_fail("snapshot format mismatch; select the matching --snapshot-v2 or --snapshot-v3");
+    if (v2 != g_snapshot_v2 || v3 != g_snapshot_v3 || v4 != g_snapshot_v4)
+        checkpoint_fail("snapshot format mismatch; select the matching --snapshot-v2, --snapshot-v3 or --snapshot-v4");
     ven_checkpoint::AtaState ata;
     uint32_t spi[3]{};
     uint32_t read_edge = 0;
@@ -1133,6 +1251,7 @@ static void load_state(const char *fn) {
             is.read(&read_edge, sizeof(read_edge));
             if (read_edge > 1) checkpoint_fail("invalid DDR read-edge state");
         }
+        if (v4) mouse_checkpoint_load(is);
         is.read(&ata, sizeof(ata));
         if (spi[0] > 1 || spi[1] > 9) checkpoint_fail("invalid SPI checkpoint state");
         is.read(&main_time, sizeof(main_time));
@@ -1358,12 +1477,14 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--save-file") && i+1<argc) g_save_file = argv[++i];
         else if (!strcmp(argv[i], "--snapshot-v2")) g_snapshot_v2 = true;
         else if (!strcmp(argv[i], "--snapshot-v3")) { g_snapshot_v2 = true; g_snapshot_v3 = true; }
+        else if (!strcmp(argv[i], "--snapshot-v4")) { g_snapshot_v2 = true; g_snapshot_v3 = true; g_snapshot_v4 = true; }
         else if (!strcmp(argv[i], "--save-stop")) g_save_stop = true;
         else if (!strcmp(argv[i], "--restore") && i+1<argc) g_restore_file = argv[++i];
         else if (!strcmp(argv[i], "--ide-verbose")) g_ide_verbose = true;
         else if (!strcmp(argv[i], "--open-trace")) g_open_trace = 1;
         else if (!strcmp(argv[i], "--rmtest")) g_rmtest = 1;
         else if (!strcmp(argv[i], "--kb") && i+1<argc) g_kb_script = argv[++i];
+        else if (!strcmp(argv[i], "--mouse")) g_mouse_en = true;
         else if (!strcmp(argv[i], "--kb-start") && i+1<argc) g_kb_start = strtoull(argv[++i], 0, 0);
         else if (!strcmp(argv[i], "--kb-gap") && i+1<argc) g_kb_gap = strtoull(argv[++i], 0, 0);
         else if (!strcmp(argv[i], "--vgatext-every") && i+1<argc) g_vgatext_every = strtoull(argv[++i], 0, 0);
@@ -1394,6 +1515,8 @@ int main(int argc, char **argv) {
     if (const char *error = ven_host::validate_fault_ring_options(g_fault_ring_options,
                                                                 g_restore_file != nullptr))
         fault_ring_fail(error);
+    if (g_mouse_en && (g_restore_file || g_save_at || g_save_every) && !g_snapshot_v4)
+        checkpoint_fail("--mouse snapshots require --snapshot-v4");
     if (g_rep_account_enable && g_rep_account_start >= cycles)
         checkpoint_fail("REP accounting start must precede the stop cycle");
     if (g_kb_script) kb_build_events(g_kb_script);
@@ -1531,6 +1654,7 @@ int main(int argc, char **argv) {
         // ide_io(n,0) is a no-op unless state==RESET, so calling it every tick is safe.
         { extern void ide_io(int, int); ide_io(0, 0); ide_io(1, 0); }
         ps2_kb_drive();   // inject queued keystrokes (no-op unless --kb given)
+        ps2_mouse_drive(); // opt-in connected PS/2 mouse (no-op unless --mouse)
         if (g_vgatext_every && main_time >= g_vgatext_next) {
             g_vgatext_next = main_time + g_vgatext_every;
             vgatext_dump();
