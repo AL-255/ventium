@@ -135,11 +135,13 @@ evidence paths and remaining work are in
 
 ## September 30: standard-suite continuation (not yet qualified)
 
-Latest status at **15:44 UTC**: both complete CoreMark seeds pass; cold Windows
+Latest status at **17:18 UTC**: both complete CoreMark seeds pass; cold Windows
 95 has not reached a verified desktop; cold DOS Quake has reached clear gameplay
-but has not completed its 969-frame timedemo. **Current-candidate gameplay IPC is
-0.43328503**, frozen `2e63e532…`, cycles **1.5B–1.6B**. This supersedes the
-older-build-only baselines below. It is not timedemo FPS or full-suite PASS.
+but has not completed its 969-frame timedemo. **Latest measured gameplay IPC is
+0.44240609**, frozen `2e63e532…`, cycles **2.4B–2.5B**. This predates the new
+IDE-interrupt correction (`3120b065…`), which has no gameplay measurement yet.
+It supersedes the older measurement windows below, but is not timedemo FPS,
+a measured gain from the IDE fix or full-suite PASS.
 
 The user authorized 60 minutes per CoreMark seed. Both untouched 1,500-iteration
 seed images **completed without error**, matched all five reference CRCs and
@@ -149,8 +151,8 @@ qualify Windows 95, Quake, the full standard suite or an official EEMBC submissi
 
 | Completed seed | Whole-program clocks | Retired instructions | CoreMark IPC | Conservative CM/MHz | Clock-query window | Query-window CM/MHz | Guest seconds | Host minutes |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Performance, 1,500 iterations | 713,805,640 | 542,165,430 | 0.75954209 | **2.101412** | 713,731,763 | 2.101630 | 10.888 | 38.77 |
-| Validation, 1,500 iterations | 712,760,043 | 541,458,819 | 0.75966495 | **2.104495** | 712,693,215 | 2.104692 | 10.871 | 41.13 |
+| Performance, 1,500 iterations | 713,805,640 | 542,165,430 | 0.75954209 | **2.101412** | 713,731,763 | 2.101630 | 10.888 | 38.84 |
+| Validation, 1,500 iterations | 712,760,043 | 541,458,819 | 0.75966495 | **2.104495** | 712,693,215 | 2.104692 | 10.871 | 38.97 |
 
 Performance CRCs are `e9f5 / e714 / 1fd7 / 8e3a / 25b5`; validation CRCs are
 `18f2 / e3c1 / 0747 / 8d84 / e230` (seed/list/matrix/state/final). Both used the
@@ -730,8 +732,98 @@ The next verified current-candidate gameplay window is **1.5B–1.6B**:
 clocks 1,499,999,637–1,599,999,637 and retirements 450,008,441–493,336,944.
 **43,328,503 / 100,000,000 = 0.43328503 IPC**; 33,082,465 U plus 10,246,038 V
 retirements reconcile exactly. Raw frames 7/8 show advancing clear gameplay,
-and the private executable still hashes to `2e63e532…`. This is the current
-measured build/window, not timedemo FPS, a code-change gain or suite PASS.
+and the private executable still hashes to `2e63e532…`. This is a retained
+earlier measurement, not the latest window, timedemo FPS, a code-change gain
+or suite PASS.
+
+### IDE interrupt correction and continued Win95 diagnosis
+
+The current matched IDE leaf reproduces a generic protocol error: a data-in
+descriptor already raises its IRQ when the host publishes word 5, but draining
+its final buffer raises the same IRQ again after regular status acknowledged it.
+Single READ and IDENTIFY therefore produced two edges instead of one; two-block
+READ and READ MULTIPLE produced three instead of two. The pinned QEMU 8.2.2
+`hw/ide/core.c` raises READ IRQ at data-ready publication, then stops the final
+transfer without another IRQ. Backend WRITE completion remains a separate host
+publication, not the CPU's last data-port write.
+
+The minimal, opcode-independent correction removes the drain-time IRQ branch
+and its unused descriptor sidecar. It retains all status, DRQ, data, backend
+ownership, regular/alternate status priority and WRITE completion behavior. It
+adds no delay, flush, bypass or guest workaround. The canonical platform patch's
+IDE section is synchronized; unrelated preexisting PS/2 edits remain unstaged.
+
+Matched production-device microtests: **2,623 checks / 2,560 exact data words**;
+old source has exactly four extra-IRQ failures and zero control/data errors;
+fixed source has **zero failures**. Eleven cases cover READ, IDENTIFY, WRITE,
+nondata/error IRQ publication, alternate status, established nIEN, publication
+colliding with a status read, command supersession and reset. They use actual
+public ports and the existing RAM, with no forced DUT state. See
+[the device gate](../verif/ide/README.md). This is not proof that the extra IRQ
+caused the Win95 wait, and does not qualify pending-IRQ re-enable, ATAPI or DMA.
+The repeated GREEN leaf also passes. Fourteen host-only classifier cases now
+reject arbitrary missing IRQs, mismatched check totals and contradictory error
+markers, including a Bash `!`/`errexit` loophole caught by independent review.
+
+The separate corrected full-PC binary is SHA-256
+`3120b065b078c2e1e2127f80c3eca65666bac8baaf0a5b688a3707260f85f670`,
+with compilation record
+`918ef8e9f3afefa50114a60c146e4c4722dcab2d3416ead3aa74a610cf78a52b`,
+under `ao486-sim/obj_dir_ven_ide_irq_sep30.c9fbuC/`. The capped 32-job simulation
+build completed normally; no Vivado or bitstream run was launched. The direct
+core's active preprocessing remains byte-identical to the completed CoreMark
+binary. Its fresh fast gate again passes 107 functional comparisons and 19
+metric bands, with one informational kernel and 20 non-gating per-instruction
+cycle divergences. This does not replace device or full-system acceptance.
+
+Independent build audit: all 204 recorded inputs were stable before/after the
+build; only production `ide.v` differs from `2e63`. All 156 Verilator source
+dependencies are covered and all 107 defines match in order. The historical
+host manifest omitted three actual GCC dependencies (`tools/rep_accounting.h`,
+`sim_stop_request.h`, `retire_fault_ring.h`): they are currently clean with
+mtimes predating the old build, but historical hashes were not captured. Thus
+this is not a claim of complete historical C++ input identity. Receipt:
+`obj_dir_ven_ide_irq_sep30.c9fbuC/ide-build-audit.json`, SHA-256 `77eb5ef2…`.
+Removing the two IDE sidecar fields changes native serialization checksum;
+old `2e63` native snapshots **must not be restored into `3120`**.
+
+Fresh `3120` cold acceptance jobs are now running on CPUs 2/3 under user units
+`ventium-standard-win95-ide-irq-sep30` and
+`ventium-standard-quake-ide-irq-sep30`. Their private disk, binary and ROM copies
+are under `ao486-sim/obj_dir_standard_ide_acceptance_sep30.BkKjWt/`.
+Both have 2 GiB/no-swap/32-task/one-CPU limits; Win95 has a 3B-cycle/12-hour
+bound and Quake a 30B-cycle/72-hour bound. They use the original source disks,
+unchanged clock/ROM settings and no restore or guest modifications. The new
+Quake supervisor loaded the current acceptance checker at startup. A cap or
+ordinary exit is not acceptance. Older control runs remain untouched.
+
+The cold `2e63` Win95 run passed 2.1B cycles without the former terminal VDD
+error but has no desktop. Offline diagnosis now identifies its zero-count
+semaphore wait as IOS media-check/reset fallback through RMM, not an outstanding
+ATA transfer. A separate same-executable native replay confirms that the event
+selector rejects the queued RMM callback because of saved VM-control bit 20h,
+not merely the native snapshot's IF=0. No guest flag or semaphore is changed.
+
+The IRQ-focused replay covers 60,000 retirements, cycles
+450,533,520–450,655,248. The coherent IDT[50h] gate points to
+`0028:C0001100`; that actual handler runs at cycle 450,588,062 after the
+STI/NOP window. The timer, interrupt admission and scheduling therefore do
+progress. VMM time advances 14 ms; the RMM timeout's remaining list delta falls
+767 to 753 ms. Its timeout callback has not yet run in this short window, and
+the guest's timeout path can reschedule rather than complete the request.
+Neither a permanently stopped timer nor a lost ATA IRQ is established.
+
+Both replay diagnostics are closed/reaped with exit 0 and unchanged private
+disk SHA-256 `8256ceaf…`. The original closed 450M snapshot/disk and all cold
+acceptance runs remain preserved. Replays accelerate diagnosis only; they do
+not count as Windows desktop or cold timedemo acceptance. The standard suite
+remains incomplete; the IDE-corrected binary also needs system acceptance.
+
+The newest measured `2e63` gameplay window is 2.4B–2.5B: clocks
+2,399,999,637–2,499,999,637; retirements 840,136,348–884,376,957.
+33,816,593 U plus 10,424,016 V retirements sum to 44,240,609,
+giving **0.44240609 IPC**. Raw frames 16/17 visibly advance gameplay.
+This window predates the IDE-corrected binary and is not completed timedemo FPS.
 
 ### Quake acceptance checker hardening
 
