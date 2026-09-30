@@ -551,13 +551,20 @@ and retirements 970,383,698–1,015,462,121: **45,078,423 / 100,000,000 =
 exactly, and raw endpoint captures 19/20 show advancing gameplay. It is fully
 after quota logging recovered and still predates the cache-policy candidate.
 
-The latest verified gameplay window is **3.0B–3.1B**, on the same immutable b7
+The prior verified gameplay window is **3.0B–3.1B**, on the same immutable b7
 binary: clocks 2,999,999,637–3,099,999,637 and retirements
 1,080,413,113–1,122,502,626. Thus **42,089,513 / 100,000,000 = 0.42089513 IPC**;
 31,510,842 U plus 10,578,671 V retirements reconcile exactly. Raw captures
 22/23 show advancing gameplay, including the nailgun pickup. This is another
 scene-dependent measurement, not an isolated code-change gain, FPS or completed
 timedemo. The cache-policy candidate remains unmeasured.
+
+The latest verified gameplay window is **3.3B–3.4B**, still on immutable b7:
+clocks 3,299,999,637–3,399,999,637 and retirements
+1,207,857,190–1,249,674,243. **41,817,053 / 100,000,000 = 0.41817053 IPC**;
+31,933,105 U plus 9,883,948 V retirements reconcile exactly. Unprocessed
+captures 25/26 show advancing world/weapon/HUD. This still predates candidate
+`2e63e532…`, which remains unmeasured; it is not timedemo completion or FPS.
 
 ### Cache-policy implementation and new cold acceptance round
 
@@ -640,6 +647,42 @@ capture. Both CoreMark seeds had passed 603M clocks without a terminal error;
 those intermediate counters were not completed correctness results or scores.
 The subsequently closed CoreMark results above supersede that pending status;
 Windows desktop and Quake timedemo are still unqualified.
+
+The subsequent cold Win95 run passed 875M cycles without the old terminal VDD
+error but still had no graphical desktop capture. Coherent historical 350M
+and pre-store snapshots identify the repeated `C00031xx/32xx` and `C0008Exx/8Fxx`
+routines as event/callback polling. Their bytes agree across DDR/L2/L1 and the
+two checkpoints. The exact candidate's source audit finds no missing STI-shadow
+clear or fast-path IRQ divert; the live log also records vector `0x50` at
+`C0008FC2`, inside its `STI; NOP; NOP; CLI` window. Neither static code nor
+ongoing retirement identifies the current wait predicate or proves a desktop.
+Evidence remains in
+`verif/tb/obj_dir_store_policy_verify_sep30/kernel_loops/`. No live attach,
+guest-state mutation or snapshot restoration was performed for that analysis.
+The address-shape tests hold A20 fixed; older posted stores versus a younger
+dynamic A20 change are not qualified by those checks.
+
+### Quake acceptance checker hardening
+
+`tools/run_quake_standard.py` freezes private binary/ROM/disk inputs, records a
+clean pre-run console baseline, and requests graceful host closure only after a
+fresh 969-frame result. `tools/check_quake_timedemo.py` rejects restored state,
+stale results, caps, abnormal exits and terminal errors. The actual DOS fatal
+banner is `Error:`, not just `Sys_Error:`; anchored console and VGA-row variants
+now fail acceptance even after a valid result. Read-only `mtype` collection is
+bounded while reading: 16 MiB stdout, 64 KiB stderr and 15 seconds. Overflow or
+timeout kills/reaps only the reader without unbounded pipe draining. All **23
+checker + seven runner host tests pass**; no guest simulation is launched by
+these tests. The currently running supervisors loaded the earlier checker, so
+their eventual `result.json` cannot alone qualify a run: final acceptance must
+invoke the updated checker afresh against the reaped simulator's closed disk.
+The updated checker hash is
+`adc60d3350874627fb78d0cad13d4421f430060820e6461d3d19ffa1122f802d`.
+
+```sh
+PYTHONPATH=tools python3 -B -m unittest \
+  tools/test_check_quake_timedemo.py tools/test_run_quake_standard.py
+```
 
 Evidence: `/tmp/ventium-standard-sep30.qUCAcQ/` (full-PC inputs and logs),
 `/tmp/ventium-coremark-matrix.kpjs_mph/` (long seeds),
