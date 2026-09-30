@@ -559,12 +559,20 @@ binary: clocks 2,999,999,637–3,099,999,637 and retirements
 scene-dependent measurement, not an isolated code-change gain, FPS or completed
 timedemo. The cache-policy candidate remains unmeasured.
 
-The latest verified gameplay window is **3.3B–3.4B**, still on immutable b7:
+The prior verified gameplay window is **3.3B–3.4B**, still on immutable b7:
 clocks 3,299,999,637–3,399,999,637 and retirements
 1,207,857,190–1,249,674,243. **41,817,053 / 100,000,000 = 0.41817053 IPC**;
 31,933,105 U plus 9,883,948 V retirements reconcile exactly. Unprocessed
 captures 25/26 show advancing world/weapon/HUD. This still predates candidate
 `2e63e532…`, which remains unmeasured; it is not timedemo completion or FPS.
+
+The latest verified gameplay window is **3.7B–3.8B**, still on immutable b7:
+clocks 3,699,999,637–3,799,999,637 and retirements
+1,380,266,095–1,423,284,136. **43,018,041 / 100,000,000 = 0.43018041 IPC**;
+32,750,980 U plus 10,267,061 V retirements reconcile exactly. Raw endpoint
+captures 29/30 show advancing world/weapon/HUD, and the private binary's hash
+remains `b7cfbec7…`. This older build predates `2e63e532…`; the candidate still
+has no verified gameplay measurement. This is not timedemo completion or FPS.
 
 ### Cache-policy implementation and new cold acceptance round
 
@@ -661,6 +669,17 @@ Evidence remains in
 guest-state mutation or snapshot restoration was performed for that analysis.
 The address-shape tests hold A20 fixed; older posted stores versus a younger
 dynamic A20 change are not qualified by those checks.
+
+At 14:46 UTC, a separate **cold diagnostic** launched from the same original
+Win95 disk, pinned ROMs and frozen `2e63e532…` executable. It requests one native
+V4 checkpoint at 450M cycles and stops immediately afterward, with no restore,
+on CPU 2 under 2 GiB/no swap/32 tasks and a 3,600-second host limit. Its output
+is `ao486-sim/obj_dir_win95_policy_wait_sep30.yUIBxo/`; the acceptance runs remain
+untouched. The purpose is to identify the current stack predicate and event
+state, not qualify desktop boot. Native snapshots are not drained memory
+images: active fill victims and registered/queued writes must be qualified
+before reporting coherent stack or paging values. No live debugger attach
+or privileged guest-memory read has been performed.
 
 ### Quake acceptance checker hardening
 
