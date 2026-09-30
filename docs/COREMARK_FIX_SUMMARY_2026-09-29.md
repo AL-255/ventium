@@ -135,6 +135,12 @@ evidence paths and remaining work are in
 
 ## September 30: standard-suite continuation (not yet qualified)
 
+Latest status at **15:44 UTC**: both complete CoreMark seeds pass; cold Windows
+95 has not reached a verified desktop; cold DOS Quake has reached clear gameplay
+but has not completed its 969-frame timedemo. **Current-candidate gameplay IPC is
+0.43328503**, frozen `2e63e532…`, cycles **1.5B–1.6B**. This supersedes the
+older-build-only baselines below. It is not timedemo FPS or full-suite PASS.
+
 The user authorized 60 minutes per CoreMark seed. Both untouched 1,500-iteration
 seed images **completed without error**, matched all five reference CRCs and
 printed “Correct operation validated.” Their guest durations exceed ten seconds.
@@ -491,7 +497,7 @@ reference-CRC checks. Their printed elapsed time still includes that finite
 startup-offset bias; the actual-cycle denominators above remain authoritative
 for modeled CM/MHz. Neither timer values nor guest code were modified.
 
-Current verified cold raw-P54 full-PC gameplay IPC is **0.45078423** over cycles
+An earlier verified cold raw-P54 full-PC gameplay window measured **0.45078423** over cycles
 2,700,000,000–2,800,000,000 on binary
 `b7cfbec7ee31c7ff7f81abf994995431f3c660b913ae2a9d3176c6d22a2db0ae`.
 The actual private executable's SHA-256 was rechecked at the end of this window.
@@ -566,13 +572,13 @@ clocks 3,299,999,637–3,399,999,637 and retirements
 captures 25/26 show advancing world/weapon/HUD. This still predates candidate
 `2e63e532…`, which remains unmeasured; it is not timedemo completion or FPS.
 
-The latest verified gameplay window is **3.7B–3.8B**, still on immutable b7:
+The subsequent older-build gameplay window is **3.7B–3.8B**, on immutable b7:
 clocks 3,699,999,637–3,799,999,637 and retirements
 1,380,266,095–1,423,284,136. **43,018,041 / 100,000,000 = 0.43018041 IPC**;
 32,750,980 U plus 10,267,061 V retirements reconcile exactly. Raw endpoint
 captures 29/30 show advancing world/weapon/HUD, and the private binary's hash
-remains `b7cfbec7…`. This older build predates `2e63e532…`; the candidate still
-has no verified gameplay measurement. This is not timedemo completion or FPS.
+remains `b7cfbec7…`. This older build predates `2e63e532…`, which had no verified
+gameplay measurement at that observation. This is not timedemo completion or FPS.
 
 ### Cache-policy implementation and new cold acceptance round
 
@@ -638,7 +644,7 @@ has a 30B-cycle/72-hour bound so a short cap cannot substitute for completing
 969 frames. Both runs remain **unqualified**: no desktop or completed timedemo
 has been established. Their artifacts are under
 `ao486-sim/obj_dir_standard_acceptance_sep30.Au6tZL/`. Candidate `2e63e532…`
-has no verified gameplay IPC yet. The two unchanged 1,500-iteration CoreMark
+had no verified gameplay IPC at launch. The two unchanged 1,500-iteration CoreMark
 seed images completed their new runs on CPUs 2/3 within the approved 60-minute
 cap: **38.84 / 38.97 minutes**, simulator and guest exit zero, all five CRCs
 matching reference, and guest durations **10.888 / 10.871 seconds**. The
@@ -680,6 +686,52 @@ state, not qualify desktop boot. Native snapshots are not drained memory
 images: active fill victims and registered/queued writes must be qualified
 before reporting coherent stack or paging values. No live debugger attach
 or privileged guest-memory read has been performed.
+
+That cold diagnostic subsequently **closed cleanly at exactly 450,000,000
+cycles / 99,654,751 retirements**, after about 42 minutes 29 seconds. The
+simulator was reaped with exit zero; no restore or terminal error was recorded,
+and the original disk/ROM/binary hashes remain pinned. This diagnostic stop is
+not a desktop pass. Snapshot SHA-256 is
+`9bd97a823180b2b060293d2fc0e19ac24aa06afeeef7f930e4e1fee0af4e14ba`, paired
+closed-disk SHA-256
+`8256ceafdc21f4b1fa15dc3a0386fd6dfd7f8615e4009bfbe2d28ed157fbf7c2`;
+`closed_pair.json` preserves the lifecycle/configuration proof. The exact
+serialized-layout reader passes 22 host-only checks. Its first offline parse
+finds `S_PIPE`, `CS=0028`, `EIP=C000324F`, `EAX=0`, `ZF=1`, with L1/L2 and
+write queues idle. All 30 queried stack/global/context words have qualified
+canonical evidence, without resident-layer disagreement or pending writes.
+This is a null-list return sample, not the predicate-call phase; canonical
+bytes are not automatically proof of the CPU's previously served operand.
+Supplemental current-byte inspection confirms the selector's resident I-cache,
+ITLB and canonical memory evidence agree: `C000324F` is `RET`. Its current
+linked record at `C0FDA944` has null next link, callback candidate `C0FFC4BC`,
+argument `C13BDE54`, and flags `00000131`. Those flags intersect current
+`ECX=800000E2` at `20`; the inspected instructions therefore exclude that entry
+and reach the null-list return. This is not a cyclic-list witness or proof the
+exclusion is wrong. Current caller/predicate investigation remains diagnostic
+work, and raw stack return candidates are not a validated unwind.
+
+The current candidate now has a **verified gameplay measurement**:
+`2e63e532…`, cycles **1.4B–1.5B**, clocks
+1,399,999,637–1,499,999,637, retirements 407,258,224–450,008,441.
+**42,750,217 / 100,000,000 = 0.42750217 IPC**; 31,851,286 U plus 10,898,931 V
+retirements reconcile exactly. Raw captures 6/7 show clear advancing
+world/weapon/HUD without the startup console; the private executable hash
+matches the frozen candidate. The receipt is
+`ao486-sim/obj_dir_standard_acceptance_sep30.Au6tZL/gameplay-ipc-1400m-1500m.json`.
+This matches the older b7 build's same cold interval exactly, rather than
+establishing a cache-policy performance gain. Another 598 sampled startup
+states from 900M–1.2B and the 1.2B raw capture also match between builds.
+Win95 later passed 1.5B cycles without the old terminal VDD error but still
+had no desktop capture. Neither desktop nor closed 969-frame timedemo is
+qualified; reaching gameplay does not complete the standard suite.
+
+The next verified current-candidate gameplay window is **1.5B–1.6B**:
+clocks 1,499,999,637–1,599,999,637 and retirements 450,008,441–493,336,944.
+**43,328,503 / 100,000,000 = 0.43328503 IPC**; 33,082,465 U plus 10,246,038 V
+retirements reconcile exactly. Raw frames 7/8 show advancing clear gameplay,
+and the private executable still hashes to `2e63e532…`. This is the current
+measured build/window, not timedemo FPS, a code-change gain or suite PASS.
 
 ### Quake acceptance checker hardening
 
