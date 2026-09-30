@@ -325,8 +325,9 @@
             // (HALT on any IN/OUT), so every existing gate is byte-for-byte the
             // same.
             // ---- REVIEW1_Aug2 M-03: the TSS I/O-permission bitmap -----------------
-            // Port I/O at CPL > IOPL is not automatically illegal -- the bitmap can
-            // grant individual ports, and rejecting all of it (which the old blanket
+            // Port I/O at CPL > IOPL, or in V86 at any IOPL, is not automatically
+            // illegal -- the bitmap can grant individual ports. Rejecting all of it
+            // (which the old blanket
             // iopl_sensitive term did) breaks protected-mode I/O virtualisation. When
             // the consult is required, divert to S_IOPERM, which reads TSS+0x66 for the
             // map base and then the byte covering this port, and either continues to

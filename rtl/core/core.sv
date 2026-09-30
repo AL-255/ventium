@@ -1078,8 +1078,10 @@ module core
   // gate stays byte-identical): EFLAGS.VM is 0 across all of user mode and the
   // whole pre-V86 sys corpus, so v86==0 there and all V86 arms below are dead.
   // iopl = EFLAGS.IOPL (bits 13:12). Under v86 with iopl<3 the IOPL-sensitive ops
-  // (CLI/STI/PUSHF/POPF/INT n/IRET/IN/OUT) #GP(0) to the CPL0 monitor (method-1);
-  // at iopl==3 they execute normally. The pv86 corpus runs at IOPL=0 so all six
+  // (CLI/STI/PUSHF/POPF/INT n/IRET) #GP(0) to the CPL0 monitor (method-1);
+  // at iopl==3 they execute normally. Scalar port I/O separately consults the
+  // TSS bitmap in V86 regardless of IOPL (see ioperm_needed below).
+  // The pv86 corpus runs at IOPL=0 so all six
   // IOPL-sensitive ops in the V86 task trap.
   logic        v86;
   assign v86 = sys_mode && eflags[17];
@@ -2483,9 +2485,9 @@ module core
   logic        lock_done_store, lock_done_cx8b_eq, lock_done_cx8b_ne, lock_done;
   logic        d_io;            // this instruction is IN/OUT
   // ---- REVIEW1_Aug2 M-03: TSS I/O-permission bitmap consult -----------------------
-  // Needed only when the instruction is port I/O AND the current privilege exceeds
-  // IOPL. At CPL <= IOPL the access is unconditionally allowed and no TSS read happens,
-  // so the common case costs nothing. tr_limit must also be large enough to HOLD a map
+  // Protected port I/O checks the map when CPL > IOPL, or unconditionally in
+  // V86 (including IOPL=3). Only non-V86 CPL <= IOPL bypasses the TSS read,
+  // so that common case costs nothing. tr_limit must be large enough to HOLD a map
   // base field (offset 0x66..0x67); a TSS too small to contain one denies all I/O,
   // which is the architectural behaviour.
   state_e      ioperm_ret;      // where to resume once the bitmap says yes
@@ -2518,7 +2520,7 @@ module core
         io_perm_mask[{2'd0, ioperm_port[2:0]} + i[4:0]] = 1'b1;
   end
   logic        ioperm_needed;
-  assign ioperm_needed = sys_mode && !real_mode && d_io && (eff_cpl > iopl);
+  assign ioperm_needed = sys_mode && !real_mode && d_io && (v86 || (eff_cpl > iopl));
   logic        d_io_write;      // 1 = OUT (CPU drives the port), 0 = IN (CPU reads)
   logic        d_io_imm;        // 1 = port is the imm8 byte (E4-E7), 0 = DX (EC-EF)
   logic [7:0]  d_io_port_imm;   // the imm8 port (when d_io_imm)
