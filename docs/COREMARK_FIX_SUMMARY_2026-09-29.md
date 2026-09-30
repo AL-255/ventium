@@ -1310,3 +1310,17 @@ are `576287e3dc5d16cb2ffb2be0c83c184bd8b895f995204de0ceefcb602b8351b2` /
 The `edda` model-identical host diagnostic has no gameplay measurement.
 **CoreMark correctness passes; Win95 desktop and Quake timedemo are still
 incomplete.** No full standard-suite PASS is claimed.
+
+At the approval handoff, the next verified current `cdcb` gameplay window is
+**0.41310006 IPC**, clocks **2,099,999,637–2,199,999,637**, retirements
+**711,661,379–752,971,385**. U adds 31,533,079 and V 9,776,927, exactly
+41,310,006 in 100M clocks. Frames 13/14 advance combat to health/rockets
+pickup; SHA-256 values are
+`071f0d0031dfa7b8485a4674ac16dc09291d73acf2a10fb6b0f57b46f6740588` /
+`241dd21fb5461763f0e6ec2c5c0579593f0b0535be5bc2a133b5b22233626759`.
+The independent model-matched scalar I/O/IRET audit finds no new causal witness:
+PIC permission bytes are genuinely zero in both saved states, translated
+supervisor bitmap reads agree with the inspected reference, and IRET does not
+implicitly modify hidden TR or link permission bits to private virtual ISR
+state. Known OUTS/extent/descriptor-check gaps remain separate. No new run or
+RTL change is made while the new diagnostic awaits user approval.
