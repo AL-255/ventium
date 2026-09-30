@@ -135,13 +135,12 @@ evidence paths and remaining work are in
 
 ## September 30: standard-suite continuation (not yet qualified)
 
-Latest status at **20:03 UTC**: the V86-corrected candidate independently passes
+Latest status at **20:32 UTC**: the V86-corrected candidate independently passes
 both complete CoreMark seeds, with every reference CRC and cycle count unchanged.
 Cold Windows 95 has not reached a verified desktop. Cold DOS Quake on the
-previous candidate has reached clear gameplay but has not completed its
-969-frame timedemo. **Latest measured gameplay IPC is 0.40805858**, frozen
-`2e63e532…`, cycles **4.0B–4.1B**. This predates the current candidate
-`cdcb6faa…`, which has no gameplay measurement yet. It is not timedemo FPS,
+current candidate has reached clear gameplay but has not completed its
+969-frame timedemo. **Latest measured gameplay IPC is 0.42750217**, frozen
+current candidate `cdcb6faa…`, cycles **1.4B–1.5B**. It is not timedemo FPS,
 a measured gain from either correctness fix or full-suite PASS.
 
 The user authorized 60 minutes per CoreMark seed. Both untouched 1,500-iteration
@@ -1117,3 +1116,81 @@ summing exactly to 40,805,858. Unprocessed frames 32/33 visibly advance through
 the corridor, and the private executable retains its verified `2e63` hash.
 Current `cdcb` remains unmeasured. **CoreMark passes; Win95 desktop and completed
 Quake timedemo remain unqualified**, so the goal and cold acceptance runs continue.
+
+### Independent transition analyses and first current-candidate gameplay
+
+Two independent readers consume the complete Win95 delta, with no event cap:
+the strict C++ inspector and the actual Python `Reader` both reconstruct every
+cycle, validate footer/terminal/EOF, and reconcile **138,967 fresh retirements**
+against the host counter. Their results match. The inspector's synthetic tests
+use the production delta writer and cover pair retirement, packed-snapshot
+ownership, ACK edge phase, wrong windows, missing fields, corrupt/truncated
+streams, trailing data and output-overwrite rejection. These are host-only
+analysis tests, not additional RTL or guest runs.
+
+Observed I/O and interrupt facts in **393.9M–394.9M**, not the preceding boot:
+
+- **726 bitmap consultations / 1,452 memory beats**, all permitted: 640 dword
+  INS from 1F0h and 86 scalar IDE accesses. No denied consultation or PIC-port
+  consultation appears. 220 scalar completions plus 640 INS elements exactly
+  reconcile with **860 shim/I/O-bus requests**.
+- Scalar completions include 128 dword OUTS elements. OUTS's separate string
+  dispatch still bypasses the bitmap check; the consulted 1F0h–1F3h bits here
+  are allowed, so this is **not a causal witness for this wait**. The separate
+  four-byte bitmap-read extent and descriptor-validation ordering concerns
+  remain open; do not label them fixed by the V86 predicate repair.
+- At edge **394,358,063**, the core accepts hardware vector 50h once, from
+  V86 F000:141Bh. PIC ISR changes 0→1 and the delivery counter increments once.
+  `intr_take` remains high for one further settled record because the pending
+  register samples the previous PIC level. State-qualified INTA is already low
+  in the gate-delivery state: there is **no second admission or frame**.
+- The protected VPICD path writes 21h=B9h at 394,358,572, **20h=60h at
+  394,358,659**, then 21h=B8h at 394,359,017. The specific physical EOI clears
+  hardware ISR 1→0; its instruction retires at C002AC9Ah. This proves physical
+  acknowledgement, not a virtual EOI or the earlier virtual-ISR origin.
+- The 41 delivery-counter changes comprise 40 ROM #UD callback transitions
+  and that one hardware interrupt. They are not 41 unexpected faults or #GPs.
+
+The software chronology is now instruction-qualified: IOS issues request 3
+through C026212Ah; `SendCommand` retires at C001184Ch / cycle 394,824,329,
+with IOP C13BDE54h. RMM schedules callback C0FFC4BCh at 394,830,045 and returns
+record C0FDA28Ch. VMM enters its semaphore wait at 394,832,519; its first
+selector call is at 394,832,917. The predicate at 394,838,004 uses VM
+C15200E8h, semaphore C10D9758h and IOP C13BDE54h. The queued RMM callback,
+known virtual-IRQ mask setter and virtual-EOI entry points do not retire within
+this complete window. That is an interval fact, not proof they never ran.
+
+Independent passive, layered native readers qualify both the closed **393.8M**
+input and **394.9M** terminal state against the current serializer and memory
+layers. VM+1Eh is already 20h and virtual IRR/ISR are already 1 **before** the
+capture. The semaphore already has count zero and signature 4553h. The current
+RMM node changes from callback C0003ACEh / flags 80000000h to C0FFC4BCh /
+IOP C13BDE54h / flags 131h, consistent with its observed reuse. The restriction's
+origin is therefore outside the captured interval; no semaphore, private flag,
+EOI or timer is forced. A suspected AL result mismatch is rejected by qualified
+current code: C00031F2h contains **0C DF (OR AL,DFh)**, not NOT AL. AL 20h→FFh
+is correct. Canonical endpoint code alone is not an actual fetched-byte witness.
+
+Evidence below `ao486-sim/obj_dir_win95_ioperm_native_sep30.ePtDku/`:
+`io-transition.{summary,events,commits}.tsv`, `python-delta-receipt.json`,
+`current-virtual-context.json` and its independently pinned before-state
+counterpart. The inspector source/binary hashes are respectively
+`c84d9a2220053ac22290ac4a2e1d63bfda61c1a6c27bd98d2611a0c73f35be1c` /
+`2e53c24c712fc4827ba7ddb83fb7f81f5a7772cf302d03edd60f63af2483d432`;
+the Python analyzer is
+`e5f041abe8262cfafde9bd526ac9bc89cd9456bc9e0a3dd905552c06f19096b7`.
+
+The first qualified **current `cdcb` gameplay window** supersedes the older
+baseline: clocks **1,399,999,637–1,499,999,637**, harness retirements
+**407,258,224–450,008,441**, hence **0.42750217 IPC**. U contributes 31,851,286
+and V 10,898,931 retirements, summing exactly to 42,750,217. Raw frames 6/7
+advance from the shells corridor to the grenade-launcher/monster view with no
+startup overlay or post-processing. Their SHA-256 values are
+`eaca570d8ddfc97cc40b72fbded880fdf650a3934764c2fec0486e415fd35cc6` /
+`503a664724c84e6bb525f5ca40e21c999ece5bb90ec45f06471580dafa3b26b9`.
+Log: `ao486-sim/obj_dir_standard_v86_iop3_sep30.W6RkaF/quake/run.log`,
+profile rows at cycles 1.4B and 1.5B. Its private executable retains full SHA-256
+`cdcb6faa8599124f9e1c6b663d04cd23206a31a7a88bc325f49381fbb5479c56`.
+These different-scene windows do not measure a fix gain. Cold Win95 is still
+polling at approximately 1.45B; Quake has no fresh 969-frame completion yet.
+**CoreMark correctness PASS; Win95 desktop and Quake timedemo incomplete.**
