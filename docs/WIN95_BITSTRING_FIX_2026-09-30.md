@@ -1004,3 +1004,36 @@ the helper rejects that missing contract rather than inferring success.
 Their metadata and the untouched special/golden branches require separate
 review. Gameplay baseline remains **0.44240609 IPC**, older e572, clocks
 **2,399,999,637–2,499,999,637**; final c611 remains unmeasured.
+
+### October1: graphics startup and standard-suite qualification scope
+
+The same c611 Win95 cold run produces its first640x480 planar graphics
+frame at600M clocks (black screen/hourglass), then a700M frame showing
+"Building driver information database" at0%. Neither is a desktop or
+closed-run PASS. Raw frame SHA256 values are
+`26b50f0a0a1152196f40a3ec9c1085c8acf90e392160248a3431390acbcd9ef7`
+and `6e1f06351799119e26cb4732f94569be47fd1db1c172743d80a5e2e5244c9e91`.
+Inspection PNGs preserve every RGB byte, without color effects. Read-only
+inspection of the original source image confirms pre-existing
+`[boot] display.drv=vga.drv` and `shell=Explorer.exe`: this is an unchanged
+configured cc68b005 baseline, not stock unconfigured installation media.
+No display-fix script or during-run guest patch was applied.
+
+Standard qualification must keep its declared profiles distinct: CoreMark
+passes on TB2ce6's user/register-image, syscall-emulation/direct-memory
+profile; Win95 and Quake run from cold reset on full-PC c611. All25 TB
+defines occur among the107 full-PC defines, and149 common RTL/fp_shared
+input pins match, but these are not identical compiled profiles or proof
+of compiler ancestry. CoreMark's PASS does not alone verify the additional
+full-PC cache/FP configuration. Only Win/Quake carry the cold-reset/no
+snapshot/no during-run guest-patch claim.
+
+Win95 acceptance still requires recognizable desktop frames in the closed
+inventory, clean complete held capture, actual native wait/group closure,
+final input/resource pins and supervisor terminal evidence. Use its owned
+stop-request handshake only after observing desktop; prematurely stopping
+the launcher service would disrupt final receipt generation. Quake still
+requires the current cold run's closed969-frame timedemo and both canonical
+and outer PASS receipts. **The full standard suite remains incomplete.**
+Gameplay baseline is **0.44240609 IPC**, older e572, clocks
+**2,399,999,637–2,499,999,637**; current c611 remains unmeasured.
