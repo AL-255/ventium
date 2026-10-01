@@ -1620,3 +1620,34 @@ guard. The packing receipt is `pch-lossless-pack.json` in the build directory.
 Quake timedemo pending.** Current verified gameplay IPC remains
 **0.43038841**,4092 clocks **2,199,999,637–2,299,999,637**. No new FPS or matched
 before/after Quake performance gain is claimed.
+
+### October1 21:04UTC: advancing cold boots, unchanged tested sources
+
+Root revalidated the same three candidate native processes and original unit
+invocations; all remain live. The complete `compile-inputs.before.sha256`
+check returned0 against current files (manifest SHA256
+`e170cbbc5bb5abdecf75df4a007a5087654a7a75128c024ef995e91ff3ce5db6`).
+All three actual `/proc/<pid>/exe` hashes remain4092; no compile-input drift or new
+model is introduced by this checkpoint.
+
+The original cc68-fixture RF Win95 run has advanced from82% through84% and86%
+to **90% driver-database setup**. Root viewed published raw `frame_00027.ppm`,
+SHA256 `7af24e5156f7b2c465ba12831e6bf644a268e237c0a710093451a0385986b249`,
+after checking the held regular file's identity, exact921615-byte P6 file,
+stable content metadata and pixel-identical PNG conversion. This is setup,
+not a desktop or manual closed acceptance. The configured37f5 cold run remains
+live at505,299,072 clocks /111,830,349 retire events, without a published
+frame or closure marker at the21:03 poll. No live private disk was read.
+
+The literal `tb: FLT` debug label is not an exception classifier:
+`core_fetch_decode.svh:143–147` sends ordinary maskable INTR through
+`start_fault(inta_vector,...)`, whose common debug print is `core.sv:9741`.
+Thus vector94 logs alone do not prove a CPU exception. Likewise the documented
+`FCB2:2FF7` / `0078cc386c6c3863` ROM callback trap is not standalone CPU
+corruption evidence (see `WIN95_ABLATION_2026-09-28.md:1585–1596,1652–1658`).
+Neither observation qualifies an error-free desktop.
+
+CoreMark remains closed PASS; Win95 desktop and Quake timedemo remain pending.
+Current verified gameplay IPC remains **0.43038841**,4092 clocks
+**2,199,999,637–2,299,999,637**, with no completed timedemo/FPS or matched-work
+performance gain established.
