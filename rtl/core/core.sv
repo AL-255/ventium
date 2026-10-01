@@ -10132,6 +10132,9 @@ module core
       S_LCALL: begin
         cur_is_w_nat = 1'b1;
         // R2-H05: lc_callw (gate width for a gated call) mirrors the bus arm.
+        // Each frame slot has that width too. A word CS push at SS:FFFE
+        // must not be segment-checked as a dword extending past SS.limit.
+        cur_size = {1'b0, lc_callw};
         cur_lin_nat = !seg_step ? seg_base[SG_SS] + stk16(gpr_o[R_ESP] - {28'd0,lc_callw})
                              : seg_base[SG_SS] + stk16(gpr_o[R_ESP] - {27'd0,lc_callw,1'b0});
       end
@@ -10140,6 +10143,9 @@ module core
       // retf_out is set (retf_ob 0=ESP, 1=SS); this mirror had only the two-beat
       // inner form, so under paging beats 2 and 3 translated the wrong linear.
       S_RETF: begin
+        // Match the actual IP/CS and outer SP/SS slot width. The fragment
+        // engine must not probe a third/fourth byte of a word at page end.
+        cur_size = {1'b0, q_w};
         // R2-H05 follow-up (B1): the outer slots sit above the imm16 discard --
         // mirrors the bus arm EXACTLY (CHECK 5).
         if (retf_out) cur_lin_nat = seg_base[SG_SS] + stk16(gpr_o[R_ESP] + {16'd0,q_ret_imm} +

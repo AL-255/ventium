@@ -526,3 +526,62 @@ The standard suite is **CoreMark PASS / Win95 FAIL / Quake incomplete**.
 Latest verified gameplay IPC remains **0.43107762**, `c0e5206e` profile clocks
 1,599,999,637–1,699,999,637, predating e572. The e572 cold Quake run is live
 with no verified gameplay measurement or completed timedemo yet.
+
+## October 1: far-frame width repair, full directed matrix PASS
+
+The independent word-frame defect is reproduced and repaired. The frozen
+pre-fix TB `fe4a21d7...` delivered false #SS for legal word far CALL/RETF
+at SS.limit (cases1/2), and false #PF for a word RETF ending at page boundary
+(case4); DWORD control17 completed normally. The primary faults are present
+in the separately captured `rtl.stdout`; their later quiescent exits are
+not an absence of faults. Cascading #SS during exception-frame delivery exposed
+another defect: the same-privilege DWORD-gate push address omitted `stk16`.
+The final generic GPR writeback already preserves the high ESP half; no
+independent ESP-writeback defect is claimed. A separate INT-frame fixture is
+being prepared before changing that address path.
+
+The width repair has three functional assignments, no new state, cache flush,
+stall, guest patch or workload check: LCALL `cur_size=lc_callw`, all RETF slots
+`cur_size=q_w`, and RETF read byte enables matching q_w. Existing DWORD
+accesses keep their four-byte behavior. Word writes already had exact strobes;
+their error was the segment-check extent. Word return reads needed both extent
+and strobes so the fragment engine does not probe nonexistent tail bytes.
+
+New source-controlled `pfarwordwidth` has32 independent CALL-only/RETF-only
+cases: CS.D0/1, SS.B0/1, WORD/DWORD frames, and segment/page boundaries.
+Based code descriptors keep16-bit return offsets valid; CS16 witnesses use
+explicit address32 so absolute observations cannot silently truncate. Each
+case requires actual free pinned-QEMU exit133, completed GDB trace, actual
+native exit133, zero canonical faults, exact ESP/frame/control witnesses,
+normal stop/footer/I/O closure and the complete existing architectural diff.
+Twenty host mutation tests check these contracts; the gate never builds a
+model or guest implicitly and is bounded below10 minutes.
+
+Width-fixed TB SHA256
+`ba8effe8167c3d88da2d95562256a29847047150eff391afe0af7d3fe3c0e17f`,
+compile-record SHA256
+`c9027d1a8656e6827af9a6680e8d0586f3930b678f3af1b1da87c343856c41ac`:
+**all32 cases PASS**, all child exits133, zero faults and unchanged inputs.
+Local summary SHA256
+`a9be776af1f491db4f67ef381f279974639625639c72f60a967354e218b31bb6`,
+under `ao486-sim/obj_dir_win95_retf_oct01.pP4BlM/design/pfarwordwidth-fixed-oct01.1/`.
+The reviewed test sources at that run are archived under
+`verif/tb/obj_dir_farwidth_oct01.FCKHi2/reviewed_test_sources.872uee/`.
+`make verify` on this frozen TB passes108 functional programs and all19
+gated timing bands; the20 reported per-instruction cycle divergences remain
+non-gating diagnostics, not correctness passes. All five strict lint profiles
+pass. The32-job,16GiB-capped build took68.3 seconds.
+
+These legal frame tests do not cover outer-privilege returns or MMIO read
+side effects. This fix is **not established as causal for Win95's prefixed
+RETF failure**, and no new-candidate standard-suite pass is claimed. The
+e572 checkpoint/vector13 runs remain unmodified; their intact progress prefixes
+match the original failed boot through at least425M/433M clocks. Normal earlier
+V86 faults are not a new cold-path divergence. Actual closed capture and
+fault-edge ACK/selector evidence are still needed.
+
+Latest verified gameplay IPC remains **0.43107762**, c0e5206e, profile clocks
+1,599,999,637–1,699,999,637. It predates e572 and this width-fixed RTL; both
+remain without a verified gameplay measurement. CoreMark's previous full-seed
+PASS belongs to fe4a21d7, not the new ba8effe8 TB. The full standard suite
+remains incomplete, particularly Win95 desktop and Quake timedemo completion.

@@ -1,0 +1,19 @@
+{
+  "name": "pfarwordwidth",
+  "kind": "system",
+  "src": "pfarwordwidth.S",
+  "linker": "pfarwordwidth.ld",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 6000,
+  "cases": 32,
+  "case_encoding": "CASE-1 bits: 0 RETF (else CALL), 1 page boundary (else segment boundary), 2 CS.D, 3 SS.B, 4 DWORD frame (else WORD)",
+  "oracle": "pinned QEMU 8.2.2 full architectural differential for legal accesses",
+  "required_defines_segment_cases": ["VEN_SEG_ENFORCE"],
+  "expected_faults": [],
+  "qualification": "Directed frame-width witnesses only; no whole-system or Win95-cause claim. QEMU does not prove rejection of architecturally out-of-limit negative accesses.",
+  "status": "All32 variants passed full pinned-QEMU differential and actual native exit133 on ba8effe8 (2026-10-01); 20 host contract tests passed. Full standard-suite acceptance remains pending."
+}

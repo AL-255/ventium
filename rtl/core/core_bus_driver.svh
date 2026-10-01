@@ -200,6 +200,9 @@
       // pops CS at [SS:SP+w]. ESP is unchanged until the S_RETF commit.
       S_RETF: begin
         bd_req =1'b1;
+        // Reads use producer-relative byte enables too: the zero-strobe
+        // legacy fallback means four bytes, which over-reads word frames.
+        bd_wstrb = (q_w==3'd2) ? 4'b0011 : 4'b1111;
         // REVIEW1_Aug2 C-01: now checkable. This arm anchors on seg_base[SG_SS] and
         // says so explicitly, so the limit comes from SS rather than from whatever
         // dseg happened to name (which is why it was excluded before).
