@@ -19,6 +19,12 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# This runner owns QEMU, image construction, trace generation, and the RTL
+# fan-out.  Enter the verified global scope before any of them start; scoping
+# only its nested builders leaves the long-lived simulator process unbounded.
+if ! "$REPO/tools/build_scope.sh" --is-active; then
+  exec "$REPO/tools/build_scope.sh" -- "$0" "$@"
+fi
 SYS="$REPO/verif/sys"
 REFS="$REPO/ventium-refs/07-p5-emulation-harness"
 QSYS="$REFS/build/qemu/build-sys/qemu-system-i386"
@@ -937,11 +943,17 @@ if echo " $RTL_SYS_TESTS " | grep -q " $TEST "; then
   TB="${TB_BIN:-$REPO/verif/tb/obj_dir/tb_ventium}"
   [[ -n "${TB_BIN:-}" ]] || make -C "$REPO/verif/tb" rtl >/dev/null 2>&1
   [[ -x "$TB" ]] || { echo "FATAL: RTL TB $TB not built"; exit 1; }
-  RTL_OUT="$OUTDIR/$TEST.rtl.sys.vtrace"
+  # Preserve previous native evidence and permit repeated ordinary invocations.
+  RTL_DIR="$(mktemp -d "$OUTDIR/$TEST.native.XXXXXX")"
+  RTL_OUT="$RTL_DIR/rtl.sys.vtrace"
   # --max-insn matches the golden length cap; --quiesce generous so the boot's
   # icache fills + descriptor reads do not trip a premature idle stop.
-  "$TB" --image "$IMG" --system --out "$RTL_OUT" \
-      --max-insn "$MAXI" --quiesce 400 >/dev/null 2>&1 || true
+  # Plain --system treats OUT as the legacy halt; --cosim enables the actual
+  # I/O handshake and debug-exit status. Require closed native acceptance before
+  # comparing, rather than letting an equivalent prefix hide a failed run.
+  "$PY" "$SYS/run-native-system.py" --tb "$TB" --image "$IMG" \
+      --manifest "$TDIR/manifest.json" --out "$RTL_OUT" \
+      --stdout "$RTL_DIR/rtl.stdout" --stderr "$RTL_DIR/rtl.stderr"
   echo "  RTL sys trace: $RTL_OUT ($(wc -l < "$RTL_OUT") lines)"
   set +e
   RDIFF_OUT="$("$PY" "$COMPARE" --mode func --all --max-report 8 "$OUT" "$RTL_OUT" 2>/dev/null)"
@@ -1111,9 +1123,10 @@ if echo " $RTL_SYS_TESTS " | grep -q " $TEST "; then
   # differential proves the flows; the fault log proves NOTHING ELSE faulted
   # (a partial commit would cascade into #GP/#DF).
   if [[ "$TEST" == "pcgpg" ]]; then
-    FLOG="$OUTDIR/$TEST.faultlog"
-    "$TB" --image "$IMG" --system --out /dev/null --max-insn "$MAXI" \
-        --quiesce 400 +ven_faultlog >"$FLOG" 2>&1 || true
+    FLOG="$RTL_DIR/faultlog"
+    "$PY" "$SYS/run-native-system.py" --tb "$TB" --image "$IMG" \
+        --manifest "$TDIR/manifest.json" --out "$RTL_DIR/fault.rtl.sys.vtrace" \
+        --stdout "$FLOG" --stderr "$FLOG.stderr" --faultlog
     PFW="$(grep -c '^\[FAULT\] vec=14 .*err=00000002' "$FLOG" || true)"
     PFR="$(grep -c '^\[FAULT\] vec=14 .*err=00000000' "$FLOG" || true)"
     PFANY="$(grep -c '^\[FAULT\] vec=14 ' "$FLOG" || true)"
