@@ -1113,7 +1113,18 @@ module decode_stages
         8'h8F: begin // POP r/m
           d_is_pop=1'b1; d_mem_read=1'b1; d_w=eff_opsize?3'd2:3'd4;
           if (modrm_mod==2'b11) begin d_writes_reg=1'b1; d_dst_reg=modrm_rm; d_len=pfx_len+4'd2; end
-          else begin d_mem_write=1'b1; d_mem_dst=1'b1; d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base); end
+          else begin
+            d_mem_write=1'b1; d_mem_dst=1'b1;
+            d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base);
+            // POP's explicit ESP-based destination uses the post-pop EA, but
+            // its stack read and architectural ESP still use the old pointer
+            // until the destination's final ACK. Keep faults restartable.
+            // Address16 has no ESP base; register POP ESP is a different case.
+            // For SS.B=0 wrap, this full-address adjustment matches the pinned
+            // Pentium QEMU oracle; Intel leaves that location family-specific.
+            if (!eff_addr && has_sib && (sib_base==R_ESP))
+              d_ea = d_ea + {29'd0, d_w};
+          end
         end
         8'b1001_0???: begin // NOP / XCHG eAX,r
           if (op0==8'h90 && !eff_opsize) begin d_is_nop=1'b1; d_len=pfx_len+4'd1; end

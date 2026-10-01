@@ -1,0 +1,12 @@
+{
+  "name":"ppopespea", "cases":16, "exit_code":133, "max_insn":12000,
+  "required_defines":["VEN_SEG_ENFORCE"], "fault_cases":[12,13,15,16],
+  "oracle":"pinned QEMU full --all architectural differential except explicit Intel-spec CASE13",
+  "spec_only_cases":[13],
+  "case13":{"oracle":"intel-spec", "expected_free_qemu_exit":135,
+    "limitation":"Pinned QEMU omits per-access SS-limit checks; its failure exit is limitation evidence, not a correctness pass."},
+  "crosspage_destination":"0x2ffe",
+  "fault_flags_profile":2,
+  "rf_limitation":"Exact savedFLAGS2 is the current pinned-QEMU/model profile, not Intel automatic fault RF correctness; original10002 failures retained independently.",
+  "wrap_caveat":"SS.B0 ESP-based wrap destination follows this pinned P54/QEMU profile; later Intel manuals call this processor-family-specific."
+}

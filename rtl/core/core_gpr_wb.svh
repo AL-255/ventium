@@ -479,7 +479,10 @@
         // -------------------------------------------------------------------
         // store / micro-sequence arms.
         S_STORE: begin
-          if (mem_ack) begin
+          // Match the sequencer's whole-store commit, not the preliminary
+          // first-page ACK. Otherwise split POP/PUSH/CALL update ESP twice
+          // and XCHG/XADD can replace their source before the final fragment.
+          if (mem_ack && (!xs_eff_act || (xs_eff_ph == 2'd2))) begin
             unique case (q_kind)
               K_CTRL: begin // CALL push: ESP -= w
                 gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=gpr_o[R_ESP]-{28'd0,q_w};

@@ -706,3 +706,160 @@ This supersedes the earlier c0e5-labelled baseline, but e572 still predates all
 three new frame repairs. Their gameplay and complete standard-suite results
 remain unmeasured; prior full CoreMark success does not qualify the new build.
 Win95 desktop and completed current Quake timedemo are still unproven.
+
+## October 1: POP memory destination corrupts the Win95 RETF frame
+
+A closed, same-build diagnostic replay now locates the Win95 error precisely,
+superseding the earlier coarse around-488M attribution. At cycle480553474,
+CS0117.D0 decodes `67 66 8f 44 24 08; 66 cb` with ESP0001A208,
+SS013F.B0. The implicit POP source is physicalC55208. The explicit `[ESP+8]`
+destination must use the incremented pointer, yielding linear1A214 / physical
+C55214. The original implementation instead ACKs its write at C55210 on
+cycle480553479. That overwrites the following DWORD RETF's selector slot:
+the selector read ACKs C55210 on cycle480553489, faults on the next clock,
+and eventually delivers #GP at0117:6522 with errorECC4.
+
+The replay is diagnostic-only, not a cold-boot pass. Closed native log SHA256
+`75d94bf68f01bbcc0a0b5e63f53131daa99eabb6dc4befe02ac40f7ac88a5a87`;
+independent terminal receipt
+`db290aafeaf0fa608d8faa0fce55701db2c8a51cca3043fc7e5f7fb6a255ce6c`,
+under `ao486-sim/obj_dir_win95_retf_oct01.pP4BlM/replay-480m-edge-oct01.1/`.
+The replay retained actual native wait, pipe EOF, empty owned process group,
+unchanged input pins and zero OOM events. No cross-build snapshot was used.
+
+Two independent fixtures reproduce the defect against the pinned Pentium
+QEMU: the exact CS16 thunk with a following RETF, and a CS32 destination
+sentinel without a RETF dependency. On frozen TB9a7976f7, both free QEMU
+executions exit133 and both RTL executions exit135. The first corrupts the
+return selector; the second leaves the intended destination untouched. Closed
+red summary SHA256
+`39c4dff71415c5a3641b6117dbb9a37f9be82b4609103a43973c0715ccdb6d39`.
+
+The repair adjusts only the memory POP destination EA in the central decoder,
+adding the operand width when the address32 SIB base is ESP. Implicit source
+addressing and architectural ESP remain unchanged until successful final store
+commit; address16 and register POP ESP are unaffected. No early ESP mutation,
+second address generator, extra pipeline state, serialization, guest patch,
+or workload-specific exception is introduced. The SS.B0-wrap destination
+choice follows the pinned QEMU profile; later Intel manuals describe that
+write location as processor-family-specific. The actual Win95 pointer does
+not wrap, so its diagnosis does not depend on that ambiguity.
+
+Both **unchanged original images** pass the original complete136-record goldens
+on frozen repaired TB80d89a33, with actual RTL133 and unmodified
+`compare.py --mode func --all`. Closed green summary SHA256
+`e1f93416a77e5342a42f4f121f9ea8ec8e0cea4f95222c608f8eebeccdbd0bd0`.
+This is directed evidence, not Windows95 desktop acceptance. The expanded
+fault/cross-page matrix is still being qualified. Its first draft used DFA
+instead of FFA for the crossing displacement: its apparent CASE14 pass was
+an ordinary noncrossing write at2DFE, **not** evidence about page splitting.
+The original failed fixtures/results are preserved rather than relabelled.
+
+## October 1: POP write-watchpoints used the implicit source segment
+
+An independent non-ESP POP matrix proves that S_STORE's data-write debug
+check incorrectly used `dbase`, the implicit SS source base, rather than
+`stbase`, the explicit destination's segment base. Frozen TB80d89a33 fails
+the based-FS DWORD and based-DS WORD positive traps, and incorrectly traps
+at the old SS-relative alias in the negative case. An ordinary SS-default
+EBP-based control passes. All four pinned-QEMU executions exit133.
+
+The repair changes the debug address calculation to `stbase + st_addr`;
+string destinations retain their existing ES-relative calculation. The
+underlying store, ACK, MMU and instruction timing are unchanged. Four isolated
+fixtures at `verif/sys/tests/ppopwatch/` deliberately avoid ESP-based addressing
+and verify committed memory, post-POP ESP, saved nextIP/CS/FLAGS, DR6.B0 and
+IRET. Their checker retains the existing delivery marker and first-handler
+instruction as distinct adjacent rows; neither is filtered. The initial
+checker incorrectly required a unique handler PC, was corrected using closed
+golden evidence, and its original source/failure receipt is archived locally.
+
+Frozen TB4b81d6a5 / compile-record6c274d9a passes all four with actual133,
+zero ordinary faults, exact trap counts, normal I/O/retirement footers and
+the complete unmodified architectural differential (98/100/98/78 records).
+All source/model/fixture pins remain unchanged. Red summary SHA256
+`382a6675322ee0ead19bd2c56da8ba3e44344e9c022a050b6daad74b5d072e18`;
+green summary SHA256
+`36aa43400a7843911a681ea44893a1ababbc591f75b5bfe45963273f082ed7e6`.
+Fourteen host contract tests separately pass; they are not DUT qualification.
+
+Latest visually verified gameplay baseline is now **0.44240609 IPC**, e572,
+profile clocks **2,399,999,637–2,499,999,637**: 44,240,609 retirements equals
+33,816,593 U plus10,424,016 V events. Endpoint raw frames16/17 visibly
+advance; actual executable, counters, frame hashes, held log prefix and owner
+invocation were checked, with zero OOM events. Live-window receipt SHA256
+`93a79361d56a08c186cb5ea5ae7b7b4ebc3aa6c348836cc4616eed94aebe3a67`.
+This is scene-dependent measurement, not an isolated fix gain, FPS or completed
+timedemo. e572 predates all current frame/POP repairs. Their gameplay remains
+unmeasured, and **the current standard suite has not passed**.
+
+### October1: corrected split-store witness and final candidate
+
+The earlier CASE14 fixture selected2DFE, not a page boundary; its PASS was
+not cross-page evidence. Corrected CASE14 selects2FFE..3001 and enforces
+that geometry in assembly and host checks. On frozen TB4b81d6a5 it exposes
+a second independent defect: one POP retires with ESP2008 rather than
+QEMU's ESP2004. S_STORE's GPR writeback acted on both the preliminary
+first-page ACK and final whole-store ACK. The sequencer itself retired once.
+
+`core_gpr_wb.svh` now gates its S_STORE arm with
+`mem_ack && (!xs_eff_act || xs_eff_ph == 2'd2)`, matching the existing
+sequencer/store-lock commit. The repair preserves old GPRs until all store
+fragments complete; ordinary unsplit stores are unchanged. There is no
+new FSM, extra stall or workload-specific condition. Closed red summary
+SHA256 `8941a876aa43683302b768842eca91ccad23c92d7033f260beff65895fb9df0a`.
+
+Final TB SHA256
+`2ce6ac0aab75fd27aa1e0f8abd5d6b7f1561a7a42ea5d8711f5fcfa980a98c5c`,
+compile-record SHA256
+`65bab2283a020e8babc5e21b80ab743b31a145990c13152fc8f9074a68944963`,
+passes all16 corrected POP cases:15 full fresh-QEMU architectural
+differentials and one explicit Intel SS-limit spec-only check (CASE13).
+The split success is3237 records/25306 clocks, ESP2004; the second-page
+read-only fault verifies no partial write. Native exits133, actual child
+waits/groups/footers close and all pins remain unchanged. Final summary
+SHA256 `9c0d585b4abbe35df2c3781d1d13e10ea1a26f59c6ebfeb054572793bc4e272e`.
+
+CASE13 is not counted as a QEMU correctness pass: the pinned oracle omits
+per-access SS-limit enforcement and exits135, while the compiled
+VEN_SEG_ENFORCE model exits133 with the exact #SS witness. Separately,
+automatic RF in fault frames is an open, pre-existing Intel-fidelity gap in
+both pinned QEMU and the RTL. These fixtures check exact savedFLAGS2 for
+the current profile, never mask flags or claim Intel RF qualification.
+
+The same final TB passes make verify (108 functional programs and19 timing
+bands) and all five strict lint configurations; actual outer waits are0.
+The20 reported structural cycle divergences remain non-gating diagnostics,
+not correctness passes. Log SHA256 values:
+`ffb35c514a41d773815dd5ec92f6d975c12f3e0f12169e713af6f43ef6bb57ee`
+(verify) and `9c7bb86c80ea3a03095564b47e278ab7cee1a8ed390aeb1742c69116702e49a2`
+(lint). All four destination-segment watchpoint differentials also pass
+on this TB, summary `2d8090a68555af59c001f04a556012798ae79f7b9ec4d437679a7d8433608064`.
+
+The prior frame/trap repairs also retain all42 full differential passes on
+the final TB:8 INT stack-wrap,32 far-frame-width and2 ESP-debug cases.
+Alongside the4 watchpoint cases this is46 fresh differentials with184
+closed child receipts, native/free QEMU133 and generator/comparator0,
+no surviving descendants and unchanged input/artifact pins. Summary hashes
+are `b86c3f330f1256f579200e5b9a304256a9fdeb76697ce3d6633f2549a2b5bfdc`
+(INT), `25e439fe0c7cc7f0cb82096c20882a7fe78262aed3bcc3d61b2ae6ddeabb2cf6`
+(far), and `e9293f506f2800b59d8e826b8d497f4990f5d4376183eaa2ad608c14f2ec2e23`
+(ESP debug). These are directed regression results, not OS completion.
+
+The final full-PC model is SHA256
+`c611cf03f6e7a9d48a1b24fcc4e6b17e44533a3e33dd9a1ac82e70311c5253de`,
+compile-record `5627099a0e9e9dcadeabe58c0c291a55e88832b77bd0509594cba46b7b955d31`.
+Its uncached build retained275 input pins; independent prerequisite audit
+covered all156 RTL and53 non-generated C++ inputs. It starts a new
+unmodified-media Win95 cold boot in
+`ventium-standard-win95-popwatch-oct01.service`, invocation
+`72e81207798d471cb4eb1715a4e3faf4`, worker787847/native787860 on CPU8.
+Actual executable/cgroup/argv admission is checked, memory2GiB/no-swap,
+tasks32, nine-billion-cycle/72-hour native bounds; no snapshots, guest edits
+or injected input. Startup advances normally and OOM counters are0.
+Only separate closed visual/error-free review can qualify desktop.
+
+Latest verified gameplay IPC remains **0.44240609**, e572, clocks
+**2,399,999,637–2,499,999,637**, predating all current frame/POP repairs.
+The final candidate has no gameplay/FPS measurement. Its full standard
+suite remains incomplete; previous builds' results do not qualify it.
