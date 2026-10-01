@@ -905,3 +905,102 @@ system-gate acceptance. Broader strict mode/completion checks are in progress.
 
 Verified gameplay baseline remains **0.44240609 IPC**, older e572,
 **2,399,999,637–2,499,999,637**. Final c611 is gameplay-unmeasured.
+
+### October1: explicit real-I/O system completion audit
+
+A separate closed audit of twelve existing system images on final TB2ce6
+passes full, unfiltered architectural comparison: pseg, pmode, ppage, pcpl,
+pintr, pfault, pfarok, pstk16, psoccallfmem, pcgpg, pxwalkd and pdebug.
+Each native invocation explicitly uses `--system --cosim`, exits133 as
+the fixture requires, and retains matching normal I/O/retirement footers;
+free QEMU exits133 and each unchanged `compare.py --mode func --all`
+returns0. The additional pcgpg rerun verifies ordered page faults
+`(14,2), (14,0)`. Actual child waits and process-group closure are retained,
+and input/artifact pins remain stable. Summary SHA256:
+`70117c17110f76a54ca1b329a31c5c46cfa8804959c85026974e42013967aa1b`,
+under `verif/tb/obj_dir_storecommit_oct01.RxNbj7/verify-sys-core-cosim-final-oct01.1/`.
+
+This qualifies only those twelve image contracts, not all system gates or
+the standard suite. Existing oracle limits remain explicit: pxwalkd avoids
+observing probe A-bit timing; pdebug does not verify DR7.GD firing.
+The original non-cosim FAIL archive remains unchanged. A verifier-only
+repair of the ordinary system runner is being reviewed to make actual
+completion mandatory, keep diagnostics and preserve failure receipts;
+there is no new RTL or guest workaround.
+
+Gameplay baseline is still **0.44240609 IPC**, older e572, clocks
+**2,399,999,637–2,499,999,637**. Final c611 remains gameplay-unmeasured;
+its Win95 desktop and completed Quake timedemo are not yet qualified.
+
+### October1 11:48 UTC: final-candidate CoreMark closes successfully
+
+Both unchanged standard1500-iteration seeds complete on final TB2ce6.
+The independent closed checker returns0/PASS with all five reference CRCs,
+matching raw guest reports and native footers, unchanged binary/image/header
+pins, zero OOM events and no remaining owner/native processes. Performance
+uses713805640 clocks/542165430 retirements (**2.10141237 CM/MHz**);
+validation uses712760043/541458819 (**2.10449507 CM/MHz**). Guest durations
+10.888s/10.871s exceed the ten-second requirement. These cycle counts are
+unchanged from the preceding qualified build: no CoreMark regression is
+observed from the frame/POP/store-commit repairs.
+
+Closed qualification is
+`verif/tb/obj_dir_storecommit_oct01.RxNbj7/coremark-standard-popstore-oct01.1/closed-qualified.json`,
+SHA256 `2526babe48be446a8f0a4de5b5f2ae8f42e6bc881d1d5d7b6336b7628d7e4d41`.
+The exact invocation's terminal supervisor receipt was retained by the
+read-only unit observer before metadata collection: actual owner exit0,
+`ExecMainCode=1`, inactive/dead, SHA256
+`3e5df29cace8e631c70748581fa6cbe3d70ba1d3c5ef4e0a0b4b0477cab031fb`.
+The checker independently verifies25 files. Its stated limitation remains:
+ordinary CoreMark log files provide observed complete functional evidence,
+not a historical lossless pipe-capture proof or compiler-ancestry proof.
+
+The final c611 Win95 cold run separately advances beyond its predecessor's
+480.55M POP/RETF failure checkpoint. The independently observed complete
+2182119-byte log prefix reaches486720805 clocks/107032640 retirements,
+CS0028:EIP C001EABE, with no fatal-error banner and zero OOM events;
+prefix SHA256 `cc8dffeef4dd3fde756de21573ff8de4000f7499bf352391e8f16addeca84949`.
+It subsequently reaches522M clocks without the old fatal screen. This is
+live progress only: no closed visual desktop acceptance yet. Quake remains
+live from cold reset. **Only CoreMark, not the whole standard suite, passes.**
+
+Verified gameplay IPC remains **0.44240609**, older e572, clocks
+**2,399,999,637–2,499,999,637**; final c611 is gameplay-unmeasured.
+
+### October1: ordinary system gate requires closed native success
+
+The ordinary step7 and pcgpg fault rerun now use
+`verif/sys/run-native-system.py`: real I/O mode, exact manifest debug-exit,
+contiguous functional/system trace fields, matching normal stop/retirement
+and zero-desync I/O footers, unchanged input pins and actual child wait.
+The unchanged full architectural comparator runs only after this native
+acceptance. Separate stdout/stderr and fresh per-invocation native leaves
+preserve diagnostics and earlier evidence. Each native invocation is capped
+at90s/16MiB per output inside the verified build scope. The ordinary runner's
+existing scope-entry hunk is a required integration prerequisite.
+
+Forty host-only contracts exercise the production checker/launcher and
+pass, including a byte-identical architectural trace with failed native
+exit, timeout handlers returning0 or133, missing/duplicate/truncated
+footers, replay/desync, signal death, leaked descendants, input deletion,
+fast-exit admission and admission/census exceptions. The unreaped child
+anchors any group cleanup before final wait; cleanup errors stay negative.
+Containment explicitly assumes a non-escaping dedicated native group and
+uses the enclosing build-scope cgroup for the broader tree. Host summary
+SHA256 `2a7284a9854709605e96392819705056e55d7aabed4404f8976d956e842ddca2`.
+
+The modified canonical runner then passes existing pseg, pmode and pcgpg
+on final TB2ce6, including the actual pcgpg fault rerun and unchanged full
+differentials. All four native receipts retain exit133, actual wait,
+closed groups and matching footers; outer gates return0 and input pins
+remain stable. Canonical summary SHA256
+`f6efda50089017d4b0d1fa460aeb33f76efbb66a597a9c4a915967266b7c05f4`,
+under `verif/tb/obj_dir_storecommit_oct01.RxNbj7/canonical-native-final-oct01.1/`.
+
+No RTL, model, guest, golden, comparator mask or special SMM/witness branch
+was changed for this repair. It is not full verify-sys acceptance. The local
+psgdtpg/pbytemovpg manifests currently lack explicit exit_method/exit_port;
+the helper rejects that missing contract rather than inferring success.
+Their metadata and the untouched special/golden branches require separate
+review. Gameplay baseline remains **0.44240609 IPC**, older e572, clocks
+**2,399,999,637–2,499,999,637**; final c611 remains unmeasured.
