@@ -24,12 +24,11 @@
 #   2. NEGATIVE: across every system test, the check rejects NOTHING. This is the
 #      false-positive tripwire, and it is the assertion that matters -- C-06's
 #      delivery was reverted twice for shipping false positives, so "it fires on the
-#      violation" is worth little without "it fires on nothing else". (Exception:
-#      pselnull DELIBERATELY uses a null-loaded DS for its REVIEW1_Aug3 R2-C02
-#      witnesses -- architecturally #GP(0), true positives, and its null-DS
-#      handler then cascades; the sweep grades its FAULT-LOG prefix instead:
-#      the enforcement-clean prefix must reach the case-A null-use catch
-#      (#GP(0)) with only the two designed faults before it.)
+#      violation" is worth little without "it fires on nothing else".
+#      Standard pselnull uses legal SS-qualified accesses and visible-null
+#      checks in A/E; all five terminal witnesses and exactly its designed
+#      case-C GP0004 / case-D TS0004 pair are required, without a cascade
+#      exception. pnullseg separately grades strict null-data #GP(0).
 #
 # Enforcement is NOT compiled into the default build (see core_fetch_decode.svh for
 # why), so this gate builds its own object directory with +define+VEN_SEG_ENFORCE.
@@ -228,46 +227,29 @@ for t in $TESTS; do
   TIMG="$REPO/verif/sys/tests/$t/$t.bin"
   [[ -f "$TIMG" ]] || continue
   NRUN=$((NRUN+1))
-  RAW="$("$TB" --image "$TIMG" --system --out /dev/null --max-insn 1200 --quiesce 400 \
-        +ven_seglog +ven_xpagelog +ven_faultlog 2>&1 || true)"
-  N="$(printf '%s\n' "$RAW" | grep -c SEGCHK || true)"
-  # REVIEW1_Aug3 R2-C02: pselnull is ENFORCEMENT-INCOMPATIBLE BY DESIGN past
-  # its case A: it deliberately addresses memory through a null-loaded DS
-  # (the case-A/case-E witnesses, which prove the staged hidden cache is
-  # explicit zeros and not GDT[0]'s poison base), and those uses are
-  # architecturally #GP(0) -- TRUE positives, the same reason pseglim is the
-  # POSITIVE test rather than a sweep member. Worse, its #GP handler runs
-  # with DS still null, so under enforcement the first null-use fault
-  # legitimately escalates (a faulting handler) and the run never completes.
-  # (The +ven_seglog probe does not see this access class, so it cannot be
-  # graded that way -- measured: zero SEGCHK lines for a delivered #GP(0).)
-  # So for pselnull grade the FAULT LOG instead: the run must reach its
-  # deliberate null use with the enforcement-clean prefix INTACT -- the only
-  # faults before and at the catch are, in order, case C (#GP(0x0004)), case
-  # D (#TS(0x0004)) and the case-A null-use catch (#GP(0)). Any spurious
-  # rejection of a legitimate access in the prefix would show up as an extra
-  # or earlier fault and fail the gate; the cascade after the catch is the
-  # guest's null-DS handler, out of scope.
+  STRACE=/dev/null
   if [[ "$t" == "pselnull" ]]; then
-    mapfile -t FL < <(printf '%s\n' "$RAW" | grep '\[FAULT\]' || true)
-    PF="${#FL[@]}"
-    F0="${FL[0]:-none}"; F1="${FL[1]:-none}"; F2="${FL[2]:-none}"
-    echo "  $t: enforcement run fault prefix (${PF} total faults, the cascade after the catch is out of scope):"
-    echo "      [0] $F0"
-    echo "      [1] $F1"
-    echo "      [2] $F2"
-    if [[ "$PF" -lt 3 ]] \
-      || ! grep -q 'vec=13 .*err=00000004' <<<"$F0" \
-      || ! grep -q 'vec=10 .*err=00000004' <<<"$F1" \
-      || ! grep -q 'vec=13 .*err=00000000' <<<"$F2"; then
-      echo "FATAL: pselnull: the enforcement prefix must be exactly"
-      echo "       [#GP(0x0004) case C, #TS(0x0004) case D, #GP(0) case-A null-use"
-      echo "       catch] -- anything else is a false positive in the clean prefix"
-      echo "       (or the null use was NOT caught, i.e. enforcement is inert)."
-      exit 1
-    fi
-    echo "  $t: enforcement-clean prefix intact + the deliberate null-DS use IS caught (#GP(0))"
-    N=0
+    STRACE="$REPO/build/sys/pselnull_seg.vtrace"
+    SLOG="$REPO/build/sys/pselnull_seg.log"
+    SRC=0
+    timeout --kill-after=3s 30s "$TB" --image "$TIMG" --system --cosim \
+      --out "$STRACE" --max-insn 1200 --max-cycles 1000000 --quiesce 400 \
+      +ven_seglog +ven_xpagelog +ven_faultlog >"$SLOG" 2>&1 || SRC=$?
+    RAW="$(<"$SLOG")"
+  else
+    RAW="$("$TB" --image "$TIMG" --system --out "$STRACE" --max-insn 1200 --quiesce 400 \
+          +ven_seglog +ven_xpagelog +ven_faultlog 2>&1 || true)"
+  fi
+  N="$(printf '%s\n' "$RAW" | grep -c SEGCHK || true)"
+  # Standard pselnull A/E now use legal SS-relative sentinels plus visible-null
+  # checks. No cascade/prefix exception: the whole five-case flow must finish
+  # without PF or any fault beyond the existing intentional C/D pair. Strict
+  # null-data-use/no-effect GP0 is independently covered by pnullseg.
+  if [[ "$t" == "pselnull" ]]; then
+    timeout --kill-after=3s 10s python3 "$REPO/verif/sys/tests/pselnull/check_witness.py" \
+      --trace "$STRACE" --log "$SLOG" --return-code "$SRC" \
+      --elf "$REPO/verif/sys/tests/pselnull/pselnull.elf"
+    echo "  $t: all five witnesses, exact C/D faults, genuine closed debug-exit133"
   fi
   TOTAL=$((TOTAL+N))
   # REVIEW1_Aug2 C-03: count the PAGING/C-03 assertions in the SAME sweep. Both of

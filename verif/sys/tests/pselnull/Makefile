@@ -25,7 +25,20 @@ pselnull.bin: pselnull.elf
 	@truncate -s $(IMG_BYTES) pselnull.bin
 	@echo "pselnull.bin: $$(stat -c%s pselnull.bin) bytes (want $(IMG_BYTES))"
 
-clean:
-	rm -f pselnull.o pselnull.elf pselnull.bin
+# Historical enforcement-OFF poison-hidden-base probe only; NEVER standard.
+legacy: pselnull-legacy.bin
 
-.PHONY: all clean
+pselnull-legacy.o: pselnull.S
+	$(CC) $(CFLAGS) -DLEGACY_NULL_USE=1 -c $< -o $@
+
+pselnull-legacy.elf: pselnull-legacy.o pselnull.ld
+	$(CC) $(CFLAGS) -static -no-pie -nostdlib -Wl,-T,pselnull.ld -Wl,--build-id=none $< -o $@
+
+pselnull-legacy.bin: pselnull-legacy.elf
+	$(OBJCOPY) -O binary $< $@
+	@truncate -s $(IMG_BYTES) $@
+
+clean:
+	rm -f pselnull.o pselnull.elf pselnull.bin pselnull-legacy.o pselnull-legacy.elf pselnull-legacy.bin
+
+.PHONY: all clean legacy

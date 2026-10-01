@@ -557,13 +557,17 @@ verify-sys:
 	# REVIEW1_Aug3 R2-C02: pselnull proves ONE null-selector definition
 	# (sel[15:2]==0) and TI-preserving selector error codes: a null DS load
 	# with GDT[0] NONZERO and NON-PRESENT reads nothing (no #PF) and stages
-	# explicit zeros (the poison base never leaks into a data access); a far
+	# visible null DS, with legal SS-relative sentinels; a far
 	# JMP through LDT entry 0 (0x0004) succeeds; an out-of-bounds LDT
 	# selector faults #GP(0x0004); an incoming task LDTR of 0x0004 is
 	# #TS(0x0004); a paged task switch with a null incoming DS completes.
 	# WITNESS gate (case D cannot be diffed: QEMU raises the same #TS only
 	# AFTER committing the switch); graded in step 7w.
 	bash verif/sys/run-sys-golden.sh pselnull
+	# Intel-spec null-data accesses: four precise GP0/no-effect cases and six
+	# legal alternate-segment controls. QEMU softmmu cannot be this oracle;
+	# the standalone witness requires an actually enforced frozen TB profile.
+	bash verif/sys/run-pnullseg-gate.sh
 	# REVIEW1_Aug3 R2-C04 (pxprobe): a cross-privilege delivery whose frame
 	# straddles onto a NOT-PRESENT second page must #PF BEFORE the SS/CPL
 	# commit -- err=2 (supervisor class), CR2 = the first faulting push's

@@ -642,12 +642,12 @@ elif test == "pselnull":
     # honestly -- QEMU raises the incoming-LDTR #TS(0x0004) only AFTER
     # committing the switch (d_espok=0, both busy bytes toggled) -- alongside
     # the oracle-identical witnesses every oracle agrees on.
-    assert H(last, "edi") == 0x0BABE001, f"exit edi={last['edi']} != 0x0BABE001 (case A: null-DS read at base 0 = S1)"
+    assert H(last, "edi") == 0x0BABE001, f"exit edi={last['edi']} != 0x0BABE001 (case A: visible DS0/noPF plus legal SS sentinel)"
     assert H(last, "esi") == 0x00010004, f"exit esi={last['esi']} != 0x00010004 (case B LDT-entry-0 JMP ok + case C err 0x0004 TI-preserved)"
     assert H(last, "ebp") == 0x000A0004, f"exit ebp={last['ebp']} != 0x000A0004 (QEMU: case-D #TS(0x0004) raised POST-commit -- oracle gap 1, pinned honestly)"
     assert H(last, "ebx") == 0x00008B89, f"exit ebx={last['ebx']} != 0x00008B89 (QEMU: the committed-then-faulted switch toggled both busy bytes -- oracle gap 1)"
-    assert H(last, "ecx") == 0x0BABE001, f"exit ecx={last['ecx']} != 0x0BABE001 (case E: staged null DS reads S1 at base 0)"
-    print(f"  exit witnesses (QEMU flow): edi=ecx=0x0BABE001 (null-DS base 0, cases A/E), esi=0x00010004 (LDT0 JMP + err 0x0004)")
+    assert H(last, "ecx") == 0x0BABE001, f"exit ecx={last['ecx']} != 0x0BABE001 (case E: visible DS=LDTR0/noPF plus legal SS sentinel)"
+    print(f"  exit witnesses (QEMU flow): edi=ecx=0x0BABE001 (legal A/E, visible null selectors), esi=0x00010004 (LDT0 JMP + err 0x0004)")
     print(f"                            : ebp=0x000A0004 ebx=0x00008B89 (case-D #TS POST-commit -- oracle gap 1, pinned honestly)")
     print(f"                            : the RTL-side witnesses (ebp=0x010A0004, ebx=0x0000898B) are graded in step 7w")
 elif test == "pxc04f":
@@ -1198,9 +1198,10 @@ fi
 # #TS(0x0004) only AFTER committing the switch (CR0.TS, busy bits, new task
 # context; oracle gap 1 in the manifest) while the fix's C-06 prevalidation
 # raises it BEFORE any state moves. Graded here: the final record must carry
-# the null-base proofs (edi=ecx=0x0BABE001 = the S1 sentinel read through the
-# null DS at base 0, never the poison base), the LDT-entry-0 + TI-error-code
-# proof (esi=0x00010004), the outgoing-context #TS (ebp=0x010A0004: ESP at
+# the legal null-load/task-switch proofs (edi=ecx=0x0BABE001 = the SS-relative
+# S1 sentinel after visible-null checks, NOT a hidden-base proof), the
+# LDT-entry-0 + TI-error-code proof (esi=0x00010004), outgoing-context #TS
+# (ebp=0x010A0004: ESP at
 # the fault == the pre-switch ESP) and the NO-busy-write proof
 # (ebx=0x0000898B), plus +ven_faultlog for the two fault deliveries.
 if echo " $WITNESS_TESTS " | grep -q " $TEST "; then
@@ -1210,8 +1211,17 @@ if echo " $WITNESS_TESTS " | grep -q " $TEST "; then
   [[ -x "$TB" ]] || { echo "FATAL: RTL TB $TB not built"; exit 1; }
   WTR="$OUTDIR/$TEST.rtl.wit.vtrace"
   FLOG="$OUTDIR/$TEST.faultlog"
-  "$TB" --image "$IMG" --system --out "$WTR" --max-insn "$MAXI" \
-      --quiesce 400 +ven_faultlog >"$FLOG" 2>&1 || true
+  WRC=0
+  if [[ "$TEST" == "pselnull" ]]; then
+    # Normal existing I/O service gives a real AL42/debug-exit133 closure;
+    # do not accept matching registers after a timeout/kill/quiescent prefix.
+    timeout --kill-after=3s 30s "$TB" --image "$IMG" --system --cosim \
+      --out "$WTR" --max-insn "$MAXI" --max-cycles 1000000 \
+      --quiesce 400 +ven_faultlog >"$FLOG" 2>&1 || WRC=$?
+  else
+    "$TB" --image "$IMG" --system --out "$WTR" --max-insn "$MAXI" \
+        --quiesce 400 +ven_faultlog >"$FLOG" 2>&1 || true
+  fi
   echo "  RTL witness trace: $WTR ($(wc -l < "$WTR") lines)"
   if [[ "$TEST" == "piretgp0" ]]; then
   PYTHONPATH="$REPO/verif/diff" "$PY" - "$WTR" <<'PYEOF'
@@ -1240,32 +1250,9 @@ PYEOF
   echo "  RTL-WITNESS-OK: #GP(0) with error code 0 at both returns, ESP preserved,"
   echo "                  at-limit IRET succeeds, case-B cleanup boundary correct"
   elif [[ "$TEST" == "pselnull" ]]; then
-  PYTHONPATH="$REPO/verif/diff" "$PY" - "$WTR" <<'PYEOF'
-import sys
-import tracefmt as t
-tr = t.read_trace(sys.argv[1])
-last = tr.records[-1]
-def H(k): return int(last[k], 16)
-assert H("edi") == 0x0BABE001, f"edi={last['edi']} != 0x0BABE001 (case A: null-DS read must land on S1 at base 0, no #PF, NOT the poison base 0xA0000)"
-assert H("esi") == 0x00010004, f"esi={last['esi']} != 0x00010004 (case B: the LDT-entry-0 far JMP succeeded; case C: error code 0x0004 -- TI preserved)"
-assert H("ebp") == 0x010A0004, f"ebp={last['ebp']} != 0x010A0004 (case D: #TS(0x0004) raised in the OUTGOING context -- ESP at the fault == the pre-switch ESP, nothing moved)"
-assert H("ebx") == 0x0000898B, f"ebx={last['ebx']} != 0x0000898B (case D: NO busy-byte writes -- TSS_D stays 0x89, TSS1 stays 0x8B)"
-assert H("ecx") == 0x0BABE001, f"ecx={last['ecx']} != 0x0BABE001 (case E: the task-switch-staged null DS has base 0 -- task_e reads S1 through it, no #PF)"
-print(f"  RTL final record        : edi=ecx=0x0BABE001 esi=0x00010004 ebp=0x010A0004 ebx=0x0000898B")
-print(f"                          (null DS base 0 twice; LDT0 JMP ok + err 0x0004; outgoing-context #TS; no busy writes)")
-PYEOF
-  GP04="$(grep -c '^\[FAULT\] vec=13 .*err=00000004' "$FLOG" || true)"
-  TS04="$(grep -c '^\[FAULT\] vec=10 .*err=00000004' "$FLOG" || true)"
-  TS00="$(grep -c '^\[FAULT\] vec=10 .*err=00000000' "$FLOG" || true)"
-  echo "  fault log: #GP(0x0004)=$GP04 (want 1: case C, OOB LDT selector, TI preserved)"
-  echo "             #TS(0x0004)=$TS04 (want 1: case D, incoming LDTR TI violation)"
-  echo "             #TS(0x0000)=$TS00 (want 0: the old {sel[15:3],3'b000} error form)"
-  [[ "$GP04" == "1" ]] || { echo "FATAL: pselnull: case C must deliver exactly one #GP(0x0004) -- the OOB LDT selector's error code with TI preserved (0x0000 would be the old form; 0 would mean no fault); see $FLOG"; exit 1; }
-  [[ "$TS04" == "1" ]] || { echo "FATAL: pselnull: case D must deliver exactly one #TS(0x0004) -- the incoming LDTR 0x0004 TI violation (0 would mean the LDTR was silently invalidated, the HEAD defect); see $FLOG"; exit 1; }
-  [[ "$TS00" == "0" ]] || { echo "FATAL: pselnull: #TS(0x0000) is the old TI-clearing error form"; exit 1; }
-  echo "  RTL-WITNESS-OK: null loads staged zeros with no GDT[0] access (no #PF,"
-  echo "                  poison base never leaks), LDT entry 0 jumpable, error"
-  echo "                  codes preserve TI, incoming LDTR 0x0004 is #TS(0x0004)"
+  timeout --kill-after=3s 10s "$PY" "$TDIR/check_witness.py" \
+    --trace "$WTR" --log "$FLOG" --return-code "$WRC" --elf "$TDIR/pselnull.elf"
+  echo "  RTL-WITNESS-OK: complete five-case legal flow, exact GP4/TS4, zero PF, debug-exit133"
   elif [[ "$TEST" == "ptswflt" ]]; then
   PYTHONPATH="$REPO/verif/diff" "$PY" - "$WTR" <<'PYEOF'
 import sys

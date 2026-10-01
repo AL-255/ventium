@@ -47,23 +47,22 @@
  *           page 3, which is NOT PRESENT; the rest of the GDT starts at
  *           0x4000 on present page 4):
  *   case A  MOV DS <- 0x0000 with GDT[0] nonzero AND non-present: NO #PF
- *           (no descriptor read) and the hidden cache is explicit zeros --
- *           proven by a data read THROUGH the null DS at offset 0x9ABC
- *           landing on the S1 sentinel at linear 0x9ABC (base 0), NOT on the
- *           S2 sentinel at 0xA9ABC (poison base 0xA0000 + 0x9ABC). (HEAD
- *           reads GDT[0] -> #PF -> pf_handler poisons the exit witnesses.)
+ *           (no descriptor read), visible DS=0, then a LEGAL SS-relative
+ *           S1 sentinel access. This does NOT prove a hidden DS base of0.
+ *           pnullseg independently proves null-DS accesses raise #GP(0).
+ *           LEGACY_NULL_USE=1 retains the former unenforced poison-base
+ *           diagnostic only; it is never the architectural standard image.
  *   case E  hardware task switch (ljmp to TSS_E, paging stays on) whose
  *           incoming DS is NULL (0x0000) and incoming LDTR is null, with
  *           GDT[0] non-present: the switch completes with NO #PF (explicit
- *           zeros staged for both), and task_e reads S1 through the staged
- *           null DS (base 0, not the poison base).
+ *           null selectors staged for both), task_e verifies DS=LDTR=0,
+ *           and reads S1 legally through SS before restoring valid DS.
  *
  * ORACLE: cases A, B, C, E are implemented identically by QEMU 8.2.2
  * (helper_load_seg / helper_ljmp_protected / switch_tss_ra -- verified in
- * the pinned harness source) and QEMU does NOT fault on a data access
- * through a null-loaded DS in softmmu (no per-access segment validation --
- * the same reason run-seg-gate.sh exists), so the base-0 read is
- * oracle-identical. Case D is the ONE witness-only case (oracle_gaps):
+ * the pinned harness source). Standard A/E no longer access a null DS:
+ * QEMU softmmu does not implement per-access null-segment validation and
+ * cannot be that access's oracle. Case D remains witness-only (oracle gap):
  * QEMU raises #TS(0x0004) only AFTER committing the whole switch (outgoing
  * save, busy toggle, CR0.TS=1, new task context -- SDM Vol.3A 8.2 step 9/14
  * ordering), while the fix's REVIEW_Aug3 C-06 prevalidation raises it in
@@ -95,9 +94,8 @@
  *
  * EXIT WITNESSES (final-record GPRs; step-7w asserts the RTL values, step-5g
  * pins the GOLDEN's honestly where the oracle ordering differs):
- *   edi = 0x0BABE001  case A: the null-DS read landed on S1 (base 0), not
- *         the poison base -- and no #PF (pf_handler would have diverted the
- *         run to do_exit with edi=0)
+ *   edi = 0x0BABE001  case A: visible DS=0, no #PF on null load, legal
+ *         SS-relative S1 read. Neither this nor the sentinel proves DS base.
  *   esi = (b_ok<<16)|0x0004 = 0x00010004  case B's LDT-entry-0 JMP succeeded
  *         (sentinel verified) AND case C's error code is 0x0004 (TI kept)
  *   ebp = (d_espok<<24)|(vec<<16)|err = 0x010A0004 (RTL) / 0x000A0004 (QEMU
@@ -107,9 +105,8 @@
  *   ebx = (TSS_D.acc<<8)|TSS1.acc = 0x0000898B (RTL) / 0x00008B89 (golden
  *         pin): the RTL's rejected switch wrote NO busy bytes; QEMU's
  *         committed-then-faulted switch toggled both
- *   ecx = 0x0BABE001  case E: the task-switch-staged null DS has base 0
- *         (task_e reads S1 through it), and the paged switch with a null
- *         incoming DS + null LDTR raised no #PF
+ *   ecx = 0x0BABE001  case E: visible DS=LDTR=0, legal SS-relative S1
+ *         read, and no #PF on the paged null-selector task switch
  *
  * NEGATIVE CONTROL (REQUIRED, see manifest.json): the HEAD TB (no R2-C02
  * fix) treats 0x0004/0x0006 as null: case B's JMP faults as a null-CS load
@@ -135,6 +132,9 @@
     movl    %esp, PRE_ESP
 .endm
 
+#ifndef LEGACY_NULL_USE
+#define LEGACY_NULL_USE 0
+#endif
     .code16
     .section .text16, "ax"
     .global _start16
@@ -248,9 +248,8 @@ pm_entry:
     movl    $0x0000FFFF, 0x00005008
     movl    $0x00CF9200, 0x0000500C
 
-    /* ---- the two sentinels: S1 at linear 0x9ABC (base 0 + offset), S2 at
-     * 0xA9ABC (poison base 0xA0000 + the same offset). A null-DS read at
-     * offset 0x9ABC lands on S1 iff the hidden base is 0. ----------------- */
+    /* S1 is the standard legal SS sentinel. S2 is used only by the explicit
+     * historical LEGACY_NULL_USE poison-hidden-base diagnostic. */
     movl    $0x0BABE001, 0x00009ABC
     movl    $0xDEAD9002, 0x000A9ABC
 
@@ -329,6 +328,8 @@ c_b_done:
     lldt    %ax                         /* LDT_C: limit 0x00 */
     STAGE   (SLOTS+1*12), c_c_done
     movw    $0x0006, %ax
+    .global fault_c
+fault_c:
     movw    %ax, %ds                    /* #GP(0x0004) */
 c_c_done:
     movl    (SLOTS+1*12+4), %eax        /* the handler-recorded error code */
@@ -344,6 +345,8 @@ c_c_done:
      * golden honestly pins d_espok == 0 and the toggled busy bytes. HEAD
      * silently invalidates the LDT and COMPLETES the switch -> task_d runs.  */
     STAGE   (SLOTS+2*12), c_d_done
+    .global fault_d
+fault_d:
     ljmp    $0x28, $0                   /* task switch to TSS_D */
 c_d_done:
     movl    (SLOTS+2*12+0), %eax        /* vec (10 in both oracles) */
@@ -395,18 +398,22 @@ c_d_done:
     orl     $0x80000000, %eax
     movl    %eax, %cr0                  /* CR0.PG=1: paging ON */
 
-    /* ============== case A: null DS load, GDT[0] poison + non-present ===== *
-     * MOV DS <- 0: a null load names NO descriptor. The fix performs no read
-     * (no #PF on the non-present page 3) and stages explicit zeros. The read
-     * THROUGH the null DS at offset 0x9ABC must land on S1 (base 0) -- never
-     * on S2 at poison-base 0xA0000 + 0x9ABC. QEMU likewise performs no read
-     * and computes base 0 + offset (no softmmu null-use fault -- verified in
-     * the golden flow). HEAD reads GDT[0] -> #PF -> pf_entry poisons 0x2004
-     * and diverts to do_exit with edi == 0.                                 */
+    /* Case A: visible null load succeeds without reading nonpresent GDT[0].
+     * The STANDARD sentinel read/store uses valid SS, not unusable DS. */
     xorl    %eax, %eax
+    .global null_load_a
+null_load_a:
     movw    %ax, %ds                    /* NULL selector: no descriptor read */
+#if LEGACY_NULL_USE
     movl    0x00009ABC, %eax            /* DS-relative: base(0) + 0x9ABC = S1 */
     movl    %eax, 0x00002000            /* expect 0x0BABE001 */
+#else
+    movw    %ds, %ax
+    testw   %ax, %ax
+    jnz     null_visible_bad
+    movl    %ss:0x00009ABC, %eax
+    movl    %eax, %ss:0x00002000
+#endif
     movw    $0x10, %ax
     movw    %ax, %ds                    /* restore a valid DS */
     movl    $0xC0C0C0C0, 0x00002004     /* "null DS load completed, no #PF" */
@@ -416,26 +423,37 @@ c_d_done:
      * with NO GDT[0] read (tsw_seg_null), and the null incoming LDTR stages
      * the invalid LDT the same way, so the whole switch touches only PRESENT
      * pages and completes. HEAD reads GDT[0] at linear 0x3FF8 for the null
-     * DS -> #PF mid-switch -> pf_entry. task_e runs with DS null (base 0).   */
+     * DS -> #PF mid-switch -> pf_entry. task_e starts with unusable null DS. */
     ljmp    $0x30, $0                   /* TASK SWITCH to TSS_E */
 
-    /* ============================== task_e =============================== *
-     * Entered with DS = the staged null (base 0, limit 0, attr 0). The read
-     * through it at offset 0x9ABC must land on S1 -- proof the staged hidden
-     * base is 0, not the poison 0xA0000. All absolute addressing below uses
-     * DS, which is base 0, so it lands linear.                               */
+    /* Case E: verify visible DS=LDTR=0, legal SS bookkeeping, then restore
+     * valid DS. No standard data access depends on a null hidden base. */
     .align 16
     .global task_e
 task_e:
+#if LEGACY_NULL_USE
     movl    0x00009ABC, %eax            /* via the staged null DS: S1 */
     movl    %eax, 0x00002020            /* expect 0x0BABE001 */
     movl    $0xE0E0E0E0, 0x00002024     /* "paged switch, null DS, no #PF" */
+#else
+    movw    %ds, %ax
+    testw   %ax, %ax
+    jnz     null_visible_bad
+    sldt    %ax
+    testw   %ax, %ax
+    jnz     null_visible_bad
+    movl    %ss:0x00009ABC, %eax
+    movl    %eax, %ss:0x00002020
+    movl    $0xE0E0E0E0, %ss:0x00002024
+    movw    $0x10, %ax
+    movw    %ax, %ds
+#endif
 
     /* ===================== pull the witnesses and exit ===================== */
     .align 16
     .global do_exit
 do_exit:
-    movl    0x00002000, %edi            /* case A: S1 (0x0BABE001) */
+    movl    0x00002000, %edi            /* A: visible null load + legal S1 */
     movl    CNT_BOK, %eax
     shll    $16, %eax
     orl     0x0000200C, %eax
@@ -448,14 +466,27 @@ do_exit:
     shll    $8, %eax
     orl     0x00002018, %eax
     movl    %eax, %ebx                  /* (TSS_D.acc<<8)|TSS1.acc */
-    movl    0x00002020, %ecx            /* case E: S1 (0x0BABE001) */
+    movl    0x00002020, %ecx            /* E: null DS/LDTR + legal S1 */
 
     movl    $0x42, %eax
+    .global exit_port
+exit_port:
     movw    $0xF4, %dx
+    .global exit_out
+exit_out:
     outb    %al, %dx
 hang1:
     hlt
     jmp     hang1
+
+#if !LEGACY_NULL_USE
+null_visible_bad:
+    movw    $0x10, %ax
+    movw    %ax, %ds
+    movl    $0, 0x00002000
+    movl    $0, 0x00002020
+    jmp     do_exit
+#endif
 
     /* ================== case-B target (LDT entry 0 code) ================== *
      * Runs with CS = 0x0004 (base 0xF0000): reached ONLY if the far JMP
@@ -515,7 +546,9 @@ fcommon:
     .align 16
     .global pf_entry
 pf_entry:
-    movl    $0xEEEEEEEE, 0x00002004
+    movl    $0xEEEEEEEE, %ss:0x00002004
+    movw    $0x10, %ax
+    movw    %ax, %ds                   /* reliable failure path with null DS */
     addl    $4, %esp                    /* drop the #PF error code */
     jmp     do_exit
 

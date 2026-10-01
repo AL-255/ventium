@@ -1,0 +1,37 @@
+{
+  "name": "pnullseg",
+  "kind": "system-witness",
+  "src": "pnullseg.S",
+  "linker": "pnullseg.ld",
+  "image": "pnullseg.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 85,
+  "max_insn": 1200,
+  "sys": true,
+  "paging": false,
+  "required_defines": ["VEN_SEG_ENFORCE"],
+  "oracle": "Intel 243191-001 MOV pp.3-287/3-289 (PDF316-319); QEMU softmmu is not a null-data-access oracle",
+  "faults": [
+    {"symbol": "fault_ds_read", "vector": 13, "error": 0},
+    {"symbol": "fault_ds_write", "vector": 13, "error": 0},
+    {"symbol": "fault_es_read", "vector": 13, "error": 0},
+    {"symbol": "fault_es_write", "vector": 13, "error": 0}
+  ],
+  "witnesses": {
+    "eax": "0x0000002a",
+    "ecx": "0x00000004",
+    "ebx": "0x00000006",
+    "esp": "0x00090000",
+    "ebp": "0xaabbccdd",
+    "esi": "0x600d51a5",
+    "edi": "0x00000000",
+    "ds": "0x0010",
+    "es": "0x0010",
+    "ss": "0x0010"
+  },
+  "description": "Strict #GP(0) for null DS0/ES3 reads and writes. Each handler checks original fault EIP, error0, saved CS, all8 GPRs, original ESP, status/control flags, null selectors and untouched target+neighbors; return checks live GPRs/flags. Legal SS override/default-SS read+write controls with nullDS and ordinary DS read+write with nullES. Does not replace pselnull's LDT/task/paging/hidden-cache obligations."
+}
