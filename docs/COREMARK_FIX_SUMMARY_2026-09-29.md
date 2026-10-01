@@ -1470,12 +1470,34 @@ through to RET, skipping the virtual-EOI call. Service semantics and common
 VPICD cleanup still need qualification before claiming an ISA defect.
 No guest flag, EOI, semaphore, clock or RTL was changed.
 
-Latest verified current `cdcb` gameplay IPC is **0.47240456** over **4.4B–4.5B**:
-profile clocks 4,399,999,637–4,499,999,637, retirements
-1,682,993,352–1,730,233,808; U 35,122,727 plus V 12,117,729 exactly equals
-47,240,456 in 100M clocks. Raw frames 36/37 advance gameplay; hashes
-`c3a9afe62be86c4f20c898e63f4a4f52d67ed23b743e06307ef3b03ffc3f28f0` /
-`773b7afde046c7905f2ef9ed69ce84ea8d43ed0fc054ffdd0a46c807338022ef`.
+The frozen sparse memory reader reconstructs the same complete 1M stream in
+14.688 seconds / 33.8 MiB, without model eval. Its strengthened **18 host
+fixtures PASS**, including the qualified pilot, exact retirement accounting,
+malformed footer/CRC/schema/cycle rejection and existing-output preservation.
+Victim-bank changes while unrelated fills replace old tags are explicitly
+excluded from IRQ-clear and coherence claims.
+
+The combined origin/terminal native query closes with exit zero in 17.881
+seconds under CPU 3 / 512 MiB / no swap / 16 tasks, zero OOM events. Result:
+`e7faa7eff89fc71cb473b9e5280b331624d9ad2cbeb89acdd75bb6b08f3066a4`;
+resource receipt `87a26c6839542868627ed5e3844f5740deddc91c141144bcb3c2799cdec2a212`.
+Binding `C000E358 -> C0002028` is CMP EBX,[C0010720]; both operands are
+`C15200E8`, so ZF=1 is correct. Endpoint code confirms the guest patches
+the INT20 service call into that inline CMP. Owner virtual callback is CLC/RET;
+the actual carry-clear path deliberately sets virtual ISR. Cleanup A620 clears
+an event handle and computes `IRR & ~(ISR | IMR)` for scheduling, **not EOI**.
+AB5B clears VM+1F's high bit; terminal completed VM word is `0020`, private
+IRR/ISR both `0001`. No wrong compare/branch or cache corruption is established.
+The remaining causal question is the guest's intended system-VM PIC/EOI path;
+this endpoint alone does not establish continuous persistence across the later
+95M-clock gap. No guest state or RTL is forced to bypass it.
+
+Latest verified current `cdcb` gameplay IPC is **0.43136870** over **4.7B–4.8B**:
+profile clocks 4,699,999,637–4,799,999,637, retirements
+1,819,383,759–1,862,520,629; U 32,644,047 plus V 10,492,823 exactly equals
+43,136,870 in 100M clocks. Raw frames 39/40 advance gameplay; hashes
+`7603301d3d0641a8c5375595ecfd5e2760d2ad5a29d08006fabc1d47aa7ac508` /
+`16386d9130566f56de44861c5fa259603dfb972169448c903e1667b0000e5bc5`.
 The private executable still matches `cdcb`; `edda` remains a host-only
 diagnostic with no gameplay measurement. Current cold Quake timedemo and
 Win95 desktop remain incomplete. Acceptance fixes `f5457c9` and `4480287`
