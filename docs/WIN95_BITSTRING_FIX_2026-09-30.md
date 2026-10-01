@@ -83,6 +83,57 @@ initialized bitmaps; restoring it after an RTL fix cannot prove boot repair.
 Acceptance requires a fresh cold boot to the desktop, both CoreMark correctness
 seeds, completed Quake timedemo and the relevant differential gates.
 
+## October 1: cold acceptance and evidence collection
+
+At 03:51 UTC the repaired candidate's two CoreMark seeds and both cold OS
+runs are actually running, not merely queued. Their private full-PC parent is
+`ao486-sim/obj_dir_standard_bitmem_sep30.S9VlV4/`:
+
+| Run | User service | Invocation ID | Native CPU |
+| --- | --- | --- | --- |
+| Both CoreMark seeds | `ventium-standard-bitmem-coremark-sep30.service` | `c8fb53fb3f044949b4be4fcae04c3a73` | 4 / 5 |
+| Win95 cold boot | `ventium-standard-win95-bitmem-sep30.service` | `0f3faba5b45d4d7d8807429e83b1bf34` | 8 |
+| FreeDOS Quake cold timedemo | `ventium-standard-quake-bitmem-sep30.service` | `52726767e6d74984b47c1715f2b7f8ff` | 9 |
+
+The OS wrappers start with a clean environment, private disk/executable/ROM
+copies, 45 MHz core/RTC, 90 MHz VGA, 32 MiB and `FPGA_DDR=2`. No guest
+patches, write dropping, keyboard bypass, old snapshots or forced EOI are used.
+Each OS unit has a 2 GiB/no-swap/32-task, one-CPU envelope; the CoreMark unit
+has two CPUs and 160-task headroom. Actual `/proc` executable hashes, affinities,
+unit invocations and cgroup OOM counters were checked. The Win95 unit's large
+memory accounting is predominantly inactive disk-copy file cache, not anonymous
+simulator growth; no OOM events are recorded.
+
+Win95 now uses the reviewed held-inode `CapturedLog` collector rather than
+letting the child write the evidence file. Final screening requires the actual
+child wait, pipe EOF, absent child process group, complete normal engine footer,
+stable log hash and unchanged observed source/input hashes. The 49 combined
+collector/Win95 host tests pass. A zero exit remains `clean_exit_unqualified`,
+not desktop acceptance: a verified desktop and error-free evidence are still
+required. Observed Python source hashes are not misrepresented as proof of the
+exact loaded text. Setup-exception cleanup and disk hashing after an unproved
+process-group closure remain harness limitations; such results cannot qualify
+acceptance. The running source files are frozen for their before/after checks.
+
+The candidate's first 194 complete Quake progress records through 97,348,660
+clocks, including the 97 logged startup page faults, match the original `cdcb`
+run exactly. Those faults are not evidence of a new regression; startup is
+advancing, but is not gameplay IPC or timedemo completion. Both CoreMark seeds
+have reached their 536,870,912-clock checkpoints; neither has a closed CRC
+verdict yet. Win95 has not produced a verified desktop frame. All three
+standard-suite requirements therefore remain pending.
+
+The broader `make verify-sys` invocation on the frozen repaired TB stopped with
+exit 2 at `pselnull`, not at its timeout. That historical fixture deliberately
+reads through a null DS, relying on QEMU softmmu's missing per-access segment
+validation. Both the original and repaired measured compile profiles enable
+`VEN_SEG_ENFORCE`: a protected-mode null-DS access must instead raise #GP(0).
+The fixture's null-DS handler then faults recursively, so the remaining system
+gates did not run. This is not a green system-gate result, and no measured
+old-binary control is claimed. Fix the test contract while preserving its
+five selector/task/paging obligations and add precise null-segment read/write
+witnesses; do not disable CPU segment enforcement to make it pass.
+
 ## Evidence receipts
 
 Artifacts are under the ignored
@@ -100,10 +151,10 @@ no swap / 16 tasks / 300-second hard cap. Offline invocation:
 `d57bf0a31992430291028462a3b8372f`, CPU 3 / 512 MiB / no swap / 16 tasks /
 120-second cap; actual closure 20.632 seconds, zero OOM events.
 
-Latest verified gameplay IPC is **0.41675015**, `cdcb`, cycles **5.4–5.5B**:
-clocks 5,399,999,637–5,499,999,637, retirements 2,126,385,929–2,168,060,944.
-The 41,675,015 retirements reconcile with U 32,346,537 + V 9,328,478
-in 100M clocks; raw frames 46/47 advance gameplay. Different demo scenes do
+Latest verified gameplay IPC is **0.43641547**, `cdcb`, cycles **5.7–5.8B**:
+clocks 5,699,999,637–5,799,999,637, retirements 2,260,946,143–2,304,587,690.
+The 43,641,547 retirements reconcile with U 32,959,242 + V 10,682,305
+in 100M clocks; raw frames 49/50 advance gameplay. Different demo scenes do
 not establish a code-change gain or regression.
 It predates this bit-string repair; the repair has no gameplay measurement.
 No FPS gain or full-suite pass is claimed.
