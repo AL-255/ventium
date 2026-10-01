@@ -1449,13 +1449,39 @@ delivery/EOI or persistence without intervening clears over the later 95M
 clocks. The next bounded diagnostic follows the actual post-setter path with
 the existing model-matched recorder; no new model build is required.
 
-Latest verified current `cdcb` gameplay IPC is **0.44275880** over **4.2B–4.3B**:
-profile clocks 4,199,999,637–4,299,999,637, retirements
-1,592,675,761–1,636,951,641; U 33,639,949 plus V 10,635,931 exactly equals
-44,275,880 in 100M clocks. Raw frames 34/35 advance gameplay; hashes
-`0992c9bc49bcad51922edea1f0d8f1919f6420f5116ab5cb759ff5de2a5364a9` /
-`e4950a6606d8ef45f1ca6d18d49b656c2cd44465eda68743daf0428312834538`.
+At **01:40 UTC**, the bounded first-setter continuation closed PASS in
+209.103 seconds under CPU 2, 2 GiB/no-swap/32 tasks, with zero OOM events.
+Its four actual children were waited with exit zero, complete pipe capture and
+absent process groups. The 1,000-clock reference/profiler pilot and 1M-clock
+recorder OFF/ON native snapshots/disks match byte-for-byte. Exact records span
+**298,745,024–299,745,023**: 12,768 fields / 426,746 bytes, including terminal
+reconstruction and gzip/footer checks. Receipt SHA-256:
+`43b2d0e0ef23319f2ef49289269ffb11d7a2faf45c6a15f3fae160bb9df3e6f3`;
+trace `8dc5b79cfab5e1da8a0d5424ccade7bf9993773d7b5d0f39cddd09bd8ce0f350`.
+Artifacts are `obj_dir_win95_ioperm_native_sep30.ePtDku/firstsetter-delta-sep30.1/`
+under `ao486-sim/`. This is a same-model diagnostic, **not desktop acceptance**.
+
+The existing frozen passive I/O inspector independently reconstructs all
+1M records in 8.233 seconds, reconciles **334,363 actual DPI retirements**,
+and reports eight uncapped I/O/fault events. BIOS OUT 20h,20h follows an
+allowed TSS bitmap lookup and physical PIC write. The owner IRET callback
+reaches `C002C5E2`; after service `10004h`, its actual ZF=1 makes JNZ fall
+through to RET, skipping the virtual-EOI call. Service semantics and common
+VPICD cleanup still need qualification before claiming an ISA defect.
+No guest flag, EOI, semaphore, clock or RTL was changed.
+
+Latest verified current `cdcb` gameplay IPC is **0.47240456** over **4.4B–4.5B**:
+profile clocks 4,399,999,637–4,499,999,637, retirements
+1,682,993,352–1,730,233,808; U 35,122,727 plus V 12,117,729 exactly equals
+47,240,456 in 100M clocks. Raw frames 36/37 advance gameplay; hashes
+`c3a9afe62be86c4f20c898e63f4a4f52d67ed23b743e06307ef3b03ffc3f28f0` /
+`773b7afde046c7905f2ef9ed69ce84ea8d43ed0fc054ffdd0a46c807338022ef`.
 The private executable still matches `cdcb`; `edda` remains a host-only
 diagnostic with no gameplay measurement. Current cold Quake timedemo and
 Win95 desktop remain incomplete. Acceptance fixes `f5457c9` and `4480287`
 are pushed; they do not claim to repair the Win95 guest wait.
+
+The **11.7 FPS at 70 MHz** answer is only a linear extrapolation from the
+older control's reported 7.5 FPS at 45 MHz, not a current-candidate result or
+before/after IPC-fix gain. Current timedemo FPS remains unmeasured. Comparing
+different demo scenes' IPC cannot establish a fixed-work FPS improvement.
