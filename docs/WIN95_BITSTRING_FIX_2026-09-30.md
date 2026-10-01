@@ -1521,3 +1521,102 @@ remains live in advancing gameplay and has no completed timedemo/FPS result.
 **Standard suite remains incomplete: CoreMark PASS, Win95 pending, Quake pending.**
 Current verified gameplay IPC is **0.43038841**,4092 clocks
 **2,199,999,637–2,299,999,637**; this checkpoint adds no measured performance gain.
+
+### October1 20:21UTC: normal VGA configuration and fresh cold qualification
+
+The original cc68 disk is retained unchanged. On a **new private QEMU overlay**,
+root used Windows' own Display Properties to replace the existing adapter:
+Settings → Change Display Type → Adapter Change → Show All Devices →
+`(Standard display types)` → `Standard Display Adapter (VGA)`. The earlier
+manual Add New Hardware attempt reported a resource conflict; root cancelled
+it instead of installing a second adapter. No guest-code patch, hand-edited
+registry, CPU-state injection, snapshot or saved-state resume was used.
+
+Root viewed the old Cirrus binding in frame17, the installed
+`Standard Display Adapter (VGA)` / `vga.drv,*vdd` in frame25, Windows' restart
+prompt in frame27, and the post-restart desktop without the display error in
+frame29. Root then selected normal Windows shutdown. Native QEMU exited0 at
+19:56:55UTC, before its19:58:02 hard cap. Root retained the original invocation
+`f6b0902aee1140fc8caac46fcc468e84`, actual exited0 tuple and absent native PID /
+recursive cgroup **before** cleaning the already-exited service; the actual
+`systemd-run --wait` subsequently returned0. Its longer displayed service
+runtime includes idle `RemainAfterExit` retention, not a native timeout.
+The final poweroff screen/QMP poweroff event was not captured: frame31 failed
+because the native process had already exited. Terminal cgroup OOM counters
+were not retained after group removal; they are not retrospectively invented.
+
+Preparation artifacts are under
+`ao486-sim/obj_dir_ven_rfcomplete_oct01.5mZtCG/qemu-vga-fixture-4VSF7/`.
+The original source still hashes to cc68. Closed overlay SHA256 is
+`af2c9c48067f845060d5d38421e758edbfad9ef63dbdb7927bff1d4fe8afed3f`.
+After actual closure, a bounded `qemu-img convert` exported a **new**, independent
+2GiB raw disk, SHA256
+`37f5db14225f753aa357e321606e75273726fe330a2b7bcd954a61f9337b1a56`;
+it did not overwrite, repair, commit into or rebase the original source.
+Export native/actual wait both returned0; original source and overlay hashes
+remained unchanged. The preparation receipt `fixture-closed.json` hashes to
+`7b8c57e780fd36647dc0e915b9d0a7ef7eb07a87c106c659fcc132bfaf7ab579`.
+
+Root read only the closed export's SYSTEM.DAT, SHA256
+`4275e35b08202af74e15428df0e474cb98a08bd7b51aa2e77e98017d2bbc4293`.
+The linked CREG reader resolves the existing Enum instance to `Display\0000`:
+HardwareID now `*PNP0900`, `MSDISP.INF` / `InfSection=VGA`, DEFAULT
+`4,640,480` / `vga.drv` / `*vdd`, selected Config0001 `640,480` /4 bits.
+Native installer changes to driver/registry configuration are intentional;
+this is **not** a claim that the configured guest disk is byte-identical to cc68.
+
+A separate fresh QEMU cold reference then used that immutable37f5 source,
+explicit read-only file/raw nodes, a new writable overlay, `-cpu pentium`
+with no VME override, standard VGA, and **no UI input**. Both root-viewed raw
+frames show the desktop with the ordinary Welcome window, not the display
+error. QMP quit closed native0 at20:17:35UTC before its20:18 hard cap; original
+PID/cgroup absence preceded idle cleanup, actual wait returned0, and source
+SHA remained37f5. `qemu-vga-fixture-vVGAk/cold-reference-closed.json` hashes to
+`539cbd5edc78c71f324426908379b20bb1f35005c9b0f3ed6ba1b4d1aab8ba7f`.
+This is fixture sanity evidence on different PC firmware/VGA, **not a Ventium
+CPU differential or standard-suite PASS**. Its disposable cold-reference
+overlay is not the source of the next DUT run.
+
+The separate Ventium cold run is now actually live: unit
+`ventium-standard-win95-vga-rfcomplete-oct01.service`, invocation
+`5d4961061292401d87e951ddf44ece07`, owner1024147 / native1024191,
+starts20587448 /20587784, CPU20, unchanged RF executable4092. Fresh private
+copy SHA matched37f5 before execution; no runtime input, snapshot, state hook,
+guest patch, clock/cache override or new RTL is involved. The frozen new
+launcher `run_win95_vga_cold.py` hashes to
+`734354ba031f51a33e2be4211d51ceef394cee05e0756bf466ba24f523d4ffad`.
+Root independently checked all17 source/archive pins and actual native
+lifetime, parent/session/group, executable SHA, affinity and command.
+Prepared `root-closed-expectation.json` SHA is
+`d8c1a0095cb642d9984afb5d9b775c4162e413fbabfed7a6f2e8e59e18d9c9ce`;
+it is future acceptance authority, not a closed result or desktop review.
+The metadata-only observer holds the original unit reference, binds actual
+`RemainAfterExit=no`, and never changes properties or stops/restarts the DUT.
+At20:20UTC the new run has85,713,983 clocks /6,511,986 retire events;
+OOM / OOM-kill / OOM-group-kill counters are0, although the staging file cache
+has reached the2GiB cap. The original-source RF Win95 and both Quake runs are
+preserved; no live private DUT disk has been read or hashed.
+
+The closed Win95 checker only adds the exact second launcher basename to its
+existing externally SHA-pinned allowlist. Cold command/environment, resource,
+input/ROM/helper, actual closure, lossless-log, complete-frame inventory and
+manual error-free desktop requirements are unchanged. All20 host-only checker
+contracts passed, including the new valid configured-source case and rejection
+of unknown launcher names, forged launcher SHA and post-pin launcher, configured
+source and preparation-receipt mutation. The final20-test host run returned0
+in192ms /20.5MiB / no swap (invocation `0d2ee3ec5e7740d4bcf8ec27ebc2e3e9`). The
+configured QMP helper separately passed all17 mock-only contracts. Neither
+host test is a guest boot pass.
+
+Disk headroom briefly fell below the launcher's8GiB floor. Root losslessly
+packed only this completed build's two generated `.gch` compiler caches,
+verified expanded SHA equality, then removed the two raw cache files under
+the heavy-build lock. Their `.gch.gz` copies can restore the exact bytes;
+approximately150MiB was reclaimed. Binaries, models, sources and acceptance
+artifacts were untouched, and the new launch passed the unchanged headroom
+guard. The packing receipt is `pch-lossless-pack.json` in the build directory.
+
+**Suite remains incomplete: CoreMark PASS; configured Win95 boot pending;
+Quake timedemo pending.** Current verified gameplay IPC remains
+**0.43038841**,4092 clocks **2,199,999,637–2,299,999,637**. No new FPS or matched
+before/after Quake performance gain is claimed.
