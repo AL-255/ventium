@@ -1393,3 +1393,45 @@ not prove that entire records were never dropped. The existing loaded
 supervisors are not retroactively relabelled as a new loss-detecting collector;
 a bounded pipe collector is being implemented for future runs. No RTL/model
 rebuild or current-run modification accompanies these acceptance fixes.
+
+At **01:01 UTC**, the first-setter diagnostic actually closed with waited
+simulator exit zero, native qualification PASS, unchanged frozen inputs/models,
+zero OOM events and no reported errors. Trigger clock/retirement are
+**298,745,022 / 28,038,195**; save is at **298,745,023** with the same
+retirement. The first relevant setter is now captured rather than inferred
+from the much later wait state. Closed receipt SHA-256:
+`911479245a82ba4b53ab0e10b0bf6104fe6c9862fd2d862017d9d9f64d05ee52`;
+native snapshot `04c38b8bdff091c4171da9840a8481abdf59ed25e17987a0cbc31df1ec94f727`;
+paired closed disk `d7c5bee2a74db8408324b9e8869ddf2634cdd505bda474d02828d5f38ce6d0e5`.
+The cold diagnostic took 29.35 minutes, below its 45-minute cap.
+
+Offline extraction returns zero in 4.103 seconds under verified CPU 3,
+512 MiB/no-swap/16 tasks/120 seconds, with no model restore/eval or guest edit.
+Analysis SHA-256 is
+`85448bb6f57069c2f9c6fa9702852666a875329b98311fc2bdde371ef04f17d9`.
+Saved GPRs/selectors equal the trigger and the frontend boundary is qualified.
+The actual selected VM is `C15200E8`, private VPICD state `C159F11C`,
+IRQ descriptor `C002BA40` (IRQ 0), owner `C002BE40`. Virtual IRR/ISR are both
+one. The 256 prior actual retirements show the scheduler's call from
+`C000332B` into `C002A6B8`, the virtual hook `C002C59F` returning CF zero,
+and the ISR update at `C002A773` preceding the VM setter. ESP+8 returns to
+`C000332D`, not a presumed hardware-IRQ caller. PIC I/O bitmap bytes are
+already genuinely zero at this earlier phase. The VM+1E operand is correctly
+marked **unavailable as completed memory evidence**: its store is still posted
+and offered downstream. L1/posted bytes `2020` versus old DDR `0000` are normal
+in-flight layer evidence, not a demonstrated coherence defect. Following the
+delivery/return path remains necessary; Win95 desktop is still unqualified.
+
+The future Quake supervisor now continuously drains a merged child-output
+pipe into a fresh held evidence inode, bounded to 64 MiB. It requires actual
+wait, EOF, absent owned process group, matching byte counts/hash and successful
+flush/close. Collector failures, detected path/content changes, and observed
+terminal guest errors remain sticky; transient live FAT races do not. Inherited
+`VEN_`/`AO486_`/`VTM_` hooks are stripped before explicit platform inputs are
+installed: otherwise `VEN_PCTRACE` could truncate an unrelated/source file.
+Observed Python sources are archived with honest loaded-code fingerprints,
+not falsely claimed exact executed-source identity. The parent independently
+reruns **38 runner/collector/source methods** and **31 checker methods**, all
+PASS in under one second per batch, using only tiny host fixtures. No DUT or
+long verification run is launched by these tests, and existing loaded
+acceptance jobs are not changed or credited with this new collector.

@@ -162,6 +162,17 @@ class QuakeAcceptanceTests(unittest.TestCase):
                     log = DONE + (error if evidence == "engine" else b"")
                     self.check(console, log, stopped=True, returncode=0)
 
+    def test_terminal_console_error_has_a_sticky_nontransient_type(self):
+        with self.assertRaises(q.TerminalError):
+            self.check(STARTUP + b"Error: fatal\n")
+        with mock.patch.object(q, "read_console", side_effect=ValueError("live FAT geometry")):
+            try:
+                q.check(self.disk, self.receipt, DONE)
+            except ValueError as exc:
+                self.assertNotIsInstance(exc, q.TerminalError)
+            else:
+                self.fail("transient read unexpectedly accepted")
+
     def test_dos_fatal_error_in_actual_vgatext_row_cannot_pass(self):
         for row in (b"  |Error: failed writing configuration\n",
                     b"  |Error: Quake requires a floating-point processor\n",

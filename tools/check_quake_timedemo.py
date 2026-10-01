@@ -52,6 +52,10 @@ DONE_RE = re.compile(
 DEMO_RE = re.compile(rb"Playing\s+demo\s+from\s+demo1\.dem\b", re.IGNORECASE)
 
 
+class TerminalError(ValueError):
+    """Observed terminal failure; unlike live FAT races this must stay sticky."""
+
+
 def digest(path):
     h = hashlib.sha256()
     with Path(path).open("rb") as stream:
@@ -220,7 +224,7 @@ def check(path, receipt, engine_log, *, stopped=False, returncode=None):
     if offset != receipt.get("partition_offset"):
         raise ValueError("FAT16 partition geometry changed from the baseline")
     if ENGINE_ERROR_RE.search(engine_log) or GUEST_ERROR_RE.search(engine_log + b"\n" + console):
-        raise ValueError("simulator/guest terminal error in acceptance evidence")
+        raise TerminalError("simulator/guest terminal error in acceptance evidence")
     if b">>> STATE LOADED from " in engine_log:
         raise ValueError("cold-run acceptance cannot use a restored snapshot")
     found = results(console)
