@@ -1382,7 +1382,8 @@ expectation SHAs are c611
 and RF4092
 `6d3a9537bbb7b2a111a227ef5d262abc2971a46cf191600c8f24e1ff82ae5424`.
 This is prepared future authority, not a fresh disk/source qualification or
-Win95 PASS; no live private disk was read and no manual desktop review exists.
+Win95 PASS; root did not read a live private disk and no manual desktop review
+exists.
 At that16:00 checkpoint, root also inspected RF Quake raw frames0/1: startup
 console and THE NECROPOLIS loading. Those frames were not gameplay evidence.
 
@@ -1595,7 +1596,8 @@ The metadata-only observer holds the original unit reference, binds actual
 At20:20UTC the new run has85,713,983 clocks /6,511,986 retire events;
 OOM / OOM-kill / OOM-group-kill counters are0, although the staging file cache
 has reached the2GiB cap. The original-source RF Win95 and both Quake runs are
-preserved; no live private DUT disk has been read or hashed.
+preserved; root and monitoring agents did not read or hash live private DUT
+disks.
 
 The closed Win95 checker only adds the exact second launcher basename to its
 existing externally SHA-pinned allowlist. Cold command/environment, resource,
@@ -1637,7 +1639,12 @@ after checking the held regular file's identity, exact921615-byte P6 file,
 stable content metadata and pixel-identical PNG conversion. This is setup,
 not a desktop or manual closed acceptance. The configured37f5 cold run remains
 live at505,299,072 clocks /111,830,349 retire events, without a published
-frame or closure marker at the21:03 poll. No live private disk was read.
+frame or closure marker at the21:03 poll. Root did not read a live private disk.
+The already-running canonical Quake launcher does make internal advisory FAT
+console probes; its loaded checker cannot return PASS for a live probe. The
+runner waits for native exit, proves process-group absence and finishes log
+capture before requesting the final stopped-disk check. This is existing
+frozen behavior, not a new probe or a live-observation acceptance shortcut.
 
 The literal `tb: FLT` debug label is not an exception classifier:
 `core_fetch_decode.svh:143–147` sends ordinary maskable INTR through
@@ -1651,3 +1658,22 @@ CoreMark remains closed PASS; Win95 desktop and Quake timedemo remain pending.
 Current verified gameplay IPC remains **0.43038841**,4092 clocks
 **2,199,999,637–2,299,999,637**, with no completed timedemo/FPS or matched-work
 performance gain established.
+
+### October1 21:24UTC: configured fixture enters graphics, not desktop
+
+The configured37f5 RF run remains live and has published raw frames0/1.
+Root checked their held file identities, complete P6 lengths/headers, stable
+content metadata, raw hashes and pixel-identical PNG previews. Frame0 shows
+the loading cursor on black (SHA256
+`26b50f0a0a1152196f40a3ec9c1085c8acf90e392160248a3431390acbcd9ef7`);
+frame1 shows the teal initialization background and cursor, without Explorer
+icons, taskbar or Start button (SHA256
+`ca069cd82b5166f6bbefdb0bf8d4c83f539f03c156920308f5c2f0983d5a3909`).
+Neither is a desktop review or stop condition. The original cc68 RF run's
+root-viewed frame28 has advanced to92% driver-database setup, not desktop
+(SHA256 `51ca760ef63f6f1d5b19842be8e4140420bb945fc98e76d49d2d0f74073baba1`).
+No new run, guest input, snapshot or model change was introduced.
+
+CoreMark is closed PASS; Win95 desktop and Quake timedemo remain pending.
+Current verified gameplay IPC remains **0.43038841**,4092 clocks
+**2,199,999,637–2,299,999,637**; no new FPS/performance gain is claimed.
