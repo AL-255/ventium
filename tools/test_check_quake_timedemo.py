@@ -15,7 +15,17 @@ import check_quake_timedemo as q
 
 STARTUP = b"Console initialized.\r\nPlaying demo from demo1.dem.\r\nThe Necropolis\r\n"
 RESULT = b"969 frames 12.3 seconds 78.8 fps\r\n"
-DONE = b">>> done: cyc=123456 retires=3456 last cs=0008:eip=00012345\n"
+RESET = b">>> ventium-soc: reset released; running up to 30000000000 cycles\n"
+DONE = RESET + b">>> done: cyc=123456 retires=3456 last cs=0008:eip=00012345\n"
+
+
+def progress(cycle, retired):
+    return (f"[{cycle:10d}] retires={retired} cs=00a7:eip=00010574 "
+            "cr0=80000011 cr3=0003d000 eflags=00003206\n").encode()
+
+
+def footer(cycle, retired):
+    return f">>> done: cyc={cycle} retires={retired} last cs=00a7:eip=00010574\n".encode()
 
 
 class QuakeAcceptanceTests(unittest.TestCase):
@@ -78,6 +88,57 @@ class QuakeAcceptanceTests(unittest.TestCase):
                           (0, DONE.replace(b"retires=3456", b"retires=0"))):
             with self.subTest(code=code, log=log), self.assertRaises(ValueError):
                 self.check(STARTUP + RESULT, log, stopped=True, returncode=code)
+
+    def test_truncated_progress_then_recovered_output_cannot_pass(self):
+        # Exact class of the observed quota failure: new stderr starts inside
+        # the prior record's truncated eflags field, then clean exit/result.
+        log = (RESET + progress(2364747136, 823644193) +
+               progress(2365247136, 823965360).split(b"eflags=")[0] + b"eflags=0000" +
+               progress(2497747136, 883222045) + footer(9000000000, 3000000000))
+        with self.assertRaisesRegex(ValueError, "incomplete progress"):
+            self.check(STARTUP + RESULT, log, stopped=True, returncode=0)
+
+    def test_progress_prefixed_by_buffered_stdout_is_valid(self):
+        log = (RESET + b"tb: FLT vec=80 cs=0028 eip=c00012" + progress(54348660, 1000000) +
+               b"  |[1] numerical guest text\n" + progress(55348660, 1100000) + footer(55348660, 1100000))
+        self.assertEqual(self.check(STARTUP + RESULT, log, stopped=True, returncode=0)["status"], "PASS")
+
+    def test_large_progress_gap_is_not_itself_an_architectural_failure(self):
+        # Nested host IDE polling has no static upper tick bound. Parsing must
+        # not manufacture a failure by assuming 500K+small fixed overshoot.
+        log = RESET + progress(500000, 100000) + progress(5000000000, 2000000000) + footer(9000000000, 3000000000)
+        result = self.check(STARTUP + RESULT, log, stopped=True, returncode=0)
+        self.assertEqual(result["status"], "PASS")
+        self.assertTrue(result["log_records"]["maximum_progress_interval_not_bounded"])
+
+    def test_missing_reset_duplicate_footer_and_unterminated_footer_fail(self):
+        for log in (DONE[len(RESET):], DONE + footer(200000, 4000), DONE[:-1], RESET + DONE,
+                    RESET + footer(500000, 100000)):
+            with self.subTest(log=log), self.assertRaises(ValueError):
+                self.check(STARTUP + RESULT, log, stopped=True, returncode=0)
+
+    def test_reset_cap_must_fit_the_native_uint64_producer(self):
+        for cap in (b"0", b"18446744073709551616"):
+            with self.subTest(cap=cap), self.assertRaises(ValueError):
+                self.check(STARTUP + RESULT, DONE.replace(b"30000000000", cap), stopped=True, returncode=0)
+
+    def test_out_of_order_progress_or_final_counters_fail(self):
+        cases = (progress(500000, 100000) + progress(499999, 200000),
+                 progress(500000, 100000) + progress(1000000, 99999),
+                 progress(499999, 100000), progress(1500000, 300000),
+                 progress(500000, 300001))
+        for records in cases:
+            with self.subTest(records=records), self.assertRaises(ValueError):
+                self.check(STARTUP + RESULT, RESET + records + footer(1000000, 300000),
+                           stopped=True, returncode=0)
+        with self.assertRaises(ValueError):
+            self.check(STARTUP + RESULT, DONE + progress(500000, 100000), stopped=True, returncode=0)
+
+    def test_error_free_large_log_is_bounded_before_disk_read(self):
+        with mock.patch.object(q, "ENGINE_LOG_MAX_BYTES", 4), mock.patch.object(q, "read_console") as read:
+            with self.assertRaisesRegex(ValueError, "64 MiB"):
+                q.check(self.disk, self.receipt, b"abcde", stopped=True, returncode=0)
+            read.assert_not_called()
 
     def test_actual_errors_fail_but_guest_fault_probes_are_not_errors(self):
         for error in (b"%Error: core.sv: Assertion failed", b"SNAPSHOT-ERROR: disk flush", b"Sys_Error: bad",

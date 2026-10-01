@@ -135,7 +135,7 @@ evidence paths and remaining work are in
 
 ## September 30: standard-suite continuation (not yet qualified)
 
-Latest status at **21:17 UTC**: the V86-corrected candidate independently passes
+Status at **September 30, 21:17 UTC** (superseded by the October 1 update below): the V86-corrected candidate independently passes
 both complete CoreMark seeds, with every reference CRC and cycle count unchanged.
 Cold Windows 95 has not reached a verified desktop. Cold DOS Quake on the
 current candidate has reached clear gameplay but has not completed its
@@ -1324,3 +1324,72 @@ supervisor bitmap reads agree with the inspected reference, and IRET does not
 implicitly modify hidden TR or link permission bits to private virtual ISR
 state. Known OUTS/extent/descriptor-check gaps remain separate. No new run or
 RTL change is made while the new diagnostic awaits user approval.
+
+### October 1: live cold first-setter capture and tainted-log rejection
+
+At **00:48 UTC**, both full-PC acceptance jobs remain live and unchanged.
+Current Win95 is at approximately **4.06B clocks**, still in the protected VMM
+wait/list loop, with no verified desktop. Current FreeDOS Quake is at about
+**4.09B clocks**, with advancing gameplay but no completed timedemo result.
+Both current acceptance cgroups report zero OOM/kill events. CoreMark's two
+complete correctness seeds remain PASS; the entire standard suite is **not
+qualified**.
+
+Latest verified current `cdcb` gameplay IPC is **0.40805858**, profile clocks
+**3,999,999,637–4,099,999,637**, retirements
+**1,508,193,850–1,548,999,708**. U adds 31,949,492 and V 8,856,366, exactly
+40,805,858 retirements in 100M clocks. Raw frames 32/33 show advancing gameplay;
+their SHA-256 values are
+`673b7ff9e01863fdbe68646c09868d4eace86aceb07a195115b208e757807e81` /
+`52917dc811e5e6b225fbf1b85052244c0af5de9bdb59869ebff57bae49b05da2`.
+The private executable was rehashed as the exact current `cdcb` build. These
+scene-dependent windows are not measured fix gains or timedemo FPS. The `edda`
+model-identical host diagnostic has no gameplay measurement.
+
+The launch-policy external state changed, removing the earlier approval
+blocker. One actual cold first-setter diagnostic is now running in
+`ventium-win95-pc-firstsetter-sep30.service`, invocation
+`4ca6dcc1387949a3b00e38c0ec963464`, native child PID 569457. Its private
+directory is `ao486-sim/obj_dir_win95_ioperm_native_sep30.ePtDku/pc-firstsetter-sep30.edda1`.
+It uses unchanged media, ROMs, generated model and guest clocks, no restore,
+no guest edits or injected input, and the passive first-retirement trigger
+`0028:C002A7BC`. Actual parent and child affinity are CPU 2; memory/swap/tasks
+are bounded at 2 GiB/zero/32, with 400M guest-clock and 45-minute wall caps.
+This is diagnostic evidence only, not a desktop acceptance run. Its live
+snapshot and disk have not been parsed. Qualification requires actual child
+wait, pipe closure, native V4 grammar, paired closed disk and unchanged inputs
+and all 120 generated-model/header/archive hashes.
+
+The first host launch failed **before any DUT or output directory existed**:
+this user manager does not delegate `cpuset`, so `cpuset.cpus.effective` is
+absent. The private launch guard now requires actual inherited affinity,
+enforced with `taskset`, while retaining strict memory/swap/tasks/CPU quota
+checks. Fifteen host-only guard methods pass. This is not a guest fix.
+The live status file's empty `latest_progress` is a display bug: it recognizes
+`>>> cyc=` instead of the actual numeric-bracket progress format. Actual PID,
+CPU execution and drained bytes confirm the run is live; it was not restarted
+or modified to repair that display.
+
+The older `b7cfbec7…` Quake control naturally closed at 9B clocks with actual
+simulator exit zero and a fresh **969 frames / 128.4 guest seconds / 7.5 fps**.
+Its closed result receipt SHA-256 is
+`1b21c617fdfe70cc8c92354c704cb52940f7cfd28bc5b189ece7f0039ebb76f2`.
+That receipt's original `PASS` is **not valid error-free whole-run acceptance**:
+the known quota interval left a truncated record at 2,365,247,136 clocks fused
+to recovered output at 2,497,747,136, and a zero-byte frame 16. An entire
+133M-clock boundary span lacks intact progress. The old result/build is not
+current-candidate acceptance, and absence of errors in lost output is unproved.
+Its immutable historical result is preserved, not rewritten to conceal this.
+
+The read-only checker now rejects that exact closed evidence with exit 2;
+30 host microtests pass. It requires a unique complete cold-reset header,
+unique complete normal footer, complete recognizable progress records,
+monotonic counters and reaped exit zero. Buffered stdout can prefix an intact
+stderr record mid-line, so records are parsed anywhere in the byte stream.
+There is deliberately **no guessed maximum progress interval**: PS-side IDE
+polling can legally tick the model for an unbounded number of clocks before
+returning to outer-loop reporting. Grammar checks detect known taint, but do
+not prove that entire records were never dropped. The existing loaded
+supervisors are not retroactively relabelled as a new loss-detecting collector;
+a bounded pipe collector is being implemented for future runs. No RTL/model
+rebuild or current-run modification accompanies these acceptance fixes.

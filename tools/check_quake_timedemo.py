@@ -25,6 +25,7 @@ LOG_PATH = "::/QUAKE/ID1/QCONSOLE.LOG"
 CONSOLE_MAX_BYTES = 16 * 1024 * 1024
 MTYPE_STDERR_MAX_BYTES = 64 * 1024
 MTYPE_TIMEOUT_SECONDS = 15
+ENGINE_LOG_MAX_BYTES = 64 * 1024 * 1024
 RESULT_RE = re.compile(
     rb"^\s*(\d{1,5})\s+frames\s+(\d+(?:\.\d+)?)\s+seconds\s+"
     rb"(\d+(?:\.\d+)?)\s+fps\s*$", re.MULTILINE | re.IGNORECASE)
@@ -40,7 +41,14 @@ GUEST_ERROR_RE = re.compile(
     # the start of a line, so diagnostic prose containing "Error:" is not
     # mistaken for the guest's fatal banner; horizontal whitespace only.
     rb"^[ \t]*(?:\|[ \t]*)?Error:", re.IGNORECASE | re.MULTILINE)
-DONE_RE = re.compile(rb">>> done: cyc=(\d+) retires=(\d+) last cs=[0-9a-f]+:eip=[0-9a-f]+", re.IGNORECASE)
+RESET_RE = re.compile(rb">>> ventium-soc: reset released; running up to (\d+) cycles\n")
+PROGRESS_START_RE = re.compile(rb"\[[ \t]*\d+\] retires=")
+PROGRESS_RE = re.compile(
+    rb"\[[ \t]*(\d+)\] retires=(\d+) cs=[0-9a-f]{4}:eip=[0-9a-f]{8} "
+    rb"cr0=[0-9a-f]{8} cr3=[0-9a-f]{8} eflags=[0-9a-f]{8}\n", re.IGNORECASE)
+DONE_RE = re.compile(
+    rb">>> done: cyc=(\d+) retires=(\d+) last cs=[0-9a-f]{4}:eip=[0-9a-f]{8}\n",
+    re.IGNORECASE)
 DEMO_RE = re.compile(rb"Playing\s+demo\s+from\s+demo1\.dem\b", re.IGNORECASE)
 
 
@@ -164,7 +172,46 @@ def baseline(path):
             "qconsole_sha256": hashlib.sha256(console).hexdigest(), "results": []}
 
 
+def check_closed_log(engine_log):
+    """Reject demonstrably tainted cold-run records, not legitimate PS detours.
+
+    Buffered stdout diagnostics may prefix an intact stderr progress record on
+    the same line, so search the byte stream rather than anchoring line starts.
+    A quota-truncated progress record followed by recovered output must not
+    disappear from parsing. PS IDE service can tick the DUT in an unbounded
+    polling loop: there is no valid maximum progress interval. This grammar
+    check does not prove that whole output records were never silently lost;
+    the capturing supervisor must separately verify its pipe/file integrity.
+    """
+    resets = list(RESET_RE.finditer(engine_log))
+    ends = list(DONE_RE.finditer(engine_log))
+    if (len(resets) != 1 or engine_log.count(b">>> ventium-soc: reset released;") != 1 or
+            not 0 < int(resets[0][1]) <= (1 << 64) - 1 or len(ends) != 1 or engine_log.count(b">>> done:") != 1 or
+            not all(0 < int(v) <= (1 << 64) - 1 for v in ends[0].groups()) or
+            resets[0].end() > ends[0].start()):
+        raise ValueError("incomplete/ambiguous cold reset or normal final report")
+    progress = list(PROGRESS_RE.finditer(engine_log))
+    if {m.start() for m in PROGRESS_START_RE.finditer(engine_log)} != {m.start() for m in progress}:
+        raise ValueError("incomplete progress record; whole-run evidence is tainted")
+    previous_cycle = previous_retire = 0
+    for record in progress:
+        cycle, retired = map(int, record.groups())
+        if (not resets[0].end() <= record.start() < record.end() <= ends[0].start() or
+                not 500000 <= cycle - previous_cycle or cycle > (1 << 64) - 1 or
+                not previous_retire <= retired <= (1 << 64) - 1):
+            raise ValueError("progress records are outside the cold run or counters regress")
+        previous_cycle, previous_retire = cycle, retired
+    final_cycle, final_retire = map(int, ends[0].groups())
+    if (final_cycle < previous_cycle or final_retire < previous_retire or
+            (final_cycle >= 500000 and not progress)):
+        raise ValueError("missing progress or final counters precede progress")
+    return {"complete_progress_records": len(progress), "final_cycle": final_cycle,
+            "final_retires": final_retire, "maximum_progress_interval_not_bounded": True}
+
+
 def check(path, receipt, engine_log, *, stopped=False, returncode=None):
+    if len(engine_log) > ENGINE_LOG_MAX_BYTES:
+        raise ValueError("evidence log exceeded 64 MiB budget")
     if (not isinstance(receipt, dict) or receipt.get("schema") != 1 or receipt.get("results") != [] or
             any(not re.fullmatch(r"[0-9a-f]{64}", str(receipt.get(key, "")))
                 for key in ("disk_sha256", "qconsole_sha256"))):
@@ -195,10 +242,11 @@ def check(path, receipt, engine_log, *, stopped=False, returncode=None):
     if not stopped:
         return {"status": "OBSERVED_UNQUALIFIED", "result": result,
                 "reason": "live disk observation; stop/reap and recheck"}
-    ends = list(DONE_RE.finditer(engine_log))
-    if returncode != 0 or not ends or not all(int(v) > 0 for v in ends[-1].groups()):
-        raise ValueError("require reaped simulator exit 0 and nonempty normal final report")
+    if returncode != 0:
+        raise ValueError("require reaped simulator exit 0")
+    log_records = check_closed_log(engine_log)
     return {"status": "PASS", "result": result, "partition_offset": offset,
+            "log_records": log_records,
             "qconsole_sha256": hashlib.sha256(console).hexdigest(), "disk_sha256": digest(path)}
 
 
@@ -218,9 +266,13 @@ def main():
     if not args.stopped and args.sim_returncode is not None:
         parser.error("--sim-returncode requires --stopped")
     try:
-        evidence = baseline(args.disk) if args.mode == "baseline" else check(
-            args.disk, json.loads(args.baseline.read_text()), args.log.read_bytes(),
-            stopped=args.stopped, returncode=args.sim_returncode)
+        if args.mode == "baseline":
+            evidence = baseline(args.disk)
+        else:
+            with args.log.open("rb") as stream:
+                engine_log = stream.read(ENGINE_LOG_MAX_BYTES + 1)
+            evidence = check(args.disk, json.loads(args.baseline.read_text()), engine_log,
+                             stopped=args.stopped, returncode=args.sim_returncode)
     except (OSError, ValueError, subprocess.SubprocessError, OverflowError) as exc:
         parser.exit(2, f"QUAKE-TIMEDEMO-FAIL: {exc}\n")
     print(json.dumps(evidence, indent=2))
