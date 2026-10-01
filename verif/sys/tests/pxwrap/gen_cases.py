@@ -83,6 +83,12 @@ class Case:
         self.flags, self.esp0, self.ss_base, self.deny = flags, esp0, ss_base, deny
         self.unit = 2 if (flags & FL_G16) else 4
         s = slots_of(esp0, nslots, self.unit, b32, ss_base)
+        # Stack-pointer arithmetic may wrap; an individual memory operand
+        # must still fit the segment's effective 0xFFFFFFFF limit.  B=0
+        # selects a 16-bit SP, not a 64-KiB segment limit (our G=1 descriptor
+        # deliberately has the full 4-GiB effective limit).
+        if any(off + self.unit - 1 > 0xFFFFFFFF for _, off, _ in s):
+            raise ValueError("frame slot crosses the stack segment offset limit")
         self.slots = s
         if deny is not None:
             fk = fault_slot(s, self.unit, deny)
@@ -123,13 +129,21 @@ def pxwrap_cases():
     #      32-bit interrupt gate, no error code, ESP0 0..20; plus the
     #      maximal-page-count call-gate layouts.
     for esp0 in (0, 2, 4, 8, 12, 16, 20):
-        probe = Case(KIND_INT, 1, 5, 0, esp0, 0, None)
+        # The old ESP0=2/base=0 layout put a dword at offset FFFFFFFE:
+        # QEMU permits it, but Intel's segment limit rule rejects the two
+        # bytes beyond FFFFFFFF.  Move two bytes from ESP0 into SS.base.
+        # Every slot's LINEAR address, page order, and CR2 is unchanged;
+        # the dword now starts at legal offset FFFFFFFC while its linear
+        # address still straddles the 4-GiB boundary.
+        sp, base = (0, 2) if esp0 == 2 else (esp0, 0)
+        probe = Case(KIND_INT, 1, 5, 0, sp, base, None)
         for pg in pages_in_order(probe.slots, 4):
-            cases.append(Case(KIND_INT, 1, 5, 0, esp0, 0, pg))
+            cases.append(Case(KIND_INT, 1, 5, 0, sp, base, pg))
     for esp0 in (2, 8):     # 140-byte frame on a 4 GiB-wrapped flat stack
-        probe = Case(KIND_CG, 1, 35, 0, esp0, 0, None)
+        sp, base = (0, 2) if esp0 == 2 else (esp0, 0)
+        probe = Case(KIND_CG, 1, 35, 0, sp, base, None)
         for pg in pages_in_order(probe.slots, 4):
-            cases.append(Case(KIND_CG, 1, 35, 0, esp0, 0, pg))
+            cases.append(Case(KIND_CG, 1, 35, 0, sp, base, pg))
     # ---- group 4: max-parameter call gates on a B=0 new stack, SP < frame.
     #      16-bit gate pcount=31 (70-byte frame) and 32-bit gate pcount=31
     #      (140-byte frame).  (Param SOURCE reads are covered elsewhere;

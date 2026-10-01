@@ -1520,15 +1520,15 @@ case_table:
   .long 0x00000000
   .long 0x00000000
   .long 0xfffff000
-  /* k1 b32=1 n=5 f=0x0 esp0=0x2 base=0x0 deny=0xfffff000 kflt=0 cr2=0xfffffffe */
+  /* k1 b32=1 n=5 f=0x0 esp0=0x0 base=0x2 deny=0xfffff000 kflt=0 cr2=0xfffffffe */
   .byte 1, 1, 5, 0
-  .long 0x00000002
   .long 0x00000000
+  .long 0x00000002
   .long 0xfffff000
-  /* k1 b32=1 n=5 f=0x0 esp0=0x2 base=0x0 deny=0x00000000 kflt=0 cr2=0 */
+  /* k1 b32=1 n=5 f=0x0 esp0=0x0 base=0x2 deny=0x00000000 kflt=0 cr2=0 */
   .byte 1, 1, 5, 0
-  .long 0x00000002
   .long 0x00000000
+  .long 0x00000002
   .long 0x00000000
   /* k1 b32=1 n=5 f=0x0 esp0=0x4 base=0x0 deny=0x00000000 kflt=0 cr2=0 */
   .byte 1, 1, 5, 0
@@ -1575,15 +1575,15 @@ case_table:
   .long 0x00000014
   .long 0x00000000
   .long 0x00000000
-  /* k3 b32=1 n=35 f=0x0 esp0=0x2 base=0x0 deny=0xfffff000 kflt=0 cr2=0xfffffffe */
+  /* k3 b32=1 n=35 f=0x0 esp0=0x0 base=0x2 deny=0xfffff000 kflt=0 cr2=0xfffffffe */
   .byte 3, 1, 35, 0
-  .long 0x00000002
   .long 0x00000000
+  .long 0x00000002
   .long 0xfffff000
-  /* k3 b32=1 n=35 f=0x0 esp0=0x2 base=0x0 deny=0x00000000 kflt=0 cr2=0 */
+  /* k3 b32=1 n=35 f=0x0 esp0=0x0 base=0x2 deny=0x00000000 kflt=0 cr2=0 */
   .byte 3, 1, 35, 0
-  .long 0x00000002
   .long 0x00000000
+  .long 0x00000002
   .long 0x00000000
   /* k3 b32=1 n=35 f=0x0 esp0=0x8 base=0x0 deny=0x00000000 kflt=0 cr2=0x4 */
   .byte 3, 1, 35, 0

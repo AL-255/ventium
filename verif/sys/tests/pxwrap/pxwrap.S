@@ -14,7 +14,10 @@
  *            error code; SP from 0 through the frame size; SS.base low-12 in
  *            {0x000, 0xFF0, 0xFFC}; every touched page denied in turn.
  *   group 2: B=1, ESP0 < frame size (the 4 GiB wrap), incl. the
- *            maximal-page-count 140-byte call-gate frame on a flat stack.
+ *            maximal-page-count 140-byte call-gate frame.  The old
+ *            ESP0=2/base=0 layouts are represented by ESP0=0/base=2:
+ *            identical linear bytes/pages, but each dword's segment offset
+ *            fits the limit (a single operand cannot wrap that limit).
  *   group 4: 16-bit (70-byte) and 32-bit (140-byte) pcount=31 call-gate
  *            frames on a B=0 stack with SP < frame size.
  *   group 3: V86 permitted controls (9/10-slot frames on wrapped stacks).
@@ -230,8 +233,11 @@ setup_handler:
     movl    4(%esi), %eax
     movl    %eax, 0x00003004
     cmpb    $0, 1(%esi)
-    jne     1f
-    /* build the B=0 ss16 descriptor at GDT[6] (base per case, G=1 lim 0xFFFFF) */
+    je      .Lsetup_dynamic_ss
+    cmpl    $0, 8(%esi)
+    je      1f                        /* B=1, base=0 keeps existing flat SS */
+.Lsetup_dynamic_ss:
+    /* GDT[6]: per-case base, G=1 limit 0xFFFFF; B follows the case. */
     movl    8(%esi), %eax
     movzwl  %ax, %ebx
     shll    $16, %ebx
@@ -244,6 +250,10 @@ setup_handler:
     andl    $0xFF000000, %ebx
     orl     %ebx, %eax
     orl     $0x008F9200, %eax           /* access 0x92, gran 0x8F (G=1,B=0) */
+    cmpb    $0, 1(%esi)
+    je      .Lsetup_ss_attr_ready
+    orl     $0x00400000, %eax           /* B=1: gran 0xCF */
+.Lsetup_ss_attr_ready:
     movl    %eax, 0x6034
     movl    $0x00000030, %eax
     jmp     2f
@@ -561,8 +571,8 @@ int0h16:                                /* 16-bit gate, no err: IP CS FL SP SS *
 
     .align 16
     .global int0h32
-int0h32:                                /* 32-bit gate, no err (B=1, base 0):
-                                         * the 32-bit EA wraps naturally. */
+int0h32:                                /* B=1: offsets wrap naturally;
+                                         * ESP operands use the actual SS base. */
     cmpl    $(trig_int_ret - 0xF0000), 0(%esp)
     jne     fail
     cmpl    $0x4B, 4(%esp)
@@ -685,20 +695,23 @@ cg32_callee:                            /* 140-byte frame: EIP CS p0..p30 ESP SS
     decl    %eax
     shll    $4, %eax
     leal    case_table(%eax), %eax
-    movl    8(%eax), %esi               /* ss_base */
     movl    $0x0000FFFF, %edi           /* B=0: 64 KiB offset mask */
     cmpb    $0, 1(%eax)
     je      0f
-    movl    $0xFFFFFFFF, %edi           /* B=1: natural 4 GiB wrap, base 0 */
+    movl    $0xFFFFFFFF, %edi           /* B=1: natural 4 GiB offset wrap */
 0:  movl    %esp, %eax
     andl    %edi, %eax
-    movl    (%eax,%esi), %eax
+    /* Use the masked SEGMENT offset through SS.  A flat-DS dword at the
+     * relocated linear FFFFFFFE would itself exceed DS.limit; SS's base=2
+     * gives the same linear bytes with legal offset FFFFFFFC.  This also
+     * preserves the B=0 masked-offset reads without adding the base twice. */
+    movl    %ss:(%eax), %eax
     cmpl    $(trig_done - 0xF0000), %eax
     jne     fail
     movl    %esp, %eax
     addl    $4, %eax
     andl    %edi, %eax
-    movl    (%eax,%esi), %eax
+    movl    %ss:(%eax), %eax
     cmpl    $0x4B, %eax
     jne     fail
     movl    $31, %ecx
@@ -707,7 +720,7 @@ cg32_callee:                            /* 140-byte frame: EIP CS p0..p30 ESP SS
 1:  movl    %esp, %eax
     addl    %ebx, %eax
     andl    %edi, %eax
-    movl    (%eax,%esi), %eax
+    movl    %ss:(%eax), %eax
     cmpl    %edx, %eax
     jne     fail
     addl    $4, %ebx
@@ -716,13 +729,13 @@ cg32_callee:                            /* 140-byte frame: EIP CS p0..p30 ESP SS
     movl    %esp, %eax
     addl    $132, %eax
     andl    %edi, %eax
-    movl    (%eax,%esi), %eax
+    movl    %ss:(%eax), %eax
     cmpl    $0xEF00, %eax
     jne     fail
     movl    %esp, %eax
     addl    $136, %eax
     andl    %edi, %eax
-    movl    (%eax,%esi), %eax
+    movl    %ss:(%eax), %eax
     cmpl    $0x23, %eax
     jne     fail
     movl    $0x000A0000, 0x00003004
