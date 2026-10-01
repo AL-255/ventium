@@ -863,3 +863,45 @@ Latest verified gameplay IPC remains **0.44240609**, e572, clocks
 **2,399,999,637–2,499,999,637**, predating all current frame/POP repairs.
 The final candidate has no gameplay/FPS measurement. Its full standard
 suite remains incomplete; previous builds' results do not qualify it.
+
+### October1: final-candidate standard suite is running
+
+All three required components now have actual live native processes, not
+just prepared launchers. No previous-build snapshots or guest modifications
+are used. Win95 and Quake use final full-PC c611; CoreMark uses final TB2ce6.
+
+| Component | Unit / invocation | Actual native PID / CPU |
+| --- | --- | --- |
+| Win95 cold boot | `ventium-standard-win95-popwatch-oct01.service` / `72e81207798d471cb4eb1715a4e3faf4` |787860 /8|
+| CoreMark both1500 seeds | `ventium-standard-coremark-popstore-oct01.service` / `fe7d60fd6ddd4e3fb9d6d33c73e0c5ea` |796941 /11;796942 /10|
+| FreeDOS Quake demo1 cold boot | `ventium-standard-quake-popstore-oct01.service` / `948ff446e9e04db7bb68478e90d6c3b5` |800886 /13|
+
+CoreMark runs the unchanged1500-iteration/2000-byte workloads in parallel,
+each capped at3600s, with exact reference CRCs and the corrected matrix
+acceptance predicate. Forty host contracts pass. Its actual native admission
+receipt SHA256 is `78b52f391357b8f600330a26391c4de2b37227f22a30c806e4bc2abe8713226e`;
+a separate read-only D-Bus unit reference retains the real terminal status
+for independent closed grading. Current heartbeats advance; neither seed
+is qualified until actual error-free completion.
+
+The Quake wrapper executes the exact archived canonical lossless collector
+and checker; six host contracts pass. Its actual admission SHA256 is
+`3bacc06c366715a71826fb8ba8bb35687e14380a0bd1b0cbb32d49852721b5e0`.
+The pristine disk hash remains2df14ac9, clocks45/45/90MHz, DDR2,32MiB,
+30B clocks/72h bounds. All three owned cgroups have zero OOM events.
+Win95 has reached284M clocks without a detected fatal banner; this is
+startup, not desktop proof or gameplay IPC. **No final suite PASS yet.**
+
+Additional system-gate scrutiny found an inherited acceptance hole:
+non-cosim OUT goes to S_HALT, so the old runner could report an equal
+architectural trace while discarding native exit0/quiescence instead of
+requiring the fixture's I/O success exit133. The original strict audit is
+retained as FAIL, not rewritten. A separately labelled I/O-enabled pseg
+diagnostic (`--system --cosim`) exits133, closes normally and matches all90
+unchanged QEMU rows, summary
+`55e142036fe72ed7361df72a9b05cb5b33f2785d991b6d7d768c953fc0fd184c`.
+This is verification-profile evidence, not a new RTL workaround or whole
+system-gate acceptance. Broader strict mode/completion checks are in progress.
+
+Verified gameplay baseline remains **0.44240609 IPC**, older e572,
+**2,399,999,637–2,499,999,637**. Final c611 is gameplay-unmeasured.
