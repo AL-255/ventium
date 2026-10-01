@@ -176,6 +176,7 @@
         // (R2-M02: the descriptor address is cur_lin.)
         bd_req =!seg_null_load;  // TI bit (sel[2]) picks GDT vs LDT
       end
+      S_DQUERY: begin bd_req = !dq_pre_invalid; end
       S_LJMP: begin bd_req =1'b1;   // far jmp/call target CS: TI bit picks GDT vs LDT (R2-M02: cur_lin)
       end
       // M9.5 — real-mode far CALL: 2-beat descending push on SS:SP. beat 0 pushes CS

@@ -1794,8 +1794,8 @@
   "00": {
    "mnem": "GRP6 (SLDT/STR/LLDT/LTR/VERR/VERW r/m)",
    "status": "partial",
-   "detail": "ModRM.reg group. Ventium decodes the register forms /0 SLDT, /1 STR, /2 LLDT and /3 LTR, and ONLY when sys_mode=1; VERR(/4), VERW(/5), and ALL memory forms set d_unknown->S_HALT, and the whole opcode HALTs in user mode.",
-   "evidence": "decode_stages.sv:377-397 (SLDT /0, STR /1, LLDT /2, LTR /3 reg gated on sys_mode; else d_unknown); exec core_exec.svh (SYS_STR/SYS_SLDT), core_tss_priv.svh S_LTR (LLDT/LTR)",
+   "detail": "ModRM.reg group. /0 SLDT, /1 STR, /2 LLDT and /3 LTR retain their system-mode register forms; their memory forms remain deferred. /4 VERR and /5 VERW accept a fixed-width r/m16 selector at any CPL in protected mode, changing only ZF. Descriptor type, CPL/RPL and table bounds are checked; presence is not a filter and queries never write the source or descriptor. Real/V86 and illegal LOCK queries raise #UD; unsupported user-mode forms retain the loud halt.",
+   "evidence": "decode_stages.sv:0F 00 SYS_VERR/SYS_VERW; shared S_DQUERY in core.sv/core_seg_ljmp.svh; verif/sys/tests/pverrw directed qualification. /0..3: core_exec.svh SYS_STR/SYS_SLDT and core_tss_priv.svh S_LTR (LLDT/LTR)",
    "desc": "Group 6 (SLDT/STR/LLDT/LTR/VERR/VERW)"
   },
   "01": {
@@ -1807,16 +1807,16 @@
   },
   "02": {
    "mnem": "LAR r,r/m",
-   "status": "gap",
-   "detail": "No decode arm; falls to the two-byte default d_unknown->S_HALT.",
-   "evidence": "core.sv:1668 (two-byte default d_unknown); FSM core_fetch_decode.svh:351 (->S_HALT)",
+   "status": "implemented",
+   "detail": "Protected-mode 16-bit selector source (register or memory), 16/32-bit destination. Descriptor table bounds/type/privilege checks set ZF; unsuccessful queries preserve the destination. Real/V86 forms #UD.",
+   "evidence": "decode_stages.sv:0F 02 SYS_LAR; core_seg_ljmp.svh:S_DQUERY; verif/sys/tests/plar QEMU differential",
    "desc": "Load Access Rights Byte"
   },
   "03": {
    "mnem": "LSL r,r/m",
-   "status": "gap",
-   "detail": "No decode arm; two-byte default d_unknown->S_HALT.",
-   "evidence": "core.sv:1668 (default d_unknown); core_fetch_decode.svh:351",
+   "status": "implemented",
+   "detail": "Protected-mode 16-bit selector source (register or memory), 16/32-bit destination. Valid selectors return the granularity-scaled segment limit and set ZF; invalid queries preserve the destination and clear ZF. Real/V86 forms #UD.",
+   "evidence": "decode_stages.sv:0F 03 SYS_LSL; core_seg_ljmp.svh:S_DQUERY; verif/sys/tests/plar QEMU differential",
    "desc": "Load Segment Limit"
   },
   "04": {
@@ -3563,5 +3563,5 @@
    "desc": "Undefined Instruction (#UD)"
   }
  },
- "_decode_fingerprint": "8773d84534c2a39c29d06ff6e0a7d75ef44b7bef4e3645c42f2228339e956846"
+ "_decode_fingerprint": "cd286b64269331d92247d23694ad142f57001cc18864b891035fd9aa38b354f2"
 }

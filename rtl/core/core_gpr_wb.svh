@@ -61,6 +61,12 @@
         // success event that installs the validated segment descriptor; never in
         // S_EXEC, where a later descriptor fault would otherwise expose a partial
         // instruction. Real/V86 loads retain the ordinary S_EXEC writeback.
+        S_DQUERY: begin
+          if (dq_commit_ok && q_writes_reg) begin
+            gpr_we[q_dst_reg]=1'b1;
+            gpr_wd[q_dst_reg]=reg_merge(gpr_o[q_dst_reg], dq_result, q_w, 1'b0);
+          end
+        end
         S_SEGLD: begin
           if (segld_commit_ok && q_seg_from_mem && q_seg_load
               && !q_seg_load_lo && q_writes_reg) begin

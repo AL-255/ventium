@@ -55,7 +55,10 @@ typedef enum logic [4:0] {
   // REVIEW_Aug3 — SLDT (0F 00 /0): store the LDTR selector. The core has tracked
   // ldt_sel since REVIEW2 M-02; the ptaskpg differential reads it back to witness
   // the incoming task's LDTR after a task switch. Register form only (mirrors STR).
-  SYS_SLDT
+  SYS_SLDT,
+  // Unprivileged protected-mode descriptor queries. A rejected selector clears
+  // ZF without a destination write; a valid descriptor is read through paging.
+  SYS_LAR, SYS_LSL, SYS_VERR, SYS_VERW
 } sysop_e;
 
 // The pipeline FSM state enum. Promoted from an in-`core` typedef to compilation-
@@ -121,7 +124,7 @@ typedef enum logic [6:0] {
     S_INS,
     S_PF, S_PIPE, S_F00F_HANG,
     // M2S.1 system-mode descriptor + table micro-sequences:
-    S_LGDT, S_SEGLD, S_LJMP,
+    S_LGDT, S_SEGLD, S_LJMP, S_DQUERY,
     // M9.5 real-mode far CALL / RETF (2-beat stack push / pop of CS:IP). Reuse
     // seg_step as the beat counter (mutually exclusive with the seg/ljmp states).
     S_LCALL, S_RETF,
@@ -1548,7 +1551,10 @@ module core
     // MOVZX/MOVSX retain q_w for their destination register merge, but read
     // only the byte/word source. Using q_w here falsely probed the next page
     // or segment and amplified noncacheable reads for a narrow source.
-    if ((state == S_LOAD) && (q_kind == K_EXT))
+    if ((state == S_LOAD) && (q_sysop==SYS_LAR || q_sysop==SYS_LSL
+                             || q_sysop==SYS_VERR || q_sysop==SYS_VERW))
+      load_beat_w = 3'd2;
+    else if ((state == S_LOAD) && (q_kind == K_EXT))
       load_beat_w = q_ext_srcw;
     else if ((state == S_LOAD) && (q_w == 3'd2)
         && (q_jmpf_mem || q_callf_mem || (q_seg_load && !q_seg_load_lo)))
@@ -3404,6 +3410,37 @@ module core
                         && ((seg_null_load && !segld_is_ss
                              && (segld_tgt != 3'(SG_CS)))
                             || (mem_ack && seg_step && !segld_desc_fault));
+
+  // LAR/LSL/VERR/VERW probe a descriptor without loading a segment. A null or
+  // out-of-table selector is rejected before any implicit GDT/LDT memory
+  // access; an in-table descriptor is read through the ordinary page walker.
+  // The only flag they alter is ZF, and a rejected query leaves the GPR alone.
+  logic [15:0] dq_sel;
+  logic        dq_pre_invalid, dq_type_ok, dq_visible, dq_valid, dq_commit_ok;
+  logic [63:0] dq_desc;
+  logic [7:0]  dq_attr;
+  logic [31:0] dq_result, dq_flags;
+  assign dq_sel = q_mem_read ? mem_load_data[15:0] : gpr_o[q_src_reg][15:0];
+  assign dq_pre_invalid = is_null_selector(dq_sel) || !sel_in_table(dq_sel);
+  assign dq_desc = {mem_rdata, gdt_lo};
+  assign dq_attr = desc_attr(dq_desc);
+  // Verify queries accept only readable segments / writable data. Presence
+  // is deliberately not tested: these instructions do not load the segment.
+  assign dq_type_ok = (q_sysop==SYS_VERR)
+                     ? (desc_s(dq_attr) && (!dq_attr[3] || dq_attr[1]))
+                   : (q_sysop==SYS_VERW)
+                     ? (desc_s(dq_attr) && !dq_attr[3] && dq_attr[1])
+                   : (desc_s(dq_attr)
+                      || ((q_sysop==SYS_LAR)
+                          ? (desc_type(dq_attr) inside {4'h1,4'h2,4'h3,4'h4,4'h5,4'h9,4'hB,4'hC})
+                          : (desc_type(dq_attr) inside {4'h1,4'h2,4'h3,4'h9,4'hB})));
+  assign dq_visible = (desc_s(dq_attr) && dq_attr[3] && dq_attr[2])
+                   || ((cpl_r <= desc_dpl(dq_attr)) && (dq_sel[1:0] <= desc_dpl(dq_attr)));
+  assign dq_valid = !dq_pre_invalid && dq_type_ok && dq_visible;
+  assign dq_flags = {eflags[31:7], dq_valid, eflags[5:0]};
+  assign dq_commit_ok = (state==S_DQUERY) && mem_ack && seg_step && dq_valid;
+  assign dq_result = (q_sysop==SYS_LAR) ? (mem_rdata & 32'h00F0_FF00)
+                                         : desc_limit(dq_desc);
 
 
   // H-08: the target CS limit from the descriptor BEING READ, granularity-scaled.
@@ -10081,6 +10118,8 @@ module core
         cur_lin_nat = (segld_ssel[2] ? ldt_base : gdt_base) + {16'd0, segld_ssel[15:3], 3'd0}
                 + {29'd0, seg_step, 2'b00};
       end
+      S_DQUERY: cur_lin_nat = (dq_sel[2] ? ldt_base : gdt_base)
+                        + {16'd0, dq_sel[15:3], 3'd0} + {29'd0, seg_step, 2'b00};
       S_LJMP: cur_lin_nat = (q_ljmp_sel[2] ? ldt_base : gdt_base)
                       + {16'd0, q_ljmp_sel[15:3], 3'd0} + {29'd0, seg_step, 2'b00};
 
@@ -10490,6 +10529,7 @@ module core
       // suppresses the request), so it must not translate either -- same
       // suppression/translation coherence as the null-LLDT fix.
       S_SEGLD:   translatable = !seg_null_load;
+      S_DQUERY:  translatable = !dq_pre_invalid;
       // REVIEW_Aug3 (the pltr blocker): a NULL LLDT performs NO access at all --
       // lldt_null_q suppresses the bus request -- so it must not TRANSLATE either.
       // With paging on, the unsuppressed divert walked the GDT[0] page and raised

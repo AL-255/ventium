@@ -161,6 +161,8 @@
             else if (p54_mov_ack_take)
               retire_reference_integer(next_eip,1'b0,eflags);
 `endif
+            else if (q_sysop==SYS_LAR || q_sysop==SYS_LSL
+                     || q_sysop==SYS_VERR || q_sysop==SYS_VERW) state<=S_DQUERY;
             else state<=S_EXEC;
           end
         end

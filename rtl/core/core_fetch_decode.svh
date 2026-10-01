@@ -689,6 +689,10 @@
           // ---- M2S.1 system instructions ------------------------------------
           else if (d_sysop != SYS_NONE) begin
             unique case (d_sysop)
+              SYS_LAR, SYS_LSL, SYS_VERR, SYS_VERW: begin
+                seg_step<=1'b0;
+                state<=d_mem_read ? S_LOAD : S_DQUERY;
+              end
               SYS_LGDT, SYS_LIDT: state<=S_LGDT;    // read 6-byte pseudo-desc
               SYS_MOVSREG_TO: begin
                 // load a segment register. In REAL mode (or a null/PM-but-here

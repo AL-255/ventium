@@ -87,6 +87,9 @@ opcodes (already listed PARTIAL in the integer table):
 | --- | --- | --- | --- |
 | LGDT / LIDT | 0F 01 /2,/3 | IMPLEMENTED (system mode) | `SYS_LGDT/SYS_LIDT` (`core.sv:1109-1114`) |
 | LTR / STR | 0F 00 /3,/1 | IMPLEMENTED (system mode, reg form) | `SYS_LTR/SYS_STR` (`core.sv:1087-1091`) |
+| SLDT / LLDT | 0F 00 /0,/2 | IMPLEMENTED (system mode, register form) | `decode_stages.sv` group0F00; `core_exec.svh`/`core_tss_priv.svh` |
+| LAR / LSL | 0F 02/03 | IMPLEMENTED (protected mode, fixed word selector; word/dword destination) | Shared `S_DQUERY`; rejected selectors leave the destination unchanged. `plar` differential and `pverrw` TF regression. |
+| VERR / VERW | 0F 00 /4,/5 | IMPLEMENTED (protected mode, any CPL, register/memory word source); ten directed cases qualified, full cold-suite pending | `decode_stages.sv` and shared `S_DQUERY`; only ZF changes, P ignored, readable/writable segment and privilege checks. Real/V86 and illegal LOCK raise #UD. `verif/sys/tests/pverrw/` distinguishes differential and Intel-spec witnesses. |
 | MOV CRn / MOV DRn | 0F 20/22, 0F 21/23 | IMPLEMENTED (DRn system-mode gated) | `SYS_MOVCR_*` (`core.sv:1116-1136`) |
 | RSM | 0F AA | IMPLEMENTED (only inside SMM) | `d_rsm` (`core.sv:1104-1106`) |
 | Jcc rel16/32 | 0F 80–8F | IMPLEMENTED | `core.sv:1138` |
@@ -105,7 +108,7 @@ opcodes (already listed PARTIAL in the integer table):
 
 | Mnemonic | Opcode | Why it HALTs |
 | --- | --- | --- |
-| SLDT / LLDT / VERR / VERW (and `0F 00` memory form) | 0F 00 /0,/2,/4,/5, mem | not the LTR/STR reg subforms → `else d_unknown` (`core.sv:1092-1093`) |
+| SLDT / STR / LLDT / LTR memory forms | 0F 00 /0..3, mem | Only register forms are implemented for /0..3; `decode_stages.sv` group0F00 rejects their memory forms. VERR/VERW memory forms are implemented. |
 | SMSW / LMSW (and other `0F 01` subforms) | 0F 01 /4,/6,... | not LGDT/LIDT → `d_unknown` (`core.sv:1114`) |
 | CMPXCHG8B | 0F C7 /1 | both reg and mem forms `d_unknown`; reg-dst also tagged `d_f00f` for Erratum 81 (`core.sv:1252-1254`) |
 | SHLD / SHRD **memory dst** | 0F A4/A5/AC/AD mem | `mod!=11` → `d_unknown` (`core.sv:1213`) |

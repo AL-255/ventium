@@ -1,0 +1,17 @@
+{
+  "name": "plar",
+  "kind": "system",
+  "src": "plar.S",
+  "linker": "plar.ld",
+  "image": "plar.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 160,
+  "sys": true,
+  "paging": false,
+  "description": "Protected-mode LAR/LSL descriptor-query differential: register and 16-bit memory sources, 16/32-bit destinations, null/out-of-table rejection, RPL visibility, conforming code, and not-present data. Rejected queries preserve the destination; a memory selector source is only two bytes even for a 32-bit destination."
+}

@@ -180,6 +180,23 @@
         // COMPUTED via seg_load_fault(); delivery is M2S.3 (a raised decision
         // HALTs). The pseg far jump targets a present 32-bit code seg => no fault.
         // -------------------------------------------------------------------
+        S_DQUERY: begin
+          if (dq_pre_invalid) begin
+            // An executed ZF0 query still has normal post-instruction #DB
+            // semantics; an operand/descriptor fault never reaches this edge.
+            retire_reference_integer(next_eip, 1'b1, dq_flags);
+            seg_step<=1'b0;
+          end else if (mem_ack) begin
+            if (!seg_step) begin
+              gdt_lo<=mem_rdata;
+              seg_step<=1'b1;
+            end else begin
+              retire_reference_integer(next_eip, 1'b1, dq_flags);
+              seg_step<=1'b0;
+            end
+          end
+        end
+
         S_LJMP: begin
           if (mem_ack) begin
             if (!seg_step) begin gdt_lo<=mem_rdata; seg_step<=1'b1; end

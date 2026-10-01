@@ -380,17 +380,39 @@ module decode_stages
 
     if (two_byte) begin
       unique casez (op1)
-        // ---- M2S.4 system 0F 00 group: /0 SLDT, /1 STR, /2 LLDT, /3 LTR --------
+        // LAR/LSL: only the selector source is 16 bits, even when the
+        // destination is 32 bits. The descriptor read and ZF/writeback happen
+        // atomically in S_DQUERY; neither form modifies the source memory.
+        8'h02, 8'h03: begin
+          if (sys_mode && !seg_real) begin
+            d_sysop = (op1==8'h02) ? SYS_LAR : SYS_LSL;
+            d_src_reg=modrm_rm; d_dst_reg=modrm_reg;
+            d_writes_reg=1'b1; d_writes_flags=1'b1;
+            d_w=eff_opsize?3'd2:3'd4;
+            d_mem_read=(modrm_mod!=2'b11);
+            d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base);
+          end else begin
+            d_unknown=1'b1; d_len=pfx_len+4'd2;
+          end
+        end
+        // ---- 0F 00 group: /0 SLDT, /1 STR, /2 LLDT, /3 LTR, /4 VERR, /5 VERW --
         // 0F 00 /3 LTR r/m16 — load TR from a GDT TSS selector (reads the TSS
         // descriptor, marks it busy). 0F 00 /1 STR r/m16 — store the TR selector;
         // /0 SLDT r/m16 — store the LDTR selector (REVIEW_Aug3). Register forms
-        // only; VERR(/4)/VERW(/5) and the memory forms are not needed by the corpus.
+        // only for /0..3. VERR/VERW accept any r/m16 in protected mode and
+        // reuse S_DQUERY, changing only ZF and never the source/descriptor.
         8'h00: begin
           // LTR/STR are SYSTEM instructions: only meaningful in system mode. Gate
           // the decode on sys_mode so user mode keeps its exact pre-M2S.4 behavior
           // (0F 00 was d_unknown -> HALT; the user corpus never uses it, so this
           // keeps `make verify` byte-identical).
-          if (sys_mode && modrm_mod==2'b11 && modrm_reg==3'd3) begin // LTR r16
+          if (sys_mode && !seg_real
+              && (modrm_reg==3'd4 || modrm_reg==3'd5)) begin
+            d_sysop=(modrm_reg==3'd4) ? SYS_VERR : SYS_VERW;
+            d_src_reg=modrm_rm; d_w=3'd2; d_writes_flags=1'b1;
+            d_mem_read=(modrm_mod!=2'b11);
+            d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base);
+          end else if (sys_mode && modrm_mod==2'b11 && modrm_reg==3'd3) begin // LTR r16
             d_sysop=SYS_LTR; d_src_reg=modrm_rm; d_w=3'd2; d_len=pfx_len+4'd3;
           end else if (sys_mode && modrm_mod==2'b11 && modrm_reg==3'd2) begin // LLDT r16
             // load the LDTR from a GDT LDT descriptor (reuses the S_LTR read FSM).
