@@ -823,9 +823,10 @@ SHA256 `9c0d585b4abbe35df2c3781d1d13e10ea1a26f59c6ebfeb054572793bc4e272e`.
 CASE13 is not counted as a QEMU correctness pass: the pinned oracle omits
 per-access SS-limit enforcement and exits135, while the compiled
 VEN_SEG_ENFORCE model exits133 with the exact #SS witness. Separately,
-automatic RF in fault frames is an open, pre-existing Intel-fidelity gap in
-both pinned QEMU and the RTL. These fixtures check exact savedFLAGS2 for
-the current profile, never mask flags or claim Intel RF qualification.
+the automatic fault-RF policy requires the Pentium-specific clarification
+below; the earlier blanket Intel-fidelity-gap classification was too broad.
+These fixtures check exact savedFLAGS2 for the current profile, never mask
+flags or claim RF-retention qualification.
 
 The same final TB passes make verify (108 functional programs and19 timing
 bands) and all five strict lint configurations; actual outer waits are0.
@@ -1037,3 +1038,37 @@ requires the current cold run's closed969-frame timedemo and both canonical
 and outer PASS receipts. **The full standard suite remains incomplete.**
 Gameplay baseline is **0.44240609 IPC**, older e572, clocks
 **2,399,999,637–2,499,999,637**; current c611 remains unmeasured.
+
+### October1: RF authority correction and continuing GUI evidence
+
+The generic1997 SDM (243192-001, section14.3.1.1, printed14-9) and the
+July1995 Pentium manual (241430-004, section17.3.1.1, printed17-7/17-8)
+describe different automatic fault-RF behavior. Pentium Specification Update
+242480-041, clarification10, printed59/PDF67, explicitly makes the hardware
+RF-setting circumstances implementation-specific. Therefore a blanket
+RF0-to-RF1 change for every fault is not justified for this P54C target.
+The original report's blanket automatic-RF bug classification is withdrawn,
+not silently treated as a repaired or oracle-qualified behavior.
+
+A separate source-supported issue remains: core_fetch_decode.svh clears
+incoming RF during decode, before instruction success. Later32-bit fault
+frames use those live flags. The Pentium successful-completion rule and
+pinned QEMU's fault-frame save before handler RF clearing support testing
+**incoming RF1 retention across a failed instruction**. Short RF0/RF1,
+fault-versus-success fixtures are being prepared against existing finalTB2ce6;
+no red run, RTL repair, flag mask or automatic-RF policy change is yet claimed.
+IRETD/task-transfer entry-RF1 oracle behavior needs separate qualification.
+
+The unchanged c611 Win95 cold run reaches the driver-information dialog
+at15% in the1B-clock frame and16% at1.1B, still not desktop. Raw frame SHA256s:
+`6afaa71f5e0e55e1f0538c0bc99a168bb5479675f0ad47772c7b774e479c1b0d`
+and `221ea3b06f438907d56c45e03b7c8432bc60b69c19864e75513ce3e452821ec7`.
+Inspection PNGs are byte-for-byte identical in RGB pixels. Independent
+capture review finds the planar decoder identical to the legacy decoder,
+but not equivalent to full VGA scanout: address/row/pan/mask/Color Select
+and coherent frame-boundary assumptions are not established by FBCAP logs.
+Thus the odd cursor does not yet demonstrate native pixel or RTL corruption.
+Current build inputs and all three c611 executable copies still match pins;
+Win/Quake are live, with no closure/standard-suite PASS. Gameplay baseline
+remains **0.44240609 IPC**, older e572, clocks
+**2,399,999,637–2,499,999,637**; current c611 is unmeasured.
