@@ -1238,3 +1238,41 @@ This is a held live-prefix gameplay observation, not completed timedemo FPS,
 closed sticky-capture evidence, REP-normalized architectural IPC or a matched
 before/after performance comparison. **c611 predates the RF repair; current
 a48f/4092 candidates remain gameplay-unmeasured.**
+
+### October1 14:59UTC: repaired-candidate CoreMark component CLOSED PASS
+
+Both a48f standard seeds finished normally in approximately40 host minutes,
+within their60-minute caps. The unchanged independent closed checker actually
+returns0 and qualifies both complete raw reports, all five CRCs per seed,
+native waits0, normal guest exit_group(0), input/source pins, empty child
+groups, OOM0 and exact supervisor invocation. The metadata observer retained
+the actual f3f484e2 invocation through normal owner exit; only after all three
+recorded PIDs and the cgroup were absent did it discard idle service state.
+The preserved actual terminal tuple is inactive/dead/MainPID0/success/1:0,
+not an unloaded unit's default success response.
+
+| Standard seed | Total program clocks | CM/MHz, total program | CM/MHz, measured clock window |
+| --- | ---: | ---: | ---: |
+| performance1500 | 713,805,640 | 2.10141237 | 2.10162988 |
+| validation1500 | 712,760,043 | 2.10449507 | 2.10469241 |
+
+Performance CRCs are e9f5/e714/1fd7/8e3a/25b5; validation CRCs are
+18f2/e3c1/0747/8d84/e230 (seed/list/matrix/state/final). This qualifies the
+CoreMark correctness component; scoring remains a separate observation.
+The closed qualification receipt SHA256 is
+`7da3529e8d8c14883b791e01cc6480b504ca29090a3cfb65d9497442cc3c2f4d`,
+under `verif/tb/obj_dir_rfcomplete_elem_oct01.dskIXX/coremark-standard-rfcomplete-oct01.1/closed-qualified.json`.
+The root-observed supervisor receipt SHA256 is
+`84b8a32b8cb9fa414a21c275980c0797ba36ae7412c9707d48cb4421af04aca3`.
+Ordinary file logs still lack historical sticky pipe-loss receipts; this is
+observed closed functional evidence, not retroactive lossless-capture proof.
+
+RF repair, fixtures and directed checkpoint were selectively committed and
+pushed as5882b8b; unrelated local edits and artifacts were not included.
+Win95/Quake remain live and unqualified. The older c611 Win95 control's
+latest inspected frame shows driver-database progress60%, not desktop.
+The newer4092 run is still early boot, with no accepted desktop frame.
+**Standard suite: CoreMark PASS, Win95 pending, Quake timedemo pending.**
+Current verified gameplay IPC remains **0.42689244** on pre-RF c611, clocks
+**1,399,999,637–1,499,999,637**; the repaired candidate is unmeasured. These
+CoreMark scores are not Quake IPC, FPS or a matched before/after Quake gain.
