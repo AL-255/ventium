@@ -1435,3 +1435,27 @@ reruns **38 runner/collector/source methods** and **31 checker methods**, all
 PASS in under one second per batch, using only tiny host fixtures. No DUT or
 long verification run is launched by these tests, and existing loaded
 acceptance jobs are not changed or credited with this new collector.
+
+The additional passive caller query qualifies current service binding
+`C000E558 -> C0003528`, whose save convention is PUSHAD/FS/GS, paired with
+the POPGS/POPFS/POPAD/RET resume at `C00035B9`. Both represented frame EAX
+arguments are `2Fh`, with qualified CALL-through-E558 returns `C00026AF` and
+`C0259190`: these earlier frames are **Exec_Int2F**, not INT1C or the later
+393.8M snapshot's INT21 frames. Low client code `0247:006C` is STI; saved
+next EIP is `006D` with VM/IF set. The setter is a scheduled VPICD event, not
+proof of a hardware interrupt ancestor. Physical PIC ISR0 is already clear.
+These observations establish the first origin, but do not yet prove failed
+delivery/EOI or persistence without intervening clears over the later 95M
+clocks. The next bounded diagnostic follows the actual post-setter path with
+the existing model-matched recorder; no new model build is required.
+
+Latest verified current `cdcb` gameplay IPC is **0.44275880** over **4.2B–4.3B**:
+profile clocks 4,199,999,637–4,299,999,637, retirements
+1,592,675,761–1,636,951,641; U 33,639,949 plus V 10,635,931 exactly equals
+44,275,880 in 100M clocks. Raw frames 34/35 advance gameplay; hashes
+`0992c9bc49bcad51922edea1f0d8f1919f6420f5116ab5cb759ff5de2a5364a9` /
+`e4950a6606d8ef45f1ca6d18d49b656c2cd44465eda68743daf0428312834538`.
+The private executable still matches `cdcb`; `edda` remains a host-only
+diagnostic with no gameplay measurement. Current cold Quake timedemo and
+Win95 desktop remain incomplete. Acceptance fixes `f5457c9` and `4480287`
+are pushed; they do not claim to repair the Win95 guest wait.
