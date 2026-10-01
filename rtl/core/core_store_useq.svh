@@ -43,11 +43,12 @@
             // wr_hit selects the matched DR6.Bn bits; the default (K_ALU `mov
             // mem,reg`) retire path below diverts to arm_db instead of retiring,
             // fusing the store's record with the delivery (q_pc stamp, like the
-            // qemu gdbstub). mem_addr is post-translate physical, but paging is off
-            // in the corpus (linear==physical) and the breakpoint linear is the same
-            // cur_lin the access used, so compute it the same way.
+            // qemu gdbstub). Debug registers compare linear, not physical,
+            // addresses. Use the store destination's segment base: POP's
+            // implicit read uses SS (dbase), while its explicit write may
+            // use DS or a segment override (stbase).
             wr_hit = sys_mode ? dr_match((q_kind==K_STR) ? (dbase_edi+str_store_addr)
-                                                         : (dbase+st_addr), 1'b0)
+                                                         : (stbase+st_addr), 1'b0)
                               : 4'd0;
             // M5 finding [med]: a STORE mutates the D-cache (read-allocate write-back
             // allocates/updates LRU) but adds NO miss penalty (oracle p5_mem:

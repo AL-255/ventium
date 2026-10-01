@@ -1,0 +1,24 @@
+{
+  "name": "ppopwatch",
+  "kind": "system",
+  "src": "ppopwatch.S",
+  "linker": "ppopwatch.ld",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 1000,
+  "sys": true,
+  "paging": false,
+  "cases": 4,
+  "expected_faults": [],
+  "required_defines": ["VEN_SEG_ENFORCE"],
+  "variants": [
+    {"case": 1, "description": "DWORD FS:[EBX], FSbase10000, watch actual destination14000, one B0 trap"},
+    {"case": 2, "description": "WORD DS:[EBX], DSbase20000, watch actual destination24000, one B0 trap"},
+    {"case": 3, "description": "DWORD [EBP] defaultSS base0, watch4000, one B0 trap"},
+    {"case": 4, "description": "DWORD FS:[EBX], watch wrong oldSS-base4000, no trap"}
+  ],
+  "qualification": "Complete standard functional architectural differential and actual exit/closure; no new masks or row filtering. Non-ESP forms isolate destination segment provenance from POP[ESP] EA. Directed only, not an OS or standard-suite pass."
+}
