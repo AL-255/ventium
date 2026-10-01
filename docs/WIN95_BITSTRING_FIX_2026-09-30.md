@@ -248,6 +248,18 @@ and error-free closed evidence are still required, not merely gameplay.
 The new55-generic-plus-plar sweep was prepared but not launched: its agent's
 execution request was rejected. Those candidate system regressions remain
 open; no old-model sweep is substituted for them.
+Both new CoreMark standard seeds are now active on frozen TBfe4a, native
+PIDs679926/679927 on CPUs10/11. Service
+`ventium-standard-coremark-verrw-oct01.service`, invocation
+`cf6f39f53a80434084314ac7030fac6a`,2GiB/no-swap/160tasks/twoCPU,
+60minutes per seed. Parent
+`verif/tb/obj_dir_verrw_oct01.M2bz8N/coremark-standard-oct01.rwe4r3/`,
+matrix `ventium-coremark-matrix.k43qjdzq/`. Original1500-iteration/2000-byte
+images, all five reference CRCs and limits are unchanged. The launcher
+archives and executes the exact pinned matrix-driver bytes; initial actual
+cgroup admission, source/executable/input hashes and zero OOM counters are
+recorded. Final wait/CRC/pin/OOM/child-group closure receipts are pending;
+there is no new completed score yet.
 Its gameplay IPC is unmeasured; the labelled pre-repair baseline remains
 0.44499855 on cdcb, clocks6,899,999,637–6,999,999,637.
 
