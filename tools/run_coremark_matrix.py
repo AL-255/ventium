@@ -422,8 +422,10 @@ def load_plan(path):
             raise ValueError("workload seed must be performance or validation")
         for key in ("iterations", "max_insn", "max_cycles", "timeout_seconds"):
             positive_integer(workload[key], key)
-        if workload["timeout_seconds"] > 1800:
-            raise ValueError("CoreMark runs are currently authorized for at most 1800 seconds")
+        # Explicit user authorization on 2026-09-30 permits one hour per seed.
+        # Existing plan deadlines remain unchanged; this is only the hard cap.
+        if workload["timeout_seconds"] > 3600:
+            raise ValueError("CoreMark runs are currently authorized for at most 3600 seconds")
         if not re.fullmatch(r"(?:0x)?[0-9a-fA-F]{1,4}", workload["crcfinal"]):
             raise ValueError("crcfinal must be a reference hexadecimal CRC")
         workload["image"] = str(Path(workload["image"]).resolve(strict=True))
@@ -469,6 +471,16 @@ def stop_children(signum, _frame):
                     os.killpg(child.pid, signal.SIGTERM)
                 except ProcessLookupError:
                     pass
+
+
+def is_accepted(result):
+    """Completed correctness, independent of score or P54 profile eligibility."""
+    required = ("complete", "crc_ok", "iterations_ok", "dataset_ok",
+                "coremark_report_validated", "guest_duration_ok", "binary_unchanged",
+                "image_unchanged", "compile_record_unchanged", "generated_headers_unchanged")
+    return (all(result.get(key) is True for key in required)
+            and type(result.get("returncode")) is int and result["returncode"] == 0
+            and not any(result.get(key) for key in ("failure", "timed_out", "interrupted", "stopping")))
 
 
 def run_job(case, workload, directory, cpus):
@@ -533,9 +545,7 @@ def run_job(case, workload, directory, cpus):
     result["compile_record_unchanged"] = sha256(case["profile"]["compile_record"]) == case["profile"]["compile_record_sha256"]
     result["generated_headers_unchanged"] = all(sha256(path) == digest for path, digest in
                                                 case["profile"].get("input_snapshot_generated_headers", {}).items())
-    result["score_eligible"] &= (returncode == 0 and result["binary_unchanged"]
-                                 and result["image_unchanged"] and result["compile_record_unchanged"]
-                                 and result["generated_headers_unchanged"])
+    result["score_eligible"] &= is_accepted(result)
     result["clock_window_score_eligible"] = result["score_eligible"] and result.get("clock_window_valid", False)
     json_write(job / "result.json", result)
     print(f"{result['case']} {result['workload']}: clocks={result.get('clocks', '?')} "
@@ -549,8 +559,9 @@ def summarize(plan, results):
     candidates = []
     for case in plan["cases"]:
         values = [item for item in results if item["case"] == case["label"]]
-        eligible = [item for item in values if item["score_eligible"]]
-        seeds = {next(w["seed"] for w in plan["workloads"] if w["label"] == item["workload"]) for item in eligible}
+        accepted = [item for item in values if is_accepted(item)]
+        eligible = [item for item in accepted if item["score_eligible"]]
+        seeds = {next(w["seed"] for w in plan["workloads"] if w["label"] == item["workload"]) for item in accepted}
         candidates.append({"case": case["label"], "both_standard_seeds_complete": seeds == set(STANDARD_CRCS),
                            "minimum_eligible_cm_per_mhz": min((item["cm_per_mhz_total_program"] for item in eligible), default=None),
                            "p54_fidelity_rejections": case["profile"]["p54_fidelity_rejections"],
@@ -659,10 +670,7 @@ def main():
             except Exception as error:
                 results.append({"case": "unknown", "workload": "unknown", "score_eligible": False, "failure": repr(error)})
             json_write(directory / "summary.json", summarize(plan, results))
-    required = ("complete", "crc_ok", "iterations_ok", "dataset_ok", "binary_unchanged",
-                "image_unchanged", "compile_record_unchanged", "generated_headers_unchanged")
-    failed = any(any(not item.get(key) for key in required)
-                 or item.get("failure") or item.get("returncode", 1) != 0 for item in results)
+    failed = any(not is_accepted(item) for item in results)
     return 1 if _stopping.is_set() or failed else 0
 
 

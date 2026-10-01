@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 """Exercise cycle/CRC attribution and score eligibility independently of RTL."""
 
+import json
+from pathlib import Path
+import sys
+import tempfile
 import unittest
+from unittest.mock import patch
 
-from run_coremark_matrix import parse_clock_window, parse_crc_output, parse_input_settle, parse_memory_shapes, parse_result, parse_verilator_host_optimization, parse_verilator_threads, summarize, validate_host_lto_plan
+from run_coremark_matrix import is_accepted, load_plan, parse_clock_window, parse_crc_output, parse_input_settle, parse_memory_shapes, parse_result, parse_verilator_host_optimization, parse_verilator_threads, summarize, validate_host_lto_plan
 from gen_model_input_snapshot import generate, input_ports
 
 
@@ -45,6 +50,77 @@ MEMORY_SHAPES = """-- D-memory producer shape (events, not exclusive clocks) --
 
 
 class CoreMarkMatrixTests(unittest.TestCase):
+    @staticmethod
+    def accepted_result():
+        workload = dict(WORKLOAD_10, iterations=1500, crcfinal="25b5")
+        stdout = STDOUT_10.replace("0.001000", "22.010000").replace("Iterations       : 10", "Iterations       : 1500")
+        stdout = stdout.replace("0xfcaf", "0x25b5").replace("Errors detected", "Correct operation validated")
+        stdout = stdout.replace("ERROR! Must execute for at least 10 secs for a valid result!\n", "")
+        result = parse_result(LOG_10, stdout, workload)
+        result.update(returncode=0, binary_unchanged=True, image_unchanged=True,
+                      compile_record_unchanged=True, generated_headers_unchanged=True)
+        return result, stdout, workload
+
+    def test_correctness_acceptance_is_not_performance_eligibility(self):
+        result, _, _ = self.accepted_result()
+        self.assertTrue(is_accepted(result))
+        result.update(score_eligible=False, clock_window_score_eligible=False,
+                      cm_per_mhz_total_program=0.01, p54_fidelity_rejections=["VEN_UOPCACHE"])
+        self.assertTrue(is_accepted(result))
+
+    def test_valid_crc_and_exit_zero_cannot_hide_guest_error_or_short_run(self):
+        result, stdout, workload = self.accepted_result()
+        for changed in (stdout + "ERROR!\n", stdout + "Errors detected\n",
+                        stdout.replace("22.010000", "0.001000"),
+                        stdout.replace("Correct operation validated", "validation missing")):
+            with self.subTest(changed=changed):
+                failed = dict(result, **parse_result(LOG_10, changed, workload))
+                self.assertTrue(failed["crc_ok"])
+                self.assertEqual(failed["returncode"], 0)
+                self.assertFalse(is_accepted(failed))
+
+    def test_graceful_timeout_zero_and_other_incomplete_results_are_rejected(self):
+        result, _, _ = self.accepted_result()
+        for key, value in (("timed_out", True), ("interrupted", True), ("stopping", True),
+                           ("failure", "failed observation"), ("returncode", 1),
+                           ("returncode", False), ("returncode", None)):
+            with self.subTest(key=key, value=value):
+                self.assertFalse(is_accepted(dict(result, **{key: value})))
+        for key in ("complete", "crc_ok", "iterations_ok", "dataset_ok", "coremark_report_validated",
+                    "guest_duration_ok", "binary_unchanged", "image_unchanged",
+                    "compile_record_unchanged", "generated_headers_unchanged", "returncode"):
+            with self.subTest(missing=key):
+                missing = dict(result)
+                del missing[key]
+                self.assertFalse(is_accepted(missing))
+
+    def test_explicit_one_hour_limit_preserves_existing_plan_deadlines(self):
+        with tempfile.TemporaryDirectory(prefix="ventium-coremark-plan-test.") as directory:
+            root = Path(directory)
+            image = root / "image.json"
+            image.write_text("{}\n")
+            plan_file = root / "plan.json"
+            workload = dict(WORKLOAD_10, image=str(image), max_insn=10000000,
+                            max_cycles=30000000)
+            profile = {"model_threads": 1, "input_snapshot_capable": False}
+            with patch("run_coremark_matrix.compile_profile", return_value=profile):
+                for deadline in (1, 600, 1800, 1801, 3600):
+                    with self.subTest(deadline=deadline):
+                        plan_file.write_text(json.dumps({
+                            "version": 1,
+                            "cases": [{"label": "test", "binary": sys.executable}],
+                            "workloads": [dict(workload, timeout_seconds=deadline)]}))
+                        loaded = load_plan(plan_file)
+                        self.assertEqual(loaded["workloads"][0]["timeout_seconds"], deadline)
+                for deadline in (0, -1, True, "3600", 3600.0, 3601):
+                    with self.subTest(deadline=deadline):
+                        plan_file.write_text(json.dumps({
+                            "version": 1,
+                            "cases": [{"label": "test", "binary": sys.executable}],
+                            "workloads": [dict(workload, timeout_seconds=deadline)]}))
+                        with self.assertRaises(ValueError):
+                            load_plan(plan_file)
+
     def test_plan_cannot_mislabel_host_lto_binary(self):
         validate_host_lto_plan({"label": "legacy"})
         for actual in (False, True):
@@ -316,13 +392,22 @@ class CoreMarkMatrixTests(unittest.TestCase):
     def test_both_seeds_and_fidelity_are_distinct(self):
         plan = {"cases": [{"label": "example", "profile": {"p54_fidelity_rejections": ["VEN_UOPCACHE"]}}],
                 "workloads": [WORKLOAD_10, {"label": "validation10", "seed": "validation"}]}
-        result = {"case": "example", "workload": "performance10", "score_eligible": True,
-                  "cm_per_mhz_total_program": 2.2}
+        result, _, _ = self.accepted_result()
+        result.update(case="example", workload="performance10", score_eligible=True,
+                      cm_per_mhz_total_program=2.2)
         one = summarize(plan, [result])["candidates"][0]
         self.assertFalse(one["both_standard_seeds_complete"])
         two = summarize(plan, [result, dict(result, workload="validation10")])["candidates"][0]
         self.assertTrue(two["both_standard_seeds_complete"])
         self.assertEqual(two["p54_fidelity_rejections"], ["VEN_UOPCACHE"])
+        unscored = summarize(plan, [dict(result, score_eligible=False),
+                                   dict(result, workload="validation10", score_eligible=False)])["candidates"][0]
+        self.assertTrue(unscored["both_standard_seeds_complete"])
+        self.assertIsNone(unscored["minimum_eligible_cm_per_mhz"])
+        capped = summarize(plan, [result, dict(result, workload="validation10", timed_out=True,
+                                               score_eligible=True, cm_per_mhz_total_program=0.01)])["candidates"][0]
+        self.assertFalse(capped["both_standard_seeds_complete"])
+        self.assertEqual(capped["minimum_eligible_cm_per_mhz"], 2.2)
 
 
 if __name__ == "__main__":
