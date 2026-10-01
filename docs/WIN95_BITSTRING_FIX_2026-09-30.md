@@ -1383,5 +1383,141 @@ and RF4092
 `6d3a9537bbb7b2a111a227ef5d262abc2971a46cf191600c8f24e1ff82ae5424`.
 This is prepared future authority, not a fresh disk/source qualification or
 Win95 PASS; no live private disk was read and no manual desktop review exists.
-Root also inspected RF Quake raw frames0/1: startup console and THE NECROPOLIS
-loading, respectively. These are not yet a qualified gameplay IPC window.
+At that16:00 checkpoint, root also inspected RF Quake raw frames0/1: startup
+console and THE NECROPOLIS loading. Those frames were not gameplay evidence.
+
+### October1 19:18UTC: repaired candidate gameplay measurement
+
+This supersedes the earlier pre-RF gameplay baseline and the statements that
+4092 is gameplay-unmeasured. Root independently qualifies **0.43038841 IPC**
+on executable `4092c92a9f626157c9a0fa872f0a09f031b32f49f9b0cfa20d192a9a46835cc8`,
+profiler clocks **2,199,999,637–2,299,999,637**: 43,038,841 legacy retire events
+in100M clocks, exactly32,873,263 U plus10,165,578 V. Actual raw frames14/15
+advance the gameplay scene. Root verified both complete counter rows and their
+hashes, the held750378-byte log prefix and collector inode, process starts,
+actual executable/ROM/compile pins, raw-frame hashes and exact PNG/RGB equality.
+
+The root receipt is
+`ao486-sim/obj_dir_ven_rfcomplete_oct01.5mZtCG/quake-cold-oct01.1/root-qualified-gameplay-window-2p2-2p3.json`,
+SHA256 `0946daf8a669cc8c56e23cb6822f4ea98c70c8b782415c1e4c2ec84cfd70fb0d`.
+Its fully reviewed parent receipt SHA256 is
+`f859b0212386dd2e18d8cbd30363b44c8940eef61c160f19779558d2629fa8b0`.
+This measures **the current RF-repaired build**, not startup or a target IPC.
+It is still a live-prefix observation: no closed timedemo, sticky-capture/EOF
+acceptance, REP-normalized instruction CPI, matched-work fix gain or FPS is
+established. The old11.7FPS@70MHz projection remains an older-control estimate.
+
+The c611/4092 cold Quake prefix also matches through1.2B clocks: all four
+complete profiler rows at0.9/1.0/1.1/1.2B and raw frames0–4 agree byte-for-byte.
+The concatenated profiler-row SHA256 is
+`6b80724fa35dcb2bf5d8bbc59645110c27839d6d62a5a48790fdbbaa828b76f5`.
+Those frames are loading, not gameplay; this is prefix non-regression evidence,
+not a full-run or performance qualification.
+
+### October1 19:18UTC: old Win95 control closes with a real display error
+
+The c611 control reached the graphical error:
+“Your display adapter is not configured properly.” It offers the Hardware
+Installation wizard, **not an error-free desktop**. Root viewed raw frame38
+before requesting closure and independently viewed it again after closure.
+Frames33–39 share SHA256
+`84c4d37305a89ac9404ac4032ce50b37b58d5c69bae70c945c6c6832a857f01e`.
+
+Only after that actual error, root created the owned empty0600 `stop.request`.
+The native honored normal HOST-STOP at4,505,310,439 clocks/531,255,089 retires
+and exited0; its owner reaped it and closed at18:38:20UTC. Both PIDs and the
+recursive cgroup were absent before idle service cleanup. A metadata observer
+retained the original invocation72e81207 through actual inactive/dead/MainPID0,
+success/1:0; root did not stop a live DUT or use unloaded systemd defaults.
+
+Retained evidence under `obj_dir_ven_popwatch_oct01.52WV37/win95-cold-oct01.1/`:
+
+- `result.json`: `336e99e835b2bd2242ca8bb7a39eee4e4c16c6c2d01cb16ad96e4eccc3e33e4e`.
+- `supervisor-closure.json`: `e0427534d8730f3ceb16fc34cdf50c1ef5153424179cfdea49e90a43aa2bb86f`.
+- `root-closed-display-error-review.json`:
+  `4f4467114e688e917ec282b92be605779d7b3bf8638c2155092dbeba442b4ae6`.
+- Closed private2GiB disk:
+  `23a6f75bd3044dd7d00096c4c0087b17b7996003a4c7b1f6de53b32c18d17f07`.
+
+Captured/persisted log bytes both equal17,855,741, with normal EOF/wait and no
+sticky error; all40 raw frames match the closed inventory. Nevertheless,
+`CLOSED_UNQUALIFIED`/native0 is not desktop PASS. Root actually ran the closed
+Win checker against the independently pinned **negative** visual review: it
+returns2 at `missing/early/unbound manual desktop authority`. The bounded
+host check took2.284s/58.6MiB/no swap, invocationed0580bd; it did not mutate or
+execute a guest. The visual failure is on c611; RF4092 is not relabelled failed
+from an older model's result.
+
+### October1 19:18UTC: display fixture diagnosis, not a CPU workaround
+
+Only after old Win95's proven closure, root read its FAT16 files through mtools
+at the independently checked partition offset1048576. `SYSTEM.INI` already
+selects `vga.drv` and `Explorer.exe`. Its Cirrus description label alone is
+not proof of a loaded driver. `BOOTLOG.TXT` is **stale**: its19975 bytes and
+SHA256 `053d216aca468844d60e21dec5c919388813a52f83a360ac34194dd305372f8c`
+are identical to the pristine source; its date is June3. Its driver failures
+must not be attributed to this current boot.
+
+A bounded read-only CREG reader now resolves actual linked hierarchy entries,
+not string hits or physical record order. Root read the
+[libcreg format](https://github.com/libyal/libcreg/blob/main/documentation/Windows%209x%20Registry%20File%20%28CREG%29%20format.asciidoc)
+and relevant primary implementation, reviewed all code, and ran17 host contracts
+successfully (92ms/16.4MiB/no swap, invocation3c9de832). Tests distinguish
+linked versus orphan/alternate bindings and cover sparse IDs, bounds, cycles,
+parent/hash/identifier disagreement, overlapping navigation records and the
+observed singleton-NUL logical-root encoding. Only that exact root encoding is
+normalized; raw bytes and offsets remain reported and nonroot/double-NUL names
+still fail. Unknown layouts fail rather than recover guessed strings.
+
+The scratch reader/test SHA256 values are
+`f4120812c7be4731f1b32778055c5075e994262f356b0217f702b039173b4c13` /
+`4e51d7410ae8f77d57df6b017dfb8bd5b5685f07c9f1158b0067032d927c6d2e`,
+under the52WV37 build directory. An earlier strict reader rejected the real
+root encoding; that is a host-reader limitation, not a Windows/CPU failure.
+The corrected real-hive diagnostic actually exits0 without writes. Its output
+is explicitly **non-acceptance** and requires caller-attested SYSTEM.DAT
+provenance plus an independent byte SHA; CREG alone does not name its hive.
+
+Closed SYSTEM.DAT is345136 bytes,
+`eb5e5b1c0509dce27565a8afc5c6b41a1b63f3a9e447f314ce1835a50bbe7b01`,
+with2442 linked keys/10 data blocks/no unlinked live records. Pristine
+SYSTEM.DAT has the same size,2440 linked keys and SHA256
+`45693d669d01aa796b01b829f01883df385bc44d8c5c05175e8d35a0f374a674`.
+**Both** store the same display binding:
+
+```
+Enum\Root\*PNP0905\0000.Driver = Display\0000
+Services\Class\Display\0000.InfSection = Cirrus
+Services\Class\Display\0000\DEFAULT.drv = cirrus.drv
+Services\Class\Display\0000\DEFAULT.minivdd = cirrus.vxd
+Control\IDConfigDB.CurrentConfig = 0001
+Config\0001\Display\Settings = 800,600 / 4 bits
+```
+
+Thus the stored Cirrus configuration predates all these runs. Static bindings
+do not by themselves identify the currently loaded driver. The ao486 VGA has
+ET4K-style extensions, not a complete Cirrus adapter; text-source inspection is
+not proof of loaded-ROM ancestry. The disk's native MSDISP.INF supplies a normal
+standard-VGA installation section with640×480×16 colors and `vga.drv`/`*vdd`.
+The historical INI-only script does not update these registry bindings.
+
+Root also independently viewed the existing closed pinned-QEMU control's
+`screen_180.ppm`/pixel-identical PNG: the **same cc68 source** produces the same
+display-adapter dialog on QEMU's standard VGA. Raw frame SHA256 is
+`c6913e6b9b5663d2e11a6c289ec5525f854881d37e760d0af327bb555eb34cbf`;
+its closed reference receipt SHA256 is
+`ecbb26c2087d25fcdb67f8a73f76ce2404193ee9c526ee6b3fc724b2dfa28b5c`.
+That control reports normal reaped0 and unchanged source. Its different PC
+firmware/VGA prevent a CPU-causal conclusion or a Ventium standard-suite PASS.
+
+Next action: prepare a **separate** disk through Windows' own standard-VGA
+installer, retain the original immutable source and configuration evidence,
+then require a fresh no-snapshot/no-input Ventium cold boot without errors.
+No hand-patched registry, dialog dismissal counted as acceptance, forced CPU
+state, guest-code patch or workload-specific hardware bypass is justified.
+The live4092 Win95 disk has not been read or modified; its latest root-viewed
+frame17 still shows60% driver-database setup, not a desktop. Current4092 Quake
+remains live in advancing gameplay and has no completed timedemo/FPS result.
+**Standard suite remains incomplete: CoreMark PASS, Win95 pending, Quake pending.**
+Current verified gameplay IPC is **0.43038841**,4092 clocks
+**2,199,999,637–2,299,999,637**; this checkpoint adds no measured performance gain.
