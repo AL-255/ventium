@@ -3,7 +3,7 @@
 CC ?= gcc
 OBJCOPY ?= objcopy
 CFLAGS := -m32 -ffreestanding -nostdlib -fno-pic -fno-pie -Wall
-CASES := 1 2 3 4 5 6 7
+CASES := 1 2 3 4 5 6 7 8 9 10
 IMAGES := $(addprefix pverrw-c,$(addsuffix .bin,$(CASES)))
 .SECONDARY:
 all: $(IMAGES)

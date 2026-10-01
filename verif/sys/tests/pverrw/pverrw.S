@@ -7,12 +7,14 @@
  * CASE4 implicit descriptor high-dword #PF; no early ZF commit.
  * CASE5 real-mode #UD, CASE6 V86 #UD before an unmapped operand.
  * CASE7 PM16, with 66/67 prefixes and precise instruction lengths.
+ * CASE8 query TF/#DB; CASE9 illegal LOCK before operand access.
+ * CASE10 precise source #GP/#SS, requiring VEN_SEG_ENFORCE (Intel-spec gate).
  */
 #ifndef CASE
 #define CASE 1
 #endif
-#if CASE < 1 || CASE > 7
-#error CASE must be 1..7
+#if CASE < 1 || CASE > 10
+#error CASE must be 1..10
 #endif
     .set QUERIES, 0x2000
     .set ERRORS, 0x2004
@@ -22,6 +24,11 @@
     .set RESUME_PC, 0x2014
     .set EXPECT_FLAGS, 0x2018
     .set EXPECT_SP, 0x201c
+    .set EXPECT_AX, 0x2020
+    .set EXPECT_VECTOR, 0x2024
+    .set EXPECT_DS, 0x2028
+    .set EXPECT_SS, 0x202c
+    .set EDGE, 0x9ffe
     .set TARGET, 0x9000
     .set FLAGS_MASK, 0x003e7fd5 /* defined EFLAGS, except exception-image RF */
 #if CASE == 2
@@ -36,6 +43,12 @@
     .set FAULT_EXPECT, 4
 #elif CASE == 6
     .set FAULT_EXPECT, 3
+#elif CASE == 8
+    .set FAULT_EXPECT, 8
+#elif CASE == 9
+    .set FAULT_EXPECT, 4
+#elif CASE == 10
+    .set FAULT_EXPECT, 6
 #else
     .set FAULT_EXPECT, 0
 #endif
@@ -54,7 +67,7 @@
     pushl $\flags
     popfl
     .endm
-    .macro checked selector, zf, flags=0xcd7, bad=fail
+    .macro checked selector, zf, flags=0xcd7, bad=fail, count=1
     pushfl
     popl %ss:FLAGS_SAVE
     cmpl $(0xa55a0000 | \selector),%eax
@@ -77,9 +90,120 @@
     andl $FLAGS_MASK,%edx
     cmpl $((\flags & FLAGS_MASK & ~0x40) | (\zf << 6) | QUERY_MODE_FLAGS),%edx
     jne \bad
-    incl %ss:QUERIES
-    .set QUERY_EXPECT, QUERY_EXPECT+1
+    .if \count
+      incl %ss:QUERIES
+      .set QUERY_EXPECT, QUERY_EXPECT+1
+    .endif
     .endm
+
+#if CASE >= 8
+    /* Every event checks the same-CPL PUSHAL image. The saved PUSHAL ESP is
+     * the original ESP minus the 12/16-byte exception frame, not original ESP. */
+    .macro event_context error=0
+    movl %ss:EXPECT_PC,%eax
+    cmpl %eax,(32+4*\error)(%esp)
+    jne unexpected
+    cmpl $8,(36+4*\error)(%esp)
+    jne unexpected
+    movl (40+4*\error)(%esp),%eax
+    andl $FLAGS_MASK,%eax
+    cmpl %ss:EXPECT_FLAGS,%eax
+    jne unexpected
+    movl %ss:EXPECT_AX,%eax
+    cmpl %eax,28(%esp)
+    jne unexpected
+    cmpl $0x23456789,24(%esp)
+    jne unexpected
+    cmpl $0x3456789a,20(%esp)
+    jne unexpected
+    cmpl $0xdead9000,16(%esp)
+    jne unexpected
+    movl %ss:EXPECT_SP,%eax
+    subl $(12+4*\error),%eax
+    cmpl %eax,12(%esp)
+    jne unexpected
+    cmpl $0x56789abc,8(%esp)
+    jne unexpected
+    cmpl $0x6789abcd,4(%esp)
+    jne unexpected
+    cmpl $0x789abcde,0(%esp)
+    jne unexpected
+    movw %ds,%ax
+    cmpw %ss:EXPECT_DS,%ax
+    jne unexpected
+    movw %ss,%ax
+    cmpw %ss:EXPECT_SS,%ax
+    jne unexpected
+    .endm
+    .set EVENT_ORDINAL,0
+    .macro fault_stage name, resume, vector, flags=0xcd7
+    movl $\name,%ss:EXPECT_PC
+    movl $\resume,%ss:RESUME_PC
+    movl $\vector,%ss:EXPECT_VECTOR
+    movl $(\flags & FLAGS_MASK),%ss:EXPECT_FLAGS
+    movl $0xa55a0018,%ss:EXPECT_AX
+    stage 0x18,\flags
+    .endm
+    .macro fault_return flags=0xcd7
+    checked 0x18,((\flags >> 6) & 1),\flags,fail,0
+    .set EVENT_ORDINAL,EVENT_ORDINAL+1
+    cmpl $EVENT_ORDINAL,%ss:FAULTS
+    jne fail
+    .endm
+#endif
+#if CASE == 8
+    .macro tfq name, selector, opcode, modrm, result, zf, flags
+    movl $0xffff0ff0,%eax
+    movl %eax,%dr6
+    movl $\name\()_end,%ss:EXPECT_PC
+    movl $((\flags & FLAGS_MASK & ~0x40) | (\zf << 6) | 0x100),%ss:EXPECT_FLAGS
+    movl $\result,%ss:EXPECT_AX
+    stage \selector,(\flags | 0x100)
+    .global \name,\name\()_end
+\name:
+    .byte 0x0f,\opcode,\modrm
+\name\()_end:
+    /* IRET must have cleared TF; only LAR/LSL success changes EAX. */
+    pushfl
+    popl %ss:FLAGS_SAVE
+    cmpl $\result,%eax
+    jne fail
+    cmpl $0xdead9000,%ebx
+    jne fail
+    cmpl $0x23456789,%ecx
+    jne fail
+    cmpl $0x3456789a,%edx
+    jne fail
+    cmpl $0x56789abc,%ebp
+    jne fail
+    cmpl $0x6789abcd,%esi
+    jne fail
+    cmpl $0x789abcde,%edi
+    jne fail
+    cmpl %ss:EXPECT_SP,%esp
+    jne fail
+    movl %ss:FLAGS_SAVE,%edx
+    andl $(FLAGS_MASK | 0x10000),%edx
+    cmpl $((\flags & FLAGS_MASK & ~0x40) | (\zf << 6)),%edx
+    jne fail
+    .set EVENT_ORDINAL,EVENT_ORDINAL+1
+    cmpl $EVENT_ORDINAL,%ss:FAULTS
+    jne fail
+    incl %ss:QUERIES
+    .set QUERY_EXPECT,QUERY_EXPECT+1
+    .endm
+#endif
+#if CASE == 10
+    .macro ss_memq name, op, address
+    stage 0x18
+    .global \name,\name\()_end
+\name:
+    .byte 0x36,0x0f,0x00,(0x05 | (\op << 3))
+    .long \address
+\name\()_end:
+    checked 0x18,1
+    .endm
+#endif
     .macro regq name, selector, op, zf, prefix=0
     stage \selector
     .global \name, \name\()_end
@@ -187,7 +311,14 @@ real_mem_w67_end:
     movl $0xffff,0x550
     movl $0x00cf7000,0x554       /* 50 P=0 RO data3 */
     movl $0xffff,0x558
-    movl $0x000f9b00,0x55c       /* 58 PM16 code, baseF0000 */
+#if CASE == 7
+    .global pm16_descriptor_high,pm16_descriptor_high_end
+pm16_descriptor_high:
+    movl $0x00009b0f,0x55c       /* 58 PM16 code: baseF0000, limitFFFF, G=0,D=0 */
+pm16_descriptor_high_end:
+#else
+    movl $0x000f9b00,0x55c       /* preserved historical unused slot58 encoding */
+#endif
     movl $0x40000017,0x560
     movl $0x00008200,0x564       /* 60 LDT, base4000 limit17 */
     movl $0x30000067,0x568
@@ -196,7 +327,15 @@ real_mem_w67_end:
     movl $0x00cfb200,0x574       /* 70 RW data1 */
     movl $0,0x578
     movl $0x00008c00,0x57c       /* 78 call gate: never data */
+#if CASE == 10
+    movl $0x9fff,0x580
+    movl $0x00409300,0x584       /* 80 DS short: byte limit9fff, B=1 */
+    movl $0x9fff,0x588
+    movl $0x00409300,0x58c       /* 88 SS short: valid stack below limit */
+    movw $0x8f,0x480
+#else
     movw $0x7f,0x480
+#endif
     movl $0x500,0x482
     lgdt 0x480
     movl %cr0,%eax
@@ -218,11 +357,23 @@ pm_entry:
     movw %ax,%gs
     movl $0x90000,%esp
     movl %esp,EXPECT_SP
+#if CASE >= 8
+    movl $0x10,EXPECT_DS
+    movl $0x10,EXPECT_SS
+#endif
+#if CASE == 8
+    gate 1,db_handler,0x8f
+#endif
     gate 6,ud_handler
     gate 8,unexpected
     gate 11,unexpected
+#if CASE == 10
+    gate 12,seg_ss_handler
+    gate 13,seg_gp_handler
+#else
     gate 12,unexpected
     gate 13,unexpected
+#endif
     gate 14,pf_handler
     gate 32,done_handler,0xee
     movw $0x7ff,0x490
@@ -383,6 +534,117 @@ descriptor_resume2:
     jmp finish
 #elif CASE == 7
     ljmp $0x58,$pm16_entry_off
+#elif CASE == 8
+    movl $0x400,%eax
+    movl %eax,%dr7              /* no competing address breakpoints */
+    tfq tf_verr_valid,0x18,0x00,0xe0,0xa55a0018,1,0xc97
+    tfq tf_verr_null,0,0x00,0xe0,0xa55a0000,0,0xcd7
+    tfq tf_verw_valid,0x18,0x00,0xe8,0xa55a0018,1,0xc97
+    tfq tf_verw_ro,0x20,0x00,0xe8,0xa55a0020,0,0xcd7
+    tfq tf_lar_valid,0x18,0x02,0xc0,0x00c0f200,1,0xc97
+    tfq tf_lar_null,0,0x02,0xc0,0xa55a0000,0,0xcd7
+    tfq tf_lsl_valid,0x18,0x03,0xc0,0xffffffff,1,0xc97
+    tfq tf_lsl_null,0,0x03,0xc0,0xa55a0000,0,0xcd7
+    jmp finish
+#elif CASE == 9
+    call paging
+    movl $0x77889900,%eax
+    movl %eax,%cr2              /* #UD must not visit the absent operand */
+    fault_stage lock_verr_reg,lock_verr_reg_end,6
+    .global lock_verr_reg,lock_verr_reg_end
+lock_verr_reg: .byte 0xf0,0x0f,0x00,0xe0
+lock_verr_reg_end:
+    fault_return
+    fault_stage lock_verw_reg66,lock_verw_reg66_end,6,0xc97
+    .global lock_verw_reg66,lock_verw_reg66_end
+lock_verw_reg66: .byte 0xf0,0x66,0x0f,0x00,0xe8
+lock_verw_reg66_end:
+    fault_return 0xc97
+    fault_stage lock_verr_mem,lock_verr_mem_end,6
+    .global lock_verr_mem,lock_verr_mem_end
+lock_verr_mem: .byte 0xf0,0x0f,0x00,0x25
+    .long 0x21000
+lock_verr_mem_end:
+    fault_return
+    fault_stage lock_verw_mem66,lock_verw_mem66_end,6,0xc97
+    .global lock_verw_mem66,lock_verw_mem66_end
+lock_verw_mem66: .byte 0xf0,0x66,0x0f,0x00,0x2d
+    .long 0x21000
+lock_verw_mem66_end:
+    fault_return 0xc97
+    jmp finish
+#elif CASE == 10
+    movw $0x1357,%ss:EDGE-2
+    movw $0x18,%ss:EDGE
+    movw $0x2468,%ss:EDGE+2
+    xorw %ax,%ax
+    movw %ax,%ds
+    movl $0,%ss:EXPECT_DS
+    fault_stage gp_null_verr,gp_null_verr_end,13
+    .global gp_null_verr,gp_null_verr_end
+gp_null_verr: .byte 0x0f,0x00,0x25
+    .long TARGET
+gp_null_verr_end:
+    fault_return
+    fault_stage gp_null_verw66,gp_null_verw66_end,13,0xc97
+    .global gp_null_verw66,gp_null_verw66_end
+gp_null_verw66: .byte 0x66,0x0f,0x00,0x2d
+    .long TARGET
+gp_null_verw66_end:
+    fault_return 0xc97
+    ss_memq null_ds_ss_verr,4,TARGET
+    ss_memq null_ds_ss_verw,5,TARGET
+    movw $0x80,%ax
+    movw %ax,%ds
+    movl $0x80,%ss:EXPECT_DS
+    memq short_ds_legal_verr,4,1,0,0,EDGE
+    memq short_ds_legal_verw,5,1,1,0,EDGE
+    fault_stage gp_limit_verr,gp_limit_verr_end,13
+    .global gp_limit_verr,gp_limit_verr_end
+gp_limit_verr: .byte 0x0f,0x00,0x25
+    .long EDGE+1
+gp_limit_verr_end:
+    fault_return
+    fault_stage gp_limit_verw66,gp_limit_verw66_end,13,0xc97
+    .global gp_limit_verw66,gp_limit_verw66_end
+gp_limit_verw66: .byte 0x66,0x0f,0x00,0x2d
+    .long EDGE+1
+gp_limit_verw66_end:
+    fault_return 0xc97
+    movw $0x10,%ax
+    movw %ax,%ds
+    movl $0x10,%ss:EXPECT_DS
+    movw $0x88,%ax
+    movw %ax,%ss
+    movl $0x7000,%esp
+    movl %esp,%ss:EXPECT_SP
+    movl $0x88,%ss:EXPECT_SS
+    ss_memq short_ss_legal_verr,4,EDGE
+    ss_memq short_ss_legal_verw,5,EDGE
+    fault_stage ss_limit_verr,ss_limit_verr_end,12
+    .global ss_limit_verr,ss_limit_verr_end
+ss_limit_verr: .byte 0x36,0x0f,0x00,0x25
+    .long EDGE+1
+ss_limit_verr_end:
+    fault_return
+    fault_stage ss_limit_verw66,ss_limit_verw66_end,12,0xc97
+    .global ss_limit_verw66,ss_limit_verw66_end
+ss_limit_verw66: .byte 0x36,0x66,0x0f,0x00,0x2d
+    .long EDGE+1
+ss_limit_verw66_end:
+    fault_return 0xc97
+    movw $0x10,%ax
+    movw %ax,%ss
+    movl $0x90000,%esp
+    movl %esp,%ss:EXPECT_SP
+    movl $0x10,%ss:EXPECT_SS
+    cmpw $0x1357,%ss:EDGE-2
+    jne fail
+    cmpw $0x18,%ss:EDGE
+    jne fail
+    cmpw $0x2468,%ss:EDGE+2
+    jne fail
+    jmp finish
 #endif
 
 paging:
@@ -500,8 +762,65 @@ ud_handler:
     addl $(vm_r66_end-vm_r66),32(%esp)
 3:  popal
     iret
+#elif CASE == 9
+    pushal
+    event_context
+    cmpl $6,%ss:EXPECT_VECTOR
+    jne unexpected
+    movl %cr2,%eax
+    cmpl $0x77889900,%eax
+    jne unexpected
+    incl %ss:FAULTS
+    movl %ss:RESUME_PC,%eax
+    movl %eax,32(%esp)
+    popal
+    iret
 #else
     jmp unexpected
+#endif
+#if CASE == 8
+    .global db_handler
+db_handler:
+    pushal
+    event_context
+    /* TF traps save the post-query flags/PC; unlike faults they do not set RF. */
+    testl $0x10000,40(%esp)
+    jnz unexpected
+    pushfl
+    popl %eax
+    testl $0x100,%eax
+    jnz unexpected
+    movl %dr6,%eax
+    testl $0x4000,%eax
+    jz unexpected
+    incl %ss:FAULTS
+    andl $~0x100,40(%esp)        /* prevent recursive stepping after IRET */
+    movl $0xffff0ff0,%eax
+    movl %eax,%dr6
+    popal
+    iret
+#endif
+#if CASE == 10
+    .global seg_gp_handler,seg_ss_handler
+seg_gp_handler:
+    pushal
+    cmpl $13,%ss:EXPECT_VECTOR
+    jne unexpected
+    jmp seg_fault_common
+seg_ss_handler:
+    pushal
+    cmpl $12,%ss:EXPECT_VECTOR
+    jne unexpected
+seg_fault_common:
+    event_context 1
+    cmpl $0,32(%esp)
+    jne unexpected
+    incl %ss:FAULTS
+    movl %ss:RESUME_PC,%eax
+    movl %eax,36(%esp)
+    popal
+    addl $4,%esp
+    iret
 #endif
 done_handler:
     jmp finish

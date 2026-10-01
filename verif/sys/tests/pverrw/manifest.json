@@ -12,27 +12,39 @@
   "max_insn": 12000,
   "sys": true,
   "standalone_only": true,
-  "execution_status": "NOT RUN: host build/contract checks only",
+  "execution_status": "NOT RUN as a complete all-ten passing gate: parent first gate passed nine cases; CASE7 fixture repaired after actual QEMU135, targeted QEMU133 only; complete rerun pending",
+  "case7_repair": {
+    "cause": "PM16 descriptor high dword000F9B00 encoded base0/limitFFFFF; corrected CASE7 only to00009B0F for baseF0000/limitFFFF/D0/G0",
+    "preserved_failed_image": "verif/tb/obj_dir_verrw_oct01.M2bz8N/pverrw-qualified-oct01.1/case7/image.bin",
+    "failed_image_sha256": "9675f3548e4325a6e0f7f928f97d745248ff4de528d7775acefe7dfe9c2351e3",
+    "repaired_image_sha256": "7531c9dfaf2a39c7cc96bbeed4547d20baf51dfba8e910cd1e386cb963166da4",
+    "targeted_qemu_actual_return": 133,
+    "all_ten_architectural_rerun": "PENDING"
+  },
   "description": "General P54C VERR/VERW queries: fixed r/m16 source, only ZF changes, no GPR/source/descriptor writes, descriptor type and CPL/RPL rules, conforming-code exemption, P-bit independence, GDT/LDT boundaries, precise explicit/implicit read faults, and real/V86 rejection.",
   "primary_sources": [
     "ventium-refs/01-intel-canonical/243191-001_IA32_SDM_Vol2_InstrSet_1997.pdf: printed 3-453/454, PDF pages 483/484",
+    "ventium-refs/01-intel-canonical/243191-001_IA32_SDM_Vol2_InstrSet_1997.pdf: LOCK printed3-273; query opcodes are outside the legal LOCK list",
+    "ventium-refs/01-intel-canonical/243192-001_IA32_SDM_Vol3_SystemProg_1997.pdf: TF and RF printed14-9/14-10",
     "ventium-refs/07-p5-emulation-harness/build/qemu/target/i386/tcg/seg_helper.c: helper_verr/helper_verw and load_segment_ra",
     "ventium-refs/07-p5-emulation-harness/build/qemu/target/i386/tcg/translate.c: 0F00 /4,/5 protected-mode predicate and MO_16 operand"
   ],
   "variants": [
     {"case": 1, "image": "pverrw-c1.bin", "queries": 50, "faults": 0, "purpose": "PM32 register/memory; 66/67/both lengths; type/RPL/P0/null/GDT OOB/LDT including index0 and OOB; no accessed-bit write"},
     {"case": 2, "image": "pverrw-c2.bin", "queries": 22, "faults": 0, "purpose": "CPL3 versus DPL0/1/3; readable conforming DPL0 bypasses CPL and RPL; code is never writable"},
-    {"case": 3, "image": "pverrw-c3.bin", "queries": 2, "faults": 2, "purpose": "Exactly two-byte selector at page end succeeds; absent/crossing selector #PF0 CR2=21000; both old ZF1/ZF0 and all GPRs preserved"},
-    {"case": 4, "image": "pverrw-c4.bin", "queries": 4, "faults": 2, "purpose": "Valid selector's high descriptor dword #PF0 CR2=21000; no early ZF change; null/OOB rejects without implicit descriptor read"},
-    {"case": 5, "image": "pverrw-c5.bin", "queries": 0, "faults": 4, "purpose": "Real-mode register/memory VERR/VERW #UD; 3/4/5/8-byte lengths, saved IP/CS/flags/GPR/stack precision"},
-    {"case": 6, "image": "pverrw-c6.bin", "queries": 0, "faults": 3, "purpose": "V86 #UD before unmapped DS2000:1000 operand; saved VM/IOPL/flags/GPR/stack/selectors and prefix lengths"},
-    {"case": 7, "image": "pverrw-c7.bin", "queries": 6, "faults": 0, "purpose": "PM16 register and memory fixed-word source with 66/67/both; 3/4/5/6/8/9-byte lengths"}
+    {"case": 3, "image": "pverrw-c3.bin", "queries": 2, "faults": 2, "purpose": "Exactly two-byte selector at page end succeeds; absent/crossing selector #PF0 CR2=21000; both old ZF1/ZF0 and all GPRs preserved", "expected_faults": [{"vector":14,"error":0,"symbol":"operand_fault1"},{"vector":14,"error":0,"symbol":"operand_fault2"}]},
+    {"case": 4, "image": "pverrw-c4.bin", "queries": 4, "faults": 2, "purpose": "Valid selector's high descriptor dword #PF0 CR2=21000; no early ZF change; null/OOB rejects without implicit descriptor read", "expected_faults": [{"vector":14,"error":0,"symbol":"descriptor_fault1"},{"vector":14,"error":0,"symbol":"descriptor_fault2"}]},
+    {"case": 5, "image": "pverrw-c5.bin", "queries": 0, "faults": 4, "purpose": "Real-mode register/memory VERR/VERW #UD; 3/4/5/8-byte lengths, saved IP/CS/flags/GPR/stack precision", "expected_faults": [{"vector":6,"error":0,"symbol":"real_r","pc_mode":"real16"},{"vector":6,"error":0,"symbol":"real_w66","pc_mode":"real16"},{"vector":6,"error":0,"symbol":"real_mem_r","pc_mode":"real16"},{"vector":6,"error":0,"symbol":"real_mem_w67","pc_mode":"real16"}]},
+    {"case": 6, "image": "pverrw-c6.bin", "queries": 0, "faults": 3, "purpose": "V86 #UD before unmapped DS2000:1000 operand; saved VM/IOPL/flags/GPR/stack/selectors and prefix lengths", "expected_faults": [{"vector":6,"error":0,"symbol":"vm_r","pc_mode":"v86","base_symbol":"v86_start"},{"vector":6,"error":0,"symbol":"vm_mem_w","pc_mode":"v86","base_symbol":"v86_start"},{"vector":6,"error":0,"symbol":"vm_r66","pc_mode":"v86","base_symbol":"v86_start"}]},
+    {"case": 7, "image": "pverrw-c7.bin", "queries": 6, "faults": 0, "purpose": "PM16 register and memory fixed-word source with 66/67/both; 3/4/5/6/8/9-byte lengths"},
+    {"case": 8, "image": "pverrw-c8.bin", "queries": 8, "faults": 8, "event_kind":"TF traps", "trap_handler":"db_handler", "qualification":"PENDING differential", "purpose":"TF post-query #DB after valid and ZF0 VERR/VERW and shared LAR/LSL; exact saved next EIP/final flags/GPRs/ESP, RF0 and DR6.BS; saved TF cleared before IRET", "expected_faults":[], "expected_traps":[{"vector":1,"symbol":"tf_verr_valid","end_symbol":"tf_verr_valid_end"},{"vector":1,"symbol":"tf_verr_null","end_symbol":"tf_verr_null_end"},{"vector":1,"symbol":"tf_verw_valid","end_symbol":"tf_verw_valid_end"},{"vector":1,"symbol":"tf_verw_ro","end_symbol":"tf_verw_ro_end"},{"vector":1,"symbol":"tf_lar_valid","end_symbol":"tf_lar_valid_end"},{"vector":1,"symbol":"tf_lar_null","end_symbol":"tf_lar_null_end"},{"vector":1,"symbol":"tf_lsl_valid","end_symbol":"tf_lsl_valid_end"},{"vector":1,"symbol":"tf_lsl_null","end_symbol":"tf_lsl_null_end"}]},
+    {"case": 9, "image": "pverrw-c9.bin", "queries": 0, "faults": 4, "oracle":"intel-spec", "qualification":"PENDING Intel-spec only; not differential", "purpose":"Illegal LOCK register/66-register and absent-page memory/66-memory VERR/VERW #UD before operand access; exact source PC/flags/GPRs/ESP and unchanged CR2 poison; pinned QEMU legacy query arm omits LOCK rejection", "expected_faults":[{"vector":6,"error":0,"symbol":"lock_verr_reg"},{"vector":6,"error":0,"symbol":"lock_verw_reg66"},{"vector":6,"error":0,"symbol":"lock_verr_mem"},{"vector":6,"error":0,"symbol":"lock_verw_mem66"}]},
+    {"case": 10, "image": "pverrw-c10.bin", "queries": 6, "faults": 6, "oracle":"intel-spec", "qualification":"PENDING Intel-spec only; not differential", "required_defines":["VEN_SEG_ENFORCE"], "purpose":"Null DS #GP0, DS word-crossing limit #GP0, explicit SS word-crossing limit #SS0; old ZF1/ZF0/all GPRs/selectors/frame and live return precision; six legal explicit-SS/word-at-limit queries; pinned QEMU omits these per-access checks", "expected_faults":[{"vector":13,"error":0,"symbol":"gp_null_verr"},{"vector":13,"error":0,"symbol":"gp_null_verw66"},{"vector":13,"error":0,"symbol":"gp_limit_verr"},{"vector":13,"error":0,"symbol":"gp_limit_verw66"},{"vector":12,"error":0,"symbol":"ss_limit_verr"},{"vector":12,"error":0,"symbol":"ss_limit_verw66"}]}
   ],
   "terminal": {"eax": "0x42", "edi": "0x0", "esi": "0x600d0f00", "ebx": "CASE", "ecx": "variant.queries", "ebp": "variant.faults"},
   "coverage_gaps": [
-    "No TF/data-breakpoint trap witness yet; existing S_DQUERY bare retirement must not be assumed debug-qualified.",
-    "No explicit source #GP/#SS null/limit/privilege cases yet; these must retain existing source-access enforcement.",
-    "No illegal LOCK query witness yet; decoder rejection must be preserved.",
+    "Variants8-10 are newly host-built and not yet architecturally qualified; host assertions are not CPU execution evidence.",
+    "No query execution/data-breakpoint, explicit ES/FS/GS-source matrix, source privilege/#AC, or TF-at-operand/descriptor-fault priority witness yet.",
     "Host build and static assertions do not prove QEMU/RTL execution, cold Win95 causality, desktop, or standard-suite acceptance."
   ]
 }
