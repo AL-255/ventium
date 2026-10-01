@@ -1303,3 +1303,73 @@ standard-suite acceptance**. No source/model/guest state workaround was added.
 CoreMark is closed PASS; Win95 desktop and Quake timedemo remain pending.
 Gameplay IPC remains **0.42689244**, pre-RF c611, clocks
 **1,399,999,637–1,499,999,637**; the repaired candidate remains unmeasured.
+
+### October1 16:00UTC: Win95 closed-run qualification tooling
+
+`tools/check_win95_standard_closed.py` is a host-only checker; it never runs,
+modifies or stops a guest. An externally reviewed expectation SHA binds the
+original unit/invocation, admissions, model, launcher, exact loaded helper
+archives, ROMs and complete frozen input map. A **separate externally pinned
+manual review of actual closed raw desktop frames is mandatory**. It does not
+recognize a desktop automatically. A clean `CLOSED_UNQUALIFIED` wrapper result,
+live screenshot, snapshot or observer exit0 alone never becomes PASS.
+
+Before opening runtime logs, frames or disks, the checker requires the actual
+successful inactive/dead supervisor tuple for the exact original invocation,
+absent recorded owner/native PIDs and an absent or recursively empty cgroup.
+If systemd has collected the unit, use the independently reviewed and SHA-pinned
+historical supervisor receipt; an unloaded unit's default success is not proof.
+It then requires actual native wait0/group closure, lossless pipe EOF/byte/hash/
+inode receipts without sticky errors, complete cold header/footer and progress,
+the owned graceful HOST-STOP, no cap/error/hook/snapshot, unchanged source/input
+pins, resources/OOM0, unique native-published raw frame inventory and closed
+private-disk hash. PID/cgroup absence is checked again afterward. The output
+qualifies **Win95 only**, never the entire standard suite.
+
+Run it only after normal guest/owner closure, with `--expect`,
+`--expect-sha256`, `--visual-review`, `--visual-review-sha256`; add
+`--supervisor-closure` and `--supervisor-sha256` for a collected unit. Never
+manufacture manual desktop authority from setup progress or prepare a PASS
+review while the run is live. The current checker SHA256 is
+`d4dd8deb3eb9b376aa02d6259e37f347b4ffa6d4fff12f4d6b88d84308541537`.
+
+Root actually ran all17 `tools/test_check_win95_standard_closed.py` host tests
+after full source review and independent peer review. They pass, with actual
+service wait0, invocation `7448244972d4496eb0c82d4fa8bdce2f`,169ms runtime,
+20.2MiB peak and swap0. This uses synthetic files in standard TMPDIR or `/tmp`,
+not the full external `tmp` symlink. The2GiB disk reads are mocked; the real
+reader's wrong-size rejection is separately tested. Present PID rejection is
+real; recursive-cgroup negative coverage uses an injected refusal, not a sysfs
+integration fixture. Tests are checker contracts, **not Win95 desktop tests**.
+Test-source SHA256 is
+`f0c2a5f715ba92aad18796d0ec11dc547e2b89196c4464121c6f26493f4af593`.
+
+### October1 16:00UTC: host scheduling and retained live OS identities
+
+RF Win95's native858151 shared CPU14 with an older, preserved Quake run450409.
+Its approximately50% host CPU use and runqueue delay occurred without cgroup
+CPU throttling; this is host contention, not evidence of a DUT regression.
+Only the owned RF Win95 service's runtime `CPUWeight` was raised to1000.
+Its original invocation74bd87ca, owner858124, CPU14 affinity, CPU quota1s,
+2GiB/no-swap/32-task/file-size caps and guest/model/clock inputs are unchanged.
+The before/after property receipts are retained in its run directory. A later
+346.576705s host interval recorded315.399316s native CPU time, **91.0042% host
+CPU use**. This is not guest IPC, FPS or a hardware performance improvement.
+
+Four small metadata observers now hold the two Win95 and two Quake original
+supervisor invocations. They do not signal, restart or stop guests, execute
+models/checkers, or read live disks. Actual terminal metadata is retained only
+after normal closure; idle service cleanup must wait for absent PIDs/empty
+cgroups. Observers themselves never qualify a guest. Their individual caps are
+128MiB/no-swap/16 tasks/5% CPU/73h+120s, not changes to the DUT caps.
+
+The root-inspected old c611 Win95 raw frame23 now shows78% driver-database
+setup, **not the desktop** (raw SHA256
+`bfc3c01cc3ed70e6ff90ff16c9fc752a8042028e15ce11993611cc9e6b2033b9`).
+The PNG preview preserves every RGB pixel. RF4092 Win95 and Quake remain live;
+no new RTL/build/guest run was launched for this host-tooling checkpoint.
+CoreMark is PASS; both OS components remain pending. Latest verified gameplay
+IPC is **0.42689244**, c611 clocks **1,399,999,637–1,499,999,637**, predating RF;
+the RF candidate remains unmeasured. There is still **no matched pre/post IPC
+fix Quake FPS result**. The old11.7FPS@70MHz projection is not candidate FPS
+or a measured fix gain; CoreMark improvements do not establish a Quake gain.
