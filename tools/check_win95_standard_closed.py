@@ -255,7 +255,7 @@ def check(run, expected, visual, *, supervisor=None):
     require(final['worker'] == before['worker'] and before['unix'] <= final['unix'] < before['unix'] + SECONDS,
             'owner identity changed or wall cap reached')
     cmd, launcher = expected_command(run), absolute(expected['launcher_path'])
-    require(launcher.parent == run.parent and launcher.name == 'run_win95_cold.py' and
+    require(launcher.parent == run.parent and launcher.name in ('run_win95_cold.py', 'run_win95_vga_cold.py') and
             before['worker']['argv'] in (['/usr/bin/python3', str(launcher), str(run)],
                                        ['/usr/bin/python3', '-B', str(launcher), str(run)]), 'wrong observed launcher command')
     require(before['command'] == result['command'] == admission['argv'] == cmd and

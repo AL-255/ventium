@@ -164,6 +164,54 @@ class ClosedWin95Tests(unittest.TestCase):
         self.persist()
         self.assertEqual(self.qualify()['status'], 'PASS')
 
+    def rename_launcher(self, name):
+        old, renamed = self.launcher, self.build / name
+        old.rename(renamed)
+        pins = self.expect['pins']
+        pins[str(renamed)] = pins.pop(str(old))
+        self.launcher = renamed
+        self.expect['launcher_path'] = str(renamed)
+        for record in (self.before, self.final):
+            record['worker']['argv'] = ['/usr/bin/python3', str(renamed), str(self.run)]
+        self.persist()
+
+    def test_exact_vga_variant_with_separately_pinned_configured_source(self):
+        self.rename_launcher('run_win95_vga_cold.py')
+        old, configured = self.pristine, self.build / 'win95-standard-vga.raw'
+        old.rename(configured)
+        pins = self.expect['pins']
+        pins[str(configured)] = pins.pop(str(old))
+        self.pristine = configured
+        self.expect['pristine_disk_path'] = str(configured)
+        provenance = self.build / 'fixture-closed.json'
+        provenance.write_bytes(b'{"kind":"synthetic native-installed VGA preparation; not guest acceptance"}\n')
+        pins[str(provenance)] = sha(provenance)
+        self.persist()
+        value = self.qualify()
+        self.assertEqual(value['status'], 'PASS')
+        self.assertFalse(value['suite_acceptance'])
+
+        for path in (configured, provenance):
+            with self.subTest(mutated_pin=path.name):
+                original = path.read_bytes()
+                path.write_bytes(original + b'changed after the pinned receipt\n')
+                self.reject()
+                path.write_bytes(original)
+        self.assertEqual(self.qualify()['status'], 'PASS')
+
+    def test_unknown_launcher_even_with_consistent_external_pins_is_rejected(self):
+        self.rename_launcher('run_win95_unreviewed.py')
+        self.reject()
+
+    def test_vga_variant_does_not_waive_launcher_sha_or_source_pin(self):
+        self.rename_launcher('run_win95_vga_cold.py')
+        good_sha = self.expect['launcher_sha256']
+        self.expect['launcher_sha256'] = '0' * 64
+        self.reject()
+        self.expect['launcher_sha256'] = good_sha
+        self.launcher.write_bytes(b'# mutated after the pinned before receipt\n')
+        self.reject()
+
     def test_unknown_owner_options_are_not_allowed(self):
         self.before['worker']['argv'].insert(1, '-c')
         self.final['worker'] = copy.deepcopy(self.before['worker'])
