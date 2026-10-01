@@ -1677,3 +1677,79 @@ No new run, guest input, snapshot or model change was introduced.
 CoreMark is closed PASS; Win95 desktop and Quake timedemo remain pending.
 Current verified gameplay IPC remains **0.43038841**,4092 clocks
 **2,199,999,637–2,299,999,637**; no new FPS/performance gain is claimed.
+
+### October1: closed Win95 failures and precise-fetch investigation
+
+Both RF4092 Win95 runs have now closed after root directly inspected definite
+visual errors. Neither is an error-free desktop or standard-suite PASS. The
+raw P6 files were held with complete lengths, stable inode/content metadata
+and pixel-identical PNG previews, then rechecked and viewed after native closure.
+
+- The original cc68 disk reached98% driver-database setup, then a loading
+  background, and finally the **Display adapter is not configured properly**
+  dialog in frame33. Its raw SHA256 is
+  `84c4d37305a89ac9404ac4032ce50b37b58d5c69bae70c945c6c6832a857f01e`,
+  exactly the older c611 control's error pixels. Root created only the owned
+  empty0600 host-stop request at22:12:28UTC. Native and owner closed with zero
+  exit status at22:12:35UTC, at **3,924,310,439 clocks /432,212,683 retire
+  events**. The8,052,616-byte held log has EOF, equal captured/persisted counts
+  and no sticky capture error. Input pins and final zero OOM counters passed
+  the frozen launcher. Only after actual PID absence and an empty/absent
+  original cgroup did root clean the idle RemainAfterExit service. The observer
+  retained the original invocation `74bd87ca8cfc49fe8916cbbb3946e1e8` as
+  inactive/dead, code1/status0. The closed checker actually rejected the
+  negative manual desktop authority with exit2; native exit0 is not desktop
+  acceptance.
+- The prepared37f5 standard-VGA disk showed **Explorer: This program has
+  performed an illegal operation and will be shut down** in frame6, raw SHA256
+  `b51c3d5a6ead8cef1b0fcb102be82a82e5efa4c49b44ff69931f8d7067ccf1e7`.
+  This differs from the display-configuration failure. Root requested normal
+  host closure at22:16:43UTC without clicking the dialog or injecting input.
+  Native exited0 at **1,231,125,405 clocks /212,440,507 retire events**; the
+  4,471,360-byte held log reached EOF without a sticky error. The frozen launcher
+  retained unchanged input pins, final zero OOM counters and `CLOSED_UNQUALIFIED`.
+  Separately, the **owner/supervisor exited120**, not zero. The observer retained
+  that failed/failed state under original invocation
+  `5d4961061292401d87e951ddf44ece07`, after actual PID/cgroup absence. Its cause
+  is not proved by the native closure receipt or missing old launch-tool handle;
+  it is not waived. The closed checker actually rejected this supervisor with
+  exit2. The successful cold QEMU fixture sanity remains a different-platform
+  fixture check, not evidence that this DUT boot passed.
+
+Original-run receipts under `5mZtCG/win95-cold-oct01.1/`:
+`result.json` SHA256
+`733a178b851404d0947ce840cb8faae73ad93357c3bc76f73ebd442b53bfbd81`,
+`supervisor-closure.json`
+`7d923df6fb1931b38032472bdb90c9f64ca3fc063667ef28596b8ee466f2152b`,
+and `root-closed-display-error-review.json`
+`49553b03161e45460d613e301be7b507ca86193d79805f54958738d72a995f3f`.
+Configured-run receipts under `5mZtCG/win95-cold-vga-rfcomplete-oct01.1/`:
+`result.json` SHA256
+`2c3374f065e8eae9b9611ed5eda56111155d1cc0151af4628c5df8b98aab6355`,
+`supervisor-closure.json`
+`fa0d58728fd6e1053d77ce43bb28664ff05e3f235a64a6990ae8f379a329eee0`,
+and `root-closed-explorer-error-review.json`
+`21cba7da1b94ef07f67c597ee029750de113e04586592feea44a68d89b7edda4`.
+
+The configured log has a concrete suspicious sequence at lines39030–39031:
+user-CS0137 #PF stamped with kernel-looking `fault_pc=c00013d1`, followed by
+#GP at that same PC, error927c, while the updated CR2 is00408000. Source review
+finds that generic permission faults and `walk_fault_pc` capture use
+`S_PIPE ? pipe_commit_eip : q_pc`; **S_FETCH has not yet captured the upcoming
+instruction's q_pc**. A slow instruction fetch can therefore retain the prior
+IRET/transfer owner's restart PC. This is a general precise-fetch-restart
+defect candidate, not yet a proved explanation of Explorer's crash. A directed
+essential-byte fetch/page-fault regression is being prepared before RTL edits.
+Incidental16-byte overfetch across an absent page is a separate correctness
+question and must not be hidden by merely fixing the restart address.
+
+The common `tb: FLT ... cr2=` print reads pre-nonblocking-assignment CR2:
+`core_walk.svh` writes `creg2 <= walk_lin` on the same edge that invokes
+`start_fault`, so that printed CR2 is not necessarily this event's address.
+Use the registered post-edge context or explicit walk address before assigning
+individual fault addresses. Ordinary PIC/callback traps remain nonfatal by
+themselves. No RTL, guest-code patch or extra DUT run accompanies these closed
+failure receipts. CoreMark remains closed PASS; current Quake remains live and
+its timedemo is uncompleted. Current verified gameplay IPC remains
+**0.43038841**,4092 clocks **2,199,999,637–2,299,999,637**, with no new FPS or
+matched-work gain established.
