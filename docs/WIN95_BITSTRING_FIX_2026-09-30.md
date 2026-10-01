@@ -1072,3 +1072,41 @@ Current build inputs and all three c611 executable copies still match pins;
 Win/Quake are live, with no closure/standard-suite PASS. Gameplay baseline
 remains **0.44240609 IPC**, older e572, clocks
 **2,399,999,637–2,499,999,637**; current c611 is unmeasured.
+
+### October1: incoming-RF retention is reproduced, not repaired
+
+Four short cold CPL0/protected32 fixtures run on existing finalTB2ce6 without
+any RTL/model rebuild. RF0 followed by UD2 and RF1 followed by one successful
+MOV then UD2 pass complete architectural comparison. RF1 followed immediately
+by UD2 or divide-by-zero is **RED**: the handler reads savedEFLAGS00000002,
+where pinned QEMU preserves00010002. Both failures first diverge in EBP at
+the full saved-flags read, then also differ at the handler's IRETD. All
+59/59 records (60/60 for the MOV control) are retained and compared; no custom
+RF mask, record removal, state restore or workload bypass was used.
+
+Every native and separately free-running QEMU child actually exits133;
+native debug-exit/retirement/I/O footers, actual waits and closed groups
+qualify. Generator and comparators retain their own separate statuses;
+generator0 is not presented as actual free-QEMU133. The driver returns1
+and records RED, not a correctness PASS. Inputs remain pinned. Summary
+SHA256 `79364258fde71ae7d7ae8e133a41c88d9d0615c9173ce953f673cfe2c500f90d`,
+under `verif/tb/obj_dir_storecommit_oct01.RxNbj7/rf-retention-oct01.1/run-red-oct01.1/`.
+Independent closed review rechecks all25 child receipts/groups,26 input
+pins,50 stdout/stderr hashes and eight trace hashes. Observed source hashes
+are provenance, not independently proven loaded-byte/compiler ancestry.
+The unchanged canonical fault logger emits zero entries for direct UD2
+staging and one for DIV's start_fault route; the fixtures explicitly install
+only their intended IDT vector and verify the exact saved instruction PC.
+
+Proposed general repair: preserve live RF until semantic instruction success
+inside the existing EFLAGS owner, rather than restoring a stale issue-time
+bit in only some fault paths. Account separately for synthetic interrupt/SMI
+records, REP element versus terminal boundaries, after-execution debug traps,
+IRETD/task-transfer/RSM exceptions and ordinary RETF sharing an IRET state.
+PUSHFD must still mask RF/VM in its memory image. Additional boundary tests
+and implementation remain required; no repair or complete standard-suite
+acceptance is claimed. Win95/Quake's c611 cold runs remain unchanged/live.
+At13:11UTC, Win95's1.3B-clock frame shows17% driver-database progress;
+Quake's1.1B frame still shows the demo-loading console, not gameplay.
+Gameplay baseline remains **0.44240609 IPC**, older e572, clocks
+**2,399,999,637–2,499,999,637**; current c611 remains unmeasured.
