@@ -585,3 +585,71 @@ Latest verified gameplay IPC remains **0.43107762**, c0e5206e, profile clocks
 remain without a verified gameplay measurement. CoreMark's previous full-seed
 PASS belongs to fe4a21d7, not the new ba8effe8 TB. The full standard suite
 remains incomplete, particularly Win95 desktop and Quake timedemo completion.
+
+## October 1: interrupt stack-address repair and qualified checkpoint
+
+The secondary exception-delivery defect now has an independent reproducer.
+Eight `pintstackwrap` cases vary WORD/DWORD interrupt gates, SS.B0/B1 and
+low/wrapping stack placement. Before the address repair, DWORD/B0 cases1/5
+produce #SS at `S_INT_PUSH` and quiescent exit0; all six controls pass. Handlers
+check actual pushed IP/CS/FLAGS, adjacent sentinels, full handler ESP and full
+ESP restored by IRET. No paging or error-code-frame coverage is claimed.
+
+The repair applies `stk16` only to the same-privilege DWORD frame's subtracted
+offset, before adding SS.base. Slot width, byte enables, cross-privilege frame
+planning and writeback are unchanged. It adds no state, stall or guest-specific
+condition. This INT3 witness proves the address defect independently of the
+earlier far-frame width defect; neither is yet proved causal for Win95.
+
+Combined model SHA256
+`4f5e65cf828323161e8233913fabb5e08c07dae8188099167afcd170ebe7d1a3`,
+compile record SHA256
+`4bc4561a175b828512d0f724ba6c838930aca3c7bca8d8e5ffd0b5e93d31d7fc`:
+all eight cases PASS with actual exit133, zero faults,83 records and824 clocks;
+all32 far-frame cases PASS;108 functional programs,19 gated timing bands and
+all five lint profiles PASS. The fresh32-job build took58.9 seconds.
+Eighteen host-contract tests also pass, including refusal to overwrite/reuse
+an existing or symlinked assembly-output directory. The originally reviewed
+sources are preserved in `verif/tb/obj_dir_intstack_oct01.aBIBvx/pintstackwrap-reviewed-sources.sthi6s/`.
+The final eight-case summary SHA256 is
+`d5c3d708b7f32ed9940898d58bc88d46e3fe8bc67a2ca28ee41ce92a881e6dee`
+(`design/pintstackwrap-fixed-oct01.2/`);32-case summary SHA256 is
+`b847b4f4e51fa443a740a649208af2b40708366063f1d5d4e972fc7928fac719`
+(`design/pfarwordwidth-intstack-fixed-oct01.3/`). Both are under the owned
+`ao486-sim/obj_dir_win95_retf_oct01.pP4BlM/` parent. Two preceding four-worker
+far-frame attempts had one QEMU GDB-stub connection failure apiece, not a DUT
+mismatch; their FAIL receipts are retained. The complete two-worker retry
+passed. The cause of those oracle-startup failures is not established.
+
+The cold e572 checkpoint closed at exactly480,000,000 cycles /105,940,602
+retires. Actual native wait0, EOF, unchanged input/source pins and OOM0 are
+independently checked. Its wrapper really failed exit1 because its final
+process census counted its still-owned timeout ancestor; that failed wrapper
+status is preserved, not relabelled as a suite pass. Closed diagnostic proof
+SHA256 `16a944a10dfaee285e4fbf94cdbf4b195a71dd670d77dd07f24f3cc10d9804d9`
+permits passive inspection of only the exact snapshot and same-run closed disk.
+
+The passive parser initially failed closed: an older helper treated serialized
+FIFO entries as24bytes, but pinned e572 writes20bytes (uint32 address plus two
+uint64 values). A FIFO-only adaptation, with nonzero-FIFO positive and negative
+fixtures, passes17 host tests and the actual eight-entry capture. Extraction
+SHA256 `98f6dd7aa0dff76274294f87b462d77505722e9230dbffd5aedee345f2a9cffe`
+shows CPL3/VM0, CS0117.D0, SS0097.B0 and stateS_LOAD—not the RETF fault edge.
+Sixteen sampled stack dwords agree across DDR/L1/platform-cache layers, without
+overlapping pending writes. Pending reads and non-quiescent state are preserved.
+This does not establish the later popped selector or exclude earlier corruption.
+
+The completed vector13 ring contains three BIOS faults but misses the target
+0117:6522/ECC4 event; target qualification FAIL is retained. Buffered fault
+stdout cannot establish the exact cycle/retirement from its placement between
+stderr progress records. Next diagnosis uses the same native checkpoint ABI,
+a fresh copy of its paired disk and bounded host traces; it is replay evidence,
+not cold-boot acceptance. A separate stale explicit-ESP decode-metadata #DB
+writeback hypothesis still needs a dedicated witness before any correction.
+
+Latest verified gameplay IPC remains **0.43107762**, c0e5206e, profile clocks
+1,599,999,637–1,699,999,637, predating e572 and both frame repairs. No newer
+candidate gameplay IPC or standard-suite completion is claimed. The e572
+CoreMark full seeds passed previously; Win95 desktop remains FAIL and Quake
+timedemo remains incomplete. The new combined frame model still requires the
+complete standard suite before its integration can be declared complete.

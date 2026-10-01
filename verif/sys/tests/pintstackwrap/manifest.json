@@ -1,0 +1,12 @@
+{
+  "name": "pintstackwrap",
+  "image_prefix": "pintstackwrap-c",
+  "cases": 8,
+  "exit_code": 133,
+  "max_insn": 1000,
+  "expected_faults": [],
+  "oracle": "pinned QEMU8.2.2 full architectural differential",
+  "required_defines": ["VEN_SEG_ENFORCE"],
+  "qualification": "Directed same-privilege INT3 gate-width/stack-address-size witness; not standard-suite acceptance.",
+  "coverage_limits": "No paging, cross-privilege entry, error-code frames, hardware IRQ, task gate, or in-slot misalignment. INT3 gate size and SS.B are independent; B=1 high-placement controls start at10000 rather than wrapping."
+}

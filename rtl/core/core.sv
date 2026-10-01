@@ -10333,7 +10333,9 @@ module core
           // the ESP writeback wrapped, splitting the frame across the window.)
           cur_lin_nat = xpl_active
                     ? (seg_base[SG_SS] + frm_slot_off(int_new_esp, {2'd0, int_step}, 1'b1, ss_b))
-                    : (seg_base[SG_SS] + gpr_o[R_ESP] - ({28'd0, int_step} * 32'd4) - 32'd4);
+                    // Same privilege uses the existing stack's address size
+                    // independently of the DWORD gate's slot width.
+                    : (seg_base[SG_SS] + stk16(gpr_o[R_ESP] - ({28'd0, int_step} * 32'd4) - 32'd4));
         end
       end
       // REVIEW_aug2 C-06: S_IRET_SS reads the popped SS DESCRIPTOR from the GDT/LDT,
