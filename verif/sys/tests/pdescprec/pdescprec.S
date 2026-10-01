@@ -392,12 +392,20 @@ r3_entry:
     movl    $2, SKIP
     movw    $0x38, %ax
     movw    %ax, %ds                    /* #GP here (DPL < CPL) */
+    /* The handler loads DPL0 DS=0x10. Its outer IRET correctly nulls DS
+     * before returning to CPL3, so reload a usable selector before the next
+     * data access. QEMU's permissive null-data uses are not an ISA oracle. */
+    movw    $0x23, %ax
+    movw    %ax, %ds
 
     /* ---- fam 1b control: DS <- 0x40 (P=0 data DPL=3) at CPL3 -> #NP(0x40) -- */
     movl    $0x2068, CURSLOT
     movl    $2, SKIP
     movw    $0x40, %ax
     movw    %ax, %ds                    /* #NP here */
+    /* The same outer-return nulling applies to the control's handler. */
+    movw    $0x23, %ax
+    movw    %ax, %ds
 
     /* ======================= verify + fold + exit ========================= *
      * Verify every slot against the expected table (fail edi = 0x80|cases-
