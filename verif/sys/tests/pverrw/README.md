@@ -6,7 +6,7 @@ pinned-QEMU architectural comparison;9/10 pass their explicit Intel-spec
 contracts. The first all-ten run's CASE7 QEMU fixture failure is preserved.
 The fixture author has run host checks and bounded CASE7 QEMU diagnostics, not
 a DUT. Neither directed gate is Win95 evidence. The verified gameplay baseline is IPC
-0.45149190 on cdcb over cycles 6.5–6.6B; it predates the current candidate,
+0.44499855 on cdcb over cycles 6.9–7.0B; it predates the current candidate,
 which has no gameplay measurement.
 
 Historical first-seven freeze, committed in `aafc924`: source SHA256
