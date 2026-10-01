@@ -367,6 +367,40 @@ No FPS gain or full-suite pass is claimed.
 
 ## Separate open fidelity issue
 
+The frozen query candidate still has two pre-existing limitations found in the
+read-only followup. Neither has been demonstrated as a Win95 boot failure;
+do not replace the running acceptance binary or claim the ten microcases cover
+these paths.
+
+- Explicit memory-query reads do not invoke a DR7 read/write data-breakpoint
+  check. `S_LOAD` hands off to `S_DQUERY`, whose shared retirement handles TF
+  and execution breakpoints, not read watchpoints. A general repair needs a
+  fault-qualified read-range match latched until architectural completion,
+  precise post-query flags/destination and #DB delivery, and no watch on the
+  implicit supervisor descriptor reads. Directed witnesses must cover a
+  successful word query, null/OOB query with a real explicit operand, crossing
+  operand/descriptor faults, and TF/data-breakpoint combinations before a
+  broader read-debug change is accepted.
+- `desc_limit16()` keeps only the low16 bits of a scaled LDT limit. LLDT and
+  task-switch staging use that value: a byte-granular limit10017 becomes17
+  and falsely rejects TI1 selector1C (entry bytes24–31); a granular limit10
+  becomes0FFF rather than10FFF. This statically differs from pinned QEMU's
+  full cached limit. Intel1997 Vol3§4.3.2 explicitly calls LDTR's limit32bit,
+  while§2.4.2 says16bit, so do not claim a measured P54 silicon result from
+  the prose alone. Proposed general repair: retain the full scaled limit
+  through LLDT, staged task reload, SMM/RSM and debug scan, keeping GDT/IDT's
+  architectural16bit limits distinct. Add independent large/G1-LDT query and
+  segment-load witnesses, null-LDTR/no-access controls, task-switch and SMM
+  roundtrip coverage; never wrap a limit modulo65536.
+
+The new CoreMark matrix's CLI return0 also does not alone prove correctness:
+its final required-fields check omits the guest validation banner. Closed
+acceptance must independently require both standard seeds, all five exact
+CRCs, the validated/no-ERROR report, original1500/2000-byte contract, actual
+normal waits, unchanged inputs and the final resource/child-closure receipt.
+The currently loaded driver is frozen; any driver tightening waits for its
+owned jobs to close, rather than altering their provenance mid-run.
+
 Current CPUID advertises MMX although this non-MMX P54C implementation does not
 implement it, and reports family 5/model 4 instead of the P54C model 2 identity.
 A coordinated target/oracle profile and capability tests are needed. Do not
