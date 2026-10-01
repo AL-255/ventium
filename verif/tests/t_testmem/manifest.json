@@ -1,0 +1,3 @@
+{ "name":"t_testmem", "src":"t_testmem/t_testmem.s",
+  "elf":"t_testmem/t_testmem.elf", "image":"t_testmem/t_testmem.flat",
+  "load_addr":"0x08048000", "entry":"0x08048000", "max_insn":60 }

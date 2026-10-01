@@ -989,12 +989,12 @@ module decode_stages
         8'h84: begin // TEST r/m8, r8
           d_w=3'd1; d_alu_op=ALU_TEST; d_writes_flags=1'b1; d_src_reg=modrm_reg; d_src_high8=modrm_reg[2];
           if (modrm_mod==2'b11) begin d_dst_reg=modrm_rm; d_dst_high8=modrm_rm[2]; d_len=pfx_len+4'd2; end
-          else begin d_mem_read=1'b1; d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base); end
+          else begin d_mem_read=1'b1; d_mem_dst=1'b1; d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base); end
         end
         8'h85: begin // TEST r/m16/32, r16/32
           d_alu_op=ALU_TEST; d_writes_flags=1'b1; d_src_reg=modrm_reg;
           if (modrm_mod==2'b11) begin d_dst_reg=modrm_rm; d_len=pfx_len+4'd2; end
-          else begin d_mem_read=1'b1; d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base); end
+          else begin d_mem_read=1'b1; d_mem_dst=1'b1; d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base); end
         end
         8'h86: begin // XCHG r/m8, r8
           d_kind=K_XCHG; d_w=3'd1; d_src_reg=modrm_reg; d_src_high8=modrm_reg[2];
