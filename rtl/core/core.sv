@@ -1169,7 +1169,11 @@ module core
   // `real_mode`-only condition had the same flaw; it simply never showed, because
   // real-mode code writes SP, not ESP.
   logic esp_arch_dst;
-  assign esp_arch_dst = (q_writes_reg && (q_dst_reg == R_ESP))
+  assign esp_arch_dst = (q_writes_reg && (q_dst_reg == R_ESP)
+                        // Fault/trap delivery retains the interrupted decode,
+                        // but its frame pointer is an implicit stack update.
+                        // A stale MOV/LEA ESP destination must not own that WB.
+                        && (state != S_INT_PUSH) && (state != S_RMINT_PUSH))
                      // VEN_SYS_FASTPATH can reach the same explicit register
                      // writes without populating q_writes_reg/q_dst_reg.  Every
                      // GPR write produced by S_PIPE is an explicit instruction

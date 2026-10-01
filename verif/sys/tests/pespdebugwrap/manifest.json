@@ -1,0 +1,14 @@
+{
+  "name": "pespdebugwrap",
+  "image_prefix": "pespdebugwrap-c",
+  "cases": 2,
+  "exit_code": 133,
+  "max_insn": 1000,
+  "expected_faults": [],
+  "expected_debug_traps": 1,
+  "oracle": "pinned QEMU8.2.2 full architectural differential",
+  "required_defines": ["VEN_SEG_ENFORCE"],
+  "prerequisite": "Same-privilege DWORD S_INT_PUSH address wrap corrected first; otherwise the earlier #SS masks this writeback defect.",
+  "qualification": "Directed explicit-ESP TF/#DB metadata ownership; not standard-suite acceptance.",
+  "coverage_limits": "CPL0, CS.D1, SS.B0, no paging, DWORD trap gate. Does not qualify #PF/error-code, real/V86, cross-privilege or hardware IRQ metadata."
+}

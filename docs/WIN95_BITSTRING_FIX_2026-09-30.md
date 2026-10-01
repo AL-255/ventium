@@ -479,7 +479,9 @@ for that host-tool repair.
 
 The fresh e572 Win95 cold boot avoids the former 457M VERW #UD, but then
 **FAILS**, not boots to the desktop. Actual log line 20725 records #GP at
-`0117:00006522`, error `0000ECC4`, between 488,163,870 and 488,663,870 clocks.
+`0117:00006522`, error `0000ECC4`, printed between progress records for
+488,163,870 and 488,663,870 clocks. Buffered fault stdout makes those records
+an observation bracket, not an authoritative fault-cycle bracket.
 Seven passive VGA text samples from 500,026,424 through 650,026,424 show
 `A fatal exception 0D has occurred` at that same address. Fetched low bytes are
 `66 CB` (prefixed RETF); effective width still requires CS.D. Error ECC4 alone
@@ -653,3 +655,54 @@ candidate gameplay IPC or standard-suite completion is claimed. The e572
 CoreMark full seeds passed previously; Win95 desktop remains FAIL and Quake
 timedemo remains incomplete. The new combined frame model still requires the
 complete standard suite before its integration can be declared complete.
+
+## October 1: stale explicit-ESP ownership during a debug-trap frame
+
+The dedicated MOV ESP / LEA ESP single-step witnesses confirm a third general
+processor bug. On an SS.B=0 stack, the explicit instruction correctly changes
+BEEF7000 to DEAD0000, but its retained `q_writes_reg`/`q_dst_reg` metadata then
+incorrectly owns the implicit S_INT_PUSH update. The old ownership exemption
+bypasses high-half preservation and commits handler ESP=DEACFFF4 instead of
+DEADFFF4. Both old-model executions fail in the handler with actual exit135;
+both pinned-QEMU executions pass. This is independent of the earlier address
+wrap correction, which is required to reach the writeback corner at all.
+
+The repair excludes S_INT_PUSH and S_RMINT_PUSH from the stale decoded-destination
+ownership term. Explicit MOV/LEA ESP writes remain full-width; frame updates
+retain their architectural stack-width behavior. No blanket metadata clearing,
+extra serialization, guest change or workload-specific bypass is introduced.
+The real-mode exclusion shares that invariant, but these new cases exercise
+protected-mode same-privilege #DB, not every real-mode/V86 delivery path.
+
+Frozen TB SHA256
+`9a7976f79c824b7b00869d411af8ed4b3d60c41c0a5b27ad60e0001e77f17e4d`,
+compile-record SHA256
+`c15682778f3ad352ed33cc412b7244165cfb781caff4e44f4ef407671de0a937`:
+
+- Both new cases PASS: 96 records / 936 clocks each, actual exit133, exactly
+  one TF trap, correct saved frame/DR6/guards and full ESP after IRETD.
+  Summary SHA256 `5acdae4374bf451ab55cb580e29d98f0b4045d452c3a696c27683cfd0612d061`.
+- All eight INT3 stack-wrap regressions PASS; summary SHA256
+  `04f2780d78501de0bcf024edd4e5bf2aa510ef00257c74c6d770f792a0d75395`.
+- All 32 far-frame width regressions PASS; summary SHA256
+  `76d0605e02ddd029a7d755167ad6841aeed7fa906da8b645bebab067d54a3b80`.
+- Fast gate PASS: 108 functional comparisons and 19 gating timing bands;
+  the 20 non-gating per-instruction cycle divergences remain separately reported.
+  All five strict structural lint profiles PASS.
+
+The 42 directed cases use complete standard functional differential with no
+additional masks or row filtering. Existing defined/undefined EFLAGS masks
+remain; new #DB witnesses explicitly inspect TF/RF, saved FLAGS/IP and DR6.
+All directed summaries retain source/model pins and actual native closure.
+Original reviewed test inputs are archived under
+`verif/tb/obj_dir_espdebug_oct01.eo9QA1/pespdebug-reviewed-sources.85N32M/`.
+
+The newer e572 cold Quake run now has a visually verified gameplay window:
+**0.43107762 IPC**, profile clocks **1,599,999,637–1,699,999,637**. Its exact
+retirement/U/V counters and endpoint frame hashes match c0e5; no IPC change
+is measured in that corresponding window. Receipt SHA256
+`bdc4190d6970f7b9a70033ace75114d0ce73ef39d714d0a5eb470a0108193603`.
+This supersedes the earlier c0e5-labelled baseline, but e572 still predates all
+three new frame repairs. Their gameplay and complete standard-suite results
+remain unmeasured; prior full CoreMark success does not qualify the new build.
+Win95 desktop and completed current Quake timedemo are still unproven.
