@@ -376,8 +376,10 @@ these paths.
   check. `S_LOAD` hands off to `S_DQUERY`, whose shared retirement handles TF
   and execution breakpoints, not read watchpoints. A general repair needs a
   fault-qualified read-range match latched until architectural completion,
-  precise post-query flags/destination and #DB delivery, and no watch on the
-  implicit supervisor descriptor reads. Directed witnesses must cover a
+  precise post-query flags/destination and #DB delivery. Implicit supervisor
+  descriptor-read watchpoint behavior needs a separate oracle/spec witness;
+  it is not yet established that these reads should be exempt. Directed
+  witnesses must cover a
   successful word query, null/OOB query with a real explicit operand, crossing
   operand/descriptor faults, and TF/data-breakpoint combinations before a
   broader read-debug change is accepted.
@@ -400,6 +402,43 @@ CRCs, the validated/no-ERROR report, original1500/2000-byte contract, actual
 normal waits, unchanged inputs and the final resource/child-closure receipt.
 The currently loaded driver is frozen; any driver tightening waits for its
 owned jobs to close, rather than altering their provenance mid-run.
+
+### October 1 live-suite followup
+
+All four current native jobs were revalidated alive on their actual frozen
+executables and CPUs: Win95/Quake `e572d518...` on 8/12, CoreMark
+`fe4a21d7...` on 10/11. No new DUT run or RTL change accompanied this audit.
+Win95's sampled `0028:C036F70C` startup loop is finite: the old `c0e5` cold
+log and fresh run both enter it around 334.9M clocks and leave at 346.4M.
+All 727 common CS/PC/retirement observations through 372.4M match exactly.
+This rules out that observed loop as a newly introduced stuck state, not a
+later boot defect. Fresh Win95 reached 400.9M clocks with no terminal error;
+the old 457.3M VERW fault point and desktop acceptance remain ahead.
+Both CoreMark seeds reached at least 469,762,048 clocks without an OOM.
+
+The new latest verified gameplay baseline is **0.43107762** on the bit-string
+repair binary `c0e5206ea2233f98dae7b60288a513e2dc5a3de5c9622d002e33d96b356b7958`.
+Profile clocks **1,599,999,637–1,699,999,637** contain 43,107,762 retirements
+(493,336,944–536,444,706), exactly U 33,045,867 + V 10,061,895 in 100M clocks.
+Actual `/proc/623348/exe`, private executable, ROMs, command, CPU9 and zero
+OOM counters were checked against the cold staging receipt; no live disk
+was read. Complete raw 320×200 frames 08/09 were viewed without color changes
+and show advancing gameplay (weapon/enemy action). Raw hashes:
+`e526845465a74a632ec18aee82222493aa2efc08d85c7fe8d18c0b7b84b945e6` /
+`574a4cc78e28c9f18357d40cb9b093936831038c0ced3fd3e48f0872ec39ddc2`.
+The ignored local receipt is
+`ao486-sim/obj_dir_standard_bitmem_sep30.S9VlV4/quake/gameplay-window-oct01-1p6-1p7.json`,
+SHA256 `8ffa4438783255957157ab1f19ee11ee786910c1599821e7d5b1b119f43f5de3`.
+It supersedes the older cdcb 6.9–7.0B number as the latest observed build/window;
+the current query-repaired `e572` candidate is still unmeasured. Different
+scenes do not establish a fix gain/regression, FPS or timedemo completion.
+
+The independent closed-CoreMark grader must also reject `timed_out=True`:
+the current matrix can otherwise accept a timeout race followed by a valid
+guest report and graceful native exit 0. A transient unit's default
+`Result=success` after unloading is not a historical wait result; retain the
+exact invocation's terminal supervisor evidence. The loaded driver remains
+unchanged while its seeds run.
 
 Current CPUID advertises MMX although this non-MMX P54C implementation does not
 implement it, and reports family 5/model 4 instead of the P54C model 2 identity.

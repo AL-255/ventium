@@ -1507,3 +1507,16 @@ The **11.7 FPS at 70 MHz** answer is only a linear extrapolation from the
 older control's reported 7.5 FPS at 45 MHz, not a current-candidate result or
 before/after IPC-fix gain. Current timedemo FPS remains unmeasured. Comparing
 different demo scenes' IPC cannot establish a fixed-work FPS improvement.
+
+October 1 followup: the newer bit-string repair `c0e5206e...` now has a
+visually qualified gameplay window, profile clocks 1,599,999,637–1,699,999,637:
+43,107,762 retirements / 100M clocks = **0.43107762 IPC**. Primary 33,045,867
++ secondary 10,061,895 reconcile exactly; raw frames 08/09 advance gameplay,
+and actual executable/ROM/profile pins and OOM counters were checked.
+The retained local receipt's SHA256 is
+`8ffa4438783255957157ab1f19ee11ee786910c1599821e7d5b1b119f43f5de3`;
+details are in `WIN95_BITSTRING_FIX_2026-09-30.md`.
+This is the latest measured gameplay baseline, not a matched-work speedup,
+FPS result or completed timedemo. Current query repair `e572d518...` remains
+unmeasured. Its fresh Win95/Quake runs and both full CoreMark seeds remain
+live; their completed standard-suite acceptance is still required.
