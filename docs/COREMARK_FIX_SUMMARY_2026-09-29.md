@@ -1520,3 +1520,25 @@ This is the latest measured gameplay baseline, not a matched-work speedup,
 FPS result or completed timedemo. Current query repair `e572d518...` remains
 unmeasured. Its fresh Win95/Quake runs and both full CoreMark seeds remain
 live; their completed standard-suite acceptance is still required.
+
+October 1 closed followup supersedes that live observation: the query-repaired
+candidate now passes both full standard CoreMark seeds with unchanged CRCs and
+cycle counts (performance **2.10141237**, validation **2.10449507 CM/MHz**).
+Independent closed qualification SHA256 is
+`0593bb8bb046dcf9ed8145d2e746f88d3c31f787a58a99229aff93534014a9b5`, under
+`verif/tb/obj_dir_verrw_oct01.M2bz8N/coremark-standard-oct01.rwe4r3/closed-qualified.json`.
+The exact supervisor wait was retained before collection; current unloaded
+defaults are not used. Closed-checker/matrix acceptance repairs pass40 host
+tests and are pushed in `4a537f4`. This is correctness and modeled CoreMark
+performance evidence, not gameplay/FPS.
+
+Fresh Win95 **FAILS** with #GP at `0117:6522`/ECC4 around488M and repeated
+fatal-exception0D screens; it was gracefully stopped with evidence preserved.
+Independent FAIL receipt SHA256
+`fd1f61dac8d96a2b3807fd54b3a095b22e68d2c7b4877e171a2c84fd5c412daf`.
+Quake is still live/incomplete. Same-build pre-fault checkpoint and GP-history
+diagnostics are running; no RTL or guest state is changed. Details and host
+qualification caveats are in `WIN95_BITSTRING_FIX_2026-09-30.md`.
+Latest verified gameplay IPC remains **0.43107762**, c0e5206e clocks
+1,599,999,637–1,699,999,637, predating the unmeasured e572 candidate.
+**The complete standard suite has not passed.**

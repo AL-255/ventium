@@ -451,3 +451,78 @@ accepted instead of raising #UD, and read-only BT does not check read/write
 data breakpoints. These pre-existing defects are not repaired or claimed covered
 by the eight address/write-fault cases. Non-flat/finite-segment and post-store
 #DB coverage are also still needed.
+
+## October 1: closed CoreMark PASS, new Win95 fatal return, targeted captures
+
+The query-repaired candidate's **two full CoreMark correctness seeds PASS**.
+Both run the unchanged 2000-byte standard workload for 1500 iterations, print
+`Correct operation validated.`, match all five reference CRCs and actually
+exit zero without timeout. Performance: 713,805,640 clocks / 542,165,430
+retirements, **2.10141237 CM/MHz**; validation: 712,760,043 clocks /
+541,458,819 retirements, **2.10449507 CM/MHz**. These counts and guest reports
+are identical to the preceding bit-string repair's complete runs: no measured
+CoreMark cycle regression from the query repair. They are not gameplay IPC/FPS.
+
+Frozen TB SHA256 is `fe4a21d733c5e7223e19ff3b2d2d30a71ff3a8f1cd6013456087a04ddb7c1e79`.
+Independent closed qualification is retained under
+`verif/tb/obj_dir_verrw_oct01.M2bz8N/coremark-standard-oct01.rwe4r3/closed-qualified.json`,
+SHA256 `0593bb8bb046dcf9ed8145d2e746f88d3c31f787a58a99229aff93534014a9b5`.
+It binds both raw reports, actual native waits, exact loaded helper archive,
+unchanged inputs/generated headers, zero OOM counters and the exact owner's
+terminal supervisor receipt retained before unit collection. Ordinary native
+file logs are observed functional evidence, not retroactive sticky-capture or
+compiler-ancestry proof. The new closed checker and the repaired matrix acceptance
+predicate pass **40 host tests**; commit `4a537f4` rejects guest errors, absent
+validation, insufficient duration and graceful timeout/exit-zero races. The
+explicitly authorized 60-minute seed cap is retained; no new DUT run was used
+for that host-tool repair.
+
+The fresh e572 Win95 cold boot avoids the former 457M VERW #UD, but then
+**FAILS**, not boots to the desktop. Actual log line 20725 records #GP at
+`0117:00006522`, error `0000ECC4`, between 488,163,870 and 488,663,870 clocks.
+Seven passive VGA text samples from 500,026,424 through 650,026,424 show
+`A fatal exception 0D has occurred` at that same address. Fetched low bytes are
+`66 CB` (prefixed RETF); effective width still requires CS.D. Error ECC4 alone
+does not establish the raw popped CS/RPL, descriptor reason or root cause.
+
+The failed run was gracefully stopped at 672,163,870 clocks / 155,079,575
+retirements. Its actual native wait/EOF/sticky-capture receipt and unchanged
+inputs are preserved. The original helper missed this fatal banner and reported
+`clean_exit_unqualified`; it never established desktop acceptance. A separate
+independent FAIL receipt, without rewriting the original result, is
+`ao486-sim/obj_dir_standard_verrw_oct01.ckekDl/win95/fatal-0d-failure-qualification-oct01.json`,
+SHA256 `fd1f61dac8d96a2b3807fd54b3a095b22e68d2c7b4877e171a2c84fd5c412daf`.
+Closed log SHA256 is `d7dbd5f93c1af0fa776129fbb76657dea6c9acea2517da50ce4b3b7dcb1808ef`.
+Live zero-OOM observations are recorded separately; final machine-persisted OOM
+counters are unavailable after cgroup collection. The fatal banner proves FAIL
+irrespective of that limitation. The vector6 fault ring saturated before 455M;
+absence of the later GP from that ring proves nothing.
+
+Two new same-e572 **cold diagnostics**, not acceptance passes, are actually
+running under `ao486-sim/obj_dir_win95_retf_oct01.pP4BlM/`: CPU10 requested
+480M save-stop/V4 (mouse state), CPU11 a 495M run with vector13 fault history
+starting at retirement107740000. Invocations are
+`0cc3c5957f094907961a5289571a29e5` / `ddbfbf6df34b4dcfa888398929d009a1`.
+Both have fresh pristine-media copies, unchanged ROMs/native model/profile,
+2GiB RAM/zero swap/32 tasks/one CPU, 4GiB per-file limits and 60-minute wall
+caps plus whole-cgroup cleanup. No RTL, guest bytes or FPGA build was changed.
+Future replay requires the actually closed pre-fault V4 snapshot paired with
+its own closed disk, same executable/ABI/profile, and a new private replay disk.
+It cannot reuse the failed 672M disk or enable fault-ring history on restore.
+Actual save must precede 488,163,870; a requested save time is not proof.
+
+The new diagnostic wrapper has a conservative final-census defect: it expects
+only its Python worker in the cgroup but its known timeout supervisor also
+remains until worker exit. The original script/runs remain unchanged. Native
+diagnostic evidence will require independent closure grading with exact recorded
+parent identities, actual native wait/EOF, unchanged pins/no OOM/no deadline and
+the completed snapshot or target ring; neither wrapper exit nor that false
+single-worker census is accepted as native success. This is a host qualification
+issue, not an RTL repair or permission to ignore unexplained failures.
+
+An independent word-sized LCALL/RETF extent/read-strobe defect is being given
+focused differential fixtures; it is **not** yet proved causal for this RETF.
+The standard suite is **CoreMark PASS / Win95 FAIL / Quake incomplete**.
+Latest verified gameplay IPC remains **0.43107762**, `c0e5206e` profile clocks
+1,599,999,637–1,699,999,637, predating e572. The e572 cold Quake run is live
+with no verified gameplay measurement or completed timedemo yet.
