@@ -1801,3 +1801,101 @@ fresh full standard suite or produced a gameplay measurement. The old RF4092
 CoreMark PASS and live Quake run do not qualify this changed candidate.
 Verified gameplay baseline remains **0.43038841 IPC**, build4092c92a, clocks
 **2,199,999,637–2,299,999,637**, preceding this repair; no FPS gain is claimed.
+
+### October1: fresh suite admission and remaining fetch-boundary failures
+
+Commit `6b615a7` contains the precise-restart repair and its passing pfetchpc
+regression. Additional existing system differentials **ppage, pfault, pfcpl3,
+pcpl, pretfoutpg, pxc04i and pxfrag pass** using the explicit new `50dc` TB;
+these are not a substitute for the standard suite. No warm-ITLB protection
+regression has been added, so that permission path and the P54C error-code
+bit4 concern remain unqualified. This supersedes the preceding preparation
+statement, not its narrower nonpresent-page PASS.
+
+The fresh full-PC build is
+`ao486-sim/obj_dir_ven_pfetchpc_oct01.AivFre/ao486sim_ven_standard`, SHA256
+`0cc2c728b5d1457ad2c3cc76346d5ec59888b744e266e83d9ea3c9bf5a55708a`.
+Its Verilator compile record SHA256 is
+`a4bda303f58fd902053eecce35f73a1174aa6b3b00440bc833b4277acd6ddd6d`.
+All107 compile defines match the previous RF profile; of276 common input
+paths, only `rtl/core/core.sv` differs. Source inputs were stable across the
+49.9s build. Full-profile core structural lint passes with implicit, missing,
+undriven, multiply-driven, latch and combinational-loop warnings fatal.
+
+All three fresh standard-suite jobs were actually admitted and remained live
+at the October1 23:17UTC process/unit check:
+
+| Component | Actual unit / invocation | Owner / native PID |
+| --- | --- | --- |
+| CoreMark both standard1500 seeds | `ventium-standard-coremark-pfetchpc-oct01.service`, `c1c377a686e44e5388d50fd1002781d4` |1108835 /1108840 validation,1108841 performance |
+| Cold FreeDOS Quake | `ventium-standard-quake-pfetchpc-oct01.service`, `1c1561b5110749c9898cbacd4bfd22ae` |1108076 /1108083 |
+| Cold configured Win95 | `ventium-standard-win95-vga-pfetchpc-oct01.service`, `6474c189ec0c468ca0826eaf00731056` |1109467 /1109497 |
+
+Each run has2GiB/swap0 containment; CoreMark has two pinned CPUs and a60min
+per-seed limit, Quake/Win95 one pinned CPU each. New launchers preserve frozen
+guest commands, seeds, reference CRCs and runtime profile. They use journald,
+not a lifetime-dependent terminal pipe. Win95 starts from a fresh copy of the
+closed generic-VGA fixture `37f5db14...`; its preparation is disclosed above,
+not counted as a DUT desktop PASS. Neither full-PC run uses a saved state,
+guest patch, injected keyboard input or reduced cache. No private live disk
+was externally read or hashed for these checks. All actual OOM/kill/group
+counters were zero. Win95 reached its2GiB file-cache limit with4,817 `max`
+events; that is memory pressure, not an OOM or an instruction fault.
+
+Metadata-only observers now hold the exact Quake/Win95 unit invocations and
+record actual owner/native start identities. They never stop or restart a
+workload and never assign guest PASS. `active/exited` is retained separately
+from supervisor closure; root cleanup is allowed only after actual process
+and recursive-cgroup absence. Suite completion remains **unproved**.
+
+New `verif/sys/tests/pfetchbound/` supplies seven independently selected BIOS
+regressions. Two bounded, parallel, no-build runs against frozen `50dc`
+exercised all seven in both functional and cycle-func modes:
+
+| Case | Actual result in both modes | Evidence / remaining defect |
+| --- | --- | --- |
+|1 short CALL, all five bytes mapped | **FAIL**, native141 | PF14/error4 at source PC401FFA, registered CR2=402000; unused successor page faults before CALL executes. QEMU133 executes CALL/POP, exact return address401FFF and counter1. |
+|2 NOP then next-page opcode | **FAIL**, native137 | PF source PC401FFF; QEMU requires the NOP to retire and the next opcode to fault at402000. |
+|3 essential immediate | **PASS**, native133 |480/480 full architectural records; exact PF/retry,4364/3276 clocks. |
+|4 essential ModR/M | **PASS**, native133 |480/480 full architectural records; exact PF/retry,4366/3278 clocks. |
+|5 essential SIB | **PASS**, native133 |480/480 full architectural records; exact PF/retry,4366/3278 clocks. |
+|6 byte16 on nonpresent page | **FAIL**, native143 | Initial PF14/error4 at original PC precedes retry, but RTL then raises UD6; pinned QEMU requires GP13/error0 at original EIP. |
+|7 byte16 already present | **FAIL**, native143 | RTL raises UD6 instead of GP13/error0; no PF is required. |
+
+These positive native statuses are normal isa-debug-exit witnesses, **not**
+Unix kill signals. Failed commands were actually waited/reaped, without
+timeout, leaked descendants or cleanup signals. Raw architectural rows are
+retained; wrong native status is not waived to run a passing comparator.
+Case1 observes source/delivery PC and CR2 but its unexpected-fault handler
+exits before reading saved stack EIP; do not claim a saved-frame witness for
+that case. Passing essential-byte cases do read the exact exception frame,
+leave it unmodified on IRET, and check post-retry counter1.
+
+Closed summaries under `obj_dir_pfetchfix_oct01.PWUG43/`:
+`pfetchbound-closed-oct01.1/summary.json` SHA256
+`d773b7a56f36e96402a0e0a6b6b18a8ceb9ce73f87983205eac4be4e858bc6e5`
+and `pfetchbound-closed-oct01.2/summary.json` SHA256
+`94bbe826f94b2632c7883711443fa8551f57145bd45b48d500f4e9ca58be21bc`.
+All frozen input hashes remained stable. No single invocation is labelled a
+full-case PASS: the two selected subsets collectively expose four failing cases.
+
+The proposed general repair is **demand-qualified fetch**, not a blanket
+fast-path disable or extra flush: preserve the common in-page frontend;
+route boundary lookahead to a valid-byte cursor; obtain prefix/opcode,
+ModR/M and SIB metadata before trusting the existing decoder's length; fetch
+only essential page-bounded pieces; gate both bus request and translation
+from the same demand; retain ownership through walks; and use nonwrapping
+length arithmetic for the architectural15-byte limit and byte16 fault
+precedence. The existing four-prefix scan and4-bit lengths cannot alone
+decide these corners. This integration is not implemented or qualified yet.
+
+To recover build headroom,32 unused old PCH files were losslessly gzip-packed
+only after exact-path, ignored/owned/inactive checks and expanded-SHA equality.
+The verified raw originals were removed, recovering approximately2.28GiB;
+the `.gch.gz` recovery copies remain. No model, source, guest image, snapshot
+or run-evidence log was deleted.
+
+Verified gameplay baseline remains **0.43038841 IPC**, build4092c92a, clocks
+**2,199,999,637–2,299,999,637**. Fresh `50dc`/`0cc2` candidates have no new
+gameplay measurement; they are unmeasured and cannot inherit the old
+CoreMark PASS, Quake FPS or desktop acceptance.

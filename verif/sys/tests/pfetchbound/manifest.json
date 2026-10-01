@@ -1,0 +1,23 @@
+{
+  "name": "pfetchbound",
+  "kind": "system",
+  "src": "pfetchbound.S",
+  "linker": "pfetchbound.ld",
+  "image_pattern": "pfetchbound_CASE.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 1800,
+  "cases": [
+    {"id": 1, "name": "short-call", "entry": "0x00401ffa", "faults": []},
+    {"id": 2, "name": "nop-next-opcode", "entry": "0x00401fff", "faults": [[14, 4, "0x00402000"]]},
+    {"id": 3, "name": "essential-immediate", "entry": "0x00401ffc", "faults": [[14, 4, "0x00401ffc"]]},
+    {"id": 4, "name": "essential-modrm", "entry": "0x00401fff", "faults": [[14, 4, "0x00401fff"]]},
+    {"id": 5, "name": "essential-sib", "entry": "0x00401ffe", "faults": [[14, 4, "0x00401ffe"]]},
+    {"id": 6, "name": "prefix16-nonpresent", "entry": "0x00401ff1", "faults": [[14, 4, "0x00401ff1"], [13, 0, "0x00401ff1"]]},
+    {"id": 7, "name": "prefix16-present", "entry": "0x00401ff1", "faults": [[13, 0, "0x00401ff1"]]}
+  ],
+  "description": "Full-state directed fetch-length/essential-byte boundaries with exact frames, unchanged valid #PF retry, and P5/QEMU PF-before-overlength-GP ordering. No standard-suite acceptance."
+}
