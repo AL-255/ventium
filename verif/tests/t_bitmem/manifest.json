@@ -1,0 +1,9 @@
+{
+  "name": "t_bitmem",
+  "src": "t_bitmem/t_bitmem.s",
+  "elf": "t_bitmem/t_bitmem.elf",
+  "image": "t_bitmem/t_bitmem.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 500
+}

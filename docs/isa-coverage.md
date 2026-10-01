@@ -97,7 +97,7 @@ opcodes (already listed PARTIAL in the integer table):
 | BSWAP | 0F C8–CF | IMPLEMENTED | `core.sv:1217` |
 | CMPXCHG r/m,r | 0F B0/B1 | IMPLEMENTED | `K_CMPXCHG` (`core.sv:1233`) |
 | UD2 | 0F 0B | IMPLEMENTED (system: delivers #UD; user: HALT) | `d_ud2` (`core.sv:1277`) |
-| BT/BTS/BTR/BTC reg `0F A3/AB/B3/BB`, imm `0F BA` | 0F A3.. / 0F BA | PARTIAL — register destination IMPLEMENTED; **memory destination HALTs** | `mod!=11` sets `d_unknown` (`core.sv:1188,1195`) |
+| BT/BTS/BTR/BTC reg `0F A3/AB/B3/BB`, imm `0F BA` | 0F A3.. / 0F BA | Legal register and memory forms IMPLEMENTED; reserved `0F BA /0..3` incorrectly accepted | `decode_stages.sv` signed register-index EA and modulo immediate selection; memory RMW CF commits on final `S_STORE` ACK. `t_bitmem` + `pbitmem` regression cases. |
 | SHLD / SHRD | 0F A4/A5/AC/AD | PARTIAL — register destination IMPLEMENTED; **memory destination HALTs** | `mod!=11` sets `d_unknown` (`core.sv:1213`) |
 | CPUID | 0F A2 | PARTIAL — IMPLEMENTED only under co-sim (`cosim_en`); HALT otherwise | `core.sv:1267-1271` |
 
@@ -108,7 +108,6 @@ opcodes (already listed PARTIAL in the integer table):
 | SLDT / LLDT / VERR / VERW (and `0F 00` memory form) | 0F 00 /0,/2,/4,/5, mem | not the LTR/STR reg subforms → `else d_unknown` (`core.sv:1092-1093`) |
 | SMSW / LMSW (and other `0F 01` subforms) | 0F 01 /4,/6,... | not LGDT/LIDT → `d_unknown` (`core.sv:1114`) |
 | CMPXCHG8B | 0F C7 /1 | both reg and mem forms `d_unknown`; reg-dst also tagged `d_f00f` for Erratum 81 (`core.sv:1252-1254`) |
-| BT/BTS/BTR/BTC **memory dst** | 0F A3/AB/B3/BB, 0F BA mem | `mod!=11` → `d_unknown` (`core.sv:1188,1195`) |
 | SHLD / SHRD **memory dst** | 0F A4/A5/AC/AD mem | `mod!=11` → `d_unknown` (`core.sv:1213`) |
 | All other `0F xx` (incl. MMX, MSR access, NOP-`0F 1F`, etc.) | various | two-byte `default` `d_unknown` (`core.sv:1281`) |
 

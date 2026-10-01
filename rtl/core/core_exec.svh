@@ -501,10 +501,9 @@
                 if (q_mem_write) begin do_store=1'b1; do_retire=1'b0; end
                 // Register-direct / immediate bit index is taken modulo the
                 // operand size: mod 16 for a 0x66-prefixed (16-bit) operand,
-                // mod 32 otherwise. (Memory-operand bit-string forms, which use
-                // the full index to address a different byte, are not decoded
-                // here — they HALT — so masking the index is correct for all
-                // forms reaching this block.)
+                // mod 32 otherwise. Memory register-index forms have already
+                // advanced q_ea by the signed whole-word/dword offset in the
+                // decoder; only the within-operand bit selector remains here.
                 cur=wmask(dst_cur,q_w);
                 // (Bind reg_read() to a temp first: IEEE 1800 forbids a
                 // bit-select directly on a function-call result; Vivado enforces.)
@@ -520,7 +519,11 @@
                 endcase
                 // Modify forms (BTS/BTR/BTC) write the destination — R3: that
                 // dst-reg write moved to the gpr writeback driver (K_BITTEST arm).
-                begin logic [31:0] fl; fl=eflags; fl[0]=bv; fl[1]=1'b1; eflags<=fl; end
+                // A memory RMW can still fault during S_STORE permission probes.
+                // Keep its CF private until the final write acknowledgement;
+                // register forms and read-only BT have no remaining store fault.
+                if (q_mem_write) bit_cf_r<=bv;
+                else begin logic [31:0] fl; fl=eflags; fl[0]=bv; fl[1]=1'b1; eflags<=fl; end
                 flags_we=1'b0;
               end
 

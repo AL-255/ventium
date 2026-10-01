@@ -277,6 +277,13 @@
                 // R3: the push/pop ESP adjust moved to the gpr writeback driver
                 // (core_gpr_wb.svh, S_STORE/default arm).
                 if (q_writes_flags && q_kind==K_ALU) eflags<=flags_out;
+                else if (q_kind==K_BITTEST && q_mem_write) begin
+                  // This block is reached only on the final ACK, after both
+                  // page permissions and all split-store beats have completed.
+                  // Commit CF before the existing post-store #DB/retire route.
+                  logic [31:0] fl;
+                  fl=eflags; fl[0]=bit_cf_r; fl[1]=1'b1; eflags<=fl;
+                end
                 eip<=next_eip;
                 // M2S.6: a data-write breakpoint (TRAP, fires AFTER the store) or a
                 // TF single-step trap fuses this store's record with the #DB

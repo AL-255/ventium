@@ -2874,6 +2874,9 @@ module core
   logic [3:0]  q_cc;
   logic        q_bit_imm;
   logic [2:0]  q_bit_op;
+  // Memory BTS/BTR/BTC must preserve architectural CF if the write faults.
+  // Stage only the original operand bit until the final S_STORE acknowledgement.
+  logic        bit_cf_r;
   logic        q_conv_cdq;
   smk_e        q_sm;
   st_e         q_st;
@@ -6809,6 +6812,7 @@ module core
     if (!rst_n) begin
       state<=S_RESET;
       gate_via <= 1'b0;   // bug#6 call-gate re-vector flag
+      bit_cf_r <= 1'b0;
 `ifdef VEN_DBG_CORE
       dbg_div_fault_q <= 1'b0;
       dbg_fault_cnt_q <= 8'd0;

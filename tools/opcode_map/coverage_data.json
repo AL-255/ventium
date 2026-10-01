@@ -2913,9 +2913,9 @@
   },
   "A3": {
    "mnem": "BT r/m,r",
-   "status": "partial",
-   "detail": "Memory destination HALTs. isa-coverage.md:100,111.",
-   "evidence": "core.sv:1540-1548 (8'hA3): K_BITTEST reg-dst form (mod==11) implemented; mem-dst (mod!=11) sets d_unknown -> S_HALT (core.sv:1548).",
+   "status": "implemented",
+   "detail": "Register and memory operands implemented. Memory register indices use signed operand-width bit-string displacement, with address-size wrapping before segmentation.",
+   "evidence": "decode_stages.sv A3/AB/B3/BB K_BITTEST arm; core_exec.svh reads the selected operand bit into CF. t_bitmem and pbitmem cover signed offsets, wrapping and page faults.",
    "desc": "Bit Test"
   },
   "A4": {
@@ -2969,9 +2969,9 @@
   },
   "AB": {
    "mnem": "BTS r/m,r",
-   "status": "partial",
-   "detail": "Memory destination HALTs.",
-   "evidence": "core.sv:1540-1548 (8'hAB): K_BITTEST reg-dst (mod==11) implemented; mem-dst sets d_unknown -> S_HALT (core.sv:1548).",
+   "status": "implemented",
+   "detail": "Register and signed-index memory operands implemented. Memory RMW carry commits only on final successful store acknowledgement.",
+   "evidence": "decode_stages.sv K_BITTEST memory EA; core_exec.svh bit_cf_r; core_store_useq.svh final-ACK CF commit. t_bitmem and pbitmem cover signed offsets, split stores and fault/restart precision.",
    "desc": "Bit Test and Set"
   },
   "AC": {
@@ -3025,9 +3025,9 @@
   },
   "B3": {
    "mnem": "BTR r/m,r",
-   "status": "partial",
-   "detail": "Memory destination HALTs.",
-   "evidence": "core.sv:1540-1548 (8'hB3): K_BITTEST reg-dst (mod==11) implemented; mem-dst sets d_unknown -> S_HALT (core.sv:1548).",
+   "status": "implemented",
+   "detail": "Register and signed-index memory operands implemented; memory RMW CF commits only after the final store ACK.",
+   "evidence": "Shared decode_stages.sv A3/AB/B3/BB arm and final-ACK CF commit; t_bitmem signed controls and pbitmem CASE6 crossing LOCK BTR.",
    "desc": "Bit Test and Reset"
   },
   "B4": {
@@ -3075,15 +3075,15 @@
   "BA": {
    "mnem": "BT/BTS/BTR/BTC r/m,imm8 (grp 8)",
    "status": "partial",
-   "detail": "ModRM.reg group: /4 BT /5 BTS /6 BTR /7 BTC handled reg-only; memory dst HALTs. Invalid sub-forms /0-/3 are NOT rejected as #UD (decoded as a bit-test). isa-coverage.md:100,111.",
-   "evidence": "core.sv:1550-1556 (8'hBA): K_BITTEST d_bit_imm, d_bit_op=modrm_reg, reg-dst (mod==11) implemented; mem-dst sets d_unknown -> S_HALT (core.sv:1555).",
+   "detail": "Legal /4 BT /5 BTS /6 BTR /7 BTC register and memory forms implemented; immediate bit selection is modulo operand width, without register-index EA displacement. Reserved /0..3 are still incorrectly accepted instead of #UD.",
+   "evidence": "decode_stages.sv 0F BA K_BITTEST arm; t_bitmem raw immediate controls and pbitmem CASE1. Reserved-subopcode rejection remains an open separate defect.",
    "desc": "Bit Test Group 8 (BT/BTS/BTR/BTC)"
   },
   "BB": {
    "mnem": "BTC r/m,r",
-   "status": "partial",
-   "detail": "Memory destination HALTs.",
-   "evidence": "core.sv:1540-1548 (8'hBB): K_BITTEST reg-dst (mod==11) implemented; mem-dst sets d_unknown -> S_HALT (core.sv:1548).",
+   "status": "implemented",
+   "detail": "Register and signed-index memory operands implemented; memory RMW CF commits only after the final store ACK.",
+   "evidence": "Shared decode_stages.sv A3/AB/B3/BB arm, core_exec.svh bit selection and core_store_useq.svh final-ACK CF; t_bitmem covers positive and negative BTC offsets.",
    "desc": "Bit Test and Complement"
   },
   "BC": {
@@ -3563,5 +3563,5 @@
    "desc": "Undefined Instruction (#UD)"
   }
  },
- "_decode_fingerprint": "5caf5e06463362d4ad85509a59abe19c52b6121d2d9d2d482738e5ec9afe6424"
+ "_decode_fingerprint": "8773d84534c2a39c29d06ff6e0a7d75ef44b7bef4e3645c42f2228339e956846"
 }

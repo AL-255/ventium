@@ -251,6 +251,8 @@ module decode_stages
   // Combinational decoder (moved VERBATIM from core.sv)
   // ===========================================================================
   always_comb begin
+    logic [31:0] bit_disp;
+    bit_disp=32'd0;
     d_addr_mask=8'd0; d_addr_mask_known=1'b1;
     d_len=4'd1; d_halt=1'b0; d_cacheinv=1'b0; d_lock=1'b0; d_int80=1'b0; d_unknown=1'b0; d_f00f=1'b0; d_is_branch=1'b0; d_branch_taken=1'b0;
     d_rel=32'd0; d_alu_op=ALU_ADD; d_writes_reg=1'b0; d_writes_flags=1'b0;
@@ -580,8 +582,19 @@ module decode_stages
             d_dst_reg=modrm_rm; d_writes_reg=(op1!=8'hA3); d_len=pfx_len+4'd3;
           end else begin
             // memory bit op: BT (A3) reads [mem] (CF only); BTS/BTR/BTC RMW [mem].
-            // d_src_reg=modrm_reg is the index reg; idx is masked to the operand size
-            // (the huge-offset bit-string addressing is not modeled — not exercised).
+            // A register index is a SIGNED bit-string offset, not just a
+            // modulo-width bit selector. Advance the one segment-relative EA
+            // latched by the core; S_LOAD and the RMW S_STORE then translate
+            // and permission-check the same adjusted operand. Constant wiring
+            // implements (signext(index) >>> log2(bits)) << log2(bytes).
+            bit_disp = eff_opsize
+                     ? {{19{gpr[modrm_reg][15]}},gpr[modrm_reg][15:4],1'b0}
+                     : {{3{gpr[modrm_reg][31]}},gpr[modrm_reg][31:5],2'b0};
+            d_ea = d_ea + bit_disp;
+            // Address-size truncation belongs before the segment-base add,
+            // including an offset that crosses either end of the 64KiB span.
+            if (eff_addr) d_ea = {16'd0,d_ea[15:0]};
+            d_addr_mask[modrm_reg] = 1'b1;
             d_mem_read=1'b1; d_mem_dst=1'b1; d_mem_write=(op1!=8'hA3);
             d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base);
           end
