@@ -1727,6 +1727,7 @@ module core
   // q_pc at diversion time, and a delayed packet may have an older q_pc from
   // the preceding retirement, so latch the fault PC with the walk itself.
   logic [31:0] walk_fault_pc;
+  logic [31:0] access_restart_pc;
   logic        walk_for_d;         // 1 = data access (D-TLB), 0 = fetch (I-TLB)
   logic        walk_is_write;      // H-02: the resumed access is architecturally a
                                    // WRITE -> the #PF error code's W/R bit
@@ -7636,8 +7637,8 @@ module core
         // load (or an I-side fill fault) must save the current instruction,
         // not the prior retired instruction.  An admitted delayed packet has
         // its own captured restart PC for the same reason as a walker #PF.
-        start_fault(8'd14, 1'b1, perm_err,
-                    (state==S_PIPE) ? pipe_commit_eip : q_pc);
+        // Slow fetch/fill states also precede the next q_pc decode capture.
+        start_fault(8'd14, 1'b1, perm_err, access_restart_pc);
       end else if (xlate_miss) begin
 `ifdef VEN_REP_STOS_STREAM
         // Starting a walk is an architectural start for a shadow descriptor:
@@ -7658,7 +7659,7 @@ module core
         // A fast packet's architectural PC is captured at admission.  Do not
         // overwrite q_pc here: the walk remains non-retiring until it either
         // resumes the packet or delivers the fault.
-        walk_fault_pc  <= (state == S_PIPE) ? pipe_commit_eip : q_pc;
+        walk_fault_pc  <= access_restart_pc;
         walk_for_d     <= cur_is_d;
         // REVIEW1_Aug2 C-02: a walk triggered BY THE PROBE must not set Dirty --
         // the store may still fault on page 1 and never happen. Phase 2 walks
@@ -9887,6 +9888,14 @@ module core
     end
   endtask
 `endif
+
+  // One restart owner for permission faults and faulting page walks. Fetch
+  // precedes capture_reference_decode: q_pc can still name the previous IRET
+  // under a newly installed user CS. Keep that retirement metadata untouched.
+  // An admitted fast packet instead owns pipe_commit_eip; decoded data beats
+  // retain q_pc across split accesses, REP elements and micro-sequences.
+  assign access_restart_pc = (state == S_PIPE) ? pipe_commit_eip
+                           : ((state == S_FETCH || state == S_PF) ? eip : q_pc);
 
   // Is the current bus access a DATA access (D-TLB) vs an instruction fetch
   // (I-TLB)? Fetch states are S_FETCH / S_PF / the S_PIPE icache fill; the

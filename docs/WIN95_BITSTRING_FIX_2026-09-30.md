@@ -1753,3 +1753,51 @@ failure receipts. CoreMark remains closed PASS; current Quake remains live and
 its timedemo is uncompleted. Current verified gameplay IPC remains
 **0.43038841**,4092 clocks **2,199,999,637–2,299,999,637**, with no new FPS or
 matched-work gain established.
+
+### October1: precise-fetch restart reproduced and repaired
+
+The stale restart address is now reproduced independently of Windows95 in
+`verif/sys/tests/pfetchpc/`. Its CPL3 C7 MOV starts at00401FFA; the four
+essential immediate bytes occupy a nonpresent next page00402000. QEMU Pentium
+returns native133. The frozen pre-repair testbench `a48fe77e...` returns137
+in **both functional and cycle-func modes**: the actual saved exception-frame
+EIP is000F041D (the preceding kernel `cross_enter_iret`), not00401FFA. Error4,
+CS1B, CR2=00402000 and old SS:ESP=23:80000 are independently read back. This
+is a precise restart defect, not evidence that incidental lookahead must fault.
+The negative fixture/output is `/tmp/ventium-pfetchpc-before.m2JgUQ/`.
+
+The RTL uses one combinational `access_restart_pc` selection for permission
+faults and page-walk admission: admitted S_PIPE packets retain their captured
+`pipe_commit_eip`, undecoded S_FETCH/S_PF use current `eip`, and decoded data
+and microsequence accesses retain `q_pc`. It does not overwrite retirement
+metadata, flush caches, disable a fast path, add guest patches or use snapshots.
+
+Fresh isolated testbench `obj_dir_pfetchfix_oct01.PWUG43/tb_ventium` SHA256
+`50dc854501ad46cf0620dc726ba95dace5b54d8927b6fe6966f25a0bf364cf21`
+was built with32 bounded compile jobs (peak5.01GB, zero OOM/swap). Its compile
+record SHA256 is
+`2c956a7406f588f4636e2d191fef00965849792b7903fa1be344ffdf66de1d85`.
+`make verify` using this explicit TB **passes** functional QEMU differentials
+and all M4/M5 aggregate cycle bands; log SHA256
+`6e9166ed4999e48f0aa82593c3a64a09cd17819950cb688808e230544d6b45c8`.
+The separately reported per-instruction structural-cycle diagnostic remains
+divergent and is not reclassified as a passing equivalence test.
+
+The frozen, no-build pfetchpc gate also **passes both modes**:523 of523
+architectural records match pinned QEMU, native133, two exact #PF frames,
+unchanged pre-fault destination/counter, and an unmodified-frame IRET retry
+followed by counter1. Functional/cycle-func clocks are4887/3497. Each actual
+child wait completed with no timeout, leaked descendants or cleanup signal;
+all input hashes remained stable. The closed summary under that build's
+`pfetchpc-closed-oct01.1/summary.json` has SHA256
+`a23f2cd1f26461a7461482b6e64cdb4b8897630dde0fedb1cc8e882e9f24f03c`.
+
+This covers **nonpresent-page fetch restart**, not all fetch protection paths
+or the separate16-byte overfetch defect. A warm-ITLB supervisor-page test is
+being added; source review also found permission faults incorrectly emit the
+later-generation I/D error-code bit, which must not be attributed to P54C.
+Windows95 recovery is not yet proved. The repaired RTL has not yet passed a
+fresh full standard suite or produced a gameplay measurement. The old RF4092
+CoreMark PASS and live Quake run do not qualify this changed candidate.
+Verified gameplay baseline remains **0.43038841 IPC**, build4092c92a, clocks
+**2,199,999,637–2,299,999,637**, preceding this repair; no FPS gain is claimed.

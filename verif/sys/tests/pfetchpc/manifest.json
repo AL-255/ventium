@@ -1,0 +1,22 @@
+{
+  "name": "pfetchpc",
+  "kind": "system",
+  "src": "pfetchpc.S",
+  "linker": "pfetchpc.ld",
+  "image": "pfetchpc.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 1800,
+  "sys": true,
+  "paging": true,
+  "cases": 2,
+  "expected_faults": [
+    {"vector": 14, "error": 4, "eip": "0x00400000", "cs": "0x001b", "cr2": "0x00400000"},
+    {"vector": 14, "error": 4, "eip": "0x00401ffa", "cs": "0x001b", "cr2": "0x00402000"}
+  ],
+  "description": "Precise user instruction-fetch #PF restart: first-opcode control after outer IRET, then ten-byte C7 memory MOV whose essential immediate crosses onto a nonpresent page; unmodified IRET retry and no premature store."
+}
