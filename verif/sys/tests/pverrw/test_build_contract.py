@@ -206,9 +206,20 @@ class BuiltFixtureTests(unittest.TestCase):
                     self.assertIn(event["base_symbol"], table)
         self.assertEqual(self.manifest["exit_code"], (0x42 << 1) | 1)
 
-    def test_host_receipt_does_not_claim_simulated_pass(self):
+    def test_directed_receipt_does_not_claim_standard_suite_acceptance(self):
         self.assertTrue(self.manifest["standalone_only"])
-        self.assertTrue(self.manifest["execution_status"].startswith("NOT RUN"))
+        self.assertTrue(self.manifest["execution_status"].startswith("PASS directed all-ten gate"))
+        self.assertIn("Standard-suite acceptance remains pending", self.manifest["execution_status"])
+        receipt = self.manifest["qualification_receipt"]
+        self.assertRegex(receipt["sha256"], r"^[0-9a-f]{64}$")
+        self.assertRegex(receipt["tb_sha256"], r"^[0-9a-f]{64}$")
+        self.assertEqual(receipt["path"],
+                         "verif/tb/obj_dir_verrw_oct01.M2bz8N/pverrw-qualified-oct01.2/summary.json")
+        # This host check validates the metadata contract, not the referenced
+        # simulator result. The parent separately audited that closed receipt.
+        for variant in self.manifest["variants"][8:]:
+            self.assertEqual(variant["oracle"], "intel-spec")
+            self.assertIn("not differential", variant["qualification"])
         self.assertEqual(self.manifest["terminal"]["eax"], "0x42")
         self.assertEqual(self.manifest["terminal"]["ebp"], "variant.faults")
         self.assertGreaterEqual(len(self.manifest["coverage_gaps"]), 2)
