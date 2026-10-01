@@ -1373,3 +1373,15 @@ IPC is **0.42689244**, c611 clocks **1,399,999,637–1,499,999,637**, predating 
 the RF candidate remains unmeasured. There is still **no matched pre/post IPC
 fix Quake FPS result**. The old11.7FPS@70MHz projection is not candidate FPS
 or a measured fix gain; CoreMark improvements do not establish a Quake gain.
+
+Both Win95 run directories now contain a prepared `closed-expectation.json`.
+Root and an independent peer reviewed all identities, admission-byte hashes
+and each complete16-pin map against the frozen before receipts. Their reviewed
+expectation SHAs are c611
+`873ede4a2bc72f6e4dfb60dca550f0990b17b2b9565b11b20a4f7ac91e2c401a`
+and RF4092
+`6d3a9537bbb7b2a111a227ef5d262abc2971a46cf191600c8f24e1ff82ae5424`.
+This is prepared future authority, not a fresh disk/source qualification or
+Win95 PASS; no live private disk was read and no manual desktop review exists.
+Root also inspected RF Quake raw frames0/1: startup console and THE NECROPOLIS
+loading, respectively. These are not yet a qualified gameplay IPC window.
