@@ -380,11 +380,11 @@
               // VM-clear is the LOAD-BEARING transition into the PM monitor.
               //   common mask = TF|NT|RF|VM = 0x0003_4100; +IF (0x200) for int gate.
               // REVIEW2_aug2 C-06: NONE of this applies to a far CALL through a call
-              // gate. A CALL does not clear IF/TF/NT/RF/VM -- it is not an exception
+              // gate. A CALL does not clear IF/TF/NT/VM -- it is not an exception
               // entry, and masking IF here would silently disable interrupts across
               // every cross-privilege call.
               if (cg_xpl)
-                ;                                    // call gate: EFLAGS untouched
+                complete_reference_rf();            // ordinary CALL completed
               else if (!int_gate_trap)
                 eflags <= eflags & ~32'h0003_4300;   // clear IF+TF+NT+RF+VM (int gate)
               else

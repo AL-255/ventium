@@ -84,14 +84,12 @@
           // the issue-time flags, not the post-modified ones — a POPF that SETS TF
           // must not itself step-trap; the trap fires after the NEXT instruction).
           // EFLAGS.RF (resume flag) suppresses an instruction breakpoint for
-          // exactly THIS one instruction and the CPU clears it once the instruction
-          // retires; clearing it here makes the post-retire EFLAGS show RF=0 (qemu
-          // does the same). A SMI/#DB diversion does not reach the normal dispatch,
-          // so these are still issue-time-correct.
+          // exactly THIS one instruction. Keep architectural RF until successful
+          // completion: decode/operand faults and pre-execution SMI/IRQ/#DB must
+          // save the incoming value, not a prematurely cleared decode attempt.
           if (sys_mode && !dbg_block_issue) begin
             tf_at_issue <= eflags[8];
             rf_at_issue <= eflags[16];
-            if (eflags[16]) eflags <= eflags & ~32'h0001_0000;  // RF clears after 1 insn
           end
           capture_reference_decode(eip);
           // M2S.3 INT/IRET/UD2 are dispatched directly from the d_* decode below
@@ -419,6 +417,7 @@
             // S_HLTWAIT (which delivers the next INTR/NMI). USER mode keeps the terminal
             // no-wake S_HALT below (no retire), so make verify is byte-identical.
             if (sys_mode && d_halt && !d_unknown) begin
+              complete_reference_rf();
               q_pc<=eip; retire_valid<=1'b1;
               eip<=eip+{28'd0,d_len};
               state<=S_HLTWAIT;

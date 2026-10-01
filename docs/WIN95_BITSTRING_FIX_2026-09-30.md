@@ -1110,3 +1110,131 @@ At13:11UTC, Win95's1.3B-clock frame shows17% driver-database progress;
 Quake's1.1B frame still shows the demo-loading console, not gameplay.
 Gameplay baseline remains **0.44240609 IPC**, older e572, clocks
 **2,399,999,637–2,499,999,637**; current c611 remains unmeasured.
+
+### October1: successful-completion RF repair — directed checkpoint
+
+The reproduced incoming-RF retention defect is now repaired in the working
+candidate. Decode still snapshots issue-time RF/TF for debug decisions, but
+does not clear architectural RF. `complete_reference_rf()` consumes RF in
+the existing EFLAGS sequential owner only after ordinary instruction success,
+including the final logical store completion and existing after-execute #DB
+boundary. Its bit-select nonblocking assignment follows any whole-EFLAGS
+assignment, preserving the newly produced condition flags. Ordinary outer
+RETF consumes RF even though it shares an IRET state; genuine IRET, task
+transfers and RSM remain flags-install/preserve paths. PUSHFD masks RF/VM in
+its memory image independently of live fault-frame flags. This adds no new
+pipeline state, flags owner, stall, workload recognition or snapshot repair.
+It does **not** change the withdrawn blanket automatic fault-RF policy.
+
+REP needed an additional correction: a provisional terminal-only RF clear
+failed the pinned oracle at the first successful element of a two-element
+REP. The current candidate consumes RF at the existing successful-element
+retirement boundary, never an operand acquisition, page probe or partial
+store acknowledgement. Both intermediate and terminal records then match.
+This is differential qualification of the existing REP record contract, not
+independent silicon proof for every REP/event boundary. The original RED
+receipt is retained under `obj_dir_rf_boundary_oct01.VURRTw` (summary SHA256
+`4d9d1de551a1f76e32dfc372e68260fbfc1ce4186d27eca8fec964208088d249`);
+it is not relabelled as PASS.
+
+Two reusable standalone suites are added under `verif/sys/tests/`:
+
+- `prfcompletion`: RF0/RF1 immediate #UD, RF1 #DE, successful MOV, STC,
+  POPFD and memory BTS. The already-set BTS bit is a CF/RF witness, not a
+  changed-memory-value witness. Complete traces contain59/59/59/60/60/61/62
+  records; saved flags include incomingRF on failures and retain new CF or
+  whole-flags results on successes.
+- `prfcompletion_fp`: successful FNINIT, FLD32, FNSTCW and FNSTENV28 after
+  RF1 restoration, followed by #UD. Complete traces contain68/69/70/72
+  records; selected stored fields are CW037F, SW0 and TAGFFFF. These are
+  integer/system (`x87=false`) RF/completion witnesses, not complete x87
+  datapath or environment-byte qualification.
+
+Both suites use the independently prebuilt DUT and pinned Pentium QEMU,
+compare complete `func --all` traces with RF included, require actual native
+and separate free-running QEMU exits133 plus closed process groups, and
+retain before/after input pins. No custom RF mask, filtered record, model
+state edit, guest patch or snapshot is used. They are standalone multi-image
+suites, not yet entries in the generic single-image system gate runner.
+
+Actual October1 directed results:
+
+| Model/profile | Integer RF7 | FP RF4 |
+| --- | --- | --- |
+| `a48fe77e` TB,25 defines, legacy FP | PASS | PASS |
+| `03e19a08` TB,53 defines, shared FP subset | PASS | PASS |
+
+Legacy summary SHA256s are `2e4a1371f8aa4cad88964493026d665eac1c2b9dbd15422376a8dcb564e1110e`
+and `8936df7c6c5400f6adedea3723648998a3b04d04bf4ee5361a05aa39a77c403c`.
+Shared-FP summary SHA256s are `fbd4a81775a374f15411367118fa28281c6388ac399f8078d867447cd2357baf`
+and `8e357aff780a30d7035e3e0955f6fdd81e5962351915657538a77d82d0a85080`.
+The shared-FP test build explicitly uses the existing probe's required
+`--public-flat-rw` visibility; an earlier build without it failed to compile
+because an optimized-away internal signal was absent. No RTL workaround was
+introduced. The53-define directed profile is not the107-define full-PC build.
+
+The PUSHFD/REP2/REP0 boundary suite also passes on a48f (summary SHA256
+`593a610b4e42aa9b7e730c9c7ed01dd4e4746dc3a6aa38ebc8cd1cb3aa5a903d`).
+Its actual waits/closed groups qualify;22 transport receipts nevertheless
+retain a default `result=FAIL` metadata label. Those labels are not silently
+rewritten or counted as22 PASS receipts. The a48f fast gate passes108
+functional and19 metric comparisons;20 visible instruction-cycle differences
+remain nongating, not exact cycle equivalence. All five lint profiles pass.
+These are directed checkpoints, **not RF-general acceptance**: faulting
+memory/REP phases, asynchronous events, RF1 HLT, debug/task/RSM corner cases
+and complete FP-state equality need separate qualification.
+
+### October1: fresh repaired-candidate standard suite is running
+
+A fresh cold full-PC candidate was actually built and reaped successfully:
+`ao486-sim/obj_dir_ven_rfcomplete_oct01.5mZtCG/ao486sim_ven_standard`, executable SHA256
+`4092c92a9f626157c9a0fa872f0a09f031b32f49f9b0cfa20d192a9a46835cc8`.
+It retains all107 c611 full-PC defines. Its275 unique declared input files
+remain pinned; all152 actual common RTL prerequisites match the a48f TB
+inputs. The broader input manifests have two identical filelist aliases;
+277 raw entries must not be described as277 unique files. These binaries were
+built from the pinned working checkout, including other retained local changes;
+a selective RF-only commit is not itself a reproducer for every build input.
+Component profiles and matching pins are not compiler/loaded-byte ancestry proof.
+
+The repaired candidate's standard runs are independent of the still-live
+older c611 Win95/Quake controls:
+
+- CoreMark: a48f, both unchanged standard1500-iteration seed images, CPUs11
+  (performance) and10 (validation), unit
+  `ventium-standard-coremark-rfcomplete-oct01.service`, invocation
+  `f3f484e2694b4403a93cc78ddea7a58a`, started14:19UTC. Actual live admission
+  checks native `/proc` executable/argv/start identities, source/seed pins,
+  two CPUs,2GiB/no-swap caps and OOM0. No seed completion or score yet.
+- Win95:4092, unchanged cc68b005 source image copied to a private disk,
+  CPU14, unit `ventium-standard-win95-rfcomplete-oct01.service`, invocation
+  `74bd87ca8cfc49fe8916cbbb3946e1e8`, started14:25UTC. Cold reset; no
+  snapshot, during-run guest patch or forced cache override. Desktop and
+  clean closed-run acceptance are still pending.
+- Quake:4092, unchanged FreeDOS/demo1 qk_td source image and private disk,
+  CPU15, unit `ventium-standard-quake-rfcomplete-oct01.service`, invocation
+  `b099b59a17634ce2acb8508c0e5fa0fd`, started14:25UTC. Cold reset; no
+  snapshot/hook/guest patch. A969-frame timedemo and clean closed receipts
+  remain required. Reaching gameplay alone will not count as PASS.
+
+Only the CoreMark component uses its declared user/register-image plus
+syscall-emulation/direct-memory profile. Win95/Quake use the full-PC shared
+FP/cache configuration at45MHz core/RTC and90MHz VGA. Each OS native is
+single-CPU capped at2GiB with swap disabled. The CoreMark metadata observer
+holds the actual supervisor invocation and may discard idle RemainAfterExit
+state only after normal owner exit, actual zero-child receipts, absent PIDs
+and an empty cgroup; it does not stop a live DUT or manufacture a wait tuple.
+All three standard components must actually close and pass before this
+repair is declared complete. **The full standard suite remains incomplete.**
+
+The latest verified gameplay measurement supersedes the old e572 baseline:
+**0.42689244 IPC**, c611 executable `c611cf03`, profiler clocks
+**1,399,999,637–1,499,999,637**,100M clocks with42,689,244 legacy retire events
+(31,813,033 U +10,876,211 V). Raw frames6/7 visibly advance world/camera,
+weapon and pickup state. The measurement receipt is
+`obj_dir_ven_popwatch_oct01.52WV37/quake-cold-oct01.1/gameplay-window-1p4-1p5.json`
+(SHA256 `19eef64d3e639bce6b5222940a0609079c4b42ff01a3193ae7e032a0b228404b`).
+This is a held live-prefix gameplay observation, not completed timedemo FPS,
+closed sticky-capture evidence, REP-normalized architectural IPC or a matched
+before/after performance comparison. **c611 predates the RF repair; current
+a48f/4092 candidates remain gameplay-unmeasured.**

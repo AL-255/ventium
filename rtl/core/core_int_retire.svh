@@ -1,5 +1,14 @@
 // Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
 // SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+// P5 RF belongs to the interrupted architectural instruction, not its decode
+// attempt. Call only after every effect has succeeded, including a fused
+// after-execute #DB, and AFTER any whole-EFLAGS assignment on this edge.
+// A bit-select NBA preserves that same edge's new condition/control flags.
+// IRET, task transfers and RSM install/preserve flags and do not call this.
+task automatic complete_reference_rf();
+  if (sys_mode) eflags[16] <= 1'b0;
+endtask
+
 // One normal integer retire/#DB authority. The caller has already validated
 // every effect and supplies its final EIP/flags; GPRs remain owned by the single
 // existing writeback driver. Shared by S_EXEC and optional plain MOV load ACK.
@@ -8,6 +17,10 @@ task automatic retire_reference_integer(input logic [31:0] cmt_eip,
                                        input logic [31:0] flags_val);
   logic [3:0] xbp;
   if (flags_we) eflags<=flags_val;
+  // Keep the existing per-element REP retirement contract, qualified against
+  // the pinned instruction-step oracle. A successful element consumes RF;
+  // a failed acquisition/store or pre-execution diversion never reaches here.
+  complete_reference_rf();
   eip<=cmt_eip;
   // Preserve the existing P5 #DB priority/fused-record semantics exactly:
   // next-PC instruction FAULT first, then issue-time TF single-step TRAP.

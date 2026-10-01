@@ -104,6 +104,7 @@
             // same clock's nonblocking assignment and return the CPU to S_PIPE.
             if (!(q_io_write && q_io_port == 16'h0092 && io_wdata[0])) begin
               io_eip = (q_kind==K_STR) ? str_next_eip : next_eip;
+              complete_reference_rf();
               // R3: the IN value -> AL/AX/eAX write moved to the gpr writeback driver
               // (core_gpr_wb.svh, S_IO arm).
               eip <= io_eip;
@@ -139,6 +140,7 @@
           if (rep_active && (q_cnt16 ? (cx[15:0]==16'd0) : (cx==32'd0))) begin
             // Degenerate REP INS with ECX==0: no port read, no store — advance EIP
             // and retire one no-op record (matches qemu's degenerate-REP record).
+            complete_reference_rf();
             eip <= next_eip;
             if (sys_mode && tf_at_issue) arm_db(32'd1 << DR6_BS, q_pc, next_eip);
             else begin retire_valid <= 1'b1; state <= S_PIPE; end

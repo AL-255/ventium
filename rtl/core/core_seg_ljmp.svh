@@ -73,6 +73,7 @@
                                : {mem_rdata[15:0], gdt_lo[31:16]};
               if (q_sysop==SYS_LGDT) begin gdt_base<=nb; gdt_limit<=nl; end
               else begin idt_base<=nb; idt_limit<=nl; end
+              complete_reference_rf();
               eip<=next_eip; retire_valid<=1'b1; state<=S_PIPE; seg_step<=1'b0;
             end
           end
@@ -112,6 +113,7 @@
               // is now marked loaded directly.
               seg_pm_loaded[segld_tgt] <= 1'b1;
               q_seg_from_mem <= 1'b0;
+              complete_reference_rf();
               eip<=next_eip; retire_valid<=1'b1; state<=S_PIPE; seg_step<=1'b0;
             end
           end else if (mem_ack) begin
@@ -165,6 +167,7 @@
                 // expand-down data segment has a real upper bound instead of 4 GiB.
                 seg_b[segld_tgt] <= segld_desc[54];
                 q_seg_from_mem <= 1'b0;
+                complete_reference_rf();
                 eip<=next_eip; retire_valid<=1'b1; state<=S_PIPE; seg_step<=1'b0;
               end
             end
@@ -620,6 +623,7 @@
                 // cross-privilege case is rejected above. erpl is the forced RPL (F2).
                 cpl_r    <= gate_via ? cpl_r : erpl;
                 cs_d <= desc[54];   // D/B bit: 1 => 32-bit default operand/addr size
+                complete_reference_rf();
                 eip<=q_ljmp_off; retire_valid<=1'b1; state<=S_PIPE; seg_step<=1'b0;
                 gate_via <= 1'b0;
                 // REVIEW_Aug3 H-02: this commit is also the same-privilege RETF's --
@@ -718,6 +722,7 @@
               lcall_pend       <= 1'b0;
               lc_gate          <= 1'b0;   // R2-H05: gate width consumed
               seg_step         <= 1'b0;
+              complete_reference_rf();
               retire_valid     <= 1'b1;
               state            <= S_PIPE;
             end
@@ -727,6 +732,7 @@
               seg_base[SG_CS] <= {12'd0, q_ljmp_sel, 4'd0};        // base = sel<<4
               seg_attr[SG_CS] <= 8'h9B;
               seg_pm_loaded[SG_CS] <= 1'b0;   // R2-H07: real-mode load
+              complete_reference_rf();
               eip <= q_ljmp_off; retire_valid<=1'b1; state<=S_PIPE; seg_step<=1'b0;
             end
           end
@@ -837,6 +843,7 @@
               seg_pm_loaded[SG_CS] <= 1'b0;   // R2-H07: real-mode load
               // R3: ESP += 2w + imm bump moved to the gpr writeback driver (S_RETF arm).
               eip <= (q_w==3'd2) ? {16'd0, retf_off[15:0]} : retf_off;
+              complete_reference_rf();
               retire_valid<=1'b1; state<=S_PIPE; seg_step<=1'b0;
             end
           end
@@ -859,6 +866,7 @@
           end else if (mem_ack) begin
             if (!seg_step) seg_step <= 1'b1;
             else begin
+              complete_reference_rf();
               eip<=next_eip; retire_valid<=1'b1; state<=S_PIPE; seg_step<=1'b0;
             end
           end

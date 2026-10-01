@@ -1,0 +1,27 @@
+{
+  "name": "prfcompletion-cpl0",
+  "kind": "system",
+  "src": "prfcompletion.S",
+  "linker": "prfcompletion.ld",
+  "image": "rf-c1.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 300,
+  "sys": true,
+  "paging": false,
+  "status": "PREPARED_NOT_EXECUTED",
+  "scope": "CPL0 protected32; incoming software-RF retention and successful completion, not automatic fault RF setting or IRETD/TSW-entered-RF1 qualification",
+  "cases": [
+    {"id": 1, "image": "rf-c1.bin", "seed_flags": "0x00000002", "saved_flags": "0x00000002", "vector": 6, "canonical_fault_records": 0, "fault_route": "UD2 direct int_* stage bypasses start_fault logger; exact handler/PC/GPR/full-trace witness required", "purpose": "RF0 first-instruction #UD control"},
+    {"id": 2, "image": "rf-c2.bin", "seed_flags": "0x00010002", "saved_flags": "0x00010002", "vector": 6, "canonical_fault_records": 0, "fault_route": "UD2 direct int_* stage bypasses start_fault logger; exact handler/PC/GPR/full-trace witness required", "purpose": "RF1 first-instruction #UD retains RF; architectural mismatch is RED, not correctness PASS"},
+    {"id": 3, "image": "rf-c3.bin", "seed_flags": "0x00010002", "saved_flags": "0x00010002", "vector": 0, "canonical_fault_records": 1, "fault_route": "S_EXEC DIV start_fault with exact canonical vector0/error0 record", "purpose": "RF1 later-stage #DE retains RF; skip DIV after frame capture"},
+    {"id": 4, "image": "rf-c4.bin", "seed_flags": "0x00010002", "saved_flags": "0x00000002", "ordinary_flags": "0x00000002", "vector": 6, "canonical_fault_records": 0, "fault_route": "UD2 direct int_* stage bypasses start_fault logger; exact handler/PC/GPR/full-trace witness required", "purpose": "Successful ordinary MOV consumes RF before following #UD"},
+    {"id": 5, "image": "rf-c5.bin", "seed_flags": "0x00010002", "saved_flags": "0x00000003", "ordinary_flags": "0x00000003", "vector": 6, "canonical_fault_records": 0, "fault_route": "UD2 direct int_* stage bypasses start_fault logger; exact handler/PC/GPR/full-trace witness required", "purpose": "RF1 STC completion preserves newly set CF while consuming RF"},
+    {"id": 6, "image": "rf-c6.bin", "seed_flags": "0x00010002", "saved_flags": "0x00000047", "ordinary_flags": "0x00000047", "seed_esp": "0x0008fffc", "vector": 6, "canonical_fault_records": 0, "fault_route": "UD2 direct int_* stage bypasses start_fault logger; exact handler/PC/GPR/full-trace witness required", "purpose": "RF1 POPFD loads whole flags0x47; pre-seed operand restores final ESP0x90000"},
+    {"id": 7, "image": "rf-c7.bin", "seed_flags": "0x00010002", "saved_flags": "0x00000003", "ordinary_flags": "0x00000003", "terminal_edx": "0x00000002", "vector": 6, "canonical_fault_records": 0, "fault_route": "UD2 direct int_* stage bypasses start_fault logger; exact handler/PC/GPR/full-trace witness required", "purpose": "RF1 BTS dword[0x20000],imm1 commits CF1 at successful store ACK; destination remains2"}
+  ]
+}

@@ -24,6 +24,7 @@
             ldt_limit   <= 16'd0;
             lldt_null_q <= 1'b0;
             seg_step    <= 1'b0;
+            complete_reference_rf();
             eip<=next_eip; retire_valid<=1'b1; state<=S_PIPE;
           end else if (mem_ack && ltr_busy_q) begin
             // REVIEW_Aug3 H-11b (busy half, beat 3): the busy byte has been
@@ -40,6 +41,7 @@
             tr_valid   <= 1'b1;
             ltr_busy_q <= 1'b0;
             seg_step   <= 1'b0;
+            complete_reference_rf();
             eip<=next_eip; retire_valid<=1'b1; state<=S_PIPE;
           end else if (mem_ack) begin
             if (!seg_step) begin gdt_lo<=mem_rdata; seg_step<=1'b1; end
@@ -83,6 +85,7 @@
                 ldt_base  <= desc_base(desc);
                 ldt_limit <= desc_limit16(desc);
                 seg_step <= 1'b0;
+                complete_reference_rf();
                 eip<=next_eip; retire_valid<=1'b1; state<=S_PIPE;
               end else begin
                 // REVIEW_Aug3 H-11b: do NOT commit TR yet. Stage the validated

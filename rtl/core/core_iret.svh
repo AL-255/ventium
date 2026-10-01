@@ -308,6 +308,9 @@
               cs_d             <= iret_cs_d;
               eip              <= iret_eip;
               eflags           <= iret_eflags;
+              // This flags-install edge also serves ordinary outer RETF.
+              // Only RETF consumes RF; genuine IRET retains its restored RF.
+              if (retf_out) complete_reference_rf();
               seg_sel  [SG_SS] <= iret_ss;
               seg_base [SG_SS] <= desc_base(desc);
               seg_limit[SG_SS] <= desc_limit(desc);

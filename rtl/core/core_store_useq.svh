@@ -302,6 +302,11 @@
                 end
               end
             endcase
+            // This is the final logical store ACK, after any full flags write
+            // above. Never consume on a probe or first split beat. REP uses
+            // its existing per-successful-element retirement contract; the
+            // current element must finish before consuming RF, even with #DB.
+            complete_reference_rf();
             end   // REVIEW2 C-02: closes the phase-guard `begin`
           end
         end
@@ -313,18 +318,23 @@
             if (q_kind==K_CX8B) begin
               // CMPXCHG8B equal-case store: beat 0 = EBX@[mem], beat 1 = ECX@[mem+4].
               // ZF was already committed in S_EXEC; retire after the second beat.
-              if (step==4'd1) begin eip<=next_eip; retire_valid<=1'b1; state<=S_PIPE; end
+              if (step==4'd1) begin
+                complete_reference_rf();
+                eip<=next_eip; retire_valid<=1'b1; state<=S_PIPE;
+              end
               else step<=step+4'd1;
             end else if (q_sm==SM_PUSHA) begin
               // push order: EAX,ECX,EDX,EBX,ESP(orig),EBP,ESI,EDI
               // R3: the final ESP commit moved to the gpr writeback driver (S_USEQ).
               if (step==4'd7) begin
+                complete_reference_rf();
                 eip<=next_eip; retire_valid<=1'b1; state<=S_PIPE;
               end else step<=step+4'd1;
             end else begin // POPA: pop EDI,ESI,EBP,(skip ESP),EBX,EDX,ECX,EAX
               // R3: the per-beat GPR pops + the final ESP commit moved to the gpr
               // writeback driver (core_gpr_wb.svh, S_USEQ arm).
               if (step==4'd7) begin
+                complete_reference_rf();
                 eip<=next_eip; retire_valid<=1'b1; state<=S_PIPE;
               end else step<=step+4'd1;
             end
@@ -345,6 +355,7 @@
               ent_rd  <= 1'b0;
             end else if (({1'b0, q_imm[20:16]} + 6'd1) == ent_k) begin
               // just pushed FrameTemp (the (level+1)th push) -> done
+              complete_reference_rf();
               eip<=next_eip; retire_valid<=1'b1; state<=S_PIPE;
             end else begin
               ent_k <= ent_k + 6'd1;

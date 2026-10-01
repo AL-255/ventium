@@ -91,6 +91,7 @@
                 seg_attr[SG_CS] <= 8'h9B;
                 seg_pm_loaded[SG_CS] <= 1'b0;   // R2-H07: real-mode load
                 eip <= {16'd0, ld_val[15:0]};
+                complete_reference_rf();
                 retire_valid <= 1'b1; state <= S_PIPE;
               end else begin
                 // PROTECTED-mode far JMP (m16:16): stage the target, then hand off to
@@ -199,6 +200,7 @@
                 seg_attr[SG_CS] <= 8'h9B;
                 seg_pm_loaded[SG_CS] <= 1'b0;   // R2-H07: real-mode load
                 eip <= q_ljmp_off;                 // full 32-bit offset (NOT truncated)
+                complete_reference_rf();
                 retire_valid <= 1'b1; state <= S_PIPE;
               end else begin
                 // PROTECTED-mode far JMP (m16:32): q_ljmp_off already holds the 32-bit
@@ -288,6 +290,7 @@
 `ifdef VEN_FP_SHARED
               if (fp_shared_load_cmd && fp_shared_cmd_valid && fp_shared_cmd_ready) begin
                 if (fp_shared_accept_retire) begin
+                  complete_reference_rf();
                   eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1;
                   state<=S_PIPE;
                 end else state<=S_FP_SHARED_WAIT;

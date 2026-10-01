@@ -1,0 +1,94 @@
+{
+  "name": "prfcompletion-fp-cpl0",
+  "kind": "system",
+  "src": "prfcompletion_fp.S",
+  "linker": "prfcompletion_fp.ld",
+  "image": "rf-c1.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 300,
+  "sys": true,
+  "x87": false,
+  "paging": false,
+  "status": "PREPARED_NOT_EXECUTED",
+  "scope": "CPL0 protected32 x87 RF-success completion only; seed IRETD entered RF0; integer/system full func--all includes RF, x87=false",
+  "case_wall_seconds_cap": 50,
+  "overall_wall_seconds_cap": 500,
+  "limitations": [
+    "No x87 register/datapath bit correctness verdict; existing FP differential gates remain required.",
+    "Environment CW/SW/TAG store readbacks cover architected low16 fields only, not every byte/reserved field in the28-byte image.",
+    "No memory faults, page splits, TF/data-breakpoint traps, IRQ/SMI, CPL changes, task transfer or RSM coverage.",
+    "IRETD entered RF1, automatic fault RF0->1 setting and CPU-generation oracle discrepancies remain outside scope.",
+    "Prepared standalone four-case driver only; not registered with the generic single-image run-sys-golden flow."
+  ],
+  "cases": [
+    {
+      "id": 1,
+      "purpose": "RF1 FNINIT successful command consumes RF; no x87 datapath-state verdict",
+      "image": "rf-c1.bin",
+      "seed_flags": "0x00010002",
+      "saved_flags": "0x00000002",
+      "ordinary_flags": "0x00000002",
+      "vector": 6,
+      "canonical_fault_records": 0,
+      "fault_route": "UD2 direct int_* staging bypasses canonical start_fault logger; exact intended handler/saved-PC/full-trace witnesses required"
+    },
+    {
+      "id": 2,
+      "purpose": "RF1 FLD single[0x20000] consumes RF after successful load/command completion; FP register bits intentionally not traced",
+      "image": "rf-c2.bin",
+      "seed_flags": "0x00010002",
+      "saved_flags": "0x00000002",
+      "ordinary_flags": "0x00000002",
+      "vector": 6,
+      "canonical_fault_records": 0,
+      "fault_route": "UD2 direct int_* staging bypasses canonical start_fault logger; exact intended handler/saved-PC/full-trace witnesses required"
+    },
+    {
+      "id": 3,
+      "purpose": "RF1 FNSTCW[0x20100] consumes RF after store completion; stored default037f readback differs from5a5a sentinel",
+      "memory_witnesses": {
+        "capture_control_word": {
+          "register": "ecx",
+          "expected": "0x0000037f"
+        }
+      },
+      "image": "rf-c3.bin",
+      "seed_flags": "0x00010002",
+      "saved_flags": "0x00000002",
+      "ordinary_flags": "0x00000002",
+      "vector": 6,
+      "canonical_fault_records": 0,
+      "fault_route": "UD2 direct int_* staging bypasses canonical start_fault logger; exact intended handler/saved-PC/full-trace witnesses required"
+    },
+    {
+      "id": 4,
+      "purpose": "RF1 FNSTENV28[0x20100] consumes RF after final environment-store completion; CW/SW/TAG readbacks differ from5a5a sentinels",
+      "memory_witnesses": {
+        "capture_control_word": {
+          "register": "ecx",
+          "expected": "0x0000037f"
+        },
+        "capture_status_word": {
+          "register": "edx",
+          "expected": "0x00000000"
+        },
+        "capture_tag_word": {
+          "register": "eax",
+          "expected": "0x0000ffff"
+        }
+      },
+      "image": "rf-c4.bin",
+      "seed_flags": "0x00010002",
+      "saved_flags": "0x00000002",
+      "ordinary_flags": "0x00000002",
+      "vector": 6,
+      "canonical_fault_records": 0,
+      "fault_route": "UD2 direct int_* staging bypasses canonical start_fault logger; exact intended handler/saved-PC/full-trace witnesses required"
+    }
+  ]
+}

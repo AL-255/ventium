@@ -3961,7 +3961,9 @@ module core
       st_strb = strb_of(q_w);
     end else if (q_kind==K_STKMISC && q_sm==SM_PUSHF) begin
       st_addr = stk16(gpr_o[R_ESP] - {28'd0,q_w});
-      st_data = eflags;
+      // PUSHFD's memory image excludes RF/VM even while live RF is retained
+      // until this store succeeds. Interrupt/fault frames must NOT use this mask.
+      st_data = eflags & ~32'h0003_0000;
     end else if (q_kind==K_STKMISC && q_sm==SM_ENTER) begin
       // ENTER level 0: the single push writes EBP at [ESP-w].
       st_addr = stk16(gpr_o[R_ESP] - {28'd0,q_w});
@@ -6099,10 +6101,10 @@ module core
   // armed. eflags[8] is TF.
   logic fp_dbg_active;
   // REVIEW2 H-08: EFLAGS.RF must also send the instruction to the slow FSM. RF is
-  // snapshotted AND CLEARED only in S_DECODE (core_fetch_decode.svh:99-100); it
-  // suppresses an instruction breakpoint for exactly one instruction and the CPU
-  // clears it on retire. A fast path that never enters S_DECODE leaves RF set
-  // indefinitely, so later debug behaviour and every saved EFLAGS image are wrong.
+  // snapshotted in S_DECODE and consumed only at validated slow completion;
+  // unsuccessful attempts and pre-execution diversions retain live RF for
+  // their saved flags. A fast path that bypassed both authorities could leave
+  // RF set indefinitely or miss instruction-breakpoint suppression.
   // Same class as the irq_shadow starvation, same conservative remedy.
   assign fp_dbg_active = eflags[8] || eflags[16] || (dr7[7:0] != 8'd0);
 
@@ -7768,6 +7770,7 @@ module core
 `ifndef VEN_P54_INT_EXEC_OCC
               pending_mem_pen <= (q_md==3'd7) ? 7'd6 : 7'd1;
 `endif
+              complete_reference_rf();
               eip<=next_eip; retire_valid<=1'b1; state<=S_PIPE;
             end
           end
@@ -7815,6 +7818,7 @@ module core
             end else
 `endif
             begin
+              complete_reference_rf();
               eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1; state<=S_PIPE;
             end
           end
@@ -9867,6 +9871,7 @@ module core
   task automatic retire_x87_shared(input logic [31:0] ret_eip);
     logic [3:0] xbp;
     begin
+      complete_reference_rf();
       eip <= ret_eip;
       x87_touched_r <= 1'b1;
       xbp = (sys_mode && !rf_at_issue && (dr7[7:0] != 8'd0))

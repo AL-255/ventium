@@ -29,12 +29,14 @@
               // completion boundary.  Route debug-active cases through the
               // same x87 retire helper as S_FEXEC/S_FSTORE.
               if (fp_shared_early_retire_ok) begin
+                complete_reference_rf();
                 eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1;
                 state<=S_PIPE;
               end else begin
                 retire_x87_shared(next_eip);
               end
 `else
+              complete_reference_rf();
               eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1;
               state<=S_PIPE;
 `endif
@@ -79,6 +81,7 @@
               // before all translations/limit checks have succeeded.
               state<=S_FEXEC; f_seq_step<=6'd0;
 `else
+              complete_reference_rf();
               eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1;
               state<=S_PIPE; f_seq_step<=6'd0;
 `endif

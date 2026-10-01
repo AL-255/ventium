@@ -35,6 +35,7 @@
               // common completion helper so a #DB is delivered rather than
               // silently retired after the shared state mutation.
               if (fp_shared_early_retire_ok) begin
+                complete_reference_rf();
                 eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1;
                 state<=S_PIPE;
               end else begin
@@ -55,6 +56,7 @@
           // on the established response path, where retire_x87_shared performs
           // the required #DB decision after the registered completion.
           if (fp_shared_alu_commit_retire && fp_shared_early_retire_ok) begin
+            complete_reference_rf();
             eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1;
             state<=S_PIPE;
           end else if (fp_shared_rsp_valid) begin
@@ -85,6 +87,7 @@
               // Includes an unmasked stack fault: the shared top has committed
               // its status-only result and intentionally emitted no store.
               if (fp_shared_early_retire_ok) begin
+                complete_reference_rf();
                 eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1;
                 state<=S_PIPE;
               end else begin
@@ -109,6 +112,7 @@
               // memory form; data-write watchpoints remain a separate store
               // access concern (as in the legacy S_FSTORE path).
               if (fp_shared_early_retire_ok) begin
+                complete_reference_rf();
                 eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1;
                 state<=S_PIPE;
               end else begin
@@ -275,9 +279,11 @@
               // same-cycle and retire here as before.
               if (fp_pipe_cap) state<=S_FEXEC_EX;
               else begin
+                complete_reference_rf();
                 eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1; state<=S_PIPE;
               end
 `else
+              complete_reference_rf();
               eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1; state<=S_PIPE;
 `endif
 `ifdef VEN_BCD_ITER
@@ -306,6 +312,7 @@
               // straight to S_FSTORE in PL.
               if (f_ps_store_trap) begin
                 if (fp_store_suppressed) begin
+                  complete_reference_rf();
                   eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1; state<=S_PIPE;
                 end else state<=S_FPTRAP_WAIT;
               end
@@ -315,6 +322,7 @@
               // 18-chained-/10 conversion is multi-cycle, then store.
               if (q_fxop==FX_FBSTP) begin
                 if (fp_store_suppressed) begin
+                  complete_reference_rf();
                   eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1; state<=S_PIPE;
                 end else state<=S_BCD_BUSY;
               end
@@ -334,6 +342,7 @@
         // exact. eip/q_fxop are unchanged since S_FEXEC (we did not retire there),
         // so next_eip is still correct.
         S_FEXEC_EX: begin
+          complete_reference_rf();
           eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1; state<=S_PIPE;
         end
 `endif
@@ -355,6 +364,7 @@
         // same clock, so the per-retire architectural state is exact.
         S_FBLD_BUSY: begin
           if (eng_fbld_done) begin
+            complete_reference_rf();
             eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1; state<=S_PIPE;
           end
         end
@@ -367,6 +377,7 @@
         // we retire + advance EIP the same clock (per-retire arch state exact).
         S_TRSC_BUSY: begin
           if (eng_trsc_done) begin
+            complete_reference_rf();
             eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1; state<=S_PIPE;
           end
         end
@@ -377,6 +388,7 @@
         // the engine `done` clock; here we retire + advance EIP the same clock.
         S_FPREM_BUSY: begin
           if (eng_fprem_done) begin
+            complete_reference_rf();
             eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1; state<=S_PIPE;
           end
         end
@@ -392,6 +404,7 @@
         // -------------------------------------------------------------------
         S_FP_BUSY: begin
           if (fp_iter_done) begin
+            complete_reference_rf();
             eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1; state<=S_PIPE;
           end
         end
@@ -410,6 +423,7 @@
           // next waiting FP instruction. The bus arm's bd_req is gated on the
           // same predicate, so no memory side effect leaves the core.
           if (fp_flt_q && !fctrl[0]) begin
+            complete_reference_rf();
             eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1; state<=S_PIPE; f_step<=4'd0;
           end else if (mem_ack) begin
             // words needed: m16/cw/sw->1, m32->1, m64->2, m80->3
@@ -419,6 +433,7 @@
               // last beat: the POP (fptag[ftop]<=1; ftop++) for FSTP/FISTP is
               // driven onto u_fpu_state's we_pop port by fp_we_* (which re-derives
               // this exact last-beat condition). Here we only retire + advance EIP.
+              complete_reference_rf();
               eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1; state<=S_PIPE; f_step<=4'd0;
             end else f_step<=f_step+4'd1;
           end
