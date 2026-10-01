@@ -1276,3 +1276,30 @@ The newer4092 run is still early boot, with no accepted desktop frame.
 Current verified gameplay IPC remains **0.42689244** on pre-RF c611, clocks
 **1,399,999,637–1,499,999,637**; the repaired candidate is unmeasured. These
 CoreMark scores are not Quake IPC, FPS or a matched before/after Quake gain.
+
+### October1 15:09UTC: existing system regressions on shared-FP candidate
+
+The prebuilt03e19 shared-FP TB passes the16 existing ordinary system gates
+`pseg pmode ppage pcpl pintr pfault pfarok pstk16 psoccallfmem pcgpg pxwalkd
+pdebug ptask ppopf psysfpreloc psysfpload`. They compare all18,329 architectural
+records using the unchanged full `func --all` comparator. All16 canonical
+runners actually return0; all17 strict native invocations, including pcgpg's
+separate fault rerun, exit133 with normal footers, unchanged inputs and closed
+groups. Free-running QEMU exits133 in each gate. The pcgpg rerun has exactly
+one destination write-probe #PF(2) and one source-read #PF(0), no other fault
+or escalation. Independent read-only audit confirms traces, waits, receipts,
+empty groups and all109 input pins plus16 post-run pin checks.
+
+Evidence is retained under
+`verif/tb/obj_dir_rfcomplete_fp_public_oct01.OPhKB9/ordinary-system-oct01.QaRFuX/`.
+Input-inventory SHA256 is `561509a7c0cb7c10c18008b3a439e66391bc556a53c2cfc08f6fa6741a990b99`;
+actual outer-wait TSV SHA256 is `9016346894ee01174d95bd5e04c5231c21a7bd8f2bd5b31b6858384ddd124d1b`.
+Only the selected tiny guest images may assemble, one job; TB_BIN suppresses
+RTL rebuilds and the pinned QEMU builder skips. An earlier wrapper namespace
+failed its input-pin preflight on a nonexistent file before any VM launch;
+it is retained separately and not counted as a DUT failure or PASS.
+This is a named16-gate subset, **not complete verify-sys, RF-general or
+standard-suite acceptance**. No source/model/guest state workaround was added.
+CoreMark is closed PASS; Win95 desktop and Quake timedemo remain pending.
+Gameplay IPC remains **0.42689244**, pre-RF c611, clocks
+**1,399,999,637–1,499,999,637**; the repaired candidate remains unmeasured.
