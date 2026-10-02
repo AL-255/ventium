@@ -2472,3 +2472,115 @@ native exit0 and no terminal log match do not override visible corruption.
 The repaired5c2491 Win95/Quake runs remain unchanged and live. Gameplay IPC
 baseline remains **0.43038841**,4092c92a clocks
 **2,199,999,637–2,299,999,637**;5c2491 is still gameplay-unmeasured.
+
+### October 2 03:55–04:03UTC: retain the actual supervisor through closure
+
+Two separate metadata-only services now hold RefUnit for the exact live Win95
+and Quake invocations. The reviewed wrapper `uVGIvV/retain_current_supervisor.py`
+has SHA `c164ce2eda7e7e60368b0aa364bcd07fe5f346a1f689b92422014dbe3de76dc9`;
+it only retargets the pinned AivFre observers b48bc66a/ff84cb3d. Their bodies
+never stop/restart a DUT or execute models, guest disks or acceptance graders.
+Root separately cleans a RemainAfterExit service only after actual normal
+owner exit, absent recorded PIDs and an empty/absent recursive cgroup. The
+observer then records the original invocation's actual inactive/dead state.
+Active/exited metadata alone remains insufficient for acceptance.
+
+Observer Win95: PID1305709, invocation1cebba069be94d198c46efe28c9366ee;
+Quake: PID1306367, invocationfef54c2d1ffc4649900f53a6850a0b35. Actual separate
+cgroup limits are128MiB, swap0,16 tasks and5% CPU, with73h+120s wall limits.
+Stdout/stderr are durable journal sockets, avoiding the older observer's
+BrokenPipe failure; that historical failure is preserved, not relabelled.
+Independent launch review confirms actual bounds, journal descriptors,
+original DUT identity bindings, unchanged non-disk pins and no OOM/failure.
+Startup receipt SHAs: Win95
+`32bd27540351ebfcb01c9c10a66ad83ee0fb0a7e4b7b072a643891f6087ab529`;
+Quake `2960a00d2dd960efbcd3385cbd095110163cc1c06b28650dd879602763f9defe`.
+Root's fresh278-entry full-PC build-input check returns0; manifest SHA
+`164ab4a885db4f62a91b260699558f9cf3f1308a98c7d0faaffe67195353adf6`.
+No live private disk was read and no RTL, launcher/helper, guest input or
+acceptance rule changed. These are retention receipts, not suite PASS.
+
+### October 2 04:06UTC: first repaired desktop sample, still mid-paint
+
+Repaired5c2491 raw6 now shows Explorer icons, Start/taskbar and the Welcome
+window. SHA `1ae7eac8fdeb853fe4b7ee953e76013808025b15fccde4200d161135001e0c5a`,
+native capture bracket1,199,728,609–1,200,228,609 clocks. Root and independent
+lossless viewing find clean small labels, buttons and checkbox text, without
+the old vertical striped glyphs. However the large Welcome banner/tip text
+is not yet visible and the tip area has a patterned yellow/teal fill. This
+could be an unfinished paint; neither persistent corruption nor an error-free
+desktop PASS is inferred from this one live image. Continue the same cold
+run to its next completed capture before closure or manual acceptance.
+Gameplay baseline remains **0.43038841 IPC**,4092c92a clocks
+**2,199,999,637–2,299,999,637**;5c2491 still has no gameplay measurement.
+
+### October 2 04:16–04:23UTC: repaired Welcome finishes painting
+
+The next repaired capture, raw7, has SHA
+`0589d29b72d19308e5eb7eb4d62d0c96348cf6eb949d96c236f5d6a202f5f36c`,
+native bracket1,299,830,695–1,300,330,695 clocks. Root and the independent
+live-check agent see the complete Welcome-to-Windows95 banner, lightbulb,
+Did-you-know heading and readable tip, clean desktop labels, buttons, Start
+and taskbar, and the normal arrow. The missing text in raw6 was transient
+painting, not persistent corruption. No old striped glyphs or cursor residue
+are visible in raw7.
+
+Root separately views the actual CLOSED QEMU fixture raw28, whose recorded
+and freshly observed SHA is
+`3a11f396b7a4ea0881f4d3737b68da78ce06b35c66822aac29ac835a2f80873c`.
+Its fully painted Welcome has the same yellow/teal dithered tip background:
+that pattern is expected16-color artwork, not evidence of a rendering defect.
+Both root views use memory-only lossless container conversion, with exact RGB
+identity checked before and after; no raw pixels or files are modified.
+
+The live5c2491 desktop image is encouraging, but not closed-run acceptance.
+Retain another completed capture, use only the owned normal stop request, and
+require actual child wait0, intact EOF/held-log capture, unchanged input pins,
+final no-OOM resource evidence, actual owner exit0 and retained supervisor
+closure. The separate visual authority must name actual CLOSED raw hashes
+and be reviewed after the final resource receipt. No acceptance rule changes.
+Gameplay IPC baseline remains **0.43038841**,4092c92a clocks
+**2,199,999,637–2,299,999,637**;5c2491 remains gameplay-unmeasured.
+
+### October 2 04:28–04:33UTC: repaired desktop run closes normally
+
+Raw8 is byte-identical to the fully painted raw7 above, with a separate native
+capture bracket1,399,830,695–1,400,330,695 clocks. Root and peer independently
+inspect both clean desktops100M clocks apart. The exact owned empty
+`win95-cold-vga-axivgalanes-oct02.1/stop.request` is then created; no live
+service or DUT process is killed. Normal footer:
+**1,412,330,695 clocks /213,221,862 retirements**. Actual child wait0 and
+process-group absence are recorded, followed by actual owner exit0.
+
+The held capture reaches EOF without sticky errors: **6,570,515 bytes**
+captured=persisted,2,815 complete progress records,9 complete raw publications,
+no terminal-error match and no collector errors. All18 frozen input/archive
+pins agree before/after. Root independently rehashes17 non-disk pins and all9
+closed raw frames, binds the exact log inode/hash/byte count, and confirms the
+278 compiled-source entries still hold. The collector hashes the private disk
+only after actual native wait/group absence. OOM/oom_kill/group_kill remain0;
+final memory.max pressure2,811 is not an OOM.
+
+Root separately cleans only the already-exited original service at04:30:58,
+after freshly verifying invocationa00dd3c66ef643aa9b3491c4f9d48c56, MainPID0,
+code1/status0, absent owner/native PIDs and absent recursive cgroup. Actual
+transient-unit contents have no stop hooks or drop-ins. The metadata retainer
+captures original-invocation inactive/dead success before releasing RefUnit;
+closure SHA `bc48368468b8653dbd7b6c4ed53c5ae0124f4d42a7bcb492c1bf0541abbb367c`.
+Result SHA `4327775d5a61f03da2439f39cd27f0cbed03c2c27c0c8f3b459d604c3eab2245`;
+final resource SHA `cbd4e0f01ede0b8cf67b487a127ccfa78115aa2dee594dda9df8e05f642138e1`;
+closed log SHA `23b0beed39e913f82e2f851434c7a9f114cf67df151e00473ac932c0feb588aa`.
+
+Root re-views actual raw8 AFTER closure, with exact lossless RGB identity.
+The external human visual-confirmation request is pending; no authority is
+fabricated and the unchanged checker is not bypassed. The raw result correctly
+remains CLOSED_UNQUALIFIED until that review and strict closed-run checking.
+The repeated FCB2:2FF7/FCBF:2F27 #UDs target intentional VMM callbacks at
+ROMFFB17, not swallowed errors: pinned ROM bytes63386c6c38cc7800 match the
+logged ibuf, and the retained guest handler explicitly recognizes that address
+and dispatches CS−FCB1 callback indices1/14 (WIN95_ABLATION, Sep28 code review).
+
+Quake5c2491 remains cold and live, with no snapshots, guest hacks or rebuild.
+The entire standard suite is still unqualified pending its completed timedemo
+and the remaining evidence checks. Gameplay baseline remains **0.43038841**,
+4092c92a clocks **2,199,999,637–2,299,999,637**;5c2491 has no gameplay IPC yet.
