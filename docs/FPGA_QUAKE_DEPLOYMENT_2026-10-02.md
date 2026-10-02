@@ -92,6 +92,35 @@ independently reran them. This new resume copy does **not** change the original
 do not regenerate the BD or repeat synthesis. A completed implementation and
 finite negative WNS still do not constitute timing closure.
 
+Read-only preflight of the generated BD/XDC confirms two domains: control and
+core interfaces at 40 MHz, and the memory converter/HP0 side at nominal
+100 MHz. The failed attempts to override read-only `FREQ_HZ` metadata did not
+prevent automatic propagation: the generated core-side interfaces report
+40,000,000 Hz and HP-side interfaces 99,999,001 Hz. The persisted constraints
+are `clk_pl_0` at 10.000 ns and `mmcm_clk` at 25.000 ns. This is modeled
+frequency, not a silicon measurement; PCAP does not reprogram Linux's PS clock.
+The memory clock converter is asynchronous; the width converter is synchronous
+on the HP domain. The legacy `fpatan_mcp.xdc` is absent. Forty-three narrow
+vendor reset/CDC false paths and ten FIFO Gray-bus skew constraints still need
+actual exception-coverage and routed timing inspection.
+
+The authored IRQ port lacks a `SENSITIVITY` attribute, but the generated IP
+wrapper declares `LEVEL_HIGH`. Its signal is a registered level OR of host
+IDE/FDD service requests, not the guest's P5 IRQ bus. The clean daemon polls
+host service requests instead of using a Linux interrupt handler; guest IRQs
+have their own PIC path. This explains the warning's scope, not interrupt-path
+qualification. Preserve it, and check DT/GIC trigger configuration separately
+before introducing interrupt-driven host service.
+
+Inspection-only Tcl is prepared at
+`/var/tmp/ventium-fpga40-inspection-oct02.U3ZJp5aC/inspect_completed_synth.tcl`,
+SHA `4ee24174b13c01471e5d5268d0dbdca09746a8bcebe15d902148e94b333ff121`.
+It opens the exact existing project read-only, rejects incomplete/stale
+synthesis, and emits utilization, clock/exception, DRC and timing reports
+outside the frozen tree. It must run only after the synthesis process is
+closed, under the sole-Vivado/resource guard and an external deadline. It
+cannot launch, reset or regenerate a run, and report completion is not sign-off.
+
 The FPGA's existing retired counter counts primary retire events only; it
 omits simultaneous V-pipe retire events. Its read-only cycle counter is valid
 for MHz measurement, but its displayed IPC is **not comparable to total
@@ -238,6 +267,20 @@ to skip BIOS/text modes without resizing them. Confirm the actual geometry
 before interpreting its pixels. The current decoder's default lossy H.264
 output is not a lossless RGB movie, and the old private FFV1 assembler pins
 historical tool provenance; neither is automatic acceptance for the new run.
+
+Current-pinned host helpers are prepared under
+`movie-root-micro.Oki6CEec/` in the task directory. Root independently reran
+the synthetic gate successfully. The normalizer requires an exact root-authored
+producer/transport closure receipt, verifies current probe/decoder/manifest
+pins, preserves the original raw stream and any partial terminal record, and
+rejects malformed geometry, CRC or ordering. The FFV1 assembler presents every
+validated accepted record once at 15 fps without resizing or color changes,
+then decodes it and checks byte-exact RGB equality. Its limits are 2 GiB input,
+6 GiB **streamed** expanded RGB (not a stored buffer), 2 GiB movie output and
+1 GiB disk reserve; FFmpeg has two threads, 512 MiB address space and an
+enforced per-stage pipe/exit deadline. These host-only tests include stalled
+pipes and do not prove a real capture or timedemo. Use an outer whole-helper
+deadline as well. Do not reuse the historical assembler's old-source claim.
 
 Preserve raw colors and dimensions. Presentation is 15 fps, with no gamma,
 brightness or contrast processing. Retain capture-cycle timestamps; a
