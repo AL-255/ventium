@@ -2651,3 +2651,30 @@ Root's `5mZtCG/quake-cold-oct01.1/root-closed-timedemo-recheck.json` SHA is
 Current5c Quake remains unchanged and live; its Win95 desktop component passed
 separately above. Gameplay IPC baseline remains **0.43038841**,4092c92a clocks
 **2,199,999,637–2,299,999,637**;5c2491 remains gameplay-unmeasured.
+
+### October 2 05:13–05:56UTC: recoverable board cleanup and DDR preflight
+
+Removed only the obsolete board archive
+`/home/riguke/ao486-replay/qemu-win95-ref-icount-33-board-replay.tar.gz`
+after a complete local backup and matching source/backup SHA
+`ce1a9799806fc277493fd95d9f554759765700510e8b7599e8f8743533725ef1`.
+Freed **224,039,027 bytes**; a fresh board check shows **478MiB free,69% used**.
+Recovery copy is
+`/var/tmp/ventium-fpga-quake-oct02.rc0wVn/board-old-win95-replay-backup.tar.gz`.
+Firmware, staged guest inputs/replays and unrelated tools were preserved.
+Cleanup receipt SHA
+`cad1dcd1e17df29312e4712145aafb5060eebf30aedea23eb8fdc8d1df5ced5f`.
+
+The boot device tree has no reserved-memory node; its memory description
+includes the full guest aperture60000000–6fffffff. Boot argument`cma=512M`
+does not establish exclusive ownership. No DDR mapping/zeroing, PL MMIO,
+programming or boot configuration change was performed. Administrative
+authentication and an approved, proved boot-time reservation remain blockers.
+`HOW_TO_RUN_FPGA.md` now makes these stop conditions prominent and distinguishes
+historical images from current deployment qualification.
+
+The unchanged current5c Quake native process1244177 and original invocation
+remain live; root observed **724,219,234 clocks /279,584,431 retire events**
+at05:53UTC. This is startup progress, not gameplay IPC. Verified gameplay
+baseline remains **0.43038841**,older4092c92a clocks
+**2,199,999,637–2,299,999,637**;current5c2491 remains gameplay-unmeasured.

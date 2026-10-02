@@ -2,7 +2,21 @@
 
 This is the operating procedure for the Ventium-swapped `ao486_MiSTer` system on
 the RK-XCZU15EG-F board. It covers the current build, deployment, test, and
-debug tools as inspected through **2026-08-23**.
+debug tools as inspected through **2026-08-23**, with the safety preflight
+updated on **2026-10-02**. Historical clocks, binaries and results below are
+not certification of the currently installed image.
+
+> **Deployment stop condition (2026-10-02):** SSH to
+> `riguke@rk-xczu15eg-f.local` / `riguke@10.0.0.214` works, but administrative
+> authentication is unresolved and FPGA-manager state is `unknown`.
+> More importantly, this boot has **no `/reserved-memory` device-tree node**:
+> Linux's memory description includes the entire hardcoded guest aperture,
+> **`[0x60000000, 0x70000000)` (256 MiB)**. Do not launch a DDR-using daemon,
+> map/zero this aperture, or access unconfigured PL registers. Boot argument
+> `cma=512M` is **not** an exclusive guest-RAM reservation. Correct boot-time
+> reservation, administrative access and manager/image compatibility must be
+> proved before the deployment commands below are used. No bitstream was
+> programmed during this inspection.
 
 The short version is:
 
@@ -17,7 +31,7 @@ The short version is:
 8. Keep logs and hashes. `fpga state: operating` alone is not proof that the
    intended bitstream is running.
 
-> **Current stop condition (2026-08-23):** the superseding L1 request-ownership
+> **Historical result (2026-08-23):** the superseding L1 request-ownership
 > image passes the reset-state IRQ/IRET ROM twice, boots production BIOS and
 > FreeDOS, and reaches CWSDPMI. The source-repaired
 > `fpga_run_20260823_lds2` image also executes beyond the old protected-mode
@@ -134,6 +148,18 @@ be treated as one versioned set.
 
 ## 3. Safety rules
 
+- Before **any guest-DDR mapping**, prove that the full 256 MiB aperture is
+  excluded from Linux System RAM by the actual boot-time reservation. Require
+  a covering, non-reusable `no-map` reserved-memory region, not a CMA pool,
+  and inspect unmasked root `/proc/iomem` for overlap. A runtime device-tree
+  overlay or an apparent address-space gap alone is not proof that pages
+  were excluded at boot. CMA can contain movable allocations, including page
+  cache; never write the aperture on the assumption that `cma=512M` owns it.
+  See the kernel's [CMA implementation](https://raw.githubusercontent.com/torvalds/linux/v6.12/kernel/dma/contiguous.c)
+  and [boot-time reserved-memory handling](https://raw.githubusercontent.com/torvalds/linux/v6.12/drivers/of/of_reserved_mem.c).
+  Changing the boot reservation and rebooting requires separate approval and
+  a recoverable boot configuration. Recheck the effective device tree, memory
+  map and boot log **after** reboot; a proposed DT source is insufficient.
 - Reprogramming the PL disrupts the current guest immediately. Check for an
   existing `ao486d` first and stop it deliberately before loading a bitstream.
   Process absence does **not** mean the guest is idle: the daemon can exit after
@@ -154,6 +180,12 @@ be treated as one versioned set.
 - `--inject-keys` changes guest BDA memory and triggers a cache flush.
   `--stall-flush` is explicitly a workaround. A run that needs either option
   is diagnostic evidence, not a clean correctness pass.
+- Omitting those flags is insufficient for older daemon binaries: the
+  inspected September board shim also rewrites BDA LED state at `0x497` and
+  flushes L1 by default. Clean acceptance requires a source-audited daemon
+  without that intervention. Do not infer cleanliness from a binary name.
+  The isolated October 2 replacement is still being qualified; this guide
+  does not certify it or the retained September 5 bitstream as a matched set.
 - Trace freeze and comparator modes can stop or reset the core. Use them only
   after a normal run has failed or when the run is intentionally diagnostic.
 - Never access the PL AXI-Lite window through `/dev/mem` unless
@@ -571,15 +603,31 @@ All commands in this section are read-only:
 ```bash
 ssh -F "$SSH_CONFIG" "$BOARD" 'hostname; uname -a; df -h / /tmp'
 ssh -F "$SSH_CONFIG" "$BOARD" 'cat /sys/class/fpga_manager/fpga0/state'
+ssh -F "$SSH_CONFIG" "$BOARD" 'cat /proc/cmdline; ls -ld /proc/device-tree/reserved-memory'
 ssh -F "$SSH_CONFIG" "$BOARD" 'pgrep -a -x ao486d || true'
 ssh -F "$SSH_CONFIG" "$BOARD" 'ls -lh /tmp/ao486 2>/dev/null || true'
 ssh -F "$SSH_CONFIG" "$BOARD" \
   'sha256sum /tmp/ao486/rk_ao486_system.bit.bin /tmp/ao486/ao486d 2>/dev/null || true'
 ```
 
+For a DDR-using launch, also obtain the actual reserved-memory node's `reg`,
+`no-map` and pool/reuse properties, unmasked **root** `/proc/iomem`, and boot
+reservation evidence. Decode `reg` using the tree's address/size cell counts;
+verify coverage of `[0x60000000, 0x70000000)` and absence of every overlapping
+System RAM interval. Non-root `/proc/iomem` can report all-zero addresses:
+that is masked evidence, not an empty memory map or permission to proceed.
+On the October 2 inspection the node was absent, the memory node covered the
+aperture, and the boot arguments contained only `cma=512M` for reservation.
+**This boot is not admitted for guest DDR use.**
+
 If the staged daemon is the one built from the inspected `board_shim.cpp`, its
 `--ident` path only reads the control/debug registers (it does not hold/reset,
 zero RAM, mount a disk, or release the core):
+
+The older implementation nevertheless attempts to **map guest DDR** during
+`--ident`. Do not use that binary on the blocked October 2 boot. A genuinely
+control-only IDENT path must be confirmed in the exact replacement source and
+binary; the isolated replacement is not yet deployment-qualified.
 
 ```bash
 ssh -F "$SSH_CONFIG" -t "$BOARD" 'sudo /tmp/ao486/ao486d --ident'
