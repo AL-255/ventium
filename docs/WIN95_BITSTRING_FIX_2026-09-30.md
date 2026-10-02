@@ -1964,3 +1964,56 @@ Gameplay baseline remains **0.43038841 IPC** on4092c92a, clocks
 2,199,999,637–2,299,999,637. Both precise-PC-only and demand-fetch candidates
 remain without a verified gameplay measurement. No before/after gameplay
 FPS gain can be inferred from these directed tests or CoreMark scores.
+
+### October2 boundary-priority qualification checkpoint
+
+Frozen TB `357df59b0eafbd0655b6f4a9651991a15a049eb4b802c409cbd6aacab283d062`
+(`obj_dir_fetchguard_oct02.DxZUZe`, compile record
+`f92020a6e8ffd3a9fde238cfa347495fdb3752208d5f595e4d05fbe3b81b16d5`)
+adds the CS-demand/zero-length guards, event-qualified endpoint probe,
+opcode-only x87/MOV-CR/DR fault admission, and non-system loud overlength halt.
+Same-page permission handoff preserves revalidated complete resident-window
+hints; boundary handoff explicitly clears them. No held admitted memory packet
+is withdrawn by the new fetch handoff.
+
+All15 fetch-boundary cases pass in both full-state modes, actual native133 and
+full QEMU comparisons. Cases10–13 prove earlier #NM/CPL faults, unchanged
+CLTS/IRET retry and raw80 FLD1/FSTP1.0; cases14/15 distinguish opcode byte16
+overlength from opcode byte15's earlier #NM. The preceding `fddb` model fails
+cases10/13 normally with native135 and11/12 with native141, showing premature
+PF rather than the required initial NM/GP. No unexpected exit is waived.
+Closed full15-case summary SHA256:
+`e91c03e661f140cce32f2809e382ce75a341adb7bc6709864bbe8e9135568048`.
+Closed10–13 negative-control summary SHA256:
+`73ab3fa1883fbcb222313ccbc30d1a3461b3ecc236fa13939a467170d7a61e26`.
+The first15-way invocation failed launching several QEMU goldens with EAGAIN
+or refused GDB connections under the default64-task scope. It remains FAIL;
+the fresh passing invocation uses8 workers inside the reviewed128-task scope.
+Compiler builds still use32 jobs. This is bounded parallelism, not removal of
+the resource guard or a change to architectural acceptance.
+
+The precise-PC regression still passes both modes, summary SHA256
+`d56ea81ed159dd0a3a96e85ce4f99e6273b3aa1ff81041c0a5efe13a24dcceb8`.
+`make verify` again passes108 functional programs and all gated cycle bands,
+log SHA256 `0a53179cd860db202b5e4c9f8acaa7a19f755513e2e74562bd65a7efbd57f4b4`;
+its20 structural cycle diagnostics remain explicitly divergent/non-gating.
+The adjacent system differentials also close0:ppage,pfault,pfcpl3,pcpl,
+pretfoutpg,pxc04i,pxfrag,plar,pmode,pv86,pdebug,psysfpreloc,psysfpload.
+Actual status-table SHA256:
+`0b6a60c143785ab7acbe2df5266bb972821f512e3cb5a0003f4bf8693e825c0f`.
+
+Two separate strict-lint leaf gates add281 decoder-metadata checks and1,590
+checks of exact production predicate RHS expressions. These validate suffix
+independence, legal/overlength header endpoints and demand/event/held-packet
+guards; they are not full-FSM or guest passes. The predicate leaf's actual
+swap limit is `max`, not0; OOM/kill counters are0 and peak memory646MiB.
+
+Further primary-source review exposes pre-EA CPL faults in0F00/0F01 groups,
+real/V860F00 rejection, invalid register LGDT/LIDT, and SMSW's accidental
+MOV-CR privilege alias. Follow-up metadata/semantic corrections and directed
+cases are now in progress. They postdate the `357d` verification above and
+need their own frozen build and gates. Full-PC deployment waits for that
+qualification; no major modification is declared complete from leaf tests.
+
+Gameplay baseline remains0.43038841 IPC on4092c92a, clocks2.2–2.3B; neither
+boundary candidate nor its follow-up has a verified gameplay measurement.
