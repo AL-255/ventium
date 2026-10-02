@@ -2821,3 +2821,67 @@ no reserved-memory node, `cma=512M` and sudo requiring a password. No PL access,
 programming, hardware timedemo or movie. Verified gameplay IPC remains
 **0.43038841**,older4092c92a clocks **2,199,999,637–2,299,999,637**; current5c2491
 and the separate UI diagnostic have no verified gameplay measurement.
+
+### October 2 07:51–08:16UTC: obsolete-run closure and isolated PS2 repair
+
+Root creates exact owned empty stop markers for seven identity-checked obsolete
+Quake controls at07:51:59UTC. All recorded owners/natives/process groups and
+service cgroups are absent afterward. Five persisted older controls report
+969frames/128.4seconds/7.5fps with native0 and normal footers; they cannot qualify
+current5c. Store-policy/V86 have only simple returncode/footer records, not
+retained explicit wait/EOF authority. Bitmem/verrw retain native wait/EOF capture
+but their transient units have already been collected, so current systemd
+defaults cannot establish original owner exit/final OOM. Popstore preserves
+original INV, owner0, pins, actual wait/EOF and final OOM0. Pfetchpc/fetchpriority
+are intentionally stopped **incomplete**, native0/EOF but owner2/no completed
+timedemo, not guest-error observations or acceptance passes. Logs/results/raws
+are preserved; no old disk is read/hashed by root's closure observation.
+Closure receipt SHA
+`3d513f80fb1860da26a3a6ed2c8812564976b6c0c2f611e118f5b39fca0ec624`.
+Its v2 corrects a root metadata line-selector that initially collected PERF
+lines instead of HOST-STOP/done footers; original v1 is kept, no gate modified.
+
+Only current5c Quake and Win95 UI natives remain. Both original invocation/PID
+identities hold and all observed cap/OOM counters remain0. At08:12UTC Quake
+reaches1,299,275,264clocks/358,602,239retires in startup; UI reaches443,804,046/
+88,658,581, not yet a painted desktop and with no keys sent. Closing old bitmem
+also releases the SMT sibling of current Quake CPU25. No restart, live-disk
+read, guest-state change or full model/FPGA rebuild is used.
+
+A staged minimal PS2 repair now has **actual isolated positive tests**, not
+production integration. Eleven new producer/ownership bits retain translated
+RX and ACK under backpressure, require actual keyboard read credit and selected
+FIFO commit, deduplicate held writes and prevent nonexistent headless SEND.
+Candidate source SHA
+`7ebf00b9b982d7441f32ae6f79cb8944b5e981f4322c39c529bd38fa86e64726`.
+Both fixed AUTOACK-on and physical-off profiles compile/test/owner/wrapper0;
+INVs `a1cd45aac3e54422b5348594b45a5657` and
+`e5bdcd8ec14e48d999a877b3ca60bd00`, peaks511,766,528/454,373,376bytes.
+Closed native logs SHA
+`79b3e9ffb535c08741d2610603483a171e58751f6c55ccab9082fb2f0945ffd0`
+and `ac188da842cb088ddb655a097ba59c465f64294e5d5c56fb46474fd1fdf63a71`.
+Two unchanged-controller controls also finish0: legacy headless reproduces
+documented defects, **not correctness**, and physical control exercises actual
+wire transmission. Every phase is below590seconds,2GiB/swap0/64tasks/CPUs28,30,
+before/after65 original+10 staged pins held, cap/OOM0. First fixed attempts fail
+before compile on unsupported `--makeflags`; retained receipts remain failed.
+Separate root runner corrects to documented `-MAKEFLAGS`, without source changes.
+
+Checked-in proposal/TB/probe in `verif/ps2_ui/proposals/` preserve the tested
+work without touching canonical/live inputs. Export-only final-hunk context is
+completed after the original diff fails apply-check; final `git apply --check`
+succeeds and no production patch is applied. Independent review keeps open
+mid-frame self-test device continuation/resynchronization, continuous-device
+inhibition boundaries, actual iobus integration and atomic loaded ancestry.
+The ordinary abort test releases device pins, not a continuing-frame proof.
+Microtest success does not close these corners or imply visible UI/full-suite/
+FPGA correctness. A changed-controller full-PC build requires a new identity
+and full qualification after the current frozen runs finish.
+
+Board cleanup remains recoverable:214MiB replay archive removed with full local
+backup; firmware, current tools and104MiB remaining reference payloads kept.
+Deployment still needs working administration and exclusive boot-time guest
+RAM reservation. No PL MMIO, bitstream deployment, hardware timedemo or movie.
+Verified gameplay IPC remains **0.43038841**,older4092c92a clocks
+**2,199,999,637–2,299,999,637**; current5c2491 and isolated PS2 candidate remain
+gameplay-unmeasured. The standard suite is still incomplete.
