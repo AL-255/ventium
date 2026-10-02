@@ -36,7 +36,21 @@
           if (sfetch_short_fast && (icsnp_v1 || icsnp_v2)) begin
           end else
 `endif
-          if (sfetch_short_fast || sfetch_fast || sfetch_uop_fast || sfetch_resident_fast) begin
+          if (sfetch_boundary) begin
+            if (sfetch_early_nm || sfetch_early_gp ||
+                (!sfetch_demand_req && d_fetch_meta_ready)) begin
+              fetch_word <= 3'd0;
+              state <= S_DECODE;
+            end else if (mem_req && mem_ack) begin
+              // Clear stale suffix scratch once; only validated bytes become
+              // visible to the length parser as sfetch_valid_q advances.
+              if (sfetch_valid_q == 5'd0)
+                for (int i=0; i<IWORDS*4; i++) ibuf[i] <= 8'd0;
+              for (int i=0; i<4; i++)
+                if (i < int'(sfetch_demand_size))
+                  ibuf[sfetch_valid_q[3:0] + 4'(i)] <= mem_rdata[i*8 +: 8];
+            end
+          end else if (sfetch_short_fast || sfetch_fast || sfetch_uop_fast || sfetch_resident_fast) begin
             for (int i = 0; i < IWORDS*4; i++) begin
               if (sfetch_short_fast && (
 `ifdef VEN_UOP_SLOW_LEN_HINT
@@ -146,6 +160,18 @@
             start_fault(inta_vector, 1'b0, 32'd0, eip);
             dlv_ext         <= 1'b1;            // INTR is an external event (EXT=1)
           end
+          else if ((sfetch_header_fault_q != 2'd0) ||
+                   sfetch_early_nm || sfetch_early_gp) begin
+            // The authorized opcode selected a fault before its EA exists.
+            // A complete interior window uses the same header priority as a
+            // demanded boundary header; only the latter needs the latch.
+            // Never execute a provisional zero-padded semantic decode, and
+            // preserve the normal debugger/SMI/NMI/INTR boundary priority.
+            if ((sfetch_header_fault_q == 2'd1) || sfetch_early_nm)
+              start_fault(8'd7, 1'b0, 32'd0, eip);
+            else
+              start_fault(8'd13, 1'b1, 32'd0, eip);
+          end
           // ---- M2S.6 GD general-detect (#DB before a MOV-DR access; gated
           // sys_mode + DBG_GD_ENABLE). This is the ONE #DB that fires BEFORE its
           // instruction (no preceding instruction to fuse with): a MOV to/from a DR
@@ -200,6 +226,21 @@
           // specific rather than CPL0-only). priv_fault is the single predicate
           // computed in core.sv; #GP(0) is a FAULT, so the faulting EIP is pushed and
           // the instruction is restartable.
+          else if (d_fetch_overlong) begin
+            // Byte16 has already passed the demanded translation checks. Its
+            // absent-page PF therefore precedes this architectural #GP(0).
+            if (sys_mode)
+              start_fault(8'd13, 1'b1, 32'd0, eip);
+            else begin
+              // The bare functional harness has no architectural IDT. Match
+              // its unsupported-encoding policy: loud no-retirement halt,
+              // never a legal-looking operation with wrapped q_len==0.
+              state <= S_HALT;
+`ifndef SYNTHESIS
+              $display("[VEN-UNK] overlength HALT eip=%08x", eip);
+`endif
+            end
+          end
           else if (priv_fault) begin
             start_fault(8'd13, 1'b1, 32'd0, eip);
           end

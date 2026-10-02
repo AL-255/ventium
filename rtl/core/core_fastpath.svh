@@ -210,6 +210,22 @@
             str_next_eip   <= (dec_cx == 32'd0) ? next_eip : q_pc;
             state          <= S_STORE;
             end
+          end else if (pipe_fetch_checked_handoff) begin
+            // No speculative fill or new operand request accompanies this
+            // boundary. The checked slow fetch owns its exact demanded bytes.
+            fetch_word <= 3'd0;
+            sfetch_short_len_q <= 4'd0;
+`ifdef VEN_UOPCACHE
+            sfetch_uop_q <= !sfetch_boundary && cycle_mode && exec_issue_ok &&
+                            ic_buffered(flin) &&
+                            ic_buffered(flin + 32'(IWORDS*4 - 1));
+`endif
+`ifdef VEN_SFETCH_RESIDENT
+            sfetch_resident_q <= !sfetch_boundary && cycle_mode && exec_issue_ok &&
+                                 ic_buffered(flin) &&
+                                 ic_buffered(flin + 32'(IWORDS*4 - 1));
+`endif
+            state <= S_FETCH;
           end else if (!pipe_mem_active_q && ((!pipe_bytes_ok || !exec_issue_ok)
 `ifdef VEN_L1_AXI
                        && !(real_bus && !mem_ack)   // word-0 not ready -> bubble arm below

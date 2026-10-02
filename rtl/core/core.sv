@@ -2053,6 +2053,116 @@ module core
   localparam int IWORDS = 4;
   logic [7:0]  ibuf [16];
   logic [2:0]  fetch_word;
+  // The interior-page frontend retains its established wide fetch. At a
+  // page/CS boundary, only bytes demanded by the reference decoder may
+  // translate: lookahead into an unused successor page is not an access.
+  logic sfetch_boundary, sfetch_demand_req;
+  logic [4:0] sfetch_valid_q, refdecode_valid;
+  logic [4:0] d_fetch_need, d_fetch_len, d_fetch_fault_len;
+  logic d_fetch_meta_ready, d_fetch_overlong, d_fetch_modrm;
+  logic d_fetch_header_ready, d_fetch_header_x87, d_fetch_header_cpl0;
+  logic d_smsw;
+  logic sfetch_early_nm, sfetch_early_gp;
+  logic [1:0] sfetch_header_fault_q;
+  logic [31:0] sfetch_demand_addr;
+  logic [31:0] fetch_fault_linear, fetch_fault_page;
+  logic fetch_overlength_probe;
+  logic [2:0] sfetch_demand_size;
+  logic pipe_fetch_checked_handoff;
+  logic if_auth_valid_q, if_auth_user_q, if_auth_ok;
+  logic [19:0] if_auth_page_q;
+
+  always_comb begin
+    sfetch_boundary = (flin[11:0] > 12'hff0)
+                    || (def16 && (eip[15:0] > 16'hfff0));
+`ifdef VEN_SEG_ENFORCE
+    sfetch_boundary = sfetch_boundary ||
+       (sys_mode && !real_mode && !v86 && seg_attr[SG_CS][7] &&
+        ({1'b0,eip} + 33'd15 > {1'b0,seg_limit[SG_CS]}));
+`endif
+    refdecode_valid = ((state == S_FETCH) && sfetch_boundary)
+                    ? sfetch_valid_q : 5'd16;
+  end
+  assign sfetch_demand_addr = flin + {27'd0,sfetch_valid_q};
+  // Only the checked opcode header may select these pre-ModR/M traps. The
+  // ordinary semantic decode is provisional until all essential bytes arrive.
+  assign sfetch_early_nm = sys_mode && d_fetch_header_ready &&
+                           d_fetch_header_x87 && (creg0[2] || creg0[3]);
+  assign sfetch_early_gp = sys_mode && d_fetch_header_ready &&
+                           d_fetch_header_cpl0 && (eff_cpl != 2'd0);
+  assign sfetch_demand_req = (state == S_FETCH) && sfetch_boundary &&
+                            !sfetch_early_nm && !sfetch_early_gp &&
+                            (sfetch_valid_q < d_fetch_need);
+  // Separate the byte-valid producer from the decoder-consuming beat shaper:
+  // combining their procedural outputs invents valid->need->valid feedback.
+  always_comb begin
+    sfetch_demand_size = 3'd0;
+    if (sfetch_demand_req) begin
+      sfetch_demand_size = (d_fetch_need - sfetch_valid_q >= 5'd4)
+                        ? 3'd4 : 3'(d_fetch_need - sfetch_valid_q);
+      if ((sfetch_demand_addr[11:0] > 12'hffc) &&
+          (sfetch_demand_size > 3'(13'h1000 - {1'b0,sfetch_demand_addr[11:0]})))
+        sfetch_demand_size = 3'(13'h1000 - {1'b0,sfetch_demand_addr[11:0]});
+    end
+  end
+
+  // This tiny authorization cache is independent of the shared lookup port:
+  // during a fast data operation that port names DS/SS:EA, not the code page.
+  // Retain US, not a CPL0 allow boolean; every issue rechecks the LIVE CPL.
+  assign if_auth_ok = !paging_on || (if_auth_valid_q &&
+                       (if_auth_page_q == flin[31:12]) &&
+                       ((eff_cpl != 2'd3) || if_auth_user_q));
+  assign pipe_fetch_checked_handoff = !pipe_mem_active_q &&
+                                      (sfetch_boundary || !if_auth_ok);
+  // QEMU's pinned P54 decoder advances displacement/immediate fields
+  // atomically. If the FIRST field overrunning byte15 ends on another page,
+  // that page is probed before #GP; later unused fields must not be probed.
+  // The probe has no bus read and never stores bytes beyond the16-byte buffer.
+  assign fetch_fault_linear = flin + {27'd0,d_fetch_fault_len} - 32'd1;
+  assign fetch_fault_page = {fetch_fault_linear[31:12],12'd0};
+  assign fetch_overlength_probe = (state == S_DECODE) && sys_mode &&
+                                 paging_on && d_fetch_overlong &&
+                                 (sfetch_header_fault_q == 2'd0) &&
+                                 !sfetch_early_nm && !sfetch_early_gp &&
+                                 !dbg_block_issue &&
+                                 !(smi_pending && !smm_active && !dbg_step_active) &&
+                                 !(nmi_take && !dbg_step_active) &&
+                                 !(intr_take && !dbg_step_active) &&
+                                 (fetch_fault_page[31:12] != flin[31:12]);
+
+  always_ff @(posedge clk) begin
+    if (!rst_n) begin
+      sfetch_valid_q <= 5'd0;
+      sfetch_header_fault_q <= 2'd0;
+      if_auth_valid_q <= 1'b0;
+      if_auth_user_q <= 1'b0;
+      if_auth_page_q <= 20'd0;
+    end else begin
+      if ((state == S_FETCH) && sfetch_boundary && fsm_case_enabled &&
+          (sfetch_early_nm || sfetch_early_gp))
+        sfetch_header_fault_q <= sfetch_early_nm ? 2'd1 : 2'd2;
+      else if ((state != S_DECODE) &&
+               !((state == S_WALK) && (walk_ret_state == S_DECODE)))
+        sfetch_header_fault_q <= 2'd0;
+      // A walk is a detour of this exact fetch owner, not a new instruction.
+      if ((state != S_FETCH) &&
+          !((state == S_WALK) && (walk_ret_state == S_FETCH)))
+        sfetch_valid_q <= 5'd0;
+      else if (sfetch_demand_req && fsm_case_enabled && mem_req && mem_ack)
+        sfetch_valid_q <= sfetch_valid_q + {2'd0,sfetch_demand_size};
+
+      // Raw flush is sequential only, preserving the existing comb-loop break.
+      if (tlb_flush)
+        if_auth_valid_q <= 1'b0;
+      else if (paging_on && fe_translatable && !cur_is_d &&
+               fsm_case_enabled && itlb_lk_hit &&
+               !xlate_miss && !perm_fault && !fe_xlate_pend) begin
+        if_auth_valid_q <= 1'b1;
+        if_auth_page_q <= cur_lin[31:12];
+        if_auth_user_q <= itlb_lk_perm[2];
+      end
+    end
+  end
   // A nonzero value is a one-shot, non-executable short-fetch descriptor from
   // the uop-cache walker.  It is intentionally carried separately from the
   // normal uop hit: S_FETCH still invokes the reference decoder and does not
@@ -2642,6 +2752,7 @@ module core
 `else
     .ibuf          (ibuf),
 `endif
+    .ibuf_valid    (refdecode_valid),
     .gpr           (gpr_o),
     .eflags        (eflags),
     .sys_mode      (sys_mode),
@@ -2661,6 +2772,16 @@ module core
     .eff_addr      (eff_addr),
     // decoded fields (the d_* the q_* latch consumes)
     .d_len         (d_len),
+    .d_fetch_need  (d_fetch_need),
+    .d_fetch_len   (d_fetch_len),
+    .d_fetch_fault_len (d_fetch_fault_len),
+    .d_fetch_meta_ready (d_fetch_meta_ready),
+    .d_fetch_overlong (d_fetch_overlong),
+    .d_fetch_modrm (d_fetch_modrm),
+    .d_fetch_header_ready (d_fetch_header_ready),
+    .d_fetch_header_x87 (d_fetch_header_x87),
+    .d_fetch_header_cpl0 (d_fetch_header_cpl0),
+    .d_smsw        (d_smsw),
     .d_halt        (d_halt),
     .d_cacheinv    (d_cacheinv),
     .d_int80       (d_int80),
@@ -4215,6 +4336,7 @@ module core
   // necessarily assert exec_flush_all. These guards affect only the register
   // capture enable; no instruction-byte decoder or BRAM read port is added.
   assign pipe_sdecode_window_ok = (state == S_PIPE) && cycle_mode && !def16
+                       && !pipe_fetch_checked_handoff
                        && exec_issue_ok && !icsnp_v1 && !icsnp_v2
 `ifdef VEN_L1_AXI
                        && !ic_snoop_valid
@@ -4239,6 +4361,7 @@ module core
   // S_FETCH copies 16 bytes (not the fast path's 12), and a stale/predicted B
   // buffer must fall back to the original bus fetch, never supply old bytes.
   assign sfetch_uop_fast = sfetch_uop_q && (state == S_FETCH) && (fetch_word == 3'd0)
+                       && !sfetch_boundary
                        && exec_issue_ok
                        && ic_buffered(flin)
                        && ic_buffered(flin + 32'(IWORDS*4 - 1));
@@ -4260,6 +4383,7 @@ module core
 `endif
                            )
                          && (state == S_FETCH) && (fetch_word == 3'd0)
+                         && !sfetch_boundary
                          && exec_issue_ok && ic_buffered(flin)
 `ifdef VEN_UOP_SLOW_LEN_HINT
                          // The hint is not a permission or residency token.
@@ -4289,6 +4413,7 @@ module core
   // window here; any changed way, collision, flush, or straddle ambiguity
   // immediately returns to the original bus fetch.
   assign sfetch_resident_fast = sfetch_resident_q && (state == S_FETCH)
+                            && !sfetch_boundary
                             && (fetch_word == 3'd0) && exec_issue_ok
                             && ic_buffered(flin)
                             && ic_buffered(flin + 32'(IWORDS*4 - 1));
@@ -4421,6 +4546,7 @@ module core
   // d_len, and both endpoint buffers cover all of that at most 15-byte span.
   // A stale suffix may change unused decoder scratch, never an operand field.
   assign pipe_sdispatch_short_window_ok = (state == S_PIPE) && cycle_mode && !def16
+                       && !pipe_fetch_checked_handoff
                        && pipe_sdispatch_shape_ok && (d_len != 4'd0)
                        && exec_issue_ok && !icsnp_v1 && !icsnp_v2
 `ifdef VEN_L1_AXI
@@ -4539,6 +4665,7 @@ module core
   // clocks (VEN_PERF_PROFILE, DISK_BOOT_STATUS UPDATE 303). Keep it as an
   // instrument. Do not ship it.
   assign sfetch_fast = (state == S_FETCH) && (fetch_word == 3'd0)
+                    && !sfetch_boundary
                     && exec_issue_ok      // a flush cycle always fetches fresh
                     && ic_present(flin)
                     && ic_present(flin + 32'(IWORDS*4 - 1));
@@ -5677,7 +5804,7 @@ module core
     // Do not fold this into pipe_bytes_ok: that raw residency predicate also
     // drives the S_PIPE I-fill decision.  This stricter permit is only for a
     // *new* fast side-effecting instruction.
-    pipe_frontend_ready = pipe_bytes_ok;
+    pipe_frontend_ready = pipe_bytes_ok && !pipe_fetch_checked_handoff;
 `ifdef VEN_IC_BRAM
     pipe_frontend_ready = pipe_frontend_ready && ic_fetch_ready;
 `endif
@@ -5728,7 +5855,7 @@ module core
     // It must never be reclassified as an I-fill just because a later executable
     // invalidation makes the raw frontend window non-resident.
     pf_miss = (state==S_PIPE) && !pipe_mem_active_q && !fp_issue_block &&
-              (stall_cnt==7'd0) && !pipe_bytes_ok;
+              (stall_cnt==7'd0) && !pipe_bytes_ok && !pipe_fetch_checked_handoff;
 
     // pairing decision: V can pair only when U leads, no hazards, AND the V
     // candidate's FULL bytes are resident in the I-cache. A V branch can pair (it
@@ -5744,7 +5871,7 @@ module core
     // require the V instruction's first byte AND its last byte to be in resident
     // lines before pairing; otherwise V is not paired this clock — it becomes the
     // next U, the cold line fills via S_PF, and it issues with correct bytes.
-    v_bytes_ok = exec_issue_ok &&
+    v_bytes_ok = exec_issue_ok && !pipe_fetch_checked_handoff &&
                  ic_present(flin + {28'd0,u_d.len}) &&
                  ic_present(flin + {28'd0,u_d.len} + {28'd0,v_d.len} - 32'd1);
     // REVIEW2 H-05: the STI / MOV-SS shadow protects exactly ONE instruction. If the
@@ -9058,8 +9185,13 @@ module core
 `ifdef VEN_SEG_ENFORCE
     cs_fetch_fault = sys_mode && !real_mode && !cur_is_d
                   && (state == S_FETCH) && (fetch_word == 3'd0)
+                  && (!sfetch_boundary || sfetch_demand_req)
                   && seg_attr[SG_CS][7]                    // P: unpopulated cache reads 0
-                  && ((cur_lin - seg_base[SG_CS]) > seg_limit[SG_CS]);
+                  && (((cur_lin - seg_base[SG_CS]) > seg_limit[SG_CS]) ||
+                      (sfetch_boundary &&
+                       ({1'b0,(cur_lin - seg_base[SG_CS])} +
+                        {30'd0,sfetch_demand_size} - 33'd1 >
+                        {1'b0,seg_limit[SG_CS]})));
     // REVIEW1_Aug3 R2-H07: the DECODED-EXTENT half. The first-byte check above
     // misses an instruction whose LATER bytes cross CS.limit (an instruction
     // ending exactly AT the limit is legal; one byte past it is #GP(0)).
@@ -9080,7 +9212,9 @@ module core
                   // a later raw uop/BRAM value while its memory seam is pending.
                   && ((state == S_PIPE && pipe_cs_issue_eligible
                        && (({1'b0, eip} + {28'd0, pipe_u_eff.len} - 33'd1) > {1'b0, seg_limit[SG_CS]}))
-                   || (state == S_DECODE
+                   || (state == S_DECODE && (d_len != 4'd0) &&
+                       (sfetch_header_fault_q == 2'd0)
+                       && !sfetch_early_nm && !sfetch_early_gp
                        && (({1'b0, eip} + {28'd0, d_len} - 33'd1) > {1'b0, seg_limit[SG_CS]})));
     seg_access_fault = cur_is_d && cur_seg_rel && !seg_ext_skip
                     && (seg_off_over_limit || seg_null_sel || seg_not_present
@@ -9895,7 +10029,8 @@ module core
   // An admitted fast packet instead owns pipe_commit_eip; decoded data beats
   // retain q_pc across split accesses, REP elements and micro-sequences.
   assign access_restart_pc = (state == S_PIPE) ? pipe_commit_eip
-                           : ((state == S_FETCH || state == S_PF) ? eip : q_pc);
+                           : ((state == S_FETCH || state == S_PF || state == S_DECODE)
+                              ? eip : q_pc);
 
   // Is the current bus access a DATA access (D-TLB) vs an instruction fetch
   // (I-TLB)? Fetch states are S_FETCH / S_PF / the S_PIPE icache fill; the
@@ -9905,6 +10040,7 @@ module core
   always_comb begin
     unique case (state)
       S_FETCH, S_PF: cur_is_d = 1'b0;
+      S_DECODE: cur_is_d = !fetch_overlength_probe;
       // S_PIPE issues BOTH an icache fill (pf_miss -> I-TLB, a fetch) AND a
       // checked DS effective-address DATA load (pipe_load_req -> D-TLB). They are mutually
       // exclusive (pf_miss => !pipe_bytes_ok => !pipe_load_req), so classify by
@@ -10054,7 +10190,17 @@ module core
     ven_h06_hit = 1'b0;
 `endif
     unique case (state)
-      S_FETCH: cur_lin_nat = flin + {27'd0,fetch_word,2'b00};
+      S_FETCH: begin
+        cur_lin_nat = sfetch_boundary ? sfetch_demand_addr
+                                     : flin + {27'd0,fetch_word,2'b00};
+        if (sfetch_boundary) cur_size = {1'b0,sfetch_demand_size};
+      end
+      S_DECODE: begin
+        if (fetch_overlength_probe) begin
+          cur_lin_nat = fetch_fault_page;
+          cur_size = 4'd1;
+        end
+      end
       S_PF:    cur_lin_nat = {pf_fill_addr[31:5],5'd0} + {27'd0,pf_word,2'b00};
       S_PIPE: begin
         cur_lin_nat = pf_miss ? {pf_miss_fa[31:5],5'd0}
@@ -10528,6 +10674,7 @@ module core
   always_comb begin
     logic translatable;
     unique case (state)
+      S_DECODE: translatable = fetch_overlength_probe;
       S_FETCH, S_PF, S_PIPE,
       S_LOAD, S_LOAD2, S_FLOAD, S_FSTORE, S_STORE, S_USEQ, S_ENTER,
       // M2S.3 IDT delivery reads/writes are translated when paging is on.
@@ -10583,6 +10730,10 @@ module core
     endcase
     // S_PIPE accesses memory only for a checked data read/store or an I-cache fill.
     if (state==S_PIPE && !(pipe_load_req || pipe_store_req || pf_miss)) translatable = 1'b0;
+    // Completion/metadata clocks have no demand and must not start a walk,
+    // including when the buffered legal instruction ends at the page edge.
+    if ((state == S_FETCH) && sfetch_boundary && !sfetch_demand_req)
+      translatable = 1'b0;
     // A prepared stream descriptor is a genuine between-element boundary until
     // it starts.  Do not let a simultaneous event/debug/SMC cancellation launch
     // a DTLB walk (or report a permission fault) before the boundary can consume
@@ -11047,6 +11198,7 @@ module core
     // invalidating edge inside the icache. Word 0 refetches from S_PF (the
     // divert sets pf_word=0 on a flush cycle).
     ic_pf_miss_fill = (state==S_PIPE) && fsm_case_enabled && !pipe_mem_active_q &&
+                      !pipe_fetch_checked_handoff &&
                       !fp_issue_block && (stall_cnt==7'd0) &&
                       !pipe_bytes_ok && exec_issue_ok && !exec_flush_all
 `ifdef VEN_L1_AXI
@@ -12427,7 +12579,8 @@ module core
     // CPL0-only. SGDT/SIDT/STR/SMSW are deliberately ABSENT -- they are readable at
     // any CPL on a P5 (that is the well-known store-descriptor-table leak, not a bug
     // to fix here). MOV CR/DR covers both directions: reading CR/DR is CPL0-only too.
-    cpl0_only = (d_sysop==SYS_MOVCR_TO)  || (d_sysop==SYS_MOVCR_FROM)
+    cpl0_only = (d_sysop==SYS_MOVCR_TO)  ||
+                ((d_sysop==SYS_MOVCR_FROM) && !d_smsw)
              || (d_sysop==SYS_MOVDR_TO)  || (d_sysop==SYS_MOVDR_FROM)
              || (d_sysop==SYS_LGDT)      || (d_sysop==SYS_LIDT)
              || (d_sysop==SYS_LLDT)      || (d_sysop==SYS_LTR)
@@ -12483,8 +12636,9 @@ module core
     end
     // #PF error code (IA-32 Vol.3): [0]=P (1 here -- the page IS present, which is
     // exactly what distinguishes this from the S_WALK not-present fault), [1]=W/R,
-    // [2]=U/S, [3]=RSVD, [4]=I/D (instruction fetch).
-    perm_err = {27'd0, perm_fault_i, 1'b0, usr, cur_is_w && !perm_fault_i, 1'b1};
+    // [2]=U/S, [3]=RSVD. P54C has neither NX nor SMEP: the later I/D bit4
+    // must remain zero even for an instruction-side protection violation.
+    perm_err = {28'd0, 1'b0, usr, cur_is_w && !perm_fault_i, 1'b1};
   end
 
   // REP MOVS/STOS updates its pointers and count in S_EXEC, before the

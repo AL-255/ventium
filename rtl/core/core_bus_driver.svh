@@ -111,7 +111,13 @@
     unique case (state)
       // task #54: no bus transaction when the window is served from the I-cache.
       // (R2-M02 family 6: the fetch addresses are cur_lin too.)
-      S_FETCH: begin bd_req =!(sfetch_fast || sfetch_uop_fast || sfetch_short_fast || sfetch_resident_fast); end
+      S_FETCH: begin
+        if (sfetch_boundary) begin
+          bd_req = sfetch_demand_req;
+          bd_wstrb = (4'b0001 << sfetch_demand_size) - 4'd1;
+        end else
+          bd_req = !(sfetch_fast || sfetch_uop_fast || sfetch_short_fast || sfetch_resident_fast);
+      end
       S_PF:    begin bd_req =1'b1; end
       S_PIPE:  begin
         // A checked DS/SS effective-address read/store issued this clock. The
