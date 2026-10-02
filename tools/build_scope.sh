@@ -25,6 +25,11 @@ ipc_parallel32_memory_max="16G"
 ipc_parallel32_tasks_max="128"
 vivado_memory_max="20G"
 vivado_tasks_max="32"
+# Keep swap bounded separately from resident memory.  Vivado can retain a large
+# working set during synthesis, but allowing an unbounded swap backlog turns an
+# OOM into hours of host-wide thrashing.  A caller may request a *smaller* cap
+# for an especially constrained run; it may never raise this reviewed ceiling.
+vivado_swap_max="2G"
 # One fixed lock is part of the safety boundary.  Permitting a caller to choose
 # another path creates two independently valid locks and lets heavyweight trees
 # overlap again.  It is advisory only for unrelated projects; every Ventium
@@ -55,10 +60,102 @@ size_to_bytes() {
     return 1
 }
 
+# `size_to_bytes` is appropriate for the fixed, reviewed caps below, but do
+# not use shell arithmetic to validate an arbitrary environment value: an
+# enormous decimal magnitude could wrap before it is compared.  The Vivado
+# ceilings are deliberately expressed in GiB, so compare the decimal
+# magnitude against the corresponding exact count in each accepted unit.
+# Return 0 for an in-range positive size, 1 for malformed input, 2 for zero,
+# and 3 for a positive value above the ceiling.
+vivado_size_status() {
+    local requested="$1" ceiling_gib="$2" digits unit limit
+
+    [[ "$requested" =~ ^0+([KMGTP]?)$ ]] && return 2
+    [[ "$requested" =~ ^([1-9][0-9]*)([KMGTP]?)$ ]] || return 1
+    digits="${BASH_REMATCH[1]}"
+    unit="${BASH_REMATCH[2]}"
+
+    case "$unit" in
+        "") limit=$(( ceiling_gib * 1024 * 1024 * 1024 )) ;;
+        K)  limit=$(( ceiling_gib * 1024 * 1024 )) ;;
+        M)  limit=$(( ceiling_gib * 1024 )) ;;
+        G)  limit="$ceiling_gib" ;;
+        T|P) return 3 ;;
+    esac
+
+    # Both operands are decimal strings.  Compare their lengths first so no
+    # untrusted magnitude enters bash arithmetic; equal-length digit strings
+    # compare lexically in numeric order.
+    if [ "${#digits}" -lt "${#limit}" ] || \
+       { [ "${#digits}" -eq "${#limit}" ] && [[ "$digits" < "$limit" || "$digits" == "$limit" ]]; }; then
+        return 0
+    fi
+    return 3
+}
+
+# Return the effective Vivado resident-memory cap.  The public override is
+# deliberately one-way: a valid positive value can lower the reviewed 20 GiB
+# ceiling, while an attempted increase is explicitly clamped rather than
+# silently expanding the scope.  Malformed and zero values are errors because
+# interpreting either as an unlimited cgroup would defeat the safety boundary.
+vivado_memory_limit() {
+    local requested="${VENTIUM_VIVADO_MEMORY_MAX:-$vivado_memory_max}"
+    local size_status
+
+    if vivado_size_status "$requested" 20; then
+        printf '%s\n' "$requested"
+        return 0
+    else
+        size_status=$?
+    fi
+    if [ "$size_status" -eq 1 ]; then
+        echo "[build-scope] invalid VENTIUM_VIVADO_MEMORY_MAX: ${requested@Q}" >&2
+        return 1
+    fi
+    if [ "$size_status" -eq 2 ]; then
+        echo "[build-scope] VENTIUM_VIVADO_MEMORY_MAX must be positive: ${requested@Q}" >&2
+        return 1
+    fi
+    echo "[build-scope] clamping Vivado MemoryMax ${requested@Q} to reviewed ceiling ${vivado_memory_max}" >&2
+    printf '%s\n' "$vivado_memory_max"
+}
+
+# Swap follows the same non-expanding policy, except zero is meaningful: it
+# explicitly disables swap.  Keeping the parser shared with MemoryMax accepts
+# only unambiguous binary-unit sizes and makes an oversized request visibly
+# clamp to the 2 GiB Vivado ceiling.
+vivado_swap_limit() {
+    local requested="${VENTIUM_VIVADO_MEMORY_SWAP_MAX:-$vivado_swap_max}"
+    local size_status
+
+    if [ "$requested" = "0" ]; then
+        printf '%s\n' "$requested"
+        return 0
+    fi
+    if vivado_size_status "$requested" 2; then
+        printf '%s\n' "$requested"
+        return 0
+    else
+        size_status=$?
+    fi
+    if [ "$size_status" -eq 1 ]; then
+        echo "[build-scope] invalid VENTIUM_VIVADO_MEMORY_SWAP_MAX: ${requested@Q}" >&2
+        return 1
+    fi
+    if [ "$size_status" -eq 2 ]; then
+        # Unit-suffixed zero is normalized too, so systemd always receives its
+        # canonical explicit swap-disable spelling.
+        printf '%s\n' 0
+        return 0
+    fi
+    echo "[build-scope] clamping Vivado MemorySwapMax ${requested@Q} to reviewed ceiling ${vivado_swap_max}" >&2
+    printf '%s\n' "$vivado_swap_max"
+}
+
 scope_has_cap() {
-    local cgroup_path="$1" memory_cap="$2" tasks_cap="$3"
+    local cgroup_path="$1" memory_cap="$2" tasks_cap="$3" swap_cap="${4:-}"
     local cgroup_root="/sys/fs/cgroup${cgroup_path}"
-    local actual_memory actual_tasks limit_memory
+    local actual_memory actual_tasks actual_swap limit_memory limit_swap
 
     [ -r "$cgroup_root/memory.max" ] || return 1
     [ -r "$cgroup_root/pids.max" ] || return 1
@@ -67,13 +164,23 @@ scope_has_cap() {
     limit_memory="$(size_to_bytes "$memory_cap")" || return 1
     [[ "$actual_memory" =~ ^[0-9]+$ ]] || return 1
     [[ "$actual_tasks" =~ ^[0-9]+$ ]] || return 1
-    (( actual_memory <= limit_memory && actual_tasks <= tasks_cap ))
+    (( actual_memory <= limit_memory && actual_tasks <= tasks_cap )) || return 1
+    if [ -n "$swap_cap" ]; then
+        [ -r "$cgroup_root/memory.swap.max" ] || return 1
+        actual_swap="$(<"$cgroup_root/memory.swap.max")"
+        limit_swap="$(size_to_bytes "$swap_cap")" || return 1
+        [[ "$actual_swap" =~ ^[0-9]+$ ]] || return 1
+        (( actual_swap <= limit_swap )) || return 1
+    fi
+    return 0
 }
 
 scope_required_limits() {
-    local unit="$1"
+    local unit="$1" selected_memory selected_swap
     if [ "$unit" = "ventium-vivado" ]; then
-        printf '%s %s\n' "$vivado_memory_max" "$vivado_tasks_max"
+        selected_memory="$(vivado_memory_limit)" || return 1
+        selected_swap="$(vivado_swap_limit)" || return 1
+        printf '%s %s %s\n' "$selected_memory" "$vivado_tasks_max" "$selected_swap"
     elif [ "$unit" = "ventium-ipc-parallel" ]; then
         printf '%s %s\n' "$ipc_parallel_memory_max" "$ipc_parallel_tasks_max"
     elif [ "$unit" = "ventium-ipc-parallel32" ]; then
@@ -110,7 +217,7 @@ scope_holds_lock() {
 # make environment from bypassing the global lock and the cgroup limits.
 scope_is_active() {
     local unit="${VENTIUM_BUILD_SCOPE_UNIT:-}"
-    local _hierarchy _controllers cgroup_path required_memory required_tasks
+    local _hierarchy _controllers cgroup_path required_memory required_tasks required_swap required_limits
 
     [ "${VENTIUM_BUILD_SCOPE_ACTIVE:-0}" = "1" ] || return 1
     # Unit names are supplied to systemd-run without a suffix. A project prefix
@@ -126,7 +233,9 @@ scope_is_active() {
     # cgroup v2 reports `0::/…/unit.scope` or `unit.service`. Match a complete
     # path component, not a substring (for example `ventium-build-1` must not
     # match `ventium-build-10`).
-    read -r required_memory required_tasks < <(scope_required_limits "$unit")
+    required_limits="$(scope_required_limits "$unit")" || return 1
+    read -r required_memory required_tasks required_swap <<< "$required_limits"
+    [ -n "$required_memory" ] && [ -n "$required_tasks" ] || return 1
     while IFS=: read -r _hierarchy _controllers cgroup_path; do
         case "/${cgroup_path}/" in
             *"/${unit}.scope/"*|*"/${unit}.service/"*)
@@ -134,7 +243,7 @@ scope_is_active() {
                 # verify both the cgroup's leaf limits and ownership of the
                 # fixed process-wide lock before allowing a nested invocation
                 # to skip the lock/cap setup.
-                scope_has_cap "$cgroup_path" "$required_memory" "$required_tasks" || return 1
+                scope_has_cap "$cgroup_path" "$required_memory" "$required_tasks" "$required_swap" || return 1
                 scope_holds_lock || return 1
                 return 0
                 ;;
@@ -288,6 +397,7 @@ fi
 # expanding a build's budget.  Keep both profiles fixed so `--is-active` can
 # verify their cgroup limits without trusting inherited configuration.
 scope_profile="${VENTIUM_BUILD_SCOPE_PROFILE:-default}"
+scope_swap=""
 case "$scope_profile" in
     default|"")
         if [ "$scope_unit" = "ventium-vivado" ] || [ "$scope_unit" = "ventium-ipc-parallel" ] || \
@@ -323,12 +433,13 @@ case "$scope_profile" in
             echo "[build-scope] vivado profile requires scope unit ventium-vivado" >&2
             exit 2
         fi
-        if [ "${VENTIUM_VIVADO_MEMORY_MAX:-$vivado_memory_max}" != "$vivado_memory_max" ] || \
-           [ "${VENTIUM_VIVADO_TASKS_MAX:-$vivado_tasks_max}" != "$vivado_tasks_max" ]; then
-            echo "[build-scope] forcing reviewed Vivado profile (${vivado_memory_max}, ${vivado_tasks_max} tasks)" >&2
+        scope_mem="$(vivado_memory_limit)" || exit 2
+        scope_swap="$(vivado_swap_limit)" || exit 2
+        if [ "${VENTIUM_VIVADO_TASKS_MAX:-$vivado_tasks_max}" != "$vivado_tasks_max" ]; then
+            echo "[build-scope] forcing reviewed Vivado TasksMax=${vivado_tasks_max}" >&2
         fi
-        scope_mem="$vivado_memory_max"
         scope_tasks="$vivado_tasks_max"
+        echo "[build-scope] Vivado limits: MemoryMax=${scope_mem} (ceiling ${vivado_memory_max}), MemorySwapMax=${scope_swap} (ceiling ${vivado_swap_max}), TasksMax=${scope_tasks}" >&2
         ;;
     *)
         echo "[build-scope] unknown build profile: $scope_profile" >&2
@@ -419,9 +530,11 @@ set +e
 # The caller's argv is already shell-tokenized. A second expansion by systemd
 # would rewrite literal ${name} expressions inside bash -c scripts (including
 # variables those scripts have not assigned yet), corrupting paths/arguments.
-systemd-run --expand-environment=no "${scope_args[@]}" \
-    -p "MemoryMax=${scope_mem}" -p "TasksMax=${scope_tasks}" \
-    -p "KillMode=control-group" \
+scope_properties=(-p "MemoryMax=${scope_mem}" -p "TasksMax=${scope_tasks}" -p "KillMode=control-group")
+if [ -n "${scope_swap}" ]; then
+    scope_properties+=(-p "MemorySwapMax=${scope_swap}")
+fi
+systemd-run --expand-environment=no "${scope_args[@]}" "${scope_properties[@]}" \
     -- bash -c '
         : > "$1"
         result_file="$2"
