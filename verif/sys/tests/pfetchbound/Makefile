@@ -3,7 +3,7 @@ CC ?= gcc
 OBJCOPY ?= objcopy
 OUTDIR ?= .
 CFLAGS := -m32 -ffreestanding -nostdlib -fno-pic -fno-pie -Wall
-CASES := 1 2 3 4 5 6 7
+CASES := 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22
 all: $(foreach case,$(CASES),$(OUTDIR)/pfetchbound_$(case).bin)
 $(OUTDIR):
 	mkdir -p "$@"

@@ -17,7 +17,22 @@
     {"id": 4, "name": "essential-modrm", "entry": "0x00401fff", "faults": [[14, 4, "0x00401fff"]]},
     {"id": 5, "name": "essential-sib", "entry": "0x00401ffe", "faults": [[14, 4, "0x00401ffe"]]},
     {"id": 6, "name": "prefix16-nonpresent", "entry": "0x00401ff1", "faults": [[14, 4, "0x00401ff1"], [13, 0, "0x00401ff1"]]},
-    {"id": 7, "name": "prefix16-present", "entry": "0x00401ff1", "faults": [[13, 0, "0x00401ff1"]]}
+    {"id": 7, "name": "prefix16-present", "entry": "0x00401ff1", "faults": [[13, 0, "0x00401ff1"]]},
+    {"id": 8, "name": "overrun-immediate-endpoint", "entry": "0x00401ff0", "faults": [[14, 4, "0x00401ff0"], [13, 0, "0x00401ff0"]]},
+    {"id": 9, "name": "overrun-displacement-first", "entry": "0x00401fee", "faults": [[13, 0, "0x00401fee"]]},
+    {"id": 10, "name": "nm-before-modrm", "entry": "0x00401fff", "faults": [[7, 0, "0x00401fff"], [14, 4, "0x00401fff"]]},
+    {"id": 11, "name": "mov-cr-cpl-before-modrm", "entry": "0x00401ffe", "faults": [[13, 0, "0x00401ffe"]]},
+    {"id": 12, "name": "mov-dr-cpl-before-modrm", "entry": "0x00401ffe", "faults": [[13, 0, "0x00401ffe"]]},
+    {"id": 13, "name": "opcode15-nm-before-overlength", "entry": "0x00401ff1", "faults": [[7, 0, "0x00401ff1"], [14, 4, "0x00401ff1"], [13, 0, "0x00401ff1"]]},
+    {"id": 14, "name": "opcode16-pf-before-gp-no-nm", "entry": "0x00401ff1", "faults": [[14, 4, "0x00401ff1"], [13, 0, "0x00401ff1"]]},
+    {"id": 15, "name": "opcode16-present-gp-no-nm", "entry": "0x00401ff1", "faults": [[13, 0, "0x00401ff1"]]},
+    {"id": 16, "name": "lgdt-cpl-before-sib", "entry": "0x00401ffd", "faults": [[13, 0, "0x00401ffd"]]},
+    {"id": 17, "name": "lmsw-cpl-before-sib", "entry": "0x00401ffd", "faults": [[13, 0, "0x00401ffd"]]},
+    {"id": 18, "name": "lldt-cpl-before-sib", "entry": "0x00401ffd", "faults": [[13, 0, "0x00401ffd"]]},
+    {"id": 19, "name": "lidt-cpl-before-sib", "entry": "0x00401ffd", "faults": [[13, 0, "0x00401ffd"]]},
+    {"id": 20, "name": "smsw-unprivileged-width", "entry": "0x00401ffd", "faults": []},
+    {"id": 21, "name": "inpage-lgdt-cpl-before-overrun", "entry": "0x00401ff0", "faults": [[13, 0, "0x00401ff0"]], "encoding": {"head": "2e2e2e2e2e2e2e2e2e2e2e0f01150040", "tail": "0000"}},
+    {"id": 22, "name": "inpage-nm-before-unsupported-ud", "entry": "0x00401f00", "faults": [[7, 0, "0x00401f00"], [6, 0, "0x00401f00"]]}
   ],
-  "description": "Full-state directed fetch-length/essential-byte boundaries with exact frames, unchanged valid #PF retry, and P5/QEMU PF-before-overlength-GP ordering. No standard-suite acceptance."
+  "description": "Full-state directed fetch-length/essential-byte boundaries, #NM/CPL priority before ModR/M, EA/overrun, or unsupported UD, exact error/no-error frames, unchanged #NM and #PF retry, and P5/QEMU PF-before-overlength-GP ordering. No standard-suite acceptance."
 }

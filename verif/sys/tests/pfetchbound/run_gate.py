@@ -42,8 +42,8 @@ def command(argv, stem, seconds, deadline, expected):
 def parse_cases(value):
     if value == "all":
         return list(checks.CASES)
-    if not re.fullmatch(r"[1-7](?:,[1-7])*", value):
-        raise argparse.ArgumentTypeError("--cases must be all or comma-separated 1..7")
+    if not re.fullmatch(r"(?:[1-9]|1[0-9]|2[0-2])(?:,(?:[1-9]|1[0-9]|2[0-2]))*", value):
+        raise argparse.ArgumentTypeError("--cases must be all or comma-separated 1..22")
     cases = [int(item) for item in value.split(",")]
     if len(cases) != len(set(cases)):
         raise argparse.ArgumentTypeError("duplicate selected case")
@@ -61,13 +61,13 @@ def parse_args():
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--modes", choices=("both", "functional", "cycle-func"), default="both")
     parser.add_argument("--cases", type=parse_cases, default="all")
-    parser.add_argument("--jobs", type=int, choices=range(1, 8), default=2)
+    parser.add_argument("--jobs", type=int, choices=range(1, 23), default=2)
     parser.add_argument("--port-base", type=int, default=41710)
     args = parser.parse_args()
     if args.tb is None or args.tb_sha256 is None or args.compile_sha256 is None:
         parser.error("explicit frozen --tb/TB_BIN and reviewed TB/compile SHA256 pins are mandatory")
-    if not 1024 <= args.port_base <= 65529:
-        parser.error("GDB ports must be unprivileged and leave space for seven distinct cases")
+    if not 1024 <= args.port_base <= 65536 - max(checks.CASES):
+        parser.error("GDB ports must be unprivileged and leave space for twenty-two distinct cases")
     return args
 
 
