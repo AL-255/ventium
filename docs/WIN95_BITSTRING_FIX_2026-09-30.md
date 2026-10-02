@@ -3146,3 +3146,54 @@ Use this newer measurement in status reports instead of the earlier same-build
 do **not** establish performance gain. This is existing retire-event IPC,
 not REP-normalized instruction CPI, hardware FPS or closed timedemo/full-suite
 acceptance. Original Quake remains live and unmodified.
+
+### October 2 10:59UTC: current-source bit-memory differential rerun
+
+All eight existing prebuilt64KiB `pbitmem-cN.bin` BIOS witnesses now pass
+against the frozen current standalone TB7522, not just the older6ae testbench.
+The unchanged `run-pbitmem-gate.sh` uses pinned Pentium QEMU, generates fresh
+architectural traces and compares every record with `compare.py --mode func
+--all`. No RTL/BIOS build, new fixture, snapshot or guest-memory patch occurs.
+
+| Case | Witness | Matching records | Expected page faults |
+| --- | --- | ---: | ---: |
+| 1 | op32/addr16 signed index wrap; immediate modulo control | 76 | 0 |
+| 2 | op16/addr16 wrap; signed low16 index ignores stale high16 | 71 | 0 |
+| 3 | adjusted BT read into nonpresent page; precise CR2/CF | 7,274 | 1 |
+| 4 | read/modify/write into read-only page; saved CF preserved | 7,272 | 1 |
+| 5 | crossing read/modify/write into read-only page; neither half changes | 7,272 | 1 |
+| 6 | LOCK read/modify/write across noncontiguous physical frames | 7,259 | 0 |
+| 7 | crossing read fault; no partial memory/CF effect | 7,272 | 1 |
+| 8 | handler maps/changes target; restart re-reads its changed bit | 7,277 | 1 |
+
+Both producers reach the checked terminal registers for every case: EAX42,
+EDI0, EBX=case, ECX=expected fault count and ESI600db173. Each RTL log reports
+the400-clock quiescent terminal stop; each QEMU trace reports guest exit.
+All eight full diffs are EQUIVALENT and all recorded inputs remain unchanged.
+The actual outer command exits0. Its independently bounded540-second attempt
+runs outside any existing build scope; no original Quake owner is disturbed.
+
+Artifacts are retained under
+`/var/tmp/ventium-fpga-quake-oct02.rc0wVn/pbitmem-current7522-oct02.1`.
+Input manifest SHA is
+`84222b13496986f20a89c8fd9eb5d1321576f5263479cd7916f284e831a9b278`.
+TB SHA is
+`7522cbab0a492810cee60321fc19c593c86b92aa686c0af52086cd01a3f85bf9`;
+pinned QEMU SHA is
+`b42b70e5109638df22ff736c18b93c40881faa30dc5f52f4d119dda3be3467fd`.
+Resource scope INV3aab611ff7fc4209918eb2ac56bf679c has4GiB/64-task limits;
+during case8 its observed peak is103,747,584bytes and all memory-event counters
+are0. Final counters are not retained after scope collection: no stronger final
+resource measurement is inferred. After actual completion, its scope/cgroup and
+private safety markers are absent, with no surviving test process observed.
+
+Root and peer establish exact common source hashes with frozen full-PC5c,
+including core381bc055 and the signed-EA decode, read/modify/write, store and
+CF-commit fragments. The bit-string operations use the slow path even with
+5c's extra system-fastpath definition. This new run strengthens current common
+core semantics coverage. The25-definition direct-memory TB is **not** the
+107-definition full-PC L1/AXI profile: it does not certify its cache/coherence,
+board implementation or standard-suite completion. No production fix is added.
+Current verified gameplay IPC remains **0.41798714** on frozen5c2491, clocks
+**2,499,999,637–2,599,999,637**. Full Quake closure and current-profile CoreMark
+qualification remain outstanding.
