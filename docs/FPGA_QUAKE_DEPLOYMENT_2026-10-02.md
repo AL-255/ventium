@@ -1,6 +1,6 @@
 # RK FPGA Quake deployment — October 2, 2026
 
-## Current status (20:35 UTC)
+## Current status (21:07 UTC)
 
 Administrator access and the boot-time DDR reservation work. The board remains
 held in reset on the historical image. At the user's request, a new **40 MHz**
@@ -73,6 +73,13 @@ available memory 7.650 GiB. Pressure stopped accumulating and synthesis
 recovered to approximately one productive CPU core. No OOM/max/kill event
 occurred. The independent resource/source audit is under
 `vivado-resource-watch.rryo52rB/resource-watch.json` in the task directory.
+Chrome restarted at 21:02:45, reducing host headroom to roughly 4.4 GiB.
+Under the user's explicit instruction, root verified the browser main PID's
+UID and exact `/opt/google/chrome/chrome` executable, then sent it SIGTERM.
+At 21:03:48 browser processes were gone and headroom was 8.4 GiB. Unrelated
+applications and tiny old crash-report helpers were left alone. At 21:07:29
+the same Vivado invocation used 15.146 GiB with 8.615 GiB host headroom;
+worker CPU remained productive and no new limit/OOM/pressure event appeared.
 Preliminary runs are gone; routing has not started. Do not treat process
 progress as a synthesis/timing pass.
 Inspect area before implementation; then check routed DRC/setup/hold and
@@ -120,6 +127,20 @@ synthesis, and emits utilization, clock/exception, DRC and timing reports
 outside the frozen tree. It must run only after the synthesis process is
 closed, under the sole-Vivado/resource guard and an external deadline. It
 cannot launch, reset or regenerate a run, and report completion is not sign-off.
+Its 61 local command-stub cases passed; these are not native Vivado reports.
+Require native exit zero as well as the marker, which precedes project closure.
+
+The separate post-route inspection helper is
+`/var/tmp/ventium-fpga40-postroute-oct02.Cfe6e80r/inspect_completed_impl.tcl`,
+SHA `348f6dfd46d007cdcb4e856512a80325b8e21602f9f468e44dcd231311c69d11`.
+It requires fresh completed synthesis/implementation, exact 100/40 MHz clocks
+and positively complete, error-free routing. It produces the same nine reports
+plus route status, detailed unwaived CDC and four bounded same-domain
+setup/hold reports. All 114 local command-stub cases passed; no actual routed
+inspection has run. Its completion marker follows project closure, but native
+exit zero remains required. Optional period-minus-slack estimates are explicitly
+conditional, path-local and withheld when requirement/exception metadata is
+missing; they are neither a physical MHz measurement nor sign-off.
 
 The FPGA's existing retired counter counts primary retire events only; it
 omits simultaneous V-pipe retire events. Its read-only cycle counter is valid
