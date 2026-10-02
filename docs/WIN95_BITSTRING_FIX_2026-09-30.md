@@ -3197,3 +3197,37 @@ board implementation or standard-suite completion. No production fix is added.
 Current verified gameplay IPC remains **0.41798714** on frozen5c2491, clocks
 **2,499,999,637–2,599,999,637**. Full Quake closure and current-profile CoreMark
 qualification remain outstanding.
+
+### October 2 11:08–11:15UTC: newer IPC and real-mode detour check
+
+The same frozen5c original timedemo continues without input or rebuild. Newest
+qualified gameplay interval is **2,799,999,637–2,899,999,637 clocks**:
+**0.41633501 IPC**,41,633,501 retire events =31,571,181 primary+10,062,320
+secondary events over100M clocks (CPI2.401911864). Root and independent peer
+view evolving combat/camera scenes in raw20/21; exact320x200 RGB pixels are
+preserved. Endpoint U+V and state-bin sums agree. Original process starts,
+INV/executable/log inode,15 non-disk pins, two private ROMs, five counter-semantic
+source pins and cap/OOM0 hold. No guest disk is opened.
+
+Retained observational receipt `root-qualified-gameplay-window-2p8-2p9.json`
+under the current Quake run has SHA
+`6c74b869921e8b021f5bd473b8a5ccf445f985eb286f04cb1757f1101fe531f7`.
+Root re-reads the same954,172-byte prefix, SHA
+`52629c47dbf0563493b5cfafffecd5ac5466ef37a0b7e6ec0d453e3db5b8c9cd`;
+the peer independently binds both endpoint rows and raw captures through their
+following progress. Capture clocks are bracketed, not exact tags. This replaces
+the earlier same-build2.5–2.6B status measurement; different scenes/windows do
+not establish a fix gain or regression. It is retire-event IPC, not whole-demo
+completion, REP-normalized instruction CPI or silicon performance.
+
+A subsequent long sampled real-mode interval is investigated without changing
+the guest or acceptance criteria. Current5c first samples CS05f7/CR0=10 at
+2,924,275,264, last samples real mode at2,984,275,264, and is back at protected
+CS00a7 by2,985,275,264. The closed older4092 control has the same sampled region
+at2,844,675,341–2,905,175,341 and returns by2,905,675,341. Snapshot granularity
+bounds their observed phases to about60.0–61.5M and60.5–61.5M clocks respectively;
+both advance about43.7k retires per500k clocks there. The older completed control
+also has later short real-mode detours that return normally. This is consistent
+with expected DOS-side service, not evidence of a persistent new stall or an
+exact cycle-equivalence proof. No speculative processor/cache workaround is
+applied. Original current Quake remains live; full-suite completion is unproven.
