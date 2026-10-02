@@ -2396,3 +2396,79 @@ This adds storage/latch qualification, not scanout or physical RAM/CDC
 qualification; current cold Win95/Quake runs still must complete their own
 acceptance. Verified gameplay baseline remains **0.43038841 IPC**,4092c92a
 clocks **2,199,999,637–2,299,999,637**;5c2491 remains unmeasured.
+
+### October 2: external Win95 expectation prepared from actual admission
+
+The repaired run's future closed audit now has a separately root-reviewed
+schema2 expectation at `uVGIvV/standard-acceptance/root-win95-expectation.json`,
+SHA `bf6a766bc3cf98f9a4c731c6cb301743362063167c36b19419a540374aab0237`.
+It binds the actual owner1244399/start22645706 and native1244442/start22646050,
+unit/invocation/boot identity, configured entrypoint and parent archive,
+all18 frozen inputs, and the original before/admission receipt hashes.
+Independent review rechecked the real processes and all18 immutable input
+hashes, including the closed pristine fixture, and found14 distinct mandatory
+roles with no mismatch. The private live guest disk was not opened. Creating
+this metadata changes none of the live input pins or launcher behavior.
+This is admission/input authority only: no visual PASS is invented and the
+full checker must still wait for authoritative closure, exact final capture
+and disk/source checks, and a genuine closed-raw error-free desktop review.
+
+The older1513 control has now reached Explorer/Start/taskbar and the Windows95
+Welcome dialog. Raw frame6, bracketed by1,199,988,024–1,200,488,024 clocks,
+has SHA `9683e571ff0b058332531f144a4c347223a26ee8a995e82c0df448f4ec62063c`.
+Root and independent lossless inspection show persistent striped small text
+and patterned labels. Its corruption class resembles the older0cc2 desktop,
+but the images are not byte-identical. Neither is an error-free desktop PASS.
+The actual repaired5c2491 run is still booting and remains unchanged.
+Verified gameplay baseline remains **0.43038841 IPC**,4092c92a clocks
+**2,199,999,637–2,299,999,637**;5c2491 has no gameplay measurement yet.
+
+### October 2 03:12UTC: repaired cold graphics improve before desktop
+
+Root and independent inspection of the actual5c2491 cold run now show a clean
+centered hourglass in both first graphical captures. Raw0 is black-background
+startup, bracketed by599,838,475–600,338,475 clocks, SHA
+`744d971c1b3675d1e40c405822a044ed1b1f0e83c823246a9ad793868e235042`.
+Raw1 is teal-background startup, bracketed by699,800,804–700,300,804 clocks,
+SHA `b7d315658673ca7b71641e283bfdeff2a1541521e9735d560c79b67386dbbb47`.
+Both are stable native921,615-byte640x480 P6 frames, viewed through an
+in-memory lossless PNG container conversion with exact RGB-byte roundtrip;
+there is no brightness, gamma, resizing, or guest-frame manipulation.
+
+The older1513 control's equivalent first graphical samples have conspicuous
+patterned cursor smears: raw0 SHA
+`26b50f0a0a1152196f40a3ec9c1085c8acf90e392160248a3431390acbcd9ef7`,
+raw1 SHA `ca069cd82b5166f6bbefdb0bf8d4c83f539f03c156920308f5c2f0983d5a3909`.
+The native capture modes agree:12h-16planar, chain4=0, pel2=0, start0, at
+approximately600M/700M clocks. These are equivalent boot/capture stages,
+not exact instruction-matched images. The repaired process/model identity
+and zero OOM counters are held. This is real graphics-regression improvement,
+not proof of every VGA corner or error-free desktop: neither repaired frame
+contains Explorer, and the unmodified run must continue to that milestone.
+
+### October 2 03:10:23UTC: obsolete corrupted control closes normally, not PASS
+
+After root and independent inspection of two desktop captures100M clocks
+apart, an empty owned `stop.request` closed only the older1513 Win95 control.
+Raw7, bracketed by1,299,675,234–1,300,175,234 clocks, SHA
+`e6df2648195e92dee0d22ad3c60146482c17ab140b39c307d7a05faa0cda7a65`,
+retains the raw6 striped text/patterned glyph corruption. Explorer, Start and
+the Welcome dialog alone do not make these frames an error-free desktop.
+
+The original invocation7e0a9ea4 closes with actual native wait0, absent
+owner1194783/native1194857, successful owner exit0 (ExecMainCode1)/MainPID0 and
+normal HOST-STOP at1,373,675,234 clocks/207,365,204 retire events. The closed
+grammar has2,736 complete progress records; all source/input pins remain
+unchanged and all eight raw frames are retained. Both resource receipts have
+zero oom/oom_kill/oom_group_kill fields; final memory.max pressure events11,946
+are not OOM kills. The same held log has5,981,062 captured/persisted bytes,
+EOF and no sticky error; SHA
+`36930dcf3c38bdf5e3a498ac1e4767a9194834564eaa7feb4e877995f3f3e6e7`.
+Result SHA `efb3d882f1d76d39035b313d11e772a74a1e504329091f91e836d5b37bd5944f`;
+final resource receipt SHA
+`2056e29029190063945d7c062e2925c36600f2039484b1b67ba074f2072c95e7`.
+Its status remains **CLOSED_UNQUALIFIED**, desktop/suite acceptance false:
+native exit0 and no terminal log match do not override visible corruption.
+The repaired5c2491 Win95/Quake runs remain unchanged and live. Gameplay IPC
+baseline remains **0.43038841**,4092c92a clocks
+**2,199,999,637–2,299,999,637**;5c2491 is still gameplay-unmeasured.
