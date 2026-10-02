@@ -1,0 +1,145 @@
+--- a/src/rk_ao486_system_pl.v
++++ b/src/rk_ao486_system_pl.v
+@@ -7,7 +7,7 @@
+ // without it synth sweeps the AXI-only PL logic (see README §1.5.2). Both are inert to Verilator.
+ (* DONT_TOUCH = "yes" *)
+ module rk_ao486_system_pl #(
+-    parameter CLK_HZ   = 32'd3_000_000,   // pl_clk0 (nominal; feeds the SoC clock_rate regs)
++    parameter CLK_HZ   = 32'd3_125_000,   // actual core/SoC clock; overridden by the BD profile
+     parameter [31:0] MEM_BASE = 32'h6000_0000  // guest RAM carveout base (inside the board CMA region)
+ )(
+     // No FREQ_HZ on clk: let soc/clk inherit pl_clk0's actual frequency (README §1.5.2).
+@@ -370,7 +370,7 @@
+     // A normal PS/2 device endpoint for headless boards.  The AXI-Lite
+     // register only queues device-originated scan-code bytes; the actual
+     // 8042 receives them through its ordinary serial pins and raises IRQ1.
+-    ven_ps2_kbd_inject u_ps2_kbd_inject (
++    ven_ps2_kbd_inject #(.CLK_HZ(CLK_HZ)) u_ps2_kbd_inject (
+         .clk(clk), .rst_n(~soc_reset),
+         .inject_valid(kbd_inject_valid), .inject_data(kbd_inject_data),
+         .inject_ready(kbd_inject_ready), .inject_busy(kbd_inject_busy),
+@@ -393,13 +393,11 @@
+         .dbg_st(dbg_st)
+     );
+ 
+-    // Timer/RTC rates MUST match the cosim (sim_ven.cpp): clock_rate=4 MHz (PIT base; low so timed
+-    // delays finish fast), rtc_clock_rate=80 kHz (cycles per RTC second; small so RTC-second waits
+-    // complete quickly — otherwise a real-time RTC makes early-POST RTC waits take ~37x longer and
+-    // time-dependent → non-deterministic). These are the guest's REPORTED rates, decoupled from the
+-    // actual 3 MHz pl_clk0; the guest calibrates all delays to them, self-consistently.
++    // Physical timebases: all three clocks below run at the actual core/SoC
++    // CLK_HZ.  Accelerated simulation rates must not be used on hardware:
++    // PIT/RTC seconds and VGA pixel enables must track their real input clocks.
+     system u_soc (
+-        .reset(soc_reset), .clk_sys(clk), .clock_rate(28'd4000000), .rtc_clock_rate(28'd80000),
++        .reset(soc_reset), .clk_sys(clk), .clock_rate(CLK_HZ[27:0]), .rtc_clock_rate(CLK_HZ[27:0]),
+         // build #28: RE-ENABLE the ao486 L2 (revert Fix C). Build #27 proved the read corruption is a
+         // downstream read-response mis-sync, and the non-standard L2-DISABLE-mode pipeline is a prime
+         // suspect. The L2 ENABLED is the PROVEN ao486 path (boots Win95 on stock ao486). Barrier also off.
+@@ -420,7 +418,7 @@
+         .sound_fm_mode(1'b0), .sound_cms_en(1'b0), .speaker_out(), .sbp(),
+         .vol_master_l(), .vol_master_r(), .vol_voice_l(), .vol_voice_r(), .vol_midi_l(), .vol_midi_r(),
+         .vol_cd_l(), .vol_cd_r(), .vol_line_l(), .vol_line_r(), .vol_spk(), .vol_en(),
+-        .clk_vga(clk), .clock_rate_vga(28'd90000000),   // match cosim g_rate_vga
++        .clk_vga(clk), .clock_rate_vga(CLK_HZ[27:0]),
+         .video_ce(video_ce), .video_blank_n(video_blank_n), .video_hsync(video_hsync), .video_vsync(video_vsync),
+         .video_r(video_r), .video_g(video_g), .video_b(video_b), .video_f60(1'b0),
+         .video_pal_a(), .video_pal_d(), .video_pal_we(),
+--- a/src/ven_ps2_kbd_inject.v
++++ b/src/ven_ps2_kbd_inject.v
+@@ -8,13 +8,15 @@
+ //
+ // One byte is accepted only while ready.  Software must wait for ready after
+ // every write; this preserves byte order and naturally back-pressures while
+-// the 8042 is talking to the device.  At a 3.125 MHz system clock, the 128/128
+-// phase timings below produce an approximately 12 kHz PS/2 clock, within the
+-// normal device range and comfortably above the receiver's 16-cycle debounce
+-// requirement.  The serial framing matches the proven simulation device model
+-// in ao486-sim/ven/sim_ven.cpp.
++// the 8042 is talking to the device.  Timings scale with the actual system
++// clock and preserve the original 128/128 phases and 80-cycle idle interval
++// at 3.125 MHz.  This is approximately a 12 kHz PS/2 clock; the idle interval
++// preserves the existing transport contract rather than proving a complete
++// physical-device protocol.  Framing matches the simulation device model.
+ `default_nettype none
+-module ven_ps2_kbd_inject (
++module ven_ps2_kbd_inject #(
++    parameter CLK_HZ = 32'd3_125_000
++) (
+     input  wire       clk,
+     input  wire       rst_n,
+     input  wire       inject_valid,
+@@ -28,17 +30,21 @@
+     output wire       dev_clk_release,
+     output wire       dev_dat_release
+ );
+-    localparam [7:0] HALF_CYCLES = 8'd128;
+-    localparam [8:0] CELL_CYCLES = {1'b0, HALF_CYCLES} << 1;
+-    localparam [7:0] START_IDLE_CYCLES = 8'd80;
++    // Use wide intermediate arithmetic: 128 * 40 MHz exceeds 32 bits.
++    // Ceiling division avoids shortening either legacy physical interval.
++    localparam integer HALF_CYCLES = (64'd128 * CLK_HZ + 64'd3_124_999) / 64'd3_125_000;
++    localparam integer CELL_CYCLES = 2 * HALF_CYCLES;
++    localparam integer START_IDLE_CYCLES = (64'd80 * CLK_HZ + 64'd3_124_999) / 64'd3_125_000;
++    localparam integer CELL_CW = (CELL_CYCLES > 1) ? $clog2(CELL_CYCLES) : 1;
++    localparam integer IDLE_CW = (START_IDLE_CYCLES > 1) ? $clog2(START_IDLE_CYCLES) : 1;
+ 
+     localparam [1:0] IDLE = 2'd0, WAIT_IDLE = 2'd1, SEND = 2'd2;
+     reg [1:0] state;
+     reg [7:0] byte_q;
+     reg [10:0] frame_q;
+     reg [3:0] bit_idx;
+-    reg [8:0] half_count;
+-    reg [7:0] idle_count;
++    reg [CELL_CW-1:0] half_count;
++    reg [IDLE_CW-1:0] idle_count;
+ 
+     assign inject_ready = (state == IDLE);
+     assign inject_busy = (state != IDLE);
+@@ -46,7 +52,7 @@
+     // drives data for the whole cell and supplies a high then low clock phase,
+     // exactly like the established simulation keyboard device.
+     assign dev_dat_release = (state == SEND) ? frame_q[bit_idx] : 1'b1;
+-    assign dev_clk_release = (state == SEND) ? (half_count < {1'b0, HALF_CYCLES}) : 1'b1;
++    assign dev_clk_release = (state == SEND) ? (half_count < HALF_CYCLES) : 1'b1;
+ 
+     function [10:0] ps2_frame;
+         input [7:0] data;
+@@ -65,12 +71,12 @@
+             byte_q <= 8'd0;
+             frame_q <= 11'h7ff;
+             bit_idx <= 4'd0;
+-            half_count <= 9'd0;
+-            idle_count <= 8'd0;
++            half_count <= 0;
++            idle_count <= 0;
+         end else begin
+             case (state)
+                 IDLE: begin
+-                    idle_count <= 8'd0;
++                    idle_count <= 0;
+                     if (inject_valid) begin
+                         byte_q <= inject_data;
+                         state <= WAIT_IDLE;
+@@ -84,18 +90,18 @@
+                         if (idle_count == START_IDLE_CYCLES - 1'b1) begin
+                             frame_q <= ps2_frame(byte_q);
+                             bit_idx <= 4'd0;
+-                            half_count <= 9'd0;
++                            half_count <= 0;
+                             state <= SEND;
+                         end else begin
+                             idle_count <= idle_count + 1'b1;
+                         end
+                     end else begin
+-                        idle_count <= 8'd0;
++                        idle_count <= 0;
+                     end
+                 end
+                 SEND: begin
+                     if (half_count == CELL_CYCLES - 1'b1) begin
+-                        half_count <= 9'd0;
++                        half_count <= 0;
+                         if (bit_idx == 4'd10) begin
+                             state <= IDLE;
+                             bit_idx <= 4'd0;
