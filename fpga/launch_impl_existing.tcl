@@ -26,8 +26,8 @@ report_utilization -file [file join $impl_dir post_impl_utilization.rpt]
 report_timing_summary -file [file join $impl_dir post_impl_timing_summary.rpt]
 
 # Report the constrained clocks before slack.  Slack proves closure only at the
-# constraint; it is not a frequency measurement.  These names are emitted by
-# the /32 clock-divider constraints in the RK board build.
+# constraint; it is not a frequency measurement. Support the current MMCM
+# clock name as well as the legacy divider checkpoint's name.
 proc report_clock_frequency {clock_name role} {
     set clock [get_clocks -quiet $clock_name]
     if {[llength $clock] != 1} {
@@ -43,7 +43,15 @@ proc report_clock_frequency {clock_name role} {
 
 puts "## IMPL OK"
 report_clock_frequency clk_pl_0 "PL / HP0"
-report_clock_frequency wr_clk_i "core (/32)"
+set core_clock ""
+foreach candidate {u_clkdiv_clk_out wr_clk_i} {
+    if {[llength [get_clocks -quiet $candidate]] == 1} {
+        set core_clock $candidate
+        break
+    }
+}
+if {$core_clock eq ""} { error "cannot identify the implemented core clock" }
+report_clock_frequency $core_clock "core"
 
 set wns [get_property SLACK [get_timing_paths -max_paths 1 -nworst 1 -setup]]
 set whs [get_property SLACK [get_timing_paths -max_paths 1 -nworst 1 -hold]]

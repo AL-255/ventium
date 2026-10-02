@@ -6,13 +6,14 @@
 # validation.  Evaluate the authoritative flow script with that stale metadata
 # corrected and, by default, with the repaired system fast path enabled for
 # literal-flat and equal-common-base 32-bit protected-mode clients, including
-# the independently verified full-limit DS/SS MOV r32,[...] and MOV [...],r32
+# the independently verified full-limit and finite-page-safe DS memory
 # subset. Set
 # VEN_FPGA_FASTPATH=0 for a source-identical diagnostic A/B image with all
 # system-path defines omitted; set VEN_FPGA_RELOC_FASTPATH=0 to retain only the
 # base-zero subset; set VEN_FPGA_FASTLOAD=0 or VEN_FPGA_FASTSTORE=0 to retain
 # the system control path while sending the respective memory direction to the
-# slow FSM. VEN_SYS_FASTPATH_ALL remains an experimental
+# slow FSM; set VEN_FPGA_BOUNDED_FASTMEM=0 to remove just the new finite-limit
+# forms. VEN_SYS_FASTPATH_ALL remains an experimental
 # real-mode/heterogeneous-segmentation expansion and is not part of any image.
 # The stock Linux platform leaves pl0_ref at exactly 100 MHz even though the
 # external project asks Vivado to model 96 MHz; the previous routed image used
@@ -45,7 +46,7 @@ puts "Vivado synthesis concurrency: $synth_jobs"
 # Keep the recovered 3.125 MHz image as the default diagnostic fallback, but
 # permit a meaningful timing/bring-up candidate after an area reduction.  The
 # PS PL0 source is fixed at 100 MHz below.  The 50 MHz option is its
-# synchronous /2 derivative; the 45 MHz option is a locked UltraScale+ MMCM
+# synchronous /2 derivative; the 40/45 MHz options use a locked UltraScale+ MMCM
 # derivative of the same source.  Both keep core and HP0 frequency-related
 # rather than introducing an unrelated clock-domain crossing.  Other rates
 # must be expressed by a real divider and are rejected instead of silently
@@ -54,8 +55,8 @@ set core_div_file_add_span {lappend files "$ROOT/$x"}
 set core_c3f_span {set c3f 3000000}
 set core_label_span {CLK3 (core) label = $c3f (actual = pl_clk0/32)}
 if {[info exists ::env(VEN_FPGA_CORE_MHZ)] && $::env(VEN_FPGA_CORE_MHZ) ne ""} {
-    if {$::env(VEN_FPGA_CORE_MHZ) ni {45 50}} {
-        error "VEN_FPGA_CORE_MHZ supports 45 or 50 (omit it for the 3.125 MHz fallback)"
+    if {$::env(VEN_FPGA_CORE_MHZ) ni {40 45 50}} {
+        error "VEN_FPGA_CORE_MHZ supports 40, 45 or 50 (omit it for the 3.125 MHz fallback)"
     }
     if {$::env(VEN_FPGA_CORE_MHZ) eq "50"} {
     set core_div_file_add_span {
@@ -67,6 +68,16 @@ if {$x eq "src/clk_div32.v"} {
     set core_c3f_span {set c3f 50000000}
     set core_label_span {CLK3 (core) label = $c3f (actual = pl_clk0/2)}
     puts "High-speed candidate: synchronous core clock = pl_clk0/2 = 50 MHz"
+    } elseif {$::env(VEN_FPGA_CORE_MHZ) eq "40"} {
+    set core_div_file_add_span {
+if {$x eq "src/clk_div32.v"} {
+    lappend files "$VEN/fpga/clk_div32_40mhz.v"
+} else {
+    lappend files "$ROOT/$x"
+}}
+    set core_c3f_span {set c3f 40000000}
+    set core_label_span {CLK3 (core) label = $c3f (actual = MMCM(pl_clk0) = 40 MHz)}
+    puts "Core clock: locked MMCM 100 MHz * 10 / 25 = 40 MHz (1 GHz VCO)"
     } else {
     set core_div_file_add_span {
 if {$x eq "src/clk_div32.v"} {
@@ -81,14 +92,24 @@ if {$x eq "src/clk_div32.v"} {
 }
 
 set upstream "/home/yukidama/github/ao486_MiSTer/fpga/rk-ao486-system/hw/create_project.tcl"
+if {[info exists ::env(VEN_FPGA_FLOW_ROOT)]} {
+    set upstream [file normalize [file join $::env(VEN_FPGA_FLOW_ROOT) hw create_project.tcl]]
+}
 set upstream_hw [file dirname $upstream]
 set upstream_root [file dirname $upstream_hw]
+set source_root "/home/yukidama/github/ventium"
+if {[info exists ::env(VEN_FPGA_SOURCE_ROOT)]} {
+    set source_root [file normalize $::env(VEN_FPGA_SOURCE_ROOT)]
+}
 
 # The upstream project explicitly supports a preset-free fallback for a
 # PCAP-only build: Linux has already configured the PS and the project itself
 # supplies the PL-facing GP0/HP0/PL-clock settings.  Use it only when this
 # Vivado/IP catalog rejects the template's board-level MIO/DDR preset.
 set preset_span {set TMPL "/home/yukidama/external/RK-XCZU15EG-F-Template"}
+if {[info exists ::env(VEN_FPGA_TEMPLATE_ROOT)]} {
+    set preset_span "set TMPL {[file normalize $::env(VEN_FPGA_TEMPLATE_ROOT)]}"
+}
 if {[info exists ::env(VEN_FPGA_SKIP_PRESET)] && $::env(VEN_FPGA_SKIP_PRESET)} {
     set preset_span {set TMPL "/__ventium_no_preset__"}
     puts "PCAP-only build: skipping incompatible template PS preset"
@@ -99,7 +120,7 @@ if {[info exists ::env(VEN_FPGA_SKIP_PRESET)] && $::env(VEN_FPGA_SKIP_PRESET)} {
 # and the BRAM/uop-cache front end explicitly.  The upstream recovery script
 # still names the retired half-cache/narrow I-cache experiment, so it is
 # rewritten below before Vivado sees its definition list.
-set define_span {VEN_FP_PC_RELAX VEN_FP_SHARED VEN_FP_SHARED_DIRECT VEN_SYS_FASTPATH VEN_SYS_FASTPATH_RELOC VEN_SYS_FASTLOAD_FLAT VEN_SYS_FASTSTORE_FLAT VEN_FAST_RETRACE}
+set define_span {VEN_FP_PC_RELAX VEN_FP_SHARED VEN_FP_SHARED_DIRECT VEN_SYS_FASTPATH VEN_SYS_FASTPATH_RELOC VEN_SYS_FASTLOAD_FLAT VEN_SYS_FASTLOAD_BOUNDED VEN_SYS_FASTSTORE_FLAT VEN_FAST_MEM_ADD VEN_FAST_MOFFS_STORE VEN_FAST_RETRACE}
 if {[info exists ::env(VEN_FPGA_FASTPATH)] && !$::env(VEN_FPGA_FASTPATH)} {
     set define_span {VEN_FP_PC_RELAX VEN_FP_SHARED VEN_FP_SHARED_DIRECT VEN_FAST_RETRACE}
     puts "Diagnostic build: all VEN_SYS_FASTPATH defines disabled by VEN_FPGA_FASTPATH=0"
@@ -107,45 +128,37 @@ if {[info exists ::env(VEN_FPGA_FASTPATH)] && !$::env(VEN_FPGA_FASTPATH)} {
 # CWSDPMI's 32-bit client maps CS/DS/SS/ES at one nonzero common base.  The
 # default relocated profile remains much narrower than FASTPATH_ALL: only
 # non-real, D=1, common-base register/relative forms plus the independently
-# gated full-limit DS MOV r32,[base+disp] forms enter S_PIPE.  Every other memory form
-# takes the checked slow FSM.  A base-zero-only control remains available
+# gated full-limit and finite-limit/page-safe DS packet forms enter S_PIPE.
+# Every other memory form takes the checked slow FSM. A base-zero-only control remains available
 # without accidentally re-enabling the system path after VEN_FPGA_FASTPATH=0
 # has removed it.
 if {[info exists ::env(VEN_FPGA_RELOC_FASTPATH)] && !$::env(VEN_FPGA_RELOC_FASTPATH)} {
     if {[lsearch -exact $define_span VEN_SYS_FASTPATH] >= 0} {
-        set define_span {VEN_FP_PC_RELAX VEN_FP_SHARED VEN_FP_SHARED_DIRECT VEN_SYS_FASTPATH VEN_SYS_FASTLOAD_FLAT VEN_SYS_FASTSTORE_FLAT VEN_FAST_RETRACE}
+        set define_span {VEN_FP_PC_RELAX VEN_FP_SHARED VEN_FP_SHARED_DIRECT VEN_SYS_FASTPATH VEN_SYS_FASTLOAD_FLAT VEN_SYS_FASTLOAD_BOUNDED VEN_SYS_FASTSTORE_FLAT VEN_FAST_MEM_ADD VEN_FAST_MOFFS_STORE VEN_FAST_RETRACE}
         puts "Diagnostic build: VEN_SYS_FASTPATH_RELOC disabled by VEN_FPGA_RELOC_FASTPATH=0"
     } else {
         puts "Diagnostic build: VEN_SYS_FASTPATH_RELOC already absent because VEN_FPGA_FASTPATH=0"
     }
 }
 # The default fast-memory subset is the compact 32-bit full-limit DS/SS MOV
-# r32,[...] / MOV [...],r32 family accepted by decode.sv. Store admission is
-# intentionally no wider than load admission and excludes a dword crossing a
-# 4 KiB linear boundary, which remains on the mature S_STORE fragment path.
-# It retains the normal cur_lin, D-TLB/page-walk, permission and fragment-engine
-# machinery; `psysfpload` and `pfaststore` differentially cover a common
-# non-zero base/non-identity 4 KiB mapping and a #PF-restart/split-store case.
-# VEN_FPGA_FASTLOAD/FASTSTORE=0 are source-identical rollback A/B controls, not
-# path-expansion knobs.
+# r32,[...] / MOV [...],r32 family plus audited ADD r32,r/m32 and moffs forms.
+# The bounded addition accepts a DS dword only wholly below its final limit
+# page and within its starting offset page. Final-page/page-cross/faulting
+# cases stay on the mature FSM/fragment path. `psysfpload`, `pfaststore`, and
+# `psysfpbounded` differentially cover nonzero-base/nonidentity mapping,
+# fault/restart, and finite-limit boundaries. The rollback controls below are
+# source-identical A/B controls, not path-expansion knobs.
 if {[info exists ::env(VEN_FPGA_FASTLOAD)] && $::env(VEN_FPGA_FASTLOAD)} {
     if {[lsearch -exact $define_span VEN_SYS_FASTPATH] < 0} {
         error "VEN_FPGA_FASTLOAD requires VEN_SYS_FASTPATH"
     }
 }
 if {[info exists ::env(VEN_FPGA_FASTLOAD)] && !$::env(VEN_FPGA_FASTLOAD)} {
-    set fpga_fastload_at [lsearch -exact $define_span VEN_SYS_FASTLOAD_FLAT]
-    if {$fpga_fastload_at >= 0} {
-        set define_span [lreplace $define_span $fpga_fastload_at $fpga_fastload_at]
-        puts "Diagnostic build: VEN_SYS_FASTLOAD_FLAT disabled by VEN_FPGA_FASTLOAD=0"
-    } else {
-        puts "Diagnostic build: VEN_SYS_FASTLOAD_FLAT already absent because VEN_FPGA_FASTPATH=0"
+    foreach d {VEN_SYS_FASTLOAD_FLAT VEN_SYS_FASTLOAD_BOUNDED VEN_FAST_MEM_ADD VEN_FAST_MOFFS_STORE VEN_SYS_FASTSTORE_FLAT} {
+        set at [lsearch -exact $define_span $d]
+        if {$at >= 0} { set define_span [lreplace $define_span $at $at] }
     }
-    set fpga_faststore_at [lsearch -exact $define_span VEN_SYS_FASTSTORE_FLAT]
-    if {$fpga_faststore_at >= 0} {
-        set define_span [lreplace $define_span $fpga_faststore_at $fpga_faststore_at]
-        puts "Diagnostic build: VEN_SYS_FASTSTORE_FLAT disabled because it requires VEN_SYS_FASTLOAD_FLAT"
-    }
+    puts "Diagnostic build: fast load/store and finite-limit packet forms disabled by VEN_FPGA_FASTLOAD=0"
 }
 if {[info exists ::env(VEN_FPGA_FASTSTORE)] && $::env(VEN_FPGA_FASTSTORE)} {
     if {[lsearch -exact $define_span VEN_SYS_FASTPATH] < 0} {
@@ -156,20 +169,89 @@ if {[info exists ::env(VEN_FPGA_FASTSTORE)] && $::env(VEN_FPGA_FASTSTORE)} {
     }
 }
 if {[info exists ::env(VEN_FPGA_FASTSTORE)] && !$::env(VEN_FPGA_FASTSTORE)} {
-    set fpga_faststore_at [lsearch -exact $define_span VEN_SYS_FASTSTORE_FLAT]
-    if {$fpga_faststore_at >= 0} {
-        set define_span [lreplace $define_span $fpga_faststore_at $fpga_faststore_at]
-        puts "Diagnostic build: VEN_SYS_FASTSTORE_FLAT disabled by VEN_FPGA_FASTSTORE=0"
-    } else {
-        puts "Diagnostic build: VEN_SYS_FASTSTORE_FLAT already absent because VEN_FPGA_FASTPATH=0 or VEN_FPGA_FASTLOAD=0"
+    foreach d {VEN_SYS_FASTSTORE_FLAT VEN_FAST_MOFFS_STORE} {
+        set at [lsearch -exact $define_span $d]
+        if {$at >= 0} { set define_span [lreplace $define_span $at $at] }
     }
+    puts "Diagnostic build: fast-store packet forms disabled by VEN_FPGA_FASTSTORE=0"
+}
+# The finite-limit extension is independently removable for a true source-level
+# board A/B. Its decoder additions and bounded segment admission must move as a
+# unit: otherwise the forms decode yet only manufacture avoidable slow-FSM
+# traffic, the rejected experiment recorded in CPI_PROGRESS_Sep05.md.
+if {[info exists ::env(VEN_FPGA_BOUNDED_FASTMEM)] && $::env(VEN_FPGA_BOUNDED_FASTMEM)} {
+    foreach d {VEN_SYS_FASTLOAD_BOUNDED VEN_FAST_MEM_ADD VEN_FAST_MOFFS_STORE} {
+        if {[lsearch -exact $define_span $d] < 0} {
+            error "VEN_FPGA_BOUNDED_FASTMEM requires active system fast load/store support"
+        }
+    }
+}
+if {[info exists ::env(VEN_FPGA_BOUNDED_FASTMEM)] && !$::env(VEN_FPGA_BOUNDED_FASTMEM)} {
+    foreach d {VEN_SYS_FASTLOAD_BOUNDED VEN_FAST_MEM_ADD VEN_FAST_MOFFS_STORE} {
+        set at [lsearch -exact $define_span $d]
+        if {$at >= 0} { set define_span [lreplace $define_span $at $at] }
+    }
+    puts "Diagnostic build: finite-limit packet forms disabled by VEN_FPGA_BOUNDED_FASTMEM=0"
+}
+
+# The measured performance candidate is intentionally opt-in.  It combines
+# only general mechanisms: a two-way D-TLB, the audited seven-byte SIB+disp32
+# ADD form, and lower-half L2 critical-word-first delivery.  Do not silently
+# select it for a recovery or diagnostic build: its full-PC/Win95/PPA evidence
+# must be attributable to this exact source-level profile.
+if {[info exists ::env(VEN_FPGA_PERF_CANDIDATE)] && $::env(VEN_FPGA_PERF_CANDIDATE)} {
+    foreach d {VEN_SYS_FASTPATH VEN_SYS_FASTLOAD_FLAT VEN_SYS_FASTLOAD_BOUNDED VEN_FAST_MEM_ADD} {
+        if {[lsearch -exact $define_span $d] < 0} {
+            error "VEN_FPGA_PERF_CANDIDATE requires the complete audited system fast-memory profile (missing $d)"
+        }
+    }
+    foreach d {VEN_DTLB_ASSOC_2WAY VEN_FAST_MEM_ADD7 VEN_L2_STREAM_CWF} {
+        if {[lsearch -exact $define_span $d] < 0} { lappend define_span $d }
+    }
+    puts "Performance candidate: DTLB2 + ADD7 + L2 critical-word-first enabled"
 }
 
 set fh [open $upstream r]
 set body [read $fh]
 close $fh
+if {![regsub {set VEN[ \t]+"/home/yukidama/github/ventium"} $body \
+    "set VEN {$source_root}" body]} {
+    error "refusing FPGA build: could not pin upstream Ventium source root"
+}
 
-set area_synth "set_property STEPS.SYNTH_DESIGN.ARGS.DIRECTIVE AreaOptimized_high \[get_runs synth_1\]\nlaunch_runs synth_1 -jobs $synth_jobs; wait_on_run synth_1"
+# Keep the historical settings reproducible. The balanced profile is an
+# explicit candidate, not a claim of measured timing or area improvement.
+set build_profile legacy
+if {[info exists ::env(VEN_FPGA_BUILD_PROFILE)]} {
+    set build_profile $::env(VEN_FPGA_BUILD_PROFILE)
+}
+if {$build_profile ni {legacy balanced}} {
+    error "VEN_FPGA_BUILD_PROFILE must be legacy or balanced"
+}
+set synth_directive AreaOptimized_high
+if {$build_profile eq "balanced"} { set synth_directive Default }
+puts "FPGA build profile: $build_profile (synthesis $synth_directive)"
+set area_synth "set_property STEPS.SYNTH_DESIGN.ARGS.DIRECTIVE $synth_directive \[get_runs synth_1\]\nlaunch_runs synth_1 -jobs $synth_jobs; wait_on_run synth_1"
+
+# Apply the implementation profile after upstream's historical overrides, but
+# before either run is launched. Keep spread placement for the known congestion
+# problem; defer expensive route exploration until a routed baseline exists.
+if {$build_profile eq "balanced"} {
+    set impl_profile {
+set_property STEPS.PLACE_DESIGN.ARGS.DIRECTIVE AltSpreadLogic_high [get_runs impl_1]
+set_property STEPS.ROUTE_DESIGN.ARGS.DIRECTIVE Default [get_runs impl_1]
+set_property STEPS.POST_ROUTE_PHYS_OPT_DESIGN.IS_ENABLED false [get_runs impl_1]
+}
+    set area_synth "$impl_profile\n$area_synth"
+}
+
+# Bound implementation run fan-out too; this is separate from maxThreads.
+set impl_launch {launch_runs impl_1 -to_step write_bitstream -jobs 4; wait_on_run impl_1}
+if {[string first $impl_launch $body] < 0} {
+    error "refusing FPGA build: could not locate the upstream impl_1 launch"
+}
+set body [string map [list $impl_launch \
+    {launch_runs impl_1 -to_step write_bitstream -jobs 1; wait_on_run impl_1}] $body]
 
 set body [string map [list \
     {set TMPL "/home/yukidama/external/RK-XCZU15EG-F-Template"} \
@@ -193,12 +275,12 @@ set_property -dict [list \
     {set c3f 6000000} \
     $core_c3f_span \
     {VEN_CACHE_HALF VEN_IC_NARROWB} \
-    {VEN_IC_BRAM VEN_UOPCACHE VEN_UOP_SFETCH VEN_SFETCH_RESIDENT VEN_FP_PIPE2} \
+    {VEN_IC_BRAM VEN_UOPCACHE VEN_UOP_SFETCH VEN_SFETCH_RESIDENT VEN_UOP_TAIL_LOCAL VEN_FP_PIPE2} \
     {VEN_FP_PC_RELAX VEN_FAST_RETRACE} \
     $define_span \
     {CLK3 (core) label = $c3f (actual = pl_clk0/16)} \
     $core_label_span \
-    {launch_runs synth_1 -jobs 1; wait_on_run synth_1} \
+    {launch_runs synth_1 -jobs 4; wait_on_run synth_1} \
     $area_synth \
     {add_files -fileset constrs_1 -norecurse "$HW/bitstream.xdc" "$HW/led.xdc" "$HW/fpatan_mcp.xdc"
 # fpatan multicycle references synthesized cells: apply in implementation (post-synth netlist).
@@ -223,7 +305,7 @@ add_files -fileset constrs_1 -norecurse "$HW/bitstream.xdc" "$HW/led.xdc"} \
     set core_clk_role {core (/32)}
     if {[info exists ::env(VEN_FPGA_CORE_MHZ)] && $::env(VEN_FPGA_CORE_MHZ) eq "50"} {
         set core_clk_role {core (/2)}
-    } elseif {[info exists ::env(VEN_FPGA_CORE_MHZ)] && $::env(VEN_FPGA_CORE_MHZ) eq "45"} {
+    } elseif {[info exists ::env(VEN_FPGA_CORE_MHZ)] && $::env(VEN_FPGA_CORE_MHZ) in {40 45}} {
         set core_clk_role {core (MMCM)}
     }
     # ``u_clkdiv_clk_out`` is the generated-clock name emitted by the
@@ -256,10 +338,44 @@ add_files -fileset constrs_1 -norecurse "$HW/bitstream.xdc" "$HW/led.xdc"} \
     puts "## WHS (hold worst slack) = $whs"} \
 ] $body]
 
+# The recovered upstream flow currently launches synth_1 with ``-jobs 4``.
+# Treat that exact launch form as part of this wrapper's contract: if upstream
+# changes it again, fail before Vivado can silently exceed the one-worker
+# resource budget.  ``general.maxThreads`` alone does not constrain the run
+# launcher, and the old ``-jobs 1`` string-map key had therefore become dead.
+if {[string first {launch_runs synth_1 -jobs 4; wait_on_run synth_1} $body] >= 0} {
+    error "refusing FPGA build: upstream synth_1 -jobs 4 launch escaped the one-worker wrapper"
+}
+if {[string first "launch_runs synth_1 -jobs $synth_jobs; wait_on_run synth_1" $body] < 0} {
+    error "refusing FPGA build: could not install the one-worker synth_1 launch"
+}
+
 # A full P5 cache geometry is a release invariant, not merely a preferred
 # implementation option.  Inspect the actual `set DEFS {...}` payload (rather
 # than comments in the recovered upstream script) so an upstream-script change
 # cannot silently revive the retired experiment.
+# A frozen simulation profile may replace the legacy recovery defaults in its
+# entirety. Do not append them: doing so would silently re-enable the uop cache
+# and incompatible D-TLB experiments. One define per line, no Tcl evaluation.
+set explicit_profile 0
+if {[info exists ::env(VEN_FPGA_DEFINE_FILE)]} {
+    set df [open $::env(VEN_FPGA_DEFINE_FILE) r]
+    set explicit_defs [split [string trim [read $df]] "\n"]
+    close $df
+    foreach d $explicit_defs {
+        if {![regexp {^[A-Z][A-Z0-9_]*$} $d]} {
+            error "invalid FPGA define in frozen profile: $d"
+        }
+    }
+    if {[llength [lsort -unique $explicit_defs]] != [llength $explicit_defs]} {
+        error "duplicate FPGA defines in frozen profile"
+    }
+    if {![regsub {set DEFS \{[^\}]*\}} $body "set DEFS {[join $explicit_defs { }]}" body]} {
+        error "could not replace the legacy FPGA define list"
+    }
+    set explicit_profile 1
+    puts "Frozen FPGA profile: [llength $explicit_defs] exact defines"
+}
 if {![regexp {set DEFS \{([^\}]*)\}} $body -> fpga_defs_text]} {
     error "refusing FPGA build: could not locate the upstream set DEFS payload"
 }
@@ -268,9 +384,13 @@ if {[lsearch -exact $fpga_defs VEN_CACHE_HALF] >= 0} {
     error "refusing FPGA build: VEN_CACHE_HALF is retired; use the full P5 L1 configuration"
 }
 if {[lsearch -exact $fpga_defs VEN_IC_NARROWB] >= 0} {
-    error "refusing FPGA build: VEN_IC_NARROWB is retired; use VEN_IC_BRAM + VEN_UOPCACHE"
+    error "refusing FPGA build: VEN_IC_NARROWB is retired; use the full P5 I-cache"
 }
-foreach required_def {VEN_IC_BRAM VEN_UOPCACHE VEN_UOP_SFETCH VEN_SFETCH_RESIDENT VEN_FP_PIPE2} {
+set required_defs {SYNTHESIS VTM_NO_DPI VEN_ALTSYNCRAM_XPM VEN_IC_BRAM VEN_SFETCH_RESIDENT VEN_FP_PIPE2 VEN_FP_SHARED VEN_FP_SHARED_DIRECT}
+if {!$explicit_profile} {
+    lappend required_defs VEN_UOPCACHE VEN_UOP_SFETCH VEN_UOP_TAIL_LOCAL
+}
+foreach required_def $required_defs {
     if {[lsearch -exact $fpga_defs $required_def] < 0} {
         error "refusing FPGA build: full-P5 profile is missing $required_def"
     }
@@ -281,8 +401,19 @@ foreach required_def {VEN_IC_BRAM VEN_UOPCACHE VEN_UOP_SFETCH VEN_SFETCH_RESIDEN
 # narrowly patched PL top (fpga/patches/0001-passive-vga-frame-capture.patch).
 set body [string map [list \
     {add_files -norecurse $files} \
-    {lappend files "$VEN/fpga/ven_video_capture.sv" "$VEN/fpga/ven_axi_read_profiler.sv"
+    {lappend files "$VEN/fpga/ven_video_capture.sv" "$VEN/fpga/ven_axi_read_profiler.sv" "$VEN/fpga/ven_axi_write_profiler.sv"
 add_files -norecurse $files} \
+] $body]
+
+# Upstream historically prints a failure and returns successfully. Make both
+# run failures fatal; callers must still verify routed reports and bit hashes.
+set body [string map [list \
+    {puts "## SYNTH FAILED (PROGRESS=[get_property PROGRESS [get_runs synth_1]])"; return} \
+    {error "FPGA synthesis failed (PROGRESS=[get_property PROGRESS [get_runs synth_1]])"} \
+    {puts "## IMPL FAILED (PROGRESS=[get_property PROGRESS [get_runs impl_1]])"; return} \
+    {error "FPGA implementation failed (PROGRESS=[get_property PROGRESS [get_runs impl_1]])"} \
+    {catch { set_property CONFIG.CLK_HZ  $c3f [get_bd_cells $soc] }} \
+    {set_property CONFIG.CLK_HZ $c3f [get_bd_cells $soc]} \
 ] $body]
 
 uplevel #0 $body

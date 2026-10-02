@@ -74,7 +74,9 @@ vivado_family_pids() {
     local proc
     local pid
     local ppid
-    local -A selected
+    # Initialize explicitly: with nounset, some Bash versions treat an empty
+    # declared associative array as unset when querying its element count.
+    local -A selected=()
 
     mapfile -t pids < <(vivado_seed_pids)
     for pid in "${pids[@]}"; do
@@ -117,7 +119,10 @@ scope_is_live() {
 stop_scoped_vivado() {
     local deadline
 
-    scope_is_live || return
+    # A missing/inactive prior scope is the normal clean-launch case.  Return
+    # success explicitly: propagating scope_is_live's false status under
+    # `set -e` aborted every launch before the process-family cleanup.
+    scope_is_live || return 0
     echo "[vivado-exclusive] stopping prior guarded scope: $vivado_scope" >&2
     systemctl --user kill --kill-whom=all --signal=TERM "$vivado_scope" >/dev/null 2>&1 || true
     systemctl --user stop --no-block "$vivado_scope" >/dev/null 2>&1 || true
@@ -209,7 +214,6 @@ set -u
 # the same resource pool used by Verilator/QEMU builds.  The Tcl flow further
 # fixes Vivado's internal worker count at one; this cgroup is the hard failure
 # boundary if a vendor tool nevertheless fans out unexpectedly.
-export VENTIUM_BUILD_MEMORY_MAX="${VENTIUM_VIVADO_MEMORY_MAX:-20G}"
-export VENTIUM_BUILD_TASKS_MAX="${VENTIUM_VIVADO_TASKS_MAX:-32}"
 export VENTIUM_BUILD_SCOPE_UNIT="ventium-vivado"
+export VENTIUM_BUILD_SCOPE_PROFILE="vivado"
 exec "$SCRIPT_DIR/../tools/build_scope.sh" -- "${VIVADO_BIN:-vivado}" "$@"
