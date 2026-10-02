@@ -2712,3 +2712,50 @@ unchanged-controller microproof and UI interaction are still pending. No PS2
 RTL change or new long UI run has occurred. Verified gameplay IPC remains
 **0.43038841**,older4092c92a clocks **2,199,999,637–2,299,999,637**;
 current5c2491 remains gameplay-unmeasured, with its original cold Quake still live.
+
+### October 2 06:53–06:59UTC: ordinary-input micros and host-only relink
+
+The isolated sender now owns accepted F0 prefixes independently of controller
+translation state. Timeout, reset/self-test, mode changes or a missing prefix
+between bytes refuse completion; a coherently stored wrong make is not accepted
+as a break. Bytes retire only on actual producer arbitration plus post-edge
+FIFO write-index/memory evidence. No speculative replay or guest-state edit.
+
+Actual bounded pure-host and unchanged-production PS2/FIFO micros both return0
+with closed logs and before/after83original+11isolated source pins held. Host
+INV `2813465afda64c80af87ca7d0a2ad0ae`, peak138,256,384bytes; narrow PS2 INV
+`07a7e265f85e4e16a5543ff7581a429f`, peak541,044,736bytes. Both compiler/native
+waits0 and wrappers0,2GiB/swap0/64tasks/two CPUs26,28; all OOM counters0.
+PS2 native log SHA
+`c90d3becdfdd3946cd916a5d1f940234ba615f1479396406d8a4c239e4c8c5f0`.
+Ordinary translated streams pass at32/64/1875/2917half-periods, raw mode and
+normal prefix/suffix control pass. Tests use physical pins and ordinary I/O;
+no force/deposit/FIFO seeding. Byte-exact sources persist in `verif/ps2_ui/`.
+
+The same actual micro reproduces **unfixed controller bugs**: simultaneous
+AUTOACK overwrites received make/raw/break suffix; a full FIFO drops a received
+scan or ACK; ordinary host LED command followed by natural timeout loses F0,
+turning the later suffix into a make. The sender refuses all false receipts.
+`UI-PS2-MICRO-OK controller_bug_witnesses_expected=1 rtl_unchanged=1` is a test
+specification pass, **not controller correctness or Win95 interaction acceptance**.
+
+Host-only relink compiles one copied main and reuses the frozen5c archive/eight
+non-main objects read-only, with no full RTL rebuild or Vivado. New executable
+SHA `509c934b86b8ccfca4ec4427109e3ed8182ad639bc2c18252a15c8e37d0c2f6f`,
+main source SHA
+`effd4cf91160ca4f9a431581fb6b6a511b12df0a9b2f53aa998e8b349d096c5f`.
+Actual second-phase INV `db476cab37b842188a778d3949957ca5`, compile/link0,
+six invalid CLI probes each refuse before boot with native status2; wrapper0,
+peak237,027,328bytes and OOM0. Receipt SHA
+`62b28bf493b463f2bddf368e41e5475869f3afb3f821ff002d67bc26d821cf0c`.
+The first relink phase is retained as a **runner expectation failure**: native
+correctly returns2 for UI+kb but prints the pre-scan exclusion message rather
+than the runner's expected UI-ERROR marker. Only that expectation is corrected;
+no source/RTL/guest change, no fabricated pass or OOM retry. New native identity
+cannot inherit5c's desktop acceptance. Fresh cold UI diagnostic remains pending.
+
+Original current5c Quake continues unchanged; at07:00UTC it reaches936,217,804
+clocks/305,822,521retires in startup, not gameplay/timedemo completion. No new
+gameplay IPC: verified baseline **0.43038841** belongs to older4092c92a, clocks
+**2,199,999,637–2,299,999,637**. Board deployment remains blocked by administrative
+access and exclusive boot-time guest RAM reservation; no PL MMIO/programming.
