@@ -2959,3 +2959,164 @@ clocks; no painted desktop/action proof yet, no keys sent. Original strict5c
 closed desktop/user visual PASS remains separate. Board remains blocked by
 working administration/exclusive boot-time guest RAM reservation. No PL MMIO,
 deployment, hardware timedemo/movie or full-suite completion is claimed.
+
+### October 2 09:10–09:28UTC: waiter and reset-alarm adjudication
+
+Same original5c Quake and509c UI invocation/PID starts remain live; around09:27UTC
+they reach2.0B/1.2B clocks respectively, with cap/OOM0 and no restart/input.
+UI raw5 is losslessly viewed: teal background and normal pointer, **not a
+painted desktop**. No keys sent. Current verified gameplay IPC remains
+**0.40394810**,5c2491 clocks **1,499,999,637–1,599,999,637**.
+
+`tb: FLT vec=94/136` is a shared `start_fault` entry-request diagnostic, not a
+fatal assertion or CPU exception number. External INTR calls supply programmable
+PIC vectors; exact markers also occur in accepted current5c Win95 and completed
+4092 Quake controls. Printed CR2 can be previous state, and the message precedes
+delivery overrides. These markers alone do not prove either failure or successful
+interrupt completion. Actual terminal capture/guest result remain authority.
+
+Frozen Quake runner already has automatic normal-stop handling: its own advisory
+timedemo observation writes the ordinary stop request, then actual native wait,
+group absence, full pipe EOF/sticky-error and closed-disk checks determine PASS.
+Visible969-frame console is only a fallback normal-stop cue, never acceptance.
+Do not signal the owner or rewrite graders. No root live-disk access occurs.
+
+A stale AXI status handoff initially calls containment tests untracked and a
+direct-master reset/shutdown ACK a CPU leak. Fresh root/peer inspection corrects
+both claims: master SHA3c1574fec0d7c24e66fad9467526ca77fd5da61f2fb99bee114831929ff36313
+is clean and exactly in5c compile inputs; named containment/reset artifacts are
+tracked. `ventium_l1_axi.sv` gates both CPU request and core_ack immediately with
+seam reset. Local shutdown ACK intentionally avoids deadlock; reset-induced
+local FSM-idle is explicitly **not** proof of completed external fabric drain.
+No demonstrated CPU-ack leak or current-run invalidation follows from that probe,
+and no speculative reset patch is applied. Same-ID stale response during a new
+owned phase violates the fabric/reset ownership contract; the physical-board
+workaround remains unproved, not a reason to weaken compliant-path acceptance.
+
+Full-PC CoreMark port/reference/execution authorization has been asked separately;
+no new guest/fixture/collector/model is prepared or launched pending direction.
+Existing native runs continue. Standard-suite completion remains unproven.
+
+### October 2 09:30–09:54UTC: visible ordinary Win95 interaction
+
+The same R2 diagnostic native1429881/start24632966 and INV
+`c6bad69eb4324b67ac3112dafce1b54a` reach a painted desktop. This is the
+host-only UI relink509c934 of the frozen5c RTL archive, not the canonical
+standard-suite executable and not either PS2 proposal. No RTL rebuild,
+snapshot, guest-memory patch, driver patch or forced internal state is used.
+
+The first client attempt fails before FIFO open/write because the selected
+Conda Python3.13.14 lacks `os.pidfd_open`; it consumes no command ID. The
+unchanged client succeeds with explicit `/usr/bin/python3`3.14.4, retaining
+native start/executable hash, pidfd and FIFO device/inode/ownership checks.
+Wire-complete and guest-read markers are transport evidence, not GUI PASS.
+
+Ordinary keyboard actions now have independent root/peer raw-frame proof:
+
+- Ctrl+Esc after settled Welcome opens a fully painted Start menu. Raw10,
+  cycle1,312,600,065, SHA
+  `d9425f28f3354a5fe0dc6cd7881341b2fbb6cf36ed931f177afc78dff0e3a64c`.
+  The earlier chord before settled Welcome has no proven visible action;
+  the intermediate gray menu rectangle is not counted as completed painting.
+- Esc closes Start. Raw11, cycle1,340,354,561, SHA
+  `d44b874f1c57fa0b34c25ebb8ac09e249e8bb4afd658fa26139b49df58b75f39`.
+- Alt+Tab activates Welcome: blue title and focused Close button. Raw12,
+  cycle1,357,246,465, SHA
+  `da82fe3cc27ca4081858aa0fa06d9e4f0ed0a5ed0263c3c76f7afd150630ef43`.
+- Enter closes Welcome normally, leaving a clean desktop and taskbar. Raw13,
+  cycle1,371,049,985, SHA
+  `5f3ce4dc2a3017f58f8c1704ac3943e0e021c95641e434eea63745b0c086bff4`.
+
+All inspection PNGs preserve exact640x480 RGB bytes; no color manipulation.
+Root also views a second fully painted Start opening (raw15, cycle
+1,440,833,537, SHA
+`ff5d1f752b25d988561d57a0fa3ecee8c50f79207998613a1b1cd24b8127d94d`).
+The following R make/break reaches the guest, but raw16 still shows a busy
+cursor, not a Run dialog. No typing or application-launch success is claimed
+yet. Diagnostic remains live; current-profile Quake timedemo is also live.
+Current verified gameplay IPC stays **0.40394810**,5c2491 clocks
+**1,499,999,637–1,599,999,637**. No full-suite/hardware completion claim.
+
+### October 2 09:55–10:03UTC: Run and normal application launch
+
+Run eventually paints normally: raw17, cycle1,477,001,217, SHA
+`871494f3396a9fba51ce2bf9d17f65b6eeb7befaeffa484404c33b130d685993`,
+with old `control` text selected. Six named make/break keys17–22 replace it;
+raw18, cycle1,488,564,225, SHA
+`0bd1e0a36566da1dffd8140e0e97be61eee7f2ee7e9d2f91722c505ce601072b`
+visibly contains exactly `winver`. Independent peer views both unmodified raw
+frames and verifies RGB-identical previews. No text is patched into guest RAM.
+
+Enter24 launches the application. Initial raw20 is only a busy desktop, not
+success. Raw21 at1,525,129,217 then shows a readable Windows95 About dialog,
+Microsoft copyright and focused OK button; SHA
+`12391e8ce6fbeb861e7cc68df0c5f632eb6214952151edc5e22d6993c7e7b8f5`.
+Enter27 dismisses it normally. Raw22 shows closure while cursor still busy;
+raw23 at1,548,689,409 shows a clean settled desktop with ordinary pointer and
+My Computer focus, SHA
+`7319df650d105149249cffa811f8a608bb734df000d07418317dfe62a906814b`.
+Enter30 is sent to My Computer only after that settled capture; browser success
+is pending. Same invocation/native/model identity and OOM0 remain intact.
+
+Current verified gameplay IPC remains **0.40394810** on5c2491, clocks
+**1,499,999,637–1,599,999,637**; Quake is still live. These ordinary GUI actions
+are diagnostic functionality evidence, not closed-capture/full-suite acceptance.
+
+### October 2 10:04–10:28UTC: browser checks and clean diagnostic closure
+
+The first Enter on a dotted but unselected desktop icon has no proven visible
+effect. Ordinary Home32 then visibly selects My Computer in blue (raw25); its
+extended make/break reaches the guest. Enter34 opens a clean My Computer window:
+raw29 at1,635,291,137, SHA
+`cdce7921f7005679ed32e990199891c3644a31c9f2ba50e36090aaa15ed5e1b7`,
+showing A:, B:, Win95 C:, Control Panel and Printers. No processor/input fix is
+inferred from the earlier focus/selection mismatch.
+
+Home38/Right39/Right40 visibly select C: (raw30). Enter42 opens its directory;
+raw33 at1,695,277,057, SHA
+`a92775c34fb4806f2043f5a806dfba59be5b85a46ee5585ed1a7368a58a7f878`,
+shows eight objects plus twelve hidden: Program Files, Quake, Win95, Windows,
+Autoexec, Command, Msbatch and Netlog. Root and independent peer confirm clean
+pixels with lossless previews. Guest file browsing is read-only; no host reads
+of the live private disk occur.
+
+Alt+F4 closes each window separately, with completed repaint checked before the
+next close. Raw37 at1,731,624,961 shows the fully repainted My Computer window,
+SHA `4bc389f0c61c54fbb0477b26ca208496670147f59236db0a7b9b8f0239a0ebfb`.
+Raw39 at1,752,563,713 is the clean final desktop with ordinary pointer and no
+application taskbar button, SHA
+`3bf633fb2644f91aef46fd77eb090a2a77c122883d940c0ee9a29f9af4f2b4ae`.
+Intermediate incomplete paint/erase captures are retained, not counted as final
+GUI success or silently corrected.
+
+Root requests ordinary stop only after final desktop, against the original
+native start/executable and exact owned empty stop target. Actual native and
+owner wait0, group/cgroup absence, one cold footer and full pipe EOF hold.
+Final counters: **1,761,594,661 cycles /252,352,283 retires**. Closed log is
+8,838,482 captured=persisted bytes, SHA
+`c77f13b0ee89c35a372e78d19955282a9d716bc9ee44a2f7e2af26bac0c4c0a6`,
+original device66305/inode11028457; sticky/terminal errors null, hard termination
+false. All52 sequential commands are retained:24 key commands complete transport,
+28 captures publish. UI-END is pending0/owned0/failed0. The two unproved visible
+key actions remain labelled, not retroactively credited.
+
+Twenty staged pins plus83/11 manifest inputs remain unchanged. Original INV,
+owner identity, caps and OOM0 hold; peak233,701,376bytes. Forty raw captures are
+bound to the closed inventory. Owner hashes its private disk only after actual
+wait/EOF/original-owner-only census, SHA
+`bc969b237873d10b3afe9844b88aeab6257ca1764a930461cafcc8d51d5a83e1`.
+Closed result SHA
+`71f29d751d0fc292be8729400b673632353e3e56253120db4afb7966a1346eae`;
+root observation `root-ui-closed-observation-1027.json` under the R2 run has SHA
+`43bdc6febd9dfd8659d0fc7923c28bc4d3c41d6647d940a930526af62035202e`.
+Only exited-unit metadata is cleared after MainPID0, absent cgroup and no stop
+hooks; no retained run/input/artifact is removed.
+
+The wrapper stays **CLOSED_DIAGNOSTIC_UNQUALIFIED** with its suite/desktop/UI
+acceptance flags false; it is not rewritten into canonical5c suite admission.
+Root/peer visual action evidence adds an ordinary cold-boot robustness check to
+the separately accepted standard Win95 desktop. It does not qualify either
+unapplied PS2 proposal, universal device timing or new RTL. Current verified
+gameplay IPC remains **0.40394810**,5c2491 clocks
+**1,499,999,637–1,599,999,637**. Original Quake continues; current-profile
+CoreMark coverage and FPGA administrative/RAM-reservation blockers remain open.
