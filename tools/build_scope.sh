@@ -24,7 +24,12 @@ ipc_parallel_tasks_max="64"
 ipc_parallel32_memory_max="16G"
 ipc_parallel32_tasks_max="128"
 vivado_memory_max="20G"
-vivado_tasks_max="32"
+# `general.maxThreads=1` / one `launch_runs -jobs 1` bound synth work, but
+# Vivado also creates bounded control, board-repository, and Taskflow helper
+# threads.  A 32-TID cgroup cap denied that fixed one-worker family mid-startup.
+# Keep a fixed, non-environment-overridable cushion rather than permitting an
+# unreviewed task limit; 48 remains below the normal generated-build cap.
+vivado_tasks_max="48"
 # Keep swap bounded separately from resident memory.  Vivado can retain a large
 # working set during synthesis, but allowing an unbounded swap backlog turns an
 # OOM into hours of host-wide thrashing.  A caller may request a *smaller* cap
