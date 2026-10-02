@@ -2329,3 +2329,70 @@ with admission identities and executable hashes independently rechecked and
 zero OOM counters. No fresh desktop or timedemo completion is claimed.
 Verified gameplay baseline remains **0.43038841 IPC**,4092c92a clocks
 **2,199,999,637–2,299,999,637**;5c2491 has no gameplay measurement yet.
+
+### October 2: actual planar RAM/latch red–green qualification
+
+The separate `verif/axivgalanes/tb_axivgalanes_planar.sv` now connects the
+production adapter to actual ao486 L2 and actual `vga.v`, using genuine
+simulated plane storage. Setup is entirely ordinary VGA register I/O and
+AXI writes; no force, hierarchical RAM initialization, replacement endpoint,
+guest change or framebuffer bypass is used. All16 preceding write masks
+are crossed with four byte lanes, two aligned halfwords and a dword.
+Distinct per-plane/address source values and an independent prime detect
+wrong latch ownership. Each case performs a mode0 masked write and a mode1
+latch copy before any intervening memory read, then reads allfour planes.
+Both AXI response metadata and backend completion are checked.
+
+Each profile completes112 cases,896 stored-plane checks and208 source-byte
+checks. The unchanged test gives:
+
+| Adapter | Ordinary profile | Deployed-feature profile | Wrapper exit |
+| --- | --- | --- | ---: |
+| Repaired b8457dfd | native0, zero plane/data failures | native0, zero plane/data failures |0|
+| Original a4c3101a | native1,632 plane failures, zero source-RDATA failures | native1,632 plane failures, zero source-RDATA failures |1|
+
+For example, preceding WSTRB0 leaves the old plane0 latch at prime8Dh:
+the masked store produces8Bh instead of1Bh, and latch copy produces8Dh
+instead of10h. Thus plausible returned read data does not establish correct
+VGA read side effects. This is actual storage evidence, not proof that this
+defect caused every observed Windows pixel artifact.
+
+Green artifacts: `verif/l1/obj_dir_axivgalanes_planar_green2_oct02.AynAqwbK`.
+Ordinary/deployed run-log SHAs:
+`eea0d9b440bc72198498a2987ace9aa3440cab5d6179a97f74a8c242d500e4f6` /
+`2ac2cb3bee9491862e7bb051f92f422c7dafb448683c325b670402f1dc278fc1`.
+Red: `verif/l1/obj_dir_axivgalanes_planar_red_oct02.xODOjtfq`.
+Run-log SHAs:
+`863105c7cfa76694b460652155093e08bbac1110ae02b096b44e19de80390c76` /
+`2b96d0b0bf6eea1836ba29194b066b218248fd1e9113efdca24161cb5200e47b`.
+TB SHA `5ff2d725e54cae326a4759371e4c21258e2d6a3944e74725ed06d29723d7ed5c`;
+runner SHA `8f5543bb3ca210c1a00907890f5c9abbd0cef189041ef1f82a2c5a4b6cc40987`.
+Only the adapter source changes between positive and negative controls;
+the old unsupported-narrow assertion is disabled only in red so the legal
+transactions reach the storage checks. Green enables bridge assertions.
+Before/after production/TB/primitive/old-test source pins match in both runs.
+Independent review rechecked all24 manifest entries, the four actual compile
+commands, native/wrapper statuses and eight recovery archives. The632 red
+failures also reconcile independently:79 wrong read owners ×four planes ×two
+write modes. The other33 cases accidentally retain the requested last lane;
+the existing strobe tests cover extra-read side effects that this storage
+oracle alone would not detect.
+
+Both runs retain32 build jobs,540-second total bounds,16GiB memory and128
+tasks with zero OOM events; peak memory968,712,192/971,886,592 bytes.
+The first green attempt `Ls68xEfg` remains wrapper exit2: ordinary native0,
+but the compiled second profile was not executed because generated PCHs
+raised cumulative scratch to337,142,636 bytes, above the300MiB guard.
+No limit was relaxed and that attempt is not relabelled PASS. The amended
+runner instead losslessly packs exactly two closed generated PCHs after each
+profile compilation, retains integrity/expanded-SHA-verified recovery copies
+and identity/hash receipts, then checks the unchanged scratch cap. Fresh
+complete green output is60,610,807 bytes. No source, model, object/library,
+guest image, snapshot or run evidence was removed.
+
+No additional production RTL, CPU rebuild or FPGA rebuild is required by
+these tests. Original strobe and held-command tests remain unchanged.
+This adds storage/latch qualification, not scanout or physical RAM/CDC
+qualification; current cold Win95/Quake runs still must complete their own
+acceptance. Verified gameplay baseline remains **0.43038841 IPC**,4092c92a
+clocks **2,199,999,637–2,299,999,637**;5c2491 remains unmeasured.

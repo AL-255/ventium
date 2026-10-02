@@ -39,3 +39,47 @@ Existing WRAP coverage can be extended in `ao486-sim/ven/tb_axi2avalon.sv`
 and `verif/l1/run-axi2avalon-wrap-gate.sh`; the original four-byte responder
 does not establish byte-exact VGA read side effects. This independent test
 does not modify that potentially user-owned work.
+
+## Actual VGA planar storage regression
+
+`tb_axivgalanes_planar.sv` additionally instantiates the production `vga.v`
+and its real simulated plane RAMs. All plane/address initialization uses
+ordinary AXI writes and VGA register I/O; there are no forced signals or
+hierarchical RAM pokes. Distinct source bytes and an independent latch prime
+make a missing or extra read observable in the subsequent stored bytes.
+
+Each profile tests all16 preceding WSTRB values against four byte lanes, two
+aligned halfwords and a dword:112 cases. For each case it checks source RDATA,
+then both a mode0 masked write and a mode1 latch copy in allfour planes.
+There are896 actual stored-plane checks and208 addressed source-byte checks,
+including initialization readback. Requests and I/O changes wait for backend
+completion, not merely an early AXI B response. Planar wide-store admission
+and unexpected DDR traffic are rejected.
+
+From the repository root, after checking available space:
+
+```sh
+task_planar_out="$(mktemp -d "$PWD/verif/l1/obj_dir_axivgalanes_planar_XXXXXXXX")"
+bash verif/axivgalanes/run-planar-gate.sh --out "$task_planar_out"
+```
+
+The bounded runner enables bridge assertions by default and runs ordinary and
+deployed-feature profiles, using32 build jobs in the existing16GiB/128-task
+scope and a540-second total cap. Its300MiB leaf guard remains enforced.
+After compilation closes, exactly the two owned generated PCH files per
+profile are losslessly archived to adjacent `.recovery.gz` files. Their raw
+and archive identities/hashes/sizes are retained in `pch-recovery.tsv`;
+gzip integrity and expanded SHA are checked before removing only the exact
+unused raw PCHs. Models, objects, source, logs and evidence are retained.
+Rebuilding uses a fresh output leaf; any manual PCH recovery must target the
+explicit missing raw path and verify the receipt's expanded hash.
+
+The unchanged test fails on the pre-repair adapter even when source RDATA
+looks correct:632 plane mismatches per profile, versus zero on the repair.
+The old adapter's narrow-shape assertion must be disabled for this negative
+control; otherwise it stops before the storage checks. An expected negative
+control remains a failure, not a correctness PASS.
+
+Scope is VGA storage/read-latch behavior through the production adapter and
+L2 byte sequencer. It does not establish scanout, physical FPGA RAM collision
+or clock-domain fidelity, Windows desktop correctness, or Quake acceptance.
