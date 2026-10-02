@@ -12,6 +12,8 @@
 //             only has incrementing bursts, so this bridge emits the high and
 //             low line fragments as two Avalon commands while keeping one AXI R
 //             response stream.
+//           Byte-exact device reads instead use one naturally aligned INCR
+//           beat, ARSIZE=0/1/2 (1/2/4 B), with its own accepted read lane mask.
 //   WRITE = one or two INCR beats, AWLEN=0/1, AWSIZE=2, WSTRB verbatim
 // and issues them serially (one outstanding), with registered VALIDs. So this bridge
 // handles one Avalon command at a time. VEN_AXI2AVL_BPIPE decouples completed
@@ -51,7 +53,7 @@ module ven_axi2avalon (
     input  logic [3:0]  s_axi_arid,
     input  logic [39:0] s_axi_araddr,
     input  logic [7:0]  s_axi_arlen,      // expect 7 (8 beats) or 0
-    input  logic [2:0]  s_axi_arsize,     // expect 2 (4 B)
+    input  logic [2:0]  s_axi_arsize,     // 0/1/2 for narrow single beats; 2 for lines
     input  logic [1:0]  s_axi_arburst,
     input  logic        s_axi_arvalid,
     output logic        s_axi_arready,
@@ -94,6 +96,7 @@ module ven_axi2avalon (
     logic [3:0]   wrap_low_beats;// low fragment after the first WRAP8 fragment
     logic         wrap_pending;  // issue the low line fragment after this command
     logic [1:0]   wr_left;       // remaining W beats in current AXI write
+    logic [3:0]   rd_be_q;       // accepted AR's byte lanes, independent of idle W
 `ifdef VEN_AXI2AVL_BPIPE
     // The CPU-facing P54 master has exactly two occupied write slots. Holding
     // at most two completed B responses lets its next ordered AW start while
@@ -176,7 +179,12 @@ module ven_axi2avalon (
     // Avalon accepts one dword at a time; hold each AXI W until that write
     // command is accepted, then advance the dword address for burst beat 2.
     assign avm_writedata  = s_axi_wdata;
-    assign avm_byteenable = s_axi_wstrb;
+    // l2_cache uses CPU_BE for actual VGA byte reads as well as writes.
+    // Reading extra bytes changes the VGA planar latches; reading none leaves
+    // stale latches. Never let a previous/idle WSTRB shape a read command, nor
+    // use live AR fields after their address handshake has completed.
+    assign avm_byteenable = ((state == S_RD_CMD) || (state == S_RD_DATA))
+                         ? rd_be_q : s_axi_wstrb;
     assign s_axi_wready   = ((state == S_WR_CMD)
 `ifdef VEN_AXI2AVL_WRITE_THROUGH
                              || idle_write_offer
@@ -214,6 +222,7 @@ module ven_axi2avalon (
             wrap_low_beats <= '0;
             wrap_pending <= 1'b0;
             wr_left <= '0;
+            rd_be_q <= '0;
         end else begin
             unique case (state)
                 // ---------------------------------------------------------------
@@ -222,6 +231,12 @@ module ven_axi2avalon (
                         id_q   <= s_axi_arid;
                         addr_q <= s_axi_araddr[31:2];        // byte→dword
                         len_q  <= s_axi_arlen[3:0] + 4'd1;
+                        unique case (s_axi_arsize)
+                            3'd0: rd_be_q <= 4'b0001 << s_axi_araddr[1:0];
+                            3'd1: rd_be_q <= 4'b0011 << s_axi_araddr[1:0];
+                            3'd2: rd_be_q <= 4'b1111;
+                            default: rd_be_q <= 4'b0000; // unsupported master shape
+                        endcase
                         // AXI WRAP8 at dword N is {N..7,0..N-1}.  Translate it
                         // into two incrementing Avalon commands, but do not split
                         // the AXI response: RVALID may pause between commands.
@@ -308,8 +323,9 @@ module ven_axi2avalon (
     end
 
 `ifdef VEN_AXI2AVL_ASSERT
-    // Sanity: the Ventium master only ever issues 8-beat (or 1) 4 B reads,
-    // and 1- or 2-beat 4 B writes. Flag protocol drift loudly.
+    // Sanity: the Ventium master issues aligned 1/2/4 B single-beat device
+    // reads or eight 4 B line beats, and 1- or 2-beat 4 B writes.
+    // Flag unsupported shapes loudly rather than silently widening MMIO.
     always_ff @(posedge clk) if (rst_n) begin
 `ifdef VEN_AXI2AVL_WRITE_THROUGH
         assert (!(idle_write_accept && (!s_axi_awready || !s_axi_wready ||
@@ -323,8 +339,13 @@ module ven_axi2avalon (
           else $error("ven_axi2avalon: B response underflow");
 `endif
         if (s_axi_arvalid && s_axi_arready)
-            assert (s_axi_arsize == 3'd2 && (s_axi_arlen == 8'd7 || s_axi_arlen == 8'd0) &&
-                    ((s_axi_arburst == 2'b01) || (s_axi_arburst == 2'b10 && s_axi_arlen == 8'd7)))
+            assert (((s_axi_arlen == 8'd0) && (s_axi_arburst == 2'b01) &&
+                     ((s_axi_arsize == 3'd0) ||
+                      ((s_axi_arsize == 3'd1) && !s_axi_araddr[0]) ||
+                      ((s_axi_arsize == 3'd2) && (s_axi_araddr[1:0] == 2'd0)))) ||
+                    ((s_axi_arlen == 8'd7) && (s_axi_arsize == 3'd2) &&
+                     (s_axi_araddr[1:0] == 2'd0) &&
+                     ((s_axi_arburst == 2'b01) || (s_axi_arburst == 2'b10))))
               else $error("ven_axi2avalon: unexpected AR len=%0d size=%0d burst=%0d",
                           s_axi_arlen, s_axi_arsize, s_axi_arburst);
         if (s_axi_awvalid && s_axi_awready)
