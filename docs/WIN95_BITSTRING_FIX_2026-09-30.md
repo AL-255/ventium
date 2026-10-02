@@ -2885,3 +2885,77 @@ RAM reservation. No PL MMIO, bitstream deployment, hardware timedemo or movie.
 Verified gameplay IPC remains **0.43038841**,older4092c92a clocks
 **2,199,999,637–2,299,999,637**; current5c2491 and isolated PS2 candidate remain
 gameplay-unmeasured. The standard suite is still incomplete.
+
+### October 2 08:53–09:04UTC: current gameplay, profile gap and PS2 resync
+
+Current frozen5c2491 now has root-qualified **gameplay IPC0.40394810**, clocks
+**1,499,999,637–1,599,999,637**. Actual endpoint totals440,927,807→481,322,617
+give40,394,810 retire events/100,000,000clocks; U31,033,899+V9,360,911 reconcile
+exactly. Raw6 already shows gameplay before this conservative window; raw7/8
+show different world/camera/pickup/enemy scenes. Root and peer independently
+view lossless RGB-equal images, with no postprocessing. Captures are bracketed
+by PERF checkpoints and following progress, not exact-cycle stamped.
+
+Root holds/re-reads identical523,274-byte original log prefix, SHA
+`4bad422d3a364d1593f0aa01230796b656b60bd95def3fafe8cd786f16bd5547`,
+device66305/inode6042054 matching owner's actualFD3. Complete row hashes,
+native/proc executable5c2491, original owner/native starts and unit INV hold;
+fifteen non-disk before pins plus two private ROMs rehash unchanged. Existing
+profiler/RTL/DPI semantic source pins match compilation inventory. No guest
+disk is opened. Root receipt `root-qualified-gameplay-window-1p5-1p6.json`
+under `quake-cold-axivgalanes-oct02.1` has SHA
+`9f9552c7dc3844bf7d37b84d9155b6076e277c6c5c89627a00ee22c9ce7b69e6`.
+This replaces older4092's labelled baseline for current-build reports, but the
+different gameplay windows do not measure controlled fix gain/regression.
+Retire-event IPC is not REP-normalized instruction CPI, hardware FPS, closed
+error-free timedemo or full-suite acceptance. Current Quake remains running.
+
+**Substantive CoreMark coverage gap:** the retained7522 TB's two successful
+standard seed/CRC results use25 defines and direct memory/syscall proxy, not
+current5c's107-define full-PC configuration. Shared source hashes do not bridge
+different active paths: real L1/AXI/posted-write service, V memory pairing,
+system fastload/store, iterative IDIV and associative DTLB differ. Some other
+extra defines are inactive/no-ops; define count alone is not the evidence.
+The shim explicitly uses boot/cycle/system/cosim/L1AXI mode with proxy off;
+`tools/run_coremark_matrix.py` admits only direct memory. The benchmark doc
+already records why flipping `--l1-axi` on its Linux-user image is invalid:
+stack0x407ff510 lies outside the no-L2 DRAM route. Do not count those passes as
+current-profile cache qualification or fabricate missing admission ancestry.
+
+Independent read-only asset survey finds official algorithms and an unfinished
+barebones port, but no ready SoC CoreMark guest in the scoped inventory. Timer,
+init and UART output contain explicit#error. Installed GCC/binutils/NASM make
+a genuine cold PM guest feasible, with ordinary RAM code/data/stack, RDTSC
+clock measurement and actual VGA text output; no RTL/model rebuild is required.
+Both unchanged standard seeds,2K data/all five CRCs and validated error-free
+completion must remain authority. This requires new guest port/bootstrap/BSS/
+runtime and bounded reference/full-PC qualification. No new guest, collector,
+external expectation or denied fixture preparation/run is performed here.
+Existing25-define seed results remain component evidence, not erased/relabelled.
+
+Four new bounded PS2 interrupted-RX phases complete compiler/test/owner/wrapper0.
+New proposal changes only four reset/AA assignments to existing WAIT/inhibit,
+unchanged8191 timer/no new storage. Headless and AUTOACK-off RX each pass72
+keyboard/mouse × reset/AA ×45/70MHz ×nine wire-phase cases. Old ownership
+candidate each reproduces56 pre-stop defects, with16 clean completed-stop/idle
+controls required separately. Device wire behavior observes only actual host
+outputs, not command/reset/internal RX state. These passes are **conditional**
+on explicit100µs host-inhibit abandon/retry policy; Microchip documents idle/
+cell timing, not this universal retry rule. Pause/resume-only devices, TX,
+continuous-inhibition and actual iobus integration remain unqualified.
+
+Actual INVs: old/proposed headless16831150952f4b058a2df0c05cfd2303/
+5fdf979bb2aa4a08903ec6b8b12c79bd; old/proposed RX014e9c7896ec4b4896184cc9dfa85d47/
+e0afb1e0573d4fb8bf4da8cffbb535ed. Peaks338,604,032/335,990,784/
+190,570,496/190,144,512bytes, all cap/OOM0; actual build/test<3seconds each,
+2GiB/swap0/64tasks/CPUs28,30/deadline<590s. All76 input+10 staged pins hold
+before/after. Closed child groups, native waits and logs are retained; root
+verifies owner0/MainPID0/absent cgroup/no hooks before exited-unit metadata
+clearance and actual wrapper0. Exact TB/probe/laboratory diff are preserved
+under `verif/ps2_ui/proposals/`, not applied to canonical/live RTL.
+
+Fresh UI diagnostic still shows busy cursor on teal background around900M
+clocks; no painted desktop/action proof yet, no keys sent. Original strict5c
+closed desktop/user visual PASS remains separate. Board remains blocked by
+working administration/exclusive boot-time guest RAM reservation. No PL MMIO,
+deployment, hardware timedemo/movie or full-suite completion is claimed.

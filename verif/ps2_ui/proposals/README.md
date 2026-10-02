@@ -89,6 +89,57 @@ Production integration needs a new full-PC identity and fresh visible Win95
 interaction plus full standard-suite/differential verification. Do not apply
 the proposal while the frozen current runs are live.
 
-Verified gameplay baseline: **0.43038841 IPC**, older4092c92a, cycles
-**2,199,999,637–2,299,999,637**. It predates current5c2491; the current candidate
-and this isolated controller have no verified gameplay measurement.
+## Interrupted-frame reset extension: conditional proof only
+
+`ps2-resync-corner.patch` is a laboratory diff **against the above staged
+ownership candidate**, not a standalone patch against canonical RTL. Its four
+assignments enter existing WAIT/inhibit on keyboard and mouse reset/self-test,
+with the unchanged8191 timer and no additional storage. The byte-exact tested
+TB/probe are `test_ps2_resync.cpp` and `ps2_resync_probe.sv` here. New staged
+controller SHA:
+`29bf4403a43f65684433d2f8221966a460005595d5d21acd4b3a3d83309595e2`.
+
+Actual root-owned executions, all compiler/test/owner/wrapper0:
+
+| Profile | Output leaf | Invocation ID | Peak bytes |
+| --- | --- | --- | ---: |
+| Previous headless | `qualified-resync-old-autoack.rkds2bq8` | `16831150952f4b058a2df0c05cfd2303` | 338604032 |
+| Proposed headless | `qualified-resync-proposed-autoack.fyals4nk` | `5fdf979bb2aa4a08903ec6b8b12c79bd` | 335990784 |
+| Previous RX, AUTOACK off | `qualified-resync-old-physical.4f0w0rpq` | `014e9c7896ec4b4896184cc9dfa85d47` | 190570496 |
+| Proposed RX, AUTOACK off | `qualified-resync-proposed-physical.8u168yae` | `e0afb1e0573d4fb8bf4da8cffbb535ed` | 190144512 |
+
+Each proposed profile passes72 cases: keyboard/mouse × reset/AA ×45/70MHz
+×nine start/data/parity/stop/idle positions. Previous profiles each reproduce56
+pre-stop defects; their16 completed-stop/idle controls are required clean and
+are not counted as defects. The device observes only real wired-AND outputs,
+does not reset/requeue on AA or rst_n, and continues unless actual host inhibition
+causes its explicitly modeled abort. Reads use real FIFO strobes and port60.
+No forces, FIFO injection, snapshots, guest/controller substitution or core run.
+
+**Limit:** unfinished-frame abandon/retry after100µs host inhibition is an
+explicit device-model assumption, not a proved universal PS/2 contract.
+[Microchip ECE1117 §10.1.1](https://ww1.microchip.com/downloads/en/DeviceDoc/ECE1117-Data-Sheet-DS00001860E.pdf)
+supports50µs idle before starting and60–100µs cells, but not that retry rule.
+The unchanged hold is ~182µs at45MHz/~117µs at70MHz. A pause/resume-only device,
+other clock rates and host-to-device command recovery remain unqualified.
+AUTOACK-off here qualifies RX only, not the physical TX tests above.
+
+Each build/test phase takes under3seconds, capped below590seconds with2GiB,
+swap0,64tasks and CPUs28/30. All76 original inputs and10 staged artifacts hold
+before/after; cap/OOM counters0. Native waits/log closure and absent child groups
+are recorded. Retained units show owner0/MainPID0/absent cgroup/no stop hooks
+before metadata clearance; actual waiting wrappers then return0. These are
+path/source observations, not atomic compiler-loaded ancestry. Both extensions
+remain unapplied to production; no current guest or standard-suite credit.
+
+Reproduction: Verilator5.046, top `ps2_resync_probe`, this TB/probe, unchanged
+`simple_fifo.v` and selected previous/proposed controller, `--assert`,
+`VEN_KBC_FAST`, `RESYNC_OLD_CONTROL=1|0`; add `VEN_KBD_AUTOACK` only for
+headless. Use fresh bounded outputs and structural lint errors, never an old
+full-PC model. Original scratch manifests/logs remain available under
+`/var/tmp/ventium-fpga-quake-oct02.rc0wVn/ps2-resync-corner` and listed outputs.
+
+Current standard model5c2491 has root-qualified gameplay **0.40394810 IPC**,
+clocks **1,499,999,637–1,599,999,637** (2026-10-02); it does **not** contain
+either controller proposal. The isolated proposals have no gameplay measurement.
+This sampled live window does not establish timedemo/full-suite acceptance.
