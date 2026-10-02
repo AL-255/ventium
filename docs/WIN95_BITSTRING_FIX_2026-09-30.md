@@ -2130,3 +2130,142 @@ At01:09 UTC the fresh CoreMark seeds and both cold PC guests are still running.
 No desktop, completed timedemo or new gameplay result is accepted. The last
 verified gameplay IPC remains0.43038841 on4092c92a over2.2–2.3B clocks; there
 is no completed matched-work before/after FPS comparison for1513.
+
+### October2 VGA read-lane repair and closed controls
+
+The precise-PC-only Win95 control `0cc2c728...` reached the Explorer desktop,
+Start/taskbar/icons and Welcome dialog. Frames6/7 at1.2B/1.3B clocks are
+byte-identical640x480 captures, SHA256
+`57195224e18b5438189e1bedbc3e632e5dc86b58dd56d4a6d0290a331b9c84dc`.
+Persistent text/glyph stripes and cursor/pixel residues prevent declaring an
+error-free visual desktop. A host stop requested normal closure after those
+captures; it was not stopped for an alleged #UD boot loop. The recurring
+FCB2:2FF7 and aliasing ROM addresses resolve toFFB17's intentional ARPL callback,
+as already documented; retirement continues through them.
+
+That control actually closed with waited native exit0 and absent process group
+at1,327,101,620 clocks/208,497,512 retirements. Its held log records equal
+captured/persisted5,955,705 bytes, EOF, no sticky capture error, all2646 complete
+progress records, unchanged input/helper pins and zero OOM counters. Log SHA256
+`843e7102de46f148e50e81bb5157b5c2c9ae4136fef6c00f2b49f95811596c61`;
+`ao486-sim/obj_dir_ven_pfetchpc_oct01.AivFre/win95-cold-vga-pfetchpc-oct01.1/result.json`
+retains `CLOSED_UNQUALIFIED`, not desktop or suite PASS. Buffered stdout is
+interleaved with intact diagnostic/progress records; neither filtering the log
+nor treating the documented callback as corruption is justified.
+
+Independent bus testing confirmed an actual adapter contract defect:
+`ven_axi2avalon` used idle/previous write-channel WSTRB for Avalon reads.
+Actual ao486 L2 captures CPU_BE and uses it to issue VGA byte-read strobes;
+real VGA reads also load planar write latches. Consequently a legitimate
+narrow read could load no latch, the neighboring latch, or extra latches.
+This defect is confirmed independently of the Windows screenshot; screenshot
+causation is still unproven. FBCAP reads plane RAM directly rather than actual
+vsync-qualified VGA scanout and retains the previously documented address,
+panning and palette-control limitations. No capture/color manipulation is
+introduced to hide the artifacts.
+
+Repair `769eedc` captures the1/2/4-byte lane mask on the accepted AXI AR and
+holds it through Avalon command waits, returned data and WRAP continuation.
+Writes retain their original WSTRB behavior. This is four ownership bits plus
+a mux, not wider MMIO reads, an added queue, extra stalls, guest recognition or
+a workaround conditioned on VGA addresses. Legal-shape assertions now admit
+the production master's naturally aligned narrow single reads while retaining
+eight-word line-burst and write checks. RREADY backpressure remains outside
+this bridge's documented master contract and is not claimed newly supported.
+
+Focused tests instantiate the production adapter and actual ao486 L2's VGA
+byte sequencer. Each profile runs192 legal pieces, covering all16 previous
+write masks, four byte lanes, aligned halfword/dword reads and decomposed
+unaligned logical spans. The endpoint observes read strobes/address ownership,
+not actual plane-latch contents, masked RDATA or scanout.
+
+| Frozen qualification | Baseline / deployed-feature profile | Native exits |
+| --- | --- | --- |
+| Original adapter, original test | Each:180 wrong masks,180 wrong strobe sets,142 missing/wrong final read owners | 1 / 1 |
+| Repaired adapter, same original test, bridge assertions | Each:zero mask/strobe/owner failures | 0 / 0 |
+| Separate strengthened test: idle AR/W metadata changes, four-cycle Avalon waits | Each:192 pieces,768 held-command checks,zero failures | 0 / 0 |
+
+Red/green/strengthened receipts respectively remain in
+`verif/l1/obj_dir_axivgalanes_oct02.rcH1g1`, `DvjeP5`, `mqFWNb`.
+Original TB SHA256 `afd0cdac52e0c6ab5e1da180524ace84f9c7e92e9d4407a3da84e7c9689aefae`
+is unchanged. Repaired adapter SHA256
+`b8457dfd0937a46039f2722a2055d4c60f87b92cca4d4b8298056e98e3b47d7e`;
+strengthened TB `d9779c36b4ca80440098882ad799237b054adafce952f444ee84cfb27614d159`.
+The runner keeps structural errors including PINMISSING hard for adapter/new
+TB ports; only the existing platform primitive-instance waiver is scoped to
+L2 lines950–1060. Both feature profiles use bounded32-job builds with actual
+16GiB/128-task limits, peak below708MB and zero OOM events. Build-scope swap
+is not disabled; the long guest services separately use swap0.
+
+The existing WRAP/write gate also passes baseline, BPIPE and BPIPE+direct-write
+profiles:32 offset/jitter bursts, all16 write strobes, delayed W, held/ordered B,
+quadword writes and shared reset/reuse. All wrapper exits0; retained outer log
+`verif/l1/obj_dir_axiwrap_oct02.KCP2lG/outer.log`, SHA256
+`a3a20a5b722f104e458d155ce81825468aa88f920f6dc490b7c15bda9684b830`.
+
+Mandatory `make verify` passes108/108 functional QEMU comparisons and all
+required metric bands on unchanged standalone core7522. Its20 structural
+cycle comparator divergences remain non-gating and disclosed. Successful log
+`qvsJff/verify-axivgalanes-oct02.rfiBPY/gate.log` SHA256
+`d517ae4d155b7c3c86f77d7b3adb51b856fc2cd088a2281c7ac1ccfbb3b931d4`.
+Two earlier retained attempts failed on full external scratch/golden-cache
+storage, not an observed DUT mismatch; the final attempt uses fresh root-FS
+scratch and regenerates all128 goldens without changing test expectations.
+The standalone TB does not instantiate this adapter, so it is not substituted
+for the bridge tests or full-PC acceptance.
+
+Fresh full-PC model SHA256
+`5c2491f3b2eb73243e47cb614ae6d2e36012eb36f4f402e32fa3e9da27290033`
+is under `ao486-sim/obj_dir_ven_axivgalanes_oct02.uVGIvV`.
+Common source-input manifests differ from1513 only in the repaired adapter;
+the same107 macro profile is retained. Strict core-profile lint and source
+before/after hashes pass. The32-job build took45.783 seconds, peak3,235,303,424
+bytes with zero OOM events. Build-output manifest SHA256
+`113ec036304f997703e6fd3bbaabf04d1494ba9e91960b9ad09accb17e329fa6`.
+No FPGA rebuild or deployment is involved; new cold guest qualification is
+still required. Older1513/0cc2 guest controls contain the original adapter.
+
+Both fresh7522 CoreMark seeds closed normally and allfive CRC fields per seed
+match standard references. Conservative whole-program results are714,033,885
+clocks/542,165,482 retirements (**2.100740639 CM/MHz**) for performance and
+712,987,777/541,458,601 (**2.103822882 CM/MHz**) for validation,1500 iterations
+and10.892/10.875 guest seconds. Matrix summary SHA256
+`f26022a1e7182648d0b31a4ae06fce88e329001ace888ffa1289c19d64e66fb1`;
+all closed artifacts/pins and zero OOM counters were independently rechecked.
+This is observed closed functional evidence, not strict closed-checker PASS:
+the actual native-live receipt/external expectation are missing, and its owner
+rule also rejects retained active/exited units. No past admission receipt is
+fabricated and no checker is weakened. The bridge is absent from that TB;
+its compile inputs and executable remain unchanged by this repair.
+
+Recovered a further624,732,717 bytes by losslessly packing eight exact unused
+generated PCH files, retaining verified gzip recovery copies. Sources, models,
+guest images, snapshots, libraries and run logs were not removed. Receipt
+SHA256 `3bb737489afc316bc971233dccb707416f9175c83c056a15b7351e2b37653682`.
+
+The full standard suite remains incomplete. Verified gameplay baseline is
+**0.43038841 IPC**,4092c92a over2,199,999,637–2,299,999,637 clocks; new5c2491
+has no gameplay or completed timedemo/FPS measurement yet.
+
+New5c2491 cold guest processes were actually admitted at01:55UTC, with fresh
+private media, no restores/guest edits/input scripts and unchanged45/45/90MHz
+core/RTC/VGA timing,32MiB RAM and full P5 caches:
+
+- Win95: `ventium-standard-win95-vga-axivgalanes-oct02.service`, invocation
+  `a00dd3c66ef643aa9b3491c4f9d48c56`, owner1244399, native1244442/start22646050,
+  CPU24; `uVGIvV/win95-cold-vga-axivgalanes-oct02.1`.
+- Quake: `ventium-standard-quake-axivgalanes-oct02.service`, invocation
+  `3c98d01fdcdc4bfe8b4dc85d2f9dda1c`, owner1244164, native1244177/start22643120,
+  CPU25; `uVGIvV/quake-cold-axivgalanes-oct02.1/run`.
+
+Fresh `/proc/exe` hashes, parent/process-group/session ownership and argv match
+admission. Actual service limits are one CPU,2GiB memory,swap0,32 tasks,4GiB
+file size and73h owner wall bound; zero OOM counters at admission. Both advance
+through ordinary BIOS startup. Host configuration wrapper SHA256
+`d8fe34909051d241dd51a7f133bdaf6599152081b673677be64e93d1af42567d`
+executes exact pinned preceding launcher bytes and changes only build pins,
+output paths, unit names and CPU affinity. Parent source archives and this
+separately pinned configuration together establish configured-launcher
+provenance; the archived parent alone is not the new configuration. Collectors,
+guest arguments, media, clocks and closure/acceptance requirements are unchanged.
+No older guest control is stopped or substituted for these results.
