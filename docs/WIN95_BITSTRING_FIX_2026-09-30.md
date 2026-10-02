@@ -2017,3 +2017,91 @@ qualification; no major modification is declared complete from leaf tests.
 
 Gameplay baseline remains0.43038841 IPC on4092c92a, clocks2.2–2.3B; neither
 boundary candidate nor its follow-up has a verified gameplay measurement.
+
+### October2 general fetch repair and fresh standard-suite launch
+
+Committed the owned RTL repair as `02e782a` and its directed/leaf regressions
+as `12846b7`. Boundary fetches now request only authorized essential bytes;
+the ordinary interior wide path remains. Decoder lengths cannot wrap, grouped
+CPL faults require a checked ModR/M, and raw x87/header exceptions precede
+missing EA bytes. That priority applies to complete in-page windows as well as
+partially fetched boundary headers. SMSW no longer inherits MOV-CR privilege,
+and its register width follows the operand-size override. These are general
+processor fixes: no guest patch, saved frame rewrite, instruction skip or
+Quake-specific path was added. Pre-existing unrelated working-tree changes
+remain unstaged; the measured simulator receipts bind the actual working
+candidate, not a claim that these two commits alone reproduce its full profile.
+
+Latest standalone TB SHA256:
+`7522cbab0a492810cee60321fc19c593c86b92aa686c0af52086cd01a3f85bf9`,
+compile record
+`b03e7f5a9778edd01699a80575d734e9d72c3a1116c3c0f69add579575acb26c`.
+Strict structural lint, stable compile-input pins and32-job build passed.
+`make verify` passes108 functional programs and all gated M4/M5 bands;
+its20 divergent structural cycle diagnostics remain non-gating, not passes.
+Log SHA256:
+`e0d7cd25637476fd31ceca4a8dcb0ba0de0ef73c93bb3b7cfbf9deb7c565adae`.
+The precise-PC case passes both modes, summary SHA256
+`d56ea81ed159dd0a3a96e85ce4f99e6273b3aa1ff81041c0a5efe13a24dcceb8`.
+All15 adjacent system differentials close0: the previously listed13 plus
+ptask/pltr; status SHA256
+`dd119f7678432b17a33c1c0ae5199ca0b6bb1a1ea6634c93cbfdd2d8f3f6baa5`.
+
+All22 fetch cases pass full architectural functional and cycle-func
+comparisons, with actual native133 and stable fresh input pins. Closed summary
+SHA256 `d9d218c12bcdda222e0cb4111e4c325151d250e4b501e6a4a3b0330e9d5450a5`.
+Cases16–20 distinguish pre-EA LGDT/LIDT/LMSW/LLDT privilege and unprivileged
+SMSW32/SMSW16; preceding357d fails normally with141/143. The final cases
+distinguish in-page LGDT privilege from an atomic displacement-page probe,
+and unsupported D9 D1's #NM → CLTS/unchanged IRET → #UD ordering. Preceding
+c5d0 fails the strengthened21 with141 and22 with135, not host signals or
+timeouts; control summary SHA256
+`8608909989ebed964bd69555a544df4eeb38413ba549365acb2937d063028ce2`.
+The first version of21 used a SIB at byte16 and passed the old model too;
+those receipts remain preserved. The strengthened case uses eleven prefixes
+and a no-SIB displacement whose atomic endpoint crosses the nonpresent page.
+No original case acceptance was relaxed. Separate source-linked leaf gates
+pass23,402 decoder and1,596 predicate checks; these do not qualify a guest.
+
+The same frozen working RTL was built under the unchanged107-define full-PC
+profile: model SHA256
+`1513ee6a10bff5206203f655672e88ce24a8a04027e8fda1dba449e3ef0dc764`,
+compile record
+`bd860ace0e30f832d7926014ce3f728be4467024a1927bfc87577af7a1e290f2`.
+Strict structural lint and before/after compile pins pass; build51.8 seconds,
+32 compiler jobs. No FPGA synthesis or bitstream rebuild was launched.
+
+Fresh standard components are now running, **not accepted**:
+
+- CoreMark both unchanged1500-iteration standard seeds, TB7522, CPUs10/11;
+  unit `ventium-standard-coremark-fetchpriority-oct02.service`, invocation
+  `076edfe30608463f9dfc68cfad28e4d3`, started00:45:36 UTC.
+- Cold standard-VGA Win95, full-PC1513, CPU22; unit
+  `ventium-standard-win95-vga-fetchpriority-oct02.service`, invocation
+  `7e0a9ea4cb2b45a490f81c71cf7940a1`, native1194857/start22235907.
+- Cold FreeDOS Quake demo1, full-PC1513, CPU23; unit
+  `ventium-standard-quake-fetchpriority-oct02.service`, invocation
+  `85cfc71a226644a9919486be37b26990`, native1194812/start22235490.
+
+Both PC natives were actually admitted with the expected executable hash,
+argv, affinity, parent and private process group. They start from fresh disk
+copies with unchanged ROM/workload/helper pins, full P5 caches and45/45/90MHz
+core/RTC/VGA timing. Quake requires a closed969-frame timedemo; Win95 still
+requires a closed error-free desktop review. Startup or a plain GUI background
+does not qualify either. All three supervisors cap memory, tasks and wall time;
+long runs have swap0. Older precise-PC-only controls remain untouched.
+
+Recovered3,947,150,608 bytes (3.68GiB) by losslessly gzip-packing50 exact,
+ignored, owned, unused generated PCH files after fresh inode/hash/reference
+checks. Every archive passed gzip integrity and expanded-SHA equality before
+its raw original was removed; recovery copies remain alongside. No source,
+executable, guest image, checkpoint or run-evidence log was removed. Receipt
+SHA256 `57620813d54f69f5ca58ada580857d2ae11cac123982ade48ba67811e0d26ec1`.
+The initial archive script had a syntax error and removed nothing; its failed
+attempt remains retained. The corrected closed run restored the preserved8GiB
+PC-launch headroom requirement.
+
+Verified gameplay baseline remains **0.43038841 IPC**,4092c92a, clocks
+2,199,999,637–2,299,999,637. The new7522/1513 candidate is unmeasured for
+gameplay. There is still no completed matched-work before/after FPS comparison,
+and no major modification or full standard-suite PASS is declared here.
