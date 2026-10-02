@@ -2105,3 +2105,28 @@ Verified gameplay baseline remains **0.43038841 IPC**,4092c92a, clocks
 2,199,999,637–2,299,999,637. The new7522/1513 candidate is unmeasured for
 gameplay. There is still no completed matched-work before/after FPS comparison,
 and no major modification or full standard-suite PASS is declared here.
+
+### October2 open follow-up: proxy admission mirrors
+
+Read-only review identified a remaining admission mismatch in the optional
+user-mode syscall proxy. The execution FSM rejects an overlength instruction,
+but `syscall_active_c` still tests only S_DECODE, `d_int80` and `proxy_en`.
+The independent S_DECODE GPR mirror also omits the new header/overlength
+rejection guards. Consequently the host service or EAX write can occur even
+when the execution FSM does not accept the proxy instruction. Its outbound
+event also lacks the shared `fsm_case_enabled` permit and debugger/event vetoes.
+
+Proposed repair: one qualified proxy-admission predicate, shared by the
+outbound pulse, execution dispatch and GPR writeback, rather than another set
+of separately maintained guards. Preserve legal proxy timing and the existing
+debugger/interrupt/fault priority. Static review confirms the mismatch; a
+focused dynamic regression and the repair are **not yet completed**. No RTL
+change was made for this follow-up, and the frozen7522/1513 standard-suite
+processes and inputs remain untouched. This is not a demonstrated cause of
+the full-PC guests' behavior: their system-mode INT path does not select the
+user proxy.
+
+At01:09 UTC the fresh CoreMark seeds and both cold PC guests are still running.
+No desktop, completed timedemo or new gameplay result is accepted. The last
+verified gameplay IPC remains0.43038841 on4092c92a over2.2–2.3B clocks; there
+is no completed matched-work before/after FPS comparison for1513.
