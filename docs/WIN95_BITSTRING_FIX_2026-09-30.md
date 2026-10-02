@@ -2615,3 +2615,39 @@ Historical source/clock pairing is not established; this is not a5c2491 image.
 The existing cold Quake simulation remains untouched. Gameplay IPC baseline
 is **0.43038841**,4092c92a clocks **2,199,999,637–2,299,999,637**;
 5c2491 remains gameplay-unmeasured.
+
+### October 2 05:19–05:27UTC: older4092 Quake completes and closes PASS
+
+Root losslessly checks raw71: the console reports **969 frames,128.4 seconds,
+7.5 FPS**. Independent review confirms repeated completed-demo captures68–72.
+After checking the actual original owner858123/native858136, invocation
+`b099b59a17634ce2acb8508c0e5fa0fd`, frozen non-disk pins and absent stop file,
+root creates only the exact owned empty `run/stop.request`. No guest keys,
+snapshot, cache workaround, changed timer, simulator kill or acceptance edit.
+
+Actual normal native wait0 and owner exit0 close at **8,042,710,500 clocks /
+3,244,434,089 retire events**. Both the unchanged canonical checker and pinned
+outer owner return PASS with the fresh closed FAT console result. Root then
+independently runs the unchanged checker on that CLOSED disk; actual exit0,
+again969/128.4/7.5. This is the guest's simulated45MHz timing, not silicon FPS.
+
+Held stdout/stderr capture has EOF, no sticky error, **2,661,279 bytes**
+captured=persisted and16,082 complete monotonic progress records. No guest or
+engine terminal errors, restores or OOM. All20 post-pins, the private/pristine
+disk hashes and all73 published320x200 raw frames agree on independent root
+and peer rechecks. Root cleans only the already-empty RemainAfterExit service
+after checking the exact original exited invocation, absent PIDs/cgroup and
+no stop hooks/drop-ins. The retainer records actual inactive/dead success
+before original metadata GC.
+
+Outer result SHA `27be43cf23257466a8f273d170fcd340c72c19ff5e7ff19ff33a0c798a7b71b4`;
+supervisor closure SHA
+`10b8c07d4214c49a545d7c41a7bad366131a30dd31048bfb0017e68cbfa1d277`;
+held log SHA `cc3f89960496ec8a1bee6bf88c07e97f9aef645808ca219fdc6402719541fa39`.
+Root's `5mZtCG/quake-cold-oct01.1/root-closed-timedemo-recheck.json` SHA is
+`5f0d2873dbabc4b850be1819046be8bc31be6b88a8c0ec20e7c78f228c13170d`.
+
+**Historical4092 Quake component only; NOT current5c or full-suite PASS.**
+Current5c Quake remains unchanged and live; its Win95 desktop component passed
+separately above. Gameplay IPC baseline remains **0.43038841**,4092c92a clocks
+**2,199,999,637–2,299,999,637**;5c2491 remains gameplay-unmeasured.
