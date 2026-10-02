@@ -1899,3 +1899,68 @@ Verified gameplay baseline remains **0.43038841 IPC**, build4092c92a, clocks
 **2,199,999,637–2,299,999,637**. Fresh `50dc`/`0cc2` candidates have no new
 gameplay measurement; they are unmeasured and cannot inherit the old
 CoreMark PASS, Quake FPS or desktop acceptance.
+
+### October2 demand-fetch integration checkpoint (not full-suite acceptance)
+
+The first demand-qualified candidate was actually built and source-pinned:
+TB `fddbc1c5e4057bec9849f7182ae68b1fa84eaff00a32f6ee57f8271a3ed27399`,
+compile record `35b6c533ab6b9b59ae763dfaa7dc7c2c30cff4c5bf927034081fc5f1af5c49f3`,
+under `verif/tb/obj_dir_fetchdemand_oct01.CfmFbJ/`. Strict structural lint
+passed without a new waiver, and compile-input hashes matched before/after.
+The common in-page window is retained; page/CS boundaries use an accepted-byte
+cursor and decoder-owned opcode/ModR/M/SIB/body prerequisites. Requests and
+translation share the same exact demand. An independent one-page instruction
+permission token records US permission, rechecks live CPL, and is invalidated
+by the existing architectural TLB flush. It does not provide another TLB
+port or disable the general fast path.
+
+All nine `pfetchbound` cases passed in both full architectural functional and
+cycle-func modes, with actual native133, independently completed golden/free
+QEMU, full unfiltered comparisons, and unchanged input pins. The new cases
+distinguish an atomic immediate endpoint beyond byte16 (required PF before
+GP) from a displacement that is already the first overrun field (GP before
+touching a later unused immediate). Cases8/9 both fail normally with native143
+on the preceding `50dc` simulator; they are not timeout or kill witnesses.
+
+Closed candidate summary SHA256:
+`e328f5ab7916bdc3cbbeebad36ec79e8cbc6906086d06bf5a5d5da3ae89976df`.
+Closed8/9 control summary SHA256:
+`ae56eed96d768da6642b6e81c7a95cde8f1d1bb334de66b5d12a9cb4a9f626b2`.
+The candidate also passed `make verify`:108 functional programs, all gated
+M4/M5 cycle bands. Its20 per-instruction cycle comparators remain separately
+reported divergent diagnostics, not correctness passes. Log SHA256:
+`32d46a1307c21e014d43c48f78c69513289d89054266d57cc8a33678c50d355a`.
+The first attempt failed generating four goldens because the shared cache
+volume was full; the passing rerun used a fresh root-filesystem cache. The
+failed attempt remains retained and is not relabelled PASS.
+
+Independent static reviews found additional corners after that frozen build:
+CS-limit checks must ignore a no-demand completion clock and cover the end of
+each essential beat; zero overlength `d_len` must not underflow a CS-extent
+check; an overlength endpoint probe must not preempt debugger/SMI/NMI/INTR;
+x87 TS/EM and MOV-CR/DR privilege faults can precede a missing ModR/M; and
+non-system overlength must loud-halt rather than dispatch a zero length.
+Those changes and direct tests are being integrated into a **later** candidate.
+The nine-case PASS and fast-gate PASS above do not qualify these later edits,
+warm permission behavior, every fetch corner, or the standard suite.
+
+The separate precise-PC-only `50dc` CoreMark run has now closed normally:
+both1500-iteration/2000-byte standard seeds completed, native0, matching
+reference CRCs and unchanged observed build/image/header pins. Performance:
+713,805,640 clocks, **2.1014123676579524 CM/MHz**; validation:712,760,043 clocks,
+**2.104495074789146 CM/MHz**. These exactly match the preceding RF-completion
+candidate's clock counts. Matrix return0, owner systemd `ExecMainCode=1`
+(`CLD_EXITED`), `ExecMainStatus=0`, exact invocation
+`c1c377a686e44e5388d50fd1002781d4`; final receipt reports children gone and
+all OOM counters zero. Summary SHA256
+`ec5fcab608472f0df725ed226c2d63ec896d1b53b57a59b1d5cdcf3ac3af0044`.
+Independent native-admission/terminal qualification was not completed, so
+this is labelled observed closed CRC/performance evidence, not a newly
+independently qualified full standard-suite PASS. In particular it does not
+qualify the demand-fetch candidate. Fresh precise-PC-only Win95/Quake remain
+running; no desktop or completed timedemo result is claimed.
+
+Gameplay baseline remains **0.43038841 IPC** on4092c92a, clocks
+2,199,999,637–2,299,999,637. Both precise-PC-only and demand-fetch candidates
+remain without a verified gameplay measurement. No before/after gameplay
+FPS gain can be inferred from these directed tests or CoreMark scores.
