@@ -1,15 +1,77 @@
 # RK FPGA Quake deployment — October 2, 2026
 
-## Current status (19:41 UTC)
+## Current status (20:13 UTC)
 
-Administrator access works. The DDR reservation and FPGA programming are
-complete; cold Quake startup is not yet working. The clean ARM daemon exits
-with SIGBUS while clearing reserved guest RAM, before disk/ROM initialization
-and core release. This is not an OOM or a Quake acceptance result.
+Administrator access and the boot-time DDR reservation work. The board remains
+held in reset on the historical image. At the user's request, a new **40 MHz**
+current-source image is being synthesized; no new bitstream is deployed yet.
+The first daemon's SIGBUS has an instruction-level cause (`DC ZVA` on Device
+memory), and an isolated scalar-access successor is built and microtested,
+but not yet qualified on the board. No FPGA timedemo/movie is accepted.
 
 Verified **simulation** gameplay IPC is **0.42633263**, model
 `5c2491f3b2eb73243e47cb614ae6d2e36012eb36f4f402e32fa3e9da27290033`,
 clocks **7,099,999,637–7,199,999,637**. No FPGA gameplay IPC is measured.
+
+## Fresh 40 MHz build
+
+The current build is under
+`/var/tmp/ventium-fpga-quake-oct02.rc0wVn/fpga40-vco1g.3vpbYB/`.
+Its frozen-input manifest SHA is
+`adfb6ff13531761637599ec837527a788483706413b78735666023460f121c1c`:
+179 explicit source/evidence files, the verified simulator's exact 107 defines,
+plus only `SYNTHESIS`, `VTM_NO_DPI`, and `VEN_ALTSYNCRAM_XPM` for hardware.
+The legacy FPGA default missed 79 verified defines and added three unverified
+uop-cache defines; it is not used. Full P5 caches remain selected.
+Common RTL/source pins were checked unchanged from the accepted 5c build.
+The host resource guard is intentionally updated, not an RTL/profile change.
+
+The new clock is a real MMCM derivative of PL0: **100 MHz × 10 / 25 = 40 MHz**,
+with a 1 GHz VCO and output gated until LOCKED. Its source SHA is
+`7d156871987abc06ee09412016ddb305d6551d6adf4a19e4159e131179d041aa`.
+Genuine AMD Unisim simulation checked startup gating and 200 exact 25 ns
+periods (actual exit 0, 0.13 seconds). The initial M8/D20 prototype was
+superseded because the modeled PL0 rate of 99,999,001 Hz put its VCO slightly
+below the 800 MHz minimum. The new VCO is safely inside range. This is not
+routed timing or a silicon-clock measurement.
+
+The external PL top now feeds its actual `CLK_HZ` to PIT/RTC/VGA; accelerated
+4 MHz/80 kHz/90 MHz simulation defaults are not copied into physical hardware.
+The hosted PS/2 sender scales its existing timing with that same parameter,
+using 64-bit arithmetic and appropriately sized counters. Ordinary-pin tests
+checked both legacy and 40 MHz profiles: 12 frames, 132 bits, phase lengths,
+byte order, framing/parity and prelaunch host inhibition. These are narrow
+tests, not full keyboard/controller acceptance. No arbitration fixes added.
+
+The template PS preset produced catalog validation errors. The preliminary
+run was explicitly stopped (actual outer exit 143), and the documented
+**PCAP-only, preset-free** flow is now used: booted Linux keeps PS DDR/MIO
+configuration; PL overrides retain 100 MHz PL0 and native 128-bit HP0 with
+the explicit 64-to-128-bit converter. The final BD validated at 40 MHz,
+and HP0 remained 128 bits after propagation.
+
+Synthesis started at 20:11 UTC, `balanced` profile (Default synthesis), one
+run job/internal worker. Scope invocation is
+`1e9b119f6c8744988529c6382906ac20`; actual limits are **8 GiB memory,
+2 GiB swap, 32 tasks**, not an unbounded parent-only limit. Preliminary
+runs are gone. At 20:13:48 the scope used 5.13 GiB, peak 7.06 GiB; routing
+has not started. Do not treat process progress as a synthesis/timing pass.
+Inspect area before implementation; then check routed DRC/setup/hold and
+clock reports, hash/program the artifact, measure silicon MHz, and run the
+unmodified cold timedemo with the matching widened capture tool.
+
+The FPGA's existing retired counter counts primary retire events only; it
+omits simultaneous V-pipe retire events. Its read-only cycle counter is valid
+for MHz measurement, but its displayed IPC is **not comparable to total
+simulator U+V gameplay IPC** without a separately qualified total counter.
+
+Resource cleanup removed only exact reviewed `.o`, `.a`, and `.gch` compiler
+intermediates from closed old builds. Binaries, sources, receipts, logs,
+media and current model/build directories were preserved. The initial cleanup
+recovered 5.11 GiB root-disk space and 1.82 GiB tmpfs space; its SHA/path
+manifest is under `/var/tmp/ventium-generated-cleanup-oct02.xy3EgO/`.
+Intermediates are rebuildable with matching inputs, not backed up. Additional
+old tmpfs-intermediate cleanup is separately recorded.
 
 ## Boot-memory change and rollback
 
@@ -49,6 +111,11 @@ reports PL0 about 100 MHz. No new Vivado run was launched. It is **not** a
 current-5c hardware qualification: the external board flow was untracked and
 no exact archived source/daemon pairing proves that ancestry.
 
+Actual read-only hardware-counter measurement while reset is held:
+6,250,569 cycles over 2.000077 seconds = **3.125164 MHz**, zero retire events.
+Counter endpoints are 1,382,828,105–1,389,078,674. This is clock evidence,
+not gameplay IPC or performance acceptance.
+
 Use the tools at commit `f2ffc0106b0ba42ec3fa2020ad61675cfe440212`:
 
 | Tool | SHA-256 |
@@ -86,9 +153,21 @@ Service `ventium-quake-cold-oct02.service`, invocation
 The static daemon's `__memset_generic` uses `DC ZVA` for large zero fills.
 Linux 6.12 ARM64 maps non-map-memory `/dev/mem` pages as Device-nGnRnE,
 not Normal-NC. This is a suspected access-attribute mismatch, pending exact
-fault-PC evidence; do not weaken exclusive guest-memory ownership to bypass it.
+fault-PC evidence at first inspection; do not weaken exclusive guest-memory
+ownership to bypass it.
 See [ARM64 /dev/mem protection](https://raw.githubusercontent.com/torvalds/linux/v6.12/arch/arm64/mm/mmu.c)
 and [memory-type definitions](https://raw.githubusercontent.com/torvalds/linux/v6.12/arch/arm64/include/asm/pgtable.h).
+
+At 19:48 UTC the guarded bounded probe
+`devmem_sigbus_probe.aarch64` (SHA
+`5f25cbbb7cfa56458a52098098f9af2c07dabf1f5b932002d12c91a3c7013760`)
+independently checked manager/DT/root-iomem/IDENT/CTRL=1. Aligned read64 at
+`0x60000000` succeeded. An explicitly requested 64-byte `DC ZVA` experiment
+faulted with SIGBUS, si_code 1, ESR `0x92000061`, PC `0x400bac`, exit 135.
+Root disassembled that exact PC as `dc zva, x0`. A scalar 64 KiB clear at the
+same address returned zero using `str xzr` and `dsb sy`. Neither experiment
+released the guest or changed its disk. This confirms the instruction/mapping
+mismatch; it does not yet qualify the complete replacement daemon.
 
 ## Movie requirements
 
