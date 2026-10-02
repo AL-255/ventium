@@ -3231,3 +3231,49 @@ also has later short real-mode detours that return normally. This is consistent
 with expected DOS-side service, not evidence of a persistent new stall or an
 exact cycle-equivalence proof. No speculative processor/cache workaround is
 applied. Original current Quake remains live; full-suite completion is unproven.
+
+### October 2 18:43–19:13 UTC: current Quake closed PASS
+
+The original frozen `5c2491f3` cold Quake run completed **969 frames / 134.0
+guest seconds / 7.2 guest FPS**. Root visually checked the unmodified raw66
+completion console, then requested the existing normal host stop. Native and
+outer runner both returned zero; the unchanged closed timedemo checker was
+independently rerun at 19:07:24 UTC and returned PASS/exit zero. No snapshot,
+guest input/patch, timer intervention or verification-criteria change occurred.
+
+Final progress is **7,440,924,502 clocks / 2,906,483,460 retire events**.
+The original invocation `3c98d01fdcdc4bfe8b4dc85d2f9dda1c` is closed:
+all recorded owner/native PIDs and the cgroup are absent, the retainer observed
+inactive/dead/success, and only already-empty service metadata was cleaned up.
+The full log has EOF, no sticky capture error, 2,467,039 captured/persisted
+bytes and SHA
+`959670864899b1e438c6433f648349d5fad18db65d0161ee51860cd2636a03b3`.
+All resource memory-event counters are zero. Root reconciled all **75** PERF
+rows (74 periodic plus the final shutdown row), U+V sums, array sizes, the
+363-clock accounting offset and the final footer. All 67 raw capture bindings
+were retained and rehashed. Closed disk SHA is
+`17b6d1c8c51e738f4d4204e6854b53b6dedc9eac6c4fbd12a5cde8be462b3eb1`;
+QCONSOLE SHA is `f296fd09f934b2371a26ffadc39907bc0cf83726b1c8b7abd1e22d8f55d24b0d`.
+Pristine source media was rehashed only after the original processes exited.
+
+Root component receipt is
+`ao486-sim/obj_dir_ven_axivgalanes_oct02.uVGIvV/standard-acceptance/root-quake-closed-pass.json`,
+SHA `a5398947e8bfd70f64170dec43429b7302ea21c1fcc69552dd13948520eed3f5`.
+The final compile-source recheck at 19:13:32 UTC holds all 278 target files
+and both build outputs. Source/code pins are observational closure, not an
+atomic proof of the compiler's loaded sources.
+
+Latest verified gameplay IPC is **0.42633263** on this same frozen model,
+clocks **7,099,999,637–7,199,999,637**: 42,633,263 retire events over 100M
+clocks, U 32,484,243 + V 10,149,020. Root and peer viewed advancing gameplay
+in raw63/64. Gameplay receipt SHA is
+`0432e1b6fc1d41aebe904ae9ae7a222d1b16217c671e091787f905ce14e9b607`.
+This replaces the earlier scene windows for status reporting; it does not
+establish a fix gain, REP-normalized CPI or FPGA IPC/FPS.
+
+Win95 and Quake now have separate current full-PC component PASS receipts.
+**The entire standard suite is not complete:** current full-PC-profile
+CoreMark qualification remains outstanding; existing direct-profile CoreMark
+seed successes do not certify the full-PC L1/AXI profile. No new CoreMark run
+was launched. FPGA deployment has a separate hardware artifact and evidence
+trail in `docs/FPGA_QUAKE_DEPLOYMENT_2026-10-02.md`.
