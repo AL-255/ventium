@@ -2284,3 +2284,48 @@ leaves: each profile again has192 pieces and zero failures; held profiles
 retain768 wait checks. All native/wrapper exits0, before/after source pins
 match and OOM counters remain zero. This runner-only change does not alter the
 frozen5c2491 guest model or any live guest/collector inputs.
+
+### October 2: configured-launcher qualification and pin-role alias repair
+
+The current Win95 owner actually executes `python3 -B uVGIvV/run_cold.py
+win95`; its configuration SHA is `d8fe3490...677be64e93d1af42567d`.
+The separately executed parent source is `oGoyR1/run_win95_vga_cold.py`,
+SHA `7383d006...3ca218a2`, and `observed-launcher.py` archives those parent
+bytes, not the configuration bytes. The old schema1 checker conflated these
+two identities and required a local direct launcher with a run-directory
+argument. Consequently it could not qualify this actual configured owner,
+even after an otherwise successful guest run.
+
+Schema2 explicitly separates the externally reviewed configuration path/SHA
+and exact `win95` owner command from the parent source/SHA and parent archive.
+All three are mandatory in the exact frozen before/after input map. Schema1
+direct-launcher support is retained. The checker neither executes nor imports
+these sources; externally reviewed bytes remain source authority, not proof
+of loaded-memory ancestry. Native arguments/environment, actual wait and
+process/cgroup absence, OOM checks, sticky capture, closed raw-frame inventory
+and independently pinned manual desktop review remain mandatory. No live
+launcher, admission receipt, collector, guest image or model was changed.
+
+Independent review also demonstrated a host-only false-PASS case: later
+helper-source roles could overwrite an earlier required configuration digest
+if the paths aliased. The role merger now rejects every duplicate mandatory
+path rather than silently replacing its digest. The exact former false-PASS
+fixture now fails; additional helper/ROM/pristine aliases are rejected too.
+The current actual receipt has14 distinct mandatory roles and fits the new
+provenance subcheck. This is not a full live qualification or desktop PASS.
+
+All26 synthetic host contract tests pass, including configured-role negatives
+and the original closure/capture/native/desktop negative matrices repeated
+with the configuration form. Root receipt:
+`verif/l1/obj_dir_win95config_host_oct02.1ulqWquE`, native exit0;
+log SHA `5d47a7e2cb6fa3f2ab9f2e38748719d58dff8689c1dfa2423c80f0bb2d93e1c5`.
+Checker SHA `fc3062576212fa8c280debf05b563ce9731111422ebc44a56d765a49c9a84120`;
+test SHA `78677d58a4224b810f5e1121a8a82a0f645b9e9bc589d93f03282ca0eb9f8aa6`.
+An independent rerun and collision reproducer agree. These are host-only
+checker tests, not native guest execution or genuine desktop-pixel evidence.
+
+At02:17UTC, actual5c2491 Win95/Quake natives remain live and advancing,
+with admission identities and executable hashes independently rechecked and
+zero OOM counters. No fresh desktop or timedemo completion is claimed.
+Verified gameplay baseline remains **0.43038841 IPC**,4092c92a clocks
+**2,199,999,637–2,299,999,637**;5c2491 has no gameplay measurement yet.

@@ -15,6 +15,14 @@ receipt_before_sha256 and native_admission_sha256. Paths are absolute.
 The two helper names are check_quake_timedemo/run_quake_standard; ROM names
 are boot0.rom/boot1.rom. pins is the EXACT wrapper input_sha256_before map.
 
+Schema 2 retains those fields but separates the reviewed host entrypoint from
+the parent source it executes/archives. launcher_path/launcher_sha256 identify
+the parent; configured_launcher is {path, sha256, mode}, with mode=win95 and
+path=<build>/run_cold.py. The owner command must be exactly python3 -B that
+configuration win95. Both sources and the parent archive must be in the frozen
+pin map. Configuration semantics are externally reviewed source authority,
+not inferred from a filename, a self-reported receipt, or code execution here.
+
 Visual schema 1: kind=WIN95_MANUAL_DESKTOP_REVIEW, authority=manual,
 reviewer, reviewed_unix, run_directory, unit, invocation_id, model_sha256,
 desktop=true, error_free=true, review_basis=closed_raw_frames, and raw_frames
@@ -230,10 +238,46 @@ def expected_command(run):
             '--stop-request', str(run / 'stop.request')]
 
 
+def launcher_roles(run, expected, worker):
+    """Bind the actual entrypoint and the separately archived parent source.
+
+    This is host provenance only. It does not bypass any native/closure/visual
+    requirement or execute the configuration to decide whether it is trusted.
+    """
+    launcher = absolute(expected['launcher_path'])
+    require(launcher.name in ('run_win95_cold.py', 'run_win95_vga_cold.py'),
+            'unknown reviewed parent launcher')
+    roles = {str(launcher): expected['launcher_sha256'],
+             str(run / 'observed-launcher.py'): expected['launcher_sha256']}
+    if expected['schema'] == 1:
+        require('configured_launcher' not in expected and launcher.parent == run.parent and
+                worker['argv'] in (['/usr/bin/python3', str(launcher), str(run)],
+                                   ['/usr/bin/python3', '-B', str(launcher), str(run)]),
+                'wrong observed launcher command')
+    else:
+        configured = expected['configured_launcher']
+        require(type(configured) is dict and set(configured) == {'path', 'sha256', 'mode'} and
+                configured['mode'] == 'win95' and type(configured['sha256']) is str and
+                SHA.fullmatch(configured['sha256']), 'invalid externally reviewed configuration')
+        entry = absolute(configured['path'])
+        require(entry == run.parent / 'run_cold.py' and entry != launcher and
+                worker['argv'] == ['/usr/bin/python3', '-B', str(entry), 'win95'],
+                'wrong observed configured launcher command')
+        roles[str(entry)] = configured['sha256']
+    return roles
+
+
+def add_roles(roles, entries):
+    """Mandatory source/archive identities may not overwrite one another."""
+    for path, digest in entries:
+        require(path not in roles, 'aliased mandatory frozen pin roles: ' + path)
+        roles[path] = digest
+
+
 def check(run, expected, visual, *, supervisor=None):
     run, files = absolute(str(run)), Files()
     require(run.resolve(strict=True) == run and re.fullmatch(r'win95-cold-[A-Za-z0-9_.-]+', run.name), 'wrong owned run leaf')
-    require(integer(expected['schema'], 1) and expected['kind'] == 'WIN95_STANDARD_EXPECTATION' and
+    require(integer(expected['schema']) and expected['schema'] in (1, 2) and expected['kind'] == 'WIN95_STANDARD_EXPECTATION' and
             expected['run_directory'] == str(run) and
             re.fullmatch(r'ventium-standard-win95-[A-Za-z0-9_.-]+\.service', expected['unit']) and
             re.fullmatch(r'[0-9a-f]{32}', expected['invocation_id']) and
@@ -254,10 +298,7 @@ def check(run, expected, visual, *, supervisor=None):
     resource_receipt(final, expected)
     require(final['worker'] == before['worker'] and before['unix'] <= final['unix'] < before['unix'] + SECONDS,
             'owner identity changed or wall cap reached')
-    cmd, launcher = expected_command(run), absolute(expected['launcher_path'])
-    require(launcher.parent == run.parent and launcher.name in ('run_win95_cold.py', 'run_win95_vga_cold.py') and
-            before['worker']['argv'] in (['/usr/bin/python3', str(launcher), str(run)],
-                                       ['/usr/bin/python3', '-B', str(launcher), str(run)]), 'wrong observed launcher command')
+    cmd, roles = expected_command(run), launcher_roles(run, expected, before['worker'])
     require(before['command'] == result['command'] == admission['argv'] == cmd and
             before['environment'] == {'PATH': '/usr/local/bin:/usr/bin:/bin', 'LANG': 'C.UTF-8', 'TMPDIR': str(run),
                                      'AO486_BIOS_DIR': str(run / 'rom'), 'AO486_RTC_EPOCH': '1789257600', 'FPGA_DDR': '2'},
@@ -289,13 +330,15 @@ def check(run, expected, visual, *, supervisor=None):
             {'check_quake_timedemo', 'run_quake_standard'} and
             set(expected['rom_sha256']) == set(expected['rom_source_paths']) == {'boot0.rom', 'boot1.rom'} and
             before['exact_loaded_helper_archives'] == expected['helper_sha256'], 'missing exact helper/ROM identities')
-    roles = {str(launcher): expected['launcher_sha256'], str(run / 'observed-launcher.py'): expected['launcher_sha256'],
-             str(run.parent / 'ao486sim_ven_standard'): expected['model_sha256'], cmd[0]: expected['model_sha256'],
-             expected['pristine_disk_path']: expected['pristine_disk_sha256']}
+    add_roles(roles, [(str(run.parent / 'ao486sim_ven_standard'), expected['model_sha256']),
+                      (cmd[0], expected['model_sha256']),
+                      (expected['pristine_disk_path'], expected['pristine_disk_sha256'])])
     for name, digest in expected['helper_sha256'].items():
-        roles.update({expected['helper_source_paths'][name]: digest, str(run / 'python' / (name + '.py')): digest})
+        add_roles(roles, [(expected['helper_source_paths'][name], digest),
+                          (str(run / 'python' / (name + '.py')), digest)])
     for name, digest in expected['rom_sha256'].items():
-        roles.update({expected['rom_source_paths'][name]: digest, str(run / 'rom' / name): digest})
+        add_roles(roles, [(expected['rom_source_paths'][name], digest),
+                          (str(run / 'rom' / name), digest)])
     require(all(pins.get(path) == digest for path, digest in roles.items()) and
             all(str(run.parent / name) in pins for name in ('Vsystem__verFiles.dat', 'compile-inputs.before.sha256', 'build-output.sha256')) and
             before['pristine_private_disk_sha256'] == expected['pristine_disk_sha256'], 'mandatory frozen pin roles missing')

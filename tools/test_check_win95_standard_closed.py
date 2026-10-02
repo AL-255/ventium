@@ -218,6 +218,113 @@ class ClosedWin95Tests(unittest.TestCase):
         self.persist()
         self.reject()
 
+    def configure_launcher(self):
+        """Synthetic host provenance only: none of these bytes are executed."""
+        source = self.build / 'parent-build' / self.launcher.name
+        source.parent.mkdir()
+        self.launcher.rename(source)
+        pins = self.expect['pins']
+        pins[str(source)] = pins.pop(str(self.launcher))
+        self.launcher = source
+        self.expect['schema'] = 2
+        self.expect['launcher_path'] = str(source)
+        self.config = self.build / 'run_cold.py'
+        self.config.write_bytes(b'# synthetic externally reviewed host configuration; never executed\n')
+        pins[str(self.config)] = sha(self.config)
+        self.expect['configured_launcher'] = {'path': str(self.config), 'sha256': sha(self.config), 'mode': 'win95'}
+        self.before['worker']['argv'] = ['/usr/bin/python3', '-B', str(self.config), 'win95']
+        self.final['worker'] = copy.deepcopy(self.before['worker'])
+        self.persist()
+
+    def test_configured_entrypoint_and_archived_parent_have_separate_roles(self):
+        self.configure_launcher()
+        value = self.qualify()
+        self.assertEqual(value['status'], 'PASS')
+        self.assertFalse(value['suite_acceptance'])
+        self.assertNotEqual(sha(self.config), sha(self.run / 'observed-launcher.py'))
+
+    def test_configured_launcher_requires_explicit_schema_and_complete_roles(self):
+        self.configure_launcher()
+        self.expect['schema'] = 1
+        self.reject()
+        self.expect['schema'] = 2
+        config = self.expect.pop('configured_launcher')
+        self.reject()
+        self.expect['configured_launcher'] = config
+        pins = self.expect['pins']
+        for path in (self.config, self.launcher, self.run / 'observed-launcher.py'):
+            with self.subTest(missing_role=path.name):
+                digest = pins.pop(str(path))
+                self.persist()
+                self.reject()
+                pins[str(path)] = digest
+                self.persist()
+        self.assertEqual(self.qualify()['status'], 'PASS')
+
+    def test_configured_source_mode_digest_and_actual_argv_cannot_be_substituted(self):
+        self.configure_launcher()
+        good = copy.deepcopy(self.expect['configured_launcher'])
+        for key, bad in [('mode', 'quake'), ('sha256', '0' * 64), ('sha256', True),
+                         ('path', str(self.config.with_name('run_unknown.py')))]:
+            with self.subTest(key=key):
+                self.expect['configured_launcher'] = dict(good, **{key: bad})
+                self.reject()
+        self.expect['configured_launcher'] = good
+        original = self.before['worker']['argv'].copy()
+        for bad in (original[:-1], original + [str(self.run)], original[:1] + original[2:],
+                    [original[0], '-c', *original[2:]], [*original[:-1], 'quake']):
+            with self.subTest(argv=bad):
+                self.before['worker']['argv'] = bad
+                self.final['worker'] = copy.deepcopy(self.before['worker'])
+                self.persist()
+                self.reject()
+        self.before['worker']['argv'] = original
+        self.final['worker'] = copy.deepcopy(self.before['worker'])
+        self.persist()
+        self.assertEqual(self.qualify()['status'], 'PASS')
+        self.config.write_bytes(b'# mutated separately configured source\n')
+        self.reject()
+
+    def test_configured_roles_do_not_waive_closure_capture_or_manual_desktop(self):
+        self.configure_launcher()
+        for negative_matrix in (self.test_supervisor_negative_matrix_precedes_runtime_reads,
+                                self.test_lossy_capture_negative_matrix,
+                                self.test_manual_desktop_negative_matrix,
+                                self.test_native_actual_wait_and_negative_results):
+            self.assertEqual(self.qualify()['status'], 'PASS')
+            negative_matrix()
+            self.persist()
+            self.assertEqual(self.qualify()['status'], 'PASS')
+
+    def test_mandatory_roles_cannot_alias_or_overwrite_launcher_digests(self):
+        self.configure_launcher()
+        original = copy.deepcopy(self.expect)
+        for target in (self.config, self.launcher, self.run / 'observed-launcher.py'):
+            for kind in ('helper', 'rom', 'pristine'):
+                with self.subTest(target=target.name, alias=kind):
+                    self.expect = copy.deepcopy(original)
+                    if kind == 'helper':
+                        self.expect['helper_source_paths']['check_quake_timedemo'] = str(target)
+                    elif kind == 'rom':
+                        self.expect['rom_source_paths']['boot0.rom'] = str(target)
+                    else:
+                        self.expect['pristine_disk_path'] = str(target)
+                    with self.assertRaisesRegex(ValueError, 'aliased mandatory frozen pin roles'):
+                        self.qualify()
+        self.expect = original
+        self.assertEqual(self.qualify()['status'], 'PASS')
+
+    def test_same_digest_role_alias_cannot_hide_a_wrong_configured_digest(self):
+        self.configure_launcher()
+        archive = self.run / 'python/check_quake_timedemo.py'
+        self.config.write_bytes(archive.read_bytes())
+        self.expect['pins'][str(self.config)] = sha(self.config)
+        self.expect['helper_source_paths']['check_quake_timedemo'] = str(self.config)
+        self.expect['configured_launcher']['sha256'] = '0' * 64
+        self.persist()
+        with self.assertRaisesRegex(ValueError, 'aliased mandatory frozen pin roles'):
+            self.qualify()
+
     def test_supervisor_negative_matrix_precedes_runtime_reads(self):
         fields = [('ActiveState', 'active'), ('SubState', 'exited'), ('MainPID', '1'), ('Result', 'oom-kill'),
                   ('ExecMainCode', '0'), ('ExecMainStatus', '1'), ('InvocationID', '0' * 32),
