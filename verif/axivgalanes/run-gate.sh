@@ -38,7 +38,7 @@ timeout --signal=TERM --kill-after=10s 540s tools/build_scope.sh -- bash -c '
     if [[ "$AXIVGALANES_BRIDGE_ASSERT" == 1 ]]; then defs+=(-DVEN_AXI2AVL_ASSERT); fi;
     mkdir "$out/$profile";
     verilator --binary --timing --assert -sv -j 32 -Wall -Wno-UNUSED -Wno-fatal \
-      -Wno-DECLFILENAME -Wno-PINCONNECTEMPTY -Werror-IMPLICIT -Werror-PINMISSING \
+      -Werror-IMPLICIT -Werror-PINMISSING \
       -Werror-UNDRIVEN -Werror-MULTIDRIVEN -Werror-LATCH -Werror-UNOPTFLAT \
       "${defs[@]}" --top-module "$top" -Mdir "$out/$profile/obj" -o tb_axivgalanes \
       "$repo/verif/l1/romwrite_ao486_primitive.vlt" \

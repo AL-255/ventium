@@ -2269,3 +2269,18 @@ separately pinned configuration together establish configured-launcher
 provenance; the archived parent alone is not the new configuration. Collectors,
 guest arguments, media, clocks and closure/acceptance requirements are unchanged.
 No older guest control is stopped or substituted for these results.
+
+Final host follow-up recovered another769,179,648 allocated bytes by packing
+ten exact unused PCH files, retaining gzip integrity/expanded-SHA-verified
+recovery copies. Receipt SHA256
+`7139ccfb1a6445b2773f3d1c8c694aecb7a8c852b00654af495e636ff80547ff`;
+final root free space9,346,629,632 bytes. No model, object/library, source,
+guest disk or run evidence was removed.
+
+The committed micro runner now also leaves DECLFILENAME/PINCONNECTEMPTY style
+warnings visible rather than globally suppressing them. Ordinary and held
+variants were rerun with bridge assertions in fresh `l7bVqC`/`KaC6rl` output
+leaves: each profile again has192 pieces and zero failures; held profiles
+retain768 wait checks. All native/wrapper exits0, before/after source pins
+match and OOM counters remain zero. This runner-only change does not alter the
+frozen5c2491 guest model or any live guest/collector inputs.
