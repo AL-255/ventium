@@ -1532,6 +1532,20 @@ cover cold startup, workload and closure margin. Keep all colors, dimensions,
 and accepted records unchanged; 15 fps is the movie presentation rate, not
 measured gameplay FPS or a capture-rate limit.
 
+For final timedemo disk evidence, use the separately audited closed FAT-console
+procedure in `docs/FPGA_QUAKE_DEPLOYMENT_2026-10-02.md` ("Separate closed
+FAT-console evidence"). It reads the actual QCONSOLE file through the held
+original VHD descriptor, not deleted raw clusters, and compares against the
+immutable pre-run console. The old log already contains a demo1 marker but no
+result; that marker alone cannot establish fresh playback. Fourteen focused
+host tests pass, including pathname substitution, bounded parsing, malformed
+numeric records and cross-line regex false positives. These are verifier
+tests, not a hardware timedemo. Its exit 0 validates **console evidence only**;
+native closure, cold reset, no snapshots, exact image/source/clock identity and
+full movie coverage still need independently observed root evidence. Never
+manufacture simulator log grammar to make the simulation-only checker pass
+an FPGA run.
+
 Its `perf --seconds N` mode reads the split cycle/retirement counters, AXI
 event counters, state slots, I/O-cycle counter, and external-interrupt-
 acknowledgement counter twice and reports raw interval deltas, measured clock,

@@ -372,6 +372,57 @@ host RAM and stubbed x86/IDE, not real ARM Device execution or ROM correctness.
 
 ## Movie requirements
 
+### Separate closed FAT-console evidence
+
+Do not call the simulation checker's final `check` command on the board daemon
+log or fabricate simulator `RESET`/`PROGRESS`/`DONE` lines: those grammars are
+simulation-specific. Do not use a whole-VHD regex scan as acceptance either;
+deleted FAT clusters can contain old completion strings.
+
+The final root-reviewed offline helper is
+`/var/tmp/ventium-fpga-quake-oct02.rc0wVn/fpga-console-root-final.hhhpbilJ/check_closed_console.py`,
+SHA `be2f8fd8733e677bab456bd1d1594d7367c2da64158f2721dc80d7790f834900`.
+It executes only the exact hash-pinned common parser bytes
+(`427d9e7471eb4d6a65361fc468646307c66df4fe70fe8001e51977307bb85ad7`),
+without changing that parser or its simulation acceptance gate. It requires a
+bounded, owned, one-link, closed local VHD copy and a SHA-pinned root receipt,
+binds both FAT parsing and `mtype` to the held original descriptor through
+`/proc/<helper-pid>/fd/<fd>`, and checks inode metadata and disk SHA before and
+after extraction. Only FAT `::/QUAKE/ID1/QCONSOLE.LOG` is evidence.
+
+The immutable pre-run input has SHA
+`2df14ac9ae5f927cab2410e784d14c655f0e96644ca80ced3c0b012df7a36e4c`;
+its saved 465-byte console has SHA
+`a5884526b232055e67c512d68b6da6ea09ef6b7f00218617c8e0440e3cec7364`.
+That console already has an old demo1 marker but no result. An unchanged log
+is **PENDING**; a fresh result relying solely on the unchanged old marker
+requires attribution review. Every retained result must contain 969 frames,
+positive finite seconds/fps and mutually consistent printed rounding. Errors,
+malformed records, a nearest demo2 marker, and CR/LF joining fields or marker
+words across physical lines fail closed. Ordinary DOS line endings and
+horizontal tabs remain valid.
+
+After actual daemon/disk and transport closure, preserve the native properties
+and make the root-authored receipt described by the helper. Use a whole-helper
+30-second outer deadline as well as its inherited 15-second `mtype` deadline;
+JSON, disk and console bounds are 64 KiB, 128 MiB and 16 MiB, respectively.
+Console parsing streams physical lines, keeps only the nearest marker and
+caps results at 1,024. The final root microtests passed **14 methods**, native
+exit 0, 2.54 seconds process wall time and 28,692 KiB peak RSS, with a 256 MiB
+address-space / 20 CPU-second limit. Actual CLI extraction of the closed
+**pre-run** copy returned native exit 1 / PENDING; a wrong receipt pin was
+also rejected. Receipt:
+`fpga-console-root-final.hhhpbilJ/ROOT_FINAL_MICROTEST_RECEIPT.json`, SHA
+`42eed0a7c343a51706dc822cc9eddd4325308afb28fba01be6f679f6e5b35101`.
+
+Exit 0 means only `CLOSED_CONSOLE_EVIDENCE_VALIDATED_NOT_FPGA_ACCEPTANCE`.
+All FPGA/native-closure/hardware-provenance/cold-reset fields remain false.
+The root receipt is a caller assertion, and copied/shifted historical text is
+not fresh execution proof. Root must separately establish the real cold
+release, bitstream/daemon/source/clock ancestry, native shutdown observations
+and continuous movie coverage. No actual final hardware disk has passed this
+helper yet.
+
 The passive recorder is private BRAM: arming/draining it does not modify guest
 RAM, halt execution or flush caches. Stream binary VENVCAP1 over **non-PTY**
 SSH directly to the host; keep progress on stderr and credentials out of
