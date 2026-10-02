@@ -3120,3 +3120,29 @@ unapplied PS2 proposal, universal device timing or new RTL. Current verified
 gameplay IPC remains **0.40394810**,5c2491 clocks
 **1,499,999,637–1,599,999,637**. Original Quake continues; current-profile
 CoreMark coverage and FPGA administrative/RAM-reservation blockers remain open.
+
+### October 2 10:35UTC: refreshed current-build gameplay IPC
+
+Newest qualified100M-clock window is **2,499,999,637–2,599,999,637** on the
+same frozen5c2491 executable/original Quake invocation: **0.41798714 IPC**,
+41,798,714 retire events =31,848,217 primary+9,950,497 secondary events,
+CPI2.392418102. Both endpoints reconcile U+V exactly;64 state bins sum to
+clock count. Root and peer independently view advancing combat/camera scenes
+in raw17/18, with exact320x200 lossless RGB previews and published SHA binding.
+Publication clocks are bracketed by PERF/following progress, not exactly tagged.
+
+Root holds/re-reads851,041 bytes of original owner-FD3 log inode6042054, SHA
+`fee647c554560554f3300f6e7d793332f9b9690de79d14b60d13458c68f3045f`.
+Complete endpoint rows7514/7786 have SHA
+`ec94df85df06b9b5e6023a4db6790bc19bc79881e9d5382ae5d871b8c4dc16f4`/
+`fad87ac29c691b657bfe1bec563177675cae36465f028fb7b78ed63f95eb545f`.
+Original process starts/executable/INV, fifteen non-disk pins, two private ROMs,
+profiler/core/DPI semantic-source hashes and cap/OOM0 hold. No guest disk is
+opened. Root receipt `root-qualified-gameplay-window-2p5-2p6.json` has SHA
+`2a84fc0ee0d6c17c69f7e78d3ea55c88afef2ebf9421f1e1ce567704f26ae5dd`.
+
+Use this newer measurement in status reports instead of the earlier same-build
+0.40394810 window. No intervening core fix occurred; different scenes/windows
+do **not** establish performance gain. This is existing retire-event IPC,
+not REP-normalized instruction CPI, hardware FPS or closed timedemo/full-suite
+acceptance. Original Quake remains live and unmodified.
