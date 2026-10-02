@@ -2584,3 +2584,34 @@ Quake5c2491 remains cold and live, with no snapshots, guest hacks or rebuild.
 The entire standard suite is still unqualified pending its completed timedemo
 and the remaining evidence checks. Gameplay baseline remains **0.43038841**,
 4092c92a clocks **2,199,999,637–2,299,999,637**;5c2491 has no gameplay IPC yet.
+
+### October 2 04:46UTC: user confirms closed desktop; strict Win95 gate PASS
+
+After seeing the linked actual CLOSED raw8, the user explicitly confirms
+"looks clean" and separately requests UI interaction. The human authority
+receipt binds that raw SHA, the5c2491 model, original invocation and final
+resource ordering; SHA
+`fe1f520fbade1d7274b2fe4d8d79bd31a3a66714ccab61fd4504ab8052e54b62`.
+It does not claim UI interaction has occurred.
+
+The unchanged `tools/check_win95_standard_closed.py`, SHA
+`fc3062576212fa8c280debf05b563ce9731111422ebc44a56d765a49c9a84120`,
+actually returns0 with **PASS: Win95 cold boot to desktop only**. Its exact
+output is retained at `uVGIvV/standard-acceptance/root-win95-closed-pass.json`,
+SHA `812f90c7847e0bce35cd54efbdea3fa8393d046ae86fd4e5effa35dabe82857c`.
+The checker validates the closed log/private disk, capture grammar, frozen
+input pins, externally pinned human review and actual supervisor closure.
+The original wrapper result remains CLOSED_UNQUALIFIED; it is not rewritten.
+**suite_acceptance=false** remains correct: the current Quake timedemo is
+unfinished, and the separate Win95 UI robustness request is still pending.
+
+The next user request prioritizes a full FPGA Quake timedemo and movie. SSH
+to the recovered RK board succeeds, but the supplied administrative credential
+is rejected by both root authentication and riguke sudo. No programming or
+PL MMIO access has occurred; FPGA-manager state is unknown. A read-only backup
+of its persisted September5 firmware has SHA
+`a0aaf0fd3f511144e0641d653cf91c66d2b2c4d17d29fea769ba02c84e383965`.
+Historical source/clock pairing is not established; this is not a5c2491 image.
+The existing cold Quake simulation remains untouched. Gameplay IPC baseline
+is **0.43038841**,4092c92a clocks **2,199,999,637–2,299,999,637**;
+5c2491 remains gameplay-unmeasured.
