@@ -2759,3 +2759,20 @@ clocks/305,822,521retires in startup, not gameplay/timedemo completion. No new
 gameplay IPC: verified baseline **0.43038841** belongs to older4092c92a, clocks
 **2,199,999,637–2,299,999,637**. Board deployment remains blocked by administrative
 access and exclusive boot-time guest RAM reservation; no PL MMIO/programming.
+
+Proposed generic controller repair (source review only, **not implemented**):
+retain one translated RX skid byte and one pending ACK; arbitrate retained/current
+scan before ACK before controller reply, and retire producers only on actual
+FIFO commit using `!full || keyboard_rdreq`, excluding reset/self-test. Hold
+IBF until its ACK commits rather than treating unrelated OBF data as completion.
+Inhibit additional receive frames while the RX skid is occupied. Own each I/O
+write transaction so a held strobe cannot repeat a device request or reinterpret
+a command parameter. In the headless AUTOACK profile, do not initiate the physical
+SEND FSM that otherwise times out despite the synthetic ACK; retain physical
+handshake behavior with AUTOACK disabled. This needs only small producer state,
+not a bigger/multiport FIFO or core change. Required future red-to-green micros:
+exact make/raw/break/F0 collisions; full+read and pending-producer drain exactly
+once; IBF/held-write/parameter cases; reset/self-test cancellation; F0→LED-command
+→suffix break preservation; AUTOACK-off physical handshake; existing ordinary
+stream/parity controls. A skid-aware observer must distinguish retained RX from
+FIFO commit. No new controller candidate or full model rebuild is launched.
