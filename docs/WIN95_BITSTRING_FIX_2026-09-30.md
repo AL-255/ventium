@@ -2678,3 +2678,37 @@ remain live; root observed **724,219,234 clocks /279,584,431 retire events**
 at05:53UTC. This is startup progress, not gameplay IPC. Verified gameplay
 baseline remains **0.43038841**,older4092c92a clocks
 **2,199,999,637–2,299,999,637**;current5c2491 remains gameplay-unmeasured.
+
+### October 2 06:16–06:27UTC: clean daemon compile and135 stub checks
+
+Isolated board-daemon source removes the default BDA LED rewrite/L1 flush and
+rejects intervention modes. Generic startup checks validate manager state,
+unmasked nonoverlapping guest-DDR extents, media/ROM geometry and complete actual
+ROM reads before release. Root also spots unchecked shared-memory pointer/length
+arithmetic; the copy now validates the entire extent by subtraction before
+pointer formation/copy, including null, underflow, overflow and one-past cases.
+Canonical external flow and frozen current5c simulation inputs are unchanged.
+
+Final source SHA `e5a378f9d2960dbad583dd04df05e38f3ae5049d0e5d0fb4b2a0ed7faaa5150e`;
+static AArch64 ELF SHA
+`3feafe09a07b397cec4a61b435383f8c603f6e60db267e10958388ccad3e931c`.
+Actual three compile waits0/link0/phase0/wrapper0; diagnostic macro build fails
+as required. The production ELF is never executed. Actual stub-host native
+wait0 and wrapper0 pass **135 cases** with31 I/O interpositions, no real PS
+backend or devices. Native log SHA
+`039e45701a5ff0a1d193581f729493f8c2ffbaa83e734881753c2d973cb2ca1a`.
+Each phase is below540seconds,4GiB/64tasks/swap0; all OOM counters0.
+Qualification receipt SHA
+`001eafb4f83b87b47c830623ab0b6e51bebf2b9d8a98834f30d67e1435c8e7d7`.
+Root independently checks actual closed logs/waits, ELF architecture/hash and
+source/object stability. Dependency hashes are post-build observations, not
+precompiler ancestry. Checked-in patch and byte-exact host fixture preserve
+this work; no broad guest, hardware, attach or runtime media-error pass is claimed.
+
+Separate static PS2 review confirms an incoming scan byte can collide with
+`VEN_KBD_AUTOACK` and be overwritten byFA in the FIFO producer. The isolated UI
+driver must not count `recv_final` alone as byte acceptance; deterministic
+unchanged-controller microproof and UI interaction are still pending. No PS2
+RTL change or new long UI run has occurred. Verified gameplay IPC remains
+**0.43038841**,older4092c92a clocks **2,199,999,637–2,299,999,637**;
+current5c2491 remains gameplay-unmeasured, with its original cold Quake still live.

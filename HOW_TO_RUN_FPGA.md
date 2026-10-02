@@ -184,8 +184,9 @@ be treated as one versioned set.
   inspected September board shim also rewrites BDA LED state at `0x497` and
   flushes L1 by default. Clean acceptance requires a source-audited daemon
   without that intervention. Do not infer cleanliness from a binary name.
-  The isolated October 2 replacement is still being qualified; this guide
-  does not certify it or the retained September 5 bitstream as a matched set.
+  The isolated October 2 replacement passes compile/link and stubbed-host
+  checks only; this guide does not certify it or the retained September 5
+  bitstream as a hardware-qualified matched set.
 - Trace freeze and comparator modes can stop or reset the core. Use them only
   after a normal run has failed or when the run is intentionally diagnostic.
 - Never access the PL AXI-Lite window through `/dev/mem` unless
@@ -627,7 +628,7 @@ zero RAM, mount a disk, or release the core):
 The older implementation nevertheless attempts to **map guest DDR** during
 `--ident`. Do not use that binary on the blocked October 2 boot. A genuinely
 control-only IDENT path must be confirmed in the exact replacement source and
-binary; the isolated replacement is not yet deployment-qualified.
+binary; the isolated replacement is not yet hardware/deployment-qualified.
 
 ```bash
 ssh -F "$SSH_CONFIG" -t "$BOARD" 'sudo /tmp/ao486/ao486d --ident'
@@ -1131,6 +1132,9 @@ existing Python `mmap` diagnostics instead.
 
 ### `ao486d` modes
 
+The following table describes the historical diagnostic daemon, **not** the
+clean profile. Diagnostic options cannot be used to claim clean acceptance.
+
 | Option | Purpose |
 |---|---|
 | `--ident` | Read IDENT, status, control, and basic debug state; does not initialize/run the guest |
@@ -1143,6 +1147,49 @@ existing Python `mmap` diagnostics instead.
 | `--cmpcfg`, `--cmprng` | Retire comparator diagnostics |
 | `--inject-keys` | PS-side BIOS-keyboard-buffer injection plus cache flush; diagnostic, visible only to BIOS-buffer consumers |
 | `--stall-flush` | Stale-line watchdog workaround; never a correctness pass |
+
+### Clean board-daemon profile (October 2: offline qualification only)
+
+[The reusable patch](fpga/patches/ao486d-clean-admission-20261002.patch)
+targets `$FLOW/sw/board_shim.cpp` with original SHA
+`e92326c629183330a4d05745a2f9b2e7268ca0e3217d47228e768fb705a71740`.
+Its qualified result has SHA
+`e5a378f9d2960dbad583dd04df05e38f3ae5049d0e5d0fb4b2a0ed7faaa5150e`.
+The canonical external flow remains unchanged; the tested build used an
+isolated source copy. Check the exact source pin and patch applicability before
+preparing another copy. Do not apply it to a running verification input.
+
+The profile removes the default BDA LED rewrite/cache flush, rejects intervention
+flags/environment, requires an operating FPGA manager, rejects guest-DDR overlap
+with System RAM, and makes `--ident` control-only. It validates ROM/media geometry,
+tracks complete startup ROM reads, and keeps reset held on startup failure.
+Shared-memory callbacks now check lower bounds and the complete transfer extent
+before forming pointers or copying; null buffers and overflow/underflow are
+rejected. Cold mode requires explicit `--bios` and `--hdd`; `--mem` accepts only
+**16**, matching the unchanged backend, not the full-PC simulation's 32 MiB.
+Compile without `VEN_IDE_RB_DIAG`; the original diagnostic Makefile is unsuitable.
+
+The final static AArch64 ELF at
+`/var/tmp/ventium-fpga-quake-oct02.rc0wVn/clean-daemon/build-cross.89xNA1T6/ao486d.clean`
+has SHA `3feafe09a07b397cec4a61b435383f8c603f6e60db267e10958388ccad3e931c`.
+It compiled/linked successfully and was **never executed**. The
+[host-only fixture](fpga/board-tools/tests/test_ao486d_clean_guard.cpp) passed
+**135 cases**, with actual native exit0 and no OOM; it interposes all 31 declared
+I/O entrypoints and links no real PS backend. It deliberately uses fake ROM,
+media, manager, memory-map and MMIO state: neither that test nor the ELF build
+proves physical reservation, cache coherence, guest boot or timedemo completion.
+For reproduction, place the byte-exact fixture under an isolated `tests/`
+beside the patched `src/board_shim.cpp` and pinned `src/ps/` inputs; never
+execute the production daemon as a unit test. Exact commands, wrap list, waits
+and proof limits are retained in that leaf's `README.md`,
+`qualification-receipt.json` and `build-host.IKHMZFGU/`.
+
+Dependency/header and static-library hashes observed after compilation establish
+post-build stability only, not loaded-header ancestry. Runtime IDE media-error
+handling and attach mode remain outside this gate. The board's missing RAM
+reservation, administrative access and image/register/clock compatibility must
+still be resolved before hardware use. No FPGA rebuild is implied by this
+PS-side software preparation.
 
 `ao486d` must run as root because it maps `/dev/mem`.
 
