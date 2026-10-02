@@ -6,17 +6,19 @@ debug tools as inspected through **2026-08-23**, with the safety preflight
 updated on **2026-10-02**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
 
-> **Deployment stop condition (2026-10-02):** SSH to
-> `riguke@rk-xczu15eg-f.local` / `riguke@10.0.0.214` works, but administrative
-> authentication is unresolved and FPGA-manager state is `unknown`.
-> More importantly, this boot has **no `/reserved-memory` device-tree node**:
-> Linux's memory description includes the entire hardcoded guest aperture,
-> **`[0x60000000, 0x70000000)` (256 MiB)**. Do not launch a DDR-using daemon,
-> map/zero this aperture, or access unconfigured PL registers. Boot argument
-> `cma=512M` is **not** an exclusive guest-RAM reservation. Correct boot-time
-> reservation, administrative access and manager/image compatibility must be
-> proved before the deployment commands below are used. No bitstream was
-> programmed during this inspection.
+> **Deployment update (2026-10-02 19:41 UTC):** administrative authentication
+> is resolved. The board rebooted with a minimal boot-DT change reserving
+> **`[0x60000000, 0x70000000)` (256 MiB)** as non-reusable `no-map` memory.
+> Root verified the effective DT, non-overlapping `/proc/iomem`, and boot log;
+> CMA now occupies a separate interval. The original DT is retained as
+> `/boot/firmware/system.pre-ventium-oct02.dtb`. The recovered August 29
+> capture image (`279bc2c0…895064fd`) is programmed, manager state is
+> `operating`, and IDENT is `a0486501`. It is a historical 3.125 MHz image,
+> **not** the current simulation build. Cold startup presently fails with
+> ARM-side `SIGBUS` during guest-RAM clearing, before core release. No FPGA
+> timedemo or movie is accepted yet. Do not remove the reservation to bypass
+> this mapping/access failure; use the image-matched tools described in
+> `docs/FPGA_QUAKE_DEPLOYMENT_2026-10-02.md`.
 
 The short version is:
 
@@ -617,9 +619,13 @@ reservation evidence. Decode `reg` using the tree's address/size cell counts;
 verify coverage of `[0x60000000, 0x70000000)` and absence of every overlapping
 System RAM interval. Non-root `/proc/iomem` can report all-zero addresses:
 that is masked evidence, not an empty memory map or permission to proceed.
-On the October 2 inspection the node was absent, the memory node covered the
-aperture, and the boot arguments contained only `cma=512M` for reservation.
-**This boot is not admitted for guest DDR use.**
+On the initial October 2 inspection the node was absent, the memory node
+covered the aperture, and the boot arguments contained only `cma=512M`.
+That boot was not admitted for guest DDR use. After the authorized reboot at
+19:35 UTC, boot ID `2861e4e8-cd4c-48cd-9f44-7f7d8a991ebb` has the full
+non-reusable `no-map` reservation and root `/proc/iomem` excludes the aperture
+from System RAM. Recheck all of this for each subsequent boot; the retained
+receipt does not authorize a different boot or memory map.
 
 If the staged daemon is the one built from the inspected `board_shim.cpp`, its
 `--ident` path only reads the control/debug registers (it does not hold/reset,
