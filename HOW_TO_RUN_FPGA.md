@@ -20,16 +20,24 @@ not certification of the currently installed image.
 > this mapping/access failure; use the image-matched tools described in
 > `docs/FPGA_QUAKE_DEPLOYMENT_2026-10-02.md`.
 
-> **Fresh-build update (2026-10-02 20:13 UTC):** the user requested a current
+> **Fresh-build update (2026-10-02 20:35 UTC):** the user requested a current
 > **40 MHz** image. Synthesis is now running from a frozen source snapshot,
 > using the verified 5c simulator's exact 107 defines plus three hardware-only
 > defines, not the legacy FPGA defaults. `VEN_FPGA_CORE_MHZ=40` selects a real
 > 100 MHz × 10 / 25 MMCM clock (1 GHz VCO). PIT/RTC/VGA and keyboard transport
 > timing follow the physical clock. Use the documented preset-free PCAP flow
 > on the already-booted board, retain native 128-bit HP0, and invoke only
-> `fpga/run_vivado_exclusive.sh`. The current run has whole-family limits of
-> 8 GiB memory and 2 GiB swap. Build/deployment acceptance is still pending;
+> `fpga/run_vivado_exclusive.sh`. During timing optimization the same run's
+> whole-family budget was extended after host-headroom checks. After Chrome
+> exited, measured headroom allowed 18 GiB hard / 17 GiB soft memory, retaining
+> 2 GiB swap and 32 tasks. Synthesis recovered to about one productive CPU
+> core with no OOM; no route or new bitstream is complete. The Device-safe daemon
+> successor is staged and passes control-only IDENT, not cold startup yet.
+> Build/deployment acceptance is still pending;
 > see the dated deployment document for frozen hashes and exact status.
+> The current MMCM clock is named `mmcm_clk`; the tested implementation-resume
+> reporter handles that name. Set `VEN_FPGA_CORE_MHZ=40` for this checkpoint
+> and reuse completed synthesis rather than recreating the project.
 > Verified simulation gameplay IPC is 0.42633263 on 5c2491f3, clocks
 > 7,099,999,637–7,199,999,637; this is not a measurement of the new FPGA image.
 

@@ -1,13 +1,15 @@
 # RK FPGA Quake deployment — October 2, 2026
 
-## Current status (20:13 UTC)
+## Current status (20:35 UTC)
 
 Administrator access and the boot-time DDR reservation work. The board remains
 held in reset on the historical image. At the user's request, a new **40 MHz**
 current-source image is being synthesized; no new bitstream is deployed yet.
 The first daemon's SIGBUS has an instruction-level cause (`DC ZVA` on Device
 memory), and an isolated scalar-access successor is built and microtested,
-but not yet qualified on the board. No FPGA timedemo/movie is accepted.
+and staged on the board. Its control-only `--ident` probe exits zero; DDR
+initialization and cold guest startup are not yet qualified. No FPGA
+timedemo/movie is accepted.
 
 Verified **simulation** gameplay IPC is **0.42633263**, model
 `5c2491f3b2eb73243e47cb614ae6d2e36012eb36f4f402e32fa3e9da27290033`,
@@ -52,13 +54,43 @@ and HP0 remained 128 bits after propagation.
 
 Synthesis started at 20:11 UTC, `balanced` profile (Default synthesis), one
 run job/internal worker. Scope invocation is
-`1e9b119f6c8744988529c6382906ac20`; actual limits are **8 GiB memory,
-2 GiB swap, 32 tasks**, not an unbounded parent-only limit. Preliminary
-runs are gone. At 20:13:48 the scope used 5.13 GiB, peak 7.06 GiB; routing
-has not started. Do not treat process progress as a synthesis/timing pass.
+`1e9b119f6c8744988529c6382906ac20`; initial limits were 8 GiB memory,
+2 GiB swap and 32 tasks. Timing optimization grew beyond that working set.
+After repeated actual host-headroom checks, the **same invocation** was
+extended to 9 GiB (soft limit 8 GiB), then 11 GiB (soft 10 GiB), and finally
+13 GiB hard / 12 GiB soft, then 14 GiB hard / 13 GiB soft,
+retaining 2 GiB swap, 32 tasks and one run.
+At 20:31:29 it used 12.37 GiB; swap was full and the soft limit was throttling
+it. Host available memory was about 3.1 GiB. No memory-max/OOM/kill event was
+recorded; one task-cap event occurred without a corresponding tool error.
+This is resource pressure, not useful completion evidence or permission to
+expand indefinitely. The user then authorized terminating Chrome; by the
+actual process check it had already exited, so no signals were sent.
+With 7.5 GiB host-available memory, the same scope was extended to
+**18 GiB hard / 17 GiB soft**, still bounded by the reviewed 20 GiB ceiling.
+At 20:35:07 memory was 14.927 GiB, anonymous memory 13.357 GiB and host
+available memory 7.650 GiB. Pressure stopped accumulating and synthesis
+recovered to approximately one productive CPU core. No OOM/max/kill event
+occurred. The independent resource/source audit is under
+`vivado-resource-watch.rryo52rB/resource-watch.json` in the task directory.
+Preliminary runs are gone; routing has not started. Do not treat process
+progress as a synthesis/timing pass.
 Inspect area before implementation; then check routed DRC/setup/hold and
 clock reports, hash/program the artifact, measure silicon MHz, and run the
 unmodified cold timedemo with the matching widened capture tool.
+
+Preflight found the actual core clock is `mmcm_clk` (25.000 ns), whereas the
+old resume reporter searched only legacy divider names. The separately pinned
+resume script is now
+`impl-resume-current.QSFuiF98/launch_impl_existing.tcl` in the task directory,
+SHA `0299790cad0488ef90895bdbb35287c5f67d6bec6ea964fa05fb19d8f98a6f1f`.
+It accepts the actual MMCM name, validates an explicitly requested 40/45/50 MHz
+target and finite clock/slack values, and prints its completion marker only
+after successful reports. All 61 real-tclsh/stub-only cases passed; root
+independently reran them. This new resume copy does **not** change the original
+179 frozen inputs. Set `VEN_FPGA_CORE_MHZ=40` when resuming the existing XPR;
+do not regenerate the BD or repeat synthesis. A completed implementation and
+finite negative WNS still do not constitute timing closure.
 
 The FPGA's existing retired counter counts primary retire events only; it
 omits simultaneous V-pipe retire events. Its read-only cycle counter is valid
@@ -71,7 +103,9 @@ media and current model/build directories were preserved. The initial cleanup
 recovered 5.11 GiB root-disk space and 1.82 GiB tmpfs space; its SHA/path
 manifest is under `/var/tmp/ventium-generated-cleanup-oct02.xy3EgO/`.
 Intermediates are rebuildable with matching inputs, not backed up. Additional
-old tmpfs-intermediate cleanup is separately recorded.
+old tmpfs-intermediate cleanup recovered another 3.85 GiB without deleting
+model executables or sources; its manifest is under
+`/var/tmp/ventium-generated-cleanup2-oct02.9fZBVC/`.
 
 ## Boot-memory change and rollback
 
@@ -107,7 +141,8 @@ the control-only clean-daemon IDENT probe returns `a0486501`, CTRL `1` (reset).
 
 This historical RK image targets `xczu15eg-ffvb1156-2-i`; its recorded core
 clock is 3.125 MHz, WNS +4.521 ns and WHS +0.014 ns. The live Linux clock tree
-reports PL0 about 100 MHz. No new Vivado run was launched. It is **not** a
+reports PL0 about 100 MHz. This was a recovered artifact, not a newly built
+image; the current-source build above is separate. It is **not** a
 current-5c hardware qualification: the external board flow was untracked and
 no exact archived source/daemon pairing proves that ancestry.
 
@@ -169,13 +204,40 @@ same address returned zero using `str xzr` and `dsb sy`. Neither experiment
 released the guest or changed its disk. This confirms the instruction/mapping
 mismatch; it does not yet qualify the complete replacement daemon.
 
+The successor ARM binary is `/tmp/ao486/ao486d.device-safe-oct02`, SHA
+`03e1860ffb80a4b3113e2644259933a95650e687fc0ca57ebf69ee04ad94c4b6`.
+It uses explicit scalar Device-memory loads/stores and normal-memory file
+bounces instead of libc bulk operations on `/dev/mem`. Bounded host tests
+checked sizes, aliases, partial overlap, short reads and file transfers;
+cross-compilation and disassembly also passed. At 20:20 UTC its `--ident`
+returned zero, IDENT `a0486501`, CTRL `1`, and explicitly left DDR unmapped.
+That is control-path evidence only; do not count it as guest startup.
+The updated host-stub startup gate also passed in 1.5 seconds: non-operating
+manager/System-RAM overlap are rejected before mapping, malformed/short ROM
+loads and rejected Device aliases/bounds do not release the guest, and a valid
+stubbed startup holds then releases exactly once. Its proof is under
+`startup-guard-hoststub-axi-audit/` in the task directory. It uses ordinary
+host RAM and stubbed x86/IDE, not real ARM Device execution or ROM correctness.
+
 ## Movie requirements
 
 The passive recorder is private BRAM: arming/draining it does not modify guest
 RAM, halt execution or flush caches. Stream binary VENVCAP1 over **non-PTY**
 SSH directly to the host; keep progress on stderr and credentials out of
 commands/scripts/logs. The armed first capture has not produced a frame while
-the guest remains in reset.
+the guest remains in reset. That failed old capture is a 16-byte header-only
+archive, not a movie. No capture process remains active.
+
+The newly staged wide probe is `/tmp/ao486/ven_board_probe.wide-oct02.py`,
+SHA `cd2842b6da87df26a5fa16840903f8347c628d718239a1d183aba578c038b102`.
+It belongs to the new 512 KiB capture interface, **not** the currently loaded
+historical image. After programming, use observed CSR dimensions as authority;
+`video_lores=1` decimates scanout but does not force Mode 13h. A uniform
+320×200 stream should explicitly request that geometry and `--skip-unmatched`
+to skip BIOS/text modes without resizing them. Confirm the actual geometry
+before interpreting its pixels. The current decoder's default lossy H.264
+output is not a lossless RGB movie, and the old private FFV1 assembler pins
+historical tool provenance; neither is automatic acceptance for the new run.
 
 Preserve raw colors and dimensions. Presentation is 15 fps, with no gamma,
 brightness or contrast processing. Retain capture-cycle timestamps; a
