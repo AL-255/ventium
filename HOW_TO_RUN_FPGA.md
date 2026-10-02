@@ -57,6 +57,26 @@ not certification of the currently installed image.
 > Verified simulation IPC remains 0.42633263 on 5c2491f3, clocks
 > 7,099,999,637–7,199,999,637; it predates this unmeasured FPGA candidate.
 
+> **Live-resource update (2026-10-02 22:13:50 UTC):** after a fresh host
+> available-memory check above 5 GiB, root changed only the live cgroup to
+> **19 GiB `MemoryHigh` / 20 GiB `MemoryMax` / 2 GiB `MemorySwapMax` / 48
+> `TasksMax`**. The launch environment remains
+> `VENTIUM_VIVADO_MEMORY_MAX=18G`. `memory.events.high` is 16; all OOM counters
+> remain zero. This is neither synthesis completion nor timing, fit, deployment,
+> or hardware-performance qualification. Verified simulation gameplay IPC remains
+> 0.42633263 on frozen 5c2491f3, clocks 7,099,999,637–7,199,999,637; it predates
+> the unmeasured FPGA candidate.
+
+> **Board availability recheck (2026-10-02 22:02/22:07 UTC):** the retained
+> key-only, read-only receipt records manager `operating`, the same boot ID, and
+> 374 MiB free on the shared root/tmp filesystem; staged daemon, probe, and cold
+> disk hashes match the dated deployment record. Root's separate 22:07 recheck
+> confirmed the reserved interval in root IOMEM, with no guest running. At
+> 22:19 root additionally verified the live DT node's exact base/size and
+> `no-map` property, unchanged boot ID, and non-overlapping IOMEM interval.
+> This does not identify a new bitstream or qualify
+> a clock, cold startup, Quake, Win95, or FPGA IPC.
+
 The short version is:
 
 1. Record the exact source state.
@@ -1489,6 +1509,28 @@ framebuffer and must not be presented as an image. Use `vga-capture` for a
 passive rendered-pixel frame; its 512-KiB RGB332 private BRAM holds a complete
 720x400 text scanout (288,000 bytes) as well as Mode 13h. Larger modes report
 overflow rather than emitting a truncated image.
+
+For the October 2 widened capture candidate, use its separately staged,
+image-matched `/tmp/ao486/ven_board_probe.wide-oct02.py`, **not** the historical
+probe with the currently loaded August image. Stream binary pixels over
+non-PTY SSH to a host-owned run directory rather than accumulating frames on
+the board. Root's two actual-board synthetic FIFO tests passed byte integrity
+and correctly exposed producer failure after consumer loss; they are transport
+tests only, not hardware captures. Their receipt and exact pins are recorded
+in `docs/FPGA_QUAKE_DEPLOYMENT_2026-10-02.md`.
+
+Start the FIFO reader first. Run the producer directly in a retained root
+transient service (`Type=exec`, `PrivateTmp=no`, `RemainAfterExit=yes`, separate
+stdout/stderr, bounded `TimeoutStartSec` and `RuntimeMaxSec`). Omitting
+`--collect` alone does **not** retain a successful transient unit. Do not use
+`--wait` with `RemainAfterExit`; observe actual main exit, then reader EOF/exit,
+and record both before cleanup. A retained `active/exited`, `MainPID=0` service
+is closed, not a live capture. A header or successful SSH reader can coexist
+with a failed producer and is not acceptance. The real producer needs
+`--frame-timeout 600`; choose its total running-service bound separately to
+cover cold startup, workload and closure margin. Keep all colors, dimensions,
+and accepted records unchanged; 15 fps is the movie presentation rate, not
+measured gameplay FPS or a capture-rate limit.
 
 Its `perf --seconds N` mode reads the split cycle/retirement counters, AXI
 event counters, state slots, I/O-cycle counter, and external-interrupt-

@@ -1,6 +1,6 @@
 # RK FPGA Quake deployment — October 2, 2026
 
-## Current status (21:59 UTC)
+## Current status (22:13:50 UTC)
 
 Administrator access and the boot-time DDR reservation work. The board remains
 held in reset on the historical image. At the user's request, a new **40 MHz**
@@ -18,6 +18,20 @@ Verified **simulation** gameplay IPC is **0.42633263**, model
 `5c2491f3b2eb73243e47cb614ae6d2e36012eb36f4f402e32fa3e9da27290033`,
 clocks **7,099,999,637–7,199,999,637**. This predates the FPGA candidate;
 no FPGA gameplay IPC is measured.
+
+A key-only, read-only board-availability receipt from **22:02 UTC** is
+`/var/tmp/ventium-fpga-quake-oct02.rc0wVn/board-availability-audit/BOARD_AVAILABILITY_2026-10-02T220221Z.md`,
+SHA `6857a4865b9dd32e053d918671c0287de4ca20bf6b7f61e1f4a954b0b96e36a6`.
+It records manager state `operating`, the same boot ID, 374 MiB free on the
+shared root/tmp filesystem, and matching hashes for the staged device-safe
+daemon, widened probe, and cold disk. At **22:07 UTC**, root separately
+rechecked the root IOMEM view, with no guest running. At **22:19 UTC**, root
+also read the live DT node `reserved-memory/guest-ram@60000000`: its 16-byte
+`reg` selects base `0x60000000`, size `0x10000000`, and its zero-length
+`no-map` property exists. The unchanged boot ID and root IOMEM independently
+show `[0x60000000, 0x70000000)` reserved outside System RAM. These are readiness facts
+only; they neither identify a newly programmed bitstream nor qualify its clock
+or performance.
 
 ## Fresh 40 MHz build
 
@@ -152,6 +166,14 @@ XPR below, only after its native synthesis handle closes successfully:
 /var/tmp/ventium-fpga-quake-oct02.rc0wVn/fpga40-task48-retry.5ZayIg/output/rk_ao486_system/rk_ao486_system.xpr
 ```
 
+At **22:13:50 UTC**, after a fresh host-available-memory check above 5 GiB,
+root changed only the live cgroup limits to `MemoryHigh=19 GiB`,
+`MemoryMax=20 GiB`, `MemorySwapMax=2 GiB`, and `TasksMax=48`. The launch
+environment remains `VENTIUM_VIVADO_MEMORY_MAX=18G`. `memory.events.high` is
+16, so this run has encountered the high limit; all OOM counters remain zero.
+That resource observation is neither synthesis completion nor timing, fit, or
+hardware qualification.
+
 Preflight found the actual core clock is `mmcm_clk` (25.000 ns), whereas the
 old resume reporter searched only legacy divider names. The separately pinned
 resume script is now
@@ -185,28 +207,41 @@ have their own PIC path. This explains the warning's scope, not interrupt-path
 qualification. Preserve it, and check DT/GIC trigger configuration separately
 before introducing interrupt-driven host service.
 
-Inspection-only Tcl is prepared at
-`/var/tmp/ventium-fpga40-inspection-oct02.U3ZJp5aC/inspect_completed_synth.tcl`,
-SHA `4ee24174b13c01471e5d5268d0dbdca09746a8bcebe15d902148e94b333ff121`.
-It opens the exact existing project read-only, rejects incomplete/stale
-synthesis, and emits utilization, clock/exception, DRC and timing reports
-outside the frozen tree. It must run only after the synthesis process is
+The root-validated, inspection-only synthesis Tcl is
+`/var/tmp/ventium-fpga-quake-oct02.rc0wVn/inspection-root-task48.PmBU0x/inspect_completed_synth.tcl`,
+SHA `e10c7d601e06c7625c0826de766533463421a471bf96d0f7b6b8c07e124dd891`.
+It opens only the exact retry project above, rejects incomplete/stale
+synthesis, and emits utilization, clock/exception, DRC, and timing reports
+outside both protected trees. It must run only after the synthesis process is
 closed, under the sole-Vivado/resource guard and an external deadline. It
-cannot launch, reset or regenerate a run, and report completion is not sign-off.
-Its 61 local command-stub cases passed; these are not native Vivado reports.
-Require native exit zero as well as the marker, which precedes project closure.
+cannot launch, reset, or regenerate a run, and report completion is not
+sign-off. Its completion marker precedes project closure, so require native
+exit zero as well as the marker. Root's independently validated 66-case
+Tcl-only stub receipt exited zero and hashes to
+`14b47be1951cb562de82b044a158e234422d79cf70d909b0d1cf7c4df5b9913a`;
+it is not a native Vivado report.
 
-The separate post-route inspection helper is
-`/var/tmp/ventium-fpga40-postroute-oct02.Cfe6e80r/inspect_completed_impl.tcl`,
-SHA `348f6dfd46d007cdcb4e856512a80325b8e21602f9f468e44dcd231311c69d11`.
-It requires fresh completed synthesis/implementation, exact 100/40 MHz clocks
+The separate root-validated post-route inspection helper is
+`/var/tmp/ventium-fpga-quake-oct02.rc0wVn/inspection-root-task48.PmBU0x/inspect_completed_impl.tcl`,
+SHA `694d7deea47cfd39125c2f5192ca9bf4c038ce6a9f17995d6d6cfc9059b672cd`.
+It requires fresh completed synthesis/implementation, exact 100/40 MHz clocks,
 and positively complete, error-free routing. It produces the same nine reports
-plus route status, detailed unwaived CDC and four bounded same-domain
-setup/hold reports. All 114 local command-stub cases passed; no actual routed
-inspection has run. Its completion marker follows project closure, but native
-exit zero remains required. Optional period-minus-slack estimates are explicitly
-conditional, path-local and withheld when requirement/exception metadata is
-missing; they are neither a physical MHz measurement nor sign-off.
+plus route status, detailed unwaived CDC, and four bounded same-domain
+setup/hold reports. Its completion marker follows project closure, but native
+exit zero remains required. Root's independently validated 119-case Tcl-only
+stub receipt exited zero and hashes to
+`7b8ca4e4c8bccadb26b161b8632a3a87e7974aa0a6cde85aad8a3ee43fdd732b`.
+No actual routed inspection has run. Optional period-minus-slack estimates are
+explicitly conditional, path-local, and withheld when requirement/exception
+metadata is missing; they are neither a physical MHz measurement nor sign-off.
+
+Both helpers accept the exact retry XPR
+`/var/tmp/ventium-fpga-quake-oct02.rc0wVn/fpga40-task48-retry.5ZayIg/output/rk_ao486_system/rk_ao486_system.xpr`.
+They reject the old failed XPR under
+`/var/tmp/ventium-fpga-quake-oct02.rc0wVn/fpga40-vco1g.3vpbYB/`, even if it is
+readable, and reject report destinations within either the frozen or retry
+artifact tree. Those guards establish provenance and avoid contaminating the
+preserved inputs; they do not make a Vivado result or sign-off claim.
 
 The FPGA's existing retired counter counts primary retire events only; it
 omits simultaneous V-pipe retire events. Its read-only cycle counter is valid
@@ -368,6 +403,47 @@ then decodes it and checks byte-exact RGB equality. Its limits are 2 GiB input,
 enforced per-stage pipe/exit deadline. These host-only tests include stalled
 pipes and do not prove a real capture or timedemo. Use an outer whole-helper
 deadline as well. Do not reuse the historical assembler's old-source claim.
+
+### Board-to-host transport qualification (22:15–22:16 UTC)
+
+Root ran two **synthetic-only** FIFO tests on the actual Debian/systemd 252
+board. Neither opened MMIO, armed capture, started a guest, nor produced a
+hardware movie. The complete receipt is
+`/var/tmp/ventium-fpga-quake-oct02.rc0wVn/board-fifo-transport-root.wLdy2xHK/ROOT_SYNTHETIC_TRANSPORT_RECEIPT.json`,
+SHA `ab033a55279a289e3b74cb7f46863c86792a3f1fb3bfc58675fdfd8993a69849`.
+
+The positive test used a private `root:riguke` directory (0750), a binary
+FIFO (0640), a non-PTY key-authenticated SSH reader started **first**, and a
+direct-exec root transient service with separate stderr. All 192,124 synthetic
+bytes arrived unchanged (SHA
+`293fe0156e98c902860c5f089b22f75822001ababb4f9ca07c216b5d357aa269`).
+The producer's observed native exit and the reader's actual exit were both
+zero; byte comparison passed and stderr was empty. The negative test closed
+the consumer after the 16-byte header: its reader still exited zero, but the
+Python producer exited **1** with `BrokenPipeError`. Header/reader success must
+therefore never substitute for completed producer evidence. Both test units
+were subsequently stopped/unloaded and their PIDs are absent; their completed
+properties and the failed-test stderr are retained on the host.
+
+For the real producer, use `Type=exec`, `PrivateTmp=no`,
+`StandardOutput=file:<private FIFO>`, and separate `StandardError=append:`.
+Set **`RemainAfterExit=yes`** to retain a successful transient unit until its
+native exit is recorded; omitting `--collect` alone does not retain a successful
+unit. Do not combine this with `--wait`. A retained `active/exited`, `MainPID=0`
+unit means the main process has **closed**, not that capture is still running.
+Set `TimeoutStartSec=20s` for the reader-first FIFO rendezvous, independently
+of the running-service bound. A real capture bound must cover the 600-second
+pre-release/frame wait, the admitted 7,200-second workload, and closure margin;
+the synthetic test's 60-second runtime is not the real-run bound.
+
+At 320×200, one RGB332 record occupies 64,036 bytes. The current single-stream
+helpers accept at most 32,768 records (1.954 GiB per raw/normalized stream), so
+two-hour coverage requires an average below 4.551 accepted records/s. Monitor
+actual timestamps and remaining quota; **15 fps is presentation, not a capture
+rate limit**, and no complete-time-span claim follows from this capacity cap.
+Keep the producer's natural cadence; do not silently pace/drop records to fit.
+The maximum raw/normalized/movie budget plus disk reserve is about 6.91 GiB,
+and the small fixtures do not establish maximum-scale encoder throughput.
 
 Preserve raw colors and dimensions. Presentation is 15 fps, with no gamma,
 brightness or contrast processing. Retain capture-cycle timestamps; a
