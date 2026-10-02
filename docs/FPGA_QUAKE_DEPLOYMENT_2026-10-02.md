@@ -1,10 +1,13 @@
 # RK FPGA Quake deployment — October 2, 2026
 
-## Current status (21:07 UTC)
+## Current status (21:59 UTC)
 
 Administrator access and the boot-time DDR reservation work. The board remains
 held in reset on the historical image. At the user's request, a new **40 MHz**
 current-source image is being synthesized; no new bitstream is deployed yet.
+The original run was stopped after read-only debugger evidence identified a
+deadlocked vendor helper. A replacement with the same frozen RTL/defines is
+now computing under a corrected fixed task cap. Neither run is a synthesis pass.
 The first daemon's SIGBUS has an instruction-level cause (`DC ZVA` on Device
 memory), and an isolated scalar-access successor is built and microtested,
 and staged on the board. Its control-only `--ident` probe exits zero; DDR
@@ -13,12 +16,16 @@ timedemo/movie is accepted.
 
 Verified **simulation** gameplay IPC is **0.42633263**, model
 `5c2491f3b2eb73243e47cb614ae6d2e36012eb36f4f402e32fa3e9da27290033`,
-clocks **7,099,999,637–7,199,999,637**. No FPGA gameplay IPC is measured.
+clocks **7,099,999,637–7,199,999,637**. This predates the FPGA candidate;
+no FPGA gameplay IPC is measured.
 
 ## Fresh 40 MHz build
 
-The current build is under
+The frozen source snapshot and original preserved output are under
 `/var/tmp/ventium-fpga-quake-oct02.rc0wVn/fpga40-vco1g.3vpbYB/`.
+The live replacement output is under
+`/var/tmp/ventium-fpga-quake-oct02.rc0wVn/fpga40-task48-retry.5ZayIg/`;
+it reads the original frozen source paths, not today's dirty worktree.
 Its frozen-input manifest SHA is
 `adfb6ff13531761637599ec837527a788483706413b78735666023460f121c1c`:
 179 explicit source/evidence files, the verified simulator's exact 107 defines,
@@ -85,6 +92,65 @@ progress as a synthesis/timing pass.
 Inspect area before implementation; then check routed DRC/setup/hold and
 clock reports, hash/program the artifact, measure silicon MHz, and run the
 unmodified cold timedemo with the matching widened capture tool.
+
+### Vendor helper deadlock and bounded restart
+
+Timing Optimization finished at 21:39:51 UTC and Technology Mapping began,
+but productive CPU stopped around 21:40. The cgroup reached its 32-TID cap;
+`pids.events.max` advanced to 2. All 17 processes / 32 TIDs remained live,
+with no final DCP or completion marker. The same invocation was extended to
+20 GiB hard / 19 GiB soft after another headroom check; OOM/max/kill counters
+remained zero. A reversible task-cap increase to 36 did not recover it.
+
+Bounded, read-only GDB attachments found the synthesis thread waiting in
+`HARTNDb::loadOptimizedGenomes()`. Its task worker was instead deadlocked in
+`pthread_cond_destroy` during board-catalog initialization/unwind, while six
+Taskflow startup workers still waited on its condition variables. A separate
+read-only vector inspection established **eight requested workers, only six
+created**. This strongly supports a one-shot partial thread-pool construction
+failure at the task cap; no exact rejected pthread errno was captured.
+Increasing capacity afterward cannot restart an already-unwinding constructor.
+The root diagnosis receipt is `synth-task-cap-deadlock-oct02.md` in the task
+directory. Successful debugger probes detached with native exit zero and
+disabled core dumps. An earlier debugger-only probe exhausted its own 1 GiB
+address-space cap; that was not a Vivado/host OOM.
+
+Root deliberately stopped the original family. Native handle `12327` exited
+143; at 21:55:34 the scope was inactive and its cgroup absent, and all 17
+recorded PIDs were absent by 21:56:10. The wrapper also emitted a parse warning
+after its on-disk guard was edited during cleanup: do not edit a running shell
+launcher's source. No synthesis success is inferred from that closure.
+The final old resource audit contains 319 observations / 85 pin checks, SHA
+`4b1daf1da7c89e0da1c89e02a6926aa1006782ac5e5ddbfcc9449c0e8aeb723f`.
+
+The host guard now has a fixed, non-overridable **TasksMax=48**, leaving a
+bounded cushion for metadata/control threads without increasing synthesis
+jobs or `general.maxThreads`. Twelve host-only tests passed, including high
+and low task-env requests, unchanged non-Vivado profiles, explicit leaf caps,
+unlimited/oversized rejection and stale smaller inherited memory requests.
+These tests mock systemd and cgroup files; they do not launch Vivado.
+
+The first replacement launch (`88482`) exited 1 before project creation:
+the repository's `.Xil` symlink points at the full external volume. Its small
+logs are retained. Use the owned replacement directory as **working directory**
+as well as output/TMPDIR; changing TMPDIR alone does not relocate Vivado `.Xil`.
+Do not alter the external volume or the user's symlink to bypass this.
+
+The corrected native handle is **`74097`**, invocation
+**`bb0afade4190423b8903316598a14ded`**. Synthesis launched at **21:57:56 UTC**,
+after BD validation retained 128-bit HP0 and the exact 110 defines / 40 MHz
+clock. Initial hard memory is **18 GiB**, soft **17 GiB**, swap **2 GiB**,
+tasks **48**, one run job. With 21.7 GiB available after old-run cleanup,
+starting at the full 20 GiB ceiling would leave too little host reserve.
+At 21:58:14 the new synth worker was using a productive CPU core, memory was
+3.08 GiB, and task/memory-limit events were zero. Root rechecked all 179 frozen
+hashes successfully. Recovery is not proved until it passes the stalled stage
+and completes. Preserve the original output; inspect/resume the replacement
+XPR below, only after its native synthesis handle closes successfully:
+
+```
+/var/tmp/ventium-fpga-quake-oct02.rc0wVn/fpga40-task48-retry.5ZayIg/output/rk_ao486_system/rk_ao486_system.xpr
+```
 
 Preflight found the actual core clock is `mmcm_clk` (25.000 ns), whereas the
 old resume reporter searched only legacy divider names. The separately pinned

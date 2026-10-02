@@ -41,6 +41,22 @@ not certification of the currently installed image.
 > Verified simulation gameplay IPC is 0.42633263 on 5c2491f3, clocks
 > 7,099,999,637–7,199,999,637; this is not a measurement of the new FPGA image.
 
+> **Build recovery (2026-10-02 21:59 UTC):** the original synthesis helper
+> deadlocked during partial board-catalog thread-pool initialization after
+> reaching its 32-TID cgroup limit. Root diagnosed it with bounded read-only
+> debugger attachments, then stopped that family (native exit 143, scope and
+> all recorded PIDs gone). The corrected host guard fixes **TasksMax=48**,
+> still one synthesis job and `general.maxThreads=1`; twelve host-only guard
+> tests pass. A new run uses unchanged frozen RTL/110 defines/40 MHz MMCM,
+> **18 GiB hard / 17 GiB soft / 2 GiB swap**, with output under
+> `/var/tmp/ventium-fpga-quake-oct02.rc0wVn/fpga40-task48-retry.5ZayIg/`.
+> Use that owned directory as the Vivado **working directory**, not only
+> TMPDIR/output: the repository `.Xil` symlink points at the full external
+> volume. Do not edit a running shell launcher's source. Synthesis completion,
+> routed timing, deployment and cold timedemo/movie acceptance remain pending.
+> Verified simulation IPC remains 0.42633263 on 5c2491f3, clocks
+> 7,099,999,637–7,199,999,637; it predates this unmeasured FPGA candidate.
+
 The short version is:
 
 1. Record the exact source state.
