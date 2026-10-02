@@ -174,6 +174,24 @@ environment remains `VENTIUM_VIVADO_MEMORY_MAX=18G`. `memory.events.high` is
 That resource observation is neither synthesis completion nor timing, fit, or
 hardware qualification.
 
+At **23:18 UTC**, timing optimization finished (logged CPU 1:20:02, elapsed
+1:20:26) and the same run entered **Technology Mapping**. Mapping helpers made
+measurable CPU progress with no task-limit event; the former idle thread-pool
+failure has not recurred. The temporary parent/helper working-set transfer
+filled the original 2 GiB and then 4 GiB swap allowances. Root changed only
+the **live scope** `MemorySwapMax` to **4 GiB at 23:20:24**, then **8 GiB at
+23:25:17 UTC**, retaining 19 GiB soft / 20 GiB hard RAM and 48 tasks. No running
+launcher, frozen source, define, project or launch environment was edited or
+restarted; the future guard still has its original 2 GiB swap ceiling.
+At the latter property readback, the host had about 3.7 GiB RAM available and
+14 GiB global swap free; scope swap use was 4 GiB. All max/OOM/kill/task-event
+counters remained zero. High-limit reclaim events did increase and are not
+reported as zero. The observer now alerts above 7 GiB scope swap or below
+1.5 GiB host available RAM. This is continued, resource-bounded mapping—not
+synthesis completion or hardware qualification. Root receipt:
+`fpga40-task48-retry.5ZayIg/mapping-live-swap-adjustments.json`, SHA
+`96484fd8c696954004a27c12678132200693e4cebdbdce9394fc7b777626b1a2`.
+
 Preflight found the actual core clock is `mmcm_clk` (25.000 ns), whereas the
 old resume reporter searched only legacy divider names. The separately pinned
 resume script is now

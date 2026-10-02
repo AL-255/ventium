@@ -67,6 +67,18 @@ not certification of the currently installed image.
 > 0.42633263 on frozen 5c2491f3, clocks 7,099,999,637–7,199,999,637; it predates
 > the unmeasured FPGA candidate.
 
+> **Mapping-resource update (2026-10-02 23:25 UTC):** timing optimization
+> finished and technology mapping is actively progressing on the same run.
+> Its temporary parent/helper working set filled the swap allowance. Root
+> extended only the live scope swap from 2 to 4, then **8 GiB**, keeping
+> **19 GiB soft / 20 GiB hard RAM / 48 tasks**. No source, running launcher or
+> launch environment changed; the future guard remains at 2 GiB swap. No OOM,
+> max or task-limit event was observed. The dated deployment document records
+> exact readbacks and the resource receipt. Synthesis, routing and hardware
+> acceptance are still pending. Verified gameplay IPC remains 0.42633263 on
+> simulation build 5c2491f3, cycles 7,099,999,637–7,199,999,637; it predates
+> the unmeasured FPGA candidate.
+
 > **Board availability recheck (2026-10-02 22:02/22:07 UTC):** the retained
 > key-only, read-only receipt records manager `operating`, the same boot ID, and
 > 374 MiB free on the shared root/tmp filesystem; staged daemon, probe, and cold
