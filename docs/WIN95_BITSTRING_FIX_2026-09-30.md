@@ -2776,3 +2776,48 @@ once; IBF/held-write/parameter cases; reset/self-test cancellation; F0→LED-com
 →suffix break preservation; AUTOACK-off physical handshake; existing ordinary
 stream/parity controls. A skid-aware observer must distinguish retained RX from
 FIFO commit. No new controller candidate or full model rebuild is launched.
+
+### October 2 07:14–07:29UTC: cold UI diagnostic staging and corrected owner
+
+First UI diagnostic is **failed/unqualified**, not a desktop/UI/suite pass.
+INV `d9180c31938247ff8e51e8d9e45a6c8e`, owner1424970/native1425001. Archived
+owner SHA `5ce6c11573225592bfbf68f085088d8738525f6745403755355a72e285a99dcc`
+matches launch observation, but a peer's later closure-hardening edit changes
+the public source at07:15:23UTC. Root stops this early with the exact owned empty
+stop request. Actual native wait0, owner2, group absent/pipe EOF/sticky-log null,
+**35,277,805clocks/2,645,272retires**, no keys or frames/UI acceptance. Complete
+closed log SHA
+`b7cc0d0e19dcca8b659c7a2081e503d3964f2dda42a24ecc62f756ff8e2ef10d`.
+Source drift remains a recorded failure, never repaired retroactively.
+
+The first staging path also fills its2GiB cgroup through sequential disk-cache
+pressure: root observes memory.events max4443 with oom/oom_kill/oom_group_kill0
+while live. It is not an observed OOM kill; source/resource qualification fails.
+A separate owner now advises consumed8MiB hash ranges DONTNEED and checks
+staging resources before native admission. It also verifies original owner-only
+cgroup census before closed-private-disk hashing, not only after it. Actual
+host-only cold-read test of the closed2GiB sparse input matches its expected SHA:
+INV `a04a95bd110b4e609dbec8272f0e4f5a`, native/wrapper0, peak20,979,712bytes
+under256MiB, all cap/OOM counters0. No guest runs in that microtest.
+
+Corrected diagnostic starts07:26:40UTC in
+`/var/tmp/ventium-fpga-quake-oct02.rc0wVn/ui-input-host/win95-ui-oct02.2`.
+Unit `ventium-diagnostic-win95-ui-oct02-r2.service`, INV
+`c6bad69eb4324b67ac3112dafce1b54a`, owner1429851/native1429881 onCPU26.
+Separately frozen owner SHA
+`85f739947fd8077d7eccbf952735e34996f665daad4513ccb0810e6a1f7043d2`
+matches actual archived source. Same qualified native509c934b, frozen5c RTL,
+fresh pristine private disk,45MHz core/PIT/RTC,90MHz VGA,32MiB, ordinary mouse
+and PS2 input. No snapshots, keyboard scripts, guest RAM changes or RTL rebuild.
+Bounds:5Bcycles/8h,2GiB/swap0/32tasks/one CPU,4GiB disk admission plus1GiB live
+headroom,250MiB merged log and100raw captures at most. Staging peak233,701,376bytes,
+all max/OOM counters0 at07:27UTC; source pins remain held. Native input endpoint
+is ready with half1875/idle4500. **Painted desktop and actual menu/dialog
+interaction remain pending**; wire markers cannot qualify actions. Never hash
+this live private disk. Original standard5c Quake is left unchanged.
+
+Fresh board read-only check07:28UTC still shows478MiB free, manager unknown,
+no reserved-memory node, `cma=512M` and sudo requiring a password. No PL access,
+programming, hardware timedemo or movie. Verified gameplay IPC remains
+**0.43038841**,older4092c92a clocks **2,199,999,637–2,299,999,637**; current5c2491
+and the separate UI diagnostic have no verified gameplay measurement.
