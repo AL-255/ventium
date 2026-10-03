@@ -1,6 +1,6 @@
 # RK FPGA Quake deployment — October 2, 2026
 
-## Current status (2026-10-03 01:04 UTC)
+## Current status (2026-10-03 01:27 UTC)
 
 Administrator access and the boot-time DDR reservation work. The board remains
 held in reset on the historical image. At the user's request, a new **40 MHz**
@@ -10,8 +10,10 @@ deadlocked vendor helper. A replacement with the same frozen RTL/defines is
 closed with native exit **0** under the corrected fixed task cap. Read-only
 checkpoint inspection also closed with exit **0**. Implementation launched
 from that same completed project at 00:29 UTC, **without resynthesis**.
-Placement has completed successfully in 29m10s; pre-route physical optimization
-is now running. Placed occupancy is 65.73% LUT / 89.11% CLB, with a native
+Placement has completed successfully in 29m10s, and pre-route physical
+optimization completed successfully in 17m42s. Routing started at about
+01:21 UTC and is now in the initial net-routing pass. Placed occupancy is
+65.73% LUT / 89.11% CLB, with a native
 high-congestion warning and estimated WNS −22.180 ns. Area fits the part,
 but preliminary timing is severely negative: the constrained
 40 MHz target is not yet a demonstrated operating frequency or timing pass.
@@ -198,6 +200,25 @@ on placed or routed designs. It is whole-design analysis (not scoped by
 `-cells`); the default level 5 hides level-3/4 hotspots. Do not open another
 Vivado against this active run, overwrite existing reports, or treat a
 congestion report as route/timing/CDC acceptance.
+
+Pre-route `phys_opt_design` subsequently completed successfully, with zero
+errors or critical warnings, CPU **17m41s** / elapsed **17m42s**. Its checkpoint
+was written at **01:20:53 UTC**:
+`output/rk_ao486_system/rk_ao486_system.runs/impl_1/rk_ao486_bd_wrapper_physopt.dcp`,
+86,100,278 bytes, SHA
+`f8f9bef610610f6ae1d94c761dfa6651933cfbb8eb538e1bf649eb7b9d6c88d6`.
+The same worker then entered `route_design`; its precondition DRC reported
+zero errors. By **01:26:50 UTC** it was still CPU-active in **Phase 4.1 Initial
+Net Routing Pass**, using 7.19 GiB scope memory with zero swap and zero
+memory/task-limit events. Root rechecked all 179 frozen-file hashes at
+01:27 UTC; no resynthesis, source edit or replacement run was performed.
+
+Routing's intermediate timing summary is **WNS −19.465 ns**. `Route 35-445`
+reports local congestion/high pin utilization in at least **329 CLBs**, which
+may affect runtime and timing closure. Initial unrouted/partially routed net
+counts are expected before initial routing and are not a terminal tool failure.
+Routing completion, final setup/hold/CDC/bus-skew review, bitstream generation,
+deployment and physical 40 MHz qualification all remain pending.
 
 Implementation native session **66620** is now live, scope invocation
 `d4a69c016ef5448ab10a01a303a752ad`, outer PID 1814754 / implementation PID

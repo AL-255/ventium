@@ -6,7 +6,7 @@ debug tools as inspected through **2026-08-23**, with the safety preflight
 updated through **2026-10-03**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
 
-> **Latest build status (2026-10-03 01:04 UTC):** replacement synthesis has
+> **Latest build status (2026-10-03 01:27 UTC):** replacement synthesis has
 > closed with native exit **0** (2h26m), and the separate read-only checkpoint
 > inspection also exited **0**. Preliminary area is **66.04% LUT / 29.70%
 > BRAM**. Clock constraints are **40 MHz core / 100 MHz PS-AXI**, but pre-route
@@ -15,9 +15,12 @@ not certification of the currently installed image.
 > Placement completed successfully in **29m10s**, with **65.73% LUT / 89.11%
 > CLB occupancy**. Vivado warns that the design is highly congested; its
 > post-placement WNS estimate is **−22.180 ns**, not a routed timing pass.
-> Pre-route physical optimization is now running from the existing XPR,
-> **without resynthesis**,
-> under the exclusive guard: **20 GiB RAM hard / 19 GiB soft / 2 GiB swap**.
+> Pre-route physical optimization also completed successfully in **17m42s**;
+> routing started at about **01:21 UTC** from the existing XPR, **without
+> resynthesis**, under the exclusive guard: **20 GiB RAM hard / 19 GiB soft /
+> 2 GiB swap**. Initial net routing is live. Its intermediate WNS is
+> **−19.465 ns**; local congestion affects at least 329 CLBs. Neither this
+> estimate nor successful earlier steps qualifies the 40 MHz target.
 > At 00:32 UTC its live task cap was extended **48 → 64** after observing
 > 45 occupied slots (mostly sleeping vendor threads); the future launch guard
 > remains fixed at 48. RAM, swap, job count and source were unchanged. The
