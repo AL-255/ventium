@@ -1586,6 +1586,9 @@ module core
   logic        seg_ext_ovr_v;  // 1 = use seg_ext_ovr instead of cur_size
   logic        seg_ext_skip;   // this beat is inside an already-checked extent
   wire  [7:0]  seg_ext_size;   // extent the LIMIT check uses (resolved below)
+  // This drives the functional segment-limit check, not just its diagnostics.
+  // In particular it must survive SYNTHESIS for the FPGA protected-mode core.
+  assign seg_ext_size = seg_ext_ovr_v ? seg_ext_ovr : {4'd0, cur_size};
 
   logic        xp_cross;
   logic [12:0] xp_end;
@@ -8571,8 +8574,6 @@ module core
   //
   // Counting before rebuilding is the point: extending the split state-by-state is
   // what C-03 exists to stop, and a measurement says which states are reachable at all.
-  assign seg_ext_size = seg_ext_ovr_v ? seg_ext_ovr : {4'd0, cur_size};
-
   logic [12:0] cur_ext_end;
   logic        cur_crosses, cross_split_capable, cross_unhandled;
   assign cur_ext_end         = {1'b0, cur_lin_nat[11:0]} + {9'd0, cur_size};
