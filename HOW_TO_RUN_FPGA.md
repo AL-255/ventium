@@ -6,7 +6,7 @@ debug tools as inspected through **2026-08-23**, with the safety preflight
 updated through **2026-10-03**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
 
-> **Latest build status (2026-10-03 04:05 UTC):** replacement synthesis has
+> **Latest build status (2026-10-03 04:40 UTC):** replacement synthesis has
 > closed with native exit **0** (2h26m), and the separate read-only checkpoint
 > inspection also exited **0**. Preliminary area is **66.04% LUT / 29.70%
 > BRAM**. Clock constraints are **40 MHz core / 100 MHz PS-AXI**, but pre-route
@@ -42,6 +42,11 @@ not certification of the currently installed image.
 > changing only high to medium placement spreading after renewed source,
 > synthesis-DCP and actual 110-define XPR checks. It is live under the exclusive
 > guard, retaining the other directives, 40/100 MHz clocks and one-worker limits.
+> Medium placement completed successfully in **27m45s**, with zero errors:
+> **218,526 LUTs (64.03%) / 37,513 CLBs (87.93%)**. This saves 372 occupied
+> CLBs (0.98%) versus high spreading, but F7/F8 mux counts remain unchanged
+> and the high-congestion warning persists. Standalone pre-route physical
+> optimization is now live; there is still no routed frequency qualification.
 > A tiny same-part native probe accepted the router directive (exit 0), but
 > does not prove this full design will route. The retry retains one CPU job,
 > 20 GiB hard / 19 GiB soft RAM and 2 GiB swap, with a phase-local 64-task

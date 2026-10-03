@@ -1,6 +1,6 @@
 # RK FPGA Quake deployment — October 2, 2026
 
-## Current status (2026-10-03 04:05 UTC)
+## Current status (2026-10-03 04:40 UTC)
 
 Administrator access and the boot-time DDR reservation work. The board remains
 held in reset on the historical image. At the user's request, a new **40 MHz**
@@ -35,7 +35,10 @@ and **1,125,751 node overlaps**; native session 8229 closed with actual exit
 **1** at **04:00:40 UTC**. A fresh **`impl_area_medium`** attempt launched
 at **04:04:20 UTC**, changing only high to medium placement spreading and
 retaining the same synthesis checkpoint, other directives and clocks. It is
-live; no new bitstream or hardware timedemo is proved.
+live. Medium placement completed in **27m45s**, with zero errors and
+**218,526 LUTs (64.03%) / 37,513 CLBs (87.93%)**. High congestion remains;
+standalone pre-route physical optimization has started. No new bitstream or
+hardware timedemo is proved.
 The first daemon's SIGBUS has an instruction-level cause (`DC ZVA` on Device
 memory), and an isolated scalar-access successor is built and microtested,
 and staged on the board. Its control-only `--ident` probe exits zero; DDR
@@ -457,6 +460,33 @@ The root launch receipt under the medium recovery CWD is
 `ROOT_MEDIUM_LAUNCH_RECEIPT.json`, SHA
 `f1c4ab25f638e190b5d6924d7964e0062683680f82dc9c0b1eea3eb61a9d61da`.
 This remains an active implementation attempt, not route/bitstream acceptance.
+
+At **04:39 UTC**, medium placement completed successfully in **27m45s**:
+zero errors/critical warnings, two warnings. Its fully placed report records
+**218,526 LUTs (64.03%), 37,513 occupied CLBs (87.93%), 58,999 FFs,
+221 BRAM tiles and 127 DSPs**. Versus the high-spread retry this adds 32 LUTs
+but saves **372 occupied CLBs (0.98%)**; F7/F8 counts remain **35,420/14,110**
+(F9 zero). Vivado still warns of high congestion: estimated global/long
+regions are **64×64 north/south**, **32×32 east/west**. Placed WNS is
+**−24.685 ns** at the configured **40 MHz core / 100 MHz PS** clocks; no
+qualified operating frequency is inferred from a global pre-route WNS.
+The standalone `phys_opt_design` command has started in the same live family.
+
+After the placed-checkpoint generation message, root hashed the completed
+**86,545,323-byte** `impl_area_medium/rk_ao486_bd_wrapper_placed.dcp`:
+`019a6e6d60c802f5b8efb0a1adbcede7bf2c686dec85a68eea1ab09f33b89e98`.
+Its `rk_ao486_bd_wrapper_utilization_placed.rpt` SHA is
+`6677760a3aa2f27ff88b303bd73aa413e2cded67f709ede593ebdc442bf63cc3`.
+These are completed placement artifacts inside a still-live implementation,
+not native-run closure, successful routing, bitstream or hardware acceptance.
+
+At **04:34:05 UTC**, root's existing board SSH session reconfirmed UID 0,
+the unchanged boot ID, manager `operating` on the historical image, and
+`60000000–6fffffff : reserved` between non-overlapping System RAM intervals.
+The staged device-safe daemon, pristine cold VHD, both ROMs and widened probe
+still match their recorded hashes; no daemon/capture process was present.
+Board root/tmp had **391,041,024 bytes** available. This read-only refresh
+does not qualify full DDR clearing, program a new image or start a guest.
 
 The **inactive**, run-bound final inspector is now
 `impl-area-medium.9i7ufg/final-inspection-prepared/inspect_completed_impl.tcl`,
