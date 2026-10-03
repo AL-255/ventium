@@ -1016,3 +1016,49 @@ continuous temporal coverage through the visible 969-frame completion result,
 plus separately checked timedemo completion. Never count 969 scanout samples
 as proof that the game completed 969 timedemo frames. Use bounded compressed
 lossless output to avoid filling the host or board filesystem.
+
+### Generic whole-record capture stop (October 3)
+
+The source-controlled probe now offers opt-in **`--stop-on-sigusr1`** for
+`vga-capture`. Its handler only sets a sticky request flag. The capture loop
+finishes any in-flight frame, record writes, flush and progress message, then
+stops before the next arm. It retains the original declared quota and prints
+the actual accepted count and SIGUSR1 close reason. Timeouts, MMIO/drain faults,
+broken pipes, KeyboardInterrupt and cleanup failures are not converted to zero.
+Previous signal handlers are restored even on error. There is no Quake-specific
+producer logic, pacing, guest mutation, RTL change or cleanup MMIO write.
+
+Root independently inspected the complete source diff/test fixture and reran
+**19 unittest methods**, actual native exit **0**, **0.009 seconds**, bounded
+by 90-second wall / 60-second CPU / 256-MiB address-space limits. Subcases use
+both direct handler requests and real own-PID POSIX SIGUSR1 delivery with
+mocked MMIO and transport. They cover record boundaries, READY wait/drain,
+repeated requests, filtered frames, failures and per-invocation restoration.
+This is not real board/SSH/capture or timedemo qualification. Client SHA is
+`fd0a83fe16ab6ccce42d6adcaef971c740119326932ec478d21b0393e33c5f68`;
+test SHA is `16c0dafc88f44c01142c2154b86858e0ad0b147be06b77695bb47054c9af26fe`.
+
+Send one SIGUSR1 only to the verified live capture PID/unit after the
+required endpoint is independently observed; wait for genuine closure. A
+request does not bound an in-flight wait/drain/write, so retain outer deadlines
+and actual nonzero failure statuses. Successful VSYNC completion naturally
+clears capture-active in the RTL; closing the mapping alone does not cancel an
+arm, and writing zero to the W1P is not an abort. Header-only/empty captures
+cannot become movies or timedemo evidence.
+
+The frozen image manifest **adfb…** and original client **cd284…** remain
+unchanged. The old helper bundle deliberately rejects this new runtime client;
+use separately reviewed/pinned derivatives which distinguish frozen hardware
+ABI ancestry from the new host-side tool SHA. The old normalizer/assembler
+accept integer nonzero producer/transport exits for **forensic prefixes** and
+retain all acceptance/coverage flags false; that is not clean-capture success.
+
+At **05:17 UTC**, after host headroom had fallen to about 4.8 GiB, root followed
+the user's existing Chrome-termination instruction. It verified main PID
+**1899606**, UID 1000, `/opt/google/chrome/chrome`, no renderer `--type`, and
+start tick **32412723**, then sent SIGTERM (native exit 0). The PID was absent
+afterward and host available memory recovered to **14,343,245,824 bytes**.
+Vivado's original worker remained productive and unswapped, with zero
+memory-max/OOM events. Its idle parent had filled the unchanged **2-GiB** swap
+cap, recording **6,596 max/fail swap events**; do not call all resource events
+zero. No Vivado restart or limit increase was made.

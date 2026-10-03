@@ -19,6 +19,7 @@ import json
 import mmap
 import os
 import re
+import signal
 import struct
 import sys
 import time
@@ -710,6 +711,10 @@ def vga_capture_probe(args: argparse.Namespace) -> int:
     session can archive frames directly on the host.  It is intentionally the
     preferred multi-frame mode: writing 969 raw frames locally would exhaust
     the board filesystem long before a Quake timedemo completes.
+
+    An optional SIGUSR1 request stops only between whole records. It does not
+    abort the recorder or bound an in-flight wait/drain/write. The original
+    stream header still declares the requested quota, not the shorter count.
     """
     if args.frames < 1:
         raise SystemExit("--frames must be positive")
@@ -720,9 +725,24 @@ def vga_capture_probe(args: argparse.Namespace) -> int:
     if args.width < 0 or args.height < 0 or bool(args.width) != bool(args.height):
         raise SystemExit("--width and --height must be supplied together, or both omitted")
 
-    fd, ctrl, _ = open_mmio(writable=True)
-    stream = sys.stdout.buffer if args.stream else None
+    stop_requested = False
+
+    def request_stop(_signum, _frame):
+        nonlocal stop_requested
+        stop_requested = True
+
+    stop_on_sigusr1 = getattr(args, "stop_on_sigusr1", False)
+    previous_handler = None
+    fd = None
+    ctrl = None
     try:
+        if stop_on_sigusr1:
+            previous_handler = signal.getsignal(signal.SIGUSR1)
+            if previous_handler is None:
+                raise RuntimeError("cannot restore the existing SIGUSR1 handler")
+            signal.signal(signal.SIGUSR1, request_stop)
+        fd, ctrl, _ = open_mmio(writable=True)
+        stream = sys.stdout.buffer if args.stream else None
         if stream is not None:
             stream.write(VCAP_STREAM_HEADER.pack(VCAP_STREAM_MAGIC, VCAP_STREAM_VERSION, args.frames))
             stream.flush()
@@ -730,6 +750,8 @@ def vga_capture_probe(args: argparse.Namespace) -> int:
         completed = 0
         oversized_skips = 0
         while completed < args.frames:
+            if stop_requested:
+                break
             try:
                 sequence, cycle, width, height, pixels, payload = _capture_scanout_frame(
                     ctrl, frame_timeout=args.frame_timeout, poll_interval=args.poll_interval
@@ -807,10 +829,27 @@ def vga_capture_probe(args: argparse.Namespace) -> int:
                 file=sys.stderr if stream is not None else sys.stdout,
                 flush=True,
             )
+        if stop_requested:
+            print(
+                f"VGA CAPTURE STOP reason=SIGUSR1 completed={completed} requested={args.frames}; "
+                "NOT timedemo or temporal-coverage acceptance",
+                file=sys.stderr,
+                flush=True,
+            )
         return 0
     finally:
-        ctrl.close()
-        os.close(fd)
+        # CAP_CTL is an arm W1P, not an abort register. A successful capture
+        # already reached READY/inactive; do not issue a cleanup MMIO write.
+        try:
+            if ctrl is not None:
+                ctrl.close()
+        finally:
+            try:
+                if fd is not None:
+                    os.close(fd)
+            finally:
+                if stop_on_sigusr1 and previous_handler is not None:
+                    signal.signal(signal.SIGUSR1, previous_handler)
 
 
 def dump_lowmem_probe(args: argparse.Namespace) -> int:
@@ -2271,6 +2310,11 @@ def parse_args() -> argparse.Namespace:
         help="passively record frozen RGB332 scan-out frames (no guest-memory or execution access)",
     )
     vga_capture.add_argument("--frames", type=int, default=1)
+    vga_capture.add_argument(
+        "--stop-on-sigusr1",
+        action="store_true",
+        help="finish any in-flight frame, then stop between records on SIGUSR1 (no recorder abort)",
+    )
     vga_capture.add_argument("--width", type=int, default=0, help="require this captured width")
     vga_capture.add_argument("--height", type=int, default=0, help="require this captured height")
     vga_capture.add_argument(

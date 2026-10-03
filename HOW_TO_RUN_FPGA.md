@@ -1366,6 +1366,23 @@ selector allow-list. `dump-ring` requires a frozen trace unless `--allow-live`
 is explicit. Treat these as paired forensic trigger/readout tools, not as
 acceptance instrumentation.
 
+### Passive video capture: whole-record stop
+
+The matching client supports `vga-capture --stream --stop-on-sigusr1`.
+Send **one SIGUSR1** to the verified live capture main PID after the required
+endpoint has been recorded. It finishes any in-flight frame and its output
+before stopping; it does not abort the FPGA recorder or touch guest RAM.
+Timeouts, MMIO faults and broken pipes remain failures. Keep an outer deadline:
+the stop request cannot interrupt a blocked drain/write. SIGINT/SIGTERM are
+not equivalent clean-stop requests, and closing a mapping does not cancel
+the recorder's arm W1P.
+
+The raw stream still declares the original requested quota. Retain that raw
+file and actual exits; normalize only complete validated records. A clean
+stop, quota exhaustion or codec pass is not full timedemo/movie acceptance.
+Tests: `python3 -B fpga/board-tools/test_ven_board_capture_stop.py` (native
+POSIX signal delivery with mocked MMIO/transport, not board qualification).
+
 ### Hosted PS/2 keyboard device
 
 The original board wrapper ties both keyboard pins high, so `--inject-keys`
