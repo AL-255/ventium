@@ -1177,6 +1177,26 @@ proves **installed-2025.2 selective tool behavior only**: OOC warnings and
 unconstrained external paths preclude a frequency qualification, and it
 does not establish Ventium area, routability, timing or guest correctness.
 
+At **09:41:31 UTC**, root launched fresh **impl_area_muxf8**, native **87162**,
+from the unchanged frozen synthesis checkpoint. Before the exclusive guard,
+an exhaustive scan again found zero Vivado-installation executables; all 179
+inputs still matched. The launcher/hook SHAs are **59e9a721… / 96ec087f…**.
+Root fully reviewed both, including the final hook revision: only actual F8
+leaves are marked, original F7 names/count must remain, and F8 count must
+decrease. LUT3 delta is recorded, not capped by an unproven one-LUT-per-remap
+assumption. All four prior run directories are preserved; none is reset.
+The existing area/medium-spreading/default-physopt/AlternateCLB flow remains,
+with no post-route physopt, unchanged RTL/caches and no RTL-synthesis rerun.
+The same 20-GiB RAM / 2-GiB swap / 48-task caps, one job/thread, four-hour
+deadline and 75-second cleanup allowance apply. They are not an ETA.
+The actual worker is **2048306** under invocation **10bfa34c…**. Root reviewed
+its entire diff against the previous generated worker: only run names and
+the one hook path changed (worker SHA **05c83a1e…**). Creation legitimately
+changed XPR SHA to **06bdffc5…**, while exactly 110 unique defines remain.
+The launcher confirmed **40-MHz core / 100-MHz PS constraints**, not measured
+hardware frequency. Placement, route, bitstream and hardware acceptance are
+still pending at this launch record.
+
 Verified gameplay IPC remains **0.42633263**, simulation build **5c2491f3**,
 cycles **7,099,999,637–7,199,999,637**. It predates this FPGA candidate; the
 current candidate's gameplay IPC is unmeasured.
