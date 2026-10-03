@@ -1197,6 +1197,16 @@ The launcher confirmed **40-MHz core / 100-MHz PS constraints**, not measured
 hardware frequency. Placement, route, bitstream and hardware acceptance are
 still pending at this launch record.
 
+By **09:50:05 UTC**, the full-design property-only hook completed in **24s**,
+with zero errors: F7 **35,420→35,420**, F8 **14,110→512**, other MUXF types
+zero. Exactly 14,110 F8 leaves and no F7 were marked; **13,598 F8s** actually
+converted, adding 13,598 LUT3s, with original F7 names/count preserved.
+This is substantially less remap expansion than the failed global pass's
+47,926 conversions, **not proof of a downstream utilization or routing gain**.
+The completed opt checkpoint SHA is **4a5d7f25…**, rechecked after its write
+completion marker. By 09:51:54 UTC the same worker was in global placement
+under `AltSpreadLogic_medium`. Route/timing/hardware acceptance remains false.
+
 Verified gameplay IPC remains **0.42633263**, simulation build **5c2491f3**,
 cycles **7,099,999,637–7,199,999,637**. It predates this FPGA candidate; the
 current candidate's gameplay IPC is unmeasured.
