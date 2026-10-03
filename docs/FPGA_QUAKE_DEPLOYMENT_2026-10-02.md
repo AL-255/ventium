@@ -725,6 +725,20 @@ stubbed startup holds then releases exactly once. Its proof is under
 `startup-guard-hoststub-axi-audit/` in the task directory. It uses ordinary
 host RAM and stubbed x86/IDE, not real ARM Device execution or ROM correctness.
 
+The final cold-command audit confirms that `--mem 16` only validates the
+unchanged 16 MiB backend configuration: startup still maps and scalar-clears
+**the full 256 MiB** aperture. Root rechecked its live reservation at
+**02:45:05 UTC**: the same boot ID, exact base/size DT cells, zero-length
+`no-map`, and root IOMEM `60000000–6fffffff : reserved`, outside both adjacent
+System RAM ranges. No guest or capture process was running. The planned
+`--secs 600` is a post-release loop budget, **not wall time**; startup and
+128 IDE-service polls per iteration are outside its nominal sleep accounting.
+Keep a separate whole-run deadline. A hard deadline firing is an unqualified
+run, not normal closure. Normal exit closes libc disk handles but neither
+checks `fclose` errors nor fsyncs the VHD; after native closure/no writer,
+sync and preserve a stable closed copy before console checking. No such
+current-candidate cold run has been launched yet.
+
 ## Movie requirements
 
 ### Separate closed FAT-console evidence
