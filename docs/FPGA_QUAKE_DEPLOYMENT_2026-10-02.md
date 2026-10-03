@@ -1,6 +1,6 @@
 # RK FPGA Quake deployment — October 2, 2026
 
-## Current status (2026-10-03 02:27 UTC)
+## Current status (2026-10-03 02:39 UTC)
 
 Administrator access and the boot-time DDR reservation work. The board remains
 held in reset on the historical image. At the user's request, a new **40 MHz**
@@ -26,6 +26,9 @@ implementation-stage area optimization and router directives, not the RTL,
 defines or cache geometry. Preliminary timing is also severely
 negative: the constrained
 40 MHz target is not yet a demonstrated operating frequency or timing pass.
+Retry placement completed in **30m52s**, with **218,494 LUTs (64.02%)** /
+**37,885 CLBs (88.81%)**. High congestion persists and placed WNS is
+**−24.487 ns**; pre-route physical optimization is running.
 The first daemon's SIGBUS has an instruction-level cause (`DC ZVA` on Device
 memory), and an isolated scalar-access successor is built and microtested,
 and staged on the board. Its control-only `--ident` probe exits zero; DDR
@@ -356,6 +359,23 @@ percentage**. The preserved optimized checkpoint is
 Placement started at about **02:07:33 UTC**. Do not interrupt the healthy sole
 family to inspect this checkpoint in a second Vivado process. Actual area and
 regional congestion effects remain unmeasured pending the placement reports.
+
+Retry `place_design` subsequently completed with zero errors/critical warnings,
+elapsed **30m52s**. Root read and hashed its completed placed report at
+**02:39 UTC**: **218,494 LUTs (64.02%)**, 59,000 registers, zero latches,
+**37,885 CLBs (88.81%)**, 221 BRAM tiles and 127 DSPs. Compared with the
+original **placed** report, LUTs fall 5,840 (**2.60%**) and occupied CLBs fall
+128 (**0.34%**). The F7/F8 counts remain 35,420/14,110. This is a small area
+improvement, not a congestion fix or routed utilization result. `Place 46-14`
+persists; north/south global estimated congestion regions are now **64×64**,
+versus 32×32 in the original placement, and east/west remain 32×32. Placed
+WNS is **−24.487 ns**, not final routed timing or a measured Fmax.
+The generated placed DCP is **86,412,477 bytes**, SHA
+`697f7baf28a2dfddbf9995ca0aa96b3849ab5d50baf408c5e3e5683ba8432992`;
+the placed utilization report SHA is
+`9b68f0f7a15c3471c119cc81199faaa9d6d7c93c4726cd484fe1d00bd1092305`.
+The same native session 8229 then entered default pre-route `phys_opt_design`;
+it remains live, without resynthesis, RTL edits, replacement or bitstream output.
 
 The bus-skew-complete final inspection helper is prepared for the exact new
 run at `final-inspection-prepared/inspect_completed_impl.tcl` under the

@@ -6,13 +6,13 @@ debug tools as inspected through **2026-08-23**, with the safety preflight
 updated through **2026-10-03**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
 
-> **Latest build status (2026-10-03 02:01 UTC):** replacement synthesis has
+> **Latest build status (2026-10-03 02:39 UTC):** replacement synthesis has
 > closed with native exit **0** (2h26m), and the separate read-only checkpoint
 > inspection also exited **0**. Preliminary area is **66.04% LUT / 29.70%
 > BRAM**. Clock constraints are **40 MHz core / 100 MHz PS-AXI**, but pre-route
 > timing is not a pass: WNS **−23.863 ns**, WHS **−0.108 ns**, including a
 > 195-level EIP-to-FPU-SRT cone with substantial unplaced-route delay.
-> Placement completed successfully in **29m10s**, with **65.73% LUT / 89.11%
+> The original placement completed in **29m10s**, with **65.73% LUT / 89.11%
 > CLB occupancy**. Vivado warns that the design is highly congested; its
 > post-placement WNS estimate is **−22.180 ns**, not a routed timing pass.
 > Pre-route physical optimization also completed successfully in **17m42s**;
@@ -30,18 +30,24 @@ not certification of the currently installed image.
 > and is live, reusing `synth_1` with `ExploreArea` optimization and
 > `AlternateCLBRouting`. High-spread placement/default pre-route physical
 > optimization are retained controls; RTL/defines/full P5 caches are unchanged.
+> Retry placement completed in **30m52s**: **218,494 LUTs (64.02%)** and
+> **37,885 CLBs (88.81%)**, reductions of only **2.60% / 0.34%** versus
+> the original placed report. High-congestion warnings persist, with larger
+> north/south estimated regions; placed WNS is **−24.487 ns**. Pre-route
+> physical optimization is live; alternate routing has not completed.
 > A tiny same-part native probe accepted the router directive (exit 0), but
 > does not prove this full design will route. The retry retains one CPU job,
 > 20 GiB hard / 19 GiB soft RAM and 2 GiB swap, with a phase-local 64-task
 > cushion; its four-hour guard is not a finish-time prediction.
-> At 00:32 UTC its live task cap was extended **48 → 64** after observing
+> At 00:32 UTC the original run's task cap was extended **48 → 64** after observing
 > 45 occupied slots (mostly sleeping vendor threads); the future launch guard
 > remains fixed at 48. RAM, swap, job count and source were unchanged. The
 > previous mapping-only 8 GiB swap exception ended at closure.
 > Preserve actual routed timing/CDC evidence and add `report_bus_skew` before
 > sign-off; no timing waiver or blind latency-changing DSP pipeline fix was
-> added. The bus-skew-complete inspection helper has root-passed 120 host-only
-> stub checks; real post-route native inspection is still required, only after
+> added. The earlier inspection helper passed 120 host-only stub checks; the
+> new run-bound copy additionally requests both-corner `min_max` bus skew and
+> has not run natively. Real post-route inspection is still required, only after
 > implementation closes. Logs/receipts are in the dated deployment document. No new bitstream,
 > silicon clock, cold startup, timedemo or movie is accepted yet. Verified
 > simulation gameplay IPC is **0.42633263**, build **5c2491f3**, cycles
