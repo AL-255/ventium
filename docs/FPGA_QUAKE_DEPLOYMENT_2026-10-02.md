@@ -1,8 +1,50 @@
 # RK FPGA Quake deployment — October 2, 2026
 
-## Current status (2026-10-03 22:01 UTC)
+## Current status (2026-10-03 22:08 UTC)
 
-The `impl_nobram_power` retry (native **79488**) has actually closed with
+The shared-FPU control-factored candidate's native synthesis **38563** has
+closed with actual exit **0**, observed **22:06:04 UTC**. `synth_design` elapsed
+**1h24m11s**; its final summary records **1,498 warnings / 0 critical warnings /
+0 errors**, distinct from the later command counter of **739 warnings**.
+The regular, single-link checkpoint is **178,458,469 bytes**, SHA
+`115e1e1d9724c4c0e0b8060af1d1e0cc3f034475f4d43f67cd0e8b0f6c658a26`,
+under the current R2 `synth_1/` directory. Controller log SHA:
+`10c4b88bc429c2f7bdc883f0aea3e5674eeb41abfdf2fba1a8bf474b7ca916d1`;
+worker log SHA:
+`24b85a4ded127a9a19a0cd89f0b6dc52768983d008a3dfb5c7016cffa0b6ed87`.
+Root rechecked all **179** frozen input hashes after actual closure and
+confirmed the old scope/family had exited. The generated synthesis script
+still names the frozen FP source and exact ordered **110** definitions.
+
+Synthesized utilization is **185,581 CLB LUTs (54.38%) / 58,863 FFs /
+221 BRAM tiles / 127 DSPs**. Against the preceding frontend candidate this is
+**1,601 fewer LUTs (0.86%)** and four fewer FFs; BRAM/DSP counts are unchanged.
+F7/F8 muxes are **19,417 / 7,515**. Report SHA:
+`fbff1f60430e4152c7969c09593de057eb0eef851df5c1b960a62f32ef4d63ab`.
+These are synthesis figures, not routed utilization, timing or performance.
+Known warning follow-ups include I-cache metadata reset priority, unregistered
+x87 DSP cascades and optional BRAM output registers; do not insert latency or
+force RAM mappings from warning text alone. Final routed evidence is required.
+
+A fresh existing-project implementation launched at **22:07:05 UTC**, native
+**46772**, controller
+`/var/tmp/ventium-fpga40-srtctrl-native.eMTOMg/implementation-controller.log`.
+The exclusive guard admitted **23,215,230,976 available RAM bytes /
+19,012,730,880 free swap bytes**. Disk availability was **11,770,736,640 bytes**,
+above the explicit **9 GiB** pre-launch floor. The new scope invocation is
+**`86641ef620584d1ba57bb1a55ed56f61`**, with **19 GiB RAM / 8 GiB swap /
+48 tasks**, `memory.high=max`, one Vivado family and one implementation worker.
+The external safety bound is **8 hours**, not an ETA. Installed help/readback
+and the generated worker Tcl confirm **RuntimeOptimized**,
+`general.maxThreads=1`, `-jobs 1`, `AltSpreadLogic_high` placement and default
+physical optimization/routing. No synthesis rerun or prior-run reset occurred.
+At **22:08:27 UTC**, `opt_design` completed successfully in **27 seconds**, with
+zero critical warnings/errors; native implementation is still live. Routing,
+bitstream, full-route/STA/hold/DRC/CDC/bus-skew review and physical clock
+measurement remain pending. **40 MHz core / 100 MHz PS-AXI** are targets only;
+there is no new deployed image, hardware timedemo or full movie.
+
+The preceding `impl_nobram_power` retry (native **79488**) has actually closed with
 exit **124**, observed **20:08:29 UTC**. The four-hour safety timeout expired
 during Phase 5.3 / Global Iteration 2, whose final logged overlap count is
 **1,493**. Global Iteration 1 had reached zero overlaps and finished at
@@ -10,7 +52,7 @@ during Phase 5.3 / Global Iteration 2, whose final logged overlap count is
 intermediate (**WNS −28.224 ns / WHS +0.006 ns**), not routed Fmax or sign-off.
 No routed checkpoint, `.bit` or `.bin` was produced. All native processes are
 gone; this failed attempt has no live/orphan Vivado. The new candidate's sole
-live synthesis family is identified below. The prior synthesized,
+live implementation family is identified above. The prior synthesized,
 optimized, placed and physical-optimization checkpoints and original logs are
 preserved. Zero memory/OOM events were recorded; this was a timeout, not OOM.
 
@@ -87,7 +129,7 @@ design has validated HP0 at **128 bits**. Constraints remain **40/100 MHz**,
 full P5 caches, `balanced`, synthesis `Default`, and preset-free PCAP-only
 configuration. The four-hour bound applies to synthesis only and is not an
 implementation ETA. Monitor this handle/cgroup; do not overlap an inspector,
-another Vivado family or a heavyweight simulator build. Synthesis, routing,
+another Vivado family or a heavyweight simulator build. At launch, synthesis, routing,
 bitstream, source-consumption and physical-clock qualification remain pending;
 no timing gain,
 complete standard-suite result, board timedemo or movie is claimed.

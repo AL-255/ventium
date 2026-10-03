@@ -6,7 +6,32 @@ debug tools as inspected through **2026-08-23**, with the safety preflight
 updated through **2026-10-03**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
 
-> **Latest status (2026-10-03 21:43 UTC):** the implementation retry ended
+> **Latest status (2026-10-03 22:08 UTC):** the current control-factored
+> candidate's synthesis has actually closed with native exit **0** (handle
+> **38563**, observed 22:06:04 UTC), `synth_design` elapsed **1h24m11s**,
+> zero errors/critical warnings. Its synthesized use is **185,581 LUTs
+> (54.38%) / 58,863 FFs / 221 BRAM tiles / 127 DSPs**, 1,601 fewer LUTs than
+> the previous candidate. These are not routed figures. The checkpoint and
+> all **179** frozen payload hashes were checked after closure.
+> A fresh implementation is now live, native **46772**, under
+> `/var/tmp/ventium-fpga40-srtctrl-native.eMTOMg/`: one Vivado family,
+> **19 GiB RAM / 8 GiB swap / 48 tasks**, `memory.high=max`,
+> **RuntimeOptimized** (Default without the crashing `bram_power_opt` pass),
+> one worker and an **8-hour safety bound**, not a completion estimate.
+> The actual worker script confirms that directive; `opt_design` completed
+> successfully at 22:08 UTC. There was no synthesis rerun or failed-run reset.
+> Full routing, bitstream, STA/hold/DRC/CDC/bus-skew review, fresh measured
+> clocks and the hardware timedemo/movie remain pending.
+> A small candidate-bound source tree for later standard-suite simulation is
+> prepared under `/var/tmp/ventium-f-standard-sources.krURBA/candidate/`.
+> Seven root host checks plus independent source/mode/107-define dry-run
+> checks passed; no simulator model, guest media or old acceptance was copied.
+> No heavyweight simulator/compiler has been launched beside Vivado.
+> **40 MHz remains the core target, not a new silicon measurement.**
+> Candidate gameplay IPC is unmeasured; verified pre-candidate baseline
+> **0.42633263**, build **5c2491f3**, cycles **7,099,999,637–7,199,999,637**.
+
+> **Historical status (2026-10-03 21:43 UTC):** the implementation retry ended
 > with actual native exit **124**, observed at **20:08:29 UTC**: its four-hour
 > safety timeout expired during Global Iteration 2. Global Iteration 1 reached
 > zero overlaps, but routing did not finish. No routed checkpoint, bitstream
