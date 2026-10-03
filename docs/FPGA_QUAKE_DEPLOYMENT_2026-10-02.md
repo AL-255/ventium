@@ -1116,6 +1116,13 @@ The sole new family is bounded to one job/thread, 20-GiB resident memory,
 cleanup allowance. The deadline is **not a completion estimate**. No new
 hardware image, cold guest run or movie acceptance exists at launch.
 
+At **08:15 UTC**, the actual full-design hook completed successfully after
+the 6m06s `ExploreArea` pass. Vivado reported **47,926 MUXFX primitives
+transformed into LUT3**, with zero errors; the separate remap pass took 24s.
+The generated worker sources this hook once, before the opt checkpoint and
+placement. This proves the full transform executed, **not** that utilization,
+congestion, routing or timing improved; those require downstream reports.
+
 Verified gameplay IPC remains **0.42633263**, simulation build **5c2491f3**,
 cycles **7,099,999,637–7,199,999,637**. It predates this FPGA candidate; the
 current candidate's gameplay IPC is unmeasured.
