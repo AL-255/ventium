@@ -6,7 +6,36 @@ debug tools as inspected through **2026-08-23**, with the safety preflight
 updated through **2026-10-03**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
 
-> **Latest status (2026-10-03 14:32 UTC):** the congestion retries did not
+> **Latest status (2026-10-03 15:57 UTC):** the frontend-factored candidate's
+> full-chip synthesis completed with native exit **0** (handle **48145**):
+> `synth_design` elapsed **1h37m15s**, about **1h38m** for the complete run.
+> Its checkpoint is under
+> `/var/tmp/ventium-fpga40-icfrontspan-nothrottle.3ZFR9t/output/rk_ao486_system/rk_ao486_system.runs/synth_1/`
+> (`rk_ao486_bd_wrapper.dcp`, SHA-256
+> `d922c518b1299faaeea812d64caeb6d8b5cd2893b670a22a9b623d06c0ddf0c1`).
+> Synthesized utilization is **187,182 CLB LUTs (54.85%)**, down **16.94%** from
+> the prior full-chip synthesis; **58,867 FFs**, **221 BRAM tiles**, **127 DSPs**,
+> **18,912 MUXF7** and **7,471 MUXF8**. These are not routed sign-off figures.
+>
+> The separate read-only inspection closed with native exit **0** (handle
+> **59007**) and confirmed synthesis **100% / Complete / not stale**, with
+> **40 MHz core / 100 MHz PS-AXI** constraints. Its reports are under
+> `/var/tmp/ventium-icfrontspan-synth-inspection.I1YvlZ/reports/`.
+> Pre-route timing still fails (**WNS −22.317 ns / WHS −0.108 ns**); no
+> routed Fmax or physical clock measurement is inferred from these estimates.
+> After the inspector's family exited, a single existing-project implementation
+> launched at **15:57:46 UTC**, native **67512**, through the exclusive guard:
+> **20 GiB RAM / 8 GiB swap / 48 tasks**, one worker, `memory.high=max`.
+> It reuses the completed synthesis, frozen 179 payloads, exact 110 defines,
+> full P5 caches and unchanged 40/100 MHz profile. Its controller log is under
+> `/var/tmp/ventium-icfrontspan-implementation.d26ux9/`; the four-hour timeout
+> is a safety bound, not a completion estimate. There is no new bitstream,
+> deployed candidate, hardware timedemo or movie. The current candidate's full
+> standard suite is pending and gameplay IPC is unmeasured. Verified
+> pre-candidate simulation gameplay baseline: **0.42633263**, build
+> **5c2491f3**, cycles **7,099,999,637–7,199,999,637**.
+
+> **Historical retry record (2026-10-03 14:32 UTC):** the congestion retries did not
 > produce a new bitstream. The board is reachable and idle, still holding the
 > historical image. A source-level frontend factoring candidate has passed
 > focused byte-span tests, strict hardware-profile lint, and default/BRAM

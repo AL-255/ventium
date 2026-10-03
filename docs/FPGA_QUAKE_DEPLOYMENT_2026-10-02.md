@@ -1,6 +1,58 @@
 # RK FPGA Quake deployment — October 2, 2026
 
-## Current status (2026-10-03 14:32 UTC)
+## Current status (2026-10-03 15:57 UTC)
+
+The frontend-factored full-chip synthesis completed with native exit **0**
+(handle **48145**, closure confirmed **15:49:49 UTC**). `synth_design` elapsed
+**1h37m15s**, about **1h38m** for the complete native run. The log records
+**745 warnings / 0 critical warnings / 0 errors**. The regular synthesized
+checkpoint is **177,531,902 bytes**, SHA-256
+`d922c518b1299faaeea812d64caeb6d8b5cd2893b670a22a9b623d06c0ddf0c1`, at
+`/var/tmp/ventium-fpga40-icfrontspan-nothrottle.3ZFR9t/output/rk_ao486_system/rk_ao486_system.runs/synth_1/rk_ao486_bd_wrapper.dcp`.
+
+Compared with the retained prior full-chip synthesis, CLB LUTs fell from
+**225,368 to 187,182 (54.85%)**, a **38,186 / 16.94%** reduction. FFs are
+**58,867** (91 fewer); **221 BRAM tiles** and **127 DSPs** are unchanged.
+MUXF7 fell from **35,420 to 18,912 (−46.61%)**; MUXF8 from **14,110 to 7,471
+(−47.05%)**. These are synthesized, not placed/routed, utilization figures.
+
+The sole read-only inspector, native **59007**, closed with actual exit **0**
+at **15:56:34 UTC**. It required synthesis **100%**, status
+`synth_design Complete!`, and `NEEDS_REFRESH=0` before and after reporting.
+Its nine reports are under
+`/var/tmp/ventium-icfrontspan-synth-inspection.I1YvlZ/reports/`.
+The constrained clocks are **40 MHz core / 100 MHz PS-AXI**. Pre-route timing
+still fails: **WNS −22.317 ns / WHS −0.108 ns**; do not infer routed Fmax or
+measured hardware frequency. Unwaived synthesis DRC reports warnings/advisories,
+not errors; `check_timing` reports no unconstrained internal endpoints or
+combinational loops, with eight PS EMIO register/latch pins with no clock and four LED outputs
+without I/O timing constraints. Bus-skew and CDC checks remain required after
+actual routing, as do complete-route and bitstream checks.
+
+After closure and an empty Vivado-family census, Chrome was closed with
+`SIGTERM` under the user's existing authorization. Fresh admission measured
+**24,083,005,440 available RAM bytes / 17,689,378,816 free swap bytes**, meeting
+the selected **20 GiB RAM / 8 GiB swap** caps plus **2 / 4 GiB** host reserves.
+At **15:57:46 UTC**, existing `impl_1` launched from the same completed
+`synth_1`, native **67512**, without source, define, cache, clock or directive
+changes. Controller logs are under
+`/var/tmp/ventium-icfrontspan-implementation.d26ux9/`. The separately pinned
+launcher SHA is
+`0299790cad0488ef90895bdbb35287c5f67d6bec6ea964fa05fb19d8f98a6f1f`;
+`VEN_FPGA_CORE_MHZ=40` supplies the launcher's expected 25 ns core constraint check.
+Actual scope invocation `f5646a88e213475fbb53b8219cee8589` confirms
+`MemoryMax=21474836480`, swap cap `8589934592`, and **48 tasks**; internal
+`general.maxThreads=1` and `-jobs 1` are configured. The four-hour timeout is a
+safety bound, not an ETA.
+Do not start another inspector/implementation while this family is live.
+
+No new bitstream, routed sign-off, deployment, cold hardware timedemo or movie
+is complete. The current candidate's full standard suite remains pending;
+gameplay IPC is unmeasured. Verified pre-candidate simulation gameplay baseline:
+**0.42633263**, build **5c2491f3**, cycles
+**7,099,999,637–7,199,999,637**.
+
+## Historical live/retry record (through 2026-10-03 14:32 UTC)
 
 The first frontend-factored synthesis (native **65164**) closed with exit
 **143**, not success. The kernel/user journals identify **CONSTRAINT_MEMCG
