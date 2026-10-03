@@ -1062,3 +1062,16 @@ Vivado's original worker remained productive and unswapped, with zero
 memory-max/OOM events. Its idle parent had filled the unchanged **2-GiB** swap
 cap, recording **6,596 max/fail swap events**; do not call all resource events
 zero. No Vivado restart or limit increase was made.
+
+The separate runtime movie bundle is
+`/var/tmp/ventium-fpga-quake-oct02.rc0wVn/runtime-movie-bundle.Oz2wfq`.
+Root reviewed its provenance/decoder changes and independently reran the
+bounded host gate (actual exit 0): normalizer SHA `e062bf67…`, assembler
+`d03a2be8…`, unchanged RGB decoder `ef46…`. Fixtures prove byte-exact decoded
+RGB at 15 fps, partial-tail preservation and rejection of wrong runtime/base
+pins; all timedemo/coverage acceptance flags remain false. At 05:26 UTC the
+new client was staged as root-owned mode 0444
+`/tmp/ao486/ven_board_probe.sigusr1-oct03.py`; its board SHA matches `fd0a83…`
+and its help command recognizes the new option. The old `cd284…` client is
+unchanged. No board guest, capture, new programming or hardware qualification
+has occurred at this point; the original Vivado implementation is still live.
