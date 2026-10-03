@@ -1,6 +1,6 @@
 # RK FPGA Quake deployment — October 2, 2026
 
-## Current status (2026-10-03 23:03 UTC)
+## Current status (2026-10-03 23:48 UTC)
 
 The shared-FPU control-factored candidate's native synthesis **38563** has
 closed with actual exit **0**, observed **22:06:04 UTC**. `synth_design` elapsed
@@ -85,6 +85,15 @@ lower LUT count. Latest scope memory was **6,947,360,768 bytes**, swap use
 zero, with all memory/OOM event counters zero and CPU time advancing.
 No routed checkpoint, bitstream, final endpoint report or hardware result
 is established by these intermediate observations.
+
+At **23:48:02 UTC**, the same worker remained live after **1h40m48s** in
+Global Iteration 1, with CPU time advancing. Actual overlapping-node counts
+have progressed **277,221 → 71,244 → 23,097 → 8,292**. This is convergence
+evidence only: it is neither a percent-complete estimate nor full-route or
+frequency sign-off. Latest resource checks still show no swap use or
+memory/OOM events. The process-family census found only the expected build;
+disk availability was **11,582,439,424 bytes** at the last disk check.
+No additional Vivado family or heavyweight simulator/compiler was launched.
 
 The fresh board preflight closed with native exit **0** (handle **5124**).
 Board boot ID remains `2861e4e8-cd4c-48cd-9f44-7f7d8a991ebb`. Unmasked

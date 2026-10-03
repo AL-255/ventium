@@ -6,7 +6,7 @@ debug tools as inspected through **2026-08-23**, with the safety preflight
 updated through **2026-10-03**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
 
-> **Latest status (2026-10-03 23:03 UTC):** the current control-factored
+> **Latest status (2026-10-03 23:48 UTC):** the current control-factored
 > candidate's synthesis has actually closed with native exit **0** (handle
 > **38563**, observed 22:06:04 UTC), `synth_design` elapsed **1h24m11s**,
 > zero errors/critical warnings. Its synthesized use is **185,581 LUTs
@@ -32,6 +32,10 @@ not certification of the currently installed image.
 > Iteration 1**; the router reports **level-6 (64×64)** global/short and timing
 > congestion. No OOM events or swap use have been observed. This is not full
 > routing or a new frequency result.
+> At 23:48 UTC the same worker remained active after **1h40m48s**. Its logged
+> overlapping-node counts have fallen **277,221 → 71,244 → 23,097 → 8,292**,
+> still within Global Iteration 1. These are convergence observations, not a
+> percent-complete estimate or evidence of a deployable image.
 > Full routing, bitstream, STA/hold/DRC/CDC/bus-skew review, fresh measured
 > clocks and the hardware timedemo/movie remain pending.
 > A fresh read-only board check confirmed the guest DDR reservation and the
