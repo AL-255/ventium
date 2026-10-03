@@ -20,7 +20,9 @@ not certification of the currently installed image.
 > previous mapping-only 8 GiB swap exception ended at closure.
 > Preserve actual routed timing/CDC evidence and add `report_bus_skew` before
 > sign-off; no timing waiver or blind latency-changing DSP pipeline fix was
-> added. Logs/receipts are in the dated deployment document. No new bitstream,
+> added. The bus-skew-complete inspection helper has root-passed 120 host-only
+> stub checks; real post-route native inspection is still required, only after
+> implementation closes. Logs/receipts are in the dated deployment document. No new bitstream,
 > silicon clock, cold startup, timedemo or movie is accepted yet. Verified
 > simulation gameplay IPC is **0.42633263**, build **5c2491f3**, cycles
 > **7,099,999,637–7,199,999,637**; it predates the unmeasured FPGA candidate.

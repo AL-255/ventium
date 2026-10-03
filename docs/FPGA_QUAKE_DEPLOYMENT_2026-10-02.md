@@ -155,6 +155,23 @@ synchronizer cells. These are retained findings, not waived clean reports.
 Vivado also requests **`report_bus_skew`** because bus-skew constraints exist;
 that report must be added to the closed-implementation inspection.
 
+The prepared bus-skew-complete inspection helper is now
+`/var/tmp/ventium-fpga-quake-oct02.rc0wVn/inspection-root-bus-skew.jeblFlLT/inspect_completed_impl.tcl`,
+SHA `6b7f3c7dda3a83878c1945fb3162e4d2ce1aac741ea6c3287ed60ad3b776fb06`.
+Root read the full helper and independently ran **120 Tcl stub cases** with
+native exit **0** in 0.22 seconds, preserving all 119 previous cases and adding
+failure of `report_bus_skew`. Its receipt is `clone_stub_audit_receipt.json`
+in that leaf, SHA
+`63a1260612e4ee6c1b59009cb313f5bce82457928c3aef2f41f1667e2e55b8fb`.
+The helper retains the exact XPR/fresh-run/clock/full-route checks, read-only
+project opening, protected output directories, unfiltered/no-waiver reports,
+and native-close-before-completion-marker semantics. It adds only the raw
+`report_bus_skew` report; no RTL, timing exception or regeneration was changed.
+These are host-only control-flow tests, **not** native Vivado reporting or
+timing/CDC acceptance. Run the real helper under the exclusive guard and a
+540-second outer deadline **only after the implementation family has closed**;
+require exit 0 and review the reports separately from its report-completion marker.
+
 Implementation native session **66620** is now live, scope invocation
 `d4a69c016ef5448ab10a01a303a752ad`, outer PID 1814754 / implementation PID
 1815196. It resumes the existing XPR with `VEN_FPGA_CORE_MHZ=40`, one run job
