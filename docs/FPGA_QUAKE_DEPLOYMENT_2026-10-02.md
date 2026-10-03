@@ -1123,6 +1123,21 @@ The generated worker sources this hook once, before the opt checkpoint and
 placement. This proves the full transform executed, **not** that utilization,
 congestion, routing or timing improved; those require downstream reports.
 
+Placement completed by **08:48:42 UTC**, in 32m56s with zero errors/critical
+warnings. Root read the complete 257-line placed utilization report. The
+remap **increased** LUTs from 218,526 (64.03%) to **262,059 (76.79%)**, and
+occupied CLBs from 37,513 (87.93%) to **41,062 (96.25%)**. That is +43,533
+LUTs and +3,549 occupied CLBs; it is not an area reduction. F7/F8 counts fell
+to 1,092/512, while BRAM tiles/DSPs remained 221/127. The placer still warned
+of high congestion: global regions N/S/E/W were 64×64 / 32×32 / 32×32 /
+16×16, and long-congestion regions 64×64 / 64×64 / 32×32 / 64×64.
+Placed WNS estimate was **−29.714 ns**, versus medium's −24.685 ns, at the
+unchanged 40-MHz core constraint; neither number establishes routed Fmax.
+The placed checkpoint SHA is **ff8bb02f…**, utilization report **f7708e94…**,
+and opt checkpoint **0c0afa9f…**. The same live worker then entered standalone
+pre-route physical optimization. It remains under the original deadline;
+no route, bitstream, deployment or timedemo acceptance follows from placement.
+
 Verified gameplay IPC remains **0.42633263**, simulation build **5c2491f3**,
 cycles **7,099,999,637–7,199,999,637**. It predates this FPGA candidate; the
 current candidate's gameplay IPC is unmeasured.
