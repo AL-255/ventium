@@ -1,6 +1,6 @@
 # RK FPGA Quake deployment — October 2, 2026
 
-## Current status (2026-10-03 03:45 UTC)
+## Current status (2026-10-03 04:05 UTC)
 
 Administrator access and the boot-time DDR reservation work. The board remains
 held in reset on the historical image. At the user's request, a new **40 MHz**
@@ -21,7 +21,7 @@ failed live router. A separate report-only inspection of its error checkpoint
 closed with native exit **0**; this proves report completion, not a valid route.
 The completed synthesis and failed-run checkpoints are retained. A separate
 congestion-focused run, **`impl_area_cong2`**, launched at **02:00:14 UTC**
-from the same synthesis checkpoint and is live. It changes only the
+from the same synthesis checkpoint. It changed only the
 implementation-stage area optimization and router directives, not the RTL,
 defines or cache geometry. Preliminary timing is also severely
 negative: the constrained
@@ -30,8 +30,12 @@ Retry placement completed in **30m52s**, with **218,494 LUTs (64.02%)** /
 **37,885 CLBs (88.81%)**. High congestion persists and placed WNS is
 **−24.487 ns**. Pre-route physical optimization subsequently completed in
 **1h04m50s**, with zero errors/critical warnings and post-optimization WNS
-**−23.574 ns**. Routing is now live with `AlternateCLBRouting`; neither
-route closure nor a new bitstream is proved.
+**−23.574 ns**. Alternate routing also failed with global congestion level 6
+and **1,125,751 node overlaps**; native session 8229 closed with actual exit
+**1** at **04:00:40 UTC**. A fresh **`impl_area_medium`** attempt launched
+at **04:04:20 UTC**, changing only high to medium placement spreading and
+retaining the same synthesis checkpoint, other directives and clocks. It is
+live; no new bitstream or hardware timedemo is proved.
 The first daemon's SIGBUS has an instruction-level cause (`DC ZVA` on Device
 memory), and an isolated scalar-access successor is built and microtested,
 and staged on the board. Its control-only `--ident` probe exits zero; DDR
@@ -361,7 +365,7 @@ percentage**. The preserved optimized checkpoint is
 `ca26d69cbe1ae711ea9ca29c101d6c6ec0a22089c34b8f6753a4341139c1644b`.
 Placement started at about **02:07:33 UTC**. Do not interrupt the healthy sole
 family to inspect this checkpoint in a second Vivado process. Actual area and
-regional congestion effects remain unmeasured pending the placement reports.
+regional congestion effects were then pending the placement reports.
 
 Retry `place_design` subsequently completed with zero errors/critical warnings,
 elapsed **30m52s**. Root read and hashed its completed placed report at
@@ -386,8 +390,8 @@ qualification. Root read the completed log and hashed the generated
 `impl_area_cong2/rk_ao486_bd_wrapper_physopt.dcp`, SHA
 `2953a9a8855c69c2d1abd93127dd5b837e73130a2d4660ca23708ced83261304`.
 The worker then entered `route_design -directive AlternateCLBRouting` and
-reached Phase 2.2 Pre Route Cleanup. Native session 8229 and the original
-invocation remain live, without RTL resynthesis or bitstream output. The
+reached Phase 2.2 Pre Route Cleanup. At that milestone, native session 8229 and
+the original invocation remained live, without RTL resynthesis or bitstream output. The
 pre-route DRC's zero errors do not establish a conflict-free completed route.
 
 The bus-skew-complete final inspection helper is prepared for the exact new
@@ -410,20 +414,57 @@ this report argument. No active entry, constraint or netlist was edited. This
 version still awaits native execution and does not inherit the old copy's
 stub-test qualification.
 
-A further **unlaunched** fallback is prepared at
+A further fallback was prepared at
 `/var/tmp/ventium-impl-area-cong.IfjIKA/impl-area-medium.9i7ufg/launch_impl_area_medium.tcl`,
 SHA `a1cefc8f98b4386d10c0a55c6e3d1d85b632f1132c71df528f45ad1302a8fbe8`.
-Root read the whole entry and compared it with the live launch source: only
+Root read the whole entry and compared it with the previous launch source: only
 the usage filename, fresh run name `impl_area_medium`, and placement directive
 `AltSpreadLogic_medium` differ. ExploreArea, AlternateCLBRouting, default
 pre-route physical optimization, the frozen synthesis parent, 40/100 MHz
 checks and native-completion checks are retained. Medium spreading is a
 controlled packing experiment, not a promised congestion or timing fix.
-It must not launch while `impl_area_cong2` is live. Consider it only after an
-actual terminal failure, harvested native status, family absence and renewed
-source/checkpoint validation, through the exclusive launcher. Its final
-inspection must target its own run; the `impl_area_cong2` inspector cannot
-qualify it unchanged. No fallback project run or FPGA deployment exists yet.
+It must not launch while `impl_area_cong2` is live. Its final inspection must
+target its own run; the `impl_area_cong2` inspector cannot qualify it unchanged.
+
+The high-spread retry subsequently failed routing with `Route 35-3` and
+`Route 35-4445`, elapsed **16m20s**. Regional congestion is north **118.100%**,
+south **133.842%**, east **130.464%**, west **124.568%**. The live route has
+zero failed/unrouted nets but **1,125,751 overlapping nodes**; zero DRC errors
+and the successful per-net verification phase do not make it routable.
+Root harvested native session **8229**, actual exit **1**, at **04:00:40 UTC**,
+then confirmed parent/worker absence and the inactive scope. The final retained
+resource sample has zero memory/task events and zero swap: this is another
+congestion failure, not an OOM. Its preserved **87,960,506-byte** error DCP is
+`impl_area_cong2/rk_ao486_bd_wrapper_routed_error.dcp`, SHA
+`02527746a2798cb6d2b2d1d0c4b5f0e685acbc20c1b0f5d382e116b145e9f50a`.
+
+Before launching medium spreading, root renewed all **179** frozen-file hashes
+from the frozen CWD (native checksum exit 0), the manifest and synthesis-DCP
+pins, and compared the actual XPR's **110** `Verilog_Define` entries with the
+manifest (native comparison exit 0). An independent entry review found only
+the three intended changes. Through the exclusive launcher, native session
+**29785** opened the unchanged synthesis, confirmed **40 MHz core / 100 MHz
+PS**, and launched `impl_area_medium` at **04:04:20 UTC**. Its invocation is
+`a43ecce4b2354b0c95d2eba695df74f7`; parent/worker identities are
+**1886002/32052651** and **1886523/32058699** (PID/start tick). Before worker
+fan-out, root set/read back **19 GiB soft / 20 GiB hard RAM, 2 GiB swap,
+64 phase-local tasks**, with native property-command exit 0. Future guard source
+remains at 48 tasks; CPU job/thread limits stay one. The generated worker reads
+the exact synthesis DCP, with no `synth_design`, `read_verilog` or `read_vhdl`;
+its script SHA is
+`ab5bd8546a53d19dea62277e4ee227cbd8818505a6037dce35a0417c8db75aa3`.
+The root launch receipt under the medium recovery CWD is
+`ROOT_MEDIUM_LAUNCH_RECEIPT.json`, SHA
+`f1c4ab25f638e190b5d6924d7964e0062683680f82dc9c0b1eea3eb61a9d61da`.
+This remains an active implementation attempt, not route/bitstream acceptance.
+
+The **inactive**, run-bound final inspector is now
+`impl-area-medium.9i7ufg/final-inspection-prepared/inspect_completed_impl.tcl`,
+SHA `5310b3b89e692741ab991f57caaa5ed5842d251939a5aaef522af9618fc96799`.
+Root read all 189 lines and the complete diff: only the four run-name references
+change from the min/max-bus-skew-complete helper. It retains all 16 reports and
+pre/post full-route/error checks. It has not executed, inherits no old-copy
+stub-test qualification, and must wait for actual native closure/family absence.
 
 A separate key-only board check at **02:02:40 UTC** returned native exit 0,
 the same boot ID, manager `operating`, 374 MiB free, all staged cold-disk/ROM/
