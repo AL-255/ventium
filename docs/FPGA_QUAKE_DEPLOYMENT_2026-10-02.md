@@ -1,6 +1,6 @@
 # RK FPGA Quake deployment — October 2, 2026
 
-## Current status (2026-10-03 22:31 UTC)
+## Current status (2026-10-03 22:41 UTC)
 
 The shared-FPU control-factored candidate's native synthesis **38563** has
 closed with actual exit **0**, observed **22:06:04 UTC**. `synth_design` elapsed
@@ -59,6 +59,22 @@ checks: **490 findings**, all **346 warnings / 144 advisories**, no errors or
 critical warnings. The warnings concern DSP input/output/internal pipelining
 and one dynamic PREG case. They are timing follow-ups, not permission to insert
 latency without functional verification. This is not final routed DRC.
+
+Placement subsequently completed successfully in **29m31s**, with **2 warnings /
+0 critical warnings / 0 errors**. The `Fully Placed` utilization report (SHA
+`25c9cd4ca157f44f07fb23b9bf3453c1fd28eac4132d546e333a6447ff7e9ad8`)
+records **184,716 LUTs (54.12%) / 58,947 FFs / 34,457 CLBs (80.77%) /
+221 BRAM tiles / 127 DSPs**. Against the previous placement, LUTs are down
+**1,608**, FFs down **16**, but CLBs are up **764**. The high-congestion
+warning therefore must not be dismissed on the basis of lower LUT use.
+Post-placement WNS is **−19.706 ns**, still an estimate, not routed STA.
+The regular single-link placed checkpoint is **75,953,704 bytes**, SHA
+`4748c7dbd97f020fe192cbc8cce596156c877d036d864936514142ea5a7db94a`;
+it is not a routed checkpoint or deployable image. At **22:41:10 UTC**, the same worker
+had advanced through physical critical-path optimization, with pre-route
+estimated WNS **−19.186 ns**, no swap use and zero memory/OOM events.
+The current frequency targets remain **40 MHz core / 100 MHz PS-AXI**;
+no achieved frequency or SRT endpoint attribution is proven yet.
 
 The fresh board preflight closed with native exit **0** (handle **5124**).
 Board boot ID remains `2861e4e8-cd4c-48cd-9f44-7f7d8a991ebb`. Unmasked

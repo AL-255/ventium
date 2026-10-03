@@ -6,7 +6,7 @@ debug tools as inspected through **2026-08-23**, with the safety preflight
 updated through **2026-10-03**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
 
-> **Latest status (2026-10-03 22:31 UTC):** the current control-factored
+> **Latest status (2026-10-03 22:41 UTC):** the current control-factored
 > candidate's synthesis has actually closed with native exit **0** (handle
 > **38563**, observed 22:06:04 UTC), `synth_design` elapsed **1h24m11s**,
 > zero errors/critical warnings. Its synthesized use is **185,581 LUTs
@@ -23,6 +23,11 @@ not certification of the currently installed image.
 > At 22:31 UTC the same worker had reached post-placement timing optimization,
 > with zero recorded OOM events and no swap use. The initial physical-synthesis
 > estimate is WNS **−22.247 ns**, not final STA or an achieved frequency.
+> Placement has now completed successfully in **29m31s**, with **184,716 LUTs /
+> 58,947 FFs / 34,457 CLBs (80.77%)**, 221 BRAM tiles and 127 DSPs.
+> Compared with the previous placement, LUTs fell by 1,608 but CLBs rose by
+> 764. The placer warns of high congestion; reduced LUT count is not proof of
+> reduced congestion. The same native worker is now in physical optimization.
 > Full routing, bitstream, STA/hold/DRC/CDC/bus-skew review, fresh measured
 > clocks and the hardware timedemo/movie remain pending.
 > A fresh read-only board check confirmed the guest DDR reservation and the
