@@ -387,6 +387,20 @@ at **02:13:33 UTC**: the same worker has advanced to **Global Place Phase1**,
 CPU time 13m18s, scope memory **9.144 GB**, swap zero and 14 tasks. Native
 session 8229 remains live; observer completion is not build completion.
 
+At **02:19:06 UTC**, root independently read the board loader and the first
+128 bytes of the historical working raw image over SSH (native exit 0).
+`/usr/local/bin/load-bitstream.sh` has SHA
+`e61f43b393da00d46dbff004e74a0f900bd12a9c5404953dc0bc261f88a3b9d4`;
+it installs the supplied bytes unchanged and applies the full-FPGA overlay,
+with a legacy manager fallback. Its non-operating-state check is only a
+warning: separately require manager `operating`, correct IDENT and measured
+held-reset 40 MHz before cold release. The historical raw image has sync bytes
+`aa 99 55 66` at offset `0x50`. The new run's `write_bitstream -bin_file`
+output must therefore be copied/renamed from `.bin` to a distinct `.bit.bin`
+**without conversion or byte-swapping**, then hashed and byte-checked. No new
+candidate bytes exist yet; this read-only audit neither programs the board
+nor qualifies the old image as the candidate.
+
 ### Vendor helper deadlock and bounded restart
 
 Timing Optimization finished at 21:39:51 UTC and Technology Mapping began,

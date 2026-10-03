@@ -554,6 +554,12 @@ $VENTIUM/fpga_run_<tag>/rk_ao486_system/rk_ao486_system.runs/impl_1/
 
 `write_bitstream -bin_file` creates the raw `.bin`; the flow copies it to the
 `.bit.bin` name. Do not run the template's `bit2bin.sh` on it again.
+Do not byte-swap it either: the October 3 board-loader audit confirms that
+the loader copies the bytes unchanged. Before staging a new candidate, hash
+the native `.bin` and its renamed copy and inspect the initial bytes; the
+known-working raw image contains the Xilinx sync bytes `aa 99 55 66` at
+offset `0x50`. This is a format sanity check, not proof of correct routing,
+hardware operation or timedemo completion.
 
 ### 8.3 Sign-off checks
 
@@ -807,6 +813,10 @@ ssh -F "$SSH_CONFIG" -t "$BOARD" \
 The loader copies the raw bitstream to `/lib/firmware`, applies a configfs
 device-tree overlay to `&fpga_full`, and programs through the ZynqMP FPGA
 manager/PCAP. It falls back to the legacy manager sysfs interface if necessary.
+The current loader only warns when the manager is not `operating`; its exit
+code alone is insufficient. Read the manager state independently and require
+the matching IDENT before releasing the core. For a new clock image, also
+measure the held-reset core clock; constraint reports do not prove silicon MHz.
 
 Smoke passes only when both conditions hold:
 
