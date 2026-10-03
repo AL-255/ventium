@@ -1,6 +1,6 @@
 # RK FPGA Quake deployment — October 2, 2026
 
-## Current status (2026-10-03 21:43 UTC)
+## Current status (2026-10-03 21:57 UTC)
 
 The `impl_nobram_power` retry (native **79488**) has actually closed with
 exit **124**, observed **20:08:29 UTC**. The four-hour safety timeout expired
@@ -121,6 +121,23 @@ Placement/routing has **not** started for this candidate. No full-PC simulator
 was running in the 21:42 process census. The historical clean cold Quake
 simulation took **61,759.871582 seconds (17h09m19.9s)**; this is a simulation
 estimate, not the runtime of the currently active FPGA synthesis.
+
+At **21:54:33 UTC**, root's direct Verilator **preprocess-only** check exited
+**0** with the exact **107** simulation defines (the hardware set minus only
+`SYNTHESIS`, `VTM_NO_DPI`, and `VEN_ALTSYNCRAM_XPM`; no `VEN_UOPCACHE`). It ran
+from the frozen `ventium/` root with unchanged filelists, a **512 MiB**
+address-space cap and **60-second** external bound. Output is **2,240,656 bytes**
+at `/var/tmp/ventium-fpga40-preprocess.6AiVGj/candidate.preprocessed.sv`, SHA
+`5623d0d2fe22a3d9eb83df85af1da0b095f28e3f38cfec187656703c8ad052f5`;
+stderr is empty. All **151** unique preprocessor source/include paths match
+frozen manifest payloads; root also rechecked the manifest pin and all **179**
+payload hashes. The absent legacy `rtl/ao486` and `rtl/soc/uart` search
+directories are unused in this profile: neither an empty placeholder, a live
+source fallback nor a filelist edit was used. This establishes preprocessing
+source closure, not elaboration, a compiled candidate model, numerical
+correctness or a standard-suite pass. The same synthesis handle was freshly
+polled live at **21:57:11 UTC** with advancing CPU time, unchanged OOM counters
+and zero current pressure averages; routing remains unlaunched.
 
 Only **20** regular, single-link `.gch` caches from the closed focused-test
 tree were removed after two no-open-file checks, metadata/hash rechecks,
