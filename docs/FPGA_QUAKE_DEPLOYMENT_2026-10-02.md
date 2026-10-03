@@ -1,6 +1,6 @@
 # RK FPGA Quake deployment — October 2, 2026
 
-## Current status (2026-10-03 18:52 UTC)
+## Current status (2026-10-03 19:39 UTC)
 
 The frontend-factored full-chip synthesis completed with native exit **0**
 (handle **48145**, closure confirmed **15:49:49 UTC**). `synth_design` elapsed
@@ -163,6 +163,26 @@ The same native handle subsequently reported **2,348** (**18:21:00 UTC**),
 At the last observation, worker **2364930** remains live and CPU-active, with
 **2h43m56s** actual CPU time. Global Iteration 1 is still unfinished; no
 restart, new source change, complete-route result or bitstream is claimed.
+
+Further actual counts were **397** (**18:59:48 UTC**), **299**
+(**19:06:04 UTC**), **270** (**19:12:32 UTC**), **212** (**19:18:22 UTC**),
+**166** (**19:23:21 UTC**), **134** (**19:28:18 UTC**), **89**
+(**19:31:47 UTC**), **63** (**19:35:16 UTC**), and **51**
+(**19:37:32 UTC**). At **19:39:02 UTC**, the same live worker had
+**3h30m19s** actual CPU time, zero swap and no memory/OOM events. This remains
+unfinished Global Iteration 1, not a complete-route or timing result.
+
+Fresh root checks at **19:00–19:03 UTC** revalidated the manifest SHA,
+**all 179 frozen payloads**, and the unchanged synthesized checkpoint SHA.
+Independent read-only audit and root current-path checks found **177/179**
+mapped current sources matching: **all 164 RTL sources** match, and only the
+already documented launcher/probe helper differences remain (`029979…` and
+`fd0a83…` current versus `9ee5f6…` and `cd2842…` frozen). The current-path
+checksum command correctly returns **1** for exactly those two known
+differences; it is not a claim of all-current-files equality. These checks
+establish source bindings, not native input consumption, valid routed
+artifacts or hardware acceptance. Bind both current helpers separately in
+the final deployment/runtime receipt.
 
 Independent read-only review confirms the prepared post-route inspector is
 a **report collector, not a deployment/sign-off gate**. It rejects incomplete,
