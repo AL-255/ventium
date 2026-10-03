@@ -1,6 +1,6 @@
 # RK FPGA Quake deployment — October 2, 2026
 
-## Current status (2026-10-03 13:37 UTC)
+## Current status (2026-10-03 14:12 UTC)
 
 The first frontend-factored synthesis (native **65164**) closed with exit
 **143**, not success. The kernel/user journals identify **CONSTRAINT_MEMCG
@@ -10,31 +10,55 @@ the unit records a 20 GiB memory peak and 2 GiB swap peak. The earlier zero
 event samples predated the allocation burst. All family processes are gone;
 no synthesis DCP or bitstream was produced. Failed logs and sources are retained.
 
-The sole unchanged-source retry launched at **12:56:45 UTC**, native **32041**,
+The first unchanged-source retry launched at **12:56:45 UTC**, native **32041**,
 under `/var/tmp/ventium-fpga40-icfrontspan-memretry.Gdis4N/`, using the same
 179 frozen source payloads and 110 defines from
 `/var/tmp/ventium-fpga40-icfrontspan.yqNVao/`. All 179 hashes were checked before
 launch; the input manifest remains
 `b94db3dc4e6e559f8aa956ec629906d45f88192b627b3793f757a8cb79178270`.
 This is still **40 MHz core / 100 MHz PS-AXI**, full P5 caches and balanced
-synthesis, not another RTL or directive experiment. No competing build runs.
+synthesis, not another RTL or directive experiment.
 
-The admission repair is committed/pushed as **`3f1d3e9`**, with **18 host-only
-tests** passing. The RAM ceiling remains 20 GiB and default swap remains 2 GiB;
-explicit swap is bounded at 8 GiB. New Vivado admission requires available RAM
-at least the selected cap plus 2 GiB, and free swap at least the selected cap
-plus 4 GiB when swap is enabled. The retry selects **18 GiB RAM / 8 GiB swap /
-48 tasks**, with **MemoryHigh at 90% of RAM cap** (also attested for nesting).
-Actual manager properties confirm those limits, invocation
+The original admission repair was **`3f1d3e9`**. Attempt 32041 selected
+**18 GiB RAM / 8 GiB swap / 48 tasks**, with **MemoryHigh at 90% of RAM cap**.
+Its actual manager properties confirmed those limits, invocation
 `8125cbd80ab4436ea1936f03f7422cd2`. Admission observed 23,201,869,824 available
-RAM bytes and 17,748,029,440 free swap bytes. Passing admission is not proof
-that later synthesis peaks will fit; continue monitoring before implementation.
+RAM bytes and 17,748,029,440 free swap bytes.
 
-At **13:36:24 UTC**, the same native **32041** remained live. Synthesis worker
-PID **2177306** had accumulated **39m26s CPU** and was still computing in timing
-optimization. The scope's OOM/max counters were zero; `memory.events.high=1610`
-records expected soft-limit reclaim, not an OOM. No DCP or implementation exists
-for this retry yet. Do not restart from a quiet log alone.
+The **13:36:24 UTC** live sample and its zero kernel OOM/max counters were
+historical, not final success. Timing optimization subsequently completed
+(54m50s CPU / 55m35s elapsed), and technology mapping began. At **13:56:52 UTC**,
+**systemd-oomd killed all 17 family processes**; native 32041 closed with
+**exit 137**. The scope records 16.6 GiB RAM and 8 GiB swap peaks. Its ancestor
+`user@1000.service` exceeded its installed 50% memory-pressure policy for more
+than 20 seconds; the scope had sustained reclaim/PSI. This userspace kill is
+distinct from attempt 65164's kernel hard-cap OOM. A finite soft throttle
+coincided with the pressure, but is not proven to be its sole cause. No DCP,
+implementation or bitstream was produced. A proposed live 19 GiB increase was
+rejected by the fresh reserve check before mutation; 18 GiB remained in force.
+
+The controlled retry launched at **14:11:30 UTC**, native **48145**, under
+`/var/tmp/ventium-fpga40-icfrontspan-nothrottle.3ZFR9t/`; synth_1 started at
+**14:11:53 UTC**. Guard **`830c1a9`** is committed/pushed, and **20 host-only
+tests** pass. It omits automatic MemoryHigh and requires actual
+`memory.high=max` when attesting a nested Vivado scope. The hard RAM ceiling
+remains 20 GiB, default swap 2 GiB and explicit swap ceiling 8 GiB. Admission
+still requires available RAM at least selected cap + 2 GiB and free swap at
+least selected cap + 4 GiB. This retry selects the same **18 GiB RAM / 8 GiB
+swap / 48 tasks**, without changing host OOM policy or preferring other victims.
+
+Actual cgroup files confirm `memory.max=19327352832`, `memory.high=max`,
+`memory.swap.max=8589934592`, `pids.max=48`; invocation is
+`3da91b793e324153ba2bdbc86c0de757`. Admission observed **22,465,601,536** available
+RAM bytes and **18,425,196,544** free swap bytes. At **14:12:26 UTC**, synthesis
+worker **2296983** was live at 97% CPU, scope memory was **5,672,022,016 bytes**,
+swap was zero and 19 tasks were present. One Vivado family runs, with jobs=1
+and general.maxThreads=1. Exact **110 defines** match both the new XPR and
+generated synthesis Tcl; all **179** frozen source hashes were rechecked.
+The 40/100 MHz clocks, full P5 caches, balanced profile and RTL are unchanged.
+Passing tests/admission does not guarantee that mapping peaks fit. Monitor
+native handle, cgroup pressure/events, journal and disk; do not restart merely
+because the log is quiet. No new synthesis DCP or bit exists yet.
 
 The stopped OOM run's caches were cleaned only after archive verification and
 an exact-file/liveness qualification: **624** regular single-link `.rtd`/`.tim`

@@ -6,7 +6,7 @@ debug tools as inspected through **2026-08-23**, with the safety preflight
 updated through **2026-10-03**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
 
-> **Latest status (2026-10-03 13:37 UTC):** the congestion retries did not
+> **Latest status (2026-10-03 14:12 UTC):** the congestion retries did not
 > produce a new bitstream. The board is reachable and idle, still holding the
 > historical image. A source-level frontend factoring candidate has passed
 > focused byte-span tests, strict hardware-profile lint, and default/BRAM
@@ -26,12 +26,22 @@ not certification of the currently installed image.
 > **OOM-killed at 12:50:43 UTC** during technology mapping: the kernel records
 > `CONSTRAINT_MEMCG`, 20 GiB RAM and 2 GiB swap at their limits. Its runner
 > closed with native exit **143**; no synthesis DCP or bitstream was produced.
-> An unchanged-source retry is live under
-> `/var/tmp/ventium-fpga40-icfrontspan-memretry.Gdis4N/` (native handle **32041**).
-> The guard now checks host reserves and applies earlier reclaim; this run
-> uses **18 GiB RAM / 8 GiB swap / 48 tasks**, still one Vivado family and
-> one synthesis worker. **18 host-only guard tests** pass (`3f1d3e9`); those
-> tests do not prove the retry will fit. No new bit exists.
+> The next unchanged-source attempt, native **32041** under
+> `/var/tmp/ventium-fpga40-icfrontspan-memretry.Gdis4N/`, also stopped: at
+> **13:56:52 UTC**, **systemd-oomd killed its 17-process family**, with native
+> exit **137**, a 16.6 GiB RAM peak and 8 GiB swap peak. This was a userspace
+> pressure-policy kill, distinct from the first run's kernel hard-cap OOM.
+> Its finite 90% `MemoryHigh` coincided with sustained reclaim/PSI; that is
+> not proof that this was the sole cause. No DCP or bitstream was produced.
+> A controlled unchanged-source retry launched at **14:11:30 UTC**, native
+> **48145**, under `/var/tmp/ventium-fpga40-icfrontspan-nothrottle.3ZFR9t/`.
+> Guard commit **`830c1a9`** removes the automatic soft throttle, while keeping
+> hard **18 GiB RAM / 8 GiB swap / 48 tasks** for this run and the same host
+> admission reserves. Actual cgroup `memory.high=max`, one Vivado family,
+> one synthesis worker and exact 110 XPR/generated-Tcl defines were checked.
+> **20 host-only guard tests** pass; these do not guarantee a completed build.
+> Neither system OOM policy nor source/clock/cache settings were changed.
+> No new bit exists.
 > The movie bundle was separately re-pinned for this candidate under
 > `/var/tmp/ventium-fpga-quake-oct02.rc0wVn/icfrontspan-movie-bundle.UKUNF0/`.
 > Its bounded synthetic host gate exited **0**, including rejection of the
