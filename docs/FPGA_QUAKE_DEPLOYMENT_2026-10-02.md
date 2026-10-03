@@ -1,6 +1,6 @@
 # RK FPGA Quake deployment — October 2, 2026
 
-## Current status (2026-10-03 01:27 UTC)
+## Current status (2026-10-03 01:52 UTC)
 
 Administrator access and the boot-time DDR reservation work. The board remains
 held in reset on the historical image. At the user's request, a new **40 MHz**
@@ -9,13 +9,19 @@ The original run was stopped after read-only debugger evidence identified a
 deadlocked vendor helper. A replacement with the same frozen RTL/defines is
 closed with native exit **0** under the corrected fixed task cap. Read-only
 checkpoint inspection also closed with exit **0**. Implementation launched
-from that same completed project at 00:29 UTC, **without resynthesis**.
-Placement has completed successfully in 29m10s, and pre-route physical
-optimization completed successfully in 17m42s. Routing started at about
-01:21 UTC and is now in the initial net-routing pass. Placed occupancy is
-65.73% LUT / 89.11% CLB, with a native
-high-congestion warning and estimated WNS −22.180 ns. Area fits the part,
-but preliminary timing is severely negative: the constrained
+from that same completed project at 00:29 UTC, **without RTL resynthesis**.
+Placement completed in 29m10s and pre-route physical optimization in 17m42s,
+but routing **failed** with `Route 35-3` / `Route 35-4445`. The implementation
+runner closed with actual native exit **1**, observed at 01:37:35 UTC. There
+is no new bitstream. This was congestion, **not an OOM**: the last retained
+resource observations have zero memory/task-limit events and zero build swap.
+Placed occupancy is 65.73% LUT / 89.11% CLB; regional routing demand reaches
+158.487% north and 135.603% south, with 1,153,331 overlapping nodes in the
+failed live router. A separate report-only inspection of its error checkpoint
+closed with native exit **0**; this proves report completion, not a valid route.
+The completed synthesis and failed-run checkpoints are retained for a new
+congestion-focused implementation attempt. Preliminary timing is also severely
+negative: the constrained
 40 MHz target is not yet a demonstrated operating frequency or timing pass.
 The first daemon's SIGBUS has an instruction-level cause (`DC ZVA` on Device
 memory), and an isolated scalar-access successor is built and microtested,
@@ -218,9 +224,9 @@ reports local congestion/high pin utilization in at least **329 CLBs**, which
 may affect runtime and timing closure. Initial unrouted/partially routed net
 counts are expected before initial routing and are not a terminal tool failure.
 Routing completion, final setup/hold/CDC/bus-skew review, bitstream generation,
-deployment and physical 40 MHz qualification all remain pending.
+deployment and physical 40 MHz qualification remained pending at that observation.
 
-Implementation native session **66620** is now live, scope invocation
+The then-live implementation native session was **66620**, scope invocation
 `d4a69c016ef5448ab10a01a303a752ad`, outer PID 1814754 / implementation PID
 1815196. It resumes the existing XPR with `VEN_FPGA_CORE_MHZ=40`, one run job
 and one internal worker; no BD regeneration or resynthesis. Launcher logs/CWD
@@ -247,6 +253,54 @@ the board still holds the historical reset-held image. Hardware IPC, cold
 startup, full 969-frame timedemo and continuous movie coverage remain unmeasured
 or unproven. Simulation gameplay baseline remains **0.42633263** on frozen
 5c2491f3, cycles **7,099,999,637–7,199,999,637**, predating the FPGA candidate.
+
+### October 3: terminal routing failure and checkpoint recovery
+
+The original implementation's `route_design` failed after **16m07s**; the
+parent's implementation wait took **1h08m22s**. Root observed native session
+66620 exit **1** at 01:37:35 UTC, then confirmed the old family and scope were
+gone. `Route 35-3` reports global congestion level **6**; `Route 35-4445`
+explicitly says these initial-routing issues cannot be resolved later in
+that invocation. The router reports 1,153,331 node overlaps despite zero
+failed-net counts, and estimated global/short and timing congestion level
+**7 (128×128)**. Zero DRC errors are not successful routing. Do not force
+bitstream generation or present the historical image as this candidate.
+
+Preserved checkpoints under the original XPR's `.runs/` directory:
+
+| Checkpoint | Bytes | SHA256 |
+| --- | ---: | --- |
+| `synth_1/rk_ao486_bd_wrapper.dcp` | 189,588,385 | `43cfcc3146f07bb7021a5a46978ce0ab4be6a165d820da5f4f6773988c53910c` |
+| `impl_1/rk_ao486_bd_wrapper_placed.dcp` | 86,585,115 | `a85bda9f8dca7e679abc2366e2cc0c0a729428e7e7fb4ad615e7ae7721fd21e0` |
+| `impl_1/rk_ao486_bd_wrapper_physopt.dcp` | 86,100,278 | `f8f9bef610610f6ae1d94c761dfa6651933cfbb8eb538e1bf649eb7b9d6c88d6` |
+| `impl_1/rk_ao486_bd_wrapper_routed_error.dcp` | 88,018,240 | `78bc871cb523d4165e2f49a9a7839953705b436218135b9c725bc5b8588b46df` |
+
+Root launched a separate bounded, exclusive **report-only** inspection at
+01:42:54 UTC, after the failed family was gone. Its source and eleven native
+reports are under
+`/var/tmp/ventium-fpga-quake-oct02.rc0wVn/route-failure-inspect-oct03.ScF3bypa/`.
+Native session 22371 returned **0**, observed at 01:49:39 UTC, and its
+completion marker follows `close_design`. A subsequent inventory at
+01:50:13 UTC found no surviving Vivado family and an inactive scope. It used
+18 GiB RAM / 2 GiB swap / 48 tasks, with one worker and a nine-minute outer
+bound. The error checkpoint has discarded invalid signal routes: its native
+route-status report has **242,219 unrouted / 242,223 routable nets**, only
+four fully routed nets and zero routing errors. Therefore its timing reports
+are **not final routed timing**, and zero routing errors are not acceptance.
+
+The next controlled recovery preserves `impl_1` and reuses completed
+`synth_1` in a new implementation run. The proposed recipe is `ExploreArea`
+optimization, `AltSpreadLogic_high` placement, default pre-route physical
+optimization, `AlternateCLBRouting`, and no post-route physical optimization.
+`ExploreArea` includes implementation-stage **netlist area resynthesis**;
+it is not a full RTL synthesis rebuild. A separate tiny same-part native
+probe checks router-directive acceptance before the full implementation
+launch; passing that probe cannot prove Ventium routability or timing.
+High-spread placement and default pre-route physical optimization were already
+used by the failed run and are retained controls, not new fixes. The intended
+changes are the area-optimization directive and alternative router.
+No frozen RTL, defines, P5 cache geometry or timing exceptions are changed.
+The recipe is a recovery attempt, not a guarantee of closure.
 
 ### Vendor helper deadlock and bounded restart
 

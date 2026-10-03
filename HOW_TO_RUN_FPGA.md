@@ -6,7 +6,7 @@ debug tools as inspected through **2026-08-23**, with the safety preflight
 updated through **2026-10-03**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
 
-> **Latest build status (2026-10-03 01:27 UTC):** replacement synthesis has
+> **Latest build status (2026-10-03 01:52 UTC):** replacement synthesis has
 > closed with native exit **0** (2h26m), and the separate read-only checkpoint
 > inspection also exited **0**. Preliminary area is **66.04% LUT / 29.70%
 > BRAM**. Clock constraints are **40 MHz core / 100 MHz PS-AXI**, but pre-route
@@ -16,11 +16,16 @@ not certification of the currently installed image.
 > CLB occupancy**. Vivado warns that the design is highly congested; its
 > post-placement WNS estimate is **−22.180 ns**, not a routed timing pass.
 > Pre-route physical optimization also completed successfully in **17m42s**;
-> routing started at about **01:21 UTC** from the existing XPR, **without
-> resynthesis**, under the exclusive guard: **20 GiB RAM hard / 19 GiB soft /
-> 2 GiB swap**. Initial net routing is live. Its intermediate WNS is
-> **−19.465 ns**; local congestion affects at least 329 CLBs. Neither this
-> estimate nor successful earlier steps qualifies the 40 MHz target.
+> routing subsequently **failed** with `Route 35-3` / `Route 35-4445`.
+> The runner closed with native exit **1**, observed at **01:37:35 UTC**;
+> no new bitstream exists. This was **congestion, not OOM**: retained build
+> resource events are zero, with no build swap. Regional routing demand
+> reaches **158.487% north / 135.603% south**, and the failed live router
+> has **1,153,331 node overlaps**. Zero DRC errors do not prove routing.
+> A separate error-checkpoint diagnostic closed with native exit **0**,
+> but reports **242,219 unrouted nets**; its timing is not routed sign-off.
+> Preserve the failed run and reuse completed synthesis for a separate
+> congestion-focused implementation retry; do not force bitstream output.
 > At 00:32 UTC its live task cap was extended **48 → 64** after observing
 > 45 occupied slots (mostly sleeping vendor threads); the future launch guard
 > remains fixed at 48. RAM, swap, job count and source were unchanged. The
