@@ -1,6 +1,6 @@
 # RK FPGA Quake deployment — October 2, 2026
 
-## Current status (2026-10-03 21:57 UTC)
+## Current status (2026-10-03 22:01 UTC)
 
 The `impl_nobram_power` retry (native **79488**) has actually closed with
 exit **124**, observed **20:08:29 UTC**. The four-hour safety timeout expired
@@ -138,6 +138,32 @@ source closure, not elaboration, a compiled candidate model, numerical
 correctness or a standard-suite pass. The same synthesis handle was freshly
 polled live at **21:57:11 UTC** with advancing CPU time, unchanged OOM counters
 and zero current pressure averages; routing remains unlaunched.
+
+Root's **seven** bounded host-only full-PC freezer checks exited **0** at
+**22:01:03 UTC**; log
+`/var/tmp/ventium-f-standard-host.T9GeDB/root-host-tests.log`, SHA
+`cee46f02d8199fb9dcd0651b00d25377c54c65d9318d09adf17942c31b201c68`.
+Review caught and fixed dropped executable permissions in the source-copy
+helper before retaining a candidate tree. It now rejects symlinked ancestors,
+preserves sanitized ordinary modes, and leaves both build wrappers **0755**.
+Actual source preparation then exited **0** at **22:01:23 UTC** under
+`/var/tmp/ventium-f-standard-sources.krURBA/candidate/`.
+Its source-freeze manifest SHA is
+`db6d215541a554ee5866ad17f00ef56ac411d6580df0869948bafbbe0316b8e6`;
+simulator-defines SHA is
+`d16eb805e3831c3c9c54c74087592e08e415db17c270dd164eef930ca49da943`.
+Only **175** candidate source payloads plus **54** explicit harness/support
+files were copied (**4,344,575 bytes**); F's four historical evidence files
+were verified but withheld. All **66** external toolchain files were pinned,
+not copied. The resource guard is an explicit current-hash rebase; the other
+53 support files retain predecessor bytes. No generated model, object tree,
+media or old acceptance receipt was copied. An independent root check rehashed
+every staged/external file and verified wrapper modes; the staged `make -n
+ven-standard` emitted the exact ordered **107** defines. Its log SHA is
+`7ea0e8e6848aad26b42fa85d3d65e20c17d9330e2a715cd3d8f0c2784f8beba5`.
+Qualification remains `UNQUALIFIED`: this is source preparation, not a build,
+simulation or completed standard suite. Native synthesis **38563** remained
+live at **22:01:47 UTC**; no heavyweight compiler or simulator was launched.
 
 Only **20** regular, single-link `.gch` caches from the closed focused-test
 tree were removed after two no-open-file checks, metadata/hash rechecks,
