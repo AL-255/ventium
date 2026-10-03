@@ -1,6 +1,101 @@
 # RK FPGA Quake deployment — October 2, 2026
 
-## Current status (2026-10-03 19:39 UTC)
+## Current status (2026-10-03 20:41 UTC)
+
+The `impl_nobram_power` retry (native **79488**) has actually closed with
+exit **124**, observed **20:08:29 UTC**. The four-hour safety timeout expired
+during Phase 5.3 / Global Iteration 2, whose final logged overlap count is
+**1,493**. Global Iteration 1 had reached zero overlaps and finished at
+**19:50:52 UTC**, but this was not full routing: its timing summary was explicitly
+intermediate (**WNS −28.224 ns / WHS +0.006 ns**), not routed Fmax or sign-off.
+No routed checkpoint, `.bit` or `.bin` was produced. All native processes are
+gone; no live/orphan memory-consuming Vivado remains. The prior synthesized,
+optimized, placed and physical-optimization checkpoints and original logs are
+preserved. Zero memory/OOM events were recorded; this was a timeout, not OOM.
+
+Controller log SHA-256:
+`3b2558a18bff748291885af19b6f3326a60903fc1e3c1644897a84ff996bd229`;
+worker log SHA-256:
+`2367c6d89c20f42f504686b3ebd146b39bc19c7f018d0766501c978430d418d0`.
+Do not run the completed-implementation inspector or deploy from this partial
+run. The **40 MHz core / 100 MHz PS-AXI** targets have not been physically
+qualified on a new image.
+
+The next generic timing candidate factors SRT rounding/precision controls out
+of the shared-FPU command-admission/operand block. Current
+`fp_shared/ven_fp_top.sv` SHA-256 is
+`e093df1b7b332a226a2ad8a551af2309403610fb15ef3cd791afcdf06c952b5a`.
+It adds no registers or latency and does not change start/operand priority.
+Borrowed transcendental requests retain their one-pulse precision override and
+subsequent live-CW restoration; RC/PC are deliberately not latched.
+Strict shared-FPU lint, the actual **172-check** top test
+and all **four** arithmetic-stream regression modes have exited zero. Tests
+and isolated build outputs are under
+`/var/tmp/ventium-fp-controls-oct03.dneAL2/`, using the reviewed **32-job /
+16 GiB / 128-task** compilation profile. These standalone gates passed with
+both the bundled `fp_shared/fpu_srt_div.sv` and the actual production
+`rtl/fpu/fpu_srt_div.sv` (SHA `62c662f7e1608c100e4853a12b3282aefa729bb49b6dd519cdb9404a94f87b52`).
+Production-gate log SHA is
+`1623e15e7f3d0bd06680f919bd40eeffeecc38e54636d5386481f8021fe7ea80`.
+Root source-extracted Icarus tests passed **332,599 base / 332,604 stream**
+settled four-state comparisons, including unknown admission/state/control
+inputs and the borrowed precision override returning to live CW. Log SHA:
+`6f0d45f8375bd1dbaaa1ccaebc290ccb8c6c87fc0b3c80353d0c31ebc7332979`.
+The actual whole-FPU old/new production-SRT test also passed **12 RC/PC
+combinations / 396 checks** in each base/stream variant, requiring direct
+FDIV/reverse-FDIV/FSQRT/FPREM starts and borrowed FPATAN/FPTAN starts,
+with cycle-settled architectural/handshake/SRT equality. Initial run log SHA:
+`b43e12c72e80075e06ff32f5e72462bb822674e025e84b4e67b140ab8fcff480`.
+The hardened gate then closed with actual native **0**, handle **49988**,
+including a third `VEN_FP_ARITH_FWD` variant matching the hardware's forwarding
+mode. All three require exact **12 / 396** completion markers and absolute
+SRT operand assertions, and all direct sources/include headers are hash-checked
+before/after the run. Its final controller log SHA is
+`1ea2e77c259ff7ed467db528def60cea9f4db2a29ad41fa8204a3675811e042d`.
+These are focused equivalence tests, not a full-system or numerical-golden gate.
+A freshly rebuilt default differential model and `make verify` have exited
+zero: **108/108 functional programs** and every required M4/M5 metric band
+pass, with **20** disclosed non-gating structural cycle divergences. The default
+profile does not select the changed shared FPU and is not its acceptance gate.
+The explicit derivative freezer's **35 host tests** passed. Actual freeze
+exited zero at
+`/var/tmp/ventium-fpga-quake-oct02.rc0wVn/fpga40-srtctrl.3M3DsT/`, and an
+independent root check verified all **179 hashes/sizes**, **178 unchanged /
+one explicit FPU replacement**, exact **110** defines and **40 MHz** target.
+Input manifest SHA:
+`5e36c8fa48cbfcd02f4eecf60b1421bc736eec1bc109622da3239d2eb11bcf74`;
+delta receipt SHA:
+`fdbea1d829de8850eefad6f15c83f9b4035c68f410f6f718b3160c3328a1f0fa`.
+Qualification is `UNQUALIFIED`; current model identity is null, and all copied
+parent receipts are ancestry only. The revised RuntimeOptimized launcher
+passed **77 host Tcl cases** and independent review; its separate SHA is
+`39c50bee0a94fd480d571ee6b06e4ac6b4a8c2275922b616850388fd18557a84`.
+It only changes fresh, never-started implementation runs, requires installed
+directive help/readback/native bitstream completion, and checks 40/100 MHz
+constraints. It does not certify full routing, STA or physical clocks.
+Fresh synthesis launched at **20:40:49 UTC**, native **38563**, under
+`/var/tmp/ventium-fpga40-srtctrl-native.eMTOMg/`, with frozen source/flow/define
+roots and separately pinned current guards/implementation launcher. Actual
+scope invocation **`5f72a130817a406f991c19e236fe26cc`** confirms one family,
+`memory.max=20401094656` (**19 GiB**), swap **8 GiB**, **48 tasks**, and no soft
+throttle. The 20 GiB fresh-launch headroom requirement was not met; selecting
+19 GiB retains, rather than bypasses, the **2 GiB RAM / 4 GiB swap** host
+reserves. This does not guarantee mapper peaks fit. The actual parent was
+CPU-active at **20:41:10 UTC** with about **0.79 GB** scope memory; the block
+design has validated HP0 at **128 bits**. Constraints remain **40/100 MHz**,
+full P5 caches, `balanced`, synthesis `Default`, and preset-free PCAP-only
+configuration. The four-hour bound applies to synthesis only and is not an
+implementation ETA. Monitor this handle/cgroup; do not overlap an inspector,
+another Vivado family or a heavyweight simulator build. Synthesis, routing,
+bitstream, source-consumption and physical-clock qualification remain pending;
+no timing gain,
+complete standard-suite result, board timedemo or movie is claimed.
+
+Gameplay IPC is unmeasured for this candidate. Verified pre-candidate baseline:
+**0.42633263**, simulation build **5c2491f3**, cycles
+**7,099,999,637–7,199,999,637**.
+
+## Historical status (2026-10-03 19:39 UTC)
 
 The frontend-factored full-chip synthesis completed with native exit **0**
 (handle **48145**, closure confirmed **15:49:49 UTC**). `synth_design` elapsed

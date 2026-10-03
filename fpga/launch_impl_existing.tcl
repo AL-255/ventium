@@ -7,6 +7,17 @@ if {$argc != 1} {
     error "usage: vivado -mode batch -source launch_impl_existing.tcl -tclargs <project.xpr>"
 }
 
+# Explicit crash-avoidance option for a fresh implementation. Vivado 2025.2
+# documents RuntimeOptimized as Default without bram_power_opt; the latter
+# crashed on this large hierarchy. Do not reset or retarget a prior run.
+set opt_directive Default
+if {[info exists ::env(VEN_FPGA_OPT_DIRECTIVE)]} {
+    set opt_directive $::env(VEN_FPGA_OPT_DIRECTIVE)
+    if {$opt_directive ni {Default RuntimeOptimized}} {
+        error "VEN_FPGA_OPT_DIRECTIVE must be Default or RuntimeOptimized"
+    }
+}
+
 # An explicitly requested target must match the existing constrained clock.
 # With no target, retain compatibility with older checkpoints and report the
 # actual finite positive period rather than guessing the intended frequency.
@@ -25,10 +36,36 @@ if {[get_property PROGRESS [get_runs synth_1]] ne "100%"} {
     error "synth_1 is not complete"
 }
 
+if {$opt_directive eq "RuntimeOptimized"} {
+    set synth [get_runs synth_1]
+    if {[get_property STATUS $synth] ne "synth_design Complete!" ||
+        [string tolower [get_property NEEDS_REFRESH $synth]] ni {0 false}} {
+        error "synth_1 is stale or lacks native completion"
+    }
+    set impl [get_runs impl_1]
+    if {[get_property PROGRESS $impl] ne "0%" ||
+        [get_property STATUS $impl] ne "Not started"} {
+        error "RuntimeOptimized requires a fresh, never-started impl_1; no reset permitted"
+    }
+    if {[string first "RuntimeOptimized - Runs Default without bram_power_opt" [help opt_design]] < 0} {
+        error "installed opt_design help does not document RuntimeOptimized"
+    }
+    set_property STEPS.OPT_DESIGN.ARGS.DIRECTIVE RuntimeOptimized $impl
+    if {[get_property STEPS.OPT_DESIGN.ARGS.DIRECTIVE $impl] ne "RuntimeOptimized"} {
+        error "opt_design directive did not retain RuntimeOptimized"
+    }
+    puts "## Fresh implementation: RuntimeOptimized (Default without bram_power_opt)"
+}
+
 launch_runs impl_1 -to_step write_bitstream -jobs 1
 wait_on_run impl_1
 if {[get_property PROGRESS [get_runs impl_1]] ne "100%"} {
     error "impl_1 failed (PROGRESS=[get_property PROGRESS [get_runs impl_1]])"
+}
+if {$opt_directive eq "RuntimeOptimized" &&
+    ([get_property STATUS [get_runs impl_1]] ne "write_bitstream Complete!" ||
+     [string tolower [get_property NEEDS_REFRESH [get_runs impl_1]]] ni {0 false})} {
+    error "impl_1 lacks native bitstream completion or is stale"
 }
 
 open_run impl_1
@@ -57,7 +94,9 @@ proc report_clock_frequency {clock_name role {expected_period ""}} {
         $role [expr {1000.0 / $period_ns}] $period_ns]
 }
 
-report_clock_frequency clk_pl_0 "PL / HP0"
+set expected_pl_period ""
+if {$opt_directive eq "RuntimeOptimized"} { set expected_pl_period 10.0 }
+report_clock_frequency clk_pl_0 "PL / HP0" $expected_pl_period
 set core_clocks {}
 foreach candidate {mmcm_clk u_clkdiv_clk_out wr_clk_i} {
     set matches [get_clocks -quiet $candidate]

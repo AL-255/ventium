@@ -25,6 +25,13 @@ BASE = {
     'setup': ['setup_path'], 'hold': ['hold_path'],
     'slacks': {'setup_path': '0.104', 'hold_path': '0.012'},
     'target': None,
+    'opt_directive': None,
+    'status': {'synth_1': 'synth_design Complete!', 'impl_1': 'Not started'},
+    'refresh': {'synth_1': 'false', 'impl_1': 'false'},
+    'opt_help': 'RuntimeOptimized - Runs Default without bram_power_opt',
+    'wait_success': False,
+    'wait_status': 'write_bitstream Complete!',
+    'ignore_opt_setter': False,
 }
 RECEIPTS = []
 
@@ -51,11 +58,25 @@ proc get_runs {name} { return $name }
 proc get_property {name object} {
     switch -- $name {
         PROGRESS { return [dict get $::progress $object] }
+        STATUS { return [dict get $::status $object] }
+        NEEDS_REFRESH { return [dict get $::refresh $object] }
+        STEPS.OPT_DESIGN.ARGS.DIRECTIVE { return $::actual_opt_directive }
         DIRECTORY { return /stub-only/no-output-written }
         PERIOD { return [dict get $::periods $object] }
         SLACK { return [dict get $::slacks $object] }
         default { error "unexpected property $name" }
     }
+}
+proc help {name} {
+    if {$name ne "opt_design"} { error "unexpected help query" }
+    return $::opt_help
+}
+proc set_property {name value object} {
+    if {$name ne "STEPS.OPT_DESIGN.ARGS.DIRECTIVE" || $value ne "RuntimeOptimized" || $object ne "impl_1"} {
+        error "unexpected implementation setting change"
+    }
+    if {!$::ignore_opt_setter} { set ::actual_opt_directive $value }
+    record set_property $name $value $object
 }
 proc launch_runs {args} {
     if {$args ne {impl_1 -to_step write_bitstream -jobs 1}} {
@@ -63,7 +84,13 @@ proc launch_runs {args} {
     }
     record launch_runs {*}$args
 }
-proc wait_on_run {name} { record wait_on_run $name }
+proc wait_on_run {name} {
+    record wait_on_run $name
+    if {$::wait_success} {
+        dict set ::progress impl_1 {100%}
+        dict set ::status impl_1 $::wait_status
+    }
+}
 proc open_run {name} { record open_run $name }
 proc report_utilization {args} { record report_utilization {*}$args }
 proc report_timing_summary {args} { record report_timing_summary {*}$args }
@@ -88,14 +115,24 @@ def run(name, data, expected_ok, core_mhz=None, no_launch=False):
         'set ::setup ' + quote(' '.join(data['setup'])),
         'set ::hold ' + quote(' '.join(data['hold'])),
         'set ::slacks ' + tdict(data['slacks']),
+        'set ::status ' + tdict(data['status']),
+        'set ::refresh ' + tdict(data['refresh']),
+        'set ::opt_help ' + quote(data['opt_help']),
+        'set ::wait_success ' + ('1' if data['wait_success'] else '0'),
+        'set ::wait_status ' + quote(data['wait_status']),
+        'set ::ignore_opt_setter ' + ('1' if data['ignore_opt_setter'] else '0'),
+        'set ::actual_opt_directive Default',
     ))
     source = assignments + '\n' + STUBS + '\n' + (
         'if {[catch {source ' + quote(TARGET) + '} error_text]} {'
         ' puts stderr "EXPECTED-OR-ACTUAL-STUB-FAIL: $error_text"; exit 1 }\n')
     env = os.environ.copy()
     env.pop('VEN_FPGA_CORE_MHZ', None)
+    env.pop('VEN_FPGA_OPT_DIRECTIVE', None)
     if data['target'] is not None:
         env['VEN_FPGA_CORE_MHZ'] = str(data['target'])
+    if data['opt_directive'] is not None:
+        env['VEN_FPGA_OPT_DIRECTIVE'] = data['opt_directive']
     result = subprocess.run([TCLSH], input=source, text=True, env=env,
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=3)
     marker = '## IMPL OK'
@@ -107,6 +144,8 @@ def run(name, data, expected_ok, core_mhz=None, no_launch=False):
         assert result.stdout.count('STUB-CALL launch_runs ') == 1
         assert 'STUB-CALL close_project' in result.stdout
         assert f'## Frequency (core): {core_mhz:.6f} MHz' in result.stdout
+        expected_settings = int(data['opt_directive'] == 'RuntimeOptimized')
+        assert result.stdout.count('STUB-CALL set_property ') == expected_settings
     else:
         assert result.returncode != 0, (name, result.stdout, result.stderr)
         assert marker not in result.stdout, (name, result.stdout)
@@ -179,6 +218,35 @@ def main():
     for stage in ('synth_1', 'impl_1'):
         d = copy.deepcopy(BASE); d['progress'][stage] = '99%'
         check('incomplete-' + stage, d)
+    d = copy.deepcopy(BASE); d['opt_directive'] = 'Default'
+    check('explicit-default-no-setting-change', d, True, 40)
+    runtime = copy.deepcopy(BASE)
+    runtime['opt_directive'] = 'RuntimeOptimized'
+    runtime['progress']['impl_1'] = '0%'
+    runtime['wait_success'] = True
+    check('documented-runtime-fresh-completion', copy.deepcopy(runtime), True, 40)
+    for value in ('', 'NoBramPowerOpt', 'Explore', 'RuntimeOptimized; reset_run impl_1'):
+        d = copy.deepcopy(BASE); d['opt_directive'] = value
+        check('invalid-opt-directive-' + (value or 'empty'), d, no_launch=True)
+    for stage in ('synth_1', 'impl_1'):
+        d = copy.deepcopy(runtime); d['status'][stage] = 'opt_design ERROR'
+        check('runtime-nonfresh-status-' + stage, d, no_launch=True)
+    d = copy.deepcopy(runtime); d['refresh']['synth_1'] = 'true'
+    check('runtime-stale-synthesis', d, no_launch=True)
+    d = copy.deepcopy(runtime); d['progress']['impl_1'] = '1%'
+    check('runtime-previously-started', d, no_launch=True)
+    d = copy.deepcopy(runtime); d['opt_help'] = 'RuntimeOptimized is not documented here'
+    check('runtime-unsupported-installed-help', d, no_launch=True)
+    d = copy.deepcopy(runtime); d['wait_success'] = False
+    check('runtime-incomplete-native-run', d)
+    d = copy.deepcopy(runtime); d['refresh']['impl_1'] = 'true'
+    check('runtime-stale-native-completion', d)
+    d = copy.deepcopy(runtime); d['ignore_opt_setter'] = True
+    check('runtime-setting-readback-mismatch', d, no_launch=True)
+    d = copy.deepcopy(runtime); d['wait_status'] = 'route_design Complete!'
+    check('runtime-progress-without-bitstream-completion', d)
+    d = copy.deepcopy(runtime); d['periods']['pl'] = '12.5'
+    check('runtime-wrong-ps-axi-period', d)
     assert hashlib.sha256(TARGET.read_bytes()).hexdigest() == source_sha
     summary = {'marker': 'IMPL-RESUME-TCL-STUB-OK', 'cases': count,
                'source_sha256': source_sha,

@@ -6,7 +6,37 @@ debug tools as inspected through **2026-08-23**, with the safety preflight
 updated through **2026-10-03**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
 
-> **Latest status (2026-10-03 19:39 UTC):** the frontend-factored candidate's
+> **Latest status (2026-10-03 20:41 UTC):** the implementation retry ended
+> with actual native exit **124**, observed at **20:08:29 UTC**: its four-hour
+> safety timeout expired during Global Iteration 2. Global Iteration 1 reached
+> zero overlaps, but routing did not finish. No routed checkpoint, bitstream
+> or binary exists; the optimization, placement and physical-optimization
+> checkpoints and logs are preserved. All Vivado-family processes have exited;
+> this attempt had zero recorded memory/OOM events. Do not deploy it.
+> A generic shared-FPU RC/PC control-cone factoring change has passed focused
+> verification. Strict FPU lint, the 172-check top regression and all four
+> arithmetic-stream modes passed with both bundled and production SRT engines.
+> Source-extracted four-state selector tests passed 332,599 base and 332,604
+> streaming comparisons; actual whole-FPU old/new tests passed all 12 RC/PC
+> combinations (396 checks each in base, stream and stream-forwarding modes)
+> with the production divider.
+> No registers, operand capture or latency were added;
+> live rounding/precision behavior is retained. These tests do not establish
+> routed timing or full-system acceptance. A new 179-payload freeze at
+> `/var/tmp/ventium-fpga-quake-oct02.rc0wVn/fpga40-srtctrl.3M3DsT/` passed
+> independent hash/size checks: 178 unchanged, one explicit FPU replacement,
+> unchanged 110 defines/full P5 caches. Its candidate qualification is
+> deliberately `UNQUALIFIED`, with no inherited model/suite acceptance.
+> Fresh synthesis is now live, native handle **38563**, under
+> `/var/tmp/ventium-fpga40-srtctrl-native.eMTOMg/`: one Vivado family,
+> **19 GiB RAM / 8 GiB swap / 48 tasks**, `memory.high=max`, successful
+> reserve-preserving admission. Routing/bitstream and full-system tests remain
+> pending; no new deployment is claimed.
+> **40 MHz is the target, not a new silicon measurement.** Candidate
+> gameplay IPC is unmeasured; verified pre-candidate baseline **0.42633263**,
+> build **5c2491f3**, cycles **7,099,999,637–7,199,999,637**.
+
+> **Historical status (2026-10-03 19:39 UTC):** the frontend-factored candidate's
 > full-chip synthesis completed with native exit **0** (handle **48145**):
 > `synth_design` elapsed **1h37m15s**, about **1h38m** for the complete run.
 > Its checkpoint is under
@@ -619,6 +649,75 @@ job.  Do not launch `vivado -mode batch ...` directly, do not run two FPGA
 commands in separate terminals, and do not bypass the guard with a background
 shell.  The launcher records the PID/command line it terminates and escalates
 from `SIGTERM` to `SIGKILL` if a stale process survives 45 seconds.
+
+#### Current 40 MHz staged candidate flow
+
+The October 3 candidate uses an explicit, frozen 110-define profile, full P5
+caches, MMCM-derived **40 MHz core / 100 MHz PS-AXI**, and the `balanced`
+implementation profile. The legacy command below defaults to 3.125 MHz and is
+not the current 40 MHz deployment recipe. A copied historical PASS receipt
+does not qualify a changed candidate.
+
+`fpga/freeze_rk_candidate.py` creates an explicitly `UNQUALIFIED` derivative
+of a pinned 179-payload parent. Supply exact parent-manifest/define hashes and
+an explicit path/hash for each replacement; use `--help` for the arguments.
+The output must be an already-created, empty directory outside the parent and
+live source roots. Independently verify all resulting payload hashes/sizes,
+defines and the delta receipt before launching. The current freeze and hashes
+are recorded in `docs/FPGA_QUAKE_DEPLOYMENT_2026-10-02.md`.
+
+From the repository, focused FPU checks are available as:
+
+```bash
+python3 -B fp_shared/tb/run_ven_fp_srt_controls.py
+tools/build_scope.sh -- bash fp_shared/tb/run_srt_top_ab_gate.sh
+python3 -B fpga/test_freeze_rk_candidate.py
+python3 -B fpga/test_impl_resume_tcl.py
+```
+
+The first gate extracts old/new control blocks from pinned actual sources and
+checks settled four-state behavior. The second builds actual old/new FPU tops
+with the production SRT divider; its base, stream and stream-forwarding runs
+have bounded build/run time. Neither replaces the standard suite.
+
+For a verified frozen-input directory, create a **fresh** native output tree:
+
+```bash
+fpga_inputs=/absolute/path/to/verified/frozen-inputs
+fpga_run_root=$(mktemp -d /var/tmp/ventium-fpga40-native.XXXXXX)
+mkdir "$fpga_run_root/tmp"
+cd "$fpga_run_root"
+TMPDIR="$fpga_run_root/tmp" \
+VEN_FPGA_JOBS=1 VEN_FPGA_CORE_MHZ=40 VEN_FPGA_BUILD_PROFILE=balanced \
+VEN_FPGA_SKIP_PRESET=1 \
+VEN_FPGA_SOURCE_ROOT="$fpga_inputs/ventium" \
+VEN_FPGA_FLOW_ROOT="$fpga_inputs/flow" \
+VEN_FPGA_TEMPLATE_ROOT="$fpga_inputs/template" \
+VEN_FPGA_DEFINE_FILE="$fpga_inputs/defines.txt" \
+VENTIUM_VIVADO_MEMORY_MAX=19G VENTIUM_VIVADO_MEMORY_SWAP_MAX=8G \
+timeout --signal=TERM --kill-after=60s 4h \
+  "$VENTIUM/fpga/run_vivado_exclusive.sh" -mode batch \
+  -log "$fpga_run_root/synthesis.log" -journal "$fpga_run_root/synthesis.jou" \
+  -source "$fpga_inputs/ventium/fpga/create_project_3mhz_wrapper.tcl" \
+  -tclargs synth "$fpga_run_root/output"
+```
+
+The selected cap must pass actual RAM/swap admission while preserving the
+guard's host reserves. Do not disable admission or launch a second family to
+inspect a live run. The four-hour synthesis bound is not an ETA. Require native
+exit zero and completed, non-stale synthesis before implementation.
+
+Pin the current `fpga/launch_impl_existing.tcl` separately from the historical
+frozen launcher. For a fresh, never-started `impl_1`, invoke that pinned launcher
+through the same exclusive guard with `VEN_FPGA_CORE_MHZ=40` and
+`VEN_FPGA_OPT_DIRECTIVE=RuntimeOptimized`, passing the completed project's
+absolute XPR path. The latter is installed Vivado 2025.2's documented Default
+optimization without `bram_power_opt`, which previously crashed. It does not
+reset failed runs or force bitstream generation. Require actual native
+bitstream completion, full routing, DRC/CDC/bus-skew/timing review and regular
+bit/bin hashes; its `IMPL OK` marker is not timing or silicon sign-off.
+
+#### Legacy 3.125 MHz diagnostic flow
 
 ```bash
 "$VENTIUM/fpga/run_vivado_exclusive.sh" -mode batch \
