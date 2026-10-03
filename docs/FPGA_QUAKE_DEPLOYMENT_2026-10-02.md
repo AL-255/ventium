@@ -1138,6 +1138,21 @@ and opt checkpoint **0c0afa9f…**. The same live worker then entered standalone
 pre-route physical optimization. It remains under the original deadline;
 no route, bitstream, deployment or timedemo acceptance follows from placement.
 
+By **09:14:42 UTC**, standalone `phys_opt_design` completed successfully in
+**24m53s**, with zero errors/critical warnings and two warnings. Its final
+pre-route WNS estimate was **−28.899 ns** (TNS −1,085,318.392 ns); this is
+not a routed clock-frequency qualification. The physopt checkpoint SHA is
+**0897118e215e4a49295c673823809650a773f99adf68b2a531ce886ccc518bdb**.
+The same worker then actually entered `route_design -directive
+AlternateCLBRouting`; the preceding route DRC reported zero errors, but
+routing itself was still incomplete. No new Vivado instance was launched.
+The sealed resource watch through 09:13:41 UTC retained all 179 input hashes,
+exactly 110 defines and the original process identities, with zero current
+memory/swap/pids-limit events and zero worker swap. Its receipt SHA is
+**8d82268319597626c67d2016e9e3e8e02427f4c59aae5679ae85426e079cc1f2**.
+Neither this phase completion nor the route command proves a valid route,
+bitstream, hardware timedemo result or full movie.
+
 Verified gameplay IPC remains **0.42633263**, simulation build **5c2491f3**,
 cycles **7,099,999,637–7,199,999,637**. It predates this FPGA candidate; the
 current candidate's gameplay IPC is unmeasured.
