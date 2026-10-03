@@ -1222,6 +1222,17 @@ utilization report SHA is **1faaadb4b834374c0268cd82f419563be9491dbb60c8045f50c3
 The same worker entered standalone pre-route `phys_opt_design`; routing,
 bitstream, deployment, timedemo and full-movie acceptance remain pending.
 
+By **10:50:38 UTC**, standalone `phys_opt_design` completed successfully in
+**28m53s**, with zero errors/critical warnings and two warnings. Final
+pre-route estimated WNS/TNS were **−23.090 ns / −729,131.629 ns**; these do
+not establish a routed Fmax or qualify the 40-MHz constraint. The completed
+physopt checkpoint SHA is **12d2c8c0de2563a7981a0fe0fabf3134b27b272c666f4b42f18f8d0e6fa8868c**.
+The same worker actually entered `route_design -directive AlternateCLBRouting`
+and route phase 1. Pre-route DRC reported zero errors, but this is not route
+acceptance. Root's direct cgroup checks showed zero current memory, swap and
+task-limit events and zero swap use. The original build remains live; no
+second Vivado job, new bitstream, deployment or hardware timedemo is claimed.
+
 Verified gameplay IPC remains **0.42633263**, simulation build **5c2491f3**,
 cycles **7,099,999,637–7,199,999,637**. It predates this FPGA candidate; the
 current candidate's gameplay IPC is unmeasured.
