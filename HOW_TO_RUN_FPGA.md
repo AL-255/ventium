@@ -6,7 +6,7 @@ debug tools as inspected through **2026-08-23**, with the safety preflight
 updated through **2026-10-03**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
 
-> **Latest status (2026-10-03 17:20 UTC):** the frontend-factored candidate's
+> **Latest status (2026-10-03 17:44 UTC):** the frontend-factored candidate's
 > full-chip synthesis completed with native exit **0** (handle **48145**):
 > `synth_design` elapsed **1h37m15s**, about **1h38m** for the complete run.
 > Its checkpoint is under
@@ -52,7 +52,8 @@ not certification of the currently installed image.
 > Its preserved checkpoint is **75,298,446 bytes**, SHA
 > `6c1baf744db1bf4cb9a1af47981b7a9dcfbd92ab826294b29cc7f91258d3903e`.
 > The same CPU-active worker is in rip-up/reroute, **Global Iteration 1**, with
-> **286,033 intermediate overlapping nodes**, global/short congestion **level
+> intermediate overlap counts falling **286,033 → 75,853 → 25,087**,
+> global/short congestion **level
 > 6**, and timing congestion **level 7**. This is not a completed or terminal
 > routing result. It has no swap or memory/OOM
 > events. Full routing, bitstream and final frequency qualification remain
@@ -967,6 +968,13 @@ can establish the physical core clock pin frequency before guest release,
 but cannot establish CPU throughput. The October 3 held historical image
 measured **3.125067 MHz**, with zero retirements and `CTRL=1` before/after;
 this is not a measurement of the new 40 MHz candidate. Repeat after programming.
+Require and record **`CTRL=0x0001`** and **`FRZINFO.frozen=0`** before and after
+the interval, with no concurrent owner issuing clear/control writes. Preserve
+the raw 64-bit cycle endpoints and actual monotonic elapsed time; about 200M
+cycles over five seconds with **zero retirements** is the expected held-reset
+40 MHz result. The probe uses rollover-safe reads, but this is not a precision
+calibration or STA proof. A stopped/incorrect counter or a changed hold/freeze
+state fails preflight; do not release the guest based only on a clock label.
 
 Smoke passes only when both conditions hold:
 

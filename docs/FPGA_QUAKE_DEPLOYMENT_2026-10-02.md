@@ -1,6 +1,6 @@
 # RK FPGA Quake deployment — October 2, 2026
 
-## Current status (2026-10-03 17:20 UTC)
+## Current status (2026-10-03 17:44 UTC)
 
 The frontend-factored full-chip synthesis completed with native exit **0**
 (handle **48145**, closure confirmed **15:49:49 UTC**). `synth_design` elapsed
@@ -140,6 +140,13 @@ of a fully routed design. Scope memory is **8,208,117,760 bytes**, swap is
 **0**, and the actual memory-event counters remain zero. Continue observing
 this handle; a quiet log with a live CPU-active worker is not a restart reason.
 
+The same handle produced further intermediate counts **75,853** (observed
+**17:26:35 UTC**) and **25,087** (**17:44:16 UTC**), down from **286,033**.
+At **17:45:29 UTC**, it is still in Global Iteration 1: actual worker CPU time
+continues to advance, memory is **8,046,403,584 bytes**, and swap remains zero.
+This is real conflict-reduction progress, not route completion, timing sign-off,
+or a linear remaining-time estimate. No new run or source change was made.
+
 Independent read-only review confirms the prepared post-route inspector is
 a **report collector, not a deployment/sign-off gate**. It rejects incomplete,
 stale or partially/error-routed designs and incorrect 40/100 MHz constraint
@@ -149,6 +156,19 @@ match final bitstream and source hashes, and measure the held physical core
 clock. Native exit **0**, an empty original Vivado family, a separately bounded
 exclusive inspection and its actual exit **0** are all required; the inspector
 has not yet been executed. Its success marker alone cannot authorize deployment.
+
+An independent read-only clock-chain cross-check also found no downstream core
+divider/enable mismatch: the frozen MMCM is PL0 ×10/25; the same output clocks
+`system.clk_sys`, the Ventium shim/core and `ven_soc_dbg.perf_cyc`. Guest hold
+resets the SoC/core, not this debug counter, which increments every clock edge.
+Root read the actual MMCM, generated BD connectivity, debug counter, shim/core
+connections and runtime probe implementation. The pinned runtime `perf` probe
+is read-only and uses rollover-safe 64-bit reads. After programming, require
+manager operating/IDENT, `CTRL=1` and the frozen bit clear both before and after
+the five-second interval, with no other clear/control writer. Preserve raw
+endpoints, elapsed time and zero retirements; roughly 200M cycles is expected
+at 40 MHz. This prepares physical-clock verification; it does not measure the
+new image already or prove its timing/guest correctness.
 
 The board was freshly checked, with boot ID
 `2861e4e8-cd4c-48cd-9f44-7f7d8a991ebb`: no daemon/capture process was running,
