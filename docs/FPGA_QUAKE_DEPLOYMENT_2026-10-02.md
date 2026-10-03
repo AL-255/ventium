@@ -1153,6 +1153,30 @@ memory/swap/pids-limit events and zero worker swap. Its receipt SHA is
 Neither this phase completion nor the route command proves a valid route,
 bitstream, hardware timedemo result or full movie.
 
+The global-remap attempt **failed routing** and native `7139` exited **1**
+at **09:31:07 UTC**. `route_design` took 16m29s and reported global congestion
+level 6, estimated global/short and timing levels 7 (128×128), and
+**1,173,350 node overlaps**. Its zero unrouted-net count does not make that
+overlapping route valid. The failed checkpoint SHA is **3d015b41…**, worker
+log **d88e8259…**. No BIT/BIN exists. The final original observer retained
+all pins, zero worker swap and zero current memory/swap/pids-limit events;
+this was **not an OOM**. Root harvested the actual failure, confirmed both
+original PIDs absent/scope inactive, then found **zero** executables under
+the Vivado installation at 09:31:38 UTC before another launch.
+
+The lower-expansion follow-up first used a separate, bounded same-part probe
+at `/var/tmp/ventium-muxf8-property-probe.gj50Fu`, through the exclusive guard.
+Native **10165 exited 0** at 09:35:35 UTC. Unchanged explicit RTL retained
+16 F7 + 8 F8 after synthesis and `ExploreArea`; marking only actual `MUXF8`
+leaf cells with `MUXF_REMAP=TRUE`, then separately running
+`opt_design -property_opt_only`, produced **16 F7 + zero F8**, with the
+original F7 names intact. Final tiny routing remained 16/0, fully routed
+17/17 nets with zero route errors, and no-waiver DRC found zero checks.
+Root confirmed all Vivado executables absent again at 09:36:18 UTC. This
+proves **installed-2025.2 selective tool behavior only**: OOC warnings and
+unconstrained external paths preclude a frequency qualification, and it
+does not establish Ventium area, routability, timing or guest correctness.
+
 Verified gameplay IPC remains **0.42633263**, simulation build **5c2491f3**,
 cycles **7,099,999,637–7,199,999,637**. It predates this FPGA candidate; the
 current candidate's gameplay IPC is unmeasured.
