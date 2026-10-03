@@ -1207,6 +1207,21 @@ The completed opt checkpoint SHA is **4a5d7f25…**, rechecked after its write
 completion marker. By 09:51:54 UTC the same worker was in global placement
 under `AltSpreadLogic_medium`. Route/timing/hardware acceptance remains false.
 
+Placement completed by **10:20:40 UTC**, in **30m27s**, with zero errors or
+critical warnings. Root read the entire 257-line placed utilization report:
+**230,966 LUTs (67.68%)**, **38,639 occupied CLBs (90.57%)**, 59,005 FFs,
+zero latches, 35,420 F7 / 512 F8, 221 BRAM tiles and 127 DSPs. Selective F8
+remapping uses 31,093 fewer LUTs and 2,423 fewer CLBs than global remapping,
+but **12,440 more LUTs and 1,126 more CLBs than the no-remap medium baseline**.
+It is therefore not an area improvement over that baseline. High-congestion
+warning `Place 46-14` remains: global regions N/S/E/W are all 32×32, and
+long-congestion regions are 64×64 / 64×64 / 32×32 / 32×32. These placement
+estimates do not establish routability or routed Fmax. The completed placed
+checkpoint SHA is **9a3fff99b5935b92d36be7930a5c5ea34b2956c50dd504f30b67a1bbafd41902**;
+utilization report SHA is **1faaadb4b834374c0268cd82f419563be9491dbb60c8045f50c31764a80a16ad**.
+The same worker entered standalone pre-route `phys_opt_design`; routing,
+bitstream, deployment, timedemo and full-movie acceptance remain pending.
+
 Verified gameplay IPC remains **0.42633263**, simulation build **5c2491f3**,
 cycles **7,099,999,637–7,199,999,637**. It predates this FPGA candidate; the
 current candidate's gameplay IPC is unmeasured.
