@@ -1671,6 +1671,20 @@ the recorder's arm W1P.
 The raw stream still declares the original requested quota. Retain that raw
 file and actual exits; normalize only complete validated records. A clean
 stop, quota exhaustion or codec pass is not full timedemo/movie acceptance.
+For a clean full-movie claim, require actual producer **and** reader exits 0,
+the fresh closed-disk 969-frame result, a start-before-gameplay anchor, and an
+end-after-demo anchor. One end anchor uses only existing records: retain the
+board daemon's `ExecMainExitTimestampMonotonic` (positive microseconds, normal
+exit/status 0), find an accepted record whose board `host_monotonic_ns` is
+later, then retain its **successor** before requesting SIGUSR1. The first
+timestamp is taken after BRAM drain, so that record alone might depict an
+earlier raster; its successor is armed only after that timestamp/write/flush
+and therefore depicts a post-closure raster. Require the same board boot and
+CLOCK_MONOTONIC namespace: record `/proc/PID/ns/time` against board PID 1 while
+the producer is live, and preserve its unchanged PID/invocation. Host SSH
+timestamps are not substitutes. Review the capture-completion-cycle span and
+maximum gaps separately: this causal endpoint does not prove the first gameplay
+frame or gap-free scanout. Ensure quota/deadline permits the successor record.
 Tests: `python3 -B fpga/board-tools/test_ven_board_capture_stop.py` (native
 POSIX signal delivery with mocked MMIO/transport, not board qualification).
 

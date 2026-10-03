@@ -130,6 +130,22 @@ record is encoded once with unchanged dimensions/colors at **15 fps**;
 single-BRAM drain/rearm gaps mean neither record count nor encoding success
 proves all engine frames or full timedemo temporal coverage.
 
+Clean final capture additionally requires producer **0** and reader **0**;
+the normalizer's acceptance of nonzero exits is intentionally forensic-prefix
+support, not full-movie acceptance. Preserve the daemon's actual positive
+board `ExecMainExitTimestampMonotonic`, normal exit/status 0, board boot ID,
+and producer/PID-1 time-namespace identity observed while live. After daemon
+closure, retain a record with `host_monotonic_ns` later than that timestamp
+(convert microseconds to nanoseconds), then its successor before SIGUSR1.
+The successor is armed after the prior drain/timestamp/write/flush, so its
+raster is causally after closure; the first post-exit host timestamp alone
+is insufficient. Join this endpoint to the fresh closed-VHD 969 result, an
+independently checked start-before-gameplay image, capture-cycle span and
+maximum-gap review. Preserve producer PID/invocation and ensure quota/deadline
+permits the successor. This requires no guest mutation, workload symbol guesses,
+counter-offset assumption or extra capture owner; no such board evidence exists
+yet. Native daemon exit 0 or a sticky-freeze break alone is not timedemo success.
+
 A read-only completed-implementation collector is separately pinned at
 `/var/tmp/ventium-fpga40-srtctrl-native.eMTOMg/tools/inspect_completed_impl.tcl`,
 SHA `a23f7e19cb1601e73b1b60efb74f8dcdce01ea00d5b3ac5b3276bd549257feb9`.
@@ -1649,7 +1665,8 @@ Preserve raw colors and dimensions. Presentation is 15 fps, with no gamma,
 brightness or contrast processing. Retain capture-cycle timestamps; a
 constant-rate presentation is not measured silicon FPS. One recorder buffer
 does not guarantee capture of every game-engine frame. A full movie needs
-continuous temporal coverage through the visible 969-frame completion result,
+independent temporal-span evidence from before gameplay to after the fresh
+969-frame completion (visible result or the causal endpoint described above),
 plus separately checked timedemo completion. Never count 969 scanout samples
 as proof that the game completed 969 timedemo frames. Use bounded compressed
 lossless output to avoid filling the host or board filesystem.
