@@ -373,6 +373,20 @@ device-safe-daemon hashes unchanged, and the effective 256 MiB reservation's
 `reg` and `no-map` intact. This does not deploy or release the guest, and is
 not evidence of fresh hardware clock/timedemo/movie acceptance.
 
+The first bounded recovery resource watch completed with **38 samples over
+603.45 seconds** (02:01:43–02:11:46 UTC; largest gap 56.15 seconds). It retains
+the same invocation and original parent/worker identities, about one busy
+CPU, peak sampled **8.045 GiB** scope memory, zero build swap, at most 14/64
+tasks and zero sampled memory/task-limit events. Minimum sampled host/disk
+headroom is 13.80/15.64 GiB. Its final source check at 02:12:13 UTC holds all
+179 frozen files, 110 defines and the exact launch helper hash. Receipt:
+`observer-batch.jLBcE9xn/resource-batch.json` under the recovery CWD, SHA
+`c9c79efe108ac730ffa98ab8941e53a7b852fd4f8db7cdc6a4ac7d1b52a55ec6`.
+Root rehashed/read that receipt and independently rechecked the live family
+at **02:13:33 UTC**: the same worker has advanced to **Global Place Phase1**,
+CPU time 13m18s, scope memory **9.144 GB**, swap zero and 14 tasks. Native
+session 8229 remains live; observer completion is not build completion.
+
 ### Vendor helper deadlock and bounded restart
 
 Timing Optimization finished at 21:39:51 UTC and Technology Mapping began,
