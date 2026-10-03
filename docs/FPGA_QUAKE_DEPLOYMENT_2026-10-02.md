@@ -1,6 +1,6 @@
 # RK FPGA Quake deployment — October 2, 2026
 
-## Current status (2026-10-03 15:57 UTC)
+## Current status (2026-10-03 16:09 UTC)
 
 The frontend-factored full-chip synthesis completed with native exit **0**
 (handle **48145**, closure confirmed **15:49:49 UTC**). `synth_design` elapsed
@@ -45,6 +45,59 @@ Actual scope invocation `f5646a88e213475fbb53b8219cee8589` confirms
 `general.maxThreads=1` and `-jobs 1` are configured. The four-hour timeout is a
 safety bound, not an ETA.
 Do not start another inspector/implementation while this family is live.
+
+That implementation stopped at **16:01:27 UTC** with native exit **1**;
+all Vivado-family processes were confirmed gone. The worker received
+**SIGSEGV 11** during the default `opt_design` power-optimization pass,
+after `HACOOException: Too many fanin/fanouts`. Its crash stack is in
+`libxv_pwropt.so`, specifically `Cudd_RecursiveDeref`, `ABDD::~ABDD`, and
+`HACOOPwrOptMgr` destruction. This is a native tool crash, not a routed result;
+placement never began and no implementation DCP/bitstream was produced.
+The failed `impl_1` artifacts remain preserved. Crash log SHA:
+`4d904a788d6ce8531cfeedf67f57a14103acc354617284fb10b834a292a06481`.
+The completed synthesis DCP hash was rechecked unchanged.
+
+An installed-tool read-only documentation/property probe closed with native
+exit **0** (handle **55785**). Its actual Vivado **2025.2** `help opt_design`
+documents **RuntimeOptimized** as default optimization without
+`bram_power_opt`; the older **NoBramPowerOpt** name is not listed. Do not
+guess hidden power-optimization parameters or apply the obsolete directive.
+Help evidence: `/var/tmp/ventium-icfrontspan-pwropt-help.HMmw46/help2.log`, SHA
+`8c34e22d6e6955553a9d2c379a255df68b2e8b5880006df9afed691cbffd0e2c`.
+A separately named **`impl_nobram_power`** launched at **16:08:38 UTC**,
+native **79488**, reusing the completed synthesis. The launcher checks the
+exact regular XPR, current synthesis completion/no-refresh, installed help,
+and absence of the new run before creation. It clones and verifies all original
+step arguments, enable flags and hooks, excluding run-specific report names;
+the only changed step setting is **OPT_DESIGN Default → RuntimeOptimized**.
+Independent static review and root Tcl syntax-completeness checks preceded
+launch. Six subsequent host-only Tcl stub cases passed: success, stale synth,
+wrong retained-run status, existing retry, clone mismatch, and unsupported
+directive. These validate launcher control flow, not native Vivado semantics.
+Harness: `/var/tmp/ventium-nobram-tclstub.AVQobA/test_launch_nobram_stub.tcl`, SHA
+`d666debb1cd4e4b3cf5d379992a45350dc246dc6ea38bb992dd77e44c40924df`.
+Actual generated worker Tcl confirms `opt_design -directive RuntimeOptimized`,
+`place_design -directive AltSpreadLogic_high`, default pre-route physical
+optimization/routing, no post-route physical optimization, and binary output.
+`opt_design` completed successfully, produced an opt checkpoint, and placement
+began. This crosses the prior native crash point, but does not complete routing.
+This is a supported vendor-workaround experiment, not proof of unchanged
+physical QoR or successful placement/routing. No RTL, source, define, cache,
+clock or hidden parameter changed, and failed `impl_1` was not reset.
+
+Retry logs/helpers:
+`/var/tmp/ventium-icfrontspan-nobram-retry.cvKzwq/`. Launcher SHA:
+`8e823f241f912d8457868ddd330fde931c3753f6388234773cee08413134d85c`.
+The post-route inspector derivative changes only its four run-name bindings
+to `impl_nobram_power` (SHA
+`e8857dfdcde65ec86ce4d59598be3cad71a721acebe2f396f7de90993595166a`);
+it has not been executed against a completed routed run. All frozen-source
+and synthesis-DCP hashes were rechecked before retry. Fresh admission measured
+**23,935,229,952 available RAM bytes / 18,035,011,584 free swap bytes**.
+Actual invocation **`8c4925d93ad7440aa6b54fe443e47fb8`** confirms **20 GiB
+RAM / 8 GiB swap / 48 tasks**, with `memory.high=max`, `general.maxThreads=1`
+and `-jobs 1`. Do not start a new Vivado invocation until actual native closure
+and complete family exit; the four-hour timeout is not an ETA.
 
 No new bitstream, routed sign-off, deployment, cold hardware timedemo or movie
 is complete. The current candidate's full standard suite remains pending;

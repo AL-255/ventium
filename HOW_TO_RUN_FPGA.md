@@ -6,7 +6,7 @@ debug tools as inspected through **2026-08-23**, with the safety preflight
 updated through **2026-10-03**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
 
-> **Latest status (2026-10-03 15:57 UTC):** the frontend-factored candidate's
+> **Latest status (2026-10-03 16:09 UTC):** the frontend-factored candidate's
 > full-chip synthesis completed with native exit **0** (handle **48145**):
 > `synth_design` elapsed **1h37m15s**, about **1h38m** for the complete run.
 > Its checkpoint is under
@@ -28,8 +28,27 @@ not certification of the currently installed image.
 > **20 GiB RAM / 8 GiB swap / 48 tasks**, one worker, `memory.high=max`.
 > It reuses the completed synthesis, frozen 179 payloads, exact 110 defines,
 > full P5 caches and unchanged 40/100 MHz profile. Its controller log is under
-> `/var/tmp/ventium-icfrontspan-implementation.d26ux9/`; the four-hour timeout
-> is a safety bound, not a completion estimate. There is no new bitstream,
+> `/var/tmp/ventium-icfrontspan-implementation.d26ux9/`. This run stopped at
+> **16:01:27 UTC**, native exit **1**: the worker segfaulted in
+> `libxv_pwropt.so` cleanup after a fan-in/fan-out-limit exception during the
+> default `opt_design` power-optimization pass. Placement never began; the
+> completed synthesis remains intact. Failed `impl_1` logs and crash stack are
+> preserved, not reset. The installed 2025.2 help documents `RuntimeOptimized`
+> as default optimization without `bram_power_opt`; older `NoBramPowerOpt`
+> documentation is not applicable. A separately named **`impl_nobram_power`**
+> retry launched at **16:08:38 UTC**, native **79488**, after independent static
+> review and fresh admission through the same single-Vivado guard. Its script
+> clones and checks all original step arguments, enable flags and hooks, then
+> changes only `opt_design` to `RuntimeOptimized`. The actual generated script
+> confirms that directive, `AltSpreadLogic_high` placement, default physical
+> optimization/routing, with `general.maxThreads=1` and `-jobs 1` configured.
+> The retry has passed optimization, written an opt checkpoint, and reached
+> placement. Six host-only Tcl launcher tests subsequently passed; they test
+> control flow, not native implementation semantics. Physical QoR may differ;
+> this is a supported crash-avoidance experiment, not a routing/timing pass.
+> Logs/helpers are under `/var/tmp/ventium-icfrontspan-nobram-retry.cvKzwq/`.
+> The 20 GiB RAM / 8 GiB swap / 48-task guard remains active; do not overlap
+> an inspector or another Vivado family. There is no new bitstream,
 > deployed candidate, hardware timedemo or movie. The current candidate's full
 > standard suite is pending and gameplay IPC is unmeasured. Verified
 > pre-candidate simulation gameplay baseline: **0.42633263**, build
