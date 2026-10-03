@@ -1,6 +1,6 @@
 # RK FPGA Quake deployment — October 2, 2026
 
-## Current status (2026-10-03 14:12 UTC)
+## Current status (2026-10-03 14:32 UTC)
 
 The first frontend-factored synthesis (native **65164**) closed with exit
 **143**, not success. The kernel/user journals identify **CONSTRAINT_MEMCG
@@ -60,6 +60,24 @@ Passing tests/admission does not guarantee that mapping peaks fit. Monitor
 native handle, cgroup pressure/events, journal and disk; do not restart merely
 because the log is quiet. No new synthesis DCP or bit exists yet.
 
+At **14:32:04 UTC**, the same live scope's RAM cap was raised in place from
+**18 to 20 GiB**, still within the reviewed guard ceiling. Immediately before
+the write, actual `memory.current` was **19,324,596,224 bytes**, available RAM
+**5,446,189,056 bytes**, and required remaining capacity plus the preserved
+2 GiB host reserve was **4,297,723,904 bytes**. Free swap was
+**18,292,731,904 bytes**, exceeding the unchanged 8 GiB cap plus 4 GiB reserve.
+This was a live-capacity check, not an attempt to bypass failed fresh-launch
+admission. Exact invocation, cgroup and worker were checked before/after;
+`memory.max=21474836480`, `memory.high=max`, swap 8 GiB and tasks 48 were
+reattested. Worker **2296983** remained computing, without a restart or source
+change. Prior hard-cap reclaim events (362) remain historical counters; OOM
+counters were zero and pressure averages zero. The host OOM policy is intact.
+The parent's original configured limit remains 18 GiB, so a new nested guarded
+call would correctly reject this raised scope: **do not run nested guards or
+inspectors while this family is live**. After actual native closure, a fresh
+inspection/implementation launch must pass the normal admission guard again.
+This adjustment is not a guarantee against a later mapping-pressure failure.
+
 The stopped OOM run's caches were cleaned only after archive verification and
 an exact-file/liveness qualification: **624** regular single-link `.rtd`/`.tim`
 files removed, **570** other cache files and all **179** frozen payloads checked
@@ -69,6 +87,30 @@ was removed. Net reclaimed space is approximately **2.70 GiB**. Recovery archive
 `72a7995e0fb6f171ea86c0c90c52938d30c31a6ec1a2b899e81f33aee93a025e`;
 cleanup receipt SHA
 `4439e2afa40f4d8b95e06d2b62b2d2da2ae85ff0e57397ab086fee75cb5292f5`.
+
+At **14:23:38 UTC**, the separately stopped **32041** attempt was also cleaned,
+without touching the current live retry. Only **622** exact regular single-link
+`.rtd`/`.tim` files were removed after a fresh qualification, privileged
+file-handle checks, archive decompression and original-file content comparison.
+All checks exited **0**; the other **570** cache files and all **179** frozen
+source hashes remain unchanged. No directory, marker, log, checkpoint or guest
+media was removed. Net reclaimed space is approximately **2.69 GiB**; available
+root-filesystem space then measured **12,640,358,400 bytes**. Recovery archive:
+`/var/tmp/ventium-oomd-synth-cache-cleanup.nbwlSY/regenerable-caches.tar.zst`,
+SHA `43d3addb0bd8805fdab48fbc7d3c7e26b2b50bdf4e2afc7835e96cf7cf2c584a`;
+cleanup receipt SHA
+`cbe74c9bfbac57fad783f5d40f2a1c30e1fad918496eda1e9e5c3bb28ca4b5c6`.
+
+For the pending cold run, preserve the original board input VHD and create a
+new writable per-run copy whose prelaunch hash matches the input. Launch the
+device-safe daemon directly as a retained `Type=exec` service, with separate
+stdout/stderr files and **without `--text`**. Do not use the historical shell
+pipeline: its grep exit can hide daemon failure. Record actual `ExecMain*`,
+invocation and closure properties, not just `is-active`; retained successful
+units remain active/exited. Native zero alone is insufficient because the
+daemon's debug-freeze branch also returns zero. Independent fresh 969-frame
+closed-disk console, bitstream/held-clock and complete capture evidence are
+still required. This is a source-audited handoff, not an executed cold run.
 
 The source audit confirms no CPU clock division after the MMCM: CPU and debug
 `perf_cyc` share its output, so the held counter can measure core clock pin

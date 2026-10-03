@@ -6,7 +6,7 @@ debug tools as inspected through **2026-08-23**, with the safety preflight
 updated through **2026-10-03**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
 
-> **Latest status (2026-10-03 14:12 UTC):** the congestion retries did not
+> **Latest status (2026-10-03 14:32 UTC):** the congestion retries did not
 > produce a new bitstream. The board is reachable and idle, still holding the
 > historical image. A source-level frontend factoring candidate has passed
 > focused byte-span tests, strict hardware-profile lint, and default/BRAM
@@ -36,12 +36,23 @@ not certification of the currently installed image.
 > A controlled unchanged-source retry launched at **14:11:30 UTC**, native
 > **48145**, under `/var/tmp/ventium-fpga40-icfrontspan-nothrottle.3ZFR9t/`.
 > Guard commit **`830c1a9`** removes the automatic soft throttle, while keeping
-> hard **18 GiB RAM / 8 GiB swap / 48 tasks** for this run and the same host
+> hard **18 GiB RAM initially / 8 GiB swap / 48 tasks** and the same host
 > admission reserves. Actual cgroup `memory.high=max`, one Vivado family,
 > one synthesis worker and exact 110 XPR/generated-Tcl defines were checked.
 > **20 host-only guard tests** pass; these do not guarantee a completed build.
 > Neither system OOM policy nor source/clock/cache settings were changed.
+> At **14:32:04 UTC**, this same live scope's RAM cap was raised **18 → 20 GiB**
+> within the reviewed ceiling, after checking full remaining live capacity
+> plus the 2 GiB host reserve. Swap/task caps and `memory.high=max` stayed
+> unchanged. The original launch environment still requests 18 GiB: do not
+> invoke nested guards/inspectors until the existing family has closed.
 > No new bit exists.
+> Stopped-attempt caches were separately archived and verified before removing
+> 622 exact `.rtd`/`.tim` files, reclaiming approximately **2.69 GiB** net.
+> The live build, logs, guest media, other cache files and all 179 source
+> payloads were preserved. The recovery archive is under
+> `/var/tmp/ventium-oomd-synth-cache-cleanup.nbwlSY/`; the dated deployment log
+> records hashes and actual checks.
 > The movie bundle was separately re-pinned for this candidate under
 > `/var/tmp/ventium-fpga-quake-oct02.rc0wVn/icfrontspan-movie-bundle.UKUNF0/`.
 > Its bounded synthetic host gate exited **0**, including rejection of the
@@ -1197,27 +1208,62 @@ The board-local `/tmp/ao486/qk_board_mon.sh` scans guest RAM/logs for this
 signature. It is a useful monitor, but it is not source-controlled and must be
 archived with its hash when used as evidence.
 
-For a multi-hour run on a nearly full board, do not save the daemon's complete
-verbose output. A detached transient service can retain only progress and
-acceptance markers:
+Use a direct retained transient service, not `ao486d | grep`: a shell pipeline
+can report grep's exit instead of a failed daemon. Omit `--text`; normal
+device-safe runtime logging is substantially smaller and can be filtered on
+the host without affecting the daemon. After programming the correct image,
+held-clock/identity checks and media/DDR preflight, a board-shell command shape
+is shown below. First prepare a root-owned expected-hash manifest, in a
+root-owned directory, from the accepted deployment receipts. It must pin the
+input VHD, device-safe daemon, both ROMs, final raw `.bit.bin` and matched probe;
+all manifest entries must use absolute board paths.
+do not manufacture expected hashes from unchecked live files. Set
+`quake_input_manifest` to that manifest's absolute board path. Preserve the
+input VHD; run only its uniquely named writable copy. This example's 600-second
+nominal loop budget is **not** a wall-time or completion prediction, and the
+outer runtime bound must be recorded for the actual run.
 
 ```bash
-sudo systemd-run --unit=ven-quake-nonfast --collect /bin/sh -c \
-  '/tmp/ao486/ao486d --membase 0x60000000 \
-     --bios /tmp/ao486 --hdd /tmp/ao486/qk_td.vhd \
-     --secs 21600 --text 2>&1 | \
-   stdbuf -oL grep -E \
-     "board_init|mounting HDD0|x86_init done|IDENTIFY STORE OK|BOOT SECTOR LOADED|IDESNAP|TIMEDEMO|969 frames|FLUSHWD|done: x86_polls|DBG\\[final\\]" \
-     > /tmp/ao486/quake_nonfast_long.log'
+set -euo pipefail
+: "${quake_input_manifest:?Set the root-owned current deployment manifest first}"
+sudo sha256sum -c "$quake_input_manifest"
+quake_run_dir=$(sudo mktemp -d /tmp/ao486/quake-cold-run.XXXXXX)
+sudo chown root:root "$quake_run_dir"
+sudo chmod 0700 "$quake_run_dir"
+quake_unit="ventium-$(basename "$quake_run_dir")"
+sudo cp --reflink=never /tmp/ao486/quake-cold-oct02.vhd \
+  "$quake_run_dir/run.vhd"
+sudo cmp /tmp/ao486/quake-cold-oct02.vhd "$quake_run_dir/run.vhd"
+sudo sha256sum /tmp/ao486/quake-cold-oct02.vhd "$quake_run_dir/run.vhd"
+sudo systemd-run --unit="$quake_unit" \
+  -p Type=exec -p RemainAfterExit=yes -p PrivateTmp=no \
+  -p KillMode=control-group -p MemoryMax=512M -p MemorySwapMax=0 -p TasksMax=32 \
+  -p RuntimeMaxSec=8100s -p TimeoutStopSec=30s \
+  -p "StandardOutput=append:$quake_run_dir/daemon.stdout" \
+  -p "StandardError=append:$quake_run_dir/daemon.stderr" \
+  -- /tmp/ao486/ao486d.device-safe-oct02 \
+     --membase 0x60000000 --mem 16 --bios /tmp/ao486 \
+     --hdd "$quake_run_dir/run.vhd" --secs 600
 ```
 
-Check it without perturbing the guest:
+The launch returns before daemon completion. Later, only after independently
+observing actual `MainPID=0`, record closure and read the logs:
 
 ```bash
-systemctl is-active ven-quake-nonfast.service
-systemctl show -p MainPID -p ActiveEnterTimestamp ven-quake-nonfast.service
-tail -20 /tmp/ao486/quake_nonfast_long.log
+systemctl show "$quake_unit.service" \
+  -p InvocationID -p ActiveState -p SubState -p MainPID -p Result \
+  -p ExecMainCode -p ExecMainStatus -p ExecMainExitTimestamp
+sudo tail -20 "$quake_run_dir/daemon.stderr"
 ```
+
+Do not use `--wait` or `--collect` for this retained unit. An outer timeout or
+signal termination is a failed/unqualified run, not clean native completion.
+Its main process is
+closed only after observing `MainPID=0` plus actual exit properties; successful
+`active/exited` is not a live daemon. Unexpected debug freeze can also make
+this daemon return zero, so read/report `R_DBG_FRZINFO[31]`, CTRL and retained
+logs; zero alone is not a guest pass. Avoid checking for closure with
+`is-active`, which remains true after retained successful completion.
 
 Do not run the normal `quake` probe concurrently: it rereads the entire disk
 on every interval. If control-flow evidence is needed, use only a short read-only
@@ -1225,23 +1271,13 @@ on every interval. If control-flow evidence is needed, use only a short read-onl
 the normal probe once; only `QUAKE TIMEDEMO COMPLETE` with exactly 969 frames is
 an acceptance result.
 
-For an unattended run, schedule that one scan behind the workload rather than
-polling the disk:
-
-```bash
-sudo systemd-run --unit=ven-quake-postcheck --collect /bin/sh -c \
-  'while systemctl is-active --quiet ven-quake-nonfast.service; do
-     sleep 60
-   done
-   /tmp/ao486/ven_board_probe.py quake \
-     --disk /tmp/ao486/qk_td.vhd --allow-existing --timeout 1 \
-     > /tmp/ao486/quake_nonfast_result.log 2>&1'
-```
-
-`--allow-existing` is correct only here: the clean precheck was already logged,
-and the postcheck does not start until the producing daemon is gone. The short
-timeout deliberately makes this a single full-disk scan; without it, a missing
-result causes the detached postcheck to rescan the disk forever.
+Run the one-shot disk check only after actual daemon closure and a fresh
+no-writer check, then sync and retain a stable closed VHD copy. A raw
+`--allow-existing` result is not evidence of a fresh run: join the prelaunch
+input hash, cold release, native exit, current bitstream/held-clock receipt
+and closed-disk console checker. The dated deployment document describes the
+strict current-candidate helper and capture provenance; do not certify a new
+run using the historical image's markers or an old-source movie bundle.
 
 ### 11.4 Windows 95
 
