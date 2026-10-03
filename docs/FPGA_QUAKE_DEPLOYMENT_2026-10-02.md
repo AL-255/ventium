@@ -1,6 +1,6 @@
 # RK FPGA Quake deployment — October 2, 2026
 
-## Current status (2026-10-03 22:08 UTC)
+## Current status (2026-10-03 22:31 UTC)
 
 The shared-FPU control-factored candidate's native synthesis **38563** has
 closed with actual exit **0**, observed **22:06:04 UTC**. `synth_design` elapsed
@@ -43,6 +43,33 @@ zero critical warnings/errors; native implementation is still live. Routing,
 bitstream, full-route/STA/hold/DRC/CDC/bus-skew review and physical clock
 measurement remain pending. **40 MHz core / 100 MHz PS-AXI** are targets only;
 there is no new deployed image, hardware timedemo or full movie.
+
+At **22:31:41 UTC**, the same implementation worker **2646446** remained live
+at about 24 minutes elapsed, in **Phase 4.1.1.2 Post Placement Timing
+Optimization**. Its initial physical-synthesis estimate is **WNS −22.247 ns /
+TNS −536,345.877 ns**, not routed STA or an achieved frequency. All recorded
+memory/OOM events remained zero; swap use was zero at the latest scope check.
+No placement endpoint report or routed result is available yet, so the
+remaining critical cone and final timing benefit are unproven.
+
+The current post-optimization DRC report (SHA
+`4eb5d60f65e14a756cb0c5d0e859e17415afff0d65574d67dde22399d938e65c`)
+covers the entire synthesized design with the default ruledeck and unlimited
+checks: **490 findings**, all **346 warnings / 144 advisories**, no errors or
+critical warnings. The warnings concern DSP input/output/internal pipelining
+and one dynamic PREG case. They are timing follow-ups, not permission to insert
+latency without functional verification. This is not final routed DRC.
+
+The fresh board preflight closed with native exit **0** (handle **5124**).
+Board boot ID remains `2861e4e8-cd4c-48cd-9f44-7f7d8a991ebb`. Unmasked
+`/proc/iomem` and the device-tree `guest-ram@60000000/reg` bytes confirm the
+**0x60000000–0x6fffffff** reservation with `no-map`, without `reusable` or a
+default CMA flag. Actual SHA-256 values match the six pinned assets: daemon,
+pristine cold Quake disk, both boot ROMs, loader and rollback bitstream.
+Daemon/disk/ROM root ownership, modes and single-link counts were also checked.
+The manager is `operating`, no guest daemon/capture process is running, and the board has
+**385,601,536 bytes** free. No bitstream, guest state or asset was changed;
+repeat the live checks before programming/release.
 
 The preceding `impl_nobram_power` retry (native **79488**) has actually closed with
 exit **124**, observed **20:08:29 UTC**. The four-hour safety timeout expired

@@ -6,7 +6,7 @@ debug tools as inspected through **2026-08-23**, with the safety preflight
 updated through **2026-10-03**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
 
-> **Latest status (2026-10-03 22:08 UTC):** the current control-factored
+> **Latest status (2026-10-03 22:31 UTC):** the current control-factored
 > candidate's synthesis has actually closed with native exit **0** (handle
 > **38563**, observed 22:06:04 UTC), `synth_design` elapsed **1h24m11s**,
 > zero errors/critical warnings. Its synthesized use is **185,581 LUTs
@@ -20,8 +20,15 @@ not certification of the currently installed image.
 > one worker and an **8-hour safety bound**, not a completion estimate.
 > The actual worker script confirms that directive; `opt_design` completed
 > successfully at 22:08 UTC. There was no synthesis rerun or failed-run reset.
+> At 22:31 UTC the same worker had reached post-placement timing optimization,
+> with zero recorded OOM events and no swap use. The initial physical-synthesis
+> estimate is WNS **−22.247 ns**, not final STA or an achieved frequency.
 > Full routing, bitstream, STA/hold/DRC/CDC/bus-skew review, fresh measured
 > clocks and the hardware timedemo/movie remain pending.
+> A fresh read-only board check confirmed the guest DDR reservation and the
+> pinned daemon, pristine Quake disk, both ROMs, loader and rollback image.
+> The FPGA manager reports `operating`; no guest/capture process is running.
+> These checks do not qualify the historical image as the new candidate.
 > A small candidate-bound source tree for later standard-suite simulation is
 > prepared under `/var/tmp/ventium-f-standard-sources.krURBA/candidate/`.
 > Seven root host checks plus independent source/mode/107-define dry-run
