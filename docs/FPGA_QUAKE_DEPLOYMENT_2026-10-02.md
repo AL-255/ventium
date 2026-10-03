@@ -347,6 +347,32 @@ At 02:01 UTC the original invocation is live, using 6.28 GB scope memory,
 zero build swap and 13 tasks. These observations do not prove routing,
 40 MHz silicon operation, timedemo completion or movie coverage.
 
+`opt_design -directive ExploreArea` completed successfully in **6m10s**,
+with zero errors/critical warnings. Its resynthesis phase remapped 42 modules,
+creating 98,568 cells and removing 102,829; these counts are **not a LUT-area
+percentage**. The preserved optimized checkpoint is
+`impl_area_cong2/rk_ao486_bd_wrapper_opt.dcp`, **38,483,549 bytes**, SHA
+`ca26d69cbe1ae711ea9ca29c101d6c6ec0a22089c34b8f6753a4341139c1644b`.
+Placement started at about **02:07:33 UTC**. Do not interrupt the healthy sole
+family to inspect this checkpoint in a second Vivado process. Actual area and
+regional congestion effects remain unmeasured pending the placement reports.
+
+The bus-skew-complete final inspection helper is prepared for the exact new
+run at `final-inspection-prepared/inspect_completed_impl.tcl` under the
+recovery CWD, SHA
+`3c07905a95067c154ab3510bf387d09df8c87c554ce2073bad488c0c89608e97`.
+Root inspected the full original and the diff: only four run-name references
+change from `impl_1` to `impl_area_cong2`. This copy has **not** run natively.
+Run it only after actual implementation/native closure and family absence;
+the existing completed/fresh-run, full-route and zero-route-error checks,
+40/100 MHz constraints and raw timing/CDC/bus-skew reports are unchanged.
+
+A separate key-only board check at **02:02:40 UTC** returned native exit 0,
+the same boot ID, manager `operating`, 374 MiB free, all staged cold-disk/ROM/
+device-safe-daemon hashes unchanged, and the effective 256 MiB reservation's
+`reg` and `no-map` intact. This does not deploy or release the guest, and is
+not evidence of fresh hardware clock/timedemo/movie acceptance.
+
 ### Vendor helper deadlock and bounded restart
 
 Timing Optimization finished at 21:39:51 UTC and Technology Mapping began,
