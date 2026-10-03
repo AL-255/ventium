@@ -1,6 +1,6 @@
 # RK FPGA Quake deployment — October 2, 2026
 
-## Current status (2026-10-03 00:29 UTC)
+## Current status (2026-10-03 01:04 UTC)
 
 Administrator access and the boot-time DDR reservation work. The board remains
 held in reset on the historical image. At the user's request, a new **40 MHz**
@@ -9,8 +9,11 @@ The original run was stopped after read-only debugger evidence identified a
 deadlocked vendor helper. A replacement with the same frozen RTL/defines is
 closed with native exit **0** under the corrected fixed task cap. Read-only
 checkpoint inspection also closed with exit **0**. Implementation launched
-from that same completed project at 00:29 UTC, **without resynthesis**. Area
-fits the part, but synthesized timing is severely negative: the constrained
+from that same completed project at 00:29 UTC, **without resynthesis**.
+Placement has completed successfully in 29m10s; pre-route physical optimization
+is now running. Placed occupancy is 65.73% LUT / 89.11% CLB, with a native
+high-congestion warning and estimated WNS −22.180 ns. Area fits the part,
+but preliminary timing is severely negative: the constrained
 40 MHz target is not yet a demonstrated operating frequency or timing pass.
 The first daemon's SIGBUS has an instruction-level cause (`DC ZVA` on Device
 memory), and an isolated scalar-access successor is built and microtested,
@@ -111,7 +114,7 @@ Inspect area before implementation; then check routed DRC/setup/hold and
 clock reports, hash/program the artifact, measure silicon MHz, and run the
 unmodified cold timedemo with the matching widened capture tool.
 
-### Completed replacement synthesis and implementation launch (October 3)
+### Completed replacement synthesis and implementation milestones (October 3)
 
 The corrected replacement finished at **00:23:56 UTC**, native session 74097,
 exit **0**, reporting `SYNTH OK` / `DONE` and 2h26m elapsed. At 00:24:17 root
@@ -171,6 +174,30 @@ These are host-only control-flow tests, **not** native Vivado reporting or
 timing/CDC acceptance. Run the real helper under the exclusive guard and a
 540-second outer deadline **only after the implementation family has closed**;
 require exit 0 and review the reports separately from its report-completion marker.
+
+At approximately **01:02 UTC**, `place_design` completed successfully with
+zero errors or critical warnings, CPU 29m05s / elapsed **29m10s**. The placed
+checkpoint is `output/rk_ao486_system/rk_ao486_system.runs/impl_1/rk_ao486_bd_wrapper_placed.dcp`
+under the replacement output, 86,585,115 bytes, SHA
+`a85bda9f8dca7e679abc2366e2cc0c0a729428e7e7fb4ad615e7ae7721fd21e0`.
+Its native utilization report has SHA
+`2f6ade7307f905365db23d02b0baaa45b84501dcba45a4f9d46ac130c393a0f4`:
+**224,334 LUTs (65.73%)**, 59,009 registers, no latches, **38,013 CLBs
+(89.11%)**. This is placed, not final routed utilization.
+
+The placer reports **WNS −22.180 ns** and `Place 46-14`: the design is highly
+congested and may be difficult to route. Estimated global congestion regions
+are 32×32 in every direction; some long-congestion regions reach 64×64.
+This warning increases the uncertainty of the earlier remaining-time estimate;
+neither placement success nor continued CPU activity proves 40 MHz operation.
+At 01:04 UTC the same live worker was executing **pre-route `phys_opt_design`**,
+with no resource-limit events. Routing and bitstream generation remained pending.
+For a later closed-run diagnostic, installed Vivado 2025.2 supports
+`report_design_analysis -congestion -min_congestion_level 3 -file <fresh-path>`
+on placed or routed designs. It is whole-design analysis (not scoped by
+`-cells`); the default level 5 hides level-3/4 hotspots. Do not open another
+Vivado against this active run, overwrite existing reports, or treat a
+congestion report as route/timing/CDC acceptance.
 
 Implementation native session **66620** is now live, scope invocation
 `d4a69c016ef5448ab10a01a303a752ad`, outer PID 1814754 / implementation PID

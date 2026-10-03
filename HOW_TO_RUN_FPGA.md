@@ -6,13 +6,17 @@ debug tools as inspected through **2026-08-23**, with the safety preflight
 updated through **2026-10-03**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
 
-> **Latest build status (2026-10-03 00:29 UTC):** replacement synthesis has
+> **Latest build status (2026-10-03 01:04 UTC):** replacement synthesis has
 > closed with native exit **0** (2h26m), and the separate read-only checkpoint
 > inspection also exited **0**. Preliminary area is **66.04% LUT / 29.70%
 > BRAM**. Clock constraints are **40 MHz core / 100 MHz PS-AXI**, but pre-route
 > timing is not a pass: WNS **−23.863 ns**, WHS **−0.108 ns**, including a
 > 195-level EIP-to-FPU-SRT cone with substantial unplaced-route delay.
-> Place-and-route is now running from the existing XPR, **without resynthesis**,
+> Placement completed successfully in **29m10s**, with **65.73% LUT / 89.11%
+> CLB occupancy**. Vivado warns that the design is highly congested; its
+> post-placement WNS estimate is **−22.180 ns**, not a routed timing pass.
+> Pre-route physical optimization is now running from the existing XPR,
+> **without resynthesis**,
 > under the exclusive guard: **20 GiB RAM hard / 19 GiB soft / 2 GiB swap**.
 > At 00:32 UTC its live task cap was extended **48 → 64** after observing
 > 45 occupied slots (mostly sleeping vendor threads); the future launch guard
