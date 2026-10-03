@@ -6,7 +6,23 @@ debug tools as inspected through **2026-08-23**, with the safety preflight
 updated through **2026-10-03**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
 
-> **Latest build status (2026-10-03 04:40 UTC):** replacement synthesis has
+> **Latest status (2026-10-03 11:54 UTC):** the congestion retries did not
+> produce a new bitstream. The board is reachable and idle, still holding the
+> historical image. A source-level frontend factoring candidate has passed
+> focused byte-span tests, strict hardware-profile lint, and default/BRAM
+> differential gates. Its isolated OOC frontend uses 88.05% fewer LUTs; that is
+> not yet a whole-chip gain or timing result. Fresh 40 MHz synthesis-only work
+> is running under `/var/tmp/ventium-fpga40-icfrontspan.yqNVao/`, with unchanged
+> full P5 caches and 110 hardware defines. Full-system acceptance is pending;
+> the frontend change/tests are committed as `659b4c0`. A separately
+> committed synthesis-only segment-extent driver repair is `f24909e`. Do not
+> deploy the failed-route checkpoints or interpret their timing as Fmax. See
+> `docs/FPGA_QUAKE_DEPLOYMENT_2026-10-02.md` for the retained evidence.
+> Verified simulation gameplay IPC baseline is **0.42633263**, build
+> **5c2491f3**, cycles **7,099,999,637–7,199,999,637**; this predates the
+> current candidate, whose gameplay IPC is unmeasured.
+
+> **Historical build status (2026-10-03 04:40 UTC):** replacement synthesis has
 > closed with native exit **0** (2h26m), and the separate read-only checkpoint
 > inspection also exited **0**. Preliminary area is **66.04% LUT / 29.70%
 > BRAM**. Clock constraints are **40 MHz core / 100 MHz PS-AXI**, but pre-route

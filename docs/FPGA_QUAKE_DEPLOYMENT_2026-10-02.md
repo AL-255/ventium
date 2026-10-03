@@ -1248,10 +1248,100 @@ tool launch. The final bounded observer retained all 179 input hashes,
 110 exact defines and all script/XPR pins, with zero worker/parent swap or
 current limit/OOM events. Its final sample predates root's native closure;
 neither is substituted for the other. This was congestion, **not an OOM**.
-The next action is a bounded read-only failed-checkpoint inspection and
+The next action was a bounded read-only failed-checkpoint inspection and
 source-structure audit, not another unsubstantiated implementation variant.
 Routing, deployment, hardware timedemo and full movie remain unachieved.
 
 Verified gameplay IPC remains **0.42633263**, simulation build **5c2491f3**,
 cycles **7,099,999,637–7,199,999,637**. It predates this FPGA candidate; the
 current candidate's gameplay IPC is unmeasured.
+
+### Source-led repair after the routing failures (October 3)
+
+The read-only failed-F8 checkpoint inspection closed with native exit **0**
+at **11:13:48 UTC**. Reloading its error checkpoint reports **271,369 unrouted
+nets / only four fully routed nets**; the failed router's overlap state is not
+a legal routed design. The reported 178-level, 48.008-ns segment-base-to-SRT
+path mixes estimated delays and is **not routed Fmax**. Vivado also explicitly
+ignores `-path_type` when combined with `-of_objects`; the requested expanded
+clock-path coverage must not be claimed from that command.
+
+Two independent source audits selected the repeated frontend tag queries as
+the first bounded RTL area experiment. The candidate computes two pre-edge
+`{present,way}` lookups and a shared 22-byte window for raw U/V decoding and
+16-byte reference/slow captures. It preserves full P5 caches, every pipeline
+cycle, last-match way/bypass priority, returned BRAM identity/collision checks,
+stale-A fallback, and generic PrefixEX/endpoint queries. The first leaf-only
+area measurement is recorded below; a whole-chip gain is still unmeasured.
+
+Strict lint of the actual 110-define hardware profile additionally exposed a
+**preexisting synthesis-only functional defect**: the sole `seg_ext_size`
+assignment was inside `ifndef SYNTHESIS` instrumentation, although the
+functional protected-mode limit check consumes it. The unchanged assignment
+is now next to its unconditional declaration. Both the actual hardware profile
+and the 107-define simulation profile plus DPI suppression close strict lint
+with native **0**, including fatal UNDRIVEN/LATCH/UNOPTFLAT checks. The cache
+snoop gate, all three alias-discrimination configurations, and issue-UV gate
+also close with native **0**. These do not substitute for the differential
+gate or standard suite.
+The first `make verify` attempt stopped before compilation because its default
+scratch symlink points to the full external volume; subsequent scratch uses
+`/var/tmp`, leaving that volume unchanged.
+
+The production-extracted span miter passes with and without fetch bypass;
+both non-BRAM variants pass explicitly labelled generic-byte smoke tests.
+Retained span logs are under
+`/var/tmp/ventium-frontend-factor-oct03.RYgdDXkl/ventium-ic-front-span.IHNavI/`.
+That first umbrella invocation failed because its segment-test coroutine
+counter printed zero. The corrected, segment-only retry closes with native
+**0** under `ventium-ic-front-span.ooabZN/`: both preprocessing modes retain
+exactly one driver and both mux tests check all **8,192** combinations, with
+elapsed-time coverage. It does not rerun or replace the retained span logs.
+The independent segment-driver repair is committed and pushed as **f24909e**.
+
+The same-part old/new OOC comparison closes with native **0** at **11:48 UTC**,
+in `/var/tmp/ventium-ic-front-span-ooc-synthopts.FhSGPv/`. Isolated frontend
+LUTs fall **40,863 → 4,881 (88.05%)**, F7 muxes **17,866 → 1,584**, F8 muxes
+**8,112 → 752**, and CARRY8s **184 → 16**; both have **304 FFs**, zero latches,
+and no BRAM or DSP. Identical capture registers are merged in both models.
+These are **synthesized leaf-model counts, not whole-chip area, routed CLB
+occupancy, timing, or Fmax**. The exact production section/oracle include is
+generator-pinned to core SHA **630663db…520053**. The two earlier probe attempts
+closed with native **1** before synthesis because their non-project Tcl used
+unsupported `read_verilog` options; both original logs are preserved.
+Fresh default and BRAM differential TB builds use **32** compiler jobs within
+the fixed **16 GiB / 128-task** scope, isolated under
+`/var/tmp/ventium-verify-current.0hQwc7/`. Both builds and both `make verify`
+invocations close with native **0**: **108 functional programs**, including
+x87, and every required M4/M5 cycle metric band pass in each configuration.
+The 20 structural per-instruction cycle diagnostics remain labelled divergent
+and non-gating; this is not a claim of exact per-instruction cycle equivalence.
+Default TB SHA is **70e4b7d…978bfb**; BRAM TB SHA is **f27bd70c…e5f3f4d**.
+No canonical TB or full FPGA implementation is launched by these focused tests.
+
+A new explicitly **UNQUALIFIED** frozen candidate is
+`/var/tmp/ventium-fpga40-icfrontspan.yqNVao/`: all 179 parent inputs are checked,
+177 are unchanged, and only `core.sv` and `core_fetch_decode.svh` are replaced.
+The exact 110 defines, full P5 caches, shared FPU and 40/100 MHz clocks remain
+unchanged. Candidate manifest SHA is **b94db3dc…178270**; original manifest
+**adfb6ff1…21c1c** is retained independently. All new frozen-file checks and the
+pure-Tcl wrapper contract test pass. Live source comparison finds only the two
+previously recorded **host-tool** differences (implementation reporting and
+SIGUSR1 capture stop); the frozen RTL/flow inputs have no additional drift.
+The synthesis profile stays **balanced / Default**, matching the actual
+previous synthesis transcript rather than the wrapper's legacy default.
+
+The frontend change and focused tests are committed/pushed as **659b4c0**;
+unrelated preexisting V86/debug changes remain unstaged. Fresh **synthesis
+only** launched at **11:54 UTC** in the new candidate's owned `output/`
+directory, through the sole-Vivado guard with **20 GiB RAM / 2 GiB swap / 48
+tasks**, one worker and a four-hour deadline. The deadline is not an ETA or
+acceptance criterion. No implementation or deployment is authorized by a
+pre-route result alone; inspect the fresh area before proceeding to routing.
+The current-source standard suite, final routed frequency/CDC and DRC, cold
+board boot, exact hardware 969-frame completion and complete movie remain
+unachieved.
+
+The candidate is unqualified and not deployed. Gameplay IPC baseline remains
+**0.42633263**, build **5c2491f3**, cycles **7,099,999,637–7,199,999,637**;
+it predates these changes, whose gameplay IPC is unmeasured.
