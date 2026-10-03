@@ -397,6 +397,21 @@ this report argument. No active entry, constraint or netlist was edited. This
 version still awaits native execution and does not inherit the old copy's
 stub-test qualification.
 
+A further **unlaunched** fallback is prepared at
+`/var/tmp/ventium-impl-area-cong.IfjIKA/impl-area-medium.9i7ufg/launch_impl_area_medium.tcl`,
+SHA `a1cefc8f98b4386d10c0a55c6e3d1d85b632f1132c71df528f45ad1302a8fbe8`.
+Root read the whole entry and compared it with the live launch source: only
+the usage filename, fresh run name `impl_area_medium`, and placement directive
+`AltSpreadLogic_medium` differ. ExploreArea, AlternateCLBRouting, default
+pre-route physical optimization, the frozen synthesis parent, 40/100 MHz
+checks and native-completion checks are retained. Medium spreading is a
+controlled packing experiment, not a promised congestion or timing fix.
+It must not launch while `impl_area_cong2` is live. Consider it only after an
+actual terminal failure, harvested native status, family absence and renewed
+source/checkpoint validation, through the exclusive launcher. Its final
+inspection must target its own run; the `impl_area_cong2` inspector cannot
+qualify it unchanged. No fallback project run or FPGA deployment exists yet.
+
 A separate key-only board check at **02:02:40 UTC** returned native exit 0,
 the same boot ID, manager `operating`, 374 MiB free, all staged cold-disk/ROM/
 device-safe-daemon hashes unchanged, and the effective 256 MiB reservation's
