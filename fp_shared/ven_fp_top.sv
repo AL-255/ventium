@@ -785,11 +785,23 @@ module ven_fp_top
     end
   end
 
+  // Rounding controls are live throughout SRT execution. Command admission
+  // cannot win while TOP_TRANS owns the unit (cmd_ready is low there), so
+  // keep its long decode/operand cone out of these controls. Do not capture
+  // RC/PC: a borrowed transcendental request's PC=64 override ends with the
+  // request pulse, retaining the existing subsequent live-CW behavior.
+  always_comb begin
+    srt_rc    = fctrl_o[11:10];
+    srt_pc    = fctrl_o[9:8];
+    if ((top_state == TOP_TRANS) && trans_divide_start) begin
+      srt_rc  = trans_divide_rc;
+      srt_pc  = 2'b11;
+    end
+  end
+
   always_comb begin
     srt_start = 1'b0;
     srt_mode  = 2'd0;
-    srt_rc    = fctrl_o[11:10];
-    srt_pc    = fctrl_o[9:8];
     srt_a     = (cmd_aluop == 3'd7) ? alu_b : alu_a;
     srt_b     = (cmd_aluop == 3'd7) ? alu_a : alu_b;
     if (accept && !issue_stack_fault &&
@@ -816,8 +828,6 @@ module ven_fp_top
       srt_mode  = 2'd0;
       srt_a     = trans_divide_a;
       srt_b     = trans_divide_b;
-      srt_rc    = trans_divide_rc;
-      srt_pc    = 2'b11;
     end else if ((top_state == TOP_TRANS) && trans_done &&
                  (pending_op == FX_FPTAN) && !trans_c2) begin
       // FPTAN's quotient uses the same SRT divider as FDIV/FPREM.  The trig
