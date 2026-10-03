@@ -6,7 +6,7 @@ debug tools as inspected through **2026-08-23**, with the safety preflight
 updated through **2026-10-03**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
 
-> **Latest status (2026-10-03 12:57 UTC):** the congestion retries did not
+> **Latest status (2026-10-03 13:37 UTC):** the congestion retries did not
 > produce a new bitstream. The board is reachable and idle, still holding the
 > historical image. A source-level frontend factoring candidate has passed
 > focused byte-span tests, strict hardware-profile lint, and default/BRAM
@@ -32,6 +32,16 @@ not certification of the currently installed image.
 > uses **18 GiB RAM / 8 GiB swap / 48 tasks**, still one Vivado family and
 > one synthesis worker. **18 host-only guard tests** pass (`3f1d3e9`); those
 > tests do not prove the retry will fit. No new bit exists.
+> The movie bundle was separately re-pinned for this candidate under
+> `/var/tmp/ventium-fpga-quake-oct02.rc0wVn/icfrontspan-movie-bundle.UKUNF0/`.
+> Its bounded synthetic host gate exited **0**, including rejection of the
+> actual previous candidate's manifest. The original `runtime-movie-bundle`
+> still binds the previous source snapshot and must not certify this candidate.
+> These are helper tests, not an FPGA recording or timedemo pass. At the maximum
+> 32,768 records, raw 320×200 RGB332 capture occupies 1.954 GiB; the same-filesystem
+> raw/normalized/movie workflow requires at least **6.908 GiB**, including
+> the 2 GiB movie allowance and 1 GiB free reserve. Recheck after implementation;
+> the output-size cap is not a guarantee every full-quota stream will compress.
 > Verified simulation gameplay IPC baseline is **0.42633263**, build
 > **5c2491f3**, cycles **7,099,999,637–7,199,999,637**; this predates the
 > current candidate, whose gameplay IPC is unmeasured.

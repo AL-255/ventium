@@ -1,6 +1,6 @@
 # RK FPGA Quake deployment — October 2, 2026
 
-## Current status (2026-10-03 12:57 UTC)
+## Current status (2026-10-03 13:37 UTC)
 
 The first frontend-factored synthesis (native **65164**) closed with exit
 **143**, not success. The kernel/user journals identify **CONSTRAINT_MEMCG
@@ -30,6 +30,22 @@ Actual manager properties confirm those limits, invocation
 RAM bytes and 17,748,029,440 free swap bytes. Passing admission is not proof
 that later synthesis peaks will fit; continue monitoring before implementation.
 
+At **13:36:24 UTC**, the same native **32041** remained live. Synthesis worker
+PID **2177306** had accumulated **39m26s CPU** and was still computing in timing
+optimization. The scope's OOM/max counters were zero; `memory.events.high=1610`
+records expected soft-limit reclaim, not an OOM. No DCP or implementation exists
+for this retry yet. Do not restart from a quiet log alone.
+
+The stopped OOM run's caches were cleaned only after archive verification and
+an exact-file/liveness qualification: **624** regular single-link `.rtd`/`.tim`
+files removed, **570** other cache files and all **179** frozen payloads checked
+unchanged. No directory, diagnostic log, source, guest media, or live-retry file
+was removed. Net reclaimed space is approximately **2.70 GiB**. Recovery archive:
+`/var/tmp/ventium-oom-synth-cache-cleanup.7nY8Mt/regenerable-caches.tar.zst`, SHA
+`72a7995e0fb6f171ea86c0c90c52938d30c31a6ec1a2b899e81f33aee93a025e`;
+cleanup receipt SHA
+`4439e2afa40f4d8b95e06d2b62b2d2da2ae85ff0e57397ab086fee75cb5292f5`.
+
 The source audit confirms no CPU clock division after the MMCM: CPU and debug
 `perf_cyc` share its output, so the held counter can measure core clock pin
 frequency. A fresh read-only five-second sample on the **old held image**
@@ -38,6 +54,35 @@ closed with native exit **0**: 15,625,600 counter cycles / 5.000084 seconds =
 DDR and made no control writes. This does not measure the new candidate.
 Clock receipt: `/var/tmp/ventium-held-ddr-sweep-prep.SwSZzP/old-image-readonly-clock.json`,
 SHA `8752242ea4f6fd0ecdf30d3df1a9ad20dacecbe529b7a148672d33000a5558f1`.
+
+### Movie provenance preparation for this candidate
+
+The earlier `runtime-movie-bundle.Oz2wfq` pins the old `adfb6ff…` source
+manifest, so it must not be used as authority for a capture from the new
+`b94db3d…` frontend candidate. A separately reviewed derivative is prepared at
+`/var/tmp/ventium-fpga-quake-oct02.rc0wVn/icfrontspan-movie-bundle.UKUNF0/`.
+Only its frozen root/manifest pins and explanatory documentation changed;
+capture ABI/runtime-client pins, fail-closed checks, geometry, colours and
+15-fps presentation are unchanged. The original bundle's hash receipt still
+checks clean. A new negative fixture rejects the actual previous manifest and
+base provenance before output creation.
+
+The synthetic host-only microtest runner closed with native exit **0** (handle
+**21555**), including tiny and 320×200 FFV1 byte-exact roundtrips, partial-tail
+retention, malformed record/provenance rejection and streaming deadlines.
+Normalizer SHA: `4b4113c1ded1bbe6ff08cf2a9efc2cc40bd82c881eb0c4338af2675a94a4d2f2`;
+assembler SHA: `c272e19112fc91fba42778a2143f2c3eeca76344c9c9b941010a70aee5506734`.
+These tests do not prove a maximum-quota encoding, board capture or timedemo.
+
+At 32,768 × 320×200, raw RGB332 is exactly **2,098,331,664 bytes** (1.954 GiB).
+Raw plus normalized copy, a 2 GiB FFV1 allowance and 1 GiB required free reserve
+total **7,417,888,800 bytes** (6.908 GiB). Original retention is a hard link,
+not a third raw copy; RGB24 expansion is streamed, not stored. Raw and
+normalization must share a filesystem. The 2 GiB movie cap is a fail-safe
+bound, not proof of sufficient compression for every 32,768-frame stream.
+Recheck actual free space and capture cadence before recording, and retain
+independent fresh 969-frame console/clock/release evidence: a lossless movie
+of accepted samples alone is not timedemo or continuous-scanout acceptance.
 
 No current-candidate full standard suite, routed sign-off, deployment,
 hardware timedemo or movie is complete. Verified simulation gameplay IPC
