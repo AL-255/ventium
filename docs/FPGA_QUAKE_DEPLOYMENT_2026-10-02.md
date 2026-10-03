@@ -1,6 +1,6 @@
 # RK FPGA Quake deployment — October 2, 2026
 
-## Current status (2026-10-03 18:10 UTC)
+## Current status (2026-10-03 18:52 UTC)
 
 The frontend-factored full-chip synthesis completed with native exit **0**
 (handle **48145**, closure confirmed **15:49:49 UTC**). `synth_design` elapsed
@@ -156,6 +156,13 @@ be converted into a claimed completion percentage or fixed ETA. A fresh
 read-only board check at **17:57:48 UTC** confirmed the same boot ID, the
 historical image operating, no guest/capture process and **385,765,376 free
 bytes** on the board root filesystem. No programming or guest release occurred.
+
+The same native handle subsequently reported **2,348** (**18:21:00 UTC**),
+**1,537** (**18:29:16 UTC**), **1,108** (**18:36:44 UTC**), **825**
+(**18:45:44 UTC**), and **587** (**18:52:38 UTC**) intermediate overlaps.
+At the last observation, worker **2364930** remains live and CPU-active, with
+**2h43m56s** actual CPU time. Global Iteration 1 is still unfinished; no
+restart, new source change, complete-route result or bitstream is claimed.
 
 Independent read-only review confirms the prepared post-route inspector is
 a **report collector, not a deployment/sign-off gate**. It rejects incomplete,
@@ -1336,6 +1343,17 @@ run, not normal closure. Normal exit closes libc disk handles but neither
 checks `fclose` errors nor fsyncs the VHD; after native closure/no writer,
 sync and preserve a stable closed copy before console checking. No such
 current-candidate cold run has been launched yet.
+
+A further read-only source audit confirms that the pinned device-safe CLI
+explicitly rejects `--loadonly` and negative `--secs`. Its older
+`post_secs < 0` held-startup branch is therefore unreachable; do not attempt
+to qualify startup through that branch. `--ident` leaves DDR unmapped, and
+`--attach` services a live guest rather than qualifying cold initialization.
+The supported private-VHD cold helper uses unsigned `--secs 600` and remains
+the actual cold-init/release path. The earlier held scalar sweep proves only
+full-aperture scalar stores plus its two boundary readbacks, not the daemon's
+single-map clear, ROM/x86 initialization, or guest boot. No new daemon flag,
+source change or board run was introduced by this audit.
 
 ## Movie requirements
 

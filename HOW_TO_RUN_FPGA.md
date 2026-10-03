@@ -6,7 +6,7 @@ debug tools as inspected through **2026-08-23**, with the safety preflight
 updated through **2026-10-03**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
 
-> **Latest status (2026-10-03 18:10 UTC):** the frontend-factored candidate's
+> **Latest status (2026-10-03 18:52 UTC):** the frontend-factored candidate's
 > full-chip synthesis completed with native exit **0** (handle **48145**):
 > `synth_design` elapsed **1h37m15s**, about **1h38m** for the complete run.
 > Its checkpoint is under
@@ -53,10 +53,13 @@ not certification of the currently installed image.
 > `6c1baf744db1bf4cb9a1af47981b7a9dcfbd92ab826294b29cc7f91258d3903e`.
 > The same CPU-active worker is in rip-up/reroute, **Global Iteration 1**, with
 > intermediate overlap counts falling **286,033 → 75,853 → 25,087 → 9,137
-> → 4,228**, global/short congestion **level 6**, and timing congestion
+> → 4,228 → 2,348 → 1,537 → 1,108 → 825 → 587**,
+> global/short congestion **level 6**, and timing congestion
 > **level 7**. This is not a completed or terminal
 > routing result. It has no swap or memory/OOM
-> events. Full routing, bitstream and final frequency qualification remain
+> events. The latest count was observed at **18:52:38 UTC**, with the same
+> worker at **2h43m56s** actual CPU time. Full routing, bitstream and final
+> frequency qualification remain
 > pending; do not launch an inspector while this family is live.
 > Six host-only Tcl launcher tests subsequently passed; they test
 > control flow, not native implementation semantics. Physical QoR may differ;
@@ -1028,6 +1031,12 @@ reprograms the PL.
 
 ### 11.2 Trace a POST or boot failure
 
+**Historical diagnostic daemon only.** These commands apply to the legacy
+`/tmp/ao486/ao486d`, not the pinned `ao486d.device-safe-oct02`. The production
+CLI rejects `--loadonly`, the listed diagnostic/intervention options, and
+negative `--secs`; its legacy held-startup branch is unreachable. Use the
+supported private-VHD cold launch in §11.3 for the current candidate.
+
 ```bash
 ssh -F "$SSH_CONFIG" -t "$BOARD" \
   'sudo /tmp/ao486/ao486d --membase 0x60000000 \
@@ -1292,6 +1301,11 @@ do not manufacture expected hashes from unchecked live files. Set
 input VHD; run only its uniquely named writable copy. This example's 600-second
 nominal loop budget is **not** a wall-time or completion prediction, and the
 outer runtime bound must be recorded for the actual run.
+
+The pinned device-safe CLI accepts this unsigned `--secs 600` cold path, not
+legacy `--loadonly`. `--mem 16` validates only the backend setting: startup
+still maps and scalar-clears **all 256 MiB** at `[0x60000000,0x70000000)`.
+The earlier held scalar sweep is not qualification of that complete startup.
 
 ```bash
 set -euo pipefail
