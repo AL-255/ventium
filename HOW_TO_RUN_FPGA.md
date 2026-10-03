@@ -6,13 +6,13 @@ debug tools as inspected through **2026-08-23**, with the safety preflight
 updated through **2026-10-03**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
 
-> **Latest status (2026-10-03 12:13 UTC):** the congestion retries did not
+> **Latest status (2026-10-03 12:57 UTC):** the congestion retries did not
 > produce a new bitstream. The board is reachable and idle, still holding the
 > historical image. A source-level frontend factoring candidate has passed
 > focused byte-span tests, strict hardware-profile lint, and default/BRAM
 > differential gates. Its isolated OOC frontend uses 88.05% fewer LUTs; that is
 > not yet a whole-chip gain or timing result. Fresh 40 MHz synthesis-only work
-> is running under `/var/tmp/ventium-fpga40-icfrontspan.yqNVao/`, with unchanged
+> retains frozen sources under `/var/tmp/ventium-fpga40-icfrontspan.yqNVao/`, with unchanged
 > full P5 caches and 110 hardware defines. Full-system acceptance is pending;
 > the frontend change/tests are committed as `659b4c0`. A separately
 > committed synthesis-only segment-extent driver repair is `f24909e`. Do not
@@ -22,7 +22,16 @@ not certification of the currently installed image.
 > in 4,096 ordered 64 KiB chunks (14.839 seconds, actual exit 0), with the core
 > held throughout and two zero boundary readbacks. Guest disks were untouched.
 > This does not qualify full-byte readback, the daemon's single-map clear,
-> cold startup or the timedemo. Fresh synthesis remains live; no new bit exists.
+> cold startup or the timedemo. The first frontend-factored synthesis was
+> **OOM-killed at 12:50:43 UTC** during technology mapping: the kernel records
+> `CONSTRAINT_MEMCG`, 20 GiB RAM and 2 GiB swap at their limits. Its runner
+> closed with native exit **143**; no synthesis DCP or bitstream was produced.
+> An unchanged-source retry is live under
+> `/var/tmp/ventium-fpga40-icfrontspan-memretry.Gdis4N/` (native handle **32041**).
+> The guard now checks host reserves and applies earlier reclaim; this run
+> uses **18 GiB RAM / 8 GiB swap / 48 tasks**, still one Vivado family and
+> one synthesis worker. **18 host-only guard tests** pass (`3f1d3e9`); those
+> tests do not prove the retry will fit. No new bit exists.
 > Verified simulation gameplay IPC baseline is **0.42633263**, build
 > **5c2491f3**, cycles **7,099,999,637–7,199,999,637**; this predates the
 > current candidate, whose gameplay IPC is unmeasured.
@@ -856,6 +865,15 @@ The current loader only warns when the manager is not `operating`; its exit
 code alone is insufficient. Read the manager state independently and require
 the matching IDENT before releasing the core. For a new clock image, also
 measure the held-reset core clock; constraint reports do not prove silicon MHz.
+
+For the frozen October 3 MMCM candidate, the CPU and `perf_cyc` share the same
+clock: `MMCM -> system.clk_sys -> ven_ao486_shim -> ventium_top -> core`.
+There is no downstream divide-by-four or clock enable; the output buffer is
+enabled only by MMCM lock. Thus a held-core `perf --seconds 5` counter interval
+can establish the physical core clock pin frequency before guest release,
+but cannot establish CPU throughput. The October 3 held historical image
+measured **3.125067 MHz**, with zero retirements and `CTRL=1` before/after;
+this is not a measurement of the new 40 MHz candidate. Repeat after programming.
 
 Smoke passes only when both conditions hold:
 

@@ -1,6 +1,50 @@
 # RK FPGA Quake deployment — October 2, 2026
 
-## Current status (2026-10-03 12:13 UTC)
+## Current status (2026-10-03 12:57 UTC)
+
+The first frontend-factored synthesis (native **65164**) closed with exit
+**143**, not success. The kernel/user journals identify **CONSTRAINT_MEMCG
+OOM at 12:50:43 UTC**, during technology mapping, after timing optimization
+completed. Both its **20 GiB RAM / 2 GiB swap** boundaries were exhausted;
+the unit records a 20 GiB memory peak and 2 GiB swap peak. The earlier zero
+event samples predated the allocation burst. All family processes are gone;
+no synthesis DCP or bitstream was produced. Failed logs and sources are retained.
+
+The sole unchanged-source retry launched at **12:56:45 UTC**, native **32041**,
+under `/var/tmp/ventium-fpga40-icfrontspan-memretry.Gdis4N/`, using the same
+179 frozen source payloads and 110 defines from
+`/var/tmp/ventium-fpga40-icfrontspan.yqNVao/`. All 179 hashes were checked before
+launch; the input manifest remains
+`b94db3dc4e6e559f8aa956ec629906d45f88192b627b3793f757a8cb79178270`.
+This is still **40 MHz core / 100 MHz PS-AXI**, full P5 caches and balanced
+synthesis, not another RTL or directive experiment. No competing build runs.
+
+The admission repair is committed/pushed as **`3f1d3e9`**, with **18 host-only
+tests** passing. The RAM ceiling remains 20 GiB and default swap remains 2 GiB;
+explicit swap is bounded at 8 GiB. New Vivado admission requires available RAM
+at least the selected cap plus 2 GiB, and free swap at least the selected cap
+plus 4 GiB when swap is enabled. The retry selects **18 GiB RAM / 8 GiB swap /
+48 tasks**, with **MemoryHigh at 90% of RAM cap** (also attested for nesting).
+Actual manager properties confirm those limits, invocation
+`8125cbd80ab4436ea1936f03f7422cd2`. Admission observed 23,201,869,824 available
+RAM bytes and 17,748,029,440 free swap bytes. Passing admission is not proof
+that later synthesis peaks will fit; continue monitoring before implementation.
+
+The source audit confirms no CPU clock division after the MMCM: CPU and debug
+`perf_cyc` share its output, so the held counter can measure core clock pin
+frequency. A fresh read-only five-second sample on the **old held image**
+closed with native exit **0**: 15,625,600 counter cycles / 5.000084 seconds =
+**3.125067 MHz**, zero retirements, `CTRL=1` before/after. It mapped no guest
+DDR and made no control writes. This does not measure the new candidate.
+Clock receipt: `/var/tmp/ventium-held-ddr-sweep-prep.SwSZzP/old-image-readonly-clock.json`,
+SHA `8752242ea4f6fd0ecdf30d3df1a9ad20dacecbe529b7a148672d33000a5558f1`.
+
+No current-candidate full standard suite, routed sign-off, deployment,
+hardware timedemo or movie is complete. Verified simulation gameplay IPC
+baseline is **0.42633263**, build **5c2491f3**, cycles
+**7,099,999,637–7,199,999,637**, predating this unmeasured candidate.
+
+## Historical status (2026-10-03 12:13 UTC)
 
 The new source-factored **40 MHz** candidate is still in synthesis timing
 optimization under `/var/tmp/ventium-fpga40-icfrontspan.yqNVao/` (native handle
