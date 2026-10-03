@@ -91,6 +91,25 @@ bitstream, source-consumption and physical-clock qualification remain pending;
 no timing gain,
 complete standard-suite result, board timedemo or movie is claimed.
 
+At **20:47:58 UTC**, the same native synthesis remained active in cross-boundary
+and area optimization. Scope memory was **8,159,703,040 bytes**, peak
+**8,438,865,920**, swap **0**, **27 tasks**, with zero memory/OOM events and
+zero pressure averages. The actual generated synthesis Tcl's ordered define
+list was independently compared byte-for-byte with the frozen **110**-define
+file and points at the frozen **40 MHz** MMCM source.
+
+Only **20** regular, single-link `.gch` caches from the closed focused-test
+tree were removed after two no-open-file checks, metadata/hash rechecks,
+archive integrity testing and byte comparison against that archive. No logs,
+sources, executables, object code, checkpoints, live-native files or external
+volume files were removed. Net recovery is approximately **1,465,803,716 bytes
+(1.37 GiB)**; root filesystem availability was **11,231,211,520 bytes** after
+concurrent synthesis output growth. Recovery archive:
+`/var/tmp/ventium-fp-closed-pch-recovery.ZNFigp/closed-test-pch.tar.zst`, SHA
+`af4cd33eccf2147fa13a97c164496748f85d244c557cd6197d725c1fdc4f1fee`.
+The exact-target script, original hashes and successful native cleanup log are
+retained alongside it. The removed caches remain recoverable and regenerable.
+
 Gameplay IPC is unmeasured for this candidate. Verified pre-candidate baseline:
 **0.42633263**, simulation build **5c2491f3**, cycles
 **7,099,999,637–7,199,999,637**.
