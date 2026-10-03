@@ -1,6 +1,6 @@
 # RK FPGA Quake deployment — October 2, 2026
 
-## Current status (2026-10-03 01:52 UTC)
+## Current status (2026-10-03 02:01 UTC)
 
 Administrator access and the boot-time DDR reservation work. The board remains
 held in reset on the historical image. At the user's request, a new **40 MHz**
@@ -19,8 +19,11 @@ Placed occupancy is 65.73% LUT / 89.11% CLB; regional routing demand reaches
 158.487% north and 135.603% south, with 1,153,331 overlapping nodes in the
 failed live router. A separate report-only inspection of its error checkpoint
 closed with native exit **0**; this proves report completion, not a valid route.
-The completed synthesis and failed-run checkpoints are retained for a new
-congestion-focused implementation attempt. Preliminary timing is also severely
+The completed synthesis and failed-run checkpoints are retained. A separate
+congestion-focused run, **`impl_area_cong2`**, launched at **02:00:14 UTC**
+from the same synthesis checkpoint and is live. It changes only the
+implementation-stage area optimization and router directives, not the RTL,
+defines or cache geometry. Preliminary timing is also severely
 negative: the constrained
 40 MHz target is not yet a demonstrated operating frequency or timing pass.
 The first daemon's SIGBUS has an instruction-level cause (`DC ZVA` on Device
@@ -301,6 +304,48 @@ used by the failed run and are retained controls, not new fixes. The intended
 changes are the area-optimization directive and alternative router.
 No frozen RTL, defines, P5 cache geometry or timing exceptions are changed.
 The recipe is a recovery attempt, not a guarantee of closure.
+
+The native same-part router probe subsequently completed with **actual exit
+0**, accepting `route_design -directive AlternateCLBRouting` on Vivado
+2025.2 / `xczu15eg-ffvb1156-2-i`. Its preserved log is
+`/var/tmp/ventium-altclb-native-probe.gviImj/root-guard-probe2.log`, SHA
+`3b7969e36126bd714105a601f2dd4ad03f841905608d3060827b61ed9607db41`.
+Root confirmed its family and scope were gone at 01:53:44 UTC. This tiny
+OOC design checks directive compatibility only, not Ventium timing or routing.
+
+The first retry entry reached fresh-synthesis and clock validation, but stopped
+**before `launch_runs`**, with native exit **1**, because Vivado has no run
+property `STEPS.WRITE_BITSTREAM.IS_ENABLED`. The optional property was removed;
+the explicit `-to_step write_bitstream` and supported `ARGS.BIN_FILE` remain.
+The entry also omits unsupported `save_project`; run creation/launch/project
+close use ordinary project persistence. The unused `impl_area_cong` metadata,
+rejected source and log are preserved; no expensive P&R occurred in that entry.
+
+The corrected entry creates fresh **`impl_area_cong2`**, validates parent
+`synth_1`, exact part, complete/fresh synthesis and **40 MHz core / 100 MHz
+PS-AXI** constraints before launch, and prints all actual directive readbacks.
+Its source/CWD/logs are under `/var/tmp/ventium-impl-area-cong.IfjIKA/`:
+`launch_impl_area_cong.tcl`, SHA
+`2e9c9c10d6bf054514094f490d6907dd76d138a58871547525f78950d4deb58b`;
+`impl-area2.log` / `impl-area2.jou`. Root rechecked all 179 frozen-file pins and
+the original synthesis DCP before the retry. The pre-edit 68 KiB XPR backup
+is `project-before-area-retry.xpr`, SHA
+`950af3492d7dec847ac55c7c051c39444891177c1d8b55dfb8f9b4be69254f11`.
+
+The actual implementation launch is recorded at **02:00:14 UTC**. Native
+session **8229**, invocation `d6a070624b484e1e9e0d839469f66037`, is the only
+top-level build family. The four-hour outer guard is a safety limit, **not a
+completion ETA**. RAM remains **20 GiB hard / 19 GiB soft**, swap **2 GiB**,
+jobs/internal workers **1**. Root preemptively extended only this live phase's
+task headroom from **48 to 64**, because the prior same one-worker flow used
+45 slots and partial vendor pool creation previously deadlocked. Native
+property-command exit/readback are zero/correct, with zero memory/task-limit
+events. Future launcher source stays at fixed 48. This does not add CPU jobs.
+The root headroom receipt SHA is
+`6ad9019015ad6172c91a5800a986c540cdc27c6b24a68b422264716d2fc4a9d0`.
+At 02:01 UTC the original invocation is live, using 6.28 GB scope memory,
+zero build swap and 13 tasks. These observations do not prove routing,
+40 MHz silicon operation, timedemo completion or movie coverage.
 
 ### Vendor helper deadlock and bounded restart
 

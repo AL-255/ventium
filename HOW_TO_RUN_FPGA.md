@@ -6,7 +6,7 @@ debug tools as inspected through **2026-08-23**, with the safety preflight
 updated through **2026-10-03**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
 
-> **Latest build status (2026-10-03 01:52 UTC):** replacement synthesis has
+> **Latest build status (2026-10-03 02:01 UTC):** replacement synthesis has
 > closed with native exit **0** (2h26m), and the separate read-only checkpoint
 > inspection also exited **0**. Preliminary area is **66.04% LUT / 29.70%
 > BRAM**. Clock constraints are **40 MHz core / 100 MHz PS-AXI**, but pre-route
@@ -26,6 +26,14 @@ not certification of the currently installed image.
 > but reports **242,219 unrouted nets**; its timing is not routed sign-off.
 > Preserve the failed run and reuse completed synthesis for a separate
 > congestion-focused implementation retry; do not force bitstream output.
+> The corrected new run **`impl_area_cong2`** launched at **02:00:14 UTC**
+> and is live, reusing `synth_1` with `ExploreArea` optimization and
+> `AlternateCLBRouting`. High-spread placement/default pre-route physical
+> optimization are retained controls; RTL/defines/full P5 caches are unchanged.
+> A tiny same-part native probe accepted the router directive (exit 0), but
+> does not prove this full design will route. The retry retains one CPU job,
+> 20 GiB hard / 19 GiB soft RAM and 2 GiB swap, with a phase-local 64-task
+> cushion; its four-hour guard is not a finish-time prediction.
 > At 00:32 UTC its live task cap was extended **48 → 64** after observing
 > 45 occupied slots (mostly sleeping vendor threads); the future launch guard
 > remains fixed at 48. RAM, swap, job count and source were unchanged. The
