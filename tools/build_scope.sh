@@ -227,8 +227,11 @@ scope_has_cap() {
         (( actual_swap <= limit_swap )) || return 1
         [ -r "$cgroup_root/memory.high" ] || return 1
         actual_high="$(<"$cgroup_root/memory.high")"
-        [[ "$actual_high" =~ ^[0-9]+$ ]] || return 1
-        (( actual_high <= actual_memory * 9 / 10 )) || return 1
+        # An automatic soft throttle generated sustained reclaim/PSI and a
+        # userspace oomd kill below MemoryMax on the reviewed mapper run.
+        # Require the default unthrottled soft boundary, not an old/stale
+        # finite one. The numeric hard RAM/swap/tasks caps above still apply.
+        [ "$actual_high" = max ] || return 1
     fi
     return 0
 }
@@ -592,9 +595,10 @@ set +e
 scope_properties=(-p "MemoryMax=${scope_mem}" -p "TasksMax=${scope_tasks}" -p "KillMode=control-group")
 if [ -n "${scope_swap}" ]; then
     scope_properties+=(-p "MemorySwapMax=${scope_swap}")
-    # Start reclaim before the hard boundary instead of discovering a mapper
-    # burst at MemoryMax. This is Vivado-only; verification profiles are intact.
-    scope_properties+=(-p "MemoryHigh=$(( $(size_to_bytes "$scope_mem") * 9 / 10 ))")
+    # Keep memory.high at its default max. Early forced reclaim caused the
+    # monitored user manager's PSI policy to kill the mapper below its hard
+    # RAM cap (2026-10-03). Admission reserves and MemoryMax/SwapMax remain
+    # the boundary; do not change oomd policy or prefer a sibling as victim.
 fi
 systemd-run --expand-environment=no "${scope_args[@]}" "${scope_properties[@]}" \
     -- bash -c '

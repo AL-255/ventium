@@ -6,6 +6,7 @@ Mock systemd commands record resource properties, so this neither contacts the
 user manager nor starts Vivado, a compiler, or an FPGA flow.
 """
 
+import fcntl
 import os
 from pathlib import Path
 import subprocess
@@ -146,7 +147,7 @@ class VivadoLimitPolicyTests(unittest.TestCase):
             (leaf / "pids.max").write_text(f"{pids_max}\n")
             (leaf / "memory.swap.max").write_text(f"{swap_max}\n")
             if memory_high is None:
-                memory_high = memory_max * 9 // 10 if isinstance(memory_max, int) else "max"
+                memory_high = "max"
             if memory_high != "missing":
                 (leaf / "memory.high").write_text(f"{memory_high}\n")
             if parent_memory_max is not None:
@@ -178,8 +179,7 @@ class VivadoLimitPolicyTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
             properties,
-            ["MemoryMax=20G", "TasksMax=48", "KillMode=control-group", "MemorySwapMax=2G",
-             f"MemoryHigh={20 * 1024**3 * 9 // 10}"],
+            ["MemoryMax=20G", "TasksMax=48", "KillMode=control-group", "MemorySwapMax=2G"],
         )
 
     def test_lower_memory_and_swap_are_applied_but_tasks_stay_fixed(self):
@@ -187,8 +187,7 @@ class VivadoLimitPolicyTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
             properties,
-            ["MemoryMax=12G", "TasksMax=48", "KillMode=control-group", "MemorySwapMax=1G",
-             f"MemoryHigh={12 * 1024**3 * 9 // 10}"],
+            ["MemoryMax=12G", "TasksMax=48", "KillMode=control-group", "MemorySwapMax=1G"],
         )
         self.assertIn("forcing reviewed Vivado TasksMax=48", result.stderr)
 
@@ -197,8 +196,7 @@ class VivadoLimitPolicyTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
             properties,
-            ["MemoryMax=12G", "TasksMax=48", "KillMode=control-group", "MemorySwapMax=1G",
-             f"MemoryHigh={12 * 1024**3 * 9 // 10}"],
+            ["MemoryMax=12G", "TasksMax=48", "KillMode=control-group", "MemorySwapMax=1G"],
         )
         self.assertIn("forcing reviewed Vivado TasksMax=48", result.stderr)
 
@@ -207,8 +205,7 @@ class VivadoLimitPolicyTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
             properties,
-            ["MemoryMax=20G", "TasksMax=48", "KillMode=control-group", "MemorySwapMax=8G",
-             f"MemoryHigh={20 * 1024**3 * 9 // 10}"],
+            ["MemoryMax=20G", "TasksMax=48", "KillMode=control-group", "MemorySwapMax=8G"],
         )
         self.assertIn("clamping Vivado MemoryMax", result.stderr)
         self.assertIn("clamping Vivado MemorySwapMax", result.stderr)
@@ -218,8 +215,12 @@ class VivadoLimitPolicyTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(properties, [
             "MemoryMax=18G", "TasksMax=48", "KillMode=control-group", "MemorySwapMax=8G",
-            f"MemoryHigh={18 * 1024**3 * 9 // 10}",
         ])
+
+    def test_vivado_does_not_inject_soft_pressure_or_change_oomd_victims(self):
+        result, properties = self.run_scope(memory="18G", swap="8G")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(any(p.startswith(("MemoryHigh=", "ManagedOOM")) for p in properties))
 
     def test_admission_memory_and_swap_reserve_boundaries(self):
         cases = (
@@ -311,14 +312,65 @@ class VivadoLimitPolicyTests(unittest.TestCase):
         oversized = self.run_scope_has_cap(swap_cap="8G", swap_max=9 * 1024**3)
         self.assertNotEqual(oversized.returncode, 0, oversized.stderr)
 
-    def test_scope_has_cap_requires_the_vivado_soft_boundary(self):
-        high = 20 * 1024**3 * 9 // 10
-        accepted = self.run_scope_has_cap(memory_high=high)
+    def test_scope_has_cap_requires_unthrottled_vivado_soft_boundary(self):
+        accepted = self.run_scope_has_cap(memory_high="max")
         self.assertEqual(accepted.returncode, 0, accepted.stderr)
-        for limit in (high + 1, "max", "missing"):
+        for limit in (20 * 1024**3 * 9 // 10, 20 * 1024**3, "missing", "", "bad", "infinity"):
             with self.subTest(memory_high=limit):
                 result = self.run_scope_has_cap(memory_high=limit)
                 self.assertNotEqual(result.returncode, 0, result.stderr)
+
+    def test_nested_active_scope_requires_unthrottled_caps_and_inherited_lock(self):
+        # Execute the actual nesting and lock-attestation functions, not only
+        # the leaf cap helper. No real manager/cgroup/production lock is used.
+        source = SCRIPT.read_text()
+        names = (
+            "size_to_bytes", "vivado_size_status", "vivado_memory_limit",
+            "vivado_swap_limit", "scope_has_cap", "scope_required_limits",
+            "scope_holds_lock", "scope_is_active",
+        )
+        functions = "\n\n".join(self.extract_function(source, name) for name in names)
+        functions = functions.replace(
+            'cgroup_root="/sys/fs/cgroup${cgroup_path}"',
+            'cgroup_root="${BUILD_SCOPE_TEST_CGROUP_ROOT}${cgroup_path}"', 1,
+        ).replace("/proc/self/cgroup", '"${BUILD_SCOPE_TEST_PROC_CGROUP}"')
+        self.assertNotIn("/sys/fs/cgroup", functions)
+        self.assertNotIn("/proc/self/cgroup", functions)
+        cases = (("max", True, 0), ("max", False, 1), (16 * 1024**3, True, 1))
+        for high, inherited_lock, expected in cases:
+            with self.subTest(memory_high=high, inherited_lock=inherited_lock):
+                with tempfile.TemporaryDirectory(prefix="ventium-build-scope-nested-test-") as temp_name:
+                    temp = Path(temp_name)
+                    leaf = temp / "cgroup" / "app.slice" / "ventium-vivado.scope"
+                    leaf.mkdir(parents=True)
+                    for name, value in (
+                        ("memory.max", 18 * 1024**3), ("pids.max", 48),
+                        ("memory.swap.max", 8 * 1024**3), ("memory.high", high),
+                    ):
+                        (leaf / name).write_text(f"{value}\n")
+                    proc_cgroup = temp / "proc-cgroup"
+                    proc_cgroup.write_text("0::/app.slice/ventium-vivado.scope\n")
+                    lock_path = temp / "scope.lock"
+                    env = os.environ.copy()
+                    env.update(
+                        BUILD_SCOPE_TEST_CGROUP_ROOT=str(temp / "cgroup"),
+                        BUILD_SCOPE_TEST_PROC_CGROUP=str(proc_cgroup),
+                        BUILD_SCOPE_TEST_LOCK=str(lock_path),
+                        VENTIUM_BUILD_SCOPE_ACTIVE="1", VENTIUM_BUILD_SCOPE_UNIT="ventium-vivado",
+                        VENTIUM_VIVADO_MEMORY_MAX="18G", VENTIUM_VIVADO_MEMORY_SWAP_MAX="8G",
+                    )
+                    script = (
+                        'set -euo pipefail\nvivado_memory_max=20G\nvivado_swap_default=2G\n'
+                        'vivado_swap_max=8G\nvivado_tasks_max=48\n'
+                        'lock_path="$BUILD_SCOPE_TEST_LOCK"\n' + functions + "\nscope_is_active\n"
+                    )
+                    with lock_path.open("w") as held_lock:
+                        fcntl.flock(held_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        result = subprocess.run(
+                            ["bash", "-c", script], env=env, text=True, capture_output=True,
+                            pass_fds=(held_lock.fileno(),) if inherited_lock else (),
+                        )
+                    self.assertEqual(result.returncode, expected, result.stderr)
 
     def test_scope_has_cap_rejects_stale_smaller_inherited_memory_request(self):
         result = self.run_scope_has_cap(memory_cap="8G")
