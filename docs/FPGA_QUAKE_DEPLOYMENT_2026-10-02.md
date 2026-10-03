@@ -1,6 +1,6 @@
 # RK FPGA Quake deployment — October 2, 2026
 
-## Current status (2026-10-03 17:44 UTC)
+## Current status (2026-10-03 18:10 UTC)
 
 The frontend-factored full-chip synthesis completed with native exit **0**
 (handle **48145**, closure confirmed **15:49:49 UTC**). `synth_design` elapsed
@@ -146,6 +146,16 @@ At **17:45:29 UTC**, it is still in Global Iteration 1: actual worker CPU time
 continues to advance, memory is **8,046,403,584 bytes**, and swap remains zero.
 This is real conflict-reduction progress, not route completion, timing sign-off,
 or a linear remaining-time estimate. No new run or source change was made.
+
+Further counts fell to **9,137** (**17:59:40 UTC**) and **4,228**
+(**18:10:05 UTC**). Native **79488** still returns a live session; worker
+**2364930** has **2h01m23s** of actual CPU time and all memory-event counters
+are zero. The phase remains Global Iteration 1. No new bitstream, final route
+check or physical-clock measurement exists; declining overlap counts must not
+be converted into a claimed completion percentage or fixed ETA. A fresh
+read-only board check at **17:57:48 UTC** confirmed the same boot ID, the
+historical image operating, no guest/capture process and **385,765,376 free
+bytes** on the board root filesystem. No programming or guest release occurred.
 
 Independent read-only review confirms the prepared post-route inspector is
 a **report collector, not a deployment/sign-off gate**. It rejects incomplete,

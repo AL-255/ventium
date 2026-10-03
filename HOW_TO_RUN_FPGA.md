@@ -6,7 +6,7 @@ debug tools as inspected through **2026-08-23**, with the safety preflight
 updated through **2026-10-03**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
 
-> **Latest status (2026-10-03 17:44 UTC):** the frontend-factored candidate's
+> **Latest status (2026-10-03 18:10 UTC):** the frontend-factored candidate's
 > full-chip synthesis completed with native exit **0** (handle **48145**):
 > `synth_design` elapsed **1h37m15s**, about **1h38m** for the complete run.
 > Its checkpoint is under
@@ -52,9 +52,9 @@ not certification of the currently installed image.
 > Its preserved checkpoint is **75,298,446 bytes**, SHA
 > `6c1baf744db1bf4cb9a1af47981b7a9dcfbd92ab826294b29cc7f91258d3903e`.
 > The same CPU-active worker is in rip-up/reroute, **Global Iteration 1**, with
-> intermediate overlap counts falling **286,033 → 75,853 → 25,087**,
-> global/short congestion **level
-> 6**, and timing congestion **level 7**. This is not a completed or terminal
+> intermediate overlap counts falling **286,033 → 75,853 → 25,087 → 9,137
+> → 4,228**, global/short congestion **level 6**, and timing congestion
+> **level 7**. This is not a completed or terminal
 > routing result. It has no swap or memory/OOM
 > events. Full routing, bitstream and final frequency qualification remain
 > pending; do not launch an inspector while this family is live.
