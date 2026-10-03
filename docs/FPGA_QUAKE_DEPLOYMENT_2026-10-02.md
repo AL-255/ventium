@@ -143,6 +143,58 @@ gameplay IPC is unmeasured. Verified pre-candidate simulation gameplay baseline:
 **0.42633263**, build **5c2491f3**, cycles
 **7,099,999,637–7,199,999,637**.
 
+### Prepared cold-launch/capture helpers (16:57 UTC; not executed)
+
+Reviewed helper copies are installed at **`/tmp/ao486/quake-tools.dej5dp/`**,
+root:root **0700**, with root-owned, single-link **0444** files. Actual
+administrative SSH handle **33311** exited **0** and printed their matching
+hashes:
+
+- `launch_cold_quake.sh`: `b8d92193fdf99ff55b81a9bb4775ae13f3aa48f11a9bd870e693137c9bba1686`.
+  Root independently reran ten host-only stub cases, exit **0**. It requires
+  pinned daemon/VHD/ROM inputs, preserves the base disk via a verified physical
+  private copy, and requires stable live capture PID/invocation before release.
+- `start_capture_service.py`: `3fb42a6d14fa8c3da03be8bfdede7dab95934bc7cd206a47509ed6ab72768c10`.
+  Root independently reran five mocked host tests, exit **0**. It validates the
+  final-input manifest, precreated FIFO/stderr permissions and external reader,
+  then starts only the direct retained capture service with whole-record SIGUSR1
+  closure. Its PID/header checks are not hardware-arm acknowledgment.
+
+Host staging-only receipt:
+`/var/tmp/ventium-fpga-quake-oct02.rc0wVn/runtime-helper-stage-receipt.xjhk4w/STAGING_ONLY.json`.
+Neither helper has been executed on the board. New-image programming, physical
+held-clock/DDR preflight and the final root-owned input manifest remain pending.
+
+### Read-only timing-cone fallback (not implemented)
+
+The closed synthesis report's 186-level EIP-to-SRT-result path passes through
+frontend, translation/L1 readiness, and FP command-admission logic before
+reaching **live SRT rounding controls**; it is not primarily the iterative
+divider recurrence. Approximately 37.602 ns precedes `srt_rc` in the unplaced
+estimate, which must not be interpreted as routed timing. Frozen
+`ven_fp_top.sv` SHA is
+`19a2b6e4323ce6583567632baf4358b5af62406775ef0c1a8cf8e0754760b70c`.
+
+A possible latency-neutral fallback separates RC/PC selection from the
+prioritized start chain: the trans override owner is exactly
+`top_state == TOP_TRANS && trans_divide_start`. `TOP_TRANS` cannot admit a
+command, so earlier `accept` branches cannot suppress that override. A
+source-pinned exhaustive **two-state selector projection**, preserving the
+current pulse-only/late-PC behavior, passed **1,835,008 admission cases +
+7,168 FPTAN-tail cases + 524,288 CW/data cases**. Root independently reran it
+with native exit **0**, **1.179394 s / 19,308 KiB** high-water memory.
+Proof script:
+`/var/tmp/ventium-fpga-quake-oct02.rc0wVn/srt-rcpc-factor-proof.rn9ZEU/prove_rcpc_factoring.py`,
+SHA `dd8f176964cb4ea61b24b38ac8f5ac66344fa0e941197d843306d416a05837df`.
+
+This proves neither full-FPU/core/arithmetic or four-state equivalence nor
+physical timing improvement. No RTL, register, latency or timing exception
+was changed. Wait for the existing native implementation's actual terminal
+outcome before deciding whether this fallback is needed. Simply capturing
+RC/PC is a different change: borrowed atan currently requests PC64 only on
+its start pulse, then the live PC reverts to the control word, so latching
+could change results and requires separate directed verification.
+
 ## Historical live/retry record (through 2026-10-03 14:32 UTC)
 
 The first frontend-factored synthesis (native **65164**) closed with exit
