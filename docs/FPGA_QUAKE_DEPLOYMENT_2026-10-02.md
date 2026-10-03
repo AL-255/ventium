@@ -1,13 +1,17 @@
 # RK FPGA Quake deployment — October 2, 2026
 
-## Current status (22:13:50 UTC)
+## Current status (2026-10-03 00:29 UTC)
 
 Administrator access and the boot-time DDR reservation work. The board remains
 held in reset on the historical image. At the user's request, a new **40 MHz**
-current-source image is being synthesized; no new bitstream is deployed yet.
+current-source image has completed synthesis; no new bitstream is deployed yet.
 The original run was stopped after read-only debugger evidence identified a
 deadlocked vendor helper. A replacement with the same frozen RTL/defines is
-now computing under a corrected fixed task cap. Neither run is a synthesis pass.
+closed with native exit **0** under the corrected fixed task cap. Read-only
+checkpoint inspection also closed with exit **0**. Implementation launched
+from that same completed project at 00:29 UTC, **without resynthesis**. Area
+fits the part, but synthesized timing is severely negative: the constrained
+40 MHz target is not yet a demonstrated operating frequency or timing pass.
 The first daemon's SIGBUS has an instruction-level cause (`DC ZVA` on Device
 memory), and an isolated scalar-access successor is built and microtested,
 and staged on the board. Its control-only `--ident` probe exits zero; DDR
@@ -37,7 +41,7 @@ or performance.
 
 The frozen source snapshot and original preserved output are under
 `/var/tmp/ventium-fpga-quake-oct02.rc0wVn/fpga40-vco1g.3vpbYB/`.
-The live replacement output is under
+The replacement synthesis/implementation output is under
 `/var/tmp/ventium-fpga-quake-oct02.rc0wVn/fpga40-task48-retry.5ZayIg/`;
 it reads the original frozen source paths, not today's dirty worktree.
 Its frozen-input manifest SHA is
@@ -101,11 +105,72 @@ At 21:03:48 browser processes were gone and headroom was 8.4 GiB. Unrelated
 applications and tiny old crash-report helpers were left alone. At 21:07:29
 the same Vivado invocation used 15.146 GiB with 8.615 GiB host headroom;
 worker CPU remained productive and no new limit/OOM/pressure event appeared.
-Preliminary runs are gone; routing has not started. Do not treat process
-progress as a synthesis/timing pass.
+At that original-run checkpoint, preliminary runs were gone and routing had
+not started. Those process-progress observations were not a synthesis/timing pass.
 Inspect area before implementation; then check routed DRC/setup/hold and
 clock reports, hash/program the artifact, measure silicon MHz, and run the
 unmodified cold timedemo with the matching widened capture tool.
+
+### Completed replacement synthesis and implementation launch (October 3)
+
+The corrected replacement finished at **00:23:56 UTC**, native session 74097,
+exit **0**, reporting `SYNTH OK` / `DONE` and 2h26m elapsed. At 00:24:17 root
+observed the scope inactive and no remaining Vivado executable family. All 179
+frozen-input hashes were rechecked successfully. The generated synthesized
+checkpoint is `output/rk_ao486_system/rk_ao486_system.runs/synth_1/rk_ao486_bd_wrapper.dcp`
+under the replacement directory, SHA
+`43cfcc3146f07bb7021a5a46978ce0ab4be6a165d820da5f4f6773988c53910c`.
+
+Inspection ran separately, after closure, under the same exclusive launcher
+and a 540-second outer bound. Native session 95691 exited **0** at 00:26:56,
+with `synth_1 PROGRESS=100%`, `STATUS=synth_design Complete!`,
+`NEEDS_REFRESH=0`, and nine reports. Reports and root's closure receipt are in
+`/var/tmp/ventium-fpga-quake-oct02.rc0wVn/synth-inspection-oct03.2MjGyf5U/`.
+The source, checkpoint and report hashes are recorded in
+`ROOT_CLOSED_SYNTHESIS_INSPECTION_RECEIPT.json`; its completion flags deliberately
+do not assert routed timing, hardware deployment, timedemo or movie acceptance.
+
+The synthesized netlist uses **225,368 LUTs (66.04%)**, 58,958 registers,
+**221 BRAM tiles (29.70%)**, and 127 DSPs (3.60%). The largest logic consumers
+are the core: icache 88,737 LUTs and shared FP 72,452 LUTs. This is preliminary
+fit evidence, not final placed utilization. The clock report confirms a
+**40 MHz core / 100 MHz PS-AXI constraint**, not measured silicon frequency.
+
+Timing is a substantial risk: pre-route WNS **−23.863 ns**, TNS
+−491,471.562 ns, 70,291 failing setup endpoints; WHS **−0.108 ns**, 28,531
+failing hold endpoints. The worst setup cone runs from `eip_reg[0]` through
+instruction/control logic into the shared FPU SRT `result_q_reg[9]`: **195
+logic levels**, 48.652 ns estimated data delay, including **37.846 ns unplaced
+routing**. Placement may improve that routing estimate, but the long logic
+cone must not be dismissed or called 40 MHz-ready. Wait for routed setup,
+hold, CDC and bus-skew evidence before timing sign-off; no RTL/latency patch or
+timing waiver was introduced to hide it.
+
+Default `report_drc -no_waivers` reports no errors or critical warnings; all
+513 findings are DSP pipelining/power warnings or advisories. `check_timing`
+finds no unconstrained internal endpoints, loops, multiple clocks or detached
+generated clocks. Eight unused PS EMIO clock outputs lack clocks and four LED
+outputs lack I/O delays; five ignored false paths target nonexistent
+synchronizer cells. These are retained findings, not waived clean reports.
+Vivado also requests **`report_bus_skew`** because bus-skew constraints exist;
+that report must be added to the closed-implementation inspection.
+
+Implementation native session **66620** is now live, scope invocation
+`d4a69c016ef5448ab10a01a303a752ad`, outer PID 1814754 / implementation PID
+1815196. It resumes the existing XPR with `VEN_FPGA_CORE_MHZ=40`, one run job
+and one internal worker; no BD regeneration or resynthesis. Launcher logs/CWD
+are `/var/tmp/ventium-fpga-quake-oct02.rc0wVn/impl-current-oct03.MGgQvIXl/`.
+The explicit launch RAM cap is **20 GiB**, runtime soft cap **19 GiB**, swap
+**2 GiB**, fixed task cap **48**. The old mapping-only 8 GiB swap exception
+ended with its closed scope and is **not** inherited by this phase.
+
+At 00:23 UTC, key-only board preflight separately confirmed the unchanged boot
+ID, no guest/probe/capture process, 374 MiB free, matching staged daemon/VHD/ROM
+hashes, and the exact 256 MiB `no-map` DT property. This is readiness only;
+the board still holds the historical reset-held image. Hardware IPC, cold
+startup, full 969-frame timedemo and continuous movie coverage remain unmeasured
+or unproven. Simulation gameplay baseline remains **0.42633263** on frozen
+5c2491f3, cycles **7,099,999,637–7,199,999,637**, predating the FPGA candidate.
 
 ### Vendor helper deadlock and bounded restart
 

@@ -3,8 +3,24 @@
 This is the operating procedure for the Ventium-swapped `ao486_MiSTer` system on
 the RK-XCZU15EG-F board. It covers the current build, deployment, test, and
 debug tools as inspected through **2026-08-23**, with the safety preflight
-updated on **2026-10-02**. Historical clocks, binaries and results below are
+updated through **2026-10-03**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
+
+> **Latest build status (2026-10-03 00:29 UTC):** replacement synthesis has
+> closed with native exit **0** (2h26m), and the separate read-only checkpoint
+> inspection also exited **0**. Preliminary area is **66.04% LUT / 29.70%
+> BRAM**. Clock constraints are **40 MHz core / 100 MHz PS-AXI**, but pre-route
+> timing is not a pass: WNS **−23.863 ns**, WHS **−0.108 ns**, including a
+> 195-level EIP-to-FPU-SRT cone with substantial unplaced-route delay.
+> Place-and-route is now running from the existing XPR, **without resynthesis**,
+> under the exclusive guard: **20 GiB RAM hard / 19 GiB soft / 2 GiB swap /
+> 48 tasks**. The previous mapping-only 8 GiB swap exception ended at closure.
+> Preserve actual routed timing/CDC evidence and add `report_bus_skew` before
+> sign-off; no timing waiver or blind latency-changing DSP pipeline fix was
+> added. Logs/receipts are in the dated deployment document. No new bitstream,
+> silicon clock, cold startup, timedemo or movie is accepted yet. Verified
+> simulation gameplay IPC is **0.42633263**, build **5c2491f3**, cycles
+> **7,099,999,637–7,199,999,637**; it predates the unmeasured FPGA candidate.
 
 > **Deployment update (2026-10-02 19:41 UTC):** administrative authentication
 > is resolved. The board rebooted with a minimal boot-DT change reserving
