@@ -6,7 +6,7 @@ debug tools as inspected through **2026-08-23**, with the safety preflight
 updated through **2026-10-03**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
 
-> **Latest status (2026-10-03 20:59 UTC):** the implementation retry ended
+> **Latest status (2026-10-03 21:43 UTC):** the implementation retry ended
 > with actual native exit **124**, observed at **20:08:29 UTC**: its four-hour
 > safety timeout expired during Global Iteration 2. Global Iteration 1 reached
 > zero overlaps, but routing did not finish. No routed checkpoint, bitstream
@@ -32,8 +32,14 @@ not certification of the currently installed image.
 > **19 GiB RAM / 8 GiB swap / 48 tasks**, `memory.high=max`, successful
 > reserve-preserving admission. Routing/bitstream and full-system tests remain
 > pending; no new deployment is claimed.
-> At 20:58 UTC the same synthesis handle was still live in timing optimization,
-> with a 16,901,173,248-byte memory peak and zero memory/OOM events.
+> At 21:38 UTC timing optimization finished and technology mapping began.
+> The same native handle was freshly polled live at 21:43 UTC. Scope RAM peaked
+> at its unchanged 19 GiB cap and swap reached approximately 8 GiB; RAM/swap
+> limit events occurred, but all recorded OOM/kill counters remain zero.
+> The cap was not raised because the conservative live headroom predicate
+> failed. Current memory pressure had subsided; continued monitoring is required.
+> No full-PC simulation is currently running. Its historical cold Quake run
+> took 17h09m20s, distinct from synthesis and the still-pending placement/routing.
 > The candidate-bound movie helpers passed an independent, host-only,
 > 512 MiB / 180-second gate (native exit 0, handle 31368). They retain unchanged
 > pixels/dimensions and 15 fps presentation, and reject the previous candidate

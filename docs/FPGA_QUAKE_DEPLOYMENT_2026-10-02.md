@@ -1,6 +1,6 @@
 # RK FPGA Quake deployment — October 2, 2026
 
-## Current status (2026-10-03 20:59 UTC)
+## Current status (2026-10-03 21:43 UTC)
 
 The `impl_nobram_power` retry (native **79488**) has actually closed with
 exit **124**, observed **20:08:29 UTC**. The four-hour safety timeout expired
@@ -98,6 +98,29 @@ and area optimization. Scope memory was **8,159,703,040 bytes**, peak
 zero pressure averages. The actual generated synthesis Tcl's ordered define
 list was independently compared byte-for-byte with the frozen **110**-define
 file and points at the frozen **40 MHz** MMCM source.
+
+At **21:38:05 UTC**, timing optimization finished at **55m03s** synthesis
+elapsed and the same worker entered **Technology Mapping**. Native **38563**
+was freshly polled live at **21:43 UTC**, with CPU time advancing in its sole
+Vivado family. Scope RAM had reached its unchanged **19 GiB** cap; at that
+sample current RAM was **15,715,999,744 bytes**, peak **20,401,094,656**, and
+swap **8,589,635,584 bytes**, effectively the **8 GiB** swap limit. RAM-limit
+events were **570**, but `oom`, `oom_kill` and `oom_group_kill` remained **0**.
+Swap-limit/failed-charge events were present (**50,694** by 21:43:35); do not
+describe this stage as zero memory events or zero swap. The latest pressure
+averages were **0.00 / 0.39 / 0.86** for 10/60/300 seconds, not sustained
+current stalls. These samples are observations, not an OOM-safety guarantee.
+The RAM cap was **not** raised: the reviewed live 20 GiB admission predicate
+failed first on RAM headroom and later on the required **12 GiB free-swap**
+floor. No system OOM policy, swap/task limit, source or clock setting changed.
+Root filesystem availability was **9,369,935,872 bytes** at 21:43:10.
+
+The comparable prior native synthesis completed in about **1h38m**, suggesting
+tens of minutes left in this synthesis, not a guaranteed completion time.
+Placement/routing has **not** started for this candidate. No full-PC simulator
+was running in the 21:42 process census. The historical clean cold Quake
+simulation took **61,759.871582 seconds (17h09m19.9s)**; this is a simulation
+estimate, not the runtime of the currently active FPGA synthesis.
 
 Only **20** regular, single-link `.gch` caches from the closed focused-test
 tree were removed after two no-open-file checks, metadata/hash rechecks,
