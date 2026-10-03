@@ -2744,7 +2744,11 @@ module core
         refdecode_ibuf[i] = ic_byte(p54_prefix_ex_flin + 32'(i));
       else
 `endif
+`ifdef VEN_IC_BRAM
+      refdecode_ibuf[i] = (state == S_PIPE) ? ic_front_bytes[i] : ibuf[i];
+`else
       refdecode_ibuf[i] = (state == S_PIPE) ? ic_byte(flin + 32'(i)) : ibuf[i];
+`endif
     end
   end
 `endif
@@ -4305,6 +4309,66 @@ module core
     ic_byte = ln[{addr[4:0],3'b000} +: 8];
   endfunction
 
+  // BEGIN IC FRONT SPAN
+`ifdef VEN_IC_BRAM
+  // All ordinary byte consumers fit in flin+[0,21]: a 7-byte U window,
+  // a 7-byte V window after a <=15-byte U, and the 16-byte slow window.
+  // Probe each of the two possible lines ONCE, rather than reindexing the
+  // complete tag array independently for every byte. This is combinational
+  // factoring only: cache geometry, read ports and pre-edge state are unchanged.
+  localparam int IC_FRONT_BYTES = 22;
+  logic [IC_WAYW:0] ic_front_a, ic_front_b;
+  logic [IC_LINE*8-1:0] ic_front_lineA, ic_front_lineB;
+  logic [7:0] ic_front_bytes [IC_FRONT_BYTES];
+  logic [IC_FRONT_BYTES-1:0] ic_front_present_bytes;
+
+  function automatic logic [IC_WAYW:0] ic_front_probe(input logic [31:0] addr);
+    logic [IC_IDXW-1:0] set;
+    logic [IC_TAGW-1:0] tag;
+    logic [IC_WAYW:0] probe;
+    begin
+      set = addr[5 +: IC_IDXW]; tag = addr[5+IC_IDXW +: IC_TAGW];
+      probe = {1'b0, IC_WAYW'(IC_WAYS-1)};
+      // Preserve the executable priority, including duplicate valid tags:
+      // the last matching cache way wins, then the last matching bypass slot.
+      for (int w=0; w<IC_WAYS; w++)
+        if (ic_val_o[set][w] && ic_tag_o[set][w]==tag)
+          probe = {1'b1, IC_WAYW'(w)};
+`ifndef VEN_IC_NO_FETCH_BYPASS
+      for (int i=0; i<2; i++)
+        if (icbp_v[i] && (set == icbp_set[i]) && (tag == icbp_tag[i]))
+          probe = {1'b1, icbp_way[i]};
+`endif
+      ic_front_probe = probe;
+    end
+  endfunction
+
+  assign ic_front_a = ic_front_probe(flin);
+  assign ic_front_b = ic_front_probe(flin_nl);
+  // The registered ports may have been redirected or may hold the same set.
+  // Select by returned (set,way), not assumed sequential A/B ownership. A
+  // collided/missing identity falls back to stale A exactly like ic_byte.
+  assign ic_front_lineA =
+      (rdA_set_q == flin[5 +: IC_IDXW] &&
+       rdA_way_q == ic_front_a[IC_WAYW-1:0] && !ic_rd_collA) ? ic_rd_lineA :
+      (rdB_set_q == flin[5 +: IC_IDXW] &&
+       rdB_way_q == ic_front_a[IC_WAYW-1:0] && !ic_rd_collB) ? ic_rd_lineB : ic_rd_lineA;
+  assign ic_front_lineB =
+      (rdA_set_q == flin_nl[5 +: IC_IDXW] &&
+       rdA_way_q == ic_front_b[IC_WAYW-1:0] && !ic_rd_collA) ? ic_rd_lineA :
+      (rdB_set_q == flin_nl[5 +: IC_IDXW] &&
+       rdB_way_q == ic_front_b[IC_WAYW-1:0] && !ic_rd_collB) ? ic_rd_lineB : ic_rd_lineA;
+  for (genvar ic_front_i=0; ic_front_i<IC_FRONT_BYTES; ic_front_i++) begin : g_ic_front_span
+    wire [5:0] pos = {1'b0,flin[4:0]} + 6'(ic_front_i);
+    assign ic_front_bytes[ic_front_i] = pos[5]
+        ? ic_front_lineB[{pos[4:0],3'b000} +: 8]
+        : ic_front_lineA[{pos[4:0],3'b000} +: 8];
+    assign ic_front_present_bytes[ic_front_i] = pos[5]
+        ? ic_front_b[IC_WAYW] : ic_front_a[IC_WAYW];
+  end
+`endif
+  // END IC FRONT SPAN
+
   // A resident line is not by itself safe to read during S_FETCH with the BRAM
   // frontend: the synchronous I-cache buffers may still hold a different way.
   // This is the same returned-address predicate used by ic_fetch_ready, factored
@@ -4584,7 +4648,11 @@ module core
           ibuf[i] <= 8'd0;
         else
 `endif
+`ifdef VEN_IC_BRAM
+        ibuf[i] <= ic_front_bytes[i];
+`else
         ibuf[i] <= ic_byte(flin + 32'(i));
+`endif
       end
       fetch_word <= 3'd0;
       sfetch_short_len_q <= 4'd0;
@@ -5339,8 +5407,13 @@ module core
   // so the byte gather is truly absent from the netlist).
   fpd_t u_d_ref, v_d_ref;
   always_comb begin
+`ifdef VEN_IC_BRAM
+    for (int i=0;i<7;i++) ub[i] = ic_front_present_bytes[i] ? ic_front_bytes[i] : 8'd0;
+    for (int i=0;i<7;i++) vb[i] = ic_front_bytes[{1'b0,u_d_ref.len}+5'(i)];
+`else
     for (int i=0;i<7;i++) ub[i] = ic_present(flin+i[31:0]) ? ic_byte(flin+i[31:0]) : 8'd0;
     for (int i=0;i<7;i++) vb[i] = ic_byte(flin+{28'd0,u_d_ref.len}+i[31:0]);
+`endif
   end
   decode u_decode_ref (.ib0(ub[0]),.ib1(ub[1]),.ib2(ub[2]),.ib3(ub[3]),.ib4(ub[4]),.ib5(ub[5]),.ib6(ub[6]),
                        .iflags(eflags), .def16(def16), .cycle_mode(cycle_mode), .uop(u_d_ref));
@@ -5411,8 +5484,13 @@ module core
   // exactly as the in-line `fp_decode(...)` calls read them. u_d/v_d are driven
   // by the instances; everything downstream consumes them unchanged.
   always_comb begin
+`ifdef VEN_IC_BRAM
+    for (int i=0;i<7;i++) ub[i] = ic_front_present_bytes[i] ? ic_front_bytes[i] : 8'd0;
+    for (int i=0;i<7;i++) vb[i] = ic_front_bytes[{1'b0,u_d.len}+5'(i)];
+`else
     for (int i=0;i<7;i++) ub[i] = ic_present(flin+i[31:0]) ? ic_byte(flin+i[31:0]) : 8'd0;
     for (int i=0;i<7;i++) vb[i] = ic_byte(flin+{28'd0,u_d.len}+i[31:0]);
+`endif
   end
 
 `ifdef VEN_P54_PREFIX66_REG

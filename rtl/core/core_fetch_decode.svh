@@ -62,7 +62,12 @@
 `endif
 `endif
                   )) ibuf[i] <= 8'd0;
-              else                                ibuf[i] <= ic_byte(flin + 32'(i));
+              else
+`ifdef VEN_IC_BRAM
+                ibuf[i] <= ic_front_bytes[i];
+`else
+                ibuf[i] <= ic_byte(flin + 32'(i));
+`endif
             end
             fetch_word <= 3'd0;
             state      <= S_DECODE;
