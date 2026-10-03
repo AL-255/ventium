@@ -1,6 +1,6 @@
 # RK FPGA Quake deployment — October 2, 2026
 
-## Current status (2026-10-03 17:05 UTC)
+## Current status (2026-10-03 17:20 UTC)
 
 The frontend-factored full-chip synthesis completed with native exit **0**
 (handle **48145**, closure confirmed **15:49:49 UTC**). `synth_design` elapsed
@@ -128,6 +128,27 @@ router WNS is **−16.124 ns**, not final STA or a routed Fmax estimate. The
 measurement remains pending, and there is no new bitstream. The worker is
 CPU-active, with no swap or memory/OOM events. No source, constraint, run
 or directive was changed during placement/physical optimization.
+
+At **17:20:56 UTC**, native **79488** still returns a live session and the
+same worker is CPU-active (**99.9%**). Routing is in **Phase 5.2 Global
+Iteration 1**, after rip-up/reroute began; the latest intermediate count is
+**286,033 nodes with overlaps**. The router reports global/short congestion
+**level 6 (64×64)** and timing congestion **level 7 (128×128)**, and warns
+that it is prioritizing completing routing over timing optimization. These
+are unresolved intermediate conflicts, not a terminal failure or evidence
+of a fully routed design. Scope memory is **8,208,117,760 bytes**, swap is
+**0**, and the actual memory-event counters remain zero. Continue observing
+this handle; a quiet log with a live CPU-active worker is not a restart reason.
+
+Independent read-only review confirms the prepared post-route inspector is
+a **report collector, not a deployment/sign-off gate**. It rejects incomplete,
+stale or partially/error-routed designs and incorrect 40/100 MHz constraint
+periods, but negative setup/hold slack does not itself fail the script. Root
+must inspect the emitted timing/DRC/CDC/bus-skew/exception/unconstrained reports,
+match final bitstream and source hashes, and measure the held physical core
+clock. Native exit **0**, an empty original Vivado family, a separately bounded
+exclusive inspection and its actual exit **0** are all required; the inspector
+has not yet been executed. Its success marker alone cannot authorize deployment.
 
 The board was freshly checked, with boot ID
 `2861e4e8-cd4c-48cd-9f44-7f7d8a991ebb`: no daemon/capture process was running,
