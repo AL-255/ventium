@@ -1075,3 +1075,47 @@ new client was staged as root-owned mode 0444
 and its help command recognizes the new option. The old `cd284…` client is
 unchanged. No board guest, capture, new programming or hardware qualification
 has occurred at this point; the original Vivado implementation is still live.
+
+### Medium-run timeout and explicit MUXF fallback (October 3)
+
+At **08:03:18 UTC**, the medium-spread implementation's actual native handle
+`29785` closed with **exit 124** at its existing four-hour deadline. It was
+still in pre-route critical-path optimization; no routed checkpoint, bitstream
+or BIN was produced. This was a timeout, **not an OOM**: the final original
+resource samples had no memory-max/OOM/pids event, worker swap remained zero,
+and historical scope swap max/fail counters remained 6,596. At 08:03:29 UTC
+root confirmed the original PIDs absent, scope inactive and no executable
+under the Vivado installation left in `/proc`. The placement remains only
+placement evidence (218,526 LUTs, 37,513 CLBs, WNS −24.685 ns), not routed Fmax.
+
+The closed run retained stale `Running phys_opt_design...` metadata. After
+independent family closure, a separate guarded batch used supported
+`terminate_runs impl_area_medium`, **never `reset_runs`**. Native handle
+`78741` exited zero and the status changed to `phys_opt_design ERROR`; the
+tool's attempt-to-kill warning reflects the already absent process. The
+placed/opt checkpoint and original run-log hashes were unchanged afterward.
+This metadata recovery does not convert the original timeout into success.
+
+Before another full attempt, root ran the explicit same-part structural probe
+at `/var/tmp/ventium-muxf-remap-explicit-probe.fJUEkE` through the exclusive
+guard, with a 180-second deadline. Native `97812` exited **0**. Actual MUXF
+inventory was **16 F7 + 8 F8** after both synthesis and `ExploreArea`, then
+**zero** after the separate `opt_design -muxf_remap` call. Tiny routing reported
+`ROUTED_FULLY=1`, `ERRORS_IN_ROUTES=0`, zero node overlaps, and the final close
+marker. Its out-of-context warnings/unconstrained external paths mean this is
+**tool compatibility only**, not Ventium timing, functionality or routability.
+
+At **08:07:04 UTC**, root launched fresh `impl_area_muxf` (native `7139`) from
+the unchanged `synth_1` checkpoint **43cf…**, with all 179 frozen input hashes
+matching and exactly the same 110 defines. It preserves the 40-MHz core /
+100-MHz PS clocks, medium spreading and `AlternateCLBRouting`; the new
+optimization post-hook runs the separate supported MUXF remap operation after
+`ExploreArea`. This is a post-synthesis netlist transform, not an RTL rebuild.
+The sole new family is bounded to one job/thread, 20-GiB resident memory,
+2-GiB swap and initially 48 tasks, with a four-hour deadline and 75-second
+cleanup allowance. The deadline is **not a completion estimate**. No new
+hardware image, cold guest run or movie acceptance exists at launch.
+
+Verified gameplay IPC remains **0.42633263**, simulation build **5c2491f3**,
+cycles **7,099,999,637–7,199,999,637**. It predates this FPGA candidate; the
+current candidate's gameplay IPC is unmeasured.
