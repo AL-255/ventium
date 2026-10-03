@@ -13,8 +13,11 @@ not certification of the currently installed image.
 > timing is not a pass: WNS **−23.863 ns**, WHS **−0.108 ns**, including a
 > 195-level EIP-to-FPU-SRT cone with substantial unplaced-route delay.
 > Place-and-route is now running from the existing XPR, **without resynthesis**,
-> under the exclusive guard: **20 GiB RAM hard / 19 GiB soft / 2 GiB swap /
-> 48 tasks**. The previous mapping-only 8 GiB swap exception ended at closure.
+> under the exclusive guard: **20 GiB RAM hard / 19 GiB soft / 2 GiB swap**.
+> At 00:32 UTC its live task cap was extended **48 → 64** after observing
+> 45 occupied slots (mostly sleeping vendor threads); the future launch guard
+> remains fixed at 48. RAM, swap, job count and source were unchanged. The
+> previous mapping-only 8 GiB swap exception ended at closure.
 > Preserve actual routed timing/CDC evidence and add `report_bus_skew` before
 > sign-off; no timing waiver or blind latency-changing DSP pipeline fix was
 > added. Logs/receipts are in the dated deployment document. No new bitstream,

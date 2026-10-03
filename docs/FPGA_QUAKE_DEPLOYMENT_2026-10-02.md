@@ -164,6 +164,17 @@ The explicit launch RAM cap is **20 GiB**, runtime soft cap **19 GiB**, swap
 **2 GiB**, fixed task cap **48**. The old mapping-only 8 GiB swap exception
 ended with its closed scope and is **not** inherited by this phase.
 
+At **00:32:34 UTC**, the same implementation reached **45 / 48 task slots**,
+mostly sleeping vendor library threads. The generated implementation Tcl
+explicitly retains `general.maxThreads=1` and `-jobs 1`; the thread count is not
+45 useful CPUs or multiple top-level builds. Before another partial vendor
+thread-pool failure, root extended **only the live `TasksMax` to 64** (native
+property-command exit 0, readback 64, `pids.events.max=0` before and after).
+RAM and swap caps remain 19/20/2 GiB. No source, active launcher or launch
+environment was edited, and the future guard stays fixed at 48. The separate
+`ROOT_LIVE_TASK_HEADROOM_RECEIPT.json` under the implementation CWD links the
+unchanged closed-synthesis receipt and records this phase-local exception.
+
 At 00:23 UTC, key-only board preflight separately confirmed the unchanged boot
 ID, no guest/probe/capture process, 374 MiB free, matching staged daemon/VHD/ROM
 hashes, and the exact 256 MiB `no-map` DT property. This is readiness only;
