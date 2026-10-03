@@ -1,6 +1,6 @@
 # RK FPGA Quake deployment — October 2, 2026
 
-## Current status (2026-10-03 02:39 UTC)
+## Current status (2026-10-03 03:45 UTC)
 
 Administrator access and the boot-time DDR reservation work. The board remains
 held in reset on the historical image. At the user's request, a new **40 MHz**
@@ -28,7 +28,10 @@ negative: the constrained
 40 MHz target is not yet a demonstrated operating frequency or timing pass.
 Retry placement completed in **30m52s**, with **218,494 LUTs (64.02%)** /
 **37,885 CLBs (88.81%)**. High congestion persists and placed WNS is
-**−24.487 ns**; pre-route physical optimization is running.
+**−24.487 ns**. Pre-route physical optimization subsequently completed in
+**1h04m50s**, with zero errors/critical warnings and post-optimization WNS
+**−23.574 ns**. Routing is now live with `AlternateCLBRouting`; neither
+route closure nor a new bitstream is proved.
 The first daemon's SIGBUS has an instruction-level cause (`DC ZVA` on Device
 memory), and an isolated scalar-access successor is built and microtested,
 and staged on the board. Its control-only `--ident` probe exits zero; DDR
@@ -374,8 +377,18 @@ The generated placed DCP is **86,412,477 bytes**, SHA
 `697f7baf28a2dfddbf9995ca0aa96b3849ab5d50baf408c5e3e5683ba8432992`;
 the placed utilization report SHA is
 `9b68f0f7a15c3471c119cc81199faaa9d6d7c93c4726cd484fe1d00bd1092305`.
-The same native session 8229 then entered default pre-route `phys_opt_design`;
-it remains live, without resynthesis, RTL edits, replacement or bitstream output.
+The same native session 8229 then entered default pre-route `phys_opt_design`.
+It completed successfully in **1h04m50s**, with zero errors/critical warnings,
+77 added cells and 168 optimized cells/nets. Post-optimization WNS is
+**−23.574 ns**, still pre-route rather than a routed operating-frequency
+qualification. Root read the completed log and hashed the generated
+**86,065,623-byte** physical-optimization checkpoint at about **03:44 UTC**:
+`impl_area_cong2/rk_ao486_bd_wrapper_physopt.dcp`, SHA
+`2953a9a8855c69c2d1abd93127dd5b837e73130a2d4660ca23708ced83261304`.
+The worker then entered `route_design -directive AlternateCLBRouting` and
+reached Phase 2.2 Pre Route Cleanup. Native session 8229 and the original
+invocation remain live, without RTL resynthesis or bitstream output. The
+pre-route DRC's zero errors do not establish a conflict-free completed route.
 
 The bus-skew-complete final inspection helper is prepared for the exact new
 run at `final-inspection-prepared/inspect_completed_impl.tcl` under the

@@ -6,7 +6,7 @@ debug tools as inspected through **2026-08-23**, with the safety preflight
 updated through **2026-10-03**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
 
-> **Latest build status (2026-10-03 02:39 UTC):** replacement synthesis has
+> **Latest build status (2026-10-03 03:45 UTC):** replacement synthesis has
 > closed with native exit **0** (2h26m), and the separate read-only checkpoint
 > inspection also exited **0**. Preliminary area is **66.04% LUT / 29.70%
 > BRAM**. Clock constraints are **40 MHz core / 100 MHz PS-AXI**, but pre-route
@@ -34,7 +34,9 @@ not certification of the currently installed image.
 > **37,885 CLBs (88.81%)**, reductions of only **2.60% / 0.34%** versus
 > the original placed report. High-congestion warnings persist, with larger
 > north/south estimated regions; placed WNS is **−24.487 ns**. Pre-route
-> physical optimization is live; alternate routing has not completed.
+> physical optimization completed in **1h04m50s**, with zero errors/critical
+> warnings and WNS **−23.574 ns**. Alternate routing is live; it has not
+> completed, and there is still no new bitstream or 40 MHz timing pass.
 > A tiny same-part native probe accepted the router directive (exit 0), but
 > does not prove this full design will route. The retry retains one CPU job,
 > 20 GiB hard / 19 GiB soft RAM and 2 GiB swap, with a phase-local 64-task
