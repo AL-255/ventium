@@ -1,6 +1,6 @@
 # RK FPGA Quake deployment — October 2, 2026
 
-## Current status (2026-10-03 02:01 UTC)
+## Current status (2026-10-03 02:27 UTC)
 
 Administrator access and the boot-time DDR reservation work. The board remains
 held in reset on the historical image. At the user's request, a new **40 MHz**
@@ -367,6 +367,16 @@ Run it only after actual implementation/native closure and family absence;
 the existing completed/fresh-run, full-route and zero-route-error checks,
 40/100 MHz constraints and raw timing/CDC/bus-skew reports are unchanged.
 
+Before native use, its bus-skew command was made explicit:
+`report_bus_skew -delay_type min_max`. Root read the installed Vivado 2025.2
+primary command metadata: `min_max` is supported, whereas the default is
+`max`. The prepared helper's current SHA is
+`3bdca6472af48333ef1b5d6f3cecde604edc935a01d6961ce5f1e0cea2f26407`;
+relative to the protected original it has only the four run-name changes and
+this report argument. No active entry, constraint or netlist was edited. This
+version still awaits native execution and does not inherit the old copy's
+stub-test qualification.
+
 A separate key-only board check at **02:02:40 UTC** returned native exit 0,
 the same boot ID, manager `operating`, 374 MiB free, all staged cold-disk/ROM/
 device-safe-daemon hashes unchanged, and the effective 256 MiB reservation's
@@ -386,6 +396,19 @@ Root rehashed/read that receipt and independently rechecked the live family
 at **02:13:33 UTC**: the same worker has advanced to **Global Place Phase1**,
 CPU time 13m18s, scope memory **9.144 GB**, swap zero and 14 tasks. Native
 session 8229 remains live; observer completion is not build completion.
+
+The second bounded watch has **40 samples over 614.34 seconds**
+(02:14:56–02:25:11 UTC, maximum within-batch gap 41.20 seconds). Its final
+02:25:40 check holds the original process identities, all 179 source hashes,
+110 defines, 40 MHz profile and launch-helper hash. Peak sampled scope RAM is
+**8.786 GiB**, swap zero, tasks at most 15/64 and all memory/OOM/task-limit
+events zero; average CPU use is one productive core. The explicit gap between
+watch batches is retained, not represented as continuous observation. Receipt
+`observer-batch.rgvrLnIl/resource-batch.json` has SHA
+`3f0f96824d5a22db0bfbfb3a3dc4602625acc3a7f00f76171ad8f9de3acae059`.
+Root rehashed/read the receipt and rechecked native session 8229 and its worker;
+at **02:27:39 UTC**, placement is in **Small Shape DP / Slice Area Swap**.
+There is still no new bitstream or FPGA timedemo/movie acceptance.
 
 At **02:19:06 UTC**, root independently read the board loader and the first
 128 bytes of the historical working raw image over SSH (native exit 0).
