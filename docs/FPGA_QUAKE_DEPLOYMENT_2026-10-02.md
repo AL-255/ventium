@@ -1,6 +1,6 @@
 # RK FPGA Quake deployment — October 2, 2026
 
-## Current status (2026-10-03 16:09 UTC)
+## Current status (2026-10-03 16:35 UTC)
 
 The frontend-factored full-chip synthesis completed with native exit **0**
 (handle **48145**, closure confirmed **15:49:49 UTC**). `synth_design` elapsed
@@ -98,6 +98,44 @@ Actual invocation **`8c4925d93ad7440aa6b54fe443e47fb8`** confirms **20 GiB
 RAM / 8 GiB swap / 48 tasks**, with `memory.high=max`, `general.maxThreads=1`
 and `-jobs 1`. Do not start a new Vivado invocation until actual native closure
 and complete family exit; the four-hour timeout is not an ETA.
+
+Placement has now completed successfully: `place_design` elapsed **24m03s**,
+with **0 errors / 0 critical warnings**. The placed checkpoint is
+**75,712,024 bytes**, SHA
+`bf648c5ddc701e198b5bc3b3f1a7b27eb6f92d20d98c94099a1716079b84310b`,
+in the actual `impl_nobram_power` directory. Its native utilization report
+(SHA `72a757939ae63eda58cad395d3057b8c2ef2a7fb77d61fbb0a70bf033706b091`)
+reports **186,324 LUTs (54.60%) / 33,693 CLBs (78.98%)**, **58,963 FFs**,
+**221 BRAM tiles / 127 DSPs**, **18,912 MUXF7 / 7,471 MUXF8**. These are
+placed, not routed, figures. The high-congestion warning remains; estimated
+WNS is **−19.167 ns**, not a routed frequency result. Estimated global
+congestion regions are north **16×16**, south **32×32**, east **4×4**, west
+**16×16**; south long congestion still reaches **64×64**.
+
+The same native handle/family has entered pre-route physical optimization.
+The worker remains CPU-active, with no swap and zero memory/OOM/task-limit
+events. Routing and bitstream output remain pending. No source, constraint,
+run or directive was changed during placement.
+
+The board was freshly checked, with boot ID
+`2861e4e8-cd4c-48cd-9f44-7f7d8a991ebb`: no daemon/capture process was running,
+both staged BIOS ROM hashes still match, and the historical FPGA image remains
+operating. A scoped administrative preparation hardened **only `/tmp/ao486`**
+from `riguke:riguke 0755` to **`root:root 0755`**, preserving the files. Actual
+SSH/sudo handle **90084** closed with exit **0** and the expected ownership
+readback. `su root` authentication failed; the supplied board credential works
+for **riguke's sudo**, not as a verified root password. No new programming,
+guest release, media write or capture occurred.
+
+The capture procedure now pins the separate SIGUSR1-capable runtime client
+(`fd0a83…`) while retaining frozen-client ancestry (`cd2842…`). Frozen RTL
+inspection confirms that the private pending arm is not visible in ACTIVE,
+and held-core SoC/VGA reset prevents the VSYNC edge that begins acquisition.
+Do not wait for a positive pre-release arm acknowledgment: start reader and
+live producer before release, then require READY with a changed sequence
+afterward. Headers/service liveness do not prove hardware arm acceptance or
+coverage of the very first raster/every engine frame. No RTL change was needed
+for this procedural correction.
 
 No new bitstream, routed sign-off, deployment, cold hardware timedemo or movie
 is complete. The current candidate's full standard suite remains pending;

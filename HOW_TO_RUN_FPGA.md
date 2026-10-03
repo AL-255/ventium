@@ -6,7 +6,7 @@ debug tools as inspected through **2026-08-23**, with the safety preflight
 updated through **2026-10-03**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
 
-> **Latest status (2026-10-03 16:09 UTC):** the frontend-factored candidate's
+> **Latest status (2026-10-03 16:35 UTC):** the frontend-factored candidate's
 > full-chip synthesis completed with native exit **0** (handle **48145**):
 > `synth_design` elapsed **1h37m15s**, about **1h38m** for the complete run.
 > Its checkpoint is under
@@ -42,8 +42,15 @@ not certification of the currently installed image.
 > changes only `opt_design` to `RuntimeOptimized`. The actual generated script
 > confirms that directive, `AltSpreadLogic_high` placement, default physical
 > optimization/routing, with `general.maxThreads=1` and `-jobs 1` configured.
-> The retry has passed optimization, written an opt checkpoint, and reached
-> placement. Six host-only Tcl launcher tests subsequently passed; they test
+> The retry has passed optimization and placement. `place_design` completed
+> successfully in **24m03s**, with **186,324 LUTs (54.60%) / 33,693 CLBs
+> (78.98%)**, **58,963 FFs**, **221 BRAM tiles** and **127 DSPs**. The placer
+> still warns of high congestion and estimates WNS **−19.167 ns**; these are
+> not routed sign-off/Fmax results. The placed checkpoint is preserved.
+> The same CPU-active worker has entered pre-route physical optimization,
+> with no swap or memory/OOM/task-limit events. Routing and bitstream remain
+> pending; do not launch an inspector while this family is live.
+> Six host-only Tcl launcher tests subsequently passed; they test
 > control flow, not native implementation semantics. Physical QoR may differ;
 > this is a supported crash-avoidance experiment, not a routing/timing pass.
 > Logs/helpers are under `/var/tmp/ventium-icfrontspan-nobram-retry.cvKzwq/`.
@@ -1751,9 +1758,15 @@ passive rendered-pixel frame; its 512-KiB RGB332 private BRAM holds a complete
 720x400 text scanout (288,000 bytes) as well as Mode 13h. Larger modes report
 overflow rather than emitting a truncated image.
 
-For the October 2 widened capture candidate, use its separately staged,
-image-matched `/tmp/ao486/ven_board_probe.wide-oct02.py`, **not** the historical
-probe with the currently loaded August image. Stream binary pixels over
+For the current frontend-factored candidate and whole-record SIGUSR1 closure,
+use `/tmp/ao486/ven_board_probe.sigusr1-oct03.py`, SHA-256
+`fd0a83fe16ab6ccce42d6adcaef971c740119326932ec478d21b0393e33c5f68`.
+The older `/tmp/ao486/ven_board_probe.wide-oct02.py` has the matching widened
+capture ABI but lacks `--stop-on-sigusr1`; do not use it for this workflow.
+Retain its separate frozen hardware-ancestry pin (`cd2842…`) in provenance,
+and do not use either widened client to certify the historical August image.
+Verify the final bitstream/source/client identity and held clock before capture.
+Stream binary pixels over
 non-PTY SSH to a host-owned run directory rather than accumulating frames on
 the board. Root's two actual-board synthetic FIFO tests passed byte integrity
 and correctly exposed producer failure after consumer loss; they are transport
@@ -1772,6 +1785,16 @@ with a failed producer and is not acceptance. The real producer needs
 cover cold startup, workload and closure margin. Keep all colors, dimensions,
 and accepted records unchanged; 15 fps is the movie presentation rate, not
 measured gameplay FPS or a capture-rate limit.
+
+There is no reliable positive pre-release arm acknowledgment in this capture
+ABI. `CAP_STATUS.ACTIVE` excludes the private pending-arm latch, and holding
+the core also resets the SoC/VGA, preventing the VSYNC edge that starts capture.
+Do not wait for ACTIVE/READY before releasing a cold guest. Record the initial
+status, start the FIFO reader and producer, check the producer is still live
+with no early error, then release before its frame timeout. Require READY with
+a changed sequence after release; neither the stream header nor a live service
+PID proves that the hardware accepted an arm. This ordering does not prove
+capture of the very first physical raster or every engine frame.
 
 For final timedemo disk evidence, use the separately audited closed FAT-console
 procedure in `docs/FPGA_QUAKE_DEPLOYMENT_2026-10-02.md` ("Separate closed
