@@ -6,12 +6,12 @@ debug tools as inspected through **2026-08-23**, with the safety preflight
 updated through **2026-10-03**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
 
-> **Latest status (2026-10-03 20:41 UTC):** the implementation retry ended
+> **Latest status (2026-10-03 20:59 UTC):** the implementation retry ended
 > with actual native exit **124**, observed at **20:08:29 UTC**: its four-hour
 > safety timeout expired during Global Iteration 2. Global Iteration 1 reached
 > zero overlaps, but routing did not finish. No routed checkpoint, bitstream
 > or binary exists; the optimization, placement and physical-optimization
-> checkpoints and logs are preserved. All Vivado-family processes have exited;
+> checkpoints and logs are preserved. That retry's Vivado family has exited;
 > this attempt had zero recorded memory/OOM events. Do not deploy it.
 > A generic shared-FPU RC/PC control-cone factoring change has passed focused
 > verification. Strict FPU lint, the 172-check top regression and all four
@@ -32,6 +32,14 @@ not certification of the currently installed image.
 > **19 GiB RAM / 8 GiB swap / 48 tasks**, `memory.high=max`, successful
 > reserve-preserving admission. Routing/bitstream and full-system tests remain
 > pending; no new deployment is claimed.
+> At 20:58 UTC the same synthesis handle was still live in timing optimization,
+> with a 16,901,173,248-byte memory peak and zero memory/OOM events.
+> The candidate-bound movie helpers passed an independent, host-only,
+> 512 MiB / 180-second gate (native exit 0, handle 31368). They retain unchanged
+> pixels/dimensions and 15 fps presentation, and reject the previous candidate
+> or a mismatched delta-to-input-manifest link. These synthetic tests do not
+> prove a hardware capture or full timedemo; the single-BRAM drain/rearm gaps
+> still require independent whole-timedemo temporal coverage evidence.
 > **40 MHz is the target, not a new silicon measurement.** Candidate
 > gameplay IPC is unmeasured; verified pre-candidate baseline **0.42633263**,
 > build **5c2491f3**, cycles **7,099,999,637–7,199,999,637**.

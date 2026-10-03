@@ -1,6 +1,6 @@
 # RK FPGA Quake deployment — October 2, 2026
 
-## Current status (2026-10-03 20:41 UTC)
+## Current status (2026-10-03 20:59 UTC)
 
 The `impl_nobram_power` retry (native **79488**) has actually closed with
 exit **124**, observed **20:08:29 UTC**. The four-hour safety timeout expired
@@ -9,7 +9,8 @@ during Phase 5.3 / Global Iteration 2, whose final logged overlap count is
 **19:50:52 UTC**, but this was not full routing: its timing summary was explicitly
 intermediate (**WNS −28.224 ns / WHS +0.006 ns**), not routed Fmax or sign-off.
 No routed checkpoint, `.bit` or `.bin` was produced. All native processes are
-gone; no live/orphan memory-consuming Vivado remains. The prior synthesized,
+gone; this failed attempt has no live/orphan Vivado. The new candidate's sole
+live synthesis family is identified below. The prior synthesized,
 optimized, placed and physical-optimization checkpoints and original logs are
 preserved. Zero memory/OOM events were recorded; this was a timeout, not OOM.
 
@@ -109,6 +110,35 @@ concurrent synthesis output growth. Recovery archive:
 `af4cd33eccf2147fa13a97c164496748f85d244c557cd6197d725c1fdc4f1fee`.
 The exact-target script, original hashes and successful native cleanup log are
 retained alongside it. The removed caches remain recoverable and regenerable.
+
+The independent candidate-bound movie-helper gate closed with native **0**
+(handle **31368**, closure confirmed **20:58:58 UTC**), under a **512 MiB** address-space cap
+and **180-second** external bound. Bundle:
+`/var/tmp/ventium-fpga-quake-oct02.rc0wVn/fpga40-srtctrl-movie-bundle.vIkK6x/`.
+The earlier frontend bundle is unchanged. Frozen ABI assets remain distinct
+from the separately pinned SIGUSR1 runtime overlay. Both helpers bind the new
+manifest and explicit FP-top replacement, require the actual delta's
+`manifest_sha256` linkage, and reject a fixture changing only that link.
+Normalizer SHA: `cf4bb5928750771d7854deae1271bc23e476b7e4bcae03fd56ae544f39db54fe`;
+assembler SHA: `d9127cf84ad76db9274a568000e2698df53ae7ccf6f2de16d22d8c8f9470fa2e`.
+Root gate log:
+`/var/tmp/ventium-fp-controls-oct03.dneAL2/srtctrl-movie-helpers-root-final.log`,
+SHA `262950d23d52bbc860346938098b41817fc9d50ebe6aab54f1a87c99f43c302e`.
+These are small synthetic host fixtures, not a 2 GiB encoding qualification,
+board capture, physical-clock result or completed timedemo. Every accepted
+record is encoded once with unchanged dimensions/colors at **15 fps**;
+single-BRAM drain/rearm gaps mean neither record count nor encoding success
+proves all engine frames or full timedemo temporal coverage.
+
+A read-only completed-implementation collector is separately pinned at
+`/var/tmp/ventium-fpga40-srtctrl-native.eMTOMg/tools/inspect_completed_impl.tcl`,
+SHA `a23f7e19cb1601e73b1b60efb74f8dcdce01ea00d5b3ac5b3276bd549257feb9`.
+It has **not** run: it must wait for actual native implementation closure,
+complete/non-stale synthesis and bitstream runs, and exclusive fresh admission.
+It requires fully placed/routed state with no partial routes or routing errors;
+its reports still need root timing/hold/DRC/CDC/bus-skew review before deployment.
+Its completion marker is not sign-off. Native BIN output remains under
+`rk_ao486_system.runs/impl_1/rk_ao486_bd_wrapper.bin`, not the project top level.
 
 Gameplay IPC is unmeasured for this candidate. Verified pre-candidate baseline:
 **0.42633263**, simulation build **5c2491f3**, cycles
