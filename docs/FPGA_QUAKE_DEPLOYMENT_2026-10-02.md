@@ -1233,6 +1233,25 @@ acceptance. Root's direct cgroup checks showed zero current memory, swap and
 task-limit events and zero swap use. The original build remains live; no
 second Vivado job, new bitstream, deployment or hardware timedemo is claimed.
 
+The selective-F8 attempt **also failed routing**. Root harvested native
+**87162 exit 1 at 11:06:47 UTC**; `route_design` took **15m55s** and reported
+global congestion level **6**, global/short and timing congestion estimates
+**7**, and **1,115,370 node overlaps**. Zero unrouted/partially routed nets
+and zero post-failure DRC errors do not make this an electrically valid route.
+Peak global directional demands were N **96.4841%**, S **123.004%**,
+E **106.004%**, W **119.746%**. No BIT/BIN exists. The failed checkpoint SHA
+is **78a72ef003ef2072a0559c76b1e986f424cc7aed02f54a3e69fcd73d6ff5ffdb**;
+closed worker log SHA is **3a8e6086fbc5b88ee046fe8d706679ef6349549fad29a535d9968942e0cb13e2**.
+Root confirmed both original PIDs absent/scope inactive and independently
+enumerated **zero Vivado-installation executables** before any subsequent
+tool launch. The final bounded observer retained all 179 input hashes,
+110 exact defines and all script/XPR pins, with zero worker/parent swap or
+current limit/OOM events. Its final sample predates root's native closure;
+neither is substituted for the other. This was congestion, **not an OOM**.
+The next action is a bounded read-only failed-checkpoint inspection and
+source-structure audit, not another unsubstantiated implementation variant.
+Routing, deployment, hardware timedemo and full movie remain unachieved.
+
 Verified gameplay IPC remains **0.42633263**, simulation build **5c2491f3**,
 cycles **7,099,999,637–7,199,999,637**. It predates this FPGA candidate; the
 current candidate's gameplay IPC is unmeasured.
