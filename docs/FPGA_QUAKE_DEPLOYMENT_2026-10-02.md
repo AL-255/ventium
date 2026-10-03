@@ -1,6 +1,6 @@
 # RK FPGA Quake deployment — October 2, 2026
 
-## Current status (2026-10-03 22:41 UTC)
+## Current status (2026-10-03 23:03 UTC)
 
 The shared-FPU control-factored candidate's native synthesis **38563** has
 closed with actual exit **0**, observed **22:06:04 UTC**. `synth_design` elapsed
@@ -75,6 +75,16 @@ had advanced through physical critical-path optimization, with pre-route
 estimated WNS **−19.186 ns**, no swap use and zero memory/OOM events.
 The current frequency targets remain **40 MHz core / 100 MHz PS-AXI**;
 no achieved frequency or SRT endpoint attribution is proven yet.
+
+Physical optimization completed successfully in **2m47s**. The same native
+run started `route_design`; at **23:03:06 UTC** its worker remained active
+after **55m52s**, in **Phase 5.2 Global Iteration 1**. Router initialization
+reports **level-6 (64×64)** estimated global/short and timing congestion
+(`Route 35-448` / `35-581`), a concrete routability/timing risk despite the
+lower LUT count. Latest scope memory was **6,947,360,768 bytes**, swap use
+zero, with all memory/OOM event counters zero and CPU time advancing.
+No routed checkpoint, bitstream, final endpoint report or hardware result
+is established by these intermediate observations.
 
 The fresh board preflight closed with native exit **0** (handle **5124**).
 Board boot ID remains `2861e4e8-cd4c-48cd-9f44-7f7d8a991ebb`. Unmasked
