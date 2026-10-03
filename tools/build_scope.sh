@@ -32,9 +32,11 @@ vivado_memory_max="20G"
 vivado_tasks_max="48"
 # Keep swap bounded separately from resident memory.  Vivado can retain a large
 # working set during synthesis, but allowing an unbounded swap backlog turns an
-# OOM into hours of host-wide thrashing.  A caller may request a *smaller* cap
-# for an especially constrained run; it may never raise this reviewed ceiling.
-vivado_swap_max="2G"
+# OOM into hours of host-wide thrashing. Keep the default at 2G. The explicit
+# 8G ceiling accommodates the measured synthesis-mapper burst without raising
+# resident memory; host admission below reserves RAM and swap for other apps.
+vivado_swap_default="2G"
+vivado_swap_max="8G"
 # One fixed lock is part of the safety boundary.  Permitting a caller to choose
 # another path creates two independently valid locks and lets heavyweight trees
 # overlap again.  It is advisory only for unrelated projects; every Ventium
@@ -128,16 +130,16 @@ vivado_memory_limit() {
 # Swap follows the same non-expanding policy, except zero is meaningful: it
 # explicitly disables swap.  Keeping the parser shared with MemoryMax accepts
 # only unambiguous binary-unit sizes and makes an oversized request visibly
-# clamp to the 2 GiB Vivado ceiling.
+# clamp to the explicit 8 GiB Vivado ceiling (the default remains 2 GiB).
 vivado_swap_limit() {
-    local requested="${VENTIUM_VIVADO_MEMORY_SWAP_MAX:-$vivado_swap_max}"
+    local requested="${VENTIUM_VIVADO_MEMORY_SWAP_MAX:-$vivado_swap_default}"
     local size_status
 
     if [ "$requested" = "0" ]; then
         printf '%s\n' "$requested"
         return 0
     fi
-    if vivado_size_status "$requested" 2; then
+    if vivado_size_status "$requested" 8; then
         printf '%s\n' "$requested"
         return 0
     else
@@ -157,10 +159,57 @@ vivado_swap_limit() {
     printf '%s\n' "$vivado_swap_max"
 }
 
+# Admission is sampled only for a new Vivado tree, under the shared heavy-build
+# lock. Existing nested invocations are already contained and skip this check.
+# Do not accept an environment-owned meminfo path: a forged sample would defeat
+# the host reserve. Tests rewrite this literal in their private script copy.
+vivado_host_admission() {
+    local memory_cap="$1" swap_cap="$2" key value unit rest
+    local memory_available=0 swap_free=0 memory_seen=0 swap_seen=0
+    local memory_bytes swap_bytes gib=$((1024 * 1024 * 1024))
+
+    if [ ! -r /proc/meminfo ]; then
+        echo "[build-scope] cannot inspect host memory; refusing Vivado" >&2
+        return 1
+    fi
+    while read -r key value unit rest; do
+        case "$key" in
+            MemAvailable:|SwapFree:)
+                if ! [[ "$value" =~ ^[0-9]+$ ]] || [ "$unit" != kB ] || [ -n "$rest" ]; then
+                    echo "[build-scope] invalid host memory sample; refusing Vivado" >&2
+                    return 1
+                fi
+                if [ "$key" = MemAvailable: ]; then
+                    memory_available=$((10#$value * 1024))
+                    memory_seen=1
+                else
+                    swap_free=$((10#$value * 1024))
+                    swap_seen=1
+                fi
+                ;;
+        esac
+    done < /proc/meminfo
+    if [ "$memory_seen" -ne 1 ] || [ "$swap_seen" -ne 1 ]; then
+        echo "[build-scope] incomplete host memory sample; refusing Vivado" >&2
+        return 1
+    fi
+    memory_bytes="$(size_to_bytes "$memory_cap")" || return 1
+    swap_bytes="$(size_to_bytes "$swap_cap")" || return 1
+    if (( memory_available < memory_bytes + 2 * gib )); then
+        echo "[build-scope] insufficient MemAvailable for ${memory_cap} plus 2G host reserve; refusing Vivado" >&2
+        return 1
+    fi
+    if (( swap_bytes > 0 && swap_free < swap_bytes + 4 * gib )); then
+        echo "[build-scope] insufficient SwapFree for ${swap_cap} plus 4G host reserve; refusing Vivado" >&2
+        return 1
+    fi
+    echo "[build-scope] admitted Vivado: MemAvailable=${memory_available}, SwapFree=${swap_free} bytes" >&2
+}
+
 scope_has_cap() {
     local cgroup_path="$1" memory_cap="$2" tasks_cap="$3" swap_cap="${4:-}"
     local cgroup_root="/sys/fs/cgroup${cgroup_path}"
-    local actual_memory actual_tasks actual_swap limit_memory limit_swap
+    local actual_memory actual_tasks actual_swap actual_high limit_memory limit_swap
 
     [ -r "$cgroup_root/memory.max" ] || return 1
     [ -r "$cgroup_root/pids.max" ] || return 1
@@ -176,6 +225,10 @@ scope_has_cap() {
         limit_swap="$(size_to_bytes "$swap_cap")" || return 1
         [[ "$actual_swap" =~ ^[0-9]+$ ]] || return 1
         (( actual_swap <= limit_swap )) || return 1
+        [ -r "$cgroup_root/memory.high" ] || return 1
+        actual_high="$(<"$cgroup_root/memory.high")"
+        [[ "$actual_high" =~ ^[0-9]+$ ]] || return 1
+        (( actual_high <= actual_memory * 9 / 10 )) || return 1
     fi
     return 0
 }
@@ -445,6 +498,7 @@ case "$scope_profile" in
         fi
         scope_tasks="$vivado_tasks_max"
         echo "[build-scope] Vivado limits: MemoryMax=${scope_mem} (ceiling ${vivado_memory_max}), MemorySwapMax=${scope_swap} (ceiling ${vivado_swap_max}), TasksMax=${scope_tasks}" >&2
+        vivado_host_admission "$scope_mem" "$scope_swap" || exit 125
         ;;
     *)
         echo "[build-scope] unknown build profile: $scope_profile" >&2
@@ -538,6 +592,9 @@ set +e
 scope_properties=(-p "MemoryMax=${scope_mem}" -p "TasksMax=${scope_tasks}" -p "KillMode=control-group")
 if [ -n "${scope_swap}" ]; then
     scope_properties+=(-p "MemorySwapMax=${scope_swap}")
+    # Start reclaim before the hard boundary instead of discovering a mapper
+    # burst at MemoryMax. This is Vivado-only; verification profiles are intact.
+    scope_properties+=(-p "MemoryHigh=$(( $(size_to_bytes "$scope_mem") * 9 / 10 ))")
 fi
 systemd-run --expand-environment=no "${scope_args[@]}" "${scope_properties[@]}" \
     -- bash -c '

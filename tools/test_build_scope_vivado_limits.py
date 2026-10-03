@@ -18,14 +18,25 @@ SCRIPT = ROOT / "tools" / "build_scope.sh"
 
 
 class VivadoLimitPolicyTests(unittest.TestCase):
-    def run_scope(self, *, memory=None, swap=None, tasks=None, profile="vivado", unit=None):
+    def run_scope(
+        self, *, memory=None, swap=None, tasks=None, profile="vivado", unit=None,
+        memory_available_kib=32 * 1024 * 1024,
+        swap_free_kib=32 * 1024 * 1024, meminfo_text=None,
+    ):
         if unit is None:
             unit = "ventium-vivado" if profile == "vivado" else "ventium-build-scope-test"
         with tempfile.TemporaryDirectory(prefix="ventium-build-scope-test-") as temp_name:
             temp = Path(temp_name)
             clone = temp / "tools" / "build_scope.sh"
             clone.parent.mkdir()
+            meminfo = temp / "meminfo"
+            meminfo.write_text(
+                meminfo_text if meminfo_text is not None else
+                f"MemAvailable: {memory_available_kib} kB\nSwapFree: {swap_free_kib} kB\n"
+            )
             source = SCRIPT.read_text()
+            self.assertIn("done < /proc/meminfo", source)
+            source = source.replace("/proc/meminfo", str(meminfo))
             source = source.replace(
                 'lock_path="/tmp/ventium-heavy-build.lock"',
                 f'lock_path="{temp / "scope.lock"}"',
@@ -109,6 +120,8 @@ class VivadoLimitPolicyTests(unittest.TestCase):
         swap_max=2 * 1024 * 1024 * 1024,
         parent_memory_max=None,
         memory_cap="20G",
+        swap_cap="2G",
+        memory_high=None,
     ):
         """Run extracted cap logic against a private fake cgroup filesystem.
 
@@ -132,6 +145,10 @@ class VivadoLimitPolicyTests(unittest.TestCase):
             (leaf / "memory.max").write_text(f"{memory_max}\n")
             (leaf / "pids.max").write_text(f"{pids_max}\n")
             (leaf / "memory.swap.max").write_text(f"{swap_max}\n")
+            if memory_high is None:
+                memory_high = memory_max * 9 // 10 if isinstance(memory_max, int) else "max"
+            if memory_high != "missing":
+                (leaf / "memory.high").write_text(f"{memory_high}\n")
             if parent_memory_max is not None:
                 parent = leaf.parent
                 (parent / "memory.max").write_text(f"{parent_memory_max}\n")
@@ -144,10 +161,11 @@ class VivadoLimitPolicyTests(unittest.TestCase):
                     "-c",
                     "set -euo pipefail\n"
                     + functions
-                    + "\nscope_has_cap \"$1\" \"$2\" 48 2G\n",
+                    + "\nscope_has_cap \"$1\" \"$2\" 48 \"$3\"\n",
                     "scope-cap-test",
                     cgroup_path,
                     memory_cap,
+                    swap_cap,
                 ],
                 env=env,
                 capture_output=True,
@@ -160,7 +178,8 @@ class VivadoLimitPolicyTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
             properties,
-            ["MemoryMax=20G", "TasksMax=48", "KillMode=control-group", "MemorySwapMax=2G"],
+            ["MemoryMax=20G", "TasksMax=48", "KillMode=control-group", "MemorySwapMax=2G",
+             f"MemoryHigh={20 * 1024**3 * 9 // 10}"],
         )
 
     def test_lower_memory_and_swap_are_applied_but_tasks_stay_fixed(self):
@@ -168,7 +187,8 @@ class VivadoLimitPolicyTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
             properties,
-            ["MemoryMax=12G", "TasksMax=48", "KillMode=control-group", "MemorySwapMax=1G"],
+            ["MemoryMax=12G", "TasksMax=48", "KillMode=control-group", "MemorySwapMax=1G",
+             f"MemoryHigh={12 * 1024**3 * 9 // 10}"],
         )
         self.assertIn("forcing reviewed Vivado TasksMax=48", result.stderr)
 
@@ -177,19 +197,63 @@ class VivadoLimitPolicyTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
             properties,
-            ["MemoryMax=12G", "TasksMax=48", "KillMode=control-group", "MemorySwapMax=1G"],
+            ["MemoryMax=12G", "TasksMax=48", "KillMode=control-group", "MemorySwapMax=1G",
+             f"MemoryHigh={12 * 1024**3 * 9 // 10}"],
         )
         self.assertIn("forcing reviewed Vivado TasksMax=48", result.stderr)
 
     def test_oversized_and_huge_requests_are_visibly_clamped(self):
-        result, properties = self.run_scope(memory="999999999999999999999G", swap="3G")
+        result, properties = self.run_scope(memory="999999999999999999999G", swap="999999999999999999999G")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
             properties,
-            ["MemoryMax=20G", "TasksMax=48", "KillMode=control-group", "MemorySwapMax=2G"],
+            ["MemoryMax=20G", "TasksMax=48", "KillMode=control-group", "MemorySwapMax=8G",
+             f"MemoryHigh={20 * 1024**3 * 9 // 10}"],
         )
         self.assertIn("clamping Vivado MemoryMax", result.stderr)
         self.assertIn("clamping Vivado MemorySwapMax", result.stderr)
+
+    def test_explicit_mapper_retry_keeps_ram_bounded_and_allows_more_swap(self):
+        result, properties = self.run_scope(memory="18G", swap="8G")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(properties, [
+            "MemoryMax=18G", "TasksMax=48", "KillMode=control-group", "MemorySwapMax=8G",
+            f"MemoryHigh={18 * 1024**3 * 9 // 10}",
+        ])
+
+    def test_admission_memory_and_swap_reserve_boundaries(self):
+        cases = (
+            (20 * 1024**2, 12 * 1024**2, 0),
+            (20 * 1024**2 - 1, 12 * 1024**2, 125),
+            (20 * 1024**2, 12 * 1024**2 - 1, 125),
+        )
+        for mem_kib, swap_kib, expected in cases:
+            with self.subTest(memory_available_kib=mem_kib, swap_free_kib=swap_kib):
+                result, properties = self.run_scope(
+                    memory="18G", swap="8G", memory_available_kib=mem_kib,
+                    swap_free_kib=swap_kib,
+                )
+                self.assertEqual(result.returncode, expected, result.stderr)
+                if expected:
+                    self.assertEqual(properties, [])
+                    self.assertIn("refusing Vivado", result.stderr)
+
+    def test_disabled_swap_needs_no_host_swap_reserve(self):
+        result, properties = self.run_scope(memory="12G", swap="0", swap_free_kib=0)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("MemorySwapMax=0", properties)
+
+    def test_missing_or_malformed_host_memory_fails_closed(self):
+        for sample in (
+            "", "MemAvailable: 33554432 kB\n", "SwapFree: 33554432 kB\n",
+            "MemAvailable: bad kB\nSwapFree: 33554432 kB\n",
+            "MemAvailable: 33554432 MB\nSwapFree: 33554432 kB\n",
+            "MemAvailable: 33554432 kB unexpected\nSwapFree: 33554432 kB\n",
+        ):
+            with self.subTest(sample=sample):
+                result, properties = self.run_scope(meminfo_text=sample)
+                self.assertEqual(result.returncode, 125, result.stderr)
+                self.assertEqual(properties, [])
 
     def test_zero_memory_rejects_before_a_scope_is_created(self):
         result, properties = self.run_scope(memory="0")
@@ -210,7 +274,7 @@ class VivadoLimitPolicyTests(unittest.TestCase):
         )
         for profile, unit, expected in cases:
             with self.subTest(profile=profile):
-                result, properties = self.run_scope(profile=profile, unit=unit)
+                result, properties = self.run_scope(profile=profile, unit=unit, meminfo_text="")
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(properties, expected)
 
@@ -240,6 +304,21 @@ class VivadoLimitPolicyTests(unittest.TestCase):
     def test_scope_has_cap_rejects_swap_above_reviewed_ceiling(self):
         result = self.run_scope_has_cap(swap_max=3 * 1024 * 1024 * 1024)
         self.assertNotEqual(result.returncode, 0, result.stderr)
+
+    def test_scope_has_cap_uses_the_explicit_selected_swap_limit(self):
+        accepted = self.run_scope_has_cap(swap_cap="8G", swap_max=8 * 1024**3)
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+        oversized = self.run_scope_has_cap(swap_cap="8G", swap_max=9 * 1024**3)
+        self.assertNotEqual(oversized.returncode, 0, oversized.stderr)
+
+    def test_scope_has_cap_requires_the_vivado_soft_boundary(self):
+        high = 20 * 1024**3 * 9 // 10
+        accepted = self.run_scope_has_cap(memory_high=high)
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+        for limit in (high + 1, "max", "missing"):
+            with self.subTest(memory_high=limit):
+                result = self.run_scope_has_cap(memory_high=limit)
+                self.assertNotEqual(result.returncode, 0, result.stderr)
 
     def test_scope_has_cap_rejects_stale_smaller_inherited_memory_request(self):
         result = self.run_scope_has_cap(memory_cap="8G")
