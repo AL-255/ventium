@@ -156,6 +156,22 @@ its reports still need root timing/hold/DRC/CDC/bus-skew review before deploymen
 Its completion marker is not sign-off. Native BIN output remains under
 `rk_ao486_system.runs/impl_1/rk_ao486_bd_wrapper.bin`, not the project top level.
 
+Board read-only preflight was freshly repeated at **21:11–21:12 UTC**:
+administrator authentication worked, boot ID remains
+`2861e4e8-cd4c-48cd-9f44-7f7d8a991ebb`, manager state is `operating`, and the
+process census has no guest daemon/capture client/bitstream loader. All nine
+staged cold-launch/capture/daemon/probe/base-VHD/ROM/loader/rollback-image hashes
+still match their retained pins. Board root/tmp availability is
+**385,650,688 bytes**. Root's unmasked `/proc/iomem` shows exactly
+`60000000-6fffffff : reserved`, outside System RAM. The DT node's 16-byte
+big-endian `reg` is `00000000600000000000000010000000`; `no-map` is empty/present,
+and `reusable` / `linux,cma-default` are absent. The independent DT check
+exited **0** (`BOARD-GUEST-DDR-DT-PREFLIGHT-OK`); root's hash/iomem/census
+check also exited **0** (native **20092**). No deployment asset, register, bitstream
+or guest state was changed. This checks deployment prerequisites, not a new
+image, measured 40 MHz clock, cold boot or timedemo; repeat the live checks
+again immediately before programming.
+
 Gameplay IPC is unmeasured for this candidate. Verified pre-candidate baseline:
 **0.42633263**, simulation build **5c2491f3**, cycles
 **7,099,999,637–7,199,999,637**.
