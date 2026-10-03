@@ -1,6 +1,48 @@
 # RK FPGA Quake deployment — October 2, 2026
 
-## Current status (2026-10-03 04:40 UTC)
+## Current status (2026-10-03 12:13 UTC)
+
+The new source-factored **40 MHz** candidate is still in synthesis timing
+optimization under `/var/tmp/ventium-fpga40-icfrontspan.yqNVao/` (native handle
+65164). No new bitstream, deployed candidate, hardware timedemo or movie exists.
+The single guarded Vivado family remains live; observed memory/task-limit
+events are zero. At 12:11 its scoped working set was about 16.3 GiB, with the
+2 GiB swap allowance nearly full. Do not overlap another heavy build.
+The source changes have focused differential/miter evidence, not a completed
+current-candidate standard suite.
+
+Board readiness now includes an actual held-core scalar clear over **all
+256 MiB** of reserved guest DDR, `[0x60000000,0x70000000)`. Fresh root checks
+found the exact non-reusable, zero-length-`no-map` DT node, no other overlapping
+reservation/owner or System RAM, no active relevant service/timer, and no
+physical-memory FD/mapping users. The root-owned pinned helper issued **4,096
+ordered 64 KiB clears**, closing in **14.839 seconds** with actual wrapper
+exit **0**. The two boundary 64-bit readbacks were zero; `IDENT=a0486501` and
+`CTRL=1` held, and the post-run mapping census was empty. Only reserved guest
+RAM was cleared; disks and FPGA control state were untouched. This is not a
+full-byte readback test, universal exclusion of a later privileged actor, the
+daemon's single-mapping clear, cold guest boot, or timedemo acceptance.
+
+Retrieved evidence is `/var/tmp/ventium-held-ddr-sweep-evidence.suHfUI/`:
+receipt SHA `8c401792857dcfd24051931ba909a0c4f65975216e0f9a4623232cdeb91bd282`,
+log SHA `3c8e52ec71c40653b4a9c2af679192b2156e3522076800c1f74856bc7fabb017`.
+The root SSH command session closed with native exit **0**. The board remains
+on the historical held image; no guest was released.
+
+A fresh read-only post-route inspector is prepared under
+`/var/tmp/ventium-icfrontspan-postroute.vyHrc7/` (script SHA
+`cd7a9bd6fcea7c492a29bbc641b7179cb00481daf1eb98371a6027936d67028f`).
+It pins this candidate's project/`impl_1`, requires full placement/routing and
+no partial-route errors, and re-queries expanded-clock setup/hold reports
+without the ignored `-of_objects`/`-path_type` combination. **121 host-only
+stub cases** pass; no native Vivado inspection has run. Conditional path-local
+Fmax is not board frequency or timing/CDC sign-off.
+
+Verified simulation gameplay IPC baseline is **0.42633263**, build
+**5c2491f3**, cycles **7,099,999,637–7,199,999,637**. It predates the current
+candidate, whose gameplay IPC is unmeasured.
+
+## Historical status (2026-10-03 04:40 UTC)
 
 Administrator access and the boot-time DDR reservation work. The board remains
 held in reset on the historical image. At the user's request, a new **40 MHz**

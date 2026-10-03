@@ -6,7 +6,7 @@ debug tools as inspected through **2026-08-23**, with the safety preflight
 updated through **2026-10-03**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
 
-> **Latest status (2026-10-03 11:54 UTC):** the congestion retries did not
+> **Latest status (2026-10-03 12:13 UTC):** the congestion retries did not
 > produce a new bitstream. The board is reachable and idle, still holding the
 > historical image. A source-level frontend factoring candidate has passed
 > focused byte-span tests, strict hardware-profile lint, and default/BRAM
@@ -18,6 +18,11 @@ not certification of the currently installed image.
 > committed synthesis-only segment-extent driver repair is `f24909e`. Do not
 > deploy the failed-route checkpoints or interpret their timing as Fmax. See
 > `docs/FPGA_QUAKE_DEPLOYMENT_2026-10-02.md` for the retained evidence.
+> A root-owned scalar helper has now cleared all reserved 256 MiB of guest DDR
+> in 4,096 ordered 64 KiB chunks (14.839 seconds, actual exit 0), with the core
+> held throughout and two zero boundary readbacks. Guest disks were untouched.
+> This does not qualify full-byte readback, the daemon's single-map clear,
+> cold startup or the timedemo. Fresh synthesis remains live; no new bit exists.
 > Verified simulation gameplay IPC baseline is **0.42633263**, build
 > **5c2491f3**, cycles **7,099,999,637–7,199,999,637**; this predates the
 > current candidate, whose gameplay IPC is unmeasured.
