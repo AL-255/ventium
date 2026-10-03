@@ -466,6 +466,50 @@ change from the min/max-bus-skew-complete helper. It retains all 16 reports and
 pre/post full-route/error checks. It has not executed, inherits no old-copy
 stub-test qualification, and must wait for actual native closure/family absence.
 
+### Structural follow-ups — read-only, not implemented
+
+The medium attempt remains frozen. Two parallel source/report reviews found
+specific follow-ups; neither is a guarantee of routing or 40 MHz operation.
+
+**MUXF packing:** ExploreArea reduced LUTs by 2.60%, but occupied CLBs by only
+0.34%, and F7/F8 counts remained exactly **35,420/14,110**. This supports a
+packing-pressure hypothesis, not a claim that caches own the absorbed hierarchy
+buckets. The installed Vivado 2025.2 primary `opt_design` manual documents
+`-muxf_remap` as an opportunistic MUXF-to-LUT3 conversion for routability.
+It also explicitly prohibits combining `-directive` with specific optimization
+options in one command. If medium spreading fails, the evidence-led next
+netlist experiment is separate passes, `opt_design -directive ExploreArea`
+then `opt_design -muxf_remap`, after a same-part compatibility check and actual
+closure of the live family. No probe, hook or remap has been executed. Compare
+MUXF counts, occupied CLBs and congestion before attributing a gain; additional
+LUTs or no useful remapping are possible. Do not run a directive sweep or force
+bitstream generation around an invalid route.
+
+**SRT request controls:** Root read the frozen `rtl/fpu/fpu_srt_div.sv`
+rounder at lines 265–305 and finish states at 454/476: they consume live RC/PC
+ports; the accepted request at 324–325 captures mode but not RC/PC.
+`fp_shared/ven_fp_top.sv:788–829` defaults these ports to the control word and
+overrides PC to 64 bits only for `trans_divide_start`. In the far-ratio FPATAN
+path, `ven_fp_trans.sv:979–990` asserts that request for one cycle and waits;
+line 403 clears the request subsequently. The requested internal PC64 is
+therefore not retained through the iterative divide. This is a proven
+request/control mismatch. An architectural wrong-result claim still needs a
+non-exact far-ratio oracle case at PC24/53. Normal FDIV/FSQRT admission blocks
+control-word changes, so no ordinary-caller RC/PC corruption is claimed.
+
+The completed synthesis report independently shows an EIP-to-SRT-result setup
+path with **195 logic levels / 48.652 ns** estimated delay, including live
+`srt_rc`, against a **25 ns** requirement. Its **37.846 ns route component is
+unplaced estimation**, not measured or final routed delay. The first RTL remedy
+to investigate is four RC/PC request flops, captured only at accepted start and
+used through finish, with no extra divide cycles or global FPU stall. Required
+micros include changed controls immediately after start, non-exact far-ratio
+FPATAN at every RC and PC24/53/64, normal divide/sqrt, and reset/busy/back-to-back
+ownership. If timing still requires a staged final normalize/jam/round/pack,
+preserve single rounding, residual/sticky signs, flags and FP/integer overlap;
+that is a separate latency-sensitive change requiring verification. No RTL
+change or timing exception has been applied to either follow-up.
+
 A separate key-only board check at **02:02:40 UTC** returned native exit 0,
 the same boot ID, manager `operating`, 374 MiB free, all staged cold-disk/ROM/
 device-safe-daemon hashes unchanged, and the effective 256 MiB reservation's
