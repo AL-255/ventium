@@ -6,7 +6,7 @@ debug tools as inspected through **2026-08-23**, with the safety preflight
 updated through **2026-10-03**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
 
-> **Latest status (2026-10-03 16:35 UTC):** the frontend-factored candidate's
+> **Latest status (2026-10-03 17:05 UTC):** the frontend-factored candidate's
 > full-chip synthesis completed with native exit **0** (handle **48145**):
 > `synth_design` elapsed **1h37m15s**, about **1h38m** for the complete run.
 > Its checkpoint is under
@@ -47,8 +47,12 @@ not certification of the currently installed image.
 > (78.98%)**, **58,963 FFs**, **221 BRAM tiles** and **127 DSPs**. The placer
 > still warns of high congestion and estimates WNS **−19.167 ns**; these are
 > not routed sign-off/Fmax results. The placed checkpoint is preserved.
-> The same CPU-active worker has entered pre-route physical optimization,
-> with no swap or memory/OOM/task-limit events. Routing and bitstream remain
+> Pre-route physical optimization completed successfully in **28m06s**,
+> with no errors/critical warnings and estimated WNS **−18.626 ns**.
+> Its preserved checkpoint is **75,298,446 bytes**, SHA
+> `6c1baf744db1bf4cb9a1af47981b7a9dcfbd92ab826294b29cc7f91258d3903e`.
+> The same CPU-active worker is now routing, with no swap or memory/OOM
+> events. Full routing, bitstream and final frequency qualification remain
 > pending; do not launch an inspector while this family is live.
 > Six host-only Tcl launcher tests subsequently passed; they test
 > control flow, not native implementation semantics. Physical QoR may differ;

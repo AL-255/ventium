@@ -1,6 +1,6 @@
 # RK FPGA Quake deployment — October 2, 2026
 
-## Current status (2026-10-03 16:35 UTC)
+## Current status (2026-10-03 17:05 UTC)
 
 The frontend-factored full-chip synthesis completed with native exit **0**
 (handle **48145**, closure confirmed **15:49:49 UTC**). `synth_design` elapsed
@@ -112,10 +112,22 @@ WNS is **−19.167 ns**, not a routed frequency result. Estimated global
 congestion regions are north **16×16**, south **32×32**, east **4×4**, west
 **16×16**; south long congestion still reaches **64×64**.
 
-The same native handle/family has entered pre-route physical optimization.
-The worker remains CPU-active, with no swap and zero memory/OOM/task-limit
-events. Routing and bitstream output remain pending. No source, constraint,
-run or directive was changed during placement.
+Pre-route `phys_opt_design` has also completed successfully, **28m06s**
+elapsed, **0 errors / 0 critical warnings**, estimated WNS **−18.626 ns**.
+It added 47 cells through critical-path optimization, without adding DSP
+registers. The preserved physical-optimization checkpoint is **75,298,446
+bytes**, SHA
+`6c1baf744db1bf4cb9a1af47981b7a9dcfbd92ab826294b29cc7f91258d3903e`,
+in the actual `impl_nobram_power` directory.
+
+At **17:05 UTC**, the same native handle/family is live in `route_design`.
+Its precondition DRC finished with **0 errors**, and global clock routing
+reports zero overlaps; neither proves complete data routing. Intermediate
+router WNS is **−16.124 ns**, not final STA or a routed Fmax estimate. The
+40 MHz core / 100 MHz PS-AXI constraints are unchanged, physical clock
+measurement remains pending, and there is no new bitstream. The worker is
+CPU-active, with no swap or memory/OOM events. No source, constraint, run
+or directive was changed during placement/physical optimization.
 
 The board was freshly checked, with boot ID
 `2861e4e8-cd4c-48cd-9f44-7f7d8a991ebb`: no daemon/capture process was running,
