@@ -2704,6 +2704,61 @@ inspect and hash them before citing their output:
 The last two run helpers kill processes and reprogram the PL, and their comments
 refer to old build labels. Prefer the explicit procedure above.
 
+### Additional closed debugging checks (2026-10-04)
+
+The existing debugger was used again without resetting, stepping, reprogramming
+or changing the clock. `--ident` reported `STATUS=00000100`, `CTRL=00000102`
+and an idle outer bridge. The halted architectural scan remained at
+`00a7:14570`, CR3 `0007e000`, EAX `3`, with all x87 stack entries empty.
+The separately retrieved 128-entry primary ring begins `1456b`, `14567`, then
+the CWSDPMI interrupt-return path. This preserves the earlier **IRQ-contaminated
+control**, not a new clean paired-CMP pass. Exports are in
+`ventium-after-third-control.h1MOTw/held-{ring,state}-oct04-current.*` beneath
+the external temporary directory. Their SHA-256 hashes are respectively
+`196729b56114287a9ca9cb4d359c67b69ac1e2a9528ae63bef5522bee1d3cd59` and
+`b444b77db3adebaf130b0e2e2627061e7ffaa6c2268a78559e8e63c869c5ae77`.
+Both native probe exits were zero. Ring `lin` fields remain inappropriate for
+protected-mode addresses; use the scanned hidden segment base and page tables.
+
+The deployed daemon's existing `--attach --hdd ...` mode skips cold reset,
+guest-RAM zeroing and BIOS loading. **Do not assume idle IDE status makes
+reattachment transparent.** The newly created host backend defaults to 16
+sectors per multiple operation and image-derived geometry; prior guest
+`SET MULTIPLE` (`0xc6`) and `INIT DEVICE PARAMS` (`0x91`) settings are not
+reconstructed. It also cannot recover a pending data-phase buffer. No attach
+was launched for this held guest while those settings remain unknown. Never
+use a normal cold daemon launch as a resume operation.
+
+A bounded test of the exact frozen outer `ven_ddram_axi.v` completed with
+native compile/runtime exits zero in `ventium-outer-ddram-response.jFLtzn`.
+It checked held request addresses, discarded priming reads, second-read data,
+and independently stalled AW/W channels. Its negative witnesses show that
+second-read SLVERR/DECERR payloads are published as ordinary DDR data and a
+write SLVERR releases BUSY: the adapter ignores RRESP/BRESP. This is a concrete
+error-handling defect, **not evidence that HP0 returned an error in Quake**.
+The test has no vendor CDC/width-converter/HP0 model and is not acceptance.
+
+The board also exposes four PS AXI performance monitors through root-only
+`/dev/uio*`. The read-only capability scan in
+`ventium-ps-apm-capability.teCx1O` completed with native exit zero. DDR monitor
+`uio1` maps registers at `0xfd0b0000`; its six-slot advanced configuration
+provides counters but no event log. Slot 3 combines HP0 and DisplayPort, so it
+is neither an exclusive core traffic measurement nor an address/data trace.
+Counters were disabled (`CTL=0`) and zero: **no latency or bandwidth result
+was measured**. `SICR=0x100` enables reset on sample-register reads; avoid
+reading sample offset `0x2c` during a passive scan. The second UIO mapping is
+the kernel driver's parameter page, not a trace FIFO. No monitor configuration
+was changed. These monitors do not expose AXI response-error classifications.
+Register interpretation was checked against the primary
+[Xilinx AXI performance-monitor register definitions](https://github.com/Xilinx/embeddedsw/blob/master/XilinxProcessorIPLib/drivers/axipmon/src/xaxipmon_hw.h)
+and [Linux UIO driver](https://github.com/Xilinx/linux-xlnx/blob/master/drivers/uio/uio_xilinx_apm.c),
+as well as the board's actual device-tree and read-only parameter page.
+
+Candidate gameplay IPC remains unmeasured. The verified pre-candidate baseline
+is **0.42633263**, build `5c2491f3`, cycles
+`7,099,999,637–7,199,999,637`; none of these debugger or bus tests replaces
+the pending native Quake timedemo/movie or standard-suite acceptance.
+
 ## 13. Custom debug/control register map
 
 The AXI-Lite window starts at `0xA0000000`. Every implemented 32-bit register is
