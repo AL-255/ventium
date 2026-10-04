@@ -6,7 +6,7 @@ debug tools as inspected through **2026-08-23**, with the safety preflight
 updated through **2026-10-04**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
 
-> **Latest status (2026-10-04 17:15 UTC):** the checkpoint continuation closed
+> **Latest status (2026-10-04 17:27 UTC):** the checkpoint continuation closed
 > with actual native exit **0**, including native bitstream generation. No
 > Vivado worker remains live. The unchanged native BIN was deployed to the RK
 > board; its SHA-256 is
@@ -49,6 +49,29 @@ not certification of the currently installed image.
 > witness, not uninterrupted-error recovery or direct V-retirement capture.
 > Its operand is word 3; the repeated bad-PC captures use word 7. Mixed FP and
 > interrupt context remain separate test axes.
+> A bounded board-local derivative (15 host lifecycle tests passed) then selected
+> the **second** real Quake CMP encounter, operand offset `0xe7c0fc`, word 7.
+> Its single rapid resume reached `14567`, primary delta 1, IRQ-ACK delta 0,
+> ZF=1, in about **19 microseconds**. Full per-encounter scans/rings are saved as
+> `paired-word7-quake.json`, SHA-256
+> `443aeb51c033df1e64fcd9013591e2a652c7a457f1a26c05b46d250e9b19c440`.
+> This excludes word-7 position alone as sufficient to reproduce the fault;
+> it does not reproduce the uninterrupted failing context (EAX here is 3,
+> versus `0xae` in the later repeated failure). The probe exited 0 and confirmed
+> final quiescent HALT; the guest daemon was explicitly operator-stopped after
+> archiving. This is not native timedemo completion or cold-run acceptance.
+> Four interrupt-chain simulations have now closed: each simulator exited 0;
+> the control checker passed, while all three IRQ checkers initially failed.
+> A read-only audit found three observation assumptions: completed interrupt
+> delivery emits a trace record stamped with its saved return PC; the handler's
+> frame-witness NOP can retire as V, outside a primary-only observer; and the
+> registered retirement appears one clock after the pre-edge final-ACK sample.
+> Preserve those initial failures. The retained-owner records nevertheless show
+> six pending-IRQ CMP episodes in each A variant completing as actual U/V pairs,
+> then interrupting at the correct boundary. All 35 observed IRET snapshots
+> restore their saved integer/segment/control state exactly. This synthetic
+> fixed-vector evidence does not clear the natural FPGA failure, and the missing
+> frame-observer coverage is not a passed frame-capture test.
 > The full-chain ROM with a preceding `FDIVP` also passed its 13-invocation
 > integer/FP terminal contract on the unchanged FPGA. Its result checks use
 > synthetic FCW `0x0c7f` (24-bit precision, truncate), then reset the x87
@@ -57,11 +80,16 @@ not certification of the currently installed image.
 > latency 3 observed none and retains its overlap-coverage **failure**, despite
 > correct arithmetic and 40/40 integer pairs. Original failed checks and the
 > separately named precision-corrected regrades remain preserved.
-> A read-only routed-DCP inspection opened the exact checkpoint but exited
-> **1** because its first script incorrectly required `RAM_MODE`. RAMB36E2
+> Read-only routed-DCP inspections opened the exact checkpoint but exited
+> **1**: the first script incorrectly required `RAM_MODE`. RAMB36E2
 > derives SDP from width properties; the installed primitive has no such
-> required parameter. The initial failure is preserved and a corrected query
-> is pending. This is an inspection API error, not a hardware result or rebuild.
+> required parameter. The second query confirmed A0's correct width orientation
+> but stopped at a guard limiting the global clock tree to 128 net segments.
+> The third query used local clock metadata but still matched legacy output pin
+> names, not RAMB36E2's `DOUTADOUT`/`DOUTBDOUT`, and failed the output-count guard.
+> All failures are preserved; a query aligned to the installed E2 primitive's
+> full pin declaration is pending. These are inspection errors, not cache failures
+> or rebuilds; full 512-output connectivity has not yet been established.
 > A separate minimal L1D response-owner fix, **`0f12b20`**, is committed/pushed:
 > critical-word data now uses the same address-owner match as its ACK. Its new
 > regression passed **27 cases / 11 configurations**; the original source fails
