@@ -183,6 +183,23 @@ plus **both CoreMark CRC seed configurations, Windows 95 boot-to-desktop, and
 a completed error-free Quake timedemo**. A microtest, snapshot, gameplay entry,
 or successful bitstream generation does not replace that suite.
 
+## First targeted proposal: local proof completed
+
+The [isolated fetch-residency proposal](../verif/uopcache/proposals/ic_residency_span/README.md)
+implements shared A/B presence/buffered helpers with the backwards-zero-length
+query. At **2026-10-04 00:28:12 UTC**, root observed native handle **93713**
+close with **exit 0**, passing **11,069,120 comparisons** across bypass-enabled
+and bypass-disabled configurations. It uses actual source-extracted old
+functions and caller expressions, all lengths/offsets, metadata/port fixtures,
+rollover and directed X/Z cases. The test-only Icarus stimulus refresh and
+earlier failed scheduling-adapter attempts are documented, not hidden.
+
+This code remains under `verif/uopcache/proposals/`, not connected to production
+RTL. The production core and live frozen candidate were not modified. There is
+no new claimed LUT reduction, Fmax or gameplay gain: production integration,
+lint/differential/standard-suite qualification and measured hardware resource
+comparison are still pending. No new implementation-strategy trial was launched.
+
 ## Report provenance
 
 Local inspection bundles above are retained, not committed generated artifacts.
