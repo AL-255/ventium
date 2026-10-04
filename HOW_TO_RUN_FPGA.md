@@ -204,6 +204,34 @@ not certification of the currently installed image.
 > qualify every prelude store or the indexed-load's V partner. The FPGA remains
 > halted after the IRQ-contaminated after-third control described below; no
 > daemon or Vivado worker is running. Full timedemo/movie acceptance is pending.
+> A separate closed-file audit (root read and independently reran it, actual 0)
+> confirms all 64 interrupt-frame markers are valid **V** retirements and
+> reproduces the exact delivery/frame/IRET joins and missing/pass grades. Eleven
+> in-memory adversarial edits returned their expected grades. That supplementary
+> audit also qualifies **512 U-store receipts per case** (eight original PCs ×
+> 64 invocations), including physical address, data, strobes, complete ACK and
+> next registered U retirement. This is distinct from the immutable consumer's
+> narrower coverage; raw retained store packets and backing-memory coherence
+> remain unproven, and indexed-load-V/V-store coverage remains zero. Audit source
+> SHA-256 `213f9806a0cf592bdd7e1ffa763ecf851e3d49f084cdb026ab9c74c27f068e3a`;
+> receipt `CLOSED_OFFLINE_AUDIT.md` in the same leaf. All 24 original outputs and
+> consumer/runner pins stayed unchanged; no additional simulation was needed.
+> The saved x87 environment was also checked against each natural-fault DDR
+> capture, rather than guessing that FP remained busy. The **first** capture's
+> FIP is `117db`, bytes `DF E0` (`FNSTSW AX`), FDP `100939e8`; the **repeat**
+> capture's FIP is `117b3`, bytes `DD D8` (`FSTP ST(0)`), FDP `100939e0`.
+> Both translate through PDE `7c227` / PTE `110a67`; the complete 64/128-byte
+> surrounding contexts are identical between dumps. Frozen-source decoding,
+> async-owner admission and shared response paths show these operations drain
+> older arithmetic owners and cannot themselves allocate deferred arithmetic
+> owners. Consequently this last recorded routine is not a source-supported
+> explanation for FP still overlapping the allocator's CMP/JNE. This does not
+> prove global absence of later FP: environment pointers can be suppressed,
+> stale, restored or corrupt, and HALT drains pending work. No artificial FP
+> fixture was launched on that assumption. Root independently rechecked input
+> hashes, page translations, actual opcodes and complete contexts, exit 0.
+> Report `/home/yukidama/external/tmp/ventium-natural-fp-offline.9rAvfT/report.json`,
+> SHA-256 `228692c05b7c9690f6933af066e29a0b5b6966cdf3ebec6ffd834b40c6f45cc7`.
 > A bounded source-parity audit also ran only `verilator -E` (four variants,
 > each native 0; no elaboration, model build or CAD). It found the deferred
 > legacy x87 fault-latch driver at frozen `core.sv:8829..8838` inside the outer
