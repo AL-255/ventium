@@ -216,6 +216,13 @@ not certification of the currently installed image.
 > SHA-256 `213f9806a0cf592bdd7e1ffa763ecf851e3d49f084cdb026ab9c74c27f068e3a`;
 > receipt `CLOSED_OFFLINE_AUDIT.md` in the same leaf. All 24 original outputs and
 > consumer/runner pins stayed unchanged; no additional simulation was needed.
+> **Geometry clarification:** the immutable checker field `exact_word7_pairs`
+> is a legacy fixture label, not a cache-position assertion. With captured CS
+> base `10000000` and 32-byte lines, final CMP `14562` is offset **2 / word 0**
+> of line `10014560`, paired with JNE `14565`. The preceding CMP `1455d` is
+> offset **29 / word 7** of the previous line and pairs across the seam with
+> JNE `14560`. Interpret all above coverage by its explicit PCs; neither checker
+> nor original outputs were changed to rename that historical field.
 > The saved x87 environment was also checked against each natural-fault DDR
 > capture, rather than guessing that FP remained busy. The **first** capture's
 > FIP is `117db`, bytes `DF E0` (`FNSTSW AX`), FDP `100939e8`; the **repeat**
@@ -232,6 +239,33 @@ not certification of the currently installed image.
 > hashes, page translations, actual opcodes and complete contexts, exit 0.
 > Report `/home/yukidama/external/tmp/ventium-natural-fp-offline.9rAvfT/report.json`,
 > SHA-256 `228692c05b7c9690f6933af066e29a0b5b6966cdf3ebec6ffd834b40c6f45cc7`.
+> A further read-only integration audit distinguishes the passing core fixtures
+> from the hardware backend. The CPU Icache directly infers BRAM; it does **not**
+> instantiate the platform `altsyncram` XPM wrapper. Closed R4 records all eight
+> CPU RAMs with `DOA_REG=0/DOB_REG=0`, consistent with the one-edge data/returned
+> `{set,way}`/collision pipeline. Both returned ports are searched and collided
+> buffers rejected. Predicted B can duplicate A; the comment claiming different
+> sets is not an invariant. A relocated-CS prefetch limitation exists: B steering
+> uses relative branch targets without CS base for hit-way lookup. This can lose
+> prefetch efficiency, but live presence/returned-way gates reject the wrong way;
+> no resulting incorrect retirement was demonstrated.
+> Platform RAM simulation has a genuine fidelity gap: registered-address plus
+> combinational output exposes newly written bytes on collision, while native
+> XPM `READ_FIRST` returns old bytes. The ordinary L2 refill schedules a write,
+> performs it in `READCACHE_OUT`, then reads/raises ready in `READONE`; stream
+> responses use a retained bypass. No examined path exposes that colliding old
+> word as acknowledged response. This is not a proven Quake cause.
+> The **ao486 platform L2 is enabled** (`rk_ao486_system_pl.v`, `l2_disable=0`),
+> independently of core `EN_L2=0`. The hardware then traverses `ven_ddram_axi`,
+> a 64-bit async AXI converter (40 MHz to approximately 100 MHz), and a 64→128
+> width converter to HP0. Core microfixtures omit those backend crossings. The
+> frozen outer DDR adapter still unconditionally discards/reissues its first
+> read and ignores `RRESP/BRESP`; its dormant write-barrier comments are not an
+> active barrier (`wr_bar` rearms to zero). These are integration/error-handling
+> risks, not measured natural-fault causes. Preserve them as verification gaps;
+> neither the shim's single-fill flag nor core microfixture passes remove or
+> validate that separate adapter workaround. No RTL change or new CAD run was
+> made from these audits.
 > A bounded source-parity audit also ran only `verilator -E` (four variants,
 > each native 0; no elaboration, model build or CAD). It found the deferred
 > legacy x87 fault-latch driver at frozen `core.sv:8829..8838` inside the outer
