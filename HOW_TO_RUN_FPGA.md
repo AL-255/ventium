@@ -181,6 +181,23 @@ not certification of the currently installed image.
 > epilogue are synthetic, IF=0/IOPL=0; simulation stops pre-OUT. This excludes
 > the tested recurrence/owner/outcome combination alone as sufficient, not
 > natural Quake failure, full timedemo/movie or standard-suite acceptance.
+> A bounded source-parity audit also ran only `verilator -E` (four variants,
+> each native 0; no elaboration, model build or CAD). It found the deferred
+> legacy x87 fault-latch driver at frozen `core.sv:8829..8838` inside the outer
+> `ifndef SYNTHESIS` begun at 8592. This is a real source guard defect, but
+> **not a demonstrated cause here**: `VEN_FP_SHARED` removes every consumer
+> in the deployed profile; both latches have only declaration/driver references
+> in 107-define preprocessing and neither appears in its generated model header.
+> No active fetch/CMP/JNE/retained-owner semantic exclusion was found in this
+> focused audit. `VTM_NO_DPI` removes observation callbacks, not the architectural
+> retirement-counter update. Wrapper/XPM, optimized tie values and full-profile
+> equivalence are outside this proof. All 179 frozen input hashes stayed equal;
+> root independently rechecked the closed outputs. Report:
+> `/home/yukidama/external/tmp/ventium-synthesis-guard-audit.H0oe3F/report.json`,
+> SHA-256 `f1d18eafd3d2292fc8a3a73f13dccb6c0e6210bd60e56d1bec6cfc213ebb3f1c`.
+> Its initial external-path guard failed before invoking the preprocessor;
+> the corrected guard verified both literal and resolved external paths. No RTL
+> repair or FPGA rebuild was performed on the strength of this inactive defect.
 > A subsequent cold, private-disk Quake diagnostic used the existing V-candidate
 > breakpoint at `14565`: this suppresses pairing with preceding CMP `14562`,
 > parks at the original JNE, steps exactly that instruction and rearms. Its
