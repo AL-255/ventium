@@ -1403,10 +1403,13 @@ module ven_l1d #(
     // write of BDA kbd tail=0x1E sat in the 32-entry buffer and overlaid EVERY fresh read of
     // 0x41C forever, so daemon-injected keys were invisible. The coherence problem it was
     // built for was actually the LGDT base bug. Clean registered serve restored.)
+    // A resident hit can be captured on another fill's critical-beat edge.
+    // Select critical data only for its exact owner, just as ACK does below;
+    // an armed but unmatched fill must not override the registered hit data.
     c_rdata = (st==L1_BYP) ? bp_line_x[{4'd0,fbase[1:0],3'b000} +: 32]   // saved request offset
                            : shadow_reuse ? shadow_line_q[{1'b0,c_addr[4:0],3'b000} +: 32]
                            : window_reuse ? rd_window_q[{1'b0,c_addr[4:0],3'b000} +: 32]
-                           : early_armed ? early_rdata_q
+                           : early_match ? early_rdata_q
                                          : rd_window_q[{1'b0,rd_addr_q[4:0],3'b000} +: 32];
     c_ack   = 1'b0;
     if (c_req) begin
