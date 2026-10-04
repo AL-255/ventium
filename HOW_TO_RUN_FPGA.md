@@ -2115,6 +2115,26 @@ and correctly exposed producer failure after consumer loss; they are transport
 tests only, not hardware captures. Their receipt and exact pins are recorded
 in `docs/FPGA_QUAKE_DEPLOYMENT_2026-10-02.md`.
 
+The current host capture workspace is
+`/home/yukidama/external/tmp/ventium-fpga40-capture.VMIAgs/`.
+Its `bundle/` contains source-only derivatives of the candidate-bound
+normalizer, movie assembler and closed-console checker. The only source
+changes are storage guards: new raw captures, closure receipts, normalized
+streams and movies must lie beneath this resolved external directory. The
+console checker still reads its separately pinned historical baseline; that
+baseline and all candidate/tool hashes are unchanged.
+Do not write a new raw stream under `/var/tmp` and normalize across filesystems:
+raw retention deliberately uses a hard link. Capture directly into external
+storage, then normalize and assemble there. These helpers preserve source
+colors/dimensions and each accepted record, with byte-exact FFV1/RGB verification
+and **15 fps** presentation; they do not establish full temporal coverage.
+Independent and root bounded synthetic microgates exited zero after this
+relocation. The root rerun replaced the runner's fixed microtest log, so use
+`root-helper-verification.json` for the current log/hash binding; the original
+`derivative-receipt.json` retains source ancestry and historical test context.
+No hardware frames, native timedemo or movie acceptance is asserted by either
+host receipt.
+
 Start the FIFO reader first. Run the producer directly in a retained root
 transient service (`Type=exec`, `PrivateTmp=no`, `RemainAfterExit=yes`, separate
 stdout/stderr, bounded `TimeoutStartSec` and `RuntimeMaxSec`). Omitting
