@@ -6,6 +6,56 @@ debug tools as inspected through **2026-08-23**, with the safety preflight
 updated through **2026-10-04**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
 
+> **OF/ZF hardware discriminator (2026-10-04 23:25 UTC):** the new private ROM
+> keeps the JE diagnostic's 171 original payload bytes plus its one opcode
+> mutation unchanged. Its synthetic memory schedule remains `1,1,0,0`; actual
+> prelude EDI inputs become `0,0,80000000,0` through palette/index data, not a
+> register value that the original prelude would overwrite. Native x86 and
+> pinned QEMU `-cpu pentium` independently agree on CMP flags `2,2,887,46`.
+> Correct JE outcomes are NT/NT/NT/T; JO would be NT/NT/T/NT.
+> ROM SHA-256:
+> `a7b7800444a11c7c51ce2502be626b8be10dd05fcfb4201fb97c9a03654d2a23`.
+>
+> Both bounded frozen-107-model runs close native **0**. The first paired
+> consumer exits 1 because it incorrectly requests GPRs from sparse cycle
+> trace rows. A separate read-only regrade uses registered-state observer
+> joins, without rerunning or changing the sealed inputs/results. Functional
+> consumer **0** checks all 64 architectural CMP results. Paired consumer
+> **3/MISSING**, not a complete coverage pass: all 64 CMP/JE pairs, seam pairs,
+> raw descriptor/ACK joins and 126 prior retained snapshots are correct, but
+> neither owner supplies predicted-T/actual-NT coverage with this new schedule.
+>
+> The unchanged FPGA passes all software checks on the third (OF1/ZF0) input,
+> then **fails on the fourth (ZF1)**: counter=3, caller-count=4/checksum=d554,
+> EAX=EE, with U-ring `14562 → 14567` instead of the required taken path.
+> Uninterrupted invocation `6afb26fa520247038308fabb1015b74b` closes native 0.
+> A separately closed boundary control at **14567**, not V's 14565, captures
+> CMP flags **2,2,887,46**. Third EDI=80000000/OF1/ZF0 correctly falls through;
+> fourth EDI=0/ZF1 incorrectly falls through, newest U retirement 14562.
+> The earlier three one-instruction MOV steps perturb scheduling; they do not
+> execute the CMP/Jcc under single-step. Control invocation
+> `3eaa2190eb224f5ca4d5c470a5a607df` closes native 0.
+> The initial setup invocation `ef882dfef6794095bc1882ff8b467e33` is retained
+> as **UNRUN**: initialization completed, but no core release occurred before
+> its service closed. Later releases/captures use a bounded automatic controller.
+>
+> This behavior does **not** match universal JE→JO with correctly forwarded OF;
+> it still does not reveal actual V metadata/forwarded flags or eliminate
+> combined/intermittent metadata faults or physical timing. Proposed next
+> check: jointly audit the implemented forwarded-ZF and architectural-ZF
+> commit cones under explicit retained-CMP assumptions, including capture
+> controls. Fix only a demonstrated common-path mismatch, preserving pairing;
+> do not substitute pairing disablement, guest patches or save-state workarounds.
+> No RTL, programming or clock change occurred; production hashes remain
+> unchanged. Board is halted at the fourth private JE fallthrough, services
+> closed. Full production timedemo/movie acceptance is still **pending**.
+>
+> Artifacts: `/home/yukidama/external/tmp/ventium-cpl3-warmcaller-je-of.PgXWG7/`.
+> `check_board_of.py` exits 0 for evidence integrity while explicitly reporting
+> **DUT FAIL**, not correctness acceptance. Candidate gameplay IPC is
+> **unmeasured**; verified pre-candidate baseline **0.42633263**, build
+> **5c2491f3**, cycles **7,099,999,637–7,199,999,637**.
+
 > **Implemented condition-selector audit (2026-10-04):** the actual named
 > branch net is under Vivado's rebuilt `u_icache` hierarchy, not the original
 > `u_uv_common` boundary searched earlier. Two recursive inspections stopped at
