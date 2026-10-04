@@ -2738,6 +2738,31 @@ write SLVERR releases BUSY: the adapter ignores RRESP/BRESP. This is a concrete
 error-handling defect, **not evidence that HP0 returned an error in Quake**.
 The test has no vendor CDC/width-converter/HP0 model and is not acceptance.
 
+The positive backend comparison in `ventium-frozen-backend-path.omzmPt`
+adds that exact outer adapter to the frozen master → Avalon bridge → platform
+L2 path. Both behavioral RAM and Verilator's XPM-fidelity wrapper completed
+48 line reads (384 checked words), all 16 byte-strobe patterns, and an exact
+2048-word final backing-memory check. Both builds, native runs and the closed
+consumer exited zero: identical 2,219 read clocks / 2,463 total clocks,
+17 DDR commands, 34 outer ARs, 272 outer R beats, 136 forwarded DDR beats.
+AW-first/W-first/simultaneous write counts were 6/5/5; AR stalls, gapped reads
+and delayed write responses were exercised. There were 32 observed RAM
+read/write-collision edges per case, zero collision results consumed without
+the streaming bypass, and 80 bypass replies. This narrows the wrapper-collision
+hypothesis **only for this stimulus**, not all cache or live-hardware cases.
+All responses were OKAY and clocks synchronous; vendor CDC/width conversion,
+HP0 and the full guest remain outside this test.
+
+The first invocation failed before compilation because the runner supplied an
+inconsistent installed `VERILATOR_ROOT`; both exits 1 and the not-launched
+receipts remain intact. The separately named R2 runner unsets that variable
+and uses the same pinned installed frontend's own root detection. It retained
+the original RTL, TB and BFM unchanged, with two `-j2` builds in one fixed
+10-GiB/64-task guarded scope, a 120-second outer deadline and 20-second native
+runtime caps. R2 source-manifest SHA-256:
+`4e9d9175880a81ca77538dc5ca3f8145ba05b42aab75519549be2ce0fbec141f`.
+This is a directed diagnostic pass, not a Quake or FPGA acceptance pass.
+
 The board also exposes four PS AXI performance monitors through root-only
 `/dev/uio*`. The read-only capability scan in
 `ventium-ps-apm-capability.teCx1O` completed with native exit zero. DDR monitor
