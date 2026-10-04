@@ -6,7 +6,7 @@ debug tools as inspected through **2026-08-23**, with the safety preflight
 updated through **2026-10-04**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
 
-> **Latest status (2026-10-04 17:27 UTC):** the checkpoint continuation closed
+> **Latest status (2026-10-04 17:56 UTC):** the checkpoint continuation closed
 > with actual native exit **0**, including native bitstream generation. No
 > Vivado worker remains live. The unchanged native BIN was deployed to the RK
 > board; its SHA-256 is
@@ -87,9 +87,33 @@ not certification of the currently installed image.
 > but stopped at a guard limiting the global clock tree to 128 net segments.
 > The third query used local clock metadata but still matched legacy output pin
 > names, not RAMB36E2's `DOUTADOUT`/`DOUTBDOUT`, and failed the output-count guard.
-> All failures are preserved; a query aligned to the installed E2 primitive's
-> full pin declaration is pending. These are inspection errors, not cache failures
-> or rebuilds; full 512-output connectivity has not yet been established.
+> All failures are preserved. The fourth query, aligned to the installed E2
+> primitive's full pin declaration, exited **0** on the unchanged routed DCP.
+> It establishes eight distinct SDP slices and 512 non-aliased output drivers;
+> an independent offline grade confirms all 512 named output connections follow
+> the intended A-natural/B-word-reversed swizzle, and all 512 DIN connections
+> use the correct replicated 32-bit fill-data bit. All 16 four-byte write-enable
+> groups are internally consistent. Only two of eight reversed A/B word-selector
+> pairs share identical nets: six distinct LUT cones remain Boolean-unverified,
+> not demonstrated failures. No RAM-content dump, implementation, clock change
+> or bitstream rebuild occurred. These are structural wiring checks, not cache
+> collision/functional-equivalence or Quake acceptance.
+> A fifth bounded read-only query exited **0**, but all six selector pairs
+> reached its eight-edge fan-in depth limit: **0/6 complete cones, all UNPROVED**.
+> Native process success is not Boolean equivalence. No solver verdict follows
+> from the truncated records, and no additional CAD run was launched.
+> Read-only history analysis uses hidden CS base and the actual saved PD/PTs,
+> not the ring's real-mode `lin` field. The two natural failures and the clean
+> word-7 capture share their newest 64 primary PCs; repeat failure and success
+> share 78, including the same x87 prelude. No x87 instruction appears in their
+> last 31 primary entries, but V retirement and in-flight ownership remain
+> unobserved. The omitted immediate prelude contains a pointer load followed by
+> `ADD ESP,4`; the longer prelude also stores across global word 7/next-line word
+> 0. The two exact-byte reproducers now assemble/link successfully as separate
+> 65,536-byte private ROMs, with native symbol/payload/PTE checks. They preserve
+> either 50 or 134 prelude bytes plus the original 38-byte chain, but use explicit
+> synthetic input data and IF=0. Runtime architecture/pair/store-ACK coverage
+> is still **UNRUN**, not a passed test or restored live Quake cache state.
 > A separate minimal L1D response-owner fix, **`0f12b20`**, is committed/pushed:
 > critical-word data now uses the same address-owner match as its ACK. Its new
 > regression passed **27 cases / 11 configurations**; the original source fails
@@ -97,6 +121,13 @@ not certification of the currently installed image.
 > passed all **17 configurations**, and `make verify` passed. The production
 > collision and a causal connection to Quake remain unproven. This fix is
 > **not in the deployed BIN**; no FPGA rebuild or clock change was made.
+> A frozen-source producer audit further narrows that result: the unit failure
+> changes an unacknowledged primary request B into A. Normal fast DATA loads
+> retain B until ACK, consuming and clearing its one-clock early-response pulse
+> before A can be captured. Thus background-fill overlap alone does not establish
+> this schedule on the inspected production path. Exceptional cancellation and
+> other producers are not exhaustively excluded; the cache-interface fix remains
+> valid, but is not an established explanation of this Quake failure.
 > Host `/tmp` has a per-user tmpfs quota in addition to its global free-space
 > limit. A failed, unstarted guard-marker leaf was archived; only the empty
 > owned `/tmp/ventium-build-scope` directory was replaced by a symlink to
