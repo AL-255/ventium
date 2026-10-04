@@ -6,7 +6,7 @@ debug tools as inspected through **2026-08-23**, with the safety preflight
 updated through **2026-10-04**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
 
-> **Latest status (2026-10-04 18:38 UTC):** the checkpoint continuation closed
+> **Latest status (2026-10-04 19:02 UTC):** the checkpoint continuation closed
 > with actual native exit **0**, including native bitstream generation. No
 > Vivado worker remains live. The unchanged native BIN was deployed to the RK
 > board; its SHA-256 is
@@ -144,6 +144,43 @@ not certification of the currently installed image.
 > These IF0 single-case results do not recreate the uninterrupted failing
 > context, prove hardware V/store-ACK coverage, or clear the Quake failure.
 > No additional RTL/bitstream/clock change was made for those controls.
+> A new recurrent fixture preserves all **172 original bytes** (134-byte
+> prelude plus 38-byte chain), selects both observed indexed-pointer contexts,
+> and runs **64 synthetic invocations** with T,T,NT,NT third-branch outcomes
+> per owner. Four frozen-107-model runs (paired/functional, AXI latency 0/3)
+> closed native/initial-checker **0**. Each paired trace has 64 final-CMP ACKs,
+> 64 indexed-pointer-load ACKs and 16 retained predicted-T/actual-NT witnesses
+> per owner. A separately named R2 consumer joins each ACK to its actual
+> invocation, qualified same-cycle request and next registered/DPI retirement;
+> all four closed traces regrade **0** without new simulations. Both paired
+> cases also prove 64 preceding cross-line `1455d U / 14560 V` pairs and 64
+> semantically decoded original CMP/JNE descriptors. Latency 3 provides 126
+> prior retained descriptor/effective-address/pair snapshots and 189 owned
+> physical-request checks; latency 0 has no prior active snapshot, so it does
+> not independently prove multi-cycle stability. Flag-dependent V `br_taken`
+> is excluded from packet-stability comparison. **24** pure-consumer outcomes
+> (four positives plus twenty adversarial edits) matched their expected
+> pass/missing/wrong statuses; root independently reran them, exit 0. Consumer
+> SHA-256 `23fa0ac2ba0c0711ab5d718cce9c475824af2910a8d239af9534c1fbb20e7d70`.
+> Raw packets cover owner `14562` only; the seam uses exact retirement/EIP,
+> not internal BRAM tag snapshots. These results are not a causal reproduction.
+> The same ROM, SHA-256
+> `b68b2ed61d93b804c5f9a3fcbb4b3e5b82f162db2358eb613e0e7340f1955aff`,
+> also closed native **0** on the unchanged 40 MHz FPGA, invocation
+> `4c901d773fde4b1bbd41eba06fdb3ea4`, MainPID 0 / Result success. The existing
+> halt/register scanner captured `CS=8/EIP=f025f/EAX=42` and all expected
+> terminal integer/control scalars; the offline consumer exited 0. Capture
+> SHA-256 is `cf2a157a4b1a37b97e05741da3bc22262a590076e6f089ba86e73911fb2796c9`.
+> Artifacts: `/home/yukidama/external/tmp/ventium-cpl3-recurrent-prelude.NGNHgd/`.
+> Its original native assembly worker exited **1** only after producing the ROM:
+> its byte checker mistakenly compared a 134-byte span to the aggregate
+> 172-byte hash. That failure/empty proof remain preserved. A separately named
+> R2 checker verified both exact spans and linked symbols, exit 0; no ROM retry
+> or byte change was made. The software checks all 64 returns, but hardware
+> terminal scans/U-only history do not prove V pairing. Inputs and taken-target
+> epilogue are synthetic, IF=0/IOPL=0; simulation stops pre-OUT. This excludes
+> the tested recurrence/owner/outcome combination alone as sufficient, not
+> natural Quake failure, full timedemo/movie or standard-suite acceptance.
 > A subsequent cold, private-disk Quake diagnostic used the existing V-candidate
 > breakpoint at `14565`: this suppresses pairing with preceding CMP `14562`,
 > parks at the original JNE, steps exactly that instruction and rearms. Its
@@ -175,6 +212,25 @@ not certification of the currently installed image.
 > suppresses U/V pairing and defers asynchronous recognition. The U-only ring
 > cannot directly prove V admission or retirement. No architecture/DDR patch,
 > cache flush, clock change, RTL change or bitstream rebuild was used.
+> An independent **after-third-branch** halt control then armed `14567` before
+> a private cold guest was released. Unlike the earlier JNE-target breakpoint,
+> this target does not suppress pairing of original CMP `14562` with JNE `14565`.
+> Sixteen host safety-test methods passed. The first cold stop reached `14567`
+> with ZF=1, EAX=3 and newest U=`14562` (source-consistent pair inference, not
+> direct V proof). The next target `14570` arrived after **236 primary
+> retirements and one IRQ acknowledgement**, not the required clean 2/3-retire
+> interval. The helper stopped once at **61.690 seconds**, native exit **3**,
+> zero completed rounds / coverage MISSING, and confirmed final manual HALT.
+> No retry, stepping, interrupt mask or guest-state patch was applied. Guest
+> service invocation `344a2ebfbd6147438895cf79623a37d1` was operator-stopped;
+> it is not a native-completion/acceptance receipt. Probe invocation
+> `2ae0bae976b54e77aeca1205e746f504` remains closed MainPID 0 / exit 3.
+> Host leaf `/home/yukidama/external/tmp/ventium-after-third-control.h1MOTw/`,
+> `after-third-probe.jsonl` SHA-256
+> `3240d924c80963e9df432d21b27c85c73883378b976590a1d19c961ec6c59336`.
+> This demonstrates why uninterrupted IRQ history cannot be inferred from a
+> halt-resume boundary. It does not establish that this interrupt caused the
+> original invalid-PC failure. No daemon/probe remains live; the core is halted.
 > The earlier interrupted VCAP was also decoded read-only: all **3,207** complete
 > 320×200 records validate, with **82 distinct CRCs**. Selected original-pixel
 > PNGs show real Quake 3D gameplay/HUD, but this is a partial, halt-contaminated
