@@ -6,7 +6,7 @@ debug tools as inspected through **2026-08-23**, with the safety preflight
 updated through **2026-10-04**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
 
-> **Latest status (2026-10-04 18:13 UTC):** the checkpoint continuation closed
+> **Latest status (2026-10-04 18:28 UTC):** the checkpoint continuation closed
 > with actual native exit **0**, including native bitstream generation. No
 > Vivado worker remains live. The unchanged native BIN was deployed to the RK
 > board; its SHA-256 is
@@ -125,8 +125,38 @@ not certification of the currently installed image.
 > `/home/yukidama/external/tmp/ventium-cpl3-real-prelude.wPvcvn/`.
 > These IF0 single-case results do not recreate the uninterrupted failing
 > context, prove hardware V/store-ACK coverage, or clear the Quake failure.
-> No additional RTL/bitstream/clock change was made. The board remains halted
-> at the full-prelude terminal, with no guest daemon running.
+> No additional RTL/bitstream/clock change was made for those controls.
+> A subsequent cold, private-disk Quake diagnostic used the existing V-candidate
+> breakpoint at `14565`: this suppresses pairing with preceding CMP `14562`,
+> parks at the original JNE, steps exactly that instruction and rearms. Its
+> bounded window checked **4,096 events** in **113.020 seconds**, all with ZF=1,
+> correct next EIP `14567`, primary-retirement delta 1 and IRQ-ACK delta 0 per
+> step. The helper checks integer/context/flags invariance; a separate read-only
+> audit also passed the saved compact records and event sequencing. Operand
+> positions include **1,807 word-7** encounters. **93** events have `EAX=43`;
+> event **2,680** matches the first natural failure's `EAX=43, EBX=2c403c,
+> EDX=efe6cc, ESP=e07f8, EFLAGS=3246, CR3=7e000`, yet reaches `14567`.
+> This establishes only visible-state overlap, not identical cache, in-flight,
+> FP or interrupt timing. No `EAX=ae` encounter was reached: native probe exit
+> **3 / MISSING**, not an all-pass verdict. Its native guest service subsequently
+> reached its wall-time guard (**timeout, signal 15**), not native completion.
+> The board remains quiescent HALTED at `00a7:14567`; both services have MainPID 0.
+> Probe invocation `917e5dc74b104910963de15cad787bbd` and guest invocation
+> `2803d990435d42c68d0ac5fd9c4979aa` are preserved with their actual statuses.
+> Artifacts are in
+> `/home/yukidama/external/tmp/ventium-jne-pair-suppress.davGkW/`;
+> `probe.jsonl` SHA-256 is
+> `89d51facd2c4b33f0ae12eef560599ab3865b053cd7c26e5e9c565b88a04f951`.
+> **Not acceptance or a production workaround:** halt drains owners, step
+> suppresses U/V pairing and defers asynchronous recognition. The U-only ring
+> cannot directly prove V admission or retirement. No architecture/DDR patch,
+> cache flush, clock change, RTL change or bitstream rebuild was used.
+> The earlier interrupted VCAP was also decoded read-only: all **3,207** complete
+> 320×200 records validate, with **82 distinct CRCs**. Selected original-pixel
+> PNGs show real Quake 3D gameplay/HUD, but this is a partial, halt-contaminated
+> diagnostic recording, not a completed timedemo or a measured FPS result.
+> PNGs/receipt are under the prelude leaf's `diagnostic-frames/`; only the existing
+> RGB332 expansion and lossless PNG encoding were used, without color adjustment.
 > A separate minimal L1D response-owner fix, **`0f12b20`**, is committed/pushed:
 > critical-word data now uses the same address-owner match as its ACK. Its new
 > regression passed **27 cases / 11 configurations**; the original source fails
