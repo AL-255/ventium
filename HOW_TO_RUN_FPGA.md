@@ -6,6 +6,40 @@ debug tools as inspected through **2026-08-23**, with the safety preflight
 updated through **2026-10-04**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
 
+> **New failing hardware reproducer (2026-10-04):** a narrower private ROM
+> adds only one read-only congruent caller page before the unchanged 172-byte
+> original prelude. ROM SHA-256
+> `639edebb2acc6a9776d6f189d3c37b8d74741669aec5efc5e7a1fc46adac07d9`.
+> All three bounded frozen-model simulations (paired latency 0/3, functional
+> latency 3) closed native/consumer **0**. Both paired cases contain 64 qualified
+> CMP/JNE pairs, 64 preceding cross-line pairs, and 16 retained predicted-T /
+> actual-NT witnesses per pointer owner; latency 3 also checks 126 prior retained
+> descriptor snapshots. Functional control checks all 128 caller effects.
+> The same ROM on unchanged hardware **fails**: native service closes 0 but
+> guest software reports `EAX=EE`. Its U-only ring and DDR case counter identify
+> invocation 2 (the third invocation), which reaches taken target `1457a`
+> instead of the expected NT path and fails the returned-EAX check.
+>
+> A separately closed cold control uses the existing breakpoint at **1457a**,
+> not the V instruction at 14565. The first two target captures show EFLAGS=2.
+> After each, exactly one STEP executes target MOV EAX,1, then the target
+> breakpoint is rearmed. The third target capture shows **EFLAGS=46 (ZF=1)**,
+> with newest primary retirement **14562** and no epilogue executed yet. JNE
+> should fall through with this flag state. Capture service invocation
+> `86a08052f2a84210b33e7401b9a05807` closes native 0; the existing scanner, ring
+> and DDR dump preserve the contradiction. Offline evidence audit exits 0 and
+> explicitly labels the **DUT FAIL**, not a correctness pass.
+> Artifacts: `/home/yukidama/external/tmp/ventium-cpl3-recurrent-warmcaller.WkLUKW/`;
+> checker `check_board_warmtarget.py`. The board is halted at the third target.
+> This is synthetic IF0 code with debugger perturbations, not a reproduction
+> of natural Quake's mid-instruction 14577 jump. The ring does not expose the
+> V packet/cache bytes; DDR does not prove the actual load response. Logic
+> versus physical timing remains unresolved. No RTL, bitstream, clock or
+> production-media change was made. Full timedemo/movie acceptance is pending.
+> Candidate gameplay IPC is **unmeasured**; verified pre-candidate baseline
+> **0.42633263**, build **5c2491f3**, cycles
+> **7,099,999,637–7,199,999,637**.
+
 > **Additional debug evidence (2026-10-04):** the existing halt/register scanner
 > and U-retirement ring captured a successful private 64-case cache-conflict
 > ROM on the unchanged 40 MHz image: `CS=8/EIP=f02b0/EAX=42`, all expected
