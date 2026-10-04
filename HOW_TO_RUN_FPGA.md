@@ -6,6 +6,41 @@ debug tools as inspected through **2026-08-23**, with the safety preflight
 updated through **2026-10-04**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
 
+> **Opposite-condition diagnostic (2026-10-04 21:18 UTC):** the warm-caller ROM
+> was changed at exactly one original payload byte: `14565`, JNE `75` to JE `74`.
+> Its other 171 payload bytes, caller, mapping and `1,1,0,0` input schedule remain
+> unchanged; test-only expected returns are reversed. This is a synthetic
+> diagnostic, **not patched Quake or original-byte acceptance**. ROM SHA-256
+> `6ae2e38530d9170b43092d7fd26b6f76db57276a445e0cf5e69e1b4883d9005c`.
+> Both bounded, frozen-107-profile simulations (paired latency 3 and functional
+> latency 3) closed native/consumer **0**. The paired run checks 64 exact CMP/JE
+> pairs, 64 preceding seam pairs, 126 prior retained-packet snapshots and 14
+> retained predicted-T/actual-NT witnesses per owner after eight warm-up cases.
+>
+> The unchanged 40 MHz FPGA **fails** this ROM too. Uninterrupted run invocation
+> `7395f5383eee48239ac3cdbaa4ac3172` closes native 0, but guest returns `EAX=EE`;
+> invocation 2 follows `14562 → 14567` and fails its expected-return check.
+> A separate cold control sets the existing breakpoint at **14567**, not V's
+> 14565. First two captures have EFLAGS=2. One STEP after each executes only
+> `MOV ECX,[ESP+16]`, then the breakpoint is rearmed. The third capture has
+> **EIP=14567/EFLAGS=46 (ZF=1)** with newest primary retirement 14562; JE should
+> take 1457a instead. DDR counter=2/caller-count=3/checksum=9fff, exact JE bytes
+> and operand zero are preserved. Control invocation
+> `c286060fe51b4159877f829c2ecaf5ed` closes native 0. The initial 20-second setup
+> invocation was never released from reset and is retained as **UNRUN**, not
+> a guest result; later controls wait for the daemon's initialization marker.
+>
+> Artifacts: `/home/yukidama/external/tmp/ventium-cpl3-recurrent-warmcaller-je.5ngqBz/`;
+> `check_board_je.py` audits closed captures and reports **DUT FAIL**. Both JNE
+> and JE now contradict committed ZF1 on the third warm invocation. This
+> excludes a JNE-only or universal always-taken explanation as sufficient, but
+> does not expose raw V metadata or distinguish logic from physical timing.
+> Earlier debugger halts/steps perturb scheduling. No RTL, bitstream, clock or
+> production-media change was made; the board is halted at the JE fallthrough.
+> Full timedemo/movie acceptance remains pending. Candidate gameplay IPC is
+> **unmeasured**; verified pre-candidate baseline **0.42633263**, build
+> **5c2491f3**, cycles **7,099,999,637–7,199,999,637**.
+
 > **New failing hardware reproducer (2026-10-04):** a narrower private ROM
 > adds only one read-only congruent caller page before the unchanged 172-byte
 > original prelude. ROM SHA-256
