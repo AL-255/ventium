@@ -6,7 +6,7 @@ debug tools as inspected through **2026-08-23**, with the safety preflight
 updated through **2026-10-04**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
 
-> **Latest status (2026-10-04 19:02 UTC):** the checkpoint continuation closed
+> **Latest status (2026-10-04 19:25 UTC):** the checkpoint continuation closed
 > with actual native exit **0**, including native bitstream generation. No
 > Vivado worker remains live. The unchanged native BIN was deployed to the RK
 > board; its SHA-256 is
@@ -181,6 +181,29 @@ not certification of the currently installed image.
 > epilogue are synthetic, IF=0/IOPL=0; simulation stops pre-OUT. This excludes
 > the tested recurrence/owner/outcome combination alone as sufficient, not
 > natural Quake failure, full timedemo/movie or standard-suite acceptance.
+> A subsequent IF1/IOPL0 recurrent fixture retains the same 172 original
+> bytes and both pointer contexts, adds a real CPL3 interrupt gate/frame/IRET,
+> and requests vector `40` after registered U `1455d`. Four bounded parallel
+> simulations reused the unchanged frozen 107-define model: all native exits
+> were **0**; both matched no-injection controls (AXI latency 0/3) graded **0**.
+> The IRQ latency-3 case graded **0**, with 64 actual INTAs, frame captures and
+> exact IRET restorations, 64 qualified final-CMP ACK/U+V pairs, and **63**
+> episodes with internal IRQ pending before the final ACK. Both pointer owners
+> supplied 16 predicted-taken/actual-not-taken pairs with that conjunction.
+> The IRQ latency-0 case graded **3 (coverage missing)**: its architectural
+> prefix and 64 interrupts passed, but no earlier pending-before-ACK witness
+> existed. The aggregate therefore remains **3**, not a four-case coverage pass.
+> Input/model hashes matched before and after; no RTL/model regeneration,
+> FPGA programming, clock change, guest snapshot or production-file patch.
+> Artifacts: `/home/yukidama/external/tmp/ventium-cpl3-recurrent-irq.IwcC9i/`.
+> Consumer SHA-256
+> `3487ca1f472eb53f6895136b0943f534db3931a9cef7cd7cdb8395168aa50557`.
+> This proves the measured simulated IRQ/cache-response/retirement conjunction,
+> not FPGA V visibility or the natural Quake failure. These cases contain no FP
+> operations, do not prove asynchronous FP overlap, and do not independently
+> qualify every prelude store or the indexed-load's V partner. The FPGA remains
+> halted after the IRQ-contaminated after-third control described below; no
+> daemon or Vivado worker is running. Full timedemo/movie acceptance is pending.
 > A bounded source-parity audit also ran only `verilator -E` (four variants,
 > each native 0; no elaboration, model build or CAD). It found the deferred
 > legacy x87 fault-latch driver at frozen `core.sv:8829..8838` inside the outer
