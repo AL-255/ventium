@@ -6,7 +6,7 @@ debug tools as inspected through **2026-08-23**, with the safety preflight
 updated through **2026-10-03**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
 
-> **Latest status (2026-10-03 23:48 UTC):** the current control-factored
+> **Latest status (2026-10-04 01:16 UTC):** the current control-factored
 > candidate's synthesis has actually closed with native exit **0** (handle
 > **38563**, observed 22:06:04 UTC), `synth_design` elapsed **1h24m11s**,
 > zero errors/critical warnings. Its synthesized use is **185,581 LUTs
@@ -36,6 +36,19 @@ not certification of the currently installed image.
 > overlapping-node counts have fallen **277,221 → 71,244 → 23,097 → 8,292**,
 > still within Global Iteration 1. These are convergence observations, not a
 > percent-complete estimate or evidence of a deployable image.
+> At 01:16 UTC Global Iteration 1 reached **zero overlaps**, elapsed
+> **2h34m50s**, and the same worker began **Global Iteration 2** with 3,032
+> reported overlaps. This is not completed routing. Its intermediate timing
+> summary is WNS **−31.031 ns / WHS +0.002 ns**; no achieved Fmax is inferred.
+> The unchanged constraints target **40 MHz core / 100 MHz AXI**. The scope
+> uses approximately **6.70 GB RAM / zero swap**, with zero OOM events.
+> A separate host check found **8.94 GB available memory** and zero recent
+> memory-pressure averages; low immediately free RAM is not itself an OOM.
+> The four Vivado-named PIDs are the expected controller/worker and shell
+> wrappers of this one family; no new inspector or build was launched.
+> Fresh residual tag-net congestion evidence and the locally proven,
+> not-yet-integrated sharing proposal are documented in
+> `docs/FPGA_CONGESTION_ANALYSIS_2026-10-03.md`.
 > Full routing, bitstream, STA/hold/DRC/CDC/bus-skew review, fresh measured
 > clocks and the hardware timedemo/movie remain pending.
 > A fresh read-only board check confirmed the guest DDR reservation and the
