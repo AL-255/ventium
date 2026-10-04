@@ -3,10 +3,90 @@
 This is the operating procedure for the Ventium-swapped `ao486_MiSTer` system on
 the RK-XCZU15EG-F board. It covers the current build, deployment, test, and
 debug tools as inspected through **2026-08-23**, with the safety preflight
-updated through **2026-10-03**. Historical clocks, binaries and results below are
+updated through **2026-10-04**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
 
-> **Latest status (2026-10-04 02:44 UTC):** the corrected fresh checkpoint
+> **Latest status (2026-10-04 17:15 UTC):** the checkpoint continuation closed
+> with actual native exit **0**, including native bitstream generation. No
+> Vivado worker remains live. The unchanged native BIN was deployed to the RK
+> board; its SHA-256 is
+> `30b0178eb924eb2914bda6300f7ef3f3bef233b48d821ef77bf452349f8beefb`.
+> A held-core counter measurement gives **39.999479 MHz**; it is a physical-clock
+> measurement, not guest throughput or timing sign-off. Raw routed timing
+> reports remain preserved; this debug phase uses the same image and clock.
+> The first cold FreeDOS/Quake run failed with a page fault at `00a7:00014577`.
+> A second cold run used the existing **quiescent breakpoint**, not forensic
+> freeze, to intercept that EIP before execution. Code, descriptors and page
+> mappings in the saved DDR dump are valid; the preceding `CMP` has equal
+> operands and architectural **ZF=1**, so its `JNE` should fall through to
+> `0x14567`. Instead execution reached `0x14577`, inside `ADD ESP,16`.
+> One hardware single-step then reproduced **CR2=0x10000043** and entered the
+> CWSDPMI page-fault handler. The control-flow cause remains under investigation;
+> correct DDR bytes do not prove correct cache/fetch bytes at issue time.
+> A further cold run reproduced the same wrong EIP with different data pointers.
+> An unpaired debugger control correctly stepped
+> `14562 → 14565 → 14567 → 1456b → 1456e → 14570`.
+> Six reduced-profile, frozen-source simulations passed the exact three-byte
+> memory-CMP/two-byte-JNE test with both flag outcomes and memory-response delays.
+> All **12** full-107-define simulations passed the original and last-word
+> variants at AXI latency 0/3. CPL3 tests with Quake-like segment/paging geometry
+> passed 64 rounds, and data-cache-conflict stress passed 256 rounds, including
+> actual same-clock U/V pairs in cycle traces. The combined I/D-conflict case
+> retains its pairing-coverage failure (0/256 pairs), despite correct
+> architectural outcomes; it is not an all-pass result.
+> The **same 40 MHz FPGA image** completed the original and last-word 16-case
+> ROMs, the 64-round CPL3 geometry ROM, and the 256-round D-conflict ROM. The
+> latter two ended at the linked kernel HLT boundary with
+> `EAX=42, EBP=3, ECX=0, ESI=0`. These private diagnostic ROMs are synthetic,
+> not restored Quake snapshots or full-system acceptance. A further ROM preserves
+> all 38 original bytes at `14554..14579`, including the `1455d/14560` line
+> seam and the first `14562` port-B-to-A transition. Its 13 trained invocations
+> passed the FPGA scalar/HLT contract. Both cycle simulations at latency 0/3
+> show 40/40 actual pairs; the tiny host TB stops pre-OUT/S_IO and does not itself
+> observe OUT/HLT. Original terminal-checker failures are retained separately.
+> A rapid real-Quake control also caught `14562 → 14567` with primary delta 1,
+> IRQ delta 0 and ZF=1 in about 25 microseconds. This is a post-halt boundary
+> witness, not uninterrupted-error recovery or direct V-retirement capture.
+> Its operand is word 3; the repeated bad-PC captures use word 7. Mixed FP and
+> interrupt context remain separate test axes.
+> The full-chain ROM with a preceding `FDIVP` also passed its 13-invocation
+> integer/FP terminal contract on the unchanged FPGA. Its result checks use
+> synthetic FCW `0x0c7f` (24-bit precision, truncate), then reset the x87
+> environment. Hardware terminal state is not evidence of live FP/INT overlap.
+> The latency-0 cycle simulation observed 39 integer commits with FP busy;
+> latency 3 observed none and retains its overlap-coverage **failure**, despite
+> correct arithmetic and 40/40 integer pairs. Original failed checks and the
+> separately named precision-corrected regrades remain preserved.
+> A read-only routed-DCP inspection opened the exact checkpoint but exited
+> **1** because its first script incorrectly required `RAM_MODE`. RAMB36E2
+> derives SDP from width properties; the installed primitive has no such
+> required parameter. The initial failure is preserved and a corrected query
+> is pending. This is an inspection API error, not a hardware result or rebuild.
+> A separate minimal L1D response-owner fix, **`0f12b20`**, is committed/pushed:
+> critical-word data now uses the same address-owner match as its ACK. Its new
+> regression passed **27 cases / 11 configurations**; the original source fails
+> all 16 retarget cases while passing the hold controls. The existing L1D gate
+> passed all **17 configurations**, and `make verify` passed. The production
+> collision and a causal connection to Quake remain unproven. This fix is
+> **not in the deployed BIN**; no FPGA rebuild or clock change was made.
+> Host `/tmp` has a per-user tmpfs quota in addition to its global free-space
+> limit. A failed, unstarted guard-marker leaf was archived; only the empty
+> owned `/tmp/ventium-build-scope` directory was replaced by a symlink to
+> `/home/yukidama/external/tmp/ventium-build-scope`. The shared lock and cgroup
+> admission limits remain unchanged. Recheck this ephemeral path after reboot;
+> do not delete unrelated `/tmp` work or bypass the guard to recover quota.
+> Debug artifacts are in
+> `/home/yukidama/external/tmp/ventium-fpga40-capture.VMIAgs/`.
+> The closed 3,207-frame diagnostic recording includes halted duplicates and
+> is **not** a complete timedemo movie. A narrow PS-side capture derivative
+> skips malformed non-target boot-mode geometry; 33 host tests passed. This
+> changes neither guest pixels nor RTL and is not functional acceptance.
+> Candidate standard-suite acceptance and the requested full movie remain
+> pending. Candidate gameplay IPC is **unmeasured**; verified pre-candidate
+> baseline **0.42633263**, build **5c2491f3**, cycles
+> **7,099,999,637–7,199,999,637**.
+
+> **Historical status (2026-10-04 02:44 UTC):** the corrected fresh checkpoint
 > continuation is live, native session **43591**, worker PID **53971**, under
 > `/home/yukidama/external/tmp/ventium-fpga40-dcp-route-top.5ptYzr/`.
 > Its actual loader positively verified loaded-module `TOP=rk_ao486_bd_wrapper`,
@@ -2008,9 +2088,9 @@ cd "$VENTIUM/ao486-sim"
 from the first retirement. The trace reflects a source-matched simulator build,
 not FPGA state, and is a diagnosis aid rather than an acceptance result.
 
-### Quiescent execution debugger (new debug image; not deployed yet)
+### Quiescent execution debugger (deployed 2026-10-04 image)
 
-The new debug image advertises `0x56450005` at read offset `0x2c0`. It routes
+The deployed 40 MHz debug image advertises `0x56450005` at read offset `0x2c0`. It routes
 the core's existing debug hold mechanism to AXI-Lite; it does **not** gate the
 PL clock and does **not** assert the forensic `frozen` reset. `halt` parks at
 the next quiescent issue boundary: either `S_DECODE` on the slow path or
@@ -2073,6 +2153,64 @@ breakpoint, or completed single-step.
 The older freeze-context page at `0x200` remains the right tool for a terminal
 forensic event; `capture` still requires that sticky freeze and should not be
 used to claim a halt-state RAM snapshot is atomic.
+
+#### Using the debugger to localize a real failure
+
+The 2026-10-04 investigation intercepted an invalid Quake EIP **before** its
+instruction executed. First archive `dump-state`, then the primary PC ring
+(`dump-ring --allow-live --depth 128`) while HALTED remains set. `--allow-live`
+here means the separate forensic-freeze bit is clear; it does not make a ring
+read atomic while execution is running. A quiescent `dump-ram` is a DDR image,
+not a scan of dirty cache contents, TLBs or admitted transactions.
+
+For a suspected CMP/Jcc pair, use two different controls:
+
+- Single-step from the CMP and record each returned EIP/EFLAGS. This deliberately
+  disables pairing, so success establishes only the **unpaired control**.
+- Re-arm a different breakpoint at the expected next U boundary to resume
+  normally. Record the primary retirement delta and ring history. A breakpoint
+  matching the V instruction suppresses the very pair being investigated.
+  Check CS as well: the hardware breakpoint matches EIP only.
+
+The FPGA PMU and PC ring count **primary/U retirement only**, not total U+V
+instructions. An uninterrupted paired CMP/Jcc should increment that counter by
+one and leave the CMP as the newest primary PC. A separately recorded Jcc or
+intervening handler means this is not that clean paired experiment. For example,
+one `14562 → 14567` resume on 2026-10-04 retired 236 primary instructions and
+visited CWSDPMI: its correct fallthrough did **not** validate a direct pair.
+
+For a lower-overhead control, keep one board-local MMIO mapping open. At the
+first halt hold manually with `DBG_EXEC=0x001`, program/read back the expected
+next U EIP, leave the architectural selector on EIP, then release with the
+single ordered `DBG_EXEC=0x202` write. Poll HALTED and EIP in that same process;
+do not require observing HALTED fall, since an immediate re-park can be shorter
+than the PS read interval. Reject a still-stale original EIP. Grade only the
+new target, unchanged CS/CR3, primary delta 1, IRQ-ACK delta 0, and newest CMP
+ring entry. This remains an inferred boundary witness: no CSR exposes direct
+V retirement. The pre-CMP halt drains FP work and clears AGI bookkeeping, so
+even a clean pass does not refute the natural uninterrupted failure.
+
+Guest x86 DR breakpoints, TF and RF also force the slow/unpaired path in this
+profile. They are not alternatives for observing this pair. Do not clear
+`CTRL[8]` to suppress guest IRQs: it gates **PS disk-service notification**,
+not PIT/PIC/core INTR. Pending guest IRQs continue to accumulate while halted.
+
+Do not interpret `dump-core-observe-ring` as a branch waveform in this image:
+the frozen tap records acknowledged **VGA-text writes** only. Neither ring
+exposes decoded lengths, raw I-cache bytes, branch decisions or forwarded flags.
+Also, the JSON CS `b` field reports `seg_b[CS]`, not the separate effective
+`cs_d` used by decoding; interrupt entry can update the latter without updating
+the former. A descriptor/default-size mismatch in that field alone is not proof
+that the handler decoded in the wrong mode.
+The ring's `real_mode_linear_if_applicable` (printed as `lin`) is only
+`(CS << 4) + EIP`; it is **not** the protected-mode segment-base-derived
+linear address. Use the hidden CS base and paging tables for that calculation.
+
+Keep breakpoint/single-step tests separate from acceptance. This investigation
+used a private diagnostic ROM on the unchanged FPGA, preserving the production
+ROMs and media; a diagnostic pass is not a cold Quake timedemo pass. Do not use
+the intrusive comparator/forensic freeze to resume a stopped guest: it drives
+SoC reset, unlike the quiescent debugger.
 
 Before a hardware build, run the focused AXI-Lite regression from the host. It
 also verifies that a `STEP` command cannot alias the old ring-clear command:
