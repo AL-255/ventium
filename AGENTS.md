@@ -243,9 +243,14 @@ gap blocks interrupt-driven real-mode guests — see README "On silicon".
 
 ## Conventions
 
-- Keep generated runs, temporary builds, and scratch files out of `~/`.
-  Use `/tmp` or `ventium/tmp` after checking available space; do not create
-  new top-level home-directory work folders.
+- Use `/home/yukidama/external/tmp` for all new generated runs, temporary builds,
+  and scratch files; set `TMPDIR` explicitly for commands that create temporary
+  files. Check that the external filesystem is mounted, writable, and has enough
+  available space before starting. Do not silently fall back to the root disk or
+  create new top-level home-directory work folders.
+  Existing repo symlinks into `external/ventium_run` are active backing storage,
+  not permission to delete that entire tree. Prune only verified disposable,
+  closed artifacts; preserve sources, media, accepted binaries and useful evidence.
 - One module per file, filename == module name; packages are `*_pkg.sv`;
   `ven_*`/`vtm_*` prefixes for ventium-specific blocks; `core_*.svh` are raw
   `` `include ``d case-arm fragments of core.sv (netlist-identical — keep them so).
