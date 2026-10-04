@@ -136,8 +136,14 @@ not certification of the currently installed image.
 > positions include **1,807 word-7** encounters. **93** events have `EAX=43`;
 > event **2,680** matches the first natural failure's `EAX=43, EBX=2c403c,
 > EDX=efe6cc, ESP=e07f8, EFLAGS=3246, CR3=7e000`, yet reaches `14567`.
-> This establishes only visible-state overlap, not identical cache, in-flight,
-> FP or interrupt timing. No `EAX=ae` encounter was reached: native probe exit
+> A full recursive comparison against `bp14577-state.json` (SHA-256
+> `c26faaa8f7c8879b765ea2d3883530f77e3ba43b69788a95386ce03fe8a8e0ce`)
+> finds **EIP is the only differing exposed architectural field**: every GPR,
+> flag/control/debug/table scalar, nested hidden segment and all eight x87
+> physical/logical records plus environment match exactly. Both root and an
+> independent read-only audit verified this against the actual nested state.
+> This does not establish identical cache, in-flight, FP or interrupt timing.
+> No `EAX=ae` encounter was reached: native probe exit
 > **3 / MISSING**, not an all-pass verdict. Its native guest service subsequently
 > reached its wall-time guard (**timeout, signal 15**), not native completion.
 > The board remains quiescent HALTED at `00a7:14567`; both services have MainPID 0.
