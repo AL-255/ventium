@@ -6,6 +6,71 @@ debug tools as inspected through **2026-08-23**, with the safety preflight
 updated through **2026-10-04**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
 
+> **Implemented condition-selector audit (2026-10-04):** the actual named
+> branch net is under Vivado's rebuilt `u_icache` hierarchy, not the original
+> `u_uv_common` boundary searched earlier. Two recursive inspections stopped at
+> their 1,024-cell caps; both native exits 1 and post-pin exits 0 are retained.
+> An earlier host-path check stopped before opening the DCP. These are inspection
+> failures, not DUT failures or passes. The bounded four-level query closes
+> native/post-pin checks **0**, recording **26 LUT/mux gates**, six sequential
+> leaves and 45 deeper physical cuts from the same pinned routed checkpoint.
+>
+> Offline Z3 checks of that receipt pass all **six** obligations: under nine
+> explicit **nominal, not captured** retained-packet bindings, the selector's
+> output is its forwarded flag-data input XOR V's condition bit 0. Thus JE and
+> JNE select that input with the expected polarity; the stale architectural ZF
+> can differ without replacing it. The 94-variable model preserves shared
+> physical inputs and LUT `I0`-least-significant truth-table indexing. It does
+> **not** prove the deeper arithmetic input equals the correct CMP ZF, actual
+> retained U/V contents, the handshakes/CDC, timing or Quake correctness. Do not
+> promote this conditional selector proof into a complete forwarding or
+> scalar-truncation verdict. Next isolate upstream flag production versus
+> retained condition capture; an OF=1/ZF=0 diagnostic can distinguish a lost
+> condition bit 2 (JE/JNE becoming JO/JNO) from a zero/stale-ZF hypothesis.
+>
+> Artifacts: `/home/yukidama/external/tmp/ventium-fpga40-branch-local.VHONmO/`;
+> receipt SHA-256
+> `b3e60f998c2ae7731e85f00d080f9b30ae63d18a680d2e78c017d94bb52304f8`;
+> `grade_selector.tcl`, `selector-proof.smt2`, `selector-grade.tcllist`.
+> No synthesis, implementation, programming or clock change occurred. No
+> Vivado worker remains live; the board remains halted on the private JE ROM.
+> All eight production-file hashes still match. Full timedemo/movie acceptance
+> remains **pending**. Candidate gameplay IPC is **unmeasured**; verified
+> pre-candidate baseline **0.42633263**, build **5c2491f3**, cycles
+> **7,099,999,637–7,199,999,637**.
+
+> **PS readback feasibility correction (2026-10-04):** exact matching kernel
+> build artifacts were located at
+> `/home/yukidama/external/RK-XCZU15EG-F-Template/build/src/linux`, HEAD
+> `7e47ae4ab22ed45a8326203c863f826423978f89`, generated release
+> `6.12.0-g7e47ae4ab22e`. Generated headers, `modpost` and full `Module.symvers`
+> exist; modules are enabled, MODVERSIONS/module signatures and FPGA-manager
+> debugfs are disabled. `zynqmp_pm_fpga_read` is GPL-exported. Missing board-side
+> headers therefore do not establish that a matching-host wrapper cannot be
+> built. No wrapper was built or loaded and no firmware command was issued.
+>
+> Generic configuration readback is **not** a proven live-state capture path.
+> UltraScale/UltraScale+ CLB capture uses MASK/CTL1 bit 23, not GCAPTURE; associated
+> user clocks must be stopped/disabled throughout capture. CPU architectural
+> HALT is not proof of that clock contract. Correct decoding also needs the
+> matching `.ll` mapping, padding and inverted CLB values.
+> [XAPP1230](https://download.amd.com/docnav/documents/XAPP1230.pdf),
+> [UG570 CTL1](https://docs.amd.com/r/en-US/ug570-ultrascale-configuration/Control-Register-1-11000).
+> Reference `xilinx_v2025.1` data readback emits SHUTDOWN/RCRC/RCFG, then
+> START/RCRC/DESYNC, without capture enable; failure can bypass START. Register
+> readback is narrower and does not issue SHUTDOWN/START. Neither preservation
+> of all live state nor compatibility with the deployed PMU firmware is proved.
+> [Reference PCAP implementation](https://raw.githubusercontent.com/Xilinx/embeddedsw/xilinx_v2025.1/lib/sw_services/xilfpga/src/interface/zynqmp/xilfpga_pcap.c),
+> [UG570 commands](https://docs.amd.com/r/en-US/ug570-ultrascale-configuration/Command-Register-00100).
+> The exact kernel manager allocates `S+512+100` bytes and requests `(S+100)/4`
+> words, using firmware's returned offset as a word index. Validate status,
+> lengths, offset bounds and image-size provenance; its SG write path does not
+> set the stored size. Reference PMUFW returns zero for data-read offset, not a
+> calculated padding offset. Raw firmware debugfs calls do not supply coherent
+> DMA storage or these checks.
+> [Exact kernel manager](https://github.com/Xilinx/linux-xlnx/blob/7e47ae4ab22ed45a8326203c863f826423978f89/drivers/fpga/zynqmp-fpga.c),
+> [Reference PMUFW](https://raw.githubusercontent.com/Xilinx/embeddedsw/xilinx_v2025.1/lib/sw_apps/zynqmp_pmufw/src/pm_core.c).
+
 > **Read-only implemented-logic audit (2026-10-04):** two bounded queries of
 > the saved routed checkpoint closed native/post-query pin checks **0**. Neither
 > performed synthesis, implementation, programming or clock changes. The first
