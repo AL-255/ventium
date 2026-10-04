@@ -6,7 +6,57 @@ debug tools as inspected through **2026-08-23**, with the safety preflight
 updated through **2026-10-03**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
 
-> **Latest status (2026-10-04 02:13 UTC):** the host session/reboot interrupted
+> **Latest status (2026-10-04 02:27 UTC):** the corrected fresh checkpoint
+> continuation is live, native **43591**, under
+> `/home/yukidama/external/tmp/ventium-fpga40-dcp-route-top.5ptYzr/`.
+> Its actual loader positively verified loaded-module `TOP=rk_ao486_bd_wrapper`,
+> exact part `xczu15eg-ffvb1156-2-i`, **40 MHz core / 100 MHz AXI** constraints
+> and full placement. Default `route_design` has started, in Phase 1 Build RT
+> Design. This reuses the preserved physical-opt DCP and does not repeat
+> synthesis, optimization or placement. The aborted old project and first
+> failed checkpoint-launch directory remain untouched.
+> Root and independent host-only regressions both passed **59 cases** after
+> separating the native design display name from its module `TOP`. The Tcl
+> pin is `7715271b225e62839996deef377bb35a0c2ba8b0c8f07c8280b7d26d2e5a4d0c`;
+> these tests are control-flow mocks, not native routing or guest acceptance.
+> The sole Vivado family remains bounded to **12 GiB RAM / 2 GiB swap / 48
+> tasks**, `memory.high=max`, one worker and an **8-hour safety bound**.
+> Observed OOM/limit counters and swap use are zero. All new artifacts are
+> under external/tmp. Full route, native bit/bin, STA/hold/DRC/CDC/bus-skew
+> review, measured physical clocks, timedemo and full movie remain pending.
+> Candidate gameplay IPC is unmeasured; verified pre-candidate baseline
+> **0.42633263**, build **5c2491f3**, cycles **7,099,999,637–7,199,999,637**.
+
+> **Historical status (2026-10-04 02:26 UTC):** the first non-project checkpoint
+> continuation closed with actual native exit **1**, handle **10721**, under
+> `/home/yukidama/external/tmp/ventium-fpga40-dcp-route.AzqGe7/`.
+> It is loading the preserved physical-opt DCP, SHA-256
+> `1099e8ce07371b9ee1f907077521f3322f562350da942e4468b34fa02e0cea5b`.
+> Native output confirms successful restoration of the netlist, timing,
+> constraints and physical databases in **32 seconds**. It stopped before
+> routing because the initial top check incorrectly treated `current_design`
+> `NAME` as the HDL module name. Vivado names this restored design
+> `checkpoint_rk_ao486_bd_wrapper_physopt`. The check is being corrected to
+> query the loaded design's `TOP`; the part, checkpoint SHA and frozen inputs are
+> unchanged. The family has exited and the scope is inactive. Preserve this
+> failed launch; do not reuse/reset it. The old interrupted project is untouched;
+> no synthesis, optimization or placement was repeated.
+> All **179** frozen payload hashes/sizes and the manifest/delta/define pins
+> were independently rechecked. Root and independent host-only Tcl regressions
+> both passed **59** cases; these are mock control-flow checks, not native
+> routing or functional acceptance.
+> The exclusive guard admitted one Vivado family with **12 GiB RAM / 2 GiB
+> swap / 48 tasks**, `memory.high=max`, one worker and an **8-hour safety
+> bound**. All observed memory/OOM event counters are zero. External has about
+> **27 GiB** available. New logs, temporary files and outputs use external/tmp.
+> A fresh SSH check found the board reachable and idle, FPGA manager operating
+> on the historical image; no deployment or new physical-clock result is claimed.
+> The target remains **40 MHz core / 100 MHz AXI**. Complete routing,
+> native bit/bin closure, report review and the fresh timedemo/movie are pending.
+> Candidate gameplay IPC is unmeasured; verified pre-candidate baseline
+> **0.42633263**, build **5c2491f3**, cycles **7,099,999,637–7,199,999,637**.
+
+> **Historical status (2026-10-04 02:13 UTC):** the host session/reboot interrupted
 > the native implementation. The old Vivado family is gone and its scope is
 > inactive; the controller records `Terminated`, not a successful native closure.
 > Its last worker log is incomplete in Global Iteration 2, at 1,010 overlaps.
@@ -779,7 +829,8 @@ For a verified frozen-input directory, create a **fresh** native output tree:
 
 ```bash
 fpga_inputs=/absolute/path/to/verified/frozen-inputs
-fpga_run_root=$(mktemp -d /var/tmp/ventium-fpga40-native.XXXXXX)
+fpga_run_root=$(TMPDIR=/home/yukidama/external/tmp \
+  mktemp -d /home/yukidama/external/tmp/ventium-fpga40-native.XXXXXX)
 mkdir "$fpga_run_root/tmp"
 cd "$fpga_run_root"
 TMPDIR="$fpga_run_root/tmp" \
@@ -811,6 +862,55 @@ optimization without `bram_power_opt`, which previously crashed. It does not
 reset failed runs or force bitstream generation. Require actual native
 bitstream completion, full routing, DRC/CDC/bus-skew/timing review and regular
 bit/bin hashes; its `IMPL OK` marker is not timing or silicon sign-off.
+
+#### Continue an interrupted route from a preserved physical-opt checkpoint
+
+Use `fpga/route_checkpoint_40mhz.tcl` when the saved, independently pinned DCP
+contains the complete placed **40/100 MHz RK-XCZU15EG-F** design. Preserve the
+aborted project and its logs; never reset it or copy completion markers. Verify
+the DCP's ancestry against the frozen inputs, not just its filename. The native
+loader checks Vivado 2025.2, part `xczu15eg-ffvb1156-2-i`, top
+`rk_ao486_bd_wrapper`, both clock periods and full placement before routing.
+
+After setting `checkpoint` and `checkpoint_sha` to the independently verified
+input and its exact SHA-256, create a fresh external output tree:
+
+```bash
+fpga_run_root=$(TMPDIR=/home/yukidama/external/tmp \
+  mktemp -d /home/yukidama/external/tmp/ventium-fpga40-dcp-route.XXXXXX)
+mkdir "$fpga_run_root/tmp"
+cd "$fpga_run_root"
+TMPDIR="$fpga_run_root/tmp" \
+VENTIUM_VIVADO_LOCK_DIR=/home/yukidama/external/tmp \
+VENTIUM_VIVADO_MEMORY_MAX=12G VENTIUM_VIVADO_MEMORY_SWAP_MAX=2G \
+timeout --signal=TERM --kill-after=60s 8h \
+  "$VENTIUM/fpga/run_vivado_exclusive.sh" -mode batch \
+  -log "$fpga_run_root/route.log" -journal "$fpga_run_root/route.jou" \
+  -source "$VENTIUM/fpga/route_checkpoint_40mhz.tcl" \
+  -tclargs "$checkpoint" "$checkpoint_sha" "$fpga_run_root/output"
+```
+
+The cap must pass the existing admission reserves; 12 GiB is a routing-only
+profile, not a synthesis recommendation. The script opens the DCP without
+overriding part or dropping timing, uses default routing, preserves a fresh
+routed DCP before reporting, emits the same 16 unfiltered reports, then writes
+native `.bit` and `.bin` without `-force`. Require actual native exit zero,
+positive full-routing/no-error checks, nonempty regular artifacts and independent
+report review. Its completion marker is not timing or silicon acceptance.
+The old project-run-only collector cannot certify this standalone flow: its
+aborted `impl_1` remains aborted. Do not fabricate project completion metadata.
+
+Host-only failure regression (no Vivado, synthesis or simulation):
+
+```bash
+TMPDIR=/home/yukidama/external/tmp \
+  python3 -B fpga/test_route_checkpoint_40mhz.py
+```
+
+The test is bounded to 512 MiB / 115 seconds and checks successful control flow,
+all 16 report-command errors, hashes, part/top/clocks, placement/routing,
+missing/empty native artifacts and closure failure. Its synthetic fixtures are
+not native checkpoints or deployable images.
 
 #### Legacy 3.125 MHz diagnostic flow
 
