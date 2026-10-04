@@ -6,14 +6,14 @@ debug tools as inspected through **2026-08-23**, with the safety preflight
 updated through **2026-10-03**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
 
-> **Latest status (2026-10-04 02:27 UTC):** the corrected fresh checkpoint
-> continuation is live, native **43591**, under
+> **Latest status (2026-10-04 02:44 UTC):** the corrected fresh checkpoint
+> continuation is live, native session **43591**, worker PID **53971**, under
 > `/home/yukidama/external/tmp/ventium-fpga40-dcp-route-top.5ptYzr/`.
 > Its actual loader positively verified loaded-module `TOP=rk_ao486_bd_wrapper`,
 > exact part `xczu15eg-ffvb1156-2-i`, **40 MHz core / 100 MHz AXI** constraints
-> and full placement. Default `route_design` has started, in Phase 1 Build RT
-> Design. This reuses the preserved physical-opt DCP and does not repeat
-> synthesis, optimization or placement. The aborted old project and first
+> and full placement. Default `route_design` is in Global Iteration 1; the
+> worker remains CPU-active. This reuses the preserved physical-opt DCP and
+> does not repeat synthesis, optimization or placement. The aborted old project and first
 > failed checkpoint-launch directory remain untouched.
 > Root and independent host-only regressions both passed **59 cases** after
 > separating the native design display name from its module `TOP`. The Tcl
@@ -22,7 +22,14 @@ not certification of the currently installed image.
 > The sole Vivado family remains bounded to **12 GiB RAM / 2 GiB swap / 48
 > tasks**, `memory.high=max`, one worker and an **8-hour safety bound**.
 > Observed OOM/limit counters and swap use are zero. All new artifacts are
-> under external/tmp. Full route, native bit/bin, STA/hold/DRC/CDC/bus-skew
+> under external/tmp. Fresh read-only SSH/root preflight confirmed boot ID
+> `2861e4e8-cd4c-48cd-9f44-7f7d8a991ebb`, the full reserved guest aperture with
+> no System RAM overlap, and unchanged root-owned cold-launch/capture helper
+> hashes. The board is idle on the historical image; no guest was released.
+> The root observation is retained under external/tmp in
+> `ventium-fpga40-capture.VMIAgs/board-readonly-preflight-024325.json`; it is
+> not authority for a changed boot/deployment. Refresh before guest-DDR use.
+> Full route, native bit/bin, STA/hold/DRC/CDC/bus-skew
 > review, measured physical clocks, timedemo and full movie remain pending.
 > Candidate gameplay IPC is unmeasured; verified pre-candidate baseline
 > **0.42633263**, build **5c2491f3**, cycles **7,099,999,637–7,199,999,637**.
