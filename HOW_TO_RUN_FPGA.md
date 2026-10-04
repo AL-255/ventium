@@ -6,6 +6,36 @@ debug tools as inspected through **2026-08-23**, with the safety preflight
 updated through **2026-10-04**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
 
+> **Additional debug evidence (2026-10-04):** the existing halt/register scanner
+> and U-retirement ring captured a successful private 64-case cache-conflict
+> ROM on the unchanged 40 MHz image: `CS=8/EIP=f02b0/EAX=42`, all expected
+> terminal scalars, native service exit 0, no IRQ-count increment. Invocation
+> `c9b96d872b774eceb0a842c80e14c658`; ROM SHA-256
+> `7ef04f3c3eb0e99760d14f3d535b9a213629ea9ebf9f4d1010c008008b7f76a8`.
+> Its original 172-byte Quake prelude is unchanged. Software checks three
+> read-only congruent code-page sweeps before each invocation. Frozen paired
+> simulations at latency 0/3 finish correctly but grade **MISSING** for retained
+> CMP-owner/predicted-T/actual-NT overlap; this is not full coverage or Quake
+> acceptance. The first functional control timed out (124); a separately named
+> bounded control completed and checked all 2,304 conflict instructions.
+> Artifacts: `/home/yukidama/external/tmp/ventium-cpl3-recurrent-icconflict.pxdooO/`.
+> Production BIOS/media remain unchanged; the FPGA is halted on this private
+> diagnostic, not running Quake. No bitstream or clock change was needed.
+>
+> Read-only inspection of board kernel `6.12.0-g7e47ae4ab22e` finds
+> `CONFIG_FPGA_MGR_DEBUG_FS` **not set** and no FPGA-manager debugfs image file.
+> The `zynqmp_fpga` readback parameter exists (`N`), but does not itself expose
+> configuration/BRAM data. The separate firmware `pm` debug file is not a safe
+> drop-in replacement: the documented driver readback allocates coherent DMA
+> storage before requesting firmware data. No firmware command, parameter
+> write, kernel change or raw readback was attempted. See the
+> [Xilinx 6.12 driver](https://github.com/Xilinx/linux-xlnx/blob/xlnx_rebase_v6.12/drivers/fpga/zynqmp-fpga.c).
+> Existing architectural selectors do not expose cache ways or retained U/V
+> packets; DDR bytes and a U-only ring cannot prove their contents.
+> Candidate gameplay IPC is **unmeasured**; verified pre-candidate baseline
+> **0.42633263**, build **5c2491f3**, cycles
+> **7,099,999,637–7,199,999,637**. Full timedemo/movie acceptance remains pending.
+
 > **Latest status (2026-10-04 19:25 UTC):** the checkpoint continuation closed
 > with actual native exit **0**, including native bitstream generation. No
 > Vivado worker remains live. The unchanged native BIN was deployed to the RK
