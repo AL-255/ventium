@@ -6,7 +6,7 @@ debug tools as inspected through **2026-08-23**, with the safety preflight
 updated through **2026-10-04**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
 
-> **Latest status (2026-10-04 17:56 UTC):** the checkpoint continuation closed
+> **Latest status (2026-10-04 18:13 UTC):** the checkpoint continuation closed
 > with actual native exit **0**, including native bitstream generation. No
 > Vivado worker remains live. The unchanged native BIN was deployed to the RK
 > board; its SHA-256 is
@@ -112,8 +112,21 @@ not certification of the currently installed image.
 > 0. The two exact-byte reproducers now assemble/link successfully as separate
 > 65,536-byte private ROMs, with native symbol/payload/PTE checks. They preserve
 > either 50 or 134 prelude bytes plus the original 38-byte chain, but use explicit
-> synthetic input data and IF=0. Runtime architecture/pair/store-ACK coverage
-> is still **UNRUN**, not a passed test or restored live Quake cache state.
+> synthetic input data and IF=0. All four existing-107-model cycle simulations
+> (two ROMs, AXI latency 0/3) now closed native/checker **0**. Each proves the
+> actual `14530 U / 14534 V` load/ADD pair and four original CMP/JNE pairs.
+> Full-prelude store coverage correlates `144ef → physical 1c7f7c` (value 108)
+> and `14500 → 1c7f80` (value 0) with qualified ACK and following registered/DPI
+> retirement. Coverage is measured, not inferred from setup or readback.
+> Both ROMs also ran on the **same 40 MHz BIN**, direct daemon native exit **0**.
+> The existing debugger captured HALTED `CS=8/EIP=f024b`, `EAX=42` and every
+> expected terminal integer/control scalar; both offline scalar checks exited 0.
+> Native captures/receipts are in
+> `/home/yukidama/external/tmp/ventium-cpl3-real-prelude.wPvcvn/`.
+> These IF0 single-case results do not recreate the uninterrupted failing
+> context, prove hardware V/store-ACK coverage, or clear the Quake failure.
+> No additional RTL/bitstream/clock change was made. The board remains halted
+> at the full-prelude terminal, with no guest daemon running.
 > A separate minimal L1D response-owner fix, **`0f12b20`**, is committed/pushed:
 > critical-word data now uses the same address-owner match as its ACK. Its new
 > regression passed **27 cases / 11 configurations**; the original source fails
