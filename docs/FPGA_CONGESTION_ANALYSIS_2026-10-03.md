@@ -86,6 +86,26 @@ not uniformly disappears. The current router also reports **349 CLBs with high
 pin utilization**. Overlap counts are convergence diagnostics, not completion
 percentages.
 
+### Fresh residual-congestion evidence
+
+At **2026-10-04 01:13:24 UTC**, the current native run emitted
+`impl_1/iter_140_CongestedCLBsAndNets.txt`: **289 bytes**, with a stable
+SHA-256 of `4fefa47a042d76a2572ed5a1f2269fcbf3183972ad6316cacb02dc20d4073775`.
+Root read the complete file and checked its hash. It lists six CLB tiles near
+**X45–46 / Y187–191** and two nets under the rebuilt `u_icache` hierarchy:
+`ic_tag_o[102][0]_831[11]` and `p_0_in23_in[0]`. The latter is an unresolved
+synthetic alias; the text report does not identify its exact RTL expression.
+
+The previous `impl_nobram_power/iter_120_CongestedCLBsAndNets.txt` listed
+three tiles near X59–60 / Y219–231, five tag-array aliases and two segment-base
+aliases. The fresh report corroborates residual tag-query/selection pressure,
+supporting the targeted shared-residency proposal below. **Two listed nets
+versus seven is not a measured congestion reduction**: placement and iteration
+differ, and neither dump describes every congested region or proves RTL ownership.
+The live log links the new dump to eight overlaps; root subsequently observed
+three at **01:15:15 UTC**, with the same CPU-active worker. Routing was still
+incomplete, not a legal-route or timing result.
+
 ## Optimization order and exact invariants
 
 ### 1. Share remaining sequential-span residency queries
