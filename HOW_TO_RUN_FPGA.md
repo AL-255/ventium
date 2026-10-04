@@ -6,6 +6,43 @@ debug tools as inspected through **2026-08-23**, with the safety preflight
 updated through **2026-10-04**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
 
+> **Read-only implemented-logic audit (2026-10-04):** two bounded queries of
+> the saved routed checkpoint closed native/post-query pin checks **0**. Neither
+> performed synthesis, implementation, programming or clock changes. The first
+> query matched U158/V139 retained cells but its numeric-only name classifier
+> accepted none: Vivado preserves struct member names, e.g. `[cc][2]`, instead
+> of flat packed-bit indices. This was an inspection limitation, **not evidence
+> of removed hardware**. The corrected query captures all **297 FDREs**, each
+> physical Q/D pin and immediate D driver, including V's four condition bits,
+> conditional-branch control and U's flag-write/shift controls. Frozen hardware
+> ties `cycle_mode=1`; ordinary retained-packet capture is not disabled.
+>
+> The first query also captures 240 address pins on the eight exact Icache
+> RAMB36E2s (15 pins per port; bit 15 is not present). All four read slices share
+> physical address drivers within each A/B copy. Seven write-address comparisons
+> use distinct LUT drivers. A strict physical-identity-only checker exits 1;
+> this does **not** establish an address error. The corrected query records only
+> those seven pairs' LUT4 truth tables and immediate input identities. Offline
+> enumeration proves **7/7 equivalent** for all 16 cut assignments per pair,
+> **112 assignments total**. This is relative binary combinational equivalence,
+> not absolute address/way correctness, dynamic memory, collision or timing proof.
+>
+> Native synthesis reports early implicit-wire/redeclaration warnings for the
+> flag-forwarding connections, without a corresponding port-width diagnostic.
+> The routed `u_uv_common` boundary and named flags nets were flattened; these
+> queries therefore **neither prove nor disprove scalar flags truncation**.
+> Missing names must not be graded as a correctness pass or a causal bug.
+> The raw receipt SHA-256 is
+> `ef1869c5fd48aa0b71bf9e43e2cc51614a762c754bcbf99383afd08f0acf0fbb`;
+> artifacts/checker: `/home/yukidama/external/tmp/ventium-fpga40-branch-inventory-r2.v9F36d/`,
+> `grade_address_cuts.tcl`. The original query/failed identity-only audit remain
+> preserved in `ventium-fpga40-branch-inventory.IXhbIg/`.
+> No Vivado worker remains live. The FPGA is still halted on the private JE
+> diagnostic below; no production-media or RTL change was made. Full timedemo
+> and current-candidate movie acceptance remain **pending**. Candidate gameplay
+> IPC is **unmeasured**; verified pre-candidate baseline **0.42633263**, build
+> **5c2491f3**, cycles **7,099,999,637–7,199,999,637**.
+
 > **Opposite-condition diagnostic (2026-10-04 21:18 UTC):** the warm-caller ROM
 > was changed at exactly one original payload byte: `14565`, JNE `75` to JE `74`.
 > Its other 171 payload bytes, caller, mapping and `1,1,0,0` input schedule remain
