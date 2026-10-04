@@ -6,7 +6,7 @@ debug tools as inspected through **2026-08-23**, with the safety preflight
 updated through **2026-10-04**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
 
-> **Latest status (2026-10-04 18:28 UTC):** the checkpoint continuation closed
+> **Latest status (2026-10-04 18:38 UTC):** the checkpoint continuation closed
 > with actual native exit **0**, including native bitstream generation. No
 > Vivado worker remains live. The unchanged native BIN was deployed to the RK
 > board; its SHA-256 is
@@ -102,6 +102,24 @@ not certification of the currently installed image.
 > reached its eight-edge fan-in depth limit: **0/6 complete cones, all UNPROVED**.
 > Native process success is not Boolean equivalence. No solver verdict follows
 > from the truncated records, and no additional CAD run was launched.
+> That remained the R5 outcome; a later **separately named R6** read-only query
+> cut only at exact immediate physical driver pins, avoiding expansion of the
+> common fill-enable cone. Root reviewed its full sources and reran 30 new
+> synthetic checks plus 27 inherited checks before the single guarded query.
+> R6 exited native **0** and collected all 12 LUT4 roots / 48 inputs using only
+> 16 unique cells. Each corresponding A/B root has identical truth table and
+> ordered driver pins: the same three `pf_word` Q pins and common fill-enable
+> LUT output. The separately executed offline exhaustive grade exited **0**:
+> **6/6 pairs equivalent**, each over all 16 independent binary assignments.
+> Together with R4's two identical nets, all eight reversed selector pairs now
+> have static combinational-equivalence evidence. This is not memory-content,
+> collision, timing, full cache functional-equivalence or Quake causal proof.
+> No implementation, netlist export, constraint/clock/RTL change or rebuild ran.
+> R6 used the exclusive guard: 6 GiB RAM, zero swap, 48 tasks; native peak
+> **4381.246 MB**, then scope inactive/dead. Routed DCP hash remained unchanged.
+> Receipt is in `/home/yukidama/external/tmp/ventium-fpga40-wefront-r6.WzNL8H/`;
+> `native-output/one-hop-frontier.tcllist` SHA-256 is
+> `0bfbe376187ed80dece87de8a3d3f2d12f82275ea300e14202229682681fe094`.
 > Read-only history analysis uses hidden CS base and the actual saved PD/PTs,
 > not the ring's real-mode `lin` field. The two natural failures and the clean
 > word-7 capture share their newest 64 primary PCs; repeat failure and success
@@ -2538,7 +2556,7 @@ in this block design.
 |---:|---|---|
 | `0x000` | IDENT `0xA0486501` | — |
 | `0x010` | management address | management address |
-| `0x020` | control | bit 0 hold reset, bit 1 run, bit 8 IRQ enable |
+| `0x020` | control | bit 0 hold reset, bit 1 run, bit 8 PS disk-service notification enable (not guest IRQ masking) |
 | `0x030` | auxiliary ring data high | management write data/pulse |
 | `0x040` | management read data | — |
 | `0x050` | IDE/FDD/core status | — |
@@ -2578,10 +2596,13 @@ in this block design.
 | `0x2b0` | selected architectural word (valid only while `0x280[2]`) | — |
 | `0x2c0` | execution-debug capability (`0x56450005` = format 5, seven-bit selector, x87/segment/task/debug state plus stop cause) | — |
 
-The auxiliary ring is **not generically an AXI read-beat ring** in the current
-source. The top currently feeds it a live core/L1 handshake bundle. Several
-nearby comments describe older taps. Decode entries from the exact source, not
-from a historical label.
+The auxiliary ring is **not generically an AXI read-beat ring or a per-cycle
+waveform** in the frozen 2026-10-04 deployed source. Its exact valid predicate is
+`core_req & core_we & core_ack & (core_addr[23:12] == 12'h0B8)`: accepted stores
+in the B8000 page. Address/data are `core_addr/core_wdata`; the wrapper adds
+state/primary-retire/INTA bits to the high word. It cannot reveal the Quake CMP's
+load response or in-flight U/V state. Nearby load-serve/mini-ILA comments describe
+older taps. Recheck the exact build source before interpreting any later image.
 
 ## 14. How to interpret failures
 
