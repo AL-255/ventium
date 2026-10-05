@@ -6,6 +6,16 @@ debug tools as inspected through **2026-08-23**, with the safety preflight
 updated through **2026-10-05 UTC**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
 
+> **Latest localization (2026-10-05 UTC):** private memory-OR/JP and
+> reversed-memory-CMP/JP controls each pass64 cases on the unchanged40MHz
+> image. The original CMP/JP ROM is also caught at actual **00a7:14566 before
+> any exception**, FLAGS887/CR2=0; correct JP destination is1457a. The new
+> [localization report](docs/FPGA_CMP_BRANCH_LOCALIZATION_2026-10-05.md) records
+> exact state, sealed captures, model coverage gaps and the remaining causal
+> limits. This is not a production fix or timedemo acceptance. Candidate
+> gameplay IPC remains **unmeasured**; pre-candidate baseline **0.42633263**,
+> build **5c2491f3**, cycles **7,099,999,637–7,199,999,637**.
+
 > **Single-step localization (2026-10-05 UTC):** a new cold control reuses the
 > **identical JP ROM** from the full exception capture below. Existing hardware
 > breakpoints park at U=14562, then two host steps execute memory CMP and JP
