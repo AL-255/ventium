@@ -6,6 +6,59 @@ debug tools as inspected through **2026-08-23**, with the safety preflight
 updated through **2026-10-04**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
 
+> **Implemented ZF follow-up (saved routed image, 2026-10-04):** the joint
+> four-level inspection in `ventium-fpga40-zf-commit-r4.rdrRvv` closes
+> native/post-pin checks **0/0**. It records seven physical roots, **214 LUT/mux
+> gates**, 76 sequential leaves, 344 deeper cuts and one unsupported primitive.
+> The exact architectural ZF FDRE has CE tied to VCC. Cell inversion parameters
+> read empty; the actual netlist pins independently report **D/R/C inversion=0**.
+> Empty parameters were not treated as zero. Pin-polarity interpretation follows
+> [AMD UG903 case-analysis semantics](https://docs.amd.com/r/2025.1-English/ug903-vivado-using-constraints/Case-Analysis).
+>
+> The separate R2 consumer closes **0** on this sealed receipt. Under 15 explicit
+> nominal retained-CMP/JE bindings, selected ZF equals the arithmetic flag input
+> and JE selects that ZF; both mismatch queries are UNSAT. Nonreset integer
+> commit and ZF1 commit remain feasible, avoiding a vacuous proof. The other
+> three queries—commit/forward disagreement and the two wrong branch
+> directions—remain **SAT in the partial model**. With unconstrained deeper
+> controls, this is **inconclusive**, not a demonstrated RTL defect or a captured
+> hardware witness. Receipt SHA-256:
+> `6bf64c69d24ded908283c1406f1994dc2c203ef54dbab69127e36958dc761249`.
+>
+> The three preceding joint inspections remain native **1**, post-pin **0**:
+> `zf-commit.zCcrbx` lost a Vivado object handle through an `expr` conditional;
+> `zf-commit-r2.GKmGSl` exceeded the data-net segment cap on the clock network;
+> `zf-commit-r3.Ko2v6S` reached its 768-gate cap at depth six. None is a DUT
+> verdict. The first R4 consumer also remains exit **1** for an unquoted Tcl
+> path expression; the separately pinned R2 consumer corrects only that parser
+> issue, without rerunning the native query or modifying its sealed sources.
+>
+> A subsequent wiring-only query in `ventium-fpga40-state-aliases-r2.GXPpfZ`
+> closes **0/0**, recording **83 state FDREs / 51 distinct transition signatures**.
+> Equal actual D/CE/R wiring, clock and pin polarity support 12 additional Q
+> equalities in three relevant groups **after a common enabled clock edge**.
+> The consumer closes 0, but the same three partial-model mismatch queries
+> remain SAT. Register names were not used to invent an FSM encoding or live
+> value; this is not evidence of actual physical replica divergence. Its initial
+> query remains native 1/post-pin 0 after a global constant net exceeded the
+> segment cap; R2 instead resolves one top electrical net and its unique driver.
+>
+> `ventium-fpga40-forward-flag-wires.Mj8QfF` closes **0/0**. Only one synthetic
+> `u_uv_common/u_flags_eff1` net survives the bounded name inventory, with five
+> checked sinks. **No named `u_flags[6]` connection was recovered**; optimized
+> names cannot prove an absent wire or resolve the implicit-declaration warning.
+> Next compare a warm paired register/immediate-CMP/JE control with the original
+> memory-CMP/JE on the unchanged board, retaining the forwarding dependency.
+>
+> All artifacts above are under `/home/yukidama/external/tmp/`. One guarded
+> Vivado worker at a time, 6 GiB/zero swap; no synthesis, implementation, RTL,
+> programming, core release or clock change occurred. Fresh board readback is
+> still halted at **00a7:14567 / EFLAGS=46**, newest U=`14562`; all eight
+> production hashes match. No vendor worker remains live. Full production
+> timedemo/movie acceptance remains **pending**. Candidate gameplay IPC is
+> **unmeasured**; verified pre-candidate baseline **0.42633263**, build
+> **5c2491f3**, cycles **7,099,999,637–7,199,999,637**.
+
 > **OF/ZF hardware discriminator (2026-10-04 23:25 UTC):** the new private ROM
 > keeps the JE diagnostic's 171 original payload bytes plus its one opcode
 > mutation unchanged. Its synthetic memory schedule remains `1,1,0,0`; actual
@@ -41,10 +94,10 @@ not certification of the currently installed image.
 >
 > This behavior does **not** match universal JE→JO with correctly forwarded OF;
 > it still does not reveal actual V metadata/forwarded flags or eliminate
-> combined/intermittent metadata faults or physical timing. Proposed next
-> check: jointly audit the implemented forwarded-ZF and architectural-ZF
-> commit cones under explicit retained-CMP assumptions, including capture
-> controls. Fix only a demonstrated common-path mismatch, preserving pairing;
+> combined/intermittent metadata faults or physical timing. The follow-up
+> joint forwarded-ZF/architectural-ZF audit is recorded above; its deeper
+> comparison remains inconclusive. Fix only a demonstrated common-path mismatch,
+> preserving pairing;
 > do not substitute pairing disablement, guest patches or save-state workarounds.
 > No RTL, programming or clock change occurred; production hashes remain
 > unchanged. Board is halted at the fourth private JE fallthrough, services
