@@ -6,6 +6,108 @@ debug tools as inspected through **2026-08-23**, with the safety preflight
 updated through **2026-10-05 UTC**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
 
+> **Single-step localization (2026-10-05 UTC):** a new cold control reuses the
+> **identical JP ROM** from the full exception capture below. Existing hardware
+> breakpoints park at U=14562, then two host steps execute memory CMP and JP
+> separately. Cases1/2 produce CMP FLAGS2/EIP14565 then JP **14567** (PF0/NT).
+> Case3 produces FLAGS887/EIP14565 then JP **1457a** (PF1/T). Every step has
+> exactly **one** retirement, preserves the expected GPRs/selectors/CRs and
+> records a coherent architectural scan with completed-step stop cause.
+>
+> After those three pairs, RUN restores ordinary **pair-enabled** execution.
+> Case4 captures #PF14/error4 at **00a7:14566**, saved FLAGS **46**, CR2
+> **493c6488**, ESP/SS **e07f8/af**. PF1 requires JP target1457a. Actual RAM
+> independently confirms three completed cases, caller4/checksum **d554**,
+> fourth-case memory0/EDI0, original code/caller/logger and mappings. The same
+> displaced `ADC ECX,[EBX+3910244c]` bytes again reconstruct CR2 exactly.
+> The logger runs normally; HALT/state/aligned16MiB RAM precede late freeze.
+> Native closes **0**, controller **1** means the captured diagnostic fault,
+> not a reader crash or successful workload. No restart or first-fault trigger.
+>
+> `audit_step_capture.py` independently passes all **63** sealed files and
+> the six exact retirement deltas. Invocation:
+> `f7d731be624e463e95a6f87dcaf00160`; capture manifest SHA-256:
+> `c929178104a82e58e608477318f9e1d020c6152fcc1418697a18e2e139cb650c`.
+> Artifacts: `/home/yukidama/external/tmp/ventium-private-jp-single-step.0lsd9u/`.
+> Stepping suppresses pairing and changes warm history. Case4 fails after
+> pair-enabled release, but the ring does **not directly expose the V packet
+> or prove its retirement**. Combined with JMP64 success, this focuses the
+> investigation on memory-CMP/conditional-branch pairing, forwarded flags and
+> descriptor/length/next-PC selection; it does not yet establish the RTL cause.
+> No RTL, bitstream, clock or production-media modification. Full production
+> timedemo/movie remains **pending**. Candidate gameplay IPC **unmeasured**;
+> pre-candidate baseline **0.42633263**, build **5c2491f3**, cycles
+> **7,099,999,637–7,199,999,637**.
+
+> **Conditional-branch discriminator (2026-10-05 UTC):** the unchanged FPGA
+> completes all **64** private memory-CMP/JMP cases, both congruent-pointer
+> owners and all four memory/EDI/flag schedules. Only JP at14565 becomes
+> same-length JMP `eb13`; the synthetic expected-return setup also becomes1.
+> The remaining **171** payload bytes, bootstrap, caller and general exception
+> logger stay identical. This is not a production Quake patch or acceptance.
+> The recovered coherent scan is CS8/EIPf0258, EAX42, ESP6fec, FLAGS46,
+> CR080000011/CR2=0/CR37e000 (CR2 is **0**, not a fault address).
+> Actual RAM checks software-count64, caller-count64, checksum **d5540**,
+> a zero 26-word exception record, exact executable/caller/logger bytes and
+> mappings. The late frozen U-ring ends with normal OUTf0256/HLTf0257.
+>
+> The first controller closes **1**: it incorrectly polls physical113f00
+> through the probe's **1 MiB** convenience mapping. Preserve that bounds
+> failure; do not restart the guest. The same invocation
+> `96404c08cd9d46eeb24372a25c1b4c9c` closes native0. Separately named recovery
+> takes HALT/state/full aligned 16 MiB RAM before late forensic freeze.
+> Normal-counter completion is verified from recovered RAM, **not observed
+> live**. `audit_jmp_capture.py` independently passes all **33** sealed files;
+> manifest SHA-256:
+> `b4565a90570db97901e331c68d40bc73b9333dfb9095c4f3abb3d16e9a4b05b4`.
+> Artifacts: `/home/yukidama/external/tmp/ventium-private-memcmp-jmp.V2edQ6/`.
+> For counters above1MiB, map the full reserved guest RAM read-only, use
+> naturally aligned u32 reads and validate bounds. Do not enlarge the probe's
+> global low-memory window or use short Device-memory slice copies.
+>
+> Pinned Pentium QEMU completes64 with expected AL42 debug-exit **133**.
+> The initial randomized 32-job model matrix has **11 consumer passes**,
+> **19 startup SVA stops**, one observer-bound abort and one further consumer
+> failure; it is not31/32. A passive phase trace localizes seed2's SVA stop to
+> reset clock0: raw rst=0, internal seam reset still random1, error latches
+> still random. The frozen model initializes previous input levels during its
+> first eval; starting at rst=0 does not create an asynchronous reset edge.
+> A separately named harness first settles at clk0/rst1, asserts rst0 and
+> retains the original four reset clocks, **never disabling assertions**.
+> No generated RTL/model state is forced or recompiled.
+>
+> That corrected-reset matrix has **28 native0**, four native**124** at their
+> 180-second caps, and no SVA stops. The original phase consumer was too strict
+> when seam reset already started0: the master clears on the first held reset
+> clock, not an absent internal falling edge. A separately named offline R2
+> consumer keeps the original grades and checks that exact behavior. Results:
+> **25 passes**, **3 architectural passes missing retained-prediction coverage**
+> (consumer3), **4 incomplete functional-lat13/gap jobs** (consumer1).
+> The complete suite remains **1**; these are not32 correctness passes.
+> Sources, native binaries and all179 frozen inputs remain pinned.
+> Reset-control artifacts:
+> `/home/yukidama/external/tmp/ventium-private-reset-edge.LHADfg/`.
+>
+> A bounded native Vivado leaf control reproduces all six early implicit/
+> redeclaration warnings around the frozen `uv_common` interface. Late and
+> early typed connections synthesize to the **same nonconstant LUT5 driver**;
+> mismatch is GND. An independent post-synthesis condition-table/shift oracle
+> passes **360,464** checks. Native synthesis and post-simulation exits/pins are0.
+> Artifacts: `/home/yukidama/external/tmp/ventium-vivado-forward-decl-r3.UMMkDc/`.
+> This weakens an inherent declaration-order/scalar-width explanation; it is
+> **not full-core netlist or hardware forwarding proof**. The original failed
+> path guard and OBUF receipt consumer attempts remain separately preserved.
+> No production project was rebuilt or FPGA image/clock/media changed.
+>
+> JMP success versus the separately captured JP wrong-boundary fault narrows
+> attention toward conditional-branch/paired-retirement handling, but altered
+> branch/input schedules mean it does not prove a flag-forwarding root cause.
+> Single-step intentionally suppresses U/V pairing and may change warm history;
+> it is a diagnostic, never a general-processor fix or acceptance workaround.
+> Full production timedemo/movie remains **pending**. Candidate gameplay IPC
+> is **unmeasured**; pre-candidate baseline **0.42633263**, build **5c2491f3**,
+> cycles **7,099,999,637–7,199,999,637**.
+
 > **Full private exception capture (2026-10-05 UTC):** a general private ROM
 > logger now records the exception/error frame, original ESP/SS, all integer
 > registers, selectors and CR0/CR2/CR3 before any reset. Its 26-word record at
