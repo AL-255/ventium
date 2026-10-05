@@ -3,8 +3,102 @@
 This is the operating procedure for the Ventium-swapped `ao486_MiSTer` system on
 the RK-XCZU15EG-F board. It covers the current build, deployment, test, and
 debug tools as inspected through **2026-08-23**, with the safety preflight
-updated through **2026-10-04**. Historical clocks, binaries and results below are
+updated through **2026-10-05 UTC**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
+
+> **Memory-CMP condition controls (2026-10-05 UTC):**
+> `ventium-memorycc.8Zlcft` retains the original memory CMP at **14562** and
+> changes only production opcode 75 at **14565** to **76/JBE** or **7a/JP**.
+> Each retains 171/172 payload bytes, full prelude and congruent caller geometry.
+> Synthetic memory/EDI schedules are `1,1,0,0` / `0,0,80000000,0`; exact CMP
+> flags are **2,2,887,46**, and both new branches require **NT/NT/T/T**.
+> The third expected-return setup is corrected to 1, independently checked in
+> linked bytes. Native x86 and pinned Pentium QEMU execute matching flag and
+> SETBE/SETP oracles. No production code/media is patched.
+>
+> Four reused-frozen-model jobs run in parallel within one guarded
+> 10 GiB/64-task scope, each capped at 180 s/2M cycles/64K rows. All native and
+> consumer exits are **0**; all 179 frozen inputs match before/after. Each paired
+> job checks **64 exact memory-CMP/Jcc pairs**, 64 preceding cross-line pairs,
+> 126 earlier retained packet snapshots, exact flags/address/data/registered
+> joins and **14 warm predicted-T/actual-NT cases per owner**, with no missing
+> coverage. These checks do not model the FPGA's actual XPM/CDC/timing.
+>
+> **JBE on unchanged hardware passes three cases, then fails the fourth:**
+> counter=3, caller-count=4/checksum=d554, EAX=EE, and U-ring
+> **14562 → 14567**. Thus the third CF1/OF1/ZF0 case reaches its required target,
+> but the fourth equality/ZF1 case incorrectly falls through, as JE did.
+> Invocation `bc5d2dd76c9f48c6a6d16c8a0eff82a6` closes native/controller **0/0**.
+> Sealed 16 MiB RAM, payload/caller/mappings and final halted scan are checked;
+> native exit 0 is not a DUT pass. Closed-capture manifest SHA-256:
+> `8a5d70521f5fbc21245e034dc771cc9c94c2295752729ce1ae5f83dcb2ed40c4`.
+>
+> **JP is an incomplete hardware stall, not a software pass/fail verdict:**
+> counter=2, caller-count=3/checksum=9fff, stored EDI=80000000; newest primary
+> retirement is **14562**, last AXI fetch is guest **840**. HALT times out with
+> `exec_ctrl=1`; two later read-only samples confirm HALT requested but not
+> acknowledged, freeze clear, no retirement/AR progress while cycles advance.
+> The last fetch is consistent with an exception-table path, **not proof of a
+> fault vector, branch target, forwarded PF or final architectural state**.
+> Invocation `d58118f0adb8403897e6c75f2ffd70e1` closes native **0**, controller
+> **1**. It was not restarted on timeout. There is no final architectural scan
+> or quiescent ring; a separately named live physical-RAM copy is explicitly
+> noncoherent and not a cache snapshot. Partial-capture manifest SHA-256:
+> `3c923e404bcffc2944a1917657b46538b3cdfa1f0aa44172285cf8c8af3755e6`.
+>
+> `check_board_memorycc.py` independently closes 0 for evidence integrity and
+> reports **JBE DUT FAIL / JP INCOMPLETE / acceptance=false**. The newest
+> historical core-observation entry is not treated as a live FSM-state probe.
+> Artifacts are under `/home/yukidama/external/tmp/ventium-memorycc.8Zlcft/`.
+> Next capture the private branch's actual fault context with a general guest
+> exception logger, validated separately for no-error/error-code exception
+> frames before use. Do not patch production Quake, disable pairing or claim
+> a uniform flag/condition corruption from these partial observations.
+>
+> Both board daemons and all four model workers are closed; the JP guest remains
+> stalled with HALT pending. No Vivado, RTL, programming or clock change occurred.
+> Production hashes remain unchanged. Full timedemo/movie acceptance remains
+> **pending**. Candidate gameplay IPC is **unmeasured**; verified pre-candidate
+> baseline **0.42633263**, build **5c2491f3**, cycles
+> **7,099,999,637–7,199,999,637**.
+
+> **Warm immediate-CMP hardware control (2026-10-05 UTC):** the new private
+> control in `ventium-cpl3-warmcaller-je-imm.HWLFnN` changes only the three CMP
+> bytes at **14562**, `397a10 → 83ff00`, relative to the sealed memory-CMP/JE
+> parent. JE remains at **14565**; instruction lengths, full prelude, CPL3/
+> IF0/IOPL0 policy and one readonly congruent caller page remain in place.
+> Relative to production Quake, 168/172 payload bytes are unchanged; this is
+> explicitly a private control, not a replacement Quake image.
+>
+> Native x86 and pinned Pentium QEMU agree on arithmetic flags; the exact RTL
+> schedule is **46,46,86,46**, with JE outcomes **T/T/NT/T**. Both frozen-model
+> jobs close native/consumer **0/0**. Paired coverage checks all **64 exact U/V
+> pairs** and seven warm predicted-T/actual-NT cases for each owner. Immediate
+> CMP has no retained memory owner; the borrowed caller helper's legacy
+> retained-memory narration is explicitly inapplicable, not new ACK coverage.
+>
+> The **unchanged FPGA passes all 64 software cases**, caller-count=64,
+> checksum=**d5540**, EAX=**42**. Invocation
+> `ed6a4bd02bf045318692969a4f98efba` closes native/controller **0/0**. Final
+> scan is halted at **0008:f027a / EFLAGS=46**, BP disabled, freeze clear.
+> The final U-only ring contains adjacent `14562 → 1457a`, with no separate U
+> entry for 14565; that is consistent with the last JE pairing, not a capture
+> of all 64 hardware V packets. The independent `check_board_immediate.py`
+> audit closes 0, checks the actual 16 MiB RAM, linked payload/caller/mappings,
+> counters, same-invocation lifecycle and sealed simulation/capture hashes,
+> and reports **PASS_PRIVATE_IMMEDIATE_CONTROL / acceptance=false**.
+>
+> ROM SHA-256:
+> `52ccd12296be98e9559cb525f6a96bb5691cf0a609dc87c6742291610e561285`.
+> Closed-capture manifest:
+> `6a1e03ffb4592851a53a2ac491628c1b81875bdda1a5464afe66eae8bd48a2fe`.
+> This narrows the failing memory-CMP/JE comparison to its memory/retained
+> context; it does **not** prove a cache, flag-bus, condition-packet or timing
+> cause. The subsequent memory-CMP JBE/JP results are recorded above.
+> No RTL, programming or clock change occurred; production hashes match.
+> Full Quake timedemo/movie acceptance remains **pending**. Candidate gameplay
+> IPC is **unmeasured**; verified pre-candidate baseline **0.42633263**, build
+> **5c2491f3**, cycles **7,099,999,637–7,199,999,637**.
 
 > **Implemented ZF follow-up (saved routed image, 2026-10-04):** the joint
 > four-level inspection in `ventium-fpga40-zf-commit-r4.rdrRvv` closes
