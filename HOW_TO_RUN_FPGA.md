@@ -6,6 +6,71 @@ debug tools as inspected through **2026-08-23**, with the safety preflight
 updated through **2026-10-05 UTC**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
 
+> **First-fault capture (2026-10-05 UTC):** the existing hardware
+> `dbg_cmp_cfg[22]` trigger is now exercised before releasing a private cold
+> control. The fixed profile is **01400000**: threshold `cfg[31:24]=1`,
+> fault-freeze enabled, retire comparator/divide trigger disabled. It detects
+> the first `start_fault` count; this is not every possible #DB/software-INT
+> path. The PS helper refuses to arm unless HALTED at the reset context with
+> BP disabled. A host fixture checks its exact writes and rejection guards.
+> It writes only CFG at **A0**, not the aliased readback or a range/flush toggle.
+> IDENT orders the write; it is not a readable CFG confirmation. A forensic
+> match preserves the frame/rings and then holds the guest in **SoC reset**.
+>
+> Before this run, the same private JP ROM was tried with BP **14577**, without
+> naming nominal V **14565**. The BP command closes **2** for its park timeout;
+> subsequent HALT also times out, controller **1**, native **0**. Invocation
+> `d64eab2b09854b0bb9edff9952842761` is closed, not restarted on observation
+> timeout. Its missing BP does not exclude visiting 14577 outside a parkable
+> issue boundary. After preserving live RAM/status, a late manual freeze records
+> last-retire **00a7:14562 / ESP=e07f8 / FLAGS=887**, fault source **14566**,
+> last vector **13**, state **10**, CR0 **80000011**. The actual configured
+> enum has 64 states; six-bit state 10 is unambiguously **S_SHUTDOWN**, not an
+> assumed optimized-register encoding. Fault PC is `int_src_pc`; this late
+> frame does not identify the initial exception. Capture manifest SHA-256:
+> `8afa3ed1c1b693da884f8f1be4b564ba6400e2c957f01951c0359e267ea1ce7c`.
+>
+> The new first-fault control reuses the **identical JP ROM**, original memory
+> CMP, caller and mappings. Old evidence is sealed before holding reset,
+> disarming and clearing forensic rings for the explicitly new cold run.
+> Invocation `32ae5f9a521f4022b32f36328862e3bb` closes native/controller **0/0**;
+> its intended diagnostic freeze, not native exit 0, is the result. No target
+> BP or instruction step intervenes. The first snapshot is **vector14/#PF**,
+> fault source **14577**, state **42/S_INT_GATE**, CR0 **80000011**.
+> Last-retire context is **00a7:14562 / ESP=e07f8 / FLAGS=2**; this is not a
+> raw V packet or a complete pre-fault architectural scan. Live CR0 after
+> freeze is reset **60000010**, not the saved fault context.
+>
+> Actual 16 MiB physical RAM verifies **one** completed software case,
+> caller-count **2**/checksum **6aaa**, second-case memory=1/EDI=0 and the
+> original linked payload/caller/PTEs. Correct JP for that case is **NT** to
+> **14567**; its encoded taken target is **1457a**, not **14577**. The captured
+> fault source is inside original `83 c4 10` at **14576**. Newest primary
+> retirement is 14562; no guest IRQ acknowledgment occurred. Last AR **6007c000**
+> is a page-table read, not proof of CR2. The earlier uninterrupted JP control
+> completed two cases before stalling on caller three, so the failing case is
+> **not fixed across invocations**. Neither arithmetic truncation nor a uniform
+> condition-bit fault follows from these observations.
+>
+> `check_capture.py` closes 0 for evidence integrity and reports
+> **acceptance=false**. All 25 exported files and nine native inputs are
+> pinned; closed-capture manifest SHA-256:
+> `9c73436cd46b2b67cc56d1d43cd9b879b1b01ecefca26dbba4e9e6bf45e3c712`.
+> Artifacts: `/home/yukidama/external/tmp/ventium-jp-firstfault.oZMhYP/`;
+> late-capture audit: `ventium-jp-badpc.dPlbOD/`. CR2/error frame/full pre-fault
+> GPRs and actual retained V/cache contents remain unavailable in this frame.
+> Next validate a general **private** exception handler/logger for error-code
+> and no-error-code frames, retaining these fields before any reset, while
+> reviewing the cache/retained-branch path. Do not patch production Quake or
+> promote these diagnostics to timedemo acceptance.
+>
+> The native worker is closed and the guest is now forensically frozen/reset.
+> No Vivado, RTL, programming or clock change occurred; production input hashes
+> still match. Full production timedemo/movie acceptance remains **pending**.
+> Candidate gameplay IPC is **unmeasured**; verified pre-candidate baseline
+> **0.42633263**, build **5c2491f3**, cycles
+> **7,099,999,637–7,199,999,637**.
+
 > **Memory-CMP condition controls (2026-10-05 UTC):**
 > `ventium-memorycc.8Zlcft` retains the original memory CMP at **14562** and
 > changes only production opcode 75 at **14565** to **76/JBE** or **7a/JP**.
@@ -55,8 +120,9 @@ not certification of the currently installed image.
 > frames before use. Do not patch production Quake, disable pairing or claim
 > a uniform flag/condition corruption from these partial observations.
 >
-> Both board daemons and all four model workers are closed; the JP guest remains
-> stalled with HALT pending. No Vivado, RTL, programming or clock change occurred.
+> Both board daemons and all four model workers closed; at this capture the JP
+> guest remained stalled with HALT pending. The later first-fault control above
+> supersedes that live-state description. No Vivado, RTL, programming or clock change occurred.
 > Production hashes remain unchanged. Full timedemo/movie acceptance remains
 > **pending**. Candidate gameplay IPC is **unmeasured**; verified pre-candidate
 > baseline **0.42633263**, build **5c2491f3**, cycles
