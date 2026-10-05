@@ -6,6 +6,73 @@ debug tools as inspected through **2026-08-23**, with the safety preflight
 updated through **2026-10-05 UTC**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
 
+> **Full private exception capture (2026-10-05 UTC):** a general private ROM
+> logger now records the exception/error frame, original ESP/SS, all integer
+> registers, selectors and CR0/CR2/CR3 before any reset. Its 26-word record at
+> physical **100** publishes its magic last. Ordinary supervisor interrupt
+> gates handle both error-code and no-error-code exceptions; the logger then
+> emits OUT F4 and HLT. This stops a diagnostic fault; it does not repair a
+> guest, patch production Quake/BIOS, restore a snapshot or disable pairing.
+>
+> Four pinned Pentium QEMU controls validate CPL0/CPL3 #UD and #PF frames.
+> Reference/native exits are **0/1**, with native 1 the expected
+> `isa-debug-exit` AL0 result. All 24 bounded frozen-model frame controls match
+> the exact decoded reference fields at AXI latencies 0/3/7, paired and
+> functional. The eight original-workload controls have seven consumer passes;
+> functional latency13 closes native 0 at its 2M-cycle cap after observing the
+> terminal boundary, before the required 200K-clock idle window. Its consumer
+> remains **1**, not a coverage pass or a demonstrated DUT failure. The complete
+> 32-job matrix therefore remains exit **1**. All 179 frozen inputs match.
+>
+> On the unchanged FPGA, directed CPL3 #UD and #PF records match the pinned
+> reference, including seeded registers, selectors, exact FLAGS=2 and both
+> privilege-transition stack frames. The first #UD PS reader closes **135 /
+> SIGBUS** while copying a 104-byte Device-memory mmap slice. That original
+> failure is preserved. Naturally aligned 32-bit reads recover the complete
+> record from the **same native invocation**, without restarting the guest.
+> The separately named R2 reader uses only aligned dwords, packs bytes in PS
+> memory and confirms a stable second read; subsequent #PF/workload controllers
+> close 0. Do not use a short mmap-slice memcpy for this Device-memory record.
+>
+> The original memory-CMP/JP private workload now captures **#PF14 / error4**
+> at **00a7:14566**, saved FLAGS **887**, ESP/SS **e07f8/af**,
+> CR2 **493c6488**, CR3 **7e000**, CR0 **80000011**. Pre-fault registers are
+> EAX=43, ECX=108, EDX=efe6cc, EBX=2c403c, EBP=0, ESI=2, EDI=80000000.
+> Actual physical RAM independently checks two completed cases, caller-count
+> **3**/checksum **9fff**, third-case inputs, linked payload/caller/logger and
+> original mappings (only the logger PTE's accessed bit changes). The complete
+> client code and caller remain unchanged relative to the JP parent; logger
+> bootstrap/IDT changes mean this is a new cold history, not an identical run.
+>
+> **14566 is the displacement byte of JP `7a13` at14565.** PF1 requires target
+> **1457a**; even correct fallthrough would be **14567**, neither14566. Decoding
+> from the captured byte yields `13 8b 4c 24 10 39`,
+> `ADC ECX,[EBX+3910244c]`; the actual client descriptor's DS base10000000 plus
+> captured EBX2c403c and that displacement equals **CR2=493c6488** exactly.
+> This corroborates a mid-instruction memory decode, not merely a suspicious
+> fault-PC label. It still does not reveal the actual retained V packet,
+> instruction-cache contents or the cause of the wrong boundary.
+>
+> The late frozen U-ring contains logger OUT/HLT and preceding U=14562. Its
+> transition entry CS8/EIP14566 mixes handler CS with fault source; do not grade
+> it as successful CPL0 retirement of the ADC. The coherent post-handler scan
+> and 16 MiB physical-RAM dump were obtained **before** late forensic freeze
+> held SoC reset. No first-fault reset trigger, target BP or STEP intervened.
+>
+> `check_board_captures.py` independently closes 0 on all three sealed exports:
+> manifests, actual RAM/code/mappings/frames, live-to-closed invocation identity
+> and production pins. This is evidence integrity, **acceptance=false**.
+> Artifacts are in `/home/yukidama/external/tmp/ventium-private-exception-log.8jCJnt/`;
+> workload capture manifest SHA-256:
+> `867e612c7c9ee4d6e3c496d59d04884ebd96e27a6030551bf23598ded765e3fe`.
+> Native workers are closed and the guest is forensically held reset. No RTL,
+> Vivado, bitstream, clock or production-media change occurred. Next trace
+> retained descriptor/length, frontend read identity and next-PC selection;
+> forwarding warnings alone do not establish a scalar-width or timing cause.
+> Full production timedemo/movie acceptance remains **pending**. Candidate
+> gameplay IPC is **unmeasured**; verified pre-candidate baseline **0.42633263**,
+> build **5c2491f3**, cycles **7,099,999,637–7,199,999,637**.
+
 > **First-fault capture (2026-10-05 UTC):** the existing hardware
 > `dbg_cmp_cfg[22]` trigger is now exercised before releasing a private cold
 > control. The fixed profile is **01400000**: threshold `cfg[31:24]=1`,
@@ -59,10 +126,9 @@ not certification of the currently installed image.
 > Artifacts: `/home/yukidama/external/tmp/ventium-jp-firstfault.oZMhYP/`;
 > late-capture audit: `ventium-jp-badpc.dPlbOD/`. CR2/error frame/full pre-fault
 > GPRs and actual retained V/cache contents remain unavailable in this frame.
-> Next validate a general **private** exception handler/logger for error-code
-> and no-error-code frames, retaining these fields before any reset, while
-> reviewing the cache/retained-branch path. Do not patch production Quake or
-> promote these diagnostics to timedemo acceptance.
+> The general private exception-handler follow-up is recorded above; these
+> earlier reset-held snapshots remain preserved. Do not patch production
+> Quake or promote these diagnostics to timedemo acceptance.
 >
 > The native worker is closed and the guest is now forensically frozen/reset.
 > No Vivado, RTL, programming or clock change occurred; production input hashes
