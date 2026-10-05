@@ -16,6 +16,13 @@ not certification of the currently installed image.
 > gameplay IPC remains **unmeasured**; pre-candidate baseline **0.42633263**,
 > build **5c2491f3**, cycles **7,099,999,637–7,199,999,637**.
 
+> The additional reversed-CMP overflow discriminator also passes64 hardware
+> cases, with QEMU/model flags93/93/46/887. The installed **core observation
+> ring captures only VGA text stores**, not instruction reads or a live L1
+> waveform; its old entries are invalid for these no-VGA-write private ROMs.
+> Outer AXI counters also have a different reset epoch from debug counters.
+> See the report before interpreting either diagnostic.
+
 > **Single-step localization (2026-10-05 UTC):** a new cold control reuses the
 > **identical JP ROM** from the full exception capture below. Existing hardware
 > breakpoints park at U=14562, then two host steps execute memory CMP and JP
