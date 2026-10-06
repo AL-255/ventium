@@ -14,9 +14,12 @@ Current verified active-timedemo IPC: **0.165995778**, retirement-observer image
 **8,721,490,845–19,169,282,165**, demo frames37–898. This is the closed R4
 aggregate with gaps between qualified groups, not an every-cycle full-demo
 score or40MHz qualification. The earlier closed R3 aggregate is below.
-The later diagnostic-only image `48288e83` has **no gameplay measurement**;
-the above hardware baseline predates it. Its calibrated branch-decision
-captures are recorded in the final October6 section below.
+The latest deployed physical candidate `5a0561fc` has **no gameplay measurement**;
+the above hardware baseline predates it. The R4 final-PC shortcut remains
+rejected: original CMP/JP64 fails after two cases, including a repeated run
+with the corrected diagnostic checker and management reset; the matched OR/JP64
+control passes all64 cases. The earlier diagnostic-only `48288e83` branch
+captures and the later physical candidates are recorded chronologically below.
 The older0.42633263 simulation baseline(build `5c2491f3`, cycles
 7,099,999,637–7,199,999,637) predates this FPGA candidate. The PS PL reference
 is not the core frequency; actual core counter/time measurements are used.
@@ -2885,3 +2888,104 @@ remain pending. Verified baseline is0.1659957781052303 **primary/U-only** IPC,
 53f129e9 at37.499869765MHz,127 qualified intervals with gaps spanning cycles
 8,721,490,845–19,169,282,165. It predates5a0561fc and is not total U+V IPC or
 a whole-demo all-cycle measurement.
+
+#### Current R4 upstream bindings, positive control and matched replay (October6)
+
+A read-only current-dd1e64cd query closes native0/pins0 and independent
+consumer0. It covers12 roots,413 mapped cells and2,959 pin records at five
+mapped levels, checking11 unchanged overlapping primitives and82 original
+driver bindings against the older ca23d499 query. Root
+`ventium-pc-primary-fanin.0DC9yR`; native data
+`23ee1a1290aa67969f95ec03494221b117d107718edad82cf81e445b7bd10cfd`;
+closure seal
+`17ff0238212d6089d71bc3af46c10c7bb0bcfbad96d1c3568506eb5bfd1f6f3f`.
+It changes no constraints, checkpoint, route, bitstream or deployment.
+
+Separate exhaustive checks establish only three local stable functions:
+
+- Inner selector LUT2 `4'h2`: `I0 && !I1` (four cases).
+- Low primary submux bit2 LUT5 `32'hB8BBB888`:
+  `I1 ? I0 : (I3 ? I2 : I4)` (32 cases).
+- V branch arm bit2 LUT6 `64'hAAAAA8080000A808`:
+  `I0 && (I4 ? I5 : (I2 ? I3 : I1))` (64 cases).
+
+The bounded carry-support analysis respects actual LUT dependencies and CARRY8
+bit lanes. The physical V-decision pin is not found in the inspected taken
+carry O4 cone (207 known signals/110 outside cutpoints) or not-taken carry O4
+cone (211/130); it does reach the V-branch selection LUT. These bounded
+absences **do not establish absence in the full graph**, arithmetic correctness,
+edge alignment, analog timing or a fault cause. Unconnected native ports
+remain explicitly unknown, not assumed zero. A further PC shortcut must prove
+the complete32-bit function and physical conditions; these three local truth
+tables are not that proof.
+
+The diagnostic controller's normal-terminal predicate had compared low EAX
+with **decimal42**. The ROM actually loads **hex0x42** before INT80 and OUT,
+and pinned QEMU's expected ISA-debug-exit return is133. A separately named
+controller corrects this predicate to `== 0x42`; the old sealed controller and
+archives are not rewritten. This checker mistake could reject a good terminal
+state, but cannot explain the earlier two-case wrong-PC/#PF capture.
+
+The original OR/JP64 positive-control ROM is qualified with pinned QEMU pentium
+(`b42b70e5`, native133) and run on the same5a0561fc candidate at measured
+**39.999874995068MHz**. It differs from the CMP/JP ROM at exactly ROM7e2:
+`39 ->0b`; JP14565, target1457a, caller geometry and input schedules remain.
+OR additionally changes operand direction and EDI writeback, so this is not
+an isolated flag-latency experiment. All64 cases and caller checks pass,
+checksumd5540, with a zero26-word exception record, unchanged private code and
+terminal CS8/EIPf0258/EAX42/CR2zero. Native0/controller0 close with MainPID0,
+Result success, invocation `f801f1cdec7041f793a35693c4fc2506`.
+
+OR evidence root `ventium-r4-or-control.8rT8BM`;41-file export
+`exception-log-3TvooP-export`, manifest
+`30a9d4627f402e418616bd9f09402eb71ee78f2200a26327d94118d6812dc360`.
+The independent consumer checks source/production pins, ROM/QEMU identity,
+reset scan, clock arithmetic, complete RAM scalars/record and native closure.
+Closure seal
+`069551808777da9f72521efa2047fe0dbdc8281707a7a703650fb13ee1a8f1c9`.
+This is a private positive control, **not** a repaired CPU, production Quake
+timedemo or standard-suite pass.
+
+After this archive/audit passes, only the closed OR export duplicates and its
+original duplicate VHD/RAM are pruned:44 files/101,309,308 logical bytes,
+53,702,656 allocated bytes reclaimed. Original metadata and seed remain;
+recovery is the complete host export plus the unchanged seed. Receipt
+`c46c963239dc5d7cc20fbe58fc853745c42e2a263a44c84e6f052ef200545c18`.
+
+The original CMP/JP64 ROM (`e6b20263`) also passes pinned QEMU pentium133.
+A matched FPGA replay uses the same corrected controller, production pins,
+clock and native binary, without reprogramming FPGA. Existing management
+CTRL holds general guest reset, disarms the forensic comparator, clears the
+old frozen rings, and retains HALT before cold init. The reset guard allows
+the FPGA lifetime retirement total to persist but requires zero new
+retirements; initial architectural reset and an entirely zero/invalid
+retirement observer are independently checked. The current boot's2/2-cell,
+256MiB, non-reusable no-map DDR reservation is rechecked outside System RAM.
+Held reset measures **39.999899298432MHz** with100 guards and zero retirement
+delta. No STEP, intended-V breakpoint, snapshot, forced flag, pair-disable,
+clock reduction or production guest patch is used.
+
+The corrected replay still **fails after two cases**: count2/caller3/checksum9fff,
+primary `14562 ->14576 ->14579 ->CS8:EIP0`, #PF14/error4 at savedCSa7:EIP0.
+Its entire16MiB physical RAM hash is identical to the original R4 failure,
+`b19b550907e7f635af23b48089ef97d7aa4419ce616bbfbf32dcbf9438af1d69`.
+The offline descriptor/page-table walk again derives RET's zero physical
+stack word001e5808. Native0/controller1 close, invocation
+`dac08d59e0984ae8a3cc685d064cf9bd`; all41 capture hashes,15 source pins,
+before/after production checks and the independent failure consumer pass.
+
+Matched replay root `ventium-r4-or-control.8rT8BM/cmp-repeat`;41-file export
+`exception-log-h0y3ot-export`, manifest
+`0b0ae5d324e629da9f7e84cf0675810735e4946e7ca41e6aa3d533396db8c5c8`;
+closure seal
+`60fe7b27d11341e3f9d82509dca5dc7f08858e326cd913aba209aac6a41248d0`.
+This establishes reproducibility, not acceptance. In particular14576 is a
+valid normal epilogue instruction on other cases: an unqualified breakpoint
+there would first stop good execution. Any future parked capture must
+qualify the immediately preceding primary retirement rather than treat
+every14576 stop as the wrong branch.
+
+The40MHz production timedemo/full movie and candidate gameplay IPC remain
+pending. Verified gameplay baseline remains0.1659957781052303 U-only IPC,
+53f129e9 at37.499869765MHz,127 qualified intervals with gaps spanning cycles
+8,721,490,845–19,169,282,165; it predates5a0561fc.
