@@ -92,8 +92,9 @@ request must wait (`core.sv:7473`). The parked observation therefore narrows
 the missing evidence to the live/immediate-response execution path; it does
 not by itself prove which dynamic packet selected the bad PC on the preceding
 edge. No stale-packet-consumption, decoder, cache or next-PC root cause is
-claimed. Passing controls must be rerun on the observer image before further
-attribution.
+claimed. The OR and reversed-overflow passing controls are rerun on the
+observer image below; they do not make this older packet attributable to the
+failing CMP.
 
 Evidence:
 `ventium-private-observer-boundary.cj7i9A/exception-log-XEIuht-export/closed-capture.sha256`,
@@ -102,6 +103,34 @@ independent `audit-result.json` and `closed-audit.sha256` (SHA-256
 `a7c6d0e6325a69becba638d3df8ab68c3a43e4c0a5567138e3a6927e3e027f51`).
 This qualifies a coherent retained-state read at the reproduced private fault,
 not a complete internal-state dump, ISA gate or completed Quake timedemo.
+
+Both original passing controls also complete64 cases on the same observer
+image: count64/caller64/checksumd5540, normal AL42/exit-HLT context and an
+entirely zero104-byte exception record. Each closes native0/controller0,
+retains the original ROM and production pins, and passes coherent reset and
+terminal scans before late forensic reset. No STEP or breakpoint is used.
+The independent host consumer verifies39 exported files per run and their
+separate native invocations:
+
+| Observer-image control | Native invocation | Closed-capture SHA-256 |
+| --- | --- | --- |
+| OR/JP | `917b3fd4d0db41fbbfdebb86f2dee47e` | `785625108da3f5ff8692d3d13baf56fd82e0efdef33aae1f3501b8fc50d4e6b0` |
+| Reversed CMP/JP, overflow discriminator | `95699908015643d3a2e13e5af36c54cc` | `405af9f51b09efad2b0af9980645e3cc4c05db750bd2f1b050086496e4c10358` |
+
+Artifacts are under `ventium-private-observer-controls.BFWmEY/`; the independent
+consumer prints `PASS_PRIVATE_OBSERVER_CONTROLS_ONLY` and its sealed audit is
+`closed-audit.sha256`, SHA-256
+`4f9b8be7673ccd4420a615747ac462af07c2222cf792f7dbed0e660d5129c98d`.
+The observer preserves the failing-case/passing-control distinction in these
+tests. It is still not a processor repair or standard-suite acceptance.
+
+To bound board RAM-disk usage, only the older closed `9loTuZ` run and its
+duplicate export are removed after checking all35 sealed files, the exact
+closed native invocation and the kept VHD seed. This recovers53,415,936 bytes;
+full recoverable evidence remains at
+`ventium-private-reversecmp-overflow.o9SjbO/exception-log-9loTuZ-export` on
+the host. Production media, the original rollback BIN and the new observer
+captures remain untouched.
 
 ## Model/reference verification
 
