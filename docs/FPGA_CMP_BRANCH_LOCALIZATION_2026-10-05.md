@@ -2228,3 +2228,41 @@ Verified gameplay remains **0.1659957781052303 primary/U IPC**, image
 `53f129e9` at37.499869764MHz,127 independently qualified active intervals
 with gaps spanning cycles8,721,490,845–19,169,282,165. It predates this
 observer; `a533550b` has no gameplay measurement.
+
+### Read-only PC-data cutpoint miter
+
+The follow-up query opens the actual deployed observer's routed checkpoint
+read-only and closes **native0/pins0**:60 roots,496 primitives and3197 pins.
+All preceding363 primitive/2405 pin records are literal-identical. It writes
+no checkpoint/BIN and changes no route, placement or clock constraint.
+Recovery root: `ventium-pc-data-cone.XG4N30`; native seal
+`97d0716c355983b24d0665217d9c709baa6f15c9ad75ef2190a981c2a513ea85`.
+
+The independent consumer verifies actual primitive inputs/INITs and passes
+512 live/retained ownership and target-LSB arithmetic cases,32,768 stable
+taken-V mux-LSB cases and8 ideal S_PIPE primary-PC mux cases. It keeps
+prediction and unused side-word inputs arbitrary. Original EIP bits0/1 have
+non-inverted C/D/CE/R, so an omitted D-input inversion is not the observed
+known-bit D/Q xor explanation. **This is a low-bit cutpoint check, not proof
+of the final PC mux, whole target word or simultaneous runtime values.**
+An initial consumer assertion incorrectly expects CI and CI_TOP to name the
+same GND alias; the two exact native aliases are asserted separately in the
+corrected run. The failed fixture receipt is kept. Analysis seal:
+`f539f2f3915e1593e2d55417bd1f4e1457c2256bf064082658fa387d07534451`.
+
+The targeted path reports include the requested branch/selector and actual
+EIP-bit0 endpoint in their resource bodies. Their longest reported path is
+48.505ns,111 logic levels,77.431% routing, beginning at a segment-base FF and
+passing cache/decode logic; at the modeled slow corner its reported setup
+budget corresponds to approximately20.6MHz. **That is not measured Fmax or
+proof this path is sensitized by the fault.** Measured core clock remains
+39.999876587MHz. The segment base is fixed during the private cases; using
+the overall report as the fault explanation would be unjustified. Native
+command headers reconstruct nested pin queries misleadingly, so the
+consumer verifies actual resource names in both paths of each report.
+
+The next diagnostic should capture branch decision, selected-target LSB and
+successive PC-mux outputs **together on one image/edge**, while retaining
+the original D/Q and selector observations. This avoids treating separate
+one-bit captures as simultaneous evidence. No CPU patch or extra full
+production run follows the static miter alone.
