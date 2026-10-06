@@ -2640,3 +2640,135 @@ final proof seal
 `ee5db78aca821e335954e0f5d1d25889b239255d359180e6be864e3fbe523c68`;
 proof output
 `3d68101da84fe5d650b8d47dfa639e4827e312f257028566ccf81e402cf647d1`.
+
+#### Full-word proof and bounded local PC candidate (October6)
+
+A fresh **read-only** query of the actually deployed ca23d499 checkpoint
+closes native0/pins0. It covers all32 original PC-D endpoints, four physical
+control outputs and CODE32,291 mapped fanin cells and176 nearby slice sites.
+The three-level query is bounded, not a full processor-cone proof. No CPU,
+clock, routing or checkpoint is changed by this query. It runs as one worker
+with a6GiB RAM/no-swap cap and450-second timeout, completing without OOM.
+
+The first consumer recognizes only the low15 LUT6/LUT6 structures and
+explicitly leaves bits15–31 unproved. The separately named second consumer
+also handles the native MUXF7/MUXF8 structures. It proves the selected
+identity for **all32 bits** under the same four physical cutpoints:
+
+```
+gate14=1, gate31=0, FP_override=0, reset=0:
+    original_final_D[bit] == selected_primary_carrier[bit]
+```
+
+Each carrier is independently fixed to0 and1; all other physical inputs are
+conservatively arbitrary. There is no assumed state-replica agreement,
+opcode, PC address or guest-value condition. The native structures are15
+LUT6/LUT6,12 LUT6/LUT3/MUXF7 and5 LUT6/MUXF8/MUXF7. High-bit carriers already
+contain the original mode/width handling; the proof does not substitute an
+unmasked arithmetic word. The proof establishes a stable Boolean identity,
+**not** analog settling, timing closure, a fault cause or a processor repair.
+
+Query/proof root `ventium-pc-commit-full-query.XqSdfq`, full closure seal
+`052791a097b7d4b78aecf49163379fd90aa1facd64c10061206b95e0687adf68`;
+native data
+`1b0c790e8b50a6a9d267a66ad20c17db79c3af8204b093cfcf846354487c109c`;
+passing consumer
+`45121001fbc9ba23bdc77bb4ef7fb1a4bcd1ae737b8a813961dd55c995cbd65e`.
+
+The vendor-primitive miter exhausts6,144 cases over all three structures:
+384 selected cases and5,760 inactive cases, including reset and FP priority.
+The original unprimed vendor-model fixture fails at vector0 with uninitialized
+combinational outputs and is retained. The separately named corrected fixture
+forces initialization transitions and passes. A second exact-representation
+test also passes6,144 cases with the prospective final **LUT6** INIT
+`64'hCACACACACACACACA`, not merely an abstract mux or a three-input surrogate.
+
+The proposed physical candidate keeps every original PC FF and every original
+final-LUT output/observer route. It adds32 copies of the original complete
+final-D function and three local predecoded selection LUTs,35 LUTs total and
+**zero FFs**. The original final LUT selects the primary carrier only under
+the proved condition; otherwise it selects the copied original D verbatim.
+Original reset, FP, exception and mode priorities therefore remain part of
+the original function. There are no forced flags, disabled pairs, bubbles,
+clock reduction, snapshots or production guest patches. CPU RTL is untouched.
+The inactive physical path gains a LUT stage, so hardware corner acceptance
+is still required even though the stable function is equivalent.
+
+The bounded route contract allows only96 original LUT-input changes and204
+new LUT-input connections. It requires unchanged original placements, FF
+polarities, pin maps/locks, clocks, constant trees and all32 original PC output
+routes; only declared input leaf branches may be removed. All other original
+CPU sink paths must survive, and the independent consumer must verify the
+post-router new-cell truth tables and all300 logical source bindings. The
+existing EIP-D scan output pins remain the actual final-D pins. The sampled
+older state mux must **not** be treated as the selected fast path when the
+new predicate is active. None of these criteria certifies routed timing or
+hardware execution on its own.
+
+Three closed, non-deployed native failures are preserved:
+
+- `ventium-pc-commit-bypass-eco.4GzXmk`: native1/pins0. Vivado rejects
+  reapplying existing LOCK_PINS on an already placed LUT. No checkpoint or
+  bitstream is written. The correction retains the existing complete native
+  locks literally; it does not unplace cells or relax pin protection. Seal
+  `a9574ca27767b8d8d3add2eeb9c89774115835a4d5af4200950c3898386bc64f`.
+- `ventium-pc-commit-bypass-eco-r2.57Vs62`: native1/pins0. The selected router
+  reports unreachable clone9/I4 at SLICE_X73Y223/A5 and clone15/I5 at
+  SLICE_X74Y224/B6. A free LUT BEL in a partly used slice is not proof of an
+  available input route. No candidate checkpoint/bitstream is written. Seal
+  `def1015fa0668be57ddd9d64ed4335fe76eb571df66df58b96f405744524a581`.
+- `ventium-pc-commit-bypass-eco-r3.7bUz9w`: native1/pins0. All300 selected
+  connections route, and the original cell/pin/route-preservation assertions
+  pass. The final physical gate nevertheless rejects two PDIL-1 errors and43
+  critical routing warnings. New predicate2 at SLICE_X73Y230/A6LUT and clone16
+  at SLICE_X75Y210/A6LUT conflict with inherited GLOBAL_LOGIC0 LUT
+  route-through programming (`O6=1`). A cell-free BEL is not a routing-free
+  resource. The rejected candidate never reaches checkpoint writing or
+  bitgen; this placement defect is not evidence of the original CPU fault.
+  Seal `4bfecee336ce78deba245412d05827094e74af5d44ef3c1a3ab2b0163976ed07`.
+
+The separately named R3 plan changes only the R2-unreachable clone placements, into
+B6LUT/C6LUT at SLICE_X73Y222. The current native inventory and an explicit
+preflight require zero original cells and zero used site PIPs there. All
+other placements, functions, connections and route protections are retained.
+Plan hash
+`696d4f5c0d8d7a6f35a5abe32c8d294ead9c0a99f5e9850291670daa3ffa41b4`.
+The physical gate has now rejected this plan despite its route-preservation
+checks; it is **not a saved or deployed repair**. The next read-only query
+checks all176 inventoried nearby sites for routed owners on native site-pin
+nodes, not just primitive occupancy and used site PIPs. Any new placement
+must exclude inherited routing resources; the full physical gate remains
+mandatory afterwards. No DRC waiver, constant-tree rewrite or original pin-map
+relaxation is authorized by this investigation.
+
+The current board remains fa2af871 at its previously measured39.999873MHz;
+there is no current-image gameplay measurement. Neither the proof nor the
+route attempts complete the40MHz cold production timedemo/movie or the
+standard suite. Verified gameplay baseline remains0.1659957781052303 U-only
+IPC, build53f129e9 at37.499869765MHz,127 qualified active intervals with gaps
+spanning cycles8,721,490,845–19,169,282,165. It predates this proposed candidate.
+
+The176-site query closes native0/pins0. Of47 originally cell-free,
+unprogrammed sites, six have inherited signal owners;41 have no original
+cells, used site PIPs or **query-reported signal** owners. Its first consumer
+incorrectly expects `get_nets -of_objects` to enumerate physical
+GLOBAL_LOGIC0 at the two DRC-rejected sites and closes1. Preserve that failed
+consumer and empty output. The separately named R2 consumer explicitly bounds
+the API coverage, verifies all176 original inventories and4,177 per-pin
+ownership records, and closes0. The two known bad sites are excluded by
+their existing cells, site PIPs and signal owners; absence of reported owners
+alone must not certify constant-route freedom.
+
+Read-only root `ventium-pc-commit-vacancy.udJybq`; closure seal
+`2022faf05f77a4d54f9e57dffc0bd609172340b124a8d6a50a4a99d5cb0bb040`;
+passing bounded consumer
+`326a8d91ef22b2e198da945e051ad3bf6638ab1c83fcbaad4b658e423743976b`.
+This query changes no checkpoint or board state.
+
+R4 selects **all35** new LUT locations from those41 conservatively qualified
+sites, instead of choosing cell-free BELs inside partly occupied slices. It
+repeats the same native ownership preflight before any mutation, retains all
+original protection/physical gates and passes the same6,144-case vendor
+primitive miter. Root `ventium-pc-commit-bypass-eco-r4.CFPOpr`, plan hash
+`c9956877c5c6a34041cf0c74c0e97e05376bf20699adf87dac9f7add62cf034e`.
+Its bounded native worker is pending; there is no new deployed CPU image.
