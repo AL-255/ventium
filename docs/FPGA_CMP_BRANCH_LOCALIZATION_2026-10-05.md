@@ -2,13 +2,18 @@
 
 Production Quake timedemo and the requested complete 15 fps movie remain
 **pending**. These are private cold diagnostics, not patched production Quake,
-save-state repairs, or acceptance substitutes. The installed FPGA image,
-clock, RTL, production BIOS and disk were not changed during these controls.
+save-state repairs, or acceptance substitutes. The original control runs did
+not change the installed FPGA image, clock, RTL, production BIOS or disk.
+On October6 the preserved debug-only observer image was deployed, as recorded
+below; it does not implement a processor fix. Production BIOS/disk and RTL
+remain unchanged by this investigation.
 
 Current candidate gameplay IPC: **unmeasured**. Verified pre-candidate baseline:
 **0.42633263**, build `5c2491f3`, cycles
 **7,099,999,637–7,199,999,637**. Last measured physical core clock was
-**39.999479 MHz**; the PS PL source is 100 MHz, not the core frequency.
+**39.999877 MHz** on the observer image; the PS PL source is100 MHz, not the
+core frequency. This held-reset clock sample has zero retirements and is not
+a gameplay IPC measurement or timing sign-off.
 
 ## Hardware results
 
@@ -55,9 +60,48 @@ The breakpoint does not name intended V PC14565. The debugger's paired-V
 boundary check would normally compare `14562+3=14565`, not14566. However,
 other debugger-history perturbations are not excluded. The PC ring exposes
 primary U retirement only: **no actual retained V descriptor, length, condition
-bits, next-PC mux input, or FPGA cache contents have been read**. Its legacy
+bits, next-PC mux input, or FPGA cache contents had been read in this original
+capture**. The later observer capture is described separately below. Its legacy
 `lin=` selector-times16 display is wrong for this protected-mode hidden base;
 use the captured hidden descriptor, not that display.
+
+## October6 observer capture: preserved defect, inactive older packet
+
+The deployed observer image reproduces the original wrong architectural EIP
+**14566**, FLAGS887, CR2zero, last primary retirement14562 and
+count2/caller3/checksum9fff before ADC/#PF. The original JP ROM, code bytes,
+guest mappings and operands are unchanged; there is no STEP, intended-V
+breakpoint, guest-memory repair or processor RTL fix. Reset and parked scans
+both satisfy the signature, metadata, two-read coherence and selector-restore
+protocol. Native invocation `4b1cc1fe7f9c4690a75728bf282c0dae` closes0 and
+the independent host audit verifies all42 exported files and the architectural
+and physical-RAM context.
+
+The338-bit physical scan is **not the failing packet**. Retained owner EIP is
+**14558**, all eight ACTIVE copies are0 and the retained PAIR bit is1. The
+decoded known fields match the earlier `CMP [EDX+8],ECX; JNE +1d` in the
+captured instruction bytes: U length low bits3, memory displacement8,
+memory-left CMP; V length low bits2, condition5 and displacement1d. Unlisted
+optimized fields, including length bit3, remain unknown. The failed CMP at
+14562 instead uses displacement10 and JP conditionA/displacement13. Do not
+attribute the retained V condition/length/target to that later CMP.
+
+In the frozen RTL, ACTIVE0 selects the live `u_d/v_d` descriptors rather than
+the retained packet (`core.sv:6155`). Retention is engaged when a new memory
+request must wait (`core.sv:7473`). The parked observation therefore narrows
+the missing evidence to the live/immediate-response execution path; it does
+not by itself prove which dynamic packet selected the bad PC on the preceding
+edge. No stale-packet-consumption, decoder, cache or next-PC root cause is
+claimed. Passing controls must be rerun on the observer image before further
+attribution.
+
+Evidence:
+`ventium-private-observer-boundary.cj7i9A/exception-log-XEIuht-export/closed-capture.sha256`,
+SHA-256 `c179ded78eec8103afe366b9c5aad730cc5e3c1272bab5e024e66def6c0b2aee`;
+independent `audit-result.json` and `closed-audit.sha256` (SHA-256
+`a7c6d0e6325a69becba638d3df8ab68c3a43e4c0a5567138e3a6927e3e027f51`).
+This qualifies a coherent retained-state read at the reproduced private fault,
+not a complete internal-state dump, ISA gate or completed Quake timedemo.
 
 ## Model/reference verification
 
@@ -832,6 +876,19 @@ The original raw BIN is retained unchanged for rollback (SHA-256
 This is a bitgen/provenance pass, not a timing sign-off, silicon-clock
 measurement, functional repair, gameplay measurement or completed timedemo.
 
+The sealed native BIN is deployed on October6 with the original image retained
+for rollback. Source and `/lib/firmware` hashes both match the generated BIN;
+the manager independently reports `operating` and IDENT is `a0486501`.
+The five-second read-only clock admission measures200,004,225 cycles over
+5.000120971 seconds: **39.999877 MHz**, with zero retirements. `CTRL=1` and
+`FRZINFO.frozen=0` remain true through100 guard checks and before/after the
+sample. Production pins and uploaded files still match. Deployment closes0,
+and the separate host consumer verifies all sealed deployment artifacts.
+Evidence: `ventium-debugscan-deploy.BL9amZ/native-export/closed-deployment.sha256`,
+SHA-256 `d19deb2b0424bd2e93ca7c1a5594a8b92281024608fdbf6c673872a585e03870`.
+This proves image transport/manager identity and the held-reset core clock,
+not CPU correctness or a successful Quake timedemo.
+
 Board scratch cleanup removes only the closed `rC7oCB` run and its duplicate
 board export, after checking native closure, all37 sealed files and the kept
 VHD seed. It frees53,465,088 bytes. Full evidence remains in the host's
@@ -849,8 +906,10 @@ and reports missing optimized packet fields as unknown. A retained owner EIP
 other than `14562` is explicitly not attributable to the failing CMP.
 Eight fake-MMIO tests pass, including338 one-hot physical-bit checks, four
 no-write precondition rejections and nine post-write safety/coherence failure
-cases. These are **offline tests only**: the new observer and reader have not
-yet been qualified on the board.
+cases. These are **offline tests only**. The separate October6 board capture
+now demonstrates coherent reset/bad-boundary reads and reproduces the defect;
+it does not extend those eight fake-MMIO results into a full hardware or ISA
+qualification.
 
 Attribution caution: matching retained owner PC is necessary, **not sufficient**
 to identify a dynamic instruction. In the frozen core, the packet FFs update
