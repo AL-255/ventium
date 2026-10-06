@@ -733,14 +733,104 @@ cases with A6 high),43,520 scan-bank cases and4,096 random envelopes. The
 compatible physical table is `64'h00022022ffff0000`: its low32 bits implement
 O5=NOP and its high32 preserve the original O6 function. This requires the
 physical G6 A6 input to be tied high; a native placement pass alone does not
-discharge that condition. The bounded native ECO must verify the exact one-node/
-one-PIP VCC extension, original G6 logical INIT and all five physical input
+discharge that condition. The bounded native ECO must verify the exact physical
+VCC extension, original G6 logical INIT and all five physical input
 mappings, unchanged original NOP route, all214 existing observer outputs,
 the complete original-route audit, full native routing and full DRC before
 bitstream generation. Offline proof only:
 `ventium-debugscan-nop-buffer.McEzrg/checks/result.json`; native plan SHA-256
 `39657e2a6ca9a2b4d3ad796e4faeed3b2d4c0479db258df24a8c71f994a71d6c`.
 No image is deployed or hardware acceptance claimed at this point.
+
+The first native NOP-helper attempt passes the exact shared-input/BEL checks
+and inserts only that LUT and observer-input splice. The physical-constant
+router returns0 with zero overlaps, but the required power-tree footprint
+check rejects its result. The inherited GND route and both inherited constant
+resource subsets are preserved through that check; this is **not** proof that
+the new A6 tie exists. No two-pin signal route, full preservation audit,
+accepted checkpoint, bitstream or deployment follows. It closes
+native1/input-pins0. Rejected attempt:
+`ventium-debugscan-nop-buffer.McEzrg/closed-rejected-constant-footprint.sha256`,
+SHA-256 `2cb02b30efa43b42a1a1ded781161b900263f51d3807896174aeb197779fe548`.
+The next diagnostic retains the same acceptance condition but saves an
+unqualified post-physical-router checkpoint and reports the actual added
+nodes/PIPs before rejecting a mismatch. Do not replace the required physical
+tie proof with the router's successful exit or the earlier offline truth table.
+
+The saved diagnostic resolves the footprint mismatch: GND is unchanged, and
+POWER gains exactly `INT_X71Y203/VCC_WIRE` plus `INT_X71Y203/IMUX_E46`, with
+the single PIP `INT_X71Y203/INT.VCC_WIRE->>IMUX_E46`. The required A6 node and
+PIP are both present; all inherited resources remain. The correct new power
+footprint is70,884 nodes/57,946 PIPs, not70,883/57,946. The earlier TAP76 tie
+needed only one additional node because its tile's VCC driver node was already
+represented; this tie also needs its local driver node. This is a guard-count
+assumption error, not an unexplained processor/resource change.
+
+The diagnostic closes native1/input-pins0, with no full route/hardware pass.
+Its independent consumer accepts **only** the exact constant delta and sealed
+diagnostic evidence. Checkpoint:
+`ventium-debugscan-nop-buffer-r2.XTXcgs/native-output/scan_nop_physical_DIAGNOSTIC.dcp`,
+SHA-256 `658970a80f44ed122055c39338117f30f608a3df36b31dc362a0606a442d8343`.
+Rejected attempt manifest:
+`ventium-debugscan-nop-buffer-r2.XTXcgs/closed-rejected-constant-footprint.sha256`,
+SHA-256 `3f0cf0ed76ac7094759301f6f20a4fd43fc6139c2fd234eec0bb705665f1968b`.
+The next full guarded attempt returns to the preserved pre-buffer checkpoint
+and requires exactly those two added nodes and one added PIP, with no other
+constant changes, before routing the two signal inputs and auditing the result.
+
+The corrected full attempt closes **native0/input-pins0**. Both signal pins
+route successfully; all225,203 routable nets are fully routed, with zero route
+errors. Native `ROUTED_FULLY=1`, `ERRORS_IN_ROUTES=0`; full DRC has zero errors
+and zero critical warnings. The lone router warning is the expected empty
+`PDIL-1*` violation query, not a waived violation.
+
+The full preservation audit passes:297,336 original primitive configurations/
+placements and415,174 unaffected original routes match;361 protected source
+branches retain all resources;471 constant aliases are verified against the
+original immutable tree data;214 existing observer output routes match.
+All608 source/sink groups match the explicitly spliced graph (the NOP source
+exchanges only the unrouted observer load for the helper input), and891 new
+input bindings are checked. The NOP source's original eight-node/seven-PIP
+route is identical, all five original G6 input mappings and its logical INIT
+remain identical, and the exact two-node/one-PIP power extension is verified
+before and after signal routing. The observer totals183 LUTs/32 shadow FFs;
+no processor FF is duplicated and no original route is unlocked.
+
+The independent consumer prints
+`PASS_PRIVATE_NOP_BUFFER_FULL_ROUTE_NO_STA_OR_HARDWARE_ACCEPTANCE`.
+Full-route-verified checkpoint (the cautious filename remains unchanged):
+`ventium-debugscan-nop-buffer-r3.V8pODG/native-output/scan_nop_buffer_routed_UNQUALIFIED.dcp`,
+SHA-256 `ab46d01b9ab8562f35b3e2e1ac418bcd0970f2ed765fb568928a052c8347de78`.
+Sealed attempt:
+`ventium-debugscan-nop-buffer-r3.V8pODG/closed-routing.sha256`, SHA-256
+`cf5ece336be88bf4ef31c4e3b56b902a0855d821db41858939b567ebf662b86f`.
+This discharges the **observer's physical routing** gate, not timing, hardware,
+the CMP/branch defect, gameplay IPC or timedemo acceptance. Generate only the
+native raw BIN from this closed checkpoint; do not synthesize/reimplement the
+processor, run bootgen or byte-swap the BIN. Board testing must still reproduce
+the original failing case and the passing controls before packet attribution.
+
+Native bitstream generation from that closed checkpoint also closes
+**native0/input-pins0**. Opening it again confirms full routing, zero route
+errors, zero full-DRC errors/critical warnings and the unchanged25 ns core
+clock (40 MHz;100 MHz reference). No synthesis, placement, routing or clock
+change is performed. `write_bitstream -bin_file` completes with zero warnings,
+critical warnings or errors. The raw BIN is20,606,636 bytes, with native sync
+`aa995566` at offset80; its `.bit.bin` copy is byte-identical, without bootgen
+or byte swapping.
+
+Native output:
+`ventium-debugscan-bitgen.0Neit8/native-output/ventium_fpga40_debugscan.bit.bin`,
+SHA-256 `3be5b6e464f27f1125540e3cb60c61dc0e45c8e5ce3f567a9802f40bc54ff14d`.
+Sealed generation:
+`ventium-debugscan-bitgen.0Neit8/closed-bitgen.sha256`, SHA-256
+`75aa0cf36584d41a2a22d1e235d5822d8961ef4acc72923756e8ab4ff2248727`.
+The independent consumer prints
+`PASS_PRIVATE_NATIVE_RAW_BIN_ONLY_NO_STA_OR_HARDWARE_ACCEPTANCE`.
+The original raw BIN is retained unchanged for rollback (SHA-256
+`30b0178eb924eb2914bda6300f7ef3f3bef233b48d821ef77bf452349f8beefb`).
+This is a bitgen/provenance pass, not a timing sign-off, silicon-clock
+measurement, functional repair, gameplay measurement or completed timedemo.
 
 Board scratch cleanup removes only the closed `rC7oCB` run and its duplicate
 board export, after checking native closure, all37 sealed files and the kept
