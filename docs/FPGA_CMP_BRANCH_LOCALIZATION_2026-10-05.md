@@ -1051,12 +1051,33 @@ before construction: only original-pin/constraint inventory records exist,
 with no new checkpoint. Its seal is
 `ventium-debugscan-retire-eco-r3.Co7axy/closed-rejected-inventory.sha256`, SHA-256
 `b402f3593ec15e15f76416596a41ac6252e903fb0eb80acd30c1ab3eb62ca448`.
-The long native inherited-net enumeration exhausted the budget before cached
-route loading; a separate data-only check indexes all416,253 recorded names
+The stack reports the budget check inside cached route loading; this attempt
+has insufficient stage instrumentation to attribute all preceding time to one
+query. A separate data-only check indexes all416,253 recorded names
 in1.025 seconds and parses all415,782 nonconstant routes in2.270 seconds total.
 The next attempt keeps the tested physical plan unchanged, resolves its
 complete recorded name set against all native hierarchical nets, and adds
 stage timestamps. No additional observer image has been deployed.
+
+That next attempt matches all416,253 recorded names against587,412 native
+hierarchical nets (native query20 ms, name matching5.571 seconds). It then
+closes **native1/input-pins0** at the same550-second budget, still inside the
+cached-route loader and before construction. This separates the successful
+name lookup from the unresolved loader delay; it is not full route closure.
+Seal: `ventium-debugscan-retire-eco-r4.dKUXqw/closed-rejected-cache-loading.sha256`,
+SHA-256 `dcd1907af7dbc50506ad46ca9c3d268097d8bf2145d104bb1684989751e6305f`.
+
+The array-lookup revision reaches the first constant alias promptly, but
+rejects `get_property TYPE` because its value is an ordinary net-name string,
+not an accepted native DB object. This is a **diagnostic-script object-cache
+defect**, not an FPGA constant-tree or processor failure. It closes
+**native1/input-pins0** before construction; no new checkpoint is written.
+Seal: `ventium-debugscan-retire-eco-r5.1hMfQI/closed-rejected-object-handles.sha256`,
+SHA-256 `aa73914ce2c88b7d9d5697433d11af57bf5d09a84805643cf3bc403e97315ae2`.
+The subsequent revision retains native objects directly in the shared array,
+with no ordinary dict/list return conversion. Its full preservation/route/DRC
+gates are pending. The logical sampler, scan ABI and board image remain
+unchanged by these rejected tooling attempts.
 
 Board cleanup removes only the closed `mFdR81` and `XEIuht` private runs and
 their duplicate board exports, after re-auditing both host recovery captures,
