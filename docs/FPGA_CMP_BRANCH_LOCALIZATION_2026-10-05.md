@@ -626,6 +626,84 @@ full DRC and the complete original-route/resource/logical guards. No
 full-route, timing, hardware or gameplay acceptance is yet claimed, and no new
 image has been deployed.
 
+The net-wide tap attempt verifies all415,174 unaffected original routes before
+routing, protects the213 completed observer outputs, and saves its prepared
+checkpoint. Routing390 pending source nets then stalls at seven overlaps;
+the exact private Vivado process is interrupted, not left running. It closes
+native1/input-pins0. Its pre-router checkpoint is diagnostic only, and there
+is no accepted post-router result. Sealed attempt:
+`ventium-debugscan-tapstage.VyT7YY/closed-routing.sha256`, SHA-256
+`84b2775097fca0705b8c89aae68cb6509f07fcbb02ef657dceca62f23a7016e2`.
+
+Pin-directed routing of741 observer/restored-debug inputs avoids that endless
+net-wide overlap loop and identifies eight blocked loads across seven nets:
+
+| Original source | New observer load |
+| --- | --- |
+| `dbg_arch_sel_reg[4]/Q` | `rdata_override_10/I3`, `rdata_override_18/I3` |
+| `u_dbg/s_rdata[24]_i_1/O` | `rdata_override_24/I0` |
+| `u_mgmt/s_rdata[28]_i_1/O` | `rdata_override_28/I0` |
+| `u_mgmt/s_rdata[30]_i_1/O` | `rdata_override_30/I0` |
+| `u_dbg/s_rdata[5]_i_1/O` | `rdata_override_5/I0` |
+| `u_dbg/s_rdata[7]_i_1/O` | `rdata_override_7/I0` |
+| Core retained U `is_nop/Q` | `word4_29_0/I1` |
+
+The native full-route report now has five unrouted nets and two nets with
+missing pins:225,195 of225,202 routable nets are complete. The router still
+returns failure. Its saved checkpoint is **unqualified**, SHA-256
+`5c6b63e245107d1099dc8241017e8e25783fd3540803b27cb25388b501c87995`.
+Original primitive/function/placement, protected-source resource, completed
+observer-route and constant-tree checks finish, but the550-second construction
+deadline expires during the full original-route comparison. The independent
+partial/full consumers must reject missing final preservation checks; do not
+reuse this failure as a qualified routing pass. Sealed attempt:
+`ventium-debugscan-tappins.O4Vwqw/closed-routing.sha256`, SHA-256
+`7ec1508c5e80b7f4b188b25b4eae28ab575a0ce4a8d495e24f99413832555a27`.
+
+All eight affected targets are new LUT4s, with two unused logical inputs in
+their six-LUT placements. The next test returns to the sealed lower-stage
+checkpoint rather than adopting the incompletely audited failure. It first
+checks the paired fifth-input BEL's physical vacancy, then remaps only the
+blocked logical input to A5 at the same LOC/BEL. Logical INIT, connectivity
+and original cells/routes must not change. Nine incident **new observer**
+routes may need temporary constraint removal during same-BEL replacement;
+their full constraints and all213 completed output routes must be restored
+exactly before tap routing continues. No original processor route is unlocked.
+This is an observer repair candidate, not a processor fix or hardware pass.
+
+The guarded eight-target remap completes its placement/configuration checks
+and restores all213 completed observer outputs exactly. Seven blocked loads
+now route; the retained U `is_nop/Q` load still fails at the new A5 endpoint.
+The full native report has225,201 of225,202 routable nets complete, one net
+with an unrouted pin and no wholly unrouted nets. The remaining connection is
+`pipe_mem_u_q_reg[is_nop]/Q` at `SLICE_X106Y203/EQ` to
+`word4_29_0/I1` at `SLICE_X115Y196/A5`
+(`INT_X77Y196/IMUX_E26`). Its earlier A2 endpoint also failed; this does not
+establish whether the source exit or destination entry is responsible.
+
+Unlike the preceding deadline-expired attempt, this attempt completes the
+entire preservation audit: all297,336 original primitive functions/placements
+and415,174 unaffected original routes match, all607 source/sink groups match,
+361 protected source branches retain their resources, both inherited constant
+trees match, all890 new input bindings are verified, and all213 completed
+observer output routes match. The only observer configuration differences are
+the eight explicitly audited logical-input-to-physical-pin remaps; INIT,
+connectivity and LOC/BEL do not change. Native closes1/input-pins0. The
+independent consumer prints
+`PASS_PRESERVED_PARTIAL_DIAGNOSTIC_ONLY_NO_FULL_ROUTE_OR_HARDWARE_ACCEPTANCE`.
+
+This checkpoint is suitable only as the preserved base for the final tap
+diagnostic, **not** for bitstream generation or deployment:
+`ventium-debugscan-tappins-map8.3dDG0v/native-output/scan_taps_routed_UNQUALIFIED.dcp`,
+SHA-256 `f426d3376aa1efc29c7d0498509f2f57acafbd933516162bc75ada3da46e4a84`.
+Sealed attempt:
+`ventium-debugscan-tappins-map8.3dDG0v/closed-routing.sha256`, SHA-256
+`f8fcb832a5aac92b065d292620a1e76e3f887ae9b80a92c542544d7a57237130`.
+Next inspect the original NOP source's actual routed receivers/exit and the
+remaining target's physical entry resources before selecting a repair. A
+duplicate FF with matching D/C/CE/R would not prove observation of the original
+retained state and is not an acceptable replacement for that tap.
+
 Board scratch cleanup removes only the closed `rC7oCB` run and its duplicate
 board export, after checking native closure, all37 sealed files and the kept
 VHD seed. It frees53,465,088 bytes. Full evidence remains in the host's
