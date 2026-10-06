@@ -11,7 +11,7 @@ remain unchanged by this investigation.
 Current candidate gameplay IPC: **unmeasured**. Verified pre-candidate baseline:
 **0.42633263**, build `5c2491f3`, cycles
 **7,099,999,637–7,199,999,637**. Last measured physical core clock was
-**39.999877 MHz** on the observer image; the PS PL source is100 MHz, not the
+**39.999871 MHz** on the retirement-observer image; the PS PL source is100 MHz, not the
 core frequency. This held-reset clock sample has zero retirements and is not
 a gameplay IPC measurement or timing sign-off.
 
@@ -131,6 +131,168 @@ full recoverable evidence remains at
 `ventium-private-reversecmp-overflow.o9SjbO/exception-log-9loTuZ-export` on
 the host. Production media, the original rollback BIN and the new observer
 captures remain untouched.
+
+## October6 direct retirement capture: correct live fields, D/Q discrepancy
+
+The qualified partial retirement observer was programmed without a CPU RTL,
+placement, original-route, clock or production-media change. Native bitgen
+closes0/pins0 and its independent raw-BIN consumer passes; BIN SHA-256 is
+`53f129e9e1c4e36bcd342fb38e4e9abd11edc55f1e2e0971b6a2a41292ad4001`.
+The actual deployment closes0, preserves both rollback images and all eight
+production pins, and measures **39.999870539 MHz** over5.000124108 seconds
+with reset held and zero retirements. It is not gameplay or STA acceptance.
+Deployment seal:
+`ventium-retire-deploy.kmw81J/native-export/closed-deployment.sha256`, SHA-256
+`4d91ec67e2eccf7dc7347c54f885ead9b2fc78acfe8a5101f900f11ff4d527cc`.
+The independent host deployment/clock arithmetic audit passes. An initial
+recursive retrieval returns1 on the unreadable empty once-marker directory;
+every sealed file and raw BIN is recovered and hash-checked independently,
+and a separate named-manifest retrieval closes0. No deployment is retried.
+
+The original failing JP ROM again parks **before** ADC/#PF at case2,
+CSa7/EIP14566/FLAGS887/CR2zero, primary retirement14562. This run uses no
+STEP, intended-V breakpoint or guest-memory repair. Both observer banks have
+correct signatures, coherent double scans and selector restoration; the
+actual registered primary PC, next-PC and PF match halted architecture.
+
+| Directly sampled field | Observed value |
+| --- | --- |
+| Architectural primary / next PC | `14562` / **`14566`** |
+| Prior EIP-D known value / known mask | `14547` / `ffffffdf`; bit5 **UNKNOWN** |
+| Prior original EIP enable | 1 |
+| Prior live U/V length low3 | 3 / 2; bit3 unknown |
+| Prior live V condition / displacement | A / `13` |
+| Prior ACTIVE / state | 0 / 28 |
+| Prior PF-D / architectural PF-Q | 1 / 1 |
+| Legacy retained owner / eight ACTIVE copies | `14558` / all0 |
+
+The sampled branch fields match the actual `CMP [EDX+10],EDI; JP +13`,
+and ACTIVE0 selects live inputs in the frozen RTL. The prior known EIP-D
+bits differ from committed EIP on **bit0**, despite sampled enable1.
+Do not choose a value for missing bit5: the partial word is not a complete
+EIP-D value. These observations narrow the next checks to branch/next-PC
+selection, commit, and observer edge validity; they do **not** prove a root
+cause or exclude transient/path-dependent sampling. The passing controls and
+correct-edge comparisons on this new observer are recorded immediately below.
+
+Native invocation `c6e3110a23c94a268ed7d43512861b63` and controller both
+close0. The independent host consumer verifies44 exported files, all input
+pins, native identity, original code/mappings/operands, zero exception record,
+all150 retirement storage bits (149 known), and all338 legacy physical bits.
+Capture:
+`ventium-private-masked-retire-boundary.okShyC/exception-log-WVpK5F-export/closed-capture.sha256`,
+SHA-256 `52da7989fccd07c624d92d73a0665289be6b831e96c6b138adff736fa77d8f4c`.
+Host audit seal `closed-audit.sha256`, SHA-256
+`a31682257d0941f598b9f7ee9ab58e4d344bc83c9a727e3bc9d33d6906e8eb3f`.
+Guest is held in reset after late forensic capture; no production Quake or
+Vivado worker is running. No CPU repair or timedemo/movie completion claimed.
+
+Both existing passing controls subsequently complete64 cases on the partial
+retirement image without BP/STEP or exceptions: count64/caller64/checksumd5540,
+AL42/normal exit-HLT. Coherent dual-bank reset and terminal scans pass, and
+native/controller both close0. The independent consumers verify41 exported
+files per control, exact ROM/input/native pins and full16MiB RAM:
+
+| Partial-retirement image control | Native invocation | Closed-capture SHA-256 |
+| --- | --- | --- |
+| OR/JP | `34edbd2705994325845233ed7c6fbd9f` | `2368ffbab79e7c22cbb9454afc1b98f2d43f84368d7b0925459410ce0979cfd9` |
+| Reversed CMP/JP, overflow discriminator | `2a339b5f1493457991b67ecc266a2fc7` | `e344b7c4de75d16dc5360878c19f62c74fb40156435b6535ca78841802eac3e6` |
+
+Host recovery root: `ventium-private-retire-controls.W2hm8V`.
+Independent audit seals: OR `closed-or-audit.sha256` SHA-256
+`7fe2105bd21726cf87b5fdcb28677c6ff20fb18cbaffa6c01dfd5d1961d66dbe`;
+reverse `closed-reverse-audit.sha256` SHA-256
+`d7654cee64b3f21d9a1c6335a8f152a34a5c43d714563b39e1ea4506bc9cf7f0`.
+An mDNS lookup fails once; the existing authenticated board session confirms
+its address10.0.0.214, and subsequent named captures use that address.
+
+Three additional cold runs capture **correct architectural successors**, not
+the intended V instruction14565, without STEP or payload changes. The original
+ROM stops at its first NT boundary14567/case0; OR and reversed-CMP controls
+stop at their first taken target1457a/case2. Each native/controller closes0,
+and its independent consumer checks43 sealed files, original mappings/code/
+operands, zero exception record and both raw scan banks. All four sampled
+edges below have primary14562, state28, ACTIVE0, enable1 and live U/V low
+lengths3/2, V conditionA/displacement13. Unknown EIP-D bit5 is excluded from
+every comparison, never guessed; length bit3 remains unobserved.
+
+| Edge | PF-D / PF-Q | EIP-D known value | Architectural next PC | Known D/Q XOR |
+| --- | --- | --- | --- | --- |
+| Original CMP/JP, first correct NT | 0 / 0 | `14547` | `14567` | 0 |
+| OR/JP, first correct taken | 1 / 1 | `1455a` | `1457a` | 0 |
+| Reversed CMP/JP, first correct taken | 1 / 1 | `1455a` | `1457a` | 0 |
+| Original CMP/JP, reproduced bad edge | 1 / 1 | `14547` | **`14566`** | **1** |
+
+Known D/Q XOR is `(sampled_known_D ^ actual_Q) & ffffffdf`, not a
+reconstructed full D word. The first NT retained owner is1455d; both taken
+controls and the failing edge retain the older14558 packet with all ACTIVE
+copies0. The observer can distinguish NT and taken inputs in these controls,
+so a universal readback bit0 mapping/alignment error is not an explanation
+supported by these samples. Path-dependent sampling, unobserved inputs and
+transients remain possible; these checks do **not** qualify observer STA or
+prove a forwarding, mux, enable, synthesis or silicon timing root cause.
+
+Recovery root: `ventium-private-retire-boundaries.po0KZG`.
+
+| Correct-edge capture leaf | Native invocation | Closed-capture SHA-256 |
+| --- | --- | --- |
+| `WBbyr6` (original NT) | `7aa7da843ff4479e83e096bcad4d1264` | `48cbc708ba17a33b229ea84f143a67ff9630a81d8c265424df38791a5f4b8844` |
+| `5BewYN` (OR taken) | `8eb26738b65e446eadf7067f29b4e096` | `7b54b330edbb75475d87f0f2d4a793b29f8a94145fe64f7947dcc428756bbd46` |
+| `z6vDs8` (reversed CMP taken) | `9f7e6471004341a3980f3721d39b08ea` | `a7b07a7632cd9aa627949e57d290ef85e9aa4587634d5030e24438fa83ad294b` |
+
+Their independent seals are `closed-original-audit.sha256`
+`da4a401907f67f2676a9d82290ed4843f4ed497bec68149e7227e56f49652150`,
+`closed-or-audit.sha256`
+`ab02acb5db5ddc7338977bff52c2d1f63d8dc65c6d31b1ae275a67ab4a9367ba`,
+and `closed-reverse-audit.sha256`
+`a2e8222a493830b84f182324ce7e1de012538fb258353301ba22ea0992028381`.
+The copied arithmetic decoder test initially lacks its fake-reader helper;
+after copying the unchanged helper it passes256 synthetic checks. That fixture
+failure is not a hardware/ISA finding, and synthetic checks are not acceptance.
+
+For these bounded captures, admission reserves127MB RAM-disk free space: a
+measured <64MiB run+export footprint plus >63MiB spare. The native service has
+RuntimeMaxSec60/MemoryMax384M/TasksMax32 and a30-second daemon window; no
+verification timeout, memory cap, payload or processor throughput rule is
+relaxed. Production Quake timedemo/movie and candidate gameplay IPC remain
+unmeasured/pending; the control ladder is not the standard suite.
+
+## October6 mapped branch-selector check
+
+A read-only query of the actually deployed routed checkpoint closes native0/
+input-pins0: eight roots,134 primitive cells and818 pins over three mapped
+levels. It performs no synthesis, placement, routing, constraint change,
+checkpoint write, bitgen or deployment. The independent consumer checks
+actual LUT INITs and pin connectivity, then passes **1,024** combinations of
+five effective flag cutpoints,16 condition codes and conditional/unconditional
+selection against the ISA Jcc truth table. For effective JP/conditionA, the
+mapped selector uses the effective PF cutpoint as expected.
+
+This clears the tested selector truth table, **not upstream flag production**.
+The branch's effective-PF producer is distinct from architectural PF-D.
+Captured architectural PF-D/PF-Q1 therefore does not establish the branch's
+forwarded PF value on the failed edge. Its upstream flag-write/shift controls
+and parity source remain unobserved. Net display names are not authoritative:
+one alias named `eflags[0]` is physically driven by architectural PF register
+bit2. The consumer uses native driver identities, not that alias spelling.
+
+The first native query closes1/pins0 because the diagnostic script applies
+`get_nets -of_objects` to a net instead of querying its native segments.
+Its source and rejected receipt are retained. The corrected query closes0.
+The initial independent consumer then rejects14 **unconnected, unused CARRY8
+outputs**; a separately named revision checks their exact identities and
+requires one driver for every connected pin and every input. It closes0;
+neither script failure is a CPU finding. No dynamic flag value, complete
+fanin-cone proof, STA sign-off, processor repair or timedemo acceptance follows
+from this static cutpoint check.
+
+Evidence: `ventium-retire-nextpc-fanin-r2.vHEVSU/closed-mapped-fanin.sha256`,
+SHA-256 `c9e2a41053d8a9b9ea7f2199dec490016ab07d5a0d654fe7e659027dcbedeab8`;
+independent closure `closed-independent-consumer.sha256`, SHA-256
+`4dce652724c6f1353b92812a2bbc1445e2ede5cab46dc6346a2e96cf76140c86`.
+The rejected query is separately sealed under
+`ventium-retire-nextpc-fanin.KyXRO9/closed-rejected-driver-query.sha256`,
+SHA-256 `4fee34b975b7023c05aa64e5bdc17bf37a587d6e4830be4fd4cbb2fcab1a07e5`.
 
 ## Model/reference verification
 
@@ -1268,7 +1430,8 @@ Full-parent-audit seal:
 `ventium-retire-full-parent-audit-r2.htKx0f/closed-parent-audit.sha256`, SHA-256
 `d962c63f26e5e2d134bfb6abc0fe0d146e062ff68fcd8c710f3b506b84f222f8`.
 **This qualifies only diagnostic graph/route preservation, not STA, silicon
-correctness, a CPU repair or timedemo acceptance.** No new deployment yet.
+correctness, a CPU repair or timedemo acceptance.** The separately qualified
+bitgen, deployment and direct retirement capture are recorded above.
 
 Native collections are not generic Tcl lists; preserving their object type
 matters when passing them back to native APIs. This is consistent with
