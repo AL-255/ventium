@@ -1167,8 +1167,41 @@ the vendor LUT event model; the corrected fixture makes real input transitions
 without forcing vendor state. The failed receipt is retained. Offline seal:
 `ventium-debugscan-retire-eco-r8.2oBeaz/closed-response-tests.sha256`, SHA-256
 `a539bbfad7150dd75784ba08bcff63bf9694add76cabfb0341d01c4a75b5faaa`.
-The single bounded native attempt is in progress; these tests are **not**
-route qualification, deployment, a CPU fix or timedemo acceptance.
+That native attempt places all605 primitives, then closes **native1/pins0**
+before routing or writing a checkpoint. A new hierarchy-crossing response net
+is rejected by `DONT_TOUCH` on the SoC instance; this is an observer-connection
+error, not a processor finding. No hierarchy protection is relaxed. Seal:
+`ventium-debugscan-retire-eco-r8.2oBeaz/closed-rejected-hierarchy-crossing.sha256`,
+SHA-256 `66fe08d799af34622c1e8cd95ceb1af0d6b439f3c50f233eb63eb481e836524c`.
+
+The following revision uses the already-proven first observer's method:
+exchange only debug output drivers inside `u_mgmt`, reusing the existing
+hierarchy-crossing response wire and leaving the FIFO D connection intact.
+Old shadow D is unchanged; old shadow Q is isolated on the fresh internal
+wire. No CPU output, old-cell placement or hierarchy protection is changed.
+A trusted-procedure mock checks32 exchanges and five rejection cases; the
+unchanged dual-bank reader passes its10 tests again. New native gates compare
+all original hierarchy protections and require zero invalid-site violations
+before routing. Swap-test seal:
+`ventium-debugscan-retire-eco-r9.CAFLC2/closed-swap-tests.sha256`, SHA-256
+`302c3fc1ff8f0e0dc7fb317e840eba7def1acdd1c7a50e89c776286d60545307`.
+The bounded R9 attempt constructs all605 primitives and32 readback swaps,
+passes the pre-route invalid-site DRC with zero violations, and completes
+constant routing with zero overlaps. It still reports incomplete clock-guidance
+metadata, and selected-pin routing fails on one newly added connection:
+original LUT6 `u_icache/eip[5]_i_1/O`, `SLICE_X73Y208.CMUX/C_O`, to
+`ven_retire_scan_data_pre_5/I0`, `SLICE_X75Y211/F1`. The parent inventory had
+that original EIP-D connection as **INTRASITE**, with no intersite nodes/PIPs.
+After saving a partial **unqualified** checkpoint, the550-second Tcl budget
+rejects before the after-routing preservation audit. Native closes **1/pins0**,
+with no bitgen or deployment; cancellation-time zero-error DRC is not closure.
+Seal: `ventium-debugscan-retire-eco-r9.CAFLC2/closed-rejected-pre5-placement.sha256`,
+SHA-256 `4536b4491e49d931110e38f201a468032048a09947ebde65697474b3b71282a0`.
+Partial checkpoint SHA-256
+`8aabc0b08e138659589de581efddb18e5bd3aa9a9d2de3312404e6050de88cce`
+is diagnostic input only. A read-only source/target site and routing-owner
+query precedes any proposed new-buffer pin or placement change. There is
+still no additional deployment, CPU repair or timedemo acceptance.
 
 Native collections are not generic Tcl lists; preserving their object type
 matters when passing them back to native APIs. This is consistent with
