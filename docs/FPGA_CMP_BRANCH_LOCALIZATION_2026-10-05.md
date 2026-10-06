@@ -333,9 +333,8 @@ the 40MHz preset; production-media pins and rollback images are preserved.
 The failure is now experimentally **clock/cadence-sensitive**. This does not
 yet distinguish physical capture timing from a memory-response/ownership race:
 changing the PS reference also changes the cadence relative to memory service.
-The next discriminator is a correct original-ROM taken-edge capture at the
-lower clock, to compare the actual ACTIVE/live-input path against the failed
-40MHz edge. No timing sign-off, root cause or processor fix is claimed.
+A subsequent correct original-ROM taken-edge capture at the lower clock is
+described below. No timing sign-off, root cause or processor fix is claimed.
 
 Recovery root: `ventium-private-clock-discriminator.feXIXN`.
 37MHz leaf `93HxOv`, native `6bdb4f05e72b4980a40930d5cd95e3da`, capture SHA-256
@@ -351,6 +350,68 @@ exact native invocations and live board source pins. This recovers111,009,792
 bytes. Complete recoverable host evidence remains under
 `ventium-private-retire-boundaries.po0KZG`; both fault captures, the latest
 reversed-CMP edge, seed, production media and firmware are retained.
+
+### Original taken-edge capture at37.5MHz: same live path
+
+At measured **37.499881010 MHz**, the original JP ROM parks at case2,
+CSa7/EIP1457a/FLAGS887/CR2zero, primary retirement14562, without STEP or
+intended-V breakpoint. Its known EIP-D value is1455a, maskffffffdf; the known
+D/Q XOR is0. Prior ACTIVE0/CE1/state28, live U/V low lengths3/2, conditionA/
+displacement13 and PF-D/Q1/1 match the corresponding fields of the failed
+40MHz edge. The retained owner is14558 and all eight ACTIVE copies are0,
+also matching that failure. Both runs have the same case2 operands, original
+code and mappings, and caller3/checksum9fff. EIP-D bit5 and length bit3 remain
+unknown in both.
+
+Thus passing merely by switching to the retained-packet path is **not supported
+by these samples**. Unobserved decode/forwarding inputs, response phase,
+transients, replica capture timing and observer timing remain unresolved;
+matching ACTIVE/live fields does not prove identical full-cycle waveforms.
+The launcher restores the 40MHz preset after native0/controller0. The
+independent host consumer verifies47 sealed files, source/native/image pins,
+all149 known retirement bits,338 legacy bits, architectural context, zero
+exception record and complete16MiB RAM.
+
+Recovery root `ventium-private-clock-taken-boundary.h6Gf3e`; leaf `2iOFH6`,
+native `56366081759c49599294689b9d807b09`, capture SHA-256
+`073a45c38149a78a53ce8cf425afedfa6c16bf7ccb863b5e35ecc96a479fc749`.
+Independent closure SHA-256
+`84f1db3eb09c4ecba1c75184360e25b88014d18f3e8923f922c0987e07ecf591`.
+Before this capture, only the closed host-archived `93HxOv` and `z6vDs8` board
+runs and their duplicate exports are removed, recovering110,362,624 bytes;
+their full host archives remain. The original and newly reproduced 40MHz
+faults, seed, media and firmware remain intact. This is not a 40MHz repair,
+standard-suite pass, gameplay IPC measurement or completed Quake timedemo.
+
+### Read-only directed path query
+
+The deployed routed checkpoint is queried without optimization, routing,
+constraint changes, checkpoint writes, bitgen or deployment. Native closes
+0/pins0. A data-only consumer checks all24 max/min queries through effective-PF
+or V-branch-taken to EIP bits0/2/3/4, including the subset starting at the32
+EIP registers. It checks actual traversed resource rows, not replay of Vivado's
+misleading collection-formatted `Command` header. The bit4 destination is
+FDSE/S, while bits0/2/3 are FDRE/R; the earlier incomplete query's mistaken
+reset-pin assumption closes native1/pins0 and is not a processor finding.
+
+The EIP-rooted max paths through effective PF have47.614–47.984ns data delay
+and110 logic levels under the saved25ns/40MHz constraint. Roughly78% of that
+delay is routing. Their unregistered chain includes fetch-window selection,
+decode, address/translation, memory-return/flags, V condition and next-PC.
+Changing EIP sources are therefore not absent from the long static cone.
+**These are slow-corner static paths, not a measured Fmax, proof that the
+complete path is sensitized by case2, or proof of the failure's root cause.**
+The measured board frequencies remain the37.499884/39.999874MHz controls above;
+the memory-response race alternative is still open.
+
+Recovery root `ventium-retire-directed-paths-r2.3nNLyv`; native seal SHA-256
+`c017cf581923e1693fa3f4dc08d5f54988d127685e0baf104c40db38160d8b68`;
+independent seal SHA-256
+`8d3ffe55787ebf82ca6a78b6c77131cb371c2e5348fd9c25f70baed5ba11da23`.
+The separate data-only cleanup audit validates all six host recovery archives,
+four closed cleanup receipts and exact deletion sets. Cleanup seal SHA-256
+`61a11889fb963953d225861ffe8ac96c282d8a7ba803f6d14a1b1dc73e331d9c`;
+it does not infer the current live board state from historical receipts.
 
 ## Model/reference verification
 
