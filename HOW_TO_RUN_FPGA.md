@@ -3196,6 +3196,22 @@ Malformed requested-mode frames, impossible metadata, and metadata errors
 after accepted capture starts remain fatal. Its26 mock/signal tests pass;
 that is not hardware/timedemo qualification. Keep the older client and its
 receipts intact and use separately re-pinned movie helpers for the new client.
+The separately pinned `ven_board_probe.startup-r3.py` additionally permits
+an **all-zero** pre-target raster: the recorder can complete a VSYNC interval
+with no active video during mode setup. Partial-zero metadata still fails.
+Source SHA-256 `8ff672d0af63ecc18b8519b6e7fdfe2f1137c9284b7eeb99867b28de0012b6a3`;
+its28 tests pass. This client retrieves a complete320x200/64,000-pixel board
+frame, but a single post-run image is not a full timedemo movie.
+The subsequent generic client permits an exact`0x0/pixels0` empty interval
+also after accepted capture starts: display blanking is not a malformed image.
+With explicit dimensions and`--skip-unmatched`, it re-arms without reading
+stale BRAM or emitting a replacement frame. A bounded consecutive-gap deadline
+also limits later capture waits and resets only after a complete requested
+image. Partial-zero metadata, nonempty post-start corruption and transport
+errors still fail. All33 tests pass; source SHA-256
+`9b60a741522dc6519ace852d4e338fc09cbcafd12d6e3c5167cdd1532984c8cd`.
+Historical client pins/receipts remain unchanged; install this under a new
+name and re-pin its movie helpers instead of overwriting closed-run tools.
 Stream binary pixels over
 non-PTY SSH to a host-owned run directory rather than accumulating frames on
 the board. Root's two actual-board synthetic FIFO tests passed byte integrity

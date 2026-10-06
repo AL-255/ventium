@@ -1,19 +1,21 @@
 # FPGA memory-CMP/conditional-branch localization — 2026-10-05 UTC
 
-Production Quake timedemo and the requested complete 15 fps movie remain
-**pending**. These are private cold diagnostics, not patched production Quake,
+The requested **40MHz** production Quake timedemo and complete15fps movie
+remain **pending**. Unmodified production media completes a separate37.5MHz
+cold diagnostic, documented below. These are private cold diagnostics, not patched production Quake,
 save-state repairs, or acceptance substitutes. The original control runs did
 not change the installed FPGA image, clock, RTL, production BIOS or disk.
 On October6 the preserved debug-only observer image was deployed, as recorded
 below; it does not implement a processor fix. Production BIOS/disk and RTL
 remain unchanged by this investigation.
 
-Current candidate gameplay IPC: **unmeasured**. Verified pre-candidate baseline:
-**0.42633263**, build `5c2491f3`, cycles
-**7,099,999,637–7,199,999,637**. Last measured physical core clock was
-**39.999871 MHz** on the retirement-observer image; the PS PL source is100 MHz, not the
-core frequency. This held-reset clock sample has zero retirements and is not
-a gameplay IPC measurement or timing sign-off.
+Current verified active-timedemo IPC: **0.147150958**, retirement-observer image
+`53f129e9`, measured **37.499890854MHz**, cycles
+**10,079,905,963–10,157,193,207**, demo frames40–50. This is a short interval
+from the current cold diagnostic, not a full-demo score or40MHz qualification.
+The older0.42633263 simulation baseline(build `5c2491f3`, cycles
+7,099,999,637–7,199,999,637) predates this FPGA candidate. The PS PL reference
+is not the core frequency; actual core counter/time measurements are used.
 
 ## Hardware results
 
@@ -444,6 +446,78 @@ test SHA-256 `17e908a8276a45e67f5f2301ac6f4096305b51d751d882a9bda30ad20e029e54`.
 There is no RTL, guest-code, color, dimension or frame-rate change. A fresh
 cold diagnostic is being retried separately; this software test is not a
 hardware movie or timedemo pass, and the40MHz CPU defect remains open.
+
+The next cold run uses the same image and original production ROM/media at
+measured**37.499881997MHz**. Its recorder passes the initial partial raster
+and720x400 text frames, then exits2 on a completed`0x0/pixels0` interval.
+The monitor now retains that recording failure while allowing the unchanged
+guest to finish. Native invocation`93599532b19246aba13ab148f20018e6` closes
+normally(code1/status0/MainPID0), with `done: x86_polls=76800128` at its600-second
+service-loop budget. The monitor exits1 because capture failed, restores the
+40MHz preset and holds guest reset. **Recording failure is not relabelled as
+success, and this is not40MHz qualification.**
+
+The closed FAT-console checker independently reads the original held disk
+descriptor. It finds a **fresh969-frame/demo1 result:288.3 guest seconds,
+3.4 printed fps**, after a new/changed-byte-extent playback marker; the
+465-byte baseline has no result. It checks all retained result lines, error
+patterns, numeric rounding, FAT membership and unchanged disk hash. The helper
+exits0 with `CLOSED_CONSOLE_EVIDENCE_VALIDATED_NOT_FPGA_ACCEPTANCE`; hardware,
+native closure and cold-reset evidence remain separate. A live read also
+observes playback active at865 frames before the flag later clears. The short
+performance sample occurs afterward, so its0.138444 IPC is **not claimed as
+verified timedemo/gameplay IPC**. At that point candidate timedemo IPC was
+unmeasured; the following cold run supplies the active interval reported above.
+
+Recovery root`ventium-fpga40-capture.VMIAgs/quake-clock37-r2.uBQifa`;
+board closure SHA-256
+`d96f87860062c9494ab2127f81b53a3e5eba024c8b072e3cffd267509651ff16`;
+closed disk SHA-256
+`55a47e20f5fd9107598b4b8eb9e982b5a7b49dcad387021977b7609e7d14c73e`.
+Independent closed-console seal SHA-256
+`37a505b531f3e012b81d2af223314cf76796ccef301eaa4168b5c660d69ccfff`.
+
+The frozen recorder RTL can legitimately complete an empty interval when
+VSYNC runs with no active video. A second generic client revision permits
+only the exactall-zero case under the same pre-first-target/explicit-mode/
+opt-in/deadline restrictions. Partial-zero metadata, requested-mode corruption
+and any metadata error after the first accepted frame stay fatal. All28
+mock/signal tests pass(native0,0.011s). Client SHA-256
+`8ff672d0af63ecc18b8519b6e7fdfe2f1137c9284b7eeb99867b28de0012b6a3`;
+test SHA-256 `f86045a0a052a87481b7effba9a662607e786a064f92d58223a8dd38e79bd035`.
+An actual post-run capture returns320x200/64,000 pixels, sequence7 and CRC
+`8a424917`. Lossless PPM→PNG conversion preserves RGB bytes exactly(SHA-256
+`b3bbd75eaae4263b3323eca109b188b57b70ec6df11269bb02e3312f200ee777`).
+This shows the capture interface works beyond startup, not full temporal
+coverage or capture of all game frames. No sync-polarity defect is established;
+no recorder RTL, CPU RTL, guest payload or colors are changed.
+
+### Cold recording R3: active IPC, later empty scanout
+
+The next original-media cold run uses the same diagnostic image at measured
+37.499876871MHz. The recorder emits16 valid320x200 frames, then exits2 on
+sequence24's exact`0x0/pixels0` interval. This is **not a complete movie**;
+transport exit0 does not make producer exit2 successful. The unchanged guest
+continues under native invocation`f1e825a40f774603b2565f9073f001fa`.
+Read-only engine witnesses bracket the independent-checked sample above:
+demo active1, the same nonzero demo file, frames40→50, no debug freeze,
+HALTREQ, breakpoint or single-step;77,287,244 cycles and11,372,892 retirements.
+Recovery root`ventium-fpga40-capture.VMIAgs/quake-clock37-r3.N7gmzr`.
+This first sample is not a full-run weighted IPC estimate.
+
+The generic client is consequently revised to skip an **exact all-zero empty
+scanout**, with explicit dimensions and`--skip-unmatched`, before or after
+accepted capture starts. The frozen recorder can end any VSYNC interval with
+zero active pixels; zero stale BRAM bytes are drained or emitted. No black
+placeholder is manufactured. The wait has a consecutive-gap deadline, also
+applied to subsequent capture waits; only a complete requested-mode image
+resets it. Nonempty post-start malformed metadata, partial-zero metadata,
+requested-mode corruption, timeouts and transport faults remain failures.
+All33 mock/signal tests pass(native0,0.012s), including late empty intervals,
+deadline reset/non-reset cases, no payload drain and opt-in restrictions.
+Client SHA-256`9b60a741522dc6519ace852d4e338fc09cbcafd12d6e3c5167cdd1532984c8cd`;
+test SHA-256`baf075b243b02bb23f381e244b9b02e090789a4f2211736b7265e7336a4c0ad4`.
+This is a host/PS capture change, not a CPU, recorder RTL or guest fix.
 
 ## Model/reference verification
 

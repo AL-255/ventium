@@ -363,6 +363,24 @@ class CaptureStopTests(unittest.TestCase):
         self.assertEqual(h.ctrl_writes, [(PROBE.R_CAP_CTL, 1)])
         self.assert_restored(h)
 
+    def test_empty_pre_target_scanout_is_filtered_without_emission(self):
+        h = Harness(plan=[PROBE.CaptureMetadataError(1, 0, 0, 0)])
+        h.args.skip_unmatched = True
+        self.assertEqual(h.run(), 0)
+        self.assert_records(h, 3)
+        self.assertEqual(h.captures, 4)
+        self.assert_restored(h)
+
+    def test_actual_empty_pre_target_scanout_never_drains_payload(self):
+        h = Harness(phase="ready_wait", actual="valid")
+        h.dimensions = (0, 0)
+        h.pixel_count = 0
+        h.args.skip_unmatched = True
+        self.assertEqual(h.run(), 0)
+        self.assert_records(h, 0)
+        self.assertEqual(h.ctrl_writes, [(PROBE.R_CAP_CTL, 1)])
+        self.assert_restored(h)
+
     def test_startup_filter_requires_explicit_geometry_and_optin(self):
         for skip, dimensions in ((False, (2, 2)), (True, (0, 0))):
             with self.subTest(skip=skip, dimensions=dimensions):
@@ -386,11 +404,72 @@ class CaptureStopTests(unittest.TestCase):
 
     def test_metadata_fault_after_first_requested_frame_is_fatal(self):
         valid = (1, 100, 2, 2, 4, b"abcd")
-        h = Harness(plan=[valid, PROBE.CaptureMetadataError(2, 128, 3, 360)])
+        for error in (PROBE.CaptureMetadataError(2, 128, 3, 360),
+                      PROBE.CaptureMetadataError(2, 0, 3, 0),
+                      PROBE.CaptureMetadataError(2, 2, 2, 3)):
+            with self.subTest(error=error):
+                h = Harness(plan=[valid, error])
+                h.args.skip_unmatched = True
+                self.assertEqual(h.run(), 2)
+                self.assert_records(h, 1)
+                self.assertNotIn("startup VGA metadata", h.stderr.getvalue())
+                self.assert_restored(h)
+
+    def test_empty_scanout_after_requested_frame_is_filtered(self):
+        valid = (1, 100, 2, 2, 4, b"abcd")
+        h = Harness(plan=[valid, PROBE.CaptureMetadataError(2, 0, 0, 0)])
         h.args.skip_unmatched = True
+        self.assertEqual(h.run(), 0)
+        self.assert_records(h, 3)
+        self.assertEqual(h.captures, 4)
+        self.assertIn("skipping empty VGA scanout", h.stderr.getvalue())
+        self.assert_restored(h)
+
+    def test_empty_scanout_filter_requires_geometry_and_optin(self):
+        for skip, dimensions in ((False, (2, 2)), (True, (0, 0))):
+            with self.subTest(skip=skip, dimensions=dimensions):
+                h = Harness(plan=[PROBE.CaptureMetadataError(1, 0, 0, 0)])
+                h.args.skip_unmatched = skip
+                h.args.width, h.args.height = dimensions
+                self.assertEqual(h.run(), 2)
+                self.assert_records(h, 0)
+                self.assert_restored(h)
+
+    def test_empty_scanout_retry_after_requested_frame_is_bounded(self):
+        valid = (1, 100, 2, 2, 4, b"abcd")
+        h = Harness(plan=[valid, PROBE.CaptureMetadataError(2, 0, 0, 0),
+                          PROBE.CaptureMetadataError(3, 0, 0, 0)])
+        h.args.skip_unmatched = True
+        ticks = iter((0, 601))
+        h.monotonic = lambda: next(ticks)
         self.assertEqual(h.run(), 2)
         self.assert_records(h, 1)
-        self.assertNotIn("startup VGA metadata", h.stderr.getvalue())
+        self.assertIn("empty scanout did not resume before timeout", h.stderr.getvalue())
+        self.assert_restored(h)
+
+    def test_empty_scanout_deadline_resets_only_after_requested_frame(self):
+        a = (2, 200, 2, 2, 4, b"abcd")
+        b = (4, 400, 2, 2, 4, b"efgh")
+        h = Harness(plan=[PROBE.CaptureMetadataError(1, 0, 0, 0), a,
+                          PROBE.CaptureMetadataError(3, 0, 0, 0), b])
+        h.args.skip_unmatched = True
+        ticks = iter((0, 1, 601, 602))
+        h.monotonic = lambda: next(ticks)
+        self.assertEqual(h.run(), 0)
+        self.assert_records(h, 3)
+        self.assertEqual(h.captures, 5)
+        self.assert_restored(h)
+
+    def test_out_of_mode_frame_does_not_reset_empty_scanout_deadline(self):
+        wrong = (2, 200, 3, 2, 6, b"abcdef")
+        h = Harness(plan=[PROBE.CaptureMetadataError(1, 0, 0, 0), wrong])
+        h.args.skip_unmatched = True
+        ticks = iter((0, 1, 601))
+        h.monotonic = lambda: next(ticks)
+        self.assertEqual(h.run(), 2)
+        self.assert_records(h, 0)
+        self.assertEqual(h.captures, 2)
+        self.assertIn("empty scanout did not resume before timeout", h.stderr.getvalue())
         self.assert_restored(h)
 
     def test_stop_after_startup_filter_emits_no_partial_record(self):

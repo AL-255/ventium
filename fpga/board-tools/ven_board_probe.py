@@ -649,7 +649,7 @@ def _rgb332_to_rgb24(pixels: bytes) -> bytes:
 
 
 class CaptureMetadataError(RuntimeError):
-    """A completed recorder image whose reported raster is not rectangular."""
+    """A completed recorder image with unusable or empty raster metadata."""
 
     def __init__(self, sequence: int, width: int, height: int, pixels: int):
         super().__init__(
@@ -761,20 +761,53 @@ def vga_capture_probe(args: argparse.Namespace) -> int:
         oversized_skips = 0
         startup_metadata_skips = 0
         startup_metadata_deadline = None
+        empty_scanout_skips = 0
+        empty_scanout_deadline = None
         while completed < args.frames:
             if stop_requested:
                 break
+            capture_timeout = args.frame_timeout
+            if empty_scanout_deadline is not None:
+                remaining = empty_scanout_deadline - time.monotonic()
+                if remaining <= 0:
+                    raise RuntimeError("VGA empty scanout did not resume before timeout")
+                capture_timeout = min(capture_timeout, remaining)
             try:
                 sequence, cycle, width, height, pixels, payload = _capture_scanout_frame(
-                    ctrl, frame_timeout=args.frame_timeout, poll_interval=args.poll_interval
+                    ctrl, frame_timeout=capture_timeout, poll_interval=args.poll_interval
                 )
             except RuntimeError as error:
+                # A READY interval with no active pixels is not an image.
+                # Display blanking can occur after mode setup as well as
+                # before it. Opt-in filtering may re-arm, but must not drain
+                # stale BRAM, emit a fabricated black frame, or wait forever.
+                if (
+                    isinstance(error, CaptureMetadataError)
+                    and args.skip_unmatched and args.width
+                    and (error.width, error.height, error.pixels) == (0, 0, 0)
+                ):
+                    now = time.monotonic()
+                    if empty_scanout_deadline is None:
+                        empty_scanout_deadline = now + args.frame_timeout
+                    if now >= empty_scanout_deadline:
+                        raise RuntimeError("VGA empty scanout did not resume before timeout") from error
+                    empty_scanout_skips += 1
+                    if empty_scanout_skips == 1 or empty_scanout_skips % 20 == 0:
+                        print(
+                            f"skipping empty VGA scanout: {error} "
+                            f"(count={empty_scanout_skips}); no payload emitted",
+                            file=sys.stderr if stream is not None else sys.stdout,
+                            flush=True,
+                        )
+                    time.sleep(0.25)
+                    continue
                 # VGA timing changes during cold firmware setup can leave a
                 # nonrectangular transitional raster. Only before the FIRST
                 # accepted requested-mode frame, and only with explicit
                 # --skip-unmatched and dimensions, discard an out-of-mode
                 # raster WITHOUT draining or emitting any of its payload.
-                # Requested-mode corruption, zero/oversized metadata, and all
+                # Partial-zero/oversized metadata is not safe. Requested-mode
+                # corruption, impossible metadata, and nonempty metadata
                 # errors after requested capture starts remain fatal.
                 if (
                     isinstance(error, CaptureMetadataError)
@@ -828,6 +861,7 @@ def vga_capture_probe(args: argparse.Namespace) -> int:
                 raise RuntimeError(message)
 
             host_ns = time.monotonic_ns()
+            empty_scanout_deadline = None  # Only a complete requested image resumes capture.
             checksum = zlib.crc32(payload) & 0xFFFF_FFFF
             if stream is not None:
                 stream.write(
