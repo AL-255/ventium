@@ -269,9 +269,86 @@ unchanged. Output:
 SHA-256 `56eaac75640413090d9830b0c0434d496a024f6d2da6ece5f73972a6ddc14627`.
 This is **placed but unrouted**, not a deployable bitstream. A separate bounded
 affected-net routing script checks preserved original branch resources and
-untouched routes. Its closed-placement consumer passes; the native routing
-attempt is now running with one thread, an8GiB/no-swap cgroup and a540s outer
-deadline. It is not yet accepted and cannot generate a bitstream or deploy.
+untouched routes. Its closed-placement consumer passes. Initial native
+attempts reject `-eco -nets` and `-preserve -nets` combinations **before any
+routing**; both retain native1/input-pins0 and separate sealed receipts.
+A bare no-project check closes0 but is inconclusive: every command requires
+an open project. A disposable two-cell design then proves
+`route_design -no_psir -nets` actually routes its selected net, while confirming
+both incompatible combinations. That toy pass is not a processor gate.
+
+R3 uses the accepted command with one thread, an8GiB/no-swap cgroup and a540s
+outer deadline. Before routing it verifies415,680 unchanged physical roots,
+reusing the pinned1,459,317,012-byte baseline instead of creating another copy.
+The router runs52s but **fails native1/input-pins0**:21 unrouted nets and five
+node overlaps. Five specific fixed address-net branches conflict with debug
+read-data FF D inputs. Most reported blockages are override-output routes to
+those debug FFs; one tapped core FF, `pipe_mem_u_q_reg[mem_disp][15]`, also
+cannot reach the new observer LUT within the router's local search. The
+post-failure DRC's zero errors does **not** override the failed route verdict.
+No output checkpoint, bitstream or board deployment is produced. Preserve
+`ventium-debugscan-route-r3.ZIbEj4/closed-routing.sha256`
+(`f9cc971bedc05cffb5d94e60fffd09fa01bf2df3f316ea436ee1384f4a60da1e`).
+Inspect the local physical wiring before another layout attempt; do not unlock
+CPU routes or move CPU cells to manufacture observer routability.
+
+A read-only footprint query closes native0/input-pins0. The blocked core tap
+already reaches the `G6LUT/A2` input at `SLICE_X108Y209`; the adjacent G5 LUT
+is vacant. Its existing G6 LUT is a conditional function, not a raw-bit buffer,
+so that output cannot substitute for the observation. The proposed identity
+buffer shares the already-routed A2 input instead. All32 management read-data
+FF Q outputs have exactly one leaf consumer: the PS AXI response FIFO. There
+are43 vacant LUT/FF pairs in slice halves containing a management FF with the
+same clock, enable and active-low synchronous reset. Footprint receipt:
+`ventium-debugscan-footprint.ECaRiY/closed-query.sha256`.
+
+The revised adapter restores the32 legacy management FF D connections and
+adds32 shadow response FFs, relocating only the new override LUTs beside them.
+It retains the original response clock, enable, reset polarity and latency;
+only the unused private scan selectors can change the returned word. The
+identity buffer increases the observer to182 LUTs/890 input connections, with
+the same338-bit catalogue. Offline checks pass43,520 bank cases,4,096 random
+envelopes, two buffer truth cases and768 register-transition cases. These are
+algebraic checks, not hardware qualification. Inputs and proof are under
+`ventium-debugscan-shadow.99S7OI`.
+
+The first native adapter attempt passes all32 control/polarity and exclusive
+consumer preflights, then fails when a new wire would cross the protected
+SoC hierarchy: native1/input-pins0, no output checkpoint or deployment.
+Receipt: `ventium-debugscan-shadow-build.9p5jxq/closed-adaptation.sha256`
+(`5cde42b748e390ff165400f4d97528c3976839ac4a70f330565a4e8e88a74db3`).
+The follow-up reuses each existing hierarchy-crossing response wire and
+changes only its source inside the management block. It does not clear
+hierarchy protection or relocate original cells. R2 gets through all32
+connection changes but placement rejects bit22: its vacant H6 LUT shares
+inputs with an occupied H5 LUT. That failure is retained separately
+(`ventium-debugscan-shadow-build-r2.AVq2Bq/closed-adaptation.sha256`,
+`0242d074220a28558bf01827a685e50f508d6e0e09a258425597c3644a3f4a5b`).
+The corrected inventory excludes occupied halves and finds42 complete pairs.
+The same offline proof passes again under `ventium-debugscan-shadow-r3.mqjfbk`.
+
+**R3 adapter placement passes native0/input-pins0**:297,336 original
+primitive functions/placements unchanged,182 new LUTs,32 shadow FDREs,
+890 verified logical/physical LUT input bindings, all32 legacy D connections
+restored and exactly32 exclusive response-wire sources replaced. All32
+shadow clock/enable/reset polarities match their legacy FFs, and all358
+protected original source routes remain unchanged. The G5 buffer shares the
+old G6 A2 input without changing that original LUT's mapping or function.
+An independent closed-output consumer passes after correcting its own Tcl
+carriage-return escape in an expected name; the failed consumer receipt is
+retained and was not a native implementation failure. Placed **unrouted** DCP:
+`ventium-debugscan-shadow-build-r3.UxQzHt/native-output/scan_shadow_placed_UNQUALIFIED.dcp`,
+SHA-256 `be6049fa2e45c2d67fc286ad93240e1dee64d8d0bb53a66acabb70310dd1f8c7`.
+Closed adaptation manifest:
+`dc04067343c2c88649d917267f94d163f32634e513f35c42eb806c5ddf53462d`.
+Routing qualification, a bitstream and board validation remain outstanding.
+
+Board scratch cleanup removes only the closed `rC7oCB` run and its duplicate
+board export, after checking native closure, all37 sealed files and the kept
+VHD seed. It frees53,465,088 bytes. Full evidence remains in the host's
+`ventium-private-jp-bad-boundary.oE0Zzd/exception-log-rC7oCB-export`; its omitted
+private VHD is identical to the retained board seed. Production media and the
+latest closed control remain untouched.
 
 The private reader at `ventium-private-scan-reader.tLwjM1/read_scan.py`
 requires an already-quiescent, **non-frozen** core, the original execution-debug
