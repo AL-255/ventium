@@ -2406,3 +2406,82 @@ states, exceptions and code16 wrapping. Neither case justifies disabling
 pairing, adding unconditional bubbles, guest patches or a Quake-only bypass.
 Any CPU repair still requires differential gates and the full standard suite.
 No processor fix, new gameplay IPC or40MHz production timedemo is claimed.
+
+#### State-register controls and observer endpoint delays
+
+A subsequent read-only query on the deployed observer's routed checkpoint
+closes native0/pins0 and passes the independent DATA consumer. It requests
+all seven main state bits plus the17 other registers referenced by the low-bit
+miter:24 FDRE/INIT0 registers. Every replica has the same clock, enable and
+reset driver and input polarity as its corresponding main bit; D inputs are
+non-inverted. Seven replicas have differently named D-driver LUTs. Their
+functions and runtime Q agreement are **not** established by these records.
+Names alone do not establish opposite polarity or an incorrect replica.
+
+The72-cell/320-pin query also verifies all nine existing two-edge observer
+chains and12 requested PC endpoints. CPU EIP bit4 is FDSE/INIT1, correctly
+using synchronous set rather than reset; its input polarities are non-inverted.
+All31 endpoint net-delay objects are native, non-estimated modeled delays,
+with exact net/to-pin identities and units **picoseconds**.
+
+| Endpoint | Fast min/max (ps) | Slow min/max (ps) |
+|---|---|---|
+|Original EIP-bit0 clock|1419/1585|2323/2597|
+|Primary-PC observer clock|1367/1532|2234/2496|
+|Primary-PC observer input net|581/762|776/1140|
+|Later state-mux observer clock|1439/1606|2363/2627|
+|Later state-mux observer input net|661/871|842/1271|
+|Primary output → state-mux input|550/723|722/1072|
+|State-mux output → final-D input|279/365|334/524|
+
+These are endpoint **net/site** delays, not total logic-path delays, measured
+arrival phases, setup/hold margins or measured Fmax. Observer buffering and
+its own capture skew remain relevant. Different modeled delays neither prove
+nor disprove the silicon failure's cause. The checked state-clock endpoint
+slow-min values span2237–2423ps and slow-max2491–2705ps; this does not prove
+runtime state disagreement. No routing, constraints, CPU RTL or firmware is
+changed by the query.
+
+Recovery root `ventium-pc-state-capture-query.yVG6kH`; closed-query seal
+`954ff81049a37e5962cd72f78ea59dbc45435c99a968ca0c5f4cc081a74ad9d6`.
+Independent audit hash
+`42ac564f1e4d5169b57fe23c55fdf112309b1045a52d031d1f6bc7e6441e54b5`.
+Failed consumer-schema assumptions and corrections are retained; no failed
+fixture is reported as a hardware pass. The next read-only check compares
+the differently named state-D functions before any CPU repair is proposed.
+
+That follow-up closes native0/pins0:10 D-driver roots,161 cells and922 pins,
+four mapped fanin levels, with no checkpoint or bitstream output. The exact
+literal-clone proof establishes all seven differently named state-D drivers
+are Boolean-equivalent for **arbitrary physical input values**, without
+assuming any state Q agreement. Five pairs have identical INIT and ordered
+input-driver pins directly. The two bit0 replicas instead use a duplicated
+LUT pair (`env_tmp[0][15]_i_9` / `ic_ptag[0][1][18]_i_2`) whose INIT and
+ordered inputs are themselves identical; substituting that proved equivalence
+makes their final state-D LUTs identical as well.
+
+Together with INIT0 and matching C/CE/R controls, this verifies ideal digital
+replication for the24 checked registers. It rules out a stable **function or
+polarity** mismatch in that subset, not physical setup/hold violations,
+transient hazards or the values sampled by separate routed observer paths.
+An eager BDD consumer hits its resource cap; a common-cutpoint abstraction
+is then inconclusive. Neither failed consumer is a CPU counterexample or
+pass. Exact literal-clone congruence is the final, simpler proof.
+
+Installed vendor LUT6 models independently pass2240 domain cases for the
+duplicated intermediate function and all three D-driver function classes.
+The first vendor bench fails because its unchanged all-zero initialization
+does not trigger the vendor model's input-event block. A fresh r2 bench
+explicitly toggles inputs before enumerating the same cases; expectations,
+models and INITs are unchanged. Both failed and passing fixtures are retained.
+This cross-check is functional, not routed timing or silicon acceptance.
+
+Query/proof root `ventium-state-replica-functions.jPiKVU`, seal
+`4cd7d11fa6c1b58026a41884a7794d2717799a545b6ae0c9f666ae1cd640f415`;
+independent audit
+`af303eb2c4f2d9f3ca301a82af8c22f5e75e7c9ebbb5ea1b2b76577acf3c12f8`.
+Passing vendor root `ventium-state-replica-vendor-r2.bJh64t`, seal
+`9149fc38b9fb7bc7e19fc03b4add7d4849209bd3e382c1e6d72fa7a1761916ae`.
+The next useful hardware discriminator is simultaneous early/later PC bits
+2–4 and their mux controls, because those bits differ between actual14566
+and expected1457a. No CPU patch follows the low-bit mismatch alone.
