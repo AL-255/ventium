@@ -1046,8 +1046,28 @@ SHA-256 `1b4c81cc56e3cd5b9fd8fba7e7e271a368f06a0d0b25c3fb64caca306dcb24db`.
 Only the completed **pre-construction baseline data** from the rejected
 attempt is reused, with its seal, unchanged parent identity and all416,253
 original net groups checked; the failed ECO is never treated as accepted.
-The revised guarded native attempt is pending full preservation/route/DRC
-closure. No additional observer image has been deployed.
+The revised attempt closes **native1/input-pins0** on its550-second Tcl budget,
+before construction: only original-pin/constraint inventory records exist,
+with no new checkpoint. Its seal is
+`ventium-debugscan-retire-eco-r3.Co7axy/closed-rejected-inventory.sha256`, SHA-256
+`b402f3593ec15e15f76416596a41ac6252e903fb0eb80acd30c1ab3eb62ca448`.
+The long native inherited-net enumeration exhausted the budget before cached
+route loading; a separate data-only check indexes all416,253 recorded names
+in1.025 seconds and parses all415,782 nonconstant routes in2.270 seconds total.
+The next attempt keeps the tested physical plan unchanged, resolves its
+complete recorded name set against all native hierarchical nets, and adds
+stage timestamps. No additional observer image has been deployed.
+
+Board cleanup removes only the closed `mFdR81` and `XEIuht` private runs and
+their duplicate board exports, after re-auditing both host recovery captures,
+closed native invocation identities and every original/export file. It frees
+109,256,704 bytes;264,998,912 bytes are available afterward. The latest
+`KILHpq` control, production media, firmware, rollback and VHD seed are kept.
+Complete captures remain under `ventium-private-observer-controls.BFWmEY`
+and `ventium-private-observer-boundary.cj7i9A`; the omitted private VHDs match
+the retained seed. Cleanup closes0 and its independent host audit passes.
+Seal: `ventium-board-archived-cleanup.fyTzpg/closed-cleanup.sha256`, SHA-256
+`d42a30898f27510a262bbaf9a5f5d9dca401decb738e1631df904b1144cf74de`.
 
 Obtain causally useful retained-packet/next-PC evidence before selecting
 a general fix. Do not disable pairing, single-step production Quake, suppress
