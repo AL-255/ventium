@@ -9,10 +9,11 @@ On October6 the preserved debug-only observer image was deployed, as recorded
 below; it does not implement a processor fix. Production BIOS/disk and RTL
 remain unchanged by this investigation.
 
-Current verified active-timedemo IPC: **0.147150958**, retirement-observer image
-`53f129e9`, measured **37.499890854MHz**, cycles
-**10,079,905,963–10,157,193,207**, demo frames40–50. This is a short interval
-from the current cold diagnostic, not a full-demo score or40MHz qualification.
+Current verified active-timedemo IPC: **0.166225752**, retirement-observer image
+`53f129e9`, measured **37.499869755MHz**,41 qualified intervals spanning cycles
+**8,721,490,845–12,204,030,581**, demo frames37–292. This is an in-flight R4
+aggregate with gaps between qualified groups, not an every-cycle full-demo
+score or40MHz qualification. The earlier closed R3 aggregate is below.
 The older0.42633263 simulation baseline(build `5c2491f3`, cycles
 7,099,999,637–7,199,999,637) predates this FPGA candidate. The PS PL reference
 is not the core frequency; actual core counter/time measurements are used.
@@ -498,12 +499,29 @@ The next original-media cold run uses the same diagnostic image at measured
 37.499876871MHz. The recorder emits16 valid320x200 frames, then exits2 on
 sequence24's exact`0x0/pixels0` interval. This is **not a complete movie**;
 transport exit0 does not make producer exit2 successful. The unchanged guest
-continues under native invocation`f1e825a40f774603b2565f9073f001fa`.
-Read-only engine witnesses bracket the independent-checked sample above:
+continues under native invocation`f1e825a40f774603b2565f9073f001fa` and later
+closes normally(code1/status0/MainPID0); its watcher exits1 for recording
+failure and restores40MHz while holding guest reset.
+Read-only engine witnesses bracket the independent-checked first sample:
 demo active1, the same nonzero demo file, frames40→50, no debug freeze,
 HALTREQ, breakpoint or single-step;77,287,244 cycles and11,372,892 retirements.
 Recovery root`ventium-fpga40-capture.VMIAgs/quake-clock37-r3.N7gmzr`.
-This first sample is not a full-run weighted IPC estimate.
+This first sample is not a full-run weighted IPC estimate. The sealed closed
+log supplies127 independent-qualified active intervals spanning cycles
+10,079,905,963–20,519,678,252 and frames40–900, with gaps between groups.
+They account for9,820,997,166 cycles/1,631,830,793 retirements, giving weighted
+**0.166157343 IPC** at37.499867698MHz. Startup, post-demo activity and incoherent
+or out-of-range intervals are excluded; this is not every-cycle full-demo
+accounting. The independent closed-disk consumer confirms a fresh969-frame
+demo1 result,288.2 guest seconds/3.4 printed fps, and no retained error line.
+Board closure SHA-256`5da1f7bda35929863381260f790b5fbad34d6521a8bb221aa725cb85594e1a7a`;
+independent results seal`576b69bd2b0c5f14047e4ab1f63645c20c07b46fbec31dc58a3da97973f980ee`.
+The first recursive retrieval fails on root-private file permissions; after
+granting group read access only within this closed diagnostic, all sealed
+regular files are recovered and hash-checked. Failed retrieval/audit logs
+remain; no partial retrieval is counted as a complete archive. Only the closed
+board VHD and16MiB RAM copy are removed after host recovery checks; full host
+copies, all metadata, production media, firmware and fault captures remain.
 
 The generic client is consequently revised to skip an **exact all-zero empty
 scanout**, with explicit dimensions and`--skip-unmatched`, before or after
@@ -518,6 +536,22 @@ deadline reset/non-reset cases, no payload drain and opt-in restrictions.
 Client SHA-256`9b60a741522dc6519ace852d4e338fc09cbcafd12d6e3c5167cdd1532984c8cd`;
 test SHA-256`baf075b243b02bb23f381e244b9b02e090789a4f2211736b7265e7336a4c0ad4`.
 This is a host/PS capture change, not a CPU, recorder RTL or guest fix.
+
+The fresh cold R4 recording uses this client and the same image/media at
+37.499878045MHz, native invocation`7cacf13de33b43c382cc1266fd4808be`.
+It resumes after the empty-video interval and collects changing320x200 frames.
+At the first independent IPC audit it has41 qualified intervals,3,173,050,804
+cycles/527,442,756 retirements, giving the current0.166225752 sample above.
+A1,385-record in-flight prefix passes CRC/geometry/order checks; its last
+complete frame(sequence1514) is Quake gameplay. PPM→PNG decoded RGB remains
+byte-exact(SHA-256`b269b7d7eeb54785740c7de3c2a6719bfa55f5e3a7cdbcb06b894e77f4fb85ea`).
+The R4 movie helpers retain frozen179-file ancestry separately from the new
+runtime client. Their bounded synthetic normalizer/FFV1/RGB-round-trip and
+corrupt-record/deadline checks pass. Host proof seal SHA-256
+`58d44455cbedc318fe8d986b6999584879aadf6e41e956f6831ff8e3e1663a78`.
+Recovery root`ventium-fpga40-capture.VMIAgs/quake-clock37-r4.xUgDDO`.
+An in-flight prefix or passing host fixture is **not a completed movie or
+timedemo acceptance**; native closure and fresh disk result remain pending.
 
 ## Model/reference verification
 
