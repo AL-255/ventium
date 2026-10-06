@@ -568,11 +568,63 @@ native1/input-pins0, not a 32-word pass. Its independent consumer accepts only
 the earlier saved five-word stage (0–3 and 7) for further diagnostics. Sealed
 attempt: `ventium-debugscan-word7-onefix.wEMoyB/closed-routing.sha256`,
 SHA-256 `99a22150a8973b71ecaa5d6a41807bcfd881cf4ca796c205bacbd7cb84336538`.
-The next test starts from that saved stage and applies the same guarded,
-new-LUT-only relocation to bit 16, checking both replacement B5/B6 resources
-before moving it. These fixes address observer routing, **not** the silicon
-CMP/branch defect; no full-route, timing, hardware or gameplay acceptance is
-claimed, and no new image has been deployed.
+The same guarded source A6→B6 relocation does **not** fix bit 16. That attempt
+closes native1/input-pins0 without an output checkpoint and is discarded:
+`ventium-debugscan-word16-onefix.qsAmmK/closed-routing.sha256`, SHA-256
+`4e2c52558b13ee6947e7d10a7c5cd7b4b6ce5d12b276c715545df6bc282f5abc`.
+Subsequent attempts return to the saved bit-7 checkpoint, keeping source16
+at its original A6 placement.
+
+The first target-pin remapping attempt is rejected by Vivado before routing:
+changing `LOCK_PINS` on an already-placed, locked LUT requires unplacing it,
+clearing the old lock, setting the new lock and replacing it. This is a
+native API failure, not a routing pass. Its closed rejected manifest is
+`ventium-debugscan-word16-pinfix.p9rf2C/closed-rejected-pin-update.sha256`, SHA-256
+`1ee43483a77bf24d0924093b92e7a33b19ec4269765100641f98cddb83c44223`.
+
+The corrected attempt unplaces **only** the new `rdata_override_16` observer
+LUT, remaps logical I1 from physical A2 to A5, then replaces the LUT at the
+same `SLICE_X25Y189/B6LUT`. Its logical INIT `16'h0ACA`, connectivity and
+all other pin mappings remain unchanged. B5 shared-input resource vacancy is
+checked first. The new endpoint is site pin B5 / node
+`INT_X17Y189/IMUX_W27`; the old B2 endpoint used `IMUX_W9`. No processor cell
+is unplaced, moved or unlocked. Bit16 now routes successfully, followed by
+all remaining26 word connections.
+
+This attempt closes native0/input-pins0 with all32 word connections routed,
+PDIL-1 violations0, all297,336 original primitive functions/placements
+unchanged, all32 response routes unchanged, and all214 observer configurations
+unchanged except the explicitly checked I1 pin map. The independent consumer
+prints `PASS_OBSERVER_WORDS_ONLY_NO_FULL_ROUTE_OR_HARDWARE_ACCEPTANCE`.
+Saved checkpoint:
+`ventium-debugscan-word16-pinfix-r2.vAieNW/native-output/scan_all_words_DIAGNOSTIC.dcp`,
+SHA-256 `490de3a4a405274f5a67a230ae9d45fb99ece6f42598e3ef128dc5fc7d7e20e8`.
+Sealed attempt: `ventium-debugscan-word16-pinfix-r2.vAieNW/closed-routing.sha256`,
+SHA-256 `a00d1eea4622acea7211429c8a2e62d09763e2fc4137cecc91e4ef55b3d4d32b`.
+
+These changes address **observer routing, not the silicon CMP/branch defect**.
+The next stage protects all64 completed response/word routes and successfully
+routes the three new control outputs and114 lower mux outputs, saving each
+stage before the next router call. It closes native0/input-pins0; the independent
+consumer prints `PASS_CONTROL_LOWER_STAGES_ONLY_NO_FULL_ROUTE_OR_HARDWARE_ACCEPTANCE`.
+All297,336 original primitive functions/placements, all214 observer
+configurations and all64 completed routes remain unchanged; PDIL-1 is0.
+Saved lower-stage checkpoint:
+`ventium-debugscan-lowerstage.9UEvMx/native-output/scan_lower_DIAGNOSTIC.dcp`,
+SHA-256 `ce2753305b3f7e60d73f6ea3707e67d045b9e8e8bfe3c4215836f363295828f5`.
+Sealed attempt: `ventium-debugscan-lowerstage.9UEvMx/closed-routing.sha256`,
+SHA-256 `8d03f3f4c54ea4a6fd6c5f1f72ad510d6bbccd75ac9b3c350efc9581c09c243c`.
+
+The complete native route report is still incomplete:34 unrouted nets and356
+nets with unrouted pins, including the new address/control/tap inputs. A
+staged mux-output pass is **not** a full routing pass. The next guarded attempt
+protects all213 completed observer outputs (including32 local intrasite
+outputs), the inherited physical constant trees, original source branches and
+all unaffected original routes. It routes only pending original-source taps
+and the new local buffer output, then requires full native route booleans,
+full DRC and the complete original-route/resource/logical guards. No
+full-route, timing, hardware or gameplay acceptance is yet claimed, and no new
+image has been deployed.
 
 Board scratch cleanup removes only the closed `rC7oCB` run and its duplicate
 board export, after checking native closure, all37 sealed files and the kept
