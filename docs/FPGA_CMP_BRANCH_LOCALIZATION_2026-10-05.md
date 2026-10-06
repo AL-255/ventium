@@ -416,6 +416,178 @@ four closed cleanup receipts and exact deletion sets. Cleanup seal SHA-256
 `61a11889fb963953d225861ffe8ac96c282d8a7ba803f6d14a1b1dc73e331d9c`;
 it does not infer the current live board state from historical receipts.
 
+### Selected EIP commit-law check
+
+A data-only audit of the saved native pin query checks EIP bits0/2/3/4.
+All four share the same clock and enable; bits0/2/3 are FDRE with common R,
+and bit4 is FDSE with S driven by that same management reset buffer. Pin
+inversions are0. The installed vendor FDRE/FDSE/glbl functional models are
+then simulated with the exact four primitive types/INITs, the captured known
+D inputs and prior primary PC. No Vivado, RTL, FPGA or clock change occurs.
+
+All20 functional-model cases pass (five actual captures × all four common
+CE/reset combinations). All four correct-edge captures agree with CE1/reset0.
+For the failing40MHz capture, none of the three settled logical outcomes agrees
+with the actual Q, even if its sampled enable is allowed to be either value:
+
+| Selected bits0/2/3/4 only (`mask=1d`) | Value |
+| --- | --- |
+| Hold prior primary PC | `00` |
+| Enabled load of sampled known D | `05` |
+| Common reset/set | `10` |
+| Actual failed-edge Q | **`04`** |
+
+This excludes a **settled, uniform logical** hold/reset explanation under the
+PRE/Q alignment assumption. It does not exclude physical skew, transient
+inputs, unobserved controls or invalid observer-edge alignment, and is not
+observer STA or a silicon timing proof. Bit5 is never reconstructed; the
+other28 EIP bits are outside this primitive simulation's scope.
+
+Recovery root `ventium-eip-commit-law.GWizoG`; actual audit exit0. Two early
+pre-simulation failures (aliased path and wrong manifest filename) remain
+recorded as exit1. The initial in-flight seal is rejected because it hashes
+stdout before closure; the separate post-close consumer validates the actual
+exit/log/result and pins, then seals all25 final files. Final seal
+`closed-actual-eip-commit-law.sha256` SHA-256:
+`b1977c72305dcfcf7fbda0baec23275d4ef088cd6a7daca6fcbc7f7bd89f5df9`.
+No root cause,40MHz repair or workload acceptance is claimed.
+
+### Odd-target discriminator (2026-10-06 UTC)
+
+A new **private diagnostic** keeps memory-left CMP at14562 and JP at14565,
+but relocates the common taken epilogue from1457a to **1457b**. Thus both
+valid successors, fallthrough14567 and taken1457b, have bit0=1. Eight branch
+relative immediates become old+1; the identical13-byte epilogue moves one byte
+and an unexecuted NOP occupies1457a. All opcodes/data operands and instruction
+addresses within the172-byte body stay unchanged. **The payload bytes are not all
+unchanged:**164 of172 match the parent JP ROM; eight relative immediates differ,
+four in each of the134/38-byte subranges. No production Quake/BIOS/VHD, CPU RTL,
+FPGA image or pairing policy is patched.
+
+ROM SHA-256:
+`f42858ee4a653d1818ebda8747aa70c2356ad4c13ce8c3edeb7402990cbb2050`.
+Pinned Pentium QEMU checks all64 actual branch edges and original CMP flags
+2/2/887/46, then returns AL42/debug-exit133 with count64, caller64,
+checksumd5540 and a zero exception record. QEMU/reference wrapper exit0 is
+not FPGA acceptance.
+
+The cached assertion-enabled, real-reset-edge model matrix checks seeds1–32,
+AXI latencies0/3/7/13 and alternating response-gap schedules. Initial matrix
+exit1 is retained: seven natives hit the64MiB file cap (SIGXFSZ), and concurrent
+consumers also had resource failures. Only those seven natives are rerun,
+with the same seeds, assertions and180-second limits and a128MiB file cap;
+closed-stream consumers are regraded serially. Final results are **32 native0,
+27 consumer0, five consumer3**. All2048 architectural cases and their raw
+CMP/JP descriptors, flags and request/retirement joins pass. Seeds5/8/14/30/31
+lack the additional warm retained-predicted-T/actual-NT conjunction; they are
+coverage exclusions, **not five full passes or architectural failures**.
+Matrix/wrapper exit remains3. All179 frozen source inputs match before/after.
+
+The post-close consumer validates actual exit receipts and all32 JSON reports,
+then seals366 model/golden/source files. Model seal
+`closed-model-evidence.sha256` SHA-256:
+`05bca0de49e3e68715f460674c72b12fc1be62a8ffbce08424f5454639f99a65`.
+Earlier inherited one-opcode provenance is preserved, not used as the child's
+change count. R2 corrects the eight changes; the board's R3 metadata also fixes
+the inherited runtime target/limits. ROM and closed QEMU/model streams do not
+change. A pre-upload wrong-offset assertion is retained and corrected before
+any launch.
+
+On unchanged observer image53f129e9 at measured **39.999872115MHz**, the
+natural private run misses the1457b breakpoint during case2. Native closes0;
+controller/launcher close1, correctly rejecting the diagnostic. It reaches
+the private verifier's error exit **CS8/EIPf0258/EAXee**, not an exception:
+CR2=0 and the104-byte exception record is all-zero. Physical RAM checks
+count2/caller3/checksum9fff, memory0, actual BIOS/client/caller code and original
+mappings. The primary-PC ring shows **00a7:14562 → 00a7:14567**, rather than
+the reference's1457b. The actual flags at that CMP edge are **not observed**
+in this terminal capture; expected model flags887 cannot substitute for them.
+This new result does not support treating the earlier error as merely an
+illegal-address/bit0 alignment problem, but altered branch immediates and code
+geometry still prevent a single-variable physical root-cause claim.
+
+All45 exported files are independently hash-checked and the terminal audit
+closes0. Invocation `dac2d6c4157445b2bdeb15bc825eba9c`; capture seal SHA-256:
+`39841d72020b7d2b859893f18249cc0b3fc150c608b14f7a22a6f96a67361a1f`.
+Recovery root `ventium-private-target-lsb.UXIa4w`, export
+`exception-log-PJpuRD-export`. Board-only copies of the fully archived37.5MHz
+correct-edge run2iOFH6 and this terminal control are pruned after exact file,
+invocation, native-status and source checks, recovering55.5MB and54.5MB.
+Their host archives remain recoverable; both earlier40MHz fault captures,
+VHD seed, production media and firmware are preserved.
+
+The held-reset preflight measures a zero **retirement delta**, not an absolute
+zero counter: the board PMU retains its older epoch. The private preparer
+requires reset hold, non-frozen reset CR0 and stable retirements before/after
+disarming; it neither clears the PMU, releases execution nor changes clocks.
+The40MHz preset is restored after closure. No40MHz production timedemo,
+CPU repair, new gameplay IPC or standard-suite pass is claimed here.
+
+#### Direct wrong-fallthrough scan: useful partial run, not a pass
+
+A separate controller alternates successor breakpoints14567/14570 through the
+early NT path; it never steps or sets a breakpoint at intended V14565. This
+perturbs warm history. Its next14567 stop is **actual case2**, not the loop's
+expected case1: the controller correctly rejects the scalar mismatch and
+closes1 before its normal export. The launcher explicitly stops the daemon;
+the cleared post-stop systemd status is **not a natural native0**. No guest
+restart or successful sweep is inferred, and the missed expected case1 stop
+remains an ungraded coverage/control issue.
+
+The saved coherent scan nevertheless captures the wanted wrong edge:
+
+| Actual case2 retirement observation | Value |
+| --- | --- |
+| CS / primary PC / architectural next PC | `a7 / 14562 / 14567` |
+| Architectural FLAGS / memory / EDI | `887 / 0 / 80000000` |
+| Previous state / EIP CE / ACTIVE | `28 / 1 / 0` |
+| Live U/V length low3bits / V condition / relative offset | `3 / 2 / A / 14` |
+| Flags-register PF D / Q | `1 / 1` |
+| Known EIP D / mask / known D–Q XOR | `14547 / ffffffdf / 0` |
+| Reference taken destination | **`1457b`** |
+
+EIP-D bit5 and both length bit3s remain **UNKNOWN**. PF-D is the input of
+`eflags_reg[2]`, **not a direct observation of effective PF at the branch LUT**.
+The retained packet still belongs to14558, with all eight ACTIVE copies0;
+it is not the packet owning CMP14562. The live-path selection and actual
+registered next PC are observed, but a settled effective branch condition
+is not. These limits also apply to the earlier40MHz wrong-boundary capture.
+
+Both wrong results fit the same selected-bit pattern: for bits0/2/3/4, old
+target1457a / NT14567 / actual14566 are`1a / 05 / 04`; new target1457b /
+NT14567 / actual14567 are`1b / 05 / 05`. In both, bit0 agrees with the taken
+destination while bits2/3/4 agree with NT. This is a **bitwise fit**, not proof
+of a transient mixed PC, wrong adder base, stale flags, observer alignment or
+physical timing. Moving the target's low bit can conceal the illegal boundary
+without correcting the branch result; it is not a usable processor repair.
+
+The original breakpoint halt survives the daemon stop. A separately named
+recovery verifies current architecture equals the saved pre-stop state,
+HALTED stays set and retirements do not advance across the aligned16MiB RAM
+read. It checks actual count2/caller3/checksum9fff, zero exception record,
+original inputs/code/caller/mappings, and exports36 closed files. Physical DDR
+is still **not a cache dump**. Recovery's first attempts retain a pre-transfer
+file-not-found and an overly strict reset-hold guard; neither releases or
+restarts the guest. The successful recovery and independent audit close0.
+
+Native invocation `a52859ffb4c142bc838f3d61c33cb9ba`; measured held-reset
+admission clock **39.999874147MHz**. Partial export seal SHA-256:
+`80588780c87b40916d10e25b5360136ef6a44cb96ae66cdf18ed7cd93d241272`.
+Recovery directory `ventium-private-target-lsb.UXIa4w/fallthrough-r1/`;
+`exception-log-MH5a4f-interrupted-export` preserves the actual scans and RAM.
+The guest remains breakpoint-halted, the daemon is stopped, and no new
+bitstream, RTL fix or40MHz workload acceptance is claimed.
+
+The final post-close follow-up seal checks the model seal again and validates
+both hardware result classifications, then hashes514 regular files, including
+all failed attempts and both new host exports. `closed-followup.sha256`:
+`c9e78596f069710571956a2dc0de257fa200b0711423af551bc658616a854979`.
+Actual sealing exit0; no still-running output is included. Next localization
+is the effective branch-flag/next-PC selection cone, not a change to CMP's
+architectural arithmetic. Any eventual repair must preserve general paired
+execution and pass differential gates plus the complete standard suite;
+none is implemented or declared complete by these diagnostic controls.
+
 ### Cold recording startup — capture-client issue, not a CPU finding
 
 A separate unchanged-media cold diagnostic at measured37.499883540MHz stops
