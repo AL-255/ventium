@@ -2266,3 +2266,143 @@ successive PC-mux outputs **together on one image/edge**, while retaining
 the original D/Q and selector observations. This avoids treating separate
 one-bit captures as simultaneous evidence. No CPU patch or extra full
 production run follows the static miter alone.
+
+### Simultaneous PC-vector diagnostic — CPU functions unchanged
+
+The next image reuses nine existing high-relative-displacement observer slots
+to sample the branch and successive PC-data cutpoints in the same two-edge
+bank. It keeps the original mapped-selector slot69, architectural D/Q fields,
+150-bit retirement bank and338-bit retained-packet bank. It adds no FFs/LUTs
+and changes no CPU function, site/BEL, clock, reset or record-enable logic.
+
+| Record bit | Mapped point sampled on the preceding edge |
+|---|---|
+|119|U_IS_BRANCH|
+|120|V_BRANCH_TAKEN|
+|121|V_TARGET_LSB|
+|122|V_FUSED_INVERTED_LSB|
+|123|PC_TARGET_LSB|
+|124|PC_PRIMARY_LSB|
+|125|PC_STATE_MUX_LSB|
+|126|PC_FP_OVERRIDE|
+|127|U_ADVANCE_LSB|
+
+Metadata is now `008f0096`, catalogue
+`7208a32a09f7294f98135dcf110054a85cef6dc42bbf092b620d2b7fcb31b215`.
+EIP-D bit5 remains unknown (`ffffffdf` mask). V-relative bits23–31 are now
+**unknown** (`007fffff` mask); the reader reports the full displacement as
+null, not a reconstructed signed value. Offline tests cover150/338 onehots,
+512 vector patterns and2048 metadata cases. Installed vendor models pass
+128 changed-metadata checks and2048 reset/hold/two-edge vector cases. None
+of these tests proves routed settling times or processor correctness.
+
+The first route-only attempt closes native1/pins0 and is rejected: retaining
+all old branches leaves nine antenna endpoints belonging to disconnected
+observer inputs. It writes no checkpoint or bitstream. Recovery root:
+`ventium-pc-vector-observer.f41xtL`. The revised, documented selective
+unroute removes only those observer-input paths back to their nearest branch.
+Its independent consumer confirms removal of89 observer-only nodes/87 PIPs,
+with every retained CPU sink path preserved. All298156 primitive identities,
+236980 FF-input polarities,329 hierarchy protections,2336 original physical
+pin maps and560440 non-target route literals are unchanged. Only two
+metadata LUT INITs and nine observer input mappings/reconnections change.
+Native0/pins0, fully routed, zero route errors and zero error/critical DRCs;
+route seal `cb33367875e9ed2d561a20cad35ddffd42e39475cf460eacf04c798fe4a91d7b`
+under `ventium-pc-vector-observer-r2.xUZ2Ld`.
+
+Separate bitgen reopens parent/candidate and checks exact canonical POWER
+70944-node/57982-PIP and GROUND106722-node/103141-PIP trees, including their
+route literals, plus all nine bindings and unchanged25ns/10ns clocks.
+Native0/pins0; raw BIN remains20606636 bytes with native sync at offset80.
+Firmware SHA `74d7cf7d8c24c87da025696d0f19c719ea689bc717de123ba5d98d65a765ced9`;
+bitgen seal `89aa7c03cc7322111a776084c45f3eca3f63c7fd52fb0395dffdfcffcb7ec0f3`
+under `ventium-pc-vector-bitgen.LvID7D`.
+
+Deployment closes0 and the independently retrieved receipt measures
+39.999875259MHz with zero retirements during admission and all eight
+production pins unchanged. Sources/archive: `ventium-pc-vector-captures.W1DCH1`.
+The seed, production inputs and all installed rollback images are retained.
+Already closed/independently archived KYP24e duplicates and the old sCrrN4
+RAM duplicate free70979584 allocated bytes; their original metadata and host
+archives stay intact. The separately archived/installed upload duplicate
+frees another20606976 bytes. No unique evidence is discarded.
+
+Same-bank sampling does not establish equal analog arrival times: added
+tap load and differing routed delays/capture skew may perturb reproduction.
+Cold private faulty/healthy controls must qualify the values before attributing
+the failure. No CPU fix or40MHz cold production timedemo is accepted here.
+Verified gameplay remains0.1659957781052303 primary/U IPC on `53f129e9`,
+37.499869764MHz,127 active intervals with gaps spanning
+cycles8,721,490,845–19,169,282,165. It predates `74d7cf7d`, which has no
+gameplay measurement.
+
+#### Closed simultaneous faulty/healthy controls
+
+All three private cold controls close native0/controller0/launcher0 on this
+same image. Each44-file export passes the independent byte/hash, invocation,
+production-pin, architecture, RAM, reset-bank and retirement/retained-bank
+audit. Captures are taken before ADC/#PF or late forensic reset; no STEP is
+used and the intended V-slot address is not the breakpoint.
+
+| Observed point | CMP/JP fault | CMP/JP not taken | OR/JP taken |
+|---|---|---|---|
+|Primary PC|14562|14562|14562|
+|Actual next-PC Q|**14566**|14567|1457a|
+|PF D/Q|1/1|0/0|1/1|
+|V branch taken|1|0|1|
+|Mapped selector|1|0|1|
+|Selected PC-target LSB|0|1|0|
+|Primary PC-mux LSB|0|1|0|
+|Later state-mux LSB|**1**|1|0|
+|Partial EIP-D, maskffffffdf|14547|14547|1455a|
+
+U_IS_BRANCH and PC_FP_OVERRIDE are0, U_ADVANCE_LSB is1 and V_TARGET_LSB
+is0 in all three captures. Thus the latter point is **not** calibrated with
+both logic levels. V_FUSED_INVERTED_LSB is1/0/1. The sampled raw main state
+pattern is28, ACTIVE is0 and EIP-CE is1 in every capture. Known U/V length
+bits are3/2, conditionA and V-relative low23 bits13(hex); high9 displacement
+bits remain unknown. All eight retained ACTIVE copies are0. Stale retained
+owner14558/1455d/14558 is not substituted for the live-selected packet.
+
+Recovery captures under `ventium-pc-vector-captures.W1DCH1`:
+
+- Fault: Xq8wx3, invocation `77913c8cc6b0434bbcd4486d57cbc29e`, manifest
+  `689505c18829fe2543d3cfa49fd953771d08f3361385578400c659d1db69c7ab`.
+- Not taken: axjvxg, invocation `5c63aca24dd74e809ed0cd919cc3f18c`, manifest
+  `c83653712c559cf2180612b18b9bbe76fcd13cd59cf584f9a2fc545caee6d4bb`.
+- Taken: HxMri6, invocation `c6e2141bd1554ffc9a6b2c0a9d7639fe`, manifest
+  `873f62c56e04cef7e479b82ef7d2a5b42afd8f29477a6b6e9c843e12e8527716`.
+
+The212-file host seal is
+`8e408202f0f1fcd6bfc5275b803ddefc73016c358b15f317decc4325ad33486b`.
+After complete retrieval/audit, only fault/NT board duplicates are pruned;
+their original metadata, full host exports, seed and firmware stay available.
+
+**Interpretation:** the fault reproduces with branch decision/selector and
+earlier selected-PC low bit matching the healthy taken case on one image.
+It differs at the sampled later mapped mux. This narrows the next check to
+that mux's controls/arrival times and the observer's own capture latency;
+it is not proof of a stable Boolean defect, replica disagreement or clock
+skew. In particular, the faulty actual next-PC's LSB is0, as is1457a's:
+this diagnostic does not yet localize the actual incorrect word bits2–4.
+
+The DATA-only follow-up passes two conservative set-valued low-bit miter
+cases through the later mux and final EIP-D LUT, allowing all other data
+cutpoints arbitrary. It assumes19 referenced state-replica outputs agree
+on raw pattern28, reset is deasserted and primary-PC/FP-override inputs are
+stable. Under those assumptions, final/mux LSB equals primary-PC LSB; both
+healthy captures agree and the faulty sampled mux differs. Actual replica
+agreement and analog settling are **not** verified. Their FDRE/INIT0
+identities are present in the native data; names alone do not prove polarity
+or runtime agreement. Miter output hash:
+`595e32ee8c75ca0dc8db782962b386879f2242810105d36ce4a5467e07a61838`.
+
+**Proposed fix direction, pending discriminator:** if ownership/priority is
+wrong, make the admitted packet's PC commit carrier and valid selection
+explicit, including memory completion and interrupt/debug holds. If physical
+arrival is responsible, factor the equivalent state/PC selection into a local
+low-fanout, packet-owned path; first prove equivalent outcomes across all
+states, exceptions and code16 wrapping. Neither case justifies disabling
+pairing, adding unconditional bubbles, guest patches or a Quake-only bypass.
+Any CPU repair still requires differential gates and the full standard suite.
+No processor fix, new gameplay IPC or40MHz production timedemo is claimed.
