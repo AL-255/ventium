@@ -294,6 +294,64 @@ The rejected query is separately sealed under
 `ventium-retire-nextpc-fanin.KyXRO9/closed-rejected-driver-query.sha256`,
 SHA-256 `4fee34b975b7023c05aa64e5bdc17bf37a587d6e4830be4fd4cbb2fcab1a07e5`.
 
+The bounded upstream extension closes native0/pins0:22 roots,276 cells,
+1,756 pins and the same three mapped levels. All134 earlier cell functions and
+818 earlier pins match literally. Its independent consumer passes the same
+1,024 Jcc cases plus128 parity-forwarding cutpoint cases: non-shift U flag
+writes select the ALU-PF cutpoint; otherwise old PF is retained; nonzero shifts
+select even parity of the two shift-parity groups. This is not a proof of the
+ALU-PF source's value or any unobserved decode controls at the hardware edge.
+No checkpoint or FPGA image is changed. Query closure:
+`ventium-retire-forward-fanin.no5t64/closed-mapped-fanin.sha256`, SHA-256
+`35031107b77666ba320dc226e58834f67f8bfb5a43ae2308ff730a7e1653c043`;
+independent closure SHA-256
+`c7f80706b8f5a99dbfa0382d4dea4fe5ecdbdbf663f31f6057187205d10b5bdc`.
+
+## October6 clock/cadence discriminator — not a lower-frequency fix
+
+Two cold runs use the **same original JP diagnostic ROM, seed, full prelude,
+observer BIN and native executable**, with no BP/STEP, pairing suppression,
+RAM repair or RTL change. The existing audited PS clock presets are used;
+each launcher restores `iopll-100m`/40MHz after its service closes. The lower
+clock is strictly a private discriminator, not a replacement implementation
+frequency or timedemo acceptance.
+
+| Measured core clock | Native / controller exit | Result |
+| --- | --- | --- |
+| **37.499884255 MHz** | 0 / 0 | All64 cases; caller64/checksumd5540, normal AL42/exit-HLT, no exception |
+| **39.999873899 MHz** | 0 / **1** | Same #PF14/error4 at CSa7/EIP14566, FLAGS887, CR2 `493c6488`; count2/caller3/checksum9fff |
+
+Clock samples independently check five-second monotonic-time/cycle arithmetic,
+100 held-reset guards and zero retirements. They are not IPC measurements.
+Host consumers verify all45/46 sealed files respectively, original ROM/code/
+mappings, native identity, coherent dual-bank reset/terminal scans and16MiB
+RAM. The 40MHz consumer's integrity exit0 **does not turn its controller1 or
+CPU failure into a pass**. The full exception record and displaced-ADC CR2
+arithmetic are checked independently. Both clock-restoration receipts match
+the 40MHz preset; production-media pins and rollback images are preserved.
+
+The failure is now experimentally **clock/cadence-sensitive**. This does not
+yet distinguish physical capture timing from a memory-response/ownership race:
+changing the PS reference also changes the cadence relative to memory service.
+The next discriminator is a correct original-ROM taken-edge capture at the
+lower clock, to compare the actual ACTIVE/live-input path against the failed
+40MHz edge. No timing sign-off, root cause or processor fix is claimed.
+
+Recovery root: `ventium-private-clock-discriminator.feXIXN`.
+37MHz leaf `93HxOv`, native `6bdb4f05e72b4980a40930d5cd95e3da`, capture SHA-256
+`c19027a79e93e2175e6b91afd67fdc7ec32e57ac488c388975fb14dcc19d110c`.
+40MHz leaf `l2w0qN`, native `bd976743f2124e69977152b11c1fae42`, capture SHA-256
+`1f8c6f27c997e577eef1325e916de43095d0549abd0e812c37d9b29731d6f4ce`.
+Independent closure `closed-clock-discriminator.sha256`, SHA-256
+`c512a2db28e0ef1f142505ce0a983993be0bf02726c7d3c0a09cc5e2013f826a`.
+
+Before these controls, only the closed `WBbyr6`/`5BewYN` board runs and their
+duplicate exports are removed, after checking all43 files per host archive,
+exact native invocations and live board source pins. This recovers111,009,792
+bytes. Complete recoverable host evidence remains under
+`ventium-private-retire-boundaries.po0KZG`; both fault captures, the latest
+reversed-CMP edge, seed, production media and firmware are retained.
+
 ## Model/reference verification
 
 Pinned QEMU Pentium independently checks all64 actual post-ALU states and JP
