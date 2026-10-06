@@ -343,6 +343,99 @@ Closed adaptation manifest:
 `dc04067343c2c88649d917267f94d163f32634e513f35c42eb806c5ddf53462d`.
 Routing qualification, a bitstream and board validation remain outstanding.
 
+The shadow routing attempt checks415,645 unaffected physical roots against
+the original baseline; all match. Its explicit exceptions are32 response
+wires plus the common clock/enable/reset nets, whose original branch
+resources are protected. It selects607 roots,361 protected source branches,
+and removes only the32 obsolete response route trees before routing. Native
+binding identifies the management FF clock as the core MMCM output, not a
+separate assumed PS clock. The router remains near ten overlaps and hits its
+540s deadline: native124/input-pins0, no output checkpoint or bitstream, scope
+inactive and vendor process family gone. This is **not** route qualification.
+Sealed attempt: `ventium-debugscan-shadow-route.fm39e5/closed-routing.sha256`,
+`9f9635568da0b5175033b97ca4fa23b16501a4227763f7aba4b7fcd6c50873ea`.
+Next inspect conflict details in a diagnostic copy rather than repeating
+automatic routing or relaxing processor protections. The installed image
+remains unchanged.
+
+The bounded diagnostic copy closes native0/input-pins0, but is **not** route
+qualification. Its full reports identify95 nets affected by invalid sites,
+despite `report_route_status -return_nets -route_type CONFLICTS` returning an
+empty list. DRC identifies two PDIL-1 errors: `SLICE_X20Y199/A6LUT` and
+`SLICE_X24Y191/F6LUT` are logically vacant but already implement constant
+route-throughs. Placing override bits20 and10 there conflicts with the old
+physical configuration. Logical BEL-to-cell vacancy alone is insufficient;
+future placement must also account for physical routing resources, and full
+route/DRC reports remain mandatory.
+
+Packing the local identity buffer beside its old G6 LUT also introduces one
+physical-only VCC connection, reported at `INT_X73Y209/IMUX_W46`. The logical
+observer plan has no explicit constant input, but that does **not** imply zero
+physical constant-routing work after packing. Account for the new connection
+explicitly without relaxing protections on original constant branches. The
+diagnostic removes only32 obsolete response routes; all297,336 original
+primitive functions/placements and361 protected source routes remain
+unchanged. Diagnostic checkpoint (not deployable):
+`ventium-debugscan-shadow-conflicts.AFIe4U/native-output/scan_shadow_debug_unrouted_DIAGNOSTIC.dcp`,
+SHA-256 `5b78ace21230c9ef76b188a982cce03fdcfdf08b21e9276a0778d5046522d5df`.
+Sealed diagnostic manifest:
+`880bcfde6c96931254c47ffd986a487752e753cb6927f44a25a6a19645d0edab`.
+No board programming, clock change or production Quake run follows this
+diagnostic. A separate read-only native resource query is the next step.
+
+That read-only query closes native0/input-pins0 in93.6s; an independent
+closed-output consumer passes. Native `BEL.IS_USED` identifies exactly the
+two route-through LUTs;40 of the42 logically vacant complete pairs remain
+available. The output site pins' `IS_USED` flags are zero even for those two
+route-throughs, so those flags cannot substitute for BEL configuration checks.
+The query also inventories471 logical constant groups (228 POWER,243 GROUND)
+sharing the two physical constant trees. `get_nets GLOBAL_LOGIC0/1` finds no
+ordinary net object. Sealed query:
+`ventium-debugscan-routeaware-query.2tDvQ7/closed-query.sha256`,
+SHA-256 `0e70cc46a0d26adf6ff2340b6f68410b9ceb78a4b3e33231a59977a14ae01d25`.
+
+R4 uses that physical inventory, repeats the unchanged offline bank/transition
+proof, and checks both LUT halves plus both FF BELs before placement. Native
+placement closes0/0 with the original297,336 primitive functions/placements
+unchanged. The explicit, waiver-free PDIL-1 check reports zero violations;
+an independent consumer checks the full report and excludes both conflicting
+BELs. Output remains **placed, unrouted, not deployable**:
+`ventium-debugscan-shadow-build-r4.7xf3Ok/native-output/scan_shadow_placed_UNQUALIFIED.dcp`,
+SHA-256 `d0c77bc5b977bbcd4af9fd239712cd74a7e24fdf98ccc46b9dedb1dd86f9374f`.
+Sealed placement manifest:
+`b7f0f5825fdb388369f1ebbfc1ca65c0e3c7dd64d804ff79364af82bea8a3517`.
+The next bounded route explicitly handles both physical constant trees,
+preserves original branch resources and GND's exact route, checks all471
+aliases, and saves a diagnostic checkpoint before routing. Twelve offline
+guard tests pass, including rejection of removed old nodes/PIPs, changed GND,
+inconsistent aliases and incomplete routes. These are guard tests, not DUT or
+route-qualification results. No board image changes on these results alone.
+
+That route attempt closes native124/input-pins0 at its540s deadline. Its
+preflight verifies415,174 unaffected routes exactly, plus all471 original
+constant aliases. Native protection covers106,722 GND nodes/103,141 PIPs and
+70,881 VCC nodes/57,944 PIPs. The physical-constant route succeeds with zero
+warnings/errors: GND remains exact, all old resources remain present, and VCC
+gains exactly one node and one PIP. The separate607-net observer route still
+oscillates around7–8 overlaps. It is **not qualified**; no bitstream or board
+programming follows. The sole vendor scope closes inactive without OOM.
+Sealed attempt:
+`ventium-debugscan-shadow-route-r2.MSsmAL/closed-routing.sha256`,
+SHA-256 `5d396e896a23b68060e7e2300fd4dea099284dabb12d8741d8354dea530e9c97`.
+Its prepared diagnostic checkpoint is saved **before** either router pass:
+`native-output/scan_shadow_route_prepared_UNQUALIFIED.dcp`, SHA-256
+`d33b004e5678c027f04030be50899e16c7ef3e775fa962730558bbce1a3fbc98`.
+Do not claim that saved checkpoint contains the later successful VCC extension.
+
+Control-group follow-up: bit11's selected primary `EFF` at `SLICE_X14Y206`
+has a secondary `HFF2` peer. They share the clock/reset half but not the CE
+group. Same-half matching alone does not prove enable routability:
+[AMD's UltraScale CLB guide](https://docs.amd.com/r/en-US/ug574-ultrascale-clb/Clock-Enables)
+documents distinct primary/secondary CE groups. This is a **hypothesis** for
+the remaining route blockage, not yet a confirmed cause. A read-only native
+query will compare all32 new/peer control-pin mappings and the original FFs
+occupying their selected sites before another routing change.
+
 Board scratch cleanup removes only the closed `rC7oCB` run and its duplicate
 board export, after checking native closure, all37 sealed files and the kept
 VHD seed. It frees53,465,088 bytes. Full evidence remains in the host's
@@ -362,6 +455,16 @@ Eight fake-MMIO tests pass, including338 one-hot physical-bit checks, four
 no-write precondition rejections and nine post-write safety/coherence failure
 cases. These are **offline tests only**: the new observer and reader have not
 yet been qualified on the board.
+
+Attribution caution: matching retained owner PC is necessary, **not sufficient**
+to identify a dynamic instruction. In the frozen core, the packet FFs update
+only when a new memory request must wait; immediate acknowledgements can use
+the live decode without updating them (`core.sv:7473` and the effective-packet
+mux at6155). Repeated executions of the same PC can also leave an older owner
+with the same value. The ACTIVE copies report retained selection at capture,
+not a history of which packet retired. Correlate the halt, retire evidence and
+memory-transaction ownership before attributing a packet to the failing CMP;
+do not turn an owner-PC match into a causal or timedemo acceptance claim.
 
 Obtain causally useful retained-packet/next-PC evidence before selecting
 a general fix. Do not disable pairing, single-step production Quake, suppress
