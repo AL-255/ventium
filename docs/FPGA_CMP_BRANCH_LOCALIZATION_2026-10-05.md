@@ -2771,4 +2771,117 @@ repeats the same native ownership preflight before any mutation, retains all
 original protection/physical gates and passes the same6,144-case vendor
 primitive miter. Root `ventium-pc-commit-bypass-eco-r4.CFPOpr`, plan hash
 `c9956877c5c6a34041cf0c74c0e97e05376bf20699adf87dac9f7add62cf034e`.
-Its bounded native worker is pending; there is no new deployed CPU image.
+The bounded worker closes native0/pins0 and its independent consumer closes0.
+All300 targeted pins route successfully. Original298,156 primitive placements
+and functions outside the32 declared final-PC LUT INITs are unchanged;
+236,980 FF input polarities,329 hierarchy protections, original pin maps/locks,
+all32 original PC-output routes and560,167 non-target route strings survive.
+The reopened physical state is fully routed, with zero route errors, zero DRC
+errors and zero critical warnings. This is not timing or hardware acceptance.
+No CPU RTL is edited. At this route gate, the candidate is not yet deployed.
+
+Saved R4 checkpoint
+`dd1e64cd9ad2451e824a7404563ba170c3e1d6e634398c179a1094b7c0df7e63`;
+route closure seal
+`70641902f5a7e07da625acd23a99f101e3eb411e12d3cc0ae62ebda902776551`;
+passing independent consumer
+`47f4d956b7e7e6d96973a7b17a0de9ffff1c52c17439943a2ef1e88347b8db5f`.
+Before bitgen, a separately bounded native pass must reopen parent/candidate
+and compare the canonical POWER/GROUND routes, every node and every PIP; the
+site-pin ownership query did not enumerate those physical constant trees.
+
+#### R4 bit generation and rejected 40MHz cold execution (October6)
+
+The separately bounded bitgen pass reopens both ca23d499 parent and dd1e64cd
+candidate. Canonical POWER and GROUND route strings, every node and every PIP
+match exactly: POWER70,944 nodes/57,982 PIPs; GROUND106,722 nodes/103,141 PIPs.
+It also rechecks the32 changed final-PC functions, all32 complete original-D
+clones and ordered inputs, three selection predicates, the actual PC-FF
+drivers, existing final-D observers and nine vector taps. Observer ABI
+`00cf0096` is unchanged. The physical state is fully routed with zero route
+errors, DRC errors or critical warnings. Native0/pins0 and the independent
+bitgen consumer0 close without OOM. This establishes physical validity and
+stable-function equivalence, **not** correct hardware execution.
+
+Bitgen root `ventium-pc-commit-bitgen.7ai680`; closure seal
+`64ee8e86b098ff6fe9a819dd7c977f41ead162c5e183da1f1cd26735385b6c89`.
+The native20,606,636-byte bin has the AA995566 sync word at byte80:
+`5a0561fc1df1d9b53961b4a1a782c3af10e4ff22f308b4e45d2ad71f2a8b1225`.
+No synthesis or global place/route is repeated during this pass.
+
+Deploying5a0561fc on the same board boot closes loader0 and manager operating.
+DDR reservation60000000–6fffffff remains excluded from Linux RAM. All eight
+production pins are unchanged. Held reset measures **39.999875866980MHz**
+over200,004,180 clocks/5.000120017s, with zero retirements and100 reset/freeze
+guards. The deployment source audit independently checks all14 pinned inputs
+and recomputes the clock arithmetic. Deploy success does not accept the core.
+
+The cold original paired CMP/JP64 diagnostic **fails** on this candidate:
+
+- Native unit `ventium-exception-log-0-Kan5ot.service` closes MainPID0,
+  native exit0, Result success, invocation
+  `bbfd544dcb53400a835152a6d96f9934`. Controller1 is a captured CPU failure,
+  not a daemon crash, observation timeout or verification success.
+- The old bad-PC14566 breakpoint misses (exit2). Only two cases complete;
+  caller count3 and checksum9fff identify the third call.
+- Primary retirement history is `00a7:14562 ->14576 ->14579`, followed by
+  the exception entry. Correct parity-taken destination is1457a. This ring
+  does not expose every V retirement, and its packed `lin` field is not an
+  MMU linear-address oracle.
+- The code bytes are unchanged.14576 executes `ADD ESP,16`;14579 is RET.
+  An independent offline LDT/page-table walk locates that RET's zero stack
+  word at physical001e5808. The exception record independently agrees:
+  #PF14/error4, savedCS00a7/EIP0, FLAGS2, ESPe080c/SS00af, CR210000000.
+  This explains the fault **after** the wrong jump, not the cause of the
+  wrong destination.
+
+There is no STEP, breakpoint on the intended paired V14565, disabled pairing,
+forced flag, save-state or production-media patch. The private ROM substitutes
+JP for one original JNE byte and is diagnostic-only. It is not a Quake timedemo
+or standard-suite result. The candidate is **rejected**, and no production
+timedemo is started on it. The changed wrong destination is not proof that the
+original fault is fixed, nor evidence of a particular analog timing cause.
+
+All41 exported files pass their recorded hashes. Archive root
+`ventium-pc-commit-board.MVYK5u/exception-log-Kan5ot-export`; manifest
+`6d98b4f949b53b65e72a6636a1e910a589c0d87712dcb97b177afd10d1110fcd`;
+physical16MiB RAM
+`b19b550907e7f635af23b48089ef97d7aa4419ce616bbfbf32dcbf9438af1d69`.
+The independent failure consumer closes0, explicitly with CPU acceptance false.
+Deployment/failure/cone-analysis audit seal
+`42d1d8e96776e13ff3a86ea4a7cc2e2746be6f471a8b8fafebf4aaf4465e3344`.
+
+To fit the new installed firmware on the nearly full board root, only the
+already archived intermediate74d7cf7d pcvector firmware copy is removed
+(20,606,636 bytes). Its exact host recovery remains under
+`ventium-pc-vector-bitgen.LvID7D/native-output/`. After deployment, the duplicate
+uploaded5a0561fc bin is also removed; its installed firmware and sealed host
+bitgen master are retained. Original production,53f129e9,48288e83,3be5b6e4
+and fa2af871 rollback firmware remain untouched.
+
+After the separate host archive/audits pass, exact closed-run pruning removes
+the42 exported duplicate files and only the original run's duplicate VHD and
+physical-RAM dump. Native closure/invocation, controller1, every export hash,
+seed/VHD identity and absence of open descriptors are rechecked before unlink.
+All original metadata and the seed remain.44 files/101,310,815 logical bytes
+are removed, reclaiming53,702,656 allocated bytes (51.2MiB) from board tmpfs.
+Receipt `c48534e193baac1a923b6a9074822ba9ca4188d9c2235238b36fd3933a4789c7`
+is retained under the board-audit root; recovery is the host export plus the
+unchanged seed. No material board artifact is removed without that recovery.
+
+Source follow-up uses the immutable actual-image package under
+`/var/tmp/ventium-fpga-quake-oct02.rc0wVn/fpga40-srtctrl.3M3DsT/ventium`,
+not the dirty current checkout. `core.sv:6105–6117` already precomputes U/V
+targets independently of the branch flags; `uv_common.sv:116–131` forwards
+U flags to V, and `core_fastpath.svh:835–854` selects the resolved PC. Do not
+propose flag-independent target precomputation as if it were absent. The
+existing three-level native query identifies the low-bit primary carrier's
+LUT5/CARRY8 inputs, but leaves four upstream selection/arithmetic drivers
+outside its captured cone. Their mapped functions remain unproved. Further
+localization must cover those native drivers before another physical fix.
+
+The40MHz cold production timedemo/full movie and current-image gameplay IPC
+remain pending. Verified baseline is0.1659957781052303 **primary/U-only** IPC,
+53f129e9 at37.499869765MHz,127 qualified intervals with gaps spanning cycles
+8,721,490,845–19,169,282,165. It predates5a0561fc and is not total U+V IPC or
+a whole-demo all-cycle measurement.
