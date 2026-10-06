@@ -987,6 +987,68 @@ pairing disable, CPU fix or additional observer deployment has been made.
 Primitive simulation, scan truth-table/coherence checks and full physical
 preservation/routing gates must precede any deployment of this extension.
 
+### Two-edge sampler: offline proof and rejected physical attempts
+
+The logical sampler now has84 pre-edge FFs and150 retirement-record FFs.
+Its retained record includes actual original primary-PC/EIP/PF outputs plus
+the preceding edge's raw EIP input, live length/condition/displacement inputs,
+ACTIVE, EIP enable, PF input and seven state bits. Capture uses the original
+registered retirement pulse through an identity-LUT enable buffer. Selectors
+109–115 expose signature/metadata and150 bits; the original338-bit bank is
+unchanged. This is general diagnostic state with no instruction-PC filter,
+CPU RTL change or additional MMIO response cycle.
+
+Installed Xilinx FDRE/LUT1 functional models pass8,168 checks, including all
+eight-clock retirement patterns, consecutive retirements, per-bit propagation,
+disabled-original-EIP-enable D/Q discrimination, halted retention and reset
+priority. Independent scan checks pass31,424 cases. Existing64 model traces
+contain4,096 committed CMP/JP windows:684 immediate and3,412 retained-memory
+windows have the expected next-edge original PC/EIP/PF alignment. This replay
+does **not** claim64 complete seed gates or hardware timing qualification.
+Logical catalogue SHA-256:
+`e5439cc145fc7f62c6b60e9300fc96560c0a6d2e0115d908bf5a419157696394`.
+Offline closure: `ventium-debugscan-retire-plan.dlobDM/closed-offline-tests.sha256`,
+SHA-256 `caab0b7771beddb9f313b7c1f01f50d2e8a9f99b931474f5a3079a490ae2af96`.
+
+The dual-bank reader also passes10 fake-MMIO tests, with150 new and338 old
+one-hot bit checks. It requires an already-halted, non-frozen core; writes
+only the selector CSR; restores that selector on failure; checks signatures,
+padding, unused selectors and two complete coherent reads; and compares a
+valid record's actual PC/EIP/PF against independent original debug values.
+An old retained-only image is rejected before payload interpretation. Its
+seal is `ventium-private-retire-reader.vEoE1U/closed-reader-tests.sha256`,
+SHA-256 `0148f0cf1a3d4dc62cc973c72b5794b493bd964e88ee700468fe4cb7ebd7c170`.
+These remain offline protocol tests, not a deployed extension or CPU pass.
+
+The first native preflight rejects a guessed reset inversion **before any
+construction**. The original retire-valid R pin is non-inverted0 despite its
+driver's misleading `core_reset_n` name. A matching reset0 vendor-model test
+passes8,168 checks; its closure SHA-256 is
+`813c1672e0f432e50f0db087bbb653200d7f8c47b81dc7a072acb7ace6a05665`.
+Rejected preflight seal: `ventium-debugscan-retire-eco.nz8GFx/closed-rejected-preflight.sha256`,
+SHA-256 `6a2f4790d73e0314797ff450b2c6b12239bc538fd899bc1b9b7e9f9be5f054ec`.
+
+The reset0 physical attempt then packs16 independent diagnostic FF inputs per
+fresh slice. Native routing reports overlapping/unreachable connections,
+including record FF2 paths and the changed debug-response inputs. It reaches
+the580-second bound: **native124/input-pins0**, not a routing pass. Its prepared
+checkpoint must **not** be bitgenerated or deployed. The unchanged parent DCP
+and board image remain available. Rejected routing seal:
+`ventium-debugscan-retire-eco-r2.strCm2/closed-rejected-routing.sha256`, SHA-256
+`e84631cff0bef67b28aac6a65f61fad7bf00b7a41e97dd1128b0aee78e223b70`.
+
+The revised physical plan uses only eight FF1 lanes per fresh slice, each with
+a matching identity6LUT data path:234 FFs and339 LUTs,573 new primitives total.
+The logical catalogue/scan ABI is unchanged. Its vendor-model test again
+passes8,168 checks;468 identity-buffer truth cases and31,424 independent scan
+cases pass. Closure: `ventium-debugscan-retire-eco-r3.Co7axy/closed-buffer-tests.sha256`,
+SHA-256 `1b4c81cc56e3cd5b9fd8fba7e7e271a368f06a0d0b25c3fb64caca306dcb24db`.
+Only the completed **pre-construction baseline data** from the rejected
+attempt is reused, with its seal, unchanged parent identity and all416,253
+original net groups checked; the failed ECO is never treated as accepted.
+The revised guarded native attempt is pending full preservation/route/DRC
+closure. No additional observer image has been deployed.
+
 Obtain causally useful retained-packet/next-PC evidence before selecting
 a general fix. Do not disable pairing, single-step production Quake, suppress
 faults, or patch its allocator to manufacture completion. Any eventual major
