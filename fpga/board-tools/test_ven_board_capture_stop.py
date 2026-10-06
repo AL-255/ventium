@@ -86,6 +86,9 @@ class Harness:
         self.phase = phase
         self.plan = list(plan or [])
         self.actual = actual
+        self.dimensions = (2, 2)
+        self.pixel_count = 4
+        self.monotonic = lambda: 0
         self.native = native
         self.native_handler_after = None
         self.native_original_restored = False
@@ -173,9 +176,9 @@ class Harness:
                 return PROBE.CAP_STATUS_ACTIVE
             return PROBE.CAP_STATUS_READY | 1
         if offset == PROBE.R_CAP_DIMS:
-            return 2 | (2 << 12)
+            return self.dimensions[0] | (self.dimensions[1] << 12)
         if offset == PROBE.R_CAP_PIXELS:
-            return 4
+            return self.pixel_count
         if offset == PROBE.R_CAP_DATA:
             self.trigger("drain")
             if self.actual == "drain_error":
@@ -226,7 +229,7 @@ class Harness:
             if self.actual == "timeout":
                 stack.enter_context(patch.object(PROBE.time, "monotonic", side_effect=[0, 1000]))
             else:
-                stack.enter_context(patch.object(PROBE.time, "monotonic", return_value=0))
+                stack.enter_context(patch.object(PROBE.time, "monotonic", side_effect=self.monotonic))
             return PROBE.main()
 
 
@@ -340,6 +343,74 @@ class CaptureStopTests(unittest.TestCase):
                 self.assertEqual(h.run(), 2)
                 self.assertNotIn("VGA CAPTURE STOP", h.stderr.getvalue())
                 self.assert_restored(h)
+
+    def test_nonrequested_startup_metadata_is_filtered_without_emission(self):
+        h = Harness(plan=[PROBE.CaptureMetadataError(1, 128, 3, 360)])
+        h.args.skip_unmatched = True
+        self.assertEqual(h.run(), 0)
+        self.assertEqual(h.captures, 4)
+        self.assert_records(h, 3)
+        self.assertIn("no payload emitted", h.stderr.getvalue())
+        self.assert_restored(h)
+
+    def test_actual_metadata_filter_never_drains_invalid_payload(self):
+        h = Harness(phase="ready_wait", actual="valid")
+        h.dimensions = (128, 3)
+        h.pixel_count = 360
+        h.args.skip_unmatched = True
+        self.assertEqual(h.run(), 0)
+        self.assert_records(h, 0)
+        self.assertEqual(h.ctrl_writes, [(PROBE.R_CAP_CTL, 1)])
+        self.assert_restored(h)
+
+    def test_startup_filter_requires_explicit_geometry_and_optin(self):
+        for skip, dimensions in ((False, (2, 2)), (True, (0, 0))):
+            with self.subTest(skip=skip, dimensions=dimensions):
+                h = Harness(plan=[PROBE.CaptureMetadataError(1, 128, 3, 360)])
+                h.args.skip_unmatched = skip
+                h.args.width, h.args.height = dimensions
+                self.assertEqual(h.run(), 2)
+                self.assert_records(h, 0)
+                self.assert_restored(h)
+
+    def test_requested_and_impossible_metadata_always_fail(self):
+        for dimensions in ((2, 2, 3), (0, 3, 360), (128, 0, 360),
+                           (128, 3, 0), (128, 3, PROBE.CAPTURE_MAX_BYTES + 1),
+                           (4096, 3, 360)):
+            with self.subTest(dimensions=dimensions):
+                h = Harness(plan=[PROBE.CaptureMetadataError(1, *dimensions)])
+                h.args.skip_unmatched = True
+                self.assertEqual(h.run(), 2)
+                self.assert_records(h, 0)
+                self.assert_restored(h)
+
+    def test_metadata_fault_after_first_requested_frame_is_fatal(self):
+        valid = (1, 100, 2, 2, 4, b"abcd")
+        h = Harness(plan=[valid, PROBE.CaptureMetadataError(2, 128, 3, 360)])
+        h.args.skip_unmatched = True
+        self.assertEqual(h.run(), 2)
+        self.assert_records(h, 1)
+        self.assertNotIn("startup VGA metadata", h.stderr.getvalue())
+        self.assert_restored(h)
+
+    def test_stop_after_startup_filter_emits_no_partial_record(self):
+        h = Harness(phase="capture", plan=[PROBE.CaptureMetadataError(1, 128, 3, 360)])
+        h.args.skip_unmatched = True
+        self.assertEqual(h.run(), 0)
+        self.assert_records(h, 0)
+        self.assertEqual(h.captures, 1)
+        self.assert_restored(h)
+
+    def test_startup_metadata_retry_is_bounded(self):
+        h = Harness(plan=[PROBE.CaptureMetadataError(1, 128, 3, 360),
+                          PROBE.CaptureMetadataError(2, 128, 3, 360)])
+        h.args.skip_unmatched = True
+        ticks = iter((0, 601))
+        h.monotonic = lambda: next(ticks)
+        self.assertEqual(h.run(), 2)
+        self.assert_records(h, 0)
+        self.assertIn("did not settle before timeout", h.stderr.getvalue())
+        self.assert_restored(h)
 
     def test_ready_timeout_after_request_stays_nonzero(self):
         h = Harness(phase="ready_wait", actual="timeout")

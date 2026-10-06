@@ -648,6 +648,19 @@ def _rgb332_to_rgb24(pixels: bytes) -> bytes:
     return bytes(rgb)
 
 
+class CaptureMetadataError(RuntimeError):
+    """A completed recorder image whose reported raster is not rectangular."""
+
+    def __init__(self, sequence: int, width: int, height: int, pixels: int):
+        super().__init__(
+            f"invalid frozen VGA metadata seq={sequence} "
+            f"{width}x{height} pixels={pixels}"
+        )
+        self.width = width
+        self.height = height
+        self.pixels = pixels
+
+
 def _capture_scanout_frame(
     ctrl: mmap.mmap, *, frame_timeout: float, poll_interval: float
 ) -> tuple[int, int, int, int, int, bytes]:
@@ -691,10 +704,7 @@ def _capture_scanout_frame(
     height = (dims >> 12) & 0xFFF
     pixels = u32(ctrl, R_CAP_PIXELS) & 0xFFFFF
     if not width or not height or pixels != width * height or pixels > CAPTURE_MAX_BYTES:
-        raise RuntimeError(
-            f"invalid frozen VGA metadata seq={sequence} "
-            f"{width}x{height} pixels={pixels}"
-        )
+        raise CaptureMetadataError(sequence, width, height, pixels)
 
     rounded_bytes = (pixels + 3) & ~3
     payload = bytearray(rounded_bytes)
@@ -749,6 +759,8 @@ def vga_capture_probe(args: argparse.Namespace) -> int:
 
         completed = 0
         oversized_skips = 0
+        startup_metadata_skips = 0
+        startup_metadata_deadline = None
         while completed < args.frames:
             if stop_requested:
                 break
@@ -757,6 +769,35 @@ def vga_capture_probe(args: argparse.Namespace) -> int:
                     ctrl, frame_timeout=args.frame_timeout, poll_interval=args.poll_interval
                 )
             except RuntimeError as error:
+                # VGA timing changes during cold firmware setup can leave a
+                # nonrectangular transitional raster. Only before the FIRST
+                # accepted requested-mode frame, and only with explicit
+                # --skip-unmatched and dimensions, discard an out-of-mode
+                # raster WITHOUT draining or emitting any of its payload.
+                # Requested-mode corruption, zero/oversized metadata, and all
+                # errors after requested capture starts remain fatal.
+                if (
+                    isinstance(error, CaptureMetadataError)
+                    and args.skip_unmatched and args.width and completed == 0
+                    and 0 < error.width <= 0xFFF and 0 < error.height <= 0xFFF
+                    and 0 < error.pixels <= CAPTURE_MAX_BYTES
+                    and (error.width != args.width or error.height != args.height)
+                ):
+                    now = time.monotonic()
+                    if startup_metadata_deadline is None:
+                        startup_metadata_deadline = now + args.frame_timeout
+                    if now >= startup_metadata_deadline:
+                        raise RuntimeError("VGA startup metadata did not settle before timeout") from error
+                    startup_metadata_skips += 1
+                    if startup_metadata_skips == 1 or startup_metadata_skips % 20 == 0:
+                        print(
+                            f"skipping non-requested startup VGA metadata: {error} "
+                            f"(count={startup_metadata_skips}); no payload emitted",
+                            file=sys.stderr if stream is not None else sys.stdout,
+                            flush=True,
+                        )
+                    time.sleep(0.25)
+                    continue
                 # The recorder deliberately has only one private BRAM image.
                 # Firmware text/graphics modes can exceed that capacity before
                 # the guest selects its requested low-resolution mode.  The

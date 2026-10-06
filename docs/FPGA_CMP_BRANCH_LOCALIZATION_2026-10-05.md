@@ -413,6 +413,38 @@ four closed cleanup receipts and exact deletion sets. Cleanup seal SHA-256
 `61a11889fb963953d225861ffe8ac96c282d8a7ba803f6d14a1b1dc73e331d9c`;
 it does not infer the current live board state from historical receipts.
 
+### Cold recording startup — capture-client issue, not a CPU finding
+
+A separate unchanged-media cold diagnostic at measured37.499883540MHz stops
+after the recorder reports `seq=1 128x3 pixels=360`. The requested mode is
+320x200; metadata validation precedes the existing `--skip-unmatched` filter.
+The producer exits2 and the monitor exits1; transport closes0 with only a
+16-byte header. The guest service is explicitly stopped, so its cleared
+post-stop systemd status is **not a natural native exit0**. No gameplay,
+completed timedemo, full movie or processor pass is inferred. The monitor
+restores the40MHz preset and holds guest reset after preserving state/RAM.
+All regular board files, including the original cloned disk and16MiB RAM,
+are independently hash-checked on the host against closure SHA-256
+`55317a7dc90cd7969a324e9db8f5b2c4a3464c7ebc72e5a5b17b3642b955a2e8`,
+under `ventium-fpga40-capture.VMIAgs/quake-clock37.S0lmbK/failed-start-board`.
+Only those two large board copies are then removed; the recovery copies,
+production seed, firmware and earlier40MHz CPU-fault captures remain.
+
+The generic capture client now distinguishes typed invalid metadata. Only
+before its first accepted requested-mode frame, with explicit dimensions and
+`--skip-unmatched`, it may discard a positive, bounded **non-requested**
+startup raster. It neither drains nor emits that invalid payload. Requested
+320x200 corruption, impossible metadata, subsequent metadata errors, timeouts
+and consumer loss remain fatal. A retry deadline prevents endless malformed
+startup handling. All26 mock/signal tests pass, native0 in0.011s, including
+actual mocked MMIO validation/no-drain, mode/opt-in restrictions, post-first-
+frame failure, deadline, whole-record SIGUSR1 and broken-pipe cases.
+Source SHA-256 `426f793fb280133fd35ea19ed37e9229dd4f54badcc6562ac0176ddad6cffa0d`;
+test SHA-256 `17e908a8276a45e67f5f2301ac6f4096305b51d751d882a9bda30ad20e029e54`.
+There is no RTL, guest-code, color, dimension or frame-rate change. A fresh
+cold diagnostic is being retried separately; this software test is not a
+hardware movie or timedemo pass, and the40MHz CPU defect remains open.
+
 ## Model/reference verification
 
 Pinned QEMU Pentium independently checks all64 actual post-ALU states and JP

@@ -3186,6 +3186,16 @@ capture ABI but lacks `--stop-on-sigusr1`; do not use it for this workflow.
 Retain its separate frozen hardware-ancestry pin (`cd2842…`) in provenance,
 and do not use either widened client to certify the historical August image.
 Verify the final bitstream/source/client identity and held clock before capture.
+The October6 startup-filter client is separately installed as
+`/tmp/ao486/ven_board_probe.startup-r2.py`, SHA-256
+`426f793fb280133fd35ea19ed37e9229dd4f54badcc6562ac0176ddad6cffa0d`.
+With explicit dimensions and `--skip-unmatched`, it can discard malformed
+**non-requested** startup rasters before the first accepted requested frame,
+without draining or emitting their payload. The retry phase is bounded.
+Malformed requested-mode frames, impossible metadata, and metadata errors
+after accepted capture starts remain fatal. Its26 mock/signal tests pass;
+that is not hardware/timedemo qualification. Keep the older client and its
+receipts intact and use separately re-pinned movie helpers for the new client.
 Stream binary pixels over
 non-PTY SSH to a host-owned run directory rather than accumulating frames on
 the board. Root's two actual-board synthetic FIFO tests passed byte integrity
