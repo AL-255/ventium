@@ -1075,9 +1075,29 @@ defect**, not an FPGA constant-tree or processor failure. It closes
 Seal: `ventium-debugscan-retire-eco-r5.1hMfQI/closed-rejected-object-handles.sha256`,
 SHA-256 `aa73914ce2c88b7d9d5697433d11af57bf5d09a84805643cf3bc403e97315ae2`.
 The subsequent revision retains native objects directly in the shared array,
-with no ordinary dict/list return conversion. Its full preservation/route/DRC
-gates are pending. The logical sampler, scan ABI and board image remain
-unchanged by these rejected tooling attempts.
+with no ordinary dict/list return conversion. It now loads the complete
+baseline and passes preservation preflight:297,551 parent primitives,
+416,253 inherited groups,191 source bindings,3,990 original mapped LUT inputs,
+1,930 constraint-only locks and471 constant aliases. Both constant trees
+match the cached parent and already have matching inherited route locks.
+This confirms the loader/cache repair, **not** final routed preservation.
+
+Construction places234 sampler FFs and234 matching data buffers, then rejects
+a heuristic that tries to get a slice coordinate for the VALID-bit constant.
+Those matched buffers are already placed with their FFs; they need no source
+coordinate. The attempt closes **native1/input-pins0**, with no checkpoint
+written and no routing/bitgen/deployment. Seal:
+`ventium-debugscan-retire-eco-r6.pLJ9Sq/closed-rejected-constant-location.sha256`,
+SHA-256 `4c1c4e17c99c87f9388cbff991b4e6d9ebca0982abc173f1cbaf5e7aed7eb207`.
+The next revision skips coordinate lookup for already-placed matched buffers;
+the logical sampler and scan ABI remain identical. Its full route/DRC and
+after-routing preservation checks are still required before deployment.
+
+Native collections are not generic Tcl lists; preserving their object type
+matters when passing them back to native APIs. This is consistent with
+[AMD's collection-handling guidance](https://docs.amd.com/r/2022.1-English/ug894-vivado-tcl-scripting/Handling-Lists-of-Objects).
+The exact errors, cache repair and native preflight results above come from
+these pinned2025.2 runs, not a claim that documentation alone qualifies an ECO.
 
 Board cleanup removes only the closed `mFdR81` and `XEIuht` private runs and
 their duplicate board exports, after re-auditing both host recovery captures,
