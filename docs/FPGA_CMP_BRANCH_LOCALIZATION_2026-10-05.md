@@ -2485,3 +2485,158 @@ Passing vendor root `ventium-state-replica-vendor-r2.bJh64t`, seal
 The next useful hardware discriminator is simultaneous early/later PC bits
 2–4 and their mux controls, because those bits differ between actual14566
 and expected1457a. No CPU patch follows the low-bit mismatch alone.
+
+#### PC bits2–4: deployment, controls and observer calibration (October6)
+
+The nine reused observer slots now capture early PC bits2/3/4, later mux
+bits2/3/4, the two mapped mux controls and FP override. Metadata is
+**00cf0096**, catalogue
+`b4c5a43062bcbbe1486e7f85d2f5e5ca44097fc36fe3d05e23efc06d9dc770dd`.
+No FF/LUT is added; only nine observer leaf inputs and one metadata LUT INIT
+change. All298156 original primitives,236980 FF-input polarities, CPU sink
+paths, nine observer output routes and both constant trees are preserved.
+The first native attempt rejects an incorrectly quoted Tcl expression before
+opening the checkpoint; that failed fixture is retained, not a hardware run.
+The separately named corrected route and bitgen close native0/pins0, with a
+fully routed image and no DRC errors/critical warnings. This is diagnostic
+qualification, not CPU repair or timing sign-off.
+
+Route root `ventium-pc-word-observer-r2.KTHFxy`, closed-route seal
+`2ea73c899bfc5ef08092f697bd8dc9b0007f2181038e0909440a6f9c80ac0389`;
+bitgen root `ventium-pc-word-bitgen.qJXcW7`, closed-bitgen seal
+`f0e7d120d7486784eacae5934f0246c9786560e94224e2d84949ca8dac187bd6`.
+The native20,606,636-byte raw BIN is installed and programmed as
+`/lib/firmware/ventium_fpga40_pcword_scan.bit.bin`, SHA-256
+**fa2af8714ea50961f089ac04fd182d6c39c2600f67a4bdda809421d3b3b2a390**.
+The closed deployment/archive consumer verifies17 source pins, all eight
+unchanged production pins, actual deployment exit0 and measured held-reset
+clock **39.999873027MHz**, with zero retirements. Neither the previous74d7
+image nor this new image has a gameplay IPC measurement.
+
+Three once-only cold private controls use the original CMP/JP ROM or the
+existing OR/JP discriminator. There is no STEP, guest repair, production ROM/
+disk change or CPU RTL modification. Each native/controller/launcher closes0;
+the independent consumer checks all44 exported files, invocation identity,
+actual16MiB RAM/code/mappings, coherent breakpoint architecture and the
+150/338-bit scan layouts. BP stops precede any exception; CR2 and the ordinary
+exception record remain zero. Raw state28, ACTIVE0, CE1, U/V lengths low3/2
+and VccA are common to all three. EIP-D bit5, Vrel bits23–31 and length bit3
+remain **unobserved**, never fabricated.
+
+|Observation|CMP/JP fault|CMP/JP not taken|OR/JP taken|
+|---|---|---|---|
+|Case / FLAGS|2 /887|0 /2|2 /86|
+|Actual primary / next PC|14562 / **14566**|14562 /14567|14562 /1457a|
+|PF D/Q / mapped PC selector|1/1 /1|0/0 /0|1/1 /1|
+|Early PC bits `[4:2]`|**111**|001|110|
+|Later mux bits `[4:2]`|001|001|**001**|
+|Final EIP-D bits `[4:2]`|001|001|**110**|
+|Actual EIP-Q bits `[4:2]`|001|001|**110**|
+|Mux gate14 / gate31 / FP override|1 /0 /0|1 /0 /0|1 /0 /0|
+
+**Important correction to the localization:** the healthy taken control also
+has a later-tap mismatch. Its actual destination and independently sampled
+final EIP-D bits are correct, while the intermediate sampled mux retains001.
+Therefore this intermediate mismatch is **not fault-specific** and does not
+establish a bad Boolean mux, state-replica disagreement or the first point
+where the CPU chooses the wrong PC. Early bit2 differs between the fault and
+healthy taken captures, but unmatched analog sampling times prevent assigning
+causality to that difference alone. The original actual14566 fault remains
+real and uncorrected.
+
+Closed capture identities:
+
+- Fault jWIi1Z: invocation `685199ed543c49d09a094eaf4402d243`, manifest
+  `b428253b61d9f90844f20e84c59e72cebf2a604fd2dd503e472f9eeb6e110035`.
+- NT Hzf0Nt: invocation `2bf92995c41b4e6d8042c48491c712e5`, manifest
+  `87079b80e494891d99dc53f72e3f6f68064d7f1451a1c95da673ebc7844042fd`.
+- Taken iirKUH: invocation `c33decc2b5f94aa18cb2bf1774822af1`, manifest
+  `09f61561914ec0aa2aaad06b88ec0a30a850c9e123e688e9b1084ae8fc2a13b2`.
+
+Recovery root `ventium-pc-word-captures.EOTvAv`, complete round seal
+`9a8aea5f402601eafedc7764fba6503bf94654bcdd9f264442ed083964f4f10c`.
+After full host retrieval/audit/seal, the three closed board VHD/RAM/export
+duplicates are pruned, retaining original metadata, all full host captures
+and the seed. One redundant installed a533 intermediate firmware and the new
+upload duplicate are also removed after recovery/hash verification. Current
+fa2af871, preceding74d7, baseline53f129e9 and other retained rollback firmware
+remain installed. The removed firmware is recoverable from its sealed host
+bitgen output. There is no active guest or Vivado worker at this closure.
+
+A subsequent **read-only** native query of the actually deployed checkpoint
+closes0/pins0. The final independent consumer verifies605 observer cells,
+all234 pre/record chains, all105 readout-graph LUT truth tables and ordered
+physical inputs, plus all32 registered response lanes. Its2,100 native-LUT
+readout checks cover every150-bit one-hot across all seven extension
+selectors, accepted and rejected reads. This rules out an incorrect symbolic
+lane mapping in that checked readout graph; it is not an analog capture proof.
+The first consumer incorrectly omits the32 response FFs, the next assumes
+non-inverted response reset, and another mistakes a catalogue reminder for a
+numeric polarity. All failed fixtures are retained. The final consumer checks
+the native inherited active-low reset source/polarity explicitly; no hardware
+or checkpoint is rerun or edited to satisfy it.
+
+The local48-case truth proof shows that each later LUT6 is exactly an identity
+on its primary-PC input when gate14=1 and gate31=0, for **every value** of the
+other data inputs. It requires no state-Q agreement assumption. The sampled
+records violate that stable identity in fault bits3/4 and healthy taken
+bits2/3/4, so a collection of correct digital bindings is not sufficient to
+treat the recorded intermediate signals as one coherent settled instant.
+
+The72 native endpoint-delay objects have exact net/to-pin identities and
+units **picoseconds**. Relevant slow-corner min/max net/site delays:
+
+|Endpoint|Bit2|Bit3|Bit4|
+|---|---|---|---|
+|Original EIP clock|2323/2597|2324/2603|2335/2617|
+|Early observer clock|2232/2491|2232/2491|2232/2491|
+|Later observer clock|2234/2496|2234/2496|2234/2496|
+|Early source → observer-buffer input|1055/1544|826/1300|725/1083|
+|Later source → observer-buffer input|1612/2452|1289/1949|1614/2401|
+|Primary source → original mux input|153/224|750/1112|811/1201|
+|Mux source → original final-D input|289/440|391/595|405/629|
+
+The observer additionally has a LUT1 buffer before each sampling FF. These
+numbers are **not** total logic delays, setup/hold margins, measured Fmax or
+proof of a timing failure. They show why the distant diagnostic path cannot
+be assumed to have the CPU endpoint's aperture. Readout/layout correctness
+and the observed healthy-control contradiction both have to be respected.
+Query root `ventium-pc-word-capture-query.HqHaOA`, complete query seal
+`f6216f039559d86c4a6b694bd171833239a6a7100ebd75b9ab3a54dd40b12e90`;
+final consumer hash
+`237d6d6e8d5c2b2d65e348558e0ca8d9972728944fea378bdcb1b64d4389a6a7`.
+
+**Next repair direction:** first calibrate any new intermediate probe against
+the CPU's actual registered outcome on both healthy transitions; do not infer
+instantaneous causality from an unqualified tap. A general, function-equivalent
+local PC-commit path is worth evaluating against the native mux truth tables
+and every reset/FP/exception priority before a bounded physical change. Neither
+an unproved bypass nor disabling pairs, unconditional bubbles, reduced-clock
+acceptance or a guest-specific patch is acceptable. CPU changes still require
+the differential gates and the complete standard suite. The40MHz cold
+production timedemo/movie and a current-image gameplay IPC remain **pending**.
+Latest verified gameplay baseline remains **0.165996 primary/U-only IPC** on
+53f129e9 at37.5MHz,127 qualified intervals spanning cycles
+8,721,490,845–19,169,282,165; it predates both diagnostic candidates and is not
+total U+V IPC or a whole-demo all-cycle measurement.
+
+The subsequent conservative DATA proof establishes a possible general bypass
+for **PC bits0–7 only**. Under the four actual physical control cutpoints
+`gate14=1, gate31=0, FP_override=0, reset=0`, original final D equals the
+primary-PC carrier for both carrier values and all other input values. A mux
+`fast_condition ? primary_PC : original_D` would therefore preserve the
+checked stable function: inactive conditions retain original D verbatim.
+There is no state-replica equality, opcode or guest-value assumption. This
+proves a conditional **Boolean identity**, not routing feasibility, analog
+capture alignment, timing closure or a processor repair. No mux is applied.
+
+The bounded source query contains only the low eight EIP-D endpoints; bits8–31
+are explicitly **not proved**, not failed CPU cases. An initial structural
+lookup reaches absent bit8 and stops; its empty output and traceback remain
+preserved. The separately named final consumer bounds that missing scope
+explicitly and closes0. Wider application requires a fresh current-native
+binding/function query first. Root `ventium-pc-commit-bypass-proof.GMtr3J`,
+final proof seal
+`ee5db78aca821e335954e0f5d1d25889b239255d359180e6be864e3fbe523c68`;
+proof output
+`3d68101da84fe5d650b8d47dfa639e4827e312f257028566ccf81e402cf647d1`.
