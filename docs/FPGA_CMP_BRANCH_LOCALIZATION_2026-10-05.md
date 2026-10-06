@@ -704,6 +704,44 @@ remaining target's physical entry resources before selecting a repair. A
 duplicate FF with matching D/C/CE/R would not prove observation of the original
 retained state and is not an acceptable replacement for that tap.
 
+The first NOP endpoint inventory stops at an invalid net-name equality
+assumption, before placement or routing; it closes native1/input-pins0.
+Rejected query manifest:
+`ventium-debugscan-nop-resources.7PTW3x/closed-rejected-query.sha256`, SHA-256
+`7b170b093e75253f6b0891a490456ae8849de5487931e45c64c9ef4aca8f308b`.
+The corrected read-only query exposes different hierarchical alias names for
+the same physical connection. The target's unique driver is the actual
+original U `is_nop/Q`; both aliases report identical ROUTE, FIXED_ROUTE, eight
+physical nodes and seven PIPs. Alias names alone are not electrical identity.
+Native closes0/input-pins0, and the separate alias-aware consumer passes.
+Sealed query:
+`ventium-debugscan-nop-resources-r2.ZNDDwj/closed-query.sha256`, SHA-256
+`9fb3279e69876e037d835773597dbff2622349808a770927807a3a98d8c7b7b1`.
+The initially pinned name-equality consumer is retained unchanged, not silently
+edited into a pass. This query failure is not a processor defect.
+
+The source has three original local receivers. Original LUT5
+`u_icache/gpr[6][0]_i_31` occupies `SLICE_X106Y203/G6LUT`, with logical INIT
+`32'h0000202A` and I0..I4 physically on A1,A5,A3,A4,A2. Its paired G5 BEL is
+physically unused/unreserved/non-prohibited, and A5 already carries the true
+NOP FF value. The proposed repair adds one identity LUT1 at G5, sharing that
+input, and moves **only** the new observer load behind its output. It does not
+duplicate a processor register or alter the reader's338-bit catalogue.
+
+The offline proof checks all64 paired-LUT input assignments (32 original O6
+cases with A6 high),43,520 scan-bank cases and4,096 random envelopes. The
+compatible physical table is `64'h00022022ffff0000`: its low32 bits implement
+O5=NOP and its high32 preserve the original O6 function. This requires the
+physical G6 A6 input to be tied high; a native placement pass alone does not
+discharge that condition. The bounded native ECO must verify the exact one-node/
+one-PIP VCC extension, original G6 logical INIT and all five physical input
+mappings, unchanged original NOP route, all214 existing observer outputs,
+the complete original-route audit, full native routing and full DRC before
+bitstream generation. Offline proof only:
+`ventium-debugscan-nop-buffer.McEzrg/checks/result.json`; native plan SHA-256
+`39657e2a6ca9a2b4d3ad796e4faeed3b2d4c0479db258df24a8c71f994a71d6c`.
+No image is deployed or hardware acceptance claimed at this point.
+
 Board scratch cleanup removes only the closed `rC7oCB` run and its duplicate
 board export, after checking native closure, all37 sealed files and the kept
 VHD seed. It frees53,465,088 bytes. Full evidence remains in the host's
