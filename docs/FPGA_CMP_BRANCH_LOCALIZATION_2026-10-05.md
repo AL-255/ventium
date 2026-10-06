@@ -466,6 +466,62 @@ new observer/response nets from the original-source tap branches to localize
 the remaining blockage. No synthesis, board programming, clock change or
 production Quake run occurs on these diagnostic results.
 
+Routing just the 214 new observer/response nets, without selecting any
+protected original net, falls from 18 overlaps to one and stalls. A SIGINT to
+the exact private Vivado PID cancels both `route_design` and its entire Tcl
+source; the script's catch does not run. Native1/input-pins0 closes with **no
+saved output checkpoint**. The router's cancellation-time DRC reports zero
+errors, but that is not routing completion. Sealed attempt:
+`ventium-debugscan-freshnets.pmb1NZ/closed-routing.sha256`, SHA-256
+`4bc5e359edd0215c39b35e34efbdf684e7ee9ac1d847cfbfcbd4610cdb32a4d0`.
+Save completed stages before a later router call; do not assume cancellation
+will permit post-route checkpoint/report commands to execute.
+
+The staged follow-up first routes the physical constants successfully, checks
+all old constant nodes/PIPs, verifies GND's exact route, and verifies exactly
+one new VCC node/PIP at `INT_X73Y209/IMUX_W46`. All 297,336 old primitive
+functions/placements remain unchanged. It saves the completed constant stage
+before trying the other 213 fresh nets, excluding `local_ff_buffer/O`.
+That 213-net route also stalls at one overlap and is canceled; the exclusion
+does not remove the blockage. Native1/input-pins0 closes; no 213-net result
+is accepted. The earlier saved stage survives:
+`ventium-debugscan-freshsplit.4KMxem/native-output/scan_constants_DIAGNOSTIC.dcp`,
+SHA-256 `e1e49c6380f3f18e542506f28f87b1ca6b3f1c1bdb903f1db0d66e80c1d8e734`.
+Sealed attempt: `ventium-debugscan-freshsplit.4KMxem/closed-routing.sha256`,
+SHA-256 `46c4ffccfb50662930a9cb4d2750fb229d49aecdd7fb047762dca42ed82d262d`.
+An independent consumer accepts only that preceding constant stage for
+further diagnostics, explicitly not route or hardware acceptance. Next query
+the actual used site routing resources and native router parameter inventory
+without mutating this saved design. No further combined automatic pass or
+processor-route relaxation is justified by these results.
+
+The read-only resource query closes native0/input-pins0 in 57.6 s, enumerating
+all 214 new outputs across 170 sites and their used site PIPs. It writes no
+design checkpoint. Sealed query:
+`ventium-debugscan-routeparams.6B5Xar/closed-query.sha256`, SHA-256
+`18dd337fce7f71fe5d5cf137f724e2f2688d6cf3a5e4c18126698620ebd37b47`.
+Separate native-help/report queries confirm 17 public parameters, none a
+routing iteration limit; `report_param *route*` exposes no matching parameter.
+Do not invent or set an undocumented iteration knob. Native help also
+confirms that `-no_psir` disables **physical synthesis in the router**, not
+site-internal routing. Keep it enabled; no processor synthesis optimization
+is authorized as part of this observer-routing diagnostic.
+
+The response-only follow-up closes native0/input-pins0. All 32 replacement
+debug-response wires route in 32 s with zero final overlaps and no
+warnings/errors. All 297,336 original primitive functions/placements, all 32
+shadow-FF configurations and exclusive response sinks remain unchanged;
+waiver-free PDIL-1 is zero. An independent consumer accepts only this
+completed diagnostic stage, not the full design. Sealed attempt:
+`ventium-debugscan-responses.zglMyD/closed-routing.sha256`, SHA-256
+`16d2864f05e7a6b215e868f3814acfaedc7af6d6d66d3f3ca0c5ed86b8755e07`.
+Saved `native-output/scan_responses_DIAGNOSTIC.dcp` has SHA-256
+`97b4a41b5289c71ff4c3f8fc7fff53127c04f7fd766821852ba0d797381a323b`.
+The next staged pass preserves those completed response routes and separates
+32 final word muxes, three shared controls and 114 lower-level LUT nets,
+saving each completed stage before proceeding. The observer remains
+**unqualified and undeployed**; the production timedemo has not been restarted.
+
 Board scratch cleanup removes only the closed `rC7oCB` run and its duplicate
 board export, after checking native closure, all37 sealed files and the kept
 VHD seed. It frees53,465,088 bytes. Full evidence remains in the host's
