@@ -1194,14 +1194,81 @@ original LUT6 `u_icache/eip[5]_i_1/O`, `SLICE_X73Y208.CMUX/C_O`, to
 that original EIP-D connection as **INTRASITE**, with no intersite nodes/PIPs.
 After saving a partial **unqualified** checkpoint, the550-second Tcl budget
 rejects before the after-routing preservation audit. Native closes **1/pins0**,
-with no bitgen or deployment; cancellation-time zero-error DRC is not closure.
+with no bitgen or deployment; failure-time zero-error DRC is not closure.
 Seal: `ventium-debugscan-retire-eco-r9.CAFLC2/closed-rejected-pre5-placement.sha256`,
 SHA-256 `4536b4491e49d931110e38f201a468032048a09947ebde65697474b3b71282a0`.
 Partial checkpoint SHA-256
 `8aabc0b08e138659589de581efddb18e5bd3aa9a9d2de3312404e6050de88cce`
-is diagnostic input only. A read-only source/target site and routing-owner
-query precedes any proposed new-buffer pin or placement change. There is
-still no additional deployment, CPU repair or timedemo acceptance.
+is diagnostic input only. The subsequent read-only source/target query closes
+native0/pins0 and confirms **225,580/225,581** routable nets fully routed,
+exactly one unrouted net and zero routing-error nets. The actual bit5 source
+is LUT6/O6, not an O5 or MUXF output. Its C_O and CMUX site-output nodes are
+unowned; some escape resources are free, while others belong to CPU nets.
+The new sampler's F3 input and all seven immediate predecessor nodes are
+unowned. This supports a bounded new-LUT input-map trial, not proof of a
+complete path. Inventory seal:
+`ventium-retire-pre5-endpoint.z5tP8T/closed-readonly-endpoints.sha256`, SHA-256
+`1011421ad04ad2f23bfe93f08b0f37332dda78c221f2bec57ae43953922db5d7`.
+There is still no additional deployment, CPU repair or timedemo acceptance.
+
+The bounded same-site F1→F3 remap of only the new sampling LUT is also
+unroutable. It closes native1/pins0 without a checkpoint or deployment; the
+source/target routing problem is not a processor finding. An earlier
+preflight-only attempt rejects before any mutation because a hierarchical
+net-filter result does not match the complete native route report. Rejected
+F3 seal: `ventium-retire-pre5-remap-r2.IcuPIC/closed-rejected-remap.sha256`,
+SHA-256 `e442a146e3310b8c70b7c959fd1c4332dedc9919d77789f6dedac7d114217a39`.
+
+To avoid changing CPU placement/routes just to observe one signal, the next
+diagnostic catalogue explicitly marks **EIP-D bit5 UNKNOWN**. Its storage
+slot (record bit69) is a zero placeholder, never reported as a measured or
+predicted CPU bit. Architectural primary PC, actual next-PC and actual PF
+remain fully observed, as do all other sampler inputs. Only the new input
+is disconnected from EIP-D; a constant-zero new LUT supplies that storage
+slot. A second new LUT changes selector110 metadata to **000f0096**, so the
+partial format cannot be confused with the earlier complete-input format.
+No CPU LUT, original FF, opcode, pairing rule, clock or guest payload is fixed
+or replaced. Catalogue SHA-256:
+`2d58b14da4a9ad82ca66155a175e2142997fd72bf0ba767abcce5307544583e9`.
+Physical-plan SHA-256:
+`2585d406be52caaf25dedb4882a00c03abfa4c62f199f13f1057c8423e9967ed`.
+
+The partial reader passes12 tests (including old-metadata rejection, unknown
+slot corruption rejection and selector restoration);31,424 scan-logic checks,
+468 buffer truth cases and320 installed vendor-LUT/FDRE checks also pass.
+Initial catalogue/wiring and vendor-global-model fixture failures are retained,
+not counted as passes. Offline seal:
+`ventium-retire-masked-input.IRmCT2/closed-offline-mask-tests.sha256`, SHA-256
+`b11e025aa431a3707a38bc7d864b667cbf076a516909f6d11046fedb79cb9908`.
+An initial native preflight rejects before mutation on case-sensitive INIT
+comparison; the next native query confirms hexadecimal letters are uppercase.
+Comparison is normalized without relaxing function/placement/pin-map checks.
+The update then closes **native0/pins0**, with **225,580/225,580** routable nets
+fully routed, zero routing errors and zero full-DRC errors/critical warnings.
+It changes only two new diagnostic LUT INITs and one new input connection;
+all inherited POWER nodes/PIPs from its input are retained. Route-only seal:
+`ventium-retire-masked-eco-r2.dl55kM/closed-masked-route.sha256`, SHA-256
+`e51c18219a8ad81ae6c251caa436c7023fbdd4c94d52bd3c67b7960b42d5cc5a`.
+Checkpoint SHA-256:
+`265fdac8f5ef56e5c6e8a3b06eac526f2d448cb4f8e2d1aef064230d19e87298`
+then passes a separate, read-only comparison against the qualified parent:
+297,551 original primitives,235,916 original FD input inversions,329 original
+hierarchies,4,119 original LUT pin maps,225 source/sink groups and193 inherited
+source-resource groups. All605 new cells/1864 inputs,234 matched sampler paths,
+32 matched response paths and128 originally vacant sites are checked. The
+full route partition is **415,558** unchanged literal routes +**224** tapped/
+debug exceptions +**471** constant aliases =**416,253** original groups.
+The GND tree is literal-identical and all original POWER nodes/PIPs are kept.
+Full routing and DRC pass again; native closes0/pins0 and the independent
+sealed-record consumer passes. An initial read-only audit fails its own
+partition accounting after comparison because the tapped constant root was
+also counted as a signal exception; the corrected helper passes five directed
+cases and the entire native audit is rerun, without relaxing preservation.
+Full-parent-audit seal:
+`ventium-retire-full-parent-audit-r2.htKx0f/closed-parent-audit.sha256`, SHA-256
+`d962c63f26e5e2d134bfb6abc0fe0d146e062ff68fcd8c710f3b506b84f222f8`.
+**This qualifies only diagnostic graph/route preservation, not STA, silicon
+correctness, a CPU repair or timedemo acceptance.** No new deployment yet.
 
 Native collections are not generic Tcl lists; preserving their object type
 matters when passing them back to native APIs. This is consistent with
