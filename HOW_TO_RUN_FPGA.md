@@ -3212,6 +3212,21 @@ errors still fail. All33 tests pass; source SHA-256
 `9b60a741522dc6519ace852d4e338fc09cbcafd12d6e3c5167cdd1532984c8cd`.
 Historical client pins/receipts remain unchanged; install this under a new
 name and re-pin its movie helpers instead of overwriting closed-run tools.
+The October6 original-media diagnostic completes969 frames at measured37.5MHz
+and yields6,505 validated recording samples. The full raw-colour15fps movie
+and exact-palette GIF are verified back to the captured RGB sequence; the GIF
+is the README hero. This **does not qualify40MHz**, which retains the separate
+CMP/Jcc defect. See the [closed capture evidence](docs/FPGA_CMP_BRANCH_LOCALIZATION_2026-10-05.md#completed-cold-recording-r4).
+Use canonical scratch paths for the receipt-bound movie helpers when
+`external/tmp` is a symlink. Bound FFmpeg input/output codec threads and filter
+threads explicitly;`MALLOC_ARENA_MAX=2` allows the installed encoder stack to
+run under the same512MiB address-space cap without thread-allocation failure.
+Generate a full-source palette in a separate pass, then apply it without
+dithering; buffering an entire full capture behind one split/palette graph is
+unnecessary. No gamma, contrast, brightness, dimensions or frame-rate change
+is used. Keep raw streams, closed producer/transport statuses and decoder
+hashes; a movie is not proof of every physical/engine frame or workload
+acceptance at a different core clock.
 Stream binary pixels over
 non-PTY SSH to a host-owned run directory rather than accumulating frames on
 the board. Root's two actual-board synthetic FIFO tests passed byte integrity

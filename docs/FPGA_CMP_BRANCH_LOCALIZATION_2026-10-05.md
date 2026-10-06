@@ -1,17 +1,17 @@
 # FPGA memory-CMP/conditional-branch localization — 2026-10-05 UTC
 
-The requested **40MHz** production Quake timedemo and complete15fps movie
-remain **pending**. Unmodified production media completes a separate37.5MHz
-cold diagnostic, documented below. These are private cold diagnostics, not patched production Quake,
+The requested **40MHz** production Quake timedemo remains **pending**.
+A complete15fps recording of a separate37.5MHz cold timedemo is now retrieved
+and verified, documented below. These are private cold diagnostics, not patched production Quake,
 save-state repairs, or acceptance substitutes. The original control runs did
 not change the installed FPGA image, clock, RTL, production BIOS or disk.
 On October6 the preserved debug-only observer image was deployed, as recorded
 below; it does not implement a processor fix. Production BIOS/disk and RTL
 remain unchanged by this investigation.
 
-Current verified active-timedemo IPC: **0.166225752**, retirement-observer image
-`53f129e9`, measured **37.499869755MHz**,41 qualified intervals spanning cycles
-**8,721,490,845–12,204,030,581**, demo frames37–292. This is an in-flight R4
+Current verified active-timedemo IPC: **0.165995778**, retirement-observer image
+`53f129e9`, measured **37.499869764MHz**,127 qualified intervals spanning cycles
+**8,721,490,845–19,169,282,165**, demo frames37–898. This is the closed R4
 aggregate with gaps between qualified groups, not an every-cycle full-demo
 score or40MHz qualification. The earlier closed R3 aggregate is below.
 The older0.42633263 simulation baseline(build `5c2491f3`, cycles
@@ -541,7 +541,7 @@ The fresh cold R4 recording uses this client and the same image/media at
 37.499878045MHz, native invocation`7cacf13de33b43c382cc1266fd4808be`.
 It resumes after the empty-video interval and collects changing320x200 frames.
 At the first independent IPC audit it has41 qualified intervals,3,173,050,804
-cycles/527,442,756 retirements, giving the current0.166225752 sample above.
+cycles/527,442,756 retirements, giving an initial0.166225752 sample.
 A1,385-record in-flight prefix passes CRC/geometry/order checks; its last
 complete frame(sequence1514) is Quake gameplay. PPM→PNG decoded RGB remains
 byte-exact(SHA-256`b269b7d7eeb54785740c7de3c2a6719bfa55f5e3a7cdbcb06b894e77f4fb85ea`).
@@ -550,8 +550,86 @@ runtime client. Their bounded synthetic normalizer/FFV1/RGB-round-trip and
 corrupt-record/deadline checks pass. Host proof seal SHA-256
 `58d44455cbedc318fe8d986b6999584879aadf6e41e956f6831ff8e3e1663a78`.
 Recovery root`ventium-fpga40-capture.VMIAgs/quake-clock37-r4.xUgDDO`.
-An in-flight prefix or passing host fixture is **not a completed movie or
-timedemo acceptance**; native closure and fresh disk result remain pending.
+At that point, the in-flight prefix and host fixtures were **not a completed
+movie or timedemo acceptance**. The subsequent closure is below.
+
+### Completed cold recording R4
+
+The same unchanged CPU image and production BIOS/disk complete the cold run.
+The native daemon completes naturally; the recorder and watcher also close
+successfully with code1/status0/MainPID0, using their original invocation
+identities. The recorder receives SIGUSR1
+only after coherent post-playback witnesses(demo inactive/file0 and host
+framecount>1000); its final whole-record count is6,505. The guest continues
+unchanged to its600-second service-loop deadline. The watcher holds reset and
+restores40MHz only after all owners close. No snapshot, STEP, breakpoint,
+guest patch, exception suppression or new FPGA image is introduced.
+
+The closed FAT-console consumer independently confirms a freshdemo1 result:
+**969 frames/288.3 guest seconds/3.4 printed fps**, with no retained error line.
+Console SHA-256`0bd2c8c255906a837bf39f2476670f0bd04d2d1f63771eb2a89d174d3fb738a1`;
+closed disk SHA-256`013a0cd844aabc5d86cb8728d0c187e7f0f7fdd426e98df70e113ca5291491ed`.
+All sealed board files, including16MiB RAM, are recovered and hash-checked;
+native/archive closure is distinct from the console helper's deliberately
+limited`CLOSED_CONSOLE_EVIDENCE_VALIDATED_NOT_FPGA_ACCEPTANCE` marker.
+Board seal SHA-256`41da535c69ded8d954c4b301efb1e40d8b0cbeca39802a59981231026da1eadd`.
+The independent closed log qualifies127 playback intervals:
+9,828,716,788 cycles/1,631,525,491 retirements =**0.165995778 IPC**.
+The exact window/groups and source-log hash are in`active-intervals.closed.json`.
+
+Host transport exits0; raw416,554,196-byte stream SHA-256
+`e3ce32ddfca73154f7073d4b7569e3615aa29e38e0fae3879995cee79e9eafbb`.
+The root-authored closure binds actual producer identity/count and clearly
+labels host size/hash/transport observations as relayed attestations, not
+board-local hashing of the host file. Closure SHA-256
+`926a7d190be1b53b78b4c788980e60bec9b9672843c1c015db75c017c73de7ac`.
+Normalization validates every record's CRC, dimensions and ordered timestamps,
+preserves the raw quota32768 and emits a6505-record header; no partial tail
+exists. An initial encoding rejects an aliased output path at receipt binding;
+using canonical scratch paths succeeds without changing validation or pixels.
+
+All three movies preserve all6505 accepted records at320x200 and15fps:
+
+| Format | Bytes | Verification |
+| --- | ---: | --- |
+| FFV1 RGB MKV | 412,217,678 | full decoded RGB hash matches capture |
+| Lossless H.264 RGB MP4 | 24,709,792 | same decoded RGB sequence/count |
+| GIF | 5,802,150 | same decoded RGB sequence/count;433.67s duration |
+
+Common decoded RGB SHA-256
+`ebd9b0945c08d505df4d218b1e281293129818b93f49abf3228c76ccc6a06dc5`.
+There is no gamma/brightness/contrast, resize, crop, record removal or
+duplication. The GIF uses the source's at-most256 RGB332 colours and lossless
+LZW/delta encoding, not another colour-quantization pass. Its centisecond
+delay rounding differs from6505/15 by less than0.01s. A directRGB8 trial
+changes decoded colours and is rejected; the two-pass exact palette succeeds.
+MP4/GIF initially hit the512MiB virtual-address limit during thread creation;
+bounded allocator arenas(`MALLOC_ARENA_MAX=2`) succeed at the **same** limit,
+with two codec threads, one filter thread and600-second stage deadlines.
+These encoding jobs are not OOM-killed; no FPGA rebuild or hardware restart
+is involved.
+
+Viewing files live in the recovery root's`movie/` directory as
+`quake-fpga-37p5MHz-full-capture-15fps.{mp4,gif}`. MP4 SHA-256
+`62ee215ac54a65bc22d86bca890c9d3de24120a2d3e000ba20876e60586310bf`;
+GIF SHA-256`7bb0f4b07add8a562a65fc5a934eb61079b12a7feb4601b2845e70904fca7c8a`.
+The verified GIF replaces the README hero; its earlier version is backed up
+in this recovery root. Hardware clock and guest-reported fps are explicitly
+labelled, separate from15fps presentation. This records the entire diagnostic
+session around timedemo playback, **not every physical scanout or engine
+frame**: the single-BRAM recorder inherently has drain/re-arm gaps and empty
+scanouts have no emitted payload. Complete bookended recording does not
+discharge the40MHz branch defect or full standard-suite acceptance.
+
+Final movie-evidence seal (`closed-full-movie-evidence.sha256`) SHA-256:
+`9e4b92fc7d5ef4c95e80ea2e93069f1a79d2c6f01fba622718b39505bf9ad535`.
+Recovery root: `ventium-fpga40-capture.VMIAgs/quake-clock37-r4.xUgDDO`.
+After byte comparison and matching SHA-256, only the failed-path attempt's
+duplicate `normalized/normalized.vcap` (416,554,196 bytes) was removed.
+The retained `normalized-r2/normalized.vcap` has SHA-256
+`4b3369b30e37bf7c6edbe8b6de55cebab813a27ac8cce92900dd0308a6bc6a0e`.
+Raw capture, accepted normalized stream, failed-attempt logs and receipts,
+all movies, and board recovery remain available.
 
 ## Model/reference verification
 

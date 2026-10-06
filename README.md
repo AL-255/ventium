@@ -4,6 +4,11 @@
   <img src="docs/quake-timedemo.gif" alt="Quake timedemo running on the Ventium FPGA" width="640">
 </p>
 
+FPGA diagnostic capture at **37.5 MHz**, native 320×200 colours, **15 fps playback**.
+The cold timedemo completed 969 frames in 288.3 guest-reported seconds
+(3.4 printed fps); **40 MHz qualification remains open**.
+[Recording and IPC evidence](docs/FPGA_CMP_BRANCH_LOCALIZATION_2026-10-05.md#completed-cold-recording-r4).
+
 [![Documentation](https://img.shields.io/badge/docs-Sphinx-green)][docs]
 
 [docs]: https://al-255.github.io/ventium/
