@@ -950,6 +950,43 @@ not a history of which packet retired. Correlate the halt, retire evidence and
 memory-transaction ownership before attributing a packet to the failing CMP;
 do not turn an owner-PC match into a causal or timedemo acceptance claim.
 
+## Live-input inventory and next diagnostic
+
+The first read-only query finds only one of88 requested exact RTL net names.
+That is not evidence that the missing signals are zero or absent: native
+synthesis has renamed/merged their logical aliases. A second query follows
+actual original primitive pins instead. Its initial attempt rejects on the
+first flags-register D input because a valid `INTRASITE` connection has no
+intersite nodes/PIPs; calling `get_property` on that empty object list is a
+query-script error. Native exit1/input-pins0 and the unchanged parent DCP are
+sealed in `ventium-debugscan-live-pins.qLSKml/closed-rejected-query.sha256`
+(SHA-256 `47c9a894a73a3a1293cb342efd9aa2c6f79cd37f958d79f33698b7276b1a2f60`).
+
+The corrected, separately pinned query closes native0/input-pins0 and its
+independent consumer passes. It records251 matched primitives,1,137 pins and
+14,604 net names; broad name categories include replicas/carry cells and are
+**not** counts of distinct architectural registers. It finds the original
+retire-valid FF, EIP/primary-PC pins, both retained-packet length inputs,
+V-condition/displacement inputs, flags PF input and seven state bits. The
+primary-PC FFs have no functional reset on their R pin, whereas retire-valid
+does; do not copy a guessed generic reset. The absent `retire_pipe_valid` name
+must not be used as a capture enable. Parent CPU logic, routes and board state
+are unchanged by these inventories. Sealed query:
+`ventium-debugscan-live-pins-r2.gJvNcj/closed-query.sha256`, SHA-256
+`727769977cdf45b925a72138efa6921f14177d6d498967c808881fb432861925`.
+
+The proposed general diagnostic samples original pre-edge inputs every clock,
+then uses the **original registered retirement pulse** on the following clock
+to retain those inputs together with actual original PC/EIP/PF outputs. This
+aligns delayed memory, immediate memory and consecutive retirements without
+mistaking a newly decoded next instruction for the retiring packet. It is new
+diagnostic state, **not a duplicate FF claimed to prove an original FF's value**.
+Length bit3 remains unobserved; raw live decoder inputs are not selected
+effective-packet evidence when ACTIVE is set. No EIP-specific hardware filter,
+pairing disable, CPU fix or additional observer deployment has been made.
+Primitive simulation, scan truth-table/coherence checks and full physical
+preservation/routing gates must precede any deployment of this extension.
+
 Obtain causally useful retained-packet/next-PC evidence before selecting
 a general fix. Do not disable pairing, single-step production Quake, suppress
 faults, or patch its allocator to manufacture completion. Any eventual major
