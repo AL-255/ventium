@@ -178,7 +178,7 @@ reversed CMP `8c143eb2230400771976ec151c84a50eabcf4cba5909c8c3adb6a3a2563fdb13`;
 original JP `e6b20263852628770d3d9de0e8834681a7da844cd2f88ece2a7bd8ec95195f8a`.
 Overflow-control ROM:
 `d3b796de70876c79c540a2982c7745a5b1b48bf19ed3390a5aac6e4ad630640b`.
-Installed bitstream bin remains
+Those four pre-observer captures used bitstream bin
 `30b0178eb924eb2914bda6300f7ef3f3bef233b48d821ef77bf452349f8beefb`.
 
 At the last capture all native workers and model matrices were closed; the
@@ -1092,6 +1092,28 @@ SHA-256 `4c1c4e17c99c87f9388cbff991b4e6d9ebca0982abc173f1cbaf5e7aed7eb207`.
 The next revision skips coordinate lookup for already-placed matched buffers;
 the logical sampler and scan ABI remain identical. Its full route/DRC and
 after-routing preservation checks are still required before deployment.
+
+That revision constructs all573 new diagnostic primitives and1736 selected
+inputs, then writes a prepared **unqualified** checkpoint. The physical router
+attempts two global nets, reports incomplete placer guidance and two node
+overlaps, and rejects before selected-pin routing or the final preservation
+audit. It closes **native1/input-pins0**; there is no bitgen or deployment.
+Prepared SHA-256 `7a799797da57bd1263d8d3da865ecd09f9b224f718ff01ae05bfd5b76bc638e3`
+is a rejected diagnostic input, never an accepted implementation. Seal:
+`ventium-debugscan-retire-eco-r7.w6F64J/closed-rejected-clock-routing.sha256`,
+SHA-256 `91581e7c08beef2020ca3c55ab508e143567b722c96419c1d8e4275ec0ad7b04`.
+
+A separate bounded clock-guidance probe uses that prepared checkpoint only
+for diagnosis. Both new sampler C and R distributions originate at BUFGs in
+this native design. The probe tests `update_clock_routing -pin` only on the
+468 new C/R inputs, never clearing an original route or moving an original
+cell. Any removal of an inherited clock node/PIP rejects the probe. It cannot
+write a checkpoint or bitstream, and even success does not qualify the full
+observer, CPU behavior or timedemo. AMD documents the unrouted-pin form and
+post-placement clock-load updates in
+[UG835](https://docs.amd.com/r/2023.2-English/ug835-vivado-tcl-commands/update_clock_routing);
+the actual installed2025.2 command and native results, not that older manual,
+must establish whether this narrowly scoped approach works.
 
 Native collections are not generic Tcl lists; preserving their object type
 matters when passing them back to native APIs. This is consistent with
