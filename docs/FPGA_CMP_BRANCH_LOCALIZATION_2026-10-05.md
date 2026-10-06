@@ -432,9 +432,39 @@ has a secondary `HFF2` peer. They share the clock/reset half but not the CE
 group. Same-half matching alone does not prove enable routability:
 [AMD's UltraScale CLB guide](https://docs.amd.com/r/en-US/ug574-ultrascale-clb/Clock-Enables)
 documents distinct primary/secondary CE groups. This is a **hypothesis** for
-the remaining route blockage, not yet a confirmed cause. A read-only native
-query will compare all32 new/peer control-pin mappings and the original FFs
-occupying their selected sites before another routing change.
+the remaining route blockage, not yet a confirmed cause. The read-only native
+query captures all 32 new/peer control-pin mappings and the 64 FFs occupying
+their 20 selected sites. Bit 11 uses `CKEN3`; its old `HFF2` peer uses `CKEN4`.
+The clock/reset mappings match, and no old primary FF occupies that upper
+half. The difference alone is therefore not evidence of a conflict.
+
+That query closes native1/input-pins0 because its final `-to_load` report
+requests an enable target absent from the existing route tree. Keep it as a
+**partial query**, not a native pass. Sealed partial evidence:
+`ventium-debugscan-controlgroups.HCFbdp/closed-partial-query.sha256`,
+SHA-256 `bdd47e794419969644a972396bc62e0737cadd7eb0549faa76622ba1ab5bf6d3`.
+
+The subsequent one-pin diagnostic closes native0/input-pins0. Routing only
+the new bit 11 CE pin with PSIR disabled succeeds in 38 s with no warnings or
+errors. Its native full enable-net report says ROUTED; the target
+`INT_X10Y206/CTRL_W2` is present. All 247 old CE nodes/246 PIPs remain, with
+exactly one new node/PIP. All 297,336 original primitive functions/placements
+and the enable's logical sinks remain unchanged; waiver-free PDIL-1 is zero.
+The enable-group difference does **not** explain the remaining routing stall.
+The first independent consumer rejects a mistyped expected baseline hash;
+the corrected consumer passes without changing the closed native evidence.
+Sealed native diagnostic:
+`ventium-debugscan-bit11-enable.P1jmVE/closed-enable.sha256`, SHA-256
+`b3e44533e49351d63393fdc99658c41e6aeb1c50fb2e98a17c9bfc2385a938a6`.
+Corrected closed-consumer manifest:
+`41e853c1bfb4b0bf4a1a01c4fc96937a177a3c8b53edc0ae9e29146472c08ab6`.
+Its saved `native-output/scan_one_enable_DIAGNOSTIC.dcp` has SHA-256
+`21380ad3fb9b7c2ff03d710718b088423c0d049ad3dce4a99597c8d613debd36`.
+It is **not** a complete routed or deployable design: only that enable branch
+is qualified, not all unaffected routes or the observer. Next separate the 214
+new observer/response nets from the original-source tap branches to localize
+the remaining blockage. No synthesis, board programming, clock change or
+production Quake run occurs on these diagnostic results.
 
 Board scratch cleanup removes only the closed `rC7oCB` run and its duplicate
 board export, after checking native closure, all37 sealed files and the kept
