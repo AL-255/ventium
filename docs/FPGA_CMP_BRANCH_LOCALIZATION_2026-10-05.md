@@ -522,6 +522,58 @@ The next staged pass preserves those completed response routes and separates
 saving each completed stage before proceeding. The observer remains
 **unqualified and undeployed**; the production timedemo has not been restarted.
 
+The first word-mux group still stalls at one overlap; that canceled attempt
+does not produce a completed stage. Sealed attempt:
+`ventium-debugscan-lutnetwork.1e21hj/closed-routing.sha256`, SHA-256
+`5e13b34e18709d8a71fa985ee7a8b628e7917d361ae404620299125a9c66110f`.
+An individual-pin pass then routes bits 0–6 successfully and naturally fails
+at bit 7. Native reports a potential placement issue on
+`word16_7/O` (`SLICE_X101Y188/A6LUT`) → `rdata_override_7/I1`
+(`SLICE_X21Y196/B6LUT`, physical input `B2`, node `INT_X14Y196/IMUX_E9`).
+Its failure-time zero-error DRC is not a routing pass. The native failure
+closes input-pins0 and executes the final input-preservation checks. Sealed
+attempt: `ventium-debugscan-wordpins.UsTX0t/closed-routing.sha256`, SHA-256
+`0075571b02648491d9ad4b195d8a11c3784ee5e9b991cbafd6d970bb7ee8ed7e`.
+Only the preceding checkpoint through bit 3 was saved; it does **not** contain
+the later successful bits 4–6:
+`native-output/scan_word_through_03_DIAGNOSTIC.dcp`, SHA-256
+`d25ea021ca3e3006cae6a2a8e39d3a3929b4e0110f19aa7629ad15727a00593a`.
+
+A read-only endpoint inventory closes native0/input-pins0 and its independent
+consumer passes. Sealed query:
+`ventium-debugscan-word7-resources.KKgpxY/closed-query.sha256`, SHA-256
+`45f54a25bde816baa6d549f20ad5b6257beedaa5f17f98794aa180046d161df5`.
+The source slice contains only the new word-7 LUT, has no used site PIPs,
+and has a physically unused/unreserved/non-prohibited B6 LUT. This is a safe
+observer-only placement candidate, **not** proof that its interconnect exits
+are free. The initial site-pin neighbor query returns the endpoint nodes
+themselves; it is not accepted as a routing-resource ownership proof.
+Actual neighboring interconnect nodes are queried from those node objects
+in the subsequent one-LUT diagnostic. Do not confuse logical vacancy, BEL
+vacancy, and end-to-end routing feasibility.
+
+Moving only new `word16_7` from A6 to B6 in the same source slice fixes its
+single-pin route in 38 s (native0, ROUTED). The LUT INIT, locked logical pin
+mapping and target remain identical. All 297,336 original primitive functions
+and placements, all 214 observer configurations except that one BEL, the 32
+completed response routes, and word routes 0–3 remain unchanged. The completed
+stage is saved before the next router call:
+`ventium-debugscan-word7-onefix.wEMoyB/native-output/scan_word7_source_B6_DIAGNOSTIC.dcp`,
+SHA-256 `b68ed36bb156a6632c8554417ddebd7f185f35fd12aa04cb3819f45200f6147f`.
+
+The remaining 27-word batch then naturally fails at another placement-blocked
+connection: `word16_16/O` (`SLICE_X114Y197/A6LUT`) →
+`rdata_override_16/I1` (`SLICE_X25Y189/B2`). The whole attempt closes
+native1/input-pins0, not a 32-word pass. Its independent consumer accepts only
+the earlier saved five-word stage (0–3 and 7) for further diagnostics. Sealed
+attempt: `ventium-debugscan-word7-onefix.wEMoyB/closed-routing.sha256`,
+SHA-256 `99a22150a8973b71ecaa5d6a41807bcfd881cf4ca796c205bacbd7cb84336538`.
+The next test starts from that saved stage and applies the same guarded,
+new-LUT-only relocation to bit 16, checking both replacement B5/B6 resources
+before moving it. These fixes address observer routing, **not** the silicon
+CMP/branch defect; no full-route, timing, hardware or gameplay acceptance is
+claimed, and no new image has been deployed.
+
 Board scratch cleanup removes only the closed `rC7oCB` run and its duplicate
 board export, after checking native closure, all37 sealed files and the kept
 VHD seed. It frees53,465,088 bytes. Full evidence remains in the host's
