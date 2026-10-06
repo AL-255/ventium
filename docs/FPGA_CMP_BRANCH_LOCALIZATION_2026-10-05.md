@@ -14,6 +14,9 @@ Current verified active-timedemo IPC: **0.165995778**, retirement-observer image
 **8,721,490,845–19,169,282,165**, demo frames37–898. This is the closed R4
 aggregate with gaps between qualified groups, not an every-cycle full-demo
 score or40MHz qualification. The earlier closed R3 aggregate is below.
+The later diagnostic-only image `48288e83` has **no gameplay measurement**;
+the above hardware baseline predates it. Its calibrated branch-decision
+captures are recorded in the final October6 section below.
 The older0.42633263 simulation baseline(build `5c2491f3`, cycles
 7,099,999,637–7,199,999,637) predates this FPGA candidate. The PS PL reference
 is not the core frequency; actual core counter/time measurements are used.
@@ -1965,3 +1968,159 @@ faults, or patch its allocator to manufacture completion. Any eventual major
 core/cache change must pass differential gates and the entire standard suite:
 both CoreMark correctness seeds, Win95 boot-to-desktop, and completed Quake
 timedemo. A 64-case private pass does not discharge that requirement.
+
+## October6 calibrated branch-decision capture — not a processor fix
+
+The new debug-only BIN is
+`48288e836e9347b4ff80638c972602d5c4aa5874d8b23bb61c6e47a15820838f`.
+Deployment closes0 and the independent host deployment/clock audit passes.
+With reset held and zero retirements, five seconds of counter/time arithmetic
+measure **39.999878619MHz**. Production BIOS, disk and all eight production
+pins remain unchanged; original and previous observer rollback images remain
+on the board. This is not gameplay, a CPU repair, or40MHz production acceptance.
+
+The observer reuses the previously constant-zero missing-EIP-D-bit5 slot:
+record bit69 now captures the actual mapped `v_br_taken_eff` output at
+`u_core/u_core/u_icache/rt_use_i_3/O`. **It is not EIP-D bit5.** EIP-D retains
+known mask `ffffffdf`; length bit3 is still unknown. Selector110 metadata is
+now **002f0096**, catalogue SHA-256
+`e9adc9491b4a3ed25e3e0d4402e12cdd7f1be3d0d4ce8159c4787ea24eaca5ee`.
+The new reader rejects the old format and independently clears bit69 out of
+the reported partial EIP-D value. Its13 fake-MMIO tests,150 retirement and338
+legacy one-hot cases,256 metadata cases and128 installed vendor-primitive
+cases pass. These qualify observer logic, not processor correctness.
+
+Two same-input F1-endpoint trials close native1/pins0 as unroutable, without
+a new checkpoint/BIN or deployment: effective-PF tap
+`ventium-retire-effective-pf.o9MU17` and branch-decision tap
+`ventium-retire-v-branch.xo1PyW`. Their receipts are retained. The successful
+bounded trial changes **only** two diagnostic LUT INITs, one diagnostic input
+connection and that diagnostic LUT's physical input mapping **A1→A3**, at the
+same site/BEL. No new FF/LUT, CPU functional change, old-cell movement,
+clock/reset change or full synthesis/place/route occurs.
+
+Native route preservation and a separate read-only canonical-constant-tree
+audit close0/pins0. All298,156 primitives,236,980 FD input inversions,
+329 hierarchies,44 source pin maps and560,525 literal old nonconstant routes
+are checked. The original branch signal's38 sinks and168 nodes/167 PIPs are
+kept, with one observation sink added. POWER70,944 nodes/57,982 PIPs and
+GROUND106,722 nodes/103,141 PIPs are literal-identical. Full routing and DRC
+have zero errors/critical warnings. Native bitgen then closes0/pins0, emitting
+a20,606,636-byte raw BIN, byte-identically renamed with no bootgen/byte swap.
+Preserving existing route branches does **not** prove zero electrical
+perturbation from the extra load, timing closure or transient-free capture.
+
+Three cold private controls now have coherent halted scans,16MiB physical RAM,
+zero104-byte exception records and independently audited closed native0 /
+controller0 / launcher0 results. No STEP, intended-V breakpoint, guest repair,
+save-state, pairing disable or clock change is used. Breakpoints name only the
+result boundary and capture before a subsequent instruction or fault.
+
+| Capture at40MHz | Actual case | PF-D/Q | Captured V branch decision | Actual next-PC | Partial EIP-D (`ffffffdf`) |
+| --- | ---: | --- | ---: | --- | --- |
+| Original memory-left CMP/JP, bad boundary | 2 | 1/1 | **1** | **14566 (wrong; expected1457a)** | 14547 |
+| Same original ROM, healthy not-taken boundary | 0 | 0/0 | **0** | 14567 | 14547 |
+| Previously QEMU/model-qualified OR/JP ROM, healthy taken boundary | 2 | 1/1 | **1** | 1457a | 1455a |
+
+All three records report primary PC14562, state28, ACTIVE0, EIP-CE1,
+U/V length low bits3/2, V conditionA and displacement13. The first and third
+have retained owner14558; the not-taken control has retained owner1455d.
+All eight retained ACTIVE copies are0, so these older retained packets must
+not be mistaken for the live failing packet. The independent consumers decode
+raw sampler bits as data, separately from the deployed reader, and check the
+actual primary/EIP/PF against unchanged architectural scans.
+
+The healthy cases calibrate both0 and1 through the same tap, metadata and
+two-edge reader protocol. The failing run reproduces the original
+count2/caller3/checksum9fff, FLAGS887 and actual EIP14566 before ADC/#PF.
+Thus a **captured static false JP decision alone does not explain this run**.
+The partial EIP-D equals masked14567, whereas actual Q is14566: known D/Q
+xor1 persists. Healthy not-taken and OR-taken captures have known D/Q xor0.
+PF-D is still the architectural flags-register D input, not a new effective-PF
+tap. The additional tap is the combinational branch decision, **not** admitted
+`do_v`, V-retire-valid, final redirect select or a target-word capture.
+Clock skew/transient propagation and capture alignment remain possible;
+the new observations do not establish what every CPU FF sampled on that edge.
+
+### Closed evidence and recovery
+
+All directories are under `/home/yukidama/external/tmp/`.
+
+| Capture root | Native invocation | Files in capture manifest | Capture manifest SHA-256 |
+| --- | --- | ---: | --- |
+| `ventium-v-branch-fault.OMP3dz/exception-log-DeB5aS-export` | `3e38c500b6fc4b178c12f8e48ac8809a` | 44 | `7c1dc88e191e6ec8d387de5811800972b0946dc8758f6b9c8c2730f3782bf4dc` |
+| `ventium-v-branch-nt-control.aUOpHv/exception-log-sCrrN4-export` | `aa464c179d21403db848308a7004b251` | 43 | `631214ec4b80d9ae593ff4bfe333f2eb459a33b8270b265835367835ea4dff60` |
+| `ventium-v-branch-taken-control.NBSGG7/exception-log-3gD63l-export` | `4d96b6abbaa4497cafb81d108db4fe58` | 43 | `b5d3f05e1484c4c90b0d0c6f3c957f8130179aa14a0f93df34dc28783a234c6c` |
+
+Each parent root contains an independent `audit-result.json` and
+`closed-vbranch-audit.sha256`; seal SHAs respectively:
+`c73225d35cbad23f785ee7ae8eaffaed1bf7efec824b8d6b80795a659530302e`,
+`2ed92363dbac645286b5cfd4834e38678ec334e38459d97be87bf61227b20857`,
+`fe50c925ab20f89cf994d17c1e9d658fdb476d04af6a1fbc2b5605792e0d3fe7`.
+Route preservation seal:
+`ventium-retire-v-branch-a3.5ZgLVb/closed-route.sha256`,
+`7665ca59bd3b4efc46b3d1504c1d5df165cba5800dc5a77af8105e2cd18319e4`.
+Routed DCP SHA-256:
+`a69cd157a99a4cee0e42bf902aa6e60a0f802b6bfdece851ebe20319894ffa5a`.
+Constant audit/bitgen seal:
+`ventium-v-branch-bitgen.nCsJlP/closed-bitgen.sha256`,
+`1c53e924b5ee51602e2654de44d23a57cac687db8e0fba64672f7e5052c2eb28`.
+Deployment seal:
+`ventium-v-branch-deploy.nn4nEW/closed-deployment.sha256`,
+`fd06677dff568c9d8d26f8c639106c4b62e449e8118f35a2e34a61ed0c7dfa96`.
+An initial recursive deployment retrieval returns1 on unreadable empty marker
+directories; the explicit flat-file retrieval closes0 and all archived inputs
+and native raw BIN are independently hash-checked. A later log retrieval has
+one hostname-typo failure, followed by an explicit successful retrieval;
+neither causes another FPGA program or guest run.
+
+Board capacity remains limited. Only exact, closed and independently archived
+duplicate exports and seed-identical private disks are pruned. The new failing
+run's archived16MiB RAM file is also removed from board RAM-disk after checking
+its exact hash, closed invocation and no open owner; complete RAM is retained
+on the external filesystem. Original metadata/logs, production media and all
+rollback images remain. Sparse VHD logical size is **not** reclaimed allocation:
+67,092,480 logical bytes per duplicate are not a67MiB free-space claim. Original
+once-only launch failures at capacity admission are retained; no native worker
+starts in those attempts. The successful controls remain bounded to60 seconds.
+
+### Remaining discriminator and proposed general fix direction
+
+Use mapped physical inputs to bind and distinguish pairing admission,
+U-branch priority, V target/fallthrough, final redirect and PC-update selection.
+The existing architectural scan stops at selector75 and has no V-retire PC;
+the PC ring/PMU also export primary retirement only. Do not treat either as
+proof that V committed.
+
+The bounded read-only dispatch-cone query now closes native0/pins0 and its
+independent data consumer passes:33 roots,363 cells and2405 pins, including
+all276 cells/1756 pins from the preceding query byte-identically. Its72 finite
+control truth cases establish the actual mapped `u_icache/eip[14]_i_17/O`
+function:
+
+```
+U_branch ? (U_pred || U_taken) : dispatch_gate && (V_pred || V_taken)
+```
+
+The mapped dispatch gate is `rpc_use[31]_i_3/O`, the AND of
+`gpr[1][29]_i_12/O` and effective V `is_branch` (`rv_use_i_3/O`). These names
+are bound by physical primitive inputs, not guessed from display aliases.
+This is a useful downstream sampling point, **not an observed runtime value**
+or a proof of the whole PC cone. At U_branch0 and V_taken1, that select still
+depends on dispatch_gate; the calibrated branch tap alone cannot establish it.
+The query changes no design/constraints, writes no DCP/BIN and does not program
+the board. Recovery: `ventium-nextpc-dispatch-cone.xqDoO2`; native query seal
+`4723633f47470840a4ab0f26ce2203067bcdcf6b985512039a8930658b072804`,
+independent analysis seal
+`f51b1c3acc2c27d5ddf6d86e9c3b795b791b28bf50f6727975b1929b076569c9`.
+
+If a descriptor/admission mismatch is established, fix the ownership/lifetime
+contract for the immediate memory-response path, with exact-address/epoch
+microtests. If target/redirect selection is wrong, centralize generic U/V PC
+advance and target calculations, sharing one admitted packet and preserving
+16-bit wrap, both prediction outcomes, page crossings, interrupts/debug holds
+and all Jcc conditions. If propagation is established, shorten the sensitized
+operand/flags/branch/PC cone or compute targets earlier in parallel; do not add
+blanket bubbles, disable pairing or patch the guest. These are conditional fix
+directions, **not** implemented or proven fixes. Differential gates and the
+complete standard suite are still required after a major functional change.
