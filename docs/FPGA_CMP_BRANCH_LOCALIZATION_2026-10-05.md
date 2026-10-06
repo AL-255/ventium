@@ -2124,3 +2124,107 @@ operand/flags/branch/PC cone or compute targets earlier in parallel; do not add
 blanket bubbles, disable pairing or patch the guest. These are conditional fix
 directions, **not** implemented or proven fixes. Differential gates and the
 complete standard suite are still required after a major functional change.
+
+## October6 calibrated downstream PC-selector capture
+
+**The bad CMP/JP boundary also captures the downstream mapped selector as1.**
+Healthy not-taken and OR/JP-taken controls independently calibrate0 and1 on
+the same deployed image. This narrows the next investigation to selected PC
+data, subsequent update selection and propagation/capture alignment; it is
+not a processor repair or proof of a timing cause.
+
+The debug-only image is
+`a533550b2cbd527aebee8effa2765ff3736ea209c9aa49d5b29797e81d7d81f9`.
+It observes `u_core/u_core/u_icache/eip[14]_i_17/O`, the actual mapped LUT6
+with INIT `64'hEEEEEEEEF0F0F000`, at `SLICE_X20Y239/SLICEM.H6LUT`.
+Its finite truth function is the U/V selector recorded above. It is **not**
+the final EIP-D word, an actual `do_v` observation, or proof that V retired.
+
+Record bit69 now means `previous_edge_mapped_pc_selector`, metadata
+selector110 is **004f0096**, and catalogue SHA-256 is
+`d647facd1ccb3104f137e03ae5774bfb497b7f619c2f0817b9c5f36a49113937`.
+EIP-D bit5 remains **UNKNOWN** and is excluded with mask `ffffffdf`.
+The reader rejects the preceding branch-tap metadata;14 reader tests,
+150 retirement/338 legacy one-hot cases,256 metadata truth cases and128
+installed vendor-primitive cases pass. These are observer tests, not CPU gates.
+
+Only two diagnostic LUT INITs, one diagnostic input connection and the
+diagnostic sampler's A1→A3 pin map change. No primitive is added and no CPU
+function, placement, clock/reset or original LUT pin mapping changes. Native
+preservation checks cover298,156 primitives,236,980 FD input inversions,
+329 hierarchies,39 source pin maps and560,525 literal old nonconstant routes.
+The selector's32 original sinks and123 nodes/122 PIPs are retained; one
+observation sink is added. A separate read-only constant-tree audit confirms
+POWER70,944 nodes/57,982 PIPs and GROUND106,722 nodes/103,141 PIPs unchanged.
+Full routing/DRC and native bitgen close0/pins0. No full synthesis/place/route
+is launched. Retaining old routes does not prove no added-load perturbation.
+
+Deployment and its independent host audit close0. Held-reset counter/time
+arithmetic measures **39.999876587MHz**, with zero retirements. All eight
+production pins pass again after the controls. The raw20,606,636-byte BIN is
+byte-identically installed, with no bootgen/byte swap; prior images remain.
+
+| Cold private capture at40MHz | Case | PF-D/Q | Captured mapped selector | Actual next-PC | Partial EIP-D (`ffffffdf`) |
+| --- | ---: | --- | ---: | --- | --- |
+| Original CMP/JP, bad boundary | 2 | 1/1 | **1** | **14566; expected1457a** | 14547 |
+| Original ROM, healthy not-taken | 0 | 0/0 | **0** | 14567 | 14547 |
+| Qualified OR/JP, healthy taken | 2 | 1/1 | **1** | 1457a | 1455a |
+
+All three have primary PC14562, sampled state28, ACTIVE0, EIP-CE1,
+U/V length low bits3/2, V conditionA and displacement13. All eight retained
+ACTIVE copies are0; retained owner14558 for fault/taken and1455d for not-taken
+still belongs to an older packet. Their partial EIP-D/actual-Q known-bit XOR
+is1 for the fault and0 for both healthy controls. The expected target is
+`14562 + 3 + 2 + 13 = 1457a`; neither unknown EIP-D bit5 nor unknown length
+bit3 is fabricated by the consumers.
+
+Each capture has44 hash-pinned exported files,16MiB physical RAM and a zero
+104-byte exception record. Native, controller and launcher all close0;
+independent consumers re-decode raw150/338-bit packets separately from the
+deployed reader and compare architecture, code, ROM, mapping, scalar records
+and native invocation identity. No STEP, guest patch/save-state repair,
+pairing disable, intended-V breakpoint or clock change is used. The healthy
+OR ROM is a private opcode discriminator, not a production modification.
+
+All following paths are beneath `/home/yukidama/external/tmp/`:
+
+| Capture in `ventium-pc-select-captures.nUrour/` | Native invocation | Capture manifest SHA-256 |
+| --- | --- | --- |
+| `exception-log-rDhCM9-export` | `939d028946cc45e8a6e434febd1fcc9f` | `67f5b16079e4aef923f08642aaefb2513d8b3b1b23474855aa685b2914673049` |
+| `exception-log-ueIyd5-export` | `1788e21cabd24b9d90685c4d24772afd` | `48b108d90232c431b26636a1d37961246190d49e02c6b10504ed6083efdeef9d` |
+| `exception-log-KYP24e-export` | `0e9dc0123c4844b2b182299f6db135b6` | `dfece4b2dfbd3aaf7a16b38b70806aac53fe16b92d118871f70e207d47f772ae` |
+
+The parent contains the three `*-independent-audit.json` receipts,
+`deployment-audit.json`, original transport/source pins and cleanup receipts.
+Its207-file `closed-pc-select-captures.sha256` verifies with SHA-256
+`fd66fa300097db16cfd85bdf445edaa13d1e4016234c3ad2b79be3cc75af0ab7`.
+Route qualification: `ventium-pc-select-observer.n3UmUG/closed-route.sha256`,
+`3ad0437e369d855ce1209b058bcd9ffeee2d5a685606a833de4015cf3a4869d2`;
+routed DCP `0ca9266f4ede85f7981b05b35353a47f995e057a6b81b42a74d821a2a0222c30`.
+Constant audit/bitgen: `ventium-pc-select-bitgen.LQdTty/closed-bitgen.sha256`,
+`3ce2bbf0033026a54355c19bc42d0994bc438565f42cbc8d5649ff1f7ea86561`.
+The initial fake-MMIO receipt fixture and relative-manifest preflight failures
+remain archived; corrected runs close0. The latter starts no Vivado process.
+
+After complete host retrieval and independent audits, exact closed fault/NT
+duplicate exports, seed-identical private disks and archived physical-RAM
+copies are removed from board RAM-disk. Each removal frees54,202,368 allocated
+bytes; complete captures remain recoverable on the host and original board
+metadata remains. The latest taken capture, production media and rollbacks
+are kept. The staged upload BIN is also removed only after installed/host
+hash agreement and successful deployment/retrieval; installed firmware stays.
+
+**Next fix discriminator:** evaluate the mapped selected-target/fallthrough
+data and final PC-update muxes, with the memory-CMP versus OR control held
+explicit. Do not change pairing/flag forwarding solely because the fault
+follows CMP: both the earlier branch decision and this downstream selector
+capture1 in separate faulty runs. These are not simultaneous observations
+on one image/edge, and do not exclude a transient or a capture-skew effect.
+Any general fix must preserve admitted packet ownership, all Jcc outcomes,
+code16 wrap, debug/interrupt holds and cold production behavior. No CPU fix,
+new gameplay IPC or40MHz cold production timedemo acceptance is claimed.
+
+Verified gameplay remains **0.1659957781052303 primary/U IPC**, image
+`53f129e9` at37.499869764MHz,127 independently qualified active intervals
+with gaps spanning cycles8,721,490,845–19,169,282,165. It predates this
+observer; `a533550b` has no gameplay measurement.
