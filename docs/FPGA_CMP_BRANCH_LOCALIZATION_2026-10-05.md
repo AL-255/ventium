@@ -1094,9 +1094,9 @@ the logical sampler and scan ABI remain identical. Its full route/DRC and
 after-routing preservation checks are still required before deployment.
 
 That revision constructs all573 new diagnostic primitives and1736 selected
-inputs, then writes a prepared **unqualified** checkpoint. The physical router
-attempts two global nets, reports incomplete placer guidance and two node
-overlaps, and rejects before selected-pin routing or the final preservation
+inputs, then writes a prepared **unqualified** checkpoint. The constant-net
+routing operation reports incomplete guidance for two global clocks and two
+node overlaps, and rejects before selected-pin routing or the final preservation
 audit. It closes **native1/input-pins0**; there is no bitgen or deployment.
 Prepared SHA-256 `7a799797da57bd1263d8d3da865ecd09f9b224f718ff01ae05bfd5b76bc638e3`
 is a rejected diagnostic input, never an accepted implementation. Seal:
@@ -1113,7 +1113,62 @@ observer, CPU behavior or timedemo. AMD documents the unrouted-pin form and
 post-placement clock-load updates in
 [UG835](https://docs.amd.com/r/2023.2-English/ug835-vivado-tcl-commands/update_clock_routing);
 the actual installed2025.2 command and native results, not that older manual,
-must establish whether this narrowly scoped approach works.
+must establish whether this narrowly scoped approach works. Four successful
+per-pin calls show that each call rebuilds the whole affected global tree
+(about10–16 seconds each). The redundant first probe is deliberately stopped:
+**native143/input-pins0**, no checkpoint/image. Seal:
+`ventium-retire-clock-guidance.lGXrQw/closed-stopped-redundant-guidance.sha256`,
+SHA-256 `87df2eb32bc83b63d9e6dc1e546323d89130cd2d1fc3963376c5d8f7bd092065`.
+
+The separately named probe makes only one new-pin call per changed global.
+Both return0, but routing again reports the same two overlaps. The inherited
+C-tree nodes/PIPs survive its subset check; C remains `CONFLICTS`, and the
+probe rejects before checking R or reaching any final verdict. This is
+**not** a clock-guidance repair, full preservation proof or CPU finding.
+It closes **native1/input-pins0**, without a checkpoint/image. Seal:
+`ventium-retire-clock-guidance-r2.1hPwTv/closed-rejected-guidance.sha256`,
+SHA-256 `2743d53a8455ba3e1f84a1f06682911bc788803b7ecba1492de9c8f36fea8aec`.
+An independent read-only inventory requests detailed conflict nodes from
+the unchanged prepared input. The clock warning alone does not identify which
+resources collide; `-physical_nets` routes constants, not clock nets, as
+[AMD documents](https://docs.amd.com/r/2024.1-English/ug904-vivado-implementation/Using-Other-route_design-Options).
+
+The read-only report closes **native0/input-pins0**, but the full report lists
+78 resource-conflicting nets while its `-return_nets` helper returns none.
+That helper is not a complete conflict-coverage gate. The detailed report
+identifies two invalid new sites, `SLICE_X67Y236` and `SLICE_X92Y298`, and
+conflicts where external replacement D routes meet old debug response slices.
+Seal: `ventium-retire-route-conflicts.qtWXsU/closed-readonly-reports.sha256`,
+SHA-256 `ff5e7909ba882d1ae3964b038544e9869273e29f877ef5879456a360c703a23f`.
+
+A separate **unchanged qualified-parent** inventory closes native0/pins0 and
+passes its independent data-only consumer. Both sites have `IS_USED=0` and
+no primitive occupants or used site PIPs, yet `HAS_PROGRAMMING=1`; the second
+also has five inherited routed site-pin owners. Thus `IS_USED=0` alone is
+not physical vacancy. All32 old response FDREs have INIT0, C inversion0,
+**R inversion1**, CE/D inversion0 and one exclusive Q-to-PS-FIFO-D sink each.
+Their reset is not the sampler's non-inverted core reset. Seal:
+`ventium-retire-site-vacancy.nUVSrK/closed-inventory-audit.sha256`, SHA-256
+`5f70356e25af7d62fb471df99a07a4617df3286596e5224a65e055f502fb4cbf`.
+This diagnoses observer placement/readback hazards, not the processor defect.
+
+The next physical-only plan rejects programmed sites, primitive occupants,
+used site PIPs and routed site-pin owners. It keeps every old response D
+connection intact, places32 replacement response FDREs with matched final
+override6LUT data paths, and redirects only the32 exclusive FIFO D sinks.
+Response clock/reset/enable/INIT are cloned exactly, with no extra response
+cycle. The unchanged150-bit sampler and338-bit legacy scan ABI now use
+266 FFs plus339 LUTs (**605** new diagnostic primitives,1864 selected inputs).
+Its offline scan checks pass31,424 cases plus468 identity-buffer truth cases;
+the installed vendor FDRE/LUT4 model passes8,323 response checks, including
+128 distinct reset/enable/truth combinations. An initial testbench fails
+before its first clock because an unchanged time-zero input does not trigger
+the vendor LUT event model; the corrected fixture makes real input transitions
+without forcing vendor state. The failed receipt is retained. Offline seal:
+`ventium-debugscan-retire-eco-r8.2oBeaz/closed-response-tests.sha256`, SHA-256
+`a539bbfad7150dd75784ba08bcff63bf9694add76cabfb0341d01c4a75b5faaa`.
+The single bounded native attempt is in progress; these tests are **not**
+route qualification, deployment, a CPU fix or timedemo acceptance.
 
 Native collections are not generic Tcl lists; preserving their object type
 matters when passing them back to native APIs. This is consistent with
