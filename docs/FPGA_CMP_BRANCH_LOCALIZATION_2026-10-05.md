@@ -3590,3 +3590,43 @@ Ventium service. A fresh no-breakpoint diagnostic adapter is being prepared
 in `ventium-pc-combined-board.ohqWiT`; deployment remains gated by the closed
 route consumer and final bitgen audit. Current candidate gameplay IPC is
 unmeasured; the labelled older baseline above remains unchanged.
+
+#### UV/fast acceptance enforced; bounded R4 retry (October 7 UTC)
+
+The user explicitly requires repairs in UV + fast-pipe mode. `AGENTS.md` and
+`HOW_TO_RUN_FPGA.md` now forbid accepting slow/U-only/stepped controls as a
+repair. The current source profile already ties `cycle_mode` high and enables
+`VEN_SYS_FASTPATH`, `_RELOC`, fast flat/bounded loads, fast stores and
+`VEN_FP_PIPE`/`VEN_FP_PIPE2`. The frozen define file remains
+`65df5975c9fa7e63fc3252f896854599185ec127874a0923c69c6bd029180445`.
+This is checked source provenance, not by itself proof of dynamic execution.
+
+The normal RK wrapper now rejects disabling environment knobs even when an
+explicit profile would override them, missing fast-pipeline defines and a
+nonconstant/zero/missing/duplicate shim cycle-mode connection. Nineteen pure
+Tcl-wrapper positive/negative cases pass. New read-only board guards reject
+STEP, breakpoint, HALT and freeze during execution; seven unit tests cover
+paired taken/not-taken, unpaired, slow, wrong-target and malformed-ring cases.
+The prepared original CMP/JP64 controller additionally requires a cleared
+reset observer and a primary-retirement adjacency witness across the decoded
+U/V pair in S_PIPE. No CPU RTL, guest ROM, opcode or operand is modified by
+these guards. They do not qualify a failed functional result.
+
+R3's selected local route completes, but the memory watcher terminates it
+during post-route preservation checks at 6,442,749,952 bytes. Native exit143,
+watch exit3 and input-preservation exit0 are recorded; every observed OOM/max
+event is zero. No candidate checkpoint or bitstream was produced. The last
+sample has about 5.76 GB anonymous memory and 670 MB file cache. This is an
+early resource stop, not a repaired CPU or routing failure.
+
+Fresh `ventium-pc-combined-eco-r4.5BhMON` retains the identical physical plan,
+corrected count/cache checks and 540/570-second deadlines. With 23.33 GiB
+available, its envelope is 8 GiB hard, 7 GiB early, 10 GiB admission, zero
+swap, one worker and the same 2 GiB live host reserve. It also pins and
+rechecks the frozen UV/fast source contract before entering Vivado.
+Input manifest:
+`d947f138718fa9760784b36390809a63272b5f279ef34bd5e773e7dd4f4aa419`.
+The attempt is running, not accepted. The board still has 886e8608; neither
+it nor the combined candidate has a gameplay measurement. The historical
+0.165995778 U-only figure counts primary retirements, not total U+V IPC and
+not a verified single-issue mode. Its build/window remain as stated above.

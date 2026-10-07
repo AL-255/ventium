@@ -7,13 +7,11 @@
 # corrected and, by default, with the repaired system fast path enabled for
 # literal-flat and equal-common-base 32-bit protected-mode clients, including
 # the independently verified full-limit and finite-page-safe DS memory
-# subset. Set
-# VEN_FPGA_FASTPATH=0 for a source-identical diagnostic A/B image with all
-# system-path defines omitted; set VEN_FPGA_RELOC_FASTPATH=0 to retain only the
-# base-zero subset; set VEN_FPGA_FASTLOAD=0 or VEN_FPGA_FASTSTORE=0 to retain
-# the system control path while sending the respective memory direction to the
-# slow FSM; set VEN_FPGA_BOUNDED_FASTMEM=0 to remove just the new finite-limit
-# forms. VEN_SYS_FASTPATH_ALL remains an experimental
+# subset. UV + fast-pipe is mandatory for this launcher. Legacy environment
+# knobs that disable the fast path are rejected, including with an explicit
+# frozen define file. Slow/U-only controls require a separately labelled
+# diagnostic flow and cannot qualify a processor repair. VEN_SYS_FASTPATH_ALL
+# remains an experimental
 # real-mode/heterogeneous-segmentation expansion and is not part of any image.
 # The stock Linux platform leaves pl0_ref at exactly 100 MHz even though the
 # external project asks Vivado to model 96 MHz; the previous routed image used
@@ -100,6 +98,14 @@ set upstream_root [file dirname $upstream_hw]
 set source_root "/home/yukidama/github/ventium"
 if {[info exists ::env(VEN_FPGA_SOURCE_ROOT)]} {
     set source_root [file normalize $::env(VEN_FPGA_SOURCE_ROOT)]
+}
+
+# Reject disabling knobs even if a later explicit profile would override them:
+# contradictory launch requests must not silently pass as UV/fast acceptance.
+foreach knob {VEN_FPGA_FASTPATH VEN_FPGA_RELOC_FASTPATH VEN_FPGA_FASTLOAD VEN_FPGA_FASTSTORE VEN_FPGA_BOUNDED_FASTMEM} {
+    if {[info exists ::env($knob)] && !$::env($knob)} {
+        error "refusing FPGA build: mandatory UV+fast-pipe mode forbids $knob=0"
+    }
 }
 
 # The upstream project explicitly supports a preset-free fallback for a
@@ -386,7 +392,7 @@ if {[lsearch -exact $fpga_defs VEN_CACHE_HALF] >= 0} {
 if {[lsearch -exact $fpga_defs VEN_IC_NARROWB] >= 0} {
     error "refusing FPGA build: VEN_IC_NARROWB is retired; use the full P5 I-cache"
 }
-set required_defs {SYNTHESIS VTM_NO_DPI VEN_ALTSYNCRAM_XPM VEN_IC_BRAM VEN_SFETCH_RESIDENT VEN_FP_PIPE2 VEN_FP_SHARED VEN_FP_SHARED_DIRECT}
+set required_defs {SYNTHESIS VTM_NO_DPI VEN_ALTSYNCRAM_XPM VEN_IC_BRAM VEN_SFETCH_RESIDENT VEN_FP_PIPE VEN_FP_PIPE2 VEN_FP_SHARED VEN_FP_SHARED_DIRECT VEN_SYS_FASTPATH VEN_SYS_FASTPATH_RELOC VEN_SYS_FASTLOAD_FLAT VEN_SYS_FASTLOAD_BOUNDED VEN_SYS_FASTSTORE_FLAT}
 if {!$explicit_profile} {
     lappend required_defs VEN_UOPCACHE VEN_UOP_SFETCH VEN_UOP_TAIL_LOCAL
 }
@@ -395,6 +401,21 @@ foreach required_def $required_defs {
         error "refusing FPGA build: full-P5 profile is missing $required_def"
     }
 }
+
+# Source-contract guard, not a claim of dynamic pairing. The shim must have
+# exactly one actual cycle_mode port connection, hardwired to dual issue.
+# Hardware acceptance additionally requires paired fast-path execution evidence.
+set uv_shim_path [file join $source_root ao486-sim ven ven_ao486_shim.sv]
+set uv_shim_file [open $uv_shim_path r]
+set uv_shim_body [read $uv_shim_file]
+close $uv_shim_file
+regsub -all {(?s)/\*.*?\*/} $uv_shim_body {} uv_shim_body
+regsub -all {//[^\n]*} $uv_shim_body {} uv_shim_body
+if {[regexp -all {\.cycle_mode\s*\(} $uv_shim_body] != 1 ||
+    ![regexp {\.cycle_mode\s*\(\s*1'b1\s*\)} $uv_shim_body]} {
+    error "refusing FPGA build: mandatory UV+fast-pipe mode requires cycle_mode=1'b1"
+}
+puts "UV-FAST-SOURCE-CONTRACT-OK: dual issue hardwired; system fast load/store and pipelined FP enabled"
 
 # The passive scan-out recorder lives in the Ventium worktree rather than the
 # reference-platform checkout.  It is a standalone module instantiated by the

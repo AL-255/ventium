@@ -2328,6 +2328,32 @@ the explicit sequence above.
 Run one stage at a time and preserve its log. A later-stage failure must not
 erase the last known-good lower stage.
 
+### Mandatory UV + fast-pipe acceptance mode
+
+Processor repairs must pass with dual U/V issue and the system fast pipeline
+enabled. U-only, single-stepped, pairing-disabled, or globally slow-path
+controls are diagnostic results only, never a repair or standard-suite pass.
+The RK build wrapper rejects fast-path disabling environment options, missing
+system fast load/store/relocation or FP-pipeline defines, and a shim without
+the unique `.cycle_mode(1'b1)` connection. Explicit frozen profiles are checked
+too. `fpga/test_uv_fast_profile.py FROZEN_BUILD` exercises those source guards
+without invoking Vivado; set `TMPDIR=/home/yukidama/external/tmp` first.
+
+Source configuration alone is insufficient. During the measured workload,
+require no debugger STEP, intended-V breakpoint, HALT request or forensic freeze,
+and retain evidence of execution through the paired fast path. The read-only
+helpers in `fpga/board-tools/ven_uv_fast_guard.py` check execution controls and
+adjacent primary-retirement entries across independently decoded test pairs;
+`test_ven_uv_fast_guard.py` includes slow/unpaired/wrong-target rejection tests.
+The ring witness is local execution evidence, not an every-cycle pairing rate.
+Ordinary ISA-required serialization and slow handling of unsupported fast-path
+instructions remain valid; do not force unsafe operations to pair.
+
+The current board `perf_retired` counter increments on primary retirement,
+not both U and V. Its ratio is **primary/U retirement IPC**, even when U/V mode
+is enabled. Never label that ratio total architectural U+V IPC or claim a
+performance target has passed without a suitable complete retirement count.
+
 ### 11.1 BIOS/POST without a disk
 
 After staging/programming in section 10, run the daemon explicitly for 60

@@ -24,7 +24,22 @@ last verified gameplay number as a labelled baseline; never present startup,
 directed microbenchmark, or target IPC as measured gameplay performance.
 When a newer verified gameplay measurement is available, use that measurement.
 
-## Standard test suite
+## Mandatory UV + fast-pipe acceptance mode
+
+Processor fixes and performance acceptance must run with U/V dual issue and
+the system fast pipeline enabled, including relocated protected-mode clients
+and fast load/store paths. Never count U-only, single-stepped, pairing-disabled,
+or globally slow-FSM results as a repair or a standard-suite pass. Such runs
+may only be explicitly labelled diagnostic controls. Do not substitute a
+passing control for the original failing workload in UV + fast-pipe mode.
+Record the exact build defines and the `cycle_mode=1` connection, verify no
+debugger STEP or intended-V breakpoint suppresses pairing during acceptance,
+and require evidence that the fast paired path is actually exercised. Retain
+normal ISA-required serialization and fallback for unsupported fast-path forms;
+do not force unsafe instructions to pair. Distinguish primary/U retirement
+counters from total U+V architectural IPC in every performance result.
+
+## Standard test suite (acceptance requirements)
 
 From now on, the **standard test suite** means all three of the following:
 
