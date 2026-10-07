@@ -12,7 +12,8 @@ On October6 the preserved debug-only observer image was deployed, as recorded
 below; it does not implement a processor fix. Production BIOS/disk and RTL
 remain unchanged by this investigation.
 
-Current verified active-timedemo IPC: **0.165995778 U-only**, retirement-observer image
+Current verified active-timedemo IPC: **0.165995778 primary/U-counter IPC**
+(not total U+V IPC and not evidence of U-only execution), retirement-observer image
 `53f129e9`, measured **37.499869764MHz**,127 qualified intervals spanning cycles
 **8,721,490,845–19,169,282,165**, demo frames37–898. This is the closed R4
 aggregate with gaps between qualified groups, not an every-cycle full-demo
@@ -3841,3 +3842,153 @@ before changing RTL or issuing another physical implementation. Do not
 accept the passing JP microtest or a serialized control as closing this bug.
 The current image has no qualified gameplay IPC and no full standard-suite
 pass; the historic primary/U-only counter baseline above is unchanged.
+
+#### Exact SUB/JNE boundary fixture, UV/fast only (October 7 UTC)
+
+Added `verif/sys/tests/psubjneuv/`: four ordinary cold CPL3 ROM fixtures
+retain the actual53-byte chain59662–59696, physical code158000, relocated
+CS/DS/SS, and the preceding32-byte cache-line seam. Each checks64 invocations
+with NT,NT,T,T outcomes, including positive/negative signed overflow; variants
+add read/write history, a congruent executed caller, and the preceding
+indirect-CALL/ADD-ESP shape. No production guest, RTL, cache ACK, snapshot,
+or FPGA image is patched. Unexecuted legacy ROM sections are explicitly
+retained to reproduce the tested binaries, not claimed as workload coverage.
+
+All four pinned Pentium-QEMU controls return native133 (AL42). The unchanged
+frozen RTL model passes **32/32 UV+fast-only runs**, four histories × AXI
+latencies0,1,2,3,5,7,11,13, each bounded180s and run in the existing32-job,
+16GiB/128-task scope. **2,048 actual paired SUB/JNE commits** are checked:
+U/V same-clock retirement, lengths3/2, exact translated address/data, defined
+SUB flags, branch truth/target, no exception and terminal self-check. Every
+case has64 retained memory-owner commits and30 predicted-taken/actual-not
+events. No functional-mode/U-only controls were substituted. RTL/model,
+profile and frozen-source hashes hold before/after; only passive C++ logging
+was relinked. ROMs rebuilt from the committed fixture match all four hashes.
+
+The first matrix is **not a pass**:20 jobs hit the deliberately small24MiB
+per-file cap;12 completed but the first checker incorrectly expected the U
+trace's `paired` flag to be true. This frozen DPI marks U/false and V/true;
+the correct witness is adjacent equal-cycle U+V plus internal pair/commit.
+The corrected checker also accounts for DPI's one-edge delay. The passing
+R2 matrix narrows passive all-cycle logging to the subject range, retains
+retirement/terminal observations, and uses a64MiB file cap. All native and
+checker exits are0; all32 runs finish in38–75s. Old failures remain preserved.
+
+On FPGA `6659e0c5`, variant0 completes64 cases at **39.999864723 MHz**:
+physical158f00 scalars `[64,32,5355424a,0]`, all26 exception words zero,
+unchanged code, EAX42/CR2=0. No STEP/BP; the primary ring contains adjacent
+59680→59693 at CSa7/state28, independently spanning the paired JNE. The
+original controller incorrectly expected the simulator's pre-OUT EIPf0260
+and therefore closes1. Hardware instead services OUT and retires HLT;
+ROM/symbols, ring and architecture consistently show OUTf0260, HLTf0261,
+and terminal EIPf0262. A separate read-only, closed-artifact audit validates
+this exact post-HLT finish, all self-checks and the UV witness. Native daemon
+invocation `c593bec77f5e45178149efd4d8182eec` closes code1/status0 on the
+late forensic freeze. **Variants1–3 have not been run on hardware.** This
+passing microfixture does not reproduce or close the full Quake failure.
+
+Artifacts: `ventium-subjne-boundary.sT8Cc6` under external/tmp. R2 outputs
+manifest `cf73504656affe98abcbd7378b3ebff6ed8c07a258cd9ea79a841bd5cbf4adf3`;
+results `f01fedbe669d8b583a385c86ba2346cfd4ca564cf19c20aec84a6b37d8dc9506`;
+board archive `d61db2ea2b456834294f8c841b5323c614422c505c1da4c13c724d2a89d7f54d`;
+independent board audit `a23d52c6cff7b6a724649d53aa33152d81bde77353242d01de2896619d4ffd40`.
+Old board RAM/disk/transfer duplicates were pruned only after matching closed
+host copies. The current image still has **no qualified gameplay IPC**;
+the older0.165995778 primary/U-counter baseline above is not total UV IPC.
+
+#### Earlier full-workload fault capture: trigger limitations
+
+The existing first-`start_fault` trigger01400000 catches a **normal real-mode
+IRQ0/vector8**, C000:082E, CR0=10, first IRQ acknowledge, before FreeDOS.
+This is not evidence of a double fault. Source core.sv:7800/8115 routes
+external interrupts through the same task/counter; the diagnostic script's
+initial assumption that IRQs were excluded is disproven. Archive under
+`ventium-uvfast-firstfault.Xj5EyE`, SHA
+`dd938949d519c74674f4f5b962a0c348cc17c947f14a9106814604e4265f6ba6`;
+native `f41537cb89944bdc9f7b896a16148870`, code1/status0. Do not use that
+trigger as an unexpected-fault acceptance checker.
+
+Read-only examination of the earlier59682 capture finds a256-entry physical
+IDT at2ce88; vector14 names0018:3ab8. Its16-bit stub at physical2a578 is
+PUSH DS / CALL common dispatch. A fresh cold UV/fast retired-PC freeze at
+0018:3ab8 qualifies that full PC/vector14, but its first occurrence is an
+earlier loader context: previous CS87, reported faultPC3d8, ~4.8M primary
+retires. It is not the target Quake failure and is not classified as a new
+processor bug. Archive `ventium-uvfast-pfentry.nUEq9L`, SHA
+`06063d8589c0607f8203b14412d779cf824e43b19edf0180f0100bd05cb53c48`;
+native `d753fcf1c6854ff889ac0620f84a7fc4`, code1/status0.
+
+The next same-image cold diagnostic leaves that page-fault-entry comparator
+disarmed through early paging, then arms it while freely running after75M
+primary retirements, before the preceding103M-retirement bad-PC capture.
+This is diagnostic selection only: no breakpoint, step, paired-path
+suppression, architectural restore or guest edit. The trigger still needs
+full frozen-PC/vector and preceding-ring qualification. No successful
+timedemo, new gameplay IPC or RTL root cause is asserted by these captures.
+
+#### Cold UV/fast trace exposes the path to bad EIP108
+
+The late-armed page-fault-entry trigger succeeds at measured **39.999868963
+MHz**. It arms without stopping execution at75,935,367 primary retirements
+and freezes at189,408,572. The full snapshot qualifies0018:3ab8/vector14,
+fault-PC108. Unlike the later DJGPP trigger, this capture retains the actual
+preceding client primary-PC sequence (oldest first):
+
+```text
+14562 -> 14563 -> 14575 -> 14576 -> 14579 -> 108 -> 0018:3ab8
+```
+
+All five client entries are CSa7/state28. Physical11354e–11357e bytes match
+the original executable. At14562 the bytes are `39 7a 10` (CMP [EDX+10],EDI),
+followed by the original `75 13` (JNE1457a) at14565. The invalid14563 instead
+decodes `7a 10` (JP14575). That observed branch skips the normal return
+setup/pops, reaching `POP EBP; ADD ESP,10h; RET`, then108. The immediate
+interrupt frame, **2-byte aligned** at physical2ff4e, independently contains
+error4, EIP108/CSa7, FLAGS3206, ESPe0810/SSaf. This explains the earlier
+post-DOS108 residue with direct pre-dispatch execution history. It does not
+establish whether decode/descriptor corruption, next-PC selection, cache
+history or sampling produces the original14562→14563 transition. Do not
+call it a proven timing or arithmetic-length root cause. Ring CS at the
+fault-entry transition is post-transition; its legacy linear-address field
+is not used.
+
+Every sampled execution-control word is0; production BIOS/disk are unchanged
+inputs, no snapshot, BP, STEP, slow-mode control or clock fallback. Native
+`2662acd1281149eea062dcd496abce0f` closes code1/status0 on forensic freeze,
+controller0. Archive `ventium-uvfast-latepf.eAcGSP/closed-board.tgz`, SHA
+`564ca23beaae4798f19a923d5703c9088ab18302ee063bb10011f9cb1d8c8436`;
+closed manifest `f5979bfbfb5cfa146d80d18eaf98c186f3f8725b2ff0e3483b2970b9be86692c`;
+RAM `3f14c58a92537c7b0084c77ef05f5ca61eac218e43899d9c19d14f8e734627d4`;
+read-only audit `e1e8026079b72e409185a02f65553155b835084395ac44458b901c07223d8f36`.
+
+#### Original JNE fixture passes; immediate caller history remains uncovered
+
+`ventium-original-cmpjne.kp5FPr` restores the original JNE and verifies all172
+prelude/chain bytes against the actual EXE; only synthetic expected outcomes
+change to T,T,T,NT. ROM SHA
+`6c45feb4790ba48c52a867a344c3d3d426afc09c578b7613938332b88152e82c`.
+Pinned Pentium returns133; UV/fast simulations at AXI latencies0,3,7,13 each
+verify64 actual paired CMP/JNE commits with exact flags, outcomes and no
+exception. Each has63 retained and one immediate legal memory commit. The
+original overstrict all64-retained checker rejection is preserved; corrected
+closed-trace checks retain the same architectural/pairing requirements. The
+latency13 run exceeded64MiB passive logging and was rerun with128MiB cap;
+all four final native/consumer results pass. Output manifest
+`143fdabfbded08dd66090788c401644827425c389a45c91a2b7d1044de83c9bc`.
+
+The identical JNE ROM completes all64 cases on FPGA6659 at **39.999861276
+MHz**, counts/checksum `[64,64,d5540]`, no exception, code unchanged, AL42,
+terminal CS8/EIPf0258 and a qualified UV/fast pair witness. Controller0 and
+native `cba125f2ba564898b86ba328effa8cdb` code1/status0. Closed archive
+`22af0389d43152427baa1b4aa07b16d7f75c44485748b93052c3f5b734545d12`.
+This is **not a repair**: the synthetic caller returns into case preparation;
+the cold failing trace instead has immediate original RET35573→144ce.
+Next reproduce that real caller/return history before attributing the cold
+failure to branch condition or changing RTL. Hardware variants remain full
+UV+fast; no production timedemo/new gameplay IPC/full-suite pass is claimed.
+
+For disk headroom,32 failed original SUB/JNE-matrix owner logs were compressed
+into `ventium-subjne-boundary.sT8Cc6/original-matrix-raw.tgz`; each archived
+stream was hash-matched before removing its duplicate raw file. Passing R2
+raw evidence remains. Host free space recovered to2.3GiB. All board RAM/disk
+duplicates removed this round have checksum-verified host recovery copies.

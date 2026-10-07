@@ -197,7 +197,13 @@ not certification of the currently installed image.
 > control. The fixed profile is **01400000**: threshold `cfg[31:24]=1`,
 > fault-freeze enabled, retire comparator/divide trigger disabled. It detects
 > the first `start_fault` count; this is not every possible #DB/software-INT
-> path. The PS helper refuses to arm unless HALTED at the reset context with
+> path. **It also counts ordinary external IRQ delivery through `start_fault`:**
+> the October7 cold production control froze on real-mode IRQ0/vector8 at
+> C000:082E, not a double fault. Never equate this counter with unexpected
+> processor faults. For Quake's page-fault history, the captured DPMI IDT's
+> vector14 points to 0018:3AB8; a qualified retired-PC trigger there preserves
+> an earlier trail than the DJGPP 4D5DC stub, but early loader page faults must
+> still be distinguished from the failing workload. The PS helper refuses to arm unless HALTED at the reset context with
 > BP disabled. A host fixture checks its exact writes and rejection guards.
 > It writes only CFG at **A0**, not the aliased readback or a range/flush toggle.
 > IDENT orders the write; it is not a readable CFG confirmation. A forensic
