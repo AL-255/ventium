@@ -3784,3 +3784,57 @@ fault or repair verdict. Host leaf `ventium-uvfast40-fault.ycPY4l`, board leaf
 `133d9e8821cc2cfc38e9fbe2a5192c1905e210721eebd9cb57181f418f43a9a6`.
 The failed run's RAM and transfer-archive duplicates are removed from the
 board only after complete host recovery verification; disk/logs remain.
+
+#### Same-mode replay confirms another bad instruction boundary (October 7 UTC)
+
+The cold forensic replay at **39.999859556 MHz** hits the actual full
+CSa7/EIP4d5dc, not a low16 alias: this is the decoded page-fault dispatch
+stub. Frozen snapshot records fault-PC**59682**, vector14. The DPMI frame
+at physical2fb78 independently holds return10dc:2b, error4,
+fault59682:a7, FLAGS3246, ESPfaef4/SSaf. Both witnesses precede the handler's
+normal exception-record construction. This replay omits VGA recording and
+does not establish that it is the identical dynamic failure as the earlier
+production run's post-exit EIP108 residue.
+
+Ordinary page-table translation through CR3=7e000 maps client10059680 to
+physical158680. Its24 captured bytes exactly match the extracted executable:
+`2b5ddc750e8b5dac2b5dd875068b5da82b5dd485db743189`. Decoding from the verified
+instruction boundary gives:
+
+```text
+59680  2b 5d dc     SUB EBX,[EBP-24h]   ; length3
+59683  75 0e        JNE 59693
+59685  8b 5d ac     MOV EBX,[EBP-54h]
+```
+
+59682 is the SUB displacement byte, not its successor, branch target or
+paired fallthrough. Thus another wrong-PC/instruction-boundary failure
+remains in the full UV/fast workload after the original CMP/JP64 pass.
+The trigger does not capture the originating fast descriptors or complete
+pre-fault registers; it does **not** distinguish decode/length corruption,
+bad next-PC selection, register sampling or another earlier control-flow
+defect. No speculative RTL or timing root cause is asserted.
+
+Controller0 means the **diagnostic capture** succeeded, not Quake passed.
+All pre-freeze sampled execution controls are0; no STEP, debugger breakpoint,
+single-issue override, payload patch, snapshot or frequency change is used.
+The comparator's sticky forensic freeze intentionally holds reset. Native
+daemon invocation `13e5d6c8847b49d8b32c4138dc921835` is explicitly terminated
+after capture (code2/status15); no owner remains running. All37 closed files
+are retrieved and checked. Manifest:
+`39bd18dcbbedb7891b0b5ea1c1cd0085a867b4b63ce54b30d11c88b993fd4641`;
+archive:
+`b2f1dd74f9616b1d7e815395d58ce92d6387ded687239ce00974786042bb9a24`;
+RAM:
+`dbcc101ea8bc8a16e188a084c7e201695e490b7eb4ff6fd7f92a89ed4b27295f`;
+offline analysis:
+`0e9e4a2107af258dd3bed69d165417f073886b8c475d7b75a8af9087f4ac99d9`.
+
+Next repair evidence must cover this exact SUB/JNE sequence and its
+predecessor/call history in UV/fast mode, with taken and not-taken cases and
+actual paired execution evidence. Capture the original next-PC/descriptor
+state before the invalid59682 boundary, then build a directed regression
+before changing RTL or issuing another physical implementation. Do not
+accept the passing JP microtest or a serialized control as closing this bug.
+The current image has no qualified gameplay IPC and no full standard-suite
+pass; the historic primary/U-only counter baseline above is unchanged.
