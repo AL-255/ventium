@@ -3992,3 +3992,120 @@ into `ventium-subjne-boundary.sT8Cc6/original-matrix-raw.tgz`; each archived
 stream was hash-matched before removing its duplicate raw file. Passing R2
 raw evidence remains. Host free space recovered to2.3GiB. All board RAM/disk
 duplicates removed this round have checksum-verified host recovery copies.
+
+#### Original immediate caller/RET also passes in UV + fast mode
+
+`ventium-cmpjne-realcaller.Zz0YAT` extends the original-JNE fixture with the
+actual48-byte caller35544–35573. All172 prelude/chain bytes and all48 caller
+bytes match the original EXE. Case preparation now precedes the real caller;
+RET35573 directly enters144ce, as in the failing cold trace. Ordinary guest
+page mappings/data initialize the texture/global accesses; no restored CPU
+snapshot or production guest modification is used. ROM SHA
+`785356a32191b3cfbbc0b10134b94bd724e22f723940de852df7768e53001cad`.
+
+Pinned Pentium-QEMU returns133. Four unchanged-model UV/fast runs at AXI
+latencies0,3,7,13 all pass64 immediate caller returns and64 actual paired
+CMP/JNE commits each (63 retained memory commits plus one immediate commit),
+with exact flags/branch outcomes and no exception. Frozen source/model hashes
+remain unchanged. Results SHA
+`3a1de37c0c011e838fd004f638c144caf9fbbb8a25aef6c01e0a56781f3a3761`;
+output manifest
+`19068ba9d3a5113ccad6c22220b9d3d17374e950d8deafe0203cbc689ff30e7f`.
+
+The same ROM passes64 cases on FPGA6659 at **39.999859668 MHz**, no STEP or
+execution breakpoint, counts/checksum `[64,64,d5540]`, no exception and
+unchanged code. Both the original CMP/JNE UV witness and adjacent primary
+RET35573→144ce are required and present. The extra ordinary PTE stores move
+the post-HLT terminal toCS8/EIPf026c; this is checked against the ROM symbols.
+Controller0, native `5afff92c0f074d1faefa07cec2c1aa19` code1/status0.
+Closed archive SHA
+`15e903488715a398336843504967991399fc3667bfe65f3511759871d1f5153d`;
+every archived file verifies against its closed manifest. Board RAM/disk/archive
+duplicates were removed only after checksum-verified host recovery copies.
+
+This closes the **immediate-caller coverage gap**, not the processor defect:
+the unmodified cold workload remains broken. Wider execution/cache/interrupt
+history and actual cold operands remain to be isolated. The current image
+still has no qualified gameplay IPC; the older0.165995778 primary-counter
+baseline above is neither total U+V IPC nor current-candidate performance.
+
+#### Post-fault observation: reject normal IRQs and late/stale frames
+
+The saved RAM identifies GDT2ce00, busy TSS60 at2fe72, and available TSS70
+at3157a. The16-bit common handler at0018:3e80 computes the vector at
+physical3166c, then FAR JMP70 task-saves the client GPRs. TSS70 resumes at
+3f49 and jumps to3e98. However, a late75M-retirement comparator at3e98
+catches **normal vector136**, not the target page fault: the ring shows
+Quake's44d60 memory-sweep loop followed by the matching3ca0 IRQ stub. Do
+not classify that capture as a new CPU defect. It also exposed a controller
+polling race: the daemon closed normally on freeze between status and PID
+reads; original controller1 is retained, and a separate read-only recovery
+saved the already-frozen ring/RAM. Archive
+`ventium-uvfast-faulttss.cYfzCy/closed-board.tgz`, SHA
+`c057210e3d719f0d357af570cfe9dd4de479a7c78dc12f3f10df600a08dc6270`.
+
+A subsequent1ms Python DDR watcher waits for vector14 and a CSa7/SSaf frame,
+then manually halts without STEP/BP. It stops **too late**: the apparent
+error word is EBP/ece08 and the frame PC has become4d6d4; the original error
+has been stripped and guest exception dispatch has advanced. TSS60 retains
+CR2-copy10000108/error4, but its live GPRs now belong to4e871, not the fault.
+Neither the frame nor the halted register scan is accepted as the original
+bad-CMP operand capture. Controller0 means only capture completion. Archive
+`ventium-uvfast-pfhalt.y9SLU0/closed-board.tgz`, SHA
+`c992d12f9d2968c5ef7419ba5ef910f832904a9aa9787235ebb72c383f334788`.
+All closed files in both archives verify. Board transfer/RAM/disk duplicates
+were removed only after checking their matching host copies.
+
+`fpga/board-tools/watch_dpmi_pf.c` replaces the slow polling path with a
+bounded native diagnostic. It reads DDR only and makes exactly one possible
+control write: manual HALT **after** observing fresh vector14 and two matching
+complete CPL3 frames, including a valid error-code shape. Aligned loads handle
+the2-byte-aligned frame. It rejects STEP/BP/HALT/freeze/reset while watching,
+has a300s deadline, and never alters clock, guest RAM, comparator or execution
+mode. The pinned launcher must first validate reserved DDR and image/guest
+hashes; this is not a general-purpose unqualified `/dev/mem` tool. Host normal
+and ASan/UBSan self-tests pass; the AArch64 binary also passes its self-test
+on the board. This debugging improvement is not a processor fix or IPC gain.
+
+#### Native post-fault halt captures the original SUB interior-PC failure
+
+On unchanged image6659 at **39.999859644 MHz**, the native watcher arms at
+75,000,015 primary retirements and detects a fresh frame
+`[error4,EIP59682,CSa7,FLAGS3246,ESPfaef4,SSaf]`. HALT acknowledges18.890us
+after the matched-frame timestamp, before TSS70's first instruction at
+0018:3f49. No prior execution halt, STEP, BP, guest edit or comparator is used.
+Controller/native-watcher0; daemon `0e96aef496a24e1895a62dc75c3cd823`
+closes code1/status0 after the **later** archival forensic freeze.
+
+The uninterrupted client ring contains `5967d -> 59680 -> 59681 -> 59682`.
+The actual bytes at physical158680 are `2b 5d dc 75 0e`: SUB EBX,[EBP-24h]
+at59680, JNE59693 at59683. Entering59681 instead executes POP EBP;59682
+then decodes an x87 memory instruction. The ring shows the lazy-FPU handler
+0018:40a3..40af returning to59682, followed by the page-fault handler. Current
+CR2 is1000008c. Every original53-byte chain byte matches the EXE.
+
+Unlike the reset-only capture, this preserves task-saved client GPRs in old
+TSS60, physical2fe72, before common dispatch edits that TSS:
+EAX7ec, ECXc, EDX0, EBX0, EBP7e, ESI51eb851f, EDI59948. Its savedESP384a
+and CS18/EIP3e98 are the **handler** stack/continuation, not clientESP/EIP;
+use the actual fault frame for those. Original prologue bytes and stack
+cleanup reconstruct pre-POP ESPfaef0/EBPfaf74. Ordinary page walking maps
+both SUB operands to physical1fff24/1fff50, each value13h, while the
+accidentally popped stack word at1ffef0 is7eh. Thus the retained resultEBX0
+is consistent with19−19; the illegal POP explains EBP7e, and its following
+x87 address gives10000000+7e+0e=**1000008c**, matching CR2. Pre-POP EBP is
+a code/stack reconstruction, not a directly sampled register.
+
+The last-retirement observer now belongs to FAR JMP3e93, and the retained
+memory packet belongs to POP59681. Neither is falsely labelled the bad SUB
+commit. We still lack its effective U/V lengths, pairing decision and
+next-PC selection at the failing edge; no cache, decoder or timing root
+cause is asserted. This does establish a remaining **cold UV/fast interior
+PC defect**, not a failure cured by U-only serialization.
+
+Archive `ventium-uvfast-nativepf.Y0YPrY/closed-board.tgz`, SHA
+`b964d6e37685a2e52db630ef7f70e0e115a48e71e144379490977530cd3d04fc`;
+RAM `02b8e7e3c9ec97f8557bed9d897c35057fc10255ded3db80e788496289455f36`.
+All closed files and the read-only `audit_nativepf.py` checks pass. The current
+candidate still has no qualified gameplay IPC or full standard-suite pass;
+the older0.165995778 primary-counter baseline remains labelled above.
