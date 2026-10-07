@@ -70,6 +70,11 @@ Closed runners, model pins and captures are under
 20 trace-size-cap terminations and its checker-schema failures, not passes.
 Its32 bulky owner logs are losslessly archived in `original-matrix-raw.tgz`;
 each archived copy was hash-checked before removing the duplicate raw file.
+The passing R2 matrix's32 owner logs are likewise recoverable from
+`matrix-r2-owner-raw.tgz` (SHA256
+`77dbd4614ee01df63a3fc8a8a2012679ea8eb1c83f39b5aef798628e088bb641`);
+their original output manifest remains unchanged. Restore the logs before
+using `check_sim.py` directly on that older matrix.
 `board-v0-audit.json` is the independent post-HLT regrade; the original board
 controller's incorrect pre-OUT expectation remains recorded as exit 1.
 

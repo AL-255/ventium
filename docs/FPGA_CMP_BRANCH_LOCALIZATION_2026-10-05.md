@@ -4109,3 +4109,101 @@ RAM `02b8e7e3c9ec97f8557bed9d897c35057fc10255ded3db80e788496289455f36`.
 All closed files and the read-only `audit_nativepf.py` checks pass. The current
 candidate still has no qualified gameplay IPC or full standard-suite pass;
 the older0.165995778 primary-counter baseline remains labelled above.
+
+#### Exact cold SUB operands/layout: 32 simulations and four hardware controls
+
+The native post-fault capture motivates a **new** fixture, not another use of
+the earlier64-case1/1/overflow test. `psubjneuv/subjne_cold.S` preserves all
+53 original bytes at59662..59696 and reconstructs the captured precommit GPRs,
+ESPfaef0/EBPfaf74, ordinary FA000→1FF000 stack mapping, operands19/19,
+FLAGS3246 and later minute comparison52−58. Its16 subject comparisons must
+all continue59680→59685; the later minute comparison takes59693 normally.
+Plain, congruent D-pressure, congruent I-pressure and combined variants use
+only ordinary guest accesses. They do **not** reproduce the whole cold boot,
+interrupt history or cache contents.
+
+All32 cases (four variants × AXI read/write latency0,1,2,3,5,7,11,13) run in
+parallel against the unchanged pinned107-define model and pass:512 same-clock
+U/V subject commits, of which508 are retained memory completions and four
+immediate. The passive observer requires exact precommit registers, owner,
+effective lengths3/2, physical read1fff50/value19, branch truth/target and
+FLAGS3246. No exception or interior-byte execution occurs. All four pinned
+QEMU controls close133. Source/model/179 frozen-input hashes remain unchanged.
+Suite exit0; output manifest
+`8451e8a11918e937b923180ddf3bff1c5c268c7930a306dcb09b6825473b4527`.
+
+The same four ROMs each pass16 checks on FPGA6659, with no STEP/execution BP,
+zero exception records, unchanged original code, finalCS8:EIPf029e/EAX42,
+and adjacent-primary witnesses spanning SUB/JNE. Each controller/native closes0.
+
+| Variant | Measured MHz | Closed archive SHA-256 |
+|---|---:|---|
+| Plain | 39.999858780 | `db44ec7a2120fd4ca2094d34bf52e5a1c9ed36d08b2458b3c4a408d39f56de9c` |
+| D-pressure | 39.999854428 | `e38311b635d40809d4452553a113aac55b76e0d05451b0ee1ca970f80c2dc415` |
+| I-pressure | 39.999858628 | `e015b6af39d1136787020eb301ebdb82a5463fb76c1e585071d0649011177b51` |
+| Both | 39.999854308 | `b33c1f571de5cd0480a0349d4505d54852842fbf866c1b70d28d9eee0fb06e5b` |
+
+Host root `ventium-subjne-coldlayout.SRrOMS`; each archive's54-file manifest,
+RAM, ROM, clock, scalars and native invocation are independently checked by
+`audit_board.py`. After recovery, only the four duplicate board RAM dumps and
+unchanged private seed copy are removed; captures remain recoverable from the
+host archives and seed. No firmware, original media or useful evidence is lost.
+
+Repository `build_cold.sh` reproduces all four measured ROM hashes. The optional
+bootstrap additions leave all four legacy hashes unchanged. `check_cold.py`
+rechecks all32 closed cases and rejects seven negative controls (functional
+mode, pair, length, operand, outcome, target, flags). These are additional
+coverage/results, **not a processor repair**. Current6659 has no qualified
+gameplay IPC; older53f129e9's0.165995778 primary-counter baseline over qualified
+intervals in cycles8,721,490,845–19,169,282,165 predates this image and is not
+total U+V IPC. Full cold Quake and standard-suite acceptance remain open.
+
+#### Invalid-SUB breakpoint replay: inconclusive capture, not acceptance
+
+A separate unmodified cold replay arms execution BP59681 only after75M primary
+retires. This address is inside SUB59680, not its intended V at59683; the
+source's equality-only V breakpoint predicate does not suppress the correctly
+decoded pair. However, a transient malformed raw length could still alter
+pairing, and BP is EIP-only, so this remains **intrusive diagnostic history**.
+No STEP, clock reduction or slow-mode fallback is used. Do not label it clean
+workload acceptance even if it were to complete.
+
+It does not hit59681 before the300s deadline. Controller1 is retained;
+the bounded cleanup sends SIGTERM to the native daemon, whose closed record
+is code2/status15, invocation `ad9b2eb7f97d4c2891e1b6c8b555120b`.
+There is no bad-SUB commit capture. Later read-only core-ring text shows
+CSa7/ESPe0810, traceback108 and the DOS prompt, consistent with the other
+previously observed failure path; this text alone does not prove its original
+CMP transition. DDR B8000 is all zero on this platform and is explicitly
+**not** treated as a blank-screen verdict.
+
+Root `ventium-uvfast-invalidbp.L1epO6`; all files in the closed manifest verify.
+Metadata archive SHA
+`5235d8f72cb9a232bad25e9afc3e62d59fc9479963335f6e996fb3b4dc45ef6d`;
+separate changed-disk recovery archive
+`1eec1fca30fdd01f04d9c4508a2957f7278a57968247ee0b7006079dd5326e36`
+restores exactVHD `4c6579c0f6b6116fa07e3a65c663517bea1a78f4807994b19581b17931ba8a6b`.
+Later ring-text hash
+`0ddc33bf206c7598d56a3895c58c22090e27fdedf2ac4ae7c8fa5912036419ba`.
+Only board disk/archive duplicates are removed after host verification.
+
+The complementary BP14563 replay (inside CMP14562, not intended-V14565) also
+misses its target, this time for150s; its final ring text instead contains
+traceback59682 and the DOS prompt. Again this is not proof of the earlier
+transition or evidence that a breakpoint repaired either path. Controller1;
+bounded SIGTERM closure code2/status15, invocation
+`e181e312fca345679c621b712c5be790`. Measured39.999858308MHz. Root
+`ventium-uvfast-invalidcmp.zn6YTG`, archive
+`cabd278ba1e4b287619d88aa0aeda879c4787aac42434c3d856e65a20512bafe`:
+all33 files verify, including the private VHD which still equals the seed.
+Its board VHD/archive duplicates are pruned only after that host audit.
+
+**Next discriminator:** retain selected primary commit records passively,
+without execution breakpoints, across either cold failure. The existing
+recorder overwrites the desired commit with later POP/handler retirements;
+the native post-fault halt captures task state but cannot recover that edge.
+Before any debug ECO, check reuse of the existing retire comparator as a
+record-enable filter (freeze disabled), preserve all CPU routes/function,
+and validate observer reset/readout behavior. This is a proposed debugging
+direction, not an implemented processor fix. Do not replace the original
+failing workload with another passing short fixture or serialize its pipeline.
