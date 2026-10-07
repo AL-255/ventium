@@ -3819,8 +3819,11 @@ Controller0 means the **diagnostic capture** succeeded, not Quake passed.
 All pre-freeze sampled execution controls are0; no STEP, debugger breakpoint,
 single-issue override, payload patch, snapshot or frequency change is used.
 The comparator's sticky forensic freeze intentionally holds reset. Native
-daemon invocation `13e5d6c8847b49d8b32c4138dc921835` is explicitly terminated
-after capture (code2/status15); no owner remains running. All37 closed files
+daemon invocation `13e5d6c8847b49d8b32c4138dc921835` exits normally on its
+own frozen-core detection (code1/status0, log `FROZEN latched at t=21910`);
+the controller's conditional SIGTERM cleanup is not needed. This corrects
+the initially recorded termination assumption: native0 is a freeze-triggered
+diagnostic exit, not timedemo completion. No owner remains running. All37 closed files
 are retrieved and checked. Manifest:
 `39bd18dcbbedb7891b0b5ea1c1cd0085a867b4b63ce54b30d11c88b993fd4641`;
 archive:
