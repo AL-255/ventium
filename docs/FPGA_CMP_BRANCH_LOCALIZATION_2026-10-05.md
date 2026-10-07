@@ -3520,6 +3520,51 @@ requirement. This is a resource-admission timeout, not a native route failure.
 There is no `launch.once`, native output or new combined checkpoint/bitstream.
 The pinned attempt remains ready for launch after RAM admission succeeds.
 
+#### Smaller memory profile and corrected count guard (October 7 UTC)
+
+A further review catches a stale post-route `original_count + 2` assertion
+in the unlaunched combined-flow adapter, whose plan correctly declares five
+new LUTs. Fresh `ventium-pc-combined-eco-r2.sjsI7c` uses the actual declared
+created-cell count. A test executes that exact native guard with five new
+cells and checks that a missing cell is rejected. No faulty checkpoint was
+produced by the earlier adapter.
+
+The closed R7 resource log places its maximum at the last sample: about
+5,751 MB anonymous memory plus 309 MB file cache and 23 MB kernel memory.
+The new attempt adds a narrowly allowed, streaming SHA-256/cache-release
+helper for the task's checkpoint, plan, constant-geometry and proof files.
+It verifies content and file identity while issuing advisory per-file cache
+eviction; it does not drop global caches or touch unrelated applications.
+Independent known hashes for all four existing inputs agree. Test-result
+SHA-256: `39f98d589f955a0effc2949064082e430acd0912dee3fd27f74d4b5b64de2d00`.
+Memory savings remain unmeasured because this attempt never enters Vivado.
+
+The smaller profile lowers the hard cap to 6.5 GiB and the early stop to
+5.5 GiB. Admission correspondingly requires 8.5 GiB. The existing 1 GiB
+early-stop margin, 2 GiB live host reserve, zero swap, single worker and
+540/570-second deadlines are preserved. All functional, complete-route,
+constant-pool, original-primitive and physical DRC checks remain mandatory.
+The 82-pin/five-LUT plan and its 32-bit function are unchanged; the formal
+proof and vendor fixture are recomputed successfully before launch.
+
+Input manifest:
+`07f2075a8af12ffa7ab174635af5b2d6a28ac8bccc98c26f7f98c3eae10ed9d8`.
+The watcher observes two samples just over 8.5 GiB, but available memory
+falls again before the unmodified build-scope wrapper's own admission check.
+The wrapper refuses with exit 125; the watcher closes with zero samples and
+the input-pin check exits zero. No vendor process, native output, checkpoint
+or bitstream is produced. This is another resource-admission failure, not a
+CPU, routing or OOM result. Closed admission evidence:
+`aa51c8956b77b17e68d25d1d2111e6a424532d33e56bc0b21ac8f25045c94c84`.
+
+The original 9 GiB attempt and this closed refusal remain preserved. After
+RAM becomes available, create a fresh attempt from the corrected R2 sources;
+do not reuse its `launch.once` directory. The bitgen adapter now targets R2
+and the same smaller memory profile; retarget it to the successful fresh
+producer and pin its outputs only after full route qualification. The latest
+host recheck has about 8.32 GiB available and no orphan Vivado/verification
+process to reclaim. The next native build requires external RAM to be freed.
+
 The 40 MHz cold production timedemo and full movie remain pending. Gameplay
 IPC on 886e8608 is unmeasured. The earlier baseline is 0.1659957781052303 U-only
 on 53f129e9 at 37.499869765 MHz, from 127 intervals with gaps spanning
