@@ -3477,6 +3477,8 @@ The exact AMD LUT primitive fixture passes 196,608 comparisons: 192 taken,
 12,096 other-fast and 184,320 original-path cases. It tests reset/FP/mode
 eligibility and all payload combinations. This is stable-function evidence,
 not arithmetic, timing or hardware acceptance.
+Proof and vendor-fixture closure seal:
+`eca19518d9419322f8d2b6fc2f756e0720a02009681f49e802f8260fc7f9eed9`.
 
 The local implementation plan `ventium-pc-combined-eco.M47s1n` starts from
 the sealed dd1e64cd R4 checkpoint, adds five LUTs and no FFs, and keeps the
@@ -3496,6 +3498,20 @@ It requires two consecutive memory admissions and then hands off to the
 unchanged single-Vivado wrapper, with a 7 GiB hard/6 GiB early limit, zero
 swap and the 540/570-second native/process deadlines. It times out after
 600 seconds if memory never becomes available, without launching Vivado.
+
+Closed no-breakpoint evidence seal:
+`13f12a04d7e166af7976f21f96dfd82a5b4886b63f94f92495991ae5176a849e`.
+To prepare room for the next deployment, five exact closed duplicates are
+removed from board tmpfs: both board copies of the GHXp5j and TICi2s RAM
+dumps, plus TICi2s's seed-identical disk. Complete host captures and the
+recovery seed remain; hashes, native invocation closure and absence of open
+descriptors are checked before deletion. This reclaims 86,474,752 allocated
+bytes and leaves 136 MiB free. Cleanup seal:
+`16e3f18c52c06aaad032087587bc161cae376633fc2d522202f63c8fa233b3b9`.
+The final-audit/bitgen adapter is prepared separately in
+`ventium-pc-combined-bitgen.yYhium`; its actual plan-loading block passes
+32-bit/five-new-LUT checks. It cannot launch until the new route producer and
+independent consumer close successfully.
 
 The 40 MHz cold production timedemo and full movie remain pending. Gameplay
 IPC on 886e8608 is unmeasured. The earlier baseline is 0.1659957781052303 U-only
