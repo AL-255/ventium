@@ -14,12 +14,14 @@ Current verified active-timedemo IPC: **0.165995778 U-only**, retirement-observe
 **8,721,490,845–19,169,282,165**, demo frames37–898. This is the closed R4
 aggregate with gaps between qualified groups, not an every-cycle full-demo
 score or40MHz qualification. The earlier closed R3 aggregate is below.
-The latest deployed physical candidate `5a0561fc` has **no gameplay measurement**;
-the above hardware baseline predates it. The R4 final-PC shortcut remains
-rejected: original CMP/JP64 fails after two cases, including a repeated run
-with the corrected diagnostic checker and management reset; the matched OR/JP64
-control passes all64 cases. The earlier diagnostic-only `48288e83` branch
-captures and the later physical candidates are recorded chronologically below.
+The latest deployed physical candidate `886e8608` has **no gameplay measurement**;
+the above hardware baseline predates it. Original CMP/JP64 still fails after
+one completed case with breakpoints disabled. The combined-PC candidate is
+under implementation, not yet deployed or accepted. UV dual issue and fast
+pipeline are now mandatory acceptance requirements, including dynamic test
+evidence; a slow/U-only passing control does not qualify a repair. Earlier
+`5a0561fc`, diagnostic-only `48288e83` and other results remain recorded
+chronologically below.
 The older0.42633263 simulation baseline(build `5c2491f3`, cycles
 7,099,999,637–7,199,999,637) predates this FPGA candidate. The PS PL reference
 is not the core frequency; actual core counter/time measurements are used.
@@ -3630,3 +3632,26 @@ The attempt is running, not accepted. The board still has 886e8608; neither
 it nor the combined candidate has a gameplay measurement. The historical
 0.165995778 U-only figure counts primary retirements, not total U+V IPC and
 not a verified single-issue mode. Its build/window remain as stated above.
+
+R4 subsequently closes native0/watch0/pins0/consumer0. The candidate is fully
+routed with zero route errors and zero unwaived DRC errors/critical warnings.
+All original primitives, FF inputs/polarities, aliases, physical routes,
+PC outputs, constant pools and clocks pass their preservation checks. Peak
+scoped memory is 6,336,118,784 bytes with no observed OOM/max events; the
+540/570-second deadlines are retained. Native invocation:
+`5fe289b5db95406fb6544cf2eda3f6c0`. Checkpoint SHA-256:
+`5fc7b087453525011308275be26eb2437348e4a923c1e3b9ac6030e02c7ed8c4`.
+Independent consumer SHA-256:
+`96a1f958622073f5b9fc8c494b62ecebb5ba412b1e133a043da20787bb3e3987`.
+Closed-route manifest:
+`4952a7fcef31d15086519b86381c71572193005db2af64f08b2e878aa85e1603`.
+
+Final audit/bitgen in `ventium-pc-combined-bitgen.yYhium` reopens this exact
+checkpoint, with input manifest
+`ae50532007ef243e802892206b6366b7d3942e204751746d92118a15e27b5fb4`.
+It uses the previously sufficient 7 GiB hard/6 GiB early envelope. Native
+physical validity and stable Boolean equivalence do not establish silicon
+correctness or timing sign-off. No processor repair is accepted at this stage.
+The runtime mode checker also finds valid fast-paired retirement adjacency
+in both archived OR/reversed-CMP passing controls; these remain controls,
+not substitutes for the original CMP/JP64 case or Quake timedemo.
