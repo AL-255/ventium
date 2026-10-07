@@ -3513,6 +3513,13 @@ The final-audit/bitgen adapter is prepared separately in
 32-bit/five-new-LUT checks. It cannot launch until the new route producer and
 independent consumer close successfully.
 
+The admission watcher subsequently closes with exit 75 after its 600-second
+wait, reporting `memory_admission_timeout` and `launched:false`. Its last
+sample is 9,028,972,544 available bytes against the unchanged 9,663,676,416-byte
+requirement. This is a resource-admission timeout, not a native route failure.
+There is no `launch.once`, native output or new combined checkpoint/bitstream.
+The pinned attempt remains ready for launch after RAM admission succeeds.
+
 The 40 MHz cold production timedemo and full movie remain pending. Gameplay
 IPC on 886e8608 is unmeasured. The earlier baseline is 0.1659957781052303 U-only
 on 53f129e9 at 37.499869765 MHz, from 127 intervals with gaps spanning
