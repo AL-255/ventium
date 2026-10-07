@@ -9,7 +9,7 @@ On October6 the preserved debug-only observer image was deployed, as recorded
 below; it does not implement a processor fix. Production BIOS/disk and RTL
 remain unchanged by this investigation.
 
-Current verified active-timedemo IPC: **0.165995778**, retirement-observer image
+Current verified active-timedemo IPC: **0.165995778 U-only**, retirement-observer image
 `53f129e9`, measured **37.499869764MHz**,127 qualified intervals spanning cycles
 **8,721,490,845–19,169,282,165**, demo frames37–898. This is the closed R4
 aggregate with gaps between qualified groups, not an every-cycle full-demo
@@ -2989,3 +2989,195 @@ The40MHz production timedemo/full movie and candidate gameplay IPC remain
 pending. Verified gameplay baseline remains0.1659957781052303 U-only IPC,
 53f129e9 at37.499869765MHz,127 qualified intervals with gaps spanning cycles
 8,721,490,845–19,169,282,165; it predates5a0561fc.
+
+#### Parked wrong-PC capture and corrected taken-V proposal (October6)
+
+The parked capture is now independently audited and sealed, at
+`ventium-r4-or-control.8rT8BM/cmp-boundary`. BP14576 first stops two legitimate
+normal epilogues whose preceding primary is14575. Each is crossed with one
+step of **ADD ESP,16**, exactly one retirement, then BP14576 is rearmed. The
+third stop has preceding primary14562 and wrong next PC14576, before that bad
+epilogue executes. Neither CMP nor Jcc is stepped. This is **intrusive history**,
+not an uninterrupted-run replacement or CPU acceptance.
+
+Measured clock is39.99989777851931MHz. The coherent architectural scan records
+CSa7/EIP14576/FLAGS887/CR2zero/CR37e000/ESPe07f8, two completed cases,
+caller3/checksum9fff and an entirely zero exception record. The linked code
+is unchanged. The native/controller exits are0/0; result is
+`CAPTURED_INTRUSIVE_CMP_WRONG_PC`, invocation
+`b865699a175b454caa01ad7bb5e73587`, not a successful workload.
+
+All67 export files pass the independent consumer. Export manifest:
+`c99ff93efe9e3df9d09871042b73c0cde82cce22b272224859faf99c6947e372`.
+Complete103-file host closure seal:
+`5cb0a5fe9cb9885b6c4208ab5e287f36c2e4185041310cf51ada9ee9b7bd7260`.
+The preserved150-bit observer decodes Ulen3/Vlen2/CC10/Vrel-low23=13 and
+PF_D/Q1. Its retained owner is14558 and all eight current active copies are0.
+These sampled combinational terms are **not a coherent settled-edge proof**:
+length bit3, Vrel high bits and EIP_D bit5 are unavailable. In particular,
+14558+3+2+13hex is14570, **not14576**; an old-owner arithmetic explanation
+must not be asserted from this sample.
+
+A subsequent full-word proof exposed a scope mistake in the first direct-word
+proposal: carry chain `eip_reg[7]_i_28` is **fall-through/redir_tgt2**, with the
+late V decision0. Its valid stable-function proof does not address this
+taken-JP failure. That proposal is rejected for this purpose, not deployed.
+
+The actual taken word is the connected four-CARRY8 chain
+`ic_line_b_reg_0_i_18 ->ic_line_b_reg_0_i_13 ->ic_line_b_reg_0_i_949
+->ic_line_b_reg_0_i_940`, all under the core's `u_icache`. Native CI/CO and
+all32 output-net identities explicitly match `v_tgt_raw[31:0]`.
+Query `ventium-vtaken-word-query.HAaDyj`, native data hash
+`85992f4aa9a2226a9416cf60fee1677d4ff88c270d3a483602efbce6edfea67b`,
+closes native0/pins0 and checks all32 final-PC/FF bindings.
+
+An initial taken-word proof passes low16 but rejects high16 without the
+**effective V operand-width** guard. Adding native
+`u_icache/eflags[7]_i_20/O ==0` selects the actual live/retained w16 value;
+replica agreement is never assumed. Minimization safely removes all four
+code-size-Q cut conditions. The resulting10 physical conditions cover reset,
+outer/state/inner selects, FP override, U branch, V admission, V taken and
+effective Vw16. Ineligible, reset, FP-priority and w16 cases retain the complete
+original-D copies; there is no opcode, PC or guest-specific condition.
+
+The independent literal-minterm encoder closes both the64-bit conditional
+original/primary-to-taken miter and the unrestricted32-bit proposed-mux miter,
+with satisfiable active/inactive witnesses. Proof hash:
+`774b6e5fc8a0db4728491f1022da90090a156405beccb4e1af4244a4b48b7598`.
+Vendor primitive models pass196,608 checks, including both early predecodes,
+three reused local qualifiers and payload selection. These prove only the
+bounded captured stable functions: opaque carry/cutpoint values remain
+independent. They do **not** prove arithmetic, full-cone timing, the fault cause,
+a repaired processor, or timedemo acceptance.
+
+The proposed physical change adds **two LUTs/zero FFs**, updates three existing
+qualifier INITs and41 original inputs, and routes exactly50 inputs including
+nine new ones. All32 existing PC output/FF/observer routes must remain literal;
+all original placements, pin maps/locks, FF input polarities, clocks, constants,
+undeclared routes and retained source paths remain mandatory guards.
+Plan hash `14f52de0c95b2fdf5c4d271e93e7afbf3e1679f225fd87ffc376b4fb798f229f`.
+
+#### Bounded implementation attempts and exact cleanup (October6)
+
+The first taken-word attempt, `ventium-vtaken-direct-eco.lB9cn1`, stops before
+any selected unroute or connection at scoped5,420,883,968bytes. The corrected
+ownership watcher, not the original empty watcher, establishes invocation
+`8419148ba40c477eaeac100cc274d99f`; all observed max/OOM/kill events are0.
+Native143/pins0; no candidate checkpoint or bitstream. Its unqualified
+589,279-row full-alias route export duplicates1,353,245,691bytes.
+
+R2 (`ventium-vtaken-direct-eco-r2.OlJ7hS`) streams primitive/FF snapshots and
+stores canonical physical routes once while retaining every alias identity.
+It closes native1/watch0/pins0 before routing because the new canonical helper
+incorrectly uses a net as `-of_objects`. Peak scoped4,531,027,968bytes; no OOM.
+The [2025.2 get_nets contract](https://docs.amd.com/r/2025.2-English/ug835-vivado-tcl-commands/get_nets)
+uses a net pattern for this operation, rather than a net-to-net object relation.
+A separately closed native query (`ventium-net-group-api.7OHpnM`) validates135
+aliases,115 bracketed names and135 independent leaf-pin agreements. Native,
+watcher, pins and consumer all close0; query hash
+`d103048a3b5e287366215481c50d0ea46ad8a441260231da7b4a1f351d0eca50`.
+This is a read-only API check, not proof of every design alias or hardware.
+
+R3 (`ventium-vtaken-direct-eco-r3.MoyAuG`) validates the corrected API over all
+589,279 original aliases and exports416,931 canonical physical routes.
+Route data is218,095,063bytes; the full alias map is148,781,011bytes. The native
+preflight covers298,191 primitives,236,980 FF input polarities,329 hierarchies,
+74 source groups and all32 output routes. The41-pin selected trim and50 logical
+connections execute only in the private in-memory candidate. The watcher then
+stops router initialization at5,375,492,096bytes, with zero OOM/max/kill events.
+Native143/watch3/pins0; no completed route, physical acceptance, checkpoint or
+bitstream. The original routed master and installed5a0561fc image are unchanged.
+
+R4 (`ventium-vtaken-direct-eco-r4.4ntPKn`) is prepared, **not yet launched**.
+It releases dispensable Tcl cell/trim indices before routing and reread export
+page cache before final reports. No correctness guard is removed. Its reviewed
+envelope is one worker,7GiB hard limit,6GiB early stop, zero swap,2GiB live host
+reserve,9GiB minimum available RAM and a570-second process cap. No unrelated
+application, including Chrome, is killed to admit it.
+
+After rechecking the complete103-file host seal and closed board invocation,
+only the67-file parked export, its manifest and original duplicate VHD/RAM are
+pruned:70 files,54,546,432 allocated bytes reclaimed. Metadata, firmware and
+the unchanged recovery seed remain. Receipt
+`d23129a8f6bbe163e22988d43ba79800f9bf8d5e884da4fef7f1836a3923ef18`.
+The first stopped run's single unqualified route export is also pruned after
+hash/size/inode/no-open/native-closure checks:1,353,252,864 allocated bytes.
+Its SHA is `744f8d236f99c1d94e1dda1d5b06e7625b892b44821c9c3d45278869f233ae60`;
+receipt `b084c95e3e24168615c3cdb66da1785776d1b30576bd5c0a2c88d6ec75ec0de9`.
+Sources and stop evidence remain; that generated export is reproducible from
+the unchanged dd1e64cd routed master. Cleanup receipts/sources are preserved in
+`ventium-net-group-api.7OHpnM`.
+
+No CPU RTL edit, synthesis, global placement/routing, new bitstream or deployment
+occurs in these attempts.40MHz cold production timedemo/full movie remain
+pending. Candidate5a0561fc gameplay IPC is unmeasured. The labelled baseline
+remains0.1659957781052303 **U-only**,53f129e9 at37.499869765MHz,127 intervals
+with gaps spanning cycles8,721,490,845–19,169,282,165; it predates this candidate.
+
+#### All-root physical preservation audit and launch fences (October7 UTC)
+
+The independent R3 snapshot audit checks **1,541,381 rows** across the four
+closed primitive/FF/alias/physical-route streams. Hashes, record framing,
+unique identities and all canonical alias groups agree. It also exposes a
+verifier assumption: there are **471 logical constant roots**,243 GROUND
+and228 POWER, not one logical root per type. The failed singleton-root audit
+and corrected audit are both retained. Corrected audit hash:
+`a2b5702ebbc09569b017eecfb238dbbf951ceb42be993187fc1d70b7d8a70559`.
+This does not turn the stopped R3 implementation into a passing route.
+
+A separate **read-only native query** on the immutable dd1e64cd master now
+checks every one of those471 roots. Each root's literal ROUTE, complete
+sorted node set and complete sorted PIP set agree with its type's physical
+pool. POWER has70,944 nodes/57,982 PIPs; GROUND has106,722 nodes/103,141 PIPs.
+Two raw full-geometry records are retained only after establishing that
+sharing for **all** logical roots; distinct geometry would reject the query.
+
+Run `ventium-constant-root-pool.kCKGiZ` closes native0/watch0/pins0 and the
+independent consumer0. Scoped peak is3,946,024,960bytes (**3.675GiB**), with
+all observed max/OOM/kill events0. The envelope is4.75GiB hard/3.75GiB early,
+zero swap,2GiB live host reserve and6.75GiB admission, with one worker and
+570-second process cap. No design mutation, checkpoint, bitstream or guest
+release occurs. Native query hash:
+`0a914bf712e85960b3d3b5c67e163d4a4e1cff5122aa86934b898a33f227362c`;
+full geometry hash:
+`73a92518fe44f6a26f5269a298dbce25101ee124a1323eb1bd9bb136cd33a6b9`;
+consumer hash:
+`d09d8c103badfc2fd5544c6f34f7a88cb9cf4dff82cca25f94cdd7728b6c96de`;
+complete19-file read-only closure:
+`1fa32edd831a6a7a2ff7a943467e99f49e6d926825878864fb0ed7958a5534e0`.
+
+The **unlaunched** R4 local route now requires this closed native evidence,
+rechecks its entire seal and independently reruns its consumer before launch.
+It counts all589,279 original aliases/416,931 canonical groups and228/243
+constant roots; every original constant root must retain its literal route.
+Both complete raw physical pools are additionally checked after routing.
+No placement, FF, pin-map, output-route, source-path, clock or DRC guard is
+removed. Regenerated R4 input-manifest hash:
+`e92cb7ee831b8fd5c2b3c3ef789f54e4a3cb7d0801159027a2dac80bbc01d703`.
+Stale unlaunched manifest versions remain labelled and retained, not reused.
+
+`ventium-vtaken-bitgen.pkwfo6` prepares a **single-checkpoint** final native
+gate instead of opening two full designs. Before bitgen it freshly rechecks
+all471 roots' ROUTE/nodes/PIPs, all32 final-PC and original-D-clone bindings,
+the three8080 predicates, both early predecodes, nine vector taps, observer
+metadata,40MHz clock configuration, complete routing and unwaived DRC.
+It frees dispensable Tcl indices before reports/bitgen and uses the same
+7GiB hard/6GiB early/9GiB admission envelope as R4. Its watcher must identify
+its actual `bitgen_taken.tcl` invocation. Native raw BIN byte order and every
+input/output hash are independently consumed before any possible deployment.
+
+These bitgen sources pass shell/Python syntax and Tcl framing checks **only**;
+they are not yet run or vendor-qualified. Static-source-list hash:
+`ba80a9886210a5b0c959099ccc618f2b15c871cfc8fbe6967cc1fb7498c895fc`.
+The runnable input manifest deliberately does not exist yet: it must include
+the still-missing accepted R4 checkpoint, route closure and consumer result.
+The launcher refuses absent evidence; the master query cannot substitute for
+fresh candidate checks, physical qualification, silicon tests or timedemo.
+
+At this checkpoint no Vivado process or guest run is active; available host
+RAM is about8.2GiB, below the9GiB routing admission threshold. No unrelated
+application is closed and no guard is weakened to start a run. The installed
+rejected5a0561fc image remains unchanged. Original40MHz cold production
+timedemo and full movie remain pending. Candidate gameplay IPC is unmeasured;
+the labelled0.1659957781052303 U-only baseline is53f129e9 at37.499869765MHz,
+127 intervals with gaps spanning cycles8,721,490,845–19,169,282,165.
