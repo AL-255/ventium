@@ -3691,3 +3691,39 @@ equivalence and this silicon microtest do not establish full timing sign-off
 or full processor correctness. Cold production Quake, its complete movie,
 and broader acceptance remain pending. Candidate gameplay IPC is unmeasured;
 the older labelled 0.165995778 primary/U-counter baseline above is unchanged.
+
+#### Cold production UV/fast run started (October 7 UTC)
+
+The first launch leaf `ventium-quake-clock-run.6Q81Ou` stops before debugger
+release: the recording watcher expected `/proc/PID/ns/time`, absent on this
+kernel. Its failed watcher, launch logs and zero-frame transport are retained;
+this is not a CPU workload result. `/proc/config.gz` explicitly disables
+`CONFIG_NAMESPACES`. The fresh adapter accepts this independently recorded
+global-clock evidence, without bypassing source pins, native identities,
+clock checks or UV/fast execution guards. The actual interval predicate passes
+nine positive/negative mode, clock and gameplay-bracketing cases. The build
+profile's 19 cases and runtime guard's seven cases also pass again.
+
+Fresh host leaf `ventium-quake-uvfast40-r2.KferTx`, board leaf
+`/dev/shm/ventium-quake-clock-run.4FfqSO`, reprograms the identical6659 image,
+checks DDR/media and measures **39.999851468 MHz** held in reset. Input manifest:
+`74905023810357cb12a6bc94d289c5cdc8a573bde220f07eb6d3d29e45c316de`.
+Cold daemon `ventium-quake-cold-7HSWWi.service`, invocation
+`1cf0e95fd63a4ea0a79c7719000d40b8`, and passive recorder
+`ventium-vcap-uvfast40-4FfqSO.service`, invocation
+`b25871f91aef44da8c4ac8411e3483b4`, are running. Launch exits0; first live
+samples show execution-control0, no freeze and startup progress. No snapshot,
+stepping, breakpoint, guest payload change or clock fallback is used. Cold
+disk is a byte-identical private clone of the preserved production seed.
+
+The recorder streams to host storage, capped at16,384 records (about1GiB);
+no full raw movie is stored on the board. Native runtime limits remain8100s.
+Closure waits for three additional emitted records after daemon exit and
+requires a later independent timestamp/successor audit; exit0 alone is not
+Quake or full-movie acceptance. Candidate gameplay IPC is not yet measured.
+
+Board cleanup removes only two archived16MiB RAM duplicates and the closed
+microtest's seed-identical disk (52,920,320 allocated bytes), plus the failed
+unreleased launch's seed-identical disk (19,365,888 bytes). RAM is fully
+preserved/hash-verified in the host45-file archive; the original disk seed
+and all forensic logs remain. No master image, seed or proof input is deleted.

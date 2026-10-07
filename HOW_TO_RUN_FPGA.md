@@ -2915,7 +2915,12 @@ earlier raster; its successor is armed only after that timestamp/write/flush
 and therefore depicts a post-closure raster. Require the same board boot and
 CLOCK_MONOTONIC namespace: record `/proc/PID/ns/time` against board PID 1 while
 the producer is live, and preserve its unchanged PID/invocation. Host SSH
-timestamps are not substitutes. Review the capture-completion-cycle span and
+timestamps are not substitutes. If this kernel omits `/proc/PID/ns/time`,
+do not infer a namespace match from two missing paths: require the live
+producer PID and retain the running kernel's `/proc/config.gz` evidence that
+`CONFIG_NAMESPACES` or `CONFIG_TIME_NS` is disabled. The October 7 board has
+`CONFIG_NAMESPACES` disabled, so all processes use the global monotonic clock.
+Review the capture-completion-cycle span and
 maximum gaps separately: this causal endpoint does not prove the first gameplay
 frame or gap-free scanout. Ensure quota/deadline permits the successor record.
 Tests: `python3 -B fpga/board-tools/test_ven_board_capture_stop.py` (native
