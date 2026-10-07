@@ -2542,6 +2542,27 @@ slot does **not** disprove that the logger ran; it can be a cache-visibility
 artifact. The production, unmodified-disk timedemo must run without this
 trigger and still requires the exact 969-frame record.
 
+For the pinned October7 CWSDPMI layout, `fpga/board-tools/watch_dpmi_pf.c`
+provides a **post-fault diagnostic halt**, not a processor workaround. The
+native loop watches read-only DDR for vector14 plus two matching complete
+CPL3 fault frames; only afterward does it request the quiescent manual HALT.
+It never steps, arms an execution breakpoint, changes the clock, writes guest
+RAM or enables the reset-producing comparator. A1ms Python watcher proved
+too slow: exception dispatch had already removed the error code and reused
+the frame. The native frame checks reject that stale shape.
+
+This tool is deliberately pinned to physical3166c/2ff4a and CSa7/SSaf. Do not
+reuse these addresses for a different guest/layout. Its launcher must validate
+the reserved DDR, exact image, guest inputs and debug-helper hashes first.
+Use `--self-test` for a no-device parser/UV-guard test; the root-only
+`--post-fault-halt-pinned-oct07` action is bounded300s and rejects STEP/BP,
+an existing HALT/freeze, and observed counter reset. After it halts, preserve
+`dump-state`, `dump-ring --allow-live`, observer banks and aligned RAM **before**
+any forensic freeze or reset. Task-saved GPRs and frame bytes still require
+independent decoding; a trigger match/native0 is not workload acceptance.
+The qualified October7 capture and limitations are recorded in
+`docs/FPGA_CMP_BRANCH_LOCALIZATION_2026-10-05.md`.
+
 Some DPMI-client failures return normally to DOS and never format that
 exception record.  If read-only evidence has already established that the
 failure is a particular protected-mode exit, the selector-independent CR0
