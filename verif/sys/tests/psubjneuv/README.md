@@ -72,3 +72,41 @@ Its32 bulky owner logs are losslessly archived in `original-matrix-raw.tgz`;
 each archived copy was hash-checked before removing the duplicate raw file.
 `board-v0-audit.json` is the independent post-HLT regrade; the original board
 controller's incorrect pre-OUT expectation remains recorded as exit 1.
+
+## Cold-fault operands and cache pressure
+
+`subjne_cold.S` is a separate 16-case diagnostic. It retains the original
+53 bytes but initializes the later cold capture's reconstructed ESP/EBP
+(`faef0`/`faf74`), original precommit GPR values and physical stack mapping
+(`FA000 -> 1FF000`). Both subject operands are 19; the subject JNE must be
+not taken, followed by the original minute comparison `52 - 58`. Variants
+0–3 respectively use plain execution, two congruent D-cache tags, two
+congruent I-cache tags, and both kinds of pressure. These are synthetic
+ordinary guest accesses, **not a complete reproduction of cold history**.
+
+Build with `bash verif/sys/tests/psubjneuv/build_cold.sh EMPTY_SCRATCH_DIR`.
+`COLD_LAYOUT=1` selects only additional ordinary bootstrap mappings, a
+second pressure-code copy and the CPL3 IRET stack/flags. Without the symbol,
+all four original ROMs still match `roms.sha256`; all four new ones match
+`cold_roms.sha256`. Both rebuild checks passed. No executable or snapshot is
+patched. The new pre-OUT symbol is `f029c`; hardware's post-HLT EIP is
+`f029e`. Do not reuse the old terminal addresses.
+
+Use `--system --l1-axi --cycle --x87 --max-insn 16000 --max-cycles 1500000
+--quiesce 200000` with the same pinned passive model/hooks. Set the observer
+start PC to `59000`, OUT PC to `f029c`, and unique output paths as above.
+`check_cold.py STEM` additionally requires the exact captured precommit GPR
+values, effective lengths 3/2, ordinary load physical `1fff50`, operand 19,
+forwarded FLAGS `3246`, 16 same-clock U/V retirements and no interior-PC or
+exception execution. Seven negative checker controls reject functional
+mode, unpaired commit, wrong length, operand, branch outcome, target or flags.
+
+All 32 parallel variant/latency cases passed (512 paired subject commits),
+and all four pinned-QEMU controls exited 133. All four FPGA variants passed
+at 39.999854–39.999859 MHz on image `6659e0c5`, with 16 self-checks each,
+no STEP/BP, unchanged code, no exception and paired-fast ring witnesses.
+The exact ROM hashes match the rebuilt repository sources. Closed simulation
+and board archives/audits are in
+`/home/yukidama/external/tmp/ventium-subjne-coldlayout.SRrOMS/`.
+These passes narrow the missing reproduction context; **they do not fix or
+close the cold Quake failure**, and supply no gameplay IPC measurement.

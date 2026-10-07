@@ -75,6 +75,12 @@ pm32_entry:
     movl $0x134000, %edi
     movl $1024, %ecx
     rep movsl
+    .ifdef COLD_LAYOUT
+    movl $sub_warm_page, %esi
+    movl $0x136000, %edi
+    movl $1024, %ecx
+    rep movsl
+    .endif
     movl $0x00000f3f, 0x2d728
     movl $0x10c0fa00, 0x2d72c
     movl $0x0000ffff, 0x2d730
@@ -112,6 +118,12 @@ pm32_entry:
     /* New readonly/user/cacheable caller; matches naturalpage134000 geometry. */
     movl $0x00134a65, 0x7c0d4
     movl $0x001e5a67, 0x7c380
+    .ifdef COLD_LAYOUT
+    movl $0x001ffa67, 0x7c3e8 /* cold guestFA000 -> physical1ff000 */
+    movl $0x0020fa67, 0x7c068 /* ordinary D-pressure pages */
+    movl $0x0021fa67, 0x7c06c
+    movl $0x00136a65, 0x7c0dc /* second I-pressure tag */
+    .endif
     movl $0x0044a267, 0x7cd2c
     movl $0x00f8ba67, 0x79a30
     /* Actual first-failure pointer/object pages, ordinary cacheable user mappings. */
@@ -127,8 +139,13 @@ pm32_entry:
     jmp kernel_forced_case
     .endif
     pushl $0xaf
+    .ifdef COLD_LAYOUT
+    pushl $0xfaef0
+    pushl $0x3202
+    .else
     pushl $0xe07f8
     pushl $2
+    .endif
     pushl $0xa7
     pushl $0x59000
     iretl
