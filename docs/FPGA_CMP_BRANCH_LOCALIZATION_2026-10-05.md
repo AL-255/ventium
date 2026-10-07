@@ -3320,3 +3320,184 @@ No RTL, production ROM or disk-media change occurs.
 IPC is unmeasured; the labelled prior baseline is0.1659957781052303 U-only
 on53f129e9 at37.499869765MHz,127 intervals with gaps spanning
 cycles8,721,490,845–19,169,282,165, predating the candidate.
+
+R6 closes native1/watch0/pins0 **before mutation**: one batch contains
+179 CARRY8s,75 FDREs, one MUXF7 and one LUT3. The single LUT's `LOCK_PINS`
+query returns a scalar list-valued property, not a one-element outer list;
+the strict cardinality guard catches this distinction after99,328 primitive
+rows. No candidate checkpoint is written. Peak scope is4,174,360,576bytes,
+all observed max/OOM/kill events0. The installed native result, rather than
+the mock's earlier contract assumption, determines the correction.
+
+Fresh R7 (`ventium-vtaken-direct-eco-r7.glSYan`) wraps singleton property
+values explicitly; multi-object queries still require exact cardinality.
+Twenty-two focused tests now include the native failing column geometry,
+singleton list-valued pin locks, branched routes and empty routes. Every
+baseline hash and preservation/physical/resource/deadline guard is retained.
+R7 launches with manifest
+`1a0a87f0d55d3cba7e97c0219b2b216df7c80c8a9f19009bebc2821e157499e1`
+and invocation `7b36529f57a44c138d636cec857fb6a3`. This remains an active
+attempt, not a route, hardware or timedemo acceptance.
+
+#### R7 closed physical/stable-function pass; final bitgen starts (October7 UTC)
+
+R7 completes **native0/watch0/pins0/consumer0** inside the unchanged bounded
+envelope. All four independently audited original export hashes match before
+mutation. Post-route comparison preserves298,191 original primitive records,
+236,980 FF input polarities,329 hierarchical protection records, all original
+physical pin maps/locks and589,279 alias identities. All416,931 original
+physical groups are covered:416,386 non-target route strings remain literal,
+74 declared source groups retain their protected resources and exact planned
+fanout, and all471 original constant roots retain literal routes. Both full
+physical constant pools,32 original PC-output/FF/observer routes and original
+clock periods pass. The fresh canonical inventory contains416,933 roots;
+post-route scalar canonical checks cover172,165 non-source/non-root aliases.
+
+The native final report is fully routed, with zero route errors, unwaived DRC
+errors or critical warnings. Peak scoped memory is6,088,130,560bytes; all
+observed max/OOM/kill events remain0. No deadline/resource rule is relaxed.
+The saved checkpoint is
+`native-output/taken_candidate_UNQUALIFIED.dcp`, SHA-256
+`56076f90e2ffdbfc4fdb78e7a9839be7f5e2c3b48c622bbc2341cafd119b7f9d`.
+Independent consumer SHA-256:
+`099a0c63e33e9efdfdc4df687706dc8af66d840d6529d9a18a2e2d9e103de35f`;
+complete34-file closed-route seal:
+`d997823a94cff0e49ab58f0e8c9f7b906cd6f76a56b2425868e42265575800b5`.
+
+The separate `ventium-vtaken-bitgen-r7.d3qYB2` flow rechecks that sealed
+producer and independently recomputes its consumer, then reopens only the
+accepted checkpoint. It requires a fresh check of **every** original logical
+constant root's complete route/nodes/PIPs, all32 actual taken-word muxes,
+three predicates, two predecodes, inherited observer ABI/taps,40MHz clock
+constraints and unwaived full physical checks before native bit generation.
+It performs no synthesis, placement, routing, clock-constraint or function
+change. Input manifest:
+`a94f186991d8f02401619ea8243e6e36aabcbdce7c992fedb5ddc92bd741b057`.
+Bitgen is launched, **not yet qualified or deployed**. Stable Boolean
+equivalence and valid physical routing do not establish timing, a repaired
+silicon fault or production Quake completion. Candidate gameplay IPC remains
+unmeasured; the labelled baseline remains0.1659957781052303 U-only on53f129e9
+at37.499869765MHz,127 intervals with gaps spanning
+cycles8,721,490,845–19,169,282,165, predating the candidate.
+
+#### R7 bitgen complete; deployed 40 MHz diagnostic still fails (October 7 UTC)
+
+The final R7 bitgen closes **native0/watch0/pins0/consumer0**. All 471 logical
+constant roots pass fresh complete route/node/PIP checks, and the reopened
+32-bit PC muxes, predicates, predecodes, observer taps/ABI, clock constraints
+and unwaived full route/DRC checks pass. Scoped peak is 5,416,284,160 bytes;
+all observed max/OOM/kill events are zero. No additional function or routing
+edit occurs. The 20,606,636-byte native raw BIN is
+`886e8608a977947af4ac2d70380c11678bd13c8f8494e65c6fa38e9c66f41f4f`;
+consumer hash `be3d7e2aa6637ae5a1ae6f1b5b9c28e7d07d20dcd56d025d482ed9df5af4a997`;
+complete 26-file bitgen closure
+`8404a43d70c5745c80e9fc505879018a52d4479a0cbe74eb3715553e7e3c5e3e`.
+
+Deployment evidence is in `ventium-vtaken-board-r7.CBfgZM/board-deploy`.
+The board's boot identity, native two-cell address/size encoding,
+non-reusable `no-map` reservation 60000000–6fffffff and exclusion from Linux
+System RAM pass. Programming exits zero; the installed firmware hash matches
+the qualified BIN and the manager reports `operating`. A held-reset interval
+measures **39.999877515 MHz**, with zero retirements and 100 reset/freeze guards.
+Production source pins pass before and after deployment.
+
+Cleanup removes three closed, seed-identical diagnostic `run.vhd` copies
+(eVX6lv, orsAkx, mvnVlx), reclaiming 58,097,664 allocated bytes. The rejected
+`ventium_fpga40_pccommit_candidate.bit.bin` firmware copy is also removed;
+its verified host copy remains in `ventium-pc-commit-bitgen.7ai680`.
+Receipts identify exact targets and preserved recovery sources.
+
+The original cold paired CMP/JP64 diagnostic **fails** on this image.
+`exception-log-GHXp5j-export` contains 44 hash-verified files; its manifest is
+`69ba0ab7e2fb238a6e569a50152cb8f26ee7702e457200eb973ca67b206e9967`.
+Native invocation `e11d9df2116249d1899f283f18164021` closes normally with exit
+zero, while the controller exits one. One case completes; caller count is two
+and checksum is `0x6aaa`. The failure breakpoint catches CS:a7 EIP:14566,
+FLAGS:2 and EDI:0 after primary retirement 14562. No fault record has yet
+been published. The code bytes are unchanged.
+
+The observer reports U/V length low bits 3/2 and JP condition code 10.
+Its partially known previous-edge EIP-D is 1455a with mask ffffffdf;
+the selector is zero, EIP CE is one and observed PF is zero. These samples
+do not prove ownership or alignment with the failing commit edge. In
+particular, they do not establish a one-byte V instruction or the cause of
+the bad PC. This is an earlier failure than the prior image's third-case
+taken-branch failure, and does not establish a silicon repair.
+
+The next matched control uses fresh scratch `ventium-vtaken-no-bp.1qBob9`,
+reloads the identical BIN and uses the pinned probe's `run` operation, which
+clears BP_EN and HALT_REQ. It checks that the breakpoint stays disabled while
+watching the unchanged 64-case diagnostic, then captures architecture, RAM
+and observer evidence. The prior diagnostic's seed-identical disk copy is
+removed only after native closure and verification of its complete archive;
+the original seed and host/board evidence remain. The fresh held-reset clock
+measurement is 39.999875019 MHz.
+
+The control closes **native0/controller1** and reproduces the failure with
+breakpoints disabled. One case completes, caller count is two and checksum
+is 0x6aaa. The raw physical-RAM record reports #PF14/error4 at CS:a7/EIP14566,
+saved FLAGS:2 and CR2:493c6488. The private code is unchanged. The pinned
+probe's resume exits zero; breakpoint-disabled status is checked before
+release, throughout the result poll and at the final halt. The final observer
+sample belongs to the exception logger, not to the bad commit edge.
+
+All 42 files in `exception-log-TICi2s-export` pass their recorded hashes.
+Native invocation is `f5ac2de765124ceab97ff24a255d0583`; manifest SHA-256:
+`14a7bb2e2371fe5c46005cb7cb54ce3f45c5b474d9b6c0f0a1e29965214a9b06`.
+RAM SHA-256:
+`ea6dc9ff7e17fa2de9b0b50397a55ed1371db682331728c2a0aeccde8f4290fd`.
+The independent `audit_failure.py` recomputes clock arithmetic, checks native
+closure, source/ROM identity, breakpoint status and fault/scalars directly
+from physical RAM. Its result hash is
+`c622a28869deacf1648a342a3831db3f3060188a9ada7a6b96a10d9d20c09e33`.
+The audit passes with CPU acceptance false. The execution breakpoint is not
+required for this failure.
+
+#### Combine the two general PC shortcuts without losing the earlier path
+
+Inspection identifies a structural limitation of R7: its final mux selects
+`taken ? raw_target : original_D_clone`, replacing R4's
+`fast ? selected_primary : original_D_clone`. Therefore non-taken fast
+instructions lose R4's shorter path and pass through the old-D clone again.
+This explains which path was changed; it does not by itself prove the
+electrical cause of the second-case failure.
+
+The next candidate preserves both paths in the original final LUT:
+
+```
+taken ? raw_target : (fast ? selected_primary : original_D_clone)
+```
+
+`ventium-pc-combined-proof.f1HQc9` encodes the actual mapped native cone and
+proves the complete 32-bit function equivalent to the R4 parent for arbitrary
+unqueried cutpoints. All three selection cases are satisfiable. The miter
+returns `sat/unsat/sat/sat/sat`; proof result SHA-256:
+`641bed7d0607064ed146c6807b2d36efab0cca305b902b7b483c3e776814ba56`.
+The exact AMD LUT primitive fixture passes 196,608 comparisons: 192 taken,
+12,096 other-fast and 184,320 original-path cases. It tests reset/FP/mode
+eligibility and all payload combinations. This is stable-function evidence,
+not arithmetic, timing or hardware acceptance.
+
+The local implementation plan `ventium-pc-combined-eco.M47s1n` starts from
+the sealed dd1e64cd R4 checkpoint, adds five LUTs and no FFs, and keeps the
+three original fast predicates and final I0/I1/I2 inputs intact. Final LUT6
+INIT becomes `FF00CACAFF00CACA`; only I3/I4 gain raw-target/taken-select
+inputs. There are 64 original input changes and 18 new input connections.
+Plan SHA-256:
+`db188393475609d1c8b20f24b1edc04b86ae12b9b95745bdb73cf3fa89aae9ab`.
+The real Tcl plan parser passes its 82-pin scope check; all 22 query helper
+tests pass. Original placement, FF polarity, pin maps/locks, PC output routes,
+all other routes, constant pools, physical DRC and resource guards remain
+mandatory. No native implementation has launched yet; the host currently
+has less than the unchanged 9 GiB admission threshold.
+The bounded admission watcher is queued with source manifest
+`8a2b24d6c3b95ec5322839c3c164c5324cfee4592d6666375247f57045aa6301`.
+It requires two consecutive memory admissions and then hands off to the
+unchanged single-Vivado wrapper, with a 7 GiB hard/6 GiB early limit, zero
+swap and the 540/570-second native/process deadlines. It times out after
+600 seconds if memory never becomes available, without launching Vivado.
+
+The 40 MHz cold production timedemo and full movie remain pending. Gameplay
+IPC on 886e8608 is unmeasured. The earlier baseline is 0.1659957781052303 U-only
+on 53f129e9 at 37.499869765 MHz, from 127 intervals with gaps spanning
+cycles 8,721,490,845–19,169,282,165.
