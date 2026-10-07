@@ -3569,3 +3569,24 @@ The 40 MHz cold production timedemo and full movie remain pending. Gameplay
 IPC on 886e8608 is unmeasured. The earlier baseline is 0.1659957781052303 U-only
 on 53f129e9 at 37.499869765 MHz, from 127 intervals with gaps spanning
 cycles 8,721,490,845–19,169,282,165.
+
+#### Resumed combined-PC implementation (October 7, 19:52 UTC)
+
+After the user resumes, host available RAM is 23.26 GiB; the previous RAM
+blocker is cleared. Fresh `ventium-pc-combined-eco-r3.tCLMI3` copies the
+corrected R2 sources, preserves the five-cell count guard and bounded file
+cache helper, and restores the successful R7 resource profile: 7 GiB hard,
+6 GiB early stop, 9 GiB admission, 2 GiB live host reserve, zero swap and
+one worker. The 540/570-second deadlines and all preservation checks remain.
+No closed attempt is reused. The 22 helper tests, 82-pin/five-LUT plan tests,
+actual post-route count-guard test and independent hash tests pass.
+
+Input manifest:
+`c8a8a850ae13920591121b3b55d1b8d5ea9c5fb6d99b4a18ccd4be3e25a78747`.
+The guarded native implementation has started; this is not yet a qualified
+checkpoint, bitstream or hardware result. No full synthesis is requested.
+The board is reachable on the same reserved-memory boot, with no running
+Ventium service. A fresh no-breakpoint diagnostic adapter is being prepared
+in `ventium-pc-combined-board.ohqWiT`; deployment remains gated by the closed
+route consumer and final bitgen audit. Current candidate gameplay IPC is
+unmeasured; the labelled older baseline above remains unchanged.
