@@ -3181,3 +3181,142 @@ rejected5a0561fc image remains unchanged. Original40MHz cold production
 timedemo and full movie remain pending. Candidate gameplay IPC is unmeasured;
 the labelled0.1659957781052303 U-only baseline is53f129e9 at37.499869765MHz,
 127 intervals with gaps spanning cycles8,721,490,845–19,169,282,165.
+
+#### Installed router-cache API: preserved master, no pre-route saving (October7 UTC)
+
+The [2025.2 route_design contract](https://docs.amd.com/r/2025.2-English/ug835-vivado-tcl-commands/route_design)
+documents `-release_memory` as releasing retained router data without running
+routing passes. A bounded read-only native query on the unchanged dd1e64cd
+master verifies that exact installed API instead of guessing a memory knob.
+`ventium-router-memory-release.JlM2B1` closes native0/watch0/pins0/consumer0.
+All416,931 original canonical routes,471 logical constant-root routes,
+both full physical constant pools,298,191 tracked primitive records,
+236,980 FF input polarities and original clock periods remain literal.
+No route pass, unroute, function/placement/constraint edit, new checkpoint,
+bitstream, deployment or guest execution occurs.
+
+The measured pre-routing scope is4,239,822,848bytes before the call and
+4,240,056,320bytes afterward: **no measured saving**, an increase of228KiB.
+Peak scoped memory is4,430,077,952bytes with all observed max/OOM/kill events0.
+The query's5.5GiB hard/4.5GiB early limits retain the1GiB cushion, zero swap,
+2GiB live host reserve and7.5GiB admission; the process cap is390seconds.
+This measurement does **not** profile an active interactive router or justify
+reducing the candidate routing envelope.
+
+Native query hash:
+`1f01c3e1bec49e38f9351ce5e34abde54f1928f0943c29b40413a934aa8bf61e`;
+independent consumer hash:
+`3fc97ff2370e62e32215a5e8ef30be35eb15493f52d2c83ac16818988831bfdd`;
+complete17-file read-only closure:
+`1e3a75a6a156d8b6f51c42eed817c67deaef52c12f27a63b9c98033796d56a89`.
+
+The still-unlaunched R4 flow now frees router caches **after** successful
+selected routing and **before** every post-route preservation/physical gate.
+The independent consumer requires that ordering and native cache-call success.
+All existing route/function/placement/polarity/constant/output/DRC guards stay
+mandatory; no saving is presumed or claimed on the new candidate. The runner
+pins and rechecks the closed API query before starting. Current R4 manifest:
+`63d19ce2f63be68b4b6f8e2920cb3273a56763915218e1a19cbe0efb08ac6a4f`;
+the earlier e92cb7ee manifest is retained as an unlaunched historical version.
+
+The route still needs9GiB available RAM; the host has about8.1GiB and no
+remaining Vivado process. The installed5a0561fc image is unchanged.40MHz
+production timedemo/full movie remain pending. Gameplay IPC is unmeasured for
+the candidate; the baseline remains0.1659957781052303 U-only on53f129e9 at
+37.499869765MHz,127 intervals spanning cycles8,721,490,845–19,169,282,165 with gaps.
+
+#### Directed-path feasibility and rejected manual attempt (October7 UTC)
+
+A read-only installed-2025.2 query explores an alternative to allocating the
+interactive router. `ventium-directed-route-query.C8t6kz` records all50
+planned physical input endpoints, but exits native1/watch0/pins0 because its
+single-tile assumption is false: a routing node spans multiple tiles. It
+does not reach path search and creates no candidate. Its partial evidence
+is retained; this is not a routing or correctness pass.
+
+The corrected `ventium-directed-route-query-r2.3j8aQ0` closes
+native0/watch0/pins0/consumer0. It obtains all41 original and9 proposed input
+BEL/site/node endpoints, preserves77 queried net routes and original clocks,
+and finds an eight-node conflict-free RESET-source branch to the proposed
+SLICE_X72Y221/A1 input. No overlap/ignore-routing option is used; no returned
+path is assigned, and no checkpoint, bitstream or board change occurs.
+Physical BEL queries expose site entries for all50 inputs; this does not
+prove that a future placed output's site programming has been completed.
+
+Peak scoped memory is4,343,541,760bytes. The search itself measures
+4,333,977,600bytes before and4,333,490,176bytes after. This is one path search,
+**not** the full candidate's routing-memory requirement. Query hash:
+`0615780447ac431f2f5adb0d865ee9e8573e73383a6b489c0c112d41a57bfe9f`;
+consumer hash:
+`6dfd0e2854dbeb3e49ef21965afeb4f7f248177aa2c1e219ff727adda40fcbc9`;
+complete16-file closure:
+`b849d6b6cf5494ad8b278ac808bcc5cf2e0c87f02bee2ba243dbaa15fbf6d94e`.
+Its consumer handles native Tcl records containing multiline help text;
+fixtures test the actual parser, including rejection of truncated records.
+
+`ventium-vtaken-manual-eco-r5.CqN0O7` tests a directed-tree variant of the
+same14f52de0 Boolean-equivalent plan, retaining every R4 preservation and
+physical gate. Fifteen route-tree microtests cover explicit singleton branch
+braces, retained branches, cycles, reconvergence, disconnected components,
+duplicate edges/nodes, old-tree crossings and the500-node bound. The variant
+uses5.75GiB hard/4.75GiB early/7.75GiB admission, still with a1GiB cushion,
+2GiB live host reserve, zero swap, one worker and the570-second process cap.
+Its input manifest is
+`56a83d9ce407c04c1019a48b655b9b1d2c964edc9fc410f0649d505a0e7fe12a`.
+
+That attempt **fails** native1/watch0/pins0 before its first directed branch:
+the placed new O6 output does not expose the expected route-associated site
+connection. Peak scoped memory is5,094,227,968bytes, only about5.8MiB below
+the early-stop threshold; all observed max/OOM/kill events remain0. It does
+not establish that the full variant fits that envelope. All four complete
+pre-mutation snapshot hashes equal the already-audited R3 originals, but the
+private input reconnections are not qualified. No checkpoint, bitstream or
+deployment occurs; the failed sources/results are preserved.
+
+After this closes, actual host RAM rises to9.85GiB available. The original
+taken-V R4 local-router flow is now admitted and launches with unchanged
+63d19ce2 input pins and its7GiB hard/6GiB early/9GiB admission envelope.
+It is a new active attempt, **not yet a pass**. The rejected5a0561fc board
+image remains unchanged; original40MHz cold production timedemo/full movie
+remain pending. Gameplay IPC remains unmeasured for the candidate. The
+baseline is0.1659957781052303 U-only on53f129e9 at37.499869765MHz,127 intervals
+with gaps spanning cycles8,721,490,845–19,169,282,165, predating this candidate.
+
+#### R4 route succeeds; preservation audit hits deadline (October7 UTC)
+
+The R4 selected router completes successfully in51seconds, followed by the
+cache-only release in6seconds. The attempt nevertheless **fails**
+native1/watch0/pins0: its540-second Tcl deadline expires during the complete
+physical-route comparison, after the original primitive, FF-polarity,
+hierarchy, physical-pin-map, source-fanout/resource and alias checks. It has
+not completed the remaining constant-pool, output, full-route and unwaived
+DRC gates, and writes **no checkpoint or bitstream**. Its invocation is
+`5dce5c75b7f14fe4a5a73c057b497c72`; peak scoped memory is6,193,364,992bytes,
+with all observed max/OOM/kill events0. These results do not qualify R4 for
+deployment. The board remains on the rejected5a0561fc image.
+
+The fresh R6 attempt, `ventium-vtaken-direct-eco-r6.KaIW5N`, changes query
+execution only: native unique-root membership avoids redundant scalar
+canonical queries for416,931 actual roots; all172,348 non-root aliases still
+use the independently qualified scalar API. Canonical collections are never
+zipped to aliases. Primitive fields and nonconstant route properties use
+batches of at most256objects; every original record, alias identity,
+literal route, FF input polarity, pin map, source resource, output route,
+clock and physical gate remains mandatory. Constant routes are still
+queried separately for every logical root to avoid vectorizing enormous
+replicated constant-tree strings. Both full physical pools remain checked.
+
+Eighteen focused helper tests pass. Before mutation, all four native baseline
+exports must now also match the already independently audited R3 scalar
+hashes exactly; a query-order or representation discrepancy rejects the run.
+The7GiB hard/6GiB early/9GiB admission envelope,1GiB cushion,2GiB live host
+reserve, zero swap, single worker and540/570-second deadlines are unchanged.
+R6 launches with input manifest
+`e7c2122f5f862c51466aaf862c6e72287f58837ab3b486f1795dd251558a1393`.
+This is an active attempt, not a preservation, silicon or timedemo pass.
+No RTL, production ROM or disk-media change occurs.
+
+40MHz cold production timedemo/full movie remain pending. Candidate gameplay
+IPC is unmeasured; the labelled prior baseline is0.1659957781052303 U-only
+on53f129e9 at37.499869765MHz,127 intervals with gaps spanning
+cycles8,721,490,845–19,169,282,165, predating the candidate.
