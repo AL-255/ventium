@@ -1,6 +1,9 @@
 # FPGA memory-CMP/conditional-branch localization — 2026-10-05 UTC
 
-The requested **40MHz** production Quake timedemo remains **pending**.
+The requested **40MHz** production Quake timedemo remains **unpassed**.
+The October7 `6659e0c5` UV/fast cold run reaches rendering, then returns to DOS
+without a timedemo result. The original CMP/JP64 microtest passes, but the
+full workload still fails; see the final entries for the new fault evidence.
 A complete15fps recording of a separate37.5MHz cold timedemo is now retrieved
 and verified, documented below. These are private cold diagnostics, not patched production Quake,
 save-state repairs, or acceptance substitutes. The original control runs did
@@ -3727,3 +3730,57 @@ microtest's seed-identical disk (52,920,320 allocated bytes), plus the failed
 unreleased launch's seed-identical disk (19,365,888 bytes). RAM is fully
 preserved/hash-verified in the host45-file archive; the original disk seed
 and all forensic logs remain. No master image, seed or proof input is deleted.
+
+#### Full cold UV/fast workload fails; new saved fault context (October 7 UTC)
+
+The `4FfqSO` production run reaches the Necropolis render, then returns to
+real-mode DOS. All 70 live samples retain STEP/BP/HALT clear until the later
+forensic park; no clock fallback or slow/U-only override is used. None of its
+engine samples qualifies a gameplay IPC interval (maximum observed
+`host_framecount` is0). Candidate gameplay IPC therefore remains **unmeasured**,
+not zero and not a startup-derived score. The earlier 0.165995778 primary/U
+baseline remains historical, not candidate performance or total U+V IPC.
+
+After five sustained DOS-return samples, only the identified daemon receives
+SIGTERM. Its same-invocation native close is code2/status15, explicitly a
+forced failure closure; recorder closes code1/status0 and host transport0.
+The watcher closes1 and holds reset, preserving RAM and disk. No successful
+native/standard-suite/full-movie acceptance is claimed. The recorder produced
+265 CRC-valid320x200 records, sequences101–365, cycles2,128,525,556–3,032,553,838,
+with maximum gap3,424,350cycles. Raw SHA-256:
+`cb2e356fde313ebe6b2b73c86b54ae86399c8ade6115e2e6d8de42ac33bfbff9`.
+These are incomplete-render evidence, not a complete timedemo movie.
+
+All63 closed-run files are retrieved and hash-verified. Closed-run manifest:
+`839857d27d4eb877e67be06eae6d21d31308661b6ad6917f63dc187d5a00472d`;
+transport archive:
+`068688ed4fd78b826019c0a8aab8df8a7dc61860d45043fcdda8822ec4e5eec9`;
+physical RAM:
+`af982e7210cf7d97a7ee1d26f3397087f4f4bfdf2325cdae50b9d6167eb7a35f`;
+closed disk:
+`c96dd84dbcf10b3017f1f2043c365af2bfb0fe13d12bcf9e12e3b3f26d7392e8`.
+Offline FAT extraction of QCONSOLE.LOG has fresh startup/map text but **no
+969-frame result**. The late observer-scan helper was from the older catalogue
+and correctly rejected the new metadata; it provides no usable retirement
+scan. The successful microtest used the matching `00cf0096` catalogue.
+
+The exact disk's QUAKE.EXE SHA-256 is
+`7cdb244122cc607cc6f162524bfcac60f6d11d8ca2ff07473d6cd962311161fb`.
+Matching its intact DJGPP code page in DDR locates the initially-zero
+saved-exception structure at physical14c78c. Decoding the field stores in
+its actual4d61e–4d67e instructions gives vector14/error4, CSa7/EIP108,
+SSaf/ESPe0810, FLAGS3206; EAX7, EBX2c91fc, ECX108, EDXeca62c,
+ESI1, EDI0, EBPece08. This is **post-exit DDR residue**, not a coherent
+pre-fault architectural capture. EIP equalling ECX is a clue, not proof of
+a mux or return-address root cause. The old page tables are no longer usable.
+
+Next is a fresh same-image,40MHz, UV/fast cold **forensic** run using the
+existing on-chip retire comparator for CSa7/low-EIPd5c4–d611 (the independently
+decoded DJGPP exception dispatch). No STEP, execution breakpoint, payload
+patch or slow-mode fallback is used. Because the comparator matches only low
+16 bits, its full frozen PC must qualify the capture; a hit alone is not a
+fault or repair verdict. Host leaf `ventium-uvfast40-fault.ycPY4l`, board leaf
+`ventium-uvfast40-fault.sJs9pv`; input manifest
+`133d9e8821cc2cfc38e9fbe2a5192c1905e210721eebd9cb57181f418f43a9a6`.
+The failed run's RAM and transfer-archive duplicates are removed from the
+board only after complete host recovery verification; disk/logs remain.
