@@ -14,10 +14,12 @@ Current verified active-timedemo IPC: **0.165995778 U-only**, retirement-observe
 **8,721,490,845–19,169,282,165**, demo frames37–898. This is the closed R4
 aggregate with gaps between qualified groups, not an every-cycle full-demo
 score or40MHz qualification. The earlier closed R3 aggregate is below.
-The latest deployed physical candidate `886e8608` has **no gameplay measurement**;
-the above hardware baseline predates it. Original CMP/JP64 still fails after
-one completed case with breakpoints disabled. The combined-PC candidate is
-under implementation, not yet deployed or accepted. UV dual issue and fast
+The latest deployed physical candidate `6659e0c5` has **no gameplay measurement**;
+the above hardware baseline predates it. Original CMP/JP64 now passes all
+64 cases at measured 39.999836260 MHz, without breakpoints or stepping, with
+an independently audited fast-paired retirement witness. This is a microtest
+pass, not full-workload acceptance; the production timedemo remains pending.
+UV dual issue and fast
 pipeline are now mandatory acceptance requirements, including dynamic test
 evidence; a slow/U-only passing control does not qualify a repair. Earlier
 `5a0561fc`, diagnostic-only `48288e83` and other results remain recorded
@@ -3655,3 +3657,37 @@ correctness or timing sign-off. No processor repair is accepted at this stage.
 The runtime mode checker also finds valid fast-paired retirement adjacency
 in both archived OR/reversed-CMP passing controls; these remain controls,
 not substitutes for the original CMP/JP64 case or Quake timedemo.
+
+#### Combined-PC silicon microtest passes in UV + fast mode (October 7 UTC)
+
+Final bitgen closes native0/watch0/pins0/consumer0, peak 5,116,211,200 bytes,
+no observed OOM/max events. Final image SHA-256 is
+`6659e0c53f3ebb6e06eaefebb1e69e8e5b76003814bbbf29f632870cdd8ef6f6`
+(20,606,636 bytes); closed-bitgen manifest is
+`65682ed5329e3b5317b2bd2acfb509ddfd16c11e6db909b2197c1fd54044ac6f`.
+Fresh programming verifies the installed image, operating FPGA manager,
+reserved DDR, unchanged production inputs and measured 39.999836260 MHz.
+
+The unchanged original CMP/JP64 ROM completes all 64 cases, caller count64,
+checksum `0xd5540`, all-zero exception record and expected AL42 exit.
+Native invocation `ec863c35150b413db28e8f0bbbf4e0c6` closes0. No STEP, BP,
+pairing disable, slow-path override, guest-memory repair or opcode/operand
+change is used. The runtime guard passes, and the primary-retirement ring
+contains adjacent CSa7/S_PIPE entries U14562 → successor1457a, spanning
+the independently decoded JP at14565 without a separate primary retirement.
+This is evidence of actual paired fast execution, not merely enabled defines.
+
+All 45 exported capture files are retrieved and independently hash-checked in
+`ventium-pc-combined-board.ohqWiT/exception-log-PCuFhs-export`. The full physical
+RAM hash is `9e17828f718f0ca949b7a860cfb9d3c028db07912cba570496d94c271bec9e93`;
+closed-capture manifest is
+`1e4e30a3a3e5b4e002475e5e68b5979cef49906e1acff135c29c20d6f61ebad8`;
+independent capture audit is
+`7c785f61af33d560f5aa56aebf7e5c51afcd6fc899dce73856ac908873c5d031`.
+
+The physical correction preserves both non-taken fast selection and the
+taken-V raw target, using five new LUTs and no new registers. Stable Boolean
+equivalence and this silicon microtest do not establish full timing sign-off
+or full processor correctness. Cold production Quake, its complete movie,
+and broader acceptance remain pending. Candidate gameplay IPC is unmeasured;
+the older labelled 0.165995778 primary/U-counter baseline above is unchanged.
