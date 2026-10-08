@@ -6,22 +6,20 @@ debug tools as inspected through **2026-08-23**, with the safety preflight
 updated through **2026-10-05 UTC**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
 
-> **Current status (2026-10-08 UTC):** UV+fast-pipe mode is mandatory for repair
-> and acceptance. The current 40 MHz diagnostic image `1c8f20ac` reproduces the
-> original cold Quake bad-PC commit **14562→14563**. Its historical observer
-> captures coherent owner copies, effective lengths3/2 and enabled pairing;
-> the processor is **not repaired** and no full40MHz timedemo is accepted.
-> That image includes the parallel-PC ECO; the ECO did **not** fix the failure.
-> Subsequent shift-flag and DPI U/V-snapshot repairs are not deployed. A private
-> eight-entry translation-cut candidate passes 16 full paging/fault QEMU
-> comparisons and directed real-pair checks, but still lacks standard-suite
-> and whole-core physical qualification. No U-only/slow control is acceptance.
-> See the [translation-cut audit](docs/UV_FAST_TRANSLATION_CUT_2026-10-08.md).
-> See the newest sections of the
-> [localization report](docs/FPGA_CMP_BRANCH_LOCALIZATION_2026-10-05.md).
-> Gameplay IPC for this image is **unmeasured**. Older FPGA image `53f129e9`
-> measured0.165995778 **primary/U-counter** IPC over qualified intervals within
-> cycles8,721,490,845–19,169,282,165; it is not total U+V IPC.
+> **Current status (2026-10-08 20:59 UTC):** UV+fast-pipe remains mandatory.
+> The installed **ABI-5** bank64 image is `fe9f539d`, measured **39.9998 MHz**.
+> Its original cold Quake run reaches the recorded 969-frame result (~3.4 FPS),
+> and a post-demo coherent ring proves real fast U/V pairing. The lossless,
+> raw-color 15 fps movie is available; native daemon/closed-disk acceptance is
+> still open and a fresh shorter-budget cold repeat is live. No U-only/slow
+> fallback, STEP, breakpoint, snapshot or guest-payload patch was used.
+> Current verified gameplay **primary/U IPC is 0.165108945**, across 127
+> intervals within cycles **4,377,412,717–14,863,515,077**. Total U+V IPC is not
+> exposed; this is not a meaningful performance improvement. The generic gate
+> and full standard suite remain unclosed. See the
+> [deployment, movie, mode witness and closure caveats](docs/UV_FAST_BANK64_2026-10-08.md).
+> Historical image `53f129e9` measured 0.165995778 primary/U IPC within cycles
+> 8,721,490,845–19,169,282,165; the intervening `1c8f20ac` ECO failed cold Quake.
 > The older entries below are historical, not the current deployment status.
 
 **New candidate (2026-10-08 20:25 UTC):** the
@@ -31,7 +29,7 @@ routable nets are connected without routing errors. Final utilization is
 186,039 LUTs, 34,763 CLBs (81.49%), 59,380 registers, 221 BRAM tiles and 127 DSPs.
 Routed core setup remains negative: **20.399 MHz worst-path estimate**, not
 measured frequency or guaranteed domain Fmax. There is no 40 MHz timing sign-off
-or new deployment. The bounded read-only routed-checkpoint audit completed
+despite the subsequent diagnostic deployment. The bounded read-only routed-checkpoint audit completed
 with unchanged inputs; no critical CDC findings, two retained vendor CDC
 warnings, and the same setup violations. The
 first bank64 attempt hit its intentional combined-memory guard (not OOM);
@@ -39,12 +37,12 @@ recovery retained identical RTL/defines/clocks within the existing 20/8 GiB
 RAM/swap ceiling and closed successfully without OOM. Implementation preserved
 those inputs and closed in **2:51:36**, without swap or OOM. The candidate
 removes the measured eight-page capacity cliff in bounded tests; no gameplay
-IPC or full-system acceptance is claimed. This does not change the deployed
-image described above.
+performance gain or full-system acceptance is claimed. See the newer runtime
+status above; this paragraph records physical-build qualification only.
 
 **Debug-tool compatibility (2026-10-08):** the combined source candidate in
 [the freeze/retry record](docs/UV_FAST_COMBINED_FREEZE_2026-10-08.md) uses debug
-ABI **5**, not the deployed ECO observer's ABI **9**. Do not carry over its
+ABI **5**, not the historical ECO observer's ABI **9**. Do not carry over its
 owner-scan/filter controller. The base `ven_board_probe.py` refuses unsupported
 execution-debug ABIs before writing. ABI 5 does not read back the STEP pulse;
 absence of a readable STEP bit is not proof of no stepping. Preserve the
@@ -72,10 +70,9 @@ breakpoint and disarms comparator/threshold freeze triggers. It never releases
 reset/execution, clears evidence counters, changes clocks or writes guest RAM.
 Start the matching capture and cold-media daemon, then use a separate `run`
 command to release the debugger; prove real fast pairing independently.
-Do not run `prepare-cold` on the currently deployed ABI-9 image. The command is
-host-tested (**51 probe/capture/UV-guard tests total**) but awaits native board
-qualification on the new source bitstream. No bitstream has been deployed by
-these tool changes.
+Do not run `prepare-cold` on an ABI-9 observer image. The command is host-tested
+(**51 probe/capture/UV-guard tests total**) and now executed on the new ABI-5
+source image. Its successful admission is not CPU or workload acceptance.
 
 The read-only `ven_uv_fast_guard.require_running` now requires an explicit
 ABI-5 capability and **readback**, not a previously written command word.
@@ -96,7 +93,8 @@ reset CR0, no forensic freeze and zero primary retirements. It rejects
 backwards counters and requires the read-time-bounded frequency range to lie
 within **39.5–40.5 MHz**. It never changes a clock/reset/debug register and does
 not qualify U/V execution, gameplay IPC or STA. **61 host tests pass** including
-the seven new clock-admission tests; native qualification awaits the new image.
+the seven new clock-admission tests; the deployed ABI-5 image now passes this
+held-reset admission at measured 39.9998 MHz.
 
 An unlaunched ABI-5 cold-run package is prepared under
 `/home/yukidama/external/tmp/ventium-abi5-cold-package.ffgy8R`.
