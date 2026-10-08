@@ -171,6 +171,13 @@ cd rtl && verilator --lint-only -sv -Wall -Wno-UNUSED -Wno-fatal \
 Verilator builds are slow (minutes). Variant TB builds:
 `make -C verif/tb OBJDIR=obj_dir_<name> VL_EXTRA_DEFINES=+define+VEN_FOO` —
 **never clobber the canonical `obj_dir/tb_ventium`**.
+For an external/private C++ harness, a fresh `OBJDIR` alone is insufficient:
+Verilator's generated makefile can find an old harness `.o` through `VPATH`
+and link it without recompiling against the current generated class layout.
+Use a per-model private source basename, verify the harness object is local
+to that model's object directory, and inspect its `.d` file for the matching
+generated headers. Do not accept a build that silently reuses an external
+model-dependent object. Keep failed builds and their native logs distinct.
 Key `+define+` switches: `VTM_NO_DPI`, `VEN_TRANSCENDENTAL`, `VEN_SRT_ITER`,
 `VEN_IDIV_ITER`, `VEN_BCD_ITER`, `VEN_FP_PIPE`/`VEN_FP_PIPE2`, `VEN_UOPCACHE`,
 `VEN_L1_AXI`, `VEN_SEG_ENFORCE`. `cycle_mode` is a `ventium_top` **port**

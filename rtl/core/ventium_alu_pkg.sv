@@ -182,6 +182,38 @@ package ventium_alu_pkg;
     end
   endfunction
 
+  // Flags for the fast U shifter: SHL/SHR/SAL/SAR, and optional dword ROR.
+  // Commit and a paired V branch MUST consume the same width/rotate policy.
+  // Result, previous result and carry are supplied by the existing shared
+  // shifter; this helper adds no second shifter or execution cycle.
+  function automatic logic [31:0] fast_shift_flags(
+      input logic [2:0] subop, input logic [4:0] cnt,
+      input logic [31:0] result, input logic [31:0] previous,
+      input logic carry, input logic [31:0] cur, input logic [2:0] w);
+    logic [31:0] fl;
+    begin
+      fl = cur;
+      if (cnt != 5'd0) begin
+`ifdef VEN_FAST_ROR_IMM
+        if (subop == 3'd1) begin
+          // ROR preserves SF/ZF/PF/AF; only CF and OF are replaced.
+          fl[0] = carry;
+          fl[11] = sbit(result,w) ^ sbit2(result,w);
+        end else begin
+`endif
+          fl = cur & 32'hFFFF_F72A;
+          fl[0] = carry; fl[2] = parity8(result[7:0]); fl[4] = 1'b0;
+          fl[6] = (wmask(result,w) == 32'd0); fl[7] = sbit(result,w);
+          fl[11] = sbit(previous,w) ^ sbit(result,w);
+`ifdef VEN_FAST_ROR_IMM
+        end
+`endif
+        fl[1] = 1'b1;
+      end
+      return fl;
+    end
+  endfunction
+
   // SHLD/SHRD (16/32-bit only)
   function automatic logic [31:0] shld_result(input logic is_shrd, input logic [31:0] dst,
                                               input logic [31:0] src, input logic [5:0] cnt, input logic [2:0] w);
