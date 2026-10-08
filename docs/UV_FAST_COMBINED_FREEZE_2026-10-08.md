@@ -5,6 +5,14 @@ gameplay IPC is unmeasured. Historical `53f129e9` measured **0.1659957781052303
 primary/U-counter IPC**, not total U+V, in 127 qualified intervals with gaps
 within cycles 8,721,490,845–19,169,282,165. It predates this candidate.
 
+**New performance constraint:** the [working-set probe](../verif/fe_pipe/CAPACITY.md)
+finds 32–33% extra warm-loop cycles above eight data pages versus a no-cut
+UV-fast reference, with full QEMU equivalence and actual U/V pairs preserved.
+Do not promote this frozen eight-entry cut as a performance repair based on
+the earlier three/five-page tests. Synthesis continues unchanged as a physical
+reference; a separately [banked replacement proposal](../verif/fe_pipe/banked/README.md)
+passes leaf/parent checks but is not full-core or physically qualified.
+
 The [payload candidate](UV_FAST_L1_PAYLOAD_2026-10-08.md) is now frozen for
 whole-core hardware analysis without silently reverting its translation module
 or fast-mode definitions. The original parent-shape checks remain mandatory.
