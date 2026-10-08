@@ -24,6 +24,13 @@ not certification of the currently installed image.
 > cycles8,721,490,845–19,169,282,165; it is not total U+V IPC.
 > The older entries below are historical, not the current deployment status.
 
+**New candidate (2026-10-08 13:41 UTC):** the
+[banked RAM-layout U/V-fast build](docs/UV_FAST_BANK64_2026-10-08.md) is now
+synthesizing at **40 MHz**, after fresh full-core and mapped-leaf checks. It
+removes the measured eight-page capacity cliff in bounded tests; no gameplay
+IPC or full-system acceptance is claimed. This does not change the deployed
+image described above.
+
 **Debug-tool compatibility (2026-10-08):** the combined source candidate in
 [the freeze/retry record](docs/UV_FAST_COMBINED_FREEZE_2026-10-08.md) uses debug
 ABI **5**, not the deployed ECO observer's ABI **9**. Do not carry over its
