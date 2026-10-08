@@ -24,6 +24,26 @@ not certification of the currently installed image.
 > cycles8,721,490,845–19,169,282,165; it is not total U+V IPC.
 > The older entries below are historical, not the current deployment status.
 
+**Debug-tool compatibility (2026-10-08):** the combined source candidate in
+[the freeze/retry record](docs/UV_FAST_COMBINED_FREEZE_2026-10-08.md) uses debug
+ABI **5**, not the deployed ECO observer's ABI **9**. Do not carry over its
+owner-scan/filter controller. The base `ven_board_probe.py` refuses unsupported
+execution-debug ABIs before writing. ABI 5 does not read back the STEP pulse;
+absence of a readable STEP bit is not proof of no stepping. Preserve the
+controller commands and verify paired fast-path execution separately.
+
+The probe's `perf` output now says `primary_u_ipc` and
+`cycles_per_u_retirement`, with `total_uv_ipc=unavailable` and
+`gameplay_qualified=false`. Update console parsers that used the ambiguous old
+`ipc`/`cpi` names. JSON retains `counters.retirements` for compatibility and adds
+`retirement_counter_kind=primary_U_not_total_UV`. A backwards 64-bit counter
+sample is rejected as reset/clear, not interpreted as wraparound. This probe
+alone neither qualifies gameplay nor measures total U+V instruction throughput.
+Host-only regression: **49 tests pass** across capability refusal, raw counter
+labels, capture stop/error handling and UV-fast runtime guards. These are tool
+tests, not hardware or CPU acceptance; the live board's old pinned probe has
+not been silently replaced.
+
 > **Latest localization (2026-10-05 UTC):** private memory-OR/JP and
 > reversed-memory-CMP/JP controls each pass64 cases on the unchanged40MHz
 > image. The original CMP/JP ROM is also caught at actual **00a7:14566 before

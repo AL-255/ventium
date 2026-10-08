@@ -59,6 +59,8 @@ R_DBG_TRPC = 0xB0      # PC ring[trace index].EIP
 R_DBG_TRAUX = 0xC0     # PC ring[trace index].{state[5:0], CS[15:0]}
 R_DBG_CYC_LO = 0x100
 R_DBG_CYC_HI = 0x110
+# ven_soc_dbg counts dbg_retire_valid once per clock, not retire2_valid.
+# These are primary/U retirements, NOT the architectural U+V instruction count.
 R_DBG_RET_LO = 0x120
 R_DBG_RET_HI = 0x130
 R_DBG_IO_CYC = 0x140
@@ -77,7 +79,7 @@ R_DBG_ST_OTHER = 0x1D0
 R_DBG_RDDATA_HI = 0x30  # read-only alias; write at this offset is MGMT_WD
 R_DBG_RDADDR = 0xD0
 R_DBG_RDDATA = 0xE0
-R_DBG_STALL = 0xF0       # cycles since clear with no architectural retirement
+R_DBG_STALL = 0xF0       # cycles since clear with no primary/U retirement
 
 # Debug-bitstream snapshot page (absent/zero on the currently deployed image).
 # The capability marker prevents a legacy unused read from being reported as a
@@ -1024,6 +1026,10 @@ def debug_state(ctrl: mmap.mmap) -> dict[str, object]:
         execution: dict[str, object] = {
             "available": True,
             "format": exec_cap & 0xFFFF,
+            "raw": f"{exec_ctrl:08x}",
+            # ABI 5 reads back only HALT_REQ/BP_EN/HALTED (bits 0..2).
+            # STEP is a write pulse, not a readable execution-history bit.
+            "step_command_readback_available": False,
             "halt_requested": bool(exec_ctrl & DBG_EXEC_HALT_REQ),
             "breakpoint_enabled": bool(exec_ctrl & DBG_EXEC_BP_EN),
             "halted": bool(exec_ctrl & DBG_EXEC_HALTED),
@@ -1040,6 +1046,7 @@ def debug_state(ctrl: mmap.mmap) -> dict[str, object]:
         "last_axi_ar_raw": f"{u32(ctrl, R_DBG2):08x}",
         "core_cr0": f"{u32(ctrl, R_DBG_CR0):08x}",
         "counters": {
+            "retirement_counter_kind": "primary_U_not_total_UV",
             "cycles": stable_u64(ctrl, R_DBG_CYC_LO, R_DBG_CYC_HI),
             "retirements": stable_u64(ctrl, R_DBG_RET_LO, R_DBG_RET_HI),
             "io_cycles": u32(ctrl, R_DBG_IO_CYC),
@@ -1481,7 +1488,9 @@ def sample_probe(args: argparse.Namespace) -> int:
 
 
 def perf_probe(args: argparse.Namespace) -> int:
-    """Measure interval deltas from read-only hardware counters."""
+    """Measure raw primary/U counter deltas, not qualified gameplay or U+V IPC."""
+    if not 0 < args.seconds <= 3600:
+        raise ValueError("--seconds must be positive and at most 3600")
     fd, ctrl, _ = open_mmio()
     try:
         cyc0 = stable_u64(ctrl, R_DBG_CYC_LO, R_DBG_CYC_HI)
@@ -1510,8 +1519,12 @@ def perf_probe(args: argparse.Namespace) -> int:
         slot_b1 = u32(ctrl, R_DBG_ST_SLOT_B)
         other1 = u32(ctrl, R_DBG_ST_OTHER)
 
-        dcyc = (cyc1 - cyc0) & 0xFFFF_FFFF_FFFF_FFFF
-        dret = (ret1 - ret0) & 0xFFFF_FFFF_FFFF_FFFF
+        # A 64-bit wrap takes millennia at the supported core frequencies.
+        # Treat a backwards interval as reset/clear, never near-2**64 work.
+        if cyc1 < cyc0 or ret1 < ret0:
+            raise RuntimeError("counter reset/clear during sample; interval is invalid")
+        dcyc = cyc1 - cyc0
+        dret = ret1 - ret0
         dio = (io1 - io0) & 0xFFFF_FFFF
         dstall = (stall1 - stall0) & 0xFFFF_FFFF
         dirq = (irq1 - irq0) & 0xFFFF_FFFF
@@ -1527,13 +1540,15 @@ def perf_probe(args: argparse.Namespace) -> int:
         io_ratio = dio / dcyc if dcyc else 0.0
         stall_ratio = dstall / dcyc if dcyc else 0.0
         print(
-            f"elapsed={elapsed:.6f}s cycles={dcyc} retired={dret} "
-            f"clock={mhz:.6f}MHz ipc={ipc:.6f} cpi={cpi:.3f} "
+            f"elapsed={elapsed:.6f}s cycles={dcyc} primary_u_retired={dret} "
+            f"clock={mhz:.6f}MHz primary_u_ipc={ipc:.6f} cycles_per_u_retirement={cpi:.3f} "
             f"no_retire={dstall} no_retire_ratio={stall_ratio:.6f} "
             f"io_cycles={dio} io_ratio={io_ratio:.6f} irq_ack={dirq}"
         )
+        print("counter_kind=primary_U_not_total_UV total_uv_ipc=unavailable "
+              "gameplay_qualified=false")
         print(
-            f"raw cycles={cyc0}->{cyc1} retired={ret0}->{ret1} "
+            f"raw cycles={cyc0}->{cyc1} primary_u_retired={ret0}->{ret1} "
             f"io={io0:08x}->{io1:08x} irq={irq0:08x}->{irq1:08x}"
         )
         print(
@@ -2516,7 +2531,7 @@ def parse_args() -> argparse.Namespace:
     sample.set_defaults(func=sample_probe)
 
     perf = sub.add_parser(
-        "perf", help="measure read-only cycle, retirement, I/O, and IRQ deltas"
+        "perf", help="read-only raw primary/U counter deltas (not total U+V/gameplay IPC)"
     )
     perf.add_argument("--seconds", type=float, default=5.0)
     perf.add_argument(
