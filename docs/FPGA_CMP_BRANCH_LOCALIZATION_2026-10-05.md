@@ -4531,3 +4531,83 @@ modified in this observer/candidate study. Currentc2ce7e80 still has **no
 qualified gameplay IPC**; the older53f129e9 baseline remains0.165995778
 **primary/U-counter** IPC over qualified intervals within
 cycles8,721,490,845–19,169,282,165, not total U+V IPC.
+
+#### Candidate integrated; UV+fast simulation checks (Oct 8 UTC)
+
+The preceding isolated candidate is now integrated in commit `f710e890` in
+`rtl/core/core_fastpath.svh` (SHA-256
+`11e402fcfb11e1ac8a26e394ba8c6e388d80e3e591faaf8dcb05d5dcfe4b5a29`).
+Only the U-only/no-redirect paired PC arithmetic changes. Flags, admission,
+retirement cadence, branch selection, debug controls and the V not-taken
+redirect expression are unchanged. There is no added slow fallback or
+application-specific condition. This is a structural candidate, **not a
+demonstrated hardware root-cause repair**.
+
+The repository regression `verif/pc_advance/run_gate.py` extracts the actual
+marked production expression and binds its normalized hash to the SMT model.
+It passes all 73,728 vectors and both nonvacuous full-domain/witness miters.
+Instructions and limits are in `verif/pc_advance/README.md`.
+
+Two distinct integration builds were checked; do not conflate their profiles:
+
+1. **Current working-tree default profile**, isolated binary under
+   `ventium-fastpc-core-verify.SKowfW`: `make verify` closes **0**,
+   108/108 functional QEMU comparisons pass and all gating M4/M5 metric bands
+   pass. The 20 non-gating per-instruction cycle comparators remain divergent
+   and are explicitly reported, not silently counted as clean. This default
+   gate is not hardware-profile or UV+fast system acceptance. Its initial
+   source-hash list omitted `fp_shared`; no `fp_shared` edit was made, but the
+   list is not a complete pre-build source manifest.
+2. **Frozen hardware RTL plus only this PC-expression delta**, under
+   `ventium-fastpc-full107.ScwSbb`: all original 179 frozen inputs verify before
+   and after. A private copy contains the changed fragment; original inputs
+   remain untouched. All 107 simulation defines match the 110 hardware defines
+   minus exactly `SYNTHESIS`, `VTM_NO_DPI` and `VEN_ALTSYNCRAM_XPM`. Shared FPU,
+   relocated system fast path and fast memory remain enabled; no new
+   `VEN_SYS_FASTPATH_ALL` or U-only configuration is substituted. This build
+   uses the previously reviewed external reset-edge harness, with assertions
+   enabled and passive reset/initial-RAM receipts. Binary SHA-256:
+   `ba46febbd048bd7dbd578568fbcf5470bcf3fc34e8e7c875468ad488348b16fd`.
+
+The hardware-profile matrix has **32 native/consumer passes**, all
+`cycle_mode=1`, with no debugger STEP, intended-V breakpoint, restored state or
+forced architectural values. It covers ordinary and cache-line-last-word memory
+CMP/JNE fixtures, AXI read/write delays 0/3/7/13, random-initialization seeds
+17/31, and both cycle and paired full-state trace formats. Every cycle-format
+case observes all 16 CMP/JNE pairs retiring in U/V at the same clock, both taken
+and not-taken destinations. Paired full-state cases check produced ZF, operands,
+relocated protected/paged context and terminal success. All 16 corresponding
+cycle/full-state PC streams match. These are directed tests, not a gameplay
+measurement or the standard suite.
+
+The initial matrix is retained as **FAIL**: 12 consumer passes, 20 failures
+after the harness's 400-clock idle threshold stopped delayed-AXI bootstraps
+before all CMP windows. Separately named `r2-quiesce200000` restores the
+established AXI idle threshold; all 32 then pass, with the same binary, ROMs,
+seeds and delays. Native jobs remain individually capped at 90 seconds and
+2 million cycles. No RTL was changed to obtain the rerun pass.
+
+No new FPGA deployment or standard-suite completion is claimed. The deployed
+`c2ce7e80` still reproduces the original cold bad-PC commit and predates this
+RTL candidate. Both have **no qualified gameplay IPC**. The historical
+`53f129e9` baseline remains **0.165995778 primary/U-counter IPC**, not total
+U+V, from 127 qualified intervals with gaps within cycles
+8,721,490,845–19,169,282,165 at 37.499869765 MHz.
+
+The complete post-PC mapped-arithmetic query is now closed. Its first attempt
+stopped at the declared 20,000-cell export bound; no design was modified.
+The separately named R2 query follows every actual CO7-to-CI chain connection
+and exports bounded local cones (42 roots, 989 cells). Native/resource/pin
+checks all close 0, peak memory 3,593,801,728 bytes, no OOM. Export SHA-256:
+`b841ccf09f13e37c4df2134cd2eb138ef6d52d3b1b32bf54f6fb2284ab41b0f8`,
+under `ventium-fastpc-map-query-r2.j4uJMV`.
+
+Eight nonvacuous full-word SMT miters pass: native POST32 and POST16 equal
+owner-PC + U-length + enabled V-length modulo their widths, for both live and
+retained owners and both CS.D modes. The models have **no missing/opaque
+combinational inputs**, only explicit raw decoder/pairing cutpoints and FF
+state. They require coherent physical owner/mode replicas; they do not prove
+electrical stability at the capture edge. All overlapping descriptions in the
+earlier arithmetic export agree. This establishes useful complete-word
+replacement boundaries, not a root cause, hardware timing sign-off or CPU fix.
+No full synthesis, route change, new checkpoint or deployment occurred.

@@ -11,6 +11,9 @@ not certification of the currently installed image.
 > original cold Quake bad-PC commit **14562→14563**. Its historical observer
 > captures coherent owner copies, effective lengths3/2 and enabled pairing;
 > the processor is **not repaired** and no full40MHz timedemo is accepted.
+> A general PC-advance RTL candidate now passes its source-bound arithmetic
+> proof, the default differential gate and 32 hardware-profile UV+fast directed
+> simulations. It is **not yet deployed**; these do not close the FPGA failure.
 > See the newest sections of the
 > [localization report](docs/FPGA_CMP_BRANCH_LOCALIZATION_2026-10-05.md).
 > Gameplay IPC for this image is **unmeasured**. Older FPGA image `53f129e9`
