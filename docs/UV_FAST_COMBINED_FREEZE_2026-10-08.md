@@ -158,3 +158,20 @@ new bitstream identity and check capability **before any debug-control writes**.
 The repository's base `ven_board_probe.py` supports ABI 5; the full cold-run
 controller must use matching base debug operations, not ABI 9 register layouts.
 The primary retirement counter remains **U-only**, not total U+V IPC.
+
+At **11:47 UTC Oct 8**, a further board-only cleanup recovered **192 MiB**:
+twelve explicitly enumerated 16 MiB RAM-dump duplicates from seven closed
+diagnostic runs (seven originals plus five upload/export copies). Each matched
+its retained host copy and closed-capture checksum; native closure records,
+single-link regular-file identity, symlink resolution and process/file-map
+checks were verified before deletion. No directory was recursively removed.
+All host RAM dumps, board diagnostic logs and recovery checksums remain.
+
+Receipts and the exact recovery map are under
+`/home/yukidama/external/tmp/ventium-board-cold-space.rX5LVLbn/`.
+Dry-run and apply both closed with native exit zero; the post-delete host audit
+rechecks all recovery copies. Board tmpfs free space increased **87 → 279 MiB**,
+clearing the old cold-launcher's 100 MB admission floor. Root remains **75 MiB**
+free. Installed `1c8f20ac`, base VHD, daemon, ROMs and both deployed probes are
+hash-unchanged. No MMIO, clock, guest execution or FPGA-programming action was
+performed; this is storage readiness, not a new Quake result.
