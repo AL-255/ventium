@@ -11,8 +11,8 @@ UV-fast reference, with full QEMU equivalence and actual U/V pairs preserved.
 Do not promote this frozen eight-entry cut as a performance repair based on
 the earlier three/five-page tests. The unchanged synthesis is a physical
 reference; a separately [banked replacement proposal](../verif/fe_pipe/banked/README.md)
-passes leaf/parent and bounded full-core checks but is not physically or
-standard-suite qualified.
+passes leaf/parent, bounded full-core and isolated mapped-netlist checks, but
+has not passed whole-chip implementation or the standard suite.
 
 The [payload candidate](UV_FAST_L1_PAYLOAD_2026-10-08.md) is now frozen for
 whole-core hardware analysis without silently reverting its translation module
@@ -175,6 +175,41 @@ matched no-cut control subsequently completed their bounded microtest matrix;
 the banked proposal matches the no-cut capacity timings while preserving
 actual U/V pairs (details in its README). Both remain U/V + system-fast;
 neither uses a U-only/slow escape. These builds did not overlap synthesis.
+
+### Read-only project timing/structure audit
+
+At **13:18:32 UTC Oct 8**, `ventium-uvfast-project-audit.13j4Y1R1` closes with
+native exit zero, unchanged project/input/checkpoint pins, 110.836 seconds and
+3,827,453,952-byte peak RAM. It opens the original project **read-only** and
+the completed, nonstale synthesis run; no synthesis, placement, routing or
+checkpoint write is performed.
+
+An earlier bare-DCP audit (`ventium-uvfast-synth-audit.k8QCFwO9`) stopped at its
+clock-presence check: this synthesized checkpoint does not contain the project
+XDC constraints. Its failure is retained. Opening the actual project/run loads
+the existing constraints, not new or relaxed exceptions.
+
+- CPU `mmcm_clk` is **40 MHz / 25 ns**; PL clock is 100 MHz / 10 ns.
+- All **four A + four B RAMB36E2 instruction-data banks** are present.
+- No combinational loops or unconstrained internal endpoints are reported.
+  The eight no-clock pins belong to PS external peripheral clock interfaces.
+- Worst reported **unplaced** core path is EIP register to shared-FPU SRT
+  accumulator clock enable: 174 logic levels, **47.847 ns** data path,
+  **−23.144 ns** setup slack. Its period/slack-derived path-local estimate is
+  **20.771 MHz**, **not routed CPU Fmax or a measured hardware limit**.
+  Estimated routing accounts for 79.25% of this unplaced path delay.
+- A path through the translation child remains 172 levels / 47.312 ns;
+  cutting the translation lookup does not by itself break the entire control
+  chain. The reported chain traverses decode, fault/fragment and memory-ACK
+  control into FPU operand/control logic. Rebuilt hierarchy names alone do not
+  establish RTL ownership or prove this entire path is dynamically sensitized.
+
+This identifies further structure to investigate, not proof of the board's
+functional failure. No false-path/multicycle waiver, downclock, slow-mode or
+U-only substitution was applied. 40 MHz remains the requested deployment
+clock; routed timing, the generic gate and the full acceptance suite remain
+open. The banked RAM-layout derivative has its own source/model/leaf results;
+these eight-entry whole-system reports must not be relabelled as its results.
 
 ## Board preparation: preserve image identity and debug ABI
 

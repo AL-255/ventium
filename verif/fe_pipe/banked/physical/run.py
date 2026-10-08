@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import signal
 import subprocess
@@ -20,6 +21,7 @@ HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[3]
 SCRATCH = Path('/home/yukidama/external/tmp')
 VENDOR = Path('/tools/Xilinx/2025.2/Vivado/data/verilog/src')
+VENDOR_BIN = Path('/tools/Xilinx/2025.2/Vivado/bin')
 SCOPE = 'ventium-vivado.scope'
 GIB = 1024**3
 
@@ -53,6 +55,7 @@ def prepare():
         'control8.sv':HERE.parents[1]/'permission/ven_fe_dtlb.sv',
         'tb_fe_banked.sv':HERE.parent/'tb_fe_banked.sv',
         'tb_fe_banked_netlist.sv':HERE/'tb_fe_banked_netlist.sv',
+        'postsim_progress.sv':HERE/'postsim_progress.sv',
         'inspect.tcl':HERE/'inspect.tcl',
     }
     pins={str(path):digest(path) for path in sources.values()}
@@ -61,10 +64,11 @@ def prepare():
         shutil.copyfile(source,target)
         assert digest(target)==pins[str(source)]
         pins[str(target)]=digest(target)
-    for path in (Path(__file__),REPO/'fpga/run_vivado_exclusive.sh',REPO/'tools/build_scope.sh',VENDOR/'glbl.v'):
+    for path in (Path(__file__),REPO/'fpga/run_vivado_exclusive.sh',REPO/'tools/build_scope.sh',
+                 VENDOR/'glbl.v',VENDOR_BIN/'xelab',VENDOR_BIN/'xsim'):
         pins[str(path)]=digest(path)
-    # Library lookup is done by iverilog, not by guessing which RAM primitives
-    # Vivado will select. Pin every candidate library source before synthesis.
+    # Icarus performs dependency discovery only; Xilinx runs the scoreboard.
+    # Pin every candidate primitive source before synthesis, not guessed stubs.
     for path in sorted((VENDOR/'unisims').glob('*.v')):
         pins[str(path)]=digest(path)
     assert check_pins(pins)
@@ -125,10 +129,10 @@ def run(root):
     assert 'COMPLETE PROFILES 2 CPU_ACCEPTANCE 0' in receipt
     # Use the vendor functional primitive models, not handwritten RAM stubs.
     post=root/'postsim';post.mkdir()
-    def native(argv,stem,limit):
+    def native(argv,stem,limit,cwd=post):
         save(root,stem+'-command.json',list(map(str,argv)))
         with (root/(stem+'.log')).open('x') as log:
-            child=subprocess.Popen(argv,cwd=post,env=env,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
+            child=subprocess.Popen(argv,cwd=cwd,env=env,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
             try: status=child.wait(timeout=limit)
             except subprocess.TimeoutExpired:
                 os.killpg(child.pid,signal.SIGTERM)
@@ -149,8 +153,27 @@ def run(root):
             # A separate bounded heavy scope for compile+run; never concurrent
             # with the Vivado family. Timeout reaps descendants on failure.
             native([REPO/'tools/build_scope.sh','--',*compile_command],stage+'-compile',60)
-            native([REPO/'tools/build_scope.sh','--','vvp',post/f'{stage}.vvp'],stage+'-scoreboard',180)
-            assert 'FE-BANKED-LEAF-OK checks=1300925' in (root/(stage+'-scoreboard.log')).read_text()
+            # A stationary time-zero LUT input under Icarus can remain X;
+            # initialized replay also exceeded ten minutes. Keep its parser
+            # for exact primitive discovery, but run the unchanged assertions
+            # in the vendor simulator (about a minute for the first netlist).
+            libraries=sorted({Path(line.strip()) for line in (post/f'{stage}.deps').read_text().splitlines()
+                              if Path(line.strip()).parent==VENDOR/'unisims'})
+            assert libraries and all(str(path) in pins for path in libraries)
+            directory=post/stage;directory.mkdir()
+            elaborate=[VENDOR_BIN/'xelab','--mt','2','--snapshot','banked_'+stage,
+                '--log','elaborate.log','--svlog',root/'inputs/tb_fe_banked.sv',
+                '--svlog',root/'inputs/tb_fe_banked_netlist.sv',
+                '--svlog',root/'inputs/postsim_progress.sv','--vlog',net,'--vlog',VENDOR/'glbl.v']
+            for library in libraries:elaborate+=['--vlog',library]
+            elaborate+=['tb_fe_banked_netlist','glbl','postsim_progress']
+            native([REPO/'tools/build_scope.sh','--',*elaborate],stage+'-elaborate',180,cwd=directory)
+            native([REPO/'tools/build_scope.sh','--',VENDOR_BIN/'xsim','banked_'+stage,
+                '--runall','--onerror','quit','--onfinish','quit','--stats','--log','simulate.log',
+                '--clear_child_on_exit'],stage+'-scoreboard',600,cwd=directory)
+            simulation=(directory/'simulate.log').read_text()
+            assert 'FE-BANKED-LEAF-OK checks=1300925' in simulation
+            assert not re.search(r'(?im)^\s*(fatal|error)(:|\s*\[)',simulation)
         result['passed']=True
     finally:
         result['pins_unchanged']=check_pins(pins)

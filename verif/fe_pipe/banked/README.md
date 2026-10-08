@@ -225,4 +225,67 @@ The initialized post-synth replay passed the first-capture point but hit its
 passive progress counters and a **600-second cap per scoreboard**. It pins
 the two intentional testbench changes, all other original inputs and both
 netlist hashes. The full 1,300,925-check assertion corpus remains required;
-completion is still pending. No new synthesis or bitstream was launched.
+completion was still pending at that checkpoint. No new synthesis or bitstream
+was launched for those replays.
+
+## Vendor-simulator closure and RAM-layout revision
+
+The initialized Icarus replay subsequently hit its **600-second** limit; its
+failed receipt is retained. The unchanged first banked synthesized and routed
+netlists both pass all **1,300,925 checks** in Xilinx's simulator, using the
+same explicitly compiled vendor primitive sources and the same scoreboard.
+Evidence: `ventium-fe-xsim.rz2KXoke`, closed **13:09:51 UTC Oct 8**; stable pins,
+native exit zero for both. No RAM stubs, forced internal state or ignored
+assertions. The physical driver now uses Icarus only to discover exact primitive
+dependencies, then `xelab`/`xsim` for the assertion corpus, with bounded resources.
+
+The current source is a distinct **RAM-layout-only revision**:
+`7e9e75ac8db521440f45b14b84050004b25a960607867556aa391eff7248a51a`.
+Each constant-way generate block owns one-dimensional tag and payload arrays,
+with unconditional reads before the hit mask. Capacity, lookup, update,
+replacement, invalidation and live-permission behavior are unchanged. No extra
+pipeline stage or issue-mode change was introduced. Simulation-only aliases
+retain the duplicate-owner invariant without exposing storage to synthesis.
+
+Fresh leaf/parent checks and both expected-negative controls close in
+`ventium-fe-banked-leaf.9EQ7Ic`: **1,300,925** leaf checks, **60,166** parent
+checks and **273,304** live policy checks. The fresh physical flow also closes
+in `ventium-fe-banked-physical.dptsx7dy`: native synthesis/routing and both
+full mapped scoreboards pass; all input/netlist pins are stable. Peak Vivado
+cgroup RAM **3,516,538,880 bytes**, no resource stop.
+
+| Routed leaf | LUTs | Registers | LUTs used as memory | Query-to-physical delay |
+| --- | ---: | ---: | ---: | ---: |
+| Eight-entry control | 258 | 371 | 0 | 2.190 ns |
+| First banked layout | 782 | 1,696 | 64 | 2.758 ns |
+| Current banked RAM layout | 370 | 96 | 128 | 2.079 ns |
+
+The payload now maps to actual `RAM32M16` cells; tags use `RAM32X1D`. The 96
+remaining registers hold validity/replacement state. Relative to the first
+banked layout this removes **52.7% of LUTs and 94.3% of registers** and reduces
+the standalone physical-query delay by **24.6%**. These are isolated-leaf
+measurements, **not CPU frequency, whole-chip area or gameplay speedup**.
+
+### Fresh full-core matrix: closed 13:34:26 UTC
+
+`ventium-fe-banked-ram-core.Je0HDXrx` freezes 165 files, with only the child
+source changed from the original tested payload. Both models were rebuilt
+with **32 jobs**, sequentially after Vivado closure, in the guarded 16 GiB
+scope. Exact ordered definitions (including the Makefile's leading FPREM)
+and six negative-definition controls per profile pass.
+
+- Banked binary: `1f8b118f3d6cf25c1eecf2720943ae5ec4d9b0db8408c811c188d3301b2f19e6`.
+- No-cut binary: `3d1b27b9f6b48bb5224f276a28830022c159f7a34b96a6f5073a31ba740a27ad`.
+- Both profiles pass all **14 capacity/AXI-latency cases in both trace modes**,
+  full QEMU architectural comparisons, natural OUT exit 133, and actual
+  same-clock U-load/V-INC pairing. Warm cycles remain **13/22/25/28/49/98/194**
+  for 4/7/8/9/16/32/64 pages: exact agreement with the matched no-cut control.
+  Evidence: `ventium-fe-capacity.efvxdouz` and `.yd86ltmz`.
+- **4** permission/stack cases pass (`ventium-fe-permission-core.xj1a0dnh`),
+  plus **48** paired retirement cases (`ventium-uv-retire-pairs.hzbu2xvf`)
+  and **32** shift/branch cases (`ventium-uv-shift-branch.wqsqviga`).
+
+All native steps close with exit zero and unchanged pins. The separate generic
+terminal-observation gate, standard suite, whole-chip implementation and cold
+FPGA timedemo remain open. **No current gameplay IPC measurement**; the labelled
+historical U-counter baseline above is unchanged and predates this revision.

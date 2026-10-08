@@ -22,11 +22,14 @@ module ven_fe_dtlb #(
   localparam int TAG_W = 20-SET_W;
   logic [WAYS-1:0] valid [SETS];
   logic [WAY_W-1:0] victim [SETS];
-  // Only payload writes are enabled on capture: no bulk data reset. Separate
-  // constant-way banks expose independent query/capture addresses to LUTRAM.
-  // The attribute is an inference request, not proof of physical mapping.
-  (* ram_style = "distributed" *) logic [TAG_W-1:0] tags [WAYS][SETS];
-  (* ram_style = "distributed" *) logic [24:0] payload [WAYS][SETS];
+  // Each generate bank owns a one-dimensional RAM. Read it unconditionally
+  // before applying the hit mask: a conditional read of the old 2-D payload
+  // array was flattened into 1,600 flip-flops despite its ram_style hint.
+  logic [TAG_W-1:0] query_tag [WAYS], capture_tag [WAYS];
+  logic [24:0] query_payload [WAYS];
+`ifndef SYNTHESIS
+  wire [TAG_W-1:0] debug_tags [WAYS][SETS];
+`endif
   logic [SET_W-1:0] query_set, capture_set;
   logic [WAY_W-1:0] write_way;
   logic capture_match;
@@ -45,9 +48,9 @@ module ven_fe_dtlb #(
     query_phys = '0;
     query_perm = '0;
     for (int w=0; w<WAYS; w++) begin
-      if (valid[query_set][w] && tags[w][query_set] == query_page[19:SET_W]) begin
+      if (valid[query_set][w] && query_tag[w] == query_page[19:SET_W]) begin
         query_valid = 1'b1;
-        {query_hit,query_dirty,query_phys,query_perm} |= payload[w][query_set];
+        {query_hit,query_dirty,query_phys,query_perm} |= query_payload[w];
       end
     end
   end
@@ -57,19 +60,29 @@ module ven_fe_dtlb #(
       if (!valid[capture_set][w]) write_way = WAY_W'(w);
     capture_match = 1'b0;
     for (int w=0; w<WAYS; w++) begin
-      if (valid[capture_set][w] && tags[w][capture_set] == capture_page[19:SET_W]) begin
+      if (valid[capture_set][w] && capture_tag[w] == capture_page[19:SET_W]) begin
         capture_match = 1'b1;
         write_way = WAY_W'(w);
       end
     end
   end
   for (genvar w=0; w<WAYS; w++) begin : g_bank
+    (* ram_style = "distributed" *) logic [TAG_W-1:0] tags [SETS];
+    (* ram_style = "distributed" *) logic [24:0] payload [SETS];
+    assign query_tag[w] = tags[query_set];
+    assign capture_tag[w] = tags[capture_set];
+    assign query_payload[w] = payload[query_set];
     always_ff @(posedge clk) begin
       if (rst_n && !invalidate && capture && write_way == WAY_W'(w)) begin
-        tags[w][capture_set] <= capture_page[19:SET_W];
-        payload[w][capture_set] <= {capture_hit,capture_dirty,capture_phys,capture_perm};
+        tags[capture_set] <= capture_page[19:SET_W];
+        payload[capture_set] <= {capture_hit,capture_dirty,capture_phys,capture_perm};
       end
     end
+`ifndef SYNTHESIS
+    for (genvar s=0; s<SETS; s++) begin : g_debug_tag
+      assign debug_tags[w][s] = tags[s];
+    end
+`endif
   end
   always_ff @(posedge clk) begin
     if (!rst_n || invalidate) begin
@@ -88,7 +101,7 @@ module ven_fe_dtlb #(
       for (int s=0; s<SETS; s++)
         for (int a=0; a<WAYS; a++)
           for (int b=a+1; b<WAYS; b++)
-            assert (!(valid[s][a] && valid[s][b] && tags[a][s] == tags[b][s]))
+            assert (!(valid[s][a] && valid[s][b] && debug_tags[a][s] == debug_tags[b][s]))
               else $fatal(1, "duplicate banked translation owner");
     end
   end
