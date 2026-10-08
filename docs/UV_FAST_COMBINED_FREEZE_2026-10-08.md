@@ -1,6 +1,6 @@
 # Combined UV-fast FPGA source bundle — Oct 8, 2026
 
-**Synthesis running, not deployed; not a completed Quake repair.** Candidate
+**Synthesis retry running, not deployed; not a completed Quake repair.** Candidate
 gameplay IPC is unmeasured. Historical `53f129e9` measured **0.1659957781052303
 primary/U-counter IPC**, not total U+V, in 127 qualified intervals with gaps
 within cycles 8,721,490,845–19,169,282,165. It predates this candidate.
@@ -73,10 +73,10 @@ enumerated closed-build GCC PCH caches were removed, and 32 closed diagnostic
 owner logs were gzip-compressed losslessly. Each compressed log expands to its
 original SHA-256; per-file receipts are beside `cleanup-closed.json`. Sources,
 binaries, object/dependency receipts and original failed results remain. The
-logs are recoverable from `.jsonl.gz`; PCH files are rebuildable. External free
-space is approximately 3.2 GiB, so larger runs still need a disk guard.
+logs are recoverable from `.jsonl.gz`; PCH files are rebuildable. This left only
+approximately 3.2 GiB free, which proved insufficient for synthesis scratch.
 
-## Whole-system synthesis launched
+## First whole-system synthesis: resource stop, not an RTL result
 
 At approximately **2026-10-08 09:24 UTC (05:24 EDT)**, the native launcher began synthesis
 only from this frozen bundle (`run_synthesis.py`, `synthesis-command.json`,
@@ -89,6 +89,64 @@ owned scope invocation: `1c6e4eacb6de4cbfbca80859f1186f01`.
 The previous comparable native synthesis took **2h 25m** and reported about
 20 GB aggregate process memory; a ten-minute rerun would not be a realistic
 completion plan. That is historical sizing evidence, not a candidate ETA or
-guarantee. This run must close natively, retain input hashes, and have completed,
-nonstale synthesis checked before any area/timing result is accepted. Placement,
-routing, bitstream generation and board deployment have **not** been launched.
+guarantee.
+
+The disk guard stopped this run after **889.092 seconds (14m49s)**, at the
+start of timing optimization. Native exit **143**, wrapper exit **1**; input
+hashes unchanged. Sampled free space fell to **985,300,992 bytes**, below the
+1,100 MiB reserve. Peak cgroup memory **16,375,279,616 bytes**, swap **0**, all
+OOM counters **0**. This was a disk-reserve stop, **not an OOM or demonstrated
+RTL failure**. The process family was fully reaped; no completed DCP or
+area/timing acceptance is claimed. `synthesis-closed.json` retains that result.
+
+## Space recovery and separately named retry
+
+`/home/yukidama/external/tmp/ventium-synth-space-recovery.yH9EtR/closed.json`
+records **12,234,158,607 bytes (11.39 GiB)** reclaimed:
+
+- Removed only the stopped run's enumerated `synth_1/.Xil` generated cache
+  (1,062 files, 2,376,877,859 bytes). These files are rebuildable. Project,
+  native logs, resource samples and frozen sources remain hash-identical.
+- Losslessly gzip-compressed **180** closed owner traces, physical-route text
+  records and historical PC logs/snapshots. Each archive was decompressed and
+  SHA-256 checked before removing its original; individual receipts retain
+  both hashes and sizes. These evidence files are recoverable from `.gz`.
+- No source, VHD, movie, accepted executable or checkpoint content was discarded.
+  The first cleanup preflight rejected unfamiliar Vivado suffixes before any
+  deletion; the exact generated-file types were inspected before proceeding.
+
+Fresh retry directory:
+`/home/yukidama/external/tmp/ventium-uvfast-combined40-r2.SICmG1`.
+Launched **2026-10-08 09:50:55 UTC**, scope invocation
+`32d0aec64c6949d88779db0f89a7cead`. It references the **identical** 180-payload
+manifest above; no RTL/define changes, no reuse of partial synthesis outputs.
+Starting disk floor is now **12 GiB**, stop reserve **2 GiB**; one exclusive
+Vivado family, 19 GiB memory / 8 GiB swap caps and four-hour envelope remain.
+Its command, environment overrides, UTC timestamps, resource samples and input
+pins are recorded independently. A live process is not a completed result.
+
+This retry must close natively, retain input hashes, and have completed,
+nonstale synthesis checked before any area/timing result is accepted.
+Placement, routing, bitstream generation and board deployment have **not**
+been launched for this source candidate.
+
+## Board preparation: preserve image identity and debug ABI
+
+Board cleanup receipts are under
+`/home/yukidama/external/tmp/ventium-board-space-oct08.qMuMxb`.
+Six enumerated duplicates were removed after matching host/board hashes and
+checking no live process held them: three superseded firmware files, a copied
+closed capture archive, its RAM dump and its private run VHD. All are recoverable
+from retained host copies (RAM/VHD also verified within the archive). Board root
+free space increased from **16 to 75 MiB**, tmpfs from **42 to 87 MiB**.
+The deployed `1c8f20ac` image hash was unchanged; no clock, MMIO, guest execution
+or FPGA programming was performed during cleanup.
+
+The frozen `ven_mgmt_axil.v` advertises **DBG_EXEC_CAP=0x56450005 (ABI 5)**.
+The deployed DCP-only observer ECO advertises ABI 9. Reusing the old
+`prepare_full.py` / owner-scan watch scripts would incorrectly assume that the
+new source bitstream contains those ECO-only observers. Do not do so: pin the
+new bitstream identity and check capability **before any debug-control writes**.
+The repository's base `ven_board_probe.py` supports ABI 5; the full cold-run
+controller must use matching base debug operations, not ABI 9 register layouts.
+The primary retirement counter remains **U-only**, not total U+V IPC.
