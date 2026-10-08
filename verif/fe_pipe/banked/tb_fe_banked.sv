@@ -1,4 +1,5 @@
-module tb_fe_banked;
+`timescale 1ns/1ps
+module tb_fe_banked #(parameter int SETTLE = 1, parameter int START_DELAY = 0);
   logic clk=0, rst_n=0, invalidate=0, capture=0;
   logic [19:0] query_page=0, capture_page=0, capture_phys=0;
   logic capture_hit=0, capture_dirty=0;
@@ -40,7 +41,7 @@ module tb_fe_banked;
   task automatic tick();
     int s, slot;
     bit present;
-    clk=0; #1; check_query(); clk=1; #1;
+    clk=0; #(SETTLE); check_query(); clk=1; #(SETTLE);
     if (!rst_n || invalidate) begin
       for (int k=0; k<16; k++) begin
         victim[k]=0;
@@ -63,9 +64,13 @@ module tb_fe_banked;
       captures++;
       if (query_page[3:0] != capture_page[3:0]) cross_set++;
     end
-    check_query(); clk=0; #1;
+    check_query(); clk=0; #(SETTLE);
   endtask
   initial begin
+    // The mapped Xilinx functional model starts with a global set/reset pulse.
+    // A netlist wrapper waits for it before applying the same explicit reset
+    // and scoreboard sequence; the ordinary RTL test has no startup delay.
+    #(START_DELAY);
     tick(); rst_n=1;
     // The ordinary parent's complete 64-page working set must remain resident.
     for (int n=0; n<64; n++) begin
@@ -77,7 +82,7 @@ module tb_fe_banked;
     capture=0;
     for (int round=0; round<10; round++)
       for (int n=0; n<64; n++) begin
-        query_page=page_for(n); #1;
+        query_page=page_for(n); #(SETTLE);
         assert (query_valid) else $fatal(1,"64-page capacity retention failed page=%05x",query_page);
         check_query();
       end
@@ -89,7 +94,7 @@ module tb_fe_banked;
     end
     // A fifth same-set tag evicts only that set; other sets keep their owners.
     capture_page=page_for(64); query_page=capture_page; tick(); capture=0;
-    for (int n=1; n<16; n++) begin query_page=page_for(n); #1; check_query(); end
+    for (int n=1; n<16; n++) begin query_page=page_for(n); #(SETTLE); check_query(); end
     // Full-tag alias: same low page bits, distinct most significant tag.
     capture=1; capture_page=page_for(1)^20'h80000; query_page=capture_page; tick();
     invalidate=1; tick(); invalidate=0; tick(); rst_n=0; tick(); rst_n=1; tick();
@@ -99,7 +104,7 @@ module tb_fe_banked;
       capture_hit=1'(rnd()); capture_dirty=1'(rnd());
       capture=(rnd()%4!=0); invalidate=(rnd()%997==0); rst_n=(rnd()%1999!=0);
       tick();
-      for (int k=0; k<128; k++) begin query_page=page_for(k); #1; check_query(); end
+      for (int k=0; k<128; k++) begin query_page=page_for(k); #(SETTLE); check_query(); end
     end
     assert (checks>1200000 && updates>1000 && evictions>1000 && captures>7000 &&
             reset_collisions>0 && invalidate_collisions>0 && cross_set>5000)
