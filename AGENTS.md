@@ -178,6 +178,12 @@ Use a per-model private source basename, verify the harness object is local
 to that model's object directory, and inspect its `.d` file for the matching
 generated headers. Do not accept a build that silently reuses an external
 model-dependent object. Keep failed builds and their native logs distinct.
+When deriving a new model from frozen FPGA inputs, audit the entire source
+closure against the intended revision and explicitly list deliberate deltas.
+Matching define counts or preserving the parent's hashes does not incorporate
+later committed fixes. In particular, old Oct 3 snapshots omit L1 response-owner
+repair `0f12b208`; restore it before applying newer cache experiments. Never
+describe a frozen derivative as the current checkout without that source audit.
 Key `+define+` switches: `VTM_NO_DPI`, `VEN_TRANSCENDENTAL`, `VEN_SRT_ITER`,
 `VEN_IDIV_ITER`, `VEN_BCD_ITER`, `VEN_FP_PIPE`/`VEN_FP_PIPE2`, `VEN_UOPCACHE`,
 `VEN_L1_AXI`, `VEN_SEG_ENFORCE`. `cycle_mode` is a `ventium_top` **port**

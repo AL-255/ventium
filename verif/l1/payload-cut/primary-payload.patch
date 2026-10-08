@@ -1,0 +1,53 @@
+--- a/rtl/mem/ven_l1d.sv
++++ b/rtl/mem/ven_l1d.sv
+@@ -1407,10 +1407,14 @@
+     // Select critical data only for its exact owner, just as ACK does below;
+     // an armed but unmatched fill must not override the registered hit data.
+     c_rdata = (st==L1_BYP) ? bp_line_x[{4'd0,fbase[1:0],3'b000} +: 32]   // saved request offset
+-                           : shadow_reuse ? shadow_line_q[{1'b0,c_addr[4:0],3'b000} +: 32]
+-                           : window_reuse ? rd_window_q[{1'b0,c_addr[4:0],3'b000} +: 32]
+                            : early_match ? early_rdata_q
+-                                         : rd_window_q[{1'b0,rd_addr_q[4:0],3'b000} +: 32];
++                           : shadow_reuse ? shadow_line_q[{1'b0,c_addr[4:0],3'b000} +: 32]
++                                         : rd_window_q[{1'b0,c_addr[4:0],3'b000} +: 32];
++    // Use one primary-window byte selector, independent of window_reuse's
++    // tag/permission/ACK qualification. On an owned rd_match response the
++    // live and saved offsets are identical. Reuse already uses the live offset;
++    // reuse and early_match cannot coexist because reuse requires !early_armed.
++    // The separately owned hit-stream response below still uses its saved offset.
+     c_ack   = 1'b0;
+     if (c_req) begin
+       if (c_we) begin
+@@ -1444,6 +1448,31 @@
+ `endif
+   end
+-
++
++`ifndef SYNTHESIS
++`ifndef VEN_L1D_COMB_ACK
++  // The payload simplification must be equivalent on EVERY consumed read.
++  // Idle/unacknowledged data is not an interface response. Stream and bypass
++  // ownership stay explicit; ACK and all sequential logic are unchanged.
++  logic [31:0] payload_before_cut;
++  always_comb begin
++    payload_before_cut = (st == L1_BYP) ? bp_line_x[{4'd0,fbase[1:0],3'b000} +: 32]
++                       : shadow_reuse ? shadow_line_q[{1'b0,c_addr[4:0],3'b000} +: 32]
++                       : window_reuse ? rd_window_q[{1'b0,c_addr[4:0],3'b000} +: 32]
++                       : early_match ? early_rdata_q
++                       : rd_window_q[{1'b0,rd_addr_q[4:0],3'b000} +: 32];
++`ifdef VEN_L1D_HIT_STREAM
++    if (stream_path)
++      payload_before_cut = rd_window_q[{1'b0,rd_addr_q[4:0],3'b000} +: 32];
++`endif
++  end
++  always_ff @(posedge clk) begin
++    if (rst_n && c_req && !c_we && c_ack)
++      assert (c_rdata === payload_before_cut)
++        else $fatal(1, "L1 primary payload cut changed an acknowledged read");
++  end
++`endif
++`endif
++
+   // golden / "L1-useless" mode: a core transaction completes (acks) this clock. We
+   // drop all cached state on the NEXT edge so nothing carries into the following
+   // access. c_ack is the completion edge for both reads (rd_match) and writes (m_ack).
