@@ -4611,3 +4611,28 @@ electrical stability at the capture edge. All overlapping descriptions in the
 earlier arithmetic export agree. This establishes useful complete-word
 replacement boundaries, not a root cause, hardware timing sign-off or CPU fix.
 No full synthesis, route change, new checkpoint or deployment occurred.
+
+#### Prepared localized hardware-test plan (not yet implemented)
+
+`ventium-fastpc-eco-plan.aFM8Dc/plan.json` describes a general post-PC
+replacement at those proven boundaries, SHA-256
+`334505ad40e72656f1b97ce459182c73ef9a47c3e83657218b018af11f002f4e`.
+It reuses the native U-only sum, computes the paired sum in parallel and
+selects after addition. All 48 original POST32/POST16 output sinks are
+explicitly enumerated. No flags, admission, branch-redirect, clock, reset,
+retirement or FF changes are proposed. There is no guest-PC match predicate.
+
+Eight native-old-versus-proposed complete-word SMT miters pass, with the same
+explicit coherent-owner/mode conditions and no opaque combinational inputs.
+The exact planned LUT INITs, input order and four `SINGLE_CY8` carry chains also
+pass 73,728 vectors using the installed Vivado 2025.2 Unisim primitives, including
+both owners, all three pairing-term combinations and word-wrap cases.
+
+This bounded ECO proposes **71 LUTs, four CARRY8s, zero FFs**, deliberately
+retaining the old now-redundant post-PC cells to avoid disturbing other routes.
+Those temporary test-image counts are **not** the production RTL leaf's area
+savings. Nine candidate sites are specified, but their availability must be
+checked against the current checkpoint before mutation; an ancestral vacancy
+catalogue alone is insufficient. Placement, routing, physical-preservation
+checks, timing checks, bitstream generation and hardware replay are all pending.
+The verified tests here do not establish that this change repairs Quake.
