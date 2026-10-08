@@ -1,6 +1,6 @@
 # Combined UV-fast FPGA source bundle — Oct 8, 2026
 
-**Synthesis retry running, not deployed; not a completed Quake repair.** Candidate
+**Synthesis retry completed, not deployed; not a completed Quake repair.** Candidate
 gameplay IPC is unmeasured. Historical `53f129e9` measured **0.1659957781052303
 primary/U-counter IPC**, not total U+V, in 127 qualified intervals with gaps
 within cycles 8,721,490,845–19,169,282,165. It predates this candidate.
@@ -9,9 +9,10 @@ within cycles 8,721,490,845–19,169,282,165. It predates this candidate.
 finds 32–33% extra warm-loop cycles above eight data pages versus a no-cut
 UV-fast reference, with full QEMU equivalence and actual U/V pairs preserved.
 Do not promote this frozen eight-entry cut as a performance repair based on
-the earlier three/five-page tests. Synthesis continues unchanged as a physical
+the earlier three/five-page tests. The unchanged synthesis is a physical
 reference; a separately [banked replacement proposal](../verif/fe_pipe/banked/README.md)
-passes leaf/parent checks but is not full-core or physically qualified.
+passes leaf/parent and bounded full-core checks but is not physically or
+standard-suite qualified.
 
 The [payload candidate](UV_FAST_L1_PAYLOAD_2026-10-08.md) is now frozen for
 whole-core hardware analysis without silently reverting its translation module
@@ -137,6 +138,43 @@ This retry must close natively, retain input hashes, and have completed,
 nonstale synthesis checked before any area/timing result is accepted.
 Placement, routing, bitstream generation and board deployment have **not**
 been launched for this source candidate.
+
+### Retry closure: synthesis only
+
+At **12:37:52 UTC Oct 8**, the retry closed with native exit **0**, all pinned
+inputs unchanged and no resource stop, after **10,016.192 seconds (2h46m56s)**.
+The original scope is inactive; no replacement Vivado family was launched.
+Peak sampled cgroup RAM was **20,401,020,928 bytes (19.00 GiB)**, swap
+**4,593,926,144 bytes (4.28 GiB)**. All recorded OOM/OOM-kill counters remained
+zero. This completed run used bounded swap; it was not a no-swap run.
+
+Native evidence in `ventium-uvfast-combined40-r2.SICmG1`:
+
+- `synthesis-closed.json` records native closure, exact scope owner and stable
+  inputs. The wrapper emitted `## SYNTH OK` only after its native **100%**
+  progress check. The synthesis end/completion markers exist; no error marker.
+- Fresh `synth_1/rk_ao486_bd_wrapper.dcp`: **179,044,548 bytes**, SHA-256
+  `d1ff6002a16726f151f158f7bb7f4cd693640f7e4f436698f0c64cacbb010b71`.
+  The complete ZIP CRC check passes. The project records synthesis as current.
+- `rk_ao486_bd_wrapper_utilization_synth.rpt`: **187,236 LUTs (54.86%)**,
+  **59,311 registers (8.69%)**, **221 BRAM tiles (29.70%)**, **127 DSPs (3.60%)**;
+  zero inferred latches. These are synthesized counts, not post-route results.
+- Native `synth_design` completed with zero errors/critical warnings; ordinary
+  warnings remain. Preliminary mapping notices show all four A and four B
+  instruction-line BRAMs; final cell/connectivity inspection is still required.
+
+The flow did not produce CPU STA/Fmax, placement or routing. **40 MHz is the
+requested clock, not a demonstrated achievable frequency.** Read-only DCP
+timing/structure inspection remains pending. The eight-entry capacity penalty,
+generic UV-fast gate boundary failures, standard suite and cold FPGA timedemo
+are still open; synthesis success does not qualify any of them.
+
+After closure and fresh resource/input admission, the already-queued banked
+translation model began its **32-job** native compilation. Both it and the
+matched no-cut control subsequently completed their bounded microtest matrix;
+the banked proposal matches the no-cut capacity timings while preserving
+actual U/V pairs (details in its README). Both remain U/V + system-fast;
+neither uses a U-only/slow escape. These builds did not overlap synthesis.
 
 ## Board preparation: preserve image identity and debug ABI
 
