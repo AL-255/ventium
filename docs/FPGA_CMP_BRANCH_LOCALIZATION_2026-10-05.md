@@ -1,16 +1,17 @@
 # FPGA memory-CMP/conditional-branch localization — 2026-10-05 UTC
 
 The requested **40MHz** production Quake timedemo remains **unpassed**.
-The October7 `6659e0c5` UV/fast cold run reaches rendering, then returns to DOS
-without a timedemo result. The original CMP/JP64 microtest passes, but the
-full workload still fails; see the final entries for the new fault evidence.
-A complete15fps recording of a separate37.5MHz cold timedemo is now retrieved
-and verified, documented below. These are private cold diagnostics, not patched production Quake,
-save-state repairs, or acceptance substitutes. The original control runs did
-not change the installed FPGA image, clock, RTL, production BIOS or disk.
-On October6 the preserved debug-only observer image was deployed, as recorded
-below; it does not implement a processor fix. Production BIOS/disk and RTL
-remain unchanged by this investigation.
+Latest deployed image **`1c8f20ac`** includes the general parallel-PC arithmetic
+ECO and passive debug observers. Its original cold UV+fast run still records
+the invalid CMP transition `14562 ->14563`, returns to DOS, and produces no
+timedemo result. The separate shift/rotate flag-forwarding repair `5a56eec6`
+is tested in simulation but **not deployed**. Neither change has earned full
+standard-suite or 40 MHz Quake acceptance. See the final entries for current
+evidence; earlier image names below are historical.
+A complete 15 fps recording of a separate 37.5 MHz cold timedemo was previously
+retrieved and verified, documented below. It is not 40 MHz qualification.
+No patched production Quake, save-state repair, U-only run or slow-pipeline
+control substitutes for the requested original workload in UV+fast mode.
 
 Current verified active-timedemo IPC: **0.165995778 primary/U-counter IPC**
 (not total U+V IPC and not evidence of U-only execution), retirement-observer image
@@ -18,12 +19,10 @@ Current verified active-timedemo IPC: **0.165995778 primary/U-counter IPC**
 **8,721,490,845–19,169,282,165**, demo frames37–898. This is the closed R4
 aggregate with gaps between qualified groups, not an every-cycle full-demo
 score or40MHz qualification. The earlier closed R3 aggregate is below.
-The latest deployed observer image `ef01263f` (unchanged `6659e0c5` CPU logic)
-has **no gameplay measurement**;
-the above hardware baseline predates it. Original CMP/JP64 now passes all
-64 cases at measured 39.999836260 MHz, without breakpoints or stepping, with
-an independently audited fast-paired retirement witness. This is a microtest
-pass, not full-workload acceptance; the production timedemo remains pending.
+The latest deployed image `1c8f20ac`, repaired RTL and simulation-only
+translation experiment have **no qualified gameplay measurement**;
+the above hardware baseline predates them. Passing directed CMP/JP, CMP/JNE
+and SUB/JNE checks (documented per image below) is not full-workload acceptance.
 UV dual issue and fast
 pipeline are now mandatory acceptance requirements, including dynamic test
 evidence; a slow/U-only passing control does not qualify a repair. Earlier
@@ -5038,3 +5037,65 @@ Current repaired RTL, FE experiment and deployed `1c8f20ac` have **no qualified
 gameplay IPC**. Historical `53f129e9` remains **0.165995778 primary/U-counter
 IPC**, not total U+V, over the 127 qualified intervals with gaps within cycles
 8,721,490,845–19,169,282,165; it predates all these candidates.
+
+#### Non-shift ZF path and rejected comparator proposal (October 8)
+
+Two additional bounded, read-only mapped queries close native/input/resource
+checks successfully: `ventium-cmp-zf-paths.sC07Lw` and
+`ventium-alu-zf-paths.sWsueG`. No checkpoint/image is changed. Native LUT/pin
+exports identify `rt_use_i_15` as **the effective wflags selector**, not an ALU
+zero result. Its +3.893 ns slack must not be represented as CMP-data timing.
+`rt_use_i_9` selects old ZF versus the non-shift input `rt_use_i_16`, under
+wflags, or the shift input `rt_use_i_18`, under effective is_shift.
+The exact LUT INIT is `32'hFFE400E4`; its input mapping is in the export.
+
+Constraining the path to pass through the non-shift input, without case
+analysis or false-path declarations, still reports EIP[2]→EIP[2]/D at
+**-19.872 ns** slack against 25 ns (44.798 ns data delay, 103 logic levels;
+path-only estimate **22.29 MHz**). Allowing any source gives CS-base[3] at
+-20.039 ns (44.938 ns, 102 levels; **22.20 MHz** path-only). Thus the long
+reported path is not solely an artifact of traversing the shifter. This is
+still a generic ALU/ZF route, not dynamically proven CMP sensitization or
+proof of the hardware failure's cause.
+
+A private proposal in `ventium-cmp-zf-proposal.Slpc95` replaces U CMP/SUB ZF
+with equality of the already width-masked operands. It changes neither result
+nor other flags, adds no cycle, and has no instruction-address special case.
+The all-input bit-vector identity is UNSAT for a mismatch; a deliberately
+unmasked comparison has a SAT counterexample. The actual original/proposed SV
+U datapaths pass **917,504** equality checks across all 32 ALU encodings, byte
+operand exhaustion, word/dword samples, immediate/register sources and varied
+incoming flags. Of those, **548,864** CMP/SUB cases also pass an independent
+flags oracle. This is leaf evidence only; no full-core candidate is built or
+production RTL changed for this proposal.
+
+Isolated native OOC synthesis `ventium-cmp-zf-synth-r2.nSvxZF` closes 0 with
+unchanged input hashes. Its registered generic U-operands→registered-ZF leaf
+retains every ALU operation in both variants:
+
+| Isolated leaf | Existing | Direct CMP/SUB equality |
+| --- | ---: | ---: |
+| LUTs | 299 | 350 |
+| CARRY8 | 8 | 10 |
+| FFs | 106 | 106 |
+| Generic worst data delay (estimated) | 3.331 ns | 3.312 ns |
+| Operation-stable CMP32 data delay (estimated) | 2.640 ns | 1.807 ns |
+| Operation-stable CMP32 levels | 13 | 7 |
+
+The CMP estimate explicitly fixes the operation/width/source-selection
+registers (eight case-analysis bits). **Neither leaf is placed or routed.**
+The native warning that `HD.CLK_SRC` is unset means clock delay/skew estimation
+is unavailable; none of these leaf figures is whole-core Fmax or a 40 MHz
+acceptance claim. The first synthesis invocation failed before synthesis on
+Vivado's `read_verilog -define` compile-unit restriction; its failed logs are
+retained. R2 sets the fileset's `verilog_define` property instead. Remaining
+warnings concern unused packed input fields and the stated OOC clock source.
+
+**Decision:** leave this proposal unmerged. A 0.833 ns conditional estimated
+improvement costs 51 LUTs/two carry blocks in this small leaf, barely changes
+generic delay, and does not establish a repair for the original hardware
+failure. No full bitstream build is justified by this result alone. The two
+closed leaf-test PCH files (156.30 MiB) were removed; binary, sources and logs
+remain. The board retains UV+fast at 40 MHz; the proposed bounded 20 MHz
+clock-only diagnostic remains pending the user's answer, not silently run or
+counted as a fix. Gameplay IPC status and historical baseline above are unchanged.
