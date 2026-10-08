@@ -18,7 +18,8 @@ Current verified active-timedemo IPC: **0.165995778 primary/U-counter IPC**
 **8,721,490,845–19,169,282,165**, demo frames37–898. This is the closed R4
 aggregate with gaps between qualified groups, not an every-cycle full-demo
 score or40MHz qualification. The earlier closed R3 aggregate is below.
-The latest deployed physical candidate `6659e0c5` has **no gameplay measurement**;
+The latest deployed observer image `ef01263f` (unchanged `6659e0c5` CPU logic)
+has **no gameplay measurement**;
 the above hardware baseline predates it. Original CMP/JP64 now passes all
 64 cases at measured 39.999836260 MHz, without breakpoints or stepping, with
 an independently audited fast-paired retirement witness. This is a microtest
@@ -4207,3 +4208,147 @@ record-enable filter (freeze disabled), preserve all CPU routes/function,
 and validate observer reset/readout behavior. This is a proposed debugging
 direction, not an implemented processor fix. Do not replace the original
 failing workload with another passing short fixture or serialize its pipeline.
+
+#### Passive retirement filter: closed logic and physical checks (Oct 7)
+
+The recorder can now retain selected primary retirements without execution BP,
+STEP, slow-mode override or comparator freeze. This is **debug instrumentation,
+not a processor repair**. CPU6659's logic and UV+fast profile remain the baseline.
+
+Native inspection initially found that the original comparator's last-PC RTL
+registers were synthesized away (their shim outputs are open). Its16 counter
+FFs do remain. Their shared CE is proven, over148 mapped signals and85 FF
+cutpoints, equivalent to the complete enabled/unfrozen CS/low16-PC retirement
+match. Both the conditional and unconditional mismatch queries are UNSAT after
+a nonvacuous SAT check. The second export omitted constant-cell types and its
+consumer failed; the third exports native VCC/GND types explicitly and passes.
+Nothing is inferred from a constant's name. Closed query root
+`ventium-retire-filter-query-r3.1X9GDe`, native data SHA
+`0e7afebc7e588b0c4befa5fc4fa702f6b456cf52c88897a2f339504efb9c8926`.
+
+The ECO reconnects only `ven_retire_scan_retire_enable_buffer/I0` to that
+existing CE and changes the observer metadata from`00cf0096` to`00df0096`.
+No new LUT/FF, CPU function, clock, reset, site, BEL or pin-map changes.
+Native audit checks298196 primitives,236980 FF input polarities,329 hierarchies,
+561400 literal non-target route aliases and all pre-existing CPU sink paths.
+Only nine nodes/pips on the old observer-only branch are trimmed; the150-record
+FF CE output route is unchanged. All225637 routable nets are fully routed;
+zero route errors, DRC errors or critical warnings. The queried record0 CE
+setup path has15.687ns margin at40MHz (path-only check, **not core Fmax sign-off**).
+
+The first ECO stops cleanly at its7GiB early memory limit (native143/watcher3,
+pins0), without OOM or a usable checkpoint. A separate10GiB-capped retry closes
+native0/watcher0/pins0, peak8,657,080,320bytes and no OOM/max events. Root
+`ventium-retire-filter-eco-r2.hIwsVL`; checkpoint SHA
+`189dcefe72d2b27a43122389f9f1ca1f5ae08037b655cf1afcc811c74d44b817`;
+closed-route manifest
+`8149d6f930edbdf76cdd3b8ce4acac6a1a08d813a41684341bbcb81a41624955`.
+
+Offline checks:2048 metadata truth cases; vendor primitives8192 clock cases
+(522 matching captures,7605 holds,65 resets);12 reader tests including150
+record and338 live-packet onehots;19 UV+fast profile and7 runtime-guard tests.
+The new reader explicitly separates **historical filtered retirement** from
+the **live retained packet/current halted architecture**. It does not label
+raw live decode fields as the effective retained packet. Old image metadata,
+inconsistent scans and out-of-filter PCs are rejected. Filter CS is not sampled;
+configuration CS+EIP-care/no-freeze receipts are required because the write CSRs
+have different read meanings and cannot provide configuration readback.
+Program the range under held cold reset: its bit31 also toggles PS coherence.
+
+Hardware calibration and original cold-workload replay follow separately; none
+of the above is timedemo acceptance. Current6659 has no qualified gameplay IPC.
+Older53f129e9's0.165995778 primary/U-counter baseline, over qualified intervals
+within cycles8,721,490,845–19,169,282,165, predates this work and is **not total
+U+V IPC**. One obsolete board firmware copy (`ventium_fpga40_debugscan.bit.bin`,
+20MiB) was removed only after matching host-backup SHA3be5b6e4…54ff14d; it
+remains recoverable from `ventium-debugscan-bitgen.0Neit8/native-output/`.
+
+#### Filtered image: successful hardware calibration, not a CPU fix
+
+Bitgen closes0 with zero physical errors and unchanged inputs; image SHA
+`ef01263f5e8cca781ec1dbdf279a31022457491fb828212092393e1f8970a57f`,
+20,606,636bytes. Root`ventium-retire-filter-bitgen.CaBl0i`, closed manifest
+`c40478bf919422d828b2fba56eb136b96d4e8dda3242a13906013e429b5545b4`.
+Peak5,018,591,232bytes, no OOM/max event; Vivado is closed before deployment.
+
+On hardware, the unmodified cold-layout16-case SUB fixture passes with this
+image at39.999858572MHz. Programmed under held reset:CSa7, low16PC9680 exactly,
+cfg`000700a7`, range`96809680`; comparator freeze/STEP/BP remain disabled.
+The new record clears under reset, then retains **59680→59685** after the
+guest continues through its normal final HLT atf029d (halted EIPf029e).
+Record state28, ACTIVE0, live lengths3/2, JNEcc5, both observed PF bits1,
+known EIP-D59685 and primary/state-mux bit2=1. These fields are a healthy
+calibration, not the missing cold-failure observation. A separate adjacent
+primary ring witness confirms the paired fast path at59680→59685.
+All16 result counters match, no exception record, native/controller exits0.
+
+Host root`ventium-retire-filter-board.W8CYgp`; `audit_calibration.py` verifies
+the44-file manifest and archive
+`c777e55bc0f3c3c5facc79ea914c72c0c7b93d752bfe87107e689c56c1e2f47e`.
+Only duplicate board RAM/private seed/archive files are removed after recovery;
+the complete capture and unchanged seed remain recoverable. An initial manual
+host check expected the last OUT PCf029c; independent byte decoding confirms
+the subsequent HLTf029d retires too. The persistent checker requires that F4
+byte and next-PCf029e; no captured data is altered to satisfy it.
+
+Cold production replay follows with the same image/profile, original BIOS/VHD,
+no guest code edits and no stop before the existing native post-#PF watch.
+Currentef01263f has **no qualified gameplay IPC** or timedemo acceptance; the
+older53f129e9 primary-counter baseline and its qualifications above still apply.
+
+#### Passive cold replay captures the actual bad CMP retirement (Oct 7)
+
+Two original cold BIOS/VHD replays run on `ef01263f` with UV+fast enabled,
+`cycle_mode=1`, no STEP/execution breakpoint and no comparator freeze. Only
+the passive record filter changes between runs. The native watcher halts
+**after** a fresh guest #PF; this is fault localization, not a performance run.
+The first run filters SUB59680 and retains its healthy59680→59685 record;
+the failure instead follows the previously seen CMP14562 path. The second
+run filters CMP14562 and finally retains the **faulty14562→14563 commit**.
+
+| Cold run | Measured MHz | Retained primary→next PC | Archive SHA-256 |
+| --- | ---: | --- | --- |
+| SUB filter | 39.999861044 | `59680→59685` (healthy) | `bfba868f5ba310d05d188e082aaa21a4dde52664f7d6d1319de1913aaa180591` |
+| CMP filter | 39.999857204 | `14562→14563` (**invalid**) | `745fa06e07fd2d27322511c6000bd79389d6e40875dacdfe8ef2b1e021c648c5` |
+
+Both native/controller exits are0. Each41-file capture manifest verifies under
+host root`ventium-retire-filter-board.W8CYgp`; `audit_cold.py` independently
+binds the image, reset/config receipts, closed native invocation, ring, RAM,
+original executable bytes and page translation. Its result is explicitly
+`PASS_BOUND_COLD_CMP_FAILURE_CAPTURE_NOT_CPU_ACCEPTANCE`.
+
+In the bad record, primaryPC14562 and architectural nextPC14563 are valid;
+previous state is28 (`S_PIPE`), sampled ACTIVE0, raw live lengths3/2, JNEcc5,
+EIP-CE1 and both observed PF bits1. **ZF and actual `do_v` are not recorded.**
+The low three sampled primary-PC mux bits[2,3,4] are0,0,0; state-mux bits are
+0,1,1. Mapped selector0, state gates14=1/31=0 and FP override0 are observed.
+The pre-EIP-D known value is14542 with maskffffffdf (bit5 is unavailable).
+Its known bit0 differs from the subsequently sampled architectural nextPC.
+Therefore these intermediate taps are **not proof of a settled, coherent
+combinational word**. They do not establish a bad effective length, flags
+fault, replicated-owner disagreement, or physical timing as the root cause.
+The live retained-packet bank belongs to laterPC14575, not this historical CMP.
+
+RAM page translation (`CR3=7e000`, linear10014562→physical113562) preserves
+the exact original bytes `39 7a 10 75 13`: CMP length3 followed by JNE length2.
+Legal continuations are14565 for U-only,14567 for paired not-taken, or1457a
+for paired taken. **14563 is none of them.** The ring independently records
+14562→14563→14575→14576→14579→0018:108, followed by the #PF handler.
+Execution at the CMP's interior byte decodes JP14575, bypasses the ordinary
+epilogue, and reaches the wrong RET; the native frame is
+`[4,108,a7,3206,e0810,af]`, CR2=10000108. Post-fault HALT acknowledgement is
+19,360ns in the CMP run; no pre-fault stop was used.
+
+The changed private VHDs are preserved in their complete archives, not silently
+replaced by the seed. CMP-run RAM SHA
+`02573e90d57024aafd05a2b95c93c7691037af8ac309910a00f2c7a758c2df58`;
+VHD SHA`c5d2dc4e0c09ac15ab0679611b9973f01001ecf930282b560b71443bfd64d9d9`.
+The next investigation is effective next-PC arithmetic/selection and packet
+ownership. Existing `u_tgt_raw`/`v_tgt_raw` are already combinationally
+precomputed in RTL; merely renaming them is not a new optimization or fix.
+Earlier mapped mux/cofactor proofs did not prove the carry-chain arithmetic.
+
+No processor repair, standard-suite pass, or full40MHz timedemo completion is
+claimed. Currentef01263f still has no qualified gameplay IPC; the older
+53f129e9 **0.165995778 primary/U-counter IPC** baseline over qualified intervals
+spanning cycles8,721,490,845–19,169,282,165 predates it and is not total U+V IPC.
