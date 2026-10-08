@@ -32,6 +32,8 @@ BASE = {
     'wait_success': False,
     'wait_status': 'write_bitstream Complete!',
     'ignore_opt_setter': False,
+    'impl_clocks': None,
+    'impl_periods': None,
 }
 RECEIPTS = []
 
@@ -91,7 +93,14 @@ proc wait_on_run {name} {
         dict set ::status impl_1 $::wait_status
     }
 }
-proc open_run {name} { record open_run $name }
+proc open_run {name} {
+    record open_run $name
+    if {$name eq "impl_1"} {
+        if {$::impl_clocks ne "inherit"} { set ::clocks $::impl_clocks }
+        if {$::impl_periods ne "inherit"} { set ::periods $::impl_periods }
+    }
+}
+proc close_design {} { record close_design }
 proc report_utilization {args} { record report_utilization {*}$args }
 proc report_timing_summary {args} { record report_timing_summary {*}$args }
 proc get_clocks {args} {
@@ -122,6 +131,10 @@ def run(name, data, expected_ok, core_mhz=None, no_launch=False):
         'set ::wait_status ' + quote(data['wait_status']),
         'set ::ignore_opt_setter ' + ('1' if data['ignore_opt_setter'] else '0'),
         'set ::actual_opt_directive Default',
+        'set ::impl_clocks ' + (tdict(data['impl_clocks'], True)
+                                if data['impl_clocks'] is not None else 'inherit'),
+        'set ::impl_periods ' + (tdict(data['impl_periods'])
+                                 if data['impl_periods'] is not None else 'inherit'),
     ))
     source = assignments + '\n' + STUBS + '\n' + (
         'if {[catch {source ' + quote(TARGET) + '} error_text]} {'
@@ -142,8 +155,13 @@ def run(name, data, expected_ok, core_mhz=None, no_launch=False):
         assert result.stdout.index('## WNS ') < result.stdout.index(marker)
         assert result.stdout.index('## WHS ') < result.stdout.index(marker)
         assert result.stdout.count('STUB-CALL launch_runs ') == 1
+        assert result.stdout.count('STUB-CALL close_design') == 1
+        assert (result.stdout.index('STUB-CALL open_run synth_1') <
+                result.stdout.index('STUB-CALL close_design') <
+                result.stdout.index('STUB-CALL launch_runs ') <
+                result.stdout.index('STUB-CALL open_run impl_1'))
         assert 'STUB-CALL close_project' in result.stdout
-        assert f'## Frequency (core): {core_mhz:.6f} MHz' in result.stdout
+        assert result.stdout.count(f'## Frequency (core): {core_mhz:.6f} MHz') == 2
         expected_settings = int(data['opt_directive'] == 'RuntimeOptimized')
         assert result.stdout.count('STUB-CALL set_property ') == expected_settings
     else:
@@ -186,28 +204,28 @@ def main():
     check('finite-negative-slack-not-a-timing-pass', d, True, 40)
     for clock in ('clk_pl_0', 'mmcm_clk'):
         d = copy.deepcopy(BASE); del d['clocks'][clock]
-        check('missing-' + clock, d)
+        check('missing-' + clock, d, no_launch=True)
         d = copy.deepcopy(BASE); d['clocks'][clock].append('duplicate')
-        check('ambiguous-' + clock, d)
+        check('ambiguous-' + clock, d, no_launch=True)
         for value in ('', 'bad', '0', '-1', 'NaN', 'Inf', '-Inf'):
             d = copy.deepcopy(BASE)
             d['periods']['pl' if clock == 'clk_pl_0' else 'core'] = value
-            check('invalid-period-' + clock + '-' + (value or 'empty'), d)
+            check('invalid-period-' + clock + '-' + (value or 'empty'), d, no_launch=True)
     for target, period in [('40', '22.222222222'), ('40', '320'),
                             ('45', '25'), ('50', '25'), ('45', '22.224')]:
         d = copy.deepcopy(BASE); d['target'] = target; d['periods']['core'] = period
-        check('wrong-target-' + target + '-period-' + period, d)
+        check('wrong-target-' + target + '-period-' + period, d, no_launch=True)
     for value in ('', '0', '-1', '39', '40.0', 'bad', 'NaN', 'Inf', ' 40', '40 '):
         d = copy.deepcopy(BASE); d['target'] = value
         check('invalid-target-' + (value or 'empty'), d, no_launch=True)
     d = copy.deepcopy(BASE); d['target'] = '40'
     d['clocks'] = {'clk_pl_0': ['pl'], 'wr_clk_i': ['core']}
     d['periods']['core'] = '320'
-    check('legacy-explicit-target-mismatch', d)
+    check('legacy-explicit-target-mismatch', d, no_launch=True)
     for names in (['mmcm_clk', 'wr_clk_i'], ['u_clkdiv_clk_out', 'wr_clk_i']):
         d = copy.deepcopy(BASE)
         d['clocks'] = {'clk_pl_0': ['pl'], **{n: ['core'] for n in names}}
-        check('multiple-core-names-' + '-'.join(names), d)
+        check('multiple-core-names-' + '-'.join(names), d, no_launch=True)
     for analysis in ('setup', 'hold'):
         for paths in ([], ['one', 'two']):
             d = copy.deepcopy(BASE); d[analysis] = paths
@@ -217,7 +235,11 @@ def main():
             check('invalid-slack-' + analysis + '-' + (value or 'empty'), d)
     for stage in ('synth_1', 'impl_1'):
         d = copy.deepcopy(BASE); d['progress'][stage] = '99%'
-        check('incomplete-' + stage, d)
+        check('incomplete-' + stage, d, no_launch=stage == 'synth_1')
+    for property_name, value in (('refresh', 'true'), ('refresh', 'unknown'),
+                                 ('status', 'synth_design ERROR')):
+        d = copy.deepcopy(BASE); d[property_name]['synth_1'] = value
+        check('default-invalid-synth-' + property_name + '-' + value, d, no_launch=True)
     d = copy.deepcopy(BASE); d['opt_directive'] = 'Default'
     check('explicit-default-no-setting-change', d, True, 40)
     runtime = copy.deepcopy(BASE)
@@ -246,7 +268,17 @@ def main():
     d = copy.deepcopy(runtime); d['wait_status'] = 'route_design Complete!'
     check('runtime-progress-without-bitstream-completion', d)
     d = copy.deepcopy(runtime); d['periods']['pl'] = '12.5'
-    check('runtime-wrong-ps-axi-period', d)
+    check('runtime-wrong-ps-axi-period', d, no_launch=True)
+    for clock in ('clk_pl_0', 'mmcm_clk'):
+        d = copy.deepcopy(runtime); d['target'] = '40'
+        d['impl_clocks'] = copy.deepcopy(d['clocks']); del d['impl_clocks'][clock]
+        check('clock-lost-after-implementation-' + clock, d)
+        assert 'STUB-CALL launch_runs ' in RECEIPTS[-1]['stdout']
+        d = copy.deepcopy(runtime); d['target'] = '40'
+        d['impl_periods'] = copy.deepcopy(d['periods'])
+        d['impl_periods']['pl' if clock == 'clk_pl_0' else 'core'] = '320'
+        check('clock-drift-after-implementation-' + clock, d)
+        assert 'STUB-CALL launch_runs ' in RECEIPTS[-1]['stdout']
     assert hashlib.sha256(TARGET.read_bytes()).hexdigest() == source_sha
     summary = {'marker': 'IMPL-RESUME-TCL-STUB-OK', 'cases': count,
                'source_sha256': source_sha,

@@ -29,19 +29,57 @@ if {[info exists ::env(VEN_FPGA_CORE_MHZ)]} {
     set expected_core_period [expr {1000.0 / $::env(VEN_FPGA_CORE_MHZ)}]
 }
 
+# Report the constrained clocks before slack.  Slack proves closure only at the
+# constraint; it is not a frequency measurement. Support the current MMCM
+# clock name as well as the legacy divider checkpoint's name.
+proc report_clock_frequency {clock_name role {expected_period ""}} {
+    set clock [get_clocks -quiet $clock_name]
+    if {[llength $clock] != 1} {
+        error "expected exactly one $role clock named '$clock_name', found [llength $clock]"
+    }
+    set period_ns [get_property PERIOD $clock]
+    if {![string is double -strict $period_ns] || !($period_ns > 0.0 && $period_ns < Inf)} {
+        error "clock '$clock_name' has invalid PERIOD '$period_ns'"
+    }
+    # Vivado may expose PERIOD quantized to 1 ps (e.g. 22.222 ns at 45 MHz).
+    # The tiny arithmetic guard keeps the inclusive 1 ps boundary stable.
+    if {$expected_period ne "" && abs($period_ns - $expected_period) > 0.001 + 1.0e-12} {
+        error "clock '$clock_name' has PERIOD '$period_ns'; expected $expected_period ns"
+    }
+    puts [format "## Frequency (%s): %.6f MHz (%.6f ns constrained period)" \
+        $role [expr {1000.0 / $period_ns}] $period_ns]
+}
+
+proc report_build_clocks {expected_core_period expected_pl_period} {
+    report_clock_frequency clk_pl_0 "PL / HP0" $expected_pl_period
+    set core_clocks {}
+    foreach candidate {mmcm_clk u_clkdiv_clk_out wr_clk_i} {
+        set matches [get_clocks -quiet $candidate]
+        if {[llength $matches] > 1} {
+            error "ambiguous core clock '$candidate' ([llength $matches] matches)"
+        }
+        if {[llength $matches] == 1} { lappend core_clocks $candidate }
+    }
+    if {[llength $core_clocks] != 1} {
+        error "expected exactly one core clock, found [llength $core_clocks] ($core_clocks)"
+    }
+    report_clock_frequency [lindex $core_clocks 0] "core" $expected_core_period
+}
+
 set project [file normalize [lindex $argv 0]]
 open_project $project
 set_param general.maxThreads 1
-if {[get_property PROGRESS [get_runs synth_1]] ne "100%"} {
+set synth [get_runs synth_1]
+if {[get_property PROGRESS $synth] ne "100%"} {
     error "synth_1 is not complete"
 }
+if {[get_property STATUS $synth] ne "synth_design Complete!" ||
+    [string tolower [get_property NEEDS_REFRESH $synth]] ni {0 false}} {
+    error "synth_1 is stale or lacks native completion"
+}
 
+set expected_pl_period ""
 if {$opt_directive eq "RuntimeOptimized"} {
-    set synth [get_runs synth_1]
-    if {[get_property STATUS $synth] ne "synth_design Complete!" ||
-        [string tolower [get_property NEEDS_REFRESH $synth]] ni {0 false}} {
-        error "synth_1 is stale or lacks native completion"
-    }
     set impl [get_runs impl_1]
     if {[get_property PROGRESS $impl] ne "0%" ||
         [get_property STATUS $impl] ne "Not started"} {
@@ -50,6 +88,18 @@ if {$opt_directive eq "RuntimeOptimized"} {
     if {[string first "RuntimeOptimized - Runs Default without bram_power_opt" [help opt_design]] < 0} {
         error "installed opt_design help does not document RuntimeOptimized"
     }
+    set expected_pl_period 10.0
+}
+
+# Fail before any implementation setting/write or launch if this completed
+# project's clocks do not match the requested image. Opening through the
+# project loads its XDCs; a bare synthesis DCP may not contain those clocks.
+open_run synth_1
+puts "## Clock admission: completed synthesis"
+report_build_clocks $expected_core_period $expected_pl_period
+close_design
+
+if {$opt_directive eq "RuntimeOptimized"} {
     set_property STEPS.OPT_DESIGN.ARGS.DIRECTIVE RuntimeOptimized $impl
     if {[get_property STEPS.OPT_DESIGN.ARGS.DIRECTIVE $impl] ne "RuntimeOptimized"} {
         error "opt_design directive did not retain RuntimeOptimized"
@@ -69,47 +119,11 @@ if {$opt_directive eq "RuntimeOptimized" &&
 }
 
 open_run impl_1
+puts "## Clock admission: completed implementation"
+report_build_clocks $expected_core_period $expected_pl_period
 set impl_dir [get_property DIRECTORY [get_runs impl_1]]
 report_utilization -file [file join $impl_dir post_impl_utilization.rpt]
 report_timing_summary -file [file join $impl_dir post_impl_timing_summary.rpt]
-
-# Report the constrained clocks before slack.  Slack proves closure only at the
-# constraint; it is not a frequency measurement. Support the current MMCM
-# MMCM clock name as well as the legacy divider checkpoint's name.
-proc report_clock_frequency {clock_name role {expected_period ""}} {
-    set clock [get_clocks -quiet $clock_name]
-    if {[llength $clock] != 1} {
-        error "expected exactly one $role clock named '$clock_name', found [llength $clock]"
-    }
-    set period_ns [get_property PERIOD $clock]
-    if {![string is double -strict $period_ns] || !($period_ns > 0.0 && $period_ns < Inf)} {
-        error "clock '$clock_name' has invalid PERIOD '$period_ns'"
-    }
-    # Vivado may expose PERIOD quantized to 1 ps (e.g. 22.222 ns at 45 MHz).
-    # The tiny arithmetic guard keeps the inclusive 1 ps boundary stable.
-    if {$expected_period ne "" && abs($period_ns - $expected_period) > 0.001 + 1.0e-12} {
-        error "clock '$clock_name' has PERIOD '$period_ns'; expected $expected_period ns"
-    }
-    puts [format "## Frequency (%s): %.6f MHz (%.6f ns constrained period)" \
-        $role [expr {1000.0 / $period_ns}] $period_ns]
-}
-
-set expected_pl_period ""
-if {$opt_directive eq "RuntimeOptimized"} { set expected_pl_period 10.0 }
-report_clock_frequency clk_pl_0 "PL / HP0" $expected_pl_period
-set core_clocks {}
-foreach candidate {mmcm_clk u_clkdiv_clk_out wr_clk_i} {
-    set matches [get_clocks -quiet $candidate]
-    if {[llength $matches] > 1} {
-        error "ambiguous implemented core clock '$candidate' ([llength $matches] matches)"
-    }
-    if {[llength $matches] == 1} { lappend core_clocks $candidate }
-}
-if {[llength $core_clocks] != 1} {
-    error "expected exactly one implemented core clock, found [llength $core_clocks] ($core_clocks)"
-}
-set core_clock [lindex $core_clocks 0]
-report_clock_frequency $core_clock "core" $expected_core_period
 
 foreach analysis {setup hold} {
     set paths [get_timing_paths -max_paths 1 -nworst 1 -$analysis]

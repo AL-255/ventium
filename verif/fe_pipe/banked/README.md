@@ -1,6 +1,9 @@
 # Banked translation-cut proposal
 
-**Experimental, outside production and the running frozen synthesis.**
+**Experimental; the latest RAM-layout revision is in the frozen 40 MHz
+synthesis, not deployed or accepted.** See the
+[current build and acceptance status](../../../docs/UV_FAST_BANK64_2026-10-08.md).
+Earlier sections below retain the original proposal's chronology and failures.
 The [capacity probe](../CAPACITY.md) exposes a 32–33% warm-loop cycle penalty
 above eight hot data pages despite genuine U/V fast execution. This proposal
 addresses that specific structural limit; it is not a Quake repair claim.
