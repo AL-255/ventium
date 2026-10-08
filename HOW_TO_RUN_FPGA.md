@@ -77,6 +77,27 @@ value and a coherent capture, never an assumed universal state number.
 **54 host tests pass** after these guard changes; no board execution or processor
 acceptance is implied.
 
+The source-image clock admission is now available as
+`fpga/board-tools/ven_cold_clock.py`, alongside the matching `ven_board_probe.py`.
+Run it as root **after programming and before daemon initialization**. It reads
+the counter for five seconds while repeatedly requiring ABI 5, held reset,
+reset CR0, no forensic freeze and zero primary retirements. It rejects
+backwards counters and requires the read-time-bounded frequency range to lie
+within **39.5–40.5 MHz**. It never changes a clock/reset/debug register and does
+not qualify U/V execution, gameplay IPC or STA. **61 host tests pass** including
+the seven new clock-admission tests; native qualification awaits the new image.
+
+An unlaunched ABI-5 cold-run package is prepared under
+`/home/yukidama/external/tmp/ventium-abi5-cold-package.ffgy8R`.
+It removes the ABI-9 owner-scan/filter operations, uses the current probe and
+explicit-capability running guard, and gives the cold daemon a **3,600-second**
+envelope rather than the old 600-second diagnostic cutoff. Capture still
+starts before release and stops on a complete-record SIGUSR1 boundary.
+`prepared.json` pins the ten syntax-checked helper files; it is **not** native
+controller or CPU acceptance. The actual bitstream/hash, board run root,
+preprogram/postprogram manifests and guarded host FIFO reader must still be
+bound before launch. No board upload/programming was performed for this package.
+
 > **Latest localization (2026-10-05 UTC):** private memory-OR/JP and
 > reversed-memory-CMP/JP controls each pass64 cases on the unchanged40MHz
 > image. The original CMP/JP ROM is also caught at actual **00a7:14566 before
