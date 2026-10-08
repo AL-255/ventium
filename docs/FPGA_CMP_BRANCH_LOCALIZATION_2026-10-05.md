@@ -4352,3 +4352,59 @@ No processor repair, standard-suite pass, or full40MHz timedemo completion is
 claimed. Currentef01263f still has no qualified gameplay IPC; the older
 53f129e9 **0.165995778 primary/U-counter IPC** baseline over qualified intervals
 spanning cycles8,721,490,845–19,169,282,165 predates it and is not total U+V IPC.
+
+#### Mapped low-PC arithmetic and replicated-owner checks (Oct 8 UTC)
+
+Two read-only queries reopen the exact deployed-image checkpoint189dcefe…
+without synthesis, routing, clock changes, checkpoint writes or deployment.
+Both close native0/watcher0/pins0, no OOM; peak cgroup memory3,653,398,528 and
+3,597,258,752bytes. Their native exports are:
+
+- `ventium-pc-arithmetic-query.zoY5W9`:14299 cells, SHA
+  `79b75ef558632ca57909d86940af0653785f1ff3e3d4174fd724033baa83cec1`.
+- `ventium-pc-select-query.8GHmDW`:1095 cells, SHA
+  `a4577598eaa96e35ea95053f00c7cbbd10c6ef53ca62932f43b0418ccc2dc897`.
+
+All899 overlapping cell descriptions and5252 pin bindings agree. The low-three-
+bit fall-through carry network is proven equal to ownerPC+Ulen+Vlen modulo8
+for both live and retained packets, **conditional on coherent ACTIVE copies
+and32-bit code mode**. The64-signal arithmetic model has no opaque inputs
+other than its explicitly declared raw decode/FF cutpoints; both nonvacuous
+SAT/UNSAT miters pass. This is not a whole-word or physical timing proof.
+
+A separate primary-PC miter covers the observed no-redirect integer path:
+with native state copies atS_PIPE, CS.D copies1, no raw FP override and
+coherent owner copies, primaryPC[2:0] equals
+`(ownerPC + Ulen + (mapped_pair_enable ? Vlen : 0)) mod 8`.
+Both live/retained nonvacuous miters pass. Missing/unneeded branch/BRAM cones
+remain independent opaque variables, not guessed constants; UNSAT holds for
+all of them. This proof does **not** identify actual `do_v` in the bad capture
+or show that its sampled controls were stable/coherent at the CPU edge.
+
+Eight physical ACTIVE FFs exist. Their local next-state LUTs all implement
+the same shared-data/shared-select mux, but use different replicated feedback
+Qs. INIT, clock, CE, reset and inversion checks agree; an additional miter
+proves equal previous copies imply equal next copies. Thus **there is no
+demonstrated logical divergence of these replicas in a zero-delay synchronous
+model**. It would be incorrect to call their replication a proven RTL bug.
+
+There is nevertheless an important observability gap. In the mapped post-PC
+adder, `pipe_mem_active_q_reg_rep` selects both the U length and V-length bit1;
+other copies select the PC and other V-length bits. A deliberately inconsistent
+model (only that replica1, original sampled ACTIVE0, raw lengths3/2, retained
+lengths1/0) can produce the observed low-bit +1 advance. This is a **hypothetical
+counterexample to trusting one sampled ACTIVE bit**, not evidence that it
+occurred. The historical capture contains only the original ACTIVE bit; the
+eight-copy live scan after #PF cannot resolve this question retrospectively.
+The primary mux also contains a slow-decoder-length arm controlled by replicated
+state bits, which likewise was not individually observed on the failing edge.
+
+Next discriminator: replace redundant high EIP-D/relative-displacement sampler
+slots with historical owner-copy, primary-selector, effective-length and pairing
+controls. Keep original CPU function/routes intact and the passive filter active;
+validate reset, metadata, readout and paired hardware controls before another
+original cold replay. Do not merge owner logic or serialize memory retirement
+merely because the hypothetical model can reproduce +1. No processor repair or
+new gameplay IPC is claimed. Both native queries are closed; board RAM/VHD/tar
+duplicates from the CMP capture were removed only after exact host-copy checks
+and remain recoverable from its archive.
