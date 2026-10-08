@@ -59,6 +59,17 @@ host-tested (**51 probe/capture/UV-guard tests total**) but awaits native board
 qualification on the new source bitstream. No bitstream has been deployed by
 these tool changes.
 
+The read-only `ven_uv_fast_guard.require_running` now requires an explicit
+ABI-5 capability and **readback**, not a previously written command word.
+Reserved bits (including the write-only STEP/BP-clear positions) and unknown
+ABIs are rejected. A zero word proves only the observed running state; the
+returned result explicitly does **not** qualify UV-fast execution or establish
+an unstepped history. Preserve the complete controller command record. The
+separate paired-ring witness also requires this build's explicit `S_PIPE` enum
+value and a coherent capture, never an assumed universal state number.
+**54 host tests pass** after these guard changes; no board execution or processor
+acceptance is implied.
+
 > **Latest localization (2026-10-05 UTC):** private memory-OR/JP and
 > reversed-memory-CMP/JP controls each pass64 cases on the unchanged40MHz
 > image. The original CMP/JP ROM is also caught at actual **00a7:14566 before
