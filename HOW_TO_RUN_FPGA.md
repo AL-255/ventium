@@ -3755,6 +3755,19 @@ in this block design.
 | `0x2b0` | selected architectural word (valid only while `0x280[2]`) | — |
 | `0x2c0` | execution-debug capability (`0x56450005` = format 5, seven-bit selector, x87/segment/task/debug state plus stop cause) | — |
 
+**Candidate-only live total-U+V counter (Oct 8):** the updated shim reserves
+selectors **76/77** for the existing 64-bit total retirement counter low/high,
+and **78** for capability **`0x55563634` (`UV64`)**. Unlike architectural words
+0–75, these words may be read while running. The installed `fe9f539d` image
+does **not** contain this extension; execution ABI 5 alone does not imply it.
+Use `fpga/board-tools/ven_total_retire.py::read_total_retire` with exclusive
+selector ownership: it requires the capability, uses high/low/high rollover
+checks, and restores the previous selector. It never halts/steps the core or
+clears counters. Both total and legacy primary counters retain REP-element
+events; neither is a deduplicated x86 macroinstruction count. This extension
+has passed selector/reader tests and hard-class shim lint, not FPGA deployment
+or timing qualification. Legacy primary/U-only counter registers are unchanged.
+
 The auxiliary ring is **not generically an AXI read-beat ring or a per-cycle
 waveform** in the frozen 2026-10-04 deployed source. Its exact valid predicate is
 `core_req & core_we & core_ack & (core_addr[23:12] == 12'h0B8)`: accepted stores

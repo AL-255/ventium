@@ -62,7 +62,10 @@ module ven_ao486_shim
     // dbg_bus (up):   [0]inta [1]retire_valid [33:2]eip [49:34]cs [81:50]esp [113:82]eflags
     //                 [119:114]state [127:120]int_vec [159:128]fault_pc [191:160]cr0 [192]rd_valid
     //                 [224:193]rd_addr [256:225]rd_data [257]cmp_freeze [258]halted
-    //                 [290:259]selected architectural-state word
+    //                 [290:259]selected architectural-state word; selectors
+    //                 76/77 = live total U+V retire counter low/high,
+    //                 78 = capability 32'h5556_3634 ("UV64"). Unlike the
+    //                 architectural words, these three are safe to read live.
     // dbg_cmp (down): [31:0]cmp_cfg [63:32]cmp_range [64]halt_req [65]step [66]bp_en
     //                 [98:67]bp_addr [99]bp_clr [106:100]arch_sel
     output      [290:0] dbg_bus,
@@ -296,7 +299,19 @@ module ven_ao486_shim
     logic [15:0] d_cs;
     logic [5:0]  d_state;
     logic [7:0]  d_int_vec;
-    assign dbg_bus = { d_arch_data, d_halted, d_cmp_freeze, d_rd_data, d_rd_addr, d_rd_valid, d_cr0, d_fault_pc,
+    logic [31:0] d_scan_data;
+    // Reuse the existing narrow debug route and existing synthesizable total
+    // retire counter. Preserve the legacy primary/U-only performance registers
+    // and execution ABI. Selection cannot feed back into issue or retirement.
+    always_comb begin
+        case (dbg_cmp[106:100])
+            7'd76: d_scan_data = v_retire_count[31:0];
+            7'd77: d_scan_data = v_retire_count[63:32];
+            7'd78: d_scan_data = 32'h5556_3634;
+            default: d_scan_data = d_arch_data;
+        endcase
+    end
+    assign dbg_bus = { d_scan_data, d_halted, d_cmp_freeze, d_rd_data, d_rd_addr, d_rd_valid, d_cr0, d_fault_pc,
                        d_int_vec, d_state, d_eflags, d_esp, d_cs, d_eip, d_retire_valid, v_inta };
 `ifndef SYNTHESIS
     // Stall watchdog (sim-only): if the core goes many cycles without a retire,
