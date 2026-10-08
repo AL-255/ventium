@@ -4706,7 +4706,31 @@ R4 plan SHA-256:
 `95abdbcab27d9ccae4989180eace233c186837c08e01e36233705b6805f93086`;
 R4 input-manifest SHA-256:
 `6f840df79827b363ee541bc35cbb06821221f8628a1af7430fd3d01f9e640f3c`.
-Nothing from R4 is yet qualified or deployed.
+R4 is now closed **rejected**, native **1**, resource/input checks **0**,
+peak 6,460,755,968 bytes, no OOM. Both routing passes complete; the early
+qualification reports fully routed, zero route errors, zero DRC errors and
+zero critical warnings. All 10,611 original checked pin mappings remain
+literal. The later preservation audit stops because an old **POWER** node,
+`INT_X50Y211/IMUX_E3`, is no longer in the physical constant tree. The checker
+does not export the remaining geometry differences before stopping, so do not
+claim it was the only change or identify it as an unused endpoint. No output
+checkpoint or deployment exists. R4's rejected grade remains unchanged.
+
+R5 (`ventium-fastpc-eco-r5.YO6pcn`) is a fresh pending rerun of the **identical
+logic, placement and routing plan** with a different static-constant audit.
+Both constant input sets are captured before modification and after routing,
+including each logical pin's POWER/GROUND value and input inversion. Every
+old endpoint must remain identical; the only permitted new logical constant
+inputs are the **33** planned ground inputs of the four new carry primitives.
+All added/removed constant nodes/PIPs are exported for review. This permits
+physical rerouting of static ties only after endpoint-value/polarity checks
+and full route/DRC qualification; it does not waive the physical failures in
+R3 or permit signal-route changes. Old nonconstant routes, source fanout,
+primitive INIT/location/locks, clocks and FF polarities remain protected.
+This is a checker-scope correction, not another processor-logic modification.
+R5 input-manifest SHA-256:
+`f8bc1a1df49e247876ed005c83e38e584e1b491f9db36fa59fff7acd8b1706b5`.
+No R5 qualification, bitstream or hardware result is claimed yet.
 
 Only one guarded Vivado family runs, with 12 GiB hard/11 GiB early-stop limits,
 no swap, a 4 GiB host-memory reserve and a 900-second launcher cap. There were
