@@ -122,3 +122,48 @@ implementation. Then qualify both CoreMark seeds, Win95 boot-to-desktop, and
 the original cold 40 MHz UV-fast Quake timedemo with the complete raw-color
 movie. The original FPGA invalid-next-PC cause is not yet proven; this local
 optimization and its microbenchmarks are not a completed Quake repair.
+
+## Captured CMP/JP regression, still UV-fast — Oct 8, 10:54 UTC
+
+Evidence: `/home/yukidama/external/tmp/ventium-uvfast-jp-replay.8pPmfM`.
+The unchanged SoC model above replays the exact private cold ROM that failed
+on the board, SHA-256
+`e6b20263852628770d3d9de0e8834681a7da844cd2f88ece2a7bd8ec95195f8a`.
+This is the diagnostic JP variant with its synthetic caller and exception
+logger, **not the original Quake timedemo**. It does not modify production media.
+Both `--cycle` and `--cycle-func` drive `cycle_mode=1`; `--l1-axi` is explicit,
+assertions stay enabled, and no STEP, breakpoint or pairing-disable is used.
+
+The passive-observer matrix uses reset seeds 1/2/14/15, AXI latencies 0/3/7/13,
+and response gaps at latencies 3/7. All eight native runs finish normally.
+Seven original consumer checks pass. The latency-7 cycle case remains **exit 3**:
+it lacks the required retained predicted-taken/actual-not-taken coverage for both
+owners. It still observes all 64 target CMP/JP pairs and all 64 preceding
+cross-line CMP/JNE pairs, correct addresses/data/flags, and no exception. The
+whole observer matrix remains **FAIL**, not 8/8 or a waived coverage pass.
+The initial driver preflight's relative-manifest-path error occurred before
+launching any model; its failure record is retained separately.
+
+A separate `full-state/` run enables the ordinary system co-simulation I/O
+backend and reaches natural `OUT F4` termination, **native exit 133**, in all
+eight RTL runs. Pinned Pentium QEMU independently exits 133. The four complete
+cycle-functional traces, **15,555 instructions each**, match the fresh QEMU
+golden through the unchanged full architectural comparator. No truncation,
+new flag mask or fabricated exit state. Each cycle trace follows that same
+complete PC sequence and contains all **64 target + 64 preceding U/V pairs**.
+The source, executable and consumer pins are unchanged before/after. These
+four full-state passes do not erase the observer matrix's separate coverage gap.
+
+The retained historical consumer prints its original ALU source hash; that is
+**not this model's provenance**. This model's ALU hash is
+`3001ae4833b49f9b14d31c6685add9a81c0949443c25681b76fa15afdf9e3058`;
+the decode/package bytes and 211-bit packet layout remain identical. Actual
+model/source pins are in `inputs.json`, not the old consumer's descriptive text.
+
+Only two native tests run at once in a separate 3 GiB/no-swap scope while the
+existing synthesis continues. Both replay scopes are closed, not orphan jobs.
+There is no simulator rebuild, board programming, clock change or new RTL
+change in this replay. It adds regression coverage for the integrated repairs;
+it does **not** establish the cause or repair of the board-only bad-PC failure.
+Candidate gameplay IPC remains unmeasured; the historical baseline at the top
+of this document still predates this candidate.
