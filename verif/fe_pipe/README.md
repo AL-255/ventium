@@ -32,3 +32,7 @@ Remaining requirements include whole-core timing/area assessment,
 memory-chain/prime configuration coverage, the remaining differential gates,
 and the complete standard suite plus original 40 MHz cold FPGA timedemo.
 Native exits, terminal witnesses and microbenchmarks alone cannot close these.
+
+The follow-up [raw-permission experiment](permission/README.md) retains live
+access policy while cutting the residual parent permission lookup. It remains
+private/not enabled and has separate full-core tests and routed leaf evidence.

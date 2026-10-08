@@ -1,0 +1,29 @@
+--- a/fixture.S
++++ b/fixture.S
+@@ -243,6 +243,25 @@
+ #endif
+     movl    %eax, %cr0
+-
++
++#ifdef PERM_WARM_PROBE
++    /* Warm a readable, non-writable page before its protected write. The
++     * permission cache must retain raw RO, not the success of this read. */
++    movl    %cr0, %eax
++    andl    $0x9fffffff, %eax
++    movl    %eax, %cr0
++    movl    $0x00401000, %edi
++    movl    $8, %ecx
++    xorl    %esi, %esi
++    .p2align 5, 0x90
++    .global perm_hot_read_u, perm_hot_read_v
++perm_hot_read_u:
++    movl    (%edi), %eax
++perm_hot_read_v:
++    addl    $1, %esi
++    decl    %ecx
++    jnz     perm_hot_read_u
++#endif
++
+     /* clear the visible accumulator GPRs */
+     xorl    %eax, %eax
+     xorl    %ebx, %ebx

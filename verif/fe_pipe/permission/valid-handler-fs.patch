@@ -1,0 +1,22 @@
+--- a/fixture.S
++++ b/fixture.S
+@@ -287,15 +287,12 @@
+     .align 16
+     .global pf_handler
+ pf_handler:
+-#ifdef PFASTSTACK_SEGENF
+-    /* An outer-privilege return leaves FS unusable in this core's checked
+-     * segment model.  The ordinary pfaststack handler intentionally relies on
+-     * the non-enforcing profile's cached FS base; the enforcement companion
+-     * must reload a valid CPL0 data selector before using its FS-only slow
+-     * accesses.  EAX is not an architectural witness across these faults. */
++    /* Outer IRET invalidates the CPL0 FS selector before entering CPL3.
++     * Exception entry does not reload it. Establish a valid handler selector
++     * for both fixtures, without weakening segment enforcement in the core.
++     * EAX is not a witness across these faults. No software PUSH/POP added. */
+     movw    $0x0010, %ax
+     movw    %ax, %fs
+-#endif
+     movl    %cr2, %edx
+     cmpl    $0x00401000, %edx
+     je      pf_push
