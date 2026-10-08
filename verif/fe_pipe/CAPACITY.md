@@ -45,8 +45,7 @@ The eight-entry registered translation child uses round-robin eviction;
 `fe_d_capture` waits to register the parent's result when the child misses.
 These results are consistent with repeated child misses once a cyclic working
 set exceeds eight pages, even when the parent TLB and data cache retain the
-working set. A no-cut UV-fast reference is still needed to quantify the exact
-regression independently of code length/alignment. This **invalidates any
+working set. This **invalidates any
 generalized zero-overhead claim** from the earlier three/five-page fixtures.
 Do not accept this cut as a performance repair merely because these functional
 tests pass. The frozen hardware synthesis remains useful physical evidence,
@@ -57,6 +56,43 @@ but its final receipt writer raised `AttributeError` while hashing string
 paths. That run is not a closed pass. The runner now canonicalizes the digest
 argument and writes each case result separately; the fresh run above closes
 normally. Original native logs are retained.
+
+## No-cut reference: UV-fast remains enabled
+
+The runner also accepts `--no-cut-reference`, which **requires** the cut flags
+to be absent while retaining all required UV/system-fast/AXI flags. It does
+not change a model's mode or allow a slow/U-only result.
+
+Reference binary `ventium-uv-retire-state.bMk6tx/obj/tb_ventium`, SHA-256
+`f1722209acdb29282adc35789fb8f4557b46b2e41dbc19533ad544586bde0c98`.
+Closed evidence: `ventium-fe-capacity.0e99srhf/result.json` under external tmp.
+Again all **14 full QEMU comparisons** pass, all **28** RTL native runs exit
+133, and every case retains **10/10** subject U-load/V-increment pairs.
+
+| Hot pages | No-cut cycles/round | Eight-entry cycles/round | Added cycles |
+|---:|---:|---:|---:|
+| 4 | 13 | 13 | 0% |
+| 7 | 22 | 22 | 0% |
+| 8 | 25 | 25 | 0% |
+| 9 | 28 | 37 | 32.14% |
+| 16 | 49 | 65 | 32.65% |
+| 32 | 98 | 130 | 32.65% |
+| 64 | 194 | 258 | 32.99% |
+
+Results are identical at AXI latencies 0/7. Same source-generated BIOS images,
+instruction sequences and real pairing; **one added cycle per data load**.
+This is a measured comparison, not an exact one-variable A/B: the no-cut model
+predates the separate L1 response-owner and payload-factoring repairs.
+Read-only RTL-tree comparison finds only `core.sv`, `ven_l1d.sv`, and the added
+`ven_fe_dtlb.sv` different. The observed eight-page threshold and unchanged
+warm AXI-latency sensitivity support child-capacity attribution; a rebuilt
+matched control and direct pending-cycle attribution remain stronger follow-ups.
+
+The proposed structural remedy is a [banked child](banked/README.md), matching
+the ordinary parent's 16-set/four-way geometry and avoiding a 64-way CAM.
+It is leaf-tested, **not yet full-core or FPGA qualified**. The running frozen
+eight-entry synthesis must remain unchanged; it is now a physical reference,
+not an accepted performance candidate.
 
 Candidate gameplay IPC is **unmeasured**. Historical `53f129e9` baseline:
 **0.1659957781052303 primary/U-counter IPC**, not total U+V, in 127 qualified

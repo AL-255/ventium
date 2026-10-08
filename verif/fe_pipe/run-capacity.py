@@ -39,6 +39,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--tb', type=Path, required=True)
     parser.add_argument('--pages', type=int, nargs='+', default=[4, 7, 8, 9, 16, 32, 64])
+    parser.add_argument('--no-cut-reference', action='store_true',
+                        help='require a prebuilt no-FE model; UV-fast remains mandatory')
     args = parser.parse_args()
     if not args.pages or len(set(args.pages)) != len(args.pages) or any(n < 1 or n > 64 for n in args.pages):
         parser.error('unique page counts 1..64 required')
@@ -47,9 +49,13 @@ def main():
     commands = [line for line in stamp.read_text().splitlines() if line.startswith('C ')]
     assert len(commands) == 1
     defines = set(re.findall(r'\+define\+(\w+)', commands[0]))
-    required = {'VEN_FE_PIPE', 'VEN_FE_DTLB_MULTI', 'VEN_FE_DTLB_PERM', 'VEN_L1_AXI',
-                'VEN_SYS_FASTPATH', 'VEN_SYS_FASTPATH_RELOC', 'VEN_SYS_FASTLOAD_FLAT',
+    required = {'VEN_L1_AXI', 'VEN_SYS_FASTPATH', 'VEN_SYS_FASTPATH_RELOC', 'VEN_SYS_FASTLOAD_FLAT',
                 'VEN_SYS_FASTSTORE_FLAT', 'VEN_SEG_ENFORCE', 'VEN_PERF_PROFILE'}
+    cut_flags = {'VEN_FE_PIPE', 'VEN_FE_DTLB_MULTI', 'VEN_FE_DTLB_PERM'}
+    if args.no_cut_reference:
+        assert not cut_flags & defines, 'reference must have no translation-cut flags'
+    else:
+        required |= cut_flags
     assert required <= defines and ' --assert ' in commands[0]
     assert not {'SYNTHESIS', 'VTM_NO_DPI', 'VEN_FE_MEM_CHAIN'} & defines
     scratch = Path('/home/yukidama/external/tmp').resolve(strict=True)
@@ -149,7 +155,8 @@ def main():
         print(json.dumps(row), flush=True)
         return row
 
-    result = dict(passed=False, definitions=sorted(defines), gameplay_ipc=None, standard_suite=False)
+    result = dict(passed=False, definitions=sorted(defines), gameplay_ipc=None, standard_suite=False,
+                  profile='no-cut-UV-fast-reference' if args.no_cut_reference else 'eight-entry-UV-fast-cut')
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
             list(pool.map(prepare, args.pages))
