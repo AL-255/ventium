@@ -64,10 +64,14 @@ module ven_ao486_shim
     //                 [224:193]rd_addr [256:225]rd_data [257]cmp_freeze [258]halted
     //                 [290:259]selected architectural-state word; selectors
     //                 76/77 = live total U+V retire counter low/high,
-    //                 78 = capability 32'h5556_3634 ("UV64"). Unlike the
+    //                 78 = capability 32'h5556_3634 ("UV64"), 79 = posted
+    //                 transport status (0 if not compiled). Unlike the
     //                 architectural words, these three are safe to read live.
     // dbg_cmp (down): [31:0]cmp_cfg [63:32]cmp_range [64]halt_req [65]step [66]bp_en
     //                 [98:67]bp_addr [99]bp_clr [106:100]arch_sel
+    //                 Candidate VEN_DDR_POSTED only: [108] platform drain
+    //                 capability, [107] outer DDR drained, [109] sticky fault. Hardware-origin,
+    //                 not host-writable controls. Missing capability blocks I/O.
     output      [290:0] dbg_bus,
     input       [127:0] dbg_cmp
 );
@@ -102,6 +106,20 @@ module ven_ao486_shim
     logic [3:0]  m_rid;    logic [31:0] m_rdata; logic [1:0] m_rresp; logic m_rlast, m_rvalid, m_rready;
     logic        v_bus_err, v_m_idle, v_cpu_hung;
     logic [63:0] v_retire_count;
+    // The inner AXI B only acknowledges Avalon acceptance. A posted outer
+    // bridge can still own RAM writes after v_m_idle: IN/OUT and host memory
+    // inspection must also wait for real DDR responses. Opt-in integration;
+    // ordinary integer/FP issue is unaffected. Legacy profiles remain intact.
+`ifdef VEN_DDR_POSTED
+`ifdef VEN_DBG_CORE
+    wire platform_memory_drained = dbg_cmp[108] && dbg_cmp[107] && v_m_idle;
+`else
+    wire platform_memory_drained = 1'b0;
+    initial $fatal(1,"VEN_DDR_POSTED requires platform drain wiring via VEN_DBG_CORE");
+`endif
+`else
+    wire platform_memory_drained = 1'b1;
+`endif
 
     // -------------------------------------------------------- A20 + REMAP undo
     function automatic logic [39:0] a20_remap(input logic [39:0] axi_addr);
@@ -156,8 +174,8 @@ module ven_ao486_shim
     // port (the IDE data FIFO) that 2nd read advances io_cnt, so the identify/sector transfer
     // double-steps and drq clears early -> the core reads zeros. Also gate on io_*_done
     // COMBINATIONALLY so io_read_do drops the instant the transaction completes (no 2nd read).
-    assign io_read_do      = v_io_req & ~v_io_we & ~io_done_seen & ~(io_read_done | io_write_done);
-    assign io_write_do     = v_io_req &  v_io_we & ~io_done_seen & ~(io_read_done | io_write_done);
+    assign io_read_do      = v_io_req & ~v_io_we & ~io_done_seen & ~(io_read_done | io_write_done) & platform_memory_drained;
+    assign io_write_do     = v_io_req &  v_io_we & ~io_done_seen & ~(io_read_done | io_write_done) & platform_memory_drained;
     assign io_read_address = v_io_addr;
     assign io_write_address= v_io_addr;
     assign io_read_length  = v_io_size;    // both encode byte-count 1/2/4
@@ -287,7 +305,7 @@ module ven_ao486_shim
         .dbg_hook_opa(), .dbg_hook_opb(), .dbg_hook_meta(),
         .dbg_cmp_cfg(dbg_cmp[31:0]), .dbg_cmp_range(dbg_cmp[63:32]), .dbg_cmp_freeze(d_cmp_freeze),
         .dbg_div_eip(), .dbg_div_eip70(), .dbg_div_info(),
-        .dbg_halt_req(dbg_cmp[64]), .dbg_step(dbg_cmp[65]), .dbg_bp_en(dbg_cmp[66]),
+        .dbg_halt_req(dbg_cmp[64]), .dbg_step(dbg_cmp[65] & platform_memory_drained), .dbg_bp_en(dbg_cmp[66]),
         .dbg_bp_addr(dbg_cmp[98:67]), .dbg_bp_clr(dbg_cmp[99]),
         .dbg_arch_sel(dbg_cmp[106:100]), .dbg_arch_data(d_arch_data), .dbg_halted(d_halted)
 `endif
@@ -308,10 +326,16 @@ module ven_ao486_shim
             7'd76: d_scan_data = v_retire_count[31:0];
             7'd77: d_scan_data = v_retire_count[63:32];
             7'd78: d_scan_data = 32'h5556_3634;
+`ifdef VEN_DDR_POSTED
+            7'd79: d_scan_data = 32'h5044_0000 | {29'd0, dbg_cmp[109:107]};
+`else
+            7'd79: d_scan_data = 32'd0;
+`endif
             default: d_scan_data = d_arch_data;
         endcase
     end
-    assign dbg_bus = { d_scan_data, d_halted, d_cmp_freeze, d_rd_data, d_rd_addr, d_rd_valid, d_cr0, d_fault_pc,
+    wire d_platform_halted = d_halted && platform_memory_drained;
+    assign dbg_bus = { d_scan_data, d_platform_halted, d_cmp_freeze, d_rd_data, d_rd_addr, d_rd_valid, d_cr0, d_fault_pc,
                        d_int_vec, d_state, d_eflags, d_esp, d_cs, d_eip, d_retire_valid, v_inta };
 `ifndef SYNTHESIS
     // Stall watchdog (sim-only): if the core goes many cycles without a retire,

@@ -28,12 +28,13 @@ module ven_ddram_axi_throughput_tb;
     reg m_axi_bvalid = 0, m_axi_rvalid = 0, m_axi_rlast = 0;
     reg [1:0] m_axi_bresp = 0, m_axi_rresp = 0;
     reg [63:0] m_axi_rdata = 0;
-    wire fault;
+    wire fault, drained;
 `ifdef VEN_TEST_POSTED
     ven_ddram_axi_posted #(.WRITE_SLOTS(WRITE_SLOTS)) dut (.*);
 `else
     ven_ddram_axi dut (.*);
     assign fault = 0;
+    assign drained = rst_n && !DDRAM_BUSY && !DDRAM_RD && !DDRAM_WE && !DDRAM_DOUT_READY;
 `endif
 
     integer cyc = 0, aw = 0, w = 0, b = 0, ar = 0, r = 0;

@@ -42,6 +42,12 @@ close $profile_handle
 if {$defs ne [join $requested_defs { }]} { error "expanded defines differ from pinned profile" }
 set fe_defs {VEN_FE_PIPE VEN_FE_DTLB_MULTI VEN_FE_DTLB_PERM}
 set define_count [llength $defs]
+set actual_define_count $define_count
+if {$define_count == 114 && [lindex $defs 110] eq "VEN_DDR_POSTED"} {
+    require_span {lappend files "$VEN/fpga/ven_ddram_axi_posted.sv"}
+    set defs [lreplace $defs 110 110]
+    set define_count [llength $defs]
+}
 if {$define_count == 113} {
     if {[lrange $defs 107 109] ne $fe_defs ||
         [lrange $defs 110 end] ne {SYNTHESIS VTM_NO_DPI VEN_ALTSYNCRAM_XPM}} {
@@ -62,4 +68,4 @@ if {[string first {add_files -fileset constrs_1 -norecurse "$HW/bitstream.xdc" "
     error "legacy FPATAN multicycle constraint remains active"
 }
 if {![info complete $::expanded]} { error "transformed Tcl is incomplete" }
-puts "RK-WRAPPER-STATIC-OK: physical40M, exact${define_count}defs, pinned roots, 1job, fatal failures"
+puts "RK-WRAPPER-STATIC-OK: physical40M, exact${actual_define_count}defs, pinned roots, 1job, fatal failures"

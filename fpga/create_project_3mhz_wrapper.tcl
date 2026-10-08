@@ -417,12 +417,49 @@ if {[regexp -all {\.cycle_mode\s*\(} $uv_shim_body] != 1 ||
 }
 puts "UV-FAST-SOURCE-CONTRACT-OK: dual issue hardwired; system fast load/store and pipelined FP enabled"
 
+# Opt-in posted transport is inseparable from its external-completion barrier.
+# Never silently select a queue behind a shim that acknowledges I/O/debug at
+# inner Avalon acceptance. This is source admission, not functional acceptance.
+if {[lsearch -exact $fpga_defs VEN_DDR_POSTED] >= 0} {
+    if {!$explicit_profile || [lsearch -exact $fpga_defs VEN_DBG_CORE] < 0} {
+        error "posted DDR requires an explicit profile and VEN_DBG_CORE"
+    }
+    set posted_top_file [open [file join $upstream_root src rk_ao486_system_pl.v] r]
+    set posted_top [read $posted_top_file]
+    close $posted_top_file
+    foreach span {{ven_ddram_axi_posted #(.MEM_BASE(MEM_BASE), .WRITE_SLOTS(8)) u_ddr}
+                  {.fault(ddr_posted_fault), .drained(ddr_posted_drained)}
+                  {18'd0, ddr_posted_fault, 1'b1, ddr_posted_drained}} {
+        if {[string first $span $posted_top] < 0} {
+            error "posted DDR platform drain wiring missing: $span"
+        }
+    }
+    foreach span {{dbg_cmp[108] && dbg_cmp[107] && v_m_idle}
+                  {d_halted && platform_memory_drained}
+                  {.dbg_step(dbg_cmp[65] & platform_memory_drained)}} {
+        if {[string first $span $uv_shim_body] < 0} {
+            error "posted DDR shim drain wiring missing: $span"
+        }
+    }
+    foreach signal {io_read_do io_write_do} {
+        set predicate [format {assign\s+%s\s*=[^;]*&\s*platform_memory_drained\s*;} $signal]
+        if {![regexp $predicate $uv_shim_body]} {
+            error "posted DDR shim drain wiring missing: $signal"
+        }
+    }
+    if {![file isfile [file join $source_root fpga ven_ddram_axi_posted.sv]]} {
+        error "posted DDR bridge source missing"
+    }
+    puts "POSTED-DDR-SOURCE-CONTRACT-OK: eight slots, real completion barrier; runtime acceptance pending"
+}
+
 # The passive scan-out recorder lives in the Ventium worktree rather than the
 # reference-platform checkout.  It is a standalone module instantiated by the
 # narrowly patched PL top (fpga/patches/0001-passive-vga-frame-capture.patch).
 set body [string map [list \
     {add_files -norecurse $files} \
     {lappend files "$VEN/fpga/ven_video_capture.sv" "$VEN/fpga/ven_axi_read_profiler.sv" "$VEN/fpga/ven_axi_write_profiler.sv"
+if {[lsearch -exact $DEFS VEN_DDR_POSTED] >= 0} { lappend files "$VEN/fpga/ven_ddram_axi_posted.sv" }
 add_files -norecurse $files} \
 ] $body]
 

@@ -51,7 +51,8 @@ module ven_ddram_axi_posted #(
     input wire m_axi_rlast, m_axi_rvalid,
     output wire m_axi_rready,
     output wire [2:0] dbg_st,
-    output reg fault
+    output reg fault,
+    output wire drained
 );
     localparam integer PTR_BITS = $clog2(WRITE_SLOTS);
     initial begin
@@ -96,6 +97,10 @@ module ven_ddram_axi_posted #(
     assign m_axi_arvalid = rst_n && st == AR;
     assign m_axi_rready = rst_n && st == R;
     assign dbg_st = st != IDLE ? st : occupied != 0 ? 3'd3 : 3'd0;
+    // For platform I/O/debug barriers, not DDRAM flow control. Include the
+    // live producer command to avoid advertising idle on its acceptance edge.
+    assign drained = rst_n && !fault && st == IDLE && occupied == 0 &&
+                     !DDRAM_RD && !DDRAM_WE && !DDRAM_DOUT_READY;
 
     always @(posedge clk) begin
         if (!rst_n) begin

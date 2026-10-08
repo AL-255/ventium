@@ -93,7 +93,8 @@ def main():
     for name in ('create_project_3mhz_wrapper.tcl', 'launch_impl_existing.tcl',
                  'clk_div32_40mhz.v', 'clk_div32_45mhz.v', 'clk_div32_50mhz.v',
                  'ven_video_capture.sv', 'ven_axi_read_profiler.sv',
-                 'ven_axi_write_profiler.sv', 'board-tools/ven_board_probe.py',
+                 'ven_axi_write_profiler.sv', 'ven_ddram_axi_posted.sv',
+                 'board-tools/ven_board_probe.py',
                  'board-tools/ven_vga_stream_to_video.py'):
         src = repo / 'fpga' / name
         copy(src, Path('ventium/fpga') / name)

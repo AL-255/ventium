@@ -51,6 +51,8 @@ struct Sim {
         d.m_axi_rlast=bad_last==1 ? read_left>0 : bad_last==2 ? false : read_left==1;
         d.m_axi_rdata=memory[read_addr%128];
         d.eval();
+        if(d.drained) assert(!d.fault && b==writes.size() && !read_left &&
+                             !d.DDRAM_WE && !d.DDRAM_RD && !d.DDRAM_DOUT_READY);
         if (aw_stalled) assert(d.m_axi_awvalid && d.m_axi_awaddr==held_aw);
         if (w_stalled) assert(d.m_axi_wvalid && d.m_axi_wdata==held_w && d.m_axi_wstrb==held_mask);
         aw_stalled=d.m_axi_awvalid && !d.m_axi_awready; held_aw=d.m_axi_awaddr;

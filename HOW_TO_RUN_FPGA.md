@@ -13,8 +13,10 @@ not certification of the currently installed image.
 > A post-demo coherent ring proves real fast U/V pairing. The complete sampled,
 > raw-color 15 fps movie is available (18.5 MB). No U-only/slow
 > fallback, STEP, breakpoint, snapshot or guest-payload patch was used.
-> Current verified gameplay **primary/U IPC is 0.164984398**, across 126
-> intervals within cycles **3,218,417,090–13,622,310,275**. Total U+V IPC is not
+> Newer closed write-profile diagnostic: **primary/U IPC is 0.167990963**, across 59
+> intervals within cycles **2,648,748,396–5,129,027,099**, with a fresh
+> 969-frame / 288.6-second result. This is a different sampled scene window,
+> not a fix gain. Total U+V IPC is not
 > exposed; this is not a meaningful performance improvement. The generic gate
 > and full standard suite remain unclosed. See the
 > [deployment, movie, mode witness and closure caveats](docs/UV_FAST_BANK64_2026-10-08.md).
@@ -3767,6 +3769,19 @@ clears counters. Both total and legacy primary counters retain REP-element
 events; neither is a deduplicated x86 macroinstruction count. This extension
 has passed selector/reader tests and hard-class shim lint, not FPGA deployment
 or timing qualification. Legacy primary/U-only counter registers are unchanged.
+
+**Candidate-only posted transport:** `VEN_DDR_POSTED` additionally needs
+`fpga/patches/0010-posted-ddr-transport.patch` applied to a new flow source copy,
+the candidate bridge and shim, and an explicit frozen define profile. The
+launcher checks the coupled wiring. Packed `cpu_dbg_cmp[109:107]` carries
+hardware-origin `{fault, capability, drained}`; these are not host controls.
+The shim holds port I/O, STEP admission and externally advertised HALTED until
+both inner AXI and outer DDR are drained. Scan selector **79**, safe live,
+returns `0x50440000 | {fault, capability, drained}` in low bits 2:0 (zero when
+not compiled). A transport fault is fail-stop and requires diagnosis; do not
+reset only the CPU to discard it or claim that an inner-idle flag drained DDR.
+Bridge reset is the AXI-domain reset, not the guest-reset control. This path is
+microbench-tested but **not deployed, full-system accepted or timing-qualified**.
 
 The auxiliary ring is **not generically an AXI read-beat ring or a per-cycle
 waveform** in the frozen 2026-10-04 deployed source. Its exact valid predicate is

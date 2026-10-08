@@ -1,0 +1,29 @@
+diff --git a/fpga/rk-ao486-system/src/rk_ao486_system_pl.v b/fpga/rk-ao486-system/src/rk_ao486_system_pl.v
+--- a/fpga/rk-ao486-system/src/rk_ao486_system_pl.v
++++ b/fpga/rk-ao486-system/src/rk_ao486_system_pl.v
+@@ -228,7 +228,15 @@
+     wire [31:0] dbg_bp_addr;
+     wire [6:0]  dbg_arch_sel;
++    wire ddr_posted_drained, ddr_posted_fault;
+     // Keep [63] exactly as the historical comparator-range bit: the BDA
+     // coherence-invalidation pulse below intentionally keys from that bit.
+     // The execution debugger occupies only the new high control bits.
++`ifdef VEN_DDR_POSTED
++    // Hardware-only drain capability/status; PS controls cannot override it.
++    assign cpu_dbg_cmp = {18'd0, ddr_posted_fault, 1'b1, ddr_posted_drained,
++                          dbg_arch_sel, dbg_bp_clr, dbg_bp_addr,
++                          dbg_bp_en, dbg_step, dbg_halt_req, dbg_cmp_range, dbg_cmp_cfg};
++`else
+     assign cpu_dbg_cmp = {21'd0, dbg_arch_sel, dbg_bp_clr, dbg_bp_addr,
+                           dbg_bp_en, dbg_step, dbg_halt_req, dbg_cmp_range, dbg_cmp_cfg};
++`endif
+@@ -381,2 +388,9 @@
++`ifdef VEN_DDR_POSTED
++    ven_ddram_axi_posted #(.MEM_BASE(MEM_BASE), .WRITE_SLOTS(8)) u_ddr (
++        .fault(ddr_posted_fault), .drained(ddr_posted_drained),
++`else
++    assign ddr_posted_fault = 1'b0;
++    assign ddr_posted_drained = 1'b0;
+     ven_ddram_axi #(.MEM_BASE(MEM_BASE)) u_ddr (
++`endif
+         .clk(clk), .rst_n(resetn),
