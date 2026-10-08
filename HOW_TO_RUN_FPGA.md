@@ -6,6 +6,18 @@ debug tools as inspected through **2026-08-23**, with the safety preflight
 updated through **2026-10-05 UTC**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
 
+> **Current status (2026-10-08 UTC):** UV+fast-pipe mode is mandatory for repair
+> and acceptance. The current40MHz diagnostic image `c2ce7e80` reproduces the
+> original cold Quake bad-PC commit **14562→14563**. Its historical observer
+> captures coherent owner copies, effective lengths3/2 and enabled pairing;
+> the processor is **not repaired** and no full40MHz timedemo is accepted.
+> See the newest sections of the
+> [localization report](docs/FPGA_CMP_BRANCH_LOCALIZATION_2026-10-05.md).
+> Gameplay IPC for this image is **unmeasured**. Older FPGA image `53f129e9`
+> measured0.165995778 **primary/U-counter** IPC over qualified intervals within
+> cycles8,721,490,845–19,169,282,165; it is not total U+V IPC.
+> The older entries below are historical, not the current deployment status.
+
 > **Latest localization (2026-10-05 UTC):** private memory-OR/JP and
 > reversed-memory-CMP/JP controls each pass64 cases on the unchanged40MHz
 > image. The original CMP/JP ROM is also caught at actual **00a7:14566 before

@@ -4408,3 +4408,126 @@ merely because the hypothetical model can reproduce +1. No processor repair or
 new gameplay IPC is claimed. Both native queries are closed; board RAM/VHD/tar
 duplicates from the CMP capture were removed only after exact host-copy checks
 and remain recoverable from its archive.
+
+#### Historical owner/control observer, ABI9 (Oct 8 UTC)
+
+The next discriminator is now implemented without a CPU change. Observer ECO
+`ventium-owner-observer-eco.bN2OVZ` reuses18 existing pre-sampler inputs: seven
+additional ACTIVE copies, primary outer/inner selects, effective U-length[2:0],
+post-pair-gated V-length[2:0], and three mapped pairing terms. The original
+ACTIVE sample remains. Full primary/nextPC and the earlier PC-vector taps stay
+available; sacrificed EIP-D/relative-displacement bits are explicitly unknown,
+not silently reconstructed. Metadata is `00ff0096`, catalogue SHA
+`20884975c87fd5c2af4ff489bd1563b9a0ceadbb25c8ecc570d13993356fdc74`.
+
+Native, resource-watch and input-pin checks close0. Independent consumer passes:
+298196 primitive functions/sites/BELs preserved except one observer metadata LUT
+INIT; no new LUT/FF;236980 FF input polarities,329 hierarchy protections and
+561168 non-target route aliases unchanged. All existing CPU sink paths remain;
+only201 nodes/190 pips on the removed observer branches are trimmed. All nets
+route; DRC errors/critical warnings0. The seven additional owner-Q sampler
+paths pass setup and hold (minimum margins22.680/0.357ns at40MHz). These are
+**observer-path checks, not whole-CPU timing/frequency sign-off**. Peak cgroup
+memory8,677,531,648bytes, no OOM. Route closure SHA
+`5355f120d9af9c1f0a888595fe20ee0049b1ffef68d6ed0b4f812e3b6d19b522`.
+
+Reader14 tests pass (all150 historical and338 live one-hot bits, all256 ACTIVE
+combinations, old-ABI rejection, halt/coherence/filter guards). Vendor primitive
+test passes8192 edges,4101 captures,4006 holds,85 resets and64 metadata cases;
+the complete32-word metadata truth-table test covers2048 cases. The first vendor
+test's time-zero LUT-input event mistake is retained in its failed log; the
+corrected fixture changes initialization stimulus, not hardware truth tables.
+
+Closed bitgen `ventium-owner-observer-bitgen.Ks9Q3e` produces image
+`c2ce7e80a877926596b4492ee3c36fb21e636107572dc2e25f0383c3cc6eae2d`.
+Native/watch/pins0, peak5,018,951,680bytes, no OOM; no second Vivado instance.
+Bitgen closure SHA
+`4cf103480e23697044183f9ae8d4af5bc8ee6a7c77af478fe1c67e6065ee51c0`.
+
+Paired hardware calibration passes all16 SUB/JNE cases at39.999862060MHz.
+Historical59680→59685 survives subsequent HLT retirement; all eight ACTIVE
+copies0, effective lengths3/2, pairing-term OR1, outer select1/inner select0.
+Reset record is zero; no STEP, BP or comparator freeze. Host audit verifies
+the original micro-ROM, zero exception record, RAM, seed VHD and closed native
+invocation `1f5552c0424f47fba8802cf83ddba1e9`. Capture root
+`ventium-owner-observer-board.xS4gL9`, archive SHA
+`c6e00da8378dd80fde1bf9991e57a1efe0cf152cd82e38d557709f7ef100de79`.
+Its board RAM/VHD/tar duplicates were removed only after exact host-copy checks.
+The obsolete installed53f129e9 firmware copy was similarly removed to make
+deployment space; its identical host bitgen artifact is retained.
+
+This calibrates observation, **not a processor repair**. Original cold Quake
+replay follows. Currentc2ce7e80 has no qualified gameplay IPC or full timedemo
+acceptance; the older53f129e9 **0.165995778 primary/U-counter IPC** baseline
+over qualified intervals spanning cycles8,721,490,845–19,169,282,165 predates
+it and is not total U+V IPC.
+
+#### Cold replay: sampled owners and effective lengths are coherent (Oct 8 UTC)
+
+Original unmodified cold Quake on c2ce7e80 reproduces **14562→14563** at
+39.999860660MHz. No STEP, execution breakpoint, comparator freeze or restore
+precedes the fault. Native invocation `6801aece88b749e789e5d9ceb667d48d` and
+controller close0. This denotes a successfully captured **failure**, not a
+successful timedemo. The41-file host audit binds original executable bytes
+`39 7a 10 75 13` at physical113562, the retirement ring, RAM, private changed
+VHD and native post-#PF stop (23,011ns acknowledgement). Frame remains
+`[4,108,a7,3206,e0810,af]`. Archive SHA
+`9c86c49635b8c8292c1036ebbcd042b733e8954764ef6f44c3dadf45412214a6`
+under `ventium-owner-observer-board.xS4gL9`.
+
+The expanded **historical** record now observes all eight ACTIVE copies0,
+effective U length3, post-pair-gated V length2, pairing terms0/1/0 (OR1),
+primary outer select1 and inner select0. The old observation of state28,
+mapped redirect0, integer fast predicate1, and primary bits[2,3,4]=0/0/0
+is reproduced. Therefore neither a **sampled** owner-copy disagreement,
+wrong effective low length, disabled pairing nor selection of the slow-decoder
+primary arm explains this record. Actual architectural `do_v`/ZF still are
+not directly observed. Combinational taps still are not a settled waveform:
+pre-EIP-D14542 (mask00ffffdf) differs even in known bit0 from actual next14563.
+Do not convert these samples into a proof of electrical timing, or claim that
+all controls were stable throughout the setup/hold aperture.
+
+The CPU failure remains open. Focus moves to the fast next-PC data path;
+another U-only/slow-mode success cannot close it. Board RAM/VHD/tar duplicates
+were removed only after complete host verification; all remain recoverable.
+
+#### Concrete candidate: narrow length sum and late pairing selection
+
+`ventium-fastpc-pair-reassociate.N8f4hf` implements an **isolated, not yet
+integrated** candidate for the integer no-redirect PC expression:
+compute the unconditional5-bit `Ulen+Vlen`, compute U-only and paired PC
+advances in parallel, then select with `do_v`. This takes the late pairing
+decision out of the carry inputs. It adds no clock, bubble, pairing restriction,
+guest-specific predicate or state repair. Preserve existing U-width wrapping
+and the separate V not-taken redirect's intermediate-width semantics during
+integration; do not merge those expressions indiscriminately.
+
+Full32-bit SMT equivalence passes nonvacuous `sat/unsat` for all PC values,
+all4-bit U/V lengths, both code widths and both pairing decisions. A second
+nonvacuous witness proves14562+3+2=14567 for the no-redirect case. RTL simulation
+and independent Vivado-mapped vendor-primitives simulation each pass73,728
+directed/random vectors, including16/32-bit wrapping and sums above15.
+
+Two independently synthesized OOC leafs, same part/tool/options, give:
+
+| Isolated PC leaf | Current expression | Candidate |
+| --- | ---: | ---: |
+| LUTs | 81 | 59 |
+| CARRY8s | 12 | 8 |
+| CARRY8s downstream of pairing input | 6 | 0 |
+
+That is27.2% fewer LUTs and33.3% fewer carry primitives **in this leaf only**.
+Synthesis closes0, one guarded Vivado family,4GiB cap. These are not whole-core
+area savings, placed timing/Fmax, a gameplay gain, or proof of a hardware fix.
+Mapped structural export SHA
+`6b5bbc954bf3ac4c11d0ecd38c1e6e0c5f1444d2b801017e99f931de7cbeab6c`;
+candidate/test source SHA
+`686fb9a24c2b203c159cdfedd2474b90489419f115ac3b31f4858be8272c2daf`.
+
+Next: integrate the general expression without touching flags/admission or
+adding a slow fallback; run the differential and UV/fast integration gates,
+then validate original cold Quake on hardware. No production CPU RTL was
+modified in this observer/candidate study. Currentc2ce7e80 still has **no
+qualified gameplay IPC**; the older53f129e9 baseline remains0.165995778
+**primary/U-counter** IPC over qualified intervals within
+cycles8,721,490,845–19,169,282,165, not total U+V IPC.
