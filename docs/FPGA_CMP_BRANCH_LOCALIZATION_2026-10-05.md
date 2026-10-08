@@ -4654,7 +4654,7 @@ physical pass. Logical LUT INITs, old placements/locks, all 413 planned
 connections and all 236,980 FF-input polarities had passed their preceding
 checks; the later unrelated-route checks were **not reached**.
 
-R3 (`ventium-fastpc-eco-r3.t47wLR`) is a fresh bounded rerun, still pending.
+R3 (`ventium-fastpc-eco-r3.t47wLR`) is a separately closed **rejected** rerun.
 It temporarily locks **every input of all 32 affected old LUTs** to its original
 physical assignment while routing, then restores the original lock properties.
 Both all-pin literal mapping and original-cell properties must pass afterwards;
@@ -4662,6 +4662,51 @@ this does not waive the rejected conditions. The arithmetic plan is unchanged:
 71 new LUTs, four CARRY8s, zero FFs, no clock/admission/branch-control change.
 R3 input-manifest SHA-256:
 `c88d0fd9dc32aad2dd42500be0ae7c94d81a3da4d431e783a647c1c7d54b38f1`.
+
+R3 passes all **10,611** original pin mappings with **zero differences**, all
+298,196 original primitive/function/location/lock checks, 236,980 FF-input
+polarities, all 413 planned connections, 589,377 old aliases, 416,308 literal
+unrelated physical routes and 157 extended source routes. Both old constant
+trees retain all their original nodes/PIPs. Native then rejects the **physical
+DRC**, with 77 routing-error nets, three `PDIL-1` errors and 80 critical
+warnings. The three post-sum LUT sites X75Y217/218/219 conflict with constant
+route-through resources; `GLOBAL_LOGIC1` also has incomplete physical-only
+routing. A successful `route_design` return did not imply a fully legal result.
+Native exit **1**, resource/input checks **0**, peak 6,387,113,984 bytes, no
+OOM. No checkpoint, bitstream or deployment was produced.
+
+A read-only parent-checkpoint query (`ventium-fastpc-site-query.02i2nL`)
+distinguishes physical constant-node occupancy from logical net ownership and
+`IS_USED`/site-PIP checks. Its wider 84-site scan hits the 180-second cap
+(native **124**, resource/input-pin checks **0**, overall incomplete), but its
+closed, flushed output includes **all nine proposed sites**. The three failing
+sites really contain old GROUND nodes D_O/C_O/F_O respectively, although each
+reports `IS_USED=0`, zero logical cells/owners and zero used site PIPs. This is
+the direct physical explanation for those three collisions, not a conjecture
+about CPU logic. All four X70Y217–220 alternatives were also observed clear of
+both logical and physical-constant occupancy. A nine-site-only query derivative
+was prepared but **not launched**; no need to repeat the completed observations.
+
+The installed 2025.2 `route_design` manual distinguishes pin-only routing from
+`-physical_nets`. R4 (`ventium-fastpc-eco-r4.O5pZ5h`) is a fresh pending run:
+move only the 32 new post-sum LUTs from X75Y217–220 to X70Y217–220, check every
+proposed site against the actual old constant-node pools before mutation, and
+route physical constants explicitly before the declared data input pins.
+The original constant trees are fixed and every old node/PIP must remain;
+new GROUND carry connections and physical POWER tie-offs may extend them.
+All old nonconstant routes and primitive properties remain guarded, as do the
+temporary old-LUT pin locks. An early physical DRC now runs before the more
+expensive full preservation comparison, with no error waiver.
+
+All eight nonvacuous mapped arithmetic miters and 73,728 Unisim vectors pass
+again. A structured comparison confirms **only those 32 LOC fields and the
+derived site list changed**; names, INITs, ports, sources and target boundaries
+are identical. The generated vendor test RTL retains SHA-256 `2e551020...`.
+R4 plan SHA-256:
+`95abdbcab27d9ccae4989180eace233c186837c08e01e36233705b6805f93086`;
+R4 input-manifest SHA-256:
+`6f840df79827b363ee541bc35cbb06821221f8628a1af7430fd3d01f9e640f3c`.
+Nothing from R4 is yet qualified or deployed.
 
 Only one guarded Vivado family runs, with 12 GiB hard/11 GiB early-stop limits,
 no swap, a 4 GiB host-memory reserve and a 900-second launcher cap. There were
