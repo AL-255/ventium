@@ -24,9 +24,12 @@ not certification of the currently installed image.
 > cycles8,721,490,845–19,169,282,165; it is not total U+V IPC.
 > The older entries below are historical, not the current deployment status.
 
-**New candidate (2026-10-08 13:41 UTC):** the
+**New candidate (2026-10-08 15:21 UTC):** the
 [banked RAM-layout U/V-fast build](docs/UV_FAST_BANK64_2026-10-08.md) is now
-synthesizing at **40 MHz**, after fresh full-core and mapped-leaf checks. It
+synthesizing at **40 MHz**, after fresh full-core and mapped-leaf checks. The
+first bank64 attempt hit its intentional combined-memory guard (not OOM);
+recovery retains identical RTL/defines/clocks within the existing 20/8 GiB
+RAM/swap ceiling and preserves the failed attempt. It
 removes the measured eight-page capacity cliff in bounded tests; no gameplay
 IPC or full-system acceptance is claimed. This does not change the deployed
 image described above.
@@ -122,6 +125,34 @@ be verified independently. All **82** capture/debug/clock/transport host tests
 pass, including 21 new grammar, resource-limit and native-child lifecycle tests. The 275-frame
 historical failed-run prefix validates byte-for-byte with the new parser, but
 remains only that old prefix, not current-image or full-movie evidence.
+
+After successful transport closure, stream the recording to a lossless RGB
+movie without expanding the gzip archive or retaining all frames in RAM:
+
+```sh
+python3 -B fpga/board-tools/ven_encode_recording.py \
+  --capture-dir /home/yukidama/external/tmp/ACTUAL_CAPTURE_DIRECTORY \
+  --output-dir /home/yukidama/external/tmp/FRESH_MOVIE_DIRECTORY
+```
+
+Both directories must already be owned leaves under external/tmp. The output
+is `recording-15fps.mp4`: every accepted RGB332 frame, expanded by the original
+bit-replication palette, at **320×200 / 15 fps**, with no color manipulation,
+resampling or frame dropping. Lossless `libx264rgb` output is decoded back and
+its complete RGB byte sequence is hashed against the capture; native metadata
+must match dimensions, frame count, cadence and duration. The helper validates
+frame CRCs/order, complete gzip closure, raw-stream hash and the reader receipt.
+FFmpeg stages are bounded to two codec threads, 512 MiB address space and
+600 seconds each; output is limited to 512 MiB with a 2 GiB disk reserve.
+
+`movie.json` deliberately says **`PASS_LOSSLESS_RECORDED_FRAMES_ONLY`**, with
+`full_timedemo=false` and `acceptance=false`. A valid movie can depict a failed
+guest: separately prove the native producer/guest closures, 969 engine-frame
+completion, source clock/mode/identity and full coverage. Do not relabel the
+codec receipt as CPU acceptance. **97 host tests pass**, including 15 movie
+parser/native-codec tests, an exact-color round trip and a streaming input
+larger than the old prefix converter's 32 MiB limit. No new board capture is
+implied by those host tests.
 
 > **Latest localization (2026-10-05 UTC):** private memory-OR/JP and
 > reversed-memory-CMP/JP controls each pass64 cases on the unchanged40MHz
