@@ -44,6 +44,21 @@ labels, capture stop/error handling and UV-fast runtime guards. These are tool
 tests, not hardware or CPU acceptance; the live board's old pinned probe has
 not been silently replaced.
 
+For a **freshly programmed ABI-5** source image, the base probe now provides
+`prepare-cold`. First independently verify the bitstream hash/source profile,
+DDR reservation, held reset and actual 40 MHz clock; then run this command as
+root before daemon initialization. It refuses an unsupported ABI, released
+reset, nonzero retirement count, frozen capture or non-reset CR0 **before any
+write**. On admission it requests a manual halt, clears/disables the execution
+breakpoint and disarms comparator/threshold freeze triggers. It never releases
+reset/execution, clears evidence counters, changes clocks or writes guest RAM.
+Start the matching capture and cold-media daemon, then use a separate `run`
+command to release the debugger; prove real fast pairing independently.
+Do not run `prepare-cold` on the currently deployed ABI-9 image. The command is
+host-tested (**51 probe/capture/UV-guard tests total**) but awaits native board
+qualification on the new source bitstream. No bitstream has been deployed by
+these tool changes.
+
 > **Latest localization (2026-10-05 UTC):** private memory-OR/JP and
 > reversed-memory-CMP/JP controls each pass64 cases on the unchanged40MHz
 > image. The original CMP/JP ROM is also caught at actual **00a7:14566 before

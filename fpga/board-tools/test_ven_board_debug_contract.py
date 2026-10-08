@@ -4,6 +4,7 @@ import argparse
 from contextlib import ExitStack, redirect_stdout
 import importlib.util
 import io
+import json
 from pathlib import Path
 import struct
 import unittest
@@ -27,6 +28,56 @@ class FakeCtrl(bytearray):
 
 
 class DebugContractTests(unittest.TestCase):
+    def cold_ctrl(self):
+        ctrl = FakeCtrl()
+        struct.pack_into('<I', ctrl, 0x20, 1)
+        struct.pack_into('<I', ctrl, PROBE.R_DBG_CR0, 0x60000010)
+        return ctrl
+
+    def test_cold_prepare_has_only_three_admitted_writes(self):
+        ctrl = self.cold_ctrl()
+        before = bytes(ctrl)
+        output = io.StringIO()
+        with patch.object(PROBE, 'open_mmio', return_value=(987654, ctrl, None)), \
+             patch.object(PROBE.os, 'close') as close, \
+             patch.object(PROBE.struct, 'pack_into', wraps=struct.pack_into) as writes, \
+             redirect_stdout(output):
+            self.assertEqual(PROBE.prepare_cold_probe(argparse.Namespace()), 0)
+        self.assertEqual([(c.args[2], c.args[3]) for c in writes.call_args_list],
+                         [(PROBE.R_DBG_EXEC_CTRL, PROBE.DBG_EXEC_HALT_REQ | PROBE.DBG_EXEC_BP_CLR),
+                          (PROBE.W_DBG_CMP_CFG, 0), (PROBE.W_DBG_FREEZE_THRESH, 0)])
+        self.assertTrue(all(c.args[0] == '<I' and c.args[1] is ctrl for c in writes.call_args_list))
+        expected = bytearray(before)
+        for address, value in ((PROBE.R_DBG_EXEC_CTRL, PROBE.DBG_EXEC_HALT_REQ | PROBE.DBG_EXEC_BP_CLR),
+                               (PROBE.W_DBG_CMP_CFG, 0), (PROBE.W_DBG_FREEZE_THRESH, 0)):
+            struct.pack_into('<I', expected, address, value)
+        self.assertEqual(ctrl, expected)
+        report = json.loads(output.getvalue())
+        self.assertTrue(report['guest_held_reset'])
+        self.assertFalse(report['guest_released'])
+        self.assertFalse(report['acceptance'])
+        self.assertIsNone(report['gameplay_ipc'])
+        self.assertTrue(ctrl.closed)
+        close.assert_called_once_with(987654)
+
+    def test_cold_prepare_refuses_nonfresh_state_before_any_write(self):
+        for address, value in ((0x20, 0), (PROBE.R_DBG_RET_LO, 1),
+                               (PROBE.R_DBG_RET_HI, 1), (PROBE.R_DBG_FRZINFO, 0x80000000),
+                               (PROBE.R_DBG_CR0, 0x80000011), (PROBE.R_IDENT, 0),
+                               (PROBE.R_DBG_EXEC_CAP, 0x56450009)):
+            with self.subTest(address=hex(address), value=hex(value)):
+                ctrl = self.cold_ctrl()
+                struct.pack_into('<I', ctrl, address, value)
+                before = bytes(ctrl)
+                with patch.object(PROBE, 'open_mmio', return_value=(987654, ctrl, None)), \
+                     patch.object(PROBE.os, 'close'), \
+                     patch.object(PROBE.struct, 'pack_into', wraps=struct.pack_into) as writes, \
+                     self.assertRaises(RuntimeError):
+                    PROBE.prepare_cold_probe(argparse.Namespace())
+                writes.assert_not_called()
+                self.assertEqual(ctrl, before)
+                self.assertTrue(ctrl.closed)
+
     def test_abi5_run_only_clears_breakpoint_no_step_or_pair_suppression(self):
         ctrl = FakeCtrl()
         before = bytes(ctrl)

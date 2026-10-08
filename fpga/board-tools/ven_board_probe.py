@@ -173,6 +173,7 @@ ARCH_SELECTORS = (
 W_DBG_CMP_CFG = 0xA0
 W_DBG_CMP_RANGE = 0xB0
 W_DBG_CTL = 0x80
+W_DBG_FREEZE_THRESH = 0x90
 TRAP_ZERO_CFG = 0x000F_0000
 TRAP_ZERO_RANGE = 0x0003_0000
 TRAP_CS0_HIGH_CFG = 0x000F_0000
@@ -1177,6 +1178,43 @@ def read_halted_arch_state(ctrl: mmap.mmap) -> dict[str, object]:
         "not caches/TLBs or in-flight state"
     )
     return result
+
+
+def prepare_cold_probe(args: argparse.Namespace) -> int:
+    """Disarm a freshly programmed, still-reset ABI-5 image before daemon init.
+
+    Never programs the FPGA, writes guest RAM, changes clocks, asserts reset,
+    clears evidence counters, steps, or releases execution. The caller must
+    separately pin the bitstream and qualify its compiled UV-fast profile.
+    """
+    fd, ctrl, _ = open_mmio(writable=True)
+    try:
+        require_exec_debug(ctrl)
+
+        def cold_state():
+            state = debug_state(ctrl)
+            if (u32(ctrl, R_IDENT) != IDENT_MAGIC or u32(ctrl, 0x20) != 1 or
+                    state['counters']['retirements'] != 0 or
+                    state['freeze']['frozen'] or state['core_cr0'] != '60000010'):
+                raise RuntimeError('cold preparation requires unexecuted, held-reset, non-frozen reset state')
+            return state
+
+        before = cold_state()  # Complete admission before the first write.
+        # Preserve the held reset. The daemon may later initialize RAM/devices
+        # and release reset, but execution stays parked until a separate RUN.
+        struct.pack_into('<I', ctrl, R_DBG_EXEC_CTRL, DBG_EXEC_HALT_REQ | DBG_EXEC_BP_CLR)
+        struct.pack_into('<I', ctrl, W_DBG_CMP_CFG, 0)
+        struct.pack_into('<I', ctrl, W_DBG_FREEZE_THRESH, 0)
+        after = cold_state()
+        if not after['execution']['halt_requested'] or after['execution']['breakpoint_enabled']:
+            raise RuntimeError('cold preparation did not leave manual halt with breakpoint disabled')
+        print(json.dumps(dict(action='prepare-cold-abi5', before=before, after=after,
+                              guest_held_reset=True, guest_released=False, acceptance=False,
+                              gameplay_ipc=None), sort_keys=True))
+        return 0
+    finally:
+        ctrl.close()
+        os.close(fd)
 
 
 def halt_probe(args: argparse.Namespace) -> int:
@@ -2569,6 +2607,11 @@ def parse_args() -> argparse.Namespace:
         "trap-status", help="read the on-chip forensic freeze status"
     )
     trap_status.set_defaults(func=trap_status_probe)
+
+    prepare_cold = sub.add_parser(
+        "prepare-cold", help="disarm a fresh ABI-5 image while leaving reset and manual halt held"
+    )
+    prepare_cold.set_defaults(func=prepare_cold_probe)
 
     halt = sub.add_parser(
         "halt", help="park at the next instruction boundary (debug image; does not reset the guest)"
