@@ -1,5 +1,9 @@
 `timescale 1ns/1ps
-module tb_fe_banked #(parameter int SETTLE = 1, parameter int START_DELAY = 0);
+module tb_fe_banked #(
+  parameter int SETTLE = 1,
+  parameter int START_DELAY = 0,
+  parameter bit INITIAL_PORT_TRANSITIONS = 0
+);
   logic clk=0, rst_n=0, invalidate=0, capture=0;
   logic [19:0] query_page=0, capture_page=0, capture_phys=0;
   logic capture_hit=0, capture_dirty=0;
@@ -67,6 +71,14 @@ module tb_fe_banked #(parameter int SETTLE = 1, parameter int START_DELAY = 0);
     check_query(); clk=0; #(SETTLE);
   endtask
   initial begin
+    // Some event-based vendor LUT models never evaluate an all-zero input
+    // declared at time zero until an input changes. Exercise the address
+    // ports while reset is held, before the first clock or reference update.
+    // No DUT state is forced, and no checked transaction changes.
+    if (INITIAL_PORT_TRANSITIONS) begin
+      #1; query_page='1; capture_page='1;
+      #1; query_page='0; capture_page='0;
+    end
     // The mapped Xilinx functional model starts with a global set/reset pulse.
     // A netlist wrapper waits for it before applying the same explicit reset
     // and scoreboard sequence; the ordinary RTL test has no startup delay.

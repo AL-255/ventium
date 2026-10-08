@@ -54,9 +54,9 @@ launch or interrupt the sole Vivado process family.
   is a performance-capacity discriminator, not a claim that the old leaf's
   architecture is incorrect.
 
-Next: freeze a distinct full-core derivative replacing **only** this child,
-rerun the exact capacity/QEMU/pair matrix and existing permission/fault/cache
-gates, then measure area/timing. Keep the current eight-entry synthesis inputs
+Next: qualify the distinct full-core derivative replacing **only** this child
+with the capacity/QEMU/pair matrix and permission/fault/cache gates, then measure
+area/timing. Keep the eight-entry synthesis inputs
 immutable. Do not launch a second Vivado family or overlap another large model
 build with the current memory-heavy synthesis. Both CoreMark seeds, Win95
 desktop and original cold Quake timedemo/movie remain mandatory before declaring
@@ -76,8 +76,8 @@ basename; no old generated object is reused.
 At **2026-10-08 10:26:14 UTC**, `after_synthesis.py` was queued against the live
 Vivado invocation `32d0aec64c6949d88779db0f89a7cead`. Its watcher checks the
 actual process cgroup and waits for that run's native closed receipt; it never
-restarts or preempts synthesis. **Neither full model has begun compiling.**
-After closure and fresh RAM/disk admission, it will build the two models
+restarts or preempts synthesis. **Both models subsequently compiled; see closure
+below.** After synthesis closure and fresh RAM/disk admission, it builds the two models
 sequentially, **32 compiler jobs**, 16 GiB guarded scope, 600 seconds per native
 build. It then runs the capacity/QEMU matrix and bounded permission/stack,
 retirement-state and shift/branch checks. Inputs are pinned across the queue;
@@ -134,3 +134,95 @@ headers were removed, recovering **660,761,599 bytes**. Per-file hashes and
 preserved executable/log hashes are in `pch-reclaim-closed.json`; source,
 binaries and test results remain unchanged. Only the compiler caches need
 rebuilding if those leaf object directories are reused.
+
+## Matched full-core results, 12:42 UTC Oct 8
+
+Both native builds and the bounded matrix have now closed. The first queue
+stopped **after successful banked compilation, before tests**, because its
+definition-count audit forgot the Makefile's unconditional leading
+`+define+VEN_FPREM` (the explicit profile already contains FPREM). Its original
+`closed.json` remains failed. No RTL, build definition, model or test was
+changed to get past this check.
+
+`resume_exact_defines.py` admits **only the exact leading FPREM token followed
+by the entire ordered pinned profile**: 111 tokens/110 unique definitions for
+banked, 108/107 for no-cut. Six added/missing/reordered/duplicate-token negative
+controls per profile are rejected. The existing banked binary was hash-checked
+and reused, not rebuilt; the unique no-cut model was then built normally.
+`r2-closed.json` records native success, stable inputs and the original failure.
+
+- Banked model SHA-256:
+  `b4c6311b386dff92ec73fd23c6774846a053b606b109c4c8c7e78a6b1c4dbfc1`.
+- Matched no-cut model SHA-256:
+  `f6b17a879f34932dbe808d892141797d28866fef00a20b437b9d5d506c4d8cb6`.
+- Capacity evidence: `ventium-fe-capacity.7pehlw5j` (banked) and
+  `ventium-fe-capacity.yxxbfmfj` (no-cut), under external `tmp`.
+  Each profile passes all **14** page-count/AXI-latency combinations in both
+  cycle and cycle-func modes: full unmodified QEMU `--mode func --all`
+  comparisons for cycle-func, matching complete PC sequences in cycle mode,
+  natural OUT exit **133**, and **10 actual U-load/V-INC pairs** per case.
+
+| Hot data pages | 4 | 7 | 8 | 9 | 16 | 32 | 64 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Banked warm round cycles | 13 | 22 | 25 | 28 | 49 | 98 | 194 |
+| Matched no-cut U/V-fast cycles | 13 | 22 | 25 | 28 | 49 | 98 | 194 |
+
+All seven measured warm rounds match at both AXI latencies (0 and 7). Thus the
+banked proposal removes the measured eight-entry **capacity penalty** on these
+working sets without disabling pairing. This is not a general speedup or
+gameplay IPC claim. The capacity driver's old result profile string still says
+`eight-entry-UV-fast-cut`; the pinned model/source hashes above, not that stale
+label, identify the actual banked implementation.
+
+Additional banked checks pass: **4** permission/stack combinations (both trace
+modes, complete QEMU comparison), **48** paired retirement-state cases, and
+**32** shift/branch cases. Evidence directories are respectively
+`ventium-fe-permission-core.q49yy47b`, `ventium-uv-retire-pairs.n8ei19dk`, and
+`ventium-uv-shift-branch.uyqtyszk`. These directed user-mode checks account for
+the golden's unobservable terminal syscall explicitly; they do not close the
+separate generic gate's terminal-record contract failures.
+
+After both models and all microchecks closed, the prepared physical/netlist
+check was launched at about **12:43 UTC** with the documented 8 GiB/no-swap,
+single-family guard. Full CPU timing, the standard suite and original cold
+FPGA Quake timedemo/movie remain open.
+
+## Physical result and primitive-simulator initialization, Oct 8
+
+The standalone synth/place/route flow closed natively with **exit 0**, unchanged
+inputs and no resource stop; peak cgroup usage **4,653,154,304 bytes**. The
+overall physical verification remains **failed/pending**, because its first
+post-synthesis scoreboard failed. The original `closed.json` stays failed.
+
+| Routed leaf | LUTs | Registers | LUTs used as memory | Query-to-physical delay |
+| --- | ---: | ---: | ---: | ---: |
+| Eight-entry control | 258 | 371 | 0 | 2.190 ns |
+| Banked 64-entry proposal | 782 | 1,696 | 64 | 2.758 ns |
+
+The tag banks map into actual dual-read distributed RAM. **The payload does
+not:** all 1,600 payload bits remain flip-flops; the RAM inference hints are
+not sufficient. This is an area-improvement opportunity, not evidence of an
+incorrect architectural result. The standalone zero-IO, 25 ns constraints do
+not establish a CPU frequency or full-system timing closure.
+
+The first mapped scoreboard stopped at check 4: tag valid, but physical page
+zero instead of `0x20000`. A passive observer found the payload write-enable
+unknown because a vendor LUT4 address decoder never evaluated its initially
+zero inputs under Icarus. A separate unmodified-vendor-library reproducer
+(`postsim/tb_unisim_lut_init.sv`) confirms this event-initialization distinction:
+constant initialized-zero inputs yield X, while an input transition returning
+to the identical zero value yields the correct one. The archived netlist and
+vendor models have not been changed.
+
+The scoreboard now has an opt-in **address-port transition while reset remains
+held and before any clock/reference update**. Only the netlist wrapper opts
+in; ordinary RTL stimuli are unchanged. This is testbench initialization, not
+a forced DUT register/RAM value, changed transaction, or relaxed expectation.
+The initialized post-synth replay passed the first-capture point but hit its
+**180-second wall limit** without completing; exit 124 is not a pass.
+
+`postsim/replay_initialized.py` now runs both unchanged mapped netlists with
+passive progress counters and a **600-second cap per scoreboard**. It pins
+the two intentional testbench changes, all other original inputs and both
+netlist hashes. The full 1,300,925-check assertion corpus remains required;
+completion is still pending. No new synthesis or bitstream was launched.
