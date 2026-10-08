@@ -7,13 +7,16 @@ updated through **2026-10-05 UTC**. Historical clocks, binaries and results belo
 not certification of the currently installed image.
 
 > **Current status (2026-10-08 UTC):** UV+fast-pipe mode is mandatory for repair
-> and acceptance. The current40MHz diagnostic image `c2ce7e80` reproduces the
+> and acceptance. The current 40 MHz diagnostic image `1c8f20ac` reproduces the
 > original cold Quake bad-PC commit **14562→14563**. Its historical observer
 > captures coherent owner copies, effective lengths3/2 and enabled pairing;
 > the processor is **not repaired** and no full40MHz timedemo is accepted.
-> A general PC-advance RTL candidate now passes its source-bound arithmetic
-> proof, the default differential gate and 32 hardware-profile UV+fast directed
-> simulations. It is **not yet deployed**; these do not close the FPGA failure.
+> That image includes the parallel-PC ECO; the ECO did **not** fix the failure.
+> Subsequent shift-flag and DPI U/V-snapshot repairs are not deployed. A private
+> eight-entry translation-cut candidate passes 16 full paging/fault QEMU
+> comparisons and directed real-pair checks, but still lacks standard-suite
+> and whole-core physical qualification. No U-only/slow control is acceptance.
+> See the [translation-cut audit](docs/UV_FAST_TRANSLATION_CUT_2026-10-08.md).
 > See the newest sections of the
 > [localization report](docs/FPGA_CMP_BRANCH_LOCALIZATION_2026-10-05.md).
 > Gameplay IPC for this image is **unmeasured**. Older FPGA image `53f129e9`

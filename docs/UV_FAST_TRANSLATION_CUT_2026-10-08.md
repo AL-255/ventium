@@ -106,7 +106,7 @@ contract—not permission to bless the failed differential. Later U stores also
 inherit a following V ADD's EAX/flags. No comparator masks or pairing switches
 were changed to conceal it.
 
-Next: capture the genuine intermediate U architectural state before V writes,
+The resulting next step was to capture genuine intermediate U state before V writes,
 keeping final V state and actual retirement cycles unchanged. Add directed
 register/flags/narrow-write/memory-pair tests, then rerun the unmodified full
 QEMU comparator in UV-fast mode. Do not fix the checker by inventing states
@@ -128,3 +128,87 @@ zero retirement delta over five seconds. Four closed generated full-model PCH
 files (350.88 MiB) were removed to reclaim scratch space; binaries, object/archive
 files, sources, failed attempts and all native evidence remain. PCHs are
 rebuildable. External scratch has about 907 MiB free; no Vivado is running.
+
+## Combined candidate: genuine UV architectural checks now pass
+
+After the observer repair (`09ca5a64`), the eight-entry prototype was rebuilt
+in a **fresh private tree**, leaving the closed earlier evidence unchanged:
+`/home/yukidama/external/tmp/ventium-fe8-uv-snapshot.oZVtMZ`.
+The SoC binary is
+`bdadc0c87f4ad73650f351e6103dbe82842b179e7d7e62b880845367bf684d65`.
+The full-address user binary is
+`7377871fa6dc0a38b6f2d6e4f646a5fac5fa5fdfce707c0f95a3151370dfdf8a`.
+Definitions remain the frozen 107-profile plus only `VEN_FE_PIPE` and
+`VEN_FE_DTLB_MULTI`; user-mode removes only `VEN_KV260_SOC`. Both native
+models use unique harness objects, 32-job bounded builds, assertions and hard
+structural errors. Inputs and native hashes close unchanged.
+
+- **16/16 full paging/fault comparisons against QEMU pass**, without changing
+  the comparator or suppressing V. The no-cut snapshot-repaired control also
+  passes all 16. All 64 cycle/state × control/candidate × latency native runs
+  close at expected exit 133. Entire instruction sequences and paired-V counts
+  are preserved in all 16 cycle comparisons.
+- **48/48** directed U/V retirement cases pass
+  (`ventium-uv-retire-pairs.bxz2_ey9`), including genuine same-clock pairing and
+  individual post-U/post-V states. Shift/Jcc stays **32/32**
+  (`ventium-uv-shift-branch.badki10x`).
+- CPL3/task-switch matrix passes **12/12**. All 640 CMP/JNE pairs remain real
+  same-clock U/V retirements. The four warm-loop deltas versus the no-cut
+  baseline are all **zero clocks**. Whole cold paging fixtures incur **6–242
+  extra clocks (0.049–1.288%)**, rather than silently claiming zero cost for
+  registration/invalidation. These figures are not gameplay measurements.
+- Required `make verify` on the combined candidate's actual UV-fast state
+  mode remains **red: 7 functional passes / 101 length-only failures**, plus
+  the existing `mb_dmiss` band. All 108 comparator outputs were inspected;
+  the terminal-record limitation described in the observer report remains.
+  No comparator, golden, timing tolerance or execution mode was changed.
+
+`summary.json`, `system/`, `micro-r2/`, `warm-timing.json`, `verify/` and
+`final-pins.log` retain the detailed closure. The initial no-argument invocation
+of the separate source-profile checker was a preparation error, not a test
+pass; the runtime guard's seven tests passed. No board register was changed.
+The candidate is still private, not a standard-suite pass or FPGA repair.
+
+## Isolated routed physical probe — useful but not whole-core timing
+
+Three source-pinned leaves completed synthesis, placement and routing on
+`xczu15eg-ffvb1156-2-i`, Vivado 2025.2, with the actual P54-large four-way
+parent TLB and its independent V lookup retained. The identical registered
+input/output boundaries make the local path comparison meaningful; they omit
+decode, segment/address generation, L1, forwarded flags and CPU next-PC logic.
+Source and replay procedure: [`physical/`](../verif/fe_pipe/physical/README.md).
+Evidence: `/home/yukidama/external/tmp/ventium-fe8-physical-leaf.jiyQLe`.
+
+| Routed local metric | No cut | One entry | Eight entries |
+|---|---:|---:|---:|
+| U query register → physical-address result (ns) | 6.165 | 2.943 | 4.300 |
+| Any register → physical-address result (ns) | 6.165 | 3.346 | 4.300 |
+| U query → parent permission result (ns) | 5.543 | 4.420 | 5.524 |
+| V query → V physical-address result (ns) | 3.844 | 4.530 | 4.856 |
+| Total leaf LUTs, including parent + wrapper | 2,883 | 2,693 | 2,863 |
+| Total leaf FFs, including parent + wrapper | 3,403 | 3,461 | 3,762 |
+| Local internal setup-equivalent MHz, **not CPU Fmax** | 130.6 | 143.9 | 132.8 |
+
+The last row is `1000/(25 ns − worst internal setup slack)` under the leaf's
+ideal external clock. Its limiting path is parent fill/victim logic, not CPU
+execution. Ports deliberately lack I/O delays/partition locations, so the
+tool's OOC port warnings remain visible; unconstrained **internal** endpoints
+and routing errors are zero. External clock/I/O routing and real core congestion
+are not qualified. There is **no new CPU Fmax**; the unchanged board is 40 MHz.
+
+The eight-entry child itself costs **201 LUTs / 347 FFs**. Parent remapping
+changes the combined area, so the net leaf LUT difference is not a promised
+CPU-area saving. Its U address path improves **1.865 ns (30.25%)**, but the
+parent permission path barely changes and the V path worsens in this placement.
+Thus this is evidence for a limited data-path cut, **not** evidence that the
+~49.7 ns measured full-core live-PC path has become a 25 ns path. The one-entry
+variant is still rejected for the measured hot-page thrashing despite its
+smaller/faster local circuit.
+
+All three native flows close successfully, source pins hold, and the exclusive
+Vivado scope is inactive. Peak sampled cgroup use was **4,367,261,696 bytes**
+(8 GiB cap, no swap), with no resource-stop/OOM event. No production DCP,
+bitstream or board state changed. Next structural investigation is the retained
+permission/fault-admission dependency; any additional cut must preserve live
+CPL/WP checks, parent-fill invalidation, fault priority, task switches and
+fragment probes, and must be verified in UV-fast mode before integration.

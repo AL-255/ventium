@@ -26,7 +26,9 @@ The parent must invalidate **all** children on **every** DTLB fill/replacement
 and every context flush. Permissions remain in that parent. Retaining a child
 after parent replacement could bypass a required page walk/permission check.
 
-Remaining requirements include timing/area assessment, memory-chain/prime
-configuration coverage, true per-instruction U/V architectural trace snapshots,
+The combined snapshot-repaired candidate now passes all 16 full paging/fault
+QEMU comparisons with real U/V states and unchanged pair counts; see the audit.
+Remaining requirements include whole-core timing/area assessment,
+memory-chain/prime configuration coverage, the remaining differential gates,
 and the complete standard suite plus original 40 MHz cold FPGA timedemo.
 Native exits, terminal witnesses and microbenchmarks alone cannot close these.

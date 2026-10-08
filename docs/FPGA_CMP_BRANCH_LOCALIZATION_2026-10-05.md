@@ -5137,3 +5137,25 @@ diagnostic control, never a replacement for UV-fast acceptance. `mb_dmiss`
 remains red. No bitstream or CPU execution logic changed; no new gameplay IPC
 or full timedemo is claimed. The translation cut's physical evaluation and
 standard-suite qualification remain open.
+
+#### Eight-entry cut with repaired snapshots and local physical evidence
+
+The [combined-candidate audit](UV_FAST_TRANSLATION_CUT_2026-10-08.md) now has
+16/16 full paging/fault QEMU differentials, 48/48 pair-state cases, 32/32
+shift/Jcc cases and the 12-run CPL3/task-switch matrix. Genuine V-pair counts
+are preserved; four warm-loop deltas are zero. Whole cold paging fixtures pay
+6–242 extra clocks (0.049–1.288%). Broad UV-fast `make verify` remains red on
+the same 101 terminal-length differences and `mb_dmiss`; none is waived.
+
+Three isolated routed translation leaves show U-query→PFN delay 6.165 ns
+(no cut) versus 4.300 ns (eight entries), but parent-permission delay remains
+5.524 ns and V translation is 4.856 ns. Child cost is 201 LUTs/347 FFs. These
+are small local circuits, not CPU timing or a 40 MHz repair. Probe sources are
+preserved under `verif/fe_pipe/physical`; the guarded run closed native 0,
+pins unchanged, peak 4.07 GiB, no OOM, and no live Vivado remains.
+
+The runtime board guard's seven tests pass. No guest, clock, mode or image was
+changed; deployed `1c8f20ac` still has the original cold timedemo failure. No
+candidate gameplay IPC or standard-suite completion exists. Historical
+`53f129e9` remains 0.165996 U-counter IPC over qualified intervals within
+cycles 8.72B–19.17B, not total U+V and predating the candidate.
