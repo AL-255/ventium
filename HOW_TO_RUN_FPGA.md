@@ -98,6 +98,31 @@ controller or CPU acceptance. The actual bitstream/hash, board run root,
 preprogram/postprogram manifests and guarded host FIFO reader must still be
 bound before launch. No board upload/programming was performed for this package.
 
+Use the host-side `fpga/board-tools/ven_record_stream.py` for its FIFO reader:
+
+```sh
+# Create the root-owned board FIFO and its read permissions first. The host
+# output directory must be a fresh, owned leaf under external/tmp.
+python3 -B fpga/board-tools/ven_record_stream.py \
+  --board-root /dev/shm/ventium-quake-abi5-run.ACTUALTOKEN \
+  --output-dir /home/yukidama/external/tmp/ACTUAL_CAPTURE_DIRECTORY
+```
+
+It starts the exact non-PTY `/bin/cat -- FIFO` reader that the board launcher
+checks, before the producer/guest release. Its **4,500-second total / 650-second
+idle** limits replace the old diagnostic reader's 1,500-second cutoff. Raw
+RGB332 bytes are retained in a lossless gzip archive without resizing, color
+changes or sample dropping; buffering is limited to roughly two frames.
+It requires 3 GiB initially and retains a 2 GiB disk reserve, with explicit
+raw/quota and 512 MiB compressed-output bounds. Never reuse an output leaf.
+Both complete frame records **and a successful reader exit** are required;
+early whole-record EOF is transport closure, not proof of timedemo coverage.
+The board producer's native exit and closed-disk 969-frame result must still
+be verified independently. All **82** capture/debug/clock/transport host tests
+pass, including 21 new grammar, resource-limit and native-child lifecycle tests. The 275-frame
+historical failed-run prefix validates byte-for-byte with the new parser, but
+remains only that old prefix, not current-image or full-movie evidence.
+
 > **Latest localization (2026-10-05 UTC):** private memory-OR/JP and
 > reversed-memory-CMP/JP controls each pass64 cases on the unchanged40MHz
 > image. The original CMP/JP ROM is also caught at actual **00a7:14566 before
