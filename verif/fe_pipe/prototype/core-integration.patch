@@ -1,0 +1,91 @@
+diff --git a/rtl/core/core.sv b/rtl/core/core.sv
+index 515f32b4..dbfd5e64 100644
+--- a/rtl/core/core.sv
++++ b/rtl/core/core.sv
+@@ -1718,4 +1718,8 @@ module core
+ `ifdef VEN_FE_PIPE
+   logic [19:0] fe_itlb_page, fe_itlb_phys;  logic fe_itlb_hit,  fe_itlb_v;
+   logic [19:0] fe_dtlb_page, fe_dtlb_phys;  logic fe_dtlb_hit,  fe_dtlb_dirty, fe_dtlb_v;
++`ifdef VEN_FE_DTLB_MULTI
++  logic fe_d_capture, fe_d_capture_hit, fe_d_capture_dirty;
++  logic [19:0] fe_d_capture_page, fe_d_capture_phys;
++`endif
+ `endif
+@@ -9643,11 +9647,59 @@ module core
+   //    a write) -> invalidate that side so it re-registers the fresh entry next access.
+   // Invalidate wins over (re-)register this edge, so a freshly-flushed/filled page is
+   // never cached stale. Mirrors the access split: fetch (cur_is_d=0) -> itlb, data -> dtlb.
++`ifdef VEN_FE_DTLB_MULTI
++  // Experimental multi-page D-side cut; I-side and fault ordering are unchanged.
++  // ANY parent fill invalidates all children, even if the fill is a different
++  // page: it may evict an entry whose permission check still lives in the parent.
++  assign fe_dtlb_page = cur_lin[31:12];
++  ven_fe_dtlb u_fe_dtlb (
++      .clk(clk), .rst_n(rst_n),
++      .invalidate(tlb_flush || (tlb_fill_en && tlb_fill_is_d)),
++      .query_page(cur_lin[31:12]), .query_valid(fe_dtlb_v),
++      .query_hit(fe_dtlb_hit), .query_dirty(fe_dtlb_dirty), .query_phys(fe_dtlb_phys),
++      .capture(fe_d_capture), .capture_page(fe_d_capture_page),
++      .capture_phys(fe_d_capture_phys), .capture_hit(fe_d_capture_hit),
++      .capture_dirty(fe_d_capture_dirty)
++  );
++  always_comb begin
++    fe_d_capture = paging_on && fe_translatable && cur_is_d && !fe_dtlb_v;
++    fe_d_capture_page = cur_lin[31:12];
++    fe_d_capture_phys = dtlb_lk_phys[31:12];
++    fe_d_capture_hit = dtlb_lk_hit;
++    fe_d_capture_dirty = dtlb_lk_dirty;
++`ifdef VEN_PIPE_MEM_CHAIN
++    if (mc_accept && paging_on) begin
++      fe_d_capture = 1'b1;
++      fe_d_capture_page = mc_lin_q[31:12];
++      fe_d_capture_phys = mc_phys_q[31:12];
++      fe_d_capture_hit = 1'b1;
++      fe_d_capture_dirty = mc_dirty_q;
++    end
++`ifdef VEN_PIPE_REG_LOAD_PRIME
++    if (mc_prime_accept && paging_on) begin
++      fe_d_capture = 1'b1;
++      fe_d_capture_page = mc_query_lin[31:12];
++      fe_d_capture_phys = mc_query_phys[31:12];
++      fe_d_capture_hit = 1'b1;
++      fe_d_capture_dirty = mc_lookup_dirty;
++    end
++`endif
++`endif
++  end
++`endif
+   always_ff @(posedge clk) begin
+     if (!rst_n) begin
+-      fe_itlb_v <= 1'b0; fe_dtlb_v <= 1'b0;
++      fe_itlb_v <= 1'b0;
++`ifndef VEN_FE_DTLB_MULTI
++      fe_dtlb_v <= 1'b0;
++`endif
+     end else begin
+-      if (tlb_flush) begin fe_itlb_v <= 1'b0; fe_dtlb_v <= 1'b0; end
++      if (tlb_flush) begin
++        fe_itlb_v <= 1'b0;
++`ifndef VEN_FE_DTLB_MULTI
++        fe_dtlb_v <= 1'b0;
++`endif
++      end
+       else begin
+         // Re-register ONLY from a genuine translatable access this clock
+         // (fe_translatable): in a non-translatable state (a task-switch TSS save
+@@ -9667,6 +9719,7 @@ module core
+           fe_itlb_hit  <= itlb_lk_hit;    fe_itlb_v    <= 1'b1;
+         end
+         // D-side
++`ifndef VEN_FE_DTLB_MULTI
+         if (tlb_fill_en && tlb_fill_is_d) fe_dtlb_v <= 1'b0;
+ `ifdef VEN_PIPE_MEM_CHAIN
+ `ifdef VEN_PIPE_REG_LOAD_PRIME
+@@ -9693,6 +9746,7 @@ module core
+           fe_dtlb_hit   <= dtlb_lk_hit;    fe_dtlb_dirty <= dtlb_lk_dirty;
+           fe_dtlb_v     <= 1'b1;
+         end
++`endif
+       end
+     end
+   end

@@ -5099,3 +5099,23 @@ closed leaf-test PCH files (156.30 MiB) were removed; binary, sources and logs
 remain. The board retains UV+fast at 40 MHz; the proposed bounded 20 MHz
 clock-only diagnostic remains pending the user's answer, not silently run or
 counted as a fix. Gameplay IPC status and historical baseline above are unchanged.
+
+#### Multi-entry translation cut and UV trace-contract failure (Oct 8)
+
+[Measured follow-up](UV_FAST_TRANSLATION_CUT_2026-10-08.md): a private eight-entry
+registered-translation prototype removes the one-entry variant's hot-page
+thrashing in all four CPL3 comparisons, preserving 640 actual U/V pairs and
+matching the original warm cycle counts. Leaf 520,844 checks, 32/32 shift/Jcc
+runs, and 4/4 task-switch/dirty-page runs pass. It remains outside production
+filelists; no FPGA timing/area or standard-suite acceptance is claimed.
+
+The broader UV-fast paging matrix closes all native exits and matches the
+control's complete traces, but **both builds fail the full QEMU differential**:
+`retire_state` and `retire2_state` both expose final post-pair `snap`, so U's
+record includes V's register/flag writes. This is a confirmed trace-contract
+defect, not a reason to turn pairing off or mask the comparator. Capturing true
+intermediate U state is the next verification repair. Required `make verify`
+retains 108/108 functional passes and the existing red `mb_dmiss` cycle band;
+its non-paired functional controls are not UV-fast acceptance. Current candidate
+gameplay IPC remains unmeasured; historical `53f129e9` remains 0.165996 **U-counter**
+IPC over qualified intervals within cycles 8.72B–19.17B, predating the candidate.
