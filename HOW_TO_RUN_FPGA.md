@@ -1855,6 +1855,15 @@ live source roots. Independently verify all resulting payload hashes/sizes,
 defines and the delta receipt before launching. The current freeze and hashes
 are recorded in `docs/FPGA_QUAKE_DEPLOYMENT_2026-10-02.md`.
 
+The Oct 8 **experimental combined UV-fast** bundle has an explicitly reviewed
+extension: `--fe-dtlb-source` plus `--fe-dtlb-sha256` adds one translation module
+and exactly FE_PIPE/MULTI/PERM, producing 180 payloads / 113 hardware defines.
+It requires explicit core/filelist replacements and retains all no-symlink,
+source-pin and `UNQUALIFIED` checks. Its source audit, static guards and remaining
+acceptance requirements are in
+[`docs/UV_FAST_COMBINED_FREEZE_2026-10-08.md`](docs/UV_FAST_COMBINED_FREEZE_2026-10-08.md).
+This bundle is not the installed bitstream and has no gameplay IPC measurement.
+
 From the repository, focused FPU checks are available as:
 
 ```bash

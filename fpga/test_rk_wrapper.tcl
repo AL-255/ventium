@@ -36,7 +36,25 @@ require_span {STEPS.POST_ROUTE_PHYS_OPT_DESIGN.IS_ENABLED false}
 require_span {CONFIG.PSU__SAXIGP2__DATA_WIDTH {128}}
 require_span {CONFIG.PSU__CRL_APB__PL0_REF_CTRL__DIVISOR0 {15}}
 if {![regexp {set DEFS \{([^\}]*)\}} $::expanded -> defs]} { error "no DEFS" }
-if {[llength $defs] != 110} { error "wrong define count" }
+set profile_handle [open $definefile r]
+set requested_defs [split [string trim [read $profile_handle]] "\n"]
+close $profile_handle
+if {$defs ne [join $requested_defs { }]} { error "expanded defines differ from pinned profile" }
+set fe_defs {VEN_FE_PIPE VEN_FE_DTLB_MULTI VEN_FE_DTLB_PERM}
+set define_count [llength $defs]
+if {$define_count == 113} {
+    if {[lrange $defs 107 109] ne $fe_defs ||
+        [lrange $defs 110 end] ne {SYNTHESIS VTM_NO_DPI VEN_ALTSYNCRAM_XPM}} {
+        error "wrong FE-DTLB extension bundle/order"
+    }
+    if {[lsearch -exact $defs VEN_PIPE_MEM_CHAIN] >= 0} { error "unverified FE-DTLB memory-chain profile" }
+} elseif {$define_count == 110} {
+    foreach d $fe_defs {
+        if {[lsearch -exact $defs $d] >= 0} { error "partial FE-DTLB profile" }
+    }
+} else {
+    error "wrong define count"
+}
 foreach forbidden {VEN_UOPCACHE VEN_CACHE_HALF VEN_IC_NARROWB VEN_DTLB_ASSOC_2WAY} {
     if {[lsearch -exact $defs $forbidden] >= 0} { error "extra define: $forbidden" }
 }
@@ -44,4 +62,4 @@ if {[string first {add_files -fileset constrs_1 -norecurse "$HW/bitstream.xdc" "
     error "legacy FPATAN multicycle constraint remains active"
 }
 if {![info complete $::expanded]} { error "transformed Tcl is incomplete" }
-puts "RK-WRAPPER-STATIC-OK: physical40M, exact110defs, pinned roots, 1job, fatal failures"
+puts "RK-WRAPPER-STATIC-OK: physical40M, exact${define_count}defs, pinned roots, 1job, fatal failures"

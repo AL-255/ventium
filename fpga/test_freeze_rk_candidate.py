@@ -28,7 +28,10 @@ class CandidateFreezeTest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix='ventium-rk-candidate-test-')
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
+        # The helper deliberately rejects symlink ancestors. External scratch
+        # is normally reached through ~/external, so use its canonical path;
+        # otherwise negative tests could pass on the wrong preflight failure.
+        self.root = Path(self.temp.name).resolve(strict=True)
         self.parent = self.root / 'parent'
         self.live = self.root / 'live'
         self.out = self.root / 'candidate'
@@ -37,7 +40,8 @@ class CandidateFreezeTest(unittest.TestCase):
         self.top = 'ventium/fp_shared/ven_fp_top.sv'
         names = [self.top, 'ventium/fpga/launch_impl_existing.tcl',
                  'ventium/fpga/board-tools/ven_board_probe.py']
-        names += [f'ventium/rtl/file{i:03}.sv' for i in range(161)]
+        names += ['ventium/rtl/core/core.sv', 'ventium/rtl_ven_core.f']
+        names += [f'ventium/rtl/file{i:03}.sv' for i in range(159)]
         names += [f'flow/hw/file{i:02}.tcl' for i in range(10)]
         names += ['template/board/XCZU15EG_Base_Config.tcl']
         names += ['evidence/compile-inputs.before.sha256', 'evidence/Vsystem__verFiles.dat',
@@ -126,6 +130,140 @@ class CandidateFreezeTest(unittest.TestCase):
         result = FREEZE.freeze(self.args)
         self.assertEqual((result['unchanged_files'], result['replacement_files']), (177, 2))
         self.assertEqual((self.out / name).read_bytes(), source.read_bytes())
+
+    def enable_fe(self):
+        self.fe = self.live / 'ven_fe_dtlb.sv'
+        self.fe.write_text('module ven_fe_dtlb; endmodule\n')
+        self.core = self.live / 'core.sv'
+        self.core.write_text('// explicit experimental parent integration\n')
+        self.filelist = self.live / 'rtl_ven_core.f'
+        self.filelist.write_text('rtl/core/ven_fe_dtlb.sv\nrtl/core/core.sv\n')
+        for name, source in [('ventium/rtl/core/core.sv', self.core),
+                             ('ventium/rtl_ven_core.f', self.filelist)]:
+            self.args.replace.append(name + '=' + str(source))
+            self.args.replacement_sha256.append(name + '=' + digest(source))
+        self.args.fe_dtlb_source = str(self.fe)
+        self.args.fe_dtlb_sha256 = digest(self.fe)
+
+    def repin_filelist(self):
+        self.args.replacement_sha256 = [
+            'ventium/rtl_ven_core.f=' + digest(self.filelist)
+            if item.startswith('ventium/rtl_ven_core.f=') else item
+            for item in self.args.replacement_sha256]
+
+    def test_fe_exact_bundle_unqualified_and_pinned(self):
+        self.enable_fe()
+        result = FREEZE.freeze(self.args)
+        self.assertEqual((result['frozen_files'], result['unchanged_files'],
+                          result['replacement_files'], result['added_files'], result['defines']),
+                         (180, 176, 3, 1, 113))
+        manifest = json.loads((self.out / 'input-manifest.json').read_text())
+        receipt = json.loads((self.out / 'candidate-delta-manifest.json').read_text())
+        defs = self.defs[:-3] + FREEZE.FE_DEFINES + self.defs[-3:]
+        self.assertEqual(manifest['hardware_defines'], defs)
+        self.assertEqual(manifest['simulator_defines'], 110)
+        self.assertEqual(manifest['core_mhz'], 40)
+        self.assertEqual(manifest['qualification'], 'UNQUALIFIED')
+        self.assertIsNone(manifest['current_model_identity'])
+        self.assertEqual((self.out / 'defines.txt').read_text().splitlines(), defs)
+        self.assertEqual(result['defines_sha256'], digest(self.out / 'defines.txt'))
+        added = next(r for r in manifest['files'] if r['frozen'] == FREEZE.FE_SOURCE)
+        self.assertEqual(added['sha256'], digest(self.fe))
+        self.assertIsNone(added['parent_sha256'])
+        self.assertEqual(receipt['source_additions'], [added])
+        self.assertEqual(receipt['added_defines'], FREEZE.FE_DEFINES)
+        self.assertEqual((self.out / FREEZE.FE_SOURCE).read_bytes(), self.fe.read_bytes())
+        self.assertFalse((self.parent / FREEZE.FE_SOURCE).exists())
+        self.assertEqual((self.parent / 'defines.txt').read_text().splitlines(), self.defs)
+
+    def test_fe_missing_source(self):
+        self.enable_fe()
+        self.args.fe_dtlb_source = None
+        self.refused()
+
+    def test_fe_missing_pin(self):
+        self.enable_fe()
+        self.args.fe_dtlb_sha256 = None
+        self.refused()
+
+    def test_fe_wrong_pin(self):
+        self.enable_fe()
+        self.args.fe_dtlb_sha256 = '0' * 64
+        self.refused()
+
+    def test_fe_requires_core_replacement(self):
+        self.enable_fe()
+        self.args.replace = [x for x in self.args.replace if not x.startswith('ventium/rtl/core/core.sv=')]
+        self.args.replacement_sha256 = [x for x in self.args.replacement_sha256
+                                        if not x.startswith('ventium/rtl/core/core.sv=')]
+        self.refused()
+
+    def test_fe_requires_filelist_replacement(self):
+        self.enable_fe()
+        self.args.replace = [x for x in self.args.replace if not x.startswith('ventium/rtl_ven_core.f=')]
+        self.args.replacement_sha256 = [x for x in self.args.replacement_sha256
+                                        if not x.startswith('ventium/rtl_ven_core.f=')]
+        self.refused()
+
+    def test_fe_missing_from_filelist(self):
+        self.enable_fe()
+        self.filelist.write_text('rtl/core/core.sv\n')
+        self.repin_filelist()
+        self.refused()
+
+    def test_fe_duplicated_in_filelist(self):
+        self.enable_fe()
+        self.filelist.write_text('rtl/core/ven_fe_dtlb.sv\nrtl/core/ven_fe_dtlb.sv\nrtl/core/core.sv\n')
+        self.repin_filelist()
+        self.refused()
+
+    def test_fe_after_core_in_filelist(self):
+        self.enable_fe()
+        self.filelist.write_text('rtl/core/core.sv\nrtl/core/ven_fe_dtlb.sv\n')
+        self.repin_filelist()
+        self.refused()
+
+    def test_fe_outside_source_root(self):
+        self.enable_fe()
+        outside = self.root / 'outside.sv'
+        outside.write_bytes(self.fe.read_bytes())
+        self.args.fe_dtlb_source = str(outside)
+        self.refused()
+
+    def test_fe_symlink_source(self):
+        self.enable_fe()
+        alias = self.live / 'alias.sv'
+        alias.symlink_to(self.fe)
+        self.args.fe_dtlb_source = str(alias)
+        self.refused()
+
+    def test_fe_rejects_existing_defines_and_memory_chain(self):
+        self.enable_fe()
+        for name in FREEZE.FE_DEFINES + ['VEN_PIPE_MEM_CHAIN']:
+            with self.subTest(name=name):
+                self.manifest['hardware_defines'] = [name] + self.defs[1:]
+                (self.parent / 'defines.txt').write_text('\n'.join(self.manifest['hardware_defines']) + '\n')
+                self.args.parent_defines_sha256 = digest(self.parent / 'defines.txt')
+                self.repin_manifest()
+                self.refused()
+                self.assertFalse(any(self.out.iterdir()))
+
+    def test_fe_source_change_during_copy_prevents_manifest(self):
+        self.enable_fe()
+        original = FREEZE.write_new
+        fired = False
+
+        def changed(path, data):
+            nonlocal fired
+            result = original(path, data)
+            if not fired:
+                fired = True
+                self.fe.write_text('late child change\n')
+            return result
+
+        with mock.patch.object(FREEZE, 'write_new', side_effect=changed):
+            self.refused()
+        self.assertFalse((self.out / 'input-manifest.json').exists())
 
     def test_parent_manifest_sha_alteration(self):
         (self.parent / 'input-manifest.json').write_bytes(b'{}\n')

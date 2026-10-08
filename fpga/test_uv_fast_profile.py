@@ -68,6 +68,24 @@ def main():
         run('comment cannot substitute', body=shim.replace(connection, ".cycle_mode (1'b0)")+
             '\n// '+connection+'\n', rejection="requires cycle_mode=1'b1")
         run('two connections', body=shim+'\n'+connection, rejection="requires cycle_mode=1'b1")
+        run('unknown extra define', defs=defines+['VEN_UNREVIEWED_EXTENSION'],
+            rejection='wrong define count')
+        if len(defines) == 113:
+            fe = ['VEN_FE_PIPE', 'VEN_FE_DTLB_MULTI', 'VEN_FE_DTLB_PERM']
+            assert defines[107:110] == fe
+            for name in fe:
+                run('missing '+name, defs=[d for d in defines if d != name],
+                    rejection='wrong define count')
+            wrong_order = defines.copy()
+            wrong_order[107], wrong_order[108] = wrong_order[108], wrong_order[107]
+            run('FE order changed', defs=wrong_order, rejection='wrong FE-DTLB extension bundle/order')
+            unsupported = defines.copy()
+            # Preserve length and required fast-mode definitions: the refusal
+            # must come from the incompatible experiment, not another guard.
+            assert 'VEN_L2_PERF' in unsupported
+            unsupported[unsupported.index('VEN_L2_PERF')] = 'VEN_PIPE_MEM_CHAIN'
+            run('FE memory-chain owner unsupported', defs=unsupported,
+                rejection='unverified FE-DTLB memory-chain profile')
     print(f'UV-FAST-PROFILE-GUARDS-OK cases={cases}; no Vivado, no hardware acceptance')
 
 

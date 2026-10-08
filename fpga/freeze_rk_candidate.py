@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Freeze an explicitly UNQUALIFIED derivative of the pinned RK 40 MHz inputs.
 
-The 179 parent payloads and ordered 110 hardware defines are the only input
-closure. Replacements must name existing frozen paths and explicitly pinned,
-absolute regular files below declared source roots. There is no discovery,
-accepted-model inference, Vivado invocation, or modification of a prior run.
+The parent has 179 payloads and 110 hardware defines. Replacements must name
+existing frozen paths and explicitly pinned, absolute regular files below
+declared source roots. The optional reviewed FE-DTLB permission experiment adds
+exactly one pinned source and three definitions, never a discovered file/glob.
+There is no accepted-model inference, Vivado invocation, or prior-run mutation.
 
 An error leaves an incomplete output for inspection; it never publishes the
 input manifest before all source/destination stability checks have passed.
@@ -20,6 +21,10 @@ import stat
 
 class FreezeError(RuntimeError):
     pass
+
+
+FE_SOURCE = 'ventium/rtl/core/ven_fe_dtlb.sv'
+FE_DEFINES = ['VEN_FE_PIPE', 'VEN_FE_DTLB_MULTI', 'VEN_FE_DTLB_PERM']
 
 
 def sha256(data):
@@ -238,10 +243,41 @@ def freeze(args):
             raise FreezeError(f'replacement outside declared live source roots: {source}')
         replacement_data[name] = snapshot(source, replacement_pins[name])
 
+    # A deliberately narrow extension, not an arbitrary definition/source
+    # escape hatch. Keep the original parent shape checks unchanged above.
+    fe_source_arg = getattr(args, 'fe_dtlb_source', None)
+    fe_sha_arg = getattr(args, 'fe_dtlb_sha256', None)
+    extra_sources = {}
+    extra_data = {}
+    new_defs = list(defs)
+    if fe_source_arg is not None or fe_sha_arg is not None:
+        if fe_source_arg is None or fe_sha_arg is None:
+            raise FreezeError('FE-DTLB source and SHA-256 must be supplied together')
+        if any(d in defs for d in FE_DEFINES + ['VEN_PIPE_MEM_CHAIN']):
+            raise FreezeError('FE-DTLB extension requires an unextended, non-memory-chain parent')
+        required = {'ventium/rtl/core/core.sv', 'ventium/rtl_ven_core.f'}
+        if not required.issubset(replacements):
+            raise FreezeError('FE-DTLB requires explicit core.sv and rtl_ven_core.f replacements')
+        if FE_SOURCE in pinned or any(str(p) in pinned for p in PurePosixPath(FE_SOURCE).parents):
+            raise FreezeError('FE-DTLB added source collides with a parent payload')
+        source = absolute_path(fe_source_arg)
+        if not any(source.is_relative_to(root) for root in roots) or source.is_relative_to(parent):
+            raise FreezeError('FE-DTLB source outside declared live source roots')
+        extra_sources[FE_SOURCE] = source
+        extra_data[FE_SOURCE] = snapshot(source, checked_sha(fe_sha_arg))
+        filelist = replacement_data['ventium/rtl_ven_core.f']['data'].decode().splitlines()
+        source_line = FE_SOURCE.removeprefix('ventium/')
+        if filelist.count(source_line) != 1 or filelist.count('rtl/core/core.sv') != 1:
+            raise FreezeError('FE-DTLB filelist must contain exactly one child and one core')
+        if filelist.index(source_line) >= filelist.index('rtl/core/core.sv'):
+            raise FreezeError('FE-DTLB child must precede the core in its explicit filelist')
+        new_defs = defs[:-3] + FE_DEFINES + additions
+
     # Read/check the complete closure before creating any output payload.
     sources = [(manifest_path, parent_manifest), (defines_path, parent_defines)]
     sources += [(parent / name, data) for name, data in pinned.items()]
     sources += [(source, replacement_data[name]) for name, source in replacements.items()]
+    sources += [(source, extra_data[name]) for name, source in extra_sources.items()]
     for path, data in sources:
         unchanged(path, data)
     if directory(parent) != parent_identity or directory(out) != out_identity:
@@ -269,7 +305,16 @@ def freeze(args):
             delta.append({'frozen': name, 'source': str(source),
                           'parent_sha256': parent_data['sha256'], 'parent_bytes': parent_data['bytes'],
                           'candidate_sha256': data['sha256'], 'candidate_bytes': data['bytes']})
-    destinations.append((out / 'defines.txt', write_new(out / 'defines.txt', parent_defines['data'])))
+    for name, source in extra_sources.items():
+        data = extra_data[name]
+        dest = out / name
+        destinations.append((dest, write_new(dest, data['data'])))
+        new_records.append({'source': str(source), 'frozen': name,
+                            'sha256': data['sha256'], 'bytes': data['bytes'],
+                            'parent_sha256': None, 'parent_bytes': None,
+                            'provenance': 'explicit_fe_dtlb_addition', 'role': 'candidate_input'})
+    new_define_bytes = ('\n'.join(new_defs) + '\n').encode()
+    destinations.append((out / 'defines.txt', write_new(out / 'defines.txt', new_define_bytes)))
     # Fail closed on later source edits, inode replacement, destination edits,
     # symlink replacement, or directory replacement. No acceptance is inferred.
     for path, data in sources + destinations:
@@ -284,8 +329,8 @@ def freeze(args):
             'standard-suite, timing, routing, bitstream, deployment or gameplay acceptance is inherited.')
     new_manifest = {'schema': 1, 'qualification': 'UNQUALIFIED',
                     'model_profile': None, 'model_sha256': None, 'current_model_identity': None,
-                    'simulator_defines': 107, 'hardware_additions': additions,
-                    'hardware_defines': defs, 'core_mhz': 40, 'profile_note': note,
+                    'simulator_defines': len(new_defs) - 3, 'hardware_additions': additions,
+                    'hardware_defines': new_defs, 'core_mhz': 40, 'profile_note': note,
                     'parent_ancestry': {'directory': str(parent),
                                         'manifest_sha256': parent_manifest['sha256'],
                                         'defines_sha256': parent_defines['sha256'],
@@ -299,9 +344,13 @@ def freeze(args):
                'qualification': 'UNQUALIFIED', 'profile_note': note,
                'parent_directory': str(parent), 'parent_manifest_sha256': parent_manifest['sha256'],
                'parent_defines_sha256': parent_defines['sha256'],
-               'frozen_files': 179, 'unchanged_files': 179 - len(replacements),
+               'frozen_files': len(new_records), 'unchanged_files': 179 - len(replacements),
                'replacement_files': len(replacements), 'core_mhz': 40,
-               'hardware_define_count': 110, 'hardware_defines_sha256': parent_defines['sha256'],
+               'added_files': len(extra_sources),
+               'added_defines': FE_DEFINES if extra_sources else [],
+               'source_additions': [record for record in new_records
+                                    if record['provenance'] == 'explicit_fe_dtlb_addition'],
+               'hardware_define_count': len(new_defs), 'hardware_defines_sha256': sha256(new_define_bytes),
                'manifest_sha256': sha256(new_bytes), 'source_roots': [str(x) for x in roots],
                'replacements': delta}
     receipt_bytes = (json.dumps(receipt, indent=2) + '\n').encode()
@@ -312,9 +361,10 @@ def freeze(args):
     snapshot(out / 'candidate-delta-manifest.json', sha256(receipt_bytes), len(receipt_bytes))
     for path, data in sources + destinations:
         unchanged(path, data)
-    return {'qualification': 'UNQUALIFIED', 'frozen_files': 179,
+    return {'qualification': 'UNQUALIFIED', 'frozen_files': len(new_records),
             'unchanged_files': 179 - len(replacements), 'replacement_files': len(replacements),
-            'defines': 110, 'defines_sha256': parent_defines['sha256'],
+            'added_files': len(extra_sources),
+            'defines': len(new_defs), 'defines_sha256': sha256(new_define_bytes),
             'manifest_sha256': sha256(new_bytes), 'delta_manifest_sha256': sha256(receipt_bytes),
             'out': str(out)}
 
@@ -329,6 +379,9 @@ def parser():
                         metavar='FROZEN_PATH=ABSOLUTE_SOURCE')
     result.add_argument('--replacement-sha256', action='append', required=True,
                         metavar='FROZEN_PATH=SHA256')
+    result.add_argument('--fe-dtlb-source',
+                        help='explicit experimental ven_fe_dtlb.sv; adds exactly FE_PIPE/MULTI/PERM')
+    result.add_argument('--fe-dtlb-sha256', help='required SHA-256 for --fe-dtlb-source')
     result.add_argument('--out', required=True)
     return result
 
