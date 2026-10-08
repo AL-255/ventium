@@ -3989,7 +3989,24 @@ module core
       snap.cs=SEG_CS; snap.ss=SEG_SS; snap.ds=SEG_DS; snap.es=SEG_ES; snap.fs=SEG_FS; snap.gs=SEG_GS;
     end
   end
-  assign retire_state=snap;
+`ifndef SYNTHESIS
+`ifndef VTM_NO_DPI
+  // DPI-only intermediate integer-U state. Live `snap` is post-U+V after a
+  // paired commit, so it is correct for V but not for U. Capture U writeback
+  // before the real V overrides; none of this observation feeds execution.
+  arch_state_t trace_u_snap_q;
+  logic trace_u_snap_valid_q;
+  logic [31:0] trace_u_gpr [8];
+  logic trace_u_esp_we;
+`endif
+`endif
+  assign retire_state =
+`ifndef SYNTHESIS
+`ifndef VTM_NO_DPI
+      trace_u_snap_valid_q ? trace_u_snap_q :
+`endif
+`endif
+      snap;
   // M7.1: a folded-syscall retire (the instruction after cd80) is stamped with the
   // int-0x80's pc (fold_pc_r) so it aligns with the golden int-0x80 record. Inert
   // unless proxy_en && fold_pending_r, so non-proxy retires use q_pc verbatim.
@@ -4007,9 +4024,8 @@ module core
   assign retire_cr3 = creg3;
   assign retire_cr4 = creg4;
 
-  // Second retirement (paired V issue). In cycle mode only `pc` is compared, so
-  // retire2_state mirrors the primary snapshot (well-formed, never gate-checked
-  // for the V member); retire2_pc is registered at issue.
+  // V's post-commit state is the live state after both instructions. Integer
+  // U's earlier state is captured separately for DPI cycle-func comparison.
   logic [31:0] q_pc2;
   assign retire2_state = snap;
   assign retire2_pc = q_pc2;
@@ -7248,6 +7264,11 @@ module core
       // D-cache timing arrays (dc_tag/dc_val/dc_lru) are reset inside the
       // dcache_timing module's own rst_n arm (rtl/mem/dcache.sv).
       retire2_valid<=1'b0; retire_pipe_valid<=1'b0;
+`ifndef SYNTHESIS
+`ifndef VTM_NO_DPI
+      trace_u_snap_valid_q <= 1'b0;
+`endif
+`endif
       retire_pipe<=2'd0; retire_paired<=1'b0;
       retire2_pipe<=2'd0; retire2_paired<=1'b0;
       // BTB arrays (btb_tag/btb_ctr/btb_val/btb_rr) are reset inside the
@@ -7653,6 +7674,11 @@ module core
 
       retire_valid <= 1'b0;
       retire2_valid <= 1'b0;
+`ifndef SYNTHESIS
+`ifndef VTM_NO_DPI
+      trace_u_snap_valid_q <= 1'b0;
+`endif
+`endif
       retire_pipe_valid <= 1'b0;
       // x87-touched defaults low each cycle; only the x87 retire paths
       // (S_FEXEC / S_FSTORE) raise it, so the DPI x87 hook fires only for FPU
@@ -8180,6 +8206,12 @@ module core
   always_comb begin
     gpr_we = '0;
     gpr_wd = '{default:'0};
+`ifndef SYNTHESIS
+`ifndef VTM_NO_DPI
+    trace_u_gpr = gpr_o;
+    trace_u_esp_we = 1'b0;
+`endif
+`endif
     if (!rst_n) begin
       // reset GPR seed is u_regfile's own synchronous arm; nothing to drive here.
     end else if (!fsm_case_enabled) begin
@@ -8222,6 +8254,12 @@ module core
     // byte-identical.
     if (stk_ptr16 && gpr_we[R_ESP] && !esp_arch_dst)
       gpr_wd[R_ESP] = {gpr_o[R_ESP][31:16], gpr_wd[R_ESP][15:0]};
+`ifndef SYNTHESIS
+`ifndef VTM_NO_DPI
+    if (stk_ptr16 && trace_u_esp_we && !esp_arch_dst)
+      trace_u_gpr[R_ESP] = {gpr_o[R_ESP][31:16], trace_u_gpr[R_ESP][15:0]};
+`endif
+`endif
   end
 `ifndef SYNTHESIS
   // REVIEW_aug2 H-01 measurement (see ven_h01 above). Observation only -- a separate

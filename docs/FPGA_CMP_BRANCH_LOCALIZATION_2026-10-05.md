@@ -5119,3 +5119,21 @@ retains 108/108 functional passes and the existing red `mb_dmiss` cycle band;
 its non-paired functional controls are not UV-fast acceptance. Current candidate
 gameplay IPC remains unmeasured; historical `53f129e9` remains 0.165996 **U-counter**
 IPC over qualified intervals within cycles 8.72B–19.17B, predating the candidate.
+
+#### Integer U/V snapshot repair (Oct 8)
+
+[Implementation and native evidence](UV_FAST_RETIRE_STATE_2026-10-08.md): U's
+actual pre-V writeback state is now sampled for DPI; V still reports the final
+live state. Both synthesis and no-DPI preprocessing exclude the observer.
+The 48-case pair-state corpus passes, with all 24 state runs failing on the old
+control at the subject pair; actual pair cadence is required. All 16 full
+paging QEMU differentials now pass, and complete cycle/PC/pair records remain
+identical to the control. Previous shift/Jcc cases remain 32/32 green.
+
+The broad UV-fast user-mode corpus has matching architectural fields but is
+still red on 101 end-of-stream length differences; the comparator was not
+relaxed. The ordinary 108/108 legacy functional pass is only a separate
+diagnostic control, never a replacement for UV-fast acceptance. `mb_dmiss`
+remains red. No bitstream or CPU execution logic changed; no new gameplay IPC
+or full timedemo is claimed. The translation cut's physical evaluation and
+standard-suite qualification remain open.

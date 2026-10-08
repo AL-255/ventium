@@ -929,6 +929,16 @@
                 gpr_wd[pipe_u_eff.dst]= reg_merge(gpr_o[pipe_u_eff.dst], u_alu, fp_operand_width(pipe_u_eff), pipe_u_eff.dst_hi8); end
             end
             // ---- V commit (paired) ----
+`ifndef SYNTHESIS
+`ifndef VTM_NO_DPI
+            // Observe the actual U writeback values before V overwrites them.
+            // This uses the same byte/word merges and memory response owner as
+            // execution; no instruction emulation or QEMU state is involved.
+            for (int i=0; i<8; i++)
+              trace_u_gpr[i] = gpr_we[i] ? gpr_wd[i] : gpr_o[i];
+            trace_u_esp_we = gpr_we[R_ESP];
+`endif
+`endif
             if (pipe_pair_eff) begin
 `ifdef VEN_P54_DUAL_LOAD_PAIR
               if ((pipe_mem_v_hit_q

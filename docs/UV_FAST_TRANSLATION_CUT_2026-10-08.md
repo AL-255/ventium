@@ -85,7 +85,14 @@ assembly-include paths; no failed invocation was counted as a native test pass.
 
 ## Confirmed U/V retirement-trace defect — do not mask it
 
-`core.sv` assigns **both** `retire_state` and `retire2_state` to the live `snap`.
+**Follow-up:** the integer-pair observation defect below is repaired in the
+no-translation-cut control, where all 16 paging QEMU comparisons now pass with
+unchanged cycle/pair records; see
+[the repair evidence](UV_FAST_RETIRE_STATE_2026-10-08.md). The translation-cut
+prototype itself remains unqualified and outside production filelists.
+
+Before that repair, `core.sv` assigned **both** `retire_state` and
+`retire2_state` to the live `snap`.
 After a pair commits, that state includes V's writes. Consequently the primary
 U record can contain changes belonging to the following V instruction. The
 comments explicitly restrict state-checked use to non-paired mode, but

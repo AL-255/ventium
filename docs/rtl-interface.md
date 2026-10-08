@@ -41,6 +41,12 @@ import "DPI-C" context function void vtm_retire(
 - The testbench **implements** `vtm_retire` (C++ linkage `extern "C"`) and emits
   one func-mode `.vtrace` line per call.
 - `n` is the core's own retire counter (starts at 0, +1 per retired insn).
+- With `--cycle-func`, integer U/V pairs carry distinct post-instruction states:
+  the DPI-only U snapshot captures actual U writeback before V's overrides;
+  V reports the live final state. Observation does not alter issue or clocks.
+  The snapshot is excluded under `SYNTHESIS`/`VTM_NO_DPI`. This qualification
+  does not cover the legacy `VEN_FXCH_FREE` folded x87-pair observer. See
+  [paired-state regression](UV_FAST_RETIRE_STATE_2026-10-08.md).
 - The core calls this from a single always_ff retire point; pairing (two retires
   in one cycle, M4+) means two calls in the same clock with consecutive `n`.
 - **x87** (M3+) uses a second optional import `vtm_retire_x87(...)` called

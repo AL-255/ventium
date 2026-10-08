@@ -741,6 +741,38 @@
             end
 
             // ---- V commit (paired) ----
+`ifndef SYNTHESIS
+`ifndef VTM_NO_DPI
+            if (do_v) begin
+              trace_u_snap_valid_q <= 1'b1;
+              trace_u_snap_q <= snap;
+              trace_u_snap_q.eax <= trace_u_gpr[R_EAX];
+              trace_u_snap_q.ecx <= trace_u_gpr[R_ECX];
+              trace_u_snap_q.edx <= trace_u_gpr[R_EDX];
+              trace_u_snap_q.ebx <= trace_u_gpr[R_EBX];
+              trace_u_snap_q.esp <= trace_u_gpr[R_ESP];
+              trace_u_snap_q.ebp <= trace_u_gpr[R_EBP];
+              trace_u_snap_q.esi <= trace_u_gpr[R_ESI];
+              trace_u_snap_q.edi <= trace_u_gpr[R_EDI];
+              // Mirror only U's flag selection above. V may override flags
+              // later on this edge, but its flags belong to the V record.
+`ifdef VEN_FAST_XCHG_R
+              if (pipe_u_eff.is_xchg_r) begin end
+              else
+`endif
+              if (pipe_u_eff.is_lea) begin end
+              else if (pipe_u_eff.is_mem) begin
+                if (pipe_u_eff.wflags) trace_u_snap_q.eflags <= u_flags;
+              end else if (pipe_u_eff.is_shift) begin
+                if (u_shift_cnt!=5'd0)
+                  trace_u_snap_q.eflags <= fast_shift_flags(pipe_u_eff.shrot,
+                      u_shift_cnt, u_sh, u_shm1, u_shcf, eflags,
+                      fp_operand_width(pipe_u_eff));
+              end else if (pipe_u_eff.is_branch || pipe_u_eff.is_nop) begin end
+              else if (pipe_u_eff.wflags) trace_u_snap_q.eflags <= u_flags;
+            end
+`endif
+`endif
             if (do_v) begin
               if (pipe_v_eff.is_lea) begin
                 if (pipe_v_eff.dst!=R_ESP) w1={6'd0,pipe_v_eff.dst};
@@ -854,16 +886,13 @@
             retire_pipe <= 2'd0;        // U
             retire_paired <= 1'b0;
             if (do_v) begin
-              // GUARD: dual-issue (V retire) is CYCLE-MODE ONLY. retire2_state is
-              // hardwired to the primary (U) `snap` and is NOT a valid post-commit
-              // snapshot for the V instruction, so a paired V must never be emitted
-              // in a state-checked (func) run. pipe_pair already ANDs cycle_mode;
-              // this assertion locks that invariant so a future change that lets
-              // pairing leak into func mode trips loudly instead of silently
-              // comparing the wrong architectural state for the V member.
+              // Legacy functional mode disables pairing; --cycle-func keeps
+              // cycle_mode=1 and observes distinct U/V architectural states.
+              // This assertion protects the execution-mode contract, not a
+              // waiver of paired-state verification.
               // synopsys translate_off
               if (!cycle_mode) begin
-                $error("core: paired V retire (do_v) in func mode (cycle_mode=0): retire2_state is U's snap, not the V insn's post-commit state");
+                $error("core: paired V retire (do_v) with cycle_mode=0");
               end
               // synopsys translate_on
               q_pc2 <= eip_nx;                  // V retire pc (H-03: 16-bit wrapped)
