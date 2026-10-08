@@ -24,12 +24,17 @@ not certification of the currently installed image.
 > cycles8,721,490,845–19,169,282,165; it is not total U+V IPC.
 > The older entries below are historical, not the current deployment status.
 
-**New candidate (2026-10-08 15:21 UTC):** the
-[banked RAM-layout U/V-fast build](docs/UV_FAST_BANK64_2026-10-08.md) is now
-synthesizing at **40 MHz**, after fresh full-core and mapped-leaf checks. The
+**New candidate (2026-10-08 17:31 UTC):** the
+[banked RAM-layout U/V-fast build](docs/UV_FAST_BANK64_2026-10-08.md) has completed
+synthesis and its native read-only audit; implementation is now running at
+**40 MHz core / 100 MHz PL**. Synthesis uses 186,869 LUTs, 58,994 registers,
+221 BRAM tiles and 127 DSPs. Unplaced timing is still negative (20.482 MHz
+path-local estimate, **not routed Fmax**); there is no timing sign-off or new
+deployment. The
 first bank64 attempt hit its intentional combined-memory guard (not OOM);
-recovery retains identical RTL/defines/clocks within the existing 20/8 GiB
-RAM/swap ceiling and preserves the failed attempt. It
+recovery retained identical RTL/defines/clocks within the existing 20/8 GiB
+RAM/swap ceiling and closed successfully without OOM. Implementation preserves
+those inputs and uses the reviewed guarded profile. The candidate
 removes the measured eight-page capacity cliff in bounded tests; no gameplay
 IPC or full-system acceptance is claimed. This does not change the deployed
 image described above.
