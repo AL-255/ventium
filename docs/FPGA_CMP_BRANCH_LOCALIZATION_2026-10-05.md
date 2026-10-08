@@ -4636,3 +4636,52 @@ checked against the current checkpoint before mutation; an ancestral vacancy
 catalogue alone is insufficient. Placement, routing, physical-preservation
 checks, timing checks, bitstream generation and hardware replay are all pending.
 The verified tests here do not establish that this change repairs Quake.
+
+#### Local implementation checks: rejected pin-remapping attempts (Oct 8 UTC)
+
+The first implementation (`ventium-fastpc-eco.rjTkv0`) routed the finite
+75-cell/48-original-input plan, but the post-route preservation check rejected
+an original LUT input's changed physical pin assignment. Native exit **1**,
+resource and input-pin checks **0**; no output checkpoint or deployment.
+
+The separately named R2 (`ventium-fastpc-eco-r2.ftHJDZ`) exported every mapping
+difference before checking it. It disproved the initial narrow hypothesis of
+equivalent-input coalescing alone: **21 declared target inputs** changed maps,
+including high-word single inputs and moves to previously unused LUT pins.
+The single-input preservation check rejected R2 too, native **1** and
+resource/input-pin checks **0**. Do not label either routed-but-rejected run a
+physical pass. Logical LUT INITs, old placements/locks, all 413 planned
+connections and all 236,980 FF-input polarities had passed their preceding
+checks; the later unrelated-route checks were **not reached**.
+
+R3 (`ventium-fastpc-eco-r3.t47wLR`) is a fresh bounded rerun, still pending.
+It temporarily locks **every input of all 32 affected old LUTs** to its original
+physical assignment while routing, then restores the original lock properties.
+Both all-pin literal mapping and original-cell properties must pass afterwards;
+this does not waive the rejected conditions. The arithmetic plan is unchanged:
+71 new LUTs, four CARRY8s, zero FFs, no clock/admission/branch-control change.
+R3 input-manifest SHA-256:
+`c88d0fd9dc32aad2dd42500be0ae7c94d81a3da4d431e783a647c1c7d54b38f1`.
+
+Only one guarded Vivado family runs, with 12 GiB hard/11 GiB early-stop limits,
+no swap, a 4 GiB host-memory reserve and a 900-second launcher cap. There were
+no OOM events in the two closed attempts. Their four large baseline exports
+were losslessly gzip-compressed after closure; every decompressed SHA-256 was
+verified. Checkpoints, code and failure logs remain intact. On the board, only
+the closed `ventium-warmcaller.pm9WwW/run.vhd` duplicate was removed: its hash
+matched the retained original cold seed exactly, so it is recoverable by copy.
+The different `ventium-word7.rIrS2H/run.vhd` was deliberately retained.
+
+The repository's runtime mode guard passes all **7** tests; the actual FPGA
+wrapper's source/profile guard passes all **19** cases, including rejected
+fast-path-off overrides and invalid `cycle_mode` connections. These test
+enforcement, not execution correctness. An initial generic unittest discovery
+found zero tests in the script-based profile checker; the 19-case result is
+from its required direct invocation against the frozen hardware build.
+
+The deployed image remains `c2ce7e80` at 40 MHz, not repaired; neither it nor
+the candidate has qualified gameplay IPC. Historical `53f129e9` remains
+**0.165995778 primary/U-counter IPC**, not total U+V, from 127 qualified
+intervals with gaps within cycles 8,721,490,845–19,169,282,165 at
+37.499869765 MHz. The standard suite and original cold 40 MHz timedemo remain
+pending; no U-only or slow-mode control is accepted as a fix.
