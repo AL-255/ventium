@@ -640,6 +640,8 @@
             logic        do_v;
             logic [31:0] post_eip;
             logic [31:0] eip_nx;          // H-03: U-only next IP, 16-bit-wrapped
+            logic [4:0]  uv_advance_len;
+            logic [31:0] u_advance_raw, uv_advance_raw;
             logic        u_is_br, redirect, u_taken;
             logic [31:0] redir_tgt;
             do_v   = pipe_pair_eff;
@@ -806,13 +808,20 @@
             // fixed taken path is what made it easy to miss.
             //   eip_nx  = U-only next IP        (also the U not-taken fallthrough)
             //   post_eip= U(+V) next IP         (the no-branch advance)
-            eip_nx   = fp_code16(pipe_u_eff) ? {16'd0, (pipe_commit_eip[15:0] + {12'd0,pipe_u_eff.len})}
-                                      :         (pipe_commit_eip + {28'd0,pipe_u_eff.len});
-            post_eip = fp_code16(pipe_u_eff)
-                     ? {16'd0, (pipe_commit_eip[15:0] + {12'd0,pipe_u_eff.len}
-                                          + (do_v ? {12'd0,pipe_v_eff.len} : 16'd0))}
-                     :         (pipe_commit_eip + {28'd0,pipe_u_eff.len}
-                                          + (do_v ? {28'd0,pipe_v_eff.len} : 32'd0));
+            // Add the two small lengths before the PC, then select after the
+            // wide adders. A late pairing decision must not traverse a second
+            // PC carry chain. Five bits retain every carry from two 4-bit
+            // lengths; truncating the finished sum also preserves 16-bit wrap.
+            // No change to admission, retirement cadence, or V-branch wrapping.
+            // PC_ADVANCE_ARITH_BEGIN (also exercised by verif/pc_advance)
+            u_advance_raw = pipe_commit_eip + {28'd0,pipe_u_eff.len};
+            uv_advance_len = {1'b0,pipe_u_eff.len} + {1'b0,pipe_v_eff.len};
+            uv_advance_raw = pipe_commit_eip + {27'd0,uv_advance_len};
+            eip_nx = fp_code16(pipe_u_eff) ? {16'd0,u_advance_raw[15:0]} : u_advance_raw;
+            post_eip = do_v
+                     ? (fp_code16(pipe_u_eff) ? {16'd0,uv_advance_raw[15:0]} : uv_advance_raw)
+                     : eip_nx;
+            // PC_ADVANCE_ARITH_END
 
             if (u_is_br) begin
               // U is the (sole) branch this clock.
