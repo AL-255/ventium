@@ -54,6 +54,9 @@
 # Env (exported once by verify.sh): ROOT QEMU GEN_TRACE COMPARE ELF2FLAT
 #   ISA_VERIFY P5TRACE TB_BIN M5_METRICS PYTHON CC CFLAGS_BASE WORKDIR
 #   CACHE_DIR PORTBASE M5_TOL_PCT
+# TB_EXTRA_FLAGS applies to FUNC jobs only (it may contain --cycle-func).
+# TB_CYCLE_EXTRA_FLAGS is the separate whitespace-delimited CYCLE passthrough,
+# e.g. --l1-axi --quiesce 200000. Never infer a shared backend from FUNC flags.
 # =============================================================================
 set -uo pipefail
 
@@ -306,10 +309,23 @@ PY
     [ -n "$v" ] && INIT_ESP="$v"
 fi
 
-if ! "$TB_BIN" --image "$FLAT" --load "$LOAD" --entry "$ENTRY" \
-        --init-esp "$INIT_ESP" --cycle $TB_X87FLAG --out "$RTL" \
-        --max-insn "$GN" --max-cycles 80000000 \
-        > "$W/${TAG}_rtl.log" 2>&1; then
+cycle_extra=()
+read -r -a cycle_extra <<< "${TB_CYCLE_EXTRA_FLAGS:-}"
+for flag in "${cycle_extra[@]}"; do
+    case "$flag" in
+        --cycle-func|--no-trace|--dbg-step|--dbg-bp)
+            emit_cycle "$CLASS" 0 - - "invalid CYCLE trace/mode flag: $flag" - 0
+            exit 0 ;;
+    esac
+done
+cycle_cmd=("$TB_BIN" --image "$FLAT" --load "$LOAD" --entry "$ENTRY"
+           --init-esp "$INIT_ESP" --cycle)
+[[ -z "$TB_X87FLAG" ]] || cycle_cmd+=("$TB_X87FLAG")
+cycle_cmd+=(--out "$RTL" --max-insn "$GN" --max-cycles 80000000 "${cycle_extra[@]}")
+# NUL-separated argv is exact and unambiguous. Keep the old native log too;
+# neither compile-time defines nor a FUNC command proves this run used AXI.
+printf '%s\0' "${cycle_cmd[@]}" > "$W/${TAG}_rtl.argv"
+if ! "${cycle_cmd[@]}" > "$W/${TAG}_rtl.log" 2>&1; then
     emit_cycle "$CLASS" 0 - - "tb --cycle run failed" - "$CACHEHIT"
     exit 0
 fi

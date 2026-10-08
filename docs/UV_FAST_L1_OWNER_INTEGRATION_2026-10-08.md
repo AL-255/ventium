@@ -75,6 +75,10 @@ Required UV-fast `make verify` closed **FAIL**, exit 2: seven functional passes,
 slow-mode control substitutes for it. Both CoreMark seeds, Win95 desktop and
 the original cold 40 MHz FPGA Quake timedemo/movie remain unqualified here.
 
+Subsequent audit established that this generic run selected direct memory,
+not AXI. Its 4,154-clock result is not a physical-cache miss measurement; see
+the [backend configuration repair](UV_FAST_VERIFY_BACKEND_2026-10-08.md).
+
 The board's read-only five-second probe measured **40.000339 MHz**, zero new
 retirements and zero AXI activity. The previous failed run remains stopped;
 this is not a gameplay measurement. No bitstream, clock or guest mode changed.

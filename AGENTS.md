@@ -178,6 +178,11 @@ Use a per-model private source basename, verify the harness object is local
 to that model's object directory, and inspect its `.d` file for the matching
 generated headers. Do not accept a build that silently reuses an external
 model-dependent object. Keep failed builds and their native logs distinct.
+Compiling `VEN_L1_AXI` does not select the testbench's AXI backend: pass
+`--l1-axi` and verify backend activity. The unified gate uses `TB_EXTRA_FLAGS`
+for FUNC jobs and separate `TB_CYCLE_EXTRA_FLAGS` for CYCLE jobs; setting one
+does not configure the other. Preserve exact invocation and actual V-retirement
+evidence when qualifying UV-fast execution; see `docs/UV_FAST_VERIFY_BACKEND_2026-10-08.md`.
 When deriving a new model from frozen FPGA inputs, audit the entire source
 closure against the intended revision and explicitly list deliberate deltas.
 Matching define counts or preserving the parent's hashes does not incorporate

@@ -76,6 +76,11 @@ attempt exhausted its 600-second envelope after spending most of it queued
 behind the isolated Vivado scope; exit 124 and partial logs are preserved, not
 counted as DUT correctness evidence. The fresh bounded rerun completed normally.
 
+**Subsequent backend audit:** that `verify-r2` run used direct memory, not the
+L1/AXI backend. A separate full AXI rerun retains 7 functional passes / 101
+length-only failures and measures `mb_dmiss` at 41,037 clocks. See the
+[configuration repair and native replay](UV_FAST_VERIFY_BACKEND_2026-10-08.md).
+
 ## Isolated routed-cache result
 
 Root: `/home/yukidama/external/tmp/ventium-l1-payload-physical.vhwuN4`.
