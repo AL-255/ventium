@@ -1,6 +1,6 @@
 # Combined UV-fast FPGA source bundle — Oct 8, 2026
 
-**Prepared, not synthesized or deployed; not a completed Quake repair.** Candidate
+**Synthesis running, not deployed; not a completed Quake repair.** Candidate
 gameplay IPC is unmeasured. Historical `53f129e9` measured **0.1659957781052303
 primary/U-counter IPC**, not total U+V, in 127 qualified intervals with gaps
 within cycles 8,721,490,845–19,169,282,165. It predates this candidate.
@@ -75,3 +75,20 @@ original SHA-256; per-file receipts are beside `cleanup-closed.json`. Sources,
 binaries, object/dependency receipts and original failed results remain. The
 logs are recoverable from `.jsonl.gz`; PCH files are rebuildable. External free
 space is approximately 3.2 GiB, so larger runs still need a disk guard.
+
+## Whole-system synthesis launched
+
+At approximately **2026-10-08 05:24 UTC**, the native launcher began synthesis
+only from this frozen bundle (`run_synthesis.py`, `synthesis-command.json`,
+`synthesis-watch.jsonl` beside the inputs). One exclusive Vivado family, one
+synthesis worker, **19 GiB resident / 8 GiB swap** caps and four-hour envelope.
+The watcher stops on a 1,100 MiB disk reserve, low host RAM/swap, or scope memory
+pressure; no browser termination or concurrent heavy build is used. Initial
+owned scope invocation: `1c6e4eacb6de4cbfbca80859f1186f01`.
+
+The previous comparable native synthesis took **2h 25m** and reported about
+20 GB aggregate process memory; a ten-minute rerun would not be a realistic
+completion plan. That is historical sizing evidence, not a candidate ETA or
+guarantee. This run must close natively, retain input hashes, and have completed,
+nonstale synthesis checked before any area/timing result is accepted. Placement,
+routing, bitstream generation and board deployment have **not** been launched.
