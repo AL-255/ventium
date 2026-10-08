@@ -4775,8 +4775,43 @@ enforcement, not execution correctness. An initial generic unittest discovery
 found zero tests in the script-based profile checker; the 19-case result is
 from its required direct invocation against the frozen hardware build.
 
-The deployed image remains `c2ce7e80` at 40 MHz, not repaired; neither it nor
-the candidate has qualified gameplay IPC. Historical `53f129e9` remains
+The bitgen stage closed native/resource/input checks **0/0/0**, peak
+5,055,016,960 bytes, no OOM. Its independent consumer passes, including all
+204 pins and 172 input polarities of the 32 touched old LUTs. Image SHA-256:
+`1c8f20ace1dc1fd6abca508ec73a241c5f317134e682aa69f2e7e2d8545e2583`
+(20,606,636 raw bytes); bitgen closure manifest:
+`eef7e20ec277f4b8a3e55d1aa238fadc53da5c8c488bf1477884bdc51158e1b8`.
+
+That image is now deployed. A fresh, normal-RUN UV+fast SUB/JNE calibration
+passes **16/16** cases at measured **39.999865371 MHz**, with no exception
+record. Historical filtered retirement and adjacent primary ring entries
+both show `59680 -> 59685`, spanning the decoded V instruction in state 28.
+The independent host audit passes after native exit 0 and same-invocation
+closure (`b6565139d8b343d3a8edb3f8c15fba45`). Archive SHA-256:
+`186c6e8e767f63d9b37546cb778c926afd96880d2cb20591c4226b81ef878ccc`;
+host evidence is `ventium-parallel-pc-board.PFSqD4/micro-sub-closed/` under
+external tmp. This remains a directed calibration, **not Quake acceptance**.
+
+For board space, only the prior installed `ventium_fpga40_owner_scan.bit.bin`
+was removed, after verifying identical recovery copies on board and host.
+The closed microtest's private VHD, RAM and compressed archive were also
+removed from board tmpfs only after verified host retrieval and audit; all
+three remain recoverable from the host archive. Other board logs remain.
+
+The full cold Quake launch is prepared at
+`/dev/shm/ventium-quake-clock-run.ska1xk`, with original boot ROMs and private
+byte-identical seed disk. Its input manifest is
+`d6ba80a85fd7c54574b4336c1656fe7e7d26853bb6918470b2aa63c7c3a01281`.
+The 40 MHz image was freshly reloaded, held-reset clock-checked, and passive
+PC filtering configured before execution. No snapshot, guest patch, STEP,
+breakpoint, pairing disable or clock fallback is used. Host capture is
+`ventium-uvfast40-capture.fJKHHE`: lossless gzip of the original stream,
+per-record CRC/dimension/order checks, bounded disk reserve and output size.
+Five synthetic stream-validator cases pass. Producer/native closure and
+fresh console/timedemo completion are still required independently.
+
+Neither the new image nor its parent has qualified gameplay IPC yet.
+Historical `53f129e9` remains
 **0.165995778 primary/U-counter IPC**, not total U+V, from 127 qualified
 intervals with gaps within cycles 8,721,490,845–19,169,282,165 at
 37.499869765 MHz. The standard suite and original cold 40 MHz timedemo remain
