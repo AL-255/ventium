@@ -6,21 +6,31 @@ debug tools as inspected through **2026-08-23**, with the safety preflight
 updated through **2026-10-05 UTC**. Historical clocks, binaries and results below are
 not certification of the currently installed image.
 
-> **Current status (2026-10-08 20:59 UTC):** UV+fast-pipe remains mandatory.
+> **Current status (2026-10-08 21:10 UTC):** UV+fast-pipe remains mandatory.
 > The installed **ABI-5** bank64 image is `fe9f539d`, measured **39.9998 MHz**.
-> Its original cold Quake run reaches the recorded 969-frame result (~3.4 FPS),
-> and a post-demo coherent ring proves real fast U/V pairing. The lossless,
-> raw-color 15 fps movie is available; native daemon/closed-disk acceptance is
-> still open and a fresh shorter-budget cold repeat is live. No U-only/slow
+> Its original cold Quake run completes **969 frames in 289.1 seconds (3.4 FPS)**,
+> with native daemon/capture/watcher exits 0/0/0 and a fresh closed-disk result.
+> A post-demo coherent ring proves real fast U/V pairing. The complete sampled,
+> raw-color 15 fps movie is available (18.5 MB). No U-only/slow
 > fallback, STEP, breakpoint, snapshot or guest-payload patch was used.
-> Current verified gameplay **primary/U IPC is 0.165108945**, across 127
-> intervals within cycles **4,377,412,717–14,863,515,077**. Total U+V IPC is not
+> Current verified gameplay **primary/U IPC is 0.164984398**, across 126
+> intervals within cycles **3,218,417,090–13,622,310,275**. Total U+V IPC is not
 > exposed; this is not a meaningful performance improvement. The generic gate
 > and full standard suite remain unclosed. See the
 > [deployment, movie, mode witness and closure caveats](docs/UV_FAST_BANK64_2026-10-08.md).
 > Historical image `53f129e9` measured 0.165995778 primary/U IPC within cycles
 > 8,721,490,845–19,169,282,165; the intervening `1c8f20ac` ECO failed cold Quake.
 > The older entries below are historical, not the current deployment status.
+
+Current movie: `/home/yukidama/external/tmp/ventium-bank64-cold-final.eu514F/movie-r4/recording-15fps.mp4`.
+Board guest reset is held at the 40 MHz profile; all run workers have exited.
+For this cold controller, precreate both the FIFO and `producer.stderr` with
+root:riguke ownership/mode 0640. The daemon's `--secs` counts nominal 1 ms loop
+iterations **plus polling overhead**, not wall time: use the qualified **600**
+budget with the 3,600-second watcher, not equal 3,600/3,600 limits. Require
+natural daemon exit before reading its final disk: killing buffered stdio left
+the final result sector unflushed in the preceding run. No flush workaround
+or guest modification is part of the accepted procedure.
 
 **New candidate (2026-10-08 20:25 UTC):** the
 [banked RAM-layout U/V-fast build](docs/UV_FAST_BANK64_2026-10-08.md) has completed
