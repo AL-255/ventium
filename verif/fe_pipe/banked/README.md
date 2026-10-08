@@ -62,6 +62,27 @@ build with the current memory-heavy synthesis. Both CoreMark seeds, Win95
 desktop and original cold Quake timedemo/movie remain mandatory before declaring
 a major core/cache repair complete.
 
+## Matched native build preparation
+
+`/home/yukidama/external/tmp/ventium-fe-banked-core.iuIaEE` contains a frozen
+**165-file** native source tree copied from the tested payload candidate.
+`source-manifest.json` proves that **only** `rtl/core/ven_fe_dtlb.sv` differs;
+the repaired L1 is identical. Parent source and binary receipts were checked
+before copying. The banked profile keeps the exact 110 simulation definitions;
+the matched no-cut control removes only the three FE-experiment definitions,
+keeping UV/system-fast/AXI enabled. Each model has a unique local harness
+basename; no old generated object is reused.
+
+At **2026-10-08 10:26:14 UTC**, `after_synthesis.py` was queued against the live
+Vivado invocation `32d0aec64c6949d88779db0f89a7cead`. Its watcher checks the
+actual process cgroup and waits for that run's native closed receipt; it never
+restarts or preempts synthesis. **Neither full model has begun compiling.**
+After closure and fresh RAM/disk admission, it will build the two models
+sequentially, **32 compiler jobs**, 16 GiB guarded scope, 600 seconds per native
+build. It then runs the capacity/QEMU matrix and bounded permission/stack,
+retirement-state and shift/branch checks. Inputs are pinned across the queue;
+drift or failure stops it. `queued.json` is a plan/ownership record, not a pass.
+
 This proposal has **no gameplay IPC measurement**. Historical `53f129e9`:
 **0.1659957781052303 primary/U-counter IPC**, not total U+V, over qualified
 intervals within cycles 8,721,490,845–19,169,282,165; it predates the proposal.
