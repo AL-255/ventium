@@ -21,7 +21,7 @@ struct Sim {
     unsigned held_aw=0; uint64_t held_w=0; unsigned held_mask=0;
     bool aw_stalled=false, w_stalled=false;
     bool hold_aw=false, hold_w=false, hold_b=false;
-    int bad_b=-1; bool bad_r=false;
+    int bad_b=-1; bool bad_r=false; int bad_last=0;
     std::vector<Write> writes;
     std::array<uint64_t,128> memory{}, expected{};
     std::deque<uint64_t> reads;
@@ -48,7 +48,7 @@ struct Sim {
         d.m_axi_bresp=int(b)==bad_b ? 2 : 0;
         d.m_axi_rvalid=read_left && cycle>=read_at && random()%3;
         d.m_axi_rresp=bad_r ? 2 : 0;
-        d.m_axi_rlast=read_left==1;
+        d.m_axi_rlast=bad_last==1 ? read_left>0 : bad_last==2 ? false : read_left==1;
         d.m_axi_rdata=memory[read_addr%128];
         d.eval();
         if (aw_stalled) assert(d.m_axi_awvalid && d.m_axi_awaddr==held_aw);
@@ -127,10 +127,12 @@ int main(int argc,char **argv) {
     // drain. Also reset a full queue with one channel not yet accepted.
     for(unsigned channel=0;channel<3;channel++) {
         Sim s(seed,20); s.hold_aw=channel==0; s.hold_w=channel==1; s.hold_b=channel==2;
-        for(unsigned j=0;j<4;j++) s.send_write(j,0x1234+j,0xff);
+        unsigned slots=0;
+        while(!s.d.DDRAM_BUSY) { assert(slots<16); s.send_write(slots,0x1234+slots,0xff); ++slots; }
+        assert(slots>=2);
         for(unsigned j=0;j<30;j++) { s.tick(); assert(s.d.DDRAM_BUSY); }
-        s.hold_aw=s.hold_w=s.hold_b=false; s.drain(); assert(s.b==4 && s.expected==s.memory);
-        s.hold_aw=true; for(unsigned j=0;j<4;j++) s.send_write(j,j,1);
+        s.hold_aw=s.hold_w=s.hold_b=false; s.drain(); assert(s.b==slots && s.expected==s.memory);
+        s.hold_aw=true; for(unsigned j=0;j<slots;j++) s.send_write(j,j,1);
         s.reset_all();
     }
     for(int error_at : {0,2}) {
@@ -145,5 +147,22 @@ int main(int argc,char **argv) {
     { Sim s(seed,20); s.bad_r=true; s.d.DDRAM_RD=1; do {} while(!s.tick());
       s.d.DDRAM_RD=0; for(unsigned j=0;j<100;j++) s.tick();
       assert(s.d.fault && s.d.DDRAM_BUSY && s.responses==0 && s.ar==1); s.reset_all(); }
+    for(int malformed : {1,2}) {
+        Sim s(seed,20); s.bad_last=malformed; s.d.DDRAM_BURSTCNT=4;
+        s.d.DDRAM_RD=1; do {} while(!s.tick()); s.d.DDRAM_RD=0;
+        for(unsigned j=0;j<100;j++) s.tick();
+        assert(s.d.fault && s.d.DDRAM_BUSY && s.responses==0 && s.ar==1); s.reset_all();
+    }
+    for(unsigned simultaneous=0;simultaneous<2;simultaneous++) {
+        Sim s(seed,20); s.d.DDRAM_WE=1; s.d.DDRAM_RD=simultaneous;
+        s.d.DDRAM_BURSTCNT=simultaneous ? 1 : 2;
+        // Intentionally invalid producer inputs do not enter the normal
+        // scoreboard's accepted-request model; they must cause fail-stop.
+        for(unsigned j=0;j<4;j++) {
+            s.d.clk=0;s.d.eval();s.d.clk=1;s.d.eval();
+            assert(s.d.fault && s.d.DDRAM_BUSY && !s.d.m_axi_awvalid && !s.d.m_axi_wvalid && !s.d.m_axi_arvalid);
+        }
+        s.reset_all();
+    }
     std::printf("DDRAM-POSTED-FUZZ-OK seed=%u partial-alias-writes=2560 reads=160 errors/reset/skew=OK\n",seed);
 }

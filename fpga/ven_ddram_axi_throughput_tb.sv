@@ -4,6 +4,7 @@
 // No guest code, retirement estimate, or Quake-specific traffic is used here.
 module ven_ddram_axi_throughput_tb;
     parameter integer B_LATENCY = 20;
+    parameter integer WRITE_SLOTS = 4;
     localparam integer N = 64;
     reg clk = 0;
     always #5 clk = ~clk;
@@ -29,7 +30,7 @@ module ven_ddram_axi_throughput_tb;
     reg [63:0] m_axi_rdata = 0;
     wire fault;
 `ifdef VEN_TEST_POSTED
-    ven_ddram_axi_posted dut (.*);
+    ven_ddram_axi_posted #(.WRITE_SLOTS(WRITE_SLOTS)) dut (.*);
 `else
     ven_ddram_axi dut (.*);
     assign fault = 0;

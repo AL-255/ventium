@@ -1,7 +1,7 @@
 `timescale 1ns/1ps
 `default_nettype none
 // Experimental board-transport replacement, NOT selected by the FPGA flow.
-// Four ordered single-beat RAM writes may be outstanding. Independent AW/W
+// A bounded number of ordered single-beat RAM writes may be outstanding. AW/W
 // cursors retain payloads until each channel accepts them; only a real B frees
 // a slot. Reads drain ALL older writes before AR. No synthetic AXI response,
 // store forwarding, write combining, cache geometry or guest-specific address.
@@ -12,6 +12,7 @@
 module ven_ddram_axi_posted #(
     parameter integer AXI_ADDR_W = 32,
     parameter integer AXI_ID_W = 4,
+    parameter integer WRITE_SLOTS = 4,
     parameter [AXI_ADDR_W-1:0] MEM_BASE = 0
 )(
     input wire clk, rst_n,
@@ -52,11 +53,18 @@ module ven_ddram_axi_posted #(
     output wire [2:0] dbg_st,
     output reg fault
 );
-    reg [AXI_ADDR_W-1:0] addr_q [0:3];
-    reg [63:0] data_q [0:3];
-    reg [7:0] strb_q [0:3];
-    reg [1:0] tail, aw_head, w_head;
-    reg [2:0] occupied, aw_pending, w_pending;
+    localparam integer PTR_BITS = $clog2(WRITE_SLOTS);
+    initial begin
+        if (WRITE_SLOTS < 2 || WRITE_SLOTS > 16 || (WRITE_SLOTS & (WRITE_SLOTS-1)) != 0)
+            $fatal(1,"WRITE_SLOTS must be a power of two from 2 to 16");
+    end
+    // Separate address/payload banks have one independent read cursor each;
+    // entries have no bulk reset and are invalid until occupied by a request.
+    (* ram_style="distributed" *) reg [AXI_ADDR_W-1:0] addr_q [0:WRITE_SLOTS-1];
+    (* ram_style="distributed" *) reg [63:0] data_q [0:WRITE_SLOTS-1];
+    (* ram_style="distributed" *) reg [7:0] strb_q [0:WRITE_SLOTS-1];
+    reg [PTR_BITS-1:0] tail, aw_head, w_head;
+    reg [PTR_BITS:0] occupied, aw_pending, w_pending;
     localparam [2:0] IDLE=0, AR=1, R=2, DRAIN=4;
     reg [2:0] st;
     reg rd_seen, primed;
@@ -68,7 +76,7 @@ module ven_ddram_axi_posted #(
                      DDRAM_WE && DDRAM_BURSTCNT > 1;
     wire push = !DDRAM_BUSY && DDRAM_WE && !bad_input;
     wire take_read = !DDRAM_BUSY && DDRAM_RD && !rd_seen && !bad_input;
-    assign DDRAM_BUSY = !rst_n || fault || st != IDLE || occupied == 4;
+    assign DDRAM_BUSY = !rst_n || fault || st != IDLE || occupied == (PTR_BITS+1)'(WRITE_SLOTS);
     assign m_axi_awvalid = rst_n && aw_pending != 0;
     assign m_axi_wvalid = rst_n && w_pending != 0;
     assign m_axi_awaddr = addr_q[aw_head];
