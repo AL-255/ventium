@@ -4730,7 +4730,34 @@ primitive INIT/location/locks, clocks and FF polarities remain protected.
 This is a checker-scope correction, not another processor-logic modification.
 R5 input-manifest SHA-256:
 `f8bc1a1df49e247876ed005c83e38e584e1b491f9db36fa59fff7acd8b1706b5`.
-No R5 qualification, bitstream or hardware result is claimed yet.
+R5 is now closed **PASS for physical/preservation qualification only**:
+native/resource/input checks all **0**, peak 7,254,106,112 bytes, no OOM.
+The independent consumer verifies zero changed pin maps, all 102,147 old
+constant endpoints/value/polarity pairs, exactly 33 new ground inputs and
+fully routed/zero-error/zero-critical DRC. POWER geometry removes one node
+and one PIP (`INT_X50Y211/IMUX_E3`), adds 35 nodes and 32 PIPs; GROUND geometry
+is unchanged. Ordinary signal preservation remains mandatory. The closed
+checkpoint SHA-256 is
+`22bea0ba5734c7f39e8caacfd8926e30b50438a6dd92aa6c203eb01bbc86e2fa`;
+closed-route manifest SHA-256 is
+`c9da3a170e308739c6b11c4400cefcfa7f3fee0a99c5f852baf15e24265619ee`.
+
+This is **not STA sign-off**. The worst reported setup path through the new
+cone ends at passive observer `ven_retire_scan_pre_70/D`, has -19.251 ns
+slack against 25 ns, and implies about **22.6 MHz for that reported path**,
+not a whole-core Fmax. The reported minimum hold slack is +2.143 ns. The
+configured test frequency remains **40 MHz**, per the requested hardware
+diagnosis; this image has not demonstrated correct operation there.
+
+The bitgen-only derivative (`ventium-fastpc-bitgen.lp5rJt`) has been launched
+with manifest SHA-256
+`9a9c9285933cde22bb67661de5a7a07ac432d2e014f48e34a73b2643584c995f`.
+It reopens parent and candidate to compare **every pin** of all 32 touched
+old LUTs, verifies the complete new plan and retained ABI9 observer, and
+rechecks physical legality before emitting raw FPGA-manager bytes. No
+synthesis or placement/routing is authorized in that stage. Hardware
+calibration and original cold Quake remain pending; no CPU repair or new
+gameplay measurement is claimed.
 
 Only one guarded Vivado family runs, with 12 GiB hard/11 GiB early-stop limits,
 no swap, a 4 GiB host-memory reserve and a 900-second launcher cap. There were
