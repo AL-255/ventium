@@ -14,6 +14,13 @@ on the same-cycle query-to-permission-fault path without adding warm-hit bubbles
 
 Apply `core-permission.patch` **after** the original `core-integration.patch`
 in a frozen private tree; replace that tree's `ven_fe_dtlb.sv` with this version.
+Do not inherit the original experiment's Oct 3 L1 silently: it omitted committed
+response-owner repair `0f12b208`. Before building a derivative, restore and
+verify that repair (or explicitly review a subsequent delta). The corrected L1
+SHA-256 is `e24b9140f6c1c36dbc4478c88e09596787fcf40388b96197c90ad0a3bc418572`;
+`git show 0f12b208:rtl/mem/ven_l1d.sv | cmp - /candidate/rtl/mem/ven_l1d.sv`
+is the pre-build check used by the corrected candidate. See the
+[source-closure audit](../../../docs/UV_FAST_L1_OWNER_INTEGRATION_2026-10-08.md).
 Add only `VEN_FE_DTLB_PERM` to the already-tested eight-entry profile. It requires
 `VEN_FE_PIPE` and `VEN_FE_DTLB_MULTI`. `VEN_PIPE_MEM_CHAIN` is deliberately
 rejected: its lookahead capture has another owner and no corresponding raw

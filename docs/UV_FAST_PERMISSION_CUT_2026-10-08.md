@@ -1,5 +1,11 @@
 # UV-fast permission-path experiment — Oct 8, 2026
 
+Source-closure correction: this experiment inherited an Oct 3 frozen L1 that
+omitted committed response-owner repair `0f12b208`. Its results below belong to
+that exact source, not the current checkout. The omission, exact-profile failing
+reproduction and corrected combined candidate are documented in the
+[L1 integration audit](UV_FAST_L1_OWNER_INTEGRATION_2026-10-08.md).
+
 **Still not a Quake fix or FPGA acceptance.** The deployed `1c8f20ac` image,
 repaired `5a56eec6` RTL and this candidate have no qualified gameplay IPC.
 Historical `53f129e9`: **0.1659957781052303 primary/U-counter IPC**, not total
