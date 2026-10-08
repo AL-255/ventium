@@ -4816,3 +4816,114 @@ Historical `53f129e9` remains
 intervals with gaps within cycles 8,721,490,845–19,169,282,165 at
 37.499869765 MHz. The standard suite and original cold 40 MHz timedemo remain
 pending; no U-only or slow-mode control is accepted as a fix.
+
+#### Parallel-PC candidate still fails original cold Quake (October 8)
+
+Image `1c8f20ac` is **rejected as a CPU repair**. Cold run `ska1xk`, native
+invocation `749cc6c729634b9f8435cc12a9e62ef0`, measures 39.999863972 MHz.
+The watcher sees timedemo frame 8 at about 53.67 seconds after release, then
+real-mode execution with unavailable Quake mappings at 55.73 seconds. It
+never reaches the frame-32 gameplay measurement boundary: **zero qualified
+gameplay intervals**. Do not turn startup or the eight-frame prefix into an
+IPC claim.
+
+The retained historical record still contains **`14562 -> 14563`**, which is
+neither legal U-only fallthrough 14565, paired fallthrough 14567 nor branch
+target 1457a. All eight sampled ACTIVE copies remain zero; effective low
+lengths are 3/2, pair terms 0/1/0, outer/inner selectors 1/0 and mapped
+redirect zero. Earlier EIP-D known bits now read 1454a (mask 00ffffdf), again
+not a settled representation of the actual captured next PC. The raw record
+is preserved; no attribution to a specific unobserved control or electrical
+cause follows from these historical samples alone.
+
+Capture produces **275** CRC-valid 320x200 RGB332 samples, sequences 101–375,
+cycles 3,269,737,361–4,208,579,864, then exits **2** on transitional metadata
+`seq=376 720x329 pixels=205050`. The transport independently closes 0 on a
+whole-record boundary; transport success does **not** override producer
+failure. After observing the failed producer and real-mode return, the
+operator deliberately SIGTERMs the owned daemon (ExecMainCode 2/status 15),
+so this is explicitly **not natural timedemo completion**. The watcher
+closes 1, saves full architectural/observer/RAM evidence, and leaves reset
+held at 40 MHz. The closed disk contains no timedemo result.
+
+Host evidence: `external/tmp/ventium-uvfast40-capture.fJKHHE/closed-board/`.
+All manifest entries verify. Archive SHA-256:
+`facf48ac74ea1e5f2d45b7a22692203e86886131bef9d5fb2c41fb31a1a046f8`;
+manifest SHA-256:
+`c59abc8635577d042a25ab40faa7d1ebf10247d6b7a67400e61ce5b6f4fb9573`.
+The first tar attempt reported its own directory changing during archive
+creation; it is retained as failed. The successful archive uses the explicit
+sealed regular-file list, excludes its own output and verifies after host
+extraction.
+
+`quake-40MHz-UVfast-failed-prefix-15fps.mp4` in the same host root is a
+**partial diagnostic movie**, not the requested complete timedemo. All 275
+samples appear once at 15 fps, 320x200, with no brightness/gamma/contrast
+adjustment. Lossless RGB encode/decode hashes match. Raw stream SHA-256:
+`60b280c82cf60d4d3d6ae1636760184e995c8b634ff6cf51a4923b3b189a9b01`.
+
+Next investigation must cover the remaining selection/decode/control path,
+not assume the no-redirect adder was causal. A **read-only**, 300-second-capped
+native query (`ventium-fastpc-core-paths.lsG9EY`) reports actual CPU EIP D/CE
+endpoints, separately from the passive observer paths that dominate the
+earlier report. It cannot synthesize, route, write a checkpoint or deploy.
+`VEN_FE_PIPE` exists but is absent from the deployed 110-define profile;
+it is a registered page-translation option, not a U-only mode. Its possible
+relevance and current-profile correctness still need investigation before
+enabling it. No further RTL change or CPU acceptance is claimed here.
+
+Current `1c8f20ac` gameplay IPC is unmeasured. The older `53f129e9` baseline
+remains **0.165995778 primary/U-counter IPC**, not total U+V, from the 127
+qualified intervals within cycles 8,721,490,845–19,169,282,165.
+
+#### Actual CPU endpoints and retained CPL3 pairing failures (October 8)
+
+The first read-only timing query closed **1** because it assumed every EIP
+register was FDRE; reset-one bits are FDSE. The corrected query
+`ventium-fastpc-core-paths-r2.DMAYPZ` accepts the two actual primitive types
+and closes native/resource/input checks **0/0/0**. It identifies 32 distinct
+CPU EIP registers, excludes observer endpoints, and verifies the unchanged
+checkpoint hash `22bea0ba5734c7f39e8caacfd8926e30b50438a6dd92aa6c203eb01bbc86e2fa`
+before and after. No synthesis, route or deployment occurs.
+
+| Actual CPU endpoint | Setup slack at 25 ns | Data-path delay | Levels | Path-only frequency estimate |
+| --- | ---: | ---: | ---: | ---: |
+| EIP[1]/D | -24.976 ns | 49.877 ns | 112 | 20.01 MHz |
+| EIP[2]/D | -24.858 ns | 49.757 ns | 113 | 20.06 MHz |
+| EIP[1]/CE | -23.189 ns | 48.004 ns | 109 | 20.75 MHz |
+
+The estimates use `1000 / (25 - slack)`; they are neither measured maximum
+frequency nor whole-core sign-off. The first path starts at CS-base bit 3 and
+passes through the raw U-byte gather/decode, U-length-dependent V-byte
+gather/decode and branch/PC-selection logic. Routing contributes 38.734 ns
+(77.659%). The reported minimum EIP-D hold slack is +0.301 ns. These are real
+CPU endpoint reports, but dynamic sensitization at the Quake failure has not
+been established. They do not establish the cause of `14562 ->14563`.
+
+`ventium-fastpc-cpl3-32.8rNCR1` reuses the source-pinned parallel-PC full107
+simulator for 32 normal-run CPL3 cases: all native runs exit 0, all 16
+architectural checks pass, and 12/16 paired-cycle checks pass. The four
+combined I/D-conflict cases fail the required pairing witness at AXI
+latencies 0/3/7/13: every one of their 256 CMP/JNE windows retires separately
+in U. The original checker is unchanged; **the aggregate remains FAIL**.
+This repeats the earlier combined-conflict result recorded in the fixture's
+README, not a newly reproduced wrong-PC bug. The same-page baseline and
+D-only-conflict fixtures retain real same-clock CMP-U/JNE-V retirement.
+
+Source inspection explains an important distinction: the synthetic I aliases
+jump through three different code pages. `if_auth_page_q` is a one-page
+authorization cache, and a page change triggers `pipe_fetch_checked_handoff`
+into checked S_FETCH. That instruction then executes through the ordinary
+decoder rather than being re-admitted as the originally intended pair. An
+authorization check is required; losing the fast-path opportunity is not a
+valid substitute for the missing paired coverage. This does not explain an
+invalid PC in a pair that already issued on hardware. Do not globally bypass
+the fetch permission check to make this test green.
+
+Review of the remaining U/V branch path separately found and reproduced a
+real **narrow-shift/ROR flag-forwarding defect**. Its general ISA fix and
+focused tests are tracked in `docs/UV_FAST_SHIFT_FLAG_FIX_2026-10-08.md`.
+That fix is not yet deployed and is not asserted to cure the different
+CMP invalid-next-PC failure. Both the newly modified RTL and deployed
+`1c8f20ac` still have no qualified gameplay IPC. The historical baseline
+above remains unchanged.
