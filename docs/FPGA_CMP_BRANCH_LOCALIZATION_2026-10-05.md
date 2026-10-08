@@ -4927,3 +4927,114 @@ That fix is not yet deployed and is not asserted to cure the different
 CMP invalid-next-PC failure. Both the newly modified RTL and deployed
 `1c8f20ac` still have no qualified gameplay IPC. The historical baseline
 above remains unchanged.
+
+#### Live-PC timing and registered-translation control (October 8)
+
+The source-constrained read-only query
+`ventium-fastpc-live-pc-paths.nu6gjU` starts at the **32 real EIP/Q pins**, not
+CS-base registers or observer registers, and ends at real EIP D/CE pins.
+Native exit is 0, input hashes are unchanged, and the resource watch closes
+without a stop/OOM (peak cgroup charge 4,195,590,144 bytes). It uses the same
+`22bea0ba...` routed DCP, adds no case analysis/false paths, and performs no
+synthesis, route, bitgen or deployment.
+
+| Source → endpoint | Setup slack at 25 ns | Data delay | Levels | Path-only estimate |
+| --- | ---: | ---: | ---: | ---: |
+| EIP[2] → EIP[1]/D | -24.840 ns | 49.737 ns | 113 | 20.06 MHz |
+| EIP[2] → EIP[2]/D | -24.692 ns | 49.617 ns | 114 | 20.12 MHz |
+| EIP[2] → EIP[1]/CE | -23.052 ns | 47.864 ns | 110 | 20.81 MHz |
+
+Minimum reported PC→PC hold slack is +0.400 ns. Frequency estimates still
+mean `1000/(25-slack)`, **not measured Fmax or whole-core sign-off**.
+Closer inspection refines the previous broad description of the setup path:
+the worst reported path traverses the U-byte gather/decode, U-length-dependent
+byte-availability check, memory-address selection, DTLB lookup, L1 data-window
+selection, **U shift-result logic**, V-branch resolution, and final PC muxes.
+It is not simply two PC adders, nor can the whole prefix be described as
+serial U/V decode. Routing contributes 38.450 ns (77.307%). CMP should not
+select the shift result; transient/dynamic sensitization is still unproven.
+Consequently even this live-PC-source report does **not** prove the cause of
+the captured CMP `14562 ->14563` failure.
+
+The board remains on `1c8f20ac`, held in reset, measured again at
+39.999862556 MHz with zero retirement delta during the five-second check.
+No lower-clock diagnostic or new FPGA workload is run in this investigation.
+
+**Simulation-only configuration experiment:** source-pinned repaired RTL
+from `ventium-uvflags-full107.XuEzFb/candidate` plus exactly `VEN_FE_PIPE`.
+This is the existing registered page-translation option, not slow-FSM or
+U-only execution. Build root: `ventium-fe-pipe-uv.B0lVRI`; binary SHA-256:
+`776a69735dcc134bd68a5959141ec39a877197623b80fb33404b7088e55425a7`.
+The 108 definitions retain every previous UV/fast feature. Assertions and
+the six structural lint errors remain enabled. The private `tb_fe108.o`
+is freshly compiled against this model; native build/input checks close 0.
+No production default or board configuration is changed.
+
+- 32/32 repaired shift/Jcc integration runs pass with actual same-cycle
+  U/V retirement, including both trace modes and AXI latency 0/7. Evidence:
+  `ventium-uv-shift-branch.jc30nkwc`.
+- 8/8 CPL3 baseline/D-cache-conflict CMP/JNE runs pass architectural and
+  required-pair checks; the four cycle traces contain 640 actual pairs.
+- 4/4 `pdtlbw` paged-store/task-switch regressions exit 133, with
+  `cycle_mode=1` in both trace modes at latency 0/7. Pinned Pentium QEMU
+  also exits 133; the old fixture's claim that that oracle is unavailable
+  is no longer true in this environment. This is an independent guest
+  self-check, not a new per-instruction differential gate.
+- The first fixture-build attempt stopped before simulation because the
+  flat binary lacked the Makefile's final 11 padding bytes. The closed
+  failed `micro/` leaf remains; `micro-r2/` uses `objcopy --pad-to 0x100000`
+  with zero fill, restoring the existing 64 KiB BIOS contract.
+
+Passing the functional tests is insufficient: this option has a measurable
+**single-entry micro-TLB capacity cost** in the warm directed loops.
+Windows below run from the second CMP retirement through the last CMP,
+excluding initial warm-up; all instruction counts and pair coverage match.
+
+| Fixture / AXI latency | Baseline clocks | FE_PIPE clocks | Increase |
+| --- | ---: | ---: | ---: |
+| CPL3 baseline / 0 | 3,013 | 3,323 | 10.28875% |
+| D-cache conflicts / 0 | 24,135 | 25,406 | 5.26621% |
+| CPL3 baseline / 7 | 8,782 | 8,787 | 0.05693% |
+| D-cache conflicts / 7 | 136,652 | 136,652 | 0% |
+
+A separate host-only pre-edge observer reuses the unchanged compiled RTL
+library. Its four native runs preserve the original FE candidate's complete
+PC/cycle trace **byte-for-byte**; it never writes DUT state or changes clocks.
+Evidence: `observe/analysis.json` under the FE experiment root. In the
+latency-0 baseline, all **310** added clocks equal 62 occurrences of each
+of these five registered-translation waits:
+
+| EIP | Requested linear address | Previously cached D page |
+| --- | --- | --- |
+| `14590` | `100e07f4` (stack) | `10e8c` |
+| `14016` | `10e8c3e0` | `100e0` |
+| `14019` | `100e0808` (stack) | `10e8c` |
+| `14022` | `1034b120` | `100e0` |
+| `14562` | `10e8c3dc` | `1034b` |
+
+The cached entry is valid at every listed wait; the required page differs.
+The D-conflict fixture adds two more alternating pages (`10e8e`, `10e90`):
+1,778 FE-pending clocks in its warm window, but only 1,271 additional elapsed
+clocks. At AXI latency 7 those wait counts remain 310/1,778 while net elapsed
+cost is nearly hidden. Do not equate all FE-pending clocks with additive
+runtime loss when memory/issue timing changes overlap them.
+
+**Decision:** do not enable the one-entry FE option merely because its tests
+pass. A throughput-preserving translation cut would need to retain multiple
+hot page translations or pretranslate owned packets, with flush/fill,
+dirty-bit, task-switch, privilege and cross-page tests. Two entries alone
+cannot retain this baseline's three-page working set. This is proposed work,
+not an implemented CPU fix, measured routing improvement or Quake acceptance.
+Keep UV+fast enabled throughout; the separate shift-forwarding repair remains
+committed but not deployed. No new RTL or standard-suite pass is claimed by
+this configuration experiment.
+
+After every build/run closed, four explicitly identified, rebuildable `.gch`
+files were removed from the FE108 and prior full-address repair106 build
+directories, reclaiming 350.85 MiB. Executables, object/library files, source
+pins and evidence remain; the FE108 native hashes verify after cleanup.
+
+Current repaired RTL, FE experiment and deployed `1c8f20ac` have **no qualified
+gameplay IPC**. Historical `53f129e9` remains **0.165995778 primary/U-counter
+IPC**, not total U+V, over the 127 qualified intervals with gaps within cycles
+8,721,490,845–19,169,282,165; it predates all these candidates.
