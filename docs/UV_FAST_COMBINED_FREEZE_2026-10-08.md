@@ -78,7 +78,7 @@ space is approximately 3.2 GiB, so larger runs still need a disk guard.
 
 ## Whole-system synthesis launched
 
-At approximately **2026-10-08 05:24 UTC**, the native launcher began synthesis
+At approximately **2026-10-08 09:24 UTC (05:24 EDT)**, the native launcher began synthesis
 only from this frozen bundle (`run_synthesis.py`, `synthesis-command.json`,
 `synthesis-watch.jsonl` beside the inputs). One exclusive Vivado family, one
 synthesis worker, **19 GiB resident / 8 GiB swap** caps and four-hour envelope.
