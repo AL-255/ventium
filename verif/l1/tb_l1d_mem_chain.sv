@@ -15,6 +15,38 @@ module tb_l1d_mem_chain;
   logic [31:0] m_addr, m_wdata, m_rdata;
   logic [3:0] m_wstrb;
   logic [1:0] m_rd_size;
+`ifdef VEN_L1D_CODE_BUFFER
+  logic c_code=0;
+`endif
+`ifdef VEN_L1D_STORE_POLICY
+  logic [3:0] c_store_update_mask=4'hf;
+`endif
+`ifdef VEN_P54_DUAL_STORE_PAIR
+  logic c_pair_req=0, c_pair_ready, c_pair_ack;
+  logic [31:0] c_pair_addr=0, c_pair_wdata=0;
+  logic [3:0] c_pair_wstrb=0;
+`ifdef VEN_L1D_STORE_POLICY
+  logic [3:0] c_pair_store_update_mask=4'hf;
+`endif
+  logic m_pair_req, m_pair_ready=0, m_pair_ack=0;
+  logic [31:0] m_pair_addr, m_pair_wdata;
+  logic [3:0] m_pair_wstrb;
+`endif
+`ifdef VEN_P54_DUAL_HIT
+  logic [1:0] pair_req_valid=0, pair_cacheable=2'b11, pair_rsp_ready=2'b11;
+  logic [1:0][31:0] pair_paddr='0;
+  logic [1:0][1:0] pair_size_log2='0;
+  logic [1:0][15:0] pair_owner='0;
+  logic [1:0] pair_req_ready, pair_req_split, pair_rsp_valid, pair_rsp_cancel;
+  logic pair_bank_conflict;
+  logic [1:0][15:0] pair_rsp_owner;
+  logic [1:0][31:0] pair_rsp_paddr, pair_rsp_data;
+`ifdef VEN_P54_DUAL_BYTE_LOAD_PAIR
+  logic pair_now_req=0, pair_now_cacheable=1, pair_now_valid;
+  logic [31:0] pair_now_paddr=0, pair_now_data;
+  logic [1:0] pair_now_size_log2=0;
+`endif
+`endif
 `ifdef VEN_FP_LOAD64
   logic [31:0] c_rdata_hi;
   logic c_rdata_hi_valid;
@@ -57,11 +89,25 @@ module tb_l1d_mem_chain;
     while(dut.st!=0) @(negedge clk);
   endtask
   task automatic arm_old(input logic [31:0] addr);
+`ifdef VEN_L1D_TWO_WINDOW_REUSE
+    // Exercise a genuine registered owner, not either saved-window hit.
+    // Use ordinary reads to move both windows; no hierarchical state forcing.
+    read_at('h3040); read_at('h3860);
+`endif
     @(negedge clk); c_req=1; c_we=0; c_addr=addr; c_wstrb=4'hf;
     // A normal request captures the registered response on the next edge.
     @(posedge clk); @(negedge clk);
     if(!c_ack || !dut.rd_match) $fatal(1,"old registered response not armed");
   endtask
+`ifdef VEN_RAW_V_READ_PRIME
+  task automatic prime_only(input logic [31:0] addr);
+    @(negedge clk); c_next_req=1; c_next_commit=1; c_next_addr=addr;
+    @(posedge clk);
+    if (!c_next_ready || c_ack || m_req)
+      $fatal(1,"cache-only prime failed / issued backing traffic");
+    @(negedge clk); c_next_req=0; c_next_commit=0;
+  endtask
+`endif
   initial begin
     for(int i=0;i<65536;i++) mem[i]=8'(i^(i>>8));
     repeat(3) @(negedge clk); rst_n=1;
@@ -175,7 +221,33 @@ module tb_l1d_mem_chain;
     @(negedge clk); c_next_req=0; c_next_commit=0; c_next_cacheable=1;
 `endif
 `ifdef VEN_PIPE_REG_LOAD_PRIME
+`ifdef VEN_RAW_V_READ_PRIME
+    // Cache-window warming grants no architectural ownership. A frontend gap,
+    // snoop, flush, or intervening committed store must be safe before demand.
+    read_at('h1000);
+    prime_only('h1000);
+    repeat (3) @(negedge clk);
+    read_at('h1000);
+    prime_only('h1000);
+    snoop_inv_valid=1; snoop_inv_addr='h1000;
+    mem['h1000]=8'h83;
+    @(posedge clk); if(c_ack || c_next_ready) $fatal(1,"cache-only prime survived snoop edge");
+    @(negedge clk); snoop_inv_valid=0;
+    read_at('h1000);
+    prime_only('h1000);
+    flush_all=1;
+    @(posedge clk); if(c_ack || c_next_ready) $fatal(1,"cache-only prime survived flush edge");
+    @(negedge clk); flush_all=0;
+    read_at('h1000);
+    prime_only('h1000);
+    c_req=1; c_we=1; c_addr='h1000; c_wstrb=4'hf; c_wdata='h17293b4d;
+    do @(posedge clk); while(!c_ack);
+    @(negedge clk); c_req=0; c_we=0;
+    read_at('h1000);
+    if(accepted!=150) $fatal(1,"wrong raw-prime accepted count %0d",accepted);
+`else
     if(accepted!=146) $fatal(1,"wrong accepted count %0d",accepted);
+`endif
 `else
     if(accepted!=145) $fatal(1,"wrong accepted count %0d",accepted);
 `endif
