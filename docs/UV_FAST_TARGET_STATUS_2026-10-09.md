@@ -434,3 +434,24 @@ The corrected 10-iteration ratios are 1.823895/1.826804, **not accepted scores**
 Both CRC sets, 24 complete QEMU-state micro comparisons and 24 UV-cycle runs
 pass. No RTL or full-PC policy changed, so no Quake/FPGA gain is attributed.
 See [backend diagnosis](../verif/bench/COREMARK_BACKEND_DIAGNOSTIC.md).
+
+## Scalar final-operand handoff
+
+The next private candidate, core `9fa1b292` / corrected-host user `09aa12d9`,
+adds FIAR32 and FCOM32/64 to the existing checked final-source-beat handoff.
+It saves one command-dispatch clock without changing FPU execution latency,
+queue classes, storage or memory ports. Directed FIADD32 loops improve
+**7→6 clocks**, FCOM32/64 **4→3**. The 568 complete architectural comparisons,
+24 precise operand-fault cases, 12 debug/lazy-FP cases, 76 broader system
+comparisons and three synthesis-guard lint profiles pass. Actual predicate/
+payload leaves pass 114,688 checks each enabled/disabled and a deliberately
+broken implementation fails the expected negative control.
+
+The generic gate still fails with the existing 101 terminal mismatches/four
+bands; complete same-input parent parity passes all 108 functional programs.
+Both short CoreMark seeds retain identical clocks and CRCs on direct and
+corrected low-RAM AXI backends. No full-PC run or FPGA image contains this
+latest flag; **0.44004644 remains the verified gameplay baseline**, not a
+result for either later candidate. The existing combined cold pair continues;
+no additional cold pair was launched. Details, retained failed test attempts
+and remaining acceptance: [scalar operand handoff](../verif/fe_pipe/FP_SCALAR_LOAD_CMD.md).
