@@ -8,6 +8,40 @@ candidates. The target remains **0.48**. Direct-memory CoreMark's earlier
 **2.10736/2.11041 CM/MHz** does not measure FPGA DDR/cache performance or this
 new candidate.
 
+## Combined full-PC qualification launched
+
+`external/tmp/ventium-pop-drain-soc.PSCvg59V` combines this core with the
+LRU-owner repair and the FPGA registered-output/read-first RAM profile.
+Model `c90d8fc04321f4875111f3f038d8e47e28f3f19539f0bb044bec3fce4878f6a5`
+builds natively with stable pins. Every actual core/FP source matches the
+microtested pop-drain candidate; platform sources match the XPM parent.
+`VEN_FP_POP_DRAIN` is the only added macro. The unique host object/header and
+all four intended RAM-model instances are checked. The same 98 inherited
+third-party structural warnings remain; this is not clean full-SoC lint.
+
+Fresh cold Quake/Win95 services `ventium-pop-drain-{quake,win95}-oct09` run
+on CPUs18/19, invocation IDs `a41823228ff2456c8b359fa1253de2a5` and
+`d997b066cf73405cb027edbf8b8a95c2`. Both actual native executable identities
+were admitted with unchanged media, 40/40/80 MHz clocks, full P5 L1s,
+32 KiB platform L2, posted16 and UV + relocated fast paths. No snapshots,
+guest patches or STEP. Neither has a qualified gameplay or suite result yet.
+
+Current-core direct model `3cde0281ae31b217b1915b2dbf2cadd241969a2efc7468297016533e30bd6273`
+passes two short host-settle qualifications under
+`ventium-pop-drain-coremark.9tka4Ty1/qualify-r{3,4}`. Both standard seed forms
+have correct CRCs, identical clocks/retirements and byte-identical final model
+and mapped memory with/without the host optimization. Fifteen unsafe host
+configurations are rejected. These ten-iteration checks are **not full scores**.
+
+Full seeds were not launched because measured host throughput (~189k clocks/s)
+projects beyond the unchanged 60-minute cap. A matched cross-CPU diagnostic,
+`ventium-current-host-check.5VOcWwjR`, gives the previous passing model and this
+model the same 4,823,423-clock workload: both take 25.3–25.8 seconds, with
+unchanged CRCs/retirements, ~99% CPU, zero major page faults or swaps and only
+0.11 seconds aggregate cgroup throttling. This identifies shared host slowdown,
+not a pop-drain clock-count regression; its underlying host cause remains open.
+The earlier full 2.10736/2.11041 scores are not transferred to this model.
+
 ## Observed cause
 
 A read-only host probe links each **unchanged** frozen RTL archive and logs
