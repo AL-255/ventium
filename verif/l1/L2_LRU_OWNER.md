@@ -107,9 +107,10 @@ repairs for negative tests only. Host recipe guards:
 
 The additional `--xpm-fidelity` cases exercise the registered-output,
 read-first **data RAM** model selected for FPGA BRAMs. The LRU/tag RAM remains
-asynchronous in both profiles. Nine host recipe tests pass. The current cold
+asynchronous in both profiles. Nine host recipe tests pass. The first cold
 full-PC runs retain their parent's behavioral data RAM profile; these separate
-leaf checks do not establish whole-PC equivalence to the XPM build.
+leaf checks do not establish whole-PC equivalence to the XPM build. A subsequent
+full-PC XPM-fidelity candidate is now running, as recorded below.
 
 ## Matched isolated FPGA implementation
 
@@ -181,3 +182,45 @@ To preserve disk headroom, 58 individually enumerated, closed GCC PCH cache file
 were removed (4,861,559,330 bytes). They are regenerable; runnable models, source,
 objects, archives, headers, dependency files, guest media and all evidence remain.
 Plan/receipts: `ventium-lru-pch-reclaim.s9RAAA2z/{plan,closed,final-plan,final-closed}.json`.
+
+## Full-PC FPGA RAM-profile qualification started
+
+The earlier full-PC profiles omit `VEN_ALTSYNCRAM_XPM`. Their platform data RAM
+registers the address and exposes combinational data, whereas the FPGA wrapper
+uses registered-output, read-first BRAM. Passing the former is not qualification
+of the latter. New model
+`50f372299ce3c374271b8caa0b311fcb6a0193706d7f87c7dcb7aac481ac3c17`
+adds **only `VEN_ALTSYNCRAM_XPM`** to the LRU-repaired model's actual 117 macros.
+RTL contents and host-harness contents are unchanged; the harness has a fresh
+model-specific basename. The generated header contains `qbx` and `memx` for
+all four `gcache` ways, proving selection of the registered-output simulation
+branch. This models the FPGA memory contract; it is not simulation of native
+Xilinx primitives or hardware sign-off.
+
+Evidence root: `ventium-xpm-fidelity-soc.UhuJmB4h` under the external scratch
+root. Native compilation exits zero in 14.865 seconds, with the same 98 inherited
+third-party structural warnings. The initial post-build host guard incorrectly
+expected a generated `genblk2` name instead of source-named `gcache` and fails;
+`build-r2-closed.json` retains that failure. Separate `audit_build.py` and
+`build-r3-closed.json` recheck the actual hierarchy, generated-header dependency,
+all input pins, unchanged warnings and the exact macro delta. No RTL, executable
+or failed receipt was changed to obtain the corrected host-audit pass.
+
+| Cold guest | Service | Invocation | Native PID / CPU |
+| --- | --- | --- | --- |
+| Quake | `ventium-xpm-fidelity-quake-oct09.service` | `fb51bc13471245f38928fc28693bf5d8` | 3434931 / 20 |
+| Win95 | `ventium-xpm-fidelity-win95-oct09.service` | `c5bd93663643493ebabb58d1fad0edad` | 3434953 / 21 |
+
+Both actual executable hashes, start identities, command lines, cgroups and CPU
+affinities match `native-admission.json`. Existing one-CPU/2 GiB/no-swap bounds,
+unchanged media, cold reset, UV + relocated fast pipeline, posted16, full P5 L1s,
+32 KiB L2 and 40/40/80 MHz clocks are retained. Both are still in startup: **no
+gameplay measurement, guest pass or XPM standard-suite completion is claimed**.
+Latest verified gameplay remains **0.37798811 U+V IPC**, model `4b5fb92f`,
+cycles **1.2–1.3B**, predating this and the preceding FP/under-fill/LRU candidates.
+
+Ten individually checked closed GCC PCH caches were removed to maintain disk
+headroom, recovering **845,143,822 bytes**. The files were regular, single-link,
+unopened and regenerable; accepted binaries were rehashed unchanged. Sources,
+objects, dependency files, media and evidence remain. Plan and closure:
+`ventium-xpm-cache-reclaim.1vhi3BRb/{plan,closed}.json`.
