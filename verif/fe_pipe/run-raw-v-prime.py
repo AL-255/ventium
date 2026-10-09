@@ -27,13 +27,15 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     for name in ('control','candidate','out'):
         parser.add_argument('--'+name,type=Path,required=True)
+    parser.add_argument('--feature',choices=('raw-v','held-read'),default='raw-v')
     args=parser.parse_args()
     scratch=Path('/home/yukidama/external/tmp').resolve(strict=True)
     assert __debug__ and Path(os.environ['TMPDIR']).resolve()==scratch
     assert args.out.resolve().is_relative_to(scratch)
     args.out.mkdir()
     models={n:getattr(args,n).resolve(strict=True) for n in ('control','candidate')}
-    extra={'VEN_PIPE_MEM_CHAIN','VEN_PIPE_REG_LOAD_PRIME','VEN_RAW_V_READ_PRIME'}
+    prerequisites={'VEN_PIPE_MEM_CHAIN','VEN_PIPE_REG_LOAD_PRIME','VEN_RAW_V_READ_PRIME'}
+    extra=prerequisites if args.feature=='raw-v' else {'VEN_RAW_HELD_READ_PRIME'}
     profiles={}
     pins={}
     for name,tb in models.items():
@@ -47,6 +49,7 @@ def main():
         pins.update({str(p):sha(p) for p in (tb,stamp)})
     assert profiles['candidate']==profiles['control'] | extra
     assert not profiles['control'] & extra
+    if args.feature=='held-read':assert prerequisites <= profiles['control']
     source=HERE/'raw-v-prime.S'
     linker=REPO/'verif/sys/tests/ppage/ppage.ld'
     qemu=REPO/'ventium-refs/07-p5-emulation-harness/build/qemu/build-sys/qemu-system-i386'
@@ -123,14 +126,24 @@ def main():
                 warm=[rows[b]['cyc']-rows[a]['cyc'] for a,b in zip(hits[3:-1],hits[4:])]
                 prime_pcs=[int(x,16) for x in re.findall(r'\[FETCHDBG:RAWPRIME\] eip=[0-9a-f]+ next=([0-9a-f]+)',text)]
                 query_primes=prime_pcs.count(symbols['query_load'])
-                if name=='control' or kind in (1,3):
+                if (name=='control' and args.feature=='raw-v') or kind in (1,3):
                     assert query_primes==0,(case,name,'unsafe or control prime',query_primes)
+                held_primes=len(re.findall(r'\[FETCHDBG:HELDPRIME\]',text))
+                if name=='control':assert held_primes==0
                 load_pairs=sum(int(r['pc'],0)==symbols.get('load_pair_v',-1) for r in pairs)
                 measurements[name]=dict(warm_cycles=warm,query_primes=query_primes,
                     all_primes=len(prime_pcs),paired_v=len(pairs),load_pairs=load_pairs,
-                    records=len(rows))
+                    records=len(rows),held_primes=held_primes)
             a,b=measurements['control'],measurements['candidate']
-            if kind==2:
+            if args.feature=='held-read':
+                if kind==5:
+                    assert b['held_primes']>=12,('missing held-read prime witnesses',measurements)
+                    assert sum(b['warm_cycles'])<sum(a['warm_cycles']),('no held-read gain',measurements)
+                else:
+                    assert b['held_primes']==0,('unexpected held-read hint',measurements)
+                    assert b['warm_cycles']==a['warm_cycles'],('non-target timing changed',measurements)
+                if kind==2:assert a['load_pairs']==b['load_pairs']==16
+            elif kind==2:
                 assert a['load_pairs']==b['load_pairs']==16,('lost following V pair',measurements)
                 assert sum(b['warm_cycles'])<=sum(a['warm_cycles']),('paired load regressed',measurements)
             elif kind in (0,4,5):
@@ -143,7 +156,7 @@ def main():
                 pair_preserved=b['load_pairs']==a['load_pairs']))
         return results
 
-    result=dict(passed=False,cases=[],errors=[],gameplay_ipc=None,standard_suite=False)
+    result=dict(passed=False,cases=[],errors=[],gameplay_ipc=None,standard_suite=False,feature=args.feature)
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
             pending={pool.submit(check,c):c for c in

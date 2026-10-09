@@ -31,6 +31,7 @@ def main():
     for name in ('control','candidate','out'):
         parser.add_argument('--'+name,type=Path,required=True)
     parser.add_argument('--expect-assert',action='store_true')
+    parser.add_argument('--feature',choices=('raw-v','held-read'),default='raw-v')
     args=parser.parse_args()
     scratch=Path('/home/yukidama/external/tmp').resolve(strict=True)
     assert __debug__ and Path(os.environ['TMPDIR']).resolve()==scratch
@@ -52,8 +53,12 @@ def main():
                 'VEN_P54_DUAL_LOAD_PAIR','VEN_P54_DUAL_BYTE_LOAD_PAIR'}<=defs
         assert not {'VEN_UOPCACHE','SYNTHESIS','VTM_NO_DPI'}&defs
         inputs.extend([tb,stamp])
-    extra={'VEN_PIPE_MEM_CHAIN','VEN_PIPE_REG_LOAD_PRIME','VEN_RAW_V_READ_PRIME'}
+    prerequisites={'VEN_PIPE_MEM_CHAIN','VEN_PIPE_REG_LOAD_PRIME','VEN_RAW_V_READ_PRIME'}
+    extra=prerequisites if args.feature=='raw-v' else {'VEN_RAW_HELD_READ_PRIME'}
     assert profiles['candidate']==profiles['control']|extra and extra<=profiles['candidate']
+    if args.feature=='held-read':
+        assert prerequisites<=profiles['control'] and not profiles['control'] & extra
+        assert not args.expect_assert  # This is regression qualification, not the old broken model.
     pins={str(p):sha(p) for p in inputs}
     (args.out/'inputs.json').write_text(json.dumps(pins,indent=2)+'\n')
     env={k:v for k,v in os.environ.items() if not k.startswith(('VEN_','TB_','AXI_','QEMU_'))}
@@ -134,7 +139,7 @@ def main():
         return rows
 
     result=dict(passed=False,cases=[],errors=[],red_reproduction=args.expect_assert,
-                correctness_pass=False,gameplay_ipc=None,standard_suite=False)
+                correctness_pass=False,gameplay_ipc=None,standard_suite=False,feature=args.feature)
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
             jobs={pool.submit(check,c):c for c in [(r,s) for r in (0,1) for s in (0,1)]}
