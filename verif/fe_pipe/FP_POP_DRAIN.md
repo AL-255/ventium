@@ -1,10 +1,10 @@
 # Popping x87 arithmetic: last-response admission
 
 Experimental, default-off `VEN_FP_POP_DRAIN`; not FPGA or standard-suite
-acceptance. Latest verified gameplay is **0.38064497 total U+V IPC**, full-PC
-model `e44e3176c915a275cfd644a0cfe6cd7bc487d45b2d2cc5a3378a52d6a18c928e`,
-cycles **1,200,000,000–1,300,000,000**. That predates this fix and the LRU/XPM
-candidates. The target remains **0.48**. Direct-memory CoreMark's earlier
+acceptance. Latest verified gameplay is **0.38588696 total U+V IPC**, LRU-owner
+model `227b03736c0d04b1451e18f797c9d7c9c0cb969f9df49944d53f8a9353d640be`,
+cycles **1,200,000,000–1,300,000,000**. That predates this fix and the XPM-fidelity
+candidate. The target remains **0.48**. Direct-memory CoreMark's earlier
 **2.10736/2.11041 CM/MHz** does not measure FPGA DDR/cache performance or this
 new candidate.
 

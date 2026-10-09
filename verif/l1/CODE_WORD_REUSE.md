@@ -1,9 +1,9 @@
 # Registered instruction-word reuse — October 9
 
 Private, default-off `VEN_L1D_CODE_WORD_REUSE`; **not production, FPGA or
-standard-suite acceptance**. Latest verified gameplay remains **0.38064497
-total U+V IPC**, model `e44e3176`, cycles **1,200,000,000–1,300,000,000**.
-It predates pop-drain, the LRU/XPM candidates, and this experiment. Earlier
+standard-suite acceptance**. Latest verified gameplay is **0.38588696
+total U+V IPC**, LRU-owner model `227b0373`, cycles **1,200,000,000–1,300,000,000**.
+It predates pop-drain, XPM-fidelity and this experiment. Earlier
 full direct-memory CoreMark scores are **2.10736/2.11041 CM/MHz**, not this
 candidate's score or an FPGA cache/DDR measurement. The 0.48 target is open.
 
@@ -87,7 +87,45 @@ Instruction-miss CPI decreases **16.504 → 13.003**; near-branch CPI decreases
 **0.589 → 0.569**, entering its existing band. These are microbenchmarks, not
 gameplay speedups. The random-branch hard band tests misprediction behavior;
 its separately displayed absolute-cycle comparison still exceeds 10%.
-No full-PC guest or FPGA build yet contains instruction-word reuse.
+No FPGA build yet contains instruction-word reuse.
+
+## Combined full-PC candidate
+
+`external/tmp/ventium-code-word-soc.ftkiFJn1` applies the exact tested leaf to
+the pop-drain/LRU/XPM source closure. All compiled core/FP files match the
+microtested tree, all platform files retain the parent's bytes, and the unique
+host basename has unchanged content and a local matching generated-header
+dependency. Model:
+`f3be9a112c40dd6637ee404f98c485e04a501f85967394a304f158c8781c8d5f`.
+The 120-macro inventory adds only `VEN_L1D_CODE_WORD_REUSE`. Native build exit
+is zero with stable inputs and the same 98 inherited third-party structural
+warnings (not a clean full-SoC lint pass).
+
+Fresh unchanged-media Quake and Win95 cold runs are active on CPUs24/28:
+`ventium-code-word-{quake,win95}-oct09`, invocation IDs
+`9ba8170abf0a49b69a00075f013b4cfc` / `53b2702342e74251996cfdda2960342b`.
+Actual native executable admissions pass for both. Full P5 L1s, 32 KiB platform
+L2, posted16, XPM read-first/registered outputs, 40/40/80 MHz, UV and relocated
+fast load/store mode are unchanged. No STEP, snapshots or guest modifications.
+Both remain **unqualified**; no candidate gameplay score exists yet.
+
+## CoreMark qualification on this exact core
+
+Direct-backend model `7be6eddba0a99fe40db8e9cd19c78977c10efa3114dac2069d1c3a36f9efdcba`
+uses the same core source, unchanged qualified host-settle elision, and a unique
+locally compiled harness. `ventium-code-word-coremark.1j6DI64M/qualify-r3`
+passes both 10-iteration standard seeds with and without host elision:
+4,823,423/4,816,710 clocks and 3,660,809/3,655,953 retirements. CRCs, complete
+final serialized model, mapped memory and 15 unsafe-option rejections pass.
+These short checks do not establish the full CoreMark score or FPGA throughput.
+
+A matched serial-LTO host build, `da8a6fcb`, also passes. Its
+`ventium-code-word-lto.FbhE475V/cross-host-audit.json` checks identical RTL and
+macros and byte-equal complete final model/memory **across both compiler builds**.
+Wall times remain about 24.5–24.7 seconds per short seed: no meaningful gain.
+The implied full-seed host time is about 61–62 minutes, above the authorized
+60-minute limit. Full seeds are not launched; the 75-minute cap question is
+pending. Neither RTL execution, CRC checking nor scoring is weakened to fit.
 
 ### Failed attempts retained
 

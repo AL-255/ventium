@@ -1,15 +1,24 @@
 # Platform L2 replacement-state repair — October 9
 
 Private full-PC candidate; **not a completed standard-suite or FPGA pass**.
-Latest verified Quake gameplay is **0.37798811 total U+V IPC**, ownership-repaired
-model `4b5fb92f`, cycles **1,200,000,000–1,300,000,000**. It predates this repair
-and the intervening FP/under-fill candidate. Receipt:
-`ventium-prime-pair-gameplay.TJ6xwJz0/audit.json` under the external scratch root.
-The current candidate has no gameplay score; the **0.48 target is open**.
+Latest verified Quake gameplay is **0.38588696 total U+V IPC**, LRU-owner
+model `227b0373`, cycles **1,200,000,000–1,300,000,000**. This includes the
+replacement repair but predates XPM-fidelity, pop-drain and instruction-word
+reuse. Receipt: `ventium-lru-gameplay-audit.Xrh2KIl5/audit.json` under the external
+scratch root. The **0.48 target is open**.
 The current core's full seeds close at **2.10736/2.11041 CM/MHz**, model
 `e3dbf68a`, with correct CRCs and zero delivered faults. These are direct-memory
 simulation scores, not FPGA cache/DDR performance, and do not exercise this L2.
 See [closed CoreMark evidence](../fe_pipe/PRIME_UNDER_FILL.md).
+
+The 100M-clock gameplay interval retires **38,588,696 instructions**:
+28,629,832 U + 9,958,864 V. The audit rechecks 217 build pins, 17 runtime pins,
+native PID/executable identity, complete counter invariants and lossless frame
+pixels. Both endpoint captures visually show gameplay and are associated with
+the exact logged 1.2B/1.3B counter epochs. The preceding `e44e3176` result was
+0.38064497; equal clock windows can cover different scene progress, so their
+ratio is not claimed as a controlled speedup. Full timedemo and standard-suite
+acceptance remain pending.
 
 ## Evidence and root cause
 
