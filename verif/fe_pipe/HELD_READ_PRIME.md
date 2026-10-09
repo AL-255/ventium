@@ -78,6 +78,30 @@ terminal record or band has been changed.
 Full CoreMark seeds, cold Win95/Quake, gameplay measurement and hardware
 implementation are not qualified for this proposal.
 
+## Full-PC qualification in progress
+
+`external/tmp/ventium-read-prime-soc.xkz3smgJ` builds model
+`15f5605496acfed016b5af95d66e315eb1e01db04d9475c8c4b67203945ff453`.
+Only the chain include and new helper differ from checked-target parent
+`59650fe2`; all core/FP source matches the micro model. The native build closes
+zero, stable source pins, model-local host header and real registered XPM
+fields checked. The same 98 third-party structural warnings remain; this is
+not whole-SoC hard-lint acceptance or a routed bitstream.
+
+Cold, unchanged media/ROMs, UV-fast, posted16 DDR3, P5 L1s, 40/40/80 MHz and
+16 MiB guest RAM are retained. The unchanged resource/closure guards run:
+
+- Quake CPU17, service `ventium-read-prime-quake-oct09.service`, invocation
+  `73acee364e4545199f0e118efa80b6b6`.
+- Win95 CPU21, service `ventium-read-prime-win95-oct09.service`, invocation
+  `e169108300904df4894fab89920f10c8`.
+
+`admission-audit.json` independently rechecks native executables, PID start
+times, affinities, input pins, service ownership and 2 GiB/no-swap/one-CPU
+limits, with no OOM. Launch/admission is **not** desktop/timedemo acceptance;
+the model remains gameplay-unmeasured. Keep both CPUs and their SMT siblings
+out of subsequent heavy builds.
+
 ## Retained unsuccessful evidence
 
 `ventium-held-read-prime.6FLwLgNL` holds the held-only experiment (9→8 clocks).

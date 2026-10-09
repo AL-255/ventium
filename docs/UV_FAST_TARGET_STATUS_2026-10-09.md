@@ -32,8 +32,9 @@ parent-clock expectation failed and is retained. The host optimization never
 skips a clock edge or changes guest state. The 60-minute full-seed limit still
 applies; the optional 75-minute request has not been answered.
 
-Nine cold full-PC guests remain active: code-word Quake, combined-candidate,
-independent-REP, instruction-permission-shadow and checked-target-read
+Eleven cold full-PC guests remain active: code-word Quake, combined-candidate,
+independent-REP, instruction-permission-shadow, checked-target-read and
+pair-safe read-retirement-prime
 Quake/Win95 pairs.
 Code-word Win95 closed normally at **2,259,200,420 clocks** with a visually
 clean Welcome desktop, native exit0, stable pins, no OOM and reaped children.
@@ -161,7 +162,10 @@ are absent from this measured build.
   sixteen fault/trap/SMC and sixteen pair-ownership comparisons pass.
   The first version lost immediate V pairing and was rejected; the repaired
   version preserves the exact parent V counts. Actual helper enabled/disabled
-  passes 239,285 checks each. This is not a measured gameplay or FPGA gain.
+  passes 239,285 checks each. FPGA-faithful PC model `15f56054` now runs cold
+  Quake on CPU17 and Win95 on CPU21, with independently audited native identity
+  and resource limits. Its generic gate remains FAIL with the existing 101
+  terminal-record mismatches/four cycle bands. No gameplay or FPGA gain claimed.
 
 Closed scratch snapshots were losslessly compressed after checking their
 recorded hashes and absence of live users: **2,649,788,416 bytes reclaimed**.
