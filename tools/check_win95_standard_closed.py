@@ -23,6 +23,12 @@ configuration win95. Both sources and the parent archive must be in the frozen
 pin map. Configuration semantics are externally reviewed source authority,
 not inferred from a filename, a self-reported receipt, or code execution here.
 
+Schema 3 is the separately reviewed board-transport profile only:
+profile=board-posted16-40mhz, 40/40/80 MHz, 16 MiB, FPGA_DDR=3, and the exact
+obj1-speed-q16 source/build receipt layout. It uses schema 1's direct launcher.
+It does not permit caller-selected clocks, arbitrary commands or environments.
+All closure, cold-state, source-pin, fault and manual-review checks still apply.
+
 Visual schema 1: kind=WIN95_MANUAL_DESKTOP_REVIEW, authority=manual,
 reviewer, reviewed_unix, run_directory, unit, invocation_id, model_sha256,
 desktop=true, error_free=true, review_basis=closed_raw_frames, and raw_frames
@@ -230,9 +236,11 @@ def closed_log(data, stop):
             'final_retires': final_retire, 'maximum_progress_interval_not_bounded': True}
 
 
-def expected_command(run):
-    return [str(run / 'ao486sim_ven_standard'), '--ide', str(run / 'guest.vhd'), '--rate', '45000000',
-            '--rate-rtc', '45000000', '--rate-vga', '90000000', '--mem', '32', '--cycles', str(CYCLES),
+def expected_command(run, *, posted=False):
+    model, core, vga, memory = ('ao486sim_board_posted', '40000000', '80000000', '16') if posted else (
+        'ao486sim_ven_standard', '45000000', '90000000', '32')
+    return [str(run / model), '--ide', str(run / 'guest.vhd'), '--rate', core,
+            '--rate-rtc', core, '--rate-vga', vga, '--mem', memory, '--cycles', str(CYCLES),
             '--ddrlat', '2', '--mouse', '--vga-div', '4', '--vga-jit', '1', '--ven-perf-every', '100000000',
             '--vgatext-every', '25000000', '--fb-every', '100000000', '--fb-out', str(run / 'frame'),
             '--stop-request', str(run / 'stop.request')]
@@ -249,7 +257,7 @@ def launcher_roles(run, expected, worker):
             'unknown reviewed parent launcher')
     roles = {str(launcher): expected['launcher_sha256'],
              str(run / 'observed-launcher.py'): expected['launcher_sha256']}
-    if expected['schema'] == 1:
+    if expected['schema'] in (1, 3):
         require('configured_launcher' not in expected and launcher.parent == run.parent and
                 worker['argv'] in (['/usr/bin/python3', str(launcher), str(run)],
                                    ['/usr/bin/python3', '-B', str(launcher), str(run)]),
@@ -277,9 +285,15 @@ def add_roles(roles, entries):
 def check(run, expected, visual, *, supervisor=None):
     run, files = absolute(str(run)), Files()
     require(run.resolve(strict=True) == run and re.fullmatch(r'win95-cold-[A-Za-z0-9_.-]+', run.name), 'wrong owned run leaf')
-    require(integer(expected['schema']) and expected['schema'] in (1, 2) and expected['kind'] == 'WIN95_STANDARD_EXPECTATION' and
+    require(integer(expected['schema']) and expected['schema'] in (1, 2, 3), 'unknown expectation schema')
+    posted = expected['schema'] == 3
+    require(expected.get('profile') == ('board-posted16-40mhz' if posted else None),
+            'unknown or misplaced reviewed profile')
+    unit_pattern = (r'ventium-board-posted16-win95-[A-Za-z0-9_.-]+\.service' if posted else
+                    r'ventium-standard-win95-[A-Za-z0-9_.-]+\.service')
+    require(expected['kind'] == 'WIN95_STANDARD_EXPECTATION' and
             expected['run_directory'] == str(run) and
-            re.fullmatch(r'ventium-standard-win95-[A-Za-z0-9_.-]+\.service', expected['unit']) and
+            re.fullmatch(unit_pattern, expected['unit']) and
             re.fullmatch(r'[0-9a-f]{32}', expected['invocation_id']) and
             len(expected['affinity']) == 1 and integer(expected['affinity'][0]) and expected['affinity'][0] >= 0 and
             expected['owner_pid'] != expected['native_pid'], 'wrong externally reviewed expectation')
@@ -298,10 +312,11 @@ def check(run, expected, visual, *, supervisor=None):
     resource_receipt(final, expected)
     require(final['worker'] == before['worker'] and before['unix'] <= final['unix'] < before['unix'] + SECONDS,
             'owner identity changed or wall cap reached')
-    cmd, roles = expected_command(run), launcher_roles(run, expected, before['worker'])
+    cmd, roles = expected_command(run, posted=posted), launcher_roles(run, expected, before['worker'])
     require(before['command'] == result['command'] == admission['argv'] == cmd and
             before['environment'] == {'PATH': '/usr/local/bin:/usr/bin:/bin', 'LANG': 'C.UTF-8', 'TMPDIR': str(run),
-                                     'AO486_BIOS_DIR': str(run / 'rom'), 'AO486_RTC_EPOCH': '1789257600', 'FPGA_DDR': '2'},
+                                     'AO486_BIOS_DIR': str(run / 'rom'), 'AO486_RTC_EPOCH': '1789257600',
+                                     'FPGA_DDR': '3' if posted else '2'},
             'nonstandard command/environment or guest hooks')
     for record in (before, result):
         require(record['cold_reset'] is True and record['snapshots'] is False and record['guest_modifications'] is False,
@@ -330,7 +345,8 @@ def check(run, expected, visual, *, supervisor=None):
             {'check_quake_timedemo', 'run_quake_standard'} and
             set(expected['rom_sha256']) == set(expected['rom_source_paths']) == {'boot0.rom', 'boot1.rom'} and
             before['exact_loaded_helper_archives'] == expected['helper_sha256'], 'missing exact helper/ROM identities')
-    add_roles(roles, [(str(run.parent / 'ao486sim_ven_standard'), expected['model_sha256']),
+    source_model = run.parent / ('obj1-speed-q16/ao486sim_board_posted' if posted else 'ao486sim_ven_standard')
+    add_roles(roles, [(str(source_model), expected['model_sha256']),
                       (cmd[0], expected['model_sha256']),
                       (expected['pristine_disk_path'], expected['pristine_disk_sha256'])])
     for name, digest in expected['helper_sha256'].items():
@@ -339,8 +355,11 @@ def check(run, expected, visual, *, supervisor=None):
     for name, digest in expected['rom_sha256'].items():
         add_roles(roles, [(expected['rom_source_paths'][name], digest),
                           (str(run / 'rom' / name), digest)])
+    build_inputs = ('prepared.json', 'build1-speed-q16-started.json', 'build1-speed-q16-closed.json',
+                    'obj1-speed-q16/Vsystem__verFiles.dat', 'defines.txt') if posted else (
+                        'Vsystem__verFiles.dat', 'compile-inputs.before.sha256', 'build-output.sha256')
     require(all(pins.get(path) == digest for path, digest in roles.items()) and
-            all(str(run.parent / name) in pins for name in ('Vsystem__verFiles.dat', 'compile-inputs.before.sha256', 'build-output.sha256')) and
+            all(str(run.parent / name) in pins for name in build_inputs) and
             before['pristine_private_disk_sha256'] == expected['pristine_disk_sha256'], 'mandatory frozen pin roles missing')
     for path, digest in pins.items():
         require(type(digest) is str and SHA.fullmatch(digest), 'invalid source/input pin')
@@ -395,6 +414,7 @@ def check(run, expected, visual, *, supervisor=None):
     supervisor_closed(query_supervisor(expected['unit']) if supervisor is None else supervisor, expected)
     return {'schema': 1, 'status': 'PASS', 'scope': 'Win95 cold boot to desktop only', 'suite_acceptance': False,
             'unit': expected['unit'], 'invocation_id': expected['invocation_id'], 'candidate_sha256': expected['model_sha256'],
+            'profile': 'board-posted16-40mhz' if posted else 'standard45',
             'closed_engine_log': counters, 'manual_desktop_frames': witnesses, 'closed_private_disk_sha256': disk_digest,
             'limitations': ['Desktop recognition is externally pinned manual authority, not automated recognition.',
                             'Exact loaded helper bytes; launcher source observed before/after, not loaded-memory ancestry.']}

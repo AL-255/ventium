@@ -164,6 +164,75 @@ class ClosedWin95Tests(unittest.TestCase):
         self.persist()
         self.assertEqual(self.qualify()['status'], 'PASS')
 
+    def configure_posted(self):
+        """Synthetic alternate transport, not a real guest or visual review."""
+        old_unit = self.unit
+        self.unit = 'ventium-board-posted16-win95-hostcontract.service'
+        for name in ('expect', 'before', 'final', 'admission', 'result', 'visual', 'supervisor'):
+            setattr(self, name, json.loads(json.dumps(getattr(self, name)).replace(old_unit, self.unit)))
+        self.group = self.group.replace(old_unit, self.unit)
+        self.expect.update(schema=3, profile='board-posted16-40mhz')
+        pins = self.expect['pins']
+        for name in ('obj1-speed-q16/ao486sim_board_posted',
+                     self.run.name + '/ao486sim_board_posted', 'prepared.json',
+                     'build1-speed-q16-started.json', 'build1-speed-q16-closed.json',
+                     'obj1-speed-q16/Vsystem__verFiles.dat', 'defines.txt'):
+            path = self.build / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(self.model.read_bytes() if path.name == 'ao486sim_board_posted' else
+                             b'synthetic separately reviewed build input\n')
+            pins[str(path)] = sha(path)
+        self.before['input_sha256_before'] = self.result['input_sha256_after'] = pins
+        for record in (self.before, self.final, self.result):
+            record['command'] = gate.expected_command(self.run, posted=True)
+        for record in (self.before, self.final):
+            record['environment']['FPGA_DDR'] = '3'
+        self.admission.update(exe=str(self.run / 'ao486sim_board_posted'),
+                              argv=gate.expected_command(self.run, posted=True))
+        self.result['native_admission'] = self.admission
+        self.persist()
+
+    def test_exact_posted_profile_preserves_negative_closure_and_visual_matrix(self):
+        self.configure_posted()
+        self.assertEqual(self.qualify()['profile'], 'board-posted16-40mhz')
+        for negatives in (self.test_supervisor_negative_matrix_precedes_runtime_reads,
+                          self.test_native_actual_wait_and_negative_results,
+                          self.test_lossy_capture_negative_matrix, self.test_manual_desktop_negative_matrix):
+            negatives()
+            self.persist()
+            self.assertEqual(self.qualify()['status'], 'PASS')
+
+    def test_posted_cannot_select_arbitrary_profile_command_or_ddr(self):
+        self.configure_posted()
+        original = copy.deepcopy(self.expect)
+        for change in ({'profile':'arbitrary'}, {'profile':None}, {'schema':1},
+                       {'configured_launcher':{'path':'/tmp/untrusted'}}):
+            self.expect = dict(copy.deepcopy(original), **change)
+            self.reject()
+        self.expect = original
+        self.before['environment']['FPGA_DDR'] = '2'
+        self.persist(); self.reject()
+        self.before['environment']['FPGA_DDR'] = '3'
+        command = gate.expected_command(self.run, posted=True)
+        command[command.index('--rate') + 1] = '45000000'
+        self.before['command'] = self.result['command'] = self.admission['argv'] = command
+        self.result['native_admission'] = self.admission
+        self.persist(); self.reject()
+
+    def test_posted_requires_every_native_build_role(self):
+        self.configure_posted()
+        pins = self.expect['pins']
+        for relative in ('obj1-speed-q16/ao486sim_board_posted', 'prepared.json',
+                         'build1-speed-q16-started.json', 'build1-speed-q16-closed.json',
+                         'obj1-speed-q16/Vsystem__verFiles.dat', 'defines.txt'):
+            path = str(self.build / relative)
+            removed = pins.pop(path)
+            self.before['input_sha256_before'] = self.result['input_sha256_after'] = pins
+            self.persist(); self.reject()
+            pins[path] = removed
+        self.persist()
+        self.assertEqual(self.qualify()['status'], 'PASS')
+
     def rename_launcher(self, name):
         old, renamed = self.launcher, self.build / name
         old.rename(renamed)
