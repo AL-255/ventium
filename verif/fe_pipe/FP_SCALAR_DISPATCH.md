@@ -41,6 +41,11 @@ Parent is the pair-safe read-retirement candidate `19ac54ac`.
   `2b61d70586c2ec328d1fcbac50c79baf556c2b3d12ef401397744eb1b7e9a012`.
   Native builds pass with assertions, six structural hard-error classes,
   stable source pins and model-local host-object/generated-header checks.
+- `hardware-lint-r2`: parent and candidate also pass with `SYNTHESIS` and
+  `VTM_NO_DPI`, keeping all six structural hard errors. The initial attempt
+  refused the recorded duplicate `VEN_FPREM`; the retry preserves that exact,
+  unvalued duplicate in both profiles rather than changing any define. This
+  is synthesis-guard lint, not Vivado synthesis or hardware timing evidence.
 - Actual helper leaf: **66,688 checks each**, enabled and disabled. Includes
   all 128 operation enum values/four memory directions, all pairs of 24
   blockers, all system contexts, all FSW values and relevant CR0 combinations.
@@ -95,6 +100,22 @@ FNSTCW/FNSTSW, FLDCW and prefixed FNSTCW negative controls are unchanged.
 These are directed loop measurements, not isolated gameplay gains or an
 FPGA frequency/resource result. The added combinational predicate and packet
 capture path still need complete-chip timing/area qualification.
+
+## Full-PC integration, not launched
+
+`external/tmp/ventium-fp-scalar-soc.auXK03FE` derives from pair-safe read-prime
+model `15f56054`. Only `core.sv` and the new helper change; every core/FP source
+matches the microtested candidate. The compile adds exactly the scalar flag
+(128 unique defines), with unchanged U/V, fast system/relocated paths, full P5
+L1s, 32-KiB platform L2, posted16 and registered read-first Xilinx-memory model.
+The host source content is unchanged, with a unique basename/local header.
+
+Native build passes, model
+`73ce5538dd633c5fb62030c54e4b62d44d2572a9ff3165e73ba96ac7f0d92e39`.
+The same 98 third-party structural warnings remain; no new structural-warning
+waiver is added. This is **not clean whole-SoC lint**. No cold guest, gameplay
+measurement, CoreMark score, full-suite or FPGA acceptance is claimed for it.
+Existing cold guest measurements continue on their frozen earlier models.
 
 ## Reproduce
 

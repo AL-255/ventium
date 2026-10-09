@@ -184,6 +184,13 @@ are absent from this measured build.
   FAIL: at high AXI latency a selected slice costs one extra clock, although
   whole-program timing improves and longer steady throughput is unchanged.
   No gameplay, full-suite, production or FPGA acceptance is claimed.
+  The complete FPGA-faithful PC model builds as `73ce5538`, with identical
+  microtested core/FP source and exactly one added define; no new cold guests
+  have been launched for it. Parent/candidate synthesis-guard core lint passes
+  all six structural hard classes. The whole-PC build retains the same 98
+  third-party warning debt. Its unchanged generic gate has the parent's 101
+  terminal-length failures/four hard bands; matched-loader-input replays show
+  identical full architectural records for all 108 functional programs.
 
 Closed scratch snapshots were losslessly compressed after checking their
 recorded hashes and absence of live users: **2,649,788,416 bytes reclaimed**.
