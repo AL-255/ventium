@@ -145,6 +145,10 @@ Requests obey only the public BUSY handshake, not internal state or a fixed
 initialization delay. A public handshake while the cache cannot consume it is
 an error. After the fix, the complete **512 capacity cases and 45 store runs**
 also pass again (`init-capacity-r1`, `init-stores-r1`). Nineteen recipe tests pass.
+`warm-parity.json` independently compares all 512 cycle/miss/capacity rows
+and all 45 store case receipts against the unmodified readiness logic: they
+are **exactly identical after initialization**. This is a microbenchmark
+nonregression result, not a gameplay speedup.
 
 Repaired full-PC model:
 `86731249748f06e2baa1ba59ea3a92d5fb1313ca12b70935006374aad859c6df`,
@@ -156,10 +160,18 @@ and continue, CPUs24/26, invocations `67865eeae00e4876aed09f8388646e1b` and
 `534dca670f6e42ad8f4f16bad4716f26`. Independent admission passes; no gameplay,
 desktop or timedemo acceptance yet. Supervisor closure retention is active.
 
-The physical table above describes the **geometry-only parent**. A matched
-repaired-geometry run is in progress at
-`external/tmp/ventium-l2-capacity-physical.qaq6ps__`; do not transfer the parent
-table into a repaired-model timing sign-off.
+The physical table above describes the **geometry-only parent**. The matched
+repaired-geometry run is now closed at
+`external/tmp/ventium-l2-capacity-physical.qaq6ps__`: original/default128 are
+identical at **1,167 CLB LUTs / 588 registers / 8 RAMB36**, and repaired1024
+uses **4,459 CLB LUTs / 1,548 registers / 64 RAMB36 + 1 RAMB18**. The added
+capacity therefore costs **3,292 LUTs / 960 registers / 56.5 BRAM tiles** with
+the readiness repair present. Setup-limited isolated estimates are
+**203.50 / 160.33 MHz**, respectively, not CPU Fmax. Worst hold is still
+−0.135 ns; repaired1024 has250 failing endpoints. No timing sign-off follows.
+Native exit0, stable inputs, **387.16 seconds**, 3,978,215,424-byte observed
+peak cgroup RAM, zero OOM/swap and vendor family exited. Scope invocation:
+`aa4e97a8c1124d5e89d9bdad3298da74`.
 
 The generic differential gate is still **FAIL** on the previously recorded
 terminal-oracle/cold-cycle-band issues; it is not waived by source parity.

@@ -711,8 +711,12 @@ both execute BIOS instructions with the unchanged reset sequence. Evidence:
 `external/tmp/ventium-l2-init-soc.tt7Ma9rk`; source/runtime/native/resource
 admission passes, with 133 unchanged defines and existing UV-fast paths.
 The 98 inherited full-SoC structural warnings remain unchanged, not waived as
-clean. No gameplay or standard-suite pass exists yet. A separate bounded
-physical leaf rerun is in progress; no full FPGA rebuild or programming occurred.
+clean. No gameplay or standard-suite pass exists yet. The separate bounded
+physical leaf rerun has closed: repaired32/256KiB use **1,167/4,459 CLB LUTs**,
+8/64.5 BRAM tiles, and have **203.50/160.33 MHz isolated setup estimates**.
+Both still fail hold, not CPU timing sign-off. Native exit0, stable pins,
+387.16 seconds, 3.98GB observed peak cgroup RAM and zero OOM/swap; Vivado exited.
+No full FPGA rebuild or programming occurred.
 
 The older combined-FP Win95 run (`652de481`) closed normally at
 **1,483,622,041 clocks**, 228,426,889 retirements, after a readable Welcome
@@ -722,3 +726,14 @@ successful supervisor closure are retained at
 `ventium-supervisor-closure.E7WfTQP6/live`. Its independent/manual desktop
 acceptance remains open: CLOSED_UNQUALIFIED is not a suite pass. Its Quake
 timedemo continues. The two failed capacity-only guests are closed as FAIL.
+
+The current standalone CoreMark diagnostic remains a separate performance
+problem, not something the platform L2 experiment can fix. On `d2a117e7`,
+performance seed10 retires the same 3,661,024 instructions in 4,821,818 direct
+versus 5,264,309 AXI0 clocks: **442,491 extra clocks**. D-pipeline waiting is
+**220,926 load + 126,189 store = 347,115 clocks**, about78.4% of that net gap;
+those waits are absent on the direct backend. Other state/pairing changes have
+signed contributions, so this is not a universal miss-rate estimate. L1 reports
+6,511 miss starts and zero uncached bypasses. Evidence:
+`ventium-agi-prime.Fn1fJVfX/coremark-r1/{closed.json,performance-axi/run.log}`.
+These are existing ten-iteration diagnostics, **not a new valid CoreMark score**.
