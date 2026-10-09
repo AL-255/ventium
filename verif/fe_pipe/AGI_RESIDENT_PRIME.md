@@ -129,7 +129,10 @@ Failed attempts remain explicitly failed:
   SHA256 before removing the raw copy, preserving all other file hashes.
   **2,340 traces / 1,100,840,960 bytes recovered**; manifests/receipt are in
   `failed-matrix-archive-r2`. Restore with `zstd -d -k -- EXACT_FILE.vtrace.zst`.
-  Passing R2 traces, sources, models and live runs are untouched.
+  Sources, models and live runs are untouched. In the later integration round,
+  passing R2 traces were also losslessly archived: 2,700 files recovered
+  1,120,108,544 bytes, with decompressed hashes checked. Receipt:
+  `external/tmp/ventium-qualified-trace-archive.cqVKfhRc/stage1/closed.json`.
 
 ## Still required
 
@@ -137,6 +140,10 @@ Resolve the generic gate, complete both full CoreMark seeds and cache-backed
 score, Win95 desktop acceptance, original DOS Quake timedemo and the fixed
 gameplay measurement; then qualify the FPGA implementation. The earlier
 combined model `652de481` cold pair continues independently and does not
-contain these latest priming changes. No new cold pair or Vivado run was
-launched for this experiment. Neither requested performance target is claimed
-for this candidate.
+contain these latest priming changes. The subsequent integrated model
+`f780b331` now includes them: cold Quake/Win95 began on CPUs 22/23 at
+15:42 EDT. Source, build, launch and independent admission receipts are in
+`external/tmp/ventium-agi-prime-soc.lpcpUJXu`. No candidate gameplay measurement,
+guest acceptance or new FPGA image exists yet. Neither requested performance
+target is claimed for this candidate; the verified gameplay baseline above
+still predates it. See the [current integration status](../../docs/UV_FAST_TARGET_STATUS_2026-10-09.md#latest-integrated-cold-pair-and-resource-closure).

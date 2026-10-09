@@ -32,7 +32,7 @@ parent-clock expectation failed and is retained. The host optimization never
 skips a clock edge or changes guest state. The 60-minute full-seed limit still
 applies; the optional 75-minute request has not been answered.
 
-Thirteen cold full-PC guests remain active: code-word Quake, combined-candidate,
+Earlier in this round thirteen cold full-PC guests were active: code-word Quake, combined-candidate,
 independent-REP, instruction-permission-shadow, checked-target-read and
 pair-safe read-retirement-prime
 Quake/Win95 pairs, plus the combined scalar/m64 FP pair (`652de481`, CPUs25/26).
@@ -505,3 +505,51 @@ pair continues; no additional full-PC pair or FPGA rebuild was started.
 The requested cache-backed 2.1 score, 0.48 gameplay IPC, full-suite completion
 and hardware deployment are still open. Details and reproducible inputs:
 [AGI resident read](../verif/fe_pipe/AGI_RESIDENT_PRIME.md).
+
+## Latest integrated cold pair and resource closure
+
+The complete scalar-load-command, reference-prime and AGI-prime source is now
+integrated in full-PC native **`f780b331`**. Its core/FP source matches the
+qualified `d2a117e7` microtest model; it preserves 132 defines, full P5 L1s,
+32 KiB platform L2, posted16 writes and registered read-first XPM-fidelity RAM.
+Build and independent live-admission receipts are in
+`external/tmp/ventium-agi-prime-soc.lpcpUJXu`. This is a **simulator, not a new
+FPGA bitstream**. The inherited 98 third-party structural warnings are unchanged.
+
+Fresh, unchanged-media cold runs started at 15:42 EDT, with UV/system-relocated
+fast paths and fast loads/stores enabled, no snapshot, guest patch or STEP:
+
+| Guest | CPU | Service invocation |
+| --- | ---: | --- |
+| Quake | 22 | `4d85b68dea0c4a3e9f094dd41e1d5c42` |
+| Win95 | 23 | `9845ebf942414198a8e9e7781bba02cc` |
+
+Both have one-CPU, 2 GiB RAM, zero-swap, 32-task and 4 GiB-per-file bounds.
+`gameplay-plan.json` fixes periodic sample indices 12/13, a 100M-clock window
+and endpoint frames 6/7 before measurement; actual clock offsets must be
+reported. The independent admission audit binds the plan to the actual service
+and native executable. No gameplay IPC or guest acceptance exists for this build.
+
+Nine superseded guests were gracefully host-stopped and their actual children
+reaped with native exit zero; logs/media/frames/models remain intact. These
+are **not passes**: incomplete Quake runs stay FAIL, Win95 stays
+CLOSED_UNQUALIFIED. Exact targets and closure audit:
+`external/tmp/ventium-superseded-run-closure.BTmHZC65`.
+The read-prime control and combined `652de481` pairs continue independently.
+There are now six live guests, not thirteen; no Vivado run was launched.
+
+Lossless archival recovered **9,978,458,112 bytes (9.29 GiB)**: 5,400 closed
+reference/AGI matrix traces and 60 historical August 17 `qk5c_snap.*` files.
+Each compressed file was decompressed and hash-checked before its raw copy
+was removed. Manifests/receipts are in `ventium-qualified-trace-archive.cqVKfhRc`
+and `ventium-aug17-snapshot-archive.QSAKm2kZ` under external scratch. Restore
+one artifact with `zstd -d -k -- EXACT_FILE.zst`; live runs and source were
+not deleted. Do not remove the whole symlink-backed `external/ventium_run` tree.
+
+Verified gameplay remains **0.44004644 total U+V IPC**, model **`15f56054`**,
+clocks **1,200,012,763–1,300,012,763**, predating both later candidates.
+Its fast D-side waiting partitions into **20,178,479 load clocks (20.178479%)**
+and **896,702 store clocks (0.896702%)**, exactly the 21,075,181-clock bucket.
+These are wait exposure, not all removable cycles. Cache-backed 2.1 CM/MHz,
+0.48 gameplay IPC, generic-gate repair, complete same-source standard suite and
+FPGA deployment remain open.
