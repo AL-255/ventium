@@ -7,7 +7,7 @@ snapshot is used for the current cold full-PC runs.
 | Requirement | Verified result | Remaining |
 | --- | --- | --- |
 | CoreMark ≥2.1 CM/MHz | REP full direct-memory seeds: **2.107861982 / 2.110913372**, correct CRCs | Later combined candidate pending full seeds; not a DDR/cache/FPGA score |
-| Quake ≥0.48 total U+V IPC | **0.44004644**, read-prime `15f56054`, 1,200,012,763–1,300,012,763 clocks | Below target; combined scalar/wide-queue candidate not measured |
+| Quake ≥0.48 total U+V IPC | **0.44183623**, combined scalar/m64 queue `652de481`, 1,200,000,000–1,300,000,000 clocks | Below target; later operand-priming/read-through candidates not measured |
 | Standard suite | REP full CoreMark seeds pass; code-word Win95 closed at a visually clean desktop | Independent desktop acceptance and complete timedemo; newer candidates pending |
 | FPGA | Old image still deployed | Selected source, full timing/resource qualification and deployment |
 
@@ -646,3 +646,39 @@ preserving its actual invocation/exit code after process exit. Evidence:
 owners before closure. This is metadata retention only, not a new CPU test or
 desktop acceptance. Current gameplay remains **0.44004644**, `15f56054`,
 **1,200,012,763–1,300,012,763** clocks; newer candidates remain unmeasured.
+
+## Latest verified combined-FP gameplay window
+
+**0.44183623 total U+V IPC**, model
+`652de481d967acee7a3bf48c419136053ec8625e93566fb1091a4a1ca66dc350`,
+clocks **1,200,000,000–1,300,000,000**. This supersedes the read-prime
+0.44004644 measurement as the current verified gameplay number. It still
+misses **0.48**; no meaningful closure of the performance gap is claimed.
+
+The predeclared sample indices12/13 retire **44,183,623 = 33,874,666 U +
+10,308,957 V events** over exactly 100M clocks. Both unmodified endpoint
+captures visibly show advancing gameplay, from shells to grenade-launcher
+pickup. The captures bracket the endpoints within adjacent 500k-clock
+progress records, not cycle-exact image timestamps. Source/runtime pins
+**240/17**, live executable/PID/service identity, UV/system-relocated fast
+paths, counter invariants and zero OOM are rechecked. Evidence:
+`external/tmp/ventium-fp-combined-gameplay.ERa7LHqZ/window/{audit,residency}.json`.
+No completed timedemo, same-source standard-suite pass or FPGA score follows
+from this window. Equal-clock windows do not prove equal scene work or an
+isolated percentage gain.
+
+Exclusive residency accounts for all 100M clocks. D-side pipeline result wait
+is **21.136523%**, x87 issue/occupancy **9.149561%**, `S_FLOAD` **8.010433%**,
+slow integer load **6.939883%**, `S_FEXEC` **3.478284%**, and `S_DECODE`
+**1.699117%**. These buckets include necessary work, not wholly removable
+stalls. Holding this retirement count fixed requires **7.9507854% fewer clocks**
+to reach0.48. The platform L2's resident-hit path already emits one word per
+clock; it is not a newly found two-clock-per-word bottleneck.
+
+This measured build contains scalar dispatch and m64 operand queuing, but
+**not** the later scalar final-load handoff, reference/AGI operand priming or
+AXI read-through. Their cold qualification continues on `f780b331`/`e9097d96`.
+The last full direct-memory CoreMark scores remain **2.107861982/2.110913372**
+on `cb4b2f84`; no current cache/DDR-backed2.1 score is established. Generic
+gate repair, complete standard suite, ≥0.48 gameplay IPC and deployment remain
+open. No U-only/STEP/global-slow fallback is counted as progress.
