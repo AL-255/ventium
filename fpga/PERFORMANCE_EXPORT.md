@@ -59,6 +59,16 @@ enabled. No slow/STEP fallback is admitted.
   admission checks** pass, including legacy posted-parent admission and
   rejection of partial/reordered/duplicate/forbidden profiles.
 
+Strict `ventium_top` lint of the **actual frozen** 114-definition parent and
+135-definition export also passes (native exit0, unchanged payload pins).
+IMPLICIT/PINMISSING/UNDRIVEN/MULTIDRIVEN/LATCH/UNOPTFLAT are hard errors,
+including the `SYNTHESIS`/`VTM_NO_DPI` branches. Evidence:
+`ventium-performance-core-lint.YXj5sPxa/{inputs,closed}.json` and the exact
+commands/logs. This checks the CPU hierarchy, not the complete SoC/vendor RAM
+implementation or timing. All **131** existing board observer/ABI tests pass.
+The exported shim already has capability-checked UV64 selectors76/77/78;
+no duplicate performance counter or new observation RTL was added.
+
 Use `TMPDIR=/home/yukidama/external/tmp python3 -B` for these host tools.
 Run the freezer with `--help` for its required named inputs; output must be a
 fresh, empty, canonical directory outside the input roots. Refusal leaves
@@ -68,8 +78,12 @@ Neither wrote payloads. Both issues were corrected before the successful export.
 
 ## Remaining gates
 
-No Vivado run or board deployment was started. External free space was only
-7.6 GiB, below the existing 12 GiB build-admission floor. A single guarded build
+No Vivado run or board deployment was started. External free space initially
+was only7.6GiB. A checked cleanup removed54 regenerable GCC precompiled headers
+(4.424GiB), retaining all sources, binaries, objects, receipts and guest data.
+Free space afterward was12,846,800,896bytes, still just below the strict12GiB
+admission floor; rounded `df -h` output is not sufficient. The removal receipt
+is `ventium-pch-cleanup.WHAS3yCU/removed.json`. A single guarded build
 must satisfy storage/RAM admission and full implementation timing/resource
 checks. The current generic differential gate remains failing, both cold
 larger-L2 guests are still running, and no complete timedemo/standard-suite

@@ -908,3 +908,12 @@ closure and30 real Tcl profile checks while preserving40MHz, UV+fast and the
 16-slot posted transport. This is **UNQUALIFIED source preparation**, not
 simulation acceptance, clean lint, timing sign-off or deployment. No Vivado
 was started; external free space remains below the build-admission floor.
+
+Read-through Win95 subsequently closed normally at
+**1,469,201,965 clocks /231,707,344 retirements**, with stable inputs, complete
+log EOF, native/supervisor exit0 and no OOM or remaining child. Its separately
+viewed final capture is a readable Welcome desktop, raw SHA256
+`0589d29b72d19308e5eb7eb4d62d0c96348cf6eb949d96c236f5d6a202f5f36c`.
+Evidence:`ventium-read-through-desktop.pMbjpek1/closure-audit.json`. It remains
+`CLOSED_UNQUALIFIED` pending independent desktop acceptance; the later L2
+candidate and full timedemo are not accepted by this result.

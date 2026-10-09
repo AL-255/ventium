@@ -2012,6 +2012,15 @@ acceptance requirements are in
 [`docs/UV_FAST_COMBINED_FREEZE_2026-10-08.md`](docs/UV_FAST_COMBINED_FREEZE_2026-10-08.md).
 This bundle is not the installed bitstream and has no gameplay IPC measurement.
 
+The October9 **performance/larger-L2 export** is documented in
+[`fpga/PERFORMANCE_EXPORT.md`](fpga/PERFORMANCE_EXPORT.md). Its checked exporter
+copies actual native-compiled sources and five additional headers, producing
+186payloads/135hardware definitions. It preserves40MHz, UV+fast and the
+16-slot posted transport; the simulator-only `system.v` wrapper must not be
+copied into hardware. Strict CPU-hierarchy hardware-profile lint passes, but
+the bundle remains `UNQUALIFIED`: no full-SoC lint, full suite, implementation
+timing or silicon acceptance is inherited from a simulator build.
+
 From the repository, focused FPU checks are available as:
 
 ```bash

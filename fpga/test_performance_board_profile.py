@@ -19,6 +19,8 @@ def digest(path):
 
 
 def main():
+    if not __debug__:
+        raise SystemExit('refusing disabled Python assertions')
     parent, sim, export = (Path(p).resolve(strict=True) for p in sys.argv[1:])
     repo = Path(__file__).resolve().parents[1]
     load = lambda p: json.loads(p.read_text())
