@@ -1,9 +1,9 @@
 # Exact x87 instruction-byte capture — October 9
 
 Private, default-off `VEN_FP_SHORT_WINDOW`; **not production or standard-suite
-acceptance**. Current verified gameplay is **0.38776687 total U+V IPC**, pop-drain
-model `c90d8fc0`, cycles **1,200,000,000–1,300,000,000**. It predates this change,
-instruction-word reuse, tag LUTRAM and data-under-I-fill. The 0.48 target is open.
+acceptance**. Current verified gameplay is **0.39002079 total U+V IPC**, code-word
+model `f3be9a11`, cycles **1,200,000,000–1,300,000,000**. It predates this change,
+tag LUTRAM and data-under-I-fill. The 0.48 target is open.
 Earlier full direct-memory CoreMark scores are 2.10736/2.11041 CM/MHz, not this
 candidate's score or an FPGA cache/DDR measurement.
 

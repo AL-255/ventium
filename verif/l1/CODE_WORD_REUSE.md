@@ -1,9 +1,12 @@
 # Registered instruction-word reuse — October 9
 
 Private, default-off `VEN_L1D_CODE_WORD_REUSE`; **not production, FPGA or
-standard-suite acceptance**. Latest verified gameplay is **0.38588696
-total U+V IPC**, XPM-fidelity model `50f37229`, cycles **1,200,000,000–1,300,000,000**.
-It predates pop-drain and this experiment. Earlier
+standard-suite acceptance**. Latest verified gameplay is **0.39002079
+total U+V IPC**, code-word/pop-drain/XPM model `f3be9a11`, cycles
+**1,200,000,000–1,300,000,000**. It includes this experiment, but predates
+tag LUTRAM, data-under-I-fill and short-x87 capture. The native/source/frame
+audit is `external/tmp/ventium-code-word-gameplay-audit.VyVHIfbs/audit.json`;
+the full timedemo is still incomplete. Earlier
 full direct-memory CoreMark scores are **2.10736/2.11041 CM/MHz**, not this
 candidate's score or an FPGA cache/DDR measurement. The 0.48 target is open.
 

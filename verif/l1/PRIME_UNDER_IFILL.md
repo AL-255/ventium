@@ -2,8 +2,8 @@
 
 Experimental, default-off `VEN_L1D_PRIME_UNDER_IFILL`. **Not selected for the
 running full-PC candidate, FPGA or standard-suite acceptance.** Last verified
-gameplay is **0.38776687 total U+V IPC**, pop-drain model `c90d8fc0`, cycles
-1.2–1.3B, predating this change and the code-word/combined candidates. The
+gameplay is **0.39002079 total U+V IPC**, code-word model `f3be9a11`, cycles
+1.2–1.3B, predating this change and the combined candidate. The
 ≥0.48 target remains open. Earlier full direct-memory CoreMark is
 2.10736/2.11041 CM/MHz; latest combined full seeds are still running.
 
