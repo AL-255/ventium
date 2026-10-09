@@ -1,7 +1,8 @@
 diff --git a/fpga/rk-ao486-system/src/rk_ao486_system_pl.v b/fpga/rk-ao486-system/src/rk_ao486_system_pl.v
 --- a/fpga/rk-ao486-system/src/rk_ao486_system_pl.v
 +++ b/fpga/rk-ao486-system/src/rk_ao486_system_pl.v
-@@ -228,7 +228,15 @@
+@@ -226,11 +226,19 @@
+     wire        dbg_halt_req, dbg_step, dbg_bp_en, dbg_bp_clr;
      wire [31:0] dbg_bp_addr;
      wire [6:0]  dbg_arch_sel;
 +    wire ddr_posted_drained, ddr_posted_fault;
@@ -17,7 +18,10 @@ diff --git a/fpga/rk-ao486-system/src/rk_ao486_system_pl.v b/fpga/rk-ao486-syste
      assign cpu_dbg_cmp = {21'd0, dbg_arch_sel, dbg_bp_clr, dbg_bp_addr,
                            dbg_bp_en, dbg_step, dbg_halt_req, dbg_cmp_range, dbg_cmp_cfg};
 +`endif
-@@ -381,2 +388,9 @@
+     wire [31:0] dbg_last_eip, dbg_frozen_eip, dbg_frozen_ctx_eip, dbg_trace_pc, dbg_trace_aux, dbg_rd_ring_addr, dbg_rd_ring_data, dbg_rd_ring_data_hi, dbg_perf_stall;
+     wire [15:0] dbg_frozen_cs;
+     wire [31:0] dbg_frozen_esp, dbg_frozen_eflags, dbg_frozen_fault_pc, dbg_frozen_cr0;
+@@ -381,4 +389,11 @@
 +`ifdef VEN_DDR_POSTED
 +    ven_ddram_axi_posted #(.MEM_BASE(MEM_BASE), .WRITE_SLOTS(16)) u_ddr (
 +        .fault(ddr_posted_fault), .drained(ddr_posted_drained),
@@ -27,3 +31,5 @@ diff --git a/fpga/rk-ao486-system/src/rk_ao486_system_pl.v b/fpga/rk-ao486-syste
      ven_ddram_axi #(.MEM_BASE(MEM_BASE)) u_ddr (
 +`endif
          .clk(clk), .rst_n(resetn),
+         .DDRAM_BUSY(DDRAM_BUSY), .DDRAM_BURSTCNT(DDRAM_BURSTCNT), .DDRAM_ADDR(DDRAM_ADDR),
+         .DDRAM_DOUT(DDRAM_DOUT), .DDRAM_DOUT_READY(DDRAM_DOUT_READY), .DDRAM_RD(DDRAM_RD),

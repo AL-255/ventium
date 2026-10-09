@@ -27,7 +27,15 @@ def main():
         shim.write_text((repo/'ao486-sim/ven/ven_ao486_shim.sv').read_text())
         (source/'fpga').mkdir()
         shutil.copyfile(here/'ven_ddram_axi_posted.sv',source/'fpga/ven_ddram_axi_posted.sv')
-        p=subprocess.run(['patch','--batch','--forward','-p3','-i',str(here/'patches/0010-posted-ddr-transport.patch')],
+        patch_command=['patch','--batch','--forward','--fuzz=0','-p3','-i',str(here/'patches/0010-posted-ddr-transport.patch')]
+        pristine=top.read_text()
+        before='    wire [6:0]  dbg_arch_sel;'
+        assert pristine.count(before)==1
+        top.write_text(pristine.replace(before,'    wire [5:0]  dbg_arch_sel;'))
+        p=subprocess.run(patch_command+['--dry-run'],cwd=flow,capture_output=True,text=True,timeout=10)
+        assert p.returncode!=0 and 'FAILED' in p.stdout,p.stdout+p.stderr
+        top.write_text(pristine)
+        p=subprocess.run(patch_command,
                          cwd=flow,capture_output=True,text=True,timeout=10)
         assert p.returncode==0,p.stdout+p.stderr
         defs=(frozen/'defines.txt').read_text().splitlines()
@@ -95,7 +103,7 @@ def main():
         p=subprocess.run(['vvp',str(root/'pack')],capture_output=True,text=True,timeout=10)
         assert p.returncode==0 and 'POSTED-PACK-OK' in p.stdout,p.stdout+p.stderr
     assert digest(original)==pin
-    print('POSTED-BOARD-PROFILE-OK: 9 admission cases, 128 control-pack cases; no Vivado or deployment')
+    print('POSTED-BOARD-PROFILE-OK: exact-context patch/refusal, 9 admission cases, 128 control-pack cases; no Vivado or deployment')
 
 
 if __name__=='__main__': main()
