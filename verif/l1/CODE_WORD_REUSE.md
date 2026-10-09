@@ -2,8 +2,8 @@
 
 Private, default-off `VEN_L1D_CODE_WORD_REUSE`; **not production, FPGA or
 standard-suite acceptance**. Latest verified gameplay is **0.38588696
-total U+V IPC**, LRU-owner model `227b0373`, cycles **1,200,000,000–1,300,000,000**.
-It predates pop-drain, XPM-fidelity and this experiment. Earlier
+total U+V IPC**, XPM-fidelity model `50f37229`, cycles **1,200,000,000–1,300,000,000**.
+It predates pop-drain and this experiment. Earlier
 full direct-memory CoreMark scores are **2.10736/2.11041 CM/MHz**, not this
 candidate's score or an FPGA cache/DDR measurement. The 0.48 target is open.
 
@@ -26,8 +26,30 @@ store/invalidation rules remain unchanged.
 
 No asynchronous SRAM-to-core shortcut, new RAM port, storage, speculative fill
 validation, cache enlargement or workload-specific address is introduced.
-Synthesis/route cost and timing are still **unmeasured**; no MHz claim follows
-from a simulator's latency reduction.
+The isolated synthesis/route cost is measured below; full-CPU cost and timing
+remain unqualified. No CPU MHz claim follows from a simulator's latency reduction.
+
+The first isolated physical A/B (`ventium-code-word-physical.p0zaCvIM`) closed
+**incomplete**, native timeout 124 at its 600-second bound. Inputs stayed pinned;
+peak scope memory was 6,020,120,576 bytes, with no resource-stop/OOM indication,
+and the Vivado scope is closed with no orphan. Control routing completed:
+20,659 LUTs, 6,878 FFs, 2,048 LUTRAMs and no block RAM/DSP. Its local zero-I/O
+setup estimate is **59.91 MHz**, but hold slack is **−0.080 ns** and OOC port
+locations are absent; this is **not CPU timing sign-off**.
+
+Candidate synthesis alone increases LUTs **20,769→22,202 (+6.90%)**, with
+6,878→6,877 FFs and unchanged 2,048 LUTRAMs. This cost must be judged against
+measured gameplay benefit; no area saving is claimed. Candidate routing did not
+finish inside the joint bound. A candidate-only repeat completed under the same
+600-second bound and unchanged constraints/settings in
+`ventium-code-word-physical-r2.MAXhpogR`; its two-line Tcl selection diff is
+retained. Native exit is zero, all inputs stayed pinned, scope peak is
+4,595,408,896 bytes, and both service and Vivado scope closed without an orphan.
+Candidate routing uses **22,051 LUTs versus 20,659 control (+6.74%)**, 6,877
+FFs and unchanged 2,048 LUTRAMs. Local setup estimate is **60.29 MHz**
+(WNS +8.414 ns at 25 ns), but WHS remains **−0.080 ns**. No full-CPU timing,
+area-efficiency gain or hardware acceptance is claimed. The failed joint run
+is not overwritten or counted as passed.
 
 ## Closed checks
 
