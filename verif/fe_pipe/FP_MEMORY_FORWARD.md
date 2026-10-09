@@ -155,3 +155,8 @@ cannot qualify this candidate or the FPGA cache/DDR implementation.
 Required before promotion: resolve the generic gate, finish the standard
 suite on the selected combined implementation, measure gameplay, and complete
 whole-board synthesis/route/timing/deployment. Preserve UV + system fast path.
+
+Subsequent work adds [independent-set priming under fill](PRIME_UNDER_FILL.md),
+including cold operand mutation/remapping/#PF/#NM regressions and a fresh
+combined full-PC build. That report supersedes the earlier statement above
+that no full-PC run contains these flags; its guests are running, not accepted.

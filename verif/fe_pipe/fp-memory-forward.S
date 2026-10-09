@@ -21,6 +21,12 @@
 #ifndef EVENT_PERIOD
 #define EVENT_PERIOD 1
 #endif
+#ifndef EVENT_MEMORY
+#define EVENT_MEMORY 0
+#endif
+#if EVENT_MEMORY && (!EVENT || EVENT_PERIOD != 2 || KIND != 0)
+#error "Memory/event ownership cases require FADD32 and period-two INT3"
+#endif
 #if KIND == 3
 #define BIAS 31
 #elif KIND == 4
@@ -74,6 +80,13 @@ pm32:
     .set p,p+1
     .endr
     movl $0x180063,0x1223c
+#if EVENT_MEMORY
+    /* Separate operand pages from the interrupt stack and map the page table
+     * architecturally. Both virtual aliases are initialized before the test. */
+    movl $0x190063,0x12238
+    movl $0x1a0063,0x12234
+    movl $0x012063,0x12048
+#endif
     movl $0x11000,%eax
     movl %eax,%cr3
     movl %cr0,%eax
@@ -91,7 +104,11 @@ client:
     movw %ax,%fs
     movw %ax,%gs
     movl $0x8fff0,%esp
+#if EVENT_MEMORY
+    movl $0x8e100,%ebp
+#else
     movl $(0x8f100+BIAS),%ebp
+#endif
     .set p,0
     .rept 4
 #if KIND == 2 || KIND == 4
@@ -105,6 +122,14 @@ client:
 #endif
     .set p,p+32
     .endr
+#if EVENT_MEMORY
+    movl $0x40000000,0x8d100
+    movl $0x40000000,0x8d120
+    movl $0x40000000,0x8d140
+    movl $0x40000000,0x8d160
+    movl $0,0x8f244
+    movl $0,0x8f248
+#endif
 #if EVENT
     /* A real protected-mode INT3 after each four-operation burst; same
      * relocation as the client. Entry must drain all older FP owners. */
@@ -115,7 +140,25 @@ client:
     movw $0x8e00,0x81c
     shrl $16,%eax
     movw %ax,0x81e
+#if EVENT_MEMORY >= 3
+    movl $fault_handler,%eax
+#if EVENT_MEMORY == 3
+    movw %ax,0x870
+    movw $0x18,0x872
+    movw $0x8e00,0x874
+    shrl $16,%eax
+    movw %ax,0x876
+#else
+    movw %ax,0x838
+    movw $0x18,0x83a
+    movw $0x8e00,0x83c
+    shrl $16,%eax
+    movw %ax,0x83e
+#endif
+    movw $0x77,0x480
+#else
     movw $0x1f,0x480
+#endif
     movl $(0x800 + RELOC*0x10000000),0x482
     lidt 0x480
 #endif
@@ -190,6 +233,8 @@ operand3:
     cmpl $0,0x8f200
 #elif KIND == 10
     cmpl $1,0x8f200
+#elif EVENT_MEMORY == 1 || EVENT_MEMORY == 2
+    cmpl $96,0x8f200
 #else
     cmpl $64,0x8f200
 #endif
@@ -198,6 +243,13 @@ operand3:
     jne fail
 #if EVENT
     cmpl $(16/EVENT_PERIOD),0x8f240
+    jne fail
+#endif
+#if EVENT_MEMORY == 3
+    cmpl $8,0x8f244
+    jne fail
+#elif EVENT_MEMORY >= 4
+    cmpl $8,0x8f248
     jne fail
 #endif
     jmp pair_u
@@ -222,6 +274,55 @@ exit:
     .global handler
 handler:
     incl 0x8f240
+#if EVENT_MEMORY == 1
+    /* Ordinary coherent CPU writes must invalidate any primed operand. */
+    xorl $0x7f800000,0(%ebp)
+    xorl $0x7f800000,32(%ebp)
+    xorl $0x7f800000,64(%ebp)
+    xorl $0x7f800000,96(%ebp)
+#elif EVENT_MEMORY == 2
+    /* Same linear operand, different physical data, followed by INVLPG. */
+    xorl $0x30000,0x12238
+    invlpg (%ebp)
+#elif EVENT_MEMORY == 3
+    andl $0xfffffffe,0x12238
+    invlpg (%ebp)
+#elif EVENT_MEMORY >= 4
+    pushl %eax
+    movl %cr0,%eax
+#if EVENT_MEMORY == 4
+    orl $8,%eax
+#else
+    orl $4,%eax
+#endif
+    movl %eax,%cr0
+    popl %eax
+#endif
+    iret
+#endif
+#if EVENT_MEMORY >= 3
+    .global fault_handler
+fault_handler:
+#if EVENT_MEMORY == 3
+    cmpl $0,(%esp)
+    jne fail
+    pushl %eax
+    movl %cr2,%eax
+    cmpl $(0x8e100 + RELOC*0x10000000),%eax
+    jne fail
+    popl %eax
+    incl 0x8f244
+    orl $1,0x12238
+    invlpg (%ebp)
+    addl $4,%esp
+#else
+    incl 0x8f248
+    pushl %eax
+    movl %cr0,%eax
+    andl $0xfffffff3,%eax
+    movl %eax,%cr0
+    popl %eax
+#endif
     iret
 #endif
     .section .reset,"ax"
