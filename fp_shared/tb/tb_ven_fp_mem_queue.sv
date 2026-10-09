@@ -90,8 +90,9 @@ module tb_ven_fp_mem_queue;
   endtask
 
   task automatic queue_pair(input fxop_e op, input logic [2:0] alu,
-                            input logic [31:0] data, input logic [79:0] expected,
-                            input bit pushes, input bit full_stack);
+                            input logic [63:0] data, input logic [79:0] expected,
+                            input bit pushes, input bit full_stack,
+                            input bit wide = 0);
     int responses, waited;
     logic [2:0] old_top;
     logic [7:0] old_tag;
@@ -105,8 +106,8 @@ module tb_ven_fp_mem_queue;
     young_done_regs[(pushes ? (3'(old_top - 3'd1)) : old_top)*80 +: 80] = expected;
     start_divide();
     // Already acquired memory bytes are presented on the command seam.
-    cmd_op = op; cmd_aluop = alu; cmd_sti = 0; cmd_mem = {48'd0, data};
-    cmd_mem_bytes = 4; cmd_pop = 0; cmd_valid = 1;
+    cmd_op = op; cmd_aluop = alu; cmd_sti = 0; cmd_mem = {16'd0, data};
+    cmd_mem_bytes = wide ? 8 : 4; cmd_pop = 0; cmd_valid = 1;
     cmd_update_fip = 1; cmd_update_fdp = 1;
     cmd_fip = 32'h55667788; cmd_fcs = 16'h0028;
     cmd_fdp = 32'h1234567c; cmd_fds = 16'h0030;
@@ -174,21 +175,40 @@ module tb_ven_fp_mem_queue;
     if (cmd_ready) $fatal(1, "pop arithmetic incorrectly queued");
     cmd_pop = 0; cmd_op = FX_FST_M32; #1;
     if (cmd_ready) $fatal(1, "store incorrectly queued");
+`ifndef VEN_FP_MEM_QUEUE64
     cmd_op = FX_FLD_M64; cmd_mem_bytes = 8; #1;
     if (cmd_ready) $fatal(1, "wide source incorrectly queued");
+`else
+    cmd_op = FX_FLD_M64; cmd_mem_bytes = 4; #1;
+    if (cmd_ready) $fatal(1, "partial wide source incorrectly queued");
+    cmd_op = FX_FLD_M80; cmd_mem_bytes = 10; #1;
+    if (cmd_ready) $fatal(1, "extended source incorrectly queued");
+    cmd_op = FX_AR_M64; cmd_mem_bytes = 8; cmd_aluop = 2; #1;
+    if (cmd_ready) $fatal(1, "wide compare incorrectly queued");
+    cmd_aluop = 0; cmd_pop = 1; #1;
+    if (cmd_ready) $fatal(1, "wide pop incorrectly queued");
+    cmd_pop = 0; cmd_op = FX_FST_M64; #1;
+    if (cmd_ready) $fatal(1, "wide store incorrectly queued");
+`endif
     cmd_op = FX_FLD_M32; cmd_mem_bytes = 2; #1;
     if (cmd_ready) $fatal(1, "partial source incorrectly queued");
     cmd_valid = 0;
     setup(0, 1); start_divide();
     cmd_op = FX_FLD_M32; cmd_mem_bytes = 4; cmd_pop = 0; cmd_valid = 1; #1;
     if (cmd_ready) $fatal(1, "unmasked source incorrectly queued");
+`ifdef VEN_FP_MEM_QUEUE64
+    cmd_op = FX_FLD_M64; cmd_mem_bytes = 8; #1;
+    if (cmd_ready) $fatal(1, "unmasked wide source incorrectly queued");
+`endif
     cmd_valid = 0;
     checks++;
   endtask
 
-  task automatic reset_queued;
+  task automatic reset_queued(input bit wide = 0);
     setup(0, 0); start_divide();
-    cmd_op = FX_FLD_M32; cmd_mem_bytes = 4; cmd_mem = {48'd0,32'h40800000};
+    cmd_op = wide ? FX_FLD_M64 : FX_FLD_M32;
+    cmd_mem_bytes = wide ? 8 : 4;
+    cmd_mem = wide ? {16'd0,64'h4010000000000000} : {48'd0,32'h40800000};
     cmd_valid = 1; #1;
     if (!cmd_ready) $fatal(1, "reset fixture failed to queue");
     @(negedge clk); cmd_valid = 0;
@@ -215,6 +235,23 @@ module tb_ven_fp_mem_queue;
     queue_pair(FX_FLD_M32, 0, 32'h40800000, INDEF, 1, 1);
     queue_pair(FX_FILD_M32, 0, 32'hfffffff9, INDEF, 1, 1);
     reject_shapes(); reset_queued();
+`ifdef VEN_FP_MEM_QUEUE64
+    queue_pair(FX_AR_M64, 0, 64'h4010000000000000, SIX, 0, 0, 1);
+    queue_pair(FX_AR_M64, 1, 64'h4010000000000000, EIGHT, 0, 0, 1);
+    queue_pair(FX_AR_M64, 4, 64'h4010000000000000, NEG_TWO, 0, 0, 1);
+    queue_pair(FX_AR_M64, 5, 64'h4010000000000000, TWO, 0, 0, 1);
+    queue_pair(FX_AR_M64, 6, 64'h4010000000000000, HALF, 0, 0, 1);
+    queue_pair(FX_AR_M64, 7, 64'h4010000000000000, TWO, 0, 0, 1);
+    queue_pair(FX_FLD_M64, 0, 64'h4010000000000000, FOUR, 1, 0, 1);
+    queue_pair(FX_FILD_M64, 0, 64'hfffffffffffffff9, NEG_SEVEN, 1, 0, 1);
+    queue_pair(FX_FLD_M64, 0, 64'h4010000000000000, INDEF, 1, 1, 1);
+    queue_pair(FX_FILD_M64, 0, 64'hfffffffffffffff9, INDEF, 1, 1, 1);
+    // Low fraction and signed high dword must survive the same slot. Neither
+    // can be reproduced by zero-extending/truncating the old m32 payload.
+    queue_pair(FX_FLD_M64, 0, 64'h4010000000000001, 80'h40018000000000000800, 1, 0, 1);
+    queue_pair(FX_FILD_M64, 0, 64'h0000000100000001, 80'h401f8000000080000000, 1, 0, 1);
+    reset_queued(1);
+`endif
     $display("FP-MEM-QUEUE-LEAF-OK checks=%0d", checks);
     $finish;
   end
