@@ -455,3 +455,28 @@ latest flag; **0.44004644 remains the verified gameplay baseline**, not a
 result for either later candidate. The existing combined cold pair continues;
 no additional cold pair was launched. Details, retained failed test attempts
 and remaining acceptance: [scalar operand handoff](../verif/fe_pipe/FP_SCALAR_LOAD_CMD.md).
+
+## Reference operand resident priming
+
+Private user model **`12d078a7`** now borrows the checked reference-dispatch
+edge for a resident-only operand read using the existing D-cache/DTLB port.
+Normal S_LOAD/S_FLOAD still owns exact widths, permission/fault checks and
+execution; required MOVSX/IMUL latency is unchanged. No extra memory port,
+queue or arithmetic unit is added. In matched ordinary low-RAM short CoreMark,
+AXI0 performance clocks improve **5,482,773→5,375,191 (−1.9622%)** and validation
+**5,474,040→5,369,188 (−1.9154%)**. Both CRC sets pass; direct-memory clocks are
+identical. These are **not score-eligible runs** and not physical DDR results.
+
+The 1,200-comparison boundary matrix, 24 scalar and 24 integer precise-fault
+comparisons, 12 FP debug/lazy-state comparisons and 76 broader system checks
+pass, alongside enabled/disabled/board synthesis-guard lint. All 108 original
+generic architectural sequences match the parent exactly; the unmodified
+generic gate still fails its existing terminal mismatches and four hard cycle
+bands. No failure was converted into a pass by changing the oracle.
+
+**0.44004644 remains verified gameplay IPC** on `15f56054`, clocks
+1,200,012,763–1,300,012,763, predating this candidate. Combined `652de481`
+continues cold startup; no new full-PC pair or FPGA rebuild was launched for
+the follow-up. Full suites, measured 0.48 gameplay IPC and hardware deployment
+remain pending. Reproduction, exact results and retained failed experiments:
+[reference operand priming](../verif/fe_pipe/REF_OPERAND_PRIME.md).
