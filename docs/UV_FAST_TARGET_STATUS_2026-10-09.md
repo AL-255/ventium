@@ -7,7 +7,7 @@ snapshot is used for the current cold full-PC runs.
 | Requirement | Verified result | Remaining |
 | --- | --- | --- |
 | CoreMark ≥2.1 CM/MHz | REP full direct-memory seeds: **2.107861982 / 2.110913372**, correct CRCs | Later permission-shadow candidate pending; not a DDR/cache/FPGA score |
-| Quake ≥0.48 total U+V IPC | **0.44513116**, permission shadow `1f2583cb`, 1,200,000,000–1,300,000,000 clocks | Below target; later target-read/read-priming/scalar candidates not measured |
+| Quake ≥0.48 total U+V IPC | **0.44468922**, target-read `59650fe2`, 1,200,000,000–1,300,000,000 clocks | Below target; later read-priming/scalar/wide-queue candidates not measured |
 | Standard suite | REP full CoreMark seeds pass; code-word Win95 closed at a visually clean desktop | Independent desktop acceptance and complete timedemo; newer candidates pending |
 | FPGA | Old image still deployed | Selected source, full timing/resource qualification and deployment |
 
@@ -83,7 +83,7 @@ plus the live native identity. Full timedemo remains open. This supersedes
 percentage gain. Permission shadow, target read and read-retirement priming
 are absent from this measured build.
 
-The latest **permission-shadow** gameplay audit is
+The preceding **permission-shadow** gameplay audit is
 `external/tmp/ventium-ifetch-auth-gameplay-audit.XNYeoSR5/audit.json`:
 **44,513,116 = 33,416,464 U + 11,096,652 V retirement events / 100M clocks**,
 cycles **1,200,000,000–1,300,000,000**, giving **0.44513116 IPC**. Model SHA256:
@@ -103,6 +103,26 @@ bucket is D-side pipeline result wait (**21.124151%**); x87 admission occupies
 stalls. For this observed retirement count, reaching 0.48 needs **7.264342%**
 fewer clocks. The running read-priming candidate targets the D-side cost;
 its directed savings are not yet a gameplay result.
+
+The latest **target-read** gameplay audit is
+`external/tmp/ventium-auth-target-gameplay-audit.eunv4nge/audit.json`:
+**44,468,922 = 33,415,299 U + 11,053,623 V retirement events / 100M clocks**,
+cycles **1,200,000,000–1,300,000,000**, giving **0.44468922 IPC**. Model SHA256:
+`59650fe299f7ae07f0227c9d0eae696642000affadf35adf640fdad5e3d58059`.
+Both unchanged captures visibly show gameplay advancing from shells pickup
+to grenade-launcher pickup. Each capture is bracketed by adjacent 500k-clock
+progress records. The audit rechecks 233 source and 17 runtime inputs, live
+native identity and no OOM. This is slightly below the preceding permission-
+shadow window: **no gameplay gain is established by target read**. Equal-clock
+windows are not guaranteed equal scene work. The complete timedemo is open.
+
+The matching disjoint residency audit accounts for all 100M clocks. D-side
+result waiting remains **21.120955%**, x87 admission **8.784291%**, `S_FLOAD`
+**7.809637%**, slow integer load **7.183039%**, and registered I-cache latency
+**1.361018%**. These include necessary work, not all removable stalls. The
+same retirement count needs **7.3564125%** fewer clocks to reach 0.48.
+Read-retirement priming, scalar dispatch and wide-operand queuing are absent
+from this measured build and remain unmeasured.
 
 ## Fixes and evidence
 
@@ -177,7 +197,8 @@ its directed savings are not yet a gameplay result.
   cross-page privilege comparisons pass, and a deliberately missing boundary
   guard is rejected. FPGA-faithful PC model `59650fe2` now runs cold Quake on
   CPU28 and Win95 on CPU16, with identical core/FP source to the tested model.
-  It is not gameplay-measured or accepted; the original no-permission-shadow
+  Its fixed gameplay window now measures **0.44468922 IPC**, not an improvement
+  over the permission-shadow window and not a suite pass. The original no-permission-shadow
   experiment remains no-gain.
 - [Read-retirement cache priming](../verif/fe_pipe/HELD_READ_PRIME.md): private
   repaired candidate reuses the existing next-read port after a retiring U
