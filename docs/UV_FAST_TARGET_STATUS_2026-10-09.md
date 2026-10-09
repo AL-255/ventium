@@ -32,8 +32,9 @@ parent-clock expectation failed and is retained. The host optimization never
 skips a clock edge or changes guest state. The 60-minute full-seed limit still
 applies; the optional 75-minute request has not been answered.
 
-Seven cold full-PC guests remain active: code-word Quake, combined-candidate,
-independent-REP and instruction-permission-shadow Quake/Win95 pairs.
+Nine cold full-PC guests remain active: code-word Quake, combined-candidate,
+independent-REP, instruction-permission-shadow and checked-target-read
+Quake/Win95 pairs.
 Code-word Win95 closed normally at **2,259,200,420 clocks** with a visually
 clean Welcome desktop, native exit0, stable pins, no OOM and reaped children.
 Its closed raw frame16 is retained; human confirmation/independent desktop
@@ -134,14 +135,25 @@ Full timedemo completion is still open.
   the permission shadow removes masking stalls, the existing two-port target
   selector saves one warm CALL/RET clock. 288 control comparisons, 76 system,
   sixteen fault and 44 boundary cases pass; 115,712 real-include checks pass
-  in each of original/disabled/enabled variants. No full-PC measurement or
-  promotion yet; the original no-permission-shadow experiment remains no-gain.
+  in each of original/disabled/enabled variants. Sixteen additional twice-warm
+  cross-page privilege comparisons pass, and a deliberately missing boundary
+  guard is rejected. FPGA-faithful PC model `59650fe2` now runs cold Quake on
+  CPU28 and Win95 on CPU16, with identical core/FP source to the tested model.
+  It is not gameplay-measured or accepted; the original no-permission-shadow
+  experiment remains no-gain.
 
 Closed scratch snapshots were losslessly compressed after checking their
 recorded hashes and absence of live users: **2,649,788,416 bytes reclaimed**.
 `external/tmp/ventium-closed-snapshot-archive.4fwrK4bP/manifest.json` records
 the twenty exact paths and decompression checks. `gzip -dk -- EXACT/end.snap.gz`
 recovers each original. No source, disk media or state-delta trace was removed.
+
+Another **1,269,211,136 bytes** were recovered by losslessly compressing sixteen
+closed compiler PCH files. Every decompressed SHA256 and all other build files
+were checked; use `gzip -dk -- EXACT_FILE.gch.gz` to recover them. Manifest:
+`external/tmp/ventium-closed-goldens-archive.YYawVksY/pch-manifest.json`.
+An initial historical-golden-cache archive was refused because its files are
+hard-linked; that cache was left completely untouched.
 
 ## Current profiling lead
 

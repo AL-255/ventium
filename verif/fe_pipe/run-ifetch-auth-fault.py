@@ -27,6 +27,9 @@ def save(p,v):
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     for name in ('control','candidate','out'):parser.add_argument('--'+name,type=Path,required=True)
+    parser.add_argument('--feature',choices=('VEN_IFETCH_AUTH_MULTI','VEN_P54_CTRL_TARGET_SYSTEM'),
+                        default='VEN_IFETCH_AUTH_MULTI')
+    parser.add_argument('--fixture',choices=('single-page','warm-boundary'),default='single-page')
     args=parser.parse_args()
     scratch=Path('/home/yukidama/external/tmp').resolve(strict=True)
     assert __debug__ and Path(os.environ['TMPDIR']).resolve()==scratch
@@ -42,9 +45,11 @@ def main():
         assert {'VEN_L1_AXI','VEN_SYS_FASTPATH','VEN_SYS_FASTPATH_RELOC','VEN_FE_PIPE'}<=profiles[n]
         assert not {'VEN_UOPCACHE','VTM_NO_DPI','SYNTHESIS','VEN_SYS_FASTPATH_ALL'}&profiles[n]
         pins.update({str(p):sha(p) for p in (tb,stamp)})
-    assert profiles['candidate']==profiles['control']|{'VEN_IFETCH_AUTH_MULTI'}
-    assert 'VEN_IFETCH_AUTH_MULTI' not in profiles['control']
-    source=HERE/'ifetch-auth-fault.S'
+    assert profiles['candidate']==profiles['control']|{args.feature}
+    assert args.feature not in profiles['control']
+    if args.feature=='VEN_P54_CTRL_TARGET_SYSTEM':
+        assert 'VEN_IFETCH_AUTH_MULTI' in profiles['control']
+    source=HERE/('ifetch-auth-boundary.S' if args.fixture=='warm-boundary' else 'ifetch-auth-fault.S')
     ld=REPO/'verif/sys/tests/ppage/ppage.ld'
     qemu=REPO/'ventium-refs/07-p5-emulation-harness/build/qemu/build-sys/qemu-system-i386'
     for p in (Path(__file__),source,ld,qemu,REPO/'verif/qemu-trace/gen_trace.py',
@@ -73,7 +78,8 @@ def main():
         assert image.stat().st_size==65536
         syms={p[2]:int(p[0],16) for l in subprocess.check_output(['nm','-n',elf],text=True).splitlines()
               if len(p:=l.split())==3 and p[0]!='U'}
-        assert syms['target']%4096==syms['replacement']%4096==0
+        assert syms['target']%4096==0
+        if args.fixture=='single-page':assert syms['replacement']%4096==0
         run([qemu,'-machine','pc','-cpu','pentium','-m','64','-bios',image,'-display','none',
              '-serial','none','-monitor','none','-no-reboot','-no-shutdown',
              '-device','isa-debug-exit,iobase=0xf4,iosize=0x04'],leaf,'free-qemu',133)
@@ -98,7 +104,8 @@ def main():
             assert [r['pc'] for r in trace.records]==[r['pc'] for r in gold.records]
             assert [r['n'] for r in trace.records]==list(range(len(trace.records)))
             assert not re.search(r'%Error|%Fatal|CPU HUNG|UNIMPLEMENTED|tb: FAIL',so+se)
-            check_faultlog.check_counts(check_faultlog.read_counts(so.splitlines()),{} if case==3 else {(14,5):1})
+            pf_error=4 if args.fixture=='warm-boundary' and case==2 else 5
+            check_faultlog.check_counts(check_faultlog.read_counts(so.splitlines()),{} if case==3 else {(14,pf_error):1})
             footer=re.findall(r'^tb: stop: WIN95 co-sim isa-debug-exit \(out 0xf4\) after (\d+) retired in (\d+) clocks$',se,re.M)
             assert len(footer)==1 and int(footer[0][0])==len(trace.records)
             if mode=='cycle-func':
@@ -109,7 +116,8 @@ def main():
                 assert any(int(r['pc'],0)==syms['pair_v'] for r in pairs)
                 pair_count=len(pairs)
         return dict(case=case,model=name,latency=latency,full_qemu_diff=True,paired_v=pair_count)
-    result=dict(passed=False,cases=[],errors=[],gameplay_ipc=None,standard_suite=False)
+    result=dict(passed=False,cases=[],errors=[],gameplay_ipc=None,standard_suite=False,
+                fixture=args.fixture,feature=args.feature)
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:fixtures=list(pool.map(prepare,range(4)))
         with concurrent.futures.ThreadPoolExecutor(max_workers=32) as pool:

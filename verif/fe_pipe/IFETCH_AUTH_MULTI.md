@@ -62,6 +62,14 @@ Private harness objects use their own generated headers; input pins are stable.
 - `boundary-l0` / `boundary-l7`: **44** complete fetch-boundary checks pass,
   including missing essential bytes, unused lookahead, exact restart PC,
   maximum instruction length and privilege/x87 exception precedence.
+- `warm-boundary-r3`: **16** additional complete QEMU comparisons plus cycle
+  counterparts, using two CPL0 traversals before CPL3 entry. A crossing MOV
+  must fault before changing its destination; an INT ending exactly at the
+  page boundary must not fault on unused successor bytes. PF5/PF4, complete
+  frames, CR2 and normal INVLPG/CR3 retries are checked. The first launch had
+  an incorrect parent-model path and ran no DUT; r2 was the single-warm-up
+  fixture, now archived. The strengthened test also rejects a private
+  [missing-boundary-veto negative control](SYSTEM_TARGET_READ.md).
 
 Representative relocated offset17, AXI0 warm loops:
 
@@ -112,6 +120,11 @@ matched `--control`, `--candidate`, `--out` paths. `run-ifetch-auth-fault.py`
 uses the same paths and requires precisely this define delta. Both use original
 pinned QEMU and complete traces. Run fan-out under the bounded build scope;
 full CoreMark, cold Win95/Quake and FPGA qualification are separate next gates.
+Pass `--fixture warm-boundary` for the new boundary corpus. The runner's
+default single-page corpus is unchanged and passes again in `fault-runner-r2`.
+For matched permission-parent versus target-read models, specify
+`--feature VEN_P54_CTRL_TARGET_SYSTEM`; the feature set must differ by exactly
+that flag and both must already contain the permission shadow.
 
 The matching full-PC model `1f2583cb1e74a7ca59b07d99db8fd4aefb7b322957d6f6411a36b8898d3a6876`
 is in `external/tmp/ventium-ifetch-auth-soc.2NYSnknF`. All synthesizable core/FP
