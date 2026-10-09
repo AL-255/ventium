@@ -1,9 +1,9 @@
 # Ordered m64 x87 queue — October 9
 
 Private prototype, **not production/standard-suite/FPGA acceptance**.
-Verified gameplay remains **0.44513116 total U+V IPC**, model `1f2583cb`,
+Verified gameplay is **0.44468922 total U+V IPC**, model `59650fe2`,
 clocks **1,200,000,000–1,300,000,000**. That measurement predates this change,
-target-read and read-retirement priming. CoreMark's full REP direct-memory
+scalar dispatch and read-retirement priming. CoreMark's full REP direct-memory
 scores remain **2.107861982 / 2.110913372 CM/MHz**, not this candidate's scores.
 
 ## Two separate changes
@@ -82,6 +82,15 @@ All roots below are beneath `/home/yukidama/external/tmp/`.
   and TOP. Full traces check all stack values, and the ordinary loop verifies
   its result after IRET. All eight forms have actual queued-operand and
   two-pending-owner integer-retirement witnesses; controls do not queue.
+- `irq-full-r1`: **64 complete instruction-stream comparisons and 64 separate
+  IRQ-entry-state comparisons**, each accompanied by a cycle execution. Eight
+  forms × drained/overlapped × two models × AXI latencies 0/7. Every run has
+  sixteen real IRQ deliveries; all sixteen candidate overlap combinations
+  have fourteen requests with two FP owners still pending. INTA requires zero
+  owners. Guest metadata, TOP, return frame and final result checks pass.
+  The oracle pulses a real QEMU master-PIC IRQ5; RTL drives only its existing
+  external pins. No guest registers or internal RTL state are injected.
+  This is flat-CS standalone PIC/core-pin coverage, not full-PC IRQ acceptance.
 - Five recipe tests cover source drift, repeated application, both load-owner
   anchors, disjoint copies and existing-output preservation.
 - Two additional tests guard event-fixture generation and unique QEMU ports.
@@ -154,5 +163,48 @@ profile. Neither runner accepts snapshots or trims architectural traces.
 
 Do not promote solely on these directed passes: the mandatory generic
 UV-fast/AXI gate has known terminal-observer/cycle-band failures, and complete
-standard-suite, external-IRQ/debug-event, full-PC gameplay, hardware resource/timing
+standard-suite, relocated external-IRQ/wide-queue debug-event, full-PC gameplay, hardware resource/timing
 and FPGA deployment qualification remain open.
+
+## Combined scalar-dispatch integration
+
+`ventium-fp-combined.gkqX3v51` applies the existing scalar-dispatch recipe to
+the final pointer-corrected wide-queue source. It changes only `core.sv` and
+adds `core_fp_scalar_dispatch.svh`; all other payload files remain identical.
+The only additional define is `VEN_FP_SCALAR_DISPATCH`.
+
+- Board-core model: `7bfb9e32c7799ef9c3da80beff73e29cdc2501281da93cc545a80e408404e297`.
+- Full-address user model: `3f6373157ceecfe6f15b66e731da8ccad706e198d468c3f8bb9fd22aa4f03197`.
+- Existing scalar gates against the wide-only parent pass **356 complete QEMU
+  comparisons**: throughput 288, debug/#NM events 4, CPU-store SMC 16 and
+  store-page faults 48, plus cycle executions. Complete-program and 223-iteration
+  steady throughput windows remain nonregressing. Selected conversion loops
+  improve 8→7 clocks; this is not a gameplay attribution.
+- The combined m64 driver against the pointer-only parent passes all **536**
+  overlap/operand-fault/INT3/#GP comparisons and their cycle executions. It
+  retains every original state, fault, owner and pairing assertion. FWAIT
+  controls may benefit from scalar dispatch, so their timing must be
+  nonregressing, not necessarily identical. No isolated queue gain is inferred.
+- The new external-IRQ gate also passes **64 instruction plus 64 entry-state
+  comparisons** on the combined candidate. All overlap combinations again
+  record fourteen two-owner IRQ requests per sixteen deliveries. The earlier
+  24-case smoke pass remains separate evidence.
+- All **76** broad system comparisons and three synthesis-guard lint profiles
+  pass. Native builds, local generated-header dependencies and source pins pass.
+- Generic `make verify` remains **FAIL**, with the same 101 terminal-length
+  mismatches and four hard cycle bands. A new matched-ELF/loader execution
+  agrees with all **108 complete parent architectural traces**. This does not
+  turn the generic gate green or waive it.
+
+`run-fp-combined-mem64.py` is a fail-closed adapter around the existing m64
+driver; its only semantic differences are the two-flag profile and FWAIT
+timing rule above. `run-fp-mem64-irq.py` preserves raw traces, separately
+compares exactly identified interrupt-entry ABI records, and then compares
+every real instruction, including the resumed boundary instruction. Two
+adapter and two IRQ fixture/record-accounting unit tests pass.
+
+No combined CoreMark, gameplay, standard-suite or FPGA result is claimed.
+An initial user-build admission was refused below 4 GiB free, before launching
+a compiler. Eight explicitly selected closed-build PCHs were losslessly
+archived with verified recovery hashes, recovering **616,544,045 bytes**;
+binaries, inputs and run evidence remained unchanged. The build then passed.

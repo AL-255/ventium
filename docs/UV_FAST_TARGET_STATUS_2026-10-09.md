@@ -337,8 +337,8 @@ This does **not** change the gameplay baseline: **0.44513116**, `1f2583cb`,
 measurement; no share of Quake improvement is attributed to their micro gains.
 Post-queue INT3 and #GP now pass 128 complete QEMU comparisons each. All
 536 overlap/fault/event cases were rerun with a unique-port oracle driver;
-a preparation-stage port collision is retained as failed evidence. External
-IRQ/debug-event, full standard-suite and FPGA qualification remain required.
+a preparation-stage port collision is retained as failed evidence. Relocated
+external IRQ/debug-event, full standard-suite and FPGA qualification remain required.
 The exact three-file full-PC integration compiles as `842f0c7d` in
 `external/tmp/ventium-fp-mem64-soc.nqs8uA9x`, with unchanged platform settings
 and third-party warning debt. It has not launched guests or produced a
@@ -349,3 +349,38 @@ archived, recovering **1,578,122,581 bytes**. Their decompressed hashes and all
 other selected build files were checked. Executables, guest inputs and traces
 are unchanged. Recovery: `gzip -dk -- EXACT_FILE.gch.gz`; manifest and receipt:
 `external/tmp/ventium-mem64-pch-archive.MSxyFXMj/{manifest,closed}.json`.
+
+## Combined FP integration and external IRQ coverage
+
+`external/tmp/ventium-fp-combined.gkqX3v51` combines scalar dispatch with the
+pointer-corrected m64 queue. Board model **`7bfb9e32`**, full-address user model
+**`3f637315`**; only scalar dispatch is added to the wide-queue parent. Native
+build/source/header checks pass. It remains a private, unaccepted candidate.
+
+The combined model passes 356 scalar and 536 wide-operand complete QEMU
+comparisons, plus their cycle executions, 76 broad system comparisons and
+three synthesis-guard lint profiles. Neither the ordinary architecture checks
+nor UV pairing requirements are relaxed. The unchanged generic gate still
+fails: 101 terminal-record mismatches and four hard cycle bands. Fresh replay
+matches all 108 complete parent architectural traces; this is nonregression,
+not a generic-gate pass.
+
+New real-PIC/held-pin IRQ tests pass 64 instruction-stream and 64 entry-state
+comparisons **on each** of the wide-only and combined profiles. Eight m64
+forms, FWAIT controls, AXI 0/7 and actual V retirement are covered. Every
+candidate overlap combination records fourteen IRQ requests with two pending
+FP owners; all sixteen INTA handshakes occur only after drain. Entry ABI
+records are compared separately, not discarded. This closes the flat-CS
+standalone IRQ case, not full-PC or relocated/debug-event acceptance.
+
+Latest verified gameplay remains **0.44468922 total U+V IPC**, target-read
+`59650fe2`, cycles **1.200–1.300B**, predating both candidates. Neither has a
+combined CoreMark, gameplay, standard-suite or FPGA result. Details and exact
+model hashes: [m64 queue qualification](../verif/fe_pipe/FP_MEM64_QUEUE.md).
+
+The next user-model build was initially refused by its unchanged 4-GiB disk
+guard before starting a compiler. Eight confirmed closed-build PCHs were
+losslessly archived, recovering **616,544,045 bytes** with verified recovery
+hashes and unchanged remaining files. Receipt:
+`external/tmp/ventium-combined-pch-r2.OfLtdenl/closed.json`. The first archive
+selection refused already-compressed files before changing anything.
