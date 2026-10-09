@@ -86,7 +86,7 @@ def main():
                  '-DVEN_DDR_POSTED','-I'+str(include),
                  *['-D'+d for d in defines],*sources],tag+'-build',build=True)
 
-    for posted, slots in ((0,8),(1,4),(1,8)):
+    for posted, slots in ((0,8),(1,4),(1,8),(1,16)):
         build(posted,slots,f'p{posted}-q{slots}',root)
 
     def run(item):
@@ -100,7 +100,7 @@ def main():
         return dict(posted=posted,slots=slots,seed=seed,latency=latency,cycles=int(match[1]))
 
     with ThreadPoolExecutor(max_workers=32) as pool:
-        rows=list(pool.map(run,[(p,q,s,l) for p,q in ((0,8),(1,4),(1,8))
+        rows=list(pool.map(run,[(p,q,s,l) for p,q in ((0,8),(1,4),(1,8),(1,16))
                                for s in range(1,33) for l in (0,7,20,47)]))
     negative=root/'early-io'; negative.mkdir()
     # Prove that an inner-only "idle" really is insufficient, rather than

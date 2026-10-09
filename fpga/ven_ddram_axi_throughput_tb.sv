@@ -5,6 +5,8 @@
 module ven_ddram_axi_throughput_tb;
     parameter integer B_LATENCY = 20;
     parameter integer WRITE_SLOTS = 4;
+    // Vendor functional netlists need their global startup reset to finish.
+    parameter integer RESET_CYCLES = 3;
     localparam integer N = 64;
     reg clk = 0;
     always #5 clk = ~clk;
@@ -30,7 +32,11 @@ module ven_ddram_axi_throughput_tb;
     reg [63:0] m_axi_rdata = 0;
     wire fault, drained;
 `ifdef VEN_TEST_POSTED
+`ifdef VEN_TEST_NETLIST
+    ven_ddram_axi_posted dut (.*);
+`else
     ven_ddram_axi_posted #(.WRITE_SLOTS(WRITE_SLOTS)) dut (.*);
+`endif
 `else
     ven_ddram_axi dut (.*);
     assign fault = 0;
@@ -102,7 +108,7 @@ module ven_ddram_axi_throughput_tb;
     end
     initial begin
         for (i=0;i<N;i=i+1) committed[i]=0;
-        repeat(3) @(negedge clk);
+        repeat(RESET_CYCLES) @(negedge clk);
         rst_n = 1;
         @(negedge clk);
         start_cyc = cyc;

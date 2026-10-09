@@ -42,7 +42,7 @@ def main():
             assert p.returncode!=0, 'negative control unexpectedly passed'
         return p.stdout+p.stderr
 
-    for slots in (4,8):
+    for slots in (4,8,16):
         command([REPO/'tools/build_scope.sh','--','timeout','120','verilator','--cc','--exe','--build','-j','1',
              '--top-module','ven_ddram_axi_posted',f'-GWRITE_SLOTS={slots}','--Mdir',root/f'obj{slots}','-o','fuzz',
              '-Wall','-Wno-UNUSED','-Wno-fatal','-Werror-IMPLICIT','-Werror-PINMISSING',
@@ -56,7 +56,9 @@ def main():
         label=f'{kind}-{latency}'
         argv=['iverilog','-g2012','-s','ven_ddram_axi_throughput_tb',
               f'-Pven_ddram_axi_throughput_tb.B_LATENCY={latency}','-o',root/(label+'.vvp')]
-        if kind!='baseline': argv+=['-DVEN_TEST_POSTED',f'-Pven_ddram_axi_throughput_tb.WRITE_SLOTS={8 if kind=="posted8" else 4}']
+        if kind!='baseline':
+            slots=int(kind.removeprefix('posted')) if kind.startswith('posted') else 4
+            argv+=['-DVEN_TEST_POSTED',f'-Pven_ddram_axi_throughput_tb.WRITE_SLOTS={slots}']
         command(argv+[source or (base if kind=='baseline' else sources[1]),sources[2]],label+'-build')
         text=command(['vvp',root/(label+'.vvp')],label,expected=1 if kind=='no-drain' else 0)
         if kind=='no-drain':
@@ -68,7 +70,7 @@ def main():
 
     with ThreadPoolExecutor(max_workers=32) as pool:
         rows=list(pool.map(lambda item: throughput(*item),
-                  [(kind,latency) for kind in ('baseline','posted4','posted8') for latency in (0,1,7,20,47)]))
+                  [(kind,latency) for kind in ('baseline','posted4','posted8','posted16') for latency in (0,1,7,20,47)]))
     # Mutation test: the same scoreboard must reject a read issued before B.
     original=sources[1].read_text()
     old='DRAIN: if (occupied == 0 && !fault) st <= AR;'
@@ -77,8 +79,8 @@ def main():
     negative.write_text(original.replace(old,'DRAIN: if (!fault) st <= AR;'))
     throughput('no-drain',47,negative)
     assert all(digest(Path(p))==h for p,h in pins.items())
-    receipt=dict(passed=True,source_pins=pins,random_seeds_per_profile=32,queue_depths=[4,8],
-                 partial_alias_writes=163840,read_requests=10240,
+    receipt=dict(passed=True,source_pins=pins,random_seeds_per_profile=32,queue_depths=[4,8,16],
+                 partial_alias_writes=245760,read_requests=15360,
                  negative_control='read-before-B rejected',throughput=rows,
                  gameplay_ipc=None,full_system_acceptance=False,installed=False)
     (root/'closed.json').write_text(json.dumps(receipt,indent=2)+'\n')
