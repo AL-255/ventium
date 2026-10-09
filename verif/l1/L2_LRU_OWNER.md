@@ -4,8 +4,10 @@ Private full-PC candidate; **not a completed standard-suite or FPGA pass**.
 Latest verified Quake gameplay remains **0.38065044 total U+V IPC**, dispatch
 model `ba2463bf`, cycles **1,200,000,000–1,300,000,000**. It predates this repair.
 The current candidate has no gameplay score; the **0.48 target is open**.
-The earlier 2.10736/2.11041 CM/MHz results are direct-memory simulation scores,
-not FPGA cache/DDR performance. The current core's full seeds are still running.
+The current core's full seeds close at **2.10736/2.11041 CM/MHz**, model
+`e3dbf68a`, with correct CRCs and zero delivered faults. These are direct-memory
+simulation scores, not FPGA cache/DDR performance, and do not exercise this L2.
+See [closed CoreMark evidence](../fe_pipe/PRIME_UNDER_FILL.md).
 
 ## Evidence and root cause
 
@@ -44,7 +46,7 @@ assertion catches request set 0 consuming reset's final set 127.
 No cache size, data RAM port, response stage, guest behavior, pairing or fast
 pipeline policy changes. At the actual 128-set geometry the added state is one
 **seven-bit write address**, with an eight-bit pending-rank bypass. No blanket
-stall is introduced. Physical LUT/timing/route impact is **not measured yet**.
+stall is introduced. Matched isolated physical results are recorded below.
 The FPGA filelist uses the same asynchronous `altdpram` implementation from
 `ao486-sim/stubs/sim_prims.sv`; no synchronous-read memory is assumed here.
 
@@ -64,6 +66,7 @@ Evidence root: `/home/yukidama/external/tmp/ventium-l2-capacity.NaPFMpwa`.
 | `final-any-r1` | 512 final any-offset streaming cases pass |
 | `final-lower-r1` | 128 final lower-half streaming cases pass |
 | `final-legacy-r1` | 128 final non-streaming cases pass |
+| `xpm-any-r1`, `xpm-lower-r1`, `xpm-legacy-r1` | 384 additional 128-set cases pass with FPGA-style data RAM |
 
 The **768 final cases** vary 1–8 response words, zero/one idle cycle, two DDR
 beat/tail cadences and 512–4096-line footprints. Any-offset coverage also varies
@@ -100,6 +103,48 @@ Use `--sets 128 --stream lower` or `--sets 128 --stream legacy` for controls.
 repairs for negative tests only. Host recipe guards:
 `python3 -B verif/l1/test_l2_capacity_recipe.py`.
 
+The additional `--xpm-fidelity` cases exercise the registered-output,
+read-first **data RAM** model selected for FPGA BRAMs. The LRU/tag RAM remains
+asynchronous in both profiles. Nine host recipe tests pass. The current cold
+full-PC runs retain their parent's behavioral data RAM profile; these separate
+leaf checks do not establish whole-PC equivalence to the XPM build.
+
+## Matched isolated FPGA implementation
+
+`fpga/run-l2-lru-leaf.py` freezes both sources and the real XPM-enabled primitive
+wrapper, then runs control and candidate sequentially in **one** bounded Vivado
+family. Both complete synthesis, placement and routing on
+`xczu15eg-ffvb1156-2-i`, with identical 25 ns and zero I/O-delay constraints.
+No processor bitstream or board deployment is produced.
+
+| Routed leaf metric | Original | Repaired |
+| --- | ---: | ---: |
+| CLB LUTs | 1,151 | 1,164 |
+| LUT as logic | 959 | 956 |
+| LUT as distributed RAM | 192 | 208 |
+| Registers | 553 | 588 |
+| RAMB36E2 | 8 | 8 |
+| Setup-limited isolated frequency estimate | 217.01 MHz | 214.09 MHz |
+| Worst hold slack / failing endpoints | -0.135 ns / 266 | -0.135 ns / 266 |
+
+The fix costs **13 CLB LUTs (+1.13%) and 35 mapped registers**, not a cache
+capacity increase. Separating LRU read/write ownership changes distributed-RAM
+mapping, so synthesized cost is not just the seven explicit new RTL bits.
+The tiny isolated timing reduction is measured, not hidden; these frequencies
+are **not whole-core Fmax or a 40 MHz processor sign-off**. Raw LUT primitive
+counts (1,110 / 1,103) differ from combined CLB LUT counts and must not be mixed.
+Both reports explicitly say timing constraints are **not met**, due to those
+hold violations. Native route completion is not timing acceptance; no hold
+exception or relaxed constraint was introduced to claim a pass.
+
+Native exit zero, stable pins, 210.47 seconds, peak cgroup RAM 4,058,353,664 bytes,
+zero swap/OOM and vendor family gone. Root:
+`/home/yukidama/external/tmp/ventium-lru-physical.12qho8he`; scope invocation
+`09643a512a2b4f469b125e0ad767cb35`. The initial
+`ventium-lru-physical.9plvx7r6` attempt fails before synthesis because Vivado's
+`read_verilog -define` requires compile-unit mode. Its native failure is retained;
+the corrected launcher sets the same defines on the fileset instead.
+
 ## Cold full-PC candidate and remaining gates
 
 Root: `/home/yukidama/external/tmp/ventium-lru-owner-soc.CEg0ogJu`.
@@ -125,7 +170,8 @@ progress; no guest pass or gameplay improvement is claimed. No snapshot, guest
 patch, debugger STEP, pairing suppression or global slow fallback is used.
 
 The generic differential gate is still **FAIL**, not waived or inherited as
-passing. Complete same-source CoreMark correctness, Win95 desktop confirmation,
+passing. Same-core direct-memory CoreMark correctness is closed; L2/FPGA-backed
+CoreMark performance is not. Win95 desktop confirmation,
 complete Quake timedemo, measured gameplay ≥0.48 IPC, physical qualification and
 FPGA deployment remain required. This recipe is not production acceptance.
 

@@ -3,8 +3,9 @@
 **Private candidate, not production/FPGA acceptance.** Verified Quake gameplay
 remains **0.38065044 total U+V IPC**, dispatch-only `ba2463bf`, cycles
 **1.2–1.3B**, predating the ownership and FP/priming repairs. No newer candidate
-gameplay measurement exists; 0.48 remains open. Full CoreMark 2.10736/2.11041
-CM/MHz results belong to the earlier direct-memory `cbdf278a` model.
+gameplay measurement exists; 0.48 remains open. Full CoreMark now closes at
+2.10736/2.11041 CM/MHz on this candidate's direct-memory `e3dbf68a` model;
+these are unchanged from the earlier `cbdf278a` scores, not FPGA throughput.
 
 ## Observed cause and change
 
@@ -129,12 +130,12 @@ also pass. `qualify-r2` and the separate CPU-placement repeat `qualify-r3` both
 close successfully. Performance/validation take **4,823,423 / 4,816,710 clocks**;
 these short checks are not the required full CoreMark score.
 
-The full 1,500-iteration seeds are running under
+The full 1,500-iteration seeds were launched under
 `ventium-fp-prime-fill-coremark-full-r4-oct09.service`, invocation
 `25d8d2d8c8294a5397c36a9db2654413`. Actual children 3412103/3412102 use
 CPUs 20/21 and the SHA above. Each retains the **3,600-second hard cap**;
-the service has 2 CPUs, 2 GiB RAM, no swap and 160 tasks. Native closure and
-scores remain pending, with evidence under `full-r4`.
+the service has 2 CPUs, 2 GiB RAM, no swap and 160 tasks. The closed result is
+below, with evidence under `full-r4`.
 
 Launch planning changed explicitly: measured rates of 213,977 / 213,197
 simulated clocks/s missed the previous arbitrary 215,000 floor, even after
@@ -144,3 +145,24 @@ divided by 3,360 seconds, reserving four minutes of the unchanged hard cap:
 estimate, not guaranteed completion or relaxed correctness/scoring acceptance;
 `host-admission.json` retains both thresholds and the calculation. Full CRC,
 fault, source-pin, native-exit and score checks are unchanged.
+
+### Full seeds closed and independently audited
+
+Both 1,500-iteration seeds complete natively with all five expected CRCs,
+zero actual delivered faults, stable 114 input pins, no OOM and all children
+reaped. The service closes inactive/success/native zero; the hard cap was not
+extended. `full-r4/independent-audit.json` independently checks raw native
+footers, guest output, score arithmetic, source identities and process closure.
+
+| Seed | Clocks | U+V retirements | CM/MHz | Host seconds |
+| --- | ---: | ---: | ---: | ---: |
+| Performance | 711,790,133 | 542,165,413 | 2.107362733 | 3,364.47 |
+| Validation | 710,761,493 | 541,458,835 | 2.110412585 | 3,395.27 |
+
+Model: `e3dbf68a7229a8f6c79e5999aba3a77520e94545205fd89f7b1c11b53c5de9f4`.
+This establishes current-core CoreMark correctness and the **direct-memory**
+2.1 target, not an FPGA/cache-backend score or the whole standard suite. These
+counts match the earlier core; the FP/under-fill changes add no CoreMark gain.
+Current core source is unchanged in the separate platform-L2 candidate; this
+direct-memory harness does **not exercise that L2**. Gameplay still uses the
+older verified baseline stated above.

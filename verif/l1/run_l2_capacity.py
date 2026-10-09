@@ -49,6 +49,7 @@ def main():
     ap.add_argument('--words', type=int, nargs='+', default=[8])
     ap.add_argument('--gaps', type=int, nargs='+', default=[1])
     ap.add_argument('--stream', choices=('any','lower','legacy'), default='any')
+    ap.add_argument('--xpm-fidelity', action='store_true', help='FPGA registered-output/read-first data RAM model')
     ap.add_argument('--sets', type=int, nargs='+', default=[128,256,512,1024])
     args = ap.parse_args()
     assert not args.unsafe_read_only or args.repair_lru
@@ -102,6 +103,7 @@ def main():
                 str(out/('control.v' if sets==128 else 'candidate.v')),str(out/'prims.sv')]
             if args.stream != 'legacy': argv.insert(1,'-DVEN_L2_STREAM_CWF')
             if args.stream == 'any': argv.insert(1,'-DVEN_L2_STREAM_ANY')
+            if args.xpm_fidelity: argv.insert(1,'-DVEN_ALTSYNCRAM_XPM')
             if sets != 128:
                 argv.insert(1,'-DL2_CAPACITY_PARAM')
             if args.check_lru_owner:
@@ -137,6 +139,7 @@ def main():
                   unsafe_read_only=args.unsafe_read_only,
                   unsafe_no_forward=args.unsafe_no_forward,
                   stream_profile=args.stream,
+                  xpm_fidelity=args.xpm_fidelity,
                   lru_write_owner_assertions=args.check_lru_write_owner,
                   full_system_acceptance=False, physical_qualified=False)
     (out/'closed.json').write_text(json.dumps(result,indent=2)+'\n')
