@@ -38,6 +38,7 @@ def main():
     for name in ('control', 'candidate', 'out'):
         parser.add_argument('--' + name, type=Path, required=True)
     parser.add_argument('--smoke', action='store_true')
+    parser.add_argument('--feature', choices=('short-window', 'scalar-dispatch'), default='short-window')
     args = parser.parse_args()
     scratch = Path('/home/yukidama/external/tmp').resolve(strict=True)
     assert __debug__ and Path(os.environ['TMPDIR']).resolve() == scratch
@@ -55,8 +56,11 @@ def main():
                 'VEN_FP_LOAD_EARLY_CMD', 'VEN_FP_OPERAND_OVERLAP'} <= profiles[name]
         assert not {'VEN_UOPCACHE', 'VTM_NO_DPI', 'SYNTHESIS', 'VEN_SYS_FASTPATH_ALL'} & profiles[name]
         pins.update({str(p): sha(p) for p in (tb, stamp)})
-    assert profiles['candidate'] == profiles['control'] | {'VEN_FP_SHORT_WINDOW'}
-    assert 'VEN_FP_SHORT_WINDOW' not in profiles['control']
+    added = 'VEN_FP_SHORT_WINDOW' if args.feature == 'short-window' else 'VEN_FP_SCALAR_DISPATCH'
+    assert profiles['candidate'] == profiles['control'] | {added}
+    assert added not in profiles['control']
+    if args.feature == 'scalar-dispatch':
+        assert 'VEN_FP_SHORT_WINDOW' in profiles['control']
     source = REPO / 'verif/fe_pipe/fp-short-window.S'
     linker = REPO / 'verif/sys/tests/ppage/ppage.ld'
     qemu = REPO / 'ventium-refs/07-p5-emulation-harness/build/qemu/build-sys/qemu-system-i386'
@@ -111,6 +115,7 @@ def main():
         case, leaf, image, symbols, gold = prepared
         traces = {}
         short_captures = 0
+        scalar_dispatches = 0
         total_clocks = 0
         for mode in ('cycle-func', 'cycle'):
             stem = f'{name}-l{latency}-{mode}'
@@ -128,6 +133,8 @@ def main():
             assert len(footer) == 1 and int(footer[0][0]) == len(trace.records)
             short_captures += len(re.findall(r'\[FETCHDBG:FP-SHORT\] eip=' +
                                            f'{symbols["hot_loop"]:08x}' + ' ', text))
+            scalar_dispatches += len(re.findall(r'\[FETCHDBG:FP-SDISPATCH\] eip=' +
+                                               f'{symbols["hot_loop"]:08x}' + ' ', text))
             total_clocks = int(footer[0][1])
             if mode == 'cycle-func':
                 assert trace.mode == 'func' and trace.hdr.get('sys') is True and trace.x87
@@ -141,11 +148,13 @@ def main():
         warm = [rows[b]['cyc'] - rows[a]['cyc'] for a, b in zip(hits[3:-1], hits[4:])]
         return dict(case=case, model=name, latency=latency, warm_cycles=warm,
                     records=len(rows), paired_v=len(pairs), full_qemu_diff=True,
-                    short_captures=short_captures,total_clocks=total_clocks)
+                    short_captures=short_captures, scalar_dispatches=scalar_dispatches,
+                    total_clocks=total_clocks)
 
     cases = [(k, 0, r, o, 0x37f) for k in (0, 1, 2, 3, 4, 5, 6, 7, 8)
              for r in (0, 1) for o in ((17,) if args.smoke else (0, 17, 18, 31))]
-    result = dict(passed=False, measurements=[], errors=[], gameplay_ipc=None, standard_suite=False)
+    result = dict(passed=False, measurements=[], errors=[], gameplay_ipc=None,
+                  standard_suite=False, feature=args.feature)
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
             prepared = list(pool.map(prepare, cases))
@@ -171,11 +180,25 @@ def main():
         result['actual_short_capture'] = any(r['short_captures'] for r in result['measurements'])
         for row in result['measurements']:
             kind, _, _, offset, _ = row['case']
-            if row['model'] == 'control' or kind == 8:
+            if args.feature == 'scalar-dispatch':
+                if row['model'] == 'control' or kind not in (2, 3, 5, 6):
+                    assert row['scalar_dispatches'] == 0, ('unexpected scalar dispatch', row)
+                else:
+                    assert row['scalar_dispatches'] >= 12, ('missing scalar dispatch witness', row)
+            elif row['model'] == 'control' or kind == 8:
                 assert row['short_captures'] == 0, ('unexpected short capture', row)
             elif offset in (17, 18) and kind != 4:
                 assert row['short_captures'] > 0, ('missing actual short capture', row)
-        assert result['actual_short_capture'] and result['actual_warm_cycle_gain']
+        if args.feature == 'scalar-dispatch':
+            for gain in gains:
+                kind = gain['case'][0]
+                if kind in (2, 3, 5, 6):
+                    assert gain['fraction'] > 0, ('no scalar dispatch gain', gain)
+                else:
+                    assert gain['control'] == gain['candidate'], ('negative control changed', gain)
+        else:
+            assert result['actual_short_capture']
+        assert result['actual_warm_cycle_gain']
         result.update(passed=True, gains=gains)
     except Exception as exc:
         result['errors'].append(dict(error=repr(exc), traceback=traceback.format_exc()))
