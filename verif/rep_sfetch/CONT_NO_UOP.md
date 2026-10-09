@@ -1,9 +1,9 @@
 # Independent REP continuation admission — October 9
 
 Private, default-off `VEN_REP_CONT_NO_UOP`. Not production, FPGA or standard-suite
-acceptance. Verified gameplay remains **0.39002079 total U+V IPC**, code-word
-model `f3be9a11`, cycles **1.2–1.3B**. It predates this and the combined
-tag/data-under-I-fill/short-x87 candidate. New model unmeasured; **0.48 remains open**.
+acceptance. Verified gameplay is **0.39555990 total U+V IPC**, combined
+model `05611d6c`, cycles **1.2–1.3B**. It predates this REP change.
+The REP model is unmeasured; **0.48 remains open**.
 
 ## Cause and narrow fix
 
@@ -117,8 +117,10 @@ attempt was rejected before guest launch for a missing required file-size
 limit, and its failed receipt is retained. Quake-only disk admission is 6 GiB
 against <1 GiB bounded artifacts; the prepared Win95 launcher retains 8 GiB.
 
-This model has **no gameplay score, full CoreMark score, Win95 desktop or FPGA
-acceptance yet**. Its Win95 launcher is not launched. Existing combined tests
+This full-PC model has **no gameplay score, Win95 desktop or FPGA
+acceptance yet**. Its matching core has passed the direct-memory CoreMark
+qualification below. Cold Win95 is now running on CPU30, invocation
+`06d2598e26e541908ef2f442414ef802`, with native admission verified. Existing combined tests
 continue independently; source/native pins and complete timedemo checks remain
 mandatory before any success claim.
 
@@ -133,10 +135,22 @@ settle optimization changes no simulated clock or state. Both seeds save
 counts; short seeds are not score-eligible.
 
 `qualify-r3` repeats on CPUs16/17 and passes all 15 invalid-mode controls.
-Full 1,500-iteration seeds run in `full-r3`, invocation
+Full 1,500-iteration seeds closed in `full-r3`, invocation
 `f9fede48a89b4afba77ef45ea3435e49`, with the unchanged **3,600-second cap each**.
 Fresh measured host rates project about 3,436/3,366 seconds. The launch-only
 planning buffer is reduced from four minutes to two; correctness, CRC, score
 and hard runtime gates are unchanged. The combined parent just closed at
-3,413/3,327 seconds on those CPUs. Full REP correctness/scores remain pending;
-the parent's 2.10736/2.11041 scores are not transferred to this binary.
+3,413/3,327 seconds on those CPUs. The independent closed-run audit rechecks
+114 pins, all five CRCs per seed, zero actual fault deliveries, native exit0,
+no OOM and reaped children:
+
+| Seed | Whole-program clocks | Retirements | CM/MHz | Host seconds |
+| --- | ---: | ---: | ---: | ---: |
+| Performance1500 | 711,621,545 | 542,165,465 | **2.107861982** | 3,518.21 |
+| Validation1500 | 710,592,874 | 541,458,844 | **2.110913372** | 3,503.84 |
+
+`full-r3/independent-audit.json` passes. This meets the **2.1 direct-memory**
+target, not FPGA/cache/DDR throughput or full standard-suite acceptance.
+Whole-program clocks fall by 168,436 / 168,519 versus the combined parent;
+the small runtime-calibration retirement differences remain reported, not
+normalized away. The later instruction-permission shadow is not in this model.

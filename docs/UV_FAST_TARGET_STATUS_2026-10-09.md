@@ -6,12 +6,12 @@ snapshot is used for the current cold full-PC runs.
 
 | Requirement | Verified result | Remaining |
 | --- | --- | --- |
-| CoreMark ≥2.1 CM/MHz | Combined full direct-memory seeds: **2.107363183 / 2.110412882**, correct CRCs | Later REP candidate full seeds pending; not a DDR/cache/FPGA score |
-| Quake ≥0.48 total U+V IPC | **0.39002079**, `f3be9a11`, 1.2–1.3B clocks | Below target; later combined/REP candidates not measured |
-| Standard suite | Combined full CoreMark seeds pass; cold Win95/Quake candidates running | Clean desktop and complete timedemo; later REP full seeds |
+| CoreMark ≥2.1 CM/MHz | REP full direct-memory seeds: **2.107861982 / 2.110913372**, correct CRCs | Later permission-shadow candidate pending; not a DDR/cache/FPGA score |
+| Quake ≥0.48 total U+V IPC | **0.39555990**, `05611d6c`, 1.2–1.3B clocks | Below target; later REP/permission/target-read candidates not measured |
+| Standard suite | REP full CoreMark seeds pass; code-word Win95 closed at a visually clean desktop | Independent desktop acceptance and complete timedemo; newer candidates pending |
 | FPGA | Old image still deployed | Selected source, full timing/resource qualification and deployment |
 
-The current full CoreMark model is
+The preceding combined full CoreMark model is
 `c93ae26b20685827dacf45b466256e4139bb1d068d7546ec467801c0a8502c0b`;
 receipts and `independent-audit.json` are in
 `external/tmp/ventium-short-ifill-coremark.qQqbebWo/full-r2`.
@@ -32,14 +32,18 @@ parent-clock expectation failed and is retained. The host optimization never
 skips a clock edge or changes guest state. The 60-minute full-seed limit still
 applies; the optional 75-minute request has not been answered.
 
-Seven cold full-PC guests remain active: code-word, combined-candidate and
-independent-REP Quake/Win95 pairs, plus the instruction-permission-shadow
-Quake candidate. Superseded XPM/pop pairs closed
+Seven cold full-PC guests remain active: code-word Quake, combined-candidate,
+independent-REP and instruction-permission-shadow Quake/Win95 pairs.
+Code-word Win95 closed normally at **2,259,200,420 clocks** with a visually
+clean Welcome desktop, native exit0, stable pins, no OOM and reaped children.
+Its closed raw frame16 is retained; human confirmation/independent desktop
+acceptance remains open. `CLOSED_UNQUALIFIED` is not a suite pass.
+Superseded XPM/pop pairs closed
 normally, with native exit
 zero, reaped children and no OOM. Those incomplete timedemos remain FAIL and
 the Win95 runs CLOSED_UNQUALIFIED; no suite acceptance is inferred.
 
-The new gameplay audit is
+The preceding code-word gameplay audit is
 `external/tmp/ventium-code-word-gameplay-audit.VyVHIfbs/audit.json`:
 39,002,079 total retirements (29,046,965 U + 9,955,114 V) / 100M clocks.
 Exact endpoints were visually checked and source/runtime/native identity pins
@@ -50,6 +54,19 @@ short-x87, prime-under-I-fill or independent-REP admission candidates. A complet
 window is not a completed timedemo. The preceding pop-drain window was 0.38776687;
 equal cycle windows need not cover precisely the same scene progress, so this
 is not an equal-work percentage-gain claim.
+
+The latest combined-candidate gameplay audit is
+`external/tmp/ventium-short-ifill-gameplay-audit.tNSWpZfe/audit.json`:
+**39,555,990 = 29,484,306 U + 10,071,684 V retirements / 100M clocks**, cycles
+**1,200,000,000–1,300,000,000**, giving **0.39555990 IPC**. Exact endpoints
+are visually confirmed gameplay with unchanged raw pixels; 236 source and
+17 runtime pins plus native identity are rechecked. Model SHA256:
+`05611d6c2ac8dc767b162ed18bbf1c63daeff78d760702b4ada03eed83d37d71`.
+It includes tag LUTRAM, data-under-I-fill and short x87 fetch, but not later
+REP admission, permission shadow, target read or prime-under-I-fill. The
+increase from 0.39002079 is small and does not meet 0.48. Equal-cycle bounds
+are not an equal-scene-work comparison; no isolated percentage gain is claimed.
+Full timedemo completion is still open.
 
 ## Fixes and evidence
 
@@ -68,13 +85,14 @@ is not an equal-work percentage-gain claim.
 - [Data hits during instruction fill](../verif/l1/DATA_UNDER_IFILL.md): uses
   independent D banks through the existing registered owner path. **640**
   directed held reads finish in two clocks; 76 system/64 boundary cases pass.
-  No gameplay or FPGA timing result yet.
+  Combined gameplay is measured above; no isolated gain or FPGA timing claim.
 - [Exact short x87 byte capture](../verif/fe_pipe/FP_SHORT_WINDOW.md): retains
   ordinary decoder/exception/execution decisions and removes unused suffix
   fetches. 288 full QEMU comparisons, 492 predicate checks, fault/debug and
   CPU-store SMC tests pass. Selected loops lose 5–6 clocks per iteration;
-  these are not gameplay gains. Combined model `05611d6c` has fresh cold
-  Quake/Win95 qualification runs, not yet measured or accepted.
+  these are not isolated gameplay gains. Combined model `05611d6c` now has
+  the measured gameplay window above; its full Quake/Win95 qualification
+  remains open.
 - [Resident priming during I fill](../verif/l1/PRIME_UNDER_IFILL.md): an additional
   private candidate removes one capture clock for 640 directed resident hints,
   with ownership/event negative controls and 76 full system cases passing.
@@ -90,8 +108,12 @@ is not an equal-work percentage-gain claim.
   The separate cross-page dynamic-SMC oracle disagreement stays FAIL. Cold
   Quake model `139121ae` runs on CPU29 and Win95 on CPU30; no gameplay or
   desktop acceptance yet. Win95 invocation is `06d2598e26e541908ef2f442414ef802`.
-  Both direct-memory short CoreMark seeds pass with 1,648 fewer clocks; full
-  seeds for model `cb4b2f84` run under the unchanged 60-minute cap, not yet scored.
+  Both full direct-memory CoreMark seeds for model `cb4b2f84` pass with
+  **2.107861982 / 2.110913372 CM/MHz**, 711,621,545 / 710,592,874 clocks,
+  542,165,465 / 541,458,844 retirements. The independent audit in
+  `external/tmp/ventium-rep-no-uop-coremark.Gszccvp5/full-r3` verifies all CRCs,
+  zero actual faults, stable 114 pins and clean native closure. Host times
+  3,518.21 / 3,503.84 seconds stay below the unchanged 60-minute cap.
 - [Instruction-permission shadow](../verif/fe_pipe/IFETCH_AUTH_MULTI.md):
   retains sixteen independently checked code-page permissions instead of one,
   rechecks live CPL, and invalidates on every context flush/I-TLB replacement.
@@ -100,11 +122,28 @@ is not an equal-work percentage-gain claim.
   pass complete QEMU comparisons. These are not gameplay gains. Cold Quake
   model `1f2583cb` runs on CPU31, invocation
   `56a6b51ae71e4621a589215c80dc3de2`; its native input/CPU/resource admission
-  is checked. Win95/full CoreMark on this later model remain unrun.
+  is checked. Cold Win95 runs on CPU27, invocation
+  `a01ee6b1971f4f129b5abfad87f5fa19`; both guests remain unaccepted.
+  Matching direct-memory CoreMark model `53a2b7d8` passes short
+  host-equivalence/CRC qualification with identical clocks to the REP parent.
+  Its measured host rates are too close to the 60-minute cap for full launch;
+  CPU placement is being checked. Full seeds remain unrun.
+- [Checked system target read](../verif/fe_pipe/SYSTEM_TARGET_READ.md): after
+  the permission shadow removes masking stalls, the existing two-port target
+  selector saves one warm CALL/RET clock. 288 control comparisons, 76 system,
+  sixteen fault and 44 boundary cases pass; 115,712 real-include checks pass
+  in each of original/disabled/enabled variants. No full-PC measurement or
+  promotion yet; the original no-permission-shadow experiment remains no-gain.
+
+Closed scratch snapshots were losslessly compressed after checking their
+recorded hashes and absence of live users: **2,649,788,416 bytes reclaimed**.
+`external/tmp/ventium-closed-snapshot-archive.4fwrK4bP/manifest.json` records
+the twenty exact paths and decompression checks. `gzip -dk -- EXACT/end.snap.gz`
+recovers each original. No source, disk media or state-delta trace was removed.
 
 ## Current profiling lead
 
-The measured build and newer combined candidate define `VEN_REP_MOVS_CONT`,
+The measured combined build defines `VEN_REP_MOVS_CONT`,
 `VEN_REP_MOVS_LOAD_FUSE` and `VEN_REP_MOVS_STREAM`, but not `VEN_UOP_SFETCH`.
 Their shared `rep_stos_cont_profile` is therefore constant zero: all three
 MOVS paths are disabled despite the feature flags. The private
@@ -113,7 +152,7 @@ not enable the uop cache or change existing continuation, invalidation, event,
 fault, partial-progress or rollback checks. Directed qualification above does
 not replace the open differential gate, full standard suite or hardware checks.
 
-In the measured gameplay interval, MOVSD contributes **758,808 / 2,918,429
+In the preceding code-word gameplay interval, MOVSD contributes **758,808 / 2,918,429
 slow-decode clocks (26.00%)**. Exclusive state accounting in the audit's
 `residency.json` sums to 100M clocks; the largest categories are successful
 S_PIPE issue 20.83%, pipe-memory wait 16.36%, S_FETCH 13.81%, S_LOAD 8.02%,
@@ -121,6 +160,14 @@ S_PIPE FP admission bail 7.39%, and S_FLOAD 6.63%. These include productive
 and architecturally required clocks, not solely removable stalls. Holding
 the same retirement work fixed would require **18.75% fewer clocks** to
 reach 0.48; microbenchmarks alone cannot establish that result.
+
+Latest combined-build exclusive accounting also sums to exactly 100M clocks:
+successful S_PIPE issue **21.14%**, pipe-memory wait **16.99%**, S_FETCH
+**13.18%**, FP admission **7.56%**, S_FLOAD **6.77%**, S_LOAD **6.35%**,
+slow/system admission **5.88%**, S_EXEC **4.30%**, S_DECODE **2.93%**. The
+complete list is in the latest audit's `residency.json`. Holding retirement
+work fixed would still require **17.59% fewer clocks** for 0.48; occupancy
+is not a promise that those clocks can all be removed.
 
 ## Gates that must not be hidden
 
