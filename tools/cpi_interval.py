@@ -16,6 +16,39 @@ REQUIRED = {"cycle", "retires", "clocks", "u", "v", "load_wait",
             "store_wait"} | ARRAYS
 
 
+def validate_profile(sample, *, is_delta=False):
+    """Check the RTL counter invariants before presenting a performance score.
+
+    State residency partitions clocks. Memory wait/ACK partition only the
+    request-active subset of each state, and slow-ALU counters are another
+    overlapping view. No assumption about feature-dependent state numbers.
+    """
+    if not REQUIRED <= sample.keys():
+        raise ValueError("incomplete VEN-PERF sample")
+    for value in sample.values():
+        values = value if isinstance(value, tuple) else (value,)
+        if not values or any(type(n) is not int or not 0 <= n < 1 << 64 for n in values):
+            raise ValueError("profile counters must be unsigned 64-bit integers")
+    clocks = sample['clocks']
+    if (sample['retires'] != sample['u'] + sample['v'] or
+            sample['v'] > sample['u'] or sample['u'] > clocks):
+        raise ValueError("inconsistent primary/secondary retirement counts")
+    if sum(sample['state']) != clocks:
+        raise ValueError("state residency does not partition profile clocks")
+    if clocks > sample['cycle'] or (is_delta and clocks != sample['cycle']):
+        raise ValueError("profile clocks disagree with elapsed simulation clocks")
+    for whole, wait, ack in [('state', 'mem_wait', 'mem_ack'),
+                             ('alu_load', 'alu_load_wait', 'alu_load_ack')]:
+        if len({len(sample[k]) for k in (whole, wait, ack)}) != 1:
+            raise ValueError(f"mismatched {whole} counter family lengths")
+        if any(w + a > total for total, w, a in
+               zip(sample[whole], sample[wait], sample[ack])):
+            raise ValueError(f"wait/ACK exceeds {whole} residency")
+    if (sum(sample['alu_load']) > clocks or sum(sample['bail']) > clocks or
+            sample['load_wait'] + sample['store_wait'] > sum(sample['bail'])):
+        raise ValueError("subset counters exceed enclosing residency")
+
+
 def samples(lines, start=0, end=None):
     """Keep only endpoints, using O(one sample) memory even for large logs."""
     bounds = {"profile": [None, None], "legacy": [None, None]}
@@ -27,11 +60,15 @@ def samples(lines, start=0, end=None):
         marker = line.find("[VEN-PERF] cycle=")
         if marker >= 0:
             line = line[marker:]
-            fields = dict(part.split("=", 1) for part in line.split()[1:])
+            entries = [part.split("=", 1) for part in line.split()[1:]]
+            fields = dict(entries)
+            if len(fields) != len(entries):
+                raise ValueError("duplicate VEN-PERF field")
             if not REQUIRED <= fields.keys():
                 raise ValueError("incomplete VEN-PERF sample")
             sample = {k: tuple(int(n) for n in v.split(",")) if k in ARRAYS
                       else int(v) for k, v in fields.items()}
+            validate_profile(sample)
             kind = "profile"
         else:
             match = PROGRESS.match(line)
@@ -42,7 +79,9 @@ def samples(lines, start=0, end=None):
         # Validate every sample, including those outside the requested range.
         # Concatenated/restarted runs must never silently yield a bogus delta.
         if kind in previous:
-            delta(previous[kind], sample)
+            difference = delta(previous[kind], sample)
+            if kind == 'profile':
+                validate_profile(difference, is_delta=True)
         previous[kind] = sample
         if sample["cycle"] < start or (end is not None and sample["cycle"] > end):
             continue
@@ -90,6 +129,9 @@ def report(first, last):
              "CPI: undefined (no retirement)"]
     if "clocks" not in d:
         return "\n".join(lines + ["Legacy log: no interval stall counters available."])
+    validate_profile(first)
+    validate_profile(last)
+    validate_profile(d, is_delta=True)
     clocks = d["clocks"]
     # These count retire_valid/retire2_valid, including slow-path primary
     # retirements. They are not fast-path issue counts or pairing eligibility.

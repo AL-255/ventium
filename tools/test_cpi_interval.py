@@ -7,7 +7,7 @@ def profile(cycle, retires, count):
     return (f"[VEN-PERF] cycle={cycle} retires={retires} clocks={cycle} "
             f"u={retires} v=0 load_wait={count} store_wait=0 "
             f"state=0,{cycle} mem_wait=0,{count} mem_ack=0,{count} "
-            f"bail=0,{count} alu_load=0,{count} alu_load_wait=0,{count} "
+            f"bail=0,{count} alu_load=0,{2*count} alu_load_wait=0,{count} "
             f"alu_load_ack=0,{count}\n")
 
 
@@ -33,6 +33,39 @@ class IntervalTest(unittest.TestCase):
     def test_reset_rejected(self):
         with self.assertRaisesRegex(ValueError, "decreased"):
             samples([profile(100, 20, 10), profile(200, 30, 9)])
+
+    def test_impossible_cumulative_profile(self):
+        good = profile(100, 20, 10)
+        for before, after in [('u=20', 'u=19'), ('u=20 v=0', 'u=5 v=15'),
+                              ('state=0,100', 'state=0,99'),
+                              ('mem_wait=0,10', 'mem_wait=0,95'),
+                              ('alu_load_wait=0,10', 'alu_load_wait=0,11'),
+                              ('load_wait=10', 'load_wait=11'),
+                              ('u=20', 'u=-1'), ('cycle=100', 'cycle=99')]:
+            with self.subTest(after=after), self.assertRaises(ValueError):
+                samples([good.replace(before, after), profile(200, 40, 20)])
+
+    def test_impossible_delta_even_when_cumulative_is_plausible(self):
+        # ACK+wait fits each cumulative state, but not the new 100 clocks.
+        a = profile(100,20,0)
+        b = profile(200,40,10).replace('mem_wait=0,10', 'mem_wait=0,80').replace(
+            'mem_ack=0,10', 'mem_ack=0,80')
+        with self.assertRaisesRegex(ValueError, 'wait/ACK'):
+            samples([a,b])
+
+    def test_clock_epoch_discontinuity(self):
+        a = profile(100,20,10).replace('cycle=100', 'cycle=110')
+        b = profile(200,40,20).replace('cycle=200', 'cycle=211')
+        with self.assertRaisesRegex(ValueError, 'simulation clocks'):
+            samples([a,b])
+
+    def test_unknown_counter_shape_duplicate_and_unsigned_range(self):
+        bad = [profile(100,20,10).replace('mem_wait=0,10', 'mem_wait=10'),
+               profile(100,20,10).rstrip()+' u=20\n',
+               profile(100,20,10).replace('cycle=100',f'cycle={1<<64}')]
+        for line in bad:
+            with self.subTest(line=line), self.assertRaises(ValueError):
+                samples([line,profile(200,40,20)])
 
     def test_diagnostic_prefix(self):
         a, b = samples([profile(100, 20, 10),
@@ -67,7 +100,7 @@ class IntervalTest(unittest.TestCase):
         self.assertIn("Secondary share of profiler retirements: 25.00%", text)
 
     def test_shape_change_rejected(self):
-        with self.assertRaisesRegex(ValueError, "length changed"):
+        with self.assertRaisesRegex(ValueError, "family lengths"):
             samples([profile(100, 20, 10),
                      profile(200, 40, 20).replace("state=0,200", "state=200")])
 
