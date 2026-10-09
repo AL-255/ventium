@@ -1,0 +1,73 @@
+--- a/rtl/core/core.sv
++++ b/rtl/core/core.sv
+@@ -4508,32 +4508,34 @@
+ `endif
+                              ic_buffered(flin + 32'd1));
+ `endif
+-`ifdef VEN_SFETCH_RESIDENT
+-  // These tokens are set only by the three S_PIPE branches below the
+-  // pipe_bytes_ok/ic_fetch_ready gates.  Recheck the complete slow-decoder
+-  // window here; any changed way, collision, flush, or straddle ambiguity
+-  // immediately returns to the original bus fetch.
+-  assign sfetch_resident_fast = sfetch_resident_q && (state == S_FETCH)
+-                            && !sfetch_boundary
+-                            && (fetch_word == 3'd0) && exec_issue_ok
+-                            && ic_buffered(flin)
+-                            && ic_buffered(flin + 32'(IWORDS*4 - 1));
+ `else
+-  assign sfetch_resident_fast = 1'b0;
++  assign sfetch_uop_fast = 1'b0;
++  assign sfetch_short_fast = 1'b0;
+ `endif
+ `else
+   assign sfetch_uop_fast = 1'b0;
+   assign sfetch_short_fast = 1'b0;
+-  assign sfetch_resident_fast = 1'b0;
+ `endif
+ `else
+   assign sfetch_uop_fast = 1'b0;
+   assign sfetch_short_fast = 1'b0;
++`endif
++
++`ifdef VEN_SFETCH_RESIDENT
++`ifdef VEN_IC_BRAM
++  // The one-shot slow-fetch token belongs to the raw-byte frontend as well
++  // as the optional uop cache. Recheck both returned BRAM owners here; the
++  // producer token alone is never executable-byte or permission authority.
++  // S_FETCH additionally vetoes sequential capture on any same-edge snoop.
++  assign sfetch_resident_fast = sfetch_resident_q && (state == S_FETCH)
++                            && !sfetch_boundary
++                            && (fetch_word == 3'd0) && exec_issue_ok
++                            && ic_buffered(flin)
++                            && ic_buffered(flin + 32'(IWORDS*4 - 1));
++`else
+   assign sfetch_resident_fast = 1'b0;
+ `endif
+ `else
+-  assign sfetch_uop_fast = 1'b0;
+-  assign sfetch_short_fast = 1'b0;
+   assign sfetch_resident_fast = 1'b0;
+ `endif
+ 
+--- a/rtl/core/core_fetch_decode.svh
++++ b/rtl/core/core_fetch_decode.svh
+@@ -27,6 +27,19 @@
+           // is different: only its two verified instruction bytes are copied and
+           // the suffix is explicitly zeroed before the ordinary slow decoder runs.
+           // The bus driver uses the same predicate, so this issues no transaction.
++`ifdef VEN_SFETCH_RESIDENT
++          // A CPU-store snoop can depend on the bus-driver outputs. Veto
++          // only this sequential capture, never feed it back into the fetch
++          // request guard. Consume the one-shot token and retry after the
++          // invalidation edge. External nonpaged DMA must also block capture:
++          // it does not necessarily assert exec_flush_all.
++          if (sfetch_resident_fast && (icsnp_v1 || icsnp_v2
++`ifdef VEN_L1_AXI
++              || ic_snoop_valid
++`endif
++              )) begin
++          end else
++`endif
+ `ifdef VEN_UOP_SLOW_LEN_HINT
+           // CPU-store snoops depend on the bus driver's write output. Using
+           // them in sfetch_short_fast (which blanks that same bus block) would
