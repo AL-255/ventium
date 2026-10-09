@@ -1,8 +1,8 @@
 # Multi-page instruction permission shadow — October 9
 
 Private performance candidate; **not selected for FPGA or standard-suite
-acceptance**. Current verified Quake gameplay is **0.39002079 total U+V IPC**,
-model `f3be9a11`, cycles **1.2–1.3B**, predating this change. The candidate has
+acceptance**. Current verified Quake gameplay is **0.39555990 total U+V IPC**,
+model `05611d6c`, cycles **1.2–1.3B**, predating this change. The candidate has
 no gameplay measurement. The ≥0.48 target remains open. The combined parent's
 full direct-memory CoreMark scores are **2.107363183 / 2.110412882 CM/MHz**;
 these are not this candidate's scores or FPGA/cache-backed measurements.
@@ -95,6 +95,11 @@ archived as `runner-smoke-r1.py`, SHA256 `c8422d7b4f62a2524a5e2bd2692a45d2f9cf87
 The permission-shadow candidate is derived from the REP parent **without**
 this no-gain selector change. Do not silently combine or promote it.
 
+A subsequent, separately identified [combined selector experiment](SYSTEM_TARGET_READ.md)
+does save one warm CALL/RET clock after the permission shadow removes the
+masking stalls. Its 288 control comparisons, 76 system cases, sixteen fault
+cases and 44 boundary cases pass. It is not in this document's full-PC model.
+
 Run the repository microtests using a fresh output on `external/tmp`:
 
 ```sh
@@ -116,3 +121,12 @@ P5 L1s, platform L2, posted16 and 40/40/80MHz clocks are unchanged. The existing
 lint-clean. Cold Quake launched on CPU31 with invocation
 `56a6b51ae71e4621a589215c80dc3de2`, 2GiB/no-swap/32-task/one-CPU limits.
 Native admission is recorded; no gameplay result or timedemo completion yet.
+Cold Win95 also runs on CPU27, invocation
+`a01ee6b1971f4f129b5abfad87f5fa19`, with the same limits and verified native
+admission. Neither guest is accepted yet. Matching direct-memory CoreMark
+model `53a2b7d80b7bb50044967bd2acf9b522656e60916276bb8b76aa6943f13c4b7d`
+is built under `external/tmp/ventium-ifetch-auth-coremark.Wk20fhLO`; both short
+seeds pass full host-equivalence, CRC and negative controls. The measured
+host rate has insufficient margin under the unchanged full-seed runtime cap,
+so full seeds are not launched. The REP parent's newly closed 2.107861982 /
+2.110913372 scores do not transfer to this candidate.
