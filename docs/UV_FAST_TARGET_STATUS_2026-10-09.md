@@ -802,3 +802,35 @@ Current verified gameplay is **0.44183623 total U+V IPC**, `652de481`, clocks
 WBUF candidates remain unmeasured. Both targets still require qualification on
 the accepted current implementation; the older full direct-memory scores
 2.107861982/2.110913372 (`cb4b2f84`) do not establish current FPGA/cache throughput.
+
+## New verified gameplay window and wide-response prototype
+
+The scalar-load/ref/AGI-priming full-PC model **`f780b331`** has now completed
+its predeclared gameplay window: **0.44439995 total U+V IPC**, clocks
+**1,200,000,000–1,300,000,000**. That is44,439,995 retirements:
+34,184,100U +10,255,895V. This supersedes the0.44183623 baseline, but is only
+about0.58% higher as a window measurement, not an isolated equal-work speedup.
+Reaching0.48 for this amount of work requires about7.42% fewer clocks.
+
+Evidence: `external/tmp/ventium-agi-prime-gameplay.5lgzu8Xr/window`.
+All243 source inputs and17 runtime inputs rechecked; native/service ownership,
+UV/system/relocated fast pipeline and fast loads/stores, no STEP/snapshot, and
+zero OOM verified. Root viewed both pixel-identical raw-frame conversions:
+the shells-pickup scene advances to the grenade-launcher scene. Captures bracket
+their counter endpoints within500,000 clocks. The timedemo is still running;
+this is neither completion nor FPGA-board performance.
+
+Exclusive clock accounting still puts D-side pipeline waiting at21.033965%,
+x87 issue/occupancy9.274313%, FLOAD8.036797% and LOAD6.598098%. These are
+residencies, not all removable stalls. Later AXI read-through, repaired larger
+L2, WBUF and wide-response variants remain without verified gameplay windows.
+
+The [wide resident response prototype](../verif/l1/LOAD64_UNDER_FILL.md)
+passes its leaf ownership/cancellation matrix, old-implementation negative,
+and216 full-core native runs with complete architectural comparisons. It
+saves32 clocks across16 aligned resident x87 operands behind independent
+AXI0 data fills, but no total clocks when the longer backing refill dominates.
+Short integer CoreMark is exactly unchanged. No representative gain, suite
+pass, physical timing improvement or deployment is claimed for this prototype.
+Current full1,400-iteration CoreMark seeds continue with the unchanged60-minute
+native cap; they have not yet produced final scores.
