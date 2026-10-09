@@ -32,8 +32,9 @@ parent-clock expectation failed and is retained. The host optimization never
 skips a clock edge or changes guest state. The 60-minute full-seed limit still
 applies; the optional 75-minute request has not been answered.
 
-Five cold full-PC guests remain active: code-word and combined-candidate
-Quake/Win95 pairs, plus independent-REP Quake. Superseded XPM/pop pairs closed
+Seven cold full-PC guests remain active: code-word, combined-candidate and
+independent-REP Quake/Win95 pairs, plus the instruction-permission-shadow
+Quake candidate. Superseded XPM/pop pairs closed
 normally, with native exit
 zero, reaped children and no OOM. Those incomplete timedemos remain FAIL and
 the Win95 runs CLOSED_UNQUALIFIED; no suite acceptance is inferred.
@@ -87,9 +88,19 @@ is not an equal-work percentage-gain claim.
   precise memory-prefix checks and 1,024-clock stable parked state; they are
   not performance/suite acceptance.
   The separate cross-page dynamic-SMC oracle disagreement stays FAIL. Cold
-  Quake model `139121ae` runs on CPU29; no gameplay result yet.
+  Quake model `139121ae` runs on CPU29 and Win95 on CPU30; no gameplay or
+  desktop acceptance yet. Win95 invocation is `06d2598e26e541908ef2f442414ef802`.
   Both direct-memory short CoreMark seeds pass with 1,648 fewer clocks; full
   seeds for model `cb4b2f84` run under the unchanged 60-minute cap, not yet scored.
+- [Instruction-permission shadow](../verif/fe_pipe/IFETCH_AUTH_MULTI.md):
+  retains sixteen independently checked code-page permissions instead of one,
+  rechecks live CPL, and invalidates on every context flush/I-TLB replacement.
+  Directed paged CALL/RET loops **47→31 clocks**; 288 control-loop comparisons,
+  76 broad system cases, 16 warm-code fault/remap cases and 44 boundary cases
+  pass complete QEMU comparisons. These are not gameplay gains. Cold Quake
+  model `1f2583cb` runs on CPU31, invocation
+  `56a6b51ae71e4621a589215c80dc3de2`; its native input/CPU/resource admission
+  is checked. Win95/full CoreMark on this later model remain unrun.
 
 ## Current profiling lead
 
