@@ -612,3 +612,12 @@ not grant visual, standard-suite or hardware acceptance.
 
 Verified gameplay is unchanged at **0.44004644 total U+V IPC**, `15f56054`,
 **1,200,012,763–1,300,012,763** clocks, predating all three newer candidates.
+
+The matched old/off/on isolated FPGA bridge check is now closed: **149→175
+CLB LUTs, 71→72 registers**, no RAM/DSP addition. The setup-limited leaf estimate
+is **451.67→445.83 MHz**; this is not CPU Fmax. All profiles still fail isolated
+hold constraints (−0.049/−0.050 ns), so no timing sign-off is claimed. The single
+bounded Vivado family used 4.18 GB peak RAM, zero swap/OOM, took 255.49 seconds
+and has exited. No processor bitstream or deployment was performed. Raw reports:
+`external/tmp/ventium-read-through-physical.ou0amfh0`; see the
+[bridge evidence](../verif/l1/AXI_READ_THROUGH.md).

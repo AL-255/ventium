@@ -74,3 +74,34 @@ Verified gameplay remains **0.44004644 total U+V IPC**, model `15f56054`, clocks
 **1,200,012,763–1,300,012,763**, predating this optimization. This change has no
 gameplay measurement. Full same-source CoreMark, Win95, timedemo, differential
 gate and hardware timing qualification remain required.
+
+## Isolated FPGA cost check
+
+`fpga/run-axi-read-through-leaf.py --leaf-result /absolute/path/to/r2` freezes
+the actually tested bridge sources and runs old/disabled/enabled sequentially
+in one exclusive, 8 GiB/no-swap, ten-minute-bounded Vivado family. The matching
+Tcl uses `xczu15eg-ffvb1156-2-i`, 25 ns and zero-delay isolated I/O budgets.
+It creates no CPU bitstream and changes nothing on the board.
+
+Evidence: `external/tmp/ventium-read-through-physical.ou0amfh0`.
+
+| Routed isolated bridge | Original / disabled | Enabled |
+| --- | ---: | ---: |
+| CLB LUTs | 149 | 175 |
+| Registers | 71 | 72 |
+| BRAM / DSP | 0 / 0 | 0 / 0 |
+| Setup-limited leaf frequency estimate | 451.67 MHz | 445.83 MHz |
+| Worst hold slack | −0.049 ns | −0.050 ns |
+| Hold-failing endpoints | 21 | 17 |
+
+The saved command clock costs **26 mapped CLB LUTs and one register**. The
+disabled candidate reproduces the original area and timing exactly. Raw LUT
+primitive counts are 187→216, a different metric from mapped CLB LUTs.
+The setup path grows by 0.029 ns; this tiny leaf's frequency is **not CPU Fmax**.
+All three reports explicitly fail hold timing under these isolated constraints;
+there is no timing sign-off or ignored hold violation.
+
+Native exit0, unchanged source pins, 255.49 seconds, peak cgroup RAM
+4,180,992,000 bytes, zero swap/OOM, and no surviving Vivado family. Scope
+invocation: `6eb4e42e12434ecda5b182c616164f07`. The full-system cold runs and
+0.48 gameplay target remain open; no performance is inferred from leaf timing.
