@@ -3780,6 +3780,19 @@ establish exclusive selector ownership, the pinned UV/fast image, genuine
 gameplay membership and an error-free completed timedemo. The helper alone
 does not qualify a workload or prove its prior execution history.
 
+`ven_quake_ipc.py` supplies the matching passive engine witness and an
+accumulator for the **pinned DOS Quake 1.06** media only. The fixed interior is
+raw `host_framecount - td_startframe` **33 through 900**, chosen before seeing
+the new score. It validates page-table bounds/mapping stability, brackets UV64
+reads with double-read engine fields, retains equal-frame/zero-retirement
+intervals, and reports excluded intervals instead of bridging them. Scores are
+clock-weighted, not averages of individual IPC ratios. Preserve every endpoint
+for independent replay. The helper never declares acceptance: its physical RAM
+reads are not coherent cache snoops, and the cold controller must separately
+prove the executable/mapping, clean UV-fast history, native timedemo completion
+and video coverage. Do not run a selector observer during daemon initialization
+or alongside a halted architectural scan. Host tests do not qualify hardware.
+
 **Candidate-only posted transport:** `VEN_DDR_POSTED` additionally needs
 `fpga/patches/0010-posted-ddr-transport.patch` applied to a new flow source copy,
 the candidate bridge and shim, and an explicit frozen define profile. The
