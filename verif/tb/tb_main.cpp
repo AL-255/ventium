@@ -37,6 +37,7 @@
 
 #include "verilated.h"
 #include "Vventium_top.h"
+#include "bfm_store_policy.h"
 #ifdef VEN_TB_INPUT_SNAPSHOT
 #include "model_input_snapshot.h"
 #endif
@@ -955,10 +956,14 @@ int main(int argc, char** argv) {
     // MemModel is x86-phys-indexed, so subtract the carveout base off every AXI addr.
 #ifdef VEN_KV260_SOC
     const uint32_t AXI_REMAP = 0x40000000u;
+    const uint32_t AXI_POLICY_MASK = 0x0fffffffu;
 #else
     const uint32_t AXI_REMAP = 0u;
+    const uint32_t AXI_POLICY_MASK = 0xffffffffu;
 #endif
+    const auto store_policy = ventium::make_bfm_store_policy<Vventium_top>(AXI_POLICY_MASK);
     auto axi_drive = [&]() {
+        ventium::drive_bfm_store_policy(top, store_policy);
         if (axi_stuck) {  // never ready/valid
             top->m_axi_arready=0; top->m_axi_rvalid=0; top->m_axi_rdata=0; top->m_axi_rlast=0;
             top->m_axi_rid=0; top->m_axi_rresp=0; top->m_axi_awready=0; top->m_axi_wready=0;

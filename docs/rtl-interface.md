@@ -208,6 +208,16 @@ invalidation handles either outcome without guessing, changing read cacheability
 globally flushing the cache, or disabling ordinary RAM updates. The original
 ao486 backend remains the authority on the write's actual memory effect.
 
+The standalone `verif/tb` AXI slave has a different backing contract: flat
+`MemModel` RAM, with optional RAM-top/open-bus and option-ROM read overlays.
+Its `bfm_store_policy.h` driver describes that backing per byte, including
+the KV260 address fold when compiled, independently for U and paired V.
+It drives the ports during every AXI settle, before reset's first evaluation
+too. Leaving these optional inputs at Verilator's zero initialization causes
+every accepted store to invalidate its cached line. Do not reuse that undriven
+testbench as a cache-performance baseline or apply the ao486 ROM policy to
+otherwise ordinary flat test RAM. RTL and hardware policy are unchanged.
+
 ## 4. Image loading
 
 The testbench loads a flat memory image and a load address from the test
