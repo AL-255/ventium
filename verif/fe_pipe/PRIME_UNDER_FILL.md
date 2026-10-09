@@ -1,8 +1,8 @@
 # Resident priming during an independent fill — October 9
 
 **Private candidate, not production/FPGA acceptance.** Verified Quake gameplay
-remains **0.38065044 total U+V IPC**, dispatch-only `ba2463bf`, cycles
-**1.2–1.3B**, predating the ownership and FP/priming repairs. No newer candidate
+is **0.37798811 total U+V IPC**, ownership-repaired `4b5fb92f`, cycles
+**1.2–1.3B**, predating this FP/priming repair. No newer candidate
 gameplay measurement exists; 0.48 remains open. Full CoreMark now closes at
 2.10736/2.11041 CM/MHz on this candidate's direct-memory `e3dbf68a` model;
 these are unchanged from the earlier `cbdf278a` scores, not FPGA throughput.

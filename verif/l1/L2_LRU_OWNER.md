@@ -1,8 +1,10 @@
 # Platform L2 replacement-state repair — October 9
 
 Private full-PC candidate; **not a completed standard-suite or FPGA pass**.
-Latest verified Quake gameplay remains **0.38065044 total U+V IPC**, dispatch
-model `ba2463bf`, cycles **1,200,000,000–1,300,000,000**. It predates this repair.
+Latest verified Quake gameplay is **0.37798811 total U+V IPC**, ownership-repaired
+model `4b5fb92f`, cycles **1,200,000,000–1,300,000,000**. It predates this repair
+and the intervening FP/under-fill candidate. Receipt:
+`ventium-prime-pair-gameplay.TJ6xwJz0/audit.json` under the external scratch root.
 The current candidate has no gameplay score; the **0.48 target is open**.
 The current core's full seeds close at **2.10736/2.11041 CM/MHz**, model
 `e3dbf68a`, with correct CRCs and zero delivered faults. These are direct-memory
