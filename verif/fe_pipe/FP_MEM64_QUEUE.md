@@ -208,3 +208,16 @@ An initial user-build admission was refused below 4 GiB free, before launching
 a compiler. Eight explicitly selected closed-build PCHs were losslessly
 archived with verified recovery hashes, recovering **616,544,045 bytes**;
 binaries, inputs and run evidence remained unchanged. The build then passed.
+
+The combined full-PC source now also compiles successfully in
+`external/tmp/ventium-fp-combined-soc.WPpVLjvn`: model
+`652de481d967acee7a3bf48c419136053ec8625e93566fb1091a4a1ca66dc350`.
+Relative to the wide-only PC parent, the only added feature is scalar dispatch
+(129 defines total); both changed core files match the directed candidate.
+The actual four-way registered/read-first XPM fields, local harness/header
+dependency, source pins and unchanged 98 third-party structural warnings were
+checked. UV-fast, full P5 L1s, 32-KiB platform L2, posted16 and 40/40/80-MHz
+settings are unchanged. This is build evidence, not guest or FPGA acceptance.
+Six more closed-build PCHs were losslessly archived with verified hashes,
+recovering **472,079,414 bytes**; receipt:
+`external/tmp/ventium-combined-soc-pch.xmOyE6vW/closed.json`.

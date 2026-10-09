@@ -384,3 +384,10 @@ losslessly archived, recovering **616,544,045 bytes** with verified recovery
 hashes and unchanged remaining files. Receipt:
 `external/tmp/ventium-combined-pch-r2.OfLtdenl/closed.json`. The first archive
 selection refused already-compressed files before changing anything.
+
+Combined full-PC build **`652de481`** also passes native/source/header and
+four-way registered-XPM checks, with unchanged platform settings and warning
+debt. Root: `external/tmp/ventium-fp-combined-soc.WPpVLjvn`. No combined guest
+or FPGA measurement is implied. Six additional closed-build PCH archives
+recovered **472,079,414 bytes**, verified recoverable by their original hashes;
+receipt: `external/tmp/ventium-combined-soc-pch.xmOyE6vW/closed.json`.
