@@ -1,10 +1,10 @@
 # Multi-page instruction permission shadow — October 9
 
 Private performance candidate; **not selected for FPGA or standard-suite
-acceptance**. Current verified Quake gameplay is **0.39555990 total U+V IPC**,
-model `05611d6c`, cycles **1.2–1.3B**, predating this change. The candidate has
-no gameplay measurement. The ≥0.48 target remains open. The combined parent's
-full direct-memory CoreMark scores are **2.107363183 / 2.110412882 CM/MHz**;
+acceptance**. Current verified Quake gameplay is **0.44513116 total U+V IPC**,
+permission-shadow model `1f2583cb`, cycles **1.2–1.3B**, including this change.
+The ≥0.48 target remains open. The REP parent's
+full direct-memory CoreMark scores are **2.107861982 / 2.110913372 CM/MHz**;
 these are not this candidate's scores or FPGA/cache-backed measurements.
 
 ## Cause and change
@@ -133,7 +133,16 @@ P5 L1s, platform L2, posted16 and 40/40/80MHz clocks are unchanged. The existing
 98 structural-warning debt items are identical, not newly waived or called
 lint-clean. Cold Quake launched on CPU31 with invocation
 `56a6b51ae71e4621a589215c80dc3de2`, 2GiB/no-swap/32-task/one-CPU limits.
-Native admission is recorded; no gameplay result or timedemo completion yet.
+Native admission is recorded. The fixed **1,200,000,000–1,300,000,000** gameplay
+window now measures **0.44513116 total U+V retirement-event IPC**:
+**44,513,116 = 33,416,464 U + 11,096,652 V / 100M clocks**. Audit:
+`external/tmp/ventium-ifetch-auth-gameplay-audit.XNYeoSR5/audit.json`.
+All 238 source and 17 runtime pins plus native identity/no-OOM are rechecked.
+Unmodified endpoint captures show advancing 3D gameplay. Their timing is
+bracketed by adjacent 500k-clock progress records, not claimed cycle-exact.
+This is not a completed timedemo, standard-suite or FPGA result. Later
+target-read, read-priming and scalar-dispatch changes are absent; no isolated
+equal-scene-work percentage gain is inferred from comparison to the REP run.
 Cold Win95 also runs on CPU27, invocation
 `a01ee6b1971f4f129b5abfad87f5fa19`, with the same limits and verified native
 admission. Neither guest is accepted yet. Matching direct-memory CoreMark

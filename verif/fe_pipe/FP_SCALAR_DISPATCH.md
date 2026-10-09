@@ -1,9 +1,9 @@
 # Scalar x87 reference-packet dispatch — October 9
 
 Private, default-off `VEN_FP_SCALAR_DISPATCH`; **not production, full-suite or
-FPGA acceptance**. Latest verified gameplay remains **0.43739106 total U+V
-IPC**, REP model `139121ae`, clocks **1,200,084,750–1,300,084,750**. It predates
-this candidate, instruction-permission shadow, target read and read-retirement
+FPGA acceptance**. Latest verified gameplay is **0.44513116 total U+V
+IPC**, permission-shadow model `1f2583cb`, clocks **1,200,000,000–1,300,000,000**.
+It predates this candidate, target read and read-retirement
 priming. No gameplay gain is claimed for this change. The full REP direct-memory
 CoreMark scores are **2.107861982 / 2.110913372 CM/MHz**, not this model's scores.
 

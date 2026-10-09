@@ -1,9 +1,9 @@
 # Read-retirement cache priming — October 9
 
 Private, default-off RTL proposal; not production, standard-suite or FPGA
-acceptance. Latest verified gameplay: **0.43739106 total U+V retirement-event
-IPC**, REP model `139121ae`, cycles **1,200,084,750–1,300,084,750**.
-That model predates this proposal and the permission/target-read candidates.
+acceptance. Latest verified gameplay: **0.44513116 total U+V retirement-event
+IPC**, permission-shadow model `1f2583cb`, cycles **1,200,000,000–1,300,000,000**.
+That model predates this proposal and the target-read/scalar-dispatch candidates.
 The 0.48 target remains open.
 
 ## Change

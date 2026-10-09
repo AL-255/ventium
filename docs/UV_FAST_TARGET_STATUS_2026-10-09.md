@@ -7,7 +7,7 @@ snapshot is used for the current cold full-PC runs.
 | Requirement | Verified result | Remaining |
 | --- | --- | --- |
 | CoreMark ≥2.1 CM/MHz | REP full direct-memory seeds: **2.107861982 / 2.110913372**, correct CRCs | Later permission-shadow candidate pending; not a DDR/cache/FPGA score |
-| Quake ≥0.48 total U+V IPC | **0.43739106**, REP `139121ae`, 1,200,084,750–1,300,084,750 clocks | Below target; later permission/target-read/read-priming candidates not measured |
+| Quake ≥0.48 total U+V IPC | **0.44513116**, permission shadow `1f2583cb`, 1,200,000,000–1,300,000,000 clocks | Below target; later target-read/read-priming/scalar candidates not measured |
 | Standard suite | REP full CoreMark seeds pass; code-word Win95 closed at a visually clean desktop | Independent desktop acceptance and complete timedemo; newer candidates pending |
 | FPGA | Old image still deployed | Selected source, full timing/resource qualification and deployment |
 
@@ -70,7 +70,7 @@ increase from 0.39002079 is small and does not meet 0.48. Equal-cycle bounds
 are not an equal-scene-work comparison; no isolated percentage gain is claimed.
 Full timedemo completion is still open.
 
-The latest **REP-enabled** gameplay audit is
+The preceding **REP-enabled** gameplay audit is
 `external/tmp/ventium-rep-gameplay-audit.753XgqaN/audit.json`:
 **43,739,106 = 32,629,256 U + 11,109,850 V retirement events / 100M clocks**,
 cycles **1,200,084,750–1,300,084,750**, giving **0.43739106 IPC**. Model SHA256:
@@ -82,6 +82,27 @@ plus the live native identity. Full timedemo remains open. This supersedes
 0.39555990 as the latest measurement, not as a controlled equal-scene-work
 percentage gain. Permission shadow, target read and read-retirement priming
 are absent from this measured build.
+
+The latest **permission-shadow** gameplay audit is
+`external/tmp/ventium-ifetch-auth-gameplay-audit.XNYeoSR5/audit.json`:
+**44,513,116 = 33,416,464 U + 11,096,652 V retirement events / 100M clocks**,
+cycles **1,200,000,000–1,300,000,000**, giving **0.44513116 IPC**. Model SHA256:
+`1f2583cb1e74a7ca59b07d99db8fd4aefb7b322957d6f6411a36b8898d3a6876`.
+The unchanged endpoint captures show advancing Quake gameplay, from shells
+to grenade-launcher pickup. Capture times are bracketed by adjacent 500k-clock
+progress records, not claimed cycle-exact. The audit rechecks 238 source and
+17 runtime pins, live native identity and no OOM. It supersedes the REP result
+as the latest measurement, not as an isolated equal-scene-work gain.
+The fixed window remains below 0.48; full timedemo and desktop acceptance are
+still open. Target read, read-retirement priming and scalar dispatch are absent.
+
+Its disjoint residency audit accounts for every clock. The largest waiting
+bucket is D-side pipeline result wait (**21.124151%**); x87 admission occupies
+**8.823239%**, `S_FLOAD` **7.831977%**, slow integer load **7.005721%**, and
+`S_FETCH` **2.775894%**. These include necessary work, not wholly removable
+stalls. For this observed retirement count, reaching 0.48 needs **7.264342%**
+fewer clocks. The running read-priming candidate targets the D-side cost;
+its directed savings are not yet a gameplay result.
 
 ## Fixes and evidence
 
@@ -140,6 +161,8 @@ are absent from this measured build.
   `56a6b51ae71e4621a589215c80dc3de2`; its native input/CPU/resource admission
   is checked. Cold Win95 runs on CPU27, invocation
   `a01ee6b1971f4f129b5abfad87f5fa19`; both guests remain unaccepted.
+  The audited gameplay window above now measures **0.44513116 IPC**. It is
+  not a completed timedemo or standard-suite pass.
   Matching direct-memory CoreMark model `53a2b7d8` passes short
   host-equivalence/CRC qualification with identical clocks to the REP parent.
   Its measured host rates are too close to the 60-minute cap for full launch.
