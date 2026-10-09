@@ -22,6 +22,10 @@ on a host `gdb` binary** and **no third-party Python packages** (stdlib only).
 
 ## Usage
 
+For the opt-in **private** terminal-state observer and its still-failing generic
+subgate, see [PREEXIT_OBSERVER.md](PREEXIT_OBSERVER.md). The canonical oracle and
+default producer behavior below are unchanged.
+
 ```
 gen_trace.py --qemu <path> --elf <file> --out <trace.vtrace>
              [--max-insn N] [--port P] [--x87] [--stop-at 0xADDR]
