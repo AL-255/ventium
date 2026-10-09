@@ -143,3 +143,14 @@ are still needed for terminal propagation; these are not silently waived.
 The prior five hard cycle-band failures (depadd, indepadd, dmiss, imiss, nearbr)
 also remain open. This observer experiment does not fix or requalify timing,
 the whole generic gate, the standard suite, FPGA execution or gameplay IPC.
+
+### Additional architectural finding; do not extend the masks blindly
+
+The later [exact-FSQRT witness](../../fp_shared/tb/FSQRT_C1_PERSISTENCE.md)
+demonstrates a real RTL C1-persistence defect after FPREM1, independently of
+QEMU's missing quotient flags. Native hardware clears C1 for exact `sqrt(1)`;
+current shared-FP RTL retains it. C0/C2/C3 are undefined after FSQRT and are
+not compared by this witness. Thus the `tx_fprem` terminal discrepancy cannot
+be closed merely by extending its old quotient-flag mask. No masks were changed.
+Latest verified gameplay is now0.49083588 U+V IPC on `86731249`, cycles1.2B–1.3B;
+that measurement does not close this correctness issue.
