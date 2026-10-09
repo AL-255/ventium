@@ -1,0 +1,29 @@
+--- a/fp_shared/ven_fp_alu.sv
++++ b/fp_shared/ven_fp_alu.sv
+@@ -54,19 +54,23 @@
+       input logic [1:0]  round_control
+   );
+     logic [81:0] special;
++    logic [79:0] add_a, add_b;
+     fx_pipe_t p;
+     begin
+       p = '0;
++      // Select operands before the expensive align/add/normalize front.
++      // Preserve f_special's original operand order (including NaN priority).
++      add_a = (op == 3'd5) ? b : a;
++      add_b = (op == 3'd5) ? {~a[79], a[78:0]} :
++              (op == 3'd4) ? {~b[79], b[78:0]} : b;
+       special = f_special(op, a, b);
+       if (special[81]) begin
+         p.early  = 1'b1;
+         p.result = {special[80], 4'b0000, special[79:0]};
+       end else begin
+         unique case (op)
+-          3'd0: p = fx_add_s1(a, b, round_control);
++          3'd0, 3'd4, 3'd5: p = fx_add_s1(add_a, add_b, round_control);
+           3'd1: p = fx_mul_s1(a, b);
+-          3'd4: p = fx_add_s1(a, {~b[79], b[78:0]}, round_control);
+-          3'd5: p = fx_add_s1(b, {~a[79], a[78:0]}, round_control);
+           default: begin
+             // Invalid dispatch is made visible as masked-invalid indefinite.
+             p.early  = 1'b1;
