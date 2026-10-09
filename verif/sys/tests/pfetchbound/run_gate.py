@@ -134,7 +134,11 @@ def one_case(case, args, before, deadline):
                 mode_leaf.mkdir(mode=0o700)
                 argv = [args.tb, "--cosim", "--system", "--image", image,
                         "--max-insn", str(checks.MAX_INSN), "--max-cycles", "1000000",
-                        "--quiesce", "400", "--out", mode_leaf / "rtl.vtrace", "+ven_faultlog"]
+                        # A delayed uncached descriptor transaction can exceed
+                        # the old direct-memory 400-clock retirement watchdog.
+                        # Preserve the 1M total cycle cap and required exit133.
+                        "--quiesce", "4096" if args.l1_axi else "400",
+                        "--out", mode_leaf / "rtl.vtrace", "+ven_faultlog"]
                 if mode == "cycle-func":
                     argv.append("--cycle-func")
                 if args.l1_axi:

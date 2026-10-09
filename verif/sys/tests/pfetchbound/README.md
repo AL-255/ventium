@@ -178,6 +178,12 @@ runs require the passive `VEN_L1D_PERF` counters and positive backing-service
 activity in every case. The summary records the selected backend and latency.
 This adds no trace filtering or relaxed fault/architectural comparison. The
 default direct-memory mode remains available as an explicitly labelled control.
+AXI runs allow 4,096 clocks between retirements because delayed uncached
+descriptor reads can exceed the direct-memory watchdog's 400 clocks. The
+1,000,000-clock total cap, required natural exit133, and complete architectural
+comparison remain unchanged. Canonical fault events come from RTL **stdout**;
+the separately retained debug-observer stderr is not a second event stream.
+Terminal diagnostics in both streams remain fatal.
 
 The 540s shell wall bound includes a 530s internal deadline (plus5s forced
 cleanup). Free-QEMU/golden/native/diff command bounds are30/90/60/30s.

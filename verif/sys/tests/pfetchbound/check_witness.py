@@ -332,6 +332,26 @@ def grade_trace(case, trace, sym, image, producer):
     return len(rows)
 
 
+def fault_records(stdout):
+    """Only the RTL stdout stream owns canonical +ven_faultlog records.
+
+    VEN_DBG_CORE's stderr observer uses a different format, may repeat an
+    event, and can report reset/software-INT transitions. Native terminal
+    diagnostics in both streams are still checked by grade_native below.
+    """
+    faults, states = [], []
+    for line in stdout.splitlines():
+        if "[FAULT]" not in line:
+            continue
+        match = contracts.check_faultlog.FAULT.fullmatch(line)
+        if not match:
+            raise ValueError("malformed canonical native fault record")
+        faults.append((int(match[1]), int(match[2], 16),
+                       int(re.search(r" pc=([0-9a-fA-F]{8}) ", line)[1], 16)))
+        states.append(int(re.search(r" state=(\d+) ", line)[1]))
+    return faults, states
+
+
 def grade_native(case, trace, stdout, stderr, sym, image, return_code):
     if return_code != 133:
         raise ValueError("native actual wait must be isa-debug-exit 133")
@@ -341,16 +361,7 @@ def grade_native(case, trace, stdout, stderr, sym, image, return_code):
     native = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(native)
     grade = native.grade_native(trace, stdout, stderr, return_code, 133, MAX_INSN)
-    faults, states = [], []
-    for line in (stdout + stderr).splitlines():
-        if "[FAULT]" not in line:
-            continue
-        match = contracts.check_faultlog.FAULT.fullmatch(line)
-        if not match:
-            raise ValueError("malformed canonical native fault record")
-        faults.append((int(match[1]), int(match[2], 16),
-                       int(re.search(r" pc=([0-9a-fA-F]{8}) ", line)[1], 16)))
-        states.append(int(re.search(r" state=(\d+) ", line)[1]))
+    faults, states = fault_records(stdout)
     if faults != CASES[case]["faults"]:
         raise ValueError(f"wrong ordered exact native ordinary faults: {faults!r}")
     return dict(result="PASS", records=count, **{k: v for k, v in grade.items() if k != "records"},

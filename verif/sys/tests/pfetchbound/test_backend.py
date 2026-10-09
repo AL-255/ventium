@@ -44,6 +44,19 @@ class BackendTest(unittest.TestCase):
             with self.subTest(log=log), self.assertRaises(ValueError):
                 gate.grade_axi_activity(log)
 
+    def test_canonical_fault_order_and_duplicates_are_preserved(self):
+        first = "[FAULT] vec=7 err=00000000 pc=00401fff state=2 v86=0 depth=0\n"
+        second = "[FAULT] vec=14 err=00000004 pc=00401fff state=41 v86=0 depth=0\n"
+        self.assertEqual(gate.checks.fault_records(first + second),
+                         ([(7, 0, 0x401fff), (14, 4, 0x401fff)], [2, 41]))
+        self.assertEqual(gate.checks.fault_records(first + first)[0],
+                         [(7, 0, 0x401fff), (7, 0, 0x401fff)])
+
+    def test_malformed_fault_stdout_is_never_ignored(self):
+        for text in ("[FAULT] truncated", "tb: [FAULT] vec=0x00", "noise [FAULT] trailing"):
+            with self.subTest(text=text), self.assertRaises(ValueError):
+                gate.checks.fault_records(text)
+
 
 if __name__ == "__main__":
     unittest.main()
