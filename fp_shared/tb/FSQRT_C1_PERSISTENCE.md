@@ -49,3 +49,8 @@ adjacent SRT/arithmetic/FXCH owners. Preserve value/exception outputs and cycle
 counts in an old/new miter, then run the differential and standard suites.
 The exact-result witness is currently **failing RTL correctness**, not an
 accepted expected-failure waiver. No mask or timing band was changed.
+
+The [expanded 912-case observation](SRT_ROUND_FLOOR.md) confirms456 C1 errors
+and independently finds a reduced-precision SRT exponent double-carry bug.
+Its proposed value-only patch is uncompiled/unpromoted; the live FPGA export
+and measured gameplay model remain unchanged.

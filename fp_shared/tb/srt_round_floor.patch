@@ -1,0 +1,47 @@
+diff --git a/rtl/fpu/fpu_srt_div.sv b/rtl/fpu/fpu_srt_div.sv
+--- a/rtl/fpu/fpu_srt_div.sv
++++ b/rtl/fpu/fpu_srt_div.sv
+@@ -229,7 +229,7 @@ module fpu_srt_div
+   logic [80:0]         rsum;
+   logic                rem_nz, rs_pos, rs_neg, up, down, inexact, resid_pos, resid_neg;
+   logic [127:0]        uq, keep, remv, half;
+-  int                  msb, extra;
++  int                  msb, floor_msb, extra;
+   logic signed [31:0]  e, ebiased;
+   // out-of-range pack: feed the SHARED fx_round_pack_f one UNROUNDED 64-bit window
+   // (top-aligned) + a single residual sticky so it does ONE correct round across
+@@ -256,6 +256,7 @@ module fpu_srt_div
+     uq      = round_uq_q;
+     msb     = 0;
+     for (int i=127; i>=0; i--) if (uq[i]) begin msb=i; break; end
++    floor_msb = msb;                              // before the independent PC64 round
+     extra   = msb - 63;
+     keep    = uq >> extra;
+     remv    = uq & ((128'd1 << extra) - 128'd1);
+@@ -287,18 +288,19 @@ module fpu_srt_div
+     // significand keepf (top-aligned to bit127) + sticky go to the shared packer,
+     // which applies gradual-underflow / overflow + the active RC in ONE round.
+     keepf   = uq >> extra;                            // floor 64-bit window (unrounded)
++    ep      = ($signed(floor_msb) - round_sh_q) + (ua - ub);
+     if (resid_neg) begin                             // SRT over-shot by < 1 ULP
+       keepf = keepf - 128'd1;
+-      if (!keepf[63]) keepf = {64'd0, 64'hFFFFFFFFFFFFFFFF};  // borrowed across pow2
++      if (!keepf[63]) begin
++        keepf = {64'd0, 64'hFFFFFFFFFFFFFFFF};         // borrowed across pow2
++        ep = ep - 32'sd1;
++      end
+     end
+     stickyp = (remv != 128'd0) || rs_pos || resid_neg;        // any residual below floor
+     sigp    = keepf << 64;                            // window MSB (bit63) -> bit127
+-    // weight of keepf's MSB (bit63) == weight of uq bit `msb` (the floor window top):
+-    // (msb - SH) + (ua-ub), SH=70 (div) / 72 (sqrt). resid_neg's pow2-borrow drops
+-    // the window MSB one position, but fx_round_pack_f re-finds the MSB of sigp and
+-    // uses the passed weight as ITS top bit's exponent, so pass the floor MSB weight.
+-    ep      = ($signed(msb) - round_sh_q) + (ua - ub);
+-    if (resid_neg && !keepf[63]) ep = ep - 32'sd1;    // borrow crossed a power of two
++    // The packer owns its rounding carry/borrow. It must receive the FLOOR's
++    // exponent, not msb after PC64 rounding; otherwise an inline carry is
++    // counted twice at PC24/53. Apply a floor borrow before replacing its MSB.
+     // Pass pc: the floor-window packer rounds to 24/53/64 bits. For pc<64 this also
+     // serves the IN-RANGE result (single-round to PC; no double-round), so divide/
+     // sqrt honor x87 precision control. PC=64 keeps the fast inline path below.
