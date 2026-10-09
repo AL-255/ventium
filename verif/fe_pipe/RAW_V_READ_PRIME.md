@@ -1,9 +1,13 @@
 # Raw-decoder resident-read priming — October 9
 
 Private, default-off prototype; **not production RTL or FPGA acceptance**.
-Verified gameplay baseline: **0.37026314 total U+V retirement-event IPC**,
-posted16 model `3c8779f4`, cycles **1.2–3.0B**. Neither this prototype nor its
-dispatch/shared-FP parent has a gameplay measurement. The 0.48 target is open.
+**Update: the combined full-PC candidate failed in both Win95 and Quake.**
+An already-acknowledged primed U could orphan a registered V response.
+See the [reproduction and tested ownership repair](PRIME_PAIR_OWNER.md);
+the earlier directed passes below do not override these native failures.
+Verified gameplay baseline: **0.38065044 total U+V retirement-event IPC**,
+dispatch-only model `ba2463bf`, cycles **1.2–1.3B**. This raw-prime/shared-FP
+derivative remains gameplay-unmeasured. The 0.48 target is open.
 
 ## Change and invariants
 
