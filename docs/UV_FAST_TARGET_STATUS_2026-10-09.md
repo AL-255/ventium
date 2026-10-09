@@ -126,8 +126,10 @@ Full timedemo completion is still open.
   `a01ee6b1971f4f129b5abfad87f5fa19`; both guests remain unaccepted.
   Matching direct-memory CoreMark model `53a2b7d8` passes short
   host-equivalence/CRC qualification with identical clocks to the REP parent.
-  Its measured host rates are too close to the 60-minute cap for full launch;
-  CPU placement is being checked. Full seeds remain unrun.
+  Its measured host rates are too close to the 60-minute cap for full launch.
+  Four additional CPU placements reproduce the exact 4,821,679 clocks and
+  3,660,809 retirements, but yield only 193–199k simulated clocks/host-second;
+  they do not provide the required launch margin. Full seeds remain unrun.
 - [Checked system target read](../verif/fe_pipe/SYSTEM_TARGET_READ.md): after
   the permission shadow removes masking stalls, the existing two-port target
   selector saves one warm CALL/RET clock. 288 control comparisons, 76 system,
