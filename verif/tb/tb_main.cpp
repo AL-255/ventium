@@ -1317,6 +1317,11 @@ int main(int argc, char** argv) {
         const uint32_t port = (uint32_t)top->io_addr;
         const uint32_t size = (uint32_t)top->io_size;
         if (top->io_we) {
+            // Count the actual device service once per request assertion,
+            // beside the side effect below. Post-edge io_req can already be
+            // deasserted, or can remain held across another settle/clock.
+            // Sampling that later level undercounts or double-counts OUTs.
+            ++io_out_count;
             // OUT: the CPU drives the value out; we consume it. The isa-debug-exit
             // port 0xf4 stops the run (matches qemu-system -device isa-debug-exit).
             // Capture the AL value so a bare-metal self-checking sys image (e.g.
@@ -2156,9 +2161,6 @@ int main(int argc, char** argv) {
             if (io_used_golden && devin_idx < devins.size()) ++devin_idx;
             ++io_in_count;
         }
-        if (cosim_mode && (bool)top->io_req && (bool)top->io_we && (bool)top->io_ack)
-            ++io_out_count;
-
         ++cycles;
 
         // wedge diag: optionally zero the IO histogram at a cycle threshold so the
