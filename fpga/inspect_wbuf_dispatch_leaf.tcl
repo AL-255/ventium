@@ -1,8 +1,11 @@
 # Matched P54 two-slot AXI master. No processor bitstream or deployment.
-if {$argc != 2} {error {usage: inspect_wbuf_dispatch_leaf.tcl inputs fresh_output}}
+if {$argc != 2 && $argc != 3} {error {usage: inspect_wbuf_dispatch_leaf.tcl inputs fresh_output ?empty|admit?}}
 if {[version -short] ne {2025.2}} {error {unexpected tool version}}
 set inputs [file normalize [lindex $argv 0]]
 set out [file normalize [lindex $argv 1]]
+set variant [expr {$argc == 3 ? [lindex $argv 2] : {empty}}]
+if {$variant ni {empty admit}} {error {unknown dispatch variant}}
+set feature [expr {$variant eq {empty} ? {VEN_P54_WBUF_EMPTY_DISPATCH} : {VEN_P54_WBUF_ADMIT_DISPATCH}}]
 if {[file exists $out]} {error {fresh output required}}
 file mkdir $out
 set_param general.maxThreads 1
@@ -11,7 +14,7 @@ puts $receipt "profile\tlut_primitives\tregisters\tsetup_slack_ns\thold_slack_ns
 foreach profile {control off on} {
     create_project -in_memory -part xczu15eg-ffvb1156-2-i wbuf_leaf
     set defs {SYNTHESIS VEN_P54_DUAL_STORE_PAIR VEN_P54_WBUF_QUAD_COMBINE VEN_P54_WBUF_PIPE_DISPATCH VEN_AXI_READ_ON_FINAL_B}
-    if {$profile eq {on}} {lappend defs VEN_P54_WBUF_EMPTY_DISPATCH}
+    if {$profile eq {on}} {lappend defs $feature}
     set_property verilog_define $defs [current_fileset]
     set source [expr {$profile eq {control} ? {control.sv} : {candidate.sv}}]
     read_verilog -sv [file join $inputs $source]
