@@ -553,3 +553,32 @@ and **896,702 store clocks (0.896702%)**, exactly the 21,075,181-clock bucket.
 These are wait exposure, not all removable cycles. Cache-backed 2.1 CM/MHz,
 0.48 gameplay IPC, generic-gate repair, complete same-source standard suite and
 FPGA deployment remain open.
+
+## Read-command forwarding and passive memory diagnosis
+
+[AXI read-command forwarding](../verif/l1/AXI_READ_THROUGH.md) now removes the
+AR-capture bubble when the existing Avalon endpoint is ready, without changing
+ARREADY, memory ownership, narrow lanes or older-write ordering. The default-off
+candidate passes **63 native runs**, including 7,803 focused transaction checks
+and the real platform L2/XPM/reset corpus. Ready reads save one clock; blocked
+reads are unchanged. The real-L2 corpus saves 31 aggregate clocks (completion
+1,128→1,097); this is not a measured CPU gain. The original randomized-reset
+fixture failures are retained and explained in the linked evidence.
+
+Full-PC native **`e9097d96`** is built, not launched or deployed. It differs from
+`f780b331` only in the bridge and its added define. The six existing cold guests
+continue; no additional guest or Vivado run was started for this bridge change.
+
+A read-only sample of unchanged baseline model `15f56054`, bracketed at
+2,293,423,334–335 and 2,305,263,998–999 clocks, finds 21.474480% L1 read-wait
+exposure during fills, 9.296953% idle-state read-wait exposure and 16.096792%
+L2 stream-state residency over 11,840,664 clocks. These views overlap and must
+not be summed. L2 word-hit counts are not transaction hit rates. There are
+26,039 L2 misses and 52,076 outer reads in this window, consistent with the
+retained double-read policy and in-flight boundary effects, not permission to
+remove that hardware workaround. Evidence and identity/pin checks:
+`external/tmp/ventium-read-prime-cache-probe.TJcVRufy/analysis.json`.
+
+Verified gameplay is still **0.44004644** (`15f56054`,
+**1,200,012,763–1,300,012,763** clocks), predating the later candidates; the
+passive cache sample is diagnostic, not a new acceptance IPC measurement.

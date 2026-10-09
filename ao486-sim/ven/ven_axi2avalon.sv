@@ -97,6 +97,30 @@ module ven_axi2avalon (
     logic         wrap_pending;  // issue the low line fragment after this command
     logic [1:0]   wr_left;       // remaining W beats in current AXI write
     logic [3:0]   rd_be_q;       // accepted AR's byte lanes, independent of idle W
+`ifdef VEN_AXI2AVL_READ_THROUGH
+    // The existing slave contract returns data at least one clock after the
+    // accepted Avalon command. Lend AR's capture edge to that command when
+    // ready; retain the original registered command if Avalon is blocked.
+    // ARREADY is deliberately unchanged and does NOT depend on waitrequest.
+    // There is still only one owner, no speculative/device read, and no
+    // combinational memory-data return or new response storage.
+    logic idle_read_offer, idle_read_accept;
+    logic [3:0] idle_read_be, idle_read_beats;
+    assign idle_read_offer = rst_n && (state == S_IDLE) &&
+                             s_axi_arvalid && s_axi_arready;
+    assign idle_read_accept = idle_read_offer && !avm_waitrequest;
+    assign idle_read_beats = (s_axi_arburst == 2'b10) ?
+                             4'd8 - {1'b0, s_axi_araddr[4:2]} :
+                             s_axi_arlen[3:0] + 4'd1;
+    always_comb begin
+        case (s_axi_arsize)
+            3'd0: idle_read_be = 4'b0001 << s_axi_araddr[1:0];
+            3'd1: idle_read_be = 4'b0011 << s_axi_araddr[1:0];
+            3'd2: idle_read_be = 4'b1111;
+            default: idle_read_be = 4'b0000;
+        endcase
+    end
+`endif
 `ifdef VEN_AXI2AVL_BPIPE
     // The CPU-facing P54 master has exactly two occupied write slots. Holding
     // at most two completed B responses lets its next ordered AW start while
@@ -163,13 +187,24 @@ module ven_axi2avalon (
 `endif
 
     // ---- Avalon command outputs (registered address, combinational strobes) -
-`ifdef VEN_AXI2AVL_WRITE_THROUGH
-    assign avm_address    = idle_write_offer ? s_axi_awaddr[31:2] : addr_q;
-`else
-    assign avm_address    = addr_q;
+    assign avm_address    =
+`ifdef VEN_AXI2AVL_READ_THROUGH
+                            idle_read_offer ? s_axi_araddr[31:2] :
 `endif
-    assign avm_burstcount = (state == S_RD_CMD) ? cmd_beats : 4'd1;
-    assign avm_read       = (state == S_RD_CMD);
+`ifdef VEN_AXI2AVL_WRITE_THROUGH
+                            idle_write_offer ? s_axi_awaddr[31:2] :
+`endif
+                            addr_q;
+    assign avm_burstcount =
+`ifdef VEN_AXI2AVL_READ_THROUGH
+                            idle_read_offer ? idle_read_beats :
+`endif
+                            (state == S_RD_CMD) ? cmd_beats : 4'd1;
+    assign avm_read       = (state == S_RD_CMD)
+`ifdef VEN_AXI2AVL_READ_THROUGH
+                            || idle_read_offer
+`endif
+                            ;
     assign avm_write      = ((state == S_WR_CMD) && s_axi_wvalid)
 `ifdef VEN_AXI2AVL_WRITE_THROUGH
                             || idle_write_offer
@@ -183,7 +218,11 @@ module ven_axi2avalon (
     // Reading extra bytes changes the VGA planar latches; reading none leaves
     // stale latches. Never let a previous/idle WSTRB shape a read command, nor
     // use live AR fields after their address handshake has completed.
-    assign avm_byteenable = ((state == S_RD_CMD) || (state == S_RD_DATA))
+    assign avm_byteenable =
+`ifdef VEN_AXI2AVL_READ_THROUGH
+                            idle_read_offer ? idle_read_be :
+`endif
+                            ((state == S_RD_CMD) || (state == S_RD_DATA))
                          ? rd_be_q : s_axi_wstrb;
     assign s_axi_wready   = ((state == S_WR_CMD)
 `ifdef VEN_AXI2AVL_WRITE_THROUGH
@@ -251,7 +290,11 @@ module ven_axi2avalon (
                             wrap_low_beats <= '0;
                             wrap_pending   <= 1'b0;
                         end
+`ifdef VEN_AXI2AVL_READ_THROUGH
+                        state  <= idle_read_accept ? S_RD_DATA : S_RD_CMD;
+`else
                         state  <= S_RD_CMD;
+`endif
                     end else if (s_axi_awvalid && s_axi_awready) begin // else write
                         id_q   <= s_axi_awid;
 `ifdef VEN_AXI2AVL_WRITE_THROUGH
@@ -327,6 +370,16 @@ module ven_axi2avalon (
     // reads or eight 4 B line beats, and 1- or 2-beat 4 B writes.
     // Flag unsupported shapes loudly rather than silently widening MMIO.
     always_ff @(posedge clk) if (rst_n) begin
+`ifdef VEN_AXI2AVL_READ_THROUGH
+        if (idle_read_offer) begin
+            assert (s_axi_arvalid && s_axi_arready && avm_read && !avm_write &&
+                    avm_address == s_axi_araddr[31:2] &&
+                    avm_burstcount == idle_read_beats && avm_byteenable == idle_read_be)
+              else $error("ven_axi2avalon: direct AR/Avalon ownership disagreed");
+            assert (!avm_readdatavalid)
+              else $error("ven_axi2avalon: backend violated registered read-response contract");
+        end
+`endif
 `ifdef VEN_AXI2AVL_WRITE_THROUGH
         assert (!(idle_write_accept && (!s_axi_awready || !s_axi_wready ||
                                         !avm_write || avm_address != s_axi_awaddr[31:2])))
