@@ -59,8 +59,16 @@ from AGI model `f780b331` is the bridge, with one added define (133 total).
 Core, FP, full P5 L1s, 32 KiB platform L2, posted16 writes and memory primitives
 are unchanged. Its private harness object uses its own generated headers;
 build/pins pass. The 98 inherited full-SoC structural warnings are unchanged,
-not a clean full-SoC lint result. This binary has **not** run the standard suite
-or been synthesized/deployed to FPGA.
+not a clean full-SoC lint result. It has not completed the standard suite or
+been synthesized/deployed to FPGA.
+
+Cold Quake/Win95 qualification is now running, with unchanged media and the
+same per-run one-CPU/2 GiB/no-swap/32-task/4 GiB-file limits. CPU28 Quake
+invocation is `fa4189beba1e4f438494237b9dfec7f0`; CPU29 Win95 invocation is
+`bd39a4aeaf774e3693c1a9b29099edcc`. The independent `admission-audit.json`
+rechecks source/runtime pins, native identities, resource bounds and zero OOM.
+`gameplay-plan.json` fixes samples12/13 and frames6/7 before gameplay. These
+are candidate qualification runs, not production acceptance.
 
 Verified gameplay remains **0.44004644 total U+V IPC**, model `15f56054`, clocks
 **1,200,012,763–1,300,012,763**, predating this optimization. This change has no

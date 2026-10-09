@@ -582,3 +582,33 @@ remove that hardware workaround. Evidence and identity/pin checks:
 Verified gameplay is still **0.44004644** (`15f56054`,
 **1,200,012,763–1,300,012,763** clocks), predating the later candidates; the
 passive cache sample is diagnostic, not a new acceptance IPC measurement.
+
+### Read-through cold qualification and desktop closure
+
+`e9097d96` has now started unchanged-media cold Quake/Win95 qualification on
+CPUs28/29, invocations `fa4189beba1e4f438494237b9dfec7f0` and
+`bd39a4aeaf774e3693c1a9b29099edcc`. Independent source/runtime/native/resource
+admission passes, including zero OOM. Both preserve the existing bounds and
+UV/system-relocated fast pipeline, fast memory paths and 40/40/80 MHz clocks.
+No guest acceptance, gameplay result or FPGA deployment exists for this model.
+
+The older `15f56054` Win95 run was gracefully stopped after viewing a clean
+Welcome desktop. Native exit0, actual child wait, EOF capture, unchanged input
+pins and successful service closure are recorded at **2,478,622,041 clocks**.
+Raw frames17 and final18 both show readable text/icons/taskbar and no visible
+error; PNG conversion preserves every RGB byte. The repeated `FCB2:2FF7`
+vector6 records match the previously documented ROM-ARPL V86 callback and the
+older code-word control, not a newly identified corruption symptom. Evidence:
+`external/tmp/ventium-win95-ud-audit.4iD1TkK7` and the closed run's `result.json`.
+Independent/human desktop acceptance remains pending: **CLOSED_UNQUALIFIED is
+not a suite pass**. Seven full-PC guests remain live, not eight.
+
+`tools/prepare_gameplay_window.py` replaces repeated private audit adapters:
+it selects predeclared periodic sample indices, preserves actual offsets,
+checks complete counter invariants/pins/native ownership, rejects missing or
+reset samples and checks frame timing brackets plus pixel-identical previews.
+Eleven unit tests pass. It deliberately leaves `gameplay_ipc=null` and does
+not grant visual, standard-suite or hardware acceptance.
+
+Verified gameplay is unchanged at **0.44004644 total U+V IPC**, `15f56054`,
+**1,200,012,763–1,300,012,763** clocks, predating all three newer candidates.
