@@ -479,6 +479,13 @@ module tb_ven_fp_top;
   task automatic arithmetic_interlock(input int kind);
     int waited;
     logic [79:0] expected;
+    logic forwarding_handoff;
+    forwarding_handoff = 1'b0;
+`ifdef VEN_FP_ARITH_FWD
+    // Only these masked, non-pop register commands may acquire the final
+    // registered result on the same edge as the older architectural commit.
+    forwarding_handoff = (kind == 0 || kind == 1);
+`endif
     issue(FX_FNINIT, 0, 0, 0, '0, 0, 0, 0);
     repeat (8) load80(FP_TWO);
     if (kind == 4) issue(FX_FLDCW, 0, 0, 0, 80'h037e, 2, 0, 0);
@@ -494,6 +501,37 @@ module tb_ven_fp_top;
     cmd_pop = (kind == 5);
     // Allow combinational decode of the new command before observing ready.
     #1;
+`ifdef VEN_FP_FXCH_QUEUE
+    if (kind == 2) begin
+      // The queue admits FXCH early, but must not execute it ahead of ADD.
+      // Acceptance is not a result: observe both architectural responses.
+      if (!cmd_ready || rsp_valid || !busy || st_flat[159:80] !== FP_TWO)
+        $fatal(1, "FXCH interlock did not expose a deferred queue admission");
+      @(posedge clk);
+      @(negedge clk); cmd_valid=0;
+      for (int response=0; response<2; response++) begin
+        waited=0;
+        while (!rsp_valid) begin
+          @(negedge clk);
+          if (++waited > 16) $fatal(1, "queued interlock response missing");
+        end
+        if (rsp_unsupported || rsp_stack_fault ||
+            st_flat[79:0] !== ((response == 0) ? FP_TWO : FP_FOUR) ||
+            st_flat[159:80] !== ((response == 0) ? FP_FOUR : FP_TWO) ||
+            ftop !== 0 || fstat !== 0 || fptag !== 0)
+          $fatal(1, "queued interlock architectural order response=%0d", response);
+        if (response == 0 && rsp_arith[79:0] !== FP_FOUR)
+          $fatal(1, "queued interlock lost older ADD value");
+        @(negedge clk);
+      end
+      repeat (3) begin
+        if (rsp_valid) $fatal(1, "queued interlock duplicate response");
+        @(negedge clk);
+      end
+      $display("FP-ARITH-INTERLOCK-OK kind=%0d queued=1",kind);
+      return;
+    end
+`endif
     if (cmd_ready) $fatal(1, "missing arithmetic interlock kind=%0d",kind);
     waited=0;
     while (!cmd_ready) begin
@@ -501,10 +539,23 @@ module tb_ven_fp_top;
       waited++;
       if (waited > 16) $fatal(1, "arithmetic interlock failed to drain");
     end
-    if (!rsp_valid || rsp_arith[79:0] !== FP_FOUR)
-      $fatal(1, "interlock released without first architectural result");
+    if (forwarding_handoff) begin
+      if (waited != 2 || rsp_valid || !alu_commit_retire ||
+          st_flat[159:80] !== FP_TWO)
+        $fatal(1, "forwarding interlock did not release at registered-result boundary");
+    end else if (!rsp_valid || rsp_arith[79:0] !== FP_FOUR)
+      $fatal(1, "interlock released without first architectural result kind=%0d", kind);
     @(posedge clk);
     @(negedge clk); cmd_valid=0;
+    if (forwarding_handoff) begin
+      if (!rsp_valid || rsp_unsupported || rsp_stack_fault ||
+          rsp_arith[79:0] !== FP_FOUR || st_flat[159:80] !== FP_FOUR)
+        $fatal(1, "forwarding handoff lost the older architectural response");
+      // Do not confuse the older response on this edge with the younger one.
+      @(negedge clk);
+      if (rsp_valid) $fatal(1, "forwarded command committed before pipeline latency");
+      $display("FP-ARITH-FORWARD-HANDOFF-OK kind=%0d", kind);
+    end
     waited=0;
     while (!rsp_valid) begin
       @(negedge clk);
@@ -688,6 +739,7 @@ module tb_ven_fp_top;
       reset_arithmetic_owners();
       independent_arithmetic_throughput(); // clean reuse after cancel/reset
 `endif
+      $display("FP-THROUGHPUT-CONTRACT-OK");
       $finish;
     end
 

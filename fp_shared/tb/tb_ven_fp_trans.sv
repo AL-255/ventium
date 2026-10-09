@@ -61,7 +61,8 @@ module tb_ven_fp_trans;
       .clk(clk), .rst_n(rst_n), .start(dut_fx_req),
       .subop(dut_fx_subop), .operand_a(dut_fx_a), .operand_b(dut_fx_b),
       .rc(dut_fx_rc), .pc(dut_fx_pc), .busy(dut_fx_busy),
-      .done(dut_fx_vld), .result(dut_fx_full_result)
+      // This sequential service consumes completed results, not lookahead.
+      .done(dut_fx_vld), .commit_next(), .result(dut_fx_full_result)
   );
 
   fpu_srt_div dut_divider (

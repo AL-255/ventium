@@ -1,9 +1,9 @@
 # Shared FP arithmetic front: same-cycle FPGA-area proposal
 
-Status: **leaf-qualified proposal, not applied to production RTL**. No Quake
+Status: **integrated-test-qualified proposal, not applied to production RTL**. No Quake
 IPC, whole-core timing or standard-suite improvement is assigned to it.
-Current verified gameplay is **0.37393282 total U+V retirement-event IPC**,
-posted16 model `3c8779f4`, cycles 1.2–2.3B; it predates this proposal.
+Current verified gameplay is **0.37576697 total U+V retirement-event IPC**,
+posted16 model `3c8779f4`, cycles 1.2–2.5B; it predates this proposal.
 
 `ven_fp_alu.fast_front` originally invokes `fx_add_s1` separately for add,
 subtract and reverse subtract. The helper contains operand alignment, sticky
@@ -83,3 +83,86 @@ Before promotion: exact-source integrated FP/architectural gates, ordinary
 differential gate (currently separately red), standard suite, and full placed/
 routed timing. Keep the current dispatch guest runs intact: they do not include
 this proposal. Do not claim area savings have raised their IPC.
+
+## Integrated FP qualification, October 9
+
+`ventium-dispatch-fp-integration.iFPahYUp` freezes the tested protected-dispatch
+parent's **165 payload files / 110 board-core defines**. Its only RTL delta is
+`fp_shared/ven_fp_alu.sv`, byte-identical to the preferred leaf above. Every
+build uses assertions, six hard structural-warning classes, and the bounded
+32-compiler profile. Full-core harnesses have private basenames and verified
+model-local generated-header dependencies:
+
+- Board-core model: `9d9d798f35267288e42923ab1778a3639a08ad844e51e6a984c802516586f58b`.
+- Full-address user-test model, only `VEN_KV260_SOC` removed:
+  `3e885dce77914185c4da75f82b964b44e3f48dd5e937375a92abeee2d7a5e3b5`.
+
+The FP suite closes with unchanged inputs in `fp-suite-r9-closed.json`:
+
+- ALU: 1,216 independent-reference checks per seed.
+- Transcendentals: 1,640 comparisons per seed, including the extreme-ratio
+  FPATAN case; no case was removed.
+- Top: smoke, independent pipeline throughput, dependent forwarding/interlocks,
+  P54 multiply initiation interval, 10,656-command mixed streams (including
+  setup), queued FXCH/stack ordering and cancellation/reset.
+- Historical architectural state/routing fixture: 101 checks per seed. It
+  replays separately tested deferred-engine results into old writeback, so it
+  is **not** an independent arithmetic or whole-core oracle.
+
+All use seeds 1, 17 and 20260830. The original ALU also passes the updated top
+fixture's five modes on all three seeds. A forwarding-disabled **diagnostic**
+control separately passes; it is not a candidate performance/standard-suite
+substitute. Native failures from earlier attempts remain available.
+
+Two stale test assumptions were repaired, not hidden by changing DUT modes:
+
+1. `VEN_SRT_ITER` deliberately replaces the unused combinational divider with
+   a zero stub. The historical FPATAN oracle called it and returned zero for
+   `atan2(3f008000000000000000,40008000000000000000)`. Both original and
+   candidate failed identically. `prepare-trans-oracle.py` creates a renamed
+   **reference-only** package without that stub, restoring the macro before
+   DUT compilation. Arithmetic expressions are unchanged. Executable guards
+   require the reference quotient `3eff8000000000000000` and verify that the
+   hardware package remains stubbed. The local C reference agrees. Three
+   generator host contracts pass.
+2. The old throughput test required dependent command admission to wait until
+   after architectural writeback, rejecting the already implemented registered
+   forwarding and queued FXCH. It now checks exact early-admission boundaries,
+   the old state before commit, **both** ordered responses, younger arithmetic
+   values, and unchanged pop/unmasked interlocks. The sequential architectural
+   oracle likewise gets its own reference-only `VEN_FP_PIPE{,2}` envelope via
+   `prepare-arch-oracle.py`; the DUT retains both defines. The tracked generator
+   reproduces the tested reference files byte-for-byte.
+
+`run-shared-fp-system.py` adds a separate **unfiltered** whole-core QEMU gate:
+streamed FADD/INT3, pending divide/queued FXCH/INT3, and streamed FADD/integer
+branch/INT3. Original/candidate × AXI latency 0/7 yield **12 full comparisons,
+13,816 architectural records**, all passing. Each case witnesses 64 overlapping
+FP bursts and 64 trap entries. The branch cases witness **62** next-cycle
+integer-branch retirements with pending FP work. Actual V retirements are
+71 (stream/branch) or 327 (FXCH); neither STEP nor pairing suppression is used.
+All PCs, intermediate-U states, integer/x87/CR fields are compared through the
+ordinary comparator; no terminal record or retirement-group interior is cut.
+This covers INT3, **not arbitrary-arrival hardware IRQ/NMI/SMI**. Exact closure:
+`full-system-ab-r3/result.json`; all source/model pins unchanged.
+
+```sh
+TMPDIR=/home/yukidama/external/tmp PYTHONDONTWRITEBYTECODE=1 \
+  python3 -B verif/fppipe/run-shared-fp-system.py \
+  --control /absolute/dispatch-parent/tb_ventium \
+  --candidate /absolute/shared-add-candidate/tb_ventium \
+  --out /home/yukidama/external/tmp/new-shared-fp-system-run
+```
+
+These results do not close the generic differential/timing bands, standard
+suite, full-board synthesis/route or gameplay target. None of the live cold
+guest or full CoreMark runs was restarted or changed to this FP derivative.
+
+The independent 19-fixture system matrix also closes **76/76 PASS** (both
+models, AXI latency 0/7; `system-matrix/result.json`), pins unchanged. The
+unmodified full-address generic gate closes **FAIL**, native make exit 2,
+148.2 seconds: seven functional passes, 101 length-only mismatches and the
+existing cycle-band failures. This matches the dispatch parent; it is not a
+green differential gate. `generic-user-r2-closed.json` records stable inputs.
+Its first service attempt lacked Verilator in PATH and failed before the
+generic corpus; that failure remains separate from the completed retry.
