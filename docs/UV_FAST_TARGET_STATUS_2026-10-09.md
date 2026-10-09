@@ -768,3 +768,37 @@ Verified gameplay is still **0.44183623 total U+V IPC**, `652de481`, clocks
 **1,200,000,000–1,300,000,000**. All later candidates remain unmeasured;
 ≥0.48, current cache/DDR-backed CoreMark qualification, standard-suite closure
 and deployment remain open. Existing cold UV-fast guests continue unchanged.
+
+## Current full CoreMark validation and measured marginal cache change
+
+The WBUF admission-handoff extension is now leaf-qualified: 120 positive runs,
+three old empty-dispatch failures and three additional handoff-negative
+witnesses. The isolated enabled master uses654CLB LUTs/467registers; setup-only
+leaf estimate301.84MHz, still failing hold and **not CPU Fmax/sign-off**.
+Both short AXI CoreMark seeds improve about0.43% versus the original current
+master. See [the full evidence](../verif/l1/WBUF_ADMIT_DISPATCH.md).
+
+The full-address current model **`b5453f16`** is running both **1,400-iteration**
+standard seeds on CPUs2/3, each capped at3,600seconds. The unchanged pinned
+QEMU/ELF produced reference-checked ordinary entry images, final CRCs5275/f9c3.
+The 1,500-iteration projection exceeded the cap; no time limit or correctness,
+minimum-duration, guest-clock or scoring check was weakened. Current-rate
+launch projections are3379.6/3370.5seconds; projections are not scores.
+Evidence: `ventium-current-coremark-host-r2.3ixLJTn1/full1400-r3`, invocation
+`2ea5a68a3a0148d9bb4df1655e85309b`. Its
+[host-only optimization](../verif/tb/INACTIVE_L1_SETTLE.md) passed byte-exact
+same-model final-state/RAM comparisons and 15 negative native controls. It
+saves host evaluation time, **zero guest clocks**. Full results remain pending.
+
+Separately, the already-tested resident-D priming during I-fill change was
+retested on the current WBUF stack (`d6d85104`). All nine leaf runs and both
+short CoreMark seeds pass, but each seed saves just118AXI clocks (~0.0023%).
+Direct controls are identical. No meaningful target progress or full-PC
+promotion is claimed. The unchanged generic gate remains red; all108 complete
+same-input parent traces match. See [integration evidence](../verif/l1/PRIME_UNDER_IFILL.md).
+
+Current verified gameplay is **0.44183623 total U+V IPC**, `652de481`, clocks
+**1,200,000,000–1,300,000,000**. Newer scalar-load/ref/AGI, read-through, L2 and
+WBUF candidates remain unmeasured. Both targets still require qualification on
+the accepted current implementation; the older full direct-memory scores
+2.107861982/2.110913372 (`cb4b2f84`) do not establish current FPGA/cache throughput.

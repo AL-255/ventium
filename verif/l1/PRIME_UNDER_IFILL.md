@@ -87,3 +87,36 @@ python3 -B verif/l1/run_prime_under_ifill.py \
 The profile file is one `VEN_*` macro per line, without the new flag. The runner
 adds it only to the candidate and builds all three variants with 32 jobs.
 Keep CoreMark/full-PC service CPUs and their SMT siblings out of build affinity.
+
+## Current-stack integration check (October 9, later)
+
+Retested atop the WBUF admission-handoff model, without changing the core or
+any other RTL. Root: `external/tmp/ventium-current-prime-ifill-r2.QNLjtZqp`.
+Model **`d6d85104401ab79926da629fe8d0a476f11f8672b66461b40ce82e37c10dc37c`**.
+All nine leaf runs pass (three reset seeds for parent, disabled and enabled);
+each retains 150 memory-chain requests, 51 code-word checks, 659 D/I overlap
+checks and 661 prime checks. The enabled variant has 640 first-demand-clock
+prime completions per run; disabled controls have zero.
+
+Both short CoreMark seeds retain all five CRCs, exact retirement counts and
+unchanged direct-memory clocks. AXI clocks improve only **5,241,779→5,241,661**
+and **5,235,258→5,235,140**: 118 clocks each, about **0.0023%**, not a useful
+CoreMark target gain. These are not score-eligible duration runs. Native exit0,
+zero OOM/swap, all children reaped; short-run service invocation
+`a5fe63929b5941ce9973584a846e1368` closed successfully.
+
+The unchanged generic gate still fails: 101 terminal-length comparisons and
+the existing four hard cycle bands. Fresh same-input replay matches all108
+complete parent architectural traces. That parity is not a generic-gate pass.
+No full-PC promotion, physical result or deployment is claimed for this variant.
+
+Failed preparation attempts remain: the first rejected mixed compiler options
+in the macro-list field; the next completed its leaf suite but its nested build
+wrapper waited on its own inherited lock after Python closed that descriptor.
+Only those waiting wrapper processes were terminated. `build_r3.py` reuses the
+unchanged leaf-qualified sources through one actual shared build-scope owner;
+the fresh build and its private header/object ownership checks pass.
+
+Latest verified gameplay remains **0.44183623 total U+V IPC**, `652de481`,
+clocks **1,200,000,000–1,300,000,000**, predating this integration candidate.
+The ≥0.48 target and this candidate's gameplay qualification remain open.
