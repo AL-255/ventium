@@ -3788,6 +3788,25 @@ netlists, but **not deployed, full-system accepted or full-core timing-qualified
 The standalone mapping and simulator procedures and their limits are recorded
 in [the current candidate log](docs/UV_FAST_BANK64_2026-10-08.md).
 
+**Posted-image cold startup must drain before modifying RAM.** Guest reset
+does not cancel the bridge's outstanding writes. Do not use the old daemon's
+reset-then-immediate-zero path on this image. Apply
+`fpga/patches/ao486d-posted-reset-drain.patch` with `--fuzz=0` to an isolated copy
+of the Device-safe daemon source (SHA
+`1b9486c52438dc255903420b9ed0b05961c4f74f869204f84809081d2505f3c9`), and copy
+`fpga/board-tools/ven_posted_reset_guard.h` beside `src/board_shim.cpp`.
+Preserve its exact PS backend and scalar Device-memory implementation.
+The guard requires CTRL=1 and two clean scan-79 drained samples separated by
+1 ms, bounded to 1,000 polls. Unsupported image, sticky AXI fault, timeout,
+interrupted wait or detected reset/selector interference refuses startup before
+RAM initialization. Keep all other reset/scan writers stopped throughout cold
+initialization; readback checks are not an interprocess lock.
+
+The derivative binary and its 25 helper / 144 daemon host checks are pinned in
+the candidate log linked above; they are **not yet hardware qualification**.
+The guard is mandatory for this candidate's cold path, not a runtime performance
+fallback. It does not flush caches, discard queued writes or repair guest state.
+
 The auxiliary ring is **not generically an AXI read-beat ring or a per-cycle
 waveform** in the frozen 2026-10-04 deployed source. Its exact valid predicate is
 `core_req & core_we & core_ack & (core_addr[23:12] == 12'h0B8)`: accepted stores

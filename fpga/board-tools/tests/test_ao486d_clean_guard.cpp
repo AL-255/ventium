@@ -21,6 +21,10 @@
 #define NOINST __attribute__((no_instrument_function))
 static bool track_calls = false;
 static unsigned hold_calls, release_calls, flush_calls, mmio_reads, mmio_writes;
+#ifdef VEN_TEST_POSTED_DRAIN
+static unsigned guest_writes, drain_sleeps, drain_busy_samples;
+static bool drain_sleep_fails, drain_releases_reset, drain_steals_selector;
+#endif
 extern "C" void NOINST __cyg_profile_func_enter(void *fn, void *) {
     if (!track_calls) return;
     if (fn == reinterpret_cast<void *>(&core_hold_reset)) ++hold_calls;
@@ -28,6 +32,10 @@ extern "C" void NOINST __cyg_profile_func_enter(void *fn, void *) {
     if (fn == reinterpret_cast<void *>(&ven_flush_toggle)) ++flush_calls;
     if (fn == reinterpret_cast<void *>(&reg_rd)) ++mmio_reads;
     if (fn == reinterpret_cast<void *>(&reg_wr)) ++mmio_writes;
+#ifdef VEN_TEST_POSTED_DRAIN
+    if (fn == reinterpret_cast<void *>(&ddr_store8) ||
+        fn == reinterpret_cast<void *>(&ddr_store64_aligned)) ++guest_writes;
+#endif
 }
 extern "C" void NOINST __cyg_profile_func_exit(void *, void *) {}
 
@@ -211,7 +219,21 @@ void *__wrap_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t 
     }
     unexpected("mmap unknown aperture"); return MAP_FAILED;
 }
-int __wrap_usleep(useconds_t) {
+int __wrap_usleep(useconds_t delay) {
+#ifdef VEN_TEST_POSTED_DRAIN
+    if (control[R_CTRL / 4] == CTRL_CORE_RESET && control[ven_posted::selector / 4] == 79) {
+        check(delay == 1000, "one-millisecond drain poll");
+        check(++drain_sleeps <= 1000, "drain timeout remains bounded");
+        if (drain_releases_reset) control[R_CTRL / 4] = CTRL_RUN | CTRL_IRQ_EN;
+        if (drain_steals_selector) control[ven_posted::selector / 4] = 42;
+        if (drain_sleep_fails) { errno = EINTR; return -1; }
+        if (drain_busy_samples && drain_sleeps > drain_busy_samples)
+            control[ven_posted::data / 4] = 0x50440003;
+        return 0;
+    }
+#else
+    (void)delay;
+#endif
     check(++fx.sleeps <= 2, "cold/attach loop must remain bounded by test freeze");
     return 0;
 }
@@ -257,6 +279,18 @@ void x86_init() {
         if (!FileOpen(&f, fx.paths[kind].c_str())) continue;
         unsigned offset = kind == 1 ? 0xf0000 : 0xc0000;
         uint32_t address = rom_fault(kind, Fault::MapBounds) ? SHMEM_ADDR + DDR_SIZE - 1 : SHMEM_ADDR + offset;
+#ifdef VEN_TEST_POSTED_DRAIN
+        // The Device-safe backend loads ROMs into ordinary process RAM first;
+        // raw shmem_map is deliberately closed. Reproduce that callback order.
+        std::vector<uint8_t> bounce(static_cast<size_t>(f.size));
+        int got = FileReadAdv(&f, bounce.data(), static_cast<int>(f.size));
+        if (got == static_cast<int>(f.size)) shmem_put(address, static_cast<uint32_t>(f.size), bounce.data());
+        if (rom_fault(kind, Fault::ShortRetry)) {
+            check(FileSeek(&f, 0, SEEK_SET) == 1, "ROM retry seek");
+            got = FileReadAdv(&f, bounce.data(), static_cast<int>(f.size));
+            if (got == static_cast<int>(f.size)) shmem_put(address, static_cast<uint32_t>(f.size), bounce.data());
+        }
+#else
         void *dest = shmem_map(address, static_cast<uint32_t>(f.size));
         if (!dest) { FileClose(&f); continue; }
         memset(dest, 0, static_cast<size_t>(f.size));
@@ -265,6 +299,7 @@ void x86_init() {
             check(FileSeek(&f, 0, SEEK_SET) == 1, "ROM retry seek");
             FileReadAdv(&f, dest, static_cast<int>(f.size));
         }
+#endif
         FileClose(&f);
     }
     // Deliberate mismatch: an active LED-sync/BDA hack would rewrite 0x497.
@@ -296,6 +331,12 @@ static void reset_case() {
         fx.stats[i].st_mtim.tv_sec = 1; fx.stats[i].st_ctim.tv_sec = 2;
     }
     memset(control, 0, sizeof(control));
+#ifdef VEN_TEST_POSTED_DRAIN
+    control[ven_posted::selector / 4] = 17;
+    control[ven_posted::data / 4] = 0x50440003;
+    guest_writes = drain_sleeps = drain_busy_samples = 0;
+    drain_sleep_fails = drain_releases_reset = drain_steals_selector = false;
+#endif
     regs = nullptr; ddr = nullptr; memfd = -1; DDR_BASE = DDR_BASE_DEFAULT;
     g_startup_rom_phase = false; g_startup_rom_error = false;
     memset(g_rom_loaded, 0, sizeof(g_rom_loaded));
@@ -347,10 +388,16 @@ int main() {
     check(guest != nullptr, "one reusable 256MiB fake DDR allocation");
     // Shared-memory callbacks: actual copied helper, no unbounded pointer/copy.
     reset_case(); ddr = guest;
+#ifdef VEN_TEST_POSTED_DRAIN
+    check(!shmem_map(SHMEM_ADDR, 1) && !shmem_map(SHMEM_ADDR + DDR_SIZE - 1, 1) &&
+          !shmem_map(SHMEM_ADDR, DDR_SIZE) && !shmem_map(SHMEM_ADDR + DDR_SIZE, 0),
+          "Device-safe profile never exports raw DDR pointers");
+#else
     check(shmem_map(SHMEM_ADDR, 1) == guest, "shmem lower boundary");
     check(shmem_map(SHMEM_ADDR + DDR_SIZE - 1, 1) == guest + DDR_SIZE - 1, "shmem final byte");
     check(shmem_map(SHMEM_ADDR, DDR_SIZE) == guest, "shmem whole exact extent");
     check(shmem_map(SHMEM_ADDR + DDR_SIZE, 0) == guest + DDR_SIZE, "shmem zero-size one-past");
+#endif
     check(shmem_get(SHMEM_ADDR + DDR_SIZE, 0, nullptr) && shmem_put(SHMEM_ADDR + DDR_SIZE, 0, nullptr), "zero-size null buffers do not copy");
     uint8_t value = 0xa5, output = 0;
     check(shmem_put(SHMEM_ADDR, 1, &value) && shmem_get(SHMEM_ADDR, 1, &output) && output == value, "valid lower transfer");
@@ -465,6 +512,31 @@ int main() {
         }
     }
     reset_case(); expect_cold(0, true, true);
+#ifdef VEN_TEST_POSTED_DRAIN
+    check(drain_sleeps == 2 && guest_writes > 0 && control[ven_posted::selector/4] == 17,
+          "successful cold initialization follows two drain samples and restores selector");
+    for (uint32_t status : {0u,0x50440001u,0x50440006u,0x50440007u,0x50440002u}) {
+        reset_case(); control[ven_posted::data / 4] = status;
+        guest[0] = 0xab; guest[DDR_SIZE-1] = 0xcd;
+        expect_cold(1, true, false);
+        check(guest_writes == 0 && !g_rom_loaded[0] && !g_rom_loaded[1] &&
+              guest[0] == 0xab && guest[DDR_SIZE-1] == 0xcd,
+              "guard failure precedes every guest scalar write and ROM load");
+        check(control[ven_posted::selector/4] == 17, "failure restores owned selector");
+        check(drain_sleeps == (status == 0x50440002 ? 1000u : 1u), "fault versus timeout bound");
+    }
+    for (unsigned fault=0; fault<3; ++fault) {
+        reset_case();
+        drain_sleep_fails = fault == 0; drain_releases_reset = fault == 1; drain_steals_selector = fault == 2;
+        check(invoke(cold_args()) == 1 && hold_calls == 1 && !release_calls && !guest_writes,
+              "sleep/control interference refuses before initialization or release");
+        check(control[ven_posted::selector/4] == (fault == 2 ? 42u : 17u),
+              "do not overwrite competing selector owner");
+    }
+    reset_case(); drain_busy_samples = 5; control[ven_posted::data/4] = 0x50440002;
+    expect_cold(0, true, true);
+    check(drain_sleeps == 7 && guest_writes > 0, "busy DDR drains before normal cold initialization");
+#endif
     check(!fx.streams.size() && !fx.fds.size(), "final fake input closure");
     free(guest);
     printf("CLEAN-GUARD-MICROCHECK-OK: %u cases; real guards/CLI/ROM callbacks; fake I/O only\n", tests);

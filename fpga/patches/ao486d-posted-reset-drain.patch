@@ -1,0 +1,28 @@
+--- a/src/board_shim.cpp
++++ b/src/board_shim.cpp
+@@ -19,6 +19,7 @@
+ #include <ctype.h>
+ #include <sys/stat.h>
+ #include <sys/mman.h>
++#include "ven_posted_reset_guard.h"
+ 
+ #include "spi.h"
+ #include "fpga_io.h"
+@@ -1031,6 +1032,17 @@
+ 
+     core_hold_reset();
+     dump_dbg("held");
++    // Guest reset does not cancel AXI writes already posted to the DDR bridge.
++    // This candidate daemon intentionally refuses older/non-posted images.
++    const auto drained = ven_posted::wait_for_reset_drain(
++        [](uint32_t off) { return reg_rd(off); },
++        [](uint32_t off, uint32_t value) { reg_wr(off, value); },
++        []() { return usleep(1000) == 0; });
++    fprintf(stderr, "cold posted-DDR guard: %s\n", ven_posted::message(drained));
++    if (drained != ven_posted::DrainResult::ready) {
++        fprintf(stderr, "cold startup refused before guest RAM initialization\n");
++        return 1;
++    }
+     // Zero guest RAM to match the cosim's calloc'd ddr[]. The CMA carveout is UNINITIALIZED
+     // garbage; the BIOS reads low-memory flags early (e.g. the warm-boot flag @0x472) before the
+     // POST memory test, and garbage there sends it down the warm-boot path -> jump through a
