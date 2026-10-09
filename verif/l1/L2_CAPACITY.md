@@ -18,6 +18,28 @@ the exact same frames/counters/0.43894030IPC. Its prior observer version remains
 recoverable from git133904ad and matches that receipt's tool hash. Original
 candidate source, plan, guest, counters and runtime pins are not modified.
 
+### Passive diagnostic before the fixed window
+
+`ventium-l2-gameplay.VedZVnwA/counter-interval.json` covers12,871,327clocks
+around1.168–1.181B. Endpoint sampling skew is4/3clocks, so this is **not** an
+atomic or gameplay-acceptance interval. The unchanged model reports18.23%
+L1-read wait during fill,8.31% idle-read wait,15.82% backing-fill wait and13.14%
+platform-L2 streaming residency. There are105,851L1 miss starts,23,074L2 misses,
+46,148outer read addresses and369,184beats. The last two retain the deliberate
+two-eight-beat-read policy. Families overlap and are not additive removable
+stalls; this is not an equal-work comparison with an earlier model.
+
+The original passive reader failed closed: its single303,072-byte memory copy
+included intervening cache arrays, and all1,000retry samples disagreed on the
+core clock partition (one observed pair was1,160,123,967clocks versus a state
+sum of1,160,123,969). Clock-boundary native log partitions still reconciled.
+The reader now coalesces only nearby counter fields: **19,352bytes in five
+ranges**,93.6%less copied data. No clock-skew or counter invariant was relaxed,
+no failed sample was published, and no pause/signal/guest-memory write was used.
+The two valid samples required13/105attempts. Nine host tests pass, including
+a real native-child negative that rejects all1,000inconsistent samples and
+leaves no output. This is an observer efficiency fix, not a CPU IPC gain.
+
 ## Intended change
 
 The current ao486 platform cache has only 128 sets: **32 KiB, four ways,

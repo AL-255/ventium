@@ -13,6 +13,7 @@ that explicitly recorded bracket (at most 16 clocks); this is not an atomic
 state dump. Use clock-boundary logs and rendered frames for official IPC.
 """
 import argparse
+from collections import Counter
 import hashlib
 import json
 import os
@@ -160,6 +161,28 @@ def decode(blob, first, fields):
     return result
 
 
+def counter_ranges(fields):
+    """Avoid copying cache arrays that happen to lie between counter members.
+
+    Coalesce only adjacent/nearby counters (at most64 padding bytes). There
+    is still no atomicity promise: every invariant and clock-skew bound must
+    pass after all ranges have been read.
+    """
+    ranges = []
+    previous_end = -1
+    for name, field in sorted(fields.items(), key=lambda pair: pair[1]['offset']):
+        first, last = field['offset'], field['offset'] + field['count'] * 8
+        if first < previous_end:
+            raise ValueError('overlapping counter fields')
+        previous_end = last
+        if ranges and first - ranges[-1][1] <= 64:
+            ranges[-1][1] = last
+            ranges[-1][2][name] = field
+        else:
+            ranges.append([first, last, {name: field}])
+    return ranges
+
+
 def validate(counters):
     clocks = counters['pp_cycles']
     if sum(counters['pp_state']) != clocks:
@@ -212,8 +235,7 @@ def sample(args):
         raise ValueError('missing/ambiguous native load mapping')
     bias = int(mapped[0][0].split('-')[0], 16) if layout['elf_type'] == 3 else 0
     fields = layout['fields']
-    first = min(f['offset'] for f in fields.values())
-    last = max(f['offset'] + 8*f['count'] for f in fields.values())
+    ranges = counter_ranges(fields)
     ptr = lambda fd, address: struct.unpack('<Q', read_exact(fd, 8, address))[0]
     fd = os.open(f'/proc/{pid}/mem', os.O_RDONLY)
     try:
@@ -221,9 +243,13 @@ def sample(args):
         root = ptr(fd, top + layout['rootp_offset'])
         if not top or not root:
             raise ValueError('uninitialized native model')
+        rejected = Counter()
+        last_partition = None
         for attempt in range(1000):
             cycle_a = ptr(fd, bias + layout['symbols']['main_time'])
-            raw_a = read_exact(fd, last-first, root+first)
+            a = {}
+            for first, last, selected in ranges:
+                a.update(decode(read_exact(fd, last-first, root+first), first, selected))
             board_fields = layout.get('board_fields', {})
             if board_fields:
                 board_first = min(board_fields.values()); board_last = max(board_fields.values()) + 8
@@ -231,17 +257,21 @@ def sample(args):
                                       bias+layout['symbols']['board_memory']+board_first)
             cycle_b = ptr(fd, bias + layout['symbols']['main_time'])
             if not 0 <= cycle_b - cycle_a <= 16:
+                rejected['clock bracket exceeds 16 clocks'] += 1
                 continue
-            a = decode(raw_a, first, fields)
             a.update({k:struct.unpack_from('<Q', raw_board, offset-board_first)[0]
                       for k,offset in board_fields.items()})
             try:
                 validate(a)
-            except ValueError:
+            except ValueError as error:
+                rejected[str(error)] += 1
+                last_partition = dict(clocks=a['pp_cycles'], state_sum=sum(a['pp_state']))
                 continue
             break
         else:
-            raise ValueError('no consistent passive sample; process was not stopped')
+            raise ValueError('no consistent passive sample; process was not stopped; '
+                             'rejections=' + json.dumps(rejected, sort_keys=True) +
+                             '; last unqualified partition=' + json.dumps(last_partition))
         if identity(pid, binary) != start:
             raise ValueError('process identity changed during read')
     finally:
@@ -251,6 +281,7 @@ def sample(args):
                   main_time_bracket=[cycle_a, cycle_b], maximum_skew_clocks=cycle_b-cycle_a,
                   model_sha256=layout['binary_sha256'], attempts=attempt+1,
                   layout_sha256=sha(args.layout), counters=a,
+                  counter_ranges_read=len(ranges), counter_bytes_read=sum(b-a for a,b,_ in ranges),
                   reader_sha256=sha(__file__),
                   caveat='Passive async sampling; families may differ within clock bracket. Not gameplay acceptance.')
     with args.out.open('x') as stream:

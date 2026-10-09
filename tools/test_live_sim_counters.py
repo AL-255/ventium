@@ -100,6 +100,19 @@ class Tests(unittest.TestCase):
             os.close(wr)
             self.assertEqual(os.waitpid(pid, 0)[1], 0)
 
+    def test_ranges_skip_large_cache_holes_without_dropping_counters(self):
+        fields = {name:dict(offset=off,count=count,array=count>1) for name,off,count in (
+            ('pp_cycles',8,1),('pp_ret1',24,1),('pp_state',600000,64))}
+        ranges=live.counter_ranges(fields)
+        self.assertEqual([(a,b) for a,b,_ in ranges],[(8,32),(600000,600512)])
+        self.assertEqual({name for _,_,selected in ranges for name in selected},set(fields))
+        self.assertEqual(sum(b-a for a,b,_ in ranges),536)
+
+    def test_overlapping_counter_ranges_refused(self):
+        fields = {'pp_cycles':dict(offset=8,count=1,array=False),
+                  'pp_state':dict(offset=8,count=2,array=True)}
+        with self.assertRaisesRegex(ValueError,'overlapping'):live.counter_ranges(fields)
+
     def test_short_read(self):
         fd = os.open('/dev/null', os.O_RDONLY)
         try:
@@ -131,8 +144,9 @@ class Tests(unittest.TestCase):
                 'struct AxiMemory { uint64_t aw_count=0,w_count=0,b_count=0,ar_count=0,r_count=0; }; }\n')
             (obj / 'Vsystem.mk').write_text('VERILATOR_ROOT = /usr\n')
             (obj / 'fixture.cpp').write_text('#include "Vsystem.h"\n#include "board_axi_memory.h"\n#include <cstdio>\n'
-                'static ven_board::AxiMemory board_memory;\nVsystem* top;\nstatic uint64_t main_time;\nint main() {\n'
+                'static ven_board::AxiMemory board_memory;\nVsystem* top;\nstatic uint64_t main_time;\nint main(int argc,char**) {\n'
                 'Vsystem___024root root{100,40,20,{70,30}}; Vsystem model{&root};\n'
+                f'if(argc>1) root.{live.CORE}pp_state[0]++;\n'
                 'board_memory.aw_count=board_memory.w_count=board_memory.b_count=2;\n'
                 'board_memory.ar_count=3; board_memory.r_count=24;\n'
                 'top=&model; main_time=101; puts("ready"); fflush(stdout); getchar(); return 0; }\n')
@@ -154,6 +168,19 @@ class Tests(unittest.TestCase):
                 self.assertEqual(result['maximum_skew_clocks'], 0)
                 self.assertFalse(result['signals_sent'])
                 self.assertFalse(result['memory_writes'])
+                self.assertEqual(result['counter_bytes_read'],40)
+                self.assertEqual(result['counter_ranges_read'],1)
+                bad = subprocess.Popen([str(binary),'bad-state'],stdin=subprocess.PIPE,stdout=subprocess.PIPE)
+                try:
+                    self.assertEqual(bad.stdout.readline(),b'ready\n')
+                    bad_args=SimpleNamespace(layout=args.layout,pid=bad.pid,out=root/'rejected.json')
+                    with self.assertRaisesRegex(ValueError,r'torn core state partition.*1000'):
+                        live.sample(bad_args)
+                    self.assertFalse(bad_args.out.exists())
+                finally:
+                    bad.stdin.close()
+                    self.assertEqual(bad.wait(timeout=5),0)
+                    bad.stdout.close()
                 # Missing generated-header ownership and stale binaries must
                 # fail before touching process memory.
                 (obj/'Vsystem.h').write_text('// input drift\n')
