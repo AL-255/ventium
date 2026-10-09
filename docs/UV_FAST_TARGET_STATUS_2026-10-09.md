@@ -737,3 +737,34 @@ signed contributions, so this is not a universal miss-rate estimate. L1 reports
 6,511 miss starts and zero uncached bypasses. Evidence:
 `ventium-agi-prime.Fn1fJVfX/coremark-r1/{closed.json,performance-axi/run.log}`.
 These are existing ten-iteration diagnostics, **not a new valid CoreMark score**.
+
+## Write-buffer dispatch: measured small gain, not target closure
+
+The [registered empty-queue dispatch prototype](../verif/l1/WBUF_EMPTY_DISPATCH.md)
+removes one launch bubble without increasing the two-entry P54 write buffer.
+Its 39-profile leaf matrix passes 120 positive runs and three expected negative
+witnesses. Full-core `f75ccf1d` passes both short CoreMark seeds/all CRCs:
+AXI clocks **5,264,309→5,245,654** and **5,257,586→5,239,192**, roughly0.35%
+fewer clocks. Direct-memory controls, retirement counts and cache miss counts
+are unchanged. These are ten-iteration diagnostics, not ≥2.1 score acceptance.
+
+The unchanged generic gate remains red with 101 terminal-length mismatches
+and four cycle-band failures. Same-input parent replay is architecturally
+identical for all108 traces; that is not a gate pass. The isolated hardware
+cost is +135CLB LUTs/no extra registers; setup-only leaf frequency falls
+359.71→240.10MHz, both failing isolated hold. No CPU timing sign-off follows.
+This candidate is not promoted/deployed.
+
+Observation-only model `2527ec8f` reproduces all four CoreMark runs exactly.
+Remaining performance-seed store waits predominantly occur with both P54
+slots occupied: 48,322 clocks awaiting W acceptance and 60,108 awaiting
+dispatch/final issue; no delayed-B head wait is counted. The standalone slave
+serializes AW/W, unlike the platform's enabled write-through bridge. These
+numbers are not an FPGA DDR-latency measurement or cache-miss percentage.
+The extended same-edge admission/issue handoff is under separate testing;
+its byte-lane aligner is shared rather than duplicated.
+
+Verified gameplay is still **0.44183623 total U+V IPC**, `652de481`, clocks
+**1,200,000,000–1,300,000,000**. All later candidates remain unmeasured;
+≥0.48, current cache/DDR-backed CoreMark qualification, standard-suite closure
+and deployment remain open. Existing cold UV-fast guests continue unchanged.
