@@ -8,6 +8,12 @@ Current full direct-memory CoreMark
 scores are **2.107843209 / 2.110905243 CM/MHz** on the separate `b5453f16` model;
 they are not FPGA/cache/DDR scores.
 
+Subsequent directed testing found [SRT C1 and reduced-precision exponent
+defects](../fp_shared/tb/SRT_ROUND_FLOOR.md) in that unchanged FP source.
+The value-repair proposal is private and has no gameplay/FPGA acceptance;
+the active synthesis remains the exact frozen bundle below. Do not treat
+successful synthesis as closing either correctness defect.
+
 ## Frozen inputs
 
 `external/tmp/ventium-performance-fpga40.im8cm8YD` contains **186 payloads**,

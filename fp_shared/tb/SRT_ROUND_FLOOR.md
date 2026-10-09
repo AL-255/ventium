@@ -69,8 +69,19 @@ file consists of912 whitespace-separated hex rows:
 Require each stored native value to equal QEMU before exporting that row.
 The gate requires all912 candidate values, exactly four original failures,
 unchanged completion clocks and OE/UE/PE, and reset cancellation. It is **not
-yet compiled/run**; use the common bounded build guard after Vivado releases
-the shared lock. Broaden power-of-two neighborhoods and underflow/overflow
+yet successfully compiled/run**. Private sources/vectors and `run_leaf.py` are
+prepared in `external/tmp/ventium-srt-floor-leaf.vNu0mw59`; source and vector
+hashes are checked before/after. A lightweight Icarus attempt closed with
+native exit50 because that compiler lacks the actual source's SystemVerilog
+`break`/automatic-lifetime support (log retained); no RTL was rewritten to
+work around its compiler limitations.
+
+The real Verilator leaf is queued as `ventium-srt-floor-queued-oct09.service`,
+invocation`4637d40d8cbe4d53954b1a6fa7952a81`. It waits for Vivado to release
+the shared build lock, then gets the normal4GiB/one-job scope and a600-second
+build/run bound. It cannot start a concurrent hardware build or change frozen
+FPGA inputs. `closed.json` must actually pass; queue admission is not evidence
+of a repair. Broaden power-of-two neighborhoods and underflow/overflow
 before promotion, then rerun full-core differential and standard suites.
 
 The numeric patch does **not** fix C1. C1 must travel with the real final rounding
