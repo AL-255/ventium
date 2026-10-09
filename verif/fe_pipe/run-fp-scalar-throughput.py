@@ -38,7 +38,7 @@ def main():
     for name in ('control', 'candidate', 'out'):
         parser.add_argument('--' + name, type=Path, required=True)
     parser.add_argument('--smoke', action='store_true')
-    parser.add_argument('--feature', choices=('short-window', 'scalar-dispatch'), default='scalar-dispatch')
+    parser.add_argument('--feature', choices=('short-window', 'scalar-dispatch', 'scalar-load-cmd'), default='scalar-dispatch')
     args = parser.parse_args()
     scratch = Path('/home/yukidama/external/tmp').resolve(strict=True)
     assert __debug__ and Path(os.environ['TMPDIR']).resolve() == scratch
@@ -56,7 +56,8 @@ def main():
                 'VEN_FP_LOAD_EARLY_CMD', 'VEN_FP_OPERAND_OVERLAP'} <= profiles[name]
         assert not {'VEN_UOPCACHE', 'VTM_NO_DPI', 'SYNTHESIS', 'VEN_SYS_FASTPATH_ALL'} & profiles[name]
         pins.update({str(p): sha(p) for p in (tb, stamp)})
-    added = 'VEN_FP_SHORT_WINDOW' if args.feature == 'short-window' else 'VEN_FP_SCALAR_DISPATCH'
+    added = {'short-window': 'VEN_FP_SHORT_WINDOW', 'scalar-dispatch': 'VEN_FP_SCALAR_DISPATCH',
+             'scalar-load-cmd': 'VEN_FP_SCALAR_LOAD_CMD'}[args.feature]
     assert profiles['candidate'] == profiles['control'] | {added}
     assert added not in profiles['control']
     if args.feature == 'scalar-dispatch':
@@ -89,6 +90,7 @@ def main():
         obj, elf, image = [leaf / ('fixture.' + ext) for ext in ('o', 'elf', 'bin')]
         run(['gcc', '-m32', '-ffreestanding', '-nostdlib', '-fno-pic', '-fno-pie',
              f'-DKIND={kind}', f'-DPOP_KIND={pop}', f'-DRELOC={reloc}', f'-DOFFSET={offset}',
+             *(['-DAPPLY_CONTROL_WORD=1'] if args.feature == 'scalar-load-cmd' else []),
              f'-DCONTROL_WORD={cw}', '-c', source, '-o', obj], leaf, 'assemble')
         run(['gcc', '-m32', '-static', '-no-pie', '-nostdlib', '-Wl,-T,' + str(linker),
              '-Wl,--build-id=none', obj, '-o', elf], leaf, 'link')
@@ -116,11 +118,13 @@ def main():
         traces = {}
         short_captures = 0
         scalar_dispatches = 0
+        load_commands = 0
         total_clocks = 0
         for mode in ('cycle-func', 'cycle'):
             stem = f'{name}-l{latency}-{mode}'
             path = leaf / (stem + '.vtrace')
-            text = run([models[name], '+ven_fetchdbg', '--system', '--cosim', '--x87', '--' + mode, '--l1-axi',
+            extra_log = ['+ven_fpdirectlog'] if args.feature == 'scalar-load-cmd' else []
+            text = run([models[name], '+ven_fetchdbg', *extra_log, '--system', '--cosim', '--x87', '--' + mode, '--l1-axi',
                         '--image', image, '--out', path, '--max-insn', '5000', '--max-cycles', '3000000',
                         '--quiesce', '200000'], leaf, stem, 133, latency)
             trace = tracefmt.read_trace(str(path))
@@ -135,6 +139,8 @@ def main():
                                            f'{symbols["hot_loop"]:08x}' + ' ', text))
             scalar_dispatches += len(re.findall(r'\[FETCHDBG:FP-SDISPATCH\] eip=' +
                                                f'{symbols["hot_loop"]:08x}' + ' ', text))
+            load_commands += len(re.findall(r'\[FPLOADCMD\] ACCEPT cyc=\d+ pc=' +
+                                             f'{symbols["hot_loop"]:08x}' + ' ', text))
             total_clocks = int(footer[0][1])
             if mode == 'cycle-func':
                 assert trace.mode == 'func' and trace.hdr.get('sys') is True and trace.x87
@@ -149,10 +155,14 @@ def main():
         return dict(case=case, model=name, latency=latency, warm_cycles=warm,
                     records=len(rows), paired_v=len(pairs), full_qemu_diff=True,
                     short_captures=short_captures, scalar_dispatches=scalar_dispatches,
+                    load_commands=load_commands,
                     total_clocks=total_clocks)
 
-    cases = [(k, 0, r, o, 0x37f) for k in (0, 1, 2, 3, 4, 5, 6, 7, 8)
+    kinds = range(17) if args.feature == 'scalar-load-cmd' else range(9)
+    cases = [(k, 0, r, o, 0x37f) for k in kinds
              for r in (0, 1) for o in ((17,) if args.smoke else (0, 17, 18, 31))]
+    if args.feature == 'scalar-load-cmd':
+        cases += [(k, 0, r, 17, 0x37e) for k in (5, 6, 9) for r in (0, 1)]
     result = dict(passed=False, measurements=[], errors=[], gameplay_ipc=None,
                   standard_suite=False, feature=args.feature)
     try:
@@ -182,8 +192,12 @@ def main():
         result['actual_warm_cycle_gain'] = any(r['fraction'] > 0 for r in gains)
         result['actual_short_capture'] = any(r['short_captures'] for r in result['measurements'])
         for row in result['measurements']:
-            kind, _, _, offset, _ = row['case']
-            if args.feature == 'scalar-dispatch':
+            kind, _, _, offset, cw = row['case']
+            if args.feature == 'scalar-load-cmd':
+                if kind in (5, 6, 9, 10, 11, 12, 13, 14, 15, 16):
+                    expected = 512 if row['model'] == 'candidate' and cw == 0x37f else 0
+                    assert row['load_commands'] == expected, ('scalar command witness', row)
+            elif args.feature == 'scalar-dispatch':
                 if row['model'] == 'control' or kind not in (2, 3, 5, 6):
                     assert row['scalar_dispatches'] == 0, ('unexpected scalar dispatch', row)
                 else:
@@ -192,7 +206,13 @@ def main():
                 assert row['short_captures'] == 0, ('unexpected short capture', row)
             elif offset in (17, 18) and kind != 4:
                 assert row['short_captures'] > 0, ('missing actual short capture', row)
-        if args.feature == 'scalar-dispatch':
+        if args.feature == 'scalar-load-cmd':
+            for gain in gains:
+                if gain['case'][0] in (5, 6, 9, 10, 11, 12, 13, 14, 15, 16) and gain['case'][4] == 0x37f:
+                    assert gain['fraction'] > 0, ('no scalar operand handoff gain', gain)
+                else:
+                    assert gain['control'] == gain['candidate'], ('negative control changed', gain)
+        elif args.feature == 'scalar-dispatch':
             for gain in gains:
                 kind = gain['case'][0]
                 if kind in (5, 6) or (kind in (2, 3) and gain['latency'] == 0):

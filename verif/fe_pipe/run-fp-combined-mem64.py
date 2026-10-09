@@ -14,8 +14,12 @@ BASE = Path(__file__).with_name('run-fp-mem64-queue.py')
 
 def transform(text):
     changes = {
-        "assert profiles['candidate'] == profiles['control'] | {'VEN_FP_MEM_QUEUE64'}":
+        "added = 'VEN_FP_MEM_QUEUE64' if args.feature == 'mem64-queue' else 'VEN_FP_SCALAR_LOAD_CMD'\n"
+        "    assert profiles['candidate'] == profiles['control'] | {added}\n"
+        "    assert added not in profiles['control']":
+        "assert args.feature == 'mem64-queue'\n    "
         "assert profiles['candidate'] == profiles['control'] | {'VEN_FP_MEM_QUEUE64', 'VEN_FP_SCALAR_DISPATCH'}\n"
+        "    assert 'VEN_FP_MEM_QUEUE64' not in profiles['control']\n"
         "    assert 'VEN_FP_SCALAR_DISPATCH' not in profiles['control']",
         'for p in (Path(__file__), source, linker, qemu,':
         'for p in (Path(__file__), BASE, source, linker, qemu,',

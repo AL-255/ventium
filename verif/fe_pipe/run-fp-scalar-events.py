@@ -38,6 +38,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('control', 'candidate', 'out'):
         parser.add_argument('--' + name, type=Path, required=True)
+    parser.add_argument('--feature', choices=('scalar-dispatch', 'scalar-load-cmd'), default='scalar-dispatch')
     args = parser.parse_args()
     scratch = Path('/home/yukidama/external/tmp').resolve(strict=True)
     assert __debug__ and Path(os.environ['TMPDIR']).resolve() == scratch
@@ -55,9 +56,16 @@ def main():
                 'VEN_FP_LOAD_EARLY_CMD', 'VEN_FP_OPERAND_OVERLAP'} <= profiles[name]
         assert not {'VEN_UOPCACHE', 'VTM_NO_DPI', 'SYNTHESIS', 'VEN_SYS_FASTPATH_ALL'} & profiles[name]
         pins.update({str(p): sha(p) for p in (tb, stamp)})
-    assert profiles['candidate'] == profiles['control'] | {'VEN_FP_SCALAR_DISPATCH'}
-    assert 'VEN_FP_SCALAR_DISPATCH' not in profiles['control']
+    added = 'VEN_FP_SCALAR_DISPATCH' if args.feature == 'scalar-dispatch' else 'VEN_FP_SCALAR_LOAD_CMD'
+    assert profiles['candidate'] == profiles['control'] | {added}
+    assert added not in profiles['control']
     source = REPO / 'verif/fe_pipe/fp-scalar-events.S'
+    if args.feature == 'scalar-load-cmd':
+        generator = HERE/'prepare-fp-scalar-load-events.py'
+        pins.update({str(p): sha(p) for p in (source, generator)})
+        generated = args.out/'scalar-load-events.S'
+        subprocess.run([sys.executable, '-B', generator, '--source', source, '--out', generated], check=True)
+        source = generated
     linker = REPO / 'verif/sys/tests/ppage/ppage.ld'
     qemu = REPO / 'ventium-refs/07-p5-emulation-harness/build/qemu/build-sys/qemu-system-i386'
     for p in (Path(__file__), source, linker, qemu, REPO / 'verif/qemu-trace/gen_trace.py',
@@ -111,11 +119,13 @@ def main():
         case, leaf, image, symbols, gold = prepared
         traces = {}
         scalar_dispatches = 0
+        load_commands = 0
         total_clocks = 0
         for mode in ('cycle-func', 'cycle'):
             stem = f'{name}-l{latency}-{mode}'
             path = leaf / (stem + '.vtrace')
-            text = run([models[name], '+ven_fetchdbg', '+ven_faultlog', '--system', '--cosim', '--x87', '--' + mode, '--l1-axi',
+            extra_log = ['+ven_fpdirectlog'] if args.feature == 'scalar-load-cmd' else []
+            text = run([models[name], '+ven_fetchdbg', '+ven_faultlog', *extra_log, '--system', '--cosim', '--x87', '--' + mode, '--l1-axi',
                         '--image', image, '--out', path, '--max-insn', '5000', '--max-cycles', '3000000',
                         '--quiesce', '200000'], leaf, stem, 133, latency)
             trace = tracefmt.read_trace(str(path))
@@ -132,6 +142,8 @@ def main():
             assert len(footer) == 1 and int(footer[0][0]) == len(trace.records)
             scalar_dispatches += len(re.findall(r'\[FETCHDBG:FP-SDISPATCH\] eip=' +
                                            f'{symbols["hot_op"]:08x}' + ' ', text))
+            load_commands += len(re.findall(r'\[FPLOADCMD\] ACCEPT cyc=\d+ pc=' +
+                                            f'{symbols["hot_op"]:08x}' + ' ', text))
             total_clocks = int(footer[0][1])
             if mode == 'cycle-func':
                 assert trace.mode == 'func' and trace.hdr.get('sys') is True and trace.x87
@@ -147,9 +159,11 @@ def main():
         warm = []
         return dict(case=case, model=name, latency=latency, warm_cycles=warm,
                     records=len(rows), paired_v=len(pairs), full_qemu_diff=True,
-                    scalar_dispatches=scalar_dispatches,total_clocks=total_clocks)
+                    scalar_dispatches=scalar_dispatches,load_commands=load_commands,total_clocks=total_clocks)
 
     cases = [(0, 0, 0, 17, 0x37f)]
+    if args.feature == 'scalar-load-cmd':
+        cases = [(k, 0, 0, 17, 0x37f) for k in range(3)]
     result = dict(passed=False, measurements=[], errors=[], gameplay_ipc=None, standard_suite=False)
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
@@ -163,9 +177,14 @@ def main():
                 except Exception as exc:
                     result['errors'].append(dict(error=repr(exc), traceback=traceback.format_exc()))
         assert len(result['measurements']) == len(jobs) and not result['errors']
-        result['actual_scalar_dispatch'] = any(r['scalar_dispatches'] for r in result['measurements'])
-        assert result['actual_scalar_dispatch']
-        assert all(r['scalar_dispatches']==0 for r in result['measurements'] if r['model']=='control')
+        witness = 'scalar_dispatches' if args.feature == 'scalar-dispatch' else 'load_commands'
+        result['actual_path_witness'] = any(r[witness] for r in result['measurements'])
+        if args.feature == 'scalar-dispatch':
+            result['actual_scalar_dispatch'] = result['actual_path_witness']
+        assert result['actual_path_witness']
+        assert all(r[witness]==0 for r in result['measurements'] if r['model']=='control')
+        if args.feature == 'scalar-load-cmd':
+            assert all(0 < r[witness] <= 12 for r in result['measurements'] if r['model']=='candidate'), 'TF/RF must not elide the response path'
         result.update(passed=True)
     except Exception as exc:
         result['errors'].append(dict(error=repr(exc), traceback=traceback.format_exc()))

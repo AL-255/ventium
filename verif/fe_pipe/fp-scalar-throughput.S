@@ -10,6 +10,9 @@
 #ifndef OFFSET
 #define OFFSET 17
 #endif
+#ifndef CONTROL_WORD
+#define CONTROL_WORD 0x37f
+#endif
     .code16
     .section .text16,"ax"
     .global _start16
@@ -77,8 +80,18 @@ client:
     xorl %edi,%edi
     movl $0,(%ebp)
     movl $0,128(%ebp)
+#if KIND == 9 || KIND == 16
+    movl $0,132(%ebp)
+#endif
+#if KIND == 10 || KIND == 13 || KIND == 14
+    movl $1,128(%ebp)
+#endif
     movw $0x037f,0x8f300
     fninit
+#ifdef APPLY_CONTROL_WORD
+    movw $CONTROL_WORD,0x8f300
+    fldcw 0x8f300
+#endif
     fld1
     movl $256,%ecx
     jmp hot_loop
@@ -105,6 +118,24 @@ hot_loop:
 #elif KIND == 8
     .byte 0x66
     fnstcw 0x8f200
+#elif KIND == 9
+    fcoml 128(%ebp)
+#elif KIND == 10
+    fimull 128(%ebp)
+#elif KIND == 11
+    fisubl 128(%ebp)
+#elif KIND == 12
+    fisubrl 128(%ebp)
+#elif KIND == 13
+    fidivl 128(%ebp)
+#elif KIND == 14
+    fidivrl 128(%ebp)
+#elif KIND == 15
+    fcomps 128(%ebp)
+    fld1
+#elif KIND == 16
+    fcompl 128(%ebp)
+    fld1
 #else
 #error unsupported KIND
 #endif

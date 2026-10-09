@@ -54,10 +54,12 @@ def main():
     for name in ('control', 'candidate', 'out'):
         parser.add_argument('--'+name, type=Path, required=True)
     parser.add_argument('--smoke', action='store_true')
+    parser.add_argument('--feature', choices=('mem64-queue', 'scalar-load-cmd'), default='mem64-queue')
     parser.add_argument('--fault', action='store_true', help='Absent operand page + precise older-FP drain and restart')
     parser.add_argument('--event', choices=('int3', 'gp'), help='Post-queue architectural event and exact handler state')
     args = parser.parse_args()
     assert not (args.fault and args.event)
+    assert args.feature == 'mem64-queue' or (args.fault and not args.event)
     scratch = Path('/home/yukidama/external/tmp').resolve(strict=True)
     assert __debug__ and Path(os.environ['TMPDIR']).resolve() == scratch
     assert args.out.resolve().is_relative_to(scratch)
@@ -75,9 +77,17 @@ def main():
                 'VEN_FP_LOAD_EARLY_CMD', 'VEN_FP_OPERAND_OVERLAP'} <= profiles[name]
         assert not {'VEN_UOPCACHE', 'VTM_NO_DPI', 'SYNTHESIS', 'VEN_SYS_FASTPATH_ALL'} & profiles[name]
         pins.update({str(p): sha(p) for p in (tb, stamp)})
-    assert profiles['candidate'] == profiles['control'] | {'VEN_FP_MEM_QUEUE64'}
-    assert 'VEN_FP_MEM_QUEUE64' not in profiles['control']
+    added = 'VEN_FP_MEM_QUEUE64' if args.feature == 'mem64-queue' else 'VEN_FP_SCALAR_LOAD_CMD'
+    assert profiles['candidate'] == profiles['control'] | {added}
+    assert added not in profiles['control']
     source = REPO/'verif/fe_pipe'/('fp-mem64-fault.S' if args.fault else 'fp-mem64-queue.S')
+    if args.feature == 'scalar-load-cmd':
+        generator = REPO/'verif/fe_pipe/prepare-fp-scalar-load-fault.py'
+        for p in (source, generator):
+            pins[str(p)] = sha(p)
+        generated = args.out/'scalar-fault-fixture.S'
+        subprocess.run([sys.executable, '-B', generator, '--source', source, '--out', generated], check=True)
+        source = generated
     if args.event:
         generator = REPO/'verif/fe_pipe/prepare-fp-mem64-event.py'
         for p in (source, generator):
@@ -139,7 +149,8 @@ def main():
         for mode in ('cycle-func', 'cycle'):
             stem = f'{name}-l{latency}-{mode}'
             path = leaf/(stem+'.vtrace')
-            text = run([models[name], '+ven_fp_mem_queue_log', '+ven_faultlog', '--system', '--cosim',
+            extra_log = ['+ven_fpdirectlog'] if args.feature == 'scalar-load-cmd' else []
+            text = run([models[name], '+ven_fp_mem_queue_log', '+ven_faultlog', *extra_log, '--system', '--cosim',
                         '--x87', '--'+mode, '--l1-axi', '--image', image, '--out', path,
                         '--max-insn', '2500', '--max-cycles', '3000000', '--quiesce', '200000'],
                        leaf, stem, 133, latency)
@@ -157,11 +168,14 @@ def main():
                       if int(pc, 16) == symbols['source_op'] and int(owners) > 0]
             overlap = [int(pc, 16) for pc, owners in re.findall(r'\[FP-MEM-QUEUE\] INTEGER pc=([0-9a-f]+) owners=(\d+)', text)
                        if int(owners) >= 2 and symbols['integer_begin'] <= int(pc, 16) < symbols['integer_end']]
-            modes[mode] = dict(trace=trace, clocks=int(footer[0][1]), queued=len(queued), overlap=len(overlap))
+            load_commands = len(re.findall(r'\[FPLOADCMD\] ACCEPT cyc=\d+ pc=' +
+                                           f'{symbols["source_op"]:08x}' + ' ', text))
+            modes[mode] = dict(trace=trace, clocks=int(footer[0][1]), queued=len(queued), overlap=len(overlap),
+                               load_commands=load_commands)
             if mode == 'cycle-func':
                 with (leaf/(stem+'-diff.log')).open('x') as log:
                     assert compare_complete(gold, trace, log) == 0, (case, name, latency, 'complete QEMU diff')
-        assert all(modes['cycle'][k] == modes['cycle-func'][k] for k in ('clocks', 'queued', 'overlap'))
+        assert all(modes['cycle'][k] == modes['cycle-func'][k] for k in ('clocks', 'queued', 'overlap', 'load_commands'))
         actual = modes['cycle']
         rows = actual['trace'].records
         hits = [i for i, r in enumerate(rows) if int(r['pc'], 0) == symbols['source_op' if args.fault else 'hot_loop']]
@@ -173,6 +187,7 @@ def main():
         assert any(r.get('pipe') == 'V' and r.get('paired') and int(r['pc'], 0) == symbols['pair_v'] for r in rows)
         return dict(case=case, model=name, latency=latency, records=len(rows), full_qemu_diff=True,
                     queued=actual['queued'], integer_overlap=actual['overlap'], total_clocks=actual['clocks'],
+                    load_commands=actual['load_commands'],
                     warm_clocks=[] if args.fault or args.event else [rows[b]['cyc']-rows[a]['cyc'] for a,b in zip(hits[4:-1], hits[5:])])
 
     cases = [(k, d, r, o) for k in range(8) for d in (0, 1) for r in ((0,) if args.smoke else (0, 1))
@@ -198,7 +213,9 @@ def main():
         assert len(result['measurements']) == len(jobs) and not result['errors']
         indexed = {(tuple(r['case']), r['model'], r['latency']): r for r in result['measurements']}
         for row in result['measurements']:
-            if row['model'] == 'control' or row['case'][1]:
+            if args.feature == 'scalar-load-cmd':
+                assert row['load_commands'] == (9 if row['model'] == 'candidate' else 0), ('scalar command/retry count', row)
+            elif row['model'] == 'control' or row['case'][1]:
                 assert row['queued'] == 0 and row['integer_overlap'] == 0, ('negative control queued', row)
         gains = []
         for case in ([] if args.fault or args.event else cases):
@@ -210,8 +227,9 @@ def main():
                     assert a['total_clocks'] == b['total_clocks'] and a['warm_clocks'] == b['warm_clocks']
                 gains.append(dict(case=case, latency=latency, control=sum(a['warm_clocks']),
                                   candidate=sum(b['warm_clocks']), fraction=1-sum(b['warm_clocks'])/sum(a['warm_clocks'])))
-        for kind in range(3 if args.fault else 8):
-            assert any(r['case'][0] == kind and r['queued'] and (args.fault or r['integer_overlap']) for r in result['measurements'])
+        if args.feature == 'mem64-queue':
+            for kind in range(3 if args.fault else 8):
+                assert any(r['case'][0] == kind and r['queued'] and (args.fault or r['integer_overlap']) for r in result['measurements'])
         if not args.fault and not args.event:
             assert any(g['fraction'] > 0 for g in gains)
         result.update(passed=True, gains=gains)
