@@ -4,7 +4,7 @@ wire [63:0] board_ddram_data;
 wire [127:0] board_dbg_cmp = {18'd0, board_transport_fault, 1'b1,
                               board_transport_drained, cpu_dbg_cmp[106:0]};
 generate if (BOARD_POSTED) begin : g_board_posted
-    ven_ddram_axi_posted #(.WRITE_SLOTS(8)) board_ddr (
+    ven_ddram_axi_posted #(.WRITE_SLOTS(BOARD_WRITE_SLOTS)) board_ddr (
         .fault(board_transport_fault), .drained(board_transport_drained),
         `include "board_transport_connections.svh"
     );

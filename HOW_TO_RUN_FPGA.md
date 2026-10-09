@@ -3773,7 +3773,9 @@ or timing qualification. Legacy primary/U-only counter registers are unchanged.
 **Candidate-only posted transport:** `VEN_DDR_POSTED` additionally needs
 `fpga/patches/0010-posted-ddr-transport.patch` applied to a new flow source copy,
 the candidate bridge and shim, and an explicit frozen define profile. The
-launcher checks the coupled wiring. Packed `cpu_dbg_cmp[109:107]` carries
+current opt-in profile selects **16 retained write slots** (the earlier
+eight-slot experiment is recorded separately). The launcher checks the exact
+depth and coupled wiring. Packed `cpu_dbg_cmp[109:107]` carries
 hardware-origin `{fault, capability, drained}`; these are not host controls.
 The shim holds port I/O, STEP admission and externally advertised HALTED until
 both inner AXI and outer DDR are drained. Scan selector **79**, safe live,
@@ -3781,7 +3783,10 @@ returns `0x50440000 | {fault, capability, drained}` in low bits 2:0 (zero when
 not compiled). A transport fault is fail-stop and requires diagnosis; do not
 reset only the CPU to discard it or claim that an inner-idle flag drained DDR.
 Bridge reset is the AXI-domain reset, not the guest-reset control. This path is
-microbench-tested but **not deployed, full-system accepted or timing-qualified**.
+microbench-tested, including the real memory path and vendor functional leaf
+netlists, but **not deployed, full-system accepted or full-core timing-qualified**.
+The standalone mapping and simulator procedures and their limits are recorded
+in [the current candidate log](docs/UV_FAST_BANK64_2026-10-08.md).
 
 The auxiliary ring is **not generically an AXI read-beat ring or a per-cycle
 waveform** in the frozen 2026-10-04 deployed source. Its exact valid predicate is

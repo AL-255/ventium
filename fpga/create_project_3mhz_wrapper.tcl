@@ -427,7 +427,7 @@ if {[lsearch -exact $fpga_defs VEN_DDR_POSTED] >= 0} {
     set posted_top_file [open [file join $upstream_root src rk_ao486_system_pl.v] r]
     set posted_top [read $posted_top_file]
     close $posted_top_file
-    foreach span {{ven_ddram_axi_posted #(.MEM_BASE(MEM_BASE), .WRITE_SLOTS(8)) u_ddr}
+    foreach span {{ven_ddram_axi_posted #(.MEM_BASE(MEM_BASE), .WRITE_SLOTS(16)) u_ddr}
                   {.fault(ddr_posted_fault), .drained(ddr_posted_drained)}
                   {18'd0, ddr_posted_fault, 1'b1, ddr_posted_drained}} {
         if {[string first $span $posted_top] < 0} {
@@ -450,7 +450,7 @@ if {[lsearch -exact $fpga_defs VEN_DDR_POSTED] >= 0} {
     if {![file isfile [file join $source_root fpga ven_ddram_axi_posted.sv]]} {
         error "posted DDR bridge source missing"
     }
-    puts "POSTED-DDR-SOURCE-CONTRACT-OK: eight slots, real completion barrier; runtime acceptance pending"
+    puts "POSTED-DDR-SOURCE-CONTRACT-OK: sixteen slots, real completion barrier; runtime acceptance pending"
 }
 
 # The passive scan-out recorder lives in the Ventium worktree rather than the

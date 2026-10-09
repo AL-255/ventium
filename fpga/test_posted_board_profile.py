@@ -47,7 +47,7 @@ def main():
         top_text=top.read_text(); shim_text=shim.read_text()
         for before,after in (('.drained(ddr_posted_drained)', '.drained()'),
                             ("18'd0, ddr_posted_fault, 1'b1, ddr_posted_drained", "21'd0"),
-                            ('.WRITE_SLOTS(8)', '.WRITE_SLOTS(1)')):
+                            ('.WRITE_SLOTS(16)', '.WRITE_SLOTS(1)')):
             assert top_text.count(before)==1
             top.write_text(top_text.replace(before,after)); check('platform drain wiring missing')
         top.write_text(top_text)

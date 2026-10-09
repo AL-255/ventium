@@ -20,6 +20,7 @@ REPO=Path(__file__).resolve().parents[1]
 def main():
     ap=argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--inputs',type=Path,required=True)
+    ap.add_argument('--write-slots',type=int,choices=(4,8,16),default=16)
     args=ap.parse_args()
     frozen=args.inputs.resolve(strict=True)
     scratch=Path(os.environ['TMPDIR']).resolve(strict=True)
@@ -68,7 +69,7 @@ def main():
 
     system=dst/'3rd-party/ao486_MiSTer/rtl/system.v'
     text=system.read_text()
-    text=once(text,'module system\n(', 'module system #(parameter BOARD_POSTED=1)\n(\n`include "board_transport_ports.svh"')
+    text=once(text,'module system\n(', 'module system #(parameter BOARD_POSTED=1, parameter BOARD_WRITE_SLOTS=16)\n(\n`include "board_transport_ports.svh"')
     text=once(text,'l2_cache cache','`include "board_transport_body.svh"\n\nl2_cache cache')
     for port,net in (('DDRAM_BUSY','board_ddram_busy'),('DDRAM_DOUT','board_ddram_data'),('DDRAM_DOUT_READY','board_ddram_valid')):
         text,count=re.subn(r'(\.'+port+r'\s*\()'+port+r'(\))',r'\g<1>'+net+r'\2',text)
@@ -102,18 +103,18 @@ def main():
     text=once(text,'    ddr_service(); top->eval();','    // Real transport RTL + AXI memory model exclusively own DDR here.\n    top->eval();')
     text=once(text,'    VerilatedSave os; os.open(fn);','''    VerilatedSave os; os.open(fn);
     board_memory.save(os);
-    const uint32_t board_profile=VEN_BOARD_POSTED_PROFILE;
+    const uint32_t board_profile=(VEN_BOARD_POSTED_PROFILE<<8)|VEN_BOARD_WRITE_SLOTS;
     os.write(&board_profile,sizeof(board_profile));''')
     text=once(text,'    VerilatedRestore is; is.open(fn);','''    VerilatedRestore is; is.open(fn);
     board_memory.load(is);
     uint32_t board_profile=99; is.read(&board_profile,sizeof(board_profile));
-    if(board_profile!=VEN_BOARD_POSTED_PROFILE) checkpoint_fail("board transport snapshot profile mismatch");''')
+    if(board_profile!=((VEN_BOARD_POSTED_PROFILE<<8)|VEN_BOARD_WRITE_SLOTS)) checkpoint_fail("board transport snapshot profile/depth mismatch");''')
     old=next(x for x in text.splitlines() if 'getenv("FPGA_DDR")' in x)
     text=once(text,old,'''    if(const char* e=getenv("FPGA_DDR")) {
         if(strcmp(e,"3")) { fprintf(stderr,"real board-transport model requires FPGA_DDR=3\\n"); return 2; }
     }
     g_fpga_ddr=3;
-    fprintf(stderr,"[BOARD_AXI] real RTL profile=%d B-delay=20 R-first=21 gap=1; new snapshot prefix\\n",VEN_BOARD_POSTED_PROFILE);''')
+    fprintf(stderr,"[BOARD_AXI] real RTL profile=%d slots=%d B-delay=20 R-first=21 gap=1; new snapshot prefix\\n",VEN_BOARD_POSTED_PROFILE,VEN_BOARD_WRITE_SLOTS);''')
     # Give the harness a unique basename, avoiding historical VPATH object reuse.
     harness.unlink()
     (harness.parent/'sim_board_transport.cpp').write_text(text)
@@ -125,7 +126,7 @@ def main():
     assert all(digest(Path(p))==h for p,h in pins.items())
     (root/'prepared.json').write_text(json.dumps(dict(qualification='UNBUILT_EXPERIMENTAL_BOARD_TRANSPORT_SIM',
         baseline_manifest=pins[str(frozen/'input-manifest.json')],source_pins=pins,
-        simulator_defines=defs,build_profiles=[0,1],host_sources=hosts,
+        simulator_defines=defs,build_profiles=[0,1],write_slots=args.write_slots,host_sources=hosts,
         note='All standard/differential acceptance and gameplay measurements remain pending'),indent=2)+'\n')
     print(root)
 

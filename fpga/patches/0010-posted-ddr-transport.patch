@@ -19,7 +19,7 @@ diff --git a/fpga/rk-ao486-system/src/rk_ao486_system_pl.v b/fpga/rk-ao486-syste
 +`endif
 @@ -381,2 +388,9 @@
 +`ifdef VEN_DDR_POSTED
-+    ven_ddram_axi_posted #(.MEM_BASE(MEM_BASE), .WRITE_SLOTS(8)) u_ddr (
++    ven_ddram_axi_posted #(.MEM_BASE(MEM_BASE), .WRITE_SLOTS(16)) u_ddr (
 +        .fault(ddr_posted_fault), .drained(ddr_posted_drained),
 +`else
 +    assign ddr_posted_fault = 1'b0;
