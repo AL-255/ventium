@@ -1,8 +1,8 @@
 # Platform L2 capacity qualification — October 9
 
 Experimental **256 KiB platform L2**, not a change to the P54C split 8 KiB
-L1 caches. Latest verified gameplay remains **0.44183623 total U+V IPC**, model
-`652de481`, clocks **1,200,000,000–1,300,000,000**. This predates the capacity
+L1 caches. Latest verified gameplay is **0.43894030 total U+V IPC**, model
+`e9097d96`, clocks **1,200,000,000–1,300,000,000**. This predates the capacity
 candidate, which has **no gameplay result or standard-suite acceptance**.
 
 ## Intended change

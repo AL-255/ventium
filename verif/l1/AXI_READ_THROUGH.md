@@ -1,5 +1,13 @@
 # AXI-to-Avalon read-command forwarding
 
+Latest full-PC gameplay result: **0.43894030 total U+V IPC**, `e9097d96`,
+cycles **1.2B–1.3B**. This is below parent `f780b331`'s 0.44439995 window;
+no representative speedup is established. Both endpoint frames show advancing
+unaltered Quake gameplay, with236 source/17 runtime pins and native/service
+identity checked. Evidence:`ventium-read-through-gameplay.vnfwAGcz/window`.
+Equal-clock windows do not prove equal work. The complete timedemo, standard
+suite and FPGA deployment remain open; later larger-L2 gameplay is unmeasured.
+
 `VEN_AXI2AVL_READ_THROUGH` is default-off. It lets the existing registered AXI
 AR request present its Avalon command on the address-capture edge. A ready
 endpoint saves one clock; a blocked endpoint takes the original captured-command

@@ -6,9 +6,9 @@ snapshot is used for the current cold full-PC runs.
 
 | Requirement | Verified result | Remaining |
 | --- | --- | --- |
-| CoreMark ≥2.1 CM/MHz | REP full direct-memory seeds: **2.107861982 / 2.110913372**, correct CRCs | Later combined candidate pending full seeds; not a DDR/cache/FPGA score |
-| Quake ≥0.48 total U+V IPC | **0.44439995**, scalar-load/ref/AGI priming `f780b331`, 1,200,000,000–1,300,000,000 clocks | Below target; later read-through, larger-L2 and WBUF candidates not measured |
-| Standard suite | REP full CoreMark seeds pass; code-word Win95 closed at a visually clean desktop | Independent desktop acceptance and complete timedemo; newer candidates pending |
+| CoreMark ≥2.1 CM/MHz | Current `b5453f16` full direct-memory seeds: **2.107843209 / 2.110905243**, correct CRCs | Not a DDR/cache/FPGA score |
+| Quake ≥0.48 total U+V IPC | **0.43894030**, read-through `e9097d96`, 1,200,000,000–1,300,000,000 clocks | Below target and preceding 0.44439995 window; larger-L2 and WBUF candidates not measured |
+| Standard suite | Current full CoreMark seeds pass; AGI-prime Win95 closed at a visually clean desktop | Independent desktop acceptance and complete timedemo; larger-L2 candidate pending |
 | FPGA | Old image still deployed | Selected source, full timing/resource qualification and deployment |
 
 The preceding combined full CoreMark model is
@@ -863,3 +863,40 @@ checks per reset seed. The first edge test over-required a wide response
 while another owner armed its critical word: data was correct, and the
 existing exclusion remains. The corrected tests verify42 such exclusions
 and462 eligible wide responses, with unchanged RTL and backing counts.
+
+## Current full CoreMark closed; read-through gameplay did not improve
+
+Both current **1,400-iteration** standard CoreMark seeds completed with all
+five reference CRCs correct, zero actual fault deliveries, normal guest/native
+exit, complete output and no OOM. Independent audit rechecks141 input pins,
+the model, actual service closure, absent owner/children, raw CRCs and scores.
+Model:`b5453f16119f8b59d744cd2bb26eef38b683cbddf20bf3f215d259d5baa577f9`.
+Evidence:`ventium-current-coremark-host-r2.3ixLJTn1/full1400-r3/independent-audit.json`.
+
+| Seed | Whole-program clocks | Retirements | CM/MHz | Host seconds |
+| --- | ---: | ---: | ---: | ---: |
+| Performance | 664,186,024 | 506,024,925 | **2.107843209** | 3,355.90 |
+| Validation | 663,222,570 | 505,363,204 | **2.110905243** | 3,354.09 |
+
+Guest reports10.061/10.045seconds, satisfying minimum duration. Scores use
+1,400,000,000 divided by actual whole-program RTL clocks, not guest timer
+calibration, short-run extrapolation or host evaluation counts. Both finish
+under the unchanged60-minute cap. This closes current **direct-memory core**
+qualification, not the FPGA/cache/DDR score or the entire standard suite.
+
+The newer read-through gameplay window measures **0.43894030 total U+V IPC**:
+43,894,030=33,974,927U+9,919,103V retirements over100M clocks, **1.2B–1.3B**.
+Model:`e9097d96159c60f8605c6f499c19dfb6f357edf00a12485483927a29c9bb4f88`.
+Evidence:`ventium-read-through-gameplay.vnfwAGcz/window/{audit,residency}.json`.
+Both unchanged images show advancing gameplay, shells pickup to grenade
+launcher; each capture brackets its counter endpoint within500k clocks.
+236 source/17 runtime inputs, live native/service identity, UV+fast mode,
+no STEP/snapshot and zero OOM are checked. Timedemo completion remains open.
+
+This is below the parent's0.44439995: **no representative speedup is
+established by read-through**. Equal-cycle windows are not equal-work trials,
+and endpoint pixels differ, so this is not an isolated regression percentage.
+Disjoint residency still accounts for every clock: D-pipeline wait20.786749%,
+x87 issue/occupancy9.792194%, FLOAD8.249466%, LOAD6.373721%. For this observed
+work,0.48 requires8.554104% fewer clocks; these residencies are not wholly
+removable. The repaired256KiB-L2 run continues and remains unmeasured.

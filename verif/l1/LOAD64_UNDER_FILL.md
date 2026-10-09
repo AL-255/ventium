@@ -2,8 +2,8 @@
 
 Default-off `VEN_FP_LOAD64_UNDER_FILL`, tested in a private current-source
 copy. Not promoted to a full-PC run or FPGA image. Latest verified gameplay is
-**0.44439995 total U+V IPC**, `f780b331`, clocks **1.2B–1.3B**; that model
-predates this change. The 0.48 target remains open.
+**0.43894030 total U+V IPC**, `e9097d96`, clocks **1.2B–1.3B**; that model
+does not contain this change. The 0.48 target remains open.
 
 ## Change
 
