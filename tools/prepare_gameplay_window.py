@@ -65,6 +65,30 @@ def frame_bounds(lines, ppm, cycle):
     return bounds
 
 
+def frame_at_cycle(lines, directory, cycle):
+    """Find the unique actual capture at a fixed counter endpoint.
+
+    Faster boot can make mode13 capture start one period earlier, shifting
+    filename indices without shifting VEN-PERF samples. Selection depends
+    only on logged progress brackets, never pixels or measured performance.
+    """
+    pattern = re.compile(r'^\[FBCAP\] (' + re.escape(str(directory)) +
+                         r'/frame_([0-9]{5})\.ppm) ')
+    captures = [m for line in lines if (m := pattern.match(line))]
+    if len({m[1] for m in captures}) != len(captures):
+        raise ValueError('duplicate logged capture')
+    matches = []
+    for capture in captures:
+        try:
+            bounds = frame_bounds(lines, capture[1], cycle)
+        except ValueError:
+            continue
+        matches.append((Path(capture[1]), int(capture[2]), bounds))
+    if len(matches) != 1:
+        raise ValueError('counter endpoint lacks one unambiguous capture')
+    return matches[0]
+
+
 def stable_file(path):
     before = path.stat()
     digest = sha(path)
@@ -80,6 +104,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     for name in ('build', 'run', 'out'):
         ap.add_argument('--' + name, type=Path, required=True)
+    ap.add_argument('--frames-by-cycle', action='store_true',
+        help='associate captures by their unique logged clock bracket; counter window stays unchanged')
     args = ap.parse_args()
     build, run = args.build.resolve(strict=True), args.run.resolve(strict=True)
     scratch = Path('/home/yukidama/external/tmp').resolve(strict=True)
@@ -135,10 +161,16 @@ def main():
     first, last, delta = select_window(lines, plan['sample_indices'], plan['window_width_cycles'])
     frames = []
     assert len(plan['endpoint_frame_indices']) == 2
-    for index, counter in zip(plan['endpoint_frame_indices'], (first, last), strict=True):
-        ppm = run / f'run/frame_{index:05d}.ppm'
+    for planned_index, counter in zip(plan['endpoint_frame_indices'], (first, last), strict=True):
+        if args.frames_by_cycle:
+            ppm, index, bounds = frame_at_cycle(lines, run/'run', counter['cycle'])
+        else:
+            index = planned_index
+            ppm = run / f'run/frame_{index:05d}.ppm'
+            bounds = frame_bounds(lines, ppm, counter['cycle'])
         frames.append(dict(ppm=str(ppm), ppm_sha256=stable_file(ppm),
-            adjacent_progress_cycle_bounds=frame_bounds(lines, ppm, counter['cycle']),
+            planned_frame_index=planned_index, actual_frame_index=index,
+            adjacent_progress_cycle_bounds=bounds,
             associated_counter_cycle=counter['cycle']))
     args.out.mkdir()
     for frame in frames:
@@ -156,6 +188,7 @@ def main():
         pid=native['pid'], native=native, source_inputs_rechecked=len(source['pins']),
         runtime_inputs_rechecked=len(before['input_sha256_before']), pins=pins,
         first=first, last=last, delta=delta, sample_indices=plan['sample_indices'],
+        frame_association='unique_logged_cycle_bracket' if args.frames_by_cycle else 'planned_index',
         retirement_event_ipc=delta['retires']/delta['cycle'], gameplay_ipc=None,
         frames=frames, raw_pixels_preserved=True, endpoint_frames_reviewed_as_gameplay=False,
         no_oom=True, full_timedemo=False, standard_suite=False,

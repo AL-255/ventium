@@ -5,6 +5,19 @@ L1 caches. Latest verified gameplay is **0.43894030 total U+V IPC**, model
 `e9097d96`, clocks **1,200,000,000–1,300,000,000**. This predates the capacity
 candidate, which has **no gameplay result or standard-suite acceptance**.
 
+Capture association note: this candidate brings mode13 VGA online one period
+earlier, so frame6 corresponds to1.1B, not1.2B. At1,115,965,200clocks, before
+either measurement endpoint, `ventium-l2-gameplay.VedZVnwA/frame-association-plan.json`
+declares timestamp-based capture matching. The periodic sample indices12/13
+and100M-clock window are **unchanged**. `prepare_gameplay_window.py
+--frames-by-cycle` requires one uniquely bracketed capture at each fixed
+counter endpoint, records original/actual indices and rejects absent or
+ambiguous matches. It never selects by pixels, scene progress or IPC.
+Sixteen host tests pass; replaying the preceding read-through evidence selects
+the exact same frames/counters/0.43894030IPC. Its prior observer version remains
+recoverable from git133904ad and matches that receipt's tool hash. Original
+candidate source, plan, guest, counters and runtime pins are not modified.
+
 ## Intended change
 
 The current ao486 platform cache has only 128 sets: **32 KiB, four ways,

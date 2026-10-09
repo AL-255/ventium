@@ -1,7 +1,8 @@
 import unittest
 
 import cpi_interval as cpi
-from prepare_gameplay_window import select_window, frame_bounds
+from pathlib import Path
+from prepare_gameplay_window import select_window, frame_bounds, frame_at_cycle
 
 
 def sample(cycle, retired=None):
@@ -69,6 +70,38 @@ class WindowTests(unittest.TestCase):
                       ['[ 100] retires=1', '[FBCAP] /frame.ppm x', '[ 600101] retires=2']):
             with self.subTest(lines=lines), self.assertRaises(ValueError):
                 frame_bounds(lines, '/frame.ppm', 150)
+
+
+class FrameAssociationTests(unittest.TestCase):
+    def test_shifted_capture_start_does_not_change_counter_window(self):
+        lines = ['[ 100] retires=50', '[FBCAP] /run/frame_00007.ppm x',
+                 '[ 200] retires=100', '[ 300] retires=150',
+                 '[FBCAP] /run/frame_00008.ppm x', '[ 400] retires=200']
+        self.assertEqual(frame_at_cycle(lines, Path('/run'), 150),
+                         (Path('/run/frame_00007.ppm'), 7, [100,200]))
+        self.assertEqual(frame_at_cycle(lines, Path('/run'), 350),
+                         (Path('/run/frame_00008.ppm'), 8, [300,400]))
+
+    def test_no_capture_for_window_refused(self):
+        lines = ['[ 100] retires=50', '[FBCAP] /run/frame_00007.ppm x', '[ 200] retires=100']
+        with self.assertRaises(ValueError): frame_at_cycle(lines,Path('/run'),250)
+
+    def test_outside_run_capture_not_selected(self):
+        lines = ['[ 100] retires=50', '[FBCAP] /other/frame_00007.ppm x', '[ 200] retires=100']
+        with self.assertRaises(ValueError): frame_at_cycle(lines,Path('/run'),150)
+
+    def test_ambiguous_captures_refused(self):
+        for second in ('00007', '00008'):
+            lines = ['[ 100] retires=50', '[FBCAP] /run/frame_00007.ppm x',
+                     f'[FBCAP] /run/frame_{second}.ppm x', '[ 200] retires=100']
+            with self.subTest(second=second),self.assertRaises(ValueError):
+                frame_at_cycle(lines,Path('/run'),150)
+
+    def test_unbounded_capture_refused(self):
+        for lines in (['[FBCAP] /run/frame_00007.ppm x'],
+                      ['[ 100] retires=1', '[FBCAP] /run/frame_00007.ppm x', '[ 600101] retires=2']):
+            with self.subTest(lines=lines),self.assertRaises(ValueError):
+                frame_at_cycle(lines,Path('/run'),150)
 
 
 if __name__ == '__main__':
