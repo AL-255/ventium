@@ -14,6 +14,7 @@ import re
 import socket
 import subprocess
 import sys
+import threading
 import traceback
 
 REPO = Path(__file__).resolve().parents[2]
@@ -33,13 +34,30 @@ def save(p, value):
         json.dump(value, f, indent=2)
 
 
+def unique_port(used, lock):
+    # bind(0), close, spawn has a gap: Linux can hand the same port to another
+    # producer before its QEMU listener starts. Never reuse a port in this run.
+    # An unrelated external bind still fails closed at the normal handshake.
+    with lock:
+        for _ in range(128):
+            with socket.socket() as sock:
+                sock.bind(('127.0.0.1', 0))
+                port = sock.getsockname()[1]
+            if port not in used:
+                used.add(port)
+                return port
+    raise RuntimeError('unable to allocate a unique QEMU port')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('control', 'candidate', 'out'):
         parser.add_argument('--'+name, type=Path, required=True)
     parser.add_argument('--smoke', action='store_true')
     parser.add_argument('--fault', action='store_true', help='Absent operand page + precise older-FP drain and restart')
+    parser.add_argument('--event', choices=('int3', 'gp'), help='Post-queue architectural event and exact handler state')
     args = parser.parse_args()
+    assert not (args.fault and args.event)
     scratch = Path('/home/yukidama/external/tmp').resolve(strict=True)
     assert __debug__ and Path(os.environ['TMPDIR']).resolve() == scratch
     assert args.out.resolve().is_relative_to(scratch)
@@ -60,6 +78,13 @@ def main():
     assert profiles['candidate'] == profiles['control'] | {'VEN_FP_MEM_QUEUE64'}
     assert 'VEN_FP_MEM_QUEUE64' not in profiles['control']
     source = REPO/'verif/fe_pipe'/('fp-mem64-fault.S' if args.fault else 'fp-mem64-queue.S')
+    if args.event:
+        generator = REPO/'verif/fe_pipe/prepare-fp-mem64-event.py'
+        for p in (source, generator):
+            pins[str(p)] = sha(p)
+        generated = args.out/'event-fixture.S'
+        subprocess.run([sys.executable, '-B', generator, '--source', source, '--out', generated], check=True)
+        source = generated
     linker = REPO/'verif/sys/tests/ppage/ppage.ld'
     qemu = REPO/'ventium-refs/07-p5-emulation-harness/build/qemu/build-sys/qemu-system-i386'
     for p in (Path(__file__), source, linker, qemu, REPO/'verif/qemu-trace/gen_trace.py',
@@ -69,6 +94,7 @@ def main():
     save(args.out/'inputs.json', pins)
     env = {k: v for k, v in os.environ.items() if not k.startswith(('VEN_', 'TB_', 'AXI_', 'QEMU_'))}
     env.update(TMPDIR=str(args.out), PYTHONDONTWRITEBYTECODE='1')
+    ports, port_lock = set(), threading.Lock()
 
     def run(command, leaf, name, expected=0, latency=0):
         argv = ['timeout', '--signal=TERM', '--kill-after=3s', '60s', *map(str, command)]
@@ -87,6 +113,7 @@ def main():
         obj, elf, image = [leaf/('fixture.'+ext) for ext in ('o', 'elf', 'bin')]
         run(['gcc', '-m32', '-ffreestanding', '-nostdlib', '-fno-pic', '-fno-pie',
              f'-DKIND={kind}', f'-DDRAIN={drain}', f'-DRELOC={reloc}', f'-DDATA_OFFSET={offset}', f'-DSPLIT={offset}',
+             f'-DEVENT_GP={int(args.event == "gp")}',
              '-c', source, '-o', obj], leaf, 'assemble')
         run(['gcc', '-m32', '-static', '-no-pie', '-nostdlib', '-Wl,-T,'+str(linker),
              '-Wl,--build-id=none', obj, '-o', elf], leaf, 'link')
@@ -97,9 +124,7 @@ def main():
         run([qemu, '-machine', 'pc', '-cpu', 'pentium', '-m', '64', '-bios', image, '-display', 'none',
              '-serial', 'none', '-monitor', 'none', '-no-reboot', '-no-shutdown',
              '-device', 'isa-debug-exit,iobase=0xf4,iosize=0x04'], leaf, 'free-qemu', 133)
-        with socket.socket() as sock:
-            sock.bind(('127.0.0.1', 0))
-            port = sock.getsockname()[1]
+        port = unique_port(ports, port_lock)
         run([sys.executable, '-B', REPO/'verif/qemu-trace/gen_trace.py', '--qemu', qemu,
              '--system', '--x87', '--image', image, '--image-mode', 'bios', '--cpu', 'pentium',
              '--out', leaf/'golden.vtrace', '--max-insn', '2500', '--port', str(port)], leaf, 'golden')
@@ -123,7 +148,8 @@ def main():
             assert [r['n'] for r in trace.records] == list(range(len(trace.records)))
             assert not re.search(r'%Error|%Fatal|CPU HUNG|UNIMPLEMENTED|tb: FAIL', text)
             check_faultlog.check_counts(check_faultlog.read_counts(
-                (leaf/(stem+'.stdout')).read_text().splitlines()), {(14, 0): 1} if args.fault else {})
+                (leaf/(stem+'.stdout')).read_text().splitlines()),
+                {(14, 0): 1} if args.fault else {(13, 0x28): 16} if args.event == 'gp' else {})
             footer = re.findall(r'^tb: stop: WIN95 co-sim isa-debug-exit \(out 0xf4\) '
                                 r'after (\d+) retired in (\d+) clocks$', text, re.M)
             assert len(footer) == 1 and int(footer[0][0]) == len(trace.records)
@@ -142,17 +168,21 @@ def main():
         assert len(hits) == (10 if args.fault else 16)
         if args.fault:
             assert len([r for r in rows if int(r['pc'], 0) == symbols['pf_handler']]) == 1
+        if args.event:
+            assert len([r for r in rows if int(r['pc'], 0) == symbols['event_handler']]) == 16
         assert any(r.get('pipe') == 'V' and r.get('paired') and int(r['pc'], 0) == symbols['pair_v'] for r in rows)
         return dict(case=case, model=name, latency=latency, records=len(rows), full_qemu_diff=True,
                     queued=actual['queued'], integer_overlap=actual['overlap'], total_clocks=actual['clocks'],
-                    warm_clocks=[] if args.fault else [rows[b]['cyc']-rows[a]['cyc'] for a,b in zip(hits[4:-1], hits[5:])])
+                    warm_clocks=[] if args.fault or args.event else [rows[b]['cyc']-rows[a]['cyc'] for a,b in zip(hits[4:-1], hits[5:])])
 
     cases = [(k, d, r, o) for k in range(8) for d in (0, 1) for r in ((0,) if args.smoke else (0, 1))
              for o in ((0,) if args.smoke else (0, 29))]
     if args.fault:
         cases = [(k, 0, 0, split) for k in range(3) for split in (0, 1)]
+    elif args.event:
+        cases = [(k, d, r, 0) for k in range(8) for d in (0, 1) for r in (0, 1)]
     result = dict(passed=False, measurements=[], errors=[], gameplay_ipc=None, standard_suite=False,
-                  fixture='fault' if args.fault else 'overlap',
+                  fixture='fault' if args.fault else args.event or 'overlap',
                   case_fields=['kind','unused','unused','split'] if args.fault else ['kind','drain','reloc','data_offset'])
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
@@ -171,7 +201,7 @@ def main():
             if row['model'] == 'control' or row['case'][1]:
                 assert row['queued'] == 0 and row['integer_overlap'] == 0, ('negative control queued', row)
         gains = []
-        for case in ([] if args.fault else cases):
+        for case in ([] if args.fault or args.event else cases):
             for latency in (0, 7):
                 a, b = [indexed[case, name, latency] for name in ('control', 'candidate')]
                 assert b['total_clocks'] <= a['total_clocks'], ('whole-program regression', case, latency, a, b)
@@ -182,7 +212,7 @@ def main():
                                   candidate=sum(b['warm_clocks']), fraction=1-sum(b['warm_clocks'])/sum(a['warm_clocks'])))
         for kind in range(3 if args.fault else 8):
             assert any(r['case'][0] == kind and r['queued'] and (args.fault or r['integer_overlap']) for r in result['measurements'])
-        if not args.fault:
+        if not args.fault and not args.event:
             assert any(g['fraction'] > 0 for g in gains)
         result.update(passed=True, gains=gains)
     except Exception as exc:
