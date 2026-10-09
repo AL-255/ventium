@@ -1,9 +1,6 @@
 --- a/fp_shared/ven_fp_alu.sv
 +++ b/fp_shared/ven_fp_alu.sv
-@@ -10,7 +10,6 @@
- 
- `default_nettype none
- 
+@@ -13,4 +13,3 @@
 -(* use_dsp = "yes" *)
  module ven_fp_alu
    import fpu_x87_pkg::*;
