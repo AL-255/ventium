@@ -62,6 +62,11 @@ cover precisely the same scene progress.
   CPU-store SMC tests pass. Selected loops lose 5–6 clocks per iteration;
   these are not gameplay gains. Combined model `05611d6c` has fresh cold
   Quake/Win95 qualification runs, not yet measured or accepted.
+- [Resident priming during I fill](../verif/l1/PRIME_UNDER_IFILL.md): an additional
+  private candidate removes one capture clock for 640 directed resident hints,
+  with ownership/event negative controls and 76 full system cases passing.
+  It is **not** in the running combined guest/Full-CoreMark models and has no
+  gameplay or full-core throughput claim.
 
 ## Gates that must not be hidden
 
