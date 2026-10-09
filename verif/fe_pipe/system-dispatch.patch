@@ -1,0 +1,32 @@
+--- a/rtl/core/core.sv
++++ b/rtl/core/core.sv
+@@ -4573,1 +4573,13 @@
+-    pipe_sdispatch_shape_ok = !sys_mode && !soc_en && !cosim_en && !def16
++    pipe_sdispatch_shape_ok = ((!sys_mode && !soc_en && !cosim_en)
++`ifdef VEN_SYS_FASTPATH
++                           // Reuse the reference decoder/execution path in a
++                           // checked 32-bit flat or relocated system client.
++                           // Architectural debug still enters S_DECODE; the
++                           // S_PIPE caller retains ordinary event priority.
++                           || (sys_mode && sys_fp_ok && !real_mode && !v86
++                               && !fp_dbg_active && !dbg_block_issue
++                               && (seg_base[SG_CS] == seg_base[SG_DS])
++                               && (seg_base[SG_CS] == seg_base[SG_SS])
++                               && (seg_base[SG_CS] == seg_base[SG_ES]))
++`endif
++                           ) && !def16
+@@ -4687,2 +4699,14 @@
+         capture_reference_decode(eip);
++        // Direct dispatch bypasses S_DECODE's issue-time flag snapshot.
++        // Even with live TF/RF clear, stale values from a prior instruction
++        // must not leak into this instruction's fault/retirement handling.
++        if (sys_mode && !dbg_block_issue) begin
++          tf_at_issue <= eflags[8];
++          rf_at_issue <= eflags[16];
++        end
++`ifndef SYNTHESIS
++        if (ven_fetchdbg_en)
++          $display("[FETCHDBG:SDISPATCH] eip=%08x flin=%08x sys=%0b cpl=%0d kind=%0d len=%0d",
++                   eip, flin, sys_mode, eff_cpl, d_kind, d_len);
++`endif
+         state <= d_mem_read ? S_LOAD : S_EXEC;
