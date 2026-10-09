@@ -63,9 +63,9 @@ Root: `/home/yukidama/external/tmp/ventium-fp-memory-forward.1wOpXMgI`.
 
 The positive cases use **18.75% fewer clocks** (23.08% greater throughput).
 All layouts/AXI latencies agree; event-bearing tests also have no regression.
-The unchanged wide forms still have operand-service overhead. The earlier
-[resident-window priming experiment](FP_RESIDENT_PRIME.md) was not combined
-with this candidate; whether their combination helps remains untested.
+The unchanged wide forms still have operand-service overhead. The later
+combination with [resident-window priming](FP_RESIDENT_PRIME.md) is recorded
+separately below; these forwarding-only measurements are unchanged.
 
 The **generic gate remains FAIL**, native exit 2 after 157.7 seconds, stable
 pins: seven functional passes / 101 length-only failures; five unchanged
@@ -73,6 +73,50 @@ cycle-band failures (depadd, indepadd, dmiss, imiss, nearbr). All 108 comparison
 reports were inspected; no earlier architectural mismatch is reported. No
 terminal trimming, fabricated QEMU poststate, comparator change or relaxed
 band was used. This is not a green gate or standard-suite acceptance.
+
+## Combined arithmetic-only priming
+
+The first combination, `ventium-fp-prime-forward.kLNvZRzY`, improves aligned
+m32 arithmetic 13→12 clocks but **fails** its no-regression check: aligned
+FLD/FADDP grows 23→24 clocks. Its failing receipt is retained, not accepted.
+
+`prepare-fp-resident-prime.py --arith32` restricts cache-window capture to
+single-beat m32 ADD/MUL/SUB/SUBR. It does not prime FLD, FILD, wide, split or
+DIV operands. It retains the earlier descriptor-only query / checked-commit
+separation, translation and segment permission checks, event exclusions and
+ordinary S_FLOAD ownership. This is an instruction-class restriction, not a
+guest or address-specific workaround. The source must contain the forwarding
+implementation; both flags are recorded in the model profile.
+
+Root: `/home/yukidama/external/tmp/ventium-fp-arith32-prime.avzY8Zt1`.
+
+- Core model: `0e07298e84e59c66e4b7deca94c6d55f7416eedb62f7651b0a92390e78897eec`.
+- Full-address user model:
+  `f4c3e0a2f7ad4ae18ad7efe19c893f0edc5b43b2e200caa1e9e6aaf6aa425005`.
+- Both native builds pass with unchanged pins and private header ownership.
+- `matrix/result.json`: **88 measurements / 176 complete QEMU comparisons**.
+  Aligned m32 arithmetic is **13→12 clocks** versus forwarding alone; all
+  negative controls retain their previous timing, including FLD/FADDP.
+  Composed with forwarding, **16→12 is 25% fewer clocks / 33.33% greater
+  throughput** in this directed loop, not measured gameplay improvement.
+- `events-period2/result.json`: **88 measurements / 176 complete QEMU
+  comparisons**, with **eight real INT3 entries per fixture**, actual priming
+  witnesses for each positive shape and no measured regression. An ordinary
+  backedge separates interrupt-bearing bursts. At AXI latency 7 some shapes
+  have only three/four prime witnesses and no steady timing gain; this is not
+  a claim that every FP instruction primes after an interrupt.
+- `system-matrix/result.json`: **76/76** complete system comparisons pass.
+- `generic-user-r2-closed.json`: **FAIL**, native 2, unchanged pins. All 108
+  reports were inspected: seven equivalent, 101 length-only failures; the same
+  five cycle bands fail. No oracle, terminal records or bands were altered.
+
+The earlier `events`, `events-warm` and `events-operand-warm` attempts remain
+**coverage failures**: each closes 56 negative/control measurements but fails
+16 positive shapes for missing real prime witnesses. Architectural comparisons
+that reached the checker pass; this does not make those matrices pass. Adding
+integer re-entry instructions did not resolve eligibility. Its precise cause
+is not established. The period-two fixture is additional coverage, not a
+replacement label for those failures or arbitrary-arrival hardware IRQ proof.
 
 ## Failed harness attempts retained
 
@@ -92,6 +136,13 @@ The first full matrix exceeds the fixed 128-task envelope while launching
 `matrix/result.json`. The corrected runner prepares goldens with eight
 workers, then runs **32 RTL workers** separately; no envelope was raised or
 failed result reused. The fresh `matrix-r2` and `events` close successfully.
+
+After verifying the failed native process was gone and no files were open,
+251 rebuildable generated C++/object/archive/PCH files from `leaf-r2/control/obj`
+were removed (**874,530,487 bytes**). Private SV, inputs, commands, logs,
+receipts, headers, dependency files and accepted models remain. The retained
+`failed-leaf-prune-{plan,closed}.json` names every target; rerunning the recorded
+Verilator command regenerates the removed build products.
 
 ## Remaining acceptance
 

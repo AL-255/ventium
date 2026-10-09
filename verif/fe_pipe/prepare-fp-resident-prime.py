@@ -18,12 +18,25 @@ def once(text, old, new):
     return text.replace(old, new)
 
 
-def prepare(source, output):
+def restrict_arith32(text):
+    return once(text, '''  assign mc_fp_self_prime = pipe_u_eff.is_fp && pipe_u_eff.fp_kind == FK_MEM &&
+                           !mc_valid_q && !pipe_mem_active_q;''', '''  // Only one-beat arithmetic can consume the shortened admission without
+  // replacing its saved load clock with another execution/stack wait. Do not
+  // perturb FLD/FILD scheduling or spend the hint on two-beat operands.
+  assign mc_fp_self_prime = pipe_u_eff.is_fp && pipe_u_eff.fp_kind == FK_MEM &&
+                           pipe_u_eff.fp_role == 3'd0 && !pipe_u_eff.fp_sti[0] &&
+                           !pipe_u_eff.fp_aluop[1] &&
+                           !mc_valid_q && !pipe_mem_active_q;''')
+
+
+def prepare(source, output, *, arith32=False):
     source, output = source.resolve(strict=True), output.resolve()
     if output.is_relative_to(source):
         raise ValueError('output may not be nested inside source')
     pins = {str(p.relative_to(source)): hashlib.sha256(p.read_bytes()).hexdigest()
             for p in source.rglob('*') if p.is_file()}
+    if arith32 and 'VEN_FP_ARITH_MEM_FWD' not in (source/'fp_shared/ven_fp_top.sv').read_text():
+        raise ValueError('arith32 priming requires the memory-forwarding source')
     shutil.copytree(source, output)
     path = output/'rtl/core/core_mem_chain.svh'
     text = path.read_text()
@@ -94,6 +107,8 @@ def prepare(source, output):
                  eip, mc_query_phys, mc_query_u.fp_sti[0]);
     end else if (ven_fetchdbg_en)
       $display("[FETCHDBG:RAWPRIME]''')
+    if arith32:
+        text = restrict_arith32(text)
     path.write_text(text)
     actual = {str(p.relative_to(output)): hashlib.sha256(p.read_bytes()).hexdigest()
               for p in output.rglob('*') if p.is_file()}
@@ -101,13 +116,14 @@ def prepare(source, output):
     assert [p for p in pins if pins[p] != actual[p]] == ['rtl/core/core_mem_chain.svh']
     assert all(hashlib.sha256((source/p).read_bytes()).hexdigest() == h for p,h in pins.items())
     return dict(source=str(source),parent_pins=pins,candidate_pins=actual,
-                gameplay_ipc=None,standard_suite=False)
+                gameplay_ipc=None,standard_suite=False,arith32_only=arith32)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source',type=Path,required=True)
     parser.add_argument('--out',type=Path,required=True)
+    parser.add_argument('--arith32',action='store_true')
     args = parser.parse_args()
-    result = prepare(args.source,args.out)
+    result = prepare(args.source,args.out,arith32=args.arith32)
     (args.out/'fp-resident-prime-inputs.json').write_text(json.dumps(result,indent=2)+'\n')

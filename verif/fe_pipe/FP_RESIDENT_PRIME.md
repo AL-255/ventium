@@ -1,7 +1,9 @@
 # x87 resident-window admission experiment — October 9
 
-**Not promoted: no steady-state gain in the directed tests.** This private
-experiment is not part of any full-PC run or FPGA image. Verified gameplay
+**The original priming-only experiment has no steady-state gain.** The later
+[forwarding + arithmetic-only priming combination](FP_MEMORY_FORWARD.md#combined-arithmetic-only-priming)
+does show a directed gain, but is not promoted either. Neither experiment is
+part of any full-PC run or FPGA image. Verified gameplay
 baseline is now **0.38065044 total U+V IPC**, dispatch-only `ba2463bf`, cycles
 **1.2–1.3B**; neither this experiment nor its raw-prime parent is measured.
 The preceding posted16 baseline was 0.37026314 over 1.2–3.0B (different window).
@@ -48,9 +50,9 @@ while S_FEXEC grows 40→95: almost all removed load waits become arithmetic
 admission waits. Whole fixture clocks change only 3298→3297; the steady loop
 does not improve. Existing final-result forwarding eligibility explicitly
 excludes memory arithmetic, although those forms already share its ST0
-operand mux. Extending that eligibility is a separate, unimplemented
-hypothesis requiring dependency, flags, stack, reset and QEMU tests.
+operand mux. That eligibility was subsequently extended and tested separately;
+the linked forwarding report records both its evidence and remaining gates.
 
 That work was paused when both raw-prime full-PC guests exposed the separate
 [primed-U/V ownership regression](PRIME_PAIR_OWNER.md). Do not enable this
-flag in production or spend a bitstream build on this result.
+flag in production or spend a bitstream build on the original no-gain result.

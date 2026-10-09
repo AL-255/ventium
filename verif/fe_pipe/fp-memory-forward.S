@@ -15,6 +15,12 @@
 #ifndef EVENT
 #define EVENT 0
 #endif
+#ifndef EVENT_WARM
+#define EVENT_WARM 0
+#endif
+#ifndef EVENT_PERIOD
+#define EVENT_PERIOD 1
+#endif
 #if KIND == 3
 #define BIAS 31
 #elif KIND == 4
@@ -150,6 +156,12 @@ client:
     .space OFFSET,0x90
     .global hot_loop,operand0,operand1,operand2,operand3,pair_u,pair_v
 hot_loop:
+#if EVENT_WARM
+    /* Optional diagnostic re-entry sequence. It does not guarantee that
+     * priming is eligible after IRET; the runner requires a real witness. */
+    movl 0(%ebp),%ebx
+    movl $0x3456789a,%edx
+#endif
 operand0:
     OPERAND 0
 operand1:
@@ -159,7 +171,14 @@ operand2:
 operand3:
     OPERAND 96
 #if EVENT
+#if EVENT_PERIOD == 2
+    /* Leave one ordinary backedge between events so resident admission is
+     * exercised, then test the real event boundary after the primed burst. */
+    testb $1,%cl
+    jnz 1f
+#endif
     int3
+1:
 #endif
     decl %ecx
     jnz hot_loop
@@ -178,7 +197,7 @@ operand3:
     cmpl $0x8fff0,%esp
     jne fail
 #if EVENT
-    cmpl $16,0x8f240
+    cmpl $(16/EVENT_PERIOD),0x8f240
     jne fail
 #endif
     jmp pair_u

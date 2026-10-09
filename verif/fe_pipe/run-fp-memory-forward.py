@@ -29,8 +29,17 @@ def main():
     for name in ('control','candidate','out'):
         parser.add_argument('--'+name,type=Path,required=True)
     parser.add_argument('--smoke',action='store_true')
-    parser.add_argument('--events',action='store_true',help='real INT3 after every FP burst')
+    parser.add_argument('--events',action='store_true',help='real INT3 at the selected burst period')
+    parser.add_argument('--resident-prime',action='store_true',
+                        help='compare forwarding alone with forwarding plus resident priming')
+    parser.add_argument('--arith32',action='store_true',help='require arithmetic-only prime witnesses')
+    parser.add_argument('--event-warm-entry',action='store_true',
+                        help='ordinary integer instructions re-enter the pipeline after IRET')
+    parser.add_argument('--event-period',type=int,choices=(1,2),default=1)
     args=parser.parse_args()
+    assert not args.arith32 or args.resident_prime
+    assert not args.event_warm_entry or args.events
+    assert args.event_period==1 or args.events
     scratch=Path('/home/yukidama/external/tmp').resolve(strict=True)
     assert __debug__ and Path(os.environ['TMPDIR']).resolve()==scratch
     assert args.out.resolve().is_relative_to(scratch)
@@ -47,8 +56,11 @@ def main():
                 'VEN_L1D_BANKED_DATA','VEN_FP_LOAD64'} <= profiles[name]
         assert not {'VEN_UOPCACHE','VTM_NO_DPI','SYNTHESIS','VEN_SYS_FASTPATH_ALL'} & profiles[name]
         pins.update({str(p):sha(p) for p in (tb,stamp)})
-    assert profiles['candidate']==profiles['control']|{'VEN_FP_ARITH_MEM_FWD'}
-    assert 'VEN_FP_ARITH_MEM_FWD' not in profiles['control']
+    added='VEN_FP_RESIDENT_PRIME' if args.resident_prime else 'VEN_FP_ARITH_MEM_FWD'
+    assert profiles['candidate']==profiles['control']|{added}
+    assert added not in profiles['control']
+    if args.resident_prime:
+        assert 'VEN_FP_ARITH_MEM_FWD' in profiles['control']
     source=HERE/'fp-memory-forward.S'
     linker=REPO/'verif/sys/tests/ppage/ppage.ld'
     qemu=REPO/'ventium-refs/07-p5-emulation-harness/build/qemu/build-sys/qemu-system-i386'
@@ -75,7 +87,9 @@ def main():
         obj,elf,image=[leaf/('fixture.'+x) for x in ('o','elf','bin')]
         run(['gcc','-m32','-ffreestanding','-nostdlib','-fno-pic','-fno-pie',
              f'-DKIND={kind}',f'-DRELOC={reloc}',f'-DOFFSET={offset}',
-             f'-DEVENT={int(args.events)}','-c',source,'-o',obj],leaf,'assemble')
+             f'-DEVENT={int(args.events)}',f'-DEVENT_WARM={int(args.event_warm_entry)}',
+             f'-DEVENT_PERIOD={args.event_period}',
+             '-c',source,'-o',obj],leaf,'assemble')
         run(['gcc','-m32','-static','-no-pie','-nostdlib','-Wl,-T,'+str(linker),
              '-Wl,--build-id=none',obj,'-o',elf],leaf,'link')
         run(['objcopy','-O','binary','--gap-fill','0','--pad-to','0x100000',elf,image],leaf,'binary')
@@ -94,7 +108,7 @@ def main():
         gold=tracefmt.read_trace(str(leaf/'golden.vtrace'))
         assert 100<len(gold.records)<5000 and int(gold.records[-1]['eax'],0)&255==0x42
         if args.events:
-            assert sum(int(r['pc'],0)==symbols['handler'] for r in gold.records)==16
+            assert sum(int(r['pc'],0)==symbols['handler'] for r in gold.records)==16//args.event_period
         return leaf,symbols,gold
 
     prepared={}
@@ -130,11 +144,21 @@ def main():
                 pairs=[r for r in rows if r.get('pipe')=='V' and r.get('paired')]
                 assert any(int(r['pc'],0)==symbols['pair_v'] for r in pairs),'no real UV witness'
                 warm=[rows[b]['cyc']-rows[a]['cyc'] for a,b in zip(hits[3:-1],hits[4:])]
+                primes=re.findall(r'\[FETCHDBG:FPPRIME\] eip=([0-9a-f]+)',text)
+                if args.resident_prime:
+                    assert set(map(lambda x:int(x,16),primes))<=set(symbols[f'operand{i}'] for i in range(4))
+                    # Split operands are excluded. FIADD is deliberately not
+                    # in the fast D8/DC/load descriptor grammar, so it is a
+                    # second no-prime control rather than an alleged speedup.
+                    if name=='control' or kind in (3,4,6,7) or (args.arith32 and kind in (1,2,5)):
+                        assert not primes,('unsafe/control prime',case,name,primes)
+                    else:
+                        assert primes,('no actual FP prime',case,name)
                 measurements[name]=dict(warm_cycles=warm,paired_v=len(pairs),
-                    records=len(rows),full_qemu_diff=True)
+                    records=len(rows),full_qemu_diff=True,prime_count=len(primes))
             a,b=measurements['control'],measurements['candidate']
             assert sum(b['warm_cycles'])<=sum(a['warm_cycles']),('performance regression',measurements)
-            if kind in (1,5):
+            if kind in (1,5) and not args.resident_prime:
                 assert b['warm_cycles']==a['warm_cycles'],('non-memory-arithmetic changed',measurements)
             results.append(dict(kind=kind,reloc=reloc,offset=offset,latency=latency,
                 measurements=measurements,gain_fraction=1-sum(b['warm_cycles'])/sum(a['warm_cycles'])))
@@ -142,7 +166,9 @@ def main():
 
     cases=[(0,0,0)] if args.smoke else [(k,r,o) for k in range(11) for r in (0,1) for o in (0,31)]
     result=dict(passed=False,cases=[],errors=[],gameplay_ipc=None,standard_suite=False,
-                smoke=args.smoke,events=args.events)
+                smoke=args.smoke,events=args.events,resident_prime=args.resident_prime,
+                arith32_only=args.arith32,event_warm_entry=args.event_warm_entry,
+                event_period=args.event_period)
     try:
         # QEMU uses several native tasks per guest. Prepare its golden states
         # in a separate eight-worker phase; retain 32 independent RTL workers
