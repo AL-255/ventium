@@ -6,7 +6,7 @@ snapshot is used for the current cold full-PC runs.
 
 | Requirement | Verified result | Remaining |
 | --- | --- | --- |
-| CoreMark ≥2.1 CM/MHz | REP full direct-memory seeds: **2.107861982 / 2.110913372**, correct CRCs | Later permission-shadow candidate pending; not a DDR/cache/FPGA score |
+| CoreMark ≥2.1 CM/MHz | REP full direct-memory seeds: **2.107861982 / 2.110913372**, correct CRCs | Later combined candidate pending full seeds; not a DDR/cache/FPGA score |
 | Quake ≥0.48 total U+V IPC | **0.44004644**, read-prime `15f56054`, 1,200,012,763–1,300,012,763 clocks | Below target; combined scalar/wide-queue candidate not measured |
 | Standard suite | REP full CoreMark seeds pass; code-word Win95 closed at a visually clean desktop | Independent desktop acceptance and complete timedemo; newer candidates pending |
 | FPGA | Old image still deployed | Selected source, full timing/resource qualification and deployment |
@@ -425,3 +425,12 @@ Recovery is `zstd -d -k -- EXACT_FILE.zst`; manifests/receipts are in
 `external/tmp/ventium-old-state-extra.mEmIHBHE`. Sources, executables, current
 runs and existing trace archives were preserved. Earlier inventory refusals
 changed nothing.
+
+The standalone CoreMark AXI diagnostic also exposed a **host harness** bug:
+undriven store-update masks invalidated ordinary cached RAM on every store.
+Correcting that, and generating ordinary low-RAM entry images through QEMU's
+loader, gives reproducible cache-backed diagnostics with zero uncached bypasses.
+The corrected 10-iteration ratios are 1.823895/1.826804, **not accepted scores**.
+Both CRC sets, 24 complete QEMU-state micro comparisons and 24 UV-cycle runs
+pass. No RTL or full-PC policy changed, so no Quake/FPGA gain is attributed.
+See [backend diagnosis](../verif/bench/COREMARK_BACKEND_DIAGNOSTIC.md).

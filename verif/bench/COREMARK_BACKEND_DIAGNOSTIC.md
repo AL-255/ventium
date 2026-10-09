@@ -1,12 +1,76 @@
 # CoreMark backend diagnostic — October 9
 
 This is **not a new CoreMark score, standard-suite pass or FPGA measurement**.
-Verified gameplay remains **0.38588696 total U+V IPC**, XPM-fidelity model
-`50f37229`, cycles **1.2B–1.3B**, predating pop-drain/word reuse.
-Earlier complete direct-memory CoreMark results remain **2.10736/2.11041
-CM/MHz** on model `e3dbf68a`, not the current candidate or board memory path.
+Latest verified gameplay is **0.44004644 total U+V IPC**, read-prime model
+`15f56054`, clocks **1,200,012,763–1,300,012,763**, predating combined FP work.
+Complete direct-memory CoreMark results remain **2.107861982/2.110913372
+CM/MHz** on REP model `cb4b2f84`, not the current candidate or board memory path.
 
-## Matched short observations
+## Corrected fixture and standalone store-policy driver
+
+Two independent test-configuration problems were isolated without changing RTL:
+
+1. The old Linux-user stack is above the ordinary chipset DRAM aperture.
+   `prepare-coremark-lowram.py` uses pinned QEMU's normal `-R 0x10000000` loader
+   reservation to produce new **entry** images. ELF SHA256 remains
+   `8d8b84ad407b1ec35344415084fa4b77afa9dfd2b6369e1677345816ee2c7dbe`.
+   No saved gameplay state, image-byte relocation, benchmark change or
+   high-memory cacheability exception is used. Both native QEMU CRC sets pass;
+   the captured stack is `0x05d55460`, and every captured byte is below 256 MiB.
+2. The standalone C++ AXI slave did not drive the optional U/V cached-store
+   update masks. Verilator initialized both to **zero**, so ordinary accepted
+   RAM stores invalidated their resident lines. `bfm_store_policy.h` now drives
+   both from the actual flat `MemModel` backing contract, per byte, including
+   optional RAM-top, ROM-read-overlay and address-fold behavior. It changes no
+   bus writes, cacheability, clock or RTL. The full-PC ao486 shim already drives
+   these ports: this is **not** an FPGA/Quake performance fix.
+
+Matched 10-iteration observations; every row completes with both expected CRC
+sets, genuine V retirement, zero canonical fault deliveries and native exit0:
+
+| Fixture/host driver/backend | Performance clocks | Validation clocks |
+| --- | ---: | ---: |
+| Old high stack, old host, direct | 4,821,654 | 4,814,941 |
+| Old high stack, old host, AXI0 | 8,144,607 | 8,114,923 |
+| New low-RAM entry, old host, direct | 4,821,818 | 4,815,105 |
+| New low-RAM entry, old host, AXI0 | 8,459,889 | 8,432,607 |
+| Same low-RAM entry, corrected host, direct | 4,821,818 | 4,815,105 |
+| Same low-RAM entry, corrected host, AXI0 | **5,482,773** | **5,474,040** |
+
+The host correction saves **35.191%** of performance-seed diagnostic clocks
+(**54.299%** higher cycle-derived throughput), not processor cycles on FPGA.
+Demand line-fill starts fall **183,566→6,511**; pipeline D-wait falls
+**3,067,780→458,724**. Both low-RAM AXI runs have **zero bypass starts**.
+Direct-memory clocks and instruction counts are identical across the host fix.
+All unchanged low-RAM images and generated RTL archives are pinned. The parent
+native is `3f637315…`; corrected host/native is
+`03bc76515aa2cf2b90ba610ab36997e88e8c6a69f4ea14f2e49c768e1f0c2379`.
+
+Roots: `ventium-combined-coremark-backend.GR8rLvEA/r2`,
+`ventium-coremark-lowram.WReRaqoo`, and
+`ventium-bfm-store-policy.9p8ilO1M/coremark-r1` under `external/tmp`.
+The last AXI ratios are **1.823895/1.826804 CM/MHz**, still **short diagnostics**:
+the sole benchmark error is its insufficient-duration notice. No score-eligible
+or standard-suite pass is claimed. The ideal AXI BFM retains line replay and
+does not include the full-PC L2/DDR bridge or physical DDR.
+
+Regression: `bash verif/tb/run-bfm-store-policy-unit.sh` checks absent/U/UV
+ports, independent masks, fold/32-bit wrap, RAM-top and ROM boundaries.
+`run-bfm-store-policy.py --control OLD --candidate NEW --out FRESH` passes
+**24 complete QEMU-state comparisons and 24 UV-cycle executions**, offsets
+0/1/2/3/28/30 and AXI latency0/7. No records or fields are dropped. Six fixture
+variants retain all 1,195 retirements; aligned AXI0 whole-program clocks improve
+7,106→2,377. The initial grader wrongly expected a literal `PASS` string and
+is retained as failed; R2 verifies the actual success-register sentinel,
+normal quiescence and entire QEMU trace instead. Eight low-RAM image-boundary
+negative controls also pass. These do not replace the generic or standard suite.
+
+The latest diagnostic separates stdout/stderr and checks the canonical
+`+ven_faultlog` delivery records with `check_faultlog.py`. It does not mistake
+the legacy reset-time stderr PC observer for an exception. The failed earlier
+receipts below remain failed; no old result was rewritten.
+
+## Earlier word-reuse observations (historical)
 
 Root: `external/tmp/ventium-word-axi-coremark.gAtcHGt0`.
 `run_r2.py` uses the already-built full-address user top `9194e7e3` and unchanged
