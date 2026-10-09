@@ -1,10 +1,11 @@
 # Popping x87 arithmetic: last-response admission
 
 Experimental, default-off `VEN_FP_POP_DRAIN`; not FPGA or standard-suite
-acceptance. Latest verified gameplay is **0.38588696 total U+V IPC**, LRU-owner
-model `227b03736c0d04b1451e18f797c9d7c9c0cb969f9df49944d53f8a9353d640be`,
-cycles **1,200,000,000–1,300,000,000**. That predates this fix and the XPM-fidelity
-candidate. The target remains **0.48**. Direct-memory CoreMark's earlier
+acceptance. Latest verified gameplay is **0.38776687 total U+V IPC**, pop-drain
+model `c90d8fc04321f4875111f3f038d8e47e28f3f19539f0bb044bec3fce4878f6a5`,
+cycles **1,200,000,000–1,300,000,000**. This measures this fix, but predates
+instruction-word reuse, tag LUTRAM, D-under-I-fill and short x87 capture.
+The target remains **0.48**. Direct-memory CoreMark's earlier
 **2.10736/2.11041 CM/MHz** does not measure FPGA DDR/cache performance or this
 new candidate.
 
@@ -24,7 +25,18 @@ on CPUs18/19, invocation IDs `a41823228ff2456c8b359fa1253de2a5` and
 `d997b066cf73405cb027edbf8b8a95c2`. Both actual native executable identities
 were admitted with unchanged media, 40/40/80 MHz clocks, full P5 L1s,
 32 KiB platform L2, posted16 and UV + relocated fast paths. No snapshots,
-guest patches or STEP. Neither has a qualified gameplay or suite result yet.
+guest patches or STEP. Neither has a completed standard-suite result yet.
+
+### Closed gameplay window
+
+`external/tmp/ventium-pop-gameplay-audit.yXwJVMHF/audit.json` verifies native
+identity, invocation, 228 build pins and 17 runtime pins. Both exact endpoint
+frames are visually gameplay; their PNG copies preserve every source pixel.
+There are **38,776,687 retirements = 28,797,950 U + 9,978,737 V** in 100M
+clocks: **0.38776687 IPC**. The preceding XPM model measured 0.38588696 in
+the same cycle bounds. Equal cycle bounds need not cover identical scene
+progress, so this is not a controlled 0.49% throughput-gain claim. It is clearly
+below 0.48, and neither a completed timedemo nor hardware acceptance.
 
 Current-core direct model `3cde0281ae31b217b1915b2dbf2cadd241969a2efc7468297016533e30bd6273`
 passes two short host-settle qualifications under
