@@ -43,6 +43,18 @@ if {$defs ne [join $requested_defs { }]} { error "expanded defines differ from p
 set fe_defs {VEN_FE_PIPE VEN_FE_DTLB_MULTI VEN_FE_DTLB_PERM}
 set define_count [llength $defs]
 set actual_define_count $define_count
+# Explicit October 9 performance bundle. Strip only this complete, ordered
+# addition before applying the unchanged posted/banked-parent checks below.
+# This is source admission, never simulation, timing or silicon acceptance.
+set perf_defs {VEN_AXI2AVL_READ_THROUGH VEN_FP_ARITH_MEM_FWD VEN_FP_MEM_QUEUE64 VEN_FP_POP_DRAIN VEN_FP_RESIDENT_PRIME VEN_FP_SCALAR_DISPATCH VEN_FP_SCALAR_LOAD_CMD VEN_FP_SHORT_WINDOW VEN_IFETCH_AUTH_MULTI VEN_L1D_CODE_WORD_REUSE VEN_L1D_DATA_UNDER_IFILL VEN_L1D_PRIME_UNDER_FILL VEN_L1D_TAG_LUTRAM VEN_P54_CTRL_TARGET_SYSTEM VEN_PIPE_MEM_CHAIN VEN_PIPE_REG_LOAD_PRIME VEN_RAW_AGI_PRIME VEN_RAW_HELD_READ_PRIME VEN_RAW_V_READ_PRIME VEN_REF_OPERAND_PRIME VEN_REP_CONT_NO_UOP}
+if {$define_count == 135} {
+    if {[lrange $defs 111 131] ne $perf_defs ||
+        [lrange $defs 132 end] ne {SYNTHESIS VTM_NO_DPI VEN_ALTSYNCRAM_XPM}} {
+        error "wrong performance extension bundle/order"
+    }
+    set defs [lreplace $defs 111 131]
+    set define_count [llength $defs]
+}
 if {$define_count == 114 && [lindex $defs 110] eq "VEN_DDR_POSTED"} {
     require_span {lappend files "$VEN/fpga/ven_ddram_axi_posted.sv"}
     set defs [lreplace $defs 110 110]

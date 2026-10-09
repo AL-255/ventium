@@ -900,3 +900,11 @@ Disjoint residency still accounts for every clock: D-pipeline wait20.786749%,
 x87 issue/occupancy9.792194%, FLOAD8.249466%, LOAD6.373721%. For this observed
 work,0.48 requires8.554104% fewer clocks; these residencies are not wholly
 removable. The repaired256KiB-L2 run continues and remains unmeasured.
+
+The [checked FPGA export](../fpga/PERFORMANCE_EXPORT.md) now contains the
+actual larger-L2 model's performance sources, including five new core headers
+absent from the old hardware bundle. Its186 payloads/135definitions pass source
+closure and30 real Tcl profile checks while preserving40MHz, UV+fast and the
+16-slot posted transport. This is **UNQUALIFIED source preparation**, not
+simulation acceptance, clean lint, timing sign-off or deployment. No Vivado
+was started; external free space remains below the build-admission floor.
