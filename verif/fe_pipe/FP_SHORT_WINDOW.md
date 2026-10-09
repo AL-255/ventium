@@ -4,8 +4,8 @@ Private, default-off `VEN_FP_SHORT_WINDOW`; **not production or standard-suite
 acceptance**. Current verified gameplay is **0.39002079 total U+V IPC**, code-word
 model `f3be9a11`, cycles **1,200,000,000–1,300,000,000**. It predates this change,
 tag LUTRAM and data-under-I-fill. The 0.48 target is open.
-Earlier full direct-memory CoreMark scores are 2.10736/2.11041 CM/MHz, not this
-candidate's score or an FPGA cache/DDR measurement.
+This candidate's combined full direct-memory CoreMark scores are
+**2.107363183 / 2.110412882 CM/MHz**, not an FPGA cache/DDR measurement.
 
 ## Cause and fix
 
@@ -127,10 +127,16 @@ parent retirement counts, nonregressing clocks, zero actual faults and all
 This changes a host-equivalence expectation, not any architectural comparison,
 CoreMark CRC, score threshold, differential timing band or runtime limit.
 
-Both full 1,500-iteration seeds are now active in `full-r2`, invocation
-`2034f3eec45a4ab6830530d668a3baf9`, CPUs16/17. Each retains its **3,600-second
-hard cap**. No result or ≥2.1 claim for this binary exists yet. This is the
-direct-memory core test, not a cache/DDR/FPGA score.
+Both full 1,500-iteration seeds **pass** in `full-r2`, invocation
+`2034f3eec45a4ab6830530d668a3baf9`, CPUs16/17. Performance consumes
+711,789,981 clocks / 542,165,413 retirements (**2.107363183 CM/MHz**);
+validation consumes 710,761,393 / 541,458,835 (**2.110412882 CM/MHz**).
+All five CRCs match for each seed. `independent-audit.json` rechecks raw
+native exit footers, zero actual fault deliveries, 114 source/runtime pins,
+no OOM, reaped children and successful service closure. Host durations
+3,413.01 / 3,326.85 seconds meet the unchanged **3,600-second hard cap**.
+Scores use whole-program native clocks. This is the direct-memory core test,
+not a cache/DDR/FPGA score or full standard-suite acceptance.
 
 ## Reproduction and remaining work
 
@@ -146,7 +152,7 @@ python3 -B verif/fe_pipe/run-fp-short-smc.py --control CONTROL --candidate CANDI
 
 Use `tools/build_scope.sh` with the bounded `ipc_parallel32` profile for
 compilation/fan-out; the predicate runner also requires that scope. All new
-outputs go to external scratch. Remaining: generic-gate closure, full latest
-CoreMark seeds, Win95 desktop, complete Quake timedemo, ≥0.48 gameplay IPC,
+outputs go to external scratch. Remaining: generic-gate closure,
+Win95 desktop, complete Quake timedemo, ≥0.48 gameplay IPC,
 combined FPGA timing/resource qualification and deployment. No hardware MHz
 claim follows from these simulation clock reductions.

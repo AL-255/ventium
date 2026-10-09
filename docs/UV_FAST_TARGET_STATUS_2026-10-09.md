@@ -6,24 +6,31 @@ snapshot is used for the current cold full-PC runs.
 
 | Requirement | Verified result | Remaining |
 | --- | --- | --- |
-| CoreMark ≥2.1 CM/MHz | Earlier full direct-memory seeds: **2.107362733 / 2.110412585**, correct CRCs | Full latest-candidate seeds running; not a DDR/cache/FPGA score |
+| CoreMark ≥2.1 CM/MHz | Combined full direct-memory seeds: **2.107363183 / 2.110412882**, correct CRCs | Later REP candidate full seeds pending; not a DDR/cache/FPGA score |
 | Quake ≥0.48 total U+V IPC | **0.39002079**, `f3be9a11`, 1.2–1.3B clocks | Below target; later combined/REP candidates not measured |
-| Standard suite | Cold Win95/Quake candidates are running | Latest full seeds, clean desktop and complete timedemo |
+| Standard suite | Combined full CoreMark seeds pass; cold Win95/Quake candidates running | Clean desktop and complete timedemo; later REP full seeds |
 | FPGA | Old image still deployed | Selected source, full timing/resource qualification and deployment |
 
-The CoreMark model is `e3dbf68a7229a8f6c79e5999aba3a77520e94545205fd89f7b1c11b53c5de9f4`;
-receipts are in `external/tmp/ventium-fp-prime-fill-coremark.cw0NJAWN/full-r4`.
-The newer direct-memory short runs check CRC/state equality, not a full score.
-Do not transfer the old full score to a new binary. The 60-minute full-seed
-limit still applies; the optional 75-minute request has not been answered.
+The current full CoreMark model is
+`c93ae26b20685827dacf45b466256e4139bb1d068d7546ec467801c0a8502c0b`;
+receipts and `independent-audit.json` are in
+`external/tmp/ventium-short-ifill-coremark.qQqbebWo/full-r2`.
+Both 1,500-iteration seeds closed with native exit zero, matching all five
+CRCs, zero actual fault deliveries, stable 114 input pins, no OOM and all
+children reaped. Performance: **711,789,981 clocks / 542,165,413 retirements**,
+3,413.01 host seconds. Validation: **710,761,393 / 541,458,835**,
+3,326.85 seconds. Scores above use conservative whole-program clocks, not
+guest-reported calibration or short-run extrapolation. Both stayed below
+the unchanged 3,600-second limit. This model does not contain independent REP
+admission or optional prime-under-I-fill; do not transfer its score to them.
 
-Latest full seeds run from `external/tmp/ventium-short-ifill-coremark.qQqbebWo/full-r2`
-on CPUs16/17, model `c93ae26b`, invocation
-`2034f3eec45a4ab6830530d668a3baf9`. Before launch, both short seeds passed
+The run used CPUs16/17, invocation `2034f3eec45a4ab6830530d668a3baf9`.
+Before launch, both short seeds passed
 CRC, exact whole-model/mapped-RAM host-optimization equivalence and negative
 controls. They save 96 clocks versus the prior RTL; the first stale
-parent-clock expectation failed and is retained. Full correctness/score remains
-pending; the host optimization never skips a clock edge or changes guest state.
+parent-clock expectation failed and is retained. The host optimization never
+skips a clock edge or changes guest state. The 60-minute full-seed limit still
+applies; the optional 75-minute request has not been answered.
 
 Five cold full-PC guests remain active: code-word and combined-candidate
 Quake/Win95 pairs, plus independent-REP Quake. Superseded XPM/pop pairs closed
