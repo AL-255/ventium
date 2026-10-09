@@ -1,8 +1,8 @@
 # Raw-decoder resident-read priming — October 9
 
 Private, default-off prototype; **not production RTL or FPGA acceptance**.
-Verified gameplay baseline: **0.37698979 total U+V retirement-event IPC**,
-posted16 model `3c8779f4`, cycles **1.2–2.7B**. Neither this prototype nor its
+Verified gameplay baseline: **0.37026314 total U+V retirement-event IPC**,
+posted16 model `3c8779f4`, cycles **1.2–3.0B**. Neither this prototype nor its
 dispatch/shared-FP parent has a gameplay measurement. The 0.48 target is open.
 
 ## Change and invariants

@@ -1,8 +1,8 @@
 # Same-cycle transcendental packer sharing — October 9
 
 Private resource-reduction proposal, not production RTL or FPGA acceptance.
-Current verified gameplay baseline is **0.37698979 total U+V retirement-event
-IPC**, posted16 model `3c8779f4`, cycles **1.2–2.7B**. The running combined
+Current verified gameplay baseline is **0.37026314 total U+V retirement-event
+IPC**, posted16 model `3c8779f4`, cycles **1.2–3.0B**. The running combined
 dispatch/shared-ALU/raw-prime candidate has no gameplay measurement yet; it does
 not contain this additional packer experiment. The 0.48 requirement is open.
 
@@ -53,13 +53,40 @@ remain failures; this proposal does not trim traces or relax those checks.
 
 ## Hardware measurement
 
-Matched control/candidate out-of-context synthesis is running in **one Vivado
-family**, sequentially, with the same xczu15eg-ffvb1156-2-i part, 25 ns clock,
+Matched control/candidate out-of-context synthesis **closed successfully** in
+one Vivado family, sequentially, with the same xczu15eg-ffvb1156-2-i part, 25 ns clock,
 zero I/O-delay assumptions, full profile and `flatten_hierarchy none`.
 The guard caps memory at 8 GiB plus 2 GiB swap, reserves disk space and records
-native resource/lifecycle evidence. No unchanged full-board rebuild or
-deployment was launched. Area, frequency estimate and synthesis closure are
-pending; no routed Fmax or board improvement is claimed.
+native resource/lifecycle evidence. Native exit 0, stable inputs, both native
+markers/checkpoints, **527.08 seconds**, peak cgroup RAM **7.052 GiB**, zero
+swap and OOM events. The native family has exited. `synthesis-closed.json`
+binds invocation `f529a5268cae4221b541ba05e16898e9` and all source inputs.
+
+| Native leaf measurement | Original | Shared packer |
+| --- | ---: | ---: |
+| CLB LUTs, after synthesis LUT combining | 32,702 | 28,695 |
+| Flip-flops | 5,634 | 5,651 |
+| CARRY8 | 953 | 877 |
+| DSP48E2 | 30 | 30 |
+| RAMB36 / RAMB18 | 2 / 1 | 2 / 1 |
+| F7 muxes | 77 | 313 |
+| Setup WNS at 25 ns | +14.344 ns | +12.800 ns |
+| Unplaced setup-path frequency estimate | 93.84 MHz | 81.97 MHz |
+
+This saves **4,007 CLB LUTs (12.25%)** and 76 CARRY8s (7.97%), but costs
+17 flip-flops and worsens the estimated critical setup delay. The path moves
+from `at_x_sig0_q` to the state-select mux feeding `at_table_index_q`; its
+logic depth grows from 45 to 50 levels. These are **unplaced** reports, not
+routed timing or a guaranteed frequency. Both leaves retain -0.075 ns
+estimated hold slack; neither is a physical timing sign-off. No unconstrained
+internal endpoint, missing I/O delay, combinational loop or latch is reported.
+
+Native `LUT*` primitive counts are 37,782 / 33,478, distinct from the combined
+CLB LUT counts above; do not mix the two metrics. No unchanged full-board
+rebuild or deployment was launched. Whole-board congestion/timing benefit is
+still unmeasured. If this state-select path limits implementation, retaining a
+dedicated atan-table packer while sharing the other five is a straightforward
+same-latency alternative to measure, not an already qualified fix.
 
 ## Reproduce
 
