@@ -62,21 +62,38 @@ All roots below are beneath `/home/yukidama/external/tmp/`.
   full-address user model
   `7f555c1b55a36bfc85f05d62aca9726ddb29d5d0ca556163391cb83c24da85e7`.
   Source pins, native build exits and model-local generated headers pass.
-- `matrix-r3`: **256 complete QEMU architectural comparisons**, each with a
+- `matrix-r5`: **256 complete QEMU architectural comparisons**, each with a
   cycle execution. Eight operations × drained/overlapped × flat/relocated ×
   aligned/cache-line crossing × two models × AXI latencies 0/7. Every program
   checks results and saved metadata and requires actual V pairing. All 128
   matched complete-program totals and steady windows are nonregressing.
   All forced-FWAIT controls are exactly unchanged. Actual queue acceptance
   and integer retirement with two pending owners occur for all eight forms.
-- `fault-r2`: **24 complete QEMU comparisons** plus cycle executions.
+- `fault-r4`: **24 complete QEMU comparisons** plus cycle executions.
   FADD64/FLD64/FILD64 × absent first/second operand page × two models ×
   AXI latency 0/7. The handler checks error/EIP/CR2, older completed divide
   result, old metadata, unmodified stack depth and no younger integer effect.
   Only the PTE is repaired; restart produces the exact result. Warm calls
   prove actual queue use; no partial operand may reach the FPU.
+- `int3-r5` / `gp-r2`: **128 complete comparisons each**, plus cycle
+  executions. A real INT3 or faulting selector load follows the independent
+  integer work, with flat/relocated CS/DS and drained controls. Each of sixteen
+  handler visits checks the exact saved return state, completed FP metadata
+  and TOP. Full traces check all stack values, and the ordinary loop verifies
+  its result after IRET. All eight forms have actual queued-operand and
+  two-pending-owner integer-retirement witnesses; controls do not queue.
 - Five recipe tests cover source drift, repeated application, both load-owner
   anchors, disjoint copies and existing-output preservation.
+- Two additional tests guard event-fixture generation and unique QEMU ports.
+  The initial event fixture omitted the IDT page mapping; its QEMU #PF/DF
+  diagnostic and stopped run are retained. Two subsequent fixture failures
+  exposed pinned-QEMU metadata limitations: FLDENV ignores saved pointers,
+  and FNSTSW AX changes FIP. The final handler reads FSW from its saved
+  environment and does not mutate/restore FP pointers. No trace field or
+  result check is removed; the complete handler state is compared to QEMU.
+  `matrix-r4` failed during oracle preparation when two concurrent producers
+  received port 60751. The final runner refuses within-run port reuse. All
+  four matrices above were rerun successfully with that runner.
 - `hardware-lint`: original parent, pointer-only and final candidate all pass
   with `SYNTHESIS`/`VTM_NO_DPI` and six hard structural classes. This is **not
   Vivado synthesis, timing, placement or resource evidence**.
@@ -87,6 +104,22 @@ All roots below are beneath `/home/yukidama/external/tmp/`.
   A fresh parent execution with identical ELF/loader inputs matches all 108
   complete architectural traces, including terminal states. This establishes
   nonregression on that corpus, **not** a generic-gate pass.
+
+`qualification-r2-closed.json` rechecks the final source/test pins and keeps
+`generic_gate_passed`, `standard_suite`, `production` and `fpga_qualified`
+explicitly false. Directed qualification is not an acceptance waiver.
+
+## Full-PC integration, not launched
+
+`ventium-fp-mem64-soc.nqs8uA9x` builds model
+`842f0c7d37f9936c7e02982b3ec7dbd753e5950c37d4cea2161a11129332f389`.
+Only `core.sv`, `core_fp_async.svh` and `ven_fp_fxch_queue.sv` change from the
+read-prime PC source. Every core/FP file matches the microtested candidate;
+the profile adds only the wide flag (128 unique defines). U/V, fast system
+and relocated paths, full P5 L1s, 32-KiB platform L2, posted16 and registered
+read-first Xilinx memory modeling are unchanged. Native build, source pins
+and local host/header checks pass; the same 98 third-party structural
+warnings remain. No new cold guest, standard-suite or FPGA run is launched.
 
 ## Directed performance, not gameplay
 
@@ -114,11 +147,12 @@ Build matched models with all existing U/V/fast-system/fast-memory flags; add
 only `VEN_FP_MEM_QUEUE64` to the second. `run-fp-mem64-queue-leaf.py` accepts
 `--parent`, `--candidate` and `--out` source directories. Whole-core
 `run-fp-mem64-queue.py` takes `--control`, `--candidate` executables and a new
-`--out`; repeat with `--fault` for source-page faults. Use the existing bounded
+`--out`; repeat with `--fault` for source-page faults or `--event int3` /
+`--event gp` for post-queue events. Use the existing bounded
 `tools/build_scope.sh`, explicit external TMPDIR and the `ipc_parallel32`
 profile. Neither runner accepts snapshots or trims architectural traces.
 
 Do not promote solely on these directed passes: the mandatory generic
 UV-fast/AXI gate has known terminal-observer/cycle-band failures, and complete
-standard-suite, post-queue event, full-PC gameplay, hardware resource/timing
+standard-suite, external-IRQ/debug-event, full-PC gameplay, hardware resource/timing
 and FPGA deployment qualification remain open.

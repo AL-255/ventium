@@ -314,8 +314,14 @@ execution. No masks, guest changes or widened bands were used.
 This does **not** change the gameplay baseline: **0.44513116**, `1f2583cb`,
 1.200–1.300B clocks. Neither the m64 change nor scalar dispatch has a gameplay
 measurement; no share of Quake improvement is attributed to their micro gains.
-Post-queue event coverage, full standard-suite and FPGA qualification remain
-required before promotion.
+Post-queue INT3 and #GP now pass 128 complete QEMU comparisons each. All
+536 overlap/fault/event cases were rerun with a unique-port oracle driver;
+a preparation-stage port collision is retained as failed evidence. External
+IRQ/debug-event, full standard-suite and FPGA qualification remain required.
+The exact three-file full-PC integration compiles as `842f0c7d` in
+`external/tmp/ventium-fp-mem64-soc.nqs8uA9x`, with unchanged platform settings
+and third-party warning debt. It has not launched guests or produced a
+performance measurement.
 
 Twenty-two additional explicitly selected closed-build PCHs were losslessly
 archived, recovering **1,578,122,581 bytes**. Their decompressed hashes and all
