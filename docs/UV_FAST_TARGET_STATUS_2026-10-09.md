@@ -480,3 +480,28 @@ continues cold startup; no new full-PC pair or FPGA rebuild was launched for
 the follow-up. Full suites, measured 0.48 gameplay IPC and hardware deployment
 remain pending. Reproduction, exact results and retained failed experiments:
 [reference operand priming](../verif/fe_pipe/REF_OPERAND_PRIME.md).
+
+## Read preparation during required AGI
+
+Private model **`d2a117e7`** additionally uses an already-required address
+interlock clock to prepare the current resident U operand. No AGI clock,
+fault check or retirement boundary is removed, and no memory port or queue
+is added. Short cache-backed CoreMark performance/validation clocks improve
+**5,375,191→5,264,309 / 5,369,188→5,257,586**, or **2.1063% / 2.1227% higher
+throughput**. Direct-memory timing is unchanged; all CRCs pass. Short ratios
+**1.899585 / 1.902014 are not score-eligible results**.
+
+The 1,200 complete boundary comparisons, 24 precise-fault cases, 24 debug/
+cacheability event cases, 76 broader system checks and three synthesis-lint
+profiles pass. All 108 generic architectural sequences match the parent;
+the original generic gate still fails the existing terminal mismatches and
+four hard bands. Earlier failed checker/fixture attempts are retained, not
+relabelled as passes. Closed failed matrix traces were losslessly archived,
+recovering 1,100,840,960 bytes after decompressed-hash checks.
+
+Verified gameplay remains **0.44004644** on **`15f56054`**, clocks
+**1,200,012,763–1,300,012,763**, predating this candidate. The combined cold
+pair continues; no additional full-PC pair or FPGA rebuild was started.
+The requested cache-backed 2.1 score, 0.48 gameplay IPC, full-suite completion
+and hardware deployment are still open. Details and reproducible inputs:
+[AGI resident read](../verif/fe_pipe/AGI_RESIDENT_PRIME.md).
