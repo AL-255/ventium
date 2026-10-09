@@ -112,3 +112,35 @@ are regenerable from retained build commands.
 
 Full generic gate, same-build standard suite, gameplay and hardware acceptance
 remain required. No acceptance is inherited from any earlier model.
+
+## Same-source CoreMark qualification and full seeds
+
+`ventium-fp-prime-fill-coremark.cw0NJAWN` builds the exact 116-definition
+under-fill board-core source with a model-local host harness. Executable SHA:
+`e3dbf68a7229a8f6c79e5999aba3a77520e94545205fd89f7b1c11b53c5de9f4`.
+Native build exits zero with stable inputs and matching generated headers.
+This uses **direct memory**, not the FPGA cache/DDR backend.
+
+Both ten-iteration seeds match between ordinary host settling and the existing
+inactive-input settle optimization: complete serialized model state, mapped
+memory, clocks, retirements, all CRCs and zero delivered faults. No clock edge
+or architectural state is skipped or restored. Fifteen negative launch guards
+also pass. `qualify-r2` and the separate CPU-placement repeat `qualify-r3` both
+close successfully. Performance/validation take **4,823,423 / 4,816,710 clocks**;
+these short checks are not the required full CoreMark score.
+
+The full 1,500-iteration seeds are running under
+`ventium-fp-prime-fill-coremark-full-r4-oct09.service`, invocation
+`25d8d2d8c8294a5397c36a9db2654413`. Actual children 3412103/3412102 use
+CPUs 20/21 and the SHA above. Each retains the **3,600-second hard cap**;
+the service has 2 CPUs, 2 GiB RAM, no swap and 160 tasks. Native closure and
+scores remain pending, with evidence under `full-r4`.
+
+Launch planning changed explicitly: measured rates of 213,977 / 213,197
+simulated clocks/s missed the previous arbitrary 215,000 floor, even after
+moving CPUs. The revised floor is the target's 714,285,714-clock ceiling
+divided by 3,360 seconds, reserving four minutes of the unchanged hard cap:
+212,585 clocks/s. Projected durations are 3,338 / 3,350 seconds. This is an
+estimate, not guaranteed completion or relaxed correctness/scoring acceptance;
+`host-admission.json` retains both thresholds and the calculation. Full CRC,
+fault, source-pin, native-exit and score checks are unchanged.
