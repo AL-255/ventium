@@ -847,3 +847,19 @@ Evidence: `ventium-agi-prime-gameplay.5lgzu8Xr/counter-interval.json`, with the
 exact model-local compiled layout and both raw counter samples. This supports
 prioritizing cache/backing service; it does not justify deleting the hardware
 priming workaround or claiming a removable miss percentage.
+
+The matching AGI-prime Win95 run subsequently closed normally at
+**1,456,140,480 clocks /223,476,443 retirements**, native exit0 and real
+supervisor closure, stable inputs, complete log EOF and no remaining child.
+The separately viewed frame8 is a clean, readable Welcome desktop; its raw
+SHA256 is`0589d29b72d19308e5eb7eb4d62d0c96348cf6eb949d96c236f5d6a202f5f36c`.
+Evidence: `ventium-agi-prime-desktop-oct09/closure-audit.json`. Human visual
+confirmation has been requested separately. Status remains
+`CLOSED_UNQUALIFIED`, not a standard-suite pass or evidence for later models.
+
+The wide-response prototype additionally passes split-page FADD/FLD/FILD
+fault/retry tests with older FP work pending, plus504 read-prime/fill-edge
+checks per reset seed. The first edge test over-required a wide response
+while another owner armed its critical word: data was correct, and the
+existing exclusion remains. The corrected tests verify42 such exclusions
+and462 eligible wide responses, with unchanged RTL and backing counts.

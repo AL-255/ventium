@@ -59,6 +59,15 @@ stable input pins and six structural hard-error classes are checked.
   the parent. Native exit0, reaped children, unchanged pins and zero OOM;
   supervisor `4035bc86e65044558d817ccdc89caa8f` closed successfully. These
   ten-iteration diagnostics do not qualify a CoreMark score.
+- `source-faults-r1`: parent/candidate FADD, FLD and FILD sources straddling
+  an unmapped page, with an older pending FDIV, pass full QEMU-system
+  comparisons in functional and UV-fast modes. All six cases retain the
+  complete 1,457/1,460-record fault-and-retry traces; no terminal trimming.
+- `fill-edges-r2`: disabled/enabled × three reset seeds, **504 additional
+  checks per run**, pass read-ahead captures and every coincident backing beat.
+  The enabled case returns462 complete wide responses and explicitly checks
+  42 critical-word exclusions. Each low-half owner/value and backing count
+  remains correct. Candidate RTL is unchanged from the original prototype.
 - Unmodified `make verify` remains **FAIL**:101 terminal-length mismatches
   and four existing hard cycle bands. Fresh same-input parent replay matches
   all108 complete architectural traces. This is not a generic-gate pass.
@@ -73,6 +82,15 @@ filters the actual source PC. Its32-worker attempt also reached the128-task
 cgroup limit during QEMU spawning;16 workers passed, without raising the limit.
 The first short CoreMark launch failed native-affinity admission before any DUT
 ran; the retry explicitly binds CPUs4/5, preserving the full-seed CPUs2/3.
+
+The first extra fill-edge test incorrectly required a wide response even on
+the first critical-beat edge. Its diagnostic found the correct low and high
+data, complete-line provenance and resident owner, but `early_armed=1` and
+`early_match=0`: the existing global critical-word exclusion deliberately
+suppresses the optional high-half valid. This is not data corruption. The
+corrected test requires that exact exclusion in all42 first-beat cases; no
+RTL guard was removed. Failed receipts, native diagnostics and the original
+test body (`fill-edges-r1/original_load64_fill_edge_leaf.svh`) are preserved.
 
 ## Reproduction
 
