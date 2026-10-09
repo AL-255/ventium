@@ -166,6 +166,24 @@ are absent from this measured build.
   Quake on CPU17 and Win95 on CPU21, with independently audited native identity
   and resource limits. Its generic gate remains FAIL with the existing 101
   terminal-record mismatches/four cycle bands. No gameplay or FPGA gain claimed.
+  Matching direct-memory CoreMark model `9ba1e7ab` passes both short seeds,
+  exact serialized-model/mapped-RAM host-equivalence and all fifteen negative
+  controls. Performance/validation use **4,821,679 / 4,814,966 clocks** and
+  **3,660,809 / 3,655,953 retirements**, with correct CRCs and zero actual faults.
+  Short runs are not score-eligible. Measured optimized host rates of about
+  192k/190k clocks/second lack the required 60-minute full-seed launch margin;
+  the full seeds have not been launched. Receipts:
+  `external/tmp/ventium-read-prime-coremark.9e4FfoAo/qualify-r1/closed.json`.
+- [Scalar x87 dispatch](../verif/fe_pipe/FP_SCALAR_DISPATCH.md): private candidate
+  captures the existing reference packet at the checked slow handoff and
+  enters the unchanged operand/pre-probe path directly. FIADD32 **8→7**,
+  FCOM32 **5→4**, zero-latency FIST32 **8→7** and FST32 **9→8** steady loop clocks.
+  288 long-loop architectural comparisons, 48 precise store-fault comparisons,
+  sixteen SMC, four debug/lazy-FP and 76 broad system cases pass, with actual
+  U/V and new-path witnesses. The initial short-slice performance gate stays
+  FAIL: at high AXI latency a selected slice costs one extra clock, although
+  whole-program timing improves and longer steady throughput is unchanged.
+  No gameplay, full-suite, production or FPGA acceptance is claimed.
 
 Closed scratch snapshots were losslessly compressed after checking their
 recorded hashes and absence of live users: **2,649,788,416 bytes reclaimed**.
@@ -177,6 +195,11 @@ Another **1,269,211,136 bytes** were recovered by losslessly compressing sixteen
 closed compiler PCH files. Every decompressed SHA256 and all other build files
 were checked; use `gzip -dk -- EXACT_FILE.gch.gz` to recover them. Manifest:
 `external/tmp/ventium-closed-goldens-archive.YYawVksY/pch-manifest.json`.
+Fourteen further closed-build PCHs were losslessly archived, recovering
+**1,130,819,584 bytes**. All decompressed hashes and every other build file
+are checked; live models, media, traces and frames are unchanged. Manifest:
+`external/tmp/ventium-scalar-pch-archive.MF6R3TaC/manifest.json`.
+Recover any original with `gzip -dk -- EXACT_FILE.gch.gz`.
 An initial historical-golden-cache archive was refused because its files are
 hard-linked; that cache was left completely untouched.
 
