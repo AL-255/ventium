@@ -74,7 +74,8 @@ is not an equal-work percentage-gain claim.
   gameplay or full-core throughput claim.
 - [Independent REP admission](../verif/rep_sfetch/CONT_NO_UOP.md): removes the
   uop-short-fetch profile dependency without enabling a uop cache. 32 complete
-  QEMU comparisons, 76 system cases and four structural SMI cases pass.
+  QEMU comparisons, 76 system cases, four SMI and 36 external-IRQ structural
+  cases pass.
   The separate cross-page dynamic-SMC oracle disagreement stays FAIL. Cold
   Quake model `139121ae` runs on CPU29; no gameplay result yet.
 

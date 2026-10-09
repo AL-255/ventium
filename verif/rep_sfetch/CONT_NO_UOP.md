@@ -47,6 +47,17 @@ Root: `external/tmp/ventium-rep-no-uop.7Yn9EBWr`.
   no source/GPR side effects, exact P5 save-map pointers and RSM restart.
   STOS requires an otherwise-ready continuation to lose to SMI. This is
   RTL structural coverage, not a QEMU SMI differential claim.
+- `irq-r3`: **36 external-IRQ structural cases**, each in cycle-functional and
+  cycle mode: counts 4/32, placements 0/17/31, AXI latency 0/7/31, both models.
+  The existing pin-only probe raises a held IRQ after an actual retirement and
+  lowers it only on INTA. Exact witnesses require the candidate's second source
+  to finish after the request but before INTA, with no cancellation/replay of
+  an already-started read. The handler checks the complete committed prefix,
+  untouched suffix, saved EIP/CS/IF and ESI/EDI/ECX; IRET and final memory are
+  checked too. Control takes the IRQ after one element, candidate after two.
+  All runs retain actual U/V pairing, one request/acknowledgement and exactly
+  one vector64 delivery. The initial checker incorrectly treated that intended
+  interrupt as an unexpected fault; its failed run is retained.
 
 Warm 32-element MOVSD at zero added AXI latency: candidate gaps are
 29×3 clocks + 2×2 clocks. Controls mostly cost 5 clocks at offsets 0/31,
@@ -73,8 +84,9 @@ and checks a repeated warm U/V pair. `matrix-r1` through `matrix-r4` are retaine
 
 Canonical UV-fast/AXI `make verify` remains **FAIL**, native exit 2, stable pins:
 existing terminal-record discrepancies and four hard cycle bands. No waiver.
-Focused NMI/IRQ/host-debug arrival tests at pending and already-started source
-phases remain needed. This candidate is not declared complete.
+Focused NMI/host-debug arrival tests at pending and already-started source
+phases remain needed. SMI covers preissue cancellation and external IRQ covers
+completion of a started source. This candidate is not declared complete.
 
 ## Full-PC measurement
 
