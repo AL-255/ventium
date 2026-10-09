@@ -8,6 +8,15 @@ identity checked. Evidence:`ventium-read-through-gameplay.vnfwAGcz/window`.
 Equal-clock windows do not prove equal work. The complete timedemo, standard
 suite and FPGA deployment remain open; later larger-L2 gameplay is unmeasured.
 
+A separate passive sample on the same live model covers11,264,358 clocks
+around1.337–1.348B, with one-clock endpoint skew and no process pause/write.
+L1 fill wait still occupies22.6069%, idle read wait8.2730%, and L2 streaming
+18.7691%. There are83,396 L1 miss starts,29,010 L2 misses,58,020 outer read
+addresses and464,160 returned beats. These overlapping diagnostics are not
+additive removable cycles or another accepted gameplay IPC. Evidence:
+`ventium-read-through-gameplay.vnfwAGcz/counter-interval.json`. The request
+forwarding change did not remove the dominant backing/refill service cost.
+
 `VEN_AXI2AVL_READ_THROUGH` is default-off. It lets the existing registered AXI
 AR request present its Avalon command on the address-capture edge. A ready
 endpoint saves one clock; a blocked endpoint takes the original captured-command
