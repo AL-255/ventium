@@ -1,6 +1,8 @@
 /* Cold, paged x87 resident-window admission tests. No imported guest state.
  * KIND 0 FADD32, 1 FLD32+FADDP, 2 FADD64, 3 split32, 4 split64,
- *      5 FILD64+FADDP. All operands = 1, expected final integer = 64.
+ *      5 FILD64+FADDP, 6 FILD32+FADDP. All operands = 1.
+ * POP_KIND optionally selects add/multiply/subtract/reverse-subtract (0..3)
+ * for the load/pop cases; defaults preserve the original fixture byte stream.
  */
 #ifndef KIND
 #define KIND 0
@@ -10,6 +12,12 @@
 #endif
 #ifndef OFFSET
 #define OFFSET 0
+#endif
+#ifndef POP_KIND
+#define POP_KIND 0
+#endif
+#ifndef CONTROL_WORD
+#define CONTROL_WORD 0x037f
 #endif
 #if KIND == 3
 #define BIAS 31
@@ -87,7 +95,7 @@ client:
 #if KIND == 2 || KIND == 4
     movl $0,p(%ebp)
     movl $0x3ff00000,(p+4)(%ebp)
-#elif KIND == 5
+#elif KIND == 5 || KIND == 6
     movl $1,p(%ebp)
     movl $0,(p+4)(%ebp)
 #else
@@ -96,7 +104,15 @@ client:
     .set p,p+32
     .endr
     fninit
+#if CONTROL_WORD != 0x037f
+    movw $CONTROL_WORD,0x8f300
+    fldcw 0x8f300
+#endif
+#if POP_KIND == 1
+    fld1
+#else
     fldz
+#endif
     movl $16,%ecx
     .macro OPERAND disp
 #if KIND == 0 || KIND == 3
@@ -105,12 +121,25 @@ client:
     faddl \disp(%ebp)
 #elif KIND == 1
     flds \disp(%ebp)
-    faddp %st,%st(1)
 #elif KIND == 5
     fildll \disp(%ebp)
-    faddp %st,%st(1)
+#elif KIND == 6
+    fildl \disp(%ebp)
 #else
 #error unsupported KIND
+#endif
+#if KIND == 1 || KIND == 5 || KIND == 6
+#if POP_KIND == 0
+    faddp %st,%st(1)
+#elif POP_KIND == 1
+    .byte 0xde,0xc9 /* FMULP ST(1),ST(0) */
+#elif POP_KIND == 2
+    .byte 0xde,0xe9 /* FSUBP ST(1),ST(0) */
+#elif POP_KIND == 3
+    .byte 0xde,0xe1 /* FSUBRP ST(1),ST(0) */
+#else
+#error unsupported POP_KIND
+#endif
 #endif
     .endm
     jmp hot_loop
@@ -130,7 +159,15 @@ operand3:
     jnz hot_loop
     fistpl 0x8f200
     fwait
+#if POP_KIND == 1
+    cmpl $1,0x8f200
+#elif POP_KIND == 2
+    cmpl $-64,0x8f200
+#elif POP_KIND == 3
+    cmpl $0,0x8f200
+#else
     cmpl $64,0x8f200
+#endif
     jne fail
     cmpl $0x8fff0,%esp
     jne fail
