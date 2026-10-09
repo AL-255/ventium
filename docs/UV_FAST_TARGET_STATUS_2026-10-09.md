@@ -7,7 +7,7 @@ snapshot is used for the current cold full-PC runs.
 | Requirement | Verified result | Remaining |
 | --- | --- | --- |
 | CoreMark ≥2.1 CM/MHz | REP full direct-memory seeds: **2.107861982 / 2.110913372**, correct CRCs | Later permission-shadow candidate pending; not a DDR/cache/FPGA score |
-| Quake ≥0.48 total U+V IPC | **0.44468922**, target-read `59650fe2`, 1,200,000,000–1,300,000,000 clocks | Below target; later read-priming/scalar/wide-queue candidates not measured |
+| Quake ≥0.48 total U+V IPC | **0.44004644**, read-prime `15f56054`, 1,200,012,763–1,300,012,763 clocks | Below target; combined scalar/wide-queue candidate not measured |
 | Standard suite | REP full CoreMark seeds pass; code-word Win95 closed at a visually clean desktop | Independent desktop acceptance and complete timedemo; newer candidates pending |
 | FPGA | Old image still deployed | Selected source, full timing/resource qualification and deployment |
 
@@ -32,10 +32,10 @@ parent-clock expectation failed and is retained. The host optimization never
 skips a clock edge or changes guest state. The 60-minute full-seed limit still
 applies; the optional 75-minute request has not been answered.
 
-Eleven cold full-PC guests remain active: code-word Quake, combined-candidate,
+Thirteen cold full-PC guests remain active: code-word Quake, combined-candidate,
 independent-REP, instruction-permission-shadow, checked-target-read and
 pair-safe read-retirement-prime
-Quake/Win95 pairs.
+Quake/Win95 pairs, plus the combined scalar/m64 FP pair (`652de481`, CPUs25/26).
 Code-word Win95 closed normally at **2,259,200,420 clocks** with a visually
 clean Welcome desktop, native exit0, stable pins, no OOM and reaped children.
 Its closed raw frame16 is retained; human confirmation/independent desktop
@@ -391,3 +391,37 @@ debt. Root: `external/tmp/ventium-fp-combined-soc.WPpVLjvn`. No combined guest
 or FPGA measurement is implied. Six additional closed-build PCH archives
 recovered **472,079,414 bytes**, verified recoverable by their original hashes;
 receipt: `external/tmp/ventium-combined-soc-pch.xmOyE6vW/closed.json`.
+
+## Read-prime result and next combined measurement
+
+Read-prime model
+`15f5605496acfed016b5af95d66e315eb1e01db04d9475c8c4b67203945ff453`
+measures **0.44004644 total U+V IPC**:
+**44,004,644 = 33,710,278 U + 10,294,366 V** retirements over exactly
+100M clocks, **1,200,012,763–1,300,012,763**. Source/runtime pins (237/17),
+live native identity and zero OOM were rechecked. Both unchanged endpoint
+images visibly advance from shells to grenade-launcher pickup during gameplay.
+Root: `external/tmp/ventium-read-prime-gameplay-r2.EmjPrsx7`.
+
+The initial exact 1.2B/1.3B extraction correctly refused: this run's periodic
+profiler is offset by 12,763 clocks. R2 retains the predeclared sample indices
+12/13, frames6/7 and exact 100M width, reporting the actual endpoints rather
+than interpolating or selecting a better window. Frames remain bracketed by
+500k progress records, not cycle-exact captures. No gameplay gain over target
+read's 0.44468922 is established. Equal-clock windows are not equal-work proofs.
+Exclusive residency still includes 21.075% pipeline memory wait, 9.009% FP
+admission and 7.905% FP load. The equivalent-work clock reduction needed for
+0.48 is 8.324%; these categories are not all removable overhead.
+
+Combined FP model `652de481` now has both cold original-workload candidates
+running, under unchanged resource, disk and completion guards: Quake CPU25,
+invocation `78a96c0143a2408aa724836afc3fdb3f`; Win95 CPU26,
+`f8bab538127049f88b3bfa73fda3914e`. No combined IPC or acceptance yet.
+Sixty-two explicitly inventoried closed historical snapshot/disk artifacts
+were losslessly compressed, recovering **5,180,596,224 bytes**. Original
+hashes, decompressed bytes and untouched remaining files were checked.
+Recovery is `zstd -d -k -- EXACT_FILE.zst`; manifests/receipts are in
+`external/tmp/ventium-old-state-archive.jnTyxZ6C` and
+`external/tmp/ventium-old-state-extra.mEmIHBHE`. Sources, executables, current
+runs and existing trace archives were preserved. Earlier inventory refusals
+changed nothing.
