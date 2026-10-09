@@ -65,6 +65,15 @@ is retained as failed; R2 verifies the actual success-register sentinel,
 normal quiescence and entire QEMU trace instead. Eight low-RAM image-boundary
 negative controls also pass. These do not replace the generic or standard suite.
 
+The corrected-host generic run still closes **FAIL**, native exit2: seven
+functional passes, 101 terminal-length mismatches and the same four hard
+cycle-band failures. Fresh parent executions using the exact candidate ELF,
+stack and backend match **all 108 complete architectural record sequences**.
+This establishes host-change nonregression, not a passing differential gate;
+no terminal records, state fields or cycle bands were changed. Receipts:
+`ventium-bfm-store-policy.9p8ilO1M/generic-closed.json` and
+`generic-parent-matched/closed.json`.
+
 The latest diagnostic separates stdout/stderr and checks the canonical
 `+ven_faultlog` delivery records with `check_faultlog.py`. It does not mistake
 the legacy reset-time stderr PC observer for an exception. The failed earlier
