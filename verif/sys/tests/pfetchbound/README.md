@@ -146,11 +146,11 @@ cases1–20 keep their existing metadata and grading requirements.
 
 ## Frozen, bounded execution
 
-Build only these BIOS fixtures into an externally chosen, fresh owned path
-under `/tmp` or the existing repository scratch area after checking space:
+Build only these BIOS fixtures into a fresh owned directory under
+`/home/yukidama/external/tmp`, after checking the mounted volume's free space:
 
 ```sh
-df -h / /tmp
+df -h /home/yukidama/external/tmp
 make -C verif/sys/tests/pfetchbound OUTDIR=/absolute/owned/new-fixtures
 ```
 
@@ -170,6 +170,14 @@ bash verif/sys/tests/pfetchbound/run-gate.sh \
 coverage. `--jobs 1..22` runs independent case pipelines concurrently with
 distinct GDB ports. Normal functional and `--cycle-func` both preserve complete
 architectural state; bare cycle traces are not an accepted substitute.
+
+For the UV-fast hardware-style memory profile, select `--modes cycle-func
+--l1-axi --axi-latency 0` (and repeat independently with latency `7`). Merely
+compiling `VEN_L1_AXI` does **not** select that runtime backend. Explicit AXI
+runs require the passive `VEN_L1D_PERF` counters and positive backing-service
+activity in every case. The summary records the selected backend and latency.
+This adds no trace filtering or relaxed fault/architectural comparison. The
+default direct-memory mode remains available as an explicitly labelled control.
 
 The 540s shell wall bound includes a 530s internal deadline (plus5s forced
 cleanup). Free-QEMU/golden/native/diff command bounds are30/90/60/30s.

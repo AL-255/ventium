@@ -63,12 +63,43 @@ def parse_args():
     parser.add_argument("--cases", type=parse_cases, default="all")
     parser.add_argument("--jobs", type=int, choices=range(1, 23), default=2)
     parser.add_argument("--port-base", type=int, default=41710)
+    parser.add_argument("--l1-axi", action="store_true",
+                        help="select the real compiled L1/AXI backend, with activity witness")
+    parser.add_argument("--axi-latency", type=int, choices=(0, 7), default=0,
+                        help="fixed read/write responder latency; requires --l1-axi")
     args = parser.parse_args()
     if args.tb is None or args.tb_sha256 is None or args.compile_sha256 is None:
         parser.error("explicit frozen --tb/TB_BIN and reviewed TB/compile SHA256 pins are mandatory")
     if not 1024 <= args.port_base <= 65536 - max(checks.CASES):
         parser.error("GDB ports must be unprivileged and leave space for twenty-two distinct cases")
+    if args.axi_latency and not args.l1_axi:
+        parser.error("--axi-latency requires --l1-axi")
     return args
+
+
+def configure_backend(args, defines):
+    """Select runtime memory explicitly; a compile define alone is insufficient."""
+    if not args.l1_axi:
+        return dict(name="direct-memory", axi_latency=None)
+    required = {"VEN_L1_AXI", "VEN_L1D_PERF"}
+    if not required <= set(defines):
+        raise ValueError("--l1-axi requires compiled AXI and its passive activity counters")
+    # The supervisor inherits these fixed settings. Remove unrelated fault
+    # injection/diagnostic controls before any native child is launched.
+    for key in list(os.environ):
+        if key.startswith(("AXI_", "TB_", "QEMU_")):
+            del os.environ[key]
+    os.environ.update(AXI_RLAT=str(args.axi_latency), AXI_WLAT=str(args.axi_latency))
+    return dict(name="l1-axi", axi_latency=args.axi_latency)
+
+
+def grade_axi_activity(stdout):
+    matches = re.findall(r"^\[L1DPERF\] fill cycles=(\d+) backing-wait=(\d+) backing-ack=(\d+)$",
+                         stdout, re.MULTILINE)
+    if len(matches) != 1 or int(matches[0][0]) == 0 or int(matches[0][2]) == 0:
+        raise ValueError("missing or inactive L1/AXI backing-service witness")
+    return dict(fill_cycles=int(matches[0][0]), backing_wait=int(matches[0][1]),
+                backing_ack=int(matches[0][2]))
 
 
 def one_case(case, args, before, deadline):
@@ -106,10 +137,14 @@ def one_case(case, args, before, deadline):
                         "--quiesce", "400", "--out", mode_leaf / "rtl.vtrace", "+ven_faultlog"]
                 if mode == "cycle-func":
                     argv.append("--cycle-func")
+                if args.l1_axi:
+                    argv.append("--l1-axi")
                 rc, out, err = command(argv, mode_leaf / "rtl", 60, deadline, 133)
                 trace = contracts.read_complete_trace(mode_leaf / "rtl.vtrace")
                 grade = checks.grade_native(case, trace, contracts.closed_log(out, allow_empty=True),
                                              contracts.closed_log(err), sym, bios, rc)
+                if args.l1_axi:
+                    grade["axi_activity"] = grade_axi_activity(contracts.closed_log(out))
                 command([sys.executable, "-B", REPO / "verif/diff/compare.py", "--mode", "func", "--all",
                          leaf / "qemu.vtrace", mode_leaf / "rtl.vtrace"], mode_leaf / "diff", 30, deadline, 0)
                 grade.update(mode=mode, full_architectural_differential=True)
@@ -137,6 +172,7 @@ def main():
         raise ValueError("use this folder's run-gate.sh inside the bounded serialized guard")
     defines = contracts.validate_build(args.tb, args.tb_sha256, record, args.compile_sha256,
                                        [], args.compile_cwd)
+    backend = configure_backend(args, defines)
     contracts.pin(contracts.QEMU, contracts.QEMU_SHA)
     checks.validate_manifest(json.loads((HERE / "manifest.json").read_text()))
     sources = [args.fixtures / f"pfetchbound_{case}.{ext}"
@@ -153,7 +189,7 @@ def main():
     args.out.mkdir(mode=0o700)
     (args.out / "inputs.json").write_text(json.dumps(before, indent=2) + "\n")
     deadline = time.monotonic() + 530
-    summary = dict(result="FAIL", defines=defines, selected_cases=args.cases, jobs=args.jobs,
+    summary = dict(result="FAIL", defines=defines, backend=backend, selected_cases=args.cases, jobs=args.jobs,
                    results=[], errors=[], full_case_set=args.cases == list(checks.CASES),
                    qualification="Selected directed fetch-boundary differentials only; not standard-suite acceptance.")
     print(f"PFETCHBOUND artifacts: {args.out}", flush=True)
