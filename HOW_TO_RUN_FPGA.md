@@ -3770,6 +3770,16 @@ events; neither is a deduplicated x86 macroinstruction count. This extension
 has passed selector/reader tests and hard-class shim lint, not FPGA deployment
 or timing qualification. Legacy primary/U-only counter registers are unchanged.
 
+`fpga/board-tools/ven_ipc_window.py` brackets each capability-checked UV64 read
+with stable clock-counter reads. Its pure callback API writes only the scan
+selector, refuses held reset/halt/breakpoint/freeze or unknown ABI, and reports
+lower/upper IPC bounds for MMIO sampling skew. Use the **lower bound** to judge
+a strict target such as 0.48; a midpoint that merely rounds to 0.48 is not proof.
+Zero-retirement intervals remain in the measurement. The caller must separately
+establish exclusive selector ownership, the pinned UV/fast image, genuine
+gameplay membership and an error-free completed timedemo. The helper alone
+does not qualify a workload or prove its prior execution history.
+
 **Candidate-only posted transport:** `VEN_DDR_POSTED` additionally needs
 `fpga/patches/0010-posted-ddr-transport.patch` applied to a new flow source copy,
 the candidate bridge and shim, and an explicit frozen define profile. The
