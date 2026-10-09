@@ -7,7 +7,7 @@ snapshot is used for the current cold full-PC runs.
 | Requirement | Verified result | Remaining |
 | --- | --- | --- |
 | CoreMark ≥2.1 CM/MHz | REP full direct-memory seeds: **2.107861982 / 2.110913372**, correct CRCs | Later permission-shadow candidate pending; not a DDR/cache/FPGA score |
-| Quake ≥0.48 total U+V IPC | **0.39555990**, `05611d6c`, 1.2–1.3B clocks | Below target; later REP/permission/target-read candidates not measured |
+| Quake ≥0.48 total U+V IPC | **0.43739106**, REP `139121ae`, 1,200,084,750–1,300,084,750 clocks | Below target; later permission/target-read/read-priming candidates not measured |
 | Standard suite | REP full CoreMark seeds pass; code-word Win95 closed at a visually clean desktop | Independent desktop acceptance and complete timedemo; newer candidates pending |
 | FPGA | Old image still deployed | Selected source, full timing/resource qualification and deployment |
 
@@ -56,7 +56,7 @@ window is not a completed timedemo. The preceding pop-drain window was 0.3877668
 equal cycle windows need not cover precisely the same scene progress, so this
 is not an equal-work percentage-gain claim.
 
-The latest combined-candidate gameplay audit is
+The preceding combined-candidate gameplay audit is
 `external/tmp/ventium-short-ifill-gameplay-audit.tNSWpZfe/audit.json`:
 **39,555,990 = 29,484,306 U + 10,071,684 V retirements / 100M clocks**, cycles
 **1,200,000,000–1,300,000,000**, giving **0.39555990 IPC**. Exact endpoints
@@ -68,6 +68,19 @@ REP admission, permission shadow, target read or prime-under-I-fill. The
 increase from 0.39002079 is small and does not meet 0.48. Equal-cycle bounds
 are not an equal-scene-work comparison; no isolated percentage gain is claimed.
 Full timedemo completion is still open.
+
+The latest **REP-enabled** gameplay audit is
+`external/tmp/ventium-rep-gameplay-audit.753XgqaN/audit.json`:
+**43,739,106 = 32,629,256 U + 11,109,850 V retirement events / 100M clocks**,
+cycles **1,200,084,750–1,300,084,750**, giving **0.43739106 IPC**. Model SHA256:
+`139121ae7864dd89b3b3cc06096ea51e4a045205497a10f93035d21b848c70ad`.
+Both endpoint frames visibly show changing Quake gameplay; RGB is unchanged.
+Their capture times are bracketed by adjacent 500k-clock progress records,
+not claimed cycle-exact. The audit rechecks 234 source and 17 runtime pins
+plus the live native identity. Full timedemo remains open. This supersedes
+0.39555990 as the latest measurement, not as a controlled equal-scene-work
+percentage gain. Permission shadow, target read and read-retirement priming
+are absent from this measured build.
 
 ## Fixes and evidence
 
@@ -107,8 +120,9 @@ Full timedemo completion is still open.
   precise memory-prefix checks and 1,024-clock stable parked state; they are
   not performance/suite acceptance.
   The separate cross-page dynamic-SMC oracle disagreement stays FAIL. Cold
-  Quake model `139121ae` runs on CPU29 and Win95 on CPU30; no gameplay or
-  desktop acceptance yet. Win95 invocation is `06d2598e26e541908ef2f442414ef802`.
+  Quake model `139121ae` runs on CPU29 and Win95 on CPU30; the new gameplay
+  window above measures 0.43739106, but neither timedemo nor desktop is accepted.
+  Win95 invocation is `06d2598e26e541908ef2f442414ef802`.
   Both full direct-memory CoreMark seeds for model `cb4b2f84` pass with
   **2.107861982 / 2.110913372 CM/MHz**, 711,621,545 / 710,592,874 clocks,
   542,165,465 / 541,458,844 retirements. The independent audit in
@@ -141,6 +155,13 @@ Full timedemo completion is still open.
   CPU28 and Win95 on CPU16, with identical core/FP source to the tested model.
   It is not gameplay-measured or accepted; the original no-permission-shadow
   experiment remains no-gain.
+- [Read-retirement cache priming](../verif/fe_pipe/HELD_READ_PRIME.md): private
+  repaired candidate reuses the existing next-read port after a retiring U
+  read. Four read-ALU loop **9→6 clocks**; 96 full micro comparisons, 76 system,
+  sixteen fault/trap/SMC and sixteen pair-ownership comparisons pass.
+  The first version lost immediate V pairing and was rejected; the repaired
+  version preserves the exact parent V counts. Actual helper enabled/disabled
+  passes 239,285 checks each. This is not a measured gameplay or FPGA gain.
 
 Closed scratch snapshots were losslessly compressed after checking their
 recorded hashes and absence of live users: **2,649,788,416 bytes reclaimed**.
@@ -154,6 +175,12 @@ were checked; use `gzip -dk -- EXACT_FILE.gch.gz` to recover them. Manifest:
 `external/tmp/ventium-closed-goldens-archive.YYawVksY/pch-manifest.json`.
 An initial historical-golden-cache archive was refused because its files are
 hard-linked; that cache was left completely untouched.
+
+A further **1,429,360,640 bytes** were recovered from eighteen explicit closed
+compiler PCH files, with decompression hashes and every other selected build
+file checked unchanged. Manifest and recovery details:
+`external/tmp/ventium-read-prime-pch-archive.dY9LZoDR/{manifest,closed}.json`.
+These remain losslessly recoverable with `gzip -dk -- EXACT_FILE.gch.gz`.
 
 ## Current profiling lead
 
@@ -175,13 +202,21 @@ and architecturally required clocks, not solely removable stalls. Holding
 the same retirement work fixed would require **18.75% fewer clocks** to
 reach 0.48; microbenchmarks alone cannot establish that result.
 
-Latest combined-build exclusive accounting also sums to exactly 100M clocks:
+Preceding combined-build exclusive accounting also sums to exactly 100M clocks:
 successful S_PIPE issue **21.14%**, pipe-memory wait **16.99%**, S_FETCH
 **13.18%**, FP admission **7.56%**, S_FLOAD **6.77%**, S_LOAD **6.35%**,
 slow/system admission **5.88%**, S_EXEC **4.30%**, S_DECODE **2.93%**. The
-complete list is in the latest audit's `residency.json`. Holding retirement
+complete list is in that build's audit `residency.json`. Holding retirement
 work fixed would still require **17.59% fewer clocks** for 0.48; occupancy
 is not a promise that those clocks can all be removed.
+
+Latest REP-build accounting in `ventium-rep-gameplay-audit.753XgqaN/residency.json`
+also partitions all 100M clocks: successful issue **23.43%**, pipe-memory wait
+**20.37%** (load **19.54%**, store **0.83%**), FP admission **8.17%**, S_FLOAD
+**7.35%**, S_LOAD **6.97%**, S_FETCH **5.97%**, slow/system admission **5.64%**.
+The remaining same-retirement-work reduction needed for 0.48 is **8.88% of
+clocks**. These are residency measurements, not guaranteed removable stalls;
+different gameplay progress prevents assigning the entire change to REP.
 
 ## Gates that must not be hidden
 

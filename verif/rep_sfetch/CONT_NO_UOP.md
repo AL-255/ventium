@@ -1,9 +1,13 @@
 # Independent REP continuation admission — October 9
 
 Private, default-off `VEN_REP_CONT_NO_UOP`. Not production, FPGA or standard-suite
-acceptance. Verified gameplay is **0.39555990 total U+V IPC**, combined
-model `05611d6c`, cycles **1.2–1.3B**. It predates this REP change.
-The REP model is unmeasured; **0.48 remains open**.
+acceptance. Latest verified gameplay is **0.43739106 total U+V retirement-event
+IPC**, REP model `139121ae`, cycles **1,200,084,750–1,300,084,750**.
+The audit in `external/tmp/ventium-rep-gameplay-audit.753XgqaN/audit.json`
+rechecks 234 source / 17 runtime pins, native identity and unchanged gameplay
+frames: **43,739,106 = 32,629,256 U + 11,109,850 V / 100M clocks**.
+This is not a completed timedemo or FPGA result. Permission/target-read and
+read-retirement priming candidates are newer and unmeasured; **0.48 remains open**.
 
 ## Cause and narrow fix
 
