@@ -7,7 +7,7 @@ snapshot is used for the current cold full-PC runs.
 | Requirement | Verified result | Remaining |
 | --- | --- | --- |
 | CoreMark ≥2.1 CM/MHz | REP full direct-memory seeds: **2.107861982 / 2.110913372**, correct CRCs | Later combined candidate pending full seeds; not a DDR/cache/FPGA score |
-| Quake ≥0.48 total U+V IPC | **0.44183623**, combined scalar/m64 queue `652de481`, 1,200,000,000–1,300,000,000 clocks | Below target; later operand-priming/read-through candidates not measured |
+| Quake ≥0.48 total U+V IPC | **0.44439995**, scalar-load/ref/AGI priming `f780b331`, 1,200,000,000–1,300,000,000 clocks | Below target; later read-through, larger-L2 and WBUF candidates not measured |
 | Standard suite | REP full CoreMark seeds pass; code-word Win95 closed at a visually clean desktop | Independent desktop acceptance and complete timedemo; newer candidates pending |
 | FPGA | Old image still deployed | Selected source, full timing/resource qualification and deployment |
 
@@ -834,3 +834,16 @@ Short integer CoreMark is exactly unchanged. No representative gain, suite
 pass, physical timing improvement or deployment is claimed for this prototype.
 Current full1,400-iteration CoreMark seeds continue with the unchanged60-minute
 native cap; they have not yet produced final scores.
+
+A separate **passive, non-acceptance** diagnostic on this unchanged live model
+sampled10,332,062 clocks around1.346–1.356B without a pause, signal, debugger
+attachment or guest write. Each endpoint has a one-clock sampling bracket.
+L1 read-wait-during-fill is22.03%, read-wait-idle9.19%, and platform-L2 streaming
+residency16.95%. These overlapping counters must not be added together.
+There are75,290 L1 miss starts and23,948 platform-L2 misses. The outer adapter
+issues47,895 read addresses and383,152 returned beats, consistent with its
+retained two-eight-beat-read policy plus an endpoint in-flight transaction.
+Evidence: `ventium-agi-prime-gameplay.5lgzu8Xr/counter-interval.json`, with the
+exact model-local compiled layout and both raw counter samples. This supports
+prioritizing cache/backing service; it does not justify deleting the hardware
+priming workaround or claiming a removable miss percentage.
