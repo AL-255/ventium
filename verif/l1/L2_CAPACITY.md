@@ -214,3 +214,28 @@ Neither cache enlargement nor a passing leaf test is a measured performance
 fix. Require actual gameplay ≥0.48, current full CoreMark seeds, Win95 desktop,
 completed Quake timedemo, full FPGA timing/resources and deployment before
 declaring the target achieved.
+
+## Current full-PC gameplay result
+
+The repaired256KiB model **`86731249` now measures0.49083588 total U+V IPC**
+in the predeclared **1.2B–1.3B-clock** window:49,083,588 retirements,
+including10,974,982 genuine V retirements. Both actual endpoint images7/8
+were viewed as advancing gameplay with unchanged RGB. The corrected capture
+association was declared before1.2B; counters and window never changed.
+All242 source/17 runtime pins, native/service identity, UV+fast mode and zero
+OOM are rechecked. Evidence:
+`ventium-l2-gameplay.VedZVnwA/window/{audit,residency}.json`.
+
+This clears the requested **fixed-window0.48 target**, superseding the
+32KiB read-through parent's0.43894030 measurement. Different scene progress
+precludes claiming an isolated capacity-only speedup from these equal-cycle
+windows. D-pipeline wait occupies17.185345% of this window, with every clock
+assigned exactly once in the residency report.
+
+Matching Win95 closed at1,230,059,901 clocks with a separately viewed clean
+Welcome desktop, normal native/supervisor exit, stable pins and no OOM/child.
+`ventium-l2-desktop.DFtvNkAx/closure-audit.json` retains the actual closure;
+manual desktop acceptance is pending. Quake still runs. The existing full
+direct-memory CoreMark scores2.107843209/2.110905243 are from a separate model,
+not this platform's cache/DDR measurement. Generic differential failures,
+full timedemo, full-chip FPGA timing/resources and deployment remain open.

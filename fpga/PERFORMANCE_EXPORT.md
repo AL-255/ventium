@@ -2,8 +2,9 @@
 
 This is **UNQUALIFIED source preparation**, not a bitstream, timing pass or
 transfer of simulation acceptance to silicon. Latest verified Quake gameplay
-is **0.43894030 total U+V IPC**, model `e9097d96`, clocks 1.2B–1.3B. The larger-L2
-model below remains gameplay-unmeasured. Current full direct-memory CoreMark
+is **0.49083588 total U+V IPC**, larger-L2 model `86731249`, clocks 1.2B–1.3B.
+This passes the fixed-window target, not full timedemo or silicon acceptance.
+Current full direct-memory CoreMark
 scores are **2.107843209 / 2.110905243 CM/MHz** on the separate `b5453f16` model;
 they are not FPGA/cache/DDR scores.
 
@@ -78,14 +79,33 @@ Neither wrote payloads. Both issues were corrected before the successful export.
 
 ## Remaining gates
 
-No Vivado run or board deployment was started. External free space initially
-was only7.6GiB. A checked cleanup removed54 regenerable GCC precompiled headers
-(4.424GiB), retaining all sources, binaries, objects, receipts and guest data.
-Free space afterward was12,846,800,896bytes, still just below the strict12GiB
-admission floor; rounded `df -h` output is not sufficient. The removal receipt
-is `ventium-pch-cleanup.WHAS3yCU/removed.json`. A single guarded build
-must satisfy storage/RAM admission and full implementation timing/resource
-checks. The current generic differential gate remains failing, both cold
-larger-L2 guests are still running, and no complete timedemo/standard-suite
-pass is claimed. Hardware IPC must count **both** U and V retirements; the
-legacy primary-retire debug pulse alone is insufficient.
+No board deployment has occurred. External free space initially was only7.6GiB.
+Checked cleanup removed54 regenerable GCC precompiled headers (4.424GiB), then
+664 relocatable objects/static archives (71,222,760bytes) from six closed builds.
+All sources, executable models, receipts, test evidence and guest data remain;
+removed compiler products can be regenerated. Receipts:
+`ventium-pch-cleanup.WHAS3yCU/removed.json` and
+`ventium-object-cleanup.uqb5lvjO/removed.json`. Free space then cleared the exact
+12GiB admission floor; rounded `df -h` output alone was not sufficient.
+
+The earlier posted16 full synthesis stopped after4,469seconds at approximately
+20GiB resident +7.38GiB swap, entering technology mapping after timing
+optimization. The new export includes the separately measured tag-LUTRAM area
+relief (isolated L1 LUTs22,051→13,014; FFs6,877→1,691), but also more L2 capacity.
+Full-chip memory relief is **not assumed** and resource ceilings are unchanged.
+
+A fresh single guarded synthesis started **2026-10-09 23:25:07UTC** at
+`ventium-performance-synth40.t5wzn9jz`, invocation
+`d08d8a9f17ff4f1a86fa4a40352ac84f`. It uses40MHz, `balanced`, one synthesis
+worker, hard20GiB RAM/8GiB swap, a27GiB combined early-stop threshold, 2GiB
+host/disk reserves and a4-hour bound, not an ETA. Input pins and live resource
+samples are retained. Controller R1 refused a manifest list/count type error
+**before any Vivado launch**; R2 checks the exact definition list and count.
+The failed admission source/log is preserved. No implementation has started.
+
+The generic differential gate remains failing. Larger-L2 Win95 closed normally
+at a visually clean desktop but needs independent acceptance; Quake continues.
+No complete timedemo/standard-suite pass is claimed. Hardware IPC must count
+**both** U and V retirements; the legacy primary-retire debug pulse alone is
+insufficient. Native synthesis, implementation timing/resource and deployment
+checks remain mandatory before hardware qualification.

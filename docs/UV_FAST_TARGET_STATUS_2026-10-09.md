@@ -7,9 +7,9 @@ snapshot is used for the current cold full-PC runs.
 | Requirement | Verified result | Remaining |
 | --- | --- | --- |
 | CoreMark ≥2.1 CM/MHz | Current `b5453f16` full direct-memory seeds: **2.107843209 / 2.110905243**, correct CRCs | Not a DDR/cache/FPGA score |
-| Quake ≥0.48 total U+V IPC | **0.43894030**, read-through `e9097d96`, 1,200,000,000–1,300,000,000 clocks | Below target and preceding 0.44439995 window; larger-L2 and WBUF candidates not measured |
-| Standard suite | Current full CoreMark seeds pass; AGI-prime Win95 closed at a visually clean desktop | Independent desktop acceptance and complete timedemo; larger-L2 candidate pending |
-| FPGA | Old image still deployed | Selected source, full timing/resource qualification and deployment |
+| Quake ≥0.48 total U+V IPC | **0.49083588**, repaired 256 KiB-L2 `86731249`, 1,200,000,000–1,300,000,000 clocks | Fixed gameplay-window target passed; full timedemo and silicon performance pending |
+| Standard suite | Current full direct-memory CoreMark seeds pass; larger-L2 Win95 closed at a visually clean desktop | Independent desktop acceptance, complete timedemo and remaining differential failures |
+| FPGA | Old image still deployed; checked 40MHz performance export synthesizing | Native synthesis, full timing/resource qualification and deployment |
 
 The preceding combined full CoreMark model is
 `c93ae26b20685827dacf45b466256e4139bb1d068d7546ec467801c0a8502c0b`;
@@ -917,3 +917,40 @@ viewed final capture is a readable Welcome desktop, raw SHA256
 Evidence:`ventium-read-through-desktop.pMbjpek1/closure-audit.json`. It remains
 `CLOSED_UNQUALIFIED` pending independent desktop acceptance; the later L2
 candidate and full timedemo are not accepted by this result.
+
+## Larger-L2 candidate clears the fixed gameplay target
+
+Latest verified gameplay is **0.49083588 total U+V IPC** on model
+`86731249748f06e2baa1ba59ea3a92d5fb1313ca12b70935006374aad859c6df`.
+The predeclared counter window remains exactly **1.2B–1.3B clocks**:
+**49,083,588 = 38,108,606 U + 10,974,982 V** retirements /100,000,000 clocks.
+This supersedes read-through `e9097d96` at0.43894030, not the separate full
+direct-memory CoreMark results of **2.107843209 /2.110905243 CM/MHz**.
+The latter model contains WBUF admission; this full-PC model does not.
+
+Evidence: `external/tmp/ventium-l2-gameplay.VedZVnwA/window/{prepared,audit,residency}.json`.
+Both unmodified endpoint images were independently viewed: grenade-launcher
+pickup followed by projectile impact/explosion in the corridor. Actual frames7/8
+bracket the endpoints at1,199,965,200–1,200,465,200 and
+1,299,965,200–1,300,465,200. The capture-index correction was declared before
+the first endpoint in `frame-association-plan.json`; it changes no counter,
+window, guest state or runtime setting. The audit binds that declaration and
+rechecks242 source/17 runtime inputs, native/service identity, no OOM, UV plus
+system/relocated fast pipeline and fast loads/stores, with no STEP or snapshot.
+
+All100M clocks remain accounted for. Exclusive D-pipeline waiting is17.185345%,
+successful fast issue26.883629%, x87 issue/occupancy11.497952%, FLOAD8.000016%
+and ordinary LOAD4.565042%. These are residencies, not entirely removable
+stalls. Equal-cycle windows cover different scene progress: this does not
+establish an isolated percentage speedup from L2 capacity.
+
+The same larger-L2 Win95 model closed normally at **1,230,059,901 clocks /
+211,454,200 retirements**, native/supervisor exit0, complete log EOF, unchanged
+pins, no OOM and all children gone. Its final frame7 is the same readable
+Welcome desktop (raw SHA256`0589d29b72d19308e5eb7eb4d62d0c96348cf6eb949d96c236f5d6a202f5f36c`).
+Evidence: `ventium-l2-desktop.DFtvNkAx/closure-audit.json`. Independent human
+confirmation is requested; status remains `CLOSED_UNQUALIFIED`.
+
+**Not final acceptance:** cold Quake continues to full timedemo completion;
+the generic differential gate still fails, and no FPGA score or successful
+new deployment is claimed. No control run replaces UV+fast acceptance.
