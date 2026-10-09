@@ -621,3 +621,28 @@ bounded Vivado family used 4.18 GB peak RAM, zero swap/OOM, took 255.49 seconds
 and has exited. No processor bitstream or deployment was performed. Raw reports:
 `external/tmp/ventium-read-through-physical.ou0amfh0`; see the
 [bridge evidence](../verif/l1/AXI_READ_THROUGH.md).
+
+### Preserve actual supervisor closure, without changing acceptance
+
+The read-prime desktop's later `audit_closed.py` correctly refuses a missing
+supervisor invocation: systemd had already garbage-collected the successful
+transient service. Its native exit/EOF/result and matching journal invocation
+remain, but **no inactive supervisor receipt was reconstructed** and this
+strict audit is not called a pass.
+
+`tools/hold_supervisor_closure.py` prevents that evidence-loss race for the
+seven still-live guests. It holds a D-Bus `RefUnit` for each exact expected
+invocation, archives the manager's actual inactive/failed properties after
+exit, then immediately releases that reference. It cannot launch, stop,
+restart, step or modify any guest. Failure closures are archived too and are
+not relabelled as successful runs. The existing closed-suite checker's optional
+externally hashed supervisor receipt remains unchanged.
+
+Six unit tests and a real ten-second transient-service fixture pass, including
+preserving its actual invocation/exit code after process exit. Evidence:
+`external/tmp/ventium-supervisor-closure.E7WfTQP6`. The keeper itself is a single
+96 MiB/no-swap, 10%-CPU, 16-task, bounded service, invocation
+`97a85ec493694c80acba70e20680e1b6`. Its live-admission record binds all seven
+owners before closure. This is metadata retention only, not a new CPU test or
+desktop acceptance. Current gameplay remains **0.44004644**, `15f56054`,
+**1,200,012,763–1,300,012,763** clocks; newer candidates remain unmeasured.
