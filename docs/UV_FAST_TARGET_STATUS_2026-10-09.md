@@ -682,3 +682,43 @@ The last full direct-memory CoreMark scores remain **2.107861982/2.110913372**
 on `cb4b2f84`; no current cache/DDR-backed2.1 score is established. Generic
 gate repair, complete standard suite, ≥0.48 gameplay IPC and deployment remain
 open. No U-only/STEP/global-slow fallback is counted as progress.
+
+## Platform capacity and a newly exposed cold-boot protocol bug
+
+Current verified gameplay is still **0.44183623**, `652de481`, clocks
+**1,200,000,000–1,300,000,000**. The ≥0.48 target is open. Full direct-memory
+CoreMark remains **2.107861982/2.110913372**, older `cb4b2f84`; these do not
+qualify a new cache/DDR-backed score.
+
+The [256 KiB platform L2 candidate](../verif/l1/L2_CAPACITY.md) preserves the
+P5 L1s, four ways, 64-byte lines, registered read-first RAM, UV/system-fast
+execution and the existing DDR workaround. It passes 512 capacity/order/reset
+cases plus 45 store tests (313,344 stores, all byte masks and all sets). The
+geometry-only leaf costs +3,314 CLB LUTs/+56.5 BRAM tiles, with setup-limited
+isolated frequency 214.09→164.26 MHz. Both still fail isolated hold: not CPU
+Fmax, full-chip sign-off or deployment.
+
+Its first cold full-PC model `e5b4b41b` **failed**, with no retired instruction
+in either guest past18M clocks. Increasing depth exposed a real protocol bug:
+L2 advertised request-ready during its tag-initialization state, then dropped
+the early first fetch. The repair applies normal backpressure only during
+reset/tag initialization; it does not extend a harness delay or slow the normal
+pipeline. 576 early-request/reset outcomes reproduce the old failure and pass
+the fix. All 512 capacity and 45 store cases pass again with the repair.
+
+Repaired model **`86731249`** is now cold-booting Quake and Win95 on CPUs24/26;
+both execute BIOS instructions with the unchanged reset sequence. Evidence:
+`external/tmp/ventium-l2-init-soc.tt7Ma9rk`; source/runtime/native/resource
+admission passes, with 133 unchanged defines and existing UV-fast paths.
+The 98 inherited full-SoC structural warnings remain unchanged, not waived as
+clean. No gameplay or standard-suite pass exists yet. A separate bounded
+physical leaf rerun is in progress; no full FPGA rebuild or programming occurred.
+
+The older combined-FP Win95 run (`652de481`) closed normally at
+**1,483,622,041 clocks**, 228,426,889 retirements, after a readable Welcome
+desktop capture. Native exit0, reaped processes, EOF, unchanged pins and actual
+successful supervisor closure are retained at
+`external/tmp/ventium-fp-combined-desktop.MWjmSoWU` and
+`ventium-supervisor-closure.E7WfTQP6/live`. Its independent/manual desktop
+acceptance remains open: CLOSED_UNQUALIFIED is not a suite pass. Its Quake
+timedemo continues. The two failed capacity-only guests are closed as FAIL.
