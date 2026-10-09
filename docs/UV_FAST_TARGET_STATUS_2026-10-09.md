@@ -83,8 +83,13 @@ is not an equal-work percentage-gain claim.
   uop-short-fetch profile dependency without enabling a uop cache. 32 complete
   QEMU comparisons, 76 system cases, four SMI and 36 external-IRQ structural
   cases pass.
+  Eighteen halt/resume diagnostics also pass full architectural comparison,
+  precise memory-prefix checks and 1,024-clock stable parked state; they are
+  not performance/suite acceptance.
   The separate cross-page dynamic-SMC oracle disagreement stays FAIL. Cold
   Quake model `139121ae` runs on CPU29; no gameplay result yet.
+  Both direct-memory short CoreMark seeds pass with 1,648 fewer clocks; full
+  seeds for model `cb4b2f84` run under the unchanged 60-minute cap, not yet scored.
 
 ## Current profiling lead
 

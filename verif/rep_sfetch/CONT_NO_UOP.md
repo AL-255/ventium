@@ -58,6 +58,18 @@ Root: `external/tmp/ventium-rep-no-uop.7Yn9EBWr`.
   All runs retain actual U/V pairing, one request/acknowledgement and exactly
   one vector64 delivery. The initial checker incorrectly treated that intended
   interrupt as an unexpected fault; its failed run is retained.
+- `debug-r4`: **18 halt/resume cases**, each functional and cycle execution:
+  placements 0/17/31, AXI latency 0/7, inactive/pending/started stimulus.
+  The new host probe links the unchanged frozen RTL archive and drives only
+  `dbg_halt_req`, never STEP, breakpoint, internal registers or guest memory.
+  Pending next-source reads cancel before access; already-started reads finish
+  their element before HALTED. Exact ECX/ESI/EDI/restart EIP, all GPRs/EFLAGS
+  stable for 1,024 clocks, complete committed memory prefix and untouched suffix
+  are checked. Resume retains every architectural record and full pinned-QEMU
+  agreement. Inactive traces are byte-identical in both modes; actual U/V pairs
+  remain outside the pause. Debug-active cases are **diagnostics, not performance
+  or standard-suite acceptance**. Initial attempts rejected optimized-away
+  signal aliases and incorrect comparator CLI spelling; their failures remain.
 
 Warm 32-element MOVSD at zero added AXI latency: candidate gaps are
 29×3 clocks + 2×2 clocks. Controls mostly cost 5 clocks at offsets 0/31,
@@ -84,9 +96,10 @@ and checks a repeated warm U/V pair. `matrix-r1` through `matrix-r4` are retaine
 
 Canonical UV-fast/AXI `make verify` remains **FAIL**, native exit 2, stable pins:
 existing terminal-record discrepancies and four hard cycle bands. No waiver.
-Focused NMI/host-debug arrival tests at pending and already-started source
-phases remain needed. SMI covers preissue cancellation and external IRQ covers
-completion of a started source. This candidate is not declared complete.
+Focused NMI arrival coverage remains needed. Host halt/resume covers both
+pending and already-started phases; SMI covers preissue cancellation and
+external IRQ covers completion of a started source. This candidate is not
+declared complete.
 
 ## Full-PC measurement
 
@@ -108,3 +121,22 @@ This model has **no gameplay score, full CoreMark score, Win95 desktop or FPGA
 acceptance yet**. Its Win95 launcher is not launched. Existing combined tests
 continue independently; source/native pins and complete timedemo checks remain
 mandatory before any success claim.
+
+## CoreMark qualification
+
+Direct-memory model `cb4b2f841284b123786791cdf5fc356eabb546555facaa185b39e8a5edd30951`
+is built from this exact core in `external/tmp/ventium-rep-no-uop-coremark.Gszccvp5`.
+Both short ten-iteration seeds pass CRCs, zero actual faults and exact
+control/optimized whole-model plus mapped-memory equality. The host-only
+settle optimization changes no simulated clock or state. Both seeds save
+**1,648 core clocks** versus the combined parent, with identical retirement
+counts; short seeds are not score-eligible.
+
+`qualify-r3` repeats on CPUs16/17 and passes all 15 invalid-mode controls.
+Full 1,500-iteration seeds run in `full-r3`, invocation
+`f9fede48a89b4afba77ef45ea3435e49`, with the unchanged **3,600-second cap each**.
+Fresh measured host rates project about 3,436/3,366 seconds. The launch-only
+planning buffer is reduced from four minutes to two; correctness, CRC, score
+and hard runtime gates are unchanged. The combined parent just closed at
+3,413/3,327 seconds on those CPUs. Full REP correctness/scores remain pending;
+the parent's 2.10736/2.11041 scores are not transferred to this binary.
