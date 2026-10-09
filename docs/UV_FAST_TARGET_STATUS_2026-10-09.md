@@ -288,3 +288,37 @@ Next: finish candidate gameplay measurement; qualify the combined candidate
 with architectural fault/SMC tests, resolve the generic gate, then complete
 the full standard suite and FPGA deployment. Keep each measured binary,
 source closure, settings and native receipts separate.
+
+## Ordered m64 queue and saved-pointer correction
+
+The next isolated prototype widens the existing ordered FP slot from m32 to
+m64: 32 added payload bits and one width bit, no additional arithmetic unit
+or speculative stack state. The regression uncovered an older protected-mode
+saved-FDP defect (`dbase + q_ea` instead of the segment offset). A separate
+metadata-only correction preserves real/V86 pointer values and leaves actual
+translated memory addresses unchanged. Both are private; production/full-PC
+and FPGA integration remain open. See
+[implementation and evidence](../verif/fe_pipe/FP_MEM64_QUEUE.md).
+
+Final micro model `d1811627` in
+`external/tmp/ventium-fp-mem64-r2.LCJyV4S0` passes 256 complete QEMU overlap
+comparisons, 24 first/second-operand-page fault comparisons and 76 broader
+system comparisons, each with a cycle execution. All forced-FWAIT controls
+remain unchanged; eligible directed loops save 1–8 clocks per iteration.
+The actual leaf passes 25 enabled checks, 12 disabled/parent checks and a
+real unchanged-parent negative control. Three synthesis-guard lint profiles
+pass. The generic gate still fails with 101 terminal mismatches/four cycle
+bands; all 108 complete functional traces match a fresh same-input parent
+execution. No masks, guest changes or widened bands were used.
+
+This does **not** change the gameplay baseline: **0.44513116**, `1f2583cb`,
+1.200–1.300B clocks. Neither the m64 change nor scalar dispatch has a gameplay
+measurement; no share of Quake improvement is attributed to their micro gains.
+Post-queue event coverage, full standard-suite and FPGA qualification remain
+required before promotion.
+
+Twenty-two additional explicitly selected closed-build PCHs were losslessly
+archived, recovering **1,578,122,581 bytes**. Their decompressed hashes and all
+other selected build files were checked. Executables, guest inputs and traces
+are unchanged. Recovery: `gzip -dk -- EXACT_FILE.gch.gz`; manifest and receipt:
+`external/tmp/ventium-mem64-pch-archive.MSxyFXMj/{manifest,closed}.json`.
