@@ -11,7 +11,7 @@ have no gameplay measurement. Complete direct-memory CoreMark results are
 The actual full-CoreMark binary `b5453f16` repeats the short diagnostic on
 the unchanged low-RAM ordinary entry images below. All four runs close with
 native exit0, all five CRCs correct, real V retirement, no canonical delivered
-fault, unchanged212 input pins, zero OOM and every child reaped. The supervisor
+fault, unchanged226 input pins, zero OOM and every child reaped. The supervisor
 also closes successfully. These are **10-iteration, insufficient-duration
 diagnostics**, not valid CoreMark scores. Neither AXI case uses bypass starts.
 
