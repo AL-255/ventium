@@ -7,9 +7,54 @@ snapshot is used for the current cold full-PC runs.
 | Requirement | Verified result | Remaining |
 | --- | --- | --- |
 | CoreMark ≥2.1 CM/MHz | Current `b5453f16` full direct-memory seeds: **2.107843209 / 2.110905243**, correct CRCs | Not a DDR/cache/FPGA score |
-| Quake ≥0.48 total U+V IPC | **0.49083588**, repaired 256 KiB-L2 `86731249`, 1,200,000,000–1,300,000,000 clocks | Fixed gameplay-window target passed; full timedemo and silicon performance pending |
+| Quake ≥0.48 total U+V IPC | Latest **0.51351913**, repaired 256 KiB-L2 `86731249`, 2.2B–2.3B clocks; **0.48907486** over all 1.2B–2.3B | Original fixed-window result 0.49083588; full timedemo and silicon performance pending |
 | Standard suite | Current full direct-memory CoreMark seeds pass; larger-L2 Win95 closed at a visually clean desktop | Independent desktop acceptance, complete timedemo and remaining differential failures |
-| FPGA | Old image still deployed; checked 40MHz performance export synthesizing | Native synthesis, full timing/resource qualification and deployment |
+| FPGA | Old image still deployed; 40 MHz synthesis stopped by resource watchdog on October 10 | No accepted new synthesis/bitstream; timing/resource qualification and deployment remain open |
+
+## October 10 continuation
+
+The newest complete 100M-clock window, selected by timestamp rather than IPC,
+is **51,351,913 total U+V retirements / 100,000,000 clocks = 0.51351913**.
+Model `86731249` and native invocation are unchanged. The latest audit
+`external/tmp/ventium-l2-gameplay.VedZVnwA/latest-2300000000/audit.json`
+rechecks source/runtime identities, log prefix, no OOM and unmodified endpoint
+pixels. Both frames visibly show advancing gameplay. This later window is
+**not** substituted for the original predeclared 1.2B–1.3B test.
+
+All eleven consecutive windows from 1.2B through 2.3B average **0.48907486**;
+individual windows range 0.45969759–0.51351913, so the claim is not that every
+scene sustains 0.48. The full 969-frame timedemo remains running, incomplete.
+The independent C1 (`6f71bad6`) and RET (`56707c8a`) candidates below have no
+gameplay measurement or standard-suite acceptance.
+
+- [RET exact-byte capture](../verif/fe_pipe/RET_SHORT_WINDOW.md) retains normal
+  decode/stack/target checks and adds no pipeline stage or buffer. All 256
+  ordinary/relocated/SS16/SS32 line-position fixtures pass at AXI latencies 0/7
+  against QEMU on both control and candidate. Complete traces and actual U/V
+  pairing are checked; 160/512 matched totals improve, none regress. Short
+  cache-backed CoreMark removes 53,823/54,418 clocks (about 1.04% throughput)
+  with unchanged retirements/CRCs. Its short service-window ratios
+  **1.97703/1.98018** remain below 2.1 and are **not valid benchmark scores**.
+- [Compact C1 repair](../fp_shared/tb/ROUND_C1.md) passes 15,600 rounder cases,
+  912 SRT cases and 2,064 connected-top cases, plus directed full-core SRT/ALU
+  output checks with zero value/C1/precision mismatches. It also fixes four
+  factor-of-two FSQRT cases. The backport preserves the measured parent's
+  shared ADD/SUB operand selection and registered memory forwarding; wholesale
+  copying from the checkout would discard them. No performance gain is claimed.
+
+The single Vivado family completed timing optimization but crossed the host's
+2 GiB available-memory reserve at technology mapping. The watchdog stopped it
+at **01:16:36 UTC**, after 6,688.66 seconds, native exit 143 (SIGTERM), **not an
+OOM kill**. Peak cgroup memory was 21,091,545,088 bytes and swap 8,589,918,208;
+source pins stayed unchanged. No implementation or deployment started. Receipt:
+`external/tmp/ventium-performance-synth40.t5wzn9jz/synthesis-closed.json`.
+Do not accept a stale checkpoint or restart the identical flow without reviewing
+its memory footprint. The user browser was not stopped.
+
+Remaining: cache-backed ≥2.1 valid CoreMark, new-candidate exception/SMC/event
+coverage, differential/timing gates, full standard suite, independent Win95
+desktop acceptance, and actual FPGA performance. The direct-memory full-seed
+scores in the table do not discharge the cache-backed requirement.
 
 The preceding combined full CoreMark model is
 `c93ae26b20685827dacf45b466256e4139bb1d068d7546ec467801c0a8502c0b`;

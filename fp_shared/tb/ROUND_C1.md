@@ -1,9 +1,9 @@
 # Compact round-direction sideband proposal — October 10
 
-**Private, unpromoted RTL proposal.** It has not yet compiled or repaired the
-complete FPU. The original package, active FPGA synthesis and live full-PC
-models remain unchanged. Verified gameplay is **0.49083588 total U+V IPC**,
-`86731249`, clocks1.2B–1.3B; this proposal has no gameplay measurement.
+**Private, unpromoted RTL candidate.** Leaf, connected-top and directed full-core
+checks now pass (see the closed results below); production sources and live
+full-PC models remain unchanged. Latest verified gameplay is **0.51351913 total
+U+V IPC**, `86731249`, clocks 2.2B–2.3B; this candidate has no gameplay measurement.
 
 The [912-case observation](SRT_ROUND_FLOOR.md) proves that simply preserving
 C1 is wrong for both FDIV and FSQRT. The proposed
@@ -150,3 +150,51 @@ identities and sole `flock 9` children were checked, then only those unstarted
 waiters were stopped/requeued with corrected environments. No running compiler,
 Vivado process, pinned source, vector or expected result was changed. The old
 top's failed invocation and the cancelled original waiters remain in the logs.
+
+## Closed RTL and full-core checks
+
+R2's first actual launch exposed another driver issue: Python subprocesses
+closed inherited lock FD 9, so the nested guard waited for its own parent.
+The exact waiting tree was stopped, retaining its attempt. R3 preserved FD 9
+but failed with compiler-not-found (127) under systemd's PATH. R4 also pins
+`VENTIUM_VERILATOR_BIN=/tools/verilator/v5.046/bin/verilator`. The real guard
+still validates the cgroup and locked descriptor; its policy is unchanged.
+
+All four R4 services closed successfully at
+`external/tmp/ventium-guarded-leaf-r4.JYAr22mz`:
+
+- `srt/closed.json`: **912 cases**, parent four value failures reproduced,
+  candidate zero, unchanged latency and reset cancellation.
+- `round/closed.json`: **15,600 cases**, exact value/C1 oracle and all 83
+  original value/exception bits preserved.
+- `top/closed.json`: **2,064 arithmetic/SRT cases**, three stack-fault cases,
+  consecutive owners and reset cancellation. Model `010c233a`.
+- `ret/closed.json`: unrelated **790-case** admission predicate; not FPU evidence.
+
+Every run retained strict structural errors, original vectors, stable pins,
+one compiler and bounded execution; no production RTL was changed.
+
+Full-core backport R1 correctly refused a wholesale file copy: the measured
+parent has shared ADD/SUB/SUBR input selection and registered arithmetic-memory
+forwarding absent from the checkout's unmodified FPU files. Copying over them
+would silently lose earlier performance/area work. R2 applies only the C1
+hunks and preserves both features. Exactly four files change, and the define
+set is identical to `b5453f16`. The rejected R1 attempt is retained.
+
+R2 private root: `external/tmp/ventium-fp-c1-core-r2.rvshYb56`;
+model SHA256 `6f71bad660d57b3e4ccf6801739799cde0e8afdf69968cf58d2336831cf8bddf`.
+Fresh strict/asserting full-core build passes with its own host object/header.
+Using the unchanged native-x87/QEMU/exact-math authorities and ordinary-entry
+ISA fixtures in UV-fast mode:
+
+- `srt-observation/result.json`: **912 cases, zero value/C1 mismatches**;
+  fixes the original four factor-of-two square-root failures and 456 C1 failures.
+- `alu-observation/closed.json`: **1,152 cases, zero value/C1/precision-flag
+  mismatches**; fixes the original 576 C1 failures.
+
+Both actual guest exits are zero, actual fault deliveries zero, and actual V
+retirement is observed. These initial full-core witnesses use direct memory;
+they are directed output-oracle checks, **not complete per-instruction QEMU
+equivalence**, standard-suite acceptance, gameplay or FPGA results. Production
+promotion still requires alternate/legacy interface handling, further exception
+coverage, the generic differential gates and full standard suite.
