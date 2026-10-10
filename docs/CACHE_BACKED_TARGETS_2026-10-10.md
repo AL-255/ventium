@@ -5,10 +5,10 @@ U+V retirement-event gameplay IPC**, the error-free standard suite, green
 differential gates, and a working FPGA deployment. U-only/STEP/global slow
 fallbacks are not acceptance. REP retirement events are not P54 macroinstructions.
 
-**Latest verified measurement, 17:13 UTC:** `bfb867f7` reaches **0.51469855 IPC**
-over clocks **3,600,065,237–3,700,065,237**: 39,292,854 U + 12,177,001 V
-retirement events. All 25 consecutive windows from
-1,200,065,237 average **0.4940587592**, retaining the **0.34569625** dip at
+**Latest verified measurement, 17:37 UTC:** `bfb867f7` reaches **0.50510994 IPC**
+over clocks **3,800,065,237–3,900,065,237**: 38,963,163 U + 11,547,831 V
+retirement events. All 27 consecutive windows from
+1,200,065,237 average **0.4943896**, retaining the **0.34569625** dip at
 2,100,065,237–2,200,065,237 and every other sub-0.48 interval, including the
 **0.47062856** window at 2,800,065,237–2,900,065,237 and **0.45825794** at
 3,100,065,237–3,200,065,237.
@@ -16,11 +16,12 @@ The margin above 0.48 is now small; this is not a completed-demo average.
 This is the same cache-backed model with
 qualified **2.101890118 / 2.107616105 CM/MHz** below, not a score borrowed from
 another build. Latest raw-pixel/counter/ownership audit:
-`ventium-store-admit-gameplay-r15.wnUlv89g/audit.json`. The latest window is
-0.51469855; all 1,235,146,898 events over 2.5B clocks count. The four added
-windows are 0.49864934, 0.53008187, 0.52681791 and 0.51469855, selected by
-timestamp, not IPC. Both unchanged-pixel endpoint images show rendered
-first-person stone rooms with a weapon and changed viewpoint. Health is 73
+`ventium-store-admit-gameplay-r16.WaBK8xsR/audit.json`. The latest window is
+0.50510994; all 1,334,851,920 events over 2.7B clocks count. The two added
+windows are 0.49194028 and 0.50510994, selected by timestamp, not IPC.
+Both unchanged-pixel endpoint images show rendered first-person gameplay:
+a stone-floor/ramp view then a torch-lit arched room with an enemy, weapon
+and changed viewpoint. Health is 73
 in both; armor remains 0. **Historical visual-note
 correction, 15:13 UTC:** earlier notes mistook the left-hand armor value (0)
 for health; health is to the right of the face, consistent with
@@ -107,7 +108,13 @@ saved-cache **upper** FP word's shadow selector into SRT control. A separate
 [high-window selector](../verif/l1/HIGH_WINDOW_PAYLOAD.md) preserves valid/ACK
 and passes the complete-clock leaf A/B, 2,656 full QEMU comparisons and 1,328
 identical complete cycle-record pairs, including six FP operand boundaries.
-Its canonical gate is running separately; existing failures are not waived.
+Its canonical gate closes FAIL, with all 20 complete cycle-record streams
+unchanged from the parent; existing failures are not waived. The full-PC
+derivative is `f59d75ad`, and its exact FPGA export passes source/profile
+checks and strict CPU-hierarchy lint. Both new short CoreMark seeds preserve
+the exact original CRCs and 4,767,218 / 4,753,406 ticks (duration-invalid);
+an independently gated synthesis diagnostic starts at 17:42 UTC. No new
+frequency or gameplay result is inferred from these passes.
 Neither its gameplay IPC nor its FPGA frequency is measured.
 The [hardware backport record](../fpga/RESPONSE_PAYLOAD_EXPORT.md) identifies
 the source bundle, two intended RTL deltas, native owner and resource guards.

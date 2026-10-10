@@ -62,9 +62,22 @@ relocations, all 32 instruction alignments and AXI latency 0/7. There are 24
 additional cases at operand offsets 0, 1, 24, 25, 29 and 4093, proving both
 high-response eligibility and cross-line/page fallback. Actual V retirement,
 normal native exit and unchanged observation timing are checked throughout.
-The unchanged canonical `make verify` is now running with
-both AXI backends at latency seven. Existing canonical failures are not waived.
+The unchanged canonical `make verify` closes **native 2 / FAIL** after a
+397.6-second worker phase, with both AXI backends at latency seven: 7/108
+functional passes and the same 12/19 scored cycle-band failures. Independent
+`verification/generic-audit.json` rechecks 4,760 pins and confirms all 20
+complete cycle streams equal the parent. The controller itself exits 1;
+existing canonical failures are not waived or presented as a pass.
 Eight native workers fit the fixed task envelope; builds use 32 compiler jobs.
+
+The [full-PC/FPGA backport](../../fpga/HIGH_WINDOW_PAYLOAD_EXPORT.md) subsequently
+builds as `f59d75ad`, changing only this tested L1 file and one define from
+`c883878d`. Its exact hardware export passes independent source/profile
+checks and CPU-hierarchy lint. It does not inherit the older gameplay score.
+Both short CoreMark diagnostics subsequently close native 0, independently
+audited with unchanged CRCs and exact 4,767,218 / 4,753,406 ticks. They are not
+duration-qualified scores. Its bounded synthesis diagnostic starts at 17:42 UTC;
+no hardware frequency or area result is yet available.
 
 ## Reproduce and acceptance boundary
 
@@ -79,11 +92,22 @@ Run `test_high_window*.py` with unittest discovery in this directory.
 adapted corpus. The only feature-admission change is this experiment's define;
 all original QEMU and cycle checks are preserved.
 
-Latest verified gameplay remains **0.51469855 U+V retirement-event IPC** on
-older `bfb867f7`, clocks **3,600,065,237–3,700,065,237**; its full 2.5B-clock
-observed aggregate is **0.4940587592**. That model's own duration-valid
+Latest verified gameplay is **0.50510994 U+V retirement-event IPC** on
+older `bfb867f7`, clocks **3,800,065,237–3,900,065,237**; its full 2.7B-clock
+observed aggregate is **0.4943896**. That model's own duration-valid
 CoreMark scores are **2.101890118 / 2.107616105 CM/MHz**. None transfers to
 this unmeasured candidate. Complete timedemo, green differential gates,
 standard suite and physical FPGA remain open; REP events are not P54
 macroinstructions. The separate C1/FST correctness repairs are not in this
 one-file experiment.
+
+After the leaf closes, 60 generated compiler intermediates are losslessly
+archived, compared and hashed before removal, recovering **734,483,081 bytes**.
+Sources, executables, observations and reports are preserved. The leaf root's
+`generated-object-archive-closed.json` records archive SHA256
+`f23b63c1b9c20eb3f64c1835891ea42f16e4b31a20b53bfdfb3c4abd16798df6`
+and the exact restore command; no active run or guest media is removed.
+The two closed main microcase matrices also retain all 5,760 raw traces in
+verified `closed-traces.tar.zst` archives, recovering 607,248,160 bytes. Each
+has a member-hash manifest, closure receipt and restore command. Restore before
+running a consumer that requires loose traces; canonical-gate traces remain loose.
