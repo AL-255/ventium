@@ -74,11 +74,26 @@ structural warnings. Re-auditing the *old* export against changed live exporter
 tools correctly refuses its old tool hash; its historical receipts were not
 rewritten or weakened to claim current-tool provenance.
 
-Cold Quake remains active onCPU27; cold Win95 starts independently onCPU26,
-service`ventium-sfetch16-win95-oct10.service`, invocation
-`63dafab27323462dacd95f2752da438d`. Both use this exact model, fresh guest disks,
-UV/system/relocated fast mode, original clocks/media and no snapshot/STEP.
-Neither run is a completed standard-suite result.
+Cold Quake remains active on CPU27. The independent cold Win95 run on CPU26,
+service `ventium-sfetch16-win95-oct10.service`, invocation
+`63dafab27323462dacd95f2752da438d`, reached the Welcome desktop. Root viewed
+`win95-cold-sfetch16-oct10.1/frame_00004.ppm` through a raw RGB PNG conversion:
+readable text, icons and taskbar, no visible error. Its closed raw SHA is
+`0589d29b72d19308e5eb7eb4d62d0c96348cf6eb949d96c236f5d6a202f5f36c`.
+An owned empty host-stop request then closed the native process at
+995,227,441 clocks / 206,982,616 primary retirement events, native exit0,
+actual wait, no terminal error, unchanged input pins and final no-OOM receipt.
+This is **desktop observation plus CLOSED_UNQUALIFIED**, not a standard-suite
+pass. The supervisor's final exit properties were not retained before systemd
+garbage collection; do not fabricate them from the now-empty unit. Separate
+closed-frame human review and support for this exact new build layout in the
+strict checker also remain open. Existing checker requirements are unchanged.
+
+Both guests use this exact model, fresh disks, UV/system/relocated fast mode,
+original clocks/media and no snapshot/STEP. Neither is a completed standard-suite
+result. The remaining five live October10 controllers now have the existing
+`tools/hold_supervisor_closure.py` metadata keeper attached before closure,
+under `ventium-oct10-supervisor.PiDsQ0zq`; it changes no guest or run behavior.
 
 The new single native synthesis starts **2026-10-10 03:30:33UTC** at
 `ventium-sfetch16-logic-synth.oLSgt6W7/`, controller invocation
