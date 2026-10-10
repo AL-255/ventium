@@ -79,7 +79,10 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=fp_shared/tb python3 -B -m unittest -v \
 ```
 
 **Measured gain from these repairs: 0%** in the directed matrix, with no clocks
-added or removed. No hardware-area or gameplay gain is claimed.
+added or removed. The subsequent [whole-chip synthesis](../../fpga/ZERO_C1_EXPORT.md)
+uses 1,010 fewer LUTs and 58 fewer registers than the last code-payload export,
+with BRAM/DSP usage unchanged. This three-file bundle's area change is not a
+measured gameplay gain; its unplaced timing estimate is worse, not better.
 
 ## Exact models and remaining acceptance
 
@@ -97,4 +100,4 @@ Evidence roots are under `/home/yukidama/external/tmp/`:
   unchanged. The platform's 98 structural warnings remain debt, not new waivers.
 
 The candidate still needs its full standard suite and physical FPGA Quake/Win95
-acceptance. Follow source export/synthesis in [the hardware record](../../fpga/CODE_PAYLOAD_EXPORT.md).
+acceptance. Follow the [current implementation and suite handoff](../../fpga/ZERO_C1_EXPORT.md).

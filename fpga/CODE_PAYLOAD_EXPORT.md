@@ -232,3 +232,13 @@ failures); the new candidate has **no gameplay measurement, full-suite pass,
 routed bitstream or physical Quake/Win95 pass**. Latest verified gameplay is
 still **0.53765810 U+V event IPC** on older simulated `bfb867f7`, cycles
 4,500,065,237–4,600,065,237. Do not transfer that result to `2b4d7a48`.
+
+### Subsequent closure and implementation handoff — 20:35 UTC
+
+Synthesis has now closed and been independently audited: **195,617 LUTs,
+54,580 registers, 277.5 BRAM tiles and 47 DSPs**. The native clock audit confirms
+40/100 MHz constraints but only a **21.785543 MHz unplaced core estimate**, not
+timing closure. The guarded implementation controller and the candidate's own
+four standard-suite simulation processes are running. See the
+[source-matched handoff and evidence record](ZERO_C1_EXPORT.md); no bitstream,
+full-suite or physical-board pass is claimed.
