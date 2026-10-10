@@ -143,6 +143,50 @@ Sources: [October 8–9 hardware/transport chronology](UV_FAST_BANK64_2026-10-08
 [October 9–10 optimization record](UV_FAST_TARGET_STATUS_2026-10-09.md),
 [current cache-backed measurements](CACHE_BACKED_TARGETS_2026-10-10.md).
 
+### Matched-build IPC / FPS table — follow-up checked October 10
+
+The user requested an empirical relationship between IPC and gameplay FPS.
+Two earlier 40 MHz simulations have both a verified gameplay window and a
+subsequently closed, completed original 969-frame timedemo. Their model hashes
+and actual `--rate 40000000` launch arguments were rechecked for this table.
+
+| Build | Platform / core clock | Verified gameplay event IPC | Complete timedemo frames / guest seconds | FPS from printed frame/time totals |
+| --- | --- | ---: | ---: | ---: |
+| `fe9f539d` | Physical FPGA / 39.999826 MHz | **0.167990963, primary/U only** | 969 / 288.6 | **3.36** (guest prints 3.4) |
+| `652de481` | Simulation / 40 MHz | **0.44183623, U+V** | 969 / 138.4 | **7.00** (guest prints 7.0) |
+| `86731249` | Simulation / 40 MHz | **0.49083588, U+V** | 969 / 128.1 | **7.56** (guest prints 7.6) |
+| `bfb867f7` | Simulation / 40 MHz | **0.51030715, U+V**, first window | Pending | **Not measured yet** |
+
+The simulation IPC column uses the first declared 100M-clock gameplay window
+near 1.2–1.3B, **not full-demo average IPC**. The `bfb867f7` window is
+1,200,065,237–1,300,065,237; the other two are exactly 1.2–1.3B. Its separately
+reported latest window remains **0.53765810**, 4,500,065,237–4,600,065,237.
+The hardware row uses its 59 qualified intervals described in section 1.
+Never fit one U+V IPC/FPS curve through the primary-only hardware row.
+
+Across the two completed 40 MHz simulations, the sampled-window IPC rises
+**11.09%**, while complete-demo throughput rises **8.04%**, calculated from
+138.4/128.1 rather than the coarsely rounded printed FPS. This is useful
+same-build paired evidence, but not a constant IPC-to-FPS conversion or an
+isolated attribution to one RTL feature: the models differ by multiple changes
+and their IPC samples cover different scene progress.
+
+The exact relationship, when measured over the **same work interval**, is
+`FPS = clock_Hz × retirement_event_IPC / retired_events_per_frame`.
+The counter definition, workload/settings and measurement interval must match.
+For a calibrated comparison, retain total U+V counters at timedemo start/end
+alongside the full frame count and core frequency; do not infer FPS from a
+short high-IPC scene or from a 15-fps presentation movie.
+
+The closed simulation results and their limits are documented in
+[disk-write visibility](../ao486-sim/ven/DISK_WRITE_VISIBILITY.md).
+Exact retained closure evidence:
+`external/tmp/ventium-code-payload-soc.1oJrvfzN/superseded-controls-closed-audit.json`;
+IPC evidence: `ventium-fp-combined-gameplay.ERa7LHqZ/window/audit.json` and
+`ventium-l2-gameplay.VedZVnwA/window/audit.json` under the same external scratch
+root. Both old simulators exited zero and were reaped; the complete Quake
+components do not qualify newer candidates, Win95, or physical FPGA.
+
 ## 4. Gain ledger: individual techniques and their evidence
 
 ### 4.1 Early cache, translation and dispatch work
