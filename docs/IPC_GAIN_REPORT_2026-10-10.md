@@ -9,8 +9,13 @@ results below are retained measurements, not tests rerun for this report.
 
 ## Executive result
 
-- **Latest verified simulated gameplay:** **0.50499738 U+V retirement-event
-  IPC**, model `bfb867f7`, cycles **5,600,065,237–5,700,065,237**. All **45
+- **Latest verified simulated gameplay:** **0.51030715 U+V retirement-event
+  IPC**, model `2b4d7a48`, cycles **1,200,065,237–1,300,065,237**. This is its
+  first predeclared gameplay window: 39,233,095 U + 11,797,620 V events over
+  100M clocks. Counts and raw endpoint PPM hashes exactly match the older
+  build's same window. It has no completed timedemo/FPS result yet.
+- **Older completed gameplay run:** model `bfb867f7`, last gameplay window
+  **0.50499738**, cycles **5,600,065,237–5,700,065,237**. All **45
   consecutive 100M-clock windows**, starting at 1,200,065,237, average
   **0.500212996**: 2,250,958,484 events / 4,500,000,000 clocks. No low gameplay
   window is discarded. The transition/results-console samples from 5.7B onward
@@ -26,8 +31,8 @@ results below are retained measurements, not tests rerun for this report.
   This ABI does not expose total U+V. These are still the hardware results;
   the new simulated performance has **not** been demonstrated on the board.
 - **Subsequent candidate:** `2b4d7a48`, incorporating subsequent logic-sharing,
-  x87 C1 and packed-BCD negative-zero corrections, has **no gameplay
-  measurement or physical pass**.
+  x87 C1 and packed-BCD negative-zero corrections, now has the first gameplay
+  window above but **no completed timedemo or physical pass**.
   Its own two **900-iteration, duration-valid CoreMark seeds** now independently
   pass at **2.101890118 / 2.107616105 CM/MHz**, with exactly the parent's TSC
   clocks and original CRCs (closure checked 21:21 UTC). Thus these repairs have
@@ -50,10 +55,13 @@ results below are retained measurements, not tests rerun for this report.
   a redundant next-COMMIT mux dependency without changing accepted clock edges
   in the directed A/B corpus. The 456 whole-core cases and 228,304 under-fill
   observations pass; the canonical gate still fails unchanged. Source-matched
-  FPGA export and strict CPU lint pass. One bounded full synthesis started at
-  **22:56 UTC**. Both original short CoreMark seeds also pass with exactly the
+  FPGA export and strict CPU lint pass. Bounded full synthesis and independent
+  native timing audit close: **192,820 LUTs** (+0.486% versus prefix parent),
+  **22.49 MHz unplaced estimate** (+3.30%), still far short of 40 MHz.
+  The remaining worst path has 153 logic levels ending in FPU bank enables.
+  Both original short CoreMark seeds also pass with exactly the
   parent's 4,767,218 / 4,753,406 clocks (**0% short-workload throughput change**,
-  not new duration-valid scores). It has **no timing, gameplay or physical
+  not new duration-valid scores). It has **no routed timing, gameplay or physical
   result yet**. The goal
   remains **at least 40 MHz synthesized Fmax**, not merely a configured 40 MHz
   simulation clock. See [the L1 evidence](../fpga/L1_LEGACY_CAPTURE_CUT.md).
@@ -188,6 +196,7 @@ and actual `--rate 40000000` launch arguments were rechecked for this table.
 | `652de481` | Simulation / 40 MHz | **0.44183623, U+V** | 969 / 138.4 | **7.00** (guest prints 7.0) |
 | `86731249` | Simulation / 40 MHz | **0.49083588, U+V** | 969 / 128.1 | **7.56** (guest prints 7.6) |
 | `bfb867f7` | Simulation / 40 MHz | **0.51030715, U+V**, first window | 969 / 125.3 | **7.73** (guest prints 7.7) |
+| `2b4d7a48` | Simulation / 40 MHz | **0.51030715, U+V**, same first window | Still running | **Not measured** |
 
 The simulation IPC column uses the first declared 100M-clock gameplay window
 near 1.2–1.3B, **not full-demo average IPC**. The `bfb867f7` window is
@@ -548,12 +557,12 @@ to multi-issue, all to cache misses, or all to the FPU.
 | Requirement | Current evidence | Status |
 | --- | --- | --- |
 | Cache-backed simulated CoreMark ≥2.1 CM/MHz | `bfb867f7` and newest `2b4d7a48`, both 900-iteration seeds, original CRCs, >10 guest seconds | Met **for these two models**, not automatically other sources or hardware |
-| Simulated Quake ≥0.48 IPC | 45-window `bfb867f7` mean **0.500212996**; latest **0.50499738**; full timedemo **7.73 FPS / 40 MHz** | Completed original demo; IPC still a sampled gameplay interval, not full-demo average or every-scene guarantee |
+| Simulated Quake ≥0.48 IPC | Newer `2b4d7a48` first window **0.51030715**; older `bfb867f7` 45-window mean **0.500212996**, completed demo **7.73 FPS / 40 MHz** | Newer demo still running; no full-demo IPC or every-scene guarantee |
 | Gameplay CPI <1 / IPC >1 | Current aggregate event CPI approximately **1.999** | **Not achieved**; normalized macroinstruction accounting is also distinct |
 | Canonical differential gate on latest corrected source | **7/108 functional passes; 12/19 scored cycle failures** | **FAIL**, no masks/goldens/bands waived; directed/native x87 evidence does not replace the gate |
 | `2b4d7a48` own valid-duration CoreMark | **2.101890118 / 2.107616105 CM/MHz**, exact parent ticks, original CRCs, actual V activity, native 0/reaping, no OOM | Both simulated seeds independently closed at 21:21; not complete-suite or FPGA acceptance |
-| Newest matched hardware source `cf1b3b0b` | Manifest `5003847d…`; one prefix-header delta, same 190 payloads and 156 hardware defines; strict CPU lint and both short CoreMark seeds pass | Source/lint/short comparison pass, **not a valid-duration score, bitstream or physical pass** |
-| Latest completed synthesis | Source-matched `2b4d7a48` export: **195,617 LUTs**, **21.786 MHz unplaced estimate**, requested 40 MHz core | Subsequent route **FAIL**, congestion level 6 / 900,666 node overlaps; no new bitstream |
+| Newest matched hardware source `467ff95f` | Manifest `4d52be93…`; one L1-cofactor delta from `cf1b3b0b`, same 190 payloads and 156 hardware defines; strict CPU lint and both short CoreMark seeds pass | Source/lint/short comparison pass, **not a valid-duration score, bitstream or physical pass** |
+| Latest completed synthesis | Source-matched `467ff95f`: **192,820 LUTs**, **22.4916 MHz unplaced estimate**, requested 40 MHz core | **40 MHz not achieved**, not placed/routed; older `2b4d7a48` route failed at congestion level 6 |
 | Win95 on final FPGA | Must cold boot to clean desktop and survive keyboard/mouse, menu/window interaction | **Pending** |
 | Quake on final FPGA | Must complete original timedemo, retain closed result, full unmodified-frame movie, measured clock and UV-fast evidence | **Pending** |
 
@@ -569,14 +578,15 @@ not copied solely from a stale status paragraph. Roots are below
 
 | Evidence | Receipt / identity |
 | --- | --- |
-| Current gameplay, exact U/V totals, all retained gameplay windows and completed timedemo | `ventium-store-admit-gameplay-r22.zeWN45tM/audit.json`; full model SHA `bfb867f7844b467eeafba12fe6d5035e89d0d2cf03111911cbdd599d7fb204e6` |
+| Newest verified gameplay window | `ventium-zero-c1-gameplay-first.OAQbYerX/audit.json`, SHA `21861494dbaa56cb8dec25175fb087bda624cad13d0998969f3006acf96e19b0`; model `2b4d7a48453fb8f901730d70b5731d9fb6a5459a83fc36f69241f441a7ab298e` |
+| Older gameplay, exact U/V totals, all retained gameplay windows and completed timedemo | `ventium-store-admit-gameplay-r22.zeWN45tM/audit.json`; full model SHA `bfb867f7844b467eeafba12fe6d5035e89d0d2cf03111911cbdd599d7fb204e6` |
 | Same model's valid CoreMark | `ventium-store-admit-soc.kW7Vv7Mr/coremark-900-performance/audit.json` and `coremark-900-validation/audit.json` |
 | Closed hardware 0.167991 profile | `ventium-bank64-perf-oct08.gz8UKP/board-profile-qualified.json`; bitstream SHA `fe9f539dfcfd9a1d909a33b561d5b7b6a0febf6e90c54b339f568d0cd496f71e` |
-| Newest source-matched full-PC build and short-seed audit | `ventium-prefix-regonly-soc.MMoWhswI/{build-closed.json,coremark/audit.json}`; model SHA `cf1b3b0bf30d35993c12f335c148dbf5c1ae90f09c0e26f3c2b22907263ab27c` |
+| Newest source-matched full-PC build and short-seed audit | `ventium-l1-capture-soc.NLtK13lC/{build-closed.json,coremark/audit.json}`; model SHA `467ff95f3b58a834a84e7287cb7adafb7a72afc43bcd0b6178a14bcef03c19c5` |
 | Parent model's independently closed 900-iteration CoreMark seeds | `ventium-zero-c1-soc.FTbYSn0L/coremark-900-{performance,validation}/audit.json`; **2.101890118 / 2.107616105 CM/MHz**, exact parent TSC clocks, original CRCs, native zero, no OOM |
-| Newest FPGA source and strict CPU lint | `ventium-prefix-regonly-fpga40.D6hb2tCk/{input-manifest.json,audit.json}`; manifest SHA `5003847d311025e070fd12022b06251e62c9c50336962bc183ff179b3a903ee3`; `ventium-prefix-regonly-hw-lint.Cs41DX5l/closed.json` |
-| Newest closed full synthesis | `ventium-prefix-regonly-full-synth.mcn9SQsB/audit.json`; 191,887 LUTs, 54,574 FFs, 277.5 BRAM, 47 DSP; no timing/physical pass |
-| Closed parent/candidate unplaced comparison | `ventium-prefix-regonly-clock-r2.y0ASgQnb/audit.json`; local prefix path improves, overall worst path does not; no routed or physical-frequency claim |
+| Newest FPGA source and strict CPU lint | `ventium-l1-capture-fpga40.78luWDQ2/{input-manifest.json,audit.json}`; manifest SHA `4d52be937b4c582efb15a284ac525187023969efbc9fabd721d602a67dc5052f`; `ventium-l1-capture-hw-lint.HCX1xQRc/closed.json` |
+| Newest closed full synthesis | `ventium-l1-capture-full-synth.Ygy8gzTv/audit.json`; 192,820 LUTs, 54,581 FFs, 277.5 BRAM, 47 DSP; no timing/physical pass |
+| Closed parent/candidate unplaced comparison | `ventium-l1-capture-clock.c0os0diB/audit.json`, SHA `1be88824d655ba940aba700fe28e01801b78cd358a4930f0b2cf4cff44753f90`; 21.7727 → 22.4916 MHz, not routed or measured board frequency |
 
 Older linked reports preserve their original timestamps, scratch paths,
 negative controls and failed attempts. Some historical `/tmp` paths may no

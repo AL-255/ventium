@@ -1,7 +1,7 @@
 # Legacy L1 capture cofactor — 2026-10-10
 
-Status: **private equivalence-tested RTL candidate; synthesis running, not a
-40 MHz result** (22:56 UTC).
+Status: **private equivalence-tested RTL candidate; synthesis and native timing
+audit closed, 22.49 MHz unplaced estimate—not a 40 MHz result** (23:17 UTC).
 The full-core candidate is `de02d77f297f713adfc885c911006e7a7c427fa4113532183ba7e1160b3026a5`.
 No architectural feature, cache geometry, fast path or accepted clock edge is
 intentionally changed. No new FPGA image exists.
@@ -140,7 +140,7 @@ Four exporter tests pass; exact exported CPU-hierarchy lint passes with all
 six structural warning classes as errors. This is not full-SoC lint or a
 physical pass.
 
-One full synthesis started at **22:56 UTC**, in
+One full synthesis completed with native exit 0 at **23:13 UTC**, in
 `ventium-l1-capture-full-synth.Ygy8gzTv`, controller
 `ventium-l1-capture-full-synth-oct10.service`, invocation
 `4fe094cfd4d242e7af4cefca7e2509de`. The verified native Vivado family belongs to
@@ -149,17 +149,50 @@ unchanged logic-only mapping profile, one job, **8 GiB RAM / 6 GiB swap**, a
 30-minute native deadline, and a 4 GiB runtime disk floor. Admission checks
 10 GiB free and more than twice the parent's measured 1,227,014,144-byte disk
 growth above that floor. No place/route or programming is started by this
-controller. Completion, area and native-clock timing are still pending.
+controller. Native elapsed time was **1,033.83 seconds**; peak resident memory
+8,431,788,032 bytes, peak swap 1,425,555,456 bytes, no OOM. Independent closure
+checks all **9,341 input pins**. The unchanged warning policy reports zero
+errors, one inherited PS-clock-XDC critical warning and 1,571 warnings.
 
-A retained coordinator now waits on that **exact live synthesis invocation**,
-not a log timestamp: `ventium-l1-capture-audit-queue-oct10.service`, invocation
-`a94c850c8cdd4cba8729fef1105ebded`. Only after successful native closure and
-independent source/DCP auditing may it start the read-only clock audit under
-`ventium-l1-capture-clock.c0os0diB`. It opens both original projects/synthesis
-runs with their original XDC, compares the actual V-response capture endpoint
-and overall core paths, and checks clock objects, black boxes and structural
-DRC. It neither replaces a live Vivado family nor authorizes place/route or
-deployment. Prepared scripts are pinned; no result is presumed from the queue.
+| Resource | Prefix parent | L1 cofactor | Change |
+| --- | ---: | ---: | ---: |
+| LUT | 191,887 | 192,820 | +933 / +0.486% |
+| FF | 54,574 | 54,581 | +7 |
+| BRAM tiles | 277.5 | 277.5 | 0 |
+| DSP | 47 | 47 | 0 |
+
+Synthesis closure audit SHA-256:
+`d7cd38022aa9d67b9d5f0ff07d1f8b30e38b0b3d078712574a04b46ba0821a06`.
+
+The native clock audit under `ventium-l1-capture-clock.c0os0diB` completed with
+native exit 0 at **23:17 UTC**, opening both original projects/synthesis runs
+with their original XDC. Independent audit checks **9,389 pins**, actual 40/100
+MHz clock constraints, zero black boxes and zero structural DRC errors:
+
+| Timing estimate | Prefix parent | L1 cofactor |
+| --- | ---: | ---: |
+| Worst core setup slack at 25 ns | −20.929 ns | −19.461 ns |
+| Derived unplaced Fmax | 21.7727 MHz | **22.4916 MHz** |
+| V-response capture slack | −20.929 ns | −18.433 ns |
+| V-response capture logic levels | 160 | 152 |
+
+The estimated global Fmax improvement is **3.30%**, not a measured board gain.
+The new worst path is EIP/fetch/decode → next-read address/TLB → L1 store-pair
+readiness → write-queue/ACK → `pipe_mem_wait` → `fp_shared_direct` → shared FPU
+bank clock enable: **153 logic levels**, 44.164 ns estimated data-path delay.
+The 30 reported worst paths mostly terminate at different bits of that same
+FPU bank; they are not 30 independent bottlenecks. Mapping still uses the
+parent's diagnostic `-no_timing_driven` profile; this is not routed sign-off.
+No implementation or board programming was launched.
+
+Audit SHA-256:
+`1be88824d655ba940aba700fe28e01801b78cd358a4930f0b2cf4cff44753f90`.
+The original coordinator mistakenly combined `systemd-run --wait` with
+`RemainAfterExit=yes`, leaving its client waiting after native completion.
+Only that verified waiting client was terminated; no native job was stopped
+or restarted. Its failed queue receipt is retained. The separate bounded
+independent audit exits 0 (`adc3178b7ceb4b448e8a2d5c017f8bad`); native audit
+controller `81f12fa3b6484e20a8f3976d7309ea13` remains exited, MainPID 0.
 
 ## Resource handling and remaining work
 
@@ -170,16 +203,22 @@ and `pch-prune2-plan.json` / `pch-prune2-closed.json` under the leaf root.
 These caches are rebuildable; binaries, sources, dependency files, logs and
 traces remain. No live guest media or run directory was deleted.
 
-Next: close the bounded synthesis and compare the actual synthesized netlist
-and area before another place/route. The target remains **at least 40 MHz
+Next: cut the unnecessary integer-memory-ACK dependency in live x87 admission,
+prove the descriptor/owner guards and compare the next actual netlist before
+another place/route. The target remains **at least 40 MHz
 synthesized timing**, followed
 by routed and physical validation in UV + fast-pipe mode. A constant-folding
 argument is not a frequency measurement or a suite pass.
 
-Latest verified gameplay baseline: **0.50499738 U+V retirement-event IPC**,
-older model `bfb867f7`, cycles **5,600,065,237–5,700,065,237**. Its 45-window
-gameplay mean is **0.500212996** and its completed original timedemo is
-**7.73 FPS at modeled 40 MHz**. This capture-factored candidate has no gameplay
-measurement. The last physical result remains `fe9f539d`: **0.167990963
+Latest verified gameplay baseline: **0.51030715 U+V retirement-event IPC**,
+model `2b4d7a48`, cycles **1,200,065,237–1,300,065,237**, its first predeclared
+gameplay window (not a selected maximum or full-demo average). Independent
+audit `ventium-zero-c1-gameplay-first.OAQbYerX/audit.json` checks 7,971 pins,
+raw counters and visually reviewed endpoint frames. The same window's counts
+and raw endpoint PPM hashes exactly match older `bfb867f7`. Only that older
+model has a completed original timedemo at **7.73 FPS / modeled 40 MHz**;
+do not transfer its FPS or completion to `2b4d7a48`. This capture-factored
+candidate has no gameplay measurement. The last physical result remains
+`fe9f539d`: **0.167990963
 primary/U-only counted IPC**, **3.36 FPS at approximately 40 MHz**; total U+V
 is unavailable on that ABI.
