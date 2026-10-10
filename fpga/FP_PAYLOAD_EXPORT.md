@@ -100,9 +100,9 @@ This candidate has no gameplay or qualified CoreMark score, no full Win95/
 Quake closure, and no routed or physical result. Known x87 C1/value defects
 are not repaired by selecting the same payload earlier.
 
-Latest verified gameplay belongs to **`bfb867f7`**: **0.54372556** U+V
-retirement-event IPC at clocks **2,600,065,237–2,700,065,237**, **0.4899940033**
-over all fifteen consecutive 100M windows from 1,200,065,237. The 0.34569625
+Latest verified gameplay belongs to **`bfb867f7`**: **0.49813751** U+V
+retirement-event IPC at clocks **2,700,065,237–2,800,065,237**, **0.4905029725**
+over all sixteen consecutive 100M windows from 1,200,065,237. The 0.34569625
 dip is retained. That older model qualifies at **2.101890118 / 2.107616105
 CM/MHz**; neither result is inherited by this derivative. See the
 [current target record](../docs/CACHE_BACKED_TARGETS_2026-10-10.md).
@@ -231,7 +231,7 @@ structural classes fatal and stable inputs, supervisor
 `b7a1588b626d417385911bedf49a012d`. This is not whole-platform lint.
 One synthesis-only run is admitted under
 `ventium-fp-operand-payload-full-synth.LL7cOdfp`, controller
-`a685ae8834594de39a333a3272bfbcba`, at 15:04 UTC. It retains the same mapper,
+`a685ae8834594de39a333a3272bfbcba`, at 15:02:44 UTC. It retains the same mapper,
 8 GiB RAM / 6 GiB swap, 30-minute native cap, 12 GiB starting disk reserve,
 live reserve monitoring and exclusive Vivado family. It cannot launch
 placement, routing or programming. No new timing result is claimed yet.

@@ -5,22 +5,26 @@ U+V retirement-event gameplay IPC**, the error-free standard suite, green
 differential gates, and a working FPGA deployment. U-only/STEP/global slow
 fallbacks are not acceptance. REP retirement events are not P54 macroinstructions.
 
-**Latest verified measurement, 14:55 UTC:** `bfb867f7` reaches **0.54372556 IPC**
-over clocks **2,600,065,237–2,700,065,237**: 40,833,583 U + 13,538,973 V
-retirement events. All fifteen consecutive windows from
-1,200,065,237 average **0.4899940033**, retaining the **0.34569625** dip at
+**Latest verified measurement, 15:10 UTC:** `bfb867f7` reaches **0.49813751 IPC**
+over clocks **2,700,065,237–2,800,065,237**: 38,324,551 U + 11,489,200 V
+retirement events. All sixteen consecutive windows from
+1,200,065,237 average **0.4905029725**, retaining the **0.34569625** dip at
 2,100,065,237–2,200,065,237 as well as the earlier two sub-0.48 intervals.
 The margin above 0.48 is now small; this is not a completed-demo average.
 This is the same cache-backed model with
 qualified **2.101890118 / 2.107616105 CM/MHz** below, not a score borrowed from
 another build. Latest raw-pixel/counter/ownership audit:
-`ventium-store-admit-gameplay-r10.HAHogVZt/audit.json`. The two added windows
-are 0.47674197 and 0.54372556; all 734,991,005 events over 1.5B clocks count.
+`ventium-store-admit-gameplay-r11.lTOIcMGv/audit.json`. The newly added window
+is 0.49813751; all 784,804,756 events over 1.6B clocks count.
 Both unchanged-pixel endpoint images show rendered first-person stone rooms
-with a nailgun, changed viewpoint/ammunition and a target down the corridor in
-the second image. HUD health remains zero as in
+with a nailgun, changed viewpoint/ammunition and a nail pickup message in the
+second image. HUD health remains zero as in
 earlier captures; no living-player or render-correctness claim is inferred.
 Full timedemo and physical FPGA remain open.
+At 15:09 UTC, this model's Win95 capture at roughly 800M clocks visibly shows
+My Computer, Inbox, Recycle Bin, Internet/MSN icons and the Start/taskbar.
+It still has an hourglass cursor. This is a live observation, not closed
+desktop acceptance or demonstrated UI robustness; the cold run continues.
 New area candidate `751139e1` remains gameplay-unmeasured; its own standard
 suite is running. Its **own two 900-iteration CoreMark seeds now pass** at
 2.101890118 / 2.107616105 CM/MHz, independently audited at 12:49 UTC; the exact
