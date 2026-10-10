@@ -2,11 +2,15 @@
 
 This is **UNQUALIFIED source preparation**, not a bitstream, timing pass or
 transfer of simulation acceptance to silicon. Latest verified Quake gameplay
-is **0.49722017 total U+V IPC**, larger-L2 model `86731249`, clocks 2.9B–3.0B.
+is **0.49929384 total U+V IPC**, larger-L2 model `86731249`, clocks 3.2B–3.3B.
 The fixed 1.2B–1.3B gate remains **0.49083588**; the newer sample does not
-replace it. All18 consecutive 100M windows from1.2B–3.0B average **0.47771903**,
+replace it. All21 consecutive 100M windows from1.2B–3.3B average **0.47844824**,
 including the2.3B–2.4B dip at **0.26103520**. The sustained target, full timedemo
 and silicon acceptance remain open. New model`958f7ec4` has no gameplay result.
+The latest audit is`ventium-l2-gameplay.VedZVnwA/latest-3300000000/audit.json`:
+49,929,384 total U+V retirements over100M clocks, unchanged RGB endpoint frames
+showing advancing gameplay, stable source/runtime pins, matching native/service
+identity and no OOM. It is selected by latest complete timestamp, not highest IPC.
 Current full direct-memory CoreMark
 scores are **2.107843209 / 2.110905243 CM/MHz** on the separate `b5453f16` model;
 they are not FPGA/cache/DDR scores.
