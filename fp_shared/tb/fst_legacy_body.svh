@@ -8,6 +8,7 @@ task automatic check_case(input bit fast, input int top, input int index,
                           input bit seed);
   bit commit_ok;
   logic [15:0] want_status;
+  logic [15:0] observed_status;
   logic [79:0] want_data;
   bit bad;
   state = fast ? S_PIPE : S_FEXEC;
@@ -30,8 +31,12 @@ task automatic check_case(input bit fast, input int top, input int index,
   commit_ok = !empty_source || masked;
   want_status = 16'h4520 | (empty_source ? 16'h0041 : 16'h0000);
   want_data = empty_source ? 80'hffffc000000000000000 : fp_st[0];
+  // fpu_top only consumes fp_fstat_wval when fp_we_fstat is asserted.
+  // An unchanged architectural status need not generate a redundant write;
+  // never compare an unselected port's default-zero payload with the state.
+  observed_status = fp_we_fstat ? fp_fstat_wval : fstat;
   bad = fp_stk_ovf || (fp_stk_unf != empty_source) ||
-        !fp_we_fstat || fp_fstat_wval != want_status ||
+        observed_status != want_status ||
         fp_we_pop != (pop && commit_ok) || fp_we_pop2 ||
         fp_we_sti != (!fast && commit_ok) || fp_we_top || fp_we_push ||
         fp_we_fxch || fp_we_wabs || fp_we_envregs || fp_we_envld || fp_we_fninit;
@@ -41,9 +46,9 @@ task automatic check_case(input bit fast, input int top, input int index,
   if (bad) begin
     failures++;
     if (failures <= 8)
-      $display("FST_LEGACY_MISMATCH fast=%0d top=%0d i=%0d pop=%0d src=%0d dst=%0d mask=%0d seed=%0d sw=%04x want=%04x unf=%0d sti=%0d popout=%0d",
+      $display("FST_LEGACY_MISMATCH fast=%0d top=%0d i=%0d pop=%0d src=%0d dst=%0d mask=%0d seed=%0d sw=%04x want=%04x we_sw=%0d unf=%0d sti=%0d popout=%0d",
                fast,top,index,pop,empty_source,empty_destination,masked,seed,
-               fp_fstat_wval,want_status,fp_stk_unf,fp_we_sti,fp_we_pop);
+               observed_status,want_status,fp_we_fstat,fp_stk_unf,fp_we_sti,fp_we_pop);
   end
 endtask
 

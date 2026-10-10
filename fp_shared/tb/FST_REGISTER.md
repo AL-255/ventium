@@ -1,11 +1,12 @@
 # Register FST/FSTP repair — October 10
 
 **Verified private repair, not production promotion or suite acceptance.**
-Gameplay baseline is **0.50058134 total U+V IPC**, `86731249`, cycles
-3.6B–3.7B; the 25 consecutive windows from 1.2B–3.7B average **0.4788804468**,
-including the real 2.3B–2.4B dip at **0.26103520**. This FST candidate has no
-gameplay result. Full direct-memory CoreMark remains **2.107843209 /
-2.110905243 CM/MHz** on separate model `b5453f16`, not FPGA/cache/DDR scores.
+Latest gameplay baseline is **0.50468964 total U+V event IPC**, `bfb867f7`,
+cycles 1,800,065,237–1,900,065,237. Its seven consecutive windows from
+1,200,065,237 average **0.4999549657**, including the real 0.47318727 dip.
+This FST candidate has no gameplay result. The same separate cache-backed
+performance model qualifies **2.101890118 / 2.107616105 CM/MHz**; these are
+neither this FST candidate's scores nor FPGA measurements.
 
 ## Two defects and the compact repair
 
@@ -23,7 +24,8 @@ two-file edits to an explicitly prepared source copy, refusing missing or
 ambiguous anchors. It does not add queues, stages, datapaths, stalls or global
 fallback. FST remains excluded from arithmetic-stream admission, so removing
 the false source cannot admit it ahead of an outstanding arithmetic owner.
-The legacy edits are prepared but **not independently RTL-qualified** yet.
+The legacy edits now have two passing 1,984-case native unit profiles below;
+their matrix controller remains red on its stale negative-control count.
 Production source, live cold guests and frozen FPGA inputs are unchanged.
 
 This implements the register-copy/underflow C1 semantics in Intel's
@@ -132,13 +134,36 @@ exceeded its 130-second per-profile limit; `closed.json` retains the timeout
 and no completed profile results. It was ordinary compiler work, not a stuck
 lock. The source/test expectations were not changed to accommodate it.
 
-R2 is queued behind the single heavy-build lock at
+R2 ran after acquiring the single heavy-build lock at
 `ventium-fst-legacy-r2.qlOa6MXC`, invocation
 `2d1d395f82b247069cc0b7348b97791f`. It uses identical RTL, ports, vectors,
 expected parent failures and strict structural checks. Only host test code
 optimization changes to `OPT_FAST=-O0`, with 145 seconds per profile inside
 the same 600-second total native bound and 4 GiB/one-compiler guard. This is
-not a processor performance setting. Neither attempt qualifies the legacy
-repair yet. Latest separately verified gameplay is **0.50137912** IPC on
-`bfb867f7`, clocks 1,400,065,237–1,500,065,237; the FST repair is not in that
-model and has no gameplay measurement.
+not a processor performance setting. R2 closes in 192.63 seconds: both fixed
+profiles pass all 1,984 cases, while both parents report 992 mismatches rather
+than the controller's expected 736. The combined controller remains FAIL.
+
+Inspection found a testbench defect: it required `fp_we_fstat=1` even if the
+correct architectural status was already present, then compared the unselected
+default-zero payload. The real `fpu_top` updates status only under the write
+enable. The test now compares `fp_we_fstat ? fp_fstat_wval : fstat`, retaining
+all defined status bits, fault/pop/tag/data checks and every original vector.
+This is not a relaxed architectural mask or an RTL change.
+
+R3 (`ventium-fst-legacy-r3.JhDeXJu3`) repeats all four actual RTL profiles in
+172.98 seconds. Both repaired profiles again pass **1,984/1,984**, native 0;
+both parent controls fail with **720 actual architectural mismatches**. The
+driver still expected 736, so its original FAIL receipt remains, not rewritten.
+The corrected expected count is independently explained by the vectors:
+448 legal-empty-destination cases + 256 stale-C1 slow copies + 16 stale-C1
+fast pops. Empty-source fast cases already clear C1 through fault handling;
+they must not be counted again. The 272 removed false positives were unchanged
+status with no write. No parent correctness pass or complete legacy-matrix
+gate pass is claimed from these results. Source pins remain stable.
+
+The initial R3 launcher stopped before compilation because its TMPDIR spelling
+used the external symlink rather than the required canonical path. Its failed
+service is retained; the distinct native invocation
+`0fd7de9967f84a4b8fb900910b3c551d` uses the same prepared inputs and resolved
+TMPDIR. Neither launcher changes production RTL, guest media or FPGA inputs.
