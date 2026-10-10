@@ -7,6 +7,24 @@ or read-port ownership. The root-owned helper/caller miter has now passed;
 production integration, hardware area, routing, timing, and gameplay benefits
 remain unverified/unmeasured.
 
+**October 10 update:** the three presence-call assignments now have a private,
+default-off integration, exact extracted-caller four-state checks, full-core
+directed checks and an isolated native area comparison. See
+[`docs/FPGA_FETCH_CONGESTION_2026-10-10.md`](../../../../docs/FPGA_FETCH_CONGESTION_2026-10-10.md)
+for results and limitations. The generic gate remains red. This is not a
+production/whole-chip/standard-suite acceptance claim; buffered substitutions
+below remain unconnected. The historical October 4 result and command below
+are retained as provenance, not the current temporary-directory recipe.
+
+For new work use `run_integrated_miter.py --core <frozen-core.sv> --out <new-dir>`
+inside a bounded retained user service, with `TMPDIR=/home/yukidama/external/tmp`
+and the output under that directory. The runner refuses an existing output,
+requires a supervisor invocation, extracts the actual newly prepared caller
+bodies and pins all source inputs. The closed October 10 service used 512 MiB
+RAM, zero swap, 16 tasks, 200% CPU quota and a 150-second wall cap. It does not
+modify the supplied core. `test_prepare_integration.py` checks transformation
+guards without building a processor.
+
 ## Intended substitutions
 
 Only under `VEN_IC_BRAM`, insert `ic_front_residency.svh` at module scope after
