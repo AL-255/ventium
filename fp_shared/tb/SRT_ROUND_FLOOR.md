@@ -76,8 +76,8 @@ native exit50 because that compiler lacks the actual source's SystemVerilog
 `break`/automatic-lifetime support (log retained); no RTL was rewritten to
 work around its compiler limitations.
 
-The real Verilator leaf is queued as `ventium-srt-floor-queued-oct09.service`,
-invocation`4637d40d8cbe4d53954b1a6fa7952a81`. It waits for Vivado to release
+The real Verilator leaf is queued as `ventium-srt-floor-queued-oct09-r2.service`,
+invocation`385729e9fbc9492c89890f4db1d7cc8d`. It waits for Vivado to release
 the shared build lock, then gets the normal4GiB/one-job scope and a600-second
 build/run bound. It cannot start a concurrent hardware build or change frozen
 FPGA inputs. `closed.json` must actually pass; queue admission is not evidence

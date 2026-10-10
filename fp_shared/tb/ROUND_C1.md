@@ -58,8 +58,8 @@ Test package SHA256
 vector SHA256
 `f48c9f9bf393e4c401b4c43c2792d0bf2d6755f57dcd1738fea284bfa6145ed2`.
 
-Queued service`ventium-round-c1-queued-oct10.service`, invocation
-`a05ef0002b184c68b2c1b78451539eb0`, waits on the same shared build lock as
+Queued service`ventium-round-c1-queued-oct10-r2.service`, invocation
+`c9e6c7fb885e4b8ea9735dcbe84d2fde`, waits on the same shared build lock as
 Vivado and the exponent-repair leaf. Compilation/run has a600-second bound
 after acquiring the normal4GiB/one-job scope. Check actual`closed.json`, native
 output and supervisor closure; queue admission and host tests are not an RTL
@@ -133,11 +133,20 @@ These additional cases are **prepared, not passed**.
 
 `plan.json` freezes45 source/test/authority pins, SHA256
 `a7bdb19c6221c15b6802b4be27ccf30d64a0e6d6c767ece7ae470d434c7779b0`.
-Queued service `ventium-fp-c1-integration-queued-oct10.service`, invocation
-`335ddb1b3d99468393e481dbe9ac80e3`, first requires successful closed receipts
+Queued service `ventium-fp-c1-integration-queued-oct10-r2.service`, invocation
+`194bb4020e65463aaa04bd892ee137a4`, first requires successful closed receipts
 from both smaller leaves. It then acquires the common build lock and runs the
 top under the normal4GiB/one-job guard, bounded to600seconds. A missing/failed
 prerequisite cannot trigger a build. The active FPGA synthesis, full-PC models
 and production RTL remain unchanged. Legacy instantiations and alternate
 reference interfaces still need deliberate wiring when promoting the patch;
 this private top test is not full-core or standard-suite acceptance.
+
+The first top queue failed immediately before any build: its literal TMPDIR
+used the `external` symlink while the driver checks the canonical directory.
+R2 supplies the resolved external path; the assertion is unchanged. The same
+latent mismatch was caught in both smaller waiters. Their exact supervisor
+identities and sole `flock 9` children were checked, then only those unstarted
+waiters were stopped/requeued with corrected environments. No running compiler,
+Vivado process, pinned source, vector or expected result was changed. The old
+top's failed invocation and the cancelled original waiters remain in the logs.
