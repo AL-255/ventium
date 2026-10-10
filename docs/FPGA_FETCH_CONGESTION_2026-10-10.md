@@ -1,17 +1,18 @@
 # Fetch/operand congestion: native evidence and narrow sharing experiment
 
-Latest verified gameplay baseline is `958f7ec4`, **0.50530999** U+V event IPC
-at 3,900,048,811–4,000,048,811 clocks. All 28 consecutive 100M windows from
-1,200,048,811 average **0.4862721782**; no low window is excluded. Audit:
-`ventium-sfetch16-latest-r13.B1BPkjih/audit.json`. Full timedemo remains unfinished.
-Newer combined benchmark model `bfb867f7` and area models `89b68b62` / `343f0ccd` are
+Latest verified gameplay is `bfb867f7`, **0.50137912** U+V event IPC at
+1,400,065,237–1,500,065,237 clocks. All three consecutive 100M windows from
+1,200,065,237 average **0.50624649**; no window is excluded. Audit:
+`ventium-store-admit-gameplay-r3.8XoOMN4R/audit.json`. This same cache-backed
+model qualifies both CoreMark seeds at **2.101890118 / 2.107616105 CM/MHz**.
+Full timedemo remains unfinished. New area candidate `751139e1` is
 gameplay-unmeasured. REP events are not exact P54 macroinstructions.
 
-The expanded sharing stage below removes **66.0% of the measured local LUT
-cone**, with identical directed and short CoreMark cycles. This is not a
-whole-chip area or speedup claim. Both subsequent whole-design syntheses
-increase LUT use; the isolated savings do not establish FPGA compactness.
-Generic verification and full-suite/hardware acceptance remain open.
+The final **two-consumer** sharing correction saves **24,543 whole-design
+LUTs (11.06%)**. Earlier local successes followed by whole-design regressions
+are retained chronologically below; they are not the final area result.
+Directed cycle records remain identical. Placement is now running, but routed
+frequency, generic verification and full-suite/hardware acceptance remain open.
 
 ## Native checkpoint diagnosis
 
@@ -388,9 +389,34 @@ name-based attribution alone is not a module-area measurement.
 Evidence and the newly started independent standard suite:
 [exact export](../fpga/IC_PREFIX_CAPTURE_EXPORT.md).
 
-Current verified gameplay is performance parent `bfb867f7`'s **0.50705320**
-U+V event IPC, clocks **1,300,065,237–1,400,065,237**; both consecutive windows
-from 1,200,065,237 average **0.508680175**. `751139e1` is still unmeasured.
+At 12:07 UTC, current verified gameplay is performance parent `bfb867f7`'s
+**0.50137912** U+V event IPC, clocks **1,400,065,237–1,500,065,237**; all three
+consecutive windows from 1,200,065,237 average **0.50624649**.
+`751139e1` is still gameplay-unmeasured.
+
+### Placement-only check, started 12:04:44 UTC
+
+The 185-level path is not merely a slow arithmetic recurrence. The native
+report traverses prefix decode, paired-return invalidation/issue, lookahead
+address/translation, cache/store admission and acknowledgement, then FPU
+operand selection and SRT launch. Those are netlist observations, not proof
+that the complete path is sensitizable or permission to add false paths.
+
+`fpga/place_completed_40mhz.tcl` opens the completed native project with its
+actual XDCs. It verifies part/top, non-stale completed synthesis, fresh
+implementation history, exact DCP hash, 40/100 MHz clocks and no black boxes.
+It runs only `opt_design -directive RuntimeOptimized` and the frozen project's
+`AltSpreadLogic_high` placement policy, saving separate optimized/placed DCPs.
+No new synthesis, directive sweep, route, phys-opt, bitstream or board write.
+**40 real-tclsh stub tests pass** for admission, native failures and missing
+artifacts; these are flow-control tests, not physical acceptance.
+
+Root `ventium-ic-prefix-capture-place.kOshlZlT`, controller
+`0a85d2fb04ab4c66a17ff54413759b3b`, sole Vivado scope
+`25a061ffc2ce4d90ab8abac2a4cf63a1`. Bound: 60 minutes, 8 GiB RAM / 6 GiB swap,
+monitored host/disk reserves. Input DCP SHA
+`cd26e7d6ea4c85349d59eb88e3427ad480ff605f803cf30f6db27c64edb3fc48`.
+Optimization has completed natively; placement/result audit is still pending.
 
 ### Recoverable scratch cleanup
 

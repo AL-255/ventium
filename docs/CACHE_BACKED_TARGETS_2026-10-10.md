@@ -5,6 +5,16 @@ U+V retirement-event gameplay IPC**, the error-free standard suite, green
 differential gates, and a working FPGA deployment. U-only/STEP/global slow
 fallbacks are not acceptance. REP retirement events are not P54 macroinstructions.
 
+**Latest verified measurement, 12:07 UTC:** `bfb867f7` reaches **0.50137912 IPC**
+over clocks **1,400,065,237–1,500,065,237**. All three consecutive windows from
+1,200,065,237 average **0.50624649**. This is the same cache-backed model with
+qualified **2.101890118 / 2.107616105 CM/MHz** below, not a score borrowed from
+another build. Latest raw-pixel/counter/ownership audit:
+`ventium-store-admit-gameplay-r3.8XoOMN4R/audit.json`. Both endpoint images show
+continuing first-person combat. Full timedemo and physical FPGA remain open.
+New area candidate `751139e1` remains gameplay-unmeasured; its own standard
+suite is running. Older timestamped results below remain historical evidence.
+
 ## Current combined candidate
 
 Model `bfb867f7844b467eeafba12fe6d5035e89d0d2cf03111911cbdd599d7fb204e6`,

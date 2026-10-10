@@ -7,9 +7,9 @@ All ownership guards, nonblocking writes, q_* effects, state transitions and
 latencies remain unchanged. UV/system/relocated fast pipeline and fast
 loads/stores stay enabled; no slow-mode workaround or guest-specific change.
 
-Verified gameplay baseline is **0.50705320** U+V event IPC, performance parent
-`bfb867f7`, clocks 1,300,065,237–1,400,065,237. Both consecutive windows from
-1,200,065,237 average **0.508680175**; neither is dropped.
+Verified gameplay baseline is **0.50137912** U+V event IPC, performance parent
+`bfb867f7`, clocks 1,400,065,237–1,500,065,237. All three consecutive windows from
+1,200,065,237 average **0.50624649**; none is dropped.
 New model **`751139e1` is gameplay-unmeasured**.
 REP events are not exact P54 macroinstructions. The predecessor's qualified
 2.101890118 / 2.107616105 CM/MHz scores are not inherited by this model.
@@ -87,6 +87,15 @@ not routed Fmax or a 40 MHz sign-off. All 30 worst paths now start at `q_pc`,
 ending in SRT result enables, with 185 logic levels (previous 194).
 Raw `ibuf`-named LUT attribution falls 26,049 → 5,559; reconstructed names are
 not isolated-module area. Both DCPs remain unchanged.
+
+Placement-only measurement started at **12:04:44 UTC**, root
+`ventium-ic-prefix-capture-place.kOshlZlT`. It uses the original project/XDCs,
+pinned completed synthesis DCP, RuntimeOptimized (the documented omission of
+the previously crashing `bram_power_opt`) and the frozen AltSpreadLogic_high
+placement directive. Forty flow-control tests pass. One guarded family,
+8 GiB RAM / 6 GiB swap, 60-minute bound, monitored disk/host reserves.
+No synthesis restart or routing/bitstream launch; placement acceptance remains
+pending. [Procedure/evidence](../docs/FPGA_FETCH_CONGESTION_2026-10-10.md#placement-only-check-started-120444-utc).
 
 Its own cold standard suite started **11:50:53 UTC**, under the unchanged
 duration/completion rules. Actual model/PID/starttime/argv/affinity/cgroup and

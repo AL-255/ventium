@@ -118,7 +118,7 @@ These are writeback-port tests, not architectural-state-file or full-core tests;
 central ES/B recomputation remains outside this unit.
 
 Four generator tests pass. Four RTL profiles (parent/repaired, combinational/
-two-stage legacy FP configuration) are **queued, not passed**, in
+two-stage legacy FP configuration) were queued in
 `external/tmp/ventium-fst-legacy.2Z6k47XD/`. Service
 `ventium-fst-legacy-oct10.service`, invocation
 `7e1452b97b81477ab63332d347968441`, waits behind the same Vivado/build lock.
@@ -126,3 +126,19 @@ The bounded body allows 600 seconds total, one compiler, the normal 4 GiB
 scope and all six structural warning classes fatal. The expected parent
 failure is counted explicitly; it is not a passing correctness profile.
 No live FPGA or guest input is changed by preparing this test.
+
+That first attempt **failed**, not passed: parent-combinational C++ compilation
+exceeded its 130-second per-profile limit; `closed.json` retains the timeout
+and no completed profile results. It was ordinary compiler work, not a stuck
+lock. The source/test expectations were not changed to accommodate it.
+
+R2 is queued behind the single heavy-build lock at
+`ventium-fst-legacy-r2.qlOa6MXC`, invocation
+`2d1d395f82b247069cc0b7348b97791f`. It uses identical RTL, ports, vectors,
+expected parent failures and strict structural checks. Only host test code
+optimization changes to `OPT_FAST=-O0`, with 145 seconds per profile inside
+the same 600-second total native bound and 4 GiB/one-compiler guard. This is
+not a processor performance setting. Neither attempt qualifies the legacy
+repair yet. Latest separately verified gameplay is **0.50137912** IPC on
+`bfb867f7`, clocks 1,400,065,237–1,500,065,237; the FST repair is not in that
+model and has no gameplay measurement.
