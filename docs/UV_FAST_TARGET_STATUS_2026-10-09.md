@@ -7,9 +7,37 @@ snapshot is used for the current cold full-PC runs.
 | Requirement | Verified result | Remaining |
 | --- | --- | --- |
 | CoreMark ≥2.1 CM/MHz | Current `b5453f16` full direct-memory seeds: **2.107843209 / 2.110905243**, correct CRCs | Not a DDR/cache/FPGA score |
-| Quake ≥0.48 total U+V IPC | Latest **0.49639177**, repaired 256 KiB-L2 `86731249`, 2.6B–2.7B clocks; **0.47400567** over all 1.2B–2.7B | Sustained target still open; original fixed window 0.49083588; full timedemo and silicon pending |
+| Quake ≥0.48 total U+V IPC | Latest **0.49722017**, repaired 256 KiB-L2 `86731249`, 2.9B–3.0B clocks; **0.47771903** over all 1.2B–3.0B | Sustained target still open; original fixed window 0.49083588; full timedemo and silicon pending |
 | Standard suite | Current full direct-memory CoreMark seeds pass; larger-L2 Win95 closed at a visually clean desktop | Independent desktop acceptance, complete timedemo and remaining differential failures |
 | FPGA | Old image still deployed; 40 MHz synthesis stopped by resource watchdog on October 10 | No accepted new synthesis/bitstream; timing/resource qualification and deployment remain open |
+
+## October 10 continuation: SMC coverage and synthesis diagnosis
+
+Latest audited gameplay is **49,722,017 U+V retirements / 100M clocks =
+0.49722017 IPC**, 2.9B–3.0B on unchanged `86731249`. Both unchanged endpoint
+images show advancing nailgun gameplay, from a dark stone corridor toward
+stairs with a nail-pickup message. All **18** consecutive windows since 1.2B
+average **0.47771903**, retaining the 0.26103520 dip. The original predeclared
+window is unchanged; no completed timedemo or sustained-target pass is claimed.
+Receipt: `external/tmp/ventium-l2-gameplay.VedZVnwA/latest-3000000000/audit.json`.
+New SoC `958f7ec4` continues cold Quake; it has **no gameplay measurement**.
+
+The [SMC matrix](../verif/fe_pipe/SFETCH16_DEMAND.md#self-modifying-code-and-oracle-correction)
+now covers 1,152 fixtures / 4,608 A/B measurements. 1,065 fixtures pass the
+ordinary oracle checks; 87 page-crossing edits expose a free-running QEMU
+stale-code discrepancy while both RTL models match stepped QEMU. Those 87
+remain diagnostic-only and the full SMC gate remains FAIL. A collector bug
+was fixed separately: instruction bytes now use the actual hidden CS base,
+not `selector<<4`. Across 24 identical images all 3,800 architectural records
+remain unchanged; 2,304 opcode-byte records are corrected. All 88 fetch-fault
+checks pass again. No RTL fallback, modified guest, or comparator waiver.
+
+The prior full synthesis spent roughly 98 minutes and most of its memory growth
+in timing optimization. An explicit [logic-only synthesis diagnostic](../fpga/SYNTHESIS_PROFILES.md)
+is implemented; defaults, RTL and clock constraints are unchanged. Native
+Vivado verifies both generated option paths and the **40 MHz constraint** on
+a tiny design. This is not a full-chip memory/timing result. No new full build
+was launched with inadequate disk/RAM reserves; no browser was stopped.
 
 ## October 10: demand-fetch implementation and later gameplay
 
