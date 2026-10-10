@@ -223,3 +223,60 @@ does not substitute for it or the standard suite. Latest verified gameplay
 is **0.46555093 U+V retirement-event IPC**, older `bfb867f7`, cycles
 4,300,065,237–4,400,065,237; all 32 windows average 0.494922360. The combined
 candidate has no verified gameplay measurement yet.
+
+## Repaired candidate: all remaining reported fields observed natively
+
+On October 10, the [zero-C1/BCD-sign candidate](../../fp_shared/tb/ZERO_C1_BCD_SIGN.md)
+`f74dd76b` reran the unchanged functional worker with the private exit observer:
+**98 PASS / ten FAIL**, all 80,800 records, in 44.17 seconds. Differences fall
+from 165 to **161**: the four independently confirmed FLD errors are gone.
+Root `ventium-zero-c1-preexit.8NudGMAo`, invocation
+`a5932c288d0b498ead84477445262c4b`; independent `audit.json` rechecks 6,226 input
+pins, all trace lengths and every remaining comparison. No OOM or new masks.
+
+The new [`prepare_native_gpr_observer.py`](../../fp_shared/tb/prepare_native_gpr_observer.py)
+derives a separate passive native observer without modifying the pinned old
+helper. It reads real GPRs before/after the selected instruction. Enabling
+`PTRACE_O_TRACEEXIT` also permits an actual live stop at an exiting INT before
+the task disappears; that event is explicitly identified in the output.
+The child resumes to its natural zero exit and is reaped. There are no guest
+patches, register writes, injected instructions or synthetic terminal packets.
+Terminal GPR syscall semantics are **not** qualified by this test; the terminal
+comparison here is FSW only.
+
+All **117 distinct instruction sites** contributing the remaining differences
+were executed using their unchanged gate ELFs on native x87. Independent audit
+compares the **entire reported field values**, not just disputed bits:
+
+| Field | Reported differences | Native value equals RTL | Native value equals QEMU |
+|---|---:|---:|---:|
+| FSW | 91 | 91 | 0 |
+| EAX | 38 | 38 | 0 |
+| ECX | 32 | 32 | 0 |
+| Total | **161** | **161** | **0** |
+
+The final `tx_fprem` INT at record 300 yields native and RTL FSW **0x0120**,
+versus QEMU **0x0020**. This includes C0 persistence; agreement on the modern
+native host does **not** turn architecturally undefined bits into P54 guarantees.
+Likewise, these selected fields are not a replacement full-ISA native oracle.
+
+Controls independently check known GPR values across INC, unchanged registers
+across FNOP and seeded FSW across the real exit event. Non-ELF and unreached-PC
+controls fail closed. Two host recipe tests also pass. Native root
+`ventium-preexit-gpr-native.14cUSbOf/{started.json,result.json,audit.json}`,
+invocation `843f705846a64cb09777b4c285a05c77`, closes zero with stable pins and
+no OOM; the C derivative, GCC command, fixture, all raw witnesses and driver
+are retained there. Run the host tests with:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=fp_shared/tb python3 -B -m unittest -v \
+  test_native_gpr_observer
+```
+
+No new RTL defect is demonstrated by these remaining 161 fields. The canonical
+pinned-QEMU gate nevertheless remains **FAIL**, including its independent cycle
+failures. Its oracle policy must be resolved explicitly; neither dropping a
+terminal record nor blindly extending masks is an accepted fix. FPGA and full
+standard-suite acceptance are still pending. Latest verified gameplay remains
+older simulated `bfb867f7`: **0.53765810 U+V event IPC**, cycles
+4,500,065,237–4,600,065,237; the repaired candidate remains gameplay-unmeasured.
