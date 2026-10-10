@@ -22,7 +22,7 @@ pixels. Both frames visibly show advancing gameplay. This later window is
 **not** substituted for the original predeclared 1.2B–1.3B test.
 
 All eleven consecutive windows from 1.2B through 2.3B average **0.48907486**;
-individual windows range 0.45969759–0.51351913, so the claim is not that every
+individual windows range 0.45969841–0.51351913, so the claim is not that every
 scene sustains 0.48. The full 969-frame timedemo remains running, incomplete.
 The independent C1 (`6f71bad6`) and RET (`56707c8a`) candidates below have no
 gameplay measurement or standard-suite acceptance.
