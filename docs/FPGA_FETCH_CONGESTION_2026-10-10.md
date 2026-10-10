@@ -11,8 +11,9 @@ gameplay-unmeasured. REP events are not exact P54 macroinstructions.
 The final **two-consumer** sharing correction saves **24,543 whole-design
 LUTs (11.06%)**. Earlier local successes followed by whole-design regressions
 are retained chronologically below; they are not the final area result.
-Directed cycle records remain identical. Placement is now running, but routed
-frequency, generic verification and full-suite/hardware acceptance remain open.
+Directed cycle records remain identical. Placement has completed, but its
+**18.21 MHz estimate and level-6 congestion** remain poor despite the area gain.
+Routed frequency, generic verification and full-suite/hardware acceptance remain open.
 
 ## Native checkpoint diagnosis
 
@@ -481,12 +482,51 @@ leaf body and remove the disabled conditional to recover the exact original
 source. This recipe is **not applied to production or any running candidate**;
 native miter success and a separate full-core qualification must come first.
 
-Native RTL testing is **queued, not passed**, under
+Native RTL testing **passed**, under
 `ventium-cacheinv-local-oct10.service`, invocation
 `4b2af08633cb4ceb99262b7c0f924913`, root
-`ventium-cacheinv-local.2vGg1j9C/run`. It waits on the shared heavy-build lock
-behind the sole placement family and the earlier legacy-FST matrix. Its native
-body is bounded to ten minutes, one compiler and the normal 4 GiB scope, with
-six structural warning classes fatal. Full-core equivalence, synthesis area,
-frequency and standard-suite qualification would still be required before
-promoting this proposal. `751139e1` remains unchanged and gameplay-unmeasured.
+`ventium-cacheinv-local.2vGg1j9C/run`. After acquiring the shared heavy-build
+lock, all four builds close native 0; the candidate passes **653,984 cases /
+22,248 positive recognitions**, and each required negative fails at its actual
+`CACHEINV-MISMATCH`. Total 29.61 seconds, 1,152,376,832-byte peak RAM, no OOM,
+stable pins. Its owner was not retained after success; closed/supervised receipts
+are available, not a claimed live retained supervisor. This remains a two-state
+actual-decoder test, not full-core or four-state acceptance.
+
+The recipe is now applied only to a fresh private full-core derivative,
+`ventium-cacheinv-core.1Jju4rvk`, model `5f4e0ca0`. Exactly `core.sv` plus the
+generated `core_cacheinv_local.svh` change. Native build 0 in 15.07 seconds,
+32 bounded compiler jobs, all six structural classes fatal, verified local
+private harness/header ownership and stable pins. A new cold paged full-core
+matrix is running against QEMU and the unchanged parent: INVD/WBINVD, mixed
+and maximal legal prefixes, all line offsets, flat/relocated clients and AXI
+latencies 0/7, checking complete architectural and cycle record lists plus a
+real U/V pair. No production or running full-PC candidate was changed.
+
+### Closed placement and control-path diagnosis, 12:46 UTC
+
+`ventium-ic-prefix-capture-place.kOshlZlT`: native Vivado exits 0 after
+**2,490.08 seconds**, with a fully placed DCP, 6,304,292,864-byte peak cgroup
+RAM, zero swap/OOM, original 40/100 MHz clocks and zero checked structural DRCs.
+Placement uses 196,363 LUTs, 54,683 FFs and **35,113 CLBs (82.31%)**;
+BRAM/DSP remain 277.5/47. The mux-heavy north/south windows reach congestion
+**level 6**, despite lower LUT utilization. No routing or bitstream generation.
+
+The strict controller remains **FAILED**: Vivado rewrote its project XPR.
+`project-delta.json` reconstructs the exact old SHA from current bytes and
+proves the only changes are removing two strategy description strings and
+adding an empty simulation-source GUI filter. All **3,725 other pins** remain
+unchanged, including RTL, constraints, scripts and synthesis DCP. No project
+or failure receipt was overwritten. The separate
+`audit-metadata-requalified.json` admits **native placement only** after these
+checks; its first parser attempt expected `Placed` instead of the actual
+`Fully Placed` header and is retained separately.
+
+Worst reported core setup slack is -29.911 ns against 25 ns: a **path-local
+placed estimate of 18.211 MHz**, not routed Fmax or a physical-clock claim.
+Worst reported hold is -0.156 ns. The first path is `q_len` to paired-return
+data: 157 logic levels, 54.612 ns total (12.323 logic + 42.289 estimated routing).
+**All 30 reported worst paths traverse `d_unknown` and `flush_all0`** before
+paired lookahead/address logic. This directly supports testing the registered
+invalidation projection above. It does not prove that it repairs all timing
+paths; rerouting this unchanged congested design is not the next experiment.

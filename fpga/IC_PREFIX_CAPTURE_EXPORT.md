@@ -12,8 +12,11 @@ Verified gameplay baseline is **0.49069743** U+V event IPC, performance parent
 1,200,065,237 average **0.496524834**, retaining the preceding 0.47318727 dip;
 none is dropped. Audit `ventium-store-admit-gameplay-r5.DipwsC7P/audit.json`.
 New model **`751139e1` is gameplay-unmeasured**.
-REP events are not exact P54 macroinstructions. The predecessor's qualified
-2.101890118 / 2.107616105 CM/MHz scores are not inherited by this model.
+REP events are not exact P54 macroinstructions. This model's **own** two
+900-iteration seeds now qualify at **2.101890118 / 2.107616105 CM/MHz**, with
+428,186,037 / 427,022,738 ticks, original CRCs and more than ten guest seconds.
+Independent seed audits check native 0/EOF/reaping, actual V retirement, 3,361
+stable pins each and no OOM. These are simulation scores, not silicon scores.
 
 ## Identity and checks
 
@@ -95,8 +98,13 @@ pinned completed synthesis DCP, RuntimeOptimized (the documented omission of
 the previously crashing `bram_power_opt`) and the frozen AltSpreadLogic_high
 placement directive. Forty flow-control tests pass. One guarded family,
 8 GiB RAM / 6 GiB swap, 60-minute bound, monitored disk/host reserves.
-No synthesis restart or routing/bitstream launch; placement acceptance remains
-pending. [Procedure/evidence](../docs/FPGA_FETCH_CONGESTION_2026-10-10.md#placement-only-check-started-120444-utc).
+Native placement completed at 12:46 UTC in 2,490.08 seconds, zero swap/OOM.
+The strict controller failed on a changed XPR; separate hash-proven inspection
+shows only two description strings and a simulation GUI filter changed, with
+all 3,725 other inputs intact. Independent native-placement requalification
+passes without rewriting the failed controller receipt. The placed estimate is
+**18.21 MHz**, not 40 MHz sign-off, and congestion reaches level 6. No route
+or bitstream was started. [Procedure/evidence](../docs/FPGA_FETCH_CONGESTION_2026-10-10.md#closed-placement-and-control-path-diagnosis-1246-utc).
 
 Its own cold standard suite started **11:50:53 UTC**, under the unchanged
 duration/completion rules. Actual model/PID/starttime/argv/affinity/cgroup and
@@ -117,6 +125,6 @@ The unmodified generic gate remains **FAIL**, native 2: 7/108 functional passes,
 101 terminal-record discrepancies and 12/19 graded cycle-band failures.
 All 20 complete cycle-kernel **record lists** match the immediate parent;
 whole trace files differ in provenance headers. No records/masks/bands changed.
-Known x87 C1 repairs are still not in this source. Own duration-valid CoreMark,
-Win95 desktop, all 969 original DOS demo1 frames, routed frequency and silicon
+Known x87 C1 repairs are still not in this source. Own duration-valid CoreMark
+has passed; Win95 desktop, all 969 original DOS demo1 frames, routed frequency and silicon
 acceptance remain required; this export grants none of them.

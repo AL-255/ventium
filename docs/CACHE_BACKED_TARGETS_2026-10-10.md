@@ -15,7 +15,13 @@ another build. Latest raw-pixel/counter/ownership audit:
 endpoint images show continuing first-person gameplay: a corpse and pickups,
 then a turned view and weapon fire. Full timedemo and physical FPGA remain open.
 New area candidate `751139e1` remains gameplay-unmeasured; its own standard
-suite is running. Older timestamped results below remain historical evidence.
+suite is running. Its **own two 900-iteration CoreMark seeds now pass** at
+2.101890118 / 2.107616105 CM/MHz, independently audited at 12:49 UTC; the exact
+428,186,037 / 427,022,738 ticks match the performance parent, with all original
+CRCs, native 0/EOF/reaping, actual V retirement, 3,361 stable pins per seed and
+no OOM. Evidence: `ventium-ic-prefix-capture-soc.Vkt5yyAz/coremark-900-{performance,validation}/audit.json`.
+This does not qualify its still-running Quake/Win95 or physical FPGA.
+Older timestamped results below remain historical evidence.
 
 ## Current combined candidate
 
