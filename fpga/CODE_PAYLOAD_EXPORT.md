@@ -101,7 +101,7 @@ routing, bitstream or board programming was performed. The report-only run
 used a 4 GiB initial disk reserve (previous equivalent reports occupied 57 MiB)
 and unchanged 2 GiB live stop; the synthesis admission remains 12 GiB.
 
-The candidate's own cold standard-suite components are now running, without
+The candidate's own cold standard-suite components were launched without
 snapshots, guest patches, STEP or pairing suppression:
 
 | Service suffix (all `ventium-code-payload-*.service`) | CPU | Invocation |
@@ -115,8 +115,23 @@ Actual native executable, command line, source hashes and affinity are
 recorded, not inferred from unit properties. Each process is limited to one
 CPU, 2 GiB RAM, no swap and 128 tasks. CoreMark is capped at 60 minutes per
 seed and must report 900 iterations, all CRCs and >=10 guest seconds. These
-are **pending runs**, not suite passes or gameplay measurements. The older
-baseline timedemo continues independently.
+do not become suite passes merely by launching. The older baseline timedemo
+continues independently.
+
+**Closed CoreMark update (October 10):** both 900-iteration runs on this exact
+`4fb1bdae` model now finish with original CRCs, native exit zero, actual child
+reaping and no OOM. Independent audits recheck 6,796 source pins each:
+
+| Seed | TSC ticks | Guest seconds at 40 MHz | CM/MHz | CRCs (seed/list/matrix/state/final) |
+|---|---:|---:|---:|---|
+| Performance | 428,186,037 | 10.704650925 | **2.101890118** | e9f5/e714/1fd7/8e3a/4983 |
+| Validation | 427,022,738 | 10.675568450 | **2.107616105** | 18f2/e3c1/0747/8d84/9808 |
+
+Evidence: `ventium-code-payload-soc.1oJrvfzN/coremark-900-{performance,validation}/audit.json`.
+Ticks match the previous `bfb867f7` result exactly: **0% CoreMark regression or
+gain from these area/correctness backports**. These close the CoreMark component
+only, not Quake, Win95, physical FPGA or the newer repaired models. The two cold
+guest processes were confirmed still running on October 10 at 20:05 UTC.
 
 Preflight reclaimed **1,416,501,961 bytes** by losslessly archiving eighteen
 closed-build PCHs and 303 regenerable model C++ files. Each archive was
@@ -172,3 +187,48 @@ The newest model has **no gameplay measurement, complete standard-suite pass,
 synthesis, routed bitstream or physical Quake/Win95 acceptance**. The latest
 verified gameplay remains the older `bfb867f7` result above, not a result for
 this follow-up. The canonical differential failures remain open.
+
+## Zero-C1 / BCD-sign follow-up — October 10, 20:16 UTC
+
+The [remaining zero-C1 and packed-sign repairs](../fp_shared/tb/ZERO_C1_BCD_SIGN.md)
+are now in a source-matched full-PC model, `2b4d7a48`, and a new frozen hardware
+export. This is a correctness follow-up, not a new performance claim.
+
+- Full-PC root `ventium-zero-c1-soc.FTbYSn0L`, model SHA-256
+  `2b4d7a48453fb8f901730d70b5731d9fb6a5459a83fc36f69241f441a7ab298e`.
+  The independent short-CoreMark audit rechecks 7,990 pins, actual native
+  termination and no OOM. Both seeds retain **4,767,218 / 4,753,406 ticks** and
+  original CRCs: **0% measured throughput change**. These ten-iteration runs
+  are not duration-qualified scores.
+- Export `ventium-zero-c1-fpga40.rQeGd6ln`, manifest SHA-256
+  `b28ce916c8ce276546ac85384dd4959452aad439a14e283d1b2339692465b603`.
+  [`freeze_zero_c1_rk_candidate.py`](freeze_zero_c1_rk_candidate.py) allows only
+  the exact tested FP-top/package/BCD-engine digests. Independent `audit.json`
+  rechecks 8,152 input pins and all 190 payloads. All 102 intersecting directed
+  RTL sources match the native PC build. The 156 hardware defines, 170 compiled
+  non-wrapper inputs, 117 filelist units and 49 include edges are preserved.
+  Four new exporter tests and the actual 61-check wrapper contract pass.
+- Strict hardware CPU-hierarchy lint: `ventium-zero-c1-hw-lint.Jg7OncrJ`,
+  invocation `48a17863cac544cc88dcc4b5690a04e2`, native zero in 2.24 seconds.
+  All six structural classes remain fatal; this is not whole-platform lint.
+- Synthesis started **20:15:34 UTC**, root
+  `ventium-zero-c1-full-synth.yROXoFK0`, controller invocation
+  `f79381ce96f14bc484ad5f1aecee40ff`; actual sole Vivado-family scope invocation
+  `a817c07da12249cdbf45e8b4726a24a6`. Native `synth_1` was confirmed running.
+  The existing exclusive launcher, one job, 8 GiB RAM/6 GiB swap limits,
+  30-minute bound, 12 GiB initial disk reserve and 2 GiB live reserve remain.
+  **40 MHz core / 100 MHz PL are constraints, not a new measured Fmax.**
+  This controller does not place, route or deploy; synthesis is still pending.
+
+Preflight recovered **2,590,087,884 bytes** by losslessly archiving generated
+PCH/C++ from ten closed models and 5,760 closed matrix traces. Every archive
+was verified before removing loose copies. RTL, native binaries, headers,
+objects, logs, media and all non-trace results remain; restore commands and
+per-file hashes are in `ventium-zero-c1-space.JE69Blvc`. One older matrix with
+changed input pins was inspected but left untouched. No disk guard was lowered.
+
+The canonical gate remains FAIL (7/108 functional passes, 12/19 scored cycle
+failures); the new candidate has **no gameplay measurement, full-suite pass,
+routed bitstream or physical Quake/Win95 pass**. Latest verified gameplay is
+still **0.53765810 U+V event IPC** on older simulated `bfb867f7`, cycles
+4,500,065,237–4,600,065,237. Do not transfer that result to `2b4d7a48`.
