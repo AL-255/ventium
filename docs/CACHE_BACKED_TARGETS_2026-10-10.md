@@ -96,6 +96,11 @@ These are duration-invalid ten-iteration diagnostics; no own qualified score,
 gameplay or physical timing result is inferred. The full-PC backport includes
 the numeric SRT-floor fix, without reverting any performance feature.
 [Exact experiment and retained failures](../verif/l1/RESPONSE_PAYLOAD.md).
+At 16:46 UTC, `c883878d`'s exact 154-define hardware export passes independent
+source/profile checks and strict CPU-hierarchy lint. One guarded full-synthesis
+diagnostic is running; no new utilization/frequency or physical pass is claimed.
+The [hardware backport record](../fpga/RESPONSE_PAYLOAD_EXPORT.md) identifies
+the source bundle, two intended RTL deltas, native owner and resource guards.
 Older timestamped results below remain historical evidence.
 
 The new dip is associated with **more slow-FSM work, not a larger total memory
