@@ -169,3 +169,57 @@ See [the fixture evidence](../tests/mb_fxch/STACK_FIXTURE.md).
 
 This is not a rerun of all 108 programs, a repair of `tx_fprem`, or canonical
 gate acceptance. The observer remains opt-in; timing bands are unchanged.
+
+## Current combined candidate — October 10, 18:57 UTC
+
+The private observer was rerun on directed core `1139570b`, which contains
+the current FP correctness repairs and code-buffer payload selector. The
+unchanged canonical worker runs all **108 current programs** at real AXI
+read/write latency 7, UV + system/relocated fast paths and `--cycle-func`.
+An isolated enabled-observer cache is used; the pinned oracle and canonical
+gate are untouched. Four workers are bound to four actual CPUs, with 2 GiB
+RAM, no swap, 128 tasks and a ten-minute outer bound.
+
+Root: `ventium-code-payload-preexit.n35jOl39` under external tmp. The run
+closes in 88.60 seconds: **98 PASS / ten FAIL**, native controller exit 1,
+invocation `0f8a5fd9c2424d75a77eefe630ed149a`. All 108 workers were waited
+for and reaped; no OOM. Independent `audit.json` rechecks 5,617 source pins,
+all **80,800 records** and the actual closed supervisor. Every trace length
+matches. Re-running the original comparator with `--all` retains every
+divergence and the original masks:
+
+| Program | Differing fields/records reported |
+|---|---:|
+| `tx_addsub` | 1 |
+| `tx_chain` | 5 |
+| `tx_cmp` | 2 |
+| `tx_fp_denorm` | 79 |
+| `tx_fprem` | 58 |
+| `tx_fxam` | 3 |
+| `tx_muldiv` | 3 |
+| `tx_round` | 8 |
+| `tx_sqrt` | 1 |
+| `tx_unifdiv` | 5 |
+
+The 165 differences are FSW bit 9 (C1), FSW bit 8 (C0), or bit 9 copied into
+EAX/ECX by the original instructions. This classification is not a waiver.
+In particular, simply masking FSW would not validate status copied into GPRs.
+
+[`check_preexit_c1_native.py`](../../fp_shared/tb/check_preexit_c1_native.py)
+executes the exact unchanged ELFs with the existing passive native observer.
+All ten **first-divergence** sites have matching input operands/control words.
+Seven arithmetic sites agree with an independent exact-rational result/C1
+check; the other three are exact, nonempty `FSTP ST0` operations, whose
+native pop/tag behavior is checked and whose expected C1 is zero. Native C1
+and RTL agree at all ten; QEMU disagrees. This includes `tx_cmp`, `tx_fxam`
+and the now-earlier register-pop difference in `tx_fprem`. Invalid-ELF and
+unreached-PC controls still fail closed; four host tests cover the new
+register-store oracle branch. Evidence: `native-first-sites/result.json`.
+
+The native host is **not P54 silicon**, and these ten selected sites do not
+independently validate all 165 differences. No mask, golden, test instruction
+or timing band changed. Canonical `make verify` remains FAIL; this diagnostic
+does not substitute for it or the standard suite. Latest verified gameplay
+is **0.46555093 U+V retirement-event IPC**, older `bfb867f7`, cycles
+4,300,065,237–4,400,065,237; all 32 windows average 0.494922360. The combined
+candidate has no verified gameplay measurement yet.
