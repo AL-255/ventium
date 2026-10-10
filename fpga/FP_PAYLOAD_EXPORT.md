@@ -100,10 +100,10 @@ This candidate has no gameplay or qualified CoreMark score, no full Win95/
 Quake closure, and no routed or physical result. Known x87 C1/value defects
 are not repaired by selecting the same payload earlier.
 
-Latest verified gameplay belongs to **`bfb867f7`**: **0.49813751** U+V
-retirement-event IPC at clocks **2,700,065,237–2,800,065,237**, **0.4905029725**
-over all sixteen consecutive 100M windows from 1,200,065,237. The 0.34569625
-dip is retained. That older model qualifies at **2.101890118 / 2.107616105
+Latest verified gameplay belongs to **`bfb867f7`**: **0.50507223** U+V
+retirement-event IPC at clocks **2,900,065,237–3,000,065,237**, **0.4902082417**
+over all eighteen consecutive 100M windows from 1,200,065,237. The 0.34569625
+and new 0.47062856 dips are retained. That older model qualifies at **2.101890118 / 2.107616105
 CM/MHz**; neither result is inherited by this derivative. See the
 [current target record](../docs/CACHE_BACKED_TARGETS_2026-10-10.md).
 
@@ -209,7 +209,7 @@ retirement, native 0/EOF/reaping, 4,213 stable pins and no OOM. Supervisor
 `d13075441ce64e748705b6637fdc255b`; host times 99.86 / 98.81 seconds.
 These ten-iteration diagnostics are **duration-invalid**, not qualified scores.
 This combined candidate has **no gameplay measurement, full standard-suite
-closure, FPGA timing result or physical deployment**. Its A/B equivalence does
+closure or physical deployment**. Its A/B equivalence does
 not repair inherited arithmetic or generic-gate defects.
 
 ### Exact-source hardware export and synthesis admission
@@ -229,12 +229,30 @@ and added explicitly. Arbitrary source aliases remain forbidden.
 Strict CPU-hierarchy lint closes native 0 in **2.49 seconds**, all six
 structural classes fatal and stable inputs, supervisor
 `b7a1588b626d417385911bedf49a012d`. This is not whole-platform lint.
-One synthesis-only run is admitted under
+The synthesis-only run closes native 0 under
 `ventium-fp-operand-payload-full-synth.LL7cOdfp`, controller
-`a685ae8834594de39a333a3272bfbcba`, at 15:02:44 UTC. It retains the same mapper,
+`a685ae8834594de39a333a3272bfbcba`, at 15:21:43 UTC after **1,138.93 seconds**.
+It retains the same mapper,
 8 GiB RAM / 6 GiB swap, 30-minute native cap, 12 GiB starting disk reserve,
 live reserve monitoring and exclusive Vivado family. It cannot launch
-placement, routing or programming. No new timing result is claimed yet.
+placement, routing or programming. The independent closure audit verifies
+**4,573 stable input pins, all 152 actual defines, 148 native source entries**
+and the complete DCP. Utilization is **194,057 LUTs / 54,591 FF / 277.5 BRAM
+tiles / 47 DSPs**, down **2,616 LUTs (1.330%)** and 39 FF from the immediate
+parent. Peak RAM is 8 GiB, swap 882.68 MiB, with no OOM or resource-stop event.
+Zero synthesis errors, one generated PS clock-constraint critical warning and
+1,567 warnings remain. The serialized read-only clock audit is running in
+`ventium-fp-operand-payload-clock-audit.GjsMDYaL`, controller
+`008dc230347b44dd921e84693b59025f`. It closes native 0 in **132.01 seconds**,
+4,579 stable pins, 3.94 GiB peak RAM and zero swap/OOM. The independent audit
+confirms actual **40/100 MHz clocks**, zero black boxes/structural DRC errors,
+and **19.837334 MHz unplaced estimate** (setup −25.410 ns, hold −0.101 ns).
+This is 4.622% above the immediate parent's estimate, still not 40 MHz routed
+sign-off. The worst path remains EIP-to-SRT-enable: **179 levels / 50.113 ns**.
+It now crosses `l1d_c_rdata_hi_valid` into the high-word payload rather than
+the earlier command mux. `ventium_l1_axi` zeros that high word using its late
+valid predicate, reintroducing ACK before FP conversion despite the core's
+earlier payload selection. No place/route/bitstream or board programming ran.
 
 The previous native path also exposes an earlier serial dependency: returned
 instruction bytes → U/V length/pair decision → successor PC/descriptor → AGU
@@ -249,3 +267,55 @@ shared-port arbitration, and all valid requests, paired-store interactions,
 faults and complete cycle streams must be checked. Wait for this candidate's
 new worst-path report before advancing another timing change; do not disable
 priming, pairing or fast mode to hide this cone.
+
+## Wide-response transport: next private candidate
+
+The new worst path identifies a more direct dependency before changing the
+shared cache port: `core_rdata_hi = core_rdata_hi_valid ? data : 0` puts ACK
+in front of the high-word data path. Default-off `VEN_FP_LOAD64_PAYLOAD_SELECT`
+removes only that invalid-cycle blanking. Raw reset and SMRAM/route-denial
+blanking remain, and the entire high-valid/request/permission expression is
+unchanged. Both core consumers still sample only a checked complete operand.
+No extra register, cycle, cache entry or RAM port is added.
+
+The [source recipe](../verif/l1/prepare_fp_high_payload.py) asserts valid-response
+payload ownership. Its [four-state leaf](../verif/l1/run_fp_high_payload.py)
+passes **45,076 checks**, including every two-state qualification combination,
+44 valid-word checks, 39,434 reset/denial checks and unknown/high-impedance
+payloads. Wrong valid data and denied-data exposure each fail as required.
+Root `ventium-fp-high-payload-leaf.XNepLPMd/run`, supervisor
+`ce8f833a52594c65974f19badeaca41c`, native 0, 0.18 seconds, stable pins.
+Ten host recipe/grader tests pass; these are not processor tests.
+
+Private directed core `db83a397`, root `ventium-fp-high-payload-core.WO4FljgA`,
+builds native 0 in 15.75 seconds. Default-off preprocessing preserves the
+entire L1/AXI interface. Its own 384-case matrix plus 36 operand-boundary
+fixtures pass **1,680 full x87/system QEMU comparisons and 840 identical
+complete cycle streams**, with actual V retirement and unchanged wide/fallback
+counts. Supervisors `c92823e7a89c48a28b9b3511e76b2396` and
+`1591687c89474324aee039c8036ad6e9`; native 0, 42.33 / 11.86 seconds, stable
+inputs and reaped children. The unchanged canonical gate is running separately;
+directed A/B equality does not waive its inherited failures.
+
+Full-PC model `03921cdaad0ffe8a58983f876f0e210a3f67d56c82fdc68c7b7e6e8f4083913d`,
+root `ventium-fp-high-payload-soc.QNszcvUZ`, builds native 0 in 20.32 seconds
+with stable pins and its own generated-header/harness pair. Only
+`rtl/mem/ventium_l1_axi.sv` changes from `107d0750`; all performance/cache
+features and the 98 inherited platform structural warnings remain. Its own two
+short CoreMark diagnostics now independently pass at exactly **4,767,218 /
+4,753,406 ticks**, unchanged original CRCs and actual V retirement, native
+0/EOF/reaping, **4,424 stable pins** and no OOM. Supervisor
+`9f903f889731415eb7ba3b9b766ead04`; these ten-iteration diagnostics are not
+duration-qualified scores. This proposal has **no gameplay, qualified CoreMark,
+synthesis, full-suite or physical result** yet.
+
+Export `ventium-fp-high-payload-fpga40.RLIEUvhB`, manifest
+`9e7b6b786752dad0c21f025d4deda2dcc197430275be4bee1205719aa540dea9`,
+contains 190 payloads and **153 hardware defines**. All 170 non-wrapper native
+source payloads match; only the interface source changes from the previous
+export. **115 freezer tests and 49 real-Tcl profile checks pass**, retaining
+the exact prior profile and forbidding partial/substituted bundles. The first
+independent auditor expected both old/new boundary-driver aliases; actual pins
+contain only the new runner. Inspection confirmed the old runner is ancestry,
+not a new build input; the exact expected alias set was corrected, not broadened.
+The hardware CPU lint is serialized behind the canonical generic gate.

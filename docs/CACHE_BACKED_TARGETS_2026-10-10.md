@@ -5,23 +5,24 @@ U+V retirement-event gameplay IPC**, the error-free standard suite, green
 differential gates, and a working FPGA deployment. U-only/STEP/global slow
 fallbacks are not acceptance. REP retirement events are not P54 macroinstructions.
 
-**Latest verified measurement, 15:10 UTC:** `bfb867f7` reaches **0.49813751 IPC**
-over clocks **2,700,065,237–2,800,065,237**: 38,324,551 U + 11,489,200 V
-retirement events. All sixteen consecutive windows from
-1,200,065,237 average **0.4905029725**, retaining the **0.34569625** dip at
-2,100,065,237–2,200,065,237 as well as the earlier two sub-0.48 intervals.
+**Latest verified measurement, 15:36 UTC:** `bfb867f7` reaches **0.50507223 IPC**
+over clocks **2,900,065,237–3,000,065,237**: 38,803,213 U + 11,704,010 V
+retirement events. All eighteen consecutive windows from
+1,200,065,237 average **0.4902082417**, retaining the **0.34569625** dip at
+2,100,065,237–2,200,065,237 and every other sub-0.48 interval, including the
+new **0.47062856** window at 2,800,065,237–2,900,065,237.
 The margin above 0.48 is now small; this is not a completed-demo average.
 This is the same cache-backed model with
 qualified **2.101890118 / 2.107616105 CM/MHz** below, not a score borrowed from
 another build. Latest raw-pixel/counter/ownership audit:
-`ventium-store-admit-gameplay-r11.lTOIcMGv/audit.json`. The newly added window
-is 0.49813751; all 784,804,756 events over 1.6B clocks count.
+`ventium-store-admit-gameplay-r12.bQAk2mq7/audit.json`. The two newly added
+windows are 0.47062856 / 0.50507223; all 882,374,835 events over 1.8B clocks count.
 Both unchanged-pixel endpoint images show rendered first-person stone rooms
-with a nailgun, changed viewpoint/ammunition and a nail pickup message in the
-second image. **Visual-note correction, 15:13 UTC:** earlier notes mistook
+with a nailgun, changed viewpoint/ammunition (77 → 127) and a nail pickup
+message in the second image. **Historical visual-note correction, 15:13 UTC:** earlier notes mistook
 the left-hand armor value (0) for health. These two frames show health **72**
 to the right of the face, consistent with [id Software's HUD layout](https://github.com/id-Software/Quake/blob/master/WinQuake/sbar.c#L915-L951).
-The original audit JSON and pixels remain unchanged; `visual-correction.json`
+The original r11 audit JSON and pixels remain unchanged; its `visual-correction.json`
 records this interpretation correction without changing counters or acceptance.
 This visual observation is still not proof of complete render correctness.
 Full timedemo and physical FPGA remain open.
@@ -56,6 +57,12 @@ is **18.961 MHz**, still far short of 40 MHz sign-off. The critical path now
 crosses the early-load FP payload selector rather than the direct-command
 payload selector. [The exact candidate record](../fpga/FP_PAYLOAD_EXPORT.md)
 retains the area increase and unresolved timing, not just the small improvement.
+The combined SRT/load-payload derivative `107d0750` now synthesizes at
+**194,057 LUTs** with **19.837 MHz unplaced estimate**, still not 40 MHz
+sign-off. A subsequent interface-only high-word transport candidate `03921cda`
+passes 1,680 directed QEMU comparisons, 840 identical complete cycle streams
+and both short CoreMark diagnostics at exactly the same parent ticks/CRCs.
+Neither newer timing candidate has gameplay or full-suite qualification.
 Older timestamped results below remain historical evidence.
 
 The new dip is associated with **more slow-FSM work, not a larger total memory
