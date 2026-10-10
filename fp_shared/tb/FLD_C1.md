@@ -78,3 +78,8 @@ NaN/denormal exception conversion, memory-fault ordering and every other x87
 instruction are not certified by this matrix. The ongoing `4fb1bdae` cold
 standard suite predates this repair. A full-PC backport and its standard suite
 are still required before claiming the repaired candidate complete.
+
+Follow-up: [zero-C1 and packed-decimal sign repairs](ZERO_C1_BCD_SIGN.md) cover
+the previously excluded deferred FBLD completion and unary/exchange operations.
+They retain this load regression; their newer full-PC model is separately
+identified and is not qualified by the older model's results.
