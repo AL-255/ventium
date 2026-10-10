@@ -2,18 +2,23 @@
 
 This is **UNQUALIFIED source preparation**, not a bitstream, timing pass or
 transfer of simulation acceptance to silicon. Latest verified Quake gameplay
-is **0.49929384 total U+V IPC**, larger-L2 model `86731249`, clocks 3.2B–3.3B.
+is **0.50058134 total U+V IPC**, larger-L2 model `86731249`, clocks 3.6B–3.7B.
 The fixed 1.2B–1.3B gate remains **0.49083588**; the newer sample does not
-replace it. All21 consecutive 100M windows from1.2B–3.3B average **0.47844824**,
+replace it. All25 consecutive 100M windows from1.2B–3.7B average **0.4788804468**,
 including the2.3B–2.4B dip at **0.26103520**. The sustained target, full timedemo
 and silicon acceptance remain open. New model`958f7ec4` has no gameplay result.
-The latest audit is`ventium-l2-gameplay.VedZVnwA/latest-3300000000/audit.json`:
-49,929,384 total U+V retirements over100M clocks, unchanged RGB endpoint frames
-showing advancing gameplay, stable source/runtime pins, matching native/service
+The latest audit is`ventium-l2-gameplay.VedZVnwA/latest-3700000000/audit.json`:
+50,058,134 total U+V retirements over100M clocks, unchanged RGB endpoint frames
+showing the demo's death/combat sequence (health zero; camera/monster movement),
+stable source/runtime pins, matching native/service
 identity and no OOM. It is selected by latest complete timestamp, not highest IPC.
 Current full direct-memory CoreMark
 scores are **2.107843209 / 2.110905243 CM/MHz** on the separate `b5453f16` model;
 they are not FPGA/cache/DDR scores.
+
+Cold deployment now uses the checked-owner lifecycle helpers described in
+[COLD_LIFECYCLE.md](board-tools/COLD_LIFECYCLE.md). Their host tests and the
+fresh pinned package are not a board deployment or processor correctness pass.
 
 Subsequent directed testing found [SRT C1 and reduced-precision exponent
 defects](../fp_shared/tb/SRT_ROUND_FLOOR.md) in that unchanged FP source.
