@@ -22,7 +22,10 @@ module ven_fp_estdiv (
   } est_t;
   est_t est_q;
 
-  logic [63:0] a0_q, a1_q, b_q, z_q, rem0_q, rem1_q;
+  logic [63:0] a0_q, a1_q, b_q, rem0_q, rem1_q;
+  // Before E_D2, the quotient's low word is always zero. Retain only its
+  // high word so synthesis sees one 64x32 correction product, not 64x64.
+  logic [31:0] z_hi_q;
   logic [31:0] b0_q;
   logic [2:0]  correction_q;
 
@@ -43,7 +46,7 @@ module ven_fp_estdiv (
       a1_q         <= 64'd0;
       b_q          <= 64'd0;
       b0_q         <= 32'd0;
-      z_q          <= 64'd0;
+      z_hi_q       <= 32'd0;
       rem0_q       <= 64'd0;
       rem1_q       <= 64'd0;
       correction_q <= 3'd0;
@@ -75,7 +78,7 @@ module ven_fp_estdiv (
         // bounded 32-bit a0/b0 result placed in the high word.
         E_D1: begin
           if ({b0_q, 32'd0} <= a0_q) begin
-            z_q   <= 64'hffffffff00000000;
+            z_hi_q <= 32'hffffffff;
             est_q <= E_MUL;
           end else begin
             div_second_q <= 1'b0;
@@ -107,11 +110,11 @@ module ven_fp_estdiv (
           div_quot_q <= next_quot;
           if (div_count_q == 6'd31) begin
             if (div_second_q) begin
-              z     <= z_q | {32'd0, next_quot};
+              z     <= {z_hi_q, next_quot};
               vld   <= 1'b1;
               est_q <= E_IDLE;
             end else begin
-              z_q   <= {next_quot, 32'd0};
+              z_hi_q <= next_quot;
               est_q <= E_MUL;
             end
           end else begin
@@ -119,13 +122,13 @@ module ven_fp_estdiv (
           end
         end
 
-        // t=b*z; rem={a0,a1}-t.  This registered multiply stage is retained
-        // verbatim from the proven estimator.
+        // t=b*(z_hi<<32); rem={a0,a1}-t. Same registered E_MUL stage and
+        // exact modulo-128 subtraction; no new latency or multiplier.
         E_MUL: begin
-          automatic logic [127:0] t128;
+          automatic logic [95:0] product;
           automatic logic [127:0] rem128;
-          t128   = {64'd0, b_q} * {64'd0, z_q};
-          rem128 = {a0_q, a1_q} - t128;
+          product = {32'd0, b_q} * {64'd0, z_hi_q};
+          rem128 = {a0_q, a1_q} - {product, 32'd0};
           rem0_q       <= rem128[127:64];
           rem1_q       <= rem128[63:0];
           correction_q <= 3'd0;
@@ -136,7 +139,7 @@ module ven_fp_estdiv (
           if (rem0_q[63] && (correction_q != 3'd6)) begin
             automatic logic [127:0] rem128;
             rem128 = {rem0_q, rem1_q} + {{32'd0, b0_q}, b_q << 32};
-            z_q          <= z_q - 64'h0000000100000000;
+            z_hi_q       <= z_hi_q - 32'd1;
             rem0_q       <= rem128[127:64];
             rem1_q       <= rem128[63:0];
             correction_q <= correction_q + 3'd1;
@@ -150,7 +153,7 @@ module ven_fp_estdiv (
           automatic logic [63:0] r0;
           r0 = (rem0_q << 32) | (rem1_q >> 32);
           if ({b0_q, 32'd0} <= r0) begin
-            z     <= z_q | 64'h00000000ffffffff;
+            z     <= {z_hi_q, 32'hffffffff};
             vld   <= 1'b1;
             est_q <= E_IDLE;
           end else begin
