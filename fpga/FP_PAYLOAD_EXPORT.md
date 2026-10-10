@@ -193,7 +193,11 @@ page crossing. Both flat and relocated clients, AXI latencies 0/7, and actual
 V retirement remain checked. Main/boundary supervisors are respectively
 `138573ac749440c7ad398b3fec55fd4b` / `31237674dd0340039165bd159ad6f8b8`;
 both close native 0 with stable inputs and all children reaped. No trace
-trimming, masks or golden changes. The new canonical generic gate is pending.
+trimming, masks or golden changes. The new canonical generic gate closes
+**FAIL**, native 2, supervisor `ad0b7fa6f486457ba6af845c6adef968`, with the
+same inherited functional/cycle-band failures. An independent audit rechecks
+3,905 pins and all 20 complete cycle-kernel record lists against the SRT parent;
+all lists are identical. No failures were waived.
 
 Full-PC model **`107d07501457191bbaed205a30285fa9e77c45020fd4332f0fcbae3a34aa3b9d`**
 builds native 0 in 20.96 seconds under `ventium-fp-load-payload-soc.RCNiEqzo`.
@@ -207,3 +211,27 @@ These ten-iteration diagnostics are **duration-invalid**, not qualified scores.
 This combined candidate has **no gameplay measurement, full standard-suite
 closure, FPGA timing result or physical deployment**. Its A/B equivalence does
 not repair inherited arithmetic or generic-gate defects.
+
+### Exact-source hardware export and synthesis admission
+
+Export `ventium-fp-operand-payload-fpga40.atMUjNrL`, manifest
+`ce0738ca6a8bb80071a6f4cb5eafc6a125618c5538bcb146f21459213d0625a4`,
+contains 190 payloads, **152 hardware defines**, 117 filelist units and 49
+include edges. All 170 non-wrapper native payloads match the actual compiler
+inputs. Only the two processor sources above differ from the prior export;
+the 40 MHz core / 100 MHz PL constraints and hardware transport are unchanged.
+The new freezer requires the complete ordered two-flag extension; partial,
+reordered or substituted bundles fail. **109 host freezer tests and 45 real-Tcl
+profile checks pass**. The first attempt correctly refused an unlisted boundary
+test-driver path alias before publication; the exact script/target was checked
+and added explicitly. Arbitrary source aliases remain forbidden.
+
+Strict CPU-hierarchy lint closes native 0 in **2.49 seconds**, all six
+structural classes fatal and stable inputs, supervisor
+`b7a1588b626d417385911bedf49a012d`. This is not whole-platform lint.
+One synthesis-only run is admitted under
+`ventium-fp-operand-payload-full-synth.LL7cOdfp`, controller
+`a685ae8834594de39a333a3272bfbcba`, at 15:04 UTC. It retains the same mapper,
+8 GiB RAM / 6 GiB swap, 30-minute native cap, 12 GiB starting disk reserve,
+live reserve monitoring and exclusive Vivado family. It cannot launch
+placement, routing or programming. No new timing result is claimed yet.
