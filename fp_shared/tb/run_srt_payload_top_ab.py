@@ -38,6 +38,23 @@ def save(path, value):
         json.dump(value, stream, indent=2)
 
 
+def inherited_lock_fds():
+    """Keep the launcher's actual flock FD across Python's close_fds default.
+
+    The guard still verifies the cgroup, limits and flock ownership itself.
+    Merely copying its environment marker is not sufficient containment.
+    """
+    result = []
+    for item in Path('/proc/self/fd').iterdir():
+        try:
+            if os.readlink(item) == '/tmp/ventium-heavy-build.lock':
+                result.append(int(item.name))
+        except FileNotFoundError:
+            pass
+    assert result, 'shared build lock FD was not inherited'
+    return tuple(sorted(result))
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--source-root', type=Path, required=True)
@@ -50,7 +67,9 @@ def main():
     assert __debug__ and out.is_relative_to(scratch)
     assert Path(os.environ['TMPDIR']).resolve() == scratch
     assert os.environ['VENTIUM_BUILD_SCOPE_PROFILE'] == 'ipc_parallel32'
-    assert subprocess.run([str(repo/'tools/build_scope.sh'), '--is-active']).returncode == 0
+    lock_fds = inherited_lock_fds()
+    assert subprocess.run([str(repo/'tools/build_scope.sh'), '--is-active'],
+                          pass_fds=lock_fds).returncode == 0
     assert shutil.disk_usage(scratch).free > 2*1024**3
     out.mkdir()
     top = source/'fp_shared/ven_fp_top.sv'
@@ -104,7 +123,8 @@ def main():
             save(leaf/'command.json', command)
             env = dict(os.environ, CCACHE_DISABLE='1', TMPDIR=str(leaf))
             with (leaf/'build.log').open('x') as log:
-                build = subprocess.run(command, env=env, stdout=log, stderr=subprocess.STDOUT, timeout=240)
+                build = subprocess.run(command, env=env, stdout=log, stderr=subprocess.STDOUT,
+                                       timeout=240, pass_fds=lock_fds)
             assert build.returncode == 0, (name, 'compile', build.returncode)
             binary = leaf/'obj/Vtb_ven_fp_srt_top_ab'
             with (leaf/'run.log').open('x') as log:

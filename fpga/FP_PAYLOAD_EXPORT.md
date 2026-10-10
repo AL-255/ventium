@@ -57,13 +57,34 @@ structural classes fatal and stable inputs; root
 `ventium-fp-payload-hw-lint.IOpFXZL6`, supervisor
 `6990c841d360463cb75a332bcabf5cb9`. This is not whole-platform lint.
 
-Full synthesis starts **14:05:38 UTC** in
+Full synthesis starts **14:05:38 UTC** and closes **14:33:23 UTC** in
 `ventium-fp-payload-full-synth.9YxkPGyj`, controller
 `05e5e96dce0244b7bf516abf44ce33e4`, sole Vivado scope
 `fc0eb0f6b2eb488ebdd9536852d90734`. Same `logic_only` mapper and clocks,
 8 GiB RAM / 6 GiB swap, 30-minute native cap, 12 GiB starting disk reserve
-and live host/disk reserve monitoring. It cannot launch placement, routing
-or programming. Area/timing results are pending.
+and live host/disk reserve monitoring. Native exit 0, 1,664.95 seconds,
+4,130 stable source pins and no OOM. Peak RAM is 8 GiB, swap 145.99 MiB.
+The independent `audit_closed.py` confirms the actual 150 defines, 148 native
+read-verilog entries, complete DCP and matched parent mapper. Utilization is
+**196,673 LUTs / 54,630 FF / 277.5 BRAM tiles / 47 DSPs**: LUTs increase by
+1,431 (**0.733%**) from the immediate 195,242-LUT parent. This is not an area
+win. Zero synthesis errors, one generated PS clock-constraint critical warning
+and 1,569 warnings are retained. The subsequent read-only native clock audit
+must check actual 40/100 MHz clocks and the new worst paths before deciding
+whether the timing gain justifies that LUT cost. It runs in
+`ventium-fp-payload-clock-audit.8aaSGZzG` and closes native 0 at 14:38 UTC:
+222.64 seconds including the serialized wait, 4,137 stable pins, 3.97 GiB peak
+RAM, zero swap/OOM, controller `c8fb49f3a5ec49a3a10884908637a4c4`.
+The actual clocks are **40 / 100 MHz**, with no black boxes or structural DRC
+errors. Worst setup is **−27.741 ns**, or **18.960581 MHz unplaced estimate**;
+hold is −0.101 ns. This is only a 3.97% estimated frequency improvement from
+18.235863 MHz, not routed sign-off or physical frequency. The worst path is
+still EIP-to-SRT-result-enable, now 184 logic levels / 52.444 ns data delay.
+It goes through `l1d_c_ack` and **`fp_shared_load_cmd` → `fp_shared_cmd_mem`**
+instead of the removed direct-command payload dependency. Thus early-load
+payload selection still unnecessarily waits for late acceptance before
+conversion/SRT operand preparation; this is the next source-level investigation.
+Neither controller can launch placement, routing or programming.
 
 ## Acceptance still required
 
@@ -107,10 +128,28 @@ actual sampling boundary. Source/recipe pins stay stable, 13.36 seconds,
 16,961,536-byte peak RAM, supervisor `8aa47078bb434100adf323ac47645422`.
 This is selector equivalence, not full FPU/core correctness or a timing result.
 
-The whole-FPU A/B runner is queued **behind synthesis's shared heavy-work lock**
-under `ventium-srt-payload-top-oct10`. Once admitted it has a ten-minute total
-cap and 32 bounded compiler jobs. It retains the existing architectural,
-response, ownership and result comparisons on every cycle, with mode/A/B
-checked at start. Direct/reverse divide, sqrt, FPREM/FPREM1, borrowed far-FPATAN
-division and the FPTAN tail span all twelve supported RC/PC combinations.
-Base/stream/stream-forwarding variants are planned; none is a pass yet.
+The first whole-FPU runner, `ventium-srt-payload-top-oct10`, fails before
+compilation: Python's default descriptor closure hides the inherited heavy-work
+lock from the guard. That failed admission is retained. The corrected runner
+preserves only the actual fixed-lock descriptors across the guard and nested
+compiler launcher; cgroup/limit/flock checks remain mandatory. Two host negative/
+positive lock-descriptor tests pass, alongside the five recipe tests.
+
+**Whole-FPU A/B passes** in `ventium-srt-payload-top.zUM2uaki/run-r2`,
+supervisor `4f69b4b023da4a82b300df51d989f1ee`, native 0, 26.02 seconds,
+stable pins, ten-minute total cap and 32 bounded compiler jobs. Base, stream
+and stream-forwarding each pass **12 RC/PC cases / 396 checks**. The existing
+architectural, response, ownership and result comparisons remain active every
+cycle; mode/A/B are checked at start. Coverage includes direct/reverse divide,
+sqrt, FPREM/FPREM1, borrowed far-FPATAN division and the FPTAN tail. This is
+equivalence against the unchanged parent, not independent arithmetic correction.
+
+The combined private core build closes native 0 in
+`ventium-srt-payload-core.a6EbNrAu`, model
+`de44f9382e46c25ecfb27a2bfc79c2f9c691dfce6630c82dea267d7aaf7a8c24`,
+with stable pins and the correct private harness/generated-header pair.
+Its only source delta from `35c8cc6c` is `fp_shared/ven_fp_top.sv`.
+The 384-fixture full-core QEMU/cycle matrix and unchanged canonical generic
+gate are running. Hardware timing is still required; this proposal has no
+performance score. The five new driver checks preserve the exact prior
+fixture/grader and change only the expected SRT-vs-parent define delta.

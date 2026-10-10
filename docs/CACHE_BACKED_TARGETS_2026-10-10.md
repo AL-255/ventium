@@ -32,12 +32,22 @@ The newer registered-invalidation candidate `322bc855` also remains
 gameplay-unmeasured. Its own two short CoreMark diagnostics now pass with
 identical parent cycles/CRCs; these ten-iteration runs are duration-invalid,
 not qualified scores. See [the synthesis/diagnostic record](FPGA_FETCH_CONGESTION_2026-10-10.md).
-Its own 900-iteration seeds are now running, bounded to the approved 60 minutes
-each. Synthesis closes at 195,242 LUTs, but the next unplaced timing path still
+Its own 900-iteration seeds now **both pass**, independently audited at 14:40
+UTC: **2.101890118 / 2.107616105 CM/MHz**, exactly 428,186,037 / 427,022,738
+ticks and unchanged CRCs, native 0/EOF/reaping, 3,567 stable pins each and no
+OOM. Evidence: `ventium-cacheinv-soc.sxytw4Fn/coremark-900-{performance,validation}/audit.json`.
+The performance run takes 3,599.31 host seconds, just inside the unchanged
+3,600-second cap; no time-limit relaxation or continuation was used.
+Synthesis closes at 195,242 LUTs, but the next unplaced timing path still
 estimates only 18.236 MHz; no new FPGA deployment has occurred. A separate
 state-selected FP payload candidate (`35c8cc6c` directed core) passes 384 cold
 x87/system microcases with identical complete cycle streams. That timing
-proposal has no gameplay, qualified CoreMark, or hardware timing measurement.
+proposal has no gameplay or qualified CoreMark score. Its FPGA export now
+synthesizes at 196,673 LUTs; its independently audited unplaced timing estimate
+is **18.961 MHz**, still far short of 40 MHz sign-off. The critical path now
+crosses the early-load FP payload selector rather than the direct-command
+payload selector. [The exact candidate record](../fpga/FP_PAYLOAD_EXPORT.md)
+retains the area increase and unresolved timing, not just the small improvement.
 Older timestamped results below remain historical evidence.
 
 The new dip is associated with **more slow-FSM work, not a larger total memory
