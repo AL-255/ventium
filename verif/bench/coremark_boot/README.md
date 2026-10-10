@@ -106,13 +106,32 @@ The independent 7M–11M steady benchmark interval has
 is 4.65% of all clocks, already inside S_PIPE; do not add it again. This is a
 residency description, not a proven cache-miss or causal-savings breakdown.
 
-Current verified **gameplay** IPC is **0.49761630**, model `958f7ec4`, clocks
-1,300,048,811–1,400,048,811. The fixed first window remains 0.49741357;
-both consecutive 100M windows average 0.497514935. Real V retirements and raw
+Current verified **gameplay** IPC is **0.47794855**, model `958f7ec4`, clocks
+1,500,048,811–1,600,048,811, below 0.48 in this latest window.
+The fixed first window remains 0.49741357; all four consecutive 100M windows
+beginning 1,200,048,811 average 0.4908371775. Real V retirements and raw
 endpoint frames are checked; no intervening window is excluded. This is not complete timedemo
 or physical-board qualification. New private FST/C1/RET/sharing derivatives
 remain unmeasured in gameplay; generic differential and full-suite work remain
 open. This port changes no RTL and closes none of those obligations by itself.
+
+### Protected-client PREFIX66 backport (private candidate)
+
+Model **320c4232** changes only the PREFIX66 D1 context/owner leaf and adds
+`VEN_P54_PREFIX66_SYSTEM` to the parent above. It retains the real prefix D1
+clock, register-only whitelist and ordinary system/relocation guards; see
+[`PREFIX66_SYSTEM.md`](../../fe_pipe/PREFIX66_SYSTEM.md) for the directed tests
+and remaining qualification. Actual cache-backed cold runs remove 83,261 /
+84,377 TSC clocks: short ratios **1.994712814 / 1.999582887**, gains **1.660818% /
+1.687188%**, both below 2.1 and **not duration-valid scores**. All five CRCs
+per seed match; no gameplay measurement exists for this derivative.
+
+The first launcher failed before reset (insufficient TasksMax); the second
+completed but failed its CPU-affinity audit. The final explicit-taskset repeat
+reproduces both exact results with verified single-CPU child affinity, native
+exit 0, all children reaped, stable source/media pins and no OOM:
+`external/tmp/ventium-prefix66-system-soc.uLbhxUAh/coremark-r3/audit.json`.
+Generic differential failures remain; this is not standard-suite acceptance.
 
 ### Every-clock diagnostic: 7M–8M
 
