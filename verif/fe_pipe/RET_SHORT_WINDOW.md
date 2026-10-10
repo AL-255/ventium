@@ -1,8 +1,9 @@
 # Exact-byte near-RET capture — October 10
 
 **Private, unpromoted candidate; directed comparisons pass, short CoreMark improves.**
-Latest verified gameplay is **0.51351913 total U+V IPC**, model `86731249`,
-clocks 2.2B–2.3B, predating this and the pending x87 C1 repair. Full direct-memory
+Latest verified gameplay is **0.48007471 total U+V IPC**, model `86731249`,
+clocks 2.4B–2.5B, predating this and the pending x87 C1 repair. The complete
+1.2B–2.5B observed aggregate is **0.47084103**, below the sustained target. Full direct-memory
 CoreMark on `b5453f16` is 2.107843209/2.110905243 CM/MHz, not a cache/FPGA score.
 
 The [complete CoreMark backend cycle comparison](../bench/COREMARK_BACKEND_DIAGNOSTIC.md)

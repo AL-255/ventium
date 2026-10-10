@@ -7,13 +7,54 @@ snapshot is used for the current cold full-PC runs.
 | Requirement | Verified result | Remaining |
 | --- | --- | --- |
 | CoreMark ≥2.1 CM/MHz | Current `b5453f16` full direct-memory seeds: **2.107843209 / 2.110905243**, correct CRCs | Not a DDR/cache/FPGA score |
-| Quake ≥0.48 total U+V IPC | Latest **0.51351913**, repaired 256 KiB-L2 `86731249`, 2.2B–2.3B clocks; **0.48907486** over all 1.2B–2.3B | Original fixed-window result 0.49083588; full timedemo and silicon performance pending |
+| Quake ≥0.48 total U+V IPC | Latest **0.48007471**, repaired 256 KiB-L2 `86731249`, 2.4B–2.5B clocks; **0.47084103** over all 1.2B–2.5B | Sustained target still open; original fixed window 0.49083588; full timedemo and silicon pending |
 | Standard suite | Current full direct-memory CoreMark seeds pass; larger-L2 Win95 closed at a visually clean desktop | Independent desktop acceptance, complete timedemo and remaining differential failures |
 | FPGA | Old image still deployed; 40 MHz synthesis stopped by resource watchdog on October 10 | No accepted new synthesis/bitstream; timing/resource qualification and deployment remain open |
 
-## October 10 continuation
+## October 10: longer gameplay exposes a real-mode fetch dip
 
-The newest complete 100M-clock window, selected by timestamp rather than IPC,
+The newest timestamp-selected window is **48,007,471 U+V retirements / 100M
+clocks = 0.48007471 IPC**, cycles **2.4B–2.5B** on unchanged model `86731249`.
+Source/runtime/native identities and endpoint pixels are rechecked; both
+unchanged frames visibly show advancing gameplay. Receipt:
+`external/tmp/ventium-l2-gameplay.VedZVnwA/latest-2500000000/audit.json`.
+
+The preceding **2.3B–2.4B** interval drops to **0.26103520**, lowering all
+thirteen consecutive windows since 1.2B to **0.47084103**. It is retained,
+not excluded or replaced by the earlier high-scoring interval. The original
+predeclared 1.2B–1.3B result remains 0.49083588, but **sustained ≥0.48 is not
+established**. Full 969-frame timedemo completion remains open.
+
+The audited prefix's `dip-diagnostic.json` identifies a substantial real-mode
+stretch: 111/197 sparse progress samples have CR0.PE=0, CS=05f7, from sampled
+cycle 2,343,465,200 through 2,398,465,200. This is not exact mode residency or
+proof of which DOS function is executing. S_FETCH residency in the dip is
+**34,702,072 clocks** (34.70%), compared with 1,865,361 and 2,214,862 in its
+adjacent windows. It performs **21,615,725 fetch acknowledgements**, with
+13,005,687 request-wait clocks. These are overlapping views, not additive
+stalls or a measured cache-miss percentage. The ordinary slow path still fetches
+a full 16-byte window per instruction; safe demand-length fetching for 16-bit
+code is a concrete next target. Do not enable unqualified global real-mode
+pairing or disable U/V to hide this cost.
+
+[Shared-estimator narrowing](../fp_shared/tb/ESTDIV_NARROW.md) is implemented
+with unchanged checked cycle behavior: 284,883-clock miter plus 5,004 legacy
+cases pass. Matched native synthesis reduces the leaf from 846 to 710 LUTs and
+16 to 8 DSPs. Its width-only full-core model `dd094313` builds; generic verification
+still fails on 101 terminal-length mismatches (no earlier fields) and four hard
+cycle bands. No acceptance rule changes. This is area/timing work, not an IPC gain.
+It has no gameplay result; neither do the independent C1 and RET candidates.
+
+The [eight exact canonical C1 sites](../fp_shared/tb/ROUND_C1.md) are now
+reconciled against native execution of the unchanged ELFs and exact arithmetic:
+their inputs/results agree, and all eight support the candidate's C1 rather
+than pinned QEMU's stale rounding bit. Complete C1 semantics and the generic
+gate remain open; no mask or golden is changed. The actual `tx_round` opcode
+computes 3/10, correcting its misleading 10/3 source comment.
+
+## Earlier October 10 continuation (through 2.3B)
+
+The then-newest complete 100M-clock window, selected by timestamp rather than IPC,
 is **51,351,913 total U+V retirements / 100,000,000 clocks = 0.51351913**.
 Model `86731249` and native invocation are unchanged. The latest audit
 `external/tmp/ventium-l2-gameplay.VedZVnwA/latest-2300000000/audit.json`
