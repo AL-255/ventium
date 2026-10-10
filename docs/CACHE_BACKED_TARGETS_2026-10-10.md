@@ -5,10 +5,10 @@ U+V retirement-event gameplay IPC**, the error-free standard suite, green
 differential gates, and a working FPGA deployment. U-only/STEP/global slow
 fallbacks are not acceptance. REP retirement events are not P54 macroinstructions.
 
-**Latest verified measurement, 16:21 UTC:** `bfb867f7` reaches **0.49940993 IPC**
-over clocks **3,200,065,237–3,300,065,237**: 38,520,515 U + 11,420,478 V
-retirement events. All 21 consecutive windows from
-1,200,065,237 average **0.4895819671**, retaining the **0.34569625** dip at
+**Latest verified measurement, 17:13 UTC:** `bfb867f7` reaches **0.51469855 IPC**
+over clocks **3,600,065,237–3,700,065,237**: 39,292,854 U + 12,177,001 V
+retirement events. All 25 consecutive windows from
+1,200,065,237 average **0.4940587592**, retaining the **0.34569625** dip at
 2,100,065,237–2,200,065,237 and every other sub-0.48 interval, including the
 **0.47062856** window at 2,800,065,237–2,900,065,237 and **0.45825794** at
 3,100,065,237–3,200,065,237.
@@ -16,11 +16,12 @@ The margin above 0.48 is now small; this is not a completed-demo average.
 This is the same cache-backed model with
 qualified **2.101890118 / 2.107616105 CM/MHz** below, not a score borrowed from
 another build. Latest raw-pixel/counter/ownership audit:
-`ventium-store-admit-gameplay-r14.GumiuiiN/audit.json`. The latest window is
-0.49940993; all 1,028,122,131 events over 2.1B clocks count.
-Both unchanged-pixel endpoint images show rendered first-person stone rooms
-with a weapon, changed viewpoint, and health/rocket pickup messages. Health
-is 100 in both; armor remains 0. **Historical visual-note
+`ventium-store-admit-gameplay-r15.wnUlv89g/audit.json`. The latest window is
+0.51469855; all 1,235,146,898 events over 2.5B clocks count. The four added
+windows are 0.49864934, 0.53008187, 0.52681791 and 0.51469855, selected by
+timestamp, not IPC. Both unchanged-pixel endpoint images show rendered
+first-person stone rooms with a weapon and changed viewpoint. Health is 73
+in both; armor remains 0. **Historical visual-note
 correction, 15:13 UTC:** earlier notes mistook the left-hand armor value (0)
 for health; health is to the right of the face, consistent with
 [id Software's HUD layout](https://github.com/id-Software/Quake/blob/master/WinQuake/sbar.c#L915-L951).
@@ -98,9 +99,22 @@ the numeric SRT-floor fix, without reverting any performance feature.
 [Exact experiment and retained failures](../verif/l1/RESPONSE_PAYLOAD.md).
 At 16:46 UTC, `c883878d`'s exact 154-define hardware export passes independent
 source/profile checks and strict CPU-hierarchy lint. One guarded full-synthesis
-diagnostic is running; no new utilization/frequency or physical pass is claimed.
+diagnostic closes native 0 at 17:09 UTC and is independently audited:
+**195,679 LUTs**, up 1,617 / 0.8332% from the immediate parent. Clock inspection
+closes at 17:19 UTC: **21.130 MHz unplaced estimate**, versus 20.962 MHz in the
+parent, still not 40 MHz routed sign-off. The worst path now crosses the
+saved-cache **upper** FP word's shadow selector into SRT control. A separate
+[high-window selector](../verif/l1/HIGH_WINDOW_PAYLOAD.md) preserves valid/ACK
+and passes the complete-clock leaf A/B, 2,656 full QEMU comparisons and 1,328
+identical complete cycle-record pairs, including six FP operand boundaries.
+Its canonical gate is running separately; existing failures are not waived.
+Neither its gameplay IPC nor its FPGA frequency is measured.
 The [hardware backport record](../fpga/RESPONSE_PAYLOAD_EXPORT.md) identifies
 the source bundle, two intended RTL deltas, native owner and resource guards.
+The separate current-source C1 derivative `fac8c522` closes 2,064 directed
+arithmetic/SRT checks, with all 20 complete cycle streams unchanged from its
+parent. Its canonical gate still fails; it is gameplay-unmeasured and not in
+the active hardware export. [Exact correctness boundary](../fp_shared/tb/ROUND_C1.md).
 Older timestamped results below remain historical evidence.
 
 The new dip is associated with **more slow-FSM work, not a larger total memory

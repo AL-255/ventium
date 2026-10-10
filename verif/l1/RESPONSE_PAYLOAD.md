@@ -18,8 +18,10 @@ read commitment, finally reaching `pipe_mem_v_hit_q`.
 `shadow_reuse` is necessary for **acceptance**, but unnecessarily serializes
 that tag/next-request decision ahead of the saved payload mux. The candidate
 keeps that acceptance logic and selects bytes using saved physical ownership.
-This is a structural timing experiment; **no frequency or IPC improvement has
-yet been measured for it**. The previous export's timing is not its result.
+The subsequent [hardware export audit](../../fpga/RESPONSE_PAYLOAD_EXPORT.md)
+reports **21.130 MHz unplaced estimate** versus 20.962 MHz in that parent,
+at a cost of 1,617 LUTs for the combined selector/numeric-SRT change. This is
+not routed or measured board timing; no gameplay improvement is claimed.
 
 ## Correctness obligation
 
@@ -90,7 +92,9 @@ diagnostics now close native 0 with unchanged CRCs and exactly
 5,117 source/input pins, actual V retirement, native wait/EOF/reaping and no
 OOM. Their ten-iteration ratios **2.09765947 / 2.10375466** are duration-invalid
 diagnostics, not qualified scores. The candidate has no own qualified CoreMark score,
-gameplay, standard-suite closure, hardware synthesis, route or deployment.
+gameplay or standard-suite closure. Its exact hardware export has since
+synthesized and undergone the unplaced audit linked above; route and deployment
+remain open.
 
 ### Current-code-owner corner
 

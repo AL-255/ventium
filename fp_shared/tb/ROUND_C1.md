@@ -1,5 +1,32 @@
 # Compact round-direction sideband proposal — October 10
 
+## Current-source results, 17:17 UTC
+
+The backport below now builds as **`fac8c522`**, native 0 in 15.17 seconds,
+with its own verified host object/header. Independent `audit.json` in
+`ventium-current-round-c1-core-r2.281an9Xt` rechecks 4,752 source/input pins,
+the exact five-file delta and unchanged defines. On the actual AXI7 UV-fast
+backend, **912 SRT + 1,152 arithmetic cases pass** against the unchanged
+native/exact-value authorities. Both guests exit zero, have zero delivered
+faults and execute V retirements. Actual backing ACKs are 21,008 / 27,184.
+The SRT fixture retains all printed performance counters and exactly
+10,062 instructions / 532,305 clocks from the numeric-floor parent.
+
+The canonical gate still closes **native 2 / FAIL**: 7/108 functional passes,
+93 terminal-length failures, eight earlier C1 differences and 12/19 graded
+cycle-band failures. The retained controller exits 1 rather than hiding that
+failure. All **20 complete cycle-record streams are identical** to immediate
+parent `3c3ab215`; this is zero observed cycle regression in those kernels,
+not a correctness pass or gameplay performance result. No golden, field mask
+or cycle band changed. The earlier exact native reconciliation of the eight
+C1 sites remains below; FST/C1-owner and oracle obligations are still open.
+
+Current verified gameplay baseline is **0.51469855 U+V retirement-event IPC**,
+older `bfb867f7`, clocks **3,600,065,237–3,700,065,237**; all 25 consecutive
+fixed-start windows average **0.4940587592**. `fac8c522` is gameplay-unmeasured,
+not production-promoted, not in the active FPGA export, and not standard-suite
+qualified. The following timestamped preparation entries are historical.
+
 ## Current-source backport, 16:53 UTC
 
 The [strict backport recipe](prepare_current_round_c1.py) now applies the
