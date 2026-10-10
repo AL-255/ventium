@@ -68,11 +68,39 @@ External scratch prefix: `/home/yukidama/external/tmp/`.
   The integer suite explicitly strengthens the reused driver to compare every
   cycle record; it requires zero cycle change, not a performance gain.
 
-The unchanged canonical `make verify` is running separately. Its parent is
-red; neither these microcases nor unchanged parent failures are a generic pass.
-The candidate has no own CoreMark score, gameplay, standard-suite closure,
-hardware synthesis, route or board deployment. A private full-PC backport is
-queued after native generic closure, explicitly unqualified.
+The unchanged canonical `make verify` closes **native 2 / FAIL**: 7/108
+functional passes and 12/19 scored cycle-band failures, matching the parent's
+counts. Independent `verification-r2/generic-audit.json` rechecks 4,547 pins
+and confirms all 20 complete cycle-record lists equal the parent's. Neither
+microcase success nor unchanged parent failures are a generic pass.
+
+The private full-PC backport in `ventium-response-payload-soc.ZMhPPhmY` builds
+native 0 in 19.038 seconds: model
+`c883878de2e262f4845fc05d68b7ccf81db7c423c8d8c49f72892eccd50f0ed7`.
+Only the tested L1 selector and numeric SRT-floor backport differ from the
+preceding full-PC source tree. It retains the 98 inherited platform structural
+warnings; this is not clean whole-platform lint. Both short CoreMark
+diagnostics are running. The candidate has no own qualified CoreMark score,
+gameplay, standard-suite closure, hardware synthesis, route or deployment.
+
+### Current-code-owner corner
+
+`critical-owners-r3/` additionally checks actual full-profile critical-fill
+overlap against independent backing data, original and candidate: retargeted
+resident data, ordinary held miss, and instruction-buffer reuse all pass.
+[`prepare_response_owner_tb.py`](prepare_response_owner_tb.py) reproduces the
+**exact compiled fixture** from the original owner test. The code-buffer case
+samples its earlier real ACK, withdraws that consumed request, and checks a
+fresh transaction after the unrelated critical response arrives. A deliberately
+wrong code-data selector fails that second transaction. Eight positive native
+runs and one required native-1 negative close; positive logs must contain no
+fatal/error diagnostics. No processor RTL changed for these tests.
+
+The original test's code case failed in **both** models because it required a
+now-redundant registered capture. The first adaptation also fell through after
+SV `$finish` and printed a later fatal despite native exit 0. An independent
+log audit caught it; those attempts remain failed. The corrected named process
+explicitly exits after `$finish`, and clean-log checks remain mandatory.
 
 ## Retained failures and resources
 
@@ -108,5 +136,6 @@ runs the leaf corpus through `tools/build_scope.sh` with its reviewed
 strict cold-system corpora, archives its exact adapted driver, and preserves
 the original comparators and closure requirements. For this runner, `TMPDIR`
 must be `/home/yukidama/external/tmp`; launch within the bounded build scope.
-Recipe/adapter host tests: `python3 -B -m unittest discover -s verif/l1 -p
-'test_response_payload*.py'`. They are not RTL or benchmark acceptance.
+Recipe/adapter/owner-fixture host tests: `python3 -B -m unittest discover
+-s verif/l1 -p 'test_response*.py'` — 11 pass. They are not RTL or benchmark
+acceptance.
