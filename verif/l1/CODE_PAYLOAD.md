@@ -65,7 +65,7 @@ Three recipe/ownership host tests and two corpus-adapter tests pass. The first
 source transform correctly refused an ambiguous `!code_access` anchor; its
 guard now includes the exact primary/shadow reuse context.
 
-## Directed processor checks closed; canonical gate pending
+## Directed processor checks closed; canonical gate remains red
 
 `run_code_payload_core.py` preserves the existing cold, paged/relocated FP
 and integer corpora, QEMU comparison, actual UV/fast/AXI witnesses, native
@@ -83,10 +83,33 @@ latencies 0/7 and FP operand offsets 0, 1, 24, 25, 29 and 4093. Actual V
 retirements are required; illegal high-word boundary responses remain rejected.
 All directed children are reaped and source pins remain stable. Evidence:
 `verification/micro-closed.json`, the eight per-corpus native closures and
-their unchanged/adapted driver source pins. The unchanged canonical gate is
-now running separately; a directed pass does not supersede its result.
+their unchanged/adapted driver source pins.
+
+At **18:37 UTC**, the unchanged canonical gate closes native **2 / FAIL**:
+7/108 functional programs pass; 12/19 scored cycle checks fail. All **20
+complete canonical cycle-record streams are identical** to the FP-corrected
+parent. `verification/audit.json` independently checks the actual closed unit
+invocation, 5,390 source pins, one-file/one-define delta, all 1,328 directed
+cycle-stream pairs and 2,656 equivalent functional-comparison logs. It also
+checks the **5,312 actual RTL native exits**: each is the fixture's deliberate
+`isa-debug-exit` status 133, with the matching stop footer, zero delivered
+faults and zero I/O desynchronizations—not an accepted timeout or SIGTRAP.
+A directed pass and unchanged cycles do not supersede the red gate.
 
 The parent's canonical gate is **red**. No comparator mask, golden, cycle band,
 guest workload, debugger mode or pairing behavior was changed for this
 experiment. Full-suite, gameplay, synthesis/routing and board qualification
 are not inherited from a parent and are not yet available.
+
+## Recoverable compiler cleanup
+
+After native closure, the ten leaf precompiled headers were losslessly
+archived, compared against their originals, and then unlinked, recovering
+**724,847,785 bytes**. Archive SHA-256:
+`1a1ee5b29c3c1ea22fa6f1463dca2486ee373e5e44779343dcff32f85fb778db`.
+The same narrow procedure on the closed FP-bundle, FST-range and full-PC FP
+builds recovered another 488,166,777 bytes: **1,213,014,562 bytes total**.
+Each root has `closed-pch-manifest.json`, a verified archive and an exact
+restore command. Sources, native executables, headers, ordinary objects,
+logs, media and test results were preserved; source/model hashes were checked
+again afterwards. No active build or Vivado process was removed.

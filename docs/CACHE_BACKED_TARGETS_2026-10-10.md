@@ -143,8 +143,14 @@ physical FPGA remain unqualified for this newer model.
 [Exact bundle, failure and repair scope](../fp_shared/tb/FP_CORRECTNESS_BUNDLE.md).
 The next [saved instruction-data selector](../verif/l1/CODE_PAYLOAD.md) passes
 its full-clock five-variant leaf experiment and 2,656 directed full-core QEMU
-comparisons, with 1,328 identical complete cycle pairs. Its canonical gate is
-running; no synthesis/timing gain, gameplay result or deployment is claimed.
+comparisons, with 1,328 identical complete cycle pairs. At 18:37 UTC, its
+canonical gate closes native 2 / FAIL: 7/108 functional passes and 12/19
+scored cycle failures, with all 20 complete cycle streams identical to the
+parent. The independent closure audit rechecks 5,390 source pins, all directed
+cycle pairs and actual fixture exits. No synthesis/timing gain, gameplay result
+or deployment is claimed. A separate recoverable cleanup of sixteen closed-
+build precompiled headers returns 1.213 GB without deleting sources, binaries,
+media or verification evidence.
 Older timestamped results below remain historical evidence.
 
 The new dip is associated with **more slow-FSM work, not a larger total memory
