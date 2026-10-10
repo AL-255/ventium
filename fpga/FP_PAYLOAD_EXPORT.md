@@ -67,10 +67,14 @@ or programming. Area/timing results are pending.
 
 ## Acceptance still required
 
-Both short CoreMark seeds are running under
+Both short CoreMark seeds **pass**, independently audited under
 `ventium-fp-payload-coremark-oct10`, invocation
 `721ca14e57b24d419ef14222a5ab37d5`, CPU 5, 2 GiB/no swap, ten-minute cap per
-native seed. They test CRC/cycle preservation, not duration-valid scores.
+native seed. Both retain exactly **4,767,218 / 4,753,406 ticks**, all original
+CRCs, actual V retirement, native 0/EOF/actual reaping, 3,771 stable pins and
+zero OOM. They take 106.47 / 106.72 host seconds. `coremark/audit.json` checks
+the complete consoles and exact parent tick counts; these are **duration-invalid
+diagnostics**, not qualified scores.
 This candidate has no gameplay or qualified CoreMark score, no full Win95/
 Quake closure, and no routed or physical result. Known x87 C1/value defects
 are not repaired by selecting the same payload earlier.
@@ -81,3 +85,32 @@ over all eleven consecutive 100M windows from 1,200,065,237. The 0.34569625
 dip is retained. That older model qualifies at **2.101890118 / 2.107616105
 CM/MHz**; neither result is inherited by this derivative. See the
 [current target record](../docs/CACHE_BACKED_TARGETS_2026-10-10.md).
+
+## Separate SRT operand-selector investigation
+
+The native source also gates SRT's mode/A/B selection on `accept`, although
+the engine samples those three fields only under `ST_IDLE && start`. The
+separate default-off `VEN_SRT_PAYLOAD_SELECT`
+[recipe](../fp_shared/tb/prepare_srt_payload_select.py) separates these operands
+from the **unchanged** start predicates/priority. It preserves the live RC/PC
+controls, `prem1`, arithmetic engines and response timing. TOP_TRANS cannot
+accept an external command; its divide request still takes priority over the
+FPTAN completion tail. No register/stage is added. This is **not in the export
+or active synthesis above**, and has no measured timing benefit yet.
+
+Five host source-contract tests pass. The actual-source selector microgate
+`ventium-srt-payload-leaf.5M1l6lUR/run` passes **665,203 four-state comparisons**
+(332,599 base / 332,604 stream), and all three required mutants fail: wrong
+sqrt mode, wrong transcendental operand, dropped start. Ready/accept/start and
+live RC/PC are compared always; mode/A/B are compared on every start, their
+actual sampling boundary. Source/recipe pins stay stable, 13.36 seconds,
+16,961,536-byte peak RAM, supervisor `8aa47078bb434100adf323ac47645422`.
+This is selector equivalence, not full FPU/core correctness or a timing result.
+
+The whole-FPU A/B runner is queued **behind synthesis's shared heavy-work lock**
+under `ventium-srt-payload-top-oct10`. Once admitted it has a ten-minute total
+cap and 32 bounded compiler jobs. It retains the existing architectural,
+response, ownership and result comparisons on every cycle, with mode/A/B
+checked at start. Direct/reverse divide, sqrt, FPREM/FPREM1, borrowed far-FPATAN
+division and the FPTAN tail span all twelve supported RC/PC combinations.
+Base/stream/stream-forwarding variants are planned; none is a pass yet.
