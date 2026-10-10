@@ -41,9 +41,10 @@ TMPDIR=/home/yukidama/external/tmp python3 -B -m unittest discover \
   -s verif/uopcache/proposals/ic_residency_span -p 'test_prepare*py'
 ```
 
-All 15 tests pass (including two prefix-integration tests). The 145-define full-PC derivative `89b68b62` is distinct
-from the duration-valid CoreMark model `bfb867f7`; its ten-iteration cycle
-identity does not inherit the latter's qualified scores. Current verified
+All **19 preparation tests** pass, including the two-consumer regression below.
+The 145-define full-PC derivative `89b68b62` independently completed both
+duration-valid CoreMark seeds at **2.101890118 / 2.107616105 CM/MHz**, identical
+ticks to `bfb867f7`; these are its own audited runs, not inherited passes. Current verified
 gameplay is parent `958f7ec4`: 0.50530999 at clocks 3,900,048,811–4,000,048,811;
 both newer models and the 146-define `343f0ccd` remain gameplay-unmeasured.
 
@@ -54,8 +55,20 @@ including fixed-address metadata changes without pulsing the address. It does
 not broaden the earlier presence-helper proof to arbitrary addresses. See the
 fetch audit for 427,296 four-state comparisons, three required failing mutants,
 384 paged whole-core fixtures, identical short CoreMark cycles and 83.40%
-isolated LUT reduction. Whole-design synthesis and the exact new standard suite
-are separate pending checks, not inherited acceptance.
+isolated LUT reduction. Whole-design synthesis instead grew **220,699 → 221,918
+LUTs**. Review found a missed second gather in `core_int_retire.svh`; the first
+integration changed only the decoder, leaving the sequential copy untouched.
+
+For the complete private integration, additionally apply
+`prepare_prefix_capture.transform` to that include and call `audit_consumers`
+on both resulting files. Only the nonblocking copy's RHS changes to the same
+shared bytes; its retiring-owner guard and all effects remain. The old incomplete
+integration is now a required failing preparation test. The actual enabled
+whole-core/include preprocessor output has **zero remaining generic prefix-byte
+calls**; default-off output remains token-identical to the parent. Directed
+model `7791051b` passes 1,536 full QEMU comparisons and 768 identical matched
+whole cycle streams. Its full-PC and area checks are separate pending work.
+Do not infer whole-design savings or standard-suite acceptance from the leaf.
 
 ## Intended substitutions
 

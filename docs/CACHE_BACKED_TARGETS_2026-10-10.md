@@ -222,3 +222,24 @@ The separate canonical latency-seven gate also retains **12 failed cycle
 bands** out of 19 graded kernels (one additional informational kernel). These
 are real measurements of a different memory-service environment from the
 legacy oracle; they have not been widened, filtered or called timing passes.
+
+### Complete two-consumer sharing, 11:25 UTC
+
+Source review of the area regression found the decoder was updated but the
+included retirement task still instantiated the old sixteen-byte lookup gather.
+The corrected full-PC model **`751139e1`** changes only that task's byte-copy RHS
+to the same shared bytes. It retains all performance flags, guards, state and
+latency. It is **gameplay-unmeasured**, with no inherited qualified CoreMark score.
+
+Its 384-fixture directed matrix closes 1,536 full QEMU comparisons and 768
+identical complete cycle-record A/B lists. Full active preprocessing now proves
+no generic prefix-byte calls remain anywhere in the included core. The new
+canonical gate still fails the 101 terminal-record comparisons and 12 cycle
+bands; all 20 cycle-kernel record lists equal its parent. No failure was waived.
+
+Exact-source hardware export, 91 freezer tests, 35 real-Tcl profile checks,
+actual compiler-command/source audit and strict hardware CPU lint are recorded
+in [IC_PREFIX_CAPTURE_EXPORT.md](../fpga/IC_PREFIX_CAPTURE_EXPORT.md). Short
+CoreMark is running; performance seed closes native 0 with all CRCs and exactly
+4,767,218 ticks. Validation and whole-design area remain pending. No new route
+or board deployment; the earlier 83.40% local result is not a whole-chip saving.
