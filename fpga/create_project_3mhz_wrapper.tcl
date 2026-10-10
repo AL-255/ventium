@@ -231,18 +231,31 @@ set build_profile legacy
 if {[info exists ::env(VEN_FPGA_BUILD_PROFILE)]} {
     set build_profile $::env(VEN_FPGA_BUILD_PROFILE)
 }
-if {$build_profile ni {legacy balanced}} {
-    error "VEN_FPGA_BUILD_PROFILE must be legacy or balanced"
+if {$build_profile ni {legacy balanced logic_only}} {
+    error "VEN_FPGA_BUILD_PROFILE must be legacy, balanced or logic_only"
 }
 set synth_directive AreaOptimized_high
-if {$build_profile eq "balanced"} { set synth_directive Default }
+if {$build_profile in {balanced logic_only}} { set synth_directive Default }
 puts "FPGA build profile: $build_profile (synthesis $synth_directive)"
 set area_synth "set_property STEPS.SYNTH_DESIGN.ARGS.DIRECTIVE $synth_directive \[get_runs synth_1\]\nlaunch_runs synth_1 -jobs $synth_jobs; wait_on_run synth_1"
+
+# Explicit diagnostic for the measured timing-optimization memory explosion.
+# This changes synthesis's optimization objective, NOT the clock constraints,
+# RTL, implementation timing analysis, or acceptance criteria. Keep the normal
+# timing-driven defaults untouched. A completed logic_only synthesis is not a
+# timing sign-off; implementation must still meet the real clock constraints.
+if {$build_profile eq "logic_only"} {
+    set logic_only_synth {
+set_property -name {STEPS.SYNTH_DESIGN.ARGS.MORE OPTIONS} -value {-no_timing_driven} -objects [get_runs synth_1]
+}
+    set area_synth "$logic_only_synth\n$area_synth"
+    puts "Diagnostic synthesis: -no_timing_driven; clock constraints and timing qualification unchanged"
+}
 
 # Apply the implementation profile after upstream's historical overrides, but
 # before either run is launched. Keep spread placement for the known congestion
 # problem; defer expensive route exploration until a routed baseline exists.
-if {$build_profile eq "balanced"} {
+if {$build_profile in {balanced logic_only}} {
     set impl_profile {
 set_property STEPS.PLACE_DESIGN.ARGS.DIRECTIVE AltSpreadLogic_high [get_runs impl_1]
 set_property STEPS.ROUTE_DESIGN.ARGS.DIRECTIVE Default [get_runs impl_1]

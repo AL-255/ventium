@@ -7,6 +7,7 @@ This tests launch policy, not hardware execution or total U+V IPC.
 """
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -30,6 +31,12 @@ def main():
         source = root/'source'
         test_shim = source/'ao486-sim/ven/ven_ao486_shim.sv'
         test_shim.parent.mkdir(parents=True)
+        # Posted profiles require the actual bridge source alongside the shim.
+        # Preserve that admission check; the old fixture predated this profile.
+        if 'VEN_DDR_POSTED' in defines:
+            (source/'fpga').mkdir()
+            shutil.copyfile(frozen/'ventium/fpga/ven_ddram_axi_posted.sv',
+                            source/'fpga/ven_ddram_axi_posted.sv')
         profile = root/'defines.txt'
 
         def run(label, defs=defines, body=shim, override=None, rejection=None):

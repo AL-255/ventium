@@ -1,9 +1,10 @@
 # Pure Tcl source-contract test. Does NOT invoke Vivado or elaborate hardware.
-# Usage: tclsh test_rk_wrapper.tcl wrapper flow definefile frozen-source template
-if {$argc != 5} { error "expected wrapper flow definefile source template" }
-lassign $argv wrapper flow definefile source_root template
+# Usage: tclsh test_rk_wrapper.tcl wrapper flow definefile frozen-source template ?profile?
+if {$argc ni {5 6}} { error "expected wrapper flow definefile source template ?profile?" }
+lassign $argv wrapper flow definefile source_root template profile
+if {$argc == 5} { set profile balanced }
 set ::env(VEN_FPGA_CORE_MHZ) 40
-set ::env(VEN_FPGA_BUILD_PROFILE) balanced
+set ::env(VEN_FPGA_BUILD_PROFILE) $profile
 set ::env(VEN_FPGA_JOBS) 1
 set ::env(VEN_FPGA_FLOW_ROOT) $flow
 set ::env(VEN_FPGA_DEFINE_FILE) $definefile
@@ -30,9 +31,19 @@ require_span {launch_runs synth_1 -jobs 1; wait_on_run synth_1}
 require_span {launch_runs impl_1 -to_step write_bitstream -jobs 1; wait_on_run impl_1}
 require_span {error "FPGA synthesis failed}
 require_span {error "FPGA implementation failed}
-require_span {STEPS.SYNTH_DESIGN.ARGS.DIRECTIVE Default}
-require_span {STEPS.ROUTE_DESIGN.ARGS.DIRECTIVE Default}
-require_span {STEPS.POST_ROUTE_PHYS_OPT_DESIGN.IS_ENABLED false}
+if {$profile eq "legacy"} {
+    require_span {STEPS.SYNTH_DESIGN.ARGS.DIRECTIVE AreaOptimized_high}
+} else {
+    require_span {STEPS.SYNTH_DESIGN.ARGS.DIRECTIVE Default}
+    require_span {STEPS.ROUTE_DESIGN.ARGS.DIRECTIVE Default}
+    require_span {STEPS.POST_ROUTE_PHYS_OPT_DESIGN.IS_ENABLED false}
+}
+set logic_only_option {set_property -name {STEPS.SYNTH_DESIGN.ARGS.MORE OPTIONS} -value {-no_timing_driven} -objects [get_runs synth_1]}
+if {$profile eq "logic_only"} {
+    require_span $logic_only_option
+} elseif {[string first {-no_timing_driven} $::expanded] >= 0} {
+    error "diagnostic optimization option leaked into timing-driven profile"
+}
 require_span {CONFIG.PSU__SAXIGP2__DATA_WIDTH {128}}
 require_span {CONFIG.PSU__CRL_APB__PL0_REF_CTRL__DIVISOR0 {15}}
 if {![regexp {set DEFS \{([^\}]*)\}} $::expanded -> defs]} { error "no DEFS" }
@@ -80,4 +91,4 @@ if {[string first {add_files -fileset constrs_1 -norecurse "$HW/bitstream.xdc" "
     error "legacy FPATAN multicycle constraint remains active"
 }
 if {![info complete $::expanded]} { error "transformed Tcl is incomplete" }
-puts "RK-WRAPPER-STATIC-OK: physical40M, exact${actual_define_count}defs, pinned roots, 1job, fatal failures"
+puts "RK-WRAPPER-STATIC-OK: physical40M, exact${actual_define_count}defs, pinned roots, 1job, fatal failures, profile=$profile"
