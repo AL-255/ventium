@@ -5,31 +5,42 @@ U+V retirement-event gameplay IPC**, the error-free standard suite, green
 differential gates, and a working FPGA deployment. U-only/STEP/global slow
 fallbacks are not acceptance. REP retirement events are not P54 macroinstructions.
 
-**Latest verified measurement, 15:36 UTC:** `bfb867f7` reaches **0.50507223 IPC**
-over clocks **2,900,065,237–3,000,065,237**: 38,803,213 U + 11,704,010 V
-retirement events. All eighteen consecutive windows from
-1,200,065,237 average **0.4902082417**, retaining the **0.34569625** dip at
+**Latest verified measurement, 15:55 UTC:** `bfb867f7` reaches **0.49980509 IPC**
+over clocks **3,000,065,237–3,100,065,237**: 38,437,573 U + 11,542,936 V
+retirement events. All nineteen consecutive windows from
+1,200,065,237 average **0.4907133389**, retaining the **0.34569625** dip at
 2,100,065,237–2,200,065,237 and every other sub-0.48 interval, including the
 new **0.47062856** window at 2,800,065,237–2,900,065,237.
 The margin above 0.48 is now small; this is not a completed-demo average.
 This is the same cache-backed model with
 qualified **2.101890118 / 2.107616105 CM/MHz** below, not a score borrowed from
 another build. Latest raw-pixel/counter/ownership audit:
-`ventium-store-admit-gameplay-r12.bQAk2mq7/audit.json`. The two newly added
-windows are 0.47062856 / 0.50507223; all 882,374,835 events over 1.8B clocks count.
+`ventium-store-admit-gameplay-r13.nDDrGT4j/audit.json`. The latest window is
+0.49980509; all 932,355,344 events over 1.9B clocks count.
 Both unchanged-pixel endpoint images show rendered first-person stone rooms
-with a nailgun, changed viewpoint/ammunition (77 → 127) and a nail pickup
-message in the second image. **Historical visual-note correction, 15:13 UTC:** earlier notes mistook
-the left-hand armor value (0) for health. These two frames show health **72**
-to the right of the face, consistent with [id Software's HUD layout](https://github.com/id-Software/Quake/blob/master/WinQuake/sbar.c#L915-L951).
+with a nailgun, changed viewpoint and health pickups. Health increases **72 →
+100**, ammunition remains 127, and armor remains 0. **Historical visual-note
+correction, 15:13 UTC:** earlier notes mistook the left-hand armor value (0)
+for health; health is to the right of the face, consistent with
+[id Software's HUD layout](https://github.com/id-Software/Quake/blob/master/WinQuake/sbar.c#L915-L951).
 The original r11 audit JSON and pixels remain unchanged; its `visual-correction.json`
 records this interpretation correction without changing counters or acceptance.
 This visual observation is still not proof of complete render correctness.
 Full timedemo and physical FPGA remain open.
-At 15:09 UTC, this model's Win95 capture at roughly 800M clocks visibly shows
-My Computer, Inbox, Recycle Bin, Internet/MSN icons and the Start/taskbar.
-It still has an hourglass cursor. This is a live observation, not closed
-desktop acceptance or demonstrated UI robustness; the cold run continues.
+At **15:43 UTC**, this model's roughly 900M-clock Win95 capture shows a readable
+Welcome window, normal pointer, desktop icons and taskbar, with no visible
+error. The run was then closed normally at **905,565,475 clocks**: native exit
+0, actual wait/EOF, 270 stable source/input pins, unchanged original media and
+no OOM or terminal error. An independent closure audit rechecks every pin,
+raw frame, full log and disk: `ventium-win95-desktop-900m.ZvyknkVW/native-audit.json`.
+Its lossless `frame_00004.png` preview is pixel-identical to the closed raw PPM.
+Separate human visual confirmation is pending; UI robustness is not established.
+This is **native closure evidence, not formal desktop PASS**: the existing
+desktop checker does not support this parent-policy build layout/128-task
+startup pool. Also, unloading the successfully exited retained unit cleared
+its live supervisor properties; its real invocation/closure journal and native
+receipts are retained, not replaced by a fabricated supervisor-wait receipt.
+The original checker was not weakened. Quake continues independently.
 New area candidate `751139e1` remains gameplay-unmeasured; its own standard
 suite is running. Its **own two 900-iteration CoreMark seeds now pass** at
 2.101890118 / 2.107616105 CM/MHz, independently audited at 12:49 UTC; the exact
@@ -63,6 +74,14 @@ sign-off. A subsequent interface-only high-word transport candidate `03921cda`
 passes 1,680 directed QEMU comparisons, 840 identical complete cycle streams
 and both short CoreMark diagnostics at exactly the same parent ticks/CRCs.
 Neither newer timing candidate has gameplay or full-suite qualification.
+At 16:00 UTC, `03921cda` synthesis/timing inspection closes at **194,062 LUTs /
+20.962 MHz unplaced estimate**, versus 194,057 / 19.837 MHz in its parent.
+The worst path is now cache-lookahead/paired-return control, not the FPU;
+40 MHz routed sign-off is still open. A separate minimal FSQRT backport on
+directed-core model `b1cb5dc8` fixes all four observed numeric errors with
+zero change to its 532,305-clock fixture. Its C1 failures remain, its canonical
+gate is still running, and it has no gameplay/full-suite measurement. See the
+[numeric audit](../fp_shared/tb/SRT_ROUND_FLOOR.md) for the exact scope.
 Older timestamped results below remain historical evidence.
 
 The new dip is associated with **more slow-FSM work, not a larger total memory

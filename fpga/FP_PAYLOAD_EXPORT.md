@@ -310,7 +310,7 @@ short CoreMark diagnostics now independently pass at exactly **4,767,218 /
 0/EOF/reaping, **4,424 stable pins** and no OOM. Supervisor
 `9f903f889731415eb7ba3b9b766ead04`; these ten-iteration diagnostics are not
 duration-qualified scores. This proposal has **no gameplay, qualified CoreMark,
-synthesis, full-suite or physical result** yet.
+full-suite or physical result** yet. Synthesis closes below; timing is still open.
 
 Export `ventium-fp-high-payload-fpga40.RLIEUvhB`, manifest
 `9e7b6b786752dad0c21f025d4deda2dcc197430275be4bee1205719aa540dea9`,
@@ -336,7 +336,62 @@ One new synthesis-only run starts at **15:38 UTC** in
 and live reserve checks. A pinned waiter requests only the independent
 read-only clock/DCP audit after successful native closure; no placement,
 routing or board operation is authorized by these controllers. This candidate
-has no synthesis result yet. Old closed compiler intermediates were archived,
+was awaiting synthesis at launch. Old closed compiler intermediates were archived,
 compared and hash-checked before removal; all sources, executables, private
 harness objects and evidence remain. Those four recoverable archives reclaimed
 703,103,000 bytes without lowering the disk reserve.
+
+At **15:57:47 UTC**, this synthesis closes native 0 in **1,176.18 seconds**.
+The independent source/DCP audit verifies all **4,784 pins**, 153 actual defines,
+148 native Verilog inputs and the unchanged `logic_only` mapper. Utilization
+is **194,062 LUTs / 54,591 registers / 277.5 BRAM tiles / 47 DSPs**, versus
+194,057 / 54,591 / 277.5 / 47 in the immediate parent. The five-LUT increase
+is retained; this is not an area saving. Zero errors, one inherited generated
+PS-clock critical warning and 1,567 warnings remain. No OOM or resource stop;
+peak family RAM 8,468,733,952 bytes, swap 1,617,715,200 bytes.
+DCP SHA256: `a3680a2b0ef931b067ade3ea7e7a2c525d2e4da6bcda4f9904cf5eb4cf9f2f11`.
+
+The sole read-only timing controller is
+`ventium-fp-high-payload-clock-audit-oct10.service`, invocation
+`e56889b573c747ba89c7292ae829a749`, root
+`ventium-fp-high-payload-clock-audit.u2dXxOpG`. It reads the actual clocks and
+compares parent/candidate primitive maps; no placement or route is requested.
+The queued [numeric FSQRT backport](../fp_shared/tb/SRT_ROUND_FLOOR.md) owns its
+independent closure auditor before building a separate processor derivative;
+do not run that auditor concurrently or mutate these frozen sources.
+
+It closes at **16:00:05 UTC**, native 0, **132.14 seconds**, 4,790 stable input
+pins, 4,256,899,072 bytes peak RAM and no swap/OOM. Independent audit passes
+actual **40/100 MHz constraints**, zero black boxes and zero structural DRC
+errors. The new **unplaced estimate is 20.962163 MHz**, up **5.670%** from
+19.837334 MHz. Setup slack is −22.705 ns and hold −0.101 ns. This is neither
+routed timing nor a measured board frequency; 40 MHz sign-off remains open.
+
+The worst reported path has moved **out of the SRT/FPU**. It now runs from
+`eip_reg[0]` to `pipe_mem_v_hit_q`: **165 levels / 47.494 ns** data delay
+(10.711 ns logic, 36.783 ns estimated routing). Its serial chain is instruction
+bytes → U/V decode/pair lookahead → successor descriptor/AGU/TLB →
+`mc_prime_offer`/next address → shared L1 tag port → `shadow_reuse`/current
+load data → integer flags/branch decision → `core_mem_next_commit` → paired
+return readiness/V-hit capture. The other 29 reported worst paths end at the
+paired-return data registers. These are native netlist observations, not an
+AXI-latency or cache-miss attribution.
+
+The next structural investigation should separate the **current response's
+tag/data ownership from the successor lookahead's tag selection**. A dedicated
+FPGA tag-read port or a proven ownership-only response selector may remove
+this serial feedback. Do not remove tag-valid/coherence/fault checks, mask paths,
+or disable priming/pairing. This remains a design hypothesis, not an implemented
+or measured fix. No fresh placement/route is started in this round.
+
+Current measured gameplay baseline is **0.49980509 IPC**, `bfb867f7`,
+3,000,065,237–3,100,065,237; nineteen consecutive windows average **0.4907133389**.
+Neither `03921cda` nor the queued numeric backport inherits that measurement.
+An additional six closed builds' generated compiler objects were archived,
+tar-compared and hash-checked before removal, recovering **1,053,150,824 bytes**.
+Each affected root has `generated-objects.tar.zst` and a recovery receipt;
+all executable, source, private harness object, trace and report pins remain.
+The first FST-memory cleanup attempt refused its older `plan.json` receipt
+layout before touching its objects; the reviewed exact-layout retry checks
+the actual closed native build status and all 854 source pins. Disk reserve
+policy remains unchanged. No active run's data was removed.
