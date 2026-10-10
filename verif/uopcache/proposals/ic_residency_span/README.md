@@ -44,9 +44,11 @@ TMPDIR=/home/yukidama/external/tmp python3 -B -m unittest discover \
 All **19 preparation tests** pass, including the two-consumer regression below.
 The 145-define full-PC derivative `89b68b62` independently completed both
 duration-valid CoreMark seeds at **2.101890118 / 2.107616105 CM/MHz**, identical
-ticks to `bfb867f7`; these are its own audited runs, not inherited passes. Current verified
-gameplay is parent `958f7ec4`: 0.50530999 at clocks 3,900,048,811–4,000,048,811;
-both newer models and the 146-define `343f0ccd` remain gameplay-unmeasured.
+ticks to `bfb867f7`; these are its own audited runs, not inherited passes.
+The 146-define `343f0ccd` also independently passes both duration-valid seeds
+at those same ticks/scores. Current verified gameplay is parent `bfb867f7`:
+**0.50705320**, clocks **1,300,065,237–1,400,065,237**; both consecutive windows
+from 1,200,065,237 average **0.508680175**. Area derivatives remain unmeasured.
 
 The separate `prepare_prefix_integration.py` / `ic_prefix_span.svh` extension
 shares the successor's 16-byte gather under `VEN_IC_PREFIX_SPAN`, with no extra
@@ -67,8 +69,11 @@ integration is now a required failing preparation test. The actual enabled
 whole-core/include preprocessor output has **zero remaining generic prefix-byte
 calls**; default-off output remains token-identical to the parent. Directed
 model `7791051b` passes 1,536 full QEMU comparisons and 768 identical matched
-whole cycle streams. Its full-PC and area checks are separate pending work.
-Do not infer whole-design savings or standard-suite acceptance from the leaf.
+whole cycle streams. Its full-PC model `751139e1` preserves both short CoreMark
+tick counts. Independently audited whole synthesis now reduces **221,918 →
+197,375 LUTs (11.06%)**, with unchanged BRAM/DSP counts. This measured reduction
+belongs to the complete two-consumer integration. Its own full standard suite
+is running; no gameplay, route or hardware acceptance is inherited from a leaf.
 
 ## Intended substitutions
 

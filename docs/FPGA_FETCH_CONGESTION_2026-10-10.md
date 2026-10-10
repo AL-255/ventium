@@ -371,9 +371,26 @@ cycle-kernel record lists match the immediate parent. The full-PC build closes
 native 0 as `751139e1`; both short CoreMark seeds pass CRCs with identical
 4,767,218 / 4,753,406 ticks (duration-invalid). Sole-family whole synthesis
 started 11:26:43 UTC with 8 GiB RAM, 6 GiB swap and a 30-minute limit.
-No full-design saving, new qualified score or hardware pass is claimed yet.
-Current verified gameplay is performance parent `bfb867f7`'s **0.51030715**
-U+V event IPC, clocks **1,200,065,237–1,300,065,237**; `751139e1` is unmeasured.
+Whole synthesis now closes native 0 in 1,294.82 seconds, independently audited:
+**221,918 → 197,375 LUTs**, a **24,543-LUT / 11.06% whole-design saving**.
+BRAM/DSPs stay 277.5 / 47, registers 54,631 → 54,663. The one-file delta,
+148 actual defines, mapper, DCP integrity and all 3,722 pins are checked;
+no OOM, no route or bitstream. This confirms the missed consumer materially
+retained the old gather, not merely a change in reconstructed hierarchy names.
+
+Read-only native project-clock audit additionally closes in 183.44 seconds,
+3,726 stable pins, no black boxes or MDRV-1/LUTLP-1 errors. Original 40/100 MHz
+constraints are unchanged. **Unplaced core estimate: 18.87 MHz**, up from
+18.09 MHz; this is not routed Fmax or hardware sign-off. Worst paths now begin
+at `q_pc` and reach SRT result enables through 185 levels, versus 194 before.
+Raw `ibuf`-named LUTs fall 26,049 → 5,559, consistent with the removed gather;
+name-based attribution alone is not a module-area measurement.
+Evidence and the newly started independent standard suite:
+[exact export](../fpga/IC_PREFIX_CAPTURE_EXPORT.md).
+
+Current verified gameplay is performance parent `bfb867f7`'s **0.50705320**
+U+V event IPC, clocks **1,300,065,237–1,400,065,237**; both consecutive windows
+from 1,200,065,237 average **0.508680175**. `751139e1` is still unmeasured.
 
 ### Recoverable scratch cleanup
 

@@ -7,8 +7,9 @@ All ownership guards, nonblocking writes, q_* effects, state transitions and
 latencies remain unchanged. UV/system/relocated fast pipeline and fast
 loads/stores stay enabled; no slow-mode workaround or guest-specific change.
 
-Verified gameplay baseline is **0.51030715** U+V event IPC, performance parent
-`bfb867f7`, clocks 1,200,065,237–1,300,065,237, one predeclared 100M window.
+Verified gameplay baseline is **0.50705320** U+V event IPC, performance parent
+`bfb867f7`, clocks 1,300,065,237–1,400,065,237. Both consecutive windows from
+1,200,065,237 average **0.508680175**; neither is dropped.
 New model **`751139e1` is gameplay-unmeasured**.
 REP events are not exact P54 macroinstructions. The predecessor's qualified
 2.101890118 / 2.107616105 CM/MHz scores are not inherited by this model.
@@ -57,14 +58,50 @@ checks 3,362 stable pins, actual V retirement, EOF/reaping, retained supervisor
 `dbefff9c355344978315bfc1d3bedf97` and zero OOM. These are duration-invalid
 diagnostics, not qualified scores.
 
-Whole-design synthesis started **11:26:43 UTC**:
+Whole-design synthesis **closed native 0 at 11:48:18 UTC**, 1,294.82 seconds:
 `ventium-ic-prefix-capture-full-synth.tEFDx2fS`, controller
 `ae6a6e8fcb3846c19ad99b66c6685e4c`. One guarded Vivado family, 8 GiB RAM,
 6 GiB swap and 30-minute cap; no other synthesis/implementation family.
-It must measure
-whether removing the missed consumer actually lowers whole-design resources;
-the earlier isolated 83.40% saving cannot establish that result. No automatic
-placement, routing, clock change or deployment.
+Independent `audit_closed.py` rechecks 3,722 input pins, actual 148 defines and
+147 native read-Verilog files, same mapper/device/clocks, exact one-file delta,
+native completion markers, DCP integrity and retained supervisors. No OOM;
+peak RAM 8 GiB, swap 234,041,344 bytes. One inherited critical warning remains.
+
+| Whole-design resource | Immediate parent | Complete sharing |
+| --- | ---: | ---: |
+| CLB LUTs | 221,918 | **197,375** |
+| Registers | 54,631 | 54,663 |
+| BRAM tiles | 277.5 | 277.5 |
+| DSPs | 47 | 47 |
+
+This **24,543-LUT / 11.06% reduction** is a matched whole-design result,
+not extrapolation from the isolated 83.40% experiment. Register merging changes
+by 32 cells despite unchanged architectural registers/latency. No placement,
+route, clock change or bitstream was produced. Read-only original-project-clock
+inspection closed in `ventium-ic-prefix-capture-clock-audit.ecnKY6B4`, controller
+`4c351f4795724019a64433161b220e4d`: native 0, 183.44 seconds, 3,726 stable
+pins, 3,880,636,416-byte peak RAM and zero swap/OOM. Original clocks are
+40 MHz core / 100 MHz PL; zero black boxes and MDRV-1/LUTLP-1 errors.
+The worst **unplaced core estimate is 18.87 MHz** (previous 18.09 MHz),
+not routed Fmax or a 40 MHz sign-off. All 30 worst paths now start at `q_pc`,
+ending in SRT result enables, with 185 logic levels (previous 194).
+Raw `ibuf`-named LUT attribution falls 26,049 → 5,559; reconstructed names are
+not isolated-module area. Both DCPs remain unchanged.
+
+Its own cold standard suite started **11:50:53 UTC**, under the unchanged
+duration/completion rules. Actual model/PID/starttime/argv/affinity/cgroup and
+3,398 source/input pins are checked in `standard-suite-admission.json`:
+
+| Service suffix after `ventium-ic-prefix-capture-` | CPU | Invocation |
+| --- | ---: | --- |
+| `cm900-perf-oct10` | 3 | `68ef1a196b0f48a5b9a3f9f886b2bae1` |
+| `cm900-valid-oct10` | 5 | `b5d64faf55774c5cb2e2b51daf755e04` |
+| `quake-oct10` | 13 | `9be97467da414f8189493baf726793ed` |
+| `win95-oct10` | 15 | `5d365235bd6741b48c554903d844490f` |
+
+Every native has one actual CPU and 2 GiB/no swap. CoreMark retains its
+60-minute per-seed bound. Quake/Win95 use the original cold media, no guest
+patches, snapshots or scripted input. Admission is not acceptance.
 
 The unmodified generic gate remains **FAIL**, native 2: 7/108 functional passes,
 101 terminal-record discrepancies and 12/19 graded cycle-band failures.

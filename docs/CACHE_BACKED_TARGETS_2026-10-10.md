@@ -123,13 +123,16 @@ Quake's first declared gameplay window is now verified below.
 
 ## Gameplay baseline and blockers
 
-**Current verified build `bfb867f7`: 0.51030715** U+V retirement-event IPC at
-clocks **1,200,065,237–1,300,065,237**. This is 51,030,715 events = 39,233,095 U
-+ 11,797,620 V over 100,000,000 clocks. This exact model therefore has both
+**Current verified build `bfb867f7`: 0.50705320** U+V retirement-event IPC at
+clocks **1,300,065,237–1,400,065,237**. This is 50,705,320 events = 39,071,953 U
++ 11,633,367 V over 100,000,000 clocks. Both consecutive windows from
+1,200,065,237 average **0.508680175** (101,736,035 events / 200M clocks),
+retaining the earlier 0.51030715 window. This exact model therefore has both
 duration-valid CoreMark seeds above 2.1 and a declared gameplay window above
 0.48. It is **not** a full-timedemo average or physical FPGA result.
 
-Evidence: `ventium-store-admit-gameplay.MQccS4fZ/audit.json`. The original
+Evidence: `ventium-store-admit-gameplay.MQccS4fZ/audit.json` and the latest
+`ventium-store-admit-gameplay-latest.aZbN2LGc/audit.json`. The original
 prelaunch receipt selects periodic samples 12/13; all samples and the actual
 65,237-clock startup offset are retained. Root independently viewed both
 pixel-identical endpoint conversions: a live stone corridor, then weapon fire
@@ -274,7 +277,20 @@ CoreMark diagnostics now close both seeds, all original CRCs and exactly
 native exits 0, EOF/reaping, actual V retirement and no OOM. These short runs
 are duration-invalid, not qualified scores. Whole-design synthesis started
 11:26:43 UTC under the sole-Vivado guard (8 GiB RAM / 6 GiB swap, 30-minute
-cap), comparing the immediate 221,918-LUT parent. Area remains pending.
-No new route or board deployment; the earlier 83.40% local result is not a
-whole-chip saving. Current verified gameplay is `bfb867f7`'s 0.51030715 above;
-this `751139e1` descendant remains gameplay-unmeasured.
+cap), comparing the immediate 221,918-LUT parent. It closed native 0 at
+11:48:18 UTC and independently audited **197,375 LUTs: 24,543 fewer / 11.06%**.
+BRAM/DSP counts remain 277.5 / 47; registers change 54,631 → 54,663. All 3,722
+pins, actual source/defines, supervisor and DCP integrity are rechecked; no OOM.
+No new route or board deployment. This is a real whole-chip area saving,
+distinct from the earlier 83.40% local experiment. Its own cold standard suite
+started 11:50:53 UTC; admission and exact service identities are in the export
+document linked above. Current verified gameplay is `bfb867f7`'s **0.50705320**
+above; this `751139e1` descendant remains gameplay-unmeasured.
+
+Read-only clock/netlist inspection closes native 0 with original 40/100 MHz
+constraints, no black boxes or structural DRC errors. Its **unplaced core
+estimate is 18.87 MHz**, versus 18.09 MHz for the immediate parent. No routed
+frequency is available; the large area saving does not by itself close timing.
+The separate balanced-remainder-CLZ experiment mapped almost identically to the
+original (87 → 85 LUTs, both seven levels), so it is **not** being advanced as
+a timing fix. [Closed negative result](../fp_shared/tb/REM_CLZ_TREE.md).

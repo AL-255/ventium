@@ -1,7 +1,8 @@
 # Balanced SRT remainder leading-zero search — private candidate
 
-Current verified gameplay: **0.51030715 total U+V retirement-event IPC**,
-`bfb867f7`, clocks **1,200,065,237–1,300,065,237**. That exact cache-backed
+Current verified gameplay: **0.50705320 total U+V retirement-event IPC**,
+`bfb867f7`, clocks **1,300,065,237–1,400,065,237**; both consecutive windows
+from 1,200,065,237 average **0.508680175**. That exact cache-backed
 model also scores **2.101890118 / 2.107616105 CM/MHz** on its two duration-valid
 CoreMark seeds. This new helper is not in that model or the active FPGA
 synthesis, and has **no gameplay or processor-frequency measurement**.
@@ -51,14 +52,29 @@ The initial preflight refused an incorrect two-caller expectation before
 compilation. Inspection identified the final-normalization third caller; R2
 requires all three. The failed service/journal and explanation remain retained.
 
-## Still required
+## Native area/timing result: do not advance as a timing repair
 
-Identical registered helper shells are prepared for a native old/new area and
-unplaced timing comparison at `ventium-rem-clz-area.4rtTKVCb`. **Not launched**:
-the one permitted Vivado family is still synthesizing the complete prefix-byte
-sharing candidate. Local helper results will not establish whole-SRT or
-processor savings. No production RTL, running simulator, guest or FPGA input
-has been changed by this proposal.
+After the preceding full synthesis closed, the guarded helper comparison ran
+alone in `ventium-rem-clz-area.4rtTKVCb`. Native 0, 58.23 seconds, stable pins,
+3,274,551,296-byte peak RAM, zero swap/OOM; independently audited retained
+supervisor `3f56c963d0ed483aa262637ee788d034`.
+
+| Identical registered helper shells | Original | Balanced |
+| --- | ---: | ---: |
+| LUTs | 87 | 85 |
+| FFs | 71 | 71 |
+| Logic levels | 7 | 7 |
+| Unplaced estimated period | 2.085 ns | 2.081 ns |
+| Unplaced estimated frequency | 479.62 MHz | 480.54 MHz |
+
+These are **isolated, unplaced shell estimates**, not processor Fmax or
+physical measurements. Both have zero black boxes/CARRY8/MUXF cells. Vivado
+already balances the original helper: the source's serial appearance does
+not imply a 64-level mapped chain. Two LUTs and 0.004 ns estimated difference
+are insufficient evidence for a useful core timing repair. Do **not** advance
+this proposal into the measured full-PC/FPGA candidate on that premise.
+The negative finding and microtests are retained; no production RTL, running
+simulator, guest or FPGA input changed.
 
 Promotion requires whole-engine/core equivalence, strict structural lint,
 differential gates, the complete standard suite and actual FPGA verification.
