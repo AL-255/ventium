@@ -41,11 +41,21 @@ TMPDIR=/home/yukidama/external/tmp python3 -B -m unittest discover \
   -s verif/uopcache/proposals/ic_residency_span -p 'test_prepare*py'
 ```
 
-All 13 tests pass. The 145-define full-PC derivative `89b68b62` is distinct
+All 15 tests pass (including two prefix-integration tests). The 145-define full-PC derivative `89b68b62` is distinct
 from the duration-valid CoreMark model `bfb867f7`; its ten-iteration cycle
 identity does not inherit the latter's qualified scores. Current verified
-gameplay is parent `958f7ec4`: 0.49630560 at clocks 3,600,048,811–3,700,048,811;
-both newer models remain gameplay-unmeasured.
+gameplay is parent `958f7ec4`: 0.48544264 at clocks 3,800,048,811–3,900,048,811;
+both newer models and the 146-define `343f0ccd` remain gameplay-unmeasured.
+
+The separate `prepare_prefix_integration.py` / `ic_prefix_span.svh` extension
+shares the successor's 16-byte gather under `VEN_IC_PREFIX_SPAN`, with no extra
+cycles or ports. `run_prefix_miter.py` tests the extracted old/new consumer,
+including fixed-address metadata changes without pulsing the address. It does
+not broaden the earlier presence-helper proof to arbitrary addresses. See the
+fetch audit for 427,296 four-state comparisons, three required failing mutants,
+384 paged whole-core fixtures, identical short CoreMark cycles and 83.40%
+isolated LUT reduction. Whole-design synthesis and the exact new standard suite
+are separate pending checks, not inherited acceptance.
 
 ## Intended substitutions
 
@@ -77,8 +87,9 @@ predicates change. The miter source extracts those old caller expressions.
 known counts 0..30. Wider windows/counts require a new proof or the generic
 functions; a six-bit sum must not silently truncate a third-line crossing.
 
-Do not substitute any arbitrary branch-target, redirected-port, or
-`p54_prefix_ex_flin` lookup. Keep non-BRAM paths unchanged. The optional raw
+Do not use these presence helpers for any arbitrary branch-target,
+redirected-port or `p54_prefix_ex_flin` lookup. The separate prefix-span extension
+has its own probes and proof. Keep non-BRAM paths unchanged. The optional raw
 six-/seven-byte U window and 12-/14-byte pairing-buffer policy are unchanged.
 The seven-byte form detector need not become a constant6 window.
 

@@ -5,9 +5,9 @@ parent is documented in [STORE_ADMIT_EXPORT.md](STORE_ADMIT_EXPORT.md); the
 new sharing change and closed microtests are in the
 [fetch-congestion audit](../docs/FPGA_FETCH_CONGESTION_2026-10-10.md).
 
-Current verified gameplay remains parent `958f7ec4`: **0.49630560** U+V event
-IPC at clocks 3,600,048,811–3,700,048,811; all 25 consecutive windows average
-0.4848174992. Performance model `bfb867f7` and sharing model `89b68b62` remain
+Current verified gameplay remains parent `958f7ec4`: **0.48544264** U+V event
+IPC at clocks 3,800,048,811–3,900,048,811; all 27 consecutive windows average
+0.4855670741. Performance model `bfb867f7` and sharing model `89b68b62` remain
 gameplay-unmeasured. REP events are not exact P54 macroinstructions.
 
 ## Exact inputs
@@ -83,8 +83,9 @@ controller. Synthesized DCP SHA:
 
 **This is a 29,835-LUT increase**, not a whole-chip area win. The comparison
 also includes ten performance backports, so it does not isolate the sharing
-change. The 66.0% local-cone result must not be extrapolated. Read-only native
-netlist comparison is underway before spending time on placement/routing.
+change. The 66.0% local-cone result must not be extrapolated. Closed read-only
+netlist comparison identified duplicated prefix-successor lookup logic; the
+tested successor is documented in [IC_PREFIX_EXPORT.md](IC_PREFIX_EXPORT.md).
 
 The native synthesis has one critical warning: generated PS XDC line 21 cannot
 resolve `PS8_i/PLCLK[0]` for `create_clock`. The older parent has the same

@@ -1,10 +1,10 @@
 # Fetch/operand congestion: native evidence and narrow sharing experiment
 
-Latest verified gameplay baseline is `958f7ec4`, **0.49630560** U+V event IPC
-at 3,600,048,811–3,700,048,811 clocks. All 25 consecutive 100M windows from
-1,200,048,811 average **0.4848174992**; no low window is excluded. Audit:
-`ventium-sfetch16-latest-r11.S0xEqGEw/audit.json`. Full timedemo remains unfinished.
-Newer combined benchmark model `bfb867f7` and area model `89b68b62` are
+Latest verified gameplay baseline is `958f7ec4`, **0.48544264** U+V event IPC
+at 3,800,048,811–3,900,048,811 clocks. All 27 consecutive 100M windows from
+1,200,048,811 average **0.4855670741**; no low window is excluded. Audit:
+`ventium-sfetch16-latest-r12.DSdRLbmN/audit.json`. Full timedemo remains unfinished.
+Newer combined benchmark model `bfb867f7` and area models `89b68b62` / `343f0ccd` are
 gameplay-unmeasured. REP events are not exact P54 macroinstructions.
 
 The expanded sharing stage below removes **66.0% of the measured local LUT
@@ -297,8 +297,22 @@ Isolated same-interface native area (`ventium-ic-prefix-area.HxnkxgUE`):
 Same Vivado 2025.2, part and logic-only OOC objective; no timing/placement.
 Native 0 in 87.37 seconds, peak RAM 4,392,386,560 bytes, zero swap/OOM,
 unchanged pins; controller `db02add2c23d4eb5aa0bfa7290f81974`.
-Full-PC integration is being built in `ventium-ic-prefix-soc.ApbJoeMH`.
-Its gameplay, whole-chip area and FPGA acceptance remain unmeasured.
+Full-PC model **`343f0ccd`** closed native build 0 in
+`ventium-ic-prefix-soc.ApbJoeMH`. Both short CoreMark seeds close native 0,
+original CRCs and exact 4,767,218 / 4,753,406 parent ticks. Duration-valid
+seeds, cold Win95 and cold Quake are now running on this exact model. Its
+gameplay and physical FPGA performance remain unmeasured.
+
+The [exact hardware export](../fpga/IC_PREFIX_EXPORT.md) contains 189 payloads
+and 148 ordered defines; the entire actual native compiler command, source
+closure, permitted deltas and real Tcl admission are independently checked.
+Strict hardware CPU lint closes native 0 with all six structural classes fatal.
+Whole-design synthesis began at 10:44 UTC in
+`ventium-ic-prefix-full-synth.7G1TINWD`, single Vivado family, 8 GiB RAM /
+6 GiB swap / 30-minute native cap, unchanged 40/100 MHz constraints and mapper.
+Compare against its **220,699-LUT immediate parent**, which differs only in
+the sharing cone; do not attribute all differences from the older 190,864-LUT
+performance profile to this change. No automatic route or deployment.
 
 The generic gate remains an independent red obligation. Bare synthesized DCPs
 have **no clocks loaded** in either profile: project XDCs must be loaded via

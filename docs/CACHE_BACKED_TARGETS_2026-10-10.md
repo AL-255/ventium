@@ -123,11 +123,11 @@ completed standard-suite result or a gameplay IPC measurement for this build.
 
 ## Gameplay baseline and blockers
 
-Current verified parent `958f7ec4`: **0.49630560** at clocks
-**3,600,048,811–3,700,048,811**, 49,630,560 events = 38,045,168 U + 11,585,392 V.
-All twenty-five consecutive 100M windows from 1,200,048,811 total
-1,212,043,748 events / 2.5B clocks = **0.4848174992**, retaining every dip.
-Audit `ventium-sfetch16-latest-r11.S0xEqGEw/audit.json` checks counters,
+Current verified parent `958f7ec4`: **0.48544264** at clocks
+**3,800,048,811–3,900,048,811**, 48,544,264 events = 37,486,019 U + 11,058,245 V.
+All twenty-seven consecutive 100M windows from 1,200,048,811 total
+1,311,031,100 events / 2.7B clocks = **0.4855670741**, retaining every dip.
+Audit `ventium-sfetch16-latest-r12.DSdRLbmN/audit.json` checks counters,
 source/native/supervisor identity, unchanged raw endpoint pixels and no OOM.
 Latest window and aggregate exceed 0.48; timedemo is unfinished.
 **The newer `bfb867f7` candidate has no verified gameplay measurement.**
@@ -151,6 +151,31 @@ completion criteria are unchanged; no guest patch, input script or snapshot.
 CoreMark retains its 60-minute seed cap; Win95/Quake their bounded cold-run
 collectors. Evidence is under `ventium-ic-buffered-soc.gsztNdDc` on external
 scratch. Existing `bfb867f7` cold runs continue, not restarted or replaced.
+
+### Current prefix-sharing derivative
+
+The newest model **`343f0ccd`** (`ventium-ic-prefix-soc.ApbJoeMH`) replaces
+16 repeated successor-byte tag lookups with two shared line probes. It retains
+all performance fixes, UV/system/relocated fast paths, cache/transport geometry,
+and original guest media. Its short CoreMark runs preserve both CRC sets and
+exact 4,767,218 / 4,753,406 ticks. It has **no qualified 900-iteration score or
+gameplay IPC yet**; it cannot inherit either parent's performance acceptance.
+Source/export and closed corner-case tests: [IC_PREFIX_EXPORT.md](../fpga/IC_PREFIX_EXPORT.md).
+
+Its own cold standard suite started at 10:45 UTC; actual native executable,
+argv, PID/starttime, supervisor/cgroup and CPU affinity are checked:
+
+| Service | Actual CPU | Invocation |
+| --- | ---: | --- |
+| `ventium-ic-prefix-cm900-perf-oct10` | 3 | `01017c2e95dd4c91b8aa6f1037c1be30` |
+| `ventium-ic-prefix-cm900-valid-oct10` | 5 | `0ee3f8ac369b4e5388882f4cba52d9be` |
+| `ventium-ic-prefix-quake-oct10` | 14 | `1ee5755ad73c4f3ab7a31ca85c60d4f6` |
+| `ventium-ic-prefix-win95-oct10` | 10 | `4e56e8a830f04245869ef58b8c04ffe2` |
+
+All four are active at 10:49 UTC. The same duration/completion checks and
+resource bounds apply; no snapshot, guest patch or scripted input. Older
+candidate runs remain independent. Exact-source full synthesis is separately
+running with a 40 MHz core constraint, not a claimed achieved frequency.
 
 Unmodified generic verification remains **red**: terminal/bounded-observation
 record discrepancies and cycle-band failures. No golden records, field masks
