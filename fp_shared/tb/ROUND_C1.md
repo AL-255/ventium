@@ -193,8 +193,12 @@ ISA fixtures in UV-fast mode:
   mismatches**; fixes the original 576 C1 failures.
 
 Both actual guest exits are zero, actual fault deliveries zero, and actual V
-retirement is observed. These initial full-core witnesses use direct memory;
-they are directed output-oracle checks, **not complete per-instruction QEMU
+retirement is observed. These checks also pass with `--l1-axi`, read/write
+latencies seven, and nonzero backing-ACK counters: 912 SRT and 1,152 ALU cases
+again have zero mismatches. Their separate `srt-axi-observation` and
+`alu-axi-observation` receipts retain the unchanged oracle, explicit backend
+arguments, wrapper transformations, input pins and native logs. These are
+directed output-oracle checks, **not complete per-instruction QEMU
 equivalence**, standard-suite acceptance, gameplay or FPGA results. Production
 promotion still requires alternate/legacy interface handling, further exception
 coverage, the generic differential gates and full standard suite.

@@ -118,3 +118,11 @@ diagnostic ratios are **1.97703/1.98018 CM/MHz**: still below 2.1, and these
 short runs explicitly fail the benchmark's minimum scoring duration. They are
 not valid CoreMark scores or FPGA measurements. Receipt: candidate root
 `backend-diag/closed.json`, invocation `45625e8a6d5b476bba55d319d3b895f3`.
+
+The actual `make verify` rerun remains **FAIL**. With the canonical unchanged
+QEMU producer, it still reports the terminal-record length problem and the
+existing hard cycle failures (`mb_depadd`, `mb_indepadd`, `mb_dmiss`,
+`mb_imiss`). Directed PASS is not an override. The complete canonical log is
+candidate `generic-r2.log`, invocation `7a1c4d527e494207ba778c8e5a507c40`.
+The earlier launcher failed before the gate because systemd lacked the compiler
+path; R2 pins it explicitly. Neither attempt rebuilt the canonical core model.
