@@ -171,6 +171,15 @@ cd rtl && verilator --lint-only -sv -Wall -Wno-UNUSED -Wno-fatal \
 Verilator builds are slow (minutes). Variant TB builds:
 `make -C verif/tb OBJDIR=obj_dir_<name> VL_EXTRA_DEFINES=+define+VEN_FOO` —
 **never clobber the canonical `obj_dir/tb_ventium`**.
+Python drivers already inside `tools/build_scope.sh` must preserve its real
+locked descriptor when launching a guarded child (`subprocess.run(...,
+pass_fds=(9,))`). Python closes it by default; the nested guard then correctly
+rejects the active marker and waits on its own parent's lock. Do not bypass
+the lock/cgroup check to cure this self-deadlock. For systemd-launched builds
+and gates, explicitly set
+`VENTIUM_VERILATOR_BIN=/tools/verilator/v5.046/bin/verilator`; the user manager
+does not inherit an interactive shell's compiler PATH. Check the trivial
+`tools/verilator_serial.sh --version` probe in that environment before queueing.
 For an external/private C++ harness, a fresh `OBJDIR` alone is insufficient:
 Verilator's generated makefile can find an old harness `.o` through `VPATH`
 and link it without recompiling against the current generated class layout.
