@@ -34,6 +34,9 @@ PATH = """Slack (VIOLATED) : -1.250ns (required time - arrival time)
           (clock mmcm_clk rise edge)
                               25.000 25.000 r
           net (fo=10, unplaced) 2.000 27.000 cpu/clk
+          required time 26.750
+          arrival time -28.000
+          slack -1.250
 """
 
 
@@ -73,6 +76,8 @@ class ReportTests(unittest.TestCase):
             (HEADER + PATH.replace('10.000 25.000', '10.000 24.000'), 'discontinuous'),
             (HEADER + PATH.replace('CARRY8 (Prop_CARRY8_CI_O[0])', 'unknown-format'), 'unparsed'),
             (HEADER + PATH.replace('FDRE r cpu/result_reg[3]/CE', ''), 'unparsed'),
+            (HEADER + PATH.split('required time')[0], 'required time'),
+            (HEADER + PATH.replace('arrival time -28.000', 'arrival time -27.000'), 'footer disagrees'),
             (HEADER, 'no setup paths'),
         ]
         for report, message in cases:

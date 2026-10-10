@@ -54,7 +54,7 @@ path already exceeds 25 ns before L1 lookup completes. The next native report
 must identify surviving register-to-register paths; do not subtract the old
 tail and assert that the design meets 40 MHz, or waive it as a false path.
 
-Five parser tests pass, including ten malformed/unsupported-input subcases.
+Five parser tests pass, including twelve malformed/unsupported-input subcases.
 The real parent report parses in full, and its derived estimate matches the
 independent native audit. This tool is diagnostic evidence only; no processor,
 standard-suite, timing-closure or FPGA acceptance is implied.

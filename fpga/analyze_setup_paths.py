@@ -81,6 +81,11 @@ def parse_path(block, markers=()):
         last = arrival
     if not finished or pending or not rows or abs(last - scd - total) > .0021:
         raise ValueError("incomplete data path or arrival disagrees with summary")
+    required = float(require(r"^\s+required time\s+(" + NUMBER + r")\s*$", block))
+    arrival = float(require(r"^\s+arrival time\s+(" + NUMBER + r")\s*$", block))
+    footer_slack = float(require(r"^\s+slack\s+(" + NUMBER + r")\s*$", block))
+    if abs(arrival + last) > .0021 or abs(required + arrival - slack) > .0021 or abs(footer_slack - slack) > .0021:
+        raise ValueError("arrival/required/slack footer disagrees with data path")
     if period - slack <= 0:
         raise ValueError("nonpositive derived period")
     cuts = []
