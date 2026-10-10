@@ -1,6 +1,14 @@
 # Compact round-direction sideband proposal — October 10
 
-**Private, unpromoted RTL candidate.** Leaf, connected-top and directed full-core
+**Private, unpromoted RTL candidate.** The subsequent
+[FST/FSTP repair](FST_REGISTER.md) fixes the stale-C1 register-pop example below
+and a false empty-destination underflow; its 1,920-case test passes, but its
+canonical gate remains red. Neither repair has gameplay/FPGA acceptance.
+Latest verified gameplay is **0.49929384 total U+V IPC**, `86731249`, cycles
+3.2B–3.3B; all 21 windows from 1.2B–3.3B average **0.47844824**, below the
+sustained target. The measurements below retain their historical scope.
+
+Leaf, connected-top and directed full-core
 checks now pass (see the closed results below); production C1 sources and live
 full-PC models remain unchanged. Latest verified gameplay is **0.48007471 total
 U+V IPC**, `86731249`, clocks 2.4B–2.5B; this candidate has no gameplay measurement.
