@@ -80,7 +80,52 @@ The unchanged canonical differential gate closed with native make exit 2:
 **7/108 functional passes**, and 12/19 scored cycle kernels outside their
 bands, as on the parent. All 20 candidate/control complete cycle streams match.
 No mask, golden or band changed; this is still **FAIL**, not a correctness pass.
-Full-PC CoreMark and new synthesis remain pending.
+Full-PC short CoreMark is now closed below; new synthesis remains pending.
+
+## Full-PC and hardware source match
+
+The posted-16 full-PC model built with native exit 0 in 14.82 seconds:
+`74f16acf1f21d8924b310eac9b91cda0fa2c3c651f21d223414d16009d20f615`.
+All 102 shared RTL inputs match the directed model, with only the reviewed
+`core.sv` delta from `467ff95f`; 154 simulation defines remain unchanged.
+The 98 inherited platform structural warnings remain debt, not a lint pass.
+
+The FPGA exporter rechecks 9,658 input pins, 190 payloads, 117 filelist units
+and 49 include edges. Manifest SHA-256:
+`4e045c450620b5cef603772399d97be269f8961ebb1e161cbd152b8795a9e91b`.
+Its 156 hardware defines, full P5 L1s, platform L2, posted-16 transport and
+40/100 MHz constraints are unchanged. Four exporter tests pass. Strict
+CPU-hierarchy lint on the exact export closes native 0 in 2.37 seconds;
+this does not cover full-SoC structural lint. A first export invocation used
+the `external` symlink and was correctly rejected before writing any payload;
+the successful invocation uses canonical physical paths without weakening
+the no-symlink checks.
+
+Both original short cold CoreMark seeds close with native exit 0 and original
+CRCs, restoring the exact parent clocks:
+
+| Seed (10 iterations) | Parent clocks | Corrected clocks | Actual V retirements |
+| --- | ---: | ---: | ---: |
+| Performance | 4,767,218 | 4,767,218 | 1,055,307 |
+| Validation | 4,753,406 | 4,753,406 | 1,054,254 |
+
+The independent audit checks all 9,501 source pins, original disks/ROMs, real
+native argv/CPU-11 affinity, complete consoles and reaped children. No OOM;
+scope peak 50,814,976 bytes. Controller invocation
+`43c1da641f7f463b8171d0d0c6bce6f7` is terminal, native 0.
+Audit SHA-256:
+`0ce5802a1b98b03067004f6c0f017396904f536c2685906a286ec8c4f8bf7233`.
+This is **0% measured cycle-throughput change relative to the original parent**,
+not a duration-valid CM/MHz score or a physical performance result.
+
+At 23:42 UTC, the bounded single-family synthesis controller
+`ventium-fp-exec-full-synth-oct10.service` started, invocation
+`752a5a9ce908438dade4d65999dde174`. It uses the same diagnostic logic-only
+mapping as the parent, 8 GiB RAM / 6 GiB swap, one job, a 30-minute native cap,
+and a 4 GiB runtime disk floor. Admission requires more than twice the closed
+parent's measured disk growth above that floor. The subsequent native audit
+is queued for this exact invocation, without automatic retries or implementation.
+No frequency improvement is claimed until the new timing report closes.
 
 ## Resource handling and acceptance limits
 
@@ -93,3 +138,12 @@ Latest verified gameplay baseline: **0.51030715 total U+V retirement-event
 IPC**, model `2b4d7a48`, cycles **1,200,065,237–1,300,065,237**. It predates
 this candidate, which has no gameplay measurement, completed timedemo, Win95
 acceptance, duration-valid CoreMark score or physical FPGA qualification.
+
+Separately, the still-running older `2b4d7a48` Win95 simulation visibly shows
+a clean desktop, readable Welcome window, icons and taskbar in
+`ventium-zero-c1-soc.FTbYSn0L/win95-cold-zero-c1-oct10.1/frame_00011.ppm`.
+Raw frame SHA-256:
+`0589d29b72d19308e5eb7eb4d62d0c96348cf6eb949d96c236f5d6a202f5f36c`.
+The review PNG is a lossless format conversion with no color adjustment.
+Native closure and UI interaction have not been accepted; this is not a pass
+for the newer timing candidate or the physical board.
