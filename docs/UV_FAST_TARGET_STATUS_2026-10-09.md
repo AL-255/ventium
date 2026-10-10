@@ -7,11 +7,46 @@ snapshot is used for the current cold full-PC runs.
 | Requirement | Verified result | Remaining |
 | --- | --- | --- |
 | CoreMark ≥2.1 CM/MHz | Current `b5453f16` full direct-memory seeds: **2.107843209 / 2.110905243**, correct CRCs | Not a DDR/cache/FPGA score |
-| Quake ≥0.48 total U+V IPC | Latest **0.48007471**, repaired 256 KiB-L2 `86731249`, 2.4B–2.5B clocks; **0.47084103** over all 1.2B–2.5B | Sustained target still open; original fixed window 0.49083588; full timedemo and silicon pending |
+| Quake ≥0.48 total U+V IPC | Latest **0.49639177**, repaired 256 KiB-L2 `86731249`, 2.6B–2.7B clocks; **0.47400567** over all 1.2B–2.7B | Sustained target still open; original fixed window 0.49083588; full timedemo and silicon pending |
 | Standard suite | Current full direct-memory CoreMark seeds pass; larger-L2 Win95 closed at a visually clean desktop | Independent desktop acceptance, complete timedemo and remaining differential failures |
 | FPGA | Old image still deployed; 40 MHz synthesis stopped by resource watchdog on October 10 | No accepted new synthesis/bitstream; timing/resource qualification and deployment remain open |
 
-## October 10: longer gameplay exposes a real-mode fetch dip
+## October 10: demand-fetch implementation and later gameplay
+
+Newest timestamp-selected gameplay is **49,639,177 U+V retirements / 100M
+clocks = 0.49639177 IPC**, cycles 2.6B–2.7B on unchanged `86731249`. The exact
+endpoint images show the nailgun view advancing from the red wall target to a
+door. Source/runtime/native identity, raw pixel equality and no OOM are checked
+in `external/tmp/ventium-l2-gameplay.VedZVnwA/latest-2700000000/audit.json`.
+All 15 consecutive windows from 1.2B now average **0.47400567**; the real-mode dip
+is retained and sustained ≥0.48 is still unproved. This does not replace the
+original predeclared 1.2B–1.3B gate or count as timedemo completion.
+
+The [16-bit demand-fetch candidate](../verif/fe_pipe/SFETCH16_DEMAND.md) reuses
+the checked length decoder and existing request owner, fetching four bytes at
+a time only inside the previously legal 16-byte extent. True page/CS/wrap
+boundaries stay byte-exact. No opcode/guest-specific rule, extra cache port,
+global 16-bit pairing enable or U-only fallback is introduced.
+
+Model `3dcf4cbb`: 2,880 fixtures / 11,520 A/B measurements pass full QEMU traces;
+another 360 cache-enabled fixtures / 1,440 measurements and 88 exact fetch-fault
+checks pass. A cache-enabled real-mode short loop falls 89→58 clocks; four long
+prefix cases in the larger matrix add one clock per warm loop. These are not
+gameplay or CoreMark gains. Generic verification remains FAIL on 101 terminal
+lengths and four timing bands, with no earlier field mismatches; all 20 cycle
+record streams match the control. Detailed limits and receipts are in the note.
+
+Source-matched SoC `958f7ec4` preserves the measured parent's repaired 256 KiB L2,
+P5 L1s, posted16 and UV-fast configuration, adding only demand fetching plus
+the estimator-width reduction. Its cold full Quake run uses unchanged media
+and completion criteria. Native PID 201252 on CPU27 is independently audited
+under invocation `dc6c0bb3294b4056a2015a9a29ab9c21`, with 244 source pins and
+17 runtime pins, no STEP/snapshot and no OOM. **Neither new model has a gameplay measurement**;
+no standard-suite or FPGA acceptance is claimed. C1 and RET remain independent,
+unpromoted candidates. Closed microcase data is losslessly archived, byte-
+verified before deleting unpacked copies; source snapshots and receipts remain.
+
+## Earlier October 10: longer gameplay exposes a real-mode fetch dip
 
 The newest timestamp-selected window is **48,007,471 U+V retirements / 100M
 clocks = 0.48007471 IPC**, cycles **2.4B–2.5B** on unchanged model `86731249`.
