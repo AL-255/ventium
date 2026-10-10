@@ -29,8 +29,11 @@ results below are retained measurements, not tests rerun for this report.
   clocks and original CRCs (closure checked 21:21 UTC). Thus these repairs have
   **0% measured CoreMark throughput cost/gain**. Its matched FPGA source export
   and strict CPU-hierarchy lint pass. Synthesis and the native unplaced audit
-  have closed; implementation is routing and its Quake/Win95 tests continue,
-  with no new bitstream yet. See [the source-matched handoff](../fpga/ZERO_C1_EXPORT.md).
+  have closed; implementation **failed routing at global congestion level 6**
+  (21:27 UTC), with no new bitstream. Its Quake/Win95 simulations continue;
+  a read-only checkpoint diagnostic now confirms **228,422 unrouted nets**
+  and a 138-level cross-subsystem control path before choosing the next fix.
+  See [the source-matched handoff](../fpga/ZERO_C1_EXPORT.md).
 
 **There is no defensible measured “0.16 to 0.54, therefore 3.3× faster FPGA”
 claim.** Those endpoints differ in counter definition, platform, build and
@@ -512,7 +515,7 @@ to multi-issue, all to cache misses, or all to the FPU.
 | Canonical differential gate on latest corrected source | **7/108 functional passes; 12/19 scored cycle failures** | **FAIL**, no masks/goldens/bands waived; directed/native x87 evidence does not replace the gate |
 | Latest `2b4d7a48` own valid-duration CoreMark | **2.101890118 / 2.107616105 CM/MHz**, exact parent ticks, original CRCs, actual V activity, native 0/reaping, no OOM | Both simulated seeds independently closed at 21:21; not complete-suite or FPGA acceptance |
 | Newest matched hardware source | Manifest `b28ce916…`; 190 payloads, 156 hardware defines, 170 non-wrapper native source matches; strict CPU lint | Source/lint pass, **not bitstream or physical pass** |
-| Latest completed synthesis | Source-matched `2b4d7a48` export: **195,617 LUTs**, **21.786 MHz unplaced estimate**, requested 40 MHz core | Implementation running; not routed 40 MHz sign-off |
+| Latest completed synthesis | Source-matched `2b4d7a48` export: **195,617 LUTs**, **21.786 MHz unplaced estimate**, requested 40 MHz core | Subsequent route **FAIL**, congestion level 6 / 900,666 node overlaps; no new bitstream |
 | Win95 on final FPGA | Must cold boot to clean desktop and survive keyboard/mouse, menu/window interaction | **Pending** |
 | Quake on final FPGA | Must complete original timedemo, retain closed result, full unmodified-frame movie, measured clock and UV-fast evidence | **Pending** |
 

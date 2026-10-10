@@ -1,9 +1,9 @@
 # Zero-C1 / BCD-sign FPGA implementation — October 10, 2026
 
-Status at **21:21 UTC**: synthesis, the native clock/structural audit, placement
-and both current-candidate CoreMark seeds are closed; native `impl_1` is routing.
-This is **not** a
-bitstream, timing sign-off, standard-suite pass or physical-board acceptance.
+Status at **21:33 UTC**: both current-candidate CoreMark seeds pass, but native
+`impl_1` **failed routing because of congestion**. There is no new bitstream.
+A separately bounded read-only failure-checkpoint diagnostic has closed;
+this is not timing sign-off, a standard-suite pass or physical-board acceptance.
 
 Latest verified gameplay is **0.49366456 U+V retirement-event IPC** on older
 simulated `bfb867f7`, cycles **5,200,065,237–5,300,065,237**. All 41 consecutive
@@ -109,6 +109,110 @@ The same implementation continues through post-placement physical optimization.
 The prepared read-only auditor now also requires an actual spatial congestion
 report; all 23 helper-policy tests still pass. No timing exception, source edit
 or replacement implementation was used to respond to this warning.
+
+### Native route failure — 21:27 UTC
+
+The implementation closed with native exit **1** after **3,118.35 seconds**.
+`Route 35-3` reports global congestion **level 6**, followed by `Route 35-4445`
+terminating initial routing. No bit/bin or native success marker exists.
+Immutable inputs remain unchanged; peak scope memory is **9,611,210,752 bytes**,
+zero swap, no resource-stop/controller failure and zero observed OOM events.
+This is a genuine routability failure, not an observation timeout or OOM.
+
+The router reports **900,666 node overlaps**, despite its zero failed-net
+counter. That zero must not be treated as successful routing. Global vertical /
+horizontal utilization is 31.97% / 25.37%, while local east/west demand reaches
+106.05% / 104.95%; global averages conceal the local routing pressure.
+
+| Router hotspot | INT tile bounds | Reported maximum congestion |
+|---|---|---:|
+| North, 32×32 | X11Y253–X42Y284 | 93.37% |
+| South, 64×64 | X2Y244–X65Y307 | 92.55% |
+| East, 16×16 | X32Y260–X47Y275 | 106.05% |
+| West, 64×64 | X0Y228–X63Y291 | 104.95% |
+
+The saved `rk_ao486_bd_wrapper_routed_error.dcp` is 77,129,851 bytes, SHA-256
+`5fc8f33a131453e9c9b564d18e80d3306d607d810de95d4b0185d4db37477a00`.
+Closure SHA-256:
+`29306781803ff6e1a7bae5990d58121e5b439263f74221a778a40151f9544dda`.
+Requested clocks remain **40 MHz core / 100 MHz PL**; this failed, overlapping
+route provides no qualified routed Fmax. The earlier unplaced core estimate
+was **21.786 MHz**, not a physical frequency measurement.
+
+After the original family fully exited, a read-only diagnostic opened this
+exact error checkpoint under a fresh exclusive family. It requests route,
+clock, timing, congestion, high-fanout, hierarchical utilization and hotspot
+occupant reports. It does not optimize, route, alter constraints or emit a
+bitstream. Native limit: ten minutes, 12 GiB/no swap with earlier resource
+guards. Root: `ventium-zero-c1-route-failure.uCrakmCQ`; controller invocation
+`1e5d49b232f446dbb990e39062909622`, Vivado family
+`f343a5ce6eb94dd78aa8b072faa81aa4`. This is diagnosis before choosing a fix,
+not another implementation attempt. The successful-route auditor remains
+unlaunched and must not accept this checkpoint as a routed design.
+
+### Closed failure-checkpoint diagnosis — 21:32 UTC
+
+The read-only native diagnostic exits zero in **219.32 seconds**, all 18
+requested reports present, **8,393 pins independently rehashed**, no OOM,
+4,738,441,216-byte observed scope peak and no swap. The diagnostic succeeding
+does not turn the failed implementation into a pass. Closure SHA-256:
+`ff7e0d361a1591988cd84dd4e97bad5e79faa33d215532bec57ae6c3593e9916`.
+
+Native route-state queries say fully placed, **not fully routed**, partially
+routed. `report_route_status` finds **228,422 unrouted nets and only four fully
+routed nets**, explaining why the earlier router's zero failed-net count was
+not a closure result. The report header nevertheless says `Design State:
+Routed`; that header is not a substitute for actual route-status checks.
+
+The same-clock core setup path is now
+`seg_base_reg[0][3]/C -> q_imm_reg[24]/CE`, **138 logic levels**, 48.334 ns data
+delay (9.985 ns logic + 38.349 ns estimated/partial-route delay). The path-local
+setup estimate is **20.594 MHz** under a 25 ns requirement, slack −23.557 ns;
+it is **not a routed Fmax or measured board clock**. Core hold slack is
+−0.125 ns. The actual constraints remain 40/100 MHz.
+
+The netlist path traverses U/prefix decode, V branch prediction, speculative
+memory-chain address/TLB qualification, L1 pair readiness, store snoop,
+REP continuation/writeback control and prefix-EX admission. This identifies a
+cross-subsystem combinational dependency to investigate; it does not prove the
+whole path is simultaneously sensitizable by a legal instruction. No false
+path was added to hide it. Replacing `next_eip` with `q_pc + q_len` is **not** a
+fix: the source already makes exactly that assignment at `core.sv:4021`.
+
+Physical CLB occupancy corroborates where to inspect first:
+
+| Hotspot | Primitive occupants with rebuilt `u_icache` parent | All primitive occupants | Share |
+|---|---:|---:|---:|
+| North | 13,078 | 13,471 | 97.08% |
+| South | 36,016 | 46,483 | 77.48% |
+| East | 4,490 | 4,600 | 97.61% |
+| West | 34,376 | 43,158 | 79.65% |
+
+These are **netlist-name/placement groups**, not a claim that the original
+I-cache RTL owns all those cells: flattened/rebuilt names also contain core
+decode, memory-chain and writeback logic. The regions overlap and cannot be
+summed as separate design area. High-fanout data/address nets include cache
+address arithmetic at **3,031 / 3,014 sinks**, `rpc_use` at 2,417 / 2,356 and
+V-query address bits at 1,849 / 1,848. The 31,468-sink reset is already on a
+BUFGCE and should not be confused with those fabric data nets.
+
+Next repair priorities, **proposed, not implemented or performance-qualified**:
+
+1. Trace the reported address/window cones back to raw-byte gathering and
+   bank/residency selectors. Share/bank local selection and precompute from
+   existing registered ownership where equivalent, rather than replicating
+   thousands of dynamic selects. Retain full P5 caches and UV/fast mode.
+2. Separate state-local admission from unrelated speculative-memory readiness.
+   Prove the relevant owner exclusions before factoring the long
+   memory-chain → store-snoop → REP/writeback → prefix-EX path. Do not blindly
+   register snoops, drop same-cycle invalidation, or add timing exceptions.
+3. Microtest cross-line fetch, cache collisions, paired stores/loads, SMC,
+   prefix/AGI and asynchronous FP overlap for each factored cone; compare
+   CoreMark cycles before choosing another synthesis/implementation. Any
+   pipeline change needs measured CPI cost, not just smaller LUT counts.
+
+The unchanged source-matched guests continue while this evidence guides the
+next RTL work. There is no replacement implementation or board deployment.
 
 ## Current-candidate standard suite
 
