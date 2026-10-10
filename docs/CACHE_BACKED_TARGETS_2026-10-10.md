@@ -5,10 +5,10 @@ U+V retirement-event gameplay IPC**, the error-free standard suite, green
 differential gates, and a working FPGA deployment. U-only/STEP/global slow
 fallbacks are not acceptance. REP retirement events are not P54 macroinstructions.
 
-**Latest verified measurement, 18:04 UTC:** `bfb867f7` reaches **0.52847961 IPC**
-over clocks **4,000,065,237–4,100,065,237**: 40,261,086 U + 12,586,875 V
-retirement events. All 29 consecutive windows from
-1,200,065,237 average **0.496498649**, retaining the **0.34569625** dip at
+**Latest verified measurement, 18:24 UTC:** `bfb867f7` reaches **0.49971398 IPC**
+over clocks **4,100,065,237–4,200,065,237**: 38,406,418 U + 11,564,980 V
+retirement events. All 30 consecutive windows from
+1,200,065,237 average **0.496605827**, retaining the **0.34569625** dip at
 2,100,065,237–2,200,065,237 and every other sub-0.48 interval, including the
 **0.47062856** window at 2,800,065,237–2,900,065,237 and **0.45825794** at
 3,100,065,237–3,200,065,237.
@@ -16,12 +16,12 @@ The margin above 0.48 is now small; this is not a completed-demo average.
 This is the same cache-backed model with
 qualified **2.101890118 / 2.107616105 CM/MHz** below, not a score borrowed from
 another build. Latest raw-pixel/counter/ownership audit:
-`ventium-store-admit-gameplay-r17.NhN4neZA/audit.json`. The latest window is
-0.52847961; all 1,439,846,082 events over 2.9B clocks count. The two added
-windows are 0.52146201 and 0.52847961, selected by timestamp, not IPC.
+`ventium-store-admit-gameplay-r18.JqyiBYi9/audit.json`. The latest window is
+0.49971398; all 1,489,817,480 events over 3.0B clocks count. The added
+window is selected by timestamp, not IPC; the previous 0.52847961 remains.
 Both unchanged-pixel endpoint images show rendered first-person gameplay:
-combat with an enemy and impact particles in a stone room, then a changed
-view toward stairs/a darker passage. Weapon and HUD remain visible.
+a dark stone staircase/passage, then a changed view toward a torch-lit room
+with pickup boxes and the message “YOU GET 2 ROCKETS.” Weapon and HUD remain visible.
 **Historical visual-note
 correction, 15:13 UTC:** earlier notes mistook the left-hand armor value (0)
 for health; health is to the right of the face, consistent with
@@ -127,10 +127,24 @@ parent. Its canonical gate still fails; it is gameplay-unmeasured and not in
 the active hardware export. [Exact correctness boundary](../fp_shared/tb/ROUND_C1.md).
 The combined current-source FP bundle `643bb9e6` now passes **6,336** directed
 arithmetic and masked/register-FST checks, including a separately closed retry
-after an invalid test-port invocation. The unchanged canonical gate runs
-separately. A new 1,920-case unmasked memory-FST witness exposes **448**
-remaining control-model errors; a compact two-file repair is queued, not yet
-qualified. [Exact bundle, failure and repair scope](../fp_shared/tb/FP_CORRECTNESS_BUNDLE.md).
+after an invalid test-port invocation. Its unchanged canonical gate closes
+native 2 / FAIL, with all 20 cycle streams identical to the preceding model.
+A new 1,920-case unmasked memory-FST witness exposes **448** control-model
+errors; the compact two-file repair **`e8253e84` eliminates all 448** and passes
+all 6,192 unmasked/masked/register cases. Its own canonical gate remains red,
+again with all 20 complete cycle streams unchanged. Neither model has gameplay
+or physical FPGA qualification. The exact seven-file full-PC backport
+**`3082ac83`** builds with all 153 parent defines unchanged and all 102
+intersecting core/FP sources matching the directed candidate. Its own two
+short CoreMark diagnostics close successfully with the original CRCs and
+exact parent ticks, **4,767,218 / 4,753,406**, independently audited at 18:29
+UTC. These are not duration-valid scores. Gameplay, the standard suite and
+physical FPGA remain unqualified for this newer model.
+[Exact bundle, failure and repair scope](../fp_shared/tb/FP_CORRECTNESS_BUNDLE.md).
+The next [saved instruction-data selector](../verif/l1/CODE_PAYLOAD.md) passes
+its full-clock five-variant leaf experiment and 2,656 directed full-core QEMU
+comparisons, with 1,328 identical complete cycle pairs. Its canonical gate is
+running; no synthesis/timing gain, gameplay result or deployment is claimed.
 Older timestamped results below remain historical evidence.
 
 The new dip is associated with **more slow-FSM work, not a larger total memory
