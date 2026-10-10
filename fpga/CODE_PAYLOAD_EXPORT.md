@@ -1,16 +1,16 @@
 # Combined FP correctness / code-payload hardware candidate — October 10
 
-Status at **19:12 UTC: UNQUALIFIED, not deployed**. The new full-PC model is
+Status at **19:22 UTC: UNQUALIFIED, not deployed**. The new full-PC model is
 `4fb1bdaedb9f5afc06862a2872f1a07b5feade229da3e1c3127877e6ad8cf764`.
 It combines the [FP correctness repairs](../fp_shared/tb/FP_CORRECTNESS_BUNDLE.md)
 with the [tested code-buffer selector](../verif/l1/CODE_PAYLOAD.md). UV,
 system/relocated fast paths, full P5 L1s, 256 KiB platform L2, posted-16
 transport and the 40 MHz core / 100 MHz PL constraints remain enabled.
 
-The latest separately verified gameplay baseline is **0.46555093 U+V
-retirement-event IPC**, `bfb867f7`, cycles **4,300,065,237–4,400,065,237**.
-All 32 consecutive fixed-start windows average **0.494922360**; the last two
-are below 0.48 and are retained. That older model scored **2.101890118 /
+The latest separately verified gameplay baseline is **0.53765810 U+V
+retirement-event IPC**, `bfb867f7`, cycles **4,500,065,237–4,600,065,237**.
+All 34 consecutive fixed-start windows average **0.496534277**; all earlier
+sub-0.48 windows are retained. That older model scored **2.101890118 /
 2.107616105 CM/MHz**. None of these measurements transfers to this candidate.
 
 ## Exact source and closed checks
@@ -65,9 +65,20 @@ guards applied. Independent `audit.json` rechecks 7,157 input pins, actual
 LUTs, 54,610 registers and unchanged BRAM/DSP count. This is **not an area
 improvement**. Peak resident usage was 8.00 GiB and swap 0.45 GiB.
 There is one critical warning: a generated PS XDC `create_clock` targets an
-unknown port/pin. Actual core/PL clock objects still need the closed-DCP audit.
-Parent frequency was **21.362 MHz unplaced estimate**; no new frequency,
-routed timing or hardware acceptance has been established.
+unknown port/pin. The subsequent closed-DCP audit independently finds the
+correct **40 MHz core / 100 MHz PL** clock objects, no black boxes and no
+MDRV-1/LUTLP-1 structural errors. It does not waive the warning.
+
+Read-only audit root `ventium-code-payload-clock-audit.VcZc4b4c`, invocation
+`85290e96be854cfbafbce0deb77559e9`, closes native 0 in 134.36 seconds, with
+7,163 checked input pins and no OOM. Estimated unplaced frequency improves
+from **21.362 to 22.799 MHz** (setup -18.861 ns, hold -0.101 ns). The worst
+path now runs from EIP to `gpr_reg[4][8]/D`, through 154 logic levels:
+43.650 ns total, 9.909 ns logic plus 33.741 ns estimated routing. **This is
+neither routed 40 MHz sign-off nor measured hardware frequency.** No placement,
+routing, bitstream or board programming was performed. The report-only run
+used a 4 GiB initial disk reserve (previous equivalent reports occupied 57 MiB)
+and unchanged 2 GiB live stop; the synthesis admission remains 12 GiB.
 
 The candidate's own cold standard-suite components are now running, without
 snapshots, guest patches, STEP or pairing suppression:

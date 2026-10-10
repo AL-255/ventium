@@ -5,24 +5,25 @@ U+V retirement-event gameplay IPC**, the error-free standard suite, green
 differential gates, and a working FPGA deployment. U-only/STEP/global slow
 fallbacks are not acceptance. REP retirement events are not P54 macroinstructions.
 
-**Latest verified measurement, 18:50 UTC:** `bfb867f7` reaches **0.46555093 IPC**
-over clocks **4,300,065,237–4,400,065,237**: 36,803,320 U + 9,751,773 V
-retirement events. All 32 consecutive windows from
-1,200,065,237 average **0.494922360**, retaining the **0.34569625** dip at
+**Latest verified measurement, 19:22 UTC:** `bfb867f7` reaches **0.53765810 IPC**
+over clocks **4,500,065,237–4,600,065,237**: 40,429,427 U + 13,336,383 V
+retirement events. All 34 consecutive windows from
+1,200,065,237 average **0.496534277**, retaining the **0.34569625** dip at
 2,100,065,237–2,200,065,237 and every other sub-0.48 interval, including the
 **0.47062856** window at 2,800,065,237–2,900,065,237 and **0.45825794** at
 3,100,065,237–3,200,065,237.
-The latest two windows, **0.47378978 / 0.46555093**, are below 0.48. The
-aggregate remains above it, but this is not a completed-demo average.
+The earlier **0.47378978 / 0.46555093** dips remain; the two new windows are
+**0.50699181 / 0.53765810**. This is not a completed-demo average.
 This is the same cache-backed model with
 qualified **2.101890118 / 2.107616105 CM/MHz** below, not a score borrowed from
 another build. Latest raw-pixel/counter/ownership audit:
-`ventium-store-admit-gameplay-r19.wwkKv23R/audit.json`. The latest window is
-0.46555093; all 1,583,751,551 events over 3.2B clocks count. The added
+`ventium-store-admit-gameplay-r20.Nz0V9AR7/audit.json`. The latest window is
+0.53765810; all 1,688,216,542 events over 3.4B clocks count. The added
 windows are selected by timestamp, not IPC; all earlier measurements remain.
 Both unchanged-pixel endpoint images show rendered first-person gameplay:
-changed views around a stone pillar and torch-lit corridor. Pickup messages
-show “YOU GOT THE NAILS,” then “YOU RECEIVE 25 HEALTH.” Weapon and HUD remain visible.
+changed views in a torch-lit stone corridor, with an enemy/effect in the first
+and a different wall/floor angle in the second. Weapon and HUD remain visible;
+health changes from 98 to 88.
 **Historical visual-note
 correction, 15:13 UTC:** earlier notes mistook the left-hand armor value (0)
 for health; health is to the right of the face, consistent with
@@ -31,12 +32,15 @@ The original r11 audit JSON and pixels remain unchanged; its `visual-correction.
 records this interpretation correction without changing counters or acceptance.
 This visual observation is still not proof of complete render correctness.
 Full timedemo and physical FPGA remain open.
-At **18:57 UTC**, combined FP-corrected/code-selector full-PC model `4fb1bdae`
+At **19:22 UTC**, combined FP-corrected/code-selector full-PC model `4fb1bdae`
 has passed its own short CoreMark seeds with unchanged cycles/CRCs and has an
 exact eight-file FPGA export. Its own 900-iteration CoreMark seeds, cold Quake
-and cold Win95 runs are active, as is one bounded synthesis diagnostic.
+and cold Win95 runs are active. Synthesis and its read-only clock audit have
+closed: 196,627 LUTs and **22.799 MHz unplaced estimate**, not routed sign-off.
 It remains gameplay-unmeasured; canonical verification is still red.
 [Source closure, native owners and acceptance limits](../fpga/CODE_PAYLOAD_EXPORT.md).
+A subsequent [shared-load C1 repair](../fp_shared/tb/FLD_C1.md) fixes 288
+directed failures without adding clocks. It is not yet in that running suite.
 At **15:43 UTC**, this model's roughly 900M-clock Win95 capture shows a readable
 Welcome window, normal pointer, desktop icons and taskbar, with no visible
 error. The run was then closed normally at **905,565,475 clocks**: native exit
