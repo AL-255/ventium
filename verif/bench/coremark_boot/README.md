@@ -106,10 +106,11 @@ The independent 7M–11M steady benchmark interval has
 is 4.65% of all clocks, already inside S_PIPE; do not add it again. This is a
 residency description, not a proven cache-miss or causal-savings breakdown.
 
-Current verified **gameplay** IPC is **0.47794855**, model `958f7ec4`, clocks
-1,500,048,811–1,600,048,811, below 0.48 in this latest window.
-The fixed first window remains 0.49741357; all four consecutive 100M windows
-beginning 1,200,048,811 average 0.4908371775. Real V retirements and raw
+Current verified **gameplay** IPC is **0.49038392**, model `958f7ec4`, clocks
+1,700,048,811–1,800,048,811.
+The fixed first window remains 0.49741357; all six consecutive 100M windows
+beginning 1,200,048,811 average 0.489820525, including the earlier 0.47794855 dip.
+Real V retirements and raw
 endpoint frames are checked; no intervening window is excluded. This is not complete timedemo
 or physical-board qualification. New private FST/C1/RET/sharing derivatives
 remain unmeasured in gameplay; generic differential and full-suite work remain
@@ -132,6 +133,14 @@ reproduces both exact results with verified single-CPU child affinity, native
 exit 0, all children reaped, stable source/media pins and no OOM:
 `external/tmp/ventium-prefix66-system-soc.uLbhxUAh/coremark-r3/audit.json`.
 Generic differential failures remain; this is not standard-suite acceptance.
+
+The independently added exact-byte RET capture (`1cad4e49`) saves only
+**520 / 247** more TSC clocks in this SoC: **1.994919737 / 1.999681651** short
+ratios, **0.010374% / 0.004939%** throughput gain. It preserves both five-CRC
+sets and closes native 0 with explicit CPU 3 affinity, no OOM, 285 stable pins
+and retained successful supervisor. Receipt:
+`external/tmp/ventium-prefix66-ret-soc.B0860bF9/coremark/audit.json`.
+The earlier standalone RET percentage must not be projected onto this build.
 
 ### Every-clock diagnostic: 7M–8M
 
@@ -187,3 +196,33 @@ slice would cover only 4.6460% of its clocks; it is not by itself a demonstrated
 route from the current short ratio to 2.1, nor proof that those waits are cache
 misses. Preserve the small existing RET and write-buffer experiments as
 independent A/B changes rather than crediting them with this whole gap.
+
+### Prefix + RET every-clock follow-up
+
+`external/tmp/ventium-prefix-ret-state.qeLjIB2y` closes native 0 in 98.48 seconds,
+same **5,012,733** performance-seed ticks and all CRCs. The one-million-clock
+7M–8M archive is lossless (353,919,689 raw bytes, 22,109,553 compressed), not a
+full internal-state dump. Its independent analysis reconciles every clock,
+including the new 17,634 paid prefix-D1 clocks. CoreMark event IPC is 0.722772,
+**not gameplay IPC**. Equal-time slices execute different amounts of work, so
+their residency differences are not themselves causal percentage gains.
+
+Joining the actual pre-edge `VENSTATE` and `VENL1` records identifies a more
+specific target: **all 39,341 pipeline load-wait clocks** in this slice have an
+asserted cacheable read, no L1 ACK, idle L1 FSM, and a resident tag hit.
+All 7,358 pipeline store waits likewise see a resident hit. These match the
+independent pipeline counters exactly: they are **hit-service latency, not
+cache misses** in this window. Another 5,591 slow-load clocks have that same
+resident-read wait; only seven observed request-wait clocks have a different
+fill/nonresident classification. This does not establish that every wait is
+removable, or that no other phase has cache misses.
+
+The two hottest pipeline read sites are `10d66` and `10ef2`, both
+`mov 4(%eax),%edx`, with 5,296 and 4,476 wait clocks. Each follows a conditional
+branch in a list traversal. The current raw-decoder early-read helper accepts
+an unpaired V descriptor, but explicitly excludes branch-successor priming;
+the older branch option requires the disabled uop cache and cannot simply be
+enabled here. Investigate a checked fallthrough read using existing returned
+instruction bytes and the existing resident-only query port. Preserve outcome,
+GPR-address dependencies, permissions, events and invalidation ownership;
+do not issue speculative AXI reads or add a whole decoder/cache to bypass them.

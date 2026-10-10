@@ -2,12 +2,12 @@
 
 This is **UNQUALIFIED source preparation**, not a bitstream, timing pass or
 transfer of simulation acceptance to silicon. Latest verified Quake gameplay
-is **0.47794855 total U+V retirement-event IPC**, demand-fetch SoC model
-`958f7ec4`, clocks **1,500,048,811–1,600,048,811**, now below 0.48 in this
-latest interval. All four consecutive 100M windows from 1,200,048,811 average
-**0.4908371775**; the 0.49741357, 0.49761630, 0.49037029 and 0.47794855
-windows are all retained. Latest audit: `ventium-sfetch16-latest-r2.W3nHm6Cg/audit.json`,
-47,794,855 events (36,895,706 U + 10,899,149 V), raw advancing combat/pickup frames,
+is **0.49038392 total U+V retirement-event IPC**, demand-fetch SoC model
+`958f7ec4`, clocks **1,700,048,811–1,800,048,811**. All six consecutive 100M
+windows from 1,200,048,811 average **0.489820525**: 0.49741357, 0.49761630,
+0.49037029, 0.47794855, 0.48519052 and 0.49038392. The sub-0.48 interval is
+retained. Latest audit: `ventium-sfetch16-latest-r3.NdYg8m3Q/audit.json`,
+49,038,392 events (37,988,356 U + 11,050,036 V), raw advancing combat/explosion frames,
 stable pins/native identity and no OOM. This does not replace the fixed first
 gate **0.49741357**, clocks **1,200,048,811–1,300,048,811**. Its original pre-run plan
 selects periodic samples12/13, not zero-offset interpolated clocks.
@@ -38,6 +38,18 @@ now completes both short CRC diagnostics on this exact cache-backed SoC:
 **1.96212548 / 1.96640592 CM/MHz**. Both minimum-duration errors remain visible;
 neither ratio is a valid score or a 2.1 target pass. This uses GCC 13.4 and a
 bare-metal stack port, not the older GCC 13.3/Linux-user image.
+
+The protected-client PREFIX66 private derivative `320c4232` now measures
+**1.994712814 / 1.999582887** on the same short bootable diagnostics, both CRC
+sets correct. It has started its own cold Quake run on CPU 6, service
+`ventium-prefix66-quake-oct10.service`, invocation
+`2e3e2dd5c8064373926d93d42703ac55`; actual native PID 516043, pinned model,
+single-CPU affinity, UV/system/relocated fast load/store mode and unchanged
+original demo1 disk are recorded. No snapshot, STEP or guest modification.
+It remains gameplay-unmeasured and is **not included in this FPGA export**.
+The retained supervisor and original 969-frame completion criterion stay in
+force. The additional RET experiment `1cad4e49` saves only 520/247 clocks here,
+not its older standalone gain; neither experiment is a duration-valid score.
 
 Cold deployment now uses the checked-owner lifecycle helpers described in
 [COLD_LIFECYCLE.md](board-tools/COLD_LIFECYCLE.md). Their host tests and the

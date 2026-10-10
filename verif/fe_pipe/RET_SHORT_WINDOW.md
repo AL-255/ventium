@@ -1,9 +1,10 @@
 # Exact-byte near-RET capture — October 10
 
 **Private, unpromoted candidate; directed comparisons pass, short CoreMark improves.**
-Latest verified gameplay is **0.48007471 total U+V IPC**, model `86731249`,
-clocks 2.4B–2.5B, predating this and the pending x87 C1 repair. The complete
-1.2B–2.5B observed aggregate is **0.47084103**, below the sustained target. Full direct-memory
+Latest verified gameplay is **0.49038392 total U+V retirement-event IPC**, model
+`958f7ec4`, clocks 1,700,048,811–1,800,048,811. All six consecutive windows from
+1,200,048,811 average 0.489820525, including the earlier sub-0.48 dip.
+This newer parent still excludes RET and the pending x87 C1 repair. Full direct-memory
 CoreMark on `b5453f16` is 2.107843209/2.110905243 CM/MHz, not a cache/FPGA score.
 
 The [complete CoreMark backend cycle comparison](../bench/COREMARK_BACKEND_DIAGNOSTIC.md)
@@ -127,3 +128,34 @@ existing hard cycle failures (`mb_depadd`, `mb_indepadd`, `mb_dmiss`,
 candidate `generic-r2.log`, invocation `7a1c4d527e494207ba778c8e5a507c40`.
 The earlier launcher failed before the gate because systemd lacked the compiler
 path; R2 pins it explicitly. Neither attempt rebuilt the canonical core model.
+
+## Actual bootable SoC follow-up: much smaller gain
+
+`ventium-prefix66-ret-core.QiUDj04M` applies only this recipe/define to the
+separately tested protected-PREFIX66 core. Model **80b0937d**, native build 0,
+strict structural checks and unchanged pins. The complete C3/C2 matrix again
+passes 256 fixtures × 2 AXI latencies on both models: 1,024 architectural
+comparisons plus the corresponding cycle runs. Of 512 matched totals, 160
+improve and 352 equal; none regress. The first matrix launcher omitted the
+build guard's required `--` and exited 2 before testing; the separately retained
+R2 runs the real guard and closes 0 in 29.94 seconds, invocation
+`86b4245dc5944f05bb26c32982f42ded`.
+
+Bootable SoC **1cad4e49**, root `ventium-prefix66-ret-soc.B0860bF9`, changes
+only this core capture predicate/define relative to prefix parent 320c4232.
+Native build 0, same 98 inherited platform structural warnings, no new ones.
+Its actual ten-iteration cold CoreMark results are:
+
+| Seed | Prefix parent TSC clocks | With RET capture | Clocks removed | Throughput gain |
+| --- | ---: | ---: | ---: | ---: |
+| Performance | 5,013,253 | 5,012,733 | 520 | 0.010374% |
+| Validation | 5,001,043 | 5,000,796 | 247 | 0.004939% |
+
+Both CRC sets and native exits pass; explicit CPU3 affinity, no OOM,
+all children reaped and 285 stable pins are independently audited in
+`coremark/audit.json`. Supervisor invocation
+`56af5381ba0c445f84994960735bef27` is retained exited 0/MainPID 0.
+These **1.994919737 / 1.999681651** short CM/MHz ratios are below 2.1 and
+not duration-valid scores. Do not reuse the earlier standalone 1.04% gain
+for this different parent/backend. No gameplay or FPGA measurement exists
+for this derivative. No additional standard-suite claim is made.

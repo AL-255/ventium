@@ -1,9 +1,9 @@
 # Protected-client prefix fast path — October 10
 
 **Private candidate only; not standard-suite or FPGA acceptance.** Latest
-verified gameplay is **0.47794855 total U+V retirement-event IPC**, parent
-`958f7ec4`, clocks 1,500,048,811–1,600,048,811. All four consecutive 100M
-windows from 1,200,048,811 average **0.4908371775**, retaining the new dip.
+verified gameplay is **0.49038392 total U+V retirement-event IPC**, parent
+`958f7ec4`, clocks 1,700,048,811–1,800,048,811. All six consecutive 100M
+windows from 1,200,048,811 average **0.489820525**, retaining the earlier dip.
 The new prefix candidate has no gameplay measurement. Cache-backed CoreMark
 parent short ratios remain 1.96212548/1.96640592, not duration-valid scores.
 
@@ -110,3 +110,40 @@ boundary fixtures, unchanged user/default-off regression, generic gate repair,
 both full CoreMark seeds, Win95 desktop, complete Quake timedemo, current
 gameplay measurements and hardware area/timing/deployment. No snapshot or
 guest-specific workaround is introduced by this proposal.
+
+## Boundary tests and cold Quake follow-up
+
+`prefix66-boundary.S` / `run-prefix66-boundary.py` add ordinary-reset RAM-code
+probes for mapped page crossings, an absent instruction-tail page which the
+guest #PF handler maps and retries, a CS-truncated immediate, and a CPU-store
+SMC revisit at the same EIP. These are actual architectural deliveries/stores,
+not forced token inputs. Flat and relocated clients run against both models
+with AXI latency 0/7 and complete untrimmed traces in both observer modes.
+
+**The aggregate boundary gate is not green.** The initial `boundary/` run
+passes six of eight fixtures but both CS-limit fixtures fail the ordinary
+QEMU self-check, exit 135 rather than 133. A separate `cs-limit-diagnostic/`
+records both RTL models correctly delivering exactly one #GP(0), preserving
+the faulting AX and younger EBX, and closing 133. QEMU executes beyond that CS
+limit instead; it cannot serve as this case's differential oracle. This is
+retained as a failed oracle case, not a masked architectural comparison.
+
+`boundary-mapped/` expands the other three classes: **18/22 fixtures pass**,
+72 complete architectural comparisons plus 72 cycle runs, including actual
+page-tail #PF recovery and four observed prefixed V retirements. Four SMC
+fixtures (offset 4094/4095, both bases) fail native QEMU's self-check before
+RTL grading. At offset 4094 the native QEMU instruction log re-executes old
+immediate 1234 after the store to 4321; the GDB-stepped golden and both native
+RTL models execute 4321 and complete 133 (`smc-diagnostic/`). This demonstrates
+an execution-mode-sensitive oracle problem, not proof of its full root cause.
+No successful single-stepped oracle result substitutes for failed free-running
+QEMU acceptance. Source, failed logs and complete diagnostic traces remain.
+
+The prefix-only SoC has now started a fresh ordinary cold Quake run:
+`ventium-prefix66-system-soc.uLbhxUAh/quake-cold-prefix66-oct10.1`;
+service `ventium-prefix66-quake-oct10.service`, invocation
+`2e3e2dd5c8064373926d93d42703ac55`, actual native PID 516043 on CPU 6.
+The full compiled closure, unchanged media, real affinity and UV-fast mode
+are pinned; the supervisor is retained after exit. Its first IPC window is
+preselected at periodic samples 12/13, retaining every subsequent consecutive
+window. **No gameplay result, completed timedemo or suite pass yet.**
