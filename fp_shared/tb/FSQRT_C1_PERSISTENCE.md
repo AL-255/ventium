@@ -54,3 +54,8 @@ The [expanded 912-case observation](SRT_ROUND_FLOOR.md) confirms456 C1 errors
 and independently finds a reduced-precision SRT exponent double-carry bug.
 Its proposed value-only patch is uncompiled/unpromoted; the live FPGA export
 and measured gameplay model remain unchanged.
+
+The separate [compact round-direction proposal](ROUND_C1.md) reuses the
+existing retained bit before/after rounding. Its independent integer-oracle
+leaf is queued; propagation through actual arithmetic/SRT ownership and
+full-core qualification remain required.

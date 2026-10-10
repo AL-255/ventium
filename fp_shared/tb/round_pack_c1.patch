@@ -1,0 +1,126 @@
+diff --git a/rtl/fpu/fpu_x87_pkg.sv b/rtl/fpu/fpu_x87_pkg.sv
+index 118c77ec..39792117 100644
+--- a/rtl/fpu/fpu_x87_pkg.sv
++++ b/rtl/fpu/fpu_x87_pkg.sv
+@@ -124,7 +124,10 @@ package fpu_x87_pkg;
+   //     smallest normal sets neither UE-only-without... — exactly per softfloat.
+   // For IN-RANGE results (biased exp 1..0x7FFE) this is bit-identical to the
+   // prior normal-only packer, so the existing normal-operand corpus is unchanged.
+-  function automatic logic [82:0] fx_round_pack_f(  // {oe, ue, pe, floatx80[79:0]}
++  // C1 is the actual magnitude increment after tie-even correction. Reuse
++  // the retained LSB before/after the existing add and mask; do not duplicate
++  // the rounding datapath or mistake an inexact downward result for round-up.
++  function automatic logic [83:0] fx_round_pack_c1(  // {rounded_up, oe, ue, pe, floatx80[79:0]}
+       input logic         sign,
+       input logic signed [31:0] unbiased,
+       input logic [127:0] sig,
+@@ -143,11 +146,13 @@ package fpu_x87_pkg;
+     logic [63:0]  rmask, rincr, rbits, sigp;
+     logic signed [31:0] expp;
+     logic         rcarry;
++    logic         before_lsb, rounded_up;
+     begin
+       oe=1'b0; ue=1'b0; pe=1'b0; handled=1'b0; res=83'd0;
++      before_lsb=1'b0; rounded_up=1'b0;
+       rne = (rc==2'd0);
+       if (sig==128'd0) begin
+-        fx_round_pack_f = {3'b000, fx_make(sign, 15'd0, 64'd0)};
++        fx_round_pack_c1 = {4'b0000, fx_make(sign, 15'd0, 64'd0)};
+       end else begin
+         // align the MSB (integer bit) to bit127: frac[127:64]=zSig0, [63:0]=zSig1.
+         msb = 0;
+@@ -182,15 +187,18 @@ package fpu_x87_pkg;
+                                  (((sigp & ((64'd1 << sh) - 64'd1)) != 64'd0) ? 64'd1 : 64'd0);
+             rbits = sigp & rmask;
+             if (rbits != 64'd0) begin pe=1'b1; if (isTiny) ue=1'b1; end
++            before_lsb = (pc==2'b10) ? sigp[11] : sigp[40];
+             sigp = sigp + rincr;
+             expp = sigp[63] ? 32'sd1 : 32'sd0;                      // up to smallest normal?
+             if (rne && ((rbits << 1) == (rmask + 64'd1))) rmask = rmask | (rmask + 64'd1); // tie->even
+             sigp = sigp & ~rmask;
++            rounded_up = before_lsb ^ ((pc==2'b10) ? sigp[11] : sigp[40]);
+             res  = {oe,ue,pe, fx_make(sign, expp[14:0], sigp)};
+           end else if ((expp > 32'sd32766) ||
+                        ((expp == 32'sd32766) && ((sigp + rincr) < sigp))) begin
+             // ---- OVERFLOW ----
+             oe=1'b1; pe=1'b1;
++            rounded_up = (rc==2'd0) || (rc==2'd1 && sign) || (rc==2'd2 && !sign);
+             if (rc==2'd0 || (rc==2'd1 && sign) || (rc==2'd2 && !sign))
+               res = {oe,ue,pe, fx_make(sign, 15'h7FFF, INFM)};      // signed Inf
+             else
+@@ -198,15 +206,17 @@ package fpu_x87_pkg;
+           end else begin
+             // ---- NORMAL (in-range) ----
+             if (rbits != 64'd0) pe=1'b1;
++            before_lsb = (pc==2'b10) ? sigp[11] : sigp[40];
+             sigp   = sigp + rincr;
+             rcarry = (sigp < rincr);                                // carry out of bit63
+             if (rcarry) begin expp = expp + 32'sd1; sigp = INFM; end
+             if (rne && ((rbits << 1) == (rmask + 64'd1))) rmask = rmask | (rmask + 64'd1); // tie->even
+             sigp = sigp & ~rmask;
++            rounded_up = before_lsb ^ ((pc==2'b10) ? sigp[11] : sigp[40]);
+             if (sigp == 64'd0) expp = 32'sd0;
+             res = {oe,ue,pe, fx_make(sign, expp[14:0], sigp)};
+           end
+-          fx_round_pack_f = res;
++          fx_round_pack_c1 = {rounded_up, res};
+         end else begin
+           // ============ EXTENDED (64-bit, PC=11/01) — BYTE-IDENTICAL TO BEFORE ============
+           // round increment (softfloat precision80 rule).
+@@ -220,6 +230,7 @@ package fpu_x87_pkg;
+           if ( (zExp > 32'sd32766) ||
+                (zExp == 32'sd32766 && zSig0==ALL1 && incr) ) begin
+             oe=1'b1; pe=1'b1;
++            rounded_up = !((rc==2'd3) || (!sign && rc==2'd1) || (sign && rc==2'd2));
+             if (rc==2'd3 || (!sign && rc==2'd1) || (sign && rc==2'd2))
+               res = {oe,ue,pe, fx_make(sign, 15'h7FFE, ALL1)};   // max finite magnitude
+             else
+@@ -246,30 +257,47 @@ package fpu_x87_pkg;
+               2'd2:    incr = !sign && (zSig1 != 64'd0);
+               default: incr = 1'b0;
+             endcase
++            before_lsb = zSig0[0];
+             if (incr) begin
+               zSig0 = zSig0 + 64'd1;
+               if (rne && ((zSig1 << 1) == 64'd0)) zSig0 = zSig0 & ~64'd1;  // ties to even
+               if (zSig0[63]) zExp = 32'sd1;               // rounded up to smallest normal
+             end
++            rounded_up = before_lsb ^ zSig0[0];
+             res = {oe,ue,pe, fx_make(sign, zExp[14:0], zSig0)};
+             handled=1'b1;
+           end
+           // ----- NORMAL (in-range) -----
+           if (!handled) begin
+             if (zSig1 != 64'd0) pe=1'b1;
++            before_lsb = zSig0[0];
+             if (incr) begin
+               zSig0 = zSig0 + 64'd1;
+               if (zSig0 == 64'd0) begin zExp = zExp + 32'sd1; zSig0 = INFM; end
+               else if (rne && ((zSig1 << 1) == 64'd0)) zSig0 = zSig0 & ~64'd1;
+             end else if (zSig0 == 64'd0) zExp = 32'sd0;
++            rounded_up = before_lsb ^ zSig0[0];
+             res = {oe,ue,pe, fx_make(sign, zExp[14:0], zSig0)};
+           end
+-          fx_round_pack_f = res;
++          fx_round_pack_c1 = {rounded_up, res};
+         end
+       end
+     end
+   endfunction
+ 
++  // Keep the original value/exception ABI; only status-owning clients need C1.
++  function automatic logic [82:0] fx_round_pack_f(
++      input logic sign,
++      input logic signed [31:0] unbiased,
++      input logic [127:0] sig,
++      input logic pre_inexact,
++      input logic [1:0] rc,
++      input logic [1:0] pc);
++    logic [83:0] packed_c1;
++    packed_c1 = fx_round_pack_c1(sign, unbiased, sig, pre_inexact, rc, pc);
++    return packed_c1[82:0];
++  endfunction
++
+   // Backward-compatible {inexact, floatx80} wrapper (inexact == PE). Callers that
+   // don't need OE/UE (the iterative SRT/sqrt engines, FILD's fx_from_int) keep
+   // using this; the value is fully overflow/underflow-correct via fx_round_pack_f.
