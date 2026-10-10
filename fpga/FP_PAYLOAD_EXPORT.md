@@ -294,8 +294,11 @@ fixtures pass **1,680 full x87/system QEMU comparisons and 840 identical
 complete cycle streams**, with actual V retirement and unchanged wide/fallback
 counts. Supervisors `c92823e7a89c48a28b9b3511e76b2396` and
 `1591687c89474324aee039c8036ad6e9`; native 0, 42.33 / 11.86 seconds, stable
-inputs and reaped children. The unchanged canonical gate is running separately;
-directed A/B equality does not waive its inherited failures.
+inputs and reaped children. The unchanged canonical gate closes **FAIL**,
+native 2, supervisor `5f86edba36a046559f042d9d6188a806`, retaining its inherited
+functional/cycle-band failures. Its independent audit rechecks **4,115 input
+pins** and confirms all **20 complete cycle-kernel record lists** equal the
+parent. Directed A/B equality does not waive these failures.
 
 Full-PC model `03921cdaad0ffe8a58983f876f0e210a3f67d56c82fdc68c7b7e6e8f4083913d`,
 root `ventium-fp-high-payload-soc.QNszcvUZ`, builds native 0 in 20.32 seconds
@@ -318,4 +321,22 @@ the exact prior profile and forbidding partial/substituted bundles. The first
 independent auditor expected both old/new boundary-driver aliases; actual pins
 contain only the new runner. Inspection confirmed the old runner is ancestry,
 not a new build input; the exact expected alias set was corrected, not broadened.
-The hardware CPU lint is serialized behind the canonical generic gate.
+The first hardware-lint attempt timed out at 240 seconds while waiting for
+the shared build lock, without running lint. That failure remains under
+`ventium-fp-high-payload-hw-lint.FeKIS6Hd`. R2 acquires the same guard before
+starting the unchanged 240-second native cap. It closes native 0 in **2.39
+seconds** with all 153 defines, all six structural error classes fatal and
+stable inputs: `ventium-fp-high-payload-hw-lint-r2.fWKUtiUU`, supervisor
+`7d3a7784aecc487e84fbebcdb9bd5e43`. This is not whole-platform lint.
+
+One new synthesis-only run starts at **15:38 UTC** in
+`ventium-fp-high-payload-full-synth.84VF0WGn`, controller
+`9376eccefc6d4500a830de70f86b9b4a`. The exclusive Vivado family retains
+8 GiB RAM / 6 GiB swap, a 30-minute native cap, 12 GiB starting disk reserve
+and live reserve checks. A pinned waiter requests only the independent
+read-only clock/DCP audit after successful native closure; no placement,
+routing or board operation is authorized by these controllers. This candidate
+has no synthesis result yet. Old closed compiler intermediates were archived,
+compared and hash-checked before removal; all sources, executables, private
+harness objects and evidence remain. Those four recoverable archives reclaimed
+703,103,000 bytes without lowering the disk reserve.
