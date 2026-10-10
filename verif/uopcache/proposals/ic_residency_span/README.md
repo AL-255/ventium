@@ -2,18 +2,21 @@
 
 This directory proposes replacing repeated sequential-span tag queries with
 the existing `ic_front_a/b` probes. It does not change `rtl/core/core.sv`, the
-running/frozen FPGA candidate, byte selection, cache geometry, fill sequencing,
-or read-port ownership. The root-owned helper/caller miter has now passed;
-production integration, hardware area, routing, timing, and gameplay benefits
-remain unverified/unmeasured.
+previous performance candidate, byte selection, cache geometry, fill sequencing,
+or read-port ownership. Private integration and isolated area measurement are
+now closed below; production rollout, whole-chip area, routing, timing and
+gameplay benefits remain unverified/unmeasured.
 
-**October 10 update:** the three presence-call assignments now have a private,
-default-off integration, exact extracted-caller four-state checks, full-core
-directed checks and an isolated native area comparison. See
+**October 10 update:** the three presence-call assignments and 15 buffered
+presence call sites now have a private, default-off integration, exact
+extracted-caller four-state checks, full-core directed checks, identical short
+CoreMark cycles and an isolated native area comparison (66.0% local LUT
+reduction). The exact derivative is exported for a 40 MHz FPGA diagnostic. See
 [`docs/FPGA_FETCH_CONGESTION_2026-10-10.md`](../../../../docs/FPGA_FETCH_CONGESTION_2026-10-10.md)
 for results and limitations. The generic gate remains red. This is not a
-production/whole-chip/standard-suite acceptance claim; buffered substitutions
-below remain unconnected. The historical October 4 result and command below
+production/whole-chip/standard-suite acceptance claim. Buffered substitutions
+below are wired only in the private derivative, not checkout RTL. The historical
+October 4 result and command below
 are retained as provenance, not the current temporary-directory recipe.
 
 For new work use `run_integrated_miter.py --core <frozen-core.sv> --out <new-dir>`
@@ -24,6 +27,25 @@ bodies and pins all source inputs. The closed October 10 service used 512 MiB
 RAM, zero swap, 16 tasks, 200% CPU quota and a 150-second wall cap. It does not
 modify the supplied core. `test_prepare_integration.py` checks transformation
 guards without building a processor.
+
+For the expanded private derivative apply `prepare_integration.transform`
+first, then `prepare_buffered_integration.transform`. Run
+`run_buffered_miter.py --parent <closed-first-stage-miter> --out <new-dir>`
+under a retained 512 MiB/no-swap/240-second service. It extracts all 15 guarded old/new
+call sites and covers all five distinct buffered expressions; it does not
+substitute a detached helper for the real caller test. Both bypass variants
+close 9,962,240 comparisons each. Run both preparation test modules together:
+
+```sh
+TMPDIR=/home/yukidama/external/tmp python3 -B -m unittest discover \
+  -s verif/uopcache/proposals/ic_residency_span -p 'test_prepare*py'
+```
+
+All 13 tests pass. The 145-define full-PC derivative `89b68b62` is distinct
+from the duration-valid CoreMark model `bfb867f7`; its ten-iteration cycle
+identity does not inherit the latter's qualified scores. Current verified
+gameplay is parent `958f7ec4`: 0.50588294 at clocks 3,300,048,811–3,400,048,811;
+both newer models remain gameplay-unmeasured.
 
 ## Intended substitutions
 

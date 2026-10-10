@@ -4,8 +4,14 @@ Latest verified gameplay baseline is `958f7ec4`, **0.50588294** U+V event IPC
 at 3,300,048,811–3,400,048,811 clocks. All 22 consecutive 100M windows from
 1,200,048,811 average **0.4817253664**; no low window is excluded. Audit:
 `ventium-sfetch16-latest-r10.8YGncnX4/audit.json`. Full timedemo remains unfinished.
-Newer combined benchmark model `bfb867f7` and this area experiment are
+Newer combined benchmark model `bfb867f7` and area model `89b68b62` are
 gameplay-unmeasured. REP events are not exact P54 macroinstructions.
+
+The expanded sharing stage below removes **66.0% of the measured local LUT
+cone**, with identical directed and short CoreMark cycles. This is not a
+whole-chip area or speedup claim. Full synthesis of its exact 40 MHz hardware
+export is now a separately bounded diagnostic; generic verification and
+full-suite/hardware acceptance remain open.
 
 ## Native checkpoint diagnosis
 
@@ -59,8 +65,8 @@ guards are retained. Speculative zero lengths still query the previous byte;
 unknown lengths keep the original four-state behavior.
 
 No cache capacity, memory port, register, latency, prediction, byte-selection,
-arbitrary-target lookup, LRU policy or permission rule is changed. The proposed
-buffered-lookup substitutions are **not yet integrated**. Disabled mode keeps
+arbitrary-target lookup, LRU policy or permission rule is changed. At this first
+stage, buffered-lookup substitutions were not integrated. Disabled mode keeps
 the original three expressions. Non-BRAM mode is not an admitted enabled profile.
 This experiment is not included in the model running the long standard tests
 or the `bfb867f7` FPGA export.
@@ -126,3 +132,99 @@ differently. Full-core area, routed frequency and gameplay benefit remain
 unmeasured. No DCP or bitstream was produced. The long CoreMark/Win95/Quake
 tests on `bfb867f7` continue unchanged; this separate experiment is not promoted
 to their candidate or to production RTL by the local result.
+
+## Expanded stage: buffered-presence sharing
+
+`prepare_buffered_integration.py` uses the same default-off
+`VEN_IC_RESIDENCY_SPAN` flag after the first stage. It replaces **15 actual
+call sites / five distinct expressions**: direct `flin` (seven), the 16-byte
+window end (three), decoded-length end (three), short-hint end (one) and
+`flin+1` (one). Original non-lookup guards, arithmetic, returned `(set,way)`
+identity, collision checks and disabled branches are retained. The tool
+refuses changed counts, window geometry or length widths. Arbitrary-target
+queries, ports/state/latency/byte selection and permissions are unchanged.
+
+Closed evidence, all under `/home/yukidama/external/tmp/`:
+
+- `ventium-ic-buffered-leaf.ovK4JNrt/leaf`: actual old/new callers extracted
+  into the four-state miter; **9,962,240 comparisons per bypass configuration**,
+  19,924,480 total, native 0, reaped children, observed affinity, stable pins,
+  no OOM, 66.01 / 46.58 seconds. The documented test-only Icarus input-refresh
+  limitation remains; fixed-address event sensitivity is not proved.
+- **13 preparation tests** pass. Initial preflight found that the `flin+1`
+  caller starts an OR expression rather than following `&&`. The extractor
+  check and test were corrected before preparing the tested candidate; no
+  production guard was changed.
+- `ventium-ic-buffered-core.lC2f4l2d`: directed core **`90239d23`**, 32 bounded
+  compiler jobs, six fatal structural classes, native 0 and stable pins.
+  The 256 cold paged fixtures close **1,024 complete QEMU comparisons + 1,024
+  cycle runs** in 48.29 seconds. All 512 matched **entire instruction-cycle
+  lists** are identical, with actual V-retirement witnesses.
+- Default-off full preprocessing matches the parent token-stream SHA
+  `f3580892ac716281fbd9033a1c7f3619e20ad6d52b97671033d51f6f060c9c5c`.
+  The first whitespace-only check failed on one added leading marker comment;
+  its script/output remain. Distinct `disabled-preprocess-r2.json` explicitly
+  checks/removes only that exact comment and ignores whitespace. No RTL token
+  or architectural trace is masked.
+- Generic UV/AXI gate again **red**, native 2: **7 functional passes / 101
+  failures**, plus cycle-band failures. Directed passes do not repair or waive
+  its terminal/bounded-observation contract.
+- `ventium-ic-buffered-soc.gsztNdDc`: full-PC **`89b68b62`**, native build 0
+  (15.13 compiler seconds), matching private C++/generated-header ownership,
+  145 defines, unchanged 98 inherited platform structural warnings. All
+  intersecting processor sources match the directed build.
+- Its independently checked `coremark/audit.json`: both **10-iteration
+  diagnostics** close native 0, original five CRCs, exact parent ticks
+  **4,767,218 / 4,753,406**, no OOM, 2,947 stable pins. Minimum-duration errors
+  remain. This is **zero observed cycle cost**, not qualified 900-iteration
+  scoring on the new model. Parent scores are not inherited.
+
+### Expanded native area result
+
+`ventium-ic-buffered-area.AvsfLN8k` compares **identical interfaces**: the three
+presence/miss-address outputs plus five distinct buffered expressions extracted
+from the mitered cores. Same Vivado 2025.2 part/options, actual 16-byte bound,
+no timing-driven mapping:
+
+| Resource | Original control | Presence-only | Expanded sharing |
+| --- | ---: | ---: | ---: |
+| Combining-adjusted CLB LUTs | 13,402 | 10,463 | **4,551** |
+| Raw LUTs | 13,417 | 10,483 | 4,571 |
+| MUXF7 + MUXF8 | 9,438 | 7,326 | 3,144 |
+| CARRY8 | 68 | 56 | 24 |
+| FF / BRAM / DSP | 0 | 0 | 0 |
+
+The **66.0% local LUT reduction** is not additive to the earlier 39.53% result;
+the earlier cone had fewer outputs. Native 0 in 69.43 seconds, peak memory
+2,916,208,640 bytes, zero swap/OOM/resource stop, stable pins. Controller
+`5ca17d3aa6504b049fc06becb02361e9`; exclusive Vivado scope
+`862e5a1c807c4040a6e416ef9ad495c5`. No placement or timing result.
+
+### Hardware export and full-design measurement
+
+[`IC_BUFFERED_EXPORT.md`](../fpga/IC_BUFFERED_EXPORT.md) identifies the exact
+**UNQUALIFIED** 188-payload / 147-define export. Strict hardware CPU lint closes
+native 0 in 2.30 seconds, six structural classes fatal, unchanged pins. Clocks
+remain **40 MHz core / 100 MHz PL**, full P5 caches, posted-16 DDR and
+UV/system/relocated fast loads/stores. No slow-mode workaround.
+
+Full synthesis only is running in `ventium-ic-buffered-full-synth.6cLKnbGf`,
+controller `5c441fa813414299b1d46271ef45c11d`. Same `logic_only` mapping as the
+old whole design, unchanged clock constraints, one Vivado family, **8 GiB RAM /
+6 GiB swap**, 30-minute native cap, 12 GiB starting disk reserve and monitored
+2 GiB disk/host reserve. The measured local savings motivate checking the
+mapped whole design before another route. Launch is not synthesis, timing,
+bitstream or deployment acceptance.
+
+### Recoverable scratch cleanup
+
+137 inactive September `.snap` files from the old external `ventium_run` tree
+were archived, independently SHA/size-verified through decompression, rechecked
+unchanged and individually unlinked after repeated native-user/FD checks.
+No current source, media, binary, trace or acceptance input was removed.
+Net recovered: **16.889 GiB**. Recovery archive and exact-name manifest:
+`ventium-closed-snapshot-archive.genxQpF8/september-snapshots.tar.zst`
+(SHA `04b5205fab66d72fc6cd6d9279446bff8952b26d03ff4e01b746bcc567ad07e2`),
+with `admitted.json`, `verified.json`, `closed.json` alongside. Legacy tools
+requiring a loose snapshot must extract that specific member. Current
+acceptance runs remain cold boots.
