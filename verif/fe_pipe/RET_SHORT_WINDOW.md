@@ -1,8 +1,8 @@
 # Exact-byte near-RET capture — October 10
 
-**Private, unpromoted proposal; RTL tests queued, no measured savings yet.**
-Verified gameplay remains **0.49083588 total U+V IPC**, model `86731249`,
-clocks 1.2B–1.3B, predating this and the pending x87 C1 repair. Full direct-memory
+**Private, unpromoted candidate; directed comparisons pass, short CoreMark improves.**
+Latest verified gameplay is **0.51351913 total U+V IPC**, model `86731249`,
+clocks 2.2B–2.3B, predating this and the pending x87 C1 repair. Full direct-memory
 CoreMark on `b5453f16` is 2.107843209/2.110905243 CM/MHz, not a cache/FPGA score.
 
 The [complete CoreMark backend cycle comparison](../bench/COREMARK_BACKEND_DIAGNOSTIC.md)
@@ -64,3 +64,57 @@ length. Then repeat cache-backed CoreMark and the entire standard suite while
 keeping the generic gate and existing timing bands unchanged. Keep this small
 capture change independently attributable to its parent; do not infer its
 performance from the unrelated pending x87 correctness repair.
+
+## Closed directed and CoreMark checks
+
+The original queue was cancelled before compilation: Python closed inherited
+FD 9 and the nested build guard waited on its own parent. R3 preserved the FD
+but exited 127 because systemd's PATH lacked Verilator. Both failed attempts
+are retained. R4 explicitly selects Verilator 5.046 and passes the real locked
+descriptor; no cgroup/lock check was removed. At
+`external/tmp/ventium-guarded-leaf-r4.JYAr22mz/ret/closed.json`, the actual RTL
+passes all **790** predicate cases. The other three R4 leaves independently
+qualify the C1 proposal, not this optimization.
+
+The independently built RET-only model is `56707c8a`, from
+`external/tmp/ventium-ret-short-core.OEIt81zd`. All parent source inputs are
+stable and only `rtl/core/core.sv` changes. Its defines add only
+`VEN_RET_SHORT_WINDOW`; its uniquely named host source is byte-identical to
+the `b5453f16` parent and compiles against its own generated headers.
+Strict structural lint and assertions remain enabled.
+
+[`ret-short-window.S`](ret-short-window.S) and
+[`run-ret-short-window.py`](run-ret-short-window.py) test C3/C2 at **all 32
+line offsets**, flat/relocated protected clients, SS32/SS16 (including nonzero
+high ESP), and AXI read/write latencies 0/7. Each resets normally, enables
+paging, executes eight actual CALL/RET pairs, checks stack adjustment and
+executes a real U/V pair. Native QEMU completion and complete CR/GPR/segment/
+flags traces agree; no new mask or trimmed record is used. Cycle and
+cycle-functional observers must produce the same PC sequence and clock total.
+
+Both control and candidate pass **256 fixtures × 2 latencies = 512 comparisons**
+each, with zero actual fault deliveries. Candidate logs contain 1,280 actual
+short captures. Of the 512 matched clock totals, **160 improve, 352 are equal,
+none regress**. The independent no-candidate control pass and first smoke
+passes remain under `external/tmp/ventium-ret-corpus.pKu6ArHq`; complete A/B
+is `ab-all/closed.json`, invocation `f3bef256a1be4432aafdc1b7d50efdb9`.
+This does **not** yet cover intentionally faulting stacks/targets, TF/RF/event
+interleavings, SMC length changes, or a full standard-suite run.
+
+The unchanged 10-iteration ordinary-entry CoreMark diagnostic passes both CRC
+sets, direct and AXI backends, with exactly the original retirement counts:
+
+| Backend / seed | Parent clocks | RET candidate clocks | Clocks removed |
+|---|---:|---:|---:|
+| Direct / performance | 4,821,818 | 4,815,654 | 6,164 |
+| Direct / validation | 4,815,105 | 4,808,873 | 6,232 |
+| AXI / performance | 5,241,779 | 5,187,956 | 53,823 |
+| AXI / validation | 5,235,258 | 5,180,840 | 54,418 |
+
+AXI whole-program clocks fall **1.027%/1.039%**; corresponding throughput gains
+are **1.037%/1.050%**. No equivalence is claimed between those savings and the
+earlier per-instruction interval attribution. Exact service-to-service AXI
+diagnostic ratios are **1.97703/1.98018 CM/MHz**: still below 2.1, and these
+short runs explicitly fail the benchmark's minimum scoring duration. They are
+not valid CoreMark scores or FPGA measurements. Receipt: candidate root
+`backend-diag/closed.json`, invocation `45625e8a6d5b476bba55d319d3b895f3`.

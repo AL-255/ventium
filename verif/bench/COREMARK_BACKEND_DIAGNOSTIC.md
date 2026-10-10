@@ -118,6 +118,14 @@ Specific targets:
   **48,887** extra clocks together. These are read-owner/lookahead candidates,
   not evidence that every interval is a cache miss.
 
+The first independent RET-capture candidate now has a
+[closed directed A/B and short CoreMark comparison](../fe_pipe/RET_SHORT_WINDOW.md#closed-directed-and-coremark-checks).
+It removes 53,823/54,418 AXI clocks (performance/validation) with unchanged
+retirement counts and correct CRCs: about 1.04% throughput improvement. It
+does not close the cache-backed 2.1 target; short timed-window ratios are
+1.97703/1.98018 and remain ineligible as benchmark scores. Stack-store and
+list-load gaps remain separate work, not savings credited to RET capture.
+
 The short scored service-to-service windows are 4,746,008 direct / 5,105,915
 AXI clocks, corresponding to diagnostic ratios 2.10703 / 1.95851. Do not mix
 those with the table's conservative whole-program ratios 2.07391 / 1.90775,
