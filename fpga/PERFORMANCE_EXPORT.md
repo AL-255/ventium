@@ -1,9 +1,12 @@
-# UV-fast performance FPGA export — October 9
+# UV-fast performance FPGA export — October 10
 
 This is **UNQUALIFIED source preparation**, not a bitstream, timing pass or
 transfer of simulation acceptance to silicon. Latest verified Quake gameplay
-is **0.49083588 total U+V IPC**, larger-L2 model `86731249`, clocks 1.2B–1.3B.
-This passes the fixed-window target, not full timedemo or silicon acceptance.
+is **0.49722017 total U+V IPC**, larger-L2 model `86731249`, clocks 2.9B–3.0B.
+The fixed 1.2B–1.3B gate remains **0.49083588**; the newer sample does not
+replace it. All18 consecutive 100M windows from1.2B–3.0B average **0.47771903**,
+including the2.3B–2.4B dip at **0.26103520**. The sustained target, full timedemo
+and silicon acceptance remain open. New model`958f7ec4` has no gameplay result.
 Current full direct-memory CoreMark
 scores are **2.107843209 / 2.110905243 CM/MHz** on the separate `b5453f16` model;
 they are not FPGA/cache/DDR scores.
@@ -11,10 +14,70 @@ they are not FPGA/cache/DDR scores.
 Subsequent directed testing found [SRT C1 and reduced-precision exponent
 defects](../fp_shared/tb/SRT_ROUND_FLOOR.md) in that unchanged FP source.
 The value-repair proposal is private and has no gameplay/FPGA acceptance;
-the active synthesis remains the exact frozen bundle below. Do not treat
+the new synthesis below also excludes that proposal. Do not treat
 successful synthesis as closing either correctness defect.
 
-## Frozen inputs
+## Current demand-fetch derivative
+
+`external/tmp/ventium-sfetch16-fpga40.faJqNOcM` is the new **UNQUALIFIED**
+186-payload /136-definition export, manifest
+`91ba41600281207c754d32b3aeb0795cf9e5878ccce6b13519e14b672f9c404c`.
+It copies the actual compiled source closure of SoC model
+`958f7ec4ab8e5b2e12ccc8e35fec6fd987e1693ef480c5df432ccc6eeda9eff2`.
+Relative to the previous performance source, it adds the tested default-off
+`VEN_SFETCH16_DEMAND` experiment and cycle-equivalent estimator width reduction.
+The old hardware parent therefore has12 changed RTL payloads, five new headers
+and one separately SHA-pinned Tcl wrapper update. No current dirty RTL is
+implicitly imported. The wrapper update enables the opt-in
+[`logic_only` diagnostic](SYNTHESIS_PROFILES.md); it changes no clock or
+timing-acceptance requirement.
+
+Select the new source profile explicitly with `--variant sfetch16`, supply
+`--wrapper-sha256`, and use `--synthesis-profile logic_only` to check that
+profile during export. The default remains the original performance profile.
+Counts alone do not admit missing/substitute/reordered features. The manifest
+records the source-contract profile; the native controller separately pins
+the actual environment and command. A source manifest is not a run receipt.
+
+Checks on the new export:20 freezer contract tests,48 existing safe-freezer
+tests,35 independent real-Tcl/source checks,25 UV/fast-path guards and7 synthesis
+profile checks pass. Native strict CPU-hierarchy lint passes in2.37seconds
+with all six structural warning classes fatal, actual136 hardware definitions
+and stable payload hashes. Evidence:`ventium-sfetch16-hw-lint.d7uWMpzh/`.
+This is not clean whole-SoC lint; the simulated platform still has98 inherited
+structural warnings. Re-auditing the *old* export against changed live exporter
+tools correctly refuses its old tool hash; its historical receipts were not
+rewritten or weakened to claim current-tool provenance.
+
+Cold Quake remains active onCPU27; cold Win95 starts independently onCPU26,
+service`ventium-sfetch16-win95-oct10.service`, invocation
+`63dafab27323462dacd95f2752da438d`. Both use this exact model, fresh guest disks,
+UV/system/relocated fast mode, original clocks/media and no snapshot/STEP.
+Neither run is a completed standard-suite result.
+
+The new single native synthesis starts **2026-10-10 03:30:33UTC** at
+`ventium-sfetch16-logic-synth.oLSgt6W7/`, controller invocation
+`4f4e19065df643c69a441a87dd989891`, owned Vivado scope invocation
+`b9884d7c4d9b44c6b2a4c9ed4ab0229c`. It uses40MHz constraints, one worker,
+`logic_only`,8GiB RAM/6GiB swap caps, a13GiB combined early-stop threshold and
+a90-minute bound. The normal shared/exclusive launch guards are unchanged.
+Starting admission requires12GiB disk,10GiB available RAM (8+2 reserve) and
+10GiB free swap (6+4 reserve); runtime host/disk reserves remain2GiB. This is
+a lower-cap diagnostic based on the previous timing-optimization phase cost,
+not proof that the full processor will fit or meet40MHz. Implementation and
+deployment do not run from this controller.
+
+Recoverable cleanup made room:1,264 closed failed-synthesis scratch files,
+32,978 cached trace names and25 old trace/log files were independently hashed,
+archived, reread and then unlinked by exact inventory. Hardlinked cache data
+was counted only when actually freed. Net recovery was approximately6.84GiB;
+archives, inventories and receipts are in`ventium-fpga-space.QMM3SwPU/`.
+All models, media, source files and active-run inputs remain. Recover a file
+with`tar -xzf ARCHIVE -C NEW_EMPTY_DIRECTORY -- EXACT_INVENTORY_PATH`; do not
+extract over an active run. The four archives retain both successful and
+failed test evidence; no failure was discarded.
+
+## Previous October 9 frozen inputs
 
 `external/tmp/ventium-performance-fpga40.im8cm8YD` contains **186 payloads**,
 135 definitions and an atomic input manifest:
@@ -100,14 +163,18 @@ optimization. The new export includes the separately measured tag-LUTRAM area
 relief (isolated L1 LUTs22,051→13,014; FFs6,877→1,691), but also more L2 capacity.
 Full-chip memory relief is **not assumed** and resource ceilings are unchanged.
 
-A fresh single guarded synthesis started **2026-10-09 23:25:07UTC** at
+A previous single guarded synthesis started **2026-10-09 23:25:07UTC** at
 `ventium-performance-synth40.t5wzn9jz`, invocation
 `d08d8a9f17ff4f1a86fa4a40352ac84f`. It uses40MHz, `balanced`, one synthesis
 worker, hard20GiB RAM/8GiB swap, a27GiB combined early-stop threshold, 2GiB
 host/disk reserves and a4-hour bound, not an ETA. Input pins and live resource
 samples are retained. Controller R1 refused a manifest list/count type error
 **before any Vivado launch**; R2 checks the exact definition list and count.
-The failed admission source/log is preserved. No implementation has started.
+The failed admission source/log is preserved. It closed at01:16:36UTC after
+6,688.66seconds with native exit143 when the host memory/swap reserve fired;
+this was not an OOM, successful synthesis or implementation. Source pins were
+stable and the family was reaped. Its timing-optimization phase finished after
+1h50m26s at18,805MB reported peak. No implementation started.
 
 The generic differential gate remains failing. Larger-L2 Win95 closed normally
 at a visually clean desktop but needs independent acceptance; Quake continues.
