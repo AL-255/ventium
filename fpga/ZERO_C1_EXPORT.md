@@ -1,7 +1,7 @@
 # Zero-C1 / BCD-sign FPGA implementation — October 10, 2026
 
-Status at **20:54 UTC**: synthesis and the native clock/structural audit are
-closed; native `impl_1` is running. This is **not** a
+Status at **21:07 UTC**: synthesis, the native clock/structural audit and
+placement are closed; native `impl_1` continues. This is **not** a
 bitstream, timing sign-off, standard-suite pass or physical-board acceptance.
 
 Latest verified gameplay is **0.49366456 U+V retirement-event IPC** on older
@@ -97,6 +97,18 @@ domains, setup/hold, exceptions, DRC and CDC. The previous controller's
 `cgroup.procs` disappearance race is handled by polling the same process again.
 Preparation and mock tests are not native routed-design acceptance.
 
+Placement subsequently completed successfully in **26m22s** with zero native
+errors, but emitted `Place 46-14` high-congestion warning. Estimated long-wire
+congestion spans 64×64 regions north/south; global north/south/west spans 32×32.
+The placed global WNS is −23.907 ns, but that summary alone does not identify
+a qualified same-clock path, so it is not converted into a claimed Fmax.
+Constraints remain **40 MHz core / 100 MHz PL**; the earlier audited unplaced
+core-path estimate is **21.786 MHz**, not physical frequency or routed closure.
+The same implementation continues through post-placement physical optimization.
+The prepared read-only auditor now also requires an actual spatial congestion
+report; all 23 helper-policy tests still pass. No timing exception, source edit
+or replacement implementation was used to respond to this warning.
+
 ## Current-candidate standard suite
 
 Four native simulation processes have been admitted with the exact `2b4d7a48`
@@ -158,6 +170,12 @@ tests may proceed after boot, but must not be labelled mouse coverage or a
 complete keyboard/mouse UI pass. A real device path must be connected and
 tested through the normal 8042/IRQ12 interface; guest-memory cursor injection,
 disk patches or suppressed no-mouse dialogs would not fix this omission.
+
+An [unintegrated bidirectional byte transport](PS2_DEVICE.md) now passes 98
+directed tests against this export's actual 8042 at two clocks, plus negative
+controls. It is not in this export or active bitstream build. Mouse protocol
+policy, loss-detectable CSR integration and physical UI qualification remain
+open; these leaf tests do not close the mouse requirement.
 
 ## Retained evidence
 
