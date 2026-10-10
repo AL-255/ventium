@@ -2,20 +2,35 @@
 
 This is **UNQUALIFIED source preparation**, not a bitstream, timing pass or
 transfer of simulation acceptance to silicon. Latest verified Quake gameplay
-is **0.49638834 total U+V IPC**, larger-L2 model `86731249`, clocks 3.8B–3.9B.
-The fixed 1.2B–1.3B gate remains **0.49083588**; the newer sample does not
-replace it. All 27 consecutive 100M windows from 1.2B–3.9B average **0.4813445296**,
-including the 2.3B–2.4B dip at **0.26103520**. The partial-run average now exceeds
-0.48, but full timedemo and silicon acceptance remain open.
-New model`958f7ec4` has no gameplay result.
-The latest audit is`ventium-l2-gameplay.VedZVnwA/latest-3900000000/audit.json`:
-49,638,834 total U+V retirements over100M clocks, unchanged RGB endpoint frames
-showing the demo's death sequence (health zero; monster view followed by floor view),
-stable source/runtime pins, matching native/service
-identity and no OOM. It is selected by latest complete timestamp, not highest IPC.
+is **0.49741357 total U+V retirement-event IPC**, demand-fetch SoC model
+`958f7ec4`, clocks **1,200,048,811–1,300,048,811**. The original pre-run plan
+selects periodic samples12/13, not zero-offset interpolated clocks.
+Audit:`ventium-sfetch16-gameplay.uR79KRxi/window/audit.json`:49,741,357 events
+(38,343,171U +11,398,186V) over100M clocks,244 source/17 runtime pins,
+matching native/service identity and no OOM. Both unchanged RGB endpoint
+images were independently viewed: live weapon/HUD, corridor progression and
+monster/explosion. Captures bracket the endpoints within500k-clock progress
+records, not cycle-exact images. The first collector incorrectly demanded
+globally uniform startup timestamps; its failed attempt is retained. The
+corrected collector preserves the original sample indices and reports the
+actual48,811-clock offset, with all counter families reconciled.
+This exceeds0.48 for one gameplay window; full timedemo and silicon acceptance
+remain open. Private FST/C1/RET/converter-sharing candidates have no gameplay
+measurement. Equal-clock windows do not establish an equal-work speedup.
+
+Historical larger-L2 model`86731249` measured0.49083588 at its fixed1.2B–1.3B
+gate and0.49638834 at3.8B–3.9B. All27 consecutive100M windows1.2B–3.9B average
+0.4813445296, including the2.3B–2.4B dip0.26103520. Those are partial-run
+observations on the older model, not completion or the new candidate's average.
 Current full direct-memory CoreMark
 scores are **2.107843209 / 2.110905243 CM/MHz** on the separate `b5453f16` model;
 they are not FPGA/cache/DDR scores.
+The new [BIOS-bootable CoreMark port](../verif/bench/coremark_boot/README.md)
+now completes both short CRC diagnostics on this exact cache-backed SoC:
+5,096,514 / 5,085,420 TSC clocks for ten iterations, diagnostic ratios
+**1.96212548 / 1.96640592 CM/MHz**. Both minimum-duration errors remain visible;
+neither ratio is a valid score or a 2.1 target pass. This uses GCC 13.4 and a
+bare-metal stack port, not the older GCC 13.3/Linux-user image.
 
 Cold deployment now uses the checked-owner lifecycle helpers described in
 [COLD_LIFECYCLE.md](board-tools/COLD_LIFECYCLE.md). Their host tests and the
