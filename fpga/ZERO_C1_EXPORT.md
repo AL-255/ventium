@@ -315,7 +315,12 @@ EA/GPR-writeback dependency survived mapping on the reported critical cone.
 Follow-up, 22:10 UTC: its full-PC derivative `cf1b3b0b`, source-matched FPGA
 export and strict CPU lint now pass their own audits. Both short CoreMark
 seeds retain the parent's exact clocks/CRCs; they are not valid-duration scores.
-The new full synthesis is live; no new bitstream or timing gain exists yet.
+Its full synthesis closes at 22:18 UTC: **191,887 LUTs**, down **3,730 (1.91%)**
+from this parent, with unchanged BRAM/DSP counts. The 22:28 read-only comparison
+shows the prefix path improving from **21.79 to 26.31 MHz estimated**, while
+the overall worst path remains **21.77 MHz estimated**, now ending at V-load
+owner capture. These are unplaced estimates, not sign-off or measured frequency.
+No new bitstream exists; the linked record identifies the next control-path fix.
 This older frozen export remains unchanged. The canonical differential gate
 still fails, and physical acceptance remains open. See the linked factoring
 record for exact identities and the active synthesis controller.

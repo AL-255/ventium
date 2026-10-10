@@ -1,6 +1,8 @@
 # Register-only prefix admission factoring — 2026-10-10
 
-Status: **private candidate; no new FPGA image or measured timing gain**.
+Status: **synthesis-qualified private candidate; no new FPGA image**.
+Register-only factoring reduces total mapped LUTs by 1.91% and shortens its
+targeted unplaced path, but **does not improve overall worst-path timing**.
 The 40 MHz implementation failed routing, not functional simulation. This work
 targets its reported writeback-to-prefix-admission cone without reducing U/V
 issue, disabling the fast pipeline, adding a stall, or changing cache geometry.
@@ -144,21 +146,109 @@ warning classes treated as errors. This is **not full-SoC lint**, synthesis
 acceptance, or a physical pass. Receipt:
 `ventium-prefix-regonly-hw-lint.Cs41DX5l/closed.json`.
 
-One full synthesis is running under
+### Closed full synthesis, 22:18 UTC
+
+The full synthesis closes under
 `ventium-prefix-regonly-full-synth-oct10.service`, invocation
 `0f2db8ef82af45fb8f715532c62898d1`, in
-`ventium-prefix-regonly-full-synth.mcn9SQsB`. No implementation is launched.
-The bounded controller uses 8 GiB RAM / 6 GiB swap, one Vivado family,
+`ventium-prefix-regonly-full-synth.mcn9SQsB`. Native exit is 0 in **985.33 s**;
+the independent audit rehashes **8,842 input pins**, verifies the native
+156-definition/148-file compile, and checks the complete DCP archive. Only
+the reviewed prefix header differs from the matched synthesis parent:
+
+| Mapped resource | Parent | Prefix factoring | Change |
+| --- | ---: | ---: | ---: |
+| CLB LUTs | 195,617 | 191,887 | −3,730 (−1.91%) |
+| Registers | 54,580 | 54,574 | −6 |
+| BRAM tiles | 277.5 | 277.5 | 0 |
+| DSPs | 47 | 47 | 0 |
+
+These are whole-design synthesis counts, not isolated prefix-cone area or
+placed/routed utilization. The native diagnostic summary retains **0 errors,
+1 critical warning, 1,571 warnings**. The critical warning is the existing
+vendor PS8 XDC `create_clock` reference to an unknown port/pin; it is not
+suppressed. Actual core/PL clock objects and structural DRC are checked by
+the separate read-only post-synthesis audit.
+
+Audit SHA-256: `19ae9bfc1e73fc452ba83b9cdaa453e4bdc5bdac93b43a98ace30d2710c2639e`.
+DCP SHA-256: `70a6835ba299d7723c7e21f2836b2eff1c3c0e9bf0a149dc2743a565e4e3d98a`.
+No implementation or bitstream is produced. The bounded controller used
+8 GiB RAM / 6 GiB swap, one Vivado family,
 a 30-minute native deadline, and a 4 GiB runtime disk floor. Admission required
 10 GiB free and more than twice the previous synthesis's measured 1.50 GiB
-disk growth above that floor. Its live process/watch records, not a stale lock,
-confirm work is still running. No new resource count or timing gain is claimed
-until native closure and a parent/candidate netlist audit.
+disk growth above that floor. Peak resident scope memory was 8,589,824,000
+bytes with 622,108,672 bytes swap; no OOM, resource stop or source drift.
+The entire synthesis family exited before launching the read-only comparison.
+### Closed native timing/cone comparison, 22:28 UTC
+
+The final read-only comparison is
+`ventium-prefix-regonly-clock-r2.y0ASgQnb`, controller invocation
+`c7747d91e8dc4b568ca8b16c23caceb4`. Native exit 0 in **231.86 s**, all **8,870
+input pins unchanged**, no OOM/swap, peak scope memory 4,687,405,056 bytes.
+The native clock objects are 40 MHz core / 100 MHz PL; there are zero black
+boxes and zero errors from the MDRV-1/LUTLP-1 structural checks. This audit
+does not start implementation, change constraints, or write a checkpoint.
+
+| Synthesized-netlist observation | Parent | Prefix factoring |
+| --- | ---: | ---: |
+| Worst path through prefix admission, estimated MHz | 21.79 | 26.31 |
+| Prefix-path logic levels | 159 | 130 |
+| Overall worst core path, estimated MHz | 21.786 | 21.773 |
+| Overall setup slack at 40 MHz | −20.902 ns | −20.929 ns |
+| Worst hold slack | −0.101 ns | −0.101 ns |
+
+These frequency figures are **unplaced path estimates**, neither routed
+sign-off nor measured board frequencies. The local prefix-path improvement
+does not justify claiming an overall Fmax improvement. The prefix cone's
+transitive cell set shrinks from 82,383 to 68,689 objects; that reachability
+includes shared logic and sequential boundaries, not area owned exclusively
+by the prefix block. Remaining GPR/writeback dependencies exist elsewhere.
+
+The first attempt, `ventium-prefix-regonly-clock-audit.9z6XQIvn`, is retained
+as **native exit 1**, not a pass. It opened the parent synthesis DCP by itself,
+which has no loaded project clock objects, and failed at the parent timing
+report. The corrected attempt reads both original projects' synthesis runs and
+original XDC constraints; it pins the parent project/generated XDC files and
+independently reproduces the parent's earlier −20.902 ns result. No artificial
+clock or timing exception was inserted to make the comparison pass.
+
+Final audit SHA-256:
+`db75fe03197eb3c49560c1a0b25dc1b03968cca52527efe1ffec9bd467d5d0e2`.
+Both read-only Vivado families have exited. No new place/route has started.
+
+## Remaining structural bottleneck and next repair
+
+The new overall worst path is **160 logic levels**, from `eip_reg[0]` to
+`pipe_mem_v_hit_q_reg/D`, with 45.718 ns estimated data delay. Its observed
+sequence crosses prefix/dual decode, next-load EA/translation (`mc_prime_offer`),
+L1 lookup and store-pair readiness, memory ACK, `mem_next_commit`, paired-bank
+availability, and finally V-response owner capture. The mapped net names are
+not module ownership, but the actual connectivity establishes the long
+same-cycle control dependency. This is the next optimization target; the
+prefix change has not solved the full FPGA timing/congestion problem.
+
+Proposed repair: separate **prospective bank/tag availability** from
+**irrevocable request acceptance and owner creation**, with explicit request
+class/owner information if needed. In particular, inspect the late
+`mc_capture_next`/`pair_prime_capture` contribution to the ready path shared by
+fresh-U and primed-U requests. Preserve the original standalone pair contract
+and the mandatory older-U acceptance before any V becomes an owner. This is
+not yet implemented; simply dropping commit/snoop guards would be incorrect.
+
+Required focused checks include legacy two-lane requests, fresh U/V loads,
+primed U/V loads, U-store/V-load, same-bank conflicts, uncommitted predecessor,
+held responses, under-fill access, invalidation/reset and stale-owner rejection.
+Existing entry points include `verif/l1/tb_l1axi_pair_hit.sv`,
+`verif/l1/tb_l1d_pair_store.sv`, `verif/l1/prime_under_ifill_leaf.svh`, and
+`verif/issue_uv/tb_regmem_prime_pair.sv`. Extend them to require unchanged
+accepted-edge/cycle behavior and no new owner on a rejected speculative offer.
+Any core/cache change still requires the differential gates and full standard
+suite, including physical-board validation; a new short gate cannot replace it.
 
 ## Still required
 
-Inspect the synthesized cone and measure the structural effect before any new
-place/route or deployment. The exact-source export above is source-qualified,
+Repair the remaining memory-control critical path and evaluate its area/timing
+before another place/route. The exact-source export above is source-qualified,
 not a qualified bitstream. The full
 standard suite and physical Quake/Win95 acceptance are not inherited by this
 directed model.

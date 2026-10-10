@@ -40,7 +40,10 @@ results below are retained measurements, not tests rerun for this report.
   See [the source-matched handoff](../fpga/ZERO_C1_EXPORT.md).
 - **Newest candidate:** register-only prefix factoring `cf1b3b0b` preserves
   both short CoreMark seeds' exact parent clocks/CRCs. Its source-matched FPGA
-  export and strict CPU lint pass; synthesis is running. It has no measured
+  export and strict CPU lint pass; synthesis closes with **3,730 fewer LUTs
+  (−1.91%)**, unchanged BRAM/DSPs. Its prefix-path estimate improves to
+  **26.31 MHz**, but another path keeps the overall estimate at **21.77 MHz**;
+  neither is routed sign-off or measured board frequency. It has no measured
   gameplay, valid-duration score or physical pass. See
   [the factoring and qualification record](../fpga/PREFIX_EX_REGONLY.md).
 
@@ -561,7 +564,8 @@ not copied solely from a stale status paragraph. Roots are below
 | Newest source-matched full-PC build and short-seed audit | `ventium-prefix-regonly-soc.MMoWhswI/{build-closed.json,coremark/audit.json}`; model SHA `cf1b3b0bf30d35993c12f335c148dbf5c1ae90f09c0e26f3c2b22907263ab27c` |
 | Parent model's independently closed 900-iteration CoreMark seeds | `ventium-zero-c1-soc.FTbYSn0L/coremark-900-{performance,validation}/audit.json`; **2.101890118 / 2.107616105 CM/MHz**, exact parent TSC clocks, original CRCs, native zero, no OOM |
 | Newest FPGA source and strict CPU lint | `ventium-prefix-regonly-fpga40.D6hb2tCk/{input-manifest.json,audit.json}`; manifest SHA `5003847d311025e070fd12022b06251e62c9c50336962bc183ff179b3a903ee3`; `ventium-prefix-regonly-hw-lint.Cs41DX5l/closed.json` |
-| Latest closed full synthesis and unplaced timing | `ventium-zero-c1-full-synth.yROXoFK0/audit.json`; `ventium-zero-c1-clock-audit.QVKu9JRQ/audit.json` |
+| Newest closed full synthesis | `ventium-prefix-regonly-full-synth.mcn9SQsB/audit.json`; 191,887 LUTs, 54,574 FFs, 277.5 BRAM, 47 DSP; no timing/physical pass |
+| Closed parent/candidate unplaced comparison | `ventium-prefix-regonly-clock-r2.y0ASgQnb/audit.json`; local prefix path improves, overall worst path does not; no routed or physical-frequency claim |
 
 Older linked reports preserve their original timestamps, scratch paths,
 negative controls and failed attempts. Some historical `/tmp` paths may no
