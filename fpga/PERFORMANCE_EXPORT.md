@@ -71,6 +71,52 @@ a lower-cap diagnostic based on the previous timing-optimization phase cost,
 not proof that the full processor will fit or meet40MHz. Implementation and
 deployment do not run from this controller.
 
+### Closed native synthesis and checkpoint audit
+
+That synthesis completed at **2026-10-10 03:49:00UTC**, native exit0, in
+**1,106.82seconds (18.45minutes)**. All source pins remained stable; no OOM,
+resource stop or controller failure occurred. Scope peak was8GiB RAM and
+0.654GiB swap. Actual native synthesis used `-no_timing_driven` and produced
+`rk_ao486_bd_wrapper.dcp`; this is not a timing-closure result.
+
+| Synthesized resource | Used | Device utilization |
+| --- | ---: | ---: |
+| CLB LUTs | 190,864 | 55.93% |
+| Registers | 54,571 | 8.00% |
+| BRAM tiles | 277.5 | 37.30% |
+| DSPs | 47 | 1.33% |
+
+Independent native project reopening at
+`ventium-sfetch16-synth-audit.DendiK1P` completed successfully in63.40seconds,
+with stable DCP/source pins and no OOM. It checks native run completion and
+non-staleness, zero unresolved black boxes, and zero errors from actual
+`MDRV-1`/`LUTLP-1` checks. Actual project clocks are **40MHz core /100MHz PL**.
+The generated PS XDC's unknown-port clock warning remains in the original log;
+the active core/platform clocks were independently verified, not inferred
+from the command line. Other synthesis warnings remain; this is not a blanket
+clean-DRC or CDC claim. LUT hierarchy totals use Vivado's reconstructed
+hierarchy and must not be mistaken for isolated RTL module area measurements.
+
+### Bounded implementation characterization
+
+After the audit, `ventium-sfetch16-impl40.S3MGZiu2/run.py` resumes this exact
+project without new synthesis or run reset. Controller invocation
+`1c331a468aa345b081b456226536c6c9`, scope invocation
+`ef3052a8447247e4b167d9a3d8fab614`. The existing resume script admits the
+real40MHz clock first; `RuntimeOptimized` omits the previously crashing
+`bram_power_opt` phase. The exported spread-placement/default-routing
+profile stays intact. One Vivado family,90-minute timeout,10GiB RAM/4GiB
+swap caps,13GiB combined early stop,2GiB runtime host/disk reserves.
+Admission reserves2GiB RAM/4GiB swap beyond the caps. Starting disk admission
+is10GiB for this existing-project operation, versus12GiB for full synthesis.
+The global exclusive guard and ceilings are unchanged.
+
+This is **P&R characterization, not qualified deployment**. It deliberately
+retains the frozen source: the pending C1/FST repairs, canonical gate failures
+and incomplete standard suite are not hidden by synthesis success. There is
+no routed frequency result or new silicon acceptance yet. The repaired FST
+model is separate; see [its closed tests](../fp_shared/tb/FST_REGISTER.md).
+
 Recoverable cleanup made room:1,264 closed failed-synthesis scratch files,
 32,978 cached trace names and25 old trace/log files were independently hashed,
 archived, reread and then unlinked by exact inventory. Hardlinked cache data
