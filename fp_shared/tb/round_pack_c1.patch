@@ -107,7 +107,8 @@ index 118c77ec..39792117 100644
        end
      end
    endfunction
- 
+-
++
 +  // Keep the original value/exception ABI; only status-owning clients need C1.
 +  function automatic logic [82:0] fx_round_pack_f(
 +      input logic sign,
