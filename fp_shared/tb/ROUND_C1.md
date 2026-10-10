@@ -86,3 +86,58 @@ lint. The reference SRT copy, legacy core path and old/new tests need deliberate
 interface handling, not missing-port waivers. Combine with the independently
 verified exponent repair before full-core differential/standard-suite runs.
 Neither leaf alone closes C1, the generic gate or FPGA acceptance.
+
+## Connected private top and independent arithmetic witness
+
+The candidate is now connected in a private four-file integration, including
+the independent SRT exponent repair. The self-contained
+[`round_c1_integration.patch`](round_c1_integration.patch) applies cleanly to
+the current production sources; it is **not applied to production**.
+`ven_fp_alu` carries C1 beside its existing registered result; SRT registers it
+at its existing DFIN/QFIN completion. `ven_fp_top` consumes it only for the
+matching ALU/SRT architectural owner. Immediate divide/sqrt special cases
+clear C1 before the existing stack-fault override. Remainder quotient bits and
+the later FPTAN status override remain separate. No stage, recurrence, queue
+or wide arithmetic unit is added. Actual leaf/top tests and hardware cost are
+still pending, so these are source-level properties, not timing sign-off.
+
+[`arith_c1_vectors.py`](arith_c1_vectors.py) adds1,152 finite FADD/FMUL/FSUB/
+FSUBR cases across all three PC modes, four RC modes and both initial C1
+values. Native x87 and pinned QEMU agree on **every value**. Independent exact
+rational arithmetic also matches every native C1 and precision flag. Three
+host tests pass. Explicit register opcodes avoid SUBR assembler ambiguity.
+Native host x87 is not P54 silicon; no cycle claim comes from this oracle.
+
+The unchanged actual `b5453f16` UV-fast model executes that same ordinary-entry
+fixture: all1,152 values and precision flags agree, but **576 C1 values fail**.
+Both C1 seeds were checked before execution, so preserving the previous C1
+cannot pass. Native guest exit0, actual fault deliveries0, genuine V retirements2,
+stable source/model pins and all children reaped are recorded. Diagnostic
+exit1 and failed supervisor status are expected evidence of the bug, not a
+correctness pass. No architectural comparator or golden changed.
+
+Private tree: `external/tmp/ventium-fp-c1-integration.D3VVvyfg`.
+Arithmetic oracle vector SHA256:
+`cf413fa07a39c1a7fc62a41867b70143f3d226dfd1f49f03ef8627720591192d`.
+Current-model observation: `current-alu-observation-r1/closed.json`, SHA256
+`a68531558527224fe275f1b7bfbfbbbbb94d14149ed0284e00d2467945f55392`;
+invocation `c32fb3e5567849b9ab250973e2ed8e08`.
+
+[`tb_fp_round_c1.sv`](tb_fp_round_c1.sv) interleaves those cases with all912
+native/QEMU SRT cases: **2,064 top-level vectors**. It seeds the actual state
+using FLD/FNSTENV/FLDENV commands, not hierarchical deposits. It also checks
+consecutive independent arithmetic owners with different C1 results, command
+bus mutation after acceptance, no premature C1 commit, masked/unmasked stack
+underflow, stack overflow and reset during an actual SRT recurrence.
+These additional cases are **prepared, not passed**.
+
+`plan.json` freezes45 source/test/authority pins, SHA256
+`a7bdb19c6221c15b6802b4be27ccf30d64a0e6d6c767ece7ae470d434c7779b0`.
+Queued service `ventium-fp-c1-integration-queued-oct10.service`, invocation
+`335ddb1b3d99468393e481dbe9ac80e3`, first requires successful closed receipts
+from both smaller leaves. It then acquires the common build lock and runs the
+top under the normal4GiB/one-job guard, bounded to600seconds. A missing/failed
+prerequisite cannot trigger a build. The active FPGA synthesis, full-PC models
+and production RTL remain unchanged. Legacy instantiations and alternate
+reference interfaces still need deliberate wiring when promoting the patch;
+this private top test is not full-core or standard-suite acceptance.

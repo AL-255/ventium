@@ -1,0 +1,352 @@
+--- a/rtl/fpu/fpu_srt_div.sv
++++ b/rtl/fpu/fpu_srt_div.sv
+@@ -43,6 +43,7 @@
+     output logic             busy,       // 1 while an op is in flight
+     output logic             done,       // 1-clk strobe: result valid this clock
+     output logic [82:0]      result,     // {oe, ue, pe, floatx80}  (div/sqrt) | {2'b0, 1'b0, rem} (rem)
++    output logic             rounded_up, // div/sqrt C1; registered with result/done
+     output logic [2:0]       rem_q012,   // rem: {q2,q1,q0} -> {C0,C3,C1}
+     output logic             rem_c2,     // rem: 1 = partial (incomplete) reduction
+     output logic             rem_ie      // rem: invalid-operation
+@@ -227,7 +228,7 @@
+   logic [80:0]         rsum;
+   logic                rem_nz, rs_pos, rs_neg, up, down, inexact, resid_pos, resid_neg;
+   logic [127:0]        uq, keep, remv, half;
+-  int                  msb, extra;
++  int                  msb, floor_msb, extra;
+   logic signed [31:0]  e, ebiased;
+   // out-of-range pack: feed the SHARED fx_round_pack_f one UNROUNDED 64-bit window
+   // (top-aligned) + a single residual sticky so it does ONE correct round across
+@@ -239,7 +240,7 @@
+   logic [127:0]        sigp, keepf;
+   logic signed [31:0]  ep;
+   logic                stickyp;
+-  logic [82:0]         packed_oor;
++  logic [83:0]         packed_oor;
+   always_comb begin
+     rsum    = {1'b0, C} + {1'b0, S};
+     // The partial remainder is TRUE-ZERO when the ones-complement carry-save sum
+@@ -254,6 +255,7 @@
+     uq      = round_uq_q;
+     msb     = 0;
+     for (int i=127; i>=0; i--) if (uq[i]) begin msb=i; break; end
++    floor_msb = msb;                              // before the independent PC64 round
+     extra   = msb - 63;
+     keep    = uq >> extra;
+     remv    = uq & ((128'd1 << extra) - 128'd1);
+@@ -287,22 +289,23 @@
+     // significand keepf (top-aligned to bit127) + sticky go to the shared packer,
+     // which applies gradual-underflow / overflow + the active RC in ONE round.
+     keepf   = uq >> extra;                            // floor 64-bit window (unrounded)
++    ep      = ($signed(floor_msb) - round_sh_q) + (ua - ub);
+     if (resid_neg) begin                             // SRT over-shot by < 1 ULP
+       keepf = keepf - 128'd1;
+-      if (!keepf[63]) keepf = {64'd0, 64'hFFFFFFFFFFFFFFFF};  // borrowed across pow2
++      if (!keepf[63]) begin
++        keepf = {64'd0, 64'hFFFFFFFFFFFFFFFF};         // borrowed across pow2
++        ep = ep - 32'sd1;
++      end
+     end
+     stickyp = (remv != 128'd0) || rs_pos || resid_neg;        // any residual below floor
+     sigp    = keepf << 64;                            // window MSB (bit63) -> bit127
+-    // weight of keepf's MSB (bit63) == weight of uq bit `msb` (the floor window top):
+-    // (msb - SH) + (ua-ub), SH=70 (div) / 72 (sqrt). resid_neg's pow2-borrow drops
+-    // the window MSB one position, but fx_round_pack_f re-finds the MSB of sigp and
+-    // uses the passed weight as ITS top bit's exponent, so pass the floor MSB weight.
+-    ep      = ($signed(msb) - round_sh_q) + (ua - ub);
+-    if (resid_neg && !keepf[63]) ep = ep - 32'sd1;    // borrow crossed a power of two
++    // The packer owns its rounding carry/borrow. It must receive the FLOOR's
++    // exponent, not msb after PC64 rounding; otherwise an inline carry is
++    // counted twice at PC24/53. Apply a floor borrow before replacing its MSB.
+     // Pass pc: the floor-window packer rounds to 24/53/64 bits. For pc<64 this also
+     // serves the IN-RANGE result (single-round to PC; no double-round), so divide/
+     // sqrt honor x87 precision control. PC=64 keeps the fast inline path below.
+-    packed_oor = fx_round_pack_f(sign, ep, sigp, stickyp, rc, pc);
++    packed_oor = fx_round_pack_c1(sign, ep, sigp, stickyp, rc, pc);
+     // route the engine through the packer when the quotient is over/underflowing the
+     // floatx80 normal range (biased <= 0 -> underflow; >= 0x7FFF -> overflow). This
+     // is the set fx_div used to send to fx_div_exact; the engine now owns it too.
+@@ -317,12 +320,16 @@
+       st <= ST_IDLE; done_q <= 1'b0; k <= '0;
+       round_uq_q <= 128'd0; round_sh_q <= 32'sd70;
+       rem_q012 <= 3'd0; rem_c2 <= 1'b0; rem_ie <= 1'b0;
++      rounded_up <= 1'b0;
+     end else begin
+       done_q <= 1'b0;
+       unique case (st)
+         ST_IDLE: begin
+           if (start) begin
+             mode_q <= mode;
++            // Special operands and remainder do not use arithmetic rounding
++            // C1. Remainder quotient bits have their separate output below.
++            rounded_up <= 1'b0;
+ `ifdef VEN_FPREM
+             if (mode == FD_REM) begin
+               // ---- remainder setup (== fpu_fprem) --------------------------
+@@ -453,6 +460,10 @@
+         ST_DFIN: begin
+           result_q <= (oor || pc==2'b00 || pc==2'b10) ? packed_oor[82:0]
+                           : {2'b00, inexact, fx_make(sign, ebiased[14:0], keep[63:0])};
++          // Keeping an SRT overestimate with negative residual also rounds
++          // magnitude upward, even though the inline `up` add did not fire.
++          rounded_up <= (oor || pc==2'b00 || pc==2'b10) ? packed_oor[83]
++                          : (up || (resid_neg && !down));
+           done_q   <= 1'b1;
+           st       <= ST_IDLE;
+         end
+@@ -475,6 +486,8 @@
+         ST_QFIN: begin                          // shared remainder-sign rounder
+           result_q <= (oor || pc==2'b00 || pc==2'b10) ? packed_oor[82:0]
+                           : {2'b00, inexact, fx_make(1'b0, ebiased[14:0], keep[63:0])};
++          rounded_up <= (oor || pc==2'b00 || pc==2'b10) ? packed_oor[83]
++                          : (up || (resid_neg && !down));
+           done_q   <= 1'b1;
+           st       <= ST_IDLE;
+         end
+--- a/rtl/fpu/fpu_x87_pkg.sv
++++ b/rtl/fpu/fpu_x87_pkg.sv
+@@ -124,7 +124,10 @@
+   //     smallest normal sets neither UE-only-without... — exactly per softfloat.
+   // For IN-RANGE results (biased exp 1..0x7FFE) this is bit-identical to the
+   // prior normal-only packer, so the existing normal-operand corpus is unchanged.
+-  function automatic logic [82:0] fx_round_pack_f(  // {oe, ue, pe, floatx80[79:0]}
++  // C1 is the actual magnitude increment after tie-even correction. Reuse
++  // the retained LSB before/after the existing add and mask; do not duplicate
++  // the rounding datapath or mistake an inexact downward result for round-up.
++  function automatic logic [83:0] fx_round_pack_c1(  // {rounded_up, oe, ue, pe, floatx80[79:0]}
+       input logic         sign,
+       input logic signed [31:0] unbiased,
+       input logic [127:0] sig,
+@@ -143,11 +146,13 @@
+     logic [63:0]  rmask, rincr, rbits, sigp;
+     logic signed [31:0] expp;
+     logic         rcarry;
++    logic         before_lsb, rounded_up;
+     begin
+       oe=1'b0; ue=1'b0; pe=1'b0; handled=1'b0; res=83'd0;
++      before_lsb=1'b0; rounded_up=1'b0;
+       rne = (rc==2'd0);
+       if (sig==128'd0) begin
+-        fx_round_pack_f = {3'b000, fx_make(sign, 15'd0, 64'd0)};
++        fx_round_pack_c1 = {4'b0000, fx_make(sign, 15'd0, 64'd0)};
+       end else begin
+         // align the MSB (integer bit) to bit127: frac[127:64]=zSig0, [63:0]=zSig1.
+         msb = 0;
+@@ -182,15 +187,18 @@
+                                  (((sigp & ((64'd1 << sh) - 64'd1)) != 64'd0) ? 64'd1 : 64'd0);
+             rbits = sigp & rmask;
+             if (rbits != 64'd0) begin pe=1'b1; if (isTiny) ue=1'b1; end
++            before_lsb = (pc==2'b10) ? sigp[11] : sigp[40];
+             sigp = sigp + rincr;
+             expp = sigp[63] ? 32'sd1 : 32'sd0;                      // up to smallest normal?
+             if (rne && ((rbits << 1) == (rmask + 64'd1))) rmask = rmask | (rmask + 64'd1); // tie->even
+             sigp = sigp & ~rmask;
++            rounded_up = before_lsb ^ ((pc==2'b10) ? sigp[11] : sigp[40]);
+             res  = {oe,ue,pe, fx_make(sign, expp[14:0], sigp)};
+           end else if ((expp > 32'sd32766) ||
+                        ((expp == 32'sd32766) && ((sigp + rincr) < sigp))) begin
+             // ---- OVERFLOW ----
+             oe=1'b1; pe=1'b1;
++            rounded_up = (rc==2'd0) || (rc==2'd1 && sign) || (rc==2'd2 && !sign);
+             if (rc==2'd0 || (rc==2'd1 && sign) || (rc==2'd2 && !sign))
+               res = {oe,ue,pe, fx_make(sign, 15'h7FFF, INFM)};      // signed Inf
+             else
+@@ -198,15 +206,17 @@
+           end else begin
+             // ---- NORMAL (in-range) ----
+             if (rbits != 64'd0) pe=1'b1;
++            before_lsb = (pc==2'b10) ? sigp[11] : sigp[40];
+             sigp   = sigp + rincr;
+             rcarry = (sigp < rincr);                                // carry out of bit63
+             if (rcarry) begin expp = expp + 32'sd1; sigp = INFM; end
+             if (rne && ((rbits << 1) == (rmask + 64'd1))) rmask = rmask | (rmask + 64'd1); // tie->even
+             sigp = sigp & ~rmask;
++            rounded_up = before_lsb ^ ((pc==2'b10) ? sigp[11] : sigp[40]);
+             if (sigp == 64'd0) expp = 32'sd0;
+             res = {oe,ue,pe, fx_make(sign, expp[14:0], sigp)};
+           end
+-          fx_round_pack_f = res;
++          fx_round_pack_c1 = {rounded_up, res};
+         end else begin
+           // ============ EXTENDED (64-bit, PC=11/01) — BYTE-IDENTICAL TO BEFORE ============
+           // round increment (softfloat precision80 rule).
+@@ -220,6 +230,7 @@
+           if ( (zExp > 32'sd32766) ||
+                (zExp == 32'sd32766 && zSig0==ALL1 && incr) ) begin
+             oe=1'b1; pe=1'b1;
++            rounded_up = !((rc==2'd3) || (!sign && rc==2'd1) || (sign && rc==2'd2));
+             if (rc==2'd3 || (!sign && rc==2'd1) || (sign && rc==2'd2))
+               res = {oe,ue,pe, fx_make(sign, 15'h7FFE, ALL1)};   // max finite magnitude
+             else
+@@ -246,28 +257,45 @@
+               2'd2:    incr = !sign && (zSig1 != 64'd0);
+               default: incr = 1'b0;
+             endcase
++            before_lsb = zSig0[0];
+             if (incr) begin
+               zSig0 = zSig0 + 64'd1;
+               if (rne && ((zSig1 << 1) == 64'd0)) zSig0 = zSig0 & ~64'd1;  // ties to even
+               if (zSig0[63]) zExp = 32'sd1;               // rounded up to smallest normal
+             end
++            rounded_up = before_lsb ^ zSig0[0];
+             res = {oe,ue,pe, fx_make(sign, zExp[14:0], zSig0)};
+             handled=1'b1;
+           end
+           // ----- NORMAL (in-range) -----
+           if (!handled) begin
+             if (zSig1 != 64'd0) pe=1'b1;
++            before_lsb = zSig0[0];
+             if (incr) begin
+               zSig0 = zSig0 + 64'd1;
+               if (zSig0 == 64'd0) begin zExp = zExp + 32'sd1; zSig0 = INFM; end
+               else if (rne && ((zSig1 << 1) == 64'd0)) zSig0 = zSig0 & ~64'd1;
+             end else if (zSig0 == 64'd0) zExp = 32'sd0;
++            rounded_up = before_lsb ^ zSig0[0];
+             res = {oe,ue,pe, fx_make(sign, zExp[14:0], zSig0)};
+           end
+-          fx_round_pack_f = res;
++          fx_round_pack_c1 = {rounded_up, res};
+         end
+       end
+     end
++  endfunction
++
++  // Keep the original value/exception ABI; only status-owning clients need C1.
++  function automatic logic [82:0] fx_round_pack_f(
++      input logic sign,
++      input logic signed [31:0] unbiased,
++      input logic [127:0] sig,
++      input logic pre_inexact,
++      input logic [1:0] rc,
++      input logic [1:0] pc);
++    logic [83:0] packed_c1;
++    packed_c1 = fx_round_pack_c1(sign, unbiased, sig, pre_inexact, rc, pc);
++    return packed_c1[82:0];
+   endfunction
+
+   // Backward-compatible {inexact, floatx80} wrapper (inexact == PE). Callers that
+--- a/fp_shared/ven_fp_alu.sv
++++ b/fp_shared/ven_fp_alu.sv
+@@ -31,7 +31,8 @@
+     // architectural commit edge; it never exposes an unregistered arithmetic
+     // result.
+     output      logic         commit_next,
+-    output      logic [84:0]  result
++    output      logic [84:0]  result,
++    output      logic         rounded_up // registered C1, valid with done
+ );
+
+   logic       s0_valid;
+@@ -43,7 +44,7 @@
+   fx_pipe_t   s1_pipe;
+   logic [1:0] s1_rc;
+   logic [1:0] s1_pc;
+-  logic [84:0] result_q;
++  logic [85:0] result_q;
+
+   // Specialized copy of the proven f_eval_s1 fast arm.  It deliberately has
+   // no division cases and therefore no path to f_arith()/fx_div_exact().
+@@ -78,26 +79,27 @@
+     end
+   endfunction
+
+-  function automatic logic [84:0] finish(
++  function automatic logic [85:0] finish(
+       input fx_pipe_t  pipe,
+       input logic [1:0] round_control,
+       input logic [1:0] precision_control
+   );
+-    logic [82:0] rounded;
++    logic [83:0] rounded;
+     begin
+       if (pipe.early)
+-        return pipe.result;
+-      rounded = fx_round_pack_f(pipe.sign, pipe.unbiased, pipe.sig,
++        return {1'b0, pipe.result};
++      rounded = fx_round_pack_c1(pipe.sign, pipe.unbiased, pipe.sig,
+                                 pipe.pre_inexact, round_control,
+                                 precision_control);
+-      return {2'b00, rounded[82], rounded[81], rounded[80], rounded[79:0]};
++      return {rounded[83], 2'b00, rounded[82:0]};
+     end
+   endfunction
+
+   assign busy   = s0_valid | s1_valid | s2_valid;
+   assign done   = s2_valid;
+   assign commit_next = s1_valid;
+-  assign result = result_q;
++  assign result = result_q[84:0];
++  assign rounded_up = result_q[85];
+
+   always_ff @(posedge clk) begin
+     if (!rst_n) begin
+--- a/fp_shared/ven_fp_top.sv
++++ b/fp_shared/ven_fp_top.sv
+@@ -119,6 +119,7 @@
+   logic [2:0]  alu_subop;
+   logic [79:0] alu_a, alu_b;
+   logic [84:0] alu_result;
++  logic        alu_rounded_up;
+   logic [2:0]  pending_dst;
+   logic        pending_pop;
+   fxop_e        pending_op;
+@@ -153,6 +154,7 @@
+   logic [1:0]  srt_rc, srt_pc;
+   logic [79:0] srt_a, srt_b;
+   logic [82:0] srt_result;
++  logic        srt_rounded_up;
+   logic [2:0]  srt_rem_q012;
+   logic        srt_rem_c2, srt_rem_ie;
+
+@@ -453,7 +455,8 @@
+       .busy(alu_busy),
+       .done(alu_done),
+       .commit_next(alu_commit_next),
+-      .result(alu_result)
++      .result(alu_result),
++      .rounded_up(alu_rounded_up)
+   );
+
+   ven_fp_misc u_misc (
+@@ -527,6 +530,7 @@
+       .busy(srt_busy),
+       .done(srt_done),
+       .result(srt_result),
++      .rounded_up(srt_rounded_up),
+       .rem_q012(srt_rem_q012),
+       .rem_c2(srt_rem_c2),
+       .rem_ie(srt_rem_ie)
+@@ -1005,6 +1009,7 @@
+             c_write_data  = div_special_result[79:0];
+             c_status      = 1'b1;
+             c_status_data = f_arith_fstat(fstat_o, div_special_result);
++            c_status_data[9] = 1'b0;
+             c_pop         = cmd_pop ? 2'd1 : 2'd0;
+           end
+         end
+@@ -1015,6 +1020,7 @@
+             c_write_data  = sqrt_special_result[79:0];
+             c_status      = 1'b1;
+             c_status_data = sqrt_special_status;
++            c_status_data[9] = 1'b0;
+           end
+         end
+         default: begin end
+@@ -1127,6 +1133,9 @@
+       c_write_data  = alu_result[79:0];
+       c_status      = 1'b1;
+       c_status_data = f_arith_fstat(fstat_o, alu_result);
++      // Consume only the registered result belonging to this arithmetic
++      // owner. Borrowed transcendental micro-operations never enter TOP_ALU.
++      c_status_data[9] = alu_rounded_up;
+ `ifdef VEN_FP_ARITH_STREAM
+       c_pop         = arith_owner_pop[2] ? 2'd1 : 2'd0;
+ `else
+@@ -1155,6 +1164,7 @@
+         c_status_data = f_arith_fstat(fstat_o,
+                                       {2'b00, srt_result[82], srt_result[81],
+                                        srt_result[80], srt_result[79:0]});
++        c_status_data[9] = srt_rounded_up;
+         c_pop = pending_pop ? 2'd1 : 2'd0;
+       end
+     end
