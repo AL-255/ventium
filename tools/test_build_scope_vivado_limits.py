@@ -340,7 +340,10 @@ class VivadoLimitPolicyTests(unittest.TestCase):
         for high, inherited_lock, expected in cases:
             with self.subTest(memory_high=high, inherited_lock=inherited_lock):
                 with tempfile.TemporaryDirectory(prefix="ventium-build-scope-nested-test-") as temp_name:
-                    temp = Path(temp_name)
+                    # TMPDIR can be the external-storage symlink. The real
+                    # lock attestor canonicalizes /proc/self/fd targets, so
+                    # give this PRIVATE fixture its canonical lock path too.
+                    temp = Path(temp_name).resolve()
                     leaf = temp / "cgroup" / "app.slice" / "ventium-vivado.scope"
                     leaf.mkdir(parents=True)
                     for name, value in (
