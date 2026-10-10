@@ -1,12 +1,12 @@
 # FP repairs on the current performance candidate
 
-Status at October 10, 18:05 UTC: **not qualified for deployment**. UV + system/
+Status at October 10, 18:30 UTC: **not qualified for deployment**. UV + system/
 relocated fast pipeline and the real AXI backend remain enabled. No U-only,
 STEP, global slow-path fallback, comparator mask or golden replacement is used.
 
-The separately measured gameplay baseline is `bfb867f7`, **0.52847961 U+V
-retirement-event IPC** at clocks **4,000,065,237–4,100,065,237**. All 29
-consecutive windows from 1,200,065,237 average **0.496498649**, including every
+The separately measured gameplay baseline is `bfb867f7`, **0.49971398 U+V
+retirement-event IPC** at clocks **4,100,065,237–4,200,065,237**. All 30
+consecutive windows from 1,200,065,237 average **0.496605827**, including every
 dip. That build's duration-valid CoreMark scores are **2.101890118 /
 2.107616105 CM/MHz**. These measurements do **not** transfer to the new FP
 bundle or range-exception repair; neither has gameplay measurements.
@@ -43,7 +43,12 @@ controller failure remain. The unchanged observer/model was rerun at **25199**;
 unit `ventium-fp-bundle-register-retry-oct10.service`, invocation
 `67de33a5004f47679e653a3c6001b7a6`, closes native 0 with all 1,920 cases passing.
 The first parent controller must not be described as wholly passing. Its
-unmodified canonical `make verify` is queued/running separately.
+unmodified canonical `make verify` closes native 2 / FAIL: 7/108 functional
+programs pass and 12/19 scored cycle checks fail. The independent `audit.json`
+rechecks 4,966 source pins, every directed finding and native exit, actual
+AXI/V activity and the retained controller identities. All 20 complete cycle
+record streams are identical to the preceding high-word candidate. Neither
+the test-port retry nor cycle preservation turns the canonical gate green.
 
 ## Newly reproduced unmasked memory-FST defect
 
@@ -86,14 +91,45 @@ two-file repair on the combined candidate:
   suppressed store. Existing sticky exception bits remain sticky.
 
 There is no new execution state, RAM port or latency stage. Five recipe tests
-pass after tightening an initially ambiguous reset-line anchor. Native RTL
-qualification of this repair is **pending**, not inferred from source tests.
+pass after tightening an initially ambiguous reset-line anchor.
 The first prepared controller was stopped before compilation after detecting
 the same invalid register-port choice. Corrected controller root
-`ventium-fst-range-core-r2.drV0OWQH` preserves that attempt and waits for actual
-parent closure plus the separately successful register retry. It will build
-with 32 compiler jobs, run unmasked and masked FST/register observers, and run
-the unchanged canonical gate. No concurrent Vivado family is allowed.
+`ventium-fst-range-core-r2.drV0OWQH` preserves that attempt and required actual
+parent closure plus the separately successful register retry.
+
+The corrected model is
+`e8253e84b5859a97aa74f007b715c71485296c0eb7f30b3df3fb520158927b24`.
+It builds natively in 14.75 seconds with 32 compiler jobs and its own generated
+C++ header/object. All **1,920 unmasked cases now pass**: the 448 control-model
+errors are gone. All **2,352 masked-store** and **1,920 register/all-TOP** cases
+remain passing. Each observer has native exit 0, normal guest exit, genuine
+AXI backing acknowledgements and 66 V retirements. Pinned QEMU's respective
+1,184 / 1,176 / 1,664 disagreements remain recorded, not waived.
+
+The independent closure audit rechecks **5,171 source pins**, the exact two-file
+delta, unchanged defines, all 6,192 case findings, native closure and full
+trace lengths. The canonical gate still closes native 2 / FAIL, with the same
+7/108 functional passes and 12/19 scored cycle failures. All 20 complete cycle
+streams match the preceding bundle. The masked-store and register observers
+also retain exactly **2,929,482 / 3,029,001 clocks**, respectively.
+
+An exact seven-file full-PC backport now builds at
+`ventium-fp-range-soc.KicmQEph`, retaining all 153 parent defines and all newer
+cache/performance work. Its **102 intersecting core/FP source files** match the
+directed model exactly. Model SHA-256:
+`3082ac8377cdc364655dc47854ce9049420d0826b7da4b6a6f213bba0d98f3e8`.
+Native build exit is 0, with the matching private generated-header/harness
+object. The 98 inherited platform structural warnings remain; this is not a
+clean whole-platform lint result.
+
+Both **own ten-iteration CoreMark** seeds close native 0 with the unchanged
+reference CRCs and exactly **4,767,218 / 4,753,406 ticks**, respectively. The
+independent `coremark/audit.json` verifies 6,294 source/input pins, actual CPU
+affinity, V retirement, native wait/EOF/reaping, retained supervisor invocation
+`6215de9ba01f41038c7dd7df82ca2070` and zero OOM. This establishes no clock
+regression in these matched diagnostics. They are duration-invalid runs, not
+new qualified scores or a standard-suite pass. The full-PC candidate remains
+gameplay-unmeasured; no FPGA rebuild or board programming occurred.
 
 NaNs/unsupported encodings, all unmasked arithmetic exception responses,
 legacy-memory FST, delayed #MF delivery and memory-fault transactional ordering
