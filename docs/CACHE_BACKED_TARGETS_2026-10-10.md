@@ -184,8 +184,8 @@ The newest model **`343f0ccd`** (`ventium-ic-prefix-soc.ApbJoeMH`) replaces
 16 repeated successor-byte tag lookups with two shared line probes. It retains
 all performance fixes, UV/system/relocated fast paths, cache/transport geometry,
 and original guest media. Its short CoreMark runs preserve both CRC sets and
-exact 4,767,218 / 4,753,406 ticks. It has **no qualified 900-iteration score or
-gameplay IPC yet**; it cannot inherit either parent's performance acceptance.
+exact 4,767,218 / 4,753,406 ticks. Both own 900-iteration scores are now qualified
+below; it still has **no gameplay IPC** and cannot inherit its parent's window.
 Source/export and closed corner-case tests: [IC_PREFIX_EXPORT.md](../fpga/IC_PREFIX_EXPORT.md).
 
 Its own cold standard suite started at 10:45 UTC; actual native executable,
@@ -204,7 +204,18 @@ candidate runs remain independent. Exact-source full synthesis closed native 0
 at 11:07:22 UTC, with **221,918 LUTs versus 220,699** for its immediate parent.
 The +0.5523% whole-design regression does not confirm the isolated local saving.
 The 40 MHz core constraint is not a claimed achieved frequency. Read-only
-mapped-logic/project-clock inspection follows; no new route has been launched.
+mapped-logic/project-clock inspection is recorded in the fetch audit; no new
+route has been launched.
+
+At **11:45 UTC**, both `343f0ccd` 900-iteration seeds are closed and separately
+audited: **428,186,037 / 427,022,738 ticks**, **2.101890118 / 2.107616105 CM/MHz**.
+Both unchanged five-CRC sets match, actual guest duration exceeds ten seconds,
+native exits are 0 with EOF/reaping, V retirement is present, all 3,160 pins per
+seed remain stable and OOM counters are zero. Host durations 3,524.71 / 3,399.18
+seconds are within the unchanged 60-minute cap. Evidence is its own two
+`coremark-900-*/audit.json` files, not the earlier parent's results.
+Quake/Win95 continue. The newer two-consumer `751139e1` does not inherit these
+scores or boot acceptance.
 
 Unmodified generic verification remains **red**: terminal/bounded-observation
 record discrepancies and cycle-band failures. No golden records, field masks
