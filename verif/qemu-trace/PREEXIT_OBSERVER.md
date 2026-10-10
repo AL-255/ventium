@@ -1,10 +1,11 @@
 # Actual terminal-state observation — October 9
 
 **Verification proposal, not a processor/performance fix or a green generic
-gate.** Latest verified gameplay remains **0.37798811 total U+V IPC**, model
-`4b5fb92f`, cycles **1.2–1.3B**, predating the FP/under-fill, LRU and XPM-fidelity
-candidates. Their gameplay is unmeasured. Current-core direct-memory CoreMark
-is **2.10736 / 2.11041 CM/MHz**; FPGA throughput and 0.48 gameplay IPC stay open.
+gate.** Latest verified gameplay is **0.49083588 total U+V IPC**, model
+`86731249`, cycles **1.2–1.3B**, predating the pending, unmeasured x87 C1 repair.
+Full direct-memory CoreMark is **2.107843209 / 2.110905243 CM/MHz** on
+`b5453f16`; cache-backed throughput, full timedemo and FPGA acceptance remain
+open. Historical results below retain their original build/window scope.
 
 ## Problem and implementation
 
@@ -154,3 +155,17 @@ not compared by this witness. Thus the `tx_fprem` terminal discrepancy cannot
 be closed merely by extending its old quotient-flag mask. No masks were changed.
 Latest verified gameplay is now0.49083588 U+V IPC on `86731249`, cycles1.2B–1.3B;
 that measurement does not close this correctness issue.
+
+### FXCH throughput fixture corrected — October 10
+
+The original `mb_fxch` had no initial stack partner; it was not a legal
+ordinary-throughput workload. One setup `FLD1` and one teardown `FSTP ST(0)`
+keep its unchanged loop within depths 1–8. Its stack-fault/value masks are now
+removed, not extended. On unchanged `b5453f16` UV-fast/AXI, all 926 records
+including the true terminal record compare without added masks. The original
+still fails unmasked at its first FXCH and is retained, with separate invalid
+exchange coverage in `px87stk` and the shared-FP testbench.
+See [the fixture evidence](../tests/mb_fxch/STACK_FIXTURE.md).
+
+This is not a rerun of all 108 programs, a repair of `tx_fprem`, or canonical
+gate acceptance. The observer remains opt-in; timing bands are unchanged.
