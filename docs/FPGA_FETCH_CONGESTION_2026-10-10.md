@@ -233,6 +233,79 @@ Read-only comparison: `ventium-ic-buffered-netlist-audit.o1OrEevL`, controller
 cap, 8 GiB RAM / 4 GiB swap. No optimization, placement, routing, clock changes
 or bitstream output. No new routed frequency or hardware acceptance.
 
+## Successor-byte lookup: the newly enabled duplication
+
+The closed native netlist comparison (`ventium-ic-buffered-netlist-audit.o1OrEevL`)
+took 87.57 seconds, native 0, stable DCPs, 3,263,479,808 bytes peak RAM, no
+swap/OOM. Reconstructed `u_icache` attribution rises **54,033 → 83,353 LUTs**;
+L1D rises only 6,960 → 7,164 and AXI master 431 → 578. Reconstructed boundaries
+absorb neighboring core logic and are not independent module costs.
+
+The prefix/EX performance extension activates **16 generic `ic_byte` calls**
+at `p54_prefix_ex_flin+i`. Each independently indexes the full tag metadata
+and selects a returned line. Native isolated RTL statistics show 32 separate
+256-bit muxes and 15 full-width address adders for this gather. This is a
+concrete duplication to remove, not evidence to disable prefix overlap.
+
+`prepare_prefix_integration.py` now produces a private, default-off
+`VEN_IC_PREFIX_SPAN` derivative. Two line probes share the successor's 16-byte
+gather, retaining ordered cache-way/bypass priority, returned set/way identity,
+A priority, collision rejection, stale-A fallback and ternary X-merging.
+No new ports, cache state, latency or admission/retirement permission. The
+existing system/relocated prefix overlap and UV-fast mode remain enabled.
+Full-width `base+0` deliberately preserves the original arithmetic's unknown
+address behavior. The default-off full preprocessed core token stream is
+identical to its parent (only whitespace ignored; no comments/RTL discarded).
+
+Closed evidence under external scratch:
+
+- `ventium-ic-prefix-leaf.wxaN00ze/leaf`: **213,664 + 213,632 = 427,296** native
+  four-state byte comparisons, bypass on/off, 11.97 seconds. All sets/offsets,
+  full address wrap, duplicate tags/bypass, returned identities/collisions,
+  stale bytes and directed X/Z inputs. **18 fixed-address update checks per
+  mode**, with no address pulse or manual DUT recomputation. Native 0, actual
+  affinity, children reaped, immutable inputs, retained supervisor
+  `6a00a58472834ea397f0eaeaf74ebc13`.
+- `ventium-ic-prefix-negative.uy08SwlM`: three independent wrong implementations
+  (stale-B fallback, reversed way priority, removed full-width X arithmetic)
+  each fail natively at the specifically required fixture, not by timeout or
+  compile error. Original candidate/positive evidence unchanged.
+- Preparation-tool suite: **15 tests pass**, including refused width, consumer
+  state/index, marker, duplicate and repeated-application drift.
+- `ventium-ic-prefix-core.v5Uu6dx1`: model **`bdfa17b4`**, native build 0 in
+  15.25 seconds, six fatal structural classes, 32 bounded compiler jobs,
+  private harness/current generated-header ownership and stable source pins.
+- Its `prefix-matrix`: **384 cold paged fixtures**, six instruction/veto kinds,
+  flat/relocated clients and every line offset. **1,536 full QEMU comparisons
+  plus 1,536 cycle runs**, AXI latencies 0/7, actual V-retirement and overlap
+  witnesses, unchanged EX floors. All **768 matched entire cycle-record lists
+  are identical**, native expected exits, 39.69 seconds, stable pins. This is
+  not merely equality of final clock totals. Supervisor
+  `88a333995b2d4c75bffc4e9e6a989c26`.
+
+Isolated same-interface native area (`ventium-ic-prefix-area.HxnkxgUE`):
+
+| Resource | Original successor gather | Shared successor gather |
+| --- | ---: | ---: |
+| Combining-adjusted CLB LUTs | 27,949 | **4,640** |
+| Raw LUT primitives | 27,949 | 4,769 |
+| MUXF7/8 | 19,855 | 2,463 |
+| CARRY8 | 124 | 12 |
+| Registers / BRAM / DSP | 0 | 0 |
+
+**83.40% local CLB-LUT reduction**, not an additive or whole-chip projection.
+Same Vivado 2025.2, part and logic-only OOC objective; no timing/placement.
+Native 0 in 87.37 seconds, peak RAM 4,392,386,560 bytes, zero swap/OOM,
+unchanged pins; controller `db02add2c23d4eb5aa0bfa7290f81974`.
+Full-PC integration is being built in `ventium-ic-prefix-soc.ApbJoeMH`.
+Its gameplay, whole-chip area and FPGA acceptance remain unmeasured.
+
+The generic gate remains an independent red obligation. Bare synthesized DCPs
+have **no clocks loaded** in either profile: project XDCs must be loaded via
+`open_run synth_1` for clock admission, as required by the existing implementation
+launcher. The read-only bare-DCP comparison made no timing/frequency claim and
+did not create or modify a clock to hide the generated-PS-XDC warning.
+
 ### Recoverable scratch cleanup
 
 137 inactive September `.snap` files from the old external `ventium_run` tree
