@@ -81,9 +81,52 @@ Quake flow is running with unchanged media and completion checks, native
 PID 201252 on CPU27, invocation `dc6c0bb3294b4056a2015a9a29ab9c21`. Its
 `admission-audit.json` rechecks 244 source and 17 runtime pins and no OOM.
 
-Self-modification, 16-bit-specific faults/events, generic-gate repair and the full
-standard suite remain promotion requirements. No gameplay measurement exists
-for either new core or SoC candidate. Latest
-verified gameplay on the older `86731249` is **0.49639177 total U+V IPC**, cycles
-2.6B–2.7B; all 1.2B–2.7B windows average **0.47400567**, below sustained 0.48.
+16-bit-specific faults/events, the remaining SMC oracle discrepancy below,
+generic-gate repair and the full standard suite remain promotion requirements.
+No gameplay measurement exists for either new core or SoC candidate. Latest
+verified gameplay on the older `86731249` is **0.49722017 total U+V IPC**, cycles
+2.9B–3.0B; all 1.2B–3.0B windows average **0.47771903**, below sustained 0.48.
 Full timedemo and FPGA qualification remain open.
+
+## Self-modifying code and oracle correction
+
+`sfetch16-smc.S`, selected by `run-sfetch16-demand.py --scenario smc`, repeatedly
+rewrites real RAM code between a three-byte `MOV AX,imm16` and three one-byte
+NOPs. Prefixes and line/page positions vary; far CALL/return uses real guest
+instructions. Real, protected16 and paged16 modes run with caches enabled and
+finish with an actual 32-bit U/V pair. No debugger writes or state injection.
+
+The full matrix has **1,152 fixtures**, all 32 line offsets, six prefix counts,
+both interior/page-tail placement and all three modes. The first full run
+retains **FAIL**: 1,064 fixtures / 4,256 A/B measurements pass, 87 fixtures fail
+the free-running QEMU self-check, and one GDB listener startup fails. Fixed,
+unique per-case ports outside the host's ephemeral range replace recycled
+ephemeral ports; QEMU startup stderr is now retained. The missing fixture passes
+unchanged in the targeted rerun, with real AXI activity checked.
+
+All **87** execution failures have exactly this shape: the instruction starts
+with unchanged prefixes on page 1, while every modified byte is on page 2.
+Free-running pinned QEMU executes the old MOV after it has been replaced by
+NOPs (exit135), including with one-instruction TBs. Stepped QEMU executes the
+new bytes correctly. Both RTL models match its complete trace at AXI latencies
+0/7 on all 87 cases (**348 diagnostic A/B measurements**, native exit133,
+zero faults, actual U/V). This is evidence of a QEMU code-cache invalidation
+discrepancy, **not a waived free-running gate or a standard-suite pass**.
+Investigate second-page TB invalidation; do not modify the guest to hide it.
+
+Independent `smc-coverage-audit.json` accounts for all **4,608** A/B measurements:
+1,065 ordinary fixture passes and 87 diagnostic-only fixtures. It verifies
+actual backing-service counters and V pairing in every selected artifact.
+`smc-full/`, `smc-open-diagnostic/`, `smc-port-rerun/` and
+`external/tmp/ventium-smc-qemu-diag.6lXlSy0p/` retain receipts and failures.
+Closed full-corpus case data is losslessly archived with every file rehashed
+before removing unpacked copies; extract `smc-full/cases.tar.gz` to replay it.
+
+The tests also exposed wrong instruction-byte metadata in the system golden
+collector: QEMU's g-packet omits CS.base, but the collector used `selector<<4`
+even in protected mode. It now observes the actual hidden CS cache using a
+fixed read-only monitor query, with six fail-closed protocol tests. Across 24
+identical BIOS images, **3,800 architectural records are unchanged** and 2,304
+byte-metadata records are corrected. The 24-fixture differential and all 88
+fetch-fault checks pass again (`observer-smoke/`, `boundary-observer/`). No
+record trimming, flag-mask changes or QEMU binary changes are involved.

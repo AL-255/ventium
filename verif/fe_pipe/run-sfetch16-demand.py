@@ -41,6 +41,19 @@ def save(p, value):
         json.dump(value, f, indent=2)
 
 
+def assign_gdb_ports(cases, base, ephemeral_start):
+    """Unique per-case ports outside the host's auto-assigned client range."""
+    assert cases and len(set(cases))==len(cases), 'empty or duplicate cases'
+    assert 1024 <= base and base+len(cases) <= ephemeral_start, 'GDB/ephemeral range overlap'
+    return {case:base+i for i,case in enumerate(cases)}
+
+
+def axi_activity(stdout):
+    rows=re.findall(r'^\[L1DPERF\] fill cycles=(\d+) backing-wait=(\d+) backing-ack=(\d+)$',stdout,re.M)
+    assert len(rows)==1 and int(rows[0][0])>0 and int(rows[0][2])>0, 'inactive/missing AXI backend'
+    return tuple(map(int,rows[0]))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--control', type=Path, required=True)
@@ -49,6 +62,8 @@ def main():
     parser.add_argument('--offset', type=int, action='append')
     parser.add_argument('--full', action='store_true')
     parser.add_argument('--cache-policy', choices=('reset','enabled'), default='enabled')
+    parser.add_argument('--scenario', choices=('demand','smc'), default='demand')
+    parser.add_argument('--port-base',type=int,default=20000)
     parser.add_argument('--workers', type=int, default=4, choices=range(1, 33))
     args = parser.parse_args()
     scratch = Path('/home/yukidama/external/tmp').resolve(strict=True)
@@ -69,7 +84,7 @@ def main():
         defs = set(re.findall(r'\+define\+(\w+)', command))
         assert ' --assert ' in command
         assert {'VEN_L1_AXI', 'VEN_SYS_FASTPATH', 'VEN_SYS_FASTPATH_RELOC', 'VEN_FE_PIPE',
-                'VEN_SEG_ENFORCE', 'VEN_IC_BRAM'} <= defs
+                'VEN_SEG_ENFORCE', 'VEN_IC_BRAM', 'VEN_L1D_PERF'} <= defs
         assert not {'VEN_SYS_FASTPATH_ALL', 'VTM_NO_DPI', 'SYNTHESIS', 'VEN_UOPCACHE'} & defs
         profiles[name] = defs
         pins.update({str(p): sha(p) for p in (model, stamp)})
@@ -79,7 +94,9 @@ def main():
         pins.update(closure)
         pins[str(receipt)] = sha(receipt)
     assert profiles['candidate'] == profiles['control'] | {'VEN_SFETCH16_DEMAND'}
-    source = HERE/'sfetch16-demand.S'
+    source = HERE/('sfetch16-demand.S' if args.scenario=='demand' else 'sfetch16-smc.S')
+    if args.scenario=='smc':
+        assert args.cache_policy=='enabled', 'SMC tests require real cache-enabled execution'
     linker = REPO/'verif/sys/tests/ppage/ppage.ld'
     qemu = REPO/'ventium-refs/07-p5-emulation-harness/build/qemu/build-sys/qemu-system-i386'
     for p in (Path(__file__), source, linker, qemu, REPO/'verif/qemu-trace/gen_trace.py',
@@ -89,14 +106,19 @@ def main():
     shapes = [(0,p) for p in (0,3,4,7,11,14)] + [(1,p) for p in (0,1,2,5,9,12)] + [(2,p) for p in (0,1,2)]
     if not args.full:
         shapes = [(0,0), (0,14), (1,2), (2,2)]
+    if args.scenario=='smc':
+        shapes = [(1,p) for p in ((0,1,2,5,9,12) if args.full else (0,12))]
     cases = [(m,k,p,o,t) for m in range(3) for k,p in shapes for o in offsets for t in (0,1)]
+    ephemeral_start=int(Path('/proc/sys/net/ipv4/ip_local_port_range').read_text().split()[0])
+    ports=assign_gdb_ports(cases,args.port_base,ephemeral_start)
     save(args.out/'started.json', dict(pins=pins, cases=cases, models={k:str(v) for k,v in models.items()},
         invocation=os.environ.get('INVOCATION_ID'), unix=time.time(), workers=args.workers,
-        cache_policy=args.cache_policy))
+        cache_policy=args.cache_policy,scenario=args.scenario,port_base=args.port_base))
     # Retain exact executed fixture/driver bytes even if a later test adds
     # coverage. Live pins still must remain unchanged throughout THIS run.
     shutil.copyfile(Path(__file__),args.out/'executed-runner.py')
     shutil.copyfile(source,args.out/'executed-fixture.S')
+    shutil.copyfile(REPO/'verif/qemu-trace/gen_trace.py',args.out/'executed-generator.py')
     env = {k:v for k,v in os.environ.items() if not k.startswith(('VEN_', 'VTM_', 'TB_', 'QEMU_', 'AXI_'))}
     env.update(TMPDIR=str(args.out), PYTHONDONTWRITEBYTECODE='1')
     # A golden job owns a Python driver, timeout and multi-threaded QEMU, not
@@ -138,14 +160,21 @@ def main():
                    if len(p := line.split()) == 3 and p[0] != 'U'}
         assert image.stat().st_size == 65536 and symbols['hot_instruction'] % 32 == offset
         assert symbols['hot_end']-symbols['hot_instruction'] == prefix+[1,3,13][kind] <= 15
+        hot_pc = symbols['hot_instruction']-0xf0000
+        hot_cs = 0xf000 if mode==0 else 0x18
+        if args.scenario=='smc':
+            hot_pc,hot_cs = symbols['hot_instruction'],symbols['hot_cs']
+            assert hot_cs==(0x900 if mode==0 else 0x28)
+            assert symbols['hot_physical']==0x9000+hot_pc
+        is_hot = lambda r: int(r['pc'],0)==hot_pc and int(r['cs'],0)==hot_cs
         if tail:
             assert symbols['hot_instruction'] % 4096 == 4096-32+offset
         run(leaf, 'free-qemu', [qemu, '-machine', 'pc', '-cpu', 'pentium', '-m', '64', '-bios', image,
             '-display', 'none', '-serial', 'none', '-monitor', 'none', '-no-reboot', '-no-shutdown',
             '-device', 'isa-debug-exit,iobase=0xf4,iosize=0x04'], 133)
+        port=ports[case]
         with socket.socket() as sock:
-            sock.bind(('127.0.0.1', 0))
-            port = sock.getsockname()[1]
+            sock.bind(('127.0.0.1',port)) # fail explicitly if an unrelated owner is present
         golden_path = leaf/'golden.vtrace'
         run(leaf, 'golden', [sys.executable, '-B', REPO/'verif/qemu-trace/gen_trace.py', '--qemu', qemu,
             '--system', '--image', image, '--image-mode', 'bios', '--cpu', 'pentium',
@@ -155,12 +184,19 @@ def main():
         assert int(gold.records[-1]['eax'], 0) & 255 == 0x42
         assert all(all(k in r for k in tracefmt.SYS_CR) for r in gold.records)
         if args.cache_policy=='enabled':
-            hot = [r for r in gold.records if int(r['pc'],0)==symbols['hot_instruction']-0xf0000]
+            hot = [r for r in gold.records if is_hot(r)]
             assert len(hot)==16 and all(int(r['cr0'],0)&0x60000000==0 for r in hot)
+        if args.scenario=='smc':
+            assert [bytes.fromhex(r['bytes'])[:prefix+3] for r in hot] == [
+                bytes([0x3e])*prefix+(bytes.fromhex('b83412') if i%2==0 else bytes.fromhex('909090'))
+                for i in range(16)], 'golden did not execute both rewritten byte sequences'
+            returns=[r for r in gold.records if int(r['pc'],0)==symbols['after_hot']-0xf0000 and
+                     int(r['cs'],0)==(0xf000 if mode==0 else 0x18)]
+            assert [int(r['eax'],0)&0xffff for r in returns]==[0x1234 if i%2==0 else 0x5678 for i in range(16)]
         measures = []
         for latency in (0,7):
             for name, model in models.items():
-                stops, traces = {}, {}
+                stops, traces, backing = {}, {}, {}
                 for observation in ('cycle-func','cycle'):
                     stem = f'{name}-lat{latency}-{observation}'
                     path = leaf/(stem+'.vtrace')
@@ -169,6 +205,7 @@ def main():
                         '--quiesce', '4096', '+ven_faultlog'], 133, latency)
                     trace = tracefmt.read_trace(str(path))
                     traces[observation] = trace.records
+                    backing[observation] = axi_activity(out)
                     assert [r['n'] for r in trace.records] == list(range(len(gold.records)))
                     assert [r['pc'] for r in trace.records] == [r['pc'] for r in gold.records]
                     check_faultlog.check_counts(check_faultlog.read_counts(out.splitlines()), {})
@@ -182,12 +219,16 @@ def main():
                         with (leaf/(stem+'-diff.log')).open('x') as log:
                             assert compare.compare_func(gold,trace,False,0xffffffff,False,20,log,sys_both=True)==0, (case,stem,'QEMU diff')
                 assert stops['cycle'] == stops['cycle-func'], 'observation changed clocks'
+                assert backing['cycle'] == backing['cycle-func'], 'observation changed AXI activity'
                 rows = traces['cycle']
-                hits = [i for i,r in enumerate(rows) if int(r['pc'],0)==symbols['hot_instruction']-0xf0000]
+                # Cycle records omit segment fields; full functional comparison
+                # above verifies CS, while this fixture keeps PC values unique.
+                hits = [i for i,r in enumerate(rows) if int(r['pc'],0)==hot_pc]
                 assert len(hits)==16, (case, name, 'hot instruction count', len(hits))
                 pairs = [r for r in rows if int(r['pc'],0)==symbols['pair_v'] and r.get('pipe')=='V' and r.get('paired')]
                 assert len(pairs)==1, (case,name,'missing actual UV pair')
                 measures.append(dict(case=case,model=name,latency=latency,records=len(rows),clocks=stops['cycle'],
+                    axi_fill_cycles=backing['cycle'][0],axi_backing_acks=backing['cycle'][2],
                     paired_v=len(pairs),hot_intervals=[rows[i]['cyc']-rows[i-1]['cyc'] for i in hits],
                     warm_loops=[rows[b]['cyc']-rows[a]['cyc'] for a,b in zip(hits[2:-1],hits[3:])]))
         save(leaf/'closed.json',dict(passed=True,measurements=measures,image_sha256=sha(image)))
