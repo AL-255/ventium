@@ -51,7 +51,10 @@ results below are retained measurements, not tests rerun for this report.
   in the directed A/B corpus. The 456 whole-core cases and 228,304 under-fill
   observations pass; the canonical gate still fails unchanged. Source-matched
   FPGA export and strict CPU lint pass. One bounded full synthesis started at
-  **22:56 UTC**; it has **no timing, gameplay or physical result yet**. The goal
+  **22:56 UTC**. Both original short CoreMark seeds also pass with exactly the
+  parent's 4,767,218 / 4,753,406 clocks (**0% short-workload throughput change**,
+  not new duration-valid scores). It has **no timing, gameplay or physical
+  result yet**. The goal
   remains **at least 40 MHz synthesized Fmax**, not merely a configured 40 MHz
   simulation clock. See [the L1 evidence](../fpga/L1_LEGACY_CAPTURE_CUT.md).
 

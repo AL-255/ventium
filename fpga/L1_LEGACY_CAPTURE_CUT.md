@@ -110,7 +110,23 @@ from `cf1b3b0b` is the same L1 predicate. All **102 shared RTL inputs** match
 the directed model; all 154 simulation defines and posted-16 transport remain
 unchanged. Native build exit 0 in 14.36 s, private host-object/header ownership
 checked. The inherited 98 platform structural warnings are not lint passes.
-This model has no CoreMark, gameplay or Win95 acceptance yet.
+This model has no duration-valid CoreMark score, gameplay or Win95 acceptance
+yet. Both short cold-boot CoreMark seeds now close with native exit 0 and
+original CRCs, with **exactly unchanged parent clocks**:
+
+| Seed (10 iterations) | Parent clocks | Candidate clocks | Actual V retirements |
+| --- | ---: | ---: | ---: |
+| Performance | 4,767,218 | 4,767,218 | 1,055,307 |
+| Validation | 4,753,406 | 4,753,406 | 1,054,254 |
+
+The independent `coremark/audit.json` rereads complete consoles, verifies the
+real executable/argv/CPU-11 affinity, both reaped native children, original
+disks/ROMs and **8,982 source pins**. No OOM; scope peak 123,510,784 bytes.
+Controller invocation `227fde438bee451fbd8d7bf7cbd52ad6` is exited, native 0.
+Audit SHA-256:
+`a2b1599886d155d3dfe28502f5993aae4bcdc105f4d9dc5bea437391a5e4c144`.
+This is **0% measured throughput change on the short workloads**, not a new
+duration-valid CM/MHz score, full-suite pass or FPGA pass.
 
 [The exporter](freeze_l1_capture_rk_candidate.py) freezes that model under
 `ventium-l1-capture-fpga40.78luWDQ2`. Manifest SHA-256:
@@ -134,6 +150,16 @@ unchanged logic-only mapping profile, one job, **8 GiB RAM / 6 GiB swap**, a
 10 GiB free and more than twice the parent's measured 1,227,014,144-byte disk
 growth above that floor. No place/route or programming is started by this
 controller. Completion, area and native-clock timing are still pending.
+
+A retained coordinator now waits on that **exact live synthesis invocation**,
+not a log timestamp: `ventium-l1-capture-audit-queue-oct10.service`, invocation
+`a94c850c8cdd4cba8729fef1105ebded`. Only after successful native closure and
+independent source/DCP auditing may it start the read-only clock audit under
+`ventium-l1-capture-clock.c0os0diB`. It opens both original projects/synthesis
+runs with their original XDC, compares the actual V-response capture endpoint
+and overall core paths, and checks clock objects, black boxes and structural
+DRC. It neither replaces a live Vivado family nor authorizes place/route or
+deployment. Prepared scripts are pinned; no result is presumed from the queue.
 
 ## Resource handling and remaining work
 
