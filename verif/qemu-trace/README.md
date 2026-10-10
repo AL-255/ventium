@@ -20,11 +20,24 @@ single-step the guest over RSP and read all registers after each instruction.
 The client speaks RSP **directly over a TCP socket** — there is **no dependency
 on a host `gdb` binary** and **no third-party Python packages** (stdlib only).
 
+For system traces, optional instruction bytes are read at the actual hidden
+`CS.base + EIP`. When QEMU's i386 register packet omits `CS.base`, the collector
+uses the fixed read-only `monitor info registers` query before each instruction.
+It does not guess `selector << 4`, reconstruct the base from a possibly changed
+descriptor table, or cache it across same-selector reloads. Missing, ambiguous,
+or selector-inconsistent replies fail closed. This also handles the special
+reset CS base. The query does not change guest state, retirement records, or
+comparison masks; `--no-bytes` and user-mode collection do not use it.
+Host protocol checks: `python3 -B -m unittest discover -s verif/qemu-trace
+-p test_system_cs_observer.py` from the repository root. Previously generated
+system traces can contain incorrect opcode-byte metadata; regenerate required
+goldens deliberately rather than editing their recorded fields.
+
 ## Usage
 
 For the opt-in **private** terminal-state observer and its still-failing generic
-subgate, see [PREEXIT_OBSERVER.md](PREEXIT_OBSERVER.md). The canonical oracle and
-default producer behavior below are unchanged.
+subgate, see [PREEXIT_OBSERVER.md](PREEXIT_OBSERVER.md). That experiment does not
+change the canonical QEMU binary or its terminal-state behavior.
 
 ```
 gen_trace.py --qemu <path> --elf <file> --out <trace.vtrace>

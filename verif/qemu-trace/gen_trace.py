@@ -437,6 +437,37 @@ class RSPClient:
         except ValueError:
             return None
 
+    def read_system_cs_base(self, selector: int):
+        """Observe the actual hidden CS cache, without changing guest state.
+
+        QEMU 8.2.2's i386 system g-packet has no CS-base register. A selector
+        shifted by four is NOT its protected-mode base (nor the reset hidden
+        base). Read the stopped CPU's cache, not its possibly edited GDT/LDT.
+        The command is deliberately fixed and read-only.
+        """
+        self.send('qRcmd,' + b'info registers'.hex())
+        chunks = bytearray()
+        while True:
+            reply = self.recv()
+            if reply == b'OK':
+                break
+            if not reply.startswith(b'O'):
+                raise RSPError('cannot observe hidden CS base: monitor reply %r' % reply[:80])
+            try:
+                chunks.extend(bytes.fromhex(reply[1:].decode('ascii')))
+            except (ValueError, UnicodeDecodeError) as exc:
+                raise RSPError('malformed monitor register output') from exc
+            if len(chunks) > 65536:
+                raise RSPError('oversized monitor register output')
+        matches = re.findall(rb'^CS\s*=([0-9a-fA-F]{4})\s+([0-9a-fA-F]{8,16})\s',
+                             bytes(chunks), re.M)
+        if len(matches) != 1 or int(matches[0][0], 16) != selector:
+            raise RSPError('missing/ambiguous or inconsistent hidden CS cache')
+        base = int(matches[0][1], 16)
+        if not 0 <= base <= 0xffffffff:
+            raise RSPError('system i386 CS base exceeds 32 bits')
+        return base
+
     def write_mem(self, addr: int, data: bytes):
         """Write guest bytes through GDB RSP's debug-memory path.
 
@@ -732,8 +763,11 @@ def generate_system(qemu, image, image_mode, out_path, max_insn, port,
     cmd = base + list(extra_args)
     if verbose:
         sys.stderr.write("[gen_trace] launching (system): %s\n" % " ".join(cmd))
-    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL)
+    # Keep the real startup/crash diagnostic instead of reporting only a later
+    # GDB connection timeout. The child owns its dup of this descriptor after
+    # the parent's context closes; no guest output or trace record is changed.
+    with open(str(out_path) + ".qemu.stderr", "w") as qemu_stderr:
+        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=qemu_stderr)
     rsp = None
     n_emitted = 0
     exit_info = None
@@ -789,19 +823,14 @@ def generate_system(qemu, image, image_mode, out_path, max_insn, port,
 
                 bytes_hex = None
                 if want_bytes:
-                    # Read at the LINEAR address: pc is the offset; in real mode
-                    # the fetch linear addr is (cs<<4)+eip, in protected/flat it is
-                    # cs_base+eip. The gdbstub 'm' command takes the *current*
-                    # translation, so reading at the cs-relative linear addr is
-                    # what we want — but the simplest correct read for both modes
-                    # is via the segment base we already sliced.
+                    # Read at the true pre-instruction linear address. The
+                    # normal i386 system g-packet omits CS.base; use the stopped
+                    # CPU's hidden cache instead of guessing selector<<4. Do
+                    # not cache by selector: a far reload can change its base.
                     cs_base = sysr.get("cs_base")
                     if cs_base is None:
-                        # Real mode (no cs_base reg) -> linear = (cs<<4)+eip.
-                        # Protected flat (cs_base present & 0) -> eip works too.
-                        lin = ((seg["cs"] << 4) + pc) & 0xFFFFFFFF
-                    else:
-                        lin = (cs_base + pc) & 0xFFFFFFFF
+                        cs_base = rsp.read_system_cs_base(seg["cs"])
+                    lin = (cs_base + pc) & 0xFFFFFFFF
                     mem_bytes = rsp.read_mem(lin, 15)
                     if mem_bytes:
                         bytes_hex = mem_bytes.hex()
