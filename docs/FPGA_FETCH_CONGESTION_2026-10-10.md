@@ -9,9 +9,9 @@ gameplay-unmeasured. REP events are not exact P54 macroinstructions.
 
 The expanded sharing stage below removes **66.0% of the measured local LUT
 cone**, with identical directed and short CoreMark cycles. This is not a
-whole-chip area or speedup claim. Full synthesis of its exact 40 MHz hardware
-export is now a separately bounded diagnostic; generic verification and
-full-suite/hardware acceptance remain open.
+whole-chip area or speedup claim. Both subsequent whole-design syntheses
+increase LUT use; the isolated savings do not establish FPGA compactness.
+Generic verification and full-suite/hardware acceptance remain open.
 
 ## Native checkpoint diagnosis
 
@@ -307,18 +307,67 @@ The [exact hardware export](../fpga/IC_PREFIX_EXPORT.md) contains 189 payloads
 and 148 ordered defines; the entire actual native compiler command, source
 closure, permitted deltas and real Tcl admission are independently checked.
 Strict hardware CPU lint closes native 0 with all six structural classes fatal.
-Whole-design synthesis began at 10:44 UTC in
-`ventium-ic-prefix-full-synth.7G1TINWD`, single Vivado family, 8 GiB RAM /
-6 GiB swap / 30-minute native cap, unchanged 40/100 MHz constraints and mapper.
-Compare against its **220,699-LUT immediate parent**, which differs only in
-the sharing cone; do not attribute all differences from the older 190,864-LUT
-performance profile to this change. No automatic route or deployment.
+Whole-design synthesis closed at **11:07:22 UTC**, native 0 in 1,391.73 seconds,
+in `ventium-ic-prefix-full-synth.7G1TINWD`. The independently audited result is
+**221,918 LUTs**, versus its **220,699-LUT immediate parent**: **+1,219 LUTs
+(+0.5523%)**, not an improvement. Registers 54,647 → 54,631; BRAM/DSP unchanged
+at 277.5/47. This comparison changes only the sharing cone and its flag, with
+identical mapping and 40/100 MHz constraints. It disproves extrapolating the
+83.40% isolated saving to the whole design; it also does not support attributing
+the earlier entire 29,835-LUT increase solely to this successor gather.
+All 3,516 pins remain stable, actual 148 defines / 147 source reads checked;
+8 GiB peak RAM plus 229,478,400 bytes swap, no OOM/resource stop. No route began.
+
+Read-only native project-clock and matched primitive-netlist audit closed
+in `ventium-ic-prefix-clock-audit.9Mt59oqx`, controller
+`b188faacceef4b7c80d854c21280f163`: native 0 in 157.19 seconds, 3,521 stable
+input pins, 4,302,340,096-byte peak RAM, zero swap/OOM. Independent `audit.json`
+checks retained supervisor, native report markers, both primitive sets and
+unchanged DCPs. Loaded original project clocks are **40 MHz core / 100 MHz PL**;
+zero black boxes and zero MDRV-1/LUTLP-1 violations. The worst **unplaced** core
+estimate is **18.09 MHz**, slack -30.284 ns, 54.987 ns data delay and 194 levels.
+Its 43.231 ns routing component is an estimate; this is not physical frequency
+or directly comparable to the old placed checkpoint. All 30 worst paths again
+start at EIP. No optimization, placement, routing, changed clock or bitstream.
 
 The generic gate remains an independent red obligation. Bare synthesized DCPs
 have **no clocks loaded** in either profile: project XDCs must be loaded via
 `open_run synth_1` for clock admission, as required by the existing implementation
 launcher. The read-only bare-DCP comparison made no timing/frequency claim and
 did not create or modify a clock to hide the generated-PS-XDC warning.
+
+### Second-consumer correction
+
+The first integration missed a **second sixteen-byte gather in an included
+task**, `core_int_retire.svh:retire_reference_integer`. It changed only the
+live decoder mux in `core.sv`. The unchanged retirement copy still uses
+`ibuf[i] <= ic_byte(p54_prefix_ex_flin + i)` and can keep the original network
+alive. In the matched native netlists, `ibuf`-named raw LUTs remain
+26,398 → 26,049. Reconstructed names alone are not proof of exact RTL area,
+but the source consumer omission is concrete and must be corrected before
+concluding that the two-probe implementation failed to compact the gather.
+
+`prepare_prefix_capture.py` changes only that nonblocking assignment's RHS to
+the already four-state-tested `ic_prefix_bytes[i]`, under the same default-off
+flag. All owner guards, loop bounds, q_* capture, effects, state transitions
+and clocks are unchanged. An explicit audit now requires **both** exact
+consumer substitutions; the old incomplete integration is a negative test.
+The source preparation suite has **19 passing tests**. No additional data port,
+register, latency, issue credit or global fallback is introduced.
+
+Private directed model **`7791051b`**, root
+`ventium-ic-prefix-capture-core.oPfI27fO`, builds native 0 in 18.72 seconds,
+strict six-class lint, stable inputs and private harness/header ownership.
+Default-off whole-core preprocessing preserves SHA
+`c5c1b22bbda9011aeea9ada6734086f648b096e406a944f93472b6c26d01390c`
+(whitespace only ignored, no discarded RTL/comment tokens).
+Its closed 384-fixture matrix passes **1,536 full QEMU comparisons + 1,536
+cycle runs**, both AXI latencies, actual V retirement and overlap witnesses;
+all **768 entire matched cycle-record lists are identical**. Native expected
+exits, children reaped, unchanged pins, 53.18 seconds; controller
+`0410bc55a67e414ea12c9db218e0504f`. Generic verification and the full-PC build
+are running separately. No full-design saving, new score or hardware pass is
+claimed for this correction yet.
 
 ### Recoverable scratch cleanup
 

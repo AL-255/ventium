@@ -182,8 +182,11 @@ argv, PID/starttime, supervisor/cgroup and CPU affinity are checked:
 
 All four are active at 10:49 UTC. The same duration/completion checks and
 resource bounds apply; no snapshot, guest patch or scripted input. Older
-candidate runs remain independent. Exact-source full synthesis is separately
-running with a 40 MHz core constraint, not a claimed achieved frequency.
+candidate runs remain independent. Exact-source full synthesis closed native 0
+at 11:07:22 UTC, with **221,918 LUTs versus 220,699** for its immediate parent.
+The +0.5523% whole-design regression does not confirm the isolated local saving.
+The 40 MHz core constraint is not a claimed achieved frequency. Read-only
+mapped-logic/project-clock inspection follows; no new route has been launched.
 
 Unmodified generic verification remains **red**: terminal/bounded-observation
 record discrepancies and cycle-band failures. No golden records, field masks
