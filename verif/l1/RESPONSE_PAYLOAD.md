@@ -72,7 +72,12 @@ The unchanged canonical `make verify` closes **native 2 / FAIL**: 7/108
 functional passes and 12/19 scored cycle-band failures, matching the parent's
 counts. Independent `verification-r2/generic-audit.json` rechecks 4,547 pins
 and confirms all 20 complete cycle-record lists equal the parent's. Neither
-microcase success nor unchanged parent failures are a generic pass.
+microcase success nor unchanged parent failures are a generic pass. A separate
+attempt to compare all functional records across the two independently seeded
+canonical runs was correctly rejected: `mb_accimm` starts with ESP
+`0x40800040` versus `0x408000d0`, each matching its own QEMU initial state.
+`functional-ab-limitation.json` retains that evidence; no ESP mask or record
+normalization was introduced. The fixed-reset system microcases are unaffected.
 
 The private full-PC backport in `ventium-response-payload-soc.ZMhPPhmY` builds
 native 0 in 19.038 seconds: model
@@ -80,7 +85,11 @@ native 0 in 19.038 seconds: model
 Only the tested L1 selector and numeric SRT-floor backport differ from the
 preceding full-PC source tree. It retains the 98 inherited platform structural
 warnings; this is not clean whole-platform lint. Both short CoreMark
-diagnostics are running. The candidate has no own qualified CoreMark score,
+diagnostics now close native 0 with unchanged CRCs and exactly
+**4,767,218 / 4,753,406 ticks**. The independent `coremark/audit.json` rechecks
+5,117 source/input pins, actual V retirement, native wait/EOF/reaping and no
+OOM. Their ten-iteration ratios **2.09765947 / 2.10375466** are duration-invalid
+diagnostics, not qualified scores. The candidate has no own qualified CoreMark score,
 gameplay, standard-suite closure, hardware synthesis, route or deployment.
 
 ### Current-code-owner corner

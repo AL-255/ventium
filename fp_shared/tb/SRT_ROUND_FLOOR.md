@@ -43,13 +43,17 @@ directed zero-cycle-cost result, not a gameplay speed measurement.
 
 The original observer still correctly exits **1** for the **456 unchanged C1
 failures**. Numeric success is not whole-observer acceptance. The actual
-unmodified AXI7/UV-fast `make verify` is now running in its own private output
-and golden-cache directories; no result is inferred before closure. No new
-full-PC/standard-suite run is launched on this model yet.
+unmodified AXI7/UV-fast `make verify` has closed **native exit 2 / FAIL**:
+7/108 functional passes, 101 failures, and 12/19 scored cycle-band failures.
+The independent `generic-audit.json` confirms all **20 complete cycle-record
+lists are identical to the parent**, with all 4,331 build pins stable. No
+mask, golden or band changed. The supervisor's exit 0 records successful
+orchestration only; its retained native gate receipt remains exit 2. No own
+full-PC/standard-suite qualification is granted.
 
-Current verified gameplay baseline is **0.49980509 U+V retirement-event IPC**,
-`bfb867f7`, clocks 3,000,065,237–3,100,065,237; all nineteen windows average
-**0.4907133389**. This newer repair has no gameplay measurement or standard-suite
+Current verified gameplay baseline is **0.49940993 U+V retirement-event IPC**,
+`bfb867f7`, clocks 3,200,065,237–3,300,065,237; all 21 windows average
+**0.4895819671**, retaining the new 0.45825794 dip. This repair has no gameplay measurement or standard-suite
 acceptance. The performance baseline's qualified scores are 2.101890118 /
 2.107616105 CM/MHz, not scores measured on this new derivative.
 
