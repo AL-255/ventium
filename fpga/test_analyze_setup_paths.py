@@ -76,7 +76,7 @@ class ReportTests(unittest.TestCase):
             (HEADER + PATH.replace('10.000 25.000', '10.000 24.000'), 'discontinuous'),
             (HEADER + PATH.replace('CARRY8 (Prop_CARRY8_CI_O[0])', 'unknown-format'), 'unparsed'),
             (HEADER + PATH.replace('FDRE r cpu/result_reg[3]/CE', ''), 'unparsed'),
-            (HEADER + PATH.split('required time')[0], 'required time'),
+            (HEADER + PATH.split('\n          required time')[0], 'required time'),
             (HEADER + PATH.replace('arrival time -28.000', 'arrival time -27.000'), 'footer disagrees'),
             (HEADER, 'no setup paths'),
         ]
