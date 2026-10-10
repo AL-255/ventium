@@ -307,6 +307,16 @@ not close the mouse requirement or modify the frozen processor candidate.
 
 ## Retained evidence
 
+Follow-up, 21:50 UTC: [register-only prefix factoring](PREFIX_EX_REGONLY.md)
+now has 663,700 actual-include equivalence checks and 384 cold QEMU system
+cases, with identical A/B architectural and retirement-cycle streams. A
+second read-only failed-checkpoint inspection confirms that the redundant
+EA/GPR-writeback dependency survived mapping on the reported critical cone.
+The private derivative has not been synthesized or exported to a new FPGA
+image; this frozen export remains unchanged. The canonical differential gate
+still fails, and neither physical acceptance nor a timing improvement is
+claimed. The diagnostic Vivado family exited normally.
+
 All roots below are under `/home/yukidama/external/tmp/`:
 
 - `ventium-zero-c1-fpga40.rQeGd6ln`: exported sources, manifest and source audit.
