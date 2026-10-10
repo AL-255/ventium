@@ -1,10 +1,73 @@
 # CoreMark backend diagnostic — October 9
 
 This is **not a new CoreMark score, standard-suite pass or FPGA measurement**.
-Latest verified gameplay is **0.44004644 total U+V IPC**, read-prime model
-`15f56054`, clocks **1,200,012,763–1,300,012,763**, predating combined FP work.
-Complete direct-memory CoreMark results remain **2.107861982/2.110913372
-CM/MHz** on REP model `cb4b2f84`, not the current candidate or board memory path.
+Latest verified gameplay is **0.49083588 total U+V IPC**, repaired-L2 model
+`86731249`, clocks **1,200,000,000–1,300,000,000**. The pending x87 repairs
+have no gameplay measurement. Complete direct-memory CoreMark results are
+**2.107843209/2.110905243 CM/MHz** on `b5453f16`, not a board-memory score.
+
+## Current-model repeat and exact backend delta — October 10
+
+The actual full-CoreMark binary `b5453f16` repeats the short diagnostic on
+the unchanged low-RAM ordinary entry images below. All four runs close with
+native exit0, all five CRCs correct, real V retirement, no canonical delivered
+fault, unchanged212 input pins, zero OOM and every child reaped. The supervisor
+also closes successfully. These are **10-iteration, insufficient-duration
+diagnostics**, not valid CoreMark scores. Neither AXI case uses bypass starts.
+
+| Seed | Direct clocks | AXI0 clocks | AXI0 diagnostic CM/MHz |
+| --- | ---: | ---: | ---: |
+| Performance | 4,821,818 | 5,241,779 | 1.907749258 |
+| Validation | 4,815,105 | 5,235,258 | 1.910125537 |
+
+Performance executes exactly3,661,024 instructions on both backends; validation
+executes3,656,168. The repeat reproduces the prior WBUF-admission model's
+clocks exactly. The full host optimization contributes **zero guest clocks**.
+This model contains WBUF admission; the gameplay/FPGA export does not. The
+standalone AXI model still lacks platform L2, posted16 transport and physical
+DDR, and retains its existing line-replay policy. Do not transfer these ratios
+to the full-PC or FPGA model.
+
+The performance-seed difference is **419,961 clocks**. Replacing the aggregate
+S_PIPE row with its exclusive first-arm counters gives this complete signed
+accounting; no clocks are counted twice:
+
+| Exclusive residency change (AXI minus direct) | Clocks | Share of net gap |
+| --- | ---: | ---: |
+| S_PIPE D-result wait | +325,523 | +77.5127% |
+| S_FETCH | +57,262 | +13.6351% |
+| S_LOAD | +31,396 | +7.4759% |
+| S_PIPE instruction bytes absent | +30,669 | +7.3028% |
+| S_PIPE address-generation interlock | +10,284 | +2.4488% |
+| S_STORE | +1,040 | +0.2476% |
+| S_PIPE ISSUE | −36,361 | −8.6582% |
+| Remaining states/arms together | +148 | +0.0352% |
+| **Total** | **+419,961** | **100% (rounding)** |
+
+D-result waiting splits220,840 load/104,683 store clocks. These are residency
+deltas, **not causal savings or cache-miss percentages**. Changed pairing and
+admission opportunities explain why positive waiting buckets can exceed the
+net gap. All unchanged rows, including1,324,018 S_EXEC clocks and88,785 prefix
+clocks, contribute zero. The raw full state and pipe totals each reconcile.
+
+The132,220 slow memory-EXT acknowledgements are a large population, but simply
+turning on the old `VEN_FAST_MEM_EXT` switch is not an acceptable optimization.
+Its original leaf/hot tests use an NP two-clock occupancy model; the current
+P54 profile deliberately requires the documented three execution clocks plus
+the opcode-prefix clock. See the AP-500 finding in
+[the cycle survey](../../docs/P54_COREMARK_CYCLE_SURVEY_2026-09-29.md), and the
+explicit exclusion in `ao486-sim/Makefile`. Preserve that timing contract and
+complete the outstanding ownership/event tests before using the old experiment.
+No define, timing band, golden or production RTL changed in this diagnostic.
+
+Receipts: `external/tmp/ventium-current-coremark-host-r2.3ixLJTn1/`
+`backend-diag-oct10-r2/{plan.json,closed.json}`; closed SHA256
+`9c4a73a9f275032d4f7501eebd13a778f5902be57c6a50d7ebd5765a366eca50`.
+Invocation `8b9336814dbb428db08b9f1566267ea2`, explicit CPUs2/3,
+2GiB RAM/zero swap,420-second outer cap; actual whole diagnostic62.2seconds.
+The preceding r1 supervisor failed before launching a native: `AllowedCPUs`
+alone did not constrain `sched_getaffinity` on this host. R2 explicitly uses
+`taskset`; the failed first admission remains recorded, not overwritten.
 
 ## Corrected fixture and standalone store-policy driver
 
