@@ -88,3 +88,40 @@ goldens or bands are relaxed. Receipt: core `generic.log`, supervisor
 Inherited register-prefix/EX P54-resource qualification is also still open.
 Duration-valid CoreMark, error-free Win95 desktop, the original complete
 969-frame Quake timedemo and a routed/deployed FPGA remain required.
+
+## Exact one-million-clock follow-up
+
+`external/tmp/ventium-window-update-state.D1sDJfyQ` cold-repeats the same
+performance disk with the existing read-only VENSTATE/VENL1 observers. It
+preserves exactly **4,853,587** benchmark ticks and CRCs, closes native 0 in
+106.32 s, and records 7,000,000–7,999,999 with no gaps. The independent analyzer
+re-reads/hash-checks the complete compressed stream and reconciles every state
+count against the 7M/8M periodic counters. This is a core/bus observation, **not
+the complete retained-model state-delta format**.
+
+| Exclusive residence | Clocks | Percent |
+| --- | ---: | ---: |
+| Pipeline issue | 463,867 | 46.3867% |
+| Slow-dispatch arm | 60,883 | 6.0883% |
+| Pipeline load wait | 20,861 | 2.0861% |
+| Pipeline store wait | 8,188 | 0.8188% |
+| Paid prefix D1 | 18,094 | 1.8094% |
+| Misprediction penalty | 35,078 | 3.5078% |
+| Address-generation interlock | 33,984 | 3.3984% |
+| Registered I-cache read wait | 19,614 | 1.9614% |
+| Slow IMUL execution | 187,920 | 18.7920% |
+| Slow MOVSX execution | 54,220 | 5.4220% |
+| Other slow execution | 26,497 | 2.6497% |
+| Slow load | 50,486 | 5.0486% |
+| Decode | 11,189 | 1.1189% |
+| Slow store | 7,599 | 0.7599% |
+| Fetch | 1,520 | 0.1520% |
+| **Total** | **1,000,000** | **100%** |
+
+Joined L1 observations classify all 34,965 request-without-ACK clocks as
+cacheable resident hits in IDLE (20,861 pipeline reads, 8,188 pipeline writes,
+5,854 slow reads, 62 fetch-state reads). This is **not** an attribution of every
+clock to a cache cause, or permission to remove architecturally required P54
+occupancy/interlocks. CoreMark event IPC is 0.751684, not gameplay IPC. The trace
+motivated the later general byte memory-CMP decoder improvement, not a guest-
+specific fast path.

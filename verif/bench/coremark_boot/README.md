@@ -132,6 +132,10 @@ The subsequent [coherent saved-window writes](../../l1/WINDOW_WRITE_UPDATE.md),
 model `d37df58c`, reach **2.060331874 / 2.067073219**, removing 8,839 / 9,734
 more measured clocks with matching CRCs. These too are short diagnostics,
 not duration-valid scores or full-suite/FPGA acceptance.
+The next [shared byte memory-CMP decode](../../issue_uv/BYTE_MEMORY_CMP.md),
+model `54651745`, reaches **2.082666880 / 2.088782008**, saving a further
+52,051 / 50,279 clocks (**1.08405% / 1.05022%**). Both CRC sets match, but
+duration-valid, gameplay, generic-gate and FPGA qualification remain open.
 
 ### Protected-client PREFIX66 backport (private candidate)
 
