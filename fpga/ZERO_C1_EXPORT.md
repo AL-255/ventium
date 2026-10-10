@@ -1,7 +1,8 @@
 # Zero-C1 / BCD-sign FPGA implementation — October 10, 2026
 
-Status at **21:07 UTC**: synthesis, the native clock/structural audit and
-placement are closed; native `impl_1` continues. This is **not** a
+Status at **21:21 UTC**: synthesis, the native clock/structural audit, placement
+and both current-candidate CoreMark seeds are closed; native `impl_1` is routing.
+This is **not** a
 bitstream, timing sign-off, standard-suite pass or physical-board acceptance.
 
 Latest verified gameplay is **0.49366456 U+V retirement-event IPC** on older
@@ -111,9 +112,10 @@ or replacement implementation was used to respond to this warning.
 
 ## Current-candidate standard suite
 
-Four native simulation processes have been admitted with the exact `2b4d7a48`
+Four native simulation processes were admitted with the exact `2b4d7a48`
 binary, original guest inputs and no snapshots. Each has one actual CPU,
-2 GiB memory, zero swap and 128-task limits; no result is yet claimed:
+2 GiB memory, zero swap and 128-task limits. Both CoreMark seeds are now
+independently audited passes; the two cold guests remain live:
 
 | Component | CPU | Retained service | Invocation |
 |---|---:|---|---|
@@ -125,6 +127,25 @@ binary, original guest inputs and no snapshots. Each has one actual CPU,
 Each CoreMark seed has the authorized 60-minute limit and requires original
 CRCs plus a completed, valid-duration console result. The long guest services
 retain their bounded three-day envelope; startup is not gameplay acceptance.
+
+At 21:21 both 900-iteration CoreMark closures passed the independent
+`audit_soc_seed.py` checks: native exit zero, EOF, all children reaped, matching
+original CRCs, complete console, actual V retirement, no OOM and **7,989 input
+pins rehashed per seed**. Wall times were 52m24s / 51m23s, within the cap.
+
+| Current `2b4d7a48` seed | Guest TSC clocks | Guest seconds at 40 MHz | CM/MHz |
+|---|---:|---:|---:|
+| Performance | 428,186,037 | 10.704650925 | **2.101890118** |
+| Validation | 427,022,738 | 10.675568450 | **2.107616105** |
+
+Both counts exactly match the qualified parent: **0% CoreMark throughput
+change**, so these x87 repairs preserve this measured performance rather than
+adding a claimed speedup. This closes the current candidate's simulated
+CoreMark component, not Quake, Win95, the canonical gate or physical acceptance.
+Audit SHA-256 values, performance / validation respectively:
+`c4ce0c9bb147dabd85c14d5b61c34693fb16baa3782ac1d4d48c06725576e501` /
+`e8bf53716679c5847b0882a28662999cf1cc5a09a5bb0aa40ce6665d2aa01b11`.
+Receipts are under `ventium-zero-c1-soc.FTbYSn0L/coremark-900-{performance,validation}/`.
 
 After the new guests' actual identities were checked, the two superseded
 `4fb1bdae` cold runs received graceful host stop requests. Both native children

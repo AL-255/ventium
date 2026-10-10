@@ -24,11 +24,13 @@ results below are retained measurements, not tests rerun for this report.
 - **Newest candidate:** `2b4d7a48`, incorporating subsequent logic-sharing,
   x87 C1 and packed-BCD negative-zero corrections, has **no gameplay
   measurement or physical pass**.
-  Its own two short CoreMark diagnostics retain exactly the parent clocks
-  and CRCs; they are not duration-valid scores. Its matched FPGA source export
+  Its own two **900-iteration, duration-valid CoreMark seeds** now independently
+  pass at **2.101890118 / 2.107616105 CM/MHz**, with exactly the parent's TSC
+  clocks and original CRCs (closure checked 21:21 UTC). Thus these repairs have
+  **0% measured CoreMark throughput cost/gain**. Its matched FPGA source export
   and strict CPU-hierarchy lint pass. Synthesis and the native unplaced audit
-  have closed; implementation and its own standard suite are running, with no
-  new bitstream yet. See [the source-matched handoff](../fpga/ZERO_C1_EXPORT.md).
+  have closed; implementation is routing and its Quake/Win95 tests continue,
+  with no new bitstream yet. See [the source-matched handoff](../fpga/ZERO_C1_EXPORT.md).
 
 **There is no defensible measured “0.16 to 0.54, therefore 3.3× faster FPGA”
 claim.** Those endpoints differ in counter definition, platform, build and
@@ -504,11 +506,11 @@ to multi-issue, all to cache misses, or all to the FPU.
 
 | Requirement | Current evidence | Status |
 | --- | --- | --- |
-| Cache-backed simulated CoreMark ≥2.1 CM/MHz | `bfb867f7`, both 900-iteration seeds, original CRCs, >10 guest seconds | Met **for that model**, not automatically newer sources or hardware |
+| Cache-backed simulated CoreMark ≥2.1 CM/MHz | `bfb867f7` and newest `2b4d7a48`, both 900-iteration seeds, original CRCs, >10 guest seconds | Met **for these two models**, not automatically other sources or hardware |
 | Simulated Quake ≥0.48 IPC | All-window `bfb867f7` mean **0.498471873**; latest **0.49366456** | Observed measured prefix; not a completed-demo average or every-scene guarantee |
 | Gameplay CPI <1 / IPC >1 | Current aggregate event CPI approximately **2.006** | **Not achieved**; normalized macroinstruction accounting is also distinct |
 | Canonical differential gate on latest corrected source | **7/108 functional passes; 12/19 scored cycle failures** | **FAIL**, no masks/goldens/bands waived; directed/native x87 evidence does not replace the gate |
-| Latest `2b4d7a48` own short CoreMark | Both seeds pass CRCs, exact unchanged ticks, actual V activity, native 0/reaping, no OOM | Diagnostic pass only; its own 900-iteration seeds are still running |
+| Latest `2b4d7a48` own valid-duration CoreMark | **2.101890118 / 2.107616105 CM/MHz**, exact parent ticks, original CRCs, actual V activity, native 0/reaping, no OOM | Both simulated seeds independently closed at 21:21; not complete-suite or FPGA acceptance |
 | Newest matched hardware source | Manifest `b28ce916…`; 190 payloads, 156 hardware defines, 170 non-wrapper native source matches; strict CPU lint | Source/lint pass, **not bitstream or physical pass** |
 | Latest completed synthesis | Source-matched `2b4d7a48` export: **195,617 LUTs**, **21.786 MHz unplaced estimate**, requested 40 MHz core | Implementation running; not routed 40 MHz sign-off |
 | Win95 on final FPGA | Must cold boot to clean desktop and survive keyboard/mouse, menu/window interaction | **Pending** |
@@ -530,6 +532,7 @@ not copied solely from a stale status paragraph. Roots are below
 | Same model's valid CoreMark | `ventium-store-admit-soc.kW7Vv7Mr/coremark-900-performance/audit.json` and `coremark-900-validation/audit.json` |
 | Closed hardware 0.167991 profile | `ventium-bank64-perf-oct08.gz8UKP/board-profile-qualified.json`; bitstream SHA `fe9f539dfcfd9a1d909a33b561d5b7b6a0febf6e90c54b339f568d0cd496f71e` |
 | Newest source-matched full-PC build and short-seed audit | `ventium-zero-c1-soc.FTbYSn0L/{build-closed.json,coremark/audit.json}`; model SHA `2b4d7a48453fb8f901730d70b5731d9fb6a5459a83fc36f69241f441a7ab298e` |
+| Newest model's independently closed 900-iteration CoreMark seeds | `ventium-zero-c1-soc.FTbYSn0L/coremark-900-{performance,validation}/audit.json`; **2.101890118 / 2.107616105 CM/MHz**, exact parent TSC clocks, original CRCs, native zero, no OOM |
 | Newest FPGA source and strict CPU lint | `ventium-zero-c1-fpga40.rQeGd6ln/{input-manifest.json,audit.json}`; manifest SHA `b28ce916c8ce276546ac85384dd4959452aad439a14e283d1b2339692465b603`; `ventium-zero-c1-hw-lint.Jg7OncrJ/closed.json` |
 | Latest closed full synthesis and unplaced timing | `ventium-zero-c1-full-synth.yROXoFK0/audit.json`; `ventium-zero-c1-clock-audit.QVKu9JRQ/audit.json` |
 
