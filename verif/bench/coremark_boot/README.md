@@ -106,12 +106,12 @@ The independent 7M–11M steady benchmark interval has
 is 4.65% of all clocks, already inside S_PIPE; do not add it again. This is a
 residency description, not a proven cache-miss or causal-savings breakdown.
 
-Current verified **gameplay** IPC is **0.49843606**, model `958f7ec4`, clocks
-2,400,048,811–2,500,048,811.
-The fixed first window remains 0.49741357; all thirteen consecutive 100M windows
-beginning 1,200,048,811 average **0.47898937**, including 0.40860952 and
+Current verified **gameplay** IPC is **0.46829233**, model `958f7ec4`, clocks
+2,500,048,811–2,600,048,811.
+The fixed first window remains 0.49741357; all fourteen consecutive 100M windows
+beginning 1,200,048,811 average **0.4782252957**, including 0.40860952 and
 0.41837727 dips. This aggregate is below the 0.48 target. Latest audit:
-`external/tmp/ventium-sfetch16-latest-r5.675qsYCh/audit.json`.
+`external/tmp/ventium-sfetch16-latest-r6.13etykyJ/audit.json`.
 Real V retirements and raw
 endpoint frames are checked; no intervening window is excluded. This is not complete timedemo
 or physical-board qualification. New private FST/C1/RET/sharing derivatives
@@ -128,6 +128,10 @@ The later [register-prefix/EX experiment](../../fe_pipe/PREFIX_EX_SYSTEM.md)
 with IF-qualified INTR reaches **2.056586568 / 2.062922435** short ratios,
 model `252109e4`. It remains experimental, below target, insufficient-duration,
 unmeasured in gameplay and not period-correct P54/full-suite/FPGA acceptance.
+The subsequent [coherent saved-window writes](../../l1/WINDOW_WRITE_UPDATE.md),
+model `d37df58c`, reach **2.060331874 / 2.067073219**, removing 8,839 / 9,734
+more measured clocks with matching CRCs. These too are short diagnostics,
+not duration-valid scores or full-suite/FPGA acceptance.
 
 ### Protected-client PREFIX66 backport (private candidate)
 

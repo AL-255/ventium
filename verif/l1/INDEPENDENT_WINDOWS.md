@@ -1,10 +1,10 @@
 # Independent saved-window invalidation — October 10
 
 Private, default-off proposal. **Not standard-suite or FPGA acceptance.**
-Verified Quake gameplay is **0.49843606 U+V retirement-event IPC** on
-parent `958f7ec4`, clocks **2,400,048,811–2,500,048,811**. The thirteen-window
-average is **0.47898937**, below 0.48, with all intervening dips retained in
-`external/tmp/ventium-sfetch16-latest-r5.675qsYCh/audit.json`. This candidate has
+Verified Quake gameplay is **0.46829233 U+V retirement-event IPC** on
+parent `958f7ec4`, clocks **2,500,048,811–2,600,048,811**. The fourteen-window
+average is **0.4782252957**, below 0.48, with all intervening dips retained in
+`external/tmp/ventium-sfetch16-latest-r6.13etykyJ/audit.json`. This candidate has
 no gameplay measurement. REP elements are events, not P54 macroinstructions.
 
 ## Defect and fix

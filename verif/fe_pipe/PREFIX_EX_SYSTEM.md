@@ -1,11 +1,11 @@
 # Protected-client register-prefix/EX overlap experiment — October 10
 
 **Experimental, default-off, not production or FPGA acceptance.** Latest
-verified gameplay is **0.49843606 U+V retirement-event IPC**, parent
-`958f7ec4`, clocks **2,400,048,811–2,500,048,811**. All thirteen consecutive
-100M windows from 1,200,048,811 average **0.47898937**, including the new
+verified gameplay is **0.46829233 U+V retirement-event IPC**, parent
+`958f7ec4`, clocks **2,500,048,811–2,600,048,811**. All fourteen consecutive
+100M windows from 1,200,048,811 average **0.4782252957**, including the
 0.40860952 and 0.41837727 dips: sustained 0.48 is not achieved. Audit:
-`external/tmp/ventium-sfetch16-latest-r5.675qsYCh/audit.json`. This experiment has no
+`external/tmp/ventium-sfetch16-latest-r6.13etykyJ/audit.json`. This experiment has no
 gameplay measurement. Neither short CoreMark CRCs nor directed tests qualify it.
 
 `prepare-prefix-ex-system.py` extends the existing `VEN_P54_PREFIX_EX_CHAIN`
