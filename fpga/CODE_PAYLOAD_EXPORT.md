@@ -7,6 +7,27 @@ with the [tested code-buffer selector](../verif/l1/CODE_PAYLOAD.md). UV,
 system/relocated fast paths, full P5 L1s, 256 KiB platform L2, posted-16
 transport and the 40 MHz core / 100 MHz PL constraints remain enabled.
 
+## Required physical-board acceptance
+
+The October 10 user requirement explicitly includes **both Quake and Windows
+95 on the FPGA**, not only in simulation. Before calling this work accepted:
+
+- Deploy the exact candidate bitstream and matching host/debug software; record
+  hashes, board identity, measured core clock and UV + fast-pipe/paired-execution
+  evidence. No STEP, U-only or globally slow fallback may substitute for a pass.
+- Cold boot Windows 95 to a clean desktop, then exercise keyboard/mouse input,
+  menus and opening/closing a window. Retain before/after captures and error logs.
+- Run the complete Quake timedemo on the board, retain the final timedemo result
+  and full unmodified-frame capture, and report measured U+V gameplay IPC when
+  the deployed debug ABI supports it. Label primary-only counters explicitly.
+- Keep the canonical differential gates and complete simulation standard suite
+  as separate requirements; neither substitutes for these physical tests.
+
+**Both candidate FPGA tests are pending.** The older installed image and its
+historical Quake capture do not qualify this source revision. The shared-load
+C1 follow-up (`455f65c2` full-PC model) is not present in this document's frozen
+`4fb1bdae` hardware export; its separate source bundle is recorded below.
+
 The latest separately verified gameplay baseline is **0.53765810 U+V
 retirement-event IPC**, `bfb867f7`, cycles **4,500,065,237–4,600,065,237**.
 All 34 consecutive fixed-start windows average **0.496534277**; all earlier
@@ -112,3 +133,42 @@ but the remaining full differences and canonical acceptance remain open.
 An independently reproduced [host disk-write visibility bug](../ao486-sim/ven/DISK_WRITE_VISIBILITY.md)
 was repaired after this candidate was frozen. That host-only repair is not
 retroactively included in these running binaries or claimed as an RTL gain.
+
+## Shared-load C1 follow-up: source export, not FPGA acceptance
+
+The separately built full-PC model
+`455f65c2d69c7bc041c5e10236d1f277b35c74819297b8a3e0e85806a4023811`
+includes the [FLD/FILD/constant-load C1 repair](../fp_shared/tb/FLD_C1.md)
+and host disk-write flush. Its own short CoreMark audit passes both original
+CRC sets at exactly **4,767,218 / 4,753,406 ticks**, unchanged from the parent:
+**0% measured throughput change**. Native processes exited zero and were
+reaped; 7,314 input pins were rechecked, with no OOM. Ten iterations are not
+a duration-qualified score or a standard-suite pass.
+
+`freeze_fld_c1_rk_candidate.py` exports this model against the exact parent
+manifest, refusing profile drift or any hardware-source change other than
+the tested `fp_shared/ven_fp_top.sv` hash. It retains **190 payloads, 156
+hardware defines, 170 non-wrapper compiled-source matches, 117 filelist
+units and 49 include edges**. The 40 MHz core / 100 MHz PL constraints,
+P5 L1s, 256 KiB platform L2 and posted-16 transport are unchanged. The
+host-only flush does not become an FPGA RTL delta.
+
+Evidence under `/home/yukidama/external/tmp/`:
+
+- `ventium-fld-c1-soc.Ggbyni4b/{build-closed.json,coremark/audit.json}`.
+- `ventium-fld-c1-fpga40.STbXY3lg/{input-manifest.json,audit.json}`;
+  manifest SHA-256
+  `941c2bc788714125fa64e08a45f12ad65416f035fe20f06da316b2ccec8b248c`.
+- `ventium-fld-c1-hw-lint.XdixoAJt/closed.json`: strict CPU-hierarchy
+  hardware lint exits zero in 2.3569 seconds with stable inputs and all six
+  structural classes fatal. This is not whole-platform lint or synthesis.
+
+The actual wrapper Tcl contract passes 61 checks. Ten exporter unit tests
+(four new and six inherited parent tests) also pass. The exporter requires
+canonical input/output paths and a fresh empty external output directory;
+its `--help` lists the required parent, simulation and build-receipt hashes.
+
+The newest model has **no gameplay measurement, complete standard-suite pass,
+synthesis, routed bitstream or physical Quake/Win95 acceptance**. The latest
+verified gameplay remains the older `bfb867f7` result above, not a result for
+this follow-up. The canonical differential failures remain open.
