@@ -1,9 +1,59 @@
 # SRT exponent ownership and C1 matrix — October 9
 
-**Reproduced defects; proposed value repair is not yet compiled or promoted.**
-The frozen FPGA synthesis and live full-PC models are unchanged. Current verified
-gameplay is **0.49083588 U+V IPC**, `86731249`, cycles1.2B–1.3B. No gameplay
-measurement exists for the proposed rounding repair.
+**Private numeric backport; not promoted.** The original leaf now passes all
+912 value/exception/latency cases and reset cancellation. The historical
+pre-build investigation below is retained with its original scope.
+
+At **15:49 UTC October 10**, the newest directed UV-fast core `db83a397`
+reproduces the same four wrong values and 456 C1 failures with the actual
+L1/AXI backend at read/write latency seven. All 912 native-x87/QEMU values
+agree; native x87 C1 agrees with independent exact arithmetic. Real V
+retirement and normal guest exits are observed. The original diagnostic exits
+**1**, as it must; it is not a correctness pass. Evidence:
+`ventium-srt-floor-current.XYzJp8Rj/parent-observation/result.json`, supervisor
+`ea8606c232cf48f7a68380879f70e7a1`.
+
+[`prepare_srt_round_floor.py`](prepare_srt_round_floor.py) mechanically applies
+only the three numeric hunks to this latest candidate. Five host guard tests
+pass; the resulting engine is byte-identical (apart from its test module name)
+to the independently closed 912-case leaf. Both sequential blocks, all ports,
+recurrence, completion timing and the existing C1 behavior are unchanged. The
+new full-core build retains every performance/payload define and changes only
+`rtl/fpu/fpu_srt_div.sv`; it does not replace the shared/forwarded FPU wholesale.
+The numeric patch **does not fix C1** or waive the red canonical gate.
+
+The bounded worker `ventium-srt-floor-current-queued-oct10.service`, invocation
+`611fec2d6cd146389c1ea67e9ec196ab`, waits for the already-running native FPGA
+timing inspection. It then owns the independent clock auditor and requests
+the private full-core build, original 912-case observation and unchanged
+`make verify` with AXI7/UV-fast. Native build/gate caps remain 600 seconds;
+queue waiting is separate. Neither production RTL nor the frozen FPGA input
+is changed.
+
+At **16:00 UTC**, the strict full-core build closes native 0 in **17.50 seconds**:
+model `b1cb5dc8b58c4f671871455952d25c1827a41c856b692b81281b42a8f7d5232f`.
+Its independent `numeric-audit.json` verifies **4,331 stable build pins**, the
+one-file source delta and exactly unchanged defines. The unchanged ordinary-entry
+fixture now has **zero numeric mismatches in 912 cases**, fixing exactly cases
+160/198/464/502. Native/QEMU authorities, input ELF and every pre/post status
+word remain identical. Parent and candidate each take **532,305 clocks for
+10,062 retired instructions**, and all printed profile counters are byte-for-byte
+identical, including 21,008 backing ACKs and actual V retirement. This is a
+directed zero-cycle-cost result, not a gameplay speed measurement.
+
+The original observer still correctly exits **1** for the **456 unchanged C1
+failures**. Numeric success is not whole-observer acceptance. The actual
+unmodified AXI7/UV-fast `make verify` is now running in its own private output
+and golden-cache directories; no result is inferred before closure. No new
+full-PC/standard-suite run is launched on this model yet.
+
+Current verified gameplay baseline is **0.49980509 U+V retirement-event IPC**,
+`bfb867f7`, clocks 3,000,065,237–3,100,065,237; all nineteen windows average
+**0.4907133389**. This newer repair has no gameplay measurement or standard-suite
+acceptance. The performance baseline's qualified scores are 2.101890118 /
+2.107616105 CM/MHz, not scores measured on this new derivative.
+
+## Historical initial observation
 
 `run_srt_c1_observe.py` executes 912 finite FSQRT/FDIV cases on native host x87,
 pinned `qemu-i386 -cpu pentium`, and the actual current CoreMark model
