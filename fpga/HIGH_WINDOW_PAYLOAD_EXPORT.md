@@ -12,7 +12,8 @@ decision through `shadow_reuse` and current FP upper-word data. The new mux
 uses saved physical shadow ownership; the valid/ACK/permission/coherence
 contract is unchanged. It retains shadow priority for partial primary-bank
 captures. No new stage, stall, queue or arithmetic unit is introduced.
-This is a timing hypothesis, **not a measured frequency or area improvement**.
+The closed result below is a small improvement in an **unplaced estimate**,
+with higher LUT usage; it is not routed sign-off or a measured board clock.
 
 ## Exact source closure
 
@@ -45,7 +46,7 @@ identical complete cycle-record pairs, including unaligned/cross-page FP loads.
 Its canonical gate remains FAIL; all 20 canonical cycle streams equal its
 parent. No mask, golden state or cycle band was weakened.
 
-## Short diagnostics closed; bounded synthesis running
+## Short diagnostics and bounded synthesis closed
 
 `ventium-high-window-full-synth.5fvbD0Fa`, service
 `ventium-high-window-full-synth-oct10.service`, invocation
@@ -64,7 +65,41 @@ Only one Vivado family may start: the unchanged shared heavy-build lock,
 8 GiB resident / 6 GiB swap / 48-task envelope, one synthesis job, 30-minute
 native cap, 12 GiB initial disk reserve and live host/disk/OOM guards apply.
 The same `logic_only` mapper is used for comparison. This controller cannot
-place, route or program the board. No new synthesis result is claimed yet.
+place, route or program the board.
+
+Synthesis closes **18:01:25 UTC**, native 0 in **1,130.32 seconds**. Independent
+`audit.json` rechecks 5,977 source/input pins, all 155 actual native defines,
+148 native source reads, the closed DCP, original mapper and actual retained
+supervisor exit. There is no OOM: peak resident memory is 8,589,930,496 bytes,
+with 212,471,808 bytes peak swap. One critical warning and 1,564 warnings are
+retained, not hidden.
+
+| Resource | Parent | High-word selector | Delta |
+|---|---:|---:|---:|
+| LUTs | 195,679 | 196,505 | +826 (+0.422%) |
+| Registers | 54,613 | 54,610 | -3 |
+| BRAM tiles | 277.5 | 277.5 | 0 |
+| DSPs | 47 | 47 | 0 |
+
+This is **not an area saving**. Read-only clock inspection closes at 18:06:55
+UTC in `ventium-high-window-clock-audit.0WzF2wLr`, controller invocation
+`8b9ce5c4c4af4499b4892e33eca9c73c`, Vivado scope
+`bcff23611e37443f8c88c437106f8eed`. It runs only after synthesis closure and
+the FP-bundle compile, using the same exclusive heavy-build guard; the
+256.61-second wall time includes waiting for an existing directed observer.
+Independent `audit.json` verifies 5,981 input pins, original 40/100 MHz clocks,
+zero black boxes/structural DRC errors, 30 setup and 10 hold paths, and both
+parent/candidate primitive inventories. No synthesis, place/route or board
+operation is launched by that inspection.
+
+The new **unplaced frequency estimate is 21.362 MHz**, versus 21.130 MHz in
+the parent (+1.098%). Setup is -21.812 ns, hold -0.101 ns. The worst path
+still runs from EIP to shared SRT register enable: **160 logic levels,
+46.515 ns data delay** (9.911 ns logic / 36.604 ns estimated routing).
+It crosses next-memory decode/address/DTLB/lookup qualification and the
+current FP payload/conversion. The specific shadow-high selector cut did
+not eliminate this longer ownership/control cone. **40 MHz sign-off remains
+open**; neither a route result nor silicon tolerance is inferred.
 
 Preflight recovers **2,192,451,730 bytes** by losslessly archiving 60 closed
 compiler intermediates and 12,672 traces from four closed
@@ -73,11 +108,20 @@ unlinking loose generated files. Sources, native executables, logs, failed
 attempts, active runs and guest media remain. Per-root archive receipts record
 member hashes and restore commands. The disk-admission floor is not lowered.
 
+A later cleanup recovers **929,811,326 additional bytes** by losslessly
+archiving only twelve generated PCH files from three closed models and the
+closed three-profile SRT top test. All archives are byte-compared before
+loose files are removed; sources, executables, headers, objects, logs, test
+results and media remain. Per-root `closed-pch-archive-receipt.json` files
+contain hashes and restore commands. The first cleanup safely refused an
+incorrect full-PC executable basename after archiving two roots; its third
+target was separately resolved and completed, not broadly deleted.
+
 ## Performance boundary
 
-Latest verified gameplay is **0.50510994 U+V retirement-event IPC** on older
-`bfb867f7`, clocks **3,800,065,237–3,900,065,237**. All 27 consecutive windows
-from 1,200,065,237 average **0.4943896**, including every dip. That same older
+Latest verified gameplay is **0.52847961 U+V retirement-event IPC** on older
+`bfb867f7`, clocks **4,000,065,237–4,100,065,237**. All 29 consecutive windows
+from 1,200,065,237 average **0.496498649**, including every dip. That same older
 model's qualified CoreMark scores are **2.101890118 / 2.107616105 CM/MHz**.
 Neither measurement transfers to this gameplay-unmeasured export. Full
 timedemo, green differential gates, standard suite and physical FPGA remain

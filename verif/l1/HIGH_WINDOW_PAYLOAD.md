@@ -76,8 +76,11 @@ builds as `f59d75ad`, changing only this tested L1 file and one define from
 checks and CPU-hierarchy lint. It does not inherit the older gameplay score.
 Both short CoreMark diagnostics subsequently close native 0, independently
 audited with unchanged CRCs and exact 4,767,218 / 4,753,406 ticks. They are not
-duration-qualified scores. Its bounded synthesis diagnostic starts at 17:42 UTC;
-no hardware frequency or area result is yet available.
+duration-qualified scores. Its bounded synthesis closes at 18:01 UTC with
+**196,505 LUTs**, up 826 from the parent. Independent read-only timing
+inspection gives **21.362 MHz unplaced estimate** versus 21.130 MHz in its
+parent, still short of 40 MHz sign-off. This small estimated improvement
+does not establish a routed frequency or compensate for the area increase.
 
 ## Reproduce and acceptance boundary
 
@@ -92,9 +95,9 @@ Run `test_high_window*.py` with unittest discovery in this directory.
 adapted corpus. The only feature-admission change is this experiment's define;
 all original QEMU and cycle checks are preserved.
 
-Latest verified gameplay is **0.50510994 U+V retirement-event IPC** on
-older `bfb867f7`, clocks **3,800,065,237–3,900,065,237**; its full 2.7B-clock
-observed aggregate is **0.4943896**. That model's own duration-valid
+Latest verified gameplay is **0.52847961 U+V retirement-event IPC** on
+older `bfb867f7`, clocks **4,000,065,237–4,100,065,237**; its full 2.9B-clock
+observed aggregate is **0.496498649**. That model's own duration-valid
 CoreMark scores are **2.101890118 / 2.107616105 CM/MHz**. None transfers to
 this unmeasured candidate. Complete timedemo, green differential gates,
 standard suite and physical FPGA remain open; REP events are not P54

@@ -113,15 +113,24 @@ unchanged from the parent; existing failures are not waived. The full-PC
 derivative is `f59d75ad`, and its exact FPGA export passes source/profile
 checks and strict CPU-hierarchy lint. Both new short CoreMark seeds preserve
 the exact original CRCs and 4,767,218 / 4,753,406 ticks (duration-invalid);
-an independently gated synthesis diagnostic starts at 17:42 UTC. No new
-frequency or gameplay result is inferred from these passes.
-Neither its gameplay IPC nor its FPGA frequency is measured.
+its independently gated synthesis closes at 18:01 UTC: **196,505 LUTs**,
+up 826 from its parent. A read-only timing audit closes at 18:06 UTC with
+**21.362 MHz unplaced estimate** (parent 21.130 MHz), still a 160-level
+EIP-to-SRT-enable path. There is no routed clock, physical deployment or
+gameplay measurement for this candidate. [Closed evidence and retained
+area regression](../fpga/HIGH_WINDOW_PAYLOAD_EXPORT.md).
 The [hardware backport record](../fpga/RESPONSE_PAYLOAD_EXPORT.md) identifies
 the source bundle, two intended RTL deltas, native owner and resource guards.
 The separate current-source C1 derivative `fac8c522` closes 2,064 directed
 arithmetic/SRT checks, with all 20 complete cycle streams unchanged from its
 parent. Its canonical gate still fails; it is gameplay-unmeasured and not in
 the active hardware export. [Exact correctness boundary](../fp_shared/tb/ROUND_C1.md).
+The combined current-source FP bundle `643bb9e6` now passes **6,336** directed
+arithmetic and masked/register-FST checks, including a separately closed retry
+after an invalid test-port invocation. The unchanged canonical gate runs
+separately. A new 1,920-case unmasked memory-FST witness exposes **448**
+remaining control-model errors; a compact two-file repair is queued, not yet
+qualified. [Exact bundle, failure and repair scope](../fp_shared/tb/FP_CORRECTNESS_BUNDLE.md).
 Older timestamped results below remain historical evidence.
 
 The new dip is associated with **more slow-FSM work, not a larger total memory
