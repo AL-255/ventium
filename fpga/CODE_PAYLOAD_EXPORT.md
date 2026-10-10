@@ -1,6 +1,6 @@
 # Combined FP correctness / code-payload hardware candidate — October 10
 
-Status at **18:57 UTC: UNQUALIFIED, not deployed**. The new full-PC model is
+Status at **19:12 UTC: UNQUALIFIED, not deployed**. The new full-PC model is
 `4fb1bdaedb9f5afc06862a2872f1a07b5feade229da3e1c3127877e6ad8cf764`.
 It combines the [FP correctness repairs](../fp_shared/tb/FP_CORRECTNESS_BUNDLE.md)
 with the [tested code-buffer selector](../verif/l1/CODE_PAYLOAD.md). UV,
@@ -49,17 +49,25 @@ FAIL (7/108 functional passes, 12/19 scored cycle failures); its 20 cycle
 streams equal the parent. No golden, comparison mask or timing band changed.
 The code/primary duplicate-residency leaf coverage gap remains explicit.
 
-## Active native work; not completed results
+## Closed synthesis; active standard-suite work
 
-One bounded synthesis-only run started at **18:48 UTC**:
+The bounded synthesis-only run started at **18:48 UTC** and closed native 0
+after **1,313.50 seconds**, with unchanged inputs and no OOM:
 `ventium-code-payload-full-synth.dICMqhmp`, service
 `ventium-code-payload-full-synth-oct10.service`, invocation
 `f5a25cf3fd5247068d2ec027e9287a6b`; actual Vivado scope
 `7b37c9a39c5b4701835b9538245b9318`. It cannot place, route or program the board.
 The unchanged exclusive lock, one synthesis job, 8 GiB resident / 6 GiB swap
 envelope, 30-minute cap, 12 GiB initial disk reserve and live OOM/resource
-guards apply. Parent synthesis was 196,505 LUTs and **21.362 MHz unplaced
-estimate**. There is no new frequency or utilization result yet.
+guards applied. Independent `audit.json` rechecks 7,157 input pins, actual
+156 defines and native source closure. The candidate uses **196,627 LUTs,
+54,638 registers, 277.5 BRAM tiles and 47 DSPs**, versus the parent's 196,505
+LUTs, 54,610 registers and unchanged BRAM/DSP count. This is **not an area
+improvement**. Peak resident usage was 8.00 GiB and swap 0.45 GiB.
+There is one critical warning: a generated PS XDC `create_clock` targets an
+unknown port/pin. Actual core/PL clock objects still need the closed-DCP audit.
+Parent frequency was **21.362 MHz unplaced estimate**; no new frequency,
+routed timing or hardware acceptance has been established.
 
 The candidate's own cold standard-suite components are now running, without
 snapshots, guest patches, STEP or pairing suppression:
@@ -78,7 +86,7 @@ seed and must report 900 iterations, all CRCs and >=10 guest seconds. These
 are **pending runs**, not suite passes or gameplay measurements. The older
 baseline timedemo continues independently.
 
-Preflight reclaimed **1,416,501,961 bytes** by losslessly archiving twenty
+Preflight reclaimed **1,416,501,961 bytes** by losslessly archiving eighteen
 closed-build PCHs and 303 regenerable model C++ files. Each archive was
 byte-compared before loose files were removed; original RTL, executables,
 headers, objects, logs, media and results remain. Per-root archive receipts
@@ -89,3 +97,7 @@ The [additional pre-exit functional diagnostic](../verif/qemu-trace/PREEXIT_OBSE
 compares all 80,800 records: 98 programs pass, ten remain failing. Native x87
 and independent expected C1 agree with RTL at the ten first-divergence sites,
 but the remaining full differences and canonical acceptance remain open.
+
+An independently reproduced [host disk-write visibility bug](../ao486-sim/ven/DISK_WRITE_VISIBILITY.md)
+was repaired after this candidate was frozen. That host-only repair is not
+retroactively included in these running binaries or claimed as an RTL gain.
