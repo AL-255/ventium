@@ -235,3 +235,17 @@ One synthesis-only run is admitted under
 8 GiB RAM / 6 GiB swap, 30-minute native cap, 12 GiB starting disk reserve,
 live reserve monitoring and exclusive Vivado family. It cannot launch
 placement, routing or programming. No new timing result is claimed yet.
+
+The previous native path also exposes an earlier serial dependency: returned
+instruction bytes → U/V length/pair decision → successor PC/descriptor → AGU
+and TLB → `mc_prepare_ok` → `mem_next_addr` → L1 tag lookup → paired-store
+readiness/AXI alias check → current ACK. The FP tail is not the entire path.
+In `core_mem_chain.svh`, the next-read **payload** selector consumes the late
+`mc_prime_offer`, although that predicate also qualifies the separate request.
+A possible next investigation is selecting that payload from registered owner
+state while leaving every permission/request/commit check intact. This is
+**not implemented or assumed safe**: invalid-cycle address changes can affect
+shared-port arbitration, and all valid requests, paired-store interactions,
+faults and complete cycle streams must be checked. Wait for this candidate's
+new worst-path report before advancing another timing change; do not disable
+priming, pairing or fast mode to hide this cone.

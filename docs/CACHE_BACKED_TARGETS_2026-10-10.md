@@ -18,8 +18,12 @@ another build. Latest raw-pixel/counter/ownership audit:
 is 0.49813751; all 784,804,756 events over 1.6B clocks count.
 Both unchanged-pixel endpoint images show rendered first-person stone rooms
 with a nailgun, changed viewpoint/ammunition and a nail pickup message in the
-second image. HUD health remains zero as in
-earlier captures; no living-player or render-correctness claim is inferred.
+second image. **Visual-note correction, 15:13 UTC:** earlier notes mistook
+the left-hand armor value (0) for health. These two frames show health **72**
+to the right of the face, consistent with [id Software's HUD layout](https://github.com/id-Software/Quake/blob/master/WinQuake/sbar.c#L915-L951).
+The original audit JSON and pixels remain unchanged; `visual-correction.json`
+records this interpretation correction without changing counters or acceptance.
+This visual observation is still not proof of complete render correctness.
 Full timedemo and physical FPGA remain open.
 At 15:09 UTC, this model's Win95 capture at roughly 800M clocks visibly shows
 My Computer, Inbox, Recycle Bin, Internet/MSN icons and the Start/taskbar.
