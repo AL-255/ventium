@@ -110,3 +110,22 @@ The prefix-only cold Quake continues separately on `320c4232`, without this
 proposal. Full current-seed CoreMark, Win95 desktop, complete original Quake
 timedemo, generic-gate repair and physical implementation/deployment remain
 open. Neither a CRC diagnostic nor a passing control qualifies this candidate.
+
+## Subsequent every-clock check
+
+`external/tmp/ventium-raw-branch-state.TvzqsoWC` repeats the same performance
+disk/model with **4,954,588 ticks and all CRCs unchanged**, native 0 in 98.00 s.
+The lossless 7M–8M-clock observation archive is 22,010,722 compressed bytes;
+`analysis.json` reconciles all one million clocks. This is the existing
+VENSTATE/VENL1 observation set, not a complete retained-model state dump.
+
+The two targeted branch-successor sites, `10d66` and `10ef2`, now have **zero
+read-wait clocks** in this slice. All remaining **27,355 pipeline read waits**
+and **7,552 pipeline store waits** still see resident cacheable L1 hits; another
+5,673 slow-load waits do too. Equal-time windows execute different amounts of
+work, so subtracting occupancy counts is not a causal whole-program speedup.
+The matched complete short-seed gains above remain the performance evidence.
+
+The trace also exposes a redundant saved-window invalidation on primary-only
+stores, investigated separately in
+[independent window invalidation](../l1/INDEPENDENT_WINDOWS.md).
