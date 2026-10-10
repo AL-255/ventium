@@ -157,8 +157,20 @@ int FileSeek(fileTYPE *f, __off64_t offset, int origin) { return f->filp ? (fsee
 int FileSeekLBA(fileTYPE *f, uint32_t lba) { return f->filp ? (fseeko(f->filp, (off_t)lba * 512, SEEK_SET) == 0) : 0; }
 int FileReadAdv(fileTYPE *f, void *buf, int length, int failres) { (void)failres; return f->filp ? (int)fread(buf, 1, length, f->filp) : 0; }
 int FileReadSec(fileTYPE *f, void *buf) { return f->filp ? (fread(buf, 512, 1, f->filp) == 1) : 0; }
-int FileWriteAdv(fileTYPE *f, void *buf, int length, int failres) { (void)failres; return f->filp ? (int)fwrite(buf, 1, length, f->filp) : 0; }
-int FileWriteSec(fileTYPE *f, void *buf) { return f->filp ? (fwrite(buf, 512, 1, f->filp) == 1) : 0; }
+int FileWriteAdv(fileTYPE *f, void *buf, int length, int failres) {
+    (void)failres;
+    if (!f->filp || length <= 0) return 0;
+    // A completed emulated disk write must be visible to independent host
+    // readers while the guest remains running. fwrite alone can retain the
+    // final sector in libc until the next seek or close, hiding a completed
+    // FAT update from verification. Flush before reporting success, including
+    // delayed errors such as ENOSPC. This is visibility, not fsync durability;
+    // it adds no emulated clocks and applies to every guest and write size.
+    const size_t written = fwrite(buf, 1, length, f->filp);
+    if (written != size_t(length) || fflush(f->filp) != 0) return 0;
+    return int(written);
+}
+int FileWriteSec(fileTYPE *f, void *buf) { return FileWriteAdv(f, buf, 512) == 512; }
 int FileCanWrite(const char *name) { return access(name, W_OK) == 0; }
 int FileSaveConfig(const char *name, void *buf, int size) { (void)name; (void)buf; (void)size; return 1; }
 int FileLoadConfig(const char *name, void *buf, int size) { (void)name; (void)buf; (void)size; return 0; }
