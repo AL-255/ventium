@@ -1,12 +1,15 @@
 # Zero-C1 / BCD-sign FPGA implementation — October 10, 2026
 
-Status at **20:37 UTC**: synthesis and the native clock/structural audit are
+Status at **20:54 UTC**: synthesis and the native clock/structural audit are
 closed; native `impl_1` is running. This is **not** a
 bitstream, timing sign-off, standard-suite pass or physical-board acceptance.
 
-Latest verified gameplay remains **0.53765810 U+V retirement-event IPC** on
-older simulated `bfb867f7`, cycles **4,500,065,237–4,600,065,237**. Candidate
-`2b4d7a48` has no gameplay IPC/FPS measurement. Its cold guests are just starting.
+Latest verified gameplay is **0.49366456 U+V retirement-event IPC** on older
+simulated `bfb867f7`, cycles **5,200,065,237–5,300,065,237**. All 41 consecutive
+100M-clock windows from 1,200,065,237 average **0.498471873**; no earlier low
+window is discarded. Both unmodified endpoint images were reviewed and source,
+process, prefix-log and image hashes checked. This is not a full-demo result.
+Candidate `2b4d7a48` has no gameplay IPC/FPS measurement.
 
 ## Exact candidate and closed synthesis
 
@@ -80,6 +83,20 @@ prior completed bank64 implementation's 10.64 GB observed peak; admission
 requires 18 GiB available RAM and 8 GiB free swap. Mutable project run metadata
 is distinguished from immutable source/constraint/synthesis-DCP pins.
 
+At 20:54 the same implementation family is live in placement, using about
+8.62 GB of cgroup memory and zero swap. The four current-candidate native
+simulators and the older retained timedemo are also confirmed live. No new
+implementation or simulator was launched in this follow-up.
+
+The read-only post-route auditor is prepared separately. Its 23 host policy
+checks pass, and invoking its controller now correctly refuses with
+`NOT LAUNCHED: implementation has not closed`; no second Vivado starts.
+It pins the exact implementation invocation, requires native completion and
+unchanged sources/image artifacts, then inspects route state, both clock
+domains, setup/hold, exceptions, DRC and CDC. The previous controller's
+`cgroup.procs` disappearance race is handled by polling the same process again.
+Preparation and mock tests are not native routed-design acceptance.
+
 ## Current-candidate standard suite
 
 Four native simulation processes have been admitted with the exact `2b4d7a48`
@@ -110,6 +127,38 @@ gate repair (still FAIL: 7/108 functional passes, 12/19 scored cycle failures),
 finished route/DRC/image audit, and physical FPGA Quake plus Win95 desktop/UI
 testing in UV+fast mode. No masks, goldens or cycle bands were changed.
 
+## Physical-board preparation and remaining UI gap
+
+The posted-write-safe daemon is installed under the new name
+`/tmp/ao486/ao486d.posted-safe-oct08`, root-owned mode 0555; the older daemon
+was not replaced. Installed SHA-256 is
+`085c629bf84039f0dfd1983b9909026f0e18a811cf43730b68fb9d74357ee4d3`.
+All 42 qualified host inputs and 13 uploaded runtime helpers were rehashed.
+The native `--ident` check reports `A0486501`, `CTRL=1`, and guest DDR
+**unmapped**. The root reservation check confirms the exact non-reusable,
+`no-map` 0x60000000–0x6fffffff aperture on boot
+`2861e4e8-cd4c-48cd-9f44-7f7d8a991ebb`. No new bitstream, guest launch, clock
+write or guest-DDR write occurred. IDENT does not exercise posted-drain startup.
+
+The original standard-VGA Win95 cold seed is now staged at
+`/dev/shm/ventium-win95-seed.BWUtOXfR/win95-standard-vga.raw`, root-owned mode
+0444 beneath a root-owned 0555 directory. Host and board SHA-256 match:
+`37f5db14225f753aa357e321606e75273726fe330a2b7bcd954a61f9337b1a56`.
+Sparse transfer preserves all 2,147,483,648 logical bytes while allocating only
+95,862,784 board bytes; 335,159,296 tmpfs bytes remain free. Do not attach this
+pristine seed writable: create a separately pinned sparse run copy first.
+Neither staging nor a matching disk hash is Win95 boot acceptance.
+
+**Mouse UI coverage is currently impossible on this wrapper.** The frozen
+`flow/src/rk_ao486_system_pl.v:427` ties both PS/2 mouse inputs high and leaves
+the host outputs disconnected. Keyboard scan codes do have an ordinary serial
+8042/IRQ1 path. The simulator's opt-in bidirectional mouse is external device
+emulation; it is not present in the FPGA netlist. Keyboard-driven menu/window
+tests may proceed after boot, but must not be labelled mouse coverage or a
+complete keyboard/mouse UI pass. A real device path must be connected and
+tested through the normal 8042/IRQ12 interface; guest-memory cursor injection,
+disk patches or suppressed no-mouse dialogs would not fix this omission.
+
 ## Retained evidence
 
 All roots below are under `/home/yukidama/external/tmp/`:
@@ -130,3 +179,10 @@ All roots below are under `/home/yukidama/external/tmp/`:
 - `ventium-zero-c1-soc.FTbYSn0L`: both `coremark-900-*` runs,
   `quake-cold-zero-c1-oct10.1`, `win95-cold-zero-c1-oct10.1`, their native
   admission receipts and `superseded-cold-request.json`.
+- `ventium-store-admit-gameplay-r21.7wFYXH7w/audit.json`: the newer 41-window
+  gameplay audit; the r20 receipt remains unchanged historical evidence.
+- `ventium-zero-c1-board-stage.xm2KcqY7`: native `ident.txt`, root
+  `memory.json`, `staging-audit.json`, `win95-seed-audit.json` and their auditors.
+- `ventium-zero-c1-routed-audit.2ND1JB6w`: prepared read-only post-route
+  audit, exact-owner controller, native-Tcl host policy tests and manifest.
+  It is not automatically queued and has not run Vivado.
