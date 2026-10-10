@@ -180,6 +180,11 @@ and gates, explicitly set
 `VENTIUM_VERILATOR_BIN=/tools/verilator/v5.046/bin/verilator`; the user manager
 does not inherit an interactive shell's compiler PATH. Check the trivial
 `tools/verilator_serial.sh --version` probe in that environment before queueing.
+For CPU-bounded native runs, launch through explicit `taskset` and verify the
+actual child affinity. A user unit's configured `AllowedCPUs` may be ineffective
+without cpuset delegation; its property alone is not confinement evidence.
+Budget `TasksMax` for the simulator's startup thread pool as well as its owner;
+32 tasks was insufficient even for a single-threaded model on this host.
 For an external/private C++ harness, a fresh `OBJDIR` alone is insufficient:
 Verilator's generated makefile can find an old harness `.o` through `VPATH`
 and link it without recompiling against the current generated class layout.

@@ -2,11 +2,12 @@
 
 This is **UNQUALIFIED source preparation**, not a bitstream, timing pass or
 transfer of simulation acceptance to silicon. Latest verified Quake gameplay
-is **0.49761630 total U+V retirement-event IPC**, demand-fetch SoC model
-`958f7ec4`, clocks **1,300,048,811–1,400,048,811**. Both consecutive 100M
-windows from 1,200,048,811 average **0.497514935**; no intervening dip is
-omitted. Latest audit: `ventium-sfetch16-latest.vX56eOiX/audit.json`,
-49,761,630 events (38,390,487 U + 11,371,143 V), raw advancing combat frames,
+is **0.47794855 total U+V retirement-event IPC**, demand-fetch SoC model
+`958f7ec4`, clocks **1,500,048,811–1,600,048,811**, now below 0.48 in this
+latest interval. All four consecutive 100M windows from 1,200,048,811 average
+**0.4908371775**; the 0.49741357, 0.49761630, 0.49037029 and 0.47794855
+windows are all retained. Latest audit: `ventium-sfetch16-latest-r2.W3nHm6Cg/audit.json`,
+47,794,855 events (36,895,706 U + 10,899,149 V), raw advancing combat/pickup frames,
 stable pins/native identity and no OOM. This does not replace the fixed first
 gate **0.49741357**, clocks **1,200,048,811–1,300,048,811**. Its original pre-run plan
 selects periodic samples12/13, not zero-offset interpolated clocks.
@@ -19,8 +20,9 @@ records, not cycle-exact images. The first collector incorrectly demanded
 globally uniform startup timestamps; its failed attempt is retained. The
 corrected collector preserves the original sample indices and reports the
 actual48,811-clock offset, with all counter families reconciled.
-This exceeds0.48 for one gameplay window; full timedemo and silicon acceptance
-remain open. Private FST/C1/RET/converter-sharing candidates have no gameplay
+The fixed first window exceeds0.48, but it is not sustained acceptance;
+full timedemo and silicon acceptance remain open. Private FST/C1/RET/converter-sharing
+and protected-client PREFIX66 candidates have no gameplay
 measurement. Equal-clock windows do not establish an equal-work speedup.
 
 Historical larger-L2 model`86731249` measured0.49083588 at its fixed1.2B–1.3B
