@@ -163,9 +163,16 @@ not a qualified bitstream. The full
 standard suite and physical Quake/Win95 acceptance are not inherited by this
 directed model.
 
-Latest verified gameplay baseline remains **0.49366456 U+V retirement-event
+Latest verified gameplay baseline is **0.50499738 U+V retirement-event
 IPC**, older full-PC model `bfb867f7`, cycles
-**5,200,065,237–5,300,065,237**. The newer full-PC candidates `2b4d7a48` and
+**5,600,065,237–5,700,065,237**; the 45 retained gameplay windows average
+**0.500212996**. That model's original cold timedemo independently closes at
+22:16 UTC: **969 frames / 125.3 seconds / 7.73 FPS at modeled 40 MHz**,
+native exit 0, complete EOF, reaped process group, original disk/ROM/source
+checks and fresh closed-FAT result. The results-console counters are explicitly
+excluded from gameplay. This is not a new physical-board result.
+Receipt: `ventium-store-admit-gameplay-r22.zeWN45tM/audit.json` under external
+scratch. The newer full-PC candidates `2b4d7a48` and
 `cf1b3b0b` have no verified gameplay measurement. The last
 physical image remains `fe9f539d`, approximately 40 MHz, **0.167990963 primary/U
 event IPC**, completed timedemo **3.36 FPS**; total U+V is unavailable on that ABI.

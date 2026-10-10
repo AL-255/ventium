@@ -9,11 +9,15 @@ results below are retained measurements, not tests rerun for this report.
 
 ## Executive result
 
-- **Latest verified simulated gameplay:** **0.49366456 U+V retirement-event
-  IPC**, model `bfb867f7`, cycles **5,200,065,237–5,300,065,237**. All **41
+- **Latest verified simulated gameplay:** **0.50499738 U+V retirement-event
+  IPC**, model `bfb867f7`, cycles **5,600,065,237–5,700,065,237**. All **45
   consecutive 100M-clock windows**, starting at 1,200,065,237, average
-  **0.498471873**: 2,043,734,681 events / 4,100,000,000 clocks. No low window
-  is discarded. This is not a complete-timedemo average.
+  **0.500212996**: 2,250,958,484 events / 4,500,000,000 clocks. No low gameplay
+  window is discarded. The transition/results-console samples from 5.7B onward
+  are retained separately, not counted as gameplay. This is not a full-demo IPC.
+  The original cold timedemo now closes with **969 frames / 125.3 seconds**:
+  **7.73 FPS** at modeled **40 MHz** (guest prints 7.7). Native exit 0, EOF,
+  reaped process group and an independent fresh closed-FAT check pass, 22:16 UTC.
 - **Same model, valid-duration cache-backed CoreMark:** **2.101890118 /
   2.107616105 CM/MHz**, performance/validation seeds, with original CRCs.
 - **Last verified physical-FPGA gameplay:** **0.167990963 primary/U-event
@@ -21,7 +25,7 @@ results below are retained measurements, not tests rerun for this report.
   original Quake timedemo reports **969 frames / 288.6 seconds / 3.4 FPS**.
   This ABI does not expose total U+V. These are still the hardware results;
   the new simulated performance has **not** been demonstrated on the board.
-- **Newest candidate:** `2b4d7a48`, incorporating subsequent logic-sharing,
+- **Subsequent candidate:** `2b4d7a48`, incorporating subsequent logic-sharing,
   x87 C1 and packed-BCD negative-zero corrections, has **no gameplay
   measurement or physical pass**.
   Its own two **900-iteration, duration-valid CoreMark seeds** now independently
@@ -34,6 +38,11 @@ results below are retained measurements, not tests rerun for this report.
   a read-only checkpoint diagnostic now confirms **228,422 unrouted nets**
   and a 138-level cross-subsystem control path before choosing the next fix.
   See [the source-matched handoff](../fpga/ZERO_C1_EXPORT.md).
+- **Newest candidate:** register-only prefix factoring `cf1b3b0b` preserves
+  both short CoreMark seeds' exact parent clocks/CRCs. Its source-matched FPGA
+  export and strict CPU lint pass; synthesis is running. It has no measured
+  gameplay, valid-duration score or physical pass. See
+  [the factoring and qualification record](../fpga/PREFIX_EX_REGONLY.md).
 
 **There is no defensible measured “0.16 to 0.54, therefore 3.3× faster FPGA”
 claim.** Those endpoints differ in counter definition, platform, build and
@@ -146,7 +155,7 @@ All numbers in this table count U+V, unlike the old hardware primary-only ABI.
 | `e9097d96`: AXI read-command forwarding | **0.43894030** | **No observed gameplay gain**. |
 | `86731249`: 256 KiB platform L2 + initialization backpressure repair | **0.49083588** | **+11.82% observed IPC** versus read-through window; not equal-work attribution. Longer 1.2–3.0B aggregate is **0.47771903**, including the 0.26103520 dip. |
 | `958f7ec4`: 16-bit demand fetch | **0.486272178** over 28 consecutive windows, 1,200,048,811–4,000,048,811 | Longer aggregate, not the same window as the row above. |
-| `bfb867f7`: final cache-backed performance backports | **0.51030715** first window; **0.498471873** over all 41 windows | Latest single window **0.49366456**, exact endpoints in the executive result. Full demo still not completed in this audit. |
+| `bfb867f7`: final cache-backed performance backports | **0.51030715** first window; **0.500212996** over all 45 gameplay windows | Latest single window **0.50499738**, exact endpoints in the executive result. Complete original timedemo: **7.73 FPS at modeled 40 MHz**. |
 
 Sources: [October 8–9 hardware/transport chronology](UV_FAST_BANK64_2026-10-08.md),
 [October 9–10 optimization record](UV_FAST_TARGET_STATUS_2026-10-09.md),
@@ -155,7 +164,7 @@ Sources: [October 8–9 hardware/transport chronology](UV_FAST_BANK64_2026-10-08
 ### Matched-build IPC / FPS table — follow-up checked October 10
 
 The user requested an empirical relationship between IPC and gameplay FPS.
-Two earlier 40 MHz simulations have both a verified gameplay window and a
+Three 40 MHz simulations have both a verified gameplay window and a
 subsequently closed, completed original 969-frame timedemo. Their model hashes
 and actual `--rate 40000000` launch arguments were rechecked for this table.
 
@@ -164,22 +173,30 @@ and actual `--rate 40000000` launch arguments were rechecked for this table.
 | `fe9f539d` | Physical FPGA / 39.999826 MHz | **0.167990963, primary/U only** | 969 / 288.6 | **3.36** (guest prints 3.4) |
 | `652de481` | Simulation / 40 MHz | **0.44183623, U+V** | 969 / 138.4 | **7.00** (guest prints 7.0) |
 | `86731249` | Simulation / 40 MHz | **0.49083588, U+V** | 969 / 128.1 | **7.56** (guest prints 7.6) |
-| `bfb867f7` | Simulation / 40 MHz | **0.51030715, U+V**, first window | Pending | **Not measured yet** |
+| `bfb867f7` | Simulation / 40 MHz | **0.51030715, U+V**, first window | 969 / 125.3 | **7.73** (guest prints 7.7) |
 
 The simulation IPC column uses the first declared 100M-clock gameplay window
 near 1.2–1.3B, **not full-demo average IPC**. The `bfb867f7` window is
 1,200,065,237–1,300,065,237; the other two are exactly 1.2–1.3B. Its separately
-reported latest window is now **0.49366456**, 5,200,065,237–5,300,065,237;
+reported latest window is now **0.50499738**, 5,600,065,237–5,700,065,237;
 the prior 4.5–4.6B window was **0.53765810**. Neither is a full-demo mean.
 The hardware row uses its 59 qualified intervals described in section 1.
 Never fit one U+V IPC/FPS curve through the primary-only hardware row.
 
-Across the two completed 40 MHz simulations, the sampled-window IPC rises
+From `652de481` to `86731249`, sampled-window IPC rises
 **11.09%**, while complete-demo throughput rises **8.04%**, calculated from
 138.4/128.1 rather than the coarsely rounded printed FPS. This is useful
 same-build paired evidence, but not a constant IPC-to-FPS conversion or an
 isolated attribution to one RTL feature: the models differ by multiple changes
 and their IPC samples cover different scene progress.
+
+The newly closed `bfb867f7` result improves complete-demo FPS a further
+**2.23%** over `86731249` (128.1/125.3). Its higher post-demo-console IPC,
+including **0.63481471** at 5.9–6.0B, is explicitly rejected as gameplay.
+The result was visible on preserved raw-color frames before an explicit host
+graceful-stop request. The simulator then exited normally; the unchanged checker
+independently read the fresh 969-frame result from the closed private disk.
+No guest input, snapshot, framebuffer, register or RTL change was involved.
 
 The exact relationship, when measured over the **same work interval**, is
 `FPS = clock_Hz × retirement_event_IPC / retired_events_per_frame`.
@@ -196,6 +213,13 @@ IPC evidence: `ventium-fp-combined-gameplay.ERa7LHqZ/window/audit.json` and
 `ventium-l2-gameplay.VedZVnwA/window/audit.json` under the same external scratch
 root. Both old simulators exited zero and were reaped; the complete Quake
 components do not qualify newer candidates, Win95, or physical FPGA.
+
+Newest closure: `ventium-store-admit-gameplay-r22.zeWN45tM/audit.json` under
+the same external root; all 333 source/artifact pins rechecked. It retains the
+final 45 gameplay intervals separately from the transition and console windows,
+original-pixel endpoint images, actual native/service identity and the
+independent closed-disk result. The supervisor's full native log is retained in
+`ventium-store-admit-soc.kW7Vv7Mr/quake-cold-store-admit-oct10.1/run/`.
 
 ## 4. Gain ledger: individual techniques and their evidence
 
@@ -510,11 +534,11 @@ to multi-issue, all to cache misses, or all to the FPU.
 | Requirement | Current evidence | Status |
 | --- | --- | --- |
 | Cache-backed simulated CoreMark ≥2.1 CM/MHz | `bfb867f7` and newest `2b4d7a48`, both 900-iteration seeds, original CRCs, >10 guest seconds | Met **for these two models**, not automatically other sources or hardware |
-| Simulated Quake ≥0.48 IPC | All-window `bfb867f7` mean **0.498471873**; latest **0.49366456** | Observed measured prefix; not a completed-demo average or every-scene guarantee |
-| Gameplay CPI <1 / IPC >1 | Current aggregate event CPI approximately **2.006** | **Not achieved**; normalized macroinstruction accounting is also distinct |
+| Simulated Quake ≥0.48 IPC | 45-window `bfb867f7` mean **0.500212996**; latest **0.50499738**; full timedemo **7.73 FPS / 40 MHz** | Completed original demo; IPC still a sampled gameplay interval, not full-demo average or every-scene guarantee |
+| Gameplay CPI <1 / IPC >1 | Current aggregate event CPI approximately **1.999** | **Not achieved**; normalized macroinstruction accounting is also distinct |
 | Canonical differential gate on latest corrected source | **7/108 functional passes; 12/19 scored cycle failures** | **FAIL**, no masks/goldens/bands waived; directed/native x87 evidence does not replace the gate |
-| Latest `2b4d7a48` own valid-duration CoreMark | **2.101890118 / 2.107616105 CM/MHz**, exact parent ticks, original CRCs, actual V activity, native 0/reaping, no OOM | Both simulated seeds independently closed at 21:21; not complete-suite or FPGA acceptance |
-| Newest matched hardware source | Manifest `b28ce916…`; 190 payloads, 156 hardware defines, 170 non-wrapper native source matches; strict CPU lint | Source/lint pass, **not bitstream or physical pass** |
+| `2b4d7a48` own valid-duration CoreMark | **2.101890118 / 2.107616105 CM/MHz**, exact parent ticks, original CRCs, actual V activity, native 0/reaping, no OOM | Both simulated seeds independently closed at 21:21; not complete-suite or FPGA acceptance |
+| Newest matched hardware source `cf1b3b0b` | Manifest `5003847d…`; one prefix-header delta, same 190 payloads and 156 hardware defines; strict CPU lint and both short CoreMark seeds pass | Source/lint/short comparison pass, **not a valid-duration score, bitstream or physical pass** |
 | Latest completed synthesis | Source-matched `2b4d7a48` export: **195,617 LUTs**, **21.786 MHz unplaced estimate**, requested 40 MHz core | Subsequent route **FAIL**, congestion level 6 / 900,666 node overlaps; no new bitstream |
 | Win95 on final FPGA | Must cold boot to clean desktop and survive keyboard/mouse, menu/window interaction | **Pending** |
 | Quake on final FPGA | Must complete original timedemo, retain closed result, full unmodified-frame movie, measured clock and UV-fast evidence | **Pending** |
@@ -531,12 +555,12 @@ not copied solely from a stale status paragraph. Roots are below
 
 | Evidence | Receipt / identity |
 | --- | --- |
-| Current gameplay, exact U/V totals, all retained windows | `ventium-store-admit-gameplay-r21.7wFYXH7w/audit.json`; full model SHA `bfb867f7844b467eeafba12fe6d5035e89d0d2cf03111911cbdd599d7fb204e6` |
+| Current gameplay, exact U/V totals, all retained gameplay windows and completed timedemo | `ventium-store-admit-gameplay-r22.zeWN45tM/audit.json`; full model SHA `bfb867f7844b467eeafba12fe6d5035e89d0d2cf03111911cbdd599d7fb204e6` |
 | Same model's valid CoreMark | `ventium-store-admit-soc.kW7Vv7Mr/coremark-900-performance/audit.json` and `coremark-900-validation/audit.json` |
 | Closed hardware 0.167991 profile | `ventium-bank64-perf-oct08.gz8UKP/board-profile-qualified.json`; bitstream SHA `fe9f539dfcfd9a1d909a33b561d5b7b6a0febf6e90c54b339f568d0cd496f71e` |
-| Newest source-matched full-PC build and short-seed audit | `ventium-zero-c1-soc.FTbYSn0L/{build-closed.json,coremark/audit.json}`; model SHA `2b4d7a48453fb8f901730d70b5731d9fb6a5459a83fc36f69241f441a7ab298e` |
-| Newest model's independently closed 900-iteration CoreMark seeds | `ventium-zero-c1-soc.FTbYSn0L/coremark-900-{performance,validation}/audit.json`; **2.101890118 / 2.107616105 CM/MHz**, exact parent TSC clocks, original CRCs, native zero, no OOM |
-| Newest FPGA source and strict CPU lint | `ventium-zero-c1-fpga40.rQeGd6ln/{input-manifest.json,audit.json}`; manifest SHA `b28ce916c8ce276546ac85384dd4959452aad439a14e283d1b2339692465b603`; `ventium-zero-c1-hw-lint.Jg7OncrJ/closed.json` |
+| Newest source-matched full-PC build and short-seed audit | `ventium-prefix-regonly-soc.MMoWhswI/{build-closed.json,coremark/audit.json}`; model SHA `cf1b3b0bf30d35993c12f335c148dbf5c1ae90f09c0e26f3c2b22907263ab27c` |
+| Parent model's independently closed 900-iteration CoreMark seeds | `ventium-zero-c1-soc.FTbYSn0L/coremark-900-{performance,validation}/audit.json`; **2.101890118 / 2.107616105 CM/MHz**, exact parent TSC clocks, original CRCs, native zero, no OOM |
+| Newest FPGA source and strict CPU lint | `ventium-prefix-regonly-fpga40.D6hb2tCk/{input-manifest.json,audit.json}`; manifest SHA `5003847d311025e070fd12022b06251e62c9c50336962bc183ff179b3a903ee3`; `ventium-prefix-regonly-hw-lint.Cs41DX5l/closed.json` |
 | Latest closed full synthesis and unplaced timing | `ventium-zero-c1-full-synth.yROXoFK0/audit.json`; `ventium-zero-c1-clock-audit.QVKu9JRQ/audit.json` |
 
 Older linked reports preserve their original timestamps, scratch paths,
