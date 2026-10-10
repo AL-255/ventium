@@ -79,9 +79,9 @@ This candidate has no gameplay or qualified CoreMark score, no full Win95/
 Quake closure, and no routed or physical result. Known x87 C1/value defects
 are not repaired by selecting the same payload earlier.
 
-Latest verified gameplay belongs to **`bfb867f7`**: **0.48853614** U+V
-retirement-event IPC at clocks **2,200,065,237–2,300,065,237**, **0.4842945645**
-over all eleven consecutive 100M windows from 1,200,065,237. The 0.34569625
+Latest verified gameplay belongs to **`bfb867f7`**: **0.49706764** U+V
+retirement-event IPC at clocks **2,400,065,237–2,500,065,237**, **0.4868801938**
+over all thirteen consecutive 100M windows from 1,200,065,237. The 0.34569625
 dip is retained. That older model qualifies at **2.101890118 / 2.107616105
 CM/MHz**; neither result is inherited by this derivative. See the
 [current target record](../docs/CACHE_BACKED_TARGETS_2026-10-10.md).
