@@ -77,6 +77,24 @@ def main():
         run('two connections', body=shim+'\n'+connection, rejection="requires cycle_mode=1'b1")
         run('unknown extra define', defs=defines+['VEN_UNREVIEWED_EXTENSION'],
             rejection='wrong define count')
+        if len(defines) == 136:
+            assert defines[132] == 'VEN_SFETCH16_DEMAND'
+            # Removing the complete optional derivative explicitly selects
+            # the older performance source profile; it is not equivalent RTL.
+            run('older performance profile', defs=defines[:132]+defines[133:])
+            for replacement in ('VEN_RET_SHORT_WINDOW', 'VEN_P54_WBUF_ADMIT_DISPATCH'):
+                wrong = defines.copy()
+                wrong[132] = replacement
+                run('same-count substitute '+replacement, defs=wrong,
+                    rejection='wrong define count/profile: demand-fetch')
+            wrong = defines.copy()
+            wrong[131], wrong[132] = wrong[132], wrong[131]
+            run('demand order changed', defs=wrong,
+                rejection='wrong define count/profile: demand-fetch')
+            wrong = defines.copy()
+            wrong[131] = 'VEN_UNREVIEWED_EXTENSION'
+            run('performance owner lost', defs=wrong,
+                rejection='wrong performance extension bundle/order')
         if len(defines) == 113:
             fe = ['VEN_FE_PIPE', 'VEN_FE_DTLB_MULTI', 'VEN_FE_DTLB_PERM']
             assert defines[107:110] == fe

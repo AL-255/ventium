@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-"""Export the exact Oct9 simulated performance/L2 source to an UNQUALIFIED FPGA bundle.
+"""Export an exact simulated performance/L2 source to an UNQUALIFIED FPGA bundle.
 
 No Vivado, board access, acceptance inheritance, source discovery or live RTL
 edits. The one simulator-only system wrapper is projected back onto the pinned
 hardware top; every other compiled RTL/header/filelist is copied byte-for-byte.
+The explicit sfetch16 variant adds only the demand-fetch define and requires
+the separately compiled estimator-width change. A wrapper update is separately
+SHA-pinned; it never silently copies scripts from the working checkout.
 """
 import argparse
 import json
@@ -36,6 +39,8 @@ NEW_HEADERS = tuple('ventium/rtl/core/' + name for name in (
     'core_raw_held_prime.svh', 'core_ref_operand_prime.svh',
     'core_agi_resident_prime.svh'))
 SUFFIXES = ('.v', '.sv', '.vh', '.svh', '.f')
+WRAPPER = 'ventium/fpga/create_project_3mhz_wrapper.tcl'
+VARIANT_DEFINES = {'performance': (), 'sfetch16': ('VEN_SFETCH16_DEMAND',)}
 
 
 def require(ok, message):
@@ -43,12 +48,14 @@ def require(ok, message):
         raise FreezeError(message)
 
 
-def profile(parent, simulated):
+def profile(parent, simulated, variant='performance'):
+    require(variant in VARIANT_DEFINES, 'unknown performance variant')
+    extra = VARIANT_DEFINES[variant]
     require(len(parent) == len(set(parent)) == 114 and tuple(parent[-3:]) == ADDITIONS
             and parent[110] == 'VEN_DDR_POSTED', 'wrong posted/banked parent profile')
-    require(not set(parent) & set(PERF_DEFINES), 'already extended parent')
-    require(len(simulated) == len(set(simulated)) == 133, 'wrong simulated profile count')
-    hardware = parent[:-3] + list(PERF_DEFINES) + list(ADDITIONS)
+    require(not set(parent) & (set(PERF_DEFINES) | {'VEN_SFETCH16_DEMAND'}), 'already extended parent')
+    require(len(simulated) == len(set(simulated)) == 133 + len(extra), 'wrong simulated profile count')
+    hardware = parent[:-3] + list(PERF_DEFINES) + list(extra) + list(ADDITIONS)
     require(set(simulated) == set(hardware) - {'SYNTHESIS', 'VTM_NO_DPI'},
             'simulated definitions differ from reviewed performance profile')
     for definition in hardware:
@@ -142,11 +149,19 @@ def freeze(args):
     parent_defs = manifest['hardware_defines']
     require(read(parent/'defines.txt')['data'] == ('\n'.join(parent_defs)+'\n').encode(), 'parent define drift')
     sim_defs = read(sim/'defines.txt')['data'].decode().splitlines()
-    hardware_defs = profile(parent_defs, sim_defs)
+    hardware_defs = profile(parent_defs, sim_defs, args.variant)
+    expected_changes = CHANGES
+    if args.variant == 'sfetch16':
+        expected_changes = CHANGES | {'ventium/fp_shared/ven_fp_estdiv.sv'}
+        require(prepared['rtl_changes'] == ['fp_shared/ven_fp_estdiv.sv', 'rtl/core/core.sv']
+                and prepared['added_defines'] == ['VEN_SFETCH16_DEMAND'],
+                'wrong demand-fetch native derivative')
+        require(args.wrapper_sha256 is not None, 'demand-fetch export requires an explicit wrapper pin')
     command = started['command']
     actual_defs = [s[2:] for s in command if s.startswith('-D')]
     actual_defs += [s[8:] for s in command if s.startswith('+define+')]
-    require(len(actual_defs) == 133 and set(actual_defs) == set(sim_defs), 'actual compile define drift')
+    require(len(actual_defs) == len(sim_defs) and set(actual_defs) == set(sim_defs),
+            'actual compile define drift')
     require('-GBOARD_POSTED=1' in command and '-GBOARD_WRITE_SLOTS=16' in command,
             'actual compile lacks sixteen-slot board transport')
     require(closed['passed'] is True and closed['native_exit'] == 0 and closed['inputs_unchanged'] is True,
@@ -187,13 +202,22 @@ def freeze(args):
             if sha256(data) != prior['sha256']:
                 changes.add(name)
         payload[name] = dict(data=data, parent=prior, source=source)
-    require(changes == CHANGES, 'unreviewed/missing hardware deltas: '+repr(sorted(changes ^ CHANGES)))
+    require(changes == expected_changes,
+            'unreviewed/missing hardware deltas: '+repr(sorted(changes ^ expected_changes)))
     for name in NEW_HEADERS:
         require(name not in payload, 'new header already exists in parent: '+name)
         source = sim/'source'/name.removeprefix('ventium/')
         require(str(source) in started['pins'], 'new header absent from native build: '+name)
         data = read(source, checked_sha(started['pins'][str(source)]))['data']
         payload[name] = dict(data=data, parent=None, source=source)
+    flow_changes = []
+    if args.wrapper_sha256 is not None:
+        require(WRAPPER in payload, 'parent wrapper missing')
+        source = repo/'fpga/create_project_3mhz_wrapper.tcl'
+        data = read(source, checked_sha(args.wrapper_sha256))['data']
+        require(sha256(data) != payload[WRAPPER]['parent']['sha256'], 'redundant wrapper override')
+        payload[WRAPPER].update(data=data, source=source)
+        flow_changes.append(WRAPPER)
     closure = source_closure(payload)
     checker = repo/'fpga/test_rk_wrapper.tcl'
     for p in (Path(__file__).resolve(), repo/'fpga/freeze_rk_candidate.py', checker): read(p)
@@ -205,15 +229,16 @@ def freeze(args):
         data = item['data']; write_new(out/name, data)
         records.append(dict(frozen=name, source=str(item['source']), sha256=sha256(data), bytes=len(data),
             parent_sha256=item['parent']['sha256'] if item['parent'] else None,
-            provenance='geometry_only_hardware_projection' if name == SYSTEM else
+            provenance='explicit_sha_pinned_flow_update' if name in flow_changes else
+                       'geometry_only_hardware_projection' if name == SYSTEM else
                        'native_compiled_source' if name.startswith('ventium/') and Path(name).suffix in SUFFIXES else
                        'parent_payload_historical_ancestry_only'))
     write_new(out/'defines.txt', ('\n'.join(hardware_defs)+'\n').encode())
     result = subprocess.run(['tclsh',str(checker),str(out/'ventium/fpga/create_project_3mhz_wrapper.tcl'),
-        str(out/'flow'),str(out/'defines.txt'),str(out/'ventium'),str(out/'template')],
+        str(out/'flow'),str(out/'defines.txt'),str(out/'ventium'),str(out/'template'),args.synthesis_profile],
         capture_output=True,text=True,timeout=15)
     write_new(out/'source-contract.log', (result.stdout+result.stderr).encode())
-    require(result.returncode == 0 and 'exact135defs' in result.stdout
+    require(result.returncode == 0 and f'exact{len(hardware_defs)}defs' in result.stdout
             and 'POSTED-DDR-SOURCE-CONTRACT-OK' in result.stdout, 'hardware source contract refused')
     for p, d in observed.items(): unchanged(p, d)
     require(all(p.resolve(strict=True) == target for p,target in aliases.items()),
@@ -221,11 +246,13 @@ def freeze(args):
     require(all(directory(p) == identity for p, identity in identities.items()), 'directory identity changed')
     for row in records: snapshot(out/row['frozen'], row['sha256'], row['bytes'])
     info = dict(schema=1, qualification='UNQUALIFIED', core_mhz=40,
-        simulator_defines=133, hardware_additions=['SYNTHESIS','VTM_NO_DPI'],
+        simulator_defines=len(sim_defs), hardware_additions=['SYNTHESIS','VTM_NO_DPI'],
         simulator_already_uses_xpm_fidelity=True, hardware_defines=hardware_defs,
         parent_manifest_sha256=args.parent_sha256, simulator_sha256=args.model_sha256,
         simulator_started_sha256=args.started_sha256, simulator_closed_sha256=args.closed_sha256,
         changed_parent_payloads=sorted(changes), added_payloads=list(NEW_HEADERS),
+        variant=args.variant, changed_flow_payloads=flow_changes,
+        source_contract_synthesis_profile=args.synthesis_profile,
         files=records, write_slots=16, l2_sets=1024,
         source_closure=closure,
         inherited_simulator_structural_warning_count=closed.get('structural_debt_count'),
@@ -245,6 +272,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('parent','parent-sha256','sim','started-sha256','closed-sha256','model-sha256','repo','out'):
         parser.add_argument('--'+name, required=True)
+    parser.add_argument('--variant', choices=VARIANT_DEFINES, default='performance')
+    parser.add_argument('--wrapper-sha256', help='explicit opt-in to the pinned working-tree wrapper')
+    parser.add_argument('--synthesis-profile', choices=('legacy','balanced','logic_only'), default='balanced')
     try:
         print(json.dumps(freeze(parser.parse_args())))
     except (FreezeError,OSError,ValueError,KeyError,TypeError,subprocess.SubprocessError) as exc:

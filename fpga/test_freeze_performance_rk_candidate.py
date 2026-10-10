@@ -27,6 +27,30 @@ class Contracts(unittest.TestCase):
         self.assertEqual(out,self.parent[:-3]+list(freeze.PERF_DEFINES)+list(freeze.ADDITIONS))
         self.assertEqual(set(out)-set(self.simulated),{'SYNTHESIS','VTM_NO_DPI'})
 
+    def test_demand16_exact_profile(self):
+        simulated = self.simulated + ['VEN_SFETCH16_DEMAND']
+        out = freeze.profile(self.parent, simulated, 'sfetch16')
+        self.assertEqual(len(out), 136)
+        self.assertEqual(out[111:132], list(freeze.PERF_DEFINES))
+        self.assertEqual(out[132:], ['VEN_SFETCH16_DEMAND', *freeze.ADDITIONS])
+        self.assertEqual(set(out)-set(simulated), {'SYNTHESIS', 'VTM_NO_DPI'})
+
+    def test_demand16_never_inferred_by_count(self):
+        for variant, simulated in (
+                ('performance', self.simulated+['VEN_SFETCH16_DEMAND']),
+                ('sfetch16', self.simulated),
+                ('sfetch16', self.simulated+['VEN_RET_SHORT_WINDOW']),
+                ('sfetch16', self.simulated+['VEN_P54_WBUF_ADMIT_DISPATCH']),
+                ('auto', self.simulated)):
+            with self.subTest(variant=variant, simulated=simulated), self.assertRaises(freeze.FreezeError):
+                freeze.profile(self.parent, simulated, variant)
+
+    def test_demand16_missing_old_feature_refused(self):
+        for name in freeze.PERF_DEFINES:
+            simulated = [x for x in self.simulated if x != name] + ['VEN_SFETCH16_DEMAND', 'UNKNOWN']
+            with self.subTest(name=name), self.assertRaises(freeze.FreezeError):
+                freeze.profile(self.parent, simulated, 'sfetch16')
+
     def test_each_missing_feature_refused(self):
         for name in freeze.PERF_DEFINES:
             with self.subTest(name=name), self.assertRaises(freeze.FreezeError):

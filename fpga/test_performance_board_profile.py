@@ -29,6 +29,13 @@ def main():
     receipt = load(export/'freeze-receipt.json')
     build = load(sim/'build-started.json')
     closed = load(sim/'build-closed.json')
+    variant = new.get('variant', 'performance')
+    assert variant in ('performance', 'sfetch16')
+    extra_count = int(variant == 'sfetch16')
+    flow_changes = set(new.get('changed_flow_payloads', []))
+    assert flow_changes <= {'ventium/fpga/create_project_3mhz_wrapper.tcl'}
+    if extra_count:
+        assert flow_changes == {'ventium/fpga/create_project_3mhz_wrapper.tcl'}
     assert new['qualification'] == receipt['qualification'] == 'UNQUALIFIED'
     assert receipt['manifest_sha256'] == digest(export/'input-manifest.json')
     assert new['parent_manifest_sha256'] == digest(parent/'input-manifest.json')
@@ -54,7 +61,11 @@ def main():
             if row['sha256'] != prior['sha256']: changed.add(name)
         else:
             assert row['parent_sha256'] is None
-        if name == 'ventium/3rd-party/ao486_MiSTer/rtl/system.v':
+        if name in flow_changes:
+            assert row['provenance'] == 'explicit_sha_pinned_flow_update'
+            assert row['sha256'] == receipt['input_pins'][row['source']]
+            assert digest(Path(row['source'])) == row['sha256']
+        elif name == 'ventium/3rd-party/ao486_MiSTer/rtl/system.v':
             before = (parent/name).read_bytes()
             assert before.count(b'l2_cache cache') == 1
             assert actual.read_bytes() == before.replace(
@@ -66,16 +77,22 @@ def main():
             native += 1
         else:
             assert row['sha256'] == parent_rows[name]['sha256'], name
-    assert changed == set(new['changed_parent_payloads']) and len(changed) == 11
+    assert changed == set(new['changed_parent_payloads']) | flow_changes
+    assert len(changed-flow_changes) == 11 + extra_count
+    assert ('ventium/fp_shared/ven_fp_estdiv.sv' in changed) == bool(extra_count)
     defs = (export/'defines.txt').read_text().splitlines()
     simdefs = (sim/'defines.txt').read_text().splitlines()
     cmddefs = [a[2:] for a in build['command'] if a.startswith('-D')]
     cmddefs += [a[8:] for a in build['command'] if a.startswith('+define+')]
-    assert len(defs) == len(set(defs)) == 135 and defs == new['hardware_defines']
-    assert len(cmddefs) == len(set(cmddefs)) == 133 and set(cmddefs) == set(simdefs)
+    assert len(defs) == len(set(defs)) == 135 + extra_count and defs == new['hardware_defines']
+    assert len(cmddefs) == len(set(cmddefs)) == 133 + extra_count and set(cmddefs) == set(simdefs)
     assert set(defs)-set(cmddefs) == {'SYNTHESIS','VTM_NO_DPI'}
     assert set(cmddefs)-set(defs) == set()
-    assert defs[:111]+defs[132:] == old['hardware_defines']
+    assert defs[:111]+defs[132+extra_count:] == old['hardware_defines']
+    if extra_count:
+        assert defs[132] == 'VEN_SFETCH16_DEMAND'
+    else:
+        assert 'VEN_SFETCH16_DEMAND' not in defs
     assert new['core_mhz'] == 40 and new['write_slots'] == 16 and new['l2_sets'] == 1024
     scratch = Path(os.environ['TMPDIR']).resolve(strict=True)
     assert scratch == Path('/home/yukidama/external/tmp').resolve(strict=True)
@@ -87,7 +104,8 @@ def main():
             profile.write_text('\n'.join(values)+'\n')
             run = subprocess.run(['tclsh',str(repo/'fpga/test_rk_wrapper.tcl'),
                 str(frozen/'ventium/fpga/create_project_3mhz_wrapper.tcl'),
-                str(frozen/'flow'),str(profile),str(frozen/'ventium'),str(frozen/'template')],
+                str(frozen/'flow'),str(profile),str(frozen/'ventium'),str(frozen/'template'),
+                new.get('source_contract_synthesis_profile', 'balanced') if frozen == export else 'balanced'],
                 capture_output=True,text=True,timeout=15)
             out = run.stdout+run.stderr
             assert (run.returncode == 0) == good, out
@@ -103,9 +121,15 @@ def main():
         check(defs[:111]+[defs[112],defs[111]]+defs[113:],False)
         check(defs[:111]+[defs[112]]+defs[112:],False)
         check(defs+['VEN_EXTRA'],False)
+        if extra_count:
+            check(defs[:132]+defs[133:], True)
+            for substitute in ('VEN_RET_SHORT_WINDOW','VEN_P54_WBUF_ADMIT_DISPATCH','VEN_UNREVIEWED'):
+                check(defs[:132]+[substitute]+defs[133:],False)
+            check(defs[:131]+[defs[132],defs[131]]+defs[133:],False)
     assert receipt['manifest_sha256'] == digest(export/'input-manifest.json')
     print(json.dumps(dict(passed=True,payloads=len(rows),native_source_payloads=native,
         changed_parent_payloads=len(changed),new_headers=len(added),tcl_checks=checks,
+        variant=variant,changed_flow_payloads=len(flow_changes),
         qualification='UNQUALIFIED',note='Source/profile only; no hardware or suite acceptance.')))
 
 
