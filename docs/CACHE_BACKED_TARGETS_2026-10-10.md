@@ -5,10 +5,10 @@ U+V retirement-event gameplay IPC**, the error-free standard suite, green
 differential gates, and a working FPGA deployment. U-only/STEP/global slow
 fallbacks are not acceptance. REP retirement events are not P54 macroinstructions.
 
-**Latest verified measurement, 17:37 UTC:** `bfb867f7` reaches **0.50510994 IPC**
-over clocks **3,800,065,237–3,900,065,237**: 38,963,163 U + 11,547,831 V
-retirement events. All 27 consecutive windows from
-1,200,065,237 average **0.4943896**, retaining the **0.34569625** dip at
+**Latest verified measurement, 18:04 UTC:** `bfb867f7` reaches **0.52847961 IPC**
+over clocks **4,000,065,237–4,100,065,237**: 40,261,086 U + 12,586,875 V
+retirement events. All 29 consecutive windows from
+1,200,065,237 average **0.496498649**, retaining the **0.34569625** dip at
 2,100,065,237–2,200,065,237 and every other sub-0.48 interval, including the
 **0.47062856** window at 2,800,065,237–2,900,065,237 and **0.45825794** at
 3,100,065,237–3,200,065,237.
@@ -16,13 +16,13 @@ The margin above 0.48 is now small; this is not a completed-demo average.
 This is the same cache-backed model with
 qualified **2.101890118 / 2.107616105 CM/MHz** below, not a score borrowed from
 another build. Latest raw-pixel/counter/ownership audit:
-`ventium-store-admit-gameplay-r16.WaBK8xsR/audit.json`. The latest window is
-0.50510994; all 1,334,851,920 events over 2.7B clocks count. The two added
-windows are 0.49194028 and 0.50510994, selected by timestamp, not IPC.
+`ventium-store-admit-gameplay-r17.NhN4neZA/audit.json`. The latest window is
+0.52847961; all 1,439,846,082 events over 2.9B clocks count. The two added
+windows are 0.52146201 and 0.52847961, selected by timestamp, not IPC.
 Both unchanged-pixel endpoint images show rendered first-person gameplay:
-a stone-floor/ramp view then a torch-lit arched room with an enemy, weapon
-and changed viewpoint. Health is 73
-in both; armor remains 0. **Historical visual-note
+combat with an enemy and impact particles in a stone room, then a changed
+view toward stairs/a darker passage. Weapon and HUD remain visible.
+**Historical visual-note
 correction, 15:13 UTC:** earlier notes mistook the left-hand armor value (0)
 for health; health is to the right of the face, consistent with
 [id Software's HUD layout](https://github.com/id-Software/Quake/blob/master/WinQuake/sbar.c#L915-L951).
