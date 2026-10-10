@@ -59,13 +59,39 @@ parent ticks 4,767,218 / 4,753,406. These duration-invalid diagnostic runs prove
 no observed cycle cost; they do not grant the parent's 900-iteration qualified
 2.101890118 / 2.107616105 CM/MHz scores to the new model.
 
-## Remaining work
+## Closed full synthesis diagnostic
 
 Full synthesis diagnostic: `ventium-ic-buffered-full-synth.6cLKnbGf`, retained
 controller `5c441fa813414299b1d46271ef45c11d`, exclusive single Vivado family,
 8 GiB RAM / 6 GiB swap, 30-minute cap, external scratch and monitored reserves.
 It uses the same logic-only mapper objective as the older parent, not relaxed
 clock constraints. No automatic place/route or deployment is launched by it.
+
+Closed native 0 at 10:19:43 UTC, 1,104.90 seconds, 8 GiB peak cgroup RAM and
+623,144,960 bytes peak swap; no OOM or resource stop. Independent `audit.json`
+checks 3,301 immutable input pins, actual native Tcl's ordered 147 defines and
+146 `read_verilog` files, DCP ZIP integrity and the successfully exited retained
+controller. Synthesized DCP SHA:
+`2efbd305640c98e626b2dd31861f34922b689c6451718c30d1d7cca5058ec36c`.
+
+| Whole synthesized resource | Older `958f7ec4` profile | Current combined profile |
+| --- | ---: | ---: |
+| CLB LUTs | 190,864 | **220,699** |
+| Registers | 54,571 | 54,647 |
+| BRAM tiles | 277.5 | 277.5 |
+| DSPs | 47 | 47 |
+
+**This is a 29,835-LUT increase**, not a whole-chip area win. The comparison
+also includes ten performance backports, so it does not isolate the sharing
+change. The 66.0% local-cone result must not be extrapolated. Read-only native
+netlist comparison is underway before spending time on placement/routing.
+
+The native synthesis has one critical warning: generated PS XDC line 21 cannot
+resolve `PS8_i/PLCLK[0]` for `create_clock`. The older parent has the same
+warning; that history does not waive it. Effective checkpoint clocks must be
+checked before implementation. No routed frequency or timing sign-off exists.
+
+## Remaining work
 
 Generic differential verification remains **red**. This exact new source still
 needs duration-valid CoreMark, Win95 desktop, complete original DOS Quake,

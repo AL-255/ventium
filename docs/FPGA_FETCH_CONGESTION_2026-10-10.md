@@ -208,13 +208,30 @@ native 0 in 2.30 seconds, six structural classes fatal, unchanged pins. Clocks
 remain **40 MHz core / 100 MHz PL**, full P5 caches, posted-16 DDR and
 UV/system/relocated fast loads/stores. No slow-mode workaround.
 
-Full synthesis only is running in `ventium-ic-buffered-full-synth.6cLKnbGf`,
+Full synthesis only closed in `ventium-ic-buffered-full-synth.6cLKnbGf`,
 controller `5c441fa813414299b1d46271ef45c11d`. Same `logic_only` mapping as the
 old whole design, unchanged clock constraints, one Vivado family, **8 GiB RAM /
 6 GiB swap**, 30-minute native cap, 12 GiB starting disk reserve and monitored
-2 GiB disk/host reserve. The measured local savings motivate checking the
-mapped whole design before another route. Launch is not synthesis, timing,
-bitstream or deployment acceptance.
+2 GiB disk/host reserve. Native 0 at 10:19:43 UTC, 1,104.90 seconds, stable
+3,301 input pins, no OOM/resource stop. Peak memory 8 GiB plus 623,144,960 bytes
+swap. Independent closure audit verifies the actual ordered defines, source
+read commands, DCP integrity and retained successful supervisor.
+
+The full result is **220,699 CLB LUTs**, versus the older parent's **190,864**:
+**29,835 more**, with registers 54,571 → 54,647 and unchanged 277.5 BRAM / 47
+DSP. This comparison includes the ten performance backports as well as fetch
+sharing; neither isolated causation nor a whole-design sharing win is proved.
+The isolated 66.0% result does **not** establish compactness of the combined
+processor. Investigate the native mapped cones before another placement/route.
+
+There is one critical synthesis warning in both runs: generated PS XDC's
+`create_clock` cannot resolve `PS8_i/PLCLK[0]`. It is not waived; checkpoint
+clock inspection is part of the read-only comparison. New synthesis DCP SHA
+`2efbd305640c98e626b2dd31861f34922b689c6451718c30d1d7cca5058ec36c`.
+Read-only comparison: `ventium-ic-buffered-netlist-audit.o1OrEevL`, controller
+`455c1db5ea1d4f829a4aa31cef7f0fe5`; immutable old/new synthesized DCPs, 10-minute
+cap, 8 GiB RAM / 4 GiB swap. No optimization, placement, routing, clock changes
+or bitstream output. No new routed frequency or hardware acceptance.
 
 ### Recoverable scratch cleanup
 
