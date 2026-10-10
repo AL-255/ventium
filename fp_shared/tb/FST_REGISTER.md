@@ -1,8 +1,8 @@
 # Register FST/FSTP repair — October 10
 
 **Verified private repair, not production promotion or suite acceptance.**
-Gameplay baseline remains **0.49929384 total U+V IPC**, `86731249`, cycles
-3.2B–3.3B; the 21 consecutive windows from 1.2B–3.3B average **0.47844824**,
+Gameplay baseline is **0.50058134 total U+V IPC**, `86731249`, cycles
+3.6B–3.7B; the 25 consecutive windows from 1.2B–3.7B average **0.4788804468**,
 including the real 2.3B–2.4B dip at **0.26103520**. This FST candidate has no
 gameplay result. Full direct-memory CoreMark remains **2.107843209 /
 2.110905243 CM/MHz** on separate model `b5453f16`, not FPGA/cache/DDR scores.
@@ -105,3 +105,24 @@ The earlier arithmetic reconciliation remains in [ROUND_C1.md](ROUND_C1.md).
 Remaining: legacy-path qualification, complete exception/owner regressions,
 resolution of the real canonical-oracle/RTL discrepancies without masks,
 full standard suite and measured performance/hardware acceptance.
+
+## Legacy writeback matrix queued
+
+`prepare_fst_legacy_tb.py` generates a test shell from the **actual module
+ports** and the unchanged core compilation-unit state-type prefix. It does
+not substitute an implementation of the writeback equations or invent enum
+encodings. `fst_legacy_body.svh` prepares 1,920 copy/pop/rotation/fault/C1 cases
+plus 64 fast `FK_FSTP0` cases and an unadmitted-fast-arm negative check.
+It checks actual write enables, indices, values, status and fault outputs.
+These are writeback-port tests, not architectural-state-file or full-core tests;
+central ES/B recomputation remains outside this unit.
+
+Four generator tests pass. Four RTL profiles (parent/repaired, combinational/
+two-stage legacy FP configuration) are **queued, not passed**, in
+`external/tmp/ventium-fst-legacy.2Z6k47XD/`. Service
+`ventium-fst-legacy-oct10.service`, invocation
+`7e1452b97b81477ab63332d347968441`, waits behind the same Vivado/build lock.
+The bounded body allows 600 seconds total, one compiler, the normal 4 GiB
+scope and all six structural warning classes fatal. The expected parent
+failure is counted explicitly; it is not a passing correctness profile.
+No live FPGA or guest input is changed by preparing this test.
