@@ -5,9 +5,9 @@ parent is documented in [STORE_ADMIT_EXPORT.md](STORE_ADMIT_EXPORT.md); the
 new sharing change and closed microtests are in the
 [fetch-congestion audit](../docs/FPGA_FETCH_CONGESTION_2026-10-10.md).
 
-Current verified gameplay remains parent `958f7ec4`: **0.50588294** U+V event
-IPC at clocks 3,300,048,811–3,400,048,811; all 22 consecutive windows average
-0.4817253664. Performance model `bfb867f7` and sharing model `89b68b62` remain
+Current verified gameplay remains parent `958f7ec4`: **0.49630560** U+V event
+IPC at clocks 3,600,048,811–3,700,048,811; all 25 consecutive windows average
+0.4848174992. Performance model `bfb867f7` and sharing model `89b68b62` remain
 gameplay-unmeasured. REP events are not exact P54 macroinstructions.
 
 ## Exact inputs
@@ -71,3 +71,6 @@ Generic differential verification remains **red**. This exact new source still
 needs duration-valid CoreMark, Win95 desktop, complete original DOS Quake,
 whole-chip area/timing and silicon acceptance. The local 66.0% lookup-cone LUT
 reduction is not a whole-chip prediction or a measured gameplay improvement.
+Its separate duration-valid seeds, Win95 and Quake cold boots are now running;
+exact service identities and bounds are in the
+[target log](../docs/CACHE_BACKED_TARGETS_2026-10-10.md).

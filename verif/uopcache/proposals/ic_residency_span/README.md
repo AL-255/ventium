@@ -44,7 +44,7 @@ TMPDIR=/home/yukidama/external/tmp python3 -B -m unittest discover \
 All 13 tests pass. The 145-define full-PC derivative `89b68b62` is distinct
 from the duration-valid CoreMark model `bfb867f7`; its ten-iteration cycle
 identity does not inherit the latter's qualified scores. Current verified
-gameplay is parent `958f7ec4`: 0.50588294 at clocks 3,300,048,811–3,400,048,811;
+gameplay is parent `958f7ec4`: 0.49630560 at clocks 3,600,048,811–3,700,048,811;
 both newer models remain gameplay-unmeasured.
 
 ## Intended substitutions

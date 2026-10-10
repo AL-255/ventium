@@ -123,14 +123,34 @@ completed standard-suite result or a gameplay IPC measurement for this build.
 
 ## Gameplay baseline and blockers
 
-Current verified parent `958f7ec4`: **0.50588294** at clocks
-**3,300,048,811–3,400,048,811**, 50,588,294 events = 38,833,935 U + 11,754,359 V.
-All twenty-two consecutive 100M windows from 1,200,048,811 total
-1,059,795,806 events / 2.2B clocks = **0.4817253664**, retaining every dip.
-Audit `ventium-sfetch16-latest-r10.8YGncnX4/audit.json` checks counters,
+Current verified parent `958f7ec4`: **0.49630560** at clocks
+**3,600,048,811–3,700,048,811**, 49,630,560 events = 38,045,168 U + 11,585,392 V.
+All twenty-five consecutive 100M windows from 1,200,048,811 total
+1,212,043,748 events / 2.5B clocks = **0.4848174992**, retaining every dip.
+Audit `ventium-sfetch16-latest-r11.S0xEqGEw/audit.json` checks counters,
 source/native/supervisor identity, unchanged raw endpoint pixels and no OOM.
 Latest window and aggregate exceed 0.48; timedemo is unfinished.
 **The newer `bfb867f7` candidate has no verified gameplay measurement.**
+
+The area-sharing derivative **`89b68b62`** has no gameplay measurement either.
+Its source, zero-cost short CoreMark A/B result and 66.0% local lookup-cone LUT
+reduction are recorded in [the fetch audit](FPGA_FETCH_CONGESTION_2026-10-10.md).
+Separate cold standard-suite runs started on this exact derivative; they do
+not inherit the performance parent's qualified scores or future boot result:
+
+| Service | Actual CPU | Invocation |
+| --- | ---: | --- |
+| `ventium-ic-buffered-cm900-perf-oct10` | 15 | `b3464a40253d42ba85a770bd031006dd` |
+| `ventium-ic-buffered-cm900-valid-oct10` | 16 | `0931102127864047a66d93e5eae3b7c3` |
+| `ventium-ic-buffered-quake-oct10` | 2 | `5cf2e4c42fd645baae8f90773cfeb6f4` |
+| `ventium-ic-buffered-win95-oct10` | 4 | `2f70aa78e83a4366b6b595259d641b78` |
+
+All four are active at 10:09 UTC. Actual native admission verifies the model,
+argv, PID/starttime, supervisor/cgroup and affinity. Original media/ROMs and
+completion criteria are unchanged; no guest patch, input script or snapshot.
+CoreMark retains its 60-minute seed cap; Win95/Quake their bounded cold-run
+collectors. Evidence is under `ventium-ic-buffered-soc.gsztNdDc` on external
+scratch. Existing `bfb867f7` cold runs continue, not restarted or replaced.
 
 Unmodified generic verification remains **red**: terminal/bounded-observation
 record discrepancies and cycle-band failures. No golden records, field masks
