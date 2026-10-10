@@ -5,16 +5,20 @@ U+V retirement-event gameplay IPC**, the error-free standard suite, green
 differential gates, and a working FPGA deployment. U-only/STEP/global slow
 fallbacks are not acceptance. REP retirement events are not P54 macroinstructions.
 
-**Latest verified measurement, 13:28 UTC:** `bfb867f7` reaches **0.51922957 IPC**
-over clocks **2,000,065,237–2,100,065,237**: 39,532,488 U + 12,390,469 V
-retirement events. All nine consecutive windows from
-1,200,065,237 average **0.4992230911**, retaining both **0.47318727 / 0.47409349**
-dips below 0.48. This is the same cache-backed model with
+**Latest verified measurement, 14:01 UTC:** `bfb867f7` reaches **0.48853614 IPC**
+over clocks **2,200,065,237–2,300,065,237**: 37,408,672 U + 11,444,942 V
+retirement events. All eleven consecutive windows from
+1,200,065,237 average **0.4842945645**, retaining the **0.34569625** dip at
+2,100,065,237–2,200,065,237 as well as the earlier two sub-0.48 intervals.
+The margin above 0.48 is now small; this is not a completed-demo average.
+This is the same cache-backed model with
 qualified **2.101890118 / 2.107616105 CM/MHz** below, not a score borrowed from
 another build. Latest raw-pixel/counter/ownership audit:
-`ventium-store-admit-gameplay-r7.II8uaq7X/audit.json`. Both unchanged-pixel
-endpoint images show rendered first-person stone corridors, with changed
-camera/weapon position and ammunition. Full timedemo and physical FPGA remain open.
+`ventium-store-admit-gameplay-r8.ptRXTLmG/audit.json`. Both unchanged-pixel
+endpoint images show rendered first-person stone rooms, with changed camera
+view and a pickup message in the first image. HUD health remains zero as in
+earlier captures; no living-player or render-correctness claim is inferred.
+Full timedemo and physical FPGA remain open.
 New area candidate `751139e1` remains gameplay-unmeasured; its own standard
 suite is running. Its **own two 900-iteration CoreMark seeds now pass** at
 2.101890118 / 2.107616105 CM/MHz, independently audited at 12:49 UTC; the exact
@@ -33,6 +37,15 @@ state-selected FP payload candidate (`35c8cc6c` directed core) passes 384 cold
 x87/system microcases with identical complete cycle streams. That timing
 proposal has no gameplay, qualified CoreMark, or hardware timing measurement.
 Older timestamped results below remain historical evidence.
+
+The new dip is associated with **more slow-FSM work, not a larger total memory
+wait count**. Compared with the preceding 100M-clock window, S_FETCH/S_DECODE/
+S_EXEC residency rises from 8.020M to 32.642M clocks, while S_PIPE falls from
+69.394M to 46.352M. Total request-active memory-wait clocks fall from 25.650M
+to 23.961M; V's retirement share drops from 23.86% to 19.23%. These are direct
+counter differences, not a cache-miss attribution or a same-work speedup.
+Counters overlap; the figures must not be summed into one CPI breakdown.
+The available sample does not identify the responsible opcode distribution.
 
 ## Current combined candidate
 
