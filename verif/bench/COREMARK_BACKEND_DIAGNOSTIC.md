@@ -69,6 +69,69 @@ The preceding r1 supervisor failed before launching a native: `AllowedCPUs`
 alone did not constrain `sched_getaffinity` on this host. R2 explicitly uses
 `taskset`; the failed first admission remains recorded, not overwritten.
 
+### Every retirement matched; the largest instruction sites
+
+A second observation on the unchanged `b5453f16` executes the performance
+seed on both backends with native cycle tracing enabled. **All 3,661,024
+sequence numbers and PCs match**, both runs reproduce the earlier clock totals
+exactly, both guest outputs/CRCs are byte-identical to their baselines, actual
+fault deliveries remain zero and both have real V retirements. Inputs remain
+pinned and both children/supervisor close normally. This is still a short,
+insufficient-duration diagnostic, not a score or architectural-state oracle.
+
+The collector attributes each interval to the instruction retiring at its end.
+Intervals sum to 4,821,804 direct / 5,241,738 AXI clocks; unretired final tails
+are 14 / 41 clocks. Thus **419,934 + 27 = 419,961** extra clocks are accounted
+for. These are **signed retirement-interval attributions**, not causal savings:
+pairing changes and preceding stalls can shift cost between instructions.
+
+| Retiring instruction class | Extra interval clocks |
+| --- | ---: |
+| MOV | +152,286 |
+| PUSH | +105,682 |
+| RET | +47,909 |
+| POP | +42,430 |
+| All other instructions, including outside-ELF runtime code | +71,627 |
+| Unretired final tail | +27 |
+| **Total** | **+419,961** |
+
+The first four classes account for **82.94%** of the net gap under this
+attribution. `core_state_transition` contributes 154,013 interval clocks;
+`core_bench_list` 62,759; `crc16` 43,186. Every disassembled instruction byte
+was checked against the unchanged ordinary-entry image, including encodings
+that cross image-region boundaries. The 35 retirements outside the ELF remain
+explicitly classified, not omitted or assigned invented instructions.
+
+Specific targets:
+
+- Four consecutive pushes at `0804ad11..0804ad14` execute 10,240 times each.
+  Each costs approximately three clocks with AXI instead of one with direct
+  memory; together they account for **81,915** extra interval clocks. Inspect
+  ordinary stack-store admission and the two-entry write-buffer return path;
+  do not enlarge the architectural buffers or discard ordering requirements.
+- `crc16`'s RET at `0804b3f4` contributes **41,630** extra clocks across 1,344
+  executions. The source still demands a complete 16-byte slow-decode window
+  for this one-byte near return. A
+  [private exact-byte capture proposal](../fe_pipe/RET_SHORT_WINDOW.md) retains
+  ordinary decode/stack/target checks; measured savings are not yet established.
+- List loads at `0804a7e6` and `0804a972`, both `MOV 4(EAX),EDX`, contribute
+  **48,887** extra clocks together. These are read-owner/lookahead candidates,
+  not evidence that every interval is a cache miss.
+
+The short scored service-to-service windows are 4,746,008 direct / 5,105,915
+AXI clocks, corresponding to diagnostic ratios 2.10703 / 1.95851. Do not mix
+those with the table's conservative whole-program ratios 2.07391 / 1.90775,
+or present either short ratio as a valid full score. About 60,054 clocks of
+the whole-program backend difference occur outside that service window.
+
+Receipts: `external/tmp/ventium-coremark-cycle-diff.XqqsWNnn/`
+`r1/{started.json,closed.json,symbols.json}`; invocation
+`f104cffd0fa9436fbb9d107606e3ba8f`. Two FIFO streams retain exact native traces
+as gzip without intermediate uncompressed files: about **61.6 MiB** combined.
+Actual elapsed time is 34.46 seconds under a 768 MiB/zero-swap/360-second bound,
+with native CPUs 2/3 and collector affinity 2–4. No model build, production RTL,
+guest code, clock policy, comparison mask or timing band changes.
+
 ## Corrected fixture and standalone store-policy driver
 
 Two independent test-configuration problems were isolated without changing RTL:
