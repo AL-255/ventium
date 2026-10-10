@@ -5,15 +5,16 @@ U+V retirement-event gameplay IPC**, the error-free standard suite, green
 differential gates, and a working FPGA deployment. U-only/STEP/global slow
 fallbacks are not acceptance. REP retirement events are not P54 macroinstructions.
 
-**Latest verified measurement, 13:00 UTC:** `bfb867f7` reaches **0.50468964 IPC**
-over clocks **1,800,065,237–1,900,065,237**. All seven consecutive windows from
-1,200,065,237 average **0.4999549657**, retaining the earlier **0.47318727**
-dip below 0.48. This is the same cache-backed model with
+**Latest verified measurement, 13:28 UTC:** `bfb867f7` reaches **0.51922957 IPC**
+over clocks **2,000,065,237–2,100,065,237**: 39,532,488 U + 12,390,469 V
+retirement events. All nine consecutive windows from
+1,200,065,237 average **0.4992230911**, retaining both **0.47318727 / 0.47409349**
+dips below 0.48. This is the same cache-backed model with
 qualified **2.101890118 / 2.107616105 CM/MHz** below, not a score borrowed from
 another build. Latest raw-pixel/counter/ownership audit:
-`ventium-store-admit-gameplay-r6.4TalFu7S/audit.json`. Both unchanged-pixel
-endpoint images show rendered first-person demo scenes: a close weapon/explosion
-flash, then a changed corridor view with an enemy impact. Full timedemo and physical FPGA remain open.
+`ventium-store-admit-gameplay-r7.II8uaq7X/audit.json`. Both unchanged-pixel
+endpoint images show rendered first-person stone corridors, with changed
+camera/weapon position and ammunition. Full timedemo and physical FPGA remain open.
 New area candidate `751139e1` remains gameplay-unmeasured; its own standard
 suite is running. Its **own two 900-iteration CoreMark seeds now pass** at
 2.101890118 / 2.107616105 CM/MHz, independently audited at 12:49 UTC; the exact
@@ -21,6 +22,10 @@ suite is running. Its **own two 900-iteration CoreMark seeds now pass** at
 CRCs, native 0/EOF/reaping, actual V retirement, 3,361 stable pins per seed and
 no OOM. Evidence: `ventium-ic-prefix-capture-soc.Vkt5yyAz/coremark-900-{performance,validation}/audit.json`.
 This does not qualify its still-running Quake/Win95 or physical FPGA.
+The newer registered-invalidation candidate `322bc855` also remains
+gameplay-unmeasured. Its own two short CoreMark diagnostics now pass with
+identical parent cycles/CRCs; these ten-iteration runs are duration-invalid,
+not qualified scores. See [the synthesis/diagnostic record](FPGA_FETCH_CONGESTION_2026-10-10.md).
 Older timestamped results below remain historical evidence.
 
 ## Current combined candidate

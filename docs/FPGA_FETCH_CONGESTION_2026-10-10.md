@@ -1,12 +1,12 @@
 # Fetch/operand congestion: native evidence and narrow sharing experiment
 
-Latest verified gameplay is `bfb867f7`, **0.50468964** U+V event IPC at
-1,800,065,237–1,900,065,237 clocks. All seven consecutive 100M windows from
-1,200,065,237 average **0.4999549657**, retaining the earlier 0.47318727 dip;
-no window is excluded. Audit: `ventium-store-admit-gameplay-r6.4TalFu7S/audit.json`. This same cache-backed
+Latest verified gameplay is `bfb867f7`, **0.51922957** U+V event IPC at
+2,000,065,237–2,100,065,237 clocks. All nine consecutive 100M windows from
+1,200,065,237 average **0.4992230911**, retaining both 0.47318727 / 0.47409349
+dips; no window is excluded. Audit: `ventium-store-admit-gameplay-r7.II8uaq7X/audit.json`. This same cache-backed
 model qualifies both CoreMark seeds at **2.101890118 / 2.107616105 CM/MHz**.
-Full timedemo remains unfinished. New area candidate `751139e1` is
-gameplay-unmeasured. REP events are not exact P54 macroinstructions.
+Full timedemo remains unfinished. New area candidates `751139e1` and
+`322bc855` are gameplay-unmeasured. REP events are not exact P54 macroinstructions.
 
 The final **two-consumer** sharing correction saves **24,543 whole-design
 LUTs (11.06%)**. Earlier local successes followed by whole-design regressions
@@ -591,3 +591,24 @@ the per-seed host cap becomes 600 seconds. Service
 `9ed152738963433db57ac9f4be306821`, has 2 GiB/no swap and one actual CPU.
 This short run can establish cycle/CRC preservation, not duration-valid scores.
 Long cold acceptance runs on earlier models continue unchanged.
+
+At **13:28 UTC**, the distinct `coremark-r4` closes both short seeds and its
+independent audit passes: all original five CRCs, exactly **4,767,218 /
+4,753,406 ticks**, 113.59 / 106.54 host seconds, native 0, actual child wait,
+process disappearance, actual V retirement, 3,568 stable pins and zero OOM.
+Retained successful supervisor `ventium-cacheinv-coremark-oct10-r4`, invocation
+`4746a6cdbc5c4513922b1b861af81384`. This is **zero observed benchmark-cycle
+cost** for the local invalidation projection, not a duration-valid score or
+full-suite pass. The original minimum-duration errors remain in the console.
+
+Intermediate launcher failures are retained, not converted to passes. R2's
+performance seed completed with correct CRCs/ticks, but its validation admission
+assertion fired before saving an observation; its exact cause is unknown and
+its unconditional child-reaped boolean is not accepted as a wait witness. R3
+moved admission inside guaranteed cleanup and saved the actual observed argv;
+it exposed a new parser bug: splitting on literal backslash-zero instead of
+the NUL byte. Its observed process was terminated and actually waited for.
+R4 uses a tested NUL-byte parser (including empty arguments, spaces, literal
+backslash-zero and incomplete-input rejection), retains the strict argv /
+affinity / cgroup checks, and records actual native closure for each seed.
+No RTL, guest image, cycles, CRC reference or benchmark algorithm changed.
