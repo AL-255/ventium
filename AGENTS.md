@@ -54,6 +54,15 @@ Run and pass the entire standard test suite after any major core or cache-system
 modification before declaring that modification complete. Keep the differential
 gates green as well; the suite does not replace them.
 
+For FPGA-targeted fixes, simulation alone is not acceptance. Validate the
+candidate on the physical FPGA in UV + fast-pipe mode: Windows 95 must cold
+boot to a clean desktop and pass keyboard/mouse UI interaction; Quake must
+complete its full timedemo without error. Retain board logs and captures,
+bitstream/source hashes, measured core clock and evidence of actual paired
+execution. Keep simulation results and FPGA results separate; an older image's
+pass does not qualify a new candidate. A completed movie or a gameplay IPC
+window alone does not establish timedemo completion.
+
 ## ⚠️ Current checkout state (branch `ao486-mister-sim`)
 
 The `README.md` describes the `main`-branch state. On **this** branch:
