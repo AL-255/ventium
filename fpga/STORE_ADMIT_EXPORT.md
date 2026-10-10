@@ -2,9 +2,9 @@
 
 This is **UNQUALIFIED**, not a routed bitstream or deployment. See
 [the measured changes and outstanding targets](../docs/CACHE_BACKED_TARGETS_2026-10-10.md).
-Verified gameplay baseline is parent `958f7ec4`: **0.47600181** U+V event IPC
-at 2,900,048,811–3,000,048,811 clocks; all 18 consecutive windows average
-0.481425193. Combined candidate `bfb867f7` remains gameplay-unmeasured.
+Verified gameplay baseline is parent `958f7ec4`: **0.50588294** U+V event IPC
+at 3,300,048,811–3,400,048,811 clocks; all 22 consecutive windows average
+0.4817253664. Combined candidate `bfb867f7` remains gameplay-unmeasured.
 
 The new frozen root is
 `/home/yukidama/external/tmp/ventium-store-admit-fpga40.00qKufA7`.
@@ -65,7 +65,12 @@ before another expensive full route. Reconstructed synthesis hierarchy can
 absorb neighboring combinational logic: its 54,033-LUT `u_icache` and 27,836-LUT
 `u_regfile` totals alone do not prove those RTL modules have that standalone cost.
 
-The combined candidate's generic differential gate is still red; valid-duration
-CoreMark, cold Win95 desktop, complete original DOS Quake demo, routed frequency
-and silicon acceptance remain open. CPU lint/source admission closes none of
-those requirements, and does not resolve inherited NP-prefix/EX qualification.
+Both duration-valid cache-backed CoreMark seeds on the exact exported native
+model now pass: **2.101890118 / 2.107616105 CM/MHz**, 900 iterations, all five CRCs,
+native exit 0, stable pins and no OOM. Details and raw-TSC evidence are in the
+linked target document. This is simulation evidence, not a board score.
+
+The combined candidate's generic differential gate is still red; cold Win95
+desktop, complete original DOS Quake demo, routed frequency and silicon
+acceptance remain open. CPU lint/source admission closes none of those
+requirements, and does not resolve inherited NP-prefix/EX qualification.

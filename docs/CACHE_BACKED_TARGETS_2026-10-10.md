@@ -66,7 +66,37 @@ It found repeated one-clock stalls among cache-hit PUSHes, motivating the
 missing admission backport. The compressed 21.94 MB trace is a core/bus
 observation, **not** a complete retained-model differential dump.
 
-## Long tests admitted, not yet accepted
+## Duration-valid CoreMark: both seeds exceed 2.1
+
+Both cold 900-iteration runs on **`bfb867f7`** closed successfully and passed
+the separate `audit_soc_seed.py` checker. This is the cache/DDR-backed UV-fast
+SoC simulation, **not** the older direct-memory score or a silicon measurement.
+
+| Seed | Raw TSC ticks | Actual guest seconds | CM/MHz | Five reference CRCs |
+| --- | ---: | ---: | ---: | --- |
+| Performance | 428,186,037 | 10.704650925 | **2.101890118** | e9f5 e714 1fd7 8e3a 4983 |
+| Validation | 427,022,738 | 10.675568450 | **2.107616105** | 18f2 e3c1 0747 8d84 9808 |
+
+Score uses `900 * 1,000,000 / raw_TSC_ticks`, not the console's integer-rounded
+seconds or iterations/second. Both complete consoles say `Correct operation
+validated`, all five CRCs match the respective unchanged 900-iteration QEMU
+references, and each has native exit 0, EOF, reaped child, actual V retirements,
+294 stable source/input pins and zero OOM events. The retained supervisors also
+closed successfully with the invocation IDs below. Performance took 3,269.55
+host seconds, within its 60-minute cap. No algorithms, compiler flags, guest
+timers, pair mode or media changed between launch and closure.
+
+Evidence: `coremark-900-performance/{closed,audit}.json` and
+`coremark-900-validation/{closed,audit}.json` under the candidate root. The
+auditor's 16 synthetic positive/negative controls and the six existing console
+checker tests pass; these tests are not benchmark runs. They reject wrong CRCs,
+cross-screen assembled results, missing V retirement, faults after completion,
+missing EOF/reaping, timeout/OOM, pin drift and incorrect supervisor identity.
+
+The CoreMark component and **simulated** 2.1 target are now met. This does not
+close the generic differential gate, Win95, Quake or physical FPGA acceptance.
+
+## Standard-suite runs and resource bounds
 
 Two 900-iteration CoreMark seeds use the same unmodified algorithms/compiler
 and port. `verif/bench/coremark_boot/run_soc_seed.py` requires >=10 guest
@@ -87,17 +117,19 @@ Quake cold-boots the original DOS demo1 disk; **969 frames and native closure**
 are required. Win95 cold-boots the standard-VGA fixture installed through
 Windows' own installer; the bounded collector cannot grant desktop acceptance.
 Closed visual review remains necessary. No snapshot or input script is used.
-These four jobs were active at 08:53 UTC, not completed passes.
+At 09:37 UTC both CoreMark jobs are successfully closed as audited above.
+Quake and Win95 remain active, progressing through cold boot; neither has a
+completed standard-suite result or a gameplay IPC measurement for this build.
 
 ## Gameplay baseline and blockers
 
-Current verified parent `958f7ec4`: **0.47600181** at clocks
-**2,900,048,811–3,000,048,811**, 47,600,181 events = 37,092,341 U + 10,507,840 V.
-All eighteen consecutive 100M windows from 1,200,048,811 total
-866,565,347 events / 1.8B clocks = **0.481425193**, retaining every dip.
-Audit `ventium-sfetch16-latest-r8.nL7ZxvYs/audit.json` checks counters,
+Current verified parent `958f7ec4`: **0.50588294** at clocks
+**3,300,048,811–3,400,048,811**, 50,588,294 events = 38,833,935 U + 11,754,359 V.
+All twenty-two consecutive 100M windows from 1,200,048,811 total
+1,059,795,806 events / 2.2B clocks = **0.4817253664**, retaining every dip.
+Audit `ventium-sfetch16-latest-r10.8YGncnX4/audit.json` checks counters,
 source/native/supervisor identity, unchanged raw endpoint pixels and no OOM.
-Latest window is below target, aggregate is above, timedemo is unfinished.
+Latest window and aggregate exceed 0.48; timedemo is unfinished.
 **The newer `bfb867f7` candidate has no verified gameplay measurement.**
 
 Unmodified generic verification remains **red**: terminal/bounded-observation
