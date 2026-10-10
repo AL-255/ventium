@@ -106,9 +106,65 @@ The independent 7M–11M steady benchmark interval has
 is 4.65% of all clocks, already inside S_PIPE; do not add it again. This is a
 residency description, not a proven cache-miss or causal-savings breakdown.
 
-Current verified **gameplay** IPC is **0.49741357**, model `958f7ec4`, clocks
-1,200,048,811–1,300,048,811, from a predeclared cold-Quake window with real V
-retirements and both raw endpoint frames reviewed. It is not complete timedemo
+Current verified **gameplay** IPC is **0.49761630**, model `958f7ec4`, clocks
+1,300,048,811–1,400,048,811. The fixed first window remains 0.49741357;
+both consecutive 100M windows average 0.497514935. Real V retirements and raw
+endpoint frames are checked; no intervening window is excluded. This is not complete timedemo
 or physical-board qualification. New private FST/C1/RET/sharing derivatives
 remain unmeasured in gameplay; generic differential and full-suite work remain
 open. This port changes no RTL and closes none of those obligations by itself.
+
+### Every-clock diagnostic: 7M–8M
+
+`external/tmp/ventium-coremark-soc-state.jeo3fLiy` cold-boots the unchanged
+performance disk on the same native. Only existing read-only observers are
+added. It completes in 91.26 host seconds, native exit 0, same five CRCs and
+**exactly the same 5,096,514 measured guest clocks**. One million consecutive
+`VENSTATE` core/bus observations are recorded; this is **not** the separate
+complete retained-model state-delta format. Raw output is streamed directly
+to gzip: 353,911,575 bytes become 22,069,608 bytes, with no uncompressed disk
+copy. The independent analyzer re-reads the entire archive, checks its hash
+and consecutive timestamps, and matches every state count against periodic
+RTL counters. All one million clocks reconcile:
+
+| Exclusive residency | Clocks | Percent |
+| --- | ---: | ---: |
+| Pipeline issue arm | 438,760 | 43.8760% |
+| Pipeline dispatch to slow path | 88,490 | 8.8490% |
+| Pipeline load-result wait | 39,112 | 3.9112% |
+| Pipeline store-result wait | 7,348 | 0.7348% |
+| Branch-misprediction penalty | 32,732 | 3.2732% |
+| Address-generation interlock | 32,653 | 3.2653% |
+| Registered I-cache read wait | 17,815 | 1.7815% |
+| Slow IMUL execution | 180,645 | 18.0645% |
+| Slow MOVSX execution | 52,017 | 5.2017% |
+| Other slow execution | 43,129 | 4.3129% |
+| Slow operand load | 48,373 | 4.8373% |
+| Decode | 10,289 | 1.0289% |
+| Slow store | 7,276 | 0.7276% |
+| Fetch | 1,361 | 0.1361% |
+| **Total** | **1,000,000** | **100.0000%** |
+
+These are clock owners, **not percentages of wasted cycles or proven savings**.
+The issue arm is useful work, and required execution latency cannot simply
+be deleted. Slow instruction attribution uses the latched `q_pc` and the
+actual ELF disassembly only in S_EXEC; the stale S_PIPE `q_kind` is not used
+to classify current fast instructions. The slice's 0.715040 CoreMark
+retirement-event IPC is not a gameplay result.
+
+Three matrix IMUL sites (`115bc`, `115a6`, `114f6`) account for 167,685 clocks.
+Four adjacent sign-extension sites (`115a0`, `115a3`, `114f0`, `114f3`) account
+for 44,464 execution clocks. Preserve instruction-latency/NP contracts while
+investigating surrounding dispatch, fetch and operand handoff. In particular,
+do **not** enable old `VEN_FAST_MEM_EXT` wholesale: its documented two-clock
+result cadence conflicts with the retained EXT result-retirement regression's
+minimum four-clock contract. The old directed ISA passes do not waive that
+timing check or supply current Win95/Quake acceptance.
+
+Other measurable targets are the 3.2732% misprediction and 3.2653% address
+interlock buckets. They need separate cause/owner witnesses before changing
+prediction or forwarding. Eliminating all pipeline D-result waits in this
+slice would cover only 4.6460% of its clocks; it is not by itself a demonstrated
+route from the current short ratio to 2.1, nor proof that those waits are cache
+misses. Preserve the small existing RET and write-buffer experiments as
+independent A/B changes rather than crediting them with this whole gap.

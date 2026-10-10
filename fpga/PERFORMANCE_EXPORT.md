@@ -2,8 +2,13 @@
 
 This is **UNQUALIFIED source preparation**, not a bitstream, timing pass or
 transfer of simulation acceptance to silicon. Latest verified Quake gameplay
-is **0.49741357 total U+V retirement-event IPC**, demand-fetch SoC model
-`958f7ec4`, clocks **1,200,048,811–1,300,048,811**. The original pre-run plan
+is **0.49761630 total U+V retirement-event IPC**, demand-fetch SoC model
+`958f7ec4`, clocks **1,300,048,811–1,400,048,811**. Both consecutive 100M
+windows from 1,200,048,811 average **0.497514935**; no intervening dip is
+omitted. Latest audit: `ventium-sfetch16-latest.vX56eOiX/audit.json`,
+49,761,630 events (38,390,487 U + 11,371,143 V), raw advancing combat frames,
+stable pins/native identity and no OOM. This does not replace the fixed first
+gate **0.49741357**, clocks **1,200,048,811–1,300,048,811**. Its original pre-run plan
 selects periodic samples12/13, not zero-offset interpolated clocks.
 Audit:`ventium-sfetch16-gameplay.uR79KRxi/window/audit.json`:49,741,357 events
 (38,343,171U +11,398,186V) over100M clocks,244 source/17 runtime pins,
@@ -152,6 +157,22 @@ retains the frozen source: the pending C1/FST repairs, canonical gate failures
 and incomplete standard suite are not hidden by synthesis success. There is
 no routed frequency result or new silicon acceptance yet. The repaired FST
 model is separate; see [its closed tests](../fp_shared/tb/FST_REGISTER.md).
+
+The implementation closed at **05:32:05 UTC** after its fixed 90-minute bound:
+native timeout exit **124**, controller exit1, stable inputs, no resource stop
+or controller failure and no OOM. Peak cgroup RAM was 9,213,423,616 bytes and
+peak swap 1,212,366,848 bytes. All Vivado/vrs processes were gone afterward;
+the exact controller's failed closure is retained by the metadata keeper.
+Routing had not completed: global iteration1 reached zero overlaps, then
+iteration2 ended at130 reported overlaps when the bound expired. Intermediate
+global timing had WNS −31.972 ns; without final same-clock path reports this
+is **not a CPU Fmax**. The requested 40MHz core /100MHz PL clocks are unchanged,
+but neither is a new sign-off result. No bitstream was produced or deployed.
+Placed/physopt checkpoints and native logs remain for analysis. The emitted
+`iter_100_CongestedCLBsAndNets.txt` names only two CLB tiles and **no nets**;
+do not infer a guilty RTL block from that empty net list. No automatic retry
+was launched. Queued, bounded correctness builds can now acquire the normal
+shared lock; they do not change the frozen FPGA source.
 
 Recoverable cleanup made room:1,264 closed failed-synthesis scratch files,
 32,978 cached trace names and25 old trace/log files were independently hashed,
