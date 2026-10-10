@@ -312,10 +312,13 @@ now has 663,700 actual-include equivalence checks and 384 cold QEMU system
 cases, with identical A/B architectural and retirement-cycle streams. A
 second read-only failed-checkpoint inspection confirms that the redundant
 EA/GPR-writeback dependency survived mapping on the reported critical cone.
-The private derivative has not been synthesized or exported to a new FPGA
-image; this frozen export remains unchanged. The canonical differential gate
-still fails, and neither physical acceptance nor a timing improvement is
-claimed. The diagnostic Vivado family exited normally.
+Follow-up, 22:10 UTC: its full-PC derivative `cf1b3b0b`, source-matched FPGA
+export and strict CPU lint now pass their own audits. Both short CoreMark
+seeds retain the parent's exact clocks/CRCs; they are not valid-duration scores.
+The new full synthesis is live; no new bitstream or timing gain exists yet.
+This older frozen export remains unchanged. The canonical differential gate
+still fails, and physical acceptance remains open. See the linked factoring
+record for exact identities and the active synthesis controller.
 
 All roots below are under `/home/yukidama/external/tmp/`:
 

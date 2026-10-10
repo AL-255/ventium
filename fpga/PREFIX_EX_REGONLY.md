@@ -103,16 +103,69 @@ root above. The latter gate deliberately requires identical feature profiles
 and every retirement cycle unchanged; it is not the earlier overlap-enable
 experiment that expected fewer clocks.
 
+## Source-matched full-PC and FPGA derivative, 22:10 UTC
+
+The full-PC build now closes as
+`cf1b3b0bf30d35993c12f335c148dbf5c1ae90f09c0e26f3c2b22907263ab27c`,
+under `/home/yukidama/external/tmp/ventium-prefix-regonly-soc.MMoWhswI`.
+Its only RTL delta from `2b4d7a48` is the same prefix include. All 102 shared
+RTL inputs match the directed model. The private host object/header ownership
+was checked; all 154 simulator defines and posted-16 transport are unchanged.
+The inherited 98 platform structural warnings remain debt, not lint passes.
+
+Both original cold-boot **10-iteration** CoreMark disks complete with the
+expected CRCs and actual V retirements. These are short correctness/clock
+comparisons, **not duration-valid scores or standard-suite acceptance**:
+
+| Seed | Parent clocks | Candidate clocks | Clock change | Actual V events |
+| --- | ---: | ---: | ---: | ---: |
+| Performance | 4,767,218 | 4,767,218 | 0 | 1,055,307 |
+| Validation | 4,753,406 | 4,753,406 | 0 | 1,054,254 |
+
+The independent audit rehashes 8,479 inputs, rereads both full consoles against
+the original QEMU CRCs, verifies native argv/model/affinity, and confirms native
+exit 0, reaped children and no OOM. Receipt: `coremark/audit.json`, SHA-256
+`7e9e00ff7a2803c20e8efe7a6b66a067c61e7bdce2fabc6ec218ec620d907ee8`.
+The parent's valid-duration scores are not transferred to this model.
+
+[freeze_prefix_regonly_rk_candidate.py](freeze_prefix_regonly_rk_candidate.py)
+exports exactly that model to
+`/home/yukidama/external/tmp/ventium-prefix-regonly-fpga40.D6hb2tCk`.
+Manifest SHA-256:
+`5003847d311025e070fd12022b06251e62c9c50336962bc183ff179b3a903ee3`.
+The independent export audit checks 8,641 pins, 190 payloads, all 156 hardware
+defines, 117 filelist units and 49 include edges. Only the prefix header differs
+from the parent export. Full P5 L1s, 256 KiB platform L2, posted-16 writes,
+40 MHz core / 100 MHz PL clocks and UV/system/relocated fast paths are unchanged.
+Four exporter tests cover exact payload/feature acceptance and drift rejection.
+
+Strict lint of the exported CPU hierarchy passes with all six structural
+warning classes treated as errors. This is **not full-SoC lint**, synthesis
+acceptance, or a physical pass. Receipt:
+`ventium-prefix-regonly-hw-lint.Cs41DX5l/closed.json`.
+
+One full synthesis is running under
+`ventium-prefix-regonly-full-synth-oct10.service`, invocation
+`0f2db8ef82af45fb8f715532c62898d1`, in
+`ventium-prefix-regonly-full-synth.mcn9SQsB`. No implementation is launched.
+The bounded controller uses 8 GiB RAM / 6 GiB swap, one Vivado family,
+a 30-minute native deadline, and a 4 GiB runtime disk floor. Admission required
+10 GiB free and more than twice the previous synthesis's measured 1.50 GiB
+disk growth above that floor. Its live process/watch records, not a stale lock,
+confirm work is still running. No new resource count or timing gain is claimed
+until native closure and a parent/candidate netlist audit.
+
 ## Still required
 
-Inspect the synthesized cone, measure the structural effect, then qualify an
-exact-source FPGA export before any new place/route or deployment. The full
+Inspect the synthesized cone and measure the structural effect before any new
+place/route or deployment. The exact-source export above is source-qualified,
+not a qualified bitstream. The full
 standard suite and physical Quake/Win95 acceptance are not inherited by this
 directed model.
 
 Latest verified gameplay baseline remains **0.49366456 U+V retirement-event
 IPC**, older full-PC model `bfb867f7`, cycles
-**5,200,065,237–5,300,065,237**. The newer full-PC candidate `2b4d7a48` and this
-directed factoring derivative have no verified gameplay measurement. The last
+**5,200,065,237–5,300,065,237**. The newer full-PC candidates `2b4d7a48` and
+`cf1b3b0b` have no verified gameplay measurement. The last
 physical image remains `fe9f539d`, approximately 40 MHz, **0.167990963 primary/U
 event IPC**, completed timedemo **3.36 FPS**; total U+V is unavailable on that ABI.
