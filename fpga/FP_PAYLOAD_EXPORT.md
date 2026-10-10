@@ -9,8 +9,8 @@ The proposal is default-off: `VEN_FP_PIPE_PAYLOAD_SELECT`.
 
 The measured motivation is the preceding 192-level EIP-to-SRT-enable path,
 which crosses memory acknowledgement, direct-command admission and the FP
-operand mux. This source change **has no measured FPGA timing gain yet**.
-It is not a substitute for checking the next worst path.
+operand mux. The closed synthesis below shows a small **unplaced** timing gain,
+not routed or physical sign-off. The next worst path remains unresolved.
 
 ## Source and directed checks
 
@@ -100,9 +100,9 @@ This candidate has no gameplay or qualified CoreMark score, no full Win95/
 Quake closure, and no routed or physical result. Known x87 C1/value defects
 are not repaired by selecting the same payload earlier.
 
-Latest verified gameplay belongs to **`bfb867f7`**: **0.49706764** U+V
-retirement-event IPC at clocks **2,400,065,237–2,500,065,237**, **0.4868801938**
-over all thirteen consecutive 100M windows from 1,200,065,237. The 0.34569625
+Latest verified gameplay belongs to **`bfb867f7`**: **0.54372556** U+V
+retirement-event IPC at clocks **2,600,065,237–2,700,065,237**, **0.4899940033**
+over all fifteen consecutive 100M windows from 1,200,065,237. The 0.34569625
 dip is retained. That older model qualifies at **2.101890118 / 2.107616105
 CM/MHz**; neither result is inherited by this derivative. See the
 [current target record](../docs/CACHE_BACKED_TARGETS_2026-10-10.md).
@@ -149,7 +149,61 @@ The combined private core build closes native 0 in
 `de44f9382e46c25ecfb27a2bfc79c2f9c691dfce6630c82dea267d7aaf7a8c24`,
 with stable pins and the correct private harness/generated-header pair.
 Its only source delta from `35c8cc6c` is `fp_shared/ven_fp_top.sv`.
-The 384-fixture full-core QEMU/cycle matrix and unchanged canonical generic
-gate are running. Hardware timing is still required; this proposal has no
-performance score. The five new driver checks preserve the exact prior
-fixture/grader and change only the expected SRT-vs-parent define delta.
+The 384-fixture matrix passes **1,536 full x87/system QEMU comparisons and
+768 identical complete cycle streams**, in 42.51 seconds, supervisor
+`824048c31b5e414f8dff5723dd7d23d9`. The first attempt exhausted its 128-task
+host limit before completing; that failed run is retained. The successful
+32-worker rerun uses 512 tasks, with unchanged fixtures and grader.
+The unchanged canonical gate still closes native 2, supervisor
+`d3dd017640e94a78896f081407b9d4fa`: 7/108 functional passes and 12/19 graded
+cycle-band failures. All 20 complete cycle-kernel record lists equal the parent;
+3,686 build pins remain stable. This does not turn the inherited red gate green.
+Hardware timing is still required; this proposal has no performance score.
+Five driver checks preserve the exact prior fixture/grader and change only
+the expected SRT-vs-parent define delta.
+
+## Early-load operand selector: combined candidate
+
+The next default-off proposal, `VEN_FP_LOAD_PAYLOAD_SELECT`, removes late
+`fp_shared_load_cmd` and `fp_load64_take` from the **payload mux only**.
+Registered S_FLOAD/read/size/beat ownership selects the same 80-bit operand.
+Actual admission still checks the complete translated response, wide-response
+eligibility, faults, fragment ownership and debug conditions. Stores and other
+states retain `f_mem80`; no registers, pipeline stages or latency are added.
+The [recipe](../verif/issue_uv/prepare_fp_load_payload_select.py) checks nine
+producer/consumer anchors and asserts equality with the original operand on
+every valid command. Active/disabled whole-core preprocessing proves default-off
+identity; the SRT proposal's default-off whole-module identity is also checked.
+
+The source-extracted [leaf test](../verif/issue_uv/run_fp_load_payload_leaf.py)
+passes **742,914 sampled comparisons** across narrow/wide configurations, including
+1,026 valid wide captures. Both deliberate wrong-word mutants fail. It explores
+qualification, debug, fragment, acknowledgement, size, beat and page-boundary
+controls plus random data; two-state stimuli are not exhaustive four-state
+verification. Root `ventium-fp-load-payload-leaf.u9R75tiy/run`, supervisor
+`74d24a723dff4dba9df294475d2fdefc`, native 0, 2.65 seconds, stable pins.
+Nine host recipe/grader checks pass; they are not RTL evidence.
+
+Combined directed-core model **`e2156aa1`**, root
+`ventium-fp-load-payload-core.WsBqyEli`, passes the original 384-fixture matrix
+and 36 additional operand-boundary fixtures: **1,680 full x87/system QEMU
+comparisons and 840 identical complete cycle streams**. Operand offsets
+0/1/24 exercise wide capture; 25/29/4093 prove fallback, including a mapped
+page crossing. Both flat and relocated clients, AXI latencies 0/7, and actual
+V retirement remain checked. Main/boundary supervisors are respectively
+`138573ac749440c7ad398b3fec55fd4b` / `31237674dd0340039165bd159ad6f8b8`;
+both close native 0 with stable inputs and all children reaped. No trace
+trimming, masks or golden changes. The new canonical generic gate is pending.
+
+Full-PC model **`107d07501457191bbaed205a30285fa9e77c45020fd4332f0fcbae3a34aa3b9d`**
+builds native 0 in 20.96 seconds under `ventium-fp-load-payload-soc.RCNiEqzo`.
+Only `rtl/core/core.sv` and `fp_shared/ven_fp_top.sv` change from `eda4fe87`;
+the full fast-path/cache/DDR profile remains. The same 98 inherited platform
+structural warnings remain. Its own two short CoreMark seeds independently
+pass at **4,767,218 / 4,753,406 ticks**, all original CRCs and actual V
+retirement, native 0/EOF/reaping, 4,213 stable pins and no OOM. Supervisor
+`d13075441ce64e748705b6637fdc255b`; host times 99.86 / 98.81 seconds.
+These ten-iteration diagnostics are **duration-invalid**, not qualified scores.
+This combined candidate has **no gameplay measurement, full standard-suite
+closure, FPGA timing result or physical deployment**. Its A/B equivalence does
+not repair inherited arithmetic or generic-gate defects.
