@@ -1,9 +1,9 @@
 # Fetch/operand congestion: native evidence and narrow sharing experiment
 
-Latest verified gameplay is `bfb867f7`, **0.49069743** U+V event IPC at
-1,600,065,237–1,700,065,237 clocks. All five consecutive 100M windows from
-1,200,065,237 average **0.496524834**, retaining the preceding 0.47318727 dip;
-no window is excluded. Audit: `ventium-store-admit-gameplay-r5.DipwsC7P/audit.json`. This same cache-backed
+Latest verified gameplay is `bfb867f7`, **0.50468964** U+V event IPC at
+1,800,065,237–1,900,065,237 clocks. All seven consecutive 100M windows from
+1,200,065,237 average **0.4999549657**, retaining the earlier 0.47318727 dip;
+no window is excluded. Audit: `ventium-store-admit-gameplay-r6.4TalFu7S/audit.json`. This same cache-backed
 model qualifies both CoreMark seeds at **2.101890118 / 2.107616105 CM/MHz**.
 Full timedemo remains unfinished. New area candidate `751139e1` is
 gameplay-unmeasured. REP events are not exact P54 macroinstructions.
@@ -497,11 +497,24 @@ The recipe is now applied only to a fresh private full-core derivative,
 `ventium-cacheinv-core.1Jju4rvk`, model `5f4e0ca0`. Exactly `core.sv` plus the
 generated `core_cacheinv_local.svh` change. Native build 0 in 15.07 seconds,
 32 bounded compiler jobs, all six structural classes fatal, verified local
-private harness/header ownership and stable pins. A new cold paged full-core
-matrix is running against QEMU and the unchanged parent: INVD/WBINVD, mixed
+private harness/header ownership and stable pins. The new cold paged full-core
+matrix **passes** against QEMU and the unchanged parent: INVD/WBINVD, mixed
 and maximal legal prefixes, all line offsets, flat/relocated clients and AXI
 latencies 0/7, checking complete architectural and cycle record lists plus a
-real U/V pair. No production or running full-PC candidate was changed.
+real U/V pair. **384 fixtures / 1,536 full QEMU comparisons / 768 identical
+entire cycle-record lists**, 63.63 seconds, stable pins. The distinct
+`flush-matrix` reruns 48 boundary fixtures in both models/latencies: **192
+native runs**, 3.10 seconds, actual pre-resident / post-empty / later-refill
+contract at all 16 loop invalidations, identical complete probe events and
+architectural cycle lists. Four probe-grader corruption/vacuity tests pass;
+the directory has 14 host tests total. Full-core disabled preprocessing is
+identical with whitespace alone ignored; enabled preprocessing proves the
+cache-flush caller no longer uses generic decode. No production or running
+full-PC candidate was changed. The generic gate now closes native 2: **7/108
+functional passes, 101 terminal-record failures and 12/19 graded cycle-band
+failures**. All 20 complete cycle-kernel record lists are identical to the
+parent; `generic-audit.json` rechecks 3,256 build pins and retained native
+closure. No mask, golden or band changed. No generic-gate acceptance.
 
 ### Closed placement and control-path diagnosis, 12:46 UTC
 
@@ -530,3 +543,51 @@ data: 157 logic levels, 54.612 ns total (12.323 logic + 42.289 estimated routing
 paired lookahead/address logic. This directly supports testing the registered
 invalidation projection above. It does not prove that it repairs all timing
 paths; rerouting this unchanged congested design is not the next experiment.
+
+### Registered-invalidation SoC and synthesis candidate, 13:12 UTC
+
+New full-PC model **`322bc8553edb7cb6f5edef757f39ce3020642b4f55ed9bc3dbf5964c0d87d1e2`**,
+`ventium-cacheinv-soc.sxytw4Fn`, builds native 0 (19.13 compiler seconds;
+426.86 controller seconds include waiting on the common build lock). All
+intersecting processor sources match directed core `5f4e0ca0`; only `core.sv`
+and its new combinational fragment differ from `751139e1`. The one added flag
+is `VEN_CACHEINV_LOCAL`. Actual private C++ object/generated-header ownership,
+stable pins and the unchanged 98 inherited platform warnings are checked.
+This model has **no qualified CoreMark or gameplay measurement** yet.
+
+The exact **UNQUALIFIED** 40/100 MHz export is
+`ventium-cacheinv-fpga40.my4RpCnC`, manifest
+`9faedcacf18a01ecd561dbb9adb82da98008286221f66a8f67656900d8965389`.
+It has 190 payloads, 149 hardware defines, 117 filelist units and 49 include
+edges. All 170 non-wrapper native processor/platform payloads match; the
+unchanged hardware wrapper's transport projection is checked. Full P5 L1s,
+256 KiB L2, posted-16 DDR and UV/system/relocated fast loads/stores remain.
+**97 freezer tests and 37 real-Tcl profile checks pass**. The first independent
+audit refused a stale expected alias count; its script is retained. The new
+repository-local microbench replaces the old aliased prefix runner, leaving
+exactly 16 explicitly enumerated historical script aliases, not a relaxed
+arbitrary-path policy.
+
+Strict frozen-hardware CPU lint closes native 0 in 2.44 seconds, all six
+structural classes fatal, stable inputs; root `ventium-cacheinv-hw-lint.JglSJiMg`,
+supervisor `eebb7c1edf1a45119295bfb858aa3bf9`. This is not whole-SoC lint.
+Full synthesis started **13:12:17 UTC** under
+`ventium-cacheinv-full-synth-oct10.service`, controller
+`eb3f08e884ad40bfbf7ae05d31c70354`, exclusive Vivado scope
+`5ccf9850da864cffa84bf39bf7d129f6`; root
+`ventium-cacheinv-full-synth.d9TdDzBm`. Same `logic_only` mapper, original
+clocks, one guarded family, 8 GiB RAM / 6 GiB swap, 30-minute cap and host/disk
+reserve monitoring. It cannot start placement, routing or board programming.
+Synthesis success, area and timing remain unmeasured for this derivative.
+
+Its first unchanged 10-iteration CoreMark diagnostic hit the **240-second host
+timeout** before a completed console; all pins stayed stable, native was
+reaped, zero OOM. The failure is preserved at `coremark/closed.json` and is
+not a CRC pass. The distinct `coremark-r2` uses the exact same model, cold
+media, clocks, compiler and guest-cycle limit; only host affinity changes from
+CPU 11 (sharing a physical core with a long Quake run on 27) to CPU 0, and
+the per-seed host cap becomes 600 seconds. Service
+`ventium-cacheinv-coremark-oct10-r2`, invocation
+`9ed152738963433db57ac9f4be306821`, has 2 GiB/no swap and one actual CPU.
+This short run can establish cycle/CRC preservation, not duration-valid scores.
+Long cold acceptance runs on earlier models continue unchanged.

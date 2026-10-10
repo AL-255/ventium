@@ -5,15 +5,15 @@ U+V retirement-event gameplay IPC**, the error-free standard suite, green
 differential gates, and a working FPGA deployment. U-only/STEP/global slow
 fallbacks are not acceptance. REP retirement events are not P54 macroinstructions.
 
-**Latest verified measurement, 12:29 UTC:** `bfb867f7` reaches **0.49069743 IPC**
-over clocks **1,600,065,237–1,700,065,237**. All five consecutive windows from
-1,200,065,237 average **0.496524834**, retaining the preceding **0.47318727**
+**Latest verified measurement, 13:00 UTC:** `bfb867f7` reaches **0.50468964 IPC**
+over clocks **1,800,065,237–1,900,065,237**. All seven consecutive windows from
+1,200,065,237 average **0.4999549657**, retaining the earlier **0.47318727**
 dip below 0.48. This is the same cache-backed model with
 qualified **2.101890118 / 2.107616105 CM/MHz** below, not a score borrowed from
 another build. Latest raw-pixel/counter/ownership audit:
-`ventium-store-admit-gameplay-r5.DipwsC7P/audit.json`. Both unchanged-pixel
-endpoint images show continuing first-person gameplay: a corpse and pickups,
-then a turned view and weapon fire. Full timedemo and physical FPGA remain open.
+`ventium-store-admit-gameplay-r6.4TalFu7S/audit.json`. Both unchanged-pixel
+endpoint images show rendered first-person demo scenes: a close weapon/explosion
+flash, then a changed corridor view with an enemy impact. Full timedemo and physical FPGA remain open.
 New area candidate `751139e1` remains gameplay-unmeasured; its own standard
 suite is running. Its **own two 900-iteration CoreMark seeds now pass** at
 2.101890118 / 2.107616105 CM/MHz, independently audited at 12:49 UTC; the exact
