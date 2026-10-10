@@ -1,9 +1,9 @@
 # Fetch/operand congestion: native evidence and narrow sharing experiment
 
-Latest verified gameplay is `bfb867f7`, **0.50137912** U+V event IPC at
-1,400,065,237–1,500,065,237 clocks. All three consecutive 100M windows from
-1,200,065,237 average **0.50624649**; no window is excluded. Audit:
-`ventium-store-admit-gameplay-r3.8XoOMN4R/audit.json`. This same cache-backed
+Latest verified gameplay is `bfb867f7`, **0.49069743** U+V event IPC at
+1,600,065,237–1,700,065,237 clocks. All five consecutive 100M windows from
+1,200,065,237 average **0.496524834**, retaining the preceding 0.47318727 dip;
+no window is excluded. Audit: `ventium-store-admit-gameplay-r5.DipwsC7P/audit.json`. This same cache-backed
 model qualifies both CoreMark seeds at **2.101890118 / 2.107616105 CM/MHz**.
 Full timedemo remains unfinished. New area candidate `751139e1` is
 gameplay-unmeasured. REP events are not exact P54 macroinstructions.
@@ -430,3 +430,55 @@ Net recovered: **16.889 GiB**. Recovery archive and exact-name manifest:
 with `admitted.json`, `verified.json`, `closed.json` alongside. Legacy tools
 requiring a loose snapshot must extract that specific member. Current
 acceptance runs remain cold boots.
+
+On October 10, three inactive October 4 board diagnostic `run.vhd` copies were
+archived and individually removed, recovering **201,277,440 bytes** (192 MiB).
+Board free root space rose from 76,668,928 to 277,950,464 bytes. Source paths:
+`/tmp/ao486/quake-branch-unpaired.xEnkTc/run.vhd`,
+`/tmp/ao486/quake-cold-run.M3iXDE/run.vhd`, and
+`/tmp/ao486/quake-paired-boundary.DEDpHO/run.vhd`. Logs, firmware, binaries and
+the still-required `/tmp/ao486/quake-cold-oct02.vhd` base remain. No PL control
+or DDR write occurred. Root-visible open-FD/mapping/owner checks, full source
+SHA/identity/age checks and repeated archive decompression verification precede
+the exact unlinks. The 12-member archive also preserves each run's diagnostics:
+`ventium-board-archive-oct10.YBhg3Sl6/closed-oct04-runs.tar.gz`, SHA
+`77bb363a07a4785debc05dd607dbd3de9bc7b1af3d50fcd1af5da7936eb5dab6`.
+`verified.json`, `prune-dry-run.json` and `pruned.json` retain recovery metadata.
+
+### Registered cache-invalidation control proposal
+
+The actual unplaced critical report traverses the generic decoder's
+`d_unknown` into `u_pair_return/flush_all0`, then paired lookahead/address and
+FPU-command logic. The frontend source selects successor-cache bytes in
+`S_EXEC`, live front bytes in `S_PIPE`, and registered `ibuf` in `S_DECODE`.
+Yet `cache_inv_go` can assert **only in `S_DECODE`**. That is a structural
+opportunity to eliminate an unnecessary cross-state combinational dependency;
+it is not a false-path constraint or proof of achieved frequency.
+
+`verif/uopcache/proposals/cacheinv_local/` adds an **unconnected** small
+combinational recognizer using only registered `ibuf`, `cosim_en` and `soc_en`.
+It recognizes the same 0F 08/09 forms and repeated non-LOCK prefixes, retaining
+the old byte16 behavior; the existing fetch engine still owns overlength
+exceptions. A future caller must retain the original `S_DECODE` gate. No
+cache, pipeline register, stall, permission rule or live candidate was changed.
+
+The test shell connects the **actual full `decode_stages`**, all its real
+ports and original core enum types. It compares the qualified predicate across
+all two-byte patterns, every prefix/header offset and second opcode, LOCK at
+each position, every 7-bit state code, independently changing live gather
+bytes and 100,000 deterministic randomized cases. Three negative controls
+remove LOCK rejection, corrupt WBINVD recognition or remove the state gate.
+Six host tests pass; the separate source-contract audit verifies that the
+actual `751139e1` source has exactly the abstracted mux and always-valid
+16-byte `S_DECODE` window. This is a two-state proposal, not an exhaustive
+formal or four-state proof.
+
+Native RTL testing is **queued, not passed**, under
+`ventium-cacheinv-local-oct10.service`, invocation
+`4b2af08633cb4ceb99262b7c0f924913`, root
+`ventium-cacheinv-local.2vGg1j9C/run`. It waits on the shared heavy-build lock
+behind the sole placement family and the earlier legacy-FST matrix. Its native
+body is bounded to ten minutes, one compiler and the normal 4 GiB scope, with
+six structural warning classes fatal. Full-core equivalence, synthesis area,
+frequency and standard-suite qualification would still be required before
+promoting this proposal. `751139e1` remains unchanged and gameplay-unmeasured.

@@ -5,13 +5,15 @@ U+V retirement-event gameplay IPC**, the error-free standard suite, green
 differential gates, and a working FPGA deployment. U-only/STEP/global slow
 fallbacks are not acceptance. REP retirement events are not P54 macroinstructions.
 
-**Latest verified measurement, 12:07 UTC:** `bfb867f7` reaches **0.50137912 IPC**
-over clocks **1,400,065,237–1,500,065,237**. All three consecutive windows from
-1,200,065,237 average **0.50624649**. This is the same cache-backed model with
+**Latest verified measurement, 12:29 UTC:** `bfb867f7` reaches **0.49069743 IPC**
+over clocks **1,600,065,237–1,700,065,237**. All five consecutive windows from
+1,200,065,237 average **0.496524834**, retaining the preceding **0.47318727**
+dip below 0.48. This is the same cache-backed model with
 qualified **2.101890118 / 2.107616105 CM/MHz** below, not a score borrowed from
 another build. Latest raw-pixel/counter/ownership audit:
-`ventium-store-admit-gameplay-r3.8XoOMN4R/audit.json`. Both endpoint images show
-continuing first-person combat. Full timedemo and physical FPGA remain open.
+`ventium-store-admit-gameplay-r5.DipwsC7P/audit.json`. Both unchanged-pixel
+endpoint images show continuing first-person gameplay: a corpse and pickups,
+then a turned view and weapon fire. Full timedemo and physical FPGA remain open.
 New area candidate `751139e1` remains gameplay-unmeasured; its own standard
 suite is running. Older timestamped results below remain historical evidence.
 
@@ -133,7 +135,7 @@ Quake's first declared gameplay window is now verified below.
 
 ## Gameplay baseline and blockers
 
-**Current verified build `bfb867f7`: 0.50705320** U+V retirement-event IPC at
+**Historical two-window observation on `bfb867f7`: 0.50705320** U+V retirement-event IPC at
 clocks **1,300,065,237–1,400,065,237**. This is 50,705,320 events = 39,071,953 U
 + 11,633,367 V over 100,000,000 clocks. Both consecutive windows from
 1,200,065,237 average **0.508680175** (101,736,035 events / 200M clocks),

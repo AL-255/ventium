@@ -7,9 +7,10 @@ All ownership guards, nonblocking writes, q_* effects, state transitions and
 latencies remain unchanged. UV/system/relocated fast pipeline and fast
 loads/stores stay enabled; no slow-mode workaround or guest-specific change.
 
-Verified gameplay baseline is **0.50137912** U+V event IPC, performance parent
-`bfb867f7`, clocks 1,400,065,237–1,500,065,237. All three consecutive windows from
-1,200,065,237 average **0.50624649**; none is dropped.
+Verified gameplay baseline is **0.49069743** U+V event IPC, performance parent
+`bfb867f7`, clocks 1,600,065,237–1,700,065,237. All five consecutive windows from
+1,200,065,237 average **0.496524834**, retaining the preceding 0.47318727 dip;
+none is dropped. Audit `ventium-store-admit-gameplay-r5.DipwsC7P/audit.json`.
 New model **`751139e1` is gameplay-unmeasured**.
 REP events are not exact P54 macroinstructions. The predecessor's qualified
 2.101890118 / 2.107616105 CM/MHz scores are not inherited by this model.
