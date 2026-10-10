@@ -106,10 +106,12 @@ The independent 7M–11M steady benchmark interval has
 is 4.65% of all clocks, already inside S_PIPE; do not add it again. This is a
 residency description, not a proven cache-miss or causal-savings breakdown.
 
-Current verified **gameplay** IPC is **0.49510940**, model `958f7ec4`, clocks
-2,000,048,811–2,100,048,811.
-The fixed first window remains 0.49741357; all nine consecutive 100M windows
-beginning 1,200,048,811 average 0.490353578, including the earlier 0.47794855 dip.
+Current verified **gameplay** IPC is **0.49843606**, model `958f7ec4`, clocks
+2,400,048,811–2,500,048,811.
+The fixed first window remains 0.49741357; all thirteen consecutive 100M windows
+beginning 1,200,048,811 average **0.47898937**, including 0.40860952 and
+0.41837727 dips. This aggregate is below the 0.48 target. Latest audit:
+`external/tmp/ventium-sfetch16-latest-r5.675qsYCh/audit.json`.
 Real V retirements and raw
 endpoint frames are checked; no intervening window is excluded. This is not complete timedemo
 or physical-board qualification. New private FST/C1/RET/sharing derivatives
@@ -122,6 +124,10 @@ reach short diagnostic ratios **2.029545721 / 2.035715820** on model `8a9cabcd`,
 with matched five-CRC sets. They remain below 2.1, insufficient-duration and
 unmeasured in gameplay; generic verification is still red. Those documents
 separate matched gains, directed gates and outstanding full-suite/FPGA work.
+The later [register-prefix/EX experiment](../../fe_pipe/PREFIX_EX_SYSTEM.md)
+with IF-qualified INTR reaches **2.056586568 / 2.062922435** short ratios,
+model `252109e4`. It remains experimental, below target, insufficient-duration,
+unmeasured in gameplay and not period-correct P54/full-suite/FPGA acceptance.
 
 ### Protected-client PREFIX66 backport (private candidate)
 

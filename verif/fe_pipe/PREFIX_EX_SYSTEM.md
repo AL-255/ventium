@@ -1,8 +1,11 @@
 # Protected-client register-prefix/EX overlap experiment — October 10
 
 **Experimental, default-off, not production or FPGA acceptance.** Latest
-verified gameplay remains **0.49510940 U+V retirement-event IPC**, parent
-`958f7ec4`, clocks **2,000,048,811–2,100,048,811**. This experiment has no
+verified gameplay is **0.49843606 U+V retirement-event IPC**, parent
+`958f7ec4`, clocks **2,400,048,811–2,500,048,811**. All thirteen consecutive
+100M windows from 1,200,048,811 average **0.47898937**, including the new
+0.40860952 and 0.41837727 dips: sustained 0.48 is not achieved. Audit:
+`external/tmp/ventium-sfetch16-latest-r5.675qsYCh/audit.json`. This experiment has no
 gameplay measurement. Neither short CoreMark CRCs nor directed tests qualify it.
 
 `prepare-prefix-ex-system.py` extends the existing `VEN_P54_PREFIX_EX_CHAIN`
@@ -84,3 +87,43 @@ the independently selected native counter samples and parse stream framing.
 
 Full duration-valid CoreMark, Win95 desktop, complete original Quake timedemo,
 generic-gate repair and physical implementation remain outstanding.
+
+## IF-qualified raw-INTR correction
+
+`prepare-prefix-ex-masked-irq.py` replaces the raw `!intr` admission test
+with `!(intr && eflags[9])`. The older EXT/IMUL owners cannot change IF.
+A masked raw INTR is therefore not deliverable at either boundary; an
+unmasked new pin, resolved delivery, IRQ shadow, NMI and SMI remain vetoes.
+No interrupt latch, delivery priority or execution countdown changes.
+
+Core **`9b3011f4`**, `external/tmp/ventium-prefix-ex-irq-core.gnc3N0NS`:
+
+- Same exact profile; only the IF-qualified include changes. Structural build
+  and unique host/header check pass.
+- `guards/`: original and correction each pass **4,171 actual-include checks**.
+  A required-failure original reaches precisely
+  `MASKED-INTR-BLOCKED-PREFIX-OVERLAP`, native 1. The masked-INTR test does not
+  override the independently asserted delivery permit or NMI/SMI.
+- Repeated 384-fixture paged matrix: **1,536 full QEMU comparisons plus 1,536
+  cycle runs**, all pass in 85.28 s; 364 of 768 paired totals improve and
+  404 equal. This corpus compares with pre-overlap `1abbf89e`, not the first
+  overlap model. Actual interrupt delivery is still not tested by this leaf.
+
+SoC **`252109e4`**, `external/tmp/ventium-prefix-ex-irq-soc.DqS2SSdj`:
+
+| Seed | First overlap ticks | IF-qualified ticks | Removed | Incremental gain |
+| --- | ---: | ---: | ---: | ---: |
+| Performance | 4,919,533 | **4,862,426** | 57,107 | **1.17445%** |
+| Validation | 4,905,555 | **4,847,492** | 58,063 | **1.19779%** |
+
+Both five-CRC sets match. Short ratios **2.056586568 / 2.062922435 CM/MHz**
+remain below 2.1 and insufficient-duration; the prefix qualification caveat
+above remains. Independent `coremark/audit.json` rechecks 291 pins, actual CPU
+3 affinity, native 0/reaped children, no OOM and successful supervisor
+`08ba3b43bcd5456eaa8339bc8d6781c6`. The SoC retains the same 98 inherited
+structural warnings. The correction needs its own remaining event/fault/SMC,
+full-suite and FPGA qualification; it is not promoted to production.
+
+The correction's unchanged generic rerun also remains **FAIL**, native 2,
+**7 PASS / 101 FAIL** plus retained cycle failures, in 212 s. Supervisor:
+`79b419c766f34fe497dc652018f7e0f8`; no oracle or grading changes.

@@ -1,12 +1,12 @@
 # Raw branch fallthrough resident-read hint — October 10
 
 **Private, default-off proposal; not standard-suite or FPGA acceptance.**
-Latest verified gameplay is **0.49510940 total U+V retirement-event IPC**,
-parent SoC `958f7ec4`, clocks **2,000,048,811–2,100,048,811**. All nine
-consecutive windows from 1,200,048,811 average **0.490353578**; the earlier
-0.47794855 interval remains included. Raw endpoint frames, counters, native
+Latest verified gameplay is **0.49843606 total U+V retirement-event IPC**,
+parent SoC `958f7ec4`, clocks **2,400,048,811–2,500,048,811**. All thirteen
+consecutive windows from 1,200,048,811 average **0.47898937**, below 0.48;
+the new 0.40860952 and 0.41837727 dips remain included. Raw endpoint frames, counters, native
 identity and unchanged inputs are audited in
-`external/tmp/ventium-sfetch16-latest-r4.PYJAzYdf/audit.json`.
+`external/tmp/ventium-sfetch16-latest-r5.675qsYCh/audit.json`.
 The new branch-hint candidate has **no gameplay measurement**.
 
 ## Cause and implementation
