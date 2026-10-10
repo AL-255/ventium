@@ -41,6 +41,10 @@ gameplay measurement or standard-suite acceptance.
   factor-of-two FSQRT cases. The backport preserves the measured parent's
   shared ADD/SUB operand selection and registered memory forwarding; wholesale
   copying from the checkout would discard them. No performance gain is claimed.
+  The directed cases also pass delayed AXI. Canonical verification still fails:
+  besides existing length/timing failures, eight x87 tests expose C1-only
+  differences from QEMU. Exact-case/oracle reconciliation is pending; no new
+  mask or acceptance waiver is applied.
 
 The single Vivado family completed timing optimization but crossed the host's
 2 GiB available-memory reserve at technology mapping. The watchdog stopped it

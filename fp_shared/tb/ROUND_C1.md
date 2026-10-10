@@ -202,3 +202,23 @@ directed output-oracle checks, **not complete per-instruction QEMU
 equivalence**, standard-suite acceptance, gameplay or FPGA results. Production
 promotion still requires alternate/legacy interface handling, further exception
 coverage, the generic differential gates and full standard suite.
+
+### Canonical gate still red: C1 must be reconciled, not masked away
+
+`make verify` on `6f71bad6` closed **FAIL**, invocation
+`d5ee5c83c35f458fbbfb90635402c61e`, log `generic-r2.log` in the R2 core root.
+It retains the 101 terminal-length failures and four hard cycle-band failures
+seen on the parent/RET candidate. In addition, eight canonical x87 tests now
+show an earlier FSW divergence: `tx_addsub`, `tx_chain`, `tx_fp_denorm`,
+`tx_fprem`, `tx_muldiv`, `tx_round`, `tx_sqrt`, and `tx_unifdiv`.
+Every reported first difference is **C1 only** (XOR `0x0200`). For example,
+`tx_round`'s upward 10/3 reports QEMU `3820`, candidate `3a20`;
+`tx_fprem` first reports QEMU `7220`, candidate `7020` at record 288.
+
+The independent 2,064-case witnesses support the repaired round-direction
+semantics; they do not automatically qualify every failing canonical record.
+Exact first-divergence reproductions and the oracle's C1 behavior still need
+to be reconciled. **Do not add a blanket C1 mask, change expected records, or
+call this a differential pass.** The canonical gate remains the authority and
+the candidate remains unpromoted. Its numerical checks and complete gate
+failure are both retained, rather than describing parent parity as acceptance.
