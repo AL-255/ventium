@@ -1,5 +1,47 @@
 # Compact round-direction sideband proposal — October 10
 
+## Current-source backport, 16:53 UTC
+
+The [strict backport recipe](prepare_current_round_c1.py) now applies the
+already-tested arithmetic C1 hunks to the latest response-payload core
+`3c3ab215`, preserving the intervening operand sharing, registered forwarding,
+SRT payload selection and numeric floor-exponent repair. Nine host tests pass,
+including missing/duplicate context, partial/repeated application, patch drift
+and exact reversal of every reviewed hunk. This is **source preparation**, not
+a new RTL correctness pass.
+
+Prepared root: `external/tmp/ventium-current-round-c1-core-r2.281an9Xt`.
+`prepared.json` pins 4,751 inputs and retains exactly the parent's define set.
+The resulting SRT engine, package and shared ALU are byte-identical to those
+in the previously checked `6f71bad6` model. The newer top is modified only by
+the C1 hunks, never replaced wholesale. A fifth file, `core.sv`, explicitly
+connects the new SRT output in the inactive legacy branch; that connection
+does **not** implement legacy architectural C1 handling or qualify that mode.
+
+Controller `ventium-current-round-c1-core-r2-oct10`, invocation
+`b5c238b5775c4ec08aa77e9ebac684dc`, waits for the active response-payload
+synthesis to close successfully before compiling. It then has a 600-second
+build bound, a unique private host object/header, the unchanged AXI7 UV-fast
+912-case SRT and 1,152-case arithmetic observers, and the original `make verify`
+with a 600-second bound. The compiler uses the shared heavy-build guard and
+32-job profile; it does not overlap Vivado. The gate must still report its
+actual failure if the pre-existing oracle/C1/cycle-band debts remain. No
+golden, comparator, output state or cycle band is replaced.
+
+The initial queue failed before copying/building because it expected a
+`passed` key in the SRT diagnostic's result schema. The failed root
+`ventium-current-round-c1-core.1BrYlH6e` is retained. R2 explicitly checks the
+912 cases, zero value/C1 mismatches, native/exact agreement, actual V events
+and all native exits; it does not infer a full-core pass from that observer.
+
+Latest verified gameplay is **0.49940993 U+V retirement-event IPC** on older
+`bfb867f7`, clocks **3,200,065,237–3,300,065,237**; all 21 windows average
+**0.4895819671**. This C1 derivative is gameplay-unmeasured, unbuilt as of this
+entry, and not in the active hardware export. Full standard-suite and hardware
+qualification remain open. Earlier measurement/queue entries below are history.
+
+## Earlier proposal and qualification trail
+
 **Private, unpromoted RTL candidate.** The subsequent
 [FST/FSTP repair](FST_REGISTER.md) fixes the stale-C1 register-pop example below
 and a false empty-destination underflow; its 1,920-case test passes, but its
