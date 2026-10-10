@@ -1,12 +1,12 @@
 # Serialized integer-converter sharing experiment
 
-**Private candidate prepared; native equivalence and area results pending.**
+**Private candidate: native equivalence and matched synthesis now pass.**
 No production RTL, active build input or acceptance mask was changed.
-Latest verified gameplay is **0.49638834 total U+V retirement-event IPC**,
-model `86731249`, 3.8B–3.9B clocks. All 27 consecutive windows from 1.2B–3.9B
-average **0.4813445296**, including the low-IPC interval. That partial run is
-not a completed timedemo. Neither this proposal nor the later `958f7ec4` SoC
-has verified gameplay. Full direct-memory CoreMark remains
+Latest verified gameplay is **0.49761630 total U+V retirement-event IPC**,
+model `958f7ec4`, clocks 1,300,048,811–1,400,048,811. Its two consecutive
+100M windows beginning 1,200,048,811 average **0.497514935**. This is not a
+completed timedemo; the sharing derivative has no gameplay measurement.
+Full direct-memory CoreMark remains
 **2.107843209 / 2.110905243 CM/MHz**, separate model `b5453f16`, not FPGA scores.
 
 ## Why and what changes
@@ -40,9 +40,11 @@ that parent itself is not fully qualified.
   settings, signed zeros, integer limits, fractions, denormals, infinity/NaN
   and noncanonical bit patterns. Busy-pin mutation, sustained requests and
   reset cancellation additionally check ownership and exact latency.
-- The new native miter is queued behind the existing shared build lock, not
-  concurrently compiled with Vivado. Normal 4 GiB scope, one compiler, strict
-  structural errors and assertions, ten-minute native bound. Pending service:
+- Both native miter profiles now pass, build/run exits 0, stable pins,
+  **15.64 seconds**. Normal 4 GiB scope, one compiler, strict structural errors
+  and assertions. Each completes all 73,728 matrix cases; normal/early observed
+  latencies remain two/one clocks respectively, with reset and busy ownership
+  checks. Closed service:
   `ventium-misc-shared-int-oct10.service`, invocation
   `c9056622a55e460f8cdf0011aadefdf0`.
 - Prepared evidence: `external/tmp/ventium-misc-shared-int.dE4vmaE3/leaf/`.
@@ -53,7 +55,30 @@ that parent itself is not fully qualified.
   mandatory exclusive launcher, 4 GiB RAM/1 GiB swap and ten-minute bound.
   Both variants use the same XCZU15EG part, 25 ns constraint, early response
   mode, Default synthesis and rebuilt hierarchy. No route or board operation
-  occurs. **This measurement has not been launched.**
+  occurs. The first attempt failed before synthesis because project-mode
+  `read_verilog -define` requires compile-unit mode. That native failure is
+  retained under `ventium-misc-shared-ooc.U2itW4VW`. The corrected script sets
+  the same define on each source fileset; it changes no RTL/constraint.
+
+Matched retry `ventium-misc-shared-ooc-r2.6HWlbguy/run` closes **native 0** in
+107.20 seconds with stable pins and both report/checkpoint sets. Supervisor
+invocation `f1fb89724e1e406d89ba92791c4542f5` is independently archived as
+inactive/success, exit 0, MainPID 0 and no remaining cgroup.
+
+| Isolated synthesized leaf | Original | Shared |
+| --- | ---: | ---: |
+| CLB LUTs | 4,452 | 4,040 |
+| Registers | 265 | 263 |
+| DSPs | 0 | 0 |
+| Register-to-register setup slack at 25 ns | +12.111 ns | +10.163 ns |
+| Setup-only frequency estimate | 77.59 MHz | 67.40 MHz |
+
+The leaf saves **412 LUTs (9.25%)**, while its estimated setup path gets slower.
+The frequencies are `1000/(25−slack)` for this one-clock, **unplaced/unrouted**
+leaf; they are not measured processor Fmax. OOC clock-source and unconstrained
+I/O warnings remain. No global-route speed, routed timing sign-off or whole-chip
+area saving is established. Current cache-backed CoreMark short ratios remain
+**1.96212548 / 1.96640592**, duration errors retained, not valid scores.
 
 Reproduce with fresh external output directories and explicit `TMPDIR`:
 

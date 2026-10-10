@@ -1,10 +1,10 @@
 # Memory FST round-direction repair — October 10
 
-**Bug reproduced; three-file RTL candidate prepared and queued, not qualified.**
-Latest verified gameplay is **0.50058134 total U+V IPC**, `86731249`, clocks
-3.6B–3.7B. All 25 consecutive 1.2B–3.7B windows average **0.4788804468**.
-The demand-fetch FPGA candidate and this additional FPU repair have no gameplay
-measurement. Full direct-memory CoreMark remains **2.107843209 / 2.110905243**
+**Directed repair passes; generic differential gate remains FAIL.**
+Latest verified gameplay is **0.49761630 total U+V retirement-event IPC**,
+`958f7ec4`, clocks 1,300,048,811–1,400,048,811. Both consecutive 100M windows
+beginning 1,200,048,811 average **0.497514935**. This additional FPU repair has
+no gameplay measurement. Full direct-memory CoreMark remains **2.107843209 / 2.110905243**
 on `b5453f16`, not cache/DDR/FPGA performance.
 
 ## Reproduced defect and authority
@@ -54,7 +54,7 @@ MainPID zero and no remaining cgroup. This is a closed bug witness, not a pass.
 Root: `external/tmp/ventium-fst-memory.dPaxs129/observation-r1/`, invocation
 `4b6a4b91105243b0b9fae281c67eb12f`.
 
-## Compact implementation and pending verification
+## Compact implementation and closed directed verification
 
 `prepare_fst_memory_c1.py` changes only:
 
@@ -81,9 +81,18 @@ The build keeps the same defines, its own uniquely named C++ harness/header,
 strict structural errors and the normal shared build lock.
 
 Service `ventium-fst-memory-core-oct10.service`, invocation
-`d483d1d93def42c6b316d8d80eebd82d`, is queued behind the existing FPGA build.
-After compilation it runs this unchanged witness and the unchanged canonical
-`make verify` with explicit UV-fast/AXI latency-seven backends. A failed generic
-gate remains a failure even if all directed cases pass. Full standard-suite,
-gameplay and hardware acceptance remain open. The frozen FPGA image sources
-are unchanged and do **not** contain this repair.
+`d483d1d93def42c6b316d8d80eebd82d`, has closed. Model **12086691** builds native
+0 with stable pins and its own generated-header dependency. All **2,352**
+directed cases then pass: **zero repaired-RTL or native discrepancies**, all
+memory values/flags/stack/width checks intact, real V retirements 66. The
+pinned QEMU still has the same 1,176 C1-only differences; the mathematical
+oracle and native execution agree. Directed native exit is 0.
+
+The unchanged canonical `make verify`, explicit UV-fast/AXI latency-seven
+in both functional/cycle jobs, closes **native 2 / FAIL**. It reports seven
+functional passes and 101 failures: 91 terminal-length differences and ten
+earlier x87 C1 differences, plus the existing hard cycle-band failures.
+No masks, goldens, terminal records or bands were changed. The controller
+therefore honestly closes failed exit 1; its closure is archived by the
+metadata keeper. Full standard-suite, gameplay and hardware acceptance
+remain open. The frozen FPGA sources do **not** contain this repair.

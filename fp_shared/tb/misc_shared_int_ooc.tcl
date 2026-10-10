@@ -15,7 +15,10 @@ file mkdir $output
 set_param general.maxThreads 1
 foreach {variant source} {original original.sv shared candidate.sv} {
     create_project -in_memory -part xczu15eg-ffvb1156-2-i
-    read_verilog -sv -define VEN_FP_MISC_EARLY_DONE [list \
+    # Project-mode read_verilog does not accept -define unless compile-unit
+    # mode is enabled. Use the fileset define, identical for both variants.
+    set_property verilog_define {VEN_FP_MISC_EARLY_DONE} [current_fileset]
+    read_verilog -sv [list \
         "$leaf/fpu_x87_pkg.sv" "$leaf/ventium_decode_pkg.sv" "$leaf/$source"]
     read_xdc "$leaf/clock.xdc"
     synth_design -mode out_of_context -top ven_fp_misc \
