@@ -7,9 +7,9 @@ All ownership guards, nonblocking writes, q_* effects, state transitions and
 latencies remain unchanged. UV/system/relocated fast pipeline and fast
 loads/stores stay enabled; no slow-mode workaround or guest-specific change.
 
-Verified gameplay baseline remains **0.50530999** U+V event IPC, parent
-`958f7ec4`, clocks 3,900,048,811–4,000,048,811; all 28 consecutive windows
-average **0.4862721782**. New model **`751139e1` is gameplay-unmeasured**.
+Verified gameplay baseline is **0.51030715** U+V event IPC, performance parent
+`bfb867f7`, clocks 1,200,065,237–1,300,065,237, one predeclared 100M window.
+New model **`751139e1` is gameplay-unmeasured**.
 REP events are not exact P54 macroinstructions. The predecessor's qualified
 2.101890118 / 2.107616105 CM/MHz scores are not inherited by this model.
 
@@ -51,8 +51,17 @@ preprocessing reproduces the predecessor exactly, whitespace ignored only.
 
 ## Remaining acceptance
 
-Own short CoreMark diagnostics are running. Whole-design synthesis is prepared,
-not launched: `ventium-ic-prefix-capture-full-synth.tEFDx2fS`. It must measure
+Own short CoreMark diagnostics both close native 0 with all original CRCs and
+unchanged parent ticks: **4,767,218 / 4,753,406**. Independent `coremark/audit.json`
+checks 3,362 stable pins, actual V retirement, EOF/reaping, retained supervisor
+`dbefff9c355344978315bfc1d3bedf97` and zero OOM. These are duration-invalid
+diagnostics, not qualified scores.
+
+Whole-design synthesis started **11:26:43 UTC**:
+`ventium-ic-prefix-capture-full-synth.tEFDx2fS`, controller
+`ae6a6e8fcb3846c19ad99b66c6685e4c`. One guarded Vivado family, 8 GiB RAM,
+6 GiB swap and 30-minute cap; no other synthesis/implementation family.
+It must measure
 whether removing the missed consumer actually lowers whole-design resources;
 the earlier isolated 83.40% saving cannot establish that result. No automatic
 placement, routing, clock change or deployment.

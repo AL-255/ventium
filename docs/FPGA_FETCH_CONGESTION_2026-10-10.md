@@ -365,9 +365,15 @@ Its closed 384-fixture matrix passes **1,536 full QEMU comparisons + 1,536
 cycle runs**, both AXI latencies, actual V retirement and overlap witnesses;
 all **768 entire matched cycle-record lists are identical**. Native expected
 exits, children reaped, unchanged pins, 53.18 seconds; controller
-`0410bc55a67e414ea12c9db218e0504f`. Generic verification and the full-PC build
-are running separately. No full-design saving, new score or hardware pass is
-claimed for this correction yet.
+`0410bc55a67e414ea12c9db218e0504f`. Generic verification closes with the same
+101 terminal-record discrepancies and 12 cycle-band failures; all 20 complete
+cycle-kernel record lists match the immediate parent. The full-PC build closes
+native 0 as `751139e1`; both short CoreMark seeds pass CRCs with identical
+4,767,218 / 4,753,406 ticks (duration-invalid). Sole-family whole synthesis
+started 11:26:43 UTC with 8 GiB RAM, 6 GiB swap and a 30-minute limit.
+No full-design saving, new qualified score or hardware pass is claimed yet.
+Current verified gameplay is performance parent `bfb867f7`'s **0.51030715**
+U+V event IPC, clocks **1,200,065,237–1,300,065,237**; `751139e1` is unmeasured.
 
 ### Recoverable scratch cleanup
 

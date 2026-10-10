@@ -118,19 +118,37 @@ are required. Win95 cold-boots the standard-VGA fixture installed through
 Windows' own installer; the bounded collector cannot grant desktop acceptance.
 Closed visual review remains necessary. No snapshot or input script is used.
 At 09:37 UTC both CoreMark jobs are successfully closed as audited above.
-Quake and Win95 remain active, progressing through cold boot; neither has a
-completed standard-suite result or a gameplay IPC measurement for this build.
+Quake and Win95 remain active; neither has a completed standard-suite result.
+Quake's first declared gameplay window is now verified below.
 
 ## Gameplay baseline and blockers
 
-Current verified parent `958f7ec4`: **0.50530999** at clocks
+**Current verified build `bfb867f7`: 0.51030715** U+V retirement-event IPC at
+clocks **1,200,065,237–1,300,065,237**. This is 51,030,715 events = 39,233,095 U
++ 11,797,620 V over 100,000,000 clocks. This exact model therefore has both
+duration-valid CoreMark seeds above 2.1 and a declared gameplay window above
+0.48. It is **not** a full-timedemo average or physical FPGA result.
+
+Evidence: `ventium-store-admit-gameplay.MQccS4fZ/audit.json`. The original
+prelaunch receipt selects periodic samples 12/13; all samples and the actual
+65,237-clock startup offset are retained. Root independently viewed both
+pixel-identical endpoint conversions: a live stone corridor, then weapon fire
+and an explosion with changed ammunition. Captures are associated through their
+unique adjacent 500,000-clock progress brackets, not selected by appearance.
+Frozen build/runtime pins, actual compiler defines, native process/starttime,
+supervisor invocation, CPU affinity, cold media, active V retirement and zero
+OOM are rechecked. The receipt's inherited `candidate_delta` description is
+stale; it is preserved and explicitly rejected as source authority. Actual
+frozen sources contain the performance backports above.
+
+Historical parent `958f7ec4`: **0.50530999** at clocks
 **3,900,048,811–4,000,048,811**, 50,530,999 events = 38,868,367 U + 11,662,632 V.
 All twenty-eight consecutive 100M windows from 1,200,048,811 total
 1,361,562,099 events / 2.8B clocks = **0.4862721782**, retaining every dip.
 Audit `ventium-sfetch16-latest-r13.B1BPkjih/audit.json` checks counters,
 source/native/supervisor identity, unchanged raw endpoint pixels and no OOM.
 Latest window and aggregate exceed 0.48; timedemo is unfinished.
-**The newer `bfb867f7` candidate has no verified gameplay measurement.**
+This longer parent aggregate is not transferred to `bfb867f7` or its descendants.
 
 The area-sharing derivative **`89b68b62`** has no gameplay measurement either.
 Its source, zero-cost short CoreMark A/B result and 66.0% local lookup-cone LUT
@@ -240,6 +258,12 @@ bands; all 20 cycle-kernel record lists equal its parent. No failure was waived.
 Exact-source hardware export, 91 freezer tests, 35 real-Tcl profile checks,
 actual compiler-command/source audit and strict hardware CPU lint are recorded
 in [IC_PREFIX_CAPTURE_EXPORT.md](../fpga/IC_PREFIX_CAPTURE_EXPORT.md). Short
-CoreMark is running; performance seed closes native 0 with all CRCs and exactly
-4,767,218 ticks. Validation and whole-design area remain pending. No new route
-or board deployment; the earlier 83.40% local result is not a whole-chip saving.
+CoreMark diagnostics now close both seeds, all original CRCs and exactly
+4,767,218 / 4,753,406 ticks, independently audited with 3,362 stable pins,
+native exits 0, EOF/reaping, actual V retirement and no OOM. These short runs
+are duration-invalid, not qualified scores. Whole-design synthesis started
+11:26:43 UTC under the sole-Vivado guard (8 GiB RAM / 6 GiB swap, 30-minute
+cap), comparing the immediate 221,918-LUT parent. Area remains pending.
+No new route or board deployment; the earlier 83.40% local result is not a
+whole-chip saving. Current verified gameplay is `bfb867f7`'s 0.51030715 above;
+this `751139e1` descendant remains gameplay-unmeasured.
