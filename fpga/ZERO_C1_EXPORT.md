@@ -194,9 +194,12 @@ disk patches or suppressed no-mouse dialogs would not fix this omission.
 
 An [unintegrated bidirectional byte transport](PS2_DEVICE.md) now passes 98
 directed tests against this export's actual 8042 at two clocks, plus negative
-controls. It is not in this export or active bitstream build. Mouse protocol
-policy, loss-detectable CSR integration and physical UI qualification remain
-open; these leaf tests do not close the mouse requirement.
+controls. A general hosted mouse policy subsequently passes 14 protocol tests,
+three deliberately broken-policy controls, and 19 commands / 46 delivered
+bytes through that actual 8042 at both 3.125/40 MHz. Neither component is in this
+export or active bitstream build. Loss-detectable CSR integration, the PS-side
+input service and physical UI qualification remain open; these microtests do
+not close the mouse requirement or modify the frozen processor candidate.
 
 ## Retained evidence
 
