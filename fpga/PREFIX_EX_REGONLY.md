@@ -227,13 +227,19 @@ not module ownership, but the actual connectivity establishes the long
 same-cycle control dependency. This is the next optimization target; the
 prefix change has not solved the full FPGA timing/congestion problem.
 
-Proposed repair: separate **prospective bank/tag availability** from
+Original repair hypothesis: separate **prospective bank/tag availability** from
 **irrevocable request acceptance and owner creation**, with explicit request
 class/owner information if needed. In particular, inspect the late
 `mc_capture_next`/`pair_prime_capture` contribution to the ready path shared by
 fresh-U and primed-U requests. Preserve the original standalone pair contract
 and the mandatory older-U acceptance before any V becomes an owner. This is
-not yet implemented; simply dropping commit/snoop guards would be incorrect.
+not an implemented interface change; simply dropping commit/snoop guards would
+be incorrect. Subsequent inspection of the actual hardware profile found that
+fresh legacy capture can instead use the existing legacy arm directly, because
+its guards already exclude next-lookup and stream modes. That narrower
+[L1 capture cofactor](L1_LEGACY_CAPTURE_CUT.md) is implemented and equivalence
+tested in a private derivative. Its new synthesis is running; no timing gain
+is yet established.
 
 Required focused checks include legacy two-lane requests, fresh U/V loads,
 primed U/V loads, U-store/V-load, same-bank conflicts, uncommitted predecessor,

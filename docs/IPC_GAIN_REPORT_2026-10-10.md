@@ -38,7 +38,7 @@ results below are retained measurements, not tests rerun for this report.
   a read-only checkpoint diagnostic now confirms **228,422 unrouted nets**
   and a 138-level cross-subsystem control path before choosing the next fix.
   See [the source-matched handoff](../fpga/ZERO_C1_EXPORT.md).
-- **Newest candidate:** register-only prefix factoring `cf1b3b0b` preserves
+- **Prefix timing candidate:** register-only prefix factoring `cf1b3b0b` preserves
   both short CoreMark seeds' exact parent clocks/CRCs. Its source-matched FPGA
   export and strict CPU lint pass; synthesis closes with **3,730 fewer LUTs
   (−1.91%)**, unchanged BRAM/DSPs. Its prefix-path estimate improves to
@@ -46,6 +46,14 @@ results below are retained measurements, not tests rerun for this report.
   neither is routed sign-off or measured board frequency. It has no measured
   gameplay, valid-duration score or physical pass. See
   [the factoring and qualification record](../fpga/PREFIX_EX_REGONLY.md).
+- **Newest timing candidate:** L1 legacy-capture factoring `467ff95f` removes
+  a redundant next-COMMIT mux dependency without changing accepted clock edges
+  in the directed A/B corpus. The 456 whole-core cases and 228,304 under-fill
+  observations pass; the canonical gate still fails unchanged. Source-matched
+  FPGA export and strict CPU lint pass. One bounded full synthesis started at
+  **22:56 UTC**; it has **no timing, gameplay or physical result yet**. The goal
+  remains **at least 40 MHz synthesized Fmax**, not merely a configured 40 MHz
+  simulation clock. See [the L1 evidence](../fpga/L1_LEGACY_CAPTURE_CUT.md).
 
 **There is no defensible measured “0.16 to 0.54, therefore 3.3× faster FPGA”
 claim.** Those endpoints differ in counter definition, platform, build and
