@@ -1,9 +1,10 @@
 # Compact round-direction sideband proposal — October 10
 
 **Private, unpromoted RTL candidate.** Leaf, connected-top and directed full-core
-checks now pass (see the closed results below); production sources and live
-full-PC models remain unchanged. Latest verified gameplay is **0.51351913 total
-U+V IPC**, `86731249`, clocks 2.2B–2.3B; this candidate has no gameplay measurement.
+checks now pass (see the closed results below); production C1 sources and live
+full-PC models remain unchanged. Latest verified gameplay is **0.48007471 total
+U+V IPC**, `86731249`, clocks 2.4B–2.5B; this candidate has no gameplay measurement.
+The full observed 1.2B–2.5B aggregate is **0.47084103**, below the sustained target.
 
 The [912-case observation](SRT_ROUND_FLOOR.md) proves that simply preserving
 C1 is wrong for both FDIV and FSQRT. The proposed
@@ -212,7 +213,7 @@ seen on the parent/RET candidate. In addition, eight canonical x87 tests now
 show an earlier FSW divergence: `tx_addsub`, `tx_chain`, `tx_fp_denorm`,
 `tx_fprem`, `tx_muldiv`, `tx_round`, `tx_sqrt`, and `tx_unifdiv`.
 Every reported first difference is **C1 only** (XOR `0x0200`). For example,
-`tx_round`'s upward 10/3 reports QEMU `3820`, candidate `3a20`;
+`tx_round`'s upward **3/10** reports QEMU `3820`, candidate `3a20`;
 `tx_fprem` first reports QEMU `7220`, candidate `7020` at record 288.
 
 The independent 2,064-case witnesses support the repaired round-direction
@@ -222,3 +223,40 @@ to be reconciled. **Do not add a blanket C1 mask, change expected records, or
 call this a differential pass.** The canonical gate remains the authority and
 the candidate remains unpromoted. Its numerical checks and complete gate
 failure are both retained, rather than describing parent parity as acceptance.
+
+### Exact eight-site native reconciliation
+
+[`check_canonical_c1_native.py`](check_canonical_c1_native.py), with the small
+[`native_x87_at_pc.c`](native_x87_at_pc.c) observer, now executes the **unchanged
+gate ELFs** on native x87. The observer only reads registers/memory and steps
+its own diagnostic child: no breakpoint, injected instruction or register write.
+After the selected instruction it resumes the original guest to exit zero and
+reaps it. This is not a single-stepped RTL acceptance run or a P54 timing oracle.
+
+All **eight exact first-divergence sites** have the same control word, relevant
+input operands and output value across native, QEMU and candidate. Native C1
+matches the candidate and the independent exact-rational magnitude comparison
+at every site, including multiply overflow and square root. QEMU's C1 differs
+at all eight. Invalid-ELF and unreached-PC negative controls fail closed.
+Receipt: `external/tmp/ventium-c1-canonical-native.5DNHth97/observed-r2/result.json`.
+R1 correctly refused the overflow case because the initial witness handled only
+finite outputs; R2 explicitly checks finite exact input overflowing to infinity.
+
+The pinned QEMU `target/i386/tcg/fpu_helper.c` (SHA256
+`efb0daf00682ed65488b6ee606a409da7d84f1bb6c118d1bdbc8d27ead37c4e6`)
+merges IEEE exception flags after these operations but does not update C1 for
+their rounding direction. FSQRT only changes condition codes in its negative
+operand branch. This explains the observed first differences; it is **not**
+permission to ignore C1 or replace the whole golden with native state.
+
+The ELF also corrects a misleading source comment: `tx_round` encodes `DE F1`
+(`FDIVRP ST1,ST0`), with old ST0=3 and old ST1=10. Its actual result is **3/10**,
+not the documented 10/3. The witness decodes bytes and uses the observed operands;
+the original test source, binary, masks and goldens are unchanged.
+
+These eight sites are reconciled, but complete C1 semantics are not closed.
+For example, the later exact register-pop at `tx_round` PC `0804802e` leaves
+candidate FSW `0220`, whereas native produces `0020`; the current direct
+`FX_FST_STI` arm does not write status. Rounded memory stores and other opcode
+owners require their own defined-flag checks. Do not infer full canonical or
+standard-suite acceptance from this eight-site diagnostic.
