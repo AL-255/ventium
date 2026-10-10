@@ -468,10 +468,18 @@ all two-byte patterns, every prefix/header offset and second opcode, LOCK at
 each position, every 7-bit state code, independently changing live gather
 bytes and 100,000 deterministic randomized cases. Three negative controls
 remove LOCK rejection, corrupt WBINVD recognition or remove the state gate.
-Six host tests pass; the separate source-contract audit verifies that the
+Ten host tests pass; the separate source-contract audit verifies that the
 actual `751139e1` source has exactly the abstracted mux and always-valid
 16-byte `S_DECODE` window. This is a two-state proposal, not an exhaustive
 formal or four-state proof.
+
+`prepare_integration.py` also prepares a default-off `VEN_CACHEINV_LOCAL`
+fragment by mechanically extracting that same leaf's body and renaming only
+local identifiers. It changes the single original caller under the flag and
+retains its `S_DECODE` qualifier. Tests reverse the rename to recover the exact
+leaf body and remove the disabled conditional to recover the exact original
+source. This recipe is **not applied to production or any running candidate**;
+native miter success and a separate full-core qualification must come first.
 
 Native RTL testing is **queued, not passed**, under
 `ventium-cacheinv-local-oct10.service`, invocation
