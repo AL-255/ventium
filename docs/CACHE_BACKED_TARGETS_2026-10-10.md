@@ -26,6 +26,12 @@ The newer registered-invalidation candidate `322bc855` also remains
 gameplay-unmeasured. Its own two short CoreMark diagnostics now pass with
 identical parent cycles/CRCs; these ten-iteration runs are duration-invalid,
 not qualified scores. See [the synthesis/diagnostic record](FPGA_FETCH_CONGESTION_2026-10-10.md).
+Its own 900-iteration seeds are now running, bounded to the approved 60 minutes
+each. Synthesis closes at 195,242 LUTs, but the next unplaced timing path still
+estimates only 18.236 MHz; no new FPGA deployment has occurred. A separate
+state-selected FP payload candidate (`35c8cc6c` directed core) passes 384 cold
+x87/system microcases with identical complete cycle streams. That timing
+proposal has no gameplay, qualified CoreMark, or hardware timing measurement.
 Older timestamped results below remain historical evidence.
 
 ## Current combined candidate

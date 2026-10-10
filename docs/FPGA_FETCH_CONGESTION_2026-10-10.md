@@ -612,3 +612,63 @@ R4 uses a tested NUL-byte parser (including empty arguments, spaces, literal
 backslash-zero and incomplete-input rejection), retains the strict argv /
 affinity / cgroup checks, and records actual native closure for each seed.
 No RTL, guest image, cycles, CRC reference or benchmark algorithm changed.
+
+### Local invalidation: closed synthesis and the next timing path, 13:50 UTC
+
+`ventium-cacheinv-full-synth.d9TdDzBm/audit.json` independently closes native
+synthesis 0: **195,242 LUTs**, versus 197,375 in its immediate parent
+(-2,133 / 1.08%); 54,639 FFs, 277.5 BRAMs and 47 DSPs. The combined saving
+from the earlier 221,918-LUT design is 26,676 / 12.02%. Original mapper and
+40/100 MHz constraints remain. All 3,928 pins and actual compiler inputs are
+checked; 1,462.56 seconds, 8 GiB peak RAM, 266,391,552 bytes peak swap,
+zero OOM. No placement, routing or programming was run.
+
+`ventium-cacheinv-clock-audit.5Ojrn9tE/audit.json` closes the read-only netlist
+audit native 0 (140.12 seconds, no OOM). All 30 worst paths now **exclude
+`flush_all0`**, confirming that specific dependency was removed. Nevertheless,
+the worst unplaced setup is -29.837 ns: **18.236 MHz path-local estimate**,
+not routed Fmax, and slightly worse than the parent's unplaced estimate.
+Worst hold is -0.101 ns. No timing improvement is claimed from the LUT saving.
+
+The new path has 192 logic levels and runs from EIP through fetch/decode,
+paired lookahead, address translation, cache/store admission and `l1d_c_ack`,
+then `fp_shared_direct`, FP command selection and SRT operand initialization.
+The FPU opcode/operand mux unnecessarily uses the late admission predicate
+even though registered `S_PIPE` already identifies the payload producer.
+A separate default-off `VEN_FP_PIPE_PAYLOAD_SELECT` proposal changes eight
+payload selectors only; valid/ready logic, admission, retirement, faults and
+async ownership remain unchanged. There is no extra register or pipeline stage.
+An assertion checks producer equivalence on every valid command. This is
+a hypothesis for shortening the measured path, not yet a measured timing fix.
+
+Private core `35c8cc6c`, `ventium-fp-payload-core.gBHtaKyA`, builds native 0
+with assertions and six fatal structural lint classes. Six recipe tests pass.
+The cold paged x87 smoke closes 36 fixtures with 144 full QEMU architectural
+comparisons and 72 identical complete A/B cycle streams and FP-acceptance
+event sequences (flat/relocated clients, offsets 0/15/31, AXI latency 0/7).
+Actual V retirement is required. Evidence: `smoke-r3/closed.json`, supervisor
+`fbfcb025b3524f23b25519ac49a88518`. The full **384-fixture matrix also passes**:
+1,536 complete QEMU architectural comparisons, 768 identical complete cycle
+streams and acceptance-event A/B sequences, all 32 instruction offsets.
+It closes in 45.23 seconds using 32 workers and 1.049 GiB peak cgroup RAM;
+native supervisor 0, stable inputs, `matrix/closed.json`, invocation
+`d43a1c4d12ba4c809d501765d74bd67b`. Whole-core preprocessing independently
+proves that disabling the flag reproduces the parent's complete source tokens.
+First attempts are retained as failures: the inherited grader rejected x87
+functional headers; then the new runner incorrectly required architectural
+fields in cycle-only trace headers. The runner now follows the existing trace
+contract, with separate full-state and timing streams; no data or masks changed.
+Ten host recipe/closure tests pass, including rejection of every missing
+architectural field, malformed ST0, wrong headers, timeout/nonzero exit,
+truncated/duplicate footers and I/O desynchronization. These are host checks,
+not additional RTL cases. The canonical generic gate is rerun unchanged;
+its inherited failures are not waived by the new directed matrix.
+
+The `322bc855` full-PC model's own duration-valid 900-iteration CoreMark seeds
+started 13:39:15 UTC, still pending at this entry. Retained units
+`ventium-cacheinv-cm900-{perf,valid}-oct10`, invocations
+`f938edffc6cb47a08a3c01fb9661098c` / `48c8c55963794468bda2d492fa587b20`,
+use CPUs 0/3, 60-minute native caps and 2 GiB/no swap each. New candidates
+remain gameplay-unmeasured. Latest verified gameplay remains **0.51922957**
+on `bfb867f7`, clocks 2,000,065,237–2,100,065,237, with nine-window average
+**0.4992230911**. Generic gates, full timedemo/Win95 and FPGA acceptance are open.
