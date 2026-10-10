@@ -123,11 +123,11 @@ completed standard-suite result or a gameplay IPC measurement for this build.
 
 ## Gameplay baseline and blockers
 
-Current verified parent `958f7ec4`: **0.48544264** at clocks
-**3,800,048,811–3,900,048,811**, 48,544,264 events = 37,486,019 U + 11,058,245 V.
-All twenty-seven consecutive 100M windows from 1,200,048,811 total
-1,311,031,100 events / 2.7B clocks = **0.4855670741**, retaining every dip.
-Audit `ventium-sfetch16-latest-r12.DSdRLbmN/audit.json` checks counters,
+Current verified parent `958f7ec4`: **0.50530999** at clocks
+**3,900,048,811–4,000,048,811**, 50,530,999 events = 38,868,367 U + 11,662,632 V.
+All twenty-eight consecutive 100M windows from 1,200,048,811 total
+1,361,562,099 events / 2.8B clocks = **0.4862721782**, retaining every dip.
+Audit `ventium-sfetch16-latest-r13.B1BPkjih/audit.json` checks counters,
 source/native/supervisor identity, unchanged raw endpoint pixels and no OOM.
 Latest window and aggregate exceed 0.48; timedemo is unfinished.
 **The newer `bfb867f7` candidate has no verified gameplay measurement.**
@@ -151,6 +151,14 @@ completion criteria are unchanged; no guest patch, input script or snapshot.
 CoreMark retains its 60-minute seed cap; Win95/Quake their bounded cold-run
 collectors. Evidence is under `ventium-ic-buffered-soc.gsztNdDc` on external
 scratch. Existing `bfb867f7` cold runs continue, not restarted or replaced.
+
+At 11:04 UTC, **both `89b68b62` 900-iteration seeds are closed and independently
+audited**: 428,186,037 / 427,022,738 raw ticks, **2.101890118 / 2.107616105
+CM/MHz**, identical to the immediate performance parent. All five original
+CRCs match; native exits 0, EOF/reaping, actual V retirement, 2,946 immutable
+pins per seed and no OOM. Host times 3,552.54 / 3,418.36 seconds remain within
+the 60-minute cap. Its Quake/Win95 runs continue. These scores belong to this
+model as well as `bfb867f7`, not automatically to the newer prefix derivative.
 
 ### Current prefix-sharing derivative
 
@@ -183,3 +191,31 @@ or bands were weakened. The separate older FPGA route timed out before
 completion; it produced no new bitstream. The new source has no routed timing
 or silicon acceptance. Neither CoreMark smoke nor partial gameplay closes
 these correctness, full-suite or hardware obligations.
+
+### Exact candidate functional recheck, 10:59 UTC
+
+The existing, opt-in [QEMU live terminal-state observer](../verif/qemu-trace/PREEXIT_OBSERVER.md)
+was requalified on all 24 microcases with the current producer, then used in
+a fresh private golden cache against directed-core model **`bdfa17b4`** (the
+same processor source as full-PC `343f0ccd`). All 108 original functional jobs
+ran with `--cycle-func --l1-axi`, unchanged worker/comparator/masks and AXI
+latency zero. **107 pass; `tx_fprem` fails** at terminal record 300,
+PC `08048415`: QEMU FSW `0020`, RTL `0320`. This retains the known stale-C1
+correctness obligation, not just an unavailable oracle terminal record.
+The previously proposed C1/SRT/FST repairs are **not** in this performance
+candidate. Their separate directed results must not be inherited by it.
+
+Evidence: `ventium-ic-prefix-functional.LiwgNIsW/{closed,audit}.json`, supervisor
+`9ce8a02962e34ee3a23f21bfa7e4bf5e`, native diagnostic exit 1, 220.69 seconds,
+stable inputs. Independent audit checks all 108 actual cycle-func trace headers,
+full equal record counts, real L1 backing activity and unchanged comparisons.
+`mb_jmppair` completes all 5,204 records, with 2,604 U + 2,600 V retirements.
+The initial launcher incorrectly searched stdout for the mode; the retained
+audit uses its actual trace-header location. One interleaved stdout/stderr
+counter line is recognized literally; raw logs and architectural traces remain
+unchanged. The whole subgate is still **FAIL**, not an accepted partial pass.
+
+The separate canonical latency-seven gate also retains **12 failed cycle
+bands** out of 19 graded kernels (one additional informational kernel). These
+are real measurements of a different memory-service environment from the
+legacy oracle; they have not been widened, filtered or called timing passes.

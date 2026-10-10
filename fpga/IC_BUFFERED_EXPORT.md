@@ -5,9 +5,9 @@ parent is documented in [STORE_ADMIT_EXPORT.md](STORE_ADMIT_EXPORT.md); the
 new sharing change and closed microtests are in the
 [fetch-congestion audit](../docs/FPGA_FETCH_CONGESTION_2026-10-10.md).
 
-Current verified gameplay remains parent `958f7ec4`: **0.48544264** U+V event
-IPC at clocks 3,800,048,811–3,900,048,811; all 27 consecutive windows average
-0.4855670741. Performance model `bfb867f7` and sharing model `89b68b62` remain
+Current verified gameplay remains parent `958f7ec4`: **0.50530999** U+V event
+IPC at clocks 3,900,048,811–4,000,048,811; all 28 consecutive windows average
+0.4862721782. Performance model `bfb867f7` and sharing model `89b68b62` remain
 gameplay-unmeasured. REP events are not exact P54 macroinstructions.
 
 ## Exact inputs
@@ -56,8 +56,12 @@ sign-off; the full-PC model retains 98 inherited platform structural warnings.
 
 New full-PC short CoreMark: native 0 for both seeds, original five CRCs, exact
 parent ticks 4,767,218 / 4,753,406. These duration-invalid diagnostic runs prove
-no observed cycle cost; they do not grant the parent's 900-iteration qualified
-2.101890118 / 2.107616105 CM/MHz scores to the new model.
+no observed cycle cost; they do not alone grant a duration-valid score.
+At 11:04 UTC, this exact model's **own 900-iteration seeds** have both closed
+and passed `audit_soc_seed.py`: 428,186,037 / 427,022,738 ticks,
+**2.101890118 / 2.107616105 CM/MHz**. Original CRCs, native 0/EOF/reaping,
+2,946 stable pins per seed and zero OOM; both within the 60-minute cap.
+Thus the sharing change also has no measured cost in the full benchmark.
 
 ## Closed full synthesis diagnostic
 
@@ -95,9 +99,9 @@ checked before implementation. No routed frequency or timing sign-off exists.
 ## Remaining work
 
 Generic differential verification remains **red**. This exact new source still
-needs duration-valid CoreMark, Win95 desktop, complete original DOS Quake,
-whole-chip area/timing and silicon acceptance. The local 66.0% lookup-cone LUT
+needs Win95 desktop, complete original DOS Quake, routed timing and silicon
+acceptance. Its whole-chip synthesis regression is recorded above. The local 66.0% lookup-cone LUT
 reduction is not a whole-chip prediction or a measured gameplay improvement.
-Its separate duration-valid seeds, Win95 and Quake cold boots are now running;
+Its duration-valid seeds have passed; Win95 and Quake cold boots remain running;
 exact service identities and bounds are in the
 [target log](../docs/CACHE_BACKED_TARGETS_2026-10-10.md).

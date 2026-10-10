@@ -6,9 +6,9 @@ performance backports. No additional memory port, cache state or pipeline cycle.
 The sixteen successor-byte lookups share two line probes, retaining cache-way
 and bypass priority, returned identities, collision behavior and stale bytes.
 
-Latest verified gameplay is parent `958f7ec4`: **0.48544264** U+V event IPC at
-clocks **3,800,048,811–3,900,048,811**, all 27 consecutive windows averaging
-**0.4855670741**. REP events are not exact P54 macroinstructions. New model
+Latest verified gameplay is parent `958f7ec4`: **0.50530999** U+V event IPC at
+clocks **3,900,048,811–4,000,048,811**, all 28 consecutive windows averaging
+**0.4862721782**. REP events are not exact P54 macroinstructions. New model
 `343f0ccd` is gameplay-unmeasured and cannot inherit the parent's acceptance.
 
 ## Source identity
@@ -72,7 +72,12 @@ parent**. This comparison isolates prefix sharing; comparing to the much older
 190,864-LUT profile mixes in performance backports. No automatic route/deploy.
 
 Generic differential verification remains **red**, unchanged discrepancies and
-cycle bands retained. Duration-valid new CoreMark, Win95 desktop, full original
+cycle bands retained. The exact-source functional recheck with the requalified
+live terminal-state observer gives **107/108 comparisons passing**, retaining
+the known `tx_fprem` C1 failure. No comparison masks or trace records changed;
+the proposed FP correctness repairs are not in this source. See the linked
+target log for the failed subgate's complete evidence.
+Duration-valid new CoreMark, Win95 desktop, full original
 DOS demo1 (969 frames), full-design area, effective project clocks, routed
 frequency and silicon acceptance remain open. A bare synthesis DCP omits project
 clocks; clock admission must use `open_project` / `open_run synth_1`, not invent

@@ -2,9 +2,9 @@
 
 This is **UNQUALIFIED**, not a routed bitstream or deployment. See
 [the measured changes and outstanding targets](../docs/CACHE_BACKED_TARGETS_2026-10-10.md).
-Verified gameplay baseline is parent `958f7ec4`: **0.48544264** U+V event IPC
-at 3,800,048,811–3,900,048,811 clocks; all 27 consecutive windows average
-0.4855670741. Combined candidate `bfb867f7` remains gameplay-unmeasured.
+Verified gameplay baseline is parent `958f7ec4`: **0.50530999** U+V event IPC
+at 3,900,048,811–4,000,048,811 clocks; all 28 consecutive windows average
+0.4862721782. Combined candidate `bfb867f7` remains gameplay-unmeasured.
 
 The new frozen root is
 `/home/yukidama/external/tmp/ventium-store-admit-fpga40.00qKufA7`.

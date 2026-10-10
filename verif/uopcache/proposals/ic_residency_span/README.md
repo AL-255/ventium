@@ -44,7 +44,7 @@ TMPDIR=/home/yukidama/external/tmp python3 -B -m unittest discover \
 All 15 tests pass (including two prefix-integration tests). The 145-define full-PC derivative `89b68b62` is distinct
 from the duration-valid CoreMark model `bfb867f7`; its ten-iteration cycle
 identity does not inherit the latter's qualified scores. Current verified
-gameplay is parent `958f7ec4`: 0.48544264 at clocks 3,800,048,811–3,900,048,811;
+gameplay is parent `958f7ec4`: 0.50530999 at clocks 3,900,048,811–4,000,048,811;
 both newer models and the 146-define `343f0ccd` remain gameplay-unmeasured.
 
 The separate `prepare_prefix_integration.py` / `ic_prefix_span.svh` extension

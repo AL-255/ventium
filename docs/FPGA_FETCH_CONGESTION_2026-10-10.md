@@ -1,9 +1,9 @@
 # Fetch/operand congestion: native evidence and narrow sharing experiment
 
-Latest verified gameplay baseline is `958f7ec4`, **0.48544264** U+V event IPC
-at 3,800,048,811–3,900,048,811 clocks. All 27 consecutive 100M windows from
-1,200,048,811 average **0.4855670741**; no low window is excluded. Audit:
-`ventium-sfetch16-latest-r12.DSdRLbmN/audit.json`. Full timedemo remains unfinished.
+Latest verified gameplay baseline is `958f7ec4`, **0.50530999** U+V event IPC
+at 3,900,048,811–4,000,048,811 clocks. All 28 consecutive 100M windows from
+1,200,048,811 average **0.4862721782**; no low window is excluded. Audit:
+`ventium-sfetch16-latest-r13.B1BPkjih/audit.json`. Full timedemo remains unfinished.
 Newer combined benchmark model `bfb867f7` and area models `89b68b62` / `343f0ccd` are
 gameplay-unmeasured. REP events are not exact P54 macroinstructions.
 
