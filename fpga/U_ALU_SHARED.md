@@ -124,6 +124,39 @@ one-clock handoffs** from these subjects to Jcc. The ordinary pairable
 register cases still require actual paired U/V retirement. No RTL or model
 configuration was changed to obtain the corrected preflight result.
 
+## Whole-core preparation and serialized continuation
+
+[The builder](../verif/issue_uv/build_u_alu_shared_core.py) separates source
+preparation from compilation. `core-r2/prepared.json` records all **195 source
+files**, **480 direct input pins** and unchanged **150 definitions**. Exactly
+`rtl/core/u_pipe.sv` differs from the independently audited shift model, and
+its bytes match the component-tested transformation. The harness has a private
+per-model basename; compilation must verify its object and generated-header
+dependency. Preparation itself launches no compiler. Four
+[host contract tests](../verif/issue_uv/test_u_alu_core_builder.py) pass for
+source drift, symlink rejection, missing live build ownership and repeat-build
+refusal.
+
+Prepared manifest SHA-256:
+`385415139bf21752199c6cd8e015a3d99b282d818ba802786f1ad285b53209f7`.
+Candidate U-pipe SHA-256:
+`0d27e79c88bc0e1fa9ff94efa1e5b271aa5933f5cd102fc6f5f26e56c6a8df8b`.
+The earlier uncompiled `core-r1/` preparation and original builder are retained;
+`core-r2/` adds explicit build-start bookkeeping, command-relocation checking
+and the required compiler-version probe. Neither has a new native model yet.
+
+One owned continuation is launched at **09:10:25 UTC**, invocation
+`b7e09cbb9d19449494c53c42577e3589`, unit
+`ventium-u-alu-core-queue-oct11.service`. It waits for the **exact** active shift
+clock queue (`490247bb20b74c5497766c041e810334`) to close and pass its audit.
+It does not restart that queue or overlap the current Vivado family. If the
+measured shift candidate already reaches 40 MHz, this optional derivative is
+deferred. Otherwise it runs the guarded-32 core build, real parent/candidate
+cold arithmetic tests, unchanged canonical gate and complete same-input replay.
+The 5 GiB build/4 GiB run disk guards remain intact. A red canonical result
+remains red. This continuation launches **no FPGA synthesis, route or deploy**;
+the mapped critical path still decides the next hardware experiment.
+
 ## Remaining acceptance
 
 Use the pending register-shift timing report to choose the next measured
