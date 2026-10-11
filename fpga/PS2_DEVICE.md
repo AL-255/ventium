@@ -1,14 +1,14 @@
 # Hosted PS/2 device transport — October 10, 2026
 
-Status: **unintegrated peripheral prototype**, with byte transport and a hosted
-mouse policy, not a board-accessible mouse or an FPGA acceptance pass. The active
-`2b4d7a48` source export and implementation are unchanged. Its wrapper still
-ties the mouse input pins high.
+Status: **native-tested peripheral components and a prepared source overlay**,
+not a board-accessible mouse or an FPGA acceptance pass. The active timing
+candidate is unchanged. Its frozen wrapper still ties the mouse inputs high;
+the separate overlay below adds a loss-detectable register interface and wiring.
 
-Latest verified gameplay is **0.49366456 U+V retirement-event IPC** on older
-simulated `bfb867f7`, cycles **5,200,065,237–5,300,065,237**; the 41-window mean
-is **0.498471873**. Candidate `2b4d7a48` is unmeasured. This peripheral work
-claims **no IPC gain** and does not repair or waive the failing canonical gate.
+Latest verified gameplay is **0.51030715 U+V retirement-event IPC** on simulated
+`2b4d7a48`, cycles **1,200,065,237–1,300,065,237**, the first predeclared window,
+not a full-demo average. Newer timing candidates are gameplay-unmeasured. This
+peripheral work claims **no IPC gain** and does not waive the canonical gate.
 
 ## Why a bidirectional endpoint is needed
 
@@ -162,22 +162,119 @@ observable after leaving wrap mode, and backlog admission reserves space for
 the eventual commit of an opposite-direction in-flight motion sample. Directed
 tests cover both. Neither fix changes the processor or claims a gameplay gain.
 
+## October 11: retained mailbox and wrapper overlay
+
+[`ven_ps2_mailbox.sv`](ven_ps2_mailbox.sv) adds a single-writer CSR boundary.
+An offered byte remains owned under transport backpressure. Admission advances
+a sequence number; successful delivery and host-preemption produce distinct,
+retained events, cleared only by an acknowledgement of that exact sequence.
+Receiving a host command before a queued TX reaches the wire explicitly aborts
+that TX, so the policy can resolve it before consuming RX. The RX byte, framing
+errors and sequence remain stable until their separate exact acknowledgement.
+
+The management domain records each guest-reset assertion once and disarms
+submission. Software must observe the new generation and explicitly arm it;
+pending bytes cannot leak into the next guest. Counters saturate rather than
+wrap. Sequence exhaustion requires guest reset; generation exhaustion requires
+management/fabric reset. The physical transport still uses the actual 8042
+guest-reset domain. This is not support for independent concurrent writers or
+reattaching a fresh policy process to an unknown live device.
+
+The source overlay uses only 0x10-aligned lane-0 offsets:
+
+| Offset | Read | Write |
+|---|---|---|
+| `0x400` | Capability `50533201` | Rejected |
+| `0x410` | Status; exact bits documented in the module | Rejected |
+| `0x420` | Guest-reset generation | Rejected |
+| `0x430` | Zero | Arm the exact observed generation |
+| `0x440` | Zero | Submit byte; upper 24 bits must be zero |
+| `0x450` | TX admission sequence | Rejected |
+| `0x460` | Zero | Acknowledge retained TX event by sequence |
+| `0x470` | RX byte plus parity/stop errors | Rejected |
+| `0x480` | RX sequence | Rejected |
+| `0x490` | Zero | Acknowledge RX by sequence |
+| `0x4A0` | Zero | W1C RX-abort/protocol-error indicators |
+
+All writes require all four byte strobes. Invalid/stale writes are visible
+through the protocol-error status, not silent admission. A ready read is only
+advisory: the PS adapter must verify actual sequence advancement before calling
+`Mouse.admitted()`. It must service completion before RX, recheck generation
+around observations and reject an old image without the exact capability.
+Neither a CSR read nor an AXI response acknowledges a byte's serial delivery.
+
+[`prepare_ps2_mouse_mailbox.py`](prepare_ps2_mouse_mailbox.py) checks the three
+exact current wrapper/management/project input hashes, refuses missing,
+duplicate or already-applied anchors, and writes a separate five-file overlay.
+It forwards actual AXI byte strobes and one registered command pulse, preserves
+the existing AXI response retention, connects the wired-AND mouse pins, and
+passes the wrapper's `CLK_HZ` into the byte transport. It changes no processor
+RTL, feature defines or clock constraints. It is **not a complete independent
+build directory**: a later source-matched export must deliberately incorporate
+it through the existing clock/profile wrapper, never run the legacy base Tcl
+alone or edit the live export.
+
+Native closure: `external/tmp/ventium-ps2-mailbox-r2.rDP90LzX`, service
+`ventium-ps2-mailbox-r2-oct11.service`, invocation
+`57153f0ed3a841a79899cd2c4f868ba5`, native exit 0, 29,401,088-byte memory peak,
+zero OOM events and unchanged source/tool pins. The runner
+[`run-ps2-mailbox-gate.py`](run-ps2-mailbox-gate.py) records:
+
+- **1,969 directed mailbox checks**, including all byte values, busy writes,
+  partial strobes, retained/error events, stale acknowledgements, host-command
+  preemption, reset at each ownership stage, and natural counter saturation
+  with a narrowed test instance. No private state is forced.
+- **233 actual `ven_mgmt_axil` integration checks** with separated AW/W arrivals,
+  B/R backpressure, byte-strobe propagation, address-bank isolation and actual
+  control/forensic guest resets. The serial side here is an explicit BFM.
+- The existing debug-register regression and both modules' six-class structural
+  lint pass; twelve recipe checks pass. Six broken mailbox variants and three
+  broken register bridges fail native assertions; two invalid counter widths
+  fail elaborated parameter guards. Compile failures/timeouts are not counted
+  as successful mutation detection.
+
+The prepared overlay is `external/tmp/ventium-ps2-mouse-overlay-r2.McPNAkCQ`.
+The initial mailbox-only run and first prepared overlay remain separate
+historical evidence. Reproduce using a fresh empty external output, the bounded
+one-CPU/512-MiB/no-swap service profile above, and the runner's `--overlay` option.
+No Vivado, full guest, board write or additional heavy build is launched.
+
+The protocol runner's new `--mailbox` mode then passes the **actual 8042/FIFO +
+serial transport + mailbox + unchanged Python mouse policy** path at both
+3.125 and 40 MHz: **19 host commands / 46 delivered bytes per clock**. Every
+outgoing byte crosses independently checked serial framing/parity, AUX status,
+IRQ12 and port 60h. CSR admission sequences and retained completion records
+are checked before acknowledgement. The existing direct-transport mode is
+rerun as a separate control and also passes. Each run retains the 14 policy
+tests and three deliberate policy-mutation failures. These tests still do not
+execute a PS MMIO service or Windows driver.
+
+Both services close with native exit 0, reaped children and zero OOM events:
+
+| Mode | Evidence leaf under `external/tmp` | Native seconds, 3.125 / 40 MHz | Peak bytes |
+|---|---|---|---|
+| Mailbox wire path | `ventium-ps2-mouse-policy.twwpiusp` | 12.69 / 93.13 | 26,210,304 |
+| Direct control | `ventium-ps2-mouse-policy.1s56t25o` | 12.22 / 92.70 | 21,815,296 |
+
+Invocations are `e82a954c9cca4a32964164c3bd28b8fc` and
+`15c48e993f454492b2a35e2c730745ac`, respectively; actual child affinity is CPU
+12 / 13. An independent closure audit rechecks supervisor identities, absent
+native processes, every recorded RX/TX line and all 35 / 25 / 23 pins across
+the mailbox/AXI gate and two wire runs. Its receipt is
+`ventium-ps2-mailbox-r2.rDP90LzX/audit.json`, SHA-256
+`3d7e60fdf663fc42b40e1d5434c105bebfe7a302b2a4b2ecf6f3232b2f0dd3f6`.
+
 ## Still required before physical mouse acceptance
 
 1. Integrate the now-tested general mouse policy with an actual PS-side service
    and UI input producer. Do not introduce guest-specific command recognition
    or synthetic cursor writes. Keep the protocol/wire gates passing.
-2. Versioned, loss-detectable control-register mailboxes and reset-safe wrapper
-   wiring. Preserve distinct TX admission/completion/abort and stable RX
-   ownership; a stale ready read must not silently drop a software write.
-   The existing `ven_mgmt_axil` and wrapper share the SoC clock; the new bank
-   must retain 0x10-aligned lane-0 addresses. Do not copy the keyboard port's
-   write-time `valid & ready` drop behavior. Retain completion until explicit
-   acknowledgement and expose guest-reset generation before accepting new
-   software ownership. This integration is not implemented by the policy gate.
-3. Native protocol/CSR/reset tests, then a separately source-matched export,
-   structural lint and FPGA implementation. Do not edit the active frozen
-   source or restart its implementation to sneak this prototype into it.
+2. Complete the PS adapter against the explicit mailbox ABI, including MMIO
+   ordering, exclusive ownership, reset races and delivery-before-RX ordering.
+   The leaf/AXI tests do not establish a working Linux service or UI producer.
+3. Incorporate the separately prepared overlay in a source-matched candidate,
+   run full integration lint/verification, retain the 40 MHz timing requirement,
+   and implement/deploy it. Do not edit the active frozen synthesis inputs.
 4. Cold Win95 desktop and actual keyboard/mouse interaction on the deployed
    candidate, with original guest media, captures, bitstream/source hashes,
    measured clock and UV+fast evidence. Keyboard-only UI is not mouse coverage.

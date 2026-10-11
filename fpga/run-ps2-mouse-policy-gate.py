@@ -21,6 +21,7 @@ def sha(path):
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--platform-root', type=Path, required=True)
+    ap.add_argument('--mailbox', action='store_true', help='exercise retained CSR ownership between policy and serial transport')
     args = ap.parse_args()
     assert __debug__
     repo = Path(__file__).resolve().parents[1]
@@ -42,6 +43,8 @@ def main():
               repo/'fpga/board-tools/ven_ps2_mouse.py',
               repo/'fpga/board-tools/test_ven_ps2_mouse.py',
               platform/'soc/ps2.v', platform/'common/simple_fifo.v', Path(__file__)]
+    if args.mailbox:
+        inputs.append(repo/'fpga/ven_ps2_mailbox.sv')
     pins = {str(p): sha(p) for p in inputs}
     for p in inputs:
         shutil.copyfile(p, source/p.name)
@@ -70,7 +73,7 @@ def main():
         assert run.returncode == expected, (label, run.returncode, expected)
         return (root/(label+'.log')).read_text()
 
-    save('started.json', dict(pins=pins, invocation=os.environ['INVOCATION_ID'],
+    save('started.json', dict(pins=pins, invocation=os.environ['INVOCATION_ID'], mailbox=args.mailbox,
                              affinity=sorted(os.sched_getaffinity(0)), memory_before=events()))
     failure = None
     try:
@@ -102,6 +105,7 @@ def main():
             image = root/(label+'.vvp')
             command(label+'-compile', [tools['iverilog'], '-g2012', '-Wall',
                 '-s', 'tb_ps2_mouse_policy', '-Ptb_ps2_mouse_policy.HZ='+str(hz), '-o', str(image),
+                *(['-DVEN_PS2_MAILBOX', str(source/'ven_ps2_mailbox.sv')] if args.mailbox else []),
                 *[str(source/name) for name in ('ven_ps2_device.sv', 'tb_ps2_mouse_policy.sv',
                                                 'ps2.v', 'simple_fifo.v')]])
             start = time.monotonic()
@@ -189,7 +193,8 @@ def main():
                     host(0xE9, [0xFA, 3, 2, 100])
                     host(0xFF, [0xFA, 0xAA, 0])
                     request(3, 0)
-                    assert line() == f'PS2-MOUSE-WIRE-OK hz={hz} completed={transmitted}'
+                    marker = 'PS2-MOUSE-MAILBOX-WIRE-OK' if args.mailbox else 'PS2-MOUSE-WIRE-OK'
+                    assert line() == f'{marker} hz={hz} completed={transmitted}'
                     proc.stdin.close()
                     proc.stdin = None
                     tail = proc.communicate(timeout=5)[0]
@@ -214,7 +219,7 @@ def main():
     passed = failure is None and stable and after['oom'] == after['oom_kill'] == '0'
     save('closed.json', dict(passed=passed, error=failure, commands=rows, pins=pins,
         pins_unchanged=stable, memory_after=after, memory_peak=int((cg/'memory.peak').read_text()),
-        integrated_candidate=False, physical_board=False, standard_suite=False, gameplay_ipc=None))
+        mailbox=args.mailbox, integrated_candidate=False, physical_board=False, standard_suite=False, gameplay_ipc=None))
     print(json.dumps(dict(passed=passed, error=failure, evidence=str(root))), flush=True)
     return 0 if passed else 1
 

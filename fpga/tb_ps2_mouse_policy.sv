@@ -7,8 +7,18 @@ module tb_ps2_mouse_policy;
     localparam integer WAIT_LIMIT = HZ / 20; // 50 ms per operation
     reg clk=0, rst_n=0;
     always #HALF_PS clk = ~clk;
+`ifdef VEN_PS2_MAILBOX
+    wire tx_valid, rx_ready;
+    wire [7:0] tx_data;
+    reg mb_write=0;
+    reg [3:0] mb_waddr=0, mb_raddr=0;
+    reg [31:0] mb_wdata=0;
+    wire [31:0] mb_rdata;
+    reg [31:0] mb_value, mb_tx_sequence, mb_rx_sequence;
+`else
     reg tx_valid=0, rx_ready=0;
     reg [7:0] tx_data=0;
+`endif
     wire tx_ready, tx_done, tx_aborted, rx_valid, rx_aborted;
     wire [7:0] rx_data;
     wire [1:0] rx_error;
@@ -23,6 +33,24 @@ module tb_ps2_mouse_policy;
         if (tx_done) sent <= sent + 1;
         if (tx_aborted || rx_aborted) $fatal(1,"unexpected serial abort");
     end
+`ifdef VEN_PS2_MAILBOX
+    ven_ps2_mailbox mailbox (
+        .clk(clk), .rst_n(rst_n), .guest_reset(!rst_n),
+        .csr_write(mb_write), .csr_waddr(mb_waddr), .csr_wdata(mb_wdata), .csr_wstrb(4'hf),
+        .csr_raddr(mb_raddr), .csr_rdata(mb_rdata),
+        .tx_valid(tx_valid), .tx_data(tx_data), .tx_ready(tx_ready),
+        .tx_done(tx_done), .tx_aborted(tx_aborted),
+        .rx_valid(rx_valid), .rx_data(rx_data), .rx_error(rx_error),
+        .rx_ready(rx_ready), .rx_aborted(rx_aborted)
+    );
+    task mb_write_word(input [3:0] address, input [31:0] data);
+        @(negedge clk); mb_write=1; mb_waddr=address; mb_wdata=data;
+        @(negedge clk); mb_write=0;
+    endtask
+    task mb_read_word(input [3:0] address, output [31:0] data);
+        mb_raddr=address; #1; data=mb_rdata;
+    endtask
+`endif
     ven_ps2_device #(.CLK_HZ(HZ)) device (
         .clk(clk), .rst_n(rst_n), .tx_valid(tx_valid), .tx_data(tx_data),
         .tx_ready(tx_ready), .tx_done(tx_done), .tx_aborted(tx_aborted),
@@ -58,6 +86,11 @@ module tb_ps2_mouse_policy;
     initial begin
         repeat (8) @(negedge clk); rst_n=1;
         repeat (8) @(negedge clk);
+`ifdef VEN_PS2_MAILBOX
+        mb_read_word(0,mb_value);
+        if (mb_value != 32'h50533201) $fatal(1,"mailbox capability mismatch");
+        mb_read_word(2,mb_value); mb_write_word(3,mb_value);
+`endif
         $display("READY %0d",HZ); $fflush();
         forever begin
             scan=$fscanf(32'h80000000,"%d %d",operation,value);
@@ -68,6 +101,18 @@ module tb_ps2_mouse_policy;
                     if (status[1:0] != 0) $fatal(1,"host input/output buffer not empty");
                     io_wr(4,8'hd4); io_wr(0,8'(value));
                     count=0;
+`ifdef VEN_PS2_MAILBOX
+                    mb_raddr=1; #1;
+                    while (!mb_rdata[7] && count < WAIT_LIMIT) begin
+                        @(negedge clk); count=count+1;
+                    end
+                    if (!mb_rdata[7] || mb_rdata[10:9] != 0)
+                        $fatal(1,"host serial command mailbox timeout/error");
+                    mb_read_word(7,mb_value);
+                    mb_read_word(8,mb_rx_sequence);
+                    $display("RX %0d %0d",mb_value[7:0],mb_value[9:8]); $fflush();
+                    mb_write_word(9,mb_rx_sequence);
+`else
                     while (!rx_valid && count < WAIT_LIMIT) begin
                         @(negedge clk); count=count+1;
                     end
@@ -75,12 +120,23 @@ module tb_ps2_mouse_policy;
                     $display("RX %0d %0d",rx_data,rx_error); $fflush();
                     @(negedge clk); rx_ready=1;
                     @(negedge clk); rx_ready=0;
+`endif
                 end
                 2: begin
                     before_sent=sent;
+`ifdef VEN_PS2_MAILBOX
+                    mb_read_word(1,mb_value);
+                    if (!mb_value[2] || mb_value[10:9] != 0) $fatal(1,"mailbox cannot accept policy byte");
+                    mb_read_word(5,mb_tx_sequence);
+                    mb_write_word(4,32'(value));
+                    mb_read_word(5,mb_value);
+                    if (mb_value != mb_tx_sequence+1) $fatal(1,"mailbox did not confirm byte admission");
+                    mb_tx_sequence=mb_value;
+`else
                     if (!tx_ready) $fatal(1,"transport not ready for offered byte");
                     @(negedge clk); tx_data=8'(value); tx_valid=1;
                     @(negedge clk); tx_valid=0;
+`endif
                     expected={1'b1,~^tx_data,tx_data,1'b0};
                     for (bit_number=0;bit_number<11;bit_number=bit_number+1) begin
                         @(negedge dc);
@@ -94,6 +150,11 @@ module tb_ps2_mouse_policy;
                     end
                     if (!irq_mouse || irq_keyb || sent != before_sent+1)
                         $fatal(1,"policy byte missing IRQ12/delivery");
+`ifdef VEN_PS2_MAILBOX
+                    mb_read_word(1,mb_value);
+                    if ((mb_value & 32'h670) != 32'h60) $fatal(1,"missing retained delivered event");
+                    mb_write_word(6,mb_tx_sequence);
+`endif
                     io_rd(4,status);
                     if ((status & 8'ha3) != 8'h21) $fatal(1,"bad AUX/OBF/IBF/parity status");
                     io_rd(0,result);
@@ -103,7 +164,11 @@ module tb_ps2_mouse_policy;
                     $display("TX %0d",result); $fflush();
                 end
                 3: begin
+`ifdef VEN_PS2_MAILBOX
+                    $display("PS2-MOUSE-MAILBOX-WIRE-OK hz=%0d completed=%0d",HZ,sent);
+`else
                     $display("PS2-MOUSE-WIRE-OK hz=%0d completed=%0d",HZ,sent);
+`endif
                     $fflush(); $finish;
                 end
                 default: $fatal(1,"unknown policy operation");
