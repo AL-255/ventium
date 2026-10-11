@@ -73,6 +73,35 @@ UV-fast core/QEMU comparisons and unchanged canonical gate. Do not include
 the separate generic-overlap draft automatically. The live readiness
 synthesis and its clock audit must close before another heavy build starts.
 
+## Full-cache regression queued, not yet passed
+
+[`run_pair_now_cache.py`](../verif/l1/run_pair_now_cache.py) retains the original
+dual-store/coherence fixture and instantiates two full-size 128-set, two-way
+caches. The only candidate RTL difference is the same-line ACK cut above.
+It compares external outputs, all tag/valid/LRU/data arrays, full primary and
+shadow windows, and the actual paired response slots' owner/address/data.
+The [new transaction extension](../verif/l1/tb_l1d_pair_now_extra.svh) uses
+ordinary fills/captures to test primary/shadow returns, byte 31, crossing
+dword rejection, bank/identity/size/cacheability rejection, no double enqueue,
+a genuinely held V response, snoop plus fresh external-writer data, and flush.
+The existing store/backpressure tests are not removed or relaxed.
+
+Both fixture-generation variants pass structural generation checks; **native
+compilation and simulation have not started**. Planned runs are FF tags with
+the primary window, LUTRAM tags with primary/shadow windows, and an ownership
+defect that must fail. Compiler assertions and all six structural warning
+classes remain fatal. A historical printed FAIL followed by `$finish` is
+upgraded to a native fatal exit without changing its checks.
+
+Queue `ventium-pair-now-cache-queue-oct11.service`, invocation
+`dd01077f8cdb49fcb9e002d176f8b51b`, waits for the exact readiness timing queue
+`e46bc1ace6b943998fc4f84738c31f11` to close successfully, checks its independent
+timing audit and all pinned inputs, then launches one guarded-32 cache run.
+No competing Verilator/Vivado build starts while synthesis or timing is live.
+Its controller and receipts are under the evidence root's parent directory,
+`after_timing_cache.py` and `cache-queue/`. Do not equate a queued job or a
+generated fixture with an executed pass.
+
 Verified gameplay baseline: **0.51030715 total U+V simulated retirement-event
 IPC**, older model `2b4d7a48`, cycles **1,200,065,237–1,300,065,237**.
 This draft has no gameplay/FPS or FPGA measurement. The inherited canonical
