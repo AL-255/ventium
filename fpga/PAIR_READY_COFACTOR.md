@@ -95,26 +95,65 @@ Model SHA-256:
 Changed L1 SHA-256:
 `1d8a499aff0093a0861b20ec9faefee0820672cefe42d47504cd53f9ef71277b`.
 
-## Remaining work / running owners
+## Full-PC and hardware-source continuation
 
-The unchanged canonical gate is running under invocation
-`34068c0081984225a386eecaee9d30b5`; its predecessor remains FAIL. A matching A/B
-failure is not a canonical pass.
+The unchanged canonical gate closes **FAIL**, native exit 2, in 388.21 seconds
+under invocation `34068c0081984225a386eecaee9d30b5`. All 20 complete cycle
+traces match the predecessor, and all 688 input pins were independently
+rehashed. A matching A/B failure is not a canonical pass; no canonical mask,
+golden or cycle band changed.
 
-The [full-PC preparation](build_pair_ready_soc.py) rechecks all 102 shared RTL
+The [full-PC builder](build_pair_ready_soc.py) rechecks all 102 shared RTL
 sources against this core, preserving the platform and 154 simulator definitions.
 Relative to the measured exact-fragment platform, its only three RTL deltas are
 the two [descriptor-width corrections](DESCRIPTOR_READ_EXTENT.md) and this L1
-cofactor. No old performance result qualifies this new binary.
+cofactor. Native compilation closes successfully in **22.34 seconds**, invocation
+`506a50659a324b01a1eaa2ae257f353a`, with the private harness bound to its own
+generated header. The 98 inherited platform structural warnings are unchanged
+debt, not a full-SoC lint pass. All 597 build input pins were independently
+rehashed. New full-PC model SHA-256:
+`6583d6577f3099fe0e84bf52762516300843a8c1658f5cc373ec8c2240dcc090`.
+No old performance result qualifies this new binary.
 
-Queue invocation `b172564a5ba04239b3dab9b8196ab6dd` waits for the exact live
-canonical owner, then builds this derivative through the shared heavy-build lock
-and runs both unchanged short CoreMark disks. These ten-iteration CRC/cycle
-checks are **not** duration-valid scores or the full standard suite. No synthesis,
-place/route, bitstream programming or FPGA workload is started by that queue.
+Queue invocation `b172564a5ba04239b3dab9b8196ab6dd` then runs both unchanged short
+CoreMark disks. The performance seed closes native zero in 199.97 host seconds,
+with all five reference CRCs and **4,767,218 ticks**, unchanged from the parent;
+it records 1,055,307 V retirements. The validation seed is running under
+`6f65614c784e4b26af74d9009165a6f1`. These ten-iteration CRC/cycle checks are
+**not** duration-valid scores or the full standard suite. The reported diagnostic
+ratio is not a new qualified CM/MHz score. The parent/candidate audit follows
+true native closure, not merely the completed guest console.
 
-Next: source-matched hardware freeze, guarded synthesis and original-clock timing
-audit. Do not count a 40 MHz constraint, an overclock or an older DCP as meeting
+The [hardware freezer](freeze_pair_ready_rk_candidate.py) closes successfully
+under `e18dcd7d19e74518b99ca344b82a9bec`. It preserves all 190 payload paths,
+156 hardware definitions, 40/100 MHz clocks, posted-16 transport and filelist
+closure (117 units / 49 include edges). Exactly the three RTL deltas above are
+admitted from the compiled model; no dirty checkout source is substituted.
+The real Tcl source-contract check passes. Independent rehash checks cover its
+796 input pins and all exported payloads. Manifest SHA-256:
+`2d573cb347eaa630a7010f197d2ee0788f2aeef8340c6bb24d06767dd9712ece`.
+
+Strict CPU-hierarchy lint passes in 3.68 seconds under
+`7eb83a747d714f7389eb47d7310cb5c1`, using all 156 hardware definitions with the
+six structural warning classes fatal. All 195 input pins are independently
+rechecked. This does not qualify the full platform's existing warning debt.
+
+The [timing-controller derivation](prepare_pair_ready_timing.py) retains the
+closed predecessor's complete native launch/monitor/stop/reap lifecycle verbatim.
+It retains one Vivado family, the shared build lock, 8 GiB RAM / 6 GiB swap caps,
+the 13 GiB combined early-stop limit, 2 GiB host reserves and 4 GiB disk stop
+floor. Synthesis admission still requires over 6 GiB free disk and twice
+measured parent growth above that floor. It does not kill user applications.
+
+Timing queue `e46bc1ace6b943998fc4f84738c31f11` waits for exact full-PC/CoreMark,
+freeze and lint owners before one synthesis and the independent original-clock
+report/audit. Both candidate and parent use the **diagnostic `logic_only`
+(`-no_timing_driven`) mapper** for a matched comparison; this does not optimize
+synthesis for timing or establish routed sign-off. The original 40 MHz
+constraint and the requirement to actually reach 40 MHz remain unchanged.
+
+Next: complete short CoreMark validation, guarded synthesis and original-clock
+timing audit. Do not count a 40 MHz constraint, an overclock or an older DCP as meeting
 the synthesized target. Green differential gates, full CoreMark correctness,
 Win95 cold desktop/UI and complete Quake timedemo, including physical FPGA
 validation of the actual new candidate, remain required.
@@ -123,6 +162,15 @@ Disk hygiene: 28 regenerable compiler PCH files from the two closed cache-test
 runs were removed (2,340,612,753 bytes). Source, generated C++, objects, binaries,
 headers and logs remain. Cleanup receipts list every exact target/hash; the PCH
 files can be regenerated, but were not archived byte-for-byte.
+
+Before synthesis admission, 13,087 byte-identical closed `.vtrace` copies across
+eleven old experiment trees were consolidated as hardlinks, reclaiming
+1,955,467,264 allocated bytes. **Every path and every byte remains available.**
+The operation excludes current inputs and observable open files, checks hashes
+before/after each atomic replacement, and retains a complete plan/event/closure
+receipt under the evidence root. Separate a linked trace by copying it to a
+fresh file before any intentional edit. No source, model, media, checkpoint or
+unique trace was removed. Available disk rose to approximately 7.3 GiB.
 
 Verified gameplay baseline: **0.51030715 total U+V simulated retirement-event
 IPC**, older model `2b4d7a48`, cycles **1,200,065,237–1,300,065,237**. This timing
