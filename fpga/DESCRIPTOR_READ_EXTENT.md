@@ -73,6 +73,44 @@ twelve genuine crossing/fault fixtures at both latencies, with actual V
 retirements. The unchanged canonical gate follows; its current failures are
 not masked, trimmed or relabelled. No competing heavy build runs now.
 
+## Physical-bus witness, including an architectural false negative
+
+[`observe_descriptor_read_bus.py`](../verif/issue_uv/observe_descriptor_read_bus.py)
+observes the existing exact-fragment model at native rising-edge evaluation
+boundaries through read-only host GDB. It does not issue guest debug STEP,
+inject state, modify RTL, rebuild the model or change the memory model. The
+offsets come from that binary's generated header. The normal guest remains
+in UV-fast mode.
+
+All four observations (LGDT/LIDT, AXI latency 0/7, CR0.CD=1) confirm that the
+**architecturally passing** operand at `0x2ff8` physically reads eight bytes:
+four at `0x2ff8`, followed by four at `0x2ffc`. The last two bytes,
+`0x2ffe–0x2fff`, are outside its six-byte operand. The full observed architectural
+traces remain byte-identical to their earlier passing traces. This separately
+proves why repairing only the translation extent, or relying only on the
+register-state differential, is insufficient. It is not cache-line prefetch:
+these are accepted, single-beat bypass reads with cache disabled.
+
+The independent byte-count oracle rejects those observations. Its three host
+tests additionally reject oversized, missing, duplicate, wrong-address,
+non-handshaken and wrong-edge transfers. Diagnostic completion is explicitly
+**not** a byte-exact gate pass. The corrected model must demonstrate exactly
+four plus two bytes and unchanged architectural traces.
+
+Evidence: `descriptor-bus-parent-r1/` under the evidence root's parent above;
+closed invocation `577aeb7a588f44a9922d67960e26b574`, native exit 0,
+17.78 seconds, peak memory 281,714,688 bytes. All pinned inputs were independently
+rehashed after closure. Receipt SHA-256:
+`09dde2305d7e07c6e3f9276ddbff74de14f3068e585fc2aff68a43be5fc0c96a`.
+
+After `descriptor-core-r1` and `descriptor-fixed-r1` close successfully, run
+the same observer without `--expect-overread`, supplying those directories as
+`--build` and `--matrix`, retaining `descriptor-extent-r1` as `--corpus`, and
+using a new external scratch output directory. It requires the completed
+24-case check and the exact new model hash before observation. This extra
+check is not part of the already-pinned running queue; neither that queue nor
+the running synthesis inputs were modified.
+
 ## Remaining acceptance
 
 Build and behavioral checks are pending. The running synthesis candidate does
