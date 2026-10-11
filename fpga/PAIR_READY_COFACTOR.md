@@ -118,8 +118,13 @@ No old performance result qualifies this new binary.
 Queue invocation `b172564a5ba04239b3dab9b8196ab6dd` then runs both unchanged short
 CoreMark disks. The performance seed closes native zero in 199.97 host seconds,
 with all five reference CRCs and **4,767,218 ticks**, unchanged from the parent;
-it records 1,055,307 V retirements. The validation seed is running under
-`6f65614c784e4b26af74d9009165a6f1`. These ten-iteration CRC/cycle checks are
+it records 1,055,307 V retirements. The validation seed also closes native zero:
+all five reference CRCs, **4,753,406 ticks** (unchanged), and 1,054,254 V
+retirements. Owner `6f65614c784e4b26af74d9009165a6f1` and the full-PC queue
+both close successfully. The independent audit passes, rechecking 638 source
+pins, actual CPU affinity, native child reaping and no OOM. Audit SHA-256:
+`62db8e7d0a79f41e17897ba075e426d0367120b977d423a0d48faff5b8231839`.
+These ten-iteration CRC/cycle checks are
 **not** duration-valid scores or the full standard suite. The reported diagnostic
 ratio is not a new qualified CM/MHz score. The parent/candidate audit follows
 true native closure, not merely the completed guest console.
@@ -152,8 +157,13 @@ report/audit. Both candidate and parent use the **diagnostic `logic_only`
 synthesis for timing or establish routed sign-off. The original 40 MHz
 constraint and the requirement to actually reach 40 MHz remain unchanged.
 
-Next: complete short CoreMark validation, guarded synthesis and original-clock
-timing audit. Do not count a 40 MHz constraint, an overclock or an older DCP as meeting
+Native synthesis starts at **2026-10-11 22:36:18 UTC**, owner
+`ventium-pair-ready-synth-oct11.service`, invocation
+`883ad70de9674bad931970a06aff98be`. The launcher and actual synthesis worker
+are observed live in the one guarded Vivado family; this is not just a queue.
+
+Next: complete guarded synthesis and original-clock timing audit. Do not count
+a 40 MHz constraint, an overclock or an older DCP as meeting
 the synthesized target. Green differential gates, full CoreMark correctness,
 Win95 cold desktop/UI and complete Quake timedemo, including physical FPGA
 validation of the actual new candidate, remain required.
