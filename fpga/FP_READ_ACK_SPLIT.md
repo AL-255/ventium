@@ -221,9 +221,32 @@ The independent export audit rechecks 35,704 input pins. Strict exported
 CPU-hierarchy lint passes in 2.29 seconds, invocation
 `914f5e5cda474c3abae791ee2dc42782`; this is not full-SoC lint.
 
-Native synthesis and its original-clock timing audit remain pending. The
-retained estimate is **23.58546 MHz**, below the **40 MHz target**. No new
-placement, routing, bitstream or physical acceptance is claimed.
+Native synthesis **started at 2026-10-11 01:28:58 UTC**, unit
+`ventium-fp-read-ack-full-synth-oct11.service`, invocation
+`83f3739ae3434163af3312effdc12d0a`. The single guarded Vivado family has an
+8 GiB RAM cap, 6 GiB swap cap, 4 GiB disk stop floor and 30-minute native
+deadline. Actual native affinity is CPUs 12–15; `general.maxThreads=1` and
+one synthesis worker remain unchanged. No OOM is observed at launch.
+
+`ventium-fp-read-ack-audit-queue-oct11.service`, invocation
+`d50545b96faa4e44892a8d80b727c187`, watches that exact owner and will audit
+native closure before opening the candidate and carry-parent projects for
+original-clock timing comparison. It does not retry a failed run or launch
+placement/routing. These timing results remain pending; the retained
+estimate is **23.58546 MHz**, below the **40 MHz target**. No new bitstream
+or physical acceptance is claimed.
+
+Before launch, 67 closed builds' generated `Vventium_top`/`Vsystem` C++ and
+compiler intermediates were losslessly archived and checked with
+`tar --compare` plus file hashes before removing the loose copies. This
+recovers **2,849,258,354 bytes (2.65 GiB)**; available disk reaches 7.9 GiB.
+RTL, binaries, private harness objects/headers, logs, traces, media and board
+captures are retained. One historical build with input drift is untouched.
+Each `read-ack-generated-archive-closed.json` records the exact restoration
+command. Aggregate evidence:
+`/home/yukidama/external/tmp/ventium-read-ack-recovery.AKq4H65m/r2-closed.json`,
+SHA `81386389b37b1d85b63366f056f262890dc05d1246b1ae6786ef26b327f25e33`.
+All current export input pins were rechecked unchanged after cleanup.
 
 Verified gameplay baseline: **0.51030715 U+V retirement-event IPC**, model
 `2b4d7a48`, cycles **1,200,065,237–1,300,065,237**. It predates both timing
