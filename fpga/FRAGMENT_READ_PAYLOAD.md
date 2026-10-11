@@ -345,6 +345,39 @@ compare the one-core delta, and report Fmax from the unchanged 25 ns core clock.
 A completed process alone does not satisfy the **at least 40 MHz synthesized
 Fmax** requirement. The canonical gate remains failed, not waived.
 
+### Synthesis closed; original-clock report running
+
+The exact synthesis owner above closes with native exit 0 in **1,881.23
+seconds**, no resource stop, unchanged inputs and no OOM. Its scope reaches
+the 8 GiB resident-memory cap with zero swap; memory-limit reclaim events
+are not reported as OOMs. No second Vivado family overlaps it.
+
+The independent audit reopens all 190 frozen manifest entries, 156 hardware
+definitions, 148 native Verilog inputs and the generated checkpoint. It
+confirms the one-`core.sv` delta and unchanged synthesis mapper, original
+40/100 MHz clock constraints, full P5 caches and posted-bridge configuration.
+Artifact hashes were separately rechecked after audit closure.
+
+| Synthesized resource | BUS parent | Exact-fragment candidate |
+| --- | ---: | ---: |
+| CLB LUTs | 185,708 | 185,645 |
+| CLB registers | 54,612 | 54,636 |
+| Block RAM tiles | 277.5 | 277.5 |
+| DSPs | 47 | 47 |
+
+Checkpoint SHA-256:
+`2a61dfded20337c61dd5a7347ad388c59c25a2bd4f2af5c3bbb0fef4cdedcd25`.
+Independent synthesis audit SHA-256:
+`fbe7e82abbccd64943453a564454b3952982f6a8fddc5652529a1cc8b8948eae`.
+The generated PS clock constraint still emits one critical warning; this is
+not waived or interpreted as timing closure. The following report must check
+the original project's actual clocks and unconstrained paths.
+
+`ventium-fragment-exact-clock-oct11.service`, invocation
+`f16f8571934748bea195a35177977a5f`, has started the original-clock report and
+matched parent comparison. The synthesized Fmax result is still pending;
+LUT count or successful checkpoint generation does not prove 40 MHz.
+
 A subsequent real-ISA diagnostic reproduces an independent
 [LGDT/LIDT producer-width bug](DESCRIPTOR_READ_EXTENT.md) in this candidate
 and its predecessor. Its two-arm correction is a separate private derivative;
