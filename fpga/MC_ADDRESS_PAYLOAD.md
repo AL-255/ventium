@@ -1,8 +1,9 @@
 # Raw-prime address preparation — 2026-10-11 UTC
 
-**Private candidate. Native RTL leaf, whole-core build, five cold directed
+**Private candidate: 26.01118 MHz unplaced post-synthesis estimate, below the
+40 MHz requirement. Native RTL leaf, whole-core build, five cold directed
 matrices and focused FP-fault checks pass. Canonical verification remains
-FAIL. No gameplay, frequency or FPGA result for this change.**
+FAIL. No candidate gameplay or physical FPGA acceptance.**
 
 ## Structural issue and proposed change
 
@@ -234,7 +235,7 @@ input pins and the exact single-header change. Manifest SHA:
 Strict CPU-hierarchy lint passes in 2.23 seconds under all six structural
 error classes; no full-SoC lint or physical qualification is inferred.
 
-### Matched synthesis in progress
+### Matched synthesis and timing
 
 The first controller (`b752822029764966ba47e43dc1c70d9d`) refuses disk
 admission **before launching Vivado**. Twice the parent's measured 1,456,762,880
@@ -261,12 +262,50 @@ The timing queue `ventium-mc-address-timing-r2-queue-oct11.service`, invocation
 native source/checkpoint and original-clock timing in `clock-r2/`. It launches
 no route or deployment. The comparison parent is **24.33504 MHz**; the separate
 24.56339 MHz SRT candidate is deliberately not combined into this experiment.
-**No MC-address timing result is available yet.** Canonical verification remains
-FAIL; standard-suite, gameplay and physical FPGA acceptance remain open.
+Synthesis now closes with native exit 0 in **1,033.54 seconds**, no OOM and
+no resource stop. Peak guarded RAM is 8 GiB, peak swap 231,936,000 bytes.
+The source audit verifies 156 actual definitions, the single intended RTL
+delta and 111,216 pinned inputs. The generated PS XDC still emits its one
+unknown-clock-pin critical warning; the subsequent project-open timing audit
+verifies the actual 25 ns core and 10 ns platform clocks. It also finds zero
+black boxes and zero checked structural DRC errors; the warning is not silently
+treated as a clean synthesis warning set.
+
+Timing unit `ventium-mc-address-clock-r2-oct11.service`, invocation
+`54826524d12445d5bf5b99d6b816a2f4`, closes with native exit 0 in **247.41 seconds**.
+Its 4,984,381,440-byte peak uses no swap and incurs no OOM. Independent closure
+auditing checks 111,248 input pins and retains the original parent project
+clocks and checkpoint.
+
+| Unplaced synthesized result | Matched write-direction parent | Raw address preparation |
+| --- | ---: | ---: |
+| Fmax estimate | 24.33504 MHz | **26.01118 MHz (+6.89%)** |
+| Worst setup slack at 25 ns | -16.093 ns | -13.445 ns |
+| Worst setup logic levels | 143 | 136 |
+| V-memory capture slack | -16.057 ns | **-12.035 ns** |
+| V-memory capture logic levels | 140 | **127** |
+| LUTs | 196,749 | 197,587 (+0.43%) |
+| Registers | 54,605 | 54,618 |
+| BRAM tiles / DSPs | 277.5 / 47 | 277.5 / 47 |
+
+The memory-capture path improves by **4.022 ns**. The worst endpoint is now
+again SRT `qacc[0]/CE`, starting at EIP. This is **5.89% above** the previous
+best isolated balanced-SRT estimate of 24.56339 MHz, but the SRT source in this
+MC experiment is still the write-direction parent's source. The separate
+SRT and parallel-tag changes must be integrated and verified before claiming
+their combined effect; isolated gains are not additive evidence.
+
+Synthesis audit SHA:
+`7b232d0f3be4e11126e0e8645cbf829e875e183a0dd043ef9f3ccf62414d525b`.
+Timing audit SHA:
+`b21668783202722d3dfebe8c957b819dd7fb9d9f257865a426db7f822fd12b7d`.
+**40 MHz is not met.** No routing or board deployment is performed. Canonical
+verification remains FAIL; standard-suite, gameplay and physical FPGA acceptance
+remain open.
 
 Before adoption: pass the native leaf and whole-core fault/permission/branch
 checks, preserve full-PC benchmark cycles, resolve canonical-gate failures,
 and measure matched synthesis. The >=40 MHz target remains open.
 
 Gameplay baseline: **0.51030715 total U+V IPC**, model `2b4d7a48`, cycles
-**1,200,065,237–1,300,065,237**, predating this unmeasured experiment.
+**1,200,065,237–1,300,065,237**, predating this gameplay-unmeasured experiment.
