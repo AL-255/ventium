@@ -24,9 +24,40 @@ not a guess about routing congestion, motivates this separate experiment.
 
 AMD documents that this option disables timing-driven synthesis and can reduce
 runtime, but synthesis then ignores timing as an optimization objective.
-There is **no measured full-chip memory improvement yet**. Routed setup/hold,
+The later full-chip diagnostic **did complete**, but neither disabling this
+objective nor completing synthesis establishes timing closure. Routed setup/hold,
 frequency and resource checks remain required.
 See [Vivado 2025.2 `synth_design`](https://docs.amd.com/r/2025.2-English/ug835-vivado-tcl-commands/synth_design).
+
+## Retained full-chip evidence
+
+`external/tmp/ventium-sfetch16-logic-synth.oLSgt6W7/closed.json` records native
+exit 0 on October 10 in **1,106.82 seconds**, unchanged inputs and no resource
+stop/controller failure. Peak scope use was **8 GiB RAM + 702,697,472 bytes
+swap**. Its native synthesis log confirms `synth_design completed successfully`.
+The receipt SHA-256 is
+`a527c6feb2ec4148b8063630f595fe3c23cd397158b8c5748b997c2763caca99`.
+The subsequent independent project/checkpoint audit and resource results are
+documented in [PERFORMANCE_EXPORT.md](PERFORMANCE_EXPORT.md).
+
+By comparison, the earlier timing-driven controller closed natively with 143
+after **6,688.66 seconds** and a `host memory/swap reserve` stop. Its scope peaks
+were **21,091,545,088 bytes RAM + 8,589,918,208 bytes swap**. This differs from
+the main Vivado process's reported 18,805 MB peak at the timing phase; neither
+metric should be substituted for the other. No completed timing-driven Fmax
+exists for that attempt.
+
+These runs have different source revisions and resource caps. They establish
+that the diagnostic flow can finish within the smaller budget, **not a controlled
+percentage speed/memory improvement attributable solely to the profile**. The
+current structural timing comparisons retain `logic_only` on both sides so
+RTL changes remain attributable. A later timing-driven experiment needs a fresh
+source-matched run and its own RAM/swap admission checks; do not silently switch
+profiles in a live comparison or lower reserves to force one through.
+
+The current requirement is **at least 40 MHz synthesized Fmax**, preserving UV
+and fast pipes. A 40 MHz input constraint is not evidence that this requirement
+has been met. See [MC_READ_COMMIT.md](MC_READ_COMMIT.md) for the active candidate.
 
 ## Checks
 
