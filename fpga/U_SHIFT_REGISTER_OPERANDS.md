@@ -92,12 +92,18 @@ parent/candidate comparisons cover **33,280 architectural records and 33,280
 cycle records**, with **1,792 paired shift/Jcc observations** across both
 models. No state or timing record differs between models. Stable-input result
 SHA-256: `be31aee65cb742011be57bf00a43342231480eb21d940dcf12fc69ade6d15c7d`.
-The unchanged canonical gate is now running; 108-program same-input replay
-follows. These are not complete standard-suite or FPGA results.
+The unchanged canonical gate closes **FAIL**, native exit 2 after **403.77
+seconds**; all 20 cycle streams remain identical to the parent. The complete
+108-program same-input replay also closes successfully: **80,800 records**
+match the parent without truncation. These comparisons do not turn the failing
+canonical gate into a pass, and are not standard-suite or FPGA results.
 
 [The independent auditor](../verif/issue_uv/audit_u_shift_register_core.py)
-will reopen those complete traces and verify exact source scope, owner
-closures, original canonical cycles and 108 same-input programs. The
+has reopened those complete traces and verified exact source scope, native
+owner closures, original canonical cycles and all 108 same-input programs.
+Audit SHA-256:
+`d59eb7c496caeb74fac5880d60fbcb067e2db7283f77bd38ac8cd181c172c211`.
+The
 [PC builder](build_u_shift_register_soc.py) requires that closed audit and
 reconstructs exactly the carry-rotate and register-operand transformations on
 the measured branch-residency PC source, retaining 154 definitions and all 102
@@ -106,10 +112,42 @@ shared RTL files. It does not inherit a hardware pass from that source.
 [The exporter](freeze_u_shift_register_rk_candidate.py) admits only the two
 exact source deltas; six contract tests pass, including profile drift, lost
 fast features, wrong source bytes and same-content inode replacement rejection.
-The bounded preparation queue, invocation `61e6c68601cf415ba96615b44ad34a78`,
-waits for actual check closure, then requests the independent audit, matched
-PC build, export, source audit and strict CPU lint. **It launches no Vivado,
-routing or deployment.** Those preparation steps are queued, not completed.
+The first preparation, invocation `61e6c68601cf415ba96615b44ad34a78`, completes
+the independent audit and compiler recovery, then refuses the PC build at its
+**5 GiB disk admission guard**, before compilation. This is not an RTL failure
+or OOM; the guard remains unchanged.
+
+After verified disk recovery, the full-PC model closes successfully, native
+exit 0 after **43.20 seconds**, with unchanged inputs and the private harness
+object/header verified. Model SHA-256:
+`ac55dafd6687b0778a4d8285198f8e1d4d91f990a0800c09c962979b9166b32b`.
+The exact two RTL deltas, all 154 native definitions, posted-16 transport and
+102 shared sources are retained. The **98 inherited full-PC structural
+warnings remain**; this is not a clean full-SoC lint result.
+
+Preparation retry `c3af5cf773374dba9b17d454d6226b62` subsequently refuses
+export because the proof queue's lexical `~/external/tmp` alias was absent
+from the exporter's reviewed list. The original exporter and failed receipt
+are retained in `prepare-r2/`. The correction admits only that exact alias;
+a seventh contract test rejects both unreviewed aliases and redirected targets.
+The same binary is reused, not rebuilt. Preparation continuation
+`3d8cfd2d17c041bf8ab8ba25d1144cf6` **closes successfully**: export, independent
+source audit and strict CPU lint all pass. The audit rechecks 307,454 input
+pins and the exact two payload deltas; all 102 shared directed RTL files match.
+Lint passes its six hard structural classes under all **156 hardware
+definitions** in **3.60 seconds**. This CPU-hierarchy result does not erase
+the separate full-PC warnings. Frozen manifest SHA-256:
+`a36e00e8b30b6cfed198e8522c0baa338b528eb490d01e4d0d183f8ec053935e`.
+
+The two original short CoreMark seed disks run on this PC model, invocation
+`60e15ca2e908497e8cfddb564f3c1da9`. The performance seed closes with its five
+reference CRCs and unchanged **4,767,218 cycles**; the validation seed remains
+running. Their unchanged CRC and cycle checks are
+admission checks, **not duration-valid scores or the full standard suite**.
+An owned timing queue waits for both preparation and seed closure, then
+requests one guarded 45-minute synthesis and original-clock reports. No
+placement, routing or deployment is authorized by that queue; no new Fmax is
+available yet.
 
 **880,645,526 bytes** of explicitly selected inactive compiler products are
 losslessly archived, with verified member hashes and recovery commands in
@@ -117,10 +155,20 @@ losslessly archived, with verified member hashes and recovery commands in
 The corrected leaf runner archives only its two closed PCH caches after each
 variant, preventing four small tests from retaining ~640 MiB of compiler cache.
 
+The later `compiler-reserve-recovery/` inventory archives exact generated
+compiler members from **720 inactive build directories**, recovering
+**2,404,822,169 bytes**. Each archive is compared to the loose originals and
+hashed before their removal; binaries, headers, source snapshots, harness
+objects, traces and logs stay in place. Per-directory recovery commands and
+retained-file hashes are recorded. The new PC model's two closed PCH caches
+are also archived in `compiler-recovery-r5/`, recovering **165,769,266 bytes**
+without removing the model or its build evidence. No resource guard is reduced.
+
 Evidence root:
 `/home/yukidama/external/tmp/ventium-u-shift-registers.XRngKRoW/`.
-Whole-core differential checks, canonical gates, timing measurement, original
-standard suite and physical FPGA acceptance remain open. In particular, no
+The focused whole-core comparisons are closed, but canonical gate repair,
+timing measurement, the original standard suite and physical FPGA acceptance
+remain open. In particular, no
 syntactic depth estimate is substituted for synthesis or routed sign-off.
 
 Gameplay baseline: **0.51030715 total U+V IPC**, simulated build `2b4d7a48`,

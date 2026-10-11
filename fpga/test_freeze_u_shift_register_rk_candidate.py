@@ -75,5 +75,21 @@ class RegisterShiftFreeze(unittest.TestCase):
             with self.assertRaises(freeze.FreezeError):
                 freeze.unchanged(path,observed[path])
 
+    def test_reviewed_queue_alias_only(self):
+        with tempfile.TemporaryDirectory(dir=os.environ['TMPDIR']) as directory:
+            base=Path(directory).resolve()
+            actual=base/'actual'; actual.mkdir()
+            prefix=base/'alias'; prefix.symlink_to(actual,target_is_directory=True)
+            relative=Path('ventium-u-shift-registers.XRngKRoW/run_queue.py')
+            target=actual/relative; target.parent.mkdir(); target.write_bytes(b'queue')
+            self.assertEqual(freeze.resolve_source_input(prefix/relative,prefix),target)
+            self.assertEqual(freeze.resolve_source_input(target,prefix),target)
+            other=actual/'unreviewed.py'; other.write_bytes(b'queue')
+            with self.assertRaises(freeze.FreezeError):
+                freeze.resolve_source_input(prefix/'unreviewed.py',prefix)
+            target.unlink(); target.symlink_to(other)
+            with self.assertRaises(freeze.FreezeError):
+                freeze.resolve_source_input(prefix/relative,prefix)
+
 
 if __name__=='__main__': unittest.main()

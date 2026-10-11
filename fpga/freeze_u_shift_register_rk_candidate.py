@@ -16,6 +16,7 @@ SCRIPT_ALIASES = SCRIPT_ALIASES + (
     'ventium-fp-exec-cut.MNkzxfBO/system/run_same_profile_fp.py',
     'ventium-fp-exec-cut.MNkzxfBO/agi-r1/run_agi_same_profile.py',
     'ventium-parallel-tags.EjloHRba/audit_closed.py',
+    'ventium-u-shift-registers.XRngKRoW/run_queue.py',
 )
 
 PARENT='f607808a87e112b4629bfe86596d9515fede0e72eff3c7980a0088555f712f48'
@@ -27,6 +28,15 @@ DELTAS={
 
 def require(ok,message):
     if not ok:raise FreezeError(message)
+
+
+def resolve_source_input(path,prefix):
+    """Admit only reviewed lexical aliases, never arbitrary symlink targets."""
+    resolved=path.resolve(strict=True)
+    if path!=resolved:
+        admitted={prefix/n:prefix.resolve(strict=True)/n for n in SCRIPT_ALIASES}
+        require(path in admitted and admitted[path]==resolved,'unexpected source alias: '+str(path))
+    return resolved
 
 
 def check_delta(name,old,new):
@@ -75,11 +85,9 @@ def freeze(args):
     require('-GBOARD_POSTED=1' in started['command'] and '-GBOARD_WRITE_SLOTS=16' in started['command'],'transport drift')
     check_native_command(read(sim/'obj1-speed-q16-parentpolicy/Vsystem__verFiles.dat')['data'].decode(),started['command'])
     prefix=Path('/home/yukidama/external/tmp')
-    admitted={prefix/n:prefix.resolve(strict=True)/n for n in SCRIPT_ALIASES}
     for name,digest in started['pins'].items():
-        p=absolute_path(name); resolved=p.resolve(strict=True)
+        p=absolute_path(name); resolved=resolve_source_input(p,prefix)
         if p!=resolved:
-            require(p in admitted and admitted[p]==resolved,'unexpected source alias: '+name)
             aliases[p]=resolved
         read(resolved,checked_sha(digest))
     payload={};changed=[];compiled=0
