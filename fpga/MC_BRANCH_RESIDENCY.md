@@ -1,6 +1,7 @@
 # Branch-fallthrough ownership sharing — October 11, 2026
 
-**Isolated candidate, not a full-core or timing pass.** This targets the
+**Directed regressions pass; canonical verification remains FAIL. No timing or
+FPGA acceptance yet.** This targets the
 remaining late I-cache ownership lookups seen in the retained MC-address
 V-capture path. The combined synthesis was not modified by this experiment; it
 subsequently hit its 30-minute limit before checkpoint completion, with no Fmax.
@@ -93,19 +94,50 @@ fixtures**, plus **640 branch fixtures**, on this new model, not inherited
 passes. Memory/FP/AGI take 24.04 / 14.85 / 5.75 seconds; the branch matrix takes
 181.30 seconds. All **820 fixtures pass**. The 16 focused fault cases also
 pass on both models (32 measurements), with unchanged inputs and no errors.
-Canonical verification is running, with same-input replay and the independent
-[complete-trace auditor](../verif/l1/audit_mc_branch_residency_core.py) following
-the exact existing controller. The entire sequence remains **pending**.
+Canonical verification closes **FAIL** in 406.01 seconds, native exit 2. Its
+functional verdict lines match the parent, and all 20 complete cycle streams
+are identical; no masks, goldens or bands change. Same-input replay passes all
+108 programs / 80,800 complete records in 73.08 seconds, without truncating or
+normalizing the records. The independent
+[complete-trace auditor](../verif/l1/audit_mc_branch_residency_core.py) then
+reopens all directed traces: **438,312 architectural and 438,312 cycle records**,
+including **117,436 paired V retirements**. It closes successfully under
+`ventium-mc-branch-residency-audit-oct11.service`, invocation
+`b5d2170701aa4d5aa671776ce33bf538`. Audit SHA-256:
+`e0ef32a3d4822ec72d404ef746f962ee8ff3cab17f5410bd4e5baff89d4f156c`.
+The check controller retains exit 1 because canonical verification is still
+red; successful parent/candidate comparisons are not substituted for that gate.
 
-The [matching PC builder](build_mc_branch_residency_soc.py) is queued behind
-that audit. It changes only this header relative to the combined PC model,
+The [matching PC builder](build_mc_branch_residency_soc.py) closes successfully
+after that audit, native exit 0 in **33.79 seconds**, with stable inputs. It
+changes only this header relative to the combined PC model,
 preserves 154 defines and the posted-16 platform, requires equality of all 102
-shared RTL sources, and creates a new model-local harness. The
+shared RTL sources, and creates a new model-local harness with a checked local
+generated-header dependency. Its 98 inherited platform structural warnings
+are unchanged; this is not a clean full-SoC lint result. Service
+`ventium-mc-branch-residency-soc-oct11.service`, invocation
+`9da092664eae4d0690bcf7f22a82558c`; full-PC model SHA-256:
+`e9d4065fb8cdd5273eaf81ace062c3f7eb793cc2b019f63e72db0191d3fb3561`.
+The
 [FPGA exporter](freeze_mc_branch_residency_rk_candidate.py) likewise requires
 only the exact header delta from the combined 190-payload manifest. Six
 exporter tests pass, including profile drift, fast-feature removal, unreviewed
-source changes and input replacement rejection. No PC/CoreMark, export/lint
-or frequency result is claimed before its native run closes.
+source changes and input replacement rejection. The exact new model's short
+CoreMark seed run is live under `ventium-v-carry-cm10-branch-oct11.service`,
+invocation `529ad6850c444af2b8bf28e0aa270d14`; export is also running. No
+CoreMark, export/lint or frequency result is claimed before its run closes.
+
+The export subsequently closes successfully. An independent source audit
+rehashes **300,773 inputs**, verifies all **102 shared core sources**, and
+confirms the single expected header change. The manifest retains 190 payloads,
+117 filelist units, 49 include edges, 156 hardware defines, full P5 L1s and
+the posted-16 transport. Manifest SHA-256:
+`f607808a87e112b4629bfe86596d9515fede0e72eff3c7980a0088555f712f48`.
+Strict CPU-hierarchy lint then passes all six hard structural classes in
+**3.78 seconds**, native exit 0 with stable inputs; invocation
+`cd3d860b440745a3a7c8d5497052dfed`. This is neither full-SoC lint nor timing/
+hardware qualification. The short CoreMark run remains live; the synthesis
+queue has not launched Vivado yet.
 
 The owned queue is prepared to run the same short CoreMark seeds, source
 export/audit and strict CPU lint, then one guarded synthesis with a **45-minute
