@@ -3,6 +3,12 @@
 **Private arithmetic proposal, not integrated into the running synthesis or
 queued descriptor build. No measured Fmax gain or whole-core qualification.**
 
+The subsequently completed [exact-fragment report](FRAGMENT_READ_PAYLOAD.md)
+measures 27.83654 MHz and has a different worst path: fast U/V decode through
+read-ahead selection and paired-memory acceptance. **Defer this proposal**
+until timing evidence identifies a relevant limiting path; it is not the next
+full-chip timing candidate merely because its arithmetic tests pass.
+
 The completed BUS netlist's 28.10410 MHz critical cone includes
 `d_fetch_fault_len`, a full-width endpoint calculation, page comparison, and
 `fetch_overlength_probe` before the shared translation/fragment/response path.

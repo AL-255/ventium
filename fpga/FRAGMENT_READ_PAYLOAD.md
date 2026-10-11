@@ -1,9 +1,10 @@
 # Read-fragment payload timing experiment — October 11, 2026
 
 **Private correction with directed whole-core and actual AXI-byte checks.**
-The completed bus-payload parent measures **28.10410 MHz** (unplaced synthesis
-estimate), below the required 40 MHz. This follow-on correction has no measured
-timing or FPGA result and has not been merged into production RTL.
+The completed original-clock report measures **27.83654 MHz**, versus the
+bus-payload parent's **28.10410 MHz** (unplaced synthesis estimates). This is
+a **0.95% regression**, not a 40 MHz pass. The read-correctness fix is retained;
+neither candidate is FPGA-qualified or merged into production RTL.
 
 ## Reason and exact scope
 
@@ -336,7 +337,7 @@ parent growth above that floor. The synthesis timeout is 45 minutes; the
 subsequent read-only original-clock timing report is capped at 15 minutes.
 There is no placement, route, bitstream generation or deployment in this queue.
 
-The queue is now live, invocation `cf4377d3fed4460986c93dc44072d514`;
+The queue was launched with invocation `cf4377d3fed4460986c93dc44072d514`;
 the synthesis controller is `ventium-fragment-exact-synth-oct11.service`,
 invocation `545d309bc1eb454faaeb68530514f97b`. The native Vivado executable
 has been observed in scope invocation `cb5e0a83d1094bd09579dc323c42e900`.
@@ -345,7 +346,7 @@ compare the one-core delta, and report Fmax from the unchanged 25 ns core clock.
 A completed process alone does not satisfy the **at least 40 MHz synthesized
 Fmax** requirement. The canonical gate remains failed, not waived.
 
-### Synthesis closed; original-clock report running
+### Synthesis closed
 
 The exact synthesis owner above closes with native exit 0 in **1,881.23
 seconds**, no resource stop, unchanged inputs and no OOM. Its scope reaches
@@ -370,21 +371,56 @@ Checkpoint SHA-256:
 Independent synthesis audit SHA-256:
 `fbe7e82abbccd64943453a564454b3952982f6a8fddc5652529a1cc8b8948eae`.
 The generated PS clock constraint still emits one critical warning; this is
-not waived or interpreted as timing closure. The following report must check
-the original project's actual clocks and unconstrained paths.
+not waived or interpreted as timing closure. The original-clock audit below
+checks the actual clocks and unconstrained paths.
+
+### Original-clock timing closed: 40 MHz requirement not met
 
 `ventium-fragment-exact-clock-oct11.service`, invocation
-`f16f8571934748bea195a35177977a5f`, has started the original-clock report and
-matched parent comparison. The synthesized Fmax result is still pending;
-LUT count or successful checkpoint generation does not prove 40 MHz.
+`f16f8571934748bea195a35177977a5f`, closes native 0 in **486.89 seconds**.
+The independent audit checks 1,588 input pins, both original projects and
+their unchanged 40/100 MHz clocks. It reports no black boxes or structural
+MDRV/LUTLP errors. The inherited eight no-clock pins and four outputs without
+output delays remain visible; there are zero unconstrained internal endpoints.
+Peak report-stage memory is 4,978,024,448 bytes with no swap or OOM.
+
+| Original-clock synthesized estimate | BUS parent | Exact-fragment candidate |
+| --- | ---: | ---: |
+| Core Fmax | 28.10410 MHz | 27.83654 MHz |
+| Core setup slack at 25 ns | -10.582 ns | -10.924 ns |
+| Worst-path logic levels | 127 | 122 |
+
+The new worst path starts at `eip_reg[0]` and ends at `pipe_mem_v_hit_q_reg/D`.
+It passes through instruction-byte selection, U/V decode and pairing,
+`mc_prime_v_branch`, `mc_query_ea`, translation/`mc_prepare_ok`, next-address
+classification, L1 read-ahead selection, store-pair readiness, the backing
+request/ACK, and paired-read acceptance. Data-path delay is **35.713 ns**:
+6.893 ns logic plus 28.820 ns estimated routing. L1 LRU-update endpoints also
+remain over budget. Core hold is -0.101 ns. This report does not establish
+routed or measured silicon frequency.
+
+Accordingly, the next investigation is the read-ahead/current-request
+readiness interaction, not another SRT-only change. The prepared
+[fetch-fault page arithmetic](FETCH_FAULT_PAGE.md) is deferred: it was
+motivated by the parent's path, but is not on this new worst path. No pairing,
+fast-pipe, permission or cache-coherence check is disabled to improve timing.
+
+Timing audit SHA-256:
+`2822d19577570f4949d40b5eab5517809340bc8097e870135b903746ee60ee91`.
+Closed queue receipt SHA-256:
+`e35c37ac5eb74da0045c09c518cf0af5cd67afda47662f8dc3a7bd385d06b550`.
+Its `passed` field means the measurement sequence completed successfully;
+`synthesized_40mhz_requirement_met` is explicitly **false** and qualification
+remains **UNQUALIFIED**. All timing-audit artifact hashes were independently
+rechecked after closure.
 
 A subsequent real-ISA diagnostic reproduces an independent
 [LGDT/LIDT producer-width bug](DESCRIPTOR_READ_EXTENT.md) in this candidate
 and its predecessor. Its two-arm correction is a separate private derivative;
-the running synthesis inputs have not changed. This is an additional release
+the measured synthesis inputs have not changed. This is an additional release
 blocker, not evidence that the payload timing cofactor introduced the bug.
 
-Actual post-synthesis timing, all original standard-suite components, and
+At least 40 MHz synthesized Fmax, all original standard-suite components, and
 physical FPGA Win95/Quake acceptance remain required. No new placement, route,
 bitstream or board deployment has started for this successor.
 
