@@ -1,7 +1,7 @@
 # Raw-prime address preparation — 2026-10-11 UTC
 
-**Proposed private candidate. Native RTL test queued; no full-core, gameplay,
-frequency or FPGA result. Not part of the running write-direction synthesis.**
+**Proposed private candidate. Native RTL leaf passes; no full-core, gameplay,
+frequency or FPGA result. Not part of the completed write-direction synthesis.**
 
 ## Structural issue and proposed change
 
@@ -55,16 +55,27 @@ not a sequential processor or the mocked/native decoder implementation.
 
 [The native test](../verif/l1/run_mc_address_payload.py) extracts the real
 descriptor, source predicates and raw MOV function from pinned RTL, using the
-actual descriptor type. Its prepared 65,536-case stimulus covers the four
+actual descriptor type. Its 65,536-case stimulus covers the four
 sources, code/line boundaries, denied byte ownership, segment limits, address
 arithmetic, AGI/reference priority and two compiled defects. Cache-return
-ownership is mocked, so this will remain a leaf result even if it passes.
+ownership is mocked, so this remains a leaf result, not a whole-core pass.
 
 Evidence root: `/home/yukidama/external/tmp/ventium-mc-address.24Et4ycG`.
-The native leaf queue is live, unit `ventium-mc-address-leaf-queue-oct11.service`,
-invocation `b6e531761abc4bfb90136c8078e8b6d5`. It waits for the exact existing
-write-direction timing-audit queue to close, then uses the shared build guard.
-It never starts a competing synthesis or retries a failed native test.
+The native leaf queue closes with exit 0, unit
+`ventium-mc-address-leaf-queue-oct11.service`, invocation
+`b6e531761abc4bfb90136c8078e8b6d5`, after the exact write-direction timing queue
+closes. It uses the shared build guard and does not start another synthesis.
+The native leaf takes **3.27 seconds**: 65,536 samples, 35,956 live/override
+checks and 20,909 inactive address differences. Valid ordinary/FP/held/branch
+source counts are 7,175 / 8,298 / 8,319 / 3,563. Both compiled wrong-source
+mutants fail with native exit 1; an independent complete pin check passes.
+Receipt SHA:
+`9a3d6b3b58302564270bded9c89fb1b805614479c3cad24ede15f3c035b584b0`.
+
+The newly measured [write-direction netlist](L1_WRITE_KIND_PAYLOAD.md) reaches
+24.33504 MHz and exposes a different worst endpoint, the SRT remainder setup.
+That path is being addressed first. This leaf and its prepared whole-core
+drivers remain retained, without claiming a full-core or timing result.
 
 The prepared [whole-core builder](../verif/l1/build_mc_address_core.py)
 requires successful native positive/negative leaf runs and the source proof,

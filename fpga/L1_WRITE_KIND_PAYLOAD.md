@@ -1,9 +1,11 @@
 # Backing write-direction payload experiment — 2026-10-11 UTC
 
-**Private candidate, not qualified. No frequency improvement measured yet.**
+**Private candidate: 24.33504 MHz unplaced synthesized estimate, not qualified.**
 The objective remains **at least 40 MHz synthesized Fmax with UV dual issue,
 system/relocated fast pipeline and fast memory enabled**. The best retained
-unplaced estimate is 23.58546 MHz; the immediate read-ACK parent is 23.50176 MHz.
+prior unplaced estimate is 23.58546 MHz; the immediate read-ACK parent is
+23.50176 MHz. This candidate is now the fastest measured diagnostic netlist,
+but remains below the 40 MHz requirement.
 
 ## Critical-path change
 
@@ -123,8 +125,106 @@ The queued audit, invocation `3098cb636c5442d2bdefd0edfa88cab6`, checks that
 exact synthesis closure before measuring original 40/100 MHz clock timing.
 The timing comparison retains the faster carry parent as its reference.
 It never retries a failed synthesis or starts placement/routing/deployment.
-No synthesis result, bitstream, physical Win95/Quake pass or candidate gameplay
-result is claimed at this stage.
+Synthesis closes natively with exit 0 after **1,009.58 seconds**, with no OOM
+or resource stop. The independent source/area audit checks 52,405 input pins
+and confirms the single L1 payload delta:
+
+| Resource | Immediate read-ACK parent | Write-direction candidate |
+| --- | ---: | ---: |
+| CLB LUTs | 197,169 | 196,749 |
+| Registers | 54,631 | 54,605 |
+| BRAM tiles | 277.5 | 277.5 |
+| DSPs | 47 | 47 |
+
+The native clock audit closes with exit 0 after **244.44 seconds**, invocation
+`9531e1f26ca541048b38c2cfd2eaa60f`, with original 40/100 MHz constraints,
+zero structural errors/black boxes and no OOM. It compares both synthesized
+netlists under the same diagnostic `-no_timing_driven` flow:
+
+| Timing metric | Best previous carry parent | Write-direction candidate |
+| --- | ---: | ---: |
+| Unplaced synthesized Fmax estimate | 23.58546 MHz | **24.33504 MHz** |
+| Setup slack at 25 ns | -17.399 ns | -16.093 ns |
+| Worst path logic levels | 146 | 143 |
+
+This is **+3.18%** over the previous best, or **+3.55%** over the immediate
+read-ACK parent; it is not a routed or measured-board frequency. The new worst
+path starts at `q_pc[0]`, passes through address/translation/fragment shaping
+and FP operand conversion, and ends at the shared SRT divider's `qacc` clock
+enable. All 30 reported worst endpoints are in that accumulator bank.
+Its 40.796 ns data path contains 9.238 ns logic and 31.558 ns estimated routing.
+The dominant reported endpoint is no longer the L1 LRU update.
+
+The first timing receipt hashed its own redirected stdout before printing its
+final result. A subsequent hash check detects that one mismatch; it is not
+silently ignored. `clock/audit_closed_r2.py` preserves the first receipt,
+verifies that the formerly empty log contains exactly the first audit's
+summary, confirms the queue is terminal, then rechecks all 52,437 source/input
+pins and native reports. Its stable `clock/audit-r2.json` also passes a separate
+complete hash check. SHA:
+`ce48dec23f8e832239dc4dd9b1923eadc7e1aaa1cb357402a1aec02ab1d3821e`.
+Synthesis audit SHA:
+`e85bff87fc80afa13a97c710caa40cbf78577713b0c5bca42aa7e934eff22fa5`.
+The PS-IP missing-clock-pin warning remains recorded; the opened-project
+audit verifies the real clock objects. No timing exception was added.
+
+No bitstream, physical Win95/Quake pass or candidate gameplay result is claimed.
+
+After both simulation builds close, 468 generated compiler intermediates
+are losslessly archived and compared before unlinking their loose copies,
+recovering **417,886,168 bytes**. The core and SoC archives and recovery
+commands are recorded in their `generated-model-archive-closed.json` receipts.
+All pinned inputs, RTL, private harness objects/headers, executable models,
+traces and reports remain intact, including the then-live timing audit's pins.
+
+## Next critical-path candidate: balanced remainder CLZ
+
+The new SRT setup path includes `rem_clz64`, originally a 64-entry first-match
+chain. [The one-function recipe](../verif/srt/prepare_rem_clz_tree.py) replaces
+it with six binary half-word selections and an explicit all-zero result of 64.
+No sequential, rounding, request, ownership or cycle equation changes. This
+is a timing proposal, not a claimed frequency gain.
+
+Three [recipe/proof tests](../verif/srt/test_rem_clz_tree.py) pass, including a
+Z3 proof over every two-state 64-bit input. Wrong-zero and reversed-half
+mutants produce counterexamples. The [native extracted-function test](../verif/srt/run_rem_clz_tree.py)
+passes **393,410 samples**, including every 16-bit pattern in each quarter,
+all leading-bit positions, zero and randomized sparse words. Both compiled
+mutants fail with native exit 1. Native leaf time is 9.71 seconds.
+
+Evidence: `/home/yukidama/external/tmp/ventium-srt-clz.kKzgmNE3`.
+[The private full-core builder](../verif/srt/build_rem_clz_core.py) changes
+only `rtl/fpu/fpu_srt_div.sv` from the write-direction parent; native build
+closes in 12.25 seconds, model
+`95f6dbb8699839d8e4af879b07c37d3143311acbe910178e8ee009ac36d984ca`.
+Original defines and the separately compiled model-local harness are retained.
+The cold memory/FP/AGI matrices pass all **156 cases** at AXI delays 0/7.
+An independent audit rereads 75,192 complete architectural records, the
+original QEMU comparisons and exact A/B cycle streams; it checks 1,500 targeted
+V-memory retirements and all 350 AGI-prime accepts. Audit SHA:
+`9d2590ebae4fd960b10388c34ff63a7e9e8abb80fbdbfb1c508075053b1619de`.
+
+[The full-SRT sequential miter](../verif/srt/run_rem_clz_miter.py) instantiates
+both actual engines, not the extracted function. It passes **4,160 operations
+and 149,946 cycle checks**, including 1,366 divides, 1,365 square roots and
+1,429 remainders; all rounding/precision controls, denormal operands, ignored
+starts while busy, and 24 reset interruptions are exercised. Results, flags,
+busy/done and phase must match. This is parent/candidate equivalence, **not an
+independent numeric oracle**. Build/run takes 2.68 seconds; all artifact pins
+are independently rechecked. Receipt SHA:
+`e30a07f9e12340c8955c6a3f1714bc57ec1238d774896ca19bc4bb25f5bc25a0`.
+
+Canonical `make verify` still closes **FAIL**, native make exit 2 after 184.49
+seconds. All 20 same-input A/B cycle streams agree. The unchanged failure
+inventory examines all 108 functional streams / 80,800 candidate records and
+finds the same 7 passes, 91 length-only failures and 10 first-field C1 failures
+with length mismatches. Independent canonical inputs are not identical: only
+one complete functional A/B stream matches. No mask, golden, terminal record
+or band changes. These failures remain acceptance debt, not passed tests.
+
+Full-PC benchmarks, export/lint and synthesis are still pending. The previously
+prepared address-payload candidate remains separate; it is not stacked into
+this SRT build. The CLZ candidate has no frequency or gameplay measurement.
 
 Gameplay baseline: **0.51030715 total U+V retirement-event IPC**, model
 `2b4d7a48`, cycles **1,200,065,237–1,300,065,237**, predating this candidate.
