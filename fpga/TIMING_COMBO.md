@@ -113,15 +113,19 @@ It retains their hash, size and file identity, still reopening and hashing
 every input before publication. This reduces export memory use without
 weakening source stability checks; it does not alter synthesized RTL.
 
-The bounded preparation queue runs both unchanged short CoreMark seeds,
-exports the source closure and performs
-strict CPU-hierarchy lint. These short seeds must retain their original CRCs
-and 4,767,218 / 4,753,406 cycle counts; they are not the long standard suite.
-One synthesis and subsequent original-clock timing audit are queued behind
-successful preparation, with the same exclusive Vivado guard, matched
-logic-only mapper, 8 GiB RAM / 6 GiB swap caps, 30-minute synthesis limit,
-and live host/disk reserves. Nothing in these queues authorizes routing or
-deployment. Native results and actual Fmax remain pending.
+The bounded preparation queue has closed successfully. Both unchanged short
+CoreMark seeds complete with original CRCs, stable guest/source inputs, no OOM
+and all native children reaped:
+
+| Short seed | Parent benchmark cycles | Combined cycles | Actual paired V events over run |
+| --- | ---: | ---: | ---: |
+| Performance | 4,767,218 | 4,767,218 | 1,055,307 |
+| Validation | 4,753,406 | 4,753,406 | 1,054,254 |
+
+These are **0% cycle-throughput change**, not valid-duration CoreMark scores
+or the standard suite's long seeds. Native runs take 200.80 / 200.55 seconds.
+The independent audit rechecks 240,402 source/input pins; its SHA-256 is
+`194976631b79df5a8fcf907e408661ed3fe12d79e8cb330da978478a32652019`.
 
 The first export attempt correctly refused one newly inherited audit-script
 alias before copying any payload. The exact pinned
@@ -131,12 +135,37 @@ The failed script/log/receipts remain. Preparation R2 observes the **same**
 CoreMark invocation `e0f7ebd766494fe3842d86e3f2285092`, without restarting it;
 it does not rebuild the model or alter any RTL/guest input.
 
-Before the next synthesis: finish combined verification, source-match the
-full-PC model/export, retain original CoreMark CRC/cycle checks, and recover
-enough external-disk reserve. Use one exclusive Vivado family with original
-40/100 MHz constraints. Record actual mapped area and Fmax; parallel tag reads
-can replicate memory, and the new worst path may differ. Placement/routing and
-physical Windows/Quake testing remain separate acceptance requirements.
+R2 exports all 190 payloads and retains 156 hardware definitions, with manifest
+SHA `5e7ec0845f871b84a96adb9b7ca5646ae16056e7b89e657972671b3a8948082e`.
+The independent export audit rehashes **240,563 pins** and all 102 shared
+directed-model RTL sources, finding exactly the three intended changes.
+Strict CPU-hierarchy lint passes in **3.80 seconds**, including all six hard
+structural classes. It does not qualify the inherited full-SoC warning set.
+
+## Matched synthesis in progress
+
+Native launch is **06:15:21 UTC, October 11**, controller
+`ventium-timing-combo-synth-oct11.service`, invocation
+`1e1b684e087d4741a37c4f52625ee9bb`. Its single exclusive Vivado family is
+scope invocation `3fc51b88c77542a19ae6634c1dad9685`. This is actual native
+execution, not just a queued command; no completed combined Fmax is available.
+
+The run retains the matched logic-only mapper, original **40/100 MHz** clocks,
+8 GiB RAM / 6 GiB swap caps, 30-minute synthesis limit and live host/disk
+reserves. Starting free space is **7,504,228,352 bytes**, exceeding the
+7,208,493,056-byte admission derived from twice the parent's measured growth
+plus a 4 GiB stop floor. A final **191,352,578 bytes** of inactive generated
+compiler products was recoverably archived to preserve that margin; the
+`inactive-compiler-reserve-r2/` receipts retain extraction commands and hashes.
+
+The timing queue `ventium-timing-combo-clock-queue-oct11.service`, invocation
+`151032553daa4a298f7b1689e75bcf74`, observes this exact synthesis. It will audit
+the native source/checkpoint and original-clock timing, with the common
+write-direction parent as the matched comparison. Isolated frequency gains
+are not added together. Parallel tag reads can replicate memory; actual mapped
+area and the new worst path must be measured. No routing or deployment is
+started by these controllers. Physical Windows/Quake tests remain separate
+acceptance requirements.
 
 Canonical verification currently remains **FAIL**; the original long standard
 suite and physical acceptance are not closed by these directed checks.
