@@ -1,9 +1,9 @@
 # Read-fragment payload timing experiment — October 11, 2026
 
-**Leaf-qualified proposal only. No whole-core, synthesis or FPGA result.**
-The active bus-cancellation synthesis is unchanged. The last measured parent
-is still **26.55408 MHz**, below the required 40 MHz. This proposal has not been
-merged into production RTL or scheduled for another synthesis.
+**Private correction with directed whole-core and actual AXI-byte checks.**
+The completed bus-payload parent measures **28.10410 MHz** (unplaced synthesis
+estimate), below the required 40 MHz. This follow-on correction has no measured
+timing or FPGA result and has not been merged into production RTL.
 
 ## Reason and exact scope
 
@@ -16,8 +16,8 @@ optimizing only SRT normalization cannot resolve that measured parent.
 The [bus-payload candidate](BUS_CANCEL_PAYLOAD.md) removes late cancellation
 from the bus driver's unused payload, but its read-fragment byte mask still
 uses `fx_start`, including the late miss/permission/segment-fault conditions.
-Whether this remains critical must be checked against that candidate's pending
-netlist report; source structure alone does not establish a timing gain.
+The completed parent report confirms this remains in its 127-level critical
+path; source structure alone does not establish the follow-on timing gain.
 
 [`prepare_fragment_read_payload.py`](../verif/issue_uv/prepare_fragment_read_payload.py)
 changes exactly one assignment in a **private derivative of that bus candidate**:
@@ -147,7 +147,7 @@ path-alias preflight before observation. `gdb-r3` correctly proves the overlap;
 `abort-bus-r1` additionally proves the accepted bus transfer. None of the failed
 observation attempts is counted as an RTL test or silently overwritten.
 
-### Byte-exact correction (private, leaf-qualified)
+### Byte-exact correction (private)
 
 [`prepare_fragment_exact_reads.py`](../verif/issue_uv/prepare_fragment_exact_reads.py)
 now implements that correction on the exact BUS predecessor, retaining the
@@ -197,18 +197,74 @@ ignored-`unique` warnings remain in the logs. Receipt SHA-256:
 prepares `exact-core-r1/`: all 195 predecessor files retained, exactly one RTL
 delta (`core.sv`), the same 150 UV-fast definitions, a private harness and
 generated-header dependency, and 470 checked input hashes. The guarded-32 build
-is queued behind the **entire** existing BUS synthesis/timing sequence, not
-between its synthesis and report stages. Queue invocation:
-`60630b3871ae4c5998db14c703ed79f8`. At this update no compiler has started for the
-corrected model. No whole-core, performance, timing or hardware pass follows
-from this preparation or the leaf tests.
+runs after the **entire** BUS synthesis/timing sequence and closes native zero
+in 20.54 seconds, invocation `693da5d25265405385508024fd1772ac`.
+All input hashes remain unchanged. Model SHA-256:
+`e4ed9c0c01f53b96fc7da451695feea84b9eabf0891589107711300f042f65c8`.
+Build receipt SHA-256:
+`50860c763f31b31ea899d825a3e00420df5f740dcb789471c0541e18aa481e57`.
 
-First inspect the in-flight bus candidate's actual timing. If this cone remains
-limiting, build the private derivative under the shared compiler guard, then
-run full source-matched fragment/fault/A20/SMM/REP and FP regressions at multiple
-AXI latencies, complete architectural/cycle comparisons, and unchanged canonical
-gates. Include abort/replacement with different old/new page offsets, walk
-detours, cancelled reads and retained responses. The predecessor's canonical
+[`run_fragment_exact_core.py`](../verif/issue_uv/run_fragment_exact_core.py)
+reuses the twelve exact archived fixtures, regenerates all QEMU goldens, and
+checks complete architectural and cycle streams at AXI latency 0/7. All
+**12 cases /24 measurements** pass: **11,124 architectural records**, the same
+number of cycle records, and **1,860 candidate V retirements**. Architectural
+state matches QEMU and the predecessor exactly. All 24 runs use fewer clocks
+than their predecessor (12–1,693 fewer); cycle differences are retained,
+not represented as cycle equivalence or a canonical-cycle pass. This is a
+directed overread correction, not a gameplay performance measurement.
+`exact-system-r1/` closes in 9.30 seconds, invocation
+`86c7d0ca61da423ab148db038ed28aaf`; receipt SHA-256:
+`10ce3269fc6439efce1c051edb2c10c40a50e40b3abdefc41898e01d090b7af0`.
+
+[`observe_fragment_exact_core.py`](../verif/issue_uv/observe_fragment_exact_core.py)
+then passively observes the new native model. All **six** first1/2/3 × latency0/7
+replacement cases cover exactly their four intended bytes, without extra,
+duplicated or missing AXI reads. The first/second-fragment byte decompositions
+are respectively `1 / 2+1`, `2 / 2`, and `1+2 / 1`. Every observation is a real
+rising-edge handshake; each complete architectural trace remains byte-identical
+to its unobserved run. This is host GDB observation, not guest single-stepping,
+state injection or a memory-model patch. Three host checker tests reject excess,
+missing, duplicate, stale-owner and non-handshake observations.
+`exact-bus-r1/` closes in 26.61 seconds, invocation
+`cc00703851694d41b2aa96a3260fa986`; receipt SHA-256:
+`44baa669c50b6d735a65b553663f055a4c5c94f12cc75d251f50ab01d7380aca`.
+
+### Broader core checks
+
+The unchanged nine-fixture bus/system equivalence driver closes **FAIL** in
+9.24 seconds because `pxfrag`, `pxc04`, and `pxc04e` no longer have identical
+cycles to their overreading predecessor. Its full QEMU architectural checks
+all pass where applicable; `pfetchlim` retains its original precise-fault
+witness contract. Independent re-reading of every complete parent/candidate
+architectural trace confirms exact equality in all 18 fixture/latency pairs.
+No failure is deleted from the original receipt or relabelled as a gate pass.
+
+| Changed fixture | Clock change, AXI latency 0 | Clock change, AXI latency 7 |
+| --- | ---: | ---: |
+| `pxfrag` | -12 | -40 |
+| `pxc04` | -6 | -20 |
+| `pxc04e` | -6 | -20 |
+
+The other six fixtures have unchanged clocks. The 72-case FP matrix completes
+all 288 model/latency measurements with identical full state/cycle streams;
+both SMM fixtures complete all 8 measurements with identical save maps and
+streams; the original REP/SMI source-cancellation checker completes all 4
+measurements with identical state/cycles. These remain directed checks, not
+the original standard suite or FPGA acceptance.
+
+Evidence roots and closed SHA-256 receipts:
+
+- `exact-system-broad-r1/`:
+  `78d1e586145828c411da5a4003636cfaf07650acb1e46aecf9532c14c970c7d9`
+- `exact-fp-r1/matrix/`:
+  `eae588de29a9f7ba16302f6f9020d6035af4284bcc1a012e80272eb345cc6491`
+- `exact-smm-r1/`:
+  `e0dae399d7390db2bdc4409da5bd1e00750b1802f1df5265e0cbf51d940e3343`
+- `exact-rep-smi-r1/`:
+  `b5a7c112a4a3c58aa4c75c3ff7f488271950b599851e7fc9e8a553c26749efc5`
+
+The unchanged canonical gate is still running. The predecessor's canonical
 gate remains **FAIL**; matching that predecessor cannot qualify this proposal.
 
 Only after those checks should a frozen full-PC/hardware derivative be exported
