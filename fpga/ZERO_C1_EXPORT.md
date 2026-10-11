@@ -1,6 +1,6 @@
 # Zero-C1 / BCD-sign FPGA implementation — October 10, 2026
 
-Status at **21:33 UTC**: both current-candidate CoreMark seeds pass, but native
+Historical status at **21:33 UTC, October 10**: both current-candidate CoreMark seeds pass, but native
 `impl_1` **failed routing because of congestion**. There is no new bitstream.
 A separately bounded read-only failure-checkpoint diagnostic has closed;
 this is not timing sign-off, a standard-suite pass or physical-board acceptance.
@@ -10,7 +10,8 @@ simulated `bfb867f7`, cycles **5,200,065,237–5,300,065,237**. All 41 consecuti
 100M-clock windows from 1,200,065,237 average **0.498471873**; no earlier low
 window is discarded. Both unmodified endpoint images were reviewed and source,
 process, prefix-log and image hashes checked. This is not a full-demo result.
-Candidate `2b4d7a48` has no gameplay IPC/FPS measurement.
+At that time candidate `2b4d7a48` had no gameplay IPC/FPS measurement. See the
+October 11 follow-up below for newer evidence.
 
 ## Exact candidate and closed synthesis
 
@@ -350,3 +351,26 @@ All roots below are under `/home/yukidama/external/tmp/`:
 - `ventium-zero-c1-routed-audit.2ND1JB6w`: prepared read-only post-route
   audit, exact-owner controller, native-Tcl host policy tests and manifest.
   It is not automatically queued and has not run Vivado.
+
+## October 11: cold Windows run stopped by its log budget
+
+The `2b4d7a48` Windows simulation is **terminal FAIL, not desktop acceptance**.
+Unit `ventium-zero-c1-win95-oct10.service`, invocation
+`1b54d788f50948ceb71e5f7524566c16`, exits 2 at **04:04:44 UTC** after
+7 h 34 min. Its collector reports `evidence log exceeded 67108864-byte budget`
+and terminates the native simulator with SIGTERM (exit -15). It records no
+terminal-error signature, no host-stop request and no OOM. The source/media
+pins remain unchanged. Repeated guest fault diagnostics filled the capture;
+this closure alone does not establish a guest crash or a clean run.
+
+All 34 frames, the partial log, private disk and failed closure are retained
+under `win95-cold-zero-c1-oct10.1`. The final log is incomplete, so neither
+previous desktop images nor its 3.826B-clock progress qualify the run. A future
+collector must preserve bounded, loss-detectable evidence for long runs;
+silently raising/removing the cap or ignoring the failed closure is not a fix.
+No replacement Windows run is launched in this follow-up.
+
+Newer verified gameplay baseline: **0.51030715 total U+V IPC** on `2b4d7a48`,
+cycles **1,200,065,237–1,300,065,237**, from the first predeclared 100M-clock
+window (`ventium-zero-c1-gameplay-first.OAQbYerX/audit.json`). It is not a
+full-timedemo average. All newer timing derivatives are gameplay-unmeasured.
