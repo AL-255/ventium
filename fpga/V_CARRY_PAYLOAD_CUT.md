@@ -78,9 +78,30 @@ constraints, full P5 L1s, platform L2 and posted-16 transport are unchanged.
 Strict CPU-hierarchy lint on the exact export closes native 0 in 2.40 seconds;
 this is not a full-SoC lint pass.
 
-Short cold CoreMark checks are running. Synthesis, routed timing and physical
-FPGA acceptance remain outstanding. No standard-suite or new gameplay result
-is claimed.
+Both original short cold CoreMark seeds closed native 0 with the original CRCs
+and exactly the parent clocks:
+
+| Seed (10 iterations) | Parent clocks | Candidate clocks | Actual V retirements |
+| --- | ---: | ---: | ---: |
+| Performance | 4,767,218 | 4,767,218 | 1,055,307 |
+| Validation | 4,753,406 | 4,753,406 | 1,054,254 |
+
+The independent audit rechecks 20,104 source pins, original media, complete
+consoles, native argv/CPU-11 affinity and child reaping; no OOM occurred. Audit
+SHA-256: `2f732eb52b68f5bb723576dc8cf991b6bb9865780745b2f43b23230e3feb1ec5`.
+This is **0% cycle-throughput change**, not a duration-valid CM/MHz score or a
+standard-suite pass.
+
+At 00:13:20 UTC, synthesis controller `ventium-v-carry-full-synth-oct10.service`
+started, invocation `832f3005a99a4bba9062723d1995f2b8`. Its sole Vivado family
+has invocation `7859d76701694255848eb9b399f1577a`, 8 GiB RAM / 6 GiB swap,
+one job, a 30-minute native cap and a 4 GiB disk reserve. The same diagnostic
+logic-only mapping and 40/100 MHz constraints are retained. The subsequent
+native timing audit is queued against that exact controller invocation, with
+no retries, placement or deployment.
+
+Synthesis timing, routed timing and physical FPGA acceptance remain outstanding.
+No standard-suite or new gameplay result is claimed.
 
 Latest verified gameplay baseline: **0.51030715 total U+V retirement-event IPC**,
 model `2b4d7a48`, cycles **1,200,065,237–1,300,065,237**. It predates this
