@@ -67,12 +67,14 @@ Evidence root: `/home/yukidama/external/tmp/ventium-bus-cancel-payload.Fzx7hUyD/
 ## Whole-core continuation and remaining acceptance
 
 [The cold system runner](../verif/issue_uv/run_bus_cancel_system.py) builds
-original fixtures privately: `pxfrag`, `pxc04`, `pxc04e`, `pxc04f`, `pfault`,
+fixtures privately: `pxfrag`, `pxc04`, `pxc04e`, `pxc04f`, `pfault`,
 `pfetchlim`, `prsmflush`, `a20test`, and `a20cmdtest`. It requires real guest
-exit, precise-fault/wrap witnesses, full QEMU architectural comparison and
-identical parent/candidate functional/cycle streams at AXI latency 0/7.
+exit, precise-fault/wrap witnesses and identical parent/candidate full
+functional/cycle streams at AXI latency 0/7. Eight fixtures use full QEMU
+architectural comparison; `pfetchlim` retains its original non-differential
+precise-fault contract. The private A20 fixture correction is described below.
 Golden generation is serialized within the 32-worker matrix to avoid the
-previous port-allocation race. Three host witness contract tests pass.
+previous port-allocation race.
 The first native matrix closes **FAIL** after 60.13 seconds, invocation
 `94a3e5a9781c465893adea933c2745df`; its receipt and artifacts are retained.
 Only `pfault` and `a20cmdtest` complete all four model/latency measurements,
@@ -89,6 +91,64 @@ regression, but none can count as a completed candidate check either.
 R1 receipt SHA-256:
 `51600d9a7a7b6bf48f9615d013602882453b193d88f41ce8e4b3bb8f0bd38a81`.
 This is not SMM or reset-injection coverage.
+
+The failed R1 driver is preserved in commit `93ad4eb4` (SHA-256
+`9f55bc0096abc49173cbb8492b12dc08c9a767da895c52cf9ae2b389bd1c8507`).
+The corrected R2 driver does not overwrite that evidence. It checks GPR
+witnesses only in architectural traces, retains all cycle records separately,
+and privately changes the A20 fixture's `0x02` to `0x03` to deassert reset.
+No production RTL or canonical fixture is changed by these driver repairs.
+Six host contract tests cover these fixes and reject bad fault counts, PCs
+and error codes.
+
+| Closed candidate checks | Scope | Result |
+| --- | --- | --- |
+| `system-r2` | 9 cold fixtures, 36 model/latency measurements, 31,748 architectural records | PASS; full parent state/cycles identical; 3,068 candidate V retirements |
+| `fp-r1/matrix` | 72 paged/relocated FP fixtures, 288 measurements, 78,048 architectural records | PASS; full QEMU and parent comparisons; paired/early-FP witnesses required |
+| `smm-r1` | Original `psmm` and `prsmflush_smm`, 8 measurements, 51,160 architectural records | PASS; complete parent state/cycles/save-map identical; guest-triggered SMI/RSM |
+| `rep-smi-r1` | Original `prepsmi.S` with `PREP_SMI_MOVS`, 4 measurements, 652 architectural records | PASS; exact source-owner ARM/CANCEL boundary and saved REP state |
+
+SMM tests require independent free-running QEMU exit and the P5 save-map,
+restored context and remapped-fetch witnesses. They are **not QEMU
+single-step differential checks**, reset-injection sweeps, or the legacy
+linear-I-cache way-placement probe. The REP test uses the unchanged
+`prepsmi-rtl-selfcheck.py`: at latency 7, source ARM is cycle 8,323 and CANCEL
+is 8,324; SMM/RSM preserve ECX=1, EDI=`fee00304`, ESI=`2404`, then the final
+iteration reaches ECX=0, EDI=`fee00308`, ESI=`2408`. There is no snapshot or
+architectural-state injection.
+
+Closed receipts (SHA-256), respectively:
+
+- `07f44ca4673a5873fe04d9b465f21ae5ac8bbe235e2152534392104ee094101c`
+- `13865bba04d7d696f6383cdad8ede73526ebc96230445438121c2f063b8fcc14`
+- `ff8d31a40fa992769ed61edfd88c4b50ae72ecea7cbb58bc4468265d0ae27de8`
+- `e681ad477ccb4adbb5dbff7f160c12650849cb29aa9b740d8fefd24fe66a334f`
+
+The unchanged canonical gate closes **FAIL**, native exit 2, after **407.77
+seconds**, invocation `1647f78e57e94b22bbdf559c7683f7c9`. All 20 complete
+canonical cycle streams match the measured parent; inputs remain unchanged.
+No masks, goldens or bands were adjusted. The owned continuation closes its
+complete **108-program /80,800-record** same-input comparison successfully,
+invocation `1dbef6d0edcb43f6b9a2522757294853`. Its overall result remains red
+because the canonical gate failed; this is not an infrastructure failure or
+a reason to rerun the completed comparisons.
+
+[The independent auditor](../verif/issue_uv/audit_bus_cancel_core.py) reopens
+all four matrices' **161,608 architectural and 161,608 cycle records**, save
+maps, native commands/exits, the full QEMU comparisons where applicable, all
+20 canonical cycle streams and the 108-program replay. It checks the one
+header delta across all 195 source files and the exact closed process owners.
+Audit SHA-256:
+`1c6738e1a201bb9367d5180e1c45110dc7ed36e6ea2f1601daa6c3e6249f564a`.
+
+[The PC builder](build_bus_cancel_soc.py) now reconstructs only that header
+delta on the measured shift candidate, with all 154 native definitions,
+posted-16 transport and all 102 shared directed RTL sources unchanged.
+[The exporter](freeze_bus_cancel_rk_candidate.py) retains the original
+40 MHz core /100 MHz PL clocks and 156 hardware definitions. Seven admission
+tests reject profile drift, lost fast features, unreviewed source deltas,
+unreviewed aliases and replaced input files. These are preparation checks,
+not an actual new synthesis or FPGA result.
 
 Full downstream/core verification, actual mapped timing, the original standard
 suite and physical FPGA Win95/Quake validation remain required. The existing

@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Cold full-core bus-cancellation checks: faults, fragments and A20.
 
-Assemble the original fixtures privately. Compare every architectural and
-cycle record; no saved state, golden masks, terminal trimming or RTL rebuild.
+Assemble the original fixtures privately, correcting only the legacy A20
+fixture's reset bit. Compare every architectural and cycle record; no saved
+state, golden masks, terminal trimming or RTL rebuild. The pre-existing
+pfetchlim gate uses precise-fault witnesses, not a QEMU differential.
 SMM and reset injection require separate tests and are not claimed here.
 """
 import argparse
@@ -63,12 +65,31 @@ def save(path, value):
         json.dump(value, stream, indent=2)
 
 
-def witness(name, trace, log=None):
-    for key, value in WITNESSES.get(name, {}).items():
-        assert int(trace.records[-1][key], 0) == value, (name, key, trace.records[-1][key], value)
+def witness(name, trace, log=None, architectural=True):
+    # Cycle traces deliberately contain no GPR state. Check the full functional
+    # stream's witnesses and compare cycle records separately, never fabricate
+    # register fields in a cycle trace.
+    if architectural:
+        for key, value in WITNESSES.get(name, {}).items():
+            assert int(trace.records[-1][key], 0) == value, (name, key, trace.records[-1][key], value)
     if log is not None and name in ('a20test', 'a20cmdtest'):
         expected = A20 if name == 'a20test' else A20CMD
         assert log.count(expected) == 1, (name, 'missing complete A20 witness')
+
+
+def a20_no_reset(source):
+    old = '    movb $0x02,%al                    /* bit 1 = 1 -> A20 ENABLED */'
+    new = '    movb $0x03,%al                    /* A20 enabled, active-low reset deasserted */'
+    assert source.count(old) == 1 and new not in source
+    changed = source.replace(old, new)
+    assert changed.replace(new, old) == source
+    return changed
+
+
+def fetch_fault_witness(log):
+    faults = re.findall(r'^\[FAULT\] vec=(\d+) err=([0-9a-f]{8}) pc=([0-9a-f]{8})\b', log, re.M)
+    assert sorted(faults) == [('13', '00000000', pc)
+                             for pc in ('0000003b', '0000003c', '0000003f', '00000040')], faults
 
 
 def main():
@@ -101,12 +122,23 @@ def main():
             pins[str(path)] = sha(path)
     for path in (Path(__file__), Path(__file__).with_name('run-fp-payload-ab.py'),
                  REPO/'verif/diff/compare.py', REPO/'verif/diff/tracefmt.py',
-                 REPO/'verif/sys/run-native-system.py', REPO/'verif/qemu-trace/gen_trace.py', qemu):
+                 REPO/'verif/sys/run-native-system.py', REPO/'verif/qemu-trace/gen_trace.py', qemu,
+                 REPO/'verif/sys/run-seg-gate.sh',
+                 REPO/'ventium-refs/07-p5-emulation-harness/build/qemu/hw/input/pckbd.c'):
         pins[str(path)] = sha(path)
     out.mkdir()
+    # The original data=0x02 asserts CPU reset in an actual 8042. Retain the
+    # failed original run; this private fixture changes only that one bit.
+    a20source = out/'a20test-reset-deasserted.S'
+    a20original = sources/'mabench/a20test.S'
+    with a20source.open('x') as stream:
+        stream.write(a20_no_reset(a20original.read_text()))
+    pins[str(a20source)] = sha(a20source)
     save(out/'started.json', dict(pins=pins, cases=CASES, witnesses=WITNESSES,
         invocation=os.environ['INVOCATION_ID'], workers=32, sequential_goldens=True,
-        profiles=[sorted(profile) for profile in profiles]))
+        profiles=[sorted(profile) for profile in profiles],
+        oracle_scope={'differential': [case[1] for case in CASES if case[1] != 'pfetchlim'],
+                      'precise_fault_witness_only': ['pfetchlim']}, a20_reset_bit_corrected=True))
     env = {key: value for key, value in os.environ.items()
            if not key.startswith(('VEN_', 'VTM_', 'TB_', 'QEMU_', 'AXI_', 'FP_'))}
     env.update(TMPDIR=str(out), PYTHONDONTWRITEBYTECODE='1')
@@ -127,28 +159,32 @@ def main():
         leaf = out/name
         leaf.mkdir()
         obj, elf, image = (leaf/('fixture.'+suffix) for suffix in ('o', 'elf', 'bin'))
+        assembly = a20source if name == 'a20test' else sources/folder/(name+'.S')
         run(leaf, 'assemble', ['gcc', '-m32', '-ffreestanding', '-nostdlib', '-fno-pic',
-            '-fno-pie', '-Wall', '-c', sources/folder/(name+'.S'), '-o', obj])
+            '-fno-pie', '-Wall', '-c', assembly, '-o', obj])
         run(leaf, 'link', ['ld', '-m', 'elf_i386', '-T', sources/folder/linker, obj, '-o', elf])
         run(leaf, 'binary', ['objcopy', '-O', 'binary', '--gap-fill', '0', '--pad-to', '0x100000', elf, image])
         assert image.stat().st_size == 65536
         stdout, stderr = run(leaf, 'qemu-free', [qemu, '-machine', 'pc', '-cpu', 'pentium', '-m', '64',
             '-bios', image, '-display', 'none', '-serial', 'stdio', '-monitor', 'none',
-            '-no-reboot', '-no-shutdown', '-device', 'isa-debug-exit,iobase=0xf4,iosize=0x04'], 133)
+            '-no-reboot', '-no-shutdown', '-device', 'isa-debug-exit,iobase=0xf4,iosize=0x04'],
+            135 if name == 'pfetchlim' else 133)
         if name in ('a20test', 'a20cmdtest'):
             expected = A20 if name == 'a20test' else A20CMD
             assert (stdout+stderr).count(expected) == 1
         extra = ['--x87'] if x87 else []
-        with golden_lock:
-            with socket.socket() as sock:
-                sock.bind(('127.0.0.1', 0))
-                port = sock.getsockname()[1]
-            run(leaf, 'golden', [sys.executable, '-B', REPO/'verif/qemu-trace/gen_trace.py',
-                '--qemu', qemu, '--system', *extra, '--cpu', 'pentium', '--image', image,
-                '--image-mode', 'bios', '--out', leaf/'golden.vtrace', '--max-insn', cap, '--port', port])
-        golden = tracefmt.read_trace(str(leaf/'golden.vtrace'))
-        assert golden.sys and golden.x87 == x87 and 0 < len(golden.records) < cap
-        witness(name, golden)
+        golden = None
+        if name != 'pfetchlim':
+            with golden_lock:
+                with socket.socket() as sock:
+                    sock.bind(('127.0.0.1', 0))
+                    port = sock.getsockname()[1]
+                run(leaf, 'golden', [sys.executable, '-B', REPO/'verif/qemu-trace/gen_trace.py',
+                    '--qemu', qemu, '--system', *extra, '--cpu', 'pentium', '--image', image,
+                    '--image-mode', 'bios', '--out', leaf/'golden.vtrace', '--max-insn', cap, '--port', port])
+            golden = tracefmt.read_trace(str(leaf/'golden.vtrace'))
+            assert golden.sys and golden.x87 == x87 and 0 < len(golden.records) < cap
+            witness(name, golden)
         measurements, failures = [], []
         for latency in (0, 7):
             both = {}
@@ -162,27 +198,34 @@ def main():
                         '--'+mode, *extra, '--image', image, '--out', path, '--max-insn', cap,
                         '--max-cycles', '3000000', '--quiesce', '8000', '+ven_faultlog'], 133, latency)
                     trace = tracefmt.read_trace(str(path))
-                    assert [row['n'] for row in trace.records] == list(range(len(golden.records)))
-                    assert [row['pc'] for row in trace.records] == [row['pc'] for row in golden.records]
+                    assert 0 < len(trace.records) < cap
+                    assert [row['n'] for row in trace.records] == list(range(len(trace.records)))
+                    if golden is not None:
+                        assert [row['pc'] for row in trace.records] == [row['pc'] for row in golden.records]
                     assert not grade.native.FATAL.search(stdout+stderr)
-                    witness(name, trace, stdout+stderr)
+                    witness(name, trace, stdout+stderr, architectural=mode == 'cycle-func')
+                    if name == 'pfetchlim':
+                        fetch_fault_witness(stdout)
                     stops = re.findall(r'after (\d+) retired in (\d+) clocks', stderr)
                     assert len(stops) == 1 and int(stops[0][0]) == len(trace.records)
                     clocks.append(int(stops[0][1]))
                     if mode == 'cycle-func':
                         check_native = grade.grade_fp_native if x87 else grade.native.grade_native
                         check_native(trace, stdout, stderr, 133, 133, cap)
-                        with (leaf/(stem+'-diff.log')).open('x') as log:
-                            result = compare.compare_func(golden, trace, x87, 0xffffffff, False, 20, log, sys_both=True)
-                        if result:
-                            failures.append(dict(model=label, latency=latency, error='full QEMU architectural mismatch'))
+                        if golden is not None:
+                            with (leaf/(stem+'-diff.log')).open('x') as log:
+                                result = compare.compare_func(golden, trace, x87, 0xffffffff, False, 20, log, sys_both=True)
+                            if result:
+                                failures.append(dict(model=label, latency=latency, error='full QEMU architectural mismatch'))
                     else:
                         assert trace.mode == 'cycle'
                     streams[mode] = trace.records
                 assert clocks[0] == clocks[1]
+                assert [row['pc'] for row in streams['cycle-func']] == [row['pc'] for row in streams['cycle']]
                 both[label] = streams
                 measurements.append(dict(case=name, model=label, latency=latency,
                     records=len(streams['cycle']), clocks=clocks[0],
+                    qemu_differential=golden is not None,
                     paired_v=sum(row.get('pipe') == 'V' and row.get('paired') for row in streams['cycle'])))
             if both['control'] != both['candidate']:
                 failures.append(dict(latency=latency, error='complete parent/candidate state or cycle difference'))
