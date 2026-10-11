@@ -68,8 +68,12 @@ L1 source: `279590e09f07f0dfb7b588143678d750371d80356e71517da54c7c7a14139989`.
 
 ### Canonical gate still fails
 
-The unchanged canonical gate closes with native make exit **2**, not a pass.
-All 20 complete parent/candidate RTL cycle streams remain identical. No golden,
+The unchanged canonical gate closes with native make exit **2**, not a pass:
+7/108 functional passes, 91 length-only failures and 10 first-field C1
+differences accompanied by length failures. The retained failure inventory
+checks all 108 traces (80,800 records); only one independent-input functional
+parent/candidate stream is identical. All 20 complete same-input parent/candidate
+RTL cycle streams remain identical. No golden,
 comparator, terminal record, C1 mask or cycle band is changed. Directed A/B
 equivalence does not repair the pre-existing canonical failures or establish
 whole-processor correctness. The reset and fault sweeps of the older read-ACK
@@ -94,11 +98,33 @@ The initial export invocation used the external symlink spelling; the strict
 path checker rejected it before copying. Reinvoking with canonical resolved
 paths succeeds without weakening the path checks.
 
-Both original short (10-iteration) cold CoreMark disks are running before
-synthesis. They are cycle/CRC regression checks, not duration-valid scores
-or the standard suite's long correctness seeds. No synthesis result, route,
-bitstream deployment, physical Win95/Quake pass or candidate gameplay result
-is claimed at this stage.
+Both original short (10-iteration) cold CoreMark disks now pass:
+
+| Seed | Parent cycles | Candidate cycles | Actual V retirements |
+| --- | ---: | ---: | ---: |
+| Performance | 4,767,218 | 4,767,218 | 1,055,307 |
+| Validation | 4,753,406 | 4,753,406 | 1,054,254 |
+
+Original data CRCs match QEMU; this is **0% cycle-throughput change**, not a
+duration-valid score or the standard suite's long correctness seeds. The
+independent auditor checks 52,029 source pins, native CPU-11 affinity, original
+ROM/media, real posted-16 AXI activity, clean native closure and no OOM.
+Audit SHA: `eeb64e832717dd4efbd7856e2a48809230f58c053f6655d50a319ed0d7ecf4a6`.
+
+Matched diagnostic synthesis starts **02:02:59 UTC**, controller
+`ventium-l1-write-kind-full-synth-oct11.service`, invocation
+`a7acd105b3d644fdb192a00b9c0a5367`. The actual exclusive Vivado scope is observed
+live, invocation `1fae2af284c3421780e0272459b1029e`, with 8 GiB RAM / 6 GiB swap
+limits and a 30-minute native cap. Disk admission requires over 6 GiB and
+twice the immediate parent's measured 1,235,304,448-byte growth above a 4 GiB
+stop floor. Host memory and swap reserves remain enforced.
+
+The queued audit, invocation `3098cb636c5442d2bdefd0edfa88cab6`, checks that
+exact synthesis closure before measuring original 40/100 MHz clock timing.
+The timing comparison retains the faster carry parent as its reference.
+It never retries a failed synthesis or starts placement/routing/deployment.
+No synthesis result, bitstream, physical Win95/Quake pass or candidate gameplay
+result is claimed at this stage.
 
 Gameplay baseline: **0.51030715 total U+V retirement-event IPC**, model
 `2b4d7a48`, cycles **1,200,065,237–1,300,065,237**, predating this candidate.
