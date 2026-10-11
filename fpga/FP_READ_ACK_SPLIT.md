@@ -1,6 +1,7 @@
 # Separate FP read acknowledgement — October 11
 
-**Private whole-core candidate: build and 156 directed cases pass; no
+**Private candidate: 156 directed cases, 64 fault/fragment fixtures and both
+short CoreMark seeds pass; no
 timing, gameplay, standard-suite or FPGA acceptance is claimed.** The closed
 [next-query synthesis](NEXT_QUERY_PAYLOAD_CUT.md) regresses to 22.51593 MHz;
 this candidate excludes that header change and uses the faster carry parent. The target
@@ -144,11 +145,85 @@ No result from its functional-mode control counts as UV acceptance, and these
 short fixtures do not replace the standard suite. These m64 page-boundary
 fixtures also do not replace misaligned single-beat fragment/reset testing.
 
-The unchanged canonical `make verify` is now running, unit
+The unchanged canonical `make verify` closed **FAIL**, unit
 `ventium-fp-read-ack-verify-oct11.service`, invocation
-`2751b01f229a4bcd96cb8a4bf07273d0`. It acquired the common lock after the fault
-matrix closed. Its receipt remains pending; the parent's canonical FAIL is
-not reclassified or inherited as a pass.
+`2751b01f229a4bcd96cb8a4bf07273d0`: native make exit 2, 7 functional passes,
+101 failures (91 length-only; ten first x87 C1 differences plus terminal
+length), and 12 of 19 scored cycle failures. All 20 complete parent/candidate
+RTL cycle streams remain identical. Functional traces use independently
+initialized stack addresses, so this is **not** a claim of 108 identical
+functional streams. No oracle, mask, band or trace-length workaround was used.
+The independent canonical inventory checks 80,800 candidate records; SHA:
+`ab85441bbb38281f5029c974860a8577ae3c9457bd09ed2bda43f059f439eee1`.
+
+## Unaligned fragment fault/retry coverage
+
+[The new fixture recipe](../verif/l1/prepare_fp_fragment_faults.py) shifts the
+unchanged original FP operands and initialization words by 1, 2 or 3 bytes:
+page offsets FFD, FFE and FFF. CR2 still must be 0x401000. All sixteen original
+fault/priority variants are retained, including relocated DS/SS clients,
+NM EM/TS priority and pending-FP handling. The first 32-bit operand read now
+straddles a page; these are not merely aligned m64 reads across two beats.
+
+[The runner](../verif/l1/run_fp_read_ack_fragments.py) passes **48 fixtures**,
+each on parent/candidate and AXI latency 0/7: 192 measurements, **141,510
+candidate architectural records and 29,640 V retirements**. Complete original
+QEMU and parent state/cycle comparisons pass, with exactly one target page
+fault then one FP-load command after retry and no target early-m64 take.
+The original prelude's three other page faults are counted, not discarded.
+No state injection, snapshot or changed exception handler is used.
+
+Unit `ventium-fp-read-ack-fragments-oct11.service`, invocation
+`b94fc95c17814b83876318eacfc20c2d`, exits 0 in 18.46 seconds with 32 workers.
+Closed SHA: `2d09861a00f1216c9c205294cc0338e502b4c98cb7545f7d897d5ff351ae8dbf`.
+This does **not** cover reset midway through a transaction.
+
+[The independent combined audit](../verif/l1/audit_fp_read_ack.py) rechecks
+the exact four-file delta, complete source closure, leaf/seam mutations,
+156 directed cases, 16 aligned fault cases, 48 unaligned cases and canonical
+failure inventory. Audit SHA:
+`4cc88852c4e3245dda0eee35067ad416628915849cb4479b6125310f754b9eb7`.
+The aligned-fault driver's invocation belongs to its nested build scope
+(`a0125826adc8482fb6b91111b940d4a1`), not its outer service; both owners were
+independently checked, including all sixteen journal completion messages.
+
+## Full-PC and FPGA export
+
+[The full-PC builder](build_fp_read_ack_soc.py) closes in 15.19 seconds with
+32 compile jobs and a unique local harness/header dependency. All 102 shared
+RTL payloads match the directed model; 154 simulator defines are unchanged.
+Model: `f0277909b0c93780900619b2801c2da17372003e47ee9f21621a5727d71e949b`.
+The inherited 98 full-SoC structural warnings are unchanged, not waived away
+as a clean full-SoC lint result.
+
+Both original **ten-iteration diagnostic** CoreMark seeds complete and pass
+independent CRC, native owner, source-pin and complete guest-screen checks:
+
+| Seed | Parent ticks | Candidate ticks | Change |
+| --- | ---: | ---: | ---: |
+| Performance | 4,767,218 | 4,767,218 | 0% |
+| Validation | 4,753,406 | 4,753,406 | 0% |
+
+These runs exercise the real posted-16 AXI model and UV/fast paths (over one
+million V retirements per seed). They are **not duration-valid scores**, the
+original long correctness seeds or a standard-suite pass. Unit
+`ventium-v-carry-cm10-read-ack-oct11.service` has a historical prefix but uses
+the read-ACK model above; invocation `0dc8658ba254448b8b9f2cabf223dc3a` is
+terminal, native exit 0 for both seeds, no OOM and all children reaped.
+
+[The FPGA exporter](freeze_fp_read_ack_rk_candidate.py) preserves all 156
+hardware defines, full P5 L1s, posted-16 writes, platform L2 configuration and
+40/100 MHz constraints. Its 190 payloads differ from the carry parent only
+in the four intended files; 117 filelist units and 49 include edges are
+resolved. Manifest SHA:
+`1be147cc54d3f92991bef55d739fb2254eb5883079fe075da3cdee01385a1383`.
+The independent export audit rechecks 35,704 input pins. Strict exported
+CPU-hierarchy lint passes in 2.29 seconds, invocation
+`914f5e5cda474c3abae791ee2dc42782`; this is not full-SoC lint.
+
+Native synthesis and its original-clock timing audit remain pending. The
+retained estimate is **23.58546 MHz**, below the **40 MHz target**. No new
+placement, routing, bitstream or physical acceptance is claimed.
 
 Verified gameplay baseline: **0.51030715 U+V retirement-event IPC**, model
 `2b4d7a48`, cycles **1,200,065,237–1,300,065,237**. It predates both timing
