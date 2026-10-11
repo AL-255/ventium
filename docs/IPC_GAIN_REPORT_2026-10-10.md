@@ -51,7 +51,7 @@ results below are retained measurements, not tests rerun for this report.
   neither is routed sign-off or measured board frequency. It has no measured
   gameplay, valid-duration score or physical pass. See
   [the factoring and qualification record](../fpga/PREFIX_EX_REGONLY.md).
-- **Newest timing candidate:** L1 legacy-capture factoring `467ff95f` removes
+- **L1 timing candidate:** L1 legacy-capture factoring `467ff95f` removes
   a redundant next-COMMIT mux dependency without changing accepted clock edges
   in the directed A/B corpus. The 456 whole-core cases and 228,304 under-fill
   observations pass; the canonical gate still fails unchanged. Source-matched
@@ -65,6 +65,17 @@ results below are retained measurements, not tests rerun for this report.
   result yet**. The goal
   remains **at least 40 MHz synthesized Fmax**, not merely a configured 40 MHz
   simulation clock. See [the L1 evidence](../fpga/L1_LEGACY_CAPTURE_CUT.md).
+- **October 11 UTC timing update:** the subsequent FP-only ACK cut `74f16acf`
+  preserves both short CoreMark seeds' CRCs and clocks, but global synthesized
+  Fmax **regresses to 22.1361 MHz (−1.58%)**, with 195,869 LUTs. Its intended
+  FP dependency is removed; integer carry/ALU writeback becomes the worst path.
+  The follow-up carry-payload model `32beddd8` passes 144 cold paged cases,
+  exact parent cycle comparisons and both unchanged short CoreMark seeds
+  (**0% measured cycle-throughput change**). Its source-matched, guarded
+  synthesis is running; no new frequency is claimed. Canonical verification
+  remains FAIL, and neither candidate has gameplay or physical qualification.
+  See [FP findings](../fpga/FP_EXEC_NOMEM_CUT.md) and
+  [the carry candidate](../fpga/V_CARRY_PAYLOAD_CUT.md).
 
 **There is no defensible measured “0.16 to 0.54, therefore 3.3× faster FPGA”
 claim.** Those endpoints differ in counter definition, platform, build and
