@@ -15,6 +15,7 @@ from test_ic_prefix_board_profile import check_native_command
 SCRIPT_ALIASES = SCRIPT_ALIASES + (
     'ventium-fp-exec-cut.MNkzxfBO/system/run_same_profile_fp.py',
     'ventium-fp-exec-cut.MNkzxfBO/agi-r1/run_agi_same_profile.py',
+    'ventium-parallel-tags.EjloHRba/audit_closed.py',
 )
 
 PARENT='bc49f682f794c2f5d5faf7cf4635b2c6a2cc5d4202988d55f7c1cf1e10483ae3'

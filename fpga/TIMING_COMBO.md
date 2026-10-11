@@ -48,25 +48,31 @@ streams. The five matrices allocate **32 workers total**, bounded to CPUs
 Focused FP fault checks and the unchanged canonical gate follow. Test plans
 or successful component checks do not count as a combined-model pass.
 
-The checks controller is active, unit
+The checks controller has closed, unit
 `ventium-timing-combo-checks-oct11.service`, invocation
 `4d6910c81ed04c09a4efb27c6b1940b7`. **All five matrices have now closed
 successfully: 820 cold fixtures**, with complete QEMU state and full A/B
 architectural/cycle comparisons. The 16 focused FP fault cases have also
 closed successfully on both models (32 measurements, unchanged inputs).
-Canonical verification and the independent combined audit are not yet closed.
-After canonical closure, both models are also rerun on identical
-canonical inputs to compare all 108 functional streams without hiding the
-different loader stack addresses found in historical runs. Existing red QEMU
-gate results remain red even if A/B regression checks pass.
+Canonical verification closes with native exit **2** in **412.41 seconds**:
+the QEMU gate remains **FAIL**, while all 20 cycle streams exactly match the
+parent. Both models were then rerun on identical canonical inputs: all **108
+functional streams / 80,800 complete records match**, including exact replay
+of the original candidate traces, in **73.36 seconds**. No loader-stack
+normalization, C1 mask, terminal truncation or cycle-band change was applied.
+The checks controller therefore exits 1 for the red canonical gate, while
+recording its directed and same-input regression checks as passed.
 
 The [independent combined auditor](../verif/l1/audit_timing_combo_core.py) is
-queued behind that exact controller in
+closed successfully behind that exact controller in
 `ventium-timing-combo-audit-oct11.service`, invocation
-`54a22c44d58d490296596c7f4d290bbd`. It will reopen all directed records, the
-original canonical cycles and all same-input functional traces, while keeping
-canonical-gate failure separate from A/B regression results. It does not launch
-synthesis, routing, full-PC workloads or deployment.
+`54a22c44d58d490296596c7f4d290bbd`. It independently reopens **438,312
+architectural and 438,312 cycle records**, witnesses **117,436 paired V
+retirements**, and checks the original canonical cycles, all same-input
+functional traces and focused fault evidence. Its SHA-256 is
+`5d859b5355bd59c3bb99c63862a6d4794a38b24998c896f6cb7d9aa8f77de498`.
+Canonical-gate failure remains separate from these A/B regression results;
+this is not a standard-suite or hardware pass.
 
 Additional disk reserve is recovered by archiving only explicitly identified,
 inactive generated compiler products from three old unit builds and five old
@@ -90,9 +96,13 @@ will recheck admission rather than assume this remains available.
 parent's 154 simulation definitions and posted-16 transport, copying only the
 three checked RTL deltas. It checks all 102 shared directed-model RTL sources
 and creates a private model-local harness/header dependency. Its build is
-queued behind the exact combined audit, in
+completed behind the exact combined audit, in
 `ventium-timing-combo-soc-oct11.service` (invocation
-`3beff80ade054820bbb86dd5463aa511`); no PC build pass is claimed yet.
+`3beff80ade054820bbb86dd5463aa511`), native exit 0 in **33.51 seconds**.
+All source pins and the private harness/header check pass; the inherited
+98 SoC structural warnings are unchanged, not waived as a full-SoC lint pass.
+PC model SHA-256:
+`c1161b0b665d6e3fafa03523df79a9a55f5ca0e042f197677096524c14fdd816`.
 
 [The exporter](freeze_timing_combo_rk_candidate.py) preserves the 190-payload,
 156-definition hardware profile and exact three-file change. Six contract
@@ -103,8 +113,8 @@ It retains their hash, size and file identity, still reopening and hashing
 every input before publication. This reduces export memory use without
 weakening source stability checks; it does not alter synthesized RTL.
 
-The bounded preparation queue waits for that exact PC build before running
-both unchanged short CoreMark seeds, exporting the source closure and doing
+The bounded preparation queue runs both unchanged short CoreMark seeds,
+exports the source closure and performs
 strict CPU-hierarchy lint. These short seeds must retain their original CRCs
 and 4,767,218 / 4,753,406 cycle counts; they are not the long standard suite.
 One synthesis and subsequent original-clock timing audit are queued behind
@@ -112,6 +122,14 @@ successful preparation, with the same exclusive Vivado guard, matched
 logic-only mapper, 8 GiB RAM / 6 GiB swap caps, 30-minute synthesis limit,
 and live host/disk reserves. Nothing in these queues authorizes routing or
 deployment. Native results and actual Fmax remain pending.
+
+The first export attempt correctly refused one newly inherited audit-script
+alias before copying any payload. The exact pinned
+`ventium-parallel-tags.EjloHRba/audit_closed.py` alias was inspected and added
+to the existing explicit alias list; arbitrary symlinks remain forbidden.
+The failed script/log/receipts remain. Preparation R2 observes the **same**
+CoreMark invocation `e0f7ebd766494fe3842d86e3f2285092`, without restarting it;
+it does not rebuild the model or alter any RTL/guest input.
 
 Before the next synthesis: finish combined verification, source-match the
 full-PC model/export, retain original CoreMark CRC/cycle checks, and recover
