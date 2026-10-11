@@ -195,7 +195,74 @@ and retained artifact hashes are independently rechecked.
 Fault receipt SHA:
 `f7e9f18cb98c828571b5f837d1b2f5696162e24d0b6b03aea4d03ccfc5b29e39`.
 This is focused fault coverage, not the full permission/fault or standard suite.
-Full-PC benchmarking, matched synthesis and physical acceptance remain open.
+
+### Full-PC checks and FPGA export
+
+The [private full-PC builder](build_mc_address_soc.py) closes with native exit 0
+in **17.48 seconds**, unit `ventium-mc-address-soc-oct11.service`, invocation
+`73f465b178b442b5a49d17543224be34`. Model SHA:
+`63ad4de32399db0229815b39f6027d7c055383cbdc1b667e646ff54a93fa17f8`.
+All 102 shared RTL sources match the directed model; only
+`core_mem_chain.svh` differs from the write-direction parent. It retains the
+154 simulator defines, posted-16 transport, model-local C++ harness/header and
+98 inherited SoC structural warnings. This is not a full-SoC lint pass.
+
+Both unchanged short CoreMark disks complete with QEMU-reference CRCs and
+unchanged cycle counts:
+
+| Seed (10 iterations) | Parent cycles | Candidate cycles | Actual V retirements |
+| --- | ---: | ---: | ---: |
+| Performance | 4,767,218 | 4,767,218 | 1,055,307 |
+| Validation | 4,753,406 | 4,753,406 | 1,054,254 |
+
+Native times are 89.25 / 89.64 seconds. Unit
+`ventium-v-carry-cm10-mc-address-oct11.service`, invocation
+`70ee6e4e28064045ace19570059648c9`, closes with exit 0. The unchanged independent
+auditor rechecks 110,839 source/input pins, original media, actual CPU-11
+affinity, the real board-profile AXI delays, clean native exits and no OOM.
+This is **0% cycle-throughput change**, not a valid-duration score or the
+standard suite's long correctness seeds. Audit SHA:
+`44d73d40ef4199231d0f0d998a3077c8d63898c6a0072f1ce846d9da3d400f91`.
+
+The [source exporter](freeze_mc_address_rk_candidate.py) and its four tests
+preserve 190 payloads, 156 hardware defines, full P5 L1s and the
+117-unit/49-include closure. An initial command using the external symlink is
+rejected before copying; using canonical paths succeeds without relaxing the
+exporter's no-symlink checks. The independent source audit rechecks 111,000
+input pins and the exact single-header change. Manifest SHA:
+`877b8e99c8eda9c46e2aa874bcad86d8a2e57eb4cb91afaa4d5b609d75a8ff89`.
+Strict CPU-hierarchy lint passes in 2.23 seconds under all six structural
+error classes; no full-SoC lint or physical qualification is inferred.
+
+### Matched synthesis in progress
+
+The first controller (`b752822029764966ba47e43dc1c70d9d`) refuses disk
+admission **before launching Vivado**. Twice the parent's measured 1,456,762,880
+byte growth plus the unchanged 4 GiB stop floor requires 7,208,493,056 bytes
+free. Its failed controller and timing-queue evidence are retained.
+
+Space is recovered by losslessly archiving only explicitly selected inactive
+generated compiler products: **2,405,655,567 bytes across 13 verified archives**.
+Tar comparisons and hashes precede removal of loose copies; recovery commands
+are recorded beside each archive. Binaries, model headers, harness objects,
+RTL, media, logs, traces and pinned inputs remain intact. The canonical
+`verif/tb/obj_dir` is untouched. A recovery-script prefix mismatch stops before
+touching the two affected fixtures; a separate corrected script handles them.
+
+The admitted run starts **03:16:45 UTC, October 11**, with 7,510,138,880 bytes
+free. Unit `ventium-mc-address-full-synth-r2-oct11.service`, invocation
+`075dc40695bb486bb05db7bbf8b088ef`, owns the single exclusive Vivado scope
+`d8deb3bf5225419c8c23fa1ead5387ed`. It retains 40/100 MHz clocks, the matched
+diagnostic logic-only mapper, 8 GiB RAM / 6 GiB swap caps, the 30-minute native
+limit and live host/disk reserves. Evidence is in `synthesis-r2/`.
+
+The timing queue `ventium-mc-address-timing-r2-queue-oct11.service`, invocation
+`2af5acc6f3684a2d8d476a01f2a40606`, observes that exact run and then audits the
+native source/checkpoint and original-clock timing in `clock-r2/`. It launches
+no route or deployment. The comparison parent is **24.33504 MHz**; the separate
+24.56339 MHz SRT candidate is deliberately not combined into this experiment.
+**No MC-address timing result is available yet.** Canonical verification remains
+FAIL; standard-suite, gameplay and physical FPGA acceptance remain open.
 
 Before adoption: pass the native leaf and whole-core fault/permission/branch
 checks, preserve full-PC benchmark cycles, resolve canonical-gate failures,
