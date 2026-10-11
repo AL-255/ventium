@@ -91,6 +91,23 @@ x87 C1 mismatch; this A/B agreement does not waive the failures. Pinned inputs
 independently rehash unchanged. Closure SHA-256:
 `51ab36882b593e3ecb72da562e54b4b56eb19703fdac16c3828c677a56c71091`.
 
+The independent canonical inventory confirms all **101** failures include a
+length mismatch, with **10** additionally reporting earlier C1 differences.
+Only one of the separately invoked parent/candidate functional traces is fully
+identical: QEMU supplies different initial stack addresses across invocations.
+Those runs must not be described as identical-input architectural comparisons.
+Inventory SHA-256:
+`f432259473b41e6c813e9bd77afb7cf2c631cfc524862e7fd162a12e54a3e6c1`.
+
+To check the full failing corpus without masking that input difference,
+[`run_canonical_same_input_ab.py`](../verif/l1/run_canonical_same_input_ab.py)
+replays **both models** with the candidate's exact retained input bytes and
+initial stack. All **108 cases / 80,800 complete architectural records** match,
+including every already-failing case; the candidate also reproduces its own
+original trace verbatim. Native owner `1e5208733588453db615e1c4bea4d8cf` closes
+zero in **72.86 seconds**, with independently rehashed inputs. No record or field
+is dropped. This is a same-input regression pass, **not a QEMU/canonical pass**.
+
 The [full-PC builder](build_mc_read_commit_soc.py) closes native zero in
 **22.51 seconds**, invocation `f569eebbb2f8434c86d8426196e31c20`. It verifies
 all 102 intersecting core/FP sources match the directed model, changing only
@@ -100,11 +117,19 @@ header. All input pins independently rehash unchanged. The inherited 98 platform
 structural warnings remain debt, not a full-platform lint pass. Model SHA-256:
 `1699b3b8af036f01feb1ff25a54aa6be337f54215952023eeaef479c13cc5c07`.
 
-Both unchanged short CoreMark disks are now running under
+Both unchanged short CoreMark disks close **PASS** under
 `ventium-v-carry-cm10-mc-read-oct11.service`, invocation
-`1a56bfa30fcf4bd683f017646a2c124f`. These are diagnostic CRC/cycle checks, not
-duration-valid scores or standard-suite acceptance. No new synthesized timing,
-routed result, bitstream or FPGA acceptance yet.
+`1a56bfa30fcf4bd683f017646a2c124f`, native exit zero. Performance takes
+**4,767,218 ticks**, validation **4,753,406 ticks**: both exactly match the
+predecessor (**0% cycle-count gain**). All five CRCs match for each seed:
+`e9f5/e714/1fd7/8e3a/fcaf` and `18f2/e3c1/0747/8d84/c64e`, respectively.
+Both actually retire V-pipe work (1,055,307 and 1,054,254 events). The independent
+audit passes, all artifact pins rehash unchanged, all children are reaped and
+there was no OOM. Audit SHA-256:
+`9ebed6330c4efc30b0bbbd479d9c0bbbe9a8b90f9b05fca73deba0bd83958e48`.
+These ten-iteration runs are diagnostic CRC/cycle checks, **not duration-valid
+scores or standard-suite acceptance**. No new synthesized timing, routed result,
+bitstream or FPGA acceptance yet.
 
 The [hardware export](freeze_mc_read_commit_rk_candidate.py) closes native zero
 under `e603a9cab1e14e9482cf5ab90c3f9770`, retaining all 190 payloads, 156 hardware
@@ -123,10 +148,26 @@ unchanged; this is not a full-platform lint pass.
 the completed predecessor's native lifecycle, exclusive Vivado launcher and
 resource guards verbatim. It changes source/proof identities only: matched
 `logic_only` diagnostic synthesis, not a timing-driven mapper or routed sign-off.
-One synthesis plus original-clock audit is **queued, not yet started**, owner
-`ventium-mc-read-timing-queue-oct11.service`, invocation
-`8155476807884799bcf17b3fedb07fe0`. It waits for actual CoreMark owner closure
-and independent audit before launch, retains the 8 GiB RAM / 6 GiB swap caps,
+The first attempt reached the disk-admission check only after actual CoreMark
+closure and independent audit, then **failed before native Vivado launch**.
+Queue invocation `8155476807884799bcf17b3fedb07fe0` and synthesis invocation
+`e66afabbb14f416da9730d01864cf32f` are terminal nonzero. The measured-growth
+reserve required **7,208,493,056 bytes** free (about 6.71 GiB), more than the
+space available. This is not an RTL synthesis failure or an OOM.
+
+After removing only closed, regenerable compiler caches (below), the
+[retry preparation](prepare_mc_read_timing_retry.py) admitted **7,405,940,736
+bytes** free with the **same guards** and the same pinned RTL. It retains the
+failed attempt and uses fresh `synthesis-r2` / `clock-r2` directories. The retry
+changes only owner/output identities and adds its proof receipt; the native
+guard lifecycle is checked byte-for-byte unchanged. All preparation pins and
+generated-controller hashes independently recheck.
+
+At **2026-10-11 23:39 UTC**, R2 synthesis is **actually running**, controller
+invocation `d9aa6de7a98c4962b52685ceb4db8d5b`, live Vivado scope invocation
+`a0d553946580454ca459cadd5b153da3`. Queue invocation
+`4026d9918fe74e8cb69a02b7ac733999` will audit native synthesis and then measure
+the original clocks. It retains the 8 GiB RAM / 6 GiB swap caps,
 13 GiB combined early-stop limit, 2 GiB host reserves and 4 GiB disk stop floor.
 Admission still requires over 6 GiB free disk and twice measured predecessor
 growth above that floor. No user applications are killed; no route/deploy is
@@ -141,6 +182,17 @@ Also, 2,376 byte-identical closed traces were consolidated as hardlinks,
 reclaiming 206,241,792 allocated bytes. Every path/content remains available
 and all input hashes remain unchanged. Plan/events/closure receipts are in
 `closed-trace-dedup-*`; copy a shared trace to a fresh inode before editing it.
+Four additional PCH files from the terminal predecessor core/PC builds were
+removed, reclaiming 376,135,343 bytes. Their exact targets/hashes and recovery
+scope are in `closed-parent-pch-{plan,closed}.json`. They were not pinned inputs
+or open files; all source, generated headers/C++, objects and models remain.
+Finally, six closed descriptor-core/current-core/current-PC PCH files were
+removed, reclaiming **561,621,810 bytes**. Exact targets, hashes, terminal owners
+and recovery scope are in `closed-remaining-pch-{plan,closed}.json`. An initial
+owner-identity precheck rejected before deleting anything; the successful pass
+uses the actual terminal native descriptor-build owner, not its preparation
+invocation. Again, only regenerable PCH files were removed, not model binaries,
+sources, generated headers/C++, objects, traces, or receipts.
 
 Verified gameplay baseline: **0.51030715 total U+V simulated retirement-event
 IPC**, older model `2b4d7a48`, cycles **1,200,065,237–1,300,065,237**.
