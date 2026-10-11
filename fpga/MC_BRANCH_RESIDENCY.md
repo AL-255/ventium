@@ -2,7 +2,8 @@
 
 **Isolated candidate, not a full-core or timing pass.** This targets the
 remaining late I-cache ownership lookups seen in the retained MC-address
-V-capture path. The currently running combined synthesis is unchanged.
+V-capture path. The combined synthesis was not modified by this experiment; it
+subsequently hit its 30-minute limit before checkpoint completion, with no Fmax.
 
 ## Change
 
@@ -61,17 +62,38 @@ full-core build. Sources, positive/negative logs and receipts are retained.
 
 ## Remaining acceptance
 
-Measure the active [combined synthesis](TIMING_COMBO.md) first, then inspect its
-actual worst paths before choosing the next integrated experiment. This new
-header still needs whole-core differential/regression checks, source-matched
-synthesis and timing measurement. No frequency gain is claimed for it.
-The [full-core builder](../verif/l1/build_mc_branch_residency_core.py) is prepared
-but **not launched**. It requires the exact combined-model audit and closed
+The [combined synthesis](TIMING_COMBO.md) closes incomplete at its time limit;
+there is no new worst-path report to inspect. This derivative is motivated by
+the previously retained MC-address V-capture path and duplicate caller lookups
+still present in the combined source. Its frequency benefit is unmeasured.
+
+The [full-core builder](../verif/l1/build_mc_branch_residency_core.py) now closes
+successfully after the prior Vivado family and timing queue are confirmed
+terminal. It requires the exact combined-model audit and closed
 positive/negative leaf results, verifies that the extracted cache functions
 match the model's source, and changes only this header. It preserves all 150
 core defines and the guarded 32-job command, while allocating a new model-local
 harness and checking its generated-header dependency. Two command-relocation
-tests pass; those tests are not a processor build or functional result.
+tests pass. The actual build takes **25.45 seconds**, native exit 0, with stable
+inputs and the private-header check passing. Service
+`ventium-mc-branch-residency-core-oct11.service`, invocation
+`916fb46387e24fd48a1e5610c57ec738`; model SHA-256:
+`70900101369189169e472a78f7c4ca8ca34dbb99d6f45c0df5115d505b6a4a3e`.
+
+[The unchanged cold matrices](../verif/l1/run_mc_branch_residency_checks.py) are
+launched under `ventium-mc-branch-residency-checks-oct11.service`, invocation
+`b1a62b6099a94a518998aa79573fdd01`. The controller differs from the combined
+candidate's only in its title, single-header change expectation and unique unit
+prefix. It retains all 820 fixtures, 32 initial test workers, full QEMU/A-B
+comparisons, focused FP faults, unchanged canonical gate and same-input replay.
+Four matrices now close successfully with stable inputs and empty error lists:
+held-read (24 fixtures / 48 latency cases), memory (72 fixtures / 288 model-
+latency measurements), FP (72 / 288), and AGI (12 / 48). These are **180 cold
+fixtures** on this new model, not inherited passes. Memory/FP/AGI take
+24.04 / 14.85 / 5.75 seconds. The 640-fixture branch matrix is still running;
+focused faults, canonical verification and same-input replay follow it. The
+entire check sequence remains **pending**. Source-matched PC/CoreMark, FPGA
+export/lint and synthesis/timing checks have not been performed.
 The canonical gate remains red; the full standard suite and physical Win95/
 Quake acceptance remain open. The best completed unplaced post-synthesis
 estimate is **26.01118 MHz**, below the **40 MHz** requirement.

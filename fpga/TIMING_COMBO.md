@@ -142,13 +142,15 @@ directed-model RTL sources, finding exactly the three intended changes.
 Strict CPU-hierarchy lint passes in **3.80 seconds**, including all six hard
 structural classes. It does not qualify the inherited full-SoC warning set.
 
-## Matched synthesis in progress
+## Matched synthesis stopped before checkpoint completion
 
 Native launch is **06:15:21 UTC, October 11**, controller
 `ventium-timing-combo-synth-oct11.service`, invocation
-`1e1b684e087d4741a37c4f52625ee9bb`. Its single exclusive Vivado family is
-scope invocation `3fc51b88c77542a19ae6634c1dad9685`. This is actual native
-execution, not just a queued command; no completed combined Fmax is available.
+`1e1b684e087d4741a37c4f52625ee9bb`. Its single exclusive Vivado family was
+scope invocation `3fc51b88c77542a19ae6634c1dad9685`. The native run now closes
+with **exit 124**: its 30-minute limit stops it after technology mapping,
+at flattening before IO insertion. There is **no completed top-level DCP or
+combined Fmax**, not a measured frequency failure.
 
 The run retains the matched logic-only mapper, original **40/100 MHz** clocks,
 8 GiB RAM / 6 GiB swap caps, 30-minute synthesis limit and live host/disk
@@ -159,13 +161,34 @@ compiler products was recoverably archived to preserve that margin; the
 `inactive-compiler-reserve-r2/` receipts retain extraction commands and hashes.
 
 The timing queue `ventium-timing-combo-clock-queue-oct11.service`, invocation
-`151032553daa4a298f7b1689e75bcf74`, observes this exact synthesis. It will audit
-the native source/checkpoint and original-clock timing, with the common
+`151032553daa4a298f7b1689e75bcf74`, observed this exact synthesis. It was to audit
+the native source/checkpoint and original-clock timing, using the common
 write-direction parent as the matched comparison. Isolated frequency gains
 are not added together. Parallel tag reads can replicate memory; actual mapped
 area and the new worst path must be measured. No routing or deployment is
 started by these controllers. Physical Windows/Quake tests remain separate
 acceptance requirements.
+
+That queue closes **failed without launching timing analysis**, because its
+exact prerequisite synthesis did not succeed. The synthesis closure takes
+1,829.97 seconds including termination/closure work, records unchanged inputs,
+no controller failure and no memory/disk reserve stop. All observed OOM counters
+are zero. Peak scoped memory/swap are **8,003,137,536 / 1,833,156,608 bytes**.
+The Vivado scope and native workers are gone; this is not an orphaned run.
+
+The actual native phase timestamps localize the increased runtime to synthesis,
+not routing. Cross-boundary/area optimization takes **19m59s**, from elapsed
+6m10s to 26m09s, versus **10m07s** in the isolated address candidate. Timing
+optimization finishes at 27m39s and technology mapping at 28m44s. The selected
+30-minute outer allowance was insufficient for finalization. A subsequent
+justified synthesis should allow **45 minutes**, keeping the same memory,
+swap, disk and host reserve protections; no such replacement is launched here.
+
+The already leaf-tested [branch ownership sharing](MC_BRANCH_RESIDENCY.md) is
+now entering whole-core checks. Its motivation is the duplicate late I-cache
+queries in the retained MC-address path and the unchanged caller in this RTL,
+not an inference that this timed-out synthesis failed timing. Its eventual
+frequency gain still requires a completed synthesis measurement.
 
 Canonical verification currently remains **FAIL**; the original long standard
 suite and physical acceptance are not closed by these directed checks.
