@@ -1,7 +1,7 @@
 # Register-only fast-shift operand isolation — October 11, 2026
 
-**Unqualified timing proposal. Latest measured parent: 26.14379 MHz;
-required post-synthesis Fmax: at least 40 MHz. No new frequency or FPGA pass.**
+**Unqualified timing candidate: 26.55408 MHz unplaced post-synthesis estimate,
+versus parent 26.14379 MHz. The required 40 MHz is NOT achieved; no FPGA pass.**
 
 The measured worst path reaches the U shifter through a memory ALU response
 mux, then feeds forwarded branch flags and L1 replacement control. The decoder
@@ -189,8 +189,39 @@ The independent original-clock audit starts at **09:15:48 UTC**, invocation
 `4f59ed2d666b43ceafb094626336b5c0`, after the synthesis family exits. Its
 15-minute native cap and 8 GiB/6 GiB RAM/swap limits are unchanged. No
 placement, routing or deployment is authorized by these controllers. This
-is **not yet a completed frequency result**: the latest completed estimate
-remains **26.14379 MHz**, below the **40 MHz** requirement.
+audit now closes native 0 at **09:24:54 UTC**, in **512.54 seconds**, with
+unchanged inputs, zero black boxes/structural DRC errors and no OOM or resource
+stop. Peak memory is **5,157,478,400 bytes**, with no swap. The exact retained
+controller and queue both exit 0. Clock-audit SHA-256:
+`2787445a5751ff2a41565f521e48910b3dc06fea3b658f0835ab5fb8317d1eb9`.
+
+| Original-clock timing estimate | Parent | Candidate |
+| --- | ---: | ---: |
+| Unplaced core Fmax | 26.14379 MHz | **26.55408 MHz** |
+| Setup slack at 25 ns | -13.250 ns | -12.659 ns |
+| Core hold slack | -0.101 ns | -0.101 ns |
+| Worst-path logic levels | 135 | 134 |
+| V-response capture setup slack | -12.419 ns | -10.595 ns |
+
+The combined change improves estimated frequency **1.56935%** and reduces
+LUT count 2.55%. Neither is individually attributed to its two transformations.
+This is still **not 40 MHz**, routed sign-off, or a measured physical frequency.
+
+The new worst path begins at `eip[1]` and ends at shared SRT `ua[14]/D`:
+**37.448 ns** of data delay, comprising **8.483 ns logic /28.965 ns estimated
+routing**. It traverses instruction-byte selection, overlength-fetch probe
+address generation, segment/access checks, fragment/request shaping, saved L1
+response selection, FP conversion and SRT input normalization. The old
+memory-selected U shift is no longer the limiting endpoint.
+
+The separately requested V-response capture path remains **35.384 ns /125
+levels**, corresponding to **28.09383 MHz** from its -10.595 ns slack. Thus,
+even eliminating the SRT tail cannot establish 40 MHz with the memory path
+unchanged. This bound is diagnostic, not a measured optimization result.
+The [input-normalization experiment](SRT_INPUT_NORMALIZATION.md) addresses
+three remaining linear leading-bit searches; the common request/response
+control path also requires work. Request cancellation, permission checks,
+fragment ownership and denied-read zero data cannot be dropped as a timing fix.
 
 **880,645,526 bytes** of explicitly selected inactive compiler products are
 losslessly archived, with verified member hashes and recovery commands in
@@ -209,8 +240,8 @@ without removing the model or its build evidence. No resource guard is reduced.
 
 Evidence root:
 `/home/yukidama/external/tmp/ventium-u-shift-registers.XRngKRoW/`.
-The focused whole-core comparisons are closed, but canonical gate repair,
-timing measurement, the original standard suite and physical FPGA acceptance
+The focused whole-core comparisons and synthesis timing measurement are closed,
+but canonical gate repair, reaching 40 MHz, the original standard suite and physical FPGA acceptance
 remain open. In particular, no
 syntactic depth estimate is substituted for synthesis or routed sign-off.
 

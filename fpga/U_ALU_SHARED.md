@@ -1,8 +1,8 @@
 # Shared U arithmetic result and flags — October 11, 2026
 
-**Component-tested proposal, not a processor or FPGA qualification.** The
-running register-shift synthesis does **not** contain this change. The latest
-completed unplaced post-synthesis estimate remains **26.14379 MHz**, below the
+**Directed-core-tested proposal, not a processor or FPGA qualification.** The
+completed register-shift synthesis does **not** contain this change. The latest
+completed unplaced post-synthesis estimate is **26.55408 MHz**, below the
 required **40 MHz**. No area, frequency or IPC gain is claimed here.
 
 ## Change and scope
@@ -143,7 +143,8 @@ Candidate U-pipe SHA-256:
 `0d27e79c88bc0e1fa9ff94efa1e5b271aa5933f5cd102fc6f5f26e56c6a8df8b`.
 The earlier uncompiled `core-r1/` preparation and original builder are retained;
 `core-r2/` adds explicit build-start bookkeeping, command-relocation checking
-and the required compiler-version probe. Neither has a new native model yet.
+and the required compiler-version probe. R2 now builds successfully as recorded
+below; R1 remains an uncompiled preparation.
 
 One owned continuation is launched at **09:10:25 UTC**, invocation
 `b7e09cbb9d19449494c53c42577e3589`, unit
@@ -157,9 +158,23 @@ The 5 GiB build/4 GiB run disk guards remain intact. A red canonical result
 remains red. This continuation launches **no FPGA synthesis, route or deploy**;
 the mapped critical path still decides the next hardware experiment.
 
+The shift clock audit closes at **26.55408 MHz**, so the guarded ALU build
+proceeds. It closes native 0 in **19.82 seconds**, invocation
+`6fda6babe3fd473e932c8ef45f01aad7`, with unchanged source pins and the private
+harness/header dependency checked. Model SHA-256:
+`ac967960c2c5006819135b571b35f5de084c7c3b25b814bd8881c25a8a9c13c9`.
+This actual new model passes all **128 cold arithmetic fixtures /512
+model-latency measurements**, invocation `f5c00ad50bb044fd95424c60df96eee3`.
+Full architectural and cycle comparisons pass at AXI latency 0/7, including
+the pairable U/V and explicitly non-pairable fast unary cases. Receipt SHA-256:
+`e45814075422aa07fe7db17567c8a3fb13fcdec503de05f702d779efcd5f6ab6`.
+The canonical gate is currently running under invocation
+`30e27bc65b224ebeb5a4fefad4f28c13`; complete same-input replay follows it.
+No ALU-sharing synthesis, frequency gain or gameplay gain is established.
+
 ## Remaining acceptance
 
-Use the pending register-shift timing report to choose the next measured
+Use the closed register-shift timing report to choose the next measured
 change; do not assume this proposal fixes the next critical path. Whole-core
 differential testing, unchanged-cycle checks, mapped area/timing, the full
 standard suite and physical FPGA acceptance are still required before adoption.
