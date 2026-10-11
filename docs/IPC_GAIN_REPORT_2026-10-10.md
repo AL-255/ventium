@@ -71,8 +71,10 @@ results below are retained measurements, not tests rerun for this report.
   FP dependency is removed; integer carry/ALU writeback becomes the worst path.
   The follow-up carry-payload model `32beddd8` passes 144 cold paged cases,
   exact parent cycle comparisons and both unchanged short CoreMark seeds
-  (**0% measured cycle-throughput change**). Its source-matched, guarded
-  synthesis is running; no new frequency is claimed. Canonical verification
+  (**0% measured cycle-throughput change**). Its source-matched synthesis and
+  original-clock audit now close: **23.5855 MHz unplaced estimate (+6.55%)**,
+  with **197,313 LUTs (+0.74%)**, still below 40 MHz. The next limiting paths
+  end in FPU bank enables through the shared memory ACK. Canonical verification
   remains FAIL, and neither candidate has gameplay or physical qualification.
   See [FP findings](../fpga/FP_EXEC_NOMEM_CUT.md) and
   [the carry candidate](../fpga/V_CARRY_PAYLOAD_CUT.md).
@@ -572,8 +574,8 @@ to multi-issue, all to cache misses, or all to the FPU.
 | Gameplay CPI <1 / IPC >1 | Current aggregate event CPI approximately **1.999** | **Not achieved**; normalized macroinstruction accounting is also distinct |
 | Canonical differential gate on latest corrected source | **7/108 functional passes; 12/19 scored cycle failures** | **FAIL**, no masks/goldens/bands waived; directed/native x87 evidence does not replace the gate |
 | `2b4d7a48` own valid-duration CoreMark | **2.101890118 / 2.107616105 CM/MHz**, exact parent ticks, original CRCs, actual V activity, native 0/reaping, no OOM | Both simulated seeds independently closed at 21:21; not complete-suite or FPGA acceptance |
-| Newest matched hardware source `467ff95f` | Manifest `4d52be93…`; one L1-cofactor delta from `cf1b3b0b`, same 190 payloads and 156 hardware defines; strict CPU lint and both short CoreMark seeds pass | Source/lint/short comparison pass, **not a valid-duration score, bitstream or physical pass** |
-| Latest completed synthesis | Source-matched `467ff95f`: **192,820 LUTs**, **22.4916 MHz unplaced estimate**, requested 40 MHz core | **40 MHz not achieved**, not placed/routed; older `2b4d7a48` route failed at congestion level 6 |
+| Newest matched hardware source `32beddd8` | Manifest `f72fd96d…`; one carry-payload delta from FP-only `74f16acf`, same 190 payloads and 156 hardware defines; strict CPU lint and both short CoreMark seeds pass | Source/lint/short comparison pass, **not a valid-duration score, bitstream or physical pass** |
+| Latest completed synthesis | Source-matched `32beddd8`: **197,313 LUTs**, **23.5855 MHz unplaced estimate**, requested 40 MHz core; +6.55% frequency estimate / +0.74% LUTs versus its FP-only parent | **40 MHz not achieved**, not placed/routed; older `2b4d7a48` route failed at congestion level 6 |
 | Win95 on final FPGA | Must cold boot to clean desktop and survive keyboard/mouse, menu/window interaction | **Pending** |
 | Quake on final FPGA | Must complete original timedemo, retain closed result, full unmodified-frame movie, measured clock and UV-fast evidence | **Pending** |
 
