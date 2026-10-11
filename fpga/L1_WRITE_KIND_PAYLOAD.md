@@ -1,6 +1,8 @@
 # Backing write-direction payload experiment — 2026-10-11 UTC
 
 **Private candidate: 24.33504 MHz unplaced synthesized estimate, not qualified.**
+The later balanced-SRT derivative reaches **24.56339 MHz**; see its closed
+measurement below. Neither meets the 40 MHz requirement.
 The objective remains **at least 40 MHz synthesized Fmax with UV dual issue,
 system/relocated fast pipeline and fast memory enabled**. The best retained
 prior unplaced estimate is 23.58546 MHz; the immediate read-ACK parent is
@@ -270,18 +272,58 @@ Matched diagnostic synthesis launches **02:37:50 UTC on October 11**:
 the same logic-only mapper, 8 GiB RAM / 6 GiB swap limits and 30-minute cap.
 The live controller enforces host-memory, swap and disk reserves.
 `ventium-srt-clz-audit-queue-oct11.service`, invocation
-`0d5a28143c0847da9e66dc56d0bec8fe`, will independently audit native closure
-and compare timing against the **24.33504 MHz write-direction parent**.
+`0d5a28143c0847da9e66dc56d0bec8fe`, independently audits native closure
+and compares timing against the **24.33504 MHz write-direction parent**.
 The new timing auditor excludes its own redirected stdout from its input pins,
 avoiding the prior receipt's self-hash defect. No retry, route or deployment
 is authorized by this queue.
 
-**At this checkpoint synthesis is running; no new Fmax is available.** The
-previously prepared address-payload candidate remains separate; it is not
-stacked into this SRT build. A separate
-[quotient-initialization proposal](SRT_QACC_INIT_PAYLOAD.md) is queued for
-unit verification after this timing run. Canonical verification remains FAIL;
-there is no new bitstream, board qualification or candidate gameplay result.
+### Closed balanced-SRT synthesis and timing
+
+Synthesis closes with native exit 0 in **997.37 seconds**, no OOM and no
+resource stop. It uses 194,495 LUTs (parent 196,749: **-1.15%**), 54,606 FFs
+(parent 54,605), unchanged 277.5 BRAM tiles and 47 DSPs. Peak guarded memory
+is 8 GiB and peak swap about 301 MiB. The one critical warning is the generated
+PS-IP XDC's unknown clock pin; the subsequent project-open timing audit verifies
+both real 40/100 MHz clocks, zero black boxes and zero checked structural DRC
+errors. This warning is not counted as timing closure.
+
+Timing controller `ventium-srt-clz-clock-oct11.service`, invocation
+`a26e76ce086f4615bbe9ba9bf18e7e2a`, closes in **244.66 seconds**, native exit 0,
+with no OOM or swap use. Original-clock reports are compared against the
+original write-direction project, not a reclocked standalone checkpoint:
+
+| Unplaced synthesized result | Write-direction parent | Balanced SRT normalization |
+| --- | ---: | ---: |
+| Fmax estimate | 24.33504 MHz | **24.56339 MHz (+0.94%)** |
+| Setup slack at 25 ns | -16.093 ns | **-15.711 ns** |
+| Worst reported hold slack | -0.101 ns | -0.101 ns |
+| Worst setup logic levels | 143 | 139 |
+
+The limiting endpoint moves from SRT quotient initialization to **L1
+`dc_lru[8]/D`**, with EIP as the source. The V-response capture path is still
+close behind at -15.392 ns. Its shared decode/descriptor/address/tag/admission
+cone therefore takes priority over further FPU-only synthesis. The
+[MC address candidate](MC_ADDRESS_PAYLOAD.md) and
+[parallel tag-lookup proposal](PARALLEL_TAG_LOOKUP.md) address this cone; neither
+is present in this measured SRT build. The two separate
+[quotient-initialization alternatives](SRT_QACC_INIT_PAYLOAD.md) now pass their
+native unit miters but remain unmeasured proposals.
+
+Synthesis audit SHA:
+`a3777043ae7575f6baa1bfe99cdd1ccf4eafac5c1f00d809850ac4ad093a256b`.
+Checkpoint SHA:
+`cf70ba0e6687637109138b4c07118adb932c9eec0a14fa63321422ba697d139a`.
+Timing audit SHA:
+`fd4b1c662bb438cbdc047b2d1083c263e4361bc5fbbba9e82804d4d6683c93ce`.
+The timing audit's own retained pins and all **63,884** timing input pins are
+independently rehashed after the queue closes; no self-stdout hash exception
+beyond the explicitly excluded mutable audit-output log is needed.
+
+**The >=40 MHz requirement is not met.** These remain diagnostic logic-only,
+unplaced estimates, not routed sign-off or measured board frequency. Canonical
+verification remains FAIL; there is no new bitstream, board qualification or
+candidate gameplay result.
 
 Gameplay baseline: **0.51030715 total U+V retirement-event IPC**, model
 `2b4d7a48`, cycles **1,200,065,237–1,300,065,237**, predating this candidate.

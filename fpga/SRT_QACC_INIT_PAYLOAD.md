@@ -1,6 +1,6 @@
 # SRT quotient initialization enable — 2026-10-11 UTC
 
-**Separate private proposal; source-recipe tests pass, native miter pending.**
+**Separate private proposals; source-recipe tests and native miters pass.**
 No synthesis gain, processor qualification or production RTL change is claimed.
 The objective remains at least **40 MHz synthesized Fmax**, preserving UV
 dual issue and system/relocated fast pipeline and fast memory.
@@ -9,8 +9,9 @@ The closed write-direction netlist's 30 worst paths end at the shared SRT
 quotient accumulator's clock enable. The first path is 143 logic levels and
 40.796 ns, from `q_pc[0]`, through translation, FP conversion, denormal exponent
 classification and remainder setup, to `qacc[0]/CE`. Its unplaced Fmax estimate
-is **24.33504 MHz**. The separate balanced-CLZ candidate is being synthesized;
-its gain is not yet measured.
+is **24.33504 MHz**. The separate balanced-CLZ candidate now reaches
+**24.56339 MHz**, and its top reported endpoints move to memory/LRU/capture.
+Neither quotient-initialization proposal is part of that measured netlist.
 
 ## Proposed change
 
@@ -26,14 +27,14 @@ inactive internal quotient value may change, but no request, state, result,
 rounding or completion equation is changed. Removing operand classification
 from this enable may shorten the path; it is not yet a measured improvement.
 
-Two recipe tests check the exact source edit and reject drift. The new
-[actual-engine sequential miter](../verif/srt/tb_qacc_init_miter.sv) is prepared
-to compare results, flags, busy/done and phase cycle-for-cycle, and to assert
+Two recipe tests check the exact source edit and reject drift. The
+[actual-engine sequential miter](../verif/srt/tb_qacc_init_miter.sv) compares
+results, flags, busy/done and phase cycle-for-cycle, and asserts
 equal quotients in every consuming state. It includes 5,024 operations,
 all operation kinds, rounding/precision controls, denormals, signed zeros,
 infinities, NaNs, mixed operation sequences, ignored starts while busy and
-24 reset interruptions. A deliberately broken busy-time clear must fail the
-live-quotient assertion. These are test requirements, **not completed results**.
+24 reset interruptions. A deliberately broken busy-time clear fails the
+live-quotient assertion. Both native results are now complete (details below).
 The miter compares the two actual RTL engines; it is not an independent
 numerical oracle or whole-core verification.
 
@@ -60,8 +61,8 @@ inductively that both 128-bit quotients agree whenever a consuming state can
 observe them. Common arithmetic contributions and state-transition guards
 are unconstrained. The positive query is UNSAT; missing remainder initialization
 and busy-time clearing both produce SAT counterexamples. This is an abstraction,
-**not whole-RTL formal equivalence**. The actual-engine sequential miter remains
-required and pending.
+**not whole-RTL formal equivalence**. The complementary actual-engine sequential
+miter now passes as described below.
 
 Idle candidate source SHA:
 `f9ce70532446bbc7b991180a030bb319d50ba88a93deead1030ba3a73296461f`.
@@ -74,6 +75,29 @@ defect against this alternative. The
 [whole-core builder](../verif/srt/build_qacc_idle_core.py) is prepared but has
 not run; it requires both the native miter and liveness proof before changing
 the single SRT source in a separately compiled model.
+
+## Closed native unit evidence
+
+Both real-engine miters pass **5,024 operations /167,864 cycle checks**, including
+1,654 divides, 1,653 square roots, 1,717 remainders and 24 reset interruptions.
+Each observes 95,608 consuming-state quotient checks. The accepted-start and
+idle variants respectively observe 64,568 and 69,058 inactive quotient
+differences, demonstrating that the test actually exercises the changed
+initialization. Both independently compiled busy-clear defects fail with
+`SRT_QACC_LIVE_MISMATCH`, native exit 1. No numerical-oracle or whole-core
+qualification is inferred from these A/B checks.
+
+| Variant | Native service invocation | Time | Receipt SHA |
+| --- | --- | ---: | --- |
+| Accepted start | `5cb0a26375c5409ebeebf3859ffe2298` | 3.78 s | `baa4b8e1d56fd8233e61fe35f4fcb0bfa1398e1ec5cce4ee9fcbaa2b2723cb23` |
+| Idle initialization | `15fde2ff68bd4b5c9993a04202ce433f` | 2.43 s | `a62445c3c87131802da8a454e0aa3415a07b3902d94680200d17509d5095f208` |
+
+Both services and their queues close with exit 0. All pinned source/binary
+hashes are independently rechecked after closure. Only closed, generated
+compiler products are then losslessly archived and removed from loose storage,
+recovering **579,430,811 bytes**; verified archives, recovery commands, sources,
+headers, executables and all evidence remain. No further FPU synthesis is
+launched: the newer measured netlist makes the memory path the current priority.
 
 ## SRT is not the only limiting path
 
