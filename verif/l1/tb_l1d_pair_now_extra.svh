@@ -12,6 +12,18 @@ logic [31:0] pair_now_paddr=0, pair_now_data;
 logic [1:0] pair_now_size_log2=2;
 integer now_checks=0, now_returns=0, now_backpressure=0;
 
+task automatic warm_full_window(input logic [31:0] addr, expected);
+  read_word(addr,expected); wait_idle();
+  // A critical-word-first miss can ACK with only one returned dword. Drain
+  // the fill, then perform a resident read to capture a COMPLETE line; fill
+  // completion does not retroactively upgrade an old partial window.
+  read_word(addr,expected); wait_idle();
+  #1;
+  if (!dut.window_valid_q || !dut.rd_full_line_q ||
+      dut.rd_addr_q[31:5] != addr[31:5])
+    $fatal(1,"PAIR-NOW fixture did not create complete window for %h",addr);
+endtask
+
 task automatic pair_now_probe(input integer kind);
   logic want;
   logic [31:0] value;
@@ -62,15 +74,15 @@ task automatic run_pair_now_checks;
   @(negedge clk); extra_flush=0;
   // Make B resident first. The miss for A deliberately discards B's read
   // window, so the later resident B read must capture and retain A as shadow.
-  read_word(32'h64,mem[25]); wait_idle();
-  read_word(32'h40,mem[16]); wait_idle();
+  warm_full_window(32'h64,mem[25]);
+  warm_full_window(32'h40,mem[16]);
   for (integer k=0;k<8;k++) pair_now_probe(k);
 
 `ifdef VEN_L1D_TWO_WINDOW_REUSE
   $display("[pair-now] retained shadow window supplies its own line");
   // Move the physical registered primary to a different line. The old line
   // is only a read buffer: live tags and ordinary cancellation still apply.
-  read_word(32'h64,mem[25]); wait_idle();
+  warm_full_window(32'h64,mem[25]);
   @(negedge clk); c_req=0;
   if (!dut.shadow_valid_q || dut.shadow_line_addr_q != (32'h40 >> 5))
     fail("ordinary reads did not create the intended shadow owner");
@@ -127,7 +139,7 @@ task automatic run_pair_now_checks;
   @(posedge clk);
   @(negedge clk);
   c_req=0; pair_req_valid=0; pair_now_req=0; snoop_inv_valid=0;
-  read_word(32'h40,mem[16]); wait_idle();
+  warm_full_window(32'h40,mem[16]);
   read_word(32'h44,32'hdada_2026);
   pair_now_probe(0);
 
@@ -140,7 +152,7 @@ task automatic run_pair_now_checks;
   @(posedge clk);
   @(negedge clk);
   c_req=0; pair_req_valid=0; pair_now_req=0; extra_flush=0;
-  read_word(32'h40,mem[16]); wait_idle();
+  warm_full_window(32'h40,mem[16]);
   pair_now_probe(0);
 
   @(negedge clk);

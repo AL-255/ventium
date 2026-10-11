@@ -1,11 +1,11 @@
 # Same-line paired-read ACK cut — October 11, 2026
 
-**Isolated draft; not part of the currently running readiness synthesis.**
-Predicate proof and source-extracted microtests pass. Full-cache/core checks,
-canonical verification, timing and FPGA validation are still pending.
+**Isolated draft; not part of the measured readiness candidate.**
+Predicate proof, source-extracted microtests and full-cache checks pass.
+Whole-core checks, canonical verification, timing and FPGA validation remain pending.
 The requirement remains **40 MHz synthesized Fmax or better**, with UV,
 system/relocated fast pipes, fast loads/stores and full P5 caches retained.
-The last measured predecessor is **27.83654 MHz**, unplaced synthesis.
+The readiness predecessor now measures **30.34809 MHz**, unplaced synthesis.
 
 ## Why this cut
 
@@ -66,14 +66,13 @@ Parent L1 SHA-256:
 Candidate L1 SHA-256:
 `debab0ccd20eef18b3c2e5e9f349350e4f2b48eff8bd4b29213c5658fe499e6d`.
 
-Before promotion, run the actual full-size cache with primary/shadow returns,
-byte 31, crossing dword rejection, same-bank rejection, held V responses,
-no double enqueue, invalidation and backing-pressure tests; then the full
-UV-fast core/QEMU comparisons and unchanged canonical gate. Do not include
-the separate generic-overlap draft automatically. The live readiness
-synthesis and its clock audit must close before another heavy build starts.
+Before promotion, run the full UV-fast core/QEMU comparisons and unchanged
+canonical gate. Do not include the separate generic-overlap draft automatically.
+The new measured worst path runs through read-hint commit rather than this
+same-line-return predicate; this draft is therefore deferred from the next
+isolated timing experiment, not claimed as a measured timing improvement.
 
-## Full-cache regression queued, not yet passed
+## Full-cache regression passed after fixture correction
 
 [`run_pair_now_cache.py`](../verif/l1/run_pair_now_cache.py) retains the original
 dual-store/coherence fixture and instantiates two full-size 128-set, two-way
@@ -86,12 +85,9 @@ dword rejection, bank/identity/size/cacheability rejection, no double enqueue,
 a genuinely held V response, snoop plus fresh external-writer data, and flush.
 The existing store/backpressure tests are not removed or relaxed.
 
-Both fixture-generation variants pass structural generation checks; **native
-compilation and simulation have not started**. Planned runs are FF tags with
-the primary window, LUTRAM tags with primary/shadow windows, and an ownership
-defect that must fail. Compiler assertions and all six structural warning
-classes remain fatal. A historical printed FAIL followed by `$finish` is
-upgraded to a native fatal exit without changing its checks.
+Compiler assertions and all six structural warning classes remain fatal.
+A historical printed FAIL followed by `$finish` is upgraded to a native fatal
+exit without changing its checks.
 
 Queue `ventium-pair-now-cache-queue-oct11.service`, invocation
 `dd01077f8cdb49fcb9e002d176f8b51b`, waits for the exact readiness timing queue
@@ -99,8 +95,23 @@ Queue `ventium-pair-now-cache-queue-oct11.service`, invocation
 timing audit and all pinned inputs, then launches one guarded-32 cache run.
 No competing Verilator/Vivado build starts while synthesis or timing is live.
 Its controller and receipts are under the evidence root's parent directory,
-`after_timing_cache.py` and `cache-queue/`. Do not equate a queued job or a
-generated fixture with an executed pass.
+`after_timing_cache.py` and `cache-queue/`.
+
+The first actual cache run (`cache-r1`, invocation
+`216eddf713554fb2b2d03169c4e94a9b`) failed natively with 23 fixture expectations.
+Old/new cache comparisons agreed: a cold critical-word ACK did not imply a
+full saved line, and waiting for fill completion did not upgrade that window.
+The fixture now performs an ordinary resident read after fill completion and
+checks window validity, fullness and line identity. No internal state is forced,
+no check is relaxed, and no candidate RTL changes. The failed source/logs remain.
+
+Revision 2 (`cache-r2`, invocation `680b154a32cc493596404d204af4cbdf`) closes
+native zero in **13.55 seconds**. FF/primary and LUTRAM/primary+shadow cases
+both pass: respectively 15/17 transaction checks, 5/7 immediate same-line
+returns, and three held-backpressure checks each. The deliberately unowned
+return mutant compiles successfully and fails natively as required. All pinned
+inputs independently rehash unchanged. Receipt SHA-256:
+`2cf0ead134ea015f86c271fbb5df4d16598bf3299d660f01865def93a6ca7bb5`.
 
 ## Whole-core continuation prepared, not launched
 
@@ -115,8 +126,8 @@ dependency file against its own generated model header.
 
 The three admission unit tests pass, including twelve deliberately incomplete
 or failed row variants. These test the builder's rejection behavior, **not the
-cache or CPU**. This whole-core build is not queued or running; the exact live
-timing and cache owners must close first. The original canonical differential
+cache or CPU**. This whole-core build is not queued or running; the timing
+and cache owners are now terminal. The original canonical differential
 gate still requires a new run and a genuine pass; no comparator, terminal
 record, C1 mask or cycle band is changed by this continuation.
 
