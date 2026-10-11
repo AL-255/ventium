@@ -70,6 +70,25 @@ data-only span before the next ACK assignment and checks balanced directives.
 The four-file RTL transformation is unchanged. Use
 [the R2 runner](../verif/l1/run_fp_read_ack_split_r2.py), not the retained R1.
 
+### Backend and fragment boundary check
+
+[The seam checker](../verif/l1/run_fp_read_ack_seam.py) extracts the actual
+old/new ACK assignments from the memory subsystem, both top-level backend
+configurations and the core's final-fragment gate. It also checks the actual
+read-ACK and write-direction port bindings. Given the independently checked
+read-equivalence premise, **2,048 control combinations / 12,288 comparisons**
+pass, covering reset, DMA drain, SMRAM/route rejection, request/response,
+runtime backend selection, legacy/direct responses and fragment hold.
+
+All four deliberate faults—bypassing reset, DMA drain or fragment hold, and
+selecting the wrong backend—fail with native exit 1. The positive simulation
+and compilation exit 0. Unit `ventium-fp-read-ack-seam-oct11.service`, invocation
+`57b8c54dc7ba4204a7a2a46fc1eae8cb`, is terminal with exit 0. Receipt:
+`seam-r1/closed.json`, SHA
+`f698f11077c0a93470a677194e896e1191ece1effe3d67f961ce1fb44c851cf4`.
+This verifies the combinational equations and bindings, not sequential cache
+behavior, actual exception delivery or complete module elaboration.
+
 ## Next qualification
 
 After the current synthesis/clock audit closes, inspect its actual result
@@ -80,6 +99,12 @@ model, unchanged defines and a private native harness/header. Then check the
 cold memory, FP/AGI and fault/fragment/reset matrices, canonical gates and both
 original CoreMark seeds before measuring this candidate's synthesis. Leaf
 equivalence does not prove full wiring, cache ownership or full-system safety.
+For the existing `run-fp-memory-fault-gate.sh` fixtures, both same-profile
+models must use `FP_MEM_ADMIT=1` and `FP_LOAD_COMMAND=1`; neither is a disabled
+handoff control. Check the **complete** cycle-functional trace against QEMU in
+addition to the script's selected fault/retry records. Its functional-mode
+control is diagnostic, not UV acceptance. The existing fixed QEMU port requires
+serialization unless a separately reviewed per-run port adapter is used.
 
 Verified gameplay baseline: **0.51030715 U+V retirement-event IPC**, model
 `2b4d7a48`, cycles **1,200,065,237–1,300,065,237**. It predates both timing
