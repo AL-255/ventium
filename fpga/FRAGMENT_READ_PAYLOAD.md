@@ -90,6 +90,69 @@ TMPDIR=/home/yukidama/external/tmp PYTHONDONTWRITEBYTECODE=1 \
 
 ## Remaining acceptance
 
+### Newly reproduced predecessor bug: generic read strobes
+
+The leaf miter above establishes equivalence to its predecessor, **not that the
+predecessor's read widths are correct**. A further real-ISA diagnostic finds a
+byte-exactness defect that must be repaired before this proposal is qualified.
+
+[`run_fragment_abort_replacement.py`](../verif/issue_uv/run_fragment_abort_replacement.py)
+derives twelve private `pxfrag` BIOS fixtures: the IDT #PF gate crosses with
+1/2/3 bytes on its first page, cold/warm translations, and CR0.CD=0/1. All state
+changes are normal guest instructions; no snapshot, guest STEP or injected
+register state is used. All twelve complete under QEMU Pentium and the existing
+bus-candidate model, at AXI latency 0/7, with full architectural comparisons.
+There are 11,124 architectural records, 11,124 cycle records and 1,860 paired V
+retirements. These passing traces alone do **not** establish bus correctness.
+
+Evidence is under the same experiment root, `abort-replacement-r1/`; native
+service invocation `0807d3138187445b8f38abc728389f62`, exit zero, 9.00 driver
+seconds. Receipt SHA-256:
+`90533f2071d9bfe95a11d66f9f519f5d70015af6aa4593b1241b5c3ed954cc2e`.
+
+[`observe_fragment_abort_bus.py`](../verif/issue_uv/observe_fragment_abort_bus.py)
+observes the existing, unchanged model before its native NBA evaluation, using
+offsets compiled against that model's exact generated header. It does not write
+guest or DUT state and requires the entire resulting architectural trace to
+remain byte-identical. The first3/warm/CD=1 case proves:
+
+- A real page fault leaves `fx_act=1`, `fx_abort_q=1`, `fx_first=2`, while a new
+  crossing IDT read starts at `0x8ffd`, with size 4 and `fx_start=1`.
+- That read has `bd_wstrb=0` and `mem_wstrb=0`. The L1 explicitly interprets zero
+  as its legacy whole-word read, so ANDing zero with a fragment mask cannot
+  narrow it.
+- While **fragment 1 is still active**, AXI accepts an aligned four-byte read
+  at `0x9000` (`ARVALID=ARREADY=1`, `ARSIZE=2`, `ARLEN=0`, `fbase=0x8ffd`,
+  `fx_ph=0`). The first fragment should touch only `0x8ffd–0x8fff`.
+  The later legitimate second fragment reads `0x9000` again. All observed
+  boundaries have native NBA trigger bit 0 set, which the generated evaluator
+  defines as the real rising clock edge.
+- A second, hidden issue is the first-fragment selector's use of raw `fx_act`:
+  on abort/replacement it selects the **old** count, not the new natural count.
+  Correcting zero strobes without correcting ownership would expose an
+  incorrect first mask. The zero-strobe predecessor hides that distinction.
+
+The bus observer closes in 3.84 seconds, invocation
+`8668008349c440ac85d0a13e0cf72f14`, natural guest exit 133, stable input hashes,
+and an identical complete 467-record trace. Its output is `abort-bus-r1/`.
+Receipt SHA-256:
+`f1410effeda5e318e849ff9a9bf302987213918aacef4628280ef7d84ce11b23`.
+This is a **reproduced predecessor bug**, not a repaired-model pass; ordinary
+flat RAM and final read merging explain why architectural comparison misses it.
+It demonstrates excess read transactions, not an observed device side effect.
+
+Earlier exploratory host observations are retained: `gdb-r1` recorded startup
+instead of the target and its separate witness audit rejects it; R2 failed
+path-alias preflight before observation. `gdb-r3` correctly proves the overlap;
+`abort-bus-r1` additionally proves the accepted bus transfer. None of the failed
+observation attempts is counted as an RTL test or silently overwritten.
+
+The next correction must materialize the architectural read width before
+fragment masking and latching, choose the new count on replacement, preserve
+write strobes and walk-detour behavior, and retain the late-fault-free payload
+selection. It must be tested against exact touched bytes, not only register
+results or equivalence to this defective predecessor.
+
 First inspect the in-flight bus candidate's actual timing. If this cone remains
 limiting, build the private derivative under the shared compiler guard, then
 run full source-matched fragment/fault/A20/SMM/REP and FP regressions at multiple
