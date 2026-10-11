@@ -68,11 +68,32 @@ changes. Native owners respectively `b6f189f1b1344c8bbe8d83b86bf9bbea`,
 `bbff2d17df894eea82aa6281c9ef7602`, `f5498ebb40ae42c6b8e3a10d5e76a597` are
 terminal zero; their pinned sources/models independently rehash unchanged.
 
+Two additional whole-core corpora exercise the actual hint contexts changed
+by the cofactor, not just ordinary load/store retirement:
+
+- Held/fresh read hints: 24 cold fixture cases / 48 latency cases, **9,200**
+  candidate architectural records and **346 actual held-read hints**. Unsafe
+  candidate forms must not prime; existing immediate load pairs remain intact.
+- Predicted branch fallthrough: 40 cold cases / 80 latency cases, **22,120**
+  candidate records and **488 actual branch hints**. Taken outcomes, unsafe
+  forms and line-boundary exclusions retain full state/cycle/hint equality.
+
+Both pass fresh QEMU plus complete A/B comparisons, native exit zero, with
+independently rechecked input pins. Invocations are respectively
+`937691346aea4088b35a46ddc19c56f3` and `6e188d3cd3d44e9f83d93a0378927fa5`.
+Total across all five corpora: **133,848 candidate architectural records**.
+
 The unchanged canonical gate is running under
 `ventium-mc-read-verify-oct11.service`, invocation
 `aaac1084050145b7a7ab2604aef3ab87`. Its predecessor failed; these directed passes
 do not supersede that failure. A source-matched full-PC build is being prepared.
 No standard-suite pass, routed result, new bitstream or FPGA acceptance yet.
+
+Eight regenerable PCH files from the two **closed** same-line cache runs were
+removed, reclaiming 668,977,594 bytes. Exact target/hash and deletion receipts
+are in `closed-cache-pch-{plan,closed}.json` under this evidence root. Sources,
+generated headers/C++, objects, binaries and logs remain; the PCH can be
+regenerated, but there is no byte-for-byte backup.
 
 Verified gameplay baseline: **0.51030715 total U+V simulated retirement-event
 IPC**, older model `2b4d7a48`, cycles **1,200,065,237–1,300,065,237**.
