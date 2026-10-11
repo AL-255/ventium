@@ -80,7 +80,8 @@ The unchanged canonical differential gate closed with native make exit 2:
 **7/108 functional passes**, and 12/19 scored cycle kernels outside their
 bands, as on the parent. All 20 candidate/control complete cycle streams match.
 No mask, golden or band changed; this is still **FAIL**, not a correctness pass.
-Full-PC short CoreMark is now closed below; new synthesis remains pending.
+Full-PC short CoreMark and synthesis are now closed below. The global timing
+estimate regressed; the candidate does not meet the frequency requirement.
 
 ## Full-PC and hardware source match
 
@@ -118,14 +119,46 @@ Audit SHA-256:
 This is **0% measured cycle-throughput change relative to the original parent**,
 not a duration-valid CM/MHz score or a physical performance result.
 
-At 23:42 UTC, the bounded single-family synthesis controller
-`ventium-fp-exec-full-synth-oct10.service` started, invocation
-`752a5a9ce908438dade4d65999dde174`. It uses the same diagnostic logic-only
-mapping as the parent, 8 GiB RAM / 6 GiB swap, one job, a 30-minute native cap,
-and a 4 GiB runtime disk floor. Admission requires more than twice the closed
-parent's measured disk growth above that floor. The subsequent native audit
-is queued for this exact invocation, without automatic retries or implementation.
-No frequency improvement is claimed until the new timing report closes.
+## Closed synthesis and timing: frequency requirement still fails
+
+The bounded single-family controller `ventium-fp-exec-full-synth-oct10.service`,
+invocation `752a5a9ce908438dade4d65999dde174`, closed native 0 at 23:59:37 UTC
+on October 10, after **1,048.97 seconds**. The mapping remains the parent's
+diagnostic `logic_only` / `-no_timing_driven` profile, one job, unchanged
+40/100 MHz constraints. Peak RAM was 8,589,926,400 bytes and peak swap
+1,268,727,808 bytes; no OOM or resource stop occurred.
+
+The audit rechecked 9,874 pins and 148 native Verilog inputs. Synthesis emitted
+zero errors, 1,567 warnings and one inherited critical warning concerning a
+generated PS XDC `create_clock` pin; that warning is not waived. LUT usage rose
+from **192,820 to 195,869 (+1.58%)**, registers from 54,581 to 54,610; BRAM
+277.5 and DSP 47 are unchanged. Synthesis audit SHA-256:
+`05fba70f0a120b118583384335bfe63ef683cc8ec31a19af22810180c436eabe`.
+
+The separate native clock audit, invocation `29534b4722db4bb4852831b21e8f3848`,
+closed native 0 in 249.59 seconds. It verifies the original 40/100 MHz clocks,
+9,906 input pins and zero black boxes or structural DRC errors. This is not
+full timing acceptance: eight no-clock endpoints remain reported, alongside
+zero unconstrained internal endpoints. The unplaced core hold slack is
+−0.101 ns. Timing audit SHA-256:
+`b4644f0102a50dcf17e993b87e54499fd829a2cb7f7ac58473bb33755d64ecea`.
+
+| Same diagnostic synthesis profile | Parent | FP-only cut |
+| --- | ---: | ---: |
+| Core setup WNS at 25 ns | −19.461 ns | −20.175 ns |
+| Unplaced synthesized Fmax estimate | 22.4916 MHz | **22.1361 MHz** |
+
+Thus global estimated Fmax **regressed by 1.58%**. The intended dependency
+is removed: none of the new 30 worst paths traverses `fp_shared_direct`, and
+the V-response capture path improves from −18.433 to −17.288 ns. However,
+the new worst path ends at integer GPR data through late memory acceptance,
+V carry selection and the V ALU. It has 160 logic levels, 44.964 ns data delay
+(10.043 ns logic, 34.921 ns estimated routing). This exposes the next target;
+it does not establish that one more local edit will achieve 40 MHz.
+
+No placement, routing, bitstream generation or board programming was launched
+for this candidate. The global regression is retained, not labelled an accepted
+frequency optimization. See [the carry-payload follow-up](V_CARRY_PAYLOAD_CUT.md).
 
 ## Resource handling and acceptance limits
 
