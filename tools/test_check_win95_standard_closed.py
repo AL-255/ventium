@@ -27,7 +27,9 @@ def sha(path):
 class ClosedWin95Tests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix='obj_dir_win95closed_host_')
-        self.build = Path(self.temp.name)
+        # TMPDIR may be the external-storage symlink. The checker deliberately
+        # requires canonical paths; don't make every negative pass at that gate.
+        self.build = Path(self.temp.name).resolve()
         self.run = self.build / 'win95-cold-host.fixture'
         self.run.mkdir()
         self.unit, self.inv = 'ventium-standard-win95-hostcontract.service', 'e' * 32
@@ -232,6 +234,160 @@ class ClosedWin95Tests(unittest.TestCase):
             pins[path] = removed
         self.persist()
         self.assertEqual(self.qualify()['status'], 'PASS')
+
+    def configure_parentpolicy(self):
+        self.configure_posted()
+        self.expect.update(schema=4, profile='board-posted16-40mhz-parentpolicy')
+        pins = self.expect['pins']
+        for name in ('obj1-speed-q16-parentpolicy/ao486sim_board_posted',
+                     'build-started.json', 'build-closed.json',
+                     'obj1-speed-q16-parentpolicy/Vsystem__verFiles.dat'):
+            path = self.build / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(self.model.read_bytes() if path.name == 'ao486sim_board_posted' else
+                             b'synthetic current model-local build provenance\n')
+            pins[str(path)] = sha(path)
+        self.before['input_sha256_before'] = self.result['input_sha256_after'] = pins
+        for receipt in (self.before, self.final):
+            receipt['cgroup_files']['pids.max'] = '128'
+        self.persist()
+
+    def test_parentpolicy_keeps_closure_capture_and_manual_review_requirements(self):
+        self.configure_parentpolicy()
+        self.assertEqual(self.qualify()['profile'], 'board-posted16-40mhz-parentpolicy')
+        for negative in (self.test_supervisor_negative_matrix_precedes_runtime_reads,
+                         self.test_native_actual_wait_and_negative_results,
+                         self.test_lossy_capture_negative_matrix,
+                         self.test_logs_truncated_capped_regressed_or_snapshot_are_rejected,
+                         self.test_manual_desktop_negative_matrix):
+            negative()
+            self.persist()
+            self.assertEqual(self.qualify()['status'], 'PASS')
+
+    def test_parentpolicy_requires_new_build_roles_not_old_names(self):
+        self.configure_parentpolicy()
+        pins = self.expect['pins']
+        for name in ('obj1-speed-q16-parentpolicy/ao486sim_board_posted',
+                     'build-started.json', 'build-closed.json',
+                     'obj1-speed-q16-parentpolicy/Vsystem__verFiles.dat', 'defines.txt'):
+            with self.subTest(role=name):
+                path = str(self.build / name)
+                value = pins.pop(path)
+                self.persist(); self.reject()
+                pins[path] = value
+        self.persist()
+        self.assertEqual(self.qualify()['status'], 'PASS')
+
+    def test_parentpolicy_cannot_downgrade_or_choose_arbitrary_resources(self):
+        self.configure_parentpolicy()
+        original = copy.deepcopy(self.expect)
+        for change in ({'schema':3}, {'schema':1}, {'profile':'board-posted16-40mhz'},
+                       {'profile':None}, {'configured_launcher':{'path':'/tmp/untrusted'}}):
+            self.expect = dict(copy.deepcopy(original), **change)
+            self.reject()
+        self.expect = original
+        for receipt in (self.before, self.final):
+            for limit in ('32', '64', '129', 'max'):
+                with self.subTest(limit=limit):
+                    receipt['cgroup_files']['pids.max'] = limit
+                    self.persist(); self.reject()
+            receipt['cgroup_files']['pids.max'] = '128'
+        self.persist()
+        self.assertEqual(self.qualify()['status'], 'PASS')
+
+    def test_parentpolicy_metadata_bound_is_specific_and_does_not_raise_log_cap(self):
+        self.configure_parentpolicy()
+        self.before['diagnostic_padding'] = self.result['diagnostic_padding'] = ' ' * gate.JSON_LIMIT
+        self.persist()
+        self.assertEqual(self.qualify()['status'], 'PASS')
+        self.result['log_capture']['byte_limit'] = 2 * gate.LOG_LIMIT
+        self.write(self.run / 'result.json', self.result)
+        self.reject()
+        self.before['diagnostic_padding'] = ' ' * gate.PARENTPOLICY_JSON_LIMIT
+        self.persist(); self.reject()
+
+    def test_parentpolicy_native_command_and_environment_are_still_fixed(self):
+        self.configure_parentpolicy()
+        command = gate.expected_command(self.run, posted=True)
+        for option, value in (('--rate', '45000000'), ('--cycles', '1000000000'), ('--mem', '32')):
+            changed = list(command)
+            changed[changed.index(option) + 1] = value
+            self.before['command'] = self.result['command'] = self.admission['argv'] = changed
+            self.result['native_admission'] = self.admission
+            self.persist(); self.reject()
+        self.before['command'] = self.result['command'] = self.admission['argv'] = command
+        self.persist()
+        self.assertEqual(self.qualify()['status'], 'PASS')
+        for key, value in (('FPGA_DDR', '2'), ('VEN_GUEST_PATCH', '1')):
+            original = dict(self.before['environment'])
+            self.before['environment'][key] = value
+            self.persist(); self.reject()
+            self.before['environment'] = original
+        self.persist()
+        self.assertEqual(self.qualify()['status'], 'PASS')
+
+    def test_parentpolicy_keeps_resource_oom_cold_and_source_checks(self):
+        self.configure_parentpolicy()
+        self.test_admission_cold_environment_and_resource_negative_matrix()
+        del self.before['environment']['VEN_GUEST_PATCH']
+        self.persist()
+        self.assertEqual(self.qualify()['status'], 'PASS')
+        path = self.build / 'obj1-speed-q16-parentpolicy/ao486sim_board_posted'
+        path.write_bytes(b'mutated current model after frozen admission\n')
+        self.reject()
+
+    def test_parentpolicy_cli_rejects_metadata_over_its_fixed_bound(self):
+        self.configure_parentpolicy()
+        self.expect['diagnostic_padding'] = ' ' * gate.PARENTPOLICY_JSON_LIMIT
+        expectation = self.build / 'expect-oversized.json'
+        visual = self.build / 'visual-oversized.json'
+        self.write(expectation, self.expect)
+        self.write(visual, self.visual)
+        argv = ['checker', str(self.run), '--expect', str(expectation), '--expect-sha256', sha(expectation),
+                '--visual-review', str(visual), '--visual-review-sha256', sha(visual)]
+        with patch('sys.argv', argv), patch.object(gate, 'query_supervisor', side_effect=AssertionError('too late')), \
+                redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit) as result:
+                gate.main()
+            self.assertEqual(result.exception.code, 2)
+
+    def test_legacy_metadata_and_task_limits_remain_unchanged(self):
+        self.before['diagnostic_padding'] = ' ' * gate.JSON_LIMIT
+        self.persist(); self.reject()
+        del self.before['diagnostic_padding']
+        self.before['cgroup_files']['pids.max'] = '128'
+        self.persist(); self.reject()
+
+    def test_parentpolicy_cli_requires_external_sha_and_accepts_bounded_metadata(self):
+        self.configure_parentpolicy()
+        self.expect['diagnostic_padding'] = ' ' * gate.JSON_LIMIT
+        self.test_external_sha_authorities_required_by_cli()
+
+    def test_legacy_cli_does_not_inherit_parentpolicy_metadata_limit(self):
+        self.expect['diagnostic_padding'] = ' ' * gate.JSON_LIMIT
+        expectation = self.build / 'expect-large.json'
+        visual = self.build / 'visual-large.json'
+        self.write(expectation, self.expect)
+        self.write(visual, self.visual)
+        argv = ['checker', str(self.run), '--expect', str(expectation), '--expect-sha256', sha(expectation),
+                '--visual-review', str(visual), '--visual-review-sha256', sha(visual)]
+        with patch('sys.argv', argv), patch.object(gate, 'query_supervisor', side_effect=AssertionError('too late')), \
+                redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit) as result:
+                gate.main()
+            self.assertEqual(result.exception.code, 2)
+
+    def test_cli_nonobject_expectation_is_a_controlled_refusal(self):
+        expectation, visual = self.build / 'expect-list.json', self.build / 'visual-list.json'
+        self.write(expectation, [])
+        self.write(visual, self.visual)
+        argv = ['checker', str(self.run), '--expect', str(expectation), '--expect-sha256', sha(expectation),
+                '--visual-review', str(visual), '--visual-review-sha256', sha(visual)]
+        with patch('sys.argv', argv), patch.object(gate, 'query_supervisor', side_effect=AssertionError('too late')), \
+                redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit) as result:
+                gate.main()
+            self.assertEqual(result.exception.code, 2)
 
     def rename_launcher(self, name):
         old, renamed = self.launcher, self.build / name

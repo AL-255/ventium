@@ -29,6 +29,15 @@ obj1-speed-q16 source/build receipt layout. It uses schema 1's direct launcher.
 It does not permit caller-selected clocks, arbitrary commands or environments.
 All closure, cold-state, source-pin, fault and manual-review checks still apply.
 
+Schema 4 is board-posted16-40mhz-parentpolicy: the same native command,
+clocks, guest and log cap as schema 3, but the separately reviewed current
+obj1-speed-q16-parentpolicy model/build-receipt layout and exactly 128 tasks
+(the simulator starts a host worker pool even when limited to one CPU).
+Only its expectation, before receipt and result may be up to 4 MiB. This is
+not an arbitrary path/resource profile or permission to omit source pins.
+The external expectation must review the complete model/source provenance;
+this checker still neither executes nor qualifies the build recipes.
+
 Visual schema 1: kind=WIN95_MANUAL_DESKTOP_REVIEW, authority=manual,
 reviewer, reviewed_unix, run_directory, unit, invocation_id, model_sha256,
 desktop=true, error_free=true, review_basis=closed_raw_frames, and raw_frames
@@ -50,6 +59,7 @@ import subprocess
 SHA = re.compile(r'[0-9a-f]{64}\Z')
 SECONDS, CYCLES, DISK_SIZE = 259200, 9000000000, 2 * 1024**3
 JSON_LIMIT, LOG_LIMIT, FRAME_LIMIT = 1024**2, 64 * 1024**2, 2 * 1024**2
+PARENTPOLICY_JSON_LIMIT = 4 * 1024**2
 ERROR = re.compile(
     rb'Invalid\s+VxD\s+dynamic\s+link\s+call|Windows\s+protection\s+error|'
     rb'\bA\s+fatal\s+exception\s*[0-9A-F]{2}\s+has\s+occurred\b|'
@@ -124,10 +134,10 @@ class Files:
         finally:
             os.close(fd)
 
-    def json(self, path):
+    def json(self, path, *, limit=JSON_LIMIT):
         def bad_constant(_value):
             raise ValueError('non-finite JSON number')
-        return json.loads(self.read(path), object_pairs_hook=pairs, parse_constant=bad_constant)
+        return json.loads(self.read(path, limit=limit), object_pairs_hook=pairs, parse_constant=bad_constant)
 
     def digest_disk(self, path):
         return self.read(path, limit=DISK_SIZE, size=DISK_SIZE, digest_only=True)
@@ -198,7 +208,8 @@ def resource_receipt(value, expected):
                       'KillMode': 'control-group', 'MainPID': str(expected['owner_pid']), 'RuntimeMaxUSec': '3d 1h'},
             'wrong direct supervisor resource owner')
     require(limits['memory.max'] == str(2 * 1024**3) and limits['memory.swap.max'] == '0' and
-            limits['pids.max'] == '32' and limits['cgroup.procs'].split() == [str(expected['owner_pid'])],
+            limits['pids.max'] == ('128' if expected['schema'] == 4 else '32') and
+            limits['cgroup.procs'].split() == [str(expected['owner_pid'])],
             'wrong memory/swap/tasks/owner-only closure census')
     quota, period = limits['cpu.max'].split()
     require(quota.isdecimal() and period.isdecimal() and 0 < int(quota) <= int(period), 'unbounded CPU quota')
@@ -257,7 +268,7 @@ def launcher_roles(run, expected, worker):
             'unknown reviewed parent launcher')
     roles = {str(launcher): expected['launcher_sha256'],
              str(run / 'observed-launcher.py'): expected['launcher_sha256']}
-    if expected['schema'] in (1, 3):
+    if expected['schema'] in (1, 3, 4):
         require('configured_launcher' not in expected and launcher.parent == run.parent and
                 worker['argv'] in (['/usr/bin/python3', str(launcher), str(run)],
                                    ['/usr/bin/python3', '-B', str(launcher), str(run)]),
@@ -285,9 +296,13 @@ def add_roles(roles, entries):
 def check(run, expected, visual, *, supervisor=None):
     run, files = absolute(str(run)), Files()
     require(run.resolve(strict=True) == run and re.fullmatch(r'win95-cold-[A-Za-z0-9_.-]+', run.name), 'wrong owned run leaf')
-    require(integer(expected['schema']) and expected['schema'] in (1, 2, 3), 'unknown expectation schema')
-    posted = expected['schema'] == 3
-    require(expected.get('profile') == ('board-posted16-40mhz' if posted else None),
+    require(integer(expected['schema']) and expected['schema'] in (1, 2, 3, 4), 'unknown expectation schema')
+    parentpolicy = expected['schema'] == 4
+    posted = expected['schema'] in (3, 4)
+    profile = ('board-posted16-40mhz-parentpolicy' if parentpolicy else
+               'board-posted16-40mhz' if posted else None)
+    metadata_limit = PARENTPOLICY_JSON_LIMIT if parentpolicy else JSON_LIMIT
+    require(expected.get('profile') == profile,
             'unknown or misplaced reviewed profile')
     unit_pattern = (r'ventium-board-posted16-win95-[A-Za-z0-9_.-]+\.service' if posted else
                     r'ventium-standard-win95-[A-Za-z0-9_.-]+\.service')
@@ -303,11 +318,14 @@ def check(run, expected, visual, *, supervisor=None):
     closure = query_supervisor(expected['unit']) if supervisor is None else supervisor
     supervisor_closed(closure, expected)
     processes_absent(expected)  # No runtime files or disks have been opened yet.
-    before_bytes, admission_bytes = files.read(run / 'receipt-before.json'), files.read(run / 'native-admission.json')
+    before_bytes = files.read(run / 'receipt-before.json', limit=metadata_limit)
+    admission_bytes = files.read(run / 'native-admission.json')
     require(hashlib.sha256(before_bytes).hexdigest() == expected['receipt_before_sha256'] and
             hashlib.sha256(admission_bytes).hexdigest() == expected['native_admission_sha256'], 'frozen admission receipt changed')
-    before, admission = files.json(run / 'receipt-before.json'), files.json(run / 'native-admission.json')
-    final, result = files.json(run / 'receipt-final.json'), files.json(run / 'result.json')
+    before = files.json(run / 'receipt-before.json', limit=metadata_limit)
+    admission = files.json(run / 'native-admission.json')
+    final = files.json(run / 'receipt-final.json')
+    result = files.json(run / 'result.json', limit=metadata_limit)
     resource_receipt(before, expected)
     resource_receipt(final, expected)
     require(final['worker'] == before['worker'] and before['unix'] <= final['unix'] < before['unix'] + SECONDS,
@@ -345,7 +363,8 @@ def check(run, expected, visual, *, supervisor=None):
             {'check_quake_timedemo', 'run_quake_standard'} and
             set(expected['rom_sha256']) == set(expected['rom_source_paths']) == {'boot0.rom', 'boot1.rom'} and
             before['exact_loaded_helper_archives'] == expected['helper_sha256'], 'missing exact helper/ROM identities')
-    source_model = run.parent / ('obj1-speed-q16/ao486sim_board_posted' if posted else 'ao486sim_ven_standard')
+    source_model = run.parent / ('obj1-speed-q16-parentpolicy/ao486sim_board_posted' if parentpolicy else
+                                 'obj1-speed-q16/ao486sim_board_posted' if posted else 'ao486sim_ven_standard')
     add_roles(roles, [(str(source_model), expected['model_sha256']),
                       (cmd[0], expected['model_sha256']),
                       (expected['pristine_disk_path'], expected['pristine_disk_sha256'])])
@@ -355,7 +374,9 @@ def check(run, expected, visual, *, supervisor=None):
     for name, digest in expected['rom_sha256'].items():
         add_roles(roles, [(expected['rom_source_paths'][name], digest),
                           (str(run / 'rom' / name), digest)])
-    build_inputs = ('prepared.json', 'build1-speed-q16-started.json', 'build1-speed-q16-closed.json',
+    build_inputs = ('build-started.json', 'build-closed.json',
+                    'obj1-speed-q16-parentpolicy/Vsystem__verFiles.dat', 'defines.txt') if parentpolicy else (
+                    'prepared.json', 'build1-speed-q16-started.json', 'build1-speed-q16-closed.json',
                     'obj1-speed-q16/Vsystem__verFiles.dat', 'defines.txt') if posted else (
                         'Vsystem__verFiles.dat', 'compile-inputs.before.sha256', 'build-output.sha256')
     require(all(pins.get(path) == digest for path, digest in roles.items()) and
@@ -414,7 +435,7 @@ def check(run, expected, visual, *, supervisor=None):
     supervisor_closed(query_supervisor(expected['unit']) if supervisor is None else supervisor, expected)
     return {'schema': 1, 'status': 'PASS', 'scope': 'Win95 cold boot to desktop only', 'suite_acceptance': False,
             'unit': expected['unit'], 'invocation_id': expected['invocation_id'], 'candidate_sha256': expected['model_sha256'],
-            'profile': 'board-posted16-40mhz' if posted else 'standard45',
+            'profile': profile if posted else 'standard45',
             'closed_engine_log': counters, 'manual_desktop_frames': witnesses, 'closed_private_disk_sha256': disk_digest,
             'limitations': ['Desktop recognition is externally pinned manual authority, not automated recognition.',
                             'Exact loaded helper bytes; launcher source observed before/after, not loaded-memory ancestry.']}
@@ -432,9 +453,14 @@ def main():
     args = parser.parse_args()
     try:
         files = Files()
-        for path, digest in ((args.expect, args.expect_sha256), (args.visual_review, args.visual_review_sha256)):
-            require(SHA.fullmatch(digest or '') and hashlib.sha256(files.read(path)).hexdigest() == digest,
+        for path, digest, limit in ((args.expect, args.expect_sha256, PARENTPOLICY_JSON_LIMIT),
+                                    (args.visual_review, args.visual_review_sha256, JSON_LIMIT)):
+            require(SHA.fullmatch(digest or '') and hashlib.sha256(files.read(path, limit=limit)).hexdigest() == digest,
                     'external expectation/manual-review digest missing or changed')
+        expected = files.json(args.expect, limit=PARENTPOLICY_JSON_LIMIT)
+        require(type(expected) is dict, 'expectation must be a JSON object')
+        require(expected.get('schema') == 4 or files.observed[str(args.expect.absolute())][0][2] <= JSON_LIMIT,
+                'legacy expectation exceeds its original metadata limit')
         supervisor = None
         if args.supervisor_closure is not None:
             require(SHA.fullmatch(args.supervisor_sha256 or '') and
@@ -443,7 +469,7 @@ def main():
             supervisor = files.json(args.supervisor_closure)
         else:
             require(args.supervisor_sha256 is None, 'supervisor digest without receipt')
-        result = check(args.run.absolute(), files.json(args.expect), files.json(args.visual_review), supervisor=supervisor)
+        result = check(args.run.absolute(), expected, files.json(args.visual_review), supervisor=supervisor)
         files.finish()
     except (OSError, ValueError, KeyError, TypeError, IndexError, subprocess.SubprocessError) as exc:
         parser.exit(2, 'WIN95-STANDARD-CLOSED-FAIL: ' + str(exc) + '\n')
