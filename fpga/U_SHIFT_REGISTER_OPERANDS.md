@@ -140,14 +140,28 @@ the separate full-PC warnings. Frozen manifest SHA-256:
 `a36e00e8b30b6cfed198e8522c0baa338b528eb490d01e4d0d183f8ec053935e`.
 
 The two original short CoreMark seed disks run on this PC model, invocation
-`60e15ca2e908497e8cfddb564f3c1da9`. The performance seed closes with its five
-reference CRCs and unchanged **4,767,218 cycles**; the validation seed remains
-running. Their unchanged CRC and cycle checks are
+`60e15ca2e908497e8cfddb564f3c1da9`. Both now close with native exit 0, stable
+inputs, matching reference CRCs and unchanged cycles: **4,767,218** for the
+performance seed and **4,753,406** for validation. The independent audit passes;
+actual V retirements are 1,055,307 and 1,054,254 respectively, and no OOM event
+is recorded. Their unchanged CRC and cycle checks are
 admission checks, **not duration-valid scores or the full standard suite**.
-An owned timing queue waits for both preparation and seed closure, then
-requests one guarded 45-minute synthesis and original-clock reports. No
-placement, routing or deployment is authorized by that queue; no new Fmax is
-available yet.
+After both preparation and seed closure, the owned queue launches one guarded
+45-minute synthesis and queues its independent original-clock reports. The
+native launcher starts at **08:43:53 UTC**, and its single Vivado family is
+observed live at **08:43:56 UTC**, with **8 GiB RAM /6 GiB swap /48 tasks**.
+The 4 GiB disk floor, 2 GiB host reserve and 13 GiB combined-memory early stop
+are unchanged. The starting disk check still requires more than twice the
+matched parent's measured growth above the stop floor. Original **40 MHz
+core /100 MHz PL** constraints and the matched diagnostic `logic_only`
+mapper remain unchanged.
+
+Synthesis controller invocation: `5dca43f5622d4f3a988423fbc556b54d`;
+Vivado scope: `908e5981dd364b6095834f847af0d5b9`;
+original-clock queue: `490247bb20b74c5497766c041e810334`.
+These identify the live experiment, not a completed frequency result. No
+placement, routing or deployment is authorized by these controllers. **The
+latest completed estimate remains 26.14379 MHz, below the 40 MHz requirement.**
 
 **880,645,526 bytes** of explicitly selected inactive compiler products are
 losslessly archived, with verified member hashes and recovery commands in
