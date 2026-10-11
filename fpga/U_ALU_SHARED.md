@@ -89,6 +89,41 @@ The [runner](../verif/issue_uv/run_u_alu_shared.py) uses Icarus, not Vivado or
 a heavy Verilator build, and refuses an output outside external scratch or
 less than 4 GiB free space.
 
+## Cold system fixture preflight (original model only)
+
+The new [assembly corpus](../verif/issue_uv/t_u_alu_shared.S) boots independently
+through real mode, protected mode and paging into flat/relocated segments. It
+checks byte/high-byte/word/dword arithmetic, ADC/SBB carry input, INC/DEC carry
+preservation, NEG overflow, logical operations, MOV/NOT flag preservation and
+a memory-source ADD. Each subject is followed by a condition-code consumer,
+at four instruction-line offsets, over eight cold-to-warm iterations.
+
+[The driver](../verif/issue_uv/run_u_alu_system.py) uses the pinned system QEMU
+and native AXI-backed UV-fast core. It compares complete architectural and
+cycle streams at AXI latency 0/7, without saved state, debug stepping or
+omitted terminal records. Goldens run sequentially; four native workers
+exercise the existing binary without launching a heavy compiler.
+
+`system-control-r2/` closes successfully in approximately **52 seconds**,
+invocation `73fb476143fb48c0b22790e053e876b4`, native exit 0, unchanged inputs,
+197,656,576-byte peak unit memory. Coverage: **128 cold fixtures /512
+model-latency measurements**, **66,304 architectural plus 66,304 cycle
+records**, **3,328 actual paired subjects**. Both named model slots deliberately
+use original shift-candidate core `ce54833f54ad48e002ad001b0eb7223ac81e910f5aca8400a04634babf948fa0`.
+**This validates the fixtures; it does not test a whole core containing the
+shared-ALU proposal.** Receipt SHA-256:
+`ebdda0f990de1a7845cba8e93862945d74c906f978ef56f13f5181d16d37fbeb`.
+
+The first fixture preflight is retained as **FAIL** in `system-control-r1/`:
+its test incorrectly required NEG, NOT and non-accumulator TEST-immediate to
+pair. Their architectural comparisons passed, but that pairing expectation
+contradicted [AP-500's NP classification](../docs/ap500-pairing-table.md) and
+the existing golden timing model. The corrected test does not force those
+instructions to pair: it **asserts no pairing** and checks **504 warm
+one-clock handoffs** from these subjects to Jcc. The ordinary pairable
+register cases still require actual paired U/V retirement. No RTL or model
+configuration was changed to obtain the corrected preflight result.
+
 ## Remaining acceptance
 
 Use the pending register-shift timing report to choose the next measured
