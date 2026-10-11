@@ -258,7 +258,7 @@ store, and checks that reset does not undo an acknowledged write. A separate
 diagnostic hit-stream profile additionally holds a response while the live
 address changes, then tests both reset and consumption with no new request.
 
-[The runner](../verif/l1/run_fp_read_ack_reset.py) compares the unchanged
+[The R2 runner](../verif/l1/run_fp_read_ack_reset_r2.py) compares the unchanged
 carry parent and exact exported candidate with all hardware feature defines
 retained (only `SYNTHESIS` removed to execute assertions). The streaming
 profile adds `VEN_L1D_HIT_STREAM`; it is not the deployed profile. Inputs and
@@ -266,11 +266,18 @@ logs are pinned, structural lint classes are fatal, and parent/candidate
 completion counts must agree. This is cache-level, not whole-core reset
 coverage or FPGA acceptance.
 
-Unit `ventium-fp-read-ack-reset-queue-oct11.service`, invocation
-`d7dd46eb7ffd4cd59a75919e2e8a0bb5`, waits for the exact timing-audit queue
+Preflight found that R1 omitted `ven_p54_hit_return` and its bank arbiter from
+the source list despite enabling the hardware dual-hit profile. Its pending
+queue (`d7dd46eb7ffd4cd59a75919e2e8a0bb5`) was explicitly stopped before any
+native build/test launched; no `reset-r1` output or native log exists. R1 and
+its original pin receipt remain preserved. R2 supplies both dependencies and
+checks each against both frozen manifests; the testbench is unchanged.
+
+Unit `ventium-fp-read-ack-reset-r2-queue-oct11.service`, invocation
+`b044abc0e7e4485da19a396ba151f855`, waits for the exact timing-audit queue
 invocation above before entering the common heavy-build guard. Its four
 build/runs have a 480-second aggregate deadline. No reset-regression pass is
-claimed until native closure; future results belong under `reset-r1` in the
+claimed until native closure; future results belong under `reset-r2` in the
 read-ACK evidence root. Frozen synthesis payloads are unchanged.
 
 Verified gameplay baseline: **0.51030715 U+V retirement-event IPC**, model
