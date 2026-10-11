@@ -123,9 +123,14 @@ The
 only the exact header delta from the combined 190-payload manifest. Six
 exporter tests pass, including profile drift, fast-feature removal, unreviewed
 source changes and input replacement rejection. The exact new model's short
-CoreMark seed run is live under `ventium-v-carry-cm10-branch-oct11.service`,
-invocation `529ad6850c444af2b8bf28e0aa270d14`; export is also running. No
-CoreMark, export/lint or frequency result is claimed before its run closes.
+CoreMark seed run closes successfully under
+`ventium-v-carry-cm10-branch-oct11.service`, invocation
+`529ad6850c444af2b8bf28e0aa270d14`. Performance/validation take
+194.90 / 194.24 seconds, retain their reference CRCs and exactly match the
+parent's **4,767,218 / 4,753,406 clocks**. The independent audit also passes;
+all native children are reaped, inputs are stable and every OOM counter is
+zero. These ten-iteration runs are not duration-valid scores or the original
+long standard-suite seeds.
 
 The export subsequently closes successfully. An independent source audit
 rehashes **300,773 inputs**, verifies all **102 shared core sources**, and
@@ -136,30 +141,57 @@ the posted-16 transport. Manifest SHA-256:
 Strict CPU-hierarchy lint then passes all six hard structural classes in
 **3.78 seconds**, native exit 0 with stable inputs; invocation
 `cd3d860b440745a3a7c8d5497052dfed`. This is neither full-SoC lint nor timing/
-hardware qualification. The short CoreMark run remains live; the synthesis
-queue has not launched Vivado yet.
+hardware qualification.
 
-The owned queue is prepared to run the same short CoreMark seeds, source
-export/audit and strict CPU lint, then one guarded synthesis with a **45-minute
-limit**, followed by original-clock timing analysis. The earlier combined run
+After the short CoreMark seeds, source export/audit and strict CPU lint, the
+owned queue requests one guarded synthesis with a **45-minute limit**,
+followed by original-clock timing analysis. The earlier combined run
 reached technology mapping but exhausted its 30-minute allowance; only the
 time allowance changes. The 8 GiB RAM / 6 GiB swap caps, 13 GiB combined early
 stop, 2 GiB host reserve, 6 GiB disk admission and 4 GiB disk stop remain.
 The queue does not launch routing or deploy an image. No frequency gain is
 assumed from the source-level changes.
 
+The first launch is refused **before Vivado starts**, not an OOM or synthesis
+failure. Unit `ventium-mc-branch-residency-synth-oct11.service`, invocation
+`053ce7037dd446d7bdb124229fbcc2ec`, exits 1 at **07:12:35 UTC** on its dynamic
+disk admission check. The matched parent's measured growth is 1,456,762,880
+bytes, so admission requires **more than 7,208,493,056 free bytes**, stricter
+than the fixed 6 GiB minimum. About 6.76 GB was available. No native output
+directory or checkpoint exists from that attempt; its timing queue also exits
+without running Vivado.
+
+An additional **578,886,130 bytes** is recoverably archived from the now-closed
+PC model and verified inactive older generated compiler products, with all
+source/evidence pins and binaries retained. Free space rises to about 7.34 GB.
+`launch_synthesis_r2.py` verifies the exact terminal refusal, successful cleanup,
+unchanged candidate hashes and the original admission threshold before launching
+fresh `synthesis-r2/` and `clock-r2/` outputs. The RTL, mapper, clocks, 45-minute
+limit and all memory/disk guards are identical; only output roots/controller
+names change. Controller `ventium-mc-branch-residency-synth-r2-oct11.service`,
+invocation `959fb2f1f3b24549bba161c335768368`; timing queue invocation
+`8e575065255747debc3156bbb997ece2`. No synthesis or Fmax result is available yet.
+The native launcher actually starts at **07:16:44 UTC**, and the single Vivado
+scope is admitted at **07:16:47 UTC**, invocation
+`9dd9084333b24bdba4c6ac1c56e7789d`. Its observed limits are 8 GiB RAM, 6 GiB
+swap and 48 tasks. This is a live run, not merely a queued command.
+
 ### Disk recovery for this run
 
-**2,423,344,551 bytes (2.26 GiB)** of net space was recovered with checked,
+**3,002,230,681 bytes (2.80 GiB)** of net space was recovered with checked,
 lossless `tar --zstd` archives. These contain generated compiler products from
 closed builds and `.rtd` intermediates from the timed-out combined synthesis.
 Every selected file was checked against protected source/evidence pins;
 archives were compared before loose copies were unlinked. Sources, binaries,
 headers, model-local harness objects, traces, logs and completed checkpoints
 remain. The canonical `verif/tb/obj_dir` was not touched. Recovery commands and
-hashes are under `closed-product-recovery/` and `inactive-compiler-recovery/`
+hashes are under `closed-product-recovery/`, `inactive-compiler-recovery/` and
+`synthesis-reserve-recovery/`
 in this candidate's evidence root. This is recoverable storage cleanup, not
 removal of test evidence or an acceptance waiver.
+The first additional-recovery launcher had a Python syntax error and made no
+changes. Its failed script/journal remain; the corrected script passed syntax
+validation before the successful recovery.
 
 The canonical gate remains red; the full standard suite and physical Win95/
 Quake acceptance remain open. The best completed unplaced post-synthesis
