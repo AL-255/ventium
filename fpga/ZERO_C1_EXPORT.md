@@ -426,3 +426,39 @@ cleanly closed candidate run, UI interaction, complete standard suite and
 physical FPGA acceptance are still required. The separate 40 MHz timing
 synthesis remains the primary implementation work; its frozen inputs are not
 changed by this host-checker repair.
+
+## October 11: original cold Quake timedemo completed
+
+The older `2b4d7a48` simulation now has a **completed Quake component PASS**:
+the original DOS Quake `demo1` reports **969 frames /125.3 seconds /7.7 FPS**
+at the simulated **40 MHz** core rate. This is not a physical-board result,
+a newer timing candidate's pass, or the whole standard suite. The Windows
+closure above remains failed.
+
+`ventium-zero-c1-quake-oct10.service`, invocation
+`6f9c33893388476bb57d8af5ecbe36b6`, closes native zero at **12:15:41 UTC** after
+56,743.20 host seconds. The closed collector records actual child wait, pipe
+EOF, equal captured/persisted byte counts (2,008,293), no capture error, and
+absence of the process group. The separate resource receipt reports no OOM.
+
+The follow-up independently reruns `tools/check_quake_timedemo.py check` on
+the stopped private disk and complete log. It again passes: fresh QCONSOLE
+result, exactly 969 frames, consistent printed FPS/time, original cold reset,
+no restored snapshot, no detected terminal error, and **11,572 complete
+progress records**, ending at **5,791,550,827 clocks**. All **7,970** retained
+input hashes are also rechecked successfully. No guest rerun or replacement
+of the previous receipts is involved.
+
+Evidence root: `ventium-zero-c1-soc.FTbYSn0L/quake-cold-zero-c1-oct10.1/`
+under external scratch. SHA-256:
+
+- Supervisor result: `e8bc0ddbc06dbc9095bbde593da23788388fab6f9f416a9789b98cc1c3591ecf`
+- Native result: `27ac3781c8105af1f2cabe18428497d947c961b86e62c4eeeba90cfb6ea60bb4`
+- Complete log: `8ad0d44792331db13fb0d0be6b974318127a811a41e3967e736c91c84cd77449`
+- Closed guest disk: `6d36358611c1ce3b08d6ca8edaa358ff0099fd17037f155a09f9be7c5f85e4d1`
+
+Verified gameplay IPC remains **0.51030715 total U+V retirement events/clock**
+on this same build over **1,200,065,237–1,300,065,237**. It is a bounded gameplay
+window, whereas 7.7 FPS is the complete timedemo result; do not equate their
+measurement intervals or call that IPC a full-demo average. The fragment and
+descriptor-width successors have no gameplay measurement or FPGA acceptance.
