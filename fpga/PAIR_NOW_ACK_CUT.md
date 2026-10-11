@@ -102,6 +102,24 @@ Its controller and receipts are under the evidence root's parent directory,
 `after_timing_cache.py` and `cache-queue/`. Do not equate a queued job or a
 generated fixture with an executed pass.
 
+## Whole-core continuation prepared, not launched
+
+[`build_pair_now_core.py`](../verif/l1/build_pair_now_core.py) admits only the
+exact measured readiness core (`64e997d5…`) and the successfully closed actual
+cache regression above. It rehashes both native positive binaries/logs, the
+rejected ownership mutant and all pinned sources, and requires real immediate
+returns and held-response checks. A printed success or an unrun leaf proof is
+insufficient. Its derivative changes only `rtl/mem/ven_l1d.sv`, preserves all
+195 source files / 150 definitions, and checks the private harness's compiled
+dependency file against its own generated model header.
+
+The three admission unit tests pass, including twelve deliberately incomplete
+or failed row variants. These test the builder's rejection behavior, **not the
+cache or CPU**. This whole-core build is not queued or running; the exact live
+timing and cache owners must close first. The original canonical differential
+gate still requires a new run and a genuine pass; no comparator, terminal
+record, C1 mask or cycle band is changed by this continuation.
+
 Verified gameplay baseline: **0.51030715 total U+V simulated retirement-event
 IPC**, older model `2b4d7a48`, cycles **1,200,065,237–1,300,065,237**.
 This draft has no gameplay/FPS or FPGA measurement. The inherited canonical
