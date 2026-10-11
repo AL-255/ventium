@@ -2,7 +2,8 @@
 
 **Private timing experiment; not a 40 MHz, canonical-gate or FPGA pass.**
 The latest measured parent remains **26.55408 MHz**, below the required
-40 MHz. There is no synthesis, area or gameplay result for this change.
+40 MHz. Native synthesis and its source audit now pass; the original-clock
+timing report is running. This change has no measured Fmax or gameplay result yet.
 
 ## Measured motivation and exact change
 
@@ -195,13 +196,46 @@ restart an observation timeout. It then permits one exclusive 45-minute
 Vivado synthesis and a separate 15-minute original-clock reporting run,
 with the existing **8 GiB RAM /6 GiB swap**, **4 GiB disk stop floor** and
 host-memory reserves unchanged. No placement, routing or deployment is
-started by this queue. The synthesis controller is now live under
+started by this queue. The synthesis controller starts under
 `ventium-bus-cancel-synth-oct11.service`, invocation
 `3cb3b697de204e66a54aadaf4de7f8cc`. Its launcher starts at **10:07:29 UTC**;
 the single native Vivado family is observed at **10:07:32 UTC**, scope
 `98ffa801966d4fb3931758a9272af25f`, with the requested hard limits verified.
-This is a running synthesis, not a completed result: **26.55408 MHz remains
-the only measured candidate-line Fmax** until original-clock reports close.
+It closes native zero at **10:39:20 UTC** in **1,911.18 seconds** (31.85 minutes),
+with unchanged inputs, no resource-stop/controller failure and no OOM. Peak
+scope usage is 8,589,733,888 bytes RAM and 178,536,448 bytes swap, within the
+unchanged hard caps. The independent audit checks **315,582 input pins**, the
+actual 156 definitions and 148 native `read_verilog` files, the single intended
+payload delta, native completion, DCP and resource receipts.
+
+| Synthesis utilization | Shift parent | Bus-payload candidate |
+| --- | ---: | ---: |
+| CLB LUTs | 184,962 | 185,708 |
+| CLB registers | 54,646 | 54,612 |
+| BRAM tiles | 277.5 | 277.5 |
+| DSPs | 47 | 47 |
+
+This is a **746-LUT increase (+0.40%)**, not an area reduction. There are zero
+errors, 1,564 warnings and one critical warning in the audited logs. The critical
+warning is the inherited generated PS8 XDC clock-on-unknown-pin warning; it is
+retained, not waived. Original-clock coverage and structural timing qualification
+still belong to the following report stage.
+
+Closed synthesis receipt SHA-256:
+`361a468493a0cb252b9954ee7c3969bc48ecd59c919799cbfc933b7c7c281cae`.
+Independent synthesis audit SHA-256:
+`dc8ce76caad65d9efc505c08c0fce21fe25d20859c2cb12ba504d1f65b35de1e`.
+DCP SHA-256:
+`26b3ffc95c25b1ac211827eed1d5561710b3f32e4f969d0af8cf0d3ff9583577`.
+
+The timing-report controller is now active under
+`ventium-bus-cancel-clock-oct11.service`, invocation
+`73ef37243d0f48ed802a8a2dd4af84d9`. **26.55408 MHz remains the only measured
+candidate-line Fmax** until those original-clock reports close. A successful
+synthesis alone is not a 40 MHz pass. The independently reproduced generic-read
+overread and private follow-on correction are documented in
+[FRAGMENT_READ_PAYLOAD.md](FRAGMENT_READ_PAYLOAD.md); that correction is not
+in this completed DCP.
 
 Full downstream/core verification, actual mapped timing, the original standard
 suite and physical FPGA Win95/Quake validation remain required. The existing
