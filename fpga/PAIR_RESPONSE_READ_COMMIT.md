@@ -1,6 +1,6 @@
 # Paired-load response timing investigation — October 11, 2026
 
-**Preliminary tests only; no new RTL or synthesis candidate.** The target remains
+**Private RTL recipe and extracted tests; no whole-core build or timing result.** The target remains
 at least **40 MHz synthesized Fmax**, preserving UV, fast pipes and full P5
 caches. The measured readiness predecessor is **30.34809 MHz**, unplaced.
 [The read-hint commit candidate](MC_READ_COMMIT.md) is still synthesizing.
@@ -91,12 +91,46 @@ current evidence.
 
 Neither fixture instantiates the complete core/cache or proves translation,
 decoder admission or backpressure integration. Before promotion: wait for the
-current measured timing result; prepare an isolated exact-parent derivative;
-add live ownership/output-equivalence assertions; run full-core memory/store/
-FP/fault A/B and unchanged canonical verification, full-PC checks and matched
-synthesis. Current canonical verification is still **FAIL**. No 40 MHz result,
+current measured timing result, then build the isolated derivative and run
+full-core memory/store/FP/fault A/B and unchanged canonical verification,
+full-PC checks and matched synthesis. Current canonical verification is still
+**FAIL**. No 40 MHz result,
 full standard-suite pass, routed timing or physical FPGA acceptance is claimed.
+
+## Exact private recipe prepared, not promoted
+
+[`prepare_pair_response_read_commit.py`](../verif/l1/prepare_pair_response_read_commit.py)
+now implements that cut in a private derivative of the exact pinned core.
+Only the paired-response-consumption equation changes. Architectural
+`pipe_int_commit`, the response slot, requests, owner transitions and clock
+count remain untouched. The active raw/no-dual-prime branch gets live assertions
+for both the ownership invariant and complete old/new response-ready equality.
+Other priming profiles retain the original equation; no build define changes.
+Source drift and reapplication reject before producing a candidate.
+
+[`run_pair_response_read_commit.py`](../verif/l1/run_pair_response_read_commit.py)
+reuses the owner stimulus but substitutes the **actual recipe**, including its
+guards and assertions, for the prospective test equation. `pair-response-recipe-r1`
+passes the same **77,834 clocks** and rejects all four native mutants in
+**1.79 seconds**. Four preprocessing checks verify target selection and exact
+preservation of the old equation in nonraw, dual-prime and regmem profiles.
+These are guard checks, not full execution coverage of those other profiles.
+All native logs, binaries, generated sources and input pins independently rehash.
+New private core SHA-256:
+`8d0c3c35eca0c3ea97981d3f33178ef0c656a2eb90f27faea97fe998ab5e24a0`.
+Recipe receipt SHA-256:
+`5062c51508e1ba1815cbaf61f01ab9fca11eb578387d3715b3f75619af814d00`.
+
+[`build_pair_response_read_core.py`](../verif/l1/build_pair_response_read_core.py)
+is prepared, **not launched or queued**. It admits only the compiled read-hint
+parent `64dadfc9…`, its exact read-hint header, successful actual-recipe/native
+tests and the R2 ownership proof. It keeps all 195 sources / 150 definitions,
+changing only `core.sv`, and checks the private harness's own generated header.
+Native-exit/guard/proof/coverage admission checks accept the real receipts and
+reject 21 deliberately bad variants. They are builder checks, not a CPU pass.
+The guard requires the shared heavy-build scope and no live Vivado, so this
+preparation does not compete with or mutate the running read-hint synthesis.
 
 Verified gameplay baseline: **0.51030715 total U+V simulated retirement-event
 IPC**, older model `2b4d7a48`, cycles **1,200,065,237–1,300,065,237**. The current
-timing candidate and this unimplemented proposal have no gameplay measurement.
+timing candidate and this private derivative have no gameplay measurement.
