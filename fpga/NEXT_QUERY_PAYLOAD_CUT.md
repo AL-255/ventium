@@ -50,6 +50,32 @@ Evidence: `/home/yukidama/external/tmp/ventium-next-query-payload.sd8MaX6W`.
   the retained address) fail the offered-address check with native exit 1.
 - Leaf receipt SHA: `070aa4c8bba65ce924f9a12ba9f5f96f43a3c3f8f9a5eaf98481f1ab7d885ec5`.
 
+The additional [seam regression](../verif/l1/run_next_query_seam.py) instantiates
+the real `ven_cachemap` and extracts the unchanged seam permission, L1 lookup,
+ready and capture equations from the frozen parent sources. It checks that
+changing an inactive address cannot change lookup selection/address, ready or
+capture. This includes 24 address boundaries, all 128 payload/offer control
+combinations, 16 chipset configurations, and idle, owned-response, fill and
+independently blocked-control cases. DRAM holes, PAM, SMRAM/save-aperture and
+top-of-memory rejection remain active.
+
+Both ordinary and prime-under-fill profiles pass **196,608 samples each**
+(393,216 total), including 155,136 offers per profile. They observe 25,598 /
+30,524 ready events and 13,966 / 16,652 captures respectively. In each profile,
+12,032 inactive address pairs select different map regions without affecting
+the observed lookup/handshake. Removing the request guard deliberately fails
+both negative controls at sample 512 (`req=0`), native exit 1.
+
+The native run closes in 3.73 seconds, unit
+`ventium-next-query-seam-oct11.service`, invocation
+`38db534638c048e48cf3eff8d5cf2176`; an independent read checks all 6,879 pins,
+eight native exit/log receipts and both positive sample counts. Receipt:
+`seam-r1/closed.json`, SHA-256
+`633f3a12d53e4f3bf0a5638cd95c7fbdc7189c2debba494cf1b8ced88be0f478`.
+Icarus reports expanded `always_comb` sensitivity for constant selects; those
+diagnostics are retained. This is a **combinational seam test**, not a cache
+array/sequential-owner test, whole-core differential pass or timing result.
+
 The initial core-build helper selected `core.sv` instead of this header and
 was rejected by the source-hash check before compilation. Its archived source
 is `core/failed_build_driver.py`. Revision 2 fixes the target and checks it
