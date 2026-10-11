@@ -222,9 +222,66 @@ with length mismatches. Independent canonical inputs are not identical: only
 one complete functional A/B stream matches. No mask, golden, terminal record
 or band changes. These failures remain acceptance debt, not passed tests.
 
-Full-PC benchmarks, export/lint and synthesis are still pending. The previously
-prepared address-payload candidate remains separate; it is not stacked into
-this SRT build. The CLZ candidate has no frequency or gameplay measurement.
+### Balanced-CLZ full-PC/export checks and synthesis launch
+
+The [private full-PC builder](build_srt_clz_soc.py) closes natively in **15.18 s**,
+model `1aac192a8cb8610b26d1a71c2bfd576c94002dd31b809c4a9fdd331cb9bafb9e`.
+All 102 shared directed RTL sources agree, with only `fpu_srt_div.sv` changed
+from the write-direction parent. The 154 simulator defines, posted-16 transport,
+private model-local harness header and 98 inherited SoC structural warnings
+are retained. This is not a full-SoC lint pass.
+
+Both unchanged short CoreMark disks finish with native exit 0 and reference
+CRCs matching QEMU:
+
+| Seed (10 iterations) | Parent cycles | CLZ candidate cycles | Actual V retirements |
+| --- | ---: | ---: | ---: |
+| Performance | 4,767,218 | 4,767,218 | 1,055,307 |
+| Validation | 4,753,406 | 4,753,406 | 1,054,254 |
+
+This is **0% cycle-throughput change**, not a valid-duration score or the
+standard suite's long correctness seeds. The independent audit checks 63,475
+input pins, actual native CPU-11 affinity, original media/ROM, real board-profile
+AXI transport, clean native exits and no OOM. Audit SHA:
+`cdf29862897d233350b415867ab67f12560dda277b89a406a8438853d1baec9a`.
+
+The [source exporter](freeze_srt_clz_rk_candidate.py) retains 190 payloads,
+156 hardware defines, full P5 L1s and the 117-unit/49-include closure. Four
+exporter tests pass. Its first invocation rejects the known external-symlink
+spelling of `audit_core.py` before copying; adding only that explicit alias
+allows export without admitting arbitrary aliases. The independent source
+audit checks 63,636 input pins and the exact one-function source delta.
+Strict CPU-hierarchy lint passes with all six structural warning classes
+treated as errors. Manifest SHA:
+`9f33b2549df1c10ce4cb60351a834bdbd9c2b8087e0282f5349454a862ef6b4a`.
+
+Generated compiler intermediates from explicitly checked inactive runs are
+losslessly archived, tar-compared and hash-checked before their loose copies
+are removed. Recovery commands are retained in each archive receipt. RTL,
+executables, private harness objects/headers, media, logs, traces and pinned
+inputs remain intact. This restores the disk reserve without lowering the
+4 GiB runtime stop floor or the admission rule of twice the matched parent's
+actual growth above that floor.
+
+Matched diagnostic synthesis launches **02:37:50 UTC on October 11**:
+`ventium-srt-clz-full-synth-oct11.service`, invocation
+`08b78fe2aac54b60b1373d15d29d0cb8`; the observed exclusive Vivado scope is
+`9b3880c4daab4ea48bf27336f8c17204`. It keeps original 40/100 MHz clocks,
+the same logic-only mapper, 8 GiB RAM / 6 GiB swap limits and 30-minute cap.
+The live controller enforces host-memory, swap and disk reserves.
+`ventium-srt-clz-audit-queue-oct11.service`, invocation
+`0d5a28143c0847da9e66dc56d0bec8fe`, will independently audit native closure
+and compare timing against the **24.33504 MHz write-direction parent**.
+The new timing auditor excludes its own redirected stdout from its input pins,
+avoiding the prior receipt's self-hash defect. No retry, route or deployment
+is authorized by this queue.
+
+**At this checkpoint synthesis is running; no new Fmax is available.** The
+previously prepared address-payload candidate remains separate; it is not
+stacked into this SRT build. A separate
+[quotient-initialization proposal](SRT_QACC_INIT_PAYLOAD.md) is queued for
+unit verification after this timing run. Canonical verification remains FAIL;
+there is no new bitstream, board qualification or candidate gameplay result.
 
 Gameplay baseline: **0.51030715 total U+V retirement-event IPC**, model
 `2b4d7a48`, cycles **1,200,065,237–1,300,065,237**, predating this candidate.
