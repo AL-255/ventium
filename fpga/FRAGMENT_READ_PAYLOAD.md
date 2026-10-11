@@ -300,12 +300,15 @@ structural classes in 4.13 seconds; receipt SHA-256:
 `5c0b6aea396de0ff1e44b0ef621362abac4ccd0be7bb4c40072c3cc9c21a2fcc`.
 This is not full-SoC lint or a new synthesized timing result.
 
-The original short CoreMark disks are running under
+Both original short CoreMark disks have closed successfully under
 `ventium-v-carry-cm10-fragment-exact-oct11.service`, invocation
-`41d29ff820a74e8a87ffbb197c439456`. The performance seed closes native zero,
-matching all reference CRCs and the predecessor's **4,767,218 ticks**, with
-1,055,307 V retirements. Validation remains running at this update. Ten
-iterations are not a duration-valid CM/MHz score or the full standard suite.
+`41d29ff820a74e8a87ffbb197c439456`. The independent auditor reopens the native
+commands, exits, logs, reference CRCs, source pins and actual CPU affinity.
+Performance matches the predecessor's **4,767,218 ticks**, with 1,055,307 V
+retirements; validation matches **4,753,406 ticks**, with 1,054,254 V retirements.
+Both models exit zero with no OOM event. Audit SHA-256:
+`eb54e34cd2c61c78a725f3b4f6281d63875bceb8fafbca6f76446787159340c0`.
+Ten iterations are not a duration-valid CM/MHz score or the full standard suite.
 There is no measured benchmark-cycle gain from this timing correction.
 
 Disk reserve recovery consolidates twenty closed guest-recovery archives into
@@ -322,9 +325,29 @@ hashes are under `archive-consolidation-r1/completion-closed.json` and
 All removals are reversible; the shared build guard and resource floors stay
 unchanged.
 
+### Bounded timing measurement launched
+
+[`prepare_fragment_exact_timing.py`](prepare_fragment_exact_timing.py) derives
+the measurement controllers from the pinned, completed BUS experiment. Their
+entire monitored process lifecycle is unchanged: one exclusive Vivado family,
+8 GiB RAM /6 GiB swap caps, 13 GiB combined early stop, 2 GiB host RAM/swap
+floors and 4 GiB disk stop floor. Disk admission retains twice the measured
+parent growth above that floor. The synthesis timeout is 45 minutes; the
+subsequent read-only original-clock timing report is capped at 15 minutes.
+There is no placement, route, bitstream generation or deployment in this queue.
+
+The queue is now live, invocation `cf4377d3fed4460986c93dc44072d514`;
+the synthesis controller is `ventium-fragment-exact-synth-oct11.service`,
+invocation `545d309bc1eb454faaeb68530514f97b`. The native Vivado executable
+has been observed in scope invocation `cb5e0a83d1094bd09579dc323c42e900`.
+The final audit must reopen the native source list and resulting checkpoint,
+compare the one-core delta, and report Fmax from the unchanged 25 ns core clock.
+A completed process alone does not satisfy the **at least 40 MHz synthesized
+Fmax** requirement. The canonical gate remains failed, not waived.
+
 Actual post-synthesis timing, all original standard-suite components, and
-physical FPGA Win95/Quake acceptance remain required. No new Vivado synthesis,
-placement, route, bitstream or board deployment has started for this successor.
+physical FPGA Win95/Quake acceptance remain required. No new placement, route,
+bitstream or board deployment has started for this successor.
 
 Verified gameplay baseline is **0.51030715 total U+V simulated retirement-event
 IPC**, model `2b4d7a48`, cycles **1,200,065,237–1,300,065,237**. It predates both
