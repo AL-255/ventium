@@ -1,9 +1,10 @@
 # Bus cancellation and payload selection — October 11, 2026
 
 **Private timing experiment; not a 40 MHz, canonical-gate or FPGA pass.**
-The latest measured parent remains **26.55408 MHz**, below the required
-40 MHz. Native synthesis and its source audit now pass; the original-clock
-timing report is running. This change has no measured Fmax or gameplay result yet.
+The completed original-clock netlist report gives **28.10410 MHz**, up from
+the parent's **26.55408 MHz** (+5.84%), still below the required 40 MHz.
+This is an **unplaced synthesized-netlist estimate**, not routed sign-off or
+a measured board frequency. This candidate has no gameplay result.
 
 ## Measured motivation and exact change
 
@@ -28,8 +29,8 @@ Candidate header SHA-256:
 `e892403371c601c2e2c2660565fb8d4bf8ed7408efe3c0bf271015da63bf7ba1`.
 The transform rejects drift and reverses to the exact parent header.
 
-The intended benefit is removal of cancellation from payload-selection logic,
-**not yet a measured timing improvement**. Invalid payload may differ. Issued
+The measured benefit is removal of cancellation from payload-selection logic.
+Invalid payload may differ. Issued
 transactions, consumed responses and architectural/cycle behavior must not.
 In particular, a low request signal alone is not a whole-system proof:
 retained responses, fragment starts/aborts, A20, SMM, denied reads and faulting
@@ -219,7 +220,7 @@ This is a **746-LUT increase (+0.40%)**, not an area reduction. There are zero
 errors, 1,564 warnings and one critical warning in the audited logs. The critical
 warning is the inherited generated PS8 XDC clock-on-unknown-pin warning; it is
 retained, not waived. Original-clock coverage and structural timing qualification
-still belong to the following report stage.
+are recorded below.
 
 Closed synthesis receipt SHA-256:
 `361a468493a0cb252b9954ee7c3969bc48ecd59c919799cbfc933b7c7c281cae`.
@@ -228,11 +229,34 @@ Independent synthesis audit SHA-256:
 DCP SHA-256:
 `26b3ffc95c25b1ac211827eed1d5561710b3f32e4f969d0af8cf0d3ff9583577`.
 
-The timing-report controller is now active under
+The timing-report controller closes native zero under
 `ventium-bus-cancel-clock-oct11.service`, invocation
-`73ef37243d0f48ed802a8a2dd4af84d9`. **26.55408 MHz remains the only measured
-candidate-line Fmax** until those original-clock reports close. A successful
-synthesis alone is not a 40 MHz pass. The independently reproduced generic-read
+`73ef37243d0f48ed802a8a2dd4af84d9`, at **10:48:24 UTC**, in 504.23 seconds.
+Inputs remain unchanged; there is no OOM or resource stop. Peak report-stage
+memory is 5,059,457,024 bytes with no swap. The independent native audit passes.
+
+| Original-clock synthesized estimate | Shift parent | Bus-payload candidate |
+| --- | ---: | ---: |
+| Core setup slack at 25 ns | -12.659 ns | -10.582 ns |
+| Estimated core Fmax | 26.55408 MHz | 28.10410 MHz |
+| Worst-path logic levels | 134 | 127 |
+
+The remaining worst path starts at `q_len_reg[0]` and ends at shared SRT
+`ua_reg[14]`: instruction decoding/length, access faults, fragment strobes,
+last-byte classification, cache response and FP input conversion remain
+connected. Its 35.371 ns data path comprises 8.728 ns logic and 26.643 ns
+estimated routing. The independent V-response capture path is also failing
+(-10.174 ns); fixing only SRT normalization cannot establish 40 MHz.
+Core hold is -0.101 ns. Eight no-clock pins and four outputs without output
+delay remain reported; there are no unconstrained internal endpoints. These
+coverage warnings are not waived or converted into a timing pass.
+
+Report-stage receipt SHA-256:
+`ab959a9802dc4182cb5335a5ed76fc6044fbf3548a8f6f6e5dc8fe95eec0643b`.
+Independent timing audit SHA-256:
+`9be26bc5fde8bf77810e567b1379712c2a270e80cef973535c2578598f5b87c3`.
+
+The independently reproduced generic-read
 overread and private follow-on correction are documented in
 [FRAGMENT_READ_PAYLOAD.md](FRAGMENT_READ_PAYLOAD.md); that correction is not
 in this completed DCP.
