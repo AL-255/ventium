@@ -1,7 +1,8 @@
 # Next-read address payload experiment — 2026-10-11 UTC
 
-**Leaf-tested proposal only. No whole-core, timing, gameplay or FPGA pass.**
-It is not included in the currently running V-carry synthesis. The objective
+**Directed whole-core comparisons pass; canonical verification is unqualified.
+No timing, gameplay, full-suite or FPGA pass.**
+It is not included in the completed V-carry synthesis. The objective
 remains at least 40 MHz synthesized Fmax with UV and fast pipeline retained.
 
 The previous synthesized critical path traverses raw decode, address/permission
@@ -83,11 +84,107 @@ before copying. Its build was cancelled while waiting on the shared heavy-build
 lock held by the existing Vivado family; **no native compilation started**.
 The cancellation receipt and original logs remain. Do not bypass the guard.
 
-Next: after the current synthesis and timing audit close, build a fresh core
-directory with `build_next_query_payload_core_r2.py`, run complete memory/FP/AGI
-QEMU comparisons and canonical verification, then check original cold CoreMark
-seeds before another synthesis. A native timing report must demonstrate any
-gain; this proposal does not inherit the parent's tests or frequency.
+## Whole-core checks
+
+After the V-carry synthesis and native timing audit closed, revision 3 built
+natively in **12.37 seconds**, with only `core_mem_chain.svh` changed. The
+model is `b191540ebf0e3038f7dfef1363dde38e2e73c6ca3e474bac624d6db98dafc59b`,
+under `core-r3`; invocation `3fa56835e6cc49d194f4ea7e8dcbba0b` closes native 0.
+Its private host object uses its own generated model header. The actual
+Verilator command retains all **150 distinct RTL `+define` switches** and
+the parent's C++ options; C++ `-D` switches are not extra RTL features.
+
+The memory, FP and AGI matrices run concurrently with 4 + 16 + 12 workers:
+
+| Corpus | Cold paged cases | Complete A/B architectural records | Additional witness |
+| --- | ---: | ---: | --- |
+| Integer memory | 72 | 31,392 | 1,500 targeted V-memory retirements |
+| x87/integer | 72 | 39,024 | 7,220 early FP command accepts |
+| Address dependency | 12 | 4,776 | All 350 AGI-priming accepts retained |
+
+Both AXI latencies 0/7 pass the complete original QEMU comparisons and exact
+parent/candidate retirement-state and cycle-stream comparisons. No state or
+terminal record is removed. Native owners all close with exit 0; the longest
+matrix takes 11.27 seconds. The independent audit rereads **18,080 pins**,
+all 75,192 complete architectural records, the native exits and retained
+terminal owners. Audit SHA-256:
+`f150e0010da2e3eaaae307031029186c35fa8b05be5d533ea6a63d6b6ad483ef`.
+
+### Canonical failures remain failures
+
+The unchanged canonical `make verify` exits **2 / FAIL**: **7/108 functional
+passes**, with **91 length-only failures** and **10 x87 `fstat` mismatches
+plus length failures**. The first field differences in those ten cases are
+C1 (`0x0200`): `tx_addsub`, `tx_chain`, `tx_cmp`, `tx_fp_denorm`, `tx_fprem`,
+`tx_fxam`, `tx_muldiv`, `tx_round`, `tx_sqrt`, `tx_unifdiv`. They must be
+investigated instruction by instruction; these are not all terminal-observer
+failures, and clearing/masking C1 globally is not an acceptable repair.
+No comparator, golden, record or cycle band was changed. Twelve of the 19
+scored cycle cases also fail; all 20 complete candidate/parent RTL cycle
+streams remain identical.
+
+[The failure inventory](../verif/issue_uv/audit_canonical_failure_inventory.py)
+reads all 108 retained functional traces (80,800 candidate records), preserving
+every field and record. It does **not** claim their parent/candidate streams
+are identical: only one is; independent canonical initial states differ,
+including stack addresses. An initial inventory assertion incorrectly assumed
+identical inputs and failed on `mb_accimm`; the corrected inventory records
+the complete first differences instead of masking them. This does not change
+the separate, same-input directed A/B comparisons above.
+Inventory SHA: `0ae1deb7f6d7aa605ba9e97feeb4c4793dd46a996a53f0230399203a14390988`.
+
+## Full-PC and hardware export
+
+The native full-PC build closes with exit 0 in **14.64 seconds**; model
+`bd5ec894072fd4f23123069594da525faa5605ea9d9ec3ed2715f93c25d3ebd0`.
+All 102 shared RTL files match the directed model. The 154 simulator defines
+and posted-16 transport remain unchanged. Its 98 inherited structural warnings
+are recorded; this is not a full-SoC lint pass.
+
+Both original short cold CoreMark seeds pass their original CRCs:
+
+| Seed (10 iterations) | Parent clocks | Candidate clocks | Actual V retirements |
+| --- | ---: | ---: | ---: |
+| Performance | 4,767,218 | 4,767,218 | 1,055,307 |
+| Validation | 4,753,406 | 4,753,406 | 1,054,254 |
+
+The unchanged auditor compares the FP-only ancestor; the intervening carry
+candidate has the same clocks. This is **0% cycle-throughput change**, not a
+duration-valid CM/MHz score or a standard-suite pass. Audit rechecks 31,556
+source pins, original media, CRCs, actual CPU-11 affinity and native child
+reaping. Both owners exit 0 with no OOM. Audit SHA:
+`9bab595aa1bef2e4f745892de9ef28dab3ceafb9de50b305f6dff1cc63e7a21c`.
+
+The [exporter](freeze_next_query_payload_rk_candidate.py) retains all **156
+hardware defines**, 190 payloads and the 117-unit/49-include source closure;
+only `rtl/core/core_mem_chain.svh` changes from the carry export. Four exporter
+tests pass. The first export refuses two previously unlisted historical driver
+path aliases before copying; the final recipe admits only those exact aliases
+and still checks their resolved paths and hashes.
+
+Manifest SHA: `8d4d3998dcfdc6badf6e9999e871f6fe1de1fdda878ca6f981868cf18a1c5e77`.
+Independent export audit checks 31,717 pins and all 102 shared directed RTL
+files. Strict CPU-hierarchy lint closes native 0 in **2.29 seconds** against
+that exact export; not a full-SoC lint pass.
+
+Matched diagnostic synthesis starts at **00:47 UTC, October 11**, unit
+`ventium-next-query-full-synth-oct11.service`, invocation
+`3f8e52d02fde4c21a6b79389a05a0081`. The actual exclusive Vivado scope is observed
+live, invocation `ff738a2cb56046849a3b732c7df3e4cd`, with the unchanged 8 GiB
+RAM/6 GiB swap limits, 30-minute native cap, 4 GiB disk stop floor and host
+memory reserve. A retained queue audits that exact run and then its original
+40/100 MHz clocks; it never retries, places, routes or deploys automatically.
+
+Before launch, lossless, verified archives recover about 1.08 GiB from six
+closed models' compiler intermediates and four older models' generated C++.
+RTL, private harness objects, executables, traces and reports are preserved;
+per-model `generated-objects.tar.zst` / `generated-cpp.tar.zst` and their
+receipts give exact restoration commands. No source pin is removed.
+
+A native timing report must demonstrate any gain; this proposal does not
+inherit the parent's 23.5855 MHz estimate or full-system qualification. The
+40 MHz target, canonical gate, full standard suite and new physical FPGA
+validation remain open.
 
 Verified gameplay baseline: **0.51030715 U+V retirement-event IPC**, model
 `2b4d7a48`, cycles **1,200,065,237–1,300,065,237**. It predates both timing
