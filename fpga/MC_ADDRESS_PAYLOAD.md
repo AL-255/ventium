@@ -66,6 +66,28 @@ invocation `b6e531761abc4bfb90136c8078e8b6d5`. It waits for the exact existing
 write-direction timing-audit queue to close, then uses the shared build guard.
 It never starts a competing synthesis or retries a failed native test.
 
+The prepared [whole-core builder](../verif/l1/build_mc_address_core.py)
+requires successful native positive/negative leaf runs and the source proof,
+rechecks all input hashes, and changes only `core_mem_chain.svh`. It retains
+the parent's complete feature profile and builds a separately named C++
+harness against its own generated model headers. No full-core build has run
+for this candidate yet.
+
+Two additional cold-reset A/B drivers are prepared from the existing prime
+fixtures, without editing those fixtures or their original runners:
+
+- [Branch priming](../verif/l1/run_mc_address_branch.py): ten instruction
+  shapes, all 32 instruction offsets, flat/relocated segments and AXI delays
+  0/7. Both models keep branch priming enabled; complete architectural and
+  cycle records, as well as actual branch-hint owners, must agree.
+- [Held-read priming](../verif/l1/run_mc_address_held.py): six producer and
+  exclusion shapes, flat/relocated segments, offsets 0/31 and AXI delays 0/7.
+  Both models keep held priming enabled; complete traces and hint counts
+  must agree, with explicit held-read and paired-load witnesses.
+
+These are prepared tests, not passing results. They supplement, rather than
+replace, the existing FP, AGI, memory and permission/fault checks.
+
 Before adoption: pass the native leaf and whole-core fault/permission/branch
 checks, preserve full-PC benchmark cycles, resolve canonical-gate failures,
 and measure matched synthesis. The >=40 MHz target remains open.
