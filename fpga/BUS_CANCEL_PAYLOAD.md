@@ -175,19 +175,33 @@ not erase the separate full-PC warning debt. Frozen manifest SHA-256:
 Preparation receipt SHA-256:
 `2c9dd75d5a3808bd9f4fb97238e54029c6e9b37e7e818639872434b713eb9cb3`.
 
-Both unchanged short CoreMark seed disks are running under
+Both unchanged short CoreMark seed disks now close successfully under
 `ventium-v-carry-cm10-bus-cancel-oct11.service`, invocation
-`50b8a7337aab47e3b34ee59eedc9bc37`. They must match reference CRCs and parent
-cycles before the timing queue launches synthesis. They are not full-duration
-scores or the original standard-suite acceptance. Queue
+`50b8a7337aab47e3b34ee59eedc9bc37`. Both match reference CRCs and the parent's
+exact clocks: **4,767,218** for the performance seed and **4,753,406** for
+validation. Native runs exit 0 in 276.38 and 197.54 seconds; actual V retirements
+are **1,055,307** and **1,054,254**. The independent audit reopens both complete
+console results, native child receipts, affinity, model/source/media pins and
+resource counters. There is no OOM event. Its receipt SHA-256 is
+`ad88a482173e5d59c8d7eb8baa69a10585ed1f5fab4b8187ee8a689e659c7dda`.
+These short runs are not full-duration scores or the original standard-suite
+acceptance. There is **zero measured benchmark-cycle gain** from this
+timing-only transformation.
+
+Queue
 `ventium-bus-cancel-timing-queue-oct11.service`, invocation
 `e2ea91192dff4082bb6379825c59503a`, observes these exact owners; it does not
 restart an observation timeout. It then permits one exclusive 45-minute
 Vivado synthesis and a separate 15-minute original-clock reporting run,
 with the existing **8 GiB RAM /6 GiB swap**, **4 GiB disk stop floor** and
 host-memory reserves unchanged. No placement, routing or deployment is
-started by this queue. At this documentation checkpoint synthesis has not
-started and **26.55408 MHz remains the only measured candidate-line Fmax**.
+started by this queue. The synthesis controller is now live under
+`ventium-bus-cancel-synth-oct11.service`, invocation
+`3cb3b697de204e66a54aadaf4de7f8cc`. Its launcher starts at **10:07:29 UTC**;
+the single native Vivado family is observed at **10:07:32 UTC**, scope
+`98ffa801966d4fb3931758a9272af25f`, with the requested hard limits verified.
+This is a running synthesis, not a completed result: **26.55408 MHz remains
+the only measured candidate-line Fmax** until original-clock reports close.
 
 Full downstream/core verification, actual mapped timing, the original standard
 suite and physical FPGA Win95/Quake validation remain required. The existing
@@ -213,6 +227,23 @@ child-wait/closed-disk receipt, a terminal or absent owner, and no live process
 or open file. Live zero-C1 runs, seed media, logs, captures, source and simulator
 binaries are untouched. Total new recovery is **2,492,620,800 bytes**, entirely
 recoverable; this restores the unchanged synthesis disk-admission reserve.
+
+The guard's additional growth-based check requires **7,208,493,056 bytes**
+free: the earlier matched-profile run consumed 1,456,762,880 bytes, and the
+guard reserves twice that growth above its 4 GiB stop floor. Merely exceeding
+6 GiB is insufficient. Before Vivado launch, `admission-reserve-recovery/`
+therefore losslessly archives this already-compiled PC model's two PCH files
+and one old derived `normalized.vcap`, recovering another **577,052,672 bytes**.
+The original raw capture and existing movies are retained. Hashes, member
+comparisons and exact restore commands are preserved; the native benchmark
+binary and all protected input pins are untouched. Recovery receipt SHA-256:
+`6160bb2b13a7f66d08f77e873a418dc548a83a4b80fb89a496f1cacbee745354`.
+The growth-based admission check and all runtime floors remain unchanged.
+
+A read-only board check at this stage succeeds over SSH: root has about
+262 MiB free, `/dev/shm` about 320 MiB, and no `ao486d` process is found.
+Existing zero-C1 staging and the Win95 seed remain present. Nothing is
+programmed or removed on the board; this is readiness information only.
 
 Verified gameplay baseline: **0.51030715 total U+V IPC**, simulated model
 `2b4d7a48`, cycles **1,200,065,237–1,300,065,237**. It predates this experiment,
