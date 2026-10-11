@@ -65,6 +65,13 @@ Measure the active [combined synthesis](TIMING_COMBO.md) first, then inspect its
 actual worst paths before choosing the next integrated experiment. This new
 header still needs whole-core differential/regression checks, source-matched
 synthesis and timing measurement. No frequency gain is claimed for it.
+The [full-core builder](../verif/l1/build_mc_branch_residency_core.py) is prepared
+but **not launched**. It requires the exact combined-model audit and closed
+positive/negative leaf results, verifies that the extracted cache functions
+match the model's source, and changes only this header. It preserves all 150
+core defines and the guarded 32-job command, while allocating a new model-local
+harness and checking its generated-header dependency. Two command-relocation
+tests pass; those tests are not a processor build or functional result.
 The canonical gate remains red; the full standard suite and physical Win95/
 Quake acceptance remain open. The best completed unplaced post-synthesis
 estimate is **26.01118 MHz**, below the **40 MHz** requirement.
