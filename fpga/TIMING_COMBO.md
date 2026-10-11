@@ -52,8 +52,9 @@ The checks controller is active, unit
 `ventium-timing-combo-checks-oct11.service`, invocation
 `4d6910c81ed04c09a4efb27c6b1940b7`. **All five matrices have now closed
 successfully: 820 cold fixtures**, with complete QEMU state and full A/B
-architectural/cycle comparisons. Focused FP fault checks are now running;
-canonical verification and the independent combined audit are not yet closed.
+architectural/cycle comparisons. The 16 focused FP fault cases have also
+closed successfully on both models (32 measurements, unchanged inputs).
+Canonical verification and the independent combined audit are not yet closed.
 After canonical closure, both models are also rerun on identical
 canonical inputs to compare all 108 functional streams without hiding the
 different loader stack addresses found in historical runs. Existing red QEMU
@@ -72,7 +73,45 @@ inactive generated compiler products from three old unit builds and five old
 SoC builds (**604,397,863 +239,261,644 bytes**). Every archive is compared and
 hashed before its loose members are removed; original binaries, headers,
 sources, media, logs and traces remain, with extraction commands retained.
-This does not yet provide the next synthesis's required disk admission margin.
+That recovery alone did not provide the next synthesis's disk admission margin.
+
+A further **838,350,773 bytes** from 23 old core builds and **2,263,075,277
+bytes** from 65 explicitly selected inactive compiler directories are now
+recoverably archived. The latter receipt is
+`inactive-compiler-recovery/closed.json` under this candidate; every archive
+has a hash, verified member list and extraction command. Binaries, headers,
+harness objects and pinned evidence remain. Available external space after
+this recovery is **7,872,401,408 bytes**, before the upcoming PC build; synthesis
+will recheck admission rather than assume this remains available.
+
+## Source-matched PC build and FPGA export
+
+[The PC builder](build_timing_combo_soc.py) preserves the write-direction
+parent's 154 simulation definitions and posted-16 transport, copying only the
+three checked RTL deltas. It checks all 102 shared directed-model RTL sources
+and creates a private model-local harness/header dependency. Its build is
+queued behind the exact combined audit, in
+`ventium-timing-combo-soc-oct11.service` (invocation
+`3beff80ade054820bbb86dd5463aa511`); no PC build pass is claimed yet.
+
+[The exporter](freeze_timing_combo_rk_candidate.py) preserves the 190-payload,
+156-definition hardware profile and exact three-file change. Six contract
+tests pass, including rejection of altered bytes or a same-content replacement
+inode. The exporter no longer retains the entire inherited evidence content
+in RAM: the preceding MC export had **2,541,230,779 bytes** of input files.
+It retains their hash, size and file identity, still reopening and hashing
+every input before publication. This reduces export memory use without
+weakening source stability checks; it does not alter synthesized RTL.
+
+The bounded preparation queue waits for that exact PC build before running
+both unchanged short CoreMark seeds, exporting the source closure and doing
+strict CPU-hierarchy lint. These short seeds must retain their original CRCs
+and 4,767,218 / 4,753,406 cycle counts; they are not the long standard suite.
+One synthesis and subsequent original-clock timing audit are queued behind
+successful preparation, with the same exclusive Vivado guard, matched
+logic-only mapper, 8 GiB RAM / 6 GiB swap caps, 30-minute synthesis limit,
+and live host/disk reserves. Nothing in these queues authorizes routing or
+deployment. Native results and actual Fmax remain pending.
 
 Before the next synthesis: finish combined verification, source-match the
 full-PC model/export, retain original CoreMark CRC/cycle checks, and recover
