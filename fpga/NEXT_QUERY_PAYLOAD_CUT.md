@@ -1,7 +1,8 @@
 # Next-read address payload experiment — 2026-10-11 UTC
 
-**Directed whole-core comparisons pass; canonical verification is unqualified.
-No timing, gameplay, full-suite or FPGA pass.**
+**Rejected from the next timing candidate: synthesized Fmax regresses 4.53%.
+Directed whole-core comparisons pass; canonical verification is unqualified.
+No gameplay, full-suite or FPGA pass.**
 It is not included in the completed V-carry synthesis. The objective
 remains at least 40 MHz synthesized Fmax with UV and fast pipeline retained.
 
@@ -181,10 +182,49 @@ RTL, private harness objects, executables, traces and reports are preserved;
 per-model `generated-objects.tar.zst` / `generated-cpp.tar.zst` and their
 receipts give exact restoration commands. No source pin is removed.
 
-A native timing report must demonstrate any gain; this proposal does not
-inherit the parent's 23.5855 MHz estimate or full-system qualification. The
-40 MHz target, canonical gate, full standard suite and new physical FPGA
-validation remain open.
+### Closed timing result: do not carry this change forward
+
+Native synthesis closes in **1,005.52 seconds**, exit 0, with unchanged inputs
+and no OOM. The independent audit checks 31,933 source pins, all 156 hardware
+defines and actual native source reads. The original-clock audit closes in
+**246.86 seconds**, exit 0, with no structural errors or black boxes. Both
+candidate and parent use the same diagnostic `-no_timing_driven` synthesis
+and original 40/100 MHz project constraints; no new timing exception is used.
+
+| Unplaced synthesized result | Carry parent | Next-query candidate |
+| --- | ---: | ---: |
+| Core Fmax estimate | 23.58546 MHz | **22.51593 MHz** |
+| Setup slack at 25 ns | -17.399 ns | -19.413 ns |
+| Worst path logic levels | 146 | 153 |
+| CLB LUTs | 197,313 | 196,542 |
+| Registers | 54,645 | 54,628 |
+| BRAM tiles / DSPs | 277.5 / 47 | 277.5 / 47 |
+
+The 771-LUT saving does not justify a **4.53% frequency regression**. The
+worst path still runs from EIP through decode/next-read/cache qualification,
+store-pair admission and `fp_shared_load_cmd` to FPU state-bank enables.
+Its data delay is 44.116 ns, including 34.650 ns of estimated unplaced routing.
+The measured capture cone also grows from 86,699 to 87,435 cells. These are
+synthesized estimates, not placed/routed or measured-board frequencies.
+
+The synthesized PS IP emits one missing-pin `create_clock` critical warning;
+the subsequent opened-project audit explicitly verifies the actual core and
+platform clocks. It is retained in the logs, not presented as a warning-free
+build. Peak synthesis memory is 8,589,922,304 bytes and swap 989,921,280 bytes;
+the timing audit peaks at 5,062,832,128 bytes with no swap.
+
+Timing unit `ventium-next-query-clock-oct11.service`, invocation
+`90c1d37b4a2744c09e2c11c2784e1a38`, and its queue are terminal with native exit
+0. Synthesis audit SHA:
+`bfbd77072942db647e20392e5924bc7a3aa9cb138c07300be2f2597f7de1ab0a`.
+Clock audit SHA:
+`1fbb599618ce6ee39a98329043e57ec1ab5e5cf34e36b49751060b50785a9003`.
+
+The next [FP read-acknowledgement candidate](FP_READ_ACK_SPLIT.md) therefore
+starts from the faster carry parent and **does not include this header edit**.
+All evidence and the rejected private candidate remain intact. The 40 MHz
+target, canonical gate, full standard suite and new physical FPGA validation
+remain open.
 
 Verified gameplay baseline: **0.51030715 U+V retirement-event IPC**, model
 `2b4d7a48`, cycles **1,200,065,237–1,300,065,237**. It predates both timing

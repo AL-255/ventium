@@ -1,8 +1,9 @@
 # Separate FP read acknowledgement — October 11
 
-**Private, unbuilt whole-core proposal. Boolean leaf equivalence passes; no
-timing, gameplay, standard-suite or FPGA acceptance is claimed.** The active
-[next-query synthesis](NEXT_QUERY_PAYLOAD_CUT.md) is unchanged. The target
+**Private whole-core candidate: build and 156 directed cases pass; no
+timing, gameplay, standard-suite or FPGA acceptance is claimed.** The closed
+[next-query synthesis](NEXT_QUERY_PAYLOAD_CUT.md) regresses to 22.51593 MHz;
+this candidate excludes that header change and uses the faster carry parent. The target
 remains at least 40 MHz synthesized Fmax with UV and fast pipeline enabled;
 the last completed estimate is 23.5855 MHz, unplaced.
 
@@ -91,13 +92,30 @@ behavior, actual exception delivery or complete module elaboration.
 
 ## Next qualification
 
-After the current synthesis/clock audit closes, inspect its actual result
-before selecting the next timing candidate. A
-[private whole-core builder](../verif/l1/build_fp_read_ack_core.py) is prepared
-but **has not run**. It requires the closed leaf, the exact next-query parent
-model, unchanged defines and a private native harness/header. Then check the
-cold memory, FP/AGI and fault/fragment/reset matrices, canonical gates and both
-original CoreMark seeds before measuring this candidate's synthesis. Leaf
+The matched synthesis/clock audit rejects the next-query header change.
+The [private whole-core builder](../verif/l1/build_fp_read_ack_core.py) now
+accepts either exact known parent hash; all four edited files have identical
+hashes in both parents, and the unchanged source closure is inherited from
+the explicitly selected parent, not mixed. This run selects carry model
+`8c8898416ab8af4e6e53f9c4d94e3d9c2bbd1020edce3abdb300272dfc8104d6`.
+The four recipe tests pass against both parent trees. Unit
+`ventium-fp-read-ack-core-oct11.service`, invocation
+`d141cf10c8af402cb9466edbc0374e52`, closes `core-r1` in **11.88 seconds**,
+native 0, under the shared 32-compiler guard after both Vivado units closed.
+Its exact four-file delta, unchanged defines, source pins and local native
+harness/header dependency pass. Model SHA:
+`b5554a977cd1ef4f12ee4a55a92fa514608cc902178aec2060a71fd00537e442`.
+
+The unchanged cold paged memory, FP and AGI drivers pass **72 + 72 + 12
+fixtures** at AXI latencies 0 and 7. All 75,192 candidate architectural records
+match complete QEMU traces, and all complete candidate/parent architectural
+and retirement-cycle streams match exactly. There are 1,500 targeted memory
+V retirements; neither model disables UV or the fast paths. The longest
+matrix takes 11.53 seconds. Native units `ventium-fp-read-ack-{memory,fp,agi}-oct11`
+are terminal with exit 0. This is not a gameplay IPC result or a new CM score.
+
+Remaining: additional fragment/reset coverage, canonical gates and both original
+CoreMark seeds before measuring this candidate's synthesis. Leaf
 equivalence does not prove full wiring, cache ownership or full-system safety.
 For the existing `run-fp-memory-fault-gate.sh` fixtures, both same-profile
 models must use `FP_MEM_ADMIT=1` and `FP_LOAD_COMMAND=1`; neither is a disabled
@@ -113,9 +131,24 @@ Its 16 fixtures cover FADD/FLD/FILD split-page retry, EM/TS priority, pending
 FP-owner drain and DS/SS relocation. Both models retain early FP commands and
 memory admission. It preserves nonzero gate exits even if a later comparison
 passes, checks matching defines and input images, pins sources/binaries and
-records actual child affinity. Three matrix/command tests pass; **the native
-fault matrix has not run**. No result from its functional-mode control counts
-as UV acceptance, and these short fixtures do not replace the standard suite.
+records actual child affinity. Three matrix/command tests pass. The native
+matrix closes as `ventium-fp-read-ack-faults-oct11.service`, invocation
+`63394e00fcec45d2b28981ff3e6cf5aa`, explicitly on CPU 12 within the normal
+shared build guard. **All 16 fixtures / 32 model comparisons / 64 commands
+pass**, including complete UV traces, unchanged A/B records and final guest
+PASS witnesses. An independent re-read verifies 7,095 source pins, 609
+artifacts and all 23,585 candidate architectural records against QEMU, with
+no trace truncation or custom mask. Closed SHA:
+`61835b209ff30def7796487f9d993495ab06cb5fac6648e82f86ca8f128a0fc1`.
+No result from its functional-mode control counts as UV acceptance, and these
+short fixtures do not replace the standard suite. These m64 page-boundary
+fixtures also do not replace misaligned single-beat fragment/reset testing.
+
+The unchanged canonical `make verify` is now running, unit
+`ventium-fp-read-ack-verify-oct11.service`, invocation
+`2751b01f229a4bcd96cb8a4bf07273d0`. It acquired the common lock after the fault
+matrix closed. Its receipt remains pending; the parent's canonical FAIL is
+not reclassified or inherited as a pass.
 
 Verified gameplay baseline: **0.51030715 U+V retirement-event IPC**, model
 `2b4d7a48`, cycles **1,200,065,237–1,300,065,237**. It predates both timing

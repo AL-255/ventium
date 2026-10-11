@@ -10,6 +10,11 @@ import subprocess
 import time
 from prepare_fp_read_ack_split import PARENTS, transform
 
+KNOWN_PARENTS = {
+    '8c8898416ab8af4e6e53f9c4d94e3d9c2bbd1020edce3abdb300272dfc8104d6': 'v-carry',
+    'b191540ebf0e3038f7dfef1363dde38e2e73c6ca3e474bac624d6db98dafc59b': 'next-query',
+}
+
 
 def sha(p):
     with Path(p).open('rb') as f:
@@ -30,7 +35,8 @@ def main():
     old = json.loads((parent/'build-started.json').read_text())
     closed = json.loads((parent/'build-closed.json').read_text())
     assert closed['passed'] and closed['pins_unchanged'] and closed['native_exit'] == 0
-    assert sha(parent/'obj/tb_ventium') == closed['binary_sha256'] == 'b191540ebf0e3038f7dfef1363dde38e2e73c6ca3e474bac624d6db98dafc59b'
+    assert sha(parent/'obj/tb_ventium') == closed['binary_sha256']
+    assert closed['binary_sha256'] in KNOWN_PARENTS
     checked = json.loads((leaf/'closed.json').read_text())
     assert checked['passed'] and checked['pins_unchanged'] and len(checked['runs']) == 13
     pins = dict(old['pins'])
@@ -62,7 +68,8 @@ def main():
             json.dump(value, f, indent=2)
 
     save('build-started.json', dict(command=command, pins=pins, host=str(host), changes=changes,
-        parent_model=closed['binary_sha256'], invocation=os.environ.get('INVOCATION_ID'), gameplay_ipc=None))
+        parent_model=closed['binary_sha256'], parent_label=KNOWN_PARENTS[closed['binary_sha256']],
+        invocation=os.environ.get('INVOCATION_ID'), gameplay_ipc=None))
     env = dict(os.environ, CCACHE_DISABLE='1', PYTHONDONTWRITEBYTECODE='1',
         VENTIUM_BUILD_SCOPE_PROFILE='ipc_parallel32', VENTIUM_BUILD_SCOPE_UNIT='ventium-ipc-parallel32',
         VENTIUM_VERILATOR_BIN='/tools/verilator/v5.046/bin/verilator')
