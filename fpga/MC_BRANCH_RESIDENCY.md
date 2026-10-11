@@ -86,14 +86,49 @@ launched under `ventium-mc-branch-residency-checks-oct11.service`, invocation
 candidate's only in its title, single-header change expectation and unique unit
 prefix. It retains all 820 fixtures, 32 initial test workers, full QEMU/A-B
 comparisons, focused FP faults, unchanged canonical gate and same-input replay.
-Four matrices now close successfully with stable inputs and empty error lists:
+All five matrices now close successfully with stable inputs and empty error lists:
 held-read (24 fixtures / 48 latency cases), memory (72 fixtures / 288 model-
 latency measurements), FP (72 / 288), and AGI (12 / 48). These are **180 cold
-fixtures** on this new model, not inherited passes. Memory/FP/AGI take
-24.04 / 14.85 / 5.75 seconds. The 640-fixture branch matrix is still running;
-focused faults, canonical verification and same-input replay follow it. The
-entire check sequence remains **pending**. Source-matched PC/CoreMark, FPGA
-export/lint and synthesis/timing checks have not been performed.
+fixtures**, plus **640 branch fixtures**, on this new model, not inherited
+passes. Memory/FP/AGI take 24.04 / 14.85 / 5.75 seconds; the branch matrix takes
+181.30 seconds. All **820 fixtures pass**. The 16 focused fault cases also
+pass on both models (32 measurements), with unchanged inputs and no errors.
+Canonical verification is running, with same-input replay and the independent
+[complete-trace auditor](../verif/l1/audit_mc_branch_residency_core.py) following
+the exact existing controller. The entire sequence remains **pending**.
+
+The [matching PC builder](build_mc_branch_residency_soc.py) is queued behind
+that audit. It changes only this header relative to the combined PC model,
+preserves 154 defines and the posted-16 platform, requires equality of all 102
+shared RTL sources, and creates a new model-local harness. The
+[FPGA exporter](freeze_mc_branch_residency_rk_candidate.py) likewise requires
+only the exact header delta from the combined 190-payload manifest. Six
+exporter tests pass, including profile drift, fast-feature removal, unreviewed
+source changes and input replacement rejection. No PC/CoreMark, export/lint
+or frequency result is claimed before its native run closes.
+
+The owned queue is prepared to run the same short CoreMark seeds, source
+export/audit and strict CPU lint, then one guarded synthesis with a **45-minute
+limit**, followed by original-clock timing analysis. The earlier combined run
+reached technology mapping but exhausted its 30-minute allowance; only the
+time allowance changes. The 8 GiB RAM / 6 GiB swap caps, 13 GiB combined early
+stop, 2 GiB host reserve, 6 GiB disk admission and 4 GiB disk stop remain.
+The queue does not launch routing or deploy an image. No frequency gain is
+assumed from the source-level changes.
+
+### Disk recovery for this run
+
+**2,423,344,551 bytes (2.26 GiB)** of net space was recovered with checked,
+lossless `tar --zstd` archives. These contain generated compiler products from
+closed builds and `.rtd` intermediates from the timed-out combined synthesis.
+Every selected file was checked against protected source/evidence pins;
+archives were compared before loose copies were unlinked. Sources, binaries,
+headers, model-local harness objects, traces, logs and completed checkpoints
+remain. The canonical `verif/tb/obj_dir` was not touched. Recovery commands and
+hashes are under `closed-product-recovery/` and `inactive-compiler-recovery/`
+in this candidate's evidence root. This is recoverable storage cleanup, not
+removal of test evidence or an acceptance waiver.
+
 The canonical gate remains red; the full standard suite and physical Win95/
 Quake acceptance remain open. The best completed unplaced post-synthesis
 estimate is **26.01118 MHz**, below the **40 MHz** requirement.
