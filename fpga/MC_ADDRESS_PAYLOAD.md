@@ -74,15 +74,29 @@ Receipt SHA:
 
 The newly measured [write-direction netlist](L1_WRITE_KIND_PAYLOAD.md) reaches
 24.33504 MHz and exposes a different worst endpoint, the SRT remainder setup.
-That path is being addressed first. This leaf and its prepared whole-core
-drivers remain retained, without claiming a full-core or timing result.
+That path is being addressed, but a subsequent review of the retained capture
+report also finds `EIP -> pipe_mem_v_hit_q/D` at **-16.057 ns**, only 0.036 ns
+behind SRT's -16.093 ns. It crosses the raw branch-prime/descriptor/address
+chain before the L1 request and tag lookup. Optimizing SRT alone cannot remove
+this independent constraint, so whole-core checks of this address-preparation
+candidate are now queued as well. No full-core or timing pass is claimed yet.
 
 The prepared [whole-core builder](../verif/l1/build_mc_address_core.py)
 requires successful native positive/negative leaf runs and the source proof,
 rechecks all input hashes, and changes only `core_mem_chain.svh`. It retains
 the parent's complete feature profile and builds a separately named C++
 harness against its own generated model headers. No full-core build has run
-for this candidate yet.
+for this candidate yet. Its parent remains the independently measured
+write-direction core `1bfb1bb2`, not an unmeasured combination of SRT changes.
+
+The first core queue exits before launching anything: its exclusive-create
+receipt encounters the prior leaf queue's `queue-started.json`. The existing
+receipt is preserved. The corrected queue uses a separate `core-queue-r2/`
+directory and unit `ventium-mc-address-core-queue-r2-oct11.service`, invocation
+`1572e89b87f84731abebb21ba9d08c08`. It waits for the exact SRT unit queues, then
+losslessly archives only their closed generated compiler products before
+launching the guarded core build. Source, headers, binaries, logs and pins are
+retained. No other Vivado run, test-profile weakening or retry is introduced.
 
 Two additional cold-reset A/B drivers are prepared from the existing prime
 fixtures, without editing those fixtures or their original runners:
