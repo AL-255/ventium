@@ -1,8 +1,9 @@
 # LGDT/LIDT excess read — October 11, 2026
 
-**Reproduced bug; private correction prepared, rebuilt-core verification pending.**
+**Reproduced bug; private correction passes rebuilt-core and physical-byte checks.**
 This is present in both the 28.10410 MHz BUS predecessor and the exact-fragment
-candidate currently undergoing synthesis. Running timing inputs are unchanged.
+candidate whose completed synthesis estimates 27.83654 MHz. Its timing inputs
+were unchanged; the descriptor correction is a separate successor.
 It is not yet established as the cause of a Windows 95 or Quake failure.
 
 ## Actual guest reproduction
@@ -64,14 +65,22 @@ arms, the same 150 UV-fast definitions, and a private C++ harness. New core
 SHA-256: `8ef0079de0a0f9eba1f48533f590e0908b96fbaea9ff64030183a5e3e0416ec0`;
 bus header: `2e592948d1ae2a99babc970a5c573a1de42fbf011f62e8b34d473c4b216ae08c`.
 
-The owned continuation (`ventium-descriptor-queue-oct11.service`, invocation
-`42e8726e7f094dbdbef9cf9e00445589`) waits for the exact timing queue's completed
-owner before the guarded-32 build. The
-[candidate checker](../verif/issue_uv/run_descriptor_extent_fixed.py) then
-requires complete QEMU matches for all twelve contained-operand fixtures and
-twelve genuine crossing/fault fixtures at both latencies, with actual V
-retirements. The unchanged canonical gate follows; its current failures are
-not masked, trimmed or relabelled. No competing heavy build runs now.
+After the timing owner closed, the guarded-32 build completed in 19.96 seconds
+(invocation `042e8427669749d39d399f543e7d5a81`). Model SHA-256:
+`87035ad6ae27896b38274a908b5fcb92e37f6c5c1b1a66b8b3f122f491ed6ddf`.
+The private harness dependency names this model's own generated header.
+
+The [candidate checker](../verif/issue_uv/run_descriptor_extent_fixed.py)
+passes all **24 cases**: twelve contained-operand fixtures and twelve genuine
+crossing/fault fixtures. Both AXI latencies (0/7) and functional/cycle execution
+are checked, for 96 simulations. There are 48 complete QEMU architectural
+comparisons covering 20,364 records, plus cycle traces with 3,636 paired V
+retirements. The previously spurious faults are gone; real crossing/fault
+behavior remains correct. No trace trimming, masking or oracle change is used.
+Closed invocation `158fd29e4376405bb8cc402272b55557`, 7.65 seconds;
+`descriptor-fixed-r1/closed.json` SHA-256:
+`ded79dfeeadaabf59b4ca0961a06c5104ea6542e8be37196b27d11ca0b090599`.
+All 60 checker input pins were independently rehashed after closure.
 
 ## Physical-bus witness, including an architectural false negative
 
@@ -103,18 +112,27 @@ closed invocation `577aeb7a588f44a9922d67960e26b574`, native exit 0,
 rehashed after closure. Receipt SHA-256:
 `09dde2305d7e07c6e3f9276ddbff74de14f3068e585fc2aff68a43be5fc0c96a`.
 
-After `descriptor-core-r1` and `descriptor-fixed-r1` close successfully, run
-the same observer without `--expect-overread`, supplying those directories as
-`--build` and `--matrix`, retaining `descriptor-extent-r1` as `--corpus`, and
-using a new external scratch output directory. It requires the completed
-24-case check and the exact new model hash before observation. This extra
-check is not part of the already-pinned running queue; neither that queue nor
-the running synthesis inputs were modified.
+The corrected model then passes the same observer **without**
+`--expect-overread`. All four cases now accept four bytes at `0x2ff8` and two
+at `0x2ffc`, exactly the six architectural bytes, with no missing, repeated or
+extra byte. Each complete architectural trace remains byte-identical to its
+passing directed trace. The observer first requires the completed 24-case
+check and exact new model hash. It makes no writes to guest/model state.
+
+Evidence: `descriptor-bus-fixed-r1/closed.json`, closed invocation
+`13147e53c4524da2a324d5426a1a4303`, native exit 0, 17.56 seconds;
+SHA-256 `7971382abbf898efb180e669c8fdfce051858c5b5a2bfee0ccccf2f45cf5a9f2`.
+All 19 input pins were independently rehashed after closure. This is a real
+Verilator AXI-bus observation, **not** a physical FPGA-board test.
 
 ## Remaining acceptance
 
-Build and behavioral checks are pending. The running synthesis candidate does
-not include this additional fix. Neither candidate is FPGA-qualified; at least
+The unchanged canonical gate **fails**, native exit 2, after 384.24 seconds
+(`49d4536f869b49d0b416f99091516284`). All 20 complete cycle traces are identical
+to its predecessor, and input pins remain unchanged; that is a regression
+comparison, not a QEMU/differential pass. Inherited failures are not masked,
+trimmed or relabelled. The measured synthesis candidate does not
+include this additional fix. Neither candidate is FPGA-qualified; at least
 40 MHz synthesized Fmax, green differential gates, the full standard suite and
 physical Win95/Quake validation remain outstanding.
 
