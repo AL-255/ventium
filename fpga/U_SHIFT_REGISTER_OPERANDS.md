@@ -223,6 +223,19 @@ three remaining linear leading-bit searches; the common request/response
 control path also requires work. Request cancellation, permission checks,
 fragment ownership and denied-read zero data cannot be dropped as a timing fix.
 
+A concrete upstream source-audit lead is the two cancellation blocks in
+`core_bus_driver.svh`: translation/permission and synchronous-access faults
+both clear request **and** direction/address/data/strobes. A20 payload masking
+also depends on the already-qualified request. These shared payload wires then
+select cache response bytes and code/data ownership, putting cancellation
+conditions before arithmetic even where no transaction can be accepted.
+The next experiment should separate request cancellation from unused payload
+selection, while proving identical issued requests, consumed responses and
+architectural/cycle traces. This is **not yet an implemented or measured fix**.
+In particular, retained responses, stream mode, fragment start/abort, A20,
+SMM/route-denied reads and faulting writes need explicit checks; merely leaving
+`mem_req` low is not by itself whole-system equivalence evidence.
+
 **880,645,526 bytes** of explicitly selected inactive compiler products are
 losslessly archived, with verified member hashes and recovery commands in
 `compiler-recovery*/`. Sources, binaries, headers, logs and traces are retained.
