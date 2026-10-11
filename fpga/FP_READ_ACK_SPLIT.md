@@ -280,6 +280,10 @@ Core hold slack remains -0.101 ns. Timing audit SHA:
 The best retained estimate remains **23.58546 MHz**, below the **40 MHz target**.
 No placement, routing, new bitstream or physical acceptance is claimed.
 
+The next [backing write-direction experiment](L1_WRITE_KIND_PAYLOAD.md)
+targets pair readiness ahead of the AXI extent/credit cone. It is separately
+verified and has no measured frequency gain yet.
+
 Before launch, 67 closed builds' generated `Vventium_top`/`Vsystem` C++ and
 compiler intermediates were losslessly archived and checked with
 `tar --compare` plus file hashes before removing the loose copies. This
