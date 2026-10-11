@@ -91,5 +91,23 @@ class BusCancelFreeze(unittest.TestCase):
             with self.assertRaises(freeze.FreezeError):
                 freeze.resolve_source_input(prefix/relative,prefix)
 
+    def test_reviewed_passive_header_aliases_only(self):
+        with tempfile.TemporaryDirectory(dir=os.environ['TMPDIR']) as directory:
+            base=Path(directory).resolve()
+            actual=base/'actual'; actual.mkdir()
+            prefix=base/'alias'; prefix.symlink_to(actual,target_is_directory=True)
+            for name in ('ventium-private-memcmp-jmp.V2edQ6/constructor_ram_receipt.h',
+                         'ventium-private-memcmp-jmp.V2edQ6/exception_log_probe.h',
+                         'ventium-private-reset-edge.LHADfg/reset_edge_receipt.h'):
+                target=actual/name; target.parent.mkdir(exist_ok=True)
+                target.write_bytes(b'passive header')
+                self.assertEqual(freeze.resolve_source_input(prefix/name,prefix),target)
+                other=target.with_name('unreviewed.h'); other.write_bytes(b'passive header')
+                with self.assertRaises(freeze.FreezeError):
+                    freeze.resolve_source_input(prefix/Path(name).parent/'unreviewed.h',prefix)
+                target.unlink(); target.symlink_to(other)
+                with self.assertRaises(freeze.FreezeError):
+                    freeze.resolve_source_input(prefix/name,prefix)
+
 
 if __name__=='__main__': unittest.main()

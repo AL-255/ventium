@@ -145,10 +145,49 @@ Audit SHA-256:
 delta on the measured shift candidate, with all 154 native definitions,
 posted-16 transport and all 102 shared directed RTL sources unchanged.
 [The exporter](freeze_bus_cancel_rk_candidate.py) retains the original
-40 MHz core /100 MHz PL clocks and 156 hardware definitions. Seven admission
+40 MHz core /100 MHz PL clocks and 156 hardware definitions. Eight admission
 tests reject profile drift, lost fast features, unreviewed source deltas,
 unreviewed aliases and replaced input files. These are preparation checks,
 not an actual new synthesis or FPGA result.
+
+The PC build closes native 0 in **51.73 seconds**, invocation
+`0f8b662e8d434c27b1ae04b0daf021b4`, with stable inputs and a verified private
+harness/header dependency. Model SHA-256:
+`c9d73a0643a759e411f2dbfcecd2425df247349b42e68a4b01eb3ff4edc6cb47`.
+The 98 inherited full-PC structural warnings are unchanged, not waived away.
+
+Preparation R1 stops before writing any exported payload: its alias policy
+did not yet admit three existing passive directed-harness headers. Those
+headers are also dependencies of the parent model, not new simulation
+behavior. The failed receipt remains in `prepare-r1/`; its exporter is
+preserved in commit `655637f0`, SHA-256
+`2c759305eefb1aa1342bb0a2986745518fadb9e5e98c9395fca28f38db96e75d`.
+R2 admits only their three exact aliases and rejects redirected targets.
+No core or PC model is rebuilt for that correction.
+
+Preparation R2 closes successfully, invocation
+`7a59449270c54ff0a3e0ffc7903d896c`. The independent source audit rechecks
+**315,365 input pins**, the exact single header delta and all 102 shared
+directed RTL files. Strict CPU-hierarchy lint passes all six hard structural
+classes under all 156 hardware definitions in **3.61 seconds**; this does
+not erase the separate full-PC warning debt. Frozen manifest SHA-256:
+`9fe0c951a57d41826a4383055d3bbbf63cb6b7bb16936a400be9741792fb9536`.
+Preparation receipt SHA-256:
+`2c9dd75d5a3808bd9f4fb97238e54029c6e9b37e7e818639872434b713eb9cb3`.
+
+Both unchanged short CoreMark seed disks are running under
+`ventium-v-carry-cm10-bus-cancel-oct11.service`, invocation
+`50b8a7337aab47e3b34ee59eedc9bc37`. They must match reference CRCs and parent
+cycles before the timing queue launches synthesis. They are not full-duration
+scores or the original standard-suite acceptance. Queue
+`ventium-bus-cancel-timing-queue-oct11.service`, invocation
+`e2ea91192dff4082bb6379825c59503a`, observes these exact owners; it does not
+restart an observation timeout. It then permits one exclusive 45-minute
+Vivado synthesis and a separate 15-minute original-clock reporting run,
+with the existing **8 GiB RAM /6 GiB swap**, **4 GiB disk stop floor** and
+host-memory reserves unchanged. No placement, routing or deployment is
+started by this queue. At this documentation checkpoint synthesis has not
+started and **26.55408 MHz remains the only measured candidate-line Fmax**.
 
 Full downstream/core verification, actual mapped timing, the original standard
 suite and physical FPGA Win95/Quake validation remain required. The existing
@@ -160,6 +199,20 @@ archived and member-compared before removal, recovering **286,179,117 bytes**.
 `compiler-recovery-r1/` contains member hashes, archive hashes and recovery
 commands. Binaries, sources, ordinary headers, objects and logs are retained;
 all protected input pins remain stable. No broad directory deletion was used.
+
+Further closed-artifact recovery archives six generated core precompiled
+headers (**484,036,608 bytes recovered**), 20 already-closed private Win95
+guest disks (**707,706,880 bytes**) and 49 September profiler intermediates
+(**1,300,877,312 bytes**). Each archive is losslessly member-compared and its
+source hashes rechecked before removing the exact originals. Recovery commands
+and hashes are in `closed-storage-recovery-r1/`, `closed-storage-recovery-r2/`
+and `closed-profiler-recovery-r1/`. R1 completes its three compiler-cache
+archives, then stops before touching any guest because an old systemd unit
+has already been collected. R2 additionally requires the guest's actual
+child-wait/closed-disk receipt, a terminal or absent owner, and no live process
+or open file. Live zero-C1 runs, seed media, logs, captures, source and simulator
+binaries are untouched. Total new recovery is **2,492,620,800 bytes**, entirely
+recoverable; this restores the unchanged synthesis disk-admission reserve.
 
 Verified gameplay baseline: **0.51030715 total U+V IPC**, simulated model
 `2b4d7a48`, cycles **1,200,065,237–1,300,065,237**. It predates this experiment,

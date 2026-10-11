@@ -17,6 +17,11 @@ SCRIPT_ALIASES = SCRIPT_ALIASES + (
     'ventium-fp-exec-cut.MNkzxfBO/agi-r1/run_agi_same_profile.py',
     'ventium-parallel-tags.EjloHRba/audit_closed.py',
     'ventium-u-shift-registers.XRngKRoW/run_queue.py',
+    # Existing read-only directed-harness headers, also present in the parent
+    # model's dependency file. Admit only these exact external aliases.
+    'ventium-private-memcmp-jmp.V2edQ6/constructor_ram_receipt.h',
+    'ventium-private-memcmp-jmp.V2edQ6/exception_log_probe.h',
+    'ventium-private-reset-edge.LHADfg/reset_edge_receipt.h',
 )
 
 PARENT='a36e00e8b30b6cfed198e8522c0baa338b528eb490d01e4d0d183f8ec053935e'
