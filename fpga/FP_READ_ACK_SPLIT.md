@@ -106,6 +106,17 @@ addition to the script's selected fault/retry records. Its functional-mode
 control is diagnostic, not UV acceptance. The existing fixed QEMU port requires
 serialization unless a separately reviewed per-run port adapter is used.
 
+[The prepared fault-matrix runner](../verif/l1/run_fp_read_ack_faults.py)
+serializes that unchanged gate on both models, then requires an additional
+complete QEMU-versus-`cycle-func` comparison and exact same-input A/B records.
+Its 16 fixtures cover FADD/FLD/FILD split-page retry, EM/TS priority, pending
+FP-owner drain and DS/SS relocation. Both models retain early FP commands and
+memory admission. It preserves nonzero gate exits even if a later comparison
+passes, checks matching defines and input images, pins sources/binaries and
+records actual child affinity. Three matrix/command tests pass; **the native
+fault matrix has not run**. No result from its functional-mode control counts
+as UV acceptance, and these short fixtures do not replace the standard suite.
+
 Verified gameplay baseline: **0.51030715 U+V retirement-event IPC**, model
 `2b4d7a48`, cycles **1,200,065,237–1,300,065,237**. It predates both timing
 candidates; neither has a gameplay measurement.
