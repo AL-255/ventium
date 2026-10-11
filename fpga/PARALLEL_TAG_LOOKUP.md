@@ -121,5 +121,43 @@ and A/B traces, canonical verification, full-PC benchmark/correctness tests,
 matched area/timing, and physical Win95/Quake acceptance. Existing canonical
 failures are not waived by this leaf result.
 
+## Paired-store coverage and core-build gate
+
+The first cache matrix does not enable the mixed load/store admission path
+identified in the timing report. The separate
+[paired-cache extension](../verif/l1/run_parallel_tag_pairs.py) therefore keeps
+the original `tb_l1d_pair_store.sv` stimulus and expectations, expands its
+geometry to full 128 sets, and compares original/modified caches side by side.
+It connects lookahead during U stores to a deliberately different tag/set;
+that lookahead must never be captured. Existing tests exercise resident and
+nonresident U/V stores, independent way ownership, bank conflicts, backing
+credit and ACK backpressure, snoop rejection, withdrawn stores, and a saved U
+load paired with a V store. Both tag layouts run with the saved read window
+disabled/enabled. Two reversed-selector mutants must fail natively.
+
+All configured outputs, acceptance/ownership signals, tags, valid/LRU state
+and every bank row are compared after clock settling. The original fixture's
+read-data/backing-memory checks remain active; a zero simulator exit without
+its success marker and actual pair witnesses is insufficient. Two construction
+tests pass. The existing recipe and basic-miter construction tests also pass
+when invoked with their required source arguments. These are construction
+checks, **not native cache passes**.
+
+`ventium-parallel-tags-pairs-queue-oct11.service`, invocation
+`648a3530e0ca4de0b34c3a0e236c67a1`, waits for the exact basic cache queue.
+Its native run is bounded to 540 seconds and shares the same guarded 32-job
+build profile. No second Vivado run is launched.
+
+[An independent closure audit](../verif/l1/audit_parallel_tag_caches.py) will
+reopen both matrices' native commands, logs, binaries, generated fixtures,
+service closures and compressed compiler members. Only after it passes may
+[the core builder](../verif/l1/build_parallel_tag_core.py) create a derivative
+of the measured write-direction core. It preserves the entire 150-define
+UV-fast profile and changes only `rtl/mem/ven_l1d.sv`, checks all frozen inputs,
+and verifies the private harness was compiled against its own model headers.
+Core queue invocation: `f7b67a229835465a8235bc726da2cdaf`, unit
+`ventium-parallel-tags-core-queue-oct11.service`. It is build-only; no full-core
+functional or timing result is claimed by preparing or queueing it.
+
 Gameplay baseline: **0.51030715 total U+V IPC**, model `2b4d7a48`, cycles
 **1,200,065,237–1,300,065,237**, predating this gameplay-unmeasured experiment.
