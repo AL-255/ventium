@@ -264,12 +264,67 @@ Evidence roots and closed SHA-256 receipts:
 - `exact-rep-smi-r1/`:
   `b5a7c112a4a3c58aa4c75c3ff7f488271950b599851e7fc9e8a553c26749efc5`
 
-The unchanged canonical gate is still running. The predecessor's canonical
-gate remains **FAIL**; matching that predecessor cannot qualify this proposal.
+The unchanged canonical gate closes **FAIL**, native exit 2, after 392.64
+seconds, invocation `d6bdd568afd142f085985339b72b277a`. All 20 complete cycle
+streams remain identical to the predecessor; inputs are unchanged and no
+golden masks, terminal trimming or cycle bands were modified. Receipt SHA-256:
+`6bfc1d3eebbf5894177c5b0dbfd5ca5f840415d67c8073c0a9121b70d34e8fcc`.
+The additional same-input replay completes all **108 programs /80,800 records**
+with identical full architectural state, including the original candidate
+trace, in 143.91 seconds. Receipt SHA-256:
+`bbc46fb11665c302702122228522a96bc96fa80f67e0597d582d7a11ff71b5d9`.
+Matching a failing predecessor does not qualify the canonical gate.
 
-Only after those checks should a frozen full-PC/hardware derivative be exported
-and its real post-synthesis timing measured. All original standard-suite and
-physical FPGA Win95/Quake acceptance remain required.
+### Full-PC and frozen hardware successor
+
+[`build_fragment_exact_soc.py`](build_fragment_exact_soc.py) independently
+reopens the broad architectural streams and byte-observer evidence, retains
+the original failed-equivalence/canonical results, and changes only `core.sv`
+in the posted-16 PC model. All 102 shared directed RTL sources match; all 154
+native definitions remain unchanged. The private-harness build closes native
+zero in **23.97 seconds**, invocation `bb1b654d9b774b0eb1712dcea385dbb4`.
+The 98 inherited full-PC structural warnings are unchanged, not waived.
+Model SHA-256:
+`c52a221ecdc0ada4671c8f8d9e27bfd1be441a85b11cabcc610999f33ed75d75`.
+Build receipt SHA-256:
+`0013737df3314d799793504bcbb4136dfb2366c71f760a13184244971c68e1be`.
+
+[`freeze_fragment_exact_rk_candidate.py`](freeze_fragment_exact_rk_candidate.py)
+exports all 190 hardware inputs, retaining the original 156 definitions,
+40 MHz core /100 MHz PL clocks, full P5 caches and identical filelist/include
+closure. Exactly one hardware payload changes: `ventium/rtl/core/core.sv`.
+The source contract passes; manifest SHA-256:
+`76b5cf6b0796ed944533430b065208d5b6988adbfc1859efc0bda51abe628855`.
+The [frozen CPU-hierarchy lint](lint_frozen_rk_core.py) passes all six hard
+structural classes in 4.13 seconds; receipt SHA-256:
+`5c0b6aea396de0ff1e44b0ef621362abac4ccd0be7bb4c40072c3cc9c21a2fcc`.
+This is not full-SoC lint or a new synthesized timing result.
+
+The original short CoreMark disks are running under
+`ventium-v-carry-cm10-fragment-exact-oct11.service`, invocation
+`41d29ff820a74e8a87ffbb197c439456`. The performance seed closes native zero,
+matching all reference CRCs and the predecessor's **4,767,218 ticks**, with
+1,055,307 V retirements. Validation remains running at this update. Ten
+iterations are not a duration-valid CM/MHz score or the full standard suite.
+There is no measured benchmark-cycle gain from this timing correction.
+
+Disk reserve recovery consolidates twenty closed guest-recovery archives into
+one lossless archive, retaining the exact original archive bytes and all
+recovery receipts (**1,137,102,848 bytes recovered**). R1 first stops after
+successful archive comparison on a Python Path-subscript typo, before deleting
+anything; the separate completion script rechecks all members, hashes and open
+handles before removing the originals. Four disposable PCH caches from the two
+closed candidate builds are separately archived and member-compared
+(**327,233,536 bytes recovered**). Binaries, source, ordinary headers, current
+guest disks and evidence logs remain present. Restore commands and member
+hashes are under `archive-consolidation-r1/completion-closed.json` and
+`closed-pch-recovery-r1/closed.json`. Total recovery: **1,464,336,384 bytes**.
+All removals are reversible; the shared build guard and resource floors stay
+unchanged.
+
+Actual post-synthesis timing, all original standard-suite components, and
+physical FPGA Win95/Quake acceptance remain required. No new Vivado synthesis,
+placement, route, bitstream or board deployment has started for this successor.
 
 Verified gameplay baseline is **0.51030715 total U+V simulated retirement-event
 IPC**, model `2b4d7a48`, cycles **1,200,065,237–1,300,065,237**. It predates both
