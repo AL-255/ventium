@@ -1,9 +1,10 @@
 # Paired-memory readiness timing cut — October 11, 2026
 
-**Directed checks pass; no new synthesized Fmax or FPGA acceptance yet.**
+**Directed checks pass; synthesized estimate 30.34809 MHz, below target.**
 The target remains **at least 40 MHz synthesized Fmax**, with UV dual issue,
 system/relocated fast paths, fast loads/stores and full P5 caches retained.
-The measured predecessor is only **27.83654 MHz** (unplaced synthesis estimate).
+The measured predecessor is **27.83654 MHz** (unplaced synthesis estimate).
+The bundle improves that estimate **9.02%**; neither result is routed sign-off.
 
 ## Change and rationale
 
@@ -34,8 +35,8 @@ No register, cycle, new cache port, speculation permission or fallback is added.
 Request/ACK equations, array writes and registered response ownership are not
 changed. Simulation-only assertions compare both changed predicates against
 their original expressions on clock edges. All unrelated source bytes remain
-unchanged. This is an exact dependency simplification, not yet a demonstrated
-timing gain; next-read eligibility still has real dependencies elsewhere.
+unchanged. Next-read eligibility still has real dependencies elsewhere.
+The measured bundle's timing gain below also includes the descriptor repair.
 
 ## Verification
 
@@ -159,10 +160,50 @@ constraint and the requirement to actually reach 40 MHz remain unchanged.
 
 Native synthesis starts at **2026-10-11 22:36:18 UTC**, owner
 `ventium-pair-ready-synth-oct11.service`, invocation
-`883ad70de9674bad931970a06aff98be`. The launcher and actual synthesis worker
-are observed live in the one guarded Vivado family; this is not just a queue.
+`883ad70de9674bad931970a06aff98be`, and closes **native zero in 1,902.99 seconds**.
+The independent synthesis audit passes, checking 1,015 source pins, all 156
+hardware definitions and actual native source reads. A separate rehash of the
+started inputs, native sources and output artifacts also passes. The retained
+owner is terminal with exit zero; no OOM occurred. Peak guarded memory is
+8,589,885,440 bytes and peak swap is 128,135,168 bytes.
 
-Next: complete guarded synthesis and original-clock timing audit. Do not count
+| Synthesized resource | Exact-fragment predecessor | Readiness/descriptor bundle |
+| --- | ---: | ---: |
+| CLB LUTs | 185,645 | 187,437 |
+| Registers | 54,636 | 54,680 |
+| BRAM tiles | 277.5 | 277.5 |
+| DSPs | 47 | 47 |
+
+This is **1,792 more LUTs / 0.97% growth**, not an area improvement. The FPGA
+comparison includes both descriptor-width repairs as well as the readiness
+cut; it does not isolate their individual mapping costs. One critical clock
+warning and 1,564 warnings remain recorded, not waived as a warning-free build.
+Synthesis audit SHA-256:
+`927bc62097a3a7c3ccba1be582e2e79fcf33c39824bd81c1c139efe58f12ddc0`.
+New DCP SHA-256:
+`51832e2844ec3bcd8ad456d3a552a74aae49642fc00e425aa313329e07ea4b99`.
+
+The separate clock owner `ventium-pair-ready-clock-oct11.service`, invocation
+`10a7e512f65249a7ac7a022a6da3a147`, closes native zero in **486.70 seconds**.
+It reopens the actual project and original **40 MHz core / 100 MHz PL**
+constraints for both candidate and parent. All 1,045 input pins independently
+rehash unchanged. Audit SHA-256:
+`dbcfc34e78b768abadb44711deb3ba6904a5ae4cc36cbe7a86616eb303b2ddb8`.
+
+The result is **30.3480926 MHz**, from setup slack **−7.951 ns** at 25 ns;
+the parent's estimate is 27.8365438 MHz. This **9.02249%** improvement does
+not meet 40 MHz. Core hold slack is −0.101 ns. No OOM occurred; guarded peak
+RAM was 4,822,679,552 bytes, with zero swap. The timing queue closes native
+zero with `synthesized_40mhz_requirement_met=false` and `UNQUALIFIED` status.
+
+The new worst path has **111 logic levels**, EIP to cache LRU, with 32.740 ns
+data delay (6.688 ns logic / 26.052 ns estimated routing). It traverses decode,
+next-read qualification, paired-store readiness, the general backing-write
+ACK, `pipe_int_commit`, `mem_next_commit`, and `mc_capture_next`. The next
+isolated candidate cuts the write-ACK dependency only from read-hint commit;
+it does not alter architectural retirement or add a pipeline bubble.
+
+Do not count
 a 40 MHz constraint, an overclock or an older DCP as meeting
 the synthesized target. Green differential gates, full CoreMark correctness,
 Win95 cold desktop/UI and complete Quake timedemo, including physical FPGA
