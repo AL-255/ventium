@@ -41,12 +41,14 @@ def main():
     assert audit['passed'] and audit['whole_cache'] and not audit['whole_core']
     assert audit['summary']['cache']['positive'] == 6 and audit['summary']['cache']['defects'] == 2
     assert audit['summary']['pairs']['positive'] == 4 and audit['summary']['pairs']['defects'] == 2
+    cache = Path(audit['cache_directory']).resolve(strict=True)
+    assert cache.is_relative_to(checks)
     pins = {**old['pins'], **audit['pins']}
     assert all(sha(p)==h for p,h in pins.items())
     name = 'rtl/mem/ven_l1d.sv'
     assert sha(parent/'candidate'/name) == PARENT
     changed = transform((parent/'candidate'/name).read_text())
-    assert changed == (checks/'cache-r1/ven_l1d.sv').read_text()
+    assert changed == (cache/'ven_l1d.sv').read_text()
     root.mkdir()
     shutil.copytree(parent/'candidate',root/'candidate')
     (root/'candidate'/name).write_text(changed)

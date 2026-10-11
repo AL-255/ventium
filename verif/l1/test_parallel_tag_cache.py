@@ -2,10 +2,18 @@
 import difflib
 from pathlib import Path
 import unittest
-from run_parallel_tag_cache import BASE_OUTPUTS, STREAM_OUTPUTS, miter_fixture
+from run_parallel_tag_cache import BASE_OUTPUTS, STREAM_OUTPUTS, control_source, miter_fixture
 
 
 class FixtureConstruction(unittest.TestCase):
+    def test_control_module_end_label(self):
+        original = 'module ven_l1d #(parameter N=128) ();\nendmodule : ven_l1d\n'
+        changed = control_source(original)
+        self.assertEqual(changed, 'module control_l1d #(parameter N=128) ();\nendmodule : control_l1d\n')
+        for source in (changed, original+original, original.replace(' : ven_l1d','')):
+            with self.assertRaises(ValueError):
+                control_source(source)
+
     def test_original_stimuli_remain_verbatim(self):
         for stream in (False, True):
             path = Path(__file__).with_name('tb_l1d_' + ('window_keep_reset' if stream else 'mem_chain') + '.sv')

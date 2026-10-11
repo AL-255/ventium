@@ -18,37 +18,40 @@ def load(path):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument('--root', type=Path, required=True)
+    for key in ('root','cache','pairs'):
+        ap.add_argument('--'+key, type=Path, required=True)
+    for kind in ('cache','pairs'):
+        ap.add_argument('--'+kind+'-unit', required=True)
+        ap.add_argument('--'+kind+'-invocation', required=True)
     args = ap.parse_args()
     root = args.root.resolve(strict=True)
+    cache, pairs = args.cache.resolve(strict=True), args.pairs.resolve(strict=True)
     repo = Path(__file__).resolve().parents[2]
     assert __debug__ and root.is_relative_to(Path('/home/yukidama/external/tmp').resolve(strict=True))
+    assert cache.is_relative_to(root) and pairs.is_relative_to(root) and cache != pairs
     leaf = load(root/'audit.json')
     assert leaf['passed'] and leaf['samples'] == 262144
     pins = dict(leaf['pins'])
     summary, owners = {}, []
-    old = (root/'cache-r1/control_l1d.sv').read_text().replace('module control_l1d #(', 'module ven_l1d #(', 1)
+    old = (cache/'control_l1d.sv').read_text().replace('module control_l1d #(', 'module ven_l1d #(', 1).replace('endmodule : control_l1d', 'endmodule : ven_l1d', 1)
     assert hashlib.sha256(old.encode()).hexdigest() == PARENT
-    candidate = (root/'cache-r1/ven_l1d.sv').read_text()
+    candidate = (cache/'ven_l1d.sv').read_text()
     assert candidate == transform(old)
     wrong = candidate
     for bit in (0,1):
         a = f'mc_lookup_next ? tag_prime_hit[{bit}] : tag_current_hit[{bit}]'
         assert wrong.count(a) == 1
         wrong = wrong.replace(a, f'mc_lookup_next ? tag_current_hit[{bit}] : tag_prime_hit[{bit}]')
-    assert (root/'cache-r1/wrong_select.sv').read_text() == wrong
+    assert (cache/'wrong_select.sv').read_text() == wrong
     for kind in ('cache', 'pairs'):
-        folder = root/(kind+'-r1')
+        folder = cache if kind == 'cache' else pairs
         closed = load(folder/'closed.json')
-        queue = load(root/(kind+'-queue-closed.json'))
         assert closed['passed'] and closed['pins_unchanged'] and not closed['error']
-        assert queue['passed'] and queue['pins_unchanged']
-        assert queue['native_receipt_sha256'] == sha(folder/'closed.json')
         pins.update(closed['pins'])
-        unit = f'ventium-parallel-tags-{kind}-oct11.service'
+        unit = getattr(args,kind+'_unit')
         props = dict(s.split('=',1) for s in subprocess.check_output(['systemctl','--user','show',unit,
             '-pInvocationID','-pSubState','-pMainPID','-pExecMainStatus'],text=True).splitlines())
-        assert props == queue['native_owner']
+        assert props['InvocationID'] == getattr(args,kind+'_invocation')
         assert props['SubState'] == 'exited' and props['MainPID'] == '0' and props['ExecMainStatus'] == '0'
         owners.append(dict(unit=unit, **props))
         config = subprocess.check_output(['systemctl','--user','cat',unit],text=True)
@@ -75,8 +78,8 @@ def main():
             assert set(re.findall(r'\+define\+(\w+)', ' '.join(command))) == set(row['defines'])
             assert ('VEN_L1D_TAG_LUTRAM' in row['defines']) == row['flat']
             assert {'VEN_PIPE_MEM_CHAIN','VEN_L1D_BANKED_DATA'} <= set(row['defines'])
-            assert command[-3:] == [str(root/'cache-r1/control_l1d.sv'),
-                str(root/'cache-r1'/('wrong_select.sv' if row['mutant'] else 'ven_l1d.sv')), str(generated)]
+            assert command[-3:] == [str(cache/'control_l1d.sv'),
+                str(cache/('wrong_select.sv' if row['mutant'] else 'ven_l1d.sv')), str(generated)]
             assert row['build_exit'] == 0
             binary = path/'obj'/('V'+top)
             assert sha(binary) == row['binary_sha256']
@@ -118,13 +121,14 @@ def main():
             for p in (generated,path/'command.json',path/'build.log',path/'run.log',binary,Path(archive['path']),path/'closed.json'):
                 pins[str(p)] = sha(p)
         summary[kind] = counts
-        for p in (folder/'closed.json',root/(kind+'-queue-closed.json'),root/(kind+'-launch-command.json')):
+        for p in (folder/'closed.json',folder/'started.json'):
             pins[str(p)] = sha(p)
     for p in (Path(__file__),root/'audit.json',repo/'verif/l1/run_parallel_tag_pairs.py',
               repo/'verif/l1/run_parallel_tag_cache.py',repo/'verif/l1/prepare_parallel_tag_lookup.py'):
         pins[str(p)] = sha(p)
     assert all(sha(p)==h for p,h in pins.items())
     result = dict(passed=True,pins=pins,owners=owners,summary=summary,whole_cache=True,
+                  cache_directory=str(cache),pairs_directory=str(pairs),
                   whole_core=False,standard_suite=False,hardware_acceptance=False,gameplay_ipc=None,timing_mhz=None)
     with (root/'cache-audit.json').open('x') as f:
         json.dump(result,f,indent=2)

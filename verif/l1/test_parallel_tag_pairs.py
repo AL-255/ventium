@@ -21,6 +21,7 @@ class PairFixture(unittest.TestCase):
             self.assertIn('dc_tag[s*2+w]' if flat else 'dc_tag[s][w]', new)
             self.assertIn('bank<8', new)
             self.assertIn('row<256', new)
+            self.assertRegex(new, r'`ifdef VEN_L1D_WINDOW_REUSE\n[^\n]*dut\.window_valid_q[^\n]*\n`endif')
 
     def test_drift_rejected(self):
         old = Path(__file__).with_name('tb_l1d_pair_store.sv').read_text()

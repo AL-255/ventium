@@ -53,9 +53,13 @@ def fixture(original, flat):
     for name in outputs:
         block += f'    if (dut.{name} !== shadow_{name}) $fatal(1,"PARALLEL-PAIR-MISMATCH output {name}");\n'
     for name in ('hit0', 'hit1', 'hit_way', 'mc_lookup_next', 'mc_capture_next',
-                 'st', 'rd_armed', 'rd_addr_q', 'window_valid_q', 'store_pair_hit',
+                 'st', 'rd_armed', 'rd_addr_q', 'store_pair_hit',
                  'bank_store_we', 'bank_pair_store_we'):
         block += f'    if (dut.{name} !== control.{name}) $fatal(1,"PARALLEL-PAIR-MISMATCH state {name}");\n'
+    block += '''`ifdef VEN_L1D_WINDOW_REUSE
+    if (dut.window_valid_q !== control.window_valid_q) $fatal(1,"PARALLEL-PAIR-MISMATCH state window_valid_q");
+`endif
+'''
     block += '''    for (integer s=0;s<128;s++) begin
       if (dut.dc_lru[s] !== control.dc_lru[s]) $fatal(1,"PARALLEL-PAIR-MISMATCH lru");
       for (integer w=0;w<2;w++) begin

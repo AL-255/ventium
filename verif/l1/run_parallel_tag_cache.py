@@ -33,6 +33,13 @@ def sha(path):
         return hashlib.file_digest(f, 'sha256').hexdigest()
 
 
+def control_source(original):
+    begin, end = 'module ven_l1d #(', 'endmodule : ven_l1d'
+    if original.count(begin) != 1 or original.count(end) != 1:
+        raise ValueError('L1 module boundary drift')
+    return original.replace(begin, 'module control_l1d #(', 1).replace(end, 'endmodule : control_l1d', 1)
+
+
 def miter_fixture(original, stream, flat):
     """Insert only a shadow instance and checks; retain all original stimuli."""
     matches = list(re.finditer(r'^[ \t]*ven_l1d\s+dut\s*\((.*?)\);', original, re.S | re.M))
@@ -141,7 +148,7 @@ def main():
         assert wrong.count(a) == 1
         wrong = wrong.replace(a, f'mc_lookup_next ? tag_current_hit[{bit}] : tag_prime_hit[{bit}]')
     out.mkdir()
-    for name, text in [('control_l1d.sv', old.replace('module ven_l1d #(', 'module control_l1d #(', 1)),
+    for name, text in [('control_l1d.sv', control_source(old)),
                        ('ven_l1d.sv', changed), ('wrong_select.sv', wrong)]:
         with (out/name).open('x') as f:
             f.write(text)
