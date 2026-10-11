@@ -76,6 +76,46 @@ checks coverage counts and service closure, and rehashes all retained pins.
 Audit SHA:
 `eb17979d81449de4bb7336f51b8026576e789a954af1468f271ca08cc5ccf313`.
 
+## Whole-cache checks queued
+
+[The sequential miter](../verif/l1/run_parallel_tag_cache.py) instantiates the
+complete original and modified L1s side by side, driven by the existing
+`tb_l1d_mem_chain.sv` and `tb_l1d_window_keep_reset.sv` stimuli. The original
+stimulus is retained verbatim; the generator only inserts a shadow instance
+and comparisons. Two construction/drift tests pass, including rejection of
+ambiguous instances and explicit output connections.
+
+Both tag layouts use full 128-set/two-way geometry and eight actual banked
+data arrays. Comparisons run after both clock edges and check all configured
+outputs, tag-hit selection, lookahead acceptance, fill state, registered read
+owner/data, every tag/valid/LRU entry and all data-bank rows. Existing fixtures
+exercise continuous handoff, same-address requests, backpressure, rejected
+miss/MMIO/crossing lookahead, byte-at-line-end, store interference, snoop/flush
+cancellation, cache-only priming, fill-phase resets and held-response reset.
+The reset fixture runs with store-window retention both on and off.
+
+Six positive configurations and two compiled reversed-selector mutants are
+planned. The mutants must fail the actual cache miter; merely failing to build
+does not qualify. Closed generated compiler products are archived with tar
+comparison and hashes between cases to bound disk growth; model executables,
+headers, sources and native logs remain available.
+
+Unit `ventium-parallel-tags-cache-queue-oct11.service`, invocation
+`705075dd978a4bcebc813109aaf10003`, waits for the exact MC-address timing queue
+`2af5acc6f3684a2d8d476a01f2a40606`, then launches one guarded native cache run
+with 32 compile jobs and a 540-second limit. The shared heavy-build lock is
+retained. **These native cache results are not available yet.**
+
+One additional reason to measure the change is visible in the RTL: paired
+store admission requires `!mc_lookup_next`, but also consumes `hit`. With the
+selected address inside tag RAM, that Boolean exclusion is separated from the
+late lookahead dependency by the RAM read. A hit-result mux exposes the exact
+identity `!select && (select ? next_hit : current_hit) == !select && current_hit`
+to logic optimization. This may remove an irrelevant lookahead dependency from
+that admission path, beyond moving the tag comparison earlier. It is a
+source-level explanation, **not evidence that the mapped path is removed**.
+The eventual matched netlist must confirm the result and its read-port cost.
+
 Remaining: actual whole-cache/reset/coherence checks, whole-core UV-fast QEMU
 and A/B traces, canonical verification, full-PC benchmark/correctness tests,
 matched area/timing, and physical Win95/Quake acceptance. Existing canonical
