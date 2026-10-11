@@ -168,8 +168,15 @@ model-latency measurements**, invocation `f5c00ad50bb044fd95424c60df96eee3`.
 Full architectural and cycle comparisons pass at AXI latency 0/7, including
 the pairable U/V and explicitly non-pairable fast unary cases. Receipt SHA-256:
 `e45814075422aa07fe7db17567c8a3fb13fcdec503de05f702d779efcd5f6ab6`.
-The canonical gate is currently running under invocation
-`30e27bc65b224ebeb5a4fefad4f28c13`; complete same-input replay follows it.
+The unchanged canonical gate closes **FAIL**, native exit 2 in **411.31
+seconds**, invocation `30e27bc65b224ebeb5a4fefad4f28c13`. All **20** complete
+cycle streams remain identical to the parent. The subsequent complete
+same-input replay passes **108 programs /80,800 architectural records**,
+invocation `c5591b8aefb045a89cf72a35c1ff8fd8`, without filtering records.
+The queue finishes with stable pins and no controller errors; its overall
+result correctly remains **FAIL** because the canonical gate is red.
+Queue receipt SHA-256:
+`aa3e616a831f21462acefd2d796867427eb283c36f1428f3be1a01a94669c2a6`.
 No ALU-sharing synthesis, frequency gain or gameplay gain is established.
 
 ## Remaining acceptance

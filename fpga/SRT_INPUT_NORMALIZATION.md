@@ -98,7 +98,19 @@ invocation `e419e15b835b47699c0877ed047d36a0`, observes these exact closed
 owners and waits for the existing ALU comparison queue to finish. It then
 runs the unchanged canonical gate and all 108 complete same-input programs.
 A canonical failure remains a failure; no automatic synthesis or implementation
-follows this queue. These final whole-core gates are still pending.
+follows this queue. The unchanged canonical gate now closes **FAIL**, native
+exit 2 in **401.52 seconds**, invocation
+`ce6c3de07ed8461f803a3be121f4673a`. All **20** complete cycle streams remain
+identical to the shift parent, with stable pins and unchanged masks/goldens/
+cycle bands. Receipt SHA-256:
+`92578339c6c4ae097878b9d7fbcb7e43b56802778ab031f0a1d02b17045597ae`.
+The subsequent same-input replay closes **PASS: 108 complete programs /
+80,800 architectural records**, invocation `67ac10182e5b4280b5a9fe22d201febf`.
+All input pins remain stable. Its receipt SHA-256 is
+`5ba87d316710c1a9d2ca9206c9dd934b9d0bbe13bd2f064f40093d27b2bc18e1`.
+The complete continuation terminates with no controller errors and correctly
+reports **FAIL** because the canonical gate failed. Continuation receipt:
+`b47b2a7c45afa7cfeb9d67ba32d351203df55dc47e06cce80fc3b2e36031fc31`.
 
 The remaining original differential/cycle checks must close, followed by actual
 mapped timing, the full standard suite and physical FPGA
