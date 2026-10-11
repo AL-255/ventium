@@ -1,9 +1,10 @@
 # Zero-C1 and packed-decimal sign repairs — October 10, 2026
 
 **Directed repairs pass; canonical gate and FPGA acceptance remain open.**
-Latest verified gameplay remains **0.53765810 U+V event IPC**, older simulated
-`bfb867f7`, cycles **4,500,065,237–4,600,065,237**. Neither new model below has
-a gameplay measurement. These are correctness repairs, not measured Quake gains.
+Updated October 11: verified gameplay is **0.51030715 U+V event IPC** on the
+full-PC model below, `2b4d7a48`, cycles **1,200,065,237–1,300,065,237** (the first
+predeclared window, not a full-timedemo average). Newer timing derivatives remain
+gameplay-unmeasured. These correctness repairs have no isolated measured Quake gain.
 
 ## Bugs and compact fixes
 

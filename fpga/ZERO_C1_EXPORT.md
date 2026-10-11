@@ -374,3 +374,55 @@ Newer verified gameplay baseline: **0.51030715 total U+V IPC** on `2b4d7a48`,
 cycles **1,200,065,237–1,300,065,237**, from the first predeclared 100M-clock
 window (`ventium-zero-c1-gameplay-first.OAQbYerX/audit.json`). It is not a
 full-timedemo average. All newer timing derivatives are gameplay-unmeasured.
+
+### Closed-frame diagnosis and acceptance-checker repair
+
+The October 11 read-only follow-up rechecks the failed supervisor invocation,
+absent native/owner PIDs, all 34 raw frame hashes and the retained log hash.
+Direct inspection of unmodified pixels shows the desktop in frame 3 (near
+800M clocks), followed by the readable Welcome window in frame 4 (near 900M).
+Frame 4 remains byte-identical through frame 19; frames 20–33 are another
+identical group with the taskbar clock advanced. This is **visual evidence of
+boot progress, not successful closure, human acceptance or UI interaction**.
+
+At frame 4 the log is only 4,451,811 bytes; the run then continues to
+3,826,565,475 clocks before exhausting its cap. At least 514,916 complete
+diagnostic records report vector 6 at `fcb2:00002ff7`. Interleaved output prevents
+treating this regex count as a complete fault trace. The retained desktop and
+absence of a detected terminal signature do not prove every guest fault benign.
+The next run should inspect its desktop promptly, exercise normal input, and
+request owned graceful closure; indefinitely waiting at the desktop is not
+additional boot verification. No guest patch, log suppression, cap increase or
+replacement run was made here.
+
+Evidence: `ventium-win95-closed-inspect.0VYl7Pqt/inspection.json`, SHA-256
+`7a9fcf693b8339a23c00be9d2ef66e468ee933f1cafff788ad26aa46a74c79a4`.
+Lossless PNG previews are separate from the unchanged raw PPMs and are not
+substituted for acceptance witnesses.
+
+The [closed-run checker](../tools/check_win95_standard_closed.py) also had stale
+host assumptions: 32 tasks, the old `obj1-speed-q16` build layout and 1 MiB
+receipt bounds (this failed run's before receipt alone is 1,678,842 bytes).
+Explicit schema 4, `board-posted16-40mhz-parentpolicy`, now supports the reviewed
+model-local layout, exactly 128 startup tasks and bounded 4 MiB expectation/
+before/result metadata. Old profiles retain their old limits. Commands,
+40/40/80 MHz clocks, one-CPU quota, 2 GiB memory/zero swap, **64 MiB raw log
+limit**, cold-state checks, source pins, native wait, failure rejection and
+separate human visual authority remain unchanged. Full source/build provenance
+still needs review before producing an expectation; the checker does not
+qualify a build recipe or permit dropping pins to fit the metadata bound.
+
+**78 host-only tests pass**: 40 closed-Windows checker tests plus 38 existing
+collector tests, including negative closure, truncated capture, altered input,
+resource, metadata-bound and manual-review cases. They do not run a guest.
+Results: `checker-collector-tests-r5.log` in the inspection root. An earlier
+combined test invocation failed one existing fixture's symlink-versus-canonical
+path expectation; rerunning with the canonical external TMPDIR passes without
+changing the collector. The Windows test fixture now resolves its temporary
+path explicitly, so negative tests reach their intended checks.
+
+This repair cannot rehabilitate the SIGTERM/log-budget failure. A fresh,
+cleanly closed candidate run, UI interaction, complete standard suite and
+physical FPGA acceptance are still required. The separate 40 MHz timing
+synthesis remains the primary implementation work; its frozen inputs are not
+changed by this host-checker repair.
