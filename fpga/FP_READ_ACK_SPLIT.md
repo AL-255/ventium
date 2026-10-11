@@ -248,6 +248,31 @@ command. Aggregate evidence:
 SHA `81386389b37b1d85b63366f056f262890dc05d1246b1ae6786ef26b327f25e33`.
 All current export input pins were rechecked unchanged after cleanup.
 
+## Additional sequential reset regression — queued, not passed
+
+[The new testbench](../verif/l1/tb_fp_read_ack_reset.sv) exercises the actual
+L1 array and backing handshake, without injecting internal state. At backing
+delays 0, 3 and 7 it resets each incomplete-fill position (0–7 acknowledged
+beats), aborts a resident response before its sampling edge, aborts a blocked
+store, and checks that reset does not undo an acknowledged write. A separate
+diagnostic hit-stream profile additionally holds a response while the live
+address changes, then tests both reset and consumption with no new request.
+
+[The runner](../verif/l1/run_fp_read_ack_reset.py) compares the unchanged
+carry parent and exact exported candidate with all hardware feature defines
+retained (only `SYNTHESIS` removed to execute assertions). The streaming
+profile adds `VEN_L1D_HIT_STREAM`; it is not the deployed profile. Inputs and
+logs are pinned, structural lint classes are fatal, and parent/candidate
+completion counts must agree. This is cache-level, not whole-core reset
+coverage or FPGA acceptance.
+
+Unit `ventium-fp-read-ack-reset-queue-oct11.service`, invocation
+`d7dd46eb7ffd4cd59a75919e2e8a0bb5`, waits for the exact timing-audit queue
+invocation above before entering the common heavy-build guard. Its four
+build/runs have a 480-second aggregate deadline. No reset-regression pass is
+claimed until native closure; future results belong under `reset-r1` in the
+read-ACK evidence root. Frozen synthesis payloads are unchanged.
+
 Verified gameplay baseline: **0.51030715 U+V retirement-event IPC**, model
 `2b4d7a48`, cycles **1,200,065,237–1,300,065,237**. It predates both timing
 candidates; neither has a gameplay measurement.
