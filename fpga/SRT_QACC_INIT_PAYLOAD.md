@@ -72,9 +72,9 @@ Queue `ventium-srt-qacc-idle-queue-oct11.service`, invocation
 `67954c8d9c7145329976dc7c14ef4093`, waits for the accepted-start test before
 running the same 5,024-operation actual-engine miter and deliberate busy-clear
 defect against this alternative. The
-[whole-core builder](../verif/srt/build_qacc_idle_core.py) is prepared but has
-not run; it requires both the native miter and liveness proof before changing
-the single SRT source in a separately compiled model.
+[whole-core builder](../verif/srt/build_qacc_idle_core.py) requires both the
+native miter and liveness proof before changing the single SRT source in a
+separately compiled model. That model now builds successfully (below).
 
 ## Closed native unit evidence
 
@@ -116,10 +116,68 @@ L1 tag lookup, store credit/ACK, commit and response capture. In this netlist
 it is only **0.036 ns** behind the SRT path. Holding other paths fixed, even
 eliminating the SRT delay leaves the capture constraint at about **24.36 MHz**;
 this is a diagnostic bound, not a measured optimization gain. Both paths need
-attention to reach 40 MHz. The already leaf-tested
-[MC address-preparation change](MC_ADDRESS_PAYLOAD.md) is therefore advancing
-to full-core verification, rather than waiting for SRT changes alone to solve
-timing. Actual mapped results must still be measured.
+attention to reach 40 MHz. The
+[MC address-preparation change](MC_ADDRESS_PAYLOAD.md) now closes at
+**26.01118 MHz**, improving memory-capture slack by 4.022 ns. Its worst
+endpoint is again SRT quotient enable. That netlist does not include either
+SRT change, so their combined effect still requires actual synthesis.
+
+## Private whole-core build and directed tests
+
+The idle-state variant's full-core build closes with native exit 0 in
+**12.29 seconds**, retaining all 150 UV-fast defines and the private C++
+harness/header dependency. Unit `ventium-srt-qacc-idle-core-oct11.service`,
+invocation `1356d8a7925444c18b311802d6a9aeed`. Model SHA:
+`33fb210acc14e9f880f493767cfb9fbf0cd4304038a925a521856384680631c7`.
+The balanced-CLZ core is its sole parent; only `fpu_srt_div.sv` changes.
+
+The unchanged cold paged/relocated matrices pass **72 memory +72 FP +12 AGI
+fixtures**, including divide/sqrt, with complete QEMU architectural comparisons
+and identical full A/B cycle streams. Native times are 12.20 /6.38 /1.99 s;
+units `ventium-qacc-idle-{memory,fp,agi}-oct11.service` respectively retain
+invocations `6c085c1aaa5e43f6b0c6d01b9fe27876`,
+`f762db9ca6b14996aa787436b34c0332`, `b44f1ead5ecb46c5b5dc109d93c649dc`.
+
+All **16 focused FP fault cases on both models (32 runs, 47,170 full UV
+architectural records)** pass, including #NM/#PF ordering, source faults,
+pending FP ownership and segment relocation. Unit
+`ventium-qacc-idle-faults-oct11.service`, invocation
+`7f262d1896854b308fa51dd787612415`, exits 0. These are focused checks, not the
+full permission/fault sweep or standard suite.
+
+Canonical verification closes with native gate exit 2 (**FAIL**), unchanged
+inputs and all 20 full cycle streams identical to the parent. The 338.62-second
+controller interval includes waiting for the fault gate's shared lock; it is
+not a pure execution-time benchmark. Unit `ventium-qacc-idle-verify-oct11.service`,
+invocation `46d4814dbf7c49f0b7d9b35a9494afcc`, exits 1 as expected for that
+failed gate. No masks, goldens, terminal records or cycle bands change.
+
+[Independent full-core auditing](../verif/srt/audit_qacc_idle_core.py) now
+reopens the directed records, fixtures, native exits, profiles, source closure
+and canonical cycles: **75,192 candidate architectural records**, 1,500
+targeted memory-V retirements and 350 AGI acceptance events. Receipt
+`audit.json`, SHA:
+`c8047ea72183b751b4eee55bcbd1bf795618966bc0cadb3fa97f289a53d278dd`.
+This does not turn the canonical gate green.
+
+An additional direct comparison of all 108 historical functional RTL traces
+fails at initial ESP: independent QEMU loader invocations initialized different
+stack addresses. That comparison is retained in `canonical-ab.json` and is not
+treated as either a processor failure or equivalence. The
+[same-input driver](../verif/l1/run_canonical_same_input_ab.py) instead reruns
+both binaries on the candidate's exact original image and golden-derived ESP,
+requiring full A/B equality and exact reproduction of the candidate's original
+trace. It does not normalize ESP, mask C1 or drop terminal records.
+
+That same-input run now passes **all 108 programs /80,800 complete candidate
+records** (216 native model runs), in 98.09 seconds, with input pins unchanged.
+Every fresh candidate trace reproduces its original trace exactly, and every
+parent trace matches the same-input candidate. Unit
+`ventium-qacc-idle-canonical-ab-oct11.service`, invocation
+`21a2a50f3d8946ddbc1a4774864d483c`, exits 0. Receipt SHA:
+`cbe27a0a91f97aee1b55fddc5207b6532e655775e54d3c17ddbcdbda46899377`.
+This establishes no new full-corpus A/B architectural difference; it **does
+not fix the still-failing QEMU gate**.
 
 Gameplay baseline: **0.51030715 total U+V IPC**, model `2b4d7a48`, cycles
 **1,200,065,237–1,300,065,237**, predating both proposals. Both timing
