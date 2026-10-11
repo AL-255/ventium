@@ -1,12 +1,13 @@
 # Separate FP read acknowledgement — October 11
 
-**Private candidate: 156 directed cases, 64 fault/fragment fixtures and both
-short CoreMark seeds pass; no
-timing, gameplay, standard-suite or FPGA acceptance is claimed.** The closed
+**Private candidate: 23.50176 MHz unplaced synthesized estimate, below 40 MHz.
+156 directed cases, 64 fault/fragment fixtures, sequential cache-reset tests and
+both short CoreMark seeds pass; no gameplay, standard-suite or FPGA acceptance
+is claimed.** The closed
 [next-query synthesis](NEXT_QUERY_PAYLOAD_CUT.md) regresses to 22.51593 MHz;
 this candidate excludes that header change and uses the faster carry parent. The target
 remains at least 40 MHz synthesized Fmax with UV and fast pipeline enabled;
-the last completed estimate is 23.5855 MHz, unplaced.
+the best retained estimate is 23.5855 MHz, unplaced.
 
 ## Structural reason
 
@@ -115,9 +116,11 @@ V retirements; neither model disables UV or the fast paths. The longest
 matrix takes 11.53 seconds. Native units `ventium-fp-read-ack-{memory,fp,agi}-oct11`
 are terminal with exit 0. This is not a gameplay IPC result or a new CM score.
 
-Remaining: additional fragment/reset coverage, canonical gates and both original
-CoreMark seeds before measuring this candidate's synthesis. Leaf
-equivalence does not prove full wiring, cache ownership or full-system safety.
+At this checkpoint, fragment/reset coverage, canonical gates and both original
+long CoreMark seeds remained outstanding. Subsequent sections record the
+fragment checks, short-seed comparisons and diagnostic synthesis; none replaces
+the still-required long correctness seeds. Leaf equivalence alone does not prove
+full wiring, cache ownership or full-system safety.
 For the existing `run-fp-memory-fault-gate.sh` fixtures, both same-profile
 models must use `FP_MEM_ADMIT=1` and `FP_LOAD_COMMAND=1`; neither is a disabled
 handoff control. Check the **complete** cycle-functional trace against QEMU in
@@ -226,15 +229,56 @@ Native synthesis **started at 2026-10-11 01:28:58 UTC**, unit
 `83f3739ae3434163af3312effdc12d0a`. The single guarded Vivado family has an
 8 GiB RAM cap, 6 GiB swap cap, 4 GiB disk stop floor and 30-minute native
 deadline. Actual native affinity is CPUs 12–15; `general.maxThreads=1` and
-one synthesis worker remain unchanged. No OOM is observed at launch.
+one synthesis worker remain unchanged.
+
+The native owner closes with **exit 0 in 1,011.42 seconds** at 01:45 UTC.
+The independent closure audit rechecks **35,920 input pins**, all **156
+hardware defines**, 148 native Verilog inputs and the exact four changed
+payloads. Peak RAM is 8 GiB, peak swap 1.034 GiB; no OOM or resource stop
+occurs. The inherited generated-PS `create_clock` unknown-pin warning remains
+recorded (one critical warning, 1,568 warnings); it is not silently waived.
+
+| Synthesized resources | Carry parent | Read-ACK candidate | Change |
+| --- | ---: | ---: | ---: |
+| CLB LUTs | 197,313 | 197,169 | -144 |
+| Registers | 54,645 | 54,631 | -14 |
+| BRAM tiles | 277.5 | 277.5 | 0 |
+| DSPs | 47 | 47 | 0 |
+
+Synthesis audit SHA:
+`a7124d9fc44e33a42750ff0faeabc6c49f46f12ce2fde41ca20577487791cca0`.
+Checkpoint SHA:
+`16b48264480c37121b66e6ebf4e63eee9fcb87ed56f168e269a4637fc43209f3`.
 
 `ventium-fp-read-ack-audit-queue-oct11.service`, invocation
-`d50545b96faa4e44892a8d80b727c187`, watches that exact owner and will audit
-native closure before opening the candidate and carry-parent projects for
-original-clock timing comparison. It does not retry a failed run or launch
-placement/routing. These timing results remain pending; the retained
-estimate is **23.58546 MHz**, below the **40 MHz target**. No new bitstream
-or physical acceptance is claimed.
+`d50545b96faa4e44892a8d80b727c187`, has audited that exact native closure and
+launched `ventium-fp-read-ack-clock-oct11.service`, invocation
+`6d91d26e71bf4a5d8161b11a8fdbd4cc`, for candidate/carry-parent original-clock
+comparison. The candidate project reports the original 40 MHz core and
+100 MHz PL clocks. The queue does not retry a failed run or launch
+placement/routing. Both timing audit and queue have now closed with exit 0.
+The audit takes **246.17 seconds**, checks **35,952 input pins**, reports no
+black boxes or structural DRC errors, and observes no OOM.
+
+| Matched unplaced synthesis | Carry parent | Read-ACK candidate |
+| --- | ---: | ---: |
+| Core Fmax estimate | 23.58546 MHz | **23.50176 MHz** |
+| Setup slack at 25 ns | -17.399 ns | -17.550 ns |
+| Worst path logic levels | 146 | 148 |
+
+The global estimate regresses **0.355%**; this is **not** an accepted standalone
+frequency improvement. All 30 reported worst paths now end at L1 `dc_lru`
+data inputs, not FPU bank enables. The worst has 42.339 ns data delay:
+9.433 ns logic and 32.906 ns estimated routing. It traverses frontend decode,
+next-read address/permission preparation, lookup, paired-store admission,
+backing alias/credit logic, ordinary ACK, next-read commit and LRU update.
+The FP cut exposes another long path; it does not remove the need to shorten
+that common chain. No false-path exception is justified by this observation.
+Core hold slack remains -0.101 ns. Timing audit SHA:
+`66fea69d45499d10c398755a1a26581dd7b11cfe305540503a9a043ed08b51fc`.
+
+The best retained estimate remains **23.58546 MHz**, below the **40 MHz target**.
+No placement, routing, new bitstream or physical acceptance is claimed.
 
 Before launch, 67 closed builds' generated `Vventium_top`/`Vsystem` C++ and
 compiler intermediates were losslessly archived and checked with
@@ -248,9 +292,9 @@ command. Aggregate evidence:
 SHA `81386389b37b1d85b63366f056f262890dc05d1246b1ae6786ef26b327f25e33`.
 All current export input pins were rechecked unchanged after cleanup.
 
-## Additional sequential reset regression — queued, not passed
+## Additional sequential reset regression — R3 passes
 
-[The new testbench](../verif/l1/tb_fp_read_ack_reset.sv) exercises the actual
+[The R3 testbench](../verif/l1/tb_fp_read_ack_reset_r3.sv) exercises the actual
 L1 array and backing handshake, without injecting internal state. At backing
 delays 0, 3 and 7 it resets each incomplete-fill position (0–7 acknowledged
 beats), aborts a resident response before its sampling edge, aborts a blocked
@@ -258,7 +302,7 @@ store, and checks that reset does not undo an acknowledged write. A separate
 diagnostic hit-stream profile additionally holds a response while the live
 address changes, then tests both reset and consumption with no new request.
 
-[The R2 runner](../verif/l1/run_fp_read_ack_reset_r2.py) compares the unchanged
+[The R3 runner](../verif/l1/run_fp_read_ack_reset_r3.py) compares the unchanged
 carry parent and exact exported candidate with all hardware feature defines
 retained (only `SYNTHESIS` removed to execute assertions). The streaming
 profile adds `VEN_L1D_HIT_STREAM`; it is not the deployed profile. Inputs and
@@ -273,12 +317,29 @@ native build/test launched; no `reset-r1` output or native log exists. R1 and
 its original pin receipt remain preserved. R2 supplies both dependencies and
 checks each against both frozen manifests; the testbench is unchanged.
 
-Unit `ventium-fp-read-ack-reset-r2-queue-oct11.service`, invocation
-`b044abc0e7e4485da19a396ba151f855`, waits for the exact timing-audit queue
-invocation above before entering the common heavy-build guard. Its four
-build/runs have a 480-second aggregate deadline. No reset-regression pass is
-claimed until native closure; future results belong under `reset-r2` in the
-read-ACK evidence root. Frozen synthesis payloads are unchanged.
+R2 compiles the unchanged parent successfully but fails
+`RESIDENT_ACK_FIXTURE_MISSING`: a first cold read may complete by early-word
+forwarding without a reusable full-line window. Requiring an immediate reuse
+ACK was a fixture error, not an established DUT defect. R2 sources, binary,
+logs and failed receipt remain intact under `reset-r2`.
+
+R3 waits at most two clocks for the resident response, checks that no backing
+read occurred, then resets after the response-producing edge and before the
+next consumption edge. It does not force cache state or weaken response/data
+checks. Unit `ventium-fp-read-ack-reset-r3-oct11.service`, invocation
+`fdb0f1bcc7f5472ea8d12c835762631b`, closes native 0 in **6.93 seconds** under
+scope invocation `3c67ae277d504e309a253d4632c61d09`, CPU 16.
+
+All four parent/candidate hardware/diagnostic-stream builds and runs exit 0.
+Each checks 24 abandoned fills, 3 aborted resident responses, 3 aborted stores
+and 3 preserved committed writes. The hardware profile completes 36 reads,
+60 resets and 1,890 ACK comparisons; streaming completes 48 reads, 66 resets,
+3 held-response consumptions and 2,173 comparisons. Parent/candidate counts
+match exactly. The independent audit checks 13 source/tool pins, all four
+native binaries/logs/commands and their scoped journal records. Receipt:
+`reset-r3/independent-audit.json`, SHA
+`b66220b070c6da63ba972d8d67ad8efea2dfec53e59b59c7a24bdc7efbf0e850`.
+This remains cache-level reset coverage, not whole-core or board acceptance.
 
 Verified gameplay baseline: **0.51030715 U+V retirement-event IPC**, model
 `2b4d7a48`, cycles **1,200,065,237–1,300,065,237**. It predates both timing
