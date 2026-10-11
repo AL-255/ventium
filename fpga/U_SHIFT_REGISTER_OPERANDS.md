@@ -159,9 +159,38 @@ mapper remain unchanged.
 Synthesis controller invocation: `5dca43f5622d4f3a988423fbc556b54d`;
 Vivado scope: `908e5981dd364b6095834f847af0d5b9`;
 original-clock queue: `490247bb20b74c5497766c041e810334`.
-These identify the live experiment, not a completed frequency result. No
-placement, routing or deployment is authorized by these controllers. **The
-latest completed estimate remains 26.14379 MHz, below the 40 MHz requirement.**
+Synthesis now closes with **native exit 0**, stable inputs, in **1,877.67
+seconds** (31 min 17.67 s), at **09:15:10 UTC**. Its independent closure audit
+passes: all **307,671 input pins**, **148 native Verilog inputs**, the exact
+two payload deltas, the generated mapper command and all 156 definitions are
+checked. There is no resource-stop or OOM event. Peak bounded usage is
+**8 GiB RAM /530,145,280 bytes swap**.
+
+| Post-synthesis utilization | Branch-residency parent | Register-shift/carry-rotate candidate |
+| --- | ---: | ---: |
+| CLB LUTs | 189,799 | **184,962** |
+| Registers | 54,606 | 54,646 |
+| Block RAM tiles | 277.5 | 277.5 |
+| DSPs | 47 | 47 |
+
+The combined change removes **4,837 LUTs (2.55%)**; the two transformations
+are not individually attributed. Native synthesis reports **0 errors, 1
+critical warning and 1,567 warnings**. The critical warning is the same
+generated PS8 `create_clock` unknown-pin warning present in the matched
+parent. It is retained, not described as a clean-warning run; actual core/PL
+clock checks remain the separate timing audit's responsibility.
+
+Closure-audit SHA-256:
+`e20b9f6b72e89396fce6794bbf83dac28c8f6eb239c82ca51ce3036ff10bdd9c`.
+Synthesized checkpoint SHA-256:
+`190d758a5817c8c9727553035a62dd4075281762545444feed346e67454134f2`.
+
+The independent original-clock audit starts at **09:15:48 UTC**, invocation
+`4f59ed2d666b43ceafb094626336b5c0`, after the synthesis family exits. Its
+15-minute native cap and 8 GiB/6 GiB RAM/swap limits are unchanged. No
+placement, routing or deployment is authorized by these controllers. This
+is **not yet a completed frequency result**: the latest completed estimate
+remains **26.14379 MHz**, below the **40 MHz** requirement.
 
 **880,645,526 bytes** of explicitly selected inactive compiler products are
 losslessly archived, with verified member hashes and recovery commands in
