@@ -345,6 +345,12 @@ compare the one-core delta, and report Fmax from the unchanged 25 ns core clock.
 A completed process alone does not satisfy the **at least 40 MHz synthesized
 Fmax** requirement. The canonical gate remains failed, not waived.
 
+A subsequent real-ISA diagnostic reproduces an independent
+[LGDT/LIDT producer-width bug](DESCRIPTOR_READ_EXTENT.md) in this candidate
+and its predecessor. Its two-arm correction is a separate private derivative;
+the running synthesis inputs have not changed. This is an additional release
+blocker, not evidence that the payload timing cofactor introduced the bug.
+
 Actual post-synthesis timing, all original standard-suite components, and
 physical FPGA Win95/Quake acceptance remain required. No new placement, route,
 bitstream or board deployment has started for this successor.
