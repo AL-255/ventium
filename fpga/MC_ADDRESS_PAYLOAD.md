@@ -1,7 +1,8 @@
 # Raw-prime address preparation — 2026-10-11 UTC
 
-**Proposed private candidate. Native RTL leaf passes; no full-core, gameplay,
-frequency or FPGA result. Not part of the completed write-direction synthesis.**
+**Private candidate. Native RTL leaf, whole-core build, five cold directed
+matrices and focused FP-fault checks pass. Canonical verification remains
+FAIL. No gameplay, frequency or FPGA result for this change.**
 
 ## Structural issue and proposed change
 
@@ -81,12 +82,11 @@ chain before the L1 request and tag lookup. Optimizing SRT alone cannot remove
 this independent constraint, so whole-core checks of this address-preparation
 candidate are now queued as well. No full-core or timing pass is claimed yet.
 
-The prepared [whole-core builder](../verif/l1/build_mc_address_core.py)
+The [whole-core builder](../verif/l1/build_mc_address_core.py)
 requires successful native positive/negative leaf runs and the source proof,
 rechecks all input hashes, and changes only `core_mem_chain.svh`. It retains
 the parent's complete feature profile and builds a separately named C++
-harness against its own generated model headers. No full-core build has run
-for this candidate yet. Its parent remains the independently measured
+harness against its own generated model headers. Its parent remains the independently measured
 write-direction core `1bfb1bb2`, not an unmeasured combination of SRT changes.
 
 The first core queue exits before launching anything: its exclusive-create
@@ -97,6 +97,19 @@ directory and unit `ventium-mc-address-core-queue-r2-oct11.service`, invocation
 losslessly archives only their closed generated compiler products before
 launching the guarded core build. Source, headers, binaries, logs and pins are
 retained. No other Vivado run, test-profile weakening or retry is introduced.
+
+The core build now closes successfully in **12.52 seconds**, unit
+`ventium-mc-address-core-oct11.service`, invocation
+`578d7ea095204605a2860bda4ec0e524`, native exit 0. The single-header delta and
+all input pins are checked; model SHA:
+`911fe92597bea7eb194cc9b3b3194206324c8ed0ee3ae95ab4fdcdaef261e3f0`.
+This is a build result, not a functional pass.
+
+The later balanced-SRT timing result reaches 24.56339 MHz and exposes the
+shared memory path as the new worst cone: `EIP -> dc_lru[8]/D`, -15.711 ns,
+139 levels; V capture is -15.392 ns. That confirms the need to address this
+chain. The separately leaf-verified [parallel tag lookup](PARALLEL_TAG_LOOKUP.md)
+is another candidate for it, not part of this model.
 
 Two additional cold-reset A/B drivers are prepared from the existing prime
 fixtures, without editing those fixtures or their original runners:
@@ -110,8 +123,79 @@ fixtures, without editing those fixtures or their original runners:
   Both models keep held priming enabled; complete traces and hint counts
   must agree, with explicit held-read and paired-load witnesses.
 
-These are prepared tests, not passing results. They supplement, rather than
-replace, the existing FP, AGI, memory and permission/fault checks.
+Both matrices run in order after the exact successful build by
+`ventium-mc-address-checks-queue-oct11.service`, invocation
+`55d03159af5d42acac4f4a41cae3c710`. Both now close successfully. The full
+**640-fixture branch matrix** uses `ventium-mc-address-branch-oct11.service`,
+invocation `7823c41b6ad143c89194f212e56f4dd6`; 90.20 seconds, 2,560 model/latency
+measurements. The **24-fixture held matrix** follows under invocation
+`d766f05192e5485e83ef6a1128246b12`; all 48 latency cases pass for both models.
+Each has a bounded native service, explicit CPU affinity, separate logs and
+receipt, and a 4 GiB disk-reserve stop. Complete architectural states match
+QEMU, complete architectural/cycle records match the control, actual paired
+execution is witnessed, and the hint-owner checks pass. No prefix truncation
+or cycle-band adjustment is used.
+
+Branch receipt SHA:
+`4b110ee10d7d973178915daa1d2fdf04ee64f7340b6b86f7d86fcfb177d61884`.
+Held receipt SHA:
+`31c0e43ce23ed9026f57104d9e5a3a33c7490a53288b45b028a5829ae4d51907`.
+
+The existing paged/relocated memory, FP and AGI matrices also close with native
+exit 0, stable inputs, full QEMU comparisons and identical complete A/B state
+and cycle records:
+
+| Matrix | Fixtures | Model/latency measurements | Time | Native invocation |
+| --- | ---: | ---: | ---: | --- |
+| Memory | 72 | 288 | 11.50 s | `b19c53905dd44f0a91c00c4e0a4d6773` |
+| FP | 72 | 288 | 6.96 s | `f7ffdccd77874f4f9d5a9793f60f5eb7` |
+| AGI | 12 | 48 | 1.38 s | `7dba970104494047b0dc1c04dc79376d` |
+
+That is **820 cold fixtures** across the five directed matrices. The unchanged
+canonical gate closes in **203.79 seconds** under
+`ventium-mc-address-verify-oct11.service`, invocation
+`aa45bb1412bd4852bc13a2b6a874c1c0`, with native gate exit 2 (**FAIL**): 7/108
+functional passes; terminal-length and x87 C1 discrepancies remain. All 20
+complete cycle-record streams still match the parent. No masks, goldens,
+terminal-record truncation or cycle bands are changed.
+
+The first audit queue (`9dc68fec8c0643e4b6e456b83ae1ed2b`) fails before reading
+the matrices: its draft compares the guarded builder's scope invocation with
+the distinct outer controller invocation. That script and receipt are retained.
+The [corrected independent auditor](../verif/l1/audit_mc_address_r2.py) verifies
+the controller, the manager's native scope start/close events and exact builder
+command/closure record separately. This short-lived builder's stdout record
+lacks runtime cgroup fields, so those fields are not invented. The intermediate
+R2 draft is also retained locally as `audit-mc-address-r2-initial.py`.
+
+The corrected audit reopens **438,312 candidate architectural records** and the
+same number of cycle records, compares every record against its control and
+every architectural stream against full QEMU output, and witnesses **117,436 V
+retirements**. It checks all five retained service closures, 150 matching core
+defines, the exact single-header change, unchanged observation-mode clocks,
+native terminal statuses and all 20 canonical cycle streams. Its **65,253 pins**
+are independently rehashed after the audit closes. Receipt
+`core-audit-r2.json`, SHA:
+`30863a7bf308deb31b6bbbca473e76833606e24b98df7aa7db6146f14fa043fd`.
+Audit completion is explicitly separate from the still-failing canonical gate.
+
+### Focused fault ordering
+
+The unchanged [fault driver](../verif/l1/run_fp_read_ack_faults.py) completes
+16 cases on both models (**32 model/case runs**, 47,170 complete UV-fast
+architectural records across both models), unit
+`ventium-mc-address-faults-oct11.service`, invocation
+`44ee9efb08ec4e1ca666236a58f30aa7`, native exit 0. Cases cover FADD/FLD/FILD
+source page faults and exact restart state, CR0.EM/TS #NM-before-#PF ordering,
+pending FP-owner drain, and relocated DS/SS addressing. Every complete UV-fast
+trace matches QEMU and the identical-image parent; the driver's functional-mode
+checks are diagnostic controls, not substituted acceptance. All native inputs
+and retained artifact hashes are independently rechecked.
+
+Fault receipt SHA:
+`f7e9f18cb98c828571b5f837d1b2f5696162e24d0b6b03aea4d03ccfc5b29e39`.
+This is focused fault coverage, not the full permission/fault or standard suite.
+Full-PC benchmarking, matched synthesis and physical acceptance remain open.
 
 Before adoption: pass the native leaf and whole-core fault/permission/branch
 checks, preserve full-PC benchmark cycles, resolve canonical-gate failures,
