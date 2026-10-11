@@ -147,11 +147,61 @@ path-alias preflight before observation. `gdb-r3` correctly proves the overlap;
 `abort-bus-r1` additionally proves the accepted bus transfer. None of the failed
 observation attempts is counted as an RTL test or silently overwritten.
 
-The next correction must materialize the architectural read width before
-fragment masking and latching, choose the new count on replacement, preserve
-write strobes and walk-detour behavior, and retain the late-fault-free payload
-selection. It must be tested against exact touched bytes, not only register
-results or equivalence to this defective predecessor.
+### Byte-exact correction (private, leaf-qualified)
+
+[`prepare_fragment_exact_reads.py`](../verif/issue_uv/prepare_fragment_exact_reads.py)
+now implements that correction on the exact BUS predecessor, retaining the
+payload-only timing cofactor:
+
+1. Convert a zero **read** mask to the architectural beat width before first
+   fragment masking; preserve explicit read masks.
+2. Capture that materialized read mask for fragment 2. Writes still capture
+   their original strobes, including genuine zero-strobe writes.
+3. Use the registered count only while `fx_eng` identifies a live, non-aborted
+   owner. A replacement uses its natural page offset on the start clock.
+
+No additional register, pipeline stage, stall, request permission or clock
+exception is introduced. Ordinary unfragmented legacy reads are unchanged;
+this is not a claim that all legacy producers have byte-exact read interfaces.
+The resulting private core SHA-256 is
+`a6c2c5aabddc268ae2be5b1896d1a9bc6f8780d17eb4e45c62c2f651c48a5cae`.
+
+[`run_fragment_exact_reads.py`](../verif/issue_uv/run_fragment_exact_reads.py)
+extracts the **actual sequential engine**, bus tail, output masks and L1 narrow
+piece planner. The producer FSM and translation are abstracted; physical pages
+are deliberately discontiguous. An independent oracle checks every touched
+byte, alignment, no duplicates/excess bytes, final merge and ACK visibility.
+The [testbench](../verif/issue_uv/tb_fragment_exact_reads.sv) covers:
+
+| Sequential leaf cases | Count |
+| --- | ---: |
+| Crossing reads, 2/3/4-byte widths and every split | 216 |
+| Replacement of old read or write/probe phases | 144 |
+| Walk detours with unrelated ACK/data, frozen engine | 180 |
+| Write masks, all 16 masks at four page offsets | 64 |
+| Byte-piece plans checked, including stalled requests | 872 |
+
+Read tests include legacy/explicit masks, immediate and 1/7-clock-delayed first
+ACKs, different old/new offsets, and a pending-translation stall before the
+second fragment. These are binary-control tests, not X-state qualification.
+The unchanged predecessor fails as expected. Three mutations separately
+restoring the bad first mask, bad saved mask or aborted-owner count each fail
+the independent oracle. Four host source-scope/drift tests also pass.
+
+`exact-leaf-r1/` closes native zero in 0.31 seconds, service invocation
+`dfeb7683f25342fbbc5ab5f0a48488c6`, with stable pins. The Icarus sensitivity and
+ignored-`unique` warnings remain in the logs. Receipt SHA-256:
+`6ab35f760f0873503e1d5de5de366ce5d0ec3785560f788e8f899c18d20f5a48`.
+
+[`build_fragment_exact_core.py`](../verif/issue_uv/build_fragment_exact_core.py)
+prepares `exact-core-r1/`: all 195 predecessor files retained, exactly one RTL
+delta (`core.sv`), the same 150 UV-fast definitions, a private harness and
+generated-header dependency, and 470 checked input hashes. The guarded-32 build
+is queued behind the **entire** existing BUS synthesis/timing sequence, not
+between its synthesis and report stages. Queue invocation:
+`60630b3871ae4c5998db14c703ed79f8`. At this update no compiler has started for the
+corrected model. No whole-core, performance, timing or hardware pass follows
+from this preparation or the leaf tests.
 
 First inspect the in-flight bus candidate's actual timing. If this cone remains
 limiting, build the private derivative under the shared compiler guard, then
