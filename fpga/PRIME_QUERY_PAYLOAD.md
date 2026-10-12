@@ -1,11 +1,13 @@
 # Resident-query payload selection — October 12
 
-**Prepared and microtested only; no full-core, timing or FPGA acceptance.**
+**Exact-parent whole-core build and directed comparisons pass; canonical
+verification remains FAIL. No timing or FPGA acceptance.**
 The completed [load-ACK synthesis](LOAD_READ_ACK_TIMING.md) is unchanged and does
 not include this separate candidate. The target remains **at least 40 MHz
 post-synthesis Fmax** with UV, fast paths and full P5 caches. The last completed
-parent estimate is **30.02192 MHz**, not a timing pass. **Further compilation
-of this query candidate is deferred**, for the reasons below.
+parent estimate at the original preparation was **30.02192 MHz**, not a timing
+pass. The original load-ACK derivative remains uncompiled; the October 12
+memory-divide result below motivates a separate exact-parent transfer.
 
 ## Measured dependency and proposed cut
 
@@ -31,7 +33,7 @@ traffic. No new port, state, feature flag, exception, pipeline bubble or
 arithmetic unit is added. All permission and coherence checks remain intact.
 
 Simulation assertions compare old/new payloads on every request and require
-every commit to have a request. They still need to execute in the whole core.
+every commit to have a request. They execute in the whole-core tests below.
 This is not a claim of equivalence for every internal idle signal.
 
 ## Executed checks
@@ -70,7 +72,7 @@ The proof in `query-payload-proof-r1` closes zero as
 `c7e5e9e15ada055493bfb26f50c0bee0286336f298922e6e0f75eeb8fad70c8f`.
 Both are CPU-12-only light jobs with no swap, separate from Vivado.
 
-## Deferred after timing/history review
+## Original deferral after timing/history review
 
 The [private core builder](../verif/l1/build_prime_query_payload_core.py)
 prepares `query-payload-core-r1`: 195 input files, the same 152 definitions,
@@ -100,6 +102,140 @@ candidate should transfer into the PC model and a new measured synthesis.
 The inherited canonical **7 PASS / 101 FAIL** is still an acceptance blocker;
 unchanged A/B behavior does not waive it. Full original standard-suite and
 physical FPGA Win95/UI and Quake timedemo acceptance remain required.
+
+## Retargeted after the memory-divide timing result
+
+The [memory-divide candidate](MEMDIV_INPUT_CAPTURE.md) closes at
+**29.077375 MHz**, with all 30 reported worst paths now ending at D-cache LRU
+registers. Its 120-level path explicitly traverses `mc_prepare_ok`, the late
+`mem_next_addr` selector, address-region eligibility, paired-store readiness,
+snoop/continuation checks and next-read commit. This is new measured evidence
+for revisiting the deferred selector, not an inferred benefit from leaf proofs.
+
+[`build_memdiv_query_core.py`](../verif/l1/build_memdiv_query_core.py) reuses
+the exact reviewed builder and original source-extracted miter/all-bit proofs,
+changing only the admitted parent model identity and pinning both runner files.
+The parent model is
+`be5375aa32db48600498fc4b2c3a610c7cd99a0fa208c5186e602c44dd9b3d10`.
+Its `core_mem_chain.svh` is the exact byte-identical predecessor already
+tested by the recipe. A fresh `memdiv-query-core-r1` under the evidence root
+retains all 195 inputs and 152 definitions; only this header changes. The
+memory-divide and exponent changes remain present, and all UV/fast/cache and
+assertion settings remain enabled. No active or historical frozen export is
+modified.
+
+The guarded 32-job build starts only after synthesis and the timing audit
+have closed and no native Vivado remains. It closes native zero in **20.91 s**,
+with unchanged inputs and the private generated-header dependency verified.
+Model SHA-256:
+`e65a06e1e3c26d48723bdeb0d9d97061879f15b1ff916e493d4fe94ae336a525`.
+Service:
+`ventium-memdiv-query-core-oct12`, invocation
+`a01d2a23cf2a4285a37650e4d1cad8f1`. No synthesis of this new derivative is
+queued. Timing, gameplay and physical acceptance remain unmeasured.
+
+### Same-parent whole-core checks
+
+All tests below use the exact memory-divide parent and the selector candidate,
+unchanged enabled profiles, assertions, AXI latency 0/7 and cold system fixtures.
+The complete directed architectural traces compare against QEMU; parent and
+candidate state/cycle traces are identical, not normalized or selectively masked.
+Counts include both latency settings; they are directed records, not gameplay.
+
+| Check | Fixtures | Candidate records | Actual V retirements |
+| --- | ---: | ---: | ---: |
+| AGI priming | 20 | 36,960 | 2,560 |
+| Reference-load priming | 20 | 26,712 | 2,560 |
+| Original full FP matrix | 384 | 208,128 | 768 |
+| Held-read ownership | 24 | 9,200 | 1,360 |
+| Memory pairing / bank and line boundaries | 72 | 31,392 | 1,500 memory V |
+| Branch / priming, all 32 line offsets | 640 | 353,920 | 1,280 |
+
+AGI/reference runs retain their original 20-fixture smoke selection, **not their
+full matrices**; they witness 12,096 / 13,888 accepted resident primes. The FP
+matrix is the complete original 384-fixture sweep, with 1,536 measurements,
+49.69 s runtime and no cycle or FP-acceptance count differences. The branch
+sweep closes in 213.09 s; memory pairing in 21.32 s.
+
+Evidence directories under the root above are `memdiv-query-{agi,ref,fp,held,
+memory,branch}-r1`. Native owners all close zero and are reaped:
+
+| Check | Owner invocation |
+| --- | --- |
+| AGI | `11f6dc7b1462435aa6414670779fe32e` |
+| Reference | `9498aec3213941fba6b910536226a99a` |
+| FP | `0155905dc7e542f3ac4d432e3a216f24` |
+| Held | `a6658071f3b8495e800c1f0f29af65ea` |
+| Memory | `33c9d575ded441fabe16c4b1b7b052c7` |
+| Branch | `9d0d66914da64424a0c36308dfd6883b` |
+
+The FP and memory/branch traces were independently re-compared in full and
+losslessly compressed to `closed-memdiv-query-{fp,memory}-text.tar.gz`.
+Each archive has a member/hash index and every member is byte-verified before
+removing the unpacked text. Restore with `tar -xzf ARCHIVE -C
+/home/yukidama/external/tmp`; models, sources, receipts and input pins stay
+unpacked. No failed record is discarded.
+
+Canonical `make verify` closes **FAIL**, native make exit 2 in **410.74 s**,
+invocation `f798af9e77334e9ca5020c5acb8f25df`: **7 PASS / 101 FAIL**.
+All 20 complete cycle streams match the parent. Masks, goldens and cycle bands
+are unchanged. The separate identical-input replay passes **108 programs /
+80,800 records** in 91.63 s, reproducing the candidate's original functional
+traces too, without ESP normalization. Owner invocation:
+`94ccb53a8a7346f7a308ccf9b304a78e`. The canonical failures remain unwaived.
+
+The unchanged full FP fault matrix **passes all 32 native runs** (16 fixtures
+times parent/candidate), including **23,585 candidate architectural records**,
+complete UV/QEMU and A/B comparisons. Inputs are independently rehashed and
+the native owner is closed/reaped:
+`ventium-memdiv-query-faults-oct12`, invocation
+`d274760dc8ec48678d431f5a2447d7f6`. The
+[source-matched PC transfer](build_memdiv_query_soc.py) checks all evidence
+above, exact source deltas and stable input hashes before preparation.
+
+### PC/hardware transfer and timing preparation
+
+The PC build passes in **22.79 s**, invocation
+`97038040411c4d1b9a618cfb93508b91`, with unchanged inputs and the unique
+private C++ header dependency verified. All **102 shared RTL inputs** match
+the directed core; only `core_mem_chain.svh` differs from the memory-divide
+PC parent. Its 156 definitions and posted-16 transport are unchanged.
+The inherited **98 full-SoC structural warnings remain**; this is not a clean
+full-SoC lint result. Model SHA-256:
+`eebeb872631af564d340958bfe0c3576ab7ac9c56fb18b7f57af2b2a9ea50987`.
+
+The [hardware export](freeze_memdiv_query_rk_candidate.py) freezes 190 payloads,
+170 simulation-matched units and the same 158 hardware definitions. It keeps
+the 40 MHz core / 100 MHz PL constraints, full P5 caches and no mouse overlay.
+Manifest SHA-256:
+`a15a7ec363d5ce5cd894a9d8e7f3a238cf0c57dc2086febe35c5587e787ef4be`.
+Strict **CPU-hierarchy lint passes** in 3.78 s, invocation
+`d325f58b68504a508c7ab7f6ea040469`; the six structural classes remain errors.
+
+Both original 10-iteration CoreMark preflight seeds are running under
+`ventium-fp-exec-cm10-memdiv-query-oct12`, invocation
+`d47f25f33bed4ac8aa5a509a13a5ab7d`. The first seed has passed all five CRCs
+and exactly **4,767,218 ticks**, with 1,055,307 actual V retirements.
+The second seed is still pending. These are neither duration-valid scores
+nor full standard-suite seeds.
+
+The [new synthesis preparation](prepare_memdiv_query_synthesis.py) and two
+passing preparation tests retain the exact closed controller lifecycle:
+one Vivado family, 8 GiB RAM / 6 GiB swap, 13 GiB combined early stop,
+2 GiB host RAM/swap floor, 4 GiB disk stop, and initial disk reserve above
+6 GiB plus twice historical measured growth above the stop floor. Mapper and
+real clocks are unchanged. The independent timing audit compares the original
+memory-divide checkpoint and must reproduce its **−9.391 ns / 29.077375 MHz**.
+The [queue](run_memdiv_query_timing.py) cannot start/restart synthesis or
+deploy; it distinguishes audit completion from actual attainment of 40 MHz.
+No new synthesis has been launched yet.
+
+For disk headroom, six closed historical timing-report sets are losslessly
+archived as `memdiv-query-reserve-reports.tar.gz`: 1,602,557,831 original bytes,
+70,392,864 archive bytes, every member hash verified. Models, source inputs,
+checkpoints and current pins are retained. Four closed-build precompiled-header
+caches (376,609,210 bytes) were removed; they are regenerable build products,
+not source files or model binaries.
 
 Gameplay baseline: **0.51030715 total U+V simulated retirement-event IPC**,
 older `2b4d7a48`, cycles **1,200,065,237–1,300,065,237**. This candidate is
