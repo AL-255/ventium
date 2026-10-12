@@ -1,8 +1,8 @@
 # Immediate paired-load completion cut — October 12
 
 **Private core/PC candidates built; immediate-path and broader directed checks
-pass. Frozen CPU lint passes; CoreMark preflight is running. Canonical remains
-FAIL. No candidate
+pass. Frozen CPU lint and both short CoreMark preflights pass. Synthesis is
+running; canonical remains FAIL. No candidate
 timing, gameplay, standard-suite or physical acceptance.** The
 immediate target remains **at least 40 MHz synthesized Fmax**, UV+fast mode and
 full P5 caches. The measured parent is now **30.676729 MHz**, not a timing pass.
@@ -164,12 +164,14 @@ The [hardware export](freeze_pair_now_read_rk_candidate.py) retains 190 payloads
 Strict CPU-hierarchy lint passes in **3.73 seconds**, invocation
 `b94fd8585cef400fbf96884b7e16aee3`; all six structural classes remain errors.
 
-Both original 10-iteration CoreMark preflight seeds are launched under
+Both original 10-iteration CoreMark preflight seeds close **PASS** under
 `ventium-fp-exec-cm10-pair-now-read-oct12`, invocation
 `df1b6dc082a6471ba377ea7557fcf9f9`, using the real posted-16 board AXI model.
-The first seed closes with all five correct CRCs, **4,767,218 ticks** and
-**1,055,307 actual V retirements**; validation is still running. These are not
-duration-valid scores, full standard-suite seeds or FPGA results.
+Both have all five correct CRCs, exactly **4,767,218 / 4,753,406 ticks** and
+**1,055,307 / 1,054,254 actual V retirements**, respectively. The independent
+audit rechecks **2,697 source pins**, actual CPU-11 affinity/native commands,
+native owner closure and zero OOM events. These are not duration-valid scores,
+full standard-suite seeds or FPGA results; no IPC/CPI improvement is claimed.
 
 The [synthesis preparation](prepare_pair_now_read_synthesis.py) passes two
 scope/safety tests and generates the exact-parent experiment without launching
@@ -190,6 +192,27 @@ four closed-build PCH caches in `pair-now-build-pch.tar.gz` (376,608,812 to
 unpacked copy; all live input pins, sources, binaries and checkpoints remain.
 Restore any archive with `tar -xzf ARCHIVE -C /home/yukidama/external/tmp`;
 historical timing-audit reruns require restoring their reports first.
+
+The additional five terminal historical report sets in
+`pair-now-extra-timing-reports.tar.gz` retain 895,802,007 bytes in a
+39,697,775-byte hash-verified archive. This raises free external storage to
+about **7.0 GiB**, satisfying both the 6 GiB minimum and twice historical
+measured growth above the 4 GiB stop floor. The reserve was recovered without
+loosening the admission checks or deleting models/media/checkpoints.
+
+### Synthesis launch
+
+The exact frozen candidate launches October 12 at **14:05:39 UTC** under
+`ventium-pair-now-read-synth-oct12`, invocation
+`78de398ad2dc40049b6abb74b2f3734e`. The single active Vivado family is confirmed
+owned by scope invocation `8acb698dfc4d43c783dc9d191d2d8d50`, with 8 GiB RAM,
+6 GiB swap and 48-task limits. Evidence: `pair-now-read-synthesis-r1`.
+
+The independent audit queue adopts that exact owner as
+`ventium-pair-now-read-timing-queue-oct12`, invocation
+`33ed67c8cca54f5593b609e736078146`. It cannot restart synthesis and only starts
+the read-only timing comparison after verified native synthesis closure.
+No new Fmax result, route, bitstream or deployment is claimed yet.
 
 The inherited canonical **7 PASS / 101 FAIL** remains an acceptance blocker,
 not an expected-failure waiver. Full original standard-suite and physical FPGA
