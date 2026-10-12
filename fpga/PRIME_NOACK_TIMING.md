@@ -136,14 +136,42 @@ the held matrix retains 346 held-read primes. The three former matrices have
 72 fixtures each; held-read has 24. Native runtimes are 22.69 / 22.68 / 28.09
 seconds for memory/store/FP, not guest timings.
 
-The source-matched PC derivative is prepared, not yet compiled. Its complete
-102-source intersection matches the new core, with four exact changes from
-the measured combined PC parent and no define or transport changes.
+The source-matched PC derivative closes native zero in **24.74 seconds**.
+Its complete 102-source intersection matches the new core, with four exact
+changes from the measured combined PC parent and no define or transport changes.
+The parent's 98 full-platform structural warnings remain unchanged, not waived
+as new correctness evidence. All 621 started input pins independently rehash.
+Owner `ventium-prime-noack-soc-oct12.service`, invocation
+`7e1710c461e8446b96cc6189549dd253`; model SHA-256:
+`d8c147fe0b1b1bc91c4c9e861298fae66cfee012a926532d02227d2d6469b1aa`.
+Receipt `prime-noack/soc-r1/build-closed.json`, SHA-256
+`bdf93ec634e84ec8a63b585b82e1008f7a19393036ae3b88db5ee7190e70a1db`.
 
-Canonical verification is still underway. It uses a byte-identical copy of the
-closed parent's 128 content-keyed
-original QEMU goldens, not the experimental pre-exit observer. No oracle state,
-mask or cycle band is modified. The current candidate is not canonical-qualified.
+Canonical verification closes **FAIL: 7 PASS / 101 FAIL**, native make exit 2
+and controller exit 1, in 375.53 seconds. All 20 complete parent/candidate cycle
+streams match; all 1,700 input pins independently rehash. Owner
+`ventium-prime-noack-verify-oct12.service`, invocation
+`0f3e0d9931344dd68709ccb88801a36a`. It starts with a byte-identical copy of the
+parent's 128 content-keyed original QEMU goldens, then generates 56 new cache
+entries as required by the normal keys. It does not use the experimental
+pre-exit observer. No oracle state, mask or cycle band is modified.
+
+The subsequent identical-input replay closes native zero: **all 108 programs /
+80,800 complete records** match the parent, and the candidate reproduces its
+original full traces. It takes 77.39 seconds; all 552 inputs independently
+rehash. Owner `ventium-prime-noack-same-input-oct12.service`, invocation
+`c120e7e313e6420fb5f36f55b04cbdff`. Receipt SHA-256:
+`f0201acdb9ef6879a2c1ab8adbf9712b041d77646ebe4972714578a58e58aa34`.
+This is A/B nonregression evidence, **not a canonical pass**.
+
+Both short CoreMark diagnostic seeds are now running sequentially on the new
+PC model, with the actual child pinned to CPU 11. Unit
+`ventium-v-carry-cm10-prime-noack-oct12.service`, invocation
+`58f6ed8b5d3a469b8b1d2bb1bff77839`. The unchanged 16-fixture fault matrix is
+running separately on CPU 12 under the shared guarded scope:
+`ventium-prime-noack-fault-oct12.service`, invocation
+`b89a84004704420bb34b8475560daabd`. These live runs are not counted as passes.
+No new FPGA inputs have been published and no synthesis or deployment has begun.
 
 Disk cleanup removes **12 closed compiler PCH caches (1,035,149,312 allocated
 bytes)** after exact owner/hash/open-file and pin checks. Binaries, sources,
