@@ -46,6 +46,8 @@ All paths below are under
 | `backing-payload-cache-r3` | 737,677 edge comparisons; 414 next-read observations; 66,339 wide-response witnesses | Full 128-set, two-way, 32-byte-line banked L1s, all enabled outputs, state, tags, validity, LRU and every data-bank entry; wrong V-address control fails |
 | `backing-payload-axi-r1` | 2,387 transaction-test clocks; 4,781 full-cache edge comparisons | Two actual full-profile L1s, **independent real AXI masters**, independent RAM slaves, all AXI signals and final 64 KiB memory compared; wrong U-address control fails |
 | `backing-payload-core-r1` | Native compile exit 0, 20.91 seconds, input hashes unchanged | 195-source frozen derivative, same 152 defines, 32-job bounded build; private C++ object and matching generated-header dependency verified |
+| `backing-payload-core-r1/verify-closed.json` | **FAIL**, native `make` exit 2; 7 functional passes / 101 failures; 396.48 seconds | Unmodified canonical gate, all 20 cycle streams exactly equal to the parent; no masking, golden or band changes |
+| `backing-payload-fp-r1` | Native exit 0; 384 fixtures, 1,536 measurements, 208,128 candidate records, 768 actual V retirements | Complete QEMU/parent FP architectural comparisons; all 768 candidate/control cycle totals unchanged; 66.80 seconds, unchanged pins |
 
 The AXI test observes 68 U stores, three V stores (including one load/store
 pair), one one-slot fused quadword admission, 30 blocked-store clocks, 84
@@ -84,9 +86,25 @@ Sources, generated headers, accepted binaries, logs and receipts remain.
 
 ## Next qualification
 
-Run unchanged canonical `make verify`, complete QEMU/parent architectural and
-cycle comparisons, and the original boundary/fault/held/branch corpora. Existing
-canonical failures remain unwaived. Then transfer the exact checked sources to
+The unchanged canonical gate is closed **red**, not waived. Same-input full
+functional replay is still required; identical cycle streams alone do not
+establish that every functional failure is inherited. The remaining directed
+QEMU/parent work is running in `backing-payload-regressions-r1`. All six boundary
+cases (operand offsets 0, 1, 24, 25, 29 and 4093, at both instruction alignments)
+have passed; faults, integer, memory, held-response, branch and replay results
+must still close and be audited.
+
+The live coordinator is `ventium-backing-payload-checks-oct12.service`, invocation
+`3a112d84a0e942d697f636be994a02a9`, with receipts in
+`backing-payload-checks-r1`. It observed the exact canonical owner close, retained
+its failure, and then launched the FP matrix and unchanged 12-phase regression
+plan sequentially under the shared bounded guard. No Vivado is running.
+
+[`test_backing_pair_payload_flow.py`](../verif/l1/test_backing_pair_payload_flow.py)
+passes five scheduling/source-admission tests. The
+[PC transfer helper](build_backing_pair_payload_soc.py) requires the completed
+native regressions and exact L1+DMA source deltas; its native PC build has **not**
+been launched. After those gates, transfer the exact checked sources to
 the PC model (including DMA), run both CoreMark preflights, and perform one
 bounded synthesis/timing comparison against the **best retained** checkpoint.
 Do not claim a timing gain from the source rewrite or passing equivalence tests.
