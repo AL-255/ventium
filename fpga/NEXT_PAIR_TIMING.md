@@ -269,6 +269,13 @@ missing-core-clock interpretation:
 exclusive Vivado lifecycle, original clocks, timeout and memory/disk floors.
 This read-only diagnostic has not rerun synthesis, routed or deployed anything.
 
+After both owners and audits closed, the two timing `*_capture_cone.rpt`
+files and coverage `integer_multiplier_dsp.rpt` were losslessly compressed
+to adjacent `.gz` files. Each decompressed SHA-256 was checked against the
+original before removing only its unpacked copy (about **514 MiB** recovered).
+Restore with `gzip -dk` before rerunning an audit that expects the raw report.
+All source, DCPs, native logs, timing summaries and audit receipts remain.
+
 The exported source includes an old `flow/hw/fpatan_mcp.xdc`, but the actual
 wrapper deliberately excludes it from `constrs_1` because its legacy
 `u_fpatan` hierarchy was replaced by `VEN_FP_SHARED`. Its presence in the
