@@ -129,8 +129,14 @@ The unchanged canonical `make verify` is now running on this model under
 cycle bands and complete comparison against the fetch-probe parent. The
 384-fixture original FP/QEMU/state/cycle matrix runs concurrently with 32
 workers under `ventium-srt-div-exp-fp-oct12`, invocation
-`4f263f49bbee4e349e54ce5ee06143e7`. These are in progress, not passes; no
-new synthesis, full-system run or board deployment is launched.
+`4f263f49bbee4e349e54ce5ee06143e7`, then **passes in 50.19 seconds**.
+All 768 candidate latency-0/7 runs compare **208,128 complete architectural
+records**, with 768 V retirements and zero A/B cycle differences. Inputs are
+unchanged and all children are reaped; receipt SHA:
+`f578ccf1607c7d60b56708c7e5cf486939062594cff413587a10bffa090d68d5`.
+The canonical gate is still running, not passed. Fault matrices, full standard
+suite, source-matched PC/hardware transfer and timing remain open; no new
+synthesis, full-system run or board deployment is launched.
 
 After the engine owner closes, ten unused/unpinned compiler `.gch` files are
 removed to preserve disk reserve (**822,775,360 bytes**). Source, generated
