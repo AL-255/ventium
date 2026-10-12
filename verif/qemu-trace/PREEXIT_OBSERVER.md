@@ -280,3 +280,66 @@ terminal record nor blindly extending masks is an accepted fix. FPGA and full
 standard-suite acceptance are still pending. Latest verified gameplay remains
 older simulated `bfb867f7`: **0.53765810 U+V event IPC**, cycles
 4,500,065,237–4,600,065,237; the repaired candidate remains gameplay-unmeasured.
+
+## Cache-mode aliasing reproduced and privately repaired — October 12
+
+The production worker remains untouched because the active FPGA synthesis pins
+it. Its cache signature identifies the QEMU executable, but **not**
+`VTM_QEMU_GDB_PREEXIT`. Consequently a shared cache can silently reuse the
+disabled-observer trace while the observer is enabled, or vice versa. This is
+an evidence-selection bug, separate from the remaining x87 oracle differences.
+The cycle worker also searches the obsolete source-only functional filename,
+omitting the ELF and oracle signatures that actual functional cache files use.
+It therefore normally falls back to its default ESP instead of finding the
+matching loader-established ESP.
+
+[`prepare_observer_cache_key.py`](../lib/prepare_observer_cache_key.py) makes a
+private exact-parent worker copy. It changes only cache identity/lookup:
+
+- Normalize the observer setting exactly like the existing native hook: literal
+  `1` enables it; unset and all other values are disabled.
+- Include that mode in the signature and deliberately version out old keys.
+- Use the identical source/ELF/oracle/x87/instruction-limit functional key for
+  the cycle worker's ESP lookup.
+
+It does not enable the observer, alter the pinned QEMU, synthesize a terminal
+record, change any trace/compare/mask, or adjust RTL mode or timing bands.
+Three source/shell-equation tests pass, including reversible scope, drift and
+reapplication rejection, invalid-option normalization, deliberate old-key
+invalidation and exact functional/cycle key agreement.
+
+The [native regression](../lib/run_observer_cache_key.py) uses the **real worker,
+qualified private QEMU binary, unchanged `smoke` assembly and prebuilt UV-fast
+AXI model** `e65a06e1`. There is no fake producer or testbench. The four original
+worker invocations reproduce the bug; four repaired functional invocations
+and one repaired cycle invocation verify the change:
+
+| Worker / cache sequence | Observer setting | Golden records | Cache hit | Functional verdict |
+| --- | --- | ---: | ---: | --- |
+| Original, disabled first | 0 → 1 | 21 → 21 | 0 → 1 | FAIL → FAIL |
+| Original, enabled first | 1 → 0 | 22 → 22 | 0 → 1 | PASS → PASS |
+| Repaired, shared cache | 0 → 1 → 1 → 0 | 21 → 22 → 22 → 21 | 0 → 0 → 1 → 1 | FAIL → PASS → PASS → FAIL |
+
+All RTL executions retain all 22 records. Disabled-mode failures remain the
+original terminal-length mismatch; they are required witnesses, not suppressed
+failures. Original enabled-first reuse produces a PASS using a trace from the
+wrong oracle mode. The repaired cycle invocation uses the matching golden's
+actual **ESP `0x40800250`**, with **eight actual V retirements** and unchanged
+control flow. Its cycle comparison still fails the original timing tolerance
+(47 reference vs 448 RTL clocks); this test qualifies cache/argument transport,
+**not timing-band acceptance**.
+
+Evidence: `ventium-load-read-ack.GyWDDtiI/observer-cache-r1` under external tmp.
+Owner `ventium-observer-cache-key-oct12`, invocation
+`9d97c7bfb58644ffb7ddf3400c3f4146`, closes native zero in **3.57 seconds**,
+with stable input hashes. It is a CPU12-only light job, 768 MiB RAM/no swap,
+128 tasks, concurrent with (not part of) the one guarded Vivado family.
+The original worker, canonical cache and active synthesis inputs are unchanged.
+Applying this private repair to the canonical worker remains pending; it must
+not invalidate an in-flight build's pins. Even after promotion, the canonical
+QEMU policy, 101 functional failures and independent cycle failures remain
+unresolved; no green gate or FPGA pass is claimed.
+
+Latest verified gameplay baseline is **0.51030715 total U+V simulated
+retirement-event IPC**, older `2b4d7a4`, cycles
+**1,200,065,237–1,300,065,237**. The current timing candidate is unmeasured.
