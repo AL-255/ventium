@@ -106,7 +106,10 @@ def freeze(parent, sim, out):
         payload[name] = dict(data=data)
         rows.append(dict(frozen=name, source=str(source), sha256=sha256(data),
                          bytes=len(data), parent_sha256=before['sha256']))
-    require(changed == list(CHANGES) and compiled == 170, 'incomplete native source closure')
+    # Payload order follows the parent's filelist/include traversal, not the
+    # recipe's dictionary order. Still require each exact delta once.
+    require(len(changed) == len(CHANGES) and set(changed) == set(CHANGES)
+            and compiled == 170, 'incomplete native source closure')
     expected = expected_payloads({name: read(parent/name)['data'].decode() for name in CHANGES})
     require(all(payload[name]['data'] == data for name, data in expected.items()), 'recipe differs')
     require(source_closure(payload) == old['source_closure'] == dict(filelist_units=117, include_edges=49),

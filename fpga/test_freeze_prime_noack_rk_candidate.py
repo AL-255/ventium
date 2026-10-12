@@ -1,5 +1,6 @@
 """Exact four-file hardware recipe and normal timing-driven source contract."""
 import os
+import json
 from pathlib import Path
 import shutil
 import subprocess
@@ -39,6 +40,21 @@ class SourceContract(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stdout+done.stderr)
         self.assertIn('exact156defs', done.stdout)
         self.assertIn('POSTED-DDR-SOURCE-CONTRACT-OK', done.stdout)
+
+    def test_complete_native_export_accepts_parent_filelist_order(self):
+        scratch = Path('/home/yukidama/external/tmp').resolve(strict=True)
+        sim = self.parent.parent/'prime-noack/soc-r1'
+        with tempfile.TemporaryDirectory(prefix='ventium-prime-freeze-test-', dir=scratch) as temp:
+            out = Path(temp)/'export'
+            result = export.freeze(self.parent, sim, out)
+            manifest = json.loads((out/'input-manifest.json').read_text())
+            self.assertEqual(result['payloads'], 190)
+            self.assertEqual(manifest['source_contract_synthesis_profile'], 'balanced')
+            self.assertEqual(set(manifest['changed_parent_payloads']), set(export.CHANGES))
+            self.assertEqual(len(manifest['changed_parent_payloads']), 4)
+            self.assertNotEqual(manifest['changed_parent_payloads'], list(export.CHANGES))
+            for row in manifest['files']:
+                self.assertEqual(export.sha256((out/row['frozen']).read_bytes()), row['sha256'])
 
 
 if __name__ == '__main__':
