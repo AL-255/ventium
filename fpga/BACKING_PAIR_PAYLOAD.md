@@ -51,6 +51,8 @@ All paths below are under
 | `backing-payload-regressions-r1` | All 12 phases exit 0, 604.24 seconds, input hashes unchanged | Six boundary offsets, faults, integer, memory, held responses, branches and complete 108-program same-input replay (80,800 records) |
 | `backing-payload-soc-r1` | Native compile exit 0, 23.61 seconds, input hashes unchanged | Exact L1+DMA transfer; 102 shared core RTL files checked, DMA checked separately; same 156 defines and 98 inherited structural diagnostics |
 | `backing-payload-fpga-r1` | Source contract passed | 190 payloads, all 170 common HDL inputs source-matched to the PC build; same 158 hardware defines and 40/100 MHz constraints |
+| `backing-payload-lint-r1` | Native exit 0, 3.83 seconds, input hashes unchanged | Strict CPU-hierarchy lint of the exact 158-define hardware export; not full-SoC lint |
+| `backing-payload-soc-r1/coremark` | Both short cold-boot seeds and independent audit passed | All five CRCs per seed match QEMU; unchanged 4,767,218 / 4,753,406 ticks; actual V retirements 1,055,307 / 1,054,254; not duration-valid scores |
 
 The AXI test observes 68 U stores, three V stores (including one load/store
 pair), one one-slot fused quadword admission, 30 blocked-store clocks, 84
@@ -120,13 +122,39 @@ extra or wrong source deltas, preservation of resource bounds and comparison
 against the best retained checkpoint. The synthesis audit also requires the
 old eight DMA generated-control undriven diagnostics to disappear.
 
-Both unchanged short CoreMark seeds are running under
-`ventium-v-carry-cm10-backing-payload-oct12.service` (CPU 11), and strict
-CPU-hierarchy hardware-profile lint under
-`ventium-backing-payload-lint-oct12.service`. Neither is a standard-suite pass;
-the short seeds cannot establish a duration-valid score. No Vivado is running.
-After these close, perform one bounded synthesis/timing comparison against the
-**best retained** checkpoint, with sufficient disk reserve restored first.
+Both unchanged short CoreMark seeds closed under
+`ventium-v-carry-cm10-backing-payload-oct12.service`, invocation
+`3296c316dc5f461d80bbfefdf036b07c`, with actual child affinity CPU 11. The
+independent audit rechecked 3,756 source pins, native child closure and zero OOM
+events. The sole console error is the expected **under-ten-second duration**
+failure; these are CRC/cycle preflights, not error-free standard-suite results
+or publishable CoreMark scores. The CPU lint owner also closed successfully.
+
+At **17:19:41 UTC**, one synthesis launches as
+`ventium-backing-payload-synth-oct12.service`, invocation
+`821db0a58cad4ab7ab1526f00cd45435`; its single Vivado family is scope invocation
+`4e6cdc2a87054eea90d3783e1f3d42b2`. Admission rechecked the exact sources,
+canonical failure, replay, PC build, lint and both audited preflights. The
+unchanged diagnostic `Default -no_timing_driven` mapper preserves a comparable
+structural timing measurement; it does not constitute timing closure.
+
+The bounds remain one worker, 8 GiB RAM / 6 GiB swap, 13 GiB combined early
+stop, 2 GiB host reserve, 4 GiB live disk floor and 45-minute native timeout.
+Starting disk reserve exceeds both 6 GiB and twice the measured parent growth
+above that floor. Closed historical matrix text and the two closed builds'
+four PCH files were byte-verified in lossless archives to restore that reserve;
+no source, binary, media or active input was removed.
+
+`ventium-backing-payload-report-queue-oct12.service`, invocation
+`1ce9d17db029447cad350bc7d1824bfc`, waits on that exact synthesis owner. Only
+after native closure and the independent source/DCP/DMA-diagnostic audit may it
+launch the read-only original-clock timing comparison against **MEMDIV-QUERY,
+the best retained 30.676729 MHz checkpoint**. It cannot launch another
+synthesis, placement, routing or deployment. Receipts and controllers reside
+in `backing-payload-synthesis-r1`, `backing-payload-clock-r1`, and
+`backing-payload-report-queue-{started,closed}.json` (closed receipt pending).
+
+**No Fmax for the new candidate is available yet.**
 Do not claim a timing gain from the source rewrite or passing equivalence tests.
 
 The final requirements remain ≥40 MHz synthesized Fmax, routed timing,
