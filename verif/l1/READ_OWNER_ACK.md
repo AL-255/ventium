@@ -481,7 +481,14 @@ and still requires the solo U write to complete. Both A/B instances see this
 same public traffic. A host test guards this qualified observation; native
 mutation sensitivity remains pending execution.
 
-**15 host tests passed** across `test_intent_ready_{cut,pairs,cache}.py` on
+`build_intent_ready_core.py` also prepares the follow-on whole-core build
+procedure, **not a model**. It requires the closed full-profile cache result,
+audits all 195 parent payloads, and permits only the L1/seam two-file delta.
+The 152-define UV-fast profile, private harness basename and matching-header
+check, shared guard and native build lifecycle are retained. No preparation
+directory or candidate model has been created by this driver yet.
+
+**19 host tests passed** across `test_intent_ready_{cut,pairs,cache,core}.py` on
 2026-10-12. These check transformation boundaries, retained comparisons,
 native-run safety guards and fail-closed source admission. The closed leaf
 proof was re-audited from its native logs and hashes, including exact symbolic

@@ -12,6 +12,7 @@ import run_intent_ready_pairs as paired
 
 HERE=Path(__file__).resolve().parent
 BASE_SHA='2bff0206726bef918242e5cd40645d735334514ad5ae6965f5fa4ceef3e09508'
+MODEL='e1621913f28c5cd1c10b0c19f57bc59277807034dfb6b94a79bd7fe58d6a1a81'
 
 
 def admit_pairs(root):
@@ -45,7 +46,7 @@ def derive():
         text=paired.replace(text,old,new)
     change('import prepare_fp_high_valid_cofactor as recipe','import prepare_intent_ready_cut as recipe')
     change("MODEL='66cfd2e6365d0093d395e807e07bcd5148ae76a3701e64d5d1a58ae18e800750'",
-           "MODEL='e1621913f28c5cd1c10b0c19f57bc59277807034dfb6b94a79bd7fe58d6a1a81'")
+           'MODEL='+repr(MODEL))
     change("    args=ap.parse_args()", "    ap.add_argument('--pairs',type=Path,required=True)\n    args=ap.parse_args()")
     change("    assert built['passed'] and built['pins_unchanged'] and built['native_exit']==0",
            "    assert built['passed'] and built['pins_unchanged'] and built['native_exit']==0\n"
