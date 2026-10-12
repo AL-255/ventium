@@ -5,6 +5,12 @@ FAIL. PC transfer, frozen CPU lint and both short CoreMark preflights pass;
 synthesis is running. No new Fmax, standard-suite or physical FPGA acceptance.** The target
 remains **at least 40 MHz post-synthesis Fmax**, UV+fast, full P5 caches.
 
+The live synthesis also exposed an independent
+[DMA generated-scope wiring defect](DMA_DECLARATION_ORDER.md). Its focused
+four-state fix is now in the canonical platform overlay, **not in this frozen
+timing candidate**. Carry and requalify it in the next source-matched PC/FPGA
+revision before claiming final physical acceptance.
+
 The [paired-read experiment](PAIR_NOW_READ_COMPLETION.md) regresses from
 30.676729 to 29.953572 MHz. All 30 worst reported paths traverse next-read
 lookup, read/code ACK qualification and wide FP validity before the FPU bank
