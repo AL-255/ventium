@@ -100,8 +100,9 @@ The **4,240** simulator invocations have exactly the same aggregate predicate
 counts and **21,190,336** observed clocks as the unmodified probe. Every full
 QEMU architectural comparison and parent/candidate retirement-clock comparison
 in those corpora passed; the request-equivalence assertion stayed enabled.
-There is no candidate synthesis, route, CoreMark score, full timedemo or FPGA
-acceptance. In particular, no frequency gain is claimed from these tests.
+There is no closed candidate synthesis, route, duration-valid CoreMark score,
+full timedemo or FPGA acceptance. In particular, no frequency gain is claimed
+from these tests.
 
 Two closed probe compiler PCH files were gzip-compressed and checked with
 `gzip -t`. Their `.gch.gz` files preserve the full contents; source, executable,
@@ -115,6 +116,69 @@ before removing its uncompressed copy. This changed 1,699,996,357 bytes into
 and closed receipt retain the exact file list, hashes and terminal owner IDs.
 Current input pins, source, models, images, logs, JSON receipts and canonical
 gate traces remain in place. Restore archive members before reusing raw traces.
+
+## Whole-PC transfer and bounded synthesis
+
+The exact candidate transferred into the frozen PC platform without changing
+its other RTL, DMA repair, 156 defines or 16-entry posted-write configuration.
+All 102 shared core source files were checked; only `core_mem_chain.svh`
+changed. Native compilation closed successfully in **23.705 seconds**, with a
+fresh private harness object and matching generated-header dependency. The
+model is `6e26dd39ea94482a0d1eb65d84c26d8dadfa6d73b24f853aea03a2fec629ec80`.
+The **98 inherited structural diagnostics remain**; this is not a clean full-SoC
+lint result.
+
+`next-pair-cofactor-fpga-r1` preserves 190 payloads, 170 common HDL inputs,
+158 hardware defines and the original 40/100 MHz clocks. Its manifest is
+`a13b84ce9ea8fa810914e3526d170129869ab7b1d2a335d3fcfefc9c9488860c`.
+Strict CPU-hierarchy lint passed in **3.928 seconds** against this export.
+No cache geometry, external port or timing exception changed.
+
+The independent short CoreMark audit closed both cold-boot seeds with all five
+CRCs matching QEMU, exactly **4,767,218 / 4,753,406 ticks**, and actual V
+retirement counts **1,055,307 / 1,054,254**. All 11,455 source pins were rechecked;
+both native children exited and no OOM occurred. The cycle counts are identical
+to the parent: **zero measured throughput gain**. These ten-iteration tests
+retain the expected under-ten-second duration error and are not publishable
+scores or error-free standard-suite passes.
+
+`next-pair-cofactor-replay-r1` closed all **108 programs / 80,800 records** with
+complete same-input parent/candidate equality. A direct comparison of separately
+generated historical traces was rejected because their QEMU-provided initial
+stack pointers differed. The replay actually runs both models with identical
+images and initial state; it does not mask ESP or any other fields. The original
+canonical gate remains **red and unwaived**.
+
+The first synthesis controller, invocation
+`6be311b8f76e40b38786ad773e10b123`, stopped during disk admission, **before any
+Vivado process launched**. Free space exceeded 6 GiB but did not exceed twice
+the measured parent's 1,456,762,880-byte growth above the 4 GiB stop floor.
+The refusal and journal are retained in `admission-failure.json`.
+
+After lossless archival restored the unchanged reserve, the controller restarted
+at **18:55:10 UTC** as `ventium-next-pair-cofactor-synth-oct12.service`, invocation
+`2fff17acfee741be81f281d2264a24d2`. Its single Vivado scope invocation is
+`deed97be6a9749c8984f6fde39113669`. The matched `Default -no_timing_driven`
+synthesis is a structural diagnostic, not timing closure. Bounds remain one
+worker, 8 GiB resident / 6 GiB swap, 13 GiB combined early stop, 2 GiB host
+reserve, 4 GiB live disk floor and 45-minute native timeout.
+
+`ventium-next-pair-cofactor-report-queue-oct12.service`, invocation
+`4017a795c0f8441fa0378de46989ce76`, observes only that exact synthesis owner.
+After native closure and an independent source/DCP/DMA audit, it may launch
+one guarded, read-only original-clock timing comparison against the retained
+best **MEMDIV-QUERY 30.676729 MHz** checkpoint. It cannot retry synthesis,
+start placement/routing or deploy. At this update synthesis is running, so
+there is **no candidate Fmax result or 40 MHz claim**.
+
+Space recovery is reversible. `closed-next-pair-synthesis-reserve.tar.gz`
+contains 10,731 closed old traces/large reports: 2,061,281,628 source bytes became
+88,762,335 archive bytes. `closed-next-pair-pch.tar.gz` contains another 857
+closed compiler-cache/failed-run trace files: 235,226,722 bytes became
+34,298,253 bytes, recovering **192 MiB**. Every member's size and SHA-256 was
+verified before removing its unpacked copy; sources, models, images, active
+inputs, native logs and receipts remain. Exact member lists and recovery hashes
+are in the adjacent `*-plan.json`, `*-verified.json` and `*-closed.json` receipts.
 
 ## Reproduction entry points
 
@@ -137,6 +201,14 @@ Build/test fan-out goes through `tools/build_scope.sh`, profile
   corpora, exact A/B clocks/state, real V stores and all hint-producer coverage.
 - `verif/issue_uv/run_fp_nomem_verify.py`: unchanged canonical gate; failures
   and all 20 parent/candidate cycle-trace comparisons stay visible.
+- `fpga/build_next_pair_cofactor_soc.py`: exact PC transfer and guarded build.
+- `fpga/freeze_next_pair_cofactor_rk_candidate.py`: source-matched FPGA export.
+- `fpga/prepare_next_pair_cofactor_synthesis.py`: hash-pinned controller
+  derivation; five tests in `test_prepare_next_pair_cofactor_synthesis.py`
+  check source identity, replay admission and unchanged resource/clock bounds.
+- `fpga/audit_v_carry_payload_coremark.py`: unchanged short-seed closure audit.
+- Evidence-root `report_next_pair_timing_after_synth.py`: exact-owner synthesis
+  closure, native timing audit and explicit measured-40-MHz result; no routing.
 
 Candidate gameplay IPC is **unmeasured**. Older verified simulation baseline:
 **0.51030715 total U+V retirement-event IPC**, model `2b4d7a48`, cycles
