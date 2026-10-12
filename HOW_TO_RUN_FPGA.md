@@ -2921,6 +2921,24 @@ run using the historical image's markers or an old-source movie bundle.
 
 ### 11.4 Windows 95
 
+**Current acceptance requirements (October 12):** the command/result below is
+historical, not a current-candidate launch recipe or desktop/UI pass. Use a
+private writable copy of the pristine disk, a retained daemon owner and exact
+source/bitstream/media hashes. Require a cold desktop, error-free native
+closure and real keyboard/mouse UI interaction in UV+fast mode. The current
+core timing candidate still ties its mouse pins idle; the native-tested
+[mouse overlay and policy](fpga/PS2_DEVICE.md) are not yet integrated or served
+by a PS-side adapter. That gap must be closed before claiming mouse coverage.
+
+The passive VGA recorder now provides rendered RGB332 scan-out capture through
+`ven_board_probe.py vga-capture --frames 1 --output ...`. Its **512 KiB** frame
+limit accommodates 640×480 and 800×600; unsupported/oversized rasters must fail,
+not be presented as a desktop. Use a fresh output path and the source-matched
+probe. The dedicated Quake stream collector is restricted to 320×200, so it is
+not a Win95 screenshot collector. Retain raw captures around input events;
+desktop-idle signatures alone remain insufficient. None of these capture
+capabilities constitutes a new Win95 run or pass.
+
 Current known result: the procedure below passed on the repaired-fast
 `l1bypown` image at 3.125029 MHz on 2026-08-23. The source-controlled detector
 held `last_ar=0x001021c0` for all 1,500 samples, observed both idle EIPs
@@ -2947,11 +2965,11 @@ ssh -F "$SSH_CONFIG" -t "$BOARD" \
 `scripts/restore_w95.sh` performs the same sparse-aware restore but contains
 fixed credentials/host values; the explicit command is preferred.
 
-The current headless hardware flow has no connected video output. The best
-available automated proxy is the board-local `/tmp/ao486/w95det.py`, which
+The historical headless hardware flow had no connected video output. Its
+automated proxy was the board-local `/tmp/ao486/w95det.py`, which
 samples for the known desktop-idle EIP/fetch-region signature. Treat that as a
-control-flow proxy, not as proof of a correctly rendered desktop. Stronger
-evidence would require adding a reproducible framebuffer/video capture path.
+control-flow proxy, not as proof of a correctly rendered desktop. Use the
+source-matched passive capture path described above for current visual checks.
 
 Expected lower-level signs include:
 

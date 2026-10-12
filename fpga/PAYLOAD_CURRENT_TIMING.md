@@ -178,6 +178,19 @@ performing its source checks; inspecting the actual Tcl and the parent's same
 148-entry read list resolves that checker assumption. It is not a missing-source
 or native-build failure. The completed native/DCP audit remains pending.
 
+### Hardware acceptance gap: hosted mouse
+
+The current frozen wrapper still ties both mouse input pins high. This is the
+known, separately documented [PS/2 integration gap](PS2_DEVICE.md), not a newly
+demonstrated CPU defect. Rechecking the current export confirms all three
+wrapper/management/project hashes match the tested mouse overlay's exact input
+contract. The prepared overlay remains available, but it is **not incorporated
+in this timing run**. A real PS-side service/CSR adapter and deliberate overlay
+integration, verification and renewed timing qualification are still required
+before Win95 mouse interaction can pass. Keyboard-only operation is not mouse
+coverage. Do not alter the running export or report this image as final board
+acceptance even if its core timing reaches 40 MHz.
+
 ## Disk preservation
 
 Removed **12 closed, unopened, unpinned compiler PCH caches**, reclaiming
