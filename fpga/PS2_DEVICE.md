@@ -1,6 +1,6 @@
 # Hosted PS/2 device transport — October 10, 2026
 
-Status: **native-tested peripheral components and a prepared source overlay**,
+Status: **native-tested combined adapter/peripheral path and a prepared source overlay**,
 not a board-accessible mouse or an FPGA acceptance pass. The active timing
 candidate is unchanged. Its frozen wrapper still ties the mouse inputs high;
 the separate overlay below adds a loss-detectable register interface and wiring.
@@ -443,15 +443,65 @@ Reproduce with the bounded mailbox-wire command above, adding
 `--fpga-defines` for the selected frozen export and using its matching
 `--platform-root`. No active synthesis input or board state was changed.
 
+### Combined software adapter, AXI bridge and serial controller
+
+[`run-ps2-adapter-path-gate.py`](run-ps2-adapter-path-gate.py) now connects the
+unchanged software adapter/policy and real local-socket input endpoint through
+AXI transactions to the prepared **actual management bridge, mailbox, serial
+transport and frozen 8042/FIFO**. The small
+[testbench](tb_ps2_adapter_path.sv) supplies normal guest port-64h/60h I/O and
+elapsed clock cycles; it never forces controller/FIFO/IRQ state. It extracts
+the complete management instance from the existing management regression,
+pinning both sources rather than maintaining divergent debug-port tie-offs.
+
+Both **3.125 and 40 MHz** runs pass **20 host commands / 50 delivered bytes**,
+in **17.78 / 140.54 seconds**. They exercise identification/reset, configuration,
+stream and remote motion, resend, wrap, all three buttons, and a real management
+reset followed by adapter-generation invalidation/rearm. Movement/button input
+crosses the actual Unix `SOCK_SEQPACKET` endpoint. Every returned byte traverses
+serial framing/parity, AUX status, actual IRQ12 and port 60h; completed frames
+match software-confirmed delivery counts. AXI AW/W arrivals are skewed, B/R
+responses are held under backpressure, and the callback performs same-device
+write readback. The original frozen controller flags `VEN_KBC_FAST` and
+`VEN_KBD_AUTOACK` remain enabled.
+
+An independently compiled even-parity mutation exits **1** at the native serial
+bit-9 assertion, not a compile failure/timeout. This scenario has no serial
+preemption; the earlier directed preemption tests remain separate coverage.
+The callbacks model ordered MMIO as AXI transactions: **AArch64 MMIO execution,
+the production service's wall-clock loop, processor, Windows and physical
+FPGA are not tested**. The source overlay remains unintegrated and no live
+synthesis input was edited.
+
+Evidence: `external/tmp/ventium-ps2-adapter-path.qJTeO3XE`, native owner
+`ventium-ps2-adapter-path-oct12`, invocation
+`29f9550243a04cc4a580e144a0bc0aed`. The owner closes zero, all children are
+reaped, actual affinity is CPU 12, peak memory is **24,969,216 bytes**, and
+OOM counts are zero. An independent closure check rehashes all **40 pins**,
+replays recorded command/count consistency and checks actual owner closure.
+Receipt SHA-256:
+`946e16f75e62701c733ca31d5ceaa37281907ac65dda83da37f259273a9a68ed`.
+
+Reproduce in a fresh empty external directory with the earlier one-CPU service
+profile, `MemoryMax=256M`, `RuntimeMaxSec=510`, and:
+
+```sh
+python3 -B fpga/run-ps2-adapter-path-gate.py \
+  --out FRESH_EMPTY_EXTERNAL_DIRECTORY \
+  --overlay PREPARED_MOUSE_OVERLAY \
+  --platform-root FROZEN_EXPORT/ventium/3rd-party/ao486_MiSTer/rtl \
+  --fpga-defines FROZEN_EXPORT/defines.txt
+```
+
 ## Still required before physical mouse acceptance
 
 1. Integrate and qualify the prepared service/input client in the actual cold
    launch and UI procedure. Do not introduce guest-specific command recognition
    or synthetic cursor writes. Keep the protocol/wire gates passing.
 2. Verify the prepared native MMIO backend and service on the deployed
-   platform, then exercise the adapter through the actual
-   8042/wire/AXI path. The separate leaf/AXI/wire tests do not establish this
-   complete path or a working UI producer.
+   platform, then exercise the physical 8042/wire/AXI path. The combined
+   simulation above establishes its software/RTL protocol, not real ARM MMIO
+   ordering, production polling behavior or a Windows UI producer.
 3. Incorporate the separately prepared overlay in a source-matched candidate,
    run full integration lint/verification, retain the 40 MHz timing requirement,
    and implement/deploy it. Do not edit the active frozen synthesis inputs.
