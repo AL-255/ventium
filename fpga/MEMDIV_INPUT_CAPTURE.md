@@ -1,10 +1,12 @@
 # Memory-divide input capture — October 12
 
-**Private timing candidate. Synthesis running; not routed or FPGA-qualified.**
-The last measured full-design post-synthesis Fmax is **30.487805 MHz** for
-the [fetch-probe parent](FETCH_PROBE_PAYLOAD.md), below the **40 MHz** requirement.
+**Private timing candidate: 29.077375 MHz post-synthesis, below 40 MHz.**
+This is a **4.63% frequency regression** from the **30.487805 MHz**
+[fetch-probe parent](FETCH_PROBE_PAYLOAD.md), not a completed timing fix.
+Not routed or FPGA-qualified.
 This experiment follows the [bounded exponent change](SRT_DIV_EXP_WIDTH.md).
-Neither experiment has its own Fmax or gameplay measurement yet.
+The two changes are measured together; their separate timing contributions
+are not established. Neither has a gameplay measurement yet.
 
 ## Structural change and cost
 
@@ -188,15 +190,70 @@ more than **7,208,493,056 free bytes**. This failure remains in the journal;
 no safeguard is weakened.
 
 After lossless compaction, admission observes 7,335,583,744 free bytes.
-Controller invocation `8a64a6aaafd04df391f2e7099068e561` is running under
+Controller invocation `8a64a6aaafd04df391f2e7099068e561` runs under
 `ventium-memdiv-synth-oct12.service`; its owned Vivado scope invocation is
 `c32cf9f7f01942d59dcb62eea51ac435`. The first rejected admission had no
 `started.json` or `once` directory; this is the first actual native synthesis.
 The [timing queue](run_memdiv_capture_timing.py), invocation
 `c7ff77bffc15454b8d1dffc07bb9232d`, adopts that exact owner and waits for
 successful native closure before the independent synthesis and clock audits.
-It cannot restart synthesis, route or program hardware. No new Fmax is known.
-Synthesis/timing, full standard suite and physical FPGA Win95/UI plus full
+It cannot restart synthesis, route or program hardware.
+
+Synthesis closes native zero in **1,921.79 seconds**, with the owner exited
+and no live native synthesis worker. The independent audit passes **2,507
+input pins**, the actual 158 definitions and exactly the two intended RTL
+changes. The Default logic-only mapper, real clocks and cache/profile settings
+are unchanged. DCP SHA-256:
+`da8395424004b9016f9c7a4822271aa0c3234daef8cc2d97dc8d987a4e89d950`.
+
+| Resource | Fetch-probe parent | Memory-divide candidate | Difference |
+| --- | ---: | ---: | ---: |
+| CLB LUTs | 187,066 | 186,597 | −469 |
+| CLB registers | 54,629 | 54,817 | +188 |
+| BRAM tiles | 277.5 | 277.5 | 0 |
+| DSPs | 47 | 47 | 0 |
+
+Peak scoped RAM is **8 GiB**, peak swap **170,811,392 bytes**, with no OOM or
+resource stop. The inherited generated PS clock critical warning is retained;
+the separate timing audit verifies the actual clocks before its timing
+calculation. Its controller `ventium-memdiv-clock-oct12.service`, invocation
+`b7d690407ef746f3917cd9f026ebc084`, closes native zero in **488.40 seconds**,
+with **2,522 input pins** unchanged, no black boxes or tested structural DRC
+errors, 4,680,830,976-byte peak RAM, zero swap and no OOM. The original parent
+reproduces its −7.800 ns setup slack under its original project constraints.
+
+The current core has **−9.391 ns setup slack**, giving
+`1000 / (25 + 9.391) = 29.077374895 MHz`; core hold slack is −0.101 ns.
+The timing queue closes successfully but explicitly records
+`synthesized_40mhz_requirement_met=false`. This is a successful measurement
+of a failing candidate, not timing closure. Audit SHA-256:
+`b4ab2628580a572fb2e26af74a5b3175fcd3f38ed3606fe1788d7f127bfc1f34`.
+No placement, routing or deployment is launched.
+
+All **30 worst setup paths now end in D-cache LRU registers**, not SRT inputs.
+The worst starts at `eip_reg[0]` and contains 120 logic levels, with 34.180 ns
+data delay: 7.002 ns logic and 27.178 ns **estimated, unplaced** routing.
+Selected net arrivals below exclude the 2.902 ns source clock delay:
+
+| Point on the same worst path | Cumulative data delay |
+| --- | ---: |
+| Fetch/decode and `pipe_pair_lookahead` | 15.597 ns |
+| Next-read eligibility, `mc_prepare_ok` | 22.805 ns |
+| L1 `c_next_req` | 24.726 ns |
+| Core paired-store request | 27.263 ns |
+| Second CPU-store I-cache snoop hit | 29.259 ns |
+| L1 `c_next_commit` | 31.922 ns |
+| D-cache LRU register D | 34.180 ns |
+
+This evidence selects the next investigation: separate the live/retained
+query payload from its late OFFER qualification without relaxing request,
+permission, commit or snoop checks. The previously microtested
+[query-payload proposal](PRIME_QUERY_PAYLOAD.md) targets this exact selector.
+A related earlier rewrite regressed timing, so neither its proofs nor this
+path alone justify claiming a frequency gain. It must be tested against this
+exact parent before a separately measured synthesis is considered.
+
+The **40 MHz requirement**, full standard suite and physical FPGA Win95/UI plus full
 Quake timedemo remain open. The canonical **7 PASS / 101 FAIL** gate is still
 an unwaived blocker, not superseded by these checks.
 
