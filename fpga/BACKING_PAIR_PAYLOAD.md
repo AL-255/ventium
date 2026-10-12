@@ -221,7 +221,11 @@ hint: an AGI clock can have decoded pair-shaped instructions without an active
 architectural memory request. A valid cut must preserve those useful hints,
 owner/cancellation rules, cache writes and actual U/V acceptance; require
 targeted contention microtests and full architectural comparison before a
-new synthesis. No replacement RTL cut is claimed here.
+new synthesis. The subsequent [RAW next-read/pair experiment](NEXT_PAIR_TIMING.md)
+now has a request-equivalent candidate and closed directed evidence, including
+a real counterexample to the overly broad shape-only exclusion. It has no new
+synthesis result yet; the frequency figures in this document remain the parent
+measurement, not a claimed improvement.
 
 The final requirements remain ≥40 MHz synthesized Fmax, routed timing,
 duration-valid CoreMark performance, the complete standard suite, and physical
