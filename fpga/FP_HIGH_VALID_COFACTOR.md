@@ -259,7 +259,10 @@ those fields to generate readiness. This puts the late route-qualified
 request before a readiness calculation needed to admit the request. Preparing
 the existing U/V address and strobes from their producer identity could remove
 that dependency while keeping `m_req` as the sole transaction authority.
-This is a proposed change, **not an implemented or measured improvement**.
+At timing closure this was a proposed change. The subsequent
+[backing-payload derivative](BACKING_PAIR_PAYLOAD.md) implements it and passes
+source-extracted, full-cache and real-AXI comparisons; its timing is still
+unmeasured. It does not alter this frozen FP-HIGH-VALID result.
 Before implementation, prove all active request payloads, observable pair
 credit and fill/narrow-read behavior are unchanged; preserve read+store and
 dual-store ordering, denial and stream guards. Do not simply ignore idle
