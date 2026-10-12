@@ -110,28 +110,60 @@ owner `c16be5915aa746758fb32b99d657d204` is terminal zero; actual guarded invoca
 is `743bb02c0d5547f2862a7339da216d0b`, with measured affinity CPU 12. Receipt:
 `fe64637f0adf225cddffa38b7074bbcc0670568d22221edbd7d65fc4f7202e72`.
 
-The unchanged canonical gate starts only after that guard is released; no
-second compiler or Vivado bypasses it. At **00:24 UTC on October 12**, the
-actual `make verify` is running, not merely an intended launch. Canonical owner:
+The unchanged canonical gate closes **FAIL**, native `make` exit 2 and
+controller exit 1: **7 PASS / 101 FAIL** functional programs. The independent
+inventory finds 101 length mismatches, including 10 programs with field
+mismatches. These failures are retained, not waived by A/B equivalence. All
+**20 complete parent/candidate cycle streams match**. The 645.69-second
+controller duration includes waiting for the shared build lock; the canonical
+parallel phase takes 367.6 seconds with one effective worker. Canonical owner:
 `ventium-mc-pair-srt-verify-oct12.service`, invocation
 `dd3e24bdc74b4efdb6f91ff8c2740da4`.
+
+Separate canonical invocations have different QEMU initial stack addresses:
+only one of their 108 complete RTL streams is identical. The subsequent
+**same-input replay passes all 108 programs / 80,800 records**, reproducing
+each candidate trace and the parent trace completely in 75.56 seconds. Native
+owner `ventium-mc-pair-srt-same-input-oct12.service`, invocation
+`4faddb219f7c4b0f8bccf6a66b7a0836`, is terminal zero. Its receipt explicitly says
+`same_input_regression_passed: true`, **not** canonical correctness PASS.
 
 [`build_mc_pair_srt_soc.py`](build_mc_pair_srt_soc.py) prepares the full-PC
 derivative, preserving the posted-16 transport and 154 simulator definitions.
 All **102 shared core/FP inputs** match the directed model, with exactly these
-two changes relative to the measured read-hint PC. It has **not compiled yet**;
-the build lifecycle requires actual canonical closure and unchanged complete
-A/B cycle streams, retaining any gate failure as a failure.
+two changes relative to the measured read-hint PC. Its actual build now closes
+native zero in **22.35 seconds**, preserving the parent's 98 platform structural
+warnings without introducing another one. The private harness dependency names
+this model's generated header; all inputs rehash unchanged. Model SHA-256:
+`8277a36e4fc3e85411bbd1e82f9bccc900bceabb78f1779da5f29786014f759d`.
+Owner `ventium-mc-pair-srt-soc-oct12.service`, invocation
+`55a63ccd1a464b0b9b286a6f8b8e3e02`.
 
-The live continuation `ventium-mc-pair-srt-pc-queue-oct12.service`, invocation
-`4e26dd83304c4d4f9ba05bbbc5cc361a`, observes those exact native owners without
-restarting them. After canonical closure it requires complete same-input replay
-of all 108 programs, then builds this full-PC model and runs both unchanged
-ten-iteration CoreMark diagnostic seeds plus independent CRC/source/owner audit.
-The latter are **not duration-valid scores or full-suite acceptance**. Its
-pinned controller is `after_checks.py` in the evidence root, SHA-256
-`c67a334c53aab7c975533ac64f110e7d423b458677f98e1206c94f8100d10065`.
-No synthesis, placement, routing, bitstream or deployment follows this queue.
+The first PC continuation fails after the successful replay because it reads
+the nonexistent generic `passed` field. Its dependent export queue correctly
+stops, rather than claiming completion. Both failed owners and original logs
+are preserved. [`resume_mc_pair_srt_checks.py`](resume_mc_pair_srt_checks.py)
+checks those terminal owners, reads the actual producer schema, rehashes the
+retained evidence and resumes without rerunning the completed checks. Three
+host tests cover the schema bug and rejection of incomplete, failed, changed or
+waived results. Resume owner `ventium-mc-pair-srt-resume-r2-oct12.service`,
+invocation `c14df51299514da5a6d0c8cd89748e67`.
+
+At **00:36 UTC on October 12**, both unchanged ten-iteration CoreMark diagnostic
+seeds are in progress under native owner
+`ventium-v-carry-cm10-mc-pair-srt-oct12.service`, invocation
+`4655a024d9b241f28e7c5d9173c23ce0`, explicitly pinned to CPU 11. These are **not
+duration-valid scores or full-suite acceptance**. The resumed queue requires
+independent CRC/source/owner audit, then a fresh hardware export and strict CPU
+lint. It cannot launch synthesis, placement, routing, bitstream or deployment.
+
+[`freeze_mc_pair_srt_rk_candidate.py`](freeze_mc_pair_srt_rk_candidate.py)
+requires the actual compiled source closure, exact two tested transformations,
+190 retained payloads, 156 hardware definitions and unchanged 40/100 MHz clocks.
+Its three host recipe/guard tests pass; the hardware export itself is still
+pending the diagnostic runs. The separate timing-controller derivation preserves
+the closed parent's entire native monitor/stop/reap lifecycle and resource
+reserves, and compares against that parent's original DCP and clock constraints.
 
 Canonical verification remains **FAIL**, not waived by the component checks.
 Combined-model differential/cycle checks, both original CoreMark correctness
