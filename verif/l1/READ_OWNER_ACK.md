@@ -1,9 +1,12 @@
 # Current-owner read completion — October 12
 
-Private derivative of [PAIR-INTENT](../../fpga/PAIR_INTENT_TIMING.md), whose
-closed synthesized estimate is **31.651579 MHz**, still below **40 MHz**.
-Its closed synthesized estimate is **31.040477 MHz**, worse than that parent
-and still below **40 MHz**. It has no gameplay or physical result yet.
+READ-OWNER is a private derivative of
+[PAIR-INTENT](../../fpga/PAIR_INTENT_TIMING.md): **31.040477 MHz** versus its
+parent's **31.651579 MHz**. The later **FRESH-PAIR** derivative below now has
+the best closed synthesized estimate, **31.822811 MHz**, still below **40 MHz**.
+Its follow-on **INTENT-READY** private core has passed cache comparisons and
+built; whole-core verification is running. INTENT-READY has no synthesis,
+gameplay or physical result yet.
 
 ## Change
 
@@ -408,11 +411,29 @@ warning is the inherited generated PS8 scoped-XDC clock target; it is not
 silently counted as clean. The timing stage still must audit the actual
 40/100 MHz clocks, structural DRC and both setup/hold reports.
 
-That timing stage is now running as `ventium-fresh-pair-clock-oct12`, invocation
-`b02abead37244159aa52002d1b334b4b`, launched automatically by the exact-owner
-observer. There is **no fresh Fmax result yet**, nor routed/gameplay acceptance.
-The last completed timing result is READ-OWNER at **31.040477 MHz**; best
-remains PAIR-INTENT at **31.651579 MHz**, both short of the required **40 MHz**.
+The timing stage `ventium-fresh-pair-clock-oct12`, invocation
+`b02abead37244159aa52002d1b334b4b`, has also **closed native 0**. Its independent
+audit checked **4,121 input pins**, actual 40/100 MHz clocks, no black boxes
+and zero tested structural DRC errors. It took **493.546 seconds**, with
+4,572,676,096 bytes peak scope RAM, zero swap and no OOM. The exact-owner
+observer closed successfully too; neither Vivado family remains live.
+
+The result is **31.822810591 MHz**, setup **−6.424 ns**, hold **−0.101 ns**.
+The matched best-parent checkpoint reproduces **31.651579414 MHz**, so the
+improvement over that control is **0.541%**. This is an unplaced synthesized
+estimate, **not ≥40 MHz, routed timing, gameplay or board acceptance**.
+
+All 30 reported worst paths share the long frontend/next-request dependency:
+the worst ends at `pipe_mem_store_pair_q_reg/D` (111 levels, **31.213 ns** data,
+including 24.398 ns estimated routing); 29 end at L1 LRU registers. The first
+LRU path is **30.844 ns / 109 levels / −6.055 ns setup**. The worst path's
+measured cumulative data delays are next request **23.021 ns**, pair-ready
+**24.191 ns**, pair request **24.528 ns**, V snoop **24.880 ns**, REP invalidation
+**27.189 ns**, next commit **28.282 ns**, endpoint **31.213 ns**. Rebuilt
+hierarchy labels are not proof of RTL module ownership. Report SHA-256:
+`cc82a40947bbf8425e61edb15ed0b50d19ca75270841311982e7ef026e445128`.
+This confirms the measured target of the following intent-only readiness cut;
+it does not predict that cut's eventual Fmax.
 
 ## Remaining acceptance
 
@@ -457,14 +478,13 @@ four passing source-scope/caller tests in `test_intent_ready_cut.py`. It adds
 the separate L1 result, carries it through the seam, and substitutes it only
 in intent-qualified request/ACK consumers. Original readiness, original
 assertions, actual lookup priority and all sequential RTL remain intact.
-It rejects parent drift and reapplication. It has **not been applied to the
-active candidate**, built as a complete cache/core, synthesized or accepted.
-Before using it, connect the additional output in the cache testbenches,
-audit the full source closure, and run full-cache state/data comparisons and
-core/FP/fault regressions. Choose the next experiment from the fresh timing
-report; no timing or gameplay gain is inferred from this microtest.
+It rejects parent drift and reapplication. It did **not change the active
+FRESH-PAIR synthesis**. The later private cache/core build below applies it
+after that run closed; broader core/FP/fault regressions remain required.
+No timing or gameplay gain is inferred from this microtest.
 
-Two guarded **native cache runners are prepared, not executed**:
+Two guarded native cache runners were prepared, then executed after timing
+closure (results below):
 
 - `run_intent_ready_pairs.py`: six full-P5 sequential A/B configurations
   (both tag layouts, zero/one/two saved windows), plus missing-arbitration and
@@ -497,12 +517,12 @@ and still requires the solo U write to complete. Both A/B instances see this
 same public traffic. A host test guards this qualified observation; native
 mutation sensitivity remains pending execution.
 
-`build_intent_ready_core.py` also prepares the follow-on whole-core build
-procedure, **not a model**. It requires the closed full-profile cache result,
+`build_intent_ready_core.py` implements the follow-on whole-core build
+procedure. It requires the closed full-profile cache result,
 audits all 195 parent payloads, and permits only the L1/seam two-file delta.
 The 152-define UV-fast profile, private harness basename and matching-header
-check, shared guard and native build lifecycle are retained. No preparation
-directory or candidate model has been created by this driver yet.
+check, shared guard and native build lifecycle are retained. Its native result
+is recorded below; compilation alone does not establish processor correctness.
 
 **19 host tests passed** across `test_intent_ready_{cut,pairs,cache,core}.py` on
 2026-10-12. These check transformation boundaries, retained comparisons,
@@ -511,6 +531,44 @@ proof was re-audited from its native logs and hashes, including exact symbolic
 query text/results and a deliberately altered-transcript rejection. These
 are preparation/proof-evidence checks, **not sequential RTL execution**. The
 live synthesis inputs were not changed and no competing cache build launched.
+
+### INTENT-READY native cache/core preflight closed
+
+After both exact fresh timing owners closed, controller
+`ventium-intent-ready-after-clock-oct12`
+(`cd0b8b1d69294bc1bafe8589c8089bca`) checked the measured critical path, then
+ran four sequential guarded phases. The controller closed native **0** with
+unchanged pins; actual workers were observed on CPUs **0–31**. It cannot
+launch synthesis, route or deployment. Evidence is under the same root:
+
+- `intent-ready-pairs-r1`: **46.518 seconds**, six positive native cases and
+  two required native failures (lookup arbitration and backing credit).
+  The positives total **2,042 both-edge samples**, 90 pair-ACK samples and
+  **258 intent-qualified readiness samples**; these are observer samples,
+  not unique retired instructions. All old-port/data/state comparisons stay
+  active. Guarded scope `84610ba3b65f4e5090bd9b4bb2752638`.
+- `intent-ready-cache-r1`: **13.152 seconds**, exact 152-define profile,
+  **747,037 both-edge comparisons / 463 next lookups / 66,339 wide responses**,
+  plus the 51 fresh-capture cases, all unchanged. Full bank/tag/valid/LRU and
+  saved-owner comparisons pass. Scope `aeb66d8bde2f49efa999f98bd0a8a681`.
+- `intent-ready-core-r1`: **20.846-second** native build, only the two intended
+  files changed among 195 payloads, same 152 defines and a private harness
+  object using its matching generated header. Build scope
+  `8bde0586f5d344cabfea62c48deca72e`; preparation scope
+  `4da8238c95d44a299f9440526ea729f5`. Model SHA-256
+  `6fa8f7ad89e4f84a3c484a5e8c81d933e9bda429ca6c7019bd5e2c63d3ce1b5e`.
+
+Independent rechecks found all **86 pair / 3,170 cache / 3,374 core input pins**
+unchanged, including the full cache's retained native artifacts. Source hashes:
+L1 `df7a426143baf6571d233a450fdc7c1eac17c946bd208b5334846b8fb255a29d`;
+seam `806e4392b97b983097278dbad3efa9f9dfae61bb6d9488955632e18e797c2b38`.
+
+Unmodified canonical verification is now running as
+`ventium-intent-ready-canonical-oct12`, invocation
+`ce61b29b9e65437eb5e3ecab0e942a95`, against the fresh-core parent. It retains
+the real AXI backend, all record comparisons, masks, goldens and timing bands.
+No new canonical result is claimed while that owner is live. Broader core/FP/
+fault regressions, a full-PC transfer and timing measurement remain pending.
 
 The canonical gate remains **7 PASS / 101 FAIL**, red and unwaived.
 Required next: achieve
