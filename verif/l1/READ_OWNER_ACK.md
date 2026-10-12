@@ -400,6 +400,54 @@ at **31.651579 MHz**, both short of the required **40 MHz**.
 
 ## Remaining acceptance
 
+### Paired-store readiness follow-up, not in the active synthesis
+
+READ-OWNER's second-worst reported endpoint is
+`pipe_mem_store_pair_q_reg/D`: **31.250 ns data delay / 111 levels / −6.461 ns
+setup**, behind speculative next-read preparation, paired-store readiness,
+V-store instruction-cache snoop, REP continuation invalidation and next-read
+commit. This is a measured **parent** path, not a fresh candidate result.
+The path report remains unpacked at
+`read-owner-clock-r1/core_setup_unplaced_estimate.rpt`.
+
+The next conditional experiment is a separate **intent-only readiness**
+result, not removal of the ordinary port's conflict guard. The existing core
+consumes readiness only in `pipe_store_pair_offer && mem_store_pair_ready`;
+that offer is also its checked intent, propagated to L1 with `l1d_c_req`.
+Intent already suppresses conflicting cache lookahead. Therefore the guarded
+request/ACK consumers can use a cofactor with no next-request dependency,
+while the original general readiness port retains its full semantics.
+
+`prove_pair_intent_ready.py` extracts the actual frozen L1 assignment and runs
+`tb_pair_intent_ready.sv` in eight load/store-pair, chain and code-buffer
+profiles. Unit `ventium-pair-intent-ready-proof-oct12`, invocation
+`7f0c8c82aab242c8bfe7d58584286c10`, closed successfully in **3.631 seconds**:
+**3,145,728 vectors**, including **2,621,440 intent-qualified equivalence
+checks**. It exhausts the binary control inputs and separately both address
+offsets/strobe masks. The two chain+load/store profiles also produce six
+native counterexamples to an **unconditional** replacement. All eight native
+compiles/simulations and their artifacts were independently checked; peak
+memory was 32,780,288 bytes, bounded to CPUs 10–11 / 256 MiB alongside Vivado.
+
+Three symbolic counterexample searches are UNSAT: qualified readiness,
+core request with the stated intent propagation, and ACK under request →
+intent. Five SAT sensitivity queries demonstrate why global replacement,
+lost credit/residency/ownership, or missing intent propagation are unsafe.
+This combines source-extracted binary testing with an abstract handshake
+proof; it is **not** arbitrary X/Z equivalence or sequential cache proof.
+
+`prepare_intent_ready_cut.py` is a **draft two-file transformation**, with
+four passing source-scope/caller tests in `test_intent_ready_cut.py`. It adds
+the separate L1 result, carries it through the seam, and substitutes it only
+in intent-qualified request/ACK consumers. Original readiness, original
+assertions, actual lookup priority and all sequential RTL remain intact.
+It rejects parent drift and reapplication. It has **not been applied to the
+active candidate**, built as a complete cache/core, synthesized or accepted.
+Before using it, connect the additional output in the cache testbenches,
+audit the full source closure, and run full-cache state/data comparisons and
+core/FP/fault regressions. Choose the next experiment from the fresh timing
+report; no timing or gameplay gain is inferred from this microtest.
+
 The canonical gate remains **7 PASS / 101 FAIL**, red and unwaived.
 Required next: achieve
 **≥40 MHz synthesized Fmax**, resolve canonical differential failures,
