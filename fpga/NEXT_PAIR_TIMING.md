@@ -171,6 +171,36 @@ best **MEMDIV-QUERY 30.676729 MHz** checkpoint. It cannot retry synthesis,
 start placement/routing or deploy. At this update synthesis is running, so
 there is **no candidate Fmax result or 40 MHz claim**.
 
+### Timing-coverage follow-up before sign-off
+
+The completed **parent** `backing-payload-clock-r1/timing_summary.rpt` records
+zero unconstrained internal endpoints and zero combinational loops, but also
+**8 `no_clock` pins and 4 `no_output_delay` ports**. Its summary does not name
+those objects. Their identities and significance remain unresolved; do not
+assume they are harmless LEDs or unused IP. The parent also fails hold in both
+clock domains (-0.108 ns at 100 MHz, -0.101 ns at 40 MHz). These are unplaced
+results, not proof of a silicon hold failure, and are not waived.
+
+The original 100 MHz intra-clock setup slack is +6.785 ns; the reported
+40-to-100 / 100-to-40 MHz cross-domain setup slacks are +24.712 / +9.712 ns.
+Thus the 30.591330 MHz figure describes the parent **core's same-clock setup
+estimate**, not qualification of every path or clock domain. The new report
+must be inspected independently when it closes.
+
+Before routed sign-off, collect detailed object names with
+`check_timing -verbose` and inspect the applied timing exceptions; do not
+introduce blanket false paths to clear the counts. The relevant command
+contracts are AMD's [check_timing](https://docs.amd.com/r/2024.1-English/ug835-vivado-tcl-commands/check_timing)
+and [report_exceptions](https://docs.amd.com/r/2022.1-English/ug835-vivado-tcl-commands/report_exceptions).
+This follow-up has **not** been run and does not modify the currently pinned
+synthesis/report controllers.
+
+The exported source includes an old `flow/hw/fpatan_mcp.xdc`, but the actual
+wrapper deliberately excludes it from `constrs_1` because its legacy
+`u_fpatan` hierarchy was replaced by `VEN_FP_SHARED`. Its presence in the
+source manifest is not evidence that a four-cycle relaxation is applied to
+the replacement FPU; the active wrapper keeps those paths single-cycle.
+
 Space recovery is reversible. `closed-next-pair-synthesis-reserve.tar.gz`
 contains 10,731 closed old traces/large reports: 2,061,281,628 source bytes became
 88,762,335 archive bytes. `closed-next-pair-pch.tar.gz` contains another 857
