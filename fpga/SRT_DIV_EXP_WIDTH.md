@@ -123,10 +123,15 @@ private host object linked against its own generated header. Model SHA:
 `d7d683b3e1d2ea70586b56f095a86e11fc1e37fa6889050caaa2d5541f8e5b77`.
 Compilation is not a whole-core correctness pass.
 
-The unchanged canonical `make verify` is now running on this model under
+The unchanged canonical `make verify` closes **FAIL** on this model under
 `ventium-srt-div-exp-verify-oct12`, invocation
 `6e450027a211411f8701748eafe335bd`, retaining the original masks, goldens and
-cycle bands and complete comparison against the fetch-probe parent. The
+cycle bands. Its native make exit is 2 after **397.14 seconds**: **7 functional
+passes / 101 failures**, matching the parent's counts. All 20 complete cycle
+streams match the fetch-probe parent exactly; input pins remain unchanged.
+This is an acceptance blocker, not a waived pass. Receipt SHA:
+`50ea2f575f95256bfbb9c1036c703d271d33b0b25a9cb63f19a6b32b45a699f0`.
+The
 384-fixture original FP/QEMU/state/cycle matrix runs concurrently with 32
 workers under `ventium-srt-div-exp-fp-oct12`, invocation
 `4f263f49bbee4e349e54ce5ee06143e7`, then **passes in 50.19 seconds**.
@@ -134,9 +139,35 @@ All 768 candidate latency-0/7 runs compare **208,128 complete architectural
 records**, with 768 V retirements and zero A/B cycle differences. Inputs are
 unchanged and all children are reaped; receipt SHA:
 `f578ccf1607c7d60b56708c7e5cf486939062594cff413587a10bffa090d68d5`.
-The canonical gate is still running, not passed. Fault matrices, full standard
-suite, source-matched PC/hardware transfer and timing remain open; no new
-synthesis, full-system run or board deployment is launched.
+
+The follow-up same-input replay (`div-exp-replay-r1`) closes native zero in
+**74.78 seconds**, unit `ventium-srt-div-exp-replay-oct12`, invocation
+`56b4c812b89d4e0faa7f3e4552de40c7`. All **108 programs / 80,800 complete
+architectural records** agree between parent and candidate using the candidate
+gate's exact input bytes and initial stack pointer. The candidate replay also
+reproduces its original gate traces. This establishes an A/B regression result,
+not canonical QEMU correctness or permission to alter masks/bands. Receipt SHA:
+`ed118f3db2629cc9c9323c6b0f5ef750608f988ef80cc7c217dae4f341b4ba6d`.
+
+The original FP read-ack fault matrix (`div-exp-faults-r1`) also closes native
+zero, unit `ventium-srt-div-exp-faults-oct12`, invocation
+`aea4dae253314667bb1465978896f813`: **16 fixtures × two models**, including
+**23,585 candidate architectural records**. Every native gate and complete
+UV/QEMU comparison passes, with identical full A/B state traces and no timeout.
+The original gate's slow-mode diagnostic controls are not substituted for its
+required UV comparison. Receipt SHA:
+`b706be4ca91848aa6bf07774b874c4dd44f8f840128c7ddaecec8a1fe2c1a63f`.
+Both services have exited with empty cgroups; both sets of input pins were
+independently rehashed unchanged. Real replay simulator children were sampled
+on CPU0–7 and a real fault-matrix simulator on CPU24–31; configured systemd
+CPU properties alone are not used as affinity evidence.
+
+The canonical gate remains **FAIL**. Full standard suite, source-matched
+PC/hardware transfer and timing remain open; no new synthesis, full-system run
+or board deployment is launched. The immediate hardware target remains
+**at least 40 MHz post-synthesis Fmax with UV + fast mode retained**, followed
+by routed and physical-board qualification. The last measured 30.487805 MHz
+belongs to the fetch-probe parent, not this unsynthesized exponent candidate.
 
 After the engine owner closes, ten unused/unpinned compiler `.gch` files are
 removed to preserve disk reserve (**822,775,360 bytes**). Source, generated
