@@ -131,6 +131,18 @@ reject 21 deliberately bad variants. They are builder checks, not a CPU pass.
 The guard requires the shared heavy-build scope and no live Vivado, so this
 preparation does not compete with or mutate the running read-hint synthesis.
 
+### Integration after actual clock closure
+
+The read-hint clock audit subsequently closes at **29.58405 MHz**, with the
+worst paths entering the SRT divider. Its separate V-response path is still
+limited to **30.43955 MHz**. The [combined follow-on](MC_PAIR_SRT_TIMING.md)
+therefore integrates this **exact tested core recipe** and the independently
+tested SRT normalization tree. Its actual full-core build and 216 memory/store/FP
+fixtures pass with identical A/B cycles. The standalone one-file builder above
+still has not run; the combined model is not a standalone attribution of either
+change's timing gain. New synthesis, standard-suite and board acceptance remain
+open.
+
 Verified gameplay baseline: **0.51030715 total U+V simulated retirement-event
 IPC**, older model `2b4d7a48`, cycles **1,200,065,237–1,300,065,237**. The current
 timing candidate and this private derivative have no gameplay measurement.

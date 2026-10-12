@@ -1,9 +1,10 @@
 # Read-only successor-hint commit — October 11, 2026
 
-**Directed tests and native synthesis pass; timing and full-system acceptance pending.**
+**Directed tests pass; synthesized Fmax regresses to 29.58405 MHz.**
 Target: at least **40 MHz synthesized Fmax**, preserving UV + relocated/system
 fast pipes, fast loads/stores and full P5 caches. The immediate predecessor
-measures **30.34809 MHz**, unplaced; no new frequency result is claimed.
+measures **30.34809 MHz**, unplaced. This is not a standalone timing improvement
+or a qualified FPGA image; full-system acceptance remains pending.
 
 ## Change
 
@@ -204,6 +205,31 @@ controller invocation `f34d771a7c8e46448d1763059ee10d9d`, reopening this actual
 project and the measured predecessor. At 00:10 UTC it remains live; final
 frequency/setup/hold and clock-audit closure are pending. Its unchanged
 40 MHz core / 100 MHz PL constraints are not proof of achieving 40 MHz.
+
+### R2 clock audit closed: reject standalone timing promotion
+
+At **2026-10-12 00:17 UTC**, the original-clock audit closes native zero in
+**492.79 seconds**, invocation `f34d771a7c8e46448d1763059ee10d9d`. The independent
+audit passes, and all **1,047 started input pins** plus audited artifacts
+independently rehash unchanged. Peak scope RAM is **4,864,385,024 bytes**, swap
+zero; no OOM or resource stop. The retained synthesis and clock controllers
+and their queue are terminal zero, and the exclusive Vivado scope is dead.
+
+The actual estimate is **29.58405 MHz**, from **−8.802 ns** setup slack at
+25 ns: approximately **2.52% worse** than the predecessor's 30.34809 MHz.
+Core hold is −0.101 ns. The 1.80% LUT saving does not establish timing progress.
+Both are matched `logic_only`, unplaced estimates, not timing-driven or routed
+sign-off. Audit SHA-256:
+`e274fc3b6f36338b2f9b1a340c91d5ace31fcd49c5f228b542852420028bbd36`.
+
+All 30 reported worst setup paths end in the shared SRT divider: 18 exponent
+register data endpoints and 12 carry-register enables. Worst path:
+`q_pc[0] → ua[14]/D`, **122 levels**, 33.591 ns data delay (7.495 ns logic,
+26.096 ns estimated routing). The separate V-response capture path remains
+limited to **30.43955 MHz** (−7.852 ns, 111 levels). These reports justify
+the [combined SRT normalization / response-read candidate](MC_PAIR_SRT_TIMING.md);
+the present read-hint candidate is retained as an experimental parent, **not
+promoted as a timing win**. No placement, routing, bitstream or deployment ran.
 
 Eight regenerable PCH files from the two **closed** same-line cache runs were
 removed, reclaiming 668,977,594 bytes. Exact target/hash and deletion receipts

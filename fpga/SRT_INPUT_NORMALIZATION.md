@@ -123,3 +123,12 @@ Verified gameplay baseline: **0.51030715 total U+V IPC**, simulated model
 `2b4d7a48`, cycles **1,200,065,237–1,300,065,237**. It predates this experiment,
 which has no gameplay measurement. No production RTL, bitstream or board state
 has been replaced by these tests.
+
+The later read-hint hardware image still contains this experiment's exact
+unbalanced parent SRT source. Its completed clock audit again identifies SRT
+input normalization as the worst path (29.58405 MHz). The
+[combined timing follow-on](MC_PAIR_SRT_TIMING.md) now integrates this exact
+tested replacement with the independently tested paired-response read cofactor.
+That actual combined core passes the cold memory/store/FP and #NM/debug matrices;
+its new timing, full standard suite and board validation remain open. This does
+not retroactively give the standalone normalization experiment an Fmax result.
