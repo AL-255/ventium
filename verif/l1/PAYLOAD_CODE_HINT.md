@@ -101,6 +101,25 @@ current timing result still misses 40 MHz, qualify this refinement in the
 whole-core derivative after the cache gate, rather than spending another
 synthesis on the weaker request-only cut without examining this dependency.
 
+The [whole-core builder](build_payload_code_hint_core.py) now prepares that
+combined derivative in `payload-kind-core-r1/`, without launching a compiler.
+It retains all **195 source files**, changes exactly the four interface files
+listed above, and preserves all 150 parent defines while adding only
+`VEN_L1D_PAYLOAD_CODE_HINT`. The stronger core source is
+`a9466e0aeed8d8e147974ec6280bd8a83a99cb7a0736d53d90cf7e3fc56d53a3`;
+preparation receipt is
+`6e8b7ee2f692b88c563a3e6891af8184288a66f37fc4f7a95bab1dd0699a276e`.
+The cache file is byte-identical to the queued cache candidate, while its
+upstream hint receives the separately checked S_PIPE refinement.
+
+Four builder admission tests pass, including rejection of disabled assertions,
+removed fast mode, missing/failing cache variants, an undetected negative test,
+changed cycle streams and missing coverage. Compilation requires the exact
+timing/cache continuation's successful native closure, a measured parent result
+below 40 MHz, rehashed complete-cache evidence, the guarded-32 scope, and no
+live Vivado. Its C++ harness basename is unique to the output directory and its
+local object/header dependency must match. **Prepared is not compiled or passed.**
+
 ## Next regression, prepared but not yet passed
 
 [The actual-cache driver](run_payload_code_hint_cache.py) reuses the closed
