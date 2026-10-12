@@ -123,12 +123,76 @@ case ports outside the host's 32768–60999 ephemeral range before a full rerun.
 The unchanged canonical gate closes **FAIL**, native make exit 2 in **413.38
 seconds**, under
 `ventium-fetch-probe-verify-oct12`, invocation
-`0231455e6780425e9fe9584c8d6bbaf8`. All 20 complete cycle streams equal the
-parent, and input pins remain stable. The inherited functional failures remain
+`0231455e6780425e9fe9584c8d6bbaf8`: **7 PASS / 101 FAIL**. All 20 complete cycle
+streams equal the parent, and input pins remain stable. The inherited failures remain
 an acceptance blocker; successful A/B comparisons do not turn that gate green.
-Further full-core regression, source-matched PC/hardware transfer, measured
-synthesis and full original standard-suite plus physical Win95/UI and Quake
-timedemo acceptance remain open. No synthesis, route or deployment is queued.
+
+The corrected full FP rerun uses ports **24000–24383**, outside the host's
+ephemeral range, with a runtime range check. All **384 fixtures / 208,128
+candidate records / 768 V retirements** pass the original QEMU/state and exact
+A/B cycle comparisons at latency 0/7. No test, expectation or timeout changes.
+`probe-fp-r2` closes native zero in **65.54 seconds**, 32 workers, invocation
+`972a1a7f188a4bf884019afaeb8688a0`. Receipt SHA-256:
+`c44f6b2886b95d443c17a762ad66fad315c7d4dde61762e8099d4c75a6bce700`.
+The failed R1 and serial reproduction remain failed historical runs; their
+original scheduling adapter is preserved in commit `55fcdac5`. Neither an
+unrelated connection nor the host networking configuration is modified.
+
+The identical-input replay also passes **108 complete programs / 80,800
+architectural records**, reproducing the candidate's original traces without
+normalization or trimming. `probe-canonical-replay-r1` closes zero in **92.60
+seconds**, invocation `ad9eaf3eb222462982ba743e209f4499`, receipt SHA-256:
+`2aba342d03ee6e27c69b9d8897c4cfa025db0e4bbeb4ea7aa25f557555271b8a`.
+Sampled live child affinity is CPU0–7. The held-read regression additionally
+passes **24 fixtures at two latencies / 9,200 candidate records** in
+`probe-held-r1`, invocation `b37a3524495847bba08d618715fadce2`.
+The original **16-case FP fault matrix passes all 32 parent/candidate runs**,
+including complete UV architectural comparisons and **23,585 candidate
+records**. Its slow functional controls remain diagnostic, not acceptance.
+`probe-faults-r1` closes native zero with stable pins, invocation
+`7d3101ed3cc04f4bb4bf8eef178e7e06`; receipt SHA-256:
+`71fee060de04c5c1ba086cae0a4891726801710df58ac5011061d6d7b7912d85`.
+The six directed corpora above total **463,609 candidate architectural
+records**, excluding the separately counted 80,800-record canonical replay.
+
+The [PC transfer helper](build_fetch_probe_soc.py) closes its native build
+successfully in **23.32 seconds**, with unchanged pins. It requires these
+complete directed results, the fault matrix, the real
+canonical closure and replay, unchanged profiles, and all 102 overlapping
+RTL/header sources to match the directed core. The parent PC model is
+`89ebdd625be3f65e97c1ddafee6e166084ed3978c27d96f5f96b6509144f0a09`.
+The new PC model is
+`b598f07768e3e04483a3c11dca8d97ff35acd134d2b3f94a54fb56d3e1f21b71`.
+Owner `ventium-fetch-probe-soc-oct12`, invocation
+`7af31eaf47384958b940f024e31d8f4f`, is closed and reaped. Its native build
+preserves the guarded 32-job resource profile, 156 feature definitions,
+posted depth 16 and private harness/generated-header audit. The **98 inherited
+platform structural warnings remain unchanged**, not a clean SoC lint result.
+Source-matched hardware transfer, measured synthesis and full original
+standard-suite plus physical Win95/UI and Quake timedemo acceptance remain
+open. No synthesis, route or deployment is queued.
+
+## Recoverable evidence compaction
+
+Disk reserve is preserved without deleting sources, fixtures, native models or
+pinned inputs. These archives live in the evidence root and are byte-verified
+before their unpacked copies are removed:
+
+- `failed-probe-fp-traces.tar.gz`: 3,429 terminal failed-run `.vtrace` files,
+  **424,206,803 to 16,008,763 bytes**; SHA-256
+  `af00e9b20a4a0fe19430b23becab5bb1f6ef74813039be9bd26e8ced6bc859ba`.
+  Failed-run diagnostics remain unpacked.
+- `closed-probe-corpora-text.tar.gz`: 22,104 closed FP/integer/memory text files,
+  **764,658,404 to 54,603,307 bytes**; SHA-256
+  `d2d8974cd3c066282f87df04278cc003402cb62875dc1fc34b0967701315cf4d`.
+  Before archiving, an independent reread rechecks full QEMU comparisons,
+  complete A/B state/cycle equality, native exits and pins for all 712 fixtures
+  and **408,992 candidate records**. This excludes the separately counted
+  boundary/held-read/canonical corpora.
+
+Restore either with `tar -xzf ARCHIVE -C /home/yukidama/external/tmp`.
+Member/hash manifests, protected-input lists and closure receipts remain beside
+the archives. No active run's streams are removed.
 
 Gameplay baseline: **0.51030715 total U+V simulated retirement-event IPC**,
 older model `2b4d7a48`, cycles **1,200,065,237–1,300,065,237**. This candidate

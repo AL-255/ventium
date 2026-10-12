@@ -28,7 +28,13 @@ def main():
     # The original loop has distinct (kind, reloc, offset), each in 6/2/32
     # (FP) or 4/2/32 (store). Refuse drift rather than reintroducing port races.
     assert text.count(old)==1
-    portbase=47000 if args.suite=='fp' else 48000
+    # QEMU can silently obtain only an IPv6 listener when an outbound IPv4
+    # connection already owns an ephemeral source port. Our collector uses
+    # 127.0.0.1. Stay outside that allocation range, not merely distinct among
+    # our fixture jobs; do not alter the host range or unrelated connections.
+    portbase=24000 if args.suite=='fp' else 25000
+    ephemeral_lo,ephemeral_hi=map(int,Path('/proc/sys/net/ipv4/ip_local_port_range').read_text().split())
+    assert portbase+383<ephemeral_lo or portbase>ephemeral_hi
     text=text.replace(old,f'        port = {portbase} + 64 * kind + 32 * reloc + offset\n')
     runner=root.with_suffix('.driver.py')
     with runner.open('x') as stream: stream.write(text)
