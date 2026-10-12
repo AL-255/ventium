@@ -78,7 +78,7 @@ transport. Three host tests check all four exact recipe outputs, drift and
 reapplication rejection, and Tcl expansion without the diagnostic synthesis
 option. The first Tcl test lacked the frozen upstream flow in its disposable
 fixture; copying that unchanged input fixes the test, not the production flow.
-The exporter has not published inputs yet. Future synthesis must retain the
+The export and guarded synthesis launch are recorded below. Synthesis retains the
 single-family resource monitor and reserves; the timing-driven profile previously
 had excessive optimization memory growth. A frequency difference across mapper
 profiles cannot be presented as an isolated RTL improvement.
@@ -164,14 +164,28 @@ rehash. Owner `ventium-prime-noack-same-input-oct12.service`, invocation
 `f0201acdb9ef6879a2c1ab8adbf9712b041d77646ebe4972714578a58e58aa34`.
 This is A/B nonregression evidence, **not a canonical pass**.
 
-Both short CoreMark diagnostic seeds are now running sequentially on the new
-PC model, with the actual child pinned to CPU 11. Unit
+Both short CoreMark diagnostic seeds close native zero on the new PC model,
+with each actual child pinned to CPU 11. Performance / validation retain exactly
+**4,767,218 / 4,753,406 ticks** and their original five CRCs; elapsed host times
+are **207.20 / 201.72 seconds**. The independent audit rehashes all 662 input
+pins, verifies actual child exit/reaping and the terminal native owner, and
+reports no OOM. These 10-iteration diagnostics provide no-regression evidence,
+not duration-valid scores or full-seed correctness acceptance. Unit
 `ventium-v-carry-cm10-prime-noack-oct12.service`, invocation
-`58f6ed8b5d3a469b8b1d2bb1bff77839`. The unchanged 16-fixture fault matrix is
-running separately on CPU 12 under the shared guarded scope:
+`58f6ed8b5d3a469b8b1d2bb1bff77839`.
+
+The unchanged 16-fixture fault matrix also closes native zero: **32 complete
+comparisons / 23,585 candidate records**, no errors. Its 1,704 input pins and
+all result artifact pins independently rehash. CPU 12, shared guarded scope:
 `ventium-prime-noack-fault-oct12.service`, invocation
-`b89a84004704420bb34b8475560daabd`. These live runs are not counted as passes.
-No new FPGA inputs have been published and no synthesis or deployment has begun.
+`b89a84004704420bb34b8475560daabd`.
+
+Cold #NM (TS/EM) and architectural-debug checks close native zero in **9.06
+seconds**, covering **7,244 candidate records** with identical complete A/B
+state/cycles at AXI latency 0/7. The deployed profile lacks strict-MF support;
+these results do not claim the omitted strict-MF cases. Input pins rehash.
+Owner `ventium-prime-noack-debug-oct12.service`, invocation
+`2dbeba4937f24dc6af6464d14c7e97db`; receipt `prime-noack/debug-r1/closed.json`.
 
 Disk cleanup removes **12 closed compiler PCH caches (1,035,149,312 allocated
 bytes)** after exact owner/hash/open-file and pin checks. Binaries, sources,
@@ -179,6 +193,68 @@ headers, generated C++, objects, traces, media, logs and DCPs are retained and
 rehashed. Those caches require regeneration, not byte-identical restoration.
 Exact targets remain in `closed-prime-pch-{plan,closed}.json`. The first cleanup
 attempt rejected an incorrect binary basename before deleting anything.
+
+Additional cleanup archives generated simulation netlists from nine completed
+June KV260 projects, then removes their 27 regenerable pre-route DCPs. Final
+routed DCPs, bitstreams, XSAs, reports, logs, source and IP checkpoints remain
+hash-verified. Net reclaimed: **1,593,155,584 bytes**. Byte-exact netlists are in
+`prime-noack/old-kv260-simulation-netlists.tar.gz`; exact targets and restoration
+command are in `old-kv260-products-{plan,closed}.json`. Pre-route DCPs require
+regeneration; they do not have byte-exact backups.
+
+A further **270,077,952 bytes** is reclaimed from the closed PC model's two
+regenerable PCH caches and two byte-exact archived generated June `_uc0`
+simulation netlists. All old `_uc0` checkpoints and other files are retained;
+that incomplete project's checkpoints are not discarded. Evidence:
+`prime-noack/closed-soc-cache-{plan,closed}.json` and
+`prime-noack/old-uc0-simulation-netlists.tar.gz`. No recursive directory deletion.
+
+## Timing-driven synthesis admitted, October 12 01:54 UTC
+
+The first actual export rejects an order-only mismatch: manifest traversal
+lists the same four verified deltas in a different order from the recipe
+dictionary. No output is published by that attempt. The corrected check still
+requires exactly four unique, independently hash-verified changes and 170
+compiled modules. A new end-to-end native-source export test reproduces that
+ordering; all **four exporter tests** pass.
+
+The actual export publishes 190 immutable payloads / 156 hardware definitions:
+`prime-noack/fpga-r1/input-manifest.json`, SHA-256
+`485aec1484e25676312315347b406a80122f2e58a13065f8bdf39ac1f089a755`.
+Strict **CPU-hierarchy** lint closes native zero in **3.73 seconds**, with no
+hard structural errors; this is not full-platform lint. Owner
+`ventium-prime-noack-lint-oct12.service`, invocation
+`07bb1d97d8f544eca5c2e5a09276d3e8`.
+
+[`prepare_prime_noack_timing.py`](prepare_prime_noack_timing.py) derives the
+controllers from hash-pinned, closed parent templates. Four host tests check
+the unchanged native monitor lifecycle, resource limits, explicit mapper change,
+terminal-owner checks, duplicate-owner rejection and guard-drift rejection.
+Preparation checks actual terminal owners for CoreMark, fault, debug, replay and
+lint. Synthesis rehashes the complete frozen source and prerequisite evidence
+before starting. Generated controllers are in `prime-noack/{synthesis,clock}`;
+`timing-prepared.json` records their hashes.
+
+The actual synthesis controller starts at **01:54:03 UTC**:
+`ventium-prime-noack-synth-oct12.service`, invocation
+`6e13bd65df494c51a2044dbab264380f`. It admits the actual sole Vivado family at
+**01:54:09 UTC**, scope invocation `52072648e4f64b23ad969cbc56a64d9f`.
+The sequencing owner is `ventium-prime-noack-timing-queue-oct12.service`,
+invocation `98cc568af1054e95a54f4fb29010251f`.
+
+Limits remain **8 GiB RAM + 6 GiB swap**, 13 GiB combined early stop, 2 GiB host
+RAM/swap reserves, 4 GiB disk stop floor, 45-minute native synthesis timeout,
+one Vivado family and no concurrent heavy Verilator build. Admission starts
+with 7.28 GB free, above the unchanged 7.21 GB measured-growth requirement.
+Successful native closure must be independently audited before the original-
+clock timing report runs. The queue cannot start placement, routing or deployment.
+
+**At this entry synthesis is live, not passed.** No frequency result exists for
+this candidate. The completed parent remains 28.88838 MHz (diagnostic
+`-no_timing_driven`, unplaced). Any future delta combines the four RTL changes
+and timing-driven mapping; it is not an isolated RTL-gain measurement. The
+requirement remains at least 40 MHz; a constraint or successful launch is not
+evidence that it is met.
 
 Canonical correctness, original full CoreMark seeds, cold Win95 desktop/UI,
 full original Quake timedemo and actual candidate FPGA validation remain
