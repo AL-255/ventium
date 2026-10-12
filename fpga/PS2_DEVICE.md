@@ -309,13 +309,76 @@ systemd-run --user --unit=ventium-ps2-mailbox-host-check --remain-after-exit \
   --out /home/yukidama/external/tmp/FRESH_EMPTY_DIRECTORY
 ```
 
+### Native MMIO backend (prepared, not deployed)
+
+[`ven_ps2_mmio.c`](board-tools/ven_ps2_mmio.c) and its
+[Python wrapper](board-tools/ven_ps2_mmio.py) provide the adapter's ordered
+callbacks. The production build is little-endian AArch64 only. It opens the
+fixed `/dev/mem` management page at `0xA0000000`, reads the exact mouse
+capability, and exposes only the six readable and five writable mouse CSR
+indices. Each MMIO access is one aligned volatile 32-bit load/store with
+`dsb sy` barriers. A store is followed by a status read from the same peripheral;
+that read does not replace the adapter's admission/delivery confirmation.
+No function writes guest reset, clock, RAM, IRQ or execution control.
+
+The backend retains a nonblocking advisory lock at
+`/run/lock/ventium-ps2-mouse.lock` until close. All mouse writers must honor it;
+it cannot exclude unrelated privileged tools that ignore this contract.
+The lock file must not be unlinked/replaced. Symlink/hardlink lock files are
+rejected; forked processes and foreign Python threads cannot operate the
+handle. Closing a forked child descriptor cannot explicitly unlock the parent.
+Fabric replacement while the handle is live remains forbidden.
+
+The mapping precondition is important: the register aperture must be a
+**non-RAM device region**, not ordinary RAM. Linux arm64's
+[`phys_mem_access_prot`](https://github.com/torvalds/linux/blob/v6.6/arch/arm64/mm/mmu.c#L87)
+distinguishes these cases; `O_SYNC` alone is not a portable device-memory-type
+guarantee. The deployed kernel/aperture still need checking before physical use.
+The [arm64 I/O primitives](https://github.com/torvalds/linux/blob/v6.6/arch/arm64/include/asm/io.h)
+also distinguish raw accesses and ordering. This userspace helper is not a
+claim of kernel-driver equivalence or measured AXI timing.
+
+[`run-ps2-mmio-gate.py`](run-ps2-mmio-gate.py) passes **13 tests** using an
+explicit regular-file fixture library. They check exact lanes, untouched
+adjacent registers, value/index rejection before access, exclusive ownership,
+fork/close behavior, capability failure cleanup, unsafe path rejection, and
+Python integer/thread/lifetime checks. A fixture library cannot open physical
+MMIO and is rejected by the production Python wrapper. The real AArch64 library
+cross-compiles with `-Wall -Wextra -Werror`; its disassembly shows the 32-bit
+load/store, barriers and status readback. It does not export the fixture opener.
+An x86 production build is deliberately rejected. None of these checks executes
+the ARM instructions on a device or qualifies physical ordering.
+
+Evidence: `external/tmp/ventium-ps2-mmio-r2.NFgjdW9Q`, service
+`ventium-ps2-mmio-r2-oct12`, invocation `cdd9eecabd8f4c6ba3b7510ef4891cd0`,
+native exit zero, CPU 12, peak 26,988,544 bytes; source/tool pins unchanged.
+The first run, `ventium-ps2-mmio.UxuW6vYv`, failed during Python import because
+`ven_ps2_mmio.so` shadowed `ven_ps2_mmio.py`. Renaming the library to
+`libven_ps2_mmio.so` fixes the actual packaging problem; the failed run remains
+separate evidence. The corrected library's SHA-256 is
+`f78ff8f91bddae6137caa30e9d22189bd731bf6bf0384899a78a2586920d2c18`.
+
+Reproduce in the same bounded service profile as the adapter gate, replacing
+the command with `fpga/run-ps2-mmio-gate.py --out FRESH_EMPTY_EXTERNAL_DIRECTORY`.
+Build the deployable library on AArch64, or with the matching cross compiler:
+
+```sh
+aarch64-linux-gnu-gcc -std=c11 -Wall -Wextra -Werror -O2 -fPIC -shared \
+  fpga/board-tools/ven_ps2_mmio.c -o "$TMPDIR/libven_ps2_mmio.so"
+```
+
+Install it beside the Python module. Use `with MMIO() as io:` around
+`Adapter(io.read32, io.write32)` while actual guest reset is held. There is not
+yet a qualified Linux service/UI producer; do not use this fragment as a
+standalone boot/deployment recipe.
+
 ## Still required before physical mouse acceptance
 
 1. Integrate the now-tested general mouse policy with an actual PS-side service
    and UI input producer. Do not introduce guest-specific command recognition
    or synthetic cursor writes. Keep the protocol/wire gates passing.
-2. Supply and verify the native ordered MMIO backend and exclusive-owner Linux
-   service for the tested adapter, then exercise that adapter through the actual
+2. Verify the prepared native MMIO backend on the deployed platform and add the
+   exclusive-owner Linux service, then exercise that adapter through the actual
    8042/wire/AXI path. The separate leaf/AXI/wire tests do not establish this
    complete path or a working UI producer.
 3. Incorporate the separately prepared overlay in a source-matched candidate,
