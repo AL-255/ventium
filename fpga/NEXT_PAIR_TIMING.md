@@ -2,8 +2,11 @@
 
 Target: **at least 40 MHz synthesized Fmax**, UV+fast, full P5 caches.
 This is an **unqualified timing candidate**, not a frequency or FPGA pass.
-The last measured parent remains **30.591330 MHz** unplaced, setup **−7.689 ns**
-at 40 MHz. See [the parent timing audit](BACKING_PAIR_PAYLOAD.md).
+Closed native timing is **30.393289 MHz** unplaced, setup **−7.902 ns** at
+40 MHz: worse than the source parent's **30.591330 MHz / −7.689 ns**.
+The request cofactor did **not** remove the critical dependency and is not
+promoted on the strength of its area reduction.
+See [the parent timing audit](BACKING_PAIR_PAYLOAD.md).
 
 ## Reason for the change
 
@@ -25,7 +28,7 @@ Other configurations keep the original equation. The candidate retains an
 assertion comparing the new request with the complete original equation on
 every post-reset clock. No cache arbitration, permission, address, data,
 retirement, golden, tolerance, clock or timing-exception change is intended.
-Whether synthesis actually removes the late dependency remains to be measured.
+Native synthesis leaves the late dependency in the worst path (see below).
 
 ### Why the exclusion is plausible, and its limit
 
@@ -168,8 +171,28 @@ reserve, 4 GiB live disk floor and 45-minute native timeout.
 After native closure and an independent source/DCP/DMA audit, it may launch
 one guarded, read-only original-clock timing comparison against the retained
 best **MEMDIV-QUERY 30.676729 MHz** checkpoint. It cannot retry synthesis,
-start placement/routing or deploy. At this update synthesis is running, so
-there is **no candidate Fmax result or 40 MHz claim**.
+start placement/routing or deploy. Both exact owners have now exited 0, and
+the coordinator's independent audits passed. **40 MHz was not achieved.**
+
+Synthesis closed at **19:27:58 UTC**, native runtime **1,966.720 seconds**,
+unchanged inputs, zero errors and no OOM. The inherited generated-PS8 XDC
+critical warning remains. Utilization is **185,256 LUTs / 54,438 FFs /
+277.5 BRAM36-equivalents / 47 DSPs**: **1,323 fewer LUTs and 503 fewer FFs**
+than the source parent, unchanged BRAM/DSP. Neither this nor the short
+CoreMark equality is a frequency or throughput gain.
+
+The timing owner `b2360d6fe40443afbd22a8d4e6d16edc` reports **−7.902 ns setup**,
+**−0.101 ns hold** in the core domain, giving **30.393289 MHz** under the
+original 25 ns constraint. The best retained MEMDIV-QUERY remains
+**30.676729 MHz**. These are unplaced estimates, not routed results.
+The new worst path has **113 logic levels**, from `eip_reg[0]` to
+`eip_reg[11]/D` (32.691 ns data-path delay). It still traverses frontend
+decode → V-branch lookahead → next-read AGU/DTLB/qualification →
+`core_mem_next_req` → paired-store readiness → backing write admission →
+shared ACK → `pipe_pair_eff` → EIP. Merely exposing the core's redundant
+read/store exclusion did not make that shared-port arbitration dependency
+disappear from the mapped netlist. Do not rerun this unchanged RTL expecting
+40 MHz; the next experiment must address that dependency explicitly.
 
 ### Timing-coverage follow-up before sign-off
 
@@ -179,7 +202,7 @@ zero unconstrained internal endpoints and zero combinational loops, but also
 `rk_ao486_bd_wrapper_stub.v` declares only `output [3:0] led`, matching the four
 physical LED assignments in `flow/hw/led.xdc`. Those outputs have no synchronous
 external receiver contract; do not invent clocked output delays for status LEDs.
-The eight unclocked objects still need identification. The parent fails hold in both
+The eight objects were subsequently identified below. The parent fails hold in both
 clock domains (-0.108 ns at 100 MHz, -0.101 ns at 40 MHz). These are unplaced
 results, not proof of a silicon hold failure, and are not waived.
 
@@ -194,8 +217,8 @@ Before routed sign-off, collect detailed object names with
 introduce blanket false paths to clear the counts. The relevant command
 contracts are AMD's [check_timing](https://docs.amd.com/r/2024.1-English/ug835-vivado-tcl-commands/check_timing)
 and [report_exceptions](https://docs.amd.com/r/2022.1-English/ug835-vivado-tcl-commands/report_exceptions).
-This follow-up has **not** been run and does not modify the currently pinned
-synthesis/report controllers.
+The follow-up has now run without modifying the pinned synthesis/report
+controllers; its closed findings are below.
 
 The detailed parent summary does expose a more specific unresolved internal
 case: a no-source-clock group covers **52 maximum-delay and 52 minimum-delay
@@ -218,6 +241,33 @@ and empty-DSP rejection. **These tests do not execute Vivado or resolve the
 reported timing debt.** Run the native diagnostic only after the existing
 synthesis and queued timing owners have closed, under the same exclusive
 Vivado/resource guard.
+
+`next-pair-cofactor-coverage-r1` closed successfully in **202.334 seconds**,
+unit invocation `2e03e96eb656406aae991d7a63d193ae`. The independent
+`audit_next_pair_coverage.py` audit rechecked every pinned input, the exact
+terminal owner and native resource receipts: **no OOM**, peak resident
+**4,164,399,104 bytes**, no swap. The native findings resolve the suspected
+missing-core-clock interpretation:
+
+- All **eight** `no_clock` objects are PS8 peripheral output pins:
+  EMIO ENET0–3 MDIO clocks, SDIO0–1 clock outputs and SPI0–1 clock outputs.
+  They are **not the multiplier's clock pins**. Their platform connectivity
+  still needs checking before routed sign-off; no exceptions were added.
+- All four missing-output-delay ports are exactly `led[0:3]`.
+- The two representative `ex_mul_p0__1/__2/DSP_A_B_DATA_INST` cells have
+  **AREG=1, BREG=0**, with CLK connected to the multiplier's core clock.
+  Vivado's installed `DSP_A_B_DATA.v` model (lines 496–502) selects combinational
+  B/BCIN for `B2_DATA` when BREG=0. These startpoint names do not establish live
+  unclocked B-register state. This is not a blanket waiver of primitive arcs.
+- Applied exception summary: **45 false-path constraints / 316 endpoints**,
+  **10 datapath-only maximum-delay constraints / 40 endpoints**, and **zero
+  multicycle-path constraints**. Inspect the retained coverage report for
+  individual scopes; these counts alone do not qualify CDC timing.
+- No unconstrained internal endpoints or combinational loops were reported.
+
+`prepare_next_pair_coverage.py` preserved the closed report controller's
+exclusive Vivado lifecycle, original clocks, timeout and memory/disk floors.
+This read-only diagnostic has not rerun synthesis, routed or deployed anything.
 
 The exported source includes an old `flow/hw/fpatan_mcp.xdc`, but the actual
 wrapper deliberately excludes it from `constrs_1` because its legacy
