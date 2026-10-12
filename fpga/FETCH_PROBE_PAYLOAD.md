@@ -168,9 +168,45 @@ Owner `ventium-fetch-probe-soc-oct12`, invocation
 preserves the guarded 32-job resource profile, 156 feature definitions,
 posted depth 16 and private harness/generated-header audit. The **98 inherited
 platform structural warnings remain unchanged**, not a clean SoC lint result.
-Source-matched hardware transfer, measured synthesis and full original
-standard-suite plus physical Win95/UI and Quake timedemo acceptance remain
-open. No synthesis, route or deployment is queued.
+Measured synthesis and full original standard-suite plus physical Win95/UI
+and Quake timedemo acceptance remain open.
+
+## Hardware export and timing admission
+
+The [hardware exporter](freeze_fetch_probe_rk_candidate.py) freezes **190
+payloads**, including **170 simulation-matched RTL/header files** and exactly
+the parent's ordered **158 hardware definitions**. Only
+`ventium/rtl/core/core.sv` changes. Clocks, wrappers, flow, posted depth 16 and
+cache configuration remain unchanged; the separate mouse overlay is not added.
+Manifest SHA-256:
+`6e8db80a61959c273141140c77d7c7351d38b19616557c12e19b9d9dc40c0ee0`.
+The Tcl source contract passes. Strict frozen-core lint closes native zero in
+**3.78 seconds**, with stable pins; owner `ventium-fetch-probe-lint-oct12`,
+invocation `de6a0512f1af496da4d7228957df88b7`. This is CPU-hierarchy lint,
+not a claim that the inherited full-SoC warnings are fixed.
+
+Both original cold **10-iteration CoreMark disks pass all five reference CRCs**
+in 200.53 / 197.78 seconds. Their 4,767,218 / 4,753,406 ticks and
+1,055,307 / 1,054,254 V retirements equal the parent: **0% cycle gain**.
+These short checks are not duration-valid scores or the full standard seeds.
+Owner `ventium-v-carry-cm10-fetch-probe-oct12`, invocation
+`5e1187da97324b6a9ea967d8fc32dc36`, is closed and reaped. The existing runner's
+historical `v-carry` name does not identify this candidate's RTL change; its
+receipt pins the new `b598f077` model. Independent audit rechecks **4,450 input
+pins**, actual CPU11 child affinity, complete CRCs, unmodified disks and no OOM.
+Audit SHA-256:
+`329ce7035634fc4ec6ca7ded46450d3c4d0a74b8b23225be37c5d31603636c95`.
+
+The [timing preparation](prepare_fetch_probe_synthesis.py) passes two tests
+of exact source identities, unchanged profiles and identical resource
+monitor/stop/reap code. It preserves the existing **8 GiB RAM / 6 GiB swap**
+caps, 13 GiB combined early stop, 2 GiB host RAM/swap floors and **4 GiB disk
+stop floor**. Synthesis admission still needs more than 6 GiB free and twice
+measured parent growth above that floor; no limit is relaxed. Its paired
+[queue](run_fetch_probe_timing.py) can only adopt the exact requested synthesis
+invocation, independently audit its native closure, then run the read-only
+clock audit. Audit success and the **at-least-40-MHz requirement** are separate
+fields. The actual Fmax remains unmeasured; no route or deployment is queued.
 
 ## Recoverable evidence compaction
 
@@ -193,6 +229,19 @@ before their unpacked copies are removed:
 Restore either with `tar -xzf ARCHIVE -C /home/yukidama/external/tmp`.
 Member/hash manifests, protected-input lists and closure receipts remain beside
 the archives. No active run's streams are removed.
+
+For the next synthesis reserve, seven explicitly closed older clock-audit
+folders have **105 report/TSV files** losslessly archived as
+`old-clock-reports.tar.gz`: **1,871,831,675 to 82,182,379 bytes**, SHA-256
+`a68ba01d6a1f1faba5b0c87479c482d0f93a851e796989e34e5617f5f1d24257`.
+All members are byte-verified before unlinking, owners are checked closed, and
+current/export/parent-timing pins remain intact. Historical audit reruns need
+the same `tar -xzf ... -C /home/yukidama/external/tmp` restoration first.
+Four unused, unpinned `.gch` compiler caches from this candidate's closed core
+and PC builds are also removed (**376,165,725 bytes**); rebuilding regenerates
+them. Models, source trees, generated headers and all current pins remain.
+Together these recover about **2.02 GiB**; no input archive or checkpoint is
+discarded.
 
 Gameplay baseline: **0.51030715 total U+V simulated retirement-event IPC**,
 older model `2b4d7a48`, cycles **1,200,065,237–1,300,065,237**. This candidate
