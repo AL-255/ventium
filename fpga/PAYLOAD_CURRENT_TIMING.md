@@ -116,7 +116,7 @@ as expected for cycle-preserving structural cuts. Ten-iteration diagnostics
 are neither duration-valid CM/MHz scores nor the full standard seeds.
 
 [The source exporter](freeze_payload_current_rk_candidate.py) publishes
-`payload-current-fpga-r1`: **190 payloads, 170 compiled non-wrapper units and
+`payload-current-fpga-r1`: **190 payloads, 170 simulator-matched non-wrapper RTL/header files and
 157 hardware definitions**, preserving the actual 40/100 MHz clocks and all
 previous features. Exactly the four checked interface files change. Manifest:
 `1f78fbf6d9384f8e79a558f25d6e2b9a2b3e3a7a286fd8100f3f8764daca87f2`;
@@ -167,6 +167,16 @@ Admission retains both the **6 GiB** minimum and twice the older measured
 parent's **1,456,762,880-byte** growth above the disk floor (a stricter
 **7,208,493,056-byte** admission threshold). The native timeout remains 45 minutes.
 No implementation, bitstream programming, or acceptance waiver is queued.
+
+The live native synthesis Tcl independently confirms the **exact 157 ordered
+definitions** and the requested part/mapper. All **147 frozen `read_verilog`
+inputs** rehash to the manifest; the only additional `read_verilog` input is
+the generated block-design wrapper. This is distinct from the exporter's 170
+simulator-matched files, which also preserve unused/alternative units. The
+initial ad-hoc preflight incorrectly equates these counts and rejects before
+performing its source checks; inspecting the actual Tcl and the parent's same
+148-entry read list resolves that checker assumption. It is not a missing-source
+or native-build failure. The completed native/DCP audit remains pending.
 
 ## Disk preservation
 
