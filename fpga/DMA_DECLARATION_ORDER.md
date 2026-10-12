@@ -1,6 +1,6 @@
 # DMA generated-scope wiring repair — October 12
 
-The current FPGA synthesis exposes a real platform bug: each `i8237.chan[i]`
+The FP-HIGH-VALID synthesis exposed a real platform bug: each `i8237.chan[i]`
 uses `reset` and `flip_flop` before their module-level declarations. Vivado
 creates **undriven local nets in each generate scope** (`Synth 8-3848`), rather
 than connecting those ports to the later controller-level signals. Icarus also
@@ -76,11 +76,23 @@ second Vivado job.
 These tests prove register programming and **stalled-transfer abort**, not all
 8237 transfer modes, normal transfer completion, audio or floppy compatibility.
 There is no physical-board pass, complete standard-suite pass or measured
-performance gain for this change yet. The current frozen FP-HIGH-VALID timing
-run still contains the old DMA source and is deliberately untouched. The next
-source-matched PC/FPGA candidate must carry this repair; check that Vivado no
-longer reports these eight undriven channel controls, then run the required
-full suite and physical Win95/Quake acceptance in UV+fast mode.
+performance gain for this change yet. The historical FP-HIGH-VALID export
+retains the old source. Its [backing-payload successor](BACKING_PAIR_PAYLOAD.md)
+now carries the repair in both the compiled PC model and frozen FPGA export.
+
+At **17:51:28 UTC on October 12**, that successor's synthesis closed native
+zero in **1,906.84 seconds**, with unchanged inputs and no OOM or resource stop.
+The independent audit checks **4,144 input pins**, all 158 hardware definitions
+and 148 native read-Verilog files. It confirms that **all eight old undriven
+DMA-control diagnostics are absent**. This is synthesis evidence for the
+declaration repair, not whole-DMA functionality, a clean-warning claim, timing
+closure or physical acceptance. The subsequent clock/path audit closes at
+**30.591330 MHz unplaced**, below the required 40 MHz and the retained best;
+there is no claimed frequency gain from this wiring repair.
+Evidence: `backing-payload-synthesis-r1/{closed,audit}.json` under the root above;
+native owner `ventium-backing-payload-synth-oct12.service`, invocation
+`821db0a58cad4ab7ab1526f00cd45435`. The full suite and physical Win95/Quake
+acceptance in UV+fast mode remain required.
 
 Current candidate gameplay IPC is unmeasured. The older simulated baseline is
 **0.51030715 total U+V retirement events/cycle**, build `2b4d7a48`, cycles

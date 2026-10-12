@@ -2,9 +2,10 @@
 
 Target: **at least 40 MHz synthesized Fmax**, UV+fast and full P5 caches.
 This change is implemented in a **private source-matched derivative** and has
-passed leaf/cache/AXI tests, whole-core regressions and whole-PC compilation. **Timing is unmeasured;
-it is not a release, standard-suite pass or FPGA acceptance.** The last timing
-candidate was 30.556744 MHz; the best retained result is 30.676729 MHz.
+passed leaf/cache/AXI tests, whole-core regressions and whole-PC compilation.
+Its closed **30.591330 MHz unplaced synthesized estimate is below 40 MHz and
+below the retained best 30.676729 MHz**. It is not a release, standard-suite
+pass or FPGA acceptance. The immediate predecessor was 30.556744 MHz.
 
 ## Measured problem and change
 
@@ -130,7 +131,7 @@ events. The sole console error is the expected **under-ten-second duration**
 failure; these are CRC/cycle preflights, not error-free standard-suite results
 or publishable CoreMark scores. The CPU lint owner also closed successfully.
 
-At **17:19:41 UTC**, one synthesis launches as
+At **17:19:41 UTC**, one synthesis launched as
 `ventium-backing-payload-synth-oct12.service`, invocation
 `821db0a58cad4ab7ab1526f00cd45435`; its single Vivado family is scope invocation
 `4e6cdc2a87054eea90d3783e1f3d42b2`. Admission rechecked the exact sources,
@@ -152,10 +153,75 @@ launch the read-only original-clock timing comparison against **MEMDIV-QUERY,
 the best retained 30.676729 MHz checkpoint**. It cannot launch another
 synthesis, placement, routing or deployment. Receipts and controllers reside
 in `backing-payload-synthesis-r1`, `backing-payload-clock-r1`, and
-`backing-payload-report-queue-{started,closed}.json` (closed receipt pending).
+`backing-payload-report-queue-{started,closed}.json`.
 
-**No Fmax for the new candidate is available yet.**
-Do not claim a timing gain from the source rewrite or passing equivalence tests.
+### Closed synthesis and clock audit
+
+At **17:51:28 UTC**, synthesis closes native zero in **1,906.84 seconds**.
+The exact controller is terminal with PID zero. The independent closure audit
+passes **4,144 pinned inputs / 158 hardware definitions / 148 native HDL files**,
+and confirms the eight old DMA generated-scope undriven diagnostics are absent.
+Peak scope memory is **8,589,766,656 bytes**, peak swap zero; there is no OOM,
+resource stop or source drift. The inherited PS8 scoped-XDC unknown-clock-pin
+warning and eight I-cache-bypass metadata set/reset warnings remain; no clean
+warning or full-SoC correctness claim is made.
+
+The queued read-only timing audit ran as
+`ventium-backing-payload-clock-oct12.service`, invocation
+`1f2b090e17d346499f4c3d8eeeb5b4dd`. It closes native zero at **17:59:44 UTC**
+in **491.24 seconds**; its independent audit checks **4,159 input pins**, native
+closure, original 100/40 MHz clocks and the best-parent checkpoint. Peak memory
+is **4,700,164,096 bytes**, zero swap and no OOM. Both the report owner and its
+coordinator are terminal, and the Vivado scope is empty. No implementation or
+deployment is started.
+
+| Result | Current candidate | Retained best MEMDIV-QUERY |
+|---|---:|---:|
+| Unplaced synthesized core estimate | **30.591330 MHz** | **30.676729 MHz** |
+| Core setup slack at 40 MHz | -7.689 ns | -7.598 ns |
+| LUTs | 186,579 | 186,766 |
+| FFs | 54,941 | 54,831 |
+| BRAM36 equivalents / DSPs | 277.5 / 47 | 277.5 / 47 |
+
+Core hold slack is **-0.101 ns**. The new estimate is **0.113% above its
+immediate predecessor but 0.278% below the retained best**; this is not a
+successful frequency optimization. The coordinator explicitly records
+`forty_mhz_synthesis_met: false`. The combined source delta includes the DMA
+wiring repair, so whole-design area changes cannot be attributed solely to
+backing payload preparation. No gameplay or CoreMark throughput gain is claimed.
+
+### Next measured target: lookahead in paired-memory readiness
+
+All 30 worst paths still end at `int_ret_eip` clock enables, but the dominant
+route has changed. The path now has **111 logic levels / 32.392 ns data delay**:
+6.161 ns logic and 26.231 ns estimated routing. The old route-extent/backing
+address/quad-credit sequence is no longer on this first critical path. It now
+traverses V decode/branch lookahead, next-address translation and permission,
+`mem_next_req`, L1 paired-memory readiness, paired request and general ACK.
+
+Selected first-path delays, subtracting the 2.902 ns launch-clock arrival:
+
+| Path point | Cumulative data delay |
+|---|---:|
+| V descriptor length | 12.269 ns |
+| V-branch lookahead selection | 15.425 ns |
+| Next-read request | 23.348 ns |
+| L1 paired-store readiness | 24.742 ns |
+| Core paired-store request | 25.899 ns |
+| L1 general ACK | 28.962 ns |
+| Interrupt return-PC enable | 32.392 ns |
+
+The next investigation is the read/store readiness exclusion
+`!(c_next_req && rd_match)` and its core producer. Do **not** simply remove
+this guard: the next lookup redirects the cache port and masks paired bank
+writes. First prove whether a real active read/store-pair candidate can coexist
+with any of the four next-request producers (AGI, reference, retained chain,
+raw priming). Pair *shape* alone is insufficient to justify suppressing a
+hint: an AGI clock can have decoded pair-shaped instructions without an active
+architectural memory request. A valid cut must preserve those useful hints,
+owner/cancellation rules, cache writes and actual U/V acceptance; require
+targeted contention microtests and full architectural comparison before a
+new synthesis. No replacement RTL cut is claimed here.
 
 The final requirements remain ≥40 MHz synthesized Fmax, routed timing,
 duration-valid CoreMark performance, the complete standard suite, and physical
