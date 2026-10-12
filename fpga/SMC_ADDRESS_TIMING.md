@@ -119,3 +119,13 @@ FreeDOS Quake timedemo are still required; FPGA acceptance must be physical.
 Gameplay baseline: **0.51030715 total U+V simulated retirement-event IPC**,
 older build `2b4d7a48`, cycles **1,200,065,237–1,300,065,237**. Neither the
 running timing candidate nor this proposed derivative has a gameplay result.
+
+## Deferred after the query-selector timing audit
+
+The [resident-query audit](PRIME_QUERY_PAYLOAD.md) subsequently closes at
+**30.676729 MHz**, still below 40 MHz. Its worst setup path now runs through
+backing-write ACK to immediate paired-load acceptance/GPR writeback; it does
+not traverse the second-snoop lookup. Consequently this SMC proposal remains
+uncompiled and unpromoted. The next selected experiment targets that measured
+[read-only ACK consumer](PAIR_NOW_READ_COMPLETION.md). Retain this proposal's
+proofs and caveats for a later report that actually makes its cone critical.

@@ -1,7 +1,7 @@
 # Resident-query payload selection — October 12
 
-**New synthesis running after exact-parent whole-core/PC preflight checks;
-canonical verification remains FAIL. No timing or FPGA acceptance.**
+**Synthesis/audit closed: 30.676729 MHz, below the 40 MHz requirement;
+canonical verification remains FAIL. No routed or FPGA acceptance.**
 The completed [load-ACK synthesis](LOAD_READ_ACK_TIMING.md) is unchanged and does
 not include this separate candidate. The target remains **at least 40 MHz
 post-synthesis Fmax** with UV, fast paths and full P5 caches. The last completed
@@ -232,12 +232,12 @@ memory-divide checkpoint and must reproduce its **−9.391 ns / 29.077375 MHz**.
 The [queue](run_memdiv_query_timing.py) cannot start/restart synthesis or
 deploy; it distinguishes audit completion from actual attainment of 40 MHz.
 
-Synthesis is **running**, launched October 12 at **12:45:58 UTC**, service
+Synthesis was launched October 12 at **12:45:58 UTC**, service
 `ventium-memdiv-query-synth-oct12`, invocation
-`8720fc70120341cd9bb0c85f20bc6938`. Its single owned Vivado family is confirmed
-active, scope invocation `6d6b2a938d314a669853f187fa1bf2cf`, with 8 GiB RAM,
+`8720fc70120341cd9bb0c85f20bc6938`. Its single owned Vivado family used
+scope invocation `6d6b2a938d314a669853f187fa1bf2cf`, with 8 GiB RAM,
 6 GiB swap and 48-task limits. Native outputs are in
-`memdiv-query-synthesis-r1`; no checkpoint or Fmax result is available yet.
+`memdiv-query-synthesis-r1`; the completed checkpoint/Fmax audit is below.
 Timing-queue invocation `2cf0d0fe3bfb4917a806bd3aa99a102a` adopts this exact
 owner, then audits native closure and runs the independent timing measurement.
 No routing or board programming is authorized by either controller.
@@ -251,4 +251,42 @@ not source files or model binaries.
 
 Gameplay baseline: **0.51030715 total U+V simulated retirement-event IPC**,
 older `2b4d7a48`, cycles **1,200,065,237–1,300,065,237**. This candidate is
-gameplay-unmeasured; no IPC or Fmax gain is claimed.
+gameplay-unmeasured; no IPC gain is claimed. The measured Fmax change is below.
+
+### Closed timing result and next measured dependency
+
+The synthesis above closes native zero in **1,999.33 seconds**, with all
+**2,785 input pins** checked and exactly the intended one-header difference.
+Peak guarded memory is 8 GiB, swap is zero, and no OOM/resource stop occurs.
+The source-matched mapper and clocks are unchanged:
+
+| Resource | Memory-divide parent | Query selector |
+| --- | ---: | ---: |
+| CLB LUTs | 186,597 | 186,766 |
+| Registers | 54,817 | 54,831 |
+| BRAM tiles | 277.5 | 277.5 |
+| DSPs | 47 | 47 |
+
+The independent clock/netlist audit closes native zero in **491.09 seconds**,
+invocation `f739dd7fce474279ae52ef4ab6414fad`, with **2,798 input pins** checked,
+peak memory 4,726,325,248 bytes and zero swap/OOM. It reproduces the original
+parent's **29.077375 MHz / −9.391 ns**, verifies actual 40/100 MHz clocks and
+reports the candidate at **30.676729 MHz / −7.598 ns**: **+5.50%** estimated
+Fmax, still **not 40 MHz**. Core hold slack is −0.101 ns. Neither result is
+routed sign-off or a measured physical clock; no bitstream is built/deployed.
+The inherited PS-IP `create_clock` synthesis warning is retained, not waived;
+the actual post-synthesis clock objects pass the independent audit.
+
+The 30 reported worst setup endpoints are now **19 GPR bits, 10 EIP bits and
+one retained V-read-valid bit**, instead of the parent's D-cache LRU bits.
+The worst path has **110 logic levels**, data delay **32.387 ns** (6.410 ns
+logic plus 25.977 ns unplaced estimated routing). It still traverses raw
+decode/AGU/DTLB, next-read eligibility, load/store-pair readiness, backing-write
+admission and the general ACK, then `pipe_v_pair_now_accept` and GPR writeback.
+
+The next selected experiment is therefore the
+[immediate paired-load read-ACK cut](PAIR_NOW_READ_COMPLETION.md), which changes
+that one read-only consumer to the existing fragment-qualified read ACK.
+The separately microtested [SMC address proposal](SMC_ADDRESS_TIMING.md) is
+**deferred**, not automatically compiled/synthesized: it does not remove the
+new worst path. Full canonical and standard/physical acceptance remain open.
