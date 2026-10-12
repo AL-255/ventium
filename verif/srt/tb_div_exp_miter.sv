@@ -38,7 +38,7 @@ module tb_div_exp_miter;
       if (old_done && old_result !== new_result)
         $fatal(1,"DIV_EXP_RESULT_MISMATCH sample=%0d old=%h new=%h",samples,old_result,new_result);
       // No inactive-state differences are permitted by this transformation.
-      // Verilator supplies two-state initial values; X/Z arithmetic is tested
+      // The simulator supplies two-state initial values; X/Z arithmetic is tested
       // separately by the source-derived Icarus helper gate.
       if ({control.mode_q,control.sign,control.ua,control.ub,control.d4,control.dfx,
            control.S,control.C,control.qacc,control.k,control.twoR,control.corrpos,

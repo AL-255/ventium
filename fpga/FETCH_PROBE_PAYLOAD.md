@@ -1,6 +1,7 @@
 # Early fetch-probe payload — October 12
 
-**Private RTL candidate; no measured Fmax, gameplay or FPGA acceptance yet.**
+**Private RTL candidate; 30.487805 MHz post-synthesis estimate, below 40 MHz.**
+No routed sign-off, gameplay measurement or FPGA acceptance.
 The immediate requirement remains **at least 40 MHz post-synthesis Fmax** in
 UV + fast-pipe mode with full P5 caches. The measured
 [load-ACK parent](LOAD_READ_ACK_TIMING.md) reaches **30.02192 MHz**.
@@ -206,7 +207,7 @@ measured parent growth above that floor; no limit is relaxed. Its paired
 [queue](run_fetch_probe_timing.py) can only adopt the exact requested synthesis
 invocation, independently audit its native closure, then run the read-only
 clock audit. Audit success and the **at-least-40-MHz requirement** are separate
-fields. The actual Fmax remains unmeasured; no route or deployment is queued.
+fields. No route or deployment is queued.
 
 Synthesis starts at **09:37:59 UTC**, owner
 `ventium-fetch-probe-synth-oct12`, invocation
@@ -215,8 +216,55 @@ under scope invocation `c8e488af8465470cb379644a66b4a10a`, with the unchanged
 8/6 GiB caps and 48-task bound. Evidence is `probe-synthesis-r1`; no competing
 heavy compile is active. Queue `ventium-fetch-probe-timing-queue-oct12`,
 invocation `a1ad35845ae54e5d9a686ab25770e8b6`, adopts exactly that synthesis
-and will write `probe-clock-r1` only after successful native closure and
-independent source/DCP audit. This is **in progress**, not a timing pass.
+and writes `probe-clock-r1` only after successful native closure and
+independent source/DCP audit. Starting either process is not a timing pass.
+
+Synthesis subsequently closes native zero in **1,929.58 seconds**, with all
+**4,841 input pins stable**, no OOM/resource stop and zero swap. Scope peak
+RAM is 8,589,930,496 bytes within the unchanged 8 GiB limit. The independent
+audit verifies the same 158 definitions, matched mapper and exactly the
+intended single-file RTL change. It reports 0 errors, 1 critical warning and
+1,559 warnings; this is not warning-free synthesis. The critical warning is
+the generated PS8 `clk_pl_0` create-clock target during synthesis. The separate
+project timing audit must still verify that the actual 100/40 MHz clocks exist.
+
+| Synthesized resource | LOAD parent | Fetch-probe candidate |
+| --- | ---: | ---: |
+| CLB LUTs | 183,333 | 187,066 |
+| CLB registers | 54,103 | 54,629 |
+| Block RAM tiles | 277.5 | 277.5 |
+| DSPs | 47 | 47 |
+
+Thus LUT/register usage increases in this matched experiment; no area gain is
+claimed. DCP SHA-256:
+`934c8741b51440be4dfda0bfacfa4f551d352cbc7482638836bce9342c5eb907`.
+Independent synthesis audit SHA-256:
+`2199f37080577b937033aff2e35cf795e14034754070fc3900e07aad75a06074`.
+The queue then starts `ventium-fetch-probe-clock-oct12`, invocation
+`7b2bc2c309e949aa99f4261f369a02c6`, under a new exclusive scope
+`eb8a624359c941d68b48176063c19912`. The synthesis owner is terminal and reaped.
+The clock audit subsequently closes native zero in **488.69 seconds**, with
+4,853 input pins stable, no OOM, 4,582,727,680-byte scope peak RAM and no swap.
+It confirms actual **100 MHz PL / 40 MHz core** clocks, no unresolved black
+boxes or structural DRC errors, and an unchanged parent checkpoint. Audit SHA:
+`2e4b5c7d84570dbac49585ce6106fc488a76e2f05fcdb9101e2fc5f7e327b673`.
+
+The measured unplaced core estimate is **30.487804878 MHz**, versus the
+matched parent's **30.021915999 MHz**: **+1.551829% Fmax**, not an IPC gain.
+Core setup slack is -7.800 ns and hold slack is -0.101 ns. All 30 worst setup
+paths still start at `q_pc[0]`; 27 end at SRT `ua`, three at SRT `S`.
+The worst path remains **119 logic levels / 32.589 ns data delay** (7.693 ns
+cell logic, 24.896 ns estimated unplaced routing). The divider input node is
+already reached at about 26.396 ns data-only arrival, so narrowing its exponent
+arithmetic must not be assumed sufficient on its own. Rebuilt hierarchy names
+are not proof of source-level ownership or module area attribution.
+
+The queue closes successfully as an audit workflow, but explicitly records
+`synthesized_40mhz_requirement_met=false`. **The frequency requirement fails.**
+No physical implementation or deployment was launched, and the canonical gate
+and full standard-suite/physical-board requirements remain open. The measured
+endpoint motivates the separate [divider experiment](SRT_DIV_EXP_WIDTH.md),
+not a claim that its still-unsynthesized change fixes this path.
 
 ## Recoverable evidence compaction
 
