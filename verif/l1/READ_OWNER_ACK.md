@@ -448,6 +448,39 @@ audit the full source closure, and run full-cache state/data comparisons and
 core/FP/fault regressions. Choose the next experiment from the fresh timing
 report; no timing or gameplay gain is inferred from this microtest.
 
+Two guarded **native cache runners are prepared, not executed**:
+
+- `run_intent_ready_pairs.py`: six full-P5 sequential A/B configurations
+  (both tag layouts, zero/one/two saved windows), plus missing-arbitration and
+  missing-credit negative controls. Both instances receive identical checked
+  intent and retain every original port/state/data comparison. Additional
+  checks cover fill ownership and saved payloads. Explicit intent without a
+  request must never write; dropping intent retains the original hint behavior.
+- `run_intent_ready_cache.py`: the exact fresh-core **152-define** profile,
+  requiring the pair matrix first. It retains the high-word/window/coherence
+  corpus and all **51 fresh-capture cases**. This runner has no additional
+  negative control; its prerequisite runs the two actual pair mutations.
+
+Both refuse live Vivado, retain the shared build lock (FD 9), 32 compiler
+jobs, six fatal structural warning classes, bounded child runtimes and disk
+admission. Closed compiler products use the existing byte-verified recoverable
+archive helper. Neither runner promotes production RTL or claims core, timing,
+standard-suite or hardware acceptance. Run the pair matrix with `--parent`
+pointing to the fresh FPGA L1 source and `--proof` to `intent-ready-proof-r1`;
+then the full-profile runner with `--parent fresh-pair-core-r1`, that same
+`--proof`, `--pairs` pointing to the closed matrix, and the pinned original
+`ventium-high-window-payload.WjAngfp4/tb_l1d_mem_chain.sv` fixture. Use distinct
+new scratch output directories and the `ipc_parallel32` guard after Vivado
+and its timing observer finish.
+
+**14 host tests passed** across `test_intent_ready_{cut,pairs,cache}.py` on
+2026-10-12. These check transformation boundaries, retained comparisons,
+native-run safety guards and fail-closed source admission. The closed leaf
+proof was re-audited from its native logs and hashes, including exact symbolic
+query text/results and a deliberately altered-transcript rejection. These
+are preparation/proof-evidence checks, **not sequential RTL execution**. The
+live synthesis inputs were not changed and no competing cache build launched.
+
 The canonical gate remains **7 PASS / 101 FAIL**, red and unwaived.
 Required next: achieve
 **≥40 MHz synthesized Fmax**, resolve canonical differential failures,
