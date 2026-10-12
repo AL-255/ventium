@@ -1,6 +1,6 @@
 # Combined divider normalization and paired-response timing cut
 
-**Private candidate, not yet synthesized or FPGA-qualified.** Target remains
+**Private candidate; synthesis running, not FPGA-qualified.** Target remains
 at least **40 MHz synthesized Fmax**, with UV, relocated/system fast pipes,
 fast loads/stores and full P5 L1 caches unchanged.
 
@@ -149,22 +149,52 @@ host tests cover the schema bug and rejection of incomplete, failed, changed or
 waived results. Resume owner `ventium-mc-pair-srt-resume-r2-oct12.service`,
 invocation `c14df51299514da5a6d0c8cd89748e67`.
 
-At **00:38 UTC on October 12**, the first unchanged ten-iteration CoreMark
-diagnostic seed closes native zero with its five expected CRCs and unchanged
-**4,767,218 ticks**. The validation seed is running under the same native owner
+Both unchanged ten-iteration CoreMark diagnostic seeds close native zero under
 `ventium-v-carry-cm10-mc-pair-srt-oct12.service`, invocation
-`4655a024d9b241f28e7c5d9173c23ce0`, explicitly pinned to CPU 11. These are **not
-duration-valid scores or full-suite acceptance**. The resumed queue requires
-independent CRC/source/owner audit, then a fresh hardware export and strict CPU
-lint. It cannot launch synthesis, placement, routing, bitstream or deployment.
+`4655a024d9b241f28e7c5d9173c23ce0`, explicitly pinned to CPU 11:
+
+| Diagnostic seed | Expected data CRCs, all matched | TSC ticks, unchanged from parent | Native seconds |
+| --- | --- | ---: | ---: |
+| Performance | `e9f5 e714 1fd7 8e3a fcaf` | 4,767,218 | 196.12 |
+| Validation | `18f2 e3c1 0747 8d84 c64e` | 4,753,406 | 197.72 |
+
+The independent CRC/source/actual-owner audit passes and all 643 started pins
+and 15 audit artifact pins independently rehash unchanged. Audit SHA-256:
+`b3b8771cda70da05e807f19b76952ab2a7c32a17f610ae62359310eb318946cc`.
+These are **not duration-valid scores or full-suite acceptance**; the short-run
+duration error is expected and the checker still requires every expected CRC.
+The resumed queue itself closes native zero, with no synthesis or deployment.
 
 [`freeze_mc_pair_srt_rk_candidate.py`](freeze_mc_pair_srt_rk_candidate.py)
 requires the actual compiled source closure, exact two tested transformations,
 190 retained payloads, 156 hardware definitions and unchanged 40/100 MHz clocks.
-Its three host recipe/guard tests pass; the hardware export itself is still
-pending the diagnostic runs. The separate timing-controller derivation preserves
-the closed parent's entire native monitor/stop/reap lifecycle and resource
-reserves, and compares against that parent's original DCP and clock constraints.
+Its three host recipe/guard tests pass. The actual export also closes native
+zero, invocation `03bfc938250f4a6bb5c2121c29f9bccc`; all 801 input pins and 190
+published payloads independently rehash. Frozen manifest SHA-256:
+`43e940607586e889fe85185d4a12effcc083a1f92b32b7130fc0704304fe48b7`.
+Strict frozen **CPU** lint closes native zero in 3.73 seconds, invocation
+`8023f209950f479d92e2325a9ff6e0f6`. This is not full-platform lint or acceptance.
+
+The separate [timing-controller derivation](prepare_mc_pair_srt_timing.py)
+preserves the closed parent's entire native monitor/stop/reap lifecycle and
+resource reserves, and compares against that parent's original DCP and clock
+constraints. Four host tests check the exact delta/parent, guard preservation,
+source-anchor drift rejection and invalid invocation rejection.
+
+At **00:41:39 UTC on October 12**, the actual Vivado family is admitted and
+observed running, not just queued. Synthesis controller:
+`ventium-mc-pair-srt-synth-oct12.service`, invocation
+`e84c6c6849f149b0a9b8a21c06f6e685`; guarded scope invocation
+`98bc42826fc44a6786fca6c0975ca6f7`. The native caps are 8 GiB RAM, 6 GiB swap,
+48 tasks, with 13 GiB combined early stop and existing host/disk reserves.
+One matched `logic_only` synthesis is followed by original-clock checkpoint
+reporting and independent audits, **not placement, routing or deployment**.
+Queue `ventium-mc-pair-srt-timing-queue-oct12.service`, invocation
+`cc78495efc6d41229c3f285d9223b767`, observes actual child closure. This mapper
+profile preserves `-no_timing_driven` for a comparable structural measurement;
+the clock constraint alone is not evidence of achieving 40 MHz. No result is
+available yet. Preparation receipt:
+`425b430cf9b6b6075d3310984ee7f8a503b9fb46a1f0f9001b37ba22cffd9481`.
 
 Disk admission was below the original synthesis reserve. A closed-artifact
 cleanup reclaims **1,418,747,904 allocated bytes (1.32 GiB)**: 814 verified
@@ -179,7 +209,7 @@ remain in `obsolete-compiler-backup-{plan,closed}.json` and
 growth-derived disk requirement and 4 GiB emergency reserve are unchanged.
 
 Canonical verification remains **FAIL**, not waived by the component checks.
-Combined-model differential/cycle checks, both original CoreMark correctness
+Complete differential/cycle gate closure, both original CoreMark correctness
 seeds, Win95 cold desktop/UI, full Quake timedemo and physical FPGA validation
 remain required. No new frequency or performance gain is claimed.
 
