@@ -415,6 +415,34 @@ whose System RAM ranges do not include `0xA0000000`. This confirms the non-RAM
 aperture prerequisite, not the actual PTE attributes, new mailbox capability or
 physical access ordering. No bitstream, register or guest state was changed.
 
+### Frozen FPGA controller profile
+
+The original wire tests used the default 8042 preprocessor configuration.
+The actual frozen FPGA profile also enables `VEN_KBC_FAST` and
+`VEN_KBD_AUTOACK`. The runner's new `--fpga-defines PATH/defines.txt` option
+pins that file, checks the controller's feature branches, and passes these two
+flags to both native Icarus compilations. Other SoC definitions are not claimed
+as exercised by this peripheral-only test. Three host tests reject missing,
+valued, duplicate, unsafe or unknown feature selections.
+
+The unchanged mailbox/wire scenario passes using the **actual memory-divide
+candidate's frozen `ps2.v`, FIFO and defines** at 3.125 and 40 MHz: 19 host
+commands / 46 delivered bytes at each clock, in **13.13 / 96.91 seconds**.
+The 14 policy tests and three intended mutation failures remain enabled.
+Independent closure checks rehash all 27 pins, inspect actual compile flags,
+count saved RX/TX lines, and verify the owner is terminal and children reaped.
+This closes a configuration-coverage gap; it does not demonstrate a newly
+repaired controller bug, physical mouse operation or end-to-end service use.
+
+Evidence: `external/tmp/ventium-ps2-mouse-policy.uuiwv3_z`, service
+`ventium-ps2-mouse-fpga-profile-oct12`, invocation
+`5cfcee8440b14430912b7cdb54ad3c2b`, native exit zero, actual CPU 12,
+26,120,192-byte peak, no OOM. Closure SHA-256:
+`67b04e8630f2567a08a4df07bdbf6b8634fa55deb2d3e0c1b68bde2521d28191`.
+Reproduce with the bounded mailbox-wire command above, adding
+`--fpga-defines` for the selected frozen export and using its matching
+`--platform-root`. No active synthesis input or board state was changed.
+
 ## Still required before physical mouse acceptance
 
 1. Integrate and qualify the prepared service/input client in the actual cold

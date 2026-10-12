@@ -6,6 +6,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import selectors
 import shutil
 import subprocess
@@ -18,10 +19,30 @@ def sha(path):
         return hashlib.file_digest(f, 'sha256').hexdigest()
 
 
+def kbc_defines(platform_text, definitions):
+    """Select the controller's actual feature flags from a frozen FPGA profile.
+
+    Other SoC definitions do not apply to this peripheral-only test. Refuse
+    unknown conditional branches rather than silently testing a new default.
+    """
+    consumed = set(re.findall(r'^\s*`(?:ifdef|ifndef)\s+(\w+)', platform_text, re.M))
+    expected = {'VEN_KBC_FAST', 'VEN_KBD_AUTOACK'}
+    assert consumed == expected, ('unreviewed 8042 feature flags', consumed)
+    tokens = definitions.splitlines()
+    assert tokens and len(tokens) == len(set(tokens))
+    assert all(re.fullmatch(r'[A-Z][A-Z0-9_]*(?:=[A-Za-z0-9_\x27]+)?', x) for x in tokens)
+    values = dict(x.split('=', 1) if '=' in x else (x, None) for x in tokens)
+    assert len(values) == len(tokens), 'duplicate define names'
+    assert all(name in values and values[name] is None for name in expected), 'FPGA KBC flags absent/valued'
+    return sorted(consumed)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--platform-root', type=Path, required=True)
     ap.add_argument('--mailbox', action='store_true', help='exercise retained CSR ownership between policy and serial transport')
+    ap.add_argument('--fpga-defines', type=Path,
+                    help='pin a frozen defines.txt and exercise its actual 8042 feature flags')
     args = ap.parse_args()
     assert __debug__
     repo = Path(__file__).resolve().parents[1]
@@ -45,11 +66,17 @@ def main():
               platform/'soc/ps2.v', platform/'common/simple_fifo.v', Path(__file__)]
     if args.mailbox:
         inputs.append(repo/'fpga/ven_ps2_mailbox.sv')
+    if args.fpga_defines:
+        inputs.append(args.fpga_defines.resolve(strict=True))
+    assert len({p.name for p in inputs}) == len(inputs), 'frozen input basename collision'
     pins = {str(p): sha(p) for p in inputs}
     for p in inputs:
         shutil.copyfile(p, source/p.name)
         assert sha(source/p.name) == pins[str(p)]
         pins[str(source/p.name)] = pins[str(p)]
+    definitions = (kbc_defines((source/'ps2.v').read_text(),
+                              (source/args.fpga_defines.name).read_text())
+                   if args.fpga_defines else [])
     tools = {name: str(Path(shutil.which(name)).resolve(strict=True)) for name in ('iverilog', 'vvp', 'python3')}
     pins.update({p: sha(p) for p in tools.values()})
     spec = importlib.util.spec_from_file_location('mouse_policy_frozen', source/'ven_ps2_mouse.py')
@@ -74,6 +101,7 @@ def main():
         return (root/(label+'.log')).read_text()
 
     save('started.json', dict(pins=pins, invocation=os.environ['INVOCATION_ID'], mailbox=args.mailbox,
+                             kbc_defines=definitions,
                              affinity=sorted(os.sched_getaffinity(0)), memory_before=events()))
     failure = None
     try:
@@ -105,6 +133,7 @@ def main():
             image = root/(label+'.vvp')
             command(label+'-compile', [tools['iverilog'], '-g2012', '-Wall',
                 '-s', 'tb_ps2_mouse_policy', '-Ptb_ps2_mouse_policy.HZ='+str(hz), '-o', str(image),
+                *['-D'+definition for definition in definitions],
                 *(['-DVEN_PS2_MAILBOX', str(source/'ven_ps2_mailbox.sv')] if args.mailbox else []),
                 *[str(source/name) for name in ('ven_ps2_device.sv', 'tb_ps2_mouse_policy.sv',
                                                 'ps2.v', 'simple_fifo.v')]])
@@ -219,7 +248,8 @@ def main():
     passed = failure is None and stable and after['oom'] == after['oom_kill'] == '0'
     save('closed.json', dict(passed=passed, error=failure, commands=rows, pins=pins,
         pins_unchanged=stable, memory_after=after, memory_peak=int((cg/'memory.peak').read_text()),
-        mailbox=args.mailbox, integrated_candidate=False, physical_board=False, standard_suite=False, gameplay_ipc=None))
+        mailbox=args.mailbox, kbc_defines=definitions,
+        integrated_candidate=False, physical_board=False, standard_suite=False, gameplay_ipc=None))
     print(json.dumps(dict(passed=passed, error=failure, evidence=str(root))), flush=True)
     return 0 if passed else 1
 
