@@ -200,6 +200,45 @@ Synthesis/timing, full standard suite and physical FPGA Win95/UI plus full
 Quake timedemo remain open. The canonical **7 PASS / 101 FAIL** gate is still
 an unwaived blocker, not superseded by these checks.
 
+### Additional memory-FDIV erratum witness during synthesis
+
+The leaf matrix varies the bug-selection flag but does not apply the classic
+failing operand pair through the new memory input stage. The new
+[fixture](../verif/issue_uv/memdiv-erratum.S) and
+[runner](../verif/issue_uv/run_memdiv_erratum.py) close that coverage gap using
+the already-built parent/candidate models, without an RTL rebuild or changes
+to synthesis inputs. Eight width/direction forms run with errata off/on and
+AXI latency 0/7, in both complete architectural and cycle trace modes:
+**128 native runs pass** in **10.63 seconds**. Owner invocation
+`7bf12978a1f6428383df69baddfaaeb9` is terminal/reaped, with unchanged pins.
+Four workers run on actual CPUs 4–7 under a separate 3 GiB/no-swap limit;
+observed peak memory is 52,989,952 bytes.
+
+M32, M64 and I32 use `4195835 / 3145727`; the clean result is independently
+computed by exact integer nearest-even rounding. Bug mode must produce the
+existing SRT gate's full extended result `3fffaab7f6392a768638` (not the older
+table-injection approximation ending `8800`). The narrow I16 control uses
+`29 / 7`, with the same quotient in either mode. Both divide directions must
+produce the intended numerator/denominator order.
+
+An [independent audit](../verif/issue_uv/audit_memdiv_erratum.py) rechecks all
+native argv/statuses, actual machine opcodes, all **832 candidate architectural
+records**, all A/B fields, the one-cycle latency budget, and **320 actual V
+retirements with same-clock U siblings**. Every run has nonzero L1 backing
+ACKs. Forty-eight opposite-erratum-result checks must reject the actual saved
+results. These remain directed numerical/A-B checks, not the full canonical
+oracle or a gameplay/performance result. Three host tests check the exact
+quotient oracle's ties-to-even/carry behavior and missing/wrong/duplicate
+witness rejection.
+
+The first launch (`memdiv-erratum-r1`, invocation
+`056f8daa592641c2ac247dee06a65699`) fails all eight assemblies because two
+preprocessor directives were joined to labels; no simulator ran. Its logs
+remain. Only the fixture syntax is repaired for R2. The first audit invocation
+uses the wrong trace-parser property (`header` instead of `mode`) and stops
+without writing a passing receipt; correcting that reader use allows the
+unchanged R2 traces to be independently checked.
+
 ## Disk reserve and receipts
 
 Twelve unused/unpinned compiler PCH caches from the six closed leaf attempts
