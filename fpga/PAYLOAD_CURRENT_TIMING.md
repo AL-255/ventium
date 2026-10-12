@@ -1,9 +1,10 @@
 # Combined I-fill, bank-overlap and payload-kind timing candidate
 
-October 12: **private candidate, not timing- or FPGA-qualified**. The immediate
+October 12: **private candidate, measured at 30.30487 MHz, not timing- or FPGA-qualified**. The immediate
 requirement is **at least 40 MHz post-synthesis Fmax**, retaining UV dual issue,
 system/relocated fast execution, fast loads/stores and full P5 L1s. The latest
-measured parent is still **28.88420323 MHz**, unplaced; no new Fmax is claimed.
+measured parent is **28.88420323 MHz**, unplaced. The matched candidate improves
+frequency **4.92%**, but remains below the required 40 MHz.
 
 The [exact-current recipe](../verif/l1/prepare_payload_current.py) combines:
 
@@ -131,14 +132,14 @@ Strict hardware-profile CPU lint closes native zero in **3.63 s** as
 `b89b28d17b324e0dac111285210f3df6`. The adapter preserves all structural-error
 classes and admits only the exact 157th flag. Full SoC lint is not claimed.
 
-Still required: new synthesis measurement, canonical correctness, full standard
-suite, and actual current-candidate FPGA Win95/UI and original Quake timedemo.
+Still required: a synthesis result meeting 40 MHz, canonical correctness, full
+standard suite, and actual current-candidate FPGA Win95/UI and original Quake timedemo.
 
-## Native synthesis in progress
+## Native synthesis and closed timing measurement
 
-At **2026-10-12 05:31:51 UTC**, the combined candidate starts its first native
-synthesis. There is **no new Fmax result yet**. The previous **28.88420323 MHz**
-measurement remains the baseline, below the requested **40 MHz**.
+Launch record, **2026-10-12 05:31:51 UTC**: the combined candidate starts its
+first native synthesis. At launch there is no new Fmax result; the previous
+**28.88420323 MHz** is the baseline. The closed result follows below.
 
 [The preparation recipe](prepare_payload_current_synthesis.py) derives five
 controllers/audits from the byte-pinned, completed PRIME logic-only experiment.
@@ -176,7 +177,73 @@ simulator-matched files, which also preserve unused/alternative units. The
 initial ad-hoc preflight incorrectly equates these counts and rejects before
 performing its source checks; inspecting the actual Tcl and the parent's same
 148-entry read list resolves that checker assumption. It is not a missing-source
-or native-build failure. The completed native/DCP audit remains pending.
+or native-build failure. The completed native/DCP audit is recorded below.
+
+### Closed result: 30.30487 MHz, still below 40 MHz
+
+Synthesis closes native zero at **06:03:28 UTC**, in **1,897.45 s (31m 37s)**.
+The source/DCP audit passes: all **4,661 input pins**, exact 157 definitions,
+148 native read inputs, original 40/100 MHz clocks and matched mapper. Utilization
+is **185,879 LUTs (+277), 54,598 registers (-68), 277.5 BRAM tiles and 47 DSPs**.
+Peak RAM is 8,589,930,496 bytes, swap zero, with no OOM or resource stop. The
+generated PS XDC clock-pin critical warning is unchanged; it is not ignored as
+proof of clock coverage. The subsequent native project audit checks the clocks.
+
+Timing closes native zero in **491.13 s** under
+`ventium-payload-current-clock-oct12.service`, invocation
+`96a978bfd1b5408cbbbd8952d504f67f`. Both stage owners and the queue are terminal
+zero, and the Vivado scope is gone. Independent rehashing checks all **4,123
+timing-input pins and 24 timing artifacts**. Actual clocks are 25 ns core /
+10 ns PL; no unresolved black boxes or checked structural DRC errors. Timing
+audit peak RAM is 4,568,969,216 bytes, swap zero, no OOM. This does not establish
+route/bus-skew/I/O timing sign-off.
+
+The measured post-synthesis estimate is **30.30486696 MHz**, from **-7.998 ns
+setup slack at 25 ns**, with **-0.101 ns hold slack**. The matched parent is
+28.88420323 MHz: **+4.91848% frequency**, not an IPC gain. The queue explicitly
+records `synthesized_40mhz_requirement_met=false`; synthesis/audit success is
+not a timing pass. No placement, routing or deployment has started.
+
+The strict full-clock parser checks all 30 setup paths: **14 SRT result-register
+synchronous-set endpoints and 16 SRT carry-register enable endpoints**. Worst:
+`q_pc[0] -> u_srt.result_q[64]/S`, **114 logic levels**, **32.688 ns data delay =
+7.373 ns logic + 25.315 ns estimated routing**. Named netlist markers are:
+
+| Through marker | Cumulative data delay |
+| --- | ---: |
+| Reference-decode length `d_len[3]` | 12.205 ns |
+| Last-byte DRAM route | 19.822 ns |
+| Shadow payload selection | 21.074 ns |
+| L1 read data | 21.907 ns |
+| SRT remainder setup `st210_in` | 31.197 ns |
+| Result register | 32.688 ns |
+
+These markers identify a mapped path, not exclusive RTL ownership. The source
+also shows an avoidable dependency: remainder setup uses the common SRT operand
+mux even though the shared top always supplies ST0/STi for FPREM/FPREM1. The
+[next isolated proposal](SRT_REM_OPERAND_SPLIT.md) separates those operand wires
+and moves carry initialization to its local IDLE state. No frequency gain is
+claimed for that unsynthesized proposal.
+
+The dedicated V-response capture path improves from **29.71415 to 31.91014 MHz**
+but still misses 40 MHz: **107 levels, 31.127 ns**, `eip[0] -> pipe_mem_v_hit_q/D`.
+It now traverses general backing/write ACK into the core's owner-clearing path,
+rather than the prior bank-readiness tail. The source's held-V invariant requires
+a live read-only U owner. A next candidate should qualify `mem_read_ack` for
+this clear consumer, retaining all abort/translation/terminal/reset priorities
+and leaving architectural ACK unchanged. Other priming profiles require separate
+proof. This is a proposed fix, not a completed implementation or false-path waiver.
+Both bottlenecks need attention before another synthesis is justified.
+
+Retained SHA-256 identifiers:
+
+- Synthesis audit: `460a5037cea2b2f7eec3fe31e695b7e351960a11fa413d27676d78b71ce54661`.
+- Synthesis closure: `26e41aacab84e434a4bfef0389d58b2a0f55cad609cdda89d658e331847214b3`.
+- Timing audit: `93028d471df11b853647d54e79b1f3a5ea0d7c5668fe9475063c98aecfcf1ac9`.
+- Timing closure: `05774a9fd166db0db390e3d92c50b89e15ac15c7fa99eff2519e02fdd8701e05`.
+
+Canonical `make verify` remains FAIL; complete current-candidate standard-suite
+and board validation remain unperformed. No current-candidate gameplay IPC.
 
 ### Hardware acceptance gap: hosted mouse
 
