@@ -24,6 +24,7 @@ class IntentReadyPairs(unittest.TestCase):
 
     def test_native_guard_and_mutations_retained(self):
         _,text=driver.derive();ast.parse(text)
+        self.assertEqual(ast.get_docstring(ast.parse(text),clean=False),driver.__doc__)
         for marker in ("pass_fds=(9,)","['pgrep','-x','vivado']",'shutil.disk_usage(root).free > 4*1024**3',
                        "'-j','32'","for w in range(3)","(True,2,'lookup')","(True,2,'credit')",
                        "recipe.caller_contract",'proof_pins.items()',"child.returncode != 0",

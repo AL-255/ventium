@@ -132,6 +132,7 @@ def derive():
     text=original.read_text()
     if hashlib.sha256(text.encode()).hexdigest() != LIFECYCLE_SHA256:
         raise ValueError('intent-ready native lifecycle drift')
+    text=replace(text,'"""'+ast.get_docstring(ast.parse(text))+'"""',repr(__doc__))
     # This import has no main side effects. The native lifecycle remains the
     # checked predecessor's; only source admission, fixtures and mutants vary.
     text=replace(text,'import prepare_pair_intent as recipe','import prepare_intent_ready_cut as recipe')

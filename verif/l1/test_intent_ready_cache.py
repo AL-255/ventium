@@ -9,6 +9,7 @@ import run_intent_ready_cache as driver
 class IntentReadyFullCache(unittest.TestCase):
     def test_exact_parent_full_profile_and_both_prior_gates(self):
         text=driver.derive();ast.parse(text)
+        self.assertEqual(ast.get_docstring(ast.parse(text),clean=False),driver.__doc__)
         for marker in ("MODEL='e1621913f28c5cd1c10b0c19f57bc59277807034dfb6b94a79bd7fe58d6a1a81'",
                        "len(defines)==152",'recipe.caller_contract',
                        "prior['pins'].items()",'paired.admit_proof(proof)',

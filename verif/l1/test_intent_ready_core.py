@@ -11,6 +11,7 @@ class IntentReadyCoreBuild(unittest.TestCase):
     def test_exact_parent_and_two_file_delta(self):
         self.assertEqual(cache.MODEL,'e1621913f28c5cd1c10b0c19f57bc59277807034dfb6b94a79bd7fe58d6a1a81')
         text=driver.derive();ast.parse(text)
+        self.assertEqual(ast.get_docstring(ast.parse(text),clean=False),driver.__doc__)
         for marker in ("len(files)==195",'recipe.caller_contract',
                        "['rtl/mem/ven_l1d.sv','rtl/mem/ventium_l1_axi.sv']",
                        'sorted(recipe.PARENTS)','len(definitions)==len(set(definitions))==152',

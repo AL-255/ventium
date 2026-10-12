@@ -41,6 +41,7 @@ def derive():
     text=(HERE/'run_fp_high_valid_cache.py').read_text()
     if hashlib.sha256(text.encode()).hexdigest()!=BASE_SHA:
         raise ValueError('intent-ready full-cache lifecycle drift')
+    text=paired.replace(text,'"""'+ast.get_docstring(ast.parse(text))+'"""',repr(__doc__))
     def change(old,new):
         nonlocal text
         text=paired.replace(text,old,new)

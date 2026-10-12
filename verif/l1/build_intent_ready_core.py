@@ -18,6 +18,7 @@ def derive():
     text=(HERE/'build_fp_high_valid_core.py').read_text()
     if hashlib.sha256(text.encode()).hexdigest()!=BASE_SHA:
         raise ValueError('intent-ready core build lifecycle drift')
+    text=replace(text,'"""'+ast.get_docstring(ast.parse(text))+'"""',repr(__doc__))
     def change(old,new):
         nonlocal text
         text=replace(text,old,new)
