@@ -1,7 +1,8 @@
 # Wide FP response qualification — October 12
 
 **Leaf/cache and directed whole-core checks pass; canonical verification remains
-FAIL. PC transfer and frozen CPU lint pass. No new Fmax, standard-suite or physical FPGA acceptance.** The target
+FAIL. PC transfer, frozen CPU lint and both short CoreMark preflights pass;
+synthesis is running. No new Fmax, standard-suite or physical FPGA acceptance.** The target
 remains **at least 40 MHz post-synthesis Fmax**, UV+fast, full P5 caches.
 
 The [paired-read experiment](PAIR_NOW_READ_COMPLETION.md) regresses from
@@ -151,11 +152,15 @@ The unchanged strict CPU-hierarchy lint passes in **3.78 seconds**, invocation
 `4bb32c02aa074456b6d704f54f505e34`; all six structural warning classes remain
 errors and the 158 hardware definitions are checked exactly.
 
-The original two short CoreMark seed preflights are running, invocation
-`7a81001e15664b778e632b692f44bc24`. They cold boot the unchanged disks through
-the real posted-16 RTL bridge; neither a duration-valid score nor the full
-standard suite is claimed. Complete and independently audit both before
-launching synthesis. [The timing coordinator](run_fp_high_valid_timing.py)
+The original two short CoreMark seed preflights close **PASS**, invocation
+`7a81001e15664b778e632b692f44bc24`. Both cold boot unchanged disks through the
+real posted-16 RTL bridge and match all five reference CRCs. Benchmark ticks
+remain **4,767,218 / 4,753,406**; actual V retirements are
+**1,055,307 / 1,054,254**. Native runtimes are **208.33 / 208.50 seconds**.
+The independent audit rechecks **3,484 source/input pins**, native argv,
+actual CPU affinity, complete consoles, ownership/reaping and zero OOM events.
+Neither a duration-valid score nor the full standard suite is claimed.
+[The timing coordinator](run_fp_high_valid_timing.py)
 can adopt only the exact launched synthesis invocation; it never restarts a
 failed run and records the 40 MHz threshold separately from audit success.
 
@@ -168,10 +173,34 @@ Restore these streams with `tar -xzf closed-fp-high-valid-regression-text.tar.gz
 PCH files and historical timing/branch text are also retained in verified
 archives; no DCP or model binary was removed.
 
+The first synthesis-controller admission stops **before launching Vivado**:
+free space exceeds 6 GiB but fails the additional twice-parent-growth reserve.
+The retained failure is `fp-high-valid-synthesis-r1/admission-failed-r1.json`,
+invocation `b21090b465ca4835ba73020673bbed8b`. The unchanged rule requires
+**7,208,493,056 bytes**, based on **1,456,762,880 bytes** of measured parent
+growth plus the 4 GiB live floor. It is not weakened. Separate cleanup removes
+**40 obsolete compiler-cache archives / 955,356,712 bytes**, after checking
+their PCH-only contents, no live users and no current pins. These old cache
+archive bytes are not recoverable, but the compiler caches are regenerable;
+`obsolete-pch-prune-{plan,closed}.json` records exact targets. All actual
+source/model/trace/checkpoint evidence remains. New candidate PCH archives are
+retained. Earlier lossless cleanup in this round recovered **2,373,542,373
+bytes** and remains reversible.
+
+The same unchanged controller is explicitly retried after that terminal
+pre-launch failure and additional cleanup. It admits at **7,541,096,448 free
+bytes** and launches the single native Vivado family at **15:50:21 UTC**:
+controller invocation `af417b8fd0ce45cabd18a926c3a041f2`, scope invocation
+`6152d90e3fcb4d86b1634897cf7dde71`, **3,872 pinned inputs**, 8 GiB resident /
+6 GiB swap caps and unchanged live reserve guards. The synthesis coordinator
+is `ventium-fp-high-valid-synth-oct12`; the independently queued timing audit
+is `ventium-fp-high-valid-timing-queue-oct12`, invocation
+`3762068731c449f7ad25d7502e2289e6`. No route or deployment is launched.
+
 Then require >=40 MHz synthesized Fmax, routed closure and physical UV-fast
 Windows 95 cold desktop/UI and original FreeDOS Quake full timedemo validation,
-as well as the full standard suite and differential gates. No synthesis or
-deployment of this derivative has been launched.
+as well as the full standard suite and differential gates. A running synthesis
+or completed audit alone does not prove the frequency requirement.
 
 Gameplay baseline: **0.51030715 total U+V simulated retirement-event IPC**,
 older build `2b4d7a48`, cycles **1,200,065,237–1,300,065,237**. This candidate
