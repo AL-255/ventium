@@ -1,7 +1,7 @@
 # Resident-query payload selection — October 12
 
-**Exact-parent whole-core build and directed comparisons pass; canonical
-verification remains FAIL. No timing or FPGA acceptance.**
+**New synthesis running after exact-parent whole-core/PC preflight checks;
+canonical verification remains FAIL. No timing or FPGA acceptance.**
 The completed [load-ACK synthesis](LOAD_READ_ACK_TIMING.md) is unchanged and does
 not include this separate candidate. The target remains **at least 40 MHz
 post-synthesis Fmax** with UV, fast paths and full P5 caches. The last completed
@@ -131,8 +131,8 @@ Model SHA-256:
 `e65a06e1e3c26d48723bdeb0d9d97061879f15b1ff916e493d4fe94ae336a525`.
 Service:
 `ventium-memdiv-query-core-oct12`, invocation
-`a01d2a23cf2a4285a37650e4d1cad8f1`. No synthesis of this new derivative is
-queued. Timing, gameplay and physical acceptance remain unmeasured.
+`a01d2a23cf2a4285a37650e4d1cad8f1`. Timing, gameplay and physical acceptance
+remain unmeasured; the subsequent synthesis launch is recorded below.
 
 ### Same-parent whole-core checks
 
@@ -212,12 +212,15 @@ Manifest SHA-256:
 Strict **CPU-hierarchy lint passes** in 3.78 s, invocation
 `d325f58b68504a508c7ab7f6ea040469`; the six structural classes remain errors.
 
-Both original 10-iteration CoreMark preflight seeds are running under
+Both original **10-iteration CoreMark preflight seeds pass** under
 `ventium-fp-exec-cm10-memdiv-query-oct12`, invocation
-`d47f25f33bed4ac8aa5a509a13a5ab7d`. The first seed has passed all five CRCs
-and exactly **4,767,218 ticks**, with 1,055,307 actual V retirements.
-The second seed is still pending. These are neither duration-valid scores
-nor full standard-suite seeds.
+`d47f25f33bed4ac8aa5a509a13a5ab7d`. Both have all five correct CRCs and
+exactly **4,767,218 / 4,753,406 ticks**, with **1,055,307 / 1,054,254 actual
+V retirements**. They close in 206.73 / 206.64 seconds. The independent audit
+rechecks 2,394 source pins, exact native argv/CPU11 affinity, real posted-16
+board AXI profile, process closure and zero OOM events. These are neither
+duration-valid scores nor full standard-suite seeds; no throughput gain is
+claimed.
 
 The [new synthesis preparation](prepare_memdiv_query_synthesis.py) and two
 passing preparation tests retain the exact closed controller lifecycle:
@@ -228,7 +231,16 @@ real clocks are unchanged. The independent timing audit compares the original
 memory-divide checkpoint and must reproduce its **−9.391 ns / 29.077375 MHz**.
 The [queue](run_memdiv_query_timing.py) cannot start/restart synthesis or
 deploy; it distinguishes audit completion from actual attainment of 40 MHz.
-No new synthesis has been launched yet.
+
+Synthesis is **running**, launched October 12 at **12:45:58 UTC**, service
+`ventium-memdiv-query-synth-oct12`, invocation
+`8720fc70120341cd9bb0c85f20bc6938`. Its single owned Vivado family is confirmed
+active, scope invocation `6d6b2a938d314a669853f187fa1bf2cf`, with 8 GiB RAM,
+6 GiB swap and 48-task limits. Native outputs are in
+`memdiv-query-synthesis-r1`; no checkpoint or Fmax result is available yet.
+Timing-queue invocation `2cf0d0fe3bfb4917a806bd3aa99a102a` adopts this exact
+owner, then audits native closure and runs the independent timing measurement.
+No routing or board programming is authorized by either controller.
 
 For disk headroom, six closed historical timing-report sets are losslessly
 archived as `memdiv-query-reserve-reports.tar.gz`: 1,602,557,831 original bytes,
