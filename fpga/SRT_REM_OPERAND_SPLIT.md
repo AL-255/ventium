@@ -1,8 +1,10 @@
 # SRT remainder operand isolation — October 12
 
 **Private directed-tested candidate; canonical, timing and FPGA qualification incomplete.**
-The latest measured FPGA candidate is **30.30487 MHz**, below the required
-**40 MHz**; see [the completed timing audit](PAYLOAD_CURRENT_TIMING.md).
+This candidate's completed post-synthesis, unplaced estimate is **29.69650 MHz**,
+below the required **40 MHz** and about **2.01% slower** than its
+[30.30487 MHz parent](PAYLOAD_CURRENT_TIMING.md). The area reduction below is
+not a timing improvement or an accepted FPGA fix.
 
 ## Structural change
 
@@ -237,11 +239,28 @@ Independent synthesis audit SHA-256:
 
 The queue `ventium-rem-split-timing-queue-oct12`, invocation
 `86989d99845a4c3dadbb123d648f1e71`, admits the native clock audit only after
-that closure. `ventium-rem-split-clock-oct12` is now running under invocation
+that closure. `ventium-rem-split-clock-oct12` closes under invocation
 `f80241e0860b47f99e59a1e49b09a2e0`. Evidence is in `synthesis-r1`, `clock-r1`
-and `timing-queue-r1` beside the tests. At this entry there is **no new audited
-Fmax measurement**; 30.30487 MHz remains below 40 MHz. No implementation or
-deployment is queued.
+and `timing-queue-r1` beside the tests. The audit takes **491.35 s**, exits zero,
+and independently rechecks 4,333 input pins. Actual core/PL clocks are 40/100 MHz;
+there are no black boxes or checked structural DRC errors. Peak RAM is
+4,588,265,472 bytes, swap zero, with no OOM. Audit SHA-256:
+`1d4aff92ac2e3011981c139a4c01bb527a26d48f5509988f3a76f64911f6d565`.
+
+The measured setup slack is **-8.674 ns at 25 ns**, giving **29.69650175 MHz**;
+unplaced hold slack is -0.101 ns. The queue's `passed=true` means the audit
+process completed successfully, not timing acceptance:
+`synthesized_40mhz_requirement_met=false`. No implementation or deployment is
+queued.
+
+The new worst path runs from `eip_reg[0]` to `int_err_reg[*]/CE` through
+**117 logic levels**. Data delay is 33.377 ns (6.493 ns logic plus 26.884 ns
+estimated routing). The path crosses decode, memory-chain priming, paired-store
+readiness, general backing/L1 ACK, fragment gating and far-load fault control.
+Seventeen of the top thirty paths end at the interrupt-error enable; none of
+those thirty ends at SRT state. The separately measured V-capture slack also
+regresses to -7.824 ns from -6.338 ns. Moving the worst endpoint is not proof
+of improved timing.
 
 The matched `Default -no_timing_driven` mapper, real 40/100 MHz constraints,
 UV+fast mode and full P5 caches are unchanged. RAM/swap remain capped at 8/6 GiB,
@@ -249,7 +268,10 @@ combined early stop 13 GiB, host floors 2 GiB, disk floor 4 GiB. The unchanged
 7,208,493,056-byte conservative disk admission passes at 7,279,157,248 bytes;
 no resource limit was raised to admit this run.
 
-Next: close the clock audit and measure both critical paths against 40 MHz.
+Next: remove the unnecessary general/write ACK dependency from the read-only
+S_LOAD, S_LOAD2 and S_FLOAD completion consumers, with active read-owner/ACK
+equality assertions and whole-core fault, page-crossing and cycle comparisons.
+The prepared change is not yet timing-qualified and adds no cycle or new mode.
 Canonical correctness, full standard suite and actual FPGA Win95/UI and Quake
 timedemo remain required; none is waived by the directed tests. The inherited
 hosted-mouse hardware gap described in the parent timing audit also remains.
