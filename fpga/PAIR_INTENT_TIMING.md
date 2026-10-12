@@ -109,10 +109,14 @@ original filelist closure (117 units / 49 include edges). Manifest SHA-256:
 The Tcl source contract passed. Strict **CPU-hierarchy** hardware-profile lint
 passed in **3.878 seconds**; this is not a full-SoC lint or timing pass.
 
-The two unchanged short cold CoreMark seeds are running under exact invocation
-`d9a1f4cead2a488ebb394708db8191f3`, CPU 11. Their purpose is CRC and exact
-parent/candidate cycle comparison, not duration-valid scoring. They must close
-and pass the independent audit before synthesis starts.
+The two unchanged short cold CoreMark seeds closed under exact invocation
+`d9a1f4cead2a488ebb394708db8191f3`, actual CPU 11 affinity. Independent audit
+rechecked 3,001 source pins, native arguments/owners, clean child termination
+and no OOM. Both sets of CRCs match QEMU; **4,767,218 / 4,753,406 cycles** and
+**1,055,307 / 1,054,254 V retirements** match the parent. Thus measured cycle
+throughput gain is **0%**, as intended for a physical timing change. The runs
+are below CoreMark's minimum duration and print its expected duration error:
+they are **not** valid scores or error-free standard-suite acceptance.
 
 Reproduction tools:
 
@@ -125,10 +129,29 @@ Reproduction tools:
 - `test_pair_intent_transfer.py`: four tests check every intended transformation
   and rejection of omitted, extra or unrelated byte changes.
 
-Synthesis/timing and routed/physical acceptance remain outstanding. The standard
-suite and gameplay performance have not been run on this candidate.
-Do not launch a new Vivado synthesis before those source/profile checks and
-the unchanged disk/memory reserve admission pass. Keep a single Vivado family.
+## Native timing run started
+
+All source/profile, replay, short-seed and reserve admission checks passed.
+One native synthesis started at **2026-10-12 20:08 UTC**, controller invocation
+`a6586063f10c4bb1ae08172c6ba3aab0`, owned Vivado scope
+`c8c65f49b70c48c890b30ef35297dedf`. Evidence is under
+`pair-intent-synthesis-r1`; it is not a closed timing result yet.
+
+The matched mapper and original 40/100 MHz clocks are unchanged. Resource
+guards remain one worker, 8 GiB resident / 6 GiB swap limits, 13 GiB combined
+early stop, 2 GiB host RAM/swap floors and 4 GiB live disk floor. Admission
+also retained the twice-measured-parent-growth disk reserve. No OOM reserve
+was relaxed to launch this run.
+
+The exact-owner observer `report_pair_intent_timing_after_synth.py`, invocation
+`3bf6984f86ea48f888bbcb02cf0c61c4`, waits only for this synthesis, independently
+audits its closure, then launches one original-clock timing report and audits
+its measured Fmax. It cannot retry synthesis, start placement/routing or
+deploy. An observation timeout is not permission to restart the native owner.
+
+Synthesized Fmax, routed/physical acceptance, the standard suite and gameplay
+performance remain unmeasured on this candidate. **40 MHz is not yet achieved.**
+Keep a single Vivado family; do not change or prune its pinned inputs.
 
 Closed cache compiler products are stored in per-case verified
 `compiler-products.tar.zst` archives; binaries, headers, source and native
@@ -144,6 +167,12 @@ Sources, binaries, images and result receipts remain unpacked, including the
 failed first cache experiment. Exact recovery manifests/hashes are in the
 adjacent `*-plan.json`, `*-verified.json` and `*-closed.json` files. Restore
 archives relative to the evidence root before rerunning raw-trace collectors.
+After both PC seeds and their audit closed, the two PC compiler PCH files were
+compressed to adjacent `.gch.gz` files and their decompressed hashes verified
+before removing only the unpacked copies (**152 MiB** recovered). The exact
+files, hashes and sizes are in `pair-intent-pc-pch-closed.json`; restore with
+`gzip -dk` if a future incremental rebuild needs them. Sources, matching headers,
+objects, binary and runtime evidence remain; every pinned input still matches.
 
 Candidate gameplay IPC is **unmeasured**. Older verified simulation baseline:
 **0.51030715 total U+V retirement-event IPC**, model `2b4d7a48`, cycles
