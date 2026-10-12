@@ -284,8 +284,11 @@ Full FP `ventium-fresh-pair-fp-oct12` (`fddb7f232e1741559f1cbffd8b997918`)
 **closed successfully in 67.579 seconds**: **384 fixtures / 1,536 native
 measurements / 768 zero-cycle-delta comparisons**, actual AXI latencies 0 and 7.
 Independent checks confirmed the closed owner and all 13 input pins. The
-eight-corpus A/B checks are running under the shared heavy-job guard as
-`ventium-fresh-pair-checks-oct12` (`2281576132ce48ea8e8e7cf3565f34b2`).
+eight-corpus A/B checks `ventium-fresh-pair-checks-oct12`
+(`2281576132ce48ea8e8e7cf3565f34b2`) **closed successfully in 303.706 seconds**:
+**4,240 native probes**, with coverage identical to READ-OWNER: 21,190,336
+clocks, AGI 18,172, reference 24,352, retained 0, prime 282,808, intent 5,616,
+request 3,072, accept 1,872 and shape-only 1,536.
 
 Six source-transfer tests pass for the new `build_fresh_pair_soc.py` /
 `freeze_fresh_pair_rk_candidate.py` recipes: they match the actual tested core
@@ -294,7 +297,34 @@ unrelated changes. Five synthesis-preparation tests also pass. They preserve
 the closed READ-OWNER native lifecycle, original 40/100 MHz clocks, full
 FP/fault/replay/CoreMark requirements and resource floors. Source/area control
 is READ-OWNER; the independent timing control remains the better PAIR-INTENT
-checkpoint. These are preparation tests, not a PC build or a Vivado launch.
+checkpoint. These tests alone do not establish hardware acceptance.
+
+The full-PC build `ventium-fresh-pair-soc-oct12`
+(`58f090d1d4974b90a228998c000fdafe`) **closed successfully in 23.574 seconds**:
+102 shared core/FP sources, one deliberate L1 delta, 156 simulation defines,
+and 16 posted-write slots. Model SHA-256:
+`bb5a251dd9e5e21c54450dad145993007921f0482f7edf778a10a9c16be9eb20`.
+All 3,677 input pins were independently rehashed. The inherited **98 full-SoC
+structural warnings remain unchanged**; this is not clean full-SoC lint.
+
+The FPGA export contains 190 payloads, 170 HDL files and 158 hardware defines,
+with unchanged 40/100 MHz clocks and full P5 caches. Manifest SHA-256:
+`0c767b0435e78a86aa0f61907dff21f9a2184aedea071d209a1230eb10e4ced7`.
+Independent rehashing checked all 190 payloads and 3,873 input pins. Strict
+CPU-hierarchy lint `ventium-fresh-pair-lint-oct12`
+(`edc2bd61b3ca4b4fb1516500a76e6444`) **closed successfully in 3.778 seconds**;
+its 195 pins were independently rechecked. It is not full-SoC lint or FPGA
+qualification.
+
+Both cold **10-iteration** CoreMark diagnostic seeds
+`ventium-v-carry-cm10-fresh-pair-oct12`
+(`fd4ce700cf9e4337a1f638ac2f1cc80e`) closed successfully and were independently
+audited: performance **4,767,218** ticks, validation **4,753,406** ticks,
+identical to the control, with matching reference CRCs. Actual V retirements
+were 1,055,307 / 1,054,254; the real posted AXI backend was active. All 3,719
+source pins were rehashed, both native children were reaped, and no OOM occurred.
+These runs are **duration-invalid**, not accepted scores or a standard-suite
+pass. They show no measured cycle regression from this timing-only change.
 
 Before compaction, all **208,128 candidate FP records** were independently
 recompared against QEMU and the control. The **11,916** closed text artifacts
@@ -308,8 +338,63 @@ The failed cache-R2 compiler intermediates were likewise archived with the
 existing byte-checked helper; its native failure log, test binary and original
 fixture remain unpacked. See its `compiler-compaction.json` for restoration.
 
-No fresh candidate synthesis, routed or gameplay result is claimed. The wider
-FP/fault driver is prepared but not launched yet. The last synthesized
+Closed eight-corpus text is preserved as `closed-fresh-pair-checks.tar.gz`:
+38,352 entries, **969,164,582 → 87,624,096 bytes**, SHA-256
+`9efbb5da38699d639323321f4c36272de3f2e54a3ba7c7368068644d2a07e55f`.
+An additional 156,580 unpinned per-case products from five older closed runs
+are recoverable in `closed-case-products.tar.gz`, SHA-256
+`fc820215a03c68b9b9164db9309b3a55ad8b71e641f577c039d6ab96c000eb0e`;
+all 3,937 protected current pins were preserved. Both restore into the
+`ventium-load-read-ack.GyWDDtiI` scratch directory. Source fixtures, native
+models and aggregate receipts remain unpacked.
+
+The closed fresh-PC and directed-core compiler PCH caches were byte-verified
+in adjacent `.gz` copies before removing the unpacked copies, recovering
+**159,407,036** and **155,145,803 bytes**, respectively.
+Ten verbose cone/cell-inventory reports from three closed timing comparisons
+are recoverable in `closed-cone-reports.tar.gz`, **559,196,131 → 24,016,787
+bytes**, SHA-256
+`12862ca4a8bce88e47246d59b135774b0f5b7d323cc190e9744fba4198efc980`.
+Restore that archive into `/home/yukidama/external/tmp` before rerunning those
+historical report audits. Critical-path reports, DCPs, project/clock inputs,
+native closure receipts and current protected pins remain unpacked.
+
+The wider **12-phase FP/fault/replay run closed successfully in 607.420
+seconds**, controller `ventium-fresh-pair-regressions-oct12`
+(`255ffa88e48c43f9bdb2e7c3b97c6953`; nested build scope
+`23155721e38e49568930b3d86f15526e`). Independent checks rehashed 3,088 root
+inputs, every phase's input pins and all 12 result receipts. Coverage includes
+six boundary matrices, 32 fault measurements, integer, memory, held-response,
+branch and **108-program / 80,800-record same-input replay**. The canonical
+gate remains red; replay equality does not replace it.
+
+Closed regression text is recoverable from
+`closed-fresh-pair-regressions.tar.gz`: 37,112 entries,
+**997,530,444 → 86,085,832 bytes**, SHA-256
+`b40842b18f5f91e26574044335b74e97c308a1ab46c1b302520213a70932e4fb`.
+Unpinned per-case products from the two closed fresh suites are preserved in
+`closed-fresh-pair-case-products.tar.gz`: 62,528 entries,
+**188,156,515 → 11,204,254 bytes**, SHA-256
+`928f4e5a2fac86d4fb1638570b40d7b991e27a46311b0cf78073a52374297628`.
+All 4,540 protected pins, including each phase's inputs, remained unchanged.
+Both archives restore into `ventium-load-read-ack.GyWDDtiI`; restore before
+reopening archived per-case evidence. Every archived member was byte-verified
+before deleting its unpacked copy.
+
+**Fresh synthesis launched on 2026-10-12 at 23:00 UTC** as
+`ventium-fresh-pair-synth-oct12`
+(`9b6fbfe5476145ed986aa5b0ac56ae31`), with the sole guarded Vivado family
+`dca1ede960cc46cc87c11abc5cdd96d5`. Disk headroom exceeded the unchanged
+admission bound (**more than 7,208,493,056 bytes free**). Limits remain 8 GiB
+RAM / 6 GiB swap, 13 GiB combined early stop, 4 GiB live disk floor and one
+Vivado family. The original 40/100 MHz clocks and matched logic-only mapper
+are unchanged. Observer `ventium-fresh-pair-report-queue-oct12`
+(`b0801720945c41daadeb70d778c956b8`) tracks that exact synthesis invocation,
+then independently audits the native result and original-clock timing;
+it cannot retry synthesis, implement or deploy.
+
+No fresh candidate synthesis **result**, routed or gameplay result is claimed.
+The last completed synthesized
 candidate is still READ-OWNER at **31.040477 MHz**; best remains PAIR-INTENT
 at **31.651579 MHz**, both short of the required **40 MHz**.
 
