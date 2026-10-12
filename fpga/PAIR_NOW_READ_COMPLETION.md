@@ -1,9 +1,9 @@
 # Immediate paired-load completion cut — October 12
 
-**Private core/PC candidates built; immediate-path and broader directed checks
-pass. Frozen CPU lint and both short CoreMark preflights pass. Synthesis is
-running; canonical remains FAIL. No candidate
-timing, gameplay, standard-suite or physical acceptance.** The
+**Synthesis and independent audit closed: 29.953572 MHz, a regression from
+30.676729 MHz. Directed checks, frozen CPU lint and short CoreMark preflights
+pass; canonical remains FAIL. No gameplay, standard-suite or physical
+acceptance.** The
 immediate target remains **at least 40 MHz synthesized Fmax**, UV+fast mode and
 full P5 caches. The measured parent is now **30.676729 MHz**, not a timing pass.
 
@@ -212,7 +212,28 @@ The independent audit queue adopts that exact owner as
 `ventium-pair-now-read-timing-queue-oct12`, invocation
 `33ed67c8cca54f5593b609e736078146`. It cannot restart synthesis and only starts
 the read-only timing comparison after verified native synthesis closure.
-No new Fmax result, route, bitstream or deployment is claimed yet.
+Both owners have now closed successfully and their native processes are reaped.
+Synthesis takes **2,006.13 seconds**, with no OOM or input drift; its audit
+checks 3,088 input pins. The independent comparison takes **490.06 seconds**,
+checks 3,101 pins and reproduces the exact parent's **30.676729 MHz / −7.598 ns**.
+Candidate setup is **−8.385 ns**, hold **−0.101 ns**, giving an unplaced
+post-synthesis estimate of **29.953572 MHz** (−2.36%). The audit's successful
+exit means evidence collection succeeded, **not** that 40 MHz was met.
+
+All 30 reported worst paths now run from EIP to shared-FPU bank clock enables:
+**113 logic levels**, 33.088 ns data delay, of which 26.729 ns is estimated
+routing. They traverse next-read lookup, code/read ACK qualification,
+`c_rdata_hi_valid`, and `fp_load64_take`. This motivates checking redundant
+ACK qualification and next-lookup dependencies on the wide saved response.
+It does not demonstrate a benefit from this isolated paired-load change.
+The best query-parent checkpoint remains retained for comparison.
+
+Candidate utilization is **186,749 CLB LUTs / 54,773 registers / 277.5 BRAM /
+47 DSPs**, versus 186,766 LUTs / 54,831 registers in the parent. Neither the
+small area reduction nor passing directed tests offsets the timing regression.
+Evidence: `pair-now-read-clock-r1/audit.json` and
+`pair-now-read-timing-queue-r1/closed.json` under the root above. No route,
+new bitstream or deployment has been performed.
 
 The inherited canonical **7 PASS / 101 FAIL** remains an acceptance blocker,
 not an expected-failure waiver. Full original standard-suite and physical FPGA
@@ -220,4 +241,4 @@ Win95/UI and FreeDOS Quake timedemo completion remain outstanding.
 
 Gameplay baseline: **0.51030715 total U+V simulated retirement-event IPC**,
 older `2b4d7a48`, cycles **1,200,065,237–1,300,065,237**. This new candidate
-has no gameplay or Fmax measurement.
+has no gameplay measurement; its synthesis estimate remains below 40 MHz.
