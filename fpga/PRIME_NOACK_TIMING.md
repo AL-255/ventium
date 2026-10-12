@@ -256,6 +256,44 @@ and timing-driven mapping; it is not an isolated RTL-gain measurement. The
 requirement remains at least 40 MHz; a constraint or successful launch is not
 evidence that it is met.
 
+### Downstream reporter repair, synthesis left running
+
+Read-through of the generated reporter catches a host-flow defect before it
+launches: `clock/audit.tcl` was copied unchanged and still requires the parent's
+`-no_timing_driven` option. It would reject a valid balanced candidate before
+producing timing reports. The initial four derivation tests did not execute
+this Tcl admission check.
+
+Only the original sequencing observer is stopped. Its pinned files and
+`timing-queue/started.json` remain; it has no successful closure receipt.
+The actual synthesis controller remains PID **2694737**, invocation
+`6e13bd65df494c51a2044dbab264380f`; the Vivado scope invocation is still
+`52072648e4f64b23ad969cbc56a64d9f`. **No synthesis restart or source change.**
+
+[`prepare_prime_noack_clock_r2.py`](prepare_prime_noack_clock_r2.py) publishes
+fresh `clock-r2` reporting files and `after_clock_repair.py`. The corrected
+candidate guard requires empty extra synthesis options and the `Default`
+directive. Clock constraints, every report command, native resource monitor,
+stop/reap lifecycle and parent comparison remain unchanged. The original
+producer/outputs remain immutable historical evidence; use this report-only
+continuation for this run, not the superseded original queue.
+
+**Five host tests pass**, including actual Tcl execution: the original guard
+rejects this candidate's real settings; the corrected guard admits them and
+rejects diagnostic, area-optimized and extra-retiming settings. Tests also check
+unchanged reporting/monitor text, reapplication rejection and that the new
+queue cannot launch synthesis or duplicate a clock owner. They do not establish
+native Vivado timing success.
+
+The replacement observer starts at **02:01:48 UTC**:
+`ventium-prime-noack-report-queue-r2-oct12.service`, invocation
+`1694e645b24e4e529c0c663ad5c6441a`. It waits on the existing synthesis invocation,
+audits its native closure, then may launch exactly one
+`ventium-prime-noack-clock-r2-oct12.service`. Preparation evidence is
+`prime-noack/clock-repair-prepared.json`; the new observer's evidence directory
+is `prime-noack/timing-queue-clock-r2`. At this entry synthesis has completed
+RTL optimization phase 2 and is still running; no candidate Fmax is available.
+
 Canonical correctness, original full CoreMark seeds, cold Win95 desktop/UI,
 full original Quake timedemo and actual candidate FPGA validation remain
 required. No current candidate gameplay measurement exists.
