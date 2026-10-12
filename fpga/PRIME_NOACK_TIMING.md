@@ -70,6 +70,19 @@ workaround, saved-state dependency, feature switch, cache reduction or bubble.
    synthesis under the real 40 MHz constraints. An unplaced diagnostic result
    is neither routed timing closure nor physical-board qualification.
 
+[`freeze_prime_noack_rk_candidate.py`](freeze_prime_noack_rk_candidate.py)
+prepares that export using the existing **balanced / Default timing-driven**
+profile, not the diagnostic `-no_timing_driven` mapper. It preserves the actual
+40/100 MHz clock requests, 156 hardware definitions, 190 payloads and posted-16
+transport. Three host tests check all four exact recipe outputs, drift and
+reapplication rejection, and Tcl expansion without the diagnostic synthesis
+option. The first Tcl test lacked the frozen upstream flow in its disposable
+fixture; copying that unchanged input fixes the test, not the production flow.
+The exporter has not published inputs yet. Future synthesis must retain the
+single-family resource monitor and reserves; the timing-driven profile previously
+had excessive optimization memory growth. A frequency difference across mapper
+profiles cannot be presented as an isolated RTL improvement.
+
 All generated work uses `/home/yukidama/external/tmp`, with the exclusive
 guarded-32 compiler profile and no concurrent Vivado family.
 
