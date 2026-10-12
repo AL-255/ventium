@@ -78,9 +78,21 @@ identities and the one-file delta contract. The eight-corpus run is active
 Six source-transfer tests pass, checking the exact one-file core/PC/FPGA delta
 and rejecting missing edits, added bytes, wrong parents and reapplication.
 No PC build or new FPGA export has started yet.
+Five synthesis-preparation tests also pass. The planned controllers retain the
+closed resource lifecycle byte-for-byte, require the complete FP/fault matrix
+and replay evidence, and use **PAIR-INTENT / 31.651579 MHz** as both source and
+timing control. The native Tcl timing audit and original 40/100 MHz clocks are
+unchanged. These tests do not generate or launch a Vivado run.
 Closed cache compiler products were archived losslessly and byte-compared
 before removing unpacked copies. Retain sources, generated headers, native
 binaries, logs and receipts; recover products with each receipt's tar command.
+The closed FP matrix was independently recompared (208,128 candidate records)
+before archiving 11,916 trace/log files: **487,358,972 → 29,591,438 bytes**, every
+member hash verified. The archive is `closed-read-owner-fp-text.tar.gz`, SHA-256
+`e84a0c496f9cf5a243501fab2565747bc3833ae2919b4d8744d58528e4740e03`.
+Restore with `tar -xzf closed-read-owner-fp-text.tar.gz -C /home/yukidama/external/tmp`.
+All protected pins remain unchanged; this is recoverable compaction, not loss
+of native failure evidence or acceptance-trace filtering.
 
 ## Remaining acceptance
 
