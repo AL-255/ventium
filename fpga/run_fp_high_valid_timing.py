@@ -1,0 +1,26 @@
+"""Adopt the single FP response synthesis and queue its native timing audit.
+
+Cannot restart synthesis, route or deploy. Audit completion is distinct from
+meeting the >=40 MHz requirement; canonical/physical acceptance remain open.
+"""
+import hashlib
+from pathlib import Path
+
+original=Path(__file__).with_name('run_fetch_probe_timing.py')
+text=original.read_text()
+digest='a0ff546de75b33f4a21f062bffc9603f32d2f9210d2f043b7397b8d621a9d5ac'
+assert hashlib.sha256(text.encode()).hexdigest()==digest
+old='from prepare_fetch_probe_synthesis import PARENT as ROOT, MANIFEST, MODEL'
+assert text.count(old)==1
+text=text.replace(old,"""from prepare_fp_high_valid_synthesis import ROOT
+MANIFEST='98c7d92a830568b0aa08417b2ad2444df5b14789e92d86e497cae05552d42887'
+MODEL='07b59e2059a985764fe7bc9ce99ebde0530acf96e8d6dfed1e83258db1178541'""")
+assert text.count('ventium-fetch-probe-')==2
+text=text.replace('ventium-fetch-probe-','ventium-fp-high-valid-')
+assert text.count("'probe-")==8
+text=text.replace("'probe-","'fp-high-valid-")
+anchor='    assert all(sha(p) == h for p,h in pins.items())\n'
+assert text.count(anchor)==3
+first=text.index(anchor)
+text=text[:first]+"    pins["+repr(str(original))+'] = '+repr(digest)+'\n'+text[first:]
+exec(compile(text,str(original),'exec'),globals())

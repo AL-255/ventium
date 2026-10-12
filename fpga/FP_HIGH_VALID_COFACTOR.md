@@ -1,7 +1,7 @@
 # Wide FP response qualification — October 12
 
-**Private candidate built; leaf/cache checks pass. Whole-core verification is
-running. No new Fmax, standard-suite or physical FPGA acceptance.** The target
+**Leaf/cache and directed whole-core checks pass; canonical verification remains
+FAIL. PC transfer and frozen CPU lint pass. No new Fmax, standard-suite or physical FPGA acceptance.** The target
 remains **at least 40 MHz post-synthesis Fmax**, UV+fast, full P5 caches.
 
 The [paired-read experiment](PAIR_NOW_READ_COMPLETION.md) regresses from
@@ -81,7 +81,7 @@ Evidence root: `/home/yukidama/external/tmp/ventium-load-read-ack.GyWDDtiI`.
    `ca23313603a8a34e4d3c76688b6d4f5c63d0339cb578ecf7b544d9be188eef8c`.
    Invocation `de2e514a391f4f35ade19aad4f4aafa3`.
 
-## Work still required
+## Whole-core results and retained failures
 
 The first unchanged full FP matrix, `fp-high-valid-fp-r1`, closes **FAIL** in
 31.02 seconds: 32 concurrent fixtures exceed the fixed 128-task envelope when
@@ -89,17 +89,85 @@ QEMU starts its helper threads. Native logs show `EAGAIN`/failed QEMU startup;
 308 measurements complete, but this is not a matrix pass. Invocation
 `de716da6b8bc409db60ac12b75d9747b`. Its failed evidence is retained.
 
-The complete matrix is queued again with **eight concurrent fixtures**, without
-changing cases, comparisons, timeouts or RTL, under the same 16 GiB / 128-task
-guard (`ventium-fp-high-valid-fp-r2-oct12`, invocation
-`4de0443618f64fefb57e4d42582c53e8`). Compiler fan-out remains 32. The original
-canonical `make verify` is currently running (`ventium-fp-high-valid-verify-oct12`,
-invocation `e013e606f3be4d8baaa3b7b3b5d69bf4`); the matrix waits for its lock.
-Do not treat launching either as passing.
-The parent's **7 PASS / 101 FAIL** is an unwaived acceptance blocker.
+The complete retry passes in **67.88 seconds** with **eight concurrent fixtures**,
+without changing cases, comparisons, timeouts or RTL, under the same 16 GiB /
+128-task guard (`ventium-fp-high-valid-fp-r2-oct12`, invocation
+`4de0443618f64fefb57e4d42582c53e8`). All **384 fixtures / 1,536 measurements /
+208,128 candidate architectural records** pass full QEMU comparison and exact
+parent/candidate cycles, with **768 actual V retirements**. Compiler fan-out
+remains 32. Every trace is independently re-compared before lossless archival
+to `closed-fp-high-valid-fp-text.tar.gz` (487,072,544 → 29,385,640 bytes).
 
-Complete whole-core FP boundary/fault and integer/memory A/B checks, PC transfer,
-CoreMark preflights and frozen lint before measuring this hardware candidate.
+Canonical `make verify` closes **7 PASS / 101 FAIL**, native make exit 2;
+invocation `e013e606f3be4d8baaa3b7b3b5d69bf4`. All 20 cycle streams match the
+parent, with unchanged source pins, goldens, masks and bands. Matching the
+parent does **not** waive those failures.
+
+The [follow-on driver](../verif/l1/run_fp_high_valid_regressions.py) closes all
+12 phases in **605.02 seconds**, invocation
+`4bb5fe0c82a44819b8615ff107f54666`, in `fp-high-valid-regressions-r2`:
+
+| Check | Complete coverage | Candidate records |
+| --- | --- | ---: |
+| FP operand boundaries | offsets 0, 1, 24, 25, 29, 4093; two instruction alignments, relocations and AXI latencies | 11,904 |
+| FP faults | 16 fixtures × two models; full UV comparison, #NM/#PF priority, pending FP and relocated segments | 23,585 |
+| Integer | 256 fixtures / 1,024 measurements | 169,472 |
+| Paged memory | 72 fixtures / 288 measurements | 31,392 |
+| Held read | 48 cases | 9,200 |
+| Branch/priming | 640 fixtures / 2,560 measurements | 353,920 |
+| Same-input canonical replay | 108 programs; identical initial ESP and complete state/cycles | 80,800 |
+
+The first follow-on attempt is retained as **FAIL** in
+`fp-high-valid-regressions-r1`: its outer fault-phase limit of 180 seconds
+expired after 22 successful native runs at ~7.9 seconds each. The original
+fixed-port gate serializes 32 runs. The retry changes only that batch limit to
+420 seconds, not the 90-second individual watchdog, cases, RTL or comparison
+rules; all 32 pass in **259.68 seconds**. It is not an RTL failure or a waived
+test. Boundary positives require actual wide takes; line/page-crossing controls
+require zero. Functional/U-only fault controls are diagnostic, not acceptance.
+
+## PC/hardware transfer and remaining work
+
+[PC admission](build_fp_high_valid_soc.py) rechecks every closed matrix and its
+pins, all three exact transformations, **102 shared RTL sources**, **156
+unchanged definitions**, and posted-16 transport. The
+[hardware export](freeze_fp_high_valid_rk_candidate.py) additionally rejects
+missing/extra deltas and requires all **170 common HDL inputs / 190 payloads /
+158 hardware definitions**, with unchanged filelist closure and Tcl contract.
+The [synthesis preparation](prepare_fp_high_valid_synthesis.py) retains the
+closed single-Vivado lifecycle, mapper, memory/disk guards and 40/100 MHz clocks.
+Its source audit compares against PAIR-NOW-READ; its timing audit independently
+compares against the **better 30.676729 MHz MEMDIV-QUERY checkpoint**.
+Four scheduling, four export-scope and four controller-derivation tests pass.
+
+The PC build closes native zero in **23.69 seconds**, invocation
+`7d2dab4b797e481ca7d7ca72babf660e`, with unchanged pins and its unique C++ harness
+dependency checked against the actual generated headers. Model SHA-256:
+`07b59e2059a985764fe7bc9ce99ebde0530acf96e8d6dfed1e83258db1178541`.
+The inherited **98 full-SoC structural warnings** remain; this is not a clean
+full-SoC lint result. The export closes with manifest SHA-256
+`98c7d92a830568b0aa08417b2ad2444df5b14789e92d86e497cae05552d42887`.
+The unchanged strict CPU-hierarchy lint passes in **3.78 seconds**, invocation
+`4bb32c02aa074456b6d704f54f505e34`; all six structural warning classes remain
+errors and the 158 hardware definitions are checked exactly.
+
+The original two short CoreMark seed preflights are running, invocation
+`7a81001e15664b778e632b692f44bc24`. They cold boot the unchanged disks through
+the real posted-16 RTL bridge; neither a duration-valid score nor the full
+standard suite is claimed. Complete and independently audit both before
+launching synthesis. [The timing coordinator](run_fp_high_valid_timing.py)
+can adopt only the exact launched synthesis invocation; it never restarts a
+failed run and records the 40 MHz threshold separately from audit success.
+
+Closed integer, memory and branch traces were independently re-compared against
+QEMU and the parent before archival: **789,258,716 → 74,543,568 bytes**, all
+30,048 members hash-verified, `closed-fp-high-valid-regression-text.tar.gz`.
+Compiled models, sources, pins, receipts and fault traces stay unpacked.
+Restore these streams with `tar -xzf closed-fp-high-valid-regression-text.tar.gz
+-C /home/yukidama/external/tmp` from the evidence root. Disposable closed-build
+PCH files and historical timing/branch text are also retained in verified
+archives; no DCP or model binary was removed.
+
 Then require >=40 MHz synthesized Fmax, routed closure and physical UV-fast
 Windows 95 cold desktop/UI and original FreeDOS Quake full timedemo validation,
 as well as the full standard suite and differential gates. No synthesis or
