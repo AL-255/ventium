@@ -100,9 +100,19 @@ speed. Memory/store take 19.11/19.62 seconds and debug takes 9.28 seconds.
 Receipts are respectively `memory-r1`, `store-r1`, `fp-r1/matrix`, `debug-r1`.
 These checks establish no observed cycle-count change, not a gameplay IPC gain.
 
-The full aligned FP fault/fragment matrix is running. The unchanged canonical
-gate is queued behind its shared heavy-build lock; no second compiler or Vivado
-is allowed to bypass it. Canonical owner:
+The aligned FP fault/fragment matrix subsequently closes **PASS: 16 fixtures /
+32 model comparisons / 23,585 candidate architectural records**. Every original
+gate and additional complete UV comparison exits zero; full parent/candidate
+architectural records match. It covers aligned split-page retry, EM/TS priority,
+pending FP owners and DS/SS relocation, **not all unaligned/reset scenarios**.
+All source pins and generated artifacts independently rehash unchanged. Outer
+owner `c16be5915aa746758fb32b99d657d204` is terminal zero; actual guarded invocation
+is `743bb02c0d5547f2862a7339da216d0b`, with measured affinity CPU 12. Receipt:
+`fe64637f0adf225cddffa38b7074bbcc0670568d22221edbd7d65fc4f7202e72`.
+
+The unchanged canonical gate starts only after that guard is released; no
+second compiler or Vivado bypasses it. At **00:24 UTC on October 12**, the
+actual `make verify` is running, not merely an intended launch. Canonical owner:
 `ventium-mc-pair-srt-verify-oct12.service`, invocation
 `dd3e24bdc74b4efdb6f91ff8c2740da4`.
 
@@ -112,6 +122,16 @@ All **102 shared core/FP inputs** match the directed model, with exactly these
 two changes relative to the measured read-hint PC. It has **not compiled yet**;
 the build lifecycle requires actual canonical closure and unchanged complete
 A/B cycle streams, retaining any gate failure as a failure.
+
+The live continuation `ventium-mc-pair-srt-pc-queue-oct12.service`, invocation
+`4e26dd83304c4d4f9ba05bbbc5cc361a`, observes those exact native owners without
+restarting them. After canonical closure it requires complete same-input replay
+of all 108 programs, then builds this full-PC model and runs both unchanged
+ten-iteration CoreMark diagnostic seeds plus independent CRC/source/owner audit.
+The latter are **not duration-valid scores or full-suite acceptance**. Its
+pinned controller is `after_checks.py` in the evidence root, SHA-256
+`c67a334c53aab7c975533ac64f110e7d423b458677f98e1206c94f8100d10065`.
+No synthesis, placement, routing, bitstream or deployment follows this queue.
 
 Canonical verification remains **FAIL**, not waived by the component checks.
 Combined-model differential/cycle checks, both original CoreMark correctness
