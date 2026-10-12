@@ -563,12 +563,13 @@ unchanged, including the full cache's retained native artifacts. Source hashes:
 L1 `df7a426143baf6571d233a450fdc7c1eac17c946bd208b5334846b8fb255a29d`;
 seam `806e4392b97b983097278dbad3efa9f9dfae61bb6d9488955632e18e797c2b38`.
 
-Unmodified canonical verification is now running as
+Unmodified canonical verification closed as
 `ventium-intent-ready-canonical-oct12`, invocation
 `ce61b29b9e65437eb5e3ecab0e942a95`, against the fresh-core parent. It retains
 the real AXI backend, all record comparisons, masks, goldens and timing bands.
-No new canonical result is claimed while that owner is live. Broader core/FP/
-fault regressions, a full-PC transfer and timing measurement remain pending.
+The native gate exited **2** after **398.719 seconds**: **7 PASS / 101 FAIL**.
+All 20 parent/candidate cycle traces match, and input pins are unchanged.
+That equality is not a waiver of the red canonical gate.
 
 `run_intent_ready_core.py` binds the unchanged eight-corpus plan to exact
 parent `e1621913` and candidate `6fa8f7ad` model hashes. Three additional host
@@ -576,9 +577,59 @@ checks pass (**22 total** for these adapters), verifying byte-identical native
 plan/comparison/coverage logic and rejecting lifecycle drift. It retains the
 4,240-probe and exact cycle/intent/pair coverage requirements, not just exit
 status. `ventium-intent-ready-corpora-oct12`, invocation
-`b587a086b6124ea9984ac3d0934254ef`, is queued behind the canonical job's shared
-lock; its expensive work has **not started** at this entry. Output will be
-`intent-ready-checks-r1`. No directed regression result is claimed yet.
+`b587a086b6124ea9984ac3d0934254ef`, closed **native 0** in **301.702 seconds**;
+guarded scope `52f34fc2f2ff490f9510875738aa2280`. All eight corpora pass with
+**4,240 probes**, exactly 21,190,336 observed clocks, 5,616 intent samples,
+3,072 requests and 1,872 accepted pairs. These are directed observer counts,
+not gameplay metrics. Independent rechecks found all **3,387 input pins**
+unchanged. Output is `intent-ready-checks-r1`.
+
+The complete wide-FP matrix also passed: `intent-ready-fp-r1`, **69.095 seconds**,
+**384 fixtures / 1,536 measurements / 768 zero-cycle-delta comparisons** at
+AXI latencies 0 and 7, retaining full QEMU/x87 and actual U/V-pair checks.
+All 13 matrix input pins were independently rehashed. Its native scope was
+`6faf0d38866c45f6a3ea0b3fafb913be` (940.7 MiB peak, zero swap). The outer
+`ventium-intent-ready-fp-oct12` service was transient and collected after exit;
+its journal and the native scope journal/closed receipt retain the evidence.
+Do not claim it remains an inspectable exited unit.
+
+Closed eight-corpus text is recoverable from
+`closed-intent-ready-checks.tar.gz`: **38,352 entries**, **969,202,890 →
+87,612,464 bytes**, SHA-256
+`c7f7ae453d4d6e0085e06023b053c19be8a5ea8b05f1e77fadd7e8453dadbcd1`.
+Every member was byte-verified before removing its unpacked copy; restore into
+`ventium-load-read-ack.GyWDDtiI`. Sources, models, receipts and pinned inputs
+remain unpacked. No current verification output was selected.
+
+`run_intent_ready_regressions.py` now runs the unchanged 12-phase FP boundary,
+fault, integer/memory/held/branch and same-input replay plan against exact
+models `e1621913` / `6fa8f7ad`. Unit
+`ventium-intent-ready-regressions-oct12`, invocation
+`311a3dc90f574573bf44861d77c1c193`, is **running**, not yet a pass. All gate
+comparisons, native timeouts and the canonical-failure status remain intact.
+
+The source-transfer and measurement procedures are prepared, **not run**:
+
+- `fpga/build_intent_ready_soc.py prepare`: requires that closed 12-phase
+  proof plus the complete FP matrix and canonical receipt, then transfers
+  exactly L1/seam into the fresh full-PC source with 102 common RTL payloads.
+  `build` retains the guarded 32-job compiler and private matching-header harness.
+- `fpga/freeze_intent_ready_rk_candidate.py`: checks all 170 shared HDL
+  inputs and permits only those two changes in the 190-file FPGA export.
+- `fpga/prepare_intent_ready_synthesis.py`: prepares controllers that retain
+  the original 40/100 MHz clocks, matched logic-only mapper, one Vivado family,
+  memory/disk admission and live stop thresholds. It requires short CoreMark,
+  strict CPU lint and all existing proof receipts before synthesis starts.
+  Source and timing control now both use the closed **31.822810591 MHz**
+  fresh-pair checkpoint, SHA-256
+  `32b06bb08c58472c577a0ff046301643ffba2cab13600f17103f8c32d8c5960d`.
+
+**30 host tests pass** across the intent-ready L1 and FPGA adapters. They check
+byte-exact transformation/transfer boundaries, unchanged native comparison
+plans, guard preservation, explicit model/checkpoint identities and rejection
+of source drift or extra payload changes. All four new command-line entry
+points also passed their `--help` checks. These are host checks, not native
+FPGA timing measurements. No new Vivado family was launched in this step.
 
 The canonical gate remains **7 PASS / 101 FAIL**, red and unwaived.
 Required next: achieve
