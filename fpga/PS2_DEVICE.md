@@ -533,6 +533,70 @@ simulator, synthesized Fmax, native ARM MMIO, Windows or physical FPGA result
 is inherited. The manifest explicitly clears simulator/acceptance claims.
 Full integration verification and timing remain required before deployment.
 
+### Native ARM userspace compatibility, not device-MMIO qualification
+
+At 22:00 UTC, the actual RK board passes all **61 software tests** on native
+AArch64 Linux `6.12.0-g7e47ae4ab22e`, Python 3.11.2 and 4-KiB pages. The fixture
+library is cross-compiled for ARM from the unchanged C source; both it and the
+existing production library load successfully. The production library's only
+invoked function reports its build type. **Its physical opener is never called.**
+The fixture build rejects physical open and maps only ordinary temporary files.
+Thus this tests the real ARM ABI, ctypes, file-backed register accesses,
+ownership/fork behavior and local socket tests, not device memory or AXI ordering.
+In particular, the test build uses its fixture barrier, not the production
+`dsb sy` path. No bitstream, reset, clock, guest memory or guest media changes.
+
+[`prepare_ps2_arm_fixture.py`](prepare_ps2_arm_fixture.py) freezes a previously
+closed 61-test host package, compiles its ARM fixture and copies its already
+qualified production library. Only two **test setup** assertions change: their
+explicit scratch root is supplied by the board runner instead of naming the
+host's external volume. All test methods and production sources are unchanged.
+Three recipe tests cover exact scope, source drift, duplicate anchors and
+reapplication. The source-controlled preparer reproduces all **12 tested payload
+hashes** from the initial manually prepared package.
+
+[`check_ps2_arm_fixture.py`](board-tools/check_ps2_arm_fixture.py) requires an
+owned mode-0700 `/dev/shm/ventium-ps2-arm-fixture.*` leaf, native AArch64,
+explicit CPU1 affinity, exact payload hashes and separated fixture/production
+exports. It confines test scratch to that leaf, uses a 60-second child timeout,
+256-MiB address-space and 8-MiB output-file limits, and records native child
+exit/reaping. It refuses reusing output logs. The test process completes in
+**0.9784 seconds** including interpreter startup; unittest reports **0.205 s**.
+This is not a new CPU/FPGA performance measurement.
+
+Evidence:
+
+- Board: `/dev/shm/ventium-ps2-arm-fixture.nppqb9N8`, boot ID
+  `2861e4e8-cd4c-48cd-9f44-7f7d8a991ebb`; SSH/test exits both zero. No checker
+  or test child remains live after closure.
+- Host: `/home/yukidama/external/tmp/ventium-ps2-arm-fixture.C0Ej5ne9`, retaining
+  the initial preparation, manifest, copied native log/closure and independent
+  `audit.py` / `audit.json`. The audit rehashes **15 remote artifacts**, verifies
+  all 12 reproduced payloads and 16 preparation source-pin entries.
+- Source-controlled preparation: `external/tmp/ventium-ps2-arm-fixture-r2.SKGgV5nO`.
+  Its manifest differs only in preparation provenance, not tested payloads.
+- Native closure SHA-256:
+  `98ab750f1258c2420d37d558a62c057960fe9e77541f3f86f2d1c188f7eb7b6a`.
+  Native unit-log SHA-256:
+  `9c39742709f3371a1dc6c094bbd5a7436a786e4acaa37dcc6772465ec63b4063`.
+
+Reprepare on the host, then copy the manifest-listed files and manifest to a
+fresh, owned board leaf matching the required prefix. Never overwrite a live
+service installation or reuse a previous result directory:
+
+```sh
+TMPDIR=/home/yukidama/external/tmp PYTHONDONTWRITEBYTECODE=1 \
+  taskset -c 12 python3 -B fpga/prepare_ps2_arm_fixture.py \
+  --source CLOSED_61_TEST_HOST_RUN --out FRESH_EMPTY_EXTERNAL_DIRECTORY
+# On the board, after checking the transferred hashes and changing into the leaf:
+TMPDIR="$PWD" PYTHONDONTWRITEBYTECODE=1 \
+  taskset -c 1 python3 -B check_ps2_arm_fixture.py
+```
+
+Physical MMIO, the service's real-device loop, the complete FPGA path and
+Windows mouse acceptance remain pending. The mouse source export remains
+separate from the current READ-OWNER timing candidate.
+
 ## Still required before physical mouse acceptance
 
 1. Integrate and qualify the prepared service/input client in the actual cold
