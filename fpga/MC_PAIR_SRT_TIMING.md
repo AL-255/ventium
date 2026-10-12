@@ -149,8 +149,9 @@ host tests cover the schema bug and rejection of incomplete, failed, changed or
 waived results. Resume owner `ventium-mc-pair-srt-resume-r2-oct12.service`,
 invocation `c14df51299514da5a6d0c8cd89748e67`.
 
-At **00:36 UTC on October 12**, both unchanged ten-iteration CoreMark diagnostic
-seeds are in progress under native owner
+At **00:38 UTC on October 12**, the first unchanged ten-iteration CoreMark
+diagnostic seed closes native zero with its five expected CRCs and unchanged
+**4,767,218 ticks**. The validation seed is running under the same native owner
 `ventium-v-carry-cm10-mc-pair-srt-oct12.service`, invocation
 `4655a024d9b241f28e7c5d9173c23ce0`, explicitly pinned to CPU 11. These are **not
 duration-valid scores or full-suite acceptance**. The resumed queue requires
@@ -164,6 +165,18 @@ Its three host recipe/guard tests pass; the hardware export itself is still
 pending the diagnostic runs. The separate timing-controller derivation preserves
 the closed parent's entire native monitor/stop/reap lifecycle and resource
 reserves, and compares against that parent's original DCP and clock constraints.
+
+Disk admission was below the original synthesis reserve. A closed-artifact
+cleanup reclaims **1,418,747,904 allocated bytes (1.32 GiB)**: 814 verified
+backups containing only generated compiler intermediates, one archived cache
+from the terminated October 9 Vivado run, and this closed PC build's two PCHs.
+Retained binaries/headers/build metadata and the failed synthesis's frozen
+source payloads independently rehash unchanged. No useful DCP, trace, source,
+media, binary or log is removed. Old archive-extraction recovery instructions
+are superseded: those caches now require regeneration. Exact targets and hashes
+remain in `obsolete-compiler-backup-{plan,closed}.json` and
+`closed-native-cache-{plan,closed}.json` in the evidence root. The synthesis
+growth-derived disk requirement and 4 GiB emergency reserve are unchanged.
 
 Canonical verification remains **FAIL**, not waived by the component checks.
 Combined-model differential/cycle checks, both original CoreMark correctness
