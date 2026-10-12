@@ -121,21 +121,39 @@ The checked controllers have now been generated under
 `read-owner-{synthesis,clock}-r1`; preparation itself launched no Vivado.
 
 Short cold CoreMark preflight owner `32c0d97ff9bf4d57b6e96b10c3475eb5`
-(`ventium-v-carry-cm10-read-owner-oct12.service`) has closed the performance
-seed in **214.776 seconds**: correct CRCs, **4,767,218 benchmark cycles**,
-3,409,929 U and 1,055,307 V retirements at the final 13M-cycle observation.
-Validation is still running. These 10-iteration runs deliberately do not meet
-CoreMark's duration requirement; neither a valid CM/MHz score nor an error-free
-standard-suite pass is claimed.
+(`ventium-v-carry-cm10-read-owner-oct12.service`) **closed both seeds**. Both
+CRC sets and benchmark clocks match the controls:
+
+| Seed | Benchmark cycles | Final U / V retirements | Host elapsed |
+|---|---:|---:|---:|
+| Performance | 4,767,218 | 3,409,929 / 1,055,307 | 214.776 s |
+| Validation | 4,753,406 | 3,405,882 / 1,054,254 | 206.110 s |
+
+Retirement counts are the final 13M-cycle observations, not gameplay. The
+independent audit passes **3,258 source pins**, native argv/affinity/exit,
+unchanged media and real posted-AXI transport, with zero OOMs. These
+10-iteration runs deliberately do not meet CoreMark's duration requirement;
+neither a valid CM/MHz score nor an error-free standard-suite pass is claimed.
 
 `ventium-read-owner-synth-queue-oct12.service`, invocation
-`a6b99406107a457eb2a05496d39b33cb`, observes that exact CoreMark owner. Only
-after both seeds close and the independent audit passes does it compact the
-closed PC PCH caches, launch one existing guarded synthesis controller and
-register its exact-owner timing observer. The queue cannot retry synthesis,
-route, deploy, waive canonical failures or relax native resource reserves.
+`a6b99406107a457eb2a05496d39b33cb`, closed successfully after observing that
+exact CoreMark owner, auditing both seeds and losslessly compacting the closed
+PC PCH caches. One synthesis started at **2026-10-12 21:33:25 UTC**:
+`ventium-read-owner-synth-oct12.service`, invocation
+`fdeeb7141fa4486c948a3208e6def744`, owned Vivado scope
+`4ff50012167547d48350c57846b67c7a`. Its source/resource admission checked
+**4,223 pins** and **7,390,146,560 bytes** of free disk.
+
+Resource bounds remain **8 GiB resident / 6 GiB swap**, **13 GiB combined**
+early stop, **2 GiB host RAM/swap** and **4 GiB disk** live floors, with one
+native build family. The exact-owner timing observer is
+`ventium-read-owner-report-queue-oct12.service`, invocation
+`64cc20fa966446caa9e49a739c5da240`. It audits native synthesis closure before
+launching the unchanged original-clock report. Neither queue can retry
+synthesis, route, deploy, waive canonical failures or relax resource reserves.
 No new timing result is available yet; **31.651579 MHz** remains the latest
-closed synthesized estimate, below **40 MHz**.
+closed synthesized estimate, below **40 MHz**. Preserve all pinned inputs
+while either native owner is active.
 Closed cache compiler products were archived losslessly and byte-compared
 before removing unpacked copies. Retain sources, generated headers, native
 binaries, logs and receipts; recover products with each receipt's tar command.
@@ -171,13 +189,16 @@ Restore with `tar -xzf closed-read-owner-regressions.tar.gz -C
 The closed directed-core PCH files are recoverable from their adjacent
 `.gch.gz` files (`read-owner-core-pch-closed.json`); this recovers another
 155,157,873 bytes without changing model inputs or executable binaries.
+The same checked operation recovered **159,386,376 bytes** from the closed PC
+PCH caches (`read-owner-pc-pch-closed.json`), also retaining adjacent verified
+gzip copies. Restore an individual missing PCH with `gunzip -k <file>.gch.gz`.
 
 ## Remaining acceptance
 
 The canonical gate remains **7 PASS / 101 FAIL**, red and unwaived.
-Required next: close both short CoreMark preflights and their independent audit,
-measure **≥40 MHz
-synthesized Fmax**, routed setup/hold, full standard suite and physical UV-fast
+Required next: close and audit the native synthesis/timing run, achieve
+**≥40 MHz synthesized Fmax**, resolve canonical differential failures,
+qualify routed setup/hold, the full standard suite and physical UV-fast
 Win95 cold desktop/UI plus original FreeDOS Quake complete timedemo. Compile or
 cache-test success cannot replace those requirements.
 
