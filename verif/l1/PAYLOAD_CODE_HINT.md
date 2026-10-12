@@ -63,6 +63,44 @@ zero-time loop. The fixed run retains every vector and uses a measured 50-second
 bound. Original failed artifacts and diagnostic output remain separately saved.
 **This source-extracted miter is not a whole-cache or processor proof.**
 
+### Stronger S_PIPE hint: separately checked, not in the queued candidate
+
+The first hint still includes `pipe_load_req || pipe_store_req`, whose new-issue
+path depends on decoded CS extent and permission-related logic. Further source
+inspection identifies an earlier equivalent **on issued S_PIPE beats**:
+`pf_miss`. A new data issue requires `pipe_frontend_ready`, which requires
+`pipe_bytes_ok`; an I-fill requires its negation. A held data packet explicitly
+suppresses `pf_miss`, even if executable-line invalidation makes its frontend
+nonresident. Simply using `!pipe_bytes_ok` would therefore be wrong.
+
+[The source-extracted request microtest](run_payload_fetch_kind_leaf.py) uses
+the actual frontend permit, new/held load/store assignments, and complete S_PIPE
+bus branch. It enumerates **1,048,576 Boolean guard-class vectors**, with
+135,192 issued beats: 4,096 fetches, 65,544 reads and 65,552 stores. These include
+65,536 held reads and 65,536 held stores. Native exit is zero in **7.54 seconds**;
+two wrong hints fail natively, including the held-owner/nonresident corner.
+The 28,672 idle hint differences are expected and cannot authorize a request.
+Receipt: `payload-fetch-kind-leaf-r1/closed.json`, SHA-256
+`347a4585d1c017723888f04902ae9b9656a5a43ec241a0e488abc222a84bdce0`.
+
+This test fixes the state to S_PIPE and uses the actual current profile
+(`VEN_IC_BRAM`, `VEN_FP_PIPE`, no `VEN_UOPCACHE`). It abstracts later squashes as
+independent request cancellations; four additional host checks verify that the
+actual driver tail only clears requests and the fragment stage cannot create
+one. It is not a whole-core state/translation proof or a timing result.
+
+[The private refinement recipe](prepare_payload_fetch_kind.py) changes only
+the earlier proposal's hint assignment to
+`(state == S_PIPE) ? pf_miss : !cur_is_d`, adding a live issued-beat equality
+assertion. It reuses the same default-off flag and retains the original
+`mem_code`, `cur_is_d`, all non-S_PIPE behavior, cache logic and every authority
+guard. Drift/reapplication and flag-off equivalence tests pass. **It has not
+been compiled into a whole core, exported, synthesized or deployed.** The live
+synthesis and queued cache test retain their exact original inputs. If the
+current timing result still misses 40 MHz, qualify this refinement in the
+whole-core derivative after the cache gate, rather than spending another
+synthesis on the weaker request-only cut without examining this dependency.
+
 ## Next regression, prepared but not yet passed
 
 [The actual-cache driver](run_payload_code_hint_cache.py) reuses the closed
