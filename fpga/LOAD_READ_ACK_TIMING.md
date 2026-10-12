@@ -3,7 +3,8 @@
 **Private candidate; not timing-, canonical-, standard-suite- or FPGA-qualified.**
 The immediate requirement remains **at least 40 MHz post-synthesis Fmax** with
 U/V dual issue, fast paths and full P5 caches. The measured parent is
-[29.69650 MHz](SRT_REM_OPERAND_SPLIT.md); this candidate has no Fmax result yet.
+[29.69650 MHz](SRT_REM_OPERAND_SPLIT.md); this candidate reaches **30.02192 MHz**
+in the closed unplaced netlist audit, still below the requirement.
 
 ## Change and rationale
 
@@ -74,6 +75,27 @@ The existing 16-case FP fault corpus closes all 32 parent/candidate runs with
 full UV architectural comparisons. Native failures, timeouts or missing traces
 would fail the runner; none occurred.
 
+Two later, unchanged [same-profile priming smoke regressions](../verif/l1/run_prime_noack_system.py)
+also pass against the rem-split parent: 20 AGI fixtures / 36,960 candidate
+records and 20 reference-operand fixtures / 26,712 records, each at AXI latency
+0/7. They retain full QEMU comparisons, complete A/B state/cycle equality and
+the original rejection controls. Actual V retirements are 2,560 per corpus;
+prime witnesses total 12,096 / 13,888 across both observation modes. These
+63,672 records raise the directed total to **514,755**, not a standard-suite
+pass. Independent re-reading of all complete A/B streams confirms equality;
+all 17 / 16 runner/input pins rehash.
+
+The first two launches incorrectly supply build directories rather than model
+executables and fail in profile discovery before any fixture runs. Their
+failed units and `*-prime-r1` logs remain. Corrected owners
+`ventium-load-read-ack-agi-prime-r2-oct12` and
+`ventium-load-read-ack-ref-prime-r2-oct12` close native zero under invocations
+`cd89d92264a04902adff2e6f1ccadf2f` and `db037b59bd1348f9871e504720ffd7a6`.
+Evidence is `agi-prime-r2` / `ref-prime-r2`. They use the prebuilt models,
+16 native workers each and separate 3 GiB/no-swap/2,048-task services; no core
+compile overlaps Vivado. Their recorded controller affinities are 16–23 and
+24–31; this run does not retain independent per-child affinity samples.
+
 ## Full-PC transfer and synthesis admission
 
 The [PC builder](build_load_read_ack_soc.py) checks all closed regressions and
@@ -108,8 +130,8 @@ The original admission rule remains: more than 6 GiB free and twice observed
 parent growth above a 4 GiB stop floor (7,208,493,056 bytes minimum here).
 RAM/swap caps remain **8/6 GiB**, combined early stop 13 GiB and host free
 RAM/swap floors 2 GiB. No limit was increased. No route or deployment is queued.
-Fmax remains unmeasured for this new candidate until native synthesis and the
-independent clock audit both close. Full standard-suite and physical FPGA
+Fmax was unmeasured at launch; native synthesis and the independent clock
+audit now close as recorded below. Full standard-suite and physical FPGA
 Win95/UI and complete Quake timedemo acceptance remain outstanding.
 
 The [timing queue](run_load_read_ack_timing.py) adopts that exact synthesis
@@ -121,10 +143,80 @@ Only then may it launch the prepared clock/netlist audit. Audit-process success
 is distinct from its `synthesized_40mhz_requirement_met` field. No route or
 deployment is queued, and no resource limit is raised.
 
-While this frozen synthesis runs, a separate
+While this frozen synthesis ran, a separate
 [query-payload selector candidate](PRIME_QUERY_PAYLOAD.md) is prepared and
 microtested. It is **not included** in this synthesis. Full-core compilation
-and regression of that separate candidate wait for the timing queue to close.
+of that separate candidate is now deferred: an older related experiment
+regressed timing, and the new worst paths point to a different dependency.
+
+## Closed synthesis and clock audit
+
+Native synthesis closes zero at **08:38:13 UTC**, taking **1,907.27 seconds**.
+Its independent audit passes: 4,554 input pins, 158 ordered definitions and
+148 native Verilog inputs; the exact one-header delta is retained. Utilization
+is **183,333 LUTs / 54,103 registers / 277.5 BRAM tiles / 47 DSPs**. Relative to
+the rem-split parent this is **1,636 fewer LUTs and 493 fewer registers**, with
+BRAM/DSP unchanged. These are mapped-area results, not an Fmax or IPC gain.
+
+The synthesis scope peaks at **8 GiB RAM**, zero swap, with no OOM/resource
+stop and unchanged inputs. The native summary records zero errors, one critical
+warning and 1,565 warnings; the generated-clock warning is not treated as a
+clean timing report. DCP SHA-256:
+`5710a825be2f623f2749fb421dcf6b4daa24a999270e3099655bbc30fb1f471f`.
+Audit SHA-256:
+`add447491ed8e36478054b3735eba94d22ea95d003e56ae3662284c344be8805`.
+The queue then starts `ventium-load-read-ack-clock-oct12`, invocation
+`678f4a45aa8142e5867064810bfd4831`, sole Vivado scope
+`7b712297743d4fcdb3e6701e25195dcd`.
+
+The clock audit closes native zero at **08:46:32 UTC** in **488.63 seconds**,
+with 4,569 stable input pins, 4,612,136,960 bytes peak RAM, no swap/OOM and no
+resource stop. Actual core/PL constraints remain **40/100 MHz**. The unplaced
+core estimate is **30.0219159987 MHz** (`1000 / (25 + 8.309)`), **1.0958%**
+above the parent's 29.696501751 MHz. Setup slack is **-8.309 ns** and hold
+**-0.101 ns**. The queue explicitly reports
+`synthesized_40mhz_requirement_met=false`; native audit success is not a timing
+pass, routed sign-off or a board-frequency result. Audit SHA-256:
+`9afe7fc87db5c8cabfc935a2b1a5b32f6336aa53eb84566c08f8be99e8f865ea`.
+
+All 30 reported worst setup paths start at `q_pc[0]`: 27 end at the shared
+SRT engine's `ua` exponent register and three at its `S` recurrence register.
+The worst path has **119 logic levels / 33.098 ns data delay** (7.614 ns logic,
+25.484 ns estimated routing). It traverses fetch-overlength qualification,
+the current linear-address/DTLB network, L1 response selection, FP memory
+conversion and SRT input normalization. This is not evidence that divider
+arithmetic alone causes the full delay. The next investigation targets the
+early fetch/probe dependency in this measured cone; no timing exceptions,
+slow-pipeline fallback or speculative Fmax claim are introduced.
+
+Both controller owners are terminated/reaped and the sole Vivado scope is
+closed. No implementation or deployment has started.
+
+### Next source-level investigation, not an implemented fix
+
+`core.sv` currently qualifies S_DECODE's address, byte extent and I/D class
+with `fetch_overlength_probe`, although the probe's translation authority
+is separately retained in `fe_translatable` and this state issues no bus read.
+The measured path reaches that predicate at 16.840 ns before entering the
+shared address/DTLB/data network. Removing qualification from an inactive
+payload must not remove qualification from translation, faults or state updates.
+
+The decoder initializes `d_fetch_fault_len` to 16 and replaces it only with
+five-bit endpoints greater than 15. Thus a crossing endpoint is expected to
+name the next page, including 32-bit wraparound, independent of the late
+decoded endpoint value. A proposed early page-base payload and static
+instruction-side classification need an explicit all-address proof plus
+native source-linked tests; they are not implemented or proven here. In
+particular, retain the existing first-overrun-field crossing test and all
+debug/SMI/NMI/INTR, #NM and privilege precedence. A later immediate crossing
+must never cause a probe when the first overrun field remains on-page.
+
+Before advancing such a candidate, run the unchanged 22-case `pfetchbound`
+oracle/frame/retry corpus and fetch-guard tests, complete A/B architectural
+and cycle comparisons, then the ordinary core/memory checks. Source inspection
+finds translation and permission faults qualified by `fe_translatable` and
+S_DECODE absent from segment-relative bus states; this is supporting evidence,
+not a whole-core proof that every idle-payload consumer is harmless.
 
 ## Evidence and storage
 

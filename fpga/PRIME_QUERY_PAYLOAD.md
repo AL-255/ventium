@@ -1,10 +1,11 @@
 # Resident-query payload selection — October 12
 
 **Prepared and microtested only; no full-core, timing or FPGA acceptance.**
-The running [load-ACK synthesis](LOAD_READ_ACK_TIMING.md) is unchanged and does
+The completed [load-ACK synthesis](LOAD_READ_ACK_TIMING.md) is unchanged and does
 not include this separate candidate. The target remains **at least 40 MHz
 post-synthesis Fmax** with UV, fast paths and full P5 caches. The last completed
-parent estimate is **29.69650 MHz**, not a timing pass.
+parent estimate is **30.02192 MHz**, not a timing pass. **Further compilation
+of this query candidate is deferred**, for the reasons below.
 
 ## Measured dependency and proposed cut
 
@@ -69,7 +70,7 @@ The proof in `query-payload-proof-r1` closes zero as
 `c7e5e9e15ada055493bfb26f50c0bee0286336f298922e6e0f75eeb8fad70c8f`.
 Both are CPU-12-only light jobs with no swap, separate from Vivado.
 
-## Next qualification
+## Deferred after timing/history review
 
 The [private core builder](../verif/l1/build_prime_query_payload_core.py)
 prepares `query-payload-core-r1`: 195 input files, the same 152 definitions,
@@ -77,7 +78,22 @@ one changed header and a unique private harness basename. It admits the native
 positive/negative results and proof, rechecks their pins, and retains the
 model-local generated-header dependency audit. **No compiler is launched yet.**
 
-After the current synthesis/clock audit closes, run its guarded 32-job build,
+The [October 11 next-query experiment](NEXT_QUERY_PAYLOAD_CUT.md) already tried
+a related idle-address rewrite: `(mc_valid_q && !A) ? retained : query`, where
+`A` included the late prime selector. Its complete directed checks passed but
+Fmax regressed **23.58546 to 22.51593 MHz (-4.53%)**, so it was rejected.
+The present proposal is not byte-identical: it removes that late prime input
+entirely and also changes the strobe selector. Nevertheless, this is a related
+previously tested optimization family, not an entirely new untried approach.
+Leaf equivalence does not predict mapped timing.
+
+The newly closed load-ACK report instead puts all 30 reported worst setup
+paths in the current-address/FP-conversion/SRT-input cone. Therefore do not
+automatically compile or synthesize this prepared query proposal. Investigate
+the measured critical dependency first and retain this evidence for possible
+later use. No build or synthesis of this candidate is queued.
+
+If subsequently selected, run its guarded 32-job build,
 canonical `make verify`, complete parent/candidate architectural/cycle replays,
 memory/held-read/FP/store/fault and branch/priming regressions. Only a qualified
 candidate should transfer into the PC model and a new measured synthesis.
