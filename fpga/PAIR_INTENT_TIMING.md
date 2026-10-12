@@ -76,22 +76,74 @@ include separate cycle and cycle-functional executions; they are not unique
 workload cycles or gameplay measurements. There is **no measured cycle gain**;
 the intended benefit is a shorter physical dependency, still unmeasured.
 
-The exact-owner coordinator `queue_pair_intent_canonical.py` observed directed
-unit invocation `715fecee043343fb8a0fa8bdc01663a5` close successfully and has
-started the **unchanged canonical gate**. Its own unit invocation is
-`738217af094449d49991c35afee25702`; native evidence is under
-`pair-intent-core-r1/verify-*.json` and `generic.log`. Parent canonical failures
-remain red and unwaived. This candidate does not inherit a differential pass.
+The **unchanged canonical gate** closed in **397.078 seconds**, native exit 2:
+**7 functional PASS / 101 FAIL**. All 20 cycle traces exactly match the parent;
+no golden, mask or tolerance changes were made. Its coordinator invocation
+`738217af094449d49991c35afee25702` is terminal, not still running. Evidence is
+under `pair-intent-core-r1/verify-*.json` and `generic.log`. These failures remain
+**red and unwaived**; this candidate does not inherit a differential pass.
 
-Whole-PC transfer, short-seed CRC/cycle comparisons, FPGA export/lint,
-synthesis/timing and routed/physical acceptance remain outstanding. The
-standard suite and gameplay performance have not been run on this candidate.
+The separate same-input replay `pair-intent-replay-r1` passed all **108 programs
+/ 80,800 records** in **75.999 seconds**, including every architectural field
+and exact candidate trace reproduction. Both models used the same retained
+input image and QEMU initial ESP; no stack-field normalization was applied.
+That A/B result does not turn the canonical QEMU gate green.
+
+## FPGA-matched integration
+
+`pair-intent-soc-r1` built successfully with a fresh private harness object and
+its matching generated header. Verilator reports **23.270 seconds** native work;
+the controller's **99.781 seconds** includes waiting for the replay's resource
+lock. Model SHA-256:
+`a02884bdd6f12dd6090ac0207d26f6aa1363c5aa2647448ca21d28ed8fea8d1e`.
+All 102 shared core RTL files match the directed candidate. The PC changes are
+the four hardware files plus the inherited simulation-only `core_mem_chain.svh`
+probe; the latter disappears under `SYNTHESIS`. All 156 simulation defines and
+the posted-16 transport are unchanged. The 98 inherited full-PC structural
+warnings are unchanged, not claimed resolved.
+
+`pair-intent-fpga-r1` exports 190 payloads, checks all 170 common HDL inputs,
+and retains 158 hardware defines, 40/100 MHz clocks, full P5 caches and the
+original filelist closure (117 units / 49 include edges). Manifest SHA-256:
+`06a4179627952a02aa8444fe91b2a44d5f1dd11bf1f56c5bd0ff07bc232d7777`.
+The Tcl source contract passed. Strict **CPU-hierarchy** hardware-profile lint
+passed in **3.878 seconds**; this is not a full-SoC lint or timing pass.
+
+The two unchanged short cold CoreMark seeds are running under exact invocation
+`d9a1f4cead2a488ebb394708db8191f3`, CPU 11. Their purpose is CRC and exact
+parent/candidate cycle comparison, not duration-valid scoring. They must close
+and pass the independent audit before synthesis starts.
+
+Reproduction tools:
+
+- `build_pair_intent_soc.py`: checked PC transfer and private native build.
+- `freeze_pair_intent_rk_candidate.py`: byte-exact FPGA export.
+- `lint_rem_split_rk.py`: strict 158-define CPU-hierarchy lint.
+- `prepare_pair_intent_synthesis.py`: bounded synthesis/timing controller
+  generation. Five tests check the four-file core / five-file PC distinction,
+  complete replay admission, same clocks and unchanged resource lifecycle.
+- `test_pair_intent_transfer.py`: four tests check every intended transformation
+  and rejection of omitted, extra or unrelated byte changes.
+
+Synthesis/timing and routed/physical acceptance remain outstanding. The standard
+suite and gameplay performance have not been run on this candidate.
 Do not launch a new Vivado synthesis before those source/profile checks and
 the unchanged disk/memory reserve admission pass. Keep a single Vivado family.
 
 Closed cache compiler products are stored in per-case verified
 `compiler-products.tar.zst` archives; binaries, headers, source and native
 logs remain unpacked. This is lossless space recovery, not evidence deletion.
+
+`closed-pair-intent-reserve.tar.gz` retains 67,836 closed traces/logs:
+2,044,895,076 original bytes became 113,330,333 archive bytes (**1.80 GiB**
+recovered). `closed-pair-intent-build-reserve.tar.gz` retains another 49,200
+closed raw test logs and compiler-cache files: 582,895,163 bytes became
+83,509,240 (**476 MiB** recovered). Every member's size and SHA-256 was checked
+before removing its unpacked copy; all current pinned inputs stayed unchanged.
+Sources, binaries, images and result receipts remain unpacked, including the
+failed first cache experiment. Exact recovery manifests/hashes are in the
+adjacent `*-plan.json`, `*-verified.json` and `*-closed.json` files. Restore
+archives relative to the evidence root before rerunning raw-trace collectors.
 
 Candidate gameplay IPC is **unmeasured**. Older verified simulation baseline:
 **0.51030715 total U+V retirement-event IPC**, model `2b4d7a48`, cycles
