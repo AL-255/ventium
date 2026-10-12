@@ -173,13 +173,20 @@ independently rehash unchanged:
 
 These are **111,728 candidate architectural records with no observed cycle
 change**, not a gameplay gain. Receipts: `pair-now-{memory,store,held,fp}-r1/`.
-The original 16-fixture FP fault matrix is now running as
+The original 16-fixture FP fault matrix closes native zero as
 `ventium-pair-now-fault-oct12.service`, invocation
-`8c39731e21174073a7433df693eb389a`. The unchanged canonical gate is queued on
-the shared build lock as `ventium-pair-now-verify-oct12.service`, invocation
-`f358fc432c534afa9922955ae9f7d3c1`. Neither pending run is counted as passed.
+`8c39731e21174073a7433df693eb389a`: **32 model comparisons / 23,585 candidate
+records**, with all 1,489 input pins and 609 artifacts independently rehashed.
+Its receipt is `1fbcb79f215c0d11c6c2b4dca4cc24d8e72eeb550d4835a5a146f91b258470d0`.
+The unchanged canonical gate closes **FAIL: 7 PASS / 101 FAIL** as
+`ventium-pair-now-verify-oct12.service`, invocation
+`f358fc432c534afa9922955ae9f7d3c1`. Native make exits 2; its controller exits 1
+after 653.75 seconds including lock wait. All 20 complete parent/candidate cycle
+streams match and the input pins are unchanged. The canonical failure is not
+waived by the directed checks.
 No new synthesis, routing, full-PC or FPGA run is launched for this derivative.
-The separate AGI/reference priming ACK dependency still needs a checked fix;
+The separate [AGI/reference priming ACK candidate](PRIME_NOACK_TIMING.md) is
+now undergoing native qualification;
 do not claim this isolated cut can by itself reach 40 MHz.
 
 Verified gameplay baseline: **0.51030715 total U+V simulated retirement-event
