@@ -264,14 +264,60 @@ the mailbox/AXI gate and two wire runs. Its receipt is
 `ventium-ps2-mailbox-r2.rDP90LzX/audit.json`, SHA-256
 `3d7e60fdf663fc42b40e1d5434c105bebfe7a302b2a4b2ecf6f3232b2f0dd3f6`.
 
+## October 12: software owner and native CSR test
+
+[`ven_ps2_mailbox_host.py`](board-tools/ven_ps2_mailbox_host.py) now connects the
+mouse policy to ordered register callbacks. It checks the exact capability and
+requires a clean, held guest reset when first attaching. Each poll uses bounded
+generation/status-checked reads and performs at most one store. Delayed command
+confirmation never causes a speculative repeat store; TX sequence advancement
+admits a byte, and acknowledgement of a retained delivery/abort event resolves
+it before RX is consumed. Reset invalidates old policy ownership. Unexplained
+errors or ambiguous I/O failures poison the adapter rather than silently retrying.
+It does not open `/dev/mem`, reset the guest or permit a fresh policy to attach
+to an already running device.
+
+All **25 software-adapter tests** pass, covering delayed writes, immediately
+completed TX, back-to-back RX, retained-data corruption, read-boundary resets,
+stale acknowledgements, deadlines, sequence exhaustion and foreign ownership.
+These tests use an independent transaction-level register model.
+
+[`run-ps2-mailbox-host-gate.py`](run-ps2-mailbox-host-gate.py) separately runs the
+actual adapter and policy against the actual mailbox RTL through
+[`tb_ps2_mailbox_host.sv`](tb_ps2_mailbox_host.sv). **722 register transactions**
+pass, including BAT/ID, reporting enable, signed motion and packet resend,
+RX preemption of queued TX, READY-to-store rejection, stale-event acknowledgement
+across reset, and RX-abort acknowledgement. The serial side is explicitly a
+BFM: this test does **not** include the 8042, wire framing, AXI bridge, native
+MMIO, Windows or the board. The earlier wire and AXI tests remain separate
+evidence, not an end-to-end service qualification.
+
+Retained run: `external/tmp/ventium-ps2-mailbox-host.IQ4KEutH`, service
+`ventium-ps2-mailbox-host-oct12`, invocation
+`86102e3b40484831b57cfced148f408d`. Native exit is zero, the child is reaped,
+actual affinity is CPU 12, and the service peak is 14,262,272 bytes under a
+128-MiB/no-swap limit. Source/tool pins remain unchanged. No active FPGA source
+or timing input is modified. Reproduce using a fresh empty external directory:
+
+```sh
+systemd-run --user --unit=ventium-ps2-mailbox-host-check --remain-after-exit \
+  --property=MemoryMax=128M --property=MemorySwapMax=0 \
+  --property=TasksMax=16 --property=CPUQuota=100% --property=RuntimeMaxSec=120 \
+  --setenv=TMPDIR=/home/yukidama/external/tmp --setenv=PYTHONDONTWRITEBYTECODE=1 \
+  /usr/bin/taskset -c 12 /usr/bin/python3 -B \
+  /home/yukidama/github/ventium/fpga/run-ps2-mailbox-host-gate.py \
+  --out /home/yukidama/external/tmp/FRESH_EMPTY_DIRECTORY
+```
+
 ## Still required before physical mouse acceptance
 
 1. Integrate the now-tested general mouse policy with an actual PS-side service
    and UI input producer. Do not introduce guest-specific command recognition
    or synthetic cursor writes. Keep the protocol/wire gates passing.
-2. Complete the PS adapter against the explicit mailbox ABI, including MMIO
-   ordering, exclusive ownership, reset races and delivery-before-RX ordering.
-   The leaf/AXI tests do not establish a working Linux service or UI producer.
+2. Supply and verify the native ordered MMIO backend and exclusive-owner Linux
+   service for the tested adapter, then exercise that adapter through the actual
+   8042/wire/AXI path. The separate leaf/AXI/wire tests do not establish this
+   complete path or a working UI producer.
 3. Incorporate the separately prepared overlay in a source-matched candidate,
    run full integration lint/verification, retain the 40 MHz timing requirement,
    and implement/deploy it. Do not edit the active frozen synthesis inputs.
