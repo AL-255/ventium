@@ -78,6 +78,21 @@ transfer. Any selected final processor still requires the canonical differential
 gate, full standard suite and physical FPGA Win95/UI and Quake validation.
 No latency, area or frequency gain is claimed here.
 
+The [full-engine runner](../verif/srt/run_div_exp_miter.py) and
+[testbench](../verif/srt/tb_div_exp_miter.sv) are now **prepared, not run**.
+They compare the actual engines' registered arithmetic state, control, valid
+results and completion cycles, with 29,537 operations per configuration.
+Coverage requirements include both remainder-port configurations, all 64
+normalization positions in either divide operand, six exponent boundaries,
+all RC/PC encodings, both erratum settings, special operands, interleaved
+divide/sqrt/remainder, 126 reset points and ignored starts while busy. Three
+separately compiled mutations must fail in the real engine. The extra PC=01
+and unusual extended encodings test parent equivalence, not independently
+established ISA correctness for those inputs. Compilation requires the existing
+heavy-build lock and cannot overlap the active synthesis or clock audit.
+Preparation checks validate Python syntax, distinct mutation sources and the
+operation-count calculation; they do **not** qualify the testbench or candidate.
+
 Gameplay baseline: **0.51030715 total U+V simulated retirement-event IPC**,
 older model `2b4d7a48`, cycles **1,200,065,237–1,300,065,237**. This experiment
 has no gameplay measurement; that baseline is not board IPC or a full-demo mean.
