@@ -393,10 +393,26 @@ are unchanged. Observer `ventium-fresh-pair-report-queue-oct12`
 then independently audits the native result and original-clock timing;
 it cannot retry synthesis, implement or deploy.
 
-No fresh candidate synthesis **result**, routed or gameplay result is claimed.
-The last completed synthesized
-candidate is still READ-OWNER at **31.040477 MHz**; best remains PAIR-INTENT
-at **31.651579 MHz**, both short of the required **40 MHz**.
+Fresh synthesis closed native **0** after **1,983.655 seconds**, the same exact
+owner `9b6fbfe5476145ed986aa5b0ac56ae31`. Its independent audit rechecked
+**4,684 input pins**, all 158 defines and **148 actual native HDL inputs**.
+The only changed payload is L1. Checkpoint/report/source artifact hashes were
+also rechecked independently after closure. There was no OOM, resource stop or
+controller failure; peak scope RAM was **8,589,910,016 bytes**, swap
+**408,125,440 bytes**. This is successful synthesis, not timing acceptance.
+
+Utilization is **185,621 LUTs / 54,948 FFs / 277.5 BRAM36-equivalents / 47
+DSPs**, versus READ-OWNER's 185,368 LUTs / 54,950 FFs / unchanged memories/DSPs.
+Diagnostics are **0 errors, 1 critical warning, 1,564 warnings**. The critical
+warning is the inherited generated PS8 scoped-XDC clock target; it is not
+silently counted as clean. The timing stage still must audit the actual
+40/100 MHz clocks, structural DRC and both setup/hold reports.
+
+That timing stage is now running as `ventium-fresh-pair-clock-oct12`, invocation
+`b02abead37244159aa52002d1b334b4b`, launched automatically by the exact-owner
+observer. There is **no fresh Fmax result yet**, nor routed/gameplay acceptance.
+The last completed timing result is READ-OWNER at **31.040477 MHz**; best
+remains PAIR-INTENT at **31.651579 MHz**, both short of the required **40 MHz**.
 
 ## Remaining acceptance
 
