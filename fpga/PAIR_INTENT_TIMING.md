@@ -157,6 +157,28 @@ Closed cache compiler products are stored in per-case verified
 `compiler-products.tar.zst` archives; binaries, headers, source and native
 logs remain unpacked. This is lossless space recovery, not evidence deletion.
 
+## Frozen U+V observation check
+
+`check_frozen_uv64.py` compiled the exported image's actual `retire_n`
+counter block and debug scan mux verbatim with all 158 hardware definitions.
+`pair-intent-uv64-r1` passed **269 clocks / 34,688 scan checks**: reset,
+all four U/V pulse combinations (V alone is ignored), low-word carry,
+64-bit wrap, selectors 76–79 and every default selector. The wrap stimulus
+seeds only the isolated counter leaf, never processor or guest state.
+Deliberately counting U alone and swapping the exported halves both failed
+natively at the expected assertions. All 193 input pins and generated
+source/binary/log hashes were independently rechecked after native closure.
+Unit invocation `8e4ac84f769148caad568cd203355852` exited successfully on CPU 12;
+the three cases took **0.148 seconds**, with **14,368,768 bytes** peak memory.
+
+This validates the frozen counter/mux fragments, **not** their full-SoC
+connectivity, CDC sampling, processor execution, gameplay IPC or FPGA
+acceptance. It does not alter the synthesizing candidate. Actual hardware
+measurement must still use the UV64 capability check and coherent read
+protocol, not the legacy U-only counter.
+
+## Recoverable evidence compaction
+
 `closed-pair-intent-reserve.tar.gz` retains 67,836 closed traces/logs:
 2,044,895,076 original bytes became 113,330,333 archive bytes (**1.80 GiB**
 recovered). `closed-pair-intent-build-reserve.tar.gz` retains another 49,200
