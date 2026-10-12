@@ -1,6 +1,6 @@
 # Read-only successor-hint commit — October 11, 2026
 
-**Whole-core directed tests pass; timing and full-system acceptance pending.**
+**Directed tests and native synthesis pass; timing and full-system acceptance pending.**
 Target: at least **40 MHz synthesized Fmax**, preserving UV + relocated/system
 fast pipes, fast loads/stores and full P5 caches. The immediate predecessor
 measures **30.34809 MHz**, unplaced; no new frequency result is claimed.
@@ -172,6 +172,38 @@ the original clocks. It retains the 8 GiB RAM / 6 GiB swap caps,
 Admission still requires over 6 GiB free disk and twice measured predecessor
 growth above that floor. No user applications are killed; no route/deploy is
 authorized by this diagnostic controller. **40 MHz remains unachieved.**
+
+### R2 native synthesis closed; original-clock audit running
+
+The retained R2 controller closes native zero in **1,940.33 seconds** on
+October 12 UTC (October 11 local time), invocation
+`d9aa6de7a98c4962b52685ceb4db8d5b`. The independent synthesis audit passes:
+all **1,049 input pins**, **156 actual hardware definitions**, and **148 native
+Verilog source reads** are checked. Exactly the read-hint header differs from
+the predecessor export. A separate rehash of started inputs, native source
+pins and output artifacts also passes. No OOM, resource stop or controller
+failure occurred; peak scope RAM was **8,589,828,096 bytes**, swap **zero**.
+
+| Synthesized resource | Readiness predecessor | Read-hint commit |
+| --- | ---: | ---: |
+| CLB LUTs | 187,437 | 184,061 |
+| Registers | 54,680 | 54,610 |
+| BRAM tiles | 277.5 | 277.5 |
+| DSPs | 47 | 47 |
+
+This removes **3,376 LUTs (1.80%)** and 70 registers with no measured directed
+or short-CoreMark cycle-count change. It is not yet a timing result. The log
+still has one critical clock warning and 1,565 warnings; no blanket warning-free
+or routed-sign-off claim is made. Audit SHA-256:
+`0861bd9890b0245a2f74077ca5057873e6f60a1282640c7baf22e471f2a9aa97`.
+Checkpoint SHA-256:
+`9262331c62aa74413bbf5a785e927fcdea1a425507941bcf1d3f94c449bf8d15`.
+
+The queued original-clock audit **actually starts at 00:09:27 UTC**, native
+controller invocation `f34d771a7c8e46448d1763059ee10d9d`, reopening this actual
+project and the measured predecessor. At 00:10 UTC it remains live; final
+frequency/setup/hold and clock-audit closure are pending. Its unchanged
+40 MHz core / 100 MHz PL constraints are not proof of achieving 40 MHz.
 
 Eight regenerable PCH files from the two **closed** same-line cache runs were
 removed, reclaiming 668,977,594 bytes. Exact target/hash and deletion receipts
