@@ -294,6 +294,79 @@ audits its native closure, then may launch exactly one
 is `prime-noack/timing-queue-clock-r2`. At this entry synthesis has completed
 RTL optimization phase 2 and is still running; no candidate Fmax is available.
 
+### Timing-driven run stopped by its resource guard
+
+At **02:29:57 UTC**, the same synthesis closes native **143**, after **2,151.63
+seconds (35m 52s)**. The 13 GiB combined-memory monitor sends TERM during
+`Timing Optimization`; the recorded peak is 8,589,934,592 bytes RAM and
+5,405,790,208 bytes swap. All **214 resource samples record zero OOM,
+OOM-kill and OOM-group-kill events**. Input hashes remain unchanged and there
+is no controller exception. This is a deliberate resource stop, **not successful
+synthesis and not an OOM kill**.
+
+The reporting observer closes failed on the exact terminal synthesis owner;
+it does not launch its clock-report stage. The Vivado scope is gone. No completed
+candidate DCP, utilization or Fmax result exists. Receipt:
+`prime-noack/synthesis/closed.json`, SHA-256
+`f9d1e7e114673fe6a528d623ffe4098a55fa5fcc938e0f05d1a01b820b8f688c`.
+
+The phase/resource evidence guides the next measurement: area optimization
+finished, but timing optimization grew from about 7.18 GiB combined at 1,601
+seconds to 13.03 GiB at the stop. The previous **logic-only** parent completed
+in 1,988.98 seconds under the same limits. This identifies the phase in which
+memory grew; it does not prove a particular RTL cone caused that growth.
+Do not raise the caps or repeat the balanced run unchanged.
+
+### Matched-mapper diagnostic launched, October 12 02:35 UTC
+
+[`prepare_prime_noack_logic_measurement.py`](prepare_prime_noack_logic_measurement.py)
+prepares fresh `synthesis-logic-r1` / `clock-logic-r1` controllers and
+`after_prime_logic.py`. It independently checks the failed native owners,
+resource samples, absence of a completed checkpoint and **3,307 input/evidence
+pins**, then executes the actual Tcl source contract for `logic_only`.
+
+The **190 frozen payloads, manifest, 156 definitions, 40/100 MHz clocks and
+tested PC model remain byte-identical**. The immutable manifest truthfully
+records its original balanced source-contract check; the new preparation and
+native launch explicitly record the separate `Default -no_timing_driven`
+measurement override. Native synthesis auditing must verify that exact command
+for both parent and candidate. The report guard checks both this option and the
+Default directive. All reporting commands, native monitor/stop/reap code,
+memory limits, disk admission and timeout remain unchanged. This is a
+**matched-mapper timing diagnostic**, not weaker timing acceptance: synthesized
+Fmax must still reach at least 40 MHz, and routed/board qualification remains
+separate.
+
+**Six host tests pass**, covering native stop evidence and negative cases,
+actual Tcl guard execution, unchanged monitor/limits, explicit source/mapper
+identity and fresh single-owner dependencies. The first preparation attempt
+rejects string paths passed to a Path-only hashing helper, before publication;
+the corrected adapter and regression check pass. The native preparation then
+completes. These tests are not RTL or timing results.
+
+Before launch, **516 regenerable `.rtd` / `.tim` cache files from only the
+closed failed synthesis** are removed, reclaiming **822,120,448 allocated
+bytes**. Exact targets and before/after retained hashes are recorded in
+`failed-synth-cache-{plan,closed}.json`. All logs, source, native commands,
+constraints, project metadata and receipts are retained. No candidate DCP
+existed. These failed incremental/realtime databases have no byte-exact backup;
+they regenerate from retained inputs. No live cache or other run is deleted.
+
+Actual launch at **02:35:01 UTC**:
+
+- Synthesis owner `ventium-prime-noack-logic-synth-oct12.service`, invocation
+  `13612f52b4f742abadac87f029fb6297`.
+- Sole native scope admitted **02:35:05 UTC**, invocation
+  `c689fc953fd644588a272719215ce813`.
+- Sequencing owner `ventium-prime-noack-logic-queue-oct12.service`, invocation
+  `571e46c7e86a4c1b876f641dafa4dae3`.
+
+Admission has **7,226,908,672 bytes free**, above the unchanged growth-derived
+7,208,493,056-byte requirement. The runtime stop floor remains 4 GiB. No
+placement, routing or deployment is authorized by these controllers. At this
+entry the new diagnostic is **running**, with no candidate Fmax result yet;
+the last measured parent remains **28.88838 MHz**.
+
 Canonical correctness, original full CoreMark seeds, cold Win95 desktop/UI,
 full original Quake timedemo and actual candidate FPGA validation remain
 required. No current candidate gameplay measurement exists.
