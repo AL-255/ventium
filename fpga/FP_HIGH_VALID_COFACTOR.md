@@ -2,7 +2,8 @@
 
 **Leaf/cache and directed whole-core checks pass; canonical verification remains
 FAIL. PC transfer, frozen CPU lint and both short CoreMark preflights pass;
-synthesis is running. No new Fmax, standard-suite or physical FPGA acceptance.** The target
+synthesis and its source audit pass; native timing comparison is running.
+No new Fmax, standard-suite or physical FPGA acceptance.** The target
 remains **at least 40 MHz post-synthesis Fmax**, UV+fast, full P5 caches.
 
 The live synthesis also exposed an independent
@@ -202,6 +203,21 @@ controller invocation `af417b8fd0ce45cabd18a926c3a041f2`, scope invocation
 is `ventium-fp-high-valid-synth-oct12`; the independently queued timing audit
 is `ventium-fp-high-valid-timing-queue-oct12`, invocation
 `3762068731c449f7ad25d7502e2289e6`. No route or deployment is launched.
+
+Synthesis now closes native zero in **1,940.26 seconds**, with unchanged inputs,
+no OOM events and no resource stop. Peak resident memory is **8,291,155,968
+bytes** and peak swap **2,199,810,048 bytes** (separate peaks, not a simultaneous
+sum). The independent closure audit checks all **3,872 pins**, 158 definitions
+and 148 native read-Verilog files. The inherited PS8 XDC `create_clock` unknown
+pin warning remains; it is not silently waived as timing success. The queued
+native timing audit checks the actual 100 MHz PL / 40 MHz core clocks and
+compares the better MEMDIV-QUERY checkpoint. It is now live as
+`ventium-fp-high-valid-clock-oct12`, invocation
+`ff925880906346c49c3d9f34891206cb`.
+
+While waiting, the [read-ACK absorption analysis](../verif/l1/READ_ACK_ABSORPTION.md)
+passes abstract and source-extracted checks. This is an unqualified private
+derivative, not a change to this frozen run or a measured timing improvement.
 
 Then require >=40 MHz synthesized Fmax, routed closure and physical UV-fast
 Windows 95 cold desktop/UI and original FreeDOS Quake full timedemo validation,
