@@ -514,8 +514,8 @@ inherited one-slot test asserted no pair intent, so the new fast-ready result
 was deliberately unobserved. The fixture now reserves intent with credit
 absent and no actual V request, checks that both readiness results are false,
 and still requires the solo U write to complete. Both A/B instances see this
-same public traffic. A host test guards this qualified observation; native
-mutation sensitivity remains pending execution.
+same public traffic. A host test guards this qualified observation; the later
+native matrix below confirms that the missing-credit mutation is detected.
 
 `build_intent_ready_core.py` implements the follow-on whole-core build
 procedure. It requires the closed full-profile cache result,
@@ -569,6 +569,16 @@ Unmodified canonical verification is now running as
 the real AXI backend, all record comparisons, masks, goldens and timing bands.
 No new canonical result is claimed while that owner is live. Broader core/FP/
 fault regressions, a full-PC transfer and timing measurement remain pending.
+
+`run_intent_ready_core.py` binds the unchanged eight-corpus plan to exact
+parent `e1621913` and candidate `6fa8f7ad` model hashes. Three additional host
+checks pass (**22 total** for these adapters), verifying byte-identical native
+plan/comparison/coverage logic and rejecting lifecycle drift. It retains the
+4,240-probe and exact cycle/intent/pair coverage requirements, not just exit
+status. `ventium-intent-ready-corpora-oct12`, invocation
+`b587a086b6124ea9984ac3d0934254ef`, is queued behind the canonical job's shared
+lock; its expensive work has **not started** at this entry. Output will be
+`intent-ready-checks-r1`. No directed regression result is claimed yet.
 
 The canonical gate remains **7 PASS / 101 FAIL**, red and unwaived.
 Required next: achieve
