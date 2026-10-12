@@ -131,10 +131,42 @@ Strict hardware-profile CPU lint closes native zero in **3.63 s** as
 `b89b28d17b324e0dac111285210f3df6`. The adapter preserves all structural-error
 classes and admits only the exact 157th flag. Full SoC lint is not claimed.
 
-Still required: new synthesis measurement,
-canonical correctness, full standard suite, and actual current-candidate FPGA
-Win95/UI and original Quake timedemo. No Vivado measurement has been started
-for this combined candidate.
+Still required: new synthesis measurement, canonical correctness, full standard
+suite, and actual current-candidate FPGA Win95/UI and original Quake timedemo.
+
+## Native synthesis in progress
+
+At **2026-10-12 05:31:51 UTC**, the combined candidate starts its first native
+synthesis. There is **no new Fmax result yet**. The previous **28.88420323 MHz**
+measurement remains the baseline, below the requested **40 MHz**.
+
+[The preparation recipe](prepare_payload_current_synthesis.py) derives five
+controllers/audits from the byte-pinned, completed PRIME logic-only experiment.
+Three preparation tests pass. The entire resource monitor and stop/reap code
+is byte-identical to that parent; proof checks rehash the tested core, PC model,
+short CoreMark runs, lint and frozen hardware source closure. Canonical failure
+remains explicit. The first preparation attempt rejects a lexical-versus-resolved
+external-path mismatch before creating outputs; the corrected recipe and tests
+handle the template's literal path explicitly.
+
+Native owner `ventium-payload-current-synth-oct12.service`, invocation
+`a0ce840d0860406ebdd6fb2d64dd0610`, owns the sole `ventium-vivado.scope`
+invocation `35dfee26af8a4f0f9a1c5e64fbdddaee`. Evidence is under
+`payload-current-synthesis-r1`. The retained queue owner is
+`ventium-payload-current-timing-queue-oct12.service`, invocation
+`2f2f9d9b3fce4dfaac6ccdcb59729926`; its script and receipts remain in the evidence
+root. It launches the read-only native clock/netlist audit only after successful
+synthesis closure and an independent DCP/source/define audit.
+
+The run preserves **40 MHz core / 100 MHz PL** constraints, the matched
+`Default -no_timing_driven` mapper, 157 hardware definitions, full P5 caches,
+UV and fast execution. A constraint or successful synthesis alone cannot satisfy
+the Fmax requirement. RAM/swap caps remain **8/6 GiB**, combined early stop
+**13 GiB**, host RAM/swap floors **2 GiB**, and disk stop floor **4 GiB**.
+Admission retains both the **6 GiB** minimum and twice the older measured
+parent's **1,456,762,880-byte** growth above the disk floor (a stricter
+**7,208,493,056-byte** admission threshold). The native timeout remains 45 minutes.
+No implementation, bitstream programming, or acceptance waiver is queued.
 
 ## Disk preservation
 
@@ -153,6 +185,29 @@ with `tar -xzf ARCHIVE -C EVIDENCE_ROOT` when raw traces are needed:
   `862022d47c131fc18785a1a2d0e7ba72ca8931bacd948ccc60ca78c9bf845d6b`.
 - `payload-current-integer-r2.tar.gz`:
   `bfc39e8758bd3a047c0767d4aaeedc2980eeb748c7b85c01d03279ea4b841ead`.
+
+Before synthesis, further closed diagnostics are losslessly archived, every
+member verified against its original SHA-256, and only then raw text removed:
+
+- `closed-timing-text.tar.gz`: 24,258 logs/traces from closed branch-residency
+  and timing-combo experiments;
+  `f153bae665580e1121c1b4ad15020e38fe5e2e69bbc26b2e013d15b8ee7f4ee3`.
+- `closed-timing-reports.tar.gz`: four large closed branch-residency capture-cone
+  and primitive-cell reports;
+  `71e16c2074988a56ef88a46bf70c2e1062f4735dc3e135fe1f3234f29405eb0b`.
+- `closed-ancestor-text.tar.gz`: 5,865 unpinned diagnostic text files from the
+  closed BUS/fragment timing ancestors;
+  `9e0103e949d41edd1bbe22ccc637ca36a5ddb0f4bae4c8cc94710b1bbc220e4c`.
+
+Restore these three archives with `tar -xzf ARCHIVE -C /home/yukidama/external/tmp`.
+Plans and closure receipts remain beside them. The initial text-archive verifier
+is stopped before deletion because random gzip seeks for hard links repeatedly
+decompress the archive; a sequential verifier completes all member checks,
+including links to previously verified bytes. Also removed two unpinned, closed
+PC-model `.gch` caches (**190,685,184 allocated bytes**); retained headers and
+build inputs regenerate them. Sources, model binaries, media, checkpoints and
+current synthesis input pins remain intact. Free space rises from about 4.7 to
+7.1 GiB without reducing the launch reserves.
 
 Gameplay IPC is **unmeasured for this candidate**. Last verified baseline:
 **0.51030715 total U+V simulated retirement-event IPC**, older model `2b4d7a48`,
