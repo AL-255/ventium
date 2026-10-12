@@ -209,7 +209,7 @@ CRC/tick results and no OOM. Audit SHA-256:
 `95c9c475fea9ad8bffbd584c15a4a9593de9654fad7a2e2521b7480b31fe2c94`.
 These are not duration-valid scores or the full CoreMark acceptance seeds.
 
-## Combined synthesis launched
+## Combined synthesis closed; timing audit running
 
 [`prepare_rem_split_synthesis.py`](prepare_rem_split_synthesis.py) derives the
 next controllers from the completed 30.30487 MHz run. Two preparation tests
@@ -219,12 +219,29 @@ owner `ventium-rem-split-synth-oct12`, invocation
 `64cbd5aaca99454689260a0c166cbc9b`. Sole Vivado scope invocation:
 `455f024c3882426a9175bd5a420ec65a`.
 
+Synthesis closes native zero at **07:26:18 UTC**, after **1,914.75 s**. The
+independent audit rechecks **4,318 input pins**, all 158 ordered definitions,
+148 native Verilog inputs and the exact three-file delta. Actual utilization is
+**184,969 LUTs / 54,596 registers / 277.5 BRAM tiles / 47 DSPs**: 910 fewer LUTs
+and two fewer registers than the matched parent, with BRAM/DSP unchanged.
+This is not an isolated attribution to either of the two changes or an IPC gain.
+The native summary has zero errors, one critical warning and 1,561 warnings;
+the generated-PS-clock constraint warning still requires the independent
+clock-net audit, not a clean-warning claim. There is no OOM/resource stop. Scope
+peaks are 8 GiB RAM and 74,665,984 bytes swap, within the original caps.
+
+DCP SHA-256:
+`538e3b5e4dd6ac5bb09ae38d291e979a24005b05f1729db3b39543879a05ee6a`.
+Independent synthesis audit SHA-256:
+`1e55b7ec067965f724d0adabc0ca1f08ed1b22d6fc626ba074564e1aeba74f8d`.
+
 The queue `ventium-rem-split-timing-queue-oct12`, invocation
-`86989d99845a4c3dadbb123d648f1e71`, will run the native clock audit only after
-successful synthesis and an independently audited DCP. Evidence is in
-`synthesis-r1`, `clock-r1` and `timing-queue-r1` beside the tests. At this entry
-there is **no new Fmax measurement**; 30.30487 MHz remains below 40 MHz.
-No implementation or deployment is queued.
+`86989d99845a4c3dadbb123d648f1e71`, admits the native clock audit only after
+that closure. `ventium-rem-split-clock-oct12` is now running under invocation
+`f80241e0860b47f99e59a1e49b09a2e0`. Evidence is in `synthesis-r1`, `clock-r1`
+and `timing-queue-r1` beside the tests. At this entry there is **no new audited
+Fmax measurement**; 30.30487 MHz remains below 40 MHz. No implementation or
+deployment is queued.
 
 The matched `Default -no_timing_driven` mapper, real 40/100 MHz constraints,
 UV+fast mode and full P5 caches are unchanged. RAM/swap remain capped at 8/6 GiB,
@@ -232,10 +249,12 @@ combined early stop 13 GiB, host floors 2 GiB, disk floor 4 GiB. The unchanged
 7,208,493,056-byte conservative disk admission passes at 7,279,157,248 bytes;
 no resource limit was raised to admit this run.
 
-Next: close native synthesis and measure both critical paths against 40 MHz.
+Next: close the clock audit and measure both critical paths against 40 MHz.
 Canonical correctness, full standard suite and actual FPGA Win95/UI and Quake
 timedemo remain required; none is waived by the directed tests. The inherited
 hosted-mouse hardware gap described in the parent timing audit also remains.
+The separately tested service/MMIO work in [PS2_DEVICE.md](PS2_DEVICE.md) is
+not incorporated in this frozen hardware export and is not a board/UI pass.
 
 ## Scratch retention
 
