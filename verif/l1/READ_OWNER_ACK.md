@@ -82,23 +82,60 @@ An independent rehash found no drift in the 37 leaf, 65 cache and 2,605
 whole-core input/artifact pins. The full-state/cycle drivers
 `run_read_owner_core.py` and `run_read_owner_regressions.py` retain the existing
 paired-intent and wide-FP/fault regression plans, changing only exact model
-identities and the one-file delta contract. The wider FP/fault plan is running:
+identities and the one-file delta contract. The wider FP/fault plan **passed
+all 12 phases in 615.529 seconds**:
 `ventium-read-owner-regressions-oct12.service`, owner
 `bbfbd546679f444fb1dd1e36e7ce7128`, guarded scope
 `a2c9f0f3793f44db8409e663e2fe2360`, actual CPUs **0–7**. Its 12 phases include
 six operand-boundary matrices, FP faults, integer, memory, held requests,
-branches and same-input canonical replay. No result is claimed yet.
+branches and same-input canonical replay. All **32 FP fault runs** pass full
+QEMU state comparisons. Replay passes **108 programs / 80,800 records**, without
+masking the unresolved canonical failures. Independent checks rehashed 2,629
+input pins and every phase's native receipt; all remain unchanged.
 Six source-transfer tests pass, checking the exact one-file core/PC/FPGA delta
 and rejecting missing edits, added bytes, wrong parents and reapplication.
 `read-owner-soc-r1/prepared.json` prepares the full-PC transfer: all 102 shared
 core/FP sources match, only L1 differs from PAIR-INTENT, and the same 156
-simulation defines and posted-16 transport remain. No compiler or new FPGA
-export has started yet; this is explicitly unqualified.
+simulation defines and posted-16 transport remain. Its build controller
+`ventium-read-owner-soc-oct12.service`, invocation
+`8a8556872377450fbc5047b88c9cbad5`, **closed successfully** in **177.357 seconds
+including its shared-lock wait**. The private host object uses the matching
+generated root header. The inherited **98 full-SoC structural warnings** are
+unchanged, not a clean full-SoC lint result. Model SHA-256:
+`ab2a70233aebf761de2e81019c16459d86805ac7a2f2b9730bcabcc918534440`.
+
+The new `read-owner-fpga-r1` export passes its source contract: **190 payloads**,
+**170 matched HDL inputs**, **158 hardware defines**, unchanged 40/100 MHz
+clocks, full P5 caches and posted-16 transport. Only `ven_l1d.sv` differs from
+PAIR-INTENT. Manifest SHA-256:
+`90e4ec12f6d61699a175484366450a41d67a8d7b1717b3d228f8b5b0ab8bb87c`.
+Strict CPU-hierarchy lint passes in **3.878 seconds**, invocation
+`5ec358f7611149a2a0f7626d5b0a8cd2`; six structural warning classes remain errors.
+This is not full-SoC lint, timing closure or hardware acceptance.
 Five synthesis-preparation tests also pass. The planned controllers retain the
 closed resource lifecycle byte-for-byte, require the complete FP/fault matrix
 and replay evidence, and use **PAIR-INTENT / 31.651579 MHz** as both source and
 timing control. The native Tcl timing audit and original 40/100 MHz clocks are
 unchanged. These tests do not generate or launch a Vivado run.
+The checked controllers have now been generated under
+`read-owner-{synthesis,clock}-r1`; preparation itself launched no Vivado.
+
+Short cold CoreMark preflight owner `32c0d97ff9bf4d57b6e96b10c3475eb5`
+(`ventium-v-carry-cm10-read-owner-oct12.service`) has closed the performance
+seed in **214.776 seconds**: correct CRCs, **4,767,218 benchmark cycles**,
+3,409,929 U and 1,055,307 V retirements at the final 13M-cycle observation.
+Validation is still running. These 10-iteration runs deliberately do not meet
+CoreMark's duration requirement; neither a valid CM/MHz score nor an error-free
+standard-suite pass is claimed.
+
+`ventium-read-owner-synth-queue-oct12.service`, invocation
+`a6b99406107a457eb2a05496d39b33cb`, observes that exact CoreMark owner. Only
+after both seeds close and the independent audit passes does it compact the
+closed PC PCH caches, launch one existing guarded synthesis controller and
+register its exact-owner timing observer. The queue cannot retry synthesis,
+route, deploy, waive canonical failures or relax native resource reserves.
+No new timing result is available yet; **31.651579 MHz** remains the latest
+closed synthesized estimate, below **40 MHz**.
 Closed cache compiler products were archived losslessly and byte-compared
 before removing unpacked copies. Retain sources, generated headers, native
 binaries, logs and receipts; recover products with each receipt's tar command.
@@ -116,13 +153,30 @@ bytes**, SHA-256
 Restore this archive with `tar -xzf closed-read-owner-checks.tar.gz -C
 /home/yukidama/external/tmp/ventium-load-read-ack.GyWDDtiI`. Closed native
 receipts and all pinned inputs stay unpacked and unchanged.
+For synthesis headroom, 9,302 compiler intermediates from 39 explicitly
+inventoried, closed models were compacted losslessly: **1,929,235,446 →
+247,238,435 bytes**, recovering **1.57 GiB**. Model executables, input sources,
+generated headers/dependency files and pinned inputs stay unpacked. Neither
+active directed-core model was selected. Archive `closed-model-products.tar.gz`
+has SHA-256 `ea6bd9047d80469ef51f242527acf87d2c0193917260915773d0ff6a45a99495`;
+restore with `tar -xzf closed-model-products.tar.gz -C /home/yukidama/external/tmp`.
+The native archive unit `72a7fbd77d4b42afaca2306bec585618` exited zero after
+member-by-member hash verification and rechecking protected pins/binaries.
+The 12-phase regression streams are likewise preserved in
+`closed-read-owner-regressions.tar.gz`: **37,112 entries**, **997,530,444 →
+86,224,638 bytes**, SHA-256
+`0cf9f5daaf136c4246408852b19460f1a09e97067714dbefa9824e90df346884`.
+Restore with `tar -xzf closed-read-owner-regressions.tar.gz -C
+/home/yukidama/external/tmp/ventium-load-read-ack.GyWDDtiI`.
+The closed directed-core PCH files are recoverable from their adjacent
+`.gch.gz` files (`read-owner-core-pch-closed.json`); this recovers another
+155,157,873 bytes without changing model inputs or executable binaries.
 
 ## Remaining acceptance
 
 The canonical gate remains **7 PASS / 101 FAIL**, red and unwaived.
-Required next: complete QEMU and
-parent whole-core state/cycle comparisons (including FP/fault/held/branch cases),
-same-input replay, matched PC/FPGA transfer, CoreMark preflights, **≥40 MHz
+Required next: close both short CoreMark preflights and their independent audit,
+measure **≥40 MHz
 synthesized Fmax**, routed setup/hold, full standard suite and physical UV-fast
 Win95 cold desktop/UI plus original FreeDOS Quake complete timedemo. Compile or
 cache-test success cannot replace those requirements.
