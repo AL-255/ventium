@@ -1,8 +1,9 @@
 # Same-line paired-read ACK cut — October 11, 2026
 
-**Isolated draft; not part of the measured readiness candidate.**
+**Private derivative; not part of the measured readiness candidate.**
 Predicate proof, source-extracted microtests and full-cache checks pass.
-Whole-core checks, canonical verification, timing and FPGA validation remain pending.
+Cold whole-core matrices now pass on the MC+PAIR+SRT derivative below;
+canonical verification, timing and FPGA validation remain pending.
 The requirement remains **40 MHz synthesized Fmax or better**, with UV,
 system/relocated fast pipes, fast loads/stores and full P5 caches retained.
 The readiness predecessor now measures **30.34809 MHz**, unplaced synthesis.
@@ -130,6 +131,56 @@ cache or CPU**. This whole-core build is not queued or running; the timing
 and cache owners are now terminal. The original canonical differential
 gate still requires a new run and a genuine pass; no comparator, terminal
 record, C1 mask or cycle band is changed by this continuation.
+
+## October 12: integrated against the newly measured critical path
+
+The [MC+PAIR+SRT timing audit](MC_PAIR_SRT_TIMING.md) closes at **28.88838 MHz**,
+with the paired-response capture cone at **29.76102 MHz**. That cone again
+traverses generic cache ACK into bank readiness. The measured parent's L1
+source is byte-identical to the cache-tested source above, so the existing
+recipe and actual cache evidence are reused, not replaced with a new draft.
+The unused generic-overlap proposal remains excluded.
+
+The builder now admits either of the two exact known parent model hashes;
+unknown/changed models are rejected. Four admission tests pass. It retains
+the parent's complete source/profile audit, requires the actual cache positives
+and rejected mutant, explicitly enforces guarded-32, and uses an output-specific
+private C++ basename.
+
+Evidence root: `/home/yukidama/external/tmp/ventium-mc-pair-srt.fI8m6eUS`.
+`pair-now-core-r1` closes native zero in **20.10 seconds**, owner
+`ventium-mc-pair-srt-pair-now-core-oct12.service`, invocation
+`6f1d5f1c060449b4aa9c089d15973eb0`. All **195 source files / 150 definitions**
+are retained; only `rtl/mem/ven_l1d.sv` differs. All 1,480 started input pins
+independently rehash, and the local harness object uses this model's header.
+Model SHA-256:
+`b84cc5b4618defd2067c8c37b2e084229a3e6759a2358eab4c570e035f5eceb4`.
+Build closure:
+`43dbd144d51b747ba1bdfadb4da58fd5a84adc0a401493580902a66717b90084`.
+
+Four cold matrices run concurrently with **32 total workers** (4 memory,
+4 store, 8 held-read, 16 FP), under bounded user units and actual CPU affinity.
+All four native owners close zero; complete fresh QEMU state and complete
+parent/candidate cycle streams match at AXI latency 0/7. All input pins
+independently rehash unchanged:
+
+| Corpus | Cases | Candidate records | Witness |
+| --- | ---: | ---: | --- |
+| Paired reads/read-ALU and rejection | 72 | 31,392 | 1,500 memory V events |
+| Load/store pairs plus readback | 72 | 32,112 | 456 memory V events |
+| Held read / unsafe prime rejection | 24 | 9,200 | 346 held primes |
+| FP/integer/memory overlap | 72 | 39,024 | 144 paired V, 7,220 early FP accepts |
+
+These are **111,728 candidate architectural records with no observed cycle
+change**, not a gameplay gain. Receipts: `pair-now-{memory,store,held,fp}-r1/`.
+The original 16-fixture FP fault matrix is now running as
+`ventium-pair-now-fault-oct12.service`, invocation
+`8c39731e21174073a7433df693eb389a`. The unchanged canonical gate is queued on
+the shared build lock as `ventium-pair-now-verify-oct12.service`, invocation
+`f358fc432c534afa9922955ae9f7d3c1`. Neither pending run is counted as passed.
+No new synthesis, routing, full-PC or FPGA run is launched for this derivative.
+The separate AGI/reference priming ACK dependency still needs a checked fix;
+do not claim this isolated cut can by itself reach 40 MHz.
 
 Verified gameplay baseline: **0.51030715 total U+V simulated retirement-event
 IPC**, older model `2b4d7a48`, cycles **1,200,065,237–1,300,065,237**.

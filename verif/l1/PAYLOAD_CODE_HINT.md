@@ -1,7 +1,7 @@
 # Request-independent code-kind hint — private timing proposal
 
-Status, October 12: **extracted-mux tests pass; complete cache/core and timing
-not yet verified**. Production RTL and the currently running MC+PAIR+SRT
+Status, October 12: **extracted-mux and complete cache tests pass;
+whole-core integration deferred after new timing evidence**. Production RTL and the MC+PAIR+SRT
 synthesis inputs are untouched. The requirement remains at least **40 MHz
 post-synthesis Fmax**, retaining UV, system/relocated fast pipes, fast memory
 paths and full P5 L1s. No additional cycle, guest special case or timing
@@ -161,6 +161,29 @@ cache regression; a failed or changed owner stops the continuation without a
 restart. Queue source/evidence: `after_timing_payload_cache.py` and
 `payload-cache-queue-r1/` under the evidence root. **No cache compiler has been
 launched at this documentation point.**
+
+Update: that timing queue is now terminal zero and independently measures
+**28.88838 MHz**, with cache-control/LRU rather than SRT endpoints dominating.
+The continuation actually launches `ventium-payload-code-hint-cache-oct12.service`,
+invocation `bc5d852e779a49d0b43463626c6dcda0`. Its complete-cache test is now
+running under guarded-32; no Vivado overlaps it. The prepared payload-kind
+whole-core build is **not launched**: first address the newly measured
+general-ACK dependencies in paired return and priming, described in
+[the closed timing report](../../fpga/MC_PAIR_SRT_TIMING.md).
+
+The actual cache run subsequently closes **native zero in 41.84 seconds**.
+Control, flag-off and flag-on all pass every retained coverage group and have
+the same complete per-clock observation SHA-256
+`2daad353eb439e7bc24f6fe89fa4d6d5f0bbe75a23b5c3d7ee39080976109215`.
+Coverage includes 1,137 coherent window-update stores, 535 store-warming
+transactions, 276 lookaheads, 368 code/data reads, 32 denied requests and
+32 idle-hint cases per variant. The wrong-kind mutant compiles and exits **1**
+with the required assertion failure. All 64 pinned inputs, four native logs,
+three binaries and losslessly compressed observations independently rehash;
+decompression verifies the three matching observation hashes. Closure SHA-256:
+`3ca12f3122eb73f0e17096ef98946ca9467cc8765d2eb73a335d9858a12b761d`.
+This qualifies the actual cache interface test, **not the upstream whole-core
+hint, the standard suite or a timing gain**. Its whole-core build stays deferred.
 
 After a real cache pass, complete-core differential/fault/cycle comparisons
 must qualify all four changed interfaces before synthesis. Canonical `make

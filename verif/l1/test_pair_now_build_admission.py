@@ -3,7 +3,7 @@
 import copy
 import unittest
 
-from build_pair_now_core import check_rows
+from build_pair_now_core import check_rows, known_model, MODELS
 
 
 class Admission(unittest.TestCase):
@@ -15,6 +15,15 @@ class Admission(unittest.TestCase):
 
     def test_complete_native_rows(self):
         check_rows(self.rows)
+
+    def test_only_exact_known_parents(self):
+        self.assertEqual(set(MODELS.values()), {'readiness', 'mc-pair-srt'})
+        for model in MODELS:
+            self.assertEqual(known_model(model, model), model)
+            with self.assertRaises(AssertionError):
+                known_model(model, '0'*64)
+        with self.assertRaises(AssertionError):
+            known_model('0'*64, '0'*64)
 
     def test_incomplete_or_failed_rows(self):
         mutations = [(0, 'build_exit', 1), (0, 'native_exit', 1),

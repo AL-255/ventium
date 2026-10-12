@@ -1,6 +1,6 @@
 # Combined divider normalization and paired-response timing cut
 
-**Private candidate; synthesis closed, timing audit running, not FPGA-qualified.** Target remains
+**Private candidate; synthesized estimate 28.88838 MHz, below target and not FPGA-qualified.** Target remains
 at least **40 MHz synthesized Fmax**, with UV, relocated/system fast pipes,
 fast loads/stores and full P5 L1 caches unchanged.
 
@@ -207,7 +207,7 @@ remain in `obsolete-compiler-backup-{plan,closed}.json` and
 `closed-native-cache-{plan,closed}.json` in the evidence root. The synthesis
 growth-derived disk requirement and 4 GiB emergency reserve are unchanged.
 
-### Synthesis closure; frequency still pending
+### Synthesis closure
 
 The actual synthesis owner closes native zero at **2026-10-12 01:14:44 UTC**,
 after **1,988.98 seconds**, with no resource stop or OOM. Independent audit
@@ -225,8 +225,59 @@ Independent audit: `synthesis/audit.json`, SHA-256
 `95100e2dd38e295531657fb31cbad324ca8c747874904786e6f1ee14808b2330`.
 The existing continuation has launched original-clock reporting as
 `ventium-mc-pair-srt-clock-oct12.service`, invocation
-`e28134f278734c45bd674ab6af9a63de`. **It is still running; no new frequency
-result, routing, bitstream or FPGA qualification is claimed.**
+`e28134f278734c45bd674ab6af9a63de`.
+
+### Closed timing audit: regression; critical path moved to cache control
+
+The original-clock report closes native zero in **486.75 seconds**. The
+independent audit passes and checks 1,050 retained input pins, actual 40/100 MHz
+clocks, native reports and DCP identities. **Fmax is 28.88838 MHz**, from
+**-9.616 ns** setup slack at 25 ns; hold is -0.101 ns. This regresses from the
+MC parent's 29.58405 MHz and remains below the best retained 30.34809 MHz.
+The small area saving is not timing success. Audit SHA-256:
+`362cbfcfdca12395a1bc871fee416564facd09e870462cf51be8a5549c30345e`.
+Both controllers and their queue are terminal zero; the queue explicitly
+records `synthesized_40mhz_requirement_met=false` and `qualification=UNQUALIFIED`.
+
+The 30 worst setup paths now contain **29 cache-LRU data endpoints and one
+GPR endpoint**, rather than SRT endpoints. Worst: `eip[0] -> dc_lru[16]/D`,
+118 logic levels, **34.405 ns data delay = 6.617 ns logic + 27.788 ns estimated
+routing**. Named-marker segments from the full-clock report are:
+
+| Through marker | Cumulative data delay |
+| --- | ---: |
+| V decode length | 12.021 ns |
+| Next-read preparation | 22.311 ns |
+| Next-read request | 24.534 ns |
+| Paired-store readiness | 25.080 ns |
+| General cache ACK | 30.235 ns |
+| Next-read commit | 31.407 ns |
+| Cache LRU endpoint | 34.405 ns |
+
+These are netlist markers, not module area ownership or physical route delays.
+Report SHA-256:
+`66178a98d89711f3dd806c6665fcedaafcbf3683251d1fed979c2a11ef4c41c8`.
+The separate V-response capture path is **29.76102 MHz**, 115 levels; it
+likewise traverses paired-store/backing ACK into paired-bank readiness.
+
+Source inspection identifies the already-tested, not-yet-integrated
+[same-line return ACK cut](PAIR_NOW_ACK_CUT.md), whose exact L1 parent is still
+present here. Its saved-window predicates already imply read ACK. Its
+whole-core derivative is now queued behind the real-cache payload-hint gate,
+under the same exclusive guarded-32 lock. Owner:
+`ventium-mc-pair-srt-pair-now-core-oct12.service`, invocation
+`6f1d5f1c060449b4aa9c089d15973eb0`; output `pair-now-core-r1/`.
+This is **not another synthesis launch**. The unrelated generic-overlap draft
+is still excluded, because its target integration excludes lane-1-only requests.
+
+The LRU path also retains `pipe_mem_wait` through AGI/reference priming's shared
+`pipe_fp_live_arm`, although the previous change only cofactors integer
+next-read commit. This is a separate candidate dependency to prove, not yet an
+implemented fix. Do not reuse the previously rejected global FP-only permit:
+AGI legitimately primes integer-memory descriptors. The prepared payload-kind
+whole-core build is deferred: it does not address the newly measured worst
+cache-control path. Its independently queued cache test may still qualify the
+payload change, but that alone cannot justify another synthesis.
 
 Canonical verification remains **FAIL**, not waived by the component checks.
 Complete differential/cycle gate closure, both original CoreMark correctness

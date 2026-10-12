@@ -6,6 +6,7 @@ Preserve all 150 UV-fast definitions, the predecessor's private harness and
 Run under the shared guarded-32 scope after Vivado has actually exited.
 """
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -22,9 +23,17 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO/'verif/issue_uv'))
 import build_bus_cancel_core as common
 
-MODEL = '64e997d504e7f73fcd1f6b5e524a68cb6f901bf88f44b97fb613dfa1adf9d055'
+MODELS = {
+    '64e997d504e7f73fcd1f6b5e524a68cb6f901bf88f44b97fb613dfa1adf9d055': 'readiness',
+    'eefa9d57c41c5eb5154d0319fb2e82240f90469b7ce119ae0abe36d6aada9702': 'mc-pair-srt',
+}
 TARGET = 'rtl/mem/ven_l1d.sv'
 sha, save, load, stable = common.sha, common.save, common.load, common.stable
+
+
+def known_model(recorded, actual):
+    assert recorded == actual and actual in MODELS, 'unknown or changed parent model'
+    return actual
 
 
 def check_rows(rows):
@@ -80,10 +89,12 @@ def main():
     assert scratch.stat().st_dev != REPO.stat().st_dev and shutil.disk_usage(scratch).free > 5*1024**3
     assert re.fullmatch('[0-9a-f]{32}', os.environ.get('INVOCATION_ID', ''))
     subprocess.run([REPO/'tools/build_scope.sh', '--is-active'], pass_fds=(9,), check=True)
+    assert os.environ['VENTIUM_BUILD_SCOPE_PROFILE'] == 'ipc_parallel32'
+    assert os.environ['VENTIUM_BUILD_SCOPE_UNIT'] == 'ventium-ipc-parallel32'
     assert subprocess.run(['pgrep', '-x', 'vivado'], stdout=subprocess.DEVNULL).returncode == 1
     old, built = load(parent/'build-started.json'), load(parent/'build-closed.json')
     assert built['passed'] and built['native_exit'] == 0 and built['pins_unchanged']
-    assert built['binary_sha256'] == sha(parent/'obj/tb_ventium') == MODEL
+    model = known_model(built['binary_sha256'], sha(parent/'obj/tb_ventium'))
     pins = cache_pins(cache)
     # The cache checker pins the source-extracted proof and its actual native
     # source/binary/log sets. Recheck that it used this exact private candidate.
@@ -114,13 +125,13 @@ def main():
     relative = [str(p.relative_to(parent/'candidate')) for p in files]
     assert [str(p.relative_to(root/'candidate')) for p in common.candidate_files(root/'candidate')] == relative
     assert [p for p in relative if sha(parent/'candidate'/p) != sha(root/'candidate'/p)] == [TARGET]
-    host = root/('tb_pair_now_'+root.parent.name.split('.')[-1].lower()+'.cpp')
+    host = root/('tb_pair_now_'+hashlib.sha256(str(root).encode()).hexdigest()[:12]+'.cpp')
     shutil.copyfile(old['host'], host)
     command = common.relocate(old['command'], parent, root, Path(old['host']), host)
     pins[str(host)] = sha(host)
     pins.update({str(root/'candidate'/p): sha(root/'candidate'/p) for p in relative})
     prepared = dict(command=command, pins=pins, host=str(host), parent=str(parent),
-        parent_model=MODEL, changes=[TARGET], definitions=defs, compiler_started=False,
+        parent_model=model, parent_family=MODELS[model], changes=[TARGET], definitions=defs, compiler_started=False,
         canonical_gate_passed=False, gameplay_ipc=None, cache=str(cache))
     save(root/'prepared.json', prepared)
     assert os.environ['VENTIUM_VERILATOR_BIN'] == '/tools/verilator/v5.046/bin/verilator'
