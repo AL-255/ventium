@@ -473,7 +473,15 @@ then the full-profile runner with `--parent fresh-pair-core-r1`, that same
 new scratch output directories and the `ipc_parallel32` guard after Vivado
 and its timing observer finish.
 
-**14 host tests passed** across `test_intent_ready_{cut,pairs,cache}.py` on
+Review caught a vacuity in the pending missing-credit negative control: the
+inherited one-slot test asserted no pair intent, so the new fast-ready result
+was deliberately unobserved. The fixture now reserves intent with credit
+absent and no actual V request, checks that both readiness results are false,
+and still requires the solo U write to complete. Both A/B instances see this
+same public traffic. A host test guards this qualified observation; native
+mutation sensitivity remains pending execution.
+
+**15 host tests passed** across `test_intent_ready_{cut,pairs,cache}.py` on
 2026-10-12. These check transformation boundaries, retained comparisons,
 native-run safety guards and fail-closed source admission. The closed leaf
 proof was re-audited from its native logs and hashes, including exact symbolic

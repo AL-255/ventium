@@ -81,6 +81,15 @@ def fixture(flat):
         '.c_next_req(c_we || next_hint), .c_next_commit(next_commit)',2)
     text = replace(text, ".c_next_addr(c_addr ^ 32'h12345020)",
         ".c_next_addr(next_hint ? next_address : (c_addr ^ 32'h12345020))",2)
+    # Exercise *reserved* pair intent with credit absent, not merely a solo
+    # store with no intent. Otherwise a fast-ready credit mutant is unobserved:
+    # ordinary readiness still blocks V, and unqualified fast-ready is unused.
+    text=replace(text,"    block_credit <= 1'b1;",
+        "    block_credit <= 1'b1; explicit_intent <= 1'b1;")
+    text=replace(text,'    if (c_pair_ready || !c_ack || !m_req || m_pair_req)',
+        '    if (c_pair_ready || intent_only_ready || !c_ack || !m_req || m_pair_req)')
+    text=replace(text,"    c_req <= 1'b0; c_we <= 1'b0; block_credit <= 1'b0;",
+        "    c_req <= 1'b0; c_we <= 1'b0; block_credit <= 1'b0; explicit_intent <= 1'b0;")
     extra='''    if (rst_n && (c_pair_req || explicit_intent)) begin
       intent_qualified_samples++;
       if (intent_only_ready !== control.c_pair_ready)

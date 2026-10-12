@@ -42,6 +42,17 @@ class IntentReadyPairs(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'native lifecycle drift'):
                 driver.derive()
 
+    def test_credit_negative_control_has_qualified_observer(self):
+        for flat in (False,True):
+            text=driver.fixture(flat)
+            begin=text.index('[pair] absent backing credit')
+            end=text.index('[pair] different resident lines',begin)
+            case=text[begin:end]
+            self.assertIn("block_credit <= 1'b1; explicit_intent <= 1'b1;",case)
+            self.assertIn('c_pair_ready || intent_only_ready || !c_ack',case)
+            self.assertIn("c_pair_req <= 1'b0;",case)
+            self.assertIn("block_credit <= 1'b0; explicit_intent <= 1'b0;",case)
+
     def test_closed_leaf_proof_reaudit(self):
         root=Path(os.environ['INTENT_READY_PROOF']).resolve(strict=True)
         pins=driver.admit_proof(root)
