@@ -368,17 +368,60 @@ aarch64-linux-gnu-gcc -std=c11 -Wall -Wextra -Werror -O2 -fPIC -shared \
 ```
 
 Install it beside the Python module. Use `with MMIO() as io:` around
-`Adapter(io.read32, io.write32)` while actual guest reset is held. There is not
-yet a qualified Linux service/UI producer; do not use this fragment as a
-standalone boot/deployment recipe.
+`Adapter(io.read32, io.write32)` while actual guest reset is held. This fragment
+is not a standalone boot/deployment recipe.
+
+### Prepared Linux service and input client
+
+[`ven_ps2_service.py`](board-tools/ven_ps2_service.py) supplies the long-lived
+owner plus `status` and `input` clients. It attaches while guest reset is held;
+the **ordinary cold launcher** subsequently releases reset. The service polls
+the real adapter and accepts bounded sensor requests through a local
+`SOCK_SEQPACKET` socket, default `/run/ventium-ps2-mouse.sock`, mode 0600 and
+same-UID peers only. At most four clients are retained, requests are limited to
+512 bytes, and idle clients expire. Slow clients do not block device polling.
+No guest recognition, cursor-memory write, synthetic interrupt or CPU stepping
+is present. Termination releases software resources without resetting the
+guest; restarting still requires a real, deliberate cold reset.
+
+The input command uses signed sensor counts and button levels, not queued UI
+clicks. A successful response means **queued input, not serial/guest delivery**.
+Status is not a delivery fence. Keep a press held until its packet is delivered
+and visually confirm the result before sending release; rapid press/release
+updates can collapse between sensor samples. A lost client response is an
+ambiguous outcome, so do not blindly retry relative movement. These limitations
+must be handled by the eventual board UI acceptance procedure.
+
+The service refuses an existing socket instead of deleting a possible live
+owner. Cleanup removes only its own socket inode and preserves a replacement.
+Protocol/backend failures stop the owner for diagnosis; neither exhaustion nor
+I/O failure triggers an automatic guest reset.
+
+Nine tests cover real local-socket exchanges, oversized/invalid requests,
+bounded idle clients, existing-owner refusal, cleanup replacement races and
+service shutdown. The MMIO gate now freezes and runs all **61 software tests**:
+14 mouse-policy, 25 adapter, 13 backend and nine service tests. This retains the
+AArch64 build/disassembly and fixture-isolation checks. Evidence:
+`external/tmp/ventium-ps2-service-r1.c6ftZbxG`, service
+`ventium-ps2-service-r1-oct12`, invocation `60348f78ccef4ebc91033e4adb7108ad`,
+native exit zero, CPU 12, peak 32,997,376 bytes, input pins unchanged. Closure:
+`8bf15374e77c10cc33db1cb2f70cee9034b07400f6692b7b114452bdd5d69c42`.
+The socket tests use fake MMIO. The service is **not yet deployed or qualified
+through the complete hardware path**.
+
+A read-only board check at 07:17 UTC finds aarch64 Linux
+`6.12.0-g7e47ae4ab22e`, 4-KiB pages, and an administrator `/proc/iomem` listing
+whose System RAM ranges do not include `0xA0000000`. This confirms the non-RAM
+aperture prerequisite, not the actual PTE attributes, new mailbox capability or
+physical access ordering. No bitstream, register or guest state was changed.
 
 ## Still required before physical mouse acceptance
 
-1. Integrate the now-tested general mouse policy with an actual PS-side service
-   and UI input producer. Do not introduce guest-specific command recognition
+1. Integrate and qualify the prepared service/input client in the actual cold
+   launch and UI procedure. Do not introduce guest-specific command recognition
    or synthetic cursor writes. Keep the protocol/wire gates passing.
-2. Verify the prepared native MMIO backend on the deployed platform and add the
-   exclusive-owner Linux service, then exercise that adapter through the actual
+2. Verify the prepared native MMIO backend and service on the deployed
+   platform, then exercise the adapter through the actual
    8042/wire/AXI path. The separate leaf/AXI/wire tests do not establish this
    complete path or a working UI producer.
 3. Incorporate the separately prepared overlay in a source-matched candidate,

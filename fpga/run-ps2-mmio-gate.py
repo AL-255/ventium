@@ -26,7 +26,9 @@ def main():
     assert root.parent == scratch and not list(root.iterdir())
     assert shutil.disk_usage(root).free > 4 * 1024**3
     assert len(os.sched_getaffinity(0)) == 1 and os.environ['INVOCATION_ID']
-    paths = [repo/n for n in ('ven_ps2_mmio.c', 'ven_ps2_mmio.py', 'test_ven_ps2_mmio.py')]
+    paths = [repo/n for n in ('ven_ps2_mmio.c', 'ven_ps2_mmio.py', 'test_ven_ps2_mmio.py',
+        'ven_ps2_mouse.py', 'test_ven_ps2_mouse.py', 'ven_ps2_mailbox_host.py',
+        'test_ven_ps2_mailbox_host.py', 'ven_ps2_service.py', 'test_ven_ps2_service.py')]
     tools = {n: Path(shutil.which(n)).resolve(strict=True) for n in
              ('gcc', 'aarch64-linux-gnu-gcc', 'aarch64-linux-gnu-objdump', 'aarch64-linux-gnu-nm', 'python3')}
     pins = {str(p):sha(p) for p in [*paths, *tools.values(), Path(__file__).resolve()]}
@@ -52,8 +54,9 @@ def main():
         # A ctypes library must not share the Python module's import basename.
         run('arm64-compile', [str(tools['aarch64-linux-gnu-gcc']), *flags, 'ven_ps2_mmio.c', '-o', 'libven_ps2_mmio.so'])
         os.environ['VEN_PS2_MMIO_TEST_LIB'] = str(root/'fixture.so')
-        unit = run('unit', [str(tools['python3']), '-B', '-m', 'unittest', '-v', 'test_ven_ps2_mmio'])
-        assert 'Ran 13 tests' in unit and unit.endswith('\nOK\n')
+        unit = run('unit', [str(tools['python3']), '-B', '-m', 'unittest', '-v',
+            'test_ven_ps2_mouse', 'test_ven_ps2_mailbox_host', 'test_ven_ps2_mmio', 'test_ven_ps2_service'])
+        assert 'Ran 61 tests' in unit and unit.endswith('\nOK\n')
         symbols = run('arm64-symbols', [str(tools['aarch64-linux-gnu-nm']), '-D', 'libven_ps2_mmio.so'])
         assert 'ven_ps2_mmio_open_fixture' not in symbols
         disassembly = run('arm64-disassembly', [str(tools['aarch64-linux-gnu-objdump']), '-d', 'libven_ps2_mmio.so'])
