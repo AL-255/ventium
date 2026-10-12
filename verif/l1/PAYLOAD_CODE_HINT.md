@@ -121,8 +121,8 @@ live Vivado. Its C++ harness basename is unique to the output directory and its
 local object/header dependency must match. **Prepared is not compiled or passed.**
 
 The [whole-core regression adapter](run_payload_code_hint_core.py) now admits
-only this one added flag in the existing FP, integer and FP-fault corpora.
-Its four host tests verify that fixtures/comparisons are retained, unrelated
+only this one added flag in the existing FP, integer, FP-fault, held-read,
+paired-memory and raw-branch corpora. Its five host tests verify that fixtures/comparisons are retained, unrelated
 profile differences and source drift are rejected, and the FP/integer matrices
 still demand complete cycle-stream equality. The fault corpus retains all
 16 cases and 32 complete QEMU/UV architectural comparisons, serialized for

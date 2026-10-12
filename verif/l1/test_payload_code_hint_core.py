@@ -35,6 +35,25 @@ class Tests(unittest.TestCase):
         self.assertIn('pass_fds=(9,)', adapted)
         ast.parse(adapted)
 
+    def test_held_pair_and_branch_corpora_retained(self):
+        for suite, old_guard, equality in (
+            ('held', "    assert profiles['candidate']==profiles['control']",
+             "assert full_traces['control'] == full_traces['candidate']"),
+            ('memory', "    assert profiles['control']==profiles['candidate']",
+             "assert both['control']==both['candidate']"),
+            ('branch', "    assert profiles['candidate'] == profiles['control']",
+             "assert both['control'] == both['candidate']")):
+            source = driver.SOURCES[suite].read_text()
+            adapted = driver.adapt(source, suite)
+            old_location = ('HERE = Path(__file__).resolve().parent' if suite == 'branch'
+                            else 'HERE=Path(__file__).resolve().parent')
+            restored = adapted.replace('HERE = Path('+repr(str(driver.base.HERE))+')', old_location)
+            restored = restored.replace('    assert '+repr(driver.FLAG)+" not in profiles['control']\n"
+                "    assert profiles['candidate'] == profiles['control'] | {"+repr(driver.FLAG)+'}', old_guard)
+            self.assertEqual(restored, source)
+            self.assertIn(equality, adapted)
+            ast.parse(adapted)
+
     def test_profile_rejects_any_other_difference(self):
         adapted = driver.adapt(driver.SOURCES['faults'].read_text(), 'faults')
         checks = '\n'.join(line.strip() for line in adapted.splitlines()

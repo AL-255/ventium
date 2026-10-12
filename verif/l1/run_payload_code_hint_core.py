@@ -19,6 +19,9 @@ SOURCES = {
     'fp': base.REPO/'verif/issue_uv/run-fp-high-payload-ab.py',
     'integer': base.HERE/'run_store_warm_core.py',
     'faults': base.HERE/'run_fp_read_ack_faults.py',
+    'held': base.HERE/'run_mc_address_held.py',
+    'memory': base.HERE/'run_l1_capture_cut_system.py',
+    'branch': base.HERE/'run_mc_address_branch.py',
 }
 
 
@@ -34,6 +37,19 @@ def adapt(source, suite):
         old = ("added = {'"+base.FLAG+"'}" if suite == 'fp'
                else "flag = '"+base.FLAG+"'")
         return replace_once(text, old, old.replace(base.FLAG, FLAG))
+    if suite in ('held', 'memory', 'branch'):
+        spaced = suite == 'branch'
+        old_location = ('HERE = Path(__file__).resolve().parent' if spaced
+                        else 'HERE=Path(__file__).resolve().parent')
+        text = replace_once(source, old_location, 'HERE = Path('+repr(str(base.HERE))+')')
+        old_guard = {
+            'held': "    assert profiles['candidate']==profiles['control']",
+            'memory': "    assert profiles['control']==profiles['candidate']",
+            'branch': "    assert profiles['candidate'] == profiles['control']",
+        }[suite]
+        return replace_once(text, old_guard,
+                            '    assert '+repr(FLAG)+" not in profiles['control']\n"
+                            "    assert profiles['candidate'] == profiles['control'] | {"+repr(FLAG)+'}')
     if suite != 'faults':
         raise ValueError('unknown corpus')
     text = replace_once(source, 'REPO = Path(__file__).resolve().parents[2]',

@@ -1,6 +1,6 @@
 # Combined divider normalization and paired-response timing cut
 
-**Private candidate; synthesis running, not FPGA-qualified.** Target remains
+**Private candidate; synthesis closed, timing audit running, not FPGA-qualified.** Target remains
 at least **40 MHz synthesized Fmax**, with UV, relocated/system fast pipes,
 fast loads/stores and full P5 L1 caches unchanged.
 
@@ -192,8 +192,7 @@ reporting and independent audits, **not placement, routing or deployment**.
 Queue `ventium-mc-pair-srt-timing-queue-oct12.service`, invocation
 `cc78495efc6d41229c3f285d9223b767`, observes actual child closure. This mapper
 profile preserves `-no_timing_driven` for a comparable structural measurement;
-the clock constraint alone is not evidence of achieving 40 MHz. No result is
-available yet. Preparation receipt:
+the clock constraint alone is not evidence of achieving 40 MHz. Preparation receipt:
 `425b430cf9b6b6075d3310984ee7f8a503b9fb46a1f0f9001b37ba22cffd9481`.
 
 Disk admission was below the original synthesis reserve. A closed-artifact
@@ -207,6 +206,27 @@ are superseded: those caches now require regeneration. Exact targets and hashes
 remain in `obsolete-compiler-backup-{plan,closed}.json` and
 `closed-native-cache-{plan,closed}.json` in the evidence root. The synthesis
 growth-derived disk requirement and 4 GiB emergency reserve are unchanged.
+
+### Synthesis closure; frequency still pending
+
+The actual synthesis owner closes native zero at **2026-10-12 01:14:44 UTC**,
+after **1,988.98 seconds**, with no resource stop or OOM. Independent audit
+checks 2,777 source pins and the two intended changed payloads. Compared with
+the measured MC parent, utilization is **183,770 LUTs (-291), 54,644 registers
+(+34), 277.5 BRAM tiles (unchanged), 47 DSPs (unchanged)**. Synthesis reports
+zero errors, one critical warning and 1,558 warnings; the critical warning is
+the generated PS XDC attempting to constrain an unknown clock pin. The pending
+clock audit must independently establish the actual core/PL clocks; synthesis
+success alone does not resolve clock coverage or establish Fmax.
+
+Synthesis DCP SHA-256:
+`edeeb26299d0cb2b85e71a1567e09440e566726e544d0c4c084a520d28a93ffd`.
+Independent audit: `synthesis/audit.json`, SHA-256
+`95100e2dd38e295531657fb31cbad324ca8c747874904786e6f1ee14808b2330`.
+The existing continuation has launched original-clock reporting as
+`ventium-mc-pair-srt-clock-oct12.service`, invocation
+`e28134f278734c45bd674ab6af9a63de`. **It is still running; no new frequency
+result, routing, bitstream or FPGA qualification is claimed.**
 
 Canonical verification remains **FAIL**, not waived by the component checks.
 Complete differential/cycle gate closure, both original CoreMark correctness
