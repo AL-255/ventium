@@ -1,9 +1,9 @@
 # Hosted PS/2 device transport — October 10, 2026
 
-Status: **native-tested combined adapter/peripheral path and a prepared source overlay**,
+Status: **native-tested combined adapter/peripheral path and a separate complete source export**,
 not a board-accessible mouse or an FPGA acceptance pass. The active timing
 candidate is unchanged. Its frozen wrapper still ties the mouse inputs high;
-the separate overlay below adds a loss-detectable register interface and wiring.
+the separate mouse export below adds a loss-detectable register interface and wiring.
 
 Latest verified gameplay is **0.51030715 U+V retirement-event IPC** on simulated
 `2b4d7a48`, cycles **1,200,065,237–1,300,065,237**, the first predeclared window,
@@ -493,6 +493,46 @@ python3 -B fpga/run-ps2-adapter-path-gate.py \
   --fpga-defines FROZEN_EXPORT/defines.txt
 ```
 
+### October 12: source-complete integration, not hardware qualification
+
+[`freeze_ps2_mouse_rk_candidate.py`](freeze_ps2_mouse_rk_candidate.py) now
+integrates the tested overlay into a **separate 192-payload export** derived
+from the [early backing-payload candidate](BACKING_PAIR_PAYLOAD.md). It changes
+only the management bridge, PL wrapper and project source list, and adds the
+two mouse modules. Every processor/peripheral input outside those exact five
+files is byte-identical to the 190-payload parent. All 158 hardware defines,
+full P5 cache geometry, UV+fast mode and 40/100 MHz constraints are retained.
+The active synthesis input directory was not edited.
+
+Preparation rehashes all parent inputs and the combined-path test's 40 pins,
+verifies its actual native owner is closed, and matches its real 8042/FIFO
+sources and controller flags to the new export. The actual expanded project
+passes the original clock/profile checks and names each added mouse module
+exactly once. Ten host tests check exact delta admission, missing/extra/drifted
+inputs, reapplication, absent/duplicate project entries, missing RTL and the
+original half-cache rejection. The first negative-control test expected a
+later error message; it was corrected to assert the earlier native wrapper
+rejection. No acceptance check or hardware behavior was relaxed.
+
+Evidence: `external/tmp/ventium-load-read-ack.GyWDDtiI/backing-payload-mouse-source-r1`,
+manifest SHA-256
+`1c772c58f614c553eff93f3c7b7ce813b0e32dbff6bfca11623482e437d77df5`.
+`freeze-receipt.json`, `source-contract.log` and `host-tests.log` record source
+admission. Reproduce with fresh external output:
+
+```sh
+TMPDIR=/home/yukidama/external/tmp python3 -B fpga/freeze_ps2_mouse_rk_candidate.py \
+  --parent FROZEN_BACKING_PAYLOAD_EXPORT --overlay PREPARED_MOUSE_OVERLAY \
+  --proof CLOSED_ADAPTER_PATH_RUN --out FRESH_EXTERNAL_OUTPUT
+TMPDIR=/home/yukidama/external/tmp python3 -B fpga/test_freeze_ps2_mouse_rk_candidate.py \
+  --source FRESH_EXTERNAL_OUTPUT -v
+```
+
+This is **source integration only**: no complete-wrapper elaboration, new
+simulator, synthesized Fmax, native ARM MMIO, Windows or physical FPGA result
+is inherited. The manifest explicitly clears simulator/acceptance claims.
+Full integration verification and timing remain required before deployment.
+
 ## Still required before physical mouse acceptance
 
 1. Integrate and qualify the prepared service/input client in the actual cold
@@ -502,9 +542,9 @@ python3 -B fpga/run-ps2-adapter-path-gate.py \
    platform, then exercise the physical 8042/wire/AXI path. The combined
    simulation above establishes its software/RTL protocol, not real ARM MMIO
    ordering, production polling behavior or a Windows UI producer.
-3. Incorporate the separately prepared overlay in a source-matched candidate,
-   run full integration lint/verification, retain the 40 MHz timing requirement,
-   and implement/deploy it. Do not edit the active frozen synthesis inputs.
+3. Qualify the separate source-matched mouse export with full integration
+   lint/verification, retain the 40 MHz timing requirement, and implement/deploy
+   it. Do not edit the active frozen synthesis inputs.
 4. Cold Win95 desktop and actual keyboard/mouse interaction on the deployed
    candidate, with original guest media, captures, bitstream/source hashes,
    measured clock and UV+fast evidence. Keyboard-only UI is not mouse coverage.
