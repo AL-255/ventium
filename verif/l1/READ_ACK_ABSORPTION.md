@@ -57,8 +57,12 @@ closed proof and leaf artifacts and rejects concurrent Vivado. It preserves
 the 32-job build envelope and tests a native removed-read-owner mutation.
 Only its preparation/CLI has been checked so far; it has **not run** yet.
 
-After the current native timing audit closes, use its actual critical paths
-to decide whether to advance this derivative. Require the full cache miter,
+The native timing audit has now closed at **30.556744 MHz**. Its worst path is
+paired-store readiness/general ACK into interrupt return-PC capture, not this
+read-ACK alternative. This derivative is therefore **retained, not advanced**;
+the prepared full-cache gate has not been launched. Focus the next experiment
+on the measured backing-payload/admission dependency documented with that
+timing result. If this derivative is subsequently advanced, require the full cache miter,
 QEMU/parent whole-core state and cycles, canonical gates, matched PC/FPGA
 transfer (including the separate DMA repair), CoreMark preflights, actual
 >=40 MHz synthesized Fmax, routing and physical standard-suite acceptance.

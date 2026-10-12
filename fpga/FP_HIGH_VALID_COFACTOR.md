@@ -1,9 +1,10 @@
 # Wide FP response qualification — October 12
 
 **Leaf/cache and directed whole-core checks pass; canonical verification remains
-FAIL. PC transfer, frozen CPU lint and both short CoreMark preflights pass;
-synthesis and its source audit pass; native timing comparison is running.
-No new Fmax, standard-suite or physical FPGA acceptance.** The target
+FAIL. PC transfer, frozen CPU lint and both short CoreMark preflights pass.
+Closed synthesis/timing comparison: **30.556744 MHz**, still below the best
+parent's 30.676729 MHz and the 40 MHz requirement. No standard-suite or physical
+FPGA acceptance.** The target
 remains **at least 40 MHz post-synthesis Fmax**, UV+fast, full P5 caches.
 
 The live synthesis also exposed an independent
@@ -211,13 +212,62 @@ sum). The independent closure audit checks all **3,872 pins**, 158 definitions
 and 148 native read-Verilog files. The inherited PS8 XDC `create_clock` unknown
 pin warning remains; it is not silently waived as timing success. The queued
 native timing audit checks the actual 100 MHz PL / 40 MHz core clocks and
-compares the better MEMDIV-QUERY checkpoint. It is now live as
+compares the better MEMDIV-QUERY checkpoint. Its native owner is
 `ventium-fp-high-valid-clock-oct12`, invocation
 `ff925880906346c49c3d9f34891206cb`.
 
 While waiting, the [read-ACK absorption analysis](../verif/l1/READ_ACK_ABSORPTION.md)
 passes abstract and source-extracted checks. This is an unqualified private
 derivative, not a change to this frozen run or a measured timing improvement.
+
+### Closed timing result and next measured target
+
+The timing owner and coordinator now both close native zero and are reaped.
+Independent audit: **489.47 seconds / 3,887 checked input pins**, no OOM,
+4,713,250,816-byte peak resident memory and zero swap. It reproduces the exact
+better parent's **30.676729 MHz / -7.598 ns**. Candidate setup is **-7.726 ns**,
+core hold **-0.101 ns**, giving **30.556744 MHz** unplaced synthesized Fmax.
+The coordinator explicitly records `synthesized_40mhz_requirement_met=false`.
+Audit success is evidence-collection success, not timing closure.
+
+The candidate improves on its immediate PAIR-NOW-READ predecessor's
+**29.953572 MHz**, but **does not improve the best retained checkpoint**.
+Utilization is **185,893 LUTs / 54,764 FFs / 277.5 BRAM / 47 DSPs**; versus
+PAIR-NOW-READ it saves 856 LUTs and nine FFs. No IPC increase is inferred.
+
+All 30 worst paths now terminate at `int_ret_eip` clock enables, with **114
+logic levels**, **32.429 ns data delay** (6.538 ns logic / 25.891 ns estimated
+routing). The path passes through raw decode/address preparation, route extent
+checking, backing address selection, quad-store credit, paired-store request,
+general ACK and interrupt/fault capture. It no longer ends at the FPU bank.
+
+First-path cumulative data delay, after subtracting the 2.902 ns launch clock:
+
+| Path point | Delay |
+|---|---:|
+| End-of-access route classification (`core_d_dram_last_u`) | 20.931 ns |
+| Backing write address (`b_addr[6]`) | 22.505 ns |
+| Backing pair credit (`b_pair_ready`) | 23.883 ns |
+| Core paired-store request | 25.608 ns |
+| Backing ACK (`c_ack0`) | 28.025 ns |
+| Interrupt return-PC clock enable | 32.429 ns |
+
+The next target is **backing payload preparation before request admission**.
+`ven_l1d` currently sets `m_addr`/`m_wstrb` to zero and selects the U/V store
+payload only under `c_req`; meanwhile `ven_axi_master.pair_quad_ok` consumes
+those fields to generate readiness. This puts the late route-qualified
+request before a readiness calculation needed to admit the request. Preparing
+the existing U/V address and strobes from their producer identity could remove
+that dependency while keeping `m_req` as the sole transaction authority.
+This is a proposed change, **not an implemented or measured improvement**.
+Before implementation, prove all active request payloads, observable pair
+credit and fill/narrow-read behavior are unchanged; preserve read+store and
+dual-store ordering, denial and stream guards. Do not simply ignore idle
+payload changes if a readiness consumer can observe them.
+
+The separate read-ACK absorption derivative is retained but **not advanced to
+a full build**, because it does not directly target this new worst
+paired-store/general-ACK path. No further Vivado or implementation is running.
 
 Then require >=40 MHz synthesized Fmax, routed closure and physical UV-fast
 Windows 95 cold desktop/UI and original FreeDOS Quake full timedemo validation,
