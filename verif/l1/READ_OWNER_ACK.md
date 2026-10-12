@@ -2,7 +2,8 @@
 
 Private derivative of [PAIR-INTENT](../../fpga/PAIR_INTENT_TIMING.md), whose
 closed synthesized estimate is **31.651579 MHz**, still below **40 MHz**.
-This derivative has no timing, gameplay or physical result yet.
+Its closed synthesized estimate is **31.040477 MHz**, worse than that parent
+and still below **40 MHz**. It has no gameplay or physical result yet.
 
 ## Change
 
@@ -151,9 +152,29 @@ native build family. The exact-owner timing observer is
 `64cc20fa966446caa9e49a739c5da240`. It audits native synthesis closure before
 launching the unchanged original-clock report. Neither queue can retry
 synthesis, route, deploy, waive canonical failures or relax resource reserves.
-No new timing result is available yet; **31.651579 MHz** remains the latest
-closed synthesized estimate, below **40 MHz**. Preserve all pinned inputs
-while either native owner is active.
+Both native owners have now closed successfully, with unchanged input pins.
+Synthesis took **1,979.322 seconds** and used **185,368 LUTs / 54,950 FFs /
+277.5 BRAM tiles / 47 DSPs**: 1,056 fewer LUTs and six fewer FFs than PAIR-INTENT.
+Peak resident usage was **8,589,848,576 bytes**, zero swap and no OOM. The
+inherited PS8 scoped-XDC `Synth 8-3321` critical warning remains; successful
+native closure is not a claim of warning-free synthesis.
+
+The exact clock-report owner `d302db2cf5194128a1fce5b4d9ba53b8` closed in
+**493.107 seconds**. The independent audit passes, reopens both DCPs with
+the original **25 ns core / 10 ns PL** clocks, and reproduces the parent's
+**31.651579 MHz**. READ-OWNER instead gives **31.040477 MHz** (setup
+**−7.216 ns**, hold **−0.101 ns**). These are unplaced synthesized-netlist
+estimates, not routed sign-off or measured board clocks. Area decreased but
+worst timing regressed; do not promote this as a timing improvement.
+
+The new worst path is `eip_reg[0]/C` → `pipe_mem_v_hit_q_reg/D`, with **111
+logic levels** and **32.005 ns** data delay (7.062 ns logic / 24.943 ns estimated
+routing). It traverses frontend decode, speculative-next request, selected
+cache tags and fresh paired-bank admission. This directs the next experiment:
+under a fresh current U read (`c_req && !rd_armed`), neither old-owner nor prime
+lookahead can select the next address. Cofactor that admission using current
+tags while preserving saved-window suppression, invalidation and byte extents.
+Neither changing the clock constraint nor disabling pairing is a repair.
 Closed cache compiler products were archived losslessly and byte-compared
 before removing unpacked copies. Retain sources, generated headers, native
 binaries, logs and receipts; recover products with each receipt's tar command.
@@ -193,10 +214,80 @@ The same checked operation recovered **159,386,376 bytes** from the closed PC
 PCH caches (`read-owner-pc-pch-closed.json`), also retaining adjacent verified
 gzip copies. Restore an individual missing PCH with `gunzip -k <file>.gch.gz`.
 
+## Fresh paired-capture follow-up — October 12
+
+The measured V-admission path now has a private one-file derivative,
+`prepare_fresh_pair_capture.py`. It accepts only the READ-OWNER L1 hash above.
+For `c_req && !rd_armed`, `mc_lookup_old` is impossible because `rd_match`
+requires `rd_armed`; `mc_lookup_prime` is impossible because it requires
+`!c_req`. Therefore fresh U admission uses current tags directly. Its byte
+or aligned-dword extent cannot cross a cache line. Idle excludes fill-forward;
+the data-read guard excludes code reuse. Saved primary/shadow window identity
+still suppresses redundant capture, with the original flush and offset rules.
+In particular, bytes **29–31** cannot reuse the four-byte saved window.
+The separate prime path, actual U capture, data selectors, bank reservation,
+request/response interfaces and all sequential updates remain byte-identical.
+The full original predicate and the no-next-lookup implication remain native
+simulation assertions. No new clock, register, stall or pairing restriction.
+
+Evidence below uses the same external root as above:
+
+- `fresh-pair-leaf-r3`: **26 feature profiles × 179,264 binary vectors**,
+  **4,660,864 comparisons**, pass in **32.045 seconds** with eight concurrent
+  native simulations on CPUs 0–7. All **eight mutants fail natively**: wrong
+  tags, lost primary/shadow suppression, flush qualification, byte extent,
+  snoop, saved owner and dword alignment. Native unit
+  `ventium-fresh-pair-leaf-r3-oct12.service`, invocation
+  `df34956299634217b15315dcd18ef564`, closed zero. Equations are extracted from
+  native-preprocessed source, not translated to a Python oracle. This is not
+  exhaustive symbolic, arbitrary X/Z or sequential reachability proof.
+- R1 failed at leaf **compilation**: the extractor consumed beyond a semicolon
+  followed by an inline comment. R2 passed every positive profile but rejected
+  a mutation anchor that also occurred in a comment. Both failed runs and their
+  hash-matching `driver-r1.py` / `driver-r2.py` remain intact. R3 changes only
+  extraction/mutation setup, not the RTL candidate or comparison requirements.
+- `fresh-pair-cache-r3`: full 128-set/two-way banked cache A/B passes **747,037
+  both-edge comparisons**, including **463 next lookups**, all enabled outputs,
+  the existing owner/FSM checks and every tag/valid/LRU/data-bank entry. Its new
+  public-traffic microbench checks **51 cases / 41 accepted U/V pairs / 123 held
+  V observations / two saved-window cases / eight bank conflicts / four policy
+  guards**. Every current byte position, byte 31 and every aligned dword are
+  exercised. A missing-primary-window mutant fails. Native owner
+  `a89bcc14721d44d7b1c6cfa984454a40` closed zero in **29.635 seconds**. No
+  hierarchical cache writes or injected response owners.
+- Cache R1 refused the incomplete leaf preflight, without compiling. Cache R2
+  passed the older corpus and fresh reads but exposed a **new test setup error**:
+  a cold critical-word response need not retain a complete reusable window.
+  R3 establishes both saved windows by normal rereads of resident lines and
+  explicitly checks their identities. The RTL derivative remains unchanged.
+  Preserve the failed log and `fresh_pair_capture_leaf-r2.svh` reproducer.
+- `fresh-pair-core-r1`: all **195 payloads / 152 defines** retained; only L1
+  changes. UV, fast pipeline and actual AXI backend remain selected. The full
+  model builds in **20.565 seconds**, native owner
+  `9d6745a2a0a141af912ed4bb58bbb4e2`, with a unique local host object using its
+  matching generated header. Independent closure checks rehashed **245 leaf /
+  273 cache / 3,064 core pins** and verified all three exact owners exited zero.
+
+Fresh derivative L1 SHA-256:
+`182856870bdf5627a2c0c48180fbb2a2a604b679728b40d53e9811bb1df31d37`.
+Whole-core model SHA-256:
+`e1621913f28c5cd1c10b0c19f57bc59277807034dfb6b94a79bd7fe58d6a1a81`.
+
+Canonical verification is launched as `ventium-fresh-pair-canonical-oct12`,
+invocation `b9a31628a6d64d9fbf836522a98b787d`; it keeps the known failures
+unwaived and compares all 20 cycle traces with READ-OWNER. Full FP and the
+eight-corpus A/B checks are queued behind the shared heavy-job guard as
+`ventium-fresh-pair-fp-oct12` (`fddb7f232e1741559f1cbffd8b997918`) and
+`ventium-fresh-pair-checks-oct12` (`2281576132ce48ea8e8e7cf3565f34b2`). No
+fresh candidate synthesis, routed or gameplay result is claimed. The wider
+FP/fault driver is prepared but not launched yet. The last synthesized
+candidate is still READ-OWNER at **31.040477 MHz**; best remains PAIR-INTENT
+at **31.651579 MHz**, both short of the required **40 MHz**.
+
 ## Remaining acceptance
 
 The canonical gate remains **7 PASS / 101 FAIL**, red and unwaived.
-Required next: close and audit the native synthesis/timing run, achieve
+Required next: achieve
 **≥40 MHz synthesized Fmax**, resolve canonical differential failures,
 qualify routed setup/hold, the full standard suite and physical UV-fast
 Win95 cold desktop/UI plus original FreeDOS Quake complete timedemo. Compile or
