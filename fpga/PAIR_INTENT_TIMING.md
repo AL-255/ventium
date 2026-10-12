@@ -2,6 +2,9 @@
 
 Target: **at least 40 MHz synthesized Fmax**, UV+fast, full P5 caches.
 This is an **unqualified experimental derivative**, not a deployed fix.
+Its closed synthesized estimate is **31.651579 MHz**, below the 40 MHz target.
+That improves the source parent by **3.47%** and the previous best retained
+checkpoint by **3.18%**; these are frequency estimates, not gameplay gains.
 The previous [NEXT-PAIR experiment](NEXT_PAIR_TIMING.md) closed at
 **30.393289 MHz**, worse than its **30.591330 MHz** source parent.
 
@@ -74,7 +77,7 @@ offers, zero retained next owners, 5,616 read/pair-shape clocks, 3,072 requests,
 1,872 accepted read/store pairs and 1,536 shape-only hint overlaps. Counts
 include separate cycle and cycle-functional executions; they are not unique
 workload cycles or gameplay measurements. There is **no measured cycle gain**;
-the intended benefit is a shorter physical dependency, still unmeasured.
+the intended benefit is a shorter physical dependency, measured separately below.
 
 The **unchanged canonical gate** closed in **397.078 seconds**, native exit 2:
 **7 functional PASS / 101 FAIL**. All 20 cycle traces exactly match the parent;
@@ -135,7 +138,7 @@ All source/profile, replay, short-seed and reserve admission checks passed.
 One native synthesis started at **2026-10-12 20:08 UTC**, controller invocation
 `a6586063f10c4bb1ae08172c6ba3aab0`, owned Vivado scope
 `c8c65f49b70c48c890b30ef35297dedf`. Evidence is under
-`pair-intent-synthesis-r1`; it is not a closed timing result yet.
+`pair-intent-synthesis-r1`; its subsequent closure is recorded below.
 
 The matched mapper and original 40/100 MHz clocks are unchanged. Resource
 guards remain one worker, 8 GiB resident / 6 GiB swap limits, 13 GiB combined
@@ -149,9 +152,56 @@ audits its closure, then launches one original-clock timing report and audits
 its measured Fmax. It cannot retry synthesis, start placement/routing or
 deploy. An observation timeout is not permission to restart the native owner.
 
-Synthesized Fmax, routed/physical acceptance, the standard suite and gameplay
-performance remain unmeasured on this candidate. **40 MHz is not yet achieved.**
-Keep a single Vivado family; do not change or prune its pinned inputs.
+### Closed synthesis and timing audit
+
+Synthesis closed at **20:41:00 UTC**, native exit zero in **1,973.966 seconds**.
+The independent audit checked **3,939 input pins**, all 158 definitions and 148
+native HDL inputs. Sources stayed unchanged, no OOM or resource stop occurred,
+and the old DMA generated-scope undriven warnings remained absent. Peak scope
+memory was **8,589,905,920 bytes**, with zero swap. The inherited PS8 scoped-XDC
+warning remains; this is not a warning-free result.
+
+The clock owner `346dfd8f1ce74db182e8d5181529f830` and its queued observer
+both closed successfully. Timing auditing took **494.031 seconds**, checking
+**3,404 input pins**, with no OOM and zero swap. Original-clock core setup is
+**−6.594 ns**, core hold **−0.101 ns**, giving **31.651579 MHz** unplaced
+synthesized Fmax. The original **40/100 MHz** constraints and diagnostic
+`Default -no_timing_driven` mapper are unchanged. The audit explicitly records
+`forty_mhz_synthesis_met: false`. There is no running Vivado from this run.
+
+Utilization is **186,424 LUTs / 54,956 FFs / 277.5 BRAM36-equivalents / 47 DSPs**:
+155 fewer LUTs and 15 more FFs than the source parent. The previous best
+MEMDIV-QUERY checkpoint reproduces **30.676729 MHz**. Thus this is the best
+retained synthesized estimate so far, **not** a qualified release. Canonical
+differential failure remains red, and no standard-suite or FPGA pass follows
+from the frequency improvement.
+
+All 30 reported worst paths now end at FPU register-bank clock enables. The
+first is EIP bit 0 → frontend/pair/branch decode → speculative next-read
+AGU/DTLB → selected cache lookup/reuse → read ACK → FP command admission →
+FPU bank enable: **107 logic levels**, **31.297 ns** data delay, including
+**24.913 ns estimated routing**. Cumulative delay from the launch register:
+
+| Point | Delay |
+|---|---:|
+| `core_mem_next_req` | 23.021 ns |
+| Selected L1 `hit` | 24.952 ns |
+| `l1_c_read_ack` | 26.378 ns |
+| `mem_read_ack` | 26.735 ns |
+| `fp_shared_cmd_valid` | 27.827 ns |
+| FPU bank clock enable | 31.297 ns |
+
+The next structural target is the remaining speculative-lookup dependency in
+**read completion**. The earlier deferred
+[read-ACK absorption experiment](../verif/l1/READ_ACK_ABSORPTION.md) now targets
+this measured worst path. Its adaptation must preserve complete old ACK
+equivalence, including ordinary ACK consumers, code-fill eligibility,
+invalidation, bypass and stream ownership; data/capture rules cannot be
+relaxed. A private adaptation is being tested, not synthesized or accepted.
+
+Routed/physical acceptance, the standard suite and gameplay performance remain
+unmeasured. **40 MHz is not achieved.** Preserve the closed checkpoints and
+their pinned inputs; do not rerun this unchanged RTL expecting a new result.
 
 Closed cache compiler products are stored in per-case verified
 `compiler-products.tar.zst` archives; binaries, headers, source and native
