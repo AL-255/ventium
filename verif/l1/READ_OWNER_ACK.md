@@ -56,6 +56,16 @@ All evidence below is relative to
   differs among 195 payloads; all 152 defines remain. The private harness object
   is local and uses its matching generated header. Model SHA-256:
   `3091744d8c87eef66ed5c598d43575a80e2e8de6d0790a478de96fb0b96cb9d2`.
+- `read-owner-fp-r1` passes **384 fixtures / 1,536 measurements**, with complete
+  QEMU state comparisons and **768 zero-cycle-delta** A/B comparisons, in
+  **68.111 seconds**. Native unit invocation
+  `bc994c1e6ba34f4780b8c46fa9868237` closed successfully; this uses the actual AXI
+  backend at latencies 0 and 7 with paired execution, not a gameplay benchmark.
+- The unchanged canonical gate closes in **395.488 seconds**, native `make`
+  exit **2**: **7 functional PASS / 101 FAIL**, red and unwaived. All 20 cycle
+  traces equal the parent, and an independent rehash confirms 2,609 unchanged
+  pins. No mask, golden or cycle band changed. Owner
+  `e51aa91bda764d1fbbf81687c99afcb5` closed as a failed unit, not a passing gate.
 
 Derivative L1 SHA-256:
 `fd235f7706cba770ba898dd49d9d8c2a698b42e836c3716af204c2779b56816e`.
@@ -63,17 +73,19 @@ An independent rehash found no drift in the 37 leaf, 65 cache and 2,605
 whole-core input/artifact pins. The full-state/cycle drivers
 `run_read_owner_core.py` and `run_read_owner_regressions.py` retain the existing
 paired-intent and wide-FP/fault regression plans, changing only exact model
-identities and the one-file delta contract. Their native results are pending.
+identities and the one-file delta contract. The eight-corpus run is active
+(`d43c725466f146fcb04030ed335bcae4`); the wider FP/fault plan has not started.
+Six source-transfer tests pass, checking the exact one-file core/PC/FPGA delta
+and rejecting missing edits, added bytes, wrong parents and reapplication.
+No PC build or new FPGA export has started yet.
 Closed cache compiler products were archived losslessly and byte-compared
 before removing unpacked copies. Retain sources, generated headers, native
 binaries, logs and receipts; recover products with each receipt's tar command.
 
 ## Remaining acceptance
 
-The unchanged canonical gate is launched as
-`ventium-read-owner-canonical-oct12.service`, invocation
-`e51aa91bda764d1fbbf81687c99afcb5`; its result is pending. The parent
-remains **7 PASS / 101 FAIL**, red and unwaived. Required next: complete QEMU and
+The canonical gate remains **7 PASS / 101 FAIL**, red and unwaived.
+Required next: complete QEMU and
 parent whole-core state/cycle comparisons (including FP/fault/held/branch cases),
 same-input replay, matched PC/FPGA transfer, CoreMark preflights, **≥40 MHz
 synthesized Fmax**, routed setup/hold, full standard suite and physical UV-fast
