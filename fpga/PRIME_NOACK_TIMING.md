@@ -1,8 +1,9 @@
 # Priming ACK dependency: 40 MHz timing candidate
 
-This is an **unqualified timing candidate**, not a frequency or performance
-result. The latest measured combined parent is **28.88838 MHz** (unplaced,
-`logic_only` synthesis); the requirement remains **at least 40 MHz** with UV,
+This candidate measures **28.88420 MHz**, versus its combined parent's
+**28.88838 MHz**, under matched unplaced `logic_only` synthesis. **It has not
+met the timing requirement and is not qualified for deployment.** The
+requirement remains **at least 40 MHz** with UV,
 system/relocated fast execution, fast loads/stores and full P5 L1s enabled.
 See [the measured path](MC_PAIR_SRT_TIMING.md#closed-timing-audit-regression-critical-path-moved-to-cache-control).
 
@@ -366,6 +367,96 @@ Admission has **7,226,908,672 bytes free**, above the unchanged growth-derived
 placement, routing or deployment is authorized by these controllers. At this
 entry the new diagnostic is **running**, with no candidate Fmax result yet;
 the last measured parent remains **28.88838 MHz**.
+
+### Closed diagnostic: 28.88420 MHz, no overall timing gain
+
+The diagnostic closes native **zero at 03:07:22 UTC**, after **1,940.48 seconds
+(32m 20s)**. Its independent synthesis audit passes. A separate read-through
+rehashes all **3,309 recorded inputs, 148 native source files and 14 result
+artifacts**. Actual mapper commands match the parent's `Default
+-no_timing_driven`; source clocks and all 156 definitions are unchanged.
+
+Utilization is **185,602 LUTs (+1,832, +1.0%), 54,666 registers (+22), 277.5
+BRAM tiles and 47 DSPs**. The run records zero OOM events, peak RAM 8 GiB and
+peak swap 377,622,528 bytes. Native diagnostics are zero errors, one critical
+warning and 1,570 warnings. The critical warning is the same generated PS XDC
+clock-pin warning as the parent; actual project clocks are checked separately
+below. The eight bypass-cache metadata reset warnings match the parent.
+
+The clock audit closes native **zero in 484.73 seconds**, owner
+`ventium-prime-noack-logic-clock-oct12.service`, invocation
+`ce53f2b508744dc1bdda0af45a302445`; native scope invocation
+`e4ef7f7324cc4bae84548842d73ac27b`. Its **1,069 input pins and 24 report/artifact
+pins independently rehash**. It confirms actual 25 ns core / 10 ns PL clocks,
+no unresolved black boxes and no checked structural DRC errors. Both stage
+owners and the sequencing owner are terminal zero; no Vivado family remains.
+
+The measured unplaced core estimate is **28.88420323 MHz**, from **-9.621 ns
+setup slack at 25 ns**; core hold is **-0.101 ns**. Compared with the matched
+parent, setup is 0.005 ns worse and Fmax is effectively unchanged. The
+measurement sequence passes, but its receipt explicitly records
+`synthesized_40mhz_requirement_met=false`, `qualification=UNQUALIFIED`, no
+standard-suite acceptance and no route/deployment. A successful tool run is
+not a processor timing pass.
+
+Retained SHA-256 identifiers:
+
+- Synthesis DCP: `2a734a6d33ff623254a88e2fa3ec40078d340ed45533e0f02c9767694f36661b`.
+- Synthesis closure: `388126bbde769cc65dd62e330d5fb44089e7e4fe3984700f23b28739bd2c2e5d`.
+- Synthesis audit: `aba27bd2d42ab12d551ad75187d01dd9dc08165c26ded719830f5bb1c8ef261d`.
+- Clock audit: `2e313f2398a73c3f1b6da9e9ec0f6071f66d916ccc07e1bd58e5d34244ca726e`.
+- Full-clock setup report: `886d47076e386a491be163717d9b71ae9e9f5103b11d61e5abb0663a9fd6f2cf`.
+
+### Remaining measured paths and next fixes to qualify
+
+The complete 30-path report contains **11 instruction-cache age-data endpoints,
+14 SRT result synchronous-set endpoints and five SRT carry-register clock-enable
+endpoints**. These are the reported worst paths, not an exhaustive set of
+violating endpoints. The independent path parser verifies clock periods,
+requirements, data-delay sums and arrival/required/slack consistency.
+
+Worst path: `eip[0] -> ic_age[34][0][0]/D`, **117 logic levels**, **34.410 ns
+data delay = 6.707 ns logic + 27.703 ns estimated routing**. Its named netlist
+markers expose the retained coupling:
+
+| Through marker | Cumulative data delay |
+| --- | ---: |
+| Pair decision | 14.777 ns |
+| Next-read preparation | 22.888 ns |
+| Next-read request | 24.808 ns |
+| Paired-store readiness | 25.894 ns |
+| Paired-store request | 27.039 ns |
+| Backing ACK | 29.470 ns |
+| General L1 ACK | 30.166 ns |
+| I-fill qualifier | 31.536 ns |
+| Cache age endpoint | 34.410 ns |
+
+Source inspection finds that **both read-only I-fill arms still consume general
+`mem_ack`**: S_PF and S_PIPE miss word zero. The existing `mem_read_ack` preserves
+fragment suppression and already has an equality assertion when `!mem_we`.
+The next candidate should qualify that read cofactor for these fill consumers,
+including first-word stalls, fault/diversion, flush, snoop, bypass and held-owner
+cases. Do not change request authority, fill timing, invalidation priority or
+cache size. This is a proposed change, not a completed proof or measured gain.
+
+The worst SRT result/control paths are **29.02926 / 29.07315 MHz**, 121 levels.
+They run from EIP through decode, operand addressing, request/route qualification,
+`early_match`, memory payload selection, float conversion and SRT input
+classification. The earlier [payload-kind sideband proposal](../verif/l1/PAYLOAD_CODE_HINT.md)
+now has a relevant measured target again. Its cache and extracted request tests
+passed, but its prepared whole-core version predates the present four changes:
+it must be rebased and fully qualified, not copied blindly. SRT special-result
+and carry initialization are also candidates for removing unnecessary
+input-dependent enables; any such change needs operation/rounding/denormal,
+reset, busy/start and valid-result tests. No extra latency or simplified FP
+semantics is accepted merely to obtain a better timing number.
+
+The dedicated **V-response capture** report remains **29.71415 MHz** (114
+levels, 33.443 ns), versus the parent's **29.76102 MHz**. Thus the same-line
+return cut has **not demonstrated an improvement to the worst capture path**.
+Inspect its remaining response/readiness dependencies as well; fixing only the
+top I-cache endpoint cannot establish 40 MHz. Do not launch another expensive
+synthesis on an assumption that this third path is already resolved.
 
 Canonical correctness, original full CoreMark seeds, cold Win95 desktop/UI,
 full original Quake timedemo and actual candidate FPGA validation remain
