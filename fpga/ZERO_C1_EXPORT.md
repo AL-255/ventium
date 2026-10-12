@@ -370,6 +370,34 @@ collector must preserve bounded, loss-detectable evidence for long runs;
 silently raising/removing the cap or ignoring the failed closure is not a fix.
 No replacement Windows run is launched in this follow-up.
 
+October 12 clarification from the retained bytes: the dominant vector-6 site
+must not be labeled a newly discovered CPU #UD loop. `boot0.rom` at offset
+`0xfb17` contains `63 38 6c 6c`, matching the logged instruction bytes.
+`FCB2:2FF7`, `FCBF:2F27` and `FCC5:2EC7` all resolve to `0xFFB17` under V86
+addressing. These are the same ROM-ARPL callback aliases already diagnosed with
+actual pre-fault VM state and acknowledged return operands in
+[the earlier Win95 investigation](../docs/WIN95_ABLATION_2026-09-28.md).
+Microsoft's archived [KB71264](https://ftp.zx.net.nz/pub/archive/ftp.microsoft.com/MISC/KB/en-us/71/264.HTM)
+documents Windows' use of permanently available ROM instructions as system
+breakpoints. This evidence supports the callback interpretation, not a blanket
+assertion that every exception is benign.
+
+A fresh read-only scan of this run finds 513,810 complete vector-6 records
+including `ibuf`; 513,053 have a ROM byte `0x63` matching the logged opcode,
+across 17 aliases of `0xFFB17`. This stricter count is **not** directly comparable
+to the earlier partial-record regex count. Interleaving and the incomplete log
+still prevent exhaustive fault classification; this diagnostic also lacks a
+same-record VM bit. Log SHA-256:
+`e03e3f9de57efff8dd9ebc0a2b57f0e183c0293ba4d8efffe4a0ff5ebef48b9e`;
+ROM SHA-256:
+`dca915c5483793a710ee118c5232aad01ef3191bea7d50c2befb1a47d2dd26a3`.
+The actual collector failure remains unchanged: incomplete capture and forced
+termination after prolonged desktop idle. Do not suppress these records, alter
+the guest breakpoint setting, or count the old run as accepted. For the next
+cold candidate run, inspect the desktop promptly, perform ordinary UI input,
+capture its response, and request owned graceful closure while the evidence
+budget remains intact. No new guest run or acceptance waiver is made here.
+
 Newer verified gameplay baseline: **0.51030715 total U+V IPC** on `2b4d7a48`,
 cycles **1,200,065,237–1,300,065,237**, from the first predeclared 100M-clock
 window (`ventium-zero-c1-gameplay-first.OAQbYerX/audit.json`). It is not a
