@@ -208,6 +208,16 @@ invocation, independently audit its native closure, then run the read-only
 clock audit. Audit success and the **at-least-40-MHz requirement** are separate
 fields. The actual Fmax remains unmeasured; no route or deployment is queued.
 
+Synthesis starts at **09:37:59 UTC**, owner
+`ventium-fetch-probe-synth-oct12`, invocation
+`5d13fcd9bd29424da652db1baebb5557`. The single native Vivado family is admitted
+under scope invocation `c8e488af8465470cb379644a66b4a10a`, with the unchanged
+8/6 GiB caps and 48-task bound. Evidence is `probe-synthesis-r1`; no competing
+heavy compile is active. Queue `ventium-fetch-probe-timing-queue-oct12`,
+invocation `a1ad35845ae54e5d9a686ab25770e8b6`, adopts exactly that synthesis
+and will write `probe-clock-r1` only after successful native closure and
+independent source/DCP audit. This is **in progress**, not a timing pass.
+
 ## Recoverable evidence compaction
 
 Disk reserve is preserved without deleting sources, fixtures, native models or
