@@ -112,6 +112,20 @@ Fmax remains unmeasured for this new candidate until native synthesis and the
 independent clock audit both close. Full standard-suite and physical FPGA
 Win95/UI and complete Quake timedemo acceptance remain outstanding.
 
+The [timing queue](run_load_read_ack_timing.py) adopts that exact synthesis
+invocation; it cannot start or restart synthesis. Queue owner
+`ventium-load-read-ack-timing-queue-oct12`, invocation
+`964cc5c2972342d5b7939740e4c44957`, waits for authoritative native closure,
+rehashes the inputs and requires the independent synthesis audit to pass.
+Only then may it launch the prepared clock/netlist audit. Audit-process success
+is distinct from its `synthesized_40mhz_requirement_met` field. No route or
+deployment is queued, and no resource limit is raised.
+
+While this frozen synthesis runs, a separate
+[query-payload selector candidate](PRIME_QUERY_PAYLOAD.md) is prepared and
+microtested. It is **not included** in this synthesis. Full-core compilation
+and regression of that separate candidate wait for the timing queue to close.
+
 ## Evidence and storage
 
 Evidence root: `/home/yukidama/external/tmp/ventium-load-read-ack.GyWDDtiI`.
