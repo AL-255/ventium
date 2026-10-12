@@ -2,7 +2,7 @@
 
 Target: **at least 40 MHz synthesized Fmax**, UV+fast and full P5 caches.
 This change is implemented in a **private source-matched derivative** and has
-passed leaf/cache/AXI tests and whole-core compilation. **Timing is unmeasured;
+passed leaf/cache/AXI tests, whole-core regressions and whole-PC compilation. **Timing is unmeasured;
 it is not a release, standard-suite pass or FPGA acceptance.** The last timing
 candidate was 30.556744 MHz; the best retained result is 30.676729 MHz.
 
@@ -48,6 +48,9 @@ All paths below are under
 | `backing-payload-core-r1` | Native compile exit 0, 20.91 seconds, input hashes unchanged | 195-source frozen derivative, same 152 defines, 32-job bounded build; private C++ object and matching generated-header dependency verified |
 | `backing-payload-core-r1/verify-closed.json` | **FAIL**, native `make` exit 2; 7 functional passes / 101 failures; 396.48 seconds | Unmodified canonical gate, all 20 cycle streams exactly equal to the parent; no masking, golden or band changes |
 | `backing-payload-fp-r1` | Native exit 0; 384 fixtures, 1,536 measurements, 208,128 candidate records, 768 actual V retirements | Complete QEMU/parent FP architectural comparisons; all 768 candidate/control cycle totals unchanged; 66.80 seconds, unchanged pins |
+| `backing-payload-regressions-r1` | All 12 phases exit 0, 604.24 seconds, input hashes unchanged | Six boundary offsets, faults, integer, memory, held responses, branches and complete 108-program same-input replay (80,800 records) |
+| `backing-payload-soc-r1` | Native compile exit 0, 23.61 seconds, input hashes unchanged | Exact L1+DMA transfer; 102 shared core RTL files checked, DMA checked separately; same 156 defines and 98 inherited structural diagnostics |
+| `backing-payload-fpga-r1` | Source contract passed | 190 payloads, all 170 common HDL inputs source-matched to the PC build; same 158 hardware defines and 40/100 MHz constraints |
 
 The AXI test observes 68 U stores, three V stores (including one load/store
 pair), one one-slot fused quadword admission, 30 blocked-store clocks, 84
@@ -84,29 +87,46 @@ were losslessly archived and verified before removing the uncompressed copies.
 Sources, generated headers, accepted binaries, logs and receipts remain.
 `backing-products-archive-closed.json` records all hashes and restore commands.
 
-## Next qualification
+## Whole-PC transfer and next qualification
 
-The unchanged canonical gate is closed **red**, not waived. Same-input full
-functional replay is still required; identical cycle streams alone do not
-establish that every functional failure is inherited. The remaining directed
-QEMU/parent work is running in `backing-payload-regressions-r1`. All six boundary
-cases (operand offsets 0, 1, 24, 25, 29 and 4093, at both instruction alignments)
-have passed; faults, integer, memory, held-response, branch and replay results
-must still close and be audited.
+The unchanged canonical gate is closed **red**, not waived. Complete same-input
+replay now passes for all 108 programs and 80,800 records: this derivative does
+not change their parent results. That is regression evidence, not evidence that
+the inherited functional failures are correct. Boundary offsets 0, 1, 24, 25,
+29 and 4093 (both instruction alignments), all 32 fault measurements, 1,024
+integer measurements, 288 memory measurements, 48 held-response cases and 2,560
+branch measurements also passed. The exact coordinator
+`ventium-backing-payload-checks-oct12.service`, invocation
+`3a112d84a0e942d697f636be994a02a9`, closed natively with exit 0; its receipt
+explicitly retains `canonical_gate_passed: false`.
 
-The live coordinator is `ventium-backing-payload-checks-oct12.service`, invocation
-`3a112d84a0e942d697f636be994a02a9`, with receipts in
-`backing-payload-checks-r1`. It observed the exact canonical owner close, retained
-its failure, and then launched the FP matrix and unchanged 12-phase regression
-plan sequentially under the shared bounded guard. No Vivado is running.
+The PC model is `87afedaa869e6d8a86f36e31ea7a880875e096b924389ae78e37e65d018ad466`.
+Its build owner `ventium-backing-payload-soc-oct12.service`, invocation
+`a4a4f43fc78f48acad783379b747b755`, closed successfully. The private C++ harness
+object and matching generated-header dependency were checked. The export
+manifest is `d6f856259c0cdef90c0ef3f1a97b0a5568bdba13b8eb9d3a8332fc351bc90c20`.
+No additional source, clock, queue-depth or define change was admitted.
+
+Closed FP/integer/memory/branch traces were independently re-compared, then
+losslessly archived with every member byte-verified. Their native receipts,
+fixtures, models and source pins remain unpacked; fault and replay artifacts
+were not removed. `closed-backing-payload-{fp,regression}-text-closed.json`
+records archive hashes and restore commands.
 
 [`test_backing_pair_payload_flow.py`](../verif/l1/test_backing_pair_payload_flow.py)
-passes five scheduling/source-admission tests. The
-[PC transfer helper](build_backing_pair_payload_soc.py) requires the completed
-native regressions and exact L1+DMA source deltas; its native PC build has **not**
-been launched. After those gates, transfer the exact checked sources to
-the PC model (including DMA), run both CoreMark preflights, and perform one
-bounded synthesis/timing comparison against the **best retained** checkpoint.
+passes five scheduling/source-admission tests. The export and synthesis
+preparation helpers pass eight more tests, including rejection of missing,
+extra or wrong source deltas, preservation of resource bounds and comparison
+against the best retained checkpoint. The synthesis audit also requires the
+old eight DMA generated-control undriven diagnostics to disappear.
+
+Both unchanged short CoreMark seeds are running under
+`ventium-v-carry-cm10-backing-payload-oct12.service` (CPU 11), and strict
+CPU-hierarchy hardware-profile lint under
+`ventium-backing-payload-lint-oct12.service`. Neither is a standard-suite pass;
+the short seeds cannot establish a duration-valid score. No Vivado is running.
+After these close, perform one bounded synthesis/timing comparison against the
+**best retained** checkpoint, with sufficient disk reserve restored first.
 Do not claim a timing gain from the source rewrite or passing equivalence tests.
 
 The final requirements remain ≥40 MHz synthesized Fmax, routed timing,
