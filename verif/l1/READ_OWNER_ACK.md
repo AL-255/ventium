@@ -273,13 +273,42 @@ Fresh derivative L1 SHA-256:
 Whole-core model SHA-256:
 `e1621913f28c5cd1c10b0c19f57bc59277807034dfb6b94a79bd7fe58d6a1a81`.
 
-Canonical verification is launched as `ventium-fresh-pair-canonical-oct12`,
-invocation `b9a31628a6d64d9fbf836522a98b787d`; it keeps the known failures
-unwaived and compares all 20 cycle traces with READ-OWNER. Full FP and the
-eight-corpus A/B checks are queued behind the shared heavy-job guard as
-`ventium-fresh-pair-fp-oct12` (`fddb7f232e1741559f1cbffd8b997918`) and
-`ventium-fresh-pair-checks-oct12` (`2281576132ce48ea8e8e7cf3565f34b2`). No
-fresh candidate synthesis, routed or gameplay result is claimed. The wider
+Canonical verification `ventium-fresh-pair-canonical-oct12`, invocation
+`b9a31628a6d64d9fbf836522a98b787d`, **closed in 393.720 seconds**, native
+`make` exit **2** / controller exit **1**: **7 functional PASS / 101 FAIL**,
+still red and unwaived. All **20 cycle traces match READ-OWNER**. Independent
+checks confirmed the exact failed owner and rehashed **3,068 pins**; no masks,
+goldens or cycle bands changed.
+
+Full FP `ventium-fresh-pair-fp-oct12` (`fddb7f232e1741559f1cbffd8b997918`)
+**closed successfully in 67.579 seconds**: **384 fixtures / 1,536 native
+measurements / 768 zero-cycle-delta comparisons**, actual AXI latencies 0 and 7.
+Independent checks confirmed the closed owner and all 13 input pins. The
+eight-corpus A/B checks are running under the shared heavy-job guard as
+`ventium-fresh-pair-checks-oct12` (`2281576132ce48ea8e8e7cf3565f34b2`).
+
+Six source-transfer tests pass for the new `build_fresh_pair_soc.py` /
+`freeze_fresh_pair_rk_candidate.py` recipes: they match the actual tested core
+delta and reject omitted edits, extra bytes, parent drift, reapplication and
+unrelated changes. Five synthesis-preparation tests also pass. They preserve
+the closed READ-OWNER native lifecycle, original 40/100 MHz clocks, full
+FP/fault/replay/CoreMark requirements and resource floors. Source/area control
+is READ-OWNER; the independent timing control remains the better PAIR-INTENT
+checkpoint. These are preparation tests, not a PC build or a Vivado launch.
+
+Before compaction, all **208,128 candidate FP records** were independently
+recompared against QEMU and the control. The **11,916** closed text artifacts
+are preserved losslessly as `closed-fresh-pair-fp-text.tar.gz`, **487,358,972 →
+29,595,082 bytes**, SHA-256
+`3741484f8ee5bcd6ddc099c48abe19e33dbfe2aa23fb369e514e7eedf081039f`.
+Every archive member was byte-verified before removing unpacked copies;
+inputs, binaries and native closure receipts remain unchanged. Restore with
+`tar -xzf closed-fresh-pair-fp-text.tar.gz -C /home/yukidama/external/tmp`.
+The failed cache-R2 compiler intermediates were likewise archived with the
+existing byte-checked helper; its native failure log, test binary and original
+fixture remain unpacked. See its `compiler-compaction.json` for restoration.
+
+No fresh candidate synthesis, routed or gameplay result is claimed. The wider
 FP/fault driver is prepared but not launched yet. The last synthesized
 candidate is still READ-OWNER at **31.040477 MHz**; best remains PAIR-INTENT
 at **31.651579 MHz**, both short of the required **40 MHz**.
