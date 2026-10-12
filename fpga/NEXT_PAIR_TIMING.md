@@ -175,9 +175,11 @@ there is **no candidate Fmax result or 40 MHz claim**.
 
 The completed **parent** `backing-payload-clock-r1/timing_summary.rpt` records
 zero unconstrained internal endpoints and zero combinational loops, but also
-**8 `no_clock` pins and 4 `no_output_delay` ports**. Its summary does not name
-those objects. Their identities and significance remain unresolved; do not
-assume they are harmless LEDs or unused IP. The parent also fails hold in both
+**8 `no_clock` pins and 4 `no_output_delay` ports**. The checkpoint's actual
+`rk_ao486_bd_wrapper_stub.v` declares only `output [3:0] led`, matching the four
+physical LED assignments in `flow/hw/led.xdc`. Those outputs have no synchronous
+external receiver contract; do not invent clocked output delays for status LEDs.
+The eight unclocked objects still need identification. The parent fails hold in both
 clock domains (-0.108 ns at 100 MHz, -0.101 ns at 40 MHz). These are unplaced
 results, not proof of a silicon hold failure, and are not waived.
 
@@ -194,6 +196,28 @@ contracts are AMD's [check_timing](https://docs.amd.com/r/2024.1-English/ug835-v
 and [report_exceptions](https://docs.amd.com/r/2022.1-English/ug835-vivado-tcl-commands/report_exceptions).
 This follow-up has **not** been run and does not modify the currently pinned
 synthesis/report controllers.
+
+The detailed parent summary does expose a more specific unresolved internal
+case: a no-source-clock group covers **52 maximum-delay and 52 minimum-delay
+endpoints**. Its representative paths start at
+`ex_mul_p0__1/DSP_A_B_DATA_INST/B2_DATA[17]` and
+`ex_mul_p0__2/DSP_A_B_DATA_INST/B2_DATA[17]`, ending at EFLAGS bits 0 and 11.
+Whether these are disabled/constant DSP primitive arcs or live unclocked state
+requires the actual primitive properties and wiring. Their reported infinite
+slack is **not** a performance result. The summary alone does not prove they
+account for all eight `no_clock` objects.
+
+[`report_rk_timing_coverage.tcl`](report_rk_timing_coverage.tcl) is prepared to
+collect verbose timing checks, exception coverage, actual integer-multiplier
+DSP properties/pin connectivity and active constraint files. It requires a
+completed, non-stale, unimplemented RK synthesis project with the original
+100/40 MHz clocks and a fresh output directory. It cannot synthesize, place,
+route, change constraints or declare acceptance. Three Tcl-mocked tests pass
+in `test_report_rk_timing_coverage.py`, including stale/incomplete/wrong-clock
+and empty-DSP rejection. **These tests do not execute Vivado or resolve the
+reported timing debt.** Run the native diagnostic only after the existing
+synthesis and queued timing owners have closed, under the same exclusive
+Vivado/resource guard.
 
 The exported source includes an old `flow/hw/fpatan_mcp.xdc`, but the actual
 wrapper deliberately excludes it from `constrs_1` because its legacy
