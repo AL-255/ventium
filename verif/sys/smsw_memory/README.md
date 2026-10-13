@@ -1,7 +1,10 @@
 # Memory SMSW: Doom startup regression
 
-Status: **isolated repair compiled; 88 initial full-trace differential cases
-pass. Unpromoted; privilege/fault and standard-suite qualification remain open**.
+Status: **isolated repair compiled; 173 full-trace differential cases pass**
+(88 initial + 60 privilege + 25 paging). Twenty additional LOCK/segment cases
+pass their Intel-spec RTL self-checks but **diverge from QEMU**; these are not
+differential passes. Unpromoted; remaining corners and standard-suite
+qualification remain open.
 The physical-board finding is in
 [FPGA_DOOM_2026-10-13.md](../../../docs/FPGA_DOOM_2026-10-13.md).
 No guest patch, saved state, replacement DOS extender or U-only mode is used.
@@ -96,13 +99,86 @@ equivalence, not a QEMU correctness pass**.
 There is still **no synthesis, checkout promotion, physical-board acceptance
 or gameplay measurement for the SMSW derivative**.
 
+## Privilege and precise-store corner results
+
+`run_privilege.py` closes 60/60 full comparisons, **11,250 records**, in
+6.004 seconds. The 48 SMSW cases cover CPL3 and V86, effective 16/32-bit
+address/operand sizes, offsets 1 and 4095, default DS, default SS through
+BP/EBP addressing, and explicit FS. DS/SS/FS bases are deliberately distinct
+(0x2000/0/0x6000); the two nonselected destinations must remain unchanged.
+Twelve ordinary-MOV controls also pass, including on pre-repair RTL; all 48
+pre-repair SMSW probes deliver exactly one #UD. The repaired cases preserve
+GPRs/defined flags and the exact two-byte footprint. Register r16 preservation
+is checked; the r32 upper-half check preserves **existing QEMU compatibility**,
+not an Intel architectural requirement (Intel calls that half undefined).
+
+V86 uses IOPL=3 and explicitly allows only byte-wide port 0xF4 in its TSS I/O
+bitmap. This is ordinary cold-boot test setup, not a guest snapshot. Failed
+fixture revision `smsw-privilege-r1` is retained: its bitmap denied the V86
+exit, and the checker counted duplicate fault diagnostics. Revision r2 fixes
+those fixture/checker errors and recognizes architectural V86 EIP instead of
+treating it as a linear PC. No RTL, comparator or QEMU patch was made.
+
+`run_fault.py` executes 45 cold fixtures with caches enabled, CR0.WP=1, and
+seven-cycle AXI read/write latency. The **25 paging cases / 2,960 records**
+match QEMU completely: first/second page absent or read-only, plus writable
+controls. The word starts at offset 0xFFF and maps across **nonadjacent physical
+frames**. The handler checks fault PC, vector/error, CR2, every GPR, saved flags
+and both destination bytes/canaries **before any repair or retry**. Physical
+readback uses writable aliases. Both caches and paired execution are observed
+in native counters; these short fixtures are not gameplay or throughput scores.
+
+The remaining 20 cases (illegal LOCK, null DS, read-only DS and DS-limit
+crossing, including ordinary-MOV controls) expose reference limitations:
+RTL exits successfully after the expected precise #UD/#GP and unchanged-memory
+checks; native QEMU exits with the test's failure marker and its trace proceeds
+past the invalid access. The full comparator reports divergence. **The fault
+driver therefore remains exit 1, not a 45-case differential pass.**
+
+Specification check, using the PDF skill's rendered-page inspection:
+Intel *Pentium Processor Family Developer's Manual*, Volume 3, **241430-004**,
+printed pages **25-215** (LOCK) and **25-297** (SMSW), PDF pages 832 and 914.
+LOCK must reject instructions outside its listed set; SMSW memory writes must
+honor segment write access and limits. The pinned QEMU source's SMSW arm at
+`target/i386/tcg/translate.c:6045` lacks a LOCK-prefix rejection; its segment
+address helper only adds the selected base. The existing `run-seg-gate.sh`
+and `run-pnullseg-gate.sh` already document the segment-oracle limitation.
+No goldens, masks, fault behavior or canonical acceptance criteria were changed.
+
+`audit_corners.py` independently repeats all 105 comparisons and checks exact
+instruction encodings, fault PC/vector/error, native owners, model/source/input
+hashes and terminal markers. It reports **85 differential passes separately
+from 20 Intel-spec-only witnesses**, preserving the red full fault gate.
+Audit: `smsw-corners-audit-r1.json`, SHA-256
+`40789a717d90f1e201945b4b608799e57c23b33ea54ba40da559ad08dafe72f6`.
+
+`run_fault_mutants.py` additionally rejects all **125 negative controls**:
+45 removed-store/removed-fault variants and 40 variants for each deliberately
+dirty destination byte. The latter alter only microtest initialization, so
+each handler must notice the bad byte on its respective side of the boundary.
+All exit with failure 0x43, with the expected zero/one fault and exact fault PC;
+no RTL forcing or application patching. Runtime 3.345 seconds.
+
+Evidence (same external parent as above):
+
+| Run | Native terminal result | Controller invocation |
+| --- | --- | --- |
+| `smsw-privilege-r2` | exit 0 / MainPID 0 | `67f44768b30447fd9331644cd46c44c4` |
+| `smsw-fault-r1` | exit 1 / MainPID 0, differential disagreements retained | `e9cfc969148f4945b313b9712368dd34` |
+| `smsw-mutants-r1` | exit 0 / MainPID 0, all 125 mutants rejected | `edf9ac591744487d994ee5f25cf4b07f` |
+
+These runs use at most 8 concurrent cases, explicit two-CPU native affinity
+per child, 4 GiB RAM / zero swap limits, and watchdogs of at most 10 minutes.
+All completed in seconds; no full-system benchmark, FPGA rebuild or deploy
+was started for this qualification.
+
 ## Required next gates
 
-- CPL3/V86, segment overrides/default SS, invalid LOCK,
-  null/read-only/limit-failing segments, present/not-present/read-only page
-  boundaries, fault PC/CR2/error and absence of partial writes or GPR changes.
-- Register controls, store-delay/backpressure and reset/event/debug boundaries;
-  actual paired-path witnesses for UV-fast acceptance.
+- #SS and real/V86 64 KiB extent failures, CPL3 user/supervisor paging and #AC,
+  fault retry, priority combinations, reset/event/debug boundaries and broader
+  store-delay/backpressure coverage. Existing tests do not close these cases.
+- Wider register/destination/prefix coverage; independently qualified full
+  UV-fast execution and performance, not short-test aggregate counters.
 - Update opcode coverage on promotion, keep differential gates green, and run
   the standard suite before declaring completion. Then rerun unmodified Doom
   on a newly qualified FPGA image and obtain an actual completed timedemo.
