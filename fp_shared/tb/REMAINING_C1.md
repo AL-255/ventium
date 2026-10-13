@@ -22,7 +22,7 @@ remaining reported fields; it does not discard any of them:
 | Zero-C1 load/register-pop sites | 61 | Nonoverflowing FLD and nonempty exact FSTP; native TOP/tag transitions checked; RTL/native C1 is zero, QEMU retains one |
 | Rounding-C1 arithmetic/narrowing sites | 17 | Exact rational comparisons, squared-result comparison for sqrt, or independent integer binary32/64 narrowing; RTL/native agree, QEMU differs |
 | C1 retained across observation/integer/FWAIT instructions | 12 | Actual before/after persistence; not 12 new arithmetic defects |
-| EAX/ECX fields | 70 | Full native field equals RTL; this pass does not claim a complete architectural taint analysis |
+| EAX/ECX fields | 70 | Full native field equals RTL; the later closed-trace propagation audit below connects these copies to six independently checked rounding results |
 | Final `tx_fprem` C0 field | 1 | Retained as unqualified; modern-host agreement is not proof of P54 behavior for previously undefined bits |
 | **Total** | **161** | **No acceptance mask added** |
 
@@ -34,6 +34,15 @@ exit normally and are reaped. Narrowing C1 is computed from the exact source,
 destination precision/exponent limits and rounding control, not from a captured
 result or a host floating-point calculation. This does not qualify all x87
 exceptions, other instructions, or all bits copied through arbitrary guest code.
+
+The later [GPR propagation audit](../../verif/qemu-trace/PREEXIT_OBSERVER.md#link-the-copies-to-independently-checked-rounding-results)
+checks complete FNSTSW AX, MOVZX ECX,AX and GPR-preservation equations on both
+unchanged traces. Its join re-evaluates this checker's six source C1 results
+with matching operands/control words and **164 rehashed input pins**. All 70
+reported GPR differences originate in those six correctly rounded C1=1
+results, rather than independent integer defects. This is scoped to the
+closed `f74dd76b` corpus, not a general taint oracle or current-candidate pass;
+the undefined-C0 and reference-policy debts below remain open.
 
 The first attempt correctly failed closed on `9b db e3`: its eight-byte peek
 starts at a separately retired **FWAIT**, not the following FNINIT. R2 checks

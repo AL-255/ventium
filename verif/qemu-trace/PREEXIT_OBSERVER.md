@@ -392,3 +392,38 @@ and the current candidate still needs full standard-suite and physical FPGA
 acceptance. Current candidate gameplay IPC remains **unmeasured**; older
 simulation baseline **0.51030715 U+V IPC**, `2b4d7a48`, cycles
 **1,200,065,237–1,300,065,237**, predates it.
+
+### Link the copies to independently checked rounding results
+
+The existing [remaining-C1 checker](../../fp_shared/tb/REMAINING_C1.md) already
+classifies 17 arithmetic/narrowing status discrepancies with exact arithmetic;
+it need not be reimplemented. A read-only join of its closed result with the
+GPR-flow result identifies **six unique C1-producing instructions** behind all
+70 GPR differences. Re-evaluating the original exact-arithmetic classifier,
+checking the actual operands/control words/results against both traces, and
+rehashing **164 unique input pins** passed. All six correctly produce **C1=1**
+in RTL/native while QEMU omits it:
+
+| Program / status-producing record | Instruction/result class | Propagated GPR fields |
+|---|---|---:|
+| `tx_fp_denorm` / 35 | FMULP extended overflow | 14 |
+| `tx_fp_denorm` / 42 | FDIVRP extended overflow | 14 |
+| `tx_fp_denorm` / 61 | FST binary32 overflow | 12 |
+| `tx_fp_denorm` / 67 | FST binary64 overflow | 12 |
+| `tx_fp_denorm` / 73 | FST binary64 subnormal rounding | 12 |
+| `tx_round` / 9 | FDIVRP directed rounding | 6 |
+| **Total** | **Six roots, not 70 independent integer faults** | **70** |
+
+The join is `ventium-p54-status-origin.MVDMtGws/link_gpr_rounding.py`, with
+`gpr-rounding.json` alongside the earlier receipt (SHA-256
+`8f032f620d8b956c3049d58c07a453f510f2125379df3db5e2f68df65f1e3b80`). Unit
+`ventium-preexit-gpr-rounding-oct12`, invocation
+`f2978c21919543749a043689c2a5947c`, closed native 0 at **00:38:08 UTC**,
+peak **18,407,424 bytes**, verified actual affinity CPU12. All **14 host tests**
+for the reused narrowing checker and new propagation checker pass. No new
+native guest or simulator ran. This ties the 70 copies to the existing
+independent C1 evidence, but does **not** qualify the final undefined C0 bit,
+promote an oracle change, clear the canonical gate, or accept the live timing
+candidate. Current candidate gameplay remains unmeasured against the older
+**0.51030715 U+V IPC** `2b4d7a48` baseline, cycles
+**1,200,065,237–1,300,065,237**.
