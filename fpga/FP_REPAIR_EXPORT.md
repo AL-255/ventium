@@ -60,12 +60,33 @@ remaining system/fault discrepancies are not waived.
 
 ## Synthesis and remaining acceptance
 
-One guarded synthesis was launched under
+The guarded synthesis closed successfully under
 `ventium-fp-repair-synth-oct13.service`, invocation
-`c6d4e5049a16454496b2f0ecd0902a24`. It retains the matched Default logic-only
-mapper, fixed 40 MHz core constraint, exclusive Vivado family, 8 GiB RAM /
-6 GiB swap caps, measured-growth disk admission and live 4 GiB disk stop floor.
-**No new Fmax result yet.** The matched endpoint parent estimates
+`c6d4e5049a16454496b2f0ecd0902a24`, native exit 0 / MainPID 0, in **1,924.43 s**.
+Its independent audit rechecks **18,479 source pins**, 148 native Verilog
+inputs, all 158 definitions, the eight intended source changes and the actual
+checkpoint. The matched Default logic-only mapper, fixed 40 MHz constraint,
+exclusive Vivado family, 8/6 GiB RAM/swap caps and disk guards are unchanged.
+Measured peak RAM was **8,374,681,600 bytes**, peak swap **2,006,802,432 bytes**;
+no OOM or resource stop occurred.
+
+| Resource | Endpoint parent | Repaired candidate | Change |
+| --- | ---: | ---: | ---: |
+| CLB LUTs | 187,333 | 186,770 | -563 (-0.30%) |
+| Registers | 54,966 | 55,011 | +45 |
+| BRAM tiles | 277.5 | 277.5 | 0 |
+| DSPs | 47 | 47 | 0 |
+
+Native synthesis reports zero errors, one critical warning and 1,564 warnings.
+The critical warning is the same generated PS8 `clk_pl_0` constraint lookup
+warning as the parent; it is not silently waived. The subsequent native timing
+audit confirms actual `clk_pl_0=10 ns` and `mmcm_clk=25 ns` clocks. No unresolved
+DMA generated-control warning is present.
+
+The read-only matched timing audit is running under
+`ventium-fp-repair-clock-oct13.service`, invocation
+`e72b965246744935a0bac9cfb5d7a7ac`, after the synthesis family closed.
+**No independently closed new Fmax result yet.** The matched endpoint parent estimates
 **35.056967572 MHz**, below the 40 MHz requirement. Neither an unplaced estimate
 nor a 40 MHz constraint establishes routed timing or physical operation.
 
@@ -159,6 +180,8 @@ Evidence root: `/home/yukidama/external/tmp/ventium-fp-repair-transfer.a8nzrjHu`
 | `soc-r1/obj1-speed-q16-parentpolicy/ao486sim_board_posted` | `c7b95b78f47f5e709136f98230bdf33975cf8db0e925956b469649cbf6384afd` |
 | `fpga-r1/input-manifest.json` | `bf2a944dc6aedaa7ec406fdf5c5607c54d707b8cb04fa25ad88b6ba74fac9b93` |
 | `soc-r1/coremark/audit.json` | `0d5166bc36cc1f0d58133f8279f623702c33aa502ff7d4d13a4e9644d9be2f69` |
+| `synthesis-r1/audit.json` | `ffea1bc1e015606cc3af050580f28e9b09631aaeb885f6fc0da39d81d4034bc3` |
+| `synthesis-r1/native-synthesis/rk_ao486_system/rk_ao486_system.runs/synth_1/rk_ao486_bd_wrapper.dcp` | `d801ced570e78057204df123ad72a899b0dc2ed6ed5e22490efdaa0ce61d1b97` |
 
 The CoreMark owner is terminal, invocation
 `c65abc7c1e764fef9e364fd0074eada9`, MainPID 0 / native exit 0.
