@@ -2,11 +2,12 @@
 
 READ-OWNER is a private derivative of
 [PAIR-INTENT](../../fpga/PAIR_INTENT_TIMING.md): **31.040477 MHz** versus its
-parent's **31.651579 MHz**. The later **FRESH-PAIR** derivative below now has
-the best closed synthesized estimate, **31.822811 MHz**, still below **40 MHz**.
-Its follow-on **INTENT-READY** private core has passed cache comparisons and
-built; whole-core verification is running. INTENT-READY has no synthesis,
-gameplay or physical result yet.
+parent's **31.651579 MHz**. The later **FRESH-PAIR** derivative measures
+**31.822811 MHz**. Its follow-on **INTENT-READY** now has the best closed,
+independently audited synthesized estimate: **33.154300 MHz**, still below
+**40 MHz**. Directed/cache/FP regressions and short CoreMark comparisons pass;
+no candidate gameplay or physical result exists. The canonical differential
+gate remains red.
 
 ## Change
 
@@ -713,26 +714,53 @@ PC PCH into adjacent recoverable `.gch.gz` files, saving **159,450,000 bytes**;
 no executable was removed. Disk admission was **7,279,517,696 bytes free**,
 above the unchanged **7,208,493,056-byte** requirement.
 
-INTENT-READY synthesis started **2026-10-13 00:17 UTC** (Oct 12, 20:17 EDT):
+INTENT-READY synthesis ran **2026-10-13 00:17–00:50 UTC** (Oct 12 EDT):
 `ventium-intent-ready-synth-oct12`, invocation
-`d7abf7a0eaa143d3a122544baf0358d0`. Its **5,619 input pins** were rechecked at
-launch. The sole guarded Vivado family is `ventium-vivado.scope`, invocation
-`f6e49d788b1b41908730200ba4aece24`; child synthesis helpers belong to that
-same family. Clocks remain **40/100 MHz**, and the matched `logic_only`
-mapper, **8 GiB RAM / 6 GiB swap**, combined/host-memory stop thresholds and
-**4 GiB free-disk stop floor** are unchanged. At **00:22:05 UTC**, the exact
-native owner was still live: **6,947,110,912 bytes** scope RAM, zero swap,
-zero OOM events, **7,131,787,264 bytes** free disk. This is a live observation,
-not synthesis completion or a timing result.
+`d7abf7a0eaa143d3a122544baf0358d0`, **closed native 0 in 1,998.246 seconds**.
+The independent audit rechecked **5,619 input pins**, all 158 defines and the
+two intended changed RTL payloads. The sole synthesis family was
+`ventium-vivado.scope`, invocation `f6e49d788b1b41908730200ba4aece24`; it has
+exited, including its helpers. Peak scope RAM was **8,589,918,208 bytes** and
+swap **923,303,936 bytes**, with no OOM or resource stop. Original **40/100 MHz**
+constraints, the matched `logic_only` mapper and all resource guards remain
+unchanged. The final DCP was independently rehashed:
+`497f354881a1cb7836ca3d0acd9babc8e364865b7f1af871acf2131f346b84d1`.
+
+Actual synthesized utilization is **185,782 LUTs / 54,938 FFs / 277.5
+BRAM36-equivalents / 47 DSPs**, versus FRESH-PAIR's 185,621 / 54,948 / unchanged
+memories and DSPs: **+161 LUTs, −10 FFs**. Diagnostics remain **0 errors,
+1 critical warning, 1,564 warnings**; the inherited PS8 scoped-clock warning
+is not waived or described as clean. This is synthesis closure, **not a timing
+or physical-board pass**.
 
 Exact-owner observer `ventium-intent-ready-report-queue-oct12`, invocation
-`0825b210a40b49529a565ddd7afde6e8`, is live too. It can independently audit
-successful synthesis and then launch the original-clock timing report once;
-it cannot retry synthesis, route or deploy. **INTENT-READY Fmax remains
-unmeasured**; the last closed synthesized estimate is still
-**31.822810591 MHz** from FRESH-PAIR.
+`0825b210a40b49529a565ddd7afde6e8`, closed successfully. It independently audited
+successful synthesis and launched the original-clock timing report once;
+it did not retry synthesis, route or deploy. After the successful synthesis
+audit it launched `ventium-intent-ready-clock-oct12`, invocation
+`5861272cbe194c6d9b072e923ed084ad`, at **00:50:28 UTC**, with **5,634 pinned
+inputs**. That native timing job closed successfully after **493.526 seconds**,
+in sole Vivado scope invocation `3f1fd04f5f5e4aa2ab86928136810a4e`.
+The independent audit passes: **33.154300113 MHz**, setup **−5.162 ns**,
+core hold **−0.101 ns**. The matched parent reproduces **31.822810591 MHz**,
+so the measured improvement is **4.184%**. Peak sampled scope RAM was
+**4,631,154,688 bytes**, zero swap, no OOM. Original clocks, source/DCP pins,
+structural DRC and both native reports were checked. This remains an
+**unplaced estimate**, not routed timing or hardware acceptance.
 
-### Critical-path follow-up while synthesis runs
+The new worst path is `q_pc_reg[0]` → `pipe_mem_store_pair_q_reg`, with
+**106 logic levels / 29.951 ns data delay** (7.079 ns logic, 22.872 ns estimated
+route). Its data-only cumulative landmarks are `pipe_load_req` **14.587 ns**,
+`core_mem_wstrb[1]` **17.417 ns**, `core_d_last[23]` **18.083 ns**,
+`shadow_payload_select` **20.334 ns**, `u_dst_val[16]` **22.149 ns**,
+`v_br_taken_eff` **26.165 ns**, and `core_mem_next_commit` **27.020 ns**.
+This changes the next target to **access extent/cacheability → saved response
+selection → U flags → V branch → commit**, not the parent-only AGU conjecture
+below. Read acceptance, physical response ownership, MMIO and width checks
+must remain correct. Setup-report SHA-256:
+`311aa618ac2d9067f2f059d4c11435c6e190438cdbad6fb87f25cd4894d3fe6a`.
+
+### Historical parent-path follow-up while synthesis ran
 
 A read-only pass through `fpga/analyze_setup_paths.py` independently re-parsed
 the unchanged FRESH-PAIR setup report (SHA-256 `cc82a409...45128`, full digest
