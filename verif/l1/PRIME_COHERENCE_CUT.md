@@ -243,19 +243,73 @@ Lint closure SHA-256:
 Six host tests check exact transfer, source-drift/missing-first-stage rejection,
 unchanged regression grading, actual cold-SMC admission, and preserved timing
 controller lifecycle/resource guards. Matched synthesis and clock-audit
-controllers have been **prepared, not launched**; they retain the 6 GiB launch
-reserve, 4 GiB stop floor and exclusive Vivado family. They require completed,
-audited short CoreMark results before admitting synthesis.
+controllers retain the 6 GiB launch reserve, 4 GiB stop floor and exclusive
+Vivado family. They require completed, audited short CoreMark results before
+admitting synthesis.
+
+## Short cold PC checks and resource recovery
+
+Both 10-iteration CoreMark seeds completed with exact reference CRCs and no
+new cycle difference. Performance: **4,767,218 ticks**, U **3,409,929** / V
+**1,055,307** at the final 13M-cycle checkpoint, **212.235 seconds** host time.
+Validation: **4,753,406 ticks**, U **3,405,882** / V **1,054,254**, **207.564
+seconds**. Neither run is duration-valid; these counters are not gameplay IPC.
+No throughput gain in cycles is claimed for these timing-only changes.
+
+Owner `ventium-v-carry-cm10-prime-coherence-oct13`, invocation
+`72fa563901f7416d9c50a24cda5d068a`, is terminal, exit 0. The independent audit
+rechecked **6,335 input pins**, observed CPU-11 affinity and exact native
+arguments, all children reaped, real posted-16 AXI transport, actual pairing
+and zero OOM events. Closure SHA-256:
+`8224dba96b4643636cfda323b986bee21086b481db948deb9a3d4c2922898846`;
+audit SHA-256:
+`6fe6b28235c2071d1d10bfdf6f5f35a016594c5ac91f27409953aa602cd29b2c`.
+These are **not** full standard-suite or physical-board passes.
+
+To restore synthesis headroom, 28 explicit closed timing tables were archived
+and verified byte-for-byte: **1,204,999,617 → 52,311,745 bytes**, archive
+`closed-large-timing-tables.tar.gz`, SHA-256
+`5dc5e8fb14ac3e0468f3a454763701735f1d6b51617746e715a8022301cf19f0`.
+Restore under `/home/yukidama/external/tmp`. Netlists, projects, source,
+small timing summaries, receipts and every current candidate input remain
+unpacked. The old failed PREFIX-REGONLY reporting run remains explicitly
+failed; archiving its tables does not change that result. Replaying old
+auditors that read archived tables first requires restoring those tables.
+The now-closed PC's two compiler PCH files were independently verified into
+adjacent gzip copies, recovering another **159,415,277 bytes**; binaries,
+headers and dependency files remain. Receipt: `prime-coherence-pc-pch-closed.json`.
 
 ## Required next checks
 
-Both short cold CoreMark seeds are running, serially on verified CPU 11, under
-`ventium-v-carry-cm10-prime-coherence-oct13`, invocation
-`72fa563901f7416d9c50a24cda5d068a`. Output is
-`prime-coherence-soc-r1/coremark`; do not restart on an observation timeout.
-These short tests cannot establish a duration-valid CoreMark score or standard
-suite completion. Audit their terminal results, restore sufficient disk reserve,
-then measure the matched synthesized timing. No synthesis is queued.
+The first synthesis admission under `ventium-prime-coherence-synth-oct13`,
+invocation `f3bdfde471d24d77905e6b0494157b9a`, **failed before launching
+Vivado**. The fixed 6 GiB reserve passed, but twice the previous measured disk
+growth above the 4 GiB stop floor requires **7,208,493,056 bytes / 6.713 GiB**;
+only 6,636,306,432 bytes were available. No native process, `started.json`,
+`once` directory or synthesis output was created. The terminal rejected
+admission is retained as `prime-coherence-synthesis-preflight-failed.json`.
+The guard was not weakened. An additional **101,432 closed fixture products
+and per-command receipts**, from the two core corpora, FP matrix and extended
+regressions, were byte-verified into `closed-prime-coherence-fixtures.tar.gz`:
+**300,175,228 → 16,938,759 logical bytes**. Those small files occupied
+**660,594,688 allocated bytes** before compaction. SHA-256
+`9ac4fd6160fcc4ee258c6ed212189e7880ad088ab0cb46b4424a390cc3a664d2`;
+restore under the evidence root. Sources, top-level receipts, models, all
+current input pins and 128 protected fault artifacts remain unpacked. No
+capture/movie or guest disk was changed.
+
+With **7,256,952,832 bytes free**, the unchanged controller was retried after
+that genuine admission failure. It is now live with controller invocation
+**`83c36bf52c524975839b3e96f01f55db`**, MainPID 278875 at admission; one native
+Vivado family was observed under scope invocation
+**`817346fe7a75489dad3de05835d7bd44`**. Native launch was
+**2026-10-13 05:34:46 UTC**. Scope caps remain **8 GiB RAM / 6 GiB swap /
+48 tasks**, with the original resource watchdog and 45-minute native limit.
+This is only synthesis, not placement/routing or board deployment.
+
+Poll this exact owner; do not restart on an observation timeout. After native
+synthesis closes, run its independent audit, then the prepared read-only
+matched clock audit. No new Fmax, bitstream or board result exists yet.
 Do not claim gain before measurement. The standard suite and physical FPGA
 Win95/Quake acceptance remain required; canonical failures remain unwaived.
 
