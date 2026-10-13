@@ -232,8 +232,9 @@ standard suite**.
 Synthesis launched **2026-10-13 07:41 UTC**, service
 `ventium-prime-cs-synth-oct13.service`, controller invocation
 `25ad8b6f9a0344549354bc522f4c3fe7`; native Vivado scope
-`fc70b8a4db434463a855ffd545644f37`. It is **running, not a timing result**.
-The single-family, memory, swap, disk and 45-minute native watchdogs remain.
+`fc70b8a4db434463a855ffd545644f37`. It **closed native exit 0 at 08:15 UTC**,
+with unchanged inputs and no OOM/resource stop, in 2,056.739 seconds.
+The single-family, memory, swap, disk and 45-minute native watchdogs held.
 Admission requires both >6 GiB free and twice the measured parent growth above
 the 4 GiB stop floor: the effective starting requirement was **7,208,493,056
 bytes**, not just 6 GiB. No reserve was weakened.
@@ -253,11 +254,56 @@ Two latest archives, restored relative to `external/tmp`, are:
 The adjacent `*-plan.json`, `*-verified.json` and `*-closed.json` record exact
 members and recovery paths. Old raw-output audits require restoring them first.
 
-Finish and audit the new matched synthesis before reporting its Fmax. Full
-duration-valid performance, the complete standard suite, and physical FPGA
-Win95 desktop/UI plus original FreeDOS Quake timedemo remain required.
+### Closed synthesis and matched timing audit
+
+The independent native audit in `prime-cs-clock-swap4-r1` closes exit 0 at
+08:26:43 UTC, in 484.230 seconds, with unchanged inputs and no OOM. The core's
+**synthesized/unplaced Fmax estimate is 33.958163543 MHz**, versus the matched
+parent's **32.955444239 MHz: +3.04265%**. Setup slack improves from −5.344 to
+−4.448 ns at the unchanged 25 ns constraint; core hold remains −0.101 ns.
+**The required 40 MHz is NOT met. This is not routed or board timing.**
+
+Area rises from **184,618 to 188,163 LUTs (+1.92018%)**, and 54,493 to 55,011
+registers. BRAM stays 277.5 tiles and DSPs 47. The source/mapper audit confirms
+only `core.sv` changed, all 158 hardware definitions and clocks remain, and
+`-no_timing_driven` is unchanged. There are no unresolved black boxes or
+MDRV/LUTLP structural DRC errors. The existing PS-generated XDC `create_clock`
+unknown-pin critical warning is retained, not relabelled a pass; actual core
+and PL clock objects are checked as 40/100 MHz.
+
+Timing-controller invocation: `ec91abe1cc3e4dac96833df2735b06a2`;
+native scope: `db7639745e7f437ab326a7bf71b7cd59`.
+The reporting-only controller reduces its **swap grant** from 6 to 4 GiB,
+retaining the 8 GiB RAM cap and the same 2 GiB RAM / 4 GiB swap host admission
+reserves. Its Tcl is byte-identical to the originally prepared audit; original
+pinned controller files remain untouched. Actual peaks are 5,173,903,360 bytes
+resident and 914,599,936 bytes swap. This does not change synthesis or timing.
+
+- DCP: `097b4be822a4d63488de234395636255f43788154e9e60482419b6b6a66f56d5`.
+- Synthesis audit: `55e703c3d655a77174f259182c4cbb6d299c6f41b4065b244d711ad5b3d9c7ab`.
+- Clock audit: `a7581093c283b73287e8f3b0f966ec993f4325307426486a3d885731aece127f`.
+
+The new worst path is **EIP bit 0 → L1D LRU bit 7**, 103 logic levels,
+29.237 ns data delay (6.457 logic / 22.780 estimated routing). It crosses
+instruction selection/decode, integer address generation, DTLB lookup, the
+memory-operand ALU/flag forwarding, `v_br_taken_eff`, `mc_pipeline_commit`,
+`core_mem_next_commit` and next-read capture/LRU update. The previous slow-CS
+length consumer is no longer the reported worst path.
+
+Next structural investigation: branch-based next-read priming requires a
+**non-memory U instruction**, but its shared branch decision still includes
+the memory-fed U ALU cone. Prove a non-memory operand cofactor at this consumer
+against the complete existing commit signal before considering it. Preserve
+actual branch validation, wrong-path suppression and cache-owner semantics;
+do not globally disable memory pairing, speculate a commit, add an unchecked
+cycle, or duplicate an entire ALU without measuring the area cost. This is a
+source/report-backed hypothesis, **not an implemented or measured fix**.
+
+Full duration-valid performance, the complete standard suite, and physical
+FPGA Win95 desktop/UI plus original FreeDOS Quake timedemo remain required.
 
 Current derivative gameplay IPC is **unmeasured**. Older verified simulation
 baseline: **0.51030715 total U+V retirement events/cycle**, build `2b4d7a48`,
 cycles **1,200,065,237–1,300,065,237**. It predates the derivative and is not
-FPGA or full-timedemo IPC. No CPI or timing gain is yet claimed for this change.
+FPGA or full-timedemo IPC. The measured gain above is synthesized frequency,
+not a measured CPI, gameplay or board-performance improvement.
