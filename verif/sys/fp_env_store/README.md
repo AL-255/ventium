@@ -53,6 +53,11 @@ guest integer readback (`x87=false`), not direct x87-register tracing. This does
 not replace the canonical reference, waive the original failed run, or qualify
 the full standard suite or FPGA.
 
+Later follow-up: [environment-store write classification](WRITE_CLASS.md)
+reproduces and repairs wrong #PF access type and premature FP mask/reset on
+faulting FNSTENV/FNSAVE. Its cold paging/retry corpus is separate from these
+layout tests; the repair remains a private candidate.
+
 Unchanged regressions on the new core:
 
 | Corpus | Result |
