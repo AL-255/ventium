@@ -695,22 +695,66 @@ Both archives restore into `ventium-load-read-ack.GyWDDtiI`. Each member was
 byte-verified before deleting its unpacked copy. Closed directed-core PCH
 caches have verified adjacent `.gch.gz` copies, recovering **155,156,742 bytes**.
 
-Short cold CoreMark is running as
+Short cold CoreMark **closed native 0 for both seeds** as
 `ventium-v-carry-cm10-intent-ready-oct12`, invocation
-`0e44f5f0d48244f6937bbd10d126c389`. The **performance seed passed**, native 0
-in **202.666 seconds**, with matching CRCs, unchanged **4,767,218 ticks**, and
-1,055,307 actual V retirements at the final observation. The validation seed
-and independent audit remain pending. These 10-iteration tests are
+`0e44f5f0d48244f6937bbd10d126c389`. The performance seed took **202.666 seconds**,
+with matching CRCs, unchanged **4,767,218 ticks**, and 1,055,307 actual V
+retirements at the final observation. Validation took **207.622 seconds**,
+with matching CRCs, unchanged **4,753,406 ticks**, and 1,054,254 actual V
+retirements. The independent audit rechecked **5,233 source pins**, both
+native process exits and trace/log artifacts. Both measurements have **0%
+cycle-count change** from the parent. These 10-iteration tests are
 **duration-invalid**, not CM/MHz scores or standard-suite acceptance.
 
 Controller `ventium-intent-ready-synth-launch-oct12`, invocation
-`7b6377bdeec04f8c929efd93e60d7fba`, is **waiting on that exact CoreMark owner**.
-It requires its independent audit, byte-verifies/compresses the unused PC PCH,
-and retains the original disk admission (**>7,208,493,056 bytes free**) before
-launching one bounded synthesis. Native RAM/swap/disk stop thresholds stay
-unchanged. Its exact-owner observer can audit synthesis and then original-clock
-timing, but cannot retry synthesis, route or deploy. No INTENT-READY synthesis
-has started at this entry, and no Fmax result is inferred from compilation.
+`7b6377bdeec04f8c929efd93e60d7fba`, closed successfully after that exact
+CoreMark owner and its independent audit. It byte-verified/compressed the unused
+PC PCH into adjacent recoverable `.gch.gz` files, saving **159,450,000 bytes**;
+no executable was removed. Disk admission was **7,279,517,696 bytes free**,
+above the unchanged **7,208,493,056-byte** requirement.
+
+INTENT-READY synthesis started **2026-10-13 00:17 UTC** (Oct 12, 20:17 EDT):
+`ventium-intent-ready-synth-oct12`, invocation
+`d7abf7a0eaa143d3a122544baf0358d0`. Its **5,619 input pins** were rechecked at
+launch. The sole guarded Vivado family is `ventium-vivado.scope`, invocation
+`f6e49d788b1b41908730200ba4aece24`; child synthesis helpers belong to that
+same family. Clocks remain **40/100 MHz**, and the matched `logic_only`
+mapper, **8 GiB RAM / 6 GiB swap**, combined/host-memory stop thresholds and
+**4 GiB free-disk stop floor** are unchanged. At **00:22:05 UTC**, the exact
+native owner was still live: **6,947,110,912 bytes** scope RAM, zero swap,
+zero OOM events, **7,131,787,264 bytes** free disk. This is a live observation,
+not synthesis completion or a timing result.
+
+Exact-owner observer `ventium-intent-ready-report-queue-oct12`, invocation
+`0825b210a40b49529a565ddd7afde6e8`, is live too. It can independently audit
+successful synthesis and then launch the original-clock timing report once;
+it cannot retry synthesis, route or deploy. **INTENT-READY Fmax remains
+unmeasured**; the last closed synthesized estimate is still
+**31.822810591 MHz** from FRESH-PAIR.
+
+### Critical-path follow-up while synthesis runs
+
+A read-only pass through `fpga/analyze_setup_paths.py` independently re-parsed
+the unchanged FRESH-PAIR setup report (SHA-256 `cc82a409...45128`, full digest
+above). Its five parser safety tests pass. The worst path has these **data-only
+cumulative** landmarks: `pipe_pair_lookahead` **14.543 ns**,
+`mc_address_payload[base][0]` **16.051 ns**, `mc_query_ea1[8]` **17.387 ns**,
+`mc_prepare_ok0` **22.751 ns**, and `core_mem_next_req` **23.021 ns**. Thus
+**73.8% of this path's 31.213 ns data delay precedes next-request generation**.
+The remaining **8.192 ns** is not all pair-ready logic: it also includes the
+store/snoop/commit chain and the final register-input logic described above.
+
+Source inspection of frozen `rtl/core/core_mem_chain.svh` confirms that
+paired-branch eligibility selects the raw address payload before the common
+AGU; segment/extent/translation checks subsequently qualify the prime offer.
+This is a potential earlier optimization boundary **if it remains critical in
+the new report**, not proof that a particular RTL block owns every mapped
+delay. A future early selector must prove address equality for every admitted
+owner, retain branch prediction/byte residency/permission/dependency checks at
+offer and commit, and keep speculative lookup distinct from a backing read.
+Blindly dropping branch or lookup guards is not an acceptable timing fix.
+No additional RTL, clock exception, stall, or synthesis configuration was
+changed during this analysis; the live candidate's inputs remain frozen.
 
 The canonical gate remains **7 PASS / 101 FAIL**, red and unwaived.
 Required next: achieve
