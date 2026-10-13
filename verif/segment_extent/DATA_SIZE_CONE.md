@@ -1,6 +1,6 @@
 # Data-segment size without fetch-decode feedback
 
-October 13, 2026. **Private candidate; not synthesized or deployed.**
+October 13, 2026. **Private candidate; synthesis running, not deployed.**
 The parent has an independently audited **35.856430851 MHz unplaced estimate**,
 still below the required 40 MHz. No frequency or gameplay gain is claimed for
 this change.
@@ -49,6 +49,7 @@ synthesis can establish the effect on frequency and area.
 | Single-fill cycle A/B | All 20 complete traces unchanged | Explicit board `AXI_LINE_REPLAY=0`, AXI latency 7; not a cycle-band pass |
 | Full-PC transfer/build | Native exit 0, 24.38 s | All 102 shared RTL files match the directed core; exactly one changed; private host compiled against its own generated header |
 | Hardware CPU-hierarchy lint | Pass, 3.93 s | All six structural error classes, exact 158 hardware definitions; not full-platform lint |
+| Both short CoreMark seeds | Pass, all five CRCs each; clocks unchanged | 4,767,218 performance / 4,753,406 validation clocks; 0% cycle-throughput gain; not duration-valid scoring |
 
 The leaf proof is two-state, not arbitrary X/Z equivalence. Existing non-fatal
 testbench style/width warnings remain visible; all six hard structural classes
@@ -95,6 +96,7 @@ Evidence root: `/home/yukidama/external/tmp/ventium-data-size.v2HaTO2X`.
 | Full-PC model | `c0de36c5456d737ed38431598095f3df7d5c03f4f61da5e9462d1ddb23cd772f` |
 | `fpga-r1/input-manifest.json` | `8e8ab037834da5120453149a60766b4455f60be0e14e06f6a7be33a19aa5b864` |
 | `lint-r1/closed.json` | `21f0d956022294749834abe55118aa0b122e820d7718892d539daf9cecd029f0` |
+| `soc-r1/coremark/audit.json` | `8461b3974bb4c0a866c557e600b8be408bfc176a65af6615dc12094713b99a4f` |
 
 Closed owners: leaf, core, fetch-r2, func, soc and lint services named
 `ventium-data-size-*-oct13-r1.service` (fetch uses `-r2`); each has MainPID 0 /
@@ -102,19 +104,30 @@ exit 0. The canonical owner is terminal **exit 1**, preserving native make
 exit 2. Full-PC owner invocation: `b5bcdbe1e30041d9b69b986a39a17a7e`;
 lint owner: `4c49f95186794c8b802be11fdae97f4d`.
 
-Both short CoreMark controls are running under
+Both short CoreMark controls closed successfully under
 `ventium-data-size-cm10-oct13-r1.service`, invocation
 `96ddbcc22a4c4b2fbf86ead477bf622e`, on CPU12 with 1 GiB/no-swap and a 600 s
-per-seed limit. The adapter only changes CPU/unit identity; original disks,
-CRCs, expected clocks and checker remain unchanged. These are not
-duration-valid scores or the standard suite. Synthesis/report controllers
-are generated but not launched, and require both closed CoreMark controls.
+per-seed limit. Native elapsed times: **212.52 / 218.11 s**; final V counts:
+**1,055,307 / 1,054,254**. Both children were reaped, owner MainPID is 0, and
+all OOM counters are zero. The independent audit rechecks **17,170 pins**, both
+native commands/CPU affinities, completed consoles, original disks and CRCs,
+and exact parent/candidate benchmark clocks. These are not duration-valid
+scores, gameplay IPC or the standard suite.
 
-Still required: short CoreMark closure, canonical gate repair, >=40 MHz synthesized Fmax,
+Matched synthesis launched at **20:44:30 UTC**, only after that audit and
+strict CPU lint passed. Controller `ventium-data-size-synth-oct13.service`,
+invocation `ad838e8d4b0543cd87932bd52f908799`, owns the sole Vivado scope
+invocation `65ad0adba6c848038ad63508af87b1e7`. Limits are unchanged: 8 GiB RAM /
+6 GiB swap, 13 GiB combined early-stop, 2 GiB host reserve, 4 GiB live disk
+floor, conservative measured-growth disk admission and 45-minute native cap.
+The separate timing-report controller is prepared but **not launched**;
+it requires successful synthesis, terminal native ownership and an independent
+source/DCP audit first. No new Fmax result is available yet.
+
+Still required: canonical gate repair, >=40 MHz synthesized Fmax,
 routed timing and physical FPGA standard-suite acceptance. The parent's cold
 Win95 and Quake jobs remain running without restart; their results cannot
-qualify this new candidate. No Vivado build or board programming was launched
-for this change.
+qualify this new candidate. No board programming was performed.
 
 Candidate gameplay IPC is **unmeasured**. Older verified simulation baseline:
 **0.51030715 total U+V**, build `2b4d7a48`, cycles
