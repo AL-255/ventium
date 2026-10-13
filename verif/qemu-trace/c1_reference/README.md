@@ -118,6 +118,11 @@ FRNDINT cases, a 412-case cold full-core program, and all 108 private-reference
 functional programs. Its new denormal test also finds another defined-exception
 gap in this private QEMU; canonical promotion and full acceptance remain open.
 
+That next reference gap is now addressed by the separately qualified
+[FRNDINT helper repair](../frndint/README.md), including denormal/invalid
+exception priority and PC-independent integer results. Its fresh cold-core
+trace passes without masks. This historical reference binary remains unchanged.
+
 ## Evidence, resources and reproduction
 
 Root: `/home/yukidama/external/tmp/ventium-qemu-c1.Mw2HgVmG`.

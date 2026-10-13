@@ -113,6 +113,12 @@ or promote the reference merely because its existing 108-program corpus passes.
 The new RTL repair is supported by native/exact evidence, not by changing a
 golden to hide the discrepancy.
 
+Follow-up: the [instruction-local private-reference repair](../../qemu-trace/frndint/README.md)
+now passes all 28,612 FRNDINT fixtures, additional exception/precision-retention
+checks, the complete unmasked 11,129-record cold-core trace and all 108 functional
+programs. The old failed reference evidence above is retained. Canonical oracle
+promotion, cycle gates and FPGA/standard-suite acceptance are still open.
+
 ## Reproduction and closed runs
 
 Evidence root: `/home/yukidama/external/tmp/ventium-frndint.tM8XCg6d`.
