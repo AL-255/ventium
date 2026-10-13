@@ -115,15 +115,27 @@ clocks. Manifest SHA-256:
 Strict frozen-core lint passes in **3.879 seconds**, owner
 `7b07ea9254a74429ab6c635a8abbed92`; this is not full-SoC lint.
 
-Short cold CoreMark transfer checks are running under
-`ventium-fp-exec-cm10-payload-region-oct12.service`, invocation
-`b2eee78444af48f19a4602c39b9d80e0`. These 10-iteration seeds are not
-duration-valid scoring or standard-suite acceptance. The exact-owner queue
-`ventium-payload-region-synth-queue-oct12.service`, invocation
-`d6b6dbcb9bff43f982ba037fbd52c8dc`, waits for both seeds and an independent
-audit before launching one exclusive, resource-guarded synthesis and matched
-original-clock timing audit. Neither observer retries, routes or deploys.
-On interruption, inspect these owners; do not duplicate their jobs.
+Both short cold CoreMark transfer checks and their independent audit **pass**,
+retained owner `b2eee78444af48f19a4602c39b9d80e0`. Expected performance and
+validation CRCs match QEMU. The benchmark intervals are exactly the parent's
+**4,767,218 / 4,753,406 cycles**; final V retirement counts are
+**1,055,307 / 1,054,254**. Native runs close zero in **208.342 / 203.631 seconds**,
+with unchanged inputs, no OOM and all children reaped. These 10-iteration seeds
+are **not duration-valid scoring or standard-suite acceptance**.
+
+The exact-owner preflight queue closed successfully and launched synthesis at
+**2026-10-13 01:46:48 UTC**:
+
+- Native controller: `ventium-payload-region-synth-oct12.service`, invocation
+  `cdbc6f773cad4361a08df3e4588c6d18`.
+- Sole Vivado scope: `14d45806f37c4ecdacba205e00507cbc`, capped at **8 GiB RAM /
+  6 GiB swap / 48 tasks**, with the original resource early-stop checks.
+- Matched report observer: `ventium-payload-region-report-queue-oct12.service`,
+  invocation `2f76bcfe5baa42008b89a920cbd28fd7`. It audits native synthesis
+  closure before launching the original-clock checkpoint comparison.
+
+These jobs are live, not acceptance results. Neither observer retries, routes
+or deploys. On interruption, inspect these owners; do not duplicate their jobs.
 
 Derivative source SHA-256:
 
@@ -162,6 +174,11 @@ closed historical matrix runs were separately retained in
 Their aggregate/per-case metadata, current source/freeze inputs and executable
 models remain unpacked. Both archives have corresponding `*-closed.json`
 receipts with hashes; historical traces must be restored before replaying them.
+After the seed audit, the closed PC compiler's two precompiled-header caches
+were retained as adjacent byte-verified `.gch.gz` files, reclaiming another
+**159,455,641 bytes**. `payload-region-pc-pch-closed.json` records exact paths
+and hashes; `gzip -dk` restores each cache. The executable, harness object,
+generated headers, sources and all provenance inputs remain unpacked.
 
 Synthesis/timing and full standard-suite/physical FPGA acceptance remain
 required. No frequency gain is inferred from this edit alone.
