@@ -235,3 +235,8 @@ Timing audit SHA-256:
 The independent SMSW repair has also been composed with this candidate in a
 separate compiled tree; see the [composition record](../sys/smsw_memory/README.md#compose-the-repair-with-the-timing-candidate).
 That does not alter the timing comparison's frozen inputs or inherit its result.
+
+The next isolated derivative now predecodes both possible cache-map endpoints
+to shorten the late extent/routing path. Its microtests, source-matched full-core
+build and exact-input regressions are closed; the canonical gate remains red
+and timing is not measured. See [parallel endpoint-map decode](ENDPOINT_MAP.md).
