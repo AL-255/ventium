@@ -66,25 +66,167 @@ Build closure SHA-256:
 `8c568d4065e3145151f5fc9d2a1cbac823aff55ac3d69593c7fc20468a3f90f2`.
 This is a successful build, not an execution-test pass.
 
-The unchanged canonical gate is now running under
+The unchanged canonical gate **closed with FAIL** in **393.023473 seconds** under
 `ventium-prime-cs-verify-oct13.service`, invocation
 `46e6ef60528d4ffe8a500a102fa20ca4`. It uses the real AXI backend, identical
 latency 7, UV-fast cycle-functional traces and all 20 complete parent/candidate
-cycle streams. Its native gate has a 600-second cap. Parent canonical status
-remains **7 functional PASS / 101 FAIL**, unwaived; do not infer correctness
-from parent equality or change any mask/golden/band to hide a failure.
+cycle streams. All 20 streams match the parent exactly, and inputs remain
+unchanged. Native `make` exit is 2; the controller exits 1. The canonical result
+remains **7 functional PASS / 101 FAIL**, unwaived; parent equality is not
+correctness. No mask, golden or cycle band changed. Closure SHA-256:
+`153fa6b5864e35cbe0e703f276a4789cc1bbd394f7c5a08e62edf144de9ab997`.
+
+## Closed whole-core and directed qualification
+
+`prime-cs-corpora-r1` passes all eight unchanged groups in **295.794056 seconds**:
+**4,240 probes / 21,190,336 clocks**, complete architectural/cycle equality,
+and all earlier coherence/request assertions enabled. Coverage: AGI 18,172;
+reference prime 24,352; prime 282,808; intent 5,616; request 3,072; accept 1,872;
+shape-only 1,536; retained-prime 0. Service
+`ventium-prime-cs-corpora-oct13.service`, owner
+`cb26c8dc6d0c44d3af40ca0bea4ce7a7`, closed exit 0 / MainPID 0. Closure:
+`597f4e147d6f87bd03b0b91167a2444a94a6bf56c4e24280a2a5ed002275befa`.
+
+`prime-cs-fp-r1` passes the **384-fixture / 1,536-measurement** full wide-FP
+matrix in **67.537575 seconds**, with all **768 cycle deltas zero**. Inputs
+are unchanged; service `ventium-prime-cs-fullfp-oct13.service`, owner
+`e0252f29e186485fa804c56042af2f6c`, closed exit 0 / MainPID 0. Closure:
+`08fc40df00b26a713e7cafc4901c8344e585c7e6903f1659e2174c6aa83f2553`.
+
+### Why a CS overrun cannot exercise new fast-memory admission here
+
+The original test gap has a structural explanation, not a missing warmup:
+with segment enforcement active in protected non-V86 mode and CS present,
+`sfetch_boundary` asserts whenever the **33-bit** `eip + 15` exceeds CS.limit.
+A new request requires no held packet and `pipe_frontend_ready`, which requires
+`!pipe_fetch_checked_handoff`, which excludes this boundary. Any legal nonzero
+4-bit instruction length therefore fits inside the admitted 16-byte window.
+Overrun tests correctly exercise checked fetch, not a reachable fast rejection.
+
+Two QF_BV queries independently check that arithmetic implication: nonzero
+length gives UNSAT; zero length at EIP 0 gives a SAT underflow counterexample.
+The host test checks the current RTL guard anchors separately. This is a
+mathematical lemma, **not automatically translated whole-core formal proof**.
+The new cofactor retains its original 33-bit check, including zero-length
+behavior; no guard or global fault logic is deleted on the strength of this
+reachability argument.
+
+`prepare_pipe_cs_interior.py` derives six additional cold guest fixtures with
+CS.limit **exactly probe PC + 15**, alongside the 12 original exact-end/overrun
+fixtures. The new cases retain common zero segment bases, real guest WBINVD,
+2/3/6-byte load/store opcodes, independent U/V warmup and self-checking GPR/RAM
+results. They return legally instead of expecting a boundary fault. No saved
+state, host register injection, STEP or pairing-disabled mode is used.
+
+`build_cs_extent_observer.py` compiles only a unique read-only C++ host against
+the candidate's unchanged archive/runtime objects and matching generated
+headers. It samples settled pre-edge new-request, registered owner, ACK,
+commit, boundary and extent signals at the probe PC, and fails on log overflow.
+The first launch rejected optimized-away bus signal names before compiling;
+the corrected observer observes the retained admission/owner signals and
+does not modify the model. The corrected build closes in **3.294289 seconds**;
+binary SHA-256:
+`ca13bafe1ea707545c83b62c15e7cbea2170357c5a60f295c57dd0ce927c04ff`.
+
+`run_pipe_cs_coverage.py` passes **288 cold runs / 72 observed cases** in
+**18.268070 seconds**, comparing every architectural/cycle record and final
+clock count across the parent, candidate, observer-disabled and observer-enabled
+binaries, AXI latency 0/7, and both trace modes. All six interior instructions
+produce exactly one new request and one final-ACK commit. Cold loads hold the
+registered owner for **4 clocks at latency 0 / 11 at latency 7**; stores post
+immediately (no false claim of held-store coverage). All boundary cases show
+checked-boundary routing and **zero fast admission/commit** at the probe.
+Warmup V retirement is required independently. The older eight-corpus tests
+continue to cover held-store behavior.
+
+Coverage service `ventium-prime-cs-coverage-oct13.service`, owner
+`087e495a6b254bde96175b963d02bd13`, closed exit 0 / MainPID 0. Closure SHA-256:
+`bc952f4a5b8645f2e25c44a6d8b39a28e99a92e55c43e776d16ce477715e022f`.
+Six coverage-checker tests regrade the actual witnesses and reject lost
+admission, wrong held PC, missing ownership/ACK, boundary side effects and
+corrupt image bytes. Four driver tests retain the exact full regression plan;
+five PC/hardware-transfer tests reject unreviewed deltas and wrong model
+coverage. All pass. These checks do not waive the failed canonical gate.
+
+### Disk-safe evidence retention
+
+Only the closed eight-corpus text was removed after every member was compared
+byte-for-byte with `closed-prime-cs-corpora.tar.gz`: **38,352 files,
+969,145,428 → 87,602,987 bytes**, recoverable without losing evidence. Receipts,
+fixtures, models, sources and other runs remain. Archive SHA-256:
+`99cb70033991245d48ad8bec7bf4b081e2be861267b32ead61f7e5f22ec5ec05`.
+Restore this archive in the evidence root before rerunning raw-stream audits.
+
+The complete closed FP matrix was independently re-compared with its QEMU
+goldens and A/B partner before compaction: 384 fixtures, 208,128 candidate
+architectural records. `closed-prime-cs-fp-text.tar.gz` preserves **11,916
+files, 487,345,124 → 29,592,407 bytes**, all byte-verified. SHA-256:
+`89be60d3efdafcd45386ec0b5effcadbf543988c7c73f02320aa84905f712958`.
+This archive's paths are relative to `/home/yukidama/external/tmp`, unlike the
+eight-corpus archive. Each adjacent archive receipt records its recovery path.
+
+The closed extended regression streams were likewise byte-verified into
+`closed-prime-cs-regressions.tar.gz`: **36,984 files, 887,057,206 → 82,710,789
+bytes**, leaving 128 explicitly pinned artifacts in place. Sources, receipts,
+images and native models are retained. SHA-256:
+`844ce83aee2cd72c233b2143d4a9fd008ecef6d080642ff0b7676788bd008d68`.
+Restore in the evidence root. These three compactions recover approximately
+**2.14 GB of logical data**, not a claim about filesystem allocation.
+
+## Extended qualification and PC/hardware transfer
+
+The unchanged 12-group extended regression run **closed PASS** in
+**603.587868 seconds** under
+`ventium-prime-cs-regressions-oct13.service`, owner
+`a73550187c864b2cad5bdd75ce90e909`. It includes FP boundaries, faults, integer,
+memory, held packets, branch and all 108 same-input canonical replays
+(80,800 records). Every child exits 0 and all pins remain unchanged. This is
+parent/candidate equivalence, **not a canonical correctness pass**.
+Closure SHA-256:
+`b7ac4920b22a1f4232ccba4631b20e6b0b67d729248e34d8c7c91993a53651de`.
+
+`build_prime_cs_soc.py` and `freeze_prime_cs_rk_candidate.py` retain the full
+original admission and add direct CS-coverage admission. `prime-cs-soc-r1`
+builds in **24.454970 seconds**, with unchanged pins and native exit 0;
+its unique host is compiled against the matching generated class. All
+**102 common RTL files / 156 definitions / posted-16 transport parameters**
+match the intended core. The 98 existing structural warnings are unchanged,
+not silently cleared. Service `ventium-prime-cs-pc-oct13.service`, owner
+`1083a0506ee84bc3946a86eeab8f9a6a`, is closed exit 0 / MainPID 0.
+PC binary SHA-256:
+`95f7c9b3c6a00bcc04976305abea88560268e20c05fd996d36aa188d3b908f79`.
+Build closure SHA-256:
+`0860c2df65b949d45ec22d1e25570d36f845e61137fe26c0063b40af9f7fee89`.
+
+`prime-cs-fpga-r1` freezes **190 payloads / 170 matched HDL inputs / 158
+hardware definitions**, the same 40/100 MHz clocks and full P5 cache profile.
+The only changed parent payload is `ventium/rtl/core/core.sv`, SHA-256
+`8dc1180b154b99b7fdf586071ca53d72427f09648403cf8f0120a4f570e3ed8d`.
+Manifest SHA-256:
+`fd6a1b36862845a096981b2028b4df479b00a9da447c35300834eba8f720cd15`.
+Strict frozen-CPU lint passes in **3.878045 seconds**, all 158 definitions,
+native 0 / unchanged inputs. Owner `ventium-prime-cs-lint-oct13.service`,
+invocation `8946c03c6cc44d1ebf2300e7abcaa882`, is terminal. This is CPU lint,
+**not full-SoC lint, synthesis or board qualification**.
+
+`prepare_prime_cs_synthesis.py` also retains the tested controller/watchdog
+lifecycle, 8 GiB RAM/6 GiB swap bounds, 6 GiB starting disk reserve and original
+40/100 MHz clocks. Its five controllers/auditors are source-tested and
+materialized, **not launched**. The matched control is the actual closed
+32.955444239 MHz parent DCP, not a changed clock constraint.
 
 ## Required qualification still open
 
-Run the complete existing core/FP/fault/replay comparisons and directed CS
-boundaries, including actual accepted and held fast-memory requests. Earlier
-CS-overrun fixtures faulted in **S_FETCH**, not S_PIPE: their successful guest
-results do not prove coverage of this local consumer. Retain that limitation
-until there is direct state/request evidence; warmup V events alone do not
-close it. No host register injection or pairing-disabled control counts.
+Both unchanged 10-iteration CoreMark seeds are running sequentially in
+`ventium-v-carry-cm10-prime-cs-oct13.service`, invocation
+`0bd322d7056f460cbe9050258dd428e6`, explicitly on CPU 11, with a 2 GiB/no-swap
+limit. Inspect closure and run the independent auditor before accepting them.
+These are short correctness/cycle controls, not duration-valid scores or the
+standard suite. The new synthesis has not started; besides those controls,
+its disk reserve must be restored before launch. Latest observed free space
+after PC export was 5,256,962,048 bytes, below the preserved 6 GiB admission.
 
-Then transfer the exact candidate to the PC/HW profiles, lint, run both short
-CoreMark correctness controls, and measure a new matched synthesis. Full
+Then measure the new matched synthesis. Full
 duration-valid performance, the complete standard suite, and physical FPGA
 Win95 desktop/UI plus original FreeDOS Quake timedemo remain required.
 
