@@ -33,12 +33,15 @@ selector. V86 uses the real-mode layouts.
 The repair deliberately does **not** claim to fix all FP environment behavior.
 Still open:
 
-1. **32-bit real/V86 environment stores use the protected-mode layout.** The
+1. **32-bit real/V86 environment stores use the protected-mode layout in this candidate.** The
    new cold roundtrip tests reproduce this in 16 cases. Fix the existing
    `env_image32` pointer-word construction using figure 6-7, without changing
    the protected layout or stack payload. Then test mixed operand-size
    save/restore conversions so two mutually wrong codecs cannot pass by
-   simply reproducing their own input bytes.
+   simply reproducing their own input bytes. The subsequent isolated
+   [store-layout repair](../fp_env_store/README.md) now passes all 192 cold
+   mixed-size self-checks, versus 128 on this parent; it remains unpromoted
+   with reference, full-system and hardware acceptance open.
 2. The separate legacy absence of an FOP register and normal real-mode FIP
    address capture are outside this change. Reserved bits/FOP are not part
    of the new pointer-only cold test's assertions; this is explicit scope,
