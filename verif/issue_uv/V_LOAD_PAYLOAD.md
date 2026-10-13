@@ -92,6 +92,61 @@ then a separately identified hardware transfer/timing comparison if warranted
 by the current synthesis result. The full standard suite and physical FPGA
 Win95/Quake validation remain required. No existing failure is waived.
 
+## Whole-core preparation and cold-fixture qualification
+
+`build_v_load_payload_core.py` has prepared `v-load-payload-core-r1` from the
+tested current-tag parent model
+`737c5a8254d7d59db0558657c8c293c8e6f7e4bc255f451073c6c94776ec23d7`.
+Exactly **two of 195 source files** differ; their bytes match the native leaf's
+proposal. All **152 definitions**, assertions, board single-fill setting and
+32-job compiler command remain unchanged. The host has a unique private
+basename; the inherited native builder checks its own generated header/object.
+Three preparation/profile tests pass, including rejection of dual-prime,
+missing fast relocation, wrong AXI policy, missing assertions and reduced jobs.
+**No compiler has launched:** the live Vivado family retains exclusive access
+to the heavy-build budget.
+
+`run_v_load_payload_system.py` adds cold paged fixtures with distinct per-word
+data and nonzero preserved EBX bytes. They cover dword, low-byte and high-byte
+V loads, both flat and relocated clients, instruction offsets 0/31, and AXI
+latencies 0/7. Ordinary dependent reads seed the immediate window; other-line
+reads exercise the held response. Same-bank, unaligned dword and 16-bit-memory
+controls must not pair. No saved state, hierarchical write or reduced mode is
+used. Three fixture/comparison-preservation tests pass.
+
+The **unchanged parent** ran as both control and candidate to qualify the
+fixtures before testing the proposal. `v-load-system-baseline-r1` closes in
+**40.55 s**, **32 cold fixtures / 256 native simulator executions**. All
+**128 full architectural comparisons with QEMU, 30,208 records**, pass;
+complete cycle traces also agree. Duplicating the parent is explicitly
+`fixture_only=true`, **not an A/B implementation pass or new RTL acceptance**.
+Per named candidate lane (not doubled for its identical control):
+
+| Load shape | Paired V retirements | Immediate acceptance witnesses |
+| --- | ---: | ---: |
+| Same-line dword | 128 | 120 |
+| Same-line low byte | 128 | 120 |
+| Same-line high byte | 128 | 120 |
+| Other-line dword | 128 | 0 |
+| Other-line high byte | 128 | 0 |
+| Same-bank / split dword / word controls | 0 each | 0 each |
+
+`audit_v_load_payload_system.py` independently rechecks the native logs, full
+architectural comparisons, complete per-instruction clocks, 32 image hashes,
+all source pins and **256 actual simulator children with CPU12 affinity**.
+The source-matched owner is terminal, MainPID 0 / exit 0, invocation
+`ad43cbe07b364a0ba039cb53fa75cb72`. Peak memory is **118,493,184 bytes**;
+the 1 GiB/no-swap, one-CPU, 540-second owner had no OOM. This bounded run used
+only tiny guest assembly and existing binaries alongside Vivado, not another
+RTL or C++ build. Baseline closure hash:
+`d5ace6c40e358f67f558139b19f47550e65c5efb8279a27247fb3bf4aeb4c9c4`;
+independent audit hash:
+`9144ba25bb7bcd72d12505801842e39499ae27f425707adb1ce6d47b6c8ea3c7`.
+
+The proposed selector still needs this whole-core replay, precise fault and
+live-owner snoop/abort/reset coverage, general gates and timing measurement.
+Cold resets here do not establish reset-during-outstanding-response coverage.
+
 Parent source root:
 `/home/yukidama/external/tmp/ventium-data-size.v2HaTO2X/window-current-core-r1/candidate`.
 Use external `TMPDIR`, `PYTHONDONTWRITEBYTECODE=1`, and a fresh output directory.
