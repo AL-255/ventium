@@ -113,9 +113,14 @@ TMPDIR=/home/yukidama/external/tmp PYTHONDONTWRITEBYTECODE=1 \
 
 ## Remaining work
 
-No architectural helper consumes the new event yet. A subsequent separately
-qualified reference change must implement instruction-specific C1 behavior,
-including exact results, zero-C1 instructions and exception/stack rules,
+Follow-up: the [composed private reference](c1_reference/README.md) now consumes
+this event in instruction-specific helpers. It passes 34,200 exact/native
+instruction checks and improves the unchanged functional corpus to 107/108,
+exposing a separately confirmed RTL FRNDINT C1 defect. It is not promoted.
+
+At the standalone stage recorded above, no architectural helper consumed the
+new event. The composed follow-up adds instruction-specific C1 behavior for
+the qualified cases; broader exception/stack rules still need qualification,
 without clearing quotient/FXAM/environment flags or weakening comparisons.
 Existing terminal-observer/cache-key changes and the remaining undefined-C0
 policy must also be qualified deliberately. The canonical gate remains

@@ -101,8 +101,15 @@ compile database, a bounded systemd invocation, CPU13 affinity and at least
 
 ## Remaining acceptance
 
-Compose and qualify this with the separate [round-increment event](ROUND_INCREMENT.md),
-instruction-specific C1 helpers and terminal-observer/cache-key corrections.
+Follow-up: the [composed private reference](c1_reference/README.md) now includes
+this repair. All of `tx_fprem` compares without its former quotient masks in
+an additional strict check. The unchanged functional worker passes 107/108;
+one independently confirmed RTL FRNDINT defect remains. Canonical promotion
+and instruction-level partial-reduction/exception qualification remain open.
+
+Composition with the separate [round-increment event](ROUND_INCREMENT.md),
+instruction-specific C1 helpers and terminal observer is now privately tested.
+Canonical observer/cache-key promotion remains a separate acceptance step.
 The canonical gate remains **7 PASS / 101 FAIL**, unwaived. This local reference
 repair does not resolve processor cycle-band failures or qualify any guest.
 
