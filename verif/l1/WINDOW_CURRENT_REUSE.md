@@ -72,6 +72,14 @@ requires zero activity when disabled. No RTL failure was hidden by either fix.
 
 ## Still required
 
+`run_window_current_cache.py` prepares the unchanged full-P5 sequential A/B
+fixture, adding comparisons of both reuse predicates and the existing FP
+contextual output. Its negative build removes next ownership only from the
+new primary equation. Three host driver/scope tests pass; this is **not** a
+native full-cache result. The initial host check caught an ambiguous text
+anchor before any build; the replacement now matches the complete block.
+Native execution remains deferred while the single Vivado family is active.
+
 Inspect FP-WIDE-CONTEXT's completed timing report before choosing this next
 candidate. This proposal still needs full-cache sequential A/B, native core
 and full-PC regression, FPGA source transfer and measured timing. Existing
