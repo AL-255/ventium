@@ -129,9 +129,26 @@ patch, STEP or slow-mode control.
 
 This wrapper **never awards desktop PASS**, even on normal native exit.
 Cold desktop, closed-frame review, UI interaction and physical FPGA acceptance
-remain open. The existing closed Win95 checker has fixed 32/128-task profiles;
-a separately tested 160-task profile and this launcher's identity must be
-reviewed before using it to grade this run. Its existing profiles are unchanged.
+remain open. The closed Win95 checker now has a separately tested schema-5
+`board-posted16-40mhz-parentpolicy160` profile for this launcher. Its original
+32/128-task profiles, native command, clocks, memory, log limits, source checks,
+closed-process requirement and externally pinned human desktop review remain
+unchanged. **46 host checker tests pass**, including the existing negative
+matrices exercised on the new profile. These are synthetic host fixtures, not
+desktop evidence. A retained active/exited service is not accepted; after
+native closure its supervisor must also be closed to inactive/dead.
+
+`freeze_fp_repair_win95_expectation.py` independently verifies the live model,
+owner invocation, actual CPU affinity, resource caps, compiled source ledger,
+UV-fast definitions and `cycle_mode=1`. It freezes `win95-expectation.json`,
+SHA-256 `bc52dd9351740e46d4c34d5aaf5e92c08826880d7ea7dbd02d6b673de811c640`,
+without opening live guest media/frames or generating a visual verdict. The
+launcher was invoked through the external-directory symlink; schema 5 records
+that exact argv spelling separately and checks it resolves to the canonical
+pinned launcher before and after grading. Wrong, missing or retargeted aliases
+are rejected. Initial admission-audit attempts caught a Path/string adapter
+error and this command-spelling mismatch before writing any acceptance record;
+the guest was neither restarted nor modified.
 
 ## Reproducible identities
 

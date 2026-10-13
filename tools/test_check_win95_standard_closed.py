@@ -363,6 +363,112 @@ class ClosedWin95Tests(unittest.TestCase):
         self.expect['diagnostic_padding'] = ' ' * gate.JSON_LIMIT
         self.test_external_sha_authorities_required_by_cli()
 
+    def configure_repair(self):
+        self.configure_parentpolicy()
+        self.expect.update(schema=5, profile='board-posted16-40mhz-parentpolicy160')
+        old_unit = self.unit
+        self.unit = 'ventium-fp-repair-win95-hostcontract.service'
+        for name in ('expect', 'before', 'final', 'admission', 'result', 'visual', 'supervisor'):
+            setattr(self, name, json.loads(json.dumps(getattr(self, name)).replace(old_unit, self.unit)))
+        self.group = self.group.replace(old_unit, self.unit)
+        pins = self.expect['pins']
+        path = self.build / 'coremark/audit.json'
+        path.parent.mkdir()
+        path.write_bytes(b'synthetic separately reviewed short CoreMark audit; not desktop proof\n')
+        pins[str(path)] = sha(path)
+        self.before['input_sha256_before'] = self.result['input_sha256_after'] = pins
+        for receipt in (self.before, self.final):
+            receipt['cgroup_files']['pids.max'] = '160'
+        self.rename_launcher('run_win95_full_cold.py')
+        self.expect['launcher_invocation_path'] = str(self.launcher)
+
+    def test_repair_invocation_alias_is_explicit_exact_and_rechecked(self):
+        self.configure_repair()
+        alias = self.build / 'entry-alias'
+        alias.symlink_to(self.build, target_is_directory=True)
+        invoked = alias / self.launcher.name
+        self.expect['launcher_invocation_path'] = str(invoked)
+        for receipt in (self.before, self.final):
+            receipt['worker']['argv'] = ['/usr/bin/python3', '-B', str(invoked), str(self.run)]
+        self.persist()
+        self.assertEqual(self.qualify()['status'], 'PASS')
+        del self.expect['launcher_invocation_path']
+        self.reject()
+        self.expect['launcher_invocation_path'] = str(self.launcher)
+        self.reject()  # Canonical spelling is not the recorded argv.
+        self.expect['launcher_invocation_path'] = str(invoked)
+        with patch.object(gate.Files, 'finish', side_effect=lambda: alias.unlink()):
+            self.reject()
+        other = self.build / 'other-entry'
+        other.mkdir()
+        (other / self.launcher.name).write_bytes(self.launcher.read_bytes())
+        alias.symlink_to(other, target_is_directory=True)
+        self.reject()  # Equal bytes at a different path are not the pinned role.
+
+    def test_repair_retains_all_closure_capture_cold_resource_and_visual_checks(self):
+        self.configure_repair()
+        self.assertEqual(self.qualify()['profile'], 'board-posted16-40mhz-parentpolicy160')
+        for negative in (self.test_supervisor_negative_matrix_precedes_runtime_reads,
+                         self.test_present_owner_native_or_recursive_group_fails,
+                         self.test_native_actual_wait_and_negative_results,
+                         self.test_lossy_capture_negative_matrix,
+                         self.test_logs_truncated_capped_regressed_or_snapshot_are_rejected,
+                         self.test_manual_desktop_negative_matrix):
+            negative()
+            self.persist()
+            self.assertEqual(self.qualify()['status'], 'PASS')
+        self.test_admission_cold_environment_and_resource_negative_matrix()
+        del self.before['environment']['VEN_GUEST_PATCH']
+        self.persist()
+        self.assertEqual(self.qualify()['status'], 'PASS')
+
+    def test_repair_schema_profile_launcher_and_task_budget_cannot_be_substituted(self):
+        self.configure_repair()
+        original = copy.deepcopy(self.expect)
+        for change in ({'schema': 4}, {'schema': 3}, {'schema': True},
+                       {'profile': 'board-posted16-40mhz-parentpolicy'}, {'profile': None},
+                       {'configured_launcher': {'path': '/unreviewed/config.py'}}):
+            self.expect = dict(copy.deepcopy(original), **change)
+            self.reject()
+        self.expect = original
+        for receipt in (self.before, self.final):
+            for limit in ('32', '128', '159', '161', 'max'):
+                receipt['cgroup_files']['pids.max'] = limit
+                self.persist(); self.reject()
+            receipt['cgroup_files']['pids.max'] = '160'
+        self.persist()
+        self.assertEqual(self.qualify()['status'], 'PASS')
+        self.rename_launcher('run_win95_cold.py')
+        self.reject()
+
+    def test_repair_requires_extra_and_existing_build_pins(self):
+        self.configure_repair()
+        pins = self.expect['pins']
+        for name in ('prepared.json', 'coremark/audit.json', 'build-started.json', 'build-closed.json',
+                     'obj1-speed-q16-parentpolicy/Vsystem__verFiles.dat', 'defines.txt',
+                     'obj1-speed-q16-parentpolicy/ao486sim_board_posted'):
+            path = str(self.build / name)
+            value = pins.pop(path)
+            self.persist(); self.reject()
+            pins[path] = value
+        self.persist()
+        self.assertEqual(self.qualify()['status'], 'PASS')
+
+    def test_repair_metadata_stays_bounded_and_cli_requires_external_authority(self):
+        self.configure_repair()
+        self.expect['diagnostic_padding'] = ' ' * gate.JSON_LIMIT
+        self.test_external_sha_authorities_required_by_cli()
+        self.before['diagnostic_padding'] = ' ' * gate.PARENTPOLICY_JSON_LIMIT
+        self.persist(); self.reject()
+
+    def test_repair_profile_does_not_broaden_legacy_launchers_or_task_limits(self):
+        self.rename_launcher('run_win95_full_cold.py')
+        self.reject()
+        self.rename_launcher('run_win95_cold.py')
+        for limit in ('128', '160'):
+            self.before['cgroup_files']['pids.max'] = limit
+            self.persist(); self.reject()
+
     def test_legacy_cli_does_not_inherit_parentpolicy_metadata_limit(self):
         self.expect['diagnostic_padding'] = ' ' * gate.JSON_LIMIT
         expectation = self.build / 'expect-large.json'
@@ -651,7 +757,8 @@ class ClosedWin95Tests(unittest.TestCase):
 
     def test_admission_cold_environment_and_resource_negative_matrix(self):
         original_before, original_final = copy.deepcopy(self.before), copy.deepcopy(self.final)
-        for key, bad in [('memory.max', 'max'), ('memory.swap.max', '1'), ('pids.max', '160'),
+        wrong_task_limit = str(int(original_final['cgroup_files']['pids.max']) + 1)
+        for key, bad in [('memory.max', 'max'), ('memory.swap.max', '1'), ('pids.max', wrong_task_limit),
                          ('cpu.max', 'max 100000'), ('memory.events', 'oom 0\noom_kill 1\noom_group_kill 0'),
                          ('memory.events.local', 'oom 0'), ('cgroup.procs', str(self.owner) + '\n2')]:
             with self.subTest(key=key):

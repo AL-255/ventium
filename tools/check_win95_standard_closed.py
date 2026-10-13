@@ -38,6 +38,16 @@ not an arbitrary path/resource profile or permission to omit source pins.
 The external expectation must review the complete model/source provenance;
 this checker still neither executes nor qualifies the build recipes.
 
+Schema 5 is board-posted16-40mhz-parentpolicy160: the same guest command,
+clock/memory profile and source layout as schema 4, with exactly 160 startup
+tasks and the separately reviewed run_win95_full_cold.py entrypoint under a
+ventium-fp-repair-win95-* service. Preparation and short CoreMark audit pins
+are additionally required, not treated as desktop proof. Existing schemas'
+limits do not change. The supervisor must still be inactive/dead with all
+processes reaped; an active/exited retained unit must first be closed normally.
+launcher_invocation_path pins the actual command spelling; a directory-symlink
+alias is allowed only when it resolves to the canonical pinned launcher.
+
 Visual schema 1: kind=WIN95_MANUAL_DESKTOP_REVIEW, authority=manual,
 reviewer, reviewed_unix, run_directory, unit, invocation_id, model_sha256,
 desktop=true, error_free=true, review_basis=closed_raw_frames, and raw_frames
@@ -208,7 +218,8 @@ def resource_receipt(value, expected):
                       'KillMode': 'control-group', 'MainPID': str(expected['owner_pid']), 'RuntimeMaxUSec': '3d 1h'},
             'wrong direct supervisor resource owner')
     require(limits['memory.max'] == str(2 * 1024**3) and limits['memory.swap.max'] == '0' and
-            limits['pids.max'] == ('128' if expected['schema'] == 4 else '32') and
+            limits['pids.max'] == ('160' if expected['schema'] == 5 else
+                                   '128' if expected['schema'] == 4 else '32') and
             limits['cgroup.procs'].split() == [str(expected['owner_pid'])],
             'wrong memory/swap/tasks/owner-only closure census')
     quota, period = limits['cpu.max'].split()
@@ -264,14 +275,21 @@ def launcher_roles(run, expected, worker):
     requirement or execute the configuration to decide whether it is trusted.
     """
     launcher = absolute(expected['launcher_path'])
-    require(launcher.name in ('run_win95_cold.py', 'run_win95_vga_cold.py'),
+    names = ('run_win95_full_cold.py',) if expected['schema'] == 5 else (
+        'run_win95_cold.py', 'run_win95_vga_cold.py')
+    require(launcher.name in names,
             'unknown reviewed parent launcher')
     roles = {str(launcher): expected['launcher_sha256'],
              str(run / 'observed-launcher.py'): expected['launcher_sha256']}
-    if expected['schema'] in (1, 3, 4):
+    invocation = launcher
+    if expected['schema'] == 5:
+        invocation = absolute(expected['launcher_invocation_path'])
+        require(not invocation.is_symlink() and invocation.resolve(strict=True) == launcher,
+                'invocation alias does not resolve to the pinned launcher')
+    if expected['schema'] in (1, 3, 4, 5):
         require('configured_launcher' not in expected and launcher.parent == run.parent and
-                worker['argv'] in (['/usr/bin/python3', str(launcher), str(run)],
-                                   ['/usr/bin/python3', '-B', str(launcher), str(run)]),
+                worker['argv'] in (['/usr/bin/python3', str(invocation), str(run)],
+                                   ['/usr/bin/python3', '-B', str(invocation), str(run)]),
                 'wrong observed launcher command')
     else:
         configured = expected['configured_launcher']
@@ -296,15 +314,18 @@ def add_roles(roles, entries):
 def check(run, expected, visual, *, supervisor=None):
     run, files = absolute(str(run)), Files()
     require(run.resolve(strict=True) == run and re.fullmatch(r'win95-cold-[A-Za-z0-9_.-]+', run.name), 'wrong owned run leaf')
-    require(integer(expected['schema']) and expected['schema'] in (1, 2, 3, 4), 'unknown expectation schema')
-    parentpolicy = expected['schema'] == 4
-    posted = expected['schema'] in (3, 4)
-    profile = ('board-posted16-40mhz-parentpolicy' if parentpolicy else
+    require(integer(expected['schema']) and expected['schema'] in (1, 2, 3, 4, 5), 'unknown expectation schema')
+    repair = expected['schema'] == 5
+    parentpolicy = expected['schema'] in (4, 5)
+    posted = expected['schema'] in (3, 4, 5)
+    profile = ('board-posted16-40mhz-parentpolicy160' if repair else
+               'board-posted16-40mhz-parentpolicy' if parentpolicy else
                'board-posted16-40mhz' if posted else None)
     metadata_limit = PARENTPOLICY_JSON_LIMIT if parentpolicy else JSON_LIMIT
     require(expected.get('profile') == profile,
             'unknown or misplaced reviewed profile')
-    unit_pattern = (r'ventium-board-posted16-win95-[A-Za-z0-9_.-]+\.service' if posted else
+    unit_pattern = (r'ventium-fp-repair-win95-[A-Za-z0-9_.-]+\.service' if repair else
+                    r'ventium-board-posted16-win95-[A-Za-z0-9_.-]+\.service' if posted else
                     r'ventium-standard-win95-[A-Za-z0-9_.-]+\.service')
     require(expected['kind'] == 'WIN95_STANDARD_EXPECTATION' and
             expected['run_directory'] == str(run) and
@@ -379,6 +400,8 @@ def check(run, expected, visual, *, supervisor=None):
                     'prepared.json', 'build1-speed-q16-started.json', 'build1-speed-q16-closed.json',
                     'obj1-speed-q16/Vsystem__verFiles.dat', 'defines.txt') if posted else (
                         'Vsystem__verFiles.dat', 'compile-inputs.before.sha256', 'build-output.sha256')
+    if repair:
+        build_inputs += ('prepared.json', 'coremark/audit.json')
     require(all(pins.get(path) == digest for path, digest in roles.items()) and
             all(str(run.parent / name) in pins for name in build_inputs) and
             before['pristine_private_disk_sha256'] == expected['pristine_disk_sha256'], 'mandatory frozen pin roles missing')
@@ -431,6 +454,7 @@ def check(run, expected, visual, *, supervisor=None):
     disk_digest = files.digest_disk(run / 'guest.vhd')  # Only after authoritative closure and PID/cgroup absence.
     require(disk_digest == result['closed_private_disk_sha256'], 'closed private disk pin changed')
     files.finish()
+    launcher_roles(run, expected, before['worker'])  # Recheck any invocation-directory alias.
     processes_absent(expected)
     supervisor_closed(query_supervisor(expected['unit']) if supervisor is None else supervisor, expected)
     return {'schema': 1, 'status': 'PASS', 'scope': 'Win95 cold boot to desktop only', 'suite_acceptance': False,
@@ -459,7 +483,7 @@ def main():
                     'external expectation/manual-review digest missing or changed')
         expected = files.json(args.expect, limit=PARENTPOLICY_JSON_LIMIT)
         require(type(expected) is dict, 'expectation must be a JSON object')
-        require(expected.get('schema') == 4 or files.observed[str(args.expect.absolute())][0][2] <= JSON_LIMIT,
+        require(expected.get('schema') in (4, 5) or files.observed[str(args.expect.absolute())][0][2] <= JSON_LIMIT,
                 'legacy expectation exceeds its original metadata limit')
         supervisor = None
         if args.supervisor_closure is not None:
