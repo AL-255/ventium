@@ -631,14 +631,14 @@ current dependency pins remain unpacked.
 fault, integer/memory/held/branch and same-input replay plan against exact
 models `e1621913` / `6fa8f7ad`. Unit
 `ventium-intent-ready-regressions-oct12`, invocation
-`311a3dc90f574573bf44861d77c1c193`, is **running**, not yet a pass. All gate
-comparisons, native timeouts and the canonical-failure status remain intact.
-The six boundary matrices and all 32 fault measurements have closed
-successfully. At 2026-10-13 00:05 UTC, branch testing is live; replay and
-aggregate closure are still pending. Native scope:
+`311a3dc90f574573bf44861d77c1c193`, closed **native 0 in 609.385 seconds**.
+All 12 phases passed, including six boundary matrices, 32 fault measurements,
+integer/memory/held/branch cases and **108 programs / 80,800 records** of
+same-input replay. All gate comparisons, native timeouts and the canonical
+failure status remain intact. Native scope:
 `2ebad809529c4d86a45ec53d3d18fe5b`.
 
-The source-transfer and measurement procedures are prepared, **not run**:
+Source-transfer and measurement procedures:
 
 - `fpga/build_intent_ready_soc.py prepare`: requires that closed 12-phase
   proof plus the complete FP matrix and canonical receipt, then transfers
@@ -661,11 +661,56 @@ of source drift or extra payload changes. All four new command-line entry
 points also passed their `--help` checks. These are host checks, not native
 FPGA timing measurements. No new Vivado family was launched in this step.
 
-PC **preparation only** is queued behind the regression lock as
-`ventium-intent-ready-pc-prepare-oct12`, invocation
-`2cedbd56917b4edb9940ed5879ae5d88`; it requires the successful native proof
-receipts before exporting any source. Its output is `intent-ready-soc-r1`.
-No compiler, new FPGA freeze or synthesis has been launched for this candidate.
+PC preparation closed successfully as `ventium-intent-ready-pc-prepare-oct12`,
+invocation `2cedbd56917b4edb9940ed5879ae5d88`. The subsequent
+`ventium-intent-ready-pc-build-oct12`, invocation
+`ea139197273f4c40981251a318ed0ddf`, compiled in **24.021 seconds**, native 0.
+All 102 common RTL payloads agree with the directed model; only the two intended
+files change. The private harness used its local object/matching generated
+header. All **5,192 build input pins** were independently rehashed. The 98
+inherited full-PC structural warnings are unchanged, **not a clean SoC lint**.
+PC model SHA-256:
+`f8dad22699bef9fb8476656ed0f5610c7c18f0e11d870d943e7c981b41331ddc`.
+
+FPGA source export `intent-ready-fpga-r1` is closed and its **5,386 input pins**
+were independently rehashed. It preserves 190 payloads, 158 defines, 170 shared
+HDL inputs, original clocks and transport. Manifest SHA-256:
+`034095db8f09866e527046fd6f130a950759f3798c3a72d69bfd53d5756a2c1b`.
+Strict **CPU-hierarchy** lint passed in **3.828 seconds**, native 0, unit
+`ventium-intent-ready-lint-oct12`, invocation
+`e27e9feec56148ad906075aed931dd1a`; all 195 lint pins were rehashed. This is
+not full-SoC lint or FPGA acceptance.
+
+Closed regression text is recoverable in
+`closed-intent-ready-regressions.tar.gz`, **36,984 entries**, **887,131,526 →
+82,720,712 bytes**, SHA-256
+`7b6ef3e1c1095a4ab9505239b987c77074cb5cfec6704eb67e86b4cee22f1354`.
+The archive explicitly excludes the 128 pinned native fault-trace files needed
+by PC/source qualification. Unpinned case products from both closed suites are
+preserved in `closed-intent-ready-case-products.tar.gz`: **62,304 entries**,
+**185,707,023 → 11,071,595 bytes**, SHA-256
+`44d5a94426d51604defb560d98f0fcd6c5ff6a44554e1968347db3eab5677c10`.
+All 5,463 protected pins stayed unchanged; 224 pinned case products were skipped.
+Both archives restore into `ventium-load-read-ack.GyWDDtiI`. Each member was
+byte-verified before deleting its unpacked copy. Closed directed-core PCH
+caches have verified adjacent `.gch.gz` copies, recovering **155,156,742 bytes**.
+
+Short cold CoreMark is running as
+`ventium-v-carry-cm10-intent-ready-oct12`, invocation
+`0e44f5f0d48244f6937bbd10d126c389`. The **performance seed passed**, native 0
+in **202.666 seconds**, with matching CRCs, unchanged **4,767,218 ticks**, and
+1,055,307 actual V retirements at the final observation. The validation seed
+and independent audit remain pending. These 10-iteration tests are
+**duration-invalid**, not CM/MHz scores or standard-suite acceptance.
+
+Controller `ventium-intent-ready-synth-launch-oct12`, invocation
+`7b6377bdeec04f8c929efd93e60d7fba`, is **waiting on that exact CoreMark owner**.
+It requires its independent audit, byte-verifies/compresses the unused PC PCH,
+and retains the original disk admission (**>7,208,493,056 bytes free**) before
+launching one bounded synthesis. Native RAM/swap/disk stop thresholds stay
+unchanged. Its exact-owner observer can audit synthesis and then original-clock
+timing, but cannot retry synthesis, route or deploy. No INTENT-READY synthesis
+has started at this entry, and no Fmax result is inferred from compilation.
 
 The canonical gate remains **7 PASS / 101 FAIL**, red and unwaived.
 Required next: achieve
