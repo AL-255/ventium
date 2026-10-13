@@ -1,6 +1,6 @@
 # Register-only flags for branch read priming — 2026-10-13
 
-Status: **isolated core and full-PC experiment; not promoted, synthesized or deployed**.
+Status: **isolated core/full-PC experiment; synthesis running, not promoted or deployed**.
 The measured PRIME-CS parent is **33.958163543 MHz** synthesized/unplaced,
 below the **40 MHz** requirement. No timing or area gain is claimed here.
 
@@ -62,7 +62,8 @@ startup: [physical result](../../docs/FPGA_DOOM_2026-10-13.md).
 - Six FPGA transfer/controller tests pass, including rejection of source drift,
   a second changed file and weakened resource guards. The generated synthesis
   and read-only timing controllers preserve the matched mapper, watchdogs,
-  40/100 MHz constraints and canonical failure. They have **not launched**.
+  40/100 MHz constraints and canonical failure. Synthesis has now launched as
+  recorded below; the read-only timing audit has not started.
 - Both short cold CoreMark seeds complete with the reference CRCs and exactly
   unchanged ticks: **4,767,218 / 4,753,406**. The completed model records
   **1,055,307 / 1,054,254 V retirements**, respectively. Independent native
@@ -136,16 +137,28 @@ Measure matched synthesis area/timing. Do not claim ≥40 MHz from
 the programmed clock. Standard suite, physical UV-fast Win95/Quake, duration-
 valid CoreMark and Doom gameplay/FPS remain open. Combine the independent SMSW
 repair explicitly before any eventual replacement-image acceptance run.
-The canonical gate must still be made genuinely green. No Vivado was launched
-for this derivative. The first synthesis controller admission at **10:37:59
+The canonical gate must still be made genuinely green. The first synthesis
+controller admission at **10:37:59
 UTC** exits 1 before creating `started.json`, launching Vivado or writing a
 project: the retained measured-growth guard needs **more than 7,208,493,056
 bytes (6.7134 GiB)** free, not merely the separate 6 GiB minimum. About 6.1 GiB
 was free. Do not lower this guard or count this as a native synthesis attempt.
 Retained controller: `ventium-prime-reg-synth-oct13.service`, invocation
 `d3e2a47b023e4848854a7dcd0746b502`, MainPID 0 / native controller exit 1.
-Restore that reserve before starting the prepared controller again; its
-source, constraints and resource limits must remain unchanged.
+The reserve had to be restored before retry; its source, constraints and
+resource limits were not changed.
+
+**Resumed at 10:44:43 UTC:** lossless archival of older closed traces restored
+6.9 GiB free, clearing both original admission checks. The **unchanged**
+controller now runs as invocation `5889512f4f3840a2a791173d2141d533`, with
+7,422 pinned inputs and the original 45-minute native bound. One controlled
+Vivado build family owns synthesis; its parent, synthesis process and vendor
+task worker share the guarded scope. At 10:57 UTC it remains live, with no OOM
+or resource-stop condition. There is **no new timing/area result yet**.
+The initial refusal is retained as `preflight-refusal-r1.json`, not erased or
+converted to a tool pass. `closed-regression-replays.tar.gz` restores the old
+trace outputs under the evidence root; all current input pins stayed expanded
+and were rechecked. Historical output-consuming audits need restoration first.
 
 The short CoreMark controller
 `ventium-v-carry-cm10-prime-reg-oct13.service` closed 0, invocation
