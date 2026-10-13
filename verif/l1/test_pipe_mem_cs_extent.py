@@ -21,7 +21,7 @@ class PipeMemoryCS(unittest.TestCase):
             self.assertEqual(restored.count(new),1)
             restored=restored.replace(new,old)
         self.assertEqual(restored,self.source)
-        self.assertEqual(hashlib.sha256(restored.encode()).hexdigest(),recipe.PARENT)
+        self.assertIn(hashlib.sha256(restored.encode()).hexdigest(),recipe.PARENTS)
 
     def test_reject_drift_and_double_application(self):
         for bad in (self.source+'\n',self.changed,self.source.replace('33\'d1','32\'d1',1)):

@@ -10,6 +10,12 @@ import hashlib
 import re
 
 PARENT = '7b6dcfe3c35b07bca3016c178cf81ebfb7cf104ea30d17e10b6f40b4c8a4506f'
+# PRIME-COHERENCE retains the exact pre-issue, fault and request expressions.
+# Its only core.sv delta from the original parent is the separately qualified
+# FLOAD high-valid port/cofactor and its assertions (15 added / 1 removed lines).
+# The three commit-cofactor headers are outside this file and remain unchanged.
+PRIME_PARENT = '3d8aebbdf338a63ab86bb58a6fab2ebb43f0f280bdbd3626ff4710941a5983c6'
+PARENTS = frozenset((PARENT, PRIME_PARENT))
 DECL = '  logic        pipe_cs_issue_eligible;'
 ANCHOR = '  // A CS-extent fault is a pre-issue check, not a second frontend consumer.'
 ADDED = '''  // Payload-independent CS limit check for a NEW integer memory request.
@@ -63,7 +69,7 @@ def edits(source):
 
 
 def transform(source):
-    if hashlib.sha256(source.encode()).hexdigest() != PARENT:
+    if hashlib.sha256(source.encode()).hexdigest() not in PARENTS:
         raise ValueError('CS-extent source drift or reapplication')
     result = source
     for old,new in edits(source):

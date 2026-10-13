@@ -3,7 +3,9 @@
 Private two-header derivative of MC-LOCAL-COMMIT. **Not production RTL,
 completed qualification, timing closure or FPGA acceptance.** Immediate
 target remains at least **40 MHz synthesized Fmax in UV + fast mode**.
-Latest measured predecessor is **32.270556344 MHz**, not a pass.
+The completed candidate measures **32.955444239 MHz**, up from predecessor
+**32.270556344 MHz**, but still **fails the target**. See the closed timing
+evidence below; neither number is routed sign-off or measured board frequency.
 
 ## Why this change
 
@@ -299,7 +301,7 @@ current input pins and 128 protected fault artifacts remain unpacked. No
 capture/movie or guest disk was changed.
 
 With **7,256,952,832 bytes free**, the unchanged controller was retried after
-that genuine admission failure. It is now live with controller invocation
+that genuine admission failure. It launched with controller invocation
 **`83c36bf52c524975839b3e96f01f55db`**, MainPID 278875 at admission; one native
 Vivado family was observed under scope invocation
 **`817346fe7a75489dad3de05835d7bd44`**. Native launch was
@@ -307,12 +309,84 @@ Vivado family was observed under scope invocation
 48 tasks**, with the original resource watchdog and 45-minute native limit.
 This is only synthesis, not placement/routing or board deployment.
 
-Poll this exact owner; do not restart on an observation timeout. After native
-synthesis closes, run its independent audit, then the prepared read-only
-matched clock audit. No new Fmax, bitstream or board result exists yet.
-Do not claim gain before measurement. The standard suite and physical FPGA
-Win95/Quake acceptance remain required; canonical failures remain unwaived.
+This exact synthesis owner and the subsequent matched clock audit have now
+closed, as recorded below. No implementation or board deployment followed.
+The standard suite and physical FPGA Win95/Quake acceptance remain required;
+canonical failures remain unwaived.
 
 Candidate gameplay IPC is **unmeasured**. Older verified simulation baseline:
 **0.51030715 total U+V retirement events/cycle**, build `2b4d7a48`, cycles
 **1,200,065,237–1,300,065,237**; predates this proposal and is not FPGA IPC.
+
+## Closed synthesis and original-clock audit — October 13
+
+The synthesis controller above closed at **06:07:20 UTC**, native exit 0,
+in **1,954.585489 seconds**, with unchanged inputs and no resource stop or OOM.
+The independent audit rehashed **6,724 pins**, checked all **148 native RTL
+read paths**, all **158 unchanged definitions**, the exact three-header delta,
+the native successful-run markers, and checkpoint ZIP integrity. Both builds
+use the same `Default / -no_timing_driven` diagnostic mapper; this is not a
+new synthesis strategy or relaxed clock comparison.
+
+| Synthesized metric | FP-WIDE-CONTEXT parent | PRIME-COHERENCE |
+|---|---:|---:|
+| Core Fmax estimate | 32.270556344 MHz | **32.955444239 MHz** |
+| Core setup slack at 40 MHz | −5.988 ns | **−5.344 ns** |
+| Core hold slack | −0.101 ns | −0.101 ns |
+| LUTs | 185,209 | 184,618 |
+| Registers | 54,947 | 54,493 |
+| BRAM36 equivalents / DSPs | 277.5 / 47 | 277.5 / 47 |
+
+This is **2.12% higher estimated Fmax**, with 591 fewer LUTs and 454 fewer
+registers, but still **not the required 40 MHz**. The frequency is derived
+from the original 25 ns period and actual worst setup slack; it is not the
+configured clock rate, routed sign-off or a board measurement.
+
+The read-only clock audit used `ventium-prime-coherence-clock-oct13.service`,
+controller invocation `39f8ebe2e8de4c4da8a62f0190477c53`, scope invocation
+`c580bbb2057b47c6a80e004491b0e992`. It closed native 0 at **06:16:20 UTC**, in
+**470.503023 seconds**, rechecking **6,739 pins**, original **40/100 MHz**
+clocks, zero black boxes and zero MDRV-1/LUTLP-1 violations. It used at most
+4,884,467,712 bytes RAM, zero swap, with no OOM. Synthesis's measured scope
+peaks were 8,018,141,184 bytes RAM and 1,917,157,376 bytes swap; these separate
+peaks are not asserted to have occurred simultaneously.
+
+The unchanged critical warning is the generated PS XDC `create_clock` attempt
+on an unknown port/pin. The audit independently confirms both actual core/PL
+clocks rather than dismissing or masking that warning. The native synthesis
+summary retains 0 errors, 1 critical warning and 1,564 warnings. Compared with
+the parent, six new warnings concern constant-zero generated `ven_l1d__GB2`
+port bits `P[8,4,3,2,1,0]`; eight other constant-port messages merely change
+generated port numbering. This warning classification is not a functional
+proof or a waiver of the outstanding canonical failures.
+
+Evidence SHA-256 values:
+
+- Synthesized DCP:
+  `34c3e5383522f0c15a349887f89a94a2cf28778f8320d63866d8fcf3e8a59008`.
+- `prime-coherence-synthesis-r1/audit.json`:
+  `1fbb654cda824518f56fa5fe25865aa26b03c633db0385efd7f0bb551ee5fe8a`.
+- `prime-coherence-clock-r1/audit.json`:
+  `0ff9f72c908b08756be9a2ec3c539258a4bd24cb2fa096569f0f739a196f6bde`.
+
+### Remaining measured path and next change
+
+The worst endpoint moved to **`q_pc_reg[0] → gpr_reg[4][16]`**, with **106
+logic levels / 30.133 ns data delay**: 6.551 ns logic and 23.582 ns estimated
+unplaced routing. It still traverses reference decode/`d_len`, the shared
+CS-extent fault qualification, new-store admission, paired-store readiness,
+AXI write admission/ACK and ESP writeback. Mapped hierarchy names are not
+exclusive source ownership; the source equations were checked separately.
+
+The V-response capture's transitive cone fell from **79,597 to 67,589 cells**
+and from **26,950 to 21,644 startpoints**. These are reachability counts, not
+area ownership or proof that every reachable path is sensitizable.
+
+The previously deferred [new-memory CS-extent cofactor](PIPE_MEM_CS_EXTENT.md)
+now addresses a cone present in this completed timing result. It gives only
+new S_PIPE integer-memory requests their own live-U-length CS-limit check;
+the global slow-decoder fault and held-owner handling remain unchanged. Its
+current-source leaf checks and private core build are closed; canonical and
+whole-core regression qualification are still in progress. No further Vivado
+run or timing gain is claimed for it yet. Do not launch implementation on the
+32.955 MHz result as though the 40 MHz synthesis requirement were satisfied.
