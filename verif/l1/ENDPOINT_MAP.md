@@ -2,9 +2,10 @@
 
 Status: **implemented in an isolated full-core candidate, regression-checked,
 transferred into the full-PC model and frozen for FPGA synthesis**. Both short
-CoreMark seeds and strict hardware-profile CPU lint pass. There is **no timing,
-standard-suite or physical-FPGA acceptance yet**; the canonical gate remains
-red. This does not meet the 40 MHz requirement by itself.
+CoreMark seeds and strict hardware-profile CPU lint pass. Synthesis and its
+independent timing audit are closed: **35.056967572 MHz unplaced estimate**,
+still below 40 MHz. There is **no timing closure, standard-suite or physical-FPGA
+acceptance**; the canonical gate remains red, and cold Doom startup stalls.
 
 ## Change
 
@@ -114,7 +115,7 @@ both SMSW and endpoint-map changes. At the transfer audit's closure, scratch had
 free, below the unchanged synthesis admission requirement; no Vivado was
 launched at that point and no limit was weakened.
 
-### Guarded synthesis started — 12:49 UTC
+### Guarded synthesis — launched 12:49 UTC, now closed
 
 The subsequent recoverable archive below raised free scratch space to
 **7,329,439,744 bytes**, above the unchanged **7,208,493,056-byte** measured-growth
@@ -146,6 +147,74 @@ do not conflate native exit zero, an echoed command, graphics capture, a guest
 return or an invalid-opcode report with timedemo success. No Doom FPS or guest
 completion is established by this startup run so far.
 
+### Closed timing/area result
+
+Synthesis naturally closed with exit 0 in **1,919.77 seconds**, with unchanged
+inputs and no OOM. The independent audit checks all **19,971 input pins**, the
+actual 158 definitions, 148 native HDL reads and DCP integrity. The native
+diagnostics remain visible: 0 errors, 1 critical warning, 1,571 warnings. The
+critical warning is the PS-generated XDC's unknown clock pin; the subsequent
+native project audit confirms the required actual clocks rather than ignoring
+the warning or inventing replacement constraints.
+
+The serial read-only timing audit then closed in **475.10 seconds**, peak
+4,795,453,440 resident bytes / no swap / no OOM. It checks 18,300 input pins,
+40/100 MHz clocks, zero black boxes and zero multiple-driver/logic-loop DRC
+errors. Both retained owners are terminal with MainPID 0. No Vivado remains.
+
+| Metric | SMSW-free PRIME-REG parent | SMSW + endpoint candidate |
+| --- | ---: | ---: |
+| Unplaced core estimate | 35.023816195 MHz | **35.056967572 MHz** |
+| Setup slack at 40 MHz | −3.552 ns | −3.525 ns |
+| Hold slack | −0.101 ns | −0.101 ns |
+| LUTs | 187,311 | 187,333 |
+| Registers | 55,006 | 54,966 |
+| BRAM tiles / DSPs | 277.5 / 47 | 277.5 / 47 |
+| V-response capture path | 96 levels / −2.793 ns | 93 levels / −2.425 ns |
+
+The overall estimated frequency gain is only **0.09465%**. The capture cone
+shrinks from 71,262 to 70,374 cells, but reachability is not exclusive area
+ownership. The whole-design worst path is now 97 levels from `q_pc[0]` to
+`gpr[4][16]`, traversing fetch/prefix/decode → demanded byte count → segment and
+fragment control → code-access/store-pair admission → AXI ACK → register write.
+It does **not** meet 40 MHz. These are synthesized, unplaced estimates, not
+routed sign-off or board measurements; no isolated endpoint-only gain is
+claimed because the comparison also adds SMSW.
+
+### Cold Doom diagnostic: stalled, not passed
+
+The original 100-million-cycle smoke run closed after **1,570.06 seconds**,
+native exit 0 with its child reaped, no OOM and unchanged original media/code.
+It boots FreeDOS and launches Doom, but retirement freezes at **4,135,554**,
+`16F0:DAF0`, `EFLAGS=0x86` (IF clear). The frozen profile identifies state 40
+as `S_HLTWAIT`. Samples from cycles **33,276,784–100,000,000** have the same
+retirement count, with explicit no-retirement warnings up to 65 million cycles.
+There are no graphics captures and `DEMO3.LOG` is empty. V retirement is zero;
+this real-mode startup cannot establish UV-fast gameplay acceptance.
+
+The original runner's narrow `native_error_observed=false` field does not
+detect `[STALL]`; it is **not** a clean guest result. The separate read-only
+`fpga/audit_endpoint_map_doom.py` catches and reports the stall while checking
+17,950 input pins, all artifacts and the exact closed invocation. Two new host
+tests ensure a zero native exit never becomes guest acceptance.
+
+`prepare_endpoint_map_doom_trace.py` prepares a new, shorter **34-million-cycle /
+15-minute** cold diagnostic with the existing passive fault ring (eight events,
+4 MiB cap), a bounded 40,000-instruction trace and 20,000-cycle state window.
+It retains the smoke runner's source/media/resource/stop-reap guards and adds
+no breakpoint, STEP, save-state, guest patch or model rebuild. Two recipe tests
+pass. Unit `ventium-endpoint-map-doom-smoke-trace-oct13-r1.service`, invocation
+`60c81cd66a8643d18cf62322fd1da3da`, now naturally closes exit 0 / MainPID 0 in
+**565.02 seconds**, without OOM. Its output is `endpoint-map-doom-trace-r1`.
+The first captured fault after the four-million-retirement filter is #UD on
+**`LMSW AX` (`0F 01 F0`) at `24C7:032A`**, cycle 32,709,048. The live fetched
+bytes, AX=0x0011, CR0=0x10 and matching explicit decoder omission identify the
+next general missing instruction. This evidence is not inferred from a stale
+registered vector. Later faults end at the same HLT/count as the smoke run.
+Eight new [LMSW instruction probes](../sys/lmsw/README.md) pass on pinned QEMU
+and reproduce #UD on the candidate; eight MOV-CR fixture controls pass both.
+LMSW is **not repaired**, and neither run establishes gameplay or FPS.
+
 ## Identity and evidence
 
 Root: `/home/yukidama/external/tmp/ventium-load-read-ack.GyWDDtiI`.
@@ -164,6 +233,10 @@ Root: `/home/yukidama/external/tmp/ventium-load-read-ack.GyWDDtiI`.
   `c45c29a6b2ae32fdd34defe85a6922e8560b2ccb9054b5d1563ae773a9040bd1`.
 - `endpoint-map-transfer-audit-r1.json`:
   `f5e418d6cc37fcf58208440fe7dee892292d4a5110eef32db1bbf5359afb34a7`.
+- Synthesis DCP: `b84da6e30f8b87f26bcc86f03d23a8df44644fb272af8713316d3472721d2d12`.
+- Synthesis audit: `dbe0b27c97d35d13c41f3069f455f3a4a72ad0032c83441b9a757e678d08dc6b`.
+- Clock audit: `cbab17a851639504ddbb05ec2d2a78bc942c8888a23372ce654a15ce85fee92f`.
+- Doom smoke closure: `82bbb148bb3665fbbe88b6ec99c08ca25d2f8a452981a3506bce1aaf588c40df`.
 - Leaf, route, SMSW, privilege, fault and replay evidence uses the corresponding
   `endpoint-map-*-r1` directories. The core contains `build-closed.json`,
   `verify-closed.json`, `generic.log`, complete traces and original commands.
@@ -195,11 +268,11 @@ the restore command are in the adjacent plan/verified/closed JSON receipts.
 
 ## Next required work
 
-Monitor the admitted synthesis to native closure, audit its DCP, then measure
-the frozen four-file candidate's whole-design timing/area under unchanged
-40/100 MHz constraints and resource guards. **No timing gain is attributed
-until measured.** Inspect the separate cold Doom startup result without
-substituting simulation or a partial window for physical timedemo acceptance.
+Analyze the remaining fetch/decode-to-memory/commit critical path before
+another synthesis; the measured endpoint change is insufficient for 40 MHz.
+Implement and qualify the now-reproduced general LMSW repair, retaining the
+passive Doom fault/retire trace and directed controls. Do not substitute
+simulation or a partial window for physical timedemo acceptance.
 Continue resolving the canonical reference/RTL failures without weakening the
 gate; complete the standard suite and physical UV-fast Win95/Quake validation.
 The installed old Doom image still faults on SMSW; new Doom gameplay/FPS needs
@@ -210,5 +283,5 @@ directed traces.
 Candidate gameplay IPC is **unmeasured**. Older verified **simulation** baseline:
 **0.51030715 total U+V IPC**, build `2b4d7a48`, cycles
 **1,200,065,237–1,300,065,237**. It predates this candidate and is not FPGA/Doom
-IPC. The new composition has no Fmax measurement; 35.023816195 MHz belongs to
-the earlier SMSW-free PRIME-REG candidate.
+IPC. The composition's **35.056967572 MHz** is an unplaced synthesis estimate;
+40 MHz timing closure remains open.
