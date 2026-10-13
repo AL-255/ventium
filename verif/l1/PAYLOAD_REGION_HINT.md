@@ -85,14 +85,45 @@ comparisons**, on real AXI at latencies 0 and 7. Full x87/QEMU and complete
 cycle-stream comparisons remain. Closure SHA-256:
 `bf91f6479f56308dd5c5f7a124e0798b2132b280bbec166a13b777093dec5021`.
 
-The remaining **12-phase operand-boundary, fault and same-input replay** plan
-is live: `ventium-payload-region-regressions-oct12.service`, invocation
+The **12-phase operand-boundary, fault and same-input replay** plan passed in
+**617.338 seconds**, retained native owner
 `9d9912a1caf843cf9613731c53625cd3`, output `payload-region-regressions-r1`.
-Do not launch a duplicate if observation is interrupted. Fourteen host tests
-pass across source-scope, driver/admission and exact core/PC/FPGA transfer
-contracts. Transfer adapters are prepared code only: no new PC model, FPGA
-source freeze or synthesis has run. Their full FP/fault/replay and
-source-closure requirements remain unchanged.
+All six boundary offsets pass, along with 32 fault measurements, 1,024 integer,
+288 memory, 48 held-response cases and 2,560 branch measurements. The canonical
+same-input replay passes **108 cases / 80,800 records**, including candidate
+self-reproduction, without ESP masking. This closes the A/B input mismatch
+above, **not** the original canonical gate's 7 PASS / 101 FAIL.
+
+Seventeen host tests pass across source scope, driver/admission, exact
+core/PC/FPGA transfer and guarded synthesis/timing preparation. The new timing
+adapter retains the complete resource/watchdog lifecycle and byte-identical
+native timing Tcl; its source/DCP comparison control is the actual 33.154300 MHz
+INTENT-READY parent. No new candidate Fmax is available yet.
+
+The native **full-PC transfer/build passed** in **24.205 seconds**, owner
+`afc999c6ad294224a849f8758fb7e03e`. All 102 common RTL sources match the directed
+model after exactly two changes; 156 simulation defines and posted-16 transport
+remain. The unique local harness object uses the matching generated header.
+All 98 inherited platform structural diagnostics are unchanged, not waived.
+PC model SHA-256:
+`ac3de53084d2638155c0d10d78827857bae0aae7cc6578f1f35acf769c50b893`.
+
+The hardware freeze passes its native Tcl source contract: 190 payloads, 170
+matched HDL inputs, all 158 original hardware defines and unchanged 40/100 MHz
+clocks. Manifest SHA-256:
+`5e5bdf083c4d2ba7f678a2fd46f9dab794d15fd1a286cc904497fdc6eb503603`.
+Strict frozen-core lint passes in **3.879 seconds**, owner
+`7b07ea9254a74429ab6c635a8abbed92`; this is not full-SoC lint.
+
+Short cold CoreMark transfer checks are running under
+`ventium-fp-exec-cm10-payload-region-oct12.service`, invocation
+`b2eee78444af48f19a4602c39b9d80e0`. These 10-iteration seeds are not
+duration-valid scoring or standard-suite acceptance. The exact-owner queue
+`ventium-payload-region-synth-queue-oct12.service`, invocation
+`d6b6dbcb9bff43f982ba037fbd52c8dc`, waits for both seeds and an independent
+audit before launching one exclusive, resource-guarded synthesis and matched
+original-clock timing audit. Neither observer retries, routes or deploys.
+On interruption, inspect these owners; do not duplicate their jobs.
 
 Derivative source SHA-256:
 
@@ -113,9 +144,27 @@ only its unpacked duplicate. Source/binary/receipt/input pins remain. Restore
 with `tar -xzf closed-payload-region-checks.tar.gz -C` followed by the evidence
 root above; receipt `closed-payload-region-checks-closed.json` contains its hash.
 
-Further whole-core regressions, native transfer, synthesis/timing and full
-standard-suite/physical FPGA acceptance remain required. No frequency gain
-is inferred from this edit alone.
+The closed wide-FP text is likewise recoverable in
+`closed-payload-region-fp-text.tar.gz`: **487,386,668 → 29,588,731 bytes**,
+11,916 byte-verified members. Before archiving, all 384 fixtures were rechecked
+against QEMU and the complete A/B cycle streams; 208,128 candidate architectural
+records were compared. Restore into `/home/yukidama/external/tmp` using the
+command in `closed-payload-region-fp-text-closed.json`. All protected inputs,
+native executables and receipts remain unpacked.
+
+Closed regression text is recoverable from
+`closed-payload-region-regressions.tar.gz`: **887,168,686 → 82,708,064 bytes**,
+36,984 members; 128 explicitly pinned files were excluded, including fault
+evidence needed by transfer admission. Restore into the evidence root. Seven
+closed historical matrix runs were separately retained in
+`closed-payload-region-reserve.tar.gz`: **1,825,082,160 → 149,236,802 bytes**,
+79,440 byte-verified members; restore into `/home/yukidama/external/tmp`.
+Their aggregate/per-case metadata, current source/freeze inputs and executable
+models remain unpacked. Both archives have corresponding `*-closed.json`
+receipts with hashes; historical traces must be restored before replaying them.
+
+Synthesis/timing and full standard-suite/physical FPGA acceptance remain
+required. No frequency gain is inferred from this edit alone.
 
 Candidate gameplay IPC is **unmeasured**. Older verified simulation baseline:
 **0.51030715 total U+V retirement events/cycle**, model `2b4d7a48`, cycles
