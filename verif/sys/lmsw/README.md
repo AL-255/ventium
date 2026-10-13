@@ -111,7 +111,7 @@ In total, **92 directed case executions pass RTL self-checks**, of which
 **76 pass full QEMU comparison**, spanning **11,248 RTL records**. This does not
 qualify the full fault matrix, canonical gate or standard suite. IRQ/NMI/debug
 boundaries, all source registers/low-bit patterns, wider addressing/segment
-corners, negative mutants and post-LMSW full-PC startup remain open.
+corners, negative mutants and successful post-LMSW full-PC startup remain open.
 
 Evidence is under
 `/home/yukidama/external/tmp/ventium-load-read-ack.GyWDDtiI`:
@@ -135,8 +135,25 @@ Resolve the reference/RTL differential failures without weakening checks;
 complete the missing corners above and unchanged MOV-CR/CLTS/SMSW controls.
 Update opcode coverage when promoting the decoder, then run green canonical
 gates, cold Doom, the standard suite and physical UV-fast Win95/Quake/Doom
-validation. No app patches or mode fallback. This candidate has not been
-transferred into the full-PC model or a new FPGA source freeze yet.
+validation. No app patches or mode fallback. A source-matched full-PC transfer
+has now completed (below); no new FPGA source freeze or bitstream exists.
+
+## Full-PC transfer and cold Doom diagnostic
+
+`fpga/build_lmsw_soc.py` copies exactly the five directed-tested changes into
+the endpoint-map full-PC parent and checks all 102 common RTL files. It retains
+156 defines, `cycle_mode=1`, the posted-16 transport and private matching host
+headers. The 24.32-second native build passes; 98 pre-existing platform
+structural warnings are unchanged, not waived as correctness passes.
+
+The new model SHA-256 is
+`3e0f22506604fba879a6fa292463b5d07e442e86d24a4e91ec012cfcf2d05751`.
+The passive original-media cold Doom replay reaches beyond LMSW, but faults
+on **FSETPM (`DB E4`) at `24C7:0243`**, cycle 32,717,367. It returns to DOS;
+50 million simulated cycles, 855.03 wall seconds, no graphics or timedemo
+result. [Detailed closure](../../../docs/FPGA_DOOM_2026-10-13.md#lmsw-full-pc-replay-next-blocker-is-fsetpm).
+No hardware run, programming or application patch followed. Passing the former
+LMSW site does not establish complete Doom startup or qualify the standard suite.
 
 Candidate gameplay IPC is **unmeasured**. Older verified simulation baseline:
 **0.51030715 total U+V**, build `2b4d7a48`, cycles
