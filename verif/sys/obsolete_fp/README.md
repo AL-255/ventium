@@ -175,14 +175,21 @@ The original-media, cold-boot Doom diagnostic is `obsolete-fp-doom-r1`, owner
 `cd547ef7cf6640dcacfe6158519a2ae1`. It is capped at 50 million cycles / 900
 seconds, CPU12 (actual simulator affinity checked), 512 MiB/no swap, and a
 4 GiB disk reserve. Fault history is passive and bounded. There is no snapshot,
-STEP, breakpoint, guest patch, new bitstream or FPGA-clock change. This entry
-records its launch, **not completion or FPS**; see the
-[Doom result log](../../../docs/FPGA_DOOM_2026-10-13.md) for closure.
+STEP, breakpoint, guest patch, new bitstream or FPGA-clock change. It closed
+at its 50-million-cycle limit in **830.03 s**, native exit 0 / child reaped / no
+OOM, and explicitly retired FSETPM at `24C7:0243`, cycle 32,717,369. It remained
+active in startup at the limit: 6,037,079 U / zero V retirements, no invalid-opcode
+message or stall, but no graphics frames and an empty DEMO3.LOG. This is neither
+timedemo completion nor a new confirmed guest failure. Closure SHA-256:
+`6fecd6d918d2d4fda7bc879d5de7525b6a6b15e4c9fdcedaa314270cf4fbf08b`.
+See the [Doom result log](../../../docs/FPGA_DOOM_2026-10-13.md) for complete
+scope, passive-ring limitations and source/media audit.
 
 ## Recoverable scratch cleanup
 
 Only 12 precompiled-header caches from closed builds were removed after
-byte-verifying these archives under the evidence root. Models, sources,
+byte-verifying these archives under the evidence root (**0.829 GiB net freed**).
+Models, sources,
 dependency files, media and logs remain. Each archive restores with
 `tar -xzf ARCHIVE -C EVIDENCE_ROOT`; it is not needed to execute retained models.
 
