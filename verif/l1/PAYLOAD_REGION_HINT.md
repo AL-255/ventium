@@ -220,6 +220,33 @@ load/store and held-packet regressions, unchanged canonical comparisons,
 the full FP/fault/replay plan, PC transfer and measured timing. Complete
 standard-suite and physical FPGA acceptance are still required afterward.
 
+### Directed CS-memory fixture preparation
+
+The older `pfetchlim` image gives CS a different base from DS/SS/ES; that
+violates the deployed `VEN_SYS_FASTPATH_RELOC` common-base admission contract.
+It remains useful for global fault delivery, but cannot qualify this fast
+memory consumer. [The new fixture](t_pipe_mem_cs_extent.S) keeps all four bases
+zero and varies only the byte-granular CS limit. Its 12 configurations cover
+load/store, 2/3/6-byte ModR/M encodings, and exact-end/one-byte-overrun cases.
+The exception handler checks **#GP(0), saved CS, exact fault EIP and count**;
+the guest checks both the load destination and store-memory witness. Exact-end
+accesses must commit before a next-fetch fault; overrun accesses must not commit.
+Guest WBINVD provides a cold data line without host state injection. A taken
+branch isolates the memory instruction from the preceding V slot.
+
+`prepare_pipe_mem_cs_fixtures.py` assembled all 12 images and checked their
+actual opcodes, descriptor bytes, copied jump targets, reset vectors and fail
+doors in **0.654 seconds**, single CPU. Four host tests passed, including 60
+deliberately corrupted image checks. Evidence: `pipe-mem-cs-fixtures-r1`,
+closure SHA-256 `73d221c3ab924dedfe538fe2dc035c25ebcc62e5c94815cc57670c2037aa36fa`.
+**This is preparation, not a native core execution pass.** While the single
+PAYLOAD-REGION Vivado family remains active, no new whole-core build or
+regression was started. Still require execution against the parent/derivative
+with real AXI latency 0/7, complete architectural/cycle A/B equality, and actual
+new-request/held-owner evidence at the probe PC. A legal guest result or a U
+trace label alone does not prove fast admission. Existing canonical failures
+remain unwaived; QEMU's known CS-extent gap is not authority for these faults.
+
 Candidate gameplay IPC is **unmeasured**. Older verified simulation baseline:
 **0.51030715 total U+V retirement events/cycle**, model `2b4d7a48`, cycles
 **1,200,065,237–1,300,065,237**. It predates this candidate and is not FPGA or
