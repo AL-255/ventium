@@ -81,6 +81,35 @@ cold desktop plus UI interaction, full Quake timedemo, and physical FPGA
 Win95/Quake validation in UV-fast mode. The installed `fe9f539d` image is
 unchanged; its [Doom startup failure](../docs/FPGA_DOOM_2026-10-13.md) remains.
 
+## Cold Quake verification in progress
+
+The exact repaired model cold-started FreeDOS Quake demo1 at **19:43:34 UTC**
+under `ventium-fp-repair-quake-oct13.service`, invocation
+`56b52d8499764820923836107f97ffd2`. Native PID 859279 was observed with the
+expected executable hash, CPU11 affinity and owner cgroup; merely starting
+the launcher is not the admission evidence. Output is under
+`soc-r1/quake-cold-fp-repair-oct13.1` in the evidence root below.
+
+The flow preserves the existing completion checker: **969 frames**, native
+exit/wait, complete log EOF, no sticky capture failure, closed process group
+and rechecked private disk are required. It uses original cold media, 40 MHz
+core/RTC, 80 MHz VGA, 16 MiB RAM and DDR3 transport, without saved-state restore
+or guest modifications. A cycle or wall-time limit is not a pass.
+
+`prepare_fp_repair_cold.py` freezes the tested helper sources and rechecks the
+full compiled-input ledger. Its only host-flow changes are a 160-task startup
+budget (the simulator's initial thread pool exceeds 32) and a live **4 GiB
+free-disk stop floor**. Actual execution remains confined to one CPU with
+2 GiB RAM and no swap. Admission requires 6 GiB free disk; evidence is bounded.
+The imported Win95 resource helper deliberately refuses Win95 launch; a
+separate reviewed cold desktop/UI run is still required.
+
+Two preparation tests and **39 runner tests pass**, including low-disk failure
+remaining a failure even if a simulated completion marker appears. The board
+fixture explicitly checks DDR3, clock rates and memory size; completion,
+error-detection and log-integrity checks are unchanged. Tests do not constitute
+guest acceptance. **No candidate timedemo or gameplay IPC result yet.**
+
 ## Reproducible identities
 
 Evidence root: `/home/yukidama/external/tmp/ventium-fp-repair-transfer.a8nzrjHu`.
