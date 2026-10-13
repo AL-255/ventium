@@ -183,6 +183,43 @@ generated headers, sources and all provenance inputs remain unpacked.
 Synthesis/timing and full standard-suite/physical FPGA acceptance remain
 required. No frequency gain is inferred from this edit alone.
 
+## Pending follow-up: new-memory CS-extent cofactor
+
+The parent critical path also traverses the reference decoder's `d_len` and
+the combined `cs_extent_fault` before `pipe_load_req`. A fast new memory
+request already requires `S_PIPE`, no retained packet, and every integer
+pre-issue guard. At that consumer, the `S_DECODE` fault arm cannot contribute,
+`pipe_cs_issue_eligible` is true, and `pipe_u_eff.len` equals `u_d.len`.
+
+[The unpromoted recipe](prepare_pipe_mem_cs_extent.py) therefore gives only
+new load/store admission a direct **33-bit** live-length CS-limit predicate.
+The complete global fault signal, exception delivery and held-request muxes
+remain byte-identical. Simulation-only comparisons check both complete new
+request outputs, including rejected requests. There is no register, new cycle,
+feature define or mode fallback. **The running PAYLOAD-REGION synthesis does
+not contain this follow-up.** No integrated model or Fmax is claimed for it.
+
+[The small extracted-RTL miter](run_pipe_mem_cs_extent_leaf.py) passes **65,536
+comparisons** across segment enforcement and FP-pipeline on/off combinations.
+It uses the actual pinned pre-issue, global fault and request expressions,
+including held requests. Two compiled mutants fail at the real overflow
+corner `EIP=ffffffff, length=2, CS.limit=ffffffff`: losing the fault gate or
+truncating extent arithmetic to 32 bits wrongly admits a load. Six independent
+SMT queries prove the two-valued Boolean/33-bit arithmetic lemma and exhibit
+unsafe global replacement, overflow and zero-length-underflow counterexamples.
+The SMT model is not an automatic SystemVerilog proof.
+
+Evidence: `pipe-mem-cs-leaf-r1`, retained native owner
+`824ca5ee7b6b4db5a82bb37e354f04db`, **4.043 seconds**, peak **64,286,720 bytes**,
+one CPU, no swap; four additional host tests pass. Closure SHA-256:
+`b048b6e525e75b884f0aa398b2f53e9f3220dc90ec8bd1a51ddce00d34d2dbe3`.
+The full-core source pin is
+`7b6dcfe3c35b07bca3016c178cf81ebfb7cf104ea30d17e10b6f40b4c8a4506f`.
+Before promotion, require native whole-core lint/build, CS-end/over-limit
+load/store and held-packet regressions, unchanged canonical comparisons,
+the full FP/fault/replay plan, PC transfer and measured timing. Complete
+standard-suite and physical FPGA acceptance are still required afterward.
+
 Candidate gameplay IPC is **unmeasured**. Older verified simulation baseline:
 **0.51030715 total U+V retirement events/cycle**, model `2b4d7a48`, cycles
 **1,200,065,237–1,300,065,237**. It predates this candidate and is not FPGA or
