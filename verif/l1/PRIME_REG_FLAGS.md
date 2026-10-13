@@ -1,8 +1,10 @@
 # Register-only flags for branch read priming — 2026-10-13
 
-Status: **isolated core/full-PC experiment; synthesis running, not promoted or deployed**.
+Status: **isolated core/full-PC experiment; synthesis/timing audit closed;
+not promoted or deployed**.
 The measured PRIME-CS parent is **33.958163543 MHz** synthesized/unplaced,
-below the **40 MHz** requirement. No timing or area gain is claimed here.
+below the **40 MHz** requirement. The candidate estimates **35.023816195 MHz**
+and uses 852 fewer LUTs under the matched mapper. It still misses 40 MHz.
 
 ## Change and reason
 
@@ -17,7 +19,7 @@ existing register shifter outputs. Only this hint's commit decision uses the
 cofactored branch result. Architectural execution/branch resolution, request
 addresses, offers, ownership, exception priority and clock sequencing are
 unchanged. Full commit equality and guarded branch equality are asserted.
-The mapper must still establish the additional flags logic's area cost.
+The measured mapper area and timing effects are recorded below.
 
 The separate SMSW repair needed by DOS Doom is deliberately not mixed into
 this one-change timing comparison. The old FPGA image still fails Doom
@@ -63,7 +65,7 @@ startup: [physical result](../../docs/FPGA_DOOM_2026-10-13.md).
   a second changed file and weakened resource guards. The generated synthesis
   and read-only timing controllers preserve the matched mapper, watchdogs,
   40/100 MHz constraints and canonical failure. Synthesis has now launched as
-  recorded below; the read-only timing audit has not started.
+  recorded below; the subsequent read-only timing audit has also closed.
 - Both short cold CoreMark seeds complete with the reference CRCs and exactly
   unchanged ticks: **4,767,218 / 4,753,406**. The completed model records
   **1,055,307 / 1,054,254 V retirements**, respectively. Independent native
@@ -169,3 +171,67 @@ Candidate gameplay IPC is **unmeasured**. Older verified simulation baseline:
 **0.51030715 total U+V IPC**, build `2b4d7a48`, cycles
 **1,200,065,237–1,300,065,237**; it predates this candidate and is not physical
 FPGA/Doom IPC.
+
+## Native synthesis closure — October 13, 11:17 UTC
+
+The original synthesis invocation closes naturally with **exit 0 / MainPID 0**
+after **1,989.91 seconds**. Independent `prime-reg-synthesis-r1/audit_closed.py`
+passes: all 7,422 input pins unchanged, exact single-header RTL delta, same
+158 hardware definitions, matched logic-only mapper, complete native DCP and
+no OOM/resource-stop event. Peak guarded usage is **8.00 GiB RAM / 1.55 GiB
+swap**, within the unchanged 8/6 GiB limits. No implementation starts.
+
+| Resource | PRIME-CS | PRIME-REG | Delta |
+| --- | ---: | ---: | ---: |
+| CLB LUTs | 188,163 | 187,311 | −852 (−0.45%) |
+| CLB registers | 55,011 | 55,006 | −5 |
+| BRAM tiles | 277.5 | 277.5 | 0 |
+| DSPs | 47 | 47 | 0 |
+
+DCP SHA-256:
+`66ff1ad84d0b4f64926b0cec6df965a0a54bbca60c49185b9799c69f454eb1da`.
+Vivado reports zero synthesis errors, one critical warning and 1,564 warnings
+in its synthesis summary. The critical warning concerns a generated PS IP
+`create_clock` target; do not assume clock validity from the synthesis exit.
+The separate native timing audit opens both projects, verifies actual
+**40 MHz core / 100 MHz PL** constraints and structural DRC, and measures the
+worst core paths with those constraints. It starts at **11:19:07 UTC** as
+`ventium-prime-reg-clock-oct13.service`, invocation
+`597338c6af22432283ab53e023a572ad`, under the original 15-minute native limit
+and 8/4 GiB RAM/swap caps. It closes naturally at **11:27:01 UTC**, exit 0 /
+MainPID 0, in **473.59 seconds**. Independent `audit_closed.py` passes all
+7,437 input pins, unchanged parent checkpoint, actual 40/100 MHz clocks,
+zero black boxes and zero checked structural DRC violations (MDRV-1/LUTLP-1).
+Peak memory is 4.52 GiB, with no swap or OOM. This does not qualify all timing
+constraints, routed setup/hold or physical operation.
+
+| Matched synthesized estimate | PRIME-CS | PRIME-REG |
+| --- | ---: | ---: |
+| Core Fmax | 33.958163543 MHz | **35.023816195 MHz** |
+| Setup slack at 25 ns | −4.448 ns | −3.552 ns |
+| Worst core hold slack | −0.101 ns | −0.101 ns |
+
+Estimated Fmax improves **3.14%**, with setup slack improved by **0.896 ns**.
+This is not a gameplay speedup or routed sign-off. No false/multicycle path,
+clock relaxation, cache reduction, U-only mode or execution stall was added.
+
+The new worst path is `q_pc_reg[0]/C` → `pipe_mem_active_q_reg/D` and eight
+replicas, **99 logic levels**, **28.341 ns** data delay (6.699 ns logic /
+21.642 ns estimated routing). The report traverses legacy fetch/fault-length
+decoding, fragment/address routing, paired-store intent readiness, backing ACK
+and held-transaction ownership. `lock_session_q` is another near-critical
+consumer. This is the next measured optimization target: separate an admitted
+S_PIPE transaction's completion/admission from unrelated legacy fetch-decode
+inputs, while proving precise fault, fragment, paired-store and consume/replace
+ownership unchanged. Do not remove ACK guards merely because the path appears
+mutually exclusive in a microbenchmark. The general read-owner and intent-ready
+cofactors already present must not be duplicated as a purported new fix.
+
+No placement, routing, bitstream or board run has started for this candidate.
+
+Timing audit SHA-256:
+`72686daa0769e08fcf6fa00580c7aeaa09ff06c47ed4c4a16827f300035832ae`.
+
+The independent SMSW repair has also been composed with this candidate in a
+separate compiled tree; see the [composition record](../sys/smsw_memory/README.md#compose-the-repair-with-the-timing-candidate).
+That does not alter the timing comparison's frozen inputs or inherit its result.
