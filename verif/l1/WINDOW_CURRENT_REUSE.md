@@ -1,9 +1,9 @@
 # Current-tag saved-window timing proposal
 
-Private derivative of FP-WIDE-CONTEXT, **not production RTL, the currently
-running FPGA synthesis, or accepted hardware**. Target remains at least
+Private derivative, now composed onto the data-size and x87 environment-write
+repairs; **not production RTL or accepted hardware**. Target remains at least
 40 MHz synthesized Fmax with UV + fast enabled. No timing or gameplay result
-exists for this proposal.
+exists for this proposal. Root RTL and the installed FPGA remain unchanged.
 
 ## Reason and exact change
 
@@ -70,21 +70,89 @@ no-prime configuration. Commits `c5b25d91` and `673485b2` preserve these
 stages. The corrected coverage requires prime activity only when enabled and
 requires zero activity when disabled. No RTL failure was hidden by either fix.
 
+## Sequential cache and composed core
+
+The later data-size checkpoint closed at **35.830735605 MHz unplaced**,
+slightly worse than its 35.856430851 MHz parent. Its worst 97-level path still
+crosses next-request arbitration and saved-window reuse before paired GPR
+writeback. This motivates the current cut; it does not establish a timing gain.
+
+New evidence root:
+`/home/yukidama/external/tmp/ventium-data-size.v2HaTO2X`.
+
+`window-current-cache-r1` runs `run_window_current_cache.py` against the
+unchanged full-P5 sequential fixture, comparing both reuse predicates,
+contextual FP outputs and cache data/tags/LRU/owners on both edges.
+It closes in **23.35 s**, with **747,037 comparisons / 463 next-port samples**.
+The retained coverage includes 51 cases, 41 pairs, 123 held responses,
+66,339 high-window valid samples and 152 blocked samples. A separately
+compiled lost-next-owner mutation fails natively at cycle-time 1,021,000.
+There are no hierarchical writes to force cache state. Parent and current
+core L1/bank-arbiter/hit-return sources were byte-matched before reuse of
+this fixture. All 152 definitions and full P5 geometry remain unchanged.
+
+Owner `ventium-window-current-cache-oct13-r1.service`, invocation
+`80f1561ee5cd45bc82c5651afbb5e8bf`, is terminal, MainPID 0 / exit 0.
+The inner guarded scope used 2,446,008,320 bytes peak RAM and no swap;
+its lifetime is within that owner's invocation. Independent read-only checks
+rehash all 4,062 input pins and row artifacts. Closure SHA-256:
+`fb1f0bba0ca3eb0ab4e9d336f98985c85af2eea72a680b611862e3c055f4cfcb`.
+
+`build_window_current_core.py` composes exactly this L1 file onto the
+[environment-write repair](../sys/fp_env_store/WRITE_CLASS.md). All other
+194 source files match that parent. The 32-job guarded native build closes
+in **26.08 s**, with a unique local host object and its own generated header.
+All 152 definitions, assertion checks and board single-fill policy are
+retained. Model SHA-256:
+`737c5a8254d7d59db0558657c8c293c8e6f7e4bc255f451073c6c94776ec23d7`.
+Owner `ventium-window-current-core-oct13-r1.service`, invocation
+`366b09ba2b8e4f27b1a2081e8532d0e0`, is terminal, MainPID 0 / exit 0.
+Independent source/header audit rechecks 16,826 pins and the exact one-file
+transformation. Build closure SHA-256:
+`11ce8c9060f541ad8ece307608d70c544ba5d7e8ae606b69f620edacfb2bc8a9`.
+
+The unchanged private-QEMU functional corpus closes **108/108 PASS** in
+116.92 s; 105 also pass without the existing manifest masks. The same three
+x87 stack tests (`tx_regform`, `tx_regform2`, `tx_stack`) still need their
+existing masks. The canonical gate still closes **7 PASS / 101 FAIL**,
+native Make exit 2, in 395.52 s.
+All 20 canonical cycle traces match the immediate parent exactly. No mask,
+golden, cycle band or backend was changed. These are separate verdicts:
+the private oracle result does not turn the canonical failure into a pass.
+
+The first independent auditor incorrectly demanded identical records from
+two separately launched private-QEMU corpora. It failed on initial ESP:
+QEMU's loader stack differs with the launch environment, and stack-dependent
+flags/registers consequently differ too. This was **not waived or normalized**.
+`run_window_current_same_input.py` instead replays both models on the same
+retained flat images and initial ESP, requiring complete unmasked equality
+and reproduction of the candidate's original trace. Separate runs and their
+original results remain intact.
+
+That same-input replay now closes **108/108**, 216 native model executions,
+**80,800 complete records**, in **172.06 s**. Every per-test clock count and
+paired-retirement count is identical: **30,132 V retirements** on each model.
+These are directed tests including exit quiescence, not gameplay or a
+performance-gain measurement. Actual child affinities and waits are checked;
+the 2 GiB/no-swap owner reports no OOM.
+Owner `ventium-window-current-same-input-oct13-r1.service`, invocation
+`547dad23ce1d4594a8645b8e80aea5a5`, is terminal, MainPID 0 / exit 0.
+
+`audit_window_current_checks.py` independently rechecks 18,147 pins,
+complete private comparisons, the same-input records, clock/pair counts,
+all 20 cycle traces and terminal owners. It preserves the canonical failure.
+
+| Closed evidence | SHA-256 |
+| --- | --- |
+| `window-current-same-input-r1/closed.json` | `7ae3427fcb1432d9ada0efdfe49397521ebe69c209d1858d9e401d19f736ccfc` |
+| `window-current-core-r1/verify-closed.json` | `b4f2fee8470af22dada5a64f1813dff9b17a44f89245a57f9d435fb147503070` |
+| `window-current-regression-audit.json` | `1dd4b7175a442465dac426b026255b283acfd9d985bda1d9e7893b5872cddf28` |
+
 ## Still required
 
-`run_window_current_cache.py` prepares the unchanged full-P5 sequential A/B
-fixture, adding comparisons of both reuse predicates and the existing FP
-contextual output. Its negative build removes next ownership only from the
-new primary equation. Three host driver/scope tests pass; this is **not** a
-native full-cache result. The initial host check caught an ambiguous text
-anchor before any build; the replacement now matches the complete block.
-Native execution remains deferred while the single Vivado family is active.
-
-Inspect FP-WIDE-CONTEXT's completed timing report before choosing this next
-candidate. This proposal still needs full-cache sequential A/B, native core
-and full-PC regression, FPGA source transfer and measured timing. Existing
-canonical failures remain unwaived. Full standard-suite and physical FPGA
-Win95/Quake acceptance remain required; no reduced-mode pass substitutes.
+Full-PC regression, FPGA source transfer and measured timing remain open.
+Existing canonical failures remain unwaived. Full standard-suite and physical
+FPGA Win95/Quake acceptance remain required; no reduced-mode pass substitutes.
 
 Candidate gameplay IPC is **unmeasured**. Older verified simulation baseline:
 **0.51030715 total U+V retirement events/cycle**, build `2b4d7a48`, cycles
