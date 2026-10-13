@@ -148,11 +148,112 @@ all 20 cycle traces and terminal owners. It preserves the canonical failure.
 | `window-current-core-r1/verify-closed.json` | `b4f2fee8470af22dada5a64f1813dff9b17a44f89245a57f9d435fb147503070` |
 | `window-current-regression-audit.json` | `1dd4b7175a442465dac426b026255b283acfd9d985bda1d9e7893b5872cddf28` |
 
+## Page-fault replay and hardware-source transfer
+
+`run_window_current_env_faults.py` repeats the unchanged environment-store
+corpus on the composed core: **44 cold fixtures, 88 complete functional
+comparisons**, with AXI latencies 0 and 7. All fixture images match the prior
+repair's images. The successful `window-current-env-fault-r2` closes in
+**12.43 s**, with real paired execution and backing-memory acknowledgments.
+Owner `ventium-window-current-env-fault-oct13-r2.service`, invocation
+`17ecb2c1eebc4b1e8c11fb18edc4ba79`, is terminal, MainPID 0 / exit 0.
+The failed R1 is retained: 43 rows passed; one golden producer could not
+connect to its QEMU GDB stub within 20 seconds. Both RTL executions of that
+case passed their self-checks, but without a golden it was correctly a FAIL.
+No comparison, timeout, fixture or observation requirement changed for R2.
+
+An independent read-only pass rechecks **16,836 inputs, 1,937 artifacts and
+35,124 records** across all 88 comparisons. All emitted RTL fields equal
+the corresponding QEMU fields. Raw dictionaries are not identical across
+producers: QEMU additionally emits instruction `bytes`, `fs_base` and
+`gs_base`; this RTL producer omits those optional fields. Both QEMU bases
+are zero throughout these fixtures. This is an explicit trace-coverage
+limitation, not a claim to have checked unexposed segment bases. The unchanged
+`compare.py --mode func --all` passes; no trace was filtered or rewritten.
+
+`build_window_current_soc.py` transfers **exactly two files** from the
+data-size full-PC parent: the environment-write decoder repair and this L1
+cofactor. All **102 shared RTL files** match the tested core. The 156 full-PC
+definitions, posted-16 transport, `cycle_mode=1` and single-fill policy remain
+unchanged. The 32-job guarded native build closes in **24.55 s**, with its own
+host object/generated header, no OOM and the same **98 platform structural
+warnings**. Those warnings remain separate debt, not a full-SoC lint pass.
+Model SHA-256:
+`da16060952d983b02d4373038e3faccc5cc8d577e7635c3ae1d104314c08098e`.
+Owner `ventium-window-current-soc-oct13-r1.service`, invocation
+`5cb78f0b6dfc4699854adc22394b3e42`, is terminal, MainPID 0 / exit 0.
+
+`freeze_window_current_rk_candidate.py` exports 190 payloads, matching all
+170 compiled HDL inputs, with unchanged 158 hardware definitions and
+40/100 MHz constraints. Three exact-delta/drift/reapplication tests pass.
+Manifest SHA-256:
+`09160fa65d1b67dcfd9bc263715c5b73475c04410991a3941e651f3eb59fa7c8`.
+Independent rechecking covers all payloads and **20,370 freeze input pins**.
+Strict hardware-profile CPU-hierarchy lint passes all six structural error
+classes in **3.88 s**; this is not full-platform lint.
+
+Both original short CoreMark seeds cold-boot and finish with unchanged
+reference CRCs. Performance: **4,767,218 cycles**, V=1,055,307; validation:
+**4,753,406 cycles**, V=1,054,254. Native runtimes are 213.90 s / 213.59 s.
+**0% cycle-throughput gain** is observed, as expected for this timing-only
+rewrite. Ten iterations are **not duration-valid scores**, gameplay IPC or
+standard-suite acceptance. `audit_window_current_coremark.py` rechecks
+20,215 source pins, both native CPU12 affinities, child closure, media hashes
+and exact immediate-parent counts. Owner
+`ventium-data-size-cm10-window-current-oct13-r1.service`, invocation
+`04206b3e0d19438e92054b463f4864bd`, is terminal, MainPID 0 / exit 0, no OOM.
+
+| Closed evidence | SHA-256 |
+| --- | --- |
+| `window-current-env-fault-r2/closed.json` | `39b6e6fe0bde0c9a4d4c13cddbacf9705ba54ea36c7e58423c7aec782b18c848` |
+| `window-current-soc-r1/build-closed.json` | `9be24bcb0e1f8735b0f7649f878e2a44631bf4d5f2d6a3120a025d31317d48f0` |
+| `window-current-lint-r1/closed.json` | `55d9d3b2824553be0ec49550013dd16b0e6c4e8afb0af8be720b6998c3166674` |
+| `window-current-soc-r1/coremark/audit.json` | `39070d50b69413d826aed5ab3509ec22adc2752276c72035901ab00870c99430` |
+
+## Timing experiment and resource handling
+
+`prepare_window_current_synthesis.py` preserves the previous controllers'
+native lifecycle, guards and reporting Tcl byte-for-byte. Its three tests
+check exact source deltas, unchanged 40 MHz constraints and rejection of
+weakened memory/cleanup guards. Synthesis still requires over 6 GiB free disk
+and twice measured prior growth above a 4 GiB stop floor, plus the existing
+host RAM/swap reserves. Only the exclusive single-Vivado launcher is used.
+
+Twelve **unpinned precompiled-header caches from closed builds** were
+losslessly archived, read back and SHA-256 verified before removal. This
+frees **0.84 GiB net**; no source, model, media, dependency or log was removed.
+The recoverable archive is `closed-data-window-pch.tar.gz` under the evidence
+root, hash `bf665451c6a8f979311fcafb487e95bd447411da3957d09b98834ee27ff76da8`.
+Its plan lists each original relative path/hash; restore from the external
+scratch root. All input pins were rechecked after pruning.
+
+The first synthesis-controller invocation
+`a494873c47334e5ab5f0dfb96fb92376` failed admission **before native Vivado
+launch**: 6.618 GiB was above the simple 6 GiB minimum but below the
+6.713 GiB growth-derived reserve. `admission-failure-r1.json` preserves that
+failed attempt; there was no `started.json` or native run to grade.
+
+After CoreMark's terminal closure, the final two full-PC PCH caches were
+also archived and byte-verified, freeing another **0.15 GiB net**. Archive
+`closed-window-soc-pch.tar.gz` has hash
+`524d6118f92ce7d6f8819b7a8c1663d610031c5eb4b3bdf785ba5d1e05625cf1`.
+All source/artifact pins still match. **No guard was relaxed.**
+
+The unchanged controller was then relaunched under
+`ventium-window-current-synth-oct13.service`, invocation
+`f124e2fdd07344ce99447cbef6fdbee3`; actual native launch is **22:10:13 UTC**.
+The single Vivado family is owned by scope invocation
+`91a5533979b845b9919014b7b42f193c`, with the verified 8 GiB RAM / 6 GiB swap
+caps and 4 GiB live disk floor. **No new frequency result yet.** This
+controller cannot start implementation, routing or board programming.
+
 ## Still required
 
-Full-PC regression, FPGA source transfer and measured timing remain open.
-Existing canonical failures remain unwaived. Full standard-suite and physical
-FPGA Win95/Quake acceptance remain required; no reduced-mode pass substitutes.
+Measured timing and full-PC standard-suite qualification remain open.
+Existing canonical failures remain unwaived. Physical FPGA Win95/Quake
+acceptance remains required; no reduced-mode pass substitutes. The existing
+FPGA's [Doom startup failure](../../docs/FPGA_DOOM_2026-10-13.md) is unchanged,
+and neither physical nor simulated Doom FPS is available.
 
 Candidate gameplay IPC is **unmeasured**. Older verified simulation baseline:
 **0.51030715 total U+V retirement events/cycle**, build `2b4d7a48`, cycles
