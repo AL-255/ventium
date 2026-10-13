@@ -108,25 +108,70 @@ Every member was byte-verified before removing the unpacked copy. Restore with
 `tar -xzf closed-fp-wide-context-checks.tar.gz -C` followed by the evidence root.
 All sources, models, manifests, receipts and protected inputs remain unpacked.
 
+## Closed regression and FPGA transfer evidence
+
+The unchanged canonical gate closed in **402.535 seconds**, native `make`
+exit **2**, **7 PASS / 101 FAIL**, unwaived. All **20 complete cycle traces**
+match the parent; no masks, goldens or bands changed. Owner:
+`ventium-fp-wide-verify-oct13.service`, invocation
+`24ccd90ca4af49feb4c23d79f9a94f6f`; audit SHA-256
+`f4418abe2644c5e5728039e11c16cebdf8c91e50b14846a94d0cdc155e2f33ee`.
+
+The dependent queue `ventium-fp-wide-fp-queue-oct13.service`, invocation
+`7fa5f09d82804207afd88c73b507eee3`, has closed successfully:
+
+- Full FP: **384 fixtures / 1,536 measurements**, complete x87/system state,
+  QEMU and latency 0/7 checks, **768 zero-cycle deltas**, **69.990 seconds**.
+  Closure SHA-256:
+  `48e4ce520dc11b3fdcc587dc9365d6474bed79315618fe4a2214984512f556e7`.
+- All **12 regression groups** passed in **628.449 seconds**: six boundary
+  offsets, faults, integer, memory, held requests, branches and the complete
+  **108-case / 80,800-record same-input replay**. This replay establishes
+  equivalence to the parent, **not** a repaired canonical gate. Closure:
+  `389109c4855e39b6ec786f594a35f2be468d2f853c133c96eca5a2b7248dbe31`.
+
+The closed FP text (11,916 files) and unpinned regression text (36,984 files)
+are losslessly archived as `closed-fp-wide-context-fp-text.tar.gz` and
+`closed-fp-wide-context-regressions.tar.gz`, saving **1,262,247,922 bytes**.
+Each member was byte-verified before removing its unpacked copy; all 128
+protected fault artifacts remain. The FP archive restores relative to
+`/home/yukidama/external/tmp`; the regression archive relative to the evidence
+root. See their `*-closed.json` receipts for SHA-256 and recovery details.
+
+`fpga/build_fp_wide_context_soc.py` transferred exactly four changes across
+the **102 shared RTL sources** and preserved all **156 simulation defines**.
+The native full-PC build passed in **25.133 seconds**, with a unique private
+C++ harness and checked generated-header dependency. Its **98 inherited
+structural warnings are unchanged**, not waived into a full-SoC lint pass.
+Model SHA-256:
+`0a91843cf2f9a5f050db8ab5358d4e43f24b704aacb5dd165c1e39e17d73183b`.
+Owner `ventium-fp-wide-context-pc-oct13.service`, invocation
+`858f5c8c993a413ca366d0870433c09a`, is closed successfully.
+
+`fpga/freeze_fp_wide_context_rk_candidate.py` exported **190 payloads / 170
+shared HDL inputs**, with exactly the same four changes, **158 hardware
+defines**, full P5 caches and original **40/100 MHz** clocks. Manifest SHA-256:
+`6c60993a794d840af5e97398f7379754a8a4a2a2dc0aeff8ef6f0f582cc18e06`.
+Strict hardware-profile **CPU-hierarchy** lint passed in **4.230 seconds**;
+all six structural error classes remain fatal. This is not full-SoC lint.
+
+Seven additional host tests check exact FPGA source transfer, preserved
+regression admission, matched parent DCP and unchanged synthesis resource
+watchdog/clock policy. `fpga/prepare_fp_wide_context_synthesis.py` prepares
+the matched synthesis/report controllers without launching Vivado.
+
 ## Remaining qualification
 
-The unchanged canonical gate is running as
-`ventium-fp-wide-verify-oct13.service`, invocation
-`24ccd90ca4af49feb4c23d79f9a94f6f`. Its original failures must remain failures.
-The dependent observer `ventium-fp-wide-fp-queue-oct13.service`, invocation
-`7fa5f09d82804207afd88c73b507eee3`, waits for that exact owner and closed
-20-trace A/B audit, then runs the full FP matrix and 12-case regression plan.
-Queue source: `queue_fp_wide_context_fp.py` in the evidence root. It has no
-automatic retry, synthesis, deployment or failure-waiver step. Inspect the
-same owners/receipts on continuation; an observation timeout is not permission
-to relaunch a run.
+Both short cold-boot CoreMark seed checks are running under
+`ventium-fp-exec-cm10-fp-wide-context-oct13.service`, invocation
+`54627764e07f415396f287da62fb0e54`, on CPU 11. They are preflight comparisons,
+not duration-valid scores or standard-suite acceptance. Synthesis has not
+started; no candidate Fmax is yet measured.
 
-Still required: unchanged canonical gate and complete same-input replay,
-wide-FP/boundary/fault/branch coverage, source-matched PC transfer, strict
-hardware-profile lint, matched single-Vivado synthesis/timing, then complete
-standard-suite and real FPGA acceptance. The parent canonical gate remains
-**7 PASS / 101 FAIL**, unwaived; none of the preflight evidence above resolves
-that oracle/architectural debt or establishes FPGA boot/timedemo correctness.
+Still required: matched single-Vivado synthesis/timing reaching **40 MHz**,
+canonical gate repair, complete standard-suite and real FPGA acceptance.
+None of the equivalence/preflight evidence above resolves the canonical
+oracle/architectural debt or establishes FPGA boot/timedemo correctness.
 
 Candidate gameplay IPC is **unmeasured**. Older verified simulation baseline:
 **0.51030715 total U+V retirement events/cycle**, model `2b4d7a48`, cycles
