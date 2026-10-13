@@ -2,9 +2,11 @@
 
 Private derivative of the audited PAYLOAD-REGION source, **not accepted RTL or
 a qualified FPGA image**. The immediate target remains **at least 40 MHz
-post-synthesis Fmax with UV + fast-pipe retained**. The latest measured parent
-is **34.113392918 MHz**, setup **−4.314 ns**, core hold **−0.101 ns**, unplaced;
-this proposal has **no timing measurement yet**.
+post-synthesis Fmax with UV + fast-pipe retained**. The matched parent is
+**34.113392918 MHz**, setup **−4.314 ns**, core hold **−0.101 ns**, unplaced.
+The closed candidate is **32.270556344 MHz**, setup **−5.988 ns**, hold
+**−0.101 ns**: a timing regression, **not a 40 MHz pass**. Do not deploy it as
+the requested result or infer a physical clock limit from this unplaced estimate.
 
 ## Why this change
 
@@ -202,7 +204,29 @@ launched `ventium-fp-wide-context-clock-oct13.service` at **04:10:20 UTC**,
 invocation `5b6c59f45c4641c5b82890cf01374d6c`. This is a separate matched
 clock-report job, not another synthesis. The queue cannot retry, route or
 deploy. Inspect the same handles; observation timeout is not a restart signal.
-**No candidate Fmax is yet measured.**
+The report/audit **closed successfully in 486.329 seconds**, both owner
+services terminal with native exit 0, no OOM, peak RAM **4,731,867,136 bytes**,
+zero swap. It rechecked **6,158 pins**, actual **40/100 MHz clocks**, no black
+boxes, and structural DRC. Audit SHA-256:
+`12334cacaf426a8413de6d034cf7ceb7873f91a18cf62b3726a60de1c572ced3`.
+Reporting success is **not timing closure**.
+
+The worst path is now **111 logic levels**, `q_pc_reg[0]` → decode/extent →
+memory request/AXI paired-store admission → live paired-store I-cache snoop →
+REP continuation recovery → `core_mem_next_commit` →
+`pipe_mem_store_pair_q_reg/D`. Its 30.777 ns data delay comprises 7.405 ns logic
+and 23.372 ns estimated routing. L1D replacement-state endpoints also fail at
+**−5.581 ns** through the public next-commit path. Captured V now fails at
+**−5.388 ns / 109 levels** through that commit/clear path, versus parent
+**−3.804 ns / 99 levels** through capture admission. Source-equivalent changes
+can alter the mapper's global sharing; a shorter intended cone alone did not
+improve this design's worst timing.
+
+The subsequent saved-window and V-only bank-capture proposals are separate,
+unmeasured derivatives. Do not launch another synthesis merely because their
+leaf tests pass. `prepare_mc_local_commit.py` targets the newly measured
+pipeline-owner commit path; the **public** AGI/reference hint-to-cache path
+still requires its own analysis (see `MC_LOCAL_COMMIT.md`).
 
 Disk recovery retained sources, binaries, media, current pins, receipts and
 all failure evidence. Byte-verified lossless archives of closed trace files,

@@ -71,7 +71,7 @@ artifact hashes rechecked. Closure SHA-256:
 
 ## Next verification
 
-`run_pair_now_capture_cache.py` is prepared, **not yet run**. It retains the
+`run_pair_now_capture_cache.py` passed its native full-cache run. It retains the
 full-size sequential cache A/B, both-edge outputs/banks/tags/owners, and all
 existing traffic. `pair_now_capture_leaf.svh` adds public-traffic tests for
 128 primary/shadow byte/dword offsets (106 immediate returns, 22 rejections),
@@ -79,8 +79,22 @@ two standalone two-lane priority cases, and two fresh byte/dword captures with
 immediate requests asserted. It checks real response data/owners and rejects
 duplicate V responses. A separate deliberately broken build must fail.
 
-Native full-cache qualification waits for the sole Vivado report job to close.
-Then choose the next candidate using the actual timing paths, and require core,
+`pair-now-cache-r1` closed in **24.618 seconds** after Vivado/report closure,
+with unchanged **152 defines**, **770,015 both-edge comparisons / 465 next-port
+samples**. All 128 offset cases, two standalone priority cases and two fresh
+captures passed, as did the existing 51 fresh-pair cases and cache corpus.
+The separately compiled broad-priority mutant fails on the real cache's
+`pair_req_ready` output. Both-edge cache banks/tags/owners and the existing FP
+contextual output compare exactly. Closure SHA-256:
+`2a040c03485e35409ff3b2ef45cad571e1dc254ec087d89a37b5d45436e0d349`.
+Owner `ventium-pair-now-cache-oct13.service`, invocation
+`f9ef9c81be2f43b7931e7b6f268a35a0`, is terminal with native exit 0; guarded
+child invocation `38e6a2d06fe1491e82da592bb11f9041` is distinct.
+
+The now-closed FP-WIDE-CONTEXT report regressed to **32.270556344 MHz**; its
+worst paths traverse successor **commit**, not this capture-admission cone.
+This proposal remains separate, with no whole-core or timing qualification.
+Choose the next candidate using those actual paths, and require core,
 full-PC, source-transfer and timing evidence. Canonical gates and full FPGA
 Win95/Quake acceptance remain outstanding. Leaf passes are not substitutes.
 
