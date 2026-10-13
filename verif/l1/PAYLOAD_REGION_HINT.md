@@ -180,8 +180,59 @@ were retained as adjacent byte-verified `.gch.gz` files, reclaiming another
 and hashes; `gzip -dk` restores each cache. The executable, harness object,
 generated headers, sources and all provenance inputs remain unpacked.
 
-Synthesis/timing and full standard-suite/physical FPGA acceptance remain
-required. No frequency gain is inferred from this edit alone.
+## Closed PAYLOAD-REGION synthesis
+
+Native synthesis and its independent audit passed in **2,012.052 seconds**;
+retained owner `cdbc6f773cad4361a08df3e4588c6d18`, scope
+`14d45806f37c4ecdacba205e00507cbc`. The audit rechecked **5,858 input pins**,
+158 unchanged defines, the actual native HDL closure and the exact two-file
+delta. Resources: **185,275 LUTs / 54,951 registers / 277.5 BRAM tiles / 47
+DSPs**, versus the parent's 185,782 / 54,938 / 277.5 / 47. There were zero
+errors, the same one critical warning and 1,564 warnings; no OOM. Peak scope
+RAM/swap were 7,320,064,000 / 3,077,144,576 bytes.
+
+Checkpoint SHA-256:
+`cb4d787acf141663525776e7865af81e80bc585fbbcf9885efaa72ea65e828fd`;
+synthesis audit SHA-256:
+`f35383921849807a42ea6aea974e144a5b55a1a60b56014e6e17e96f391c8847`.
+The independent original-clock timing owner closed successfully in **499.159
+seconds**, checking 5,873 pins with 5,114,335,232 bytes peak RAM and no swap/OOM:
+`ventium-payload-region-clock-oct12.service`, invocation
+`dc136a753b5a4f73b54e29f93455c434`. Do not relaunch the completed synthesis.
+Original 40/100 MHz constraints, matched logic-only mapper and structural
+checks were preserved. The **unplaced core estimate is 34.113392918 MHz**
+(setup **−4.314 ns**, core hold **−0.101 ns**), versus 33.154300113 MHz
+(−5.162 ns): **+2.89% frequency / 0.848 ns setup improvement**. This still
+fails the ≥40 MHz synthesis target. It is not routed sign-off or a board clock.
+Timing audit SHA-256:
+`7315aa13fcbdbeb44efe69bd2c4143ea8f608140d9459f6a7803a53b16ec5c13`.
+Full standard-suite/physical FPGA acceptance remains required; canonical status
+remains the unwaived **7 PASS / 101 FAIL** above.
+
+### Measured next critical path
+
+All 30 reported worst core paths now start at `eip_reg[0]` and end at FP
+`bank_reg[0][*]/CE`, **100 logic levels**, **29.017 ns** data delay
+(6.071 ns logic, 22.946 ns estimated routing). The actual netlist traverses:
+frontend/U/V decode → `pipe_pair_lookahead` → `mc_prime_v_branch` →
+lookahead address/DTLB/permission checks → `core_mem_next_req` →
+`l1d_c_rdata_hi_valid` → `fp_load64_take` → FP command and bank enables.
+The independent captured-V response path is still **−3.804 ns** to
+`pipe_mem_v_hit_q_reg/D`; fixing just the FP endpoint would not prove 40 MHz.
+Setup report SHA-256:
+`df47cc9db7bb050cc0bce3d0dee0a9256fbd6b96e7c80045c33514d74aa0951e`.
+
+Source inspection identifies a state-disjoint dependency worth qualifying:
+all four `mem_next_req` offers require `mc_boundary_ok`, which requires
+`S_PIPE`; `fp_load64_take` requires `S_FLOAD`. Nevertheless L1 wide-valid
+depends on the late next-request arbitration term. A narrowly scoped early
+FP-load-state cofactor could remove that dependency while preserving the
+ordinary high-valid contract and every owner/ACK/permission check. This is a
+**proposal, not an implemented or timed fix**: require source-extracted proof,
+negative arbitration tests, complete cache/FP/fault comparisons and a measured
+new netlist. Also investigate the late paired-branch decision before lookahead
+address generation. Do not immediately promote the CS proposal below merely
+because it was prepared against the previous critical path.
 
 ## Pending follow-up: new-memory CS-extent cofactor
 
@@ -246,6 +297,25 @@ with real AXI latency 0/7, complete architectural/cycle A/B equality, and actual
 new-request/held-owner evidence at the probe PC. A legal guest result or a U
 trace label alone does not prove fast admission. Existing canonical failures
 remain unwaived; QEMU's known CS-extent gap is not authority for these faults.
+
+The [native fixture driver](run_pipe_mem_cs_fixtures.py) ran only after the
+exact original-clock audit closed: queue invocation
+`1922d37d70de421ab7e09ad931c150a3`, unit
+`ventium-pipe-cs-native-queue-oct12.service`; native invocation
+`e082bf4954fe431983e2791d8bf56032`, unit
+`ventium-pipe-cs-native-oct12.service`. All **96 native cold runs / 24 case-latency
+comparisons** passed in **6.265 seconds**, using the already-built INTENT-READY
+and PAYLOAD-REGION models, real V retirement in the warmup, AXI latency 0/7,
+and complete architectural/cycle A/B equality. Four additional checker tests
+regraded all native runs and rejected wrong fault EIP, lost V execution and a
+corrupt load destination. Closure: `pipe-mem-cs-native-r1/closed.json`, SHA-256
+`facfc8dbf5d6b5c011f76e1e7453c6f3e3db31576b64c81b98f1b907223e0195`.
+Neither model contains the CS-memory cofactor. In this first image layout the
+overrun faults arrive from **S_FETCH (state 1)**, without `SEGCHK-X` observations:
+the earlier frontend check catches them. Therefore these native passes do
+**not** qualify the local S_PIPE request-rejection/held-owner cases. Preserve
+that coverage gap rather than treating the warmup's V events or a U trace
+label as proof that the proposed consumer was exercised.
 
 Candidate gameplay IPC is **unmeasured**. Older verified simulation baseline:
 **0.51030715 total U+V retirement events/cycle**, model `2b4d7a48`, cycles
