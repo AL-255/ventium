@@ -77,7 +77,9 @@ def main():
            ('no-code',[f for f in full if f!='VEN_L1D_CODE_BUFFER']),
            ('primary-only',[f for f in full if f!='VEN_L1D_TWO_WINDOW_REUSE']),
            ('no-chain',windows+['VEN_L1D_CODE_BUFFER']),
-           ('no-chain-no-code',windows),('no-windows',chain)]
+           ('no-chain-no-code',windows),('no-windows',chain),
+           ('no-prime',[f for f in full if f not in ('VEN_PIPE_REG_LOAD_PRIME','VEN_L1D_PRIME_UNDER_FILL')]),
+           ('no-under-fill',[f for f in full if f!='VEN_L1D_PRIME_UNDER_FILL'])]
     mutations={
         'lost-next-owner':('!(c_next_req && rd_match)',"1'b1"),
         'wrong-tags':('assign window_current_hit = |tag_current_hit;',
@@ -98,7 +100,10 @@ def main():
                     assert candidate.count(edit[0])==1;candidate=candidate.replace(*edit)
                 else:
                     before=recipe.replacement(recipe.equation(source,'window_reuse'))
-                    assert before.count(edit[0])==1 and candidate.count(before)==1
+                    # The arbitration text has paired/unpaired preprocessor
+                    # branches. Mutate both spellings; only one is compiled.
+                    assert before.count(edit[0])==(2 if label=='lost-next-owner' else 1)
+                    assert candidate.count(before)==1
                     candidate=candidate.replace(before,before.replace(*edit))
             sv=folder/'candidate.sv';sv.write_text(candidate);pp=[]
             for name,path in (('old',source_path),('new',sv)):
