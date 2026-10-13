@@ -233,6 +233,35 @@ The SMSW repair is still **not in the timing candidate or on the FPGA**. These
 results do not clear the canonical gate, complete the standard suite, establish
 gameplay IPC, or change the failed Doom startup/FPS result.
 
+## Compose the repair with the timing candidate
+
+`compose_prime_reg.py` has prepared `smsw-prime-reg-core-r1` under the same
+evidence root. It verifies all **195 sources** against their compiled inputs,
+all **152 UV-fast definitions**, the three native model identities, and the
+independent parent audits. The SMSW change and register-only branch-flag change
+are disjoint; applying them in either order produces exactly the same bytes.
+Only four files differ from PRIME-CS: the three SMSW files listed above and
+`core_mem_chain.svh`. All other source bytes are unchanged. There are **12,309
+pinned inputs** in `prepared.json`; no existing candidate or live synthesis
+input was edited.
+
+Six composition/drift tests and four build-admission tests pass, including
+rejection of overlap, extra edits, changed job count and inherited acceptance
+claims. The first preparation check stopped before creating the candidate
+because the corner audit uses `audit_passed`, not `passed`. The corrected
+checker explicitly preserves its **85 differential / 20 specification-only**
+classification and failed full fault gate; it does not treat an audit as a
+correctness pass.
+
+`build_combined_core.py` is ready to compile this composition, but has **not
+run**. It retains the source-pinned native builder's command, 32 jobs,
+assertions, private host/header check and 660-second native limit, checks that
+no Vivado is live, and enforces **10 GiB RAM / 2 GiB swap** inside the shared
+build scope. The wrapper admits the exact register-flag parent identity rather
+than silently treating it as PRIME-CS. Successful compilation would still need
+new combined-model differential, boundary, standard-suite and FPGA checks.
+The combined source tree is not a timing result or deployable image.
+
 Current-candidate gameplay IPC is **unmeasured**. The older simulation baseline
 is **0.51030715 total U+V**, build `2b4d7a48`, cycles
 1,200,065,237–1,300,065,237. This predates the candidate and is not Doom or FPGA IPC.
