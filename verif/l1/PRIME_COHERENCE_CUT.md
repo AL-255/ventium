@@ -178,16 +178,84 @@ architectural records) and byte-verified into
 `0081785dd3cc57ba2e146a1f46943bf002e409d46b01596ced308bad7218a678`.
 Restore relative to `/home/yukidama/external/tmp`; inputs/receipts remain.
 
+## Extended regression closure
+
+`prime-coherence-regressions-r1` finished all **12 unchanged groups in
+600.801 seconds**, with exit 0, stable pins and no regression errors. This
+includes six 16-measurement FP-boundary groups; **32 fault measurements** with
+complete UV architectural comparisons; **1,024 integer / 288 memory / 2,560
+branch measurements**; **48 held-request cases**; and the **108-case,
+80,800-record same-input canonical replay**. The latter establishes no new
+parent/candidate differences, **not canonical correctness**: the canonical
+7-PASS/101-FAIL result remains unwaived.
+
+Service `ventium-prime-coherence-regressions-oct13`, invocation
+`21a2f62b70df4c37afd6abbc5aed3048`, is terminal, MainPID 0, native exit 0.
+Closure SHA-256:
+`130214a4d8578b9867873e86126723ce265fc7ed10b3dac5ace86a27508076ba`.
+All full-FP, fault artifacts, replay inputs and cold-SMC evidence were rehashed
+by the PC transfer admission, including after recoverable compaction.
+
+`closed-prime-coherence-regressions.tar.gz` preserves **36,984 files,
+887,187,266 → 82,721,661 bytes**; every archive member was checked before its
+original was removed. SHA-256
+`bb127ec74225f3ddf9412f0dba13b42417043b68cf0e5d74bace85d29e7b379b`.
+Restore under the evidence root. All 128 pinned fault artifacts and every
+PC-transfer input remain unpacked. Separately, the closed PAIR-NOW cache
+miter's generated compiler products were byte-checked and archived, recovering
+**304,944,123 bytes** while retaining both models, sources, headers and depfiles.
+Its recovery receipt is `pair-now-cache-compiler-archive.json`; that independent
+alternative was not incorporated into this candidate.
+
+## PC / hardware source transfer
+
+`prepare_prime_coherence_transfer.py` composes both audited transformations.
+The PC parent is FP-WIDE-CONTEXT, whereas the native-core parent is MC-LOCAL.
+Consequently the transfer must change **three headers**, not just the final two:
+chain local commit, AGI hint commit and reference hint commit. It rechecks the
+complete eight-file contract and each derivative hash; skipped, repeated or
+unreviewed transformations are rejected.
+
+`build_prime_coherence_soc.py` retains all existing FP/fault/replay admission
+and additionally requires the independent cold REP-SMC fresh-decode audit.
+`prime-coherence-soc-r1` compiled in **23.513 seconds**, with **102 common RTL
+sources / 156 unchanged simulator defines**, unchanged posted-16 transport,
+and the audited unique C++ harness/generated header dependency. The **98
+pre-existing PC structural warnings remain unchanged**, not waived as clean
+full-SoC lint. Model SHA-256:
+`64ef07765e1d8829dc89f851f4fab29bb88e6b997f7f4b259b0939bcb8a87f25`.
+PC owner `ventium-prime-coherence-pc-oct13`, invocation
+`958b8f1f15ce46938880c97c47b340f4`, is terminal, exit 0, stable inputs.
+Build closure SHA-256:
+`a70cae8f8b16e37bb4c0dd4dd5543eac9142267096def44bfebb4fba1066dd09`.
+
+`freeze_prime_coherence_rk_candidate.py` exported `prime-coherence-fpga-r1`:
+**190 payloads / 170 source-matched HDL files / 158 hardware defines**, original
+40/100 MHz constraints, no transport/clock/profile change. Manifest SHA-256:
+`e04980eab0ad9131f4434a8804e71f2627b62cb66214b45a5f6f7aed8bb886d2`.
+Strict hardware-profile **CPU-hierarchy lint passed in 3.778 seconds** with
+the original structural error classes enabled. This is not full-SoC lint.
+Lint owner `ventium-prime-coherence-lint-oct13`, invocation
+`23a64876bcf24bb9918390433a16f61f`, is terminal, exit 0, stable inputs.
+Lint closure SHA-256:
+`b650df0346acbbbef7d2c1baa7524bcb20cd62821141b95fed49768dea277077`.
+
+Six host tests check exact transfer, source-drift/missing-first-stage rejection,
+unchanged regression grading, actual cold-SMC admission, and preserved timing
+controller lifecycle/resource guards. Matched synthesis and clock-audit
+controllers have been **prepared, not launched**; they retain the 6 GiB launch
+reserve, 4 GiB stop floor and exclusive Vivado family. They require completed,
+audited short CoreMark results before admitting synthesis.
+
 ## Required next checks
 
-Finish fault/interrupt/replay qualification. Preserve complete
-architectural/cycle traces and all old-equation witnesses.
-The unchanged 12-group extended plan is running as
-`ventium-prime-coherence-regressions-oct13`, invocation
-`21a2f62b70df4c37afd6abbc5aed3048`, output `prime-coherence-regressions-r1`.
-Check its live owner and eventual closure before treating any group as passed;
-do not restart based on an observation timeout. No synthesis is queued.
-Then qualify full-PC behavior before a source-matched synthesis timing test.
+Both short cold CoreMark seeds are running, serially on verified CPU 11, under
+`ventium-v-carry-cm10-prime-coherence-oct13`, invocation
+`72fa563901f7416d9c50a24cda5d068a`. Output is
+`prime-coherence-soc-r1/coremark`; do not restart on an observation timeout.
+These short tests cannot establish a duration-valid CoreMark score or standard
+suite completion. Audit their terminal results, restore sufficient disk reserve,
+then measure the matched synthesized timing. No synthesis is queued.
 Do not claim gain before measurement. The standard suite and physical FPGA
 Win95/Quake acceptance remain required; canonical failures remain unwaived.
 
