@@ -1,7 +1,9 @@
 """Native source-extracted selector miter; bounded, no Verilator/core build.
 
-Run only after the exclusive Vivado family has closed. The eight profiles
-cover all combinations of the three controlling definitions. Negative builds
+The eight profiles cover all combinations of the three controlling definitions.
+This tiny Icarus-only test may run beside a separately capped Vivado family:
+one CPU, 512 MiB/no swap, and >4 GiB available host RAM at admission. It takes
+no global compiler lock and launches no C++ or full-core build. Negative builds
 check wrong sources and a change incorrectly extended to other owner models.
 This is not sequential-core verification or a performance measurement.
 """
@@ -42,7 +44,9 @@ def main():
     assert re.fullmatch(r'ventium-v-load-payload-leaf-[a-z0-9-]+\.service', args.unit)
     assert os.environ['INVOCATION_ID'] == subprocess.check_output([
         'systemctl', '--user', 'show', args.unit, '-pInvocationID', '--value'], text=True).strip()
-    assert subprocess.run(['pgrep', '-x', 'vivado'], stdout=subprocess.DEVNULL).returncode == 1
+    available = next(int(line.split()[1])*1024 for line in Path('/proc/meminfo').read_text().splitlines()
+                     if line.startswith('MemAvailable:'))
+    assert available > 4*1024**3, 'tiny-leaf host RAM admission'
     group = Path('/sys/fs/cgroup')/Path('/proc/self/cgroup').read_text().split('::', 1)[1].strip().lstrip('/')
     assert (group/'memory.max').read_text().strip() == str(512*1024**2)
     assert (group/'memory.swap.max').read_text().strip() == '0'
@@ -59,7 +63,7 @@ def main():
     inputs = [*(parent/p for p in recipe.PARENTS), Path(__file__), Path(recipe.__file__),
               HERE/'test_v_load_payload.py', HERE/'tb_v_load_payload.sv',
               HERE/'v_load_payload_contract.smt2', Path('/usr/bin/z3'),
-              Path('/usr/bin/iverilog'), Path('/usr/bin/vvp')]
+              Path('/usr/bin/iverilog'), Path('/usr/bin/vvp'), Path('/usr/bin/timeout')]
     pins = {str(p): sha(p) for p in inputs}
     out.mkdir()
 
@@ -68,15 +72,19 @@ def main():
             json.dump(value, stream, indent=2)
 
     save('started.json', dict(pins=pins, invocation=os.environ['INVOCATION_ID'], unit=args.unit,
-        parent=str(parent), cpu=18, max_seconds_per_command=20, standard_suite=False,
+        parent=str(parent), cpu=18, max_seconds_per_command=20, host_available_bytes=available,
+        memory_limit_bytes=512*1024**2, swap_limit_bytes=0, standard_suite=False,
         gameplay_ipc=None, timing_mhz=None, sequential_core=False))
     start = time.monotonic()
     rows, error = [], None
 
     def run(label, argv, expected=0, env=None):
-        save(label+'.command.json', list(map(str, argv)))
+        # timeout owns/signals the whole native process group (Icarus can
+        # spawn ivl), not only the immediate wrapper process.
+        command = ['/usr/bin/timeout', '--signal=TERM', '--kill-after=2s', '20s', *map(str, argv)]
+        save(label+'.command.json', command)
         with (out/(label+'.log')).open('x') as stream:
-            result = subprocess.run(argv, stdout=stream, stderr=subprocess.STDOUT, timeout=20, env=env)
+            result = subprocess.run(command, stdout=stream, stderr=subprocess.STDOUT, timeout=25, env=env)
         log = (out/(label+'.log')).read_text()
         assert result.returncode == expected, (label, result.returncode, expected, log[-1500:])
         return log
