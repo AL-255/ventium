@@ -601,12 +601,42 @@ Every member was byte-verified before removing its unpacked copy; restore into
 `ventium-load-read-ack.GyWDDtiI`. Sources, models, receipts and pinned inputs
 remain unpacked. No current verification output was selected.
 
+Closed FP text was independently re-compared before compaction (384 fixtures,
+208,128 candidate architectural records). Archive
+`closed-intent-ready-fp-text.tar.gz` preserves **11,916 files**, **487,372,820 →
+29,590,451 bytes**, SHA-256
+`e835d9472369976a7c71d6f8dea8279c988785384affe7dd64320bf4a4ed73dc`.
+Restore into `/home/yukidama/external/tmp`; every member was byte-verified and
+all current regression input pins remained unchanged.
+
+For additional synthesis headroom, **25 large historical input-inventory JSON
+files** from the closed Oct 11 U-shift, branch-residency and bus-cancel runs
+were losslessly preserved in `closed-oct11-metadata.tar.gz`, **1,286,186,569 →
+163,238,587 bytes**, SHA-256
+`c8c81f26fdcdcfccb920fe683964c7c8abda16d20ddec05b47fdced5f3647475`.
+All six exact synthesis/timing owners were confirmed closed; byte verification
+preceded removal of the unpacked copies, and **5,071 current pins** were
+unchanged. No source, executable, DCP, media, result receipt or timing report
+was removed. Restore into `/home/yukidama/external/tmp` before historical
+re-audits; the explicit member list is `closed-oct11-metadata-plan.json`.
+
+Four verbose fresh timing cone/cell inventories are also recoverable in
+`closed-fresh-pair-cones.tar.gz`, **251,179,264 → 10,757,810 bytes**, SHA-256
+`b79b3d89e2f5a98252298f75a5b6b1fbf6c1b06ec652904774bae84b2552aeb2`.
+Restore into `/home/yukidama/external/tmp` before repeating the full historical
+fresh timing audit. Its critical-path reports, original XDC/project, DCP and
+current dependency pins remain unpacked.
+
 `run_intent_ready_regressions.py` now runs the unchanged 12-phase FP boundary,
 fault, integer/memory/held/branch and same-input replay plan against exact
 models `e1621913` / `6fa8f7ad`. Unit
 `ventium-intent-ready-regressions-oct12`, invocation
 `311a3dc90f574573bf44861d77c1c193`, is **running**, not yet a pass. All gate
 comparisons, native timeouts and the canonical-failure status remain intact.
+The six boundary matrices and all 32 fault measurements have closed
+successfully. At 2026-10-13 00:05 UTC, branch testing is live; replay and
+aggregate closure are still pending. Native scope:
+`2ebad809529c4d86a45ec53d3d18fe5b`.
 
 The source-transfer and measurement procedures are prepared, **not run**:
 
@@ -630,6 +660,12 @@ plans, guard preservation, explicit model/checkpoint identities and rejection
 of source drift or extra payload changes. All four new command-line entry
 points also passed their `--help` checks. These are host checks, not native
 FPGA timing measurements. No new Vivado family was launched in this step.
+
+PC **preparation only** is queued behind the regression lock as
+`ventium-intent-ready-pc-prepare-oct12`, invocation
+`2cedbd56917b4edb9940ed5879ae5d88`; it requires the successful native proof
+receipts before exporting any source. Its output is `intent-ready-soc-r1`.
+No compiler, new FPGA freeze or synthesis has been launched for this candidate.
 
 The canonical gate remains **7 PASS / 101 FAIL**, red and unwaived.
 Required next: achieve
