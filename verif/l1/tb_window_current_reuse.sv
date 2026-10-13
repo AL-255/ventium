@@ -78,7 +78,12 @@ module tb;
     if (!shadow) $fatal(1,"WINDOW-REUSE-COVERAGE shadow");
 `endif
 `ifdef VEN_PIPE_MEM_CHAIN
-    if (!arbitrated || !prime) $fatal(1,"WINDOW-REUSE-COVERAGE arbitration");
+    if (!arbitrated) $fatal(1,"WINDOW-REUSE-COVERAGE arbitration");
+`ifdef VEN_PIPE_REG_LOAD_PRIME
+    if (!prime) $fatal(1,"WINDOW-REUSE-COVERAGE prime");
+`else
+    if (prime) $fatal(1,"WINDOW-REUSE-COVERAGE disabled prime used");
+`endif
 `endif
     $display("WINDOW-REUSE-OK checks=%0d primary=%0d shadow=%0d arbitrated=%0d prime=%0d",
              checks,primary,shadow,arbitrated,prime);
