@@ -343,3 +343,52 @@ unresolved; no green gate or FPGA pass is claimed.
 Latest verified gameplay baseline is **0.51030715 total U+V simulated
 retirement-event IPC**, older `2b4d7a4`, cycles
 **1,200,065,237–1,300,065,237**. The current timing candidate is unmeasured.
+
+## Closed-trace GPR propagation audit — October 12
+
+The 70 reported GPR differences above now have an independent, read-only
+dataflow check, separate from the native-host agreement check.
+[`audit_preexit_gpr_flow.py`](../../fp_shared/tb/audit_preexit_gpr_flow.py)
+reads the **unchanged** closed `f74dd76b` traces and their reported differences.
+On both QEMU and RTL separately, it verifies complete 32-bit equations:
+
+- FNSTSW AX copies the **prior** status into AX and preserves EAX's upper half.
+- MOVZX ECX,AX zero-extends the prior AX into the whole ECX register.
+- The admitted intervening opcodes do not write that GPR, and its complete
+  value remains unchanged. An unchanged XOR alone is not accepted as proof.
+
+All **70 fields pass**: **6 FNSTSW AX copies, 5 MOVZX copies, 59 preserved
+values**. Every reported native field still equals the entire RTL field, and
+all 40 input pins were rehashed before and after analysis. The tool rejects
+unreported/unexplained differences, unsupported preserving opcodes, missing
+records, and full-register corruption even when both traces retain the same
+disputed-bit XOR. **Five host tests pass**, including such negative controls
+and deliberately changed *post*-FNSTSW status, which must not be confused with
+the instruction's input status.
+
+Primary source checked visually: Intel **241430-004**, Volume 3, Table 6-4
+(printed p. 6-12; PDF p. 151), FST/FSTP (25-138; PDF p. 755), and FSTSW/FNSTSW
+(25-143/144; PDF pp. 760/761). The latter explicitly stores the prior ESC's
+status but lists its own subsequent condition codes as undefined. Likewise,
+FSQRT and FST/FSTP do not define C0/C2/C3. Native agreement on such bits is
+therefore not a P54 guarantee. The local source is
+`ventium-refs/01-intel-canonical/241430-004_Pentium_Processor_Family_Developers_Manual_Volume_3_Jul95.pdf`,
+SHA-256 `63c27628292de539eb6ea9089404fe7b5d1fca9d292021a4493dce044e9aa988`.
+
+Evidence: external tmp `ventium-p54-status-origin.MVDMtGws/gpr-flow.json`,
+SHA-256 `13461b8786ba977c55ee508c556b3ac08d6cbad8419899035175817bf8f04005`.
+Unit `ventium-preexit-gpr-flow-oct12`, invocation
+`691aad402947419e9d5d80f69e44e2b0`, closed native 0 at **00:30:55 UTC**,
+peak memory **16,498,688 bytes**, under a 384 MiB/no-swap limit and CPU12
+`taskset`. No guest, simulator or QEMU run was launched; this lightweight
+analysis ran alongside the existing sole Vivado synthesis family.
+
+This establishes that those reported integer discrepancies are copied x87
+status discrepancies, **not independent GPR-copy defects**. It does not establish
+which underlying C1 value is architecturally correct, qualify undefined bits,
+or replace the remaining **91 FSW-field** checks. No RTL, golden, mask, fixture,
+cycle band or active synthesis input changed. The canonical gate remains red,
+and the current candidate still needs full standard-suite and physical FPGA
+acceptance. Current candidate gameplay IPC remains **unmeasured**; older
+simulation baseline **0.51030715 U+V IPC**, `2b4d7a48`, cycles
+**1,200,065,237–1,300,065,237**, predates it.
