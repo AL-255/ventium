@@ -1,7 +1,7 @@
 # Memory SMSW: Doom startup regression
 
-Status: **isolated repair compiled; 173 full-trace differential cases pass**
-(88 initial + 60 privilege + 25 paging). Twenty additional LOCK/segment cases
+Status: **isolated repair compiled; 248 full-trace differential case executions pass**
+(88 initial + 60 privilege + 25 paging + 75 retry/latency cases). Twenty additional LOCK/segment cases
 pass their Intel-spec RTL self-checks but **diverge from QEMU**; these are not
 differential passes. Unpromoted; remaining corners and standard-suite
 qualification remain open.
@@ -175,13 +175,63 @@ was started for this qualification.
 ## Required next gates
 
 - #SS and real/V86 64 KiB extent failures, CPL3 user/supervisor paging and #AC,
-  fault retry, priority combinations, reset/event/debug boundaries and broader
+  retry outside the covered CPL0 page-fault cases, priority combinations,
+  reset/event/debug boundaries and broader
   store-delay/backpressure coverage. Existing tests do not close these cases.
 - Wider register/destination/prefix coverage; independently qualified full
   UV-fast execution and performance, not short-test aggregate counters.
 - Update opcode coverage on promotion, keep differential gates green, and run
   the standard suite before declaring completion. Then rerun unmodified Doom
   on a newly qualified FPGA image and obtain an actual completed timedemo.
+
+## Precise page-fault retry — October 13, 10:57 UTC
+
+`prepare_retry.py` preserves the original fault handler's complete state and
+no-partial-write checks, then adds ordinary guest page-table repair, two INVLPGs
+and IRET to the **same faulting instruction**. The post-retry path verifies the
+two-byte footprint/canaries, every GPR, defined flags, stack pointer and exactly
+one handler entry. Writable controls require zero handler entries. No debugger
+state writes, special RTL support or application patches are involved.
+
+`run_retry.py` uses the unchanged full QEMU comparator and prebuilt isolated
+SMSW model. Its 25 cold fixtures cover first/second pages absent or read-only,
+writable controls, both address/operand sizes, and ordinary MOV controls.
+They run separately at **0, 7 and 31 cycles** of AXI read/write response delay.
+All **75 executions / 11,685 records** compare completely. The independent
+`audit_retry.py` verifies actual fault vector/error/PC, the two visits to each
+retried instruction, preserved completion state, instruction encodings, native
+affinity/closure and all artifact/input hashes: **60 fault/retry paths and 15
+no-fault controls**. This closes only the stated CPL0 paging retry coverage.
+
+Negative tests in `run_retry_mutants.py` reject all **85 variants**: 25 missing
+stores, 20 missing IRETs, and 20 dirty-byte initializations on each side of the
+page boundary. Every variant reaches failure marker 0x43 with its expected
+zero/one fault; the two page-byte checks and the requirement to return/retry are
+therefore exercised. Four source/driver contract tests also pass. A first
+mutant launcher failed before running any guest due to a Python local-name
+collision; its failed service is retained, and the corrected run uses a new
+output and controller identity.
+
+Evidence under the existing external root:
+
+| Run | Controller invocation | Terminal status |
+| --- | --- | --- |
+| `smsw-retry-l0-r1` | `413f10c1c94b43c79ddd8781208b1056` | 0 |
+| `smsw-retry-l7-r1` | `7b55c1be32904dc596168bcb86d90d1b` | 0 |
+| `smsw-retry-l31-r1` | `fbdc2c2c2f514e4cba11436392ca34a4` | 0 |
+| `smsw-retry-mutants-r2` | `7cba8808a21a486083e33e7629528c83` | 0 |
+
+Each matrix/mutant job uses a separate **1 GiB RAM / zero-swap** service, four concurrent
+cases with observed two-CPU affinity per child, and a 600-second watchdog.
+The seven-cycle matrix takes 3.77 seconds; the mutants take 2.96 seconds.
+They ran beside the sole controlled Vivado build, without a second synthesis
+or generated-RTL build. All of these test workers have exited.
+Audit: `smsw-retry-audit-r1.json`, SHA-256
+`a255b4306164502c097503620f7f6e5be3958e9120e4726b566759ae47d94844`.
+
+The SMSW repair is still **not in the timing candidate or on the FPGA**. These
+results do not clear the canonical gate, complete the standard suite, establish
+gameplay IPC, or change the failed Doom startup/FPS result.
 
 Current-candidate gameplay IPC is **unmeasured**. The older simulation baseline
 is **0.51030715 total U+V**, build `2b4d7a48`, cycles
