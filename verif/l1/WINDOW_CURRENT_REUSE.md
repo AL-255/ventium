@@ -244,8 +244,49 @@ The unchanged controller was then relaunched under
 `f124e2fdd07344ce99447cbef6fdbee3`; actual native launch is **22:10:13 UTC**.
 The single Vivado family is owned by scope invocation
 `91a5533979b845b9919014b7b42f193c`, with the verified 8 GiB RAM / 6 GiB swap
-caps and 4 GiB live disk floor. **No new frequency result yet.** This
-controller cannot start implementation, routing or board programming.
+caps and 4 GiB live disk floor. That native attempt **timed out at 22:55:16 UTC**,
+exit **124**, after **2,703.29 s**. It was still in cross-boundary/area
+optimization. The controller is terminal with MainPID 0 / exit 1; no DCP or
+frequency result was produced. All input pins are unchanged, and there was
+no OOM, resource-stop event or controller exception.
+
+The launch had accidentally confined the controller and all inherited native
+workers to **CPU17 alone**. Actual thread-affinity checks found two synthesis
+workers competing on that CPU. The two successful parent synthesis units had
+no such single-CPU pin. This is a launch error that serialized worker execution,
+not evidence that the RTL alone caused the longer wall time. At 22:53:05 UTC,
+the same owned family was widened to CPUs16–19, with PID/start-time checks;
+`affinity-correction.json` records all 18 processes / 28 threads. This was too
+late to finish before the unchanged 45-minute deadline. No timeout, memory,
+feature, timing constraint or RTL change was made to rescue R1.
+
+After terminal closure, only the failed generated project and two unused PCH
+caches from a closed full-PC build were recoverably archived. The **885 files**
+were read back and SHA-256 verified before unlinking, freeing **579,813,235
+bytes net (0.54 GiB)**. Top-level native logs, watchers, controllers and failure
+receipts remain; generated child logs are in the archive. Successful DCPs,
+source freezes, live guest binaries and media were not removed. The archive
+is `failed-window-project-and-unused-pch.tar.gz`, SHA-256
+`cbeb0a8726817e3234d8789f446e1d4d10c539d0df856da5067341e72c78a51e`.
+`failed-window-archive-{plan,verified,closed}.json` retain the exact paths and
+checks. Restore members relative to the canonical external scratch root.
+
+[`prepare_window_current_retry.py`](../../fpga/prepare_window_current_retry.py)
+creates fresh R2 owners/directories from the five hash-checked R1 controllers
+and timing Tcl. Reversing only path/unit-name substitutions recovers the
+original bytes. The frozen source manifest, full-PC model, 158 definitions,
+40/100 MHz constraints, admission reserves, resource limits and deadlines are
+unchanged. R1's failure is retained, not overwritten.
+
+R2 launched at **23:01:58 UTC** under
+`ventium-window-current-synth-oct13-r2.service`, invocation
+`182429bc7bb441db8454bda28a98c02d`; its single native family has scope invocation
+`f3c48b23ecc0409a8fbfc649f8c3c30e`. At 23:05:30 UTC, all 19 live native-family
+threads were read back with actual affinity **CPUs16–19**. The verified caps
+remain 8 GiB RAM / 6 GiB swap / 48 tasks. **R2 is running; no new frequency
+result yet.** The separate [V-load payload leaf](../issue_uv/V_LOAD_PAYLOAD.md)
+is not in these synthesis inputs. These controllers cannot start
+implementation, routing or board programming.
 
 ## Still required
 
