@@ -1,7 +1,7 @@
 # Local successor commit timing proposal
 
 Private derivative of FP-WIDE-CONTEXT, **not production RTL or FPGA
-acceptance**. No whole-core/timing/gameplay result yet.
+acceptance**. Complete-core A/B passed; timing/gameplay remain unmeasured.
 
 ## Measured reason
 
@@ -59,6 +59,46 @@ RTL**: its guard-count assertion omitted the no-fastload branch's explicit
 zero assignment. The source audit now checks all three assignments. That
 failure remains in the journal and is not a passing test.
 
+## Closed full-core comparison (Oct 13)
+
+`build_mc_local_core.py` preserved the complete **195-file** parent source
+closure and all **152 UV-fast defines**, changing only `core_mem_chain.svh`.
+The 32-job guarded build completed in **20.268 seconds**, with assertions,
+the private C++ harness and its matching generated-header dependency checked.
+Model SHA-256: `2c54f961e87147003dd75909a361f1f9213f6453bbe6f1bce8ed512cb3fa94e4`.
+Service `ventium-mc-local-core-oct13`, invocation
+`53723416bc344cd69d4a5162cfad7890`, is terminal with exit 0.
+
+`run_mc_local_core.py` retained the parent's complete eight-corpus plan and
+coverage requirements. `mc-local-corpora-r1` passed in **298.539 seconds**:
+load/store, held requests, branches, integer, FP, AGI, reference priming and
+AGI/store interactions. All **4,240 probes / 21,190,336 clocks** matched the
+parent's architectural and cycle results. Coverage: **18,172 AGI / 24,352
+reference / 282,808 prime events; 5,616 paired-store intents / 3,072 requests /
+1,872 accepts / 1,536 shape-only cases**. Retained-lookahead events remain zero
+in this RAW profile; this is not a test of the disabled retained-owner mode.
+The unchanged directed QEMU comparisons remained enabled in their corpora.
+
+Service `ventium-mc-local-corpora-oct13`, invocation
+`d3189700ec0143f8b136efc38ab7d1c2`, is terminal with exit 0 and stable input pins.
+Build closure SHA-256:
+`79f2b2d03ce55e3466073c1e3fb01f674671cadf8e4856bbf7cb5388f28eeb88`.
+Corpus closure SHA-256:
+`368c50a83e6b31bf1bbcc09348ba452e5e42d1d7094d8ce11309692b23dbc504`.
+Two host tests additionally check preservation of build guards and the entire
+corpus plan/coverage assertions. These passes do **not** repair or waive the
+parent's canonical **7 PASS / 101 FAIL** result; the new model's canonical
+gate and full FP/fault/replay qualification have not yet run.
+
+Closed trace/stdout/stderr files were losslessly compacted after native jobs
+exited: **38,352 files, 969,145,428 bytes → 87,622,365 bytes**, reclaiming
+881,523,063 logical bytes. Every archived member was byte-hash verified before
+removing its loose copy; sources, models and receipts remain. Restore with
+`tar -xzf closed-mc-local-corpora.tar.gz -C <evidence-root>` when inspecting
+the full traces. Archive SHA-256:
+`a67ce78ae9e8fcf096970b3e7613c7b0a80645c48d5530848952bf3867de53f5`.
+The archive plan, verification and closure receipts are in the evidence root.
+
 ## Important remaining work
 
 This cut alone **cannot establish 40 MHz**. The same public hint-commit path
@@ -70,7 +110,11 @@ owner/fault/REP invariants. The existing RAW `PAIR-INTENT` assertion checks
 tests is not by itself sufficient authority to delete all coherence guards.
 Keep external snoops and prior-cycle poison authoritative.
 
-Next: native complete-core equivalence and directed simultaneous-event tests,
+The separate [prime coherence proposal](PRIME_COHERENCE_CUT.md) now addresses
+that public hint feedback using the integrated no-memory ownership contract.
+It is leaf-qualified only; it has not been combined into a full-core model.
+
+Next: canonical/full FP/fault/replay checks, broader simultaneous-event tests,
 then source-matched full-PC regression and synthesis. Do not merge a private
 proposal or claim acceptance from this leaf result. Canonical failures,
 standard suite and physical FPGA Win95/Quake acceptance remain unresolved.
