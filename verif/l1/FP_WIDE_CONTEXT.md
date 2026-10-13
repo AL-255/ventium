@@ -184,11 +184,24 @@ Original 40/100 MHz constraints and matched `logic_only` mapper are retained;
 requires over 6 GiB free and twice the measured parent disk growth above the
 4 GiB floor; neither check was lowered.
 
+Synthesis **closed successfully at 04:10:15 UTC**, **2,010.847 seconds**,
+native exit 0, no OOM/resource stop. The independent audit rechecked **6,143
+source pins**, all 158 defines, actual source reads and matched mapper/clocks.
+Utilization is **185,209 LUTs / 54,947 registers / 277.5 BRAM36 equivalents /
+47 DSPs** (parent 185,275 / 54,951 / 277.5 / 47). This is not a major area gain.
+The single critical warning is the generated PS8 XDC `create_clock` targeting
+an unknown port/pin; the separate timing audit must verify actual core clocks.
+Checkpoint SHA-256:
+`7e479811aac60c6c900c62f2d519fc36c010c25844a2cb130a259acdcb97c86e`.
+Synthesis audit:
+`7c211fc435086d0ea7264e5ef2450fd5a09684eedac874428c77fcc0afa24e9c`.
+
 The dependent `ventium-fp-wide-context-report-queue-oct13.service`, invocation
-`8e11e7a15b8f4a5e8c1aef73b90772b3`, observes that exact synthesis owner. Only
-after successful native closure/audit does it launch the separate matched
-clock-report service. It cannot retry synthesis, route or deploy. Inspect these
-same handles on continuation; an observation timeout is not a restart signal.
+`8e11e7a15b8f4a5e8c1aef73b90772b3`, admitted that exact closed synthesis and
+launched `ventium-fp-wide-context-clock-oct13.service` at **04:10:20 UTC**,
+invocation `5b6c59f45c4641c5b82890cf01374d6c`. This is a separate matched
+clock-report job, not another synthesis. The queue cannot retry, route or
+deploy. Inspect the same handles; observation timeout is not a restart signal.
 **No candidate Fmax is yet measured.**
 
 Disk recovery retained sources, binaries, media, current pins, receipts and
