@@ -210,23 +210,50 @@ invocation `8946c03c6cc44d1ebf2300e7abcaa882`, is terminal. This is CPU lint,
 **not full-SoC lint, synthesis or board qualification**.
 
 `prepare_prime_cs_synthesis.py` also retains the tested controller/watchdog
-lifecycle, 8 GiB RAM/6 GiB swap bounds, 6 GiB starting disk reserve and original
+lifecycle, 8 GiB RAM/6 GiB swap bounds, conservative disk admission and original
 40/100 MHz clocks. Its five controllers/auditors are source-tested and
-materialized, **not launched**. The matched control is the actual closed
+materialized. The matched control is the actual closed
 32.955444239 MHz parent DCP, not a changed clock constraint.
 
 ## Required qualification still open
 
-Both unchanged 10-iteration CoreMark seeds are running sequentially in
+Both unchanged 10-iteration CoreMark seeds **closed PASS** sequentially in
 `ventium-v-carry-cm10-prime-cs-oct13.service`, invocation
 `0bd322d7056f460cbe9050258dd428e6`, explicitly on CPU 11, with a 2 GiB/no-swap
-limit. Inspect closure and run the independent auditor before accepting them.
-These are short correctness/cycle controls, not duration-valid scores or the
-standard suite. The new synthesis has not started; besides those controls,
-its disk reserve must be restored before launch. Latest observed free space
-after PC export was 5,256,962,048 bytes, below the preserved 6 GiB admission.
+limit. The independent auditor passes with unchanged input pins, native exit 0,
+both children reaped and no OOM. Performance/validation take **4,767,218 /
+4,753,406 guest clocks**, respectively, with all original CRCs and actual V
+retirement; both exactly match the parent. Wall times are 209.873 / 207.332 s.
+Closure SHA-256: `cf2976e78d6295474e57c57fcdb3e5a73c5b9f90434600e4d4e86103063e69d0`;
+independent audit: `7247adcb390da1acc2a85cbaab80e8c3c94ed4df51a9df5f00e9616246cc548f`.
+These are short correctness/cycle controls, **not duration-valid scores or the
+standard suite**.
 
-Then measure the new matched synthesis. Full
+Synthesis launched **2026-10-13 07:41 UTC**, service
+`ventium-prime-cs-synth-oct13.service`, controller invocation
+`25ad8b6f9a0344549354bc522f4c3fe7`; native Vivado scope
+`fc70b8a4db434463a855ffd545644f37`. It is **running, not a timing result**.
+The single-family, memory, swap, disk and 45-minute native watchdogs remain.
+Admission requires both >6 GiB free and twice the measured parent growth above
+the 4 GiB stop floor: the effective starting requirement was **7,208,493,056
+bytes**, not just 6 GiB. No reserve was weakened.
+
+Additional closed traces/fixture and compiler products were archived losslessly
+to restore that reserve. Every member was hashed before originals were removed;
+current input pins, executable models, sources and receipts remain unchanged.
+Two latest archives, restored relative to `external/tmp`, are:
+
+- `pre-cs-closed-corpora.tar.gz`: 82,220 files, 473,776,648 logical bytes
+  (709,066,752 allocated) to 44,907,999 bytes; SHA-256
+  `322fc702ed2309b2454d50034bddf36e09ce013b08b26c249993d451256946c4`.
+- `pre-cs-closed-compilers.tar.gz`: 1,434 files from six closed models,
+  297,274,368 to 38,592,581 bytes; SHA-256
+  `ba23622a860754ef7f5102353554adf63abab6cf15dfc5ee2c2421f5a1af8d9f`.
+
+The adjacent `*-plan.json`, `*-verified.json` and `*-closed.json` record exact
+members and recovery paths. Old raw-output audits require restoring them first.
+
+Finish and audit the new matched synthesis before reporting its Fmax. Full
 duration-valid performance, the complete standard suite, and physical FPGA
 Win95 desktop/UI plus original FreeDOS Quake timedemo remain required.
 
