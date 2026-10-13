@@ -112,8 +112,11 @@ These additional corners are **not yet established by a failing native RTL
 test**. The current instruction probe's FRNDINT cases are small magnitudes.
 Do not claim them repaired or use the C1-only witness to qualify them.
 
-No FRNDINT RTL repair is included in this commit. It is the next concrete
-processor defect to fix; the now more accurate private reference exposes it.
+No FRNDINT RTL repair was included in the reference-stage commit. The subsequent
+[isolated RTL repair](../../sys/frndint/README.md) now passes 28,612 directed
+FRNDINT cases, a 412-case cold full-core program, and all 108 private-reference
+functional programs. Its new denormal test also finds another defined-exception
+gap in this private QEMU; canonical promotion and full acceptance remain open.
 
 ## Evidence, resources and reproduction
 
