@@ -70,8 +70,30 @@ It has not replaced canonical QEMU; these passes do not waive canonical failures
 
 The unchanged 108-program functional worker also closes **108/108 PASS** against
 the separately qualified private user-QEMU oracle, in **122.75 s**. Original
-manifest masks are unchanged. The new canonical `make verify` run is still
-pending; do not infer a canonical pass from this private-reference result.
+manifest masks are unchanged. Independent complete-record comparison confirms
+**80,800 records**, with 105 programs also passing unmasked. The three original
+unmasked failures remain `tx_regform`, `tx_regform2` and `tx_stack`.
+
+Canonical `make verify` closes **FAIL**, native make exit 2, in **390.96 s**:
+**7 functional PASS / 101 FAIL**, plus cycle-band failures. All 20 complete
+single-fill cycle traces are identical to the parent. No native result,
+comparator mask, golden or cycle band was changed or waived.
+
+The functional corpus has **30,132 V retirements**, not the parent's 30,134.
+Only `tx_fenv` (4→3) and `tx_fsave` (3→2) differ. Actual elapsed model clocks
+are unchanged for `tx_fenv` (200,760), and decrease for `tx_fsave`
+(201,526→201,320). These counts include the same 200,000-clock exit-quiescence
+tail and are not gameplay or scoring measurements. In `tx_fsave`, backing ACKs
+also decrease from 104 to 80 and hit captures from 58 to 23, consistent with
+removing unintended destination reads; this is not a quantified gameplay gain.
+The initial independent auditor incorrectly expected the old total V count;
+it rejected the run until these exact per-program deltas were checked and
+recorded. No fixture or trace changed to match that assumption.
+
+`audit_write_regressions.py` now independently rechecks **16,685 input pins**,
+all 108 full functional comparisons, both native owners, the exact two V-count
+deltas and all 20 cycle traces. Its successful evidence audit explicitly retains
+`canonical_gate_passed=false` and is not standard-suite or FPGA acceptance.
 
 All failed observations remain distinct:
 
@@ -102,6 +124,8 @@ Native build: **20.32 s**, 32 jobs inside the guarded scope, after Vivado closed
 | `env-write-fault-r3/closed.json` | `0af94b120a1567f5ff6ade7cceab7079794bc6f9d6e1b410e098f94a4c19e546` |
 | `env-write-audit.json` | `f0830198c4aa7f5b94397a733b225514e1138b1ecb8f319fecbf9b4ae1e52d3e` |
 | `env-write-func-r1/closed.json` | `fe1631a388c6fe5e308ef86ad718bd7cb5086ed26265b30530a27889e0334aa5` |
+| `env-write-core-r1/verify-closed.json` | `d09f13d4e1be9c9bd10d9724a083312ff0faaaf9a1c5964e957006a253db0b13` |
+| `env-write-regression-audit.json` | `7c0260686efe84373d0c7b15e585f123c6d1b8056074a91b0421df2f7fa10bf1` |
 
 Use external `TMPDIR` and `PYTHONDONTWRITEBYTECODE=1` throughout:
 

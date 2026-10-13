@@ -62,7 +62,9 @@ def main():
         t=tracefmt.read_trace(str(p));name=re.search(r'elf=(\w+)\.func\.elf ',t.hdr['note'])[1]
         assert name not in goldens;goldens[name]=p
     assert len(goldens)==108
-    records=paired=0;unmasked_failures=[]
+    prior_audit=load(root/'audit.json');assert prior_audit['audit_passed']
+    pins[str(root/'audit.json')]=sha(root/'audit.json')
+    records=paired=parent_paired=0;unmasked_failures=[];pair_deltas=[]
     for job,row in zip(fs['jobs'],fc['rows']):
         name=job[1];assert row['name']==name and row['passed'] and row['actual_wait']
         assert row['error'] is None and row['native_worker_exit']==0 and row['affinity_verified']
@@ -86,8 +88,19 @@ def main():
         if not equivalent(gold,rtl):unmasked_failures.append(name)
         log=(func/'work'/(name+'.func_rtl.log')).read_text()
         assert '--l1-axi selected' in log
-        paired+=int(re.search(r'pairedV=(\d+)',log)[1])
-    assert records==80800 and paired==30134
+        v=int(re.search(r'pairedV=(\d+)',log)[1]);paired+=v
+        old_log=root/'func-r1/work'/(name+'.func_rtl.log')
+        assert sha(old_log)==prior_audit['artifacts'][str(old_log)]
+        pins[str(old_log)]=sha(old_log)
+        before=old_log.read_text();old_v=int(re.search(r'pairedV=(\d+)',before)[1]);parent_paired+=old_v
+        if old_v!=v:
+            pair_deltas.append(dict(name=name,parent_v=old_v,candidate_v=v,
+                parent_clocks=int(re.search(r'^  clocks\s+(\d+)',before,re.M)[1]),
+                candidate_clocks=int(re.search(r'^  clocks\s+(\d+)',log,re.M)[1])))
+    assert records==80800 and paired==30132 and parent_paired==30134
+    assert sorted(pair_deltas,key=lambda r:r['name'])==[
+        dict(name='tx_fenv',parent_v=4,candidate_v=3,parent_clocks=200760,candidate_clocks=200760),
+        dict(name='tx_fsave',parent_v=3,candidate_v=2,parent_clocks=201526,candidate_clocks=201320)]
     assert set(unmasked_failures)=={'tx_regform','tx_regform2','tx_stack'}
     old=sorted((parent/'generic-work').glob('*.cycle_rtl.vtrace'))
     new=sorted((core/'generic-work').glob('*.cycle_rtl.vtrace'))
@@ -103,7 +116,8 @@ def main():
         artifacts[str(p)]=sha(p)
     result=dict(audit_passed=True,owners=owners,pins_checked=len(pins),artifacts=artifacts,
         functional_passes=108,unmasked_functional_passes=105,unmasked_failures=unmasked_failures,
-        functional_records=records,v_retirements=paired,cycle_traces_unchanged=20,
+        functional_records=records,v_retirements=paired,parent_v_retirements=parent_paired,
+        pair_deltas=pair_deltas,cycle_traces_unchanged=20,
         canonical_functional_passes=verdicts.count('PASS'),canonical_functional_failures=verdicts.count('FAIL'),
         canonical_gate_passed=vc['canonical_gate_passed'],canonical_gate_native_exit=vc['canonical_gate_native_exit'],
         standard_suite=False,physical_board=False,gameplay_ipc=None)
