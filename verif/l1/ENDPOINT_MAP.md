@@ -1,8 +1,10 @@
 # Parallel endpoint-map decode — October 13
 
-Status: **implemented in an isolated full-core candidate and regression-checked;
-no timing, full-PC, standard-suite or FPGA acceptance yet**. The canonical gate
-remains red. This does not meet the 40 MHz requirement by itself.
+Status: **implemented in an isolated full-core candidate, regression-checked,
+transferred into the full-PC model and frozen for FPGA synthesis**. Both short
+CoreMark seeds and strict hardware-profile CPU lint pass. There is **no timing,
+standard-suite or physical-FPGA acceptance yet**; the canonical gate remains
+red. This does not meet the 40 MHz requirement by itself.
 
 ## Change
 
@@ -65,6 +67,53 @@ fault service supplied 16 CPUs where the existing driver requires eight and
 exited before creating its output. Corrected launches did not alter a guard or
 fixture. Neither refusal is counted as a DUT result.
 
+## Full-PC and FPGA source transfer
+
+`fpga/build_endpoint_map_soc.py` copies the closed PRIME-REG PC source set and
+applies exactly the three hash-gated SMSW transformations plus the endpoint-map
+transformation. All **102 shared core sources** match the directed-tested core.
+It retains 156 simulation definitions, UV-fast mode, full P5 caches and the
+posted-16 board transport. The private harness is compiled against its own new
+generated header. Native compilation closed in **24.33 s**, with the existing
+32-job build scope reduced to 10/2 GiB RAM/swap before compilation.
+
+The unchanged PC builder finds the same **98 platform structural warnings** as
+its parent; this is not clean full-SoC lint. Separately, the frozen CPU hierarchy
+passes all six hard structural-warning classes with the exact **158 hardware
+definitions**, native exit 0 in **3.88 s**. The freeze checks all **170 common
+native HDL inputs**, retains the same 190 payloads and 117-unit/49-include source
+closure, and passes the unchanged Tcl source contract at **40/100 MHz**.
+
+Both unchanged ten-iteration CoreMark seed disks cold-booted in the new PC model:
+
+| Seed | Reference CRCs | Candidate and PRIME-REG parent ticks | Native runtime |
+| --- | --- | ---: | ---: |
+| Performance | e9f5 / e714 / 1fd7 / 8e3a / fcaf | 4,767,218 | 211.49 s |
+| Validation | 18f2 / e3c1 / 0747 / 8d84 / c64e | 4,753,406 | 210.45 s |
+
+Both native processes exited 0 and were reaped; the retained owner reports no
+OOM, with 59,809,792 bytes peak memory. V retirement is nonzero in both runs.
+These short checks show **0% fixed-clock throughput change** on those fixtures,
+not a duration-valid CM/MHz score, gameplay IPC or a completed standard suite.
+No save-state, media patch, mode fallback or reference relaxation was used.
+
+`fpga/audit_endpoint_map_transfer.py` independently rechecks the source/freeze,
+lint, native identities, short-seed audit and all three terminal invocations.
+Five host transfer/controller tests pass, including wrong-source/fifth-file
+rejection and unchanged synthesis resource lifecycle. An initial host test
+compared a changed explanatory docstring as executable structure; that test
+was corrected to exclude docstrings, without changing the freeze guard.
+
+`fpga/prepare_endpoint_map_synthesis.py` has generated, **not launched**, the
+synthesis and read-only clock-audit controllers. The mapper, definitions,
+clocks, exclusive Vivado launcher, timeouts, memory limits, disk admission and
+stop/reap logic are retained from PRIME-REG. Admission checks this candidate's
+own map/directed/replay evidence and short seeds; it does not pretend the
+parent's separate FP/branch corpus was rerun. Any timing delta will include
+both SMSW and endpoint-map changes. At closure, scratch had about **5.6 GiB**
+free, below the unchanged synthesis admission requirement; no Vivado was
+launched and no limit was weakened.
+
 ## Identity and evidence
 
 Root: `/home/yukidama/external/tmp/ventium-load-read-ack.GyWDDtiI`.
@@ -77,6 +126,12 @@ Root: `/home/yukidama/external/tmp/ventium-load-read-ack.GyWDDtiI`.
   `42bd14c86eff5e33d98753cd07d34bf1340e804989daec237e42fd499565cfa5`.
 - `endpoint-map-audit-r1.json`:
   `0165e78d169a5a582fc1878ee0b97b414b40900000f2ab32b3e7e5adff70f5b5`.
+- Full-PC binary, `endpoint-map-soc-r1/obj1-speed-q16-parentpolicy/ao486sim_board_posted`:
+  `d8f72e2ca622b46c1ee8b0ec92197d4a6b9cd682411ed91c09ecb5488e7c052c`.
+- Frozen `endpoint-map-fpga-r1/input-manifest.json`:
+  `c45c29a6b2ae32fdd34defe85a6922e8560b2ccb9054b5d1563ae773a9040bd1`.
+- `endpoint-map-transfer-audit-r1.json`:
+  `f5e418d6cc37fcf58208440fe7dee892292d4a5110eef32db1bbf5359afb34a7`.
 - Leaf, route, SMSW, privilege, fault and replay evidence uses the corresponding
   `endpoint-map-*-r1` directories. The core contains `build-closed.json`,
   `verify-closed.json`, `generic.log`, complete traces and original commands.
@@ -87,12 +142,20 @@ logs and every pinned artifact remain expanded. Recovery commands and member
 hashes are in `endpoint-map-leaf-r1/compiler-archive.json`. The route driver
 similarly retains per-build recoverable compiler archives.
 
+The two closed endpoint/SMSW-composition core builds also had **450 generated
+compiler intermediates**, 464,742,033 bytes, compressed to 73,594,701 bytes in
+`closed-endpoint-model-products.tar.gz`, SHA-256
+`4fbe78a9ea10b07e813dcfcc2670ab3bca0b01f882123afe13affdaadae29d77`.
+Every member was byte-verified before unlinking its expanded copy. Binaries,
+headers, sources, traces, receipts and every current input pin remain expanded.
+The adjacent plan/verified/closed JSON receipts contain member hashes and the
+recovery command, restoring under `/home/yukidama/external/tmp`.
+
 ## Next required work
 
-Transfer the exact four-file delta from the SMSW-free PRIME-REG PC/FPGA source
-set (three SMSW files plus this seam) into a source-matched PC build and freeze.
-Then measure whole-design timing/area under unchanged 40/100 MHz constraints
-and resource guards. **No gain is attributed to this change until measured.**
+Recover sufficient safe scratch headroom, then measure the frozen four-file
+candidate's whole-design timing/area under unchanged 40/100 MHz constraints
+and resource guards. **No timing gain is attributed until measured.**
 Continue resolving the canonical reference/RTL failures without weakening the
 gate; complete the standard suite and physical UV-fast Win95/Quake validation.
 The installed old Doom image still faults on SMSW; new Doom gameplay/FPS needs
