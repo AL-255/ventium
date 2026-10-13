@@ -1,9 +1,10 @@
 # Data-segment size without fetch-decode feedback
 
-October 13, 2026. **Private candidate; synthesis running, not deployed.**
-The parent has an independently audited **35.856430851 MHz unplaced estimate**,
-still below the required 40 MHz. No frequency or gameplay gain is claimed for
-this change.
+October 13, 2026. **Private candidate; synthesis/timing audit closed, not deployed.**
+The independently audited unplaced estimate is **35.830735605 MHz**, versus
+**35.856430851 MHz** for the parent: **0.0717% worse**, still below 40 MHz.
+This is not an optimization win, routed timing or measured board frequency.
+No gameplay gain is claimed.
 
 ## Structural change
 
@@ -115,14 +116,51 @@ and exact parent/candidate benchmark clocks. These are not duration-valid
 scores, gameplay IPC or the standard suite.
 
 Matched synthesis launched at **20:44:30 UTC**, only after that audit and
-strict CPU lint passed. Controller `ventium-data-size-synth-oct13.service`,
+strict CPU lint passed, and closed normally in **1,930.13 s**.
+Controller `ventium-data-size-synth-oct13.service`,
 invocation `ad838e8d4b0543cd87932bd52f908799`, owns the sole Vivado scope
-invocation `65ad0adba6c848038ad63508af87b1e7`. Limits are unchanged: 8 GiB RAM /
+invocation `65ad0adba6c848038ad63508af87b1e7`; both are now terminal.
+Limits were unchanged: 8 GiB RAM /
 6 GiB swap, 13 GiB combined early-stop, 2 GiB host reserve, 4 GiB live disk
 floor, conservative measured-growth disk admission and 45-minute native cap.
-The separate timing-report controller is prepared but **not launched**;
-it requires successful synthesis, terminal native ownership and an independent
-source/DCP audit first. No new Fmax result is available yet.
+Independent synthesis audit rechecked **18,628 source pins**, 148 native HDL
+reads and all 158 definitions. Utilization is **187,487 LUT / 54,988 FF /
+277.5 BRAM / 47 DSP**, versus 186,770 / 55,011 / 277.5 / 47: **717 more LUTs
+(+0.384%), 23 fewer FFs**. Peak RAM/swap: 8,329,760,768 / 1,366,659,072 bytes;
+no OOM, resource stop or error. The one critical warning concerns the generated
+PS8 clock lookup; the following timing audit explicitly verifies both clocks.
+
+The separate report-only Vivado owner `ventium-data-size-clock-oct13.service`,
+invocation `48ba1e58caa84a42b00860cf4685130f`, closed normally in **518.55 s**.
+Its sole native scope is `01044558c6d64fe695e3fe726343cbba`; no implementation
+or programming followed. The independent audit rechecked **17,573 pins**,
+40 MHz core / 100 MHz PL clocks, zero black boxes and structural DRC errors,
+and the original parent checkpoint under the same constraints. Peak RAM was
+4,869,001,216 bytes, no swap/OOM.
+
+Candidate setup/hold slack is **-2.909 / -0.101 ns**. Its worst setup path is
+**97 logic levels**, from `eip_reg[0]` to `u_regfile/gpr_reg[4][16]`, with
+27.698 ns data delay (5.663 ns logic, **22.035 ns estimated unplaced net delay**).
+It traverses instruction-byte/decode selection, V length/pair lookahead,
+`mc_prime_v_branch`, next-load address/TLB preparation, `mc_prime_offer`,
+`core_mem_next_req`, L1 immediate-pair validity and GPR writeback. These are
+observed netlist names, not proof that each source-level path is sensitizable.
+The old fetch-size/data-segment chain is absent from this reported worst path,
+but that did **not** improve the worst-clock result.
+
+The selected pair-capture cone shrank from 69,141 cells / 21,811 startpoints to
+68,545 / 21,716; its worst reported slack improved from -1.947 to -1.754 ns.
+That local improvement is not a whole-core timing gain. Next investigation:
+prove current-response ownership separately from speculative next-load lookup,
+and inspect pair-valid/writeback dependencies before another synthesis. Do not
+disable priming/pairing, add global waits or declare false paths to hide it.
+
+Audit hashes: `synthesis-r1/audit.json`
+`ecc2366911c3c73cfff3bdbe9cc92ba6b83bc59431860e5830e79e81ad34ad83`;
+`clock-r1/audit.json`
+`c77ffdf435ac6fb1d5bd7cf47ba89dee720d6cf7f33afa37c895ddceeea17f04`.
+The later [environment-write decoder repair](../sys/fp_env_store/WRITE_CLASS.md)
+is **not in this checkpoint** and has no synthesized frequency result.
 
 Still required: canonical gate repair, >=40 MHz synthesized Fmax,
 routed timing and physical FPGA standard-suite acceptance. The parent's cold
