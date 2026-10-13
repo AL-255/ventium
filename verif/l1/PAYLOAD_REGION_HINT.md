@@ -60,11 +60,40 @@ Evidence root: `/home/yukidama/external/tmp/ventium-load-read-ack.GyWDDtiI`.
   `3a91aa88841f949855d27e0ed500064854ad9b24390c318629054de858061164`.
   Owner `53d261b56eb34fb0a588e92c1942dcc3` closed zero.
 
-The unchanged canonical gate is running, owner
-`c189bf42f3f24b36bad6dae226ff80c9`. Its parent's result is **7 PASS / 101 FAIL**;
-compilation and cache tests do not waive that debt. Further whole-core
-regressions, native transfer, synthesis/timing and full standard-suite/physical
-FPGA acceptance remain required. No gain is inferred from this edit alone.
+The unchanged canonical gate closed in **399.295 seconds**, owner
+`c189bf42f3f24b36bad6dae226ff80c9`: native `make` exit **2**, controller exit **1**,
+**7 functional PASS / 101 FAIL**, red and unwaived. All **20 cycle traces**
+equal the parent and input pins remain unchanged. A separate historical-trace
+comparison correctly **fails** for 107 functional cases: the independently
+generated QEMU runs supplied different initial stack pointers (for example,
+`mb_accimm`: parent `0x40800050`, candidate `0x40800040`). The unchanged worker
+explicitly seeds RTL ESP from its own golden. Do not mask ESP or call that
+cross-run comparison a pass; the full regression plan includes **same-input
+replay** of both models and candidate self-reproduction.
+
+The eight unchanged processor corpora are live, owner
+`0d72abdc98e54d339f5b3f1f56a945d5`; the wide-FP matrix is queued behind the same
+heavy-work guard, owner `dc065a605adc44359d9b2d017b77cc31`. Fourteen host tests
+pass across source-scope, driver/admission and exact core/PC/FPGA transfer
+contracts. The transfer adapters are prepared code only: no new PC model,
+FPGA source freeze or synthesis has run. Their full FP/fault/replay and
+source-closure requirements remain unchanged.
+
+Derivative source SHA-256:
+
+- L1: `3a11ad8b8ce9e7569b0b1b144fe3666414186046e8e05fc1aff82e8aa5f1b874`.
+- Seam: `1ba072672d09c4228017e64c11d3dd0506c4bddb5dc5a1a72924ea6defc2015d`.
+
+To preserve disk reserve, **355,203,913 bytes** of closed generated compiler
+products were reclaimed using byte-verified recoverable archives. Native
+executables, headers, dependency files, all sources and **3,616 protected input
+pins** were retained/rehashed. Receipt: `payload-region-compiler-archive.json`;
+restore each `compiler-products.tar.zst` with its recorded `recovery` command.
+No active run data was removed.
+
+Further whole-core regressions, native transfer, synthesis/timing and full
+standard-suite/physical FPGA acceptance remain required. No frequency gain
+is inferred from this edit alone.
 
 Candidate gameplay IPC is **unmeasured**. Older verified simulation baseline:
 **0.51030715 total U+V retirement events/cycle**, model `2b4d7a48`, cycles
