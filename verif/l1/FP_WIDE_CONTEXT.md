@@ -162,11 +162,43 @@ the matched synthesis/report controllers without launching Vivado.
 
 ## Remaining qualification
 
-Both short cold-boot CoreMark seed checks are running under
+Both short cold-boot CoreMark seed checks **passed** under
 `ventium-fp-exec-cm10-fp-wide-context-oct13.service`, invocation
-`54627764e07f415396f287da62fb0e54`, on CPU 11. They are preflight comparisons,
-not duration-valid scores or standard-suite acceptance. Synthesis has not
-started; no candidate Fmax is yet measured.
+`54627764e07f415396f287da62fb0e54`, on verified CPU 11 affinity. Performance
+and validation took **210.650 / 217.561 seconds**, with exact parent tick
+counts **4,767,218 / 4,753,406**, matching five reference CRCs for each seed,
+and **1,055,307 / 1,054,254 V retirements**. The independent audit rechecked
+5,761 input pins, actual native arguments/BIOS/media, child reaping and zero
+OOM events. Audit SHA-256:
+`b1775c289d3b5af39d68c4da62fdf5676e5e75e832a3a6b14ac7b3676cd8977c`.
+These ten-iteration runs are **not duration-valid scores or standard-suite
+acceptance**; the timing cut's measured cycle gain on them is zero.
+
+**Synthesis launched 2026-10-13 03:36:45 UTC**, owner
+`ventium-fp-wide-context-synth-oct13.service`, invocation
+`e9b1264387c6453b9529977aa5b2dcc6`. Its one native family is
+`ventium-vivado.scope`, invocation `cb13e29e7cb94b17be50516a74e26ef6`.
+Original 40/100 MHz constraints and matched `logic_only` mapper are retained;
+8 GiB RAM / 6 GiB swap caps, 13 GiB combined early stop, 2 GiB host reserve,
+4 GiB disk stop floor and 45-minute native timeout are unchanged. Admission
+requires over 6 GiB free and twice the measured parent disk growth above the
+4 GiB floor; neither check was lowered.
+
+The dependent `ventium-fp-wide-context-report-queue-oct13.service`, invocation
+`8e11e7a15b8f4a5e8c1aef73b90772b3`, observes that exact synthesis owner. Only
+after successful native closure/audit does it launch the separate matched
+clock-report service. It cannot retry synthesis, route or deploy. Inspect these
+same handles on continuation; an observation timeout is not a restart signal.
+**No candidate Fmax is yet measured.**
+
+Disk recovery retained sources, binaries, media, current pins, receipts and
+all failure evidence. Byte-verified lossless archives of closed trace files,
+generated fixtures/command receipts, four old verbose timing inventories and
+two compiler PCH files saved **2,414,967,798 logical bytes** in this round.
+Restore instructions are in `closed-*-oct13-closed.json`,
+`closed-intent-ready-cones-closed.json`, the FP/regression archive receipts
+above, and `fp-wide-context-pc-pch-closed.json` (adjacent `gzip -dk` copies).
+Historical audit reruns need their archived members restored first.
 
 Still required: matched single-Vivado synthesis/timing reaching **40 MHz**,
 canonical gate repair, complete standard-suite and real FPGA acceptance.
