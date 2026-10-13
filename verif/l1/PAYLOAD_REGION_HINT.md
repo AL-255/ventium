@@ -134,8 +134,9 @@ The exact-owner preflight queue closed successfully and launched synthesis at
   invocation `2f76bcfe5baa42008b89a920cbd28fd7`. It audits native synthesis
   closure before launching the original-clock checkpoint comparison.
 
-These jobs are live, not acceptance results. Neither observer retries, routes
-or deploys. On interruption, inspect these owners; do not duplicate their jobs.
+These owners are now closed successfully; the audited results follow below.
+Neither observer retried, routed or deployed. Keep their original identities
+for forensic checks; do not duplicate the completed jobs.
 
 Derivative source SHA-256:
 
@@ -290,11 +291,11 @@ actual opcodes, descriptor bytes, copied jump targets, reset vectors and fail
 doors in **0.654 seconds**, single CPU. Four host tests passed, including 60
 deliberately corrupted image checks. Evidence: `pipe-mem-cs-fixtures-r1`,
 closure SHA-256 `73d221c3ab924dedfe538fe2dc035c25ebcc62e5c94815cc57670c2037aa36fa`.
-**This is preparation, not a native core execution pass.** While the single
-PAYLOAD-REGION Vivado family remains active, no new whole-core build or
-regression was started. Still require execution against the parent/derivative
-with real AXI latency 0/7, complete architectural/cycle A/B equality, and actual
-new-request/held-owner evidence at the probe PC. A legal guest result or a U
+**This preparation alone is not a native core execution pass.** During the
+single PAYLOAD-REGION Vivado family, no new whole-core build or regression
+was started. The native parent/PAYLOAD comparison closed afterward as recorded
+below; execution of the CS derivative and actual new-request/held-owner
+evidence at the probe PC remain required. A legal guest result or a U
 trace label alone does not prove fast admission. Existing canonical failures
 remain unwaived; QEMU's known CS-extent gap is not authority for these faults.
 
