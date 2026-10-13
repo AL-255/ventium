@@ -1,8 +1,15 @@
 # Open defect: x87 environment restore omits saved pointers
 
 October 13, 2026. **Reproduced in the frozen shared-FP RTL and pinned QEMU;
-not repaired.** This defect was found while testing the obsolete-x87 repair,
+not repaired in that parent or the installed FPGA.** This defect was found while testing the obsolete-x87 repair,
 but does not depend on FENI, FDISI or FSETPM executing.
+
+Follow-up: an [isolated pointer-restore repair](../fp_env_restore/README.md)
+now passes the original 24 RTL state self-checks and 1,024 shared-FP leaf cases.
+Its broader mode tests expose the separate 32-bit real/V86 store-layout gap;
+canonical and differential failures remain visible. It is unpromoted, not a
+full FP-environment, standard-suite or hardware acceptance claim. The diagnosis
+and source references below still describe the unchanged original parent.
 
 ## Evidence
 
