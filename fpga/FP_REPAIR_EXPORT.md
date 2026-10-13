@@ -101,14 +101,37 @@ full compiled-input ledger. Its only host-flow changes are a 160-task startup
 budget (the simulator's initial thread pool exceeds 32) and a live **4 GiB
 free-disk stop floor**. Actual execution remains confined to one CPU with
 2 GiB RAM and no swap. Admission requires 6 GiB free disk; evidence is bounded.
-The imported Win95 resource helper deliberately refuses Win95 launch; a
-separate reviewed cold desktop/UI run is still required.
+The imported Win95 resource helper deliberately refuses Win95 launch; the
+separate reviewed launcher below does not change that helper.
 
 Two preparation tests and **39 runner tests pass**, including low-disk failure
 remaining a failure even if a simulated completion marker appears. The board
 fixture explicitly checks DDR3, clock rates and memory size; completion,
 error-detection and log-integrity checks are unchanged. Tests do not constitute
 guest acceptance. **No candidate timedemo or gameplay IPC result yet.**
+
+## Cold Win95 verification in progress
+
+`prepare_fp_repair_win95.py` prepares the same previously reviewed cold Win95
+flow against this model, preserving its original native command, pristine
+standard-VGA fixture, 40/40/80 MHz clocks, 16 MiB RAM and DDR3 transport.
+It rechecks the compiled source ledger before launch. Four host tests pass,
+including unchanged native command/environment, exact resource constraints,
+and a low-disk stop that cannot become desktop acceptance.
+
+Native PID **864153** started at **19:52:25 UTC**, with observed CPU10 affinity
+and the expected model hash. Owner `ventium-fp-repair-win95-oct13.service`,
+invocation `0cb50f29741b40fc91f3d6618f37be82`, confines it to one CPU,
+2 GiB RAM, no swap and 160 startup tasks. Output is under
+`soc-r1/win95-cold-fp-repair-oct13.1`. The 8 GiB admission reserve and live
+4 GiB disk stop floor remain enforced. There is no snapshot, injected guest
+patch, STEP or slow-mode control.
+
+This wrapper **never awards desktop PASS**, even on normal native exit.
+Cold desktop, closed-frame review, UI interaction and physical FPGA acceptance
+remain open. The existing closed Win95 checker has fixed 32/128-task profiles;
+a separately tested 160-task profile and this launcher's identity must be
+reviewed before using it to grade this run. Its existing profiles are unchanged.
 
 ## Reproducible identities
 
@@ -136,6 +159,21 @@ regenerable compiler caches, not byte-recoverable archives. A mixed archive
 containing traces was rejected and retained. Current input pins, sources,
 models, media, DCPs and all failure evidence are preserved. Failed cleanup
 attempts stopped before deletion and remain separate from successful receipts.
+
+To admit the new Win95 run, a later cleanup removed **14 superseded diagnostic
+synthesis DCPs**, totaling **2,493,652,543 bytes**. Every synthesis and timing
+owner was checked terminal against its original invocation; exact file hashes
+and inodes were recorded, no live process held the targets, and all current
+input pins were rechecked unchanged. Current candidate, endpoint-map and
+prime-reg comparison checkpoints were excluded. Sources, projects, reports,
+logs and closure evidence remain. These old generated checkpoints can be
+regenerated, but are **not byte-recoverable**. Exact targets and hashes are in
+`superseded-dcp-plan.json`; `superseded-dcp-closed.json` records completion under
+`ventium-superseded-dcp-prune-oct13.service`, invocation
+`9f7268291341471cb3498f7f8e9d0775`, native exit 0 / MainPID 0. An initial dry
+plan refused the unlaunched prime-CS clock folder; the successful plan names
+its actual closed `prime-cs-clock-swap4-r1` owner. No deletion preceded that
+successful plan.
 
 Candidate gameplay IPC is **unmeasured**. Older verified simulation baseline:
 **0.51030715 total U+V**, build `2b4d7a48`, cycles
