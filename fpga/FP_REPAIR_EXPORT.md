@@ -83,12 +83,42 @@ warning as the parent; it is not silently waived. The subsequent native timing
 audit confirms actual `clk_pl_0=10 ns` and `mmcm_clk=25 ns` clocks. No unresolved
 DMA generated-control warning is present.
 
-The read-only matched timing audit is running under
+The read-only matched timing audit closed under
 `ventium-fp-repair-clock-oct13.service`, invocation
-`e72b965246744935a0bac9cfb5d7a7ac`, after the synthesis family closed.
-**No independently closed new Fmax result yet.** The matched endpoint parent estimates
-**35.056967572 MHz**, below the 40 MHz requirement. Neither an unplaced estimate
-nor a 40 MHz constraint establishes routed timing or physical operation.
+`e72b965246744935a0bac9cfb5d7a7ac`, native exit 0 / MainPID 0, in **469.83 s**.
+The independent closure audit rechecks **17,424 input pins**, the same parent
+checkpoint, native clock definitions, report contents and terminal ownership.
+Peak RAM was **4,777,619,456 bytes**, with no swap or OOM. Structural checks
+find zero black boxes, multiple-driver errors or combinational-loop errors;
+these checks do not replace functional verification.
+
+| Timing metric | Endpoint parent | Repaired candidate |
+| --- | ---: | ---: |
+| Unplaced core frequency estimate | 35.056967572 MHz | **35.856430851 MHz** |
+| Setup slack at 40 MHz | -3.525 ns | -2.889 ns |
+| Worst setup path logic levels | 97 | 93 |
+
+The estimated frequency improves **2.28%**, but **does not meet 40 MHz**.
+This is the combined eight-file comparison, not an isolated measurement of
+any one repair. Candidate unplaced hold slack is -0.101 ns. Neither these
+unplaced estimates nor a 40 MHz constraint establishes routed timing or
+physical operation; no implementation or new board programming occurred.
+
+The worst path starts at `q_pc[0]` and reaches the integer multiplier's DSP
+operand input. It traverses fetch/prefix/decode, demanded byte count, segment
+extent/fault checks, fragment controls, code-versus-data classification,
+paired-store admission, backing AXI ACK and register-file forwarding. Data
+delay is **27.389 ns**, comprising **5.661 ns logic** and **21.728 ns estimated
+interconnect**. The latter is an unplaced estimate, not measured congestion.
+This identifies a cross-module control dependency, not evidence that the
+multiplier arithmetic itself is the bottleneck.
+
+The next structural cut must preserve precise faults, request/response
+ownership and same-cycle read/store-pair acceptance. The existing early code
+payload hint is explicitly not an admission/ACK signal; substituting it there
+without proving equivalence would be unsafe. No false-path exception, global
+pipeline bubble or U-only fallback was introduced to hide this path. Existing
+cold Quake and Win95 jobs continue against their unchanged frozen model.
 
 `prepare_fp_repair_synthesis.py` generates, but does not launch, the matched
 synthesis and read-only timing controllers. Their independent audits must
@@ -182,6 +212,7 @@ Evidence root: `/home/yukidama/external/tmp/ventium-fp-repair-transfer.a8nzrjHu`
 | `soc-r1/coremark/audit.json` | `0d5166bc36cc1f0d58133f8279f623702c33aa502ff7d4d13a4e9644d9be2f69` |
 | `synthesis-r1/audit.json` | `ffea1bc1e015606cc3af050580f28e9b09631aaeb885f6fc0da39d81d4034bc3` |
 | `synthesis-r1/native-synthesis/rk_ao486_system/rk_ao486_system.runs/synth_1/rk_ao486_bd_wrapper.dcp` | `d801ced570e78057204df123ad72a899b0dc2ed6ed5e22490efdaa0ce61d1b97` |
+| `clock-r1/audit.json` | `c747c58d77a0268ec86a9cf87ffbcdf74db363911e5a31bc1664466b7f52f8c0` |
 
 The CoreMark owner is terminal, invocation
 `c65abc7c1e764fef9e364fd0074eada9`, MainPID 0 / native exit 0.
