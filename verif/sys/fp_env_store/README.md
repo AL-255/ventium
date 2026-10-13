@@ -45,6 +45,14 @@ QEMU differential gate**; its nonzero result is preserved. No comparator mask,
 golden, reference binary or cycle band is changed. These are not page-fault
 tests: an offset crossing 4096 with paging disabled does not qualify paging.
 
+Follow-up: a [private QEMU environment-helper repair](../../qemu-trace/fp_env/README.md)
+now passes all 192 unchanged images against these complete RTL traces. Its
+matched unmodified control reproduces all old failures, and a deliberately
+wrong V86 format is detected in 16 cases. The traces check saved pointers through
+guest integer readback (`x87=false`), not direct x87-register tracing. This does
+not replace the canonical reference, waive the original failed run, or qualify
+the full standard suite or FPGA.
+
 Unchanged regressions on the new core:
 
 | Corpus | Result |
