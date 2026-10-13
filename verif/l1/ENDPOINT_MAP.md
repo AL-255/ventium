@@ -104,15 +104,47 @@ rejection and unchanged synthesis resource lifecycle. An initial host test
 compared a changed explanatory docstring as executable structure; that test
 was corrected to exclude docstrings, without changing the freeze guard.
 
-`fpga/prepare_endpoint_map_synthesis.py` has generated, **not launched**, the
+`fpga/prepare_endpoint_map_synthesis.py` generated the
 synthesis and read-only clock-audit controllers. The mapper, definitions,
 clocks, exclusive Vivado launcher, timeouts, memory limits, disk admission and
 stop/reap logic are retained from PRIME-REG. Admission checks this candidate's
 own map/directed/replay evidence and short seeds; it does not pretend the
 parent's separate FP/branch corpus was rerun. Any timing delta will include
-both SMSW and endpoint-map changes. At closure, scratch had about **5.6 GiB**
+both SMSW and endpoint-map changes. At the transfer audit's closure, scratch had about **5.6 GiB**
 free, below the unchanged synthesis admission requirement; no Vivado was
-launched and no limit was weakened.
+launched at that point and no limit was weakened.
+
+### Guarded synthesis started — 12:49 UTC
+
+The subsequent recoverable archive below raised free scratch space to
+**7,329,439,744 bytes**, above the unchanged **7,208,493,056-byte** measured-growth
+admission requirement. The sole synthesis family is now launched:
+
+- Controller: `ventium-endpoint-map-synth-oct13.service`, invocation
+  `dc86176c8f614a6cb6b789a4427b637b`.
+- Native scope: `ventium-vivado.scope`, invocation
+  `0ac5491be1d54e76b5318fede569fe47`, 8 GiB RAM / 6 GiB swap / 48 tasks.
+- Actual 40/100 MHz constraints, unchanged logic-only mapper and frozen source
+  manifest. A 45-minute native timeout, 4 GiB disk floor, 2 GiB host RAM/swap
+  floors, OOM-event checks and 13 GiB combined-memory stop remain active.
+
+At the 12:54 UTC observation, the native process family is live, using about
+6.7 GiB RAM and no swap, with no OOM event. **This is not a synthesis result**.
+No placement, routing, bitstream generation, programming or timing pass has
+occurred. The read-only clock audit must wait for successful native closure
+and the independent synthesis/DCP audit; it must not replace a live Vivado run.
+
+The separate `fpga/run_endpoint_map_doom_smoke.py` is cold-booting a private
+copy of the exact original Doom disk with this PC model. It is limited to
+100 million cycles / 30 minutes, CPU12, 512 MiB RAM and no swap, with a 4 GiB
+disk floor. It preserves original media, EXE/WAD hashes, native argv/cgroup and
+frame/log evidence; it neither restores snapshots nor alters the guest code.
+Unit `ventium-endpoint-map-doom-smoke-oct13-r1.service`, invocation
+`3a9dacbd8cb84ae7b7609f1d5aff8dd8`, is live at the same observation. Its output
+is `endpoint-map-doom-smoke-r1`. Four host tests ensure diagnostic observations
+do not conflate native exit zero, an echoed command, graphics capture, a guest
+return or an invalid-opcode report with timedemo success. No Doom FPS or guest
+completion is established by this startup run so far.
 
 ## Identity and evidence
 
@@ -151,11 +183,23 @@ headers, sources, traces, receipts and every current input pin remain expanded.
 The adjacent plan/verified/closed JSON receipts contain member hashes and the
 recovery command, restoring under `/home/yukidama/external/tmp`.
 
+To admit synthesis without weakening its disk floor, another **196,125**
+explicitly inventoried outputs from 24 closed predecessor test directories
+were byte-verified and archived to `closed-endpoint-old-fixtures.tar.gz`:
+982,398,182 source bytes (1,543,897,088 allocated), 62,348,832 archive bytes,
+SHA-256 `525982527dd3e1ea7e1527e93ddb04a9f9d6cff9a376c88f5475c215e1ff7a04`.
+All current transfer/timing pins, models, sources, media and aggregate receipts
+remain expanded and unchanged. Old failed runs remain failed. Their older raw
+artifact audits may require restoring this archive first; member hashes and
+the restore command are in the adjacent plan/verified/closed JSON receipts.
+
 ## Next required work
 
-Recover sufficient safe scratch headroom, then measure the frozen four-file
-candidate's whole-design timing/area under unchanged 40/100 MHz constraints
-and resource guards. **No timing gain is attributed until measured.**
+Monitor the admitted synthesis to native closure, audit its DCP, then measure
+the frozen four-file candidate's whole-design timing/area under unchanged
+40/100 MHz constraints and resource guards. **No timing gain is attributed
+until measured.** Inspect the separate cold Doom startup result without
+substituting simulation or a partial window for physical timedemo acceptance.
 Continue resolving the canonical reference/RTL failures without weakening the
 gate; complete the standard suite and physical UV-fast Win95/Quake validation.
 The installed old Doom image still faults on SMSW; new Doom gameplay/FPS needs
