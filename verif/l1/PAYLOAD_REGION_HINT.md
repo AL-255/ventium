@@ -71,12 +71,27 @@ explicitly seeds RTL ESP from its own golden. Do not mask ESP or call that
 cross-run comparison a pass; the full regression plan includes **same-input
 replay** of both models and candidate self-reproduction.
 
-The eight unchanged processor corpora are live, owner
-`0d72abdc98e54d339f5b3f1f56a945d5`; the wide-FP matrix is queued behind the same
-heavy-work guard, owner `dc065a605adc44359d9b2d017b77cc31`. Fourteen host tests
+The eight unchanged processor corpora **passed**, owner
+`0d72abdc98e54d339f5b3f1f56a945d5`, **302.652 seconds / 4,240 native probe runs**.
+QEMU/full-state/cycle comparisons and new region-equality assertions pass.
+Aggregate coverage matches the parent: 21,190,336 clocks, 18,172 AGI offers,
+24,352 reference offers, 282,808 prime offers, zero retained next owners,
+5,616 intent clocks, 3,072 pair requests, 1,872 accepted pairs and 1,536
+shape-only overlaps. These are separate directed executions, not gameplay.
+
+The wide-FP matrix also **passed**, owner `dc065a605adc44359d9b2d017b77cc31`,
+**70.119 seconds / 384 fixtures / 1,536 measurements / 768 zero-cycle-delta
+comparisons**, on real AXI at latencies 0 and 7. Full x87/QEMU and complete
+cycle-stream comparisons remain. Closure SHA-256:
+`bf91f6479f56308dd5c5f7a124e0798b2132b280bbec166a13b777093dec5021`.
+
+The remaining **12-phase operand-boundary, fault and same-input replay** plan
+is live: `ventium-payload-region-regressions-oct12.service`, invocation
+`9d9912a1caf843cf9613731c53625cd3`, output `payload-region-regressions-r1`.
+Do not launch a duplicate if observation is interrupted. Fourteen host tests
 pass across source-scope, driver/admission and exact core/PC/FPGA transfer
-contracts. The transfer adapters are prepared code only: no new PC model,
-FPGA source freeze or synthesis has run. Their full FP/fault/replay and
+contracts. Transfer adapters are prepared code only: no new PC model, FPGA
+source freeze or synthesis has run. Their full FP/fault/replay and
 source-closure requirements remain unchanged.
 
 Derivative source SHA-256:
@@ -90,6 +105,13 @@ executables, headers, dependency files, all sources and **3,616 protected input
 pins** were retained/rehashed. Receipt: `payload-region-compiler-archive.json`;
 restore each `compiler-products.tar.zst` with its recorded `recovery` command.
 No active run data was removed.
+
+The now-closed eight-corpus text is also recoverable in
+`closed-payload-region-checks.tar.gz`: **38,352 entries / 969,241,198 bytes →
+87,605,566 bytes**, with every archived member byte-verified before deleting
+only its unpacked duplicate. Source/binary/receipt/input pins remain. Restore
+with `tar -xzf closed-payload-region-checks.tar.gz -C` followed by the evidence
+root above; receipt `closed-payload-region-checks-closed.json` contains its hash.
 
 Further whole-core regressions, native transfer, synthesis/timing and full
 standard-suite/physical FPGA acceptance remain required. No frequency gain
