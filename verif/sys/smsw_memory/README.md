@@ -253,14 +253,60 @@ checker explicitly preserves its **85 differential / 20 specification-only**
 classification and failed full fault gate; it does not treat an audit as a
 correctness pass.
 
-`build_combined_core.py` is ready to compile this composition, but has **not
-run**. It retains the source-pinned native builder's command, 32 jobs,
+`build_combined_core.py` has compiled this composition successfully in
+**19.858 seconds**, after Vivado's read-only timing audit exited. It retains
+the source-pinned native builder's command, 32 jobs,
 assertions, private host/header check and 660-second native limit, checks that
 no Vivado is live, and enforces **10 GiB RAM / 2 GiB swap** inside the shared
 build scope. The wrapper admits the exact register-flag parent identity rather
-than silently treating it as PRIME-CS. Successful compilation would still need
-new combined-model differential, boundary, standard-suite and FPGA checks.
-The combined source tree is not a timing result or deployable image.
+than silently treating it as PRIME-CS. Native scope memory peak is **3 GiB**.
+Build owner `ventium-smsw-prime-reg-core-oct13-r1.service`, invocation
+`2dfac73fbc1a45e99365c944f0c4b1f0`, closes 0 / MainPID 0. Native guarded
+scope invocation is `04ef5c56bc514ec595447dff2e0cdcad`; the wrapper's field
+named `controller_invocation` contains this **scope** identity, not the outer
+service identity. Both are retained separately here and in the audit.
+Model SHA-256:
+`42bd14c86eff5e33d98753cd07d34bf1340e804989daec237e42fd499565cfa5`.
+
+Fresh combined-model runs repeat the same **248 differential case executions**:
+88 initial, 60 CPL3/V86, 25 paging, and 75 repair/retry cases at AXI latencies
+0/7/31. These are requalification of the existing corpus, not 248 new unique
+test cases. The original unmodified drivers run the first three groups;
+`run_combined_retry.py` changes only the exact admitted model and wrapper
+pins/admission, retaining every fixture instruction, comparison and limit.
+The other **20 LOCK/segment cases still disagree with QEMU**, so the complete
+fault driver closes **exit 1** as before. It is not a green differential gate.
+
+`audit_combined.py` independently rehashes **18,324 input/artifact pins**, checks
+all terminal owners/native outcomes, repeats all 268 full QEMU comparisons and
+compares every complete RTL record to the separately audited SMSW-only model.
+All **34,576 records** match that isolated repair; **32,451** belong to the
+248 QEMU-equivalent cases. No masks, goldens, application patches, state
+injection or timing bands change. Audit owner
+`ventium-smsw-prime-reg-audit-oct13-r1.service`, invocation
+`8ab83623eac14f04bb53238fac9297fd`, closes 0 / MainPID 0.
+Receipt: `smsw-prime-reg-audit-r1.json`, SHA-256
+`590d423aa8a5fb77226363c6c2f7afe6632e62ba09d262c12d79d5bf68d0dbc4`.
+
+The fresh canonical gate closes in **407.25 seconds**, native make exit **2**:
+**7 PASS / 101 FAIL**. All 20 complete cycle traces equal PRIME-REG, input pins
+are unchanged, and no mask/golden/band is altered. Its production shell forces
+**one worker despite the controller requesting four**; this run is not claimed
+as a four-worker gate. Owner `ventium-smsw-prime-reg-verify-oct13-r1.service`,
+invocation `bd8935d3a0b14058a908aab3458cd669`, closes as failed / MainPID 0.
+The subsequent exact-input replay closes successfully in **77.94 seconds**:
+all **108 cases / 80,800 complete records** match PRIME-REG and reproduce the
+combined candidate's original canonical traces. Owner
+`ventium-smsw-prime-reg-replay-oct13-r1.service`, invocation
+`2ab79a157a0749b5a8303ae50e266bbf`, closes 0 / MainPID 0. Receipt
+`smsw-prime-reg-replay-r1/closed.json`, SHA-256
+`a2dcb1a79816f6407d57fa6c489e5813767223bdcba9b9ddff119880c98de759`.
+This detects same-input regressions; it does not make the QEMU gate green.
+
+The combined model still needs broader boundary, full-PC, standard-suite and
+FPGA checks. The **35.023816195 MHz** estimate belongs to the SMSW-free timing
+candidate, **not this composition**, and still falls short of 40 MHz. This
+combined tree is neither a timing-qualified nor deployable image.
 
 Current-candidate gameplay IPC is **unmeasured**. The older simulation baseline
 is **0.51030715 total U+V**, build `2b4d7a48`, cycles
