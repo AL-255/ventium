@@ -1,6 +1,7 @@
 # Memory SMSW: Doom startup regression
 
-Status: **failure reproduced; repair recipe unpromoted and not yet compiled**.
+Status: **isolated repair compiled; 88 initial full-trace differential cases
+pass. Unpromoted; privilege/fault and standard-suite qualification remain open**.
 The physical-board finding is in
 [FPGA_DOOM_2026-10-13.md](../../../docs/FPGA_DOOM_2026-10-13.md).
 No guest patch, saved state, replacement DOS extender or U-only mode is used.
@@ -48,15 +49,56 @@ checkout's dirty RTL in place:
 
 There is no new state, register, profile switch, ISA shortcut or workload check.
 Three source-contract tests pass (`test_prepare.py`); these are **not RTL
-simulation or proof of behavioral correctness**. The new decoder/datapath has
-not been compiled, synthesized, promoted or programmed on the FPGA. Preparation
-was kept separate from the running 40 MHz timing experiment.
+simulation or proof of behavioral correctness**. Preparation/build remain
+separate from the 40 MHz timing experiment, whose frozen inputs are unchanged.
+
+## Isolated native result
+
+`build_core.py` retains all 195 parent source files / 152 UV-fast definitions,
+assertions and a uniquely compiled model-dependent host. Only the three named
+RTL files change. Compilation closes native exit 0 / unchanged pins in
+19.763 seconds with 32 jobs; the scope journal records a 3 GiB memory peak.
+The resource cap was lowered to 10 GiB RAM / 2 GiB swap, below the standard
+32-job ceiling. No Vivado family was active during compilation.
+
+Model: `smsw-core-r1/obj/tb_ventium`, SHA-256
+`cbf749f16babd88fb5dcf508c2381d48b77dedd348e9b23a5ed9083de9f4e65e`.
+`run_diff.py` uses the unchanged QEMU system producer and comparator: all
+**88 cases / 6,556 complete architectural records match**, including CRs,
+selectors, GPRs and flags. No record trimming, extra masks or band changes.
+Every repaired guest also exits with the independent success marker 0x42;
+there are no fault deliveries. Native QEMU/RTL child affinity is observed as
+CPUs 0–1, not inferred solely from a unit property.
+
+Goldens: `smsw-golden-r2`; checks: `smsw-diff-r1`, under the same evidence
+parent above. Both controllers naturally close exit 0 / MainPID 0.
+`audit_diff.py` independently validates closure, the separate build-controller
+and native-scope identities, exact three-file transformation and every full
+trace comparison. Audit SHA-256:
+`b2dcb434a336f655330994bd8f3082185e54d20b3879a0562ecac56d63f6ad52`.
+
+The unchanged canonical `make verify` **closed red** in 405.562 seconds:
+7 functional passes / 101 failures, native make exit 2. These include the
+existing terminal-record and x87 status divergences; none is waived by the
+directed passes. All 20 cycle traces have identical complete records to PRIME-CS.
+
+To detect regressions hidden by that red gate, `run_regression.py` reruns both
+models on each of the candidate's exact 108 inputs and initial stack pointers.
+All **108 cases / 80,800 records** match the parent and reproduce the candidate's
+original traces. The native controller closed exit 0 / MainPID 0 in 77.719
+seconds, with unchanged input pins. Evidence: `smsw-regression-r1`; unit
+`ventium-smsw-regression-oct13-r1.service`, invocation
+`ec126ae3d4524763ab3c7ca1a76b148b`. The wrapper changes only the historical
+replay driver's definition count from 150 to 152; exact definition equality
+and every full-record comparison remain enforced. This is **regression
+equivalence, not a QEMU correctness pass**.
+
+There is still **no synthesis, checkout promotion, physical-board acceptance
+or gameplay measurement for the SMSW derivative**.
 
 ## Required next gates
 
-- Compile the isolated derivative, then run these same native probes; every
-  memory case must succeed, not just the ordinary-MOV controls.
-- QEMU-differential traces; CPL3/V86, segment overrides/default SS, invalid LOCK,
+- CPL3/V86, segment overrides/default SS, invalid LOCK,
   null/read-only/limit-failing segments, present/not-present/read-only page
   boundaries, fault PC/CR2/error and absence of partial writes or GPR changes.
 - Register controls, store-delay/backpressure and reset/event/debug boundaries;
