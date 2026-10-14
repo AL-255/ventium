@@ -275,6 +275,6 @@ and physical Win95/Quake qualification remain open.
 The existing FPGA/Doom image was not replaced; **Doom FPS is unavailable**.
 
 Gameplay IPC for this candidate is **unmeasured**. Latest verified baseline:
-**0.48176594 total U+V**, FP-repair simulation model `c7b95b78`, cycles
-**1,100,065,237–1,200,065,237**; [counter evidence](../../fpga/FP_REPAIR_EXPORT.md).
+**0.51027341 total U+V**, FP-repair simulation model `c7b95b78`, cycles
+**1,200,065,237–1,300,065,237**; [counter evidence](../../fpga/FP_REPAIR_EXPORT.md).
 That older model's timedemo is still active, and this is not FPGA or Doom IPC.

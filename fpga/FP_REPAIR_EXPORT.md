@@ -356,7 +356,7 @@ FP-classifier candidates remain gameplay-unmeasured. The timedemo is still
 running; no completion, final FPS, physical FPGA or standard-suite PASS is
 claimed.
 
-### Latest gameplay window: 1,100M–1,200M
+### Gameplay window: 1,100M–1,200M
 
 The same continuously running `c7b95b78` simulation model measures
 **0.48176594 total U+V IPC**, reported cycles
@@ -381,10 +381,39 @@ its PNG preview is format-only, with no color or size adjustment.
 `adc07ff8e678d021761ec1f66776411426f222779920b3047089670b8c76fc64`.
 The audit `gameplay-1100m-1200m-audit.json` has SHA-256
 `39946af7cfec14cc216957244f7c988632dfc6234df7156cedc98d7f45882875`.
-This supersedes the reporting baseline, **not** earlier retained measurements.
+This superseded the reporting baseline, **not** earlier retained measurements.
 The newer timing/tag-bank candidates remain gameplay-unmeasured. The timedemo
 is still running; no final FPS, physical FPGA/Doom result or suite pass follows
 from this window.
+
+### Latest gameplay window: 1,200M–1,300M
+
+The same continuously running `c7b95b78` simulation now verifies at
+**0.51027341 total U+V IPC**, reported cycles
+**1,200,065,237–1,300,065,237**. The audit rechecks the actual executable hash,
+PID859279, CPU11 affinity, exact cold argv and original supervisor invocation.
+
+| Counter | Start | End | Difference |
+| --- | ---: | ---: | ---: |
+| Core clocks | 1,200,064,874 | 1,300,064,874 | 100,000,000 |
+| U retirements | 342,191,900 | 381,420,663 | 39,228,763 |
+| V retirements | 87,771,925 | 99,570,503 | 11,798,578 |
+| Total retirements | 429,963,825 | 480,991,166 | 51,027,341 |
+
+Both totals equal U + V. Frame 7 shows hallway gameplay; frame 8 shows a weapon
+firing at an enemy, particles and HUD. Its unmodified PPM SHA-256 is
+`f7518c17ae7354adda652356a494b934052217f5e5b69eb8aeae8522e2a3e34a`.
+The PNG preview is format-only, without color or size changes.
+
+`audit_gameplay_1300m.py` retains the stable 456,605-byte complete-line prefix
+`gameplay-1200m-1300m-prefix.log`, SHA-256
+`10d2460c104ed5b2af7c0699ffdce7d7db0267814eb7d6494a42acdc2cf9f5c6`.
+`gameplay-1200m-1300m-audit.json` SHA-256 is
+`e472ed5c3c3513721f1d472c326d923d0e187458d822c46d12e3583a8ac84bd2`.
+This is the latest reporting baseline, not a controlled gain over the previous
+scene. The [combined way-banked/fetch-page candidate](../verif/l1/WAY_BANKED_CORE.md)
+is newer and gameplay-unmeasured. The timedemo remains active: no final FPS,
+timedemo completion, physical Doom result or suite acceptance is established.
 
 ### Win95 native closure and evidence-protocol failure
 
