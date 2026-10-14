@@ -109,13 +109,17 @@ No Vivado family remains.
 The [two-file combined core](WAY_BANKED_CORE.md) now adds the re-proved
 fetch-fault page arithmetic and passes directed/private-QEMU checks. Its
 canonical gate remains failed. Its [full-PC export](../../fpga/WAY_BANKED_EXPORT.md)
-and short regressions now pass, and a single guarded full synthesis is live.
-Standard-suite acceptance, full synthesis >=40 MHz, routing and physical
-Win95/Quake verification remain open. The former worst
-path still spans fetch/translation/cacheability/paired-store ACK/writeback;
-way banking is not proof that this cross-module path is fixed.
+and short regressions pass. The closed whole-chip synthesis now confirms zero
+tag FFs and **30 RAM64M8 macros per way** (240 RAMD64E children per way; not
+additive storage). The combined two-file candidate uses **187,410 LUTs**, down
+**8,152 / 4.17%**, and estimates **34.495843251 MHz unplaced**, up **6.45%** from
+its matched parent. These are not isolated attribution to way banking or an
+extrapolation from the OOC result. The remaining 100-level worst path runs from
+EIP through fast-store admission/translation/ACK to ESP; none of the 30 worst
+paths names the former overlength probe. Standard-suite acceptance, >=40 MHz,
+routing and physical Win95/Quake verification remain open.
 
-Latest verified gameplay IPC is **0.51027341 total U+V**, older FP-repair
-simulation model `c7b95b78`, cycles **1,200,065,237–1,300,065,237**
+Latest verified gameplay IPC is **0.50607097 total U+V**, older FP-repair
+simulation model `c7b95b78`, cycles **1,300,065,237–1,400,065,237**
 ([evidence](../../fpga/FP_REPAIR_EXPORT.md)). This proposal is gameplay-unmeasured.
 The existing FPGA still fails Doom startup on memory SMSW; no Doom FPS exists.

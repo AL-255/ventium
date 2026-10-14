@@ -2,10 +2,12 @@
 
 October 14, 2026 UTC. **Unqualified timing candidate.** The source-matched
 full-PC build, CPU-hierarchy hardware lint, 44 environment-store fault/retry
-fixtures and both short CoreMark CRC controls pass. A single guarded full
-synthesis started at **02:12:34 UTC**; no new Fmax, bitstream or board pass
-exists yet. The unchanged parent estimates **32.405457079 MHz unplaced**, below
-the required 40 MHz. Canonical verification remains failed.
+fixtures and both short CoreMark CRC controls pass. Full synthesis and its
+matched native timing audit now close successfully: **34.495843251 MHz
+unplaced**, versus **32.405457079 MHz** for the parent (**+6.45%**). Whole-chip
+LUT usage falls **4.17%** and the tag-register inference regression is removed.
+This still misses **40 MHz**; there is no new bitstream or board pass.
+Canonical verification remains failed.
 
 ## Transfer and source identity
 
@@ -66,7 +68,61 @@ The 158-definition Tcl source contract passes; qualification stays `UNQUALIFIED`
 | `way-banked-env-fault-r1/closed.json` | `cb9a53daf80417519bf749b9d8ea9ab8eecb263872266d5c48704cbd5fa05a0c` |
 | `way-banked-soc-r1/coremark/audit.json` | `0905554a11b9b41dd5343202f65645c5b66fc69e9049637206b70342f7ed1777` |
 
-## Live synthesis and resource limits
+## Closed synthesis, timing and remaining critical path
+
+| Matched whole-chip result | Parent | Candidate | Change |
+| --- | ---: | ---: | ---: |
+| Synthesized, unplaced core estimate | 32.405457079 MHz | 34.495843251 MHz | +6.45% |
+| CLB LUTs | 195,562 | 187,410 | −8,152 (−4.17%) |
+| CLB registers | 60,184 | 55,006 | −5,178 (−8.60%) |
+| BRAM tiles | 277.5 | 277.5 | 0 |
+| DSPs | 47 | 47 | 0 |
+
+These are the combined two-file change's results; they do not isolate each
+change's contribution. The independent synthesis audit verifies **25,401
+input pins**, 148 native `read_verilog` files, the exact 158 definitions, the
+unchanged mapper and the two allowed source differences. Synthesis finishes
+at **02:44:39 UTC**, native exit0, in **1,925.43 s**, with peak **8,589,926,400
+bytes RAM / 1,025,347,584 bytes swap**, no OOM and no resource stop.
+
+The whole-chip primitive inventory confirms **5,120 parent tag FDREs → zero**.
+Each candidate tag way has **30 RAM64M8 macros**, represented by **240 RAMD64E
+leaf cells**. Macro and leaf counts describe the same memories and must not be
+added. This is direct whole-chip evidence, separate from the earlier isolated
+L1 result of 48 macros per way and 40.84% module-LUT reduction.
+
+The timing audit closes at **02:52 UTC**, native exit0, in **481.44 s**. It
+rechecks **21,428 pins**, both original **25 ns / 10 ns** clocks, all 30 setup
+and ten hold paths, zero unresolved black boxes and zero requested structural
+DRC violations. Peak RAM is **4,822,577,152 bytes**, swap0, no OOM. The matching
+PS-generated `create_clock` synthesis warning remains visible; the audit checks
+the actual project clocks rather than treating that warning as a timing pass.
+
+Worst setup slack is **−3.989 ns**, giving `1000 / (25 + 3.989)` MHz. The
+worst path is now **EIP[0] → ESP[16]**, **100 logic levels**, data delay
+**28.778 ns** (5.642 ns logic / 23.136 ns *estimated* interconnect). It runs
+through decoded memory address/segment admission (`sys_fp_load_ok3`,
+`fp_sys_bail`), store request, translation/cacheability, paired-write readiness,
+memory ACK and integer commit. **19/30** worst paths name the admission/store
+chain; **none** names the previous `fetch_overlength_probe` bottleneck.
+Unplaced interconnect estimates are not measured routed congestion. Hold slack
+is **−0.101 ns**; this is not routed setup or hold sign-off.
+
+The next investigation is therefore fast-memory admission and completion,
+not another speculative change to overlength-instruction probing. Preserve
+bounded DS and flat DS/SS admission, byte/dword boundary behavior, precise
+faults, held-request ownership and UV throughput. Factoring segment checks
+ahead of late address selection needs equivalence and full-core tests before
+another full synthesis; removing checks or forcing slow mode is not a fix.
+
+| Closure/audit | SHA-256 |
+| --- | --- |
+| `way-banked-synthesis-r1/closed.json` | `c7eee4177c831b7b5f9e88517d535325a261722d547bb47e9dc0de460d908f4c` |
+| `way-banked-synthesis-r1/audit.json` | `34d8aac8d7d1af8ac88455cdc38097b4bc70871682ca0006b7f4f39156b48371` |
+| `way-banked-clock-r1/closed.json` | `32dd3b2ddd164a53b1b483b9269891cbc24efa17d50d17c9dc6c1cf16b7d5a3e` |
+| `way-banked-clock-r1/audit.json` | `84236ff645b1d829c2af5c727128bd8766c98ef60d89b62e1a8afbe8e91f70ca` |
+
+## Resource guards and launch provenance
 
 `prepare_way_banked_synthesis.py` derives fresh controllers from the closed
 parent. Four tests preserve the native stop/reap lifecycle, admission section,
@@ -76,7 +132,7 @@ is used. **No placement, routing, programming or clock write is authorized by
 this diagnostic controller.**
 
 Owner `ventium-way-banked-synth-oct14-r1.service`, invocation
-`c622e8db1a894ed79714ff63514d5909`, owns scope
+`c622e8db1a894ed79714ff63514d5909`, owned scope
 `c484c829b2ec466b8387102d8e8d965e`. Actual native driver and synthesis-child
 affinities were observed as CPUs16–19. Limits remain **8 GiB RAM / 6 GiB swap**,
 13 GiB combined early stop, 2 GiB host RAM/swap floors, 4 GiB disk floor,
@@ -84,14 +140,18 @@ affinities were observed as CPUs16–19. Limits remain **8 GiB RAM / 6 GiB swap*
 above both 6 GiB and twice the measured 1,456,762,880-byte parent growth above
 the 4 GiB floor. No guard was lowered to admit this run.
 
-The existing synthesis is now followed by a bounded sequencer
+The synthesis was followed by the bounded sequencer
 `ventium-way-banked-timing-sequencer-oct14-r1.service`, invocation
-`9907a645f50f48c1b7cc1f90f2e29fb2`. It waits for that exact live owner to close
-successfully, runs the unchanged synthesis audit, then launches the already
-prepared read-only timing controller and checks its closure. It cannot retry
+`9907a645f50f48c1b7cc1f90f2e29fb2`. It waited for that exact live owner to close
+successfully, ran the unchanged synthesis audit, then launched the already
+prepared read-only timing controller and checked its closure. It cannot retry
 synthesis, relax the native guards, route or program the FPGA. Its script and
 receipts are `finish_way_banked_timing.py` and `way-banked-sequencer-*.json`
-under the evidence root. A queued audit is not a timing result.
+under the evidence root. It and both native owners are terminal MainPID0 / exit0;
+no Vivado remains. Timing owner invocation is
+`548d453ee73540d1b981312254ae695c`, scope
+`9e644d31741747138a95a4bae45a3208`. Sequencer closure SHA-256:
+`40c11cd138d8132c8bf716393362cb37dfa67a8c726da9f6d48c22711b9e68af`.
 
 To reach admission, ten superseded Oct10/11 **diagnostic synthesis DCPs** were
 removed, freeing **1,800,063,540 bytes**. Each exact target's historical audit
@@ -104,8 +164,7 @@ Targets are listed in `superseded-oct10-dcp-plan.json`, SHA-256
 `58aeb7270256cd1aa743a418f42eb1cd81b196e30bcf6c9bd44362f9be331cb9`;
 closure SHA-256 is `8bf5661ab20340dc7580d8a0bfd717678379cd67b0b8fc6beae1f85e914f29d5`.
 
-Still required: closed synthesis and matched native timing audit, **>=40 MHz
-synthesized Fmax**, routed timing, a green canonical gate, duration-valid
+Still required: **>=40 MHz synthesized Fmax**, routed timing, a green canonical gate, duration-valid
 performance and the entire standard suite, then physical UV-fast Win95 cold
 desktop plus keyboard/mouse interaction and complete Quake timedemo.
 

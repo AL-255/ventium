@@ -88,15 +88,18 @@ they were not recoverably archived.
 The [full-PC transfer and source-matched FPGA export](../../fpga/WAY_BANKED_EXPORT.md)
 now pass CPU-hierarchy lint, 44 cold environment-store fixtures at latency 0/7
 and both short CoreMark CRC controls, with unchanged benchmark clocks. The
-single guarded full synthesis started at 02:12:34 UTC after disk admission was
-met without lowering guards; it has no result yet.
+single guarded full synthesis and independent native timing audit now close:
+**34.495843251 MHz unplaced** versus 32.405457079 MHz (**+6.45%**), with
+**4.17% fewer whole-chip LUTs**. Tag RAM is inferred in the full chip, not only
+the isolated cache. No OOM, source/clock/profile change or guard relaxation
+occurred. The 100-level fast-store admission/completion path remains too long.
 
 Resolution of canonical failures, the complete standard suite, full synthesis
 at **>=40 MHz**, routed timing and physical UV-fast Win95 keyboard/mouse and
 Quake timedemo acceptance remain open. This candidate has no bitstream or
 gameplay IPC measurement.
 
-Latest verified gameplay baseline: **0.51027341 total U+V IPC**, older
-FP-repair simulation `c7b95b78`, cycles **1,200,065,237–1,300,065,237**
+Latest verified gameplay baseline: **0.50607097 total U+V IPC**, older
+FP-repair simulation `c7b95b78`, cycles **1,300,065,237–1,400,065,237**
 ([evidence](../../fpga/FP_REPAIR_EXPORT.md)). The different scene window is not
 a measured gain from these changes, a full-timedemo average or a physical result.
