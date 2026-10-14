@@ -45,6 +45,9 @@ Evidence root: `/home/yukidama/external/tmp/ventium-data-size.v2HaTO2X`.
 | Identical-input replay | 216 native executions; all 108 complete traces, clocks and **30,132 V retirements** identical |
 | Canonical `make verify` | **FAIL**, native make exit 2; 7 functional PASS / 101 FAIL; all 20 cycle traces equal parent |
 | Cold system controls | Five fixtures × AXI delays 0/7/31 × two models: **30 executions**, identical parent/candidate state and clocks |
+| Original fetch-boundary controls | 22 fixtures, 176 native RTL executions, **88 full QEMU comparisons**; exact parent/candidate state and clocks |
+| Original x87 environment-store faults/retries | 44 fixtures × AXI delays 0/7: **88 full QEMU comparisons**, unchanged images |
+| Full-PC short CoreMark | Both 10-iteration CRC checks PASS; **4,767,218 / 4,753,406 ticks**, identical to parent |
 
 The symbolic/SV leaves abstract the unchanged width/decode producers; this is
 not a sequential whole-processor proof. No canonical failure or existing x87
@@ -91,22 +94,84 @@ build closes in **23.69 s**, model
 Inputs and the private generated-header contract are checked. The **98 existing
 platform structural warnings are unchanged**, not a full-SoC lint pass.
 
+The CoreMark closure audit checks **21,468 inputs**, both terminal/native
+closures, original ROM/disks, actual CPU12 affinity and nonzero V retirements
+(1,055,307 / 1,054,254). Both seeds remain too short for a valid score or full
+standard-suite acceptance. **Measured throughput change is 0%.**
+
+The fetch audit independently regrades the original witnesses and full traces:
+21,832 candidate records, 4,968 V retirements and 44 probe observations. Its
+18,131 input pins remain unchanged. This existing runner did not observe
+per-child affinity; the outer taskset alone is not described as that evidence.
+The environment-fault runner closed normally with no OOM and all 44 unchanged
+fixtures passing at both delays; it is not a replacement for the still-red
+canonical gate.
+
 | Receipt | SHA-256 |
 | --- | --- |
 | `fast-segment-leaf-r1/closed.json` | `35e92836a1b51fc4c259833104873e07e982412c84c9ec45ffb56d1c2a3d097e` |
 | `fast-segment-core-r1/build-closed.json` | `060b6c494b3df15899b07f3a5ae4836fb75ac399b99813d8b8591649432072ba` |
 | `fast-segment-system-r2/closed.json` | `a30de9aeb360b8c276037fa561bd2c147f996eceef313a62071afcb439dffcf9` |
 | `fast-segment-regression-audit.json` | `efcc3318f5c3af9a5926da23a206af9e06f9edbe5c321769564efff4c0e37232` |
+| `fast-segment-fetch-r1/audit.json` | `4ed6e04dbe86cd85a956a1ee4cb11f73d26b77a725b87c3983a9b593a281b4a2` |
+| `fast-segment-env-fault-r1/closed.json` | `f7c1d1d9f70d99426fa927553540288520e6023ca6e75de3d7263fc46915430f` |
+| `fast-segment-soc-r1/coremark/audit.json` | `c67ad755f58c4ce7a84596da8e6521da50e06d04e0f6d2f0446378854b8d2e04` |
+
+## Matched FPGA synthesis in progress
+
+`fpga/freeze_fast_segment_rk_candidate.py` checks the exact one-file transfer
+against the immediate way-banked parent. The freeze retains 190 payload files,
+170 common HDL inputs, all 158 hardware defines, 40/100 MHz constraints,
+full P5 caches, single-fill and posted-16 transport. Manifest SHA-256:
+`d4122ecbed950b845654bec8060fa83b96213f07b373b002604704cea06b6f7e`.
+Hardware-profile CPU-hierarchy lint passes all six hard structural classes;
+this is not full-SoC lint. Four export tests and four controller tests pass,
+including rejection of weakened clocks/disk guards.
+
+The first synthesis controller, invocation
+`c679e761a2984246b727bed8ba8beaba`, fails **before launching Vivado**. Although
+free space exceeded 6 GiB, admission also requires twice the measured parent
+growth above the 4 GiB stop floor: **7,208,493,056 bytes** total. That condition
+was not met. `fast-segment-synthesis-r1/preflight-failed.json` and its journal
+preserve the failed attempt; it is not a native synthesis result.
+
+The subsequent cleanup removes exactly four unpinned PCH files and seven
+PCH-only archives, **780,714,399 bytes**, after checking archive contents,
+closed build owners, no open handles and **28,856 protected hashes**. Sources,
+models, dependency/header evidence, media, traces and all DCPs remain. An archive
+with a PCH-looking name also contained traces and was explicitly excluded.
+Deleted cache copies are not recoverable, but are regenerable. The plan and
+closure are `segment-compiler-cache-prune-{plan,closed}.json` in the evidence
+root. Available space rose to 7.31 GB; no guard was weakened.
+
+The separately named `fast-segment-synthesis-r2` starts at **03:45:21 UTC**,
+owner `ventium-fast-segment-synth-oct14-r2.service`, invocation
+`ceb137ea40374841945bf828d4ea8608`. Exactly the same sources/defines/mapper and
+native guard/cleanup policy are used: one exclusive Vivado family, 45-minute
+native limit, 8 GiB RAM / 6 GiB swap, 13 GiB combined early stop, 2 GiB host
+reserve and 4 GiB free-disk stop. CPU16–19 is applied with actual `taskset`.
+It has **no closed synthesis or frequency result yet**.
+
+The unchanged read-only clock/structure/parent-comparison Tcl is queued only
+after successful native closure and independent DCP/source audit. Its separate
+8/4 GiB RAM/swap and 15-minute limits remain unchanged. The sequencer has no
+retry, route, deployment or guard-relaxation path. It also records native Vivado
+driver affinity. Prepared-r2 receipt SHA-256:
+`bae01818fafee5f9d9c6e3cf4207fd6f59716a77bf18985708c9f45735db14fe`.
+The original tested recipe is `fpga/prepare_fast_segment_synthesis.py`; the
+identity-only retry and sequencing scripts are retained as
+`prepare_fast_segment_retry.py` and `finish_fast_segment_timing.py` in the
+external evidence root. No dirty root RTL was modified.
 
 ## Still required
 
-This candidate remains **UNQUALIFIED**. Next are full-PC controls and a
-source-matched timing measurement; no new Vivado build or programming occurred
-in this step. A >=40 MHz synthesized result, routed timing, green canonical
+This candidate remains **UNQUALIFIED**. The short full-PC controls are closed;
+source-matched synthesis is running, with no new FPGA programming. A >=40 MHz
+synthesized result, routed timing, green canonical
 gates, duration-valid CoreMark score, complete standard suite and physical
 UV-fast Win95 UI/Quake timedemo acceptance are still required.
 
-Latest verified gameplay baseline: **0.50607097 total U+V IPC**, older
-`c7b95b78` FP-repair simulation, cycles **1,300,065,237–1,400,065,237**.
+Latest verified gameplay baseline: **0.47330821 total U+V IPC**, older
+`c7b95b78` FP-repair simulation, cycles **1,500,065,237–1,600,065,237**.
 This candidate is gameplay-unmeasured. The unchanged installed FPGA still has
 no Doom FPS result.
