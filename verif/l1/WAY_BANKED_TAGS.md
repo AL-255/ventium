@@ -106,12 +106,15 @@ Audit SHA-256:
 `8c83d47cbee84baa1fc9b578743f30df04ed6a2c005e57cf3c94423e6f3036af`.
 No Vivado family remains.
 
-Still required: whole-core source transfer/differential tests, standard-suite acceptance, full synthesis
->=40 MHz, routing and physical Win95/Quake verification. The former worst
+The [two-file combined core](WAY_BANKED_CORE.md) now adds the re-proved
+fetch-fault page arithmetic and passes directed/private-QEMU checks. Its
+canonical gate remains failed; full-PC transfer and standard-suite acceptance,
+full synthesis >=40 MHz, routing and physical Win95/Quake verification remain
+open. The former worst
 path still spans fetch/translation/cacheability/paired-store ACK/writeback;
 way banking is not proof that this cross-module path is fixed.
 
-Latest verified gameplay IPC is **0.48176594 total U+V**, older FP-repair
-simulation model `c7b95b78`, cycles **1,100,065,237–1,200,065,237**
+Latest verified gameplay IPC is **0.51027341 total U+V**, older FP-repair
+simulation model `c7b95b78`, cycles **1,200,065,237–1,300,065,237**
 ([evidence](../../fpga/FP_REPAIR_EXPORT.md)). This proposal is gameplay-unmeasured.
 The existing FPGA still fails Doom startup on memory SMSW; no Doom FPS exists.
