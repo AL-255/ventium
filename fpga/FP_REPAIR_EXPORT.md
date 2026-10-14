@@ -507,7 +507,7 @@ Sealed complete-line prefix: **631,534 bytes**, SHA-256
 `44e1548541fb565ae2261dd533c9397894a25db88baf25a1b36309a876897df8`.
 No new run, snapshot restore, STEP or guest patch was used.
 
-### Latest gameplay window: 1.8B–1.9B
+### Previous gameplay window: 1.8B–1.9B
 
 The same older `c7b95b78` cold simulation remains live under the same owner.
 A new read-only audit checks the model hash, exact native command, CPU11
@@ -521,7 +521,7 @@ the stone hall with shotgun, enemy and HUD; both were visually inspected.
 | V retirements | 155,734,201 | 167,349,752 | 11,615,551 |
 | Total retirements | 729,358,681 | 779,789,136 | 50,430,455 |
 
-Latest verified reporting baseline: **0.50430455 total U+V IPC**. Both endpoint
+Verified reporting baseline at that audit: **0.50430455 total U+V IPC**. Both endpoint
 totals equal U + V. The scene window differs from earlier measurements; this
 is not a controlled fix gain or a whole-timedemo average. The current
 fast-segment/prefix-payload candidates remain gameplay-unmeasured. No completed
@@ -534,6 +534,34 @@ The sealed complete-line prefix is **681,550 bytes**, SHA-256
 `75ec5153725d7e8dc86e39a7ec3bc74535e7ca444d3ec93247906cb3b8ea2f03`.
 No new simulation, snapshot restore, STEP, guest patch or color manipulation
 was used.
+
+### Latest gameplay window: 2.2B–2.3B
+
+The same older `c7b95b78` cold simulation remains live under its original owner,
+with the exact native command, input/model hashes and actual CPU11 affinity
+rechecked. As-is frames 17 and 18 show the player in a stone room, first with
+a rockets pickup message and then facing a red wall button; both retain the
+weapon and HUD. Neither image is a loading screen. Lossless PNG copies used
+for inspection have no color, contrast, brightness, size or gamma adjustment.
+
+| Counter | Cycle 2,200,065,237 | Cycle 2,300,065,237 | Difference |
+| --- | ---: | ---: | ---: |
+| Core clocks | 2,200,064,874 | 2,300,064,874 | 100,000,000 |
+| U retirements | 716,888,070 | 754,247,689 | 37,359,619 |
+| V retirements | 196,824,451 | 208,238,277 | 11,413,826 |
+| Total retirements | 913,712,521 | 962,485,966 | 48,773,445 |
+
+Latest verified baseline: **0.48773445 total U+V IPC**. Endpoint totals equal
+U + V. Scene variation is not a controlled change gain; this is not the full
+timedemo's average or its final FPS. The newer response-kind timing candidate
+has no gameplay measurement, and no standard-suite or FPGA pass is inferred.
+
+Evidence: `audit_gameplay_2300m.py`, `gameplay-2200m-2300m-audit.json` and the
+**793,512-byte** complete-line log prefix in the existing evidence root. Prefix
+SHA-256: `59986079705ad38c8e06a5ebf346260f4fb325b437340bbe5d59e764edb33a3d`.
+Audit SHA-256: `cb6f99527de3c6b6386834aabfe4333409069093a6654313b3e24c1db113732d`.
+The audit launches no new simulation and performs no snapshot restore, STEP,
+guest patch or FPGA write. The original Quake run remains active.
 
 ### Win95 native closure and evidence-protocol failure
 

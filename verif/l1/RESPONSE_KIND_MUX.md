@@ -101,20 +101,95 @@ manifest SHA-256:
 `a904bc49994af1079b1ae68b35e8aad00578e68eb7a3f9886f7515e60eaf4240`.
 It remains **UNQUALIFIED** and has no DCP, routed result or bitstream.
 
-Both unchanged ten-iteration CoreMark CRC controls are now running on CPU12:
+Both unchanged ten-iteration CoreMark CRC controls now close successfully on CPU12:
 `ventium-data-size-cm10-response-kind-oct14-r1.service`, invocation
 `2aca270e97664ff587dcaa708c503e63`. Actual native child affinity is checked by
-the owner. These are bounded cold controls, **not** duration-valid performance
-scores or the complete correctness suite. Strict frozen CPU-hierarchy lint now
+the owner; the independent audit rechecks 21,935 source pins and the original
+media. Both standard CRC sets match. Performance/validation ticks are
+**4,767,218 / 4,753,406**, exactly the parent's counts: **0% sampled cycle gain**.
+Native durations are 215.12 / 218.98 s, all children reaped, no OOM. These are
+bounded cold controls, **not** duration-valid performance scores or the complete
+correctness suite. Strict frozen CPU-hierarchy lint now
 closes native 0 in **3.98 s** with all 158 hardware defines and all six hard
 structural warning classes enabled. This is not full-SoC lint; the 98 inherited
 platform warnings remain open.
 
-Next: close/regrade the pending controls, run original cache/fetch/fault checks,
-and measure synthesis/timing under the existing single-Vivado resource guards.
-Canonical reference/observer failures and the full standard suite remain open;
-no current-board reprogramming is justified by this leaf/core result.
+## Additional unchanged fault and fetch regressions
 
-Verified gameplay baseline: **0.50430455 total U+V IPC**, older `c7b95b78`
-simulation, cycles **1,800,065,237–1,900,065,237**. It predates this candidate
-and is not Doom or physical-FPGA performance. This candidate is unmeasured.
+The original 22-case fetch corpus closes native 0 in **25.37 s**:
+176 RTL executions, 88 complete QEMU comparisons, **21,832 candidate records,
+4,968 V retirements and 44 probe witnesses**. Its independent audit checks
+18,594 input pins and complete parent/candidate state and cycles. Per-child
+affinity was not observed in this driver and is not claimed.
+
+The 44-case x87 environment-store fault corpus closes native 0 in **12.27 s**
+on the unchanged R2 retry: **88 full comparisons, 35,124 records and 4,580 V
+retirements** at AXI delays 0/7, with actual child CPU13–16 affinity recorded.
+The first attempt remains **FAIL**: QEMU's golden producer timed out connecting
+to its GDB stub on `full0-env160-head1-present0-inject0`. All 88 RTL self-checks
+passed even then, but that does not repair the missing golden. Its root cause
+is unproved; no port collision is assumed. R1/R2 input pins and fixture bytes
+are identical, and neither failed evidence nor comparisons were filtered.
+
+The original 30-case prefix-boundary gate remains **FAIL**: eight finite-CS
+QEMU free-runs exit 135 rather than 133, before RTL execution. The other 22
+cases, including four previously repaired upstream-QEMU cross-page SMC cases,
+complete **176 RTL executions / 88 full comparisons**, with 5,540 candidate
+functional records and 428 V retirements in cycle mode. Full parent/candidate
+state and cycles match. This is not a 30-case pass or a canonical-QEMU repair.
+
+[`audit_response_kind_faults.py`](audit_response_kind_faults.py) independently
+regrades these complete fault/boundary records and native terminal owners.
+Audit SHA-256:
+`5b93774bd78cfe4f0b0401be42f22a0600d5fb9d7a164878345a1e7eec8f97bd`.
+The evidence audit passing does not waive either failed gate/run.
+
+## Guarded timing measurement
+
+[`prepare_response_kind_synthesis.py`](../../fpga/prepare_response_kind_synthesis.py)
+preserves the closed parent's entire native process lifecycle, memory/disk
+admission, 40/100 MHz clocks and diagnostic synthesis mapper. Host tests reject
+clock reduction and disk-floor relaxation. It also binds every proof above,
+the exact one-file source delta, and the original failed outcomes.
+
+R1 admission, owner `ventium-response-kind-synth-oct14-r1.service`, invocation
+`cad6b0cfb13246cb8b3506180951844d`, closed native 1 **before launching Vivado**.
+Although cleanup raised free space above 6 GiB, the unchanged stricter guard
+requires **4 GiB plus twice 1,456,762,880 bytes** of measured prior disk growth.
+The failed invocation is retained. The separately named R2 controller changes
+only output/owner identities; source, tests, mapper and guards are unchanged.
+
+The first exact compiler-product prune removed **612,588,120 bytes / 1,821
+files**, preserving all 41,864 protected hashes. Only generated objects,
+archives, precompiled headers and selected generated C++ were removed;
+models, sources, guest media, dependency headers, logs and checkpoints remain.
+These products are regenerable but not byte-for-byte backed up.
+
+The second exact prune removed **924,001,693 bytes / 3,755 generated C++ and
+object/archive files**, with all **64,368 protected hashes** unchanged. The
+combined removal is 1,536,589,813 bytes; no retained model or evidence was lost.
+Its separate plan and closure are `response-kind-generated-cpp-prune-*.json`
+under the scratch root. Source and model-specific dependency headers remain;
+rebuilding these closed models requires regenerating their removed C++/objects.
+
+R2 passed the unchanged admission and started native synthesis at
+**2026-10-14 06:48 UTC**. Controller
+`ventium-response-kind-synth-oct14-r2.service`, invocation
+`62ab5441fdc544f98e56744060bf8e41`; sole Vivado family scope invocation
+`44ff1873708640deaecae1d877f135f6`. The actual scope enforces **8 GiB RAM /
+6 GiB swap / 48 tasks**, with one synthesis worker, a 13 GiB combined early
+stop, 2 GiB host RAM/swap floors and a 4 GiB disk floor. Synthesis has a
+45-minute limit. The native parent and its synthesis child belong to this
+single family; they are not separate competing builds. Closure, independent
+netlist/clock audit and any Fmax result are still pending.
+
+Canonical reference/observer failures and the full standard suite remain open.
+No current-board reprogramming is justified by these narrow results, and no
+response-kind synthesis completion, routed frequency or hardware pass is
+claimed yet.
+
+Newest verified gameplay baseline: **0.48773445 total U+V IPC**, older
+`c7b95b78` simulation, cycles **2,200,065,237–2,300,065,237**. It predates this
+candidate and is not Doom, physical-FPGA performance or a whole-timedemo
+average. This candidate is unmeasured. Frozen controller receipts retain the
+0.50430455 baseline known at launch; their inputs were not edited during the run.
