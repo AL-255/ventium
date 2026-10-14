@@ -386,7 +386,7 @@ The newer timing/tag-bank candidates remain gameplay-unmeasured. The timedemo
 is still running; no final FPS, physical FPGA/Doom result or suite pass follows
 from this window.
 
-### Latest gameplay window: 1,200M–1,300M
+### Gameplay window: 1,200M–1,300M
 
 The same continuously running `c7b95b78` simulation now verifies at
 **0.51027341 total U+V IPC**, reported cycles
@@ -410,10 +410,42 @@ The PNG preview is format-only, without color or size changes.
 `10d2460c104ed5b2af7c0699ffdce7d7db0267814eb7d6494a42acdc2cf9f5c6`.
 `gameplay-1200m-1300m-audit.json` SHA-256 is
 `e472ed5c3c3513721f1d472c326d923d0e187458d822c46d12e3583a8ac84bd2`.
-This is the latest reporting baseline, not a controlled gain over the previous
+This was the reporting baseline, not a controlled gain over the previous
 scene. The [combined way-banked/fetch-page candidate](../verif/l1/WAY_BANKED_CORE.md)
 is newer and gameplay-unmeasured. The timedemo remains active: no final FPS,
 timedemo completion, physical Doom result or suite acceptance is established.
+
+### Latest gameplay window: 1,300M–1,400M
+
+The same cold-running `c7b95b78` model now verifies **0.50607097 total U+V
+IPC**, reported cycles **1,300,065,237–1,400,065,237**. The actual executable,
+PID859279, CPU11, cold argv and original supervisor invocation were checked
+again; there was no restart, snapshot restore or debugger STEP.
+
+| Counter | Start | End | Difference |
+| --- | ---: | ---: | ---: |
+| Core clocks | 1,300,064,874 | 1,400,064,874 | 100,000,000 |
+| U retirements | 381,420,663 | 420,439,602 | 39,018,939 |
+| V retirements | 99,570,503 | 111,158,661 | 11,588,158 |
+| Total retirements | 480,991,166 | 531,598,263 | 50,607,097 |
+
+Both endpoint totals equal U + V. Frames 8 and 9 show weapon fire, an enemy,
+particles and the gameplay HUD. Frame 9's unchanged PPM SHA-256 is
+`2b21c14f350d8c20f76af0c1abc9bd9f051b282876b24d9dd28a8da85f78c474`;
+the PNG preview changes format only. The sealed 488,905-byte complete-line
+prefix has SHA-256
+`1ce452969d7db850b20e8fc048e0cfcdc0e5b4a5891c3c09ce5507b02febf7d4`.
+`audit_gameplay_1400m.py` reuses the preceding audit's identity and arithmetic
+checks, changing only the window, counts and frame identities. Its receipt
+`gameplay-1300m-1400m-audit.json` has SHA-256
+`cb0e80d4f362e09179ac94a29851406a05d05ddf50d26098b1126cc8f00b25a7`.
+Audit owner `ventium-fp-repair-gameplay1400-oct14.service`, invocation
+`77775f9f60cf4466beea05939dfbb386`, is closed MainPID0 / exit0.
+
+This is the newest reporting baseline, **not a controlled performance change**
+between builds. The way-banked/fetch-page candidate remains gameplay-unmeasured.
+The original timedemo is still running; no final FPS, timedemo completion,
+standard-suite pass or physical FPGA acceptance is claimed.
 
 ### Win95 native closure and evidence-protocol failure
 

@@ -84,6 +84,15 @@ affinities were observed as CPUs16–19. Limits remain **8 GiB RAM / 6 GiB swap*
 above both 6 GiB and twice the measured 1,456,762,880-byte parent growth above
 the 4 GiB floor. No guard was lowered to admit this run.
 
+The existing synthesis is now followed by a bounded sequencer
+`ventium-way-banked-timing-sequencer-oct14-r1.service`, invocation
+`9907a645f50f48c1b7cc1f90f2e29fb2`. It waits for that exact live owner to close
+successfully, runs the unchanged synthesis audit, then launches the already
+prepared read-only timing controller and checks its closure. It cannot retry
+synthesis, relax the native guards, route or program the FPGA. Its script and
+receipts are `finish_way_banked_timing.py` and `way-banked-sequencer-*.json`
+under the evidence root. A queued audit is not a timing result.
+
 To reach admission, ten superseded Oct10/11 **diagnostic synthesis DCPs** were
 removed, freeing **1,800,063,540 bytes**. Each exact target's historical audit
 hash, regular-file inode, naturally closed owner invocation and absence of
@@ -100,8 +109,8 @@ synthesized Fmax**, routed timing, a green canonical gate, duration-valid
 performance and the entire standard suite, then physical UV-fast Win95 cold
 desktop plus keyboard/mouse interaction and complete Quake timedemo.
 
-Latest verified gameplay baseline is **0.51027341 total U+V IPC**, older
-FP-repair simulation `c7b95b78`, cycles **1,200,065,237–1,300,065,237**
+Latest verified gameplay baseline is **0.50607097 total U+V IPC**, older
+FP-repair simulation `c7b95b78`, cycles **1,300,065,237–1,400,065,237**
 ([counter evidence](FP_REPAIR_EXPORT.md)). This candidate is gameplay-unmeasured.
 The existing physical `fe9f539d` image still fails Doom startup; no Doom FPS or
 new FPGA acceptance is implied by these simulation results.
