@@ -462,7 +462,7 @@ the weapon and HUD; both were viewed as-is, not inferred from a console marker.
 | V retirements | 122,586,755 | 133,017,441 | 10,430,686 |
 | Total retirements | 581,800,736 | 629,131,557 | 47,330,821 |
 
-The latest reporting baseline is therefore **0.47330821 total U+V IPC**.
+The reporting baseline at that point is **0.47330821 total U+V IPC**.
 This window is below 0.48; the earlier higher windows do not establish a
 whole-timedemo average or controlled fix gain. The current fast-segment timing
 candidate still has **no gameplay measurement**. No final FPS, completed
@@ -475,6 +475,37 @@ Receipt `gameplay-1500m-1600m-audit.json` SHA-256:
 The sealed prefix is 576,206 bytes, SHA-256
 `a8fadd905f387962cd275b587dd878fd5336b707bfd33829168d044ff37aa05a`.
 The native run was not restarted, stepped or patched.
+
+### Latest gameplay window: 1.7B–1.8B
+
+The same cold native simulation, owner invocation and executable remain live.
+The read-only audit rechecks the executable, exact command, actual CPU11
+affinity and cold-start provenance. As-is frames 12 and 13 show hallway
+gameplay and combat with weapon/HUD, not loading screens. PNG previews are
+format conversions only, without gamma, brightness or contrast processing.
+
+| Counter | Cycle 1,700,065,237 | Cycle 1,800,065,237 | Difference |
+| --- | ---: | ---: | ---: |
+| Core clocks | 1,700,064,874 | 1,800,064,874 | 100,000,000 |
+| U retirements | 534,104,072 | 573,624,480 | 39,520,408 |
+| V retirements | 144,068,343 | 155,734,201 | 11,665,858 |
+| Total retirements | 678,172,415 | 729,358,681 | 51,186,266 |
+
+The newest verified reporting baseline is **0.51186266 total U+V IPC** on
+older simulation model `c7b95b78`. Both totals equal U + V. The different
+scene window is **not a controlled improvement caused by a fix**, and does
+not replace the lower earlier windows when judging whole-timedemo throughput.
+The current fast-segment and prefix-memory-payload candidates remain
+gameplay-unmeasured. No final FPS, full timedemo or physical FPGA acceptance
+is claimed.
+
+Evidence root is unchanged. `audit_gameplay_1800m.py` preserves the preceding
+audit's live-process and counter checks. Receipt
+`gameplay-1700m-1800m-audit.json` SHA-256:
+`7eacf02a9332a100607a8295f711130e663c8a01d6aaf9d06b0fac5902c2912e`.
+Sealed complete-line prefix: **631,534 bytes**, SHA-256
+`44e1548541fb565ae2261dd533c9397894a25db88baf25a1b36309a876897df8`.
+No new run, snapshot restore, STEP or guest patch was used.
 
 ### Win95 native closure and evidence-protocol failure
 

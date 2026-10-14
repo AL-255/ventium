@@ -211,7 +211,13 @@ synthesized result, routed timing, green canonical
 gates, duration-valid CoreMark score, complete standard suite and physical
 UV-fast Win95 UI/Quake timedemo acceptance are still required.
 
-Latest verified gameplay baseline: **0.47330821 total U+V IPC**, older
-`c7b95b78` FP-repair simulation, cycles **1,500,065,237–1,600,065,237**.
+The next isolated experiment is the
+[PREFIX66 memory-payload dependency cut](../fe_pipe/PREFIX_MEM_PAYLOAD.md),
+targeting the remaining decoded-length-to-address path. Its leaf and private
+functional checks pass, but it has no measured timing improvement yet and
+does not change this candidate's acceptance status.
+
+Latest verified gameplay baseline: **0.51186266 total U+V IPC**, older
+`c7b95b78` FP-repair simulation, cycles **1,700,065,237–1,800,065,237**.
 This candidate is gameplay-unmeasured. The unchanged installed FPGA still has
 no Doom FPS result.
