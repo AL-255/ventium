@@ -4,6 +4,10 @@ These sources preserve the byte-exact October 2 isolated UI-input qualification.
 They are not connected to the canonical full-PC host, do not modify production
 RTL, and do not establish Windows UI acceptance.
 
+New investigation: [latched AUX byte ownership](AUX_STATUS.md), a separate
+one-line status repair and actual-iobus mixed keyboard/mouse microgate. Its
+qualification status is tracked separately from the October 2 loss witnesses.
+
 The pure-host test checks bounded command parsing, scancodes/parity, endpoint
 identity, byte/prefix ownership and checked raw-capture finalization. The narrow
 RTL test instantiates unchanged production `ps2.v` and `simple_fifo.v` with
@@ -19,8 +23,11 @@ diagnostic sender must refuse false acceptance; it never speculatively replays.
 
 ## Bounded reproduction
 
-Use an owned scratch directory under `/var/tmp` (or repo `tmp` only if its
-filesystem is healthy), never a new home-directory folder. Check disk space first.
+For new runs, use an owned scratch directory under `/home/yukidama/external/tmp`
+and set `TMPDIR` there explicitly, as required by the current `AGENTS.md`.
+Check that the external filesystem is mounted, writable and has enough free
+space. Do not fall back to the root filesystem. Historical paths below are
+retained evidence locations, not instructions to create new `/var/tmp` runs.
 Apply owner limits of 2 GiB memory, swap disabled, 64 tasks and two free CPUs,
 excluding any running gameplay CPU. Cap each compile/test phase below 590 seconds;
 stop on an actual resource failure instead of automatically retrying.
