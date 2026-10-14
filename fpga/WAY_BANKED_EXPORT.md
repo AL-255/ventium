@@ -11,7 +11,9 @@ Canonical verification remains failed.
 
 Next candidate: [parallel fast-memory segment admission](../verif/segment_extent/FAST_SEGMENT_ADMISSION.md)
 targets the newly measured fast-store path. Its leaf/full-core controls and
-source-matched full-PC build pass, but it has no new timing or physical result.
+source-matched full-PC build pass. Its matched synthesis/timing audit now closes
+at **35.474830608 MHz unplaced (+2.84%)**, still short of 40 MHz and without
+a new bitstream or physical result.
 
 ## Transfer and source identity
 

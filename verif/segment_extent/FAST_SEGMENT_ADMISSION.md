@@ -3,7 +3,9 @@
 October 14, 2026 UTC. **Private timing candidate, not promoted or installed.**
 Directed checks pass with unchanged sampled architectural state, clocks and V
 retirements. The canonical gate remains **7 functional PASS / 101 FAIL**.
-There is no new frequency or gameplay result.
+Source-matched synthesis and independent timing audit close at **35.474830608
+MHz unplaced**, up **2.84%** from the immediate parent but still below 40 MHz.
+There is no candidate gameplay result or new bitstream.
 
 ## Why and what
 
@@ -117,7 +119,7 @@ canonical gate.
 | `fast-segment-env-fault-r1/closed.json` | `f7c1d1d9f70d99426fa927553540288520e6023ca6e75de3d7263fc46915430f` |
 | `fast-segment-soc-r1/coremark/audit.json` | `c67ad755f58c4ce7a84596da8e6521da50e06d04e0f6d2f0446378854b8d2e04` |
 
-## Matched FPGA synthesis in progress
+## Matched FPGA synthesis and timing closure
 
 `fpga/freeze_fast_segment_rk_candidate.py` checks the exact one-file transfer
 against the immediate way-banked parent. The freeze retains 190 payload files,
@@ -150,9 +152,14 @@ owner `ventium-fast-segment-synth-oct14-r2.service`, invocation
 native guard/cleanup policy are used: one exclusive Vivado family, 45-minute
 native limit, 8 GiB RAM / 6 GiB swap, 13 GiB combined early stop, 2 GiB host
 reserve and 4 GiB free-disk stop. CPU16–19 is applied with actual `taskset`.
-It has **no closed synthesis or frequency result yet**.
+It closes normally at **04:16:33 UTC**, native exit 0, in **1,871.61 s**.
+The independent audit checks **26,046 input pins**, native source/definition
+records and the resulting DCP. Peak RAM is **8,589,762,560 bytes**, peak swap
+**1,209,921,536 bytes**; no OOM, resource stop or input mutation occurs.
+The native synthesis summary retains **1 critical warning and 1,561 warnings**;
+native completion is not a warning-free or functional-acceptance claim.
 
-The unchanged read-only clock/structure/parent-comparison Tcl is queued only
+The unchanged read-only clock/structure/parent-comparison Tcl runs only
 after successful native closure and independent DCP/source audit. Its separate
 8/4 GiB RAM/swap and 15-minute limits remain unchanged. The sequencer has no
 retry, route, deployment or guard-relaxation path. It also records native Vivado
@@ -163,10 +170,43 @@ identity-only retry and sequencing scripts are retained as
 `prepare_fast_segment_retry.py` and `finish_fast_segment_timing.py` in the
 external evidence root. No dirty root RTL was modified.
 
+That timing owner, `ventium-fast-segment-clock-oct14-r2.service`, invocation
+`b2fbc88b58e340afa4b78248d80133be`, closes at **04:24:32 UTC**, exit 0, in
+**468.39 s**. Its independent audit checks **21,870 input pins**, the native
+25 ns core / 10 ns PL clocks and exact parent DCP. Peak RAM is **4,924,215,296
+bytes**, with no swap or OOM. Both retained owners have MainPID 0.
+
+| Matched synthesized estimate | Way-banked parent | Fast-segment candidate |
+| --- | ---: | ---: |
+| Core Fmax, MHz | 34.495843251 | 35.474830608 |
+| Setup slack at 40 MHz, ns | -3.989 | -3.189 |
+| Worst data delay, ns | 28.778 | 27.978 |
+| Worst logic levels | 100 | 98 |
+| Whole-chip LUTs | 187,410 | 187,215 |
+| Whole-chip registers | 55,006 | 54,993 |
+| RAMB36-equivalent / DSP | 277.5 / 47 | 277.5 / 47 |
+
+Fmax is `1000 / (25 - setup_slack)`, not the selected board clock. Candidate
+hold slack is -0.101 ns. This is **synthesized, unplaced estimation**, not
+routed timing or proof of physical congestion. The remaining worst path still
+runs from EIP through fetch/decode, PREFIX66 length-dependent memory payload
+selection, address/segment checks, request/ACK logic and ESP writeback. The
+98-level path does not cross the shared-FP datapath. No timing exception,
+pipeline disable or reduced cache is used to obtain this improvement.
+
+Closure hashes under the same evidence root:
+
+| Evidence | SHA-256 |
+| --- | --- |
+| `fast-segment-synthesis-r2/closed.json` | `f26a8cb120742d9519ff43fbd4cc9791b1ae7f25dba249930b0de7bf7e596e75` |
+| `fast-segment-synthesis-r2/audit.json` | `6281be4c9804c760895a27a550793dae0e94b199131b30c5ec81eba083ff875d` |
+| `fast-segment-clock-r2/closed.json` | `f75dc53754475b301a500d9625ca5e026aa03a0a76aafcca52039b3636e81402` |
+| `fast-segment-clock-r2/audit.json` | `7618459c973d1bf62904a27a3ce7a2e36b9c90b6fbb3eafcc7d17c96f57b3cd1` |
+
 ## Still required
 
 This candidate remains **UNQUALIFIED**. The short full-PC controls are closed;
-source-matched synthesis is running, with no new FPGA programming. A >=40 MHz
+source-matched synthesis is closed below target, with no new FPGA programming. A >=40 MHz
 synthesized result, routed timing, green canonical
 gates, duration-valid CoreMark score, complete standard suite and physical
 UV-fast Win95 UI/Quake timedemo acceptance are still required.
