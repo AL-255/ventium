@@ -442,10 +442,39 @@ checks, changing only the window, counts and frame identities. Its receipt
 Audit owner `ventium-fp-repair-gameplay1400-oct14.service`, invocation
 `77775f9f60cf4466beea05939dfbb386`, is closed MainPID0 / exit0.
 
-This is the newest reporting baseline, **not a controlled performance change**
+This was the reporting baseline at that point, **not a controlled performance change**
 between builds. The way-banked/fetch-page candidate remains gameplay-unmeasured.
 The original timedemo is still running; no final FPS, timedemo completion,
 standard-suite pass or physical FPGA acceptance is claimed.
+
+### Later gameplay window: 1.5B–1.6B
+
+The same native cold run, owner and model `c7b95b78` remain active. A fresh
+read-only audit verifies the executable hash, exact command/CPU11 affinity,
+unchanged cold-start provenance and a sealed complete-line log prefix.
+Frames 10 and 11 show combat and hallway/pickup gameplay respectively, with
+the weapon and HUD; both were viewed as-is, not inferred from a console marker.
+
+| Counter | Cycle 1,500,065,237 | Cycle 1,600,065,237 | Difference |
+| --- | ---: | ---: | ---: |
+| Core clocks | 1,500,064,874 | 1,600,064,874 | 100,000,000 |
+| U retirements | 459,213,981 | 496,114,116 | 36,900,135 |
+| V retirements | 122,586,755 | 133,017,441 | 10,430,686 |
+| Total retirements | 581,800,736 | 629,131,557 | 47,330,821 |
+
+The latest reporting baseline is therefore **0.47330821 total U+V IPC**.
+This window is below 0.48; the earlier higher windows do not establish a
+whole-timedemo average or controlled fix gain. The current fast-segment timing
+candidate still has **no gameplay measurement**. No final FPS, completed
+timedemo, full-suite pass or physical FPGA result is implied.
+
+`audit_gameplay_1600m.py` retains the preceding identity/arithmetic audit and
+changes only the exact window, counts and visually reviewed frame identities.
+Receipt `gameplay-1500m-1600m-audit.json` SHA-256:
+`3d12290b05b8f4d6e0b96d4c6b0de66b11ec0ad60dc31030d7bf8295d92f250e`.
+The sealed prefix is 576,206 bytes, SHA-256
+`a8fadd905f387962cd275b587dd878fd5336b707bfd33829168d044ff37aa05a`.
+The native run was not restarted, stepped or patched.
 
 ### Win95 native closure and evidence-protocol failure
 
