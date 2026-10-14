@@ -1,8 +1,9 @@
 # Direct x87 compare-invalid classification
 
-October 14, 2026 UTC. **Private timing proposal; not promoted, synthesized or
-installed.** Source-extracted comparisons, the qualified functional corpus and
-same-input replay pass; the canonical gate is still red. No timing gain is claimed.
+October 14, 2026 UTC. **Private timing proposal; synthesis running, not promoted
+or installed.** Source-extracted comparisons, the qualified functional corpus,
+same-input replay and short full-PC checks pass; the canonical gate is still
+red. No timing gain is claimed.
 
 ## Why this change
 
@@ -113,7 +114,8 @@ functional owner `5de4b124538f42009d202ca97e3f84ef` (exit 0), replay owner
 `2b4f1a9388ea4a3aa18f7780c84e45bf` (exit 0), and canonical owner
 `3e9721f66e284fc39fefa0fa28974ee1` (wrapper exit 1, preserving make exit 2).
 The canonical functional and cycle-band failures are not waived by these
-other passes. No synthesis, full-PC run or board programming followed.
+other passes. The subsequent full-PC transfer is recorded below; no board
+programming followed.
 
 | Receipt | SHA-256 |
 | --- | --- |
@@ -123,11 +125,69 @@ other passes. No synthesis, full-PC run or board programming followed.
 | `fp-compare-core-r1/verify-closed.json` | `29cdef3508ebfdf723996dfa5d6ca55a8c0b93e02958ac4d6fdc9f62b9c507f4` |
 | `fp-compare-regression-audit.json` | `20ec2c93635ad2548b1977e30065e64f910a3630f545385e9fcc2e48bdf36732` |
 
-Precise faults, a green canonical gate, the full standard suite, timing and
-physical Win95/Quake qualification remain open.
+## Full-PC transfer and pending synthesis
+
+The classifier and parallel next-line lookup are transferred together from
+the tested core onto the current-tag PC parent. **All 102 shared RTL sources
+match**; exactly `fp_shared/ven_fp_top.sv` and `rtl/mem/ven_l1d.sv` change.
+The three transfer tests reject missing, drifted, reapplied and unrelated edits.
+All 156 simulator definitions, UV/system/relocated fast paths, full P5 caches,
+single-fill policy and posted-16 transport are retained. No feature is disabled.
+
+`fp-compare-soc-r1` builds in **26.41 s**, native exit 0 with stable inputs and
+its own compiled host/header. Model SHA-256:
+`81edc510dab23425c3935e68b4ac9b5c0d84620e2df9f99e47a0a162f1c8f76a`.
+The 98 existing platform structural warnings are unchanged, not waived as a
+full-SoC lint pass. Separate strict CPU-hierarchy hardware lint passes all six
+structural classes in **4.03 s**.
+
+`fp-compare-env-fault-r1` passes **44 unchanged cold x87 environment-store
+fixtures**, each compared against complete QEMU traces at AXI latencies 0/7
+(88 differential comparisons), in **16.42 s**. Actual backing-memory activity
+and V retirement are required; all children exit and no OOM occurs. This does
+not cover every outstanding fault class.
+
+Both ten-iteration CoreMark seeds finish with their reference CRCs and exactly
+**4,767,218 / 4,753,406 ticks**, respectively. Thus measured cycle gain is
+**0%**, as intended for these cycle-neutral timing cuts. V retirements are
+1,055,307 / 1,054,254. These short controls are **not duration-valid scores or
+full standard-suite acceptance**. The independent auditor rechecks 20,739
+source pins, native CPU12 ownership, reaping and zero OOM.
+
+| New closed receipt | SHA-256 |
+| --- | --- |
+| `fp-compare-soc-r1/build-closed.json` | `3462e34aa0f6a3979464194878a63e8c846b1394546b9af438de2658256f54aa` |
+| `fp-compare-env-fault-r1/closed.json` | `d9414c25d297d332502853544a499d29fbf838aea1dca5d539337e4f885c6913` |
+| `fp-compare-lint-r1/closed.json` | `c8359d74ba28043b22ffac29bcf7386dc7aae90398606561f1edb02032340a99` |
+| `fp-compare-soc-r1/coremark/audit.json` | `41e4ca56f591df5477cb7ff55cdcaf11e38e481b68ac7ad827f2d1115a5db6f0` |
+
+The frozen FPGA manifest is
+`296ff7367ef6af0324c47a09615f09f2c02a700a3de411efc617f598c03c001b`:
+190 payloads, 170 matched HDL inputs, 158 hardware definitions, unchanged
+40/100 MHz constraints and mapper. The single synthesis launched at
+**2026-10-14 00:43:51 UTC**, owner `ventium-fp-compare-synth-oct14-r1.service`,
+invocation `f5d5293b365841b7bf83dee6be726874`; scope invocation
+`a1f0bc8567784b4389a60b35e14168be`. It has **no timing result yet**.
+RAM/swap limits remain 8/6 GiB, 48 tasks, native 45-minute bound, disk stop
+floor 4 GiB and the unchanged twice-measured-growth admission check.
+The independent clock audit is prepared, **not launched**; routing/programming
+are not part of these controllers. The matched parent is **33.028371371 MHz
+unplaced**, not a 40 MHz pass. Neither isolated area nor timing gain is assumed.
+
+To recover scratch space, 13 unpinned compiler-cache/link-archive files from
+closed builds were removed (**919,876,614 bytes**, regenerable). Sources,
+model binaries, generated C++/headers, logs and current evidence pins remain.
+Twenty older timing reports/August Win95 RAM snapshots were losslessly archived:
+1,385,095,168 allocated bytes became a 36,991,890-byte tar.gz, every decompressed
+SHA verified. **No guest disk was removed.** The archive and explicit restore
+manifest are `closed-reports-august-win95{.tar.gz,-plan.json}` in the evidence
+root. Current and immediate-parent DCPs and the latest timing reports remain.
+
+Broader precise faults, a green canonical gate, the full standard suite, timing
+and physical Win95/Quake qualification remain open.
 The existing FPGA/Doom image was not replaced; **Doom FPS is unavailable**.
 
 Gameplay IPC for this candidate is **unmeasured**. Latest verified baseline:
-**0.5048994 total U+V**, FP-repair simulation model `c7b95b78`, cycles
-**800,065,237–900,065,237**; [counter evidence](../../fpga/FP_REPAIR_EXPORT.md).
+**0.49236929 total U+V**, FP-repair simulation model `c7b95b78`, cycles
+**900,065,237–1,000,065,237**; [counter evidence](../../fpga/FP_REPAIR_EXPORT.md).
 That older model's timedemo is still active, and this is not FPGA or Doom IPC.

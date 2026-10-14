@@ -284,9 +284,45 @@ plan refused the unlaunched prime-CS clock folder; the successful plan names
 its actual closed `prime-cs-clock-swap4-r1` owner. No deletion preceded that
 successful plan.
 
-Current measured gameplay IPC for this FP-repair model is **0.5048994 total
-U+V**, cycles **800,065,237–900,065,237**. This supersedes the older simulation
+The first measured gameplay IPC for this FP-repair model was **0.5048994 total
+U+V**, cycles **800,065,237–900,065,237**. This superseded the older simulation
 reporting baseline `2b4d7a48` / 0.51030715 (cycles
 1,200,065,237–1,300,065,237), without implying a gain or regression between
 different windows. Error-free timedemo completion and physical FPGA acceptance
 remain open. This is not a Doom measurement.
+
+### Next complete gameplay window: 900M–1,000M
+
+The same continuously running native model and CPU11 owner were rechecked.
+The next complete 100M-clock window measures **0.49236929 total U+V IPC**:
+
+| Counter | Start | End | Difference |
+| --- | ---: | ---: | ---: |
+| Core clocks | 900,064,874 | 1,000,064,874 | 100,000,000 |
+| U retirements | 228,096,362 | 265,862,407 | 37,766,045 |
+| V retirements | 54,732,851 | 66,203,735 | 11,470,884 |
+| Total retirements | 282,829,213 | 332,066,142 | 49,236,929 |
+
+Reported cycle endpoints are **900,065,237–1,000,065,237**. Both satisfy
+total = U + V. Frames 4 and 5 show different gameplay views; frame 5 displays
+the grenade-launcher pickup. Its unmodified PPM SHA-256 is
+`cb4b790fa1b8243d20caedd8c526eb8f9d00ff0fb62a2961ff8dbc31c8895f6d`.
+The stable, complete-line log prefix and read-only audit are retained as
+`gameplay-900m-1000m-prefix.log` and `gameplay-900m-1000m-audit.json` in this
+evidence root. Audit SHA-256:
+`5b408ebd20fd75f25dd12554e37c5cd4772f4d8f21fa7e5e6ab3d15e887401d8`.
+
+This is the **latest verified reporting baseline**, still simulation model
+`c7b95b78f47f5e709136f98230bdf33975cf8db0e925956b469649cbf6384afd`.
+It predates the current next-tag/FP-classifier candidate, which remains
+gameplay-unmeasured. Window variation is not a controlled build regression.
+The timedemo remains active; no final FPS, physical result or completion pass
+is established.
+
+Win95 frame 5 now shows readable Welcome text, icons, taskbar and an ordinary
+pointer, without a visible error. Repeated vector-6 records at `FCB2:2FF7`
+match the already documented [ROM-ARPL callback aliases](ZERO_C1_EXPORT.md),
+not evidence by themselves of a new crash. The native run remains active;
+its current harness has no live UI-input channel. Closed-run, ordinary UI
+interaction and separate human acceptance are **still open**, not inherited
+from an older run or inferred from the clean image.

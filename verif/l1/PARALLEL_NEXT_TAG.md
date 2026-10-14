@@ -153,14 +153,18 @@ to obtain a pass.
 | `parallel-next-tag-core-r1/verify-closed.json` | `9537389e7060f6910b4a036514fafeff7b78fa71f2c08854b6a62415289d93ac` |
 | `parallel-next-tag-regression-audit.json` | `ca4029585453809ea30a123c8b5b35b684a44e69b3badd0109fd8e12f63a3b8d` |
 
-Remaining: green canonical gates, precise faults and full standard suite;
-address the independent
-FP timing path before another hardware candidate. Physical Win95/Quake
+Follow-up: this lookup and the direct FP compare-invalid classifier now have a
+[source-matched full-PC transfer](../fp_compare/README.md#full-pc-transfer-and-pending-synthesis).
+Both short CoreMark CRC checks and 44 cold environment-store fault fixtures
+pass; their guarded synthesis is active, with no timing result yet.
+
+Remaining: green canonical gates, broader precise faults and full standard
+suite, followed by timing closure. Physical Win95/Quake
 acceptance remains mandatory. The existing FPGA's Doom startup failure and
 absence of Doom FPS are unchanged.
 
 Candidate gameplay IPC is **unmeasured**. The newest verified simulation
-counter window is **0.5048994 total U+V**, FP-repair model `c7b95b78`, cycles
-**800,065,237–900,065,237**; [evidence](../../fpga/FP_REPAIR_EXPORT.md).
+counter window is **0.49236929 total U+V**, FP-repair model `c7b95b78`, cycles
+**900,065,237–1,000,065,237**; [evidence](../../fpga/FP_REPAIR_EXPORT.md).
 It predates this candidate, its timedemo remains active, and it is not an
 FPGA or Doom measurement.
