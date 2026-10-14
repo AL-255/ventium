@@ -1,7 +1,7 @@
 # 8042 AUX status must describe the selected byte
 
-October 14, 2026. **Private one-line repair, native microgate queued; not yet
-qualified or installed.** Four recipe/coverage tests pass. No production RTL,
+October 14, 2026. **Private one-line repair, native microgate passed; not yet
+full-PC qualified or installed.** Four recipe/coverage tests pass. No production RTL,
 active synthesis input, guest image or FPGA image was changed.
 
 ## Defect and proposed repair
@@ -44,7 +44,7 @@ Inputs are wired-AND, odd-parity PS/2 frames or ordinary D2h/D3h controller
 output-buffer commands. Those commands are explicitly distinguished from
 wire-origin bytes and from device-command ACKs.
 
-The planned matrix has **496 distinct stimuli per build profile**:
+The completed matrix has **496 distinct stimuli per build profile**:
 
 - Keyboard-only, mouse-only, both ordered arrivals, repeated status polling,
   interleaved queues and simultaneous wire arrival.
@@ -71,15 +71,35 @@ the separate [loss-fix proposal](proposals/README.md).
 Recipe tests: `python3 -B -m unittest discover -s verif/ps2_ui -p test_aux_status.py -v`
 finishes with **4 PASS**. This does not compile or run the RTL.
 
-At **04:05:39 UTC**, service `ventium-ps2-aux-oct14-r1.service`, invocation
-`e58b5bea7ec94decbba0fbd572bdd755`, is confirmed live on CPU13, waiting for the
-exact live timing sequencer invocation `22c3239ddc57427ab4f265337a7d895c`.
-Observation failure never means that job has finished. No compiler is launched
-until it becomes terminal and the queued source hashes still match. There is
-no retry or modification of the timing/FPGA job.
+The first run waits for the exact timing sequencer invocation
+`22c3239ddc57427ab4f265337a7d895c` to close. It then completes all **996 native
+executions in profile 0**, but fails before profile 1 compilation: the driver's
+negative-control loop shadows the RTL-source list with an integer. This is a
+driver failure, not an RTL failure or a complete matrix pass. The failed
+`ventium-ps2-aux-oct14-r1.service` invocation
+`e58b5bea7ec94decbba0fbd572bdd755` and its receipt remain unchanged.
 
-Output is reserved at
-`/home/yukidama/external/tmp/ventium-ps2-aux.syNvZwg1/r1`.
+The two-line driver correction renames that loop variable; it changes no RTL,
+fixture, oracle or expected result. The separate full rerun,
+`ventium-ps2-aux-oct14-r2.service`, invocation
+`527a4a8260594a0884b515c30fd3f329`, closes normally in **164.88 s**, native exit
+0 / MainPID 0, with **3,984 executions** across all four compiled profiles:
+
+- **1,984 repaired-case passes** (496 per profile).
+- **1,024 unchanged-parent control passes**.
+- **960 unchanged-parent bug witnesses**, each a native failure with the exact
+  status/data origin mismatch, not a passing guest or controller result.
+- **16 constant-AUX negative variants rejected** by the same origin check.
+
+All source pins and native-log hashes were independently rechecked. Actual
+CPU13 affinity is recorded for each native child. Peak scope RAM is
+**918,839,296 bytes**, with zero OOM events and no swap.
+
+Evidence root is `/home/yukidama/external/tmp/ventium-ps2-aux.syNvZwg1`.
+Failed partial receipt `r1/closed.json` SHA-256:
+`531dfb4e036eff28c41914039cb8603e6d0096d8775e4e0f3703ce14045581b2`.
+Complete receipt `r2/closed.json` SHA-256:
+`c20586f06a84633b1d4bdec25b7be45f9e76e027ec4124528bb0f211bd1ae042`.
 The gate enters the **existing shared build lock**, uses Verilator 5.046 through
 `tools/verilator_serial.sh`, then lowers its scope to **2 GiB RAM, zero swap,
 64 tasks and one compiler**. Native CPU13 affinity is checked. Limits are 120 s
@@ -97,10 +117,16 @@ tools/build_scope.sh -- taskset -c 13 python3 -B \
   verif/ps2_ui/run_aux_status.py --out /home/yukidama/external/tmp/NEW_OWNED_LEAF
 ```
 
-Native RTL results, full-PC source transfer, differential/standard suite and
+After native closure and no-open-handle checks, ten disposable PCH caches
+were removed: **821,804,453 bytes**. All **5,005 protected source, receipt,
+binary and log hashes** remain unchanged. The caches are regenerable, not
+recoverable; exact targets are in `pch-prune-plan.json` and closure in
+`pch-prune-closed.json`. No test model or evidence was removed.
+
+Full-PC source transfer, differential/standard suite and
 physical Win95 keyboard/mouse acceptance remain **open**. This peripheral
 repair does not claim a processor timing or throughput improvement.
 
-Gameplay baseline: **0.47330821 total U+V IPC**, older simulation `c7b95b78`,
-cycles **1,500,065,237–1,600,065,237**. The fast-segment candidate and this
+Gameplay baseline: **0.51186266 total U+V IPC**, older simulation `c7b95b78`,
+cycles **1,700,065,237–1,800,065,237**. The fast-segment candidate and this
 peripheral derivative have no gameplay measurement.

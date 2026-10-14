@@ -230,9 +230,9 @@ def main():
                     native(folder, model, number, variant, case, expected)
                     number += 1
             for variant, scenario in ((2, 1), (3, 0)):
-                for sources in (0, 3):
+                for input_sources in (0, 3):
                     native(folder, model, number, variant,
-                           (scenario, sources, 64, 31, 1, 1), 'constant_aux_mutant')
+                           (scenario, input_sources, 64, 31, 1, 1), 'constant_aux_mutant')
                     number += 1
             assert sha(model) == model_hash
             result['builds'][-1]['model_sha256'] = model_hash
