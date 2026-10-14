@@ -327,7 +327,7 @@ channel. The native run was subsequently closed as described below; ordinary
 UI interaction and separate human acceptance are not inherited from an older
 run or inferred from the clean image.
 
-### Latest gameplay window: 1,000M–1,100M
+### Gameplay window: 1,000M–1,100M
 
 The unchanged, continuously running `c7b95b78` model now measures
 **0.49721089 total U+V IPC**, cycles **1,000,065,237–1,100,065,237**.
@@ -350,11 +350,41 @@ The format-only PNG preview has no color or size adjustment.
 `audit_gameplay_1100m.py` retains a stable complete-line log prefix and
 `gameplay-1000m-1100m-audit.json`, SHA-256
 `917796b44ab611478a23584ccfdf7b697fa477b84e15bca122cc1402b4a90540`,
-under the evidence root above. This is the **latest verified gameplay IPC**,
+under the evidence root above. This is a verified historical gameplay window,
 still an older simulation model: current data-size/current-tag/next-tag/
 FP-classifier candidates remain gameplay-unmeasured. The timedemo is still
 running; no completion, final FPS, physical FPGA or standard-suite PASS is
 claimed.
+
+### Latest gameplay window: 1,100M–1,200M
+
+The same continuously running `c7b95b78` simulation model measures
+**0.48176594 total U+V IPC**, reported cycles
+**1,100,065,237–1,200,065,237**. The native executable SHA, PID859279,
+CPU11 affinity, exact cold argv and original supervisor invocation were
+rechecked. This is a later scene window, not a controlled build comparison.
+
+| Counter | Start | End | Difference |
+| --- | ---: | ---: | ---: |
+| Core clocks | 1,100,064,874 | 1,200,064,874 | 100,000,000 |
+| U retirements | 304,559,167 | 342,191,900 | 37,632,733 |
+| V retirements | 77,228,064 | 87,771,925 | 10,543,861 |
+| Total retirements | 381,787,231 | 429,963,825 | 48,176,594 |
+
+Both endpoint totals equal U + V. Frame 6 shows combat/death and frame 7
+shows hallway gameplay with weapon/HUD, not loading. Frame 7 original PPM
+SHA-256 is `7a6f977ecf74f8c3277c8c3f3846e5368a3813131fdf1cc6712aad6461d847df`;
+its PNG preview is format-only, with no color or size adjustment.
+
+`audit_gameplay_1200m.py` retains the 423,315-byte stable complete-line prefix
+`gameplay-1100m-1200m-prefix.log`, SHA-256
+`adc07ff8e678d021761ec1f66776411426f222779920b3047089670b8c76fc64`.
+The audit `gameplay-1100m-1200m-audit.json` has SHA-256
+`39946af7cfec14cc216957244f7c988632dfc6234df7156cedc98d7f45882875`.
+This supersedes the reporting baseline, **not** earlier retained measurements.
+The newer timing/tag-bank candidates remain gameplay-unmeasured. The timedemo
+is still running; no final FPS, physical FPGA/Doom result or suite pass follows
+from this window.
 
 ### Win95 native closure and evidence-protocol failure
 

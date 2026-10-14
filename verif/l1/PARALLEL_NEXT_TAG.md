@@ -1,10 +1,10 @@
 # Parallel next-line tag lookup
 
-October 13, 2026. **Private one-file timing proposal; not promoted RTL, a
+October 14, 2026. **Private one-file timing proposal; not promoted RTL, a
 timing improvement, or accepted hardware.** Full-cache and cold paged-core
 checks pass; broader checks have closed with the canonical gate still red.
-No new synthesis or FPGA programming
-has started.
+Its combined next-tag/FP-classifier synthesis now closes below its parent;
+no FPGA programming has occurred.
 
 ## Measured reason
 
@@ -154,9 +154,14 @@ to obtain a pass.
 | `parallel-next-tag-regression-audit.json` | `ca4029585453809ea30a123c8b5b35b684a44e69b3badd0109fd8e12f63a3b8d` |
 
 Follow-up: this lookup and the direct FP compare-invalid classifier now have a
-[source-matched full-PC transfer](../fp_compare/README.md#full-pc-transfer-and-pending-synthesis).
+[source-matched full-PC transfer](../fp_compare/README.md#full-pc-transfer-and-synthesis).
 Both short CoreMark CRC checks and 44 cold environment-store fault fixtures
-pass; their guarded synthesis is active, with no timing result yet.
+pass. Combined synthesis closes at **32.405457079 MHz unplaced**, versus
+33.028371371 MHz, with **6,520 additional LUTs and 5,176 additional registers**.
+The flattened tag RAM crosses Vivado's inference port limit: all 5,120 payload
+bits become FDREs. This is a measured regression, not the anticipated timing
+win. A separate [way-banked remedy](WAY_BANKED_TAGS.md) preserves the parallel
+lookup identity and cache semantics; it remains isolated and unqualified.
 
 Remaining: green canonical gates, broader precise faults and full standard
 suite, followed by timing closure. Physical Win95/Quake
@@ -164,7 +169,7 @@ acceptance remains mandatory. The existing FPGA's Doom startup failure and
 absence of Doom FPS are unchanged.
 
 Candidate gameplay IPC is **unmeasured**. The newest verified simulation
-counter window is **0.49236929 total U+V**, FP-repair model `c7b95b78`, cycles
-**900,065,237–1,000,065,237**; [evidence](../../fpga/FP_REPAIR_EXPORT.md).
+counter window is **0.48176594 total U+V**, FP-repair model `c7b95b78`, cycles
+**1,100,065,237–1,200,065,237**; [evidence](../../fpga/FP_REPAIR_EXPORT.md).
 It predates this candidate, its timedemo remains active, and it is not an
 FPGA or Doom measurement.

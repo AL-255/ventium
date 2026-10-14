@@ -64,6 +64,21 @@ differentials, canonical gates, the full standard suite and matched FPGA
 synthesis/implementation. No timing exception or lower-frequency fallback is
 introduced. The >=40 MHz synthesized-Fmax requirement remains open.
 
-Verified gameplay baseline: **0.51030715 total U+V simulated retirement-event
-IPC**, older model `2b4d7a48`, cycles **1,200,065,237–1,300,065,237**. This
-proposal and both queued/running successors have no gameplay measurement.
+## October 14: limiting-path relevance returns
+
+The closed [next-tag/FP-classifier timing audit](../verif/fp_compare/README.md)
+now reports **32.405457079 MHz unplaced**. Its worst path again traverses
+`d_fetch_fault_len`, `fetch_overlength_probe`, translation/cacheability and
+paired-store/backing ACK before ESP writeback. That makes this already-proven
+arithmetic proposal relevant to reconsider; it does **not** measure its gain.
+The older hash guard deliberately rejects current `core.sv`
+`6c020b3c171fb422756a7874fb48cd32a683953ff5b95d44b708be3a7fa08b1c`.
+Do not bypass that guard or claim integration: rebase the exact two expressions
+with a new source contract, rerun native arithmetic/fetch-fault tests and
+whole-core differentials before any synthesis. The separate way-banked tag
+proposal fixes a confirmed area-inference problem, not this entire critical path.
+
+Latest verified gameplay baseline: **0.48176594 total U+V simulated IPC**,
+older model `c7b95b78`, cycles **1,100,065,237–1,200,065,237**
+([evidence](FP_REPAIR_EXPORT.md)). Current timing proposals have no gameplay
+measurement, and no full timedemo or physical acceptance is implied.

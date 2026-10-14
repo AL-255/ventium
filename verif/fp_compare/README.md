@@ -1,9 +1,10 @@
 # Direct x87 compare-invalid classification
 
-October 14, 2026 UTC. **Private timing proposal; synthesis running, not promoted
-or installed.** Source-extracted comparisons, the qualified functional corpus,
+October 14, 2026 UTC. **Private timing proposal; synthesized at 32.405 MHz,
+below its parent and the 40 MHz target; not promoted or installed.**
+Source-extracted comparisons, the qualified functional corpus,
 same-input replay and short full-PC checks pass; the canonical gate is still
-red. No timing gain is claimed.
+red. The combined next-tag/classifier result regresses timing and area.
 
 ## Why this change
 
@@ -125,7 +126,7 @@ programming followed.
 | `fp-compare-core-r1/verify-closed.json` | `29cdef3508ebfdf723996dfa5d6ca55a8c0b93e02958ac4d6fdc9f62b9c507f4` |
 | `fp-compare-regression-audit.json` | `20ec2c93635ad2548b1977e30065e64f910a3630f545385e9fcc2e48bdf36732` |
 
-## Full-PC transfer and pending synthesis
+## Full-PC transfer and synthesis
 
 The classifier and parallel next-line lookup are transferred together from
 the tested core onto the current-tag PC parent. **All 102 shared RTL sources
@@ -209,12 +210,56 @@ The frozen FPGA manifest is
 40/100 MHz constraints and mapper. The single synthesis launched at
 **2026-10-14 00:43:51 UTC**, owner `ventium-fp-compare-synth-oct14-r1.service`,
 invocation `f5d5293b365841b7bf83dee6be726874`; scope invocation
-`a1f0bc8567784b4389a60b35e14168be`. It has **no timing result yet**.
+`a1f0bc8567784b4389a60b35e14168be`. It closed at **01:17:27 UTC**,
+native exit 0 / MainPID 0, in **2,015.69 s**, without OOM or a resource stop.
 RAM/swap limits remain 8/6 GiB, 48 tasks, native 45-minute bound, disk stop
 floor 4 GiB and the unchanged twice-measured-growth admission check.
-The independent clock audit is prepared, **not launched**; routing/programming
-are not part of these controllers. The matched parent is **33.028371371 MHz
-unplaced**, not a 40 MHz pass. Neither isolated area nor timing gain is assumed.
+Peak RAM/swap were **8,095,227,904 / 1,436,688,384 bytes**. Independent source
+audit checks 24,142 pins, 148 native Verilog inputs and the exact two-file delta.
+
+The independent clock audit then closes in **491.40 s**, native exit 0 /
+MainPID 0, owner `ventium-fp-compare-clock-oct14-r1.service`, invocation
+`b377d885717846abaf7e083731815817`. Its separate auditor checks 21,142 input
+pins, both original checkpoints, unchanged 40/100 MHz clocks and report contents.
+Peak RAM is **4,838,940,672 bytes**, no swap/OOM. No routing or programming ran.
+
+| Metric | Current-tag parent | Next-tag + classifier |
+| --- | ---: | ---: |
+| Unplaced core estimate | 33.028371371 MHz | **32.405457079 MHz** |
+| Setup slack at 40 MHz | -5.277 ns | -5.859 ns |
+| CLB LUTs | 189,042 | 195,562 |
+| Registers | 55,008 | 60,184 |
+| BRAM tiles / DSPs | 277.5 / 47 | 277.5 / 47 |
+
+This is **1.89% lower estimated frequency and 3.45% more LUTs**, not an
+improvement. Hold slack is -0.101 ns. These synthesized/unplaced estimates are
+not routed sign-off, measured congestion or physical frequency. All 30 worst
+reported setup endpoints now lie in the integer register/flags/state logic;
+the worst reaches ESP bit 16 through fetch-length/translation, cacheability,
+paired-store/backing ACK and integer writeback. It has 105 logic levels and
+30.648 ns data delay (6.389 ns logic, 24.259 ns estimated interconnect).
+The former FP-status endpoint leaving this top-30 list does not prove an
+isolated classifier timing gain.
+
+The area regression has a specific confirmed memory-inference defect:
+Vivado reports **16 tag read ports** and implements the flattened `dc_tag`
+as registers. The checkpoint inventory contains **5,120 tag FDREs and no
+tag RAM**, whereas the parent has tag RAM and no tag FDREs. This explains
+5,120 of the 5,176 added registers; the entire LUT or timing delta cannot be
+attributed to it from the combined run. The tag payload was already unreset,
+so removing a reset is not the remedy. The [way-banked proposal](../l1/WAY_BANKED_TAGS.md)
+separates the ways while retaining parallel reads, all validity/ownership
+rules and latency. Its isolated equivalence results are not whole-core or
+40 MHz acceptance. The subsequent actual full-L1 synthesis probe restores
+distributed tag RAM and reduces **OOC L1 LUTs from 24,238 to 14,340 (-40.84%)**;
+full-chip area/timing for that derivative remain unmeasured.
+
+Synthesis audit SHA-256:
+`b437821f34ef0c4e3628616bd45cbad5bc83589cccc95880095afa29b0976ff4`.
+Clock audit SHA-256:
+`3eb41a92b6ad180dd4917891d2b8b09232ab5b7831a5a4651d3081bcd9bbbffb`.
+Candidate DCP SHA-256:
+`8b312897be7efeee639cf4f85856e081347f13e1dd8a608dc3843986933443a1`.
 
 To recover scratch space, 13 unpinned compiler-cache/link-archive files from
 closed builds were removed (**919,876,614 bytes**, regenerable). Sources,
@@ -230,6 +275,6 @@ and physical Win95/Quake qualification remain open.
 The existing FPGA/Doom image was not replaced; **Doom FPS is unavailable**.
 
 Gameplay IPC for this candidate is **unmeasured**. Latest verified baseline:
-**0.49721089 total U+V**, FP-repair simulation model `c7b95b78`, cycles
-**1,000,065,237–1,100,065,237**; [counter evidence](../../fpga/FP_REPAIR_EXPORT.md).
+**0.48176594 total U+V**, FP-repair simulation model `c7b95b78`, cycles
+**1,100,065,237–1,200,065,237**; [counter evidence](../../fpga/FP_REPAIR_EXPORT.md).
 That older model's timedemo is still active, and this is not FPGA or Doom IPC.
