@@ -70,6 +70,11 @@ def main():
         pins[name] = digest
     binaries = {row['variant']:Path(row['binary']) for row in built['rows']}
     assert set(binaries) == {'control','candidate'}
+    bios = REPO/'ventium-refs/07-p5-emulation-harness/build/qemu/pc-bios'
+    assert (bios/'vgabios-stdvga.bin').is_file() and (bios/'kvmvapic.bin').is_file()
+    for path in bios.rglob('*'):
+        if path.is_file():
+            pins[str(path.resolve())] = sha(path)
     original = (build/'control/tb-maint.c').read_text()
     assert (build/'candidate/tb-maint.c').read_text() == prepare.transform(original)
     for row in built['rows']:
@@ -105,7 +110,9 @@ def main():
         rows = []
         for variant,binary in binaries.items():
             cpu = 12+index%4
-            argv = ['taskset','-c',str(cpu),str(binary),*command[1:]]
+            # A relocated QEMU executable no longer finds its source-tree ROM
+            # directory automatically. Bind the same original option ROMs.
+            argv = ['taskset','-c',str(cpu),str(binary),'-L',str(bios),*command[1:]]
             start = time.monotonic()
             observed = False
             code = None

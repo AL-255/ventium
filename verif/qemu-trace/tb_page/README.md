@@ -5,8 +5,8 @@
 The original prefix-boundary gate is still **failed**, not waived. A bounded
 native investigation identifies two distinct reference defects: stale
 cross-page translated code after a guest store, and missing finite-CS-limit
-enforcement. An exact upstream backport for the first is prepared; **it has
-not yet been compiled or qualified by native execution**. The canonical QEMU,
+enforcement. The exact upstream backport for the first now passes the original
+SMC native witnesses and complete RTL trace comparisons described below. The canonical QEMU,
 guest BIOSes, RTL and comparison rules are unchanged.
 
 The current prefix-payload candidate remains gameplay-unmeasured. Latest
@@ -77,9 +77,10 @@ TMPDIR=/home/yukidama/external/tmp PYTHONDONTWRITEBYTECODE=1 \
 
 These check the exact two-line delta, drift guards, page-index counterexamples,
 compiler/header flags, unique object substitution and explicit outcome policy.
-The boundary adapter's tests also verify that the original execution,
-comparison and result bodies remain byte-for-byte unchanged and import from
-their original fixture directory.
+The boundary adapter's tests verify that the original execution, comparison
+and result bodies remain byte-for-byte unchanged apart from explicitly binding
+the original option-ROM directory for relocated QEMU binaries. Fixtures still
+import from their original directory.
 They are **not native QEMU qualification**.
 
 1. After the current Vivado family closes, run `build.py --out FRESH_ROOT`
@@ -93,7 +94,8 @@ They are **not native QEMU qualification**.
 2. Run `run_native.py --build BUILD_ROOT --original ORIGINAL_BOUNDARY_ROOT
    --out FRESH_NATIVE_ROOT` in a bounded 512 MiB/no-swap user unit with
    `taskset -c 12-15`. This executes all 30 original BIOSes, both private QEMUs,
-   using their original commands and success/failure byte contract. Each
+   retaining their original machine options and success/failure byte contract;
+   `-L` explicitly names the original, hash-pinned option-ROM directory. Each
    child is limited to 20 seconds and observed on its assigned CPU.
 3. Require all four cross-page SMC failures to become genuine guest passes,
    all other formerly passing cases to remain passes, and the eight separate
@@ -110,6 +112,55 @@ They are **not native QEMU qualification**.
    cases are expected to keep this complete gate **red**. Separately resolve
    that oracle coverage and the other canonical-gate failures before promotion.
 
-Steps 1–4 remain pending. No new native build was launched concurrently with
-the running synthesis. This repair is not a new golden-cache policy or a
-substitute for original failing workload verification.
+Steps 1–4 have now run; the complete boundary gate remains red on the separate
+finite-CS cases. No native build ran concurrently with synthesis. This repair
+is not a new golden-cache policy or a substitute for original workload testing.
+
+## Native backport and full-trace closure
+
+The shared lock released only after Vivado exited. The private relink then
+closed in **6.159 s**, with **564,637,696 bytes** peak scope RAM, zero swap and
+zero OOM. It retains exactly the two upstream changes:
+
+- Control QEMU: `1ba6c94cf995f23123920649114d47a4fe0bf5fae1bd24c8b921f5a478d93efc`.
+- Candidate QEMU: `2ffb2a1b70cba672df34c765a504dc9725bf5810831c48febc35f066a02be8f8`.
+- Build supervisor invocation: `1a0f2e704f1e4aa5a12f1cdffecc7a12`.
+  Its **distinct inner scope** invocation is
+  `4c00612a4a89440bbae9d4f308e9d1b8`; both are independently checked.
+
+The first native run failed before guest execution: a relocated QEMU binary
+could not find `kvmvapic.bin` and `vgabios-stdvga.bin`. That failure is retained
+as `qemu-tb-page-native-r1`. R2 supplies the original `pc-bios` directory to
+both QEMUs, pins all its files, and changes no ROM, BIOS test or expected exit.
+
+R2 executes **30 original BIOSes × two QEMUs = 60 native runs** in **1.673 s**.
+The control reproduces all **12** original failures. The candidate repairs
+exactly the four cross-page SMC failures; its **eight finite-CS failures
+remain**. Both retain all 18 previously passing cases. Every native child is
+waited/reaped and observed on its assigned CPU12–15. Owner
+`ventium-qemu-tb-page-native-oct14-r2.service`, invocation
+`ae20c799c3cd4cb1912d34a4ac2b7d1d`, is terminal with exit 0; this qualifies
+the narrow backport outcome, not the full processor gate.
+
+Two complete boundary reruns each finish **22 cases / 176 native RTL
+executions / 88 full QEMU comparisons** at latencies 0/7. Each retains **5,540
+candidate functional records and 428 V retirements**. Complete parent and
+candidate architectural records **and cycle records are identical**. The
+original BIOS bytes match the original failed run; no trace trimming or extra
+field mask is used. Both full gates correctly return **exit 1** on the eight
+finite-CS reference failures, before RTL execution of those eight cases.
+
+R1/R2 take **6.395 / 6.311 s**, owner invocations
+`bd002c149abd4ecab3429fed634f7f51` and
+`9ba194e46c404d0ab0b6edb836a9232b`. Per-child affinity was **not** captured for
+these full gate runs: the R2 external observer hit a `/proc/<pid>/exe`
+permission error and terminated; the gate itself continued to its ordinary
+failed closure. Do not relabel this as complete affinity observation.
+
+`audit_qemu_tb_page.py` independently verifies both closed gate owners, the
+exact source delta, 60 native QEMU outcomes, unchanged input/artifact hashes,
+all full comparisons, fault counts and parent/candidate state/clock equality.
+`qemu-tb-page-audit.json` SHA-256:
+`fadcaf48d5d4b1a326be2da7b3de17bc25ccd7836a983993394d73ac02785628`.
+The canonical oracle is not promoted, and finite-CS coverage, canonical
+gates, full standard suite and physical acceptance remain open.

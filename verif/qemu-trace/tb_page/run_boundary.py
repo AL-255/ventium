@@ -13,6 +13,11 @@ import prepare
 REPO = Path(__file__).resolve().parents[3]
 SOURCE = REPO/'verif/fe_pipe/run-prefix66-boundary.py'
 SOURCE_SHA = '228547205cd3da23062acceb5ff23b067e48651d4a03ed0084b413207a587393'
+BIOS = REPO/'ventium-refs/07-p5-emulation-harness/build/qemu/pc-bios'
+ROM_BINDINGS = (
+    ("run(leaf,'free-qemu',[qemu,'-machine'", "run(leaf,'free-qemu',[qemu,'-L',BIOS,'-machine'"),
+    ("'--max-insn','2000','--port',port])", "'--max-insn','2000','--port',port,'--args','-L',BIOS])"),
+)
 
 
 def digest(path):
@@ -49,6 +54,7 @@ def qualified_qemu(build_root, native_root):
     for path in (SOURCE, Path(__file__), Path(prepare.__file__), build_root/'closed.json',
                  native_root/'closed.json', native_root/'started.json'):
         pins[str(path.resolve())] = digest(path)
+    assert all(str(path.resolve()) in pins for path in BIOS.rglob('*') if path.is_file())
     return qemu, pins
 
 
@@ -64,7 +70,7 @@ def derive():
          "    qemu,private_pins=qualified_qemu(args.qemu_build,args.native_result)"),
         ('    profiles={}', '    pins.update(private_pins)\n    profiles={}'),
     )
-    for before,after in changes:
+    for before,after in changes+ROM_BINDINGS:
         assert text.count(before) == 1, before
         text = text.replace(before,after)
     ast.parse(text)

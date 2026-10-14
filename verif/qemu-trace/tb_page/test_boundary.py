@@ -8,6 +8,11 @@ class Binding(unittest.TestCase):
     def test_original_execution_and_comparison_body(self):
         original = run_boundary.SOURCE.read_text()
         changed = run_boundary.derive()
+        # Only the relocated executable's original option-ROM lookup changes
+        # inside the execution body. Comparison/exit policy stays byte-exact.
+        for before,after in run_boundary.ROM_BINDINGS:
+            self.assertEqual(changed.count(after),1)
+            changed = changed.replace(after,before)
         marker = '    def run(leaf,name,command,expected=0,latency=0):'
         self.assertEqual(changed[changed.index(marker):],original[original.index(marker):])
         cases = "    kinds=sorted(set(args.kind or range(4)));"
