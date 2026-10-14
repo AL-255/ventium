@@ -147,6 +147,48 @@ fixtures**, each compared against complete QEMU traces at AXI latencies 0/7
 and V retirement are required; all children exit and no OOM occurs. This does
 not cover every outstanding fault class.
 
+### Cold Doom-startup SMSW regression
+
+The same `5de1eb08` core now passes **223 full, unmasked QEMU system-state
+comparisons / 29,491 architectural records** using unchanged retained images:
+88 initial SMSW/MOV witnesses, 60 CPL3/V86 cases, and 25 precise page-fault
+repair/retry cases at each AXI latency **0, 7 and 31**. These repeat existing
+fixtures on this candidate; they are not 223 newly designed cases.
+
+The initial run takes **14.40 s**. `run_smsw_corners.py` cold-runs the other
+135 cases in **21.09 s**, two workers on actual CPUs12/13, 1 GiB/no-swap,
+with no compiler or new golden. It changes only model/output paths in the
+strictly checked existing guest command. Both owners terminate with MainPID 0
+and exit 0; peak memory is 55,836,672 / 69,591,040 bytes. Four command/admission
+tests reject missing AXI/UV mode, changed bounds/images, extra debug/snapshot
+options and incomplete or wrong executable/argv/CPU/cgroup observations.
+
+The first corner-run attempt is **retained as failed**: 133 cases pass and two
+are terminated by the new host observer's admission assertion, before their
+logs show RTL execution. That version did not save the mismatching tuple, so
+the exact field/race is not proved. The revised observer records transition
+samples and requires a complete exact match within three seconds; merely
+seeing an executable or a configured CPU limit cannot admit a run. The fresh
+R2 run observes all 135 actual children, waits/reaps them and matches every
+complete trace. Its 39 transition samples are retained. No guest, RTL, golden
+or acceptance requirement changed to repair this host-flow problem.
+
+`audit_smsw_replay.py` independently repeats all 223 complete comparisons and
+checks **18,790 input/artifact pins**, native owners, exact commands and actual
+affinities. Aggregate directed counters show **1,014 V retirements** and
+**124,648 backing ACKs**; these are not gameplay or throughput measurements.
+Known LOCK/segment QEMU disagreements are **not in this matrix**, and remain
+unresolved as documented in the [SMSW repair](../sys/smsw_memory/README.md).
+No broad system, standard-suite or FPGA acceptance is claimed.
+
+| Receipt | SHA-256 |
+| --- | --- |
+| `fp-compare-smsw-r1/closed.json` | `063e4b841e9eca66fa7647992bc0d762198e604706d206975c0c974d7258b702` |
+| `fp-compare-smswcorners-r2/closed.json` | `a3fec87bf057b408e464cc08758c6c1cb6b60ba046d5d726367ffbf9ca2899ca` |
+| `fp-compare-smsw-audit.json` | `cfdda45f46662d025004bbccc59e0ba6a6c4022a88d677e0ba41492ab0d5499a` |
+
+### Short CoreMark and synthesis
+
 Both ten-iteration CoreMark seeds finish with their reference CRCs and exactly
 **4,767,218 / 4,753,406 ticks**, respectively. Thus measured cycle gain is
 **0%**, as intended for these cycle-neutral timing cuts. V retirements are
@@ -188,6 +230,6 @@ and physical Win95/Quake qualification remain open.
 The existing FPGA/Doom image was not replaced; **Doom FPS is unavailable**.
 
 Gameplay IPC for this candidate is **unmeasured**. Latest verified baseline:
-**0.49236929 total U+V**, FP-repair simulation model `c7b95b78`, cycles
-**900,065,237–1,000,065,237**; [counter evidence](../../fpga/FP_REPAIR_EXPORT.md).
+**0.49721089 total U+V**, FP-repair simulation model `c7b95b78`, cycles
+**1,000,065,237–1,100,065,237**; [counter evidence](../../fpga/FP_REPAIR_EXPORT.md).
 That older model's timedemo is still active, and this is not FPGA or Doom IPC.
