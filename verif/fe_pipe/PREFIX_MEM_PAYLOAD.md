@@ -285,8 +285,17 @@ Still required: a green canonical gate, resolution of reference disagreements,
 measured synthesis, full-suite and physical acceptance. Do not assume this
 cofactor improves Fmax until its own timing report exists.
 
-Latest verified gameplay baseline: **0.51186266 total U+V IPC** on older
-simulation model `c7b95b78`, cycles **1,700,065,237–1,800,065,237**. This private
+Latest verified gameplay baseline: **0.50430455 total U+V IPC** on older
+simulation model `c7b95b78`, cycles **1,800,065,237–1,900,065,237**. This private
 candidate is gameplay-unmeasured; the older window is not its performance.
 No complete standard suite, physical Win95 UI, Quake timedemo or Doom FPS
 result is claimed for this experiment.
+
+The still-failed prefix-boundary gate now has a bounded native
+[reference investigation](../qemu-trace/tb_page/README.md). All four failing
+SMC cases reuse stale translated code in pinned QEMU; two finite-CS witnesses
+separately execute beyond their segment limit. Eighteen free-running QEMU
+diagnostics reproduce the failures, with no guest changes. An exact upstream
+two-line TB bookkeeping backport is prepared but not yet built or natively
+qualified. The original gate stays failed, and this does not modify the frozen
+RTL currently under synthesis.
