@@ -277,13 +277,12 @@ After the proof preflight rechecked **26,263 pins**, the single guarded
 synthesis launched at **2026-10-14 05:03:33 UTC**. Controller
 `ventium-prefix-payload-synth-oct14-r1.service`, invocation
 `b8e00fc7ed774b9cbc19b5a024780859`, owns Vivado scope invocation
-`63a2e45de4ce46d6be2bb3015e3123c7`. Native closure, independent DCP audit and
-read-only clock analysis are pending. The immediate comparison remains
-**35.474830608 MHz synthesized/unplaced**; no frequency gain is presumed.
+`63a2e45de4ce46d6be2bb3015e3123c7`. The subsequent native closure and independent
+audits are recorded below; that initial launch alone established no timing gain.
 
 Still required: a green canonical gate, resolution of reference disagreements,
-measured synthesis, full-suite and physical acceptance. Do not assume this
-cofactor improves Fmax until its own timing report exists.
+full-suite and physical acceptance. Synthesis now shows the improvement below,
+but still misses the 40 MHz requirement.
 
 Latest verified gameplay baseline: **0.50430455 total U+V IPC** on older
 simulation model `c7b95b78`, cycles **1,800,065,237–1,900,065,237**. This private
@@ -296,6 +295,61 @@ The still-failed prefix-boundary gate now has a bounded native
 SMC cases reuse stale translated code in pinned QEMU; two finite-CS witnesses
 separately execute beyond their segment limit. Eighteen free-running QEMU
 diagnostics reproduce the failures, with no guest changes. An exact upstream
-two-line TB bookkeeping backport is prepared but not yet built or natively
-qualified. The original gate stays failed, and this does not modify the frozen
-RTL currently under synthesis.
+two-line TB bookkeeping backport now repairs all four original native SMC
+failures. Two full boundary reruns each complete 22 cases, 176 RTL executions
+and 88 complete QEMU comparisons; all parent/candidate architectural and cycle
+records agree. Eight finite-CS cases keep the whole gate failed. This does not
+modify the frozen RTL or promote the private reference.
+
+## Closed synthesis and timing: 36.591 MHz, still below 40 MHz
+
+The synthesis supervisor is terminal with native exit 0 in **1,902.92 s**,
+unchanged inputs and no OOM or resource stop. Peak scope RAM/swap are
+**8,589,922,304 / 1,061,441,536 bytes**. The independent DCP audit checks
+**26,266 pins**, all 158 hardware defines, the exact one-include RTL delta and
+the unchanged synthesis mapper. The checkpoint is retained with SHA-256
+`5c0ee4195b9331cf7eb31b022b86753feecd892cd3cff78cc1448c717b4b6557`.
+
+| Metric | Immediate fast-segment parent | Prefix-payload candidate |
+| --- | ---: | ---: |
+| Synthesized/unplaced Fmax | 35.474830608 MHz | **36.591166892 MHz** |
+| Setup slack at 40 MHz | −3.189 ns | −2.329 ns |
+| Hold slack, unplaced | −0.101 ns | −0.101 ns |
+| LUTs | 187,215 | 186,045 |
+| Registers | 54,993 | 54,985 |
+| BRAM tiles / DSPs | 277.5 / 47 | 277.5 / 47 |
+
+This is **+3.1468% estimated Fmax**, **−1,170 LUTs (−0.625%)**, with no sampled
+cycle-count change. It is not measured silicon throughput. The read-only clock
+audit reopens both actual checkpoints, confirms 100 MHz PL / 40 MHz core
+constraints, zero black boxes/structural DRC errors, and **22,098 input pins**.
+It closes in **472.87 s**, peak RAM **4,759,851,008 bytes**, no swap/OOM.
+Controller `ventium-prefix-payload-clock-oct14-r1.service`, invocation
+`493531247fc445dca939ab021bb67d9b`, is terminal with exit 0.
+
+Synthesis retains the parent's generated PS-IP `create_clock` unknown-pin
+critical warning (line 21 of the generated PS XDC); no warning is hidden or
+waived. Native clock inspection independently finds the intended 10 ns and
+25 ns clocks. The remaining 1,558 synthesis warnings are not full-SoC lint
+acceptance. No implementation, routing, bitstream or board programming follows.
+
+The worst reported path has moved to **q_pc[0] → integer multiplier A[6]**,
+93 logic levels / 26.821 ns data delay. It traverses instruction-buffer
+selection, decode length / `d_fetch_need`, fragment strobes, saved L1-response
+selection, load data, U flags, V arithmetic and writeback. Other top paths
+reach q_lock, EFLAGS and state enables through the same earlier cone. Merely
+changing the multiplier endpoint would leave those paths. This is the next
+structural investigation target; neither a false-path waiver nor disabling
+U/V or fast load/store is acceptable. The report's 77.7% net-delay fraction is
+an **unplaced estimate**, not measured routed congestion.
+
+Evidence under the same root:
+
+- `prefix-payload-synthesis-r1/audit.json`:
+  `1314311e4d7fb54617d8d3eea4c2cbb6aee5699d8a3f60e3d08650a3fcdf4912`.
+- `prefix-payload-clock-r1/audit.json`:
+  `e397b7b206598b0213bd6b29d59de8ad55ee1280e8fa7d85e316585a9ab150cf`.
+
+**40 MHz synthesized Fmax and routed timing remain unachieved.** Canonical
+and finite-CS gates, duration-valid CoreMark, complete standard suite,
+physical Win95 UI / Quake and current-candidate gameplay IPC remain open.
