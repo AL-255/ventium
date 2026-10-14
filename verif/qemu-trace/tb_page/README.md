@@ -68,7 +68,7 @@ exception policy, debugger or observer change is included.
 
 ## Qualification procedure
 
-Eight host tests pass:
+Ten host tests pass:
 
 ```sh
 TMPDIR=/home/yukidama/external/tmp PYTHONDONTWRITEBYTECODE=1 \
@@ -77,12 +77,16 @@ TMPDIR=/home/yukidama/external/tmp PYTHONDONTWRITEBYTECODE=1 \
 
 These check the exact two-line delta, drift guards, page-index counterexamples,
 compiler/header flags, unique object substitution and explicit outcome policy.
+The boundary adapter's tests also verify that the original execution,
+comparison and result bodies remain byte-for-byte unchanged and import from
+their original fixture directory.
 They are **not native QEMU qualification**.
 
 1. After the current Vivado family closes, run `build.py --out FRESH_ROOT`
    through `tools/build_scope.sh`, in a bounded user unit with actual
    `taskset -c 8-15` and external TMPDIR. It refuses a live Vivado process or
-   absent build lock. It compiles just the real `tb-maint.c` translation unit
+   absent build lock, then lowers its real scope to 2 GiB RAM / no swap and
+   checks those effective limits. It compiles just the real `tb-maint.c` translation unit
    twice and privately relinks control/candidate against the original Ninja
    objects. Headers, thin-archive members, canonical binary and all source
    inputs are hashed before/after; no canonical build output is overwritten.
@@ -96,9 +100,15 @@ They are **not native QEMU qualification**.
    finite-CS failures to remain explicitly recorded. The driver always sets
    `original_boundary_gate_passed=false`; it does not turn those failures
    into a green aggregate processor gate.
-4. Rerun complete architectural trace comparisons against both unchanged
-   UV-fast RTL models, including delayed memory. Separately resolve finite-CS
-   oracle coverage and the other canonical-gate failures before promotion.
+4. Run `run_boundary.py --qemu-build BUILD_ROOT --native-result NATIVE_ROOT`
+   with the original driver's `--control`, `--candidate` and fresh `--out`
+   arguments. This checks native-backport prerequisites and binds only the
+   QEMU identity; retain all 30 cases by omitting kind/offset filters. Its
+   original fixture, expected exits, full architectural comparison, UV cycle
+   controls, latencies 0/7 and aggregate failure semantics are unchanged.
+   Observe actual child affinity in the bounded owner. The eight finite-CS
+   cases are expected to keep this complete gate **red**. Separately resolve
+   that oracle coverage and the other canonical-gate failures before promotion.
 
 Steps 1–4 remain pending. No new native build was launched concurrently with
 the running synthesis. This repair is not a new golden-cache policy or a

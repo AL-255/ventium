@@ -73,6 +73,20 @@ def main():
     assert os.environ['INVOCATION_ID'] and os.sched_getaffinity(0) == set(range(8,16))
     subprocess.run([REPO/'tools/build_scope.sh', '--is-active'], check=True, pass_fds=(9,))
     assert subprocess.run(['pgrep', '-x', 'vivado'], stdout=subprocess.DEVNULL).returncode == 1
+    # The shared default scope bounds RAM/tasks, but does not set swap. Lower
+    # this small relink's own scope and verify the real effective limits.
+    scope = os.environ['VENTIUM_BUILD_SCOPE_UNIT']+'.scope'
+    subprocess.run(['systemctl','--user','set-property','--runtime',scope,
+                    'MemoryMax=2G','MemorySwapMax=0'],check=True)
+    scope_state = dict(line.split('=',1) for line in subprocess.check_output([
+        'systemctl','--user','show',scope,'-p','ActiveState','-p','InvocationID',
+        '-p','ControlGroup','-p','MemoryMax','-p','MemorySwapMax','-p','TasksMax'],text=True).splitlines())
+    assert scope_state['ActiveState'] == 'active' and scope_state['InvocationID']
+    group = Path('/sys/fs/cgroup'+scope_state['ControlGroup'])
+    assert Path('/proc/self/cgroup').read_text().strip() == '0::'+scope_state['ControlGroup']
+    assert (group/'memory.max').read_text().strip() == str(2*1024**3)
+    assert (group/'memory.swap.max').read_text().strip() == '0'
+    assert (group/'pids.max').read_text().strip() == '64'
     assert sha(BUILD/'qemu-system-i386') == CANONICAL
     source = QEMU/prepare.FILE
     original = source.read_text()
@@ -118,7 +132,7 @@ def main():
     root.mkdir()
     save(root/'started.json', dict(pins=pins, invocation=os.environ['INVOCATION_ID'],
          affinity=sorted(os.sched_getaffinity(0)), compiler=old_compile, linker=old_link,
-         canonical_changed=False, matched_tb_object_relink=True))
+         canonical_changed=False, matched_tb_object_relink=True, scope=scope_state))
     begin = time.monotonic()
     result = dict(passed=False, rows=[], errors=[], canonical_gate_passed=False,
                   native_regression_passed=False, hardware_acceptance=False, gameplay_ipc=None)
@@ -164,8 +178,13 @@ def main():
         result['passed'] = True
     except Exception as error:
         result['errors'].append(dict(error=repr(error), traceback=traceback.format_exc()))
-    result.update(pins=pins, pins_unchanged=stable(), seconds=time.monotonic()-begin)
+    events = {key:int(value) for key,value in
+              (line.split() for line in (group/'memory.events').read_text().splitlines())}
+    result.update(pins=pins, pins_unchanged=stable(), seconds=time.monotonic()-begin,
+                  memory_events=events, memory_peak=int((group/'memory.peak').read_text()),
+                  swap_current=int((group/'memory.swap.current').read_text()))
     result['passed'] &= result['pins_unchanged']
+    result['passed'] &= not events['oom'] and not events['oom_kill'] and not result['swap_current']
     save(root/'closed.json', result)
     print(json.dumps({key:value for key,value in result.items() if key not in ('pins','rows')}, indent=2), flush=True)
     return int(not result['passed'])
