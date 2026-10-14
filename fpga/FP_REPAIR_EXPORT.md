@@ -159,7 +159,8 @@ Two preparation tests and **39 runner tests pass**, including low-disk failure
 remaining a failure even if a simulated completion marker appears. The board
 fixture explicitly checks DDR3, clock rates and memory size; completion,
 error-detection and log-integrity checks are unchanged. Tests do not constitute
-guest acceptance. **No candidate timedemo or gameplay IPC result yet.**
+guest acceptance. The later measured gameplay window below is not a completed
+timedemo result.
 
 ## Cold Win95 verification in progress
 
@@ -200,6 +201,43 @@ pinned launcher before and after grading. Wrong, missing or retargeted aliases
 are rejected. Initial admission-audit attempts caught a Path/string adapter
 error and this command-spelling mismatch before writing any acceptance record;
 the guest was neither restarted nor modified.
+
+## First measured gameplay window, run still active
+
+The unchanged cold Quake run now reaches visible gameplay. Its completed
+`frame_00003.ppm` and `frame_00004.ppm` captures show different positions in
+The Necropolis, not the loading console. The native `[FBCAP]` messages directly
+precede the **800,065,237** and **900,065,237** cycle performance samples.
+The live executable was rehashed as model `c7b95b78...6384afd`; native PID
+859279, CPU11 and owner invocation `56b52d8499764820923836107f97ffd2` match
+admission. No guest restart, patch, snapshot restore or FPGA write occurred.
+
+| Counter | Start | End | Difference |
+| --- | ---: | ---: | ---: |
+| Core clocks | 800,064,874 | 900,064,874 | 100,000,000 |
+| U retirements | 189,745,433 | 228,096,362 | 38,350,929 |
+| V retirements | 42,593,840 | 54,732,851 | 12,139,011 |
+| Total retirements | 232,339,273 | 282,829,213 | 50,489,940 |
+
+Both endpoints satisfy total = U + V. Thus this **verified counter window**
+measures **0.5048994 total U+V gameplay IPC**. It exceeds 0.48 in this window,
+but is **simulation on this FP-repair model**, not physical FPGA performance
+or a pass for subsequent data-size/current-tag/next-line-tag candidates.
+The cold timedemo is still running: no 969-frame completion, final FPS or
+error-free standard-suite acceptance has been established. Different gameplay
+windows/builds are not a controlled gain comparison.
+
+Evidence is `soc-r1/quake-cold-fp-repair-oct13.1/run/run.log` under the root
+below. The complete as-is frames have SHA-256:
+
+- `frame_00003.ppm`: `858f2b66964f7c92e75d02894b6b36ee76b6ccf95b5afbfbe47fbe24db209289`.
+- `frame_00004.ppm`: `90247eb0fa791b2bd8f8a807d097f52ac959784cdc9f9894c04337f50e7dfd95`.
+
+PNG copies `frame_00003-as-is.png` / `frame_00004-as-is.png` are format-only
+conversions, without color adjustment or resampling. The complete Win95
+`frame_00003.ppm` now shows icons and the taskbar without a visible error,
+but retains an hourglass. Its run is also active; this does not meet the
+separate closed-desktop/UI/human-review acceptance requirements.
 
 ## Reproducible identities
 
@@ -246,8 +284,9 @@ plan refused the unlaunched prime-CS clock folder; the successful plan names
 its actual closed `prime-cs-clock-swap4-r1` owner. No deletion preceded that
 successful plan.
 
-Candidate gameplay IPC is **unmeasured**. Older verified simulation baseline:
-**0.51030715 total U+V**, build `2b4d7a48`, cycles
-**1,200,065,237–1,300,065,237**; it predates this candidate and is not a physical
-FPGA or Doom measurement. The >=0.48 Quake target still needs this candidate's
-own gameplay evidence and an error-free completed timedemo.
+Current measured gameplay IPC for this FP-repair model is **0.5048994 total
+U+V**, cycles **800,065,237–900,065,237**. This supersedes the older simulation
+reporting baseline `2b4d7a48` / 0.51030715 (cycles
+1,200,065,237–1,300,065,237), without implying a gain or regression between
+different windows. Error-free timedemo completion and physical FPGA acceptance
+remain open. This is not a Doom measurement.
