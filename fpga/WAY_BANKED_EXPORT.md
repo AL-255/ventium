@@ -9,6 +9,10 @@ LUT usage falls **4.17%** and the tag-register inference regression is removed.
 This still misses **40 MHz**; there is no new bitstream or board pass.
 Canonical verification remains failed.
 
+Next candidate: [parallel fast-memory segment admission](../verif/segment_extent/FAST_SEGMENT_ADMISSION.md)
+targets the newly measured fast-store path. Its leaf/full-core controls and
+source-matched full-PC build pass, but it has no new timing or physical result.
+
 ## Transfer and source identity
 
 The [core report](../verif/l1/WAY_BANKED_CORE.md) describes the only two RTL
