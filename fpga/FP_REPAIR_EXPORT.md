@@ -476,7 +476,7 @@ The sealed prefix is 576,206 bytes, SHA-256
 `a8fadd905f387962cd275b587dd878fd5336b707bfd33829168d044ff37aa05a`.
 The native run was not restarted, stepped or patched.
 
-### Latest gameplay window: 1.7B–1.8B
+### Gameplay window: 1.7B–1.8B
 
 The same cold native simulation, owner invocation and executable remain live.
 The read-only audit rechecks the executable, exact command, actual CPU11
@@ -491,7 +491,7 @@ format conversions only, without gamma, brightness or contrast processing.
 | V retirements | 144,068,343 | 155,734,201 | 11,665,858 |
 | Total retirements | 678,172,415 | 729,358,681 | 51,186,266 |
 
-The newest verified reporting baseline is **0.51186266 total U+V IPC** on
+The reporting baseline at that point is **0.51186266 total U+V IPC** on
 older simulation model `c7b95b78`. Both totals equal U + V. The different
 scene window is **not a controlled improvement caused by a fix**, and does
 not replace the lower earlier windows when judging whole-timedemo throughput.
@@ -506,6 +506,34 @@ audit's live-process and counter checks. Receipt
 Sealed complete-line prefix: **631,534 bytes**, SHA-256
 `44e1548541fb565ae2261dd533c9397894a25db88baf25a1b36309a876897df8`.
 No new run, snapshot restore, STEP or guest patch was used.
+
+### Latest gameplay window: 1.8B–1.9B
+
+The same older `c7b95b78` cold simulation remains live under the same owner.
+A new read-only audit checks the model hash, exact native command, CPU11
+affinity and cold-start input receipt. As-is frames 13 and 14 show combat and
+the stone hall with shotgun, enemy and HUD; both were visually inspected.
+
+| Counter | Cycle 1,800,065,237 | Cycle 1,900,065,237 | Difference |
+| --- | ---: | ---: | ---: |
+| Core clocks | 1,800,064,874 | 1,900,064,874 | 100,000,000 |
+| U retirements | 573,624,480 | 612,439,384 | 38,814,904 |
+| V retirements | 155,734,201 | 167,349,752 | 11,615,551 |
+| Total retirements | 729,358,681 | 779,789,136 | 50,430,455 |
+
+Latest verified reporting baseline: **0.50430455 total U+V IPC**. Both endpoint
+totals equal U + V. The scene window differs from earlier measurements; this
+is not a controlled fix gain or a whole-timedemo average. The current
+fast-segment/prefix-payload candidates remain gameplay-unmeasured. No completed
+timedemo, final FPS, standard-suite or physical FPGA acceptance is implied.
+
+`audit_gameplay_1900m.py` preserves the preceding live-process and counter
+checks. Receipt `gameplay-1800m-1900m-audit.json` SHA-256:
+`f7f89ebcb4891425e9e2f1701e166b0061a6dbb83dcc8e51a2cca29c1dab0cd2`.
+The sealed complete-line prefix is **681,550 bytes**, SHA-256
+`75ec5153725d7e8dc86e39a7ec3bc74535e7ca444d3ec93247906cb3b8ea2f03`.
+No new simulation, snapshot restore, STEP, guest patch or color manipulation
+was used.
 
 ### Win95 native closure and evidence-protocol failure
 
