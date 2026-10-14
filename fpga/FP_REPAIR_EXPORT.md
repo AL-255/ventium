@@ -162,7 +162,7 @@ error-detection and log-integrity checks are unchanged. Tests do not constitute
 guest acceptance. The later measured gameplay window below is not a completed
 timedemo result.
 
-## Cold Win95 verification in progress
+## Cold Win95 verification: closed, unqualified
 
 `prepare_fp_repair_win95.py` prepares the same previously reviewed cold Win95
 flow against this model, preserving its original native command, pristine
@@ -180,8 +180,8 @@ invocation `0cb50f29741b40fc91f3d6618f37be82`, confines it to one CPU,
 patch, STEP or slow-mode control.
 
 This wrapper **never awards desktop PASS**, even on normal native exit.
-Cold desktop, closed-frame review, UI interaction and physical FPGA acceptance
-remain open. The closed Win95 checker now has a separately tested schema-5
+The closure and remaining acceptance blockers are recorded below. The closed
+Win95 checker now has a separately tested schema-5
 `board-posted16-40mhz-parentpolicy160` profile for this launcher. Its original
 32/128-task profiles, native command, clocks, memory, log limits, source checks,
 closed-process requirement and externally pinned human desktop review remain
@@ -236,8 +236,8 @@ below. The complete as-is frames have SHA-256:
 PNG copies `frame_00003-as-is.png` / `frame_00004-as-is.png` are format-only
 conversions, without color adjustment or resampling. The complete Win95
 `frame_00003.ppm` now shows icons and the taskbar without a visible error,
-but retains an hourglass. Its run is also active; this does not meet the
-separate closed-desktop/UI/human-review acceptance requirements.
+but retains an hourglass. At that checkpoint its run was still active; this
+did not meet the separate closed-desktop/UI/human-review requirements.
 
 ## Reproducible identities
 
@@ -312,7 +312,7 @@ The stable, complete-line log prefix and read-only audit are retained as
 evidence root. Audit SHA-256:
 `5b408ebd20fd75f25dd12554e37c5cd4772f4d8f21fa7e5e6ab3d15e887401d8`.
 
-This is the **latest verified reporting baseline**, still simulation model
+This was the next verified reporting baseline, still simulation model
 `c7b95b78f47f5e709136f98230bdf33975cf8db0e925956b469649cbf6384afd`.
 It predates the current next-tag/FP-classifier candidate, which remains
 gameplay-unmeasured. Window variation is not a controlled build regression.
@@ -322,7 +322,72 @@ is established.
 Win95 frame 5 now shows readable Welcome text, icons, taskbar and an ordinary
 pointer, without a visible error. Repeated vector-6 records at `FCB2:2FF7`
 match the already documented [ROM-ARPL callback aliases](ZERO_C1_EXPORT.md),
-not evidence by themselves of a new crash. The native run remains active;
-its current harness has no live UI-input channel. Closed-run, ordinary UI
-interaction and separate human acceptance are **still open**, not inherited
-from an older run or inferred from the clean image.
+not evidence by themselves of a new crash. Its harness has no live UI-input
+channel. The native run was subsequently closed as described below; ordinary
+UI interaction and separate human acceptance are not inherited from an older
+run or inferred from the clean image.
+
+### Latest gameplay window: 1,000M–1,100M
+
+The unchanged, continuously running `c7b95b78` model now measures
+**0.49721089 total U+V IPC**, cycles **1,000,065,237–1,100,065,237**.
+The live executable hash, native PID 859279, CPU11 affinity, exact cold-start
+command and original owner invocation were rechecked.
+
+| Counter | Start | End | Difference |
+| --- | ---: | ---: | ---: |
+| Core clocks | 1,000,064,874 | 1,100,064,874 | 100,000,000 |
+| U retirements | 265,862,407 | 304,559,167 | 38,696,760 |
+| V retirements | 66,203,735 | 77,228,064 | 11,024,329 |
+| Total retirements | 332,066,142 | 381,787,231 | 49,721,089 |
+
+Both endpoint totals equal U + V. Frames 5 and 6 show distinct gameplay views,
+with combat/death visible in frame 6; this is not a startup window. Frame 6
+raw SHA-256 is
+`594c3a999137d2361203eaf8af689bbb3db4939decee617d29adb24666761e10`.
+The format-only PNG preview has no color or size adjustment.
+
+`audit_gameplay_1100m.py` retains a stable complete-line log prefix and
+`gameplay-1000m-1100m-audit.json`, SHA-256
+`917796b44ab611478a23584ccfdf7b697fa477b84e15bca122cc1402b4a90540`,
+under the evidence root above. This is the **latest verified gameplay IPC**,
+still an older simulation model: current data-size/current-tag/next-tag/
+FP-classifier candidates remain gameplay-unmeasured. The timedemo is still
+running; no completion, final FPS, physical FPGA or standard-suite PASS is
+claimed.
+
+### Win95 native closure and evidence-protocol failure
+
+The old model's cold Win95 run closed gracefully at **2026-10-14 00:49:35 UTC**,
+cycle **1,090,616,618**, with **232,322,147 retirements**. Native exit is 0,
+the child was waited/reaped, the process group is absent and no OOM occurred.
+The retained owner has MainPID 0 / `active (exited)`, not `inactive (dead)`.
+Six raw captures and the complete 8,544,997-byte EOF-closed log remain.
+Frame 5 shows readable Welcome text, desktop icons and taskbar with an ordinary
+pointer; it is not evidence of keyboard/mouse interaction.
+
+**This run is `CLOSED_UNQUALIFIED`, not desktop or suite acceptance.** The
+manual stop operation incorrectly wrote a 211-byte explanation into
+`stop.request`; the strict checker requires an empty, owned regular marker.
+The marker remains unchanged, SHA-256
+`30695692eac715a1648adb7bf1f3af2203648626f93dc782f92cfa1c9bdf3af6`.
+It must not be truncated afterwards or accepted by relaxing the checker.
+For future stops, use the launcher's existing `request_stop` protocol, which
+creates the empty file exclusively; put any explanatory note in a separate
+receipt. No RTL or acceptance criterion was changed to hide this mistake.
+
+The independent native-closure-only audit checks all 24 wrapper pins, native
+closure, all six raw-frame hashes and the closed private disk. The canonical
+log parser accepts all 2,157 complete progress records and matching footer;
+the empty-marker invariant explicitly rejects the retained marker. The full
+acceptance checker was **not** invoked with fabricated human-review data.
+`win95-native-closure-audit.json` SHA-256:
+`0308372f5a0a34a97dfb561a7d4565defac523433c38cae3c090797dc9941ad9`.
+Native result SHA-256:
+`b5fa7bfe29f469f76b3ba08f84b8e23017ca0ab071ed3b0cf684be32292b9701`.
+
+Ordinary live UI input, a separately reviewed closed desktop, supervisor
+closure and the stop-protocol failure remain acceptance blockers. Do not
+launch another long Win95 run without a qualified input path. Existing
+`verif/ps2_ui` host input and controller proposals are isolated tests, not
+integrated or qualified full-PC/FPGA UI support.
