@@ -1,7 +1,7 @@
 # Registered-owner selector for paired V-load writeback
 
 October 13, 2026. **Native selector leaf checked; not a qualified core,
-synthesized candidate, or board image.** The ongoing current-tag synthesis
+synthesized candidate, or board image.** The closed current-tag synthesis
 does not contain this proposal.
 
 ## Measured motivation and exact change
@@ -103,8 +103,16 @@ proposal. All **152 definitions**, assertions, board single-fill setting and
 basename; the inherited native builder checks its own generated header/object.
 Three preparation/profile tests pass, including rejection of dual-prime,
 missing fast relocation, wrong AXI policy, missing assertions and reduced jobs.
-**No compiler has launched:** the live Vivado family retains exclusive access
-to the heavy-build budget.
+No compiler launched during preparation: the then-live Vivado family retained
+exclusive access to the heavy-build budget.
+
+After that Vivado run closed, its matched timing audit showed a regression to
+**33.028 MHz unplaced**, with FP status and L1 valid/LRU endpoints dominating
+the 30-path report. See [the closure](../l1/WINDOW_CURRENT_REUSE.md).
+This selector's data-only change cannot remove either path. Its prepared
+whole-core build is therefore **deferred**, not silently launched or promoted;
+the measured cache path is being investigated first. The earlier leaf and
+fixture checks remain valid limited evidence, not a timing improvement.
 
 `run_v_load_payload_system.py` adds cold paged fixtures with distinct per-word
 data and nonzero preserved EBX bytes. They cover dword, low-byte and high-byte
@@ -154,7 +162,8 @@ The leaf runner requires CPU18, a 512 MiB/no-swap systemd owner, more than 5 GiB
 free scratch disk and more than 4 GiB available host RAM; each native command
 has a 20 s process-group timeout plus 2 s forced-cleanup grace.
 
-Candidate gameplay IPC is **unmeasured**. The older verified simulation baseline
-is **0.51030715 total U+V**, build `2b4d7a48`, cycles
-**1,200,065,237–1,300,065,237**. It predates this proposal and is not an FPGA or
-Doom measurement.
+Candidate gameplay IPC is **unmeasured**. The newest verified simulation
+counter window is **0.5048994 total U+V**, FP-repair model `c7b95b78`, cycles
+**800,065,237–900,065,237**; [evidence](../../fpga/FP_REPAIR_EXPORT.md).
+It predates this proposal, its timedemo remains active, and it is not an FPGA
+or Doom measurement.

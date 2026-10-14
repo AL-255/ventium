@@ -2,8 +2,10 @@
 
 Private derivative, now composed onto the data-size and x87 environment-write
 repairs; **not production RTL or accepted hardware**. Target remains at least
-40 MHz synthesized Fmax with UV + fast enabled. No timing or gameplay result
-exists for this proposal. Root RTL and the installed FPGA remain unchanged.
+40 MHz synthesized Fmax with UV + fast enabled. Synthesis and timing audit
+closed at **33.028 MHz unplaced**, a regression; this is not an optimization
+to adopt as measured. No gameplay result exists for this proposal.
+Root RTL and the installed FPGA remain unchanged.
 
 ## Reason and exact change
 
@@ -283,10 +285,70 @@ R2 launched at **23:01:58 UTC** under
 `182429bc7bb441db8454bda28a98c02d`; its single native family has scope invocation
 `f3c48b23ecc0409a8fbfc649f8c3c30e`. At 23:05:30 UTC, all 19 live native-family
 threads were read back with actual affinity **CPUs16–19**. The verified caps
-remain 8 GiB RAM / 6 GiB swap / 48 tasks. **R2 is running; no new frequency
-result yet.** The separate [V-load payload leaf](../issue_uv/V_LOAD_PAYLOAD.md)
-is not in these synthesis inputs. These controllers cannot start
-implementation, routing or board programming.
+remain 8 GiB RAM / 6 GiB swap / 48 tasks. R2 closed successfully at
+**23:36:37 UTC**, native exit 0, **2,078.80 s**, with all input pins unchanged.
+The controller is terminal, MainPID 0 / exit 0; no OOM, resource-stop event or
+controller exception occurred. Peak scope RAM was **8,589,918,208 bytes** and
+swap **530,554,880 bytes**. Cgroup `max` events record reclaim at the cap, not
+OOM; all OOM counters stayed zero.
+
+The independent closure auditor rechecks **23,619 input pins**, all 158
+definitions, 148 native `read_verilog` files and the exact two changed payloads
+(environment-write decoder and L1 current-tag cofactor). The mapper and clocks
+match the parent. Area is **189,042 LUTs / 55,008 FFs / 277.5 BRAM tiles / 47
+DSPs**, versus **187,487 / 54,988 / 277.5 / 47**: LUTs increase **0.83%**.
+The single critical warning is a PS-generated `create_clock` target absent
+during synthesis; the separate native clock audit must still establish the
+actual clocks and constrained core paths. This is not a timing waiver.
+
+| R2 synthesis evidence | SHA-256 |
+| --- | --- |
+| `closed.json` | `6e6db1069eefc0e48dddb202f6c086f0179061ea5ea6e255ddaf591e45c71bd3` |
+| `audit.json` | `f2cad3941719c11be84aa9c52eb6449c69965e5213eb4b27b53e6e5fccab3390` |
+| Synthesized DCP | `4df9848c06b6423762546bbe6894ecdaba554446f020cd0f24ebd25814df6c14` |
+
+Read-only timing owner `ventium-window-current-clock-oct13-r2.service`,
+invocation `fdcdc0e6d84848ffa49235ab8ec70d66`, closes in **475.24 s**,
+MainPID 0 / exit 0. Its five observed native threads had actual affinity
+CPUs16–19. Peak RAM is **4,891,975,680 bytes**, no swap/OOM, below its
+8 GiB RAM / 4 GiB swap / 48-task bounds. The independent audit rechecks
+20,618 input pins, original 40/100 MHz clocks, zero black boxes and zero
+structural DRC violations. Its successful audit is **not timing success**.
+
+The matched unplaced estimate regresses **7.82%**, from **35.830735605 MHz**
+to **33.028371371 MHz** (setup slack −2.909 → −5.277 ns). Core hold slack is
+−0.101 ns, also unplaced. Neither result is routed sign-off or board frequency.
+The two changed source files are not separately synthesized, so do not assign
+the regression exclusively to the L1 cofactor or decoder correction.
+
+| Observed candidate path | Levels | Data delay | Setup slack |
+| --- | ---: | ---: | ---: |
+| `q_pc` → FP `status[15]` | 109 | 30.066 ns | −5.277 ns |
+| EIP → L1 `dc_val[109][0]` | 105 | 29.988 ns | −5.199 ns |
+| EIP → captured V owner | 102 | 28.968 ns | −4.179 ns |
+
+The parent captured-V path was 93 levels / −1.754 ns. Reachable fan-in cells
+increase 68,545 → 70,889; these are cone reachability counts, **not owned area**.
+Of 30 reported worst distinct endpoints, one is FP status and 29 are L1
+valid/LRU updates. This is not a census of all failing paths.
+
+The FP path traverses fetch-length/overlength address selection, translation,
+cacheability-qualified saved payload selection and FP conversion/status.
+The L1 path crosses paired branch lookahead and address translation, then the
+late `core_mem_next_req` selector **before a next-line tag RAM read and compare**.
+First-line queries are already parallel; next-line queries are not. The private
+[next-line lookup proposal](PARALLEL_NEXT_TAG.md) targets that measured serial
+segment without changing data-bank ports, permissions or clock count.
+It does not address the independent FP path, and has no measured timing gain.
+
+Clock closure hash:
+`c85034b69f793e6a2a338914e293c919d391aa528227e5f10de9ea93abc5bf8b`;
+independent audit hash:
+`5d2fe28c56a4c3f46b8a0266b14e9f7c35ada1dd8d0a7a3b0fd8fe108823db7a`.
+The separate [V-load payload leaf](../issue_uv/V_LOAD_PAYLOAD.md) is not in
+these synthesis inputs and is deferred: its data-only change cannot remove
+the measured FP or cache-metadata paths. No implementation, routing, new
+synthesis run or board programming followed this failed timing result.
 
 ## Still required
 
@@ -296,7 +358,8 @@ acceptance remains required; no reduced-mode pass substitutes. The existing
 FPGA's [Doom startup failure](../../docs/FPGA_DOOM_2026-10-13.md) is unchanged,
 and neither physical nor simulated Doom FPS is available.
 
-Candidate gameplay IPC is **unmeasured**. Older verified simulation baseline:
-**0.51030715 total U+V retirement events/cycle**, build `2b4d7a48`, cycles
-**1,200,065,237–1,300,065,237**. It predates this proposal and is not FPGA or
-full-timedemo IPC.
+Candidate gameplay IPC is **unmeasured**. Newest verified simulation counter
+window: **0.5048994 total U+V**, FP-repair model `c7b95b78`, cycles
+**800,065,237–900,065,237**; [evidence](../../fpga/FP_REPAIR_EXPORT.md).
+It predates this proposal, its timedemo remains active, and it is not FPGA
+or full-timedemo IPC.
