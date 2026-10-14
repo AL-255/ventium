@@ -108,9 +108,10 @@ No Vivado family remains.
 
 The [two-file combined core](WAY_BANKED_CORE.md) now adds the re-proved
 fetch-fault page arithmetic and passes directed/private-QEMU checks. Its
-canonical gate remains failed; full-PC transfer and standard-suite acceptance,
-full synthesis >=40 MHz, routing and physical Win95/Quake verification remain
-open. The former worst
+canonical gate remains failed. Its [full-PC export](../../fpga/WAY_BANKED_EXPORT.md)
+and short regressions now pass, and a single guarded full synthesis is live.
+Standard-suite acceptance, full synthesis >=40 MHz, routing and physical
+Win95/Quake verification remain open. The former worst
 path still spans fetch/translation/cacheability/paired-store ACK/writeback;
 way banking is not proof that this cross-module path is fixed.
 
