@@ -124,8 +124,8 @@ The next structural cut must preserve precise faults, request/response
 ownership and same-cycle read/store-pair acceptance. The existing early code
 payload hint is explicitly not an admission/ACK signal; substituting it there
 without proving equivalence would be unsafe. No false-path exception, global
-pipeline bubble or U-only fallback was introduced to hide this path. Existing
-cold Quake and Win95 jobs continue against their unchanged frozen model.
+pipeline bubble or U-only fallback was introduced to hide this path. The cold
+Quake and Win95 jobs used their unchanged frozen model; closure is recorded below.
 
 `prepare_fp_repair_synthesis.py` generates, but does not launch, the matched
 synthesis and read-only timing controllers. Their independent audits must
@@ -195,6 +195,14 @@ Closure audit: `quake-closed-audit.json` in the evidence root, SHA-256
 `b607eb585b0f2cc7ae25e37950b5f7402334c78393da60579968d1400856f32e`.
 Closed log SHA-256:
 `4b6a633f9f4277a4387ac3b3b95fdcf6bfa4d1166b4a7afa8e4bf0f8cc898fd8`.
+
+Fresh host checks: **41 frozen-runner/preparation tests pass**. The generic
+checker/runner corpus passes **69 tests** with the external scratch directory's
+canonical path. Its first run through the `~/external/tmp` symlink had one
+fixture-string failure (expected alias versus resolved `AO486_BIOS_DIR`); no
+acceptance code was changed, and that failing environment result is not counted
+as a pass. A first combined test import also lacked `FP_REPAIR_SOC`; the frozen
+corpus was then run separately with its required model-root environment.
 
 ## Cold Win95 verification: closed, unqualified
 
