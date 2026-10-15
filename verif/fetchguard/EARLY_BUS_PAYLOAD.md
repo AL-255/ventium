@@ -1,0 +1,111 @@
+# Early bus-address default — October 15, 2026
+
+**Directed checks and source transfer pass; canonical verification remains
+red. Timing, full-suite and board acceptance are not established.**
+
+The last verified gameplay IPC is **0.50520554 total U+V**, model
+`c7b95b78f47f5e709136f98230bdf33975cf8db0e925956b469649cbf6384afd`, cycles
+5,600,065,237–5,700,065,237. It predates this candidate, whose gameplay IPC
+and FPS are unmeasured. The live cold Quake run uses the preceding DECODE-bus
+model, not this model, and is still in startup.
+
+## Change and reason
+
+The [preceding experiment](DECODE_BUS_PAYLOAD.md) regressed to
+**33.603279680 MHz synthesized/unplaced**. Its mapped critical path still
+crosses overlength-probe qualification and the final bus-address selector.
+The 40 MHz constraint is not an achieved frequency.
+
+`prepare_early_bus_payload.py` changes exactly one private frozen include:
+
+```systemverilog
+// Before: zero default, physical-state arms, then a late linear override.
+bd_addr = 32'd0;
+// ...
+if (fe_translatable || state == S_DECODE) bd_addr = cur_lin;
+
+// Candidate: early linear default, existing physical-state overrides only.
+bd_addr = cur_lin;
+// S_RMINT_RD, S_RMINT_PUSH, S_RMIRET, S_WALK, S_SMI_SAVE, S_RSM unchanged.
+```
+
+Request authorization, translation, fragment ownership, page/segment faults,
+A20 order, data and strobes are unchanged. No added register, bubble, pairing
+restriction, guest-specific check or save-state dependency. Strict waiting-x87
+policy and all inherited FPREM repairs remain enabled. All 157 simulation /
+159 hardware defines remain unchanged, including full P5 L1s and UV-fast mode.
+
+For simulation, a complete copy of the predecessor bus driver asserts equal
+controls every clock and equal pre/post-translation addresses on issued beats
+or translated probes. It is excluded by `SYNTHESIS`, not additional hardware.
+The local all-address proof assumes the documented active-owner invariants;
+it is not advertised as a whole-core formal proof.
+
+## Closed evidence
+
+Root: `/home/yukidama/external/tmp/ventium-fprem-sequence.iSZ9BAj4`.
+All successful rows retain stable input pins, waited native exits and receipts.
+
+| Directory | Result | Scope |
+|---|---|---|
+| `early-bus-leaf-r1` | 294,912 native cases; Z3 `unsat`; four incorrect variants rejected | Actual translation/A20 equations; local assumptions only |
+| `early-bus-core-r1` | Fresh 32-job build, 21.13 s | 195-source closure; 153 unchanged directed defines; private local harness object |
+| `early-bus-boundary-r1` | 22 cold cases × delays 0/7; 21,832 candidate records / 4,968 V | Full QEMU and parent architectural comparisons; 44 probe witnesses; equal clocks |
+| `early-bus-system-r1` | Five fixtures × delays 0/7/31; 30,141 records / 5,487 V | Bounded/relocated access, store fault/retry and invalid SS; equal parent traces/clocks |
+| `early-bus-delivery-r2` | All 144 native executions pass, 75.17 s | Waiting-x87, FPREM underflow, #NM/#MF precedence and recovery; unchanged witnesses |
+| `early-bus-func-r2` | 108/108 private-reference programs pass, 225.02 s | Existing comparison policy; not the canonical gate |
+| `early-bus-matched-inputs-r1` | 108/108 complete architectural streams / 80,800 records equal, 26.28 s | Exact image and initial ESP; no normalization or added masks; 32 workers |
+| `early-bus-physical-r2` | 36 native executions regraded; 158,511 candidate records / 888 V | Real INT/IRET, relocated IVT, SMM/RSM, original save-map/metadata witnesses; equal parent clocks and full traces |
+| `early-bus-soc-r1` | Fresh full-PC build passes, 23.53 s | All 102 shared RTL files match directed model; 98 inherited structural warnings unchanged, not full-SoC lint |
+| `early-bus-lint-r1` | Strict CPU-hierarchy lint passes, 3.88 s | Exact 159 hardware defines; all six structural error classes enforced |
+
+The canonical `make verify` still closes **FAIL**, native make exit 2:
+7 functional PASS / 101 FAIL. All 20 cycle RTL streams are parent-identical;
+that does not make the legacy cycle bands pass. No golden, mask or band changed.
+
+Failed attempts are preserved, not counted as passes:
+
+- Initial functional/delivery launches rejected incorrect CPU affinities before
+  native execution. R2 uses each existing helper's required affinity.
+- `early-bus-canonical-ab.json` rejects 46 comparisons with different initial
+  ESP values from separately generated QEMU inputs. The new matched-input replay
+  uses the candidate's exact flattened images and golden-derived ESP on the
+  parent, comparing every architectural record without modification.
+- Physical R1 stopped at the **parent's** five-million-cycle cap in latency-31
+  SMM metadata testing, without guest completion. Only four missing native jobs
+  were rerun with an eight-million-cycle / 180-second cap; all completed in
+  6,040,521 cycles. R2 then independently regraded all 36 successful executions,
+  including every original witness and native debug-exit 133. R1 remains failed.
+
+`cycle_mode=1`, actual AXI service and paired V retirement are checked; no
+debugger STEP or intended-V breakpoint is used. These counts are test coverage,
+not gameplay IPC. The SMM tests are architectural witness tests, not fabricated
+QEMU single-step comparisons.
+
+## Identities and pending qualification
+
+- Directed model: `c55b996c2c8309e2c152dbab2813a144e5e30db83df6acfa190425e94067b84f`.
+- Full-PC model: `593833e1650b5869373abbd74debcc63d15ea53eca1aa87f62e833982ead2fe9`.
+- Changed include: `1b67761e014321884d87099df3cc1c4b3d834b40acf83fb58cf6d68b02ead818`.
+- FPGA manifest: `9ec9a00dc8a73884074f6ea5e01ba9925f3725bc90425693b974d38fc061e5e7`.
+
+The export audits all 170 shared HDL inputs / 190 payloads, with just the one
+changed include. The real Tcl source-contract test passes. The export remains
+**UNQUALIFIED**; no bitstream has been programmed.
+
+Two unchanged ten-iteration cold CoreMark controls are running under
+`ventium-branch-address-cm10-early-bus-oct15-r1.service`, invocation
+`d4cc82539d604fea9270fe7cdbf1ca93`, on CPU12 with a 2 GiB / no-swap cap.
+Their CRCs, exact parent clocks and native closure must pass independent audit.
+They cannot establish a duration-valid score or standard-suite pass.
+
+`fpga/prepare_early_bus_synthesis.py` prepares one matched diagnostic synthesis
+and read-only clock audit; it launches neither. Exclusive ownership, native
+wait/reaping, RAM/swap limits, host reserve and live disk floor are unchanged
+from the closed predecessor. Host tests reject relaxed stops, fake success
+and additional unreviewed RTL. No compiler/Vivado overlap is permitted.
+
+Still required: canonical gates green, valid CoreMark score and full correctness
+seeds, gameplay measurement, complete simulated standard suite, timing closure,
+and physical Win95 cold desktop/UI plus full Quake timedemo on the exact
+candidate in UV-fast mode. Diagnostic success is not a substitute.
