@@ -1,7 +1,9 @@
 # Parallel prefix endpoint → opcode selection (2026-10-15)
 
-Private timing experiment on the **36.591166892 MHz synthesized/unplaced**
-prefix-payload parent. It does not incorporate the rejected response-kind
+**Rejected after full-core measurement:** this private timing experiment
+regresses the **36.591166892 MHz synthesized/unplaced** prefix-payload parent
+to **35.135799866 MHz**, while adding 2,566 LUTs. Retain the parent; do not
+promote this decoder change. It does not incorporate the rejected response-kind
 rewrite. Target remains **40 MHz synthesized and routed**, without disabling
 UV, fast paths, or full P5 caches. No production RTL has been overwritten.
 
@@ -262,6 +264,60 @@ Exact inventory and receipt are `prefix-opcode-products-prune-plan.json` and
 `03580df7a72da4df7b731c478ff3c1f640cbe45e76c91281e3a2a398b229405b`.
 
 ## Acceptance remains open
+
+### Closed full-core result: reject the opcode selector
+
+Both native owners and the sequential audit queue have closed successfully,
+MainPID 0 / native exit 0. Evidence integrity passed; the timing target did not.
+The same `Default -no_timing_driven` synthesis profile, device, source closure
+and 40 MHz core / 100 MHz PL constraints were used. These are synthesized,
+**unplaced estimates**, not routed sign-off frequencies.
+
+| Metric | Retained prefix-payload parent | Prefix-opcode experiment |
+|---|---:|---:|
+| Core estimate, MHz | 36.591166892 | 35.135799866 |
+| Core setup slack, ns | -2.329 | -3.461 |
+| LUTs | 186,045 | 188,611 |
+| Flip-flops | 54,985 | 54,979 |
+| BRAM tiles | 277.5 | 277.5 |
+| DSPs | 47 | 47 |
+
+The selector's isolated byte-path improvement did **not** survive full-core
+mapping: Fmax falls **3.98%**, LUTs rise **1.38%**. The worst new path has
+99 logic levels, from `q_pc[0]` to `u_regfile.gpr[4][16]`: fetch alignment and
+decode length feed precise fetch-fault address selection, memory routing and
+paired-store admission, then response/pairing and register writeback. Its
+28.250 ns data path contains 6.640 ns logic and 21.610 ns estimated net delay.
+This is not evidence that the multiply datapath is the bottleneck. The parent
+path's DSP endpoint absorbs a GPR; endpoint primitive type alone does not
+identify a multiply operation. No false-path waiver or UV/fast-path disabling
+is justified by either path.
+
+Synthesis closes in **1,983.34 s**, peak RAM 7,613,194,240 bytes and swap
+2,348,969,984 bytes, no OOM or resource stop. Its independent audit checks
+26,493 input pins, all 158 definitions, 148 native HDL reads and the exact
+one-file delta. The read-only clock audit closes in **477.83 s**, peak RAM
+5,198,909,440 bytes, swap 73,764,864 bytes, no OOM; it checks 22,326 input pins,
+the original clocks and absence of black boxes/structural DRC errors. The
+inherited generated-PS-XDC unknown-pin critical warning remains recorded,
+not waived. No route, bitstream or board programming was launched.
+
+Under the scratch root above:
+
+- `prefix-opcode-synthesis-r1/audit.json` SHA-256:
+  `f85b86f933a204db724f5c55b3f6f0eb87182c169578e0d8c6600e2680b0dba5`.
+- `prefix-opcode-clock-r1/audit.json` SHA-256:
+  `56de1450387ccb78c8c8fce4dfabb3cb42be67521732459ba5c0dbadbe7dcfb8`.
+- Candidate DCP SHA-256:
+  `bb04e89bcb03dc9edcb20d053d3fe9189b5f5c3af15237989d8de7b649e3454b`.
+- Clock owner `ventium-prefix-opcode-clock-oct15-r1.service`, invocation
+  `b699b5b543d44d7dba0389274eea682f`; synthesis/queue identities are above.
+  `prefix-opcode-queue-closed.json` records both terminal owners and unchanged
+  pins at closure. No Vivado process remains after the queue closes.
+
+Further structural work must derive from the faster prefix-payload parent,
+not this rejected selector, and address the measured fetch-to-memory-response
+dependency. A successful leaf probe alone is insufficient to select a rewrite.
 
 The [October 15 backend-profile repeat](../l1/CYCLE_BACKEND_PROFILE.md#october-15-repeat-on-the-prefix-opcode-candidate-with-architectural-traces)
 adds 80 native wait-sensitivity runs on this model, including full-state

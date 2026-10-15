@@ -226,8 +226,10 @@ Drivers: [measurement](../lib/measure_cycle_memory_profile.py),
 bounded retained systemd owner and CPU13 affinity; use external TMPDIR and a
 fresh output path. The audit launches no model. Current canonical functional
 failures, complete standard suite, routed timing and physical acceptance are
-still open. Best retained synthesized/unplaced estimate is **36.591166892 MHz**;
-the prefix-opcode synthesis is still running as of this entry.
+still open. Best retained synthesized/unplaced estimate is **36.591166892 MHz**.
+The [subsequently closed full-core measurement](../fe_pipe/PREFIX_OPCODE.md#closed-full-core-result-reject-the-opcode-selector)
+rejects the prefix-opcode experiment: **35.135799866 MHz** and 2,566 additional
+LUTs. Its isolated selector improvement did not survive full-core mapping.
 
 Latest verified gameplay baseline: **0.50520554 total U+V**, older model
 `c7b95b78f47f5e709136f98230bdf33975cf8db0e925956b469649cbf6384afd`,
