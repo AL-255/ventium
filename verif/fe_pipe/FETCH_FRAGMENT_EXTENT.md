@@ -164,6 +164,46 @@ affinity and cgroup. Dead children and persistent mismatches fail closed.
 Three negative/positive host tests pass. The successful repeat uses its own
 `coremark-r2/` directory; neither failed evidence nor acceptance rules changed.
 
+## Finite-CS RTL coverage, without waiving the reference failure
+
+The original boundary differential gate aborts each finite-CS case at QEMU's
+native failure, before running RTL. A separate
+[self-checking RTL diagnostic](run_fetch_fragment_finite_cs.py) now executes
+the **same eight BIOS images**, not replacement fixtures: flat/relocated CS,
+instruction offsets 4080/4093/4094/4095, both models, AXI delays 0/7/31, and
+both full-functional and cycle trace modes. No RTL or BIOS rebuild is needed.
+
+R5 passes **96 native executions in 5.02 seconds**, with 35,905,536-byte peak
+RAM, zero swap/OOM and observed child CPU13–16 affinities. Each run requires
+guest exit133 (success byte `0x42`), precisely one #GP(0) at the original
+instruction EIP, live L1 backing transactions and complete trace termination.
+The unchanged guest handler checks the saved EIP/error code and unchanged
+EAX/EBX, then returns through IRET; the caller checks exactly one fault and
+no partial arithmetic/register commit. The ordinary paired control executes.
+Full parent/candidate records and clocks are equal at each latency: **3,048
+candidate functional records and 264 candidate V retirements**. Read-only
+regrading rechecks all 96 receipts, logs, traces and 28 input pins.
+
+The first four runner attempts remain recorded, not relabelled as passes:
+R1 rejects the TB's expected duplicate `VEN_FPREM` token before execution;
+R2 wrongly requires a banner that is absent with explicit `--quiesce`;
+R3 reads a functional register field from the distinct cycle-trace schema;
+R4 assumes the assembly label `pair_v` must issue in V. The real alignment NOP
+can instead occupy U while `pair_u` occupies V. The corrected checker requires
+both control instructions and an actual same-cycle U/V pair within that code,
+not a prescribed slot based on a label. Seven host tests cover these contracts
+and reject missing faults, wrong restart EIP, missing transactions, broken
+pair cycles, wrong trace mode and unexpected build-definition duplicates.
+No DUT assertion or guest success criterion was relaxed.
+
+Closed owner: `ventium-fetch-fragment-finite-cs-oct15-r5.service`, invocation
+`8346a8f72f264c20b0fe0c4605b32597`, MainPID0 / exit0.
+`fetch-fragment-finite-cs-r5/closed.json` SHA-256:
+`ab3adfad83088023e6ef15426bd769602d361b1fad1e44040af22676288a55a5`.
+This **does not repair or pass the original QEMU differential gate**. It closes
+an RTL coverage gap while preserving the reference failure and all broader
+acceptance requirements.
+
 ## Timing run and storage safeguards
 
 [The timing controller preparation](../../fpga/prepare_fetch_fragment_synthesis.py)
