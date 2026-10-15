@@ -1,7 +1,10 @@
 # FPREM sequence and precision audit — 2026-10-15
 
 Status: **two RTL arithmetic defects and one private-reference precision
-defect repaired in private candidates; exception handling remains open**.
+defect repaired in private candidates**. The subsequent
+[operand-exception repair](EXCEPTION_STATUS.md) covers masked/unmasked IE/DE,
+NaN priority and empty operands. Unmasked tiny-result handling, system exception
+delivery and full acceptance remain open.
 These are tested private derivatives, not canonical promotion or FPGA
 acceptance. No production RTL, workload, golden, comparison mask or clock
 constraint was changed. The unrelated backing-payload mux experiment was
@@ -170,7 +173,7 @@ runner before adding the generic `--program` diagnostic option. Its digest
 matches the recorded cold-run input pin. The audit uses that explicit archive,
 not a silently substituted later driver.
 
-### Newly exposed exception gap — still open
+### Newly exposed exception gap — retained original failure
 
 `masked_denormal.S` checks that FPREM with a nonzero subnormal dividend raises
 masked DE, while retaining the exact numeric value. Native x87 passes. The
@@ -185,13 +188,16 @@ reference is not success. The 3.92 s owner closes exit 1 with all input pins
 unchanged. This test used the earlier `da49b810…` reference; the new precision
 transform does not add denormal exception handling and is not qualified for it.
 
-The general follow-up is instruction-specific operand classification and
+The required follow-up was instruction-specific operand classification and
 exception-priority handling in the QEMU remainder helper and shared-FPU commit
 path: masked DE must become sticky; unmasked DE must leave the operands intact;
 invalid/empty-stack priority and quiet/signaling NaNs need separate tests.
 Do not globally clear flags, allow unsupported encodings to enter SRT, overwrite
 ST0 on an unmasked abort, or treat numeric agreement as exception correctness.
-The precision-only QEMU fix does not claim to repair this broader gap.
+The precision-only QEMU fix does not claim to repair this broader gap. The
+separate [exception follow-up](EXCEPTION_STATUS.md) now records the implemented
+private repair and its additional native, shared-FPU and cold whole-core tests;
+these original failed runs remain failures.
 
 Reproduction uses fresh output leaves and explicit external TMPDIR. Run the
 reference `build.py` and `../../srt/run_remainder_exact.py` through guarded
