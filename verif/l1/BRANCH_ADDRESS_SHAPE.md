@@ -149,16 +149,17 @@ translation/routing, cache response selection and integer writeback. Estimated
 routing is not a measurement of physical congestion. Capture-cone reachability
 falls from 69,278 to 69,221 cells; that is not exclusive area ownership.
 
-The next source-level investigation is the remaining late overlength-probe
+The follow-up source-level investigation targets the remaining late overlength-probe
 qualification in `core_bus_driver.svh`: `if (fe_translatable) bd_addr = cur_lin`.
 S_DECODE already has a prepared next-page payload and a clocked no-bus-request
 invariant, yet its no-request bus payload is still selected using the late
-probe predicate. A candidate cofactor could select that payload unconditionally
-in S_DECODE while retaining the original MMU/probe authority. The private
-[recipe](../fetchguard/prepare_decode_bus_payload.py) and two local host checks
-are prepared, but **no model contains it and no native proof exists yet**.
-It still requires source-linked payload checks, the existing
-fetch-boundary/#PF/#GP-priority corpus, and unchanged request/commit behavior.
+probe predicate. The [follow-up experiment](../fetchguard/DECODE_BUS_PAYLOAD.md)
+now selects that payload in S_DECODE while retaining the original MMU/probe
+authority. Its source-linked selector proof/mutants, all 22 original cold
+fetch-boundary cases, private functional/system controls and delayed-x87
+parent replay pass. A source-matched PC and 159-define FPGA freeze also include
+strict waiting-x87 policy. **No timing gain or hardware acceptance is yet
+established**; those results do not change this experiment's measured regression.
 Do not disable the fast path, add false-path constraints or remove real probes.
 
 Full simulation and physical Win95/Quake acceptance, valid

@@ -2,10 +2,14 @@
 
 **Shared-FPU leaf and cold whole-core directed tests pass; canonical and FPGA
 qualification remain open.**
-The latest [combined hardware experiment](../../l1/BRANCH_ADDRESS_SHAPE.md)
+The latest measured [combined hardware experiment](../../l1/BRANCH_ADDRESS_SHAPE.md)
 does contain the numeric/operand/underflow repairs, but reaches only
 **35.814 MHz synthesized/unplaced** and is not routed or deployed. Its profile
 does not yet include the separately tested strict waiting-x87 policy below.
+The [subsequent DECODE payload experiment](../../fetchguard/DECODE_BUS_PAYLOAD.md)
+retains that policy: 72 delayed-exception cases pass with exact strict-parent
+trace/cycle equality, and its source-matched PC/FPGA freeze includes the define.
+That freeze has no synthesized, routed or physical-board result yet.
 The completed fetch-metadata FPGA synthesis contains the earlier numeric and
 operand-exception fixes, but not this underflow fix. It failed the timing
 improvement objective (36.03 MHz unplaced estimate) and is not deployable
