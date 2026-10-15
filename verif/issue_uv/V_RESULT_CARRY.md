@@ -44,8 +44,11 @@ Directed candidate: `a8e5d55b7704f2449002c71af8db1c5c2fe7ae908669fc5dbf2e663d3a5
 | `v-result-carry-integer-r1` | 256 fixtures × latency 0/7; all 1,024 A/B measurements pass; no cycle changes; 32.05 s |
 | `v-result-carry-fp-r1` | 384 fixtures × latency 0/7; 208,128 candidate records; all 1,536 A/B measurements pass; 50.16 s |
 | `v-result-carry-boundary-r1` | Original 22 fetch-boundary fixtures × latency 0/7; 21,832 records, 4,968 V retirements; 29.45 s |
+| `v-result-carry-matched-r1` | All 108 functional programs replayed on identical images/initial ESP: 80,800 complete architectural records equal; 25.57 s; not canonical acceptance |
+| `v-result-carry-soc-r1` | Native full-PC build closes 0 in 25.77 s; private host/header verified; 98 inherited structural warnings unchanged, not full-SoC lint clean |
+| `v-result-carry-lint-r1` | Strict CPU-hierarchy lint passes on the sealed 159-define hardware export; six structural classes remain fatal; 3.73 s; not full-wrapper lint |
 
-These whole-core runs compare complete architectural state against QEMU and
+The directed whole-core corpus compares complete architectural state against QEMU and
 require exact parent/candidate state and cycle records. They use UV + fast
 pipeline, `cycle_mode=1`, actual `--l1-axi`, relocated clients and fast
 load/store definitions. No STEP, intended-V breakpoint, saved state or guest
@@ -67,7 +70,8 @@ broad sweep did not exercise pairing (only four final directed pairs).
 R3 explicitly settles/checks a decoded U NOP and requires >1,000 broad-sweep
 paired cases. **R2 is not qualifying evidence.**
 
-Five recipe/leaf host tests and four full-PC transfer tests pass. The latter
+Five recipe/leaf host tests, four full-PC transfer tests and four FPGA export
+tests pass. The transfer/export tests
 reject wrong/extra source changes, altered posted transport or definitions,
 missing subject pairs and missing held/mixed witnesses.
 
@@ -78,15 +82,36 @@ the current AUX-corrected full-PC parent
 `70c8de9eb55fda79b9fe359553ebd0b73de1e865c61414773000354edaff7b57`.
 All 102 shared core/FP sources and the 157-definition profile are checked.
 The PS/2 AUX ownership repair is retained byte-for-byte; an older peripheral
-source is not substituted. `v-result-carry-soc-r1` is prepared; native PC
-compilation, hardware export and timing are pending.
+source is not substituted. The resulting native PC model is
+`b6b92dbfde2c6148fde30b5c65cac8217f650f7bbc1a7d4c0bd58fe95f706c9e`.
 
-Canonical `make verify` is running separately with the unmodified oracle,
-masks and bands. The parent's canonical gate is red; the directed passes above
-do not waive it. Full canonical/system qualification, both error-free standard
+The closed `v-result-carry-fpga-r1` export retains all mouse-wrapper changes:
+192 payloads, all 170 shared platform HDL sources checked, and exactly two
+changed payloads relative to the prior AUX/mouse export. Its manifest SHA-256
+is `716dab7ee8801e5f865699f2b8619ae881b9d442feb4d59b42399abea758c77e`.
+All 159 hardware defines and the 40 MHz requested core clock are unchanged.
+The source-contract checker passes, but the complete FPGA wrapper is **not**
+instantiated by the PC simulator. Full-wrapper lint/elaboration, synthesis,
+route and deployment are still open. No timing result is inherited.
+
+Canonical `make verify` closed **FAIL**, native make exit 2, in 411.30 s:
+7 functional passes / 101 failures, including 90 length-only first failures
+and 11 x87 status first differences. The inventory matches the parent;
+all 20 cycle streams equal the parent, but this is not a cycle-band pass.
+Independent canonical invocations have different initial stack addresses;
+the identical-input replay above establishes equality without masking ESP or
+normalizing records. No oracle, comparator mask, golden or band was changed.
+The directed passes do not waive the red gate. Full canonical/system
+qualification, both error-free standard
 CoreMark seeds, completed Quake timedemo, and Win95 desktop remain open.
 Matching physical FPGA Win95 cold boot plus keyboard/mouse interaction and a
 complete Quake timedemo remain required before completion.
+
+No Vivado run was launched in this round. External space is about 5 GiB,
+below the existing synthesis controller's 6 GiB start reserve. That reserve
+has not been lowered. Further verified disposal of closed compiler products
+or lossless archival is needed before another expensive CAD run. The older
+decode-bus Quake run remains separate; it cannot qualify this PC/FPGA source.
 
 Current candidate gameplay IPC is **unmeasured**. Older verified baseline:
 **0.50520554 total U+V**, model
