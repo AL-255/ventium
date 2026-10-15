@@ -420,7 +420,7 @@ RAMS64E1 (768) counts remain unchanged. Five parser safety tests pass.
 - Clock audit: `29a7bc6a052822f6aa78f51d4f8d2d872e291907f4c1e8f910ed068f5dc21027`.
 - Complete 30-path report: `9e1ffcdc35520bf10c5bf6ca0ebb0f5bf6b98fbf32e276ac5d26c248948f0aa3`.
 
-**Next investigation, not an implemented or measured fix:** start from the
+**Next investigation at this measurement's closure:** start from the
 retained faster parent, not this rejected composition. Inspect the backing
 address/strobe mux and store-credit query boundary. The L1 producer has early
 address/strobe defaults, but also repeats those assignments inside late
@@ -433,6 +433,10 @@ remove route/SMRAM checks, request guards, store ordering, pairing or fast
 paths, add timing exceptions, or infer a frequency gain from this hypothesis.
 Any candidate still needs complete core differential checks, cycle/pairing
 preservation, matched timing and eventual full-suite physical acceptance.
+
+The subsequent [backing payload-mux experiment](BACKING_PAYLOAD_MUX.md)
+implements this hypothesis privately and records its own tests. It does not
+change the rejected timing verdicts above or establish a new frequency result.
 
 ### Fresh private-reference differential run while synthesis proceeds
 
