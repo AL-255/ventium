@@ -2,7 +2,9 @@
 
 **Private candidate; not accepted or deployed.** The predecessor's closed
 estimate is **34.049507985 MHz synthesized/unplaced**, below 40 MHz. This
-candidate has no frequency, gameplay or physical-board measurement yet.
+candidate's synthesis has closed successfully, but its clock audit failed
+host-RAM admission before launching Vivado. Candidate frequency, gameplay
+and physical-board performance remain unmeasured.
 
 Last verified gameplay IPC: **0.50520554 total U+V**, older model
 `c7b95b78f47f5e709136f98230bdf33975cf8db0e925956b469649cbf6384afd`, cycles
@@ -108,22 +110,67 @@ duration-error message is retained. Owner
 `ventium-branch-address-cm10-demand-size-oct15-r1.service`, invocation
 `6eef136ec9924ecfa3ecd986cb1b8bb9`, is exited / MainPID zero.
 
-The one matched diagnostic synthesis launched at **20:45:39 UTC**, under
+The one matched diagnostic synthesis launched at **20:45:39 UTC** and closed
+at **21:29:15 UTC**, under
 `ventium-demand-size-synth-oct15-r1.service`, invocation
 `690da7de4b1f4ed79bef83ab80db0a47`; the owned Vivado scope invocation is
 `938e9e23e99e4cb984eee49855eeff80`. Admission observed 7,935,717,376 bytes free
 external disk and 16,503,087,104 bytes available RAM. Limits remain 8 GiB RAM /
 6 GiB swap, 13 GiB combined early stop, 4 GiB disk floor and 2 GiB host reserve.
 Native lifetime, exact owner checks, one-Vivado lock and resource controls are
-byte-identical to the closed parent. No compiler overlaps the synthesis.
+byte-identical to the closed parent. No compiler overlapped the synthesis.
+
+Native exit is **0**, duration **2,616.16 seconds (43.60 minutes)**, all input
+hashes unchanged, no resource-stop or OOM event. Peak resident scope memory is
+**8,227,012,608 bytes** and peak swap **4,008,255,488 bytes**; these separate
+peaks need not coincide. The owner is terminal, MainPID zero. The independent
+closure audit passes **14,106 source pins**, 148 native HDL reads and all
+159 unchanged hardware defines. It confirms the same mapper/constraints and
+only `ventium/rtl/core/core.sv` changed. Native synthesis reports zero errors,
+one critical warning and 1,558 warnings; the clock warning still requires the
+independent actual-clock check, not a waiver.
+
+| Synthesized resources | Parent | Candidate | Change |
+|---|---:|---:|---:|
+| CLB LUTs | 187,708 | 187,745 | +37 (+0.020%) |
+| CLB registers | 54,980 | 55,007 | +27 |
+| BRAM tiles | 277.5 | 277.5 | 0 |
+| DSPs | 47 | 47 | 0 |
+
+The RTL adds no registers; mapped register count can change through synthesis
+optimization. No area or cycle-performance gain is claimed. Checkpoint SHA-256:
+`5ebc7472c4130f7939e0673d78df53a5fee378bc7d7da2adbd4d740bd471cfd5`.
+Independent synthesis-audit SHA-256:
+`a8ee80404cdbf70e01c995065402c0a2d0772a3038a710d08d94095a9767a536`.
 
 `ventium-demand-size-timing-chain-oct15-r1.service`, invocation
-`aa9a95ce0ddf4e3b8b757f272163da8c`, observes only that exact synthesis. It
-requires successful waited closure and an independent source/DCP audit before
-launching the read-only clock audit. It cannot retry synthesis, route or deploy.
-Host tests reject relaxed stops, fake success, changed owners and additional
-source changes. Candidate synthesized frequency remains **unknown** until the
-new reports close; the 40 MHz constraint is not a measurement.
+`aa9a95ce0ddf4e3b8b757f272163da8c`, successfully checked that exact synthesis
+and its independent source/DCP audit, then attempted the read-only clock stage.
+Clock owner `ventium-demand-size-clock-oct15-r1.service`, invocation
+`f259d735df564873b2d2b2ef9fcb3949`, exited **1 before launching Vivado**:
+available host RAM did not exceed its existing **10 GiB** admission threshold
+(8 GiB grant plus 2 GiB reserve). The sequencer then closed failed, MainPID zero;
+it did not retry, route or deploy. The failed preflight and synthesis success
+are separate outcomes. No OOM occurred and the completed checkpoint is retained.
+
+[`prepare_demand_size_clock_r2.py`](../../fpga/prepare_demand_size_clock_r2.py)
+prepares a new, **not launched or queued**, `demand-size-clock-r2` reporter and
+`ventium-demand-size-clock-oct15-r2.service` identity. Its report Tcl, source,
+mapper, clock, ownership, native-wait and resource checks are byte-identical
+apart from the two service-name substitutions. Three host tests check exact
+reversibility and reject changed admission limits, timing reports or structural
+checks. Original R1 files/failed owners remain intact. The prepared receipt
+retains the native admission traceback. Available RAM was about 5 GiB after
+synthesis; no browser or other user application was terminated.
+
+Continue with this read-only R2 reporter only after the unchanged admission
+checks pass: more than 10 GiB available RAM, 8 GiB free swap and 4 GiB disk,
+with no live Vivado family. Reuse the completed synthesis, **do not rebuild it**.
+The prepared `run.py` retains CPU24–27 launch compatibility, 8 GiB RAM/4 GiB
+swap caps and a 15-minute native timeout. After native closure, run its
+`audit_closed.py`; neither a prepared script nor an early report is a pass.
+Candidate synthesized frequency remains **unknown** until the reports close;
+the 40 MHz constraint is not a measurement.
 
 Full simulated standard
 suite, valid CoreMark scoring, routed timing and physical Win95 desktop/UI
@@ -136,3 +183,23 @@ were deleted after open-handle and retained-pin checks, reclaiming
 headers/dependencies, traces and logs are retained; binary/build-receipt hashes
 were rechecked afterward. Exact files and hashes are in
 `closed-demand-pch-prune-oct15.json` under the evidence root above.
+
+## Read-only board preflight
+
+At **21:10 UTC October 15**, SSH to `riguke@rk-xczu15eg-f.local` succeeded;
+the FPGA manager reported `operating`, with no `ao486d`, `ven_soc`, Quake or
+Doom process found. No programming, reset, clock/MMIO write or deletion was
+performed. The installed firmware file is still the older
+`/lib/firmware/ventium_uvfast_bank64_40.bit.bin`, SHA-256
+`fe9f539dfcfd9a1d909a33b561d5b7b6a0febf6e90c54b339f568d0cd496f71e`.
+That file hash is not a readback proof of which image is loaded.
+
+`/tmp/ao486/ao486d.posted-safe-oct08` matches the locally tested posted-drain
+reset daemon byte-for-byte: SHA-256
+`085c629bf84039f0dfd1983b9909026f0e18a811cf43730b68fb9d74357ee4d3`.
+Local evidence is `ventium-posted-daemon-r2.0ynoRPKK/closed.json` under external
+tmp. This removes a daemon-transfer prerequisite, not hardware acceptance.
+Board free space is only **253,300,736 bytes** on `/` and **307,503,104 bytes**
+on `/dev/shm`; recheck before transferring media or collecting captures.
+The existing cold Win95 simulation launcher still requires 8 GiB free host
+disk and a qualified ordinary UI-input path; neither check was bypassed.
