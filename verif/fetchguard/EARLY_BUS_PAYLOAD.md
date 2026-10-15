@@ -60,8 +60,11 @@ All successful rows retain stable input pins, waited native exits and receipts.
 | `early-bus-lint-r1` | Strict CPU-hierarchy lint passes, 3.88 s | Exact 159 hardware defines; all six structural error classes enforced |
 
 The canonical `make verify` still closes **FAIL**, native make exit 2:
-7 functional PASS / 101 FAIL. All 20 cycle RTL streams are parent-identical;
-that does not make the legacy cycle bands pass. No golden, mask or band changed.
+7 functional PASS / 101 FAIL: 90 are length-only differences; eleven also
+report x87 status-field differences before the missing terminal record. The
+comparator reports only the first field divergence, not every differing site.
+All 20 cycle RTL streams are parent-identical; that does not make the legacy
+cycle bands pass. No golden, mask or band changed.
 
 Failed attempts are preserved, not counted as passes:
 
@@ -93,17 +96,39 @@ The export audits all 170 shared HDL inputs / 190 payloads, with just the one
 changed include. The real Tcl source-contract test passes. The export remains
 **UNQUALIFIED**; no bitstream has been programmed.
 
-Two unchanged ten-iteration cold CoreMark controls are running under
+Two unchanged ten-iteration cold CoreMark controls closed successfully under
 `ventium-branch-address-cm10-early-bus-oct15-r1.service`, invocation
 `d4cc82539d604fea9270fe7cdbf1ca93`, on CPU12 with a 2 GiB / no-swap cap.
-Their CRCs, exact parent clocks and native closure must pass independent audit.
-They cannot establish a duration-valid score or standard-suite pass.
+The independent audit passes, rechecking **13,909 source pins**, original media,
+all five CRCs per seed, exact parent clocks, actual affinity and native closure.
+Performance: **4,767,218 ticks / 1,055,307 V retirements**, 220.31 s.
+Validation: **4,753,406 ticks / 1,054,254 V retirements**, 209.21 s.
+Both are **0% cycle gain**, as expected; no OOM, both native exits zero, owner
+exited / MainPID zero. These cannot establish a duration-valid score or
+standard-suite pass; the guest's duration-error message is retained.
 
 `fpga/prepare_early_bus_synthesis.py` prepares one matched diagnostic synthesis
 and read-only clock audit; it launches neither. Exclusive ownership, native
 wait/reaping, RAM/swap limits, host reserve and live disk floor are unchanged
 from the closed predecessor. Host tests reject relaxed stops, fake success
 and additional unreviewed RTL. No compiler/Vivado overlap is permitted.
+
+The one synthesis started **19:33:54 UTC**, under
+`ventium-early-bus-synth-oct15-r1.service`, invocation
+`c9ed942f5ed347e1b7ebe52bfa6ecf9e`; owned Vivado scope invocation
+`937415819ef841ab89274974aba0e4ec`. Admission observed 7,731,216,384 bytes free
+external storage and 15,862,124,544 bytes available host RAM. Native scope caps
+remain 8 GiB resident / 6 GiB swap, with a 13 GiB combined stop, 4 GiB disk
+floor and 2 GiB host reserve. It is a matched `logic_only` diagnostic synthesis,
+with unchanged 40 MHz core / 100 MHz PL constraints, not timing acceptance.
+
+`ventium-early-bus-timing-chain-oct15-r1.service`, invocation
+`5d95f371f0744f728fbcd877fbe38f41`, observes only that exact synthesis owner.
+After successful waited closure and independent synthesis audit, it may launch
+the prepared read-only clock audit. It cannot start another synthesis, route,
+or deploy. Six host tests check this sequence and its inherited owner/wait
+logic, including changed invocation, failure, exit races and deadline handling.
+The current measured candidate frequency remains **unknown** until closure.
 
 Still required: canonical gates green, valid CoreMark score and full correctness
 seeds, gameplay measurement, complete simulated standard suite, timing closure,
