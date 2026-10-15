@@ -1,6 +1,11 @@
 # Pair/next-read timing cofactor — 2026-10-15
 
-Status: **standalone timing experiment rejected; not accepted or deployed**.
+Status: **standalone and composed timing experiments rejected; neither accepted
+nor deployed**. The completed fetch/pair composition estimates **34.037918241
+MHz**, **6.978% slower** than the retained 36.591166892 MHz parent; see the
+closed composition analysis below.
+
+For the standalone pair/next experiment:
 The closed synthesized/unplaced estimate is **35.835871708 MHz**, versus the
 retained parent's **36.591166892 MHz**: **2.064% slower**. This replaces the
 rejected [current-U-only experiment](CURRENT_U_PAIR.md), not production RTL.
@@ -219,7 +224,7 @@ Key SHA-256 identities:
 - Clock closure: `3adfed7c5925b8821be014a3155e9ae6623f7078bdec71071911df9f075e369a`.
 - Clock audit: `a0f6ad7b1f2f265115227a6565fe267bbdf977e55c77ae5509b16d4114e94220`.
 
-## Next experiment: compose the two independently tested cuts
+## Composed experiment: both independently tested cuts
 
 The rejected [fetch-fragment-only mapping](../fe_pipe/FETCH_FRAGMENT_EXTENT.md)
 was limited by next-read/pair arbitration; this pair/next-only mapping is
@@ -272,8 +277,9 @@ exit 0. Replay/directed workers use explicit, disjoint CPU affinity sets;
 the build uses the guarded 32-job profile. Replay peaks at 766,771,200 bytes,
 the 22-worker boundary run at 722,845,696 bytes. Neither Vivado nor another
 heavy build overlaps this verification round. The subsequent full-PC transfer
-and short cold controls are described below. Its frequency is **unmeasured**;
-no board programming has been performed for the composition.
+and short cold controls are described below. Its later unplaced estimate is
+**34.037918241 MHz**, not a timing pass; no board programming has been performed
+for the composition.
 
 ### Composition full-PC transfer and pre-synthesis checks (Oct 15)
 
@@ -341,17 +347,92 @@ native models, objects and dependency files remain. Each target was checked
 against JSON input references and live `fuser` use; exact paths/hashes are in
 `closed-pch-removal-oct15.json`.
 
-**Matched synthesis is now running**, not passed:
+**Matched synthesis completed**, native exit 0 in **1,888.37 seconds**:
 `ventium-fetch-pair-next-synth-oct15-r1.service`, controller invocation
 `0c64bdd07928470daeae088fd52fcd5f`, owned Vivado scope invocation
-`0d03731a74ff4b88ab8893c1988c1c06`, native launch **11:17:14 UTC Oct 15**.
+`0d03731a74ff4b88ab8893c1988c1c06`, native launch **11:17:14 UTC Oct 15**,
+closed **11:48:43 UTC**, MainPID 0. All inputs remain unchanged; no OOM or
+resource stop. Peak scope RAM/swap: **8,062,803,968 / 2,032,164,864 bytes**.
 The preflight admitted 7.58 GB free on external storage, above the unchanged
-7.21 GB measured-growth reserve. Only this Vivado family is active. Limits
-remain 8 GiB RAM / 6 GiB swap, 13 GiB combined early stop, 4 GiB disk floor,
-2 GiB host reserve and 45-minute native timeout. Output:
-`fetch-pair-next-synthesis-r1/`; the separate prepared clock audit lives in
-`fetch-pair-next-clock-r1/` and **has not launched**. No routing or deployment
-is authorized by these diagnostic controllers. Frequency remains unmeasured.
+7.21 GB measured-growth reserve. Limits stayed at 8 GiB RAM / 6 GiB swap,
+13 GiB combined early stop, 4 GiB disk floor, 2 GiB host reserve and a
+45-minute native timeout. Output: `fetch-pair-next-synthesis-r1/`.
+
+The independent synthesis audit passes: **21,701 input pins**, 158 unchanged
+definitions, 148 native Verilog inputs, exactly the four intended payload
+changes, and a readable checkpoint. The matched mapper remains Default with
+`-no_timing_driven`. Utilization is **186,285 LUTs (+240; +0.129%)**, **54,969
+registers (-16)**, **277.5 BRAM tiles** and **47 DSPs** versus the retained
+prefix-payload parent. There is no area gain. The inherited generated PS-IP
+clock warning remains (one critical warning, 1,558 warnings), not waived.
+
+- DCP: `cfd5d96e296b746702afd5a62d079f3cbddd1edeb5dd481f8be6f94c8af8b9ec`.
+- Synthesis closure: `e89784e2939916eb3a0ce08d5826b74cb614e34e226d62577938d4bddc07b312`.
+- Synthesis audit: `7a3c394f7d0081dbf8ff87c5847abe936003aea2b55fe0c53f33fd1723c8f54e`.
+
+The separate matched clock audit **completed**, native exit 0 in **466.36 s**:
+`ventium-fetch-pair-next-clock-oct15-r1.service`, invocation
+`e1a6f63497484990a2a418243c88d6f9`, owned scope
+`a365b060e3624276b08c52ffbb149faa`, launched **11:49:38 UTC Oct 15**, closed
+**11:57:25 UTC**, MainPID 0. Peak RAM is **4,712,185,856 bytes**, zero swap/OOM.
+Its 8 GiB RAM / 4 GiB swap cap, 15-minute native timeout and disk/host reserves
+were retained. Independent regrading checks **7,716 input pins**, unchanged
+candidate/parent checkpoints and constraints, actual 40 MHz core / 100 MHz PL
+clock objects, zero black boxes and zero requested structural DRC violations.
+Output: `fetch-pair-next-clock-r1/`. Both native owners are terminal; no Vivado
+process remains. Neither controller launched placement, routing or deployment.
+
+### Closed composition result: reject promotion
+
+| Metric | Retained prefix-payload parent | Fetch/pair composition |
+|---|---:|---:|
+| Synthesized/unplaced Fmax estimate | 36.591166892 MHz | **34.037918241 MHz (-6.978%)** |
+| Core setup slack at 25 ns | -2.329 ns | -4.379 ns |
+| Core hold slack | -0.101 ns | -0.101 ns |
+| LUTs | 186,045 | 186,285 (+240) |
+| Registers | 54,985 | 54,969 (-16) |
+| BRAM tiles / DSPs | 277.5 / 47 | 277.5 / 47 |
+
+The worst path is **EIP[0] → EFLAGS[16]/D**, **100 logic levels**, 29.168 ns
+data delay: 5.538 ns logic and 23.630 ns estimated interconnect (81.013%).
+The 30 reported endpoints comprise EFLAGS, 13 replicas of the held-memory
+active register, one GPR bit, and 15 interrupt-return-EIP enables. Replicas
+are not separate architectural bottlenecks. The existing parser checks the
+entire path, including wrapped carry rows and arrival/required/slack totals:
+
+| Through named net | Incremental data delay |
+|---|---:|
+| `core_route_deny` | 18.101 ns |
+| `b_pair_ready` | 2.960 ns |
+| `l1_store_pair_ready` | 0.810 ns |
+| `l1_c_ack` | 4.068 ns |
+| EFLAGS endpoint | 3.229 ns |
+
+These are measured report boundaries, not exclusive RTL-module costs. The
+path traverses fetch/decode, access extent/routing, backing pair credit,
+paired-store admission and ACK before writeback. The V-hit capture path is
+also worse: **99 levels / -4.038 ns**, versus the parent's 91 / -1.726 ns.
+Its transitive cone shrinks from 69,278 to 68,164 cells, yet slows down;
+cone-size reduction does not establish an improvement. RAMD64E (2,996) and
+RAMS64E1 (768) counts remain unchanged. Five parser safety tests pass.
+
+- Clock closure: `40bf32fbd8f1bd28dc5b2fd5a8fae99580d2f33c20d6d788974881e9d513a30d`.
+- Clock audit: `29a7bc6a052822f6aa78f51d4f8d2d872e291907f4c1e8f910ed068f5dc21027`.
+- Complete 30-path report: `9e1ffcdc35520bf10c5bf6ca0ebb0f5bf6b98fbf32e276ac5d26c248948f0aa3`.
+
+**Next investigation, not an implemented or measured fix:** start from the
+retained faster parent, not this rejected composition. Inspect the backing
+address/strobe mux and store-credit query boundary. The L1 producer has early
+address/strobe defaults, but also repeats those assignments inside late
+request-qualified branches. A separately factored payload selector may make
+the intended request independence explicit. First require an unfiltered
+all-output equivalence microtest (including idle, blocked credit, fill,
+load/store direction and generic configurations); inspect the actual mapped
+cone before claiming that source factoring removes a dependency. Do not
+remove route/SMRAM checks, request guards, store ordering, pairing or fast
+paths, add timing exceptions, or infer a frequency gain from this hypothesis.
+Any candidate still needs complete core differential checks, cycle/pairing
+preservation, matched timing and eventual full-suite physical acceptance.
 
 ### Fresh private-reference differential run while synthesis proceeds
 
