@@ -1,9 +1,11 @@
 # Boundary-fetch extent isolation — October 15, 2026
 
-Private candidate from the retained **36.591166892 MHz synthesized/unplaced**
-prefix-payload parent. No frequency gain, routed result, production RTL change,
-standard-suite pass or FPGA acceptance is claimed. Neither rejected decoder
-selection nor response-kind factoring is inherited.
+**Rejected timing experiment: 34.177518029 MHz synthesized/unplaced**, versus
+the retained prefix-payload parent's **36.591166892 MHz** (6.596% slower).
+The functional equivalence checks below do not justify promoting a slower
+implementation. No production RTL change, routed result, standard-suite pass
+or FPGA acceptance is claimed. Neither rejected decoder selection nor
+response-kind factoring is inherited.
 
 ## Change
 
@@ -184,6 +186,16 @@ Full parent/candidate records and clocks are equal at each latency: **3,048
 candidate functional records and 264 candidate V retirements**. Read-only
 regrading rechecks all 96 receipts, logs, traces and 28 input pins.
 
+A further [independent audit](audit_fetch_fragment_finite_cs.py) reuses the
+existing [exception-delivery contract](audit_finite_cs_rtl.py), including all
+architectural fields across the deliberate delivery record, the precise
+16-byte stack-frame effect, handler entry and real same-cycle U/V partners
+for **both** MOV controls. It also rechecks each model's 195-source closure
+and the exact single-file transformation. All **48 complete parent/candidate
+comparisons** pass, with no trace trimming or new masks. This extends the
+earlier response-kind candidate's finite-CS coverage to this candidate and
+adds AXI delay31; it does not claim those checks were absent from all prior work.
+
 The first four runner attempts remain recorded, not relabelled as passes:
 R1 rejects the TB's expected duplicate `VEN_FPREM` token before execution;
 R2 wrongly requires a banner that is absent with explicit `--quiesce`;
@@ -223,12 +235,60 @@ generated headers/makefiles, objects, models and evidence remain; the PCH
 caches are rebuildable. The exact removal plan is retained in
 `fetch-fragment-compiler-prune-plan.json`.
 
-Synthesis was admitted with 7,568,551,936 bytes free. Current owner is
+Synthesis was admitted with 7,568,551,936 bytes free. Its closed owner is
 `ventium-fetch-fragment-synth-oct15-r1.service`, invocation
 `f116adc06b8e4469a46cfb6301341626`; the failed admission is retained separately.
-No new synthesized frequency is available yet. A successful native synthesis
-closure and independent source/resource audit are required before the separate
-read-only parent/candidate timing query.
+It closes native exit0 in **1,956.54 seconds**, inputs unchanged, no resource
+stop/controller failure and no OOM. Peak scope RAM/swap are
+8,449,413,120 / 2,086,707,200 bytes. The independent synthesis audit checks
+27,393 input pins, all 158 definitions, 148 native `read_verilog` files,
+the exact one-file delta, unchanged mapper and a readable checkpoint.
+
+| Synthesis area | Prefix-payload parent | Fetch-fragment candidate | Delta |
+|---|---:|---:|---:|
+| LUTs | 186,045 | 186,530 | +485 (+0.261%) |
+| Registers | 54,985 | 54,969 | -16 |
+| BRAM tiles | 277.5 | 277.5 | 0 |
+| DSPs | 47 | 47 | 0 |
+
+The native log retains one critical warning at generated PS-IP XDC line21
+(`create_clock` on an unknown pin), also present in the parent, and 1,564
+synthesis warnings. These are not waived. The separate clock audit must verify
+actual clock objects and constraints; synthesis success alone is not sign-off.
+DCP SHA-256:
+`6c09459be05993db6a32d104776a31c1f3cc2f6cc392371cef83bbe403686267`.
+Synthesis audit SHA-256:
+`1b63f8beb277a21ac40619e0c4ce719decb1282befd7f241b55315e6edc38c9a`.
+
+The separate read-only timing query closes successfully under
+`ventium-fetch-fragment-clock-oct15-r1.service`, invocation
+`4394c22721324d71b64c64b40c702061`, only after native synthesis and its independent
+audit passed. Native exit0 in **463.41 seconds**, peak RAM 4,866,273,280 bytes,
+zero swap and no OOM. The independent audit rechecks **23,223 input pins**, the
+closed owner, actual 40 MHz core / 100 MHz PL clock objects and the parent's
+original -2.329 ns setup result. Neither checkpoint is rebuilt or placed/routed.
+
+| Unplaced timing | Prefix-payload parent | Fetch-fragment candidate |
+|---|---:|---:|
+| Setup slack at 25 ns | -2.329 ns | -4.259 ns |
+| Derived Fmax estimate | 36.591166892 MHz | 34.177518029 MHz |
+| Worst-path logic levels | 93 | 100 |
+
+Candidate core hold slack is -0.101 ns. Its worst path is EIP to
+`pipe_mem_v_hit_q`, with **29.048 ns data delay**: 6.097 ns logic and 22.951 ns
+estimated interconnect (79.0%). Named nets traverse prefix/V decode,
+`mc_prime_v_branch`, next-address/DTLB qualification, `mc_prepare_ok`,
+`core_mem_next_req`, pair-bank readiness and paired-load acceptance. Of the
+30 reported paths, 27 end in paired-read payload registers; the other two
+besides the worst path end in L1 validity/LRU. These are report samples, not
+an exhaustive path census; rebuilt hierarchy names are not RTL ownership.
+
+The source-level simplification did not improve the mapped netlist. Preserve
+the faster parent as the timing baseline; **do not route or deploy this
+candidate**. The next investigation must account for both the parent's
+fetch/response/writeback path and the newly exposed next-read/bank-arbitration
+path, rather than assuming one shortened expression implies overall improvement.
+Neither 40 MHz synthesized closure nor routed closure has been achieved.
 
 Key closure hashes:
 
@@ -244,6 +304,9 @@ Key closure hashes:
 | `fetch-fragment-regression-audit.json` | `3f7c8b21b0e4023f721413cbdb70d7e243a244d360e90081dc494eee42949131` |
 | `fetch-fragment-env-fault-r1/closed.json` | `02d30ff8d8aba16d322f6fa6130d02b53d96f58861b35eff91740f6a36b4dcff` |
 | `fetch-fragment-lint-r1/closed.json` | `a19f263bd9cf1517bebae1498651380cabc1791df0d8f184f6594c33a2368e9f` |
+| `fetch-fragment-clock-r1/closed.json` | `943373862435593eeaf648e874484627ff9e82693cf8fdf7aa95f89a55fa96d8` |
+| `fetch-fragment-clock-r1/audit.json` | `e00ec7e1888b299ffec16ee304ed839d1d67259c120495683fe04e25ff5e9bf4` |
+| `fetch-fragment-finite-cs-r5/audit.json` | `a5badad4455c9f53af9e308142c399ed2b253b00f015a3a08deacc79eaa1ff97` |
 
 Current candidate gameplay is **unmeasured**. Latest verified gameplay remains
 **0.50520554 total U+V IPC**, older model `c7b95b78`, cycles
