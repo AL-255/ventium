@@ -1,7 +1,8 @@
 # DECODE bus-address timing experiment — October 15, 2026
 
-**Directed checks pass; canonical verification remains red. No new timing,
-standard-suite or physical FPGA acceptance is claimed.**
+**Directed checks pass, but the timing experiment regresses to 33.603 MHz
+synthesized/unplaced. Canonical verification remains red. This candidate is
+not routed, deployed, or accepted.**
 
 The last verified gameplay measurement is **0.50520554 total U+V IPC**, model
 `c7b95b78f47f5e709136f98230bdf33975cf8db0e925956b469649cbf6384afd`, cycles
@@ -143,8 +144,27 @@ changed invocation and observation timeout. Sequence receipts are
 closure files are only produced when their respective stages occur.
 After the synthesis audit passed, the sequence launched the clock audit at
 **18:54:02 UTC**, owner `ventium-decode-bus-clock-oct15-r1.service`, invocation
-`591007b3e78e432bbcdc0152f1b0c5f8`. This is a live read-only report run, not
-placement/routing and not a completed timing result.
+`591007b3e78e432bbcdc0152f1b0c5f8`. It closed at **19:01 UTC**, native exit 0 /
+MainPID 0, after **466.49 seconds**. The independent audit passes: 14,265 input
+pins, no OOM, 4,752,744,448 bytes peak RAM and zero swap. The one-shot sequencer
+also closed exit 0; it did not launch implementation or another synthesis.
+
+The measured synthesized, unplaced core estimate is **33.603279680 MHz**,
+versus **35.814053435 MHz** for the parent (**−6.173%**). Setup/hold estimates
+are −4.759/−0.101 ns. The 40 MHz constraint is not an achieved frequency.
+All 30 reported worst paths still start at `q_pc[0]`; the worst reaches
+`gpr[4][16]` through 101 logic levels, versus 96 in the parent. Data delay is
+29.548 ns: 6.352 ns logic and 23.196 ns estimated interconnect. This is not a
+routed congestion measurement or a silicon frequency result.
+
+The path still crosses `fetch_overlength_probe`, `translatable960_out`,
+`bd_addr1`, `mem_xlate2`, route qualification, paired-store admission and GPR
+writeback. The OR with `state == S_DECODE` did **not** remove the late address
+selector from the mapped critical path. The next investigation replaces the
+zero default plus late override with an early `cur_lin` default and preserves
+the six existing physical-state overrides. It must prove identical active
+beats/probes and retain all request/fault/translation checks; simply disabling
+the probe, pairing or faults is not an acceptable timing fix.
 
 Still required: canonical gates green; duration-valid CoreMark performance and
 full correctness seeds; candidate gameplay measurement; complete simulated
