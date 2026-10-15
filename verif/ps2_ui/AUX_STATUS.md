@@ -233,3 +233,49 @@ canonical/standard-suite checks, timing and physical UI acceptance remain open.
 No gameplay or frequency gain is claimed. Candidate gameplay IPC remains
 **unmeasured**; the verified baseline remains **0.50520554 total U+V** on the
 older `c7b95b78…` model/window identified above.
+
+## Current-source mouse export boundary
+
+`fpga/freeze_aux_mouse_rk_candidate.py` is the new export path for the current
+wait-cofactor core plus the AUX repair and ordinary mouse transport. The older
+`freeze_ps2_mouse_rk_candidate.py` export is a **158-define, older-core** artifact;
+it must not be deployed as though it contains the latest 159-define processor.
+Neither exporter edits the active synthesis inputs or starts Vivado.
+
+The new exporter requires the exact current FPGA manifest
+`d655cc8bf1dcea77cc82996c7ebade06387b3da07d7e83a65c84a0ed0a6feefc`, a successfully
+closed source-matched AUX full-PC build and its exact terminal owner invocation.
+It compares all **170 common HDL inputs**, permits only the qualified AUX line
+to differ, retains all **159 hardware / 157 simulator defines**, and verifies
+the actual generated model's compile command. All newer core/FPU/cache fixes,
+strict waiting-x87 policy, UV/fast-pipe, full P5 L1s and posted-16 transport stay
+in the source closure. The three reviewed wrapper transformations plus two
+mouse modules produce **192 payloads**, with no other processor change.
+
+The combined adapter proof above must match the exported repaired controller,
+FIFO, management bridge and mouse modules byte-for-byte. Its successful owner,
+positive runs, parity-negative witness and input hashes remain required. A new
+Tcl source-contract check extends the **strict 159-define** profile instead of
+silently removing `VEN_X87_MF_STRICT` to satisfy the older mouse checker.
+
+Nine host/source-contract tests pass, including real current-source composition,
+all inherited filelist/include edges, native Tcl expansion and negative controls
+for old core provenance, unclosed/failed owner, extra RTL edits, missing strict
+x87 mode, retired half-cache mode and missing/duplicate mouse inputs:
+
+```sh
+TMPDIR=/home/yukidama/external/tmp taskset -c 12 python3 -B \
+  fpga/test_freeze_aux_mouse_rk_candidate.py \
+  --source /home/yukidama/external/tmp/ventium-fprem-sequence.iSZ9BAj4/pipe-wait-fpga-r1 \
+  --overlay /home/yukidama/external/tmp/ventium-ps2-mouse-overlay-r2.McPNAkCQ -v
+```
+
+At this point the export tool is tested, but **no combined export has been
+published**: the AUX full-PC compilation is still waiting for the owned timing
+sequence. The future manifest explicitly leaves `simulator_sha256=null` because
+the PC model does not instantiate the complete new FPGA mouse wrapper; it names
+the matched processor/platform model separately. Full-wrapper elaboration/lint,
+timing, canonical/standard-suite and physical UI acceptance remain required.
+This integration does not qualify the separate FIFO-loss proposals or imply
+a frequency/gameplay gain. Gameplay IPC remains unmeasured for the candidate;
+the older verified baseline and window above are unchanged.
