@@ -166,12 +166,89 @@ Audit SHA-256:
 `1f80a208437fd359c5c8dd078f68f1a632fa8df539043a0c646fb5d88f967c92`.
 Audit success is evidence integrity, **not** a canonical gate pass.
 
+## PC transfer and FPGA measurement preparation
+
+The exact decoder change is now transferred to the full-PC model by
+[`build_prefix_opcode_soc.py`](../../fpga/build_prefix_opcode_soc.py). All 102
+shared RTL sources match the directed model; the 156 simulation definitions,
+single-fill backend, posted16 queue, full caches and UV-fast paths are unchanged.
+The private C++ harness object and its dependency file resolve to this model's
+generated headers. Native build closes exit0 in **24.61 s**; the 98 inherited
+platform structural warnings are unchanged, not waived. Model SHA-256:
+`977e63611f3addef40bdf60ccab402d949e82416c715a6551859a86d6451517d`.
+
+Additional closed candidate checks:
+
+- Both unchanged **10-iteration** cold CoreMark seeds have matching reference
+  CRCs and exactly **4,767,218 / 4,753,406 ticks**, identical to the parent:
+  **0% cycle gain**. Native runs take 213.90 / 223.48 s on observed CPU12,
+  with 1,055,307 / 1,054,254 V retirements at the final samples. Independent
+  regrading checks all source pins, complete VGA results, actual native waits
+  and terminal service ownership; no OOM. These are short CRC controls,
+  **not duration-valid scores or the full CoreMark correctness suite**.
+- Original fetch-boundary corpus: **22 cases, 176 RTL executions, 88 QEMU
+  comparisons**, 21,832 candidate records, 4,968 V retirements and 44 fetch
+  witnesses; full parent/candidate state and cycles match. Native closure is
+  **24.76 s**, owner `ventium-prefix-opcode-fetch-oct15-r1.service`, invocation
+  `ca9ab430027a4eeab60cbfaacdee3eef`. Per-child affinity was not observed;
+  owner affinity alone is not claimed as proof of child confinement.
+- Unchanged x87 environment-store fault corpus: **44 cases / 88 full QEMU
+  comparisons**, 35,124 records / 4,580 V retirements, AXI delay0/7. Native
+  closure **13.16 s**, owner `ventium-prefix-opcode-envfault-oct15-r1.service`,
+  invocation `a08add62dbf247bbb04c1961fe5e30f8`; no errors and pins unchanged.
+- Exact 158-definition hardware CPU lint passes in **3.98 s**, retaining the
+  hard structural classes. This is CPU-hierarchy lint, not full-SoC lint.
+
+Independent CoreMark audit SHA-256:
+`9d1e64ba5471448da2e83305b24ee632c0b235317622586485bee7ec11d7747f`.
+Independent fetch audit SHA-256:
+`b357ba33a472215a2ae506ac6d758efb4877af12bd5b4700119e2353bd6b98c7`.
+x87 fault closure SHA-256:
+`5c817bd67d99d5f4bf92584fa21b62248fab7d92fb5cee2702df173770afb832`.
+
+[`freeze_prefix_opcode_rk_candidate.py`](../../fpga/freeze_prefix_opcode_rk_candidate.py)
+publishes `prefix-opcode-fpga-r1`, retaining all 190 parent payloads and all 158
+hardware definitions. Exactly `ventium/rtl/core/decode_stages.sv` changes;
+170 HDL payloads, 117 filelist sources and 49 includes are checked. Core/PL
+targets remain **40/100 MHz**. The source contract passes; the image remains
+**UNQUALIFIED**. Manifest SHA-256:
+`3c843461da525a0ac78303ba67900815cb8a0a4be0787e99ead9d9299c2a8788`.
+
+[`prepare_prefix_opcode_synthesis.py`](../../fpga/prepare_prefix_opcode_synthesis.py)
+preserves the native synthesis/report controller lifecycle byte-for-byte,
+including exclusive Vivado ownership, admission, proactive stops and reaping.
+Six host tests cover exact PC/freeze deltas and resource/measurement guards.
+The full-core diagnostic synthesis was launched as
+`ventium-prefix-opcode-synth-oct15-r1.service`, invocation
+`71b35b08d30f43dfb57d2624a8ef1ad3`. No synthesis result, route, bitstream or
+physical pass is claimed until its native closure and independent audit.
+
+### Space reclaimed before synthesis
+
+An exact two-phase manifest removed **556 regenerable files / 1,577,180,668
+bytes**: five superseded diagnostic synthesis DCPs and generated `.cpp`, `.o`,
+`.a`, `.gch` compiler products from the three closed prefix-opcode models.
+No binary, input source, private harness object, dependency/header, guest media,
+log or report was removed. The current prefix-payload, fast-segment,
+response-kind and decoder-probe checkpoints remain. All **30,292 protected
+pins** were rechecked after deletion, unchanged. Deleted products have no
+backup, but retained source closures permit regeneration. Old DCP hashes remain
+in their original receipts, which now document historical rather than present
+files. Free external space increased to 7,386,959,872 bytes before synthesis.
+
+Exact inventory and receipt are `prefix-opcode-products-prune-plan.json` and
+`prefix-opcode-products-prune-closed.json` under the scratch root. Receipt hash:
+`03580df7a72da4df7b731c478ff3c1f640cbe45e76c91281e3a2a398b229405b`.
+
 ## Acceptance remains open
 
 No duration-valid CoreMark, standard-suite, routed or FPGA acceptance
 is established by these checks. The parent's canonical functional/cycle gate
-failures remain unresolved, not waived. The candidate must undergo full-core
-same-input/differential checks before full-system transfer or deployment.
+failures remain unresolved, not waived. Full-core same-input checks and the
+short full-PC CRC controls do not replace canonical repairs, complete standard
+suite runs, routed timing or physical deployment acceptance. The separate
+finite-CS reference failures are retained as historical parent evidence, not
+silently relabelled as a candidate boundary pass.
 
 Latest verified gameplay IPC remains **0.50520554 total U+V**, older model
 `c7b95b78f47f5e709136f98230bdf33975cf8db0e925956b469649cbf6384afd`,
