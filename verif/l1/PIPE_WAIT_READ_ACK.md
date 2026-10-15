@@ -61,6 +61,9 @@ All results below use native waited completion and unchanged input pins.
 | `pipe-wait-delivery-r1` | All 144 FPREM/waiting-x87/#NM/#MF native executions pass with exact parent traces/clocks; 74.40 s |
 | `pipe-wait-func-r1` | 108/108 programs pass against the existing repaired private QEMU reference; 225.81 s; **not canonical acceptance** |
 | `pipe-wait-matched-inputs-r1` | 108/108 complete streams, 80,800 records equal; identical flattened images and initial ESP; no normalization; 42.65 s |
+| `pipe-wait-physical-r1` | All 36 INT/IRET and SMM native executions pass; 158,511 candidate records and 888 V retirements, exact parent state/clocks; 561.87 s |
+| `pipe-wait-soc-r1` | Fresh full-PC build, 22.60 s; all 102 shared HDL inputs match the directed model, all 157 defines retained |
+| `pipe-wait-lint-r1` | Strict CPU-hierarchy lint passed with the exact 159 hardware defines; six structural classes remain fatal |
 
 The leaf uses the actual request equations, complete S_PIPE bus arm and
 fragment equations. Translation cancellation and the existing seam ACK
@@ -96,15 +99,41 @@ Identities:
 - Parent `core.sv`: `fc02d7c55bfc0f33a0e8f87fdcf04d6a4709b97a420b8161e2d0effc0a854de1`.
 - Candidate `core.sv`: `1430e18b5c039ab2ebb69e7cdf14d114ae6d0ee1dd4b63c72c2f4f2207b34076`.
 - Leaf receipt: `a33faf577ca84074823c01459dfc014f4e919ab45633b15e480e0f95bdd53f66`.
+- Full-PC model: `55e9255323354c314c102b2e7362ad3f9a5dfb1ca9c4e613a289f379936b6fce`.
+- FPGA manifest: `d655cc8bf1dcea77cc82996c7ebade06387b3da07d7e83a65c84a0ed0a6feefc`.
+
+The hardware freeze rechecks 170 shared HDL inputs / 190 payloads against the
+compiled full PC. Only `ventium/rtl/core/core.sv` changes. The actual project
+Tcl source contract passes, with unchanged full P5 L1s, single-fill, posted-16
+transport and requested 40/100 MHz core/PL clocks. An independent read-only
+pass rechecked **13,894 transfer/export pins**. The freeze is **UNQUALIFIED**,
+not a bitstream. The full-PC build retains 98 inherited structural warnings;
+strict CPU-hierarchy lint is not a full-SoC structural-cleanliness claim.
+
+Retained successful owners:
+
+- Physical-address tests: `ventium-pipe-wait-physical-oct15-r1.service`,
+  invocation `b68da418c5b5464eb4e95241930d3b89`.
+- Full-PC build: `ventium-pipe-wait-soc-oct15-r1.service`, invocation
+  `43ef88a30cff4132bdfda8039020ae4d`.
+- Hardware-profile lint: `ventium-pipe-wait-lint-oct15-r1.service`, invocation
+  `563e977d6f8c442b81eb2b58649d6eb8`.
+
+Each owner is exited / MainPID zero / native status zero. The slowest SMM
+metadata case completes in **6,040,521 clocks** on both models; its established
+eight-million-cycle bound is retained, not mistaken for a completed run.
 
 ## Outstanding qualification
 
-Cold INT/IRET and SMM physical-address-owner tests are still running. These
-are simulations, not physical FPGA tests. Full-PC transfer/export tooling
-is prepared and host-tested, but no full-PC build, hardware freeze, lint,
-CoreMark result or timing measurement is claimed yet for this candidate.
+The INT/IRET and SMM tests above are simulations, not physical FPGA tests.
+Two short ten-iteration cold CoreMark controls are running on the new full-PC
+model under `ventium-branch-address-cm10-pipe-wait-oct15-r1.service`, invocation
+`dbc97700d80c48df8762401da4d36b2c`, pinned to actual CPU12 with 2 GiB RAM,
+no swap and retained native closures. They must match both sets of five CRCs
+and the parent's exact ticks. No completed CoreMark result or timing measurement
+is claimed yet; these short controls are not duration-valid scores or the suite.
 
-Before accepting: close those checks, measure timing with unchanged mapper
+Before accepting: close those CoreMark checks, measure timing with unchanged mapper
 and constraints, restore canonical gate correctness deliberately, pass the
 complete simulated standard suite and validate matching FPGA Win95 cold
 boot/UI plus full Quake timedemo. Explicit concurrent snoop/flush injection
