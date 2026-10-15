@@ -4,6 +4,9 @@ Private candidates only; no canonical reference, production RTL, comparison
 mask, guest workload or FPGA image has been replaced. This follows the
 [numeric remainder repair](README.md). Unmasked underflow-result rescaling and
 system exception delivery remain separate, open qualifications.
+The [new underflow diagnostic](UNDERFLOW_STATUS.md) now reproduces the missing
+UM=0 rescaling/UE response in both current RTL and the private reference;
+that follow-up is not included in the qualified operand-exception repair below.
 
 ## Independent instruction check
 
