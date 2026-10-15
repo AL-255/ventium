@@ -270,7 +270,59 @@ build/run/grade sequence closes in **341.02 seconds**, stable source pins,
 actual simulator CPU12 affinity and explicit child reaping. This verifies both
 engine port configurations, not every standalone caller or whole-core profile.
 
-Remaining verification includes whole-core delayed `#MF` delivery, all
+## Cold delayed exception delivery and a remaining architectural gap
+
+[`run_underflow_delivery.py`](../../srt/run_underflow_delivery.py) adds eight
+cold protected-mode BIOS fixtures: normal cancellation, tiny finite/infinite
+divisor bypass and partial reduction, each for FPREM and FPREM1. Each runs with
+an immediately following FWAIT, FNOP or FLD1, at AXI delays 0/7/31, on the old
+underflow-bad model and both repaired cores. No snapshot, single stepping,
+interposed status read or guest workaround is used. The fixtures check saved
+fault EIP, CR0.TS/EM handling, `#NM` before `#MF`, exactly-once retry, UE/ES/B
+without PE, the scaled ST0 payload, preserved ST1 and final TOP. Partial
+remainders accept every architecturally permitted reduction width.
+
+| Model | Immediate FWAIT | Immediate FNOP | Immediate FLD1 |
+|---|---:|---:|---:|
+| Old underflow-bad `2ac15c8b…` | 0/24 | 0/24 | 0/24 |
+| Underflow repair `77c0c895…` | 24/24 | 24/24 | **0/24** |
+| Address-shape candidate `6deb3e92…` | 24/24 | 24/24 | **0/24** |
+
+Both repaired models have identical complete architectural traces, cycle and
+V-retirement counts for all cases. The latest candidate produces 137,544
+architectural records and 39,984 V retirements across its 72 executions.
+Every FLD1 failure exits at guest check `0x21`: two earlier #NM cases passed,
+but the required #MF count is zero. This is **not a passing suite or a waived
+expected failure**. FWAIT/FNOP delivery is qualified by these tests; delivery
+at arbitrary waiting x87 instructions is not.
+
+The cause is explicit configuration: `VEN_X87_MF_STRICT` is absent from all
+152-definition tested cores. `core_fetch_decode.svh` otherwise checks pending
+ES only for FWAIT/FNOP, and `core.sv`'s fast-FP trap fallback also omits ES.
+Those two existing strict-mode arms must be qualified together; merely fixing
+the slow decoder would leave the fast bypass unsafe. The proposed minimal
+repair is to enable that existing architectural mode, retaining no-wait
+status/clear instructions and normal UV-fast execution. It adds no blanket
+FP/integer serialization. Its timing and performance effects are not assumed.
+
+[`build_strict_mf_core.py`](../../sys/build_strict_mf_core.py) prepares a private
+153-definition derivative with **all 195 source files unchanged** and a unique
+native harness. Its guarded compiler refuses concurrent Vivado. The strict
+replay retains the same fixtures, verdicts, native lifecycle and source pins;
+only model selection and the now-inapplicable old/new equality check differ.
+Two fixture tests, two configuration tests and one replay-adaptation test pass.
+The derivative is prepared but **not compiled or accepted yet** while synthesis
+owns the heavyweight build slot.
+
+Evidence `delivery-underflow-r1`, owner
+`ventium-underflow-delivery-oct15-r1.service`, invocation
+`4981932d8e07483893ec2fc8e71cd3c7`, closes **exit 1**, MainPID 0, in 95.19 seconds.
+All 216 native executions were waited/reaped, source pins stayed unchanged,
+actual CPU12 affinity and AXI activity were observed. Peak RAM was 474,796,032
+bytes. The diagnostic completed but candidate acceptance is explicitly false.
+This is an Intel-spec self-check, not a system-QEMU differential pass.
+
+Remaining verification includes the strict-mode repair, all
 standalone SRT caller profiles, canonical gates and the standard suite.
 Final FPGA timing and
 physical Quake/Win95 acceptance must use the repaired source set; the older

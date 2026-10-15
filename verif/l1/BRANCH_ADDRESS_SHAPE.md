@@ -112,8 +112,12 @@ routing, bitstream or FPGA deployment is authorized by that controller.
 
 Next: close and audit synthesis, measure the candidate's frequency, and retain
 or reject the change on that evidence. Full simulation and physical Win95/Quake acceptance, valid
-CoreMark scoring, canonical failures and delayed underflow `#MF` qualification
-remain open.
+CoreMark scoring and canonical failures remain open. The subsequent cold
+underflow delivery matrix passes FWAIT/FNOP (24 cases each) but fails all 24
+immediate-FLD1 cases on both repaired cores: `VEN_X87_MF_STRICT` is disabled.
+The candidate/parent traces and counts remain identical, so this is not an
+address-shape regression. See [the underflow report](../qemu-trace/remainder_sequence/UNDERFLOW_STATUS.md)
+for the precise failure and the prepared, not-yet-built policy repair.
 
 Gameplay baseline is **0.50520554 total U+V IPC**, older model
 `c7b95b78f47f5e709136f98230bdf33975cf8db0e925956b469649cbf6384afd`, cycles
