@@ -105,8 +105,11 @@ standard-suite pass; neither diagnostic ratio is a publishable CoreMark score.
 and independent clock-audit controllers. Synthesis launched at **18:22 UTC**
 under `ventium-decode-bus-synth-oct15-r1.service`, controller invocation
 `26931169bdb9480fa5bc8264a68a4ed8`, owned Vivado scope invocation
-`7a750139557f4ca29f74d4c6fb9aa06a`. **It is running, not a completed result.**
-The independent clock audit has not launched. The native
+`7a750139557f4ca29f74d4c6fb9aa06a`. **It closed successfully at 18:53:56 UTC**, in
+1,907.62 seconds (31.79 minutes); the retained owner is exited / MainPID 0 /
+native exit 0. All input hashes remained unchanged, with no resource stop,
+controller failure or OOM. Observed peaks were 8,184,942,592 bytes resident
+and 1,867,059,200 bytes swap. The native
 lifetime/ownership, wait/reaping, disk reserve and RAM/swap stop controls are
 byte-identical to the closed preceding controllers. Guard-mutation tests
 reject relaxed memory/disk limits or replacing the native wait with success.
@@ -117,6 +120,15 @@ Vivado retains 8 GiB resident / 6 GiB swap caps, a 13 GiB combined stop and
 4 GiB disk / 2 GiB host reserve floors. No new compiler runs overlap it.
 Report actual measured synthesized and routed frequencies,
 not the requested constraint as achieved Fmax.
+
+The independent closure audit passes, rechecking **14,260 input pins**,
+159 hardware defines and 148 native `read_verilog` inputs. Utilization is
+**187,508 LUTs (54.94%) / 54,985 registers / 277.5 BRAM tiles / 47 DSPs**.
+Against the parent this is **+1,161 LUTs (+0.623%) / −31 registers**, with
+BRAM/DSP unchanged; this is not an area reduction. The retained PS8 generated
+XDC `create_clock` warning is visible; actual clock objects and structural
+checks are the independent audit's responsibility, not inferred from the
+requested frequency. Timing and routed frequency remain unqualified here.
 
 At 18:42 UTC a fixed, one-shot sequencer was attached to that exact synthesis
 invocation: `ventium-decode-bus-timing-chain-oct15-r1.service`, invocation
@@ -129,6 +141,10 @@ Four host tests cover terminal failure, live process observation, exit races,
 changed invocation and observation timeout. Sequence receipts are
 `decode-bus-sequence-{started,clock-owner,closed}.json`; the clock-owner and
 closure files are only produced when their respective stages occur.
+After the synthesis audit passed, the sequence launched the clock audit at
+**18:54:02 UTC**, owner `ventium-decode-bus-clock-oct15-r1.service`, invocation
+`591007b3e78e432bbcdc0152f1b0c5f8`. This is a live read-only report run, not
+placement/routing and not a completed timing result.
 
 Still required: canonical gates green; duration-valid CoreMark performance and
 full correctness seeds; candidate gameplay measurement; complete simulated
@@ -186,3 +202,18 @@ receipts `decode-prerequisite-pch-prune-oct15.json` and
 unchanged executable/receipt hashes. An initial cleanup preflight stopped
 without deleting anything when an engine's executable name differed; the
 validated rerun used its actual `engine-obj/test` path.
+
+Additional storage recovery: 44 large cone/primitive reports from 11 older,
+closed successful clock audits were archived, with every logical file hashed
+against its original before removal. Eight tar members reference preceding
+hardlinked data; the first verifier required regular members and correctly
+stopped before any unlink. A separate finalizer verified all linked contents
+and preserved the failed attempt. The 44 paths cover 36 distinct inodes;
+**1,741,279,232 bytes net (1.62 GiB)** were reclaimed, not the larger logical
+size obtained by double-counting links. Checkpoints, current report inputs,
+binaries, native logs and closure receipts were untouched, and current source
+pins still match. Restore `closed-timing-tables-oct15.tar.gz` relative to
+`/home/yukidama/external/tmp`; SHA-256
+`ef265dd6e6988dbbed53bd4920b47a687a65f1e3f4d4aae4fefc19574be6d099`.
+The `closed-timing-tables-oct15-{plan,verified,closed}.json` receipts preserve
+the exact member list, content hashes, link targets and space accounting.

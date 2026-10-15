@@ -9,7 +9,9 @@ does not yet include the separately tested strict waiting-x87 policy below.
 The [subsequent DECODE payload experiment](../../fetchguard/DECODE_BUS_PAYLOAD.md)
 retains that policy: 72 delayed-exception cases pass with exact strict-parent
 trace/cycle equality, and its source-matched PC/FPGA freeze includes the define.
-That freeze has no synthesized, routed or physical-board result yet.
+That freeze has now passed native synthesis and its independent closure audit;
+its clock audit is running. Synthesized frequency, routed timing and physical
+board acceptance remain unqualified; see the linked experiment for live status.
 The completed fetch-metadata FPGA synthesis contains the earlier numeric and
 operand-exception fixes, but not this underflow fix. It failed the timing
 improvement objective (36.03 MHz unplaced estimate) and is not deployable
