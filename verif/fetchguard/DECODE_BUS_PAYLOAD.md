@@ -124,6 +124,48 @@ standard suite; routed timing; physical Win95 cold desktop/UI interaction and
 full Quake timedemo on the exact candidate in UV-fast mode. No new bitstream
 was programmed in this round.
 
+### Cold Quake qualification started
+
+At **18:34:53 UTC**, `ventium-decode-bus-quake-oct15-r1.service` began a
+fresh FreeDOS+Quake demo1 run on the exact full-PC candidate `7e877b3b…`.
+Invocation: `9d304a43b10c456db6bea5cdf8189d1f`. Evidence lives in
+`decode-bus-soc-r1/quake-cold-decode-bus-oct15.1` under the root above.
+**This is running, not a timedemo pass or a gameplay IPC measurement.**
+
+The observed native process has the correct executable hash, direct parent,
+cgroup/session identity and actual CPU11-only affinity. Startup reports
+posted transport with 16 write slots, B-delay 20 / first-read delay 21, and
+40 MHz core/PIT/RTC with 80 MHz VGA. The 157-definition model preserves
+U/V and system/relocated fast paths; actual paired-retirement and gameplay
+window evidence must still come from this run. Startup retirement counts
+are not reported as gameplay IPC.
+
+`fpga/prepare_decode_bus_cold.py` adapts only model/path/run identity from
+the previously qualified cold runner. Native arguments, fresh private media,
+969-frame completion criteria, waited exit 0, descendant closure, continuous
+log/EOF checks and 4 GiB live disk reserve are unchanged. No snapshot,
+guest patch, keyboard script, debugger STEP or cache override is used.
+The owner is capped to one CPU, 2 GiB RAM, no swap, 160 tasks and a three-day
+native deadline. Deadline or reserve termination is failure, never acceptance.
+The read-only Win95 helper's launch entry remains disabled; no new Win95 run
+was started without a qualified ordinary UI-input path.
+
+Two new adaptation/negative-completion tests pass. The existing **39 runner
+tests** and **31 timedemo-checker tests** pass again; the new and old native
+helper bytes match exactly (`82d2b3e0…` runner / `427d9e74…` checker).
+The independent closed-run audit remains pending until the actual child exits.
+
+For launch headroom, 1,636 generated C++/compiler products from seven **closed
+prerequisite builds** were losslessly archived and removed from their original
+paths, recovering **296,911,803 bytes net** (283 MiB). All native executables,
+source/headers/dependencies, logs, receipts and pinned inputs remain in place.
+No current candidate model or live synthesis output was a cleanup target.
+`closed-prerequisite-products-oct15.tar.gz` (SHA-256
+`3cc4d52f8c0ba74d25af1e8fe940426e008acf2fdaca8cee86a41b213093a27b`)
+is recoverable relative to `/home/yukidama/external/tmp`; the accompanying
+plan/verified/closed receipts retain every original member hash. The cleanup
+owner exited 0 with MainPID 0 before Quake launched.
+
 Disk hygiene: 14 unused precompiled-header caches from closed builds were
 removed, totaling **1,273,376,825 bytes**. No source, executable, generated
 header/dependency file, trace or log was removed. The caches are regenerable;
