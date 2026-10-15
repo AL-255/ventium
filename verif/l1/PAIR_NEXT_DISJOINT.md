@@ -353,6 +353,53 @@ remain 8 GiB RAM / 6 GiB swap, 13 GiB combined early stop, 4 GiB disk floor,
 `fetch-pair-next-clock-r1/` and **has not launched**. No routing or deployment
 is authorized by these diagnostic controllers. Frequency remains unmeasured.
 
+### Fresh private-reference differential run while synthesis proceeds
+
+The composition now also has a **fresh QEMU run**, separate from the earlier
+authenticated-input replay. [The runner](../qemu-trace/run_fetch_pair_next_func.py)
+uses the unchanged canonical functional worker, all 108 jobs, UV-fast/AXI,
+read/write delay 7, a fresh isolated cache, and the independently qualified
+[FRNDINT/C1 reference](../qemu-trace/frndint/README.md), SHA-256
+`da49b8105f90b4257494a7b7f1e57e5428fa66dc667278b824d381d9d0e9f84d`.
+It does not replace canonical QEMU or alter a mask, stimulus, cycle band,
+production RTL, or any input of the live synthesis.
+
+Result: **108/108 PASS**, **80,800 complete records**, **30,132 V retirements**;
+109.17 s. Owner `ventium-fetch-pair-next-freshfunc-oct15-r1.service`, invocation
+`0c9c546ad5624c0989f4b71655fa51bc`, is terminal, MainPID 0, exit 0, peak
+141,922,304 bytes and no OOM. Four workers' actual QEMU/RTL child affinities
+are observed on CPUs 13–16. This is lightweight native execution alongside
+the one guarded Vivado family, not another synthesis or simulator build.
+
+[Independent regrading](../qemu-trace/audit_fetch_pair_next_func.py) checks 846
+input pins, all complete comparisons, owner closure, backend/mode, unchanged
+executable images, and the same **105 unmasked passes**. The only unmasked
+failures are `tx_regform`, `tx_regform2`, and `tx_stack`, retaining the existing
+stack-fault oracle caveat. All 108 flat executable images match the failed
+canonical run byte-for-byte. Of their rebuilt ELFs, 54 differ only in GCC's
+random non-loadable `STT_FILE` temporary-object basename; the audit permits
+only that exact metadata field and requires all loadable bytes, headers,
+addresses and other metadata to match. Negative controls reject a changed
+entry address or instruction byte. No ELF or trace is rewritten.
+
+The initial regrader assumptions were corrected before writing its successful
+receipt: the actual producer identifier is `qemu-gdbstub`, and independently
+assembled ELFs can carry the random non-loadable basename described above.
+Neither correction changes a native verdict or relaxes architectural
+comparison. Four host tests cover runner bindings and exact mask/ELF bounds.
+Root: `fetch-pair-next-freshfunc-r1/`.
+
+- Native closure: `29d9ff527e9bdaf0dee3b7275024dc732ec0511307840c65e04454e705c88474`.
+- Audit: `5a7666b5ae226340d0558ee7316f19af1b5e25557f4501625d617a75f43cb494`.
+
+The unchanged canonical result is still **7 PASS / 101 FAIL**: 90 programs'
+first reported failures are trace length, and 11 first report architectural
+state differences. These categories are first-error classifications, not a
+claim that later differences do not exist. Private-reference success alone
+does not promote a new canonical oracle, clear cycle gates, or establish FPGA
+acceptance. The earlier replay receipt correctly remains labelled replay;
+this later fresh-run evidence does not rewrite it.
+
 The 40 MHz target, duration-valid CoreMark scoring/correctness seeds,
 canonical gates, full Quake timedemo and cold Win95 desktop/UI acceptance on
 the **candidate FPGA image** remain required. Existing-image Doom still fails
