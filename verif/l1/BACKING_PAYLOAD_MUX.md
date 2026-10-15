@@ -1,10 +1,12 @@
 # Backing address/strobe mux experiment — 2026-10-15
 
-Status: **tested private derivative; not accepted or deployed**. This follows
+Status: **tested private derivative; rejected as a timing/area optimization;
+not accepted or deployed**. This follows
 the [rejected fetch/pair composition](PAIR_NEXT_DISJOINT.md), but starts from
 the faster retained prefix-payload parent. That parent's synthesized/unplaced
 estimate is **36.591166892 MHz**, not 40 MHz routed closure. The new derivative
-has no timing result yet. No production RTL or feature definition was changed.
+measures **36.221385106 MHz unplaced**, 1.0106% worse, and adds 470 LUTs.
+No production RTL or feature definition was changed.
 
 Verified gameplay baseline: **0.50520554 total U+V IPC**, older model
 `c7b95b78f47f5e709136f98230bdf33975cf8db0e925956b469649cbf6384afd`, cycles
@@ -144,17 +146,49 @@ and pre/post SHA checks. Ledgers:
 `closed-small-products-dedup-oct15-{plan,closed}.json`; closure SHA-256
 `07502add57fccac276afee29aa68da47de3b5cf13fbfcf140d826c99aad82293`.
 
-**Matched synthesis launched at 12:43:28 UTC Oct 15**, not yet a completed
-timing result. Owner `ventium-backing-payload-mux-synth-oct15-r1.service`,
+**Matched synthesis launched at 12:43:28 UTC Oct 15 and has now closed**.
+Owner `ventium-backing-payload-mux-synth-oct15-r1.service`,
 invocation `cbbcfd1117154e86a51cee9055977a87`, owns the sole Vivado family in
 scope invocation `0dfa7cd53ef144c5bfe4eedad284d6fb`. Admission verified
 13,157,089,280 bytes free, above the unchanged 7,208,493,056-byte measured-growth
 reserve. Native limits remain 8 GiB RAM / 6 GiB swap, 13 GiB combined early
 stop, 4 GiB disk floor, 2 GiB host reserve and 45-minute timeout. No Chrome
-process was killed. Output: `backing-payload-mux-synthesis-r1/`; separate clock
-audit is prepared under `backing-payload-mux-clock-r1/`, **not launched**.
+process was killed. Output: `backing-payload-mux-synthesis-r1/`; the separate
+clock audit also completed under `backing-payload-mux-clock-r1/`.
 The synthesis lifecycle retains canonical failure and does not authorize
 placement, routing, deployment or an acceptance claim.
+
+### Closed native timing result
+
+| Metric | Retained prefix parent | Payload-mux experiment |
+| --- | ---: | ---: |
+| Synthesized/unplaced frequency estimate | 36.591166892 MHz | 36.221385106 MHz |
+| Core setup slack at 40 MHz | -2.329 ns | -2.608 ns |
+| CLB LUTs | 186,045 | 186,515 |
+| CLB registers | 54,985 | 54,994 |
+| BRAM tiles / DSPs | 277.5 / 47 | 277.5 / 47 |
+| Paired-V capture slack | -1.726 ns | -1.980 ns |
+
+Synthesis took 1,905.59 s, peak resident 7,900,467,200 B and peak swap
+1,224,683,520 B. The independent clock audit took 469.09 s, peak resident
+4,762,648,576 B, zero swap. Both native owners are terminal, MainPID 0,
+exit 0, with all input pins unchanged and no OOM. Synthesis retains one
+critical warning and 1,558 warnings; successful execution is not clean timing.
+The audit verifies zero black boxes and zero structural DRC errors, not the
+full standard suite.
+
+Clock owner invocation: `562cd862bed24bed9de2df2b3dec79c6`; owned Vivado scope:
+`0d4b19e7ff404c0aa5fc2c6ef862683d`. Native source/clock/mapper matching checks
+covered 18,031 synthesis and 18,036 clock-audit pins. No placement, routing,
+bitstream generation, deployment or second simultaneous Vivado family occurred.
+
+The new worst path is `q_pc[0]` to `state[0]/CE`: 91 logic levels and
+27.311 ns data delay, including 21.892 ns estimated routing (80.16%). It still
+crosses fetch/decode, fetch extent, fragment request shaping, route permission
+and L1 admission. The paired-V capture cone remains about 69,000 cells.
+Factoring the backing payload selector did not break the upstream serial
+dependency. Fewer levels on one endpoint did not improve its delay. Retain the
+faster parent; do not spend a route run on this hypothesis or claim 40 MHz.
 
 Still required: measured ≥40 MHz synthesized/routed closure; canonical gates;
 duration-valid ≥2.1 CM/MHz and both full correctness seeds; full Quake timedemo
