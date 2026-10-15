@@ -1,6 +1,7 @@
 # Exact FPREM underflow — October 15, 2026
 
-**Shared-FPU leaf repair passes; whole-core and FPGA qualification pending.**
+**Shared-FPU leaf and cold whole-core directed tests pass; canonical and FPGA
+qualification remain open.**
 The completed fetch-metadata FPGA synthesis contains the earlier numeric and
 operand-exception fixes, but not this underflow fix. It failed the timing
 improvement objective (36.03 MHz unplaced estimate) and is not deployable
@@ -176,13 +177,85 @@ checks; native x87 and the new reference both have zero mismatches. Evidence:
 unchanged source pins. These older sequence vectors exercise masked underflow;
 they are not coverage of unmasked partial-result exception delivery.
 
-Remaining verification includes partial reductions on the repaired RTL,
-unmasked partial-result handling, whole-core UV-fast UE delivery, all standalone
-SRT caller profiles, canonical gates and the standard suite. The unchanged
-canonical functional gate remains **7 PASS / 101 FAIL** from the parent audit;
-private-reference results do not turn it green. Final
-FPGA timing and physical Quake/Win95 acceptance must use the repaired source
-set; the current synthesis cannot qualify a later underflow repair.
+## Cold whole-core integration, without the rejected timing experiment
+
+`prepare_remainder_underflow_core.py` applies the same two tested FPU changes
+to the retained pre-metadata core. The only core change is the explicit legacy
+mask tie-off. All 195 source files were audited against that parent and the
+leaf source closure; the rejected fetch-metadata change is not inherited.
+The build retains all 152 defines, assertions, single-fill AXI and the private
+model-specific C++ harness. No production RTL or frozen FPGA image is changed.
+
+Evidence: `core-underflow-r1`, model
+`77c0c895122a6d7c890924e4806af51d287cd64c5d2094aa9eaa8032079fab1d`,
+parent model `2ac15c8ba4fd6fbfcfb2dccb0daa0bb41448e7756b6abd2b2e32b8a92684bc1e`.
+The bounded 32-job build closes exit 0 in 19.96 seconds, with stable pins.
+Controller `ventium-fprem-underflow-core-oct15-r2.service`, invocation
+`9d82f40a1dbb4b0686115ade94776547`. Launcher R1 failed before compilation because
+its preflight confused the leaf controller's invocation ID with the guarded
+scope's distinct ID; the corrected check verifies both identities explicitly.
+
+Three new cold assembly fixtures run with `cycle_mode=1`, `--cycle-func
+--l1-axi`, AXI latency 7, native x87 self-checks, repaired-QEMU self-checks,
+and complete QEMU/RTL architectural comparisons through the unchanged trace
+tools. No trace truncation or new mask is used.
+
+| Fixture | Repaired core records / V retirements | Retained parent |
+|---|---:|---|
+| Normal-operand cancellation, both instructions | 42 / 4 | Expected failure; wrong guest result |
+| Both tiny-A bypasses and signed-zero control | 61 / 5 | Expected failure; wrong guest result |
+| IE/DE precedence and preserved operand | 44 / 4 | Pass |
+
+All **147 complete records and 13 V retirements** pass. Evidence:
+`cold-underflow-r1`, terminal exit 0, 15.86 seconds, stable pins. These tests
+check UE/status and the scaled result, clearing the pending exception before
+the subsequent store. They do **not** yet qualify delayed `#MF` delivery.
+
+Other closed checks on this exact whole-core model:
+
+- `func-underflow-r1`: **108/108** private-reference functional tests pass,
+  109.45 seconds. The existing optional-stack comparison policy is unchanged;
+  this is not a claim of a newly strict stack comparison or canonical success.
+- `system-underflow-r1`: bounded FP, fast FP loads, relocated FP, fast stores
+  and invalid-SS stack controls at AXI latencies **0, 7 and 31**. All parent and
+  candidate records/counts match: **30,141 candidate records, 5,487 V
+  retirements**, 23.58 seconds. Four fixtures use complete system-QEMU diffs;
+  invalid SS uses the retained Intel-spec fault witnesses. Fast-path execution
+  and actual backing acknowledgements are checked, not inferred from defines.
+- `core-underflow-r1/verify-closed.json`: unchanged canonical `make verify`
+  **fails**, native make exit 2, **7 functional PASS / 101 FAIL**, 390.34 seconds.
+  All **20 cycle RTL traces are record-identical to the parent**. Existing
+  cycle-band failures also remain. Private-reference success does not turn
+  this gate green; no masks, goldens or bands were changed.
+
+These workers are closed, source pins remain stable, and no OOM was observed.
+Two host tests also pass for exact-parent rebasing and reversible identity-only
+functional/system driver adaptation.
+
+## Partial-result underflow matrix
+
+`partial_underflow_vectors.py` checks **2,880** partial reductions (exponent
+gap at least 64) against exact integer arithmetic. It admits every partial
+reduction width **N=32..63** allowed by the instruction, rather than requiring
+native x87, QEMU and SRT to choose the same width. Every legal non-aborted
+remainder in this matrix is nonzero and tiny. Cases include both instructions,
+all supported PC/RC combinations, sign/TOP/sticky variants, 720 unmasked-UE
+results, 1,440 unmasked-DE operand aborts and 720 masked-result controls.
+
+Native x87, repaired QEMU and repaired shared RTL each have **zero failures**;
+the unfixed RTL fails exactly the 720 unmasked-UE cases. All eight x80 payloads,
+tags, control and defined status bits are checked; undefined exception CC bits
+are excluded only by this local oracle. Its host test accepts every legal
+partial result and rejects missing UE. Evidence `partial-underflow-r1`, owner
+`ventium-fprem-underflow-partial-oct15-r1.service`, invocation
+`ff1bb1ef2d7f4abd8c4207aae5a603f9`, terminal exit 0, stable pins. Existing
+binaries were reused; no compiler or Vivado ran for this test.
+
+Remaining verification includes the full numeric multi-step sequence corpus
+on repaired RTL, whole-core delayed `#MF` delivery, all standalone SRT caller
+profiles, canonical gates and the standard suite. Final FPGA timing and
+physical Quake/Win95 acceptance must use the repaired source set; the older
+synthesis cannot qualify a later underflow repair.
 
 Gameplay baseline remains **0.50520554 total U+V IPC**, model
 `c7b95b78f47f5e709136f98230bdf33975cf8db0e925956b469649cbf6384afd`, cycles
