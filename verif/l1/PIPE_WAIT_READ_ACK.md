@@ -126,14 +126,24 @@ eight-million-cycle bound is retained, not mistaken for a completed run.
 ## Outstanding qualification
 
 The INT/IRET and SMM tests above are simulations, not physical FPGA tests.
-Two short ten-iteration cold CoreMark controls are running on the new full-PC
-model under `ventium-branch-address-cm10-pipe-wait-oct15-r1.service`, invocation
-`dbc97700d80c48df8762401da4d36b2c`, pinned to actual CPU12 with 2 GiB RAM,
-no swap and retained native closures. They must match both sets of five CRCs
-and the parent's exact ticks. No completed CoreMark result or timing measurement
-is claimed yet; these short controls are not duration-valid scores or the suite.
+Both short ten-iteration cold CoreMark controls **passed** on the new full-PC
+model. Owner `ventium-branch-address-cm10-pipe-wait-oct15-r1.service`, invocation
+`dbc97700d80c48df8762401da4d36b2c`, is exited / MainPID zero / native status zero.
+Actual native CPU12 affinity, 2 GiB RAM/no swap, exact argv and waited native
+closures are retained. The independent audit rechecks **13,732 source pins**,
+all five CRCs per seed, matching media and actual V execution, with zero OOM.
 
-Before accepting: close those CoreMark checks, measure timing with unchanged mapper
+| Short seed | Ticks | V retirements | Host time |
+|---|---:|---:|---:|
+| Performance | 4,767,218 | 1,055,307 | 208.40 s |
+| Validation | 4,753,406 | 1,054,254 | 211.46 s |
+
+Both tick counts match the parent exactly: **0% cycle-throughput gain**.
+The original duration-error message is retained: these are not duration-valid
+scores, standard-suite passes or physical-board measurements. Evidence is
+`pipe-wait-soc-r1/coremark-r1/{closed.json,audit.json}` under the root above.
+
+Before accepting: measure timing with unchanged mapper
 and constraints, restore canonical gate correctness deliberately, pass the
 complete simulated standard suite and validate matching FPGA Win95 cold
 boot/UI plus full Quake timedemo. Explicit concurrent snoop/flush injection
@@ -145,3 +155,64 @@ The continuing cold DOS Quake 1.06/FreeDOS run uses the older DECODE-bus model
 timedemo completion. No board reset, programming or frequency change was
 performed for this experiment. Chrome had already exited when permission to
 close it arrived; no browser was killed.
+
+## One owned timing measurement launched
+
+`prepare_pipe_wait_synthesis.py` preserves the previous synthesis/report
+controllers' native wait, owner checks, mapper, clocks and resource limits
+byte-for-byte. It adds the new leaf and mixed/held/store evidence requirements.
+Five host tests check these adaptations, reject resource/native-exit mutations
+and extra source changes, and verify the fixed-invocation reporting sequence.
+The report Tcl is unchanged and the exact parent checkpoint is
+`5ebc7472c4130f7939e0673d78df53a5fee378bc7d7da2adbd4d740bd471cfd5`.
+
+The single synthesis launched **2026-10-15 22:24:00 UTC**, owner
+`ventium-pipe-wait-synth-oct15-r1.service`, invocation
+`2557906dc891404683ec0353d017f8d5`. Its owned Vivado scope invocation is
+`b915257b1d6d446d85a655733543a449`. Admission saw **7,365,836,800 bytes** free
+external disk and **24,210,165,760 bytes** available host RAM. The unchanged
+disk guard requires both 6 GiB initially and twice the retained measured
+parent growth (1,456,762,880 bytes) above the 4 GiB stop floor.
+
+Limits remain 8 GiB scope RAM / 6 GiB swap, 13 GiB combined early stop, a
+2 GiB host RAM/swap reserve and 45-minute native timeout. No compiler or other
+Vivado family overlaps it. All normal child synthesis/helper processes belong
+to that single owned family; they are not independent orphan runs.
+
+`ventium-pipe-wait-timing-chain-oct15-r1.service`, invocation
+`81350f4992c64591b417b4891ced23e5`, observes **only that synthesis invocation**.
+Only successful native closure plus the independent DCP/source audit permits
+the prepared read-only clock report. It does not restart synthesis, route,
+program the board or waive a failed admission. No candidate frequency,
+utilization or timing-closure result is claimed while synthesis is running.
+
+## Recoverable storage cleanup
+
+To satisfy the existing disk guard without relaxing it, **4,210 closed,
+unpinned `.vtrace` files** were archived losslessly. Every member was read
+back and SHA-256 verified before its original was removed. Original trace
+bytes total **985,242,038**; the two archives total **5,652,824 bytes**. Four
+unused precompiled-header caches, **377,649,511 bytes**, were also removed;
+they are regenerable. Executables, sources, dependency records, native logs,
+original receipts and all active-run input pins remain intact.
+
+Archives under the evidence root:
+
+- `closed-pipe-wait-traces-oct15.tar.zst`, SHA-256
+  `76b7a0d6dbc94b1de938621a5ce899df2216a83a342b41a8f35df033e1ca2158`.
+- `closed-pipe-wait-reserve-oct15.tar.zst`, SHA-256
+  `ffd2457d00a3ff10ed6ca5f17640632b68da5049bd4dc90adb03a4c63d592de0`.
+
+Restore traces into a chosen inspection directory with
+`zstd -dc ARCHIVE | tar -xf - -C DESTINATION`; each member retains its original
+run-relative path. Inspect archive names before restoring into the evidence
+root to avoid overwriting newer files. Exact removed paths, hashes, producing
+owners and stable-pin checks are retained in `closed-pipe-wait-storage-oct15.json`
+and `closed-pipe-wait-reserve-oct15.json`.
+
+The first cleanup attempt failed before deletion because non-dumpable desktop
+processes deny `/proc` descriptor reads. That failed owner and script remain.
+The successful attempts explicitly record inaccessible PIDs, rather than claim
+every descriptor was inspected. Authority was the terminal producing jobs,
+absence of compilers, exact unpinned targets, live-consumer pin checks and the
+verified restore archives. Both successful cleanup owners are terminal.
