@@ -1,10 +1,38 @@
 """Reject additional source changes and false AUX witness closure."""
 import unittest
+from copy import deepcopy
+from pathlib import Path
 
 import build_aux_status_soc as build
 
 
 class Transfer(unittest.TestCase):
+    def test_output_must_not_overlap_any_input_tree(self):
+        parent = Path('/external/tmp/parent')
+        proof = Path('/external/tmp/proof')
+        build.check_destination(Path('/external/tmp/new-aux'), parent, proof)
+        for root in (parent, parent/'source/new-aux', parent.parent, proof/'new-aux'):
+            with self.assertRaises(AssertionError): build.check_destination(root, parent, proof)
+        with self.assertRaises(AssertionError):
+            build.check_destination(parent/'source/../new-aux', parent)
+
+    def test_parent_profile_requires_exact_closed_pc_and_directed_model(self):
+        for profile, (pc, core) in build.PROFILES.items():
+            old = dict(directed_model=core)
+            closed = dict(passed=True, native_exit=0, inputs_unchanged=True, binary_sha256=pc)
+            self.assertEqual(build.check_parent(profile, old, closed, pc), (pc, core))
+            for key, value in (('passed', False), ('native_exit', 1),
+                               ('inputs_unchanged', False), ('binary_sha256', 'wrong')):
+                bad = deepcopy(closed)
+                bad[key] = value
+                with self.assertRaises(AssertionError): build.check_parent(profile, old, bad, pc)
+            with self.assertRaises(AssertionError): build.check_parent(profile, old, closed, 'wrong')
+            with self.assertRaises(AssertionError):
+                build.check_parent(profile, dict(directed_model='wrong'), closed, pc)
+            other = next(name for name in build.PROFILES if name != profile)
+            with self.assertRaises(AssertionError): build.check_parent(other, old, closed, pc)
+            with self.assertRaises(AssertionError): build.check_parent('latest', old, closed, pc)
+
     def test_one_line_transfer_only(self):
         original = (build.REPO/build.FILE).read_bytes()
         fixed = build.recipe.transform(original.decode()).encode()

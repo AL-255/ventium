@@ -169,3 +169,67 @@ Current verified gameplay baseline: **0.50520554 total U+V IPC**, older model
 `c7b95b78f47f5e709136f98230bdf33975cf8db0e925956b469649cbf6384afd`, cycles
 **5,600,065,237–5,700,065,237**. The early-bus and AUX derivatives are
 gameplay-unmeasured.
+
+## Current-core transfer and adapter regression — October 15, 22:37 UTC
+
+The earlier early-bus preparation is **not the current processor candidate**.
+`build_aux_status_soc.py prepare --parent-profile pipe-wait` now carries the
+same one-line AUX repair onto the closed wait-cofactor PC model
+`55e9255323354c314c102b2e7362ad3f9a5dfb1ca9c4e613a289f379936b6fce`, with
+directed core `c9e4b9f86ad080f72ffd8ecef3d4ffc73eb1ecb8574ba7cd185bcae4fa3a643a`.
+The explicit profile checks both identities and rejects failed/drifted closure.
+No older CPU/FPU/cache files are copied back over the newer fixes.
+
+Current prepared source is
+`external/tmp/ventium-fprem-sequence.iSZ9BAj4/pipe-wait-aux-soc-r2/source`.
+Independent readback verifies **18,011 input pins**, all **102 unchanged shared
+core/FPU files**, all **157 unchanged simulator defines**, and only the
+controller-line delta plus a private host-harness filename. Its prepared receipt
+SHA-256 is `19728c8f243c4cecf796c9a977ade974b52d4157f5c2396d18fbc71276d04908`.
+The preparation owner, `ventium-pipe-wait-aux-prepare-oct15-r2.service`, invocation
+`d5155124351344a590432bee46ce0685`, is exited / MainPID zero / native zero.
+**The full-PC derivative is still uncompiled, unmeasured and unqualified.**
+
+The preparer also rejects overlapping input/output directory trees before
+copying. Without that guard, selecting an output beneath the copied source
+could recursively copy into itself and exhaust disk space. Five host tests
+pass, including both exact parent profiles, false completion/incorrect negative
+verdict rejection, one-line scope and overlapping-path rejection. The first
+wait-core preparation (`pipe-wait-aux-soc-r1`) predates this guard and remains
+superseded evidence, not an input to a future build. Its HDL is byte-identical
+to r2; neither preparation launched a compiler.
+
+The **unchanged combined adapter-path gate** then runs against that repaired
+controller and the current 159-definition FPGA profile. Both KBC feature flags
+are actually compiled. The ordinary local input socket, Python policy/adapter,
+AXI management bridge, mailbox, serial transport and 8042/FIFO pass at:
+
+| Clock | Host commands | Delivered bytes | Native time |
+|---|---:|---:|---:|
+| 3.125 MHz | 20 | 50 | 17.43 s |
+| 40 MHz | 20 | 50 | 142.72 s |
+
+The even-parity mutation exits **1** at the serial bit-9 check; it is a required
+negative witness, not a passing native execution. Independent closure rechecks
+all **40 pins**, actual CPU12 affinity, exact feature flags, terminal owner,
+reaped children and matching repaired-controller bytes in r2. Peak memory is
+**24,735,744 bytes**, with no OOM events under 256 MiB/no swap. The small Icarus
+peripheral compile/test overlaps the owned Vivado family; no additional Vivado
+or full-core compiler starts. All **14,126 live synthesis input pins** are
+independently unchanged.
+
+Evidence: `external/tmp/ventium-ps2-aux-adapter.ZWUZA8mW`, owner
+`ventium-ps2-aux-adapter-oct15-r1.service`, invocation
+`e101a954d6b848589d4798a8d2e35fa4`, native exit zero / MainPID zero.
+Closed receipt SHA-256:
+`04dbed0d6e95ebe96d2c22ee9cc099480840bfddb1a3ce4986809d6c1af80b33`.
+The fixture used r1's identical repaired HDL; r2 additionally fixes the host
+preparation guard. AXI callbacks remain a BFM, not physical ARM MMIO. This
+regression does not instantiate the processor, execute Windows, replace the
+mixed-keyboard/mouse ownership microgate, or qualify the separate FIFO-loss
+proposals. Full-PC compilation, current-source mouse-wrapper integration,
+canonical/standard-suite checks, timing and physical UI acceptance remain open.
+
+No gameplay or frequency gain is claimed. Candidate gameplay IPC remains
+**unmeasured**; the verified baseline remains **0.50520554 total U+V** on the
+older `c7b95b78…` model/window identified above.
