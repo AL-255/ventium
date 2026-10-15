@@ -210,15 +210,20 @@ levels. Its transitive input cone has 68,373 cells / 21,560 startpoints versus
 the parent's 68,685 / 21,556; these are reachability counts, **not exclusive
 area ownership**. The total utilization change remains the +37 LUTs above.
 
-Next source-level target, **not an implemented or qualified fix**:
+Next source-level target, now an **unqualified private experiment**:
 `pipe_mem_wait` still uses the general `mem_ack` for both loads and stores,
 feeding `pipe_int_commit`. Investigate using the existing fragment-qualified
 `mem_read_ack` only for proven read owners, retaining ordinary ACK for writes.
 Prove load/store ownership, final-fragment suppression and complete old/new
-wait equality before changing it. Held/paired reads, stores, faults, snoops,
+wait equality before accepting it. Held/paired reads, stores, faults, snoops,
 flushes and immediate completions need directed coverage and full parent
 architectural/cycle comparisons. Do not globally replace ACK, remove store
 admission checks or add a serialization bubble to make timing pass.
+
+The subsequent [pipeline-wait experiment](../l1/PIPE_WAIT_READ_ACK.md) implements
+that narrow split with complete old/new wait assertions and directed mixed
+load/store checks. It has no timing or physical-board qualification yet; the
+35.875726483 MHz result above belongs only to this demand-width parent.
 
 Evidence: `demand-size-clock-r2/{closed.json,audit.json,*rpt}` under the root
 above. Independent clock-audit SHA-256:
