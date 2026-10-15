@@ -74,8 +74,67 @@ optional masks gives **105 passes / three failures**, the same historical
 stack-fault cases (`tx_regform`, `tx_regform2`, `tx_stack`); this experiment adds
 no waiver. Audit owner `ventium-fetch-metadata-audit-oct15-r1.service` closes
 exit 0, MainPID 0, peak RAM 223,518,720 bytes. All test/build owners are terminal;
-the canonical owner intentionally retains failure status. No Vivado was launched.
+the canonical owner intentionally retains failure status. No Vivado was launched
+for this initial core qualification.
 Audit SHA-256: `4bc9170becf3b2aa4cd231955ebccabe24ee34fbec70e6bad296d3a98355a786`.
+
+## Full-PC and hardware transfer
+
+The older timing parent does **not** contain either FPREM repair. The transfer
+therefore checks all 102 common RTL sources, and requires exactly three changes:
+`rtl/core/core.sv`, `rtl/fpu/fpu_srt_div.sv`, and `fp_shared/ven_fp_top.sv`.
+It composes the numeric and operand-exception recipes in order; a negative test
+rejects a partial transfer that omits the exception repair. Every other common
+source remains identical to the qualified directed core.
+
+- Full-PC model: `e09cd8f84ad449a445c13af01a4c15f47852fc7c26cff63f7792ce8e780ae503`.
+- FPGA manifest: `6d57df5328d1c6a2c4b3dc4f1e14a9021378966fa6388ea65af781a94dba3371`.
+- Full-PC build: exit 0 in 23.56 seconds; 156 unchanged defines and a unique
+  native harness object. All 98 inherited structural diagnostics remain visible
+  and unchanged: this is **not** a full-SoC lint pass.
+- FPGA freeze: 190 payloads, 170 shared HDL sources, 158 unchanged hardware
+  defines, unchanged 40 MHz core target, full P5 caches, UV-fast mode,
+  single-fill and posted-16 write configuration. Qualification is `UNQUALIFIED`.
+- Strict CPU-hierarchy hardware lint: exit 0 in 4.43 seconds; all six structural
+  warning classes remain hard errors. Not full-SoC or board acceptance.
+- Eight transfer/adapter/controller tests pass. Timing launch, native ownership,
+  watchdog and reaping code are byte-identical to the retained controllers.
+  Synthesis admission still requires twice the measured parent disk growth
+  above the 4 GiB stop floor, with 8 GiB RAM / 6 GiB swap caps and a 13 GiB
+  combined early-stop limit. Only one guarded Vivado family may run.
+
+Evidence directories are `fetch-metadata-soc-r1`, `fetch-metadata-fpga-r1`,
+`fetch-metadata-lint-r1`, `fetch-metadata-synthesis-r1`, and
+`fetch-metadata-clock-r1` under the evidence root above.
+
+Both short cold-PC CoreMark controls and the independent audit pass:
+
+| Seed | Candidate / parent ticks | Actual V retirements | Native runtime |
+|---|---:|---:|---:|
+| Performance | 4,767,218 / 4,767,218 | 1,055,307 | 222.99 s |
+| Validation | 4,753,406 / 4,753,406 | 1,054,254 | 222.38 s |
+
+Both complete five-CRC sets match QEMU. Actual native CPU affinity is CPU12;
+both processes are waited/reaped, input/media hashes remain unchanged, all OOM
+counters are zero, and the owner closes exit 0 / MainPID 0. Peak RAM is
+202,469,376 bytes. The independent audit rechecks 2,118 source pins and hashes
+to `2e1f628d943f11ea282c70051c9ba5d3515f22555ab58f58fdf0ec417f33c14b`.
+These ten-iteration runs retain the expected insufficient-duration diagnostic:
+**not valid CoreMark scores or error-free standard-suite acceptance**.
+Measured cycle-count gain is **0%**, expected for this combinational timing cut.
+
+Synthesis was launched as `ventium-fetch-metadata-synth-oct15-r1.service`,
+invocation `aae24d20dce8400280df6764cbf20770`, with a 45-minute native limit.
+Synthesis/timing results are pending. The clock-audit controller is prepared
+but must not run until synthesis and its source/native-closure audit succeed.
+Timing will compare the **combined corrected candidate** against the retained
+36.591166892 MHz parent, not attribute the whole difference to metadata alone.
+
+Transfer and timing tools: `fpga/build_fetch_metadata_soc.py`,
+`freeze_fetch_metadata_rk_candidate.py`, `run_fetch_metadata_coremark.py`,
+`audit_fetch_metadata_coremark.py`, and `prepare_fetch_metadata_synthesis.py`.
+No production RTL, board firmware, old evidence, goldens or comparison masks
+were overwritten by this transfer.
 
 ## Identities and next work
 
@@ -92,9 +151,8 @@ Runners: `run_fetch_metadata_owner.py`, `build_fetch_metadata_core.py`,
 `fetch-metadata-` prefix; native owner names are
 `ventium-fetch-metadata-{leaf,core,func,system,boundaries,replay,verify}-oct15-r1.service`.
 
-Next: transfer the exact corrected source set into the
-full-PC/hardware closure, then measure area and the actual worst paths using
-one guarded Vivado family. Do not infer frequency from the source-level cut.
+Next: close and audit synthesis, then measure the actual worst paths using the
+prepared read-only clock audit. Do not infer frequency from the source-level cut.
 Any synthesis gain still requires routed closure, duration-valid CoreMark and
 both correctness seeds, full Quake timedemo, and cold Win95 desktop/UI on the
 candidate FPGA in UV-fast mode. These remain open.
