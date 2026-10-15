@@ -1,5 +1,9 @@
 # Functional golden-cache exit-observer isolation
 
+Current status: **the composed repair is installed** in `verify_worker.sh` as
+of October 15, after both source-pinned FPGA measurements closed. The private
+qualification history below is retained; it is not a canonical-suite pass.
+
 ## Confirmed defect and private repair (2026-10-13)
 
 `verify_worker.sh` hashes the QEMU binary into its functional golden-cache
@@ -107,3 +111,26 @@ entry. Reproduction requires the recipe's exact predecessor worker and a fresh
 external output leaf, bounded retained systemd owner (1 GiB/no swap, 256 tasks,
 240 seconds) and explicit `taskset -c 13-16`. Do not promote this verification
 repair as a green canonical gate or a hardware performance improvement.
+
+## Production installation — October 15
+
+The synthesis, clock-audit and queue owners are terminal, MainPID 0 / exit 0
+(identities in [the closed timing report](../fe_pipe/PREFIX_OPCODE.md#closed-full-core-result-reject-the-opcode-selector)).
+Only then were the exact two qualified replacements applied to the production
+worker. Its SHA-256 is
+`a39a497a74a92deef65c648a535835192085e904e8dffb497ef64aec7c6aa3e6`,
+byte-identical to the worker used by all 16 native checks above. The three
+host tests, `bash -n`, byte comparison and diff whitespace check pass after
+installation. No RTL, reference binary, trace record, mask or cycle band changed.
+
+Earlier closed evidence pins the original production-worker bytes. Those pins
+remain valid historical identities, not a claim that the current file is still
+unchanged. The original worker is recoverable at commit `bcd80f23`; the native
+qualification driver intentionally requires that predecessor and refuses a
+partially repaired or already repaired input. Host tests support the installed
+worker by exact reversal. Future native replay must explicitly preserve that
+old/new comparison rather than silently treating the repaired worker as old.
+
+This prevents stale observer-mode cache reuse and repairs the cycle worker's
+functional-ESP lookup. It does **not** enable/promote the private QEMU observer,
+resolve the remaining canonical reference divergences or improve hardware IPC.

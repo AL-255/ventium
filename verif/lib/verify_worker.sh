@@ -131,7 +131,12 @@ ORACLE_SIG="$(printf '%s|%s|%s|%s|%s|%s|%s\n' \
 # =============================================================================
 if [ "$MODE" = "func" ]; then
     # M-02: image bytes + oracle signature now participate in the key.
-    KEY="${SRC_SHA}.${ELF_SHA:0:12}.${ORACLE_SIG:0:12}.func.x87${X87}.max${MAX}"
+    # The opt-in QEMU observer changes the actual terminal record without
+    # changing the binary. Match its literal-1 activation rule; all other
+    # values are disabled. Never share enabled/disabled functional goldens.
+    PREEXIT_MODE=0
+    [ "${VTM_QEMU_GDB_PREEXIT:-}" = "1" ] && PREEXIT_MODE=1
+    KEY="${SRC_SHA}.${ELF_SHA:0:12}.${ORACLE_SIG:0:12}.func.preexit${PREEXIT_MODE}.x87${X87}.max${MAX}"
     GOLD="$CACHE_DIR/${KEY}.vtrace"
     CACHEHIT=0
     X87_FLAG=""; [ "$X87" = "1" ] && X87_FLAG="--x87"
@@ -295,7 +300,11 @@ PY
 
 # init ESP: reuse a func golden's n=0 esp if cached, else spec default.
 INIT_ESP="0x40c34910"
-FUNC_GOLD="$CACHE_DIR/${SRC_SHA}.func.x87${X87}.max${MAX}.vtrace"
+# Match the functional producer's complete key, including observer mode.
+# A source-only legacy lookup cannot identify the actual image/oracle trace.
+PREEXIT_MODE=0
+[ "${VTM_QEMU_GDB_PREEXIT:-}" = "1" ] && PREEXIT_MODE=1
+FUNC_GOLD="$CACHE_DIR/${SRC_SHA}.${ELF_SHA:0:12}.${ORACLE_SIG:0:12}.func.preexit${PREEXIT_MODE}.x87${X87}.max${MAX}.vtrace"
 if [ -f "$FUNC_GOLD" ]; then
     v="$("$PYTHON" - "$FUNC_GOLD" <<'PY'
 import sys, json
