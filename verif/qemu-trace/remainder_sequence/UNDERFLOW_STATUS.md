@@ -251,9 +251,28 @@ partial result and rejects missing UE. Evidence `partial-underflow-r1`, owner
 `ff1bb1ef2d7f4abd8c4207aae5a603f9`, terminal exit 0, stable pins. Existing
 binaries were reused; no compiler or Vivado ran for this test.
 
-Remaining verification includes the full numeric multi-step sequence corpus
-on repaired RTL, whole-core delayed `#MF` delivery, all standalone SRT caller
-profiles, canonical gates and the standard suite. Final FPGA timing and
+## Closed masked multi-step RTL regression
+
+`run_remainder_underflow_sequences.py` builds the retained and repaired SRT
+engine in both split and unsplit operand-port configurations. The existing
+sequence fixture and exact integer oracle are unchanged; the candidate fixture
+only explicitly ties the new UM input high. Each of the four models passes
+**8,448 complete sequences / 266,880 records**, including **258,432 partial
+steps** and a maximum of **597 instructions** in one sequence. Every result,
+quotient, exception output and cycle count is identical across all four files
+(SHA-256 `7e286fdd9dba7d08a10c0d13096bafb4b56cda3f79fef61b13d09fe67fbaf883`).
+No truncation, new oracle exception or latency tolerance was introduced.
+
+Evidence: `sequences-underflow-r1`, controller
+`ventium-fprem-underflow-sequences-oct15-r1.service`, invocation
+`115cc57193a54e12bca33a76f6210c44`, terminal exit 0 / MainPID 0. The guarded
+build/run/grade sequence closes in **341.02 seconds**, stable source pins,
+actual simulator CPU12 affinity and explicit child reaping. This verifies both
+engine port configurations, not every standalone caller or whole-core profile.
+
+Remaining verification includes whole-core delayed `#MF` delivery, all
+standalone SRT caller profiles, canonical gates and the standard suite.
+Final FPGA timing and
 physical Quake/Win95 acceptance must use the repaired source set; the older
 synthesis cannot qualify a later underflow repair.
 
