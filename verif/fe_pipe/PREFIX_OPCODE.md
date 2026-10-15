@@ -166,6 +166,19 @@ Audit SHA-256:
 `1f80a208437fd359c5c8dd078f68f1a632fa8df539043a0c646fb5d88f967c92`.
 Audit success is evidence integrity, **not** a canonical gate pass.
 
+Reinspection of this candidate's actual canonical comparison files gives
+**90 length-only failures and 11 with field divergences**, plus seven passes.
+The latter are `tx_addsub`, `tx_chain`, `tx_cmp`, `tx_fp_denorm`, `tx_fprem`,
+`tx_fxam`, `tx_muldiv`, `tx_regform`, `tx_round`, `tx_sqrt`, `tx_unifdiv`.
+Do not carry forward the Oct 8 statement that all 101 are length-only. For
+example, `tx_regform` also has the now independently diagnosed reference C1
+disagreement at FRNDINT record15. `mb_jmppair` now uses its corrected cap6000
+and completes 5,204 RTL instructions; QEMU observes 5,203. Its current mismatch
+is terminal observation, **not** the historical 5,000/5,001 cut through a pair.
+The existing private observer/reference repairs and mode-isolated cache tests
+must be deliberately integrated and requalified; none of these diagnoses
+changes the failed canonical verdict or licenses dropping records.
+
 ## PC transfer and FPGA measurement preparation
 
 The exact decoder change is now transferred to the full-PC model by
@@ -222,6 +235,14 @@ The full-core diagnostic synthesis was launched as
 `ventium-prefix-opcode-synth-oct15-r1.service`, invocation
 `71b35b08d30f43dfb57d2624a8ef1ad3`. No synthesis result, route, bitstream or
 physical pass is claimed until its native closure and independent audit.
+The bounded follow-up owner `ventium-prefix-opcode-after-synth-oct15-r1.service`,
+invocation `cd9e818482384695b8017c87abb02ca9`, waits for that exact synthesis
+invocation to exit successfully, independently grades its source/DCP closure,
+then launches the sequential read-only clock audit. It stops on failure and
+does not launch implementation, another synthesis, or board programming.
+Its script/started/closed receipts use the `prefix-opcode-queue-*` names in
+the same scratch root. No canonical producer or worker has been edited while
+the native measurement pins them.
 
 ### Space reclaimed before synthesis
 
