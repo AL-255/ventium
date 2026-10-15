@@ -271,9 +271,87 @@ the canonical owner exits 1 because its native make exits 2, while the others
 exit 0. Replay/directed workers use explicit, disjoint CPU affinity sets;
 the build uses the guarded 32-job profile. Replay peaks at 766,771,200 bytes,
 the 22-worker boundary run at 722,845,696 bytes. Neither Vivado nor another
-heavy build overlaps this verification round. No second synthesis, full-PC
-transfer, CoreMark run or board programming has yet been performed for the
-composition. Its frequency is **unmeasured**.
+heavy build overlaps this verification round. The subsequent full-PC transfer
+and short cold controls are described below. Its frequency is **unmeasured**;
+no board programming has been performed for the composition.
+
+### Composition full-PC transfer and pre-synthesis checks (Oct 15)
+
+[The full-PC transfer](../../fpga/build_fetch_pair_next_soc.py) compiles in
+22.57 s, native exit 0, all pins unchanged. Exactly four of 102 shared RTL
+sources change; all 156 definitions and single-fill/posted16 settings remain
+identical to the prefix-payload parent. The private harness object includes
+this model's generated header. The 98 inherited SoC structural warning lines
+are unchanged, **not** a full-SoC lint pass. PC model:
+`5a50175cd6daec6079b2d2cd94fd4857d09d09d99a2b41ea5ad4a52c8d2570d9`.
+
+[The FPGA export](../../fpga/freeze_fetch_pair_next_rk_candidate.py) audits all
+190 payloads, 170 common HDL inputs, 158 definitions, 117 filelist units and
+49 include edges. It preserves the 40 MHz constraints; qualification remains
+**UNQUALIFIED**. Manifest:
+`f4359c33b0711cc2182d3835cacd92972b4c5329c56ee93f20babfe9e21624e9`.
+Strict hardware CPU-hierarchy lint passes with all six structural warning
+classes fatal; it is not full-SoC lint or timing sign-off.
+
+| Fresh composition check | Result |
+|---|---|
+| Held-read prime | 48 A/B cases; complete QEMU/state/clock comparison passes |
+| FP high-word transport | 8 A/B comparisons / 16 model measurements; complete x87 QEMU and cycle records pass |
+| x87 environment-store fault corpus | Original 44 images, delays 0/7; 88 complete non-x87 architectural comparisons, 35,124 records and 4,580 V retirements; precise-fault/self-checks pass; 10.97 s |
+| Finite CS limit diagnostics | Original 8 images, delays 0/7/31, both modes and models; 96 native executions; complete parent-equal state/cycle streams and precise #GP restart; 4.49 s; **not a QEMU pass** |
+| Cold short CoreMark performance seed | CRCs `e9f5/e714/1fd7/8e3a/fcaf`; 4,767,218 ticks, parent-identical; 213.84 s host |
+| Cold short CoreMark validation seed | CRCs `18f2/e3c1/0747/8d84/c64e`; 4,753,406 ticks, parent-identical; 210.17 s host |
+
+The 10-iteration CoreMark controls show **0% cycle change**. Their diagnostic
+ratios (2.097659 / 2.103755) are **not duration-valid CM/MHz scores**, and do not
+satisfy either full-seed acceptance or the performance target. Both cold runs
+exercise actual V retirement (1,055,307 / 1,054,254 cumulative final counts),
+UV-fast and the real board AXI profile. Independent regrading checks 7,317
+source pins, native argv/affinity/ownership, complete CRC output, unchanged
+media and parent cycle equality. Audit SHA-256:
+`46fc826f8bf16c3579fe082d46a7a120ab70252aec18801f6dee9698496d45ac`.
+
+The first finite-CS launch failed in the **adapter preflight**, before any
+native execution: an inherited local `original` directory shadowed the new
+driver-source variable. It remains a failed owner
+`ventium-fetch-pair-next-finitecs-oct15-r1`; the corrected adapter uses
+`driver_source`, and the separate `-r2` owner/output passed. No stimulus,
+oracle, RTL or acceptance condition was changed. The original finite-CS QEMU
+limitation remains open.
+
+Evidence: `fetch-pair-next-soc-r1/{build-*,coremark-r1/}`,
+`fetch-pair-next-fpga-r1/`, `fetch-pair-next-lint-r1/`,
+`fetch-pair-next-{held,fp,envfault}-r1/`, and `fetch-pair-next-finitecs-r2/`.
+All these native owners are closed, exit 0, MainPID 0, with no OOM.
+The fresh controller preparation requires these composition results, not the
+constituents' whole-core passes. Only the exact unchanged leaf-transform
+proofs are reused. Host tests check source rejection and byte-identical
+native ownership/watchdog/reaping and disk admission code. Canonical
+`make verify` is still **7 PASS / 101 FAIL**, not waived by these tests.
+
+Before admitting another synthesis, byte-identical traces from closed stable
+runs were hardlinked: 4,359 paths relinked, all bytes, names and hashes
+preserved, approximately 1.24 GiB recovered. Ledger:
+`closed-trace-dedup-oct15-{plan,closed}.json`; plan SHA-256:
+`6eeee33526e933a9c558b13eb9e2830b9c634f89904c5d1725006e7b5c46cf8e`.
+Do not modify retained hardlinked evidence in place.
+Four unreferenced, unused `.gch` files from the two closed composition builds
+were also removed (377,525,400 bytes; regenerable by recompilation). Sources,
+native models, objects and dependency files remain. Each target was checked
+against JSON input references and live `fuser` use; exact paths/hashes are in
+`closed-pch-removal-oct15.json`.
+
+**Matched synthesis is now running**, not passed:
+`ventium-fetch-pair-next-synth-oct15-r1.service`, controller invocation
+`0c64bdd07928470daeae088fd52fcd5f`, owned Vivado scope invocation
+`0d03731a74ff4b88ab8893c1988c1c06`, native launch **11:17:14 UTC Oct 15**.
+The preflight admitted 7.58 GB free on external storage, above the unchanged
+7.21 GB measured-growth reserve. Only this Vivado family is active. Limits
+remain 8 GiB RAM / 6 GiB swap, 13 GiB combined early stop, 4 GiB disk floor,
+2 GiB host reserve and 45-minute native timeout. Output:
+`fetch-pair-next-synthesis-r1/`; the separate prepared clock audit lives in
+`fetch-pair-next-clock-r1/` and **has not launched**. No routing or deployment
+is authorized by these diagnostic controllers. Frequency remains unmeasured.
 
 The 40 MHz target, duration-valid CoreMark scoring/correctness seeds,
 canonical gates, full Quake timedemo and cold Win95 desktop/UI acceptance on
