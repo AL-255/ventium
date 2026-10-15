@@ -130,3 +130,42 @@ repair does not claim a processor timing or throughput improvement.
 Gameplay baseline: **0.51186266 total U+V IPC**, older simulation `c7b95b78`,
 cycles **1,700,065,237–1,800,065,237**. The fast-segment candidate and this
 peripheral derivative have no gameplay measurement.
+
+## Source-matched PC transfer — October 15
+
+The one-line repair is now applied in the private source tree
+`external/tmp/ventium-fprem-sequence.iSZ9BAj4/aux-status-soc-r1/source`.
+**Prepared only: no compiler, guest, FPGA synthesis or deployment has run for
+this derivative.** The active early-bus synthesis and older cold Quake inputs
+are untouched. Compilation must wait until the exclusive synthesis/clock audit
+sequence has closed, rather than overlap its memory use.
+
+`fpga/build_aux_status_soc.py` independently re-audits all **3,984** original
+native microcases using `audit_aux_status.py`: exact case/variant/profile
+coverage, actual native verdicts, log and model hashes, retained successful
+owner, source pins and zero OOM events. This is a **regrade**, not a fresh RTL
+run. All 1,984 repaired cases pass; the 960 original-controller failures and
+16 incorrect constant-bit variants remain explicit negative witnesses.
+Three new host tests reject additional HDL changes, incomplete coverage,
+wrong affinity, relabelled failures and false completion markers.
+
+The PC parent is `593833e1650b5869373abbd74debcc63d15ea53eca1aa87f62e833982ead2fe9`.
+Every copied source file is compared with it; only `rtl/soc/ps2.v` in the
+ao486 platform differs, exactly matching the qualified one-line recipe and
+microtested source `2ee3b64fc24875b3aaca0e6296a2514161f19cef5e6f79aa90923ca06f1846da`.
+All **102 CPU/shared-FP source files**, all **157 definitions**, `cycle_mode=1`,
+full P5 caches, strict waiting-x87, early-bus change and posted-16 transport
+are unchanged. The host harness has a private basename for a future fresh
+model; the existing guarded 32-job builder will verify its local object/header.
+No candidate binary identity or inherited full-suite/timing pass is invented.
+
+This does **not** integrate the separate FIFO-loss/resynchronization proposals,
+add an interactive host UI, or claim that Win95 input is robust. Those known
+limitations and physical keyboard/mouse acceptance remain open. The canonical
+gate also remains red; this peripheral transfer does not fix its oracle/cycle
+failures. Short CoreMark results on the parent are not results for this model.
+
+Current verified gameplay baseline: **0.50520554 total U+V IPC**, older model
+`c7b95b78f47f5e709136f98230bdf33975cf8db0e925956b469649cbf6384afd`, cycles
+**5,600,065,237–5,700,065,237**. The early-bus and AUX derivatives are
+gameplay-unmeasured.

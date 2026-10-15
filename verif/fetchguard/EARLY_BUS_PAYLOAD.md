@@ -130,6 +130,14 @@ or deploy. Six host tests check this sequence and its inherited owner/wait
 logic, including changed invocation, failure, exit races and deadline handling.
 The current measured candidate frequency remains **unknown** until closure.
 
+While synthesis ran, four unused PCH compiler caches from the two **closed**
+early-bus builds were removed, reclaiming **377,648,739 bytes (360 MiB)**.
+Both build owners were exited/MainPID zero. The cleanup checked for open
+handles and explicit pins in retained evidence before unlinking, and rechecked
+the preserved executables and build receipts afterward. No source, generated
+header/dependency, executable, trace or log was removed. The caches are
+regenerable; `closed-early-pch-prune-oct15.json` records exact paths and hashes.
+
 Still required: canonical gates green, valid CoreMark score and full correctness
 seeds, gameplay measurement, complete simulated standard suite, timing closure,
 and physical Win95 cold desktop/UI plus full Quake timedemo on the exact
