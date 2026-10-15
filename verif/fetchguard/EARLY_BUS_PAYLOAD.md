@@ -138,6 +138,17 @@ the preserved executables and build receipts afterward. No source, generated
 header/dependency, executable, trace or log was removed. The caches are
 regenerable; `closed-early-pch-prune-oct15.json` records exact paths and hashes.
 
+A further storage-only cleanup archives **1,525 architectural traces** from the
+closed September 20 window-keep, fast-EXT and FP-system experiments. Their
+994,542,731 logical bytes are preserved in the **23,468,460-byte** lossless
+`legacy-closed-traces-oct15.tar.zst` under the evidence root above. Every archive
+member was hashed against its original before removing the loose traces;
+all non-trace files, binaries, source inputs and historical failed verdicts
+remain unchanged. No current run was touched. The adjacent plan, verified and
+closed JSON receipts give exact members, hashes and the restore command.
+Archive SHA-256:
+`3b0cc136b4d40e01ef06a4ffef85923868dd4baa1ae37c5a5e4c19f9979fbddf`.
+
 Still required: canonical gates green, valid CoreMark score and full correctness
 seeds, gameplay measurement, complete simulated standard suite, timing closure,
 and physical Win95 cold desktop/UI plus full Quake timedemo on the exact
