@@ -1,9 +1,10 @@
 # Buffered fetch metadata ownership — October 15, 2026
 
-**Private implementation and simulation experiment; not promoted or deployed.**
-No candidate frequency, gameplay gain or standard-suite pass is claimed.
-The retained older prefix-payload image estimates **36.591166892 MHz unplaced**;
-the target remains at least **40 MHz synthesized and routed**.
+**Rejected as a timing improvement; not promoted or deployed.** The completed
+matched synthesis audit estimates **36.025650263 MHz unplaced**, versus
+**36.591166892 MHz** for the retained prefix-payload parent. Neither is routed
+sign-off. The target remains at least **40 MHz synthesized and routed**; no
+gameplay gain or standard-suite pass is claimed.
 
 ## Structural change
 
@@ -19,8 +20,10 @@ module**, connecting only its nine fetch-metadata outputs. Semantic outputs are
 explicitly open on that instance. There is no second opcode table, new register,
 pipeline bubble, permission bypass, changed fragment rule or workload-specific
 condition. Profiles without `VEN_PIPE_SDISPATCH` retain the original instance.
-Synthesis is expected to discard unused semantic logic; its actual area cost
-and whole-core timing benefit are **not yet measured**.
+Synthesis discards unconsumed outputs, but the composed candidate still costs
+2,343 additional LUTs and has worse estimated whole-core timing (details below).
+The simultaneous FPREM transfer prevents attributing that entire change to
+metadata separation alone.
 
 All metadata consumers were inspected: demand and header capture are S_FETCH
 qualified; overlength probing, #NM/#GP priority and CS decoded-extent checks
@@ -123,12 +126,48 @@ These ten-iteration runs retain the expected insufficient-duration diagnostic:
 **not valid CoreMark scores or error-free standard-suite acceptance**.
 Measured cycle-count gain is **0%**, expected for this combinational timing cut.
 
-Synthesis was launched as `ventium-fetch-metadata-synth-oct15-r1.service`,
-invocation `aae24d20dce8400280df6764cbf20770`, with a 45-minute native limit.
-Synthesis/timing results are pending. The clock-audit controller is prepared
-but must not run until synthesis and its source/native-closure audit succeed.
-Timing will compare the **combined corrected candidate** against the retained
-36.591166892 MHz parent, not attribute the whole difference to metadata alone.
+Synthesis and the subsequent independent clock audit both close successfully,
+with source hashes unchanged, terminal owners and no OOM. Their success means
+the measurement is valid, **not that the 40 MHz requirement passed**.
+
+| Matched synthesis result | Retained parent | Combined candidate |
+|---|---:|---:|
+| Unplaced estimated core fmax | 36.591166892 MHz | 36.025650263 MHz |
+| Setup slack at 40 MHz | -2.329 ns | -2.758 ns |
+| LUTs | 186,045 | 188,388 |
+| Registers | 54,985 | 54,939 |
+| BRAM tiles / DSPs | 277.5 / 47 | 277.5 / 47 |
+
+Estimated frequency regresses **1.55%**; LUT usage grows **1.26%**. The new
+worst path is `eip_reg[0]` to `u_regfile/gpr_reg[4][31]`, with 97 logic levels.
+Its netlist traverses instruction alignment, live U/V decode, pairing and
+microcache branch selection before GPR writeback. Separating slow buffered
+fetch metadata does not remove this live fast-path chain. The report assigns
+22.018 ns of its 27.547 ns data delay to **estimated unplaced interconnect**;
+that is not measured routed congestion. Candidate unplaced hold slack is
+-0.101 ns. Do not spend a placement/routing run or claim timing acceptance for
+this result without a justified next change.
+
+Synthesis owner `ventium-fetch-metadata-synth-oct15-r1.service`, invocation
+`aae24d20dce8400280df6764cbf20770`, closes in 1,910.56 seconds. Peak resident
+memory is 8,589,860,864 bytes and peak swap 1,769,672,704 bytes. The closure audit
+checks 2,513 pins, 148 native HDL reads and all 158 hardware defines. There are
+zero synthesis errors, one generated PS-clock critical warning and 1,568
+warnings; these diagnostics are retained, not waived.
+
+Clock-audit owner `ventium-fetch-metadata-clock-oct15-r1.service`, invocation
+`7909cdbd65ec4509be0deb47c74978e3`, closes in 467.99 seconds. Its audit checks
+2,519 pins, the original 40/100 MHz clocks, no unresolved black boxes and no
+MDRV/LUTLP structural errors. Peak resident memory is 4,849,532,928 bytes with
+zero swap. `fetch-metadata-{synthesis,clock}-r1/audit.json` hold the complete
+receipts. Only one guarded Vivado family ran at a time. No implementation or
+bitstream was launched.
+
+The comparison includes the earlier FPREM numeric and operand-exception fixes,
+but **not** the subsequently discovered exact-underflow repair. Preserve those
+correctness fixes independently; do not inherit this metadata experiment just
+because its functional tests pass. No isolated metadata area/frequency gain
+is claimed.
 
 Transfer and timing tools: `fpga/build_fetch_metadata_soc.py`,
 `freeze_fetch_metadata_rk_candidate.py`, `run_fetch_metadata_coremark.py`,
