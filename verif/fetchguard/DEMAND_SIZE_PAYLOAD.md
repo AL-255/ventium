@@ -1,10 +1,10 @@
 # Request-independent demand-fetch width — October 15, 2026
 
-**Private candidate; not accepted or deployed.** The predecessor's closed
-estimate is **34.049507985 MHz synthesized/unplaced**, below 40 MHz. This
-candidate's synthesis has closed successfully, but its clock audit failed
-host-RAM admission before launching Vivado. Candidate frequency, gameplay
-and physical-board performance remain unmeasured.
+**Private candidate; not accepted or deployed.** The closed synthesized/unplaced
+estimate is **35.875726483 MHz**, up **5.36342%** from the matched predecessor's
+34.049507985 MHz, but still below 40 MHz. Synthesis and the independent R2 clock
+audit pass; R1's failed host-RAM admission is retained separately. Gameplay,
+routed timing and physical-board performance remain unmeasured.
 
 Last verified gameplay IPC: **0.50520554 total U+V**, older model
 `c7b95b78f47f5e709136f98230bdf33975cf8db0e925956b469649cbf6384afd`, cycles
@@ -127,8 +127,9 @@ peaks need not coincide. The owner is terminal, MainPID zero. The independent
 closure audit passes **14,106 source pins**, 148 native HDL reads and all
 159 unchanged hardware defines. It confirms the same mapper/constraints and
 only `ventium/rtl/core/core.sv` changed. Native synthesis reports zero errors,
-one critical warning and 1,558 warnings; the clock warning still requires the
-independent actual-clock check, not a waiver.
+one critical warning and 1,558 warnings. The subsequent independent clock audit
+verifies the actual 40/100 MHz constraints; this is not a warning waiver or
+evidence of timing closure.
 
 | Synthesized resources | Parent | Candidate | Change |
 |---|---:|---:|---:|
@@ -154,23 +155,74 @@ it did not retry, route or deploy. The failed preflight and synthesis success
 are separate outcomes. No OOM occurred and the completed checkpoint is retained.
 
 [`prepare_demand_size_clock_r2.py`](../../fpga/prepare_demand_size_clock_r2.py)
-prepares a new, **not launched or queued**, `demand-size-clock-r2` reporter and
+prepared a separate `demand-size-clock-r2` reporter and
 `ventium-demand-size-clock-oct15-r2.service` identity. Its report Tcl, source,
 mapper, clock, ownership, native-wait and resource checks are byte-identical
 apart from the two service-name substitutions. Three host tests check exact
 reversibility and reject changed admission limits, timing reports or structural
 checks. Original R1 files/failed owners remain intact. The prepared receipt
 retains the native admission traceback. Available RAM was about 5 GiB after
-synthesis; no browser or other user application was terminated.
+synthesis. The user subsequently authorized closing Chrome; by the new
+preflight it had already exited, so this retry sent no browser termination
+signal and changed no resource limits.
 
-Continue with this read-only R2 reporter only after the unchanged admission
-checks pass: more than 10 GiB available RAM, 8 GiB free swap and 4 GiB disk,
-with no live Vivado family. Reuse the completed synthesis, **do not rebuild it**.
-The prepared `run.py` retains CPU24–27 launch compatibility, 8 GiB RAM/4 GiB
-swap caps and a 15-minute native timeout. After native closure, run its
-`audit_closed.py`; neither a prepared script nor an early report is a pass.
-Candidate synthesized frequency remains **unknown** until the reports close;
-the 40 MHz constraint is not a measurement.
+### Closed R2 clock audit
+
+R2 launched at **21:39:45 UTC**, with 26,071,539,712 bytes available RAM,
+27,527,020,544 bytes free swap and 7,702,069,248 bytes free external disk.
+The unchanged admission thresholds are 10 GiB RAM, 8 GiB swap and 4 GiB disk.
+It reused both completed synthesis projects; **no synthesis was restarted**.
+The sole Vivado family retained CPU24–27, an 8 GiB RAM / 4 GiB swap cap,
+11 GiB combined early stop, 2 GiB host reserve and 15-minute native timeout.
+No compiler overlapped it.
+
+Native exit is **0**, at **21:47:29 UTC**, after **463.24 seconds (7.72 minutes)**.
+Peak scope memory is **5,723,074,560 bytes (5.33 GiB)**, with zero swap use,
+OOM events or resource stops. The owner is exited / MainPID zero, invocation
+`7d6a714ac53e4597a28c331f378de578`; its now-closed Vivado scope invocation is
+`20f0752d581e4b92ba23f0e4a89880a9`. Independent `audit_closed.py` passes all
+**14,110 input pins**, native closure, original clock constraints, zero black
+boxes and zero checked structural DRC violations. It also reproduces the
+parent's original timing, ruling out a changed-parent comparison.
+
+| Synthesized/unplaced metric | Early-bus parent | Demand-width candidate |
+|---|---:|---:|
+| Core frequency estimate | 34.049507985 MHz | **35.875726483 MHz** |
+| Setup slack at 40 MHz | -4.369 ns | -2.874 ns |
+| Worst-path logic levels | 100 | 94 |
+| Worst-path data delay | 29.072 ns | 27.663 ns |
+
+Frequency estimate gain is **5.36342%**; this is not an IPC gain, routed
+sign-off or a measured board frequency. Core hold slack remains **-0.101 ns**
+(global hold -0.108 ns). The report still flags four output ports without
+output delays and requests bus-skew reporting; this diagnostic audit is not
+full timing-sign-off qualification. No constraint or timing exception changed.
+
+All 30 worst sampled setup paths start at `q_pc[0]`: 24 end at EIP, four at
+EFLAGS, one at the lock-session register and one at SMI-pending. The worst ends
+at `eip[20]/D` and contains **21.750 ns estimated routing / 5.913 ns logic**.
+It still crosses decoded fetch length/need, fragment strobes, route denial,
+paired-store readiness, general ACK and integer commit. Rebuilt hierarchy
+names alone do not establish a false path or justify a timing exception.
+
+The separate V-response capture path has -2.065 ns setup slack and 91 logic
+levels. Its transitive input cone has 68,373 cells / 21,560 startpoints versus
+the parent's 68,685 / 21,556; these are reachability counts, **not exclusive
+area ownership**. The total utilization change remains the +37 LUTs above.
+
+Next source-level target, **not an implemented or qualified fix**:
+`pipe_mem_wait` still uses the general `mem_ack` for both loads and stores,
+feeding `pipe_int_commit`. Investigate using the existing fragment-qualified
+`mem_read_ack` only for proven read owners, retaining ordinary ACK for writes.
+Prove load/store ownership, final-fragment suppression and complete old/new
+wait equality before changing it. Held/paired reads, stores, faults, snoops,
+flushes and immediate completions need directed coverage and full parent
+architectural/cycle comparisons. Do not globally replace ACK, remove store
+admission checks or add a serialization bubble to make timing pass.
+
+Evidence: `demand-size-clock-r2/{closed.json,audit.json,*rpt}` under the root
+above. Independent clock-audit SHA-256:
+`c2a81798542f0f0e5b2a0695087966ce623f2283bd60b66a3e43aef696652f15`.
 
 Full simulated standard
 suite, valid CoreMark scoring, routed timing and physical Win95 desktop/UI
