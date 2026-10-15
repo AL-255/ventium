@@ -1,7 +1,8 @@
 # Early bus-address default — October 15, 2026
 
 **Directed checks and source transfer pass; canonical verification remains
-red. Timing, full-suite and board acceptance are not established.**
+red. Synthesized/unplaced estimate: 34.0495 MHz, below 40 MHz. Routed timing,
+full-suite and board acceptance are not established.**
 
 The last verified gameplay IPC is **0.50520554 total U+V**, model
 `c7b95b78f47f5e709136f98230bdf33975cf8db0e925956b469649cbf6384afd`, cycles
@@ -128,7 +129,42 @@ After successful waited closure and independent synthesis audit, it may launch
 the prepared read-only clock audit. It cannot start another synthesis, route,
 or deploy. Six host tests check this sequence and its inherited owner/wait
 logic, including changed invocation, failure, exit races and deadline handling.
-The current measured candidate frequency remains **unknown** until closure.
+Both stages have now closed successfully, and their owners are exited with
+MainPID zero. Synthesis finished at **20:09:28 UTC** (2,133.78 s); its independent
+audit rechecked 14,302 pins and 148 native HDL read inputs. Peak resident memory
+was 8,306,110,464 bytes, peak swap 1,538,007,040 bytes, with no OOM or resource stop.
+
+The clock audit finished at **20:17:21 UTC**, 465.32 s, under
+`ventium-early-bus-clock-oct15-r1.service`, invocation
+`338bee7f4f4449aba2345dfa484e38ae` (scope
+`d4657c8a9a1a4a0492b7c649be868466`). Its separate audit rechecked 14,306 pins,
+unchanged clock constraints and waited native exit zero; peak RAM was
+4,689,469,440 bytes, no swap/OOM. The sequence's closed receipt also passes.
+
+| Synthesized/unplaced metric | Preceding DECODE payload | Early bus payload |
+|---|---:|---:|
+| Core frequency estimate | 33.603279680 MHz | **34.049507985 MHz** |
+| Core setup slack at 40 MHz | -4.759 ns | -4.369 ns |
+| LUTs | 187,508 | 187,708 |
+| Flip-flops | 54,985 | 54,980 |
+
+The estimate improves **1.32793%**, with 200 additional LUTs (+0.1067%);
+277.5 BRAMs and 47 DSPs remain. This is not a routed or physical frequency.
+Core hold slack is -0.101 ns. One inherited PS constraint warning remains;
+the independent audit verifies the actual core/PL clocks. No black boxes or
+new structural errors were found. Reports are retained in
+`early-bus-synthesis-r1` and `early-bus-clock-r1`; no further Vivado is active.
+
+The new worst path has **100 logic levels**, from `q_pc_reg[0]` to
+`int_err_reg[*]/CE`: 29.072 ns data delay, including 23.270 ns estimated routing.
+All 30 sampled setup paths start at `q_pc_reg[0]`; 17 end at `int_err` enables
+and 13 at `int_ret_eip` enables. The traced chain crosses demand-fetch width,
+fragment read strobes, route denial, store-pair readiness and memory ACK before
+the interrupt enable. It no longer justifies targeting the old late address
+selector. A separate private demand-width experiment removes request
+authorization from the *payload calculation*, while retaining issued widths,
+page clipping and all request/fault authorization. Its qualification must stand
+on its own; these results do not qualify that new candidate.
 
 While synthesis ran, four unused PCH compiler caches from the two **closed**
 early-bus builds were removed, reclaiming **377,648,739 bytes (360 MiB)**.
