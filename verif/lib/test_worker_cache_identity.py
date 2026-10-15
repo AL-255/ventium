@@ -4,6 +4,7 @@ import subprocess
 import unittest
 
 import prepare_worker_cache_identity as recipe
+import prepare_owned_gdb_cache as successor
 
 WORKER = Path(__file__).with_name('verify_worker.sh')
 
@@ -11,6 +12,8 @@ WORKER = Path(__file__).with_name('verify_worker.sh')
 class Checks(unittest.TestCase):
     def setUp(self):
         text = WORKER.read_text()
+        if successor.NEW_KEY in text:
+            text = successor.original(text)
         self.old = recipe.original(text) if recipe.NEW_LOOKUP in text else text
         self.new = recipe.transform(self.old)
 

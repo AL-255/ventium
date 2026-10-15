@@ -17,8 +17,10 @@ PC, instruction bytes, and memory addresses (that is Producer B's job,
 observable through the gdbstub that `qemu-i386 -g <port>` exposes. So we
 single-step the guest over RSP and read all registers after each instruction.
 
-The client speaks RSP **directly over a TCP socket** — there is **no dependency
-on a host `gdb` binary** and **no third-party Python packages** (stdlib only).
+Owned QEMU launches use a **private Unix socket with peer-PID authentication**;
+see [OWNED_GDB.md](OWNED_GDB.md) for the port-collision defect and qualification.
+There is **no host `gdb` dependency** and **no third-party Python package**.
+Explicit remote `RSPClient` callers can still use TCP.
 
 For system traces, optional instruction bytes are read at the actual hidden
 `CS.base + EIP`. When QEMU's i386 register packet omits `CS.base`, the collector
@@ -51,7 +53,7 @@ gen_trace.py --qemu <path> --elf <file> --out <trace.vtrace>
 | `--elf`  | the 32-bit i386 ELF to trace (statically linked recommended) |
 | `--out`  | output `.vtrace` (JSON Lines, see trace-format.md) |
 | `--max-insn N` | stop after N retired instructions (safety cap; default: run to exit) |
-| `--port P` | gdbstub TCP port (default 1234) — pick a free one when parallelising |
+| `--port P` | legacy compatibility argument; owned launches use private sockets |
 | `--x87` | also emit x87 fields (`st0..st7`, `fctrl..fop`); header `x87:true` |
 | `--stop-at 0xADDR` | stop when `EIP` reaches `ADDR` (before stepping it) |
 | `--no-bytes` | do not read/emit the optional per-instruction `bytes` field |
@@ -167,7 +169,8 @@ usable integer trace.
 - **Process lifecycle:** the qemu child is always terminated/killed and reaped in
   a `finally` block, including on RSP errors or `KeyboardInterrupt`. Before
   closing, the client sends `k` (kill inferior) best-effort.
-- **Connection:** TCP connect retries (~15 s) until the stub is listening.
+- **Connection:** owned launches wait for their private socket and verify the
+  live child's PID/UID/GID before any protocol command. Startup exit fails closed.
 - **Framing:** packets are `$<payload>#<cksum2hex>`, `cksum = sum(payload) & 0xff`.
   Good packets are acked with `+`; bad checksums request a resend with `-`;
   `QStartNoAckMode` is used when the stub accepts it. RSP `}` escaping (used in
@@ -195,4 +198,4 @@ usable integer trace.
   `{"vtrace":1,"producer":"qemu-gdbstub","mode":"func","x87":<bool>,"note":…}`.
 - Pure `python3` + stdlib; no build step. Import path to `tracefmt.py` is set up
   automatically (relative `../diff`).
-- When running several traces concurrently, give each a distinct `--port`.
+- Parallel owned launches are isolated automatically; no port allocation needed.

@@ -126,6 +126,15 @@ ORACLE_SIG="$(printf '%s|%s|%s|%s|%s|%s|%s\n' \
     "load=$LOAD,entry=$ENTRY" \
     | sha1sum | cut -d' ' -f1)"
 
+# Functional-only producer closure: invalidate old TCP-derived entries without
+# invalidating the independent plugin cycle oracle. Match this in ESP lookup.
+GEN_DIR="$(dirname "$GEN_TRACE")"
+FUNC_PRODUCER_SIG="$(printf '%s|%s|%s\n' \
+    "generator=$(_sha_of "$GEN_TRACE")" \
+    "transport=$(_sha_of "$GEN_DIR/owned_gdb.py")" \
+    "tracefmt=$(_sha_of "$GEN_DIR/../diff/tracefmt.py")" \
+    | sha1sum | cut -d' ' -f1)"
+
 # =============================================================================
 # FUNC PATH
 # =============================================================================
@@ -136,7 +145,7 @@ if [ "$MODE" = "func" ]; then
     # values are disabled. Never share enabled/disabled functional goldens.
     PREEXIT_MODE=0
     [ "${VTM_QEMU_GDB_PREEXIT:-}" = "1" ] && PREEXIT_MODE=1
-    KEY="${SRC_SHA}.${ELF_SHA:0:12}.${ORACLE_SIG:0:12}.func.preexit${PREEXIT_MODE}.x87${X87}.max${MAX}"
+    KEY="${SRC_SHA}.${ELF_SHA:0:12}.${ORACLE_SIG:0:12}.producer${FUNC_PRODUCER_SIG:0:12}.func.preexit${PREEXIT_MODE}.x87${X87}.max${MAX}"
     GOLD="$CACHE_DIR/${KEY}.vtrace"
     CACHEHIT=0
     X87_FLAG=""; [ "$X87" = "1" ] && X87_FLAG="--x87"
@@ -304,7 +313,7 @@ INIT_ESP="0x40c34910"
 # A source-only legacy lookup cannot identify the actual image/oracle trace.
 PREEXIT_MODE=0
 [ "${VTM_QEMU_GDB_PREEXIT:-}" = "1" ] && PREEXIT_MODE=1
-FUNC_GOLD="$CACHE_DIR/${SRC_SHA}.${ELF_SHA:0:12}.${ORACLE_SIG:0:12}.func.preexit${PREEXIT_MODE}.x87${X87}.max${MAX}.vtrace"
+FUNC_GOLD="$CACHE_DIR/${SRC_SHA}.${ELF_SHA:0:12}.${ORACLE_SIG:0:12}.producer${FUNC_PRODUCER_SIG:0:12}.func.preexit${PREEXIT_MODE}.x87${X87}.max${MAX}.vtrace"
 if [ -f "$FUNC_GOLD" ]; then
     v="$("$PYTHON" - "$FUNC_GOLD" <<'PY'
 import sys, json

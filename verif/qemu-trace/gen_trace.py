@@ -14,7 +14,8 @@ but the architectural register file is only observable through the GDB Remote Se
 Protocol (RSP) exposed by `qemu-i386 -g <port>`.  So we single-step the guest over
 RSP and read the register file after every instruction.
 
-We speak RSP directly over a TCP socket — NO dependency on a host `gdb` binary, and
+We speak RSP over a private, PID-authenticated Unix socket for owned QEMU children
+(explicit remote RSPClient users can still use TCP) — NO host `gdb` dependency, and
 NO third-party Python packages (stdlib only: socket / subprocess / struct / etc.).
 
 State / record convention (docs/trace-format.md §2.1):
@@ -52,6 +53,10 @@ import time
 # --- import the shared trace format module (single source of field truth) -----
 # verif/qemu-trace/gen_trace.py  ->  verif/diff/tracefmt.py
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+if _THIS_DIR not in sys.path:
+    sys.path.insert(0, _THIS_DIR)
+from owned_gdb import (start_owned_qemu, connect_owned_qemu,
+                       release_owned_endpoint)
 _DIFF_DIR = os.path.normpath(os.path.join(_THIS_DIR, "..", "diff"))
 if _DIFF_DIR not in sys.path:
     sys.path.insert(0, _DIFF_DIR)
@@ -219,12 +224,14 @@ class RSPClient:
     We optionally negotiate QStartNoAckMode to drop per-packet acks for speed.
     """
 
-    def __init__(self, host="127.0.0.1", port=1234, timeout=10.0, verbose=False):
+    def __init__(self, host="127.0.0.1", port=1234, timeout=10.0, verbose=False,
+                 connected_socket=None):
         self.timeout = timeout
         self.verbose = verbose
         self.no_ack = False
         self._buf = b""
-        self.sock = self._connect_with_retry(host, port, timeout)
+        self.sock = (connected_socket if connected_socket is not None else
+                     self._connect_with_retry(host, port, timeout))
         self.sock.settimeout(timeout)
         # The RSP loop is one blocking request/response per single-step. Without
         # TCP_NODELAY, Nagle + delayed-ACK injects ~40 ms per round-trip, capping
@@ -624,13 +631,15 @@ def generate(qemu, elf, out_path, max_insn, port, extra_args,
     cmd = [qemu, "-g", str(port), "-one-insn-per-tb", elf] + list(extra_args)
     if verbose:
         sys.stderr.write("[gen_trace] launching: %s\n" % " ".join(cmd))
-    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL)
+    with open(str(out_path) + ".qemu.stderr", "w") as qemu_stderr:
+        proc = start_owned_qemu(cmd, gdb_option="-g", stdout=subprocess.DEVNULL,
+                                stderr=qemu_stderr)
     rsp = None
     n_emitted = 0
     exit_info = None
     try:
-        rsp = RSPClient(port=port, timeout=15.0, verbose=verbose)
+        rsp = RSPClient(connected_socket=connect_owned_qemu(proc, 15.0),
+                        timeout=15.0, verbose=verbose)
         rsp.handshake()
         layout = rsp.discover_layout()
         if verbose:
@@ -732,7 +741,7 @@ def generate_system(qemu, image, image_mode, out_path, max_insn, port,
     bare-metal image from the real-mode reset vector, and write a sys .vtrace.
 
     Differences vs generate() (user-mode):
-      * launch line is qemu-system-i386 -display none -S -gdb tcp::PORT
+      * launch line is qemu-system-i386 -display none -S -gdb unix:PRIVATE_SOCKET
         -machine pc -m <mem> <image-load-args> -device isa-debug-exit,...
         (-S so the guest is frozen at the F000:FFF0 reset vector when we connect).
       * each record additionally carries cr0/cr2/cr3/cr4 (+ available segment-hidden
@@ -767,12 +776,14 @@ def generate_system(qemu, image, image_mode, out_path, max_insn, port,
     # GDB connection timeout. The child owns its dup of this descriptor after
     # the parent's context closes; no guest output or trace record is changed.
     with open(str(out_path) + ".qemu.stderr", "w") as qemu_stderr:
-        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=qemu_stderr)
+        proc = start_owned_qemu(cmd, gdb_option="-gdb",
+                                stdout=subprocess.DEVNULL, stderr=qemu_stderr)
     rsp = None
     n_emitted = 0
     exit_info = None
     try:
-        rsp = RSPClient(port=port, timeout=20.0, verbose=verbose)
+        rsp = RSPClient(connected_socket=connect_owned_qemu(proc, 20.0),
+                        timeout=20.0, verbose=verbose)
         rsp.handshake()
         layout = rsp.discover_layout()
         if verbose:
@@ -982,11 +993,12 @@ def _capture_initial_phys_mem(qemu, overlay, port, ram_mb, cpu, verbose):
     if verbose:
         sys.stderr.write("[gen_trace] PASS A (initial phys-mem): %s\n"
                          % " ".join(cmd))
-    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL,
+    proc = start_owned_qemu(cmd, gdb_option="-gdb", stdout=subprocess.DEVNULL,
                             stderr=subprocess.DEVNULL)
     rsp = None
     try:
-        rsp = RSPClient(port=port, timeout=20.0, verbose=False)
+        rsp = RSPClient(connected_socket=connect_owned_qemu(proc, 20.0),
+                        timeout=20.0, verbose=False)
         rsp.handshake()
         layout = rsp.discover_layout()
         raw = rsp.read_g()
@@ -1535,8 +1547,9 @@ def generate_syscall_proxy(qemu, elf, out_path, image_path, max_insn, port,
     if verbose:
         sys.stderr.write("[gen_trace] launching (syscall-proxy): %s\n"
                          % " ".join(cmd))
-    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL)
+    with open(str(out_path) + ".qemu.stderr", "w") as qemu_stderr:
+        proc = start_owned_qemu(cmd, gdb_option="-g", stdout=subprocess.DEVNULL,
+                                stderr=qemu_stderr)
     rsp = None
     n_emitted = 0
     n_syscalls = 0
@@ -1544,7 +1557,8 @@ def generate_syscall_proxy(qemu, elf, out_path, image_path, max_insn, port,
     syscall_summary = []   # (n, nr, ret) for the report
     cur_brk = None         # track the program break to size brk-grow zero regions
     try:
-        rsp = RSPClient(port=port, timeout=20.0, verbose=verbose)
+        rsp = RSPClient(connected_socket=connect_owned_qemu(proc, 20.0),
+                        timeout=20.0, verbose=verbose)
         rsp.handshake()
         layout = rsp.discover_layout()
         emit_x87 = want_x87 and layout.has("st0")
@@ -1709,6 +1723,7 @@ def _terminate(proc):
         proc.wait(timeout=2)
     except Exception:
         pass
+    release_owned_endpoint(proc)
 
 
 # =============================================================================
@@ -1777,7 +1792,7 @@ def main(argv=None):
     p.add_argument("--max-insn", type=int, default=None,
                    help="stop after N retired instructions (safety cap)")
     p.add_argument("--port", type=int, default=1234,
-                   help="gdbstub TCP port (default 1234)")
+                   help="legacy compatibility argument; owned QEMU uses a private Unix socket")
     p.add_argument("--x87", action="store_true",
                    help="emit x87 fields (st0..st7, fctrl..fop) in records")
     p.add_argument("--stop-at", default=None,
