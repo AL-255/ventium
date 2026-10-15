@@ -4,17 +4,25 @@ import unittest
 
 import build_fetch_fragment_core as transfer
 import run_fetch_fragment_checks as checks
+import prepare_owned_gdb_cache as successor
+
+
+def historical_worker():
+    # Exercise this historical transfer at its exact predecessor; the later
+    # transport/cache qualification has its own explicit pin-migration tests.
+    text = Path(transfer.WORKER).read_text()
+    return successor.original(text) if successor.NEW_KEY in text else text
 
 
 class Checks(unittest.TestCase):
     def test_only_qualified_tool_pin_changes(self):
         before={transfer.WORKER:transfer.cache_recipe.preexit.PARENT,'unrelated':'untouched'}
-        after=transfer.promote_worker_pin(before,Path(transfer.WORKER).read_text())
+        after=transfer.promote_worker_pin(before,historical_worker())
         self.assertEqual(after,{transfer.WORKER:transfer.WORKER_NEW,'unrelated':'untouched'})
         self.assertEqual(before[transfer.WORKER],transfer.cache_recipe.preexit.PARENT)
 
     def test_refuse_tool_or_predecessor_drift(self):
-        text=Path(transfer.WORKER).read_text()
+        text=historical_worker()
         for pins,current in (({},text),({transfer.WORKER:transfer.WORKER_NEW},text),
             ({transfer.WORKER:transfer.cache_recipe.preexit.PARENT},text+'\n')):
             with self.assertRaises(ValueError):
