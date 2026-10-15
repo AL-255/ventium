@@ -60,3 +60,50 @@ It uses existing qualified binaries; it does not compile or replace them.
   `b8be90b071e824dabcf4cfe381b87ba3fbbb65e3716d557c8f121b9daeee6de4`.
 
 No gameplay/performance measurement results from this verification repair.
+
+## Composed cycle-lookup repair qualified — October 15
+
+The cycle worker also looked for the obsolete source-only functional key,
+omitting the ELF and oracle identities already required by the functional
+producer. Consequently its initial-ESP lookup normally missed a valid cached
+trace and fell back to the default. The new
+[composed recipe](prepare_worker_cache_identity.py) applies the qualified
+functional mode-key fix and makes that lookup use the **same complete key**.
+Cycle golden identities are deliberately unchanged: the exit hook does not
+run without an attached debugger. No default observer setting is enabled.
+
+[Three host tests](test_worker_cache_identity.py) check exact reversal, shell
+syntax, both functional/lookup key expressions, literal-1 normalization,
+unchanged cycle keys, source drift, reapplication and partial-repair refusal.
+The [native test](test_worker_cache_identity_native.py) reuses the fourteen
+original actual-worker sequences and adds cycle executions in both observer
+modes. **All 16 checks pass**. The old stale-mode PASS/FAIL witnesses remain;
+the repaired worker retains the expected real length failure when disabled.
+Both cycle runs use the actual matched golden's ESP and retire 22 instructions,
+including eight V retirements. The second cycle run correctly reuses the first
+cycle golden despite changing observer mode. Their cycle timing comparisons
+remain exit 1; this cache test does not qualify a cycle band or processor gate.
+
+Owner `ventium-worker-cache-identity-oct15-r2.service`, invocation
+`9233984c1212472cbfc19aa289904ca4`, is terminal, native exit 0 / MainPID 0.
+Peak RAM is 91,729,920 bytes, with no OOM. Four independent sequences observe
+their real children on CPUs13–16; the additional cycle children are observed on
+CPU13. Source pins are unchanged, all workers are waited/reaped. QEMU/model
+identities remain those above; this is not a newer processor measurement.
+
+Evidence: `external/tmp/ventium-data-size.v2HaTO2X/worker-cache-identity-r2`.
+`composed-closed.json` SHA-256:
+`44f0e788f774cd044c9a00d51648a605d96195eddf61286ccdb12eecda744066`.
+Qualified repaired worker SHA-256:
+`a39a497a74a92deef65c648a535835192085e904e8dffb497ef64aec7c6aa3e6`.
+R1 fails before launching tests because the adapter assumed the earlier
+single-replacement recipe interface. R2 calls the unchanged sequence checker
+directly and checks exact reversal of the composed transformation. No RTL,
+expected verdict or comparator was altered to resolve that driver error.
+
+**Installation is pending the live FPGA measurement's source-pin release.**
+The production worker and canonical reference are still unchanged as of this
+entry. Reproduction requires the recipe's exact predecessor worker and a fresh
+external output leaf, bounded retained systemd owner (1 GiB/no swap, 256 tasks,
+240 seconds) and explicit `taskset -c 13-16`. Do not promote this verification
+repair as a green canonical gate or a hardware performance improvement.
