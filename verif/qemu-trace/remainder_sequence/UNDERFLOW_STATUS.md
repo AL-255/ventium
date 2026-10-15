@@ -2,6 +2,10 @@
 
 **Shared-FPU leaf and cold whole-core directed tests pass; canonical and FPGA
 qualification remain open.**
+The latest [combined hardware experiment](../../l1/BRANCH_ADDRESS_SHAPE.md)
+does contain the numeric/operand/underflow repairs, but reaches only
+**35.814 MHz synthesized/unplaced** and is not routed or deployed. Its profile
+does not yet include the separately tested strict waiting-x87 policy below.
 The completed fetch-metadata FPGA synthesis contains the earlier numeric and
 operand-exception fixes, but not this underflow fix. It failed the timing
 improvement objective (36.03 MHz unplaced estimate) and is not deployable
@@ -311,8 +315,8 @@ native harness. Its guarded compiler refuses concurrent Vivado. The strict
 replay retains the same fixtures, verdicts, native lifecycle and source pins;
 only model selection and the now-inapplicable old/new equality check differ.
 Two fixture tests, two configuration tests and one replay-adaptation test pass.
-The derivative is prepared but **not compiled or accepted yet** while synthesis
-owns the heavyweight build slot.
+The subsequent derivative build and directed checks are closed below; physical
+acceptance and canonical success are still not established.
 
 Evidence `delivery-underflow-r1`, owner
 `ventium-underflow-delivery-oct15-r1.service`, invocation
@@ -322,7 +326,57 @@ actual CPU12 affinity and AXI activity were observed. Peak RAM was 474,796,032
 bytes. The diagnostic completed but candidate acceptance is explicitly false.
 This is an Intel-spec self-check, not a system-QEMU differential pass.
 
-Remaining verification includes the strict-mode repair, all
+### Strict-mode derivative: closed directed repair
+
+The unchanged 195-source model, with only `VEN_X87_MF_STRICT` added, builds in
+**20.96 seconds** with a model-local harness object/header and stable input
+pins. Binary SHA-256:
+`08be10a26af0eb36e9393837bebca22b1eed186ad3020179f438143cb4fa8605`.
+The controller is `ventium-strict-mf-core-oct15-r1.service`, invocation
+`d90453b96f0b4b0fa0dc85f44f54e16e`, terminal exit 0 / MainPID 0. No compiler
+overlapped Vivado: synthesis exited before this build, and the read-only
+clock-audit family started only after the compiler exited.
+
+- **72/72 delivery cases pass**, including all 24 formerly failing immediate
+  FLD1 cases. FWAIT/FNOP retain 24/24 each. The exact same generated fixtures
+  check 141,648 architectural records and 40,248 V retirements in 38.84 seconds.
+  Source pins, actual CPU12 affinity and native wait/reaping are retained.
+- **108/108 private-reference functional programs pass**, using the existing
+  comparison policy, in 142.95 seconds. This is not a stricter stack comparison
+  or a canonical-QEMU pass.
+- **Five cold system controls at AXI delays 0/7/31 pass**, in 23.04 seconds:
+  30,141 candidate records and 5,487 V retirements. Complete records and cycle
+  counts match the nonstrict parent. This is measured absence of cycle
+  regression in these controls, not a blanket performance claim.
+
+All three owners are terminal exit 0 / MainPID 0: respectively
+`ventium-strict-mf-delivery-oct15-r1.service` / `0451bfc5528b497c885af605c6ff0a45`,
+`ventium-strict-mf-func-oct15-r1.service` / `e3c540e33081401589e7f17a8ed08cfd`, and
+`ventium-strict-mf-system-oct15-r1.service` / `c6dad931d4e1454f80fd7b175bd6876e`.
+Their evidence directories are `strict-mf-delivery-r1`, `strict-mf-func-r1`
+and `strict-mf-system-r1` under the same root. No comparison mask, golden,
+timing band, snapshot or pairing-disable control changed. The new worker
+adapter's exact-reversal test also passes.
+
+The unchanged canonical gate closes **FAIL**, native make exit 2, in
+**387.20 seconds**: **7 functional PASS / 101 FAIL**, and all 20 RTL cycle
+streams remain record-identical to the parent. Existing timing-band failures
+remain. Source pins are stable; no masks, goldens or bands changed. Owner
+`ventium-strict-mf-verify-oct15-r2.service`, invocation
+`9d1275c4de7247bea741c1396d3d813e`, is terminal MainPID 0 / controller exit 1,
+preserving that failed verdict. R1 was canceled **before any gate started**:
+its outer timeout would have counted the clock-audit lock wait against the
+verification budget. The canceled log/receipt remain under
+`strict-mf-core-r1/verify-r1-canceled-before-gate`; no result is attributed to
+that launcher and no timeout was relaxed. R2 began after the clock family
+closed. The private-reference passes do not waive the canonical failure.
+
+The fix currently exists only in the private model's build configuration.
+It is **not yet transferred to a full-PC model or FPGA image**. The three
+waiting instructions above do not exhaust every waiting/no-wait opcode,
+fault-priority combination or memory-fault interaction.
+
+Remaining verification includes broader strict-mode coverage, all
 standalone SRT caller profiles, canonical gates and the standard suite.
 Final FPGA timing and
 physical Quake/Win95 acceptance must use the repaired source set; the older
@@ -330,5 +384,6 @@ synthesis cannot qualify a later underflow repair.
 
 Gameplay baseline remains **0.50520554 total U+V IPC**, model
 `c7b95b78f47f5e709136f98230bdf33975cf8db0e925956b469649cbf6384afd`, cycles
-**5,600,065,237–5,700,065,237**. It predates the candidate. Candidate gameplay,
-underflow-repair area and timing effects are unmeasured.
+**5,600,065,237–5,700,065,237**. It predates the candidate. Candidate gameplay
+and isolated underflow-repair area/timing effects are unmeasured; the combined
+hardware result above does not isolate this repair's contribution.
