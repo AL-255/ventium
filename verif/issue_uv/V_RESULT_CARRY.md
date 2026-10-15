@@ -49,7 +49,7 @@ Directed candidate: `a8e5d55b7704f2449002c71af8db1c5c2fe7ae908669fc5dbf2e663d3a5
 | `v-result-carry-lint-r1` | Strict CPU-hierarchy lint passes on the sealed 159-define hardware export; six structural classes remain fatal; 3.73 s; not full-wrapper lint |
 
 The directed whole-core corpus compares complete architectural state against QEMU and
-require exact parent/candidate state and cycle records. They use UV + fast
+requires exact parent/candidate state and cycle records. The tests use UV + fast
 pipeline, `cycle_mode=1`, actual `--l1-axi`, relocated clients and fast
 load/store definitions. No STEP, intended-V breakpoint, saved state or guest
 patch is added. Pairable subjects must actually retire in V; RAW-dependent and
@@ -107,11 +107,62 @@ CoreMark seeds, completed Quake timedemo, and Win95 desktop remain open.
 Matching physical FPGA Win95 cold boot plus keyboard/mouse interaction and a
 complete Quake timedemo remain required before completion.
 
-No Vivado run was launched in this round. External space is about 5 GiB,
-below the existing synthesis controller's 6 GiB start reserve. That reserve
-has not been lowered. Further verified disposal of closed compiler products
-or lossless archival is needed before another expensive CAD run. The older
-decode-bus Quake run remains separate; it cannot qualify this PC/FPGA source.
+### Short CoreMark controls and live synthesis
+
+Both ten-iteration cold CoreMark controls closed successfully on the new PC
+model, with exact parent ticks and reference CRCs. Native owner
+`ventium-branch-address-cm10-v-result-oct15-r1.service`, invocation
+`575b548cdbf74aec918b414f12b08c13`, exited 0; all children reaped, inputs
+unchanged and no OOM. Evidence: `v-result-carry-soc-r1/coremark-r1/{closed,audit}.json`.
+
+| Seed | CRCs | Core ticks | Actual V retirements | Host time |
+|---|---|---:|---:|---:|
+| Performance | `e9f5 e714 1fd7 8e3a fcaf` | 4,767,218 | 1,055,307 | 213.21 s |
+| Validation | `18f2 e3c1 0747 8d84 c64e` | 4,753,406 | 1,054,254 | 211.80 s |
+
+These are **short regression controls, not duration-valid scores or standard
+suite acceptance**. Their cycle-throughput gain is **0%**, as expected for a
+combinational timing cut. They retain UV + fast pipe, cold reset, 40 MHz core/
+RTC, 80 MHz VGA and posted16/B20/Rfirst21/gap1 transport. Native affinity was
+CPU 12; the separate older Quake run remains on CPU 11.
+
+One synthesis is now running in `v-result-carry-synthesis-r3`, started
+2026-10-15 23:52:14 UTC. Owner `ventium-v-result-carry-synth-oct15-r3.service`,
+invocation `a5b21d4ee38a4193989de23ecfd21c61`; exclusive native scope invocation
+`7c318f143afb4695b1d09a981a8a0f21`. This is the same Default logic-only mapper
+and 40/100 MHz constraints as the last synthesized parent. Relative to that
+parent, **six payloads change and two mouse HDL files are added**: AUX ownership
+and mouse-wrapper integration are also new. A future timing/area difference
+therefore **cannot be attributed solely to the V-result cut**.
+
+The native family is capped at 8 GiB RAM / 6 GiB swap and one synthesis job,
+with actual CPU affinity 24–27 checked. Stop guards remain 4 GiB free disk,
+2 GiB available host RAM/swap, 13 GiB combined scope memory and 45 minutes.
+At 161 s: 5.57 GiB scope memory, zero swap/OOM; no result yet. No route or
+deployment has started. The prior estimate **37.9507 MHz is not this build's
+frequency**.
+
+History is preserved: R1 was an unlaunched preparation; R2's owner
+`9bf8913acd2b437f88ac57ba92d7ec5e` failed disk admission before any native CAD
+launch. The bound is the larger of 6 GiB and 4 GiB plus twice the measured
+parent growth (1,456,762,880 bytes): **7,208,493,056 bytes required**, not merely
+6 GiB. More closed traces were archived; no guard was reduced. R3 is a distinct
+owner/output directory, not an overwritten failure.
+
+`run_v_result_carry_timing_sequence.py` observes only that exact R3 invocation.
+Sequence owner `ventium-v-result-carry-timing-chain-oct15-r1.service`, invocation
+`8e7a1f734d454d769bf928c2c7660cc7`, will first require successful native closure
+and the independent synthesis audit. Only then may it launch the prepared
+read-only clock report under the same exclusive scope. It never retries
+synthesis or launches routing/programming. The report Tcl and process/resource
+lifetime are unchanged; its report uses frequency in MHz and explicitly
+distinguishes unplaced estimates from routed/measured hardware. Three synthesis,
+four clock-controller and three sequencer host tests pass, including deliberate
+resource-limit weakening, malformed invocation and altered-template rejection.
+
+The older decode-bus Quake run remains separate and running (about 1.028 billion
+startup cycles at this update). It cannot qualify this PC/FPGA source or provide
+its gameplay IPC. Chrome was absent; no browser or unrelated application was killed.
 
 Current candidate gameplay IPC is **unmeasured**. Older verified baseline:
 **0.50520554 total U+V**, model
@@ -129,3 +180,22 @@ Archive: `v-result-carry-integer-fp-traces.tar.zst`, SHA-256
 610,306,448 raw bytes → 1,722,077 archive bytes. Restoration instructions and
 per-file hashes are in `v-result-carry-trace-storage.json`. No live run,
 accepted image or source was deleted.
+
+Additional storage recovery on October 15:
+
+- `closed-generated-objects-removed.json`: 2,367 individually validated generated
+  object/archive/PCH files removed, 904,030,996 bytes. All source, native binaries,
+  private harness objects, dependencies, headers and evidence remain. Rebuilding
+  regenerates the removed compiler products; the live Quake build was excluded.
+- `v-result-closed-trace-reserve.tar.zst`: 2,682 closed traces, 303,059,035 raw
+  bytes → 3,155,553 archive bytes; SHA-256
+  `a093d52c3b65459761dfd892163b57419b19f1ef7fb6b8de676db820153594a3`.
+- `closed-parent-trace-reserve.tar.zst`: 3,738 closed parent traces,
+  752,904,401 raw bytes → 8,353,679 archive bytes; SHA-256
+  `55f2064dbe0e2b909c9e684540a2bee1cc6c2d22ee88bc0e9e4fd02f4b8a8427`.
+
+Both trace archives were read back and checked member-by-member before unlinking
+originals. Their matching JSON receipts record individual hashes, terminal
+owners and restoration commands. All frozen/current inputs were rehashed and
+preserved; restore the relevant archive before rerunning a historical raw-trace
+audit. External free space reached about 6.9 GiB before R3 admission.
