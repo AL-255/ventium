@@ -1,9 +1,10 @@
 # Exact FPREM underflow — October 15, 2026
 
-**Confirmed RTL and private-reference defect; repair not yet qualified.**
-The FPGA synthesis currently running contains the earlier numeric and
-operand-exception fixes, but not this newly isolated underflow fix. It remains
-a timing experiment, not a deployable acceptance result.
+**Shared-FPU leaf repair passes; whole-core and FPGA qualification pending.**
+The completed fetch-metadata FPGA synthesis contains the earlier numeric and
+operand-exception fixes, but not this underflow fix. It failed the timing
+improvement objective (36.03 MHz unplaced estimate) and is not deployable
+acceptance evidence for this repair.
 
 ## Architectural rule and reproduction
 
@@ -23,7 +24,7 @@ A  = 0001:8000000000000001
 B  = 0001:8000000000000000
 
 Expected ST0 = 5fc2:8000000000000000, UE/ES/B set, no newly raised PE
-Current  ST0 = 0000:0000000000000001, UE/ES/B absent
+Unfixed  ST0 = 0000:0000000000000001, UE/ES/B absent
 ```
 
 Both normal operands are valid; this case does not depend on a denormal input,
@@ -85,7 +86,7 @@ raise UE. Place the block **before** the operand-abort `done` label, so aborted
 IE/DE cases cannot rescale the preserved input. Zero, pseudo-normal, NaN and
 infinite results are excluded. No global SoftFloat policy changes. Eight host
 tests pass across the exact integer oracle, mutation rejection and recipe;
-the new reference has **not** been compiled or instruction-tested yet.
+the subsequent compiled reference and instruction tests are recorded below.
 `build_underflow.py` retains the bounded fresh builder and refuses a concurrent
 Vivado family; do not bypass that check to start it during synthesis.
 
@@ -103,12 +104,83 @@ Avoid introducing another general 64-bit normalizer at the top-level writeback
 mux when the shared engine already has one. Any interface change must cover
 every caller and nonshared-profile status path explicitly. Preserve divide,
 sqrt, reset/cancel behavior, ordinary remainder latency and UV-fast acceptance.
-This RTL repair is **not implemented** by the diagnostic or reference recipe.
+The diagnostic and private-reference recipe do not change RTL. A separate
+exact-parent experiment now exists in
+[`prepare_remainder_underflow.py`](../../srt/prepare_remainder_underflow.py):
+it latches accepted UM, reuses `ST_RNORM` for both tiny-A bypasses, packs the
+scaled exponent and UE, and merges UE below operand-exception priority. Both
+`ST_SPECIAL` and `ST_RNORM` respond on the following engine clock, so the bypass
+does not add a stage. Divide/sqrt and the remainder recurrence are unchanged.
+One explicit tie-off preserves the nonshared caller's previous behavior;
+**legacy unmasked-underflow support is not repaired or claimed**. Before any
+production promotion, all standalone engine callers also require explicit
+port integration and regression tests.
 
-Next verification must include the new 7,104-case matrix with retained bad
-controls, the earlier 9,552 operand cases and 7,488 numeric sequences, following
-FADD precision restoration, special/infinite divisors, partial reductions,
-whole-core UV-fast UE delivery, canonical gates and the standard suite. Final
+The bounded runner adds a 758-case engine test (all normalization shifts,
+accepted-UM poisoning, both bypasses and reset, plus two following divide/sqrt
+controls), the 7,104-case underflow
+matrix, the existing 9,552 operand cases and 576 infinite-divisor cases. It
+requires the retained bad control to fail and checks unchanged leaf latencies.
+Four additional host recipe/oracle tests pass. This experiment does not mutate
+the FPGA freeze or production sources.
+
+## Closed shared-FPU repair tests
+
+Evidence: `srt-underflow-r2` and `build-underflow-r1` under the same external
+evidence root. The fresh private reference changes exactly one of 11,132 source
+files; its build closes in 29.75 seconds with unchanged pins. QEMU binary:
+`998b4f5d3eda4493f391ea6775adcc88f3dd810ba2829f7d635cac27877f9b85`.
+The repository's canonical QEMU is untouched.
+
+| Matrix | Cases | Native / repaired QEMU / repaired RTL failures | Unfixed RTL failures |
+|---|---:|---:|---:|
+| Exact tiny-result/mask/precision/rounding matrix | 7,104 | 0 / 0 / 0 | 3,216 |
+| Earlier operand-exception and complete-stack matrix | 9,552 | 0 / 0 / 0 | 0 |
+| Infinite-divisor bypass, signed zero and pseudo-normal controls | 576 | 0 / 0 / 0 | 72 |
+
+All **17,232 architectural cases** retain exactly the control's measured leaf
+latency. The separate engine test passes 758 remainder operations, in-flight
+reset and two following divide/sqrt controls. It deliberately changes UM,
+operands, mode, rounding/precision and start while a remainder is in flight.
+The architectural test also checks response UE and rejects spurious OE/PE.
+No new comparison mask or change to ordinary recurrence/rounding is involved.
+Twelve host tests pass across the existing oracle/reference tests and new
+recipe/infinite-divisor mutation checks.
+
+The guarded 32-job leaf build and tests close in 13.21 seconds, native exit 0,
+with unchanged source pins. Owner `ventium-fprem-underflow-rtl-oct15-r2.service`,
+invocation `5c78150da5fd4f2e86d6c5af93e8ad8f`, is terminal (MainPID 0). Every
+native child has exact argv, actual CPU12 affinity, cgroup/start-time evidence
+and actual wait/reaping. No Vivado overlapped these builds. Shared-FPU binary:
+`899139eaff1daa55ba00ed3cfc9003614775b36bebbea8c89f303f8544ab623b`.
+Repaired SRT source: `480f5f23d9c151ce6ca0df243e449c2446e435a1c556308c359d3cc652742fd2`;
+shared top: `0cdf1129c030bcd2b21e73400fafe20cb6192cad5376358c90f7e52c7a0e796c`.
+
+Two failed launch/test attempts are retained, not relabelled as passes. QEMU
+launcher R1 omitted the build guard's `--` separator and started no compiler;
+launcher R2 owns the successful build. RTL run R1 passed the engine and 7,104
+underflow cases, then its process observer sampled an empty `/proc/.../cmdline`
+during a short native probe's exit. R2 supplies native probe input only after
+observing exact executable/argv/affinity, so it does not rely on scheduling or
+accept missing identity evidence. R1's original runner is archived alongside
+its unchanged failed receipt as `run_remainder_underflow-original.py`, hash
+`c50841a761835c05e3b416380117c464f464227abe1b760cc2c6fd62282a35ea`.
+
+The repaired private QEMU also passes all **7,488 numeric sequences / 216,768
+records**, including 209,280 partial steps, plus **96 following-FADD precision
+restoration cases**. The retained pre-repair reference fails 96,868 sequence
+checks; native x87 and the new reference both have zero mismatches. Evidence:
+`regressions-underflow-r1`, owner
+`ventium-fprem-underflow-regression-oct15-r1.service`, invocation
+`d201e6d91ce240688dd212b240a4bc37`, terminal exit 0 / MainPID 0, 190.75 seconds,
+unchanged source pins. These older sequence vectors exercise masked underflow;
+they are not coverage of unmasked partial-result exception delivery.
+
+Remaining verification includes partial reductions on the repaired RTL,
+unmasked partial-result handling, whole-core UV-fast UE delivery, all standalone
+SRT caller profiles, canonical gates and the standard suite. The unchanged
+canonical functional gate remains **7 PASS / 101 FAIL** from the parent audit;
+private-reference results do not turn it green. Final
 FPGA timing and physical Quake/Win95 acceptance must use the repaired source
 set; the current synthesis cannot qualify a later underflow repair.
 
