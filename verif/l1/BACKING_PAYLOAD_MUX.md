@@ -136,6 +136,26 @@ copies; all paths/hashes remain, recovering approximately 473 MB. Ledgers:
 `closed-products-dedup-oct15-{plan,closed}.json`. Do not edit retained hardlinked
 evidence in place. The active CoreMark directory was excluded from deduplication.
 
+A second closed-product pass subsequently relinked **75,733** additional paths,
+preserving every path and hash and recovering **6,157,869,056 bytes** of free
+space. It covered only receipt-closed scratch artifacts and excluded the
+then-active candidate PC tree. All targets passed open-file, inode, filesystem
+and pre/post SHA checks. Ledgers:
+`closed-small-products-dedup-oct15-{plan,closed}.json`; closure SHA-256
+`07502add57fccac276afee29aa68da47de3b5cf13fbfcf140d826c99aad82293`.
+
+**Matched synthesis launched at 12:43:28 UTC Oct 15**, not yet a completed
+timing result. Owner `ventium-backing-payload-mux-synth-oct15-r1.service`,
+invocation `cbbcfd1117154e86a51cee9055977a87`, owns the sole Vivado family in
+scope invocation `0dfa7cd53ef144c5bfe4eedad284d6fb`. Admission verified
+13,157,089,280 bytes free, above the unchanged 7,208,493,056-byte measured-growth
+reserve. Native limits remain 8 GiB RAM / 6 GiB swap, 13 GiB combined early
+stop, 4 GiB disk floor, 2 GiB host reserve and 45-minute timeout. No Chrome
+process was killed. Output: `backing-payload-mux-synthesis-r1/`; separate clock
+audit is prepared under `backing-payload-mux-clock-r1/`, **not launched**.
+The synthesis lifecycle retains canonical failure and does not authorize
+placement, routing, deployment or an acceptance claim.
+
 Still required: measured ≥40 MHz synthesized/routed closure; canonical gates;
 duration-valid ≥2.1 CM/MHz and both full correctness seeds; full Quake timedemo
 and cold Win95 desktop/UI on the **candidate FPGA**, with source/bitstream hashes,
