@@ -81,16 +81,37 @@ Export qualification remains `UNQUALIFIED`.
 - Full-PC model: `0a1f097ee98c816eef72fc432a17fe09e77d7912651c548ad14853512e8edc52`.
 - FPGA manifest: `f3d9952f0d85d60ce85a85bfec38bb37a939b39a739dc02e6ebde5a6d0297427`.
 
-Two short cold CoreMark controls are running under
-`ventium-branch-address-cm10-oct15-r1.service`, invocation
-`0cca37c66dd64113b54b4352297643c3`. They require both CRC sets, actual V
-retirements and exact parent tick counts. Ten iterations are insufficient for
-valid CoreMark scoring or standard-suite acceptance. No Vivado or FPGA
-deployment has been launched for this candidate yet.
+Both short cold CoreMark controls and their independent regrade **pass**:
 
-Next: close/regrade these controls, measure synthesis area/frequency using the
-existing single-Vivado bounded controller, and retain or reject the change on
-that evidence. Full simulation and physical Win95/Quake acceptance, valid
+| Seed | Candidate / parent ticks | Actual V retirements | Runtime |
+|---|---:|---:|---:|
+| Performance | 4,767,218 / 4,767,218 | 1,055,307 | 217.46 s |
+| Validation | 4,753,406 / 4,753,406 | 1,054,254 | 214.68 s |
+
+Both complete five-CRC sets match the reference. CPU12 affinity, exact native
+argv, source/media hashes, process wait/reaping and zero OOM are rechecked.
+Owner `ventium-branch-address-cm10-oct15-r1.service`, invocation
+`0cca37c66dd64113b54b4352297643c3`, is terminal exit 0 / MainPID 0, peak RAM
+56,348,672 bytes. The independent audit rechecks 13,140 source pins. Measured
+cycle-count gain is **0%**, as intended for this combinational timing cut.
+Ten iterations are insufficient for valid scoring or standard-suite acceptance.
+
+`prepare_branch_address_synthesis.py` prepares the matched single-Vivado
+measurement. Three tests verify unchanged launch/watchdog/reaping code, the
+same clock-audit Tcl, exact four-file transfer and unchanged resource admission:
+6 GiB starting disk reserve plus twice the measured parent growth above a
+4 GiB stop floor, 8 GiB resident / 6 GiB swap caps and a 13 GiB combined stop.
+No memory or disk guard was relaxed. The first preflight, invocation
+`b374d7e05d184a049ec80b96157431ab`, refused the measured-growth disk check
+(6.714 GiB required, about 6.2 GiB available) **before launching Vivado**. Its
+failure receipt and journal are retained. After pruning additional unused
+compiler caches, the same unchanged controller was restarted under
+`ventium-branch-address-synth-oct15-r1.service`, invocation
+`622dfdcd29284642bceadb4de91a341d`; its result is **pending**. No placement,
+routing, bitstream or FPGA deployment is authorized by that controller.
+
+Next: close and audit synthesis, measure the candidate's frequency, and retain
+or reject the change on that evidence. Full simulation and physical Win95/Quake acceptance, valid
 CoreMark scoring, canonical failures and delayed underflow `#MF` qualification
 remain open.
 
@@ -99,8 +120,8 @@ Gameplay baseline is **0.50520554 total U+V IPC**, older model
 **5,600,065,237–5,700,065,237**. Candidate gameplay, FPS and frequency are
 unmeasured. No IPC or area gain is claimed from this combinational change.
 
-Disk hygiene: 16 unused compiler precompiled-header files from closed tests
-were pruned (about 1.27 GiB). All native binaries, generated source/dependency
+Disk hygiene: 24 unused compiler precompiled-header files from closed tests
+were pruned (about 1.96 GiB). All native binaries, generated source/dependency
 files, traces, logs and successful/failed evidence remain. The caches can be
 regenerated; pruning receipts are `PCH_PRUNE_Oct15.md` and
 `sequences-underflow-r1/PCH_PRUNE.md` under the evidence root.
