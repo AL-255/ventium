@@ -72,6 +72,7 @@ Identities:
 - Parent directed model: `c55b996c2c8309e2c152dbab2813a144e5e30db83df6acfa190425e94067b84f`.
 - Candidate directed model: `cce12fc71c394b5a154e8bad108a3b88ab1d1acccba000f1961a26ea4f19d07d`.
 - Parent `core.sv`: `a26a7dc82d8ab0049bece36548373e57cd71b64547c44c02e2356bd7aa1f14ce`.
+- Candidate `core.sv`: `fc02d7c55bfc0f33a0e8f87fdcf04d6a4709b97a420b8161e2d0effc0a854de1`.
 - Full-PC candidate: `20cef474c2a10fca2ec27b26f09d88e9b7dc70ead963fab09ce28a6baaa4d60d`.
 - FPGA input manifest: `d35a4b77598c979affbe91bb3e245587e118d0244e271872527b9555115f5315`.
 
@@ -97,12 +98,34 @@ this is not cycle-band acceptance. No comparator, golden, mask or band changes.
 The separate matched-input replay uses the same initial ESP/image and compares
 all records, rather than normalizing separately initialized QEMU runs.
 
-Two short ten-iteration cold CoreMark CRC controls are running; they are not
-duration-valid scores or the standard suite. A matched synthesis plus read-only
-clock-audit controller is prepared, **not launched**. Native lifetime, exact
-owner/invocation checks, one-Vivado lock, RAM/swap stops and disk reserves are
-byte-identical to the closed parent. Host mutation tests reject relaxed stops,
-fake native success and unreviewed source changes. Full simulated standard
+Both short ten-iteration cold CoreMark CRC controls **passed**; they are not
+duration-valid scores or the standard suite. The independent audit rechecks
+13,713 source pins, all five CRCs per seed, actual CPU12 affinity, waited native
+closures and zero OOM events. Performance takes **4,767,218 ticks**, 1,055,307 V
+retirements, 215.70 s; validation takes **4,753,406 ticks**, 1,054,254 V
+retirements, 219.64 s. Both match the parent exactly: **0% cycle gain**. The
+duration-error message is retained. Owner
+`ventium-branch-address-cm10-demand-size-oct15-r1.service`, invocation
+`6eef136ec9924ecfa3ecd986cb1b8bb9`, is exited / MainPID zero.
+
+The one matched diagnostic synthesis launched at **20:45:39 UTC**, under
+`ventium-demand-size-synth-oct15-r1.service`, invocation
+`690da7de4b1f4ed79bef83ab80db0a47`; the owned Vivado scope invocation is
+`938e9e23e99e4cb984eee49855eeff80`. Admission observed 7,935,717,376 bytes free
+external disk and 16,503,087,104 bytes available RAM. Limits remain 8 GiB RAM /
+6 GiB swap, 13 GiB combined early stop, 4 GiB disk floor and 2 GiB host reserve.
+Native lifetime, exact owner checks, one-Vivado lock and resource controls are
+byte-identical to the closed parent. No compiler overlaps the synthesis.
+
+`ventium-demand-size-timing-chain-oct15-r1.service`, invocation
+`aa9a95ce0ddf4e3b8b757f272163da8c`, observes only that exact synthesis. It
+requires successful waited closure and an independent source/DCP audit before
+launching the read-only clock audit. It cannot retry synthesis, route or deploy.
+Host tests reject relaxed stops, fake success, changed owners and additional
+source changes. Candidate synthesized frequency remains **unknown** until the
+new reports close; the 40 MHz constraint is not a measurement.
+
+Full simulated standard
 suite, valid CoreMark scoring, routed timing and physical Win95 desktop/UI
 plus full Quake timedemo are also outstanding. The continuing cold Quake run
 uses the older DECODE-bus model; it cannot qualify this candidate.
