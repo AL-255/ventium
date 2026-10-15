@@ -92,6 +92,55 @@ RTL streams equal the parent's complete records; this is **not cycle-band
 acceptance**. No comparator, mask, golden or tolerance was changed. The
 private-reference pass and identical-input replay do not override this gate.
 
+### Saved cycle-cost accounting (no new processor run)
+
+`verif/analyze_cycle_gate_costs.py` reads the canonical gate's **complete 20
+cycle-trace pairs** through `tracefmt`. It conserves every retirement interval,
+including startup and simultaneous U/V retirement, and retains the original
+failed verdicts. Six host tests reject truncation, reordered instructions and
+counter repair, and check empty/revisited-PC partitions and same-clock V events.
+This is not a new correctness run, cache-cause oracle or warm-filtered PASS.
+
+The analysis owner `ventium-cycle-cost-analysis-oct15-r1.service`, invocation
+`7d5c11929d5749cfad87b7ed8674e1de`, closed with native status zero and MainPID
+zero. It used 22,466,560 bytes peak RAM under a 384 MiB/no-swap/60-second cap.
+All **105 input hashes** independently rechecked unchanged. Artifact:
+`pipe-wait-cycle-costs-r1.json`, SHA-256
+`0db08b454bb6fcf55be2b7affa946e19f52c362f782b5a97b2c7ccb9bda0ba3e`.
+The saved original runs used `--cycle --l1-axi`, AXI read/write latency 7,
+the directed candidate hash below and no debugger STEP/breakpoint override.
+
+Selected results (full 20-kernel/per-PC intervals are in the artifact):
+
+| Kernel | Reference clocks | RTL clocks | Excess at first PC occurrences | Excess at revisited PCs |
+|---|---:|---:|---:|---:|
+| `depadd` | 3,400 | 4,626 | 1,225 | 1 |
+| `indepadd` | 1,802 | 3,028 | 1,225 | 1 |
+| `faddchain` | 9,201 | 10,306 | 1,104 | 1 |
+| `mul` | 4,819 | 5,355 | 137 | 399 |
+| `imul2` | 4,818 | 5,425 | 208 | 399 |
+| `rmimm` | 2,027 | 2,295 | 268 | 0 |
+| `nearbr` | 1,290 | 1,732 | 441 | 1 |
+| `dmiss` | 20,524 | 137,367 | 179 | 116,664 |
+| `imiss` | 24,115 | 146,730 | 24,527 | 98,088 |
+
+For `depadd`/`indepadd`, 99.918% of the excess appears on first PC occurrences;
+each original native log records 20 fill starts, 1,320 fill clocks and 1,160
+backing-wait clocks. This does **not** prove those intervals are entirely cache
+cost, or establish a percentage of Quake's IPC gap. The fixed-eight-clock miss
+estimate in the cycle reference is not an AXI beat/service-latency model.
+Revisited PCs are not necessarily hits: the miss kernels retain their large
+repeated costs rather than having them subtracted away.
+
+Both multiply kernels have exactly **399 repeated 10→11-clock intervals** at
+their multiply PCs (`0804800f` / `0804800a`). The MUL native profile contains
+4,000 `S_EXEC` clocks for 400 multiplies: the ten-clock EX occupancy is correct.
+The extra clock is the `S_PIPE` dispatch into `S_EXEC`, not an off-by-one EX
+counter. A future improvement must overlap safe decode/operand handoff;
+shortening the occupancy counter would hide the dispatch cost and violate the
+existing `core_int_exec_occ.svh` invariant. No such RTL change, reference
+promotion, comparator change or tolerance adjustment was made here.
+
 Identities:
 
 - Parent model: `cce12fc71c394b5a154e8bad108a3b88ab1d1acccba000f1961a26ea4f19d07d`.
