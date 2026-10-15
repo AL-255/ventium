@@ -270,12 +270,44 @@ TMPDIR=/home/yukidama/external/tmp taskset -c 12 python3 -B \
   --overlay /home/yukidama/external/tmp/ventium-ps2-mouse-overlay-r2.McPNAkCQ -v
 ```
 
-At this point the export tool is tested, but **no combined export has been
-published**: the AUX full-PC compilation is still waiting for the owned timing
-sequence. The future manifest explicitly leaves `simulator_sha256=null` because
-the PC model does not instantiate the complete new FPGA mouse wrapper; it names
-the matched processor/platform model separately. Full-wrapper elaboration/lint,
-timing, canonical/standard-suite and physical UI acceptance remain required.
-This integration does not qualify the separate FIFO-loss proposals or imply
-a frequency/gameplay gain. Gameplay IPC remains unmeasured for the candidate;
-the older verified baseline and window above are unchanged.
+After the exact synthesis/clock sequence successfully closed and its Vivado
+scope became inactive, the AUX full-PC build completed in **22.95 s**, native
+exit zero, with **18,011 unchanged input pins** and all 98 inherited structural
+warnings unchanged. The private harness object uses this model's own generated
+header. Owner `ventium-pipe-wait-aux-soc-build-oct15-r1.service`, invocation
+`40c0859c175748bd8d010675a4cd1c5c`, is exited / MainPID zero. Verilator 5.046 was
+first probed in the user-service environment. Compilation used the existing
+guarded 32-job command, not an overlapping Vivado/compiler family.
+
+New processor/platform simulator SHA-256:
+`70c8de9eb55fda79b9fe359553ebd0b73de1e865c61414773000354edaff7b57`.
+`pipe-wait-aux-soc-r2/build-closed.json`:
+`2dd8025fd2e10345e97ff80dd5d280539005b87fa9a2c2189b43eefc80e9dcba`.
+This is a **compiled, not guest-qualified** model; no new CoreMark, Win95 or
+Quake execution is attributed to it.
+
+The combined source export is now published at
+`external/tmp/ventium-fprem-sequence.iSZ9BAj4/pipe-wait-aux-mouse-fpga-r1`:
+
+- Manifest SHA-256:
+  `d693f7b45f03baa7cb2d70c15ee162b47bd3e3fc5f8264d348c93bdfdbf4ecb5`.
+- Freeze receipt SHA-256:
+  `73677dff41c5fcaa6ee2466fd86f02cea971bcc9950dd1718daa324d73863ada`.
+- Successful export owner `ventium-pipe-wait-aux-mouse-export-oct15-r1.service`,
+  invocation `8ba30fbb717842f3979f3964d4cac15f`, exited / MainPID zero / native zero.
+
+Independent readback rechecks **18,254 export input pins**, all **192 payload
+hashes/sizes**, input aliases, all 18,011 PC build pins and the actual binary.
+Only the AUX controller line and three wrapper files differ from the current
+FPGA parent; the two mouse RTL modules are the only new payloads. Export peak
+RAM is 189,693,952 bytes under a 1 GiB/no-swap/120-second bound. No Vivado run,
+board reset, programming, firmware or guest-image change occurred.
+
+The manifest explicitly leaves `simulator_sha256=null` because the PC model
+does not instantiate the complete new FPGA mouse wrapper; it names the matched
+processor/platform model separately. Full-wrapper elaboration/lint, timing,
+canonical/standard-suite and physical UI acceptance remain required. This
+integration does not qualify the separate FIFO-loss proposals or inherit its
+parent's **37.951 MHz synthesized/unplaced** estimate as a new-wrapper result.
+Gameplay IPC remains unmeasured for the candidate; the older verified baseline
+and window above are unchanged.

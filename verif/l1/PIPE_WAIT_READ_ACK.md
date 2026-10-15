@@ -1,9 +1,10 @@
 # Pipeline read/write wait cofactor — October 15, 2026
 
-**Private experiment, not accepted or deployed.** The change has no measured
-frequency or gameplay gain. Its demand-width parent's synthesized/unplaced
-estimate is **35.875726483 MHz**, below the 40 MHz target; that estimate does
-not qualify this derivative or establish routed timing.
+**Private experiment, not accepted or deployed.** Its closed, matched-mapper
+synthesized/unplaced estimate is **37.950664137 MHz**, up **5.78%** from the
+demand-width parent's **35.875726483 MHz**, but still below the 40 MHz target.
+This is not routed timing or measured hardware frequency. No gameplay or
+cycle-throughput gain is established.
 
 Latest verified gameplay IPC: **0.50520554 total U+V**, older model
 `c7b95b78f47f5e709136f98230bdf33975cf8db0e925956b469649cbf6384afd`, cycles
@@ -234,6 +235,65 @@ Only successful native closure plus the independent DCP/source audit permits
 the prepared read-only clock report. It does not restart synthesis, route,
 program the board or waive a failed admission. No candidate frequency,
 utilization or timing-closure result is claimed while synthesis is running.
+
+## Closed synthesis and clock audit — October 15, 23:06 UTC
+
+Both original owners and the sequencer are now exited, MainPID zero, native
+status zero. The single Vivado family has closed. Synthesis took **1,896.90 s
+(31.62 min)**; the read-only two-checkpoint audit took **603.24 s (10.05 min)**.
+No resource stop, controller failure or OOM occurred. Synthesis peaked at
+8 GiB RAM / 233,828,352 bytes swap; the report peaked at 4,507,537,408 bytes RAM
+and zero swap. The independently closed synthesis audit rechecks **14,126
+input pins**, all **159 actual defines** and 148 native `read_verilog` inputs;
+the clock audit checks **14,130 pins**. No new route or bitstream was launched.
+
+| Matched diagnostic result | Demand-width parent | Wait cofactor |
+|---|---:|---:|
+| Synthesized/unplaced core estimate | 35.875726483 MHz | **37.950664137 MHz** |
+| Core setup slack at 40 MHz | -2.874 ns | -1.350 ns |
+| CLB LUTs | 187,745 | 189,756 |
+| CLB registers | 55,007 | 55,041 |
+| BRAM tiles | 277.5 | 277.5 |
+| DSPs | 47 | 47 |
+
+The frequency estimate improves **5.78%**, but LUT usage increases **1.07%**;
+this is not an area reduction. Core hold slack remains **-0.101 ns** (global
+-0.108 ns). Both clocks retain their original 40/100 MHz constraints. The
+diagnostic `Default -no_timing_driven` mapper is unchanged. The synthesis log
+retains one generated-PS8 `create_clock` critical warning and 1,564 warnings;
+native source completion does not imply a warning-free or routed design.
+
+Worst core setup is now `q_pc[0]` → register-file `gpr[4][5]`, **93 logic levels**,
+26.139 ns data delay: 6.299 ns logic + 19.840 ns estimated routing. The reported
+path crosses decode/fetch qualification, U carry, `v_input_flags[0]`, V ALU and
+GPR writeback, instead of the parent's worst EIP endpoint. The remaining path
+therefore needs a further structural cut; relaxing clocks is not a 40 MHz pass.
+
+Next investigation: the generic V ALU contains ADC/SBB result arithmetic,
+although the actual decoder marks all their supported forms `pairs_second=0`
+and every `issue_uv` pairing class requires that bit. A V result-only carry cut
+may remove this unused serial U→V arithmetic. **Do not remove V flag carry
+forwarding**: INC/DEC must preserve U's post-instruction carry. Before accepting
+such a change, prove decode/held-packet eligibility, add an accepted-V runtime
+assertion and datapath/whole-core controls, preserve all pairing and commit
+enables, and rerun differential/standard/physical acceptance. No V-ALU RTL
+change or measured gain for that proposed cut is claimed here.
+
+Identities and durable evidence under the root above:
+
+- Synthesized DCP: `1d9d3641ebe12b64f66e4b00f7dccd0da9a5b3c4f4de99d4116257a4cb02d30c`.
+- `pipe-wait-synthesis-r1/audit.json`:
+  `3e354c02df0b1617229d916917f83934e4a1dfdb28c90a954ad19530f8dc402c`.
+- `pipe-wait-clock-r1/audit.json`:
+  `2d40a5b84a65eb4be6b642553e70f60e69e2a5e7a164afecc9bb7069fb94d9db`.
+- Clock owner `ventium-pipe-wait-clock-oct15-r1.service`, invocation
+  `930c66798f80481c81dfbb38879243e8`; native scope
+  `8621b967b1f94f69b0e4caf766c41459`.
+- `pipe-wait-sequence-closed.json` retains both successful independent audits.
+
+The canonical gate, full standard suite, 40 MHz synthesized target, routed
+timing and matching physical Win95/Quake acceptance remain open. Candidate
+gameplay IPC remains unmeasured; the older baseline at the top is unchanged.
 
 ## Recoverable storage cleanup
 
