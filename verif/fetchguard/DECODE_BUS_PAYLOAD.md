@@ -118,6 +118,18 @@ Vivado retains 8 GiB resident / 6 GiB swap caps, a 13 GiB combined stop and
 Report actual measured synthesized and routed frequencies,
 not the requested constraint as achieved Fmax.
 
+At 18:42 UTC a fixed, one-shot sequencer was attached to that exact synthesis
+invocation: `ventium-decode-bus-timing-chain-oct15-r1.service`, invocation
+`83ab4366186641a1a6e75d5fe2599d06`. It observes the live process and retained
+owner, requires successful native closure and the independent synthesis audit,
+then starts the already prepared **read-only** clock audit on CPU24–27.
+It does not start/retry synthesis, implement or deploy anything. A failed or
+changed owner stops the sequence; there is no automatic rebuild loop.
+Four host tests cover terminal failure, live process observation, exit races,
+changed invocation and observation timeout. Sequence receipts are
+`decode-bus-sequence-{started,clock-owner,closed}.json`; the clock-owner and
+closure files are only produced when their respective stages occur.
+
 Still required: canonical gates green; duration-valid CoreMark performance and
 full correctness seeds; candidate gameplay measurement; complete simulated
 standard suite; routed timing; physical Win95 cold desktop/UI interaction and
