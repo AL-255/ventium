@@ -263,6 +263,13 @@ Exact inventory and receipt are `prefix-opcode-products-prune-plan.json` and
 
 ## Acceptance remains open
 
+The [October 15 backend-profile repeat](../l1/CYCLE_BACKEND_PROFILE.md#october-15-repeat-on-the-prefix-opcode-candidate-with-architectural-traces)
+adds 80 native wait-sensitivity runs on this model, including full-state
+equality across delays and an independent artifact audit. It confirms the
+previously known testbench-delay effect, not a new processor speedup. The
+zero-added-wait `mb_imiss` failure remains; the normal delayed results and
+canonical failure status are retained unchanged.
+
 No duration-valid CoreMark, standard-suite, routed or FPGA acceptance
 is established by these checks. The parent's canonical functional/cycle gate
 failures remain unresolved, not waived. Full-core same-input checks and the

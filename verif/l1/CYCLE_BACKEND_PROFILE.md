@@ -157,3 +157,79 @@ gameplay; there is no Doom FPS result.
 Candidate gameplay IPC is **unmeasured**. Older verified simulation baseline:
 **0.51030715 total U+V**, build `2b4d7a48`, cycles
 **1,200,065,237–1,300,065,237**. It predates this candidate and is not FPGA/Doom IPC.
+
+## October 15: repeat on the prefix-opcode candidate, with architectural traces
+
+This confirms the previously recorded backend-delay effect on a newer timing
+candidate; it is **not a newly discovered cause or a new hardware gain**.
+Model `14435a4d189ed3d0d441e14d356877cf6492c4c50077f80093b5d92ea8b4aff5`
+already uses `AXI_LINE_REPLAY=0`. The experiment changes only slave wait 0/7,
+not the model, bands, goldens, images, instruction caps or trace masks.
+`--cycle` and `--cycle-func` both retain the AXI backend, U/V and fast paths;
+neither STEP nor breakpoints are supplied. All 152 build defines and exact
+commands are retained in the receipts.
+
+The **80 native executions** close in 22.276 seconds, peak 125,935,616 bytes,
+no OOM. Actual simulator affinity is observed on CPU13; the retained owner is
+`ventium-cycle-memory-profile-oct15-r1.service`, invocation
+`e497d43aad434726987fea8d1489db5e`, exit 0 / MainPID 0.
+An independent reread verifies **129 input pins**, all native exits and
+**66,807 complete architectural records** identical across slave delays,
+including x87 payload where requested. Each delay has **25,623 actual V
+retirements**. Fresh delay-7 cycle records exactly reproduce the candidate's
+canonical run. Cycle/full-state modes have identical clocks and PC streams.
+
+Unchanged verdicts remain **18 PASS / 1 FAIL / 1 INFO** at delay 0 and
+**10 PASS / 9 FAIL / 1 INFO** at delay 7. `mb_imiss` remains 34,170 clocks versus
+the current golden's **24,115**, a **10,055-clock / 41.70%** excess. Its exclusive
+state buckets are exactly those in the table above. No gate is waived.
+For 18 kernels, the whole-program delay difference is exactly seven times
+the zero-delay backing-beat count. Exceptions must not be hidden:
+
+- `mb_dmiss`: six fewer added clocks than that expression, due to overlap.
+- INFO-only `mb_agiloop`: its canonical instruction cap interrupts the next
+  fill. Delay 0/7 have 21/18 accepted backing beats, respectively, and its
+  residual is -21 clocks. Architectural equality is **not** a clean burst-drain
+  result; no complete-transaction latency average is claimed for it.
+
+The remaining fetch penalty is not solved by the existing D-hit/prime-under-I-
+fill mechanisms: those admit **data** reads while the separate instruction
+staging line fills. The core still copies words 1–7 in `S_PF`, publishes the
+I-cache line only after word 7, and waits for a safe registered BRAM read.
+The assembled `mb_imiss` also contains alignment-padding jumps, not merely
+the MOV instructions described in its source comment; branch costs must stay
+in the accounting.
+
+Possible follow-up: test a dedicated arrived-word fetch bypass or bounded
+restart before full-line publication. Do **not** simply validate a partial
+line or remove read/write-collision guards. Required cases include every word
+arrival and stalled-beat phase, snoop/flush/reset at capture and consumption,
+redirects, page/CS boundaries, fetch faults and poisoned fills. An independent
+request/fill owner must still drain the original AXI transaction. Measure
+LUT/FF cost and the real 40-MHz path before adopting such a change. No such
+RTL change was made here.
+
+Evidence: `external/tmp/ventium-data-size.v2HaTO2X/prefix-opcode-cycle-memory-r1`.
+Native closure SHA-256:
+`506ef885c347078ae6112c1e1294ae908530f7a4ddbaa2a98bb1e112ba00de17`.
+Independent `prefix-opcode-cycle-memory-audit.json` SHA-256:
+`851095d4ded71148d35827c5b26b883bafdda2e5f7d5496f6df2b85638b7212b`.
+The grader initially rejected its own incorrect trace-header API assumption,
+then the incorrect assumption that cycle-only headers advertise x87 payload.
+It now uses `tracefmt.Trace` directly and checks architectural x87 presence
+against native argv; no trace or result was rewritten. Three host tests include
+missing/duplicate counters, absent architectural fields and broken V pairing.
+
+Drivers: [measurement](../lib/measure_cycle_memory_profile.py),
+[independent audit](../lib/audit_cycle_memory_profile.py),
+[grader tests](../lib/test_cycle_memory_profile.py). The measurement requires a
+bounded retained systemd owner and CPU13 affinity; use external TMPDIR and a
+fresh output path. The audit launches no model. Current canonical functional
+failures, complete standard suite, routed timing and physical acceptance are
+still open. Best retained synthesized/unplaced estimate is **36.591166892 MHz**;
+the prefix-opcode synthesis is still running as of this entry.
+
+Latest verified gameplay baseline: **0.50520554 total U+V**, older model
+`c7b95b78f47f5e709136f98230bdf33975cf8db0e925956b469649cbf6384afd`,
+cycles **5,600,065,237–5,700,065,237**. The current timing candidate's gameplay
+is **unmeasured**; these directed runs are not a gameplay IPC measurement.
