@@ -5,6 +5,13 @@ tested general processor repairs onto the performance/timing candidate without
 changing U/V issue, system/relocated fast paths, full P5 L1 geometry, single-fill
 ao486 policy, posted-16 transport, or the 40/100 MHz clock constraints.
 
+**October 15 closure:** this model's cold FreeDOS Quake demo1 completes in
+simulation: **969 frames, 125.4 guest seconds, 7.7 reported FPS at 40 MHz**.
+The newest verified gameplay window is **0.50520554 total U+V IPC**, cycles
+**5,600,065,237–5,700,065,237**, model `c7b95b78`. This does not qualify the
+later response-kind timing candidate, which remains gameplay-unmeasured,
+nor does it establish physical-FPGA or full standard-suite acceptance.
+
 ## What changed
 
 The full-PC parent already contains the [LMSW](../verif/sys/lmsw/README.md),
@@ -128,11 +135,11 @@ programming are not performed by these controllers.
 
 Still required: >=40 MHz synthesized Fmax, implementation/timing checks,
 duration-valid >=2.1 CoreMark/MHz, complete CoreMark correctness seeds, Win95
-cold desktop plus UI interaction, full Quake timedemo, and physical FPGA
+cold desktop plus UI interaction, full Quake timedemo on newer candidates, and physical FPGA
 Win95/Quake validation in UV-fast mode. The installed `fe9f539d` image is
 unchanged; its [Doom startup failure](../docs/FPGA_DOOM_2026-10-13.md) remains.
 
-## Cold Quake verification in progress
+## Cold Quake verification: completed in simulation
 
 The exact repaired model cold-started FreeDOS Quake demo1 at **19:43:34 UTC**
 under `ventium-fp-repair-quake-oct13.service`, invocation
@@ -159,8 +166,35 @@ Two preparation tests and **39 runner tests pass**, including low-disk failure
 remaining a failure even if a simulated completion marker appears. The board
 fixture explicitly checks DDR3, clock rates and memory size; completion,
 error-detection and log-integrity checks are unchanged. Tests do not constitute
-guest acceptance. The later measured gameplay window below is not a completed
-timedemo result.
+guest acceptance. The early gameplay windows below were not completion
+evidence; the original cold run has since closed, as follows.
+
+The original owner invocation is now terminal, MainPID 0 / native exit 0.
+The native simulator was waited/reaped, its process group is absent, and the
+complete **2,009,721-byte** log reached EOF with matching captured/persisted
+hashes and no sticky capture error. The final cold counters are
+**5,792,253,606 cycles / 2,726,171,509 U+V retirements**; these include startup
+and must not be divided to label a gameplay IPC result. Host runtime was
+**101,385.82 seconds (28.16 hours)**, not guest time.
+
+[`audit_fp_repair_quake_closed.py`](audit_fp_repair_quake_closed.py) independently
+reruns the unchanged timedemo checker on the **closed** private disk and log,
+rechecks native CPU11 admission, 296 frozen source files, model/media/helper
+hashes, 40/40/80 MHz core/RTC/VGA settings, and explicit `cycle_mode=1` with
+UV/system/relocated fast-path definitions. No snapshot, STEP, breakpoint,
+guest patch, error-filter change or FPGA programming was used. The guest log
+identifies demo1 and reports **969 frames / 125.4 seconds / 7.7 FPS**.
+
+The original Quake runner writes a 55-byte explanatory regular stop file after
+observing the fresh result. This is its existing protocol, not the separate
+Win95 checker's empty-marker contract. Neither marker was rewritten or waived.
+No OOM occurred. This closes **Quake simulation only on `c7b95b78`**, not
+Win95, CoreMark, newer timing derivatives or the physical FPGA.
+
+Closure audit: `quake-closed-audit.json` in the evidence root, SHA-256
+`b607eb585b0f2cc7ae25e37950b5f7402334c78393da60579968d1400856f32e`.
+Closed log SHA-256:
+`4b6a633f9f4277a4387ac3b3b95fdcf6bfa4d1166b4a7afa8e4bf0f8cc898fd8`.
 
 ## Cold Win95 verification: closed, unqualified
 
@@ -535,7 +569,7 @@ The sealed complete-line prefix is **681,550 bytes**, SHA-256
 No new simulation, snapshot restore, STEP, guest patch or color manipulation
 was used.
 
-### Latest gameplay window: 2.2B–2.3B
+### Previous gameplay window: 2.2B–2.3B
 
 The same older `c7b95b78` cold simulation remains live under its original owner,
 with the exact native command, input/model hashes and actual CPU11 affinity
@@ -551,7 +585,7 @@ for inspection have no color, contrast, brightness, size or gamma adjustment.
 | V retirements | 196,824,451 | 208,238,277 | 11,413,826 |
 | Total retirements | 913,712,521 | 962,485,966 | 48,773,445 |
 
-Latest verified baseline: **0.48773445 total U+V IPC**. Endpoint totals equal
+Verified baseline at that audit: **0.48773445 total U+V IPC**. Endpoint totals equal
 U + V. Scene variation is not a controlled change gain; this is not the full
 timedemo's average or its final FPS. The newer response-kind timing candidate
 has no gameplay measurement, and no standard-suite or FPGA pass is inferred.
@@ -560,8 +594,30 @@ Evidence: `audit_gameplay_2300m.py`, `gameplay-2200m-2300m-audit.json` and the
 **793,512-byte** complete-line log prefix in the existing evidence root. Prefix
 SHA-256: `59986079705ad38c8e06a5ebf346260f4fb325b437340bbe5d59e764edb33a3d`.
 Audit SHA-256: `cb6f99527de3c6b6386834aabfe4333409069093a6654313b3e24c1db113732d`.
-The audit launches no new simulation and performs no snapshot restore, STEP,
-guest patch or FPGA write. The original Quake run remains active.
+The audit launched no new simulation and performed no snapshot restore, STEP,
+guest patch or FPGA write. The original Quake run was still active then.
+
+### Latest verified gameplay window: 5.6B–5.7B
+
+The independent closed-run audit above seals the latest complete 100-million-
+clock interval with inspected gameplay captures. Frames 51 and 52 show the
+gold-key pickup and approach to the exit portal, with weapon/HUD; neither is a
+loading screen. Lossless PNG previews preserve native pixels without color,
+gamma, brightness, contrast, size or frame-rate changes.
+
+| Counter | Cycle 5,600,065,237 | Cycle 5,700,065,237 | Difference |
+| --- | ---: | ---: | ---: |
+| Core clocks | 5,600,064,874 | 5,700,064,874 | 100,000,000 |
+| U retirements | 2,037,293,543 | 2,076,178,829 | 38,885,286 |
+| V retirements | 592,719,888 | 604,355,156 | 11,635,268 |
+| Total retirements | 2,630,013,431 | 2,680,533,985 | 50,520,554 |
+
+**Current verified baseline: 0.50520554 total U+V IPC**, older `c7b95b78`
+simulation. This is a scene window, not the whole timedemo's average, a
+controlled fix gain, Doom, or physical-FPGA IPC. The later response-kind
+candidate still has no gameplay measurement. The same audit independently
+confirms the older model's full timedemo result; the two metrics have different
+measurement windows and must not be conflated.
 
 ### Win95 native closure and evidence-protocol failure
 
