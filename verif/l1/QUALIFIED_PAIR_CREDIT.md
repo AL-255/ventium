@@ -472,8 +472,31 @@ After further recoverable archival, the unchanged controller is started again:
 
 The native closure must first pass `qualified-pair-credit-synthesis-r1/audit_closed.py`.
 Only then may the prepared, read-only `qualified-pair-credit-clock-r1` controller
-compare the two checkpoints. It is **not launched yet**. No route or deployment
-is queued, and no isolated MHz/area/IPC gain is assumed.
+compare the two checkpoints. At **14:39 UTC**, this continuation is queued,
+but its native process has **not started**:
+
+- `ventium-qualified-pair-credit-clock-oct16-r1.service` has both `After=` and
+  `Requires=` dependencies on the live synthesis owner. Its `ExecStartPre`
+  runs that independent synthesis audit; a failed dependency or audit prevents
+  the clock controller from starting. The queued job is 77086, MainPID 0.
+- The unchanged controller still requires the exact successful synthesis
+  invocation, unchanged sources/checkpoint and no existing Vivado family.
+  Its native limits remain 15 minutes, 8 GiB RAM / 4 GiB swap / 48 tasks,
+  11 GiB combined early stop, 4 GiB disk reserve and 2 GiB host reserve.
+  The outer oneshot has a separate 20-minute startup cap, 2 GiB RAM / 1 GiB
+  swap / 256 tasks; these are not the detached CAD family's limits.
+- `ventium-qualified-pair-credit-clock-audit-oct16-r1.service` is queued
+  behind the clock owner with the same dependency ordering (job 77116,
+  MainPID 0). It only runs the existing read-only `audit_closed.py`, with
+  a five-minute / 1 GiB / no-swap bound. It does not launch Vivado.
+
+The first transient-unit request was rejected before unit creation because
+this systemd does not accept `JobTimeoutSec` through this interface. The
+accepted queue omits that unsupported job property; all native/controller
+timeouts and resource guards above are unchanged. At queue verification,
+the original synthesis scope invocation remained
+`71463993c914417c9c9d497a6f54c1db`, with no second CAD family.
+No route or deployment is queued, and no isolated MHz/area/IPC gain is assumed.
 
 Disk recovery is lossless: **7,170 unique generated compiler products** across
 45 closed build directories were archived and byte-compared before their loose
