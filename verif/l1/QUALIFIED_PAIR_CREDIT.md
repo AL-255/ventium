@@ -429,6 +429,12 @@ Before synthesizing or accepting the whole-core candidate:
    system/fault/boundary comparisons. Existing canonical failures remain
    failures, not newly waived passes. The CDC testbench sampling correction
    also remains a separately tested proposal, not an edited canonical pass.
+   The [explicit reference profile](../qemu-trace/QUALIFIED_PROFILE.md) now
+   completes the **actual `make verify` flow** on this exact model: 108/108
+   functional comparisons pass (80,800 records; 50,668 U / 30,132 V), but its
+   unchanged nine failed cycle bands retain native exit 2 / overall **FAIL**.
+   All 20 RTL cycle streams are identical to the earlier run. No masks or
+   bands were relaxed, and the original default-reference failure is retained.
 2. Only then measure matched synthesis/timing. This simplification may have
    little timing effect because the original ready-to-request path remains;
    **no MHz, area, CPI or IPC gain is claimed**.

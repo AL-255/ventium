@@ -37,9 +37,11 @@ goldens deliberately rather than editing their recorded fields.
 
 ## Usage
 
-For the opt-in **private** terminal-state observer and its still-failing generic
-subgate, see [PREEXIT_OBSERVER.md](PREEXIT_OBSERVER.md). That experiment does not
-change the canonical QEMU binary or its terminal-state behavior.
+For the opt-in terminal-state observer's original diagnosis, see
+[PREEXIT_OBSERVER.md](PREEXIT_OBSERVER.md). The subsequently qualified observer
+and defined-x87 repairs can now be selected explicitly in `make verify` through
+the [hash-pinned reference profile](QUALIFIED_PROFILE.md). The default QEMU
+binary is unchanged, and selecting that profile does not waive cycle failures.
 
 ```
 gen_trace.py --qemu <path> --elf <file> --out <trace.vtrace>

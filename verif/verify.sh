@@ -73,6 +73,20 @@ fi
 # ---- pinned paths (all absolute) --------------------------------------------
 REFS="$ROOT/ventium-refs/07-p5-emulation-harness"
 export QEMU="$REFS/build/qemu/build/qemu-i386"
+# An explicit, source-complete qualified profile is permitted, never an arbitrary
+# QEMU override. Keep the original reference as default and retain every failed
+# canonical result. The selector pins the independently tested executable and
+# all 11,132 source files. Its terminal observer is part of this named profile;
+# verify_worker's binary/observer-aware keys isolate the resulting goldens.
+if [ -n "${VTM_QEMU_PROFILE_BUILD:-}" ]; then
+    if ! QEMU="$(python3 "$ROOT/verif/qemu-trace/qualified_profile.py" \
+                       --select-build "$VTM_QEMU_PROFILE_BUILD")"; then
+        echo '[verify] qualified reference validation failed' >&2
+        exit 1
+    fi
+    export QEMU VTM_QEMU_GDB_PREEXIT=1
+    echo '[verify] reference profile: i386-defined-x87-preexit-20261016 (explicit)'
+fi
 export ISA_VERIFY="$REFS/tools/isa_verify.py"
 export GEN_TRACE="$ROOT/verif/qemu-trace/gen_trace.py"
 export COMPARE="$ROOT/verif/diff/compare.py"
