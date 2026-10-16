@@ -1,10 +1,47 @@
 # V-pipe arithmetic carry cut — 2026-10-15
 
 Latest update, October 16: this V-result model now has a verified gameplay
-observation of **0.48146083 total U+V IPC**, cycles
-**1,100,065,247–1,200,065,247**. It is still not a full timedemo or physical-board
-pass. Later input and boundary/interior-fetch candidates remain unmeasured.
-Historical unmeasured-status paragraphs below describe their earlier updates.
+observation of **0.497040387 total U+V IPC over one billion clocks**, cycles
+**1,100,065,247–2,100,065,247**. It is still not a full timedemo or physical-board
+pass. Later input, fetch and system-read ACK candidates remain unmeasured.
+Historical measurements and unmeasured-status paragraphs below retain their
+original build/window scope.
+
+## October 16: broader one-billion-clock gameplay observation
+
+The same live cold-run model `b6b92dbfde2c6148fde30b5c65cac8217f650f7bbc1a7d4c0bd58fe95f706c9e`
+now spans ten complete 100M-clock intervals. The existing independent observer
+checks 18,622 source/runtime pins, actual native owner/argv/affinity, complete
+counter profiles, cold media, `cycle_mode=1`, UV-fast definitions, actual V
+retirements and zero OOM events. The two endpoint captures were visually
+reviewed as different gameplay views, and their PNG pixels match the raw PPMs.
+
+| Counter | Delta over 1,000,000,000 measured clocks |
+|---|---:|
+| U retirements | 384,240,079 |
+| V retirements | 112,800,308 |
+| Total U+V retirements | 497,040,387 |
+| U-only IPC | 0.384240079 |
+| Total U+V gameplay IPC | **0.497040387** |
+
+The ten individual intervals range from **0.47111589 to 0.51926353** U+V IPC;
+two are below 0.48. The wider mean exceeds 0.48, but does not establish that
+every scene does, or that the unfinished full timedemo will average the same.
+This is post-hoc observation on the same build, **not an improvement over the
+previous 0.50229051 shorter window**. It is not a measurement of the later
+RAW/input or ACK candidate, physical hardware, or FPS.
+
+Evidence under `/home/yukidama/external/tmp/ventium-fprem-sequence.iSZ9BAj4`:
+`v-result-carry-gameplay-window-1100-2100M-oct16-r2.json`; endpoint images
+`quake-v-result-frame6-oct16.png` and `quake-v-result-frame16-oct16.png`.
+The R1 receipt is retained: its second visual annotation incorrectly called
+the HUD's zero value health. R2 corrects only that description and independently
+rechecks the live owner/counters/pins; the interval and measured values agree.
+No raw capture, simulator log, guest, test policy or earlier receipt was changed.
+
+The native timedemo is still running, not closed or accepted. The matching
+newer ACK synthesis is also still running; 40 MHz synthesized/routed closure,
+full standard suite and physical Win95/Quake validation remain outstanding.
 
 ## October 16: first verified V-result gameplay window
 

@@ -194,8 +194,11 @@ The existing cold Win95 run continues on **older full-PC model `e9159acb`**,
 not this new derivative. Its boot-only controller cannot establish UI robustness.
 The older Quake runs also remain separate evidence.
 
-Latest verified gameplay baseline: **0.50229051 total U+V IPC**, model
+Latest verified gameplay baseline: **0.497040387 total U+V IPC**, model
 `b6b92dbfde2c6148fde30b5c65cac8217f650f7bbc1a7d4c0bd58fe95f706c9e`, cycles
-**1,400,065,247–1,500,065,247**. U-only IPC was 0.38787572. This predates both
+**1,100,065,247–2,100,065,247**. U-only IPC is 0.384240079. The ten shorter
+intervals range from 0.47111589 to 0.51926353; this is not a minimum-scene IPC
+guarantee. See [the broader observation](../issue_uv/V_RESULT_CARRY.md).
+This predates both
 the RAW/input candidate and this ACK derivative; neither has a verified
 gameplay measurement. It is not a completed timedemo or FPGA acceptance.
