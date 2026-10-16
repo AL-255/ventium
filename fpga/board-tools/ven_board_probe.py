@@ -1181,12 +1181,18 @@ def read_halted_arch_state(ctrl: mmap.mmap) -> dict[str, object]:
 
 
 def prepare_cold_probe(args: argparse.Namespace) -> int:
-    """Disarm a freshly programmed, still-reset ABI-5 image before daemon init.
+    """Disarm a held-reset ABI-5 image before daemon init.
 
     Never programs the FPGA, writes guest RAM, changes clocks, asserts reset,
     clears evidence counters, steps, or releases execution. The caller must
     separately pin the bitstream and qualify its compiled UV-fast profile.
     """
+    # Default remains strict fresh-image admission. The runtime-PLL trial may
+    # supply the exact constant U counter independently observed over its five
+    # second held-reset measurement; this never clears or ignores counters.
+    expected_retired = getattr(args, 'held_primary_retirements', 0)
+    if type(expected_retired) is not int or not 0 <= expected_retired < 1 << 64:
+        raise ValueError('invalid held-reset primary-counter witness')
     fd, ctrl, _ = open_mmio(writable=True)
     try:
         require_exec_debug(ctrl)
@@ -1194,9 +1200,9 @@ def prepare_cold_probe(args: argparse.Namespace) -> int:
         def cold_state():
             state = debug_state(ctrl)
             if (u32(ctrl, R_IDENT) != IDENT_MAGIC or u32(ctrl, 0x20) != 1 or
-                    state['counters']['retirements'] != 0 or
+                    state['counters']['retirements'] != expected_retired or
                     state['freeze']['frozen'] or state['core_cr0'] != '60000010'):
-                raise RuntimeError('cold preparation requires unexecuted, held-reset, non-frozen reset state')
+                raise RuntimeError('cold preparation requires held-reset, non-frozen reset state and exact retained-counter witness')
             return state
 
         before = cold_state()  # Complete admission before the first write.
@@ -1209,6 +1215,7 @@ def prepare_cold_probe(args: argparse.Namespace) -> int:
         if not after['execution']['halt_requested'] or after['execution']['breakpoint_enabled']:
             raise RuntimeError('cold preparation did not leave manual halt with breakpoint disabled')
         print(json.dumps(dict(action='prepare-cold-abi5', before=before, after=after,
+                              held_primary_retirements=expected_retired,
                               guest_held_reset=True, guest_released=False, acceptance=False,
                               gameplay_ipc=None), sort_keys=True))
         return 0

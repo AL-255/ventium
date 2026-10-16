@@ -90,6 +90,36 @@ class DebugContractTests(unittest.TestCase):
         self.assertTrue(ctrl.closed)
         close.assert_called_once_with(987654)
 
+    def test_same_image_cold_prepare_requires_exact_prior_counter(self):
+        for expected,passed in ((100,True),(99,False),(101,False)):
+            ctrl=self.cold_ctrl()
+            struct.pack_into('<I',ctrl,PROBE.R_DBG_RET_LO,100)
+            with patch.object(PROBE,'open_mmio',return_value=(987654,ctrl,None)), \
+                 patch.object(PROBE.os,'close'),redirect_stdout(io.StringIO()), \
+                 patch.object(PROBE.struct,'pack_into',wraps=struct.pack_into) as writes:
+                args=argparse.Namespace(held_primary_retirements=expected)
+                if passed:
+                    self.assertEqual(PROBE.prepare_cold_probe(args),0)
+                    self.assertEqual(len(writes.call_args_list),3)
+                else:
+                    with self.assertRaises(RuntimeError): PROBE.prepare_cold_probe(args)
+                    writes.assert_not_called()
+            self.assertEqual(PROBE.u32(ctrl,PROBE.R_DBG_RET_LO),100)
+
+    def test_cold_prepare_catches_counter_change_during_disarm(self):
+        ctrl=self.cold_ctrl()
+        real_state=PROBE.debug_state
+        count=0
+        def changing_state(c):
+            nonlocal count
+            count+=1
+            state=real_state(c)
+            if count>1: state['counters']['retirements']=1
+            return state
+        with patch.object(PROBE,'open_mmio',return_value=(987654,ctrl,None)), \
+             patch.object(PROBE.os,'close'),patch.object(PROBE,'debug_state',side_effect=changing_state):
+            with self.assertRaises(RuntimeError): PROBE.prepare_cold_probe(argparse.Namespace())
+
     def test_unknown_abi_refuses_all_execution_writes(self):
         args = argparse.Namespace(timeout=0.1, count=1, eip=0x14565, wait=False)
         for cap in (0, 0xffffffff, 0x56450004, 0x56450009):

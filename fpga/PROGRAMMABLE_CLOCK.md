@@ -87,12 +87,15 @@ Host tooling tests:
 ```sh
 TMPDIR=/home/yukidama/external/tmp PYTHONDONTWRITEBYTECODE=1 \
   PYTHONPATH=fpga:fpga/board-tools python3 -B -m unittest \
-  test_ven_pll_clock test_ven_cold_clock test_ven_coremark_clock_trial \
+  test_ven_board_debug_contract test_ven_pll_clock test_ven_cold_clock test_ven_coremark_clock_trial \
   test_coremark_clock_media test_coremark_clock_audit
 ```
 
-The 26 tests pass. They include retained-counter handling and rejecting old
-V-retirement history as evidence of pairing in a later trial.
+The 39 tests pass. They include retained-counter handling and rejecting old
+V-retirement history as evidence of pairing in a later trial. Cold preparation
+must match the exact prior U count measured while reset was held; the original
+fresh-image default still requires zero. Counters are never cleared to make
+another seed look newly programmed.
 Both 4,000-iteration private-QEMU references also pass (native exit33):
 performance CRCs `e9f5/e714/1fd7/8e3a/65c5`, validation
 `18f2/e3c1/0747/8d84/5249`. Evidence: `coremark-pll-media-r1`; these are reference
@@ -111,6 +114,9 @@ one worker, 20 GiB RAM / 8 GiB swap limits, a six-hour bound, live 4 GiB disk an
 2 GiB host RAM/swap stop floors. Fresh source/launcher pins and native results
 are recorded; no automatic retry or deployment occurs. The unchanged previous
 implementation profile is retained, including RuntimeOptimized opt_design.
+New board helpers and 4,000-iteration media are staged separately at
+`/dev/shm/ventium-coremark-clock-stage.3gpcEfvD`; the old passing evidence is not
+overwritten. Host evidence will be retained in `coremark-pll-board-r1`.
 
 ## Physical procedure (pending this image)
 

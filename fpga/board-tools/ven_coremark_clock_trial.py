@@ -130,9 +130,11 @@ def run(args):
             pll = ven_pll_clock.GpioMailbox()
             save('held-before-clock.json', quiesce(ctrl))
             save('pll-change.json',ven_pll_clock.change(pll,args.pll_divider))
-        save('held-clock.json', measure(ctrl, expected_mhz=args.expected_mhz,
-                                      allow_previous_retirements=pll is not None))
-        probe.prepare_cold_probe(argparse.Namespace())
+        held_clock=measure(ctrl, expected_mhz=args.expected_mhz,
+                           allow_previous_retirements=pll is not None)
+        save('held-clock.json',held_clock)
+        probe.prepare_cold_probe(argparse.Namespace(
+            held_primary_retirements=held_clock['after']['retired']))
         with (out/'daemon.stdout').open('xb') as stdout, (out/'daemon.stderr').open('xb') as stderr:
             argv = [str(DAEMON), '--membase', '0x60000000', '--mem', '16',
                     '--bios', '/tmp/ao486', '--hdd', str(args.media), '--secs', str(args.seconds)]
