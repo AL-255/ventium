@@ -1,8 +1,9 @@
 # Parallel write admission — native-qualified timing experiment
 
-Status, 2026-10-16: **isolated RTL derivative implemented; native cache/AXI
-tests pass. No whole-core, timing, standard-suite or FPGA acceptance.** The
-production checkout and deployed bitstream have not changed.
+Status, 2026-10-16: **isolated RTL derivative implemented; native cache/AXI,
+directed whole-core and private-reference functional checks pass. Canonical
+`make verify` remains FAIL. No timing, standard-suite or FPGA acceptance.**
+The production checkout and deployed bitstream have not changed.
 
 This follows the rejected [qualified-credit experiment](QUALIFIED_PAIR_CREDIT.md):
 35.295779 MHz synthesized/unplaced versus its RAW/input parent's 35.374438 MHz.
@@ -84,16 +85,76 @@ Candidate master SHA-256:
 Candidate wrapper SHA-256:
 `f1c73668e97cf3f80654fbd7365db6559dcc14c506c3b9e3bf3885e833795be5`.
 
+## Whole-core evidence
+
+The guarded, 32-job build completed in **20.358 seconds**, after
+[closed-cache cleanup](../../docs/SCRATCH_CACHE_RETENTION_2026-10-16.md)
+recovered **4.56 GiB** and restored the **10 GiB admission reserve**. The
+resource floor was not reduced. No Chrome process was running when checked;
+none was killed. No Vivado job was launched for this experiment.
+
+`build_parallel_write_core.py` preserves all **195 source files / 153 defines**
+from the frozen RAW/input parent except the two specified memory files. The
+private C++ harness has its own basename, local object and a dependency file
+pointing to this model's generated root header; it does not reuse a foreign
+model-dependent object. This is not a build of the dirty production checkout.
+
+| Identity | SHA-256 |
+|---|---|
+| RAW/input parent executable | `41f99bcff8125a2caa7fe768f03f242bed1a43323e4d3a190109167248a34e9b` |
+| Parallel-admission executable | `6cacb95c1f32fb83b87bb99b6ac7a9dec72a8b8a228035d1234f1cfd76f51b22` |
+| Core audit receipt | `4924403b3528e8f88c790d1d29eaebf7cb3db824c02e074b27e9f061b079760f` |
+| Private-reference functional audit receipt | `22575d565a5bfc975ce24a3242f4a4d4617bec464bda2e5353a33f6cd9f47751` |
+
+Artifacts under the same evidence root: `parallel-write-core-r1`,
+`parallel-write-system-r1`, `parallel-write-func-r1`, and
+`parallel-write-core-audit-r1.json`. The functional audit is
+`parallel-write-func-r1/audit.json`.
+
+| Check | Result and limits |
+|---|---|
+| Cold system execution | **180 executions / 90 complete parent-candidate trace matches**, 24.628 seconds; AXI latencies 0/7/31, functional and cycle modes |
+| System differential | Fresh pinned system-QEMU comparisons pass for all 15 fixtures; 47,886 candidate records, **5,349 V retirements** in cycle-mode runs |
+| Private user-mode reference | **108/108 functional PASS**, 105.520 seconds; 80,800 complete records, **30,132 V retirements** |
+| Fully unmasked private comparisons | 105 pass; `tx_regform`, `tx_regform2`, `tx_stack` still need their existing manifest-scoped x87 stack masks |
+| Canonical `make verify` | **FAIL**, native make exit 2 / controller exit 1, 384.748 seconds; **7 functional PASS / 101 FAIL; 10 cycle PASS / 9 FAIL / 1 INFO** |
+| Canonical cycle regression check | All **20 complete parsed cycle streams exactly match** the RAW/input parent; no changed clocks, pipe or pair fields |
+| Host recipe/build tests | **10 pass** (eight recipe and two build checks); an initial invocation omitted the required parent-source environment variable and failed setup, then the correctly configured invocation passed |
+
+The system fixtures are `pseg`, `ppage`, `pfault`, `pintr`, `pcpl`, `ptask`,
+`pv86`, `pxc04`, `pxfrag`, `pxwalkd`, `pcgparam`, `pretfoutpg`, `piopermwrap`,
+`pjmpgate`, and `pxfer`. They are directed cold tests, not Win95 or Quake.
+Native execution uses UV + fast-pipe, `cycle_mode=1`, the actual AXI backend,
+observed CPU affinity, and no STEP, snapshot, guest patch or pairing-disabled
+control. All model/source pins remain unchanged and the system/private-reference
+owners report no OOM events. The independent auditors recheck terminal owners,
+native child exits, complete traces, private harness dependencies and input pins.
+
+The private reference is the separately qualified executable `998b4f5d…`;
+see [its qualification and limits](../qemu-trace/QUALIFIED_PROFILE.md). It does
+not silently replace the default QEMU or turn the canonical failure into a
+pass. Default-reference failures include missing terminal post-state and x87
+status differences; the cycle bands remain unchanged. The same pass/fail
+counts were previously observed on the qualified-credit model. This alone is
+not a proof that every failed functional record is identical: separately
+generated user-mode runs import different initial stack addresses from QEMU.
+No trace normalization, comparison-mask change or timing-band relaxation was
+used to establish the results above.
+
+| Owner suffix (`ventium-parallel-write-…-oct16-r1.service`) | Invocation | Native terminal result |
+|---|---|---|
+| core | `1535db71879742e28860c8c54a2f2103` | exit 0 |
+| system | `b969fac24eeb4fc6b7da63dc8be20bf3` | exit 0 |
+| func | `6815d4757c9a4c6c91dd10af97ee7689` | exit 0 |
+| verify | `0e7208d17c37412a86fd165d87e01e33` | exit 1; underlying make exit 2 |
+
 ## Remaining gates
 
-1. Recover safe scratch capacity before another whole-core build. External
-   storage has about **5.8 GiB free**. Do not lower admission floors or delete
-   source/media/accepted binaries to force a launch. About 1.68 GB of compiler
-   archives here include substantial regenerable PCH caches; **none were
-   removed in this round**.
-2. Build the exact RAW-parent whole-core derivative with private harness
-   dependency checks; run UV + fast-pipe architectural A/B and differential
-   gates. Native cache passes do not substitute for those gates.
+1. Resolve the outstanding differential/reference and cycle-band qualification
+   issues without weakening comparisons. Passing directed A/B and the private
+   reference does not make canonical `make verify` green.
+2. Build and audit the corresponding full-PC/FPGA source closure. Preserve
+   source/media/accepted binaries and admission floors for all new work.
 3. Measure matched synthesis timing and verify that the kept cuts remove late
    request controls from admission arithmetic. Do not infer fmax from source
    structure or route another below-target result.
