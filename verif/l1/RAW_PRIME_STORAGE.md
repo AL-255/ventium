@@ -296,6 +296,28 @@ contract with actual AXI request/response timing; do not simply widen bands
 or discard startup. The full-PC DDR model's first-beat/gap settings and physical
 board latency are separate measurements, not this stress model's parameters.
 
+## Next cold Win95 run prepared, not launched
+
+[`prepare_raw_prime_storage_win95.py`](../../fpga/prepare_raw_prime_storage_win95.py)
+now prepares the established cold Win95 controller for PC model `e9159acb…`.
+All **68,320 source pins** are rechecked. The native command, pristine guest,
+ROMs, clocks, memory model, reset, capture and shutdown behavior are unchanged.
+Five host tests verify exact command/environment equality, retained resource
+guards, template-drift rejection and stale-model rejection. The preparation
+unit `ventium-raw-prime-storage-win95-prepare-oct16-r1.service` closes exit0 /
+MainPID0 in 31 seconds, invocation `11ead01e99cd45a395a71e0a12d79b9c`.
+Receipt: `raw-prime-storage-win95-prepared.json`.
+
+No Win95 simulator is launched. The run retains CPU10, 2 GiB RAM / no swap,
+160 tasks, the 8 GiB disk-admission threshold and 4 GiB live stop reserve;
+available disk space is still below admission. Its controller cannot award a
+desktop PASS. Before acceptance, bind the actual new service/model and
+`coremark-ui-disabled-r1/audit.json` in an independently reviewed admission and
+closed-result checker: the old schema's service-name/CoreMark-path contract
+does not yet cover this composition. The prepared run is **boot-only**;
+interactive keyboard/mouse and physical-board validation remain separate,
+unfulfilled requirements. No snapshot, guest patch or UI-input bypass is used.
+
 Latest verified gameplay baseline is **0.50229051 total U+V IPC**, model
 `b6b92dbfde2c6148fde30b5c65cac8217f650f7bbc1a7d4c0bd58fe95f706c9e`, cycles
 **1,400,065,247–1,500,065,247**. This is 38,787,572 U plus 11,441,479 V
