@@ -89,8 +89,46 @@ New directed CPU model:
 `e6194aa6b3f98cb7ef4cdb955377989ac45c441bde843021b535358c61e16993`.
 The unchanged canonical gate completed within its 600-second native timeout
 and remains red; neither directed passes nor parent-identical cycles waive it.
-Fresh functional, broader faults/ordering, full-PC/source-transfer and timing
-qualification remain required. No new Vivado process has been launched.
+Fresh functional, broader faults/ordering and timing qualification remain
+required. No new Vivado process has been launched.
+
+## Full-PC and FPGA transfer
+
+`fpga/build_backing_direction_soc.py` built `backing-direction-soc-r1` in
+**22.944 s**, native exit 0, owner `d6448d56645a4ca5b4366bc8a69b9b3e`.
+Its **102 common processor sources** exactly match directed model `e6194aa6…`;
+only `rtl/mem/ven_l1d.sv` differs from V-result/AUX PC `b6b92dbf…`. All 157
+definitions, peripherals and posted-16 backend remain unchanged. The private
+host object was compiled locally against its own generated header. The build
+retains **98 inherited structural warnings**, not a full-SoC lint pass.
+Guarded compilation used 32 jobs; its journal reports a 3.1 GiB peak.
+
+New PC binary:
+`810840218013b9e8ec8f3fbc1f0f39da8dbdcbd8b9c09021ba03ea27036014bd`.
+`backing-direction-fpga-r1` audits **170 common compiled HDL inputs**, retaining
+all 192 payloads and the corrected posted-DDR mouse wrapper. Exactly one FPGA
+payload changes; no clock, define, geometry or flow changes. Export manifest:
+`a241b7f819886adc58ca2fb1e2b3697222f0232754911a814e66a4c061af28a5`.
+Posted and non-posted preprocessing both retain the mouse devices; this is not
+full-wrapper simulation or physical UI acceptance.
+
+Strict CPU-hierarchy lint passed under all **159 hardware defines** in 3.879 s,
+owner `615624b59e564afc87ab18c297cff5f8`, with the original structural-error
+policy. Twelve transfer/export/controller tests pass, including negative source,
+profile, pairing-evidence and resource-guard tests. The prepared CAD controllers
+preserve the exclusive owner, 8 GiB RAM cap, admission/stop reserves, timeouts
+and termination/reaping logic. Comparison is against the **corrected-wrapper
+34.652436 MHz unplaced parent**, isolating this one RTL delta. They do not route
+or deploy a bitstream. Short cold CoreMark controls are pending; neither those
+controls nor CPU lint qualify the standard suite.
+
+Cleanup recovered 924 MiB without removing a native binary or pinned input:
+six unreferenced closed-build PCH caches are rebuildable; eight closed raw
+timing reports are losslessly retained in `latest-clock-cones-oct16.tar.zst`.
+Every archived member was SHA-256 verified by readback before removing the raw
+copy. Exact paths/hashes and restoration instructions are in the adjacent
+`latest-clock-cones-oct16-closed.json`; cache removals are recorded in
+`backing-direction-pch-prune-oct16.json`. No live Quake source or media changed.
 
 There is **no measured fmax or IPC gain** for this experiment. Its gameplay IPC
 is unmeasured, as is the separately running V-result cold-Quake model
