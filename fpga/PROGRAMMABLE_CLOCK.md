@@ -171,6 +171,18 @@ overwritten. Host evidence will be retained in `coremark-pll-board-r1`.
    failure. Retain failed results; do not bypass an interlock or use slow/U-only
    execution to manufacture a pass.
 
+Repeated cold boots do not require PCAP to invalidate the cache path. In the
+frozen source, the management reset drives `soc_reset = rst | ~core_reset_n |
+dbg_frozen`, then `system.reset` and the ao486 L2's `RESET`. Its reset edge starts
+a complete tag/LRU initialization walk, and `CPU_BUSY` blocks requests through
+both reset stages and `START`. Thus the five-second held-reset clock measurement
+also leaves ample time for that walk before the daemon rewrites guest RAM.
+The posted-DDR transport deliberately survives guest reset: software and the
+PLL interlock require its actual completion/drain, not cancellation. Debug
+retirement counters also survive, and each trial subtracts its own baseline.
+This is a source-level reset-path check, not a substitute for passing both
+physical seeds repeatedly on the new image.
+
 CoreMark clock qualification is not standard-suite acceptance. Physical Win95
 cold boot + interaction and a full Quake timedemo remain separate requirements
 before claiming general FPGA acceptance of this new image.
