@@ -48,6 +48,15 @@ processes reaped; an active/exited retained unit must first be closed normally.
 launcher_invocation_path pins the actual command spelling; a directory-symlink
 alias is allowed only when it resolves to the canonical pinned launcher.
 
+Schema 6 is board-posted16-40mhz-retained-input160: schema 5's exact native
+command/resources and closure requirements, under ventium-raw-prime-storage-
+win95-*. It requires coremark-ui-disabled-r1/audit.json plus explicit
+fpga_manifest_path/sha256 and input_audit_path/sha256, also present in the
+native frozen pin map. Their model identities must agree with this run.
+Complete in-run VEN-PERF observations must show actual V retirements and
+consistent cumulative U+V counters; build defines alone are not enough.
+These preparation controls do not supply desktop, UI or FPGA acceptance.
+
 Visual schema 1: kind=WIN95_MANUAL_DESKTOP_REVIEW, authority=manual,
 reviewer, reviewed_unix, run_directory, unit, invocation_id, model_sha256,
 desktop=true, error_free=true, review_basis=closed_raw_frames, and raw_frames
@@ -218,7 +227,7 @@ def resource_receipt(value, expected):
                       'KillMode': 'control-group', 'MainPID': str(expected['owner_pid']), 'RuntimeMaxUSec': '3d 1h'},
             'wrong direct supervisor resource owner')
     require(limits['memory.max'] == str(2 * 1024**3) and limits['memory.swap.max'] == '0' and
-            limits['pids.max'] == ('160' if expected['schema'] == 5 else
+            limits['pids.max'] == ('160' if expected['schema'] in (5, 6) else
                                    '128' if expected['schema'] == 4 else '32') and
             limits['cgroup.procs'].split() == [str(expected['owner_pid'])],
             'wrong memory/swap/tasks/owner-only closure census')
@@ -275,18 +284,18 @@ def launcher_roles(run, expected, worker):
     requirement or execute the configuration to decide whether it is trusted.
     """
     launcher = absolute(expected['launcher_path'])
-    names = ('run_win95_full_cold.py',) if expected['schema'] == 5 else (
+    names = ('run_win95_full_cold.py',) if expected['schema'] in (5, 6) else (
         'run_win95_cold.py', 'run_win95_vga_cold.py')
     require(launcher.name in names,
             'unknown reviewed parent launcher')
     roles = {str(launcher): expected['launcher_sha256'],
              str(run / 'observed-launcher.py'): expected['launcher_sha256']}
     invocation = launcher
-    if expected['schema'] == 5:
+    if expected['schema'] in (5, 6):
         invocation = absolute(expected['launcher_invocation_path'])
         require(not invocation.is_symlink() and invocation.resolve(strict=True) == launcher,
                 'invocation alias does not resolve to the pinned launcher')
-    if expected['schema'] in (1, 3, 4, 5):
+    if expected['schema'] in (1, 3, 4, 5, 6):
         require('configured_launcher' not in expected and launcher.parent == run.parent and
                 worker['argv'] in (['/usr/bin/python3', str(invocation), str(run)],
                                    ['/usr/bin/python3', '-B', str(invocation), str(run)]),
@@ -311,20 +320,66 @@ def add_roles(roles, entries):
         roles[path] = digest
 
 
+def retained_input_roles(files, run, expected, roles):
+    """Bind reviewed preparation to this model, not an older successful run."""
+    for kind in ('fpga_manifest', 'input_audit'):
+        path = absolute(expected[kind + '_path'])
+        digest = expected[kind + '_sha256']
+        require(type(digest) is str and SHA.fullmatch(digest), 'invalid lineage digest')
+        add_roles(roles, [(str(path), digest)])
+        require(hashlib.sha256(files.read(path, limit=LOG_LIMIT)).hexdigest() == digest,
+                'retained-input lineage changed')
+    manifest = files.json(expected['fpga_manifest_path'], limit=LOG_LIMIT)
+    require(manifest['processor_platform_simulator_sha256'] == expected['model_sha256'] and
+            manifest['core_mhz'] == 40 and manifest['write_slots'] == 16 and
+            manifest['l2_sets'] == 1024 and
+            {'VEN_FE_PIPE', 'VEN_SYS_FASTPATH', 'VEN_SYS_FASTPATH_RELOC',
+             'VEN_SYS_FASTLOAD_BOUNDED', 'VEN_SYS_FASTSTORE_FLAT'} <= set(manifest['hardware_defines']),
+            'wrong source-sealed processor/profile')
+    for path in (absolute(expected['input_audit_path']),
+                 run.parent / 'coremark-ui-disabled-r1/audit.json'):
+        audit = files.json(path, limit=LOG_LIMIT)
+        require(audit['passed'] is True and audit['model'] == expected['model_sha256'],
+                'input/CoreMark control is failed or from another model')
+
+
+def paired_execution(data, counters):
+    pattern = rb'\[VEN-PERF\] cycle=(\d+) retires=(\d+) clocks=(\d+) u=(\d+) v=(\d+) [^\n]*\n'
+    rows = list(re.finditer(pattern, data))
+    require(rows and len(rows) == data.count(b'[VEN-PERF]'), 'missing/incomplete pairing observations')
+    reset_end, done_begin = data.index(b'>>> ventium-soc: reset released;'), data.index(b'>>> done:')
+    previous = (0, 0, 0, 0, 0)
+    for row in rows:
+        cycle, retired, clocks, u, v = values = tuple(map(int, row.groups()))
+        require(reset_end < row.start() < row.end() <= done_begin and
+                previous[0] < cycle <= counters['final_cycle'] and
+                0 < clocks <= cycle and 0 <= v <= u <= clocks and retired == u+v and
+                retired <= counters['final_retires'] and
+                all(a <= b < (1 << 64) for a, b in zip(previous[1:], values[1:])),
+                'inconsistent/regressing/out-of-run paired counters')
+        previous = values
+    require(previous[4] > 0, 'no actual V retirement evidence')
+    return dict(samples=len(rows), last_cycle=previous[0], u_retirements=previous[3],
+                v_retirements=previous[4], total_u_plus_v=previous[1], gameplay_measurement=False)
+
+
 def check(run, expected, visual, *, supervisor=None):
     run, files = absolute(str(run)), Files()
     require(run.resolve(strict=True) == run and re.fullmatch(r'win95-cold-[A-Za-z0-9_.-]+', run.name), 'wrong owned run leaf')
-    require(integer(expected['schema']) and expected['schema'] in (1, 2, 3, 4, 5), 'unknown expectation schema')
-    repair = expected['schema'] == 5
-    parentpolicy = expected['schema'] in (4, 5)
-    posted = expected['schema'] in (3, 4, 5)
-    profile = ('board-posted16-40mhz-parentpolicy160' if repair else
+    require(integer(expected['schema']) and expected['schema'] in (1, 2, 3, 4, 5, 6), 'unknown expectation schema')
+    retained = expected['schema'] == 6
+    repair = expected['schema'] in (5, 6)
+    parentpolicy = expected['schema'] in (4, 5, 6)
+    posted = expected['schema'] in (3, 4, 5, 6)
+    profile = ('board-posted16-40mhz-retained-input160' if retained else
+               'board-posted16-40mhz-parentpolicy160' if repair else
                'board-posted16-40mhz-parentpolicy' if parentpolicy else
                'board-posted16-40mhz' if posted else None)
     metadata_limit = PARENTPOLICY_JSON_LIMIT if parentpolicy else JSON_LIMIT
     require(expected.get('profile') == profile,
             'unknown or misplaced reviewed profile')
-    unit_pattern = (r'ventium-fp-repair-win95-[A-Za-z0-9_.-]+\.service' if repair else
+    unit_pattern = (r'ventium-raw-prime-storage-win95-[A-Za-z0-9_.-]+\.service' if retained else
+                    r'ventium-fp-repair-win95-[A-Za-z0-9_.-]+\.service' if repair else
                     r'ventium-board-posted16-win95-[A-Za-z0-9_.-]+\.service' if posted else
                     r'ventium-standard-win95-[A-Za-z0-9_.-]+\.service')
     require(expected['kind'] == 'WIN95_STANDARD_EXPECTATION' and
@@ -400,7 +455,10 @@ def check(run, expected, visual, *, supervisor=None):
                     'prepared.json', 'build1-speed-q16-started.json', 'build1-speed-q16-closed.json',
                     'obj1-speed-q16/Vsystem__verFiles.dat', 'defines.txt') if posted else (
                         'Vsystem__verFiles.dat', 'compile-inputs.before.sha256', 'build-output.sha256')
-    if repair:
+    if retained:
+        build_inputs += ('prepared.json', 'coremark-ui-disabled-r1/audit.json')
+        retained_input_roles(files, run, expected, roles)
+    elif repair:
         build_inputs += ('prepared.json', 'coremark/audit.json')
     require(all(pins.get(path) == digest for path, digest in roles.items()) and
             all(str(run.parent / name) in pins for name in build_inputs) and
@@ -422,6 +480,7 @@ def check(run, expected, visual, *, supervisor=None):
     require(files.read(stop) == b'', 'nonstandard owned empty stop request')
     counters = closed_log(log, stop)
     require(result['closed_engine_log'] == counters, 'closed footer/progress counters disagree')
+    paired = paired_execution(log, counters) if retained else None
     inventory, frames = result['closed_frame_inventory'], {}
     require(type(inventory) is list and inventory, 'no closed raw frame inventory')
     for frame in inventory:
@@ -457,12 +516,15 @@ def check(run, expected, visual, *, supervisor=None):
     launcher_roles(run, expected, before['worker'])  # Recheck any invocation-directory alias.
     processes_absent(expected)
     supervisor_closed(query_supervisor(expected['unit']) if supervisor is None else supervisor, expected)
-    return {'schema': 1, 'status': 'PASS', 'scope': 'Win95 cold boot to desktop only', 'suite_acceptance': False,
+    verdict = {'schema': 1, 'status': 'PASS', 'scope': 'Win95 cold boot to desktop only', 'suite_acceptance': False,
             'unit': expected['unit'], 'invocation_id': expected['invocation_id'], 'candidate_sha256': expected['model_sha256'],
             'profile': profile if posted else 'standard45',
             'closed_engine_log': counters, 'manual_desktop_frames': witnesses, 'closed_private_disk_sha256': disk_digest,
             'limitations': ['Desktop recognition is externally pinned manual authority, not automated recognition.',
                             'Exact loaded helper bytes; launcher source observed before/after, not loaded-memory ancestry.']}
+    if retained:
+        verdict['paired_execution'] = paired
+    return verdict
 
 
 def main():
@@ -483,7 +545,7 @@ def main():
                     'external expectation/manual-review digest missing or changed')
         expected = files.json(args.expect, limit=PARENTPOLICY_JSON_LIMIT)
         require(type(expected) is dict, 'expectation must be a JSON object')
-        require(expected.get('schema') in (4, 5) or files.observed[str(args.expect.absolute())][0][2] <= JSON_LIMIT,
+        require(expected.get('schema') in (4, 5, 6) or files.observed[str(args.expect.absolute())][0][2] <= JSON_LIMIT,
                 'legacy expectation exceeds its original metadata limit')
         supervisor = None
         if args.supervisor_closure is not None:

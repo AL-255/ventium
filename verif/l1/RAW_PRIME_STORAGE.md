@@ -311,12 +311,27 @@ Receipt: `raw-prime-storage-win95-prepared.json`.
 No Win95 simulator is launched. The run retains CPU10, 2 GiB RAM / no swap,
 160 tasks, the 8 GiB disk-admission threshold and 4 GiB live stop reserve;
 available disk space is still below admission. Its controller cannot award a
-desktop PASS. Before acceptance, bind the actual new service/model and
-`coremark-ui-disabled-r1/audit.json` in an independently reviewed admission and
-closed-result checker: the old schema's service-name/CoreMark-path contract
-does not yet cover this composition. The prepared run is **boot-only**;
+desktop PASS. The prepared run is **boot-only**;
 interactive keyboard/mouse and physical-board validation remain separate,
 unfulfilled requirements. No snapshot, guest patch or UI-input bypass is used.
+
+The closed-result checker now has a separate schema 6 profile,
+`board-posted16-40mhz-retained-input160`. It preserves the previous exact native
+command, resource limits, cold-reset, process closure, immutable-file and manual
+raw-frame review checks. It additionally binds the sealed FPGA manifest,
+retained-input audit and `coremark-ui-disabled-r1/audit.json` to this exact PC
+model. Complete native `VEN-PERF` records must show actual V retirements and
+consistent, monotonic total U+V counters; these are boot-execution evidence,
+not a gameplay IPC measurement. All **51 host checker tests pass**, including
+stale/rehashed lineage, missing pairing, bad counters, legacy-profile borrowing,
+resource changes, incomplete closure, snapshots and invalid visual evidence.
+
+[`freeze_raw_prime_storage_win95_expectation.py`](../../fpga/freeze_raw_prime_storage_win95_expectation.py)
+retains the prior live `/proc`, service-invocation, native argv, affinity,
+cgroup, ROM/disk and source checks, with three passing host tests. It requires
+the actual new invocation at launch and cannot launch a guest or manufacture a
+desktop review. **No live admission or Win95 PASS exists yet.** The short
+CoreMark/input controls are preparation evidence, not standard-suite acceptance.
 
 Latest verified gameplay baseline is **0.50229051 total U+V IPC**, model
 `b6b92dbfde2c6148fde30b5c65cac8217f650f7bbc1a7d4c0bd58fe95f706c9e`, cycles

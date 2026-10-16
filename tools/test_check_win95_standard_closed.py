@@ -469,6 +469,122 @@ class ClosedWin95Tests(unittest.TestCase):
             self.before['cgroup_files']['pids.max'] = limit
             self.persist(); self.reject()
 
+    def configure_retained_input(self):
+        self.configure_repair()
+        old_unit = self.unit
+        self.unit = 'ventium-raw-prime-storage-win95-hostcontract.service'
+        for name in ('expect', 'before', 'final', 'admission', 'result', 'visual', 'supervisor'):
+            setattr(self, name, json.loads(json.dumps(getattr(self, name)).replace(old_unit, self.unit)))
+        self.group = self.group.replace(old_unit, self.unit)
+        self.expect.update(schema=6, profile='board-posted16-40mhz-retained-input160')
+        model = self.expect['model_sha256']
+        data = {
+            'lineage/fpga/input-manifest.json': dict(processor_platform_simulator_sha256=model,
+                core_mhz=40, write_slots=16, l2_sets=1024, hardware_defines=[
+                    'VEN_FE_PIPE', 'VEN_SYS_FASTPATH', 'VEN_SYS_FASTPATH_RELOC',
+                    'VEN_SYS_FASTLOAD_BOUNDED', 'VEN_SYS_FASTSTORE_FLAT']),
+            'lineage/input/audit.json': dict(passed=True, model=model),
+            'coremark-ui-disabled-r1/audit.json': dict(passed=True, model=model),
+        }
+        pins = self.expect['pins']
+        for name, value in data.items():
+            path = self.build / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            self.write(path, value)
+            pins[str(path)] = sha(path)
+        for role, name in (('fpga_manifest', 'lineage/fpga/input-manifest.json'),
+                           ('input_audit', 'lineage/input/audit.json')):
+            path = self.build / name
+            self.expect[role+'_path'] = str(path)
+            self.expect[role+'_sha256'] = sha(path)
+        self.before['input_sha256_before'] = self.result['input_sha256_after'] = pins
+        self.log = self.log.replace(b'[HOST-STOP]',
+            b'[VEN-PERF] cycle=500000 retires=40000 clocks=499637 u=30000 v=10000 state=synthetic\n[HOST-STOP]')
+        self.persist()
+
+    def test_retained_input_preserves_full_negative_acceptance_matrix(self):
+        self.configure_retained_input()
+        self.assertEqual(self.qualify()['profile'], 'board-posted16-40mhz-retained-input160')
+        for negative in (self.test_supervisor_negative_matrix_precedes_runtime_reads,
+                         self.test_present_owner_native_or_recursive_group_fails,
+                         self.test_native_actual_wait_and_negative_results,
+                         self.test_lossy_capture_negative_matrix,
+                         self.test_logs_truncated_capped_regressed_or_snapshot_are_rejected,
+                         self.test_manual_desktop_negative_matrix):
+            negative()
+            self.persist()
+            self.assertEqual(self.qualify()['status'], 'PASS')
+
+    def test_retained_input_requires_new_pins_not_legacy_audits(self):
+        self.configure_retained_input()
+        pins = self.expect['pins']
+        for path in (self.expect['fpga_manifest_path'], self.expect['input_audit_path'],
+                     str(self.build/'coremark-ui-disabled-r1/audit.json')):
+            with self.subTest(path=path):
+                old = pins.pop(path)
+                self.persist(); self.reject()
+                pins[path] = old
+        self.persist()
+        self.assertEqual(self.qualify()['status'], 'PASS')
+
+    def test_retained_input_requires_actual_pairing_with_consistent_counters(self):
+        self.configure_retained_input()
+        original = self.log
+        for old, new in ((b'v=10000', b'v=0'), (b'u=30000 v=10000', b'u=40000 v=0'),
+                         (b'retires=40000 clocks=', b'retires=40001 clocks='),
+                         (b'clocks=499637', b'clocks=500001'),
+                         (b'[VEN-PERF]', b'[NO-PERF]')):
+            with self.subTest(new=new):
+                self.log = original.replace(old, new)
+                self.persist(); self.reject()
+        self.log = original
+        self.persist()
+        value = self.qualify()['paired_execution']
+        self.assertEqual((value['u_retirements'], value['v_retirements'], value['total_u_plus_v']),
+                         (30000, 10000, 40000))
+        self.assertFalse(value['gameplay_measurement'])
+
+    def test_retained_input_rejects_rehashed_wrong_model_and_profile(self):
+        self.configure_retained_input()
+        for role, changes in (
+            ('fpga_manifest', ({'processor_platform_simulator_sha256': 'b'*64},
+                               {'core_mhz': 45}, {'write_slots': 8}, {'l2_sets': 512},
+                               {'hardware_defines': ['VEN_SYS_FASTPATH']})),
+            ('input_audit', ({'model': 'b'*64}, {'passed': False}, {'passed': 1})),
+            ('coremark', ({'model': 'b'*64}, {'passed': False}, {'passed': 1})),
+        ):
+            path = Path(self.expect[role+'_path']) if role != 'coremark' else self.build/'coremark-ui-disabled-r1/audit.json'
+            original = json.loads(path.read_text())
+            def repin(value):
+                self.write(path, value)
+                self.expect['pins'][str(path)] = sha(path)
+                if role != 'coremark': self.expect[role+'_sha256'] = sha(path)
+                self.persist()
+            for change in changes:
+                with self.subTest(role=role, change=change):
+                    repin(original | change)
+                    self.reject()
+            repin(original)
+        self.assertEqual(self.qualify()['status'], 'PASS')
+
+    def test_retained_input_cannot_borrow_legacy_schema_or_resources(self):
+        self.configure_retained_input()
+        original = copy.deepcopy(self.expect)
+        for change in ({'schema': 5}, {'schema': 4}, {'schema': True},
+                       {'profile': 'board-posted16-40mhz-parentpolicy160'},
+                       {'input_audit_path': self.expect['fpga_manifest_path'],
+                        'input_audit_sha256': self.expect['fpga_manifest_sha256']}):
+            self.expect = dict(copy.deepcopy(original), **change)
+            self.reject()
+        self.expect = original
+        self.before['input_sha256_before'] = self.result['input_sha256_after'] = self.expect['pins']
+        for limit in ('128', '159', '161', 'max'):
+            self.before['cgroup_files']['pids.max'] = limit
+            self.persist(); self.reject()
+        self.before['cgroup_files']['pids.max'] = '160'
+        self.persist()
+        self.assertEqual(self.qualify()['status'], 'PASS')
+
     def test_legacy_cli_does_not_inherit_parentpolicy_metadata_limit(self):
         self.expect['diagnostic_padding'] = ' ' * gate.JSON_LIMIT
         expectation = self.build / 'expect-large.json'
