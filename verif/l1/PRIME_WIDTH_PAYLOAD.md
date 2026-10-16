@@ -234,6 +234,37 @@ No candidate frequency or LUT result exists yet, and 40 MHz routed sign-off
 remains unproven. The later keyboard/UI-controller composition is deliberately
 not silently included in this isolated timing comparison.
 
+## Retained-input composition — prepared, compiler waiting
+
+[`build_prime_width_ui_soc.py`](../../fpga/build_prime_width_ui_soc.py) prepares
+`prime-width-ui-soc-r1` with **66,947 checked input pins**. Its CPU parent is
+`cabf2f1198f476de7ec64fd18e179e6a1c2f57dc9ceeee6883a7f14ee3f9096d`;
+the qualified input parent is
+`0e25af3b6831e0acc44a0f0faba224f66316be2a499127165a66534893983779`.
+The only platform RTL change is the retained-input `ps2.v` controller
+(`9c9d62149a25a5e3f97683ca269b77d01dcf4034517c02a225a5bce0bd2dc405`).
+No processor RTL or build definitions change. The exact tested keyboard host,
+headers and `kb_fifo_rdreq` binding are carried into a fresh private host name.
+Preparation rechecks the parent short-CRC controls and the closed input,
+controller-inhibit and FIFO-pressure evidence; no objects or guest runs are copied.
+
+The [build waiter](../../fpga/run_prime_width_ui_build.py), unit
+`ventium-prime-width-ui-build-oct16-r1.service`, invocation
+`56afca61fa39452abee6c4c9a50487ca`, is tied to the exact synthesis and timing
+sequence above. It cannot compile until both native phases close successfully
+and their independent audits pass. It retains the exclusive 32-job compiler
+guard, Verilator 5.046 probe and 5 GiB disk admission floor. Owner replacement,
+failure or deadline prevents the build; no CAD retry, guest run or deployment
+is launched. Five host tests pass, including rejection of wrong/failed owners.
+
+This is **prepared source, not a built or accepted model**. Successful CAD
+closure does not imply a frequency improvement. After compilation, the new
+model still needs the unchanged cold keyboard guest and input-disabled CRC
+controls. The separate [physical keyboard injector repair](../../fpga/KBD_INHIBIT.md)
+is not part of this PC host model or the running timing export. Final hardware
+must compose that endpoint with the controller and posted-mouse wrapper and
+pass full Win95 keyboard/mouse and Quake acceptance on the board.
+
 ## Identities and gameplay baseline
 
 - Parent core model: `e604895eeb367591b16a564d4b91b282a30a6c65b3bee5c7f81823c5e48ae56a`.
@@ -242,11 +273,15 @@ not silently included in this isolated timing comparison.
 - Candidate header: `2871ad8a6739d4c88c1296d843d5de8e285603d876289b638cc8c5ee47ecec73`.
 - Qualified private reference: `998b4f5d3eda4493f391ea6775adcc88f3dd810ba2829f7d635cac27877f9b85`.
 
-Latest verified gameplay is **0.51045343 total U+V IPC**, cycles
-**1,200,065,247–1,300,065,247**, on model
+Latest verified gameplay is **0.50229051 total U+V IPC**, cycles
+**1,400,065,247–1,500,065,247**, on model
 `b6b92dbfde2c6148fde30b5c65cac8217f650f7bbc1a7d4c0bd58fe95f706c9e`:
-39,242,072 U and 11,803,271 V retirements / 100 million clocks. U-only IPC is
-0.39242072. This predates the boundary, input and prime-width candidates.
+38,787,572 U and 11,441,479 V retirements / 100 million clocks. U-only IPC is
+0.38787572. The independent observation audit checks 18,622 source/runtime
+pins, the original cold UV-fast run and unchanged raw pixels in frames 9/10;
+both frames were visually reviewed as gameplay. Evidence is
+`v-result-carry-gameplay-window-1400-1500M-oct16-r1.json` under the evidence root.
+This predates the boundary, input and prime-width candidates.
 The current candidate has **no gameplay IPC measurement**. Different scene
 windows do not establish an incremental fix gain, and neither that window nor
 these directed tests establish timedemo completion.
