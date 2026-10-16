@@ -77,9 +77,14 @@ The inherited `--mouse` device remains unchanged and is **not** qualified by
 these keyboard checks. Do not launch another long Win95 run or count this as
 standard-suite/physical-FPGA acceptance until the input path is qualified.
 
-No IPC gain is claimed. The current candidate is gameplay-unmeasured; the
-older verified baseline remains **0.50520554 total U+V** on model `c7b95b78…`,
-cycles **5,600,065,237–5,700,065,237**.
+The retained-controller adapter now has native controller microtests and a
+prepared private whole-PC build plus cold keyboard probe. The probe's pinned
+QEMU positive/negative controls pass; its Ventium whole-PC execution is still
+pending. See [current integration evidence](LOSS_AUX_IOBUS.md#cold-whole-pc-integration-probe).
+
+No IPC gain is claimed. The current candidates are gameplay-unmeasured; the
+latest verified older baseline is **0.48146083 total U+V** on model `7e877b3b…`,
+cycles **1,100,065,247–1,200,065,247**. This does not establish timedemo completion.
 
 The pure-host test checks bounded command parsing, scancodes/parity, endpoint
 identity, byte/prefix ownership and checked raw-capture finalization. The narrow

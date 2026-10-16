@@ -146,6 +146,61 @@ Both owners closed with MainPID 0. The RTL owner's 14,237,696-byte peak is
 microtests, not full-PC, gameplay, Win95 or physical-FPGA acceptance. No live
 Quake source, CAD export or production controller RTL was changed.
 
+## Cold whole-PC integration probe
+
+`fpga/build_retained_ui_soc.py` prepares an isolated derivative of V-result
+PC `b6b92dbf…`: the combined controller above and an explicitly selected
+`pc_keyboard_retained.h` host binding. All processor sources and all 157
+defines are unchanged. It does not change the active timing experiment or
+either cold Quake run. Three preparation tests verify this source boundary,
+unchanged clock/evaluation calls and unchanged raw-pixel conversion.
+
+The first queued build (`retained-ui-soc-r1`, invocation
+`acf578b5604a4bd0b9da1ce53381332b`) was cancelled **before compilation** because
+Vivado owns the shared heavyweight build lock. Its only native log is the
+lock-wait message; all three queue-process identities are gone, input hashes
+hold, and `queue-cancelled.json` records the outcome. This is neither a compile
+pass nor a compile failure. `retained-ui-soc-r2` is prepared for a fresh build
+after synthesis releases the lock; no competing compiler was started.
+
+`pc_input_probe.S` is a new generic diagnostic guest, not a modified Windows
+or Quake image. An ordinary BIOS boot enters protected mode, configures the
+real 8042, then checks every port-60 byte for Ctrl+Esc and Enter. It has separate
+raw and translated modes, rejects AUX/error status, and publishes readiness
+and pass/fail text through VGA and the reference diagnostic port. There is no
+snapshot, CPU/register/memory injection or application-specific handling.
+
+`build_pc_input_probe.py` builds two one-sector payloads in 8 MiB boot disks.
+`run_pc_input_probe_qemu.py` executes the pinned references' QEMU 8.2.2 with
+`-cpu pentium` and real QMP keyboard events. Both positive modes pass; replacing
+Esc with Tab produces the required guest failure. Native exits are **33, 33,
+35** (the diagnostic exit device's success/success/failure codes), respectively.
+All children were waited/reaped, source/ROM/media hashes hold, and OOM counters
+are zero. These results validate the guest diagnostic, **not Ventium RTL**.
+
+Evidence under the same scratch root:
+
+- `pc-input-probe-images-r1/built.json`: disk hashes
+  `63a1611996385d675f82f0dbc9775cd515d73d15bf47ac798e288c8576a4939e`
+  (translated) and
+  `e7c0f854ee2ff6ad9081edce05df5e99db28ff85b29b5949a05015cb11fc0952`
+  (raw).
+- `pc-input-probe-qemu-r1/closed.json`: retained owner
+  `ventium-pc-input-probe-qemu-oct16-r1`, invocation
+  `e2c6fe81a86c445fba895de3d79af71b`, native 0 / MainPID 0,
+  116,977,664-byte peak, actual CPUs 16–17. Each case takes under 0.16 s.
+
+`run_retained_pc_input.py` is prepared, **not yet executed**. It requires the
+new compiled model and independently retained QEMU proof. Two bounded cold
+boots use actual external PS/2 pins at a 1,667-clock half-period, not the legacy
+accelerated sender. The grader requires nine wire bytes, the exact six or nine
+guest reads, actual V retirements, the posted-16 AXI backend, clean endpoint
+completion and the guest's pass marker. Three parser tests reject missing,
+duplicated or wrong bytes, lost prefixes, incomplete commands, absent pairing,
+accelerated timing and reported errors. Parser tests are not RTL results.
+A text-mode capture being unavailable is explicitly **not** graphics or UI
+acceptance. Windows desktop interaction and mouse motion remain separate work.
+
 ## Remaining acceptance work
 
 The broader interrupted-frame keyboard reset and physical keyboard transmit
