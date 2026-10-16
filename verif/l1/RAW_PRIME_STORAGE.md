@@ -224,7 +224,7 @@ files. No source, guest image, executable or test trace was deleted. Receipt:
 when its incomplete row count failed preflight. There was no Chrome browser
 process to close; other applications were left alone.
 
-## Matched synthesis in progress
+## Matched synthesis closed; timing report in progress
 
 Strict CPU-hierarchy lint of the exact **159-definition hardware profile**
 passes in **3.78 seconds**, with unchanged inputs and the six existing fatal
@@ -247,16 +247,54 @@ is not the timing baseline.
 audits its terminal result, and only then schedules the prepared read-only
 checkpoint timing report. It never starts implementation or deployment. Native
 limits remain 45 minutes, 8 GiB RAM / 6 GiB swap, a 13 GiB combined early-stop
-threshold and 4 GiB free-disk reserve. At the 10-minute check the native worker
-was live in cross-boundary/area optimization, without a completed checkpoint
-or measured candidate frequency. Evidence: `raw-prime-storage-synthesis-r1`
-and `raw-prime-storage-sequence-*`. These are **live, not closed PASS results**.
+threshold and 4 GiB free-disk reserve. Synthesis closed native exit0 in
+**2,078.94 seconds**, with unchanged inputs, no resource stop and no OOM. The
+independent audit passes **68,407 source pins** and the exact three-delta source
+closure. Peak guarded memory was 8,589,930,496 bytes with no swap; the cgroup
+did reach its memory limit and reclaim pages, but recorded no OOM event.
+
+| Synthesized resource | Boundary parent | RAW storage + input repairs | Difference |
+|---|---:|---:|---:|
+| LUTs | 187,990 | 187,185 | −805 |
+| Registers | 55,218 | 54,760 | −458 |
+| BRAM tiles | 277.5 | 277.5 | 0 |
+| DSPs | 47 | 47 | 0 |
+
+This is the combined three-delta result, not an isolated RTL gain measurement.
+The checkpoint SHA256 is
+`2af6ae8a36eb11fd122f9519b4c2400f66603694f21ce08387fce06a30a2db60`.
+The native log has zero errors and one critical warning, retained by the audit;
+do not describe this as warning-free or standard-suite acceptance.
+Evidence: `raw-prime-storage-synthesis-r1/{closed,audit}.json`.
+
+The same sequencer admitted exactly one read-only timing job,
+`ventium-raw-prime-storage-clock-oct16-r1.service`, invocation
+`2756ba277aca4f219df64270f88fe3c0`, controller PID2408391. At the 3.7-minute
+check it was live with no OOM; the native tool had confirmed 40 MHz core /
+100 MHz PL constraints. **These are constraints, not measured Fmax.** No new
+candidate frequency, placement/routing, deployment or physical acceptance is
+available yet. Evidence: `raw-prime-storage-clock-r1` and
+`raw-prime-storage-sequence-*`.
 
 A second pre-launch cleanup removed only **10 regenerable PCH files /
 904,073,303 bytes**, rehashing **2,171 preserved files**. This included the two
 successfully closed positive children of the otherwise failed cache R2 run;
 its failed mutant artifacts remain untouched. Sources, guest media, binaries,
 receipts and traces were retained. Receipt: `closed-pch-prune-oct16-r3.json`.
+
+Subsequent lossless deduplication replaces **10,600 duplicate trace storage
+instances** with hardlinks across only the two closed RAW-storage/prime-width
+directed corpora. All 16,960 candidate/control trace paths and hashes, original
+native commands and failed aggregate verdicts remain intact. It requires exact
+closed service identities, the eight successful native child receipts, the
+previous full-stream audit hashes, an empty open-file census and byte-for-byte
+comparison before replacement; every affected hash is rechecked afterwards.
+Observed free space increased from 7,150,727,168 to 8,022,327,296 bytes (other
+jobs were still live). Golden traces, models, sources and guest media were not
+touched. Receipt: `closed-core-trace-dedup-oct16-closed.json`; the plan records
+original identities. The retained traces must be copied before any future
+mutation because identical evidence files now share storage. Disk space still
+does not meet the 8 GiB Win95 admission threshold.
 
 ## Complete-trace diagnosis of remaining cycle failures
 
