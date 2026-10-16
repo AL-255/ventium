@@ -3,8 +3,10 @@
 Status: implemented in an isolated nine-file RTL derivative and transferred
 to a matching full-PC model. Directed, cold-input, short CoreMark and strict
 CPU-lint checks pass. Matched synthesis and its independent source/resource
-audit pass; **timing is still being measured, with no routing, deployment or standard-suite acceptance yet.
-Canonical `make verify` still fails.** The dirty checkout's RTL and pre-existing
+audit pass; **the matched unplaced timing estimate regresses from 35.3744 to
+34.7524 MHz. This is not a successful timing optimization; no routing,
+deployment or standard-suite acceptance is claimed. Canonical `make verify`
+still fails.** The dirty checkout's RTL and pre-existing
 full-PC runs remain untouched.
 
 ## Purpose and change
@@ -206,7 +208,7 @@ Process ownership, exclusive Vivado launch, 8 GiB synthesis RAM / 6 GiB swap
 caps, 45-minute bound, measured-growth disk admission and 4 GiB stop floor are
 unchanged. The read-only clock audit keeps its 8/4 GiB caps and 15-minute bound.
 
-### Closed synthesis; timing audit in progress
+### Closed synthesis and timing audit
 
 The synthesis owner closed successfully at **2026-10-16 12:01:51 UTC**, after
 2,395.906 seconds (39.93 minutes). `system-read-ack-synthesis-r1/audit.json`
@@ -230,16 +232,45 @@ constraint warning at `rk_ao486_bd_ps8_0.xdc:21`, not a new waiver or timing pas
 
 Only after that synthesis audit passed, the observer launched
 `ventium-system-read-ack-clock-oct16-r1.service`, invocation
-`44892ab4af7249039d35bd70859d2bed`. The native read-only Vivado process is live.
-It reads the completed project and original constraints, checks actual clocks
-and black boxes, and reports matched parent/candidate timing and utilization.
-No candidate frequency, routed timing or board acceptance is established yet.
+`44892ab4af7249039d35bd70859d2bed`. It closed successfully at
+**2026-10-16 12:10:50 UTC**, after 512.725 seconds. The independent
+`system-read-ack-clock-r1/audit.json` checks 71,244 input pins, the original
+project/checkpoint and constraints, exact exited owner, actual 40/100 MHz
+clocks, native closure and zero OOM. Peak RAM was 4,848,332,800 bytes, with
+zero swap. All CAD processes are closed.
+
+| Matched unplaced estimate | RAW/input parent | ACK candidate |
+|---|---:|---:|
+| Core Fmax | 35.3744 MHz | 34.7524 MHz |
+| Setup slack at 40 MHz | −3.269 ns | −3.775 ns |
+| Core hold slack | −0.101 ns | −0.101 ns |
+
+The estimated frequency fell approximately **1.76%**, with 0.506 ns additional
+setup delay. These are **unplaced estimates**, not routed frequencies. The
+candidate is rejected as a stand-alone timing improvement; it will not be
+routed or deployed on the strength of these results.
+
+The worst reported path is EIP bit 0 to `q_lock`, with 99 logic levels and
+28.564 ns data-path delay (5.525 ns logic plus 23.039 ns estimated net delay).
+The other leading paths reach I-cache age metadata, interrupt-error state,
+integer-multiplier inputs and ESP. They share prefix/decode, translation,
+paired-store admission and general-ACK dependencies. Moving only the final
+`q_lock` assignment would leave the wider path problem. Estimated net delay
+here is not measured post-route congestion.
+
+Constraint coverage is still incomplete: `check_timing` reports eight
+no-clock pins and four outputs without output delay, although it reports no
+unconstrained internal endpoints or combinational loops. Neither native exit
+zero nor the evidence audit constitutes a timing-coverage/sign-off waiver.
 
 ## Limits and next work
 
-No frequency or IPC gain is claimed for this cut. Finish and independently
-audit the matched timing reports; do not inherit the parent's timing or board
-result. Routing to ≥40 MHz, repairing canonical gates,
+No frequency or IPC gain is claimed for this cut. The next investigation is
+the shared write-admission/ACK dependency, starting from the RAW/input parent,
+not an automatic accumulation of this timing-regressed change. Any proposed
+credit simplification must prove the real L1/AXI contract, preserve generic
+unqualified request behavior, and exclude unsupported CDC/L2 configurations.
+Routing to ≥40 MHz, repairing canonical gates,
 duration-valid CoreMark ≥2.1 CM/MHz, full standard-suite completion, and physical
 Win95 cold desktop/UI plus full Quake timedemo acceptance remain required.
 
