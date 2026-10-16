@@ -1,0 +1,121 @@
+# System read-owner ACK cut — 2026-10-16
+
+Status: implemented in an isolated nine-file RTL derivative; directed
+verification passes. **Not synthesized, routed, deployed, or accepted by the
+standard suite. Canonical `make verify` still fails.** The dirty checkout's
+RTL and all live full-PC models remain untouched.
+
+## Purpose and change
+
+The preceding RAW-storage synthesis estimated only **35.3744 MHz unplaced**
+(40 MHz constraint, WNS −3.269 ns), below both the 40 MHz requirement and its
+36.9686 MHz parent. Its worst path reaches interrupt-error state through the
+general ACK's write/paired-store admission logic. This change removes that
+dependency from owners whose actual bus transactions are reads.
+
+`prepare_system_read_ack.py` checks exact predecessor hashes, then changes:
+
+- Twenty read-only descriptor, interrupt, return, query and task-switch states
+  to use the existing `mem_read_ack` instead of general `mem_ack`.
+- Page-walk PDE/PTE reads (steps 0/2) to read ACK; A/D writes (step 1 and the
+  original default arm) retain general ACK. The same split applies to the
+  independent TLB-fill driver.
+- Matching GPR/ESP/segment commit guards, string-store rollback and diagnostic
+  page-fault mirrors, so every architectural effect uses the same edge.
+
+The existing final-fragment qualifier is unchanged. No request authorization,
+fault precedence, transaction, clock, latency, queue depth, pairing policy,
+fallback, instruction semantics or guest program is changed. Mixed LTR and
+write-only states retain their original completion logic. Non-early-ACK builds
+retain the original alias `mem_read_ack = mem_ack`.
+
+A nonsynthesis witness checks actual read direction and ACK equality on all
+changed owners. Native tests reach those states naturally; they do not force
+state, ACK, STEP, breakpoints or snapshots. Source-preservation tests reverse
+each transformation and require the original state-machine bodies verbatim.
+
+## Exact models and evidence
+
+Evidence root:
+`/home/yukidama/external/tmp/ventium-fprem-sequence.iSZ9BAj4`.
+
+- Parent directed model: `41f99bcff8125a2caa7fe768f03f242bed1a43323e4d3a190109167248a34e9b`
+  (`raw-prime-storage-core-r1`).
+- Candidate: `005d0f17a3360588d6b67c5f49267db785cb7cc07893ee6a14dc42cafe615aeb`
+  (`system-read-ack-core-r1`).
+- Exactly 195 source files, nine changes; all 153 ordered defines unchanged.
+  Full source/host dependency hashes and the private model-specific harness
+  object/header are retained in `build-started.json` / `build-closed.json`.
+  32-job build closed successfully in 20.113 seconds.
+- `system-read-ack-audit-r1.json` independently replays system comparisons,
+  native closure, actual affinity, source hashes and complete state coverage.
+- `system-read-ack-canonical-audit-r1.json` checks same-input parent replay and
+  preserves the canonical failed verdict.
+
+## Verification
+
+| Check | Result |
+|---|---|
+| Host source/builder/supervisor contracts | 9 tests pass |
+| Native ACK miter, early and fallback profiles | 61,440 combinations each pass |
+| Deliberate broken ACK/fragment variants | All 8 fail as required |
+| Cold system matrices, AXI delays 0/7/31 | 19 cases, 228 native RTL runs pass |
+| Full state and clock equality | 114 parent/candidate trace pairs identical |
+| Candidate records checked | 26,667 functional + 26,667 cycle records |
+| Actual candidate V retirement | 5,925; U/V fast mode, not STEP or U-only |
+| Changed owner coverage | All 20 states plus both page-walk read phases |
+| Same-input canonical functional replay | All 108 parent-identical, 80,800 records |
+| Canonical cycle traces | All 20 parent-identical, 66,807 records |
+| Canonical verdict | FAIL: native make exit 2, controller exit 1 |
+
+The 19 cold fixtures cover segmentation, paging, IDT delivery, cross-privilege
+IRET/RETF, TSS stack changes, task CALL/NT return, incoming LDT installation,
+V86, I/O permission checks, call-gate parameters, descriptor queries, fragment
+faults and nested real-mode INT/IRET. The last fixture is a new generic BIOS
+microbenchmark with real IVT/stack accesses and SP/GPR/carry restoration checks.
+All functional comparisons use complete QEMU architectural records; no new
+flag masks, trace trimming or golden changes.
+
+Both `--cycle-func --l1-axi` and `--cycle --l1-axi` exercise `cycle_mode=1`.
+The build retains `VEN_FE_PIPE`, `VEN_SYS_FASTPATH`, relocated fast-path support,
+fast load/store defines and dual-issue defines. Native commands and actual
+child CPU affinity are retained per run. These are microbenchmark correctness
+counts, **not gameplay IPC**.
+
+The canonical run took 392.118 seconds: 7/108 functional cases pass and 101
+fail; nine cycle bands fail. Its original failed results remain authoritative.
+The parent already has these failures; a fresh same-input parent replay passed
+all 108 cases (80,800 complete records) in 55.480 seconds, distinguishing RTL
+changes from different QEMU initial stacks.
+Directly comparing independently generated functional traces first detected
+ESP `0x40800020` versus `0x40800030`, so that comparison was rejected. The
+replay uses the candidate's actual flat images and golden-derived initial ESP;
+it does not normalize or ignore ESP.
+
+Failed infrastructure attempts are preserved, not called passes:
+
+- Leaf launch r1 omitted the build guard's required `--` and exited before
+  compilation; r2 ran the native miter successfully.
+- Extra system matrix r1 could not link the new real-mode fixture because its
+  handler symbols were local. Its three other cases passed, but the aggregate
+  remains FAIL. The separately retained fixed fixture exports those symbols;
+  extra matrix r2 passes all four cases. No RTL change was needed.
+
+## Limits and next work
+
+No frequency or IPC gain is claimed for this cut. First integrate the exact
+nine-file delta into a matching full-PC/frozen FPGA source closure, retain the
+input-device repairs, and run matched synthesis/timing. Do not inherit the
+parent's timing or board result. Routing to ≥40 MHz, repairing canonical gates,
+duration-valid CoreMark ≥2.1 CM/MHz, full standard-suite completion, and physical
+Win95 cold desktop/UI plus full Quake timedemo acceptance remain required.
+
+The existing cold Win95 run continues on **older full-PC model `e9159acb`**,
+not this new derivative. Its boot-only controller cannot establish UI robustness.
+The older Quake runs also remain separate evidence.
+
+Latest verified gameplay baseline: **0.50229051 total U+V IPC**, model
+`b6b92dbfde2c6148fde30b5c65cac8217f650f7bbc1a7d4c0bd58fe95f706c9e`, cycles
+**1,400,065,247–1,500,065,247**. U-only IPC was 0.38787572. This predates both
+the RAW/input candidate and this ACK derivative; neither has a verified
+gameplay measurement. It is not a completed timedemo or FPGA acceptance.
