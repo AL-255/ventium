@@ -65,15 +65,19 @@ values through deterministic gzip. All 24 Tcl mock cases pass, including native
 property batch bounds. The separate observer stops at a 4 GiB disk floor or
 11.5 GiB resident-memory margin.
 
-At 21:07 UTC, the sole active retry is
+Historical, superseded at the user's direction: at 21:07 UTC the active retry was
 `ventium-core-clock-70-oct16-r4.service`, invocation
 `5f6c9dce75e448ebb34e104c890c22f6`. Native clocks are **70.175439 MHz core /
 100 MHz AXI**. MMCM property reports differ only in `CLKOUT0_DIVIDE_F`, 25→14.25.
 Full before/after-edit physical snapshots compare byte-for-byte, SHA-256
 `380e7bd1906bca7ea3908ee8f60bc85be42864222820ed8e1491c68a01d838c9`.
-Bitgen and the final comparison are still pending; no overclock hardware pass
-is claimed. No synthesis, placement or routing is repeated for a frequency
-variant. The board is safely held reset between trials.
+It was stopped with native exit **143** before final qualification and was never
+deployed. The user requires **one 40 MHz image with a runtime-programmable PLL**,
+not separate frequency images. The cancelled variants must not be deployed.
+See `fpga/PROGRAMMABLE_CLOCK.md` for the replacement procedure and current state.
+About 1 GiB of closed partial/duplicate physical dumps and cancelled variant
+BIT/BIN/DCP products was removed; native logs, original routed DCP, one complete
+before-edit physical snapshot and all accepted 40 MHz evidence are retained.
 
 ## Physical clock experiment preparation
 
@@ -89,9 +93,9 @@ Disk admission remains 8 GiB; the live disk-stop floor is tightened to 4 GiB.
 Three preparation tests and 84 existing Tcl launcher tests pass. This paragraph
 records the original preparation; closure and deployment are documented above.
 
-The intended sweep keeps PS/AXI at 100 MHz and the MMCM VCO at 1 GHz, varying
+The **superseded** sweep kept PS/AXI at 100 MHz and the MMCM VCO at 1 GHz, varying
 only the core-output divider in copies of the routed design. No DRP interface
-is exposed. Post-route property editing and unchanged placement/routing must
+was exposed. Post-route property editing and unchanged placement/routing must
 be verified before using bitgen-only frequency variants. The existing PS PL0
 runtime selector changes AXI and MMCM input together; it is not a core-only
 frequency control. Start at 40 MHz, increase toward 70 MHz and beyond only
