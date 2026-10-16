@@ -14,8 +14,10 @@ module tb_pll_ctrl;
         .mmcm_reset(rst), .clock_enable(ce), .daddr(addr), .di(di),
         .den(den), .dwe(dwe), .dout(dout), .drdy(drdy));
     reg [15:0] r08=16'hb30d, r09=16'h0285;
+    reg [15:0] r27=16'h0100;
     reg drop_drp=0, drop_lock=0, corrupt08=0, corrupt09=0;
-    integer latency=4, wait_drp=0, lock_wait=0, accesses=0, writes=0;
+    reg corrupt_power_on=0, corrupt_power_restore=0;
+    integer latency=4, wait_drp=0, lock_wait=0, accesses=0, writes=0, divider_writes=0;
     reg [6:0] pending_addr;
     reg pending_write;
     reg [15:0] pending_data;
@@ -29,7 +31,9 @@ module tb_pll_ctrl;
             if (den) begin
                 if (wait_drp || drdy) $fatal(1,"overlapping DRP request");
                 if (!rst || ce) $fatal(1,"DRP without gated/reset MMCM");
-                if (addr!=8 && addr!=9) $fatal(1,"unexpected DRP address");
+                if (addr!=8 && addr!=9 && addr!=7'h27) $fatal(1,"unexpected DRP address");
+                if (addr!=7'h27 && (r27 & 16'h9999)!=16'h9999)
+                    $fatal(1,"divider access without enabled DRP power group");
                 accesses <= accesses+1;
                 pending_addr <= addr; pending_write <= dwe; pending_data <= di;
                 if (!drop_drp) wait_drp <= latency;
@@ -39,9 +43,12 @@ module tb_pll_ctrl;
                 wait_drp <= 0; drdy <= 1;
                 if (pending_write) begin
                     writes <= writes+1;
+                    if (pending_addr!=7'h27) divider_writes <= divider_writes+1;
                     if (pending_addr==8) r08 <= pending_data ^ (corrupt08 ? 16'd1 : 16'd0);
-                    else r09 <= pending_data ^ (corrupt09 ? 16'd1 : 16'd0);
-                end else dout <= pending_addr==8 ? r08 : r09;
+                    else if (pending_addr==9) r09 <= pending_data ^ (corrupt09 ? 16'd1 : 16'd0);
+                    else r27 <= pending_data ^ (((pending_data==16'hffff && corrupt_power_on) ||
+                                                  (pending_data==16'h0100 && corrupt_power_restore)) ? 16'd1 : 16'd0);
+                end else dout <= pending_addr==8 ? r08 : pending_addr==9 ? r09 : r27;
             end
         end
     end
@@ -59,7 +66,7 @@ module tb_pll_ctrl;
             n=0;
             while ((status[11] != command[15] || status[8]) && n<1600) begin ticks(1); n=n+1; end
             if (n==1600 || status[9]!==expected_error) $fatal(1,"ack/error: %h state %d",status,dut.state);
-            if (!expected_error && (!ce || rst || !locked)) $fatal(1,"successful clock not running");
+            if (!expected_error && (!ce || rst || !locked || r27!=16'h0100)) $fatal(1,"successful clock/power state invalid");
         end
     endtask
     task set_div(input integer div);
@@ -73,7 +80,7 @@ module tb_pll_ctrl;
             if (r08[15:12]!=save08[15:12] || (r09 & 16'hff3f)!=(save09 & 16'hff3f))
                 $fatal(1,"unrelated DRP bits modified");
             ticks(40);
-            if (writes!=before_writes+2) $fatal(1,"duplicate transaction");
+            if (writes!=before_writes+4) $fatal(1,"duplicate/missing transaction");
         end
     endtask
     integer d, s, before_accesses;
@@ -105,27 +112,33 @@ module tb_pll_ctrl;
         if (ce || !rst) $fatal(1,"lock timeout not fail closed");
         drop_lock=0; set_div(25);
         // Lose the hardware interlock in EVERY change phase, including relock.
-        for (s=2; s<=10; s=s+1) begin
+        for (s=2; s<=14; s=s+1) begin
             latency=20; send(20); wait(dut.state==s); @(negedge clk); safe=0;
             finish_command(1);
             if (ce || !rst) $fatal(1,"safe loss state %d not fail closed",s);
             ticks(30); safe=1; ticks(40); set_div(25);
         end
         // An unsupported fractional/CDDC initial state must not be overwritten.
-        r09=r09|16'h0800; before_accesses=writes; send(20); finish_command(1);
-        if (writes!=before_accesses || ce || !rst) $fatal(1,"fractional state not rejected");
+        r09=r09|16'h0800; before_accesses=divider_writes; send(20); finish_command(1);
+        if (divider_writes!=before_accesses || ce || !rst) $fatal(1,"fractional state not rejected");
         r09=r09 & 16'hf7ff; set_div(25);
         r09=r09|16'h8000; send(20); finish_command(1);
         if (ce || !rst) $fatal(1,"CDDC state not rejected");
         r09=r09 & 16'h7fff; set_div(25);
+        corrupt_power_on=1; send(20); finish_command(1);
+        if (ce || !rst) $fatal(1,"power-enable readback error not fail closed");
+        corrupt_power_on=0; set_div(25);
+        corrupt_power_restore=1; send(20); finish_command(1);
+        if (ce || !rst) $fatal(1,"power-restore readback error not fail closed");
+        corrupt_power_restore=0; set_div(25);
         set_div(20);
         @(negedge clk); resetn=0; command=0;
-        ticks(5); resetn=1; ticks(240);
+        ticks(5); resetn=1; ticks(400);
         if (!ce || status[6:0]!=25 || r08[11:6]!=12 || r08[5:0]!=13 || !r09[7])
             $fatal(1,"reset did not restore 40 MHz divider");
-        for (s=2;s<=10;s=s+1) begin
+        for (s=2;s<=14;s=s+1) begin
             send(20); wait(dut.state==s); @(negedge clk); resetn=0; command=0;
-            ticks(5); resetn=1; ticks(240);
+            ticks(5); resetn=1; ticks(400);
             if (!ce || status[6:0]!=25 || r08[11:6]!=12 || r08[5:0]!=13 || !r09[7])
                 $fatal(1,"reset during phase %d did not recover 40 MHz",s);
         end

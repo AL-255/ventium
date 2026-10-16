@@ -13,7 +13,7 @@ import shutil
 REPO = Path(__file__).resolve().parent.parent
 ROOT = Path('/home/yukidama/external/tmp/ventium-fprem-sequence.iSZ9BAj4')
 PARENT = ROOT/'parallel-write-fpga-r1'
-DEST = ROOT/'programmable-clock-r2'
+DEST = ROOT/'programmable-clock-r3'
 PARENT_MANIFEST = 'e745cf4cffcf5143298293e021b678803204fa18dbd32328b2079c481743143f'
 
 
@@ -35,11 +35,11 @@ def transform(files):
                        'lappend files "$VEN/fpga/ven_programmable_clock.v" "$VEN/fpga/ven_pll_ctrl.sv"')
     name = 'flow/src/rk_ao486_system_pl.v'
     text = once(result[name], '    output wire [3:0]   led ',
-                '    output wire clock_change_safe,\n    output wire [3:0]   led ')
+                '    output wire pll_safe,\n    output wire [3:0]   led ')
     result[name] = once(text, '    wire ddr_posted_drained, ddr_posted_fault;',
         '    wire ddr_posted_drained, ddr_posted_fault;\n'
         '    // Observability only: CPU reset and real outer AXI drain interlock.\n'
-        '    assign clock_change_safe = ~core_reset_n & ddr_posted_drained & ~ddr_posted_fault;')
+        '    assign pll_safe = ~core_reset_n & ddr_posted_drained & ~ddr_posted_fault;')
     name = 'flow/hw/create_project.tcl'
     text = once(result[name], '-reference clk_div32 u_clkdiv', '-reference ven_programmable_clock u_clkdiv')
     text = once(text, '# SINGLE PS clock pl_clk0',
@@ -51,7 +51,7 @@ def transform(files):
         'connect_bd_net [get_bd_pins $ps/pl_resetn0] [get_bd_pins $clkdiv/resetn]\n'
         'connect_bd_net [get_bd_pins $ps/emio_gpio_o] [get_bd_pins $clkdiv/ps_gpio_o]\n'
         'connect_bd_net [get_bd_pins $clkdiv/ps_gpio_i] [get_bd_pins $ps/emio_gpio_i]\n'
-        'connect_bd_net [get_bd_pins $soc/clock_change_safe] [get_bd_pins $clkdiv/safe_change]')
+        'connect_bd_net [get_bd_pins $soc/pll_safe] [get_bd_pins $clkdiv/safe_change]')
     # Keep the last successful implementation's crash-avoidance directive.
     result[name] = once(text, 'if {$MODE eq "all"} {',
         'if {$MODE eq "all"} {\n'

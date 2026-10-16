@@ -76,8 +76,9 @@ deployed. The user requires **one 40 MHz image with a runtime-programmable PLL**
 not separate frequency images. The cancelled variants must not be deployed.
 See `fpga/PROGRAMMABLE_CLOCK.md` for the replacement procedure and current state.
 About 1 GiB of closed partial/duplicate physical dumps and cancelled variant
-BIT/BIN/DCP products was removed; native logs, original routed DCP, one complete
-before-edit physical snapshot and all accepted 40 MHz evidence are retained.
+BIT/BIN/DCP products was removed; native logs, original routed DCP and all
+accepted 40 MHz evidence are retained. The final cancelled-variant physical
+snapshot was subsequently pruned too; its historical digest remains above.
 
 ## Physical clock experiment preparation
 

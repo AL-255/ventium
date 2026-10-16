@@ -21,6 +21,9 @@ proc launch_runs {run args} {
             if {[llength [lsearch -all -glob $active */$name]] != 1} {error "clock source missing/duplicated: $name"}
         }
         if {[llength [lsearch -all -glob $active */clk_div32_40mhz.v]]} {error "fixed clock still active"}
+        if {[get_property TYPE [get_bd_pins u_soc/pll_safe]] eq "clk"} {
+            error "the drain interlock is data, not a clock interface"
+        }
         puts "PROGRAMMABLE-CLOCK-PREFLIGHT-OK 40MHz GPIO95 unchanged-CPU-profile"
     } else {
         if {[get_property STEPS.OPT_DESIGN.ARGS.DIRECTIVE [get_runs impl_1]] ne "RuntimeOptimized"} {error "opt directive changed"}

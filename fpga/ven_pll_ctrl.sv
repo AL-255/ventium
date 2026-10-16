@@ -34,7 +34,8 @@ module ven_pll_ctrl #(
     reg [7:0] guard;
     localparam [3:0] STARTUP=0, IDLE=1, GATE=2, RESET_WAIT=3,
         READ08=4, READ09=5, WRITE08=6, WRITE09=7, VERIFY08=8,
-        VERIFY09=9, LOCK_WAIT=10;
+        VERIFY09=9, LOCK_WAIT=10, POWER_ON=11, POWER_VERIFY=12,
+        POWER_RESTORE=13, POWER_RESTORE_VERIFY=14;
     reg [3:0] state;
     wire busy = state != IDLE;
     // 0x504c = "PL", ABI1 in bits15:14. [13]reset [12]safe [11]ack
@@ -84,8 +85,8 @@ module ven_pll_ctrl #(
                     if (guard == GUARD_CYCLES-1) begin
                         // MMCM RST does not restore its DRP registers. Reapply
                         // divide-25 even after a PS reset of an overclocked image.
-                        guard <= 0; daddr <= 7'h08; den <= 1;
-                        state <= READ08; timer <= 0;
+                        guard <= 0; daddr <= 7'h27; di <= 16'hffff; den <= 1; dwe <= 1;
+                        state <= POWER_ON; timer <= 0;
                         // A request left over across PS reset is not a new
                         // transaction. Software must toggle after startup ACK.
                         seen <= cmd_sync[15]; ack <= cmd_sync[15];
@@ -108,8 +109,23 @@ module ven_pll_ctrl #(
                 end
                 RESET_WAIT: begin
                     if (guard == GUARD_CYCLES-1) begin
-                        daddr <= 7'h08; den <= 1; state <= READ08; timer <= 0;
+                        daddr <= 7'h27; di <= 16'hffff; den <= 1; dwe <= 1;
+                        state <= POWER_ON; timer <= 0;
                     end else guard <= guard + 1'b1;
+                end
+                POWER_ON: if (drdy) begin
+                    // XAPP888: enable the UltraScale+ DRP power group BEFORE
+                    // changing counters. UNISIM does not enforce this rule.
+                    daddr <= 7'h27; den <= 1; state <= POWER_VERIFY; timer <= 0;
+                end
+                POWER_VERIFY: if (drdy) begin
+                    // UG572 marks only these eight bits as readable/writable;
+                    // reserved bits may read X in the vendor simulation model.
+                    if ((dout & 16'h9999) != 16'h9999) begin
+                        state <= IDLE; error <= 1; ack <= seen; changing <= 0;
+                    end else begin
+                        daddr <= 7'h08; den <= 1; state <= READ08; timer <= 0;
+                    end
                 end
                 READ08: if (drdy) begin
                     // Preserve counter enable and phase selection. UG572 0x08.
@@ -143,6 +159,20 @@ module ven_pll_ctrl #(
                 end
                 VERIFY09: if (drdy) begin
                     if (dout != next09) begin
+                        state <= IDLE; error <= 1; ack <= seen; changing <= 0;
+                    end else begin
+                        // Restore the documented integer/no-fine-phase/no-SSC
+                        // power configuration before releasing MMCM reset.
+                        // These are MMCM interpolator enables, NOT rail voltage.
+                        daddr <= 7'h27; di <= 16'h0100; den <= 1; dwe <= 1;
+                        state <= POWER_RESTORE; timer <= 0;
+                    end
+                end
+                POWER_RESTORE: if (drdy) begin
+                    daddr <= 7'h27; den <= 1; state <= POWER_RESTORE_VERIFY; timer <= 0;
+                end
+                POWER_RESTORE_VERIFY: if (drdy) begin
+                    if ((dout & 16'h9999) != 16'h0100) begin
                         state <= IDLE; error <= 1; ack <= seen; changing <= 0;
                     end else begin
                         mmcm_reset <= 0; guard <= 0; state <= LOCK_WAIT; timer <= 0;

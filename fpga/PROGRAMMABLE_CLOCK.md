@@ -38,6 +38,12 @@ gameplay measurement. CoreMark counters are not gameplay IPC.
   stable lock, then enables the clock and acknowledges. Only integer HIGH/LOW,
   EDGE and NOCOUNT fields change. Feedback, VCO, phase, lock/filter settings and
   voltage are untouched. Fractional/CDDC starting states are rejected.
+- Before counter access it writes the UltraScale+ DRP power group at **0x27**
+  to `0xffff`, as required by XAPP888. Afterward it writes `0x0100` for this
+  integer, zero-phase, no-fine-phase/no-spread-spectrum configuration before
+  releasing reset, following current UG572's interpolator-enable rules. Both
+  writes are checked on the documented `0x9999` readable-bit mask; reserved bits
+  are not assumed readable. This controls internal interpolators, not voltage.
 - Timeout, readback failure or loss of the safe-change interlock during a change
   leaves the clock gated and MMCM reset asserted. A later valid mailbox request
   can recover without reprogramming. PS reset explicitly rewrites divide25:
@@ -79,8 +85,10 @@ Icarus, without Vivado synthesis. Every divisor 10..50 is checked, including
 actual output period. Coverage includes rejected running-guest requests,
 invalid commands, delayed DRDY, DRP/lock timeout, both bad readbacks, safe loss
 in every change phase, reset in every phase, stale requests across reset and
-40 MHz restoration after an overclock. Final passing evidence:
-`/home/yukidama/external/tmp/ventium-programmable-clock.ftnP3W`.
+40 MHz restoration after an overclock. The fault BFM additionally enforces DRP
+power-enable ordering and both power-register readbacks, which the vendor
+behavioral model does not enforce. Final passing evidence:
+`/home/yukidama/external/tmp/ventium-programmable-clock.OwfH6W`.
 
 Host tooling tests:
 
@@ -104,10 +112,21 @@ correctness results, not FPGA scores.
 Evidence root: `/home/yukidama/external/tmp/ventium-fprem-sequence.iSZ9BAj4`.
 `programmable-clock-r1` is a retained **failed 25-second BD preflight**, not a
 synthesis run: the PS IP clamped requested GPIO width96 to95 and the guard
-rejected it before `launch_runs synth_1`. `programmable-clock-r2` corrects that
-width and is the sole full build, owned by
-`ventium-programmable-clock-oct16-r2.service`, invocation
-`c9e5bf19b48c495685e7e27b283831a9`.
+rejected it before `launch_runs synth_1`. `programmable-clock-r2` corrected the
+width but its synthesis was deliberately stopped after **920.8 seconds**, native
+exit143, before implementation: a further reference-flow check found the missing
+DRP power-group setup. The old simulation pass did not prove that requirement.
+Its original pins stayed unchanged; logs and generated integration metadata are
+retained. No r2 bitstream exists and no deployment occurred.
+
+`programmable-clock-r3` adds that sequence and names the drain output `pll_safe`
+so BD inference cannot mistake it for a clock. It is the active corrected build,
+owned by `ventium-programmable-clock-oct16-r3.service`, invocation
+`fa0d86b28c7840e39ee050af6d348483`. There will be one completed image and one
+deployment, with no frequency-specific synthesis/route/bitgen variants.
+About 1.2 GiB of the closed r2 synthesis cache and obsolete cancelled-variant
+physical dump was removed to retain the eight-GiB build admission reserve;
+source freezes, reports, native logs and the original routed DCP remain.
 
 `run_programmable_clock_build.py` uses the mandatory exclusive Vivado launcher,
 one worker, 20 GiB RAM / 8 GiB swap limits, a six-hour bound, live 4 GiB disk and
@@ -153,3 +172,4 @@ before claiming general FPGA acceptance of this new image.
 
 Register reference: [AMD UG572 MMCM registers](https://docs.amd.com/r/en-US/ug572-ultrascale-clocking/MMCM-Registers)
 and [DRP operation](https://docs.amd.com/r/en-US/ug572-ultrascale-clocking/Dynamic-Reconfiguration-Port).
+The power-enable prerequisite is in [XAPP888, Power Group/Table14](https://docs.amd.com/api/khub/documents/ZY272QvKAP3T95qOg6QhDg/content).
