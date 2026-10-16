@@ -2,9 +2,10 @@
 
 Status, 2026-10-16: **isolated RTL derivative implemented; native cache/AXI,
 directed whole-core and private-reference functional checks pass. Canonical
-`make verify` remains FAIL. Matched synthesis is closed; its clock audit is
-running. No timing,
-standard-suite or FPGA acceptance.**
+`make verify` remains FAIL. Matched synthesis and its independent clock audit
+are closed: **35.879588 MHz unplaced**, versus 35.374438 MHz for the matched
+parent (**+1.428%**). Still below 40 MHz; no timing, standard-suite or FPGA
+acceptance.**
 The production checkout and deployed bitstream have not changed.
 
 This follows the rejected [qualified-credit experiment](QUALIFIED_PAIR_CREDIT.md):
@@ -33,8 +34,9 @@ AXI packets, ordering, reset and read-response logic are unchanged. An active
 nonsynthesis assertion compares enqueue against the full original equation.
 
 No extra buffer, stall, latency or pairing restriction is introduced. This is
-a proposed **frequency improvement, not a measured IPC gain**. Whether the
-kept cuts improve timing or expose another critical path is unmeasured.
+a measured **unplaced frequency-estimate improvement, not an IPC gain**.
+The new worst path ends in FP status; the common fetch/length dependency and
+several other failing endpoint classes remain, as quantified below.
 
 ## Native evidence
 
@@ -264,7 +266,7 @@ All preparation evidence explicitly retains the failed canonical gate and
 unmeasured gameplay status. No placement, routing or deployment is authorized
 by these timing-only controllers.
 
-### Live measurement
+### Measurement lifecycle
 
 The synthesis controller starts **2026-10-16 16:05:03 UTC**, owner
 `ventium-parallel-write-synth-oct16-r1.service`, invocation
@@ -291,7 +293,7 @@ frequency. Do not repeat that experiment or infer that removing a source-level
 dependency guarantees 40 MHz. Inspect this run's mapped path before choosing
 any further change.
 
-### Closed synthesis; clock audit still pending
+### Closed synthesis and matched clock audit
 
 Synthesis closes native exit 0 in **1,102.922 seconds (18m 23s)**, with all
 input pins unchanged. The independent audit rechecks **72,970 pins**, the two
@@ -314,7 +316,71 @@ Area alone does not establish timing improvement. The read-only clock owner
 `dda9b7b2080449e08433e288ef668496`, starts at **16:24:09 UTC**, after the synthesis
 audit passes. Its native scope invocation is
 `055f12d6621b42e8aba274119bd7065d`; observed limits are 8 GiB RAM / 4 GiB swap /
-48 tasks. **Frequency is not yet known; no route or deployment has started.**
+48 tasks. It closes native exit 0 at **16:31:03 UTC**, in **404.738 seconds**.
+The independent audit checks **73,018 input pins**, exact terminal ownership,
+unchanged inputs, original 40/100 MHz constraints and the parent checkpoint.
+Peak scope RAM is **4,586,319,872 bytes**, with no swap, OOM, resource stop or
+controller failure. The sequencing owner also closes exit 0 / MainPID 0.
+The native Vivado family is gone; no placement, routing or deployment starts.
+
+| Timing metric | RAW/input parent | Parallel admission |
+|---|---:|---:|
+| Synthesized/unplaced frequency estimate | 35.374438 MHz | **35.879588 MHz** |
+| Setup slack at 40 MHz | −3.269 ns | −2.871 ns |
+| Worst-path logic levels | 94 | 101 |
+| Worst endpoint | `int_err_reg[0]/CE` | FP `status_reg[8]/D` |
+
+The frequency estimate improves **1.428%** while the limiting path changes;
+the increased level count is therefore not a comparison of the same path.
+The candidate's interrupt-error path improves to **−2.487 ns / 91 levels**.
+Unplaced hold slack remains **−0.101 ns**. Both use the same diagnostic
+`Default -no_timing_driven` mapper. These estimates are not routed sign-off,
+board frequency, evidence of measured congestion or permission to overclock.
+This is also **not a new best historical estimate**: the earlier boundary-stage
+ancestor measured 36.968577 MHz before the RAW-storage removal. Do not present
+this local gain as recovering that gap or satisfying the 40 MHz requirement.
+
+Clock audit: `parallel-write-clock-r1/audit.json`, SHA-256
+`7090d98b1112d377c679f1295c26c2a31ffe9e460a58ed7ba20878a9637740a2`.
+Its 24 retained artifact hashes were separately rechecked after closure.
+`parallel-write-sequence-closed.json` records successful terminal synthesis
+and clock owners. The captured netlist contains both kept `single_admit` and
+`pair_admit` nets; their presence alone is not a proof of their entire fan-in.
+
+### Remaining critical path: shared frontend, not only FP
+
+All **30 reported worst setup paths** still traverse `d_len[3]`. Endpoints
+are three FP-status bits, 17 interrupt-error enables, eight EFLAGS enables and
+two stack-pointer data bits. Therefore optimizing only the three FP endpoints
+would still leave the observed **−2.487 ns** integer path (about **36.38 MHz**
+under the same estimate), even if all other paths stayed unchanged.
+
+The worst path's **27.660 ns** data delay partitions at these consecutive
+native report markers; the values include estimated net delay:
+
+| Consecutive markers on the same path | Delay | Share |
+|---|---:|---:|
+| Launch clock arrival → `d_len[3]` | 12.131 ns | 43.86% |
+| `d_len[3]` → `fx_cross` | 4.768 ns | 17.24% |
+| `fx_cross` → FP input payload marker `saved_mem_reg[19]_0` | 3.925 ns | 14.19% |
+| That payload marker → FP status D pin | 6.836 ns | 24.71% |
+| **Total** | **27.660 ns** | **100.00%** |
+
+These are path-marker intervals, not independently measured module delays.
+Logic is 6.173 ns; the remaining 21.487 ns is **unplaced estimated** routing.
+The common frontend/fragment portion accounts for 61.10% of this path and
+appears in every sampled endpoint class. A fix must address that shared
+dependency without losing exact boundary fetch faults or UV-fast execution;
+adding a blanket FP bubble would not address it.
+
+Two seemingly obvious rewrites have already failed matched timing and must
+not be rerun unchanged: the [interior-size cofactor](../fe_pipe/SFETCH_INTERIOR_COFACTOR.md)
+exposes the prime/descriptor/LRU path, and the
+[response-kind mux rewrite](RESPONSE_KIND_MUX.md) regresses to 34.616450 MHz
+on its own parent. Neither is included here. A further composition needs a
+specific mapped-path rationale and new native evidence; source-level algebra
+alone is insufficient. No additional RTL or CAD run is introduced by this
+post-closure analysis.
 
 ## All nine failed cycle kernels: complete clock accounting
 
@@ -366,9 +432,10 @@ any of the nine failures.
 1. Resolve the outstanding differential/reference and cycle-band qualification
    issues without weakening comparisons. Passing directed A/B and the private
    reference does not make canonical `make verify` green.
-2. Measure matched synthesis timing and verify that the kept cuts remove late
-   request controls from admission arithmetic. Do not infer fmax from source
-   structure or route another below-target result.
+2. Reach at least 40 MHz with a verified structural change to the remaining
+   shared critical path. This matched measurement is closed but below target;
+   kept-net presence does not prove the whole admission fan-in independent.
+   Do not infer fmax from source structure or route this below-target result.
 3. Complete CoreMark correctness and duration-valid scoring, full Quake timedemo
    and Win95 desktop/UI acceptance, including physical FPGA evidence on the
    exact candidate bitstream.
