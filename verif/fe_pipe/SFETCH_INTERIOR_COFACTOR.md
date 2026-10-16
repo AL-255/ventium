@@ -1,7 +1,8 @@
 # Interior fetch-size output cofactor — 2026-10-16
 
-Status: **private experiment; leaf/boundary/interior/private-functional checks
-passed, canonical gate still FAIL; timing unmeasured**.
+Status: **private experiment; leaf/boundary/interior/private-functional checks,
+exact PC transfer, short cold CoreMark controls and CPU lint passed; canonical
+gate still FAIL; matched synthesis running, timing unmeasured**.
 No production RTL, FPGA bitstream, timing constraints, cycle bands or reference
 goldens were changed. No frequency/performance gain is established.
 
@@ -120,11 +121,81 @@ Identities:
 - Private functional owner: `ventium-sfetch-interior-func-oct16-r1.service`, invocation `553fc166e7a14ecca03db6b35ebb8b23`.
 - Interior-fetch owner: `ventium-sfetch-interior-demand-oct16-r1.service`, invocation `64ac56cac3e7471eabe6a39f71065484`; native scope `a434ecaf2e974b59ab23cc8ded5e2ac7`.
 
+## Exact full-PC transfer and short cold controls
+
+[The PC transfer](../../fpga/build_sfetch_interior_soc.py) preserves the faster
+boundary-stage parent `b32ab4b34482669c03ea57ce7be0dbd475623fa00b00c4c814fec976d75c86d2`,
+not the next-ready timing regression. All **102 shared CPU/FP sources** are
+checked; only the proven `rtl/core/core.sv` transformation differs. The **157
+definitions**, native host, corrected AUX controller and posted-16 backend are
+unchanged. This does **not** silently include the later keyboard/UI composition.
+
+Full-PC build `ventium-sfetch-interior-soc-build-oct16-r1.service`, invocation
+`b5b789e7ba314285836b5aa363f3d037`, closed native exit0 / MainPID0 in **22.59
+seconds**. The private C++ object binds to this model's generated header, all
+inputs remain unchanged, and the **98 inherited full-PC structural warnings**
+are unchanged—not waived or counted as a full-SoC lint pass. Model:
+`bccf110432a3ce42085841ee7dbb9056adaf277220b571b106cf91e6364eec76`.
+
+[Two concurrent short controls](../../fpga/run_sfetch_interior_coremark.py)
+cold-boot the original 10-iteration disks without patches or snapshots. Actual
+native affinity is CPU12 / CPU13, with the real AXI backend and `cycle_mode=1`.
+The original checker and original reference CRCs remain mandatory.
+
+| Seed | Parent ticks | Candidate ticks | Incremental cycle change | Actual V retirements at final sample |
+| --- | ---: | ---: | ---: | ---: |
+| Performance | 4,771,298 | 4,771,298 | 0% | 1,055,307 |
+| Validation | 4,755,366 | 4,755,366 | 0% | 1,054,254 |
+
+Performance CRCs: `e9f5/e714/1fd7/8e3a/fcaf`; validation CRCs:
+`18f2/e3c1/0747/8d84/c64e`. Both match the original reference. Native runtimes
+are **214.26 / 217.01 seconds**, both exit0 and reaped. Independent
+[regrading](../../fpga/audit_sfetch_interior_coremark.py) verifies **27,433
+source pins**, full native argv/affinity/image identity, closed owner and exact
+cycle equality. Owner `ventium-sfetch-interior-cm10-oct16-r1.service`, invocation
+`8b1097944998449db0d84acd19db31ac`, is closed MainPID0 / exit0, peak
+**53,362,688 bytes**, no OOM. These are **not duration-valid CM/MHz scores**, full
+CoreMark seeds, the standard suite, or gameplay measurements.
+
+## Hardware export and matched timing experiment
+
+[The sealed export](../../fpga/freeze_sfetch_interior_rk_candidate.py) compares
+all **192 payloads / 170 common compiled HDL sources** against
+`sfetch-boundary-fpga-r1`. Only `ventium/rtl/core/core.sv` changes. The corrected
+posted-DDR mouse wrapper, all **159 hardware definitions**, 40/100 MHz clock
+constraints, cache geometry and mapper are retained. Posted/nonposted wrapper
+preprocessing succeeds; it is not full-wrapper elaboration or board acceptance.
+Manifest SHA-256:
+`eeccdcf17f7641c80d07718ba6d88b2241912b7f6e3e53d325a1a5d2710c7cd0`.
+
+Strict CPU-hierarchy lint closes native exit0 in **3.78 seconds**, all source
+pins unchanged; owner `ventium-sfetch-interior-lint-oct16-r1.service`, invocation
+`27949ae7c24049c2a18deedc9e654ec4`. All six structural error classes retain their
+original fatal policy. **11 host tests** cover the source transfer, profile
+rejections, parallel native controls, resource-guard mutants and exact sequencer
+ownership.
+
+One matched synthesis starts at **2026-10-16 06:52:59 UTC** under
+`ventium-sfetch-interior-synth-oct16-r1.service`, invocation
+`ad8028d56f994bd8ac7a081b4ded17c9`; native exclusive scope invocation
+`15acde49eb6c4784af3065d3ed965e44`. The existing 8 GiB RAM / 6 GiB swap cap,
+13 GiB combined early stop, 4 GiB free-disk floor, 2 GiB host reserve and
+45-minute native deadline are unchanged. Disk admission retains twice the
+measured parent's growth above the floor; no second Vivado family is allowed.
+
+The [one-shot sequencer](../../fpga/run_sfetch_interior_timing_sequence.py),
+owner `ventium-sfetch-interior-timing-chain-oct16-r1.service`, invocation
+`e4ffeb87989f40a3937f8f6ad535db88`, observes this exact synthesis, independently
+audits its native closure, then runs the prepared read-only clock comparison.
+It cannot retry synthesis, start implementation or deploy a bitstream. Timing
+results remain **pending**; neither a 40 MHz constraint nor passing compilation
+establishes 40 MHz capability.
+
 ## Remaining qualification
 
 The bounded whole-core comparisons above are complete; they are not exhaustive
-correctness proof. Next require exact source transfer, short CoreMark controls,
-matched synthesis/path analysis, then routed 40 MHz closure. Mapping
+correctness proof. Exact source transfer and short CoreMark controls are now
+complete. Next require matched synthesis/path analysis, then routed 40 MHz closure. Mapping
 may reshare logic; a cleaner expression is not evidence of faster hardware.
 The canonical gate, complete standard suite, and matching physical-board Win95
 cold desktop/input and complete Quake timedemo remain mandatory.
