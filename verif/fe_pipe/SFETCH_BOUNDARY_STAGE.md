@@ -132,16 +132,17 @@ and clock audit are closed, below. The unplaced estimate improves, not sign-off.
 Canonical repair, full standard suite, ≥40 MHz synthesized/routed closure,
 candidate FPGA Win95 cold desktop/UI and a completed Quake timedemo remain open.
 
-The newer [older-model gameplay audit](../../fpga/audit_decode_bus_gameplay_window_r2.py)
-checks **0.49046518 total U+V IPC** on
-`7e877b3b9e43c2867fa3adcd93419c9b9f5fbca30b1a1ef9acacada04539ec68`, cycles
-**1,600,065,247–1,700,065,247**: 37,998,050 U and 11,048,468 V retirements
-in 100,000,000 clocks. U-only IPC is **0.37998050**, not total architectural IPC.
-It checks live process ownership, UV-fast configuration, 13,858 input pins,
-actual counter spacing, no OOM and two raw, visually inspected gameplay frames.
+The latest [older-model gameplay audit](../../fpga/audit_v_result_gameplay_observation.py)
+checks **0.50229051 total U+V IPC** on
+`b6b92dbfde2c6148fde30b5c65cac8217f650f7bbc1a7d4c0bd58fe95f706c9e`, cycles
+**1,400,065,247–1,500,065,247**: 38,787,572 U and 11,441,479 V retirements
+in 100,000,000 clocks. U-only IPC is **0.38787572**, not total architectural IPC.
+It checks live process ownership, UV-fast configuration, 18,622 input pins,
+actual counter spacing, no OOM and raw, visually inspected gameplay frames 9/10.
 This is a post-hoc window, **not timedemo completion or FPGA performance**.
-It predates the V-result, input and current fetch-stage candidates; those
-candidates still have **no verified gameplay IPC**.
+It predates the input and current fetch-stage candidates; those candidates
+still have **no verified gameplay IPC**. Evidence:
+`v-result-carry-gameplay-window-1400-1500M-oct16-r1.json` under the evidence root.
 
 ## Full-PC transfer and timing run — October 16 continuation
 
@@ -254,3 +255,74 @@ paths, lengths, inodes, timestamps and full SHA-256 digests are preserved.
 Receipt: `aug16-qk3-snapshot-sparse-pages-oct16.json`; available space rose from
 8,759,951,360 to 13,958,987,776 bytes. Active runs, source, media and native
 binaries were not removed or changed.
+
+## Retained-input composition on the faster parent
+
+The later [prime-width experiment](../l1/PRIME_WIDTH_PAYLOAD.md) regressed to
+**32.918559 MHz unplaced**, with 1,165 additional LUTs, and is rejected. Its
+queued UI compilation was cancelled before starting. The boundary-stage
+parent remains the basis for input integration; none of the rejected width,
+interior-fetch or backing-direction changes is included.
+
+[`build_boundary_ui_soc.py`](../../fpga/build_boundary_ui_soc.py) composes
+`boundary-ui-soc-r1` with the already-tested retained-input parent
+`0e25af3b6831e0acc44a0f0faba224f66316be2a499127165a66534893983779`.
+It rechecks **22,297 input pins** and keeps all 102 shared CPU/FP sources and
+157 definitions unchanged. Only the platform `ps2.v` changes to the qualified
+controller (`9c9d62149a25a5e3f97683ca269b77d01dcf4034517c02a225a5bce0bd2dc405`);
+the new private host is byte-identical to the qualified keyboard host and uses
+its exact headers and `kb_fifo_rdreq` binding. No objects or guest state are
+copied. Its builder preserves the parent's explicit +21-clock diagnostic
+policy and the measured short-seed costs above; it does not pretend the
+canonical gate passes or that the original boundary cost disappeared.
+
+Owner `ventium-boundary-ui-build-oct16-r1.service`, invocation
+`00c0672307f1495f943bdd7755b83e41`, closes native exit0 / MainPID0 in **23.28
+seconds**. The guarded compiler uses 32 threads with its original 10 GiB RAM /
+2 GiB swap cap. The new local harness object binds to this model's generated
+header. All input pins and the **98 inherited full-PC structural warnings**
+are unchanged; this is not a full-SoC lint pass. Model:
+`afb30954ff40f52727d680e12bcc2dd229f427dcf932f329685d0e109a4c2710`.
+
+[`boundary_ui_controls.py`](../../fpga/boundary_ui_controls.py) preserves the
+existing cold input and short-CRC guests, grading, native ownership and limits.
+Eight host tests pass, including rejected source/parent/binary drift and
+mutants that erase the measured cost, suppress V retirements or claim a
+canonical/standard-suite pass. The native controls closed successfully on
+CPUs16/17 (keyboard) and 12/13 (CRC), with 2 GiB RAM / no swap per owner and
+the existing 480/600-second per-child limits:
+
+- **Cold keyboard:** translated and raw scan-code guests both pass in
+  **109.01 / 107.19 seconds**, exit0, with 29,326 / 29,321 actual V retirements.
+  Each gets exactly nine original wire bytes; guest reads match the expected
+  six translated or nine raw bytes. All commands drain, both children are
+  waited/reaped, and peak memory is **59,719,680 bytes**, no OOM. The unchanged
+  [independent grader](../ps2_ui/audit_retained_pc_input.py) rechecks **22,303
+  input pins**, the exact closed native owner/argv/affinity, byte sequence and
+  ordinary cold UV-fast execution. Evidence: `boundary-ui-input-r1/audit.json`.
+  Owner `ventium-boundary-ui-input-oct16-r1.service`, invocation
+  `1181f134a7104f1b916ece6570cb46ef`, is closed exit0 / MainPID0. This is input
+  transport, **not Win95 desktop interaction or graphics acceptance**.
+- **Input-disabled short CoreMark:** both seeds match all five reference CRCs
+  and exactly the boundary parent's **4,771,298 / 4,755,366 clocks**, with
+  1,055,307 / 1,054,254 actual V retirements. No additional cycle cost or gain.
+  Native times are **210.55 / 210.81 seconds**, both exit0 and waited/reaped;
+  peak memory is **65,945,600 bytes**, zero swap/OOM. Independent regrading
+  checks **22,340 input pins**, unmodified disk/ROMs, native lifetime and exact
+  cycle equality. Evidence: `boundary-ui-soc-r1/coremark-ui-disabled-r1/audit.json`.
+  Owner `ventium-boundary-ui-cm10-oct16-r1.service`, invocation
+  `535918fecdaf47db9afd1773bd3a6558`, is closed exit0 / MainPID0. The guest still
+  prints the expected under-ten-seconds error; the checker allows **only that
+  explicit short-duration failure**, not other errors. These remain
+  **duration-invalid diagnostics**, not accepted scores or full correctness
+  seeds.
+
+The eleven existing prime-width/UI host tests also remain green. No new
+Vivado or guest run was launched by the independent auditors. The canonical
+failure, full standard suite and physical-board requirements remain open.
+
+The separate [FPGA keyboard injector repair](../../fpga/KBD_INHIBIT.md) is not
+part of this PC host model. Its management-CSR/controller tests are separate
+evidence; final hardware still needs the controller, injector and corrected
+posted-mouse wrapper together. This composition has no synthesized/routed
+frequency, gameplay measurement or physical FPGA acceptance yet.
