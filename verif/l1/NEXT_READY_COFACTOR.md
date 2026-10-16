@@ -152,16 +152,66 @@ an unsupported prediction of this candidate's disk consumption. The
 [sequencer](../../fpga/run_next_ready_timing_sequence.py) can observe only one
 exact synthesis invocation and then run its read-only clock report; it cannot
 retry synthesis or start implementation/deployment. Resource-stop mutants and
-identity-only sequencer tests pass. Actual candidate timing remains unmeasured.
+identity-only sequencer tests pass. The closed timing result is recorded below.
 
 After both short seeds and their audit closed, one synthesis was launched:
 `ventium-next-ready-synth-oct16-r1.service`, invocation
-`881fba3884214158a222ab511a4d4e13`. Its final result is pending; do not infer
-completion or a frequency gain from successful admission. No placement,
+`881fba3884214158a222ab511a4d4e13`. It closed native exit0 / MainPID0 at
+**06:12:54 UTC**, in **1,916.44 seconds**. The independent synthesis audit
+passes: all **25,436 input pins**, **159 actual definitions** and **150 native
+read-Verilog files** are checked; only the intended L1 payload differs.
+Peak RAM is **8,589,930,496 bytes**, peak swap **503,562,240 bytes**, no OOM
+or resource-stop event. The previous family was reaped before the read-only
+clock job `ventium-next-ready-clock-oct16-r1.service`, invocation
+`9dd8c2692ecf4a948767faa282048d37`, started. It subsequently closed native exit0
+and MainPID0 in **472.99 seconds**, with **4,666,085,376 bytes** peak RAM,
+zero swap and no OOM. Its independent audit checked **25,411 input pins**;
+the exact sequencer also closed successfully. Audit success establishes report
+provenance and native closure, **not timing acceptance**.
+
+Mapped LUT use is **187,309 versus 187,990** for the matched parent: **681
+fewer LUTs (0.36%)**. Registers are **55,217 versus 55,218**; **277.5 BRAM
+tiles and 47 DSPs** are unchanged. This is mapped-area evidence, not a measured
+frequency or gameplay gain. No placement,
 routing, bitstream generation or board programming is authorized by this
 diagnostic controller. Fourteen transfer/CRC/export/CAD/sequencer tests pass;
 the earlier failed preparation attempt was a Python path-type error before
 controller generation or any Vivado launch, not a synthesis failure or pass.
+
+### Matched timing result: regression, not a 40 MHz candidate
+
+| Same 25 ns core constraint / synthesized netlist | Boundary-stage parent | Next-ready cofactor |
+| --- | ---: | ---: |
+| Worst core setup slack | -2.050 ns | -3.614 ns |
+| Unplaced fmax estimate, `1000 / (25 - WNS)` | 36.968577 MHz | 34.947928 MHz |
+| Mapped LUTs | 187,990 | 187,309 |
+
+The **1.564 ns worse slack / 5.47% lower frequency estimate** outweighs any
+claim that this small LUT reduction solved timing. Neither column is routed
+sign-off or measured board frequency. Do not promote this cofactor as a timing
+win or start implementation on that basis. The underlying functional/cycle
+equivalence results remain valid but establish a different property.
+
+The candidate's worst path is `q_pc_reg[0]` to
+`u_regfile/gpr_reg[4][16]/D`, **96 logic levels**, **28.403 ns** data delay:
+6.058 ns logic and 22.345 ns estimated interconnect. The native report crosses
+fetch alignment/prefix decode, `d_len` / `d_fetch_need`, `sfetch_want_size`,
+fragment/route qualification, backing-address selection, quadword pair credit,
+`b_pair_ready`, `c_pair_intent_ready`, `l1_store_pair_ready`, `c_pair_req0`,
+`m_pair_ack`, and `l1_c_ack` before register-file writeback. These are observed
+mapped-net names; hierarchy/name reuse after synthesis is not a source-level
+proof that every stage can be sensitized together.
+
+Next investigation: explicitly factor the interior-fetch size selector, which
+still traverses `sfetch_want_size` even though that selected arm first overrides
+the decoder count with four. Keep its exact page clip. The earlier separate
+[backing-payload mux experiment](BACKING_PAYLOAD_MUX.md) already failed to
+improve timing; merely repeating that rewrite is not evidence of progress.
+Preserve the two P5 write-buffer slots, fused-pair credit,
+extent/fault checks, shutdown/reset behavior and all same-cycle acknowledgments.
+Do not disable pairing, add blanket wait states, waive paths, or infer an RTL
+fix from the unplaced route estimate alone. Reports and independent audit are
+retained in `next-ready-clock-r1` beneath the evidence root above.
 
 ## Still open
 
@@ -176,7 +226,8 @@ harness basename prevents external object reuse. Source preparation checks
 both full parent closures and the closed cold-input, actual-controller and
 full-FIFO evidence; no CPU experiment or new build definition is mixed in.
 
-This composition is **prepared, not yet compiled or accepted**. The bounded
+This composition **compiled and passed its short controls; it is not accepted**.
+The bounded
 [build owner](../../fpga/run_next_ready_ui_build.py), unit
 `ventium-next-ready-ui-build-oct16-r1.service`, invocation
 `ee6638e17fc548239e426eb1c5e81a01`, waits for exact CAD sequencer invocation
@@ -184,11 +235,50 @@ This composition is **prepared, not yet compiled or accepted**. The bounded
 synthesis/clock closure, then permits one build through the unchanged exclusive
 32-job build scope. Owner replacement, failure, disk reserve loss or the
 50-minute observation deadline prevents compilation; none causes a CAD retry.
-Three transfer/sequencing guard tests pass. No guest or bitstream is launched
+Six transfer/sequencing/control/audit guard tests pass. No guest or bitstream is launched
 by this owner. Public-pin input in this PC model does not qualify the FPGA
 debug-MMIO serializer or physical Windows UI.
 
-Matched synthesis/routed timing, full standard suite, canonical failure repair,
+The composed model's [cold input runner](../../fpga/run_next_ready_ui_input.py)
+retains the original raw/translated public-port guest, native wire/guest-read
+grader, timing, process bounds and QEMU negative control. Its
+[parallel short-seed runner](../../fpga/run_next_ready_ui_coremark.py) retains
+both original CoreMark images, all CRC checks, actual affinity/child-lifetime
+checks and exact **4,771,298 / 4,755,366** timing-parent kernel clocks.
+The [independent auditor](../../fpga/audit_next_ready_ui_coremark.py) regrades
+the original console/log data and parent results. These controls cannot award
+full-duration scores or standard-suite acceptance.
+
+The queued build completed in **23.52 seconds**, native exit0, inputs unchanged,
+private harness object bound to this model's generated header. Model SHA-256:
+`e42cd5d8974d5e471995b18b4bbde3b32e723c2a336360cd24731c9312376449`.
+Its **98 inherited structural warnings are unchanged**, not waived or counted
+as a full-SoC lint pass. The queue's exact CAD-owner/closure checks also passed.
+
+Both cold keyboard guests passed in **108.61 / 108.60 seconds** on actual
+CPUs 16 / 17. The normal translated guest consumed `1d/01/81/9d/1c/9c`; the
+raw guest consumed all nine original set-2 bytes, with no missing/duplicate
+wire or guest read. Both stopped gracefully after the pass, with zero pending
+or owned bytes and exit0. Independent audit checked **25,502 source pins**,
+native ownership and unchanged media. Peak memory **52,133,888 bytes**, no OOM.
+Owner `ventium-next-ready-ui-input-oct16-r1.service`, invocation
+`aa635dafaf9841018024644b9645c669`, is terminal/MainPID0. Evidence:
+`next-ready-ui-input-r1/{started,closed,audit}.json` and both native logs.
+This is public-pin keyboard transport, **not Windows interaction or FPGA MMIO**.
+
+The concurrent 10-iteration CoreMark controls passed all five reference CRCs
+for each seed in **218.58 / 217.57 seconds**, actual CPUs 12 / 13, native exit0.
+Kernel ticks remain exactly **4,771,298 / 4,755,366**: **0% cycle change** from
+the timing parent, while retaining 1,055,307 / 1,054,254 cumulative V retires.
+These short runs deliberately have the benchmark's duration-invalid diagnostic;
+they do not establish an error-free standard-suite pass or valid CM/MHz score.
+Independent audit checked **25,539 source pins**, raw console/CRCs, observed
+child argv/affinity, original parent ticks, and reaped processes. Owner
+`ventium-next-ready-ui-cm10-oct16-r1.service`, invocation
+`40f7160fa90b4281abee06f14fdb3eb0`, closed MainPID0 with no OOM and peak memory
+**61,640,704 bytes**. Evidence: `next-ready-ui-soc-r1/coremark-ui-disabled-r1`.
+
+Routed timing meeting 40 MHz, full standard suite, canonical failure repair,
 candidate FPGA Win95 cold desktop plus keyboard/mouse interaction, and a full
 candidate FPGA Quake timedemo remain required. The boundary-stage parent's
 measured boundary-fetch costs are inherited, not repaired by this cofactor.
