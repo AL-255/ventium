@@ -424,3 +424,50 @@ passes 16 actual-iobus cases against 16 required current-parent loss witnesses.
 It remains isolated from the live CAD source and needs the documented broader
 controller/host/full-PC/FPGA validation. At the last check, corrected-wrapper
 synthesis remained active with no OOM or swap; its clock audit had not started.
+
+## October 16: current CPU candidate cold Quake started
+
+The V-result CPU model now has its own cold FreeDOS Quake run; it is no longer
+waiting behind the older decode-bus observation. Owner
+`ventium-v-result-carry-quake-oct16-r1`, invocation
+`2c4e771b55e141d98f2ed235d37cc5f1`, started at 01:17:04 UTC. Actual native
+PID 2100579 is confined to **CPU 14**, with binary SHA
+`b6b92dbfde2c6148fde30b5c65cac8217f650f7bbc1a7d4c0bd58fe95f706c9e`.
+The older model remains independently active on CPU 11; neither result is
+credited to the other. Current-candidate gameplay IPC is still **unmeasured**.
+
+`fpga/prepare_v_result_carry_cold.py` preserves the existing cold flow's guest,
+native arguments, output/EOF/completion checks and limits, changing only model,
+run identity and CPU assignment. Two host tests check this exact adaptation and
+reject partial, tainted or unclosed timedemo results. All **18,586** candidate
+build-input pins rehash successfully before launch; the live owner repeats that
+check. Its independently observed native admission confirms the binary hash,
+PID/start time, parent, cgroup, command and actual CPU affinity.
+
+The run uses a fresh private 64 MiB-class guest disk, cold reset, no snapshots or
+guest patches, 16 MiB guest RAM, 40 MHz core/RTC timebases, 80 MHz VGA and the
+actual posted AXI transport (16 slots, B delay 20, first R 21, gap 1). It keeps
+UV + fast-pipe build settings, no STEP/breakpoint request and normal fallback.
+The same model's directed tests already observed actual V retirement; its
+new cold-run gameplay/V counter evidence is pending. Startup counters are not
+reported as gameplay IPC.
+
+Limits remain one CPU, 2 GiB RAM, no swap, 160 tasks, 4 GiB per-file limit,
+three-day native deadline / 73-hour owner lifetime, 6 GiB free-disk admission
+and 4 GiB live disk stop. The full **969-frame** timedemo and clean native
+closure are still required. Evidence is under
+`external/tmp/ventium-fprem-sequence.iSZ9BAj4/v-result-carry-soc-r1/quake-cold-v-result-carry-oct16.1/`.
+This model includes the current AUX-status fix but **not** the isolated PS/2
+loss/resync proposal or the FPGA-only mouse wrapper. It cannot qualify either
+as physical-board behavior. Win95/UI, canonical gates, both complete CoreMark
+seeds, routed timing and physical FPGA acceptance remain open.
+
+The [extended PS/2 checks](../ps2_ui/LOSS_AUX_IOBUS.md) separately pass all 12
+new RX-skid/self-test/translation cases. The first transport run remains failed
+under its original deadline; an assertion-preserving bounded diagnostic proves
+the apparent mouse loss is the newly introduced reset-inhibit latency, not
+lost command data. No live controller or hardware input was changed.
+
+Latest verified gameplay baseline remains **0.48146083 total U+V IPC**, older
+model `7e877b3b…`, cycles **1,100,065,247–1,200,065,247**. The current candidate
+is unmeasured; this new launch is not a standard-suite pass or performance gain.
