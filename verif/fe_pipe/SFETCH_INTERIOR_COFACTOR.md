@@ -198,6 +198,36 @@ It cannot retry synthesis, start implementation or deploy a bitstream. Timing
 results remain **pending**; neither a 40 MHz constraint nor passing compilation
 establishes 40 MHz capability.
 
+## Prepared input-repair composition
+
+While that exact CAD sequence runs, the [source-only UI transfer](../../fpga/build_sfetch_interior_ui_soc.py)
+prepares `sfetch-interior-ui-soc-r1`. It rechecks both closed parent builds,
+the exact short CoreMark control audit, all source pins and the qualified
+controller/injector pressure-test evidence. No CPU source, memory timing,
+definition or fast-pipe connection changes. The only platform RTL replacement
+is the previously tested `ps2.v` controller
+`9c9d62149a25a5e3f97683ca269b77d01dcf4034517c02a225a5bce0bd2dc405`.
+Its native input host and `kb_fifo_rdreq` binding are copied exactly from the
+qualified input parent `0e25af3b6831e0acc44a0f0faba224f66316be2a499127165a66534893983779`.
+The new C++ basename is private to this model; generated objects are not copied.
+The prepared source closure has **28,816 pins**.
+
+Three transfer tests reject modified CPU/controller/host sources and verify
+the closed-cycle controls; two build-owner tests reject replaced, failed,
+missing and nonterminal CAD owners. The [one-shot build waiter](../../fpga/run_sfetch_interior_ui_build.py)
+runs under `ventium-sfetch-interior-ui-build-oct16-r1.service`, invocation
+`53e924c6530d4c6cb42cc694b8626fb4`. It observes the exact timing-chain invocation
+above and cannot compile until both native CAD phases and their independent
+audits close successfully. It retains the original exclusive build lock,
+32-job resource guard, Verilator version probe and 5 GiB disk admission.
+
+At this update it is **waiting; no combined model has been compiled or run**.
+A prepared tree is not input qualification for this CPU. After compilation,
+the unchanged raw/translated cold-input guest and both short CRC controls must
+run on its actual binary. Full Win95 UI, full standard suite and matching
+physical FPGA tests remain separate. This preparation does not change the
+in-flight hardware export or silently inherit its eventual timing result.
+
 ## Remaining qualification
 
 The bounded whole-core comparisons above are complete; they are not exhaustive
