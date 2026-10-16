@@ -486,6 +486,99 @@ under the evidence root. Each affected directory has `compiler-archive.json`
 with exact members, SHA-256 and a `tar --zstd -xf ... -C ...` recovery command.
 All selected products were checked against the live timing proof's input pins.
 
+### AXI cycle-band diagnosis — native-only, not a replacement pass
+
+The nine failed bands were replayed with the **same** core binary
+`5a2fcb865e53dc67a3f866ab1edbc8bbbc4917708e984a62d60bc8400c67f2d3`,
+153 build definitions, saved flat images and saved CYCLE argv. Only output
+paths and `AXI_RLAT` changed. The read-latency sweep is **0, 1, 7**, with
+`AXI_WLAT=7` throughout and random-gap injection unset. Every case also ran
+with `--cycle-func` to compare complete architectural state, not merely PCs.
+The testbench connects both trace modes to `cycle_mode=1`; all runs select
+`--l1-axi`, with no STEP, breakpoint, trace suppression, or pairing override.
+
+`verif/lib/diagnose_axi_cycle_latency.py` launches only the prebuilt native
+model: no Verilator, compiler, golden generation, RTL edit or band change.
+Six host rejection tests pass. The diagnostic owner
+`ventium-cycle-axi-latency-oct16-r1.service`, invocation
+`daadf889c99a4136ad75b146ea0fb56d`, closed successfully at
+**2026-10-16 14:26:27 UTC**, approximately ten seconds after launch. Its two
+workers were observed in the owner's cgroup on CPUs **12 and 13**; peak memory
+was **179,249,152 bytes**, under the 2 GiB / 256-task cap. Each native child had
+a 60-second wall limit and the owner a ten-minute startup limit. The existing
+Vivado family remained separate and was neither restarted nor reconfigured.
+
+All **54 native runs pass** their diagnostic checks. The 31,898 full functional
+records per latency are identical across all three latencies, without masks.
+All nine latency-7 cycle streams exactly reproduce the earlier failed run.
+Each run has actual AXI backing activity, U/V counter reconciliation, and
+nonzero fast paired execution. `verif/lib/audit_axi_cycle_latency.py` independently
+rehashes **268 input/artifact pins** and recomputes counters, complete trace
+equality and unchanged M5 verdicts. Evidence is under
+`cycle-axi-latency-r1/` in the evidence root, including `audit.json` and closed
+receipt SHA-256
+`04e8cdcac0f6c2d78fa38735cc3ebcdc90161ba14b75d91a5eee81aa823992a2`.
+
+| Kernel | Clocks, RLAT 0 | Clocks, RLAT 1 | Clocks, RLAT 7 | Existing band at RLAT 0 |
+|---|---:|---:|---:|---|
+| `mb_depadd` | 3,506 | 3,666 | 4,626 | PASS |
+| `mb_indepadd` | 1,908 | 2,068 | 3,028 | PASS |
+| `mb_faddchain` | 9,354 | 9,490 | 10,306 | PASS |
+| `mb_dmiss` | 22,573 | 38,967 | 137,367 | PASS |
+| `mb_imiss` | 34,170 | 50,250 | 146,730 | FAIL |
+| `mb_mul` | 5,243 | 5,259 | 5,355 | PASS |
+| `mb_imul2` | 5,257 | 5,281 | 5,425 | PASS |
+| `mb_rmimm` | 2,071 | 2,103 | 2,295 | PASS |
+| `mb_nearbr` | 1,340 | 1,396 | 1,732 | PASS |
+
+**Finding:** the frozen harness reloads `AXI_RLAT` after **every R beat**, not
+just the first beat. For eight kernels, the entire RLAT-7 to RLAT-0 clock
+difference equals exactly `7 * backing_acks`. `mb_dmiss` differs from that
+formula by six clocks; the measurements alone do not establish that small
+endpoint/overlap difference's cause. Thus eight band failures disappear under
+the zero-added-delay diagnostic, without changing the processor. This is not
+an eight-bug RTL repair, a hardware speedup, or permission to change the
+acceptance latency. `AXI_RLAT=0` also does **not** mean zero total memory latency.
+
+The remaining `mb_imiss` gap is **10,055 clocks** against the plugin's 24,115
+clocks (+41.70%) at zero added delay. The native profile accounts for **every
+one of its 34,170 clocks** using mutually exclusive state/bail categories:
+
+| Category | Clocks |
+|---|---:|
+| `S_PF`, remaining seven fill words for 2,010 lines | 14,070 |
+| `S_PIPE`, instruction bytes absent | 10,052 |
+| Registered I-cache fetch-read wait | 2,010 |
+| Branch-mispredict bubbles | 6,023 |
+| Issue clocks | 2,011 |
+| Non-simple handoff | 1 |
+| Other FSM clocks | 3 |
+| **Total** | **34,170** |
+
+There are **2,012 U + 2,007 V retirements**, not collapsed dual issue. The
+line-fill path accounts for approximately 13 clocks per line before branch
+and issue costs, versus the plugin's fixed eight-clock miss charge. The exact
+aggregate gap is `2,010 * 5 + 5`; this localizes the residual to the real refill
+and fetch pipeline versus the abstract model, rather than proving that the
+model's absolute timing is a silicon oracle. The source's claim of a pure
+I-cache workload is also incomplete: disassembly of the actual saved ELF
+shows GAS inserted a short `JMP` in each alignment gap. Those branches execute
+and their measured misprediction bubbles must not be ignored.
+
+Next steps: retain the original seven-cycle functional/fault stress; measure
+first-beat versus inter-beat latency separately against the real bridge before
+claiming hardware equivalence. Investigate the word-0 handshake and registered
+fetch-read cost with directed refill tests. Any early restart or fill bypass
+must preserve partial-line validity, snoop/SMC invalidation, redirects and
+late AXI-error ownership, including line/page-boundary instruction fetches.
+Do not remove waits or relax the bands simply to turn the gate green. No RTL
+or harness timing policy was changed by this diagnostic.
+
+The matched synthesis remains live: at **14:29:03 UTC**, elapsed 886 seconds,
+its owned scope used 8,325,263,360 bytes RAM, zero swap and had zero OOM events,
+with 6,381,182,976 bytes disk free and no resource stop reason. This is not a
+new frequency, utilization or board result.
+
 ## Remaining gates
 
 Before accepting the whole-core candidate:
