@@ -94,6 +94,33 @@ ESP `0x40800020` versus `0x40800030`, so that comparison was rejected. The
 replay uses the candidate's actual flat images and golden-derived initial ESP;
 it does not normalize or ignore ESP.
 
+### Fresh private-reference qualification and broader x87 delivery
+
+`system-read-ack-func-r1/audit.json` now independently checks a fresh
+**108/108 functional pass**, 80,800 complete records and 30,132 V retirements,
+against qualified private reference
+`998b4f5d3eda4493f391ea6775adcc88f3dd810ba2829f7d635cac27877f9b85`.
+This reference includes separately qualified x87/status and live pre-exit
+observation repairs. It is explicitly selected, **not promoted to canonical
+QEMU**. The unchanged comparator/worker and existing masks are retained;
+105 cases also pass unmasked, while `tx_regform`, `tx_regform2` and `tx_stack`
+retain their existing unmasked failures. All executable input images match;
+54 ELF differences are solely non-loadable compiler temporary-file metadata.
+
+The retained owner is `ventium-system-read-ack-func-oct16-r1.service`, invocation
+`308ed25771dc4c8f9f90f1be75d32ca7`, closed successfully. The auditor checks
+12,365 input pins, actual CPU 4–7 affinity, native closure and fresh goldens.
+The parent-to-candidate source change is still exactly the original nine files.
+Two additional driver/auditor contract tests pass. This does not change the
+failed canonical verdict or its nine failed cycle bands.
+
+[Strict waiting-instruction delivery](../srt/STRICT_MF_WAITERS.md) additionally
+checks 29 x87 forms using the same candidate: 174/174 candidate runs and
+338,730 full records match the immediate parent, including exact clocks.
+All 522 native executions, including an explicitly older non-strict diagnostic
+control, are retained. Six host contract/grader tests pass. These are directed
+architectural self-checks, not a new QEMU or standard-suite pass.
+
 Failed infrastructure attempts are preserved, not called passes:
 
 - Leaf launch r1 omitted the build guard's required `--` and exited before
