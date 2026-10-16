@@ -471,3 +471,36 @@ lost command data. No live controller or hardware input was changed.
 Latest verified gameplay baseline remains **0.48146083 total U+V IPC**, older
 model `7e877b3b…`, cycles **1,100,065,247–1,200,065,247**. The current candidate
 is unmeasured; this new launch is not a standard-suite pass or performance gain.
+
+## October 16: corrected-wrapper synthesis and source audit passed
+
+`posted-mouse-synthesis-r1` closed at **01:19:08 UTC**, native 0, in
+2,017.992 seconds. The independent audit then passed under the original
+retained owner, checking **19,927 input pins**, 150 native `read_verilog`
+inputs and all 159 hardware defines. Both mouse mailbox and device are now
+actually synthesized, with no unresolved mouse CSR/line-driver omission.
+All sources remained unchanged, peak scope RAM was 8 GiB, swap was zero,
+and no sampled OOM or resource-stop event occurred.
+
+The new DCP SHA-256 is
+`9354b17d35b1c0cb4a49bf1bcd00cf6e511b8253c5b250b427d10e6764741315`.
+Utilization is **188,884 LUTs (55.35%), 55,209 registers, 277.5 BRAM tiles and
+47 DSPs**. Against the matched pipe-wait predecessor this is 872 fewer LUTs
+and 168 more registers. This comparison includes the V-result carry cut,
+AUX repair and mouse-wrapper integration; it is **not** an isolated per-fix
+area gain. The incomplete old R3 image remains rejected.
+
+The native synthesis retains one critical warning about a generated PS8 XDC
+`create_clock` target, also present in the predecessor; it is not silently
+removed or called a warning-free result. The separate timing audit checks the
+actual active clocks and unconstrained paths. It has confirmed `clk_pl_0`
+at **100 MHz** and `mmcm_clk` at **40 MHz** as constraints; those are not fmax
+results or measured board rates.
+
+The read-only timing owner `ventium-posted-mouse-clock-oct16-r1`, invocation
+`14a67035bb154378890aa2df53642efc`, started after source-audit success and is
+still running. No implementation or programming was launched. New fmax and
+routed frequency remain pending; the last audited predecessor estimate is
+**37.9507 MHz unplaced**. The current cold Quake candidate is also still live
+and gameplay-unmeasured. Latest verified gameplay remains **0.48146083 U+V**
+on older model `7e877b3b…`, cycles **1,100,065,247–1,200,065,247**.
