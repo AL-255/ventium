@@ -214,7 +214,8 @@ audit rechecks **68,320 pins**, every payload and exact three-delta recipes;
 `raw-prime-storage-fpga-r1/source-audit.json` passes. Its unit
 `ventium-raw-prime-storage-seal-audit-oct16-r1.service` closes exit0 / MainPID0,
 invocation `4dd55d8bfdd6429e8924ef1d89e5b938`, peak memory 112,570,368 bytes.
-No Vivado or board action has started.
+The subsequent matched Vivado run is now live, as recorded below; no board
+programming or new physical acceptance has occurred.
 
 Resource housekeeping removed **24 regenerable PCH files / 2,209,299,500 bytes**
 from closed builds, preserving and rehashing 6,011 source/log/receipt/binary
@@ -222,6 +223,78 @@ files. No source, guest image, executable or test trace was deleted. Receipt:
 `closed-pch-prune-oct16-r2.json`. The failed cache R2 was excluded before deletion
 when its incomplete row count failed preflight. There was no Chrome browser
 process to close; other applications were left alone.
+
+## Matched synthesis in progress
+
+Strict CPU-hierarchy lint of the exact **159-definition hardware profile**
+passes in **3.78 seconds**, with unchanged inputs and the six existing fatal
+structural classes. This does not qualify the complete wrapper or erase the
+98 inherited full-PC warnings. Evidence: `raw-prime-storage-lint-r1`;
+unit `ventium-raw-prime-storage-lint-oct16-r1.service`, invocation
+`7a0acc68244f4c728186c318b5f83536`. Five timing-controller host tests also pass.
+
+The matched native synthesis started **2026-10-16 09:53 UTC**, under
+`ventium-raw-prime-storage-synth-oct16-r1.service`, invocation
+`fb55d51d4ed349029e1555ebd5e6a0dd`, controller PID2398716. Its single guarded
+Vivado family has scope invocation `a9873c3909494b4f87c4f6a2ae2a8b5d`;
+the synthesis worker is PID2401943. The parent and its native worker are not
+independent/orphan runs. Manifest and PC model are the exact sealed identities
+above. Mapper settings, 40 MHz core / 100 MHz PL constraints and the faster
+boundary-parent comparison are unchanged; the rejected prime-width experiment
+is not the timing baseline.
+
+`run_raw_prime_storage_timing_sequence.py` watches that exact invocation,
+audits its terminal result, and only then schedules the prepared read-only
+checkpoint timing report. It never starts implementation or deployment. Native
+limits remain 45 minutes, 8 GiB RAM / 6 GiB swap, a 13 GiB combined early-stop
+threshold and 4 GiB free-disk reserve. At the 10-minute check the native worker
+was live in cross-boundary/area optimization, without a completed checkpoint
+or measured candidate frequency. Evidence: `raw-prime-storage-synthesis-r1`
+and `raw-prime-storage-sequence-*`. These are **live, not closed PASS results**.
+
+A second pre-launch cleanup removed only **10 regenerable PCH files /
+904,073,303 bytes**, rehashing **2,171 preserved files**. This included the two
+successfully closed positive children of the otherwise failed cache R2 run;
+its failed mutant artifacts remain untouched. Sources, guest media, binaries,
+receipts and traces were retained. Receipt: `closed-pch-prune-oct16-r3.json`.
+
+## Complete-trace diagnosis of remaining cycle failures
+
+The new read-only [loop-budget analyzer](../fe_pipe/analyze_loop_cycle_budget.py)
+accounts for every clock in four existing canonical cycle traces, including
+startup and exit. It checks complete equal retirement-PC streams, contiguous
+indices, monotonic clocks, explicit loop-entry addresses and independent FSM
+clock totals. Seven host tests reject truncation, tail divergence and bad
+accounting. No simulator rerun, trace trimming, gate change, new mask or altered
+timing tolerance is involved. Evidence:
+`raw-prime-storage-cycle-budget-oct16-r1.json`.
+
+| Kernel | RTL / golden total | Excess before first entry | Excess first traversal | Excess subsequent complete traversals | Excess final traversal + exit |
+|---|---:|---:|---:|---:|---:|
+| `mb_depadd` | 4,626 / 3,400 | 65 | 1,160 | 0 | 1 |
+| `mb_indepadd` | 3,028 / 1,802 | 65 | 1,160 | 0 | 1 |
+| `mb_faddchain` | 10,306 / 9,201 | 64 | 1,035 | 4 | 2 |
+| `mb_rmimm` | 2,295 / 2,027 | 65 | 62 | 0 | 141 |
+
+Thus the integer add failures do **not** establish a steady-state pairing or
+ALU throughput defect. After the first traversal, all 14 measured intervals
+match the golden: dependent 203 instructions / 202 clocks; independent
+204 instructions / 102 clocks. `mb_rmimm` likewise repeats ten instructions
+in five clocks. The FP chain has one additional four-clock interval, then
+nine equal 757-clock intervals. These are directed loop observations, **not
+gameplay IPC, an accepted score, or a substitute for the still-failed totals**.
+
+The independent-add native log records exactly 20 L1 fills, 160 backing beat
+acknowledgements and 1,320 fill clocks, of which 1,160 are backing-wait clocks.
+The actual frozen testbench applies `AXI_RLAT=7` **before every R beat**, not
+only the first beat. The cycle oracle assumes an eight-clock cache miss.
+The 1,160-clock first-traversal difference is consistent with this transport
+cost; a cycle trace alone does not prove exclusive causation. Preserve this
+stress profile and original failures. Before changing execution hardware or
+claiming cycle-model fidelity, measure and reconcile the reference's memory
+contract with actual AXI request/response timing; do not simply widen bands
+or discard startup. The full-PC DDR model's first-beat/gap settings and physical
+board latency are separate measurements, not this stress model's parameters.
 
 Latest verified gameplay baseline is **0.50229051 total U+V IPC**, model
 `b6b92dbfde2c6148fde30b5c65cac8217f650f7bbc1a7d4c0bd58fe95f706c9e`, cycles
