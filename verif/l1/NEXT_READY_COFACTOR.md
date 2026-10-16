@@ -165,6 +165,29 @@ controller generation or any Vivado launch, not a synthesis failure or pass.
 
 ## Still open
 
+The [combined input-model builder](../../fpga/build_next_ready_ui_soc.py)
+prepares `next-ready-ui-soc-r1` from this exact full-PC parent. All 102 shared
+processor/FP sources and all 157 definitions remain identical. Its sole RTL
+delta is the [retained-AUX keyboard controller](../../fpga/KBD_INHIBIT.md),
+`9c9d62149a25a5e3f97683ca269b77d01dcf4034517c02a225a5bce0bd2dc405`.
+The host is byte-identical to the tested `retained-ui-soc-r3` input host, with
+its exact three headers and corrected named FIFO-read binding. A new private
+harness basename prevents external object reuse. Source preparation checks
+both full parent closures and the closed cold-input, actual-controller and
+full-FIFO evidence; no CPU experiment or new build definition is mixed in.
+
+This composition is **prepared, not yet compiled or accepted**. The bounded
+[build owner](../../fpga/run_next_ready_ui_build.py), unit
+`ventium-next-ready-ui-build-oct16-r1.service`, invocation
+`ee6638e17fc548239e426eb1c5e81a01`, waits for exact CAD sequencer invocation
+`53b5d32e82414436a25eee699e0d28dd` to exit successfully. It checks its native
+synthesis/clock closure, then permits one build through the unchanged exclusive
+32-job build scope. Owner replacement, failure, disk reserve loss or the
+50-minute observation deadline prevents compilation; none causes a CAD retry.
+Three transfer/sequencing guard tests pass. No guest or bitstream is launched
+by this owner. Public-pin input in this PC model does not qualify the FPGA
+debug-MMIO serializer or physical Windows UI.
+
 Matched synthesis/routed timing, full standard suite, canonical failure repair,
 candidate FPGA Win95 cold desktop plus keyboard/mouse interaction, and a full
 candidate FPGA Quake timedemo remain required. The boundary-stage parent's
