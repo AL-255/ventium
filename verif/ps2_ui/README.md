@@ -79,9 +79,10 @@ these keyboard checks. Do not launch another long Win95 run or count this as
 standard-suite/physical-FPGA acceptance until the input path is qualified.
 
 The retained-controller adapter now has native controller microtests and a
-successfully linked private whole-PC model. Its cold keyboard probe is running;
-no closed Ventium result yet. The probe's pinned QEMU positive/negative controls
-pass. See [current integration evidence](LOSS_AUX_IOBUS.md#cold-whole-pc-integration-probe),
+successfully linked private whole-PC model. Its two cold keyboard probes pass
+with exact guest reads and actual V retirements; an independent audit rechecks
+19,475 source pins and native closure. The pinned QEMU positive/negative controls
+also pass. See [current integration evidence](LOSS_AUX_IOBUS.md#cold-whole-pc-integration-probe),
 including the preserved failed link and its one-wire binding correction.
 
 No IPC gain is claimed. The current candidates are gameplay-unmeasured; the

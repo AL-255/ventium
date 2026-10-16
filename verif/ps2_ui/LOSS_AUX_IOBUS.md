@@ -211,16 +211,36 @@ Evidence under the same scratch root:
 `run_retained_pc_input.py` started at **03:04:58 UTC**, owner
 `ventium-retained-pc-input-oct16-r1`, invocation
 `6910ce34b0b4409ca5b490bf502cb6b2`, evidence `retained-pc-input-r1`.
-It uses the new compiled model and independently retained QEMU proof; **no
-closed Ventium result yet**. Two bounded cold
+It uses the new compiled model and independently retained QEMU proof. Two bounded cold
 boots use actual external PS/2 pins at a 1,667-clock half-period, not the legacy
 accelerated sender. The grader requires nine wire bytes, the exact six or nine
 guest reads, actual V retirements, the posted-16 AXI backend, clean endpoint
 completion and the guest's pass marker. Three parser tests reject missing,
 duplicated or wrong bytes, lost prefixes, incomplete commands, absent pairing,
 accelerated timing and reported errors. Parser tests are not RTL results.
-A text-mode capture being unavailable is explicitly **not** graphics or UI
-acceptance. Windows desktop interaction and mouse motion remain separate work.
+Both actual Ventium cold runs **pass** and stop cleanly at 6,500,000 clocks:
+
+| Controller mode | Guest reads (hex) | U / V retirements | Native time |
+|---|---|---:|---:|
+| Translated | `1d 01 81 9d 1c 9c` | 881,912 / 29,326 | 112.021 s |
+| Raw | `14 76 f0 76 f0 14 5a f0 5a` | 881,909 / 29,321 | 108.406 s |
+
+The external sender delivers exactly nine bytes once in each case. The guest
+independently reads and checks the real port-60 data; its displayed pass marker
+precedes the host-requested clean stop. Both native exits are 0, actual affinities
+are CPUs 16 and 17, and the endpoint ends empty with no outstanding ownership or
+error. Peak owner memory is 79,724,544 bytes, swap prohibited, OOM counters 0.
+There are no forced DUT-state writes, saved states, guest workload patches,
+STEP/breakpoint controls or disabled pairing. These retirement totals are
+diagnostic counts, **not gameplay IPC**.
+
+`audit_retained_pc_input.py` independently regrades the native logs and checks
+**19,475 source pins**, the model hash, commands, ROM/media, native waits,
+absent child processes and exact terminal owner identity. Its `audit.json`
+passes. This closes the tested cold keyboard transport integration, not the
+broader physical-device resynchronization contract. A text-mode capture being
+unavailable is explicitly **not** graphics or UI acceptance. Windows desktop
+interaction and mouse motion remain separate work.
 
 ## Remaining acceptance work
 
@@ -233,7 +253,8 @@ universal physical-keyboard abort/retry contract.
 The existing `pc_keyboard_input.h` adapter still describes the **old** FIFO
 arbitration and must not qualify this candidate unchanged. The new explicit
 retained binding above addresses delayed-commit observation; its full-PC link
-now succeeds but cold integration is still pending. Cold Win95 interaction, the whole
+and the two tested cold keyboard streams now pass. UI-disabled architectural/
+cycle comparison, cold Win95 interaction, the whole
 standard suite, full FPGA wrapper validation and matching physical-board runs
 remain required. No performance gain or completed repair is claimed.
 
