@@ -132,7 +132,7 @@ checks **43,224 input pins**, exact closed owner/invocations, original commands,
 cycle records**, and **163,956 actual V retirements**. Every current-parent /
 candidate stream and all nine probe totals match. No records are truncated and
 no masks or acceptance bands change. Evidence:
-`raw-prime-storage-core-checks-r1/audit.json`.
+`raw-prime-storage-core-checks-r1/parent-equivalence-audit.json`.
 
 The three historical aggregate differences are clocks 21,190,336 versus
 16,951,320; reference hints 24,352 versus 22,872; and primes 282,808 versus
@@ -147,6 +147,81 @@ revive rejected prime-width/interior/readiness experiments or drop the input
 repair. Matched synthesis/routing to at least 40 MHz, canonical repair,
 duration-valid CoreMark, the complete standard suite and matching physical
 FPGA Win95 cold desktop/UI and full Quake timedemo remain required.
+
+## Closed full-PC transfer and integration controls
+
+[`build_raw_prime_storage_soc.py`](../../fpga/build_raw_prime_storage_soc.py)
+starts from boundary/input model
+`afb30954ff40f52727d680e12bcc2dd229f427dcf932f329685d0e109a4c2710`,
+not a rejected timing experiment. It checks all **102 common processor/FP
+sources**, changes only the exact header, and preserves **157 definitions**,
+the retained 8042 controller, keyboard host and `kb_fifo_rdreq` binding. The
+new private harness basename prevents cross-model object reuse. All 20
+canonical cycle streams must remain parent-identical; the ancestor boundary
+cost and canonical failure remain explicitly recorded.
+
+The 32-job, guarded 10 GiB RAM / 2 GiB swap build closes exit0 / MainPID0 in
+**24.87 s**. Unit `ventium-raw-prime-storage-soc-build-oct16-r1.service`,
+invocation `e83d1a3c1a374e2a905ab7d91711cb14`; evidence
+`raw-prime-storage-soc-r1`. Model:
+`e9159acb28b80a9511a87cfca1872ab907f43eb3e6f2956dc1a3d3150bcd0fd7`.
+All 98 inherited SoC structural warnings are unchanged: this is not a clean
+full-SoC lint result. Six transfer/control host tests pass.
+
+[`raw_prime_storage_controls.py`](../../fpga/raw_prime_storage_controls.py)
+retains the previous guests, grading, time limits, CPU affinities and resource
+caps. Only lineage, input pins and exact parent comparison paths change.
+
+- Cold translated/raw keyboard tests both close exit0, in **115.61 / 106.39 s**,
+  with **29,326 / 29,006 actual V retirements**. Each delivers the same nine
+  wire bytes; translated/raw guest reads are exactly six/nine bytes, without
+  pending-byte duplication. Host-timed input is not a cycle-equivalence test.
+  Independent audit checks **66,981 source pins**, exact native ownership and
+  logs. Peak memory 106,983,424 bytes, no OOM. Evidence
+  `raw-prime-storage-input-r1/audit.json`; unit
+  `ventium-raw-prime-storage-input-oct16-r1.service`, invocation
+  `ea2bc4c36a084f2eb6a37d9b1e4ff6bf`. This is not Win95 UI acceptance.
+- Both unchanged ten-iteration CoreMark disks close exit0 in **221.22 / 223.07 s**.
+  All five CRCs per seed match. Performance **4,771,298 clocks** and validation
+  **4,755,366 clocks** exactly match the boundary/input parent: **0% measured
+  throughput change**, not an optimization gain. Actual V counts are
+  **1,055,307 / 1,054,254**. Independent audit checks **67,018 pins**, native
+  arguments/affinity/ownership and terminal logs. Peak memory 106,844,160 bytes,
+  no OOM, all children reaped. Evidence
+  `raw-prime-storage-soc-r1/coremark-ui-disabled-r1/audit.json`; unit
+  `ventium-raw-prime-storage-cm10-oct16-r1.service`, invocation
+  `d1bc16efcde7451eaaa6d7768c303132`. The original too-short-duration error is
+  retained; **neither a valid score nor full-seed correctness acceptance**.
+
+The FPGA exporter now composes the exact CPU header, retained controller and
+independently tested [keyboard-injector retry](../../fpga/KBD_INHIBIT.md).
+All other payloads, including the corrected posted-memory/mouse wrapper,
+must remain unchanged. Three export tests cover all 192 payloads and reject
+missing repairs, unrelated edits, wrong geometry and promoted failures. The
+initial test invocation used the wrong Python exception class for its negative
+cases; correcting it to the existing `FreezeError` changes no export guard.
+The bounded export closes exit0 / MainPID0, unit
+`ventium-raw-prime-storage-freeze-oct16-r1.service`, invocation
+`fc284af9f88e474894b4632c4c3a55c1`, peak memory **568,655,872 bytes**.
+It checks all **170 common compiled HDL sources / 192 payloads / 159 hardware
+defines**, with exactly those three payload changes. Manifest
+`bf079f99538676ae1f43728b78ee52cc7d5b84ae0db49853ee545fcab0b72b66`
+under `raw-prime-storage-fpga-r1`. Posted/nonposted wrapper preprocessing keeps
+both input devices, but **full-wrapper elaboration, timing, placement/routing
+and physical acceptance remain unqualified**. The independent
+[`raw_prime_storage_evidence.py`](../../fpga/raw_prime_storage_evidence.py)
+audit rechecks **68,320 pins**, every payload and exact three-delta recipes;
+`raw-prime-storage-fpga-r1/source-audit.json` passes. Its unit
+`ventium-raw-prime-storage-seal-audit-oct16-r1.service` closes exit0 / MainPID0,
+invocation `4dd55d8bfdd6429e8924ef1d89e5b938`, peak memory 112,570,368 bytes.
+No Vivado or board action has started.
+
+Resource housekeeping removed **24 regenerable PCH files / 2,209,299,500 bytes**
+from closed builds, preserving and rehashing 6,011 source/log/receipt/binary
+files. No source, guest image, executable or test trace was deleted. Receipt:
+`closed-pch-prune-oct16-r2.json`. The failed cache R2 was excluded before deletion
+when its incomplete row count failed preflight. There was no Chrome browser
+process to close; other applications were left alone.
 
 Latest verified gameplay baseline is **0.50229051 total U+V IPC**, model
 `b6b92dbfde2c6148fde30b5c65cac8217f650f7bbc1a7d4c0bd58fe95f706c9e`, cycles

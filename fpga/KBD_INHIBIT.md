@@ -1,7 +1,8 @@
 # FPGA keyboard inhibit repair — October 16, 2026
 
-**Private repair; not exported, synthesized or deployed.** The current timing
-export still contains the original keyboard injector. The earlier
+**Private repair; now exported, not synthesized or deployed.** The sealed
+RAW-storage/input candidate includes the repaired injector and retained 8042;
+the earlier measured timing exports still contain the original injector. The earlier
 [`ven_ps2_device` tests](../verif/ps2_ui/LOSS_AUX_IOBUS.md) test a different,
 bidirectional endpoint; they cannot qualify this transmit-only board device.
 
@@ -181,14 +182,26 @@ exact commands, native images/logs, complete case matrix and closed ownership.
 Scope: the actual three RTL blocks, **not the full PL wrapper**, CPU, DDR,
 video or forensic-reset path. Commands use the board helper's full-word writes;
 this is not complete AXI compliance, byte-strobe or reset-race qualification.
-No processor, endpoint, controller, exported source or bitstream changed.
+During these management-path microtests, no processor, endpoint, controller,
+exported source or bitstream changed.
+
+## Composed source export — October 16
+
+The [RAW-storage/input candidate](../verif/l1/RAW_PRIME_STORAGE.md) now seals
+the exact injector above with the retained 8042 and tested processor header.
+Manifest `bf079f99538676ae1f43728b78ee52cc7d5b84ae0db49853ee545fcab0b72b66`
+contains exactly those three deltas from the measured boundary-stage parent;
+the posted-memory/mouse wrapper and management RTL are unchanged. All 170
+common compiled HDL sources / 192 payloads / 159 hardware defines are checked.
+This is source closure and wrapper preprocessing, not full-wrapper simulation,
+synthesis, timing sign-off or physical input acceptance.
 
 ## Required next steps
 
 The management-register transport above is qualified for its stated cases;
-the full wrapper and physical UI remain unqualified. Compose the exact
-controller and endpoint changes with the processor
-candidate, then verify the full suite and physical Win95 keyboard/mouse UI.
+the full wrapper and physical UI remain unqualified. Verify the composed
+candidate through full-wrapper checks, timing, the complete suite and physical
+Win95 keyboard/mouse UI.
 Do not infer that generic physical PS/2 devices share this retry policy. These
 integration microtests are not Win95 UI/standard-suite/physical-FPGA acceptance.
 
