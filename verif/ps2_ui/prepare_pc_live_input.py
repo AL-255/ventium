@@ -15,7 +15,7 @@ MAIN = 'source/ao486-sim/ven/sim_v_result_carry_9e34e5ace2f2.cpp'
 MAIN_SHA = 'f5045f6adce56edcdc011954b2eb28fa9cb31cb5524795d9e837eb9fd567e71d'
 PS2 = 'source/3rd-party/ao486_MiSTer/rtl/soc/ps2.v'
 PS2_SHA = '2ee3b64fc24875b3aaca0e6296a2514161f19cef5e6f79aa90923ca06f1846da'
-INPUT_SHA = 'f73f5ff189b9446c79119f2f799eaf284ff3d728155a6dfc00f68059ffec480b'
+INPUT_SHA = 'e80b12817951e39eaf74d6830cf020c879a513bb00bdaf72ecd0e9544ef454eb'
 HERE = Path(__file__).resolve().parent
 
 

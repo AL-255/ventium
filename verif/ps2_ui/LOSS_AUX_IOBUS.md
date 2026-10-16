@@ -103,6 +103,49 @@ observations per case and logs are retained in `ps2-loss-aux-transport-r1`.
 Both new runners use two Icarus workers, 512 MiB RAM, no swap, 32 tasks and
 a 350-second owner cap; neither starts Verilator/Vivado.
 
+## Retained-byte host observer and native controller checks
+
+`ui_input_host.h` now has an explicitly selected retained-controller contract;
+legacy arbitration checks remain intact. After real receive-final, a full FIFO
+must show the exact translated byte in the pending register, without a FIFO
+write. The host releases both pins and waits without resending. Completion
+requires a real scan commit, real space/read credit, the selected byte, the
+advanced write index and that byte in actual FIFO memory. Reset, self-test,
+owner replacement, wrong data or a one-emulated-second commit timeout fail
+closed. A retained byte cannot be skipped by a later capture request.
+
+The separate `pc_keyboard_retained.h` binding observes the pending registers
+and FIFO before/after each edge. It reconstructs optimized-away combinational
+mux aliases from the pinned controller's observed state, never from requested
+input. This binding has synthetic host coverage but **has not yet been linked
+against the generated whole-PC model**. The native RTL test instead observes
+the actual controller mux and commit wires through read-only probe ports.
+
+- `retained-host-r1`: all three ASan/UBSan C++ tests pass, including the old
+  host/binding regressions, 256 new binding cases, four direct/retained streams
+  and 28 negative controls. Five existing PC-preparation Python tests also pass.
+  Owner `ventium-retained-host-oct16-r1`, invocation
+  `384cdf4e645a4904bd6da26bcbb401fc`, native 0, 6.383 s,
+  398,225,408-byte peak, no OOM. Independent recheck verifies 20 pins/logs.
+- `retained-rtl-r1`: actual combined controller and FIFO pass eight ordinary
+  raw/translated streams at four wire rates, four full-FIFO retention cases
+  (including translation changes while pending), two exact scan/ACK collisions,
+  and four reset/self-test cases that must refuse host completion. FIFO pressure
+  is created through real controller commands; no internal state is injected.
+  Owner `ventium-retained-rtl-oct16-r1`, invocation
+  `ed4c35bcb360418c916bacec480bdb3e`, build/native 0, 8.692 s.
+  Model SHA `61973cb91b95678225b01d8326924cb6635abbfe9d7a1a21768de5f167f4f395`;
+  native log SHA `0f6ef6a2594151671d53db58d527863820a9bb8910ba4cfb25ddd4558ead885e`.
+  Independent recheck verifies 19 pins/logs; the private harness object and its
+  generated-header dependency are local to this model.
+
+Both owners closed with MainPID 0. The RTL owner's 14,237,696-byte peak is
+**not** the compiler peak: the normal build guard ran one compiler in a separate
+4 GiB/64-task scope, whose systemd journal reports 298.8 MiB peak. The requested
+`-j 2` was clamped to one; native execution used CPUs 12–13. These are peripheral
+microtests, not full-PC, gameplay, Win95 or physical-FPGA acceptance. No live
+Quake source, CAD export or production controller RTL was changed.
+
 ## Remaining acceptance work
 
 The broader interrupted-frame keyboard reset and physical keyboard transmit
@@ -111,10 +154,10 @@ continuous/inhibition-boundary input. The resync device-model limitation in
 the proposal remains open. The real RTL mouse tests above do not prove a
 universal physical-keyboard abort/retry contract.
 
-The prepared `pc_keyboard_input.h` adapter still describes the **old** FIFO
-arbitration. It cannot qualify this candidate unchanged: a retained scan and
-delayed FIFO commit require corresponding real ownership observations, not
-disabling its loss checks. Full-PC linking, cold Win95 interaction, the whole
+The existing `pc_keyboard_input.h` adapter still describes the **old** FIFO
+arbitration and must not qualify this candidate unchanged. The new explicit
+retained binding above addresses delayed-commit observation, but its full-PC
+linking and integration are still pending. Cold Win95 interaction, the whole
 standard suite, full FPGA wrapper validation and matching physical-board runs
 remain required. No performance gain or completed repair is claimed.
 

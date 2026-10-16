@@ -121,6 +121,9 @@ struct Command { uint64_t id; Op op; std::vector<uint8_t> bytes; size_t accepted
 // clear the controller's accepted F0 prefix, making a blind retry unsafe.
 struct Timing {
     uint64_t half = 0, idle = 0, accept_limit = 0;
+    // Host diagnostic deadline for an observed RX skid, not an RTL timeout.
+    // A full FIFO may inhibit pins after a successfully received frame.
+    uint64_t commit_limit = kFastControllerTimeout;
     static Timing ordinary(uint32_t hz, uint64_t requested_half = 0) {
         Timing t;
         t.half = requested_half ? requested_half : (uint64_t(hz) + 23999) / 24000;
@@ -131,6 +134,7 @@ struct Timing {
         t.idle = (uint64_t(hz) + 9999) / 10000; // >=100 us at configured clock.
         if (t.idle < 128) t.idle = 128;
         t.accept_limit = t.half * 22 + t.idle + 256;
+        t.commit_limit = hz; // One emulated second to observe guest FIFO credit.
         if (t.accept_limit >= kFastControllerTimeout)
             throw std::runtime_error("frame_exceeds_controller_timeout");
         return t;
@@ -147,6 +151,12 @@ struct ReceiveProof {
     bool full = false, read_request = false, escape_before = false, escape_after = false;
     uint8_t raw = 0, translated_value = 0, produced_value = 0, old_write_index = 0;
     uint8_t new_write_index = 0, post_memory_at_old_write_index = 0;
+    // Explicit alternate controller contract; never infer it from a failed
+    // legacy enqueue. These are real before/after observations, not permission
+    // to fabricate an immediate FIFO acceptance from a pending bit.
+    bool retained_contract = false, scan_commit = false;
+    bool pending_before = false, pending_after = false;
+    uint8_t pending_value_before = 0, pending_value_after = 0;
 };
 class Input {
     FILE *log_;
@@ -159,8 +169,11 @@ class Input {
     std::deque<Command> queue_;
     uint64_t highest_id_ = 0;
     Timing timing_;
-    enum class Wire { Idle, Sending, AwaitAcceptance } wire_ = Wire::Idle;
+    enum class Wire { Idle, Sending, AwaitAcceptance, AwaitCommit } wire_ = Wire::Idle;
     uint64_t wire_start_ = 0, idle_since_ = 0;
+    uint64_t retained_since_ = 0;
+    uint8_t retained_value_ = 0;
+    bool retained_translated_ = false;
     bool idle_seen_ = false, failed_ = false;
     std::array<bool,11> bits_{};
     uint8_t owned_byte_ = 0;
@@ -176,6 +189,28 @@ class Input {
             "[UI-ERROR] cycle=%llu reason=%s pending=%zu owned=%u raw=%02x ui_success=not_asserted\n",
             (unsigned long long)cycle, why, queue_.size(), unsigned(inflight()), owned_byte_);
         failed_ = true;
+    }
+    static bool fifo_stored(const ReceiveProof &p, uint8_t value) {
+        return p.write_request && (!p.full || p.read_request) &&
+            p.produced_value == value &&
+            p.new_write_index == ((p.old_write_index + 1) & 63) &&
+            p.post_memory_at_old_write_index == value;
+    }
+    void finish_byte(uint64_t cycle, uint8_t raw, bool translated) {
+        if (raw==0xf0) { prefix_owned_=true; prefix_translated_=translated; }
+        else prefix_owned_=false;
+        Command &cmd = queue_.front();
+        ++cmd.accepted;
+        if (log_) fprintf(log_, "[UI-WIRE-BYTE] id=%llu cycle=%llu index=%zu total=%zu raw=%02x\n",
+                          (unsigned long long)cmd.id, (unsigned long long)cycle,
+                          cmd.accepted, cmd.bytes.size(), unsigned(raw));
+        wire_ = Wire::Idle; idle_seen_ = false;
+        if (cmd.accepted == cmd.bytes.size()) {
+            if (log_) fprintf(log_,
+                "[UI-WIRE-COMPLETE] id=%llu cycle=%llu bytes=%zu ui_success=not_asserted\n",
+                (unsigned long long)cmd.id, (unsigned long long)cycle, cmd.bytes.size());
+            queue_.pop_front(); read_count_ = 0;
+        }
     }
     void admit(const std::string &line, uint64_t cycle) {
         const size_t space = line.find(' ');
@@ -227,6 +262,7 @@ public:
     ~Input() { if (fd_ >= 0) close(fd_); if (dir_fd_ >= 0) close(dir_fd_); }
     bool failed() const { return failed_; }
     bool inflight() const { return wire_ != Wire::Idle; }
+    bool awaiting_commit() const { return wire_ == Wire::AwaitCommit; }
     bool prefix_owned() const { return prefix_owned_; }
     size_t pending() const { return queue_.size(); }
     size_t accepted_front() const { return queue_.empty() ? 0 : queue_.front().accepted; }
@@ -312,6 +348,13 @@ public:
                 fail("reset_interrupted_command", cycle);
             idle_seen_ = false; return out;
         }
+        if (awaiting_commit()) {
+            // The physical frame is already owned by the controller. Release
+            // pins and permit its flow-control inhibition; never replay it.
+            if (cycle - retained_since_ > timing_.commit_limit)
+                fail("controller_commit_timeout_no_replay", cycle);
+            return out;
+        }
         if (inflight()) {
             if (!host_clock || !host_data) {
                 fail("host_interrupted_owned_frame", cycle); return out;
@@ -347,12 +390,15 @@ public:
     }
     // Call only AFTER the real rising edge. Preedge witnesses bind to actual
     // producer arbitration; postedge index/memory prove the actual FIFO write.
-    // VEN_KBD_AUTOACK has priority over a coincident scan byte. Never declare
-    // that collided raw byte accepted and never replay it speculatively.
+    // Legacy arbitration gives AUTOACK priority; the retained controller gives
+    // scans priority. Both require actual storage, with no speculative replay.
     void prefix_context_before(uint64_t cycle, bool translated, bool escape,
                                bool reset_or_clear, bool timeout_reset) {
         if (!prefix_owned_ || failed_) return;
         if (reset_or_clear) fail("owned_prefix_reset_or_selftest",cycle);
+        // The suffix already consumed this prefix at recv_final. Its frozen
+        // translated skid value, not the live parser, now owns delivery.
+        else if (awaiting_commit()) return;
         else if (timeout_reset) fail("owned_prefix_controller_timeout",cycle);
         else if (translated!=prefix_translated_) fail("owned_prefix_translation_mode_changed",cycle);
         else if (prefix_translated_ && !escape) fail("owned_prefix_lost_between_bytes",cycle);
@@ -363,6 +409,25 @@ public:
             fail("controller_reset_or_clear_interrupted_command", cycle);
     }
     void accepted_edge(uint64_t cycle, const ReceiveProof &p) {
+        if (failed_) return;
+        if (awaiting_commit()) {
+            if (p.reset || p.clear) { fail("controller_reset_or_clear_before_commit",cycle); return; }
+            if (!p.retained_contract || p.final || !p.pending_before ||
+                p.pending_value_before != retained_value_) {
+                fail("controller_retained_owner_lost_or_replaced",cycle); return;
+            }
+            if (p.scan_commit) {
+                if (p.pending_after || !fifo_stored(p,retained_value_)) {
+                    fail("controller_retained_fifo_commit_invalid",cycle); return;
+                }
+                read_until_ = cycle + timing_.accept_limit + timing_.idle;
+                finish_byte(cycle,owned_byte_,retained_translated_);
+            } else if (!p.pending_after || p.pending_value_after != retained_value_ ||
+                       p.write_request || p.new_write_index != p.old_write_index) {
+                fail("controller_retained_byte_changed_before_commit",cycle);
+            }
+            return;
+        }
         if (!p.final || failed_) return;
         if (!inflight() || queue_.empty() || queue_.front().op != Op::Key ||
             p.raw != owned_byte_ || cycle - wire_start_ < timing_.half * 20) {
@@ -377,33 +442,43 @@ public:
             fail("unexpected_translation_prefix_at_suffix",cycle); return;
         }
         const bool prefix_only = p.translated && p.raw == 0xf0;
+        if (p.retained_contract && p.pending_before) {
+            fail("controller_unowned_skid_at_receive",cycle); return;
+        }
         if (prefix_only) {
             if (!p.escape_before || !p.escape_after) { fail("translation_prefix_not_retained", cycle); return; }
+            if (p.retained_contract && (p.pending_after || p.scan_commit)) {
+                fail("controller_prefix_incorrectly_enqueued",cycle); return;
+            }
+        } else if (p.retained_contract) {
+            if (p.scan_commit) {
+                if (p.pending_after || !fifo_stored(p,p.translated_value)) {
+                    fail("controller_scan_fifo_commit_invalid",cycle); return;
+                }
+            } else {
+                if (!p.full || p.read_request || p.write_request ||
+                    p.new_write_index != p.old_write_index || !p.pending_after ||
+                    p.pending_value_after != p.translated_value) {
+                    fail("controller_scan_not_stored_or_retained",cycle); return;
+                }
+                retained_value_=p.translated_value;
+                retained_translated_=p.translated;
+                retained_since_=cycle;
+                wire_=Wire::AwaitCommit;
+                if (log_) fprintf(log_,
+                    "[UI-RX-RETAINED] cycle=%llu raw=%02x value=%02x delivery_pending=1\n",
+                    (unsigned long long)cycle,unsigned(p.raw),unsigned(retained_value_));
+                return;
+            }
         } else {
             if (p.autoack || p.reply) { fail("controller_producer_overwrote_scan_byte", cycle); return; }
-            if (!p.write_request || (p.full && !p.read_request) ||
-                p.produced_value != p.translated_value ||
-                p.new_write_index != ((p.old_write_index + 1) & 63) ||
-                p.post_memory_at_old_write_index != p.translated_value) {
+            if (!fifo_stored(p,p.translated_value)) {
                 fail("controller_fifo_dropped_or_changed_scan_byte", cycle); return;
             }
         }
         // Independent raw-stream obligation: never infer this from DUT trans.
         // Clear only after the suffix's full enqueue proof has validated.
-        if (p.raw==0xf0) { prefix_owned_=true; prefix_translated_=p.translated; }
-        else prefix_owned_=false;
-        Command &cmd = queue_.front();
-        ++cmd.accepted;
-        if (log_) fprintf(log_, "[UI-WIRE-BYTE] id=%llu cycle=%llu index=%zu total=%zu raw=%02x\n",
-                          (unsigned long long)cmd.id, (unsigned long long)cycle,
-                          cmd.accepted, cmd.bytes.size(), unsigned(p.raw));
-        wire_ = Wire::Idle; idle_seen_ = false;
-        if (cmd.accepted == cmd.bytes.size()) {
-            if (log_) fprintf(log_,
-                "[UI-WIRE-COMPLETE] id=%llu cycle=%llu bytes=%zu ui_success=not_asserted\n",
-                (unsigned long long)cmd.id, (unsigned long long)cycle, cmd.bytes.size());
-            queue_.pop_front(); read_count_ = 0;
-        }
+        finish_byte(cycle,p.raw,p.translated);
     }
     void guest_read_edge(uint64_t cycle, bool read, uint8_t value) {
         if (!read || !read_context_ || cycle > read_until_ || read_count_ >= 128) return;
