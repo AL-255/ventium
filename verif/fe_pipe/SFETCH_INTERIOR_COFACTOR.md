@@ -245,8 +245,9 @@ owner while retaining the original checked-descriptor eligibility and commit
 authority. Before using this approach, require extracted-equation tests for
 ordinary V, held V, FP-self and branch-successor sources, byte/dword extents,
 FP64 rejection, denied descriptors and AGI/reference priority, plus whole-core
-assertions and unchanged functional/cycle controls. This is a proposed fix,
-not an implemented or proven improvement. The faster boundary parent remains
+assertions and unchanged functional/cycle controls. The subsequent
+[prime-width experiment](../l1/PRIME_WIDTH_PAYLOAD.md) implements this in a
+private derivative; it is not yet a proven timing improvement. The faster boundary parent remains
 the timing baseline; another broad mapper trial is not justified by the LUT
 reduction alone.
 
