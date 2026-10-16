@@ -101,10 +101,56 @@ rechecks 15 source/tool pins, the exact matrix/defines, all native logs/images,
 exit codes and closed owner. `kbd-controller-inhibit-r1/audit.json` passes.
 The injector source is **unchanged** from the earlier 46-case isolated repair.
 
+## Actual-controller FIFO pressure — closed October 16
+
+[`tb_kbd_backpressure.sv`](tb_kbd_backpressure.sv) tests the same repaired
+transmitter and retained-AUX controller with the real 64-entry FIFO. All
+pressure is generated through public guest I/O: 59 distinct `D2` replies and
+five ordinary keyboard-command ACKs. No FIFO/state injection or forced signal
+is used. Read-only probes establish actual full/pending conditions; ordinary
+port-60 reads and serial edges establish byte delivery.
+
+The [two-worker matrix](run_kbd_backpressure.py) covers 3.125/40 MHz parameter
+profiles, raw/translated input, a subsequent command-byte translation flip,
+and FIFO full either before transmission or during the first physical frame.
+The full-before setup temporarily disables the keyboard through its command
+byte, then re-enables it while full; it does not alter controller internals.
+
+- **16 candidate cases pass.** The producer holds ownership throughout more
+  than two controller wait intervals, without hidden wire edges. Exactly two
+  complete eleven-bit frames (`5a`, `1d`) arrive, with correct start/stop/parity.
+  Exactly 66 guest reads return the 64 fillers and both expected scan bytes,
+  with IRQ1, no AUX/parity/timeout status, and no duplicate after a final wait.
+- The eight full-during-frame cases observe the exact first translated/raw
+  byte retained before any FIFO pop. Changing translation afterward affects
+  the second byte only, not the already captured first byte.
+- The **same unchanged-parent test** passes all eight full-before controls.
+  All eight full-during cases fail with native exit1 at the first missing scan:
+  the second byte arrives in place of the first. These are negative witnesses,
+  not parent correctness passes. The independent audit requires those exact
+  expected/got byte values, not any data failure or timeout.
+
+Evidence: `kbd-backpressure-r2`, owner
+`ventium-kbd-backpressure-oct16-r2.service`, invocation
+**`c9225252d694400797bcb804972c890c`**; **62.46 seconds**, peak
+**20,885,504 bytes**, no swap/OOM, native exit0 / MainPID0. Four compilations
+and all 32 waited/reaped native cases are recorded, with actual CPUs12–13.
+The [independent audit](audit_kbd_backpressure.py) checks 14 source/tool pins,
+exact build/run commands, native logs/images, all cases and the closed owner;
+`kbd-backpressure-r2/audit.json` passes. Four matrix/audit guard tests pass.
+
+R1 remains a failed experiment. Its candidate cases passed, but its unchanged
+parent never reached the intended full-FIFO condition: the setup used 64 D2
+replies, whereas the old controller stops admitting those at 60 entries. R2
+changes only public stimulus/setup to reach full on both revisions, using ACKs
+for the last five slots. It preserves all delivery, ownership, full-FIFO,
+pending, parity, IRQ and duplicate checks. Neither controller nor injector RTL
+changed. R1's copied sources and native logs remain intact.
+
 ## Required next steps
 
-Full-FIFO/backpressure interaction and the actual wrapper/debug-MMIO path remain
-unqualified. Compose the exact controller and endpoint changes with the processor
+The actual wrapper/debug-MMIO path remains unqualified. Compose the exact
+controller and endpoint changes with the processor
 candidate, then verify the full suite and physical Win95 keyboard/mouse UI.
 Do not infer that generic physical PS/2 devices share this retry policy. These
 integration microtests are not Win95 UI/standard-suite/physical-FPGA acceptance.
