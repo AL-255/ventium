@@ -5,8 +5,9 @@ Native admission-equation, full-cache/AXI A/B, selected fault regressions,
 actual same-clock no-L2 wrapper and directed whole-core system checks pass.
 The isolated processor and full-PC derivative build; canonical verification
 **fails**. Fresh qualified-private-reference comparisons pass separately.
-Timing, gameplay, the standard suite and FPGA acceptance are unmeasured.
-No new Vivado run or deployment was launched for this proposal.
+Gameplay, the standard suite and FPGA acceptance are unmeasured. A single
+matched diagnostic synthesis is now running; it has no frequency result yet.
+No placement, routing or board deployment has been launched for this proposal.
 
 ## Reason and scope
 
@@ -397,8 +398,8 @@ defines and all six structural-error classes. Owner
 `ventium-qualified-pair-lint-oct16-r1.service`, invocation
 `d36f37842841477fb7d2289f700c9ac6`, is closed exit 0 / MainPID 0; input hashes
 remain stable. This is **not full-SoC lint**, whole-wrapper elaboration,
-synthesis, routed timing, or physical validation. No new Vivado run or board
-programming has occurred for this candidate.
+synthesis, routed timing, or physical validation. That source-seal stage did
+not launch Vivado or program the board; the subsequent diagnostic is below.
 
 Closed RAW-parent and rejected ACK-parent compiler products were losslessly
 archived, byte-compared and removed from loose storage, recovering about
@@ -420,9 +421,74 @@ SHA-256 `3bad0b16048e68a68d29af81288b8d67cff921eebdd6f26899a570d7c4e4fad0`.
 Its failed log, receipt, executable and source remain intact; archiving does
 not change its verdict.
 
+### Matched diagnostic synthesis — live, not acceptance
+
+After the actual unified gate's **108/108 functional pass** and exact equality
+of all 20 same-model cycle streams, a timing-only experiment is now admitted.
+This deliberately separates measurement from acceptance: the nine cycle-band
+failures remain red, and no new processor, routed frequency, or board pass is
+claimed. Waiting for legacy direct-memory timing bands to match the AXI backend
+does not provide more evidence about whether this two-file logic simplification
+improves the physical path. Those failures still require explicit resolution;
+they are not waived by starting diagnostic synthesis.
+
+`fpga/qualified_pair_credit_timing_evidence.py` rechecks **74,560 pins**, the
+192-payload seal, exact two-file transformation, unchanged 159 defines,
+102 shared PC/core sources, actual functional gate, boundary/fault controls,
+cold input and short CoreMark controls. It permits only the two exact archived
+historical scripts documented in [the reference profile](../qemu-trace/QUALIFIED_PROFILE.md),
+and also pins their maintained versions. No receipt is rewritten, arbitrary
+drift ignored, or historical failure converted to a pass.
+
+`fpga/prepare_qualified_pair_credit_timing.py` derives the native controllers
+from the RAW/input parent's exact templates. Six host tests pass, including
+byte-identical resource/process cleanup and disk-admission blocks, unchanged
+timing Tcl, exact parent DCP, historical-source rejection, and explicit failed
+gate reporting. The Default logic-only mapper, one job, 40 MHz core / 100 MHz
+PL constraints, and all definitions remain unchanged. The parent's estimate
+is **35.3744 MHz synthesized/unplaced**, not a routed sign-off frequency.
+
+The first launch stops **before Vivado**, because 6.065 GiB free does not meet
+the unchanged measured-growth admission bound of **6.713 GiB**. Its owner
+invocation `3246b8de45dd4fefb530ef622fd57016` is terminal, exit 1, and its journal
+and controller hash are retained in
+`qualified-pair-credit-synthesis-r1/preflight-refusal-r1.json`. There was no
+`once` marker, native start receipt, or CAD process. This is a resource-admission
+refusal, not an OOM, failed synthesis, or reason to relax the guard.
+
+After further recoverable archival, the unchanged controller is started again:
+
+- Owner `ventium-qualified-pair-credit-synth-oct16-r1.service`, invocation
+  `1300a28d7fc242e9b2f85ce0fe58b079`; native launch **2026-10-16 14:14:17 UTC**.
+- Owned `ventium-vivado.scope`, invocation `71463993c914417c9c9d497a6f54c1db`;
+  actual **8 GiB RAM / 6 GiB swap / 48 tasks**. The outer controller's limits
+  are separate and do not contain the detached native family.
+- **74,583 native input pins**, 6.770 GiB admitted free space, 45-minute native
+  cap, 50-minute owner startup cap. Live stop floors remain 4 GiB disk and
+  2 GiB host RAM/swap; combined native RAM+swap early stop remains 13 GiB.
+- Latest recorded sample at **14:15:27 UTC**: about 2.39 GiB resident, zero
+  swap, no OOM events and no stop reason. This is a live sample, not a final
+  peak or successful synthesis result.
+
+The native closure must first pass `qualified-pair-credit-synthesis-r1/audit_closed.py`.
+Only then may the prepared, read-only `qualified-pair-credit-clock-r1` controller
+compare the two checkpoints. It is **not launched yet**. No route or deployment
+is queued, and no isolated MHz/area/IPC gain is assumed.
+
+Disk recovery is lossless: **7,170 unique generated compiler products** across
+45 closed build directories were archived and byte-compared before their loose
+copies were removed, recovering approximately **1.83 GiB net**. Shared hard
+links were left untouched. Sources, headers/dependencies, binaries, models,
+native logs, traces, media and active runs remain. Failed-run products retain
+their original failed receipts. The two batch inventories are
+`closed-build-archives-oct16.json` and `closed-build-archives-oct16-extra.json`
+under the evidence root. Each affected directory has `compiler-archive.json`
+with exact members, SHA-256 and a `tar --zstd -xf ... -C ...` recovery command.
+All selected products were checked against the live timing proof's input pins.
+
 ## Remaining gates
 
-Before synthesizing or accepting the whole-core candidate:
+Before accepting the whole-core candidate:
 
 1. Resolve the red canonical gate. Same-input functional replay and the fresh
    qualified-reference corpus now pass, as do the build and directed
@@ -435,9 +501,10 @@ Before synthesizing or accepting the whole-core candidate:
    unchanged nine failed cycle bands retain native exit 2 / overall **FAIL**.
    All 20 RTL cycle streams are identical to the earlier run. No masks or
    bands were relaxed, and the original default-reference failure is retained.
-2. Only then measure matched synthesis/timing. This simplification may have
-   little timing effect because the original ready-to-request path remains;
-   **no MHz, area, CPI or IPC gain is claimed**.
+2. Complete and independently audit the matched diagnostic synthesis/timing.
+   This simplification may have little timing effect because the original
+   ready-to-request path remains; **no MHz, area, CPI or IPC gain is claimed**.
+   A successful diagnostic does not by itself authorize acceptance or routing.
 
 The previously missing shutdown/same-edge boundary checks and native
 default/CDC exclusion controls now have the explicit results above. This is
