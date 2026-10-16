@@ -2,7 +2,7 @@
 
 Status: **private experiment; leaf/boundary/interior/private-functional checks,
 exact PC transfer, short cold CoreMark controls and CPU lint passed; canonical
-gate still FAIL; matched synthesis running, timing unmeasured**.
+gate still FAIL; matched unplaced timing REGRESSED; combined input/CRC controls passed**.
 No production RTL, FPGA bitstream, timing constraints, cycle bands or reference
 goldens were changed. No frequency/performance gain is established.
 
@@ -194,9 +194,61 @@ The [one-shot sequencer](../../fpga/run_sfetch_interior_timing_sequence.py),
 owner `ventium-sfetch-interior-timing-chain-oct16-r1.service`, invocation
 `e4ffeb87989f40a3937f8f6ad535db88`, observes this exact synthesis, independently
 audits its native closure, then runs the prepared read-only clock comparison.
-It cannot retry synthesis, start implementation or deploy a bitstream. Timing
-results remain **pending**; neither a 40 MHz constraint nor passing compilation
-establishes 40 MHz capability.
+It cannot retry synthesis, start implementation or deploy a bitstream. Both
+phases and their independent audits now close successfully. Audit success
+means the observations are valid; it does not mean timing improved.
+
+Synthesis closed native exit0 / MainPID0 at **2026-10-16 07:24:30 UTC**, in
+**1,893.29 seconds**. The independent native/source audit passes **28,693 pins**,
+with only `ventium/rtl/core/core.sv` changed against the boundary parent. Both
+mapper and clock constraints are unchanged. Peak native-scope memory was
+8,589,856,768 bytes, peak swap 189,612,032 bytes; no OOM or resource stop.
+
+| Synthesized resource | Boundary parent | Interior cofactor | Change |
+| --- | ---: | ---: | ---: |
+| CLB LUTs | 187,990 | 187,009 | -981 (-0.52%) |
+| Registers | 55,218 | 55,181 | -37 |
+| BRAM tiles | 277.5 | 277.5 | 0 |
+| DSPs | 47 | 47 | 0 |
+
+These are **area results, not a frequency improvement**. The original generated
+PS clock-pin critical warning remains; the read-only timing audit verifies the
+actual 40/100 MHz constraints. That audit runs under
+`ventium-sfetch-interior-clock-oct16-r1.service`, invocation
+`6ed31d4738ca47bcb44026c6068a054d`, native scope
+`816cbddf1980421b8d17ee532e8d8099`. No placement, routing or board programming
+has been started for this candidate.
+
+The clock audit closes native exit0 in **464.02 seconds**, with **28,708 input
+pins** unchanged, no black boxes, no structural DRC errors and no OOM. Peak
+memory is 4,584,845,312 bytes; no swap. Matched results:
+
+| Unplaced estimate | Boundary parent | Interior cofactor |
+| --- | ---: | ---: |
+| Core frequency estimate | 36.968577 MHz | **34.481570 MHz** |
+| Setup slack at 40 MHz | -2.050 ns | **-4.001 ns** |
+
+The candidate is **not promoted as a timing improvement**. Its worst path is
+`eip_reg[0]` to `dc_lru_reg[0]`: **102 logic levels, 28.790 ns** data-path
+delay (5.636 ns logic, 23.154 ns estimated unplaced nets). It crosses frontend
+alignment/decode, pairing eligibility, `mc_prime_v_branch`, the checked
+`mc_descriptor[w8]` payload, extent/segment qualification, `mc_prepare_ok`,
+`core_mem_next_req`, `c_next_req`, `do_rd_cap_legacy` and D-cache LRU control.
+This is a synthesized estimate, not measured congestion, routed sign-off or
+board frequency. The V-response fan-in also grows from 68,492 to 68,648 cells;
+reachability is not exclusive area ownership.
+
+Next investigation: the existing raw-prime **address** payload already bypasses
+late descriptor validation, but its **width** still comes from the checked
+descriptor before further extent arithmetic. Prepare width from the same early
+owner while retaining the original checked-descriptor eligibility and commit
+authority. Before using this approach, require extracted-equation tests for
+ordinary V, held V, FP-self and branch-successor sources, byte/dword extents,
+FP64 rejection, denied descriptors and AGI/reference priority, plus whole-core
+assertions and unchanged functional/cycle controls. This is a proposed fix,
+not an implemented or proven improvement. The faster boundary parent remains
+the timing baseline; another broad mapper trial is not justified by the LUT
+reduction alone.
 
 ## Prepared input-repair composition
 
@@ -221,10 +273,13 @@ above and cannot compile until both native CAD phases and their independent
 audits close successfully. It retains the original exclusive build lock,
 32-job resource guard, Verilator version probe and 5 GiB disk admission.
 
-At this update it is **waiting; no combined model has been compiled or run**.
-A prepared tree is not input qualification for this CPU. After compilation,
-the unchanged raw/translated cold-input guest and both short CRC controls must
-run on its actual binary. Full Win95 UI, full standard suite and matching
+The combined build closes native exit0 / MainPID0 in **23.63 seconds**, after
+both CAD audits close. Its private object binds to its own generated header,
+all inputs remain unchanged and the same 98 inherited structural warnings
+remain. Model SHA-256:
+`2942d2d2f44ebe9e4a7435e97d148590101c362ccd4761ce020395746a87d5cd`.
+The unchanged raw/translated cold-input guests and both short CRC controls now
+pass on that binary. Full Win95 UI, full standard suite and matching
 physical FPGA tests remain separate. This preparation does not change the
 in-flight hardware export or silently inherit its eventual timing result.
 
@@ -238,7 +293,35 @@ CPUs 16/17; the two CoreMark controls use CPUs 12/13 and require the input
 injector to remain disabled. The independent
 [CoreMark audit](../../fpga/audit_sfetch_interior_ui_coremark.py) compares against
 the actual fetch-size parent, not the older input parent. These prepared
-drivers are **not yet native test results**.
+drivers use the following native owners:
+`ventium-sfetch-interior-ui-input-oct16-r1.service`
+(`8ed4ff642a6e4cfd8de48d0da30bb451`) and
+`ventium-sfetch-interior-ui-cm10-oct16-r1.service`
+(`2da05d2acb6046ccbc7573168d7990c2`). Both retain 2 GiB RAM, no swap,
+192 tasks and the original native deadlines; no Vivado family overlaps them.
+
+The input owner closes native exit0 / MainPID0. Independent regrading checks
+**28,820 pins**, the exact cold media, actual CPU16/17 affinity, native waits,
+complete raw/translated byte sequences and no-OOM evidence. Native times are
+**109.51 / 110.51 seconds**, with **29,326 / 29,321 actual V retirements** at
+the 6.5M-clock final samples. The translated guest reads
+`1d 01 81 9d 1c 9c`; the raw guest reads
+`14 76 f0 76 f0 14 5a f0 5a`, exactly as expected. Peak memory is
+54,247,424 bytes. Both native children are reaped. Evidence:
+`sfetch-interior-ui-input-r1/audit.json`.
+This proves the two cold keyboard transports, not graphics, mouse interaction,
+Windows desktop behavior or physical FPGA acceptance.
+
+Both 10-iteration CoreMark controls also close native exit0 / MainPID0, in
+**221.43 / 227.54 seconds**. Original CRCs match, kernel clocks are exactly
+**4,771,298 / 4,755,366**, and final V counts remain
+**1,055,307 / 1,054,254**: **0% kernel cycle change** from the fetch-size
+parent. The UI injector stays disabled. Independent regrading checks **28,857
+pins**, exact binary/media/argv, CPU12/13 affinity, native reaping and closed
+owner. Peak memory is 65,163,264 bytes, no swap/OOM. Evidence:
+`sfetch-interior-ui-soc-r1/coremark-ui-disabled-r1/audit.json`.
+These are short correctness controls, **not duration-valid CM/MHz scores,
+complete standard seeds or whole-boot architectural/cycle equivalence**.
 
 ## Inherited platform warnings: read-only triage
 
@@ -264,16 +347,30 @@ remain untouched.
 
 The bounded whole-core comparisons above are complete; they are not exhaustive
 correctness proof. Exact source transfer and short CoreMark controls are now
-complete. Next require matched synthesis/path analysis, then routed 40 MHz closure. Mapping
-may reshare logic; a cleaner expression is not evidence of faster hardware.
+complete. Matched synthesis/path analysis rejects this candidate as a timing
+improvement; **routed 40 MHz closure remains open**. Mapping may reshare logic;
+a cleaner expression is not evidence of faster hardware.
 The canonical gate, complete standard suite, and matching physical-board Win95
 cold desktop/input and complete Quake timedemo remain mandatory.
 
 Candidate gameplay IPC is **unmeasured**. The newer audited older-build baseline
-is now **0.48146083 total U+V**, V-result model
+is now **0.51045343 total U+V**, V-result model
 `b6b92dbfde2c6148fde30b5c65cac8217f650f7bbc1a7d4c0bd58fe95f706c9e`, cycles
-**1,100,065,247–1,200,065,247**. U-only IPC is 0.37609117; the remaining
-0.10536966 is V retirement. See the [new window audit](../../fpga/audit_v_result_gameplay_window.py).
+**1,200,065,247–1,300,065,247**. U-only IPC is 0.39242072; the remaining
+0.11803271 is V retirement. The [periodic-window audit](../../fpga/audit_v_result_gameplay_observation.py)
+rechecks **18,622 source/runtime pins**, native owner/argv/affinity, mode,
+counter consistency and no-OOM evidence. Raw endpoint images 7/8 were visually
+reviewed (stone corridor, then shotgun fire/impact with weapon and HUD), with
+exact PPM/PNG pixel identity. Its two host tests pass. Receipt:
+`v-result-carry-gameplay-window-1200-1300M-oct16-r1.json`.
+
+| Observed window on the same older build | U retires | V retires | U+V IPC |
+| --- | ---: | ---: | ---: |
+| 1,100,065,247–1,200,065,247 | 37,609,117 | 10,536,966 | 0.48146083 |
+| 1,200,065,247–1,300,065,247 | 39,242,072 | 11,803,271 | 0.51045343 |
+
+These are different scene windows, **not a measured fix gain**. The first
+observation and its original checker are preserved unchanged.
 This model predates the current boundary/interior-fetch and later input
 candidates. It is neither full timedemo completion nor FPGA acceptance.
 The immutable synthesis-start receipt retains the baseline known at launch:
