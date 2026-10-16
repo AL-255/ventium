@@ -30,6 +30,8 @@ Evidence root: `/home/yukidama/external/tmp/ventium-fprem-sequence.iSZ9BAj4`.
 | `backing-direction-axi-r3` | Two complete L1s, independent real AXI masters and byte-addressable RAM; 4,781 miter observations; positive passes and fill-as-write mutant fails; 9.379 s |
 | `backing-direction-core-r1` | Native whole-core build exits 0; all 195 sources audited with exactly one delta and the same 153 defines; private host object/header checked; 19.857 s |
 | `backing-direction-mixed-r1` | 36 cold paged/relocated U-load/V-store fixtures × latency 0/7, 144 A/B measurements; complete QEMU state and exact parent cycles; 10.110 s |
+| `backing-direction-core-r1/verify-closed.json` | Canonical `make verify` **FAIL**, native exit 2, 385.492 s; unchanged parent failure inventory and all 20 complete cycle streams parent-identical |
+| `backing-direction-matched-r1` | 108/108 complete functional A/B streams identical with matched image/initial ESP: 80,800 records, no masking or normalization; 48.166 s |
 | Host source/build guards | Six tests pass, including exact reversibility, independent direction, original default branch, observable-credit checks and regraded native evidence |
 
 The AXI test checks every channel signal, consumed credit, cache data/tags and
@@ -54,6 +56,10 @@ Successful retained owner invocations:
   2,201,169,920 bytes, no OOM; 32 compiler jobs, native CPU 12.
 - Core: `143465ec9dce4500a54d23bdf06ad6fd`.
 - Mixed: `5246ba1cc6fb48a3a25595a34ab742e3`, CPUs 16–19.
+- Canonical: `1ca5551187134759b08de2eafe291e44`; native child affinity
+  0–3 observed. The existing canonical script forces one worker despite the
+  four-worker request; it was not modified.
+- Matched replay: `706cc1382fa246dd903d56aa6d578ba8`, 32 workers.
 
 AXI R1 failed before any build because the launcher omitted the guard's `--`.
 R2 failed elaboration because its inherited fixture omitted the current
@@ -62,14 +68,27 @@ real input and compares both actual LUTRAM tag ways. No candidate RTL, stimulus,
 compiler error policy or active-output check was relaxed; failed owners/logs
 remain separate. The R2 driver is preserved beside its native log.
 
+## Canonical failure inventory
+
+`backing-direction-canonical-inventory-r1.json` regrades the retained native
+results: **7 functional passes, 101 failures** (90 length-only and 11 x87
+field-mismatch failures), the same inventory as the parent. No golden, mask or
+cycle band changed. The canonical reference lacks the separately tested private
+pre-exit/x87 repairs; this does not authorize ignoring its failures. All 20
+complete RTL cycle streams match the parent, **not** all cycle bands pass.
+
+Independent canonical invocations produced different initial ESP values in six
+programs. The separate matched replay reran the parent with the candidate's
+exact images and initial ESP; **all 108 complete streams then matched** without
+normalizing records. This is a regression comparison, not a fresh QEMU run or
+a canonical pass. Both models and all pinned inputs remained unchanged.
+
 ## Still open
 
 New directed CPU model:
 `e6194aa6b3f98cb7ef4cdb955377989ac45c441bde843021b535358c61e16993`.
-The unchanged canonical gate has started under
-`ventium-backing-direction-verify-oct16-r1`, invocation
-`1ca5551187134759b08de2eafe291e44`, with a 600-second native timeout. Its parent
-gate is red; neither directed passes nor parent-identical cycles waive it.
+The unchanged canonical gate completed within its 600-second native timeout
+and remains red; neither directed passes nor parent-identical cycles waive it.
 Fresh functional, broader faults/ordering, full-PC/source-transfer and timing
 qualification remain required. No new Vivado process has been launched.
 
