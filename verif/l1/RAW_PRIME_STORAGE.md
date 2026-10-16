@@ -1,10 +1,13 @@
 # Unreachable retained storage in cache-only priming — October 16, 2026
 
-**Private candidate; not promoted, timed, routed or deployed.** The extracted
+**Private candidate; smaller netlist, but unplaced timing regresses. Not
+promoted, routed or deployed.** The extracted
 state tests, guarded whole-core build and fresh private-reference corpus pass.
 Canonical verification remains **FAIL**. All eight directed native corpora pass
 and independently match the current parent; their old aggregate assertion fails.
-No frequency, area or gameplay gain is claimed yet.
+The combined input/storage build saves 805 LUTs and 458 registers, but estimates
+35.374438 MHz versus the parent's 36.968577 MHz. There is no frequency or
+gameplay gain. A matching cold Win95 simulation is now live, not accepted.
 
 ## Evidence for the structural problem
 
@@ -224,7 +227,7 @@ files. No source, guest image, executable or test trace was deleted. Receipt:
 when its incomplete row count failed preflight. There was no Chrome browser
 process to close; other applications were left alone.
 
-## Matched synthesis closed; timing report in progress
+## Matched synthesis and timing closed: area reduction, frequency regression
 
 Strict CPU-hierarchy lint of the exact **159-definition hardware profile**
 passes in **3.78 seconds**, with unchanged inputs and the six existing fatal
@@ -269,12 +272,46 @@ Evidence: `raw-prime-storage-synthesis-r1/{closed,audit}.json`.
 
 The same sequencer admitted exactly one read-only timing job,
 `ventium-raw-prime-storage-clock-oct16-r1.service`, invocation
-`2756ba277aca4f219df64270f88fe3c0`, controller PID2408391. At the 3.7-minute
-check it was live with no OOM; the native tool had confirmed 40 MHz core /
-100 MHz PL constraints. **These are constraints, not measured Fmax.** No new
-candidate frequency, placement/routing, deployment or physical acceptance is
-available yet. Evidence: `raw-prime-storage-clock-r1` and
-`raw-prime-storage-sequence-*`.
+`2756ba277aca4f219df64270f88fe3c0`, controller PID2408391. It closes native exit0
+at **10:37:42 UTC**, in **522.25 seconds**; the sequencer and independent audit
+also close successfully. The audit rechecks **68,390 input pins**, unchanged
+40 MHz core / 100 MHz PL constraints, owner closure and native reports. Peak
+memory is **4,828,667,904 bytes**, no swap or OOM. Audit PASS establishes report
+provenance, not timing acceptance.
+
+| Synthesized, unplaced estimate | Boundary parent | RAW storage + input repairs |
+|---|---:|---:|
+| Core Fmax, `1000 / (25 - WNS)` | 36.968577 MHz | **35.374438 MHz** |
+| Setup slack at 40 MHz | −2.050 ns | −3.269 ns |
+| Worst-path logic levels | 92 | 94 |
+| Paired-V capture setup slack | −1.886 ns | −1.811 ns |
+| Paired-V capture cone cells | 68,492 | 67,381 |
+
+Frequency regresses **4.31%**, despite the smaller area and slightly improved
+paired-V capture path. The native primitive tables contain **487 → 0 FDREs**
+named for the ten retained objects, so the intended storage removal occurred;
+the net total register reduction is smaller because other mapping changed.
+This does not solve the chip's worst path. No isolated input/storage contribution
+is claimed, and no route run or deployment is justified by this result.
+
+The new worst path is `q_pc[0]` → `int_err[0]/CE`: 27.972 ns of data delay,
+including 5.500 ns logic and **22.472 ns estimated interconnect**. The report
+crosses fetch alignment/prefix decode, `d_fetch_need`, `sfetch_want_size`,
+fragment strobes, route/cacheability, store-pair credit/request, backing ACK,
+`l1_c_ack` and exception-delivery control. Synthesized names are evidence of
+the mapped dependency, not proof that every named state can be sensitized
+simultaneously. In particular, inspect the remaining read-only system-control
+consumers of general `mem_ack`: the core already has an equivalent
+final-fragment `mem_read_ack`, but IDT/CS descriptor, IRET and other slow read
+owners still use the general write-credit-dependent completion. Any proposed
+cut must cover GPR/commit mirrors and retain the mixed walk's A/D writes,
+fragment hold, faults and request ownership. No additional ACK repair has been
+implemented or qualified here; do not repeat an already rejected size/credit
+cofactor and call it a new timing result.
+
+Evidence: `raw-prime-storage-clock-r1/{closed,audit}.json`, its native timing
+and primitive reports, and `raw-prime-storage-sequence-closed.json`. All are
+unplaced diagnostics; **40 MHz synthesized/routed closure remains unmet**.
 
 A second pre-launch cleanup removed only **10 regenerable PCH files /
 904,073,303 bytes**, rehashing **2,171 preserved files**. This included the two
@@ -293,8 +330,19 @@ Observed free space increased from 7,150,727,168 to 8,022,327,296 bytes (other
 jobs were still live). Golden traces, models, sources and guest media were not
 touched. Receipt: `closed-core-trace-dedup-oct16-closed.json`; the plan records
 original identities. The retained traces must be copied before any future
-mutation because identical evidence files now share storage. Disk space still
-does not meet the 8 GiB Win95 admission threshold.
+mutation because identical evidence files now share storage. That operation
+alone did not meet the 8 GiB Win95 admission threshold.
+
+Then **16 large capture-cone/primitive reports** from the closed rejected
+next-ready, prime-width, interior-cofactor and backing-direction runs were
+losslessly archived: **905,972,195 source bytes → 19,604,564 archive bytes**.
+Each member was read back and SHA-256 verified before removing its raw copy;
+all current candidate pins were rechecked before/after. All DCPs, summaries,
+logs, receipts and source remain. Archive `rejected-clock-cones-oct16.tar.zst`,
+SHA256 `cb5d163cd33ea7389985479229bcf9c158076cd4cccba5cd38d43cffc93f847e`;
+`rejected-clock-cones-oct16-closed.json` records original paths, hashes and the
+restoration command. This recovered about **845 MiB** and allowed the unchanged
+Win95 admission threshold to be met without deleting unique evidence.
 
 ## Complete-trace diagnosis of remaining cycle failures
 
@@ -334,7 +382,7 @@ contract with actual AXI request/response timing; do not simply widen bands
 or discard startup. The full-PC DDR model's first-beat/gap settings and physical
 board latency are separate measurements, not this stress model's parameters.
 
-## Next cold Win95 run prepared, not launched
+## Matching cold Win95 simulation launched; acceptance pending
 
 [`prepare_raw_prime_storage_win95.py`](../../fpga/prepare_raw_prime_storage_win95.py)
 now prepares the established cold Win95 controller for PC model `e9159acb…`.
@@ -346,10 +394,14 @@ unit `ventium-raw-prime-storage-win95-prepare-oct16-r1.service` closes exit0 /
 MainPID0 in 31 seconds, invocation `11ead01e99cd45a395a71e0a12d79b9c`.
 Receipt: `raw-prime-storage-win95-prepared.json`.
 
-No Win95 simulator is launched. The run retains CPU10, 2 GiB RAM / no swap,
-160 tasks, the 8 GiB disk-admission threshold and 4 GiB live stop reserve;
-available disk space is still below admission. Its controller cannot award a
-desktop PASS. The prepared run is **boot-only**;
+After verified archive recovery, the run launches at **10:39:34 UTC**:
+`ventium-raw-prime-storage-win95-oct16-r1.service`, invocation
+`b70a11654a5a4aa889dc62c4ec6fb907`, controller PID2413671, native PID2413699.
+The native child is observed live with **actual CPU10 affinity**, the exact
+`e9159acb…` executable/argv, normal cold reset, the posted-16 RTL backend and
+40/40/80 MHz simulated timebases. The 2 GiB RAM / no-swap / 160-task / one-CPU
+limits, 8 GiB disk-admission threshold and 4 GiB live stop reserve are unchanged.
+Its controller cannot award a desktop PASS. The run is **boot-only**;
 interactive keyboard/mouse and physical-board validation remain separate,
 unfulfilled requirements. No snapshot, guest patch or UI-input bypass is used.
 
@@ -368,8 +420,17 @@ resource changes, incomplete closure, snapshots and invalid visual evidence.
 retains the prior live `/proc`, service-invocation, native argv, affinity,
 cgroup, ROM/disk and source checks, with three passing host tests. It requires
 the actual new invocation at launch and cannot launch a guest or manufacture a
-desktop review. **No live admission or Win95 PASS exists yet.** The short
-CoreMark/input controls are preparation evidence, not standard-suite acceptance.
+desktop review. Independent admission closes exit0 in the service
+`ventium-raw-prime-storage-win95-admission-oct16-r1`, invocation
+`94d3dbee0f8842ba885b162b9ec7c2c3`, after checking **66,976 build pins and 28
+runtime pins**, live native identity/affinity and zero OOM events. Expectation
+SHA256: `cee5930399a6bf2e35d8896e5211d3efb54c195a8e5624cd8f715517e3dba549`.
+Evidence: `raw-prime-storage-win95-{expectation,admission-audit}.json` and
+`raw-prime-storage-soc-r1/win95-cold-raw-prime-storage-oct16.1`.
+**No Win95 PASS or closed desktop evidence exists yet.** Actual V-retirement
+samples are still required as the run advances. The short CoreMark/input
+controls remain preparation evidence, not standard-suite acceptance. Running
+this functional input/boot check does not promote the timing-regressed image.
 
 Latest verified gameplay baseline is **0.50229051 total U+V IPC**, model
 `b6b92dbfde2c6148fde30b5c65cac8217f650f7bbc1a7d4c0bd58fe95f706c9e`, cycles
