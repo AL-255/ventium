@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Bounded physical CoreMark trial using an already programmed, fresh image.
+"""Bounded physical CoreMark trial using an already programmed image.
 
-No clock selection, programming, guest patch, snapshot, STEP or breakpoint.
+No programming, guest patch, snapshot, STEP or breakpoint. --pll-divider opts
+into runtime PLL control and repeated cold boots of the SAME programmed image.
 The caller pins/programs the bitstream and separately grades CRCs and duration.
 The only run controls are cold initialization, one RUN, and reset after evidence.
 """
@@ -70,7 +71,9 @@ def quiesce(ctrl, *, api=probe, sleep=time.sleep):
 
 
 def thermal():
-    return {str(p):p.read_text().strip() for p in Path('/sys/class/thermal').glob('thermal_zone*/temp')}
+    paths=list(Path('/sys/class/thermal').glob('thermal_zone*/temp'))
+    paths+=list(Path('/sys/bus/iio/devices').glob('iio:device*/in_temp*_input'))
+    return {str(p):p.read_text().strip() for p in paths}
 
 
 def run(args):
@@ -79,6 +82,9 @@ def run(args):
         raise ValueError('require a new trial leaf inside the private board staging directory')
     if not 20 <= args.expected_mhz <= 100 or not 30 <= args.seconds <= 180:
         raise ValueError('trial bounds invalid')
+    if args.pll_divider is not None and (not 10 <= args.pll_divider <= 50 or
+            abs(1000/args.pll_divider-args.expected_mhz)>1e-6):
+        raise ValueError('expected clock must match the explicit runtime PLL divider')
     no_daemon()
     if sha(DAEMON) != DAEMON_SHA or sha('/tmp/ao486/boot0.rom') != BOOT0_SHA:
         raise ValueError('daemon/BIOS identity mismatch')
@@ -107,7 +113,9 @@ def run(args):
         boot_id=Path('/proc/sys/kernel/random/boot_id').read_text().strip(),
         iomem=Path('/proc/iomem').read_text(), thermal=thermal(), label=args.label,
         invocation=os.environ.get('INVOCATION_ID'), controller_pid=os.getpid(),
-        no_step=True, no_snapshot=True, acceptance=False))
+        no_step=True, no_snapshot=True, acceptance=False,
+        runtime_pll=args.pll_divider is not None, pll_divider=args.pll_divider,
+        reprogrammed=False))
     fd, ctrl, _ = probe.open_mmio(writable=True)
     child = None
     errors = []
@@ -115,8 +123,15 @@ def run(args):
     captured = 0
     stopped_by_controller = False
     reset_drained = False
+    pll = None
     try:
-        save('held-clock.json', measure(ctrl, expected_mhz=args.expected_mhz))
+        if args.pll_divider is not None:
+            import ven_pll_clock
+            pll = ven_pll_clock.GpioMailbox()
+            save('held-before-clock.json', quiesce(ctrl))
+            save('pll-change.json',ven_pll_clock.change(pll,args.pll_divider))
+        save('held-clock.json', measure(ctrl, expected_mhz=args.expected_mhz,
+                                      allow_previous_retirements=pll is not None))
         probe.prepare_cold_probe(argparse.Namespace())
         with (out/'daemon.stdout').open('xb') as stdout, (out/'daemon.stderr').open('xb') as stderr:
             argv = [str(DAEMON), '--membase', '0x60000000', '--mem', '16',
@@ -139,9 +154,16 @@ def run(args):
                 while time.monotonic() < deadline:
                     if child.poll() is not None:
                         raise RuntimeError('daemon exited before complete CoreMark console')
+                    primary_before = probe.stable_u64(ctrl, probe.R_DBG_RET_LO, probe.R_DBG_RET_HI)
                     record = sample(lambda off:probe.u32(ctrl, off),
                                     lambda off,value:struct.pack_into('<I', ctrl, off, value))
+                    record['primary_retirements_before'] = primary_before
                     record['primary_retirements_after'] = probe.stable_u64(ctrl, probe.R_DBG_RET_LO, probe.R_DBG_RET_HI)
+                    if pll is not None:
+                        state=ven_pll_clock.decode(pll.read())
+                        if state['busy'] or state['error'] or not state['locked'] or not state['clock_enabled'] or state['mmcm_reset'] or state['divider']!=args.pll_divider:
+                            raise ValueError(f'PLL changed/failed during trial: {state}')
+                        record['pll']=state
                     record['monotonic_ns'] = time.monotonic_ns()
                     samples.write(json.dumps(record)+'\n'); samples.flush()
                     if time.monotonic() >= capture_at:
@@ -180,6 +202,10 @@ def run(args):
             save('held-after.json', quiesce(ctrl))
             reset_drained = True
         except Exception as error: errors.append('quiesce: '+repr(error))
+        if pll is not None:
+            try: save('pll-after.json',ven_pll_clock.decode(pll.read()))
+            except Exception as error: errors.append('PLL cleanup: '+repr(error))
+            pll.close()
         ctrl.close(); os.close(fd)
     stable = all(sha(p) == digest for p,digest in pins.items())
     save('closed.json', dict(console_complete=completed, errors=errors,
@@ -202,6 +228,8 @@ def main():
     trial.add_argument('--label', required=True)
     trial.add_argument('--expected-mhz', type=float, required=True)
     trial.add_argument('--seconds', type=int, default=120)
+    trial.add_argument('--pll-divider',type=int,
+                       help='runtime clock change on the SAME image; enables retained-counter measurements')
     args = parser.parse_args()
     if os.geteuid() != 0: raise PermissionError('board root required')
     if args.command == 'run': return run(args)

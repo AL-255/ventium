@@ -116,6 +116,18 @@ class ColdClockTests(unittest.TestCase):
                         monotonic_ns=lambda:board.ns, sleep=board.sleep)
             self.assertEqual(board.ns, 0)
 
+    def test_same_image_retained_counter_must_stay_constant(self):
+        board=FakeBoard(); board.retired=500_000_000
+        result=measure(None,allow_previous_retirements=True,api=board,
+                       monotonic_ns=lambda:board.ns,sleep=board.sleep)
+        self.assertEqual(result['before']['retired'],500_000_000)
+        self.assertEqual(result['retirements_delta'],0)
+        for value in (500_000_001,0):
+            board=FakeBoard(event=lambda b:setattr(b,'retired',value)); board.retired=500_000_000
+            with self.subTest(value=value),self.assertRaisesRegex(ValueError,'retirements changed'):
+                measure(None,allow_previous_retirements=True,api=board,
+                        monotonic_ns=lambda:board.ns,sleep=board.sleep)
+
 
 if __name__ == '__main__':
     unittest.main()

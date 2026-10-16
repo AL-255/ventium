@@ -14,7 +14,7 @@ import time
 import ven_board_probe as probe
 
 
-def measure(ctrl, *, expected_mhz=40.0, api=probe,
+def measure(ctrl, *, expected_mhz=40.0, allow_previous_retirements=False, api=probe,
             monotonic_ns=time.monotonic_ns, sleep=time.sleep):
     # Explicit experimental target, never an unconstrained observed-clock pass.
     # The default retains the original 39.5..40.5 MHz admission limits.
@@ -31,7 +31,7 @@ def measure(ctrl, *, expected_mhz=40.0, api=probe,
         cycles = api.stable_u64(ctrl, api.R_DBG_CYC_LO, api.R_DBG_CYC_HI)
         t1 = monotonic_ns()
         retired = api.stable_u64(ctrl, api.R_DBG_RET_LO, api.R_DBG_RET_HI)
-        if retired != 0:
+        if retired != 0 and not allow_previous_retirements:
             raise ValueError('fresh image already has primary retirements')
         if t1 < t0:
             raise ValueError('monotonic clock moved backwards')
@@ -46,6 +46,8 @@ def measure(ctrl, *, expected_mhz=40.0, api=probe,
         if current['cycles'] < previous['cycles']:
             # A reset/clear is not a plausible 64-bit wrap in a five-second test.
             raise ValueError('cycle counter reset/clear invalidates clock admission')
+        if current['retired'] != before['retired']:
+            raise ValueError('primary retirements changed while guest held reset')
         previous = current
         checks += 1
     after = previous
@@ -65,6 +67,7 @@ def measure(ctrl, *, expected_mhz=40.0, api=probe,
                 cycles_delta=delta, retirements_delta=0, elapsed_seconds=elapsed,
                 measured_core_mhz=delta/elapsed/1e6, lower_mhz=lower, upper_mhz=upper,
                 guard_checks=checks, debug_abi=5, read_only=True,
+                allow_previous_retirements=allow_previous_retirements,
                 uv_fast_qualified=False, gameplay_ipc=None, sta_signoff=False,
                 acceptance=False)
 

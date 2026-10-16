@@ -25,6 +25,24 @@ def sha(path):
         return hashlib.file_digest(stream, 'sha256').hexdigest()
 
 
+def paired_lower_bound(samples, primary_at_reset):
+    """Conservative CURRENT trial witness, never inherit prior runs' V count.
+
+    Total is sampled between U_before and U_after. Subtract the largest U delta
+    from the measured total delta. Historical samples without U_before use the
+    earlier held-reset U observation, which only makes the lower bound smaller.
+    """
+    first,last=samples[0],samples[-1]
+    first_u=first.get('primary_retirements_before',primary_at_reset)
+    last_u=last['primary_retirements_after']
+    if not primary_at_reset <= first_u <= last_u:
+        raise ValueError('primary counter reset or invalid order')
+    total_delta=last['total_retirements']-first['total_retirements']
+    if total_delta < 0:
+        raise ValueError('total counter reset')
+    return total_delta-(last_u-first_u)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--trial', type=Path, required=True)
@@ -75,7 +93,8 @@ def main():
         screen.font(args.rom.read_bytes(), meta['width']//80))
     console = (args.trial/'console.txt').read_text()
     assert decoded['exact_glyphs'] and decoded['text'] == console
-    result = check(console, reference_crcs=row['crcs'], iterations=2000, require_valid_duration=True)
+    assert row['iterations'] in (2000,4000)
+    result = check(console, reference_crcs=row['crcs'], iterations=row['iterations'], require_valid_duration=True)
     assert clock['retirements_delta'] == 0 and clock['guard_checks'] >= 80 and clock['debug_abi'] == 5
     assert clock['expected_core_mhz'] == start['expected_mhz']
     duration = result['ticks'] / (clock['measured_core_mhz'] * 1e6)
@@ -86,9 +105,18 @@ def main():
     for before, after in zip(samples, samples[1:]):
         interval(before, after)
         assert after['primary_retirements_after'] >= before['primary_retirements_after']
-    # U is read AFTER total U+V; subtraction gives a conservative V witness.
-    paired_lower = samples[-1]['total_retirements'] - samples[-1]['primary_retirements_after']
+    paired_lower = paired_lower_bound(samples,clock['before']['retired'])
     assert paired_lower > 1_000_000
+    if start.get('runtime_pll'):
+        divider=start['pll_divider']
+        assert clock['allow_previous_retirements'] and not start['reprogrammed']
+        assert abs(1000/divider-start['expected_mhz'])<1e-6
+        change=read('pll-change.json')
+        assert change['requested_divider']==divider and not change['reprogrammed']
+        assert read('held-before-clock.json')['held_reset']
+        for status in [change['after'],read('pll-after.json')]+[s['pll'] for s in samples]:
+            assert status['divider']==divider and status['locked'] and status['clock_enabled']
+            assert not status['busy'] and not status['error'] and not status['mmcm_reset']
     final = read('final-state.json')
     assert not final['freeze']['frozen'] and final['execution']['raw'] == '00000000'
     result.update(physical_coremark_trial_pass=True, measured_mhz=clock['measured_core_mhz'],
