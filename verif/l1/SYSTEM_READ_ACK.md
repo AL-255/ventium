@@ -2,8 +2,8 @@
 
 Status: implemented in an isolated nine-file RTL derivative and transferred
 to a matching full-PC model. Directed, cold-input, short CoreMark and strict
-CPU-lint checks pass. Matched synthesis has been submitted; **no completed
-synthesis/timing result, routing, deployment or standard-suite acceptance yet.
+CPU-lint checks pass. Matched synthesis and its independent source/resource
+audit pass; **timing is still being measured, with no routing, deployment or standard-suite acceptance yet.
 Canonical `make verify` still fails.** The dirty checkout's RTL and pre-existing
 full-PC runs remain untouched.
 
@@ -177,6 +177,9 @@ Completion requires the full guest console, all five same-iteration reference
 CRCs, at least ten guest seconds, actual V retirements, unchanged inputs and a
 clean native exit. A timeout or partial console does not qualify. These runs
 do not establish canonical-gate, whole-suite or physical-FPGA acceptance.
+The unchanged console checker and independent seed auditor also pass all
+22 host tests, including rejected incomplete, corrupt, short-duration,
+unpaired, timeout and OOM fixtures. These synthetic tests are not seed results.
 
 The immutable FPGA export is `system-read-ack-fpga-r1`; manifest SHA-256
 `6ab025121f1f06b1d42f3b277f40349035b5a278ca85ac41ca11d27487c5ecb2`.
@@ -203,10 +206,39 @@ Process ownership, exclusive Vivado launch, 8 GiB synthesis RAM / 6 GiB swap
 caps, 45-minute bound, measured-growth disk admission and 4 GiB stop floor are
 unchanged. The read-only clock audit keeps its 8/4 GiB caps and 15-minute bound.
 
+### Closed synthesis; timing audit in progress
+
+The synthesis owner closed successfully at **2026-10-16 12:01:51 UTC**, after
+2,395.906 seconds (39.93 minutes). `system-read-ack-synthesis-r1/audit.json`
+independently checks its exact exited owner, all **71,261 input pins**, actual
+native source/define lists, nine-file delta, mapper, checkpoint integrity and
+resource observations. Peak cgroup RAM was 8 GiB and swap 268.69 MiB; no OOM,
+resource stop or controller failure occurred. The checkpoint SHA-256 is
+`2d7a8970fe25add5be2e76862f05013687c35c8d086e74fb87518cf959b4fae1`.
+
+| Native synthesis resource | RAW/input parent | ACK candidate |
+|---|---:|---:|
+| CLB LUTs | 187,185 | 187,456 |
+| CLB registers | 54,760 | 54,754 |
+| BRAM tiles | 277.5 | 277.5 |
+| DSPs | 47 | 47 |
+
+The LUT count increased by 271; this is not an area reduction. The native
+synthesis summary has zero errors, one critical warning and 1,537 warnings.
+The critical warning is the parent's same `Synth 8-3321` generated PS-clock
+constraint warning at `rk_ao486_bd_ps8_0.xdc:21`, not a new waiver or timing pass.
+
+Only after that synthesis audit passed, the observer launched
+`ventium-system-read-ack-clock-oct16-r1.service`, invocation
+`44892ab4af7249039d35bd70859d2bed`. The native read-only Vivado process is live.
+It reads the completed project and original constraints, checks actual clocks
+and black boxes, and reports matched parent/candidate timing and utilization.
+No candidate frequency, routed timing or board acceptance is established yet.
+
 ## Limits and next work
 
 No frequency or IPC gain is claimed for this cut. Finish and independently
-audit the matched synthesis/timing; do not inherit the parent's timing or board
+audit the matched timing reports; do not inherit the parent's timing or board
 result. Routing to ≥40 MHz, repairing canonical gates,
 duration-valid CoreMark ≥2.1 CM/MHz, full standard-suite completion, and physical
 Win95 cold desktop/UI plus full Quake timedemo acceptance remain required.
