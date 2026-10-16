@@ -11,6 +11,11 @@ the synthesized/unplaced estimate is **35.2958 MHz**, slightly worse than the
 RAW/input parent's **35.3744 MHz**, and area does not fall. No placement,
 routing, board deployment or production RTL promotion has been launched.
 
+The next [parallel write-admission proposal](PARALLEL_WRITE_ADMISSION.md) retains
+generic pair-credit checks but computes them before late request selection.
+Its native cache/AXI evidence is separate; whole-core and timing results remain
+pending. It does not rehabilitate this rejected candidate.
+
 ## Reason and scope
 
 The [system read ACK cut](SYSTEM_READ_ACK.md) regressed the matched unplaced
