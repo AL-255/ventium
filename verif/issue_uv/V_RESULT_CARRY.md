@@ -335,3 +335,49 @@ Current-candidate gameplay remains unmeasured; older verified baseline is
 **0.50520554 total U+V**, model `c7b95b78…`, cycles
 **5,600,065,237–5,700,065,237**. Canonical/standard-suite/physical acceptance
 remain open.
+
+## October 16: corrected-wrapper CAD run admitted (still in progress)
+
+The next bounded synthesis started at 00:45:30 UTC from manifest
+`ab1c791f…`, in `posted-mouse-synthesis-r1`. Controller
+`ventium-posted-mouse-synth-oct16-r1`, invocation
+`876ffb6a3e8042d1abdf9028b55df03e`, owns the single Vivado process family;
+the native scope invocation is `33cd5b1c38b4419f8a2d67ca0fb5340e`.
+Actual Vivado compile-order admission now finds exactly one each of the
+wrapper, mouse mailbox and PS/2 device. It printed
+`MOUSE_POSTED_PREFLIGHT_OK exact_sources=3 implementation_authorized=false`
+before starting `synth_1` at 00:46:27 UTC. This is a **native source check**,
+not completed synthesis, timing closure or physical UI acceptance.
+
+`fpga/prepare_posted_mouse_timing.py` preserves the previous resource/lifetime
+guards byte-for-byte: one job, 40/100 MHz constraints, 8 GiB RAM / 6 GiB swap,
+13 GiB combined early stop, 4 GiB disk floor, 2 GiB host headroom and 45-minute
+timeout. CPU-only lint transfers solely because all CPU bytes are unchanged;
+the corrected wrapper's `source_contract_passed` and full-wrapper simulation
+flags remain false. Eight preparation/Tcl-stub tests and three sequence tests
+pass. The stubs do not substitute for the native Vivado source check above.
+
+The exact-owner timing sequence (`ventium-posted-mouse-timing-chain-oct16-r1`,
+invocation `037dd942438b41cc973a4dbc2c689cbc`) observes this synthesis only.
+It requires successful native closure and the independent source audit before
+launching the prepared 15-minute read-only clock report. That audit still
+requires both mouse sources in Vivado's emitted synthesis Tcl, now also checks
+actual module synthesis and rejects mouse CSR/line undriven warnings. Neither
+controller launches implementation or programming; no automatic retry occurs.
+
+Disk admission was met by losslessly archiving 16 bulky cone/primitive reports
+from four **closed** older clock runs (early-bus, branch-address, decode-bus,
+demand-size R2). Original 900,429,518 bytes became a 19,558,984-byte archive:
+`closed-clock-cones-oct16.tar.zst`, SHA-256
+`84b13d30b4c693d8dd10db2eefe822276ae58c3ee2e8da5afd14cf1f7b174212`.
+Every member's name, size and SHA was checked before removing its uncompressed
+copy. The adjacent plan/closed receipts preserve exact targets. Restore into
+the evidence root with `zstd -dc ARCHIVE | tar -xf - -C ROOT` before rerunning
+those old raw-report audits. Sources, DCPs, binaries, native logs, summary
+reports, the pipe-wait comparison parent and live Quake were not pruned.
+
+Current-candidate gameplay IPC is still unmeasured. Older baseline remains
+**0.50520554 total U+V**, `c7b95b78…`, cycles
+**5,600,065,237–5,700,065,237**. Last valid predecessor estimate remains
+**37.9507 MHz unplaced**. Canonical, standard-suite, routed-frequency and
+physical-FPGA acceptance remain open; no new performance gain is claimed.
