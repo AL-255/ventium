@@ -1,9 +1,10 @@
 # Boundary-only fetch staging experiment — October 16, 2026
 
-**Private experiment, not promoted, routed or deployed.** Synthesis is now
-running; it has no completed frequency result yet. It
-preserves architectural results in the checks below, but still has a measurable
-boundary-fetch cost. No frequency improvement or gameplay gain is claimed.
+**Private experiment, not promoted, routed or deployed.** The matched synthesis
+and independent clock audit are closed: **34.652436 → 36.968577 MHz unplaced
+estimate (+6.684%)**, still below 40 MHz. It preserves architectural results
+in the checks below, but still has a measurable boundary-fetch cost. No routed
+frequency, physical-board improvement or gameplay gain is claimed.
 Production RTL and both existing cold Quake simulations remain unchanged.
 
 The retained corrected-wrapper timing parent is **34.652436 MHz synthesized /
@@ -55,7 +56,7 @@ the page-edge regressions.
 Evidence root:
 `/home/yukidama/external/tmp/ventium-fprem-sequence.iSZ9BAj4`.
 Every new build/run uses that external filesystem and bounded native owners.
-The shared heavyweight lock was retained; no Vivado ran during this experiment.
+The shared heavyweight lock was retained; no Vivado overlapped these core tests.
 
 - Six recipe/adapter tests pass. Exact-parent hashes reject drift and
   reapplication. Both derivatives change only `rtl/core/core.sv` and
@@ -126,8 +127,8 @@ to the exact journal invocation instead of accepting an empty systemd ID.
 
 ## Remaining acceptance and current gameplay
 
-Full-PC cost measurement and the exact FPGA transfer are now closed, below.
-A matched bounded synthesis has started. No timing improvement is established yet.
+Full-PC cost measurement, exact FPGA transfer and the matched bounded synthesis
+and clock audit are closed, below. The unplaced estimate improves, not sign-off.
 Canonical repair, full standard suite, ≥40 MHz synthesized/routed closure,
 candidate FPGA Win95 cold desktop/UI and a completed Quake timedemo remain open.
 
@@ -194,17 +195,47 @@ Strict CPU-hierarchy lint passed in **3.73 seconds**, with the original six
 structural error classes; this is not complete-wrapper or full-SoC acceptance.
 Three source/profile rejection tests and three CAD-guard tests pass.
 
-One matched synthesis is running under
+The matched synthesis closed successfully under
 `ventium-sfetch-boundary-synth-oct16-r1.service`, invocation
 **`3ed4c5104c9e405c807a04154092e609`**, with source/mapper/40 MHz constraints
 matched to the **34.652436 MHz unplaced** corrected-wrapper parent.
 The watchdog retains **8 GiB RAM / 6 GiB swap**, a 13 GiB combined early stop,
 4 GiB disk stop floor and admission based on twice measured parent disk growth.
-Only one Vivado family is allowed. The
-[sequence](../../fpga/run_sfetch_boundary_timing_sequence.py) observes this exact
-invocation and may start only the prepared read-only clock report after native
-closure and an independent audit. It cannot retry synthesis, route or deploy.
-No new fmax, routed timing, Win95 pass or complete Quake result exists yet.
+Only one Vivado family is allowed. Native synthesis took **1,897.22 seconds**,
+peak RAM **8,589,930,496 bytes**, peak swap **1,376,129,024 bytes**, with no OOM,
+resource stop or input drift. The independent audit passes 21,976 input pins
+and 150 native `read_verilog` files. Diagnostics remain **1 critical warning /
+1,531 warnings**, not warning-free synthesis. Closed DCP SHA-256:
+**`cdfd1aebe93772078decc21741296b136908179f316b23393419e2971db5119c`**.
+
+The [sequence](../../fpga/run_sfetch_boundary_timing_sequence.py) observed that
+exact invocation, audited closure, and ran only the prepared read-only clock
+report. Clock owner `ventium-sfetch-boundary-clock-oct16-r1.service`, invocation
+**`4c3e30086075403abeeb20d8b81aca1e`**, closes exit0 / MainPID0 in **643.94 s**;
+peak RAM **4,711,780,352 bytes**, no swap/OOM. Its independent audit rechecks
+**21,993 input pins**. Both independent audits and the sequence report pass;
+none is a canonical functional or hardware-acceptance pass.
+
+| Matched unplaced comparison | Parent | Boundary-only candidate |
+|---|---:|---:|
+| Core frequency estimate | 34.652436 MHz | **36.968577 MHz** |
+| Core setup WNS at 25 ns | −3.858 ns | **−2.050 ns** |
+| Worst-path logic levels | 97 | **92** |
+| LUTs | 188,884 | **187,990 (−894)** |
+| Registers | 55,209 | **55,218 (+9)** |
+| BRAM tiles / DSPs | 277.5 / 47 | **277.5 / 47** |
+
+The candidate's worst setup path is `eip_reg[0]/C → pipe_mem_active_q_reg/D`:
+instruction alignment/decode, memory-chain eligibility and L1 ready feed the
+same-cycle acceptance/active decision. Data delay is **26.839 ns** (5.704 ns
+logic, 21.135 ns estimated routing). Core hold WNS is **−0.101 ns**. These
+reports retain the original 40 MHz core / 100 MHz PL constraints and matched
+Default, `-no_timing_driven` synthesis mapper; they are **not routed timing or
+measured board frequency**. The register-boundary experiment removes part of
+the old path but does not reach the requested 40 MHz. No implementation,
+programming, Win95 acceptance or complete Quake result was started by this
+sequence. Native evidence: `sfetch-boundary-synthesis-r1` and
+`sfetch-boundary-clock-r1` under the evidence root above.
 
 Disk preparation retained all evidence and native binaries: six closed-build
 PCH caches removed (**563,873,811 bytes**, regenerable by rebuilding), followed
@@ -215,3 +246,11 @@ were used in these tests. Receipts are `sfetch-closed-pch-prune-oct16.json` and
 `aug17-snapshot-sparse-pages-oct16.json` under the evidence root. About **8.7 GiB**
 was available before synthesis. No Chrome browser was running; unrelated
 Electron applications were left alone. Both older cold Quake runs remain live.
+
+After the clock owner and sequence closed, another **39 inactive August16
+`qk3_snap` files** were sparsified under the free heavyweight lock: **5,199,036,416
+allocated bytes reclaimed (4.84 GiB)**, zero files deleted. All 39 original
+paths, lengths, inodes, timestamps and full SHA-256 digests are preserved.
+Receipt: `aug16-qk3-snapshot-sparse-pages-oct16.json`; available space rose from
+8,759,951,360 to 13,958,987,776 bytes. Active runs, source, media and native
+binaries were not removed or changed.
