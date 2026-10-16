@@ -1,7 +1,8 @@
 # Credit-qualified paired-store enqueue — 2026-10-16
 
 Status: **isolated proposal, not production RTL or an accepted processor fix**.
-Native admission-equation and first full-cache/AXI A/B tests pass. Timing,
+Native admission-equation, full-cache/AXI A/B, selected fault regressions and
+actual same-clock no-L2 wrapper checks pass. Timing,
 whole-core correctness, gameplay, the standard suite and FPGA acceptance are
 unmeasured. No new Vivado run or deployment was launched for this proposal.
 
@@ -106,15 +107,80 @@ flat-tag observation name. Leaf r2 retains both preprocessor arms, and cache
 r2 compares both current per-way tag arrays in full. Neither failed attempt
 is counted as a correctness pass.
 
+### Fault, reset and actual-wrapper follow-up
+
+`qualified-pair-credit-native-audit-r1.json` independently reconstructs **18
+native fault/regression executions plus two wrapper executions**, checks 191
+source/artifact pins, reaped binaries, retained outer-service identities and
+their distinct child-scope journal identities. The audit explicitly does
+**not** turn the original failed fault controller into a pass.
+
+The fault checks run the exact original and candidate AXI master against the
+existing ID, post-AR RID, orphan-B, RRESP, BRESP, stale-first narrow replay,
+quad-store, quad BRESP-error and non-quad split-pair fixtures. Non-pair fixtures
+tie only the optional pair inputs inactive; their stimulus and checks remain
+unchanged. The candidate uses the qualified branch except in split-pair
+rejection, which deliberately exercises the **generic default** with a held,
+uncredited request. Internal assertions remain enabled; the existing narrow
+fault-injection defines suppress only the intentionally violated responder
+assumptions, not containment checks.
+
+The original `qualified-pair-credit-faults-r2` controller remains **FAIL**:
+its first twelve native runs passed, then the quad fixture printed PASS and a
+timeout fatal in the same simulator evaluation despite exit code 0. A first
+named-block exit attempt did not fix this: generated C++ still reached the
+timeout. The final `tb_axi_quad_pair.sv` repair records completion, leaves the
+poll loop and calls `$finish` once afterward, retaining the timeout on missing
+completion. The canonical shell gate now rejects fatal/error diagnostics even
+when the process exits zero and prints a PASS marker. Host tests inject that
+exact misleading log and require failure. No DUT RTL or expected AXI values
+were changed to resolve this testbench defect.
+
+`qualified-pair-credit-quad-r3` separately passes all six original/candidate
+quad cases in 32.006 seconds. The audit reuses only the twelve clean non-quad
+rows of the failed earlier controller, reconstructing their complete generated
+fixtures and master sources against current inputs; it excludes the bad quad
+row. This is collected per-case evidence, not a renamed successful original
+run. Both earlier failed quad attempts and their native logs remain retained.
+
+`qualified-pair-credit-wrapper-r3` passes both original and candidate actual
+`ventium_l1_axi` integrations in 11.526 seconds, with the same coverage:
+**65 U stores, 2 V stores, 1 quad enqueue, 30 blocked-store clocks, 53 full-queue
+clocks, 100 AXI write transactions, one AXI-only reset/retry and four denial
+checks**. The 60 byte-mask/offset stores include split writes; final backing
+RAM is checked byte-for-byte. Denial coverage is three independent V-readiness
+queries (SMRAM, unrouted high address, VGA/MMIO) plus an actual denied U/V SMRAM
+request that must not partially reach DDR. A held AR is reset through public
+reset/handshake pins, then the still-present producer request retries correctly.
+There is no forced internal ACK, cache state or queue credit. The source recipe
+enables the candidate parameter through the real wrapper, not a test-only
+direct-master override. All hardware feature defines are retained; only
+`SYNTHESIS` is removed to include assertions, and `AXI_BFM_MON` adds observation.
+
+Retained successful owners:
+
+- Quad: `ventium-qualified-pair-quad-oct16-r3.service`, invocation
+  `2ce7d4a82eda48f3bc45496422de8821`.
+- Wrapper: `ventium-qualified-pair-wrapper-oct16-r3.service`, invocation
+  `0c43425c096f45cfabfa17809d89da57`.
+
+Both have MainPID 0 and exit 0. Wrapper attempts r1/r2 failed before simulation
+(ambiguous fixture replacement and unsupported side-effecting increment in a
+short-circuit expression); they remain failures. The final eleven host tests
+pass. Closed compiler products are stored in verified `.tar.zst` archives beside
+their runs; binaries, source snapshots, headers, logs and receipts remain loose.
+Five additional closed object trees were archived to recover about **701 MiB**
+net; `tar --zstd -xf compiler-products.tar.zst -C <run-directory>` restores them.
+
 ## Remaining gates
 
 Before deriving or synthesizing a whole-core candidate:
 
-1. Expand native sequential tests for faulting B/R IDs/responses, orphan
-   responses, shutdown, reset, wrap/narrow accesses and same-edge release.
-   Boolean fatal/alias enumeration alone does not cover response ownership.
-2. Exercise the actual no-L2 wrapper, including SMRAM/route denial. Verify
-   default/unpaired and CDC exclusion configurations separately.
+1. Extend the now-passing fault and wrapper coverage to shutdown and additional
+   same-edge release/route-fault combinations. Existing evidence does not cover
+   every paired fault scenario. Preserve the explicit generic-producer contract.
+2. Verify unpaired/CDC exclusion configurations separately; their exclusion is
+   currently source-checked, not claimed as a new native CDC acceptance pass.
 3. Build the exact two-file derivative, run canonical `make verify` and
    system/fault comparisons in UV + fast-pipe mode with actual V retirement.
    Existing canonical failures remain failures, not newly waived passes.
