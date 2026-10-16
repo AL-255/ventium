@@ -6,9 +6,10 @@ actual same-clock no-L2 wrapper and directed whole-core system checks pass.
 The isolated processor and full-PC derivative build; canonical verification
 **fails**. Fresh qualified-private-reference comparisons pass separately.
 Gameplay, the standard suite and FPGA acceptance are unmeasured. Matched
-diagnostic synthesis and its independent audit now pass; area is effectively
-unchanged. The read-only timing comparison is running, with no frequency
-result yet. No placement, routing or board deployment has been launched.
+synthesis and timing audits are closed. **Rejected as a timing optimization:**
+the synthesized/unplaced estimate is **35.2958 MHz**, slightly worse than the
+RAW/input parent's **35.3744 MHz**, and area does not fall. No placement,
+routing, board deployment or production RTL promotion has been launched.
 
 ## Reason and scope
 
@@ -524,7 +525,58 @@ The clock owner then started automatically at **14:46:26 UTC**, invocation
 `f0b149d99a9b414daa06ff71266417e3`, with owned Vivado scope invocation
 `ce3b4239356c4e6994f2e10873ca384f`. At 14:47:26 it was live, about 1.87 GiB
 resident with zero swap/OOM and no stop reason. The result-audit owner is
-still waiting. **No new frequency estimate or 40 MHz qualification yet.**
+was still waiting at that sample; the final result follows below.
+
+#### Closed matched timing result — rejected
+
+The timing controller closed successfully at **14:54:04 UTC**, native exit 0,
+in **458.609 seconds**. The queued result audit also closed exit 0 / MainPID 0,
+invocation `f56b7bb132ba40688efd0fbd41c3717b`. Its `audit.json` checks **74,631
+input pins**, the original parent checkpoint, actual clocks, complete reports,
+source identity, both owner lifecycles and no OOM. Peak native RAM was
+**4,625,805,312 bytes**, zero swap. The Vivado scope is reaped/inactive.
+
+| Synthesized/unplaced result | RAW/input parent | Paired-credit candidate |
+|---|---:|---:|
+| Core frequency estimate | 35.374438 MHz | **35.295779 MHz** |
+| Setup slack at 40 MHz | -3.269 ns | -3.332 ns |
+| Core hold slack | -0.101 ns | -0.101 ns |
+| Worst-path logic levels | 94 | 94 |
+| Worst data-path delay | 27.972 ns | 28.035 ns |
+
+Frequency changes **-0.2224%**, not an improvement. The worst path still runs
+from `q_pc_reg[0]` to `int_err_reg[0]/CE`, through route/cacheability checks,
+`l1d_store_pair_intent_ready`, `core_store_pair_req`, backing request/admission,
+`l1_c_ack`, fragment completion and interrupt-delivery control. The candidate
+path's estimated net delay is 22.550 ns (80.435%); this is an **unplaced
+estimate**, not measured routing or board frequency. Actual loaded constraints
+are still 40 MHz core / 100 MHz PL. The native audit reports zero black boxes
+and zero MDRV/LUTLP errors; it does not waive the existing timing-coverage
+limitations or establish full-SoC lint/acceptance.
+
+**Decision:** retain this experiment and its functional evidence, but do not
+promote it or spend routing/deployment time on it. Removing the redundant
+enqueue credit check did not remove the long combinational dependency. The
+RAW/input parent remains the implementation baseline for the next timing
+repair; the rejected system-read-ACK derivative is not silently included.
+
+The next targeted design investigation is to compute **single-write and
+paired-write readiness in parallel with request qualification**, then select
+the appropriate completion at the L1 boundary. Today the late pair request
+still traverses backing request, alias/admission and general ACK logic before
+returning to the core. A separate readiness result must not itself enqueue,
+mutate cache data or retire an instruction: those effects remain qualified
+by the actual accepted request. Unlike the rejected redundant-credit change,
+the aim is a real dependency cut, not a renamed equivalent equation.
+
+This is **not implemented or proved yet**. Preserve independent U/V address
+extent checks, same-edge queue release, quad/non-quad credit, clean shutdown,
+fatal/foreign responses, SMRAM/DMA ordering and unqualified held-pair behavior.
+Keep generic/CDC/L2 behavior unchanged. Require negative controls and complete
+cache/core A/B traces before synthesis; do not add a global wait state, another
+architecturally retired store-buffer entry, a false-path constraint or reduced
+pairing. In particular, do not drop the V alias check on the assumption that
+U's route validates V, and do not treat an unrequested ready signal as an ACK.
 
 Disk recovery is lossless: **7,170 unique generated compiler products** across
 45 closed build directories were archived and byte-compared before their loose
@@ -691,10 +743,11 @@ Before accepting the whole-core candidate:
    unchanged nine failed cycle bands retain native exit 2 / overall **FAIL**.
    All 20 RTL cycle streams are identical to the earlier run. No masks or
    bands were relaxed, and the original default-reference failure is retained.
-2. Complete and independently audit the matched diagnostic synthesis/timing.
-   This simplification may have little timing effect because the original
-   ready-to-request path remains; **no MHz, area, CPI or IPC gain is claimed**.
-   A successful diagnostic does not by itself authorize acceptance or routing.
+2. Achieve the timing requirement with a genuine structural repair. The
+   matched diagnostic synthesis/timing and independent audits are complete,
+   but this proposal is rejected: **35.2958 MHz, no area reduction and no CPI
+   or IPC gain**. The readiness-path investigation above remains unimplemented;
+   successful diagnostic closure does not authorize acceptance or routing.
 
 The previously missing shutdown/same-edge boundary checks and native
 default/CDC exclusion controls now have the explicit results above. This is
