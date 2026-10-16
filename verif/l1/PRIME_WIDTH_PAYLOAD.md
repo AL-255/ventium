@@ -265,6 +265,17 @@ is not part of this PC host model or the running timing export. Final hardware
 must compose that endpoint with the controller and posted-mouse wrapper and
 pass full Win95 keyboard/mouse and Quake acceptance on the board.
 
+The [post-build control adapter](../../fpga/prime_width_ui_controls.py) is ready
+but **has not launched a native guest**. Its `input`, `coremark` and
+`audit-coremark` actions reuse the closed fetch/UI controls, changing only
+lineage, evidence paths and unit names. Six tests check exact derivation,
+unchanged guest/CRC/ownership grading and rejection of unqualified builds,
+wrong processor/input parents, changed definitions, changed sources or a
+mismatched binary. The two keyboard cases retain CPUs16/17 and the original
+480-second limit; the two short CRC seeds retain CPUs12/13 and 600 seconds per
+seed. Both remain cold UV-fast tests with actual V-retirement evidence. Neither
+is a full standard-suite pass or a duration-valid CoreMark score.
+
 ## Identities and gameplay baseline
 
 - Parent core model: `e604895eeb367591b16a564d4b91b282a30a6c65b3bee5c7f81823c5e48ae56a`.
