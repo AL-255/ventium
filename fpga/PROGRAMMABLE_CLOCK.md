@@ -99,11 +99,16 @@ TMPDIR=/home/yukidama/external/tmp PYTHONDONTWRITEBYTECODE=1 \
   test_coremark_clock_media test_coremark_clock_audit
 ```
 
-The 39 tests pass. They include retained-counter handling and rejecting old
+The 44 tests pass. They include retained-counter handling and rejecting old
 V-retirement history as evidence of pairing in a later trial. Cold preparation
 must match the exact prior U count measured while reset was held; the original
 fresh-image default still requires zero. Counters are never cleared to make
 another seed look newly programmed.
+The controller checks the always-on PLL status before opening management MMIO
+(even opening it reads IDENT). Failed DRP cleanup first attempts safe GPIO-only
+recovery to40; if the clock is unavailable and the interlock disallows recovery,
+it skips management MMIO instead of hanging the APU. Recovery is recorded as a
+failed trial, never a successful frequency point.
 Both 4,000-iteration private-QEMU references also pass (native exit33):
 performance CRCs `e9f5/e714/1fd7/8e3a/65c5`, validation
 `18f2/e3c1/0747/8d84/5249`. Evidence: `coremark-pll-media-r1`; these are reference

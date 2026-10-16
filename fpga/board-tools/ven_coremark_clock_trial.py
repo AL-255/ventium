@@ -76,6 +76,46 @@ def thermal():
     return {str(p):p.read_text().strip() for p in paths}
 
 
+def cleanup_clock(pll, *, sleep=time.sleep):
+    """Do not access the core-clocked MMIO bus while its clock is stopped.
+
+    A failed held-reset DRP change can recover through always-on GPIO. Never
+    bypass the hardware interlock, and never turn recovery into a trial pass.
+    """
+    import ven_pll_clock
+    def usable(s):
+        return not s['busy'] and s['locked'] and s['clock_enabled'] and not s['mmcm_reset']
+    before=ven_pll_clock.decode(pll.read())
+    current=before
+    for _ in range(200):
+        if not current['busy']: break
+        sleep(.01)
+        current=ven_pll_clock.decode(pll.read())
+    result=dict(before=before,after=current,clock_usable=usable(current),recovered=False)
+    if result['clock_usable']:
+        return result
+    if current['busy'] or not current['safe']:
+        result['error']='clock unavailable; unsafe to change it or access management MMIO'
+        return result
+    try:
+        result['recovery']=ven_pll_clock.change(pll,25,sleep=sleep)
+        result['after']=ven_pll_clock.decode(pll.read())
+        result['clock_usable']=usable(result['after'])
+        result['recovered']=result['clock_usable']
+    except Exception as error:
+        result['error']=repr(error)
+    return result
+
+
+def require_running_clock(pll):
+    """Always-on admission BEFORE open_mmio(), which itself reads IDENT."""
+    import ven_pll_clock
+    status=ven_pll_clock.decode(pll.read())
+    if status['busy'] or status['error'] or not status['locked'] or not status['clock_enabled'] or status['mmcm_reset']:
+        raise RuntimeError(f'PLL is not ready for management MMIO: {status}')
+    return status
+
+
 def run(args):
     out = args.out.resolve()
     if not str(out).startswith('/dev/shm/ventium-coremark-clock-stage.') or out.exists():
@@ -116,7 +156,7 @@ def run(args):
         no_step=True, no_snapshot=True, acceptance=False,
         runtime_pll=args.pll_divider is not None, pll_divider=args.pll_divider,
         reprogrammed=False))
-    fd, ctrl, _ = probe.open_mmio(writable=True)
+    fd = ctrl = None
     child = None
     errors = []
     completed = False
@@ -128,6 +168,9 @@ def run(args):
         if args.pll_divider is not None:
             import ven_pll_clock
             pll = ven_pll_clock.GpioMailbox()
+            save('pll-before-mmio.json',require_running_clock(pll))
+        fd, ctrl, _ = probe.open_mmio(writable=True)
+        if pll is not None:
             save('held-before-clock.json', quiesce(ctrl))
             save('pll-change.json',ven_pll_clock.change(pll,args.pll_divider))
         held_clock=measure(ctrl, expected_mhz=args.expected_mhz,
@@ -193,6 +236,17 @@ def run(args):
     except Exception as error:
         errors.append(repr(error))
     finally:
+        clock_usable=True
+        if pll is not None:
+            try:
+                clock_recovery=cleanup_clock(pll)
+                save('cleanup-clock.json',clock_recovery)
+                clock_usable=clock_recovery['clock_usable']
+                if clock_recovery.get('error') or clock_recovery['recovered']:
+                    errors.append('PLL cleanup/recovery: '+json.dumps(clock_recovery))
+            except Exception as error:
+                clock_usable=False
+                errors.append('PLL cleanup: '+repr(error))
         if child is not None and child.poll() is None:
             stopped_by_controller = True
             os.killpg(child.pid, signal.SIGTERM)
@@ -201,6 +255,10 @@ def run(args):
                 os.killpg(child.pid, signal.SIGKILL); child.wait(timeout=10)
         try:
             no_daemon()
+            if not clock_usable:
+                raise RuntimeError('clock unavailable; deliberately skipped core-clocked MMIO cleanup')
+            if ctrl is None:
+                raise RuntimeError('MMIO not mapped; reset/drain not independently read back')
             save('held-after.json', quiesce(ctrl))
             reset_drained = True
         except Exception as error: errors.append('quiesce: '+repr(error))
@@ -208,7 +266,8 @@ def run(args):
             try: save('pll-after.json',ven_pll_clock.decode(pll.read()))
             except Exception as error: errors.append('PLL cleanup: '+repr(error))
             pll.close()
-        ctrl.close(); os.close(fd)
+        if ctrl is not None: ctrl.close()
+        if fd is not None: os.close(fd)
     stable = all(sha(p) == digest for p,digest in pins.items())
     save('closed.json', dict(console_complete=completed, errors=errors,
         inputs_unchanged=stable, captured_frames=captured, thermal=thermal(),
