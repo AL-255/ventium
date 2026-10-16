@@ -4,7 +4,8 @@ Status: **private experiment; extracted-source tests, whole-core compilation
 and private-reference checks pass; canonical gate remains FAIL**. All eight
 directed child corpora pass; their historical aggregate counter check fails.
 Independent complete same-input A/B regrading finds no candidate difference.
-No production RTL, board image,
+Full-PC compilation, short cold CoreMark controls and strict CPU lint now pass;
+one matched hardware synthesis is running. No production RTL, board image,
 constraints, goldens or comparator policy has changed. No frequency or
 gameplay gain is claimed.
 
@@ -150,12 +151,88 @@ records, malformed exit receipts and changed/truncated architectural traces.
 No native test rerun or acceptance-policy change was needed.
 
 Before promotion: qualify the aggregate expectations for this exact parent
-without weakening individual comparisons, transfer the exact source delta to the
-full-PC and hardware profiles, repeat cold correctness/input controls, and
-measure matched synthesis/timing. Retain the faster parent if timing regresses.
+without weakening individual comparisons, finish matched synthesis/timing,
+and compose and recheck the qualified keyboard/UI repair. Retain the faster
+parent if timing regresses.
 The canonical gate repair, duration-valid CoreMark score, standard suite and
 matching physical Win95/UI plus full Quake timedemo remain open. There is no
 new bitstream or FPGA pass for this experiment.
+
+## Full-PC transfer and cold controls
+
+[The full-PC builder](../../fpga/build_prime_width_soc.py) starts from the faster
+boundary-stage model, preserving **102 shared CPU/FP sources**, all **157
+definitions**, the existing AUX controller and posted-16 backend. Its sole
+functional source delta is the exact tested `core_mem_chain.svh` transform.
+Admission requires the independent complete same-input audit above and
+explicitly retains the historical aggregate and canonical failures; building
+this experiment does not promote either gate to PASS.
+
+Owner `ventium-prime-width-soc-build-oct16-r1.service`, invocation
+`a9e27502920744c88b7e3efe3614da89`, closes native exit0 / MainPID0 in **24.80
+seconds**, with unchanged inputs and a uniquely named C++ object bound to this
+model's generated header. The **98 inherited full-PC structural warnings**
+remain unchanged; this is not a full-SoC lint pass. Model:
+`cabf2f1198f476de7ec64fd18e179e6a1c2f57dc9ceeee6883a7f14ee3f9096d`.
+
+[Two parallel controls](../../fpga/run_prime_width_coremark.py) cold-boot the
+unchanged 10-iteration disks on native CPUs12/13, with `cycle_mode=1`, real
+AXI and no snapshot or guest patch:
+
+| Seed | Parent ticks | Candidate ticks | Cycle change | Actual V retirements |
+| --- | ---: | ---: | ---: | ---: |
+| Performance | 4,771,298 | 4,771,298 | 0% | 1,055,307 |
+| Validation | 4,755,366 | 4,755,366 | 0% | 1,054,254 |
+
+Reference CRCs remain `e9f5/e714/1fd7/8e3a/fcaf` and
+`18f2/e3c1/0747/8d84/c64e`. Native runtimes are **222.28 / 219.97 seconds**;
+both exit0 and are waited/reaped. Independent
+[regrading](../../fpga/audit_prime_width_coremark.py) checks **65,563 source
+pins**, native argv/affinity, disk/ROM identity, actual paired execution,
+original CRCs and exact cycle equality. Owner
+`ventium-prime-width-cm10-oct16-r1.service`, invocation
+`88f431052ae644c88ca4c956e3b87e6a`, closes exit0 / MainPID0, peak memory
+77,680,640 bytes, no OOM. Evidence: `prime-width-soc-r1/coremark-r1/audit.json`.
+These short controls are **not duration-valid CM/MHz scores or full standard
+CoreMark seeds**.
+
+## Matched FPGA experiment
+
+[The sealed export](../../fpga/freeze_prime_width_rk_candidate.py) checks all
+**192 payloads / 170 common compiled HDL files** against
+`sfetch-boundary-fpga-r1`. Only `ventium/rtl/core/core_mem_chain.svh` changes.
+It retains all **159 hardware definitions**, the corrected posted-DDR mouse
+wrapper, cache geometry, mapper and 40/100 MHz clock constraints. Posted and
+nonposted wrapper preprocessing pass; this is not full-wrapper elaboration or
+physical-board acceptance. Manifest:
+`dd8d91cba48f87f9d780f82c5c5f6d660761b7c204f42b59e35bd75b5045a5ae`.
+
+Strict CPU-hierarchy lint closes native exit0 in **3.78 seconds**, with all
+six structural error classes still fatal. Owner
+`ventium-prime-width-lint-oct16-r1.service`, invocation
+`b9f36b210d6542b8988b5eb52512ed96`, is closed MainPID0 with unchanged inputs.
+Twelve host tests cover exact source/profile transfer, rejected drift, original
+CRC/native controls, resource-guard mutants and exact sequencer ownership.
+
+One synthesis starts **2026-10-16 08:18:21 UTC**, owner
+`ventium-prime-width-synth-oct16-r1.service`, invocation
+`6486dfa5929e45f78d351a1622f67466`; exclusive native scope invocation
+`6f0e32d67c5444c6954bb1f99412c451`. It audits **66,825 input pins** and uses
+the unchanged 8 GiB RAM / 6 GiB swap cap, 13 GiB combined early stop, 2 GiB
+host reserve, 4 GiB disk stop floor and 45-minute deadline. Disk admission
+requires twice the measured parent's growth above that floor; no threshold
+was lowered. Starting free disk is 7,281,180,672 bytes; measured parent growth
+is 1,456,762,880 bytes.
+
+The [one-shot sequencer](../../fpga/run_prime_width_timing_sequence.py), owner
+`ventium-prime-width-timing-chain-oct16-r1.service`, invocation
+`42b3ad41ea2f41d5be78bab3ab850260`, observes this exact synthesis. After a
+successful native close and independent audit, it runs the prepared read-only
+clock comparison against the **36.968577 MHz unplaced** boundary parent.
+It cannot retry synthesis, start placement/routing or deploy a bitstream.
+No candidate frequency or LUT result exists yet, and 40 MHz routed sign-off
+remains unproven. The later keyboard/UI-controller composition is deliberately
+not silently included in this isolated timing comparison.
 
 ## Identities and gameplay baseline
 
