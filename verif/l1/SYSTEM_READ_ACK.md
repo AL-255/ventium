@@ -159,8 +159,8 @@ timing cut. Both controls are **duration-invalid**, not a CM/MHz score or full
 CoreMark acceptance. Native children are reaped; 69,674 source pins and the
 closed owner are independently rechecked, with no OOM.
 
-The **900-iteration performance and validation seeds are now running**, not
-passed. Both cold-boot the exact `3d94caaa` model above through real posted-16
+The **900-iteration performance and validation seeds timed out**, not passed.
+Both cold-booted the exact `3d94caaa` model above through real posted-16
 AXI (B-delay 20, R-first 21, gap 1), with 40/40/80 MHz core/RTC/VGA timebases.
 They reuse the unchanged `verif/bench/coremark_boot/run_soc_seed.py` and the
 qualified `ventium-coremark-900.g2IjUIU6` media/reference CRCs. No guest changes,
@@ -179,6 +179,17 @@ Completion requires the full guest console, all five same-iteration reference
 CRCs, at least ten guest seconds, actual V retirements, unchanged inputs and a
 clean native exit. A timeout or partial console does not qualify. These runs
 do not establish canonical-gate, whole-suite or physical-FPGA acceptance.
+Both controllers closed at approximately **12:54:49 UTC** with exit 1 after
+the authorized 3,600-second cap (3,603.287/3,603.791 seconds including cleanup).
+Their native children were terminated with SIGTERM (`-15`), reaped, and both
+retained owners have MainPID 0. Input pins remain unchanged and cgroup OOM
+counters are zero; this was **the wall-time limit, not OOM**. Last complete
+telemetry was 218M clocks for performance and 207M for validation, with
+46,290,778/43,991,232 V retirements respectively. Neither log contains
+`PORT-END`; captured pipe EOF is false after termination. No complete CRC
+result, duration-valid CM/MHz score or correctness pass is available. Partial
+logs and failed closures remain retained. The time limit was not extended,
+and neither seed was restarted.
 The unchanged console checker and independent seed auditor also pass all
 22 host tests, including rejected incomplete, corrupt, short-duration,
 unpaired, timeout and OOM fixtures. These synthetic tests are not seed results.
