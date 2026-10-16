@@ -11,8 +11,8 @@ The frozen `ven_ps2_kbd_inject.v` honors host clock/data only before starting
 a frame. Its `SEND` state continues advancing through host-clock inhibition
 and eventually advertises `inject_ready`, although the physical wire remained
 low and could not deliver the byte. Software has no abort/completion status
-to distinguish that loss. A controller self-test during input is one relevant
-integration scenario; its end-to-end reproduction remains required below.
+to distinguish that loss. Controller self-test during input now reproduces
+the early-ready defect with the actual 8042, as recorded below.
 
 [`prepare_kbd_inhibit.py`](prepare_kbd_inhibit.py) adds an inhibit branch to
 `SEND`. Before a completed stop it retains the existing byte, releases device
@@ -61,14 +61,53 @@ One normal control actually needs 205,560 clocks. R2 changes only that TB
 deadline to 300,000 clocks plus its explanatory comment, not injector RTL or
 any assertion. R1's copied sources and native failure logs remain intact.
 
+## Actual-controller integration — closed October 16
+
+[`tb_kbd_controller_inhibit.sv`](tb_kbd_controller_inhibit.sv) connects the
+actual transmitter to the retained-AUX `ps2` controller
+(`9c9d62149a25a5e3f97683ca269b77d01dcf4034517c02a225a5bce0bd2dc405`),
+through ordinary wired-AND serial pins. Its only controller accesses are guest
+I/O ports; no internal state, FIFO writes or forced signals are used. The exact
+`VEN_KBC_FAST` / `VEN_KBD_AUTOACK` target definitions are retained. This test
+does not claim physical host-command reception by the transmit-only injector.
+
+The [runner](run_kbd_controller_inhibit.py) passes **104 candidate cases**:
+26 interruption positions × two clock parameter profiles × controller `AA`
+self-test or shared guest reset. Positions include every start/data/parity
+half, both stop halves, completed idle, and explicit one-clock-before,
+coincident-with, and one-clock-after-stop boundaries. For `AA`, the boundary
+checks observe actual clock-pin events. The reset signal is shared as in the
+board wiring, not a controller-only reset with a surviving old-guest device.
+
+- **46 interrupted `AA` cases** retain ownership and automatically retry a
+  full eleven-bit frame; the producer never submits the byte again. The
+  controller returns self-test `55`, then translated `5a → 1c`, with IRQ1.
+- The other **58 reset/completed-byte cases** do not replay the flushed byte.
+  Shared reset cancels the device's old owner. An already completed byte is
+  intentionally discarded by controller self-test, not resurrected afterward.
+- Every case receives a distinct subsequent `1c → 1e` byte through port60
+  and checks IRQ1, no AUX/error status and no stale/duplicate output.
+- The original injector, with the **same retained controller and testbench**,
+  produces two required native-exit1 early-ready witnesses at stop-high,
+  one per clock profile. They are negative evidence, not correctness passes.
+
+Evidence: `kbd-controller-inhibit-r1`, unit
+`ventium-kbd-controller-inhibit-oct16-r1.service`, invocation
+**`486e28f20e57408ebc43339826eaf9ac`**. Native closure is exit0 / MainPID0 in
+**201.76 seconds**, peak **21,254,144 bytes**, no swap/OOM, actual CPUs12–13.
+All 106 children are waited/reaped; four native compilations succeed. Two
+matrix/grading unit tests pass. The [independent audit](audit_kbd_controller_inhibit.py)
+rechecks 15 source/tool pins, the exact matrix/defines, all native logs/images,
+exit codes and closed owner. `kbd-controller-inhibit-r1/audit.json` passes.
+The injector source is **unchanged** from the earlier 46-case isolated repair.
+
 ## Required next steps
 
-Test coincident stop/inhibit edges and actual controller self-test/full-FIFO
-interaction, including the retained-AUX controller and the board's shared reset.
-Then qualify the actual wrapper/debug-MMIO path and compose this exact change
-with the processor/keyboard-controller candidate. Do not infer that generic
-physical PS/2 devices share this retry policy. Current microtests are neither
-controller integration nor Win95 UI/standard-suite/physical-FPGA acceptance.
+Full-FIFO/backpressure interaction and the actual wrapper/debug-MMIO path remain
+unqualified. Compose the exact controller and endpoint changes with the processor
+candidate, then verify the full suite and physical Win95 keyboard/mouse UI.
+Do not infer that generic physical PS/2 devices share this retry policy. These
+integration microtests are not Win95 UI/standard-suite/physical-FPGA acceptance.
 
 Current candidates have no verified gameplay IPC. Older measured baseline:
 **0.49046518 total U+V**, model `7e877b3b…`, cycles
