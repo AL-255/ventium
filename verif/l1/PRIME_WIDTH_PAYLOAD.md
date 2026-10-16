@@ -1,12 +1,16 @@
 # Early prime-width payload — 2026-10-16
 
-Status: **private experiment; extracted-source tests, whole-core compilation
-and private-reference checks pass; canonical gate remains FAIL**. All eight
+Status: **rejected timing experiment; canonical gate remains FAIL**.
+Extracted-source tests, whole-core compilation and private-reference checks
+pass. All eight
 directed child corpora pass; their historical aggregate counter check fails.
 Independent complete same-input A/B regrading finds no candidate difference.
 Full-PC compilation, short cold CoreMark controls and strict CPU lint now pass;
-one matched hardware synthesis is running. No production RTL, board image,
-constraints, goldens or comparator policy has changed. No frequency or
+the matched synthesis and independent clock audit are closed. Estimated
+unplaced frequency regresses **36.968577 → 32.918559 MHz (−10.96%)**, with
+**0.62% more LUTs**. The queued input-composition build was cancelled before
+compilation. Retain the faster boundary-stage parent. No production RTL,
+board image, constraints, goldens or comparator policy has changed. No
 gameplay gain is claimed.
 
 ## Structural issue and proposed fix
@@ -150,10 +154,10 @@ explicitly. Host tests reject altered counters, missing/duplicate probe
 records, malformed exit receipts and changed/truncated architectural traces.
 No native test rerun or acceptance-policy change was needed.
 
-Before promotion: qualify the aggregate expectations for this exact parent
-without weakening individual comparisons, finish matched synthesis/timing,
-and compose and recheck the qualified keyboard/UI repair. Retain the faster
-parent if timing regresses.
+Do not promote this experiment: matched timing regresses. Retain the faster
+boundary-stage parent for subsequent work and independently compose/recheck
+the qualified keyboard/UI repair there. The historical aggregate expectations
+still need exact-parent qualification without weakening individual comparisons.
 The canonical gate repair, duration-valid CoreMark score, standard suite and
 matching physical Win95/UI plus full Quake timedemo remain open. There is no
 new bitstream or FPGA pass for this experiment.
@@ -214,7 +218,7 @@ six structural error classes still fatal. Owner
 Twelve host tests cover exact source/profile transfer, rejected drift, original
 CRC/native controls, resource-guard mutants and exact sequencer ownership.
 
-One synthesis starts **2026-10-16 08:18:21 UTC**, owner
+One synthesis started **2026-10-16 08:18:21 UTC**, owner
 `ventium-prime-width-synth-oct16-r1.service`, invocation
 `6486dfa5929e45f78d351a1622f67466`; exclusive native scope invocation
 `6f0e32d67c5444c6954bb1f99412c451`. It audits **66,825 input pins** and uses
@@ -222,19 +226,52 @@ the unchanged 8 GiB RAM / 6 GiB swap cap, 13 GiB combined early stop, 2 GiB
 host reserve, 4 GiB disk stop floor and 45-minute deadline. Disk admission
 requires twice the measured parent's growth above that floor; no threshold
 was lowered. Starting free disk is 7,281,180,672 bytes; measured parent growth
-is 1,456,762,880 bytes.
+is 1,456,762,880 bytes. It closed native exit0 / MainPID0 after **2,023.93
+seconds**. All input pins remained unchanged; peak RAM was 8,589,922,304
+bytes and peak swap 1,276,018,688 bytes, with no OOM. Synthesis reported zero
+errors, one critical warning and 1,537 warnings. The generated PS clock
+warning (`Synth 8-3321`, unknown `PS8_i/PLCLK[0]`) also occurs in the parent;
+the independent audit below verifies the actual core/PL clocks. No warning
+waiver or constraint edit was introduced.
 
 The [one-shot sequencer](../../fpga/run_prime_width_timing_sequence.py), owner
 `ventium-prime-width-timing-chain-oct16-r1.service`, invocation
-`42b3ad41ea2f41d5be78bab3ab850260`, observes this exact synthesis. After a
-successful native close and independent audit, it runs the prepared read-only
+`42b3ad41ea2f41d5be78bab3ab850260`, observed this exact synthesis. After its
+successful native close and independent audit, it ran the prepared read-only
 clock comparison against the **36.968577 MHz unplaced** boundary parent.
 It cannot retry synthesis, start placement/routing or deploy a bitstream.
-No candidate frequency or LUT result exists yet, and 40 MHz routed sign-off
-remains unproven. The later keyboard/UI-controller composition is deliberately
-not silently included in this isolated timing comparison.
+Both phases and the sequencer are now closed exit0 / MainPID0. The independent
+clock owner is `ventium-prime-width-clock-oct16-r1.service`, invocation
+`47aa54293f6e48e5a7701a9ff313925e`, native scope
+`ab0a74e3969741e79076b1536c5cfea1`. It checks **66,839 input pins**, all
+unchanged, and closes after **462.48 seconds**, peak RAM 4,670,099,456 bytes,
+zero swap and no OOM. Actual constraints remain **40 MHz core / 100 MHz PL**.
 
-## Retained-input composition — prepared, compiler waiting
+| Matched synthesis/netlist metric | Boundary parent | Prime-width candidate |
+| --- | ---: | ---: |
+| Unplaced frequency estimate | 36.968577 MHz | **32.918559 MHz** |
+| Setup slack at 40 MHz | −2.050 ns | **−5.378 ns** |
+| CLB LUTs | 187,990 | **189,155** |
+| Registers | 55,218 | 55,218 |
+| BRAM tiles | 277.5 | 277.5 |
+| DSPs | 47 | 47 |
+
+The candidate's worst path is **102 logic levels**, `q_pc_reg[0]/C` to
+`u_regfile/gpr_reg[4][16]/D`: 30.167 ns data delay, comprising 6.136 ns logic
+and 24.031 ns estimated routing. Its worst hold slack is −0.101 ns. The
+V-response capture path also regresses: −1.886 ns / 92 levels to −3.218 ns /
+95 levels. The corresponding reachable capture cone grows from 68,492 to
+70,081 cells; this is reachability, not exclusive area ownership.
+
+Evidence: `prime-width-synthesis-r1/audit.json`,
+`prime-width-clock-r1/audit.json` and `prime-width-sequence-closed.json`.
+Their successful audit verdict means the evidence is consistent, **not** that
+timing meets 40 MHz. These are unplaced estimates, not routed sign-off or board
+measurements. No placement, routing or deployment was launched; no Vivado
+process remains. The keyboard/UI-controller composition was deliberately not
+silently included in this isolated timing comparison.
+
+## Retained-input composition — cancelled before compilation
 
 [`build_prime_width_ui_soc.py`](../../fpga/build_prime_width_ui_soc.py) prepares
 `prime-width-ui-soc-r1` with **66,947 checked input pins**. Its CPU parent is
@@ -250,18 +287,28 @@ controller-inhibit and FIFO-pressure evidence; no objects or guest runs are copi
 
 The [build waiter](../../fpga/run_prime_width_ui_build.py), unit
 `ventium-prime-width-ui-build-oct16-r1.service`, invocation
-`56afca61fa39452abee6c4c9a50487ca`, is tied to the exact synthesis and timing
+`56afca61fa39452abee6c4c9a50487ca`, was tied to the exact synthesis and timing
 sequence above. It cannot compile until both native phases close successfully
 and their independent audits pass. It retains the exclusive 32-job compiler
 guard, Verilator 5.046 probe and 5 GiB disk admission floor. Owner replacement,
 failure or deadline prevents the build; no CAD retry, guest run or deployment
 is launched. Five host tests pass, including rejection of wrong/failed owners.
 
+It was explicitly stopped at **2026-10-16 08:59:03 UTC** after the native
+timing report established the regression, before its compiler started. The
+last journal entry still reports waiting for the exact CAD sequence. It is
+inactive/dead / MainPID0, with neither `build-started.json` nor
+`build-closed.json`. `prime-width-ui-soc-r1/build-cancelled.json` retains the
+observed owner/invocation, cancellation and timing-report hash
+`f9a45c88929c89ce8699aa1e7d45f9e5ff4732038ce9e2499558d8c700584c58`.
+The independent clock audit was left running and subsequently confirmed the
+negative result. This queue must not be revived as a promoted candidate.
+
 This is **prepared source, not a built or accepted model**. Successful CAD
 closure does not imply a frequency improvement. After compilation, the new
 model still needs the unchanged cold keyboard guest and input-disabled CRC
 controls. The separate [physical keyboard injector repair](../../fpga/KBD_INHIBIT.md)
-is not part of this PC host model or the running timing export. Final hardware
+is not part of this PC host model or the closed timing export. Final hardware
 must compose that endpoint with the controller and posted-mouse wrapper and
 pass full Win95 keyboard/mouse and Quake acceptance on the board.
 
