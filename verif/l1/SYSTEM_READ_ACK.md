@@ -157,6 +157,27 @@ timing cut. Both controls are **duration-invalid**, not a CM/MHz score or full
 CoreMark acceptance. Native children are reaped; 69,674 source pins and the
 closed owner are independently rechecked, with no OOM.
 
+The **900-iteration performance and validation seeds are now running**, not
+passed. Both cold-boot the exact `3d94caaa` model above through real posted-16
+AXI (B-delay 20, R-first 21, gap 1), with 40/40/80 MHz core/RTC/VGA timebases.
+They reuse the unchanged `verif/bench/coremark_boot/run_soc_seed.py` and the
+qualified `ventium-coremark-900.g2IjUIU6` media/reference CRCs. No guest changes,
+snapshot, debugger STEP or pairing-disable arguments are present.
+
+| Seed | Retained unit | Invocation | Actual native CPU |
+|---|---|---|---:|
+| Performance | `ventium-system-read-ack-cm900-perf-oct16-r1.service` | `b6e8b8aa9dd048adaec15f2c32cdf128` | 3 |
+| Validation | `ventium-system-read-ack-cm900-valid-oct16-r1.service` | `752a84b4dc8d46fe8f860fb05c9bc97e` | 6 |
+
+Started 2026-10-16 11:54:45 UTC; native executables, argv, affinity and cgroup
+limits were checked against the live children. Each is bounded to 3,600 seconds,
+450M simulated clocks, one CPU, 2 GiB RAM, no swap and a 16 MiB console log.
+Artifacts are under `system-read-ack-soc-r1/coremark-900-{performance,validation}-r1`.
+Completion requires the full guest console, all five same-iteration reference
+CRCs, at least ten guest seconds, actual V retirements, unchanged inputs and a
+clean native exit. A timeout or partial console does not qualify. These runs
+do not establish canonical-gate, whole-suite or physical-FPGA acceptance.
+
 The immutable FPGA export is `system-read-ack-fpga-r1`; manifest SHA-256
 `6ab025121f1f06b1d42f3b277f40349035b5a278ca85ac41ca11d27487c5ecb2`.
 It has 192 payloads, 170 common compiled HDL files and the same 159 hardware
