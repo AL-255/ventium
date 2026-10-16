@@ -5,9 +5,10 @@ Native admission-equation, full-cache/AXI A/B, selected fault regressions,
 actual same-clock no-L2 wrapper and directed whole-core system checks pass.
 The isolated processor and full-PC derivative build; canonical verification
 **fails**. Fresh qualified-private-reference comparisons pass separately.
-Gameplay, the standard suite and FPGA acceptance are unmeasured. A single
-matched diagnostic synthesis is now running; it has no frequency result yet.
-No placement, routing or board deployment has been launched for this proposal.
+Gameplay, the standard suite and FPGA acceptance are unmeasured. Matched
+diagnostic synthesis and its independent audit now pass; area is effectively
+unchanged. The read-only timing comparison is running, with no frequency
+result yet. No placement, routing or board deployment has been launched.
 
 ## Reason and scope
 
@@ -421,7 +422,7 @@ SHA-256 `3bad0b16048e68a68d29af81288b8d67cff921eebdd6f26899a570d7c4e4fad0`.
 Its failed log, receipt, executable and source remain intact; archiving does
 not change its verdict.
 
-### Matched diagnostic synthesis — live, not acceptance
+### Matched diagnostic synthesis — closed, not acceptance
 
 After the actual unified gate's **108/108 functional pass** and exact equality
 of all 20 same-model cycle streams, a timing-only experiment is now admitted.
@@ -497,6 +498,33 @@ timeouts and resource guards above are unchanged. At queue verification,
 the original synthesis scope invocation remained
 `71463993c914417c9c9d497a6f54c1db`, with no second CAD family.
 No route or deployment is queued, and no isolated MHz/area/IPC gain is assumed.
+
+Synthesis subsequently **closed successfully at 14:46:07 UTC**, in
+**1,909.748 seconds**. The queued pre-audit passed: all **74,583 input pins**,
+159 ordered defines, 150 native `read_verilog` files and the exact two changed
+payloads agree. No OOM, resource stop, controller failure or input drift
+occurred. The actual scope peak was **8,589,934,592 bytes RAM / zero swap**;
+memory-limit reclaim events occurred, but OOM counters stayed zero.
+
+| Resource | RAW/input parent | Paired-credit candidate | Change |
+|---|---:|---:|---:|
+| CLB LUTs | 187,185 | 187,193 | +8 |
+| Registers | 54,760 | 54,761 | +1 |
+| BRAM tiles | 277.5 | 277.5 | 0 |
+| DSPs | 47 | 47 | 0 |
+
+There is **no area reduction**. Native synthesis reports zero errors, one
+critical warning and 1,537 warnings. The critical warning is the generated
+PS8 XDC's `create_clock` unknown-port/pin lookup at line 21; it is retained,
+not waived. The clock audit must verify the actual loaded clocks. Checkpoint
+SHA-256:
+`c18da7cfcaf028a14c4725a4def8e3ef8fbbd8d57cc1f7218b36eb259a922ab2`.
+
+The clock owner then started automatically at **14:46:26 UTC**, invocation
+`f0b149d99a9b414daa06ff71266417e3`, with owned Vivado scope invocation
+`ce3b4239356c4e6994f2e10873ca384f`. At 14:47:26 it was live, about 1.87 GiB
+resident with zero swap/OOM and no stop reason. The result-audit owner is
+still waiting. **No new frequency estimate or 40 MHz qualification yet.**
 
 Disk recovery is lossless: **7,170 unique generated compiler products** across
 45 closed build directories were archived and byte-compared before their loose
@@ -601,6 +629,52 @@ The matched synthesis remains live: at **14:29:03 UTC**, elapsed 886 seconds,
 its owned scope used 8,325,263,360 bytes RAM, zero swap and had zero OOM events,
 with 6,381,182,976 bytes disk free and no resource stop reason. This is not a
 new frequency, utilization or board result.
+
+### Explicit x87 stack-fault sentinel, beyond the comparison masks
+
+The three remaining unmasked corpus differences involve stack faults absent
+from the QEMU model. To check the candidate directly rather than infer its
+behavior from those masks, the existing `px87stk`, `px87stk2` and `px87stk3`
+BIOS images were cold-run on both the RAW/input and paired-credit core
+binaries at AXI delays 0 and 7. All runs use `--system --cycle-func --l1-axi
+--x87`, normal U/V fast execution, and passive fault logging. No source,
+fixture, comparator mask, model or guest was changed or rebuilt.
+
+All **12 native processes exit zero** and reach the in-guest pass witnesses:
+
+| Image | Completed cases | Actual #MF deliveries | Records per run | Actual V retirements |
+|---|---:|---:|---:|---:|
+| `px87stk` | 30 | 14 | 2,545 | 661 |
+| `px87stk2` | 12 | 6 | 2,128 | 627 |
+| `px87stk3` | **21** | 10 | 2,309 | 640 |
+
+The third image includes the suppressed-FBSTP/following-valid-store control,
+in addition to its older 20-case narrowing-store matrix. Each final record
+has `EDI=0x42`, the expected handler/case counters, and `EDX=0x600d00f4`.
+All 27,928 full architectural records agree across parent/candidate and
+latencies (13,964 candidate records, 3,856 candidate V retirements). Actual
+AXI activity and fast pairing are present in every run. This is neither
+gameplay IPC nor cycle-timing equivalence.
+
+The initial sentinel **controller remains failed**: its new grader incorrectly
+counted both decimal fault observers and expected the obsolete 20-case total
+for `px87stk3`. The native logs and traces were not changed or rerun to hide
+that mistake. `verif/sys/audit_prebuilt_x87_stack.py` independently rehashes
+the retained inputs/artifacts, checks the original failed owner, cross-checks
+each RTL `[FAULT]` delivery against the testbench `FLT` observer and the
+in-guest handler count, and compares all complete traces. It reports the
+native self-checks passing **separately** from the failed controller. Eight
+host tests reject duplicate/missing/disagreeing observers, unexpected vectors
+or error codes, a skipped 21st case and pass-code-only false positives.
+
+Evidence: `stack-sentinel-r1/{closed.json,independent-audit.json}` under the
+evidence root. Owner `ventium-stack-sentinel-oct16-r1.service`, invocation
+`f43ea44443964af29eb5ab1142249b3a`, is terminal exit 1 / MainPID 0. Native
+workers were observed on CPUs 12/13; controller wall time was 4.002 seconds,
+peak memory 56.3 MiB, with 30 seconds per native child and a five-minute owner
+cap. These are **prebuilt-image diagnostics**: their exact `.bin`, `.elf` and
+`.S` identities are retained, but the fixtures were not freshly rebuilt from
+source during CAD. No canonical x87 gate, full suite or FPGA pass is claimed.
 
 ## Remaining gates
 
