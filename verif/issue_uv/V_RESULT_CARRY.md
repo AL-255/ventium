@@ -45,6 +45,7 @@ Directed candidate: `a8e5d55b7704f2449002c71af8db1c5c2fe7ae908669fc5dbf2e663d3a5
 | `v-result-carry-fp-r1` | 384 fixtures × latency 0/7; 208,128 candidate records; all 1,536 A/B measurements pass; 50.16 s |
 | `v-result-carry-boundary-r1` | Original 22 fetch-boundary fixtures × latency 0/7; 21,832 records, 4,968 V retirements; 29.45 s |
 | `v-result-carry-matched-r1` | All 108 functional programs replayed on identical images/initial ESP: 80,800 complete architectural records equal; 25.57 s; not canonical acceptance |
+| `v-result-carry-func-r1` | Fresh qualified-private-QEMU replay: 108/108 under unchanged manifest policy, 80,800 complete records and 30,132 actual V retirements; 109.04 s; not canonical acceptance |
 | `v-result-carry-soc-r1` | Native full-PC build closes 0 in 25.77 s; private host/header verified; 98 inherited structural warnings unchanged, not full-SoC lint clean |
 | `v-result-carry-lint-r1` | Strict CPU-hierarchy lint passes on the sealed 159-define hardware export; six structural classes remain fatal; 3.73 s; not full-wrapper lint |
 
@@ -199,3 +200,72 @@ originals. Their matching JSON receipts record individual hashes, terminal
 owners and restoration commands. All frozen/current inputs were rehashed and
 preserved; restore the relevant archive before rerunning a historical raw-trace
 audit. External free space reached about 6.9 GiB before R3 admission.
+
+## Fresh functional audit and cycle diagnosis — October 16 UTC
+
+`run_v_result_carry_func.py` reruns the exact 108-program worker against the
+current directed model `a8e5d55b…`, with private reference
+`998b4f5d3eda4493f391ea6775adcc88f3dd810ba2829f7d635cac27877f9b85`.
+The adapter changes only the model identity, repository location and CPU
+assignment (12–15, disjoint from Quake and CAD). UV + fast pipe, relocated
+clients, `--cycle-func --l1-axi`, AXI latency 7, all original programs,
+instruction limits, manifests and comparison rules are retained. Every golden
+is freshly produced in an isolated cache; this is not replaying the parent's
+successful reference traces.
+
+Owner `ventium-v-result-carry-func-oct16-r1.service`, invocation
+`798617b6a0d94ce0965a1334842f22dd`, is exited / MainPID 0 / native 0.
+Wall time is **109.04 s**, peak memory **157,786,112 bytes**, with no OOM.
+`audit_v_result_carry_func.py` independently rehashes **12,357 input pins**,
+checks native closure/actual child affinity, compares all **80,800 complete
+records**, and verifies the **30,132 V retirements** from the AXI-backed logs.
+All 108 flat images are byte-identical to the canonical run. For 54 ELFs only
+GCC's randomized, non-loadable local `STT_FILE` name differs; loadable bytes,
+headers, addresses and other metadata remain equal. Nothing is rewritten.
+
+The separate fully unmasked comparison is **105/108**. The same three deliberate
+stack-fault fixtures (`tx_regform`, `tx_regform2`, `tx_stack`) retain the existing
+reference limitation: QEMU does not implement their stack-fault response.
+For example, `tx_stack` first differs at record 20 in the indefinite payload
+substituted by RTL. Existing per-record masks are unchanged; this result does
+not promote the reference or waive canonical verification. Five adapter/audit
+host tests pass. Native log/trace/closure evidence remains in
+`v-result-carry-func-r1`.
+
+The existing `verif/analyze_cycle_gate_costs.py` was rerun on this exact model's
+20 retained canonical cycle pairs. Its six host tests pass; all 105 input pins
+recheck unchanged. `v-result-carry-cycle-costs-r1.json` confirms the previously
+documented [parent diagnosis](../l1/PIPE_WAIT_READ_ACK.md): first-occurrence
+cost dominates the add/FP-chain deltas, while multiply retains a dispatch
+bubble and the miss kernels retain large repeated costs. No new processor
+execution or gate relaxation is involved.
+
+The supplemental `audit_cycle_accounting.py` conserves every positive
+cumulative cycle-counter tick, counting a simultaneous U/V retirement cycle
+only once. All 20 streams pass that accounting; four host tests cover pairing,
+idle gaps, cold intervals and invalid ordering. Artifact:
+`v-result-carry-cycle-accounting-r1.json`. Selected observed counts:
+
+| Kernel | All clocks | Before first retirement | Retirement-active clocks | Later retirement-empty clocks | Repeated backward-edge interval |
+|---|---:|---:|---:|---:|---|
+| Dependent add | 4,626 | 73 | 3,234 | 1,319 | 202 clocks / 203 instructions, 14 intervals |
+| Independent add | 3,028 | 73 | 1,635 | 1,320 | 102 clocks / 204 instructions, 14 intervals |
+| MUL | 5,355 | 73 | 1,203 | 4,079 | 13 clocks / 5 instructions, repeated |
+| D-cache miss | 137,367 | 73 | 4,103 | 133,191 | 67 clocks / 4 instructions, repeated |
+
+The hot add intervals sustain approximately **1.0 dependent / 0.5 paired CPI**;
+they do not turn the cold full-stream gate into a pass. Both add streams have
+19 inter-retirement distances of 70 clocks, accounting for 1,311 empty clocks.
+The reference's fixed eight-clock miss penalty is not an AXI beat/service model.
+Retirement-empty cycles alone do **not** prove a cache-miss cause or quantify
+Quake's IPC gap. The previous matched native profile established that MUL's
+ten-clock EX occupancy is correct: the remaining clock is dispatch. Any future
+fix must overlap safe handoff rather than subtract a clock from execution.
+
+Read-only board check confirms native AArch64 and SSH reachability, with about
+242 MiB free root storage / 294 MiB free tmpfs. No guest process, programming,
+reset, MMIO write or deletion was performed. A new Win95 long run has not been
+started: ordinary full-PC live input remains unintegrated, and the preserved
+cold launcher's 8 GiB host disk admission is not currently met. The isolated
+mouse protocol tests and old desktop captures cannot substitute for that work.
+Synthesis/clock sequencing and the older Quake remain live, not acceptance.
