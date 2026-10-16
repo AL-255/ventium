@@ -228,6 +228,38 @@ run on its actual binary. Full Win95 UI, full standard suite and matching
 physical FPGA tests remain separate. This preparation does not change the
 in-flight hardware export or silently inherit its eventual timing result.
 
+The composed-model [cold-input runner](../../fpga/run_sfetch_interior_ui_input.py)
+and [two-seed short control runner](../../fpga/run_sfetch_interior_ui_coremark.py)
+are prepared, with **three adapter tests passing**. They preserve the original
+raw/translated guests, wrong-key reference control, complete keyboard-byte
+grading, CRCs, clock expectations and native-process checks. Both reject a
+different CPU/controller/host composition or an incomplete build. Input uses
+CPUs 16/17; the two CoreMark controls use CPUs 12/13 and require the input
+injector to remain disabled. The independent
+[CoreMark audit](../../fpga/audit_sfetch_interior_ui_coremark.py) compares against
+the actual fetch-size parent, not the older input parent. These prepared
+drivers are **not yet native test results**.
+
+## Inherited platform warnings: read-only triage
+
+The retained `sfetch-interior-soc-r1/build.log` contains 90 `PINMISSING`, six
+`MULTIDRIVEN`, one `LATCH` and one `UNOPTFLAT` warning. This is the previously
+reported count, not 98 newly discovered bugs. Inspection of its frozen source
+closure distinguishes the following cases; none was changed or waived:
+
+| Class | Source finding | Required follow-up |
+| --- | --- | --- |
+| Missing pins | 48 cache RAM control pins are unused by this model's `altdpram` stub; some other missing pins are outputs. | Check the separate FPGA primitive implementation; simulation-stub behavior does not establish hardware equivalence. |
+| Missing inputs | Unused DMA request/data inputs and secondary IDE debug controls are unconnected. DMA request inputs feed pending-request logic. | Verify synthesized tie-offs; make inactive values explicit in a separately tested change if they are not guaranteed. Two-state simulation is not that proof. |
+| Multiple writers | All six OPL3 warnings pair a declaration initializer with `always_comb`. | Check complete assignment and reset behavior before removing combinational initializers; do not assume two active hardware drivers. |
+| Inferred latch | `requested_rate_p0` has no assignment for illegal values of the four-bit one-hot envelope state. | Prove reachable-state coverage, then use an explicit safe default with legal-state equivalence and invalid-state tests. |
+| Combinational cycle | The OPL3 path crosses a packed struct containing both RAM address and RAM-result-derived fields in one block. | Separate address/control from result assignments and prove bit-level equivalence before treating this as a false dependency. |
+
+The latch and missing-input findings are structural risks, **not established
+causes of a Quake/Win95 failure**. CPU-hierarchy lint passing does not qualify
+this peripheral hierarchy. Live CAD inputs and the dirty production worktree
+remain untouched.
+
 ## Remaining qualification
 
 The bounded whole-core comparisons above are complete; they are not exhaustive
