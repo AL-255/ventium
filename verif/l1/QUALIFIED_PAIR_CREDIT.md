@@ -1,10 +1,11 @@
 # Credit-qualified paired-store enqueue — 2026-10-16
 
 Status: **isolated proposal, not production RTL or an accepted processor fix**.
-Native admission-equation, full-cache/AXI A/B, selected fault regressions and
-actual same-clock no-L2 wrapper checks pass. Timing,
-whole-core correctness, gameplay, the standard suite and FPGA acceptance are
-unmeasured. No new Vivado run or deployment was launched for this proposal.
+Native admission-equation, full-cache/AXI A/B, selected fault regressions,
+actual same-clock no-L2 wrapper and directed whole-core system checks pass.
+The isolated processor builds; canonical verification **fails**.
+Timing, gameplay, the standard suite and FPGA acceptance are unmeasured.
+No new Vivado run or deployment was launched for this proposal.
 
 ## Reason and scope
 
@@ -172,18 +173,84 @@ their runs; binaries, source snapshots, headers, logs and receipts remain loose.
 Five additional closed object trees were archived to recover about **701 MiB**
 net; `tar --zstd -xf compiler-products.tar.zst -C <run-directory>` restores them.
 
+### Whole-core derivative and cold system checks
+
+`build_qualified_pair_credit_core.py` builds the exact two-file derivative of
+`raw-prime-storage-core-r1`, model
+`41f99bcff8125a2caa7fe768f03f242bed1a43323e4d3a190109167248a34e9b`.
+All **195 source files** are inventoried; only the two memory files change,
+and all **153 ordered feature defines** remain identical. The build retains
+the real AXI backend, `AXI_LINE_REPLAY=0`, assertions, U/V fast system/relocated
+execution and fast load/store paths. It uses a unique private C++ harness
+basename and checks its compiled dependency against this model's generated
+header. No stale external harness object is accepted.
+
+`qualified-pair-credit-core-r1/build-closed.json` records a successful
+**23.513-second**, 32-job bounded build. Binary SHA-256:
+`5a2fcb865e53dc67a3f866ab1edbc8bbbc4917708e984a62d60bc8400c67f2d3`.
+Owner `ventium-qualified-pair-core-oct16-r1.service`, invocation
+`e45d4f5570e845e4a740c0d8e61a3d35`, exited 0 with MainPID 0.
+The distinct build-scope invocation is `13b4cea9a79c46798ed72770db54c3eb`.
+After closure, 225 generated compiler products were archived and byte-compared
+before removal, recovering **195 MiB** net. The archive SHA-256 is
+`ac1f4152a61addbc542e1958bd283a8f2f831b8836eef9b4283f67f29f05b5a2`;
+`compiler-archive.json` records each member and the recovery command. Binary,
+headers, dependencies, private harness, source and logs remain loose.
+
+`run_qualified_pair_credit_core.py` preserves the existing cold system
+supervisor, fresh pinned QEMU-system reference, fixtures and comparison policy.
+Fifteen cases (`pseg`, `ppage`, `pfault`, `pintr`, `pcpl`, `ptask`, `pv86`,
+`pxc04`, `pxfrag`, `pxwalkd`, `pcgparam`, `pretfoutpg`, `piopermwrap`,
+`pjmpgate`, `pxfer`) run at AXI delays **0, 7 and 31**, on both parent and
+candidate, in `--cycle-func --l1-axi` and `--cycle --l1-axi` modes. There are
+no snapshots, STEP, guest patches, forced processor state or new comparison
+masks. The unrelated ACK-owner observation is removed, but the real AXI
+master's new qualification/equality assertions remain enabled.
+
+`qualified-pair-credit-system-r1/closed.json` passes **180 native RTL
+executions** in **46.358 seconds**. All **90 complete parent/candidate
+retirement-trace pairs**, including retirement clocks, match exactly. The
+candidate emits **47,886 records** across the two modes and **5,349 actual
+V retirements in cycle-mode traces**. Functional-mode system state also
+matches the fresh QEMU traces. Each native child has an observed CPU affinity,
+expected debug-port exit, completed wait and closed process group; cgroup OOM
+counters are zero. Retained owner:
+`ventium-qualified-pair-system-oct16-r1.service`, invocation
+`021fc00592d541f7ba13f41704bf3b8e`, MainPID 0, exit 0. Independent read-only
+reconstruction confirms these counts and comparisons. Fifteen host tests pass.
+
+Canonical `make verify` **failed** separately under
+`ventium-qualified-pair-verify-oct16-r1.service`, invocation
+`451739253c1242f3a0e15a4732252be6`: native gate exit **2**, controller exit **1**,
+MainPID 0, **398.806 seconds**. It uses the existing canonical oracle,
+fresh private work/cache directories and both explicit AXI backend flags.
+The result is **7 functional PASS / 101 FAIL**, with the same per-program
+verdict inventory as the parent. All **20 complete cycle RTL traces** are
+parent-identical; the nine failing cycle-band cases remain failing. This is
+not proof that every functional difference is benign: fresh QEMU invocations
+have different initial state, and full same-input functional replay is still
+needed. No oracle, tolerance, flag mask or expected result was changed.
+
+`qualified-pair-credit-core-audit-r1.json` independently reconstructs the full
+directed system comparisons and all 20 canonical cycle comparisons, rechecks
+**1,871 source/artifact pins** and all three closed service identities, and
+explicitly retains `canonical_gate_passed=false`, `standard_suite=false` and
+`hardware_acceptance=false`. Parent equality does not waive the red gate, and
+the directed system result is not a substitute for a standard-suite pass.
+
 ## Remaining gates
 
-Before deriving or synthesizing a whole-core candidate:
+Before synthesizing or accepting the whole-core candidate:
 
 1. Extend the now-passing fault and wrapper coverage to shutdown and additional
    same-edge release/route-fault combinations. Existing evidence does not cover
    every paired fault scenario. Preserve the explicit generic-producer contract.
 2. Verify unpaired/CDC exclusion configurations separately; their exclusion is
    currently source-checked, not claimed as a new native CDC acceptance pass.
-3. Build the exact two-file derivative, run canonical `make verify` and
-   system/fault comparisons in UV + fast-pipe mode with actual V retirement.
-   Existing canonical failures remain failures, not newly waived passes.
+3. Resolve the red canonical gate and complete same-input functional replay.
+   Its native closure and independent audit are complete; the two-file build
+   and directed system/fault comparisons pass, but existing canonical failures
+   remain failures, not newly waived passes.
 4. Only then measure matched synthesis/timing. This simplification may have
    little timing effect because the original ready-to-request path remains;
    **no MHz, area, CPI or IPC gain is claimed**.
