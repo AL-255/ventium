@@ -1,6 +1,6 @@
 # Early backing direction — October 16
 
-**Private experiment; not accepted, synthesized or deployed.** This follows the
+**Private experiment; synthesis running, not accepted or deployed.** This follows the
 corrected wrapper's [34.6524 MHz unplaced result](../issue_uv/V_RESULT_CARRY.md).
 It does not repeat the rejected address/strobe mux experiment.
 
@@ -90,7 +90,7 @@ New directed CPU model:
 The unchanged canonical gate completed within its 600-second native timeout
 and remains red; neither directed passes nor parent-identical cycles waive it.
 Fresh functional, broader faults/ordering and timing qualification remain
-required. No new Vivado process has been launched.
+required. The new synthesis is diagnostic, not acceptance (owner below).
 
 ## Full-PC and FPGA transfer
 
@@ -119,16 +119,34 @@ profile, pairing-evidence and resource-guard tests. The prepared CAD controllers
 preserve the exclusive owner, 8 GiB RAM cap, admission/stop reserves, timeouts
 and termination/reaping logic. Comparison is against the **corrected-wrapper
 34.652436 MHz unplaced parent**, isolating this one RTL delta. They do not route
-or deploy a bitstream. Short cold CoreMark controls are pending; neither those
-controls nor CPU lint qualify the standard suite.
+or deploy a bitstream.
 
-Cleanup recovered 924 MiB without removing a native binary or pinned input:
-six unreferenced closed-build PCH caches are rebuildable; eight closed raw
+Both short cold CoreMark controls closed successfully under owner
+`b63f748ce1a941d9850007336e657d18`. The independent audit rechecked **19,760 pins**,
+actual native CPU 12, posted-16 AXI activity, exact startup arguments, seed CRCs
+and all child closures, with no OOM events. Performance/validation counts are
+**4,767,218 / 4,753,406 cycles**, identical to the immediate V-result parent:
+**0% cycle-performance gain**. Actual V retirements are **1,055,307 / 1,054,254**;
+native run times are 215.260 / 217.307 s. These 10-iteration controls are **not
+duration-valid scores or full standard-suite seeds**.
+
+Synthesis started at **2026-10-16 02:20:55 UTC**, retained controller
+`ventium-backing-direction-synth-oct16-r1`, invocation
+`a30dff0226e74df2a2c042cb872a7c2b`. The single native Vivado family was observed
+inside `ventium-vivado.scope`, invocation `166f281a472643559661e1ec2c9d1432`,
+with enforced 8 GiB RAM / 6 GiB swap / 48-task limits. `watch.jsonl` retains
+resource samples and 4 GiB disk / 2 GiB host reserve stops. Native synthesis
+closure, independent DCP/source audit and read-only timing reports are pending;
+there is **no new measured frequency result yet**.
+
+Cleanup recovered 1.08 GiB without removing a native binary or pinned input:
+eight unreferenced closed-build PCH caches are rebuildable; eight closed raw
 timing reports are losslessly retained in `latest-clock-cones-oct16.tar.zst`.
 Every archived member was SHA-256 verified by readback before removing the raw
 copy. Exact paths/hashes and restoration instructions are in the adjacent
 `latest-clock-cones-oct16-closed.json`; cache removals are recorded in
-`backing-direction-pch-prune-oct16.json`. No live Quake source or media changed.
+`backing-direction-pch-prune-oct16.json` and
+`backing-direction-pc-pch-prune-oct16.json`. No live Quake source or media changed.
 
 There is **no measured fmax or IPC gain** for this experiment. Its gameplay IPC
 is unmeasured, as is the separately running V-result cold-Quake model
