@@ -117,9 +117,10 @@ closed. A retained byte cannot be skipped by a later capture request.
 The separate `pc_keyboard_retained.h` binding observes the pending registers
 and FIFO before/after each edge. It reconstructs optimized-away combinational
 mux aliases from the pinned controller's observed state, never from requested
-input. This binding has synthetic host coverage but **has not yet been linked
-against the generated whole-PC model**. The native RTL test instead observes
-the actual controller mux and commit wires through read-only probe ports.
+input. The whole-PC link below requires the controller's named FIFO read wire;
+the earlier binding's generated-cell alias is absent in that model. The native
+RTL test instead observes the actual controller mux and commit wires through
+read-only probe ports.
 
 - `retained-host-r1`: all three ASan/UBSan C++ tests pass, including the old
   host/binding regressions, 256 new binding cases, four direct/retained streams
@@ -160,8 +161,25 @@ The first queued build (`retained-ui-soc-r1`, invocation
 Vivado owns the shared heavyweight build lock. Its only native log is the
 lock-wait message; all three queue-process identities are gone, input hashes
 hold, and `queue-cancelled.json` records the outcome. This is neither a compile
-pass nor a compile failure. `retained-ui-soc-r2` is prepared for a fresh build
-after synthesis releases the lock; no competing compiler was started.
+pass nor a compile failure. No competing compiler was started.
+
+After synthesis closed, `retained-ui-soc-r2` actually compiled and **failed** in
+10.863 s: the retained host referenced the old generated-cell alias
+`__Vcellinp__keyb_fifo__rdreq`, which the new generated class does not expose.
+The class exposes the controller's actual `kb_fifo_rdreq` wire instead. The
+failure's sources, generated header, native log and closed receipt remain
+unchanged; native compiler exit 2 / owner exit 1, invocation
+`6696807317554144842353f0359ed076`. No guest ran.
+
+`fpga/build_retained_ui_bound_soc.py` prepares a fresh model with exactly that
+single private read-only binding substitution. It verifies the failed build,
+the generated member and the exact RTL wire-to-FIFO connection. All RTL and
+157 definitions remain identical. A source-contract test rejects drift and
+reapplication. `retained-ui-soc-r3` links successfully in **22.910 s**, native 0,
+with its own private host object and generated-header dependency. It retains
+the same 98 structural warnings, not a full-SoC lint pass. Owner invocation:
+`9309d088dcd5444a8540d1eda3242d5f`, exited / MainPID 0. New model SHA:
+`0e25af3b6831e0acc44a0f0faba224f66316be2a499127165a66534893983779`.
 
 `pc_input_probe.S` is a new generic diagnostic guest, not a modified Windows
 or Quake image. An ordinary BIOS boot enters protected mode, configures the
@@ -190,8 +208,11 @@ Evidence under the same scratch root:
   `e2c6fe81a86c445fba895de3d79af71b`, native 0 / MainPID 0,
   116,977,664-byte peak, actual CPUs 16–17. Each case takes under 0.16 s.
 
-`run_retained_pc_input.py` is prepared, **not yet executed**. It requires the
-new compiled model and independently retained QEMU proof. Two bounded cold
+`run_retained_pc_input.py` started at **03:04:58 UTC**, owner
+`ventium-retained-pc-input-oct16-r1`, invocation
+`6910ce34b0b4409ca5b490bf502cb6b2`, evidence `retained-pc-input-r1`.
+It uses the new compiled model and independently retained QEMU proof; **no
+closed Ventium result yet**. Two bounded cold
 boots use actual external PS/2 pins at a 1,667-clock half-period, not the legacy
 accelerated sender. The grader requires nine wire bytes, the exact six or nine
 guest reads, actual V retirements, the posted-16 AXI backend, clean endpoint
@@ -211,8 +232,8 @@ universal physical-keyboard abort/retry contract.
 
 The existing `pc_keyboard_input.h` adapter still describes the **old** FIFO
 arbitration and must not qualify this candidate unchanged. The new explicit
-retained binding above addresses delayed-commit observation, but its full-PC
-linking and integration are still pending. Cold Win95 interaction, the whole
+retained binding above addresses delayed-commit observation; its full-PC link
+now succeeds but cold integration is still pending. Cold Win95 interaction, the whole
 standard suite, full FPGA wrapper validation and matching physical-board runs
 remain required. No performance gain or completed repair is claimed.
 

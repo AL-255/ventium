@@ -1,6 +1,6 @@
 # Early backing direction — October 16
 
-**Private experiment; synthesis running, not accepted or deployed.** This follows the
+**Private experiment; synthesis closed, timing audit pending; not accepted or deployed.** This follows the
 corrected wrapper's [34.6524 MHz unplaced result](../issue_uv/V_RESULT_CARRY.md).
 It does not repeat the rejected address/strobe mux experiment.
 
@@ -135,9 +135,35 @@ Synthesis started at **2026-10-16 02:20:55 UTC**, retained controller
 `a30dff0226e74df2a2c042cb872a7c2b`. The single native Vivado family was observed
 inside `ventium-vivado.scope`, invocation `166f281a472643559661e1ec2c9d1432`,
 with enforced 8 GiB RAM / 6 GiB swap / 48-task limits. `watch.jsonl` retains
-resource samples and 4 GiB disk / 2 GiB host reserve stops. Native synthesis
-closure, independent DCP/source audit and read-only timing reports are pending;
-there is **no new measured frequency result yet**.
+resource samples and 4 GiB disk / 2 GiB host reserve stops.
+
+Synthesis closed successfully at **03:01 UTC** in **2,412.965 s**. Its independent
+audit verifies 20,854 input pins, all 159 actual definitions, 150 native
+`read_verilog` inputs, the one intended L1 payload delta and checkpoint integrity.
+The retained owner is exited, MainPID 0; the Vivado scope is inactive, with no
+surviving native Vivado. Peak cgroup RAM was 8,589,926,400 bytes, swap 0,
+OOM events 0. Reaching the RAM cap caused reclaim, not an OOM/restart.
+
+| Synthesis utilization | Matched parent | Early direction |
+|---|---:|---:|
+| CLB LUTs | 188,884 | 187,888 (−996, −0.53%) |
+| CLB registers | 55,209 | 55,238 (+29) |
+| BRAM tiles | 277.5 | 277.5 |
+| DSPs | 47 | 47 |
+
+Native synthesis reports 0 errors, 1 critical warning and 1,537 warnings, matching
+the parent's counts. The critical warning is the generated PS IP's `create_clock`
+target, not waived by this successful execution; the separate clock audit must
+verify actual clocks and paths. Checkpoint SHA-256:
+`2e962e851a7c15b2080cb89896a03b73385f2c18249673ab004cbd8bba33ee2e`.
+Evidence: `backing-direction-synthesis-r1/{closed.json,audit.json}` and native
+logs/reports. Read-only timing reporting started at **03:05 UTC**, retained
+owner `ventium-backing-direction-clock-oct16-r1`, invocation
+`bc8e09defcf640fbb29995559ab6cada`, native scope
+`8d456286c9c14e59835296e1fccf8c5f` (8 GiB RAM / 4 GiB swap / 48 tasks).
+It started only after the separate PC build released the heavyweight lock.
+Result pending: **no new measured frequency result yet**, no placement, route
+or bitstream.
 
 Cleanup recovered 1.08 GiB without removing a native binary or pinned input:
 eight unreferenced closed-build PCH caches are rebuildable; eight closed raw

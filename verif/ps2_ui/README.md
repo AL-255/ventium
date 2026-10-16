@@ -21,8 +21,9 @@ retained-producer protocol.
 V-result full-PC host (`v-result-carry-soc-r1`, model `b6b92dbf…`). It does not
 edit that model, the checkout's dirty `sim_ven.cpp`, RTL, defines, the running
 synthesis inputs, guest software or snapshots. The prepared main has a unique
-basename to avoid accidental VPATH object reuse. No new full-PC executable has
-been linked or run yet.
+basename to avoid accidental VPATH object reuse. This original host-only variant
+was not linked; the separate retained-controller variant's actual build and
+integration status are tracked below.
 
 The optional `--ui-fifo /absolute/private-directory/input.fifo` endpoint reuses
 the previously tested LF-framed commands: `1 key ctrl+esc`, `2 key enter`,
@@ -78,9 +79,10 @@ these keyboard checks. Do not launch another long Win95 run or count this as
 standard-suite/physical-FPGA acceptance until the input path is qualified.
 
 The retained-controller adapter now has native controller microtests and a
-prepared private whole-PC build plus cold keyboard probe. The probe's pinned
-QEMU positive/negative controls pass; its Ventium whole-PC execution is still
-pending. See [current integration evidence](LOSS_AUX_IOBUS.md#cold-whole-pc-integration-probe).
+successfully linked private whole-PC model. Its cold keyboard probe is running;
+no closed Ventium result yet. The probe's pinned QEMU positive/negative controls
+pass. See [current integration evidence](LOSS_AUX_IOBUS.md#cold-whole-pc-integration-probe),
+including the preserved failed link and its one-wire binding correction.
 
 No IPC gain is claimed. The current candidates are gameplay-unmeasured; the
 latest verified older baseline is **0.48146083 total U+V** on model `7e877b3b…`,
