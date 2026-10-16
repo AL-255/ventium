@@ -147,14 +147,51 @@ for the last five slots. It preserves all delivery, ownership, full-FIFO,
 pending, parity, IRQ and duplicate checks. Neither controller nor injector RTL
 changed. R1's copied sources and native logs remain intact.
 
+## Actual management-register path — closed October 16
+
+[`tb_kbd_mmio.sv`](tb_kbd_mmio.sv) adds the frozen `ven_mgmt_axil` slave in
+front of the same transmitter/controller pair. All scan bytes enter through
+AXI-Lite writes to `0x380`; readiness/busy and capability are read at
+`0x390`/`0x3a0`. Guest reset is released through CTRL `0x20`. Controller setup,
+self-test and byte consumption still use ordinary guest I/O ports. There are
+no forced DUT signals, FIFO writes or producer retries.
+
+The [24-case runner](run_kbd_mmio.py) covers both clock-parameter profiles,
+simultaneous/AW-first/W-first writes and five-cycle B/R response backpressure.
+It checks exactly two management submit pulses, complete frame bits/parity,
+translated guest bytes, IRQ1 and absence of stale/duplicate output. Half of
+the cases interrupt the first frame through the real controller's self-test.
+
+- All **12 repaired cases pass**, including automatic whole-frame retry.
+- All **six uninterrupted original controls pass**.
+- All **six interrupted original cases fail** at the exact MMIO early-ready
+  witness. The corresponding AXI response succeeds but status falsely reports
+  a free transmitter before the interrupted byte was delivered. These are
+  required negative witnesses, not original-device correctness passes.
+
+Evidence: `kbd-mmio-r1`, owner `ventium-kbd-mmio-oct16-r1.service`, invocation
+`3a87631f97584013a31c19944429aca3`; native exit0 / MainPID0 in **36.77 seconds**,
+peak **21,176,320 bytes**, no swap/OOM, two workers on actual CPUs12–13. Four
+compilations and all 24 waited/reaped native cases are retained. Three host
+tests pass. The [independent audit](audit_kbd_mmio.py) checks 18 source/tool pins,
+exact commands, native images/logs, complete case matrix and closed ownership.
+`kbd-mmio-r1/audit.json` passes. Management RTL is unchanged, SHA-256
+`1373aa5cd3a97e9007555858827c066174ad1746e927ed8f4a7f6d0c32f58736`.
+
+Scope: the actual three RTL blocks, **not the full PL wrapper**, CPU, DDR,
+video or forensic-reset path. Commands use the board helper's full-word writes;
+this is not complete AXI compliance, byte-strobe or reset-race qualification.
+No processor, endpoint, controller, exported source or bitstream changed.
+
 ## Required next steps
 
-The actual wrapper/debug-MMIO path remains unqualified. Compose the exact
+The management-register transport above is qualified for its stated cases;
+the full wrapper and physical UI remain unqualified. Compose the exact
 controller and endpoint changes with the processor
 candidate, then verify the full suite and physical Win95 keyboard/mouse UI.
 Do not infer that generic physical PS/2 devices share this retry policy. These
 integration microtests are not Win95 UI/standard-suite/physical-FPGA acceptance.
 
-Current candidates have no verified gameplay IPC. Older measured baseline:
-**0.49046518 total U+V**, model `7e877b3b…`, cycles
-**1,600,065,247–1,700,065,247**; this peripheral repair claims no IPC gain.
+Current candidates have no verified gameplay IPC. Latest older measured baseline:
+**0.50229051 total U+V**, model `b6b92dbf…`, cycles
+**1,400,065,247–1,500,065,247**; this peripheral repair claims no IPC gain.
