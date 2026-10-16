@@ -1,6 +1,6 @@
 # Early backing direction — October 16
 
-**Private experiment; synthesis closed, timing audit pending; not accepted or deployed.** This follows the
+**Private experiment; rejected as a timing fix, not accepted or deployed.** This follows the
 corrected wrapper's [34.6524 MHz unplaced result](../issue_uv/V_RESULT_CARRY.md).
 It does not repeat the rejected address/strobe mux experiment.
 
@@ -90,7 +90,8 @@ New directed CPU model:
 The unchanged canonical gate completed within its 600-second native timeout
 and remains red; neither directed passes nor parent-identical cycles waive it.
 Fresh functional, broader faults/ordering and timing qualification remain
-required. The new synthesis is diagnostic, not acceptance (owner below).
+required for any future use. The closed synthesis/timing comparison below is
+diagnostic, not acceptance; its frequency result is worse than the parent.
 
 ## Full-PC and FPGA transfer
 
@@ -162,8 +163,34 @@ owner `ventium-backing-direction-clock-oct16-r1`, invocation
 `bc8e09defcf640fbb29995559ab6cada`, native scope
 `8d456286c9c14e59835296e1fccf8c5f` (8 GiB RAM / 4 GiB swap / 48 tasks).
 It started only after the separate PC build released the heavyweight lock.
-Result pending: **no new measured frequency result yet**, no placement, route
-or bitstream.
+The native timing run closed successfully in **465.650 s**, with all inputs
+unchanged, 4,511,404,032-byte peak RAM, no swap and no OOM. Independent audit
+passes 20,831 pins, exact terminal owner identity, unchanged parent checkpoint,
+actual clock constraints, zero black boxes and zero structural DRC errors.
+Those checks do **not** make failing timing a pass.
+
+| Synthesized, unplaced timing | Matched parent | Early direction |
+|---|---:|---:|
+| Core frequency estimate | 34.652436 MHz | **33.991638 MHz** |
+| Setup slack at 40 MHz | −3.858 ns | −4.419 ns |
+| Worst-path logic levels | 97 | 99 |
+| Worst-path data delay | 28.647 ns | 29.208 ns |
+| Paired-V capture setup slack | −1.989 ns | −2.516 ns |
+| Paired-V capture cone cells | 69,445 | 69,360 |
+
+The frequency estimate regresses **1.91%**, despite 0.53% fewer LUTs. The worst
+path remains `q_pc[0]` to `gpr[4][16]/D`; 23.119 ns of its 29.208 ns data delay
+is estimated routing, not routed silicon evidence. The paired-V capture path
+also gains two logic levels and worsens. Early direction alone does not break
+the long request/credit/acknowledgement/retirement dependency. Preserve the
+faster parent; do not promote this experiment or spend a route run on it as a
+40 MHz fix. This is a negative timing result, not a demonstrated functional
+regression. No pairing, ordering or timing constraint was weakened.
+
+Both retained owners are exited / MainPID 0; `ventium-vivado.scope` is inactive
+and no native Vivado process remains. No placement, route, bitstream generation
+or deployment occurred. Full comparison evidence:
+`backing-direction-clock-r1/{closed.json,audit.json,core_setup_unplaced_estimate.rpt}`.
 
 Cleanup recovered 1.08 GiB without removing a native binary or pinned input:
 eight unreferenced closed-build PCH caches are rebuildable; eight closed raw
@@ -174,7 +201,8 @@ copy. Exact paths/hashes and restoration instructions are in the adjacent
 `backing-direction-pch-prune-oct16.json` and
 `backing-direction-pc-pch-prune-oct16.json`. No live Quake source or media changed.
 
-There is **no measured fmax or IPC gain** for this experiment. Its gameplay IPC
+There is **no fmax or IPC gain** for this experiment: the synthesized estimate
+regresses, and short CoreMark cycles are unchanged. Its gameplay IPC
 is unmeasured, as is the separately running V-result cold-Quake model
 `b6b92dbf…`. Latest verified older gameplay baseline remains **0.48146083 total
 U+V IPC**, model `7e877b3b…`, cycles **1,100,065,247–1,200,065,247**. Full standard
