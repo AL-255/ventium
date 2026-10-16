@@ -99,6 +99,13 @@ remain failures; all 20 full cycle streams are parent-identical. No mask,
 golden, band, comparison or guest was relaxed. This experiment is **not** a
 canonical-gate repair or a standard-suite pass.
 
+A later read-only inventory of the retained canonical results confirms all
+**108 complete candidate/parent RTL architectural streams are identical**:
+80,800 records. All 101 failed comparisons report the missing terminal record;
+90 are length-only, while 11 first report an FSW C1 difference (`xor=0x200`).
+The independent private-reference results do not erase these canonical failures.
+Evidence: `sfetch-interior-canonical-inventory-r1.json`.
+
 The original interior-fetch driver ran after that gate released the exclusive
 guard: 32 queued workers, bounded eight concurrent native children, **5.14
 seconds**, no OOM/process-limit event, all children reaped. Independent
@@ -200,9 +207,13 @@ may reshare logic; a cleaner expression is not evidence of faster hardware.
 The canonical gate, complete standard suite, and matching physical-board Win95
 cold desktop/input and complete Quake timedemo remain mandatory.
 
-Candidate gameplay IPC is **unmeasured**. Latest audited older baseline:
-**0.49046518 total U+V**, model
-`7e877b3b9e43c2867fa3adcd93419c9b9f5fbca30b1a1ef9acacada04539ec68`,
-cycles **1,600,065,247–1,700,065,247**. U-only IPC is 0.37998050; the remaining
-0.11048468 is V retirement. This baseline predates the V-result/input/fetch
-candidates and is neither full timedemo completion nor FPGA acceptance.
+Candidate gameplay IPC is **unmeasured**. The newer audited older-build baseline
+is now **0.48146083 total U+V**, V-result model
+`b6b92dbfde2c6148fde30b5c65cac8217f650f7bbc1a7d4c0bd58fe95f706c9e`, cycles
+**1,100,065,247–1,200,065,247**. U-only IPC is 0.37609117; the remaining
+0.10536966 is V retirement. See the [new window audit](../../fpga/audit_v_result_gameplay_window.py).
+This model predates the current boundary/interior-fetch and later input
+candidates. It is neither full timedemo completion nor FPGA acceptance.
+The immutable synthesis-start receipt retains the baseline known at launch:
+0.49046518 on `7e877b3b`, cycles 1,600,065,247–1,700,065,247. Different windows
+must not be treated as a measured performance regression.

@@ -1,5 +1,50 @@
 # V-pipe arithmetic carry cut — 2026-10-15
 
+Latest update, October 16: this V-result model now has a verified gameplay
+observation of **0.48146083 total U+V IPC**, cycles
+**1,100,065,247–1,200,065,247**. It is still not a full timedemo or physical-board
+pass. Later input and boundary/interior-fetch candidates remain unmeasured.
+Historical unmeasured-status paragraphs below describe their earlier updates.
+
+## October 16: first verified V-result gameplay window
+
+The original cold FreeDOS / DOS Quake 1.06 `demo1` run continues under owner
+`ventium-v-result-carry-quake-oct16-r1.service`, invocation
+`2c4e771b55e141d98f2ed235d37cc5f1`, native PID2100579 / CPU14. Model:
+`b6b92dbfde2c6148fde30b5c65cac8217f650f7bbc1a7d4c0bd58fe95f706c9e`.
+
+[Independent window audit](../../fpga/audit_v_result_gameplay_window.py) checks
+**18,621 source/runtime pins**, live PID/start time/executable/argv/affinity,
+owner invocation, cold unmodified media, UV-fast definitions, `cycle_mode=1`,
+actual paired retirements and no OOM. The two raw captures are visually
+reviewed: firing in a stone room, then a different corridor view, each with
+weapon and HUD. Converted PNG pixels equal the originals exactly; no image
+adjustment, snapshot, guest patch or debugger STEP is used.
+
+| Counter | Delta over 100,000,000 measured clocks |
+| --- | ---: |
+| U retirements | 37,609,117 |
+| V retirements | 10,536,966 |
+| Total U+V retirements | 48,146,083 |
+| U-only IPC | 0.37609117 |
+| Total U+V gameplay IPC | **0.48146083** |
+
+Evidence: `v-result-carry-gameplay-window-oct16-r1.json` under
+`/home/yukidama/external/tmp/ventium-fprem-sequence.iSZ9BAj4`; reviewed images
+`quake-v-result-frame6-oct16.png` and `quake-v-result-frame7-oct16.png`.
+The audit uses actual samples 11/12 with the retained 65,247-clock startup
+reporting offset. It does not round timestamps or weaken the generic
+predeclared-window helper. One host test preserves counter/native/pixel guards.
+
+This is a **post-hoc observation**, not a predeclared A/B experiment. Its IPC
+equals the older decode-bus build's previously audited **same cycle window**;
+no IPC gain is claimed for this combinational timing change. The later
+decode-bus 1.6B–1.7B observation of 0.49046518 samples different gameplay and
+cannot establish a regression. This newer-build measurement becomes the
+reported baseline for subsequent, still-unmeasured input/fetch candidates.
+The full timedemo remains unfinished; no new FPS, routed 40 MHz, standard-suite
+or physical FPGA acceptance follows from this window.
+
 **Private timing candidate, not accepted or deployed.** The hardware change is
 one expression in `v_pipe.sv`: call `alu_result(..., 1'b0)` instead of forwarding
 U's CF into the arithmetic result. `flags_next` still receives the real
