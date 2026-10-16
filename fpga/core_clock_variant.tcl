@@ -29,17 +29,27 @@ proc routed {} {
 }
 proc physical_state {path} {
     set cells [lsort [get_cells -hierarchical -filter {IS_PRIMITIVE}]]
-    set nets [lsort [get_nets -hierarchical]]
+    set segments [lsort [get_nets -hierarchical]]
+    # Hierarchical aliases of global GND/VCC each repeat the entire physical
+    # route tree. Keep all names, but query each actual routed net only once.
+    # UG835 get_nets documents top_net_of_hierarchical_group + segments.
+    set nets [lsort -unique [get_nets -hierarchical -segments -top_net_of_hierarchical_group]]
     if {[llength $cells] < 1000 || [llength $nets] < 1000} {error "unexpectedly small design"}
     # Vivado's whole-design ROUTE property expansion consumed >11 GiB before
     # the first edit. Bound each native query; retain EVERY value on disk and
     # compare exact bytes, not lossy hashes or a sample of nets.
-    set stream [open $path {WRONLY CREAT EXCL}]
+    if {[file exists $path]} {error "physical state output exists"}
+    # Different logical constant nets can share a very large physical route.
+    # Keep even those exact values, but losslessly stream them through gzip.
+    # -n removes timestamps, making compressed byte comparison deterministic.
+    set stream [open [list | gzip -n -1 > $path] w]
     try {
+        puts $stream [list all_net_segments $segments]
         foreach {kind objects properties} [list cells $cells {REF_NAME LOC BEL} nets $nets {ROUTE ROUTE_STATUS}] {
             puts $stream [list $kind [llength $objects]]
-            for {set i 0} {$i < [llength $objects]} {incr i 128} {
-                set batch [lrange $objects $i [expr {$i+127}]]
+            set batch_size [expr {$kind eq "cells" ? 4096 : 128}]
+            for {set i 0} {$i < [llength $objects]} {incr i $batch_size} {
+                set batch [lrange $objects $i [expr {$i+$batch_size-1}]]
                 puts $stream [list names $batch]
                 foreach property $properties {
                     puts $stream [list $property [get_property $property $batch]]
@@ -63,7 +73,7 @@ foreach {property expected} {CLKFBOUT_MULT_F 10 DIVCLK_DIVIDE 1 CLKIN1_PERIOD 10
     if {abs([get_property $property $mmcm]-$expected) > 0.000001} {error "wrong original MMCM $property"}
 }
 file mkdir $out
-set before [file join $out physical_before.txt]
+set before [file join $out physical_before.txt.gz]
 physical_state $before
 report_property $mmcm -file [file join $out mmcm_before.rpt]
 
@@ -79,7 +89,7 @@ report_clocks -file [file join $out clocks.rpt]
 clock_period clk_pl_0 10.0
 clock_period mmcm_clk $divider
 routed
-set after [file join $out physical_after_edit.txt]
+set after [file join $out physical_after_edit.txt.gz]
 physical_state $after
 if {[catch {exec cmp -- $before $after}]} {error "placement/routing changed during clock edit"}
 report_property $mmcm -file [file join $out mmcm_after.rpt]
@@ -92,7 +102,7 @@ write_bitstream -bin_file [file join $out core_clock_variant.bit]
 routed
 clock_period clk_pl_0 10.0
 clock_period mmcm_clk $divider
-set final [file join $out physical_after_bitgen.txt]
+set final [file join $out physical_after_bitgen.txt.gz]
 physical_state $final
 if {[catch {exec cmp -- $before $final}]} {error "placement/routing changed during bitgen"}
 foreach suffix {dcp bit bin} {

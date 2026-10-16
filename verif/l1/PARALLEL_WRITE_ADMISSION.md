@@ -56,11 +56,23 @@ Board staging: `/dev/shm/ventium-coremark-clock-stage.O8VozfHM`.
 The first 70.175 MHz bitgen preparation was stopped deliberately with native
 exit 143 before any clock edit, at 11,915,931,648 bytes RAM and **zero OOM
 events**. A whole-design native ROUTE-property expansion was too expensive.
-The audit now streams all cell/net properties in batches of at most 128 and
-compares exact files; it does not reduce coverage. All 24 Tcl mock cases still
-pass, including a new bound assertion on native property queries. The sole
-retry `ventium-core-clock-70-oct16-r2.service` is active; no overclock pass is
-claimed yet. No synthesis, placement or routing is repeated for a frequency
+The next two attempts were also stopped before any clock edit: raw route dumps
+repeated very large constant-net trees, even after hierarchical aliases were
+canonicalized. Their closed partial evidence is losslessly compressed; no OOM
+or full-disk event occurred. The final bounded audit uses batches of at most
+4,096 cells / 128 nets, retains every hierarchical name, and streams exact route
+values through deterministic gzip. All 24 Tcl mock cases pass, including native
+property batch bounds. The separate observer stops at a 4 GiB disk floor or
+11.5 GiB resident-memory margin.
+
+At 21:07 UTC, the sole active retry is
+`ventium-core-clock-70-oct16-r4.service`, invocation
+`5f6c9dce75e448ebb34e104c890c22f6`. Native clocks are **70.175439 MHz core /
+100 MHz AXI**. MMCM property reports differ only in `CLKOUT0_DIVIDE_F`, 25→14.25.
+Full before/after-edit physical snapshots compare byte-for-byte, SHA-256
+`380e7bd1906bca7ea3908ee8f60bc85be42864222820ed8e1491c68a01d838c9`.
+Bitgen and the final comparison are still pending; no overclock hardware pass
+is claimed. No synthesis, placement or routing is repeated for a frequency
 variant. The board is safely held reset between trials.
 
 ## Physical clock experiment preparation
