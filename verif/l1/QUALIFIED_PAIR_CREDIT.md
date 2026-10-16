@@ -174,6 +174,75 @@ their runs; binaries, source snapshots, headers, logs and receipts remain loose.
 Five additional closed object trees were archived to recover about **701 MiB**
 net; `tar --zstd -xf compiler-products.tar.zst -C <run-directory>` restores them.
 
+### Same-edge boundaries and exclusion controls
+
+`qualified-pair-credit-corners-r1` passes both real-wrapper builds in
+**11.237 seconds**. Public-port stimulus exercises each of these exact events:
+
+- A full queue releases its head and admits an aligned quad pair on that edge.
+- A one-slot-occupied queue releases its head and atomically admits a
+  non-combinable, two-slot pair on that edge.
+- A U/V SMRAM-denied transaction overlaps a previous write's B release without
+  starting a partial DDR write.
+- An externally injected bad BRESP overlaps newly available pair credit;
+  neither U nor V is acknowledged, containment remains sticky, and a coupled
+  reset restores ordinary paired operation.
+- Shutdown drains an owned write, suppresses all new backing enqueues, and
+  supplies its documented idle local ACK without writing the pending pair to
+  DDR. Normal traffic resumes only after reset, not by pretending shutdown was
+  a transparent cache-consistent stall.
+
+Both runs report **one hit of each boundary, 10 ordinary recorded U stores,
+4 V stores and 11 AXI write transactions**. The independent 64 KiB byte-RAM
+scoreboard passes. All 158 nonsynthesis hardware definitions remain, with only
+the BFM monitor and narrow bad-response injection permission added; the new
+qualification/equality assertions execute. No internal state is forced.
+Owner `ventium-qualified-pair-corners-oct16-r1.service`, invocation
+`464c1326c35c4094aedb240d8c315336`, is closed exit 0 / MainPID 0; its distinct
+build-scope invocation is `b8c2cc9d0cae4857aa9e2698aa9b7839`.
+
+`qualified-pair-credit-default-r1` passes both unchanged legacy single-clock
+cache/AXI scenarios in **11.119 seconds**, with no feature defines. A
+candidate-only elaborated assertion checks `PAIR_REQ_CREDIT_QUALIFIED==0`.
+Owner `ventium-qualified-pair-default-oct16-r1.service`, invocation
+`78c6de20bfc54d5eb2f621094c073a9a`, is closed successfully.
+
+The first CDC control, `qualified-pair-credit-cdc-r1`, **fails on the parent**
+before the candidate is run: all four clock ratios return `a5a51008` instead
+of `deadbeef` immediately after the first store. Native simulation exits zero
+but prints `L1AXICDC-GATE-FAIL`; the controller correctly exits 1. Owner
+`ventium-qualified-pair-cdc-oct16-r1.service`, invocation
+`1343a8d50f4f4d39bcca0ffbeafa7856`, remains a failed, closed run.
+
+The fixture samples `c_ack` **after** a rising edge (`#1`) and can withdraw a
+newly acknowledged request at the intervening falling edge, before L1 samples
+its completion. The CDC response FIFO makes this observable: DDR has accepted
+the store, but the cache has not received its write-update edge. The separate
+`run_qualified_pair_credit_cdc_edges.py` derivative removes `#1` from only the
+three read/write/continuous-write ACK polling points, holding the request
+through the consuming edge. It adds a real-edge accepted-store witness.
+No expected word, RTL, reset timing, traffic sequence or clock ratio changes.
+
+`qualified-pair-credit-cdc-edges-r1` passes both parent and candidate in
+**11.959 seconds**, across 5:2, 2:5, 4:4 and 5:3 core/AXI half-period ratios.
+Each ratio records **41 accepted writes, exactly one first-store commit**,
+correct read-after-write data, continuous writes and asymmetric-reset recovery.
+The candidate's qualification parameter remains zero. Only `VEN_AXI_CDC` is
+enabled, plus the candidate-only parameter observer. Owner
+`ventium-qualified-pair-cdc-edges-oct16-r1.service`, invocation
+`ab11ef8a6426449188210d669ac1f030`, is closed exit 0 / MainPID 0. The original
+canonical CDC fixture is not edited or relabelled as passing; the three
+edge-sampling corrections are the proposed canonical testbench fix.
+
+These default/CDC executions are **exclusion diagnostics, not U/V processor
+acceptance**. `qualified-pair-credit-boundaries-audit-r1.json` reconstructs
+all six passing native executions, the distinct failing original CDC run,
+exact generated fixtures and defines, source deltas and closed owner/scope
+identities. It rechecks **132 pins**, retaining the failure explicitly. All
+**23 pair-credit host tests and 8 FPGA transfer/export tests** pass. An initial
+host-suite invocation omitted required `PAIR_CREDIT_PARENT_MEM` and failed
+setup; rerunning with the exact pinned parent path passes all 23 tests.
+
 ### Whole-core derivative and cold system checks
 
 `build_qualified_pair_credit_core.py` builds the exact two-file derivative of
@@ -343,23 +412,30 @@ byte-verified, recovering another **210 MiB** net. Archive SHA-256:
 `85fabca60f22e15ad353f6c71c9a627e1a29e3694485351d2b4fdcc04d08397b`.
 All binaries, generated headers/dependencies, source and acceptance evidence
 remain loose; its `compiler-archive.json` records exact members and restoration.
+The closed, rejected ACK PC's 275 compiler products were also archived,
+recovering **210 MiB** net, SHA-256
+`2f9cb4ab8d236f72aff246c1e404ec76bd576ded93a40a0e62d1888eb2e64f6f`.
+The failed CDC parent's 65 generated products recover **144 MiB** net,
+SHA-256 `3bad0b16048e68a68d29af81288b8d67cff921eebdd6f26899a570d7c4e4fad0`.
+Its failed log, receipt, executable and source remain intact; archiving does
+not change its verdict.
 
 ## Remaining gates
 
 Before synthesizing or accepting the whole-core candidate:
 
-1. Extend the now-passing fault and wrapper coverage to shutdown and additional
-   same-edge release/route-fault combinations. Existing evidence does not cover
-   every paired fault scenario. Preserve the explicit generic-producer contract.
-2. Verify unpaired/CDC exclusion configurations separately; their exclusion is
-   currently source-checked, not claimed as a new native CDC acceptance pass.
-3. Resolve the red canonical gate. Same-input functional replay and the fresh
+1. Resolve the red canonical gate. Same-input functional replay and the fresh
    qualified-reference corpus now pass, as do the build and directed
-   system/fault comparisons. Existing canonical failures remain failures,
-   not newly waived passes.
-4. Only then measure matched synthesis/timing. This simplification may have
+   system/fault/boundary comparisons. Existing canonical failures remain
+   failures, not newly waived passes. The CDC testbench sampling correction
+   also remains a separately tested proposal, not an edited canonical pass.
+2. Only then measure matched synthesis/timing. This simplification may have
    little timing effect because the original ready-to-request path remains;
    **no MHz, area, CPI or IPC gain is claimed**.
+
+The previously missing shutdown/same-edge boundary checks and native
+default/CDC exclusion controls now have the explicit results above. This is
+directed coverage, not an exhaustive proof of all possible paired faults.
 
 Full CoreMark correctness/scoring, Win95 desktop and UI, Quake timedemo and
 matching physical-FPGA validation remain mandatory before accepting a major
