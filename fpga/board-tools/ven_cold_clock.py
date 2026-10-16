@@ -1,18 +1,25 @@
 #!/usr/bin/env python3
-"""Read-only 40 MHz admission for a fresh, held-reset ABI-5 source image.
+"""Read-only clock measurement for a fresh, held-reset ABI-5 source image.
 
 This never selects a clock, releases reset, clears counters, or changes debug
 execution mode. The deployment controller must separately pin/program the
 bitstream and check the DDR reservation. It is not timing or CPU acceptance.
 """
+import argparse
 import json
+import math
 import os
 import time
 
 import ven_board_probe as probe
 
 
-def measure(ctrl, *, api=probe, monotonic_ns=time.monotonic_ns, sleep=time.sleep):
+def measure(ctrl, *, expected_mhz=40.0, api=probe,
+            monotonic_ns=time.monotonic_ns, sleep=time.sleep):
+    # Explicit experimental target, never an unconstrained observed-clock pass.
+    # The default retains the original 39.5..40.5 MHz admission limits.
+    if not math.isfinite(expected_mhz) or not 20 <= expected_mhz <= 100:
+        raise ValueError('expected clock must be finite and within 20..100 MHz')
     def endpoint():
         api.require_exec_debug(ctrl)
         if (api.u32(ctrl, api.R_IDENT) != api.IDENT_MAGIC or
@@ -49,10 +56,12 @@ def measure(ctrl, *, api=probe, monotonic_ns=time.monotonic_ns, sleep=time.sleep
         raise ValueError('clock observation duration or read uncertainty is excessive')
     lower = delta * 1000 / maximum_ns
     upper = delta * 1000 / minimum_ns
-    if not 39.5 <= lower <= upper <= 40.5:
-        raise ValueError(f'held core is not 40 MHz: bounded observation {lower:.6f}..{upper:.6f} MHz')
+    if not expected_mhz * .9875 <= lower <= upper <= expected_mhz * 1.0125:
+        raise ValueError(f'held core is not {expected_mhz:g} MHz: bounded observation {lower:.6f}..{upper:.6f} MHz')
     elapsed = (minimum_ns + maximum_ns) / 2e9
-    return dict(result='PASS_HELD_RESET_40MHZ_ONLY', before=before, after=after,
+    verdict = ('PASS_HELD_RESET_40MHZ_ONLY' if expected_mhz == 40 else
+               'PASS_HELD_RESET_EXPERIMENTAL_CLOCK_ONLY')
+    return dict(result=verdict, expected_core_mhz=expected_mhz, before=before, after=after,
                 cycles_delta=delta, retirements_delta=0, elapsed_seconds=elapsed,
                 measured_core_mhz=delta/elapsed/1e6, lower_mhz=lower, upper_mhz=upper,
                 guard_checks=checks, debug_abi=5, read_only=True,
@@ -61,11 +70,15 @@ def measure(ctrl, *, api=probe, monotonic_ns=time.monotonic_ns, sleep=time.sleep
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--expected-mhz', type=float, default=40.0,
+                        help='explicit core-only target; does not change any clock')
+    args = parser.parse_args()
     if os.geteuid() != 0:
         raise PermissionError('must run as root on the board')
     fd, ctrl, _ = probe.open_mmio(writable=False)
     try:
-        print(json.dumps(measure(ctrl), indent=2))
+        print(json.dumps(measure(ctrl, expected_mhz=args.expected_mhz), indent=2))
     finally:
         ctrl.close()
         os.close(fd)

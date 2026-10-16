@@ -96,6 +96,26 @@ class ColdClockTests(unittest.TestCase):
         board = FakeBoard(); board.read_delay_ns=200_000_000
         with self.assertRaises(ValueError): board.measure()
 
+    def test_explicit_experimental_frequency(self):
+        board = FakeBoard(70)
+        result = measure(None, expected_mhz=70, api=board,
+                         monotonic_ns=lambda:board.ns, sleep=board.sleep)
+        self.assertEqual(result['measured_core_mhz'], 70)
+        self.assertEqual(result['result'], 'PASS_HELD_RESET_EXPERIMENTAL_CLOCK_ONLY')
+        self.assertFalse(result['acceptance'])
+        board = FakeBoard(40)
+        with self.assertRaises(ValueError):
+            measure(None, expected_mhz=70, api=board,
+                    monotonic_ns=lambda:board.ns, sleep=board.sleep)
+
+    def test_invalid_experimental_target_rejected(self):
+        for target in (0, 19, 101, float('nan'), float('inf')):
+            board = FakeBoard()
+            with self.subTest(target=target), self.assertRaises(ValueError):
+                measure(None, expected_mhz=target, api=board,
+                        monotonic_ns=lambda:board.ns, sleep=board.sleep)
+            self.assertEqual(board.ns, 0)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -8,6 +8,52 @@ parent (**+1.428%**). Still below 40 MHz; no timing, standard-suite or FPGA
 acceptance.**
 The production checkout and deployed bitstream have not changed.
 
+**User-directed next step (October 16): keep this RTL unchanged and measure
+the physical overclock limit.** This supersedes the earlier no-route direction
+below; it does not waive correctness or claim static timing closure. A single
+guarded place/route/bitstream run began at 16:43:50 UTC from the completed
+synthesis checkpoint, with no resynthesis or source/define changes. No
+experimental board-clock result exists yet.
+
+## Physical clock experiment preparation
+
+`fpga/prepare_parallel_write_implementation.py` clones the 224-file completed
+project byte-for-byte, preserving the original synthesis and clock-audit
+evidence. Checkpoint SHA-256:
+`db7f4cbfb804e8d93871cf8ccb8951d24de78d32aa8cc0d9bf2ccaf91b5bea03`.
+Evidence: `parallel-write-implementation-r1` under the root below;
+owner `ventium-parallel-write-implementation-oct16-r1.service`, invocation
+`5520853d3c3d402995c4828400de51e0`. The successful prior bank64 controller's
+single-family, 20 GiB RAM / 8 GiB swap and six-hour bounds are retained.
+Disk admission remains 8 GiB; the live disk-stop floor is tightened to 4 GiB.
+Three preparation tests and 84 existing Tcl launcher tests pass. The run is
+still active, not a completed implementation or deployment.
+
+The intended sweep keeps PS/AXI at 100 MHz and the MMCM VCO at 1 GHz, varying
+only the core-output divider in copies of the routed design. No DRP interface
+is exposed. Post-route property editing and unchanged placement/routing must
+be verified before using bitgen-only frequency variants. The existing PS PL0
+runtime selector changes AXI and MMCM input together; it is not a core-only
+frequency control. Start at 40 MHz, increase toward 70 MHz and beyond only
+while checks pass, then refine/repeat the passing boundary and return to 40 MHz
+after failures. No voltage change is planned. A highest observed repeated pass
+is empirical CoreMark evidence, not STA or general-processor acceptance.
+
+`fpga/prepare_coremark_clock_media.py` builds unchanged, BIOS-bootable
+2,000-iteration media and same-count private-QEMU CRC references. The first
+attempt (`coremark-clock-media-r1`) failed because QEMU rejects read-only IDE;
+its failed logs remain. The second uses fresh private disks with before/after
+hash equality. Both seeds finish with native exit 33 and matching standard
+algorithm CRCs; final CRCs are **4983 performance / 0cac validation**.
+Owner `ventium-coremark-clock-media-oct16-r2.service`, invocation
+`b1e7427c4dd843d0a07313d2f89b97c6`, closes exit 0 / MainPID 0. QEMU ticks are
+not FPGA performance. Require both hardware seeds, no errors, consistent raw
+TSC endpoints, at least ten seconds using the **measured** core frequency,
+fresh boot per trial, exact image/source identity, and unperturbed UV+fast
+execution. The port's printed seconds remain calibrated to 40 MHz and cannot
+validate duration at higher clocks. No workload/RTL patch or saved state is
+used. Three host parser tests pass.
+
 This follows the rejected [qualified-credit experiment](QUALIFIED_PAIR_CREDIT.md):
 35.295779 MHz synthesized/unplaced versus its RAW/input parent's 35.374438 MHz.
 Neither result qualifies 40 MHz, and neither is routed fmax.
@@ -432,10 +478,10 @@ any of the nine failures.
 1. Resolve the outstanding differential/reference and cycle-band qualification
    issues without weakening comparisons. Passing directed A/B and the private
    reference does not make canonical `make verify` green.
-2. Reach at least 40 MHz with a verified structural change to the remaining
-   shared critical path. This matched measurement is closed but below target;
-   kept-net presence does not prove the whole admission fan-in independent.
-   Do not infer fmax from source structure or route this below-target result.
+2. Static 40 MHz closure remains unproved. Per the subsequent explicit user
+   request, keep this design unchanged and perform the physical clock sweep
+   described above instead of further structural optimization. Preserve the
+   below-target timing evidence; empirical overclock success cannot replace it.
 3. Complete CoreMark correctness and duration-valid scoring, full Quake timedemo
    and Win95 desktop/UI acceptance, including physical FPGA evidence on the
    exact candidate bitstream.
