@@ -8,6 +8,13 @@ New investigation: [latched AUX byte ownership](AUX_STATUS.md), a separate
 one-line status repair and actual-iobus mixed keyboard/mouse microgate. Its
 qualification status is tracked separately from the October 2 loss witnesses.
 
+October 16 follow-up: [current-AUX keyboard ownership backport](LOSS_AUX_IOBUS.md)
+combines the retained loss/resync proposal with the newer AUX repair. Sixteen
+actual-iobus cases pass and sixteen old-controller loss witnesses reproduce.
+It is a separate private candidate, not part of the running FPGA synthesis;
+the live-input adapter below must not be assumed compatible with its new
+retained-producer protocol.
+
 ## October 16: current-model live keyboard adapter (not UI acceptance)
 
 `prepare_pc_live_input.py` now prepares a **host-only** derivative of the frozen
