@@ -323,6 +323,37 @@ it is not normalized away. This is simulated physical-pin command coverage,
 not a physical FPGA/keyboard pass, a generic pause/resume contract, or a change
 to the earlier original transport gate's failed result.
 
+## UI-disabled whole-PC CoreMark controls
+
+The already built retained-input model `0e25af3b…` now also passes both
+unchanged cold ten-iteration CoreMark controls **without** a `--ui-fifo` or
+any live-input activity. `fpga/run_retained_ui_coremark.py` runs the two seeds
+concurrently on actual CPUs 12/13, preserving the native command, original
+reference CRCs, exact parent tick expectations and clean-child lifecycle.
+Both use UV + fast pipe, `cycle_mode=1` and real posted-16 AXI service.
+
+| Seed | Parent / candidate kernel ticks | Candidate final U / V |
+|---|---:|---:|
+| Performance | 4,767,218 / 4,767,218 | 3,409,929 / 1,055,307 |
+| Validation | 4,753,406 / 4,753,406 | 3,405,882 / 1,054,254 |
+
+All five CRCs match for each seed. Timed-kernel throughput change is **0%**;
+the total U counts are 12 greater than the parent, so this is **not** a claim
+of whole-boot instruction/cycle trace equivalence. These short runs are not
+duration-valid scores or the two complete standard correctness seeds.
+
+Evidence: `retained-ui-soc-r3/coremark-ui-disabled-r1`; owner
+`ventium-retained-ui-cm10-oct16-r1`, invocation
+`8f122c39cea84849907cab827972baf5`, exited / MainPID 0. Native times
+208.67/210.62 s, peak owner memory 514,342,912 bytes, no swap/OOM. The independent
+`fpga/audit_retained_ui_coremark.py` passes, rechecking **19,424 pins**, both
+complete consoles, exact media/model/arguments, actual affinity, no UI activity,
+native reaping and terminal owner. Two adapter/audit tests pass.
+
+The separate [FPGA keyboard injector defect](../../fpga/KBD_INHIBIT.md) remains
+outside this PC model and the bidirectional endpoint tests. Its private repair
+must be integrated before claiming the board's keyboard path is qualified.
+
 ## Remaining acceptance work
 
 The exact hosted-endpoint interrupted-reset and physical keyboard-command
