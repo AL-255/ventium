@@ -1,6 +1,7 @@
 # Boundary-only fetch staging experiment — October 16, 2026
 
-**Private experiment, not promoted, synthesized, routed or deployed.** It
+**Private experiment, not promoted, routed or deployed.** Synthesis is now
+running; it has no completed frequency result yet. It
 preserves architectural results in the checks below, but still has a measurable
 boundary-fetch cost. No frequency improvement or gameplay gain is claimed.
 Production RTL and both existing cold Quake simulations remain unchanged.
@@ -125,11 +126,8 @@ to the exact journal invocation instead of accepting an empty systemd ID.
 
 ## Remaining acceptance and current gameplay
 
-Next: full-PC transfer and benchmark cost measurement, then a matched bounded
-synthesis measurement if the performance tradeoff is acceptable. The external
-volume had about **5.2 GiB free** at closure: preserve the established admission
-reserve, prune only verified closed/rebuildable artifacts if needed, and do not
-launch a large run that exceeds it. No timing improvement is established yet.
+Full-PC cost measurement and the exact FPGA transfer are now closed, below.
+A matched bounded synthesis has started. No timing improvement is established yet.
 Canonical repair, full standard suite, ≥40 MHz synthesized/routed closure,
 candidate FPGA Win95 cold desktop/UI and a completed Quake timedemo remain open.
 
@@ -143,3 +141,77 @@ actual counter spacing, no OOM and two raw, visually inspected gameplay frames.
 This is a post-hoc window, **not timedemo completion or FPGA performance**.
 It predates the V-result, input and current fetch-stage candidates; those
 candidates still have **no verified gameplay IPC**.
+
+## Full-PC transfer and timing run — October 16 continuation
+
+[Transfer builder](../../fpga/build_sfetch_boundary_soc.py) produces model
+**`b32ab4b34482669c03ea57ce7be0dbd475623fa00b00c4c814fec976d75c86d2`**
+under `sfetch-boundary-soc-r1`, from the V-result/AUX parent
+`b6b92dbfde2c6148fde30b5c65cac8217f650f7bbc1a7d4c0bd58fe95f706c9e`.
+Exactly the two fetch-stage files change; all 102 shared processor/FP sources
+match the directed candidate. All 157 PC definitions, assertions, full caches,
+posted-16 transport and platform sources are retained. The new harness has a
+private basename, local object and matching generated-header dependency.
+Guarded 32-job native build: **23.16 seconds**, exit0, inputs unchanged.
+The inherited 98 full-PC structural warnings remain debt, not a full-SoC lint pass.
+
+The [short cold CoreMark controls](../../fpga/run_sfetch_boundary_coremark.py)
+and [independent audit](../../fpga/audit_sfetch_boundary_coremark.py) pass:
+
+| Ten-iteration seed | Parent ticks | Candidate ticks | Added clocks | Clock cost | Actual final V |
+|---|---:|---:|---:|---:|---:|
+| Performance | 4,767,218 | 4,771,298 | 4,080 | +0.0855845% | 1,055,307 |
+| Validation | 4,753,406 | 4,755,366 | 1,960 | +0.0412336% | 1,054,254 |
+
+Both completed with exact five-CRC reference matches, real cold reset, actual
+CPU12 affinity, `cycle_mode=1`, UV/relocated fast paths and the unchanged real
+RTL memory profile (`slots=16`, B-delay20, R-first21, gap1). Native times were
+**230.73 / 222.17 seconds**. Both children were waited and reaped; no OOM, all
+20,915 input pins rechecked. Final U counts were 3,409,917 / 3,405,870;
+these counters include startup and are **not gameplay IPC**.
+Owner: `ventium-sfetch-boundary-cm10-oct16-r1.service`, invocation
+`c165668c29c54033a74b8a8af0a41407`.
+
+These short ratios (**2.09587 / 2.10289**) are **duration-invalid diagnostics**,
+not accepted CM/MHz scores or either full standard-seed pass. There is a small
+measured throughput loss (−0.08551% / −0.04122%), not a performance gain.
+The original +34.88% selected boundary-loop penalty remains visible above.
+
+The separate cycle-cost diagnostic explicitly rechecks all 20 native cycle
+streams: 19 identical, `mb_brrandom` exactly +21 clocks, every retirement PC,
+sequence, pipe and pairing decision unchanged. It does not edit or waive the
+original failing equivalence/canonical gate. Four transfer/cost tests reject
+new identity/pairing changes, unexpected cycle differences, profile drift and
+false score claims.
+
+[FPGA export](../../fpga/freeze_sfetch_boundary_rk_candidate.py):
+`sfetch-boundary-fpga-r1/input-manifest.json`, SHA-256
+**`34b2d154d926cd8731443576b7e786cabf2c70bd193d2d05c8e5b0505b37bafc`**.
+All **192 payloads / 170 common compiled HDL files / 159 hardware definitions**
+are checked against the corrected posted-DDR mouse-wrapper parent. Only the
+two core files differ. Retained-input keyboard proposals are not mixed in.
+Strict CPU-hierarchy lint passed in **3.73 seconds**, with the original six
+structural error classes; this is not complete-wrapper or full-SoC acceptance.
+Three source/profile rejection tests and three CAD-guard tests pass.
+
+One matched synthesis is running under
+`ventium-sfetch-boundary-synth-oct16-r1.service`, invocation
+**`3ed4c5104c9e405c807a04154092e609`**, with source/mapper/40 MHz constraints
+matched to the **34.652436 MHz unplaced** corrected-wrapper parent.
+The watchdog retains **8 GiB RAM / 6 GiB swap**, a 13 GiB combined early stop,
+4 GiB disk stop floor and admission based on twice measured parent disk growth.
+Only one Vivado family is allowed. The
+[sequence](../../fpga/run_sfetch_boundary_timing_sequence.py) observes this exact
+invocation and may start only the prepared read-only clock report after native
+closure and an independent audit. It cannot retry synthesis, route or deploy.
+No new fmax, routed timing, Win95 pass or complete Quake result exists yet.
+
+Disk preparation retained all evidence and native binaries: six closed-build
+PCH caches removed (**563,873,811 bytes**, regenerable by rebuilding), followed
+by sparse conversion of zero pages in 26 inactive August17 snapshots
+(**3,466,842,112 allocated bytes reclaimed**, zero files deleted). Each
+snapshot retained its original path, length, inode and full SHA-256; no snapshots
+were used in these tests. Receipts are `sfetch-closed-pch-prune-oct16.json` and
+`aug17-snapshot-sparse-pages-oct16.json` under the evidence root. About **8.7 GiB**
+was available before synthesis. No Chrome browser was running; unrelated
+Electron applications were left alone. Both older cold Quake runs remain live.
