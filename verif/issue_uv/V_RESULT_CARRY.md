@@ -269,3 +269,69 @@ started: ordinary full-PC live input remains unintegrated, and the preserved
 cold launcher's 8 GiB host disk admission is not currently met. The isolated
 mouse protocol tests and old desktop captures cannot substitute for that work.
 Synthesis/clock sequencing and the older Quake remain live, not acceptance.
+
+## October 16: synthesis closed; mouse-wrapper integration rejected and repaired
+
+The preceding live status is superseded. Synthesis R3 closed at 00:23:26 UTC:
+native exit 0, 1,871.71 seconds, all pinned inputs unchanged, 8 GiB peak resident
+memory, zero swap and zero sampled OOM events. It reports 188,612 LUTs, 54,978
+registers, 277.5 BRAM tiles and 47 DSPs. These numbers describe an **incomplete
+mouse integration**, not an accepted candidate or an isolated V-result gain.
+
+The independent source audit correctly failed at missing native input
+`flow/src/ven_ps2_mailbox.sv`. The timing sequencer exited 1 and **did not start
+the clock audit**. No route, programming or timing qualification followed.
+The failed audit and original DCP/source/controller are retained unchanged.
+
+Root cause: the mouse overlay used the legacy `ven_ddram_axi` instance as its
+insertion anchor. That instance is inside the `else` of `VEN_DDR_POSTED`.
+The actual 159-define FPGA profile enables posted memory, so both mouse
+instances were preprocessed away. Vivado consequently omitted both source
+modules and explicitly warned that `mouse_csr_rdata` and `ps2_mouseclk_dev`
+had no driver. The earlier source contract checked filenames in expanded Tcl,
+not the active Verilog hierarchy; isolated peripheral tests instantiate the
+devices directly and cannot catch this wrapper-conditional defect. This is a
+real hardware integration bug, **not** a path-normalization audit error.
+
+`fpga/repair_posted_mouse_wrapper.py` moves only the exact mailbox/device block
+before the DDR conditional in a **new** export:
+`external/tmp/ventium-fprem-sequence.iSZ9BAj4/v-result-carry-posted-mouse-fpga-r1`.
+Manifest SHA-256:
+`ab1c791f3f472ec72a0c36628291d3c6d2e78a6a4a1b449a71a06840800ba8e0`.
+All 192 payloads, 159 defines, 40/100 MHz clock settings, posted depth 16 and
+processor/peripheral RTL are retained except that one block relocation.
+No source file in the old export or old native evidence was edited. Three
+host tests use the real Verilog preprocessor to check both DDR selections,
+reject the old posted source and missing/duplicate-device mutants, and prove
+that every other active RTL token is unchanged.
+
+The new actual-wrapper microgate compiles the real wrapper, management AXI-Lite
+slave, mailbox and device. CPU/DDR/video and other unrelated modules are
+deliberately black-boxed with Icarus `-i`; **this is not complete-wrapper or
+processor verification**. It reads capability/reset-status/generation through
+ordinary AXI-Lite, checks held read responses and driven device reset levels.
+At each of 3.125/40 MHz it requires:
+
+- Corrected posted and non-posted wrappers: pass.
+- Original non-posted wrapper: pass.
+- Original posted wrapper: fail the actual capability read, not compilation.
+
+All eight cases met those expectations: six positive cases and two required
+old-bug controls. Native owner `ventium-posted-mouse-wrapper-oct16-r2`, invocation
+`b4eeabc049cd4ccf8ceda03c33f015e7`, exited 0; 0.179 seconds, 17,924,096-byte peak,
+zero swap, CPUs 12–13. Independent recheck confirms all 400 input pins and all
+native log markers. Evidence: `posted-mouse-wrapper-micro-r2` under the same
+scratch root. The first micro attempt is retained as R1: its incorrect expected
+initial generation was 1, while the specified fabric-reset generation is 0.
+Only that test expectation/timing and evidence snapshotting were corrected;
+the repaired wrapper was unchanged.
+
+The corrected export is still unqualified and has **not** been synthesized.
+The failed earlier image must not be relabelled a pass or deployed. Next:
+complete the corrected wrapper's source/native checks and obtain fresh bounded
+synthesis/timing before implementation. The last valid predecessor estimate
+remains **37.9507 MHz unplaced**, not routed or measured hardware frequency.
+Current-candidate gameplay remains unmeasured; older verified baseline is
+**0.50520554 total U+V**, model `c7b95b78…`, cycles
+**5,600,065,237–5,700,065,237**. Canonical/standard-suite/physical acceptance
+remain open.

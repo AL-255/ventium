@@ -1,5 +1,15 @@
 # Hosted PS/2 device transport — October 10, 2026
 
+**October 16 integration correction:** the original mouse overlay placed its
+instances inside the non-posted DDR branch. The posted FPGA synthesis omitted
+them and its independent audit rejected the result. Do not deploy or qualify
+that export. `repair_posted_mouse_wrapper.py` creates a separate corrected
+export; the real-wrapper AXI-Lite microgate now catches the old posted failure
+and passes the corrected posted/non-posted cases at both tested clocks.
+Complete-wrapper synthesis and physical UI qualification are still pending.
+See the [native failure, exact fix and retained evidence](../verif/issue_uv/V_RESULT_CARRY.md#october-16-synthesis-closed-mouse-wrapper-integration-rejected-and-repaired).
+The historical peripheral results below do not prove wrapper integration.
+
 Status: **native-tested combined adapter/peripheral path and a separate complete source export**,
 not a board-accessible mouse or an FPGA acceptance pass. The active timing
 candidate is unchanged. Its frozen wrapper still ties the mouse inputs high;
