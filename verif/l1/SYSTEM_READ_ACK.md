@@ -1,9 +1,11 @@
 # System read-owner ACK cut — 2026-10-16
 
-Status: implemented in an isolated nine-file RTL derivative; directed
-verification passes. **Not synthesized, routed, deployed, or accepted by the
-standard suite. Canonical `make verify` still fails.** The dirty checkout's
-RTL and all live full-PC models remain untouched.
+Status: implemented in an isolated nine-file RTL derivative and transferred
+to a matching full-PC model. Directed, cold-input, short CoreMark and strict
+CPU-lint checks pass. Matched synthesis has been submitted; **no completed
+synthesis/timing result, routing, deployment or standard-suite acceptance yet.
+Canonical `make verify` still fails.** The dirty checkout's RTL and pre-existing
+full-PC runs remain untouched.
 
 ## Purpose and change
 
@@ -101,12 +103,63 @@ Failed infrastructure attempts are preserved, not called passes:
   remains FAIL. The separately retained fixed fixture exports those symbols;
   extra matrix r2 passes all four cases. No RTL change was needed.
 
+## Full-PC integration and FPGA export
+
+The exact nine-file transfer is `system-read-ack-soc-r1`, model
+`3d94caaa60d85a2cd13823a24ee629d76a08fdfb0ed1795c5aed8e0f7f65a17f`.
+All 102 shared processor sources match the directed model; all 157 full-PC
+defines, full P5 caches, posted-16 transport, retained 8042 fix, peripherals
+and host contents are unchanged. A private model-specific C++ harness object
+was freshly compiled. Build closed successfully in 27.800 seconds; the
+parent's 98 full-SoC structural warnings are unchanged, **not waived as clean**.
+
+`system-read-ack-input-r1/audit.json` independently checks two cold keyboard
+probes through the real 8042, raw modes 0/1, 6.5M clocks each, native ownership,
+69,637 source pins and no OOM. This does not test Windows UI or physical input.
+
+`system-read-ack-soc-r1/coremark-ui-disabled-r1/audit.json` independently checks
+both short 10-iteration controls against the immediate RAW/input parent:
+
+| Seed | Parent and candidate ticks | Candidate V retirements | CRCs |
+|---|---:|---:|---|
+| Performance | 4,771,298 | 1,055,307 | All five match |
+| Validation | 4,755,366 | 1,054,254 | All five match |
+
+The observed throughput change is **0%**, as intended for a combinational
+timing cut. Both controls are **duration-invalid**, not a CM/MHz score or full
+CoreMark acceptance. Native children are reaped; 69,674 source pins and the
+closed owner are independently rechecked, with no OOM.
+
+The immutable FPGA export is `system-read-ack-fpga-r1`; manifest SHA-256
+`6ab025121f1f06b1d42f3b277f40349035b5a278ca85ac41ca11d27487c5ecb2`.
+It has 192 payloads, 170 common compiled HDL files and the same 159 hardware
+defines. The only payload changes are the nine processor files above: keyboard
+retry, retained 8042 and posted mouse wrapper remain byte-identical to the
+parent. The independent source audit rechecks 71,174 pins. Frozen CPU lint
+passes all six structural-error classes in 3.979 seconds; this is not full-SoC
+lint or full-wrapper qualification. Fifteen additional integration/export/
+timing-controller host tests pass.
+
+The guarded synthesis unit is `ventium-system-read-ack-synth-oct16-r1.service`,
+invocation `5650ceca536a4cfa83efc0d29be671ef`. Its one-shot observer is
+`ventium-system-read-ack-timing-chain-oct16-r1.service`, invocation
+`8065b90e615f4b7ca63e6d7ae4828e25`. The observer audits native closure and only
+then launches read-only timing reports; it cannot retry synthesis or start
+implementation/deployment. Evidence directories are
+`system-read-ack-synthesis-r1` and `system-read-ack-clock-r1`.
+
+This compares against the **immediate RAW/input parent**, not the faster older
+boundary-only model: same Default logic-only mapper and 40/100 MHz clocks,
+parent DCP `2af6ae8a36eb11fd122f9519b4c2400f66603694f21ce08387fce06a30a2db60`.
+Process ownership, exclusive Vivado launch, 8 GiB synthesis RAM / 6 GiB swap
+caps, 45-minute bound, measured-growth disk admission and 4 GiB stop floor are
+unchanged. The read-only clock audit keeps its 8/4 GiB caps and 15-minute bound.
+
 ## Limits and next work
 
-No frequency or IPC gain is claimed for this cut. First integrate the exact
-nine-file delta into a matching full-PC/frozen FPGA source closure, retain the
-input-device repairs, and run matched synthesis/timing. Do not inherit the
-parent's timing or board result. Routing to ≥40 MHz, repairing canonical gates,
+No frequency or IPC gain is claimed for this cut. Finish and independently
+audit the matched synthesis/timing; do not inherit the parent's timing or board
+result. Routing to ≥40 MHz, repairing canonical gates,
 duration-valid CoreMark ≥2.1 CM/MHz, full standard-suite completion, and physical
 Win95 cold desktop/UI plus full Quake timedemo acceptance remain required.
 
