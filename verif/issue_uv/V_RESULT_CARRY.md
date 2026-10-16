@@ -8,9 +8,10 @@ memory ownership, commit gates, registers and cycle timing are unchanged.
 
 The preceding wait-cofactor candidate synthesized to **37.9507 MHz** at the
 unchanged 40 MHz constraint, with a worst path through U CF → V result → GPR.
-This cut targets that path. **This candidate has no synthesis/routing result
-yet**, and the parent's frequency must not be assigned to it. Equal cycles
-are expected: this is an Fmax experiment, not a claimed IPC improvement.
+This cut targets that path. The corrected-wrapper candidate's completed
+synthesis audit now estimates **34.6524 MHz unplaced**, below both the parent
+and the 40 MHz target; see the latest section below. There is no routed result.
+Equal cycles are expected: this is an Fmax experiment, not a claimed IPC improvement.
 
 ## Safety argument and scope
 
@@ -504,3 +505,41 @@ routed frequency remain pending; the last audited predecessor estimate is
 **37.9507 MHz unplaced**. The current cold Quake candidate is also still live
 and gameplay-unmeasured. Latest verified gameplay remains **0.48146083 U+V**
 on older model `7e877b3b…`, cycles **1,100,065,247–1,200,065,247**.
+
+## October 16: corrected-wrapper timing audit closed below target
+
+The preceding live timing status is superseded. Owner
+`ventium-posted-mouse-clock-oct16-r1`, invocation
+`14a67035bb154378890aa2df53642efc`, closed native 0 / MainPID 0. The independent
+audit passes **19,508 input pins**, source/DCP identity and actual 40/100 MHz
+constraints. Runtime was 462.132 s; native scope peak 4,455,170,048 bytes,
+zero swap and no OOM. Evidence: `posted-mouse-clock-r1/{audit.json,
+core_setup_unplaced_estimate.rpt}` under the same scratch root.
+
+| Synthesized, unplaced estimate | Pipe-wait predecessor | Corrected-wrapper candidate |
+|---|---:|---:|
+| Core fmax | 37.9507 MHz | **34.6524 MHz** |
+| Setup slack at 40 MHz | −1.350 ns | **−3.858 ns** |
+
+The candidate's worst hold estimate is −0.101 ns. These are synthesized
+estimates, **not routed sign-off or measured board frequency**. Audit success
+means the report is authentic and structurally checked, not that timing passes.
+No implementation, programming or timing waiver followed. The comparison
+includes V-result, AUX and mouse integration changes, so it does not isolate
+the V-result cut's contribution.
+
+The worst setup path is `q_pc[0]` to GPR 4 bits 16–31: 97 logic levels,
+28.647 ns data delay (6.011 logic + 22.636 estimated routing). It traverses
+instruction-byte/prefix decode, fetch demand/fragment shaping, address-route
+admission, paired-store readiness, backing ACK, paired retirement and register
+writeback. The next investigation is this combinational request/readiness/
+response coupling. It must preserve precise ownership, store ordering and
+UV-fast throughput; a globally delayed ACK or disabled pairing is not a fix.
+The aligned paired-write comparison is already adder-free in this frozen
+source, so replacing an obsolete address adder would not address this result.
+
+Current candidate `b6b92dbf…` continues its independent cold Quake run and is
+still gameplay-unmeasured. Latest verified older baseline remains
+**0.48146083 total U+V IPC**, `7e877b3b…`, cycles
+**1,100,065,247–1,200,065,247**. Canonical gates, the full standard suite,
+40 MHz routed qualification and physical FPGA acceptance remain open.
