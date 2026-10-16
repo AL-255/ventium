@@ -2,7 +2,8 @@
 
 Status, 2026-10-16: **isolated RTL derivative implemented; native cache/AXI,
 directed whole-core and private-reference functional checks pass. Canonical
-`make verify` remains FAIL. Matched synthesis is running; no timing,
+`make verify` remains FAIL. Matched synthesis is closed; its clock audit is
+running. No timing,
 standard-suite or FPGA acceptance.**
 The production checkout and deployed bitstream have not changed.
 
@@ -85,6 +86,37 @@ Candidate master SHA-256:
 `3a910d67790368c28856bf9ec9e906da35fd2bf2955386bd2408d146f1cbb067`.
 Candidate wrapper SHA-256:
 `f1c73668e97cf3f80654fbd7365db6559dcc14c506c3b9e3bf3885e833795be5`.
+
+### Additional all-address binary model check
+
+[`prove_parallel_write_admission.py`](prove_parallel_write_admission.py) adds
+a hand-encoded bit-vector model of old/new enqueue, ACK and paired ACK.
+Both quad profiles return **UNSAT for any output difference**, with arbitrary
+32-bit U/V addresses and address masks, independent four-bit strobes, all
+two-bit queue counts and binary request/error/release controls. There is no
+live-credit or reachable-address assumption. Enqueue non-vacuity is SAT in
+both profiles.
+
+Three intentionally broken address checks—omit write spill, broaden the BIOS
+shadow by one byte, and omit V alias protection—each produce SAT witnesses in
+both profiles. All **six witnesses** are then replayed through the actual
+source-extracted expressions: the unchanged candidate agrees with the parent,
+and the corresponding mutant disagrees. Thus **12 native witness checks**
+pass. Complete parent/candidate files must reproduce the pinned two-file
+recipe; the frozen synthesis input is not edited.
+
+This is an **explicit mathematical-model proof plus native source witnesses**,
+not a compiled-RTL formal proof, sequential cache proof or unrestricted X/Z
+equivalence claim. The complete-cache, system and functional tests above remain
+necessary. Four host tests cover unconstrained scope, source drift, mutant
+construction and incomplete/duplicate counterexample rejection.
+
+Owner `ventium-parallel-write-symbolic-oct16-r1.service`, invocation
+`ef44df6f4846459baedf046f1482fd90`, closes exit 0 / MainPID 0 in **0.189 seconds**,
+42,946,560-byte memory peak, no OOM. This small Z3/Icarus job uses inherited
+CPU18–19 affinity and does not launch Vivado or Verilator. Evidence:
+`parallel-write-symbolic-r1/closed.json`, SHA-256
+`fe9db905a9a9713f21a8716c116b79e9efad19d13c659f5daca4783f69ae8a68`.
 
 ## Whole-core evidence
 
@@ -239,7 +271,7 @@ The synthesis controller starts **2026-10-16 16:05:03 UTC**, owner
 `c4c6454beb5c45f0b4e816565c63cf7e`. Native CAD is admitted at **16:05:36 UTC**
 to the sole `ventium-vivado.scope`, invocation
 `f1c726e7f0544b01a381506c93c0d711`; the observed caps are 8/6 GiB and 48 tasks.
-This is **running, not a timing result**. No Chrome process was present.
+No Chrome process was present. Native closure is recorded below.
 
 The [one-shot observer](../../fpga/run_parallel_write_timing_sequence.py), owner
 `ventium-parallel-write-timing-chain-oct16-r1.service`, invocation
@@ -258,6 +290,31 @@ It exposed a different prime/descriptor/LRU path and regressed unplaced
 frequency. Do not repeat that experiment or infer that removing a source-level
 dependency guarantees 40 MHz. Inspect this run's mapped path before choosing
 any further change.
+
+### Closed synthesis; clock audit still pending
+
+Synthesis closes native exit 0 in **1,102.922 seconds (18m 23s)**, with all
+input pins unchanged. The independent audit rechecks **72,970 pins**, the two
+intended source changes, 159 definitions and unchanged mapper/clocks. There
+is no OOM, resource stop or controller failure; peak scope RAM/swap is
+7,991,189,504 / 1,887,752,192 bytes. The original critical warning and 1,537
+warnings are retained, not represented as clean full-SoC lint.
+
+| Synthesized resource | RAW/input parent | Candidate | Change |
+|---|---:|---:|---:|
+| CLB LUTs | 187,185 | 187,252 | +67 (+0.036%) |
+| Registers | 54,760 | 54,741 | −19 |
+| BRAM tiles | 277.5 | 277.5 | 0 |
+| DSPs | 47 | 47 | 0 |
+
+Checkpoint SHA-256:
+`db7f4cbfb804e8d93871cf8ccb8951d24de78d32aa8cc0d9bf2ccaf91b5bea03`.
+Area alone does not establish timing improvement. The read-only clock owner
+`ventium-parallel-write-clock-oct16-r1.service`, invocation
+`dda9b7b2080449e08433e288ef668496`, starts at **16:24:09 UTC**, after the synthesis
+audit passes. Its native scope invocation is
+`055f12d6621b42e8aba274119bd7065d`; observed limits are 8 GiB RAM / 4 GiB swap /
+48 tasks. **Frequency is not yet known; no route or deployment has started.**
 
 ## All nine failed cycle kernels: complete clock accounting
 
