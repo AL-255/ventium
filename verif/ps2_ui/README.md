@@ -8,6 +8,72 @@ New investigation: [latched AUX byte ownership](AUX_STATUS.md), a separate
 one-line status repair and actual-iobus mixed keyboard/mouse microgate. Its
 qualification status is tracked separately from the October 2 loss witnesses.
 
+## October 16: current-model live keyboard adapter (not UI acceptance)
+
+`prepare_pc_live_input.py` now prepares a **host-only** derivative of the frozen
+V-result full-PC host (`v-result-carry-soc-r1`, model `b6b92dbf…`). It does not
+edit that model, the checkout's dirty `sim_ven.cpp`, RTL, defines, the running
+synthesis inputs, guest software or snapshots. The prepared main has a unique
+basename to avoid accidental VPATH object reuse. No new full-PC executable has
+been linked or run yet.
+
+The optional `--ui-fifo /absolute/private-directory/input.fifo` endpoint reuses
+the previously tested LF-framed commands: `1 key ctrl+esc`, `2 key enter`,
+`3 capture`. The directory must already be owned mode 0700; the FIFO is owned
+mode 0600. IDs increase monotonically. Legacy `--kb*`, save/restore/snapshot
+and debugger-breakpoint options are rejected when live input is enabled.
+Keyboard transport runs at ordinary PS/2 timing derived from the configured
+clock (half-period 1,667 core clocks at 40 MHz), not the legacy 24-clock sender.
+
+`pc_keyboard_input.h` drives only the external keyboard pins. It observes
+the real 8042/FIFO before and after **every** ordinary clock edge, including
+PS-service ticks, without adding evaluations or clocks. AUTOACK/reply
+arbitration, actual FIFO write-index movement, stored bytes, reset and break-
+prefix ownership are checked. Optimized-away timeout/data expressions are
+reconstructed from the exact pinned controller expressions; acceptance also
+requires independent post-edge FIFO evidence. Input loss is an error, not
+silent acceptance or speculative retry. FIFO delivery is **not** UI success.
+
+Capture uses the original raw pixel conversion unchanged. It checks buffered
+write/final-close failures, creates command captures exclusively, and caps
+them at 64. It neither changes colors nor overwrites earlier captures. A
+completed raw file is not evidence that the guest responded to an input.
+
+Actual limited checks on October 16:
+
+- Five Python source-integration tests pass, including exact input hashes,
+  unchanged pixel loops/evaluation counts and rejection of changed anchors.
+- The native binding unit test passes 32,768 mux cases and nine negative
+  controls. Its observations are synthetic **host tests, not RTL execution**.
+- The existing native protocol/endpoint tests print `UI-HOST-MICRO-OK`.
+- The entire generated main passes C++ syntax checking against the actual
+  current model's generated headers, including its hierarchy bindings.
+
+Evidence preparation: `external/tmp/ventium-fprem-sequence.iSZ9BAj4/pc-live-input-host-r1/`.
+Generated main SHA-256:
+`96f237afb4b51a19a7cc28f78132e9d12af72d924d6ff6eb19bfbdb185879db2`.
+Successful bounded host-check owner:
+`ventium-pc-live-input-host-oct16-r3`, invocation
+`a213959852aa4b5ea40251422e9a5ddf`, native exit 0, 00:17:46–00:17:50 UTC,
+184,983,552-byte memory peak, zero swap, actual child affinity CPUs 12–13.
+The shell's ordered `-e` command chain includes both compilations/executions
+and the final syntax check. Results were observed in the tool transcript;
+this small check did not create a separate native log file. R1 and R2 failed
+before compilation (systemd dollar expansion, then an absent user-manager
+`rg` PATH entry); they are not passes. The successful exited unit was then
+stopped to release its waiting `systemd-run --wait` client, not to kill a test.
+
+Remaining: real-controller adapter integration tests, a private full-PC link,
+UI-disabled architectural/cycle comparison, cold boot with the endpoint,
+keyboard-driven visible UI changes, and general mouse motion/button input.
+The inherited `--mouse` device remains unchanged and is **not** qualified by
+these keyboard checks. Do not launch another long Win95 run or count this as
+standard-suite/physical-FPGA acceptance until the input path is qualified.
+
+No IPC gain is claimed. The current candidate is gameplay-unmeasured; the
+older verified baseline remains **0.50520554 total U+V** on model `c7b95b78…`,
+cycles **5,600,065,237–5,700,065,237**.
+
 The pure-host test checks bounded command parsing, scancodes/parity, endpoint
 identity, byte/prefix ownership and checked raw-capture finalization. The narrow
 RTL test instantiates unchanged production `ps2.v` and `simple_fifo.v` with
