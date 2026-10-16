@@ -90,6 +90,20 @@ no clock change or CoreMark execution occurred. Do not relax the posted-drain
 guard or count that older image as the new candidate. Use the matching new
 posted-DDR image after implementation closes, first at 40 MHz.
 
+Implementation audit note at 17:07 UTC: the native worker is still active in
+post-placement timing optimization. The original launch controller pins two
+additional copied **metadata** files byte-for-byte, so its closing stability
+assertion is expected to reject Vivado's normal project relocation updates:
+`cache/wt/project.wpc` increments the batch-open counter from two to three;
+`runs/synth_1/gen_run.xml` rebases paths and changes report-index entries.
+A read-only comparison resolves all **176 source paths and their attributes
+identically**; the completed synthesis DCP and other cloned files remain
+unchanged, except the expected `.xpr` project metadata. The live controller and
+its original pins have not been edited. After native closure, retain its exact
+verdict and independently audit these explicit metadata changes, route/DRC,
+clock and output hashes before deployment; do not infer a native route failure
+or a pass solely from that wrapper exit code.
+
 This follows the rejected [qualified-credit experiment](QUALIFIED_PAIR_CREDIT.md):
 35.295779 MHz synthesized/unplaced versus its RAW/input parent's 35.374438 MHz.
 Neither result qualifies 40 MHz, and neither is routed fmax.
