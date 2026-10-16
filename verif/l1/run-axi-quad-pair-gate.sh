@@ -25,4 +25,9 @@ fi
     "$ROOT/rtl/mem/ven_axi_master.sv" "$ROOT/verif/l1/tb_axi_quad_pair.sv" \
     > "$OBJ/build.log" 2>&1 || { tail -50 "$OBJ/build.log"; exit 1; }
 OUT="$("$OBJ/tb_axi_quad_pair" 2>&1)" || { echo "$OUT"; exit 1; }
+if grep -Eq '%Fatal|%Error|(^|[[:space:]])FAIL([[:space:]:]|$)' <<<"$OUT"; then
+    echo "$OUT"
+    echo "AXI-QUAD-PAIR-GATE-FAIL (native diagnostics)"
+    exit 1
+fi
 echo "$OUT" | grep "$marker"

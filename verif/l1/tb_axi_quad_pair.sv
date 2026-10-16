@@ -106,6 +106,8 @@ module tb_axi_quad_pair;
     end
   end
   initial begin
+    bit completed;
+    completed = 0;
     repeat (4) @(negedge clk);
     rst_n = 1;
     @(negedge clk);
@@ -129,7 +131,7 @@ module tb_axi_quad_pair;
       $fatal(1, "non-quad pair consumed one free buffer");
     $display("AXI-QUAD-SPLIT-GATE-OK");
     $finish;
-`endif
+`else
     if (!m_pair_ready || !m_pair_ack || !m_ack)
       $fatal(1, "fused pair must fit free quadword buffer");
     @(negedge clk);
@@ -143,17 +145,21 @@ module tb_axi_quad_pair;
         if (!bus_err || m_ack || ar_seen != 0)
           $fatal(1, "errored fused B lost its terminal containment");
         $display("AXI-QUAD-PAIR-ERROR-GATE-OK aw=%0d w=%0d b=%0d", aw_seen, w_seen, b_seen);
-        $finish;
+        completed = 1;
+        break;
       end
 `else
       if (m_ack) begin
         if (m_rdata != 32'h2222_2222 || bus_err || ar_seen != 1 || b_seen != 2)
           $fatal(1, "read/final accounting mismatch");
         $display("AXI-QUAD-PAIR-GATE-OK aw=%0d w=%0d b=%0d", aw_seen, w_seen, b_seen);
-        $finish;
+        completed = 1;
+        break;
       end
 `endif
     end
-    $fatal(1, "timeout");
+    if (!completed) $fatal(1, "timeout");
+    $finish;
+`endif
   end
 endmodule
