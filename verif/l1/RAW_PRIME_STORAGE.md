@@ -382,7 +382,7 @@ contract with actual AXI request/response timing; do not simply widen bands
 or discard startup. The full-PC DDR model's first-beat/gap settings and physical
 board latency are separate measurements, not this stress model's parameters.
 
-## Matching cold Win95 simulation launched; acceptance pending
+## Matching cold Win95 simulation; closed desktop review pending
 
 [`prepare_raw_prime_storage_win95.py`](../../fpga/prepare_raw_prime_storage_win95.py)
 now prepares the established cold Win95 controller for PC model `e9159acb…`.
@@ -427,15 +427,56 @@ runtime pins**, live native identity/affinity and zero OOM events. Expectation
 SHA256: `cee5930399a6bf2e35d8896e5211d3efb54c195a8e5624cd8f715517e3dba549`.
 Evidence: `raw-prime-storage-win95-{expectation,admission-audit}.json` and
 `raw-prime-storage-soc-r1/win95-cold-raw-prime-storage-oct16.1`.
-**No Win95 PASS or closed desktop evidence exists yet.** Actual V-retirement
-samples are still required as the run advances. The short CoreMark/input
-controls remain preparation evidence, not standard-suite acceptance. Running
-this functional input/boot check does not promote the timing-regressed image.
+At admission, no closed desktop evidence existed; closure is recorded below.
+The short CoreMark/input controls remain preparation evidence, not
+standard-suite acceptance. Running this functional input/boot check does not
+promote the timing-regressed image.
 
-Latest verified gameplay baseline is **0.50229051 total U+V IPC**, model
+The gameplay baseline at admission was **0.50229051 total U+V IPC**, model
 `b6b92dbfde2c6148fde30b5c65cac8217f650f7bbc1a7d4c0bd58fe95f706c9e`, cycles
 **1,400,065,247–1,500,065,247**. This is 38,787,572 U plus 11,441,479 V
 retirements; U-only IPC is 0.38787572. It predates this candidate, which has
 **no gameplay measurement**. Evidence is the independently checked
 `v-result-carry-gameplay-window-1400-1500M-oct16-r1.json`; it is not timedemo
 completion or physical-board acceptance.
+
+### October 16: desktop captured, native run closed normally
+
+The last raw capture, `frame_00005.ppm`, shows the Welcome window, readable
+text, desktop icons and taskbar, with no visible error in the agent's review.
+The two final published captures are byte-identical. The run was then closed
+through its existing **host-only graceful stop request**, not by killing the
+simulator or modifying guest state. No new simulation was launched.
+
+At **1,015,115,499 cycles**, the simulator exits 0; the controller waits for it,
+confirms the process group is absent, closes its held log, rechecks its source
+and immutable input pins, and inventories all six published raw frames. The
+same service invocation closes exit 0 / MainPID 0. `result.json` records
+`CLOSED_UNQUALIFIED`, no terminal error, no collection errors, unchanged input
+pins and no timeout/disk-stop reason. Its SHA-256 is
+`f7736437fab8d5356ab8769a350522d4fa5961c2f7166d370012f8772ce2e9a7`.
+
+Final counters: **215,063,707 total architectural retirements**, comprising
+184,467,768 U and **30,595,939 V**. These are cold-boot execution counters,
+not gameplay IPC or UI-interaction evidence. Repeated `FCB2:2FF7` #UD debug
+prints are the previously documented ROM callback trap, not by themselves
+proof of a crash; see [the earlier investigation](../../docs/WIN95_BITSTRING_FIX_2026-09-30.md).
+
+Raw desktop witness SHA-256:
+`0589d29b72d19308e5eb7eb4d62d0c96348cf6eb949d96c236f5d6a202f5f36c`.
+The adjacent `frame_00005-review.png` is a lossless preview: decoded RGB hashes
+match (`4403f8b271a2ade70021f8500366baec2dc0858d386c772ed7ce1dd351d626f7`).
+The closed raw file, not that preview, is the acceptance witness.
+
+**Human visual confirmation has been requested and is pending.** No manual
+review receipt or checker PASS has been fabricated. Keyboard/mouse interaction
+was not exercised. This is the RAW/input parent PC model `e9159acb…`, not the
+new parallel-write-admission model; no current-candidate or physical FPGA
+acceptance follows from this capture. Both existing Quake simulations remain
+running separately.
+
+Current verified simulation gameplay baseline is **0.497040387 total U+V IPC**,
+model `b6b92dbfde2c6148fde30b5c65cac8217f650f7bbc1a7d4c0bd58fe95f706c9e`,
+cycles **1,100,065,247–2,100,065,247** (U 384,240,079; V 112,800,308).
+It predates RAW/input and parallel-admission; neither has a gameplay
+measurement. This broader window is not FPGA IPC or a completed timedemo.
