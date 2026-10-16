@@ -3,7 +3,8 @@
 Status: **isolated proposal, not production RTL or an accepted processor fix**.
 Native admission-equation, full-cache/AXI A/B, selected fault regressions,
 actual same-clock no-L2 wrapper and directed whole-core system checks pass.
-The isolated processor builds; canonical verification **fails**.
+The isolated processor and full-PC derivative build; canonical verification
+**fails**. Fresh qualified-private-reference comparisons pass separately.
 Timing, gameplay, the standard suite and FPGA acceptance are unmeasured.
 No new Vivado run or deployment was launched for this proposal.
 
@@ -226,10 +227,9 @@ MainPID 0, **398.806 seconds**. It uses the existing canonical oracle,
 fresh private work/cache directories and both explicit AXI backend flags.
 The result is **7 functional PASS / 101 FAIL**, with the same per-program
 verdict inventory as the parent. All **20 complete cycle RTL traces** are
-parent-identical; the nine failing cycle-band cases remain failing. This is
-not proof that every functional difference is benign: fresh QEMU invocations
-have different initial state, and full same-input functional replay is still
-needed. No oracle, tolerance, flag mask or expected result was changed.
+parent-identical; the nine failing cycle-band cases remain failing. Separate
+same-input replay and qualified-reference checks are recorded below. No oracle,
+tolerance, flag mask or expected result was changed in the canonical run.
 
 `qualified-pair-credit-core-audit-r1.json` independently reconstructs the full
 directed system comparisons and all 20 canonical cycle comparisons, rechecks
@@ -237,6 +237,112 @@ directed system comparisons and all 20 canonical cycle comparisons, rechecks
 explicitly retains `canonical_gate_passed=false`, `standard_suite=false` and
 `hardware_acceptance=false`. Parent equality does not waive the red gate, and
 the directed system result is not a substitute for a standard-suite pass.
+
+### Same-input functional replay and fresh qualified reference
+
+`qualified-pair-credit-failure-inventory-r1.json` classifies the unchanged
+canonical failures: **90 length-only failures, 11 failures with field
+differences, 101 length mismatch reports**. Comparing independently started
+parent/candidate runs directly gives only one fully identical RTL stream:
+their QEMU-established initial stacks differ. No ESP masking or trace
+normalization is used to turn that into equality.
+
+`qualified-pair-credit-replay-r1` instead reruns the actual parent using each
+candidate run's flattened image and loader-established initial ESP. All
+**108 complete streams / 80,800 records match exactly**, including clocks,
+in **55.979 seconds**, with 32 bounded workers and actual wait/reaping. Owner
+`ventium-qualified-pair-replay-oct16-r1.service`, invocation
+`2c070ff455414eea8b1501e24cf0c04c`, is closed with MainPID 0 / exit 0. The PC
+transfer independently rereads every full trace; equality does not waive the
+canonical verdict.
+
+`qualified-pair-credit-func-r1` freshly regenerates all reference traces using
+the previously independently qualified QEMU
+`998b4f5d3eda4493f391ea6775adcc88f3dd810ba2829f7d635cac27877f9b85`
+and its explicit terminal-state observer. All **108 programs / 80,800 records**
+pass the unchanged manifest comparison policy, with **30,132 V retirements**,
+in **107.843 seconds**. Owner `ventium-qualified-pair-func-oct16-r1.service`,
+invocation `7ff491629b654336aac024ac9a4672cf`, is closed, exit 0 / MainPID 0;
+peak RAM is 152,768,512 bytes, OOM counters zero. QEMU and RTL child affinities
+are observed on CPUs4–7, not inferred from a service property.
+
+The independent `audit.json` rechecks **12,528 input pins**, every full
+comparison, complete executable-image equality and native owner. Removing
+all optional comparison masks gives **105 passes**, with only the existing
+`tx_regform`, `tx_regform2` and `tx_stack` stack-fault differences failing.
+Neither the masks nor the original canonical reference is replaced. The
+qualified private result is not labelled a canonical or standard-suite pass.
+
+### Full-PC transfer and integration controls
+
+`qualified-pair-credit-soc-r1` transfers only the two tested memory files into
+the exact RAW/input parent. All **102 shared processor sources** match the
+directed model; all **157 full-PC definitions** are unchanged. The full P5
+caches, posted-16 transport, retained 8042, keyboard retry and mouse fixes
+remain. The unique private C++ harness object/header binding is verified.
+
+The native build closes in **25.859 seconds**, with model
+`03e347c7055cf24255b4527f446b7b9f293452da3e36b205fc910f413a81f961`.
+Owner `ventium-qualified-pair-soc-oct16-r1.service`, invocation
+`ee033f51c928486e8d765b9d4ab9bd54`, is closed exit 0 / MainPID 0. The inherited
+**98 full-SoC structural warnings are unchanged, not waived as clean**.
+
+Cold keyboard probes in `qualified-pair-credit-input-r1` both pass at 6.5M
+clocks, raw modes 0/1. Independent audit verifies the actual native executions,
+grades, ownership and **71,328 source pins**, with no OOM. Owner
+`ventium-qualified-pair-input-oct16-r1.service`, invocation
+`8ff5592ed42c44899394e37e21856a62`, is closed exit 0 / MainPID 0. This is input
+transport coverage, **not Windows UI or physical-board acceptance**.
+
+The two short CoreMark controls pass under
+`ventium-qualified-pair-cm10-oct16-r1.service`, invocation
+`f3fa6b9958944cd3aa310128c919b186`, now closed exit 0 / MainPID 0. They retain the original 10-iteration
+disks/CRCs, 40/40/80 MHz timebases, native CPU12/13 affinities and 600-second
+per-child limit. Independent audit rechecks **71,365 pins**, native completion
+and reaping, with no OOM. The performance seed produces CRCs
+`e9f5/e714/1fd7/8e3a/fcaf`, **4,771,298 clocks** and **1,055,307 V retirements**;
+validation produces `18f2/e3c1/0747/8d84/c64e`, **4,755,366 clocks** and
+**1,054,254 V retirements**. Both cycle counts equal the parent: **0% measured
+throughput change**. These short controls cannot establish a duration-valid
+CM/MHz score or full-seed correctness.
+
+### Sealed FPGA export and CPU lint
+
+`qualified-pair-credit-fpga-r1` seals **192 payloads**, including **170 shared
+compiled HDL sources**, against the tested PC. Only the two intended memory
+files differ from the RAW/input FPGA parent. All **159 hardware defines**,
+full P5 caches, posted transport, input fixes and 40 MHz core / 100 MHz PL
+clock configuration remain unchanged. Configuration is not a timing result.
+The manifest SHA-256 is
+`ad6b7c19643faf50a98d12d96d0edaa018716566d64bd0d498566156570b7964`.
+
+The export owner `ventium-qualified-pair-freeze-oct16-r1.service`, invocation
+`5fcc97bbf2ff479f91a9bdbc9002324f`, is closed exit 0 / MainPID 0. The separate
+source audit rechecks **72,857 pins** and all payload bytes under
+`ventium-qualified-pair-source-audit-oct16-r1.service`, invocation
+`29103035f46941d9854e64ff927d1376`, also closed successfully. Its receipt
+explicitly denies canonical, standard-suite and hardware acceptance.
+
+Strict **CPU** structural lint passes in **3.828 seconds**, retaining all 159
+defines and all six structural-error classes. Owner
+`ventium-qualified-pair-lint-oct16-r1.service`, invocation
+`d36f37842841477fb7d2289f700c9ac6`, is closed exit 0 / MainPID 0; input hashes
+remain stable. This is **not full-SoC lint**, whole-wrapper elaboration,
+synthesis, routed timing, or physical validation. No new Vivado run or board
+programming has occurred for this candidate.
+
+Closed RAW-parent and rejected ACK-parent compiler products were losslessly
+archived, byte-compared and removed from loose storage, recovering about
+**236 MiB** net. Their binaries, headers, sources, dependencies and evidence
+remain. Each directory has `compiler-archive.json` and the recovery command.
+Archive SHA-256 values are respectively
+`76280693fdc3bb4fd30f32f6f5e1b5a0701124e2b9078eec058f2ebe40608eeb`
+and `546122ed3978bafd1655076e4b149110dcb777d65dfc13c1f4b5ae24ff352ef8`.
+The closed candidate PC's 275 compiler products were likewise archived and
+byte-verified, recovering another **210 MiB** net. Archive SHA-256:
+`85fabca60f22e15ad353f6c71c9a627e1a29e3694485351d2b4fdcc04d08397b`.
+All binaries, generated headers/dependencies, source and acceptance evidence
+remain loose; its `compiler-archive.json` records exact members and restoration.
 
 ## Remaining gates
 
@@ -247,18 +353,19 @@ Before synthesizing or accepting the whole-core candidate:
    every paired fault scenario. Preserve the explicit generic-producer contract.
 2. Verify unpaired/CDC exclusion configurations separately; their exclusion is
    currently source-checked, not claimed as a new native CDC acceptance pass.
-3. Resolve the red canonical gate and complete same-input functional replay.
-   Its native closure and independent audit are complete; the two-file build
-   and directed system/fault comparisons pass, but existing canonical failures
-   remain failures, not newly waived passes.
+3. Resolve the red canonical gate. Same-input functional replay and the fresh
+   qualified-reference corpus now pass, as do the build and directed
+   system/fault comparisons. Existing canonical failures remain failures,
+   not newly waived passes.
 4. Only then measure matched synthesis/timing. This simplification may have
    little timing effect because the original ready-to-request path remains;
    **no MHz, area, CPI or IPC gain is claimed**.
 
 Full CoreMark correctness/scoring, Win95 desktop and UI, Quake timedemo and
 matching physical-FPGA validation remain mandatory before accepting a major
-core/cache change. The earlier ACK candidate's ongoing CoreMark runs do not
-qualify this different proposal.
+core/cache change. The earlier ACK candidate's two 900-iteration CoreMark runs
+timed out at their 60-minute caps without final CRCs; neither they nor this
+candidate's short CRC controls qualify the full suite.
 
 Last verified gameplay baseline: **0.497040387 total U+V IPC**, model
 `b6b92dbfde2c6148fde30b5c65cac8217f650f7bbc1a7d4c0bd58fe95f706c9e`, clocks
