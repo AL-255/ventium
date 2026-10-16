@@ -290,13 +290,46 @@ continuous full-FIFO input coverage, Windows desktop interaction, or physical
 FPGA acceptance. The source remains isolated from the active synthesis and
 both cold Quake runs.
 
+## Physical keyboard-command path with AUTOACK off
+
+`run_hosted_keyboard_transport.py` derives a separate copy of the existing
+wire test: select the keyboard pins/IRQ1, omit the AUX `D4` prefix, select raw
+keyboard bytes, and retain the explicit two-inhibit diagnostic deadline.
+Every data/parity/stop/IRQ/FIFO/abort/reset assertion remains; no controller or
+endpoint RTL changes. Both sources compile **without `VEN_KBD_AUTOACK`**:
+the real controller must shift every host command onto the physical RTL pins,
+and the endpoint must receive it and supply the serial ACK.
+
+Parent and combined candidate each pass **98 checks** across 3.125/40 MHz
+profiles, with 26 completed outgoing bytes and two explicit TX aborts per
+profile. This includes ten host commands, command replies and IBF clearing,
+full RX mailbox backpressure, malformed parity/stop metadata, host-command
+preemption and resets. A separately compiled endpoint with broken parity
+fails the independent wire-bit oracle as required. Two adapter/parser tests
+also pass. The exact adapter rejects source drift and reapplication.
+
+Evidence: `hosted-kbd-transport-r1`; owner
+`ventium-hosted-kbd-transport-oct16-r1`, invocation
+`1863918a87474532ac42642b37937cf2`, exited / MainPID 0. All three compiles pass;
+parent/candidate natives exit 0 and the required parity mutant exits 1.
+Elapsed **104.60 s**, peak **24,707,072 bytes**, no swap or OOM, CPUs 12–13.
+`audit_hosted_keyboard_transport.py` rechecks 18 pins, source transformation,
+compile flags, all logs/images, all 36 ordered command observations per source,
+native closure and retained owner. Its `audit.json` passes.
+
+Candidate first-command waits are **19,108 / 51,558 clocks**, versus parent
+10,942 / 43,392, at 3.125/40 MHz. The startup resync penalty remains explicit;
+it is not normalized away. This is simulated physical-pin command coverage,
+not a physical FPGA/keyboard pass, a generic pause/resume contract, or a change
+to the earlier original transport gate's failed result.
+
 ## Remaining acceptance work
 
-The broader interrupted-frame keyboard reset and physical keyboard transmit
-matrix still needs repeating on this exact combined source, including
-continuous/inhibition-boundary input. The resync device-model limitation in
-the proposal remains open. The real RTL mouse tests above do not prove a
-universal physical-keyboard abort/retry contract.
+The exact hosted-endpoint interrupted-reset and physical keyboard-command
+matrices now pass above. Continuous/inhibition-boundary input and alternative
+physical keyboard pause/resume policies remain unqualified. The resync
+device-model limitation in the proposal remains open; neither the keyboard
+nor mouse tests prove a universal physical-keyboard abort/retry contract.
 
 The existing `pc_keyboard_input.h` adapter still describes the **old** FIFO
 arbitration and must not qualify this candidate unchanged. The new explicit
