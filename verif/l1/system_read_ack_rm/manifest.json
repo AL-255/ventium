@@ -1,0 +1,16 @@
+{
+  "name": "system_read_ack_rm",
+  "kind": "system",
+  "src": "interrupt.S",
+  "linker": "interrupt.ld",
+  "image": "test.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 150,
+  "sys": true,
+  "description": "Cold real-mode nested INT 60/61 and IRET; real IVT and stack accesses, SP/GPR and carry restoration. No forced RTL state or snapshots."
+}

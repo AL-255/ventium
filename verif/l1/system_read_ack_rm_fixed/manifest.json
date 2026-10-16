@@ -1,0 +1,16 @@
+{
+  "name": "system_read_ack_rm_fixed",
+  "kind": "system",
+  "src": "interrupt.S",
+  "linker": "interrupt.ld",
+  "image": "test.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 150,
+  "sys": true,
+  "description": "Cold nested real-mode INT/IRET, with exported handler symbols. Prior failed-link fixture retained separately."
+}
