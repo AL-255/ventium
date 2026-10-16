@@ -381,3 +381,46 @@ Current-candidate gameplay IPC is still unmeasured. Older baseline remains
 **5,600,065,237–5,700,065,237**. Last valid predecessor estimate remains
 **37.9507 MHz unplaced**. Canonical, standard-suite, routed-frequency and
 physical-FPGA acceptance remain open; no new performance gain is claimed.
+
+## October 16: newer older-model gameplay observation and input-loss backport
+
+The running decode-bus Quake model now has a verified gameplay window:
+**0.48146083 total U+V IPC**, model
+`7e877b3b9e43c2867fa3adcd93419c9b9f5fbca30b1a1ef9acacada04539ec68`, cycles
+**1,100,065,247–1,200,065,247**. It retires 37,609,117 primary instructions
+and 10,536,966 secondary instructions in 100,000,000 actual core clocks.
+Primary-only IPC is **0.37609117**, not the architectural total.
+
+`fpga/audit_decode_bus_gameplay_window.py` verifies the live PID/start time,
+command, invocation, CPU-11 affinity, no-OOM state and **13,857 source/runtime/
+artifact pins**. It checks UV + fast-pipe defines, `cycle_mode=1`, cold reset,
+no snapshot/guest patch/STEP/breakpoint options and actual V retirements.
+All complete profiler records retain the original counter-consistency checks,
+including conservation of every clock through state residency.
+
+Frames 6 and 7 bracket those counter endpoints in the log and were visually
+checked: firing in a stone room with enemy/weapon/HUD, then a different stone
+corridor view with weapon/HUD. PNG conversion is pixel-identical to raw PPM;
+no color processing was applied. Evidence:
+`decode-bus-gameplay-window-oct16-r1.json` under the same scratch root.
+
+This is the **latest observed completed periodic window**, selected post hoc,
+not a predeclared A/B comparison or whole-timedemo average. The generic
+predeclared-window helper rejected this log's early sample spacing: sample 4
+arrives at 400,065,247, not 400,000,000. The pinned host reports in its outer
+loop while PS service can advance real DUT clocks, and sets its report origin
+to actual `main_time`. The dedicated audit retains that 65,247-clock startup
+delay explicitly, validates all actual counter deltas, and does not alter the
+generic helper, round timestamps, omit records or interpolate counters.
+
+This supersedes the older 0.50520554 number as the **latest verified gameplay
+observation**, but the windows/builds differ: their difference is not a
+measured gain or regression. Decode-bus predates the current V-result timing
+and peripheral candidates; **current-candidate gameplay remains unmeasured**.
+The Quake process is still running; this does not establish timedemo completion.
+
+Separately, the [current-AUX input-loss backport](../ps2_ui/LOSS_AUX_IOBUS.md)
+passes 16 actual-iobus cases against 16 required current-parent loss witnesses.
+It remains isolated from the live CAD source and needs the documented broader
+controller/host/full-PC/FPGA validation. At the last check, corrected-wrapper
+synthesis remained active with no OOM or swap; its clock audit had not started.
