@@ -99,8 +99,69 @@ these test-harness corrections. No failed attempt is counted as a pass.
 Four recipe/fixture/builder unit tests and three full-PC transfer guard tests
 pass. The [full-PC transfer builder](../../fpga/build_next_ready_soc.py)
 preserves all 102 shared processor/FP sources and the 157-definition posted-16
-PC profile; only the L1 cofactor may differ. Its current build/short CoreMark
-and later FPGA transfer/timing remain separate evidence, not acceptance.
+PC profile; only the L1 cofactor may differ.
+
+## Full-PC and FPGA transfer
+
+Full-PC model
+`5945191c453e113cab7e1c4e009ba768f45c39563b840064008608c94e82e72e`
+built in **23.31 seconds**, native exit0, inputs unchanged, with a private
+harness basename/local object/matching generated header. Parent model is
+`b32ab4b34482669c03ea57ce7be0dbd475623fa00b00c4c814fec976d75c86d2`.
+The 98 inherited full-PC structural warnings remain explicit debt, not lint
+acceptance. Owner `ventium-next-ready-soc-oct16-r1.service`, invocation
+`136e2e9cd1b44defbf13800436029456`.
+
+Both [short cold CoreMark seeds](../../fpga/run_next_ready_coremark.py) and their
+[independent audit](../../fpga/audit_next_ready_coremark.py) pass:
+
+| Ten-iteration seed | Parent / candidate ticks | Added clocks | Actual final V |
+|---|---:|---:|---:|
+| Performance | 4,771,298 / 4,771,298 | 0 | 1,055,307 |
+| Validation | 4,755,366 / 4,755,366 | 0 | 1,054,254 |
+
+All five data CRCs per seed match the independent reference. Native times:
+215.71 / 212.40 seconds, both exit0; actual CPU12 affinity, cold reset,
+`cycle_mode=1`, unchanged posted-16 transport/latencies and fast paired
+execution checked. No OOM; both native children reaped. Audit rechecks 24,135
+input pins. Owner `ventium-next-ready-cm10-oct16-r1.service`, invocation
+`67c5a2d66a6948a9aac759264fd25000`. Final U counts 3,409,917 / 3,405,870 include
+startup and are not gameplay measurements. Ratios 2.09587 / 2.10289 are
+**duration-invalid diagnostics**, not accepted CM/MHz scores or full-seed
+standard-suite passes. Incremental measured cycle gain/regression is **0%**.
+
+[Sealed export](../../fpga/freeze_next_ready_rk_candidate.py):
+`next-ready-fpga-r1/input-manifest.json`, SHA-256
+`2a7343b2d3f022ab891712c3cad0fb6b6f7f9460f05f60c1080a26e3c77c4982`.
+All 192 payloads / 170 common HDL files / 159 hardware definitions are checked
+against the measured boundary-stage parent. Only L1 readiness differs; the
+posted-DDR mouse wrapper and AUX fixes are retained. Later keyboard proposals
+are not silently mixed in. [Independent export checks](../../fpga/next_ready_evidence.py)
+recheck 25,340 input pins. Strict CPU-hierarchy lint passes in **3.83 seconds**
+with all six original structural warning classes treated as errors. Neither
+preprocessing nor this CPU-only lint qualifies the complete FPGA wrapper.
+
+The [matched timing preparation](../../fpga/prepare_next_ready_timing.py)
+generates controllers but launches nothing. Comparison DCP is the actual
+36.968577 MHz boundary-stage parent, SHA-256
+`cdfd1aebe93772078decc21741296b136908179f316b23393419e2971db5119c`.
+It retains the original 40/100 MHz constraints, mapper, one-Vivado-family
+launcher, 8 GiB RAM / 6 GiB swap limits, 13 GiB combined early stop and 4 GiB
+disk stop floor. Admission retains the earlier measured-growth reserve, not
+an unsupported prediction of this candidate's disk consumption. The
+[sequencer](../../fpga/run_next_ready_timing_sequence.py) can observe only one
+exact synthesis invocation and then run its read-only clock report; it cannot
+retry synthesis or start implementation/deployment. Resource-stop mutants and
+identity-only sequencer tests pass. Actual candidate timing remains unmeasured.
+
+After both short seeds and their audit closed, one synthesis was launched:
+`ventium-next-ready-synth-oct16-r1.service`, invocation
+`881fba3884214158a222ab511a4d4e13`. Its final result is pending; do not infer
+completion or a frequency gain from successful admission. No placement,
+routing, bitstream generation or board programming is authorized by this
+diagnostic controller. Fourteen transfer/CRC/export/CAD/sequencer tests pass;
+the earlier failed preparation attempt was a Python path-type error before
+controller generation or any Vivado launch, not a synthesis failure or pass.
 
 ## Still open
 
