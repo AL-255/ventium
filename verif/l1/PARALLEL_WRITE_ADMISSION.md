@@ -54,6 +54,42 @@ execution. The port's printed seconds remain calibrated to 40 MHz and cannot
 validate duration at higher clocks. No workload/RTL patch or saved state is
 used. Three host parser tests pass.
 
+Additional sweep tooling (prepared, not silicon-qualified):
+
+- `fpga/core_clock_variant.tcl` changes only `CLKOUT0_DIVIDE_F` in a completed
+  40 MHz routed checkpoint. It requires unchanged 100 MHz AXI / 1 GHz VCO,
+  native generated-clock agreement, legal routing and exact full-design
+  cell-placement/net-route comparisons before and after bitgen. It preserves
+  timing/DRC reports and does not weaken DRCs, add timing exceptions or rerun
+  synthesis/place/route. **24 real-Tcl mock cases pass**; native MMCM editing
+  has not yet run. Fractional divider steps follow
+  [AMD UG572](https://docs.amd.com/r/en-US/ug572-ultrascale-clocking/MMCM-Attributes).
+- `fpga/board-tools/ven_cold_clock.py --expected-mhz N` retains the original
+  40 MHz default and adds an explicit bounded experimental target; nine host
+  tests pass. It remains a held-reset clock observation, never a CPU pass.
+- `ven_coremark_clock_trial.py` bounds a cold board trial, retains raw TSC
+  console, passive video, U-only and total-U+V counters and native daemon
+  identity, and holds reset after evidence collection. Three posted-drain
+  helper tests pass. It never grades a stopped daemon as benchmark success.
+- `fpga/decode_coremark_screen.py` checks capture CRC/extent and matches exact
+  VGA ROM glyphs (including its 9-dot replacement table), with five host tests.
+  Unknown glyphs are rejected, not repaired heuristically. The ordinary DDR
+  B8000 aperture is not used as the live display. An old-image passive capture
+  decodes exactly except the blinking cursor; it is not a CoreMark result.
+
+Board preparation on boot `2861e4e8-cd4c-48cd-9f44-7f7d8a991ebb` rechecks the
+two-cell DT tuple and non-reusable `no-map` 256 MiB reservation at 0x60000000;
+unmasked root IOMEM excludes it from System RAM. Daemon/ROM hashes match the
+documented posted-safe inputs. Staging is
+`/dev/shm/ventium-coremark-clock-stage.o3iXxQgW`; host board evidence is
+`coremark-clock-board-r1`. Installed firmware is still **fe9f539d**, not this
+candidate. A proposed older-image 40 MHz harness control is **NOT RUN**:
+quiesce observes zero at posted-DDR capability selector 79 and refuses before
+programming or daemon launch. The old guest was held in reset by that attempt;
+no clock change or CoreMark execution occurred. Do not relax the posted-drain
+guard or count that older image as the new candidate. Use the matching new
+posted-DDR image after implementation closes, first at 40 MHz.
+
 This follows the rejected [qualified-credit experiment](QUALIFIED_PAIR_CREDIT.md):
 35.295779 MHz synthesized/unplaced versus its RAW/input parent's 35.374438 MHz.
 Neither result qualifies 40 MHz, and neither is routed fmax.
