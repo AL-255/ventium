@@ -33,6 +33,9 @@ proc get_nets {args} {
     set result {}; for {set i 0} {$i < 1000} {incr i} {lappend result net$i}; return $result
 }
 proc get_property {property object} {
+    if {$property in {REF_NAME LOC BEL ROUTE ROUTE_STATUS} && [llength $object] > 128} {
+        error "unbounded native property expansion"
+    }
     switch -- $property {
         PART {return xczu15eg-ffvb1156-2-i}
         TOP {return rk_ao486_bd_wrapper}

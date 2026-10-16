@@ -27,13 +27,27 @@ proc routed {} {
         if {[report_route_status -boolean_check $kind] ni $accepted} {error "route legality failed: $kind"}
     }
 }
-proc physical_state {} {
+proc physical_state {path} {
     set cells [lsort [get_cells -hierarchical -filter {IS_PRIMITIVE}]]
     set nets [lsort [get_nets -hierarchical]]
     if {[llength $cells] < 1000 || [llength $nets] < 1000} {error "unexpectedly small design"}
-    # Compare the full in-memory values, not lossy hashes or sample nets.
-    return [list $cells [get_property REF_NAME $cells] [get_property LOC $cells] \
-        [get_property BEL $cells] $nets [get_property ROUTE $nets] [get_property ROUTE_STATUS $nets]]
+    # Vivado's whole-design ROUTE property expansion consumed >11 GiB before
+    # the first edit. Bound each native query; retain EVERY value on disk and
+    # compare exact bytes, not lossy hashes or a sample of nets.
+    set stream [open $path {WRONLY CREAT EXCL}]
+    try {
+        foreach {kind objects properties} [list cells $cells {REF_NAME LOC BEL} nets $nets {ROUTE ROUTE_STATUS}] {
+            puts $stream [list $kind [llength $objects]]
+            for {set i 0} {$i < [llength $objects]} {incr i 128} {
+                set batch [lrange $objects $i [expr {$i+127}]]
+                puts $stream [list names $batch]
+                foreach property $properties {
+                    puts $stream [list $property [get_property $property $batch]]
+                }
+            }
+        }
+    } finally {close $stream}
+    puts "PHYSICAL_STATE_SAVED $path"
 }
 
 set_param general.maxThreads 1
@@ -48,8 +62,9 @@ if {[llength $mmcm] != 1} {error "expected exactly one MMCM"}
 foreach {property expected} {CLKFBOUT_MULT_F 10 DIVCLK_DIVIDE 1 CLKIN1_PERIOD 10 CLKOUT0_DIVIDE_F 25} {
     if {abs([get_property $property $mmcm]-$expected) > 0.000001} {error "wrong original MMCM $property"}
 }
-set before [physical_state]
 file mkdir $out
+set before [file join $out physical_before.txt]
+physical_state $before
 report_property $mmcm -file [file join $out mmcm_before.rpt]
 
 # The sole functional configuration edit. VCO and PS/AXI clock stay unchanged.
@@ -64,7 +79,9 @@ report_clocks -file [file join $out clocks.rpt]
 clock_period clk_pl_0 10.0
 clock_period mmcm_clk $divider
 routed
-if {[physical_state] ne $before} {error "placement/routing changed during clock edit"}
+set after [file join $out physical_after_edit.txt]
+physical_state $after
+if {[catch {exec cmp -- $before $after}]} {error "placement/routing changed during clock edit"}
 report_property $mmcm -file [file join $out mmcm_after.rpt]
 report_route_status -file [file join $out route_status.rpt]
 report_timing_summary -file [file join $out timing_summary.rpt]
@@ -75,7 +92,9 @@ write_bitstream -bin_file [file join $out core_clock_variant.bit]
 routed
 clock_period clk_pl_0 10.0
 clock_period mmcm_clk $divider
-if {[physical_state] ne $before} {error "placement/routing changed during bitgen"}
+set final [file join $out physical_after_bitgen.txt]
+physical_state $final
+if {[catch {exec cmp -- $before $final}]} {error "placement/routing changed during bitgen"}
 foreach suffix {dcp bit bin} {
     set artifact [file join $out core_clock_variant.$suffix]
     if {![file isfile $artifact] || [file size $artifact] <= 0} {error "missing native $suffix output"}

@@ -6,14 +6,62 @@ directed whole-core and private-reference functional checks pass. Canonical
 are closed: **35.879588 MHz unplaced**, versus 35.374438 MHz for the matched
 parent (**+1.428%**). Still below 40 MHz; no timing, standard-suite or FPGA
 acceptance.**
-The production checkout and deployed bitstream have not changed.
+The production RTL checkout has not changed. The frozen experimental derivative
+is now deployed for the user-requested clock sweep; see the physical results below.
 
 **User-directed next step (October 16): keep this RTL unchanged and measure
 the physical overclock limit.** This supersedes the earlier no-route direction
 below; it does not waive correctness or claim static timing closure. A single
 guarded place/route/bitstream run began at 16:43:50 UTC from the completed
-synthesis checkpoint, with no resynthesis or source/define changes. No
-experimental board-clock result exists yet.
+synthesis checkpoint, with no resynthesis or source/define changes. Both
+2,000-iteration CoreMark seeds now pass physically at measured **40.000 MHz**;
+the overclock boundary remains unmeasured.
+
+## Physical results (October 16, 21:00 UTC)
+
+Native implementation closes successfully in **7,136.58 seconds (1h59m)**,
+with all **223,765 routable nets routed**, no routing/DRC errors, peak RAM
+10,648,600,576 bytes, and no OOM. The original wrapper remains **FAIL** because
+of its metadata pins. `fpga/audit_parallel_write_implementation.py` independently
+checks all **73,282 input pins**, admits exactly the three explicitly explained
+project/cache/report-index metadata changes, and verifies native output hashes.
+Its receipt is `parallel-write-implementation-r1/independent-product-audit-r1.json`.
+This does not erase the wrapper failure or qualify the outstanding CPU gates.
+
+Core constraint is 40 MHz; AXI is 100 MHz. Routed setup WNS is **−9.841 ns**,
+hold WHS **+0.004 ns**, equivalent same-clock path estimate **28.701817 MHz**.
+The empirical experiment is explicitly user-authorized despite failed setup
+timing; it is not static sign-off. Raw programmed image SHA-256:
+`1d819e7cf898f35cd55a977f6ff0e892bc7a87d0a0e2149b7b08673f85c4a341`.
+Routed DCP: `c932cefb2909e0934c83d105fc8aaebc3e51beb0c2b899b43738462eb54d76a5`.
+
+| Physical trial | Measured MHz | Raw TSC ticks | Real seconds | CM/MHz | CRC result |
+|---|---:|---:|---:|---:|---|
+| 40 MHz performance seed | 39.999829 | 952,327,568 | 23.80829 | **2.100118** | All five match |
+| 40 MHz validation seed | 39.999819 | 949,311,372 | 23.73289 | 2.106790 | All five match |
+
+Each starts from a newly programmed image, checks the held-reset clock for five
+seconds, cold boots the unmodified benchmark, and runs normally in UV+fast mode.
+There is no STEP, breakpoint, saved state or guest patch during execution.
+Conservative V-retirement witnesses are **207,890,452 / 207,688,222** respectively;
+these are not U-only counters. Both retain exact ROM-glyph-decoded video,
+raw TSC endpoints, 211 passive counter samples, unchanged media/helper pins,
+terminal native owners, and verified guest-reset/posted-DDR drain after capture.
+The controller's intentional daemon SIGTERM follows captured `PORT-END`; it is
+not used as the benchmark's success marker. Independent host audit re-decodes
+the actual frame and matches every retained trial file to the board original.
+Receipts: `coremark-clock-board-r2/new40-{performance,validation}-audit-r1.json`.
+Board staging: `/dev/shm/ventium-coremark-clock-stage.O8VozfHM`.
+
+The first 70.175 MHz bitgen preparation was stopped deliberately with native
+exit 143 before any clock edit, at 11,915,931,648 bytes RAM and **zero OOM
+events**. A whole-design native ROUTE-property expansion was too expensive.
+The audit now streams all cell/net properties in batches of at most 128 and
+compares exact files; it does not reduce coverage. All 24 Tcl mock cases still
+pass, including a new bound assertion on native property queries. The sole
+retry `ventium-core-clock-70-oct16-r2.service` is active; no overclock pass is
+claimed yet. No synthesis, placement or routing is repeated for a frequency
+variant. The board is safely held reset between trials.
 
 ## Physical clock experiment preparation
 
@@ -26,8 +74,8 @@ owner `ventium-parallel-write-implementation-oct16-r1.service`, invocation
 `5520853d3c3d402995c4828400de51e0`. The successful prior bank64 controller's
 single-family, 20 GiB RAM / 8 GiB swap and six-hour bounds are retained.
 Disk admission remains 8 GiB; the live disk-stop floor is tightened to 4 GiB.
-Three preparation tests and 84 existing Tcl launcher tests pass. The run is
-still active, not a completed implementation or deployment.
+Three preparation tests and 84 existing Tcl launcher tests pass. This paragraph
+records the original preparation; closure and deployment are documented above.
 
 The intended sweep keeps PS/AXI at 100 MHz and the MMCM VCO at 1 GHz, varying
 only the core-output divider in copies of the routed design. No DRP interface
@@ -77,13 +125,14 @@ Additional sweep tooling (prepared, not silicon-qualified):
   B8000 aperture is not used as the live display. An old-image passive capture
   decodes exactly except the blinking cursor; it is not a CoreMark result.
 
-Board preparation on boot `2861e4e8-cd4c-48cd-9f44-7f7d8a991ebb` rechecks the
+Initial board preparation on boot `2861e4e8-cd4c-48cd-9f44-7f7d8a991ebb` rechecks the
 two-cell DT tuple and non-reusable `no-map` 256 MiB reservation at 0x60000000;
 unmasked root IOMEM excludes it from System RAM. Daemon/ROM hashes match the
 documented posted-safe inputs. Staging is
 `/dev/shm/ventium-coremark-clock-stage.o3iXxQgW`; host board evidence is
-`coremark-clock-board-r1`. Installed firmware is still **fe9f539d**, not this
-candidate. A proposed older-image 40 MHz harness control is **NOT RUN**:
+`coremark-clock-board-r1`. At that point installed firmware was **fe9f539d**,
+not this candidate (subsequently replaced as documented above). A proposed
+older-image 40 MHz harness control is **NOT RUN**:
 quiesce observes zero at posted-DDR capability selector 79 and refuses before
 programming or daemon launch. The old guest was held in reset by that attempt;
 no clock change or CoreMark execution occurred. Do not relax the posted-drain
