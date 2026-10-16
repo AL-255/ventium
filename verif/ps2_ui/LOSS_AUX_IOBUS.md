@@ -242,6 +242,54 @@ broader physical-device resynchronization contract. A text-mode capture being
 unavailable is explicitly **not** graphics or UI acceptance. Windows desktop
 interaction and mouse motion remain separate work.
 
+## Actual hosted endpoint: interrupted-frame reset matrix
+
+`tb_hosted_resync.sv` connects the **unchanged real `ven_ps2_device.sv`**
+directly to the combined 8042's wired-AND pins. Only the controller receives
+reset or self-test; the device never sees either operation. A software-like
+producer retries an interrupted byte only after the actual endpoint's
+`tx_aborted` event. The completed-idle control intentionally flushes the old
+byte and submits a new byte. This replaces neither device RTL nor guest state
+with a behavioral retry assumption.
+
+All **144 candidate cases pass**: keyboard/mouse × reset/self-test ×
+`CLK_HZ=3,125,000/40,000,000` × AUTOACK off/on × nine physical frame positions
+(start-low; data0-high; data3-low; data7-high; parity high/low; stop high/low;
+completed idle). Phase selection observes actual wire edges, not internal FSM
+state. The test checks explicit abort versus completion ownership, controller
+inhibition, self-test reply `55`, all eleven retry bits including parity, exact
+port-60 data and AUX ownership, no stale suffix/extra byte, and clear error/IRQ
+state. Three parser/matrix tests reject missing or duplicate evidence and
+arbitrary nonzero exits.
+
+All **16 unchanged-parent controls** reproduce the required missing-inhibit
+failure at start-low. Those failures are red witnesses, not correctness passes.
+Both frequencies are serial **cycle-count parameter profiles**; the TB's
+logical clock is fixed, so this does not measure a board clock or physical
+timing margin. Host-to-keyboard command transmission is not covered here.
+
+Evidence: `hosted-resync-r1` under the scratch root above; owner
+`ventium-hosted-resync-oct16-r1`, invocation
+`df9b26c54c084e7e9c574063e31ec68d`. All eight compiles exit 0; native matrix
+and owner exit 0 / MainPID 0. Runtime **171.14 s**, peak **22,028,288 bytes**,
+zero OOM, no swap, actual CPUs 12–13. The independent
+`audit_hosted_resync.py` rechecks all **13 source/tool pins**, all 160 logs,
+the exact eight compile profiles, every expected physical edge count, native
+waits/absent children and the terminal owner. Its full-matrix `audit.json`
+passes. No Verilator/Vivado build or live source modification was needed.
+
+The earlier 32-case smoke run also passed (18.78 s). Its first audit-parser
+attempt rejected Icarus's ordinary `$finish` metadata, not an RTL result; the
+auditor now explicitly validates that metadata's source path, line and positive
+timestamp rather than dropping arbitrary log lines. Full-run logs are retained
+unchanged. The original older transport deadline failure remains failed.
+
+This closes the tested reset/abort contract **for this hosted endpoint**. It
+does not establish a universal physical-keyboard pause/resume/retry contract,
+continuous full-FIFO input coverage, Windows desktop interaction, or physical
+FPGA acceptance. The source remains isolated from the active synthesis and
+both cold Quake runs.
+
 ## Remaining acceptance work
 
 The broader interrupted-frame keyboard reset and physical keyboard transmit
@@ -258,7 +306,7 @@ cycle comparison, cold Win95 interaction, the whole
 standard suite, full FPGA wrapper validation and matching physical-board runs
 remain required. No performance gain or completed repair is claimed.
 
-Latest verified gameplay observation is **0.48146083 total U+V IPC**, older
-decode-bus model `7e877b3b…`, cycles **1,100,065,247–1,200,065,247**. It contains
+Latest verified gameplay observation is **0.49046518 total U+V IPC**, older
+decode-bus model `7e877b3b…`, cycles **1,600,065,247–1,700,065,247**. It contains
 neither this peripheral backport nor the current V-result timing candidate.
 Both candidates remain gameplay-unmeasured.
