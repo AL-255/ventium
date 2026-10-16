@@ -2,7 +2,8 @@
 
 Status, 2026-10-16: **isolated RTL derivative implemented; native cache/AXI,
 directed whole-core and private-reference functional checks pass. Canonical
-`make verify` remains FAIL. No timing, standard-suite or FPGA acceptance.**
+`make verify` remains FAIL. Matched synthesis is running; no timing,
+standard-suite or FPGA acceptance.**
 The production checkout and deployed bitstream have not changed.
 
 This follows the rejected [qualified-credit experiment](QUALIFIED_PAIR_CREDIT.md):
@@ -258,6 +259,51 @@ frequency. Do not repeat that experiment or infer that removing a source-level
 dependency guarantees 40 MHz. Inspect this run's mapped path before choosing
 any further change.
 
+## All nine failed cycle kernels: complete clock accounting
+
+While CAD runs, the unchanged [loop-budget analyzer](../fe_pipe/analyze_loop_cycle_budget.py)
+regrades all nine failed kernels from this candidate's existing canonical run.
+Each explicit loop-entry address was checked against its actual ELF. Complete
+PC streams, all retirement records and all clocks remain in the comparison;
+independent native FSM totals must match. Seven analyzer tests pass. No new
+simulation, reference, band, mask or trace normalization is used.
+Evidence: `parallel-write-all-nine-cycle-budget-oct16-r1.json`.
+
+| Kernel | Total excess clocks | Before loop | First traversal | Repeated traversals | Final traversal + exit |
+|---|---:|---:|---:|---:|---:|
+| `mb_depadd` | 1,226 | 65 | 1,160 | 0 | 1 |
+| `mb_indepadd` | 1,226 | 65 | 1,160 | 0 | 1 |
+| `mb_faddchain` | 1,105 | 64 | 1,035 | 4 | 2 |
+| `mb_dmiss` | 116,843 | 76 | 53 | 116,611 | 103 |
+| `mb_imiss` | 122,615 | 65 | 24,522 | 73,566 | 24,462 |
+| `mb_mul` | 536 | 65 | 1 | 398 | 72 |
+| `mb_imul2` | 607 | 65 | 1 | 398 | 143 |
+| `mb_rmimm` | 268 | 65 | 62 | 0 | 141 |
+| `mb_nearbr` | 442 | 65 | 306 | 0 | 71 |
+
+This distinguishes two persistent differences from cold-only costs:
+
+- Every measured D-miss loop interval takes **67 clocks**; 2,045 corresponding
+  golden intervals take 10. The I-miss loop's four complete traversal deltas
+  are each **24,522 clocks**. The native harness applies `AXI_RLAT=7` before
+  **every** R beat, while the legacy oracle charges eight clocks per line miss.
+  These are different transport contracts, not evidence of a new admission
+  regression. They still fail the unchanged gate; full-PC/board latency cannot
+  be inferred from this stress backend.
+- Both multiply kernels have **399 one-clock-longer loop intervals**, including
+  398 warm intervals of **13 clocks versus 12**. `mb_mul` records 4,000 S_EXEC
+  clocks for 400 multiplies plus 400 non-simple S_PIPE handoffs; actual paired
+  issue remains present. This is consistent with an additional dispatch clock,
+  not solely a cold-cache explanation. The execution hold explicitly requires
+  ten EX clocks and excludes frontend work. Do not reduce that hold or change
+  the oracle merely to pass a band: qualify any decode/EX overlap with its
+  operand, event, exception and retirement ownership first.
+
+The independent-add, dependent-add, near-branch and immediate-ALU repeated
+intervals match the oracle exactly; the FP chain retains one extra four-clock
+interval. These directed observations are not gameplay IPC and do not waive
+any of the nine failures.
+
 ## Remaining gates
 
 1. Resolve the outstanding differential/reference and cycle-band qualification
@@ -270,8 +316,17 @@ any further change.
    and Win95 desktop/UI acceptance, including physical FPGA evidence on the
    exact candidate bitstream.
 
-The candidate has no gameplay measurement. Verified **simulation** baseline:
-**0.497040387 total U+V IPC**, binary
+The candidate has no gameplay measurement. Latest verified **simulation** baseline:
+**0.490014174 total U+V IPC**, binary
 `b6b92dbfde2c6148fde30b5c65cac8217f650f7bbc1a7d4c0bd58fe95f706c9e`,
-cycles **1,100,065,247–2,100,065,247**; U=384,240,079, V=112,800,308.
+cycles **1,100,065,247–3,100,065,247**; U=757,186,160, V=222,842,188;
+U-only IPC is **0.378593080**. The wider two-billion-clock observation includes
+all intermediate intervals; it does not indicate a source change from the
+previous shorter-window 0.497040387 result. The independent observation audit
+checks 18,622 source/runtime pins, live native identity/CPU14 affinity, actual
+UV-fast configuration, complete counter consistency and raw-pixel equality.
+Endpoint captures show distinct gameplay views with weapon/HUD, visually
+reviewed by the agent. Evidence:
+`v-result-carry-gameplay-window-1100-3100M-oct16-r1.json`. This is a post-hoc
+observation, not a predeclared candidate/control experiment.
 It predates this derivative and is not FPGA or full-timedemo acceptance.
