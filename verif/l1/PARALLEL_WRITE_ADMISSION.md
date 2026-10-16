@@ -231,6 +231,33 @@ All preparation evidence explicitly retains the failed canonical gate and
 unmeasured gameplay status. No placement, routing or deployment is authorized
 by these timing-only controllers.
 
+### Live measurement
+
+The synthesis controller starts **2026-10-16 16:05:03 UTC**, owner
+`ventium-parallel-write-synth-oct16-r1.service`, invocation
+`c4c6454beb5c45f0b4e816565c63cf7e`. Native CAD is admitted at **16:05:36 UTC**
+to the sole `ventium-vivado.scope`, invocation
+`f1c726e7f0544b01a381506c93c0d711`; the observed caps are 8/6 GiB and 48 tasks.
+This is **running, not a timing result**. No Chrome process was present.
+
+The [one-shot observer](../../fpga/run_parallel_write_timing_sequence.py), owner
+`ventium-parallel-write-timing-chain-oct16-r1.service`, invocation
+`aea3ac6347584238b664eae986cf0737`, watches only that synthesis invocation.
+After successful native closure and the independent source/DCP audit, it may
+run the already prepared read-only clock audit. It cannot retry synthesis,
+place, route or deploy. Four additional host tests pass. The only observation
+adaptation is recognizing this synthesis's systemd `Type=oneshot` phase
+(`activating/start`); native PID, exact invocation and successful terminal exit
+remain mandatory. The clock controller retains `Type=exec`.
+
+The parent path still includes the interior fetch-size mux. The exact size
+cofactor has **already been tested and rejected as a standalone timing
+improvement**: see [the prior result](../fe_pipe/SFETCH_INTERIOR_COFACTOR.md).
+It exposed a different prime/descriptor/LRU path and regressed unplaced
+frequency. Do not repeat that experiment or infer that removing a source-level
+dependency guarantees 40 MHz. Inspect this run's mapped path before choosing
+any further change.
+
 ## Remaining gates
 
 1. Resolve the outstanding differential/reference and cycle-band qualification
