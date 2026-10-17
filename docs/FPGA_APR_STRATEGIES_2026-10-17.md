@@ -2,12 +2,12 @@
 
 ## Scope and baseline
 
-The target remains **40 MHz core / 100 MHz AXI** (25 ns / 10 ns). No clock
-constraint is relaxed, no RTL is changed, and no new synthesis is performed.
-Experiments begin independently from the deployed programmable-clock image's
-existing routed netlist, not the dirty CPU checkout. The installed image and
-board state are untouched; these are implementation experiments, not new
-hardware acceptance results.
+The target remains **40 MHz core / 100 MHz AXI** (25 ns / 10 ns), with timing
+met after routing. **Every current trial starts from source and runs fresh
+synthesis and APR. No old checkpoint, netlist, project or IP synthesis cache is
+used.** This supersedes the earlier checkpoint experiments documented below.
+No clock constraint is relaxed. The installed image and board state are
+untouched; new physical implementations still require independent acceptance.
 
 Keep these quantities separate:
 
@@ -35,7 +35,75 @@ The [physical map analysis](FPGA_PHYSICAL_MAP_2026-10-17.md) motivates this tria
 the worst path has 89 logic levels and 74.7% routing delay; the local routing
 window peak reaches 90.37% despite much lower whole-chip routing utilization.
 
-## Selected experiments
+## Current fresh synthesis + APR trials
+
+| Trial | Timing-driven synthesis | Placement / physical optimization / routing | Status |
+|---|---|---|---|
+| `performance-r2` | `PerformanceOptimized`, rebuilt hierarchy | `ExtraNetDelay_high` / `AggressiveExplore` / `NoTimingRelaxation`; post-route `Explore` | Launched from a new source copy/project; no timing result yet |
+| `routability-spread` | `AlternateRoutability`, rebuilt hierarchy | `AltSpreadLogic_medium` / `Explore` / `AlternateCLBRouting`; post-route `Explore` | Prepared, not launched |
+
+The first combination targets the measured long logic/routing path. The second
+tests a routing-oriented mapping and spread placement, if the first result
+warrants it. These are explicit custom combinations, not claims of measured
+improvement or exact stock strategy presets. Synthesis timing optimization is
+enabled (no `-no_timing_driven`). Both retain the previously working
+`RuntimeOptimized` **opt_design** crash-avoidance directive; that is distinct
+from incremental implementation's negative-WNS target, which is not used here.
+
+The source closure is the deployed CPU/profile, not the dirty checkout:
+
+- Parent source: `ventium-fprem-sequence.iSZ9BAj4/programmable-clock-r3/source`.
+  All 200 source/metadata files match its pinned `prepared.json`, SHA256
+  `5308f8044f35b387e833e1b62a52ec7605bb3a5e157096d9327b638d4b659a54`.
+- Each trial makes a new source copy and overlays only the repaired full-width
+  `ven_pll_ctrl.sv` / `ven_programmable_clock.v`. The controller is byte-identical
+  to the deployed repair; the wrapper is checked against its exact narrowed
+  port adapter. No checkpoint is inspected or passed into the build.
+- CPU/cache RTL and all **159 defines** are preserved; the wrapper checks full
+  P5 cache geometry, `cycle_mode=1'b1`, pipelined FP and relocated fast-memory
+  defines. This source admission is not dynamic U/V execution evidence.
+- CPU sources in this freeze must not be described as current dirty-checkout RTL.
+
+[run_fresh_strategy.py](../fpga/run_fresh_strategy.py) and
+[fresh_strategy.tcl](../fpga/fresh_strategy.tcl) create a new project, disable
+IP caching before BD generation, clear incremental checkpoint properties, and
+override the legacy flow's synthesis/APR options immediately before launch.
+They retain native run properties, active source paths, exact invocation,
+source hashes, synthesis-clock evidence, stage timestamps and final reports.
+New checkpoints generated **within** a run are normal synthesis/APR outputs;
+they are never starting inputs for another strategy.
+
+Resource limits: one Vivado family/one native worker, **16 GiB RAM / 6 GiB swap**,
+21 GiB combined early stop, 4 GiB disk reserve, 2 GiB host RAM/swap reserve.
+Whole-run limit is eight hours; **implementation is bounded to 3 h 50 min**,
+including placement, optimization and routing. A timeout/resource stop is not
+a completed timing result. Four fresh-flow tests plus eleven timing/parser
+tests pass; these are tooling tests, not CPU or FPGA standard-suite acceptance.
+
+Current artifact root:
+`/home/yukidama/external/tmp/ventium-fresh-strategies-oct17.67YRDIRh/`.
+Current owner: `ventium-fresh-performance-oct17-r2.service`.
+Final timing and dynamic acceptance remain pending.
+
+`performance-r1` stopped before BD generation/synthesis in 20.09 seconds because
+the guard expected IP cache property `disabled`, whereas installed Vivado
+2025.2 returns `disable`. This was a host guard bug, not a synthesis failure.
+Inputs remained unchanged; peak charged RAM 751,202,304 bytes, no swap/OOM.
+The corrected guard accepts only the two disabled spellings. A separate native
+empty-project probe (`property-probe.log`) confirms `disable`, the incremental
+property names/disable readback, and all selected synthesis/implementation
+directives. r2 starts completely fresh, not from r1's empty project.
+
+Disk preparation removed **12 obsolete closed synthesis-only DCPs (2,145,782,725
+bytes)** from older Oct 11–14 experiments, retaining sources, logs, reports,
+accepted images and useful routed results. Exact paths/hashes are in
+`pruned-checkpoints.json` under the artifact root. There is no trash copy;
+recovery requires rebuilding the preserved sources.
+
+## Superseded checkpoint-only experiments — historical evidence
+
+**Do not launch these for the current objective.** They did not start from
+fresh synthesis and cannot satisfy the user's current requirement.
 
 Each strategy reopens the **same baseline**, rather than inheriting the previous
 strategy's modifications. Physical optimization can restructure/replicate cells;
@@ -43,9 +111,9 @@ strategy's modifications. Physical optimization can restructure/replicate cells;
 
 | Strategy | Operations | Whole native-run bound | Status |
 |---|---|---:|---|
-| `postroute-aggressive` | Explicit incremental `TimingClosure`, then `phys_opt_design -directive AggressiveExplore` | 1 hour | r3 running; no optimization result yet |
-| `postroute-replication` | Explicit incremental `TimingClosure`, then `phys_opt_design -directive AlternateReplication` | 1 hour | Prepared; not launched |
-| `replace-netdelay` | Unroute/unplace unlocked cells; `ExtraNetDelay_high` placement; `AggressiveExplore` physical optimization; `NoTimingRelaxation` routing | 3 h 50 min | Conditional follow-up; not launched |
+| `postroute-aggressive` | Explicit incremental `TimingClosure`, then `phys_opt_design -directive AggressiveExplore` | 1 hour | r3 canceled at 115.19 s when fresh-only scope became active |
+| `postroute-replication` | Explicit incremental `TimingClosure`, then `phys_opt_design -directive AlternateReplication` | 1 hour | Retired without launch |
+| `replace-netdelay` | Unroute/unplace unlocked cells; `ExtraNetDelay_high` placement; `AggressiveExplore` physical optimization; `NoTimingRelaxation` routing | 3 h 50 min | Retired without launch |
 
 The first two preserve the existing physical solution as their starting point.
 The third deliberately explores a new placement; it is **not** an incremental
@@ -83,15 +151,16 @@ The guard incorrectly demanded the textual representation `0.000`. This was a
 host/Tcl report-format bug, not a failed timing-closure strategy. The corrected
 guard compares finite numeric zero, rejects duplicate/missing/negative/nonzero
 targets, and is tested under both Python and real `tclsh`, including the actual
-native report. r3 also retains `timing-target.dcp` before the optimization step
-so a later report failure does not discard the completed setup work.
+native report. r3 was canceled before producing any result checkpoint, with
+unchanged inputs, peak charged RAM 3,545,952,256 bytes and no swap/OOM. It is a
+scope-change cancellation, not a measured strategy failure.
 
 The selected directives were checked against the installed Vivado 2025.2 manual.
 AMD documents post-route physical optimization and these directive alternatives:
 [phys_opt_design](https://docs.amd.com/r/2025.2-English/ug835-vivado-tcl-commands/phys_opt_design),
 [implementation strategy mapping](https://docs.amd.com/r/2025.2-English/ug904-vivado-implementation/Directives-Used-by-phys_opt_design-and-route_design-in-Implementation-Strategies).
 
-## Execution and validation
+### Historical execution and validation
 
 - [apr_trial.tcl](../fpga/apr_trial.tcl) checks the part/top, pinned checkpoint,
   25 ns / 10 ns clocks and M10/D1/O25 MMCM parameters before and after each trial.
