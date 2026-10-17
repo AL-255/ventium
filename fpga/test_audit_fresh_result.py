@@ -3,7 +3,8 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
-from audit_fresh_result import timing_summary, timing_coverage, route_and_drc, bus_skew, audit_closed, sha
+from audit_fresh_result import (timing_summary, timing_coverage, route_and_drc, bus_skew,
+    audit_closed, audit_input_pins, sha, CLOCK_ROLE_AMENDMENT, AMENDED_OWNER, AMENDED_SCOPE)
 from test_audit_fresh_strategy import SCRIPT, PROPS
 
 PASS = '''| Design Timing Summary
@@ -94,6 +95,35 @@ class ResultTests(unittest.TestCase):
                 (build/'stages.tsv').write_text('synth_1\t100\nimpl_1\t200\nroute_design\t300\ncomplete\t400\n')
                 source.write_text('changed source\n')
                 with self.assertRaises(ValueError): audit_closed(run)
+
+    def test_only_exact_reviewed_clock_reporting_delta_is_allowed(self):
+        with tempfile.TemporaryDirectory(prefix='report-amendment-test-') as td:
+            run = Path(td)
+            started = dict(invocation=AMENDED_OWNER,
+                           pins={p:v['before'] for p,v in CLOCK_ROLE_AMENDMENT.items()})
+            receipt = dict(files=CLOCK_ROLE_AMENDMENT, owner_invocation=AMENDED_OWNER,
+                           scope_invocation=AMENDED_SCOPE, rtl_changed=False, constraints_changed=False,
+                           synthesis_or_apr_options_changed=False, checkpoint_input_added=False, restart=False)
+            (run/'report-hook-amendment.json').write_text(json.dumps(receipt))
+            hashes = {p:v['after'] for p,v in CLOCK_ROLE_AMENDMENT.items()}
+            def fake_sha(path):
+                return hashes.get(str(path), 'receipt-digest')
+            with patch('audit_fresh_result.sha', side_effect=fake_sha):
+                result = audit_input_pins(run, started)
+                self.assertFalse(result['all_launch_inputs_unchanged'])
+                self.assertTrue(result['all_nonreport_inputs_unchanged'])
+                with self.assertRaises(ValueError): audit_input_pins(run, {**started, 'invocation':'other-run'})
+                started['pins']['/unexpected/core.sv'] = 'old-source'
+                hashes['/unexpected/core.sv'] = 'modified-source'
+                with self.assertRaises(ValueError): audit_input_pins(run, started)
+                del started['pins']['/unexpected/core.sv']
+                key = next(iter(CLOCK_ROLE_AMENDMENT))
+                hashes[key] = 'unreviewed-report-change'
+                with self.assertRaises(ValueError): audit_input_pins(run, started)
+                hashes[key] = CLOCK_ROLE_AMENDMENT[key]['after']
+                receipt['constraints_changed'] = True
+                (run/'report-hook-amendment.json').write_text(json.dumps(receipt))
+                with self.assertRaises(ValueError): audit_input_pins(run, started)
 
 
 if __name__ == '__main__': unittest.main()

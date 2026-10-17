@@ -100,13 +100,40 @@ pending.
 
 The live controller's original post-run parser incorrectly requires the default
 `-flatten_hierarchy rebuilt` argument to be printed explicitly. Vivado omits it.
-Do **not** interrupt/restart a valid synthesis for this reporting bug or silently
-modify its pinned launch files. [audit_fresh_strategy.py](../fpga/audit_fresh_strategy.py)
+Do **not** interrupt/restart a valid synthesis for this post-run parser bug or
+silently relabel its inputs. [audit_fresh_strategy.py](../fpga/audit_fresh_strategy.py)
 independently checks both the command and native property report; it passes on
 this actual script, with three additional regression tests. A terminal
 controller `flatten policy drift` audit failure must be distinguished from a
 native tool failure, and the full native result still needs independent audit.
 This configuration-only checker cannot establish completion or timing closure.
+
+### Explicit reporting-hook amendment during r2
+
+The historical native clock report revealed an independent guard bug before
+either reporting hook ran: **MMCM feedback (`mmcm_fb`) is also 100 MHz**. Counting
+all 10 ns clocks as functional AXI clocks incorrectly yields two and would stop
+the valid synthesis at its post hook. The fresh generated PS XDC explicitly
+defines `clk_pl_0` at 10 ns.
+
+At **2026-10-17 22:46:20 UTC**, while native synthesis was in timing optimization,
+only `fresh_synth_post.tcl` and `fresh_reports.tcl` were amended to identify AXI by
+`clk_pl_0` **and** its 10 ns period. Core selection still requires exactly one
+25 ns clock; no constraint, source RTL, synthesis/APR option or checkpoint input
+changed, and the run was not restarted. Both actual Tcl hook selectors passed
+ten scenarios covering normal feedback, missing/wrong AXI, missing core and
+duplicate core clocks.
+
+The immutable original `started.json` remains intact. Exact before/after hashes,
+owner/scope identities and timing of this change are recorded in
+`performance-r2/report-hook-amendment.json`, SHA256
+`c5f9473d9c0b07a783c14f83149be85d265c0692954f71b90f73e405effd5794`.
+An independent comparison confirmed **all 200 frozen source files and every
+other launch pin unchanged**. The original controller is expected to report
+`inputs_unchanged=false` and an assertion audit failure even if Vivado succeeds;
+do not overwrite that receipt or call all launch inputs unchanged. The separate
+result audit accepts only these exact two reviewed reporting deltas for this
+specific invocation, and rejects any additional source/tool/constraint change.
 
 ### Closed-run acceptance audit
 
@@ -114,8 +141,10 @@ This configuration-only checker cannot establish completion or timing closure.
 result separately from the launcher's formatting-sensitive parser. It requires
 native exit zero, unchanged pinned inputs, matching product hashes, exactly one
 fresh synthesis/implementation/route sequence, and the implementation deadline.
-It tolerates only the specifically identified `flatten policy drift` reporting
-exception; other errors, resource stops and source changes fail the audit.
+It distinguishes the specifically identified `flatten policy drift` parser
+exception and the exact reporting-hook amendment above. Other errors, resource
+stops and source changes fail the audit. The full native completion, product,
+stage, clock and timing checks still apply to an amended run.
 
 The numeric review includes all four clock-pair paths, global setup/hold/pulse
 width and failing-endpoint totals (including nonstandard path groups), complete
@@ -136,11 +165,13 @@ TMPDIR=/home/yukidama/external/tmp PYTHONDONTWRITEBYTECODE=1 \
   /home/yukidama/external/tmp/ventium-fresh-strategies-oct17.67YRDIRh/performance-r2
 ```
 
-Six result-audit tests pass in addition to the earlier three native-configuration,
-four launch/freeze and eleven timing-parser tests (**24 tooling tests**). Reading
+Seven result-audit tests pass in addition to three native-configuration,
+four launch/freeze, eleven timing-parser and one ten-scenario clock-selection
+test (**26 tooling tests**). Reading
 the old baseline's text reports confirms the parser rejects its −9.841 ns setup
 result; that parser check neither opens an old checkpoint nor qualifies a new
-implementation. The live run's pinned launch files have not been changed.
+implementation. The only live-run pin changes are the explicitly recorded
+reporting-hook amendment above.
 
 `performance-r1` stopped before BD generation/synthesis in 20.09 seconds because
 the guard expected IP cache property `disabled`, whereas installed Vivado
@@ -156,6 +187,13 @@ bytes)** from older Oct 11–14 experiments, retaining sources, logs, reports,
 accepted images and useful routed results. Exact paths/hashes are in
 `pruned-checkpoints.json` under the artifact root. There is no trash copy;
 recovery requires rebuilding the preserved sources.
+
+During r2, growing synthesis scratch reduced free space to 5.2 GiB. A second
+checked prune removed ten more obsolete closed synthesis-only DCPs
+(**1,792,749,488 bytes**), restoring 6.8 GiB free space. None was a running
+process's input/open file, an active-run pin, deployed image, source, report or
+routed checkpoint. Exact paths/hashes are in `pruned-checkpoints2.json`. These
+also have no trash copy; their retained sources can regenerate them.
 
 ## Superseded checkpoint-only experiments — historical evidence
 

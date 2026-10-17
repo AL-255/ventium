@@ -5,7 +5,8 @@ set core {}; set axi {}
 foreach c [get_clocks] {
     set period [get_property PERIOD $c]
     if {abs($period-25.0)<0.001} {lappend core $c}
-    if {abs($period-10.0)<0.001} {lappend axi $c}
+    # Exclude the 100 MHz MMCM feedback clock from the functional AXI role.
+    if {[get_property NAME $c] eq "clk_pl_0" && abs($period-10.0)<0.001} {lappend axi $c}
 }
 if {[llength $core] != 1 || [llength $axi] != 1} {error "missing/ambiguous final clocks"}
 foreach {from to} [list $core $core $axi $axi $core $axi $axi $core] {

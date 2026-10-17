@@ -10,7 +10,43 @@ from pathlib import Path
 import re
 
 from audit_fresh_strategy import audit_synth, property_value
-from run_apr_trial import sha, validate_timing
+from run_apr_trial import REPO, sha, validate_timing
+
+# Exact, reviewed reporting-only amendment for the already-running r2. These
+# hashes do not authorize arbitrary tool changes, RTL edits or constraint edits.
+# The original started/closed receipts are never rewritten to hide the change.
+CLOCK_ROLE_AMENDMENT = {
+    str(REPO/'fpga/fresh_synth_post.tcl'): {
+        'before': 'dbeaf0f882b8933b2bae35620bd384052008c718615ab28efa511b6df6dbdee3',
+        'after': '950f235ff0ad09d54199d1e326cee750596d83ad395639408c41a60e1c2ea1ef'},
+    str(REPO/'fpga/fresh_reports.tcl'): {
+        'before': '1f306696baff37f9c37a72c423421663cd3467f7faf25eefb935ed9284b6d3b9',
+        'after': '01a864188fdba4a23d5f62f0e28aa7e67549fe17f6cb151b9fd41dbe74698850'},
+}
+AMENDED_OWNER = 'e9e71270d712443e9bf65d44bf491472'
+AMENDED_SCOPE = 'f7dc258cdd6b486a903e37781f1ca6d4'
+
+
+def audit_input_pins(run, started):
+    changed = {}
+    for path, before in started['pins'].items():
+        after = sha(path)
+        if before != after:
+            changed[path] = dict(before=before, after=after)
+    if not changed:
+        return dict(all_launch_inputs_unchanged=True, all_nonreport_inputs_unchanged=True,
+                    report_only_amendment=None)
+    if changed != CLOCK_ROLE_AMENDMENT or started.get('invocation') != AMENDED_OWNER:
+        raise ValueError('unapproved pinned input changes')
+    receipt = json.loads((run/'report-hook-amendment.json').read_text())
+    if (receipt['files'] != changed or receipt['owner_invocation'] != AMENDED_OWNER or
+        receipt['scope_invocation'] != AMENDED_SCOPE or any(receipt[k] is not False for k in
+        ('rtl_changed', 'constraints_changed', 'synthesis_or_apr_options_changed',
+         'checkpoint_input_added', 'restart'))):
+        raise ValueError('report amendment receipt mismatch')
+    return dict(all_launch_inputs_unchanged=False, all_nonreport_inputs_unchanged=True,
+                report_only_amendment=changed,
+                report_amendment_sha256=sha(run/'report-hook-amendment.json'))
 
 
 def timing_summary(text):
@@ -112,13 +148,18 @@ def final_reports(build):
 def audit_closed(run):
     started = json.loads((run/'started.json').read_text())
     closed = json.loads((run/'closed.json').read_text())
-    if (closed['native_exit'] != 0 or closed['reason'] is not None or not closed['inputs_unchanged'] or
-        closed['failure'] not in (None, "audit: ValueError('flatten policy drift')")):
-        raise ValueError('native/resource/input failure is not the known default-omission parser issue')
+    if closed['native_exit'] != 0 or closed['reason'] is not None:
+        raise ValueError('native/resource failure')
+    pins = audit_input_pins(run, started)
+    if closed['inputs_unchanged'] != pins['all_launch_inputs_unchanged']:
+        raise ValueError('input-change receipt inconsistent with actual hashes')
+    if pins['report_only_amendment']:
+        if closed['failure'] != 'audit: AssertionError()' or closed['owner']['InvocationID'] != AMENDED_SCOPE:
+            raise ValueError('unexpected amended-controller outcome')
+    elif closed['failure'] not in (None, "audit: ValueError('flatten policy drift')"):
+        raise ValueError('not the known default-omission parser issue')
     if not started['fresh_synthesis'] or started['prior_checkpoint_inputs']:
         raise ValueError('not a fresh source-only run')
-    if not all(sha(p) == digest for p, digest in started['pins'].items()):
-        raise ValueError('pinned inputs changed')
     build = run/'build'
     for name, digest in closed['products'].items():
         if sha(build/name) != digest:
@@ -142,7 +183,7 @@ def audit_closed(run):
     if property_value(impl, 'AUTO_INCREMENTAL_CHECKPOINT') != '0' or property_value(impl, 'INCREMENTAL_CHECKPOINT'):
         raise ValueError('incremental implementation')
     result = final_reports(build)
-    result.update(native_completion_verified=True, native_synthesis_configuration=synth,
+    result.update(native_completion_verified=True, native_synthesis_configuration=synth, input_audit=pins,
                   controller_parser_failure=closed['failure'], elapsed_seconds=closed['elapsed'],
                   implementation_seconds=times[-1]-times[1], gameplay_ipc=None,
                   source_manifest_sha256=sha(run/'prepared.json'))

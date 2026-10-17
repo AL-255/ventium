@@ -7,7 +7,9 @@ foreach c [get_clocks] {
     set period [get_property PERIOD $c]
     puts $f "[get_property NAME $c]\t$period"
     if {abs($period-25.0) < 0.001} {incr core}
-    if {abs($period-10.0) < 0.001} {incr axi}
+    # The MMCM feedback clock is also 100 MHz. Only clk_pl_0 is the
+    # functional AXI/PS source domain; frequency alone is not its identity.
+    if {[get_property NAME $c] eq "clk_pl_0" && abs($period-10.0) < 0.001} {incr axi}
 }
 close $f
 if {$core != 1 || $axi != 1} {error "fresh synthesis lacks unique 40 MHz core / 100 MHz AXI clocks"}
