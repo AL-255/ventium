@@ -43,7 +43,7 @@ strategy's modifications. Physical optimization can restructure/replicate cells;
 
 | Strategy | Operations | Whole native-run bound | Status |
 |---|---|---:|---|
-| `postroute-aggressive` | Explicit incremental `TimingClosure`, then `phys_opt_design -directive AggressiveExplore` | 1 hour | Corrected r2 running; no result yet |
+| `postroute-aggressive` | Explicit incremental `TimingClosure`, then `phys_opt_design -directive AggressiveExplore` | 1 hour | r3 running; no optimization result yet |
 | `postroute-replication` | Explicit incremental `TimingClosure`, then `phys_opt_design -directive AlternateReplication` | 1 hour | Prepared; not launched |
 | `replace-netdelay` | Unroute/unplace unlocked cells; `ExtraNetDelay_high` placement; `AggressiveExplore` physical optimization; `NoTimingRelaxation` routing | 3 h 50 min | Conditional follow-up; not launched |
 
@@ -76,6 +76,16 @@ optimization. This changes the optimizer's objective, **not the 40 MHz clock
 constraint**. [AMD documents this distinction between the two incremental
 directives](https://docs.amd.com/r/2022.1-English/ug949-vivado-design-methodology/Incremental-Directives-and-Target-WNS).
 
+`aggressive-r2` stopped **before physical optimization** at 710.984 s, native
+exit 1, with unchanged inputs and no OOM/swap. Its reference reload did report
+100.00% canonical cell/net reuse and `TimingClosure` with **Target WNS `0.0`**.
+The guard incorrectly demanded the textual representation `0.000`. This was a
+host/Tcl report-format bug, not a failed timing-closure strategy. The corrected
+guard compares finite numeric zero, rejects duplicate/missing/negative/nonzero
+targets, and is tested under both Python and real `tclsh`, including the actual
+native report. r3 also retains `timing-target.dcp` before the optimization step
+so a later report failure does not discard the completed setup work.
+
 The selected directives were checked against the installed Vivado 2025.2 manual.
 AMD documents post-route physical optimization and these directive alternatives:
 [phys_opt_design](https://docs.amd.com/r/2025.2-English/ug835-vivado-tcl-commands/phys_opt_design),
@@ -98,7 +108,7 @@ AMD documents post-route physical optimization and these directive alternatives:
   completed trial. A worse frequency or negative hold is recorded as such,
   not hidden behind a successful tool exit. Hardware and timing acceptance
   remain separate from native completion.
-- **Ten offline guard tests pass**, including the native zero-slack target,
+- **Eleven offline guard tests pass**, including the native zero-slack target,
   domain completeness, clock
   relaxation, multicycle/exception rejection, nonfinite timing, cross-clock
   frequency misuse, route errors, critical DRC warnings and hold qualification.
@@ -109,6 +119,8 @@ The first owner is `ventium-apr-aggressive-oct17-r1.service`, invocation
 `0b39daa8016e453fb7726036f8f58cdb`.
 The corrected owner is `ventium-apr-aggressive-oct17-r2.service`, invocation
 `d96a55959d5d4ebfac4fbe3eadc69937`.
+The numeric-guard retry is `ventium-apr-aggressive-oct17-r3.service`, invocation
+`6dec43fb8aa34b24aa368c8d8d4b8556`.
 
 Source checkpoint:
 `/home/yukidama/external/tmp/ventium-fprem-sequence.iSZ9BAj4/programmable-clock-power-repair-r5/build/routed.dcp`.

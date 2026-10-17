@@ -3,6 +3,7 @@
 if {$argc != 4} {error "usage: checkpoint expected-sha256 strategy new-output-dir"}
 if {[version -short] ne "2025.2"} {error "Vivado 2025.2 required"}
 lassign $argv checkpoint expected strategy out
+source [file join [file dirname [info script]] apr_target_guard.tcl]
 if {$strategy ni {postroute-aggressive postroute-replication replace-netdelay}} {error "unknown strategy"}
 if {[lindex [exec sha256sum -- $checkpoint] 0] ne $expected} {error "input checkpoint hash mismatch"}
 if {[file exists $out]} {error "output must be new"}
@@ -81,13 +82,13 @@ report_incremental_reuse -file [file join $out target-reuse.rpt]
 set target_file [open [file join $out target-reuse.rpt]]
 set target_report [read $target_file]
 close $target_file
-if {![regexp {\|\s*Incremental Directive\s*\|\s*TimingClosure\s*\|} $target_report] ||
-    ![regexp {\|\s*Target WNS\s*\|\s*0\.000\s*\|} $target_report]} {
-    error "incremental policy is not targeting zero slack"
-}
+require_zero_apr_target $target_report
 puts "APR-TARGET-WNS=0.000 native-report-confirmed"
 report_config_implementation -file [file join $out implementation-config.rpt]
 fully_routed
+# Retain a reusable common starting point before the trial itself, even if a
+# later optimization/report fails. This does not assert timing acceptance.
+write_checkpoint [file join $out timing-target.dcp]
 switch $strategy {
     postroute-aggressive {timed physopt {phys_opt_design -directive AggressiveExplore}}
     postroute-replication {timed physopt {phys_opt_design -directive AlternateReplication}}

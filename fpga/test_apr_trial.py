@@ -2,6 +2,7 @@
 from pathlib import Path
 import tempfile
 import unittest
+import subprocess
 from run_apr_trial import validate_timing, validate_reports, validate_target
 
 
@@ -15,11 +16,27 @@ TIMING = ('from_clock\tto_clock\tsetup_ns\thold_ns\tperiod_ns\trequirement_ns\te
 class AprTests(unittest.TestCase):
     def test_native_zero_slack_target_required(self):
         text = '| Incremental Directive | TimingClosure |\n| Target WNS | 0.000 |\n'
-        validate_target(text)
+        for value in ('0', '0.0', '0.000', '-0.000', '0e0'):
+            validate_target(text.replace('0.000', value))
         for invalid in (text.replace('TimingClosure', 'RuntimeOptimized'),
                         text.replace('0.000', '-10.018'), text.replace('0.000', 'nan'),
-                        text.splitlines()[0], text+'| Target WNS | 0.000 |\n'):
+                        text.replace('0.000', 'inf'), text.replace('0.000', '0.0001'),
+                        text.splitlines()[0], text+'| Target WNS | 0.000 |\n',
+                        text+'| Incremental Directive | TimingClosure |\n'):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError): validate_target(invalid)
+
+    def test_native_target_tcl_matches_python_including_short_decimal(self):
+        helper = Path(__file__).with_name('apr_target_guard.tcl')
+        script = f'source {{{helper}}}\nset report [read stdin]\nif {{[catch {{require_zero_apr_target $report}}]}} {{exit 1}}\n'
+        with tempfile.TemporaryDirectory(prefix='apr-target-test-') as name:
+            runner = Path(name)/'test.tcl'; runner.write_text(script)
+            for value in ('0', '0.0', '0.000', '-0.000', '0e0', '-10.018', 'nan', 'inf', '0.0001', 'junk'):
+                text = f'| Incremental Directive | TimingClosure |\n| Target WNS | {value} |\n'
+                with self.subTest(value=value):
+                    try: validate_target(text); expected = 0
+                    except ValueError: expected = 1
+                    result = subprocess.run(['tclsh', str(runner)], input=text, text=True, capture_output=True)
+                    self.assertEqual(result.returncode, expected, result.stderr)
 
     def test_frequency_derived_from_period_not_reciprocal_slack(self):
         result = validate_timing(TIMING)

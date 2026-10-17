@@ -85,10 +85,11 @@ def validate_reports(build):
 
 
 def validate_target(text):
-    if not re.search(r'\|\s*Incremental Directive\s*\|\s*TimingClosure\s*\|', text):
+    directives = re.findall(r'\|\s*Incremental Directive\s*\|\s*([^|]+)\|', text)
+    if len(directives) != 1 or directives[0].strip() != 'TimingClosure':
         raise ValueError('incremental directive is not TimingClosure')
     targets = re.findall(r'\|\s*Target WNS\s*\|\s*([^|]+)\|', text)
-    if len(targets) != 1 or targets[0].strip() != '0.000':
+    if len(targets) != 1 or not math.isfinite(float(targets[0])) or float(targets[0]) != 0:
         raise ValueError('native target WNS is not zero')
 
 
@@ -111,7 +112,8 @@ def main():
     assert shutil.disk_usage(SCRATCH).free > 5*GIB
     script = REPO/'fpga/apr_trial.tcl'
     pins = {str(p): sha(p) for p in (checkpoint, BASE/'closed.json', script, Path(__file__),
-        REPO/'fpga/run_vivado_exclusive.sh', REPO/'tools/build_scope.sh')}
+        REPO/'fpga/run_vivado_exclusive.sh', REPO/'tools/build_scope.sh',
+        REPO/'fpga/apr_target_guard.tcl')}
     dest.mkdir(); (dest/'tool-tmp').mkdir()
     def save(name, data):
         with (dest/name).open('x') as stream: json.dump(data, stream, indent=2)
