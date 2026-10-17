@@ -5,6 +5,7 @@ from unittest.mock import Mock
 
 from audit_clock_eco_netlists import logical_hash
 from prepare_programmable_clock_repair import adapt
+from audit_clock_reuse import validate as validate_reuse
 
 
 class RepairTests(unittest.TestCase):
@@ -41,6 +42,24 @@ class RepairTests(unittest.TestCase):
 
     def test_missing_soc_rejected(self):
         with self.assertRaises(ValueError): self.digest(b'module leaf; endmodule\n')
+
+    REUSE='| Cells | 99.96 | 99.97 | 0.01 | 294278 |\n| Nets | 99.97 | 99.91 | 0.00 | 192208 |\n'
+
+    def test_canonical_reuse(self):
+        self.assertEqual(validate_reuse(self.REUSE)['Cells']['reused_pct'],99.97)
+
+    def test_missing_duplicate_reuse_rows(self):
+        for text in (self.REUSE.splitlines()[0],self.REUSE+self.REUSE):
+            with self.subTest(text=text),self.assertRaises(ValueError): validate_reuse(text)
+
+    def test_low_or_impossible_canonical_percent(self):
+        for before,after in (('99.96','99.49'),('99.97','0.00'),('99.91','100.01')):
+            with self.subTest(after=after),self.assertRaises(ValueError):
+                validate_reuse(self.REUSE.replace(before,after))
+
+    def test_missing_design_reuse_totals(self):
+        with self.assertRaises(ValueError): validate_reuse(self.REUSE.replace('294278','1'))
+        with self.assertRaises(ValueError): validate_reuse(self.REUSE.replace('192208','1'))
 
 
 if __name__ == '__main__': unittest.main()

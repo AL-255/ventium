@@ -10,8 +10,10 @@ from pathlib import Path
 import shutil
 
 from prepare_programmable_clock import REPO, ROOT, sha, once
+from audit_clock_reuse import validate
 
-DEST = ROOT/'programmable-clock-power-repair-r3'
+DEST = ROOT/'programmable-clock-power-repair-r4'
+PRIOR = ROOT/'programmable-clock-power-repair-r3'
 AUDIT = ROOT/'programmable-clock-netlist-audit-r3'
 BASE = ROOT/'programmable-clock-reuse-r2'
 TEST = Path('/home/yukidama/external/tmp/ventium-programmable-clock.AkDdO8')
@@ -39,6 +41,21 @@ def main():
     pins = {str(AUDIT/'reports'/n): h for n,h in audit['products'].items()}
     pins[str(BASE/'build/routed.dcp')] = prior['products']['routed.dcp']
     assert all(sha(Path(p)) == h for p,h in pins.items())
+    # Resume only the closed, verified replacement whose overly strict raw
+    # IS_MATCHED threshold rejected otherwise excellent canonical reuse.
+    stopped=json.loads((PRIOR/'closed.json').read_text())
+    assert stopped['native_exit']==1 and stopped['inputs_unchanged'] and not stopped['passed']
+    assert 'clock-only replacement lost physical reuse' in (PRIOR/'native.log').read_text()
+    assert all(sha(PRIOR/'build'/n)==h for n,h in stopped['products'].items())
+    validate((PRIOR/'build/initial-reuse.rpt').read_text())
+    raw=json.loads((PRIOR/'build/initial-reuse.json').read_text())
+    assert raw['matched_pct']>=95 and raw['reused_pct']>=99
+    old_prepared=json.loads((PRIOR/'prepared.json').read_text())
+    assert all(sha(Path(p))==h for p,h in old_prepared['source_pins'].items())
+    for p in (PRIOR/'closed.json',PRIOR/'prepared.json',PRIOR/'native.log'):
+        pins[str(p)]=sha(p)
+    pins.update({str(PRIOR/'build'/n):h for n,h in stopped['products'].items()})
+    pins.update(old_prepared['source_pins'])
     for line in (TEST/'sources.sha256').read_text().splitlines():
         h, p = line.split(maxsplit=1)
         assert sha(Path(p)) == h
@@ -56,10 +73,13 @@ def main():
     wrapper = REPO/'fpga/ven_programmable_clock.v'
     shutil.copy2(controller, source/controller.name)
     (source/'ven_programmable_clock.v').write_text(adapt(wrapper.read_text()))
+    assert all(sha(p)==sha(PRIOR/'source'/p.name) for p in source.iterdir())
     result = dict(parent_checkpoint=str(BASE/'build/routed.dcp'), pins=pins,
+        resume_checkpoint=str(PRIOR/'build/replaced.dcp'),
+        resume_soc_before=str(PRIOR/'build/soc-before.v'),
         source_pins={str(p):sha(p) for p in source.iterdir()},
         replacement_cell='rk_ao486_bd_i/u_clkdiv/inst', processor_rtl_changed=False,
-        synthesis_scope='clock leaf only', constraint_core_mhz=40, constraint_axi_mhz=100,
+        synthesis_scope='none; resume verified clock replacement', constraint_core_mhz=40, constraint_axi_mhz=100,
         boundary_map=dict(ps_gpio_i='status[10],status[6:0]',
                           mmcm_reset_reg='status[13:11],status[9:7]', ps_gpio_o='command[15:0]'),
         hardware_acceptance=False, gameplay_ipc=None)

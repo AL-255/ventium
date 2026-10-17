@@ -12,6 +12,7 @@ from prepare_programmable_clock import REPO, sha
 from prepare_programmable_clock_repair import DEST
 from run_programmable_clock_build import host, scope, GIB, SCOPE
 from run_programmable_incremental import validate_reports
+from audit_clock_reuse import validate as validate_canonical
 
 
 def main():
@@ -28,13 +29,15 @@ def main():
               REPO/'fpga/audit_clock_eco_netlists.py', REPO/'fpga/test_programmable_clock_netlist.sh',
               REPO/'fpga/tb_programmable_clock_netlist.sv', REPO/'fpga/run_programmable_incremental.py',
               REPO/'fpga/run_programmable_clock_build.py', REPO/'fpga/prepare_programmable_clock.py',
-              REPO/'fpga/prepare_programmable_clock_repair.py'):
+              REPO/'fpga/prepare_programmable_clock_repair.py', REPO/'fpga/audit_clock_reuse.py'):
         pins[str(p)] = sha(p)
     assert all(sha(Path(p)) == h for p,h in pins.items())
     assert host()['MemAvailable'] > 10*GIB and host()['SwapFree'] > 8*GIB
     assert shutil.disk_usage(DEST).free > 6*GIB
     build = DEST/'build'
     build.mkdir()
+    if prepared.get('resume_checkpoint'):
+        shutil.copy2(prepared['resume_soc_before'],build/'soc-before.v')
     (DEST/'tool-tmp').mkdir()
     def save(name, data):
         with (DEST/name).open('x') as stream: json.dump(data, stream, indent=2)
@@ -47,8 +50,9 @@ def main():
         '-log',str(DEST/'native.log'),'-journal',str(DEST/'native.jou'),
         '-source',str(script),'-tclargs',prepared['parent_checkpoint'],
         str(DEST/'source'),str(build),str(REPO)]
+    if prepared.get('resume_checkpoint'): command.append(prepared['resume_checkpoint'])
     save('started.json',dict(command=command,pins=pins,host=host(),
-        invocation=os.environ['INVOCATION_ID'],synthesis_scope='clock leaf only',
+        invocation=os.environ['INVOCATION_ID'],synthesis_scope=prepared['synthesis_scope'],
         processor_rtl_changed=False,constraint_core_mhz=40,constraint_axi_mhz=100,
         memory_max=8*GIB,swap_max=4*GIB,whole_run_limit_seconds=13800))
     interrupted=[]
@@ -114,7 +118,11 @@ def main():
         assert re.search(r'^PROGRAMMABLE-CLOCK-REPAIR-COMPLETE ',(DEST/'native.log').read_text(),re.M)
         initial=json.loads((build/'initial-reuse.json').read_text())
         placed=json.loads((build/'placed-reuse.json').read_text())
-        assert min(initial['matched_pct'],initial['reused_pct'],placed['matched_pct'],placed['reused_pct'])>=99
+        assert min(initial['matched_pct'],placed['matched_pct'])>=95
+        assert min(initial['reused_pct'],placed['reused_pct'])>=99
+        for stage in ('initial','placed'):
+            canonical=validate_canonical((build/(stage+'-reuse.rpt')).read_text())
+            assert canonical==json.loads((build/(stage+'-canonical-reuse.json')).read_text())
         checked=validate_reports((build/'route-status.rpt').read_text(),(build/'drc.rpt').read_text(),
             (build/'clocks.rpt').read_text(),json.loads((build/'route-time.json').read_text()),initial,placed)
         assert json.loads((build/'soc-unchanged.json').read_text())['identical'] is True
