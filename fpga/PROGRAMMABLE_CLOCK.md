@@ -1,9 +1,12 @@
 # One image, runtime core-clock sweep
 
-Status (2026-10-16): controller implemented and unit-tested; one full **40 MHz**
-synthesis/implementation is running. **Not yet deployed or physically qualified.**
-There are no per-frequency builds in this flow. The earlier fixed-clock variant
-attempts were cancelled and never deployed.
+Status (2026-10-16): controller implemented and unit-tested. The first full
+**40 MHz** implementation was stopped for congestion after 5 h 35 min; the user
+now requires successful routing in **less than four hours**. A physical-layout
+retry is prepared from the existing optimized netlist, without another synthesis
+or processor RTL change. **Not yet deployed or physically qualified.** There are
+no per-frequency images in this flow. Earlier fixed-clock variant attempts were
+cancelled and never deployed.
 
 The physical fixed-40 MHz parallel-write parent passes both 2,000-iteration
 CoreMark seeds, at 2.100118 / 2.106790 CM/MHz. Those passes do not qualify the new
@@ -125,10 +128,13 @@ Its original pins stayed unchanged; logs and generated integration metadata are
 retained. No r2 bitstream exists and no deployment occurred.
 
 `programmable-clock-r3` adds that sequence and names the drain output `pll_safe`
-so BD inference cannot mistake it for a clock. It is the active corrected build,
+so BD inference cannot mistake it for a clock. It is the corrected source build,
 owned by `ventium-programmable-clock-oct16-r3.service`, invocation
-`fa0d86b28c7840e39ee050af6d348483`. There will be one completed image and one
-deployment, with no frequency-specific synthesis/route/bitgen variants.
+`fa0d86b28c7840e39ee050af6d348483`. It was deliberately stopped on the user's
+new under-four-hour requirement: elapsed **20,131.37 s**, native exit143,
+`reason="controller signal"`, all input pins unchanged, **no bitstream**.
+The scope is closed and no Vivado worker survived. There will be one completed
+image and one normal deployment, with no frequency-specific images.
 About 1.2 GiB of the closed r2 synthesis cache and obsolete cancelled-variant
 physical dump was removed to retain the eight-GiB build admission reserve;
 source freezes, reports, native logs and the original routed DCP remain.
@@ -141,6 +147,87 @@ implementation profile is retained, including RuntimeOptimized opt_design.
 New board helpers and 4,000-iteration media are staged separately at
 `/dev/shm/ventium-coremark-clock-stage.3gpcEfvD`; the old passing evidence is not
 overwritten. Host evidence will be retained in `coremark-pll-board-r1`.
+
+### Congestion diagnosis and physical-layout retry
+
+The original route used `AltSpreadLogic_high` placement and default routing,
+just like its fixed-clock parent. It did not fail from OOM: its OOM counters
+remained zero. Peak scope RAM was 9,568,305,152 bytes; later host activity caused
+up to 2,721,914,880 bytes of swap. The router remained CPU-active. Merely waiting
+longer is not the selected response to the user's new runtime requirement.
+
+The native reports and read-only checkpoint audit show:
+
+| Measure | Fixed-40 parent | Programmable r3 |
+|---|---:|---:|
+| Placed LUTs | 185,922 | 186,075 |
+| Placed registers | 54,769 | 54,919 |
+| Occupied CLBs | 33,510 (78.55%) | 34,247 (80.28%) |
+| Initial global/short congestion level | 6 | 6 |
+| Initial timing-congestion level | 6 | 7 |
+| Cumulative route time at end of Global Iteration 1 | 45 m 19 s | 4 h 17 m 20 s |
+| Overlaps at that point | 0 | 628 |
+
+r3's second iteration subsequently reported **193,450 overlaps**. The earlier
+628 count was not a measure of total work remaining.
+
+`audit_programmable_congestion.tcl` reads the parent's routed DCP and r3's
+post-place-physopt DCP without modifying either. It maps native routing-tile
+hotspot rectangles to their actual placed cells, using tile/site queries rather
+than assuming routing coordinates equal slice coordinates. In the sampled
+short-route hotspot rectangle **X4..47, Y272..320**:
+
+- I-cache primitives increased from **16,157 to 20,058** (+24.144%).
+- The I-cache occupies **89.361%** of the candidate's 22,446 primitives there,
+  versus 71.145% of the parent's 22,710 primitives in the same rectangle.
+- No clock-controller cells appear in that rectangle.
+- The whole I-cache remains **44,931 LUTs, 10,783 registers and eight BRAM36s**
+  in both inspected checkpoints. Its RTL and resource implementation did not
+  grow. Total placed LUT growth for the complete design is only **0.0823%**.
+
+This supports a **placement-sensitive I-cache connectivity bottleneck**, not a
+large area cost from the programmable PLL. Cell counts alone are not routing
+utilization; the native congestion report supplies that separate evidence.
+The broader south hotspot contains 80,851 candidate primitives, including
+50,185 I-cache and 9,548 register-file primitives. The candidate's sampled east
+hotspot grows from 2,075 to 3,213 primitives, chiefly register-file/core/cache
+logic. Global control sets grow only from 2,448 to 2,456.
+
+Audit evidence: `programmable-clock-congestion-r1`, unit
+`ventium-programmable-congestion-oct16-r1.service`, invocation
+`e1426f5f04774e348c2e2c907ab834f1`; native exit0, **110.21 s**, input pins
+unchanged, no swap/OOM. It retains per-cell TSVs, per-hierarchy region counts,
+clock/utilization/control-set reports and hashes. The exact reference DCP SHA256
+is `c932cefb2909e0934c83d105fc8aaebc3e51beb0c2b899b43738462eb54d76a5`.
+
+The selected retry is `launch_programmable_incremental.tcl`, guarded by
+`run_programmable_incremental.py`, with output `programmable-clock-reuse-r1`:
+
+1. Open **r3's existing optimized netlist**, including its implementation XDCs.
+   No synthesis, source substitution, cache resizing or CPU change.
+2. Import only matching physical placement/routes from the verified parent with
+   `read_checkpoint -incremental -directive RuntimeOptimized`. Do not use
+   `-auto_incremental`, which can choose a full implementation instead.
+3. Require at least **95% matched primitive cells** and **90% reused placements**
+   both before and after incremental placement. Abort on insufficient reuse;
+   do not silently perform another full placement experiment.
+4. Keep 40 MHz core / 100 MHz AXI constraints and the M10/D1/divide25 MMCM
+   contract. Preserve the reference setup target rather than asking a
+   timing-closure directive to rip up the entire old solution.
+5. Cap the **whole native invocation at 13,800 s (3 h 50 min)**, with one worker,
+   12 GiB RAM / 4 GiB swap, and the existing live disk/host-memory guards.
+   Record route wall time independently and reject any result at or above four
+   hours. Require all routable nets routed, zero routing errors and no DRC
+   errors/critical warnings before accepting the products.
+
+The additional ten host tests pass (54 including the existing host suite).
+They check partial routes, routing/DRC errors, wrong clocks, insufficient reuse,
+duplicate counters, the strict runtime boundary and the native Tcl reuse-JSON
+format. These tests do not qualify an FPGA image. The retry is not yet a pass.
+
+AMD references: [incremental flow](https://docs.amd.com/r/2025.2-English/ug908-vivado-programming-debugging/Using-Incremental-Compile?contentId=LhXjyw_bq5zL1yBpwdGDlw),
+[reuse object properties](https://docs.amd.com/r/2023.2-English/ug904-vivado-implementation/Object-Properties),
+[RuntimeOptimized versus TimingClosure](https://docs.amd.com/r/2024.2-English/ug904-vivado-implementation/Incremental-Directives?contentId=GHAkvNCSWOZrYoe0PqJ2sg).
 
 ## Physical procedure (pending this image)
 
