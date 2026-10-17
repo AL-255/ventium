@@ -108,6 +108,40 @@ controller `flatten policy drift` audit failure must be distinguished from a
 native tool failure, and the full native result still needs independent audit.
 This configuration-only checker cannot establish completion or timing closure.
 
+### Closed-run acceptance audit
+
+[audit_fresh_result.py](../fpga/audit_fresh_result.py) checks the closed native
+result separately from the launcher's formatting-sensitive parser. It requires
+native exit zero, unchanged pinned inputs, matching product hashes, exactly one
+fresh synthesis/implementation/route sequence, and the implementation deadline.
+It tolerates only the specifically identified `flatten policy drift` reporting
+exception; other errors, resource stops and source changes fail the audit.
+
+The numeric review includes all four clock-pair paths, global setup/hold/pulse
+width and failing-endpoint totals (including nonstandard path groups), complete
+routing, no DRC errors/critical warnings, all ten AXI Gray-pointer bus-skew
+constraints, and full timing coverage. Only the four asynchronous status LEDs
+may lack output-delay constraints; unconstrained internal endpoints are never
+accepted. Different synthesis strategies may change net counts, so an old
+net-count threshold is not imposed. CDC status is recorded separately.
+
+This audit explicitly leaves manual exception/source/CDC review and physical
+standard-suite acceptance pending. Native completion, numeric timing closure
+and processor acceptance are separate results. Run only **after** `closed.json`
+exists (never on a partial synthesis/route):
+
+```bash
+TMPDIR=/home/yukidama/external/tmp PYTHONDONTWRITEBYTECODE=1 \
+  python3 fpga/audit_fresh_result.py \
+  /home/yukidama/external/tmp/ventium-fresh-strategies-oct17.67YRDIRh/performance-r2
+```
+
+Six result-audit tests pass in addition to the earlier three native-configuration,
+four launch/freeze and eleven timing-parser tests (**24 tooling tests**). Reading
+the old baseline's text reports confirms the parser rejects its −9.841 ns setup
+result; that parser check neither opens an old checkpoint nor qualifies a new
+implementation. The live run's pinned launch files have not been changed.
+
 `performance-r1` stopped before BD generation/synthesis in 20.09 seconds because
 the guard expected IP cache property `disabled`, whereas installed Vivado
 2025.2 returns `disable`. This was a host guard bug, not a synthesis failure.
