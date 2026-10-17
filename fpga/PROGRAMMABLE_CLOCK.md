@@ -11,9 +11,11 @@ physical layout resolved the routing-runtime problem.
 The first programmable image routed in 9 m 22 s but failed physical PLL startup.
 The clock-only power-sequence repair now **acquires lock on the board**, with
 status `504c5499` (divide25, enabled, locked, safe, no error/reset/busy).
-Its first held-reset measurement is **39.999834 MHz**. The physical CoreMark
-sweep is underway; this startup observation is not a seed pass or CPU acceptance.
-This repaired image is programmed once for the entire sweep, with **no
+The physical CoreMark sweep is now closed: **52.6316 MHz is the highest tested
+passing point**, with both standard seeds passing twice. The adjacent available
+point, 55.5556 MHz, and 62.5 MHz failed. The board is restored to measured
+**39.999820 MHz**, guest held reset, DDR drained, no trial workers running.
+This repaired image was programmed once for the entire sweep, with **no
 per-frequency images**. Earlier fixed-clock variant attempts were cancelled and
 never deployed. Final STA remains **28.701817 MHz conditional worst-path
 period budget**, setup −9.841 ns / hold +0.004 ns under the 40 MHz constraint:
@@ -31,6 +33,75 @@ Current verified gameplay baseline: **0.490014174 total U+V IPC**, simulation
 executable `b6b92dbfde2c6148fde30b5c65cac8217f650f7bbc1a7d4c0bd58fe95f706c9e`,
 cycles **1,100,065,247–3,100,065,247**. It predates this candidate, which has no
 gameplay measurement. CoreMark counters are not gameplay IPC.
+
+## Physical CoreMark result
+
+All runs use 4,000 iterations, the full 2 KiB dataset, both unmodified standard
+seed configurations, and private-QEMU reference CRCs. Every passing trial has
+≥10 seconds of independently clock-measured benchmark execution, exact final
+ROM-glyph-decoded console output, five matching CRCs, native owner exit0, stable
+input/image hashes and clean reset/drain closure. The failed trials retain exit1
+and timeout evidence; they are not passes. No snapshots, STEP, debugger
+breakpoints, U-only execution or slow-FSM fallback were used.
+
+| Nominal core MHz (divider) | Measured MHz | Performance seed | Validation seed | CM/MHz, performance / validation |
+|---|---|---|---|---|
+| 40 (25) | 39.999820–39.999834 | PASS ×2 | PASS ×2 | 2.100127–2.100128 / 2.106796 |
+| 50 (20) | 49.999784–49.999785 | PASS | PASS | 2.100127 / 2.106795 |
+| **52.631579 (19)** | **52.631352–52.631358** | **PASS ×2** | **PASS ×2** | **2.100126 / 2.106794** |
+| 55.555556 (18) | 55.555314 | TIMEOUT | Not run after failure | — |
+| 62.5 (16) | 62.499732 | TIMEOUT | Not run after failure | — |
+
+Chronology: pass both seeds at40, pass both at50, fail performance at62.5,
+restore40/performance passes, fail performance at55.5556,
+restore40/validation passes, then pass both seeds twice at52.6316. Each trial
+cold-initializes the same image and resets/relocks its PLL through the mailbox.
+The final mailbox change restores divide25, followed by a five-second held-reset
+measurement and explicit posted-DDR drain verification (`50440003`). No PCAP
+programming occurs between any of these trials or the final restoration.
+
+Each passing trial proves **>415 million fresh V-pipe retirements**, calculated
+conservatively from that trial's U+V and bracketed primary/U deltas. Absolute
+primary/U totals persist across guest reset; the core's U+V scan counter does
+not. Comparing their absolute values across cold boots would be wrong.
+The full **159-define** configuration is retained in
+`programmable-clock-r3/prepared.json.hardware_defines` and
+`programmable-clock-r3/source/defines.txt` (SHA256
+`6928307f0b2dae602dffaf53c24ac5b3ed93e62210d211ede86f2ebedccb0032`). It includes
+`VEN_SYS_FASTPATH`, `VEN_SYS_FASTPATH_RELOC`, `VEN_SYS_FASTLOAD_FLAT`,
+`VEN_SYS_FASTLOAD_BOUNDED` and `VEN_SYS_FASTSTORE_FLAT`, with the frozen shim's
+`.cycle_mode(1'b1)` connection. The clock-leaf replacement preserves that SoC
+netlist, rather than rebuilding from the dirty checkout.
+
+At62.5, retirement stopped at 886,313 total U+V events; the passive last-retired
+EIP was `0x11066`, in `core_list_init`. At55.5556 it stopped at 1,212,459 events,
+last-retired EIP `0x10ce3`, near `core_list_mergesort`'s trap path. These are live
+monitor observations, not coherent fault-PC snapshots or proof of the failing
+instruction. The core stopped advancing for ≥7,486,263,197 / 6,650,013,487 cycles,
+respectively. PLL lock and clock-enable remained asserted without PLL error,
+and no debugger halt/breakpoint was active. Both failures closed with guest
+reset and actual DDR drain verified. Returning to40 recovered the workload.
+This is a frequency-associated execution failure; distinguishing setup timing,
+CDC/latency-sensitive races or another cause requires further diagnosis. No
+processor fix or benchmark-specific workaround was made during the sweep.
+
+**Scope:** 52.6316 MHz is a repeat-tested CoreMark point on this image/board,
+not a proven absolute maximum, thermal-soak guarantee, or Quake/Win95 pass.
+There is no available integer divider between it and the failed55.5556 point.
+Frequencies above62.5, including71.4286, were not tested after these failures;
+do not extrapolate the older image's70MHz behavior to this image. The ~31.6%
+clock/throughput increase over40 is an overclock result, not a CPU-IPC fix.
+The full standard suite remains unqualified for the programmable-clock image.
+
+Evidence root:
+`/home/yukidama/external/tmp/ventium-fprem-sequence.iSZ9BAj4/coremark-pll-board-r2/`.
+`closed.json` reconciles ten passed trials and two failed trials, their complete
+retained-file hashes, exact firmware identity, final clock/reset/drain receipts
+and the successful 8m09s route. Per-trial `*-audit.json` files retain counters,
+CRCs, timings and native systemd invocation IDs; `*-failure-audit.json` files
+retain failed results. `r5-n{16,18}-performance-live-state.json` contains the
+additional strictly read-only live debug observations. Raw captures and logs
+remain in each corresponding trial directory, both locally and on the board.
 
 ## Clock and safety contract
 
@@ -481,7 +552,7 @@ once, then its healthy GPIO status was required before starting CoreMark.
 This is physical confirmation that retaining the full power-enable word fixes
 the observed startup failure; overclock/standard-suite acceptance is separate.
 
-## Physical procedure (clock qualification underway)
+## Physical procedure (repeatable clock qualification)
 
 1. Verify native completion, output/source hashes, routed clocks, route and DRC
    reports. Retain setup/hold failures honestly; overclock tests do not waive them.
@@ -503,7 +574,10 @@ the observed startup failure; overclock/standard-suite acceptance is separate.
    --iterations 4000`. Record actual physical duration from raw TSC ticks and
    independently measured frequency, all five CRCs, lock, temperature and
    unperturbed U+V execution. The audit subtracts each trial's counter baseline;
-   guest reset does not clear the board's cumulative debug retirement counters.
+   guest reset does not clear the board's cumulative **primary/U** counter.
+   The core's total-U+V scan counter does reset; never subtract these two
+   absolute counters across cold boots. The audit subtracts each one's own
+   first observation within the current trial before comparing their deltas.
 6. Start with both seeds at 40 MHz on this image, step upward, then repeat/refine
    the boundary. Stop at the first failed point, restore40 via the same mailbox,
    and rerun a baseline to distinguish persistent damage/state from a frequency
@@ -518,7 +592,8 @@ both reset stages and `START`. Thus the five-second held-reset clock measurement
 also leaves ample time for that walk before the daemon rewrites guest RAM.
 The posted-DDR transport deliberately survives guest reset: software and the
 PLL interlock require its actual completion/drain, not cancellation. Debug
-retirement counters also survive, and each trial subtracts its own baseline.
+primary/U debug retirement counter also survives, whereas `ventium_top.retire_n`
+(total U+V) clears with core reset. Each trial subtracts its own counter baselines.
 This is a source-level reset-path check, not a substitute for passing both
 physical seeds repeatedly on the new image.
 
