@@ -29,10 +29,14 @@ ingested. `prepared.json` inventories every frozen file and explicitly lists the
 three integration edits and two new clock RTL files. The parent's old manifest
 is retained as ancestry, not relabelled a new simulator or hardware pass.
 
-Current verified gameplay baseline: **0.490014174 total U+V IPC**, simulation
-executable `b6b92dbfde2c6148fde30b5c65cac8217f650f7bbc1a7d4c0bd58fe95f706c9e`,
-cycles **1,100,065,247–3,100,065,247**. It predates this candidate, which has no
-gameplay measurement. CoreMark counters are not gameplay IPC.
+Current verified **physical** gameplay IPC: **0.496499864 total U+V**, image
+`2886d24c`, cycles **625,021,130,428–629,480,208,865**; primary/U alone is
+0.383002768. The original cold FreeDOS/Quake timedemo completes **969 frames in
+125.8 seconds, 7.7 FPS at measured 39.999826 MHz**, with a complete raw-color
+movie and successful native closure. See the
+[Oct17 Quake report](../docs/FPGA_QUAKE_TIMEDEMO_2026-10-17.md).
+This replaces the older simulation baseline 0.490014174 (`b6b92dbf`,
+1,100,065,247–3,100,065,247); CoreMark counters are not gameplay IPC.
 
 ## Physical CoreMark result
 
@@ -597,9 +601,10 @@ primary/U debug retirement counter also survives, whereas `ventium_top.retire_n`
 This is a source-level reset-path check, not a substitute for passing both
 physical seeds repeatedly on the new image.
 
-CoreMark clock qualification is not standard-suite acceptance. Physical Win95
-cold boot + interaction and a full Quake timedemo remain separate requirements
-before claiming general FPGA acceptance of this new image.
+CoreMark clock qualification is not standard-suite acceptance. The subsequent
+[physical Quake timedemo at 40 MHz](../docs/FPGA_QUAKE_TIMEDEMO_2026-10-17.md)
+passes; physical Win95 cold boot + interaction remains unqualified for this
+image. Quake was not tested at the higher CoreMark-qualified clocks.
 
 Register reference: [AMD UG572 MMCM registers](https://docs.amd.com/r/en-US/ug572-ultrascale-clocking/MMCM-Registers)
 and [DRP operation](https://docs.amd.com/r/en-US/ug572-ultrascale-clocking/Dynamic-Reconfiguration-Port).

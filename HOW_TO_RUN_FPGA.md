@@ -1,5 +1,14 @@
 # FPGA build and hardware-verification guide
 
+> **Latest physical run (2026-10-17):** the installed programmable-clock image
+> `2886d24c` completes cold FreeDOS/Quake demo1: **969 frames / 125.8 s / 7.7 FPS**
+> at measured **39.999826 MHz**, UV + fast-pipe. Current verified total-U+V
+> gameplay IPC is **0.496499864**, cycles **625,021,130,428–629,480,208,865**.
+> The complete raw-color 15 fps movie, closure evidence, current image pins and
+> PLL-specific controller changes are in the [Oct17 run report](docs/FPGA_QUAKE_TIMEDEMO_2026-10-17.md).
+> The Oct8 deployment status and hardcoded fixed-clock recipes below are
+> historical; do not apply their image pins or PS-clock cleanup to this image.
+
 This is the operating procedure for the Ventium-swapped `ao486_MiSTer` system on
 the RK-XCZU15EG-F board. It covers the current build, deployment, test, and
 debug tools as inspected through **2026-08-23**, with the safety preflight
