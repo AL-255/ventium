@@ -16,10 +16,10 @@ module tb_pll_ctrl;
     reg [15:0] r08=16'hb30d, r09=16'h0285;
     reg [15:0] r27=16'h0100;
     reg drop_drp=0, drop_lock=0, corrupt08=0, corrupt09=0;
-    reg corrupt_power_on=0, corrupt_power_restore=0;
+    reg corrupt_power_on=0, corrupt_power_final=0;
     integer latency=4, wait_drp=0, lock_wait=0, accesses=0, writes=0, divider_writes=0;
     reg [6:0] pending_addr;
-    reg pending_write;
+    reg pending_write, pending_power_final;
     reg [15:0] pending_data;
     always @(posedge clk) begin
         drdy <= 0;
@@ -34,8 +34,11 @@ module tb_pll_ctrl;
                 if (addr!=8 && addr!=9 && addr!=7'h27) $fatal(1,"unexpected DRP address");
                 if (addr!=7'h27 && (r27 & 16'h9999)!=16'h9999)
                     $fatal(1,"divider access without enabled DRP power group");
+                if (addr==7'h27 && dwe && di!=16'hffff)
+                    $fatal(1,"power group must remain enabled through relock");
                 accesses <= accesses+1;
                 pending_addr <= addr; pending_write <= dwe; pending_data <= di;
+                pending_power_final <= dut.state==13;
                 if (!drop_drp) wait_drp <= latency;
             end
             if (wait_drp > 1) wait_drp <= wait_drp-1;
@@ -46,8 +49,8 @@ module tb_pll_ctrl;
                     if (pending_addr!=7'h27) divider_writes <= divider_writes+1;
                     if (pending_addr==8) r08 <= pending_data ^ (corrupt08 ? 16'd1 : 16'd0);
                     else if (pending_addr==9) r09 <= pending_data ^ (corrupt09 ? 16'd1 : 16'd0);
-                    else r27 <= pending_data ^ (((pending_data==16'hffff && corrupt_power_on) ||
-                                                  (pending_data==16'h0100 && corrupt_power_restore)) ? 16'd1 : 16'd0);
+                    else r27 <= pending_data ^ (((!pending_power_final && corrupt_power_on) ||
+                                                  (pending_power_final && corrupt_power_final)) ? 16'd1 : 16'd0);
                 end else dout <= pending_addr==8 ? r08 : pending_addr==9 ? r09 : r27;
             end
         end
@@ -66,7 +69,7 @@ module tb_pll_ctrl;
             n=0;
             while ((status[11] != command[15] || status[8]) && n<1600) begin ticks(1); n=n+1; end
             if (n==1600 || status[9]!==expected_error) $fatal(1,"ack/error: %h state %d",status,dut.state);
-            if (!expected_error && (!ce || rst || !locked || r27!=16'h0100)) $fatal(1,"successful clock/power state invalid");
+            if (!expected_error && (!ce || rst || !locked || r27!=16'hffff)) $fatal(1,"successful clock/power state invalid");
         end
     endtask
     task set_div(input integer div);
@@ -128,9 +131,9 @@ module tb_pll_ctrl;
         corrupt_power_on=1; send(20); finish_command(1);
         if (ce || !rst) $fatal(1,"power-enable readback error not fail closed");
         corrupt_power_on=0; set_div(25);
-        corrupt_power_restore=1; send(20); finish_command(1);
-        if (ce || !rst) $fatal(1,"power-restore readback error not fail closed");
-        corrupt_power_restore=0; set_div(25);
+        corrupt_power_final=1; send(20); finish_command(1);
+        if (ce || !rst) $fatal(1,"final power readback error not fail closed");
+        corrupt_power_final=0; set_div(25);
         set_div(20);
         @(negedge clk); resetn=0; command=0;
         ticks(5); resetn=1; ticks(400);

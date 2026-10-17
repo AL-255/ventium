@@ -45,11 +45,11 @@ gameplay measurement. CoreMark counters are not gameplay IPC.
   EDGE and NOCOUNT fields change. Feedback, VCO, phase, lock/filter settings and
   voltage are untouched. Fractional/CDDC starting states are rejected.
 - Before counter access it writes the UltraScale+ DRP power group at **0x27**
-  to `0xffff`, as required by XAPP888. Afterward it writes `0x0100` for this
-  integer, zero-phase, no-fine-phase/no-spread-spectrum configuration before
-  releasing reset, following current UG572's interpolator-enable rules. Both
-  writes are checked on the documented `0x9999` readable-bit mask; reserved bits
-  are not assumed readable. This controls internal interpolators, not voltage.
+  to `0xffff`, as required by XAPP888. The Oct17 source correction keeps that
+  value through relock and checks it again after counter readback. Both checks
+  use the documented `0x9999` readable-bit mask; reserved bits are not assumed
+  readable. This controls internal enables, not voltage. The deployed failed
+  image instead writes `0x0100` before relock; see the investigation below.
 - Timeout, readback failure or loss of the safe-change interlock during a change
   leaves the clock gated and MMCM reset asserted. A later valid mailbox request
   can recover without reprogramming. PS reset explicitly rewrites divide25:
@@ -328,6 +328,32 @@ processor change or speculative full synthesis has been launched.
 Evidence: `coremark-pll-board-r1/{program.log,pll-initial.json,
 preprogram-quiesce.json,pll-reset-probe-r1.json,pll-reset-probe-r2.json}` under
 the evidence root. No new gameplay or CoreMark score exists for this image.
+
+### Oct17 power-sequence correction (not yet physically verified)
+
+Review of AMD's installed Vivado 2025.2 reference implementations found no
+post-configuration write of `0x0100`. Clock Wizard's
+`data/ip/xilinx/clk_wiz_v6_0/ttcl/mmcm_pll_drp_v.ttcl` programs the power group
+to all ones, completes its counter/filter sequence, and releases reset. The
+MMCM path in `data/embeddedsw/XilinxProcessorIPLib/drivers/vphy_v1_15/src/
+xvphy_mmcme4.c`, `XVphy_MmcmWriteParameters`, likewise leaves it enabled.
+
+The local controller had introduced an additional full-word restore inferred
+from UG572's documented interpolator fields. That was not a saved original
+register value and did not follow the shipped reconfiguration sequence.
+The narrow correction retains `0xffff` through lock, leaving counter values,
+feedback, clock gating, timeout and safe-change checks unchanged. This is a
+reference-flow correction and a leading fault hypothesis, **not yet proof of
+the physical failure's cause**. No processor/cache source is changed.
+
+New BFM assertions reject any power write other than `0xffff`, and separately
+inject failure into the first and final power readbacks. All 41 dividers,
+safe-loss/reset phases and the AMD behavioral period checks pass in
+`/home/yukidama/external/tmp/ventium-programmable-clock.AkDdO8`. Running the new
+BFM against the old controller fails at the forbidden restore (native exit1,
+`old-power-mutant.log`). The 59 host tests also pass. None replaces silicon
+qualification; deployment remains the original failed image until a scoped
+clock-only repair has been built and its products checked.
 
 ## Physical procedure (clock qualification pending)
 

@@ -35,7 +35,7 @@ module ven_pll_ctrl #(
     localparam [3:0] STARTUP=0, IDLE=1, GATE=2, RESET_WAIT=3,
         READ08=4, READ09=5, WRITE08=6, WRITE09=7, VERIFY08=8,
         VERIFY09=9, LOCK_WAIT=10, POWER_ON=11, POWER_VERIFY=12,
-        POWER_RESTORE=13, POWER_RESTORE_VERIFY=14;
+        POWER_FINAL=13, POWER_FINAL_VERIFY=14;
     reg [3:0] state;
     wire busy = state != IDLE;
     // 0x504c = "PL", ABI1 in bits15:14. [13]reset [12]safe [11]ack
@@ -161,18 +161,20 @@ module ven_pll_ctrl #(
                     if (dout != next09) begin
                         state <= IDLE; error <= 1; ack <= seen; changing <= 0;
                     end else begin
-                        // Restore the documented integer/no-fine-phase/no-SSC
-                        // power configuration before releasing MMCM reset.
-                        // These are MMCM interpolator enables, NOT rail voltage.
-                        daddr <= 7'h27; di <= 16'h0100; den <= 1; dwe <= 1;
-                        state <= POWER_RESTORE; timer <= 0;
+                        // Keep the power group enabled through relock, matching
+                        // XAPP888 and Vivado's shipped MMCM DRP implementation.
+                        // Do NOT replace the full power word with a presumed
+                        // static default from a subset of documented bits.
+                        // These are MMCM internal enables, NOT rail voltage.
+                        daddr <= 7'h27; di <= 16'hffff; den <= 1; dwe <= 1;
+                        state <= POWER_FINAL; timer <= 0;
                     end
                 end
-                POWER_RESTORE: if (drdy) begin
-                    daddr <= 7'h27; den <= 1; state <= POWER_RESTORE_VERIFY; timer <= 0;
+                POWER_FINAL: if (drdy) begin
+                    daddr <= 7'h27; den <= 1; state <= POWER_FINAL_VERIFY; timer <= 0;
                 end
-                POWER_RESTORE_VERIFY: if (drdy) begin
-                    if ((dout & 16'h9999) != 16'h0100) begin
+                POWER_FINAL_VERIFY: if (drdy) begin
+                    if ((dout & 16'h9999) != 16'h9999) begin
                         state <= IDLE; error <= 1; ack <= seen; changing <= 0;
                     end else begin
                         mmcm_reset <= 0; guard <= 0; state <= LOCK_WAIT; timer <= 0;
