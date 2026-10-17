@@ -98,6 +98,27 @@ checkpoint and extra options, and `FLATTEN_HIERARCHY=rebuilt`. There is no nativ
 checkpoint-read command in synthesis. Final timing and dynamic acceptance remain
 pending.
 
+### Constraint and preservation preflight
+
+The actual generated synthesis script reads only the board `bitstream.xdc` /
+`led.xdc` plus generated IP constraints and `dont_touch.xdc`. The frozen wrapper
+explicitly excludes the legacy `fpatan_mcp.xdc`: its four-cycle waiver does not
+apply to the replacement shared FPU. Final native clock/exception/coverage
+reports must still establish the effective constraints; a source search alone
+does not establish timing sign-off.
+
+Do not describe the design as having no preservation attributes. The generated
+`dont_touch.xdc` uses soft hierarchy preservation, but frozen
+`source/flow/src/rk_ao486_system_pl.v:8` independently puts `DONT_TOUCH=yes` on the
+outer SoC module. Its comment records a historical AXI-only logic-trimming
+workaround. [AMD's 2025.2 property reference](https://docs.amd.com/r/2025.2-English/ug912-vivado-properties/DONT_TOUCH)
+distinguishes preserving a hierarchical boundary from freezing every contained
+cell: internal logic may still be optimized. The prior worst EIP-to-paired-return
+path is inside that SoC boundary, so this attribute alone does **not** establish
+the cause of its poor timing. Leaf/net properties and skipped physical
+optimizations require native-result inspection before changing preservation.
+No preservation attribute or running-build input was changed by this review.
+
 The live controller's original post-run parser incorrectly requires the default
 `-flatten_hierarchy rebuilt` argument to be printed explicitly. Vivado omits it.
 Do **not** interrupt/restart a valid synthesis for this post-run parser bug or
