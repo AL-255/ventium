@@ -274,6 +274,21 @@ def short_labels(paths):
     return result
 
 
+def compact_columns(clbs):
+    """Pack columns from the COMPLETE CLB inventory, not just occupied sites.
+
+    This is display-only: retain source coordinates and never compact each row
+    separately, which would destroy vertical alignment across device gaps.
+    """
+    return {x: index for index, x in enumerate(sorted({s['x'] for s in clbs}))}
+
+
+def site_geometry(site, columns=None):
+    x = site['x'] if columns is None else columns[site['x']]
+    width = 1/site['tile_site_count']
+    return x-.5+site['tile_site_index']*width, site['y']-.5, width
+
+
 def plot(data, output, image_id):
     import numpy as np
     import matplotlib
@@ -307,35 +322,33 @@ def plot(data, output, image_id):
         ax.set_xlabel('Physical tile-grid X')
         ax.set_ylabel('Physical tile-grid Y (downward)')
 
-    def geometry(s):
-        width = 1/s['tile_site_count']
-        return s['x']-.5+s['tile_site_index']*width, s['y']-.5, width
-
     def rect(x, y, w, h):
         return [(x,y), (x+w,y), (x+w,y+h), (x,y+h)]
 
     def backdrop(ax):
         polygons, paint = [], []
         for s in clbs:
-            x,y,w=geometry(s)
+            x,y,w=site_geometry(s)
             polygons.append(rect(x,y,w,1))
             paint.append('#c8cdd3' if s['primitives'] else '#ffffff')
         ax.add_collection(PolyCollection(polygons, facecolors=paint, edgecolors='none', rasterized=True))
 
+    def hierarchy(ax, columns=None):
+        polygons, paint = [], []
+        for s in clbs:
+            x,y,w=site_geometry(s, columns)
+            if not s['owners']:
+                polygons.append(rect(x,y,w,1)); paint.append('#ffffff')
+            else:
+                # Preserve all hierarchy owners as proportional strips, not just
+                # the dominant group's color. Values are cell shares, not capacity.
+                for group, count in s['owners']:
+                    h=count/s['primitives']
+                    polygons.append(rect(x,y,w,h));paint.append(colors[group]);y+=h
+        ax.add_collection(PolyCollection(polygons,facecolors=paint,edgecolors='none',rasterized=True))
+
     fig = plt.figure(figsize=(15.5, 11))
-    ax = fig.add_axes([.065,.11,.60,.78]); setup(ax)
-    polygons, paint = [], []
-    for s in clbs:
-        x,y,w=geometry(s)
-        if not s['owners']:
-            polygons.append(rect(x,y,w,1)); paint.append('#ffffff')
-        else:
-            # Preserve all hierarchy owners as proportional strips, not just
-            # the dominant group's color. Values are cell shares, not capacity.
-            for group, count in s['owners']:
-                h=count/s['primitives']
-                polygons.append(rect(x,y,w,h));paint.append(colors[group]);y+=h
-    ax.add_collection(PolyCollection(polygons,facecolors=paint,edgecolors='none',rasterized=True))
+    ax = fig.add_axes([.065,.11,.60,.78]); setup(ax); hierarchy(ax)
     fig.suptitle('CLB placement by synthesized hierarchy', x=.065, ha='left', y=.98, fontsize=20, weight='bold')
     fig.text(.065,.94,title,fontsize=11,color='#465366')
     handles=[Patch(facecolor=c,label=f'{label}  ·  {g["primitives"]:,}') for c,label,g in zip(colors,labels,data['groups'])]
@@ -350,6 +363,30 @@ def plot(data, output, image_id):
              'DSP/BRAM coordinates are excluded. White = genuinely empty CLB; grey = non-CLB geography.',fontsize=10,color='#465366')
     fig.savefig(output/'clb-hierarchy.png',dpi=220);plt.close(fig)
 
+    # Readability companion: squeeze ONLY globally absent CLB columns. Empty
+    # sites and partial-height holes remain, and the physical view is unchanged.
+    columns = compact_columns(clbs)
+    fig = plt.figure(figsize=(15.5, 11))
+    ax = fig.add_axes([.065,.11,.60,.78]); setup(ax)
+    ax.set_xlim(-.5,len(columns)-.5)
+    ax.set_aspect('auto')
+    ticks = sorted(set(np.linspace(0,len(columns)-1,min(9,len(columns)),dtype=int)))
+    physical_x = list(columns)
+    ax.set_xticks(ticks, [str(physical_x[i]) for i in ticks])
+    ax.set_xlabel('Original physical tile-grid X · non-CLB columns removed')
+    hierarchy(ax, columns)
+    fig.suptitle('CLB hierarchy — compact columns', x=.065, ha='left', y=.98, fontsize=20, weight='bold')
+    fig.text(.065,.94,title,fontsize=11,color='#465366')
+    fig.legend(handles=handles,loc='upper left',bbox_to_anchor=(.68,.88),frameon=False,fontsize=9,
+               title='Exact hierarchy parent · placed primitives',labelspacing=1.0)
+    fig.text(.69,.20,f"{total['occupied_clb_sites']:,} / {total['clb_sites']:,} CLBs occupied\n"
+             f"{len(columns)} CLB columns packed edge-to-edge\n"
+             'All sites and hierarchy shares retained',fontsize=11,linespacing=1.8)
+    fig.text(.065,.035,'Horizontal spacing is compressed, NOT physical distance; original X labels and physical Y are retained.\n'
+             'White = genuinely empty CLB; grey = a partial-height device gap. Owner strips are primitive shares, not LUT capacity.',
+             fontsize=10,color='#465366')
+    fig.savefig(output/'clb-hierarchy-compact.png',dpi=220);plt.close(fig)
+
     # Current exporter targets UltraScale/UltraScale+ SLICEs (eight LUTs).
     # Do not silently apply that denominator to a different architecture.
     if not re.match(r'xc(zu|ku|vu|k26)',data['metadata']['part']):
@@ -357,7 +394,7 @@ def plot(data, output, image_id):
     fig,ax=plt.subplots(figsize=(11,10));setup(ax)
     polygons=[];values=[]
     for s in clbs:
-        x,y,w=geometry(s);polygons.append(rect(x,y,w,1));values.append(s['lut_slots'])
+        x,y,w=site_geometry(s);polygons.append(rect(x,y,w,1));values.append(s['lut_slots'])
     coll=PolyCollection(polygons,array=np.array(values),cmap='viridis',edgecolors='none',rasterized=True)
     coll.set_clim(0,8);ax.add_collection(coll)
     fig.colorbar(coll,ax=ax,shrink=.7,label='Distinct placed LUT letters (O5/O6 combined; out of 8)')
@@ -400,7 +437,7 @@ def plot(data, output, image_id):
         polygons=[];paint=[]
         for s in clbs:
             if not (zoom[0]<=s['x']<=zoom[1] and zoom[2]<=s['y']<=zoom[3]):continue
-            x,y,w=geometry(s)
+            x,y,w=site_geometry(s)
             if not s['owners']:
                 polygons.append(rect(x,y,w,1));paint.append('#ffffff')
             for group,count in s['owners']:

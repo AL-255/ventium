@@ -143,6 +143,30 @@ Reporting congestion hotspots
         self.assertEqual({c['tile_site_index'] for c in sharing},{0,1})
         self.assertEqual({c['tile_site_count'] for c in sharing},{2})
 
+    def test_compact_columns_keep_unoccupied_sites_and_sort_large_coordinates(self):
+        m=self.load();s=r.summarize(m,r.parse_congestion(self.log,m['tiles']))
+        before=repr(s)
+        columns=r.compact_columns(list(reversed(s['clbs'])))
+        self.assertEqual(columns,{1000:0,1005:1})
+        geometry=[r.site_geometry(c,columns) for c in s['clbs']]
+        self.assertEqual(geometry,[(-.5,1199.5,1),(.5,1199.5,1)])
+        self.assertEqual(repr(s),before)
+
+    def test_compact_columns_preserve_vertical_alignment_and_partial_gaps(self):
+        sites=[dict(x=10,y=5,tile_site_count=1,tile_site_index=0),
+               dict(x=1000,y=5,tile_site_count=1,tile_site_index=0),
+               dict(x=1000,y=1200,tile_site_count=1,tile_site_index=0)]
+        columns=r.compact_columns(sites)
+        geometry=[r.site_geometry(c,columns) for c in sites]
+        self.assertEqual(geometry,[(-.5,4.5,1),(.5,4.5,1),(.5,1199.5,1)])
+
+    def test_compact_columns_keep_multiple_slices_edge_to_edge(self):
+        sites=[dict(x=1000,y=1200,tile_site_count=2,tile_site_index=i) for i in range(2)]
+        columns=r.compact_columns(sites)
+        self.assertEqual([r.site_geometry(c,columns) for c in sites],
+                         [(-.5,1199.5,.5),(0,1199.5,.5)])
+        self.assertEqual(r.site_geometry(sites[1]),(1000,1199.5,.5))
+
     def test_site_type_qualified_bel_and_unique_nonclb_sites(self):
         self.cells.append(['soc/mul/internal','DSP_ALU','DSP48E2_X0Y0','DSP_ALU'])
         self.write_cells();m=self.load()

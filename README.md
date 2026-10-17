@@ -181,6 +181,10 @@ color strips. White means an available, unoccupied CLB; grey means no CLB site.
 
 ![Hierarchy-colored physical CLB map](docs/fpga-physical-2886d24c/clb-hierarchy.png)
 
+[Compact-column version](docs/fpga-physical-2886d24c/clb-hierarchy-compact.png):
+packs CLB columns edge-to-edge, preserving empty sites and hierarchy colors;
+horizontal spacing is compressed, not physical distance.
+
 | Resource | Used / available | Utilization |
 | --- | ---: | ---: |
 | CLB LUTs | 186,086 / 341,280 | 54.53% |

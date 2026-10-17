@@ -11,6 +11,15 @@ does not create a new processor candidate or performance measurement.
 
 ## Maps
 
+![CLB hierarchy with non-CLB columns removed](fpga-physical-2886d24c/clb-hierarchy-compact.png)
+
+The **compact-column companion** packs all **117 CLB-bearing columns**
+edge-to-edge for readability. It preserves column order, every site, mixed-owner
+shares and physical Y; X tick labels retain the original physical coordinates.
+Horizontal distances are compressed and must not be used as wire lengths.
+Genuinely empty CLBs remain white and partial-height device gaps remain grey.
+The original physical-coordinate map below remains unchanged.
+
 ![CLB ownership by actual synthesized hierarchy](fpga-physical-2886d24c/clb-hierarchy.png)
 
 All **42,660** CLB sites are represented, including **9,132 unoccupied** sites.
@@ -132,11 +141,13 @@ New flow:
   exact rectangle unions and explicit missing-data semantics. Physical Y
   increases downward; name-suffix Y values are never silently substituted.
 - [test_render_device_view.py](../fpga/scripts/test_render_device_view.py):
-  **24 offline tests pass**. Coverage includes large/sparse coordinates,
+  **27 offline tests pass**. Coverage includes large/sparse coordinates,
   DSP/BRAM aliases, multiple SLICEs per tile, O5/O6 sharing, repeated primitives,
   malformed/incomplete exports, exact resource totals, hierarchy lookalikes,
   absent/mixed-session congestion data, overlaps, timing-coordinate mapping and
-  clock-net exclusion from data-fanout rankings.
+  clock-net exclusion from data-fanout rankings. Compact-column tests also
+  check empty-column preservation, vertical alignment across partial gaps and
+  multiple sites per tile; rendering does not mutate source coordinates.
 - The obsolete exporter now fails with migration guidance. Its lossy CSV cannot
   reconstruct geometry; the new renderer rejects it rather than guessing.
 
@@ -144,9 +155,10 @@ New flow:
 
 For the published image, **no Vivado is needed**:
 
-Offline replay was checked: all four published PNGs and the compressed physical
-dataset regenerate byte-for-byte identically; the summary JSON is semantically
-identical.
+Offline replay was checked: the four original PNGs and the compressed physical
+dataset still regenerate byte-for-byte identically after adding the compact
+companion; the summary JSON is semantically identical. The same command also
+generates `clb-hierarchy-compact.png` without another Vivado extraction.
 
 ```sh
 TMPDIR=/home/yukidama/external/tmp \
