@@ -171,46 +171,47 @@ before programming the board.  A generated `fpga_run_*`
 directory is disposable except for a deliberately retained deployable artifact
 or capture needed by the next debug session.
 
-### Latest retained placed CLB visualization
+### Current routed CLB placement and congestion
 
-This graphical device view was regenerated from the retained 2026-08-28 Vivado
-2025.2 placed checkpoint for `rk_ao486_bd_wrapper` on
-`xczu15eg-ffvb1156-2-i`.  Each plotted tile is a placed primitive site; color
-identifies the recognized RTL module and luminance separates its major leaf
-groups.  White regions are not populated by the plotted CLB primitives.  This
-is a capacity/routability view, not timing, DRC, or guest-correctness sign-off.
+These maps use the **2026-10-17 routed checkpoint for deployed image `2886d24c`**,
+on `xczu15eg-ffvb1156-2-i`. The rewritten exporter uses Vivado's physical tile
+grid—not incompatible SLICE/DSP/BRAM coordinate suffixes. Colors identify
+actual synthesized hierarchy parents; mixed-owner CLBs retain proportional
+color strips. White means an available, unoccupied CLB; grey means no CLB site.
 
-![Color-coded placed CLB usage for the RK-XCZU15EG-F Ventium ao486 integration](docs/fpga-clb-placement-rk-xczu15eg.png)
+![Hierarchy-colored physical CLB map](docs/fpga-physical-2886d24c/clb-hierarchy.png)
 
 | Resource | Used / available | Utilization |
 | --- | ---: | ---: |
-| CLB LUTs | 317,438 / 341,280 | 93.01% |
-| CLB sites | 41,650 / 42,660 | 97.63% |
-| Registers | 42,743 / 682,560 | 6.26% |
-| Block RAM tiles | 85 / 744 | 11.42% |
-| DSP48E2 | 1,264 / 3,528 | 35.83% |
+| CLB LUTs | 186,086 / 341,280 | 54.53% |
+| CLB sites | 33,528 / 42,660 | 78.59% |
+| Registers | 55,190 / 682,560 | 8.09% |
+| Block RAM tiles | 277.5 / 744 | 37.30% |
+| DSP48E2 | 47 / 3,528 | 1.33% |
 
-The CLB-site figure leaves little placement headroom.  Treat logic compaction
-as a correctness-sensitive engineering task: preserve single-owner FSM state,
-one-burst cache fills, exact request widths, and explicit shared-arithmetic
-handshakes.  Do not trade congestion for global flushing, duplicate line fills,
-unbounded replay, guest-specific RTL, or a serialized common path.
+![Native router congestion windows by direction](docs/fpga-physical-2886d24c/routing-congestion.png)
 
-Regenerate the graphical view from a new placed checkpoint with the historical
-device-view flow.  The Vivado step is read-only against the checkpoint and must
-use the single-run guard:
+The final native router log reports regional peaks up to **90.37%**, despite
+global routing usage of **28.32% vertical / 27.54% horizontal**. Unreported
+areas are **unknown, not zero congestion**. The congested windows overlap
+the synthesized frontend/decode/address logic under `u_icache`; that name
+does not mean all its logic is cache storage. The worst EIP-to-paired-load
+return path has **89 logic levels and 74.7% routing delay**. Its conditional
+STA period budget is **28.70 MHz**, distinct from measured **40 MHz** operation.
+
+[Map methodology, density and critical-path detail, optimization priorities,
+and full regeneration procedure](docs/FPGA_PHYSICAL_MAP_2026-10-17.md).
+No CPU RTL, placement, routing or board state was changed to generate these maps.
+
+Regenerate all graphics from the committed compact data without running Vivado:
 
 ```bash
-DCP=<impl>/rk_ao486_bd_wrapper_placed.dcp \
-OUT=/tmp/ventium-cells.csv \
-  fpga/run_vivado_exclusive.sh -mode batch \
-  -source fpga/scripts/dump_cells_loc_soc.tcl
-
-MPLCONFIGDIR=/tmp/ventium-matplotlib \
+TMPDIR=/home/yukidama/external/tmp \
+MPLCONFIGDIR=/home/yukidama/external/tmp/ventium-matplotlib \
   python3 fpga/scripts/render_device_view.py \
-    /tmp/ventium-cells.csv \
-    docs/fpga-clb-placement-rk-xczu15eg.png \
-    "RK-XCZU15EG-F placed CLB view — Ventium ao486 integration"
+    --data docs/fpga-physical-2886d24c/physical-map.json.gz \
+    --image-id 2886d24c \
+    --output /home/yukidama/external/tmp/ventium-map-preview
 ```
 
 [`docs/fpga-synthesis.md`](docs/fpga-synthesis.md) remains an explicitly
