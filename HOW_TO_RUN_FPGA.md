@@ -6,6 +6,9 @@
 > gameplay IPC is **0.496499864**, cycles **625,021,130,428–629,480,208,865**.
 > The complete raw-color 15 fps movie, closure evidence, current image pins and
 > PLL-specific controller changes are in the [Oct17 run report](docs/FPGA_QUAKE_TIMEDEMO_2026-10-17.md).
+> The same image also completes cold FreeDOS/Doom shareware 1.9 DEMO3 at
+> **20.50 FPS / 40 MHz**, U/V + fast-pipe; see the
+> [Doom result and original-media evidence](docs/FPGA_DOOM_2026-10-17.md).
 > The Oct8 deployment status and hardcoded fixed-clock recipes below are
 > historical; do not apply their image pins or PS-clock cleanup to this image.
 
