@@ -13,5 +13,5 @@ test ! -e "$output.vvp"
 timeout 50s iverilog -g2012 -s tb_programmable_clock_netlist -s glbl \
     -y "$unisim" -o "$output.vvp" "$src/tb_programmable_clock_netlist.sv" "$netlist"
 timeout 50s vvp "$output.vvp" | tee "$output.log"
-! rg 'Error:|Warning:|FATAL' "$output.log"
-rg -q 'PROGRAMMABLE-CLOCK-NETLIST-OK' "$output.log"
+! /usr/bin/grep -E 'Error:|Warning:|FATAL' "$output.log"
+/usr/bin/grep -q 'PROGRAMMABLE-CLOCK-NETLIST-OK' "$output.log"
