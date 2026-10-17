@@ -56,6 +56,12 @@ class ProductGate(unittest.TestCase):
     def test_outer_limit_leaves_shutdown_margin(self):
         self.assertLess(WHOLE_RUN_LIMIT_SECONDS+60+10,14400)
 
+    def test_incremental_cannot_silently_revert_to_full_flow(self):
+        text = Path(__file__).with_name('launch_programmable_incremental.tcl').read_text()
+        commands = [line for line in text.splitlines() if line.startswith('read_checkpoint ')]
+        self.assertEqual(commands, ['read_checkpoint -incremental -force_incr -directive RuntimeOptimized [lindex $argv 1]'])
+        self.assertIn('if {$match_pct < 95.0 || $reuse_pct < 90.0}', text)
+
     def test_tcl_reuse_json(self):
         script = Path(__file__).with_name('launch_programmable_incremental.tcl').resolve()
         with tempfile.TemporaryDirectory(prefix='ventium-reuse-json-test.',dir=os.environ['TMPDIR']) as folder:

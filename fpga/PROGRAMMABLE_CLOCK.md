@@ -3,7 +3,7 @@
 Status (2026-10-16): controller implemented and unit-tested. The first full
 **40 MHz** implementation was stopped for congestion after 5 h 35 min; the user
 now requires successful routing in **less than four hours**. A physical-layout
-retry is prepared from the existing optimized netlist, without another synthesis
+retry uses the existing optimized netlist, without another synthesis
 or processor RTL change. **Not yet deployed or physically qualified.** There are
 no per-frequency images in this flow. Earlier fixed-clock variant attempts were
 cancelled and never deployed.
@@ -201,12 +201,12 @@ clock/utilization/control-set reports and hashes. The exact reference DCP SHA256
 is `c932cefb2909e0934c83d105fc8aaebc3e51beb0c2b899b43738462eb54d76a5`.
 
 The selected retry is `launch_programmable_incremental.tcl`, guarded by
-`run_programmable_incremental.py`, with output `programmable-clock-reuse-r1`:
+`run_programmable_incremental.py`, with current output `programmable-clock-reuse-r2`:
 
 1. Open **r3's existing optimized netlist**, including its implementation XDCs.
    No synthesis, source substitution, cache resizing or CPU change.
 2. Import only matching physical placement/routes from the verified parent with
-   `read_checkpoint -incremental -directive RuntimeOptimized`. Do not use
+   `read_checkpoint -incremental -force_incr -directive RuntimeOptimized`. Do not use
    `-auto_incremental`, which can choose a full implementation instead.
 3. Require at least **95% matched primitive cells** and **90% reused placements**
    both before and after incremental placement. Abort on insufficient reuse;
@@ -220,7 +220,25 @@ The selected retry is `launch_programmable_incremental.tcl`, guarded by
    hours. Require all routable nets routed, zero routing errors and no DRC
    errors/critical warnings before accepting the products.
 
-The additional ten host tests pass (54 including the existing host suite).
+The first reuse attempt launched as `ventium-programmable-reuse-oct16-r1.service`, invocation
+`808780de602e4e30b36603cf1c995608`, using committed implementation scripts
+`e2ad22ae`. Its source/physical-input hashes and live resource records are in
+`programmable-clock-reuse-r1/{started.json,watch.jsonl}`. It closed after **50.04 s**
+with native exit1 and unchanged inputs, before placement or routing. Vivado
+reported `Constraints 18-6519`: reference WNS -9.841 ns is below its -1 ns
+incremental threshold. Despite omitting `-auto_incremental`, the tool switched
+to full implementation. The explicit reuse guard stopped that fallback:
+**97.199448% matched**, **0% reused** of 295,049 primitives.
+
+r2 explicitly adds `-force_incr`, as recommended by the native diagnostic and
+[AMD's documented override](https://docs.amd.com/r/en-US/Vivado-Design-Suite-User-Guide-Implementation-UG904/Further-Options?contentId=0boU4mD1KVUZkTYtvKq6kw).
+This selects the incremental algorithm; it does not waive the independent
+95%/90% reuse thresholds, routing/DRC gates, unchanged clock constraints,
+runtime/resource limits, or the absence of STA sign-off. The prior native
+diagnostic and closure are hashed inputs to the next attempt. No second
+full-placement or synthesis run occurred in r1.
+
+The additional eleven host tests pass (55 including the existing host suite).
 They check partial routes, routing/DRC errors, wrong clocks, insufficient reuse,
 duplicate counters, the strict runtime boundary and the native Tcl reuse-JSON
 format. These tests do not qualify an FPGA image. The retry is not yet a pass.

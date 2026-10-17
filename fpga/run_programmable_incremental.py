@@ -12,7 +12,8 @@ from prepare_programmable_clock import REPO, sha
 from run_programmable_clock_build import host, scope, GIB, SCOPE
 
 ROOT = Path('/home/yukidama/external/tmp/ventium-fprem-sequence.iSZ9BAj4')
-DEST = ROOT/'programmable-clock-reuse-r1'
+DEST = ROOT/'programmable-clock-reuse-r2'
+PRIOR = ROOT/'programmable-clock-reuse-r1'
 R3 = ROOT/'programmable-clock-r3'
 AUDIT = ROOT/'programmable-clock-congestion-r1'
 PARENT = ROOT/'parallel-write-implementation-r1/project/rk_ao486_system.runs/impl_1/rk_ao486_bd_wrapper_routed.dcp'
@@ -53,12 +54,18 @@ def main():
     assert ROOT.stat().st_dev != REPO.stat().st_dev
     assert scope()['ActiveState'] in ('inactive','failed')
     assert subprocess.run(['pgrep','-x','vivado'], stdout=subprocess.DEVNULL).returncode == 1
+    prior = json.loads((PRIOR/'closed.json').read_text())
+    assert not prior['passed'] and prior['native_exit'] == 1 and prior['inputs_unchanged']
+    reuse = json.loads((PRIOR/'build/initial-reuse.json').read_text())
+    assert reuse['matched_pct'] >= 95 and reuse['reused_pct'] == 0
+    assert 'Flow is switching to default flow due to incremental criteria not met.' in (PRIOR/'native.log').read_text()
     audit = json.loads((AUDIT/'closed.json').read_text())
     assert audit['passed'] and audit['native_exit'] == 0 and audit['inputs_unchanged']
     assert sha(PARENT) == 'c932cefb2909e0934c83d105fc8aaebc3e51beb0c2b899b43738462eb54d76a5'
     pins = json.loads((AUDIT/'started.json').read_text())['pins']
     script = REPO/'fpga/launch_programmable_incremental.tcl'
     for path in (CURRENT, script, Path(__file__).resolve(), AUDIT/'closed.json',
+                 PRIOR/'closed.json', PRIOR/'native.log', PRIOR/'build/initial-reuse.json',
                  REPO/'fpga/prepare_programmable_clock.py', REPO/'fpga/test_programmable_incremental.py'):
         pins[str(path)] = sha(path)
     for name, digest in audit['products'].items():

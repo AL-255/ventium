@@ -44,7 +44,10 @@ proc reuse_counts {stage} {
 open_checkpoint [lindex $argv 0]
 if {[get_property PART [current_design]] ne "xczu15eg-ffvb1156-2-i"} {error "wrong device"}
 check_clocks
-read_checkpoint -incremental -directive RuntimeOptimized [lindex $argv 1]
+# Native r1 rejected this physically proven reference solely on WNS (-9.841 ns)
+# and switched to full placement. Force the incremental algorithm, not timing
+# acceptance; the independent match/reuse, route, DRC and runtime gates remain.
+read_checkpoint -incremental -force_incr -directive RuntimeOptimized [lindex $argv 1]
 check_clocks
 report_incremental_reuse -file [file join $out initial-reuse.rpt]
 reuse_counts initial
