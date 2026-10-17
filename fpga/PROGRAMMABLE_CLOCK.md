@@ -1,10 +1,13 @@
 # One image, runtime core-clock sweep
 
-Status (2026-10-16): controller implemented and unit-tested. The first full
+Status (2026-10-17): controller implemented and unit-tested. The first full
 **40 MHz** implementation was stopped for congestion after 5 h 35 min; the user
-now requires successful routing in **less than four hours**. A physical-layout
-retry uses the existing optimized netlist, without another synthesis
-or processor RTL change. **Not yet deployed or physically qualified.** There are
+now requires successful routing in **less than four hours**. The physical-layout
+retry completed routing in **561.805 s (9 m 21.805 s)** from the existing
+optimized netlist, without another synthesis or processor RTL change. The entire
+native run completed in **1,491.236 s (24 m 51 s)**. The new image was programmed
+once, but **physical startup fails to acquire MMCM lock**. It remains safely
+clock-gated; no CoreMark frequency trials have started on it. There are
 no per-frequency images in this flow. Earlier fixed-clock variant attempts were
 cancelled and never deployed.
 
@@ -238,7 +241,7 @@ runtime/resource limits, or the absence of STA sign-off. The prior native
 diagnostic and closure are hashed inputs to the next attempt. No second
 full-placement or synthesis run occurred in r1.
 
-r2 is running as `ventium-programmable-reuse-oct16-r2.service`, invocation
+r2 completed as `ventium-programmable-reuse-oct16-r2.service`, invocation
 `2eb46d56f5df421694a34f5bcefc0317`, using scripts committed as `a217a092`.
 The actual physical import replays all 162 reference physical optimizations.
 The initial independent primitive-cell gate passes: 295,409 primitives,
@@ -248,18 +251,85 @@ is import evidence, not completed routing or a hardware pass. Incremental
 placement subsequently completed in **7 m 46 s** with zero warnings/errors,
 preserving the same **99.496969%** primitive-placement reuse. Both 40/100 MHz
 clock guards pass after placement. Routing started at Unix milliseconds
-`1792208801317`; its completion and elapsed-time gate remain pending.
+`1792208801317` and completed after **561,805 ms**. Native `route_design`
+finished successfully with zero errors/critical warnings. The final route
+report has **224,099 / 224,099 routable nets connected, zero routing errors**.
+The router retained **223,286 fully reused nets (99.64%)** and rerouted 807;
+its initial overlap sequence was **117 → 17 → 5 → 0**. This meets the user's
+strict under-four-hour routing requirement.
+
+Final occupied CLBs are **33,528 (78.59%)**, compared with r3's 34,247 (80.28%)
+and the parent's 33,510 (78.55%). The final DRC has no errors/critical warnings;
+DSP pipelining and unused vendor-IP net warnings remain visible. Final timing
+reports preserve **40 MHz core / 100 MHz AXI** constraints and give a
+**28.701817 MHz conditional core-period budget**, setup -9.841 ns / hold
++0.004 ns, identical to the parent's final estimate. This is **not** 40 MHz
+STA sign-off. The router's intermediate -10.018 ns estimate is superseded by
+the explicit post-route timing report. The always-on 100 MHz domain has setup
++5.935 ns / hold +0.012 ns; the two cross-clock setup minima are +0.113 and
++1.187 ns. The core's negative slack does not explain a pre-guest lock timeout.
+
+Native exit is zero, input pins and all product hashes were independently
+rechecked, peak scope RAM was 7,828,574,208 bytes, and scope swap/OOM were zero.
+The scope and controller are closed; no Vivado process remains from this run.
+
+| Product | SHA256 |
+|---|---|
+| `build/ventium_programmable_clock_40.bit` | `c1786ad0824b92f437c4eb7326577633653ddd3e03eda3b5a6fea4d01f6ceab2` |
+| `build/ventium_programmable_clock_40.bin` | `b9cd2144880c9bdf5f85988801fb4c45f9d59eda15e6d6105dac329c81778a45` |
+| `build/routed.dcp` | `602323bae23a5c22c746c10fd62f7ed8bee51923432586fb6ccc6c2338d46ebc` |
 
 The additional eleven host tests pass (55 including the existing host suite).
 They check partial routes, routing/DRC errors, wrong clocks, insufficient reuse,
 duplicate counters, the strict runtime boundary and the native Tcl reuse-JSON
-format. These tests do not qualify an FPGA image. The retry is not yet a pass.
+format. These tests do not qualify an FPGA image. Implementation passed its
+routing/product gates; physical clock qualification has **not** passed.
 
 AMD references: [incremental flow](https://docs.amd.com/r/2025.2-English/ug908-vivado-programming-debugging/Using-Incremental-Compile?contentId=LhXjyw_bq5zL1yBpwdGDlw),
 [reuse object properties](https://docs.amd.com/r/2023.2-English/ug904-vivado-implementation/Object-Properties),
 [RuntimeOptimized versus TimingClosure](https://docs.amd.com/r/2024.2-English/ug904-vivado-implementation/Incremental-Directives?contentId=GHAkvNCSWOZrYoe0PqJ2sg).
 
-## Physical procedure (pending this image)
+### First deployment: lock-acquisition failure
+
+After guest reset and posted-DDR drain, the raw binary was installed as
+`/lib/firmware/ventium_programmable_clock_40_oct16_reuse2.bit.bin`. Its board hash
+matches the table above. The normal board loader returned zero and FPGA manager
+reported `operating`. That confirms programming, **not a working core clock**.
+The old fixed-clock firmware and accepted evidence were preserved.
+
+The first GPIO-only status was `0x504c6219`: error, not busy, reset asserted,
+clock gated, unlocked, divider25. No core-clocked MMIO (including IDENT) or
+guest daemon was opened afterward: those accesses can hang when this clock
+is stopped. Board Linux still reports the PS reference at approximately
+99,999,999 Hz.
+
+`board-tools/ven_pll_reset_probe.py` performs a narrowly guarded, same-image
+whole-fabric reset diagnostic, not a normal clock-sweep operation. Generated
+PS HDL explicitly maps `pl_resetn0` to EMIO95, Linux GPIO offset173. The helper
+claims only that unused line, requires the pinned failed image/status and no
+daemon, and releases reset even if the held-reset witness fails. It does not
+reprogram or access management MMIO. Four host tests cover its safeguards.
+
+Two probes failed identically; the second retained transitions:
+
+| Time after reset release | Status | Meaning |
+|---|---|---|
+| Before release | `504c6119` | Controller reset reached; busy, MMCM reset asserted |
+| 105.9 microseconds | `504c4119` | All DRP writes/readback checks completed; reset released, waiting for lock |
+| 168.153 milliseconds | `504c6219` | Lock-wait timeout; reset reasserted and output remains gated |
+
+The timeout matches 2^24 reference cycles (167.772 ms). This localizes failure
+to lock acquisition, not a stuck DRP response or failed readback. It does not
+yet identify the analog/configuration cause. The vendor behavioral-model pass
+was insufficient to prove physical startup. Current investigation compares
+the synthesized feedback path and DRP sequence against the vendor flow; no
+processor change or speculative full synthesis has been launched.
+
+Evidence: `coremark-pll-board-r1/{program.log,pll-initial.json,
+preprogram-quiesce.json,pll-reset-probe-r1.json,pll-reset-probe-r2.json}` under
+the evidence root. No new gameplay or CoreMark score exists for this image.
+
+## Physical procedure (clock qualification pending)
 
 1. Verify native completion, output/source hashes, routed clocks, route and DRC
    reports. Retain setup/hold failures honestly; overclock tests do not waive them.
