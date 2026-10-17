@@ -2,6 +2,9 @@
 set -euo pipefail
 test "$#" = 2
 test -n "${TMPDIR:?}"
+# Vivado exports its bundled C++ runtime, which is older than the host Icarus
+# binary's ABI. Keep the vendor environment in Vivado, not in this native child.
+unset LD_LIBRARY_PATH LD_PRELOAD
 src="$(cd "$(dirname "$0")" && pwd)"
 unisim=/tools/Xilinx/2025.2/Vivado/data/verilog/src/unisims
 netlist="$1"

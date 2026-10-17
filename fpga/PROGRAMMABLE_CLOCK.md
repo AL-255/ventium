@@ -136,8 +136,9 @@ owned by `ventium-programmable-clock-oct16-r3.service`, invocation
 `fa0d86b28c7840e39ee050af6d348483`. It was deliberately stopped on the user's
 new under-four-hour requirement: elapsed **20,131.37 s**, native exit143,
 `reason="controller signal"`, all input pins unchanged, **no bitstream**.
-The scope is closed and no Vivado worker survived. There will be one completed
-image and one normal deployment, with no frequency-specific images.
+The scope is closed and no Vivado worker survived. The runtime sweep uses one
+image rather than frequency-specific images. The first completed image's
+startup failure requires a clock-only repair before that sweep can begin.
 About 1.2 GiB of the closed r2 synthesis cache and obsolete cancelled-variant
 physical dump was removed to retain the eight-GiB build admission reserve;
 source freezes, reports, native logs and the original routed DCP remain.
@@ -354,6 +355,50 @@ BFM against the old controller fails at the forbidden restore (native exit1,
 `old-power-mutant.log`). The 59 host tests also pass. None replaces silicon
 qualification; deployment remains the original failed image until a scoped
 clock-only repair has been built and its products checked.
+
+The read-only routed-leaf audit completed in **125.224 s**, native exit0,
+unchanged input hashes, no swap/OOM (`programmable-clock-netlist-audit-r3`).
+The feedback BUFGCE is permanently enabled in both parent and candidate;
+both MMCMs resolve to `COMPENSATION=BUF_IN`. Input, feedback and DRP clocks
+are connected as intended. This rejects the simple gated-feedback deadlock
+hypothesis; it does not prove analog lock. Earlier audit r1 was deliberately
+stopped after an over-broad constant-net traversal; r2 failed on a report
+API expecting one object. Neither modified or programmed a checkpoint.
+
+The first repair preflight (`programmable-clock-power-repair-r1`, owner
+`ventium-clock-power-repair-oct17-r1b.service`, invocation
+`6cb3cc1e57064fb592a1f1a7b60b5ffa`) verified strict replacement and identical
+122-module SoC exports, SHA256
+`4b04a2a4babfc433e07a0f0f6c1858de0add1e8eb680b51a9d5495572a3ceb05`.
+It then stopped before placement because the Icarus child inherited Vivado's
+older `libstdc++`; native exit1 after 100.085 s, inputs unchanged. The child
+wrapper now clears `LD_LIBRARY_PATH`/`LD_PRELOAD`, leaving Vivado's own runtime
+untouched. The repaired synthesized netlist passes all 41 divider periods,
+power-write checks, unsafe-command rejection and reset restoration, both from
+a normal shell and with the vendor library path deliberately injected.
+
+The identical clock RTL is frozen in `programmable-clock-power-repair-r2`,
+owner `ventium-clock-power-repair-oct17-r2.service`, invocation
+`d72b5f73f4ba429f9924362b80dc62f3`. The initial 10-GiB-RAM admission attempt
+was rejected before Vivado started; the admitted run uses an **8 GiB RAM /
+4 GiB swap** cap and retains two GiB of host headroom at admission. Live
+two-GiB host RAM/swap and four-GiB disk stop floors remain. Its entire native
+run is bounded to 3 h 50 min, with no frequency variants or CPU synthesis.
+
+Only the small clock leaf is synthesized (12 s), then inserted into the
+existing routed checkpoint through a **strict port match**. Vivado optimized
+the original 95-bit GPIO boundary to eight divider/lock bits and six control
+bits; the adapter is derived from that exported netlist, not guessed. All
+16,384 dynamic status combinations round-trip through the adapter test.
+Before implementation, the flow requires identical before/after logical SoC
+exports, including every attribute and statement (only comments/blank lines
+are omitted from the comparison). It also tests the actual synthesized leaf
+with AMD primitive models. At least **99% matched/reused primitive placements**
+are required before and after placement. The same netlist test is repeated
+after routing; complete routes, DRC, clocks, runtime and product-hash checks
+remain mandatory. The old routed leaf fails the new power-sequence regression
+as expected. Four additional host tests pass (63 total). No repair-image
+hardware result is claimed until deployment and CoreMark qualification.
 
 ## Physical procedure (clock qualification pending)
 

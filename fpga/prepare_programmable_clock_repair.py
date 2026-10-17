@@ -11,7 +11,7 @@ import shutil
 
 from prepare_programmable_clock import REPO, ROOT, sha, once
 
-DEST = ROOT/'programmable-clock-power-repair-r1'
+DEST = ROOT/'programmable-clock-power-repair-r2'
 AUDIT = ROOT/'programmable-clock-netlist-audit-r3'
 BASE = ROOT/'programmable-clock-reuse-r2'
 TEST = Path('/home/yukidama/external/tmp/ventium-programmable-clock.AkDdO8')
