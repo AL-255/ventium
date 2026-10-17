@@ -72,6 +72,22 @@ proc timed {name command} {
     flush $::f
     puts "APR-STAGE-END $name [clock milliseconds]"
 }
+# open_checkpoint restores the parent's incremental RuntimeOptimized policy,
+# including its negative target WNS. Merely choosing AggressiveExplore then
+# skips all setup optimization. Replace that reference policy explicitly.
+timed timing_target {read_checkpoint -incremental -force_incr -directive TimingClosure $checkpoint}
+clocks_ok
+report_incremental_reuse -file [file join $out target-reuse.rpt]
+set target_file [open [file join $out target-reuse.rpt]]
+set target_report [read $target_file]
+close $target_file
+if {![regexp {\|\s*Incremental Directive\s*\|\s*TimingClosure\s*\|} $target_report] ||
+    ![regexp {\|\s*Target WNS\s*\|\s*0\.000\s*\|} $target_report]} {
+    error "incremental policy is not targeting zero slack"
+}
+puts "APR-TARGET-WNS=0.000 native-report-confirmed"
+report_config_implementation -file [file join $out implementation-config.rpt]
+fully_routed
 switch $strategy {
     postroute-aggressive {timed physopt {phys_opt_design -directive AggressiveExplore}}
     postroute-replication {timed physopt {phys_opt_design -directive AlternateReplication}}

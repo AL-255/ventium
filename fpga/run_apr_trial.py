@@ -84,6 +84,14 @@ def validate_reports(build):
                 other_setup_nonnegative=all(r['setup_ns'] >= 0 for r in after[1:]))
 
 
+def validate_target(text):
+    if not re.search(r'\|\s*Incremental Directive\s*\|\s*TimingClosure\s*\|', text):
+        raise ValueError('incremental directive is not TimingClosure')
+    targets = re.findall(r'\|\s*Target WNS\s*\|\s*([^|]+)\|', text)
+    if len(targets) != 1 or targets[0].strip() != '0.000':
+        raise ValueError('native target WNS is not zero')
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--strategy', choices=STRATEGIES, required=True)
@@ -119,7 +127,7 @@ def main():
     save('started.json', dict(strategy=args.strategy, pins=pins, command=command,
         invocation=os.environ['INVOCATION_ID'], host=host(), disk_free=shutil.disk_usage(dest).free,
         memory_max=12*GIB, swap_max=4*GIB, whole_run_limit_seconds=limit,
-        rtl_changed=False, synthesis=False, deployment=False))
+        rtl_changed=False, synthesis=False, deployment=False, incremental_target_wns=0.0))
     interrupted = []
     signal.signal(signal.SIGTERM, lambda s,f: interrupted.append(s))
     signal.signal(signal.SIGINT, lambda s,f: interrupted.append(s))
@@ -184,6 +192,7 @@ def main():
         assert code == 0 and not reason and not failure and unchanged and owner and elapsed < limit
         assert 'APR-TRIAL-COMPLETE strategy='+args.strategy in (dest/'native.log').read_text()
         assert scope()['ActiveState'] in ('inactive', 'failed')
+        validate_target((dest/'build/target-reuse.rpt').read_text())
         checked = validate_reports(dest/'build')
         assert (dest/'build/result.dcp').stat().st_size > 50_000_000
     except Exception as error: failure = (failure+'; ' if failure else '')+'audit: '+repr(error)

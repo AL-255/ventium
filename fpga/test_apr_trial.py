@@ -2,7 +2,7 @@
 from pathlib import Path
 import tempfile
 import unittest
-from run_apr_trial import validate_timing, validate_reports
+from run_apr_trial import validate_timing, validate_reports, validate_target
 
 
 TIMING = ('from_clock\tto_clock\tsetup_ns\thold_ns\tperiod_ns\trequirement_ns\texception\tconditional_mhz\n'
@@ -13,6 +13,14 @@ TIMING = ('from_clock\tto_clock\tsetup_ns\thold_ns\tperiod_ns\trequirement_ns\te
 
 
 class AprTests(unittest.TestCase):
+    def test_native_zero_slack_target_required(self):
+        text = '| Incremental Directive | TimingClosure |\n| Target WNS | 0.000 |\n'
+        validate_target(text)
+        for invalid in (text.replace('TimingClosure', 'RuntimeOptimized'),
+                        text.replace('0.000', '-10.018'), text.replace('0.000', 'nan'),
+                        text.splitlines()[0], text+'| Target WNS | 0.000 |\n'):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError): validate_target(invalid)
+
     def test_frequency_derived_from_period_not_reciprocal_slack(self):
         result = validate_timing(TIMING)
         self.assertAlmostEqual(result[0]['conditional_mhz'], 1000/34.841)

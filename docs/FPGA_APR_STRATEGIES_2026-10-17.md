@@ -43,14 +43,38 @@ strategy's modifications. Physical optimization can restructure/replicate cells;
 
 | Strategy | Operations | Whole native-run bound | Status |
 |---|---|---:|---|
-| `postroute-aggressive` | `phys_opt_design -directive AggressiveExplore` | 1 hour | Running; no result yet |
-| `postroute-replication` | `phys_opt_design -directive AlternateReplication` | 1 hour | Prepared; not launched |
+| `postroute-aggressive` | Explicit incremental `TimingClosure`, then `phys_opt_design -directive AggressiveExplore` | 1 hour | Corrected r2 running; no result yet |
+| `postroute-replication` | Explicit incremental `TimingClosure`, then `phys_opt_design -directive AlternateReplication` | 1 hour | Prepared; not launched |
 | `replace-netdelay` | Unroute/unplace unlocked cells; `ExtraNetDelay_high` placement; `AggressiveExplore` physical optimization; `NoTimingRelaxation` routing | 3 h 50 min | Conditional follow-up; not launched |
 
 The first two preserve the existing physical solution as their starting point.
 The third deliberately explores a new placement; it is **not** an incremental
 reuse claim. No hand-edited logic, guest-specific change, retiming directive,
 false path, multicycle waiver or reduced-frequency constraint is introduced.
+
+### Initial no-op control: inherited incremental target
+
+The initial `aggressive-r1` trial, using implementation scripts `83c63768`,
+closed natively in **495.680 s** with unchanged inputs, no OOM/swap, all
+224,107 nets fully routed and no DRC errors/critical warnings. Peak charged
+RAM was 4,675,801,088 bytes. Core setup/hold remained **−9.841 / +0.004 ns**:
+**28.701817 MHz timing estimate, 0% gain**. The optimization itself took only
+642 ms: this was **a policy no-op**, not evidence that a genuine aggressive
+physical optimization cannot improve the design.
+
+The native log explained that the restored checkpoint retained the previous
+incremental `RuntimeOptimized` target of **−10.018 ns**. Since actual WNS
+−9.841 ns already exceeded that target, Vivado skipped all setup optimization
+and did not modify the netlist. A 25 ns XDC constraint alone therefore did not
+make that inherited incremental flow seek zero slack.
+
+The corrected trials explicitly execute
+`read_checkpoint -incremental -force_incr -directive TimingClosure` with the
+same baseline reference, then require the native reuse report to state both
+`Incremental Directive = TimingClosure` and **`Target WNS = 0.000`** before
+optimization. This changes the optimizer's objective, **not the 40 MHz clock
+constraint**. [AMD documents this distinction between the two incremental
+directives](https://docs.amd.com/r/2022.1-English/ug949-vivado-design-methodology/Incremental-Directives-and-Target-WNS).
 
 The selected directives were checked against the installed Vivado 2025.2 manual.
 AMD documents post-route physical optimization and these directive alternatives:
@@ -74,7 +98,8 @@ AMD documents post-route physical optimization and these directive alternatives:
   completed trial. A worse frequency or negative hold is recorded as such,
   not hidden behind a successful tool exit. Hardware and timing acceptance
   remain separate from native completion.
-- **Nine offline guard tests pass**, including domain completeness, clock
+- **Ten offline guard tests pass**, including the native zero-slack target,
+  domain completeness, clock
   relaxation, multicycle/exception rejection, nonfinite timing, cross-clock
   frequency misuse, route errors, critical DRC warnings and hold qualification.
 
@@ -82,6 +107,8 @@ Run artifacts:
 `/home/yukidama/external/tmp/ventium-apr-oct17.ByfMRzYU/`.
 The first owner is `ventium-apr-aggressive-oct17-r1.service`, invocation
 `0b39daa8016e453fb7726036f8f58cdb`.
+The corrected owner is `ventium-apr-aggressive-oct17-r2.service`, invocation
+`d96a55959d5d4ebfac4fbe3eadc69937`.
 
 Source checkpoint:
 `/home/yukidama/external/tmp/ventium-fprem-sequence.iSZ9BAj4/programmable-clock-power-repair-r5/build/routed.dcp`.
