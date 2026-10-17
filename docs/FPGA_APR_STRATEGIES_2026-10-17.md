@@ -82,8 +82,31 @@ tests pass; these are tooling tests, not CPU or FPGA standard-suite acceptance.
 
 Current artifact root:
 `/home/yukidama/external/tmp/ventium-fresh-strategies-oct17.67YRDIRh/`.
-Current owner: `ventium-fresh-performance-oct17-r2.service`.
-Final timing and dynamic acceptance remain pending.
+Current owner: `ventium-fresh-performance-oct17-r2.service`, invocation
+`e9e71270d712443e9bf65d44bf491472`; scope invocation
+`f7dc258cdd6b486a903e37781f1ca6d4`. Native synthesis started at 18:13:25 local
+time and completed RTL elaboration. Actual generated child script confirms:
+
+```text
+set_param general.maxThreads 1
+set_property ip_cache_permissions disable [current_project]
+synth_design -top rk_ao486_bd_wrapper -part xczu15eg-ffvb1156-2-i -directive PerformanceOptimized
+```
+
+Run properties confirm `AUTO_INCREMENTAL_CHECKPOINT=0`, empty incremental
+checkpoint and extra options, and `FLATTEN_HIERARCHY=rebuilt`. There is no native
+checkpoint-read command in synthesis. Final timing and dynamic acceptance remain
+pending.
+
+The live controller's original post-run parser incorrectly requires the default
+`-flatten_hierarchy rebuilt` argument to be printed explicitly. Vivado omits it.
+Do **not** interrupt/restart a valid synthesis for this reporting bug or silently
+modify its pinned launch files. [audit_fresh_strategy.py](../fpga/audit_fresh_strategy.py)
+independently checks both the command and native property report; it passes on
+this actual script, with three additional regression tests. A terminal
+controller `flatten policy drift` audit failure must be distinguished from a
+native tool failure, and the full native result still needs independent audit.
+This configuration-only checker cannot establish completion or timing closure.
 
 `performance-r1` stopped before BD generation/synthesis in 20.09 seconds because
 the guard expected IP cache property `disabled`, whereas installed Vivado
