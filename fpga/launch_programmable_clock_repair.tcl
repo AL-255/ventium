@@ -79,6 +79,8 @@ report_incremental_reuse -file [file join $out initial-reuse.rpt]
 reuse_ok initial
 place_design
 clocks_ok
+# Preserve completed placement before any report parsing or downstream gate.
+write_checkpoint [file join $out placed.dcp]
 report_incremental_reuse -file [file join $out placed-reuse.rpt]
 reuse_ok placed
 set start [clock milliseconds]

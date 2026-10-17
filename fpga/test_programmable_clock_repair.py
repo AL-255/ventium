@@ -43,10 +43,36 @@ class RepairTests(unittest.TestCase):
     def test_missing_soc_rejected(self):
         with self.assertRaises(ValueError): self.digest(b'module leaf; endmodule\n')
 
-    REUSE='| Cells | 99.96 | 99.97 | 0.01 | 294278 |\n| Nets | 99.97 | 99.91 | 0.00 | 192208 |\n'
+    REUSE=('| Type | Matched % (of Total) | Current Reuse % (of Total) | Fixed % (of Total) | Total |\n'
+           '| Cells | 99.96 | 99.97 | 0.01 | 294278 |\n| Nets | 99.97 | 99.91 | 0.00 | 192208 |\n')
+    PLACED=('| Type | Matched % (of Initial Total) | Initial Reuse % (of Initial Total) | '
+            'Current Reuse % (of Total) | Fixed % (of Total) | Total |\n'
+            '| Cells | 99.96 | 99.97 | 99.97 | 0.01 | 294278 |\n'
+            '| Nets | 99.97 | 99.91 | 99.91 | 0.00 | 192202 |\n')
 
     def test_canonical_reuse(self):
         self.assertEqual(validate_reuse(self.REUSE)['Cells']['reused_pct'],99.97)
+
+    def test_placed_canonical_reuse(self):
+        self.assertEqual(validate_reuse(self.PLACED)['Nets']['reused_pct'],99.91)
+        self.assertEqual(validate_reuse(self.PLACED)['Nets']['total'],192202)
+
+    def test_current_not_initial_reuse_is_reported(self):
+        report=self.PLACED.replace('99.91 | 99.91','99.91 | 99.60')
+        self.assertEqual(validate_reuse(report)['Nets']['reused_pct'],99.60)
+        with self.assertRaises(ValueError):
+            validate_reuse(report.replace('99.60','99.49'))
+
+    def test_placed_initial_reuse_also_required(self):
+        with self.assertRaises(ValueError):
+            validate_reuse(self.PLACED.replace('99.91 | 99.91','99.49 | 99.91'))
+
+    def test_header_and_row_width_required(self):
+        for report in (self.PLACED.replace('Initial Reuse','Unknown Reuse'),
+                       self.REUSE.replace('99.96 | 99.97','99.96 | 99.97 | 99.97'),
+                       '\n'.join(self.REUSE.splitlines()[1:]),
+                       self.PLACED.splitlines()[0]+'\n'+self.PLACED):
+            with self.subTest(report=report),self.assertRaises(ValueError): validate_reuse(report)
 
     def test_missing_duplicate_reuse_rows(self):
         for text in (self.REUSE.splitlines()[0],self.REUSE+self.REUSE):

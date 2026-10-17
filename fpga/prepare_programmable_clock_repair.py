@@ -12,8 +12,8 @@ import shutil
 from prepare_programmable_clock import REPO, ROOT, sha, once
 from audit_clock_reuse import validate
 
-DEST = ROOT/'programmable-clock-power-repair-r4'
-PRIOR = ROOT/'programmable-clock-power-repair-r3'
+DEST = ROOT/'programmable-clock-power-repair-r5'
+PRIOR = ROOT/'programmable-clock-power-repair-r4'
 AUDIT = ROOT/'programmable-clock-netlist-audit-r3'
 BASE = ROOT/'programmable-clock-reuse-r2'
 TEST = Path('/home/yukidama/external/tmp/ventium-programmable-clock.AkDdO8')
@@ -41,15 +41,16 @@ def main():
     pins = {str(AUDIT/'reports'/n): h for n,h in audit['products'].items()}
     pins[str(BASE/'build/routed.dcp')] = prior['products']['routed.dcp']
     assert all(sha(Path(p)) == h for p,h in pins.items())
-    # Resume only the closed, verified replacement whose overly strict raw
-    # IS_MATCHED threshold rejected otherwise excellent canonical reuse.
+    # Resume the closed replacement after the report-format-only failure.
+    # That run did not save placed.dcp, so repeat placement, not synthesis.
     stopped=json.loads((PRIOR/'closed.json').read_text())
     assert stopped['native_exit']==1 and stopped['inputs_unchanged'] and not stopped['passed']
-    assert 'clock-only replacement lost physical reuse' in (PRIOR/'native.log').read_text()
+    assert 'missing/ambiguous canonical Cells reuse row' in (PRIOR/'native.log').read_text()
     assert all(sha(PRIOR/'build'/n)==h for n,h in stopped['products'].items())
-    validate((PRIOR/'build/initial-reuse.rpt').read_text())
-    raw=json.loads((PRIOR/'build/initial-reuse.json').read_text())
-    assert raw['matched_pct']>=95 and raw['reused_pct']>=99
+    for stage in ('initial','placed'):
+        validate((PRIOR/'build'/(stage+'-reuse.rpt')).read_text())
+        raw=json.loads((PRIOR/'build'/(stage+'-reuse.json')).read_text())
+        assert raw['matched_pct']>=95 and raw['reused_pct']>=99
     old_prepared=json.loads((PRIOR/'prepared.json').read_text())
     assert all(sha(Path(p))==h for p,h in old_prepared['source_pins'].items())
     for p in (PRIOR/'closed.json',PRIOR/'prepared.json',PRIOR/'native.log'):

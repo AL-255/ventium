@@ -406,6 +406,24 @@ placement reuse ≥99%, and **native canonical cell/net matching and reuse each
 percentages and missing-design totals are regression-tested (67 host tests
 total). This is not permission to fall back to full placement.
 
+r4 subsequently closed at **695.597 s**, native exit1, unchanged pins: placement
+completed, but the canonical reuse parser did not handle Vivado's post-placement
+addition of an **Initial Reuse** column. The actual current reuse remained
+**99.97% cells / 99.91% nets**. This was a host parser failure, not poor reuse or
+a router failure; routing did not start. Peak RAM 6.52 GiB, swap 279.1 MiB,
+no OOM. No placed checkpoint was saved by that version of the script.
+
+`programmable-clock-power-repair-r5`, owner
+`ventium-clock-power-repair-oct17-r5.service`, invocation
+`fe03a34d61cb4862851efe5d13667774`, resumes r4's pinned pre-placement replacement
+without synthesis or RTL changes. The parser now recognizes the two exact
+native headers and reads **Current Reuse** by column name; both initial and
+current percentages remain subject to the same threshold. Regressions include
+a falling current-reuse value despite a passing initial value, malformed headers,
+and column-count mismatches (71 host tests pass). The flow now saves `placed.dcp`
+immediately after placement, before report parsing. No repair-image routing or
+hardware pass is claimed by these preflights.
+
 The initial 10-GiB-RAM admission attempt
 was rejected before Vivado started; the admitted run uses an **8 GiB RAM /
 4 GiB swap** cap and retains two GiB of host headroom at admission. Live
