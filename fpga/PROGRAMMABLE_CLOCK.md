@@ -377,9 +377,36 @@ untouched. The repaired synthesized netlist passes all 41 divider periods,
 power-write checks, unsafe-command rejection and reset restoration, both from
 a normal shell and with the vendor library path deliberately injected.
 
-The identical clock RTL is frozen in `programmable-clock-power-repair-r2`,
-owner `ventium-clock-power-repair-oct17-r2.service`, invocation
-`d72b5f73f4ba429f9924362b80dc62f3`. The initial 10-GiB-RAM admission attempt
+The second preflight (`programmable-clock-power-repair-r2`, invocation
+`d72b5f73f4ba429f9924362b80dc62f3`) passed the native netlist simulation but
+stopped before placement because the service PATH did not contain `rg` for
+the final success-marker check. It closed at 105.091 s, native exit1, unchanged
+pins. The marker check now uses system `grep`; the full wrapper passes under
+`env -i PATH=/usr/bin:/bin` with the vendor library path injected.
+
+The third preflight (`programmable-clock-power-repair-r3`, invocation
+`231b6c58b6eb4585b54d16664980e436`) passed both the unchanged-SoC and native
+clock-netlist gates. It stopped at the raw primitive matching gate, before
+placement: **97.288945% raw matched / 99.586013% placements reused**. That
+99%-raw-match threshold was inappropriate for this checkpoint's primitive
+object accounting: the prior successful route already had the same discrepancy.
+The native canonical table independently reports **99.96% cells matched /
+99.97% cells reused**, and **99.97% nets matched / 99.91% nets reused**. Native
+exit1, 285.239 s, unchanged pins, no swap/OOM; retain this as a failed preflight,
+not a routing failure or a completed implementation.
+
+`programmable-clock-power-repair-r4`, owner
+`ventium-clock-power-repair-oct17-r4.service`, invocation
+`62b4ab21ab7c40038a434273c7bd56ec`, resumes r3's **verified `replaced.dcp`**.
+It verifies all prior products and frozen source hashes, reruns SoC equality
+and the clock-netlist test, and does not repeat synthesis. Gates now explicitly
+distinguish the two metrics: raw primitive matching ≥95%, actual primitive
+placement reuse ≥99%, and **native canonical cell/net matching and reuse each
+≥99.5%**, before and after placement. Missing/duplicate rows, impossible
+percentages and missing-design totals are regression-tested (67 host tests
+total). This is not permission to fall back to full placement.
+
+The initial 10-GiB-RAM admission attempt
 was rejected before Vivado started; the admitted run uses an **8 GiB RAM /
 4 GiB swap** cap and retains two GiB of host headroom at admission. Live
 two-GiB host RAM/swap and four-GiB disk stop floors remain. Its entire native
@@ -393,11 +420,11 @@ bits; the adapter is derived from that exported netlist, not guessed. All
 Before implementation, the flow requires identical before/after logical SoC
 exports, including every attribute and statement (only comments/blank lines
 are omitted from the comparison). It also tests the actual synthesized leaf
-with AMD primitive models. At least **99% matched/reused primitive placements**
+with AMD primitive models. The separate raw/canonical reuse gates above
 are required before and after placement. The same netlist test is repeated
 after routing; complete routes, DRC, clocks, runtime and product-hash checks
 remain mandatory. The old routed leaf fails the new power-sequence regression
-as expected. Four additional host tests pass (63 total). No repair-image
+as expected. No repair-image
 hardware result is claimed until deployment and CoreMark qualification.
 
 ## Physical procedure (clock qualification pending)
