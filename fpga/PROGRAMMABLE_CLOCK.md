@@ -1,15 +1,23 @@
 # One image, runtime core-clock sweep
 
-Status (2026-10-17): controller implemented and unit-tested. The first full
-**40 MHz** implementation was stopped for congestion after 5 h 35 min; the user
-now requires successful routing in **less than four hours**. The physical-layout
-retry completed routing in **561.805 s (9 m 21.805 s)** from the existing
-optimized netlist, without another synthesis or processor RTL change. The entire
-native run completed in **1,491.236 s (24 m 51 s)**. The new image was programmed
-once, but **physical startup fails to acquire MMCM lock**. It remains safely
-clock-gated; no CoreMark frequency trials have started on it. There are
-no per-frequency images in this flow. Earlier fixed-clock variant attempts were
-cancelled and never deployed.
+Status (2026-10-17): the congestion requirement is met. The repaired **40 MHz
+programmable-clock image** routed in **489.481 s (8 m 09.481 s)**; the complete
+resumed implementation/bitgen took **1,406.197 s (23 m 26 s)**, without another
+synthesis or processor RTL change. All 224,107 routable nets are fully routed,
+zero routing errors; no DRC errors/critical warnings, swap or OOM. The earlier
+full-placement attempt exceeded five hours; reusing the verified parent's
+physical layout resolved the routing-runtime problem.
+
+The first programmable image routed in 9 m 22 s but failed physical PLL startup.
+The clock-only power-sequence repair now **acquires lock on the board**, with
+status `504c5499` (divide25, enabled, locked, safe, no error/reset/busy).
+Its first held-reset measurement is **39.999834 MHz**. The physical CoreMark
+sweep is underway; this startup observation is not a seed pass or CPU acceptance.
+This repaired image is programmed once for the entire sweep, with **no
+per-frequency images**. Earlier fixed-clock variant attempts were cancelled and
+never deployed. Final STA remains **28.701817 MHz conditional worst-path
+period budget**, setup −9.841 ns / hold +0.004 ns under the 40 MHz constraint:
+not 40 MHz timing sign-off.
 
 The physical fixed-40 MHz parallel-write parent passes both 2,000-iteration
 CoreMark seeds, at 2.100118 / 2.106790 CM/MHz. Those passes do not qualify the new
@@ -48,8 +56,8 @@ gameplay measurement. CoreMark counters are not gameplay IPC.
   to `0xffff`, as required by XAPP888. The Oct17 source correction keeps that
   value through relock and checks it again after counter readback. Both checks
   use the documented `0x9999` readable-bit mask; reserved bits are not assumed
-  readable. This controls internal enables, not voltage. The deployed failed
-  image instead writes `0x0100` before relock; see the investigation below.
+  readable. This controls internal enables, not voltage. The superseded failed
+  image instead wrote `0x0100` before relock; see the investigation below.
 - Timeout, readback failure or loss of the safe-change interlock during a change
   leaves the clock gated and MMCM reset asserted. A later valid mailbox request
   can recover without reprogramming. PS reset explicitly rewrites divide25:
@@ -445,7 +453,35 @@ remain mandatory. The old routed leaf fails the new power-sequence regression
 as expected. No repair-image
 hardware result is claimed until deployment and CoreMark qualification.
 
-## Physical procedure (clock qualification pending)
+### Repaired implementation closure and deployment
+
+`programmable-clock-power-repair-r5/closed.json`: native exit0, passed, all input
+pins unchanged; independent rehash of every pinned source and generated product
+also passed. Whole run 1,406.196775 s, route 489.481 s. Peak cgroup memory
+7,334,637,568 bytes, no swap or OOM. The placed checkpoint is retained. Native
+post-placement cell reuse is 99.97%, net reuse 99.91%; actual router fully reused
+223,933 nets (99.93%). Both pre-place and post-route exported clock netlists pass
+all 41 frequencies and reset/interlock/power-sequence tests. The 122-module
+SoC logical export remains identical across the clock-leaf replacement.
+
+Artifact SHA256:
+
+- `.bit`: `217cb6f1548a4b710a8f1f44d9fe9f58999c868e4f320f462be13156a3c0f21d`
+- raw `.bin`: `2886d24c5f9c84219f54e23a4766cfb7106f2999d28e794a0fd00256fd60cc52`
+- routed DCP: `b38e8bd49d8327eb6497146016e252703f9e90235957e903ec85f932fec41d17`
+
+The board firmware is
+`/lib/firmware/ventium_programmable_clock_40_oct17_power_r5.bit.bin`.
+Programming and initial GPIO status are retained under
+`coremark-pll-board-r2/{power-r5-program.log,power-r5-pll-initial.json}` in the
+evidence root. The prior failed image never enabled its core clock; its earlier
+DDR-drain receipt and unchanged board boot ID were checked, and no core-clocked
+MMIO was accessed while its PLL was stopped. The repaired image was programmed
+once, then its healthy GPIO status was required before starting CoreMark.
+This is physical confirmation that retaining the full power-enable word fixes
+the observed startup failure; overclock/standard-suite acceptance is separate.
+
+## Physical procedure (clock qualification underway)
 
 1. Verify native completion, output/source hashes, routed clocks, route and DRC
    reports. Retain setup/hold failures honestly; overclock tests do not waive them.
