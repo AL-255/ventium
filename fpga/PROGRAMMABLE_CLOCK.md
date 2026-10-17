@@ -238,6 +238,18 @@ runtime/resource limits, or the absence of STA sign-off. The prior native
 diagnostic and closure are hashed inputs to the next attempt. No second
 full-placement or synthesis run occurred in r1.
 
+r2 is running as `ventium-programmable-reuse-oct16-r2.service`, invocation
+`2eb46d56f5df421694a34f5bcefc0317`, using scripts committed as `a217a092`.
+The actual physical import replays all 162 reference physical optimizations.
+The initial independent primitive-cell gate passes: 295,409 primitives,
+**97.205569% matched / 99.496969% reused placements**. The native reuse report
+has **0.17% wholly unreused nets** and **0.01% partially reused nets**. This
+is import evidence, not completed routing or a hardware pass. Incremental
+placement subsequently completed in **7 m 46 s** with zero warnings/errors,
+preserving the same **99.496969%** primitive-placement reuse. Both 40/100 MHz
+clock guards pass after placement. Routing started at Unix milliseconds
+`1792208801317`; its completion and elapsed-time gate remain pending.
+
 The additional eleven host tests pass (55 including the existing host suite).
 They check partial routes, routing/DRC errors, wrong clocks, insufficient reuse,
 duplicate counters, the strict runtime boundary and the native Tcl reuse-JSON
