@@ -269,6 +269,16 @@ live trial closes; do not edit its pinned inputs or automatically jump to eight
 threads. r4 remains single-thread-capped.
 [AMD 2025.2 multithreading limits](https://docs.amd.com/r/2025.2-English/ug904-vivado-implementation/Multithreading-with-the-Vivado-Tools).
 
+An **isolated, unapplied** two-thread tooling proposal is now retained at
+`/home/yukidama/external/tmp/ventium-fresh-threads.G7EfL3nz/` (300 KiB).
+Its 28 host-only tests pass, including native-script thread-cap validation
+for both synthesis and implementation and rejection of ambiguous/out-of-range
+caps. It preserves `-jobs 1`, all existing resource limits and source-only
+admission. No native two-thread probe or full build has run; the README requires
+r4 closure/audit, review against preserved originals, repository regression,
+and a small source-only native serialization probe before any later launch.
+All 213 live r4 pins were rechecked unchanged after this preparation.
+
 The `opt_design` crash workaround has a specific scope. The retained native
 2025.2 help log `/var/tmp/ventium-icfrontspan-pwropt-help.HMmw46/help2.log`
 still matches SHA256
