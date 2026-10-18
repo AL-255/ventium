@@ -835,6 +835,25 @@ properties: `PerformanceOptimized`, `GLOBAL_RETIMING=on`, rebuilt hierarchy,
 one thread, timing-driven synthesis, disabled IP cache and no incremental or
 pre-synthesis checkpoint input. This verifies configuration, not completion.
 
+At **19:16 EDT Oct18**, native area optimization had finished at cumulative
+**26 min 01 s wall / 25 min 38 s CPU**; XDC timing application finished at
+**26 min 20 s wall / 25 min 57 s CPU**. Timing optimization then started.
+No synthesis completion, retiming-transformation count or routed result is
+claimed from this phase transition.
+
+At **19:26 EDT**, two closed Oct16 diagnostic `branch/` trace directories were
+archived and their expanded copies removed after `tar -dzf` byte comparisons
+and open-file checks. The parent failed-run summaries remain in place; all
+traces, receipts and generated fixtures are recoverable. Inode/link accounting
+gives a conservative **715,501,568-byte (682.36 MiB) net gain** after archive
+costs, excluding externally hard-linked copies and Vivado's independent scratch
+release. No source, simulator model, FPGA product or live pinned input was
+removed. Exact targets, archive hashes and recovery instructions are retained in
+`/home/yukidama/external/tmp/ventium-fprem-sequence.iSZ9BAj4/closed-branch-evidence-oct18.md`.
+All **214 live input/tool pins** were independently rehashed unchanged before
+and after cleanup. The active synthesis continued without OOM or task-limit events;
+40 MHz timing closure and candidate gameplay measurement remain pending.
+
 - `prepared.json` SHA256: `57ae9fb2d1132574cc8cb7a7d65ee6dd4371840c439709b98c56bb3b90460831`
 - `started.json` SHA256: `c2ad6f6185861ea38801c20967e75dd73ba37a4be41e028603ccd1b9a336a45a`
 
