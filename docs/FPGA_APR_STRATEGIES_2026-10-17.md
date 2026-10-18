@@ -255,6 +255,20 @@ evidence, not just a strategy label. No retiming trial has been queued.
 [AMD phys_opt_design reference](https://docs.amd.com/r/2025.2-English/ug835-vivado-tcl-commands/phys_opt_design),
 [AMD PHYSOPT_RETIMING_FORWARD property](https://docs.amd.com/r/2025.2-English/ug912-vivado-properties/PHYSOPT_RETIMING_FORWARD).
 
+Runtime control is a separate experiment axis. The actual r4 implementation
+script sets `general.maxThreads=1`; live CPU time has tracked elapsed time
+closely during the long post-placement timing-optimization phase. AMD documents
+internal threading for placement, routing, physical optimization, STA and DRC,
+with `general.maxThreads` in the range 1–8. This is distinct from launching
+multiple Vivado jobs. If runtime prevents this strategy finishing within the
+existing bound, a **fresh**, two-thread trial is a candidate, retaining one
+build family, `-jobs 1`, the memory/disk reserves and the 3 h 50 min APR limit.
+No speedup or memory safety for two threads has been demonstrated here. Update
+the runner, Tcl policy, native-command audit and tests together only after the
+live trial closes; do not edit its pinned inputs or automatically jump to eight
+threads. r4 remains single-thread-capped.
+[AMD 2025.2 multithreading limits](https://docs.amd.com/r/2025.2-English/ug904-vivado-implementation/Multithreading-with-the-Vivado-Tools).
+
 ### Constraint and preservation preflight
 
 The actual generated synthesis script reads only the board `bitstream.xdc` /
