@@ -266,6 +266,20 @@ warns that `LogicCompaction` can hurt timing; fewer occupied slices alone would
 not justify selecting it for the 40 MHz objective.
 [AMD 2025.2 synthesis settings](https://docs.amd.com/r/2025.2-English/ug901-vivado-synthesis/Using-Synthesis-Settings).
 
+The live `routability-r3/build/synth_1-properties.rpt` also explicitly records
+`STEPS.SYNTH_DESIGN.ARGS.GLOBAL_RETIMING=auto`; this trial is **not** a synthesis
+retiming experiment either. For a future isolated retiming trial, the 2025.2
+syntax/option table specifies `-global_retiming on` (project property
+`STEPS.SYNTH_DESIGN.ARGS.GLOBAL_RETIMING`), although the command reference's
+long description still mentions older `-retiming`/`-no_retiming` switches.
+Validate the property and generated native command in a fresh tiny project
+after the current Vivado family exits; do not assume the legacy switches work.
+Then keep placement/physical-optimization/routing fixed to separate synthesis
+retiming from physical retiming, and require actual transformation evidence
+plus routed timing and physical acceptance. No such probe or full trial has
+been launched, and neither RTL nor live pinned tooling has been changed.
+[AMD 2025.2 synth_design syntax](https://docs.amd.com/r/2025.2-English/ug835-vivado-tcl-commands/synth_design).
+
 Keep synthesis retiming separate from physical retiming. The 2025.2 command
 reference identifies `AddRetime` / `AlternateFlowWithRetiming` as explicit
 physical-retiming choices; the present `AggressiveExplore` configuration is
