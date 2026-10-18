@@ -43,6 +43,7 @@ window peak reaches 90.37% despite much lower whole-chip routing utilization.
 | `performance-r3` | Planned `PerformanceOptimized`, rebuilt hierarchy | Planned same performance APR | Stopped in 10.06 s before project creation: early interception of Vivado's lazily registered `wait_on_run` failed |
 | `performance-r4` | `PerformanceOptimized`, rebuilt hierarchy | `ExtraNetDelay_high` / `AggressiveExplore` / planned `NoTimingRelaxation`; planned post-route `Explore` | Stopped at the 3 h 50 min APR limit during physical optimization, before routing. No routed timing result. |
 | `routability-r2` | `AlternateRoutability`, rebuilt hierarchy | Planned `AltSpreadLogic_medium` / `Explore` / `AlternateCLBRouting`; post-route `Explore` | Stopped through its controller after technology mapping stalled with task-cap rejections. No completed synthesis/APR or timing result. |
+| `routability-r3` | `AlternateRoutability`, rebuilt hierarchy | Same planned APR as r2 | Fresh-source native synthesis running with the reviewed 128-task helper profile; no completion/timing result yet. |
 
 The first combination targets the measured long logic/routing path. The second
 tests a routing-oriented mapping and spread placement, if the first result
@@ -447,7 +448,7 @@ Any observed task-limit rejection terminates the run even if the CPU remains
 busy. The independent result auditor cross-checks the profile, owner limits,
 every monitoring sample, sampled peak and close receipt; old receipts remain
 explicitly distinguishable as lacking this task monitoring. No live run was
-modified to bypass the old cap. The new full-chip retry is still pending below.
+modified to bypass the old cap. The new full-chip retry is recorded below.
 The next trial must again start with a new source freeze/project and full
 synthesis, never the aborted mapping state.
 
@@ -480,6 +481,24 @@ task headroom, routed timing, or FPGA acceptance. No old checkpoint was input.
 - Native probe log SHA256: `3d3fb46c4a36d0a818bb46cf35001f3dea772cd4deca8fc345b933d106f0bb1f`.
 - Unchanged probe Tcl SHA256: `83d109a2fd496185fac404a9bf1948b82a5d1709cf0e61171011f76cb636df0f`.
 - Updated resource guard SHA256: `4f74b4e382663cb13418543a22c8ec51ae09eed2a991a0e8cab8e87778730bbd`.
+
+The full **routability-r3** retry started at **05:45:29 EDT**, owned by
+`ventium-fresh-routability-oct18-r3.service`, invocation
+`374974fc732549079905f0a00558289b`; scope invocation
+`cbe1ae3c456d4499a30422d29d377fa5`. Output:
+`/home/yukidama/external/tmp/ventium-fresh-strategies-oct17.67YRDIRh/routability-r3`.
+Admission recorded **20,579,340,288 bytes available RAM** and
+**8,494,608,384 bytes disk free**. Actual scope limits are **16 GiB RAM /
+6 GiB swap / 128 tasks**. The new watcher records the exact limits and task
+events, with no rejection observed at startup. All **213** launch pins were
+rehashed: the 200 source files and 159 defines retain the same deployed CPU
+profile, full P5 L1s, UV-fast `cycle_mode=1`, and **40 MHz core / 100 MHz AXI**.
+The native synthesis configuration audit passes `AlternateRoutability`, rebuilt
+hierarchy, timing-driven synthesis, `general.maxThreads=2`, disabled IP cache,
+and no incremental/old-checkpoint input. This is a genuinely new source freeze,
+project and synthesis run; neither r2's aborted state nor its archive is input.
+The whole-run eight-hour and APR 3 h 50 min limits are unchanged. Synthesis/APR
+completion, routed timing and physical acceptance remain unproven.
 
 The `opt_design` crash workaround has a specific scope. The retained native
 2025.2 help log `/var/tmp/ventium-icfrontspan-pwropt-help.HMmw46/help2.log`
