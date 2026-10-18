@@ -11,6 +11,28 @@ from test_audit_fresh_strategy import SCRIPT, PROPS
 
 
 class FreshTests(unittest.TestCase):
+    def test_partial_native_probe_needs_stage_completion_evidence(self):
+        script = Path(__file__).with_name('test_native_fresh_threads.tcl').read_text()
+        prefix = script.split('# Source-only tooling probe')[0]
+        runs = (('synth_1', 'synth_design', 'synth_design Complete!'),
+                ('impl_1', 'opt_design', 'Not started place_design'))
+        cases = ('ok', 'wrong-status', 'missing-end', 'error-marker', 'missing-log', 'error-log')
+        for (run, step, status), case in itertools.product(runs, cases):
+            with self.subTest(run=run, case=case), tempfile.TemporaryDirectory(prefix='fresh-native-status-') as td:
+                root = Path(td)
+                if run == 'impl_1': (root/'.opt_design.end.rst').touch()
+                (root/'.vivado.end.rst').touch()
+                (root/'runme.log').write_text(f'{step} completed successfully\n')
+                if case == 'wrong-status': status = 'place_design Running'
+                if case == 'missing-end': (root/'.vivado.end.rst').unlink()
+                if case == 'error-marker': (root/'.vivado.error.rst').touch()
+                if case == 'missing-log': (root/'runme.log').write_text(f'{step} started\n')
+                if case == 'error-log': (root/'runme.log').write_text(f'{step} completed successfully\nERROR: failed\n')
+                test = root/'check.tcl'
+                test.write_text(prefix + f'\nfresh_threads_check_status {run} {step} {{{status}}} {{{root}}}\n')
+                result = subprocess.run(['tclsh', str(test)], text=True, capture_output=True)
+                self.assertEqual(result.returncode == 0, case == 'ok', result.stdout+result.stderr)
+
     def test_native_timing_driven_strategy(self):
         for strategy, directive in [('performance-netdelay', 'PerformanceOptimized'),
                                     ('routability-spread', 'AlternateRoutability')]:

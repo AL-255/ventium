@@ -285,21 +285,53 @@ with `general.maxThreads` in the range 1–8. This is distinct from launching
 multiple Vivado jobs. If runtime prevents this strategy finishing within the
 existing bound, a **fresh**, two-thread trial is a candidate, retaining one
 build family, `-jobs 1`, the memory/disk reserves and the 3 h 50 min APR limit.
-No speedup or memory safety for two threads has been demonstrated here. Update
-the runner, Tcl policy, native-command audit and tests together only after the
-live trial closes; do not edit its pinned inputs or automatically jump to eight
-threads. r4 remains single-thread-capped.
+No full-chip speedup or memory safety for two threads has been demonstrated.
+The runner, Tcl policy, native-command audit and tests were updated together
+only after r4's terminal outcome and input hashes were retained. r4 used one
+internal thread throughout; no trial jumps to eight threads.
 [AMD 2025.2 multithreading limits](https://docs.amd.com/r/2025.2-English/ug904-vivado-implementation/Multithreading-with-the-Vivado-Tools).
 
-An **isolated, unapplied** two-thread tooling proposal is now retained at
+The originally isolated two-thread tooling proposal is retained at
 `/home/yukidama/external/tmp/ventium-fresh-threads.G7EfL3nz/` (300 KiB).
-Its 28 host-only tests pass, including native-script thread-cap validation
+It was applied as `dd86ae61` after exact comparisons against its preserved
+originals. All **29 host-only tests pass in the repository**, including thread-cap validation
 for both synthesis and implementation and rejection of ambiguous/out-of-range
 caps. It preserves `-jobs 1`, all existing resource limits and source-only
-admission. No native two-thread probe or full build has run; the README requires
-r4 closure/audit, review against preserved originals, repository regression,
-and a small source-only native serialization probe before any later launch.
-All 213 live r4 pins were rechecked unchanged after this preparation.
+admission. No two-thread full-chip trial has run. The old scratch README records
+the preparation-time state; this section records its subsequent integration.
+
+Small fresh-source native probes use a separate **4 GiB RAM / 1 GiB swap** cap
+and ten-minute timeout, not a reduced cap for the full design. The first probe,
+`ventium-native-threads-oct18.Q25JMa`, stopped before synthesis because Vivado's
+boolean setter rejected `false`; the probe now uses numeric `0`, matching the
+production flow. The second, `ventium-native-threads-oct18.2E1OXm`, completed
+native synthesis and logic optimization with two threads serialized in both
+worker scripts, but its owner rejected the implementation completion status.
+It is retained as a failed probe, not a pass. The instrumented fresh rerun at
+`ventium-native-threads-oct18.yW1jdK` identified the actual status as
+`Not started place_design`: after stopping at `opt_design`, Vivado reports the
+next unstarted implementation step. The corrected probe requires that exact
+status plus fresh native completion markers, no error marker and a successful
+command log. Synthesis writes a run-end marker only; implementation also writes
+per-step markers. Regression cases reject missing completion evidence, native
+errors and wrong status. Native implementation indents its thread-setting
+line, so the probe trims outer whitespace without accepting extra commands.
+
+The final fresh probe **passed** at `ventium-native-threads-oct18.A4aEQz`.
+Owner `ventium-fresh-threads-probe-oct18-r4.service`, invocation
+`51a6372b4e5e4e0ab8a4658509897739`, exited zero at **03:06:37 EDT** after
+107 seconds. Both native worker checks and `FRESH-THREADS-NATIVE-OK` passed
+with `threads=2`, `jobs=1`; its Vivado scope closed and no native worker
+remained. This establishes serialization of the installed tool's thread cap,
+not full-chip timing, runtime, memory safety, or FPGA acceptance. No old
+project or checkpoint was imported into any probe.
+
+Final probe SHA256:
+
+- Probe Tcl: `83d109a2fd496185fac404a9bf1948b82a5d1709cf0e61171011f76cb636df0f`
+- Native log: `9bdf6238e5d68485fc4fdf074117aa43366e721bc5f3bf734570f2bf6ee1c6e6`
+- Native synthesis script: `c701d1f3f45cb0528a6bdc24ededf1fadbcef3f1f18d425d5635fc413aca6cb5`
+- Native implementation script: `69378ecdd70283248805943f0d41bfc33719433c8059519c7b2adbc6be54c586`
 
 The `opt_design` crash workaround has a specific scope. The retained native
 2025.2 help log `/var/tmp/ventium-icfrontspan-pwropt-help.HMmw46/help2.log`
