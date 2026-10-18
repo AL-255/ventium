@@ -243,6 +243,18 @@ warns that `LogicCompaction` can hurt timing; fewer occupied slices alone would
 not justify selecting it for the 40 MHz objective.
 [AMD 2025.2 synthesis settings](https://docs.amd.com/r/2025.2-English/ug901-vivado-synthesis/Using-Synthesis-Settings).
 
+Keep synthesis retiming separate from physical retiming. The 2025.2 command
+reference identifies `AddRetime` / `AlternateFlowWithRetiming` as explicit
+physical-retiming choices; the present `AggressiveExplore` configuration is
+not one of them. A directive cannot be combined with an explicit `-retime`
+switch. Do not substitute `-interconnect_retime` or
+`PHYSOPT_RETIMING_FORWARD`: the cited documentation restricts those features
+to **Versal**, whereas this target is Zynq UltraScale+. Any later retiming
+experiment needs a device-supported configuration and native transformation
+evidence, not just a strategy label. No retiming trial has been queued.
+[AMD phys_opt_design reference](https://docs.amd.com/r/2025.2-English/ug835-vivado-tcl-commands/phys_opt_design),
+[AMD PHYSOPT_RETIMING_FORWARD property](https://docs.amd.com/r/2025.2-English/ug912-vivado-properties/PHYSOPT_RETIMING_FORWARD).
+
 ### Constraint and preservation preflight
 
 The actual generated synthesis script reads only the board `bitstream.xdc` /
