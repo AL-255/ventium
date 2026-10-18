@@ -202,11 +202,32 @@ future bitstream. No PL MMIO, programming, clock change or guest launch was done
 Storage needs attention before new board runs: root had **181 MiB free** and
 `/dev/shm` only **43 MiB free (98% used)**. The privileged inventory confirms
 many old debug runs consume the scratch space; an unprivileged `du` undercounts
-root-owned directories. **Nothing was deleted.** Preserve the Oct17 Quake/Doom
+root-owned directories. **Nothing was deleted by this initial preflight.**
+Preserve the Oct17 Quake/Doom
 sealed evidence, pristine Win95 media and needed binaries; admit any cleanup by
 exact closed targets and verified host copies, not a broad directory removal.
 This preparation does not interrupt the live synthesis or establish candidate
 hardware acceptance.
+
+The subsequent exact-target cleanup removed **13 old `run.vhd` duplicates**,
+reclaiming **347,209,728 allocated bytes (331.125 MiB)** and raising board scratch
+free space to **374 MiB**. Each file matched the preserved cold seed SHA256
+`2df14ac9ae5f927cab2410e784d14c655f0e96644ca80ced3c0b012df7a36e4c` on both
+host (`tmp/qk_td.vhd`) and board (`/tmp/ao486/quake-cold-oct02.vhd`). Privileged
+checks found no open/mapped target or process using its run directory; all
+targets were old single-link regular files, with inode/stat rechecks before
+unlink. Unique disks, captures, logs, pristine Win95 media and bitstreams were
+untouched. Every removed file is recoverable by copying the retained seed.
+
+Exact targets, hashes, the executed script and recovery instructions are retained
+under `/home/yukidama/external/tmp/ventium-board-prune-oct17.CV3L9Gjd/`.
+`removed.json` has SHA256
+`0891db31e652ef701cffbad62e2da457288d5a197ef366f972ca871685dfbc0f`, matching the
+board receipt; all 13 entries report deletion complete. The root SSH session
+was closed, the original seed hash remained unchanged, and FPGA manager remained
+`operating`. No guest was launched and no PL state was modified.
+
+### Historical r2 parser caveat
 
 The r2 controller's original post-run parser incorrectly required the default
 `-flatten_hierarchy rebuilt` argument to be printed explicitly. Vivado omits it.
