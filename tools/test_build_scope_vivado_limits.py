@@ -20,7 +20,7 @@ SCRIPT = ROOT / "tools" / "build_scope.sh"
 
 class VivadoLimitPolicyTests(unittest.TestCase):
     def run_scope(
-        self, *, memory=None, swap=None, tasks=None, profile="vivado", unit=None,
+        self, *, memory=None, swap=None, tasks=None, task_profile=None, profile="vivado", unit=None,
         memory_available_kib=32 * 1024 * 1024,
         swap_free_kib=32 * 1024 * 1024, meminfo_text=None,
     ):
@@ -85,6 +85,7 @@ class VivadoLimitPolicyTests(unittest.TestCase):
                 ("VENTIUM_VIVADO_MEMORY_MAX", memory),
                 ("VENTIUM_VIVADO_MEMORY_SWAP_MAX", swap),
                 ("VENTIUM_VIVADO_TASKS_MAX", tasks),
+                ("VENTIUM_VIVADO_TASK_PROFILE", task_profile),
             ):
                 if value is None:
                     env.pop(name, None)
@@ -123,6 +124,7 @@ class VivadoLimitPolicyTests(unittest.TestCase):
         memory_cap="20G",
         swap_cap="2G",
         memory_high=None,
+        task_cap="48",
     ):
         """Run extracted cap logic against a private fake cgroup filesystem.
 
@@ -162,11 +164,12 @@ class VivadoLimitPolicyTests(unittest.TestCase):
                     "-c",
                     "set -euo pipefail\n"
                     + functions
-                    + "\nscope_has_cap \"$1\" \"$2\" 48 \"$3\"\n",
+                    + "\nscope_has_cap \"$1\" \"$2\" \"$4\" \"$3\"\n",
                     "scope-cap-test",
                     cgroup_path,
                     memory_cap,
                     swap_cap,
+                    task_cap,
                 ],
                 env=env,
                 capture_output=True,
@@ -199,6 +202,28 @@ class VivadoLimitPolicyTests(unittest.TestCase):
             ["MemoryMax=12G", "TasksMax=48", "KillMode=control-group", "MemorySwapMax=1G"],
         )
         self.assertIn("forcing reviewed Vivado TasksMax=48", result.stderr)
+
+    def test_parallel2_has_fixed_helper_headroom_not_arbitrary_override(self):
+        for tasks in (None, "1", "48", "128", "999999999999999999999", "max"):
+            with self.subTest(tasks=tasks):
+                result, properties = self.run_scope(memory="16G", swap="6G",
+                    task_profile="parallel2", tasks=tasks)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(properties, ["MemoryMax=16G", "TasksMax=128",
+                    "KillMode=control-group", "MemorySwapMax=6G"])
+                if tasks not in (None, "128"):
+                    self.assertIn("forcing reviewed Vivado TasksMax=128", result.stderr)
+        for profile in ("128", "parallel32", "unlimited", "serial; true"):
+            with self.subTest(task_profile=profile):
+                result, properties = self.run_scope(task_profile=profile)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertEqual(properties, [])
+                self.assertIn("unknown Vivado task profile", result.stderr)
+
+    def test_parallel2_nested_cap_remains_bounded(self):
+        for maximum, expected in (("128", 0), ("129", 1), ("max", 1)):
+            result = self.run_scope_has_cap(pids_max=maximum, task_cap="128")
+            self.assertEqual(result.returncode, expected, result.stderr)
 
     def test_oversized_and_huge_requests_are_visibly_clamped(self):
         result, properties = self.run_scope(memory="999999999999999999999G", swap="999999999999999999999G")
@@ -326,7 +351,7 @@ class VivadoLimitPolicyTests(unittest.TestCase):
         source = SCRIPT.read_text()
         names = (
             "size_to_bytes", "vivado_size_status", "vivado_memory_limit",
-            "vivado_swap_limit", "scope_has_cap", "scope_required_limits",
+            "vivado_swap_limit", "vivado_task_limit", "scope_has_cap", "scope_required_limits",
             "scope_holds_lock", "scope_is_active",
         )
         functions = "\n\n".join(self.extract_function(source, name) for name in names)
@@ -336,9 +361,12 @@ class VivadoLimitPolicyTests(unittest.TestCase):
         ).replace("/proc/self/cgroup", '"${BUILD_SCOPE_TEST_PROC_CGROUP}"')
         self.assertNotIn("/sys/fs/cgroup", functions)
         self.assertNotIn("/proc/self/cgroup", functions)
-        cases = (("max", True, 0), ("max", False, 1), (16 * 1024**3, True, 1))
-        for high, inherited_lock, expected in cases:
-            with self.subTest(memory_high=high, inherited_lock=inherited_lock):
+        cases = (("max", True, "serial", 48, 0), ("max", False, "serial", 48, 1),
+                 (16 * 1024**3, True, "serial", 48, 1),
+                 ("max", True, "parallel2", 128, 0), ("max", False, "parallel2", 128, 1),
+                 ("max", True, "serial", 128, 1), ("max", True, "parallel2", 129, 1))
+        for high, inherited_lock, task_profile, tasks, expected in cases:
+            with self.subTest(memory_high=high, inherited_lock=inherited_lock, task_profile=task_profile, tasks=tasks):
                 with tempfile.TemporaryDirectory(prefix="ventium-build-scope-nested-test-") as temp_name:
                     # TMPDIR can be the external-storage symlink. The real
                     # lock attestor canonicalizes /proc/self/fd targets, so
@@ -347,7 +375,7 @@ class VivadoLimitPolicyTests(unittest.TestCase):
                     leaf = temp / "cgroup" / "app.slice" / "ventium-vivado.scope"
                     leaf.mkdir(parents=True)
                     for name, value in (
-                        ("memory.max", 18 * 1024**3), ("pids.max", 48),
+                        ("memory.max", 18 * 1024**3), ("pids.max", tasks),
                         ("memory.swap.max", 8 * 1024**3), ("memory.high", high),
                     ):
                         (leaf / name).write_text(f"{value}\n")
@@ -361,10 +389,11 @@ class VivadoLimitPolicyTests(unittest.TestCase):
                         BUILD_SCOPE_TEST_LOCK=str(lock_path),
                         VENTIUM_BUILD_SCOPE_ACTIVE="1", VENTIUM_BUILD_SCOPE_UNIT="ventium-vivado",
                         VENTIUM_VIVADO_MEMORY_MAX="18G", VENTIUM_VIVADO_MEMORY_SWAP_MAX="8G",
+                        VENTIUM_VIVADO_TASK_PROFILE=task_profile,
                     )
                     script = (
                         'set -euo pipefail\nvivado_memory_max=20G\nvivado_swap_default=2G\n'
-                        'vivado_swap_max=8G\nvivado_tasks_max=48\n'
+                        'vivado_swap_max=8G\nvivado_tasks_max=48\nvivado_parallel2_tasks_max=128\n'
                         'lock_path="$BUILD_SCOPE_TEST_LOCK"\n' + functions + "\nscope_is_active\n"
                     )
                     with lock_path.open("w") as held_lock:

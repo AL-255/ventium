@@ -145,12 +145,46 @@ def final_reports(build):
                 note='Manual exception/source/CDC review and physical standard-suite acceptance remain separate.')
 
 
+def audit_task_monitoring(run, started, closed):
+    fields = {'task_monitoring', 'task_profile', 'tasks_max'}
+    if not fields.intersection(started) and 'VENTIUM_VIVADO_TASK_PROFILE' not in started.get('env', {}):
+        return None  # Historical receipts did not record task events.
+    threads = started.get('tool_threads')
+    if type(threads) is not int or threads not in (1, 2):
+        raise ValueError('invalid task-profile thread count')
+    profile, maximum = ('serial', 48) if threads == 1 else ('parallel2', 128)
+    limits = dict(MemoryMax=str(16*1024**3), MemorySwapMax=str(6*1024**3), TasksMax=str(maximum))
+    if (started.get('task_monitoring') is not True or started.get('task_profile') != profile or
+        type(started.get('tasks_max')) is not int or started['tasks_max'] != maximum or
+        started.get('env', {}).get('VENTIUM_VIVADO_TASK_PROFILE') != profile or
+        closed.get('task_profile') != profile or type(closed.get('tasks_max')) is not int or
+        closed['tasks_max'] != maximum or
+        any(closed.get('owner', {}).get(k) != v for k,v in limits.items())):
+        raise ValueError('task-profile/resource contract mismatch')
+    samples = [json.loads(row) for row in (run/'watch.jsonl').read_text().splitlines()]
+    if not samples:
+        raise ValueError('missing task monitoring samples')
+    for row in samples:
+        tasks, events = row.get('tasks'), row.get('task_events')
+        if (row.get('limits') != limits or type(tasks) is not int or not 0 <= tasks <= maximum or
+            not isinstance(events, dict) or 'max' not in events or
+            any(type(v) is not int or v < 0 for v in events.values()) or events['max'] != 0):
+            raise ValueError('resource drift, invalid task sample or task-limit rejection')
+    peak = max(row['tasks'] for row in samples)
+    if (peak <= 0 or type(closed.get('peak_tasks_sampled')) is not int or closed['peak_tasks_sampled'] != peak or
+        type(closed.get('task_limit_events')) is not int or closed['task_limit_events'] != 0):
+        raise ValueError('task close receipt disagrees with sampled evidence')
+    return dict(profile=profile, tasks_max=maximum, sampled_peak=peak,
+                samples=len(samples), observed_limit_rejections=0)
+
+
 def audit_closed(run):
     started = json.loads((run/'started.json').read_text())
     closed = json.loads((run/'closed.json').read_text())
     if closed['native_exit'] != 0 or closed['reason'] is not None:
         raise ValueError('native/resource failure')
     pins = audit_input_pins(run, started)
+    task_monitoring = audit_task_monitoring(run, started, closed)
     if closed['inputs_unchanged'] != pins['all_launch_inputs_unchanged']:
         raise ValueError('input-change receipt inconsistent with actual hashes')
     if pins['report_only_amendment']:
@@ -190,6 +224,7 @@ def audit_closed(run):
         raise ValueError('incremental implementation')
     result = final_reports(build)
     result.update(native_completion_verified=True, native_synthesis_configuration=synth, input_audit=pins,
+                  task_monitoring=task_monitoring,
                   controller_parser_failure=closed['failure'], elapsed_seconds=closed['elapsed'],
                   implementation_seconds=times[-1]-times[1], gameplay_ipc=None,
                   source_manifest_sha256=sha(run/'prepared.json'))

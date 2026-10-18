@@ -100,6 +100,39 @@ def stage_deadline(text, now):
     return bool(starts and now-starts[0] >= IMPL_LIMIT)
 
 
+def task_policy(threads):
+    if type(threads) is not int or threads not in (1, 2):
+        raise ValueError('unsupported internal thread count')
+    return ('serial', 48) if threads == 1 else ('parallel2', 128)
+
+
+def check_scope_limits(current, tasks_max):
+    expected = dict(MemoryMax=str(RAM_GIB*GIB), MemorySwapMax=str(SWAP_GIB*GIB),
+                    TasksMax=str(tasks_max))
+    if any(current.get(key) != value for key, value in expected.items()):
+        raise ValueError('live resource limits differ from launch contract')
+    return expected
+
+
+def task_pressure(current_text, events_text, limit):
+    def number(text):
+        if not text or not text.isascii() or not text.isdecimal():
+            raise ValueError('invalid task counter')
+        return int(text)
+    current = number(current_text.strip())
+    if not 0 <= current <= limit:
+        raise ValueError('task count exceeds configured limit')
+    events = {}
+    for row in events_text.splitlines():
+        fields = row.split()
+        if len(fields) != 2 or fields[0] in events:
+            raise ValueError('invalid/duplicate task event')
+        events[fields[0]] = number(fields[1])
+    if 'max' not in events:
+        raise ValueError('missing task-limit event counter')
+    return dict(current=current, events=events, limit_hit=events['max'] != 0)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--strategy', choices=STRATEGIES, required=True)
@@ -107,6 +140,7 @@ def main():
     ap.add_argument('--threads', type=int, choices=(1, 2), default=1,
                     help='internal tool threads; always one Vivado family and -jobs 1')
     args = ap.parse_args()
+    task_profile, tasks_max = task_policy(args.threads)
     assert __debug__ and os.environ['TMPDIR'] == str(SCRATCH)
     assert os.environ.get('INVOCATION_ID'), 'use a retained systemd owner'
     dest = args.output.resolve()
@@ -123,6 +157,7 @@ def main():
     env = {k:v for k,v in os.environ.items() if not k.startswith(('VEN_', 'VENTIUM_', 'TB_', 'AXI_'))}
     env.update(TMPDIR=str(dest/'tool-tmp'), VIVADO_BIN='/tools/Xilinx/2025.2/Vivado/bin/vivado',
         VENTIUM_VIVADO_MEMORY_MAX=f'{RAM_GIB}G', VENTIUM_VIVADO_MEMORY_SWAP_MAX=f'{SWAP_GIB}G',
+        VENTIUM_VIVADO_TASK_PROFILE=task_profile,
         VENTIUM_VIVADO_LOCK_DIR=str(SCRATCH), VEN_FPGA_JOBS='1', VEN_FPGA_CORE_MHZ='40',
         VEN_FPGA_BUILD_PROFILE='balanced', VEN_FPGA_SKIP_PRESET='1',
         VEN_FPGA_SOURCE_ROOT=str(source/'ventium'), VEN_FPGA_FLOW_ROOT=str(source/'flow'),
@@ -137,6 +172,7 @@ def main():
         invocation=os.environ['INVOCATION_ID'], host=host(), disk_free=shutil.disk_usage(dest).free,
         env={k:v for k,v in env.items() if k.startswith(('VEN_', 'VENTIUM_')) or k == 'TMPDIR'},
         memory_max=RAM_GIB*GIB, swap_max=SWAP_GIB*GIB, whole_limit_seconds=WHOLE_LIMIT,
+        task_profile=task_profile, tasks_max=tasks_max, task_monitoring=True,
         implementation_limit_seconds=IMPL_LIMIT, prior_checkpoint_inputs=[],
         fresh_synthesis=True, tool_threads=args.threads, deployment=False, gameplay_ipc=None))
     interrupted = []
@@ -144,6 +180,7 @@ def main():
     signal.signal(signal.SIGINT, lambda s,f: interrupted.append(s))
     owner = reason = failure = None
     peak_ram = peak_swap = 0
+    peak_tasks_sampled = task_limit_events = 0
     start = time.monotonic()
     with (dest/'guard.log').open('x') as log, (dest/'watch.jsonl').open('x') as watch:
         process = subprocess.Popen(command, cwd=dest, env=env, stdout=log, stderr=subprocess.STDOUT)
@@ -160,12 +197,16 @@ def main():
                             try: cmd = Path('/proc', pid, 'cmdline').read_bytes()
                             except FileNotFoundError: continue
                             if str(dest/'native.log').encode() in cmd:
-                                assert current['MemoryMax'] == str(RAM_GIB*GIB)
-                                assert current['MemorySwapMax'] == str(SWAP_GIB*GIB) and current['TasksMax'] == '48'
+                                check_scope_limits(current, tasks_max)
                                 owner = current
                                 break
                     if owner:
                         assert current['InvocationID'] == owner['InvocationID']
+                        limits = check_scope_limits(current, tasks_max)
+                        pressure = task_pressure((group/'pids.current').read_text(),
+                            (group/'pids.events').read_text(), tasks_max)
+                        peak_tasks_sampled = max(peak_tasks_sampled, pressure['current'])
+                        task_limit_events = max(task_limit_events, pressure['events']['max'])
                         ram = int((group/'memory.current').read_text())
                         swap = int((group/'memory.swap.current').read_text())
                         events = dict(r.split() for r in (group/'memory.events').read_text().splitlines())
@@ -175,8 +216,10 @@ def main():
                         elif min(resources.values()) < 2*GIB: reason = '2 GiB host RAM/swap reserve'
                         elif ram+swap > (RAM_GIB+SWAP_GIB-1)*GIB: reason = 'combined memory early stop'
                         elif int(events['oom']) or int(events['oom_kill']): reason = 'scope OOM'
+                        elif pressure['limit_hit']: reason = 'scope task limit'
                         watch.write(json.dumps(dict(elapsed=time.monotonic()-start, memory=ram,
-                            swap=swap, events=events, host=resources, disk_free=free, reason=reason))+'\n')
+                            swap=swap, events=events, host=resources, disk_free=free, reason=reason,
+                            limits=limits, tasks=pressure['current'], task_events=pressure['events']))+'\n')
                         watch.flush()
                 if interrupted: reason = 'controller signal'
                 if time.monotonic()-start > WHOLE_LIMIT: reason = 'whole-run deadline'
@@ -217,6 +260,8 @@ def main():
     result = dict(completed=measurements is not None and not failure, native_exit=code,
         reason=reason, failure=failure, strategy=args.strategy, elapsed=time.monotonic()-start,
         inputs_unchanged=unchanged, owner=owner, peak_ram=peak_ram, peak_swap=peak_swap,
+        task_profile=task_profile, tasks_max=tasks_max, peak_tasks_sampled=peak_tasks_sampled,
+        task_limit_events=task_limit_events,
         native_synth=native_synth, measurements=measurements,
         products={p.name:sha(p) for p in (dest/'build').iterdir() if p.is_file()} if (dest/'build').exists() else {},
         # Coverage, pulse width, DRC/CDC/exceptions still require independent audit.

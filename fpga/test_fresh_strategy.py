@@ -6,11 +6,37 @@ import subprocess
 import tempfile
 import unittest
 
-from run_fresh_strategy import source_inventory, stage_deadline, validate_native_synth, IMPL_LIMIT
+from run_fresh_strategy import (source_inventory, stage_deadline, validate_native_synth,
+    IMPL_LIMIT, task_policy, task_pressure, check_scope_limits, GIB)
 from test_audit_fresh_strategy import SCRIPT, PROPS
 
 
 class FreshTests(unittest.TestCase):
+    def test_task_profiles_are_fixed_and_limits_are_rechecked(self):
+        for threads, profile, limit in ((1, 'serial', 48), (2, 'parallel2', 128)):
+            self.assertEqual(task_policy(threads), (profile, limit))
+            actual = dict(MemoryMax=str(16*GIB), MemorySwapMax=str(6*GIB), TasksMax=str(limit))
+            self.assertEqual(check_scope_limits(actual, limit), actual)
+            for key in actual:
+                for value in ('max', '0', str(int(actual[key])+1)):
+                    with self.assertRaises(ValueError):
+                        check_scope_limits({**actual, key:value}, limit)
+            with self.assertRaises(ValueError): check_scope_limits({}, limit)
+        for bad in (0, 3, True, '2', 2.0):
+            with self.assertRaises(ValueError): task_policy(bad)
+
+    def test_task_limit_events_are_a_failure_even_if_cpu_still_advances(self):
+        full = task_pressure('128\n', 'max 0\n', 128)
+        self.assertFalse(full['limit_hit'])  # Occupancy alone is not a failure.
+        rejected = task_pressure('48\n', 'max 3\n', 128)
+        self.assertTrue(rejected['limit_hit'])  # A past denial must not disappear.
+        self.assertEqual(rejected['events'], {'max':3})
+        for count, events in (('129', 'max 0'), ('-1', 'max 0'), ('nan', 'max 0'),
+                              ('1', ''), ('1', 'max -1'), ('1', 'max nan'),
+                              ('1', 'max 0\nmax 0'), ('1', 'max 0 unexpected')):
+            with self.subTest(count=count, events=events), self.assertRaises(ValueError):
+                task_pressure(count, events, 128)
+
     def test_partial_native_probe_needs_stage_completion_evidence(self):
         script = Path(__file__).with_name('test_native_fresh_threads.tcl').read_text()
         prefix = script.split('# Source-only tooling probe')[0]

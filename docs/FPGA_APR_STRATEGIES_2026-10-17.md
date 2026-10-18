@@ -436,9 +436,22 @@ family, one native job, and the unchanged RAM/swap/admission/deadline limits.
 Add task counts/events to the controller's watch/close receipts and fail fast
 on any task-limit rejection; do not wait for a silent mapping stall to reveal
 it. Verify both profiles and invalid/oversized overrides with host-only tests.
-This repair is **not implemented or launched yet**. The next trial must again
-start with a new source freeze/project and full synthesis, never the aborted
-mapping state. Disk admission must also be restored: about 6 GiB is free, and
+The task-profile repair is now implemented and passes **32 FPGA-flow tests and
+22 resource-guard tests**. These are host-only tooling regressions, not native
+full-chip completion or processor acceptance. `serial` stays at 48 tasks;
+`parallel2` selects exactly 128, while arbitrary numeric overrides still cannot
+expand the selected ceiling and unknown profiles fail closed. The fresh-run
+controller selects the profile from its audited one/two-thread setting, records
+task occupancy/rejections, and rechecks all three hard limits on every sample.
+Any observed task-limit rejection terminates the run even if the CPU remains
+busy. The independent result auditor cross-checks the profile, owner limits,
+every monitoring sample, sampled peak and close receipt; old receipts remain
+explicitly distinguishable as lacking this task monitoring. No live run was
+modified to bypass the old cap. Native profile probing and a new full-chip run
+are **pending**.
+The next trial must again start with a new source freeze/project and full
+synthesis, never the aborted mapping state. Disk admission must also be restored:
+about 6 GiB is free, and
 this closed run retains about 2.4 GiB of disposable internal synthesis scratch;
 preserve sources, logs and receipts when pruning it.
 

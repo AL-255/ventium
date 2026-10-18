@@ -4,7 +4,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 from audit_fresh_result import (timing_summary, timing_coverage, route_and_drc, bus_skew,
-    audit_closed, audit_input_pins, sha, CLOCK_ROLE_AMENDMENT, AMENDED_OWNER, AMENDED_SCOPE)
+    audit_closed, audit_input_pins, audit_task_monitoring, sha,
+    CLOCK_ROLE_AMENDMENT, AMENDED_OWNER, AMENDED_SCOPE)
 from test_audit_fresh_strategy import SCRIPT, PROPS
 
 PASS = '''| Design Timing Summary
@@ -22,6 +23,39 @@ DRC = 'Design State : Fully Routed\n| Warning |\n'
 
 
 class ResultTests(unittest.TestCase):
+    def test_task_monitoring_requires_consistent_independent_evidence(self):
+        with tempfile.TemporaryDirectory(prefix='fresh-task-audit-') as td:
+            run = Path(td)
+            self.assertIsNone(audit_task_monitoring(run, {}, {}))
+            for threads, profile, maximum in ((1, 'serial', 48), (2, 'parallel2', 128)):
+                limits = dict(MemoryMax=str(16*1024**3), MemorySwapMax=str(6*1024**3), TasksMax=str(maximum))
+                started = dict(tool_threads=threads, task_monitoring=True, task_profile=profile,
+                    tasks_max=maximum, env={'VENTIUM_VIVADO_TASK_PROFILE':profile})
+                closed = dict(task_profile=profile, tasks_max=maximum, owner=limits,
+                    peak_tasks_sampled=maximum, task_limit_events=0)
+                # A final empty-scope sample can race normal process exit.
+                rows = [dict(tasks=n, task_events={'max':0}, limits=limits) for n in (20, maximum, 0)]
+                watch = run/'watch.jsonl'
+                watch.write_text('\n'.join(json.dumps(r) for r in rows)+'\n')
+                self.assertEqual(audit_task_monitoring(run, started, closed)['sampled_peak'], maximum)
+                for key, value in (('task_monitoring', False), ('tasks_max', True),
+                                   ('task_profile', 'unlimited'), ('tool_threads', True)):
+                    with self.assertRaises(ValueError):
+                        audit_task_monitoring(run, {**started, key:value}, closed)
+                for key, value in (('peak_tasks_sampled', maximum-1), ('task_limit_events', 1),
+                                   ('task_limit_events', False), ('owner', {**limits, 'TasksMax':'max'})):
+                    with self.assertRaises(ValueError):
+                        audit_task_monitoring(run, started, {**closed, key:value})
+                for bad in ([], [dict(tasks=maximum+1, task_events={'max':0}, limits=limits)],
+                            [dict(tasks=0, task_events={'max':0}, limits=limits)],
+                            [dict(tasks=20, task_events={'max':3}, limits=limits)],
+                            [dict(tasks=True, task_events={'max':0}, limits=limits)],
+                            [dict(tasks=20, task_events={}, limits=limits)],
+                            [dict(tasks=20, task_events={'max':False}, limits=limits)],
+                            [dict(tasks=20, task_events={'max':0}, limits={**limits, 'MemoryMax':'max'})]):
+                    watch.write_text('\n'.join(json.dumps(r) for r in bad))
+                    with self.assertRaises(ValueError): audit_task_monitoring(run, started, closed)
+
     def test_all_three_timing_checks_required(self):
         self.assertTrue(timing_summary(PASS)['all_numeric_timing_met'])
         for old, new in [('0.150', '-0.150'), ('0.004', '-0.004'), ('2.000', '-2.000')]:

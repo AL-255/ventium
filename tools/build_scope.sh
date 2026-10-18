@@ -24,12 +24,13 @@ ipc_parallel_tasks_max="64"
 ipc_parallel32_memory_max="16G"
 ipc_parallel32_tasks_max="128"
 vivado_memory_max="20G"
-# `general.maxThreads=1` / one `launch_runs -jobs 1` bound synth work, but
-# Vivado also creates bounded control, board-repository, and Taskflow helper
-# threads.  A 32-TID cgroup cap denied that fixed one-worker family mid-startup.
-# Keep a fixed, non-environment-overridable cushion rather than permitting an
-# unreviewed task limit; 48 remains below the normal generated-build cap.
+# The default serial family keeps its reviewed 48-task envelope. Two internal
+# synthesis threads also create two task-worker processes with their own helper
+# pools: the full-chip Oct18 run exhausted 48 tasks and stalled during mapping.
+# Select a fixed named profile, never an arbitrary numeric task override. The
+# parallel2 profile changes helper headroom, not jobs, RAM/swap, or lock policy.
 vivado_tasks_max="48"
+vivado_parallel2_tasks_max="128"
 # Keep swap bounded separately from resident memory.  Vivado can retain a large
 # working set during synthesis, but allowing an unbounded swap backlog turns an
 # OOM into hours of host-wide thrashing. Keep the default at 2G. The explicit
@@ -206,6 +207,17 @@ vivado_host_admission() {
     echo "[build-scope] admitted Vivado: MemAvailable=${memory_available}, SwapFree=${swap_free} bytes" >&2
 }
 
+vivado_task_limit() {
+    case "${VENTIUM_VIVADO_TASK_PROFILE:-serial}" in
+        serial) printf '%s\n' "$vivado_tasks_max" ;;
+        parallel2) printf '%s\n' "$vivado_parallel2_tasks_max" ;;
+        *)
+            echo "[build-scope] unknown Vivado task profile: ${VENTIUM_VIVADO_TASK_PROFILE@Q}" >&2
+            return 1
+            ;;
+    esac
+}
+
 scope_has_cap() {
     local cgroup_path="$1" memory_cap="$2" tasks_cap="$3" swap_cap="${4:-}"
     local cgroup_root="/sys/fs/cgroup${cgroup_path}"
@@ -237,11 +249,12 @@ scope_has_cap() {
 }
 
 scope_required_limits() {
-    local unit="$1" selected_memory selected_swap
+    local unit="$1" selected_memory selected_swap selected_tasks
     if [ "$unit" = "ventium-vivado" ]; then
         selected_memory="$(vivado_memory_limit)" || return 1
         selected_swap="$(vivado_swap_limit)" || return 1
-        printf '%s %s %s\n' "$selected_memory" "$vivado_tasks_max" "$selected_swap"
+        selected_tasks="$(vivado_task_limit)" || return 1
+        printf '%s %s %s\n' "$selected_memory" "$selected_tasks" "$selected_swap"
     elif [ "$unit" = "ventium-ipc-parallel" ]; then
         printf '%s %s\n' "$ipc_parallel_memory_max" "$ipc_parallel_tasks_max"
     elif [ "$unit" = "ventium-ipc-parallel32" ]; then
@@ -496,10 +509,10 @@ case "$scope_profile" in
         fi
         scope_mem="$(vivado_memory_limit)" || exit 2
         scope_swap="$(vivado_swap_limit)" || exit 2
-        if [ "${VENTIUM_VIVADO_TASKS_MAX:-$vivado_tasks_max}" != "$vivado_tasks_max" ]; then
-            echo "[build-scope] forcing reviewed Vivado TasksMax=${vivado_tasks_max}" >&2
+        scope_tasks="$(vivado_task_limit)" || exit 2
+        if [ "${VENTIUM_VIVADO_TASKS_MAX:-$scope_tasks}" != "$scope_tasks" ]; then
+            echo "[build-scope] forcing reviewed Vivado TasksMax=${scope_tasks}" >&2
         fi
-        scope_tasks="$vivado_tasks_max"
         echo "[build-scope] Vivado limits: MemoryMax=${scope_mem} (ceiling ${vivado_memory_max}), MemorySwapMax=${scope_swap} (ceiling ${vivado_swap_max}), TasksMax=${scope_tasks}" >&2
         vivado_host_admission "$scope_mem" "$scope_swap" || exit 125
         ;;
