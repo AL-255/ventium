@@ -408,6 +408,15 @@ next fresh trial's effort/runtime policy, not a routed frequency gain or a
 reason to change the running configuration. The current 40 MHz constraint,
 single-thread setting and 3 h 50 min implementation bound remain unchanged.
 
+For the next trial, do not assume that changing only the physical-optimization
+directive removes this runtime cost. AMD describes `Explore` as multiple
+optimization passes and `AggressiveExplore` as different algorithms with more
+aggressive goals. Even physical `RuntimeOptimized` retains critical-cell and
+placement optimization. Thus the prepared `Explore` alternative is an
+experiment, not a guaranteed deadline remedy; retain the native phase/runtime
+comparison and existing resource/deadline guards.
+[AMD 2025.2 physical-optimization directives](https://docs.amd.com/r/2025.2-English/ug835-vivado-tcl-commands/phys_opt_design).
+
 ### Read-only board readiness during r4
 
 At **2026-10-18 01:46 UTC** (Oct17 local), SSH and administrator authentication
