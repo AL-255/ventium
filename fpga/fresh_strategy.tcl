@@ -1,6 +1,7 @@
 # Fresh full-project synthesis/APR. Never import a previous run's checkpoints.
-if {$argc != 3} {error "usage: strategy frozen-source new-output-directory"}
-lassign $argv strategy frozen out
+if {$argc != 4} {error "usage: strategy frozen-source new-output-directory internal-threads"}
+lassign $argv strategy frozen out tool_threads
+if {$tool_threads ni {1 2}} {error "only one or two internal threads supported"}
 if {$strategy ni {performance-netdelay routability-spread}} {error "unknown strategy"}
 if {[version -short] ne "2025.2"} {error "Vivado 2025.2 required"}
 set out [file normalize $out]
@@ -10,7 +11,7 @@ file mkdir $out
 set ::fresh_script_dir [file dirname [file normalize [info script]]]
 source [file join $::fresh_script_dir fresh_synth_evidence.tcl]
 set ::env(VEN_FRESH_OUT) $out
-set_param general.maxThreads 1
+set_param general.maxThreads $tool_threads
 set ::fresh_launches {}
 
 proc fresh_event {name} {
@@ -108,6 +109,10 @@ proc launch_runs {run args} {
         set_property STEPS.ROUTE_DESIGN.TCL.PRE [file join $::fresh_script_dir fresh_route_pre.tcl] $obj
     }
     fresh_run $run
+    # The source-only platform sets its own legacy thread default. Override
+    # immediately before each native launch without changing its -jobs 1.
+    set_param general.maxThreads $::tool_threads
+    if {[get_param general.maxThreads] != $::tool_threads} {error "tool thread policy drift"}
     fresh_event $run
     lappend ::fresh_launches $run
     return [uplevel 1 [list __fresh_launch_runs $run {*}$args]]

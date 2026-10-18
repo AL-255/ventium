@@ -85,6 +85,21 @@ class ResultTests(unittest.TestCase):
             # are tested independently above; do not treat these as FPGA data.
             with patch('audit_fresh_result.final_reports', return_value={}):
                 self.assertTrue(audit_closed(run)['native_completion_verified'])
+                # New explicit-thread receipts must agree with BOTH native
+                # worker scripts; missing or mismatched implementation fails.
+                impl_script = build/'rk_ao486_system/rk_ao486_system.runs/impl_1/rk_ao486_bd_wrapper.tcl'
+                impl_script.parent.mkdir(parents=True)
+                for threads in (1, 2):
+                    (run/'started.json').write_text(json.dumps({**started, 'tool_threads':threads}))
+                    script.write_text(SCRIPT.replace('maxThreads 1', f'maxThreads {threads}'))
+                    impl_script.write_text(f'set_param general.maxThreads {threads}\n')
+                    self.assertEqual(audit_closed(run)['native_synthesis_configuration']['configured_threads'], threads)
+                    impl_script.write_text('set_param general.maxThreads 8\n')
+                    with self.assertRaises(ValueError): audit_closed(run)
+                    impl_script.unlink()
+                    with self.assertRaises(FileNotFoundError): audit_closed(run)
+                script.write_text(SCRIPT)
+                (run/'started.json').write_text(json.dumps(started))
                 for key, value in (('native_exit', 1), ('reason', 'scope OOM'),
                                    ('inputs_unchanged', False), ('failure', 'audit: other failure')):
                     (run/'closed.json').write_text(json.dumps({**closed, key:value}))

@@ -212,8 +212,8 @@ source /tools/Xilinx/2025.2/Vivado/settings64.sh
 set -u
 # Keep the sole Vivado parent and every synthesis/place/route descendant out of
 # the same resource pool used by Verilator/QEMU builds.  The Tcl flow further
-# fixes Vivado's internal worker count at one; this cgroup is the hard failure
-# boundary if a vendor tool nevertheless fans out unexpectedly.
+# bounds Vivado's internal thread count separately from its single native job;
+# this cgroup is the hard failure boundary if the tool fans out unexpectedly.
 export VENTIUM_BUILD_SCOPE_UNIT="ventium-vivado"
 export VENTIUM_BUILD_SCOPE_PROFILE="vivado"
 exec "$SCRIPT_DIR/../tools/build_scope.sh" -- "${VIVADO_BIN:-vivado}" "$@"

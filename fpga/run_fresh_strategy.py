@@ -86,10 +86,10 @@ def prepare(dest):
     return pins
 
 
-def validate_native_synth(text, strategy, properties):
+def validate_native_synth(text, strategy, properties, threads=1):
     # Vivado omits default-valued arguments from its generated command. The
     # actual property report, not the spelling of a default, is the authority.
-    return audit_synth(text, properties, strategy)['command']
+    return audit_synth(text, properties, strategy, threads)['command']
 
 
 def stage_deadline(text, now):
@@ -104,6 +104,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--strategy', choices=STRATEGIES, required=True)
     ap.add_argument('--output', type=Path, required=True)
+    ap.add_argument('--threads', type=int, choices=(1, 2), default=1,
+                    help='internal tool threads; always one Vivado family and -jobs 1')
     args = ap.parse_args()
     assert __debug__ and os.environ['TMPDIR'] == str(SCRATCH)
     assert os.environ.get('INVOCATION_ID'), 'use a retained systemd owner'
@@ -130,13 +132,13 @@ def main():
     command = ['timeout', '--signal=TERM', '--kill-after=60s', f'{WHOLE_LIMIT}s',
         str(REPO/'fpga/run_vivado_exclusive.sh'), '-mode', 'batch', '-notrace',
         '-log', str(dest/'native.log'), '-journal', str(dest/'native.jou'),
-        '-source', str(launcher), '-tclargs', args.strategy, str(source), str(dest/'build')]
+        '-source', str(launcher), '-tclargs', args.strategy, str(source), str(dest/'build'), str(args.threads)]
     save(dest, 'started.json', dict(strategy=args.strategy, command=command, pins=pins,
         invocation=os.environ['INVOCATION_ID'], host=host(), disk_free=shutil.disk_usage(dest).free,
         env={k:v for k,v in env.items() if k.startswith(('VEN_', 'VENTIUM_')) or k == 'TMPDIR'},
         memory_max=RAM_GIB*GIB, swap_max=SWAP_GIB*GIB, whole_limit_seconds=WHOLE_LIMIT,
         implementation_limit_seconds=IMPL_LIMIT, prior_checkpoint_inputs=[],
-        fresh_synthesis=True, deployment=False, gameplay_ipc=None))
+        fresh_synthesis=True, tool_threads=args.threads, deployment=False, gameplay_ipc=None))
     interrupted = []
     signal.signal(signal.SIGTERM, lambda s,f: interrupted.append(s))
     signal.signal(signal.SIGINT, lambda s,f: interrupted.append(s))
@@ -206,7 +208,7 @@ def main():
         assert code == 0 and not reason and not failure and unchanged and owner
         assert 'FRESH-STRATEGY-COMPLETE '+args.strategy in (dest/'native.log').read_text()
         native_synth = validate_native_synth((dest/'build/rk_ao486_system/rk_ao486_system.runs/synth_1/rk_ao486_bd_wrapper.tcl').read_text(), args.strategy,
-            (dest/'build/synth_1-properties.rpt').read_text())
+            (dest/'build/synth_1-properties.rpt').read_text(), args.threads)
         measurements = validate_timing((dest/'build/timing.tsv').read_text())
         assert (dest/'build/fresh-routed.dcp').stat().st_size > 50_000_000
         assert (dest/'build/rk_ao486_system.bit.bin').stat().st_size > 10_000_000

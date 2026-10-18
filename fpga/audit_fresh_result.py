@@ -9,7 +9,7 @@ import math
 from pathlib import Path
 import re
 
-from audit_fresh_strategy import audit_synth, property_value
+from audit_fresh_strategy import audit_synth, audit_threads, property_value
 from run_apr_trial import REPO, sha, validate_timing
 
 # Exact, reviewed reporting-only amendment for the already-running r2. These
@@ -178,7 +178,13 @@ def audit_closed(run):
     if times != sorted(times) or times[-1]-times[1] >= started['implementation_limit_seconds']:
         raise ValueError('implementation deadline exceeded')
     script = build/'rk_ao486_system/rk_ao486_system.runs/synth_1/rk_ao486_bd_wrapper.tcl'
-    synth = audit_synth(script.read_text(), (build/'synth_1-properties.rpt').read_text(), started['strategy'])
+    threads = started.get('tool_threads', 1)
+    synth = audit_synth(script.read_text(), (build/'synth_1-properties.rpt').read_text(), started['strategy'], threads)
+    if 'tool_threads' in started:
+        # Legacy receipts predate the explicit field; newly configured runs
+        # must prove the native implementation's thread cap too.
+        impl_script = build/'rk_ao486_system/rk_ao486_system.runs/impl_1/rk_ao486_bd_wrapper.tcl'
+        audit_threads(impl_script.read_text(), threads)
     impl = (build/'impl_1-properties.rpt').read_text()
     if property_value(impl, 'AUTO_INCREMENTAL_CHECKPOINT') != '0' or property_value(impl, 'INCREMENTAL_CHECKPOINT'):
         raise ValueError('incremental implementation')

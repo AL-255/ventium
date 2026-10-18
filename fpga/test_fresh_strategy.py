@@ -1,5 +1,6 @@
 """Source-only build admission and native option tests, not CPU acceptance."""
 import os
+import itertools
 from pathlib import Path
 import subprocess
 import tempfile
@@ -50,15 +51,17 @@ class FreshTests(unittest.TestCase):
         prefix = script.split('# The source-only platform wrapper owns exact defines')[0]
         prefix = prefix.replace('set ::fresh_script_dir [file dirname [file normalize [info script]]]',
             'set ::fresh_script_dir {'+str(Path(__file__).parent.resolve())+'}')
-        for strategy, directive, place, route in (
+        strategies = (
                 ('performance-netdelay', 'PerformanceOptimized', 'ExtraNetDelay_high', 'NoTimingRelaxation'),
-                ('routability-spread', 'AlternateRoutability', 'AltSpreadLogic_medium', 'AlternateCLBRouting')):
+                ('routability-spread', 'AlternateRoutability', 'AltSpreadLogic_medium', 'AlternateCLBRouting'))
+        for (strategy, directive, place, route), threads in itertools.product(strategies, (1, 2)):
             with tempfile.TemporaryDirectory(prefix='fresh-tcl-test-') as td:
                 mock = '''
 proc version {args} {return 2025.2}
-proc set_param {args} {}
+proc set_param {name value} {set ::params($name) $value}
+proc get_param {name} {return $::params($name)}
 proc create_project {args} {}
-proc launch_runs {args} {}
+proc launch_runs {run args} {set ::native_threads($run) [get_param general.maxThreads]}
 proc current_project {} {return project}
 proc config_ip_cache {args} {set ::props(project,IP_CACHE_PERMISSIONS) disable}
 proc get_runs {r} {return $r}
@@ -88,6 +91,7 @@ create_project trial
 set ::props(synth_1,STEPS.SYNTH_DESIGN.ARGS.DIRECTIVE) Default
 set ::props(synth_1,AUTO_INCREMENTAL_CHECKPOINT) 1
 set ::props(impl_1,INCREMENTAL_CHECKPOINT) /old/bad.dcp
+set_param general.maxThreads 1
 launch_runs synth_1 -jobs 1
 if {{![catch {{launch_runs impl_1 -to_step write_bitstream -jobs 1}}]}} {{error "missing clock evidence allowed"}}
 # No wait_on_run exists while the prefix loads, like native Vivado startup.
@@ -99,7 +103,11 @@ proc fresh_synth_evidence {{}} {{
  set ::evidence_called 1
 }}
 wait_on_run synth_1
+set_param general.maxThreads 1
 launch_runs impl_1 -to_step write_bitstream -jobs 1
+foreach run {{synth_1 impl_1}} {{
+ if {{$::native_threads($run) != {threads}}} {{error "native thread setting lost"}}
+}}
 if {{!$::evidence_called}} {{error "evidence procedure not called"}}
 foreach {{obj prop expected}} {{
  synth_1 STEPS.SYNTH_DESIGN.ARGS.DIRECTIVE {directive}
@@ -115,7 +123,7 @@ if {{[get_property STEPS.SYNTH_DESIGN.TCL.POST synth_1] ne ""}} {{error "native 
 puts FRESH-TCL-OK
 '''
                 runner = Path(td)/'test.tcl'
-                runner.write_text(mock+f'\nset argc 3\nset argv [list {strategy} {{{td}/source}} {{{td}/build}}]\n'+prefix+checks)
+                runner.write_text(mock+f'\nset argc 4\nset argv [list {strategy} {{{td}/source}} {{{td}/build}} {threads}]\n'+prefix+checks)
                 result = subprocess.run(['tclsh', str(runner)], text=True, capture_output=True)
                 self.assertEqual(result.returncode, 0, result.stdout+result.stderr)
                 self.assertIn('FRESH-TCL-OK', result.stdout)

@@ -19,7 +19,17 @@ def property_value(text, name):
     return values[0]
 
 
-def audit_synth(script, properties, strategy):
+def audit_threads(script, threads=1):
+    if type(threads) is not int or threads not in (1, 2):
+        raise ValueError('only one or two internal threads supported')
+    values = re.findall(r'^[ \t]*set_param[ \t]+general\.maxThreads[ \t]+(\S+)[ \t]*$', script, re.M)
+    if values != [str(threads)]:
+        raise ValueError('native thread bound missing/ambiguous/mismatched')
+    return threads
+
+
+def audit_synth(script, properties, strategy, threads=1):
+    audit_threads(script, threads)
     directives = {'performance-netdelay': 'PerformanceOptimized', 'routability-spread': 'AlternateRoutability'}
     directive = directives[strategy]
     commands = re.findall(r'^synth_design [^\n]+', script, re.M)
@@ -46,14 +56,12 @@ def audit_synth(script, properties, strategy):
     for name, value in expected.items():
         if property_value(properties, name) != value:
             raise ValueError('native property mismatch: '+name)
-    if not re.search(r'^set_param general\.maxThreads 1\s*$', script, re.M):
-        raise ValueError('native thread bound missing')
     if not re.search(r'^set_property ip_cache_permissions disable(?:d)? \[current_project\]\s*$', script, re.M):
         raise ValueError('native IP cache disable missing')
     if re.search(r'^\s*(?:read_checkpoint|open_checkpoint)\s', script, re.M):
         raise ValueError('checkpoint input before native synthesis')
     return dict(command=commands[0], properties=expected, hierarchy_default_omitted='-flatten_hierarchy' not in args,
-                timing_driven=True, prior_checkpoint_input=False, configured_threads=1)
+                timing_driven=True, prior_checkpoint_input=False, configured_threads=threads)
 
 
 def main():
@@ -63,7 +71,8 @@ def main():
     started = json.loads((args.run/'started.json').read_text())
     build = args.run/'build'
     script = build/'rk_ao486_system/rk_ao486_system.runs/synth_1/rk_ao486_bd_wrapper.tcl'
-    result = audit_synth(script.read_text(), (build/'synth_1-properties.rpt').read_text(), started['strategy'])
+    result = audit_synth(script.read_text(), (build/'synth_1-properties.rpt').read_text(),
+                         started['strategy'], started.get('tool_threads', 1))
     print(json.dumps(dict(native_synthesis_configuration=result,
                          completion_verified=False, timing_signoff=False, gameplay_ipc=None), indent=2))
 
