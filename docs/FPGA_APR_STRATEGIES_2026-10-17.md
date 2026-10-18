@@ -46,6 +46,7 @@ window peak reaches 90.37% despite much lower whole-chip routing utilization.
 | `routability-r3` | `AlternateRoutability`, rebuilt hierarchy | Same planned APR as r2 | Stopped by the 21 GiB combined-memory guard during technology mapping; no OOM or task-cap rejection. No completed synthesis/APR or timing result. |
 | `routability-r4` | `AlternateRoutability`, rebuilt hierarchy; one synthesis process | Same APR as r2; routing never reached | Synthesis and placement completed; stopped at 3 h 50 min APR limit in physical optimization. No routed timing result. |
 | `performance-retime-r1` | `PerformanceOptimized`, rebuilt hierarchy, explicit synthesis retiming | Planned spread placement / explicit physical-operation sets / `NoTimingRelaxation` | Stopped by the 21 GiB combined-memory guard during technology mapping. No OOM, completed synthesis/APR or timing result. |
+| `performance-retime-r2` | Same retiming strategy, fresh source/project, named `serial20` memory profile | Same bounded physical operations / spread placement / `NoTimingRelaxation` | Launched Oct18 18:48:30 EDT; actual 20/6 GiB/48-task scope verified. No completed synthesis/APR or timing result yet. |
 
 The first combination targets the measured long logic/routing path. The second
 tests a routing-oriented mapping and spread placement, if the first result
@@ -78,8 +79,11 @@ source hashes, synthesis-clock evidence, stage timestamps and final reports.
 New checkpoints generated **within** a run are normal synthesis/APR outputs;
 they are never starting inputs for another strategy.
 
-Resource limits: one Vivado family/one native worker, **16 GiB RAM / 6 GiB swap**,
-21 GiB combined early stop, 4 GiB disk reserve, 2 GiB host RAM/swap reserve.
+Resource limits: one Vivado family/one native worker. The default `standard16`
+profile is **16 GiB RAM / 6 GiB swap**, with a 21 GiB combined early stop.
+Retiming-r2 uses the separately tested serial-only **20/6 GiB** profile and
+25 GiB combined early stop described below. Both retain the 4 GiB disk reserve
+and 2 GiB host RAM/swap reserve.
 Whole-run limit is eight hours; **implementation is bounded to 3 h 50 min**,
 including placement, optimization and routing. A timeout/resource stop is not
 a completed timing result. Four fresh-flow tests plus eleven timing/parser
@@ -792,7 +796,7 @@ one-build lock, eight-hour whole limit and 3 h 50 min APR limit. The default
 profile receipts, actual limits, admission and runtime reserve evidence; it does
 not infer acceptance from the profile label. **36 fresh-flow/audit tests plus
 22 exclusive-launcher tests pass.** These are tooling checks, not CPU acceptance.
-No next full run has launched yet. Disk admission was restored by archiving and
+Before launching the next full run, disk admission was restored by archiving and
 byte-comparing r1's closed, unopened
 `synth_1/.Xil/Vivado-3306894-AL-MS790S-U26` directory, then removing only that
 uncompressed directory. **1,803,542,528 bytes (1.68 GiB) net reclaimed**; sources,
@@ -802,6 +806,37 @@ SHA256 `f12d898c799f7c5078fb774729c00c065e273c46ba6745ae4e129368089622c3`.
 Adjacent `closed-mapping-scratch.md` records the exact target and restore
 command. Free disk was then **7,625,326,592 bytes**, above the unchanged 7 GiB
 admission threshold; all resources must be rechecked at the next launch.
+
+### Fresh retiming-r2 launch with the named serial20 profile
+
+At **18:48:30 EDT Oct18**, a new full-source trial started under
+`ventium-fresh-retime-oct18-r2.service`, owner invocation
+`9c99f901cb4d451f81f943a625fa43d8`, scope invocation
+`fecfc8474c764e4aa01ad1492e4d5f75`. Output:
+`/home/yukidama/external/tmp/ventium-fresh-strategies-oct17.67YRDIRh/performance-retime-r2`.
+The actual live scope was verified as **20 GiB RAM / 6 GiB swap / 48 tasks**.
+The launch receipt records **25,617,764,352 bytes MemAvailable** and
+**7,578,423,296 bytes free disk** after source preparation. The combined early
+stop is **26,843,545,600 bytes (25 GiB)**, with all existing reserve and
+whole-run/APR deadline checks retained. Resource-profile tooling is committed
+in `a077488b`; no exclusive-launcher ceiling was raised.
+
+The **200-file / 159-define** source closure is identical to r1's prepared
+closure; all **214 source/tool pins** were rehashed unchanged after launch.
+Only the previously documented clock-controller repair differs from the frozen
+ancestor. CPU/cache RTL, synthesis/APR parameters and 40 MHz core / 100 MHz AXI
+targets are unchanged. This is a new project with IP caching disabled, not a
+restart of r1 or an import of its archived mapping cache. No old checkpoint is
+an input. Native synthesis/APR completion, timing and physical acceptance remain
+pending; this candidate has no gameplay measurement.
+
+The native synthesis configuration audit passes on r2's generated script and
+properties: `PerformanceOptimized`, `GLOBAL_RETIMING=on`, rebuilt hierarchy,
+one thread, timing-driven synthesis, disabled IP cache and no incremental or
+pre-synthesis checkpoint input. This verifies configuration, not completion.
+
+- `prepared.json` SHA256: `57ae9fb2d1132574cc8cb7a7d65ee6dd4371840c439709b98c56bb3b90460831`
+- `started.json` SHA256: `c2ad6f6185861ea38801c20967e75dd73ba37a4be41e028603ccd1b9a336a45a`
 
 The `opt_design` crash workaround has a specific scope. The retained native
 2025.2 help log `/var/tmp/ventium-icfrontspan-pwropt-help.HMmw46/help2.log`
