@@ -42,7 +42,7 @@ window peak reaches 90.37% despite much lower whole-chip routing utilization.
 | `performance-r2` | `PerformanceOptimized`, rebuilt hierarchy | Planned `ExtraNetDelay_high` / `AggressiveExplore` / `NoTimingRelaxation`; post-route `Explore` | Native synthesis succeeded; reporting-context guard stopped the run before APR. No timing result. |
 | `performance-r3` | Planned `PerformanceOptimized`, rebuilt hierarchy | Planned same performance APR | Stopped in 10.06 s before project creation: early interception of Vivado's lazily registered `wait_on_run` failed |
 | `performance-r4` | `PerformanceOptimized`, rebuilt hierarchy | `ExtraNetDelay_high` / `AggressiveExplore` / planned `NoTimingRelaxation`; planned post-route `Explore` | Stopped at the 3 h 50 min APR limit during physical optimization, before routing. No routed timing result. |
-| `routability-r2` | `AlternateRoutability`, rebuilt hierarchy | Planned `AltSpreadLogic_medium` / `Explore` / `AlternateCLBRouting`; post-route `Explore` | Fresh native synthesis running with two internal threads; actual synthesis configuration audited. Completion/timing pending. |
+| `routability-r2` | `AlternateRoutability`, rebuilt hierarchy | Planned `AltSpreadLogic_medium` / `Explore` / `AlternateCLBRouting`; post-route `Explore` | Stopped through its controller after technology mapping stalled with task-cap rejections. No completed synthesis/APR or timing result. |
 
 The first combination targets the measured long logic/routing path. The second
 tests a routing-oriented mapping and spread placement, if the first result
@@ -398,6 +398,49 @@ failure diagnostic. This additional cap event remains a caveat, not a proven
 cause of the runtime difference. No live resource limit or pinned input was
 changed; all **213** launch pins had been rehashed successfully shortly before
 the transition.
+
+The mapping phase then **stalled**: the log remained unchanged from
+**05:28:28 EDT**, all compute threads in the synthesis parent and both task
+workers were waiting, and the two workers' CPU totals stayed at **10:26 / 10:28**.
+Across the subsequent worker-tree samples the scope accumulated only a few
+seconds of housekeeping CPU, unlike the earlier CPU-active optimization.
+At **09:33:56 UTC**, the log had been unchanged for more than five minutes,
+`TasksCurrent=TasksMax=48`, and `pids.events` still reported three rejections.
+This is evidence of a task-starved/stalled run, but does not prove the exact
+internal Vivado deadlock mechanism; no native thread-creation error was logged.
+The controller was deliberately signalled to stop, rather than leaving this
+resource-compromised experiment running to its eight-hour limit.
+
+The authoritative close receipt records **2 h 20 min 17.56 s**, native exit
+**124**, reason **`controller signal`**, `completed=false`, and
+`inputs_unchanged=true`. This was **not** a whole-run/implementation deadline
+expiry or a completed timing result. Peak scope RAM was **16,453,775,360 bytes**,
+swap remained zero, and no OOM was observed. The owner is terminal and the
+Vivado scope is inactive; all five native project/synthesis/helper PIDs were
+confirmed gone. All **213** pins were independently rehashed again before any
+subsequent tooling edit. The closed-result auditor rejects it as
+`native/resource failure`, as required.
+
+Retained SHA256 receipts:
+
+| Artifact | SHA256 |
+|---|---|
+| `closed.json` | `093f34e6cc438bd774019f38b99b873fe0fd3bf51dc3d6752d22fab0f16a7b56` |
+| `started.json` | `23ac8ff5ba7c9b8b5f024daf44568dc61e71c8297e9d0353d37ee1024a321a72` |
+| `prepared.json` | `57ae9fb2d1132574cc8cb7a7d65ee6dd4371840c439709b98c56bb3b90460831` |
+| `native.log` | `0e4025c619d20eddf21164890d715f9f599036b666577e9f434db279d9f8b506` |
+
+Before retrying, add a reviewed **two-thread task profile** with bounded helper
+headroom (128 tasks), retaining the serial/default 48-task profile, one Vivado
+family, one native job, and the unchanged RAM/swap/admission/deadline limits.
+Add task counts/events to the controller's watch/close receipts and fail fast
+on any task-limit rejection; do not wait for a silent mapping stall to reveal
+it. Verify both profiles and invalid/oversized overrides with host-only tests.
+This repair is **not implemented or launched yet**. The next trial must again
+start with a new source freeze/project and full synthesis, never the aborted
+mapping state. Disk admission must also be restored: about 6 GiB is free, and
+this closed run retains about 2.4 GiB of disposable internal synthesis scratch;
+preserve sources, logs and receipts when pruning it.
 
 The `opt_design` crash workaround has a specific scope. The retained native
 2025.2 help log `/var/tmp/ventium-icfrontspan-pwropt-help.HMmw46/help2.log`
