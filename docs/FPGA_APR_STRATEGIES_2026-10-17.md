@@ -41,7 +41,7 @@ window peak reaches 90.37% despite much lower whole-chip routing utilization.
 |---|---|---|---|
 | `performance-r2` | `PerformanceOptimized`, rebuilt hierarchy | Planned `ExtraNetDelay_high` / `AggressiveExplore` / `NoTimingRelaxation`; post-route `Explore` | Native synthesis succeeded; reporting-context guard stopped the run before APR. No timing result. |
 | `performance-r3` | Planned `PerformanceOptimized`, rebuilt hierarchy | Planned same performance APR | Stopped in 10.06 s before project creation: early interception of Vivado's lazily registered `wait_on_run` failed |
-| `performance-r4` | `PerformanceOptimized`, rebuilt hierarchy | `ExtraNetDelay_high` / `AggressiveExplore` / `NoTimingRelaxation`; post-route `Explore` | Fresh synthesis succeeded; 40/100 MHz clock audit passed; native APR started Oct17 23:04:25 EDT |
+| `performance-r4` | `PerformanceOptimized`, rebuilt hierarchy | `ExtraNetDelay_high` / `AggressiveExplore` / `NoTimingRelaxation`; post-route `Explore` | Fresh synthesis and 40/100 MHz clock audit passed; placement completed in 1 h 43 min 24 s; routed timing pending |
 | `routability-spread` | `AlternateRoutability`, rebuilt hierarchy | `AltSpreadLogic_medium` / `Explore` / `AlternateCLBRouting`; post-route `Explore` | Prepared, not launched |
 
 The first combination targets the measured long logic/routing path. The second
@@ -300,12 +300,12 @@ or final utilization. The pass reports **zero retiming transformations**.
 
 After detailed placement, the initialization of phase **4.1.1.1 BUFG
 Insertion** reported estimated WNS **−7.432 ns** and TNS **−265,969.749 ns**
-(`Physopt 32-619`, native `impl_1/runme.log`). This precedes the ongoing
+(`Physopt 32-619`, native `impl_1/runme.log`). This precedes the subsequent
 post-placement timing-optimization phase; it is neither a completed placement
 result nor routed timing. The summary supplies no path/clock-pair identity,
 so do not convert it to a claimed core fmax. The target remains **40 MHz core /
 100 MHz AXI**. The worker's own `.vdi` and `runme.log` agree with the top-level
-log on the current phase; the quiet interval is not just missing forwarding.
+log during that wait; the quiet interval was not just missing forwarding.
 
 Very-high-fanout optimization replicated core `state_reg[0]` ten times and
 L1/AXI `bypass_rst_m1_reg_rep__0_0` thirteen times. Another fanout pass replicated
@@ -329,6 +329,29 @@ observed restriction, not evidence that bypassing it would close the critical
 setup path. A later implementation-only property experiment would need to
 retain the synthesis workaround and prove its exact affected scope; broad
 preservation removal is not justified by this log.
+
+### r4 completed placement
+
+`place_design` completed successfully in **1 h 43 min 24 s**, with zero errors
+and zero critical warnings. Its one warning is vendor IP waiver `LUTAR-1`
+referencing a likely unusable hierarchy object in the AXI clock converter
+(`Vivado_Tcl 4-2057`); final unwaived DRC/CDC inspection remains required.
+
+The long post-placement timing-optimization phase completed after **61 min
+15 s** (native cumulative elapsed 40:48 to 1:42:03), approximately **59.2% of
+the complete placer runtime**. Its estimated WNS improved from **−7.432 ns**
+to **−3.089 ns** (`Place 30-746`). This is an intermediate placement result,
+not a routed fmax or a 40 MHz pass; the native summary does not identify the
+worst path's clock pair. Physical optimization and routing must still finish.
+
+The placed utilization report contains **185,184 LUTs (54.26%)**, **54,994
+FFs**, **34,029 occupied CLBs (79.77%)**, **277.5 BRAM tiles**, and **47 DSPs**.
+Lower LUT use alone therefore does not establish low physical occupancy.
+Post-placement congestion estimates report global regions of **16×16** and
+long-routing regions of **32×32** in all four directions; short-routing
+regions are 16×16 except south at 8×8. These are placer estimates, not the
+final router's congestion map or a route-completion guarantee. Retain the
+spread-placement alternative if the final timing/runtime result warrants it.
 
 ### Read-only board readiness during r4
 
