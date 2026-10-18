@@ -12,7 +12,6 @@ source [file join $::fresh_script_dir fresh_synth_evidence.tcl]
 set ::env(VEN_FRESH_OUT) $out
 set_param general.maxThreads 1
 set ::fresh_launches {}
-set ::fresh_synth_verified 0
 
 proc fresh_event {name} {
     set f [open [file join $::out stages.tsv] a]
@@ -88,7 +87,10 @@ proc launch_runs {run args} {
         if {[get_property STEPS.SYNTH_DESIGN.ARGS.DIRECTIVE $obj] ne $directive ||
             [get_property {STEPS.SYNTH_DESIGN.ARGS.MORE OPTIONS} $obj] ne ""} {error "synthesis policy drift"}
     } else {
-        if {!$::fresh_synth_verified} {error "synthesis clock evidence is required before implementation"}
+        # The platform flow already waits for synth_1 before this launch.
+        # Validate the just-built design here; wait_on_run is lazily registered
+        # by Vivado and cannot be renamed during initial script loading.
+        fresh_synth_evidence
         # RuntimeOptimized opt_design avoids the observed optimizer crash. It
         # does NOT request incremental RuntimeOptimized or a negative WNS target.
         set_property STEPS.OPT_DESIGN.ARGS.DIRECTIVE RuntimeOptimized $obj
@@ -109,16 +111,6 @@ proc launch_runs {run args} {
     fresh_event $run
     lappend ::fresh_launches $run
     return [uplevel 1 [list __fresh_launch_runs $run {*}$args]]
-}
-
-rename wait_on_run __fresh_wait_on_run
-proc wait_on_run {run args} {
-    set result [uplevel 1 [list __fresh_wait_on_run $run {*}$args]]
-    if {$run eq "synth_1"} {
-        fresh_synth_evidence
-        set ::fresh_synth_verified 1
-    }
-    return $result
 }
 
 # The source-only platform wrapper owns exact defines, full P5 caches, port

@@ -40,7 +40,8 @@ window peak reaches 90.37% despite much lower whole-chip routing utilization.
 | Trial | Timing-driven synthesis | Placement / physical optimization / routing | Status |
 |---|---|---|---|
 | `performance-r2` | `PerformanceOptimized`, rebuilt hierarchy | Planned `ExtraNetDelay_high` / `AggressiveExplore` / `NoTimingRelaxation`; post-route `Explore` | Native synthesis succeeded; reporting-context guard stopped the run before APR. No timing result. |
-| `performance-r3` | `PerformanceOptimized`, rebuilt hierarchy | `ExtraNetDelay_high` / `AggressiveExplore` / `NoTimingRelaxation`; post-route `Explore` | Fresh retry prepared after project-view reporting repair; not a continuation from r2's checkpoint |
+| `performance-r3` | Planned `PerformanceOptimized`, rebuilt hierarchy | Planned same performance APR | Stopped in 10.06 s before project creation: early interception of Vivado's lazily registered `wait_on_run` failed |
+| `performance-r4` | `PerformanceOptimized`, rebuilt hierarchy | `ExtraNetDelay_high` / `AggressiveExplore` / `NoTimingRelaxation`; post-route `Explore` | Fresh retry prepared; clock evidence runs directly before APR launch, after the platform's ordinary wait |
 | `routability-spread` | `AlternateRoutability`, rebuilt hierarchy | `AltSpreadLogic_medium` / `Explore` / `AlternateCLBRouting`; post-route `Explore` | Prepared, not launched |
 
 The first combination targets the measured long logic/routing path. The second
@@ -144,6 +145,16 @@ external scratch directory with a new output-directory argument.
 That repository-native regression also completed with exit **0** at **20:41:32
 local**, again reporting exactly 10/10/25 ns clocks; its retained logs and
 reports are under `ventium-clock-evidence-regression.GgJf4BCy/` in external tmp.
+
+r3 found a separate startup issue in **10.06 s**, before project creation or
+synthesis: Vivado lazily registers `wait_on_run`, so renaming it during script
+initialization failed. The flow no longer intercepts that command. Instead,
+the existing implementation-launch interceptor calls the tested evidence
+procedure after the platform's normal synthesis wait. The procedure rejects an
+incomplete synthesis; implementation cannot proceed on missing/invalid clocks.
+The wrapper unit test now deliberately has no `wait_on_run` during initialization
+to cover this native startup condition. r3's failure receipts are retained; r4
+uses a new output/source copy and begins again from scratch.
 
 ### Constraint and preservation preflight
 

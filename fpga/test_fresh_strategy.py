@@ -59,7 +59,6 @@ proc version {args} {return 2025.2}
 proc set_param {args} {}
 proc create_project {args} {}
 proc launch_runs {args} {}
-proc wait_on_run {args} {}
 proc current_project {} {return project}
 proc config_ip_cache {args} {set ::props(project,IP_CACHE_PERMISSIONS) disable}
 proc get_runs {r} {return $r}
@@ -91,12 +90,17 @@ set ::props(synth_1,AUTO_INCREMENTAL_CHECKPOINT) 1
 set ::props(impl_1,INCREMENTAL_CHECKPOINT) /old/bad.dcp
 launch_runs synth_1 -jobs 1
 if {{![catch {{launch_runs impl_1 -to_step write_bitstream -jobs 1}}]}} {{error "missing clock evidence allowed"}}
-# The project-view procedure is exercised separately, including a native
-# fresh-project regression. Here check the parent wait/launch ordering.
-proc fresh_synth_evidence {{}} {{set ::evidence_called 1}}
+# No wait_on_run exists while the prefix loads, like native Vivado startup.
+# The platform owns its normal wait. The actual evidence procedure's status
+# checks and cleanup are exercised separately and by the native regression.
+proc wait_on_run {{args}} {{set ::synth_done 1}}
+proc fresh_synth_evidence {{}} {{
+ if {{!$::synth_done}} {{error "synthesis not finished"}}
+ set ::evidence_called 1
+}}
 wait_on_run synth_1
-if {{!$::evidence_called}} {{error "evidence procedure not called"}}
 launch_runs impl_1 -to_step write_bitstream -jobs 1
+if {{!$::evidence_called}} {{error "evidence procedure not called"}}
 foreach {{obj prop expected}} {{
  synth_1 STEPS.SYNTH_DESIGN.ARGS.DIRECTIVE {directive}
  synth_1 AUTO_INCREMENTAL_CHECKPOINT 0
