@@ -188,6 +188,26 @@ is `q_pc_reg[0]` to shared-FPU `status_reg[10]`, with **90 logic levels** and
 Its different endpoint does not establish that the older routed EIP-to-paired-
 return bottleneck has been fixed; inspect the new post-route paths.
 
+The path is not confined to FPU arithmetic. The native unplaced path traverses
+instruction-byte/decode logic (`d_len[3]`), fetch/fragment shaping, L1D
+`shadow_payload_select` and read-data selection before entering the shared-FPU
+command-memory input. Subtracting the 2.902 ns source-clock arrival from the
+report's cumulative arrivals gives these **estimated**, not routed, landmarks:
+
+| Named point on this path | Cumulative data-path delay |
+|---|---:|
+| Decode `d_len[3]` | 11.551 ns |
+| L1D `shadow_payload_select` | 17.560 ns |
+| Shared-FPU `fp_shared_cmd_mem[9]` | 19.289 ns |
+| FPU `status_reg[10]/D` | 25.800 ns |
+
+Thus about **74.8% of this estimated path delay has accumulated before the
+shared-FPU command input**. An FPU endpoint alone does not justify an FPU-only
+placement remedy. Rebuilt-hierarchy cell names are mapping labels, not proof
+that every intermediate name containing `reg` is a register boundary. Keep
+the whole-core strategy scope and revisit this decomposition on routed paths;
+do not use it to waive timing or infer a measured performance gain.
+
 Pre-placement `check_timing` also reports **eight `no_clock` pins**, zero
 unconstrained internal endpoints and four outputs without output delays. This
 summary does not enumerate the eight pins. Final verbose coverage must resolve
