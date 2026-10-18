@@ -45,7 +45,7 @@ window peak reaches 90.37% despite much lower whole-chip routing utilization.
 | `routability-r2` | `AlternateRoutability`, rebuilt hierarchy | Planned `AltSpreadLogic_medium` / `Explore` / `AlternateCLBRouting`; post-route `Explore` | Stopped through its controller after technology mapping stalled with task-cap rejections. No completed synthesis/APR or timing result. |
 | `routability-r3` | `AlternateRoutability`, rebuilt hierarchy | Same planned APR as r2 | Stopped by the 21 GiB combined-memory guard during technology mapping; no OOM or task-cap rejection. No completed synthesis/APR or timing result. |
 | `routability-r4` | `AlternateRoutability`, rebuilt hierarchy; one synthesis process | Same APR as r2; routing never reached | Synthesis and placement completed; stopped at 3 h 50 min APR limit in physical optimization. No routed timing result. |
-| `performance-retime-bounded` (prepared) | `PerformanceOptimized`, rebuilt hierarchy, explicit synthesis retiming | Spread placement / explicit physical-operation sets / `NoTimingRelaxation` | Tiny fresh native capability probe passed; full-chip trial not launched. Waiting for safe RAM admission. |
+| `performance-retime-r1` | `PerformanceOptimized`, rebuilt hierarchy, explicit synthesis retiming | Spread placement / explicit physical-operation sets / `NoTimingRelaxation` | Fresh full-chip trial launched Oct18 16:50:57 EDT after RAM admission recovered. No completed synthesis/APR or timing result yet. |
 
 The first combination targets the measured long logic/routing path. The second
 tests a routing-oriented mapping and spread placement, if the first result
@@ -693,13 +693,38 @@ Passing probe SHA256:
 - `test_native_bounded_phys.tcl`: `3c0de1b91e61a2fc77b4673b51045445b0aef76209d7ca69102f6771c269da7f`
 - Shared `fresh_bounded_phys.tcl`: `3933335a4c9ee007270773d91139e8da082e14dd8409c7875522d19e94ce504a`
 
-The full-chip candidate is **prepared, not launched**. Immediately after the
+The full-chip candidate was initially **prepared, not launched**. Immediately after the
 probe exited, host `MemAvailable` was **18,477,488 KiB (17.62 GiB)**, below the
 unchanged **18 GiB** full-build admission threshold. Swap and external disk
-headroom were sufficient. Do not lower the OOM safeguard or kill desktop apps
-to force admission; remeasure after the user frees memory. Current verified
+headroom were sufficient. The safeguard was not lowered and desktop apps were
+not killed to force admission. Current verified
 gameplay remains **0.496499864 total U+V** on older `2886d24c`, cycles
 625,021,130,428–629,480,208,865; this candidate is unmeasured.
+
+### Fresh retiming trial launched after RAM admission recovered
+
+At **16:50:57 EDT Oct18**, `performance-retime-r1` started from a new source
+copy/project under `ventium-fresh-retime-oct18-r1.service`, owner invocation
+`208873ff07164253bd143f38108c92c3`, scope invocation
+`a00c03f141204d85b0c6681c910f7f43`. Output:
+`/home/yukidama/external/tmp/ventium-fresh-strategies-oct17.67YRDIRh/performance-retime-r1`.
+Started receipt records **25,360,371,712 bytes available RAM** and
+**7,660,527,616 bytes free disk** after source preparation. Actual scope limits
+are **16 GiB RAM / 6 GiB swap / 48 tasks**, one internal thread and `-jobs 1`.
+The eight-hour whole-run and **3 h 50 min implementation** deadlines remain.
+
+All **214 source/tool pins** were independently rehashed unchanged after
+launch. There are **200 source files / 159 defines**; only the known repaired
+`ven_pll_ctrl.sv` differs from the frozen ancestor. CPU/cache RTL is the same
+deployed profile, not the dirty checkout. The source contract checks retain
+full P5 caches, UV-fast `cycle_mode=1`, and **40 MHz core / 100 MHz AXI**.
+No old checkpoint, previous project or IP cache is an input. This is the
+`performance-retime-bounded` strategy committed in `5898177d`; it does not
+resume the failed routability implementation. Native synthesis/APR completion,
+routed timing and candidate physical standard-suite acceptance remain pending.
+
+- `prepared.json` SHA256: `57ae9fb2d1132574cc8cb7a7d65ee6dd4371840c439709b98c56bb3b90460831`
+- `started.json` SHA256: `91d61a96f8d957f7c39549ef0b495672bfea95cbd89ab4892cc4dbfc04353d65`
 
 The `opt_design` crash workaround has a specific scope. The retained native
 2025.2 help log `/var/tmp/ventium-icfrontspan-pwropt-help.HMmw46/help2.log`
