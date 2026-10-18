@@ -382,6 +382,23 @@ did not establish full-chip task headroom; do not describe all resource limits
 as unpressured. No live guard, source or tool input was changed. Review this
 task-cap evidence before selecting the next fresh run's concurrency envelope.
 
+Native timing optimization subsequently finished at cumulative **02:12:49
+wall / 02:12:07 CPU**, and technology mapping started. Relative to the preceding
+XDC-completion stamp (**00:17:32 wall / 00:17:11 CPU**), this phase consumed
+**1 h 55 min 17 s wall / 1 h 54 min 56 s CPU**. The earlier performance-r4
+timing-optimization phase took **1 h 16 min 22 s wall**; the new strategy is
+therefore not demonstrating a synthesis runtime improvement. The directives
+and internal thread caps differ, so this is not an isolated thread-scaling
+comparison, and final area/timing remain pending.
+At the transition, `pids.events` had increased from `max 2` to **`max 3`**,
+with `TasksCurrent=TasksMax=48`. The native parent and existing task workers
+remained alive, parent CPU time advanced, RAM/swap guards recorded no OOM,
+and a scan of native build logs found no `ERROR:` or thread/fork-creation
+failure diagnostic. This additional cap event remains a caveat, not a proven
+cause of the runtime difference. No live resource limit or pinned input was
+changed; all **213** launch pins had been rehashed successfully shortly before
+the transition.
+
 The `opt_design` crash workaround has a specific scope. The retained native
 2025.2 help log `/var/tmp/ventium-icfrontspan-pwropt-help.HMmw46/help2.log`
 still matches SHA256
