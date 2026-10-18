@@ -528,6 +528,23 @@ experiment, not a guaranteed deadline remedy; retain the native phase/runtime
 comparison and existing resource/deadline guards.
 [AMD 2025.2 physical-optimization directives](https://docs.amd.com/r/2025.2-English/ug835-vivado-tcl-commands/phys_opt_design).
 
+A more targeted **future fresh-run experiment**, if the active routability
+trial also exhausts APR time, is:
+
+```tcl
+phys_opt_design -fanout_opt -placement_opt -restruct_opt -equ_drivers_opt
+```
+
+The same AMD reference states that explicit options replace the default pass
+selection and cannot be combined with `-directive`. This deliberately omits
+critical-cell replication while retaining fanout, placement, LUT restructuring
+and equivalent-driver rewiring. It also omits other defaults, including
+DSP/BRAM register optimization; this is a tradeoff, not an equivalent preset.
+Any implementation must clear the directive, audit the actual native command
+and completed phases, and compare routed timing under the unchanged 25 ns
+constraint and APR deadline. No runtime or fmax gain is established. This
+alternative is **not implemented or queued**, and the active run is unchanged.
+
 ### Read-only board readiness during r4
 
 At **2026-10-18 01:46 UTC** (Oct17 local), SSH and administrator authentication
