@@ -42,7 +42,7 @@ window peak reaches 90.37% despite much lower whole-chip routing utilization.
 | `performance-r2` | `PerformanceOptimized`, rebuilt hierarchy | Planned `ExtraNetDelay_high` / `AggressiveExplore` / `NoTimingRelaxation`; post-route `Explore` | Native synthesis succeeded; reporting-context guard stopped the run before APR. No timing result. |
 | `performance-r3` | Planned `PerformanceOptimized`, rebuilt hierarchy | Planned same performance APR | Stopped in 10.06 s before project creation: early interception of Vivado's lazily registered `wait_on_run` failed |
 | `performance-r4` | `PerformanceOptimized`, rebuilt hierarchy | `ExtraNetDelay_high` / `AggressiveExplore` / planned `NoTimingRelaxation`; planned post-route `Explore` | Stopped at the 3 h 50 min APR limit during physical optimization, before routing. No routed timing result. |
-| `routability-r2` | Planned `AlternateRoutability`, rebuilt hierarchy | Planned `AltSpreadLogic_medium` / `Explore` / `AlternateCLBRouting`; post-route `Explore` | Fresh source/project run launched with two internal threads after the first owner attempt refused RAM admission. Native results pending. |
+| `routability-r2` | `AlternateRoutability`, rebuilt hierarchy | Planned `AltSpreadLogic_medium` / `Explore` / `AlternateCLBRouting`; post-route `Explore` | Fresh native synthesis running with two internal threads; actual synthesis configuration audited. Completion/timing pending. |
 
 The first combination targets the measured long logic/routing path. The second
 tests a routing-oriented mapping and spread placement, if the first result
@@ -297,7 +297,7 @@ It was applied as `dd86ae61` after exact comparisons against its preserved
 originals. All **29 host-only tests pass in the repository**, including thread-cap validation
 for both synthesis and implementation and rejection of ambiguous/out-of-range
 caps. It preserves `-jobs 1`, all existing resource limits and source-only
-admission. No two-thread full-chip trial has run. The old scratch README records
+admission. The first two-thread full-chip trial is described below. The old scratch README records
 the preparation-time state; this section records its subsequent integration.
 
 Small fresh-source native probes use a separate **4 GiB RAM / 1 GiB swap** cap
@@ -358,6 +358,11 @@ limit and 3 h 50 min APR limit. The 200-file source closure, 159 defines,
 40 MHz core / 100 MHz AXI target and UV-fast `cycle_mode=1` profile remain
 unchanged. All launch pins were rechecked. No previous checkpoint is an input;
 no synthesis/APR timing or hardware acceptance result is claimed yet.
+The owner started at **03:13:50 EDT**, and native synthesis launched at
+**03:14:39 EDT**. Its generated script/property audit confirms
+`AlternateRoutability`, rebuilt hierarchy, timing-driven synthesis, two
+internal threads, disabled IP cache and no previous checkpoint input. This
+configuration audit does not establish synthesis completion.
 
 The `opt_design` crash workaround has a specific scope. The retained native
 2025.2 help log `/var/tmp/ventium-icfrontspan-pwropt-help.HMmw46/help2.log`
