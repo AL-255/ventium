@@ -43,7 +43,8 @@ window peak reaches 90.37% despite much lower whole-chip routing utilization.
 | `performance-r3` | Planned `PerformanceOptimized`, rebuilt hierarchy | Planned same performance APR | Stopped in 10.06 s before project creation: early interception of Vivado's lazily registered `wait_on_run` failed |
 | `performance-r4` | `PerformanceOptimized`, rebuilt hierarchy | `ExtraNetDelay_high` / `AggressiveExplore` / planned `NoTimingRelaxation`; planned post-route `Explore` | Stopped at the 3 h 50 min APR limit during physical optimization, before routing. No routed timing result. |
 | `routability-r2` | `AlternateRoutability`, rebuilt hierarchy | Planned `AltSpreadLogic_medium` / `Explore` / `AlternateCLBRouting`; post-route `Explore` | Stopped through its controller after technology mapping stalled with task-cap rejections. No completed synthesis/APR or timing result. |
-| `routability-r3` | `AlternateRoutability`, rebuilt hierarchy | Same planned APR as r2 | Fresh-source native synthesis running with the reviewed 128-task helper profile; no completion/timing result yet. |
+| `routability-r3` | `AlternateRoutability`, rebuilt hierarchy | Same planned APR as r2 | Stopped by the 21 GiB combined-memory guard during technology mapping; no OOM or task-cap rejection. No completed synthesis/APR or timing result. |
+| `routability-r4` | `AlternateRoutability`, rebuilt hierarchy; one synthesis process | Same planned APR as r2 | Fresh-source synthesis started with the existing serial resource profile; native configuration audit passes. No completion/timing result yet. |
 
 The first combination targets the measured long logic/routing path. The second
 tests a routing-oriented mapping and spread placement, if the first result
@@ -266,7 +267,7 @@ warns that `LogicCompaction` can hurt timing; fewer occupied slices alone would
 not justify selecting it for the 40 MHz objective.
 [AMD 2025.2 synthesis settings](https://docs.amd.com/r/2025.2-English/ug901-vivado-synthesis/Using-Synthesis-Settings).
 
-The live `routability-r3/build/synth_1-properties.rpt` also explicitly records
+The `routability-r3/build/synth_1-properties.rpt` also explicitly records
 `STEPS.SYNTH_DESIGN.ARGS.GLOBAL_RETIMING=auto`; this trial is **not** a synthesis
 retiming experiment either. For a future isolated retiming trial, the 2025.2
 syntax/option table specifies `-global_retiming on` (project property
@@ -514,7 +515,7 @@ project and synthesis run; neither r2's aborted state nor its archive is input.
 The whole-run eight-hour and APR 3 h 50 min limits are unchanged. Synthesis/APR
 completion, routed timing and physical acceptance remain unproven.
 
-While synthesis remains active, source-level inspection narrows the earlier
+While r3 synthesis was active, source-level inspection narrowed the earlier
 eight-pin `no_clock` question without waiving it. In r3's generated
 `rk_ao486_bd_ps8_0/synth/rk_ao486_bd_ps8_0.v`, the four
 `emio_enet[0-3]_mdio_mdc`, two `emio_sdio[0-1]_clkout`, and two
@@ -524,11 +525,66 @@ values to `0`. This is consistent with the historical PS8 pin list, but is
 **not current routed-netlist coverage evidence**. If the final report again
 lists eight pins, check their exact identities and prove that none feeds a
 fabric clock, sequential endpoint or top-level port; a matching count alone
-does not qualify them. The live reporting/audit code remains unchanged and
+does not qualify them. The reporting/audit code remains unchanged and
 still rejects nonzero `no_clock`. No clock constraint or exception was added.
 
 - Generated PS wrapper SHA256: `a1f5dd59e3dff22c97c3586e2760c0f76173eac5ef1bb226cbcb38cf2b4e19fc`.
 - Generated PS XCI SHA256: `7cbc25e17748783b83916edf34202cf4cc10446cb55cdbafbee2829319d6946e`.
+
+### r3 controlled memory stop and next resource configuration
+
+The r3 owner closed at **08:00:20 EDT Oct18**, after **2 h 14 min 51.49 s**.
+Native timing optimization finished at **2:13:13** elapsed / **2:12:27** CPU
+and technology mapping began. The controller then stopped the family when
+sampled RAM plus swap reached **22,558,818,304 bytes**, just over its **21 GiB**
+early-stop threshold. Peak sampled RAM was **17,179,762,688 bytes**, peak swap
+**5,379,145,728 bytes**. There was **no OOM / OOM kill**. Across 1,616 samples,
+the peak task count was **40** and task-limit rejections stayed **0**; the
+observed r2 task-limit symptom did not recur, but this does not prove its exact
+deadlock mechanism. No completed synthesis checkpoint, APR or timing result
+was produced. The independent result auditor correctly rejects this run as
+`native/resource failure`, not as a timing pass or failed-frequency result.
+
+The owner is terminal, the Vivado scope is inactive, and all native processes
+are gone. All **213** input pins were rehashed unchanged before further work.
+The next fresh attempt uses the same synthesis/APR strategies with
+`--threads 1` (native maximum of one synthesis process, the existing serial
+48-task profile), retaining the 16 GiB RAM / 6 GiB swap caps and 21 GiB stop.
+The earlier single-process performance trial completed synthesis; that is
+evidence for trying the lower-process configuration, **not a guarantee** that
+this directive will fit. No RTL, timing constraints, acceptance checks or
+resource safeguards are relaxed. No old checkpoint will be an input.
+
+To restore launch headroom, only the closed native scratch directory
+`synth_1/.Xil/Vivado-3210237-AL-MS790S-U26` was removed **after** archiving its
+entire contents and passing `tar --diff` against the original. Its
+2,507,956,224 allocated bytes became a 339,230,720-byte archive: **2.02 GiB net
+reclaimed**, recoverable from `routability-r3/closed-mapping-scratch.tar.gz`.
+Sources, top-level logs, receipts and generated configuration evidence remain;
+the archive is forensic evidence, never input to a later build.
+
+- Closed receipt SHA256: `e540ce3547948ea213bcb182c17ebdb0fb04d8f93982a4f1c91b48f6f0e6cbe8`.
+- Started receipt SHA256: `b306f886cea6d1ccecbeba174a67b26a3610b624e8004cce4fddc6704f4061bd`.
+- Native log SHA256: `cd2bd28b605d85e5259b595ec383187f8dd924f290af43f0b494537fbfb30509`.
+- Recoverable scratch archive SHA256: `9a67f40d799844ecf2ef18a956f9c77ff1a0b680d1ac53cbd519cc261c09beee`.
+
+The **routability-r4** retry started at **08:04:00 EDT Oct18**, under
+`ventium-fresh-routability-oct18-r4.service`, invocation
+`003ed60f8bff4318b967929faa8f2510`; scope invocation
+`f5751f29c5dc4583aef034402018c616`. Output is the new sibling directory
+`/home/yukidama/external/tmp/ventium-fresh-strategies-oct17.67YRDIRh/routability-r4`.
+Admission recorded **20,915,437,568 bytes available RAM** and
+**8,059,953,152 bytes disk free**. The actual scope is capped at **16 GiB RAM /
+6 GiB swap / 48 tasks**. All **213 pins** were rehashed unchanged; the new
+source copy has 200 files / 159 defines, the same deployed CPU profile and
+full P5 caches, UV-fast `cycle_mode=1`, and **40 MHz core / 100 MHz AXI**.
+The native synthesis configuration audit passes `AlternateRoutability`,
+rebuilt hierarchy, timing-driven synthesis, `general.maxThreads=1`, empty
+incremental-checkpoint input and no extra synthesis options. IP cache remains
+disabled. Only the existing repaired full-width clock differs from the frozen
+ancestor; no CPU/cache RTL or flow code was changed for this retry. This is a
+new project and synthesis, not a continuation of r3's aborted mapping state.
+Completion, routed timing and physical acceptance are still pending.
 
 The `opt_design` crash workaround has a specific scope. The retained native
 2025.2 help log `/var/tmp/ventium-icfrontspan-pwropt-help.HMmw46/help2.log`
