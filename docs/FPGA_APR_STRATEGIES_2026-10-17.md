@@ -363,6 +363,13 @@ The owner started at **03:13:50 EDT**, and native synthesis launched at
 `AlternateRoutability`, rebuilt hierarchy, timing-driven synthesis, two
 internal threads, disabled IP cache and no previous checkpoint input. This
 configuration audit does not establish synthesis completion.
+The running native synthesis log also records parsing the generated PS8 XDC
+and deriving generated clocks. That XDC creates `clk_pl_0` with a **10 ns**
+period; the frozen `ven_programmable_clock.v` uses MMCM multiplier **10**,
+input divider **1**, and output divider **25** (40 MHz nominal core clock).
+Thus the root clock constraint is ingested during synthesis, not merely added
+by the post-synthesis reporting step. The completed-design clock-period and
+timing-coverage checks remain pending; these inputs alone do not prove closure.
 
 The `opt_design` crash workaround has a specific scope. The retained native
 2025.2 help log `/var/tmp/ventium-icfrontspan-pwropt-help.HMmw46/help2.log`
