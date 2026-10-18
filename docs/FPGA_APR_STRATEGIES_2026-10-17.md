@@ -44,7 +44,8 @@ window peak reaches 90.37% despite much lower whole-chip routing utilization.
 | `performance-r4` | `PerformanceOptimized`, rebuilt hierarchy | `ExtraNetDelay_high` / `AggressiveExplore` / planned `NoTimingRelaxation`; planned post-route `Explore` | Stopped at the 3 h 50 min APR limit during physical optimization, before routing. No routed timing result. |
 | `routability-r2` | `AlternateRoutability`, rebuilt hierarchy | Planned `AltSpreadLogic_medium` / `Explore` / `AlternateCLBRouting`; post-route `Explore` | Stopped through its controller after technology mapping stalled with task-cap rejections. No completed synthesis/APR or timing result. |
 | `routability-r3` | `AlternateRoutability`, rebuilt hierarchy | Same planned APR as r2 | Stopped by the 21 GiB combined-memory guard during technology mapping; no OOM or task-cap rejection. No completed synthesis/APR or timing result. |
-| `routability-r4` | `AlternateRoutability`, rebuilt hierarchy; one synthesis process | Same planned APR as r2 | Fresh-source synthesis started with the existing serial resource profile; native configuration audit passes. No completion/timing result yet. |
+| `routability-r4` | `AlternateRoutability`, rebuilt hierarchy; one synthesis process | Same APR as r2; routing never reached | Synthesis and placement completed; stopped at 3 h 50 min APR limit in physical optimization. No routed timing result. |
+| `performance-retime-bounded` (prepared) | `PerformanceOptimized`, rebuilt hierarchy, explicit synthesis retiming | Spread placement / explicit physical-operation sets / `NoTimingRelaxation` | Tiny fresh native capability probe passed; full-chip trial not launched. Waiting for safe RAM admission. |
 
 The first combination targets the measured long logic/routing path. The second
 tests a routing-oriented mapping and spread placement, if the first result
@@ -584,7 +585,121 @@ incremental-checkpoint input and no extra synthesis options. IP cache remains
 disabled. Only the existing repaired full-width clock differs from the frozen
 ancestor; no CPU/cache RTL or flow code was changed for this retry. This is a
 new project and synthesis, not a continuation of r3's aborted mapping state.
-Completion, routed timing and physical acceptance are still pending.
+This trial is now closed; results follow. It did not reach routed timing or
+physical acceptance.
+
+### Routability-r4 closure and next strategy (Oct18)
+
+The owner stopped at **15:05:41 EDT**, after **25,300.60 s (7 h 01 min 41 s)**,
+with native exit 124 and reason `implementation 3h50m deadline`. Implementation
+started at 11:15:37. It was in **physical optimization phase 15**, before routing.
+There were **zero OOM/OOM-kill and task-limit events**. Peak RAM was
+17,179,840,512 bytes, peak swap 3,728,154,624 bytes and peak sampled tasks 27.
+All **213 input pins** were independently rehashed unchanged after termination
+and before subsequent tooling edits. The independent completion auditor rejects
+the run as a native/resource failure. The owner and its scope are terminal;
+no old checkpoint will be used for the next trial.
+
+| Measurement | Performance-r4 | Routability-r4 |
+|---|---:|---:|
+| Native synthesis wall time | 2 h 16 min 26 s | 3 h 07 min 15 s |
+| Synthesis LUTs | 186,064 | 194,204 |
+| Unplaced core setup slack | −1.011 ns | −4.200 ns |
+| Placement wall time | 1 h 43 min 24 s | 55 min 01 s |
+| Placed LUTs / occupied CLBs | 185,184 / 34,029 | 192,762 / 34,125 |
+| Global estimated post-placement WNS | −3.089 ns | −3.810 ns |
+| Routing completed | No | No |
+
+These are **intermediate**, not routed frequency results. Both retain the
+**40 MHz core / 100 MHz AXI** clocks. Routability synthesis used more LUTs and
+had worse unplaced setup; the overall strategy placed faster. This combined
+comparison does not isolate the cause of the placement runtime difference.
+Routability-r4's worst unplaced core path is EIP[1] to `pipe_mem_v_hit_q/D`,
+**99 logic levels**, 28.989 ns data delay (5.226 ns logic plus 23.763 ns estimated
+routing). Final route delay and achievable frequency remain unknown.
+
+`Explore` repeatedly revisited fanout, single/multi-cell placement, rewiring
+and critical-cell optimization. Completed passes consumed **2 h 36 min 22 s**
+plus initialization, improving estimated global WNS from −3.810 to −2.977 ns;
+another placement pass was running when the deadline expired. Critical-cell
+passes alone cost 22 min 22 s and 21 min 23 s. No route runtime can be inferred
+from this timeout. The serial resource profile successfully completed synthesis
+and mapping in this trial; this does not prove all later strategies fit.
+
+Terminal evidence SHA256:
+
+- `closed.json`: `81f3d2de1f858ece175b123f8033aef4d26401377b78ab0f233f732e41228a79`
+- `started.json`: `2e132bd36c915b41e8c76d586b6c537d0ef243391780c630892fdc0cd2d6c039`
+- `native.log`: `a1f111d6408590f49c7bff8190a6b6a3f2dbcbb34a09457c4b0cda58b9e37802`
+
+The next proposed combination is **`performance-retime-bounded`**:
+`PerformanceOptimized` synthesis with explicit `GLOBAL_RETIMING=on`, rebuilt
+hierarchy; `AltSpreadLogic_medium` placement; one explicit pre-route physical
+operation set (`-fanout_opt -placement_opt -restruct_opt -equ_drivers_opt`);
+`NoTimingRelaxation` routing; one explicit post-route set
+(`-placement_opt -routing_opt -restruct_opt -hold_fix`). The existing
+`RuntimeOptimized` logic-optimization crash workaround remains. No RTL, clock
+constraint, timing exception or resource limit is changed.
+
+This is a **combined candidate**, not an isolated retiming A/B experiment: any
+eventual gain cannot be attributed to retiming alone. The operation sets avoid
+the repeated Explore flow; they do not promise a fixed duration. The unchanged
+3 h 50 min implementation deadline remains authoritative. Synthesis retiming
+must be present in the native command and property report; actual full-core
+transformations, routed timing and architectural/debug behavior require evidence.
+AMD documents that explicit physical-operation flags select only those
+operations and cannot be combined with a directive; the native probe checks
+that Vivado omits the `Default` directive when emitting these flags.
+[AMD 2025.2 physical optimization reference](https://docs.amd.com/r/2025.2-English/ug835-vivado-tcl-commands/phys_opt_design),
+[AMD 2025.2 synthesis retiming](https://docs.amd.com/r/2025.2-English/ug901-vivado-synthesis/Running-Synthesis-with-Tcl).
+
+A fresh tiny native capability probe ran under
+`ventium-fresh-bounded-probe-oct18-r1.service`, invocation
+`1b1bd25be6824c05b13e2a1588697a13`, at
+`/home/yukidama/external/tmp/ventium-native-bounded-oct18.lnWhZRiT`.
+It uses 4 GiB RAM / 1 GiB swap / 48 tasks, one internal thread, `-jobs 1`,
+and a ten-minute limit. It starts from new RTL/project with IP cache and
+incremental input disabled, and exercises synthesis through post-route physical
+optimization. The first probe completed synthesis (four forward register moves)
+but stopped before implementation because `launch_runs -to_step` expects the
+native label `{phys_opt_design (Post-Route)}`, not the internal property/marker
+name `post_route_phys_opt_design`. It is retained as a failed probe, not a pass.
+Native log SHA256:
+`821d660f7419942bff7c85a23ebcb2a3269cd1e32d28c4c1f4aa86ec2ea863ea`.
+The corrected probe starts again from new source/project under
+`ventium-fresh-bounded-probe-oct18-r2.service`, invocation
+`3767969ca3574cac8de7a908668226c2`, at
+`/home/yukidama/external/tmp/ventium-native-bounded-oct18.AalwzbNF`.
+The corrected native probe **passed**, owner exit zero at **16:13:59 EDT**
+(4 min 16 s wall). Native status is `phys_opt_design (Post-Route) Complete!`;
+both stage-end markers and successful command logs were checked, followed by
+`FRESH-BOUNDED-NATIVE-OK`. The generated synthesis command contains
+`-global_retiming on`; the synthesis log reports four forward register moves.
+The generated pre/post-route physical commands contain exactly the requested
+operation flags and no directive. The independent native-command parser also
+accepts the actual implementation script and properties.
+
+The tiny circuit has ample setup slack, so its physical setup optimization was
+skipped. This is **native option/flow capability evidence**, not evidence of
+full-core physical transformations, runtime reduction or timing gain. No old
+project/checkpoint was imported; implementation used this probe's own fresh
+synthesis. The owner is exited, scope inactive, and no Vivado process remains.
+**34 host-only flow tests plus 22 resource-guard tests pass**. None is CPU or
+physical standard-suite acceptance.
+
+Passing probe SHA256:
+
+- `native.log`: `6549e4368a18fd532c5e2d0725c635101edc3476089ff31d5eb95066b8b3c897`
+- `test_native_bounded_phys.tcl`: `3c0de1b91e61a2fc77b4673b51045445b0aef76209d7ca69102f6771c269da7f`
+- Shared `fresh_bounded_phys.tcl`: `3933335a4c9ee007270773d91139e8da082e14dd8409c7875522d19e94ce504a`
+
+The full-chip candidate is **prepared, not launched**. Immediately after the
+probe exited, host `MemAvailable` was **18,477,488 KiB (17.62 GiB)**, below the
+unchanged **18 GiB** full-build admission threshold. Swap and external disk
+headroom were sufficient. Do not lower the OOM safeguard or kill desktop apps
+to force admission; remeasure after the user frees memory. Current verified
+gameplay remains **0.496499864 total U+V** on older `2886d24c`, cycles
+625,021,130,428–629,480,208,865; this candidate is unmeasured.
 
 The `opt_design` crash workaround has a specific scope. The retained native
 2025.2 help log `/var/tmp/ventium-icfrontspan-pwropt-help.HMmw46/help2.log`
