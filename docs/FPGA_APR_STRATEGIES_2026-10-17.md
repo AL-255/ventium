@@ -244,6 +244,29 @@ the cause of its poor timing. Leaf/net properties and skipped physical
 optimizations require native-result inspection before changing preservation.
 No preservation attribute or running-build input was changed by this review.
 
+### Observed physical optimization during r4 placement
+
+The first completed in-placer physical-synthesis pass reported
+**2,036 optimized cells/nets**, **1,147 added cells**, and **876 removed
+cells**. This includes 1,865 LUT-combining changes and 160 equivalent-driver
+rewirings. These are native transformation counts, not measured timing gains
+or final utilization. The pass reports **zero retiming transformations**.
+
+Very-high-fanout optimization replicated core `state_reg[0]` ten times and
+L1/AXI `bypass_rst_m1_reg_rep__0_0` thirteen times. Another fanout pass replicated
+`state_reg[5]_rep__3_0` three times and `state_reg[1]_rep_0` nine times.
+
+There is now direct evidence of one preservation restriction: messages
+`Physopt 32-1483`, `32-782`, and `32-780` report that
+`rk_ao486_bd_i/rst0/U0/peripheral_aresetn[0]` could not be replicated because
+`rk_ao486_bd_i/u_soc/inst` has `DONT_TOUCH`. Listed affected loads include DDR,
+debug, management and mouse-mailbox reset/control pins. This establishes an
+actual blocked optimization, **not** that this reset net causes the worst setup
+path or that removing the attribute is safe. Reconcile it with final paths and
+congestion before a narrowly scoped future experiment; preserve the historical
+AXI-trimming workaround until such an experiment is independently qualified.
+No attribute was changed in the live run.
+
 ### Read-only board readiness during r4
 
 At **2026-10-18 01:46 UTC** (Oct17 local), SSH and administrator authentication
