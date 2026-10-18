@@ -353,6 +353,30 @@ regions are 16×16 except south at 8×8. These are placer estimates, not the
 final router's congestion map or a route-completion guarantee. Retain the
 spread-placement alternative if the final timing/runtime result warrants it.
 
+### r4 post-placement physical optimization — partial results
+
+The native `AggressiveExplore` pass is still running. Its first two completed
+optimization phases give a measured runtime-versus-estimated-timing comparison:
+
+| Completed phase | Phase elapsed | Native transformation summary | Estimated WNS before → after |
+|---|---:|---|---:|
+| Fanout optimization | 10 min 37 s | 4 nets optimized; 10 cells added | −3.089 → −3.079 ns |
+| Single-cell placement | 20 min 59 s | 121 nets optimized; 121 cells moved; none added/deleted | −3.079 → −3.007 ns |
+
+These phase durations are differences between native cumulative elapsed stamps
+`00:00:48`, `00:11:25`, and `00:32:24`; the initial 1 min 45 s timing update is
+outside that physical-synthesis task counter. Use the native phase summaries
+for transformation totals, not counts of per-net messages, which are incomplete.
+The next phase is multi-cell placement optimization with 100 identified
+candidates. No route has completed and no final physical-optimization result
+is available yet.
+
+The first two optimization phases consumed **31 min 36 s** for **0.082 ns**
+of estimated WNS improvement. This is evidence to consider when choosing the
+next fresh trial's effort/runtime policy, not a routed frequency gain or a
+reason to change the running configuration. The current 40 MHz constraint,
+single-thread setting and 3 h 50 min implementation bound remain unchanged.
+
 ### Read-only board readiness during r4
 
 At **2026-10-18 01:46 UTC** (Oct17 local), SSH and administrator authentication
