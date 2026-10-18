@@ -726,6 +726,26 @@ routed timing and candidate physical standard-suite acceptance remain pending.
 - `prepared.json` SHA256: `57ae9fb2d1132574cc8cb7a7d65ee6dd4371840c439709b98c56bb3b90460831`
 - `started.json` SHA256: `91d61a96f8d957f7c39549ef0b495672bfea95cbd89ab4892cc4dbfc04353d65`
 
+The native synthesis configuration audit passes: the actual command contains
+`-directive PerformanceOptimized -global_retiming on`, rebuilt hierarchy is
+confirmed by its run property, and IP cache/incremental inputs are disabled.
+Cross-boundary/area optimization finished at cumulative **25 min 05 s**;
+timing optimization followed. Neither is a completed synthesis/timing result.
+
+During early timing optimization, disk headroom briefly fell to about 4.93 GiB.
+Four unused `.gch` compiler caches from the completed `parallel-write-core-r1`
+and `parallel-write-soc-r1` builds were archived, compared byte-for-byte with
+`tar -dzf`, and then removed. **315,351,040 bytes (300.74 MiB) net reclaimed**;
+both source headers and simulator binaries were rehashed unchanged. All **214
+live FPGA source/tool pins** were independently rechecked unchanged afterward.
+No active build source, simulator executable, log or acceptance evidence was
+deleted. The caches remain recoverable from
+`/home/yukidama/external/tmp/ventium-closed-pch-oct18.pODGoWYy/caches.tar.gz`,
+SHA256 `9d1fa46534ec97edb0e99b1f7810a422932e9a272c0e1721d047693e9129aa69`;
+the adjacent README records exact paths and recovery details. Vivado subsequently
+released additional scratch space itself; that release is not counted as this
+cleanup's gain. No resource guard or pinned flow file was changed.
+
 The `opt_design` crash workaround has a specific scope. The retained native
 2025.2 help log `/var/tmp/ventium-icfrontspan-pwropt-help.HMmw46/help2.log`
 still matches SHA256
