@@ -383,23 +383,24 @@ spread-placement alternative if the final timing/runtime result warrants it.
 
 ### r4 post-placement physical optimization — partial results
 
-The native `AggressiveExplore` pass is still running. Its first two completed
+The native `AggressiveExplore` pass is still running. Its first three completed
 optimization phases give a measured runtime-versus-estimated-timing comparison:
 
 | Completed phase | Phase elapsed | Native transformation summary | Estimated WNS before → after |
 |---|---:|---|---:|
 | Fanout optimization | 10 min 37 s | 4 nets optimized; 10 cells added | −3.089 → −3.079 ns |
 | Single-cell placement | 20 min 59 s | 121 nets optimized; 121 cells moved; none added/deleted | −3.079 → −3.007 ns |
+| Multi-cell placement | 13 min 42 s | 29 nets optimized; 62 cells moved; none added/deleted | −3.007 → −2.985 ns |
 
 These phase durations are differences between native cumulative elapsed stamps
-`00:00:48`, `00:11:25`, and `00:32:24`; the initial 1 min 45 s timing update is
+`00:00:48`, `00:11:25`, `00:32:24`, and `00:46:06`; the initial 1 min 45 s timing update is
 outside that physical-synthesis task counter. Use the native phase summaries
 for transformation totals, not counts of per-net messages, which are incomplete.
-The next phase is multi-cell placement optimization with 100 identified
-candidates. No route has completed and no final physical-optimization result
+The next phase is rewiring optimization with 300 identified candidate nets.
+No route has completed and no final physical-optimization result
 is available yet.
 
-The first two optimization phases consumed **31 min 36 s** for **0.082 ns**
+The first three optimization phases consumed **45 min 18 s** for **0.104 ns**
 of estimated WNS improvement. This is evidence to consider when choosing the
 next fresh trial's effort/runtime policy, not a routed frequency gain or a
 reason to change the running configuration. The current 40 MHz constraint,
