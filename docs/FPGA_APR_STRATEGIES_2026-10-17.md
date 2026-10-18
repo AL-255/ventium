@@ -227,6 +227,32 @@ board receipt; all 13 entries report deletion complete. The root SSH session
 was closed, the original seed hash remained unchanged, and FPGA manager remained
 `operating`. No guest was launched and no PL state was modified.
 
+### Preserved CoreMark acceptance assets
+
+The unchanged **4,000-iteration** performance and validation media are retained
+under `/home/yukidama/external/tmp/ventium-fprem-sequence.iSZ9BAj4/coremark-pll-media-r1/`.
+A read-only recheck during r4 matched **all 32 source/tool pins and 72 artifact
+hashes** in its `closed.json`; that receipt's SHA256 is
+`f11b03f0eb5629c5523961d73958c3db9f48d6cdadfd6334925b5fb6c1424385`.
+Both pinned Pentium QEMU reference runs exited 33, with no recorded errors.
+These are reusable CRC oracles, **not candidate hardware passes**.
+
+| Seed | `seedcrc / crclist / crcmatrix / crcstate / crcfinal` |
+|---|---|
+| Performance | `e9f5 / e714 / 1fd7 / 8e3a / 65c5` |
+| Validation | `18f2 / e3c1 / 0747 / 8d84 / 5249` |
+
+[ven_coremark_clock_trial.py](../fpga/board-tools/ven_coremark_clock_trial.py)
+supports cold trials of the newly programmed image with `--pll-divider 25`
+and `--expected-mhz 40`; it does not program the FPGA or use snapshots/STEP.
+Use fresh private media copies and retain a new candidate deployment receipt.
+[audit_coremark_clock_trial.py](../fpga/audit_coremark_clock_trial.py) checks
+the completed console against these reference CRCs, measured duration, runtime
+clock, current-trial paired-retirement evidence, hashes and clean closure.
+Its image/source/deployment prerequisites remain separate. Neither these
+preserved assets nor an older board trial qualifies r4; new CoreMark runs,
+Win95 cold desktop/UI acceptance and a complete Quake timedemo remain pending.
+
 ### Historical r2 parser caveat
 
 The r2 controller's original post-run parser incorrectly required the default
