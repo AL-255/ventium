@@ -39,7 +39,8 @@ window peak reaches 90.37% despite much lower whole-chip routing utilization.
 
 | Trial | Timing-driven synthesis | Placement / physical optimization / routing | Status |
 |---|---|---|---|
-| `performance-r2` | `PerformanceOptimized`, rebuilt hierarchy | `ExtraNetDelay_high` / `AggressiveExplore` / `NoTimingRelaxation`; post-route `Explore` | Launched from a new source copy/project; no timing result yet |
+| `performance-r2` | `PerformanceOptimized`, rebuilt hierarchy | Planned `ExtraNetDelay_high` / `AggressiveExplore` / `NoTimingRelaxation`; post-route `Explore` | Native synthesis succeeded; reporting-context guard stopped the run before APR. No timing result. |
+| `performance-r3` | `PerformanceOptimized`, rebuilt hierarchy | `ExtraNetDelay_high` / `AggressiveExplore` / `NoTimingRelaxation`; post-route `Explore` | Fresh retry prepared after project-view reporting repair; not a continuation from r2's checkpoint |
 | `routability-spread` | `AlternateRoutability`, rebuilt hierarchy | `AltSpreadLogic_medium` / `Explore` / `AlternateCLBRouting`; post-route `Explore` | Prepared, not launched |
 
 The first combination targets the measured long logic/routing path. The second
@@ -82,7 +83,7 @@ tests pass; these are tooling tests, not CPU or FPGA standard-suite acceptance.
 
 Current artifact root:
 `/home/yukidama/external/tmp/ventium-fresh-strategies-oct17.67YRDIRh/`.
-Current owner: `ventium-fresh-performance-oct17-r2.service`, invocation
+Closed r2 owner: `ventium-fresh-performance-oct17-r2.service`, invocation
 `e9e71270d712443e9bf65d44bf491472`; scope invocation
 `f7dc258cdd6b486a903e37781f1ca6d4`. Native synthesis started at 18:13:25 local
 time and completed RTL elaboration. Actual generated child script confirms:
@@ -97,6 +98,52 @@ Run properties confirm `AUTO_INCREMENTAL_CHECKPOINT=0`, empty incremental
 checkpoint and extra options, and `FLATTEN_HIERARCHY=rebuilt`. There is no native
 checkpoint-read command in synthesis. Final timing and dynamic acceptance remain
 pending.
+
+### r2 closure and reporting-context repair
+
+r2 closed at **20:31:57 local** after **8,361.87 s** (2 h 19 min 22 s),
+native exit **1**, before implementation. This was **not an OOM or resource
+stop**. Native `synth_design` itself completed successfully in **2 h 16 min
+55 s**, with zero errors/critical warnings. Its pre-placement utilization was
+**186,064 LUTs / 54,917 FFs / 277.5 BRAM tiles / 47 DSPs**. No routed frequency
+or strategy improvement can be claimed from this incomplete trial.
+
+The post hook saw **zero clocks** because it queried timing inside the generated
+synthesis child, which marks its XDC files `USED_IN_IMPLEMENTATION=false`.
+Do not infer that synthesis never saw a clock: the native log explicitly parsed
+the scoped PS XDC and executed `create_clock` before timing optimization. The
+same XDC creates `clk_pl_0` at 10 ns, feeding the unchanged 10/25 MMCM. The failed
+post hook was not sufficient evidence to qualify the full clock closure.
+
+A small, source-only Vivado 2025.2 reproduction confirmed the empty post-synth
+clock view; merely changing the property back did not restore timing in that
+view. A second fresh project using the actual repaired reporting procedure
+passed: **clk_pl_0=10 ns, mmcm_fb=10 ns, mmcm_clk=25 ns**, followed by
+`FRESH-SYNTH-CLOCKS-OK`. Evidence is under
+`/home/yukidama/external/tmp/ventium-clock-visibility.WMNjkNHY/` (negative
+reproduction) and `ventium-clock-project-view.zGKe9nLv/` (positive reproduction).
+These are tooling tests, not CPU/APR/hardware acceptance.
+
+[fresh_synth_evidence.tcl](../fpga/fresh_synth_evidence.tcl) now checks native
+synthesis completion, opens **this fresh run's** synthesis through its owning
+project, runs the clock/timing reports with normal scoped project constraints,
+and closes the design. APR cannot launch until that succeeds. It never resumes
+r2 or reads another run's checkpoint. No RTL, clock period, timing exception,
+synthesis directive or APR directive was changed by this reporting repair.
+[AMD's constraint-file reference](https://docs.amd.com/r/2025.2-English/ug903-vivado-using-constraints/Synthesis-and-Implementation-Constraint-Files)
+documents the distinct synthesis/implementation applicability of XDC files.
+
+The launcher also now uses the tested native-command **and property** parser,
+so omission of Vivado's default `-flatten_hierarchy rebuilt` is not an error.
+Both new helper modules are pinned before the next launch. **27 tooling tests
+pass**, including clock selection, evidence ordering/failure cleanup, source-only
+admission, and timing-result audits. A repeatable native regression is provided
+by [test_native_synth_evidence.tcl](../fpga/test_native_synth_evidence.tcl), using
+the tiny clock-only fixture; launch it through the exclusive guard in a new
+external scratch directory with a new output-directory argument.
+That repository-native regression also completed with exit **0** at **20:41:32
+local**, again reporting exactly 10/10/25 ns clocks; its retained logs and
+reports are under `ventium-clock-evidence-regression.GgJf4BCy/` in external tmp.
 
 ### Constraint and preservation preflight
 
@@ -119,7 +166,7 @@ the cause of its poor timing. Leaf/net properties and skipped physical
 optimizations require native-result inspection before changing preservation.
 No preservation attribute or running-build input was changed by this review.
 
-The live controller's original post-run parser incorrectly requires the default
+The r2 controller's original post-run parser incorrectly required the default
 `-flatten_hierarchy rebuilt` argument to be printed explicitly. Vivado omits it.
 Do **not** interrupt/restart a valid synthesis for this post-run parser bug or
 silently relabel its inputs. [audit_fresh_strategy.py](../fpga/audit_fresh_strategy.py)
@@ -128,6 +175,8 @@ this actual script, with three additional regression tests. A terminal
 controller `flatten policy drift` audit failure must be distinguished from a
 native tool failure, and the full native result still needs independent audit.
 This configuration-only checker cannot establish completion or timing closure.
+The launcher fix above applies to subsequent fresh runs; r2 instead ended on the
+independent native reporting-context failure before this parser could matter.
 
 ### Explicit reporting-hook amendment during r2
 
@@ -149,12 +198,16 @@ The immutable original `started.json` remains intact. Exact before/after hashes,
 owner/scope identities and timing of this change are recorded in
 `performance-r2/report-hook-amendment.json`, SHA256
 `c5f9473d9c0b07a783c14f83149be85d265c0692954f71b90f73e405effd5794`.
-An independent comparison confirmed **all 200 frozen source files and every
-other launch pin unchanged**. The original controller is expected to report
-`inputs_unchanged=false` and an assertion audit failure even if Vivado succeeds;
+An independent comparison at the time confirmed **all 200 frozen source files
+and every other launch pin unchanged**. The original controller was expected to
+report `inputs_unchanged=false` and an assertion audit failure even if Vivado succeeded;
 do not overwrite that receipt or call all launch inputs unchanged. The separate
 result audit accepts only these exact two reviewed reporting deltas for this
 specific invocation, and rejects any additional source/tool/constraint change.
+r2 ultimately had native exit 1 from the separate post-synthesis clock-view
+failure, so this exception cannot qualify it. Its original receipts remain
+intact; later launcher/report repairs are for a new run, not retroactive edits
+to that failed result.
 
 ### Closed-run acceptance audit
 

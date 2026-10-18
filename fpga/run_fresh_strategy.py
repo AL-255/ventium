@@ -8,7 +8,6 @@ import argparse
 import json
 import os
 from pathlib import Path
-import re
 import shutil
 import signal
 import subprocess
@@ -16,6 +15,7 @@ import time
 
 from run_apr_trial import GIB, REPO, SCRATCH, SCOPE, host, scope, sha, validate_timing
 from prepare_programmable_clock_repair import adapt
+from audit_fresh_strategy import audit_synth
 
 ANCESTOR = SCRATCH/'ventium-fprem-sequence.iSZ9BAj4/programmable-clock-r3'
 PREPARED_SHA = '5308f8044f35b387e833e1b62a52ec7605bb3a5e157096d9327b638d4b659a54'
@@ -70,10 +70,10 @@ def prepare(dest):
     assert set(changed) <= {'ventium/fpga/'+n for n in CLOCK_HASHES}
     pins = {str(source/n): h for n, h in after.items()}
     # Pin launch dependencies too, including imported helper modules.
-    for name in ('run_fresh_strategy.py', 'fresh_strategy.tcl', 'fresh_synth_post.tcl',
+    for name in ('run_fresh_strategy.py', 'fresh_strategy.tcl', 'fresh_synth_post.tcl', 'fresh_synth_evidence.tcl',
                  'fresh_route_pre.tcl', 'fresh_reports.tcl', 'run_apr_trial.py',
                  'prepare_programmable_clock_repair.py', 'prepare_programmable_clock.py',
-                 'audit_clock_reuse.py', 'run_vivado_exclusive.sh'):
+                 'audit_clock_reuse.py', 'audit_fresh_strategy.py', 'run_vivado_exclusive.sh'):
         pins[str(REPO/'fpga'/name)] = sha(REPO/'fpga'/name)
     pins[str(REPO/'tools/build_scope.sh')] = sha(REPO/'tools/build_scope.sh')
     save(dest, 'prepared.json', dict(parent_source=str(ANCESTOR/'source'),
@@ -86,16 +86,10 @@ def prepare(dest):
     return pins
 
 
-def validate_native_synth(text, strategy):
-    commands = re.findall(r'^synth_design [^\n]+', text, re.M)
-    directive = 'PerformanceOptimized' if strategy == 'performance-netdelay' else 'AlternateRoutability'
-    if len(commands) != 1 or f'-directive {directive}' not in commands[0]:
-        raise ValueError('wrong/missing native synthesis directive')
-    if re.search(r'-(?:no_timing_driven|incremental)(?:\s|$)', commands[0]):
-        raise ValueError('timing-disabled/incremental synthesis')
-    if '-flatten_hierarchy rebuilt' not in commands[0]:
-        raise ValueError('flatten policy drift')
-    return commands[0]
+def validate_native_synth(text, strategy, properties):
+    # Vivado omits default-valued arguments from its generated command. The
+    # actual property report, not the spelling of a default, is the authority.
+    return audit_synth(text, properties, strategy)['command']
 
 
 def stage_deadline(text, now):
@@ -211,7 +205,8 @@ def main():
     try:
         assert code == 0 and not reason and not failure and unchanged and owner
         assert 'FRESH-STRATEGY-COMPLETE '+args.strategy in (dest/'native.log').read_text()
-        native_synth = validate_native_synth((dest/'build/rk_ao486_system/rk_ao486_system.runs/synth_1/rk_ao486_bd_wrapper.tcl').read_text(), args.strategy)
+        native_synth = validate_native_synth((dest/'build/rk_ao486_system/rk_ao486_system.runs/synth_1/rk_ao486_bd_wrapper.tcl').read_text(), args.strategy,
+            (dest/'build/synth_1-properties.rpt').read_text())
         measurements = validate_timing((dest/'build/timing.tsv').read_text())
         assert (dest/'build/fresh-routed.dcp').stat().st_size > 50_000_000
         assert (dest/'build/rk_ao486_system.bit.bin').stat().st_size > 10_000_000

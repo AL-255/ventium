@@ -1,4 +1,4 @@
-# Runs in the native synthesis child, with the actual synthesized design open.
+# Runs after open_run synth_1 in the owning project, with its scoped XDCs.
 set out $::env(VEN_FRESH_OUT)
 set f [open [file join $out synth-clocks.tsv] {WRONLY CREAT EXCL}]
 puts $f "clock\tperiod_ns"

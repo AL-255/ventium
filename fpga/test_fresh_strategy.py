@@ -6,19 +6,25 @@ import tempfile
 import unittest
 
 from run_fresh_strategy import source_inventory, stage_deadline, validate_native_synth, IMPL_LIMIT
+from test_audit_fresh_strategy import SCRIPT, PROPS
 
 
 class FreshTests(unittest.TestCase):
     def test_native_timing_driven_strategy(self):
         for strategy, directive in [('performance-netdelay', 'PerformanceOptimized'),
                                     ('routability-spread', 'AlternateRoutability')]:
-            text = f'synth_design -top rk_ao486_bd_wrapper -part xczu15eg-ffvb1156-2-i -flatten_hierarchy rebuilt -directive {directive}\n'
-            self.assertEqual(validate_native_synth(text, strategy), text.strip())
+            text = SCRIPT.replace('PerformanceOptimized', directive).rstrip()+' -flatten_hierarchy rebuilt\n'
+            props = PROPS.replace('PerformanceOptimized', directive)
+            self.assertEqual(validate_native_synth(text, strategy, props), text.splitlines()[-1])
+            omitted = text.replace(' -flatten_hierarchy rebuilt', '')
+            self.assertEqual(validate_native_synth(omitted, strategy, props), omitted.splitlines()[-1])
+            with self.assertRaises(ValueError):
+                validate_native_synth(omitted, strategy, props.replace('rebuilt', 'none'))
             for bad in (text.replace('rebuilt', 'none'), text.replace(directive, 'Default'),
                         text.strip()+' -no_timing_driven\n', text.strip()+' -incremental\n',
                         text+text, ''):
                 with self.subTest(bad=bad), self.assertRaises(ValueError):
-                    validate_native_synth(bad, strategy)
+                    validate_native_synth(bad, strategy, props)
 
     def test_impl_deadline_includes_place_and_route(self):
         self.assertFalse(stage_deadline('synth_1\t100\n', 99999))
@@ -42,6 +48,8 @@ class FreshTests(unittest.TestCase):
         # Exercise the actual Tcl procs, replacing only native vendor commands.
         script = Path(__file__).with_name('fresh_strategy.tcl').read_text()
         prefix = script.split('# The source-only platform wrapper owns exact defines')[0]
+        prefix = prefix.replace('set ::fresh_script_dir [file dirname [file normalize [info script]]]',
+            'set ::fresh_script_dir {'+str(Path(__file__).parent.resolve())+'}')
         for strategy, directive, place, route in (
                 ('performance-netdelay', 'PerformanceOptimized', 'ExtraNetDelay_high', 'NoTimingRelaxation'),
                 ('routability-spread', 'AlternateRoutability', 'AltSpreadLogic_medium', 'AlternateCLBRouting')):
@@ -51,6 +59,7 @@ proc version {args} {return 2025.2}
 proc set_param {args} {}
 proc create_project {args} {}
 proc launch_runs {args} {}
+proc wait_on_run {args} {}
 proc current_project {} {return project}
 proc config_ip_cache {args} {set ::props(project,IP_CACHE_PERMISSIONS) disable}
 proc get_runs {r} {return $r}
@@ -81,6 +90,12 @@ set ::props(synth_1,STEPS.SYNTH_DESIGN.ARGS.DIRECTIVE) Default
 set ::props(synth_1,AUTO_INCREMENTAL_CHECKPOINT) 1
 set ::props(impl_1,INCREMENTAL_CHECKPOINT) /old/bad.dcp
 launch_runs synth_1 -jobs 1
+if {{![catch {{launch_runs impl_1 -to_step write_bitstream -jobs 1}}]}} {{error "missing clock evidence allowed"}}
+# The project-view procedure is exercised separately, including a native
+# fresh-project regression. Here check the parent wait/launch ordering.
+proc fresh_synth_evidence {{}} {{set ::evidence_called 1}}
+wait_on_run synth_1
+if {{!$::evidence_called}} {{error "evidence procedure not called"}}
 launch_runs impl_1 -to_step write_bitstream -jobs 1
 foreach {{obj prop expected}} {{
  synth_1 STEPS.SYNTH_DESIGN.ARGS.DIRECTIVE {directive}
@@ -92,6 +107,7 @@ foreach {{obj prop expected}} {{
  if {{[get_property $prop $obj] ne $expected}} {{error "readback mismatch $prop"}}
 }}
 if {{![catch {{launch_runs impl_1 -jobs 1}}]}} {{error "duplicate launch allowed"}}
+if {{[get_property STEPS.SYNTH_DESIGN.TCL.POST synth_1] ne ""}} {{error "native post hook retained"}}
 puts FRESH-TCL-OK
 '''
                 runner = Path(td)/'test.tcl'
