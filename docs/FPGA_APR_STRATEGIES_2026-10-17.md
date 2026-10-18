@@ -41,7 +41,7 @@ window peak reaches 90.37% despite much lower whole-chip routing utilization.
 |---|---|---|---|
 | `performance-r2` | `PerformanceOptimized`, rebuilt hierarchy | Planned `ExtraNetDelay_high` / `AggressiveExplore` / `NoTimingRelaxation`; post-route `Explore` | Native synthesis succeeded; reporting-context guard stopped the run before APR. No timing result. |
 | `performance-r3` | Planned `PerformanceOptimized`, rebuilt hierarchy | Planned same performance APR | Stopped in 10.06 s before project creation: early interception of Vivado's lazily registered `wait_on_run` failed |
-| `performance-r4` | `PerformanceOptimized`, rebuilt hierarchy | `ExtraNetDelay_high` / `AggressiveExplore` / `NoTimingRelaxation`; post-route `Explore` | Active fresh retry; clock evidence runs directly before APR launch, after the platform's ordinary wait |
+| `performance-r4` | `PerformanceOptimized`, rebuilt hierarchy | `ExtraNetDelay_high` / `AggressiveExplore` / `NoTimingRelaxation`; post-route `Explore` | Fresh synthesis succeeded; 40/100 MHz clock audit passed; native APR started Oct17 23:04:25 EDT |
 | `routability-spread` | `AlternateRoutability`, rebuilt hierarchy | `AltSpreadLogic_medium` / `Explore` / `AlternateCLBRouting`; post-route `Explore` | Prepared, not launched |
 
 The first combination targets the measured long logic/routing path. The second
@@ -163,6 +163,38 @@ incomplete synthesis; implementation cannot proceed on missing/invalid clocks.
 The wrapper unit test now deliberately has no `wait_on_run` during initialization
 to cover this native startup condition. r3's failure receipts are retained; r4
 uses a new output/source copy and begins again from scratch.
+
+### r4 synthesis result and APR launch
+
+Native `synth_design` completed successfully in **2 h 16 min 26 s**, with zero
+errors/critical warnings. The native run finished at **23:01:52 EDT Oct17**.
+Pre-placement utilization is **186,064 LUTs / 54,917 FFs / 277.5 BRAM tiles /
+47 DSPs**. These are synthesis counts, not routed resource or timing results.
+
+The owning-project report now succeeds on the full design:
+`build/synth-clocks.tsv` contains **clk_pl_0=10 ns, mmcm_fb=10 ns,
+mmcm_clk=25 ns**, followed by `FRESH-SYNTH-CLOCKS-OK core=40MHz AXI=100MHz`
+in the native log. All **213 launch pins** were rechecked unchanged after
+implementation launched. The earlier reporting-context failure is resolved
+for this run; no running source or reporting hook was amended.
+
+The **unplaced** timing report still fails setup: core WNS **−1.011 ns**,
+equivalent to a conditional **38.445273 MHz pre-placement estimate**. Global
+WHS is **−0.455 ns**. Neither is a routed sign-off result, and comparing this
+estimate with the old image's routed 28.701817 MHz would not establish an
+improvement. The target remains 40 MHz. The reported worst unplaced setup path
+is `q_pc_reg[0]` to shared-FPU `status_reg[10]`, with **90 logic levels** and
+25.800 ns estimated data delay (5.882 ns logic / 19.918 ns estimated routing).
+Its different endpoint does not establish that the older routed EIP-to-paired-
+return bottleneck has been fixed; inspect the new post-route paths.
+
+`build/stages.tsv` records native APR launch at **23:04:25 EDT Oct17**.
+Its generated script consumes only **this run's newly synthesized DCP**, with
+IP caching disabled and no incremental checkpoint. Actual run properties and
+the generated commands agree on the performance APR directives listed above.
+Implementation's 3 h 50 min limit expires at **02:54:25 EDT Oct18**; this includes
+placement, optimization and routing. Final routed timing, timing coverage,
+CDC/exception review and candidate hardware acceptance remain pending.
 
 ### Constraint and preservation preflight
 
