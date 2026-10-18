@@ -188,6 +188,13 @@ is `q_pc_reg[0]` to shared-FPU `status_reg[10]`, with **90 logic levels** and
 Its different endpoint does not establish that the older routed EIP-to-paired-
 return bottleneck has been fixed; inspect the new post-route paths.
 
+Pre-placement `check_timing` also reports **eight `no_clock` pins**, zero
+unconstrained internal endpoints and four outputs without output delays. This
+summary does not enumerate the eight pins. Final verbose coverage must resolve
+them: the result audit rejects any nonzero `no_clock` count and permits only
+the four named status LEDs without output delays. Do not waive the eight pins
+or claim complete timing coverage from the three-clock inventory alone.
+
 `build/stages.tsv` records native APR launch at **23:04:25 EDT Oct17**.
 Its generated script consumes only **this run's newly synthesized DCP**, with
 IP caching disabled and no incremental checkpoint. Actual run properties and
