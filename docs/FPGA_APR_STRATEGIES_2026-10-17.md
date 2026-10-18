@@ -41,7 +41,7 @@ window peak reaches 90.37% despite much lower whole-chip routing utilization.
 |---|---|---|---|
 | `performance-r2` | `PerformanceOptimized`, rebuilt hierarchy | Planned `ExtraNetDelay_high` / `AggressiveExplore` / `NoTimingRelaxation`; post-route `Explore` | Native synthesis succeeded; reporting-context guard stopped the run before APR. No timing result. |
 | `performance-r3` | Planned `PerformanceOptimized`, rebuilt hierarchy | Planned same performance APR | Stopped in 10.06 s before project creation: early interception of Vivado's lazily registered `wait_on_run` failed |
-| `performance-r4` | `PerformanceOptimized`, rebuilt hierarchy | `ExtraNetDelay_high` / `AggressiveExplore` / `NoTimingRelaxation`; post-route `Explore` | Fresh synthesis and 40/100 MHz clock audit passed; placement completed in 1 h 43 min 24 s; routed timing pending |
+| `performance-r4` | `PerformanceOptimized`, rebuilt hierarchy | `ExtraNetDelay_high` / `AggressiveExplore` / planned `NoTimingRelaxation`; planned post-route `Explore` | Stopped at the 3 h 50 min APR limit during physical optimization, before routing. No routed timing result. |
 | `routability-spread` | `AlternateRoutability`, rebuilt hierarchy | `AltSpreadLogic_medium` / `Explore` / `AlternateCLBRouting`; post-route `Explore` | Prepared, not launched |
 
 The first combination targets the measured long logic/routing path. The second
@@ -84,13 +84,35 @@ tests pass; these are tooling tests, not CPU or FPGA standard-suite acceptance.
 
 Current artifact root:
 `/home/yukidama/external/tmp/ventium-fresh-strategies-oct17.67YRDIRh/`.
-Active output: `performance-r4`, owner
+Closed output: `performance-r4`, owner
 `ventium-fresh-performance-oct17-r4.service`, invocation
 `11102264390f4fcfb2d22f54aaa43248`, scope invocation
 `06f5c70e48af46988f0931a729f5ff9d`. Launched from the repaired tooling at
-`fdeecc90`; startup and new BD generation have been observed live. The 200-file
-source closure and 159 defines are unchanged. No old checkpoint is an input;
-40 MHz routed timing and physical acceptance remain pending.
+`fdeecc90`. At **2026-10-18 02:54 EDT**, the owner enforced the unchanged
+3 h 50 min implementation deadline during phase 10 of physical optimization.
+The owner is terminal (`ExecMainStatus=1`), its Vivado scope is inactive, and
+no Vivado process remains. The 200-file source closure and 159 defines were
+unchanged; all **213 input/tool pins** were independently rechecked before any
+subsequent tooling edits. No old checkpoint was an input. This trial did not
+route or produce an accepted bitstream; 40 MHz closure remains unproven.
+
+`closed.json` records `native_exit=124`, reason
+`implementation 3h50m deadline`, `inputs_unchanged=true`, and total elapsed
+**22,256.076 s**. The completion auditor correctly rejects it as a
+native/resource failure. The monitored memory events contain no OOM or
+OOM-kill event. Peak RAM was **15,156,060,160 bytes**, peak swap
+**6,442,450,944 bytes**, and maximum simultaneous RAM+swap
+**20,671,967,232 bytes (19.25 GiB)**. Do not add the separate RAM/swap peaks as
+though simultaneous, or assume a smaller full-build cap is safe. At initial
+post-exit inspection host available RAM was about 17.23 GiB, below the existing
+18 GiB admission threshold; remeasure before launching another full trial.
+
+Retained terminal evidence SHA256:
+
+- `closed.json`: `d34aa44d6e9bab5aefe43e503ddb5312ef589ac1ce12b4793efe39ccc326c0c5`
+- `started.json`: `305d660fcfeaa9f9c6d836103093fece3c0875af7b61dd803a2ec92e877bdaec`
+- `prepared.json`: `57ae9fb2d1132574cc8cb7a7d65ee6dd4371840c439709b98c56bb3b90460831`
+- `native.log`: `c36d061a43cf7b76ae0f730d88f73e582a8f3c8ff05bf949c4a57bc7d3bbada4`
 
 Closed r2 owner: `ventium-fresh-performance-oct17-r2.service`, invocation
 `e9e71270d712443e9bf65d44bf491472`; scope invocation
@@ -383,7 +405,7 @@ spread-placement alternative if the final timing/runtime result warrants it.
 
 ### r4 post-placement physical optimization — partial results
 
-The native `AggressiveExplore` pass is still running. Its first five completed
+The native `AggressiveExplore` pass was stopped at the deadline. Its seven completed
 optimization phases give a measured runtime-versus-estimated-timing comparison:
 
 | Completed phase | Phase elapsed | Native transformation summary | Estimated WNS before → after |
@@ -393,25 +415,28 @@ optimization phases give a measured runtime-versus-estimated-timing comparison:
 | Multi-cell placement | 13 min 42 s | 29 nets optimized; 62 cells moved; none added/deleted | −3.007 → −2.985 ns |
 | Rewiring | 11 min 48 s | 52 nets optimized; 22 cells added; none moved/deleted | −2.985 → −2.935 ns |
 | Critical-cell optimization | 45 min 45 s | 19 nets optimized; 29 cells added; none moved/deleted | −2.935 → −2.924 ns |
+| Second fanout optimization | 2 min 45 s | 5 nets optimized; 22 cells added; none moved/deleted | −2.924 → −2.924 ns |
+| Second single-cell placement | 9 min 57 s | 103 nets optimized; 103 cells moved; none added/deleted | −2.924 → −2.879 ns |
 
 These phase durations are differences between native cumulative elapsed stamps
-`00:00:48`, `00:11:25`, `00:32:24`, `00:46:06`, `00:57:54`, and `01:43:39`; the initial
+`00:00:48`, `00:11:25`, `00:32:24`, `00:46:06`, `00:57:54`, `01:43:39`,
+`01:46:24`, and `01:56:21`; the initial
 1 min 45 s timing update is outside that physical-synthesis task counter.
 Use the native phase summaries
 for transformation totals, not counts of per-net messages, which are incomplete.
 Critical-cell optimization considered 30 candidate nets; its native aggregate
 reports 19 optimized nets, including replication and driver replacement. A
-second fanout phase has now started with eight identified candidates.
-No route has completed and no final physical-optimization result
-is available yet.
+second fanout phase considered eight candidates. The next multi-cell phase
+started with 100 candidates but did not complete before the deadline.
+No route or final physical-optimization result is available.
 
-The first five optimization phases consumed **1 h 42 min 51 s** for **0.165 ns**
+The seven completed optimization phases consumed **1 h 55 min 33 s** for **0.210 ns**
 of estimated WNS improvement. Critical-cell optimization alone spent
 **45 min 45 s** for **0.011 ns**; its reported TNS changed from −66802.393 to
 −63484.869 ns. This is evidence to consider when choosing the
-next fresh trial's effort/runtime policy, not a routed frequency gain or a
-reason to change the running configuration. The current 40 MHz constraint,
-single-thread setting and 3 h 50 min implementation bound remain unchanged.
+next fresh trial's effort/runtime policy, not a routed frequency gain. The
+40 MHz constraint, single-thread setting and 3 h 50 min implementation bound
+were unchanged throughout this trial.
 
 For the next trial, do not assume that changing only the physical-optimization
 directive removes this runtime cost. AMD describes `Explore` as multiple
