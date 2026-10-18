@@ -269,6 +269,24 @@ live trial closes; do not edit its pinned inputs or automatically jump to eight
 threads. r4 remains single-thread-capped.
 [AMD 2025.2 multithreading limits](https://docs.amd.com/r/2025.2-English/ug904-vivado-implementation/Multithreading-with-the-Vivado-Tools).
 
+The `opt_design` crash workaround has a specific scope. The retained native
+2025.2 help log `/var/tmp/ventium-icfrontspan-pwropt-help.HMmw46/help2.log`
+still matches SHA256
+`8c34e22d6e6955553a9d2c379a255df68b2e8b5880006df9afed691cbffd0e2c`:
+`RuntimeOptimized` omits `bram_power_opt` from Default. The Oct3 crash log
+still shows the fan-in/fan-out exception and `libxv_pwropt.so` destruction
+stack; this is not a reason to disable timing-driven synthesis. In r4,
+retargeting, constant propagation, sweep, BUFG and shift-register optimization
+actually ran, including insertion of a `soc_reset` BUFG.
+
+That help also documents explicit timing-driven `-resynth_remap` for reducing
+critical-path logic depth. If the routed path remains deep, a later fresh trial
+could retain the normal no-BRAM-power pass and test a separate explicit remap
+pass before placement. Explicit optimization switches replace defaults and
+cannot be combined with `-directive`; do not accidentally restore the crashing
+power pass or omit the other required logic optimizations. This is a candidate
+experiment, **not configured or queued**, and no timing/runtime gain is known.
+
 ### Constraint and preservation preflight
 
 The actual generated synthesis script reads only the board `bitstream.xdc` /
