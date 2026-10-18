@@ -41,7 +41,7 @@ window peak reaches 90.37% despite much lower whole-chip routing utilization.
 |---|---|---|---|
 | `performance-r2` | `PerformanceOptimized`, rebuilt hierarchy | Planned `ExtraNetDelay_high` / `AggressiveExplore` / `NoTimingRelaxation`; post-route `Explore` | Native synthesis succeeded; reporting-context guard stopped the run before APR. No timing result. |
 | `performance-r3` | Planned `PerformanceOptimized`, rebuilt hierarchy | Planned same performance APR | Stopped in 10.06 s before project creation: early interception of Vivado's lazily registered `wait_on_run` failed |
-| `performance-r4` | `PerformanceOptimized`, rebuilt hierarchy | `ExtraNetDelay_high` / `AggressiveExplore` / `NoTimingRelaxation`; post-route `Explore` | Fresh retry prepared; clock evidence runs directly before APR launch, after the platform's ordinary wait |
+| `performance-r4` | `PerformanceOptimized`, rebuilt hierarchy | `ExtraNetDelay_high` / `AggressiveExplore` / `NoTimingRelaxation`; post-route `Explore` | Active fresh retry; clock evidence runs directly before APR launch, after the platform's ordinary wait |
 | `routability-spread` | `AlternateRoutability`, rebuilt hierarchy | `AltSpreadLogic_medium` / `Explore` / `AlternateCLBRouting`; post-route `Explore` | Prepared, not launched |
 
 The first combination targets the measured long logic/routing path. The second
@@ -84,6 +84,14 @@ tests pass; these are tooling tests, not CPU or FPGA standard-suite acceptance.
 
 Current artifact root:
 `/home/yukidama/external/tmp/ventium-fresh-strategies-oct17.67YRDIRh/`.
+Active output: `performance-r4`, owner
+`ventium-fresh-performance-oct17-r4.service`, invocation
+`11102264390f4fcfb2d22f54aaa43248`, scope invocation
+`06f5c70e48af46988f0931a729f5ff9d`. Launched from the repaired tooling at
+`fdeecc90`; startup and new BD generation have been observed live. The 200-file
+source closure and 159 defines are unchanged. No old checkpoint is an input;
+40 MHz routed timing and physical acceptance remain pending.
+
 Closed r2 owner: `ventium-fresh-performance-oct17-r2.service`, invocation
 `e9e71270d712443e9bf65d44bf491472`; scope invocation
 `f7dc258cdd6b486a903e37781f1ca6d4`. Native synthesis started at 18:13:25 local
