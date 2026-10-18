@@ -45,7 +45,7 @@ window peak reaches 90.37% despite much lower whole-chip routing utilization.
 | `routability-r2` | `AlternateRoutability`, rebuilt hierarchy | Planned `AltSpreadLogic_medium` / `Explore` / `AlternateCLBRouting`; post-route `Explore` | Stopped through its controller after technology mapping stalled with task-cap rejections. No completed synthesis/APR or timing result. |
 | `routability-r3` | `AlternateRoutability`, rebuilt hierarchy | Same planned APR as r2 | Stopped by the 21 GiB combined-memory guard during technology mapping; no OOM or task-cap rejection. No completed synthesis/APR or timing result. |
 | `routability-r4` | `AlternateRoutability`, rebuilt hierarchy; one synthesis process | Same APR as r2; routing never reached | Synthesis and placement completed; stopped at 3 h 50 min APR limit in physical optimization. No routed timing result. |
-| `performance-retime-r1` | `PerformanceOptimized`, rebuilt hierarchy, explicit synthesis retiming | Spread placement / explicit physical-operation sets / `NoTimingRelaxation` | Fresh full-chip trial launched Oct18 16:50:57 EDT after RAM admission recovered. No completed synthesis/APR or timing result yet. |
+| `performance-retime-r1` | `PerformanceOptimized`, rebuilt hierarchy, explicit synthesis retiming | Spread placement / explicit physical-operation sets / `NoTimingRelaxation` | Fresh full-chip trial launched Oct18 16:50:57 EDT. Timing optimization finished; technology mapping observed live at 18:33 EDT. No completed synthesis/APR or timing result yet. |
 
 The first combination targets the measured long logic/routing path. The second
 tests a routing-oriented mapping and spread placement, if the first result
@@ -731,6 +731,17 @@ The native synthesis configuration audit passes: the actual command contains
 confirmed by its run property, and IP cache/incremental inputs are disabled.
 Cross-boundary/area optimization finished at cumulative **25 min 05 s**;
 timing optimization followed. Neither is a completed synthesis/timing result.
+
+At the **18:33 EDT Oct18** observation, native timing optimization had finished
+at cumulative **1 h 40 min 38 s wall / 1 h 39 min 56 s CPU**, and synthesis had
+entered **Technology Mapping**. The same owner/scope remained live; the existing
+synthesis helper resumed CPU work as mapping began. It is part of this build,
+not an orphan or a second independent Vivado run. No OOM or task-limit events
+were recorded at this transition. All **214 input/tool pins** were independently
+rehashed unchanged again at 18:34 EDT. Full-core register-retiming
+transformations have not yet been reported; the enabled switch alone does not
+prove their occurrence or any timing gain. Synthesis completion, utilization,
+clock-pair timing and routed 40 MHz closure remain pending.
 
 During early timing optimization, disk headroom briefly fell to about 4.93 GiB.
 Four unused `.gch` compiler caches from the completed `parallel-write-core-r1`
