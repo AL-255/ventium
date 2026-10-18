@@ -45,7 +45,7 @@ window peak reaches 90.37% despite much lower whole-chip routing utilization.
 | `routability-r2` | `AlternateRoutability`, rebuilt hierarchy | Planned `AltSpreadLogic_medium` / `Explore` / `AlternateCLBRouting`; post-route `Explore` | Stopped through its controller after technology mapping stalled with task-cap rejections. No completed synthesis/APR or timing result. |
 | `routability-r3` | `AlternateRoutability`, rebuilt hierarchy | Same planned APR as r2 | Stopped by the 21 GiB combined-memory guard during technology mapping; no OOM or task-cap rejection. No completed synthesis/APR or timing result. |
 | `routability-r4` | `AlternateRoutability`, rebuilt hierarchy; one synthesis process | Same APR as r2; routing never reached | Synthesis and placement completed; stopped at 3 h 50 min APR limit in physical optimization. No routed timing result. |
-| `performance-retime-r1` | `PerformanceOptimized`, rebuilt hierarchy, explicit synthesis retiming | Spread placement / explicit physical-operation sets / `NoTimingRelaxation` | Fresh full-chip trial launched Oct18 16:50:57 EDT. Timing optimization finished; technology mapping observed live at 18:33 EDT. No completed synthesis/APR or timing result yet. |
+| `performance-retime-r1` | `PerformanceOptimized`, rebuilt hierarchy, explicit synthesis retiming | Planned spread placement / explicit physical-operation sets / `NoTimingRelaxation` | Stopped by the 21 GiB combined-memory guard during technology mapping. No OOM, completed synthesis/APR or timing result. |
 
 The first combination targets the measured long logic/routing path. The second
 tests a routing-oriented mapping and spread placement, if the first result
@@ -756,6 +756,52 @@ SHA256 `9d1fa46534ec97edb0e99b1f7810a422932e9a272c0e1721d047693e9129aa69`;
 the adjacent README records exact paths and recovery details. Vivado subsequently
 released additional scratch space itself; that release is not counted as this
 cleanup's gain. No resource guard or pinned flow file was changed.
+
+### Retiming-r1 controlled memory stop and resource-profile retry
+
+At **18:41 EDT Oct18**, the owner stopped r1 during technology mapping after
+**6,619.833 s (1 h 50 min 20 s)**. The terminal owner is failed, its scope is
+inactive, and no Vivado process remains. `closed.json` records native exit
+**124**, reason **`combined memory early stop`**, and inputs unchanged. All
+**214 pins** were independently rehashed unchanged after closure, before the
+following tooling edits. The independent completion auditor correctly rejects
+the run as a native/resource failure. No synthesis DCP or APR result is accepted.
+
+Maximum sampled simultaneous RAM+swap was **22,742,892,544 bytes (21.18 GiB)**,
+above the 21 GiB early-stop threshold. At that sample RAM was 17,179,160,576 bytes,
+swap was 5,563,731,968 bytes, and host available RAM was 8,560,295,936 bytes.
+There were **zero OOM/OOM-kill events and zero task-limit rejections**; peak
+task count was 27. Memory-hard-limit reclaim events are not OOM or task failures.
+The enabled retiming option still has no completed full-core transformation or
+timing result. This failure does not establish that retiming cannot improve fmax.
+
+Terminal evidence SHA256:
+
+- `closed.json`: `07d001334eec895656c4c273dbdea31ae76ab973d6e8cd7e3cd0a6d34e5cbda8`
+- `started.json`: `91d61a96f8d957f7c39549ef0b495672bfea95cbd89ab4892cc4dbfc04353d65`
+- `native.log`: `dd74ab0047f50a3641369b6c48738c8ef801be5b89b33503ff0af79f4ce91143`
+
+The next retry keeps the same synthesis/APR strategy but uses the named
+**`serial20` memory profile: 20 GiB RAM / 6 GiB swap / 25 GiB combined early
+stop**, with one internal thread and 48 tasks. The exclusive launcher's existing
+reviewed 20 GiB RAM ceiling is unchanged. Admission now requires more than
+**22 GiB MemAvailable / 10 GiB SwapFree**, retaining the two-GiB live host
+RAM/swap reserve, four-GiB disk reserve, one-GiB combined-limit headroom,
+one-build lock, eight-hour whole limit and 3 h 50 min APR limit. The default
+`standard16` profile remains 16/6 GiB. The independent auditor verifies named
+profile receipts, actual limits, admission and runtime reserve evidence; it does
+not infer acceptance from the profile label. **36 fresh-flow/audit tests plus
+22 exclusive-launcher tests pass.** These are tooling checks, not CPU acceptance.
+No next full run has launched yet. Disk admission was restored by archiving and
+byte-comparing r1's closed, unopened
+`synth_1/.Xil/Vivado-3306894-AL-MS790S-U26` directory, then removing only that
+uncompressed directory. **1,803,542,528 bytes (1.68 GiB) net reclaimed**; sources,
+native log and terminal receipts remain intact, with receipt/log hashes
+rechecked afterward. Recovery archive: `performance-retime-r1/closed-mapping-scratch.tar.gz`,
+SHA256 `f12d898c799f7c5078fb774729c00c065e273c46ba6745ae4e129368089622c3`.
+Adjacent `closed-mapping-scratch.md` records the exact target and restore
+command. Free disk was then **7,625,326,592 bytes**, above the unchanged 7 GiB
+admission threshold; all resources must be rechecked at the next launch.
 
 The `opt_design` crash workaround has a specific scope. The retained native
 2025.2 help log `/var/tmp/ventium-icfrontspan-pwropt-help.HMmw46/help2.log`
