@@ -447,13 +447,39 @@ Any observed task-limit rejection terminates the run even if the CPU remains
 busy. The independent result auditor cross-checks the profile, owner limits,
 every monitoring sample, sampled peak and close receipt; old receipts remain
 explicitly distinguishable as lacking this task monitoring. No live run was
-modified to bypass the old cap. Native profile probing and a new full-chip run
-are **pending**.
+modified to bypass the old cap. The new full-chip retry is still pending below.
 The next trial must again start with a new source freeze/project and full
-synthesis, never the aborted mapping state. Disk admission must also be restored:
-about 6 GiB is free, and
-this closed run retains about 2.4 GiB of disposable internal synthesis scratch;
-preserve sources, logs and receipts when pruning it.
+synthesis, never the aborted mapping state.
+
+Disk headroom was restored without losing the aborted run's diagnostics. The
+closed internal directory
+`build/rk_ao486_system/rk_ao486_system.runs/synth_1/.Xil/Vivado-3183016-AL-MS790S-U26`
+was archived in full as `routability-r2/closed-mapping-scratch.tar.gz` and
+verified against the original tree with `tar --diff` before its removal.
+The owner was terminal, the Vivado scope inactive, and no Vivado process
+remained. The original tree occupied **2,507,890,688 allocated bytes**; the
+archive occupies **339,185,664**, reclaiming **2,168,705,024 bytes net**
+(about 2.02 GiB) and restoring about 8 GiB free. The removed tree is recoverable
+from the archive, but must never become a future synthesis input. Frozen
+sources, top-level logs and receipts were not removed; the close/native-log
+hashes still match the table above. Archive SHA256:
+`c31e7bed11c07f835136af06a07b4bf3eab4142ffd6a1de3bfc59f979d96a1db`.
+
+The fresh-source native task-profile probe **passed** at
+`/home/yukidama/external/tmp/ventium-native-tasks-oct18.oNGVZM`.
+Owner `ventium-fresh-tasks-probe-oct18-r1.service`, invocation
+`038571a7fc834f12989a2237a1798ff4`, ran **05:42:48–05:44:35 EDT** (107 seconds),
+exiting zero. The actual scope had **TasksMax=128, MemoryMax=4 GiB,
+MemorySwapMax=1 GiB**; sampled task-limit and OOM events were zero. Both fresh
+native synthesis and the deliberately partial implementation through
+`opt_design` passed the exact completion-marker/log checks and serialized
+`general.maxThreads=2`, `-jobs 1`. The scope is now inactive and no native
+Vivado remains. This verifies the installed launch/profile path, not full-chip
+task headroom, routed timing, or FPGA acceptance. No old checkpoint was input.
+
+- Native probe log SHA256: `3d3fb46c4a36d0a818bb46cf35001f3dea772cd4deca8fc345b933d106f0bb1f`.
+- Unchanged probe Tcl SHA256: `83d109a2fd496185fac404a9bf1948b82a5d1709cf0e61171011f76cb636df0f`.
+- Updated resource guard SHA256: `4f74b4e382663cb13418543a22c8ec51ae09eed2a991a0e8cab8e87778730bbd`.
 
 The `opt_design` crash workaround has a specific scope. The retained native
 2025.2 help log `/var/tmp/ventium-icfrontspan-pwropt-help.HMmw46/help2.log`
