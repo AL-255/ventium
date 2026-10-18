@@ -514,6 +514,22 @@ project and synthesis run; neither r2's aborted state nor its archive is input.
 The whole-run eight-hour and APR 3 h 50 min limits are unchanged. Synthesis/APR
 completion, routed timing and physical acceptance remain unproven.
 
+While synthesis remains active, source-level inspection narrows the earlier
+eight-pin `no_clock` question without waiving it. In r3's generated
+`rk_ao486_bd_ps8_0/synth/rk_ao486_bd_ps8_0.v`, the four
+`emio_enet[0-3]_mdio_mdc`, two `emio_sdio[0-1]_clkout`, and two
+`emio_spi[0-1]_sclk_o` instance outputs are explicitly unconnected. Its XCI
+sets all eight corresponding `PSU__{ENET0..3,SD0..1,SPI0..1}__PERIPHERAL__ENABLE`
+values to `0`. This is consistent with the historical PS8 pin list, but is
+**not current routed-netlist coverage evidence**. If the final report again
+lists eight pins, check their exact identities and prove that none feeds a
+fabric clock, sequential endpoint or top-level port; a matching count alone
+does not qualify them. The live reporting/audit code remains unchanged and
+still rejects nonzero `no_clock`. No clock constraint or exception was added.
+
+- Generated PS wrapper SHA256: `a1f5dd59e3dff22c97c3586e2760c0f76173eac5ef1bb226cbcb38cf2b4e19fc`.
+- Generated PS XCI SHA256: `7cbc25e17748783b83916edf34202cf4cc10446cb55cdbafbee2829319d6946e`.
+
 The `opt_design` crash workaround has a specific scope. The retained native
 2025.2 help log `/var/tmp/ventium-icfrontspan-pwropt-help.HMmw46/help2.log`
 still matches SHA256
