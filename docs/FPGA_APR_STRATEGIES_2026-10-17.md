@@ -203,6 +203,26 @@ Implementation's 3 h 50 min limit expires at **02:54:25 EDT Oct18**; this includ
 placement, optimization and routing. Final routed timing, timing coverage,
 CDC/exception review and candidate hardware acceptance remain pending.
 
+### Strategy selection after the live result
+
+The current long-net placement experiment and prepared spread-placement trial
+address different observed risks. AMD describes its high net-delay strategy as
+penalizing long/high-fanout connections, while spread strategies distribute
+logic to reduce local congestion. These descriptions motivate experiments;
+they do not predict this design's timing gain.
+[AMD 2025.2 implementation strategy descriptions](https://docs.amd.com/r/2025.2-English/ug904-vivado-implementation/Implementation-Strategy-Descriptions).
+
+Do not describe r4 as an explicit **synthesis retiming** experiment: its native
+`GLOBAL_RETIMING` property is `auto`. AMD's version-matched synthesis guide
+states that `auto` does not perform retiming on non-Versal devices. If the long
+combinational paths remain after routing, explicit retiming is a possible later
+fresh trial, with native evidence of actual transformations and unchanged
+architectural/debug behavior required. It is **not enabled or queued here**.
+The same guide describes `AlternateRoutability` as reducing MUXF/carry use and
+warns that `LogicCompaction` can hurt timing; fewer occupied slices alone would
+not justify selecting it for the 40 MHz objective.
+[AMD 2025.2 synthesis settings](https://docs.amd.com/r/2025.2-English/ug901-vivado-synthesis/Using-Synthesis-Settings).
+
 ### Constraint and preservation preflight
 
 The actual generated synthesis script reads only the board `bitstream.xdc` /
