@@ -42,7 +42,7 @@ window peak reaches 90.37% despite much lower whole-chip routing utilization.
 | `performance-r2` | `PerformanceOptimized`, rebuilt hierarchy | Planned `ExtraNetDelay_high` / `AggressiveExplore` / `NoTimingRelaxation`; post-route `Explore` | Native synthesis succeeded; reporting-context guard stopped the run before APR. No timing result. |
 | `performance-r3` | Planned `PerformanceOptimized`, rebuilt hierarchy | Planned same performance APR | Stopped in 10.06 s before project creation: early interception of Vivado's lazily registered `wait_on_run` failed |
 | `performance-r4` | `PerformanceOptimized`, rebuilt hierarchy | `ExtraNetDelay_high` / `AggressiveExplore` / planned `NoTimingRelaxation`; planned post-route `Explore` | Stopped at the 3 h 50 min APR limit during physical optimization, before routing. No routed timing result. |
-| `routability-spread` | `AlternateRoutability`, rebuilt hierarchy | `AltSpreadLogic_medium` / `Explore` / `AlternateCLBRouting`; post-route `Explore` | Prepared, not launched |
+| `routability-spread` | `AlternateRoutability`, rebuilt hierarchy | `AltSpreadLogic_medium` / `Explore` / `AlternateCLBRouting`; post-route `Explore` | Prepared with two internal threads; first owner attempt refused RAM admission before source/project creation. No native full-chip run yet. |
 
 The first combination targets the measured long logic/routing path. The second
 tests a routing-oriented mapping and spread placement, if the first result
@@ -332,6 +332,19 @@ Final probe SHA256:
 - Native log: `9bdf6238e5d68485fc4fdf074117aa43366e721bc5f3bf734570f2bf6ee1c6e6`
 - Native synthesis script: `c701d1f3f45cb0528a6bdc24ededf1fadbcef3f1f18d425d5635fc413aca6cb5`
 - Native implementation script: `69378ecdd70283248805943f0d41bfc33719433c8059519c7b2adbc6be54c586`
+
+The next full trial was requested through
+`ventium-fresh-routability-oct18-r1.service` (invocation
+`6b8ff5be019244aaaa42848b16c4c06f`) at **03:07:57 EDT**, using
+`--strategy routability-spread --threads 2`. Its owner exited one at the
+existing RAM/swap admission assertion, before copying sources or starting
+Vivado. The requested `routability-r1` output does not exist. A post-exit sample
+showed 18,845,564 KiB available, below the required 18,874,368 KiB (18 GiB);
+swap was ample. This is an admission refusal, not a failed synthesis or an
+OOM. Full-build limits remain **16 GiB RAM / 6 GiB swap**, with the same
+reserves and deadlines. Do not repeatedly start owners against marginal
+headroom; remeasure before another fresh attempt. The user has been asked to
+free 1–2 GiB of unused application memory; no application was terminated.
 
 The `opt_design` crash workaround has a specific scope. The retained native
 2025.2 help log `/var/tmp/ventium-icfrontspan-pwropt-help.HMmw46/help2.log`
