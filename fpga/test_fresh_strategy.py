@@ -7,11 +7,37 @@ import tempfile
 import unittest
 
 from run_fresh_strategy import (source_inventory, stage_deadline, validate_native_synth,
-    IMPL_LIMIT, task_policy, task_pressure, check_scope_limits, GIB)
+    IMPL_LIMIT, task_policy, task_pressure, check_scope_limits, memory_policy, resource_stop, GIB)
 from test_audit_fresh_strategy import SCRIPT, PROPS
 
 
 class FreshTests(unittest.TestCase):
+    def test_memory_profiles_keep_fixed_caps_and_reserves(self):
+        for name, ram in (('standard16', 16), ('serial20', 20)):
+            self.assertEqual(memory_policy(name, 1), (ram, 6))
+            limits = dict(MemoryMax=str(ram*GIB), MemorySwapMax=str(6*GIB), TasksMax='48')
+            self.assertEqual(check_scope_limits(limits, 48, name), limits)
+            with self.assertRaises(ValueError):
+                check_scope_limits({**limits, 'MemoryMax':str((ram+1)*GIB)}, 48, name)
+            resources = dict(MemAvailable=2*GIB, SwapFree=2*GIB)
+            events = dict(oom='0', oom_kill='0')
+            def stop(**kw):
+                args = dict(ram=ram*GIB, swap=5*GIB, resources=resources, free=4*GIB,
+                    events=events, limit_hit=False, ram_gib=ram, swap_gib=6)
+                args.update(kw)
+                return resource_stop(**args)
+            self.assertIsNone(stop())
+            self.assertEqual(stop(swap=5*GIB+1), 'combined memory early stop')
+            self.assertEqual(stop(free=4*GIB-1), '4 GiB disk reserve')
+            for key in resources:
+                self.assertEqual(stop(resources={**resources, key:2*GIB-1}), '2 GiB host RAM/swap reserve')
+            self.assertEqual(stop(events={**events, 'oom':'1'}), 'scope OOM')
+            self.assertEqual(stop(events={**events, 'oom_kill':'1'}), 'scope OOM')
+            self.assertEqual(stop(limit_hit=True), 'scope task limit')
+        for name, threads in (('serial20', 2), ('unbounded', 1), (None, 1), (True, 1), ('serial20', True)):
+            with self.assertRaises(ValueError): memory_policy(name, threads)
+        with self.assertRaises(ValueError): check_scope_limits({}, 128, 'serial20')
+
     def test_task_profiles_are_fixed_and_limits_are_rechecked(self):
         for threads, profile, limit in ((1, 'serial', 48), (2, 'parallel2', 128)):
             self.assertEqual(task_policy(threads), (profile, limit))

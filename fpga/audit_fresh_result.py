@@ -146,14 +146,35 @@ def final_reports(build):
 
 
 def audit_task_monitoring(run, started, closed):
-    fields = {'task_monitoring', 'task_profile', 'tasks_max'}
-    if not fields.intersection(started) and 'VENTIUM_VIVADO_TASK_PROFILE' not in started.get('env', {}):
+    fields = {'task_monitoring', 'task_profile', 'tasks_max', 'memory_profile'}
+    if (not fields.intersection(started) and not fields.intersection(closed) and
+        'VENTIUM_VIVADO_TASK_PROFILE' not in started.get('env', {})):
         return None  # Historical receipts did not record task events.
     threads = started.get('tool_threads')
     if type(threads) is not int or threads not in (1, 2):
         raise ValueError('invalid task-profile thread count')
     profile, maximum = ('serial', 48) if threads == 1 else ('parallel2', 128)
-    limits = dict(MemoryMax=str(16*1024**3), MemorySwapMax=str(6*1024**3), TasksMax=str(maximum))
+    memory_profile = started.get('memory_profile', 'standard16')
+    if not isinstance(memory_profile, str) or memory_profile not in ('standard16', 'serial20'):
+        raise ValueError('invalid memory profile')
+    if memory_profile == 'serial20' and threads != 1:
+        raise ValueError('serial20 requires one internal thread')
+    ram_gib, swap_gib, gib = (20 if memory_profile == 'serial20' else 16), 6, 1024**3
+    named_memory = 'memory_profile' in started or 'memory_profile' in closed
+    if named_memory:
+        expected = dict(memory_max=ram_gib*gib, swap_max=swap_gib*gib,
+                        combined_limit=(ram_gib+swap_gib-1)*gib)
+        if (started.get('memory_profile') != memory_profile or
+            closed.get('memory_profile') != memory_profile or
+            any(type(started.get(k)) is not int or started[k] != v for k,v in expected.items()) or
+            started.get('env', {}).get('VENTIUM_VIVADO_MEMORY_MAX') != f'{ram_gib}G' or
+            started.get('env', {}).get('VENTIUM_VIVADO_MEMORY_SWAP_MAX') != f'{swap_gib}G'):
+            raise ValueError('named memory-profile contract mismatch')
+        admission = started.get('host', {})
+        for key, reserve in (('MemAvailable', (ram_gib+2)*gib), ('SwapFree', (swap_gib+4)*gib)):
+            if type(admission.get(key)) is not int or admission[key] <= reserve:
+                raise ValueError('memory admission reserve missing')
+    limits = dict(MemoryMax=str(ram_gib*gib), MemorySwapMax=str(swap_gib*gib), TasksMax=str(maximum))
     if (started.get('task_monitoring') is not True or started.get('task_profile') != profile or
         type(started.get('tasks_max')) is not int or started['tasks_max'] != maximum or
         started.get('env', {}).get('VENTIUM_VIVADO_TASK_PROFILE') != profile or
@@ -165,6 +186,17 @@ def audit_task_monitoring(run, started, closed):
     if not samples:
         raise ValueError('missing task monitoring samples')
     for row in samples:
+        if named_memory:
+            if any(type(row.get(k)) is not int or row[k] < 0 for k in ('memory', 'swap', 'disk_free')):
+                raise ValueError('invalid memory monitor sample')
+            resources, events = row.get('host', {}), row.get('events', {})
+            if ('reason' not in row or row['reason'] is not None or row['disk_free'] < 4*gib or
+                row['memory']+row['swap'] > (ram_gib+swap_gib-1)*gib or
+                row['swap'] > swap_gib*gib or
+                any(type(resources.get(k)) is not int or resources[k] < 2*gib
+                    for k in ('MemAvailable', 'SwapFree')) or
+                any(events.get(k) != '0' for k in ('oom', 'oom_kill'))):
+                raise ValueError('memory monitor violated safety reserve')
         tasks, events = row.get('tasks'), row.get('task_events')
         if (row.get('limits') != limits or type(tasks) is not int or not 0 <= tasks <= maximum or
             not isinstance(events, dict) or 'max' not in events or
@@ -174,7 +206,7 @@ def audit_task_monitoring(run, started, closed):
     if (peak <= 0 or type(closed.get('peak_tasks_sampled')) is not int or closed['peak_tasks_sampled'] != peak or
         type(closed.get('task_limit_events')) is not int or closed['task_limit_events'] != 0):
         raise ValueError('task close receipt disagrees with sampled evidence')
-    return dict(profile=profile, tasks_max=maximum, sampled_peak=peak,
+    return dict(profile=profile, memory_profile=memory_profile, tasks_max=maximum, sampled_peak=peak,
                 samples=len(samples), observed_limit_rejections=0)
 
 

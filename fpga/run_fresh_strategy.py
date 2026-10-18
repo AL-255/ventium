@@ -25,7 +25,9 @@ CLOCK_HASHES = {
     'ven_programmable_clock.v': 'cea6e80e4ca1240bfb2b1d3920c869458e21e30f19aa96fe77743be86109d2e9',
 }
 STRATEGIES = ('performance-netdelay', 'routability-spread', 'performance-retime-bounded')
-RAM_GIB, SWAP_GIB = 16, 6
+# Fixed reviewed envelopes, not arbitrary numeric overrides. The larger one is
+# serial-only and remains inside build_scope.sh's existing 20 GiB RAM ceiling.
+MEMORY_PROFILES = {'standard16': (16, 6), 'serial20': (20, 6)}
 WHOLE_LIMIT, IMPL_LIMIT = 8*3600, 3*3600+50*60
 
 
@@ -106,8 +108,29 @@ def task_policy(threads):
     return ('serial', 48) if threads == 1 else ('parallel2', 128)
 
 
-def check_scope_limits(current, tasks_max):
-    expected = dict(MemoryMax=str(RAM_GIB*GIB), MemorySwapMax=str(SWAP_GIB*GIB),
+def memory_policy(profile, threads):
+    task_policy(threads)
+    if not isinstance(profile, str) or profile not in MEMORY_PROFILES:
+        raise ValueError('unsupported memory profile')
+    if profile == 'serial20' and threads != 1:
+        raise ValueError('serial20 requires one internal thread')
+    return MEMORY_PROFILES[profile]
+
+
+def resource_stop(ram, swap, resources, free, events, limit_hit, ram_gib, swap_gib):
+    if free < 4*GIB: return '4 GiB disk reserve'
+    if min(resources.values()) < 2*GIB: return '2 GiB host RAM/swap reserve'
+    if ram+swap > (ram_gib+swap_gib-1)*GIB: return 'combined memory early stop'
+    if int(events['oom']) or int(events['oom_kill']): return 'scope OOM'
+    if limit_hit: return 'scope task limit'
+    return None
+
+
+def check_scope_limits(current, tasks_max, memory_profile='standard16'):
+    if type(tasks_max) is not int or tasks_max not in (48, 128):
+        raise ValueError('unsupported task limit')
+    ram_gib, swap_gib = memory_policy(memory_profile, 1 if tasks_max == 48 else 2)
+    expected = dict(MemoryMax=str(ram_gib*GIB), MemorySwapMax=str(swap_gib*GIB),
                     TasksMax=str(tasks_max))
     if any(current.get(key) != value for key, value in expected.items()):
         raise ValueError('live resource limits differ from launch contract')
@@ -139,8 +162,11 @@ def main():
     ap.add_argument('--output', type=Path, required=True)
     ap.add_argument('--threads', type=int, choices=(1, 2), default=1,
                     help='internal tool threads; always one Vivado family and -jobs 1')
+    ap.add_argument('--memory-profile', choices=MEMORY_PROFILES, default='standard16',
+                    help='fixed RAM/swap envelope; serial20 requires one internal thread')
     args = ap.parse_args()
     task_profile, tasks_max = task_policy(args.threads)
+    ram_gib, swap_gib = memory_policy(args.memory_profile, args.threads)
     assert __debug__ and os.environ['TMPDIR'] == str(SCRATCH)
     assert os.environ.get('INVOCATION_ID'), 'use a retained systemd owner'
     dest = args.output.resolve()
@@ -149,14 +175,14 @@ def main():
     assert os.access(SCRATCH, os.W_OK)
     assert scope()['ActiveState'] in ('inactive', 'failed')
     assert subprocess.run(['pgrep', '-x', 'vivado'], stdout=subprocess.DEVNULL).returncode == 1
-    assert host()['MemAvailable'] > (RAM_GIB+2)*GIB and host()['SwapFree'] > (SWAP_GIB+4)*GIB
+    assert host()['MemAvailable'] > (ram_gib+2)*GIB and host()['SwapFree'] > (swap_gib+4)*GIB
     assert shutil.disk_usage(SCRATCH).free > 7*GIB
     pins = prepare(dest)
     (dest/'tool-tmp').mkdir()
     source = dest/'source'
     env = {k:v for k,v in os.environ.items() if not k.startswith(('VEN_', 'VENTIUM_', 'TB_', 'AXI_'))}
     env.update(TMPDIR=str(dest/'tool-tmp'), VIVADO_BIN='/tools/Xilinx/2025.2/Vivado/bin/vivado',
-        VENTIUM_VIVADO_MEMORY_MAX=f'{RAM_GIB}G', VENTIUM_VIVADO_MEMORY_SWAP_MAX=f'{SWAP_GIB}G',
+        VENTIUM_VIVADO_MEMORY_MAX=f'{ram_gib}G', VENTIUM_VIVADO_MEMORY_SWAP_MAX=f'{swap_gib}G',
         VENTIUM_VIVADO_TASK_PROFILE=task_profile,
         VENTIUM_VIVADO_LOCK_DIR=str(SCRATCH), VEN_FPGA_JOBS='1', VEN_FPGA_CORE_MHZ='40',
         VEN_FPGA_BUILD_PROFILE='balanced', VEN_FPGA_SKIP_PRESET='1',
@@ -171,7 +197,8 @@ def main():
     save(dest, 'started.json', dict(strategy=args.strategy, command=command, pins=pins,
         invocation=os.environ['INVOCATION_ID'], host=host(), disk_free=shutil.disk_usage(dest).free,
         env={k:v for k,v in env.items() if k.startswith(('VEN_', 'VENTIUM_')) or k == 'TMPDIR'},
-        memory_max=RAM_GIB*GIB, swap_max=SWAP_GIB*GIB, whole_limit_seconds=WHOLE_LIMIT,
+        memory_profile=args.memory_profile, memory_max=ram_gib*GIB, swap_max=swap_gib*GIB,
+        combined_limit=(ram_gib+swap_gib-1)*GIB, whole_limit_seconds=WHOLE_LIMIT,
         task_profile=task_profile, tasks_max=tasks_max, task_monitoring=True,
         implementation_limit_seconds=IMPL_LIMIT, prior_checkpoint_inputs=[],
         fresh_synthesis=True, tool_threads=args.threads, deployment=False, gameplay_ipc=None))
@@ -197,12 +224,12 @@ def main():
                             try: cmd = Path('/proc', pid, 'cmdline').read_bytes()
                             except FileNotFoundError: continue
                             if str(dest/'native.log').encode() in cmd:
-                                check_scope_limits(current, tasks_max)
+                                check_scope_limits(current, tasks_max, args.memory_profile)
                                 owner = current
                                 break
                     if owner:
                         assert current['InvocationID'] == owner['InvocationID']
-                        limits = check_scope_limits(current, tasks_max)
+                        limits = check_scope_limits(current, tasks_max, args.memory_profile)
                         pressure = task_pressure((group/'pids.current').read_text(),
                             (group/'pids.events').read_text(), tasks_max)
                         peak_tasks_sampled = max(peak_tasks_sampled, pressure['current'])
@@ -212,11 +239,8 @@ def main():
                         events = dict(r.split() for r in (group/'memory.events').read_text().splitlines())
                         peak_ram, peak_swap = max(peak_ram, ram), max(peak_swap, swap)
                         resources, free = host(), shutil.disk_usage(dest).free
-                        if free < 4*GIB: reason = '4 GiB disk reserve'
-                        elif min(resources.values()) < 2*GIB: reason = '2 GiB host RAM/swap reserve'
-                        elif ram+swap > (RAM_GIB+SWAP_GIB-1)*GIB: reason = 'combined memory early stop'
-                        elif int(events['oom']) or int(events['oom_kill']): reason = 'scope OOM'
-                        elif pressure['limit_hit']: reason = 'scope task limit'
+                        reason = resource_stop(ram, swap, resources, free, events,
+                            pressure['limit_hit'], ram_gib, swap_gib)
                         watch.write(json.dumps(dict(elapsed=time.monotonic()-start, memory=ram,
                             swap=swap, events=events, host=resources, disk_free=free, reason=reason,
                             limits=limits, tasks=pressure['current'], task_events=pressure['events']))+'\n')
@@ -262,6 +286,7 @@ def main():
     result = dict(completed=measurements is not None and not failure, native_exit=code,
         reason=reason, failure=failure, strategy=args.strategy, elapsed=time.monotonic()-start,
         inputs_unchanged=unchanged, owner=owner, peak_ram=peak_ram, peak_swap=peak_swap,
+        memory_profile=args.memory_profile,
         task_profile=task_profile, tasks_max=tasks_max, peak_tasks_sampled=peak_tasks_sampled,
         task_limit_events=task_limit_events,
         native_synth=native_synth, measurements=measurements,

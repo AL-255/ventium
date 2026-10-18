@@ -23,6 +23,53 @@ DRC = 'Design State : Fully Routed\n| Warning |\n'
 
 
 class ResultTests(unittest.TestCase):
+    def test_named_memory_profiles_require_admission_and_runtime_evidence(self):
+        gib = 1024**3
+        for name, ram in (('standard16', 16), ('serial20', 20)):
+            with self.subTest(profile=name), tempfile.TemporaryDirectory(prefix='fresh-memory-audit-') as td:
+                run = Path(td)
+                with self.assertRaises(ValueError):
+                    audit_task_monitoring(run, {}, {'memory_profile':name})
+                limits = dict(MemoryMax=str(ram*gib), MemorySwapMax=str(6*gib), TasksMax='48')
+                started = dict(memory_profile=name, memory_max=ram*gib, swap_max=6*gib,
+                    combined_limit=(ram+5)*gib, tool_threads=1, task_monitoring=True,
+                    task_profile='serial', tasks_max=48,
+                    host=dict(MemAvailable=(ram+3)*gib, SwapFree=11*gib),
+                    env=dict(VENTIUM_VIVADO_TASK_PROFILE='serial',
+                        VENTIUM_VIVADO_MEMORY_MAX=f'{ram}G', VENTIUM_VIVADO_MEMORY_SWAP_MAX='6G'))
+                closed = dict(memory_profile=name, task_profile='serial', tasks_max=48,
+                    owner=limits, peak_tasks_sampled=27, task_limit_events=0)
+                sample = dict(memory=ram*gib, swap=5*gib, disk_free=4*gib,
+                    host=dict(MemAvailable=2*gib, SwapFree=2*gib), events=dict(oom='0', oom_kill='0'),
+                    reason=None, tasks=27, task_events={'max':0}, limits=limits)
+                def write(row): (run/'watch.jsonl').write_text(json.dumps(row)+'\n')
+                write(sample)
+                self.assertEqual(audit_task_monitoring(run, started, closed)['memory_profile'], name)
+                for key, value in (('memory_profile', 'unlimited'), ('memory_max', 21*gib),
+                                   ('swap_max', 8*gib), ('combined_limit', (ram+6)*gib),
+                                   ('memory_max', True), ('tool_threads', 2),
+                                   ('host', {**started['host'], 'MemAvailable':(ram+2)*gib}),
+                                   ('host', {**started['host'], 'SwapFree':10*gib}),
+                                   ('env', {**started['env'], 'VENTIUM_VIVADO_MEMORY_MAX':'max'})):
+                    with self.subTest(key=key, value=value), self.assertRaises(ValueError):
+                        audit_task_monitoring(run, {**started, key:value}, closed)
+                for bad_closed in ({**closed, 'memory_profile':'unlimited'},
+                                   {k:v for k,v in closed.items() if k != 'memory_profile'},
+                                   {**closed, 'owner':{**limits, 'MemoryMax':'max'}}):
+                    with self.assertRaises(ValueError): audit_task_monitoring(run, started, bad_closed)
+                for key, value in (('memory', True), ('swap', 5*gib+1), ('disk_free', 4*gib-1),
+                                   ('host', {'MemAvailable':2*gib-1, 'SwapFree':2*gib}),
+                                   ('host', {'MemAvailable':2*gib, 'SwapFree':2*gib-1}),
+                                   ('events', {'oom':'1', 'oom_kill':'0'}),
+                                   ('events', {'oom':'0', 'oom_kill':'1'}),
+                                   ('reason', 'combined memory early stop')):
+                    write({**sample, key:value})
+                    with self.subTest(key=key, value=value), self.assertRaises(ValueError):
+                        audit_task_monitoring(run, started, closed)
+                for absent in ('memory', 'swap', 'reason', 'events', 'host', 'disk_free'):
+                    write({k:v for k,v in sample.items() if k != absent})
+                    with self.assertRaises(ValueError): audit_task_monitoring(run, started, closed)
+
     def test_task_monitoring_requires_consistent_independent_evidence(self):
         with tempfile.TemporaryDirectory(prefix='fresh-task-audit-') as td:
             run = Path(td)
