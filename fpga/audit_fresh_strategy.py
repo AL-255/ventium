@@ -30,8 +30,10 @@ def audit_threads(script, threads=1):
 
 def audit_synth(script, properties, strategy, threads=1):
     audit_threads(script, threads)
-    directives = {'performance-netdelay': 'PerformanceOptimized', 'routability-spread': 'AlternateRoutability'}
+    directives = {'performance-netdelay': 'PerformanceOptimized', 'routability-spread': 'AlternateRoutability',
+                  'performance-retime-bounded': 'PerformanceOptimized'}
     directive = directives[strategy]
+    retiming = 'on' if strategy == 'performance-retime-bounded' else 'auto'
     commands = re.findall(r'^synth_design [^\n]+', script, re.M)
     if len(commands) != 1:
         raise ValueError('missing/ambiguous native synth_design')
@@ -42,6 +44,11 @@ def audit_synth(script, properties, strategy, threads=1):
             raise ValueError('native option mismatch: '+flag)
     if any(a == '-no_timing_driven' or a.startswith('-incremental') for a in args):
         raise ValueError('timing-disabled/incremental native synthesis')
+    if any(a in ('-retiming', '-no_retiming') for a in args):
+        raise ValueError('legacy retiming option not admitted')
+    if '-global_retiming' in args or retiming == 'on':
+        if args.count('-global_retiming') != 1 or args[args.index('-global_retiming')+1:args.index('-global_retiming')+2] != [retiming]:
+            raise ValueError('native retiming option mismatch')
     if '-flatten_hierarchy' in args:
         if args.count('-flatten_hierarchy') != 1 or args[args.index('-flatten_hierarchy')+1:args.index('-flatten_hierarchy')+2] != ['rebuilt']:
             raise ValueError('explicit hierarchy option mismatch')
@@ -51,6 +58,7 @@ def audit_synth(script, properties, strategy, threads=1):
         'INCREMENTAL_CHECKPOINT': '',
         'STEPS.SYNTH_DESIGN.ARGS.FLATTEN_HIERARCHY': 'rebuilt',
         'STEPS.SYNTH_DESIGN.ARGS.DIRECTIVE': directive,
+        'STEPS.SYNTH_DESIGN.ARGS.GLOBAL_RETIMING': retiming,
         'STEPS.SYNTH_DESIGN.ARGS.MORE OPTIONS': '',
     }
     for name, value in expected.items():
@@ -62,6 +70,35 @@ def audit_synth(script, properties, strategy, threads=1):
         raise ValueError('checkpoint input before native synthesis')
     return dict(command=commands[0], properties=expected, hierarchy_default_omitted='-flatten_hierarchy' not in args,
                 timing_driven=True, prior_checkpoint_input=False, configured_threads=threads)
+
+
+def audit_impl(script, properties, strategy, threads=1):
+    """Check the emitted operations, not merely the strategy label."""
+    audit_threads(script, threads)
+    configs = {
+        'performance-netdelay': ('ExtraNetDelay_high', 'NoTimingRelaxation',
+            ['-directive AggressiveExplore', '-directive Explore']),
+        'routability-spread': ('AltSpreadLogic_medium', 'AlternateCLBRouting',
+            ['-directive Explore', '-directive Explore']),
+        'performance-retime-bounded': ('AltSpreadLogic_medium', 'NoTimingRelaxation',
+            ['-fanout_opt -placement_opt -restruct_opt -equ_drivers_opt',
+             '-placement_opt -routing_opt -restruct_opt -hold_fix']),
+    }
+    place, route, phys = configs[strategy]
+    for command, expected in (('opt_design', ['-directive RuntimeOptimized']),
+                              ('place_design', ['-directive '+place]),
+                              ('route_design', ['-directive '+route]), ('phys_opt_design', phys)):
+        actual = re.findall(r'^[ \t]*'+command+r'[ \t]+([^\r\n]+)', script, re.M)
+        if [shlex.split(a) for a in actual] != [shlex.split(a) for a in expected]:
+            raise ValueError('native implementation command mismatch: '+command)
+    for step, options in zip(('PHYS_OPT_DESIGN', 'POST_ROUTE_PHYS_OPT_DESIGN'), phys):
+        if property_value(properties, f'STEPS.{step}.IS_ENABLED') not in ('1', 'true'):
+            raise ValueError('physical optimization disabled: '+step)
+        if strategy == 'performance-retime-bounded':
+            if property_value(properties, f'STEPS.{step}.ARGS.DIRECTIVE') != 'Default' or \
+               property_value(properties, f'STEPS.{step}.ARGS.MORE OPTIONS') != options:
+                raise ValueError('bounded physical optimization property mismatch: '+step)
+    return dict(strategy=strategy, physical_operations=phys, completion_verified=False)
 
 
 def main():

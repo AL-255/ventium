@@ -134,6 +134,20 @@ class ResultTests(unittest.TestCase):
                     with self.assertRaises(FileNotFoundError): audit_closed(run)
                 script.write_text(SCRIPT)
                 (run/'started.json').write_text(json.dumps(started))
+                # The new bounded strategy also requires the exact native
+                # operation set; a successful receipt alone cannot qualify it.
+                bounded = {**started, 'strategy':'performance-retime-bounded', 'tool_threads':1}
+                (run/'started.json').write_text(json.dumps(bounded))
+                (run/'native.log').write_text('FRESH-STRATEGY-COMPLETE performance-retime-bounded\n')
+                script.write_text(SCRIPT.rstrip()+' -global_retiming on\n')
+                (build/'synth_1-properties.rpt').write_text(PROPS.replace('enum false auto', 'enum false on'))
+                impl_script.write_text('set_param general.maxThreads 1\n')
+                with self.assertRaisesRegex(ValueError, 'implementation command mismatch'):
+                    audit_closed(run)
+                script.write_text(SCRIPT)
+                (build/'synth_1-properties.rpt').write_text(PROPS)
+                (run/'started.json').write_text(json.dumps(started))
+                (run/'native.log').write_text('FRESH-STRATEGY-COMPLETE performance-netdelay\n')
                 for key, value in (('native_exit', 1), ('reason', 'scope OOM'),
                                    ('inputs_unchanged', False), ('failure', 'audit: other failure')):
                     (run/'closed.json').write_text(json.dumps({**closed, key:value}))

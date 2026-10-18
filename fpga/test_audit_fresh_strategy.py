@@ -1,5 +1,5 @@
 import unittest
-from audit_fresh_strategy import audit_synth, audit_threads, property_value
+from audit_fresh_strategy import audit_synth, audit_impl, audit_threads, property_value
 
 SCRIPT = '''set_param general.maxThreads 1
 set_property ip_cache_permissions disable [current_project]
@@ -9,11 +9,41 @@ PROPS = '''AUTO_INCREMENTAL_CHECKPOINT bool false 0
 INCREMENTAL_CHECKPOINT file false
 STEPS.SYNTH_DESIGN.ARGS.FLATTEN_HIERARCHY enum false rebuilt
 STEPS.SYNTH_DESIGN.ARGS.DIRECTIVE enum false PerformanceOptimized
+STEPS.SYNTH_DESIGN.ARGS.GLOBAL_RETIMING enum false auto
 STEPS.SYNTH_DESIGN.ARGS.MORE OPTIONS string false
 '''
 
 
 class AuditTests(unittest.TestCase):
+    def test_explicit_synthesis_retiming_requires_native_and_property_evidence(self):
+        props = PROPS.replace('enum false auto', 'enum false on')
+        script = SCRIPT.rstrip()+' -global_retiming on\n'
+        audit_synth(script, props, 'performance-retime-bounded')
+        for bad_script, bad_props in ((SCRIPT, props), (script, PROPS),
+                (script.replace('retiming on', 'retiming off'), props),
+                (script.rstrip()+' -global_retiming on\n', props),
+                (SCRIPT.rstrip()+' -retiming\n', props)):
+            with self.assertRaises(ValueError): audit_synth(bad_script, bad_props, 'performance-retime-bounded')
+        with self.assertRaises(ValueError): audit_synth(script, props, 'performance-netdelay')
+
+    def test_bounded_physical_commands_exclude_directives_and_repeated_passes(self):
+        pre = '-fanout_opt -placement_opt -restruct_opt -equ_drivers_opt'
+        post = '-placement_opt -routing_opt -restruct_opt -hold_fix'
+        script = ('set_param general.maxThreads 1\nopt_design -directive RuntimeOptimized\n'
+                  'place_design -directive AltSpreadLogic_medium\n'
+                  f'phys_opt_design {pre}\nroute_design -directive NoTimingRelaxation\nphys_opt_design {post}\n')
+        props = ''.join(f'STEPS.{step}.IS_ENABLED bool false 1\n'
+                        f'STEPS.{step}.ARGS.DIRECTIVE enum false Default\n'
+                        f'STEPS.{step}.ARGS.MORE OPTIONS string false {opts}\n'
+                        for step, opts in (('PHYS_OPT_DESIGN', pre), ('POST_ROUTE_PHYS_OPT_DESIGN', post)))
+        audit_impl(script, props, 'performance-retime-bounded')
+        for bad in (script.replace(pre, '-directive Default '+pre), script+f'phys_opt_design {pre}\n',
+                    script.replace('-hold_fix', ''), script.replace('NoTimingRelaxation', 'Default')):
+            with self.assertRaises(ValueError): audit_impl(bad, props, 'performance-retime-bounded')
+        for bad in (props.replace('Default', 'Explore'), props.replace('bool false 1', 'bool false 0'),
+                    props.replace(pre, '-retime')):
+            with self.assertRaises(ValueError): audit_impl(script, bad, 'performance-retime-bounded')
+
     def test_internal_thread_cap_is_explicit_and_unique(self):
         for threads in (1, 2):
             script = SCRIPT.replace('maxThreads 1', f'maxThreads {threads}')

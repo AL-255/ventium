@@ -15,7 +15,7 @@ import time
 
 from run_apr_trial import GIB, REPO, SCRATCH, SCOPE, host, scope, sha, validate_timing
 from prepare_programmable_clock_repair import adapt
-from audit_fresh_strategy import audit_synth
+from audit_fresh_strategy import audit_synth, audit_impl
 
 ANCESTOR = SCRATCH/'ventium-fprem-sequence.iSZ9BAj4/programmable-clock-r3'
 PREPARED_SHA = '5308f8044f35b387e833e1b62a52ec7605bb3a5e157096d9327b638d4b659a54'
@@ -24,7 +24,7 @@ CLOCK_HASHES = {
     'ven_pll_ctrl.sv': '02f1cd73c2d8a13181dc605a89850e0513c84a9fb2c510784ab5b56e830a1237',
     'ven_programmable_clock.v': 'cea6e80e4ca1240bfb2b1d3920c869458e21e30f19aa96fe77743be86109d2e9',
 }
-STRATEGIES = ('performance-netdelay', 'routability-spread')
+STRATEGIES = ('performance-netdelay', 'routability-spread', 'performance-retime-bounded')
 RAM_GIB, SWAP_GIB = 16, 6
 WHOLE_LIMIT, IMPL_LIMIT = 8*3600, 3*3600+50*60
 
@@ -71,7 +71,7 @@ def prepare(dest):
     pins = {str(source/n): h for n, h in after.items()}
     # Pin launch dependencies too, including imported helper modules.
     for name in ('run_fresh_strategy.py', 'fresh_strategy.tcl', 'fresh_synth_post.tcl', 'fresh_synth_evidence.tcl',
-                 'fresh_route_pre.tcl', 'fresh_reports.tcl', 'run_apr_trial.py',
+                 'fresh_route_pre.tcl', 'fresh_reports.tcl', 'fresh_bounded_phys.tcl', 'run_apr_trial.py',
                  'prepare_programmable_clock_repair.py', 'prepare_programmable_clock.py',
                  'audit_clock_reuse.py', 'audit_fresh_strategy.py', 'run_vivado_exclusive.sh'):
         pins[str(REPO/'fpga'/name)] = sha(REPO/'fpga'/name)
@@ -252,6 +252,8 @@ def main():
         assert 'FRESH-STRATEGY-COMPLETE '+args.strategy in (dest/'native.log').read_text()
         native_synth = validate_native_synth((dest/'build/rk_ao486_system/rk_ao486_system.runs/synth_1/rk_ao486_bd_wrapper.tcl').read_text(), args.strategy,
             (dest/'build/synth_1-properties.rpt').read_text(), args.threads)
+        audit_impl((dest/'build/rk_ao486_system/rk_ao486_system.runs/impl_1/rk_ao486_bd_wrapper.tcl').read_text(),
+            (dest/'build/impl_1-properties.rpt').read_text(), args.strategy, args.threads)
         measurements = validate_timing((dest/'build/timing.tsv').read_text())
         assert (dest/'build/fresh-routed.dcp').stat().st_size > 50_000_000
         assert (dest/'build/rk_ao486_system.bit.bin').stat().st_size > 10_000_000

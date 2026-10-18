@@ -9,7 +9,7 @@ import math
 from pathlib import Path
 import re
 
-from audit_fresh_strategy import audit_synth, audit_threads, property_value
+from audit_fresh_strategy import audit_synth, audit_impl, audit_threads, property_value
 from run_apr_trial import REPO, sha, validate_timing
 
 # Exact, reviewed reporting-only amendment for the already-running r2. These
@@ -220,6 +220,9 @@ def audit_closed(run):
         impl_script = build/'rk_ao486_system/rk_ao486_system.runs/impl_1/rk_ao486_bd_wrapper.tcl'
         audit_threads(impl_script.read_text(), threads)
     impl = (build/'impl_1-properties.rpt').read_text()
+    if started['strategy'] == 'performance-retime-bounded':
+        impl_script = build/'rk_ao486_system/rk_ao486_system.runs/impl_1/rk_ao486_bd_wrapper.tcl'
+        audit_impl(impl_script.read_text(), impl, started['strategy'], threads)
     if property_value(impl, 'AUTO_INCREMENTAL_CHECKPOINT') != '0' or property_value(impl, 'INCREMENTAL_CHECKPOINT'):
         raise ValueError('incremental implementation')
     result = final_reports(build)

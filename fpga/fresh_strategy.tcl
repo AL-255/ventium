@@ -2,7 +2,7 @@
 if {$argc != 4} {error "usage: strategy frozen-source new-output-directory internal-threads"}
 lassign $argv strategy frozen out tool_threads
 if {$tool_threads ni {1 2}} {error "only one or two internal threads supported"}
-if {$strategy ni {performance-netdelay routability-spread}} {error "unknown strategy"}
+if {$strategy ni {performance-netdelay routability-spread performance-retime-bounded}} {error "unknown strategy"}
 if {[version -short] ne "2025.2"} {error "Vivado 2025.2 required"}
 set out [file normalize $out]
 set frozen [file normalize $frozen]
@@ -10,6 +10,7 @@ if {[file exists $out]} {error "fresh output must not exist"}
 file mkdir $out
 set ::fresh_script_dir [file dirname [file normalize [info script]]]
 source [file join $::fresh_script_dir fresh_synth_evidence.tcl]
+source [file join $::fresh_script_dir fresh_bounded_phys.tcl]
 set ::env(VEN_FRESH_OUT) $out
 set_param general.maxThreads $tool_threads
 set ::fresh_launches {}
@@ -78,14 +79,17 @@ proc launch_runs {run args} {
             puts $f $path
         }
         close $f
-        set directive [expr {$::strategy eq "performance-netdelay" ? "PerformanceOptimized" : "AlternateRoutability"}]
+        set directive [expr {$::strategy eq "routability-spread" ? "AlternateRoutability" : "PerformanceOptimized"}]
+        set retiming [expr {$::strategy eq "performance-retime-bounded" ? "on" : "auto"}]
         set_property STEPS.SYNTH_DESIGN.ARGS.DIRECTIVE $directive $obj
+        set_property STEPS.SYNTH_DESIGN.ARGS.GLOBAL_RETIMING $retiming $obj
         set_property STEPS.SYNTH_DESIGN.ARGS.FLATTEN_HIERARCHY rebuilt $obj
         set_property -name {STEPS.SYNTH_DESIGN.ARGS.MORE OPTIONS} -value {} -objects $obj
         # Report via the owning project after wait_on_run, not the native
         # child where implementation-disabled XDCs disappear after synthesis.
         set_property STEPS.SYNTH_DESIGN.TCL.POST {} $obj
         if {[get_property STEPS.SYNTH_DESIGN.ARGS.DIRECTIVE $obj] ne $directive ||
+            [get_property STEPS.SYNTH_DESIGN.ARGS.GLOBAL_RETIMING $obj] ne $retiming ||
             [get_property {STEPS.SYNTH_DESIGN.ARGS.MORE OPTIONS} $obj] ne ""} {error "synthesis policy drift"}
     } else {
         # The platform flow already waits for synth_1 before this launch.
@@ -97,8 +101,10 @@ proc launch_runs {run args} {
         set_property STEPS.OPT_DESIGN.ARGS.DIRECTIVE RuntimeOptimized $obj
         if {$::strategy eq "performance-netdelay"} {
             set place ExtraNetDelay_high; set phys AggressiveExplore; set route NoTimingRelaxation
-        } else {
+        } elseif {$::strategy eq "routability-spread"} {
             set place AltSpreadLogic_medium; set phys Explore; set route AlternateCLBRouting
+        } else {
+            set place AltSpreadLogic_medium; set phys Default; set route NoTimingRelaxation
         }
         set_property STEPS.PLACE_DESIGN.ARGS.DIRECTIVE $place $obj
         set_property STEPS.PHYS_OPT_DESIGN.IS_ENABLED true $obj
@@ -106,6 +112,7 @@ proc launch_runs {run args} {
         set_property STEPS.ROUTE_DESIGN.ARGS.DIRECTIVE $route $obj
         set_property STEPS.POST_ROUTE_PHYS_OPT_DESIGN.IS_ENABLED true $obj
         set_property STEPS.POST_ROUTE_PHYS_OPT_DESIGN.ARGS.DIRECTIVE Explore $obj
+        if {$::strategy eq "performance-retime-bounded"} {fresh_bounded_phys $obj}
         set_property STEPS.ROUTE_DESIGN.TCL.PRE [file join $::fresh_script_dir fresh_route_pre.tcl] $obj
     }
     fresh_run $run
