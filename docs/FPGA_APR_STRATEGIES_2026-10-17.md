@@ -42,7 +42,7 @@ window peak reaches 90.37% despite much lower whole-chip routing utilization.
 | `performance-r2` | `PerformanceOptimized`, rebuilt hierarchy | Planned `ExtraNetDelay_high` / `AggressiveExplore` / `NoTimingRelaxation`; post-route `Explore` | Native synthesis succeeded; reporting-context guard stopped the run before APR. No timing result. |
 | `performance-r3` | Planned `PerformanceOptimized`, rebuilt hierarchy | Planned same performance APR | Stopped in 10.06 s before project creation: early interception of Vivado's lazily registered `wait_on_run` failed |
 | `performance-r4` | `PerformanceOptimized`, rebuilt hierarchy | `ExtraNetDelay_high` / `AggressiveExplore` / planned `NoTimingRelaxation`; planned post-route `Explore` | Stopped at the 3 h 50 min APR limit during physical optimization, before routing. No routed timing result. |
-| `routability-spread` | `AlternateRoutability`, rebuilt hierarchy | `AltSpreadLogic_medium` / `Explore` / `AlternateCLBRouting`; post-route `Explore` | Prepared with two internal threads; first owner attempt refused RAM admission before source/project creation. No native full-chip run yet. |
+| `routability-r2` | Planned `AlternateRoutability`, rebuilt hierarchy | Planned `AltSpreadLogic_medium` / `Explore` / `AlternateCLBRouting`; post-route `Explore` | Fresh source/project run launched with two internal threads after the first owner attempt refused RAM admission. Native results pending. |
 
 The first combination targets the measured long logic/routing path. The second
 tests a routing-oriented mapping and spread placement, if the first result
@@ -345,6 +345,19 @@ OOM. Full-build limits remain **16 GiB RAM / 6 GiB swap**, with the same
 reserves and deadlines. Do not repeatedly start owners against marginal
 headroom; remeasure before another fresh attempt. The user has been asked to
 free 1–2 GiB of unused application memory; no application was terminated.
+
+Headroom subsequently recovered, and the second owner attempt was admitted
+with **20,059,455,488 bytes available RAM**. Active fresh output:
+`/home/yukidama/external/tmp/ventium-fresh-strategies-oct17.67YRDIRh/routability-r2`.
+Owner `ventium-fresh-routability-oct18-r2.service`, invocation
+`79b1819f356547b2a611ed12fddd340d`; scope invocation
+`b3f9a83c91ca43f1a844c1fc355b1a9b`. Native Vivado was observed running after
+admission. The requested cap is **two internal threads / one native job**,
+with unchanged **16 GiB RAM / 6 GiB swap**, reserves, eight-hour whole-run
+limit and 3 h 50 min APR limit. The 200-file source closure, 159 defines,
+40 MHz core / 100 MHz AXI target and UV-fast `cycle_mode=1` profile remain
+unchanged. All launch pins were rechecked. No previous checkpoint is an input;
+no synthesis/APR timing or hardware acceptance result is claimed yet.
 
 The `opt_design` crash workaround has a specific scope. The retained native
 2025.2 help log `/var/tmp/ventium-icfrontspan-pwropt-help.HMmw46/help2.log`
