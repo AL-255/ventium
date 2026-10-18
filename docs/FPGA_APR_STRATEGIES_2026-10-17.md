@@ -371,6 +371,17 @@ Thus the root clock constraint is ingested during synthesis, not merely added
 by the post-synthesis reporting step. The completed-design clock-period and
 timing-coverage checks remain pending; these inputs alone do not prove closure.
 
+At approximately 28 minutes, the scope's `pids.events` reported `max 2` and
+`TasksCurrent=TasksMax=48`: two process/thread creation attempts encountered
+the task cap. The owning project, native synthesis parent and its two internal
+task workers were still present; parent CPU time continued advancing, with no
+native synthesis error observed. These helpers belong to the single build
+family, not independent/orphan builds. RAM/swap guards had no OOM events.
+Task-limit events are now included in live polling. The tiny two-thread probe
+did not establish full-chip task headroom; do not describe all resource limits
+as unpressured. No live guard, source or tool input was changed. Review this
+task-cap evidence before selecting the next fresh run's concurrency envelope.
+
 The `opt_design` crash workaround has a specific scope. The retained native
 2025.2 help log `/var/tmp/ventium-icfrontspan-pwropt-help.HMmw46/help2.log`
 still matches SHA256
