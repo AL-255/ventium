@@ -298,6 +298,15 @@ cells**. This includes 1,865 LUT-combining changes and 160 equivalent-driver
 rewirings. These are native transformation counts, not measured timing gains
 or final utilization. The pass reports **zero retiming transformations**.
 
+After detailed placement, the initialization of phase **4.1.1.1 BUFG
+Insertion** reported estimated WNS **−7.432 ns** and TNS **−265,969.749 ns**
+(`Physopt 32-619`, native `impl_1/runme.log`). This precedes the ongoing
+post-placement timing-optimization phase; it is neither a completed placement
+result nor routed timing. The summary supplies no path/clock-pair identity,
+so do not convert it to a claimed core fmax. The target remains **40 MHz core /
+100 MHz AXI**. The worker's own `.vdi` and `runme.log` agree with the top-level
+log on the current phase; the quiet interval is not just missing forwarding.
+
 Very-high-fanout optimization replicated core `state_reg[0]` ten times and
 L1/AXI `bypass_rst_m1_reg_rep__0_0` thirteen times. Another fanout pass replicated
 `state_reg[5]_rep__3_0` three times and `state_reg[1]_rep_0` nine times.
@@ -312,6 +321,14 @@ path or that removing the attribute is safe. Reconcile it with final paths and
 congestion before a narrowly scoped future experiment; preserve the historical
 AXI-trimming workaround until such an experiment is independently qualified.
 No attribute was changed in the live run.
+
+The same boundary also blocked **reset-net BUFG insertion**, not just driver
+replication: `Place 46-32` / `46-56` report one candidate, zero inserted buffers,
+and one netlist-edit failure for `peripheral_aresetn[0]`. This is another
+observed restriction, not evidence that bypassing it would close the critical
+setup path. A later implementation-only property experiment would need to
+retain the synthesis workaround and prove its exact affected scope; broad
+preservation removal is not justified by this log.
 
 ### Read-only board readiness during r4
 
