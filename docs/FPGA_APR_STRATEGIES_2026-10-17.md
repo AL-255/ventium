@@ -185,6 +185,29 @@ the cause of its poor timing. Leaf/net properties and skipped physical
 optimizations require native-result inspection before changing preservation.
 No preservation attribute or running-build input was changed by this review.
 
+### Read-only board readiness during r4
+
+At **2026-10-18 01:46 UTC** (Oct17 local), SSH and administrator authentication
+worked on `riguke@rk-xczu15eg-f.local`. FPGA manager state was `operating`, with
+no guest daemon, recorder or watcher found. Boot ID remained
+`2861e4e8-cd4c-48cd-9f44-7f7d8a991ebb`.
+
+The reserved-memory node has two address cells and two size cells. Its big-endian
+`reg` decodes to base **0x60000000**, size **0x10000000**; `no-map` is present,
+with no reusable/pool property. Privileged `/proc/iomem` reports
+`60000000-6fffffff : reserved`, with no overlapping System RAM interval. This
+confirms the DDR reservation for this boot, not the identity or acceptance of a
+future bitstream. No PL MMIO, programming, clock change or guest launch was done.
+
+Storage needs attention before new board runs: root had **181 MiB free** and
+`/dev/shm` only **43 MiB free (98% used)**. The privileged inventory confirms
+many old debug runs consume the scratch space; an unprivileged `du` undercounts
+root-owned directories. **Nothing was deleted.** Preserve the Oct17 Quake/Doom
+sealed evidence, pristine Win95 media and needed binaries; admit any cleanup by
+exact closed targets and verified host copies, not a broad directory removal.
+This preparation does not interrupt the live synthesis or establish candidate
+hardware acceptance.
+
 The r2 controller's original post-run parser incorrectly required the default
 `-flatten_hierarchy rebuilt` argument to be printed explicitly. Vivado omits it.
 Do **not** interrupt/restart a valid synthesis for this post-run parser bug or
