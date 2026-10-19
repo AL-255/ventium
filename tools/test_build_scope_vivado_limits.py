@@ -225,6 +225,14 @@ class VivadoLimitPolicyTests(unittest.TestCase):
             result = self.run_scope_has_cap(pids_max=maximum, task_cap="128")
             self.assertEqual(result.returncode, expected, result.stderr)
 
+    def test_serial_apr4_has_the_same_fixed_helper_cap(self):
+        for tasks in (None, '48', '128', 'max', '1000000'):
+            result, properties = self.run_scope(memory='20G', swap='6G',
+                task_profile='serial_apr4', tasks=tasks)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(properties, ['MemoryMax=20G', 'TasksMax=128',
+                'KillMode=control-group', 'MemorySwapMax=6G'])
+
     def test_oversized_and_huge_requests_are_visibly_clamped(self):
         result, properties = self.run_scope(memory="999999999999999999999G", swap="999999999999999999999G")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -364,6 +372,8 @@ class VivadoLimitPolicyTests(unittest.TestCase):
         cases = (("max", True, "serial", 48, 0), ("max", False, "serial", 48, 1),
                  (16 * 1024**3, True, "serial", 48, 1),
                  ("max", True, "parallel2", 128, 0), ("max", False, "parallel2", 128, 1),
+                 ("max", True, "serial_apr4", 128, 0), ("max", False, "serial_apr4", 128, 1),
+                 ("max", True, "serial_apr4", 129, 1),
                  ("max", True, "serial", 128, 1), ("max", True, "parallel2", 129, 1))
         for high, inherited_lock, task_profile, tasks, expected in cases:
             with self.subTest(memory_high=high, inherited_lock=inherited_lock, task_profile=task_profile, tasks=tasks):

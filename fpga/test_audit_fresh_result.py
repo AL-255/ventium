@@ -23,6 +23,41 @@ DRC = 'Design State : Fully Routed\n| Warning |\n'
 
 
 class ResultTests(unittest.TestCase):
+    def test_route_first_receipts_require_separate_stage_threads_and_fixed_caps(self):
+        gib = 1024**3
+        with tempfile.TemporaryDirectory(prefix='fresh-apr4-audit-') as td:
+            run = Path(td)
+            limits = dict(MemoryMax=str(20*gib), MemorySwapMax=str(6*gib), TasksMax='128')
+            started = dict(strategy='performance-route-first', tool_threads=1, implementation_threads=4,
+                memory_profile='serial20', memory_max=20*gib, swap_max=6*gib, combined_limit=25*gib,
+                task_monitoring=True, task_profile='serial_apr4', tasks_max=128,
+                host=dict(MemAvailable=23*gib, SwapFree=11*gib),
+                env=dict(VENTIUM_VIVADO_TASK_PROFILE='serial_apr4',
+                    VENTIUM_VIVADO_MEMORY_MAX='20G', VENTIUM_VIVADO_MEMORY_SWAP_MAX='6G'))
+            closed = dict(memory_profile='serial20', task_profile='serial_apr4', tasks_max=128,
+                implementation_threads=4, owner=limits, peak_tasks_sampled=60, task_limit_events=0)
+            sample = dict(memory=19*gib, swap=0, disk_free=5*gib, reason=None,
+                host=dict(MemAvailable=3*gib, SwapFree=9*gib), events=dict(oom='0', oom_kill='0'),
+                tasks=60, task_events={'max':0}, limits=limits)
+            (run/'watch.jsonl').write_text(json.dumps(sample)+'\n')
+            self.assertEqual(audit_task_monitoring(run, started, closed)['profile'], 'serial_apr4')
+            for key, value in (('tool_threads', 2), ('tool_threads', True), ('implementation_threads', 1),
+                    ('implementation_threads', '4'), ('implementation_threads', 4.0),
+                    ('strategy', 'performance-bounded'), ('memory_profile', 'standard16'),
+                    ('tasks_max', 256), ('task_profile', 'parallel2')):
+                with self.subTest(key=key), self.assertRaises(ValueError):
+                    audit_task_monitoring(run, {**started, key:value}, closed)
+            for side in ('started', 'closed'):
+                for value in (None, True, '4', 4.0, 1):
+                    bad = dict(started if side == 'started' else closed)
+                    if value is None: del bad['implementation_threads']
+                    else: bad['implementation_threads'] = value
+                    with self.subTest(side=side, value=value), self.assertRaises(ValueError):
+                        audit_task_monitoring(run, bad if side == 'started' else started,
+                            bad if side == 'closed' else closed)
+            with self.assertRaises(ValueError):
+                audit_task_monitoring(run, {'strategy':'performance-route-first'}, {})
+
     def test_named_memory_profiles_require_admission_and_runtime_evidence(self):
         gib = 1024**3
         for name, ram in (('standard16', 16), ('serial20', 20)):

@@ -20,8 +20,8 @@ def property_value(text, name):
 
 
 def audit_threads(script, threads=1):
-    if type(threads) is not int or threads not in (1, 2):
-        raise ValueError('only one or two internal threads supported')
+    if type(threads) is not int or threads not in (1, 2, 4):
+        raise ValueError('only one, two or four internal threads supported')
     values = re.findall(r'^[ \t]*set_param[ \t]+general\.maxThreads[ \t]+(\S+)[ \t]*$', script, re.M)
     if values != [str(threads)]:
         raise ValueError('native thread bound missing/ambiguous/mismatched')
@@ -30,12 +30,15 @@ def audit_threads(script, threads=1):
 
 def audit_synth(script, properties, strategy, threads=1):
     audit_threads(script, threads)
+    if threads not in (1, 2) or (strategy == 'performance-route-first' and threads != 1):
+        raise ValueError('unsupported synthesis thread count')
     directives = {'performance-netdelay': 'PerformanceOptimized', 'routability-spread': 'AlternateRoutability',
                   'performance-retime-bounded': 'PerformanceOptimized',
-                  'performance-bounded': 'PerformanceOptimized'}
+                  'performance-bounded': 'PerformanceOptimized',
+                  'performance-route-first': 'PerformanceOptimized'}
     directive = directives[strategy]
     retiming = 'on' if strategy == 'performance-retime-bounded' else 'auto'
-    if strategy == 'performance-bounded': retiming = 'off'
+    if strategy in ('performance-bounded', 'performance-route-first'): retiming = 'off'
     commands = re.findall(r'^synth_design [^\n]+', script, re.M)
     if len(commands) != 1:
         raise ValueError('missing/ambiguous native synth_design')
@@ -77,6 +80,8 @@ def audit_synth(script, properties, strategy, threads=1):
 def audit_impl(script, properties, strategy, threads=1):
     """Check the emitted operations, not merely the strategy label."""
     audit_threads(script, threads)
+    if (strategy == 'performance-route-first' and threads != 4) or (strategy != 'performance-route-first' and threads == 4):
+        raise ValueError('unsupported implementation thread count')
     configs = {
         'performance-netdelay': ('ExtraNetDelay_high', 'NoTimingRelaxation',
             ['-directive AggressiveExplore', '-directive Explore']),
@@ -88,12 +93,14 @@ def audit_impl(script, properties, strategy, threads=1):
         'performance-bounded': ('AltSpreadLogic_medium', 'NoTimingRelaxation',
             ['-fanout_opt -placement_opt -restruct_opt -equ_drivers_opt',
              '-placement_opt -routing_opt -restruct_opt -hold_fix']),
+        'performance-route-first': ('AltSpreadLogic_medium', 'NoTimingRelaxation', []),
     }
     place, route, phys = configs[strategy]
     for command, expected in (('opt_design', ['-directive RuntimeOptimized']),
                               ('place_design', ['-directive '+place]),
                               ('route_design', ['-directive '+route]), ('phys_opt_design', phys)):
-        actual = re.findall(r'^[ \t]*'+command+r'[ \t]+([^\r\n]+)', script, re.M)
+        # Also capture a bare command: route-first must reject default phys_opt.
+        actual = re.findall(r'^[ \t]*'+command+r'(?=[ \t\r\n]|$)([^\r\n]*)', script, re.M)
         if [shlex.split(a) for a in actual] != [shlex.split(a) for a in expected]:
             raise ValueError('native implementation command mismatch: '+command)
     for step, options in zip(('PHYS_OPT_DESIGN', 'POST_ROUTE_PHYS_OPT_DESIGN'), phys):
@@ -103,6 +110,12 @@ def audit_impl(script, properties, strategy, threads=1):
             if property_value(properties, f'STEPS.{step}.ARGS.DIRECTIVE') != 'Default' or \
                property_value(properties, f'STEPS.{step}.ARGS.MORE OPTIONS') != options:
                 raise ValueError('bounded physical optimization property mismatch: '+step)
+    if strategy == 'performance-route-first':
+        for step in ('PHYS_OPT_DESIGN', 'POST_ROUTE_PHYS_OPT_DESIGN'):
+            if (property_value(properties, f'STEPS.{step}.IS_ENABLED') not in ('0', 'false') or
+                property_value(properties, f'STEPS.{step}.ARGS.DIRECTIVE') != 'Default' or
+                property_value(properties, f'STEPS.{step}.ARGS.MORE OPTIONS') != ''):
+                raise ValueError('route-first physical stage property mismatch: '+step)
     return dict(strategy=strategy, physical_operations=phys, completion_verified=False)
 
 

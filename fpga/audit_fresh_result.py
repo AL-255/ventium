@@ -146,19 +146,33 @@ def final_reports(build):
 
 
 def audit_task_monitoring(run, started, closed):
-    fields = {'task_monitoring', 'task_profile', 'tasks_max', 'memory_profile'}
+    fields = {'task_monitoring', 'task_profile', 'tasks_max', 'memory_profile', 'implementation_threads'}
     if (not fields.intersection(started) and not fields.intersection(closed) and
-        'VENTIUM_VIVADO_TASK_PROFILE' not in started.get('env', {})):
+        'VENTIUM_VIVADO_TASK_PROFILE' not in started.get('env', {}) and
+        started.get('strategy') != 'performance-route-first'):
         return None  # Historical receipts did not record task events.
     threads = started.get('tool_threads')
     if type(threads) is not int or threads not in (1, 2):
         raise ValueError('invalid task-profile thread count')
-    profile, maximum = ('serial', 48) if threads == 1 else ('parallel2', 128)
+    impl_threads = started.get('implementation_threads', threads)
+    stage_policies = {(1, 1): ('serial', 48), (2, 2): ('parallel2', 128),
+                      (1, 4): ('serial_apr4', 128)}
+    if type(impl_threads) is not int or (threads, impl_threads) not in stage_policies:
+        raise ValueError('invalid implementation thread count')
+    route_first = started.get('strategy') == 'performance-route-first'
+    if route_first != ((threads, impl_threads) == (1, 4)):
+        raise ValueError('stage thread policy disagrees with strategy')
+    if 'implementation_threads' in started or 'implementation_threads' in closed or route_first:
+        if (type(started.get('implementation_threads')) is not int or
+            type(closed.get('implementation_threads')) is not int or
+            started['implementation_threads'] != closed['implementation_threads']):
+            raise ValueError('stage thread receipts disagree')
+    profile, maximum = stage_policies[threads, impl_threads]
     memory_profile = started.get('memory_profile', 'standard16')
     if not isinstance(memory_profile, str) or memory_profile not in ('standard16', 'serial20'):
         raise ValueError('invalid memory profile')
-    if memory_profile == 'serial20' and threads != 1:
-        raise ValueError('serial20 requires one internal thread')
+    if (memory_profile == 'serial20' and threads != 1) or (route_first and memory_profile != 'serial20'):
+        raise ValueError('memory profile disagrees with stage thread policy')
     ram_gib, swap_gib, gib = (20 if memory_profile == 'serial20' else 16), 6, 1024**3
     named_memory = 'memory_profile' in started or 'memory_profile' in closed
     if named_memory:
@@ -245,16 +259,17 @@ def audit_closed(run):
         raise ValueError('implementation deadline exceeded')
     script = build/'rk_ao486_system/rk_ao486_system.runs/synth_1/rk_ao486_bd_wrapper.tcl'
     threads = started.get('tool_threads', 1)
+    impl_threads = started.get('implementation_threads', threads)
     synth = audit_synth(script.read_text(), (build/'synth_1-properties.rpt').read_text(), started['strategy'], threads)
     if 'tool_threads' in started:
         # Legacy receipts predate the explicit field; newly configured runs
         # must prove the native implementation's thread cap too.
         impl_script = build/'rk_ao486_system/rk_ao486_system.runs/impl_1/rk_ao486_bd_wrapper.tcl'
-        audit_threads(impl_script.read_text(), threads)
+        audit_threads(impl_script.read_text(), impl_threads)
     impl = (build/'impl_1-properties.rpt').read_text()
-    if started['strategy'] in ('performance-retime-bounded', 'performance-bounded'):
+    if started['strategy'] in ('performance-retime-bounded', 'performance-bounded', 'performance-route-first'):
         impl_script = build/'rk_ao486_system/rk_ao486_system.runs/impl_1/rk_ao486_bd_wrapper.tcl'
-        audit_impl(impl_script.read_text(), impl, started['strategy'], threads)
+        audit_impl(impl_script.read_text(), impl, started['strategy'], impl_threads)
     if property_value(impl, 'AUTO_INCREMENTAL_CHECKPOINT') != '0' or property_value(impl, 'INCREMENTAL_CHECKPOINT'):
         raise ValueError('incremental implementation')
     result = final_reports(build)

@@ -1,8 +1,12 @@
 # Fresh full-project synthesis/APR. Never import a previous run's checkpoints.
-if {$argc != 4} {error "usage: strategy frozen-source new-output-directory internal-threads"}
-lassign $argv strategy frozen out tool_threads
+if {$argc ni {4 5}} {error "usage: strategy frozen-source new-output-directory synth-threads ?apr-threads?"}
+lassign $argv strategy frozen out tool_threads implementation_threads
+if {$argc == 4} {set implementation_threads $tool_threads}
 if {$tool_threads ni {1 2}} {error "only one or two internal threads supported"}
-if {$strategy ni {performance-netdelay routability-spread performance-retime-bounded performance-bounded}} {error "unknown strategy"}
+if {$strategy ni {performance-netdelay routability-spread performance-retime-bounded performance-bounded performance-route-first}} {error "unknown strategy"}
+if {$strategy eq "performance-route-first"} {
+    if {$tool_threads ne "1" || $implementation_threads ne "4"} {error "route-first requires synth=1 APR=4"}
+} elseif {$implementation_threads ne $tool_threads} {error "unequal stage threads only supported for route-first"}
 if {[version -short] ne "2025.2"} {error "Vivado 2025.2 required"}
 set out [file normalize $out]
 set frozen [file normalize $frozen]
@@ -11,6 +15,7 @@ file mkdir $out
 set ::fresh_script_dir [file dirname [file normalize [info script]]]
 source [file join $::fresh_script_dir fresh_synth_evidence.tcl]
 source [file join $::fresh_script_dir fresh_bounded_phys.tcl]
+source [file join $::fresh_script_dir fresh_route_first.tcl]
 set ::env(VEN_FRESH_OUT) $out
 set_param general.maxThreads $tool_threads
 set ::fresh_launches {}
@@ -81,7 +86,7 @@ proc launch_runs {run args} {
         close $f
         set directive [expr {$::strategy eq "routability-spread" ? "AlternateRoutability" : "PerformanceOptimized"}]
         set retiming [expr {$::strategy eq "performance-retime-bounded" ? "on" : "auto"}]
-        if {$::strategy eq "performance-bounded"} {set retiming off}
+        if {$::strategy in {performance-bounded performance-route-first}} {set retiming off}
         set_property STEPS.SYNTH_DESIGN.ARGS.DIRECTIVE $directive $obj
         set_property STEPS.SYNTH_DESIGN.ARGS.GLOBAL_RETIMING $retiming $obj
         set_property STEPS.SYNTH_DESIGN.ARGS.FLATTEN_HIERARCHY rebuilt $obj
@@ -114,13 +119,15 @@ proc launch_runs {run args} {
         set_property STEPS.POST_ROUTE_PHYS_OPT_DESIGN.IS_ENABLED true $obj
         set_property STEPS.POST_ROUTE_PHYS_OPT_DESIGN.ARGS.DIRECTIVE Explore $obj
         if {$::strategy in {performance-retime-bounded performance-bounded}} {fresh_bounded_phys $obj}
+        if {$::strategy eq "performance-route-first"} {fresh_route_first $obj}
         set_property STEPS.ROUTE_DESIGN.TCL.PRE [file join $::fresh_script_dir fresh_route_pre.tcl] $obj
     }
     fresh_run $run
     # The source-only platform sets its own legacy thread default. Override
     # immediately before each native launch without changing its -jobs 1.
-    set_param general.maxThreads $::tool_threads
-    if {[get_param general.maxThreads] != $::tool_threads} {error "tool thread policy drift"}
+    set threads [expr {$run eq "synth_1" ? $::tool_threads : $::implementation_threads}]
+    set_param general.maxThreads $threads
+    if {[get_param general.maxThreads] != $threads} {error "tool thread policy drift"}
     fresh_event $run
     lappend ::fresh_launches $run
     return [uplevel 1 [list __fresh_launch_runs $run {*}$args]]

@@ -25,9 +25,9 @@ CLOCK_HASHES = {
     'ven_programmable_clock.v': 'cea6e80e4ca1240bfb2b1d3920c869458e21e30f19aa96fe77743be86109d2e9',
 }
 STRATEGIES = ('performance-netdelay', 'routability-spread', 'performance-retime-bounded',
-              'performance-bounded')
+              'performance-bounded', 'performance-route-first')
 # Fixed reviewed envelopes, not arbitrary numeric overrides. The larger one is
-# serial-only and remains inside build_scope.sh's existing 20 GiB RAM ceiling.
+# serial-synthesis-only and stays inside build_scope.sh's 20 GiB RAM ceiling.
 MEMORY_PROFILES = {'standard16': (16, 6), 'serial20': (20, 6)}
 WHOLE_LIMIT, IMPL_LIMIT = 8*3600, 3*3600+50*60
 
@@ -74,7 +74,8 @@ def prepare(dest):
     pins = {str(source/n): h for n, h in after.items()}
     # Pin launch dependencies too, including imported helper modules.
     for name in ('run_fresh_strategy.py', 'fresh_strategy.tcl', 'fresh_synth_post.tcl', 'fresh_synth_evidence.tcl',
-                 'fresh_route_pre.tcl', 'fresh_reports.tcl', 'fresh_bounded_phys.tcl', 'run_apr_trial.py',
+                 'fresh_route_pre.tcl', 'fresh_reports.tcl', 'fresh_bounded_phys.tcl',
+                 'fresh_route_first.tcl', 'run_apr_trial.py',
                  'prepare_programmable_clock_repair.py', 'prepare_programmable_clock.py',
                  'audit_clock_reuse.py', 'audit_fresh_strategy.py', 'run_vivado_exclusive.sh'):
         pins[str(REPO/'fpga'/name)] = sha(REPO/'fpga'/name)
@@ -103,10 +104,26 @@ def stage_deadline(text, now):
     return bool(starts and now-starts[0] >= IMPL_LIMIT)
 
 
-def task_policy(threads):
-    if type(threads) is not int or threads not in (1, 2):
-        raise ValueError('unsupported internal thread count')
-    return ('serial', 48) if threads == 1 else ('parallel2', 128)
+def task_policy(threads, implementation_threads=None):
+    if implementation_threads is None:
+        implementation_threads = threads
+    policies = {(1, 1): ('serial', 48), (2, 2): ('parallel2', 128),
+                (1, 4): ('serial_apr4', 128)}
+    if (type(threads) is not int or type(implementation_threads) is not int or
+        (threads, implementation_threads) not in policies):
+        raise ValueError('unsupported stage thread counts')
+    return policies[threads, implementation_threads]
+
+
+def implementation_policy(strategy, threads, memory_profile):
+    memory_policy(memory_profile, threads)
+    if strategy not in STRATEGIES:
+        raise ValueError('unsupported strategy')
+    if strategy == 'performance-route-first':
+        if threads != 1 or memory_profile != 'serial20':
+            raise ValueError('route-first requires serial synthesis and serial20 memory')
+        return 4
+    return threads
 
 
 def memory_policy(profile, threads):
@@ -114,7 +131,7 @@ def memory_policy(profile, threads):
     if not isinstance(profile, str) or profile not in MEMORY_PROFILES:
         raise ValueError('unsupported memory profile')
     if profile == 'serial20' and threads != 1:
-        raise ValueError('serial20 requires one internal thread')
+        raise ValueError('serial20 requires one synthesis thread')
     return MEMORY_PROFILES[profile]
 
 
@@ -127,10 +144,15 @@ def resource_stop(ram, swap, resources, free, events, limit_hit, ram_gib, swap_g
     return None
 
 
-def check_scope_limits(current, tasks_max, memory_profile='standard16'):
+def check_scope_limits(current, tasks_max, memory_profile='standard16', *,
+                       threads=None, implementation_threads=None):
     if type(tasks_max) is not int or tasks_max not in (48, 128):
         raise ValueError('unsupported task limit')
-    ram_gib, swap_gib = memory_policy(memory_profile, 1 if tasks_max == 48 else 2)
+    if threads is None:
+        threads = 1 if tasks_max == 48 else 2  # Legacy equal-stage policies.
+    if task_policy(threads, implementation_threads)[1] != tasks_max:
+        raise ValueError('task limit disagrees with stage threads')
+    ram_gib, swap_gib = memory_policy(memory_profile, threads)
     expected = dict(MemoryMax=str(ram_gib*GIB), MemorySwapMax=str(swap_gib*GIB),
                     TasksMax=str(tasks_max))
     if any(current.get(key) != value for key, value in expected.items()):
@@ -162,11 +184,12 @@ def main():
     ap.add_argument('--strategy', choices=STRATEGIES, required=True)
     ap.add_argument('--output', type=Path, required=True)
     ap.add_argument('--threads', type=int, choices=(1, 2), default=1,
-                    help='internal tool threads; always one Vivado family and -jobs 1')
+                    help='synthesis threads; route-first uses four APR threads; always -jobs 1')
     ap.add_argument('--memory-profile', choices=MEMORY_PROFILES, default='standard16',
-                    help='fixed RAM/swap envelope; serial20 requires one internal thread')
+                    help='fixed RAM/swap envelope; serial20 requires one synthesis thread')
     args = ap.parse_args()
-    task_profile, tasks_max = task_policy(args.threads)
+    implementation_threads = implementation_policy(args.strategy, args.threads, args.memory_profile)
+    task_profile, tasks_max = task_policy(args.threads, implementation_threads)
     ram_gib, swap_gib = memory_policy(args.memory_profile, args.threads)
     assert __debug__ and os.environ['TMPDIR'] == str(SCRATCH)
     assert os.environ.get('INVOCATION_ID'), 'use a retained systemd owner'
@@ -194,7 +217,8 @@ def main():
     command = ['timeout', '--signal=TERM', '--kill-after=60s', f'{WHOLE_LIMIT}s',
         str(REPO/'fpga/run_vivado_exclusive.sh'), '-mode', 'batch', '-notrace',
         '-log', str(dest/'native.log'), '-journal', str(dest/'native.jou'),
-        '-source', str(launcher), '-tclargs', args.strategy, str(source), str(dest/'build'), str(args.threads)]
+        '-source', str(launcher), '-tclargs', args.strategy, str(source), str(dest/'build'),
+        str(args.threads), str(implementation_threads)]
     save(dest, 'started.json', dict(strategy=args.strategy, command=command, pins=pins,
         invocation=os.environ['INVOCATION_ID'], host=host(), disk_free=shutil.disk_usage(dest).free,
         env={k:v for k,v in env.items() if k.startswith(('VEN_', 'VENTIUM_')) or k == 'TMPDIR'},
@@ -202,7 +226,8 @@ def main():
         combined_limit=(ram_gib+swap_gib-1)*GIB, whole_limit_seconds=WHOLE_LIMIT,
         task_profile=task_profile, tasks_max=tasks_max, task_monitoring=True,
         implementation_limit_seconds=IMPL_LIMIT, prior_checkpoint_inputs=[],
-        fresh_synthesis=True, tool_threads=args.threads, deployment=False, gameplay_ipc=None))
+        fresh_synthesis=True, tool_threads=args.threads, implementation_threads=implementation_threads,
+        deployment=False, gameplay_ipc=None))
     interrupted = []
     signal.signal(signal.SIGTERM, lambda s,f: interrupted.append(s))
     signal.signal(signal.SIGINT, lambda s,f: interrupted.append(s))
@@ -225,12 +250,14 @@ def main():
                             try: cmd = Path('/proc', pid, 'cmdline').read_bytes()
                             except FileNotFoundError: continue
                             if str(dest/'native.log').encode() in cmd:
-                                check_scope_limits(current, tasks_max, args.memory_profile)
+                                check_scope_limits(current, tasks_max, args.memory_profile,
+                                    threads=args.threads, implementation_threads=implementation_threads)
                                 owner = current
                                 break
                     if owner:
                         assert current['InvocationID'] == owner['InvocationID']
-                        limits = check_scope_limits(current, tasks_max, args.memory_profile)
+                        limits = check_scope_limits(current, tasks_max, args.memory_profile,
+                            threads=args.threads, implementation_threads=implementation_threads)
                         pressure = task_pressure((group/'pids.current').read_text(),
                             (group/'pids.events').read_text(), tasks_max)
                         peak_tasks_sampled = max(peak_tasks_sampled, pressure['current'])
@@ -278,7 +305,7 @@ def main():
         native_synth = validate_native_synth((dest/'build/rk_ao486_system/rk_ao486_system.runs/synth_1/rk_ao486_bd_wrapper.tcl').read_text(), args.strategy,
             (dest/'build/synth_1-properties.rpt').read_text(), args.threads)
         audit_impl((dest/'build/rk_ao486_system/rk_ao486_system.runs/impl_1/rk_ao486_bd_wrapper.tcl').read_text(),
-            (dest/'build/impl_1-properties.rpt').read_text(), args.strategy, args.threads)
+            (dest/'build/impl_1-properties.rpt').read_text(), args.strategy, implementation_threads)
         measurements = validate_timing((dest/'build/timing.tsv').read_text())
         assert (dest/'build/fresh-routed.dcp').stat().st_size > 50_000_000
         assert (dest/'build/rk_ao486_system.bit.bin').stat().st_size > 10_000_000
@@ -288,6 +315,7 @@ def main():
         reason=reason, failure=failure, strategy=args.strategy, elapsed=time.monotonic()-start,
         inputs_unchanged=unchanged, owner=owner, peak_ram=peak_ram, peak_swap=peak_swap,
         memory_profile=args.memory_profile,
+        implementation_threads=implementation_threads,
         task_profile=task_profile, tasks_max=tasks_max, peak_tasks_sampled=peak_tasks_sampled,
         task_limit_events=task_limit_events,
         native_synth=native_synth, measurements=measurements,

@@ -1157,6 +1157,74 @@ fixed RAM/swap limits and independently audited native commands. Neither change
 has been implemented or launched at this entry. No old checkpoint is authorized
 as the next trial's input.
 
+### Route-first implementation and native probe, Oct19
+
+The decision above is now implemented as `performance-route-first`. It keeps
+`PerformanceOptimized` synthesis, rebuilt hierarchy, explicit global retiming
+**off**, `RuntimeOptimized` logic optimization, `AltSpreadLogic_medium`
+placement and `NoTimingRelaxation` routing. Both optional physical-optimization
+steps are disabled, with their extra options cleared. Checkpoint export,
+bitstream generation, and all final timing/coverage/CDC/skew/DRC reports remain
+enabled. No constraint, RTL or source-closure change accompanies this strategy.
+The checkpoint crash is not caught or treated as success.
+
+The full-run contract is **one synthesis thread, four APR threads, `-jobs 1`**,
+one Vivado family, the named `serial_apr4` **128-task** profile, and the existing
+`serial20` **20 GiB RAM / 6 GiB swap** envelope. The 25 GiB combined early stop,
+host/disk reserves, 3 h 50 min whole-APR bound and 8 h whole-run bound remain.
+Four threads are a maximum for supported APR work, not a promised fourfold
+speedup. Synthesis stays serial because prior parallel mapping exceeded the
+memory budget. Each newly emitted receipt records synthesis and APR thread
+counts separately, and both generated native scripts are audited. Old equal-
+thread receipts retain their original interpretation.
+
+**76 host-only tooling tests pass:** 42 fresh-flow/source/audit tests, 11 APR
+timing-parser tests and 23 resource-scope tests. Negative cases cover mismatched
+stage counts (including booleans/string/float values), wrong task/memory caps,
+missing completion evidence, native optional physical commands (including a
+bare `phys_opt_design`), enabled stage properties, old checkpoint inputs and
+unknown/unbounded policies. Shell syntax and scoped `git diff --check` pass.
+These tests are not CPU, full-design timing or physical acceptance.
+
+A tiny **fresh-source** native probe was launched at **01:05:53 EDT Oct19**:
+
+- Artifact root: `/home/yukidama/external/tmp/ventium-native-route-first-oct19.4fA3m1kB`.
+- Owner: `ventium-fresh-route-first-probe-oct19-r1.service`, invocation
+  `05f2c4672e5f4145aafeb9f8f4360c64`.
+- Scope invocation: `ff9bbd7b30fc47849f79b40056f90ef8`; actual limits checked:
+  **4 GiB RAM / 1 GiB swap / 128 tasks**; timeout ten minutes.
+- Probe Tcl SHA256:
+  `4ab568f453d444df34f7d4d36e481d3a32d7aca74efd8bc81c7ce5d3f75160d8`.
+- Shared route-first helper SHA256:
+  `4a3fac932b1cd25bf9f0e65c11c73c96ac0c3e7b8229aeb3b357bb0e73b7afc0`.
+
+The probe **passed at 01:08:50 EDT**, owner exit zero after **2 min 57 s**.
+Native synthesis reports a maximum of **one process**, placement and routing
+each report a maximum of **four CPUs**. Both native scripts and the independent
+implementation auditor agree. The native `route_design Complete!` status,
+success log, run/stage end markers and routed checkpoint are present. The probe
+and shared helper/launcher/scope hashes remained unchanged. The scope is now
+inactive and no Vivado process remains.
+
+No optional `phys_opt_design` command is emitted. The placer's own internal
+optimization still prints a `Physopt` multithreading message; that is not an
+enabled standalone pre/post-route stage and is not suppressed. Sampled scope
+events showed no OOM or task-limit denial; RAM reached the 4 GiB cap with reclaim
+events. The short-lived scope's final counters disappeared on exit, so these
+samples are not a complete peak-memory or final-event audit.
+
+- Final native log SHA256:
+  `589cf49b38519ff5e38bde4b9c791152d84c8e106dbfd42fbf88bda700e9567a`.
+- Generated routed probe DCP SHA256:
+  `37570367463fcd1ebaf9d28cf031fda4ebc4845a3631973175d8074e59c720dd`.
+
+This proves native synthesis=1, APR=4, disabled optional physical passes and
+successful routing/checkpoint serialization **for the tiny fixture only**.
+It does not prove that the full design's crash is repaired. It uses its own
+new synthesis output only; no old project/netlist/checkpoint/IP cache. It does
+not generate an unpinned-I/O bitstream or qualify full-core timing. At this
+entry the full route-first trial has **not launched**.
+
 ### Runtime accounting at 23:56 EDT Oct18
 
 The nine closed fresh-trial receipts sum to **85,701.723 s (23 h 48 min

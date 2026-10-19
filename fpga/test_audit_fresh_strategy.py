@@ -15,6 +15,29 @@ STEPS.SYNTH_DESIGN.ARGS.MORE OPTIONS string false
 
 
 class AuditTests(unittest.TestCase):
+    def test_route_first_requires_serial_synth_apr4_and_zero_optional_phys(self):
+        props = PROPS.replace('enum false auto', 'enum false off')
+        script = SCRIPT.rstrip()+' -global_retiming off\n'
+        audit_synth(script, props, 'performance-route-first', 1)
+        for threads in (2, 4):
+            with self.assertRaises(ValueError):
+                audit_synth(script.replace('maxThreads 1', f'maxThreads {threads}'), props, 'performance-route-first', threads)
+        impl = ('set_param general.maxThreads 4\nopt_design -directive RuntimeOptimized\n'
+                'place_design -directive AltSpreadLogic_medium\nroute_design -directive NoTimingRelaxation\n')
+        properties = ''.join(f'STEPS.{step}.IS_ENABLED bool false 0\n'
+                            f'STEPS.{step}.ARGS.DIRECTIVE enum false Default\n'
+                            f'STEPS.{step}.ARGS.MORE OPTIONS string false\n'
+                            for step in ('PHYS_OPT_DESIGN', 'POST_ROUTE_PHYS_OPT_DESIGN'))
+        self.assertEqual(audit_impl(impl, properties, 'performance-route-first', 4)['physical_operations'], [])
+        for bad in (impl+'phys_opt_design\n', impl+'phys_opt_design', impl+' phys_opt_design -directive Explore\n',
+                    impl.replace('NoTimingRelaxation', 'Default'), impl.replace('maxThreads 4', 'maxThreads 1')):
+            with self.assertRaises(ValueError): audit_impl(bad, properties, 'performance-route-first', 4)
+        for bad in (properties.replace('bool false 0', 'bool false 1'),
+                    properties.replace('Default', 'Explore'), properties.replace('string false', 'string false -hold_fix')):
+            with self.assertRaises(ValueError): audit_impl(impl, bad, 'performance-route-first', 4)
+        with self.assertRaises(ValueError): audit_impl(impl, properties, 'performance-bounded', 4)
+        with self.assertRaises(ValueError): audit_synth(SCRIPT.replace('maxThreads 1', 'maxThreads 4'), PROPS, 'performance-netdelay', 4)
+
     def test_retiming_disabled_strategy_requires_explicit_off_evidence(self):
         props = PROPS.replace('enum false auto', 'enum false off')
         script = SCRIPT.rstrip()+' -global_retiming off\n'

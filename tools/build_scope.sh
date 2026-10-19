@@ -28,7 +28,8 @@ vivado_memory_max="20G"
 # synthesis threads also create two task-worker processes with their own helper
 # pools: the full-chip Oct18 run exhausted 48 tasks and stalled during mapping.
 # Select a fixed named profile, never an arbitrary numeric task override. The
-# parallel2 profile changes helper headroom, not jobs, RAM/swap, or lock policy.
+# parallel2 and serial_apr4 profiles change helper headroom, not jobs, RAM/swap,
+# or lock policy. serial_apr4 keeps serial synthesis with four-thread APR.
 vivado_tasks_max="48"
 vivado_parallel2_tasks_max="128"
 # Keep swap bounded separately from resident memory.  Vivado can retain a large
@@ -210,7 +211,7 @@ vivado_host_admission() {
 vivado_task_limit() {
     case "${VENTIUM_VIVADO_TASK_PROFILE:-serial}" in
         serial) printf '%s\n' "$vivado_tasks_max" ;;
-        parallel2) printf '%s\n' "$vivado_parallel2_tasks_max" ;;
+        parallel2|serial_apr4) printf '%s\n' "$vivado_parallel2_tasks_max" ;;
         *)
             echo "[build-scope] unknown Vivado task profile: ${VENTIUM_VIVADO_TASK_PROFILE@Q}" >&2
             return 1

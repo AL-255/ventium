@@ -7,11 +7,62 @@ import tempfile
 import unittest
 
 from run_fresh_strategy import (source_inventory, stage_deadline, validate_native_synth,
-    IMPL_LIMIT, task_policy, task_pressure, check_scope_limits, memory_policy, resource_stop, GIB)
+    IMPL_LIMIT, task_policy, task_pressure, check_scope_limits, memory_policy,
+    implementation_policy, resource_stop, GIB)
 from test_audit_fresh_strategy import SCRIPT, PROPS
 
 
 class FreshTests(unittest.TestCase):
+    def test_route_probe_requires_native_route_completion(self):
+        script = Path(__file__).with_name('test_native_route_first.tcl').read_text()
+        prefix = script.split('# Source-only tooling probe')[0]
+        for case in ('ok', 'next-step', 'running', 'missing-end', 'error-marker', 'error-log', 'missing-success'):
+            with self.subTest(case=case), tempfile.TemporaryDirectory(prefix='route-first-status-') as td:
+                root = Path(td)
+                for name in ('.vivado.end.rst', '.route_design.end.rst'): (root/name).touch()
+                status = 'Not started write_bitstream' if case == 'next-step' else 'route_design Complete!'
+                log = 'route_design completed successfully\n'
+                if case == 'running': status = 'route_design Running'
+                if case == 'missing-end': (root/'.route_design.end.rst').unlink()
+                if case == 'error-marker': (root/'.place_design.error.rst').touch()
+                if case == 'error-log': log += 'ERROR: native error\n'
+                if case == 'missing-success': log = 'route_design started\n'
+                (root/'runme.log').write_text(log)
+                check = root/'test.tcl'
+                check.write_text(prefix+f'\nroute_first_check_status impl_1 {{{status}}} {{{root}}}\n')
+                result = subprocess.run(['tclsh', str(check)], text=True, capture_output=True)
+                self.assertEqual(result.returncode == 0, case in ('ok', 'next-step'), result.stdout+result.stderr)
+
+    def test_tcl_rejects_unreviewed_stage_thread_pairs_before_creating_project(self):
+        prefix = Path(__file__).with_name('fresh_strategy.tcl').read_text().split('if {[version -short]')[0]
+        for strategy, synth, impl in (('performance-route-first', '1', '1'),
+                ('performance-route-first', '2', '4'), ('performance-route-first', 'true', '4'),
+                ('performance-route-first', '1', '4.0'), ('performance-bounded', '1', '4'),
+                ('performance-bounded', '2', '8')):
+            with self.subTest(strategy=strategy, synth=synth, impl=impl):
+                code = f'set argc 5\nset argv [list {strategy} unused unused {synth} {impl}]\n'+prefix
+                # A file script is needed: tclsh stdin can continue after errors.
+                with tempfile.TemporaryDirectory(prefix='route-first-args-') as td:
+                    p = Path(td)/'test.tcl'; p.write_text(code)
+                    result = subprocess.run(['tclsh', str(p)], text=True, capture_output=True)
+                    self.assertNotEqual(result.returncode, 0, result.stdout+result.stderr)
+
+    def test_route_first_stage_threads_keep_fixed_memory_and_tasks(self):
+        self.assertEqual(implementation_policy('performance-route-first', 1, 'serial20'), 4)
+        self.assertEqual(task_policy(1, 4), ('serial_apr4', 128))
+        limits = dict(MemoryMax=str(20*GIB), MemorySwapMax=str(6*GIB), TasksMax='128')
+        self.assertEqual(check_scope_limits(limits, 128, 'serial20', threads=1, implementation_threads=4), limits)
+        for threads, impl in ((1, True), (True, 4), (1, '4'), (1, 4.0), (2, 4), (4, 4), (1, 2), (1, 8)):
+            with self.assertRaises(ValueError): task_policy(threads, impl)
+        for threads, memory in ((1, 'standard16'), (2, 'standard16'), (2, 'serial20'), (True, 'serial20')):
+            with self.assertRaises(ValueError): implementation_policy('performance-route-first', threads, memory)
+        for cap in (48, True, 256):
+            with self.assertRaises(ValueError):
+                check_scope_limits(limits, cap, 'serial20', threads=1, implementation_threads=4)
+        for key in limits:
+            with self.assertRaises(ValueError):
+                check_scope_limits({**limits, key:'max'}, 128, 'serial20', threads=1, implementation_threads=4)
+
     def test_memory_profiles_keep_fixed_caps_and_reserves(self):
         for name, ram in (('standard16', 16), ('serial20', 20)):
             self.assertEqual(memory_policy(name, 1), (ram, 6))
@@ -130,7 +181,9 @@ class FreshTests(unittest.TestCase):
                 ('routability-spread', 'AlternateRoutability', 'AltSpreadLogic_medium', 'AlternateCLBRouting'),
                 ('performance-retime-bounded', 'PerformanceOptimized', 'AltSpreadLogic_medium', 'NoTimingRelaxation'),
                 ('performance-bounded', 'PerformanceOptimized', 'AltSpreadLogic_medium', 'NoTimingRelaxation'))
-        for (strategy, directive, place, route), threads in itertools.product(strategies, (1, 2)):
+        cases = [(s, t, t) for s, t in itertools.product(strategies, (1, 2))]
+        cases.append((('performance-route-first', 'PerformanceOptimized', 'AltSpreadLogic_medium', 'NoTimingRelaxation'), 1, 4))
+        for (strategy, directive, place, route), threads, impl_threads in cases:
             with tempfile.TemporaryDirectory(prefix='fresh-tcl-test-') as td:
                 mock = '''
 proc version {args} {return 2025.2}
@@ -181,13 +234,13 @@ proc fresh_synth_evidence {{}} {{
 wait_on_run synth_1
 set_param general.maxThreads 1
 launch_runs impl_1 -to_step write_bitstream -jobs 1
-foreach run {{synth_1 impl_1}} {{
- if {{$::native_threads($run) != {threads}}} {{error "native thread setting lost"}}
+foreach {{run expected_threads}} {{synth_1 {threads} impl_1 {impl_threads}}} {{
+ if {{$::native_threads($run) != $expected_threads}} {{error "native thread setting lost"}}
 }}
 if {{!$::evidence_called}} {{error "evidence procedure not called"}}
 foreach {{obj prop expected}} {{
  synth_1 STEPS.SYNTH_DESIGN.ARGS.DIRECTIVE {directive}
- synth_1 STEPS.SYNTH_DESIGN.ARGS.GLOBAL_RETIMING {'on' if strategy == 'performance-retime-bounded' else 'off' if strategy == 'performance-bounded' else 'auto'}
+ synth_1 STEPS.SYNTH_DESIGN.ARGS.GLOBAL_RETIMING {'on' if strategy == 'performance-retime-bounded' else 'off' if strategy in ('performance-bounded', 'performance-route-first') else 'auto'}
  synth_1 AUTO_INCREMENTAL_CHECKPOINT 0
  impl_1 INCREMENTAL_CHECKPOINT {{}}
  impl_1 STEPS.PLACE_DESIGN.ARGS.DIRECTIVE {place}
@@ -205,8 +258,18 @@ if {[get_property STEPS.PHYS_OPT_DESIGN.ARGS.DIRECTIVE impl_1] ne "Default"} {er
 if {[get_property {STEPS.PHYS_OPT_DESIGN.ARGS.MORE OPTIONS} impl_1] ne "-fanout_opt -placement_opt -restruct_opt -equ_drivers_opt"} {error "pre-route operations differ"}
 if {[get_property {STEPS.POST_ROUTE_PHYS_OPT_DESIGN.ARGS.MORE OPTIONS} impl_1] ne "-placement_opt -routing_opt -restruct_opt -hold_fix"} {error "post-route operations differ"}
 '''
+                if strategy == 'performance-route-first':
+                    checks += '''
+foreach step {PHYS_OPT_DESIGN POST_ROUTE_PHYS_OPT_DESIGN} {
+ if {[get_property STEPS.${step}.IS_ENABLED impl_1] ni {0 false}} {error "phys still enabled"}
+ if {[get_property STEPS.${step}.ARGS.DIRECTIVE impl_1] ne "Default"} {error "phys directive retained"}
+ if {[get_property "STEPS.${step}.ARGS.MORE OPTIONS" impl_1] ne ""} {error "phys options retained"}
+}
+'''
                 runner = Path(td)/'test.tcl'
-                runner.write_text(mock+f'\nset argc 4\nset argv [list {strategy} {{{td}/source}} {{{td}/build}} {threads}]\n'+prefix+checks)
+                stage_args = f'{threads} {impl_threads}' if strategy == 'performance-route-first' else str(threads)
+                argc = 5 if strategy == 'performance-route-first' else 4
+                runner.write_text(mock+f'\nset argc {argc}\nset argv [list {strategy} {{{td}/source}} {{{td}/build}} {stage_args}]\n'+prefix+checks)
                 result = subprocess.run(['tclsh', str(runner)], text=True, capture_output=True)
                 self.assertEqual(result.returncode, 0, result.stdout+result.stderr)
                 self.assertIn('FRESH-TCL-OK', result.stdout)
