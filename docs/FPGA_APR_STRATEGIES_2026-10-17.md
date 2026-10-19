@@ -46,7 +46,7 @@ window peak reaches 90.37% despite much lower whole-chip routing utilization.
 | `routability-r3` | `AlternateRoutability`, rebuilt hierarchy | Same planned APR as r2 | Stopped by the 21 GiB combined-memory guard during technology mapping; no OOM or task-cap rejection. No completed synthesis/APR or timing result. |
 | `routability-r4` | `AlternateRoutability`, rebuilt hierarchy; one synthesis process | Same APR as r2; routing never reached | Synthesis and placement completed; stopped at 3 h 50 min APR limit in physical optimization. No routed timing result. |
 | `performance-retime-r1` | `PerformanceOptimized`, rebuilt hierarchy, explicit synthesis retiming | Planned spread placement / explicit physical-operation sets / `NoTimingRelaxation` | Stopped by the 21 GiB combined-memory guard during technology mapping. No OOM, completed synthesis/APR or timing result. |
-| `performance-retime-r2` | Same retiming strategy, fresh source/project, named `serial20` memory profile | Same bounded physical operations / spread placement / `NoTimingRelaxation` | Launched Oct18 18:48:30 EDT; actual 20/6 GiB/48-task scope verified. No completed synthesis/APR or timing result yet. |
+| `performance-retime-r2` | Same retiming strategy, fresh source/project, named `serial20` memory profile | Same bounded physical operations / spread placement / `NoTimingRelaxation` | Stopped during technology mapping by the 25 GiB combined-memory guard; no OOM/task rejection, completed synthesis or routed timing. |
 
 The first combination targets the measured long logic/routing path. The second
 tests a routing-oriented mapping and spread placement, if the first result
@@ -865,6 +865,85 @@ and after cleanup. The active synthesis continued without OOM or task-limit even
 
 - `prepared.json` SHA256: `57ae9fb2d1132574cc8cb7a7d65ee6dd4371840c439709b98c56bb3b90460831`
 - `started.json` SHA256: `c2ad6f6185861ea38801c20967e75dd73ba37a4be41e028603ccd1b9a336a45a`
+
+### Retiming-r2 controlled memory stop
+
+At the **20:39 EDT Oct18** closure audit, the owner was terminal with MainPID 0,
+the Vivado scope was inactive, and no Vivado process remained. Native exit was
+**124**, reason **`combined memory early stop`**, after **6,624.152 s
+(1 h 50 min 24 s)**. All **214 source/tool pins** were independently rehashed
+unchanged after termination, before any subsequent tooling changes.
+
+The largest simultaneous sample was **26,941,095,936 bytes (25.09 GiB)**:
+21,473,136,640 bytes RAM plus 5,467,959,296 bytes swap, crossing the fixed
+26,843,545,600-byte early-stop threshold. Host available RAM was still
+5,028,052,992 bytes and free disk 6,220,402,688 bytes. OOM/OOM-kill and task-limit
+event counters stayed **zero**. The 1,058 `memory.events max` events indicate
+reclaim at the configured RAM cap, not OOM. Peak sampled tasks were 34 of 48.
+
+The larger envelope allowed mapping to exceed r1's 21 GiB limit but still did
+not complete synthesis. No retiming transformation count, final utilization,
+clock-pair timing, APR result or hardware acceptance is available. The independent
+result audit correctly rejects this receipt as `native/resource failure`.
+Neither this attempt nor r1 establishes that retiming improves or worsens fmax.
+
+- `closed.json` SHA256: `b5a82a277f2a8f4b712ceba791288649ce12dcd2378b14cdfdbcc821dc4d8575`
+- Native log SHA256: `2db639be1acffbf0dfb8e08042fb67a3034ace70d9756da2bc07e1bcfe5d62b4`
+
+The closed mapping cache was recoverably archived and removed at **20:44 EDT**:
+only `synth_1/.Xil/Vivado-3325673-AL-MS790S-U26` under this r2 project was
+removed, after open-file checks and `tar -dzf` byte comparison. All files were
+private single-link files; no symlinks were present. Expanded allocation
+2,105,692,160 bytes became a 302,022,656-byte archive: **1,803,669,504 bytes
+(1.68 GiB) net reclaimed**. All 200 frozen source hashes and native/closure
+hashes remained unchanged. `performance-retime-r2/closed-mapping-scratch.md`
+records recovery; archive SHA256 is
+`6e72c8d7250f77cf00ddc6cad6c0556dfd5ee16599ccba90d19c9fc9d050f127`.
+It is forensic storage, never an input to the next fresh build.
+
+### Next combination: performance synthesis and bounded physical operations
+
+`performance-bounded` explicitly sets `GLOBAL_RETIMING=off`, keeps timing-driven
+`PerformanceOptimized` synthesis and rebuilt hierarchy, and combines them with
+`RuntimeOptimized` logical optimization, `AltSpreadLogic_medium` placement,
+the exact bounded pre/post-route physical operations above, and
+`NoTimingRelaxation` routing. Core/AXI constraints remain **25 ns / 10 ns**.
+
+Rationale: the earlier non-retimed performance synthesis completed, whereas both
+retiming-enabled attempts exhausted their guarded mapping envelopes. Earlier
+unbounded Explore physical passes consumed the APR deadline before routing.
+This new combination is intended to obtain a complete routed comparison under
+the same **20/6 GiB** envelope; it does not establish that retiming alone caused
+the memory increase or that the new combination meets 40 MHz. CPU/cache RTL,
+defines, UV-fast mode, incremental/cache prohibitions, deadlines and resource
+reserves are unchanged. No result or hardware acceptance is claimed yet.
+
+The launcher, native-command audit and independent final audit recognize the
+new strategy. Tests require explicit native/property `off` agreement and the
+same exact bounded physical commands; omitted/changed/duplicate policy, added
+directives, repeated passes and missing hold repair are rejected. **37 flow/audit
+tests and 22 exclusive-launcher tests pass** (59 total), plus shell syntax and
+diff-whitespace checks. These are tooling tests, not CPU acceptance.
+
+The fresh native retiming-off probe completed **20:43:09–20:47:33 EDT Oct18**,
+owner exit 0, with native status `phys_opt_design (Post-Route) Complete!` and
+`FRESH-BOUNDED-NATIVE-OK retiming=off`. Its actual synthesis command explicitly
+contains `-global_retiming off`; independent inspection accepted the exact
+bounded pre/post-route commands and run properties. Both native stages have
+completion markers, no error markers, and all four source/tool hashes remained
+unchanged. The probe's owner/scope are inactive; no Vivado process remains.
+This tiny circuit proves configuration support only, not CPU correctness,
+full-core runtime, or 40 MHz timing closure.
+
+- Artifacts: `/home/yukidama/external/tmp/ventium-native-bounded-off-oct18.17YslRAE/`.
+- Owner `ventium-fresh-bounded-off-probe-oct18-r1.service`, invocation
+  `7eb597d2f5b64b3bb2fc485559d99494`; scope invocation
+  `def34e21ad2e4d309bdb107a303c3cca`.
+- Read-back limits: 4 GiB RAM / 1 GiB swap / 48 tasks, one thread and one job.
+- Native log SHA256:
+  `5e7f18dc4b942f40b3834badc1a847a5835418141b2e3e4133acfcce51e4ce56`.
+- Probe Tcl SHA256:
+  `963a110532e7ea407ecb2035764f9578a85f25b00d8f47bcf96079a8fadf8d70`.
 
 The `opt_design` crash workaround has a specific scope. The retained native
 2025.2 help log `/var/tmp/ventium-icfrontspan-pwropt-help.HMmw46/help2.log`
