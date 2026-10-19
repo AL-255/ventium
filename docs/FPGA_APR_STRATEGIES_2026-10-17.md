@@ -47,6 +47,7 @@ window peak reaches 90.37% despite much lower whole-chip routing utilization.
 | `routability-r4` | `AlternateRoutability`, rebuilt hierarchy; one synthesis process | Same APR as r2; routing never reached | Synthesis and placement completed; stopped at 3 h 50 min APR limit in physical optimization. No routed timing result. |
 | `performance-retime-r1` | `PerformanceOptimized`, rebuilt hierarchy, explicit synthesis retiming | Planned spread placement / explicit physical-operation sets / `NoTimingRelaxation` | Stopped by the 21 GiB combined-memory guard during technology mapping. No OOM, completed synthesis/APR or timing result. |
 | `performance-retime-r2` | Same retiming strategy, fresh source/project, named `serial20` memory profile | Same bounded physical operations / spread placement / `NoTimingRelaxation` | Stopped during technology mapping by the 25 GiB combined-memory guard; no OOM/task rejection, completed synthesis or routed timing. |
+| `performance-bounded-r1` | `PerformanceOptimized`, rebuilt hierarchy, explicit retiming off; fresh source/project, `serial20` | Planned spread placement / bounded physical-operation sets / `NoTimingRelaxation` | Launched Oct18 20:48:55 EDT; native synthesis active. No completed synthesis or timing result yet. |
 
 The first combination targets the measured long logic/routing path. The second
 tests a routing-oriented mapping and spread placement, if the first result
@@ -944,6 +945,28 @@ full-core runtime, or 40 MHz timing closure.
   `5e7f18dc4b942f40b3834badc1a847a5835418141b2e3e4133acfcce51e4ce56`.
 - Probe Tcl SHA256:
   `963a110532e7ea407ecb2035764f9578a85f25b00d8f47bcf96079a8fadf8d70`.
+
+Full **`performance-bounded-r1`** started at **20:48:55 EDT Oct18**, using
+tooling commit `a87dac2f` (probe/closure documentation `e8b812c9`, both pushed).
+The owner is `ventium-fresh-bounded-oct18-r1.service`, invocation
+`468e67477808475288f6ede0e0bbd5c1`, PID 3351330. Actual Vivado scope invocation
+`c2233179446c4682944fd147493a1686` read back **20 GiB RAM / 6 GiB swap /
+48 tasks**, `MemoryHigh=infinity`; one internal thread and `-jobs 1`.
+The native synthesis command and run-property audit confirm explicit
+`-global_retiming off`, `PerformanceOptimized`, rebuilt hierarchy,
+incremental checkpoint reuse disabled, and the IP synthesis cache disabled.
+There are no previous-checkpoint inputs. All **214 input/tool pins** were
+independently rehashed unchanged after launch; the 200-file source closure and
+159 defines are the same frozen CPU/profile described above.
+
+Admission evidence: external ext4 mounted read/write, available host RAM
+26,439,180,288 bytes, free swap 29,674,745,856 bytes, free disk after source
+preparation 7,972,454,400 bytes. At the 20:50 EDT check synthesis was active,
+with no OOM/task-limit events or swap use. This is launch/configuration evidence,
+not a completed synthesis, routed timing, or physical acceptance result.
+
+- `started.json` SHA256: `38889dedde18918e21d0be8955b1e8a959d1de83a04e0193515be68ed0984cf7`
+- `prepared.json` SHA256: `57ae9fb2d1132574cc8cb7a7d65ee6dd4371840c439709b98c56bb3b90460831`
 
 The `opt_design` crash workaround has a specific scope. The retained native
 2025.2 help log `/var/tmp/ventium-icfrontspan-pwropt-help.HMmw46/help2.log`
