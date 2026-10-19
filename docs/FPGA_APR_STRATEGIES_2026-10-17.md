@@ -81,7 +81,17 @@ source hashes, synthesis-clock evidence, stage timestamps and final reports.
 New checkpoints generated **within** a run are normal synthesis/APR outputs;
 they are never starting inputs for another strategy.
 
-Resource limits: one Vivado family/one native worker. The default `standard16`
+**Memory-policy override, Oct19 2026:** the user explicitly removed memory
+limitations and authorized swap use. Before the next trial, update the launcher,
+controller and evidence tests to support uncapped RAM/swap, without the old
+combined-memory early stop or free-RAM/swap admission reserve. Keep exclusive
+Vivado ownership, disk protection, runtime bounds and actual OOM/error
+monitoring. The live `performance-route-first-r1` is below its existing limits
+and remains on its original pinned contract; no restart or live script edit is
+made. The following numeric envelopes describe historical/current launches,
+not the policy for the next run. Launcher changes are still pending.
+
+Historical resource limits: one Vivado family/one native worker. The `standard16`
 profile is **16 GiB RAM / 6 GiB swap**, with a 21 GiB combined early stop.
 Retiming-r2 uses the separately tested serial-only **20/6 GiB** profile and
 25 GiB combined early stop described below. Both retain the 4 GiB disk reserve

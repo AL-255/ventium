@@ -299,6 +299,15 @@ gap blocks interrupt-driven real-mode guests — see README "On silicon".
 
 ## Conventions
 
+- **Vivado memory policy (user override, 2026-10-19):** new synthesis/APR
+  runs must not impose artificial RAM, swap, combined-memory or free-RAM
+  admission limits. Swap use is allowed and is not a reason to stop a run.
+  Update the launcher/controller and their audit tests before the next launch;
+  do not silently reuse the historical capped profiles. Preserve the exclusive
+  single-Vivado-family rule, disk-space protection, runtime bounds, and actual
+  OOM/error monitoring. Do not kill unrelated applications to free memory.
+  The already-running `performance-route-first-r1` retains its pinned launch
+  contract; do not restart it or edit its pinned scripts to apply this policy.
 - Use `/home/yukidama/external/tmp` for all new generated runs, temporary builds,
   and scratch files; set `TMPDIR` explicitly for commands that create temporary
   files. Check that the external filesystem is mounted, writable, and has enough
