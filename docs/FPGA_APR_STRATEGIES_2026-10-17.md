@@ -48,6 +48,7 @@ window peak reaches 90.37% despite much lower whole-chip routing utilization.
 | `performance-retime-r1` | `PerformanceOptimized`, rebuilt hierarchy, explicit synthesis retiming | Planned spread placement / explicit physical-operation sets / `NoTimingRelaxation` | Stopped by the 21 GiB combined-memory guard during technology mapping. No OOM, completed synthesis/APR or timing result. |
 | `performance-retime-r2` | Same retiming strategy, fresh source/project, named `serial20` memory profile | Same bounded physical operations / spread placement / `NoTimingRelaxation` | Stopped during technology mapping by the 25 GiB combined-memory guard; no OOM/task rejection, completed synthesis or routed timing. |
 | `performance-bounded-r1` | `PerformanceOptimized`, rebuilt hierarchy, explicit retiming off; fresh source/project, `serial20` | Spread placement / bounded physical-operation sets / planned `NoTimingRelaxation` | Failed Oct19 00:55 EDT: Vivado SIGSEGV exporting the post-physical-optimization checkpoint. Synthesis, placement and physical optimization completed; routing never started. No routed timing result. |
+| `performance-route-first-r1` | `PerformanceOptimized`, rebuilt hierarchy, explicit retiming off; one synthesis thread | Spread placement / optional physical stages disabled / `NoTimingRelaxation`; four APR threads | Fresh full run launched Oct19 01:10:30 EDT. Source admission and actual resource limits verified; no completed synthesis or routed timing result yet. |
 
 The first combination targets the measured long logic/routing path. The second
 tests a routing-oriented mapping and spread placement, if the first result
@@ -1224,6 +1225,44 @@ It does not prove that the full design's crash is repaired. It uses its own
 new synthesis output only; no old project/netlist/checkpoint/IP cache. It does
 not generate an unpinned-I/O bitstream or qualify full-core timing. At this
 entry the full route-first trial has **not launched**.
+
+### Fresh route-first full trial launched, Oct19 01:10 EDT
+
+Tooling/native-probe evidence was committed and pushed as **`1e3f851c`** before
+launch. The new trial `performance-route-first-r1` started **01:10:30 EDT Oct19**
+from a new source copy/project, not a checkpoint from the crashed run or probe:
+
+- Owner `ventium-fresh-route-first-oct19-r1.service`, invocation
+  `aaa4a70348b541a0ab27e30b01a8fb71`, controller PID **3391464**.
+- Vivado scope invocation `271089ef2c8d423abe26e15fbd438063`; native parent
+  PID **3393914** (its shell launcher is in the same family).
+- Actual scope readback: **20 GiB RAM / 6 GiB swap / 128 tasks**.
+- Launch receipt records **synthesis=1 / APR=4**, `serial_apr4`, `serial20`,
+  25 GiB combined early stop, 13,800 s whole-APR and 28,800 s whole-run bounds.
+- Admission: **26,597,117,952 bytes MemAvailable**, **29,563,265,024 bytes
+  SwapFree**; after freezing sources, **7,777,882,112 bytes free disk**.
+- **200 source/metadata files, 159 defines, 215 total source/tool pins**.
+  All pins were independently rechecked unchanged after launch.
+  Only `ven_pll_ctrl.sv` differs from the pinned source ancestor; the wrapper
+  already matches. CPU/cache RTL is unchanged from the deployed source profile,
+  not taken from the dirty checkout.
+- The native source checks report 40 MHz MMCM, UV-fast hardwiring, relocated
+  load/store and pipelined FP. This is configuration evidence, not execution
+  or physical acceptance; generated worker commands still need stage-by-stage
+  checks when those workers are created.
+- `started.json` SHA256:
+  `467271c5e5aa3767b47eb13bc82f1f65549a3f61ecaa8f0b78d2cbeb1863f919`.
+- `prepared.json` SHA256:
+  `57ae9fb2d1132574cc8cb7a7d65ee6dd4371840c439709b98c56bb3b90460831`.
+
+Artifacts are under
+`/home/yukidama/external/tmp/ventium-fresh-strategies-oct17.67YRDIRh/performance-route-first-r1/`.
+Its controller monitors the actual resource scope every five seconds and
+owner-checks any safety stop. Do not launch another Vivado while it is active.
+No live source/tool pins may be edited. The **40 MHz timing objective remains
+unproven**, and this candidate has no gameplay IPC or physical standard-suite
+acceptance. The older deployed gameplay baseline remains **0.496500 U+V**,
+`2886d24c`, cycles **625,021,130,428–629,480,208,865**.
 
 ### Runtime accounting at 23:56 EDT Oct18
 
