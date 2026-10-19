@@ -977,6 +977,20 @@ task-limit events across 320 samples. Peak sampled tasks were 27 of 48. This is
 still live synthesis: there is no final netlist, utilization, clock-pair timing,
 routed result, or new gameplay measurement yet.
 
+At **21:24 EDT**, the same timing-optimization worker remained active. Its
+helper processes were traced to this exact synthesis directory and guarded
+scope, not orphan runs. Charged RAM was 16,335,585,280 bytes, swap zero, and
+OOM/task-limit counters zero. To maintain disk headroom, only the closed
+`integer/` cases of `raw-prime-storage-core-checks-r1` and
+`prime-width-core-checks-r1` were recoverably archived and their expanded copies
+removed. Both failed parent diagnostic summaries remain unchanged; these are
+not acceptance passes. Archive byte comparisons and repeated open-file checks
+preceded removal. Conservative net reclamation is **303,616,000 bytes
+(289.55 MiB)**, excluding externally hard-linked files. All **214 live pins**
+were independently rehashed unchanged afterward. Exact archive/parent hashes,
+targets and recovery instructions are in
+`/home/yukidama/external/tmp/ventium-fprem-sequence.iSZ9BAj4/closed-integer-evidence-oct18.md`.
+
 The `opt_design` crash workaround has a specific scope. The retained native
 2025.2 help log `/var/tmp/ventium-icfrontspan-pwropt-help.HMmw46/help2.log`
 still matches SHA256
