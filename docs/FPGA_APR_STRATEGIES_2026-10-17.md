@@ -1264,6 +1264,20 @@ unproven**, and this candidate has no gameplay IPC or physical standard-suite
 acceptance. The older deployed gameplay baseline remains **0.496500 U+V**,
 `2886d24c`, cycles **625,021,130,428–629,480,208,865**.
 
+At **01:12 EDT**, synthesis is live and the independent native-configuration
+audit passes: `PerformanceOptimized`, explicit `-global_retiming off`, rebuilt
+hierarchy, one thread, IP cache disabled, no previous checkpoint input. The
+legacy platform's earlier `balanced (synthesis Default)` banner is superseded
+by this actual generated native command/property evidence, not counted as the
+selected synthesis directive. Native script SHA256:
+`e08e71bbe3cec42f81ed18a93f385e9f8efd5592263dab5980fba2868237eb64`;
+property report SHA256:
+`d0f4f71d6f5d5b292af4fd9feb48e41a50f315e316afa3e12c270ad02cfe87ac`.
+The first 22 scope samples show peak RAM **4,664,696,832 bytes**, no swap,
+task-limit denial, OOM kill or safety-stop reason. APR has not started; its
+generated worker configuration remains to be audited. This is not a completed
+synthesis or timing result.
+
 ### Runtime accounting at 23:56 EDT Oct18
 
 The nine closed fresh-trial receipts sum to **85,701.723 s (23 h 48 min
