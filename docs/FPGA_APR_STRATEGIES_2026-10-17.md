@@ -48,7 +48,7 @@ window peak reaches 90.37% despite much lower whole-chip routing utilization.
 | `performance-retime-r1` | `PerformanceOptimized`, rebuilt hierarchy, explicit synthesis retiming | Planned spread placement / explicit physical-operation sets / `NoTimingRelaxation` | Stopped by the 21 GiB combined-memory guard during technology mapping. No OOM, completed synthesis/APR or timing result. |
 | `performance-retime-r2` | Same retiming strategy, fresh source/project, named `serial20` memory profile | Same bounded physical operations / spread placement / `NoTimingRelaxation` | Stopped during technology mapping by the 25 GiB combined-memory guard; no OOM/task rejection, completed synthesis or routed timing. |
 | `performance-bounded-r1` | `PerformanceOptimized`, rebuilt hierarchy, explicit retiming off; fresh source/project, `serial20` | Spread placement / bounded physical-operation sets / planned `NoTimingRelaxation` | Failed Oct19 00:55 EDT: Vivado SIGSEGV exporting the post-physical-optimization checkpoint. Synthesis, placement and physical optimization completed; routing never started. No routed timing result. |
-| `performance-route-first-r1` | `PerformanceOptimized`, rebuilt hierarchy, explicit retiming off; one synthesis thread | Spread placement / optional physical stages disabled / `NoTimingRelaxation`; four APR threads | Fresh synthesis completed in 2 h 09 min 25 s; propagated 40/100 MHz clocks verified. APR launched Oct19 03:24:08 EDT; native configuration audit passes. No routed timing result yet. |
+| `performance-route-first-r1` | `PerformanceOptimized`, rebuilt hierarchy, explicit retiming off; one synthesis thread | Spread placement / optional physical stages disabled / `NoTimingRelaxation`; four APR threads | Fresh synthesis completed in 2 h 09 min 25 s; propagated 40/100 MHz clocks verified. Placement completed in 24 min 40 s; routing started Oct19 03:51:14 EDT and remains active at 04:18. No final routed timing result yet. |
 
 The first combination targets the measured long logic/routing path. The second
 tests a routing-oriented mapping and spread placement, if the first result
@@ -1406,6 +1406,86 @@ Completed report/configuration SHA256 (paths relative to this trial's `build/`):
 - `impl_1-properties.rpt`: `f16a981dd03042bce579bdf404078fc71f4c17f62adbe67fb55a5e2c0ad37580`.
 - `rk_ao486_system/rk_ao486_system.runs/impl_1/rk_ao486_bd_wrapper.tcl`:
   `5a5d310ef33f063074e690746ddd889448e6aa5e53eea866aedd9a50b41596b5`.
+
+### Placement completed; routing active, Oct19 04:18 EDT
+
+The same native worker **3408785** completed `place_design` in **24 min 40 s
+wall / 57 min 13 s CPU**. The preceding one-thread `performance-bounded-r1`
+placement took **52 min 23 s wall / 52 min 18 s CPU**: this placement is
+**52.9% shorter (2.12× faster)**, not a measured Fmax improvement. The final
+estimated post-placement global WNS is still −1.385 ns. This global, un-routed
+number does not identify a clock pair and is not converted to core Fmax.
+
+`stages.tsv` records routing start **03:51:14 EDT** (epoch 1792396274).
+The native command confirms `NoTimingRelaxation` with at most four CPUs.
+Initial congestion is **level 6 / 64×64**, with **609 CLBs** reporting high
+pin utilization. The main global congestion window is around
+`INT_X32Y228`–`INT_X63Y291`; high-pin clusters include
+`CLEL_R_X46Y261`–`CLEL_R_X46Y273` and `CLEL_R_X42Y261`–`CLEL_R_X42Y267`.
+Vivado warns that congestion is making it prioritize routing completion over
+timing optimization. These are current routing diagnostics, not final failure
+or sign-off. Phase 5.2 overlap counts declined **315,055 → 111,612 → 60,314**.
+Worker CPU time advanced to **2 h 11 min 27 s** at 04:18:36; the owner and
+exclusive scope remain live, with the original invocation IDs.
+
+That resource sample reports **6,699,819,008 bytes charged RAM + 3,170,320,384
+bytes swap**, 28 tasks, **14,640,340,992 bytes external free disk**, no OOM or
+task-limit event, and no safety-stop reason. The whole-APR deadline remains
+**07:14:08 EDT**. The completed synthesis and placement do not establish
+40 MHz routed closure. No second Vivado, checkpoint-based retry, live input
+edit, constraint relaxation or board change was performed.
+
+### User-requested disk cleanup, Oct19 04:18 EDT
+
+Cleanup receipts, exact deletion manifests and recovery archives are under
+`/home/yukidama/external/tmp/ventium-cleanup-oct19.NmNWkhbp/`.
+Both external trees were verified on the writable ext4 volume; NTFS was left
+untouched. File identity/metadata, live process references and all **215 current
+launch pins** were checked before deletion and the pins rehashed afterward.
+
+- External cleanup removed **16,377 obsolete files**, freeing about **7.4 GiB
+  gross**: 29 retired synthesis intermediates, 2,822 stale Vivado scratch files,
+  8,542 compiler products, 4,979 generated Verilator C++ files, one superseded
+  explicitly unqualified ECO checkpoint, and four closed mapping archives.
+  Canonical warm builds, active/accepted FPGA runs, source closures, media,
+  logs, reports, captures and useful profiling evidence were retained.
+- **Archive availability correction:** `closed-mapping-scratch.tar.gz` under
+  `performance-retime-r1`, `performance-retime-r2`, `routability-r2` and
+  `routability-r3` was permanently deleted. Earlier entries describing those
+  four internal mapping caches as recoverable are historical, not current
+  recovery instructions. Their frozen sources, native logs and closure receipts
+  remain; none contained an accepted synthesis/APR result.
+- `/home/yukidama/ventium-bg-sep28` was removed after verifying no live users or
+  incoming symlinks. Its roughly **14 GiB** of retired September runs included
+  three registered dirty historical worktrees. Their HEADs, statuses and six
+  binary-format diffs were recorded in `background-worktrees.json` and adjacent
+  patches; their actual sources and useful evidence were archived and compared
+  against the originals before exact-path `git worktree remove --force`.
+  No broad worktree pruning was performed. Main-checkout status/HEAD remained
+  unchanged, and all three retired registrations are gone.
+- `ventium-bg-sep28-evidence.tar.zst` (**699,199,097 bytes**) preserves 6,751
+  source/evidence files; SHA256
+  `69b3e2b3ba1e0697bd4d7b8fd3f80401562a4a972e55f1cfb65aa6904858b5c0`.
+  `ventium-bg-sep28-supplement.tar.zst` (**4,312,624 bytes**) additionally
+  preserves all 146 generated-text files; SHA256
+  `af51fe691e79f4915eabf616d40b215dc0fcb7d2f6f1b20de0655bee6015824f`.
+  Restore archives only into a fresh directory under external `tmp`, not `~/`.
+  Historical report/example paths into the retired directory now require this
+  recovery; the two CoreMark example input JSONs are included in the archive.
+  **187 obsolete private guest-disk copies, 208 old executables and 89 compiler
+  products are not archived and are permanently removed.** The historical
+  symlink into NTFS was archived/unlinked without accessing its target.
+
+`background-removed.json` records successful removal, unchanged main checkout
+and all 215 live pins. Root available space rose from **30,746,763,264** to
+**46,226,894,848 bytes** during that operation; these are filesystem samples,
+not an exact attribution of all concurrent disk activity. At 04:18, `df -h`
+reports **44 GiB root / 14 GiB external** available. The compact evidence
+archives consume about 671 MiB of the external cleanup's gross gain.
+
+Cleanup and routing progress do not supply candidate gameplay acceptance.
+Candidate IPC remains unmeasured; the older deployed **0.496500 total U+V**
+baseline is `2886d24c`, cycles **625,021,130,428–629,480,208,865**.
 
 ### Runtime accounting at 23:56 EDT Oct18
 
