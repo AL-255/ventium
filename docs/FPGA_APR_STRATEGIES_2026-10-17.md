@@ -47,7 +47,7 @@ window peak reaches 90.37% despite much lower whole-chip routing utilization.
 | `routability-r4` | `AlternateRoutability`, rebuilt hierarchy; one synthesis process | Same APR as r2; routing never reached | Synthesis and placement completed; stopped at 3 h 50 min APR limit in physical optimization. No routed timing result. |
 | `performance-retime-r1` | `PerformanceOptimized`, rebuilt hierarchy, explicit synthesis retiming | Planned spread placement / explicit physical-operation sets / `NoTimingRelaxation` | Stopped by the 21 GiB combined-memory guard during technology mapping. No OOM, completed synthesis/APR or timing result. |
 | `performance-retime-r2` | Same retiming strategy, fresh source/project, named `serial20` memory profile | Same bounded physical operations / spread placement / `NoTimingRelaxation` | Stopped during technology mapping by the 25 GiB combined-memory guard; no OOM/task rejection, completed synthesis or routed timing. |
-| `performance-bounded-r1` | `PerformanceOptimized`, rebuilt hierarchy, explicit retiming off; fresh source/project, `serial20` | Spread placement / bounded physical-operation sets / `NoTimingRelaxation` | Fresh synthesis completed Oct18 22:58:57 EDT; 40/100 MHz clock checks passed and APR launched at 23:01 EDT. No routed timing result yet. |
+| `performance-bounded-r1` | `PerformanceOptimized`, rebuilt hierarchy, explicit retiming off; fresh source/project, `serial20` | Spread placement / bounded physical-operation sets / `NoTimingRelaxation` | Fresh synthesis and placement completed; 40/100 MHz clock checks passed. Placement took 52m23s; bounded pre-route physical optimization started at about 23:57 EDT Oct18. No routed timing result yet. |
 
 The first combination targets the measured long logic/routing path. The second
 tests a routing-oriented mapping and spread placement, if the first result
@@ -1063,6 +1063,58 @@ Owning-project pre-APR evidence under `build/`:
 - `synth-clocks.tsv` SHA256: `870f414ded70ac63dedb4a92d89b654237dac82f156e7bcb5871f0e452f55d81`
 - `synth-timing.rpt` SHA256: `b99c536e9b749266b9abe73c386c325b913d47c2bdef039b2f3f492ef45cdb2c`
 - `synth-utilization.rpt` SHA256: `6c76a0f3c544ed4c8ec8fb5ce3f67d08d65569c7c4289d4728a46133dedbaeec`
+
+### Bounded trial: completed placement
+
+At **23:56 EDT Oct18**, `place_design` completed successfully in **52 min
+23 s wall / 52 min 18 s CPU**, with zero errors and zero critical warnings.
+This is **49.34% less placement time** than performance-r4's 1 h 43 min 24 s;
+it is not a whole-flow speedup or routed timing result. The placed design has
+**185,011 LUTs, 55,179 FFs and 32,271 occupied CLBs (75.65%)**, compared with
+34,029 CLBs (79.77%) in performance-r4: **5.17% fewer occupied CLBs**.
+Its estimated post-placement WNS is **−1.385 ns**. The native placer summary
+does not identify that path's clock pair, so no core fmax is inferred from it.
+The implemented clock target remains 40 MHz; final routed frequency is pending.
+
+Estimated congestion regions are still substantial: north/east global 32×32,
+south/west global 16×16; long north/south/east 32×32 and west 8×8; short
+north/south 16×16 and east/west 32×32. Lower CLB occupancy alone therefore
+does not establish that routing congestion or timing is solved.
+
+The native script has now executed the intended command
+`phys_opt_design -fanout_opt -placement_opt -restruct_opt -equ_drivers_opt`.
+This is its start, not its completion. All **214 source/tool pins** were
+rehashed unchanged after placement, and independent native-script/property
+inspection again accepted the exact pre/post-route operation sets. The same
+owner/scope and 02:51:24 EDT implementation deadline remain in force. There
+have been no OOM or task-cap events; some swap is now charged. The candidate
+still has no gameplay IPC or physical acceptance.
+
+Stable placed utilization evidence:
+`build/rk_ao486_system/rk_ao486_system.runs/impl_1/rk_ao486_bd_wrapper_utilization_placed.rpt`,
+SHA256 `e6da354604dae83b9f71b9659ccd03ada468317d999f7db860ada6a6e0063771`.
+
+### Runtime accounting at 23:56 EDT Oct18
+
+The nine closed fresh-trial receipts sum to **85,701.723 s (23 h 48 min
+21.7 s)** of run elapsed time, excluding the live bounded trial (about 3 h
+7 min), probes and gaps between runs. This is not one 20-hour routing job.
+
+| Closed attempts | Combined elapsed | Outcome |
+|---|---:|---|
+| performance-r4 + routability-r4 | 13 h 12 min 37 s | Both exhausted the APR deadline during pre-route physical optimization |
+| performance-retime-r1/r2 | 3 h 40 min 44 s | Mapping stopped at combined-memory guards |
+| routability-r2/r3 | 4 h 35 min 10 s | Mapping stall with task-limit events, then memory guard on retry |
+| performance-r1/r2/r3 | 2 h 19 min 52 s | Launcher/reporting defects, including an invalid post-synthesis clock-reporting context |
+
+The defects and repeated long Explore passes were avoidable workflow costs,
+not evidence that this design intrinsically requires that cumulative runtime.
+One internal thread also trades throughput for memory containment; the
+single-Vivado-family rule does not itself require single-threaded APR.
+The current trial already removes the repeated Explore passes and explicit
+synthesis retiming. It must reach routing before its timing benefit can be
+judged. No live inputs, resource settings or clock constraints were changed
+in response to the runtime review.
 
 The `opt_design` crash workaround has a specific scope. The retained native
 2025.2 help log `/var/tmp/ventium-icfrontspan-pwropt-help.HMmw46/help2.log`
