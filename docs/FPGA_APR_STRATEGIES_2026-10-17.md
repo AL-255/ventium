@@ -48,7 +48,7 @@ window peak reaches 90.37% despite much lower whole-chip routing utilization.
 | `performance-retime-r1` | `PerformanceOptimized`, rebuilt hierarchy, explicit synthesis retiming | Planned spread placement / explicit physical-operation sets / `NoTimingRelaxation` | Stopped by the 21 GiB combined-memory guard during technology mapping. No OOM, completed synthesis/APR or timing result. |
 | `performance-retime-r2` | Same retiming strategy, fresh source/project, named `serial20` memory profile | Same bounded physical operations / spread placement / `NoTimingRelaxation` | Stopped during technology mapping by the 25 GiB combined-memory guard; no OOM/task rejection, completed synthesis or routed timing. |
 | `performance-bounded-r1` | `PerformanceOptimized`, rebuilt hierarchy, explicit retiming off; fresh source/project, `serial20` | Spread placement / bounded physical-operation sets / planned `NoTimingRelaxation` | Failed Oct19 00:55 EDT: Vivado SIGSEGV exporting the post-physical-optimization checkpoint. Synthesis, placement and physical optimization completed; routing never started. No routed timing result. |
-| `performance-route-first-r1` | `PerformanceOptimized`, rebuilt hierarchy, explicit retiming off; one synthesis thread | Spread placement / optional physical stages disabled / `NoTimingRelaxation`; four APR threads | Fresh full run launched Oct19 01:10:30 EDT. Source admission and actual resource limits verified; no completed synthesis or routed timing result yet. |
+| `performance-route-first-r1` | `PerformanceOptimized`, rebuilt hierarchy, explicit retiming off; one synthesis thread | Spread placement / optional physical stages disabled / `NoTimingRelaxation`; four APR threads | Fresh full run launched Oct19 01:10:30 EDT; technology mapping entered around 02:52 EDT. Source admission and actual resource limits verified; no completed synthesis or routed timing result yet. |
 
 The first combination targets the measured long logic/routing path. The second
 tests a routing-oriented mapping and spread placement, if the first result
@@ -1321,6 +1321,29 @@ documented post-hook clock-view issue, not evidence of missing synthesis
 constraints. This source/native-load check does **not** replace the forthcoming
 propagated-clock report or establish achievable routed frequency. No live input
 was changed and no additional Vivado was launched.
+
+At **02:52 EDT**, native synthesis finished timing optimization and entered
+**technology mapping**. The native cumulative timing-optimization completion
+is **1 h 40 min 14 s elapsed / 1 h 39 min 32 s CPU**. The phase itself took
+**74 min 59 s**, versus **73 min 41 s** for `performance-bounded-r1`: 78 seconds
+longer, not an unexplained multi-hour stall. Synthesis is still incomplete;
+there is no propagated-clock result, unplaced frequency result or APR launch
+for this trial yet. The previous run's remaining mapping/finalization time
+is only an estimate, not a deadline or proof that this run will finish then.
+
+All **215 launch pins** were independently rehashed unchanged at **02:38 EDT**.
+At **02:23 EDT**, every process named Vivado was in the sole active scope;
+the retained native helper is owned by this synthesis family, not an orphan.
+That helper resumed CPU work during mapping. By the **02:53 EDT** resource
+poll, charged RAM was **20,703,576,064 bytes (19.28 GiB)**, swap was zero,
+free disk was **5,563,183,104 bytes**, and 27 tasks were active. The samples
+still reported no OOM/OOM-kill, task rejection or safety-stop reason. This is
+an in-progress sample, not a final memory peak; retain the **20 GiB RAM /
+6 GiB swap / 25 GiB combined early-stop** policy and keep monitoring mapping.
+No inputs, limits or clock constraints were changed. Candidate gameplay IPC
+and physical standard-suite acceptance remain unmeasured/unproven; the older
+`2886d24c` baseline remains **0.496500 U+V**, cycles
+**625,021,130,428–629,480,208,865**.
 
 ### Runtime accounting at 23:56 EDT Oct18
 
