@@ -47,7 +47,7 @@ window peak reaches 90.37% despite much lower whole-chip routing utilization.
 | `routability-r4` | `AlternateRoutability`, rebuilt hierarchy; one synthesis process | Same APR as r2; routing never reached | Synthesis and placement completed; stopped at 3 h 50 min APR limit in physical optimization. No routed timing result. |
 | `performance-retime-r1` | `PerformanceOptimized`, rebuilt hierarchy, explicit synthesis retiming | Planned spread placement / explicit physical-operation sets / `NoTimingRelaxation` | Stopped by the 21 GiB combined-memory guard during technology mapping. No OOM, completed synthesis/APR or timing result. |
 | `performance-retime-r2` | Same retiming strategy, fresh source/project, named `serial20` memory profile | Same bounded physical operations / spread placement / `NoTimingRelaxation` | Stopped during technology mapping by the 25 GiB combined-memory guard; no OOM/task rejection, completed synthesis or routed timing. |
-| `performance-bounded-r1` | `PerformanceOptimized`, rebuilt hierarchy, explicit retiming off; fresh source/project, `serial20` | Planned spread placement / bounded physical-operation sets / `NoTimingRelaxation` | Launched Oct18 20:48:55 EDT; native synthesis active. No completed synthesis or timing result yet. |
+| `performance-bounded-r1` | `PerformanceOptimized`, rebuilt hierarchy, explicit retiming off; fresh source/project, `serial20` | Planned spread placement / bounded physical-operation sets / `NoTimingRelaxation` | Launched Oct18 20:48:55 EDT; area optimization complete, timing optimization active at 21:15 EDT. No completed synthesis or routed timing result yet. |
 
 The first combination targets the measured long logic/routing path. The second
 tests a routing-oriented mapping and spread placement, if the first result
@@ -967,6 +967,15 @@ not a completed synthesis, routed timing, or physical acceptance result.
 
 - `started.json` SHA256: `38889dedde18918e21d0be8955b1e8a959d1de83a04e0193515be68ed0984cf7`
 - `prepared.json` SHA256: `57ae9fb2d1132574cc8cb7a7d65ee6dd4371840c439709b98c56bb3b90460831`
+
+At **21:15 EDT**, this same run finished cross-boundary/area optimization at
+cumulative native **24 min 49 s wall / 24 min 28 s CPU**, applied timing
+constraints by **25 min 09 s wall**, and entered timing optimization. All
+**214 input/tool pins** were rehashed unchanged after the transition. The latest
+sample charged 9,988,681,728 bytes RAM, zero swap, with zero OOM/OOM-kill or
+task-limit events across 320 samples. Peak sampled tasks were 27 of 48. This is
+still live synthesis: there is no final netlist, utilization, clock-pair timing,
+routed result, or new gameplay measurement yet.
 
 The `opt_design` crash workaround has a specific scope. The retained native
 2025.2 help log `/var/tmp/ventium-icfrontspan-pwropt-help.HMmw46/help2.log`
