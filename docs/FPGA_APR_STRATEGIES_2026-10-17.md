@@ -47,7 +47,7 @@ window peak reaches 90.37% despite much lower whole-chip routing utilization.
 | `routability-r4` | `AlternateRoutability`, rebuilt hierarchy; one synthesis process | Same APR as r2; routing never reached | Synthesis and placement completed; stopped at 3 h 50 min APR limit in physical optimization. No routed timing result. |
 | `performance-retime-r1` | `PerformanceOptimized`, rebuilt hierarchy, explicit synthesis retiming | Planned spread placement / explicit physical-operation sets / `NoTimingRelaxation` | Stopped by the 21 GiB combined-memory guard during technology mapping. No OOM, completed synthesis/APR or timing result. |
 | `performance-retime-r2` | Same retiming strategy, fresh source/project, named `serial20` memory profile | Same bounded physical operations / spread placement / `NoTimingRelaxation` | Stopped during technology mapping by the 25 GiB combined-memory guard; no OOM/task rejection, completed synthesis or routed timing. |
-| `performance-bounded-r1` | `PerformanceOptimized`, rebuilt hierarchy, explicit retiming off; fresh source/project, `serial20` | Planned spread placement / bounded physical-operation sets / `NoTimingRelaxation` | Launched Oct18 20:48:55 EDT; area optimization complete, timing optimization active at 21:15 EDT. No completed synthesis or routed timing result yet. |
+| `performance-bounded-r1` | `PerformanceOptimized`, rebuilt hierarchy, explicit retiming off; fresh source/project, `serial20` | Planned spread placement / bounded physical-operation sets / `NoTimingRelaxation` | Timing optimization finished; technology mapping active at Oct18 22:29 EDT. No completed synthesis or routed timing result yet. |
 
 The first combination targets the measured long logic/routing path. The second
 tests a routing-oriented mapping and spread placement, if the first result
@@ -990,6 +990,18 @@ preceded removal. Conservative net reclamation is **303,616,000 bytes
 were independently rehashed unchanged afterward. Exact archive/parent hashes,
 targets and recovery instructions are in
 `/home/yukidama/external/tmp/ventium-fprem-sequence.iSZ9BAj4/closed-integer-evidence-oct18.md`.
+
+At the **22:29 EDT Oct18** observation, native timing optimization had finished
+at cumulative **1 h 38 min 50 s wall / 1 h 38 min 08 s CPU**, and synthesis had
+entered **Technology Mapping**. The same owner/scope remained active; all
+**214 input/tool pins** were independently rehashed unchanged at 22:30 EDT.
+The transition sample charged **18,460,688,384 bytes RAM**, zero swap, with
+zero OOM/OOM-kill or task-limit events; free disk was 6,062,649,344 bytes.
+The existing 20/6 GiB limits and 25 GiB combined early-stop threshold remain
+unchanged. Mapping completion, final utilization, all clock-pair timing and
+routed 40 MHz closure remain pending. Finishing the timing-optimization
+algorithm is not evidence that the clock target is met; there is still no
+candidate gameplay IPC or physical standard-suite acceptance.
 
 The `opt_design` crash workaround has a specific scope. The retained native
 2025.2 help log `/var/tmp/ventium-icfrontspan-pwropt-help.HMmw46/help2.log`
