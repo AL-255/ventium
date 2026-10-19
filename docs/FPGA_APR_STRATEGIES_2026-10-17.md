@@ -1307,6 +1307,21 @@ minimum free disk **6,851,514,368 bytes**, and no task rejection, OOM kill or
 safety-stop reason. Synthesis remains incomplete; APR has not launched and no
 current candidate frequency or gameplay IPC has been measured.
 
+At **01:51 EDT**, read-only inspection of this run's native synthesis inputs
+also confirms the clock-source configuration. `synth_1/runme.log` lines
+1375–1377 record parsing its generated PS XDC and executing `create_clock`
+before optimization. That XDC defines `clk_pl_0` at **10 ns** on
+`PS8_i/PLCLK[0]` (SHA256
+`41707f907438d712eefa64188caad6554a48044b53dcde9b969cf323541c5d7d`).
+The generated BD connects `ps8_pl_clk0` to `u_clkdiv.clk_in` and its output to
+`u_soc.clk`; the frozen MMCM parameters remain **M=10, D=1, O=25**, nominal
+**40 MHz core / 100 MHz PS-memory side**. The synthesis child marks this XDC
+implementation-disabled, not synthesis-disabled; that is the previously
+documented post-hook clock-view issue, not evidence of missing synthesis
+constraints. This source/native-load check does **not** replace the forthcoming
+propagated-clock report or establish achievable routed frequency. No live input
+was changed and no additional Vivado was launched.
+
 ### Runtime accounting at 23:56 EDT Oct18
 
 The nine closed fresh-trial receipts sum to **85,701.723 s (23 h 48 min
