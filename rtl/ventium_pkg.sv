@@ -1,3 +1,4 @@
+`default_nettype wire  // Vivado project-flow: reset nettype (files compile as one unit; prevents `none` leak)
 // Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
 // SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
 
@@ -60,6 +61,12 @@ package ventium_pkg;
   // core lints/elaborates standalone (no C symbol to bind) — see §2 last bullet.
   // ---------------------------------------------------------------------------
 `ifndef VTM_NO_DPI
+`ifdef VEN_FP_ASYNC
+  // event 0 begins an ordered FP owner; event 1 consumes its just-stashed
+  // committed x87 state after the shared FPU's response. Simulation only.
+  import "DPI-C" context function void vtm_fp_async_event(
+      input int unsigned event_kind, input longint unsigned owner);
+`endif
   import "DPI-C" context function void vtm_retire(
       input longint unsigned n,        // retire seq, 0-based, monotonic
       input int      unsigned pc,      // fetch vaddr of retired insn
@@ -161,5 +168,16 @@ package ventium_pkg;
       input int     unsigned cr0, input int unsigned cr2,
       input int     unsigned cr3, input int unsigned cr4);
 `endif
+
+  // ===========================================================================
+  // ONE definition of the shippable L1 D-cache geometry.
+  // ===========================================================================
+  // A Pentium P5 has a 2-way, 128-set, 32-byte-line D$ (8 KiB).  This package
+  // constant is consumed by both the core timing model and the functional AXI
+  // L1D, so the implementation has one physical cache geometry rather than a
+  // define-selected model/cache mismatch.  Keep geometry experiments at the
+  // standalone leaf-module level; a shippable core always uses P5 geometry.
+  localparam int L1D_SETS_DEF =
+      128;
 
 endpackage : ventium_pkg

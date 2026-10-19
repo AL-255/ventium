@@ -12,6 +12,23 @@
 // from module-level signals (pure functions of the pre-edge state). Reads are
 // gpr_o[] (the registered value), matching the FSM exactly.
 
+        // Enclosed by fsm_case_enabled, exactly like the sequential S_LOAD arm:
+        // faults/walk detours cannot expose speculative pointer writes.
+        S_LOAD: begin
+`ifdef VEN_P54_MOV_ACK_RETIRE
+          // Same width/high-byte merge, final whole operand, one WB authority.
+          `include "core_mov_ack_gpr.svh"
+`endif
+          if (rep_movs_load_fuse) begin
+            gpr_we[R_ESI]=1'b1;
+            gpr_wd[R_ESI]=gpr_o[R_ESI] + str_step;
+            gpr_we[R_EDI]=1'b1;
+            gpr_wd[R_EDI]=gpr_o[R_EDI] + str_step;
+            gpr_we[R_ECX]=1'b1;
+            gpr_wd[R_ECX]=dec_cx;
+          end
+        end
+
 `ifdef VEN_IDIV_ITER
         // S_DIV_BUSY: commit quotient/remainder to EAX(/EDX) when the iterative
         // divider finishes without a #DE.
@@ -38,6 +55,26 @@
           end
         end
 `endif
+
+        // Protected far-pointer loads (LES/LDS/LSS/LFS/LGS) have two
+        // architectural destinations. Commit the offset only on the SAME shared
+        // success event that installs the validated segment descriptor; never in
+        // S_EXEC, where a later descriptor fault would otherwise expose a partial
+        // instruction. Real/V86 loads retain the ordinary S_EXEC writeback.
+        S_DQUERY: begin
+          if (dq_commit_ok && q_writes_reg) begin
+            gpr_we[q_dst_reg]=1'b1;
+            gpr_wd[q_dst_reg]=reg_merge(gpr_o[q_dst_reg], dq_result, q_w, 1'b0);
+          end
+        end
+        S_SEGLD: begin
+          if (segld_commit_ok && q_seg_from_mem && q_seg_load
+              && !q_seg_load_lo && q_writes_reg) begin
+            gpr_we[q_dst_reg]=1'b1;
+            gpr_wd[q_dst_reg]=reg_merge(gpr_o[q_dst_reg],
+                                        wmask(mem_load_data,q_w), q_w, 1'b0);
+          end
+        end
 
         // -------------------------------------------------------------------
         // S_EXEC — the integer execute/commit arm. The flag-only and seg/cr/dr-
@@ -72,12 +109,21 @@
             endcase
           end
           else if (q_sysop==SYS_MOVSREG_FROM) begin
+            // R2-M01: a 32-bit destination zero-extends the selector (the QEMU/P5
+            // contract); a 16-bit destination merges as before.
             gpr_we[q_dst_reg]=1'b1;
-            gpr_wd[q_dst_reg]=reg_merge(gpr_o[q_dst_reg], {16'd0, seg_sel[q_sys_sreg]}, 3'd2, 1'b0);
+            gpr_wd[q_dst_reg]=(q_w==3'd4) ? {16'd0, seg_sel[q_sys_sreg]}
+                                          : reg_merge(gpr_o[q_dst_reg], {16'd0, seg_sel[q_sys_sreg]}, 3'd2, 1'b0);
           end
           else if (q_sysop==SYS_STR) begin
             gpr_we[q_dst_reg]=1'b1;
-            gpr_wd[q_dst_reg]=reg_merge(gpr_o[q_dst_reg], {16'd0, tr_sel}, 3'd2, 1'b0);
+            gpr_wd[q_dst_reg]=(q_w==3'd4) ? {16'd0, tr_sel}
+                                          : reg_merge(gpr_o[q_dst_reg], {16'd0, tr_sel}, 3'd2, 1'b0);
+          end
+          else if (q_sysop==SYS_SLDT) begin
+            gpr_we[q_dst_reg]=1'b1;
+            gpr_wd[q_dst_reg]=(q_w==3'd4) ? {16'd0, ldt_sel}
+                                          : reg_merge(gpr_o[q_dst_reg], {16'd0, ldt_sel}, 3'd2, 1'b0);
           end
           else if (q_sysop==SYS_MOVSREG_TO && !sys_mode && proxy_en) begin end
           else if (q_sysop==SYS_MOVSREG_TO) begin end
@@ -103,7 +149,8 @@
                   gpr_wd[q_dst_reg]=reg_merge(gpr_o[q_dst_reg], wmask(mem_load_data,q_w), q_w, 1'b0);
                   if (q_dst_reg!=R_ESP) begin gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=gpr_o[R_ESP]+{28'd0,q_w}; end
                 end else if (q_mem_write) begin end
-                else if (q_writes_reg) begin
+                else if (q_writes_reg
+                         && !(q_seg_load && !q_seg_load_lo && !seg_real)) begin
                   gpr_we[q_dst_reg]=1'b1; gpr_wd[q_dst_reg]=reg_merge(dst_cur, alu_out, q_w, q_dst_high8);
                 end
               end
@@ -179,15 +226,8 @@
               end
 
               K_IMUL2: begin
-                logic [31:0] s1,s2;
-                s1 = q_mem_read ? wmask(mem_load_data,q_w) : reg_read(q_src_reg,q_w,1'b0);
-                s2 = q_imul_3op ? q_imul_imm : reg_read(q_dst_reg,q_w,1'b0);
-                if (q_w==3'd2) begin logic signed [31:0] pp;
-                  pp=$signed({{16{s1[15]}},s1[15:0]})*$signed({{16{s2[15]}},s2[15:0]});
-                  gpr_we[q_dst_reg]=1'b1; gpr_wd[q_dst_reg]=reg_merge(dst_cur, {16'd0,pp[15:0]}, q_w, 1'b0);
-                end else begin logic signed [63:0] pp; pp=$signed(s1)*$signed(s2);
-                  gpr_we[q_dst_reg]=1'b1; gpr_wd[q_dst_reg]=reg_merge(dst_cur, pp[31:0], q_w, 1'b0);
-                end
+                gpr_we[q_dst_reg]=1'b1;
+                gpr_wd[q_dst_reg]=reg_merge(dst_cur, ex_imul_p[31:0], q_w, 1'b0);
               end
 
               K_EXT: begin
@@ -439,7 +479,10 @@
         // -------------------------------------------------------------------
         // store / micro-sequence arms.
         S_STORE: begin
-          if (mem_ack) begin
+          // Match the sequencer's whole-store commit, not the preliminary
+          // first-page ACK. Otherwise split POP/PUSH/CALL update ESP twice
+          // and XCHG/XADD can replace their source before the final fragment.
+          if (mem_ack && (!xs_eff_act || (xs_eff_ph == 2'd2))) begin
             unique case (q_kind)
               K_CTRL: begin // CALL push: ESP -= w
                 gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=gpr_o[R_ESP]-{28'd0,q_w};
@@ -463,7 +506,21 @@
                 gpr_we[q_src_reg]=1'b1;
                 gpr_wd[q_src_reg]=reg_merge(gpr_o[q_src_reg], wmask(mem_load_data,q_w), q_w, q_src_high8);
               end
-              K_STR: begin end  // string store: pointer/count already updated in S_EXEC
+              K_STR: begin
+`ifdef VEN_REP_STOS_STREAM
+                // The first element follows the ordinary S_EXEC writeback.  A
+                // streamed shadow, however, has never visited S_EXEC: commit
+                // its EDI/ECX only with this descriptor's FINAL S_STORE ACK.
+                // That timing is also what keeps the previous element's DPI
+                // retire snapshot from observing one iteration too far ahead.
+                if (rep_stos_stream_q && mem_ack) begin
+                  gpr_we[R_EDI]=1'b1;
+                  gpr_wd[R_EDI]=gpr_o[R_EDI] + str_step;
+                  gpr_we[R_ECX]=1'b1;
+                  gpr_wd[R_ECX]=dec_cx;
+                end
+`endif
+              end  // ordinary string store: pointer/count updated in S_EXEC
               default: begin
                 if (q_is_push) begin gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=gpr_o[R_ESP]-{28'd0,q_w}; end
                 if (q_is_pop)  begin gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=gpr_o[R_ESP]+{28'd0,q_w}; end // POP m
@@ -471,6 +528,12 @@
             endcase
           end
         end
+
+        // String-store restart is deliberately owned by the post-case common
+        // override in core.sv.  It must also run on direct S_STORE permission /
+        // segment faults, where fsm_case_enabled suppresses this include, and
+        // it includes the 4 MiB PDE reserved-bit #PF decision as well as !P.
+        S_WALK: begin end
 
         S_USEQ: begin
           if (mem_ack) begin
@@ -514,18 +577,53 @@
         // -------------------------------------------------------------------
         // M9.5 real-mode far CALL / RET arms (gpr write only on beat 1).
         S_LCALL: begin
+          // R2-H05: lc_callw = the gate width for a gated call, q_w otherwise.
           if (mem_ack && seg_step) begin
-            gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=gpr_o[R_ESP] - {27'd0, q_w, 1'b0};
+            gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=gpr_o[R_ESP] - {27'd0, lc_callw, 1'b0};
           end
         end
 
         S_RETF: begin
-          if (mem_ack && seg_step) begin
+          // REVIEW2_aug2 C-06: an OUTER-level return does not ADVANCE the inner ESP --
+          // it REPLACES ESP from the frame, at the single validated commit in
+          // S_IRET_SS. Bumping it here would also move the anchor the bus driver uses
+          // to address the remaining ESP/SS pops, so the beat-1 detection has to
+          // suppress this write on the same clock it fires. The condition is the
+          // popped CS.RPL, exactly as in the S_RETF arm of core_seg_ljmp.svh.
+          // REVIEW_Aug3 H-02: a PROTECTED same-privilege RETF no longer advances ESP
+          // here either -- the popped target CS is validated only later, in S_LJMP,
+          // and a rejected target must fault with ESP untouched. The advance is
+          // staged (retf_same/retf_esp_adj at the beat-1 handoff) and fires on
+          // retf_commit_w in the S_LJMP arm below. Only the REAL-MODE form (which
+          // has no later validation stage) still advances ESP at the pop.
+          if (mem_ack && seg_step && !retf_out && seg_real) begin
             gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=gpr_o[R_ESP] + {27'd0, q_w, 1'b0} + {16'd0, q_ret_imm};
           end
         end
 
+        // REVIEW_Aug3 H-02: the deferred same-privilege protected RETF ESP advance.
+        // retf_commit_w is the S_LJMP arm's accept condition computed combinationally
+        // in core.sv, so this fires on exactly the clock the target CS commits --
+        // and never on a selector/descriptor/offset fault (start_fault cleared
+        // retf_same, and the commit predicate itself excludes those cases).
+        S_LJMP: begin
+          if (retf_commit_w) begin
+            gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=gpr_o[R_ESP] + retf_esp_adj;
+          end
+        end
+
         // -------------------------------------------------------------------
+`ifdef VEN_FP_SHARED
+        // The shared top supplies FNSTSW AX on its response, after the command
+        // edge that also owns the FP-state mutation.  Capture it on the same edge
+        // as the conservative in-order x87 retirement.
+        S_FP_SHARED_WAIT: begin
+          if (fp_shared_rsp_valid && fp_shared_rsp_ax_valid) begin
+            gpr_we[R_EAX]=1'b1;
+            gpr_wd[R_EAX]={gpr_o[R_EAX][31:16], fp_shared_rsp_ax};
+          end
+        end
+`else
         // S_FEXEC: only the FNSTSW AX cross-leaf gpr[EAX] write (gated !f_pc_bad).
         S_FEXEC: begin
           logic f_is_arith, f_pc_bad;
@@ -543,6 +641,7 @@
             gpr_wd[R_EAX]={gpr_o[R_EAX][31:16], (fstat & ~16'h3800) | ({13'd0,ftop}<<11)};
           end
         end
+`endif
 
         // -------------------------------------------------------------------
         // M2S.5 RSM: restore the GPR file on the final read-back beat.
@@ -567,23 +666,60 @@
             if (from_v86)
               last = int_has_err ? (int_step == 4'd9) : (int_step == 4'd8);
             else if (xpl_active)
-              last = int_has_err ? (int_step == 4'd5) : (int_step == 4'd4);
+              last = cg_xpl ? (cg_beat == (6'd3 + {1'b0, cg_pcount}))   // R2-H05
+                            : (int_has_err ? (int_step == 4'd5) : (int_step == 4'd4));
             else
               last = int_has_err ? (int_step == 4'd3) : (int_step == 4'd2);
             if (last) begin
               if (from_v86) begin
                 fsz = int_has_err ? 32'd40 : 32'd36;
-                gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=int_new_esp - fsz;
+                // SET_ESP through the new (SS0) stack's B mask, like every
+                // other cross-priv frame: a 16-bit SS0 replaces only ESP[15:0]
+                // and the low word WRAPS (QEMU sp_mask semantics).
+                gpr_we[R_ESP]=1'b1;
+                gpr_wd[R_ESP]= ss_b ? (int_new_esp - fsz)
+                                    : ((gpr_o[R_ESP] & 32'hFFFF_0000)
+                                       | ((int_new_esp - fsz) & 32'h0000_FFFF));
+              end else if (xpl_active && cg_xpl) begin
+                // REVIEW1_Aug3 R2-H05: the call-gate ESP commit. fsz = the 4
+                // header slots + cg_pcount params, in gate-width units; the
+                // result commits through the NEW stack's B mask (SET_ESP(sp,
+                // sp_mask) in QEMU: a 16-bit new stack replaces only ESP[15:0]).
+                fsz = cg_wide ? (32'd16 + {25'd0, cg_pcount, 2'b00})
+                              : (32'd8  + {26'd0, cg_pcount, 1'b0});
+                gpr_we[R_ESP]=1'b1;
+                gpr_wd[R_ESP]= ss_b ? (int_new_esp - fsz)
+                                    : ((gpr_o[R_ESP] & 32'hFFFF_0000)
+                                       | ((int_new_esp - fsz) & 32'h0000_FFFF));
               end else if (xpl_active) begin
-                fsz = int_has_err ? 32'd24 : 32'd20;
-                gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=int_new_esp - fsz;
+                // A4-H03: one frame plan. A 16-bit interrupt/trap gate (int_frm16)
+                // pushes a WORD frame: 10 bytes (SS, SP, FLAGS, CS, IP), 12 with an
+                // error code -- this used to charge the 32-bit 20/24 regardless of
+                // gate width, so a 16-bit cross-priv delivery landed the handler at
+                // the wrong ESP. The commit wraps through the NEW stack's B mask,
+                // exactly like the call-gate arm above (SET_ESP(sp, sp_mask)).
+                fsz = int_frm16 ? (int_has_err ? 32'd12 : 32'd10)
+                                : (int_has_err ? 32'd24 : 32'd20);
+                gpr_we[R_ESP]=1'b1;
+                gpr_wd[R_ESP]= ss_b ? (int_new_esp - fsz)
+                                    : ((gpr_o[R_ESP] & 32'hFFFF_0000)
+                                       | ((int_new_esp - fsz) & 32'h0000_FFFF));
+`ifdef VEN_DBG_WD
+                // Generic cross-privilege handler-stack writeback trace.
+                $display("[VEN-ESPWR] XPL handler ESP<=%08h = int_new_esp(%08h) - fsz(%0d) has_err=%b vec=%0d @cs:eip=%04x:%08h",
+                         int_new_esp - fsz, int_new_esp, fsz, int_has_err, int_vec, seg_sel[SG_CS], eip);
+`endif
               end else if (int_gate_op16) begin
-                // SAME-PRIV 16-BIT GATE: 6-byte IP:CS:FLAGS frame (no errcode on a
-                // 16-bit same-priv delivery in this corpus); SP -= 6 (mirrors
-                // S_RMINT_PUSH). The full 32-bit ESP is decremented (SS.B controls
-                // wrap; the corpus 16-bit-PM stacks are < 64 KiB so this matches).
-                fsz = 32'd6;
-                gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=gpr_o[R_ESP] - fsz;
+                // SAME-PRIV 16-BIT GATE: 6-byte IP:CS:FLAGS frame, 8-byte with an
+                // error code (A4-H03 -- the errcode size was hard-charged 6).
+                // SP wraps in the low 16 bits on a 16-bit stack (SS.B=0),
+                // preserving ESP's upper half -- mirroring the wrap the xpl and
+                // call-gate arms already do.
+                fsz = int_has_err ? 32'd8 : 32'd6;
+                gpr_we[R_ESP]=1'b1;
+                gpr_wd[R_ESP]= ss_b ? (gpr_o[R_ESP] - fsz)
+                                    : ((gpr_o[R_ESP] & 32'hFFFF_0000)
+                                       | ((gpr_o[R_ESP] - fsz) & 32'h0000_FFFF));
               end else begin
                 fsz = int_has_err ? 32'd16 : 32'd12;
                 gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=gpr_o[R_ESP] - fsz;
@@ -598,22 +734,64 @@
           if (mem_ack) begin
             unique case (int_step)
               4'd2: begin
+                if (v86) begin
+                  // Same cycle as core_iret.svh's intra-V86 CS:EIP:EFLAGS
+                  // commit. The generic SS.B post-process preserves ESP's
+                  // high half and wraps the V86 16-bit SP.
+                  gpr_we[R_ESP]=1'b1;
+                  gpr_wd[R_ESP]=gpr_o[R_ESP] + (int_gate_op16 ? 32'd6 : 32'd12);
+                end
                 // 16-bit IRETW (int_gate_op16) is always the same-priv 6-byte commit
                 // (SP += 6); guard the V86/inter-priv suppression off so a garbage
                 // high-half VM bit (from the dword read of a 2-byte slot) can't divert.
+                // REVIEW_aug2 C-07 (mirror drift): the inter-priv suppression carried a
+                // `!int_gate_op16` that core_iret.svh no longer has -- once the 16-bit
+                // inter-privilege IRET was un-gated there, a 16-bit outer-level return
+                // took the pop-ESP/SS path in the FSM while THIS driver still added 6 to
+                // ESP at beat 2, so beats 3 and 4 read their ESP/SS slots from the wrong
+                // offsets. The privilege decision is iret_interpriv in both places now.
                 if (!int_gate_op16 && mem_rdata[17] && cpl_r == 2'd0) begin end
-                else if (!int_gate_op16 && iret_interpriv) begin end
-                else begin gpr_we[R_ESP]=1'b1;
-                  gpr_wd[R_ESP]=gpr_o[R_ESP] + (int_gate_op16 ? 32'd6 : 32'd12); end
+                else if (iret_interpriv) begin end
+                // REVIEW1_Aug2 C-06: the same-privilege ESP advance no longer happens
+                // here either. It commits with EIP/EFLAGS/CS in S_INT_CS_RET, gated by
+                // the shared iret_cs_commit -- a frame rejected for a bad CS must leave
+                // ESP pointing at the frame so the IRET is restartable.
+                else begin end
               end
               4'd4: begin
-                if (iret_to_v86) begin end
-                else begin gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=iret_esp; end
+                // REVIEW_aug2 C-07: ESP no longer commits here. On the inter-priv path
+                // it commits with the rest of the frame, in S_IRET_SS, gated by the
+                // SAME predicate the FSM uses (iret_ss_commit) -- see the S_IRET_SS arm
+                // below. The V86 return still commits at beat 8.
               end
               4'd0, 4'd1, 4'd3, 4'd5, 4'd6, 4'd7: ;
               default: begin gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=iret_esp; end  // beat 8 (V86 commit)
             endcase
           end
+        end
+        // REVIEW_aug2 C-07: the OUTER ESP of an inter-privilege IRET. It commits with
+        // CS/SS/EIP/EFLAGS on the single validated commit clock, never before -- a frame
+        // rejected for a bad SS must leave the inner ESP untouched. iret_ss_commit is
+        // the same expression core_iret.svh branches on (defined once, in core.sv), so
+        // the two drivers cannot disagree about whether the frame was accepted.
+        S_IRET_SS: begin
+          if (iret_ss_commit) begin
+            gpr_we[R_ESP]=1'b1;
+            // The restore's mask follows the OUTER stack's B bit (mem_rdata[22]
+            // = desc[54] of the popped SS descriptor at this commit clock):
+            // 32-bit outer stack -> full assignment; 16-bit -> the popped SP
+            // word replaces SP only, preserving the handler ESP's upper half
+            // (QEMU's SET_ESP(sp, get_sp_mask(ss_e2))). esp_arch_dst exempts
+            // the write from the generic 16-bit-stack post-process.
+            gpr_wd[R_ESP]= mem_rdata[22] ? iret_esp
+                                         : {gpr_o[R_ESP][31:16], iret_esp[15:0]};
+          end
+        end
+        // REVIEW1_Aug2 C-06: the SAME-PRIVILEGE ESP advance, on the validated commit
+        // clock. iret_cs_commit is the same expression core_iret.svh branches on.
+        S_INT_CS_RET: begin
+          if (iret_cs_commit) begin gpr_we[R_ESP]=1'b1;
+            gpr_wd[R_ESP]=gpr_o[R_ESP] + (int_gate_op16 ? 32'd6 : 32'd12); end
         end
 
         // -------------------------------------------------------------------
@@ -625,7 +803,7 @@
         end
 
         S_RMIRET: begin
-          if (mem_ack) begin
+          if (rm_read_armed && mem_ack) begin
             unique case (int_step)
               4'd0, 4'd1: ;
               default: begin gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=gpr_o[R_ESP] + 32'd6; end
@@ -638,10 +816,13 @@
         // The preceding else-if branches (no gpr write) are kept as empty guards so
         // the mutual-exclusion ordering of the proxy branch is preserved verbatim.
         S_DECODE: begin
-          if (smi_pending && sys_mode && !smm_active) begin end
-          else if (nmi_take) begin end
-          else if (intr_take) begin end
-          else if (dbg_block_issue) begin end
+          // Must mirror core_fetch_decode.svh exactly: a quiescent debugger
+          // park owns the boundary, and a host STEP defers asynchronous delivery
+          // until the one requested instruction has retired.
+          if (dbg_block_issue) begin end
+          else if (smi_pending && sys_mode && !smm_active && !dbg_step_active) begin end
+          else if (nmi_take && !dbg_step_active) begin end
+          else if (intr_take && !dbg_step_active) begin end
           else if (DBG_GD_ENABLE && sys_mode &&
                    (d_sysop==SYS_MOVDR_TO || d_sysop==SYS_MOVDR_FROM) && dr7[DR7_GD]) begin end
           else if (sys_mode && creg4[3] &&
@@ -665,54 +846,129 @@
         // if chain is reproduced as empty guards so the ISSUE arm is reached under
         // the SAME condition (every bubble/miss/stall path falls through to it).
         S_PIPE: begin
-          if (stall_cnt!=7'd0) begin end
-          else if (!pipe_bytes_ok
-`ifdef VEN_L1_AXI
-                       && !(real_bus && !mem_ack)
-`endif
-                      ) begin end
-`ifdef VEN_L1_AXI
-          else if (!pipe_bytes_ok) begin end
-`endif
-`ifdef VEN_IC_BRAM
-          else if (!ic_fetch_ready) begin end
-`endif
-`ifdef VEN_UOPCACHE
-          else if (!uop_hit || !cycle_mode) begin end
-`endif
-          else if (pending_mem_pen!=7'd0) begin end
-`ifdef VEN_L1_AXI
-          else if (real_bus && pipe_load_req && !mem_ack) begin end
-`endif
-`ifdef VEN_FP_PIPE
-          else if (fp_pipe_rd_haz) begin end
-`endif
-          else if (u_d.is_fp && u_d.fp_kind==FK_ARITH && fctrl[9:8]!=2'b11) begin end
-          else if (u_d.is_fp) begin end   // FP path writes no GP register
-          else if (!u_d.simple || sys_mode) begin end
-          else if (mispred_bubbles!=3'd0) begin end
-          else if (pipe_agi) begin end
-          else begin
+          // The decoded F3 AB continuation deliberately occupies an S_PIPE
+          // boundary without issuing a U/V instruction.  Its descriptor setup
+          // in core_fastpath.svh is exactly the normal S_EXEC K_STR setup for
+          // the next default-32 STOSD element; commit the matching EDI/ECX
+          // update on that same edge.  fp_issue_block remains asserted for
+          // this boundary, so it cannot fall into the generic fast-path mirror
+          // below or accidentally commit a stale decoded U/V instruction.
+          if (rep_stos_cont_take && q_st == ST_STOS) begin
+            gpr_we[R_EDI]=1'b1;
+            gpr_wd[R_EDI]=gpr_o[R_EDI] + str_step;
+            gpr_we[R_ECX]=1'b1;
+            gpr_wd[R_ECX]=dec_cx;
+          end
+          // An accepted interrupt diverts the spine BEFORE anything issues, so this
+          // clock must write no GPR. Without this arm the chain fell through to ISSUE
+          // and committed a register for an instruction that never retired (and, since
+          // EIP is not advanced on the divert, re-executes after IRET).
+          // The shared commit predicate is the only entry to this mirror.  It
+          // covers both a normal trusted frontend issue and final completion of
+          // an admitted U-memory packet; no hand-copied fallback guard may turn
+          // a stale decode into a GPR write.
+          else if (pipe_int_commit) begin
             // ---- U commit ----
-            if (u_d.is_lea) begin
-              gpr_we[u_d.dst]=1'b1; gpr_wd[u_d.dst]=gpr_o[u_d.base];
-            end else if (u_d.is_load) begin
-              gpr_we[u_d.dst]=1'b1; gpr_wd[u_d.dst]=mem_rdata;
-            end else if (u_d.is_shift) begin
-              gpr_we[u_d.dst]=1'b1; gpr_wd[u_d.dst]=u_sh;
-            end else if (u_d.is_branch || u_d.is_nop) begin
+`ifdef VEN_FAST_XCHG_R
+            if (pipe_u_eff.is_xchg_r) begin
+              // Both values are from the pre-edge GPR file. A paired V is
+              // forbidden by the descriptor's NP classification.
+              gpr_we[R_EAX]=1'b1;
+              gpr_wd[R_EAX]=reg_merge(gpr_o[R_EAX], gpr_o[pipe_u_eff.src],
+                                      fp_operand_width(pipe_u_eff), 1'b0);
+              gpr_we[pipe_u_eff.src]=1'b1;
+              gpr_wd[pipe_u_eff.src]=reg_merge(gpr_o[pipe_u_eff.src], gpr_o[R_EAX],
+                                               fp_operand_width(pipe_u_eff), 1'b0);
+            end else
+`endif
+            if (pipe_u_eff.is_lea) begin
+              gpr_we[pipe_u_eff.dst]=1'b1; gpr_wd[pipe_u_eff.dst]=pipe_load_addr;
+            end else if (pipe_u_eff.is_stack) begin
+              // The shared S_PIPE commit predicate fires only after the final
+              // fragment-engine acknowledgement.  Thus a #PF/#SS, a delayed
+              // cache access, or the first half of a split request leaves ESP
+              // and POP's destination untouched and restarts architecturally.
+              if (pipe_u_eff.is_store) begin
+                gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=gpr_o[R_ESP]-32'd4;
+              end else begin
+                gpr_we[pipe_u_eff.dst]=1'b1; gpr_wd[pipe_u_eff.dst]=mem_rdata;
+                // POP ESP writes the popped value, not old ESP+4.
+                if (pipe_u_eff.dst!=R_ESP) begin
+                  gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=gpr_o[R_ESP]+32'd4;
+                end
+              end
+            end else if (pipe_u_eff.is_load) begin
+              gpr_we[pipe_u_eff.dst]=1'b1;
+              gpr_wd[pipe_u_eff.dst]=reg_merge(gpr_o[pipe_u_eff.dst], pipe_load_value,
+                                             fp_operand_width(pipe_u_eff), pipe_u_eff.dst_hi8);
+            end else if (pipe_u_eff.is_shift) begin
+              // REVIEW Aug-1 (H-02 companion): a 16-bit shift must PRESERVE the upper
+              // half of its destination. This wrote all 32 bits unconditionally, which
+              // is the same defect class as C-01 one arm over. Use the slow path's
+              // canonical width-aware merge, exactly as the ALU arm below does.
+`ifdef VEN_P54_AGI_WRITE_MASK
+              // Count zero does not execute a register/flags modification.
+              // Match the canonical slow shift and existing fast flag guard;
+              // expose the resulting actual WE to the common AGI history.
+              if (u_shift_cnt!=5'd0) begin
+`endif
+              gpr_we[pipe_u_eff.dst]=1'b1;
+              gpr_wd[pipe_u_eff.dst]= reg_merge(gpr_o[pipe_u_eff.dst], u_sh, fp_operand_width(pipe_u_eff), pipe_u_eff.dst_hi8);
+`ifdef VEN_P54_AGI_WRITE_MASK
+              end
+`endif
+            end else if (pipe_u_eff.is_branch || pipe_u_eff.is_nop) begin
               // no register write
             end else begin
-              if (u_d.wreg) begin gpr_we[u_d.dst]=1'b1; gpr_wd[u_d.dst]=u_alu; end
+              // 16-bit ops must PRESERVE the destination's upper half, so use the SLOW
+              // path's canonical width-aware merge (reg_merge, as at :57) rather than a
+              // hand-rolled {gpr[31:16], alu[15:0]} concat. One shared helper for every
+              // width; nothing here to drift out of sync with the slow path.
+              //
+              // CORRECTION (this comment previously said the VEN_D16_NOWREG bisect
+              // "proved the defect is here"). It did not. That bisect reached POST only
+              // because rejecting register-writing instructions removed exactly the ones
+              // whose writes were being DISCARDED by the stale guard a few lines up
+              // (C-01) -- the write VALUE was never wrong. The hand-rolled concat was in
+              // fact bit-identical to reg_merge at w==2, so that change could not have
+              // altered behaviour either way. Kept for the shared-helper reason above.
+              if (pipe_u_eff.wreg) begin gpr_we[pipe_u_eff.dst]=1'b1;
+                gpr_wd[pipe_u_eff.dst]= reg_merge(gpr_o[pipe_u_eff.dst], u_alu, fp_operand_width(pipe_u_eff), pipe_u_eff.dst_hi8); end
             end
             // ---- V commit (paired) ----
-            if (pipe_pair) begin
-              if (v_d.is_lea) begin
-                gpr_we[v_d.dst]=1'b1; gpr_wd[v_d.dst]=gpr_o[v_d.base];
-              end else if (v_d.is_branch || v_d.is_nop) begin
+`ifndef SYNTHESIS
+`ifndef VTM_NO_DPI
+            // Observe the actual U writeback values before V overwrites them.
+            // This uses the same byte/word merges and memory response owner as
+            // execution; no instruction emulation or QEMU state is involved.
+            for (int i=0; i<8; i++)
+              trace_u_gpr[i] = gpr_we[i] ? gpr_wd[i] : gpr_o[i];
+            trace_u_esp_we = gpr_we[R_ESP];
+`endif
+`endif
+            if (pipe_pair_eff) begin
+`ifdef VEN_P54_DUAL_LOAD_PAIR
+              if ((pipe_mem_v_hit_q
+`ifdef VEN_P54_DUAL_BYTE_LOAD_PAIR
+                   || pipe_v_pair_now_accept
+`endif
+                   ) && pipe_v_eff.is_load) begin
+                gpr_we[pipe_v_eff.dst]=1'b1;
+                gpr_wd[pipe_v_eff.dst]=reg_merge(gpr_o[pipe_v_eff.dst],
+`ifdef VEN_P54_DUAL_BYTE_LOAD_PAIR
+                    pipe_v_pair_now_accept ? mem_pair_now_data :
+`endif
+                    mem_pair_rsp_data[1], fp_operand_width(pipe_v_eff),
+                    pipe_v_eff.dst_hi8);
+              end else
+`endif
+              if (pipe_v_eff.is_lea) begin
+                gpr_we[pipe_v_eff.dst]=1'b1; gpr_wd[pipe_v_eff.dst]=v_lea_addr;
+              end else if (pipe_v_eff.is_branch || pipe_v_eff.is_nop) begin
                 // no register write
               end else begin
-                if (v_d.wreg) begin gpr_we[v_d.dst]=1'b1; gpr_wd[v_d.dst]=v_alu; end
+                if (pipe_v_eff.wreg) begin gpr_we[pipe_v_eff.dst]=1'b1;
+                  gpr_wd[pipe_v_eff.dst]= reg_merge(gpr_o[pipe_v_eff.dst], v_alu, fp_operand_width(pipe_v_eff), pipe_v_eff.dst_hi8); end
               end
             end
           end

@@ -1,3 +1,4 @@
+`default_nettype wire  // Vivado project-flow: reset nettype (files compile as one unit; prevents `none` leak)
 // Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
 // SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
 
@@ -50,6 +51,21 @@ module fpu_top (
     input  logic        clk,
     input  logic        rst_n,        // sync reset -> FNINIT power-on state
 
+`ifdef VEN_SNAPSHOT_RESTORE
+    // Simulation-only full x87 checkpoint seed. The ports and reset mux are
+    // absent from normal synthesis builds.
+    input  logic        init_restore,
+    input  logic [2:0]  init_ftop,
+    input  logic [15:0] init_fstat,   // raw: TOP field already stripped
+    input  logic [15:0] init_fctrl,
+    input  logic [7:0]  init_fptag,   // physical bit p: 1 means empty
+    input  logic [31:0] init_fip,
+    input  logic [15:0] init_fcs,
+    input  logic [31:0] init_fdp,
+    input  logic [15:0] init_fds,
+    input  logic [639:0] init_fpr_flat,
+`endif
+
     // ---- READ PORTS (combinational, zero-cycle) ----
     output logic [79:0] st0, st1, st2, st3, st4, st5, st6, st7, // fpr[(ftop+i)]
     output logic [2:0]  ftop_o,       // current TOP (for FNSTSW->gpr in spine)
@@ -82,12 +98,15 @@ module fpu_top (
     input  logic [79:0] wsti_data,
     input  logic        wsti_clr_tag,
 
-    // (4) FXCH 2-SLOT SWAP: fpr[ftop]<=fxch_a, fpr[ftop+fxch_idx]<=fxch_b
-    //     (NO tag/ftop change)
+    // (4) FXCH 2-SLOT SWAP: fpr[ftop]<=fxch_a, fpr[ftop+fxch_idx]<=fxch_b.
+    //     Ordinary FXCH has no tag/TOP change.  A masked #IS exchange with
+    //     an empty operand first materializes the empty slot(s) as real
+    //     indefinite and validates both slots before the exchange.
     input  logic        we_fxch,
     input  logic [2:0]  fxch_idx,
     input  logic [79:0] fxch_a,        // -> fpr[ftop]
     input  logic [79:0] fxch_b,        // -> fpr[ftop+idx]
+    input  logic        fxch_materialize_empty,
 
     // (5) POP: fptag[ftop]<=1, ftop<=ftop+1 (co-fires with we_sti/we_top/we_fstat)
     input  logic        we_pop,
@@ -159,11 +178,49 @@ module fpu_top (
   logic [2:0]  ftop;
   logic [15:0] fctrl;        // control word; reset 0x037f
   logic [15:0] fstat;        // condition codes + exception flags; TOP not overlaid
+
+  // REVIEW2 H-22 (partial): FSW.B (bit 15) MIRRORS FSW.ES (bit 7) on the P5 -- the
+  // "FPU busy" bit is architecturally a copy of the error-summary bit on a processor
+  // with no asynchronous FPU. It was only ever set on the FRSTOR/FLDENV path (the
+  // spine composed it from the image's ES); every other fstat write left it 0, so
+  // FNSTSW reported B=0 even with an error summarised. QEMU does exactly this
+  // derivation in cpu_set_fpus(): `env->fpus |= env->fpus & FPUS_SE ? FPUS_B : 0`.
+  //
+  // Applied through ONE function at each of the three fstat commit points rather than
+  // recomputed inline at the ~15 places the spine builds an fstat value -- the rule has
+  // a single definition even though it is applied in three places, which is the
+  // distinction that matters for drift.
+  //
+  // ---- REVIEW1_Aug2 H-12: DERIVE ES, which nothing did --------------------------
+  // The note that used to sit here said ES could not be computed combinationally
+  // because it is STICKY. That is right about ES and wrong about where to compute it:
+  // sticky means "once set, stays set until FNCLEX/FNINIT/FLDENV", and the place to
+  // set it is exactly where the exception FLAGS are committed. Every fstat write goes
+  // through the three commit points below, so ES is derived there and OR'd with what
+  // the incoming value already carries -- which preserves the sticky bit across writes
+  // that do not raise anything new, and preserves an ES restored by FLDENV/FRSTOR.
+  //
+  // ES = any exception flag SET and NOT MASKED by the control word. FSW[5:0] and
+  // FCW[5:0] are both {PE,UE,OE,ZE,DE,IE} in the same bit order.
+  //
+  // Consequence, and the reason this matters beyond the bit itself: with_b() mirrors
+  // B from ES, and the previous round measured ES set in 0 of 10165 fstat records --
+  // the mirror was correct and completely inert because nothing ever raised the
+  // summary. Deriving ES makes both live, and gives #MF something to key off.
+  function automatic logic [15:0] with_es_b(input logic [15:0] v);
+    logic es;
+    es = v[7] | (|(v[5:0] & ~fctrl[5:0]));
+    with_es_b = {es, v[14:8], es, v[6:0]};   // B (bit 15) := ES (bit 7) := es
+  endfunction
+  function automatic logic [15:0] with_b(input logic [15:0] v);
+    with_b = with_es_b(v);
+  endfunction
   logic [7:0]  fptag;        // bit i = tag for fpr[i] (1=empty)
   // M11: FPU instruction/data pointers (env-image only; never the graded trace).
   // FOP is always 0 in this oracle, so it is not stored (hardwired 0 at emit).
   logic [31:0] fip, fdp;     // instruction-ptr offset / data-ptr offset
   logic [15:0] fcs, fds;     // code selector / data selector
+  localparam logic [79:0] QNAN_INDEF = 80'hffffc000000000000000;
 
   // ---- combinational read ports: mirror the registered fpr/ftop, ZERO latency.
   // These reflect PRE-edge state the same clock a posedge write below updates it
@@ -202,6 +259,20 @@ module fpu_top (
       fptag <= 8'hFF;
       for (int fi = 0; fi < 8; fi++) fpr[fi] <= 80'd0;
       fip <= 32'd0; fcs <= 16'd0; fdp <= 32'd0; fds <= 16'd0;
+`ifdef VEN_SNAPSHOT_RESTORE
+      if (init_restore) begin
+        ftop  <= init_ftop;
+        fctrl <= init_fctrl;
+        fstat <= init_fstat;
+        fptag <= init_fptag;
+        fip   <= init_fip;
+        fcs   <= init_fcs;
+        fdp   <= init_fdp;
+        fds   <= init_fds;
+        for (int fi = 0; fi < 8; fi++)
+          fpr[fi] <= init_fpr_flat[fi*80 +: 80];
+      end
+`endif
     end else begin
       // FNINIT (full reset state) — takes priority, same shape as the rst arm
       // but does NOT clear fpr[] (matches the inline FX_FNINIT, which only resets
@@ -231,11 +302,21 @@ module fpu_top (
         if (wsti_clr_tag) fptag[ftop + wsti_idx] <= 1'b0;
       end
 
-      // (4) FXCH 2-slot swap — fpr[ftop]<=fxch_a, fpr[ftop+idx]<=fxch_b. The
-      // spine presents both PRE-edge values (read off st0/st(i)).
+      // (4) FXCH 2-slot swap — the spine presents both PRE-edge values (read
+      // off st0/st(i)).  A masked empty-operand FXCH is the sole exception:
+      // materialize each EMPTY source as the SDM real-indefinite before
+      // exchanging, and mark both affected architectural slots valid.  The
+      // qualifier is emitted only after the writeback has suppressed an
+      // unmasked #IS, so a normal exchange stays a pure data swap.
       if (we_fxch) begin
-        fpr[ftop]            <= fxch_a;
-        fpr[ftop + fxch_idx] <= fxch_b;
+        fpr[ftop]            <= (fxch_materialize_empty && fptag[ftop + fxch_idx])
+                                ? QNAN_INDEF : fxch_a;
+        fpr[ftop + fxch_idx] <= (fxch_materialize_empty && fptag[ftop])
+                                ? QNAN_INDEF : fxch_b;
+        if (fxch_materialize_empty) begin
+          fptag[ftop]            <= 1'b0;
+          fptag[ftop + fxch_idx] <= 1'b0;
+        end
       end
 
       // (5) POP — fptag[ftop]<=1, ftop<=ftop+1. Co-fires with we_sti/we_top/
@@ -261,7 +342,7 @@ module fpu_top (
 
       // (9) DIRECT scalar writes — fctrl<=fctrl_wval (FLDCW); fstat replace.
       if (we_fctrl) fctrl <= fctrl_wval;
-      if (we_fstat) fstat <= fstat_wval;
+      if (we_fstat) fstat <= with_b(fstat_wval);
 
       // (10) M11 env-pointer latches. we_eptr fires on every non-control FP op
       // (FIP=instr addr, FCS=code sel); we_dptr only on memory-operand FP ops
@@ -275,7 +356,7 @@ module fpu_top (
       if (we_envld) begin
         fctrl <= env_fctrl;
         ftop  <= env_ftop;
-        fstat <= env_fstat;
+        fstat <= with_b(env_fstat);
         fptag <= env_fptag;
       end
       if (we_envregs)
@@ -286,7 +367,7 @@ module fpu_top (
       // pipelined arith op suppresses its same-cycle we_top/we_fstat, so there is
       // no double-write to fpr[wabs_idx] / fstat from one op.
       if (we_wabs)       fpr[wabs_idx] <= wabs_data;
-      if (we_wabs_fstat) fstat         <= wabs_fstat;
+      if (we_wabs_fstat) fstat         <= with_b(wabs_fstat);
     end
   end
 

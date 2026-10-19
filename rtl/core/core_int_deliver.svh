@@ -37,7 +37,24 @@
             end else begin
               logic [7:0] gattr;
               gattr        = mem_rdata[15:8];
-              int_gate_off <= {mem_rdata[31:16], int_lo[15:0]};
+              // ---- REVIEW2_aug2 C-03 (fourth bullet, prerequisite): a 16-bit (286)
+              // gate -- type 0x6/0x7, gattr[3]=0 -- has a SIXTEEN-bit offset. Word1
+              // bits [31:16] are RESERVED there, not offset bits. This assembled them
+              // in unconditionally, so a 286 gate with nonzero reserved bits committed
+              // a garbage upper half straight into eip at :226. Well-formed tables zero
+              // them, which is why the corpus never showed it -- but the CPU must IGNORE
+              // them, not trust the table. Masking here is also what makes the CS-limit
+              // check below safe: comparing an unmasked 16-bit gate offset against the
+              // limit would fault spuriously on the DPMI 16-bit-gate path the
+              // int_gate_op16 comment above describes as live.
+              int_gate_off <= gattr[3] ? {mem_rdata[31:16], int_lo[15:0]}
+                                       : {16'd0,            int_lo[15:0]};
+`ifdef VEN_C03_PROBE
+              if (!gattr[3])
+                $display("[C03-G16] 16-bit gate vec=%0d reserved=%04h %s", int_vec,
+                         mem_rdata[31:16],
+                         (mem_rdata[31:16] != 16'd0) ? "NONZERO -- mask CHANGES eip" : "zero");
+`endif
               int_gate_sel <= int_lo[31:16];
               int_gate_trap<= gattr[0];   // 0xF trap -> leave IF; 0xE int -> clear IF
               // Gate SIZE bit gattr[3]: 0 = 16-bit gate (type 0x6 int / 0x7 trap ->
@@ -58,10 +75,29 @@
               // the new vector. (A second nesting would escalate toward #DF; the
               // corpus never triggers it, so the single re-vector is sufficient and
               // honest — full #DF chaining is a documented follow-on.)
-              if (!gattr[7]) begin
-                start_fault(8'd11, 1'b1, {21'd0, int_vec, 3'b010}, int_src_pc);
+              // REVIEW2 H-03: the gate TYPE was never validated -- any 8 bytes at
+              // IDT[vec] were interpreted as a gate, so a task gate, a call gate, a
+              // data descriptor or plain garbage was decoded as an interrupt/trap gate
+              // and its "offset"/"selector" fields used to transfer control. Only
+              // types 0x6/0x7 (16-bit int/trap) and 0xE/0xF (32-bit int/trap) are
+              // legal here; S=0 (system) is required. A bad type is #GP(vec*8+2).
+              //
+              // NOTE: task gates (type 0x5) are a legitimate IDT entry that this core
+              // does not implement. Faulting is the honest behaviour -- previously
+              // such a gate was silently misinterpreted as an interrupt gate, which is
+              // strictly worse than a diagnosable #GP.
+              //
+              // REVIEW_Aug4 A4-H05: the architectural order -- gate S/type FIRST
+              // (#GP), then the software-INT DPL check (#GP), presence LAST (#NP).
+              // QEMU's do_interrupt_protected is the same; a not-present gate with
+              // a bad type reported #NP here, where both oracles say #GP.
+              if (gattr[4] || !(gattr[3:0] inside {4'h6,4'h7,4'hE,4'hF})) begin
+                // S must be 0 (system descriptor) and the type must be int/trap gate.
+                start_fault(8'd13, 1'b1, {21'd0, int_vec, 3'b010}, int_src_pc);
               end else if (int_sw && (gattr[6:5] < cpl_r)) begin
                 start_fault(8'd13, 1'b1, {21'd0, int_vec, 3'b010}, int_src_pc);
+              end else if (!gattr[7]) begin
+                start_fault(8'd11, 1'b1, {21'd0, int_vec, 3'b010}, int_src_pc);
               end else begin
                 state      <= S_INT_CS;
               end
@@ -88,19 +124,64 @@
               logic [7:0]  cattr;
               logic [1:0]  tgt_dpl;
               logic        cs_bad;
+              // REVIEW1_Aug2 C-07: a CONFORMING code target keeps the current CPL and
+              // does not switch stacks. Both facts derive from one bit, so name it once
+              // and use it for the CPL, the stack-switch branch and the V86 latch.
+              logic        int_tgt_conf, int_xpriv;
+              // REVIEW2_aug2 C-03 (fifth bullet): the LAST byte the S_INT_TSS pair of
+              // reads will touch. Derived from tgt_dpl, NOT from tss_stk_off: that
+              // signal is a function of int_new_cpl, which is assigned NONBLOCKING a
+              // few lines below, so it still holds the PREVIOUS delivery's CPL here
+              // and would bound the wrong window. Same registered-vs-combinational
+              // distinction H-08 settled for the IRET target limit.
+              //   layout: ESPn at 4 + n*8, SSn at 8 + n*8  ->  last byte = 11 + n*8
+              logic [31:0] tss_last;
               desc    = {mem_rdata, int_lo};
               cattr   = desc_attr(desc);
               tgt_dpl = desc_dpl(cattr);
+              tss_last = 32'd11 + ({30'd0, tgt_dpl} << 3);
+              int_tgt_conf = seg_is_code(cattr) && cattr[2];   // code + C bit
+              int_xpriv    = !int_tgt_conf && (tgt_dpl < eff_cpl);
               // target CS must be present, a code segment, DPL <= the EFFECTIVE
               // CPL (V86 forces eff_cpl=3, so a DPL0 monitor CS is accepted).
-              cs_bad  = !desc_present(cattr) || !desc_s(cattr) ||
-                        !seg_is_code(cattr) || (tgt_dpl > eff_cpl);
+              // REVIEW_Aug4 A4-H05: the checks are ORDERED -- S/type/privilege
+              // (#GP) before presence (#NP), QEMU's do_interrupt_protected
+              // order. The collapsed cs_bad + "NP iff P=0" form reported #NP for
+              // a not-present DATA descriptor, where both oracles say #GP.
+              cs_bad  = !desc_s(cattr) || !seg_is_code(cattr) || (tgt_dpl > eff_cpl);
               if (cs_bad) begin
-                // bad target CS -> #NP(sel) if not present, else #GP(sel). Error
-                // code = the gate's code selector with the IDT/EXT bits.
+                // bad target CS (type/privilege) -> #GP(sel). The blamed
+                // descriptor is the gate's code selector in the GDT/LDT, not
+                // the IDT entry: TI from the selector, IDT=0, EXT = the
+                // latched delivery event class (dlv_ext: 1 only for NMI/INTR
+                // -- a software INT or synchronous exception is internal).
                 int_step <= 4'd0;
-                start_fault(desc_present(cattr) ? 8'd13 : 8'd11, 1'b1,
-                            {16'd0, int_gate_sel[15:3], 3'b010}, int_src_pc);
+                start_fault(8'd13, 1'b1,
+                            selector_error_ext(int_gate_sel, dlv_ext), int_src_pc);
+              end else if (!desc_present(cattr)) begin
+                // presence is the sole failing check -> #NP(sel).
+                int_step <= 4'd0;
+                start_fault(8'd11, 1'b1,
+                            selector_error_ext(int_gate_sel, dlv_ext), int_src_pc);
+              // ---- REVIEW2_aug2 C-03 (fourth bullet): the handler OFFSET was never
+              // compared against the destination CS limit. A gate naming a valid,
+              // present, correctly-privileged code segment but an offset past its end
+              // installed the handler context and then began fetching outside the
+              // segment -- the fault surfaced later, from the handler's own first
+              // fetch, with CS/CPL already switched and (cross-priv) a stack switch
+              // already begun. IA-32: the offset is checked as part of delivery and
+              // raises #GP(0) -- error code ZERO, not the selector, because the fault
+              // is attributed to the target address rather than to a bad descriptor.
+              // desc_limit() granularity-scales, and desc is the descriptor read in
+              // THIS state, so this is the same combinational-vs-registered
+              // distinction H-08 settled for the IRET target.
+              end else if (int_gate_off > desc_limit(desc)) begin
+`ifdef VEN_C03_PROBE
+                $display("[C03-OFF] handler offset %08h > CS limit %08h (vec=%0d)",
+                         int_gate_off, desc_limit(desc), int_vec);
+`endif
+                int_step <= 4'd0;
+                start_fault(8'd13, 1'b1, 32'd0, int_src_pc);
               end else begin
                 // FIX (DOS-Quake #GP): capture the interrupted CS for the same-priv
                 // frame push BEFORE seg_sel[SG_CS] is overwritten with the handler CS.
@@ -113,12 +194,55 @@
                 // the client -> #GP. (The cross-priv arm re-captures int_old_cs below;
                 // same value, harmless.)
                 int_old_cs       <= seg_sel[SG_CS];
-                seg_sel  [SG_CS] <= int_gate_sel;
-                seg_base [SG_CS] <= desc_base(desc);
-                seg_limit[SG_CS] <= desc_limit(desc);
-                seg_attr [SG_CS] <= cattr;
-                cpl_r            <= tgt_dpl;     // CPL = target CS.DPL
-                cs_d             <= desc[54];
+                // ---- REVIEW2_aug2 C-03 (first bullet): STAGE the target CS hidden
+                // state instead of installing it here. These four writes used to land
+                // the moment the descriptor was accepted, so the TSS bound check, the
+                // new-SS validation and the frame push -- every one of which can fault
+                // -- ran with the handler's CS already in the hidden cache. A fault
+                // there was then classified, and its own frame built, against a CS the
+                // interrupted code never had. Committed with eip at the end of
+                // S_INT_PUSH, which is the single point where the delivery is known to
+                // have succeeded. int_gate_sel already holds the selector.
+                int_cs_base      <= desc_base(desc);
+                int_cs_limit     <= desc_limit(desc);
+                int_cs_attr      <= cattr;
+                // ---- REVIEW1_Aug2 C-07: CONFORMING targets do not change CPL -----
+                // A conforming code segment with DPL <= CPL is a legal interrupt
+                // target and the CPU keeps running at the CURRENT privilege -- no CPL
+                // change and NO stack switch. This unconditionally set CPL to the
+                // target's DPL and then took the stack-switch branch whenever
+                // tgt_dpl < eff_cpl, turning a same-privilege conforming transfer into
+                // a spurious privilege transition: CPL silently dropped and the
+                // handler ran on a TSS stack it was never supposed to get.
+                // ---- REVIEW2_aug2 C-03 (staging, CPL half): commit the new CPL HERE
+                // only on the SAME-PRIVILEGE path, where it is a no-op anyway (a
+                // conforming target keeps eff_cpl; a non-conforming same-priv target
+                // has tgt_dpl == eff_cpl, since cs_bad already rejected tgt_dpl >
+                // eff_cpl and int_xpriv covers tgt_dpl < eff_cpl).
+                //
+                // On the CROSS-PRIVILEGE path it is now DEFERRED to S_INT_SS, where
+                // the new stack is accepted. Committing it here was observable, not
+                // theoretical: with cpl_r already lowered to the target's DPL, any
+                // fault raised later in delivery -- including the #TS from the TSS
+                // bound check below -- was classified against the NEW privilege. A
+                // #TS handler reached through a DPL3 conforming gate (the only kind
+                // that can report a broken TSS, since it needs no stack switch) was
+                // then rejected by its own tgt_dpl > eff_cpl test and escalated.
+                // Measured on ptsslim before this change:
+                //   [FAULT] vec=10 err=00000028 depth=0   the #TS, correct
+                //   [FAULT] vec=13 err=00000032 depth=1   #GP: handler CS refused
+                //   [FAULT] vec=11 err=00000042 depth=2   escalation -> no report
+                // int_new_cpl already carried the staged value and tss_stk_off already
+                // used it, so nothing between here and S_INT_SS needed cpl_r.
+                //
+                // STILL OPEN: the CS hidden state (seg_sel/base/limit/attr/cs_d) is
+                // committed above and is NOT staged. A late fault therefore still
+                // pushes the handler's CS rather than the interrupted one. That is the
+                // remainder of C-03's first bullet and needs the iret_cs_*-style
+                // staging registers; it is not done here.
+                if (!int_xpriv)
+                  cpl_r          <= int_tgt_conf ? eff_cpl : tgt_dpl;
+                int_cs_d         <= desc[54];   // REVIEW2_aug2 C-03: staged, not live
                 int_step         <= 4'd0;
                 // M7.2: latch whether THIS delivery's source was V86 (eflags[17] is
                 // still set here — it is cleared on the S_INT_PUSH final beat). A V86
@@ -133,8 +257,16 @@
                 // the 9-word frame off a never-loaded int_new_esp/SS base -> a corrupt
                 // frame at a stale address. Pinning from_v86 to the cross-priv arm
                 // closes that latent path with no functional change.
-                from_v86 <= v86 && (tgt_dpl < eff_cpl);
-                if (tgt_dpl < eff_cpl) begin
+                from_v86 <= v86 && int_xpriv;
+`ifdef VEN_DBG_WD
+                // Cross-privilege decision trace for page faults.  This diagnostic is
+                // intentionally guest-independent and is available only in a debug build.
+                if (int_vec==8'd14)
+                  $display("[VEN-XPL] vec=%0d tgt_dpl=%0d eff_cpl=%0d cpl_r=%0d v86=%b -> %s @cs:eip=%04x:%08h old_esp=%08h",
+                           int_vec, tgt_dpl, eff_cpl, cpl_r, v86, int_xpriv?"XPL":"SAME",
+                           seg_sel[SG_CS], eip, gpr_o[R_ESP]);
+`endif
+                if (int_xpriv) begin
                   // CROSS-PRIV (includes EVERY V86 delivery, eff_cpl=3): freeze the
                   // interrupted task's CS:SS:ESP for the frame (seg_sel[] here still
                   // hold the OLD values), record the target CPL, read TSS.ssN:espN.
@@ -151,6 +283,35 @@
                   int_old_fs   <= seg_sel[SG_FS];
                   int_old_gs   <= seg_sel[SG_GS];
                   int_old_eflags <= eflags;
+                  // ---- REVIEW2_aug2 C-03 (fifth bullet): REQUIRE a loaded TSS and
+                  // BOUND the ssN:espN read against tr_limit before issuing it. Both
+                  // signals existed and were consumed by NOTHING -- they sat in the
+                  // lint sink at core.sv:7699-7709 with a comment stating outright
+                  // that the negative cases "would consult" them. A cross-privilege
+                  // delivery with no TSS loaded, or a TSS truncated before ssN:espN,
+                  // read whatever memory followed tr_base and used it as the handler's
+                  // stack selector and pointer.
+                  //
+                  // IA-32 raises #TS for both: error code 0 when no TSS is loaded (no
+                  // selector to name), the TR selector when the TSS is too small.
+                  //
+                  // HONEST LIMITATION: this rejects the read, but CS/CPL were already
+                  // committed above, so the #TS still begins from a partially
+                  // installed handler context. That is C-03's REMAINING bullet (stage
+                  // the whole control context to one commit point) and is not fixed
+                  // here. Bounding the read is strictly better than performing it out
+                  // of bounds, and it does not depend on the staging rework landing.
+`ifdef VEN_C03_PROBE
+                  $display("[C03-TSSB] xpriv deliver vec=%0d tgt_dpl=%0d tr_valid=%0b tr_limit=%0h tss_last=%0d -> %s",
+                           int_vec, tgt_dpl, tr_valid, tr_limit, tss_last,
+                           (!tr_valid || (tss_last > tr_limit)) ? "#TS" : "ok");
+`endif
+                  if (!tr_valid)
+                    start_fault(8'd10, 1'b1, 32'd0, int_src_pc);
+                  else if (tss_last > tr_limit)
+                    start_fault(8'd10, 1'b1,
+                                {16'd0, tr_sel} & 32'h0000_FFFC, int_src_pc);
+                  else
                   state        <= S_INT_TSS;
                 end else begin
                   xpl_active   <= 1'b0;          // SAME-PRIV: push on current stack
@@ -178,7 +339,12 @@
             if (from_v86)
               last = int_has_err ? (int_step == 4'd9) : (int_step == 4'd8);
             else if (xpl_active)
-              last = int_has_err ? (int_step == 4'd5) : (int_step == 4'd4);
+              // REVIEW2_aug2 C-06: a call-gate frame is one word shorter (no EFLAGS),
+              // so it ends at beat 3. It never carries an error code.
+              // REVIEW1_Aug3 R2-H05: ...plus cg_pcount parameter slots, counted by
+              // cg_beat (the frame can be 35 beats, past int_step's 4 bits).
+              last = cg_xpl ? (cg_beat == (6'd3 + {1'b0, cg_pcount}))
+                            : (int_has_err ? (int_step == 4'd5) : (int_step == 4'd4));
             else
               last = int_has_err ? (int_step == 4'd3) : (int_step == 4'd2);
             if (last) begin
@@ -186,6 +352,24 @@
               // priv 5-6-word / same-priv 3-4-word, all gated on int_has_err) moved to
               // the gpr writeback driver (core_gpr_wb.svh, S_INT_PUSH arm).
               xpl_active <= 1'b0;
+              cg_xpl     <= 1'b0;   // REVIEW2_aug2 C-06
+              cg_beat    <= 6'd0;   // R2-H05: retire the frame beat counter with it
+              // The frame page plan has served its delivery; retire it so a
+              // later same-priv push can never match a captured page.
+              frm_pg_val   <= 4'd0;
+              frm_pg_markd <= 1'b0;
+              // ---- REVIEW2_aug2 C-03 (first bullet): THE SINGLE COMMIT POINT for the
+              // handler's control context. CS's selector and hidden cache land here,
+              // with eip, once the whole frame is on the stack and nothing further in
+              // this delivery can fault. Until now they were installed back in
+              // S_INT_CS, so a #TS/#SS/#GP/#PF raised anywhere in between started from
+              // a handler CS the interrupted code never executed in.
+              seg_sel  [SG_CS] <= int_gate_sel;
+              seg_base [SG_CS] <= int_cs_base;
+              seg_limit[SG_CS] <= int_cs_limit;
+              seg_attr [SG_CS] <= int_cs_attr;
+              seg_pm_loaded[SG_CS] <= 1'b1;   // R2-H07: validated (staged) PM load
+              cs_d             <= int_cs_d;
               eip        <= int_gate_off;
               // IA-32 6.12.1: on ANY interrupt/trap-gate entry the CPU clears TF
               // (bit8), NT (bit14), RF (bit16) and VM (bit17). An INTERRUPT gate
@@ -195,7 +379,13 @@
               // the non-V86 corpus, so masking them is a no-op there; under V86 the
               // VM-clear is the LOAD-BEARING transition into the PM monitor.
               //   common mask = TF|NT|RF|VM = 0x0003_4100; +IF (0x200) for int gate.
-              if (!int_gate_trap)
+              // REVIEW2_aug2 C-06: NONE of this applies to a far CALL through a call
+              // gate. A CALL does not clear IF/TF/NT/VM -- it is not an exception
+              // entry, and masking IF here would silently disable interrupts across
+              // every cross-privilege call.
+              if (cg_xpl)
+                complete_reference_rf();            // ordinary CALL completed
+              else if (!int_gate_trap)
                 eflags <= eflags & ~32'h0003_4300;   // clear IF+TF+NT+RF+VM (int gate)
               else
                 eflags <= eflags & ~32'h0003_4100;   // clear TF+NT+RF+VM (trap gate)
@@ -211,6 +401,10 @@
                     seg_base [s] <= 32'd0;
                     seg_limit[s] <= 32'd0;
                     seg_attr [s] <= 8'd0;
+                    // R2-H07: V86-entry zeroing is NOT a PM load -- a V86 guest's
+                    // null-ish selectors are ordinary real-mode-style values and
+                    // must not be caught by the PM null/not-present checks.
+                    seg_pm_loaded[s] <= 1'b0;
                   end
                 end
               end
@@ -253,8 +447,15 @@
               // emit it before the handler runs; all other deliveries go to S_PIPE.
               else if (db_wp_extra) state <= S_DB_EXTRA;
               else             state <= S_PIPE;
+              // REVIEW_aug2 H-04: the delivery COMPLETED -- control is now at the
+              // handler's first instruction, so a fault from here on is a fresh one,
+              // not a nested delivery fault. Clearing it here (rather than at the
+              // handler's first retire) is what makes the depth mean "a delivery is
+              // in flight" and nothing more.
+              dlv_depth <= 2'd0; dlv_ctrb <= 1'b0; dlv_pf <= 1'b0;
             end else begin
               int_step <= int_step + 4'd1;
+              cg_beat  <= cg_beat + 6'd1;   // R2-H05: cg_xpl frames count here
             end
           end
         end

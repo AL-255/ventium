@@ -23,19 +23,101 @@
           if (io_ack) begin
             logic [31:0] io_eip;
             logic [3:0]  io_xbp;
-            io_eip = next_eip;
-            // R3: the IN value -> AL/AX/eAX write moved to the gpr writeback driver
-            // (core_gpr_wb.svh, S_IO arm).
-            eip <= io_eip;
-            io_xbp = (sys_mode && !rf_at_issue) ? dr_match(seg_base[SG_CS]+io_eip, 1'b1)
-                                                : 4'd0;
-            if (sys_mode && io_xbp != 4'd0)
-              arm_db({28'd0, io_xbp}, q_pc, io_eip);     // instr breakpoint at next eip
-            else if (sys_mode && tf_at_issue)
-              arm_db(32'd1 << DR6_BS, q_pc, io_eip);     // TF single-step trap
-            else begin
-              retire_valid <= 1'b1;
-              state <= S_PIPE;
+            // REVIEW2 M-03: the A20 gate control latch. Port 0x92 ("fast A20" /
+            // System Control Port A) bit 1: 1 = A20 enabled, 0 = A20 forced low so
+            // physical addresses wrap at 1 MiB. Bit 0 is FAST RESET and is ignored
+            // here.
+            //
+            // WHY THE LATCH IS IN THE CORE. On real silicon this is a chipset
+            // register, and it was first written in ventium_top. That does not work:
+            // the port-0x92 OUT is serviced by the PS in one build, by a co-sim DPI
+            // hook in another and by in-PL devices in a third, and the top-level
+            // io_req/io_ack handshake is not observable at a clock edge in all of
+            // them -- an instrumented probe there never fired once. The core's own
+            // S_IO arm is the ONE place that sees every completed I/O write in every
+            // configuration, because it is the same condition the core already uses
+            // to retire the OUT. ventium_top keeps an `a20_gate` PLATFORM OVERRIDE
+            // input (ANDed with this latch) so a real chipset can still force A20 low.
+            //
+            // The write is observed, NOT intercepted: the OUT still goes out on the
+            // I/O bus exactly as before, so whatever already services 0x92 is
+            // unaffected.
+            if (q_io_write && q_io_port == 16'h0092) a20_r <= io_wdata[1];
+            // ---- REVIEW1_Aug2 M-07: port 0x92 bit 0 is FAST RESET ------------------
+            // It was consumed for A20 (bit 1) and bit 0 deliberately dropped, so
+            // software asking System Control Port A for a reset simply kept executing
+            // -- the one outcome that is certainly wrong, because the guest believes
+            // the machine restarted and continues from a state that no longer matches.
+            //
+            // A CPU cannot reset the platform by itself, so two things happen:
+            //   * fast_reset_req is asserted as a core OUTPUT, which is the "expose a
+            //     platform reset request" half -- a chipset/PS can drive rst_n from it;
+            //   * the core enters S_SHUTDOWN, the same terminal no-retire state a
+            //     triple fault uses. If nothing consumes the request, the machine STOPS
+            //     instead of running on with stale state.
+            // Gated on bit 0 alone, so the ordinary A20 idiom `out 0x92, 0x02` (A20 on,
+            // reset off) is untouched -- which is what every A20 user writes.
+            if (q_io_write && q_io_port == 16'h0092 && io_wdata[0]) begin
+              fast_reset_req <= 1'b1;
+              state          <= S_SHUTDOWN;
+            end
+            // ---- REVIEW1_Aug2 H-10: the KEYBOARD-CONTROLLER A20 path ---------------
+            // Port 0x92 is the "fast" A20. The CLASSIC route -- which is what real BIOS
+            // and DOS use, and what HIMEM.SYS falls back to -- goes through the 8042:
+            //     OUT 0x64, 0xD1     command: write the output port
+            //     OUT 0x60, <data>   bit 1 of <data> is A20
+            // Nothing in this design connected that to the gate. ventium_top ties its
+            // a20_gate override high and the SoC modules that would decode 0x60/0x64
+            // are not in this checkout, so the classic sequence changed NOTHING and the
+            // address mask stayed put.
+            //
+            // Handled HERE for exactly the reason the port-0x92 latch is (see above):
+            // the core's S_IO arm is the one place that observes every completed I/O
+            // write in every configuration. Two-step, because the data byte's meaning
+            // depends on the command that preceded it -- kbc_d1_armed is set by the
+            // 0xD1 command and consumed by the next write to 0x60.
+            //
+            // Observed, not intercepted: both OUTs still go out on the I/O bus, so
+            // whatever services the 8042 is unaffected.
+            if (q_io_write && q_io_port == 16'h0064)
+              // 0xD1 arms the output-port write; ANY other command cancels it, so an
+              // unrelated 8042 command cannot leave the core primed to misread the
+              // next 0x60 data byte as an A20 update.
+              kbc_d1_armed <= (io_wdata[7:0] == 8'hD1);
+            // The platform also implements the direct 8042 A20 commands.
+            // Mirror completed writes before L1 lookup, just like D1/0x60;
+            // the existing a20_flush invalidates executable translation state.
+            if (q_io_write && q_io_port == 16'h0064) begin
+              if (io_wdata[7:0] == 8'hDD) a20_r <= 1'b0;
+              if (io_wdata[7:0] == 8'hDF) a20_r <= 1'b1;
+            end
+            if (q_io_write && q_io_port == 16'h0060 && kbc_d1_armed) begin
+              a20_r        <= io_wdata[1];
+              kbc_d1_armed <= 1'b0;
+            end
+            // OUTS (K_STR ST_OUTS, routed here per element): retire with the string
+            // loop EIP latched in S_EXEC (q_pc while REP has elements left, next_eip
+            // on the last), exactly like the S_STORE string retire. Plain IN/OUT
+            // keeps next_eip.
+            // A reset request is terminal for the core until the platform acts on
+            // fast_reset_req.  Do not let the normal I/O completion below win the
+            // same clock's nonblocking assignment and return the CPU to S_PIPE.
+            if (!(q_io_write && q_io_port == 16'h0092 && io_wdata[0])) begin
+              io_eip = (q_kind==K_STR) ? str_next_eip : next_eip;
+              complete_reference_rf();
+              // R3: the IN value -> AL/AX/eAX write moved to the gpr writeback driver
+              // (core_gpr_wb.svh, S_IO arm).
+              eip <= io_eip;
+              io_xbp = (sys_mode && !rf_at_issue) ? dr_match(seg_base[SG_CS]+io_eip, 1'b1)
+                                                  : 4'd0;
+              if (sys_mode && io_xbp != 4'd0)
+                arm_db({28'd0, io_xbp}, q_pc, io_eip);     // instr breakpoint at next eip
+              else if (sys_mode && tf_at_issue)
+                arm_db(32'd1 << DR6_BS, q_pc, io_eip);     // TF single-step trap
+              else begin
+                retire_valid <= 1'b1;
+                state <= S_PIPE;
+              end
             end
           end
         end
@@ -58,6 +140,7 @@
           if (rep_active && (q_cnt16 ? (cx[15:0]==16'd0) : (cx==32'd0))) begin
             // Degenerate REP INS with ECX==0: no port read, no store — advance EIP
             // and retire one no-op record (matches qemu's degenerate-REP record).
+            complete_reference_rf();
             eip <= next_eip;
             if (sys_mode && tf_at_issue) arm_db(32'd1 << DR6_BS, q_pc, next_eip);
             else begin retire_valid <= 1'b1; state <= S_PIPE; end

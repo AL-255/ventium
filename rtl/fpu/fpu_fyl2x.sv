@@ -51,10 +51,36 @@ module fpu_fyl2x
     end
   endfunction
 
+  // S_CDIV is SPLIT across S_CDIV/A/B/C/D (#11 fmax): as one state it evaluated
+  // estDiv TWICE (each = two 64-bit hardware divides + a 64x64 multiply + its own
+  // 6-iteration chained 128-bit correction loop), plus mul128_192, a 192-bit
+  // subtract and a SECOND 6-iteration chained 192-bit loop — roughly four dividers
+  // and ~18 chained wide adds in ONE clock. That is the transcendental path that
+  // drove the routed WNS to -71 ns at the 167 ns (6 MHz) core period. Splitting is
+  // BIT-EXACT (identical arithmetic, just sequenced) and costs a handful of clocks
+  // in a rare instruction.
   typedef enum logic [3:0] {
-    S_IDLE, S_CLASS, S_CDIV, S_CT2, S_CHORN, S_CRECON, S_POST, S_PACK, S_DONE
+    S_IDLE, S_CLASS, S_CDIV, S_CDIVA, S_CDIVB, S_CDIVC, S_CDIVD,
+    S_CT2, S_CHORN, S_CRECON, S_POST, S_PACK, S_DONE
   } state_t;
   state_t st;
+
+  // S_CDIV pipeline registers (see the split below)
+  logic [63:0] cd_dsig0, cd_dsig1, cd_rsig0, cd_rsig1, cd_rsig2, cd_ts0;
+  logic signed [31:0] cd_texp;
+  logic [2:0]  cd_k;
+
+  // Shared SEQUENTIAL estimateDiv128To64. The combinational estDiv held two
+  // 64/32 dividers plus a 6-deep 128-bit add chain, and S_CDIV called it twice;
+  // one shared sequential instance serves both call sites (they are strictly
+  // sequential) at one divide per clock. Bit-exact with the inline function.
+  logic        ed_req, ed_vld, ed_iss;
+  logic [63:0] ed_a0, ed_a1, ed_z;
+  fpu_estdiv u_estdiv (
+    .clk(clk), .rst_n(rst_n), .req(ed_req),
+    .a0(ed_a0), .a1(ed_a1), .b(cd_dsig0),
+    .vld(ed_vld), .z(ed_z)
+  );
 
   logic [79:0] x_q, y_q, result_q, accum_q, t2_q;
   logic [1:0]  rc_q;
@@ -117,11 +143,12 @@ module fpu_fyl2x
   end
 
   always_ff @(posedge clk) begin
-    if (!rst_n) begin st<=S_IDLE; done_q<=1'b0; end
+    if (!rst_n) begin st<=S_IDLE; done_q<=1'b0; ed_req<=1'b0; ed_iss<=1'b0; end
     else begin
       done_q<=1'b0;
+      ed_req<=1'b0;                       // 1-clk pulse into the shared estDiv engine
       unique case (st)
-        S_IDLE: if (start) begin x_q<=x; y_q<=y; rc_q<=rc; mode_q<=mode; st<=S_CLASS; end
+        S_IDLE: if (start) begin x_q<=x; y_q<=y; rc_q<=rc; mode_q<=mode; ed_iss<=1'b0; st<=S_CLASS; end
 
         // ---- classify + wrapper setup -----------------------------------
         S_CLASS: begin
@@ -179,10 +206,13 @@ module fpu_fyl2x
           end
         end
 
-        // ---- fyl2x_common: t = arg/(2+arg) ------------------------------
+        // ---- fyl2x_common: t = arg/(2+arg) — SPLIT over 5 states (#11 fmax) ----
+        // Identical arithmetic to the old single-cycle S_CDIV, just sequenced so no
+        // clock holds more than one heavy operation.
+        // (1) divisor/dividend setup: shift128rj + the conditional 1-bit renormalize
         S_CDIV: begin
           automatic logic signed [31:0] dexp, texp; automatic logic [63:0] dsig0,dsig1;
-          automatic logic [63:0] rsig0,rsig1,rsig2, ts0, m0,m1b,m2; automatic logic [127:0] sh; automatic logic [191:0] mm, rem;
+          automatic logic [63:0] rsig0,rsig1; automatic logic [127:0] sh;
           if (arg_sign) begin
             dexp=32'sd16383; sh=shift128rj(arg_sig,64'd0, dexp-arg_exp); dsig0=sh[127:64]; dsig1=sh[63:0];
             sh = {64'd0,64'd0} - {dsig0,dsig1}; dsig0=sh[127:64]; dsig1=sh[63:0];
@@ -191,17 +221,49 @@ module fpu_fyl2x
             dsig0=dsig0 | 64'h8000000000000000;
           end
           texp = arg_exp - dexp + 32'sd16382;
-          rsig0=arg_sig; rsig1=64'd0; rsig2=64'd0;
+          rsig0=arg_sig; rsig1=64'd0;
           if (dsig0<=rsig0) begin sh=shift128r(rsig0,rsig1,1); rsig0=sh[127:64]; rsig1=sh[63:0]; texp=texp+32'sd1; end
-          ts0 = estDiv(rsig0,rsig1,dsig0);
-          mm = mul128_192(dsig0,dsig1,ts0); m0=mm[191:128]; m1b=mm[127:64]; m2=mm[63:0];
-          rem = {rsig0,rsig1,rsig2} - {m0,m1b,m2}; rsig0=rem[191:128]; rsig1=rem[127:64]; rsig2=rem[63:0];
-          for (int it=0; it<6; it++) begin
-            if (!rsig0[63]) break;
-            ts0=ts0-64'd1; rem={rsig0,rsig1,rsig2}+{64'd0,dsig0,dsig1}; rsig0=rem[191:128]; rsig1=rem[127:64]; rsig2=rem[63:0];
+          cd_dsig0<=dsig0; cd_dsig1<=dsig1;
+          cd_rsig0<=rsig0; cd_rsig1<=rsig1; cd_rsig2<=64'd0;
+          cd_texp <=texp;
+          st<=S_CDIVA;
+        end
+        // (2) first quotient estimate — via the shared sequential estDiv engine
+        S_CDIVA: begin
+          if (!ed_iss) begin
+            ed_req<=1'b1; ed_a0<=cd_rsig0; ed_a1<=cd_rsig1; ed_iss<=1'b1;
+          end else if (ed_vld) begin
+            cd_ts0<=ed_z; ed_iss<=1'b0; st<=S_CDIVB;
           end
-          tsig0_q<=ts0; tsig1_q<=estDiv(rsig1,rsig2,dsig0); texp_q<=texp;
-          st<=S_CT2;
+        end
+        // (3) remainder = r - d*q  (one mul128_192 + one 192-bit subtract)
+        S_CDIVB: begin
+          automatic logic [191:0] mm, rem;
+          mm  = mul128_192(cd_dsig0, cd_dsig1, cd_ts0);
+          rem = {cd_rsig0,cd_rsig1,cd_rsig2} - mm;
+          cd_rsig0<=rem[191:128]; cd_rsig1<=rem[127:64]; cd_rsig2<=rem[63:0];
+          cd_k<=3'd0;
+          st<=S_CDIVC;
+        end
+        // (4) correction loop — ONE iteration per clock (was 6 chained in one clock).
+        //     Original: for(it=0..5) { if(!rsig0[63]) break; q--; rem += d; }
+        S_CDIVC: begin
+          if (cd_rsig0[63] && (cd_k != 3'd6)) begin
+            automatic logic [191:0] rem;
+            rem = {cd_rsig0,cd_rsig1,cd_rsig2} + {64'd0, cd_dsig0, cd_dsig1};
+            cd_ts0  <= cd_ts0 - 64'd1;
+            cd_rsig0<=rem[191:128]; cd_rsig1<=rem[127:64]; cd_rsig2<=rem[63:0];
+            cd_k    <= cd_k + 3'd1;
+          end else st<=S_CDIVD;
+        end
+        // (5) second quotient estimate (same shared engine) + commit
+        S_CDIVD: begin
+          if (!ed_iss) begin
+            ed_req<=1'b1; ed_a0<=cd_rsig1; ed_a1<=cd_rsig2; ed_iss<=1'b1;
+          end else if (ed_vld) begin
+            tsig0_q<=cd_ts0; tsig1_q<=ed_z; texp_q<=cd_texp;
+            ed_iss<=1'b0; st<=S_CT2;
+          end
         end
 
         // ---- t2 = t^2 ; preload Horner ----------------------------------

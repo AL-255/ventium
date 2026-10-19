@@ -20,7 +20,13 @@
               // slots IP:CS:FLAGS. Capture only the low 16 bits and preserve the upper
               // half of EIP/EFLAGS (a 16-bit pop leaves bits[31:16] untouched).
               4'd0: begin
-                iret_eip   <= int_gate_op16 ? {eip[31:16], mem_rdata[15:0]} : mem_rdata;
+                // REVIEW_aug2 C-07: a 16-bit IRET must ZERO-EXTEND the popped IP
+                // (SDM: with 16-bit operand size the new EIP is the popped value AND
+                // 0000FFFFh). This preserved the OLD eip[31:16], so a 16-bit return
+                // jumped to a target built half from the frame and half from whatever
+                // the interrupted context happened to have. The real-mode IRET and RETF
+                // paths in this core already zero-extend; this one did not.
+                iret_eip   <= int_gate_op16 ? {16'd0, mem_rdata[15:0]} : mem_rdata;
                 int_step <= 4'd1;
               end
               4'd1: begin
@@ -33,9 +39,16 @@
                 // EFLAGS popped. Hold it; the actual eflags/eip/ESP commit happens
                 // on the final beat so an inter-priv pop can still read ESP/SS. A
                 // 16-bit pop restores only the low-16 settable flags + keeps [31:16].
+                // REVIEW2 C-10: privilege-masked, not raw. One helper for both widths
+                // and both commit sites so they cannot drift.
+                // Vivado rejects a bit-select applied directly to a function call.
+                // Merge the masked low word arithmetically instead; this is exactly
+                // the same 16-bit IRET result and keeps the old high word explicit.
                 iret_eflags <= int_gate_op16
-                  ? {eflags[31:16], ((mem_rdata[15:0] & 16'h7FD5) | 16'h0002)}
-                  : mem_rdata;
+                  ? ((eflags & 32'hFFFF_0000)
+                     | (iret_flags({eflags[31:16], mem_rdata[15:0]}, eflags)
+                        & 32'h0000_FFFF))
+                  : iret_flags(mem_rdata, eflags);
                 // M7.2: IRET from CPL0 with the popped EFLAGS.VM (bit17) set is a
                 // RETURN INTO V86. It always pops the full 9-word frame (ESP,SS +
                 // ES,DS,FS,GS follow) and switches stacks, regardless of the popped
@@ -45,38 +58,79 @@
                 // inter-priv ESP/SS pair in its 6-byte frame: the dword read at SP+4
                 // has garbage in bits[31:16], so gate BOTH the V86 and the inter-priv
                 // branch off and force the same-priv commit.
-                if (!int_gate_op16 && mem_rdata[17] && cpl_r == 2'd0) begin
+                if (v86) begin
+                  // IOPL<3 was rejected at dispatch. At IOPL=3 an IRET inside
+                  // V86 is a real-segment return, NOT a protected selector
+                  // load. Keep S_IRET for paging on the SS:SP frame reads;
+                  // S_RMIRET is deliberately not a translatable state.
+                  seg_sel[SG_CS]       <= iret_cs;
+                  seg_base[SG_CS]      <= {12'd0, iret_cs, 4'd0};
+                  seg_limit[SG_CS]     <= 32'h0000_FFFF;
+                  seg_attr[SG_CS]      <= 8'h9B;
+                  seg_pm_loaded[SG_CS] <= 1'b0;
+                  cs_d                 <= 1'b0;
+                  eip                  <= iret_eip;
+                  eflags               <= int_gate_op16
+                    ? ((eflags & 32'hFFFF_0000)
+                       | (iret_flags({eflags[31:16], mem_rdata[15:0]}, eflags)
+                          & 32'h0000_FFFF))
+                    : iret_flags(mem_rdata, eflags);
+                  iret_retire_nmi();
+                  int_step             <= 4'd0;
+                  q_pc                 <= int_src_pc;
+                  retire_valid         <= 1'b1;
+                  state                <= S_PIPE;
+                end else if (!int_gate_op16 && mem_rdata[17] && cpl_r == 2'd0) begin
                   iret_to_v86 <= 1'b1;
                   int_step    <= 4'd3;             // pop ESP, SS, ES, DS, FS, GS
-                end else if (!int_gate_op16 && iret_interpriv) int_step <= 4'd3;   // pop ESP, SS
+                // REVIEW_aug2 C-07: the inter-privilege branch was ALSO gated off for
+                // 16-bit, so a valid 16-bit protected-mode outer-level IRET was treated
+                // as same-privilege and never popped SP/SS -- it returned to CPL3 on the
+                // INNER stack. The V86 gate above genuinely does need !int_gate_op16
+                // (EFLAGS.VM lives in the high half a 16-bit pop does not load), but the
+                // privilege decision comes from the popped CS RPL, which IS loaded.
+                // NOTE: no gate exercises 16-bit inter-privilege IRET; the 32-bit path
+                // (pcpl/pfcpl3) is what verify-sys covers.
+                end else if (iret_interpriv) int_step <= 4'd3;   // pop ESP, SS
                 else begin
-                  // SAME-PRIV: commit now (ESP += 12 or 6), reload CS, retire via _RET.
-                  // R3: ESP adjust moved to the gpr writeback driver (S_IRET int_step 2).
-                  eip          <= iret_eip;
-                  eflags       <= int_gate_op16
-                    ? {eflags[31:16], ((mem_rdata[15:0] & 16'h7FD5) | 16'h0002)}
-                    : mem_rdata;
+                  // SAME-PRIV: REVIEW1_Aug2 C-06 -- commit NOTHING here. EIP, EFLAGS
+                  // and ESP all land in S_INT_CS_RET once the returned-to CS has been
+                  // read and validated. iret_eip/iret_eflags already hold the popped
+                  // values; they simply stay staged across the descriptor read.
                   int_gate_sel <= iret_cs;
                   int_step     <= 4'd0;
-                  state        <= S_INT_CS_RET;
+                  // REVIEW1_Aug2 H-01: table-limit check BEFORE the descriptor read.
+                  if (!sel_in_table(iret_cs))
+                    start_fault(8'd13, 1'b1, {16'd0, iret_cs} & 32'h0000_FFFC, int_src_pc);
+                  else state <= S_INT_CS_RET;
                 end
               end
-              4'd3: begin iret_esp <= mem_rdata;         int_step <= 4'd4; end
+              // A 16-bit IRETW (int_gate_op16) pops the outer SP as a WORD -- the
+              // dword at that slot is the pushed SS word in the high half, which
+              // must not leak into the restored ESP (QEMU helper_ret_protected
+              // zero-extends the popped word).
+              4'd3: begin iret_esp <= int_gate_op16 ? {16'd0, mem_rdata[15:0]}
+                                                  : mem_rdata;
+                          int_step <= 4'd4; end
               4'd4: begin
                 iret_ss      <= mem_rdata[15:0];
                 if (iret_to_v86) int_step <= 4'd5;   // V86: keep popping ES,DS,FS,GS
                 else begin
-                  // M2S.4 inter-priv (non-V86): SS popped. Commit the inter-priv
-                  // return: EIP, EFLAGS, and the OUTER ESP/SS. seg_base[SG_SS] is
-                  // still the inner base while we reload the CS (S_INT_CS_RET), then
-                  // S_IRET_SS loads the outer SS descriptor. ESP <- popped outer ESP.
-                  // R3: ESP<-outer popped ESP moved to the gpr writeback driver
-                  // (core_gpr_wb.svh, S_IRET/int_step 4 arm).
-                  eip          <= iret_eip;
-                  eflags       <= iret_eflags;
+                  // M2S.4 inter-priv (non-V86): SS popped -- the whole frame is now
+                  // in the iret_* staging registers.
+                  // ---- REVIEW_aug2 C-07: DO NOT COMMIT ANYTHING HERE.
+                  // This used to write eip/eflags (and the gpr driver wrote ESP) two
+                  // states before the outer SS descriptor was even read, so a frame
+                  // with an unusable SS had already redirected execution. EIP, EFLAGS,
+                  // ESP, CS and SS now all commit together in S_IRET_SS, after the SS
+                  // has been validated. iret_eip/iret_eflags/iret_esp already hold the
+                  // popped values; they simply stay staged across the two descriptor
+                  // reads.
                   int_gate_sel <= iret_cs;
                   int_step     <= 4'd0;
-                  state        <= S_INT_CS_RET;
+                  if (!sel_in_table(iret_cs))   // REVIEW1_Aug2 H-01
+                    start_fault(8'd13, 1'b1, {16'd0, iret_cs} & 32'h0000_FFFC, int_src_pc);
+                  else state <= S_INT_CS_RET;
                 end
               end
               // ---- M7.2 V86-return tail: pop ES, DS, FS, GS (beats 5..8) --------
@@ -106,6 +160,11 @@
                 seg_base [SG_SS] <= {12'd0, iret_ss, 4'd0};
                 seg_limit[SG_SS] <= 32'h0000_FFFF;
                 seg_attr [SG_SS] <= 8'h93;
+                // REVIEW1_Aug2 M-02: a V86 stack is 16-bit. ss_b was left at whatever
+                // the PREVIOUS (protected) SS descriptor set, so the one signal that
+                // is supposed to mean "this stack's width" was wrong for the whole of
+                // V86 execution -- which is why stk_ptr16 had to exclude V86 by name.
+                ss_b             <= 1'b0;
                 // ES/DS/FS/GS:base = popped sel<<4 (the V86 data segments).
                 seg_sel  [SG_ES] <= iret_v86_es;
                 seg_base [SG_ES] <= {12'd0, iret_v86_es, 4'd0};
@@ -119,7 +178,11 @@
                 seg_sel  [SG_GS] <= mem_rdata[15:0];
                 seg_base [SG_GS] <= {12'd0, mem_rdata[15:0], 4'd0};
                 seg_limit[SG_GS] <= 32'h0000_FFFF; seg_attr[SG_GS] <= 8'h93;
+                // R2-H07: the whole frame is V86-style (sel<<4, no descriptor
+                // read) -- none of the six is a PM load.
+                for (int s = 0; s < NUM_SEG; s++) seg_pm_loaded[s] <= 1'b0;
                 iret_to_v86  <= 1'b0;
+                iret_retire_nmi();      // REVIEW_aug2 H-05 (V86-return commit)
                 int_step     <= 4'd0;
                 q_pc         <= int_src_pc;            // stamp the IRET insn's PC
                 retire_valid <= 1'b1;
@@ -140,21 +203,80 @@
               int_lo <= mem_rdata; int_step <= 4'd1;
             end else begin
               logic [63:0] desc;
+              logic [7:0]  cs_a;
+              logic        cs_bad;
               desc = {mem_rdata, int_lo};
-              seg_sel  [SG_CS] <= int_gate_sel;
-              seg_base [SG_CS] <= desc_base(desc);
-              seg_limit[SG_CS] <= desc_limit(desc);
-              seg_attr [SG_CS] <= desc_attr(desc);
-              cpl_r            <= int_gate_sel[1:0];
-              cs_d             <= desc[54];
+              cs_a = desc_attr(desc);
+              // ---- REVIEW_aug2 C-07: VALIDATE the returned-to CS before installing it.
+              // This arm previously installed selector/base/limit/attr and CPL blindly.
+              // A frame carrying a null selector, a non-code descriptor, a not-present
+              // one, or one whose DPL does not match the return privilege was accepted,
+              // so IRET could install an arbitrary descriptor and set CPL from its RPL.
+              //   * null selector           -> #GP(0)
+              //   * not present (P=0)       -> #NP(sel)
+              //   * not a CODE descriptor   -> #GP(sel)   (S=1 and type bit3=1)
+              //   * privilege: a non-conforming code segment must have DPL == RPL; a
+              //     conforming one must have DPL <= RPL. IRET may not RAISE privilege,
+              //     so RPL < CPL is rejected too.
+              // Checked BEFORE any commit, so nothing is installed on a bad frame.
+              // (The full validate-then-commit restructure -- staging EIP/EFLAGS/ESP as
+              //  well -- is the rest of C-07 and is NOT done here; this closes the
+              //  descriptor half, which is the part that installs attacker-chosen
+              //  segment state.)
+              // REVIEW1_Aug2 C-06: the rule now lives in core.sv as iret_cs_ok, because
+              // the ESP writeback has to branch on the identical condition. Same
+              // expression, one definition.
+              cs_bad = !iret_cs_ok;
+              if (cs_bad) begin
+                // REVIEW1_Aug2 H-01: fault SELECTION, not just detection. The vector was
+                // chosen from P alone, so a NULL selector -- whose GDT[0] is the ordinary
+                // all-zero non-present descriptor -- raised #NP instead of the required
+                // #GP(0). Null is decided first and carries error code 0; only a
+                // well-formed-but-absent descriptor is #NP.
+                // REVIEW_Aug3 H-03: the ERROR CODE likewise depends on the reason. A
+                // valid descriptor whose popped EIP exceeds CS.limit is #GP(0), not
+                // #GP(selector) -- only a selector/table/type/privilege failure names
+                // the selector (iret_cs_desc_ok is the descriptor half of the check).
+                start_fault((int_gate_sel[15:2] == 14'd0) ? 8'd13
+                            : (!cs_a[7] ? 8'd11 : 8'd13), 1'b1,
+                            (int_gate_sel[15:2] == 14'd0) ? 32'd0
+                            : (iret_cs_desc_ok ? 32'd0
+                            : ({16'd0, int_gate_sel} & 32'h0000_FFFC)), int_src_pc);
+              end else begin
               int_step         <= 4'd0;
               if (iret_interpriv) begin
-                state          <= S_IRET_SS;   // reload outer SS, then retire
+                // ---- REVIEW_aug2 C-07: STAGE, do not install. The outer SS has not
+                // been read yet; committing CS (and with it CPL) here is what let a
+                // bad-SS frame lower privilege before anything checked the stack.
+                iret_cs_base     <= desc_base(desc);
+                iret_cs_limit    <= desc_limit(desc);
+                iret_cs_attr     <= desc_attr(desc);
+                iret_cs_d        <= desc[54];
+                // REVIEW1_Aug2 H-01: the outer SS selector needs the same check.
+                if (!sel_in_table(iret_ss))
+                  start_fault(8'd13, 1'b1, {16'd0, iret_ss} & 32'h0000_FFFC, int_src_pc);
+                else
+                state            <= S_IRET_SS;   // read + validate outer SS, then commit ALL
               end else begin
-                q_pc           <= int_src_pc;
-                retire_valid   <= 1'b1;
-                state          <= S_PIPE;
+                // SAME-PRIVILEGE return: there is no SS to validate, so this IS the
+                // single commit point -- and after REVIEW1_Aug2 C-06 that means EIP
+                // and EFLAGS commit here too, not at S_IRET beat 2. ESP is advanced
+                // by core_gpr_wb.svh off the shared iret_cs_commit on this same clock.
+                eip              <= iret_eip;
+                eflags           <= iret_eflags;
+                seg_sel  [SG_CS] <= int_gate_sel;
+                seg_base [SG_CS] <= desc_base(desc);
+                seg_limit[SG_CS] <= desc_limit(desc);
+                seg_attr [SG_CS] <= desc_attr(desc);
+                seg_pm_loaded[SG_CS] <= 1'b1;   // R2-H07: validated PM load
+                cpl_r            <= int_gate_sel[1:0];
+                cs_d             <= desc[54];
+                iret_retire_nmi();      // REVIEW_aug2 H-05 (same-privilege commit)
+                q_pc             <= int_src_pc;
+                retire_valid     <= 1'b1;
+                state            <= S_PIPE;
               end
+              end   // REVIEW_aug2 C-07: closes the cs_bad guard
             end
           end
         end
@@ -165,12 +287,11 @@
         // 6.12.3: on a privilege-lowering return, segment registers loaded with a
         // selector that is now inaccessible are zeroed to prevent a less-privileged
         // task from using a more-privileged data segment). Retire the IRET.
-        // DONE-PARTIAL (documented follow-on): the outer SS is reloaded from the
-        // popped selector WITHOUT re-validating that SS.RPL == popped CS.RPL and
-        // SS.DPL == popped CS.RPL (IA-32 requires both on an inter-priv return,
-        // else #GP(SS-selector)). The pcpl corpus uses matching RPL=3 selectors
-        // (CS=0x1B, SS=0x23), so this never trips and there is no oracle for the
-        // #GP path; deferred with the other negative-path SS checks above.
+        // REVIEW_aug2 C-07: this is now also the SINGLE COMMIT POINT of an
+        // inter-privilege IRET -- CS/SS/EIP/EFLAGS/CPL/ESP all land here, after the
+        // SS has been validated (iret_ss_ok, defined once in core.sv). The previous
+        // version reloaded SS from the popped selector with no checks whatsoever,
+        // downstream of three states that had already committed the rest of the frame.
         S_IRET_SS: begin
           if (mem_ack) begin
             if (int_step == 4'd0) begin
@@ -178,26 +299,109 @@
             end else begin
               logic [63:0] desc;
               desc = {mem_rdata, int_lo};
+              // ---- REVIEW_aug2 C-07: VALIDATE the outer SS, then commit the WHOLE frame.
+              // This arm used to install base/limit/attr from whatever descriptor the
+              // frame named, with no checks at all -- and by then EIP, EFLAGS, ESP and
+              // CS (hence CPL) were already committed by three earlier states.
+              // IA-32 requires, on a privilege-lowering return:
+              //   * SS.RPL == the return CPL (the popped CS RPL)
+              //   * SS.DPL == the return CPL
+              //   * SS is a WRITABLE DATA segment (S=1, type[3]=0 data, type[1]=W)
+              //   * SS is present, else #SS(sel)
+              //   * a null SS is not usable at the outer level -> #GP(0)
+              // The rule itself lives in core.sv as iret_ss_ok, because the ESP
+              // writeback in core_gpr_wb.svh must agree with it exactly.
+              // A not-present (but otherwise well-formed, non-null) SS raises #SS (12);
+              // everything else #GP (13), with the selector as the error code.
+              if (!iret_ss_ok) begin
+                start_fault(iret_ss_wellformed ? 8'd12 : 8'd13,   // P is the LAST check
+                            1'b1, {16'd0, iret_ss} & 32'h0000_FFFC, int_src_pc);
+              end else begin
+              // ===== THE SINGLE COMMIT POINT for an inter-privilege IRET ==========
+              // CS (staged by S_INT_CS_RET), SS, EIP, EFLAGS and CPL all land on this
+              // one clock. ESP lands with them, driven from core_gpr_wb.svh off the
+              // shared iret_ss_commit. Before this, nothing architectural has moved.
+              seg_sel  [SG_CS] <= int_gate_sel;
+              seg_base [SG_CS] <= iret_cs_base;
+              seg_limit[SG_CS] <= iret_cs_limit;
+              seg_attr [SG_CS] <= iret_cs_attr;
+              seg_pm_loaded[SG_CS] <= 1'b1;   // R2-H07: validated PM load
+              cpl_r            <= int_gate_sel[1:0];
+              cs_d             <= iret_cs_d;
+              eip              <= iret_eip;
+              eflags           <= iret_eflags;
+              // This flags-install edge also serves ordinary outer RETF.
+              // Only RETF consumes RF; genuine IRET retains its restored RF.
+              if (retf_out) complete_reference_rf();
               seg_sel  [SG_SS] <= iret_ss;
               seg_base [SG_SS] <= desc_base(desc);
               seg_limit[SG_SS] <= desc_limit(desc);
               seg_attr [SG_SS] <= desc_attr(desc);
-              // null a data segment whose DPL < new CPL (would be inaccessible).
+              seg_pm_loaded[SG_SS] <= 1'b1;   // R2-H07: validated PM load
+              // REVIEW_aug2 C-07 (ss_b): the outer stack's B bit governs stk16(); it was
+              // never updated here, so after an inter-priv return the stack width came
+              // from the PREVIOUS SS descriptor -- a 16-bit outer stack was addressed as
+              // 32-bit (and vice-versa) for every push/pop until something else reloaded SS.
+              ss_b <= desc[54];
+              // ---- REVIEW2_aug2 H-08: null a data segment that is INACCESSIBLE at the
+              // new CPL. This tested DPL alone, which is not the architectural rule and
+              // is wrong in a specific direction: IA-32 (IRET, "segment register loading
+              // on return to outer privilege") nulls a register only when its descriptor
+              // is a DATA segment or a NON-CONFORMING code segment whose DPL is below the
+              // new CPL. A CONFORMING code segment is accessible from ANY privilege level
+              // by definition, so DPL < CPL is the normal case for one and clearing it
+              // destroyed a perfectly legal segment the returning code could still use.
+              //
+              // seg_attr is the access byte: bit4 = S, bit3 = code, bit2 = C (conforming
+              // for code). So "data or non-conforming code" is S && !(code && C), and a
+              // descriptor with S=0 -- an unpopulated hidden cache reads as attr 0 -- is
+              // not a usable data segment either and is nulled, which is what the old
+              // DPL-only test already did for it.
+              //
+              // REVIEW_Aug3 H-03: the accessibility test must use the SELECTOR's RPL
+              // too, not just the new CPL. IA-32 nulls the register when
+              // DPL < max(new CPL, RPL) -- a data (or nonconforming code) selector
+              // with DPL >= new CPL but DPL < its own RPL is no longer usable at the
+              // returned privilege and must not survive the return.
               for (int s = 0; s < NUM_SEG; s++) begin
+`ifdef VEN_C03_PROBE
+                if ((s == int'(SG_DS) || s == int'(SG_ES) ||
+                     s == int'(SG_FS) || s == int'(SG_GS)))
+                  $display("[H08-SEG] outer-IRET seg%0d attr=%02h dpl=%0d newcpl=%0d conf=%0b -> %s",
+                           s, seg_attr[s], desc_dpl(seg_attr[s]), iret_cs[1:0],
+                           (seg_attr[s][4] && seg_attr[s][3] && seg_attr[s][2]),
+                           (!(seg_attr[s][4] && seg_attr[s][3] && seg_attr[s][2]) &&
+                            (desc_dpl(seg_attr[s]) < iret_cs[1:0])) ? "NULLED" : "kept");
+`endif
                 if ((s == int'(SG_DS) || s == int'(SG_ES) ||
                      s == int'(SG_FS) || s == int'(SG_GS)) &&
-                    (desc_dpl(seg_attr[s]) < iret_cs[1:0])) begin
+                    !(seg_attr[s][4] && seg_attr[s][3] && seg_attr[s][2]) &&
+                    ((desc_dpl(seg_attr[s]) < iret_cs[1:0]) ||
+                     (desc_dpl(seg_attr[s]) < seg_sel[s][1:0]))) begin
                   seg_sel  [s] <= 16'd0;
                   seg_base [s] <= 32'd0;
                   seg_limit[s] <= 32'd0;
                   seg_attr [s] <= 8'd0;
+                  // R2-H07: an outer-return nulling IS a PM load event (of a
+                  // null segment) -- a later use must #GP(0), which needs the
+                  // loaded bit set.
+                  seg_pm_loaded[s] <= 1'b1;
                 end
               end
               iret_interpriv   <= 1'b0;
+              // REVIEW2_aug2 C-06: this commit is now shared with the OUTER-level far
+              // RETF, and NMI unblocking is IRET-only semantics -- a RETF that also
+              // cleared nmi_in_progress would re-open the NMI window early, inside a
+              // handler that never took an NMI. retf_out is the discriminator, and it
+              // is cleared here (and in start_fault) so the flag cannot outlive the
+              // sequence that set it.
+              if (!retf_out) iret_retire_nmi();   // REVIEW_aug2 H-05
+              retf_out         <= 1'b0;
               int_step         <= 4'd0;
               q_pc             <= int_src_pc;
               retire_valid     <= 1'b1;
               state            <= S_PIPE;
+              end
             end
           end
         end

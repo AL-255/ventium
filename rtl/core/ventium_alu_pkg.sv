@@ -1,3 +1,4 @@
+`default_nettype wire  // Vivado project-flow: reset nettype (files compile as one unit; prevents `none` leak)
 // Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
 // SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
 
@@ -12,6 +13,19 @@
 // ALU_ADD..ALU_NOT when classifying opcodes.
 
 package ventium_alu_pkg;
+
+  // P54 cache-transfer alignment, NOT the architectural #AC test. Intel's
+  // Vol.1 basic-memory model and AP-500 5.4.3 allow a word at offsets 0/1/2
+  // inside one aligned dword. A byte never crosses a transfer boundary.
+  function automatic logic p5_data_misaligned(input logic [31:0] addr,
+                                              input logic [3:0] bytes);
+    case (bytes)
+      4'd2: return addr[1:0] == 2'b11;
+      4'd4: return addr[1:0] != 2'b00;
+      4'd8: return addr[2:0] != 3'b000;
+      default: return 1'b0;
+    endcase
+  endfunction
 
   // ALU op encoding (low 3 bits mirror the x86 ALU group order 0..7).
   localparam logic [4:0] ALU_ADD = 5'd0;
@@ -114,12 +128,67 @@ package ventium_alu_pkg;
   // ===========================================================================
   // Shift/rotate result + CF
   // ===========================================================================
+  // RCL/RCR rotate the operand and carry together: 9, 17 or 33 bits.
+  // The old helpers execute min(cnt,32) single-bit iterations. Preserve that
+  // full six-bit contract, including counts 32..63, although x86 callers mask
+  // their architectural count to five bits. Six fixed-distance stages replace
+  // 32 serial conditional stages; every distance/modulus below is a constant
+  // after loop unrolling. There is no run-time divider or added clock cycle.
+  function automatic logic [32:0] shrot_carry_ring(
+      input logic right, input logic [31:0] v, input logic [5:0] cnt,
+      input logic cfin, input logic [2:0] w);
+    logic [8:0] r9;
+    logic [16:0] r17;
+    logic [32:0] r33;
+    logic [5:0] steps;
+    begin
+      r9 = {cfin,v[7:0]}; r17 = {cfin,v[15:0]}; r33 = {cfin,v};
+      steps = cnt[5] ? 6'd32 : cnt;
+      // A relational comparison with an X/Z count was false in each old
+      // procedural if. Keep that simulation behavior; this is constant true
+      // for every binary six-bit count and disappears during synthesis.
+      if (cnt <= 6'd63) begin
+        for (int stage = 0; stage < 6; stage++) begin
+          if (steps[stage]) begin
+            if (right) begin
+              r9 = (r9 >> ((1 << stage) % 9)) |
+                   (r9 << (9 - ((1 << stage) % 9)));
+              r17 = (r17 >> ((1 << stage) % 17)) |
+                    (r17 << (17 - ((1 << stage) % 17)));
+              r33 = (r33 >> ((1 << stage) % 33)) |
+                    (r33 << (33 - ((1 << stage) % 33)));
+            end else begin
+              r9 = (r9 << ((1 << stage) % 9)) |
+                   (r9 >> (9 - ((1 << stage) % 9)));
+              r17 = (r17 << ((1 << stage) % 17)) |
+                    (r17 >> (17 - ((1 << stage) % 17)));
+              r33 = (r33 << ((1 << stage) % 33)) |
+                    (r33 >> (33 - ((1 << stage) % 33)));
+            end
+          end
+        end
+      end
+      case (w)
+        3'd1: return {r9[8],24'd0,r9[7:0]};
+        3'd2: return {r17[16],16'd0,r17[15:0]};
+        default: return r33;
+      endcase
+    end
+  endfunction
+
   function automatic logic [31:0] shrot_result(input logic [2:0] subop, input logic [31:0] v,
                                                input logic [5:0] cnt, input logic cfin, input logic [2:0] w);
-    logic [31:0] x; logic [5:0] bits; logic carry, nc; int i; logic [4:0] ihi;
+    logic [31:0] x; logic [5:0] bits, rot; logic [4:0] ihi;
+    logic [32:0] ring;
     begin
       x=wmask(v,w); bits=(w==3'd1)?6'd8:((w==3'd2)?6'd16:6'd32);
       ihi=5'(bits-6'd1);
+      // The architectural count is masked to five bits at the callers. Keep
+      // the old helper's full six-bit behavior too: its 32-step loop leaves
+      // any count >=32 unrotated, while narrower widths wrap modulo 8/16.
+      rot = cnt[5] ? 6'd0 :
+            (w==3'd1) ? {3'd0,cnt[2:0]} :
+            (w==3'd2) ? {2'd0,cnt[3:0]} : {1'd0,cnt[4:0]};
       unique case (subop)
         3'd4,3'd6: x = wmask(x << cnt, w);
         3'd5:      x = x >> cnt;
@@ -129,10 +198,14 @@ package ventium_alu_pkg;
           else              x=$unsigned($signed(v)>>>cnt);
           x=wmask(x,w);
         end
-        3'd0: for (i=0;i<32;i++) if (i<cnt) x=wmask((x<<1)|{31'd0,x[ihi]},w);
-        3'd1: for (i=0;i<32;i++) if (i<cnt) x=wmask((x>>1)|({31'd0,x[0]}<<(bits-6'd1)),w);
-        3'd2: begin carry=cfin; for(i=0;i<32;i++) if(i<cnt) begin nc=x[ihi]; x=wmask((x<<1)|{31'd0,carry},w); carry=nc; end end
-        3'd3: begin carry=cfin; for(i=0;i<32;i++) if(i<cnt) begin nc=x[0]; x=wmask((x>>1)|({31'd0,carry}<<(bits-6'd1)),w); carry=nc; end end
+        // A pair of bounded barrel shifts replaces a 32-stage conditional
+        // loop. This is the same masked rotate for 8/16/32-bit operands.
+        3'd0: x = wmask((x << rot) | (x >> (bits-rot)), w);
+        3'd1: x = wmask((x >> rot) | (x << (bits-rot)), w);
+        3'd2,3'd3: begin
+          ring = shrot_carry_ring(subop[0],v,cnt,cfin,w);
+          x = ring[31:0];
+        end
         default: ;
       endcase
       return wmask(x,w);
@@ -141,7 +214,8 @@ package ventium_alu_pkg;
 
   function automatic logic shrot_cf(input logic [2:0] subop, input logic [31:0] v,
                                     input logic [5:0] cnt, input logic cfin, input logic [2:0] w);
-    logic [31:0] x,res; logic [5:0] bits; logic carry,nc; int i;
+    logic [31:0] x,res; logic [5:0] bits;
+    logic [32:0] ring;
     logic [4:0] ihi, ilo, ic;
     begin
       x=wmask(v,w); bits=(w==3'd1)?6'd8:((w==3'd2)?6'd16:6'd32);
@@ -153,10 +227,44 @@ package ventium_alu_pkg;
         3'd5,3'd7: shrot_cf=(cnt==0)?cfin:x[ic];
         3'd0: begin res=shrot_result(3'd0,v,cnt,cfin,w); shrot_cf=(cnt==0)?cfin:res[0]; end
         3'd1: begin res=shrot_result(3'd1,v,cnt,cfin,w); shrot_cf=(cnt==0)?cfin:res[ihi]; end
-        3'd2: begin carry=cfin; for(i=0;i<32;i++) if(i<cnt) begin nc=x[ihi]; x=wmask((x<<1)|{31'd0,carry},w); carry=nc; end shrot_cf=carry; end
-        3'd3: begin carry=cfin; for(i=0;i<32;i++) if(i<cnt) begin nc=x[0]; x=wmask((x>>1)|({31'd0,carry}<<(bits-6'd1)),w); carry=nc; end shrot_cf=carry; end
+        3'd2,3'd3: begin
+          ring = shrot_carry_ring(subop[0],v,cnt,cfin,w);
+          shrot_cf = ring[32];
+        end
         default: shrot_cf=cfin;
       endcase
+    end
+  endfunction
+
+  // Flags for the fast U shifter: SHL/SHR/SAL/SAR, and optional dword ROR.
+  // Commit and a paired V branch MUST consume the same width/rotate policy.
+  // Result, previous result and carry are supplied by the existing shared
+  // shifter; this helper adds no second shifter or execution cycle.
+  function automatic logic [31:0] fast_shift_flags(
+      input logic [2:0] subop, input logic [4:0] cnt,
+      input logic [31:0] result, input logic [31:0] previous,
+      input logic carry, input logic [31:0] cur, input logic [2:0] w);
+    logic [31:0] fl;
+    begin
+      fl = cur;
+      if (cnt != 5'd0) begin
+`ifdef VEN_FAST_ROR_IMM
+        if (subop == 3'd1) begin
+          // ROR preserves SF/ZF/PF/AF; only CF and OF are replaced.
+          fl[0] = carry;
+          fl[11] = sbit(result,w) ^ sbit2(result,w);
+        end else begin
+`endif
+          fl = cur & 32'hFFFF_F72A;
+          fl[0] = carry; fl[2] = parity8(result[7:0]); fl[4] = 1'b0;
+          fl[6] = (wmask(result,w) == 32'd0); fl[7] = sbit(result,w);
+          fl[11] = sbit(previous,w) ^ sbit(result,w);
+`ifdef VEN_FAST_ROR_IMM
+        end
+`endif
+        fl[1] = 1'b1;
+      end
+      return fl;
     end
   endfunction
 
@@ -167,8 +275,11 @@ package ventium_alu_pkg;
     begin
       bits=(w==3'd2)?6'd16:6'd32;
       if (cnt==0) r=dst;
-      else if (is_shrd) r=(dst>>cnt)|(src<<(bits-cnt));
-      else              r=(dst<<cnt)|(src>>(bits-cnt));
+      // Mask BEFORE shifting: upper GPR halves are not operand bits for
+      // 16-bit forms. Masking only the result leaks dst[31:16] into SHRD
+      // (VMM32's CX=5074, ECX=00015074 witness) or src[31:16] into SHLD.
+      else if (is_shrd) r=(wmask(dst,w)>>cnt)|(wmask(src,w)<<(bits-cnt));
+      else              r=(wmask(dst,w)<<cnt)|(wmask(src,w)>>(bits-cnt));
       return wmask(r,w);
     end
   endfunction

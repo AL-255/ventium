@@ -70,8 +70,9 @@ module ven_bcd_to_fp
           if (idx == 5'd1) st <= ST_FIN;            // just consumed digits 1 and 0
         end
         ST_FIN: begin
-          automatic logic signed [63:0] sval = sign_q ? -$signed(mag) : $signed(mag);
-          result_q <= fx_from_int(sval, 2'b11);   // FBLD: extended (PC follow-up)
+          automatic logic [79:0] magnitude_fp = fx_from_int($signed(mag), 2'b11);
+          // P54 FBLD preserves the packed sign, including negative zero.
+          result_q <= {sign_q, magnitude_fp[78:0]};
           done_q   <= 1'b1;
           st       <= ST_IDLE;
         end
