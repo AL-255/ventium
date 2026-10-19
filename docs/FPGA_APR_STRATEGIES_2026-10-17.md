@@ -1,5 +1,42 @@
 # APR strategy comparison — 40 MHz target
 
+## Stopped for host migration — 2026-10-19
+
+At the user's request, `performance-route-first-r1` was cancelled at about
+04:45 EDT during routing. The controller and its Vivado scope are terminal;
+the recorded controller/native worker PIDs are gone. The synthesis/APR goal
+is paused, not achieved. No further runs were launched.
+
+`closed.json` records `reason="controller signal"`, native exit 124,
+12,917.602 seconds elapsed, unchanged inputs, no completed implementation,
+no timing sign-off, no hardware acceptance and no gameplay measurement.
+All **215 launch pins** were independently rehashed unchanged after closure.
+Receipt SHA256:
+`12137566c4fced6382c0ea01806aa378310d7745fc6a3545a1d9c657b3b95694`.
+Intermediate placement/router estimates are not a final frequency result.
+
+An additional checked cleanup permanently removed **1,933 generated files,
+1,984,106,496 allocated bytes (1.85 GiB)** from this goal's closed fresh/APR
+trial build/scratch directories. Sources, all launch/closure receipts, native
+logs/Tcl/XDC, reports, accepted images and guest evidence remain. Regeneration
+requires rebuilding; these products were not moved to trash. The exact manifest,
+deletion log and free-space receipt are retained under
+`/home/yukidama/external/tmp/ventium-readme-oct19.kXPLq4fU/` as
+`closed-delete-plan.jsonl.gz`, `closed-deleted.jsonl.gz` and
+`closed-cleanup-result.json`. Manifest SHA256:
+`e0f60a05fcd7e79b0982260e12479e5e2793b88432fcbb1de492834dfe49789f`.
+Free external space rose from 14,604,152,832 to 16,588,206,080 bytes at that check.
+Earlier cleanup/recovery archives described below are preserved for transfer.
+
+The known-good source release is being published separately to `main`, not by
+merging the experimental RTL. This development branch is renamed
+`experimental/uv-fast-ipc-apr`; pre-existing uncommitted work remains local as
+the user explicitly requested. Retain the compact staged uncapped-memory bundle
+and cleanup/evidence archives when moving computers.
+
+Verified gameplay remains **0.496499864 total U+V**, deployed `2886d24c`, cycles
+**625,021,130,428–629,480,208,865**. The cancelled APR candidate is unmeasured.
+
 ## Scope and baseline
 
 The target remains **40 MHz core / 100 MHz AXI** (25 ns / 10 ns), with timing
@@ -48,7 +85,7 @@ window peak reaches 90.37% despite much lower whole-chip routing utilization.
 | `performance-retime-r1` | `PerformanceOptimized`, rebuilt hierarchy, explicit synthesis retiming | Planned spread placement / explicit physical-operation sets / `NoTimingRelaxation` | Stopped by the 21 GiB combined-memory guard during technology mapping. No OOM, completed synthesis/APR or timing result. |
 | `performance-retime-r2` | Same retiming strategy, fresh source/project, named `serial20` memory profile | Same bounded physical operations / spread placement / `NoTimingRelaxation` | Stopped during technology mapping by the 25 GiB combined-memory guard; no OOM/task rejection, completed synthesis or routed timing. |
 | `performance-bounded-r1` | `PerformanceOptimized`, rebuilt hierarchy, explicit retiming off; fresh source/project, `serial20` | Spread placement / bounded physical-operation sets / planned `NoTimingRelaxation` | Failed Oct19 00:55 EDT: Vivado SIGSEGV exporting the post-physical-optimization checkpoint. Synthesis, placement and physical optimization completed; routing never started. No routed timing result. |
-| `performance-route-first-r1` | `PerformanceOptimized`, rebuilt hierarchy, explicit retiming off; one synthesis thread | Spread placement / optional physical stages disabled / `NoTimingRelaxation`; four APR threads | Fresh synthesis completed in 2 h 09 min 25 s; propagated 40/100 MHz clocks verified. Placement completed in 24 min 40 s; routing started Oct19 03:51:14 EDT and remains active at 04:18. No final routed timing result yet. |
+| `performance-route-first-r1` | `PerformanceOptimized`, rebuilt hierarchy, explicit retiming off; one synthesis thread | Spread placement / optional physical stages disabled / `NoTimingRelaxation`; four APR threads | Cancelled by user Oct19 04:45 EDT during routing for host migration. Synthesis completed in 2 h 09 min 25 s; placement 24 min 40 s. No final routed timing or bitstream. |
 
 The first combination targets the measured long logic/routing path. The second
 tests a routing-oriented mapping and spread placement, if the first result

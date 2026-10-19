@@ -4,10 +4,11 @@
   <img src="docs/quake-timedemo.gif" alt="Quake timedemo running on the Ventium FPGA" width="640">
 </p>
 
-FPGA diagnostic capture at **37.5 MHz**, native 320×200 colours, **15 fps playback**.
-The cold timedemo completed 969 frames in 288.3 guest-reported seconds
-(3.4 printed fps); **40 MHz qualification remains open**.
-[Recording and IPC evidence](docs/FPGA_CMP_BRANCH_LOCALIZATION_2026-10-05.md#completed-cold-recording-r4).
+Latest verified FPGA capture: **40 MHz**, native 320×200, **15 fps playback**.
+The cold FreeDOS/DOS Quake timedemo completed **969 frames in 125.8 seconds
+(7.7 FPS)**. All 2,814 capture frames are retained; GIF palette compression only,
+no brightness/gamma/contrast adjustment. Playback rate is not engine FPS.
+[Recording and IPC evidence](docs/FPGA_QUAKE_TIMEDEMO_2026-10-17.md).
 
 [![Documentation](https://img.shields.io/badge/docs-Sphinx-green)][docs]
 
@@ -23,10 +24,11 @@ pipeline, a pipelined x87 unit, split L1 caches/TLBs, two-level paging, and
 substantial system-mode support.  Verilator simulations produce per-retirement
 architectural traces and compare them with a pinned QEMU Pentium oracle.
 
-This README describes the current **`ao486-mister-sim`** branch.  The hosted
-Sphinx site primarily follows `main` and is useful background, but can describe
-a different checkout.  Consult the files and commands below before relying on
-any older status report or web page.
+This is **`experimental/uv-fast-ipc-apr`** (formerly `ao486-mister-sim`). It
+retains unqualified development RTL and local work; its checkout is not the
+source of the deployed image. The public **known-good FPGA source release and
+portable build instructions are on [main](https://github.com/AL-255/ventium)**.
+Do not substitute this branch's RTL for the frozen release and inherit its pass.
 
 ## Status and scope
 
@@ -171,6 +173,27 @@ before programming the board.  A generated `fpga_run_*`
 directory is disposable except for a deliberately retained deployable artifact
 or capture needed by the next debug session.
 
+### Latest verified results (image `2886d24c`, 2026-10-17)
+
+| Result | Measured value / qualification |
+| --- | --- |
+| Quake `demo1`, original DOS game on cold FreeDOS | **7.7 FPS** at 39.999826 MHz, full timedemo |
+| Gameplay IPC | **0.496499864 total U+V**, primary/U 0.383002768; cycles **625,021,130,428–629,480,208,865** |
+| Doom shareware 1.9 `DEMO3` | **20.50 FPS** at 39.999830 MHz, 320×200 high detail, sound off |
+| CoreMark performance / validation | **2.100128 / 2.106796 CM/MHz** at 40 MHz, correct CRCs |
+| Highest tested passing CoreMark clock | **52.6316 MHz**, both seeds pass twice; 55.5556/62.5 MHz fail |
+| Core target / AXI reference | **40 / 100 MHz** |
+| Conditional post-route timing estimate | **28.701817 MHz**, not the measured board clock or 40 MHz STA sign-off |
+| Win95/full standard suite on this image | **Unqualified** |
+
+IPC includes REP-element retirement. This older deployed image does not qualify
+the experimental checkout or the cancelled APR candidate; those have no new
+gameplay result. The last fresh APR run was cancelled Oct19 during routing;
+no replacement bitstream or frequency gain was obtained.
+See [CoreMark/PLL sweep](fpga/PROGRAMMABLE_CLOCK.md),
+[Quake](docs/FPGA_QUAKE_TIMEDEMO_2026-10-17.md) and
+[Doom](docs/FPGA_DOOM_2026-10-17.md) for scope and evidence.
+
 ### Current routed CLB placement and congestion
 
 These maps use the **2026-10-17 routed checkpoint for deployed image `2886d24c`**,
@@ -179,11 +202,11 @@ grid—not incompatible SLICE/DSP/BRAM coordinate suffixes. Colors identify
 actual synthesized hierarchy parents; mixed-owner CLBs retain proportional
 color strips. White means an available, unoccupied CLB; grey means no CLB site.
 
-![Hierarchy-colored physical CLB map](docs/fpga-physical-2886d24c/clb-hierarchy.png)
+![Compact hierarchy-colored physical CLB map](docs/fpga-physical-2886d24c/clb-hierarchy-compact.png)
 
-[Compact-column version](docs/fpga-physical-2886d24c/clb-hierarchy-compact.png):
-packs CLB columns edge-to-edge, preserving empty sites and hierarchy colors;
-horizontal spacing is compressed, not physical distance.
+The compact map packs CLB columns edge-to-edge, preserving empty sites and
+hierarchy colors; horizontal spacing is compressed, not physical distance.
+[Original physical-coordinate version](docs/fpga-physical-2886d24c/clb-hierarchy.png).
 
 | Resource | Used / available | Utilization |
 | --- | ---: | ---: |
