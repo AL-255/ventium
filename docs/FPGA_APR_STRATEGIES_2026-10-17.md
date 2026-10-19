@@ -841,6 +841,15 @@ At **19:16 EDT Oct18**, native area optimization had finished at cumulative
 No synthesis completion, retiming-transformation count or routed result is
 claimed from this phase transition.
 
+At **20:29 EDT Oct18**, native timing optimization finished at cumulative
+**1 h 39 min 38 s wall / 1 h 38 min 54 s CPU**, and synthesis entered
+**Technology Mapping**. The existing helper resumed CPU activity within the
+same Vivado family. All **214 source/tool pins** were independently rehashed
+unchanged at this transition. The fixed **20 GiB RAM / 6 GiB swap / 48-task**
+profile remains active, with no OOM or task-limit events. This is the stage
+where r1 reached its smaller combined-memory guard; r2's mapping completion,
+retiming-transform count, utilization and clock-pair timing remain unverified.
+
 At **19:26 EDT**, two closed Oct16 diagnostic `branch/` trace directories were
 archived and their expanded copies removed after `tar -dzf` byte comparisons
 and open-file checks. The parent failed-run summaries remain in place; all
