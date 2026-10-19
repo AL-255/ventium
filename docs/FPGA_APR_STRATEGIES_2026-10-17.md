@@ -47,7 +47,7 @@ window peak reaches 90.37% despite much lower whole-chip routing utilization.
 | `routability-r4` | `AlternateRoutability`, rebuilt hierarchy; one synthesis process | Same APR as r2; routing never reached | Synthesis and placement completed; stopped at 3 h 50 min APR limit in physical optimization. No routed timing result. |
 | `performance-retime-r1` | `PerformanceOptimized`, rebuilt hierarchy, explicit synthesis retiming | Planned spread placement / explicit physical-operation sets / `NoTimingRelaxation` | Stopped by the 21 GiB combined-memory guard during technology mapping. No OOM, completed synthesis/APR or timing result. |
 | `performance-retime-r2` | Same retiming strategy, fresh source/project, named `serial20` memory profile | Same bounded physical operations / spread placement / `NoTimingRelaxation` | Stopped during technology mapping by the 25 GiB combined-memory guard; no OOM/task rejection, completed synthesis or routed timing. |
-| `performance-bounded-r1` | `PerformanceOptimized`, rebuilt hierarchy, explicit retiming off; fresh source/project, `serial20` | Planned spread placement / bounded physical-operation sets / `NoTimingRelaxation` | Timing optimization finished; technology mapping active at Oct18 22:29 EDT. No completed synthesis or routed timing result yet. |
+| `performance-bounded-r1` | `PerformanceOptimized`, rebuilt hierarchy, explicit retiming off; fresh source/project, `serial20` | Spread placement / bounded physical-operation sets / `NoTimingRelaxation` | Fresh synthesis completed Oct18 22:58:57 EDT; 40/100 MHz clock checks passed and APR launched at 23:01 EDT. No routed timing result yet. |
 
 The first combination targets the measured long logic/routing path. The second
 tests a routing-oriented mapping and spread placement, if the first result
@@ -1002,6 +1002,67 @@ unchanged. Mapping completion, final utilization, all clock-pair timing and
 routed 40 MHz closure remain pending. Finishing the timing-optimization
 algorithm is not evidence that the clock target is met; there is still no
 candidate gameplay IPC or physical standard-suite acceptance.
+
+At **22:58:57 EDT Oct18**, the native synthesis stage completed successfully;
+its completion marker, finished child log and new synthesis checkpoint are
+present. `synth_design` took **2 h 08 min 15 s wall / 2 h 01 min 40 s CPU**,
+with **zero errors and zero critical warnings**. Technology mapping finished
+at cumulative **2 h 05 min 25 s wall / 1 h 58 min 49 s CPU**. All **214 pins**
+were independently rehashed unchanged at **22:59:54 EDT**.
+
+Synthesized utilization is **186,064 LUTs (54.52%), 54,917 FFs, 277.5 BRAM
+tiles and 47 DSPs**, matching the earlier performance-r4 control. The native
+design checksum also matches (`b06dfdfa`); this text-report consistency is not
+formal equivalence or a timing result. No old checkpoint was opened for the
+comparison. Peak sampled simultaneous charged memory through this stage was
+**19,757,408,256 bytes (18.4005 GiB)**, with zero swap, OOM/OOM-kill and task-limit
+events. This run completed mapping inside the fixed resource envelope, unlike
+the retiming-enabled trials; it does not prove a retiming-only causal explanation.
+
+The owning project reopened **only its own newly generated synthesis output**
+and reported `clk_pl_0=10.000 ns`, `mmcm_fb=10.000 ns`, and
+`mmcm_clk=25.000 ns` at **23:00 EDT**. Pre-APR timing/utilization reports are
+complete, with `FRESH-SYNTH-CLOCKS-OK core=40MHz AXI=100MHz` before the
+implementation launch. Neither clock presence nor synthesis completion proves
+routed 40 MHz closure or physical acceptance.
+
+The **unplaced** timing report matches the performance-r4 control:
+
+| Clock pair | Setup slack (ns) | Hold slack (ns) |
+|---|---:|---:|
+| Core → core | −1.011 | −0.101 |
+| AXI → AXI | +6.785 | −0.108 |
+| Core → AXI | +3.415 | −0.243 |
+| AXI → core | +3.814 | −0.455 |
+
+The ordinary 25 ns core path again runs from `q_pc_reg[0]` to FPU
+`status_reg[10]`, with 90 logic levels and estimated delay 25.800 ns
+(5.882 ns logic / 19.918 ns routing). Its conditional **unplaced estimate is
+38.445273 MHz**, not routed fmax or a lower clock target. Setup and hold are
+not yet closed. There are zero unconstrained internal endpoints, but eight
+`no_clock` findings and four missing output delays still require the final
+pin/output-level coverage review; clock presence does not waive them.
+
+The recorded **APR start is 23:01:24 EDT Oct18** (native launch 23:01:28),
+so the unchanged 3 h 50 min implementation deadline is **02:51:24 EDT Oct19**.
+Native worker **3367708** is active in the same owner/scope. Independent
+configuration inspection accepts spread placement and the exact bounded
+pre/post-route physical operations; it does not claim those stages completed.
+The only DCP added by the generated implementation script is this trial's new
+synthesis output. No earlier trial's checkpoint is a build input. Routing,
+final timing/CDC/bus-skew/coverage audits and physical acceptance remain pending.
+
+Stable synthesis-stage evidence, under `build/rk_ao486_system/rk_ao486_system.runs/synth_1/`:
+
+- `runme.log` SHA256: `a95a2e5a43a47fe34ef151abca970b3983b02bb416b9bb954921e7eb38bebfa7`
+- `rk_ao486_bd_wrapper_utilization_synth.rpt` SHA256: `919e34fefa736ba137fa62e44b60356f1ce89b3fc4268c93df6965cc6f6524aa`
+- New output `rk_ao486_bd_wrapper.dcp` SHA256: `41864c844865ec4aef4b3b5213319538bfddac2185f55925a050ce00e6813548`
+
+Owning-project pre-APR evidence under `build/`:
+
+- `synth-clocks.tsv` SHA256: `870f414ded70ac63dedb4a92d89b654237dac82f156e7bcb5871f0e452f55d81`
+- `synth-timing.rpt` SHA256: `b99c536e9b749266b9abe73c386c325b913d47c2bdef039b2f3f492ef45cdb2c`
+- `synth-utilization.rpt` SHA256: `6c76a0f3c544ed4c8ec8fb5ce3f67d08d65569c7c4289d4728a46133dedbaeec`
 
 The `opt_design` crash workaround has a specific scope. The retained native
 2025.2 help log `/var/tmp/ventium-icfrontspan-pwropt-help.HMmw46/help2.log`
