@@ -48,7 +48,7 @@ window peak reaches 90.37% despite much lower whole-chip routing utilization.
 | `performance-retime-r1` | `PerformanceOptimized`, rebuilt hierarchy, explicit synthesis retiming | Planned spread placement / explicit physical-operation sets / `NoTimingRelaxation` | Stopped by the 21 GiB combined-memory guard during technology mapping. No OOM, completed synthesis/APR or timing result. |
 | `performance-retime-r2` | Same retiming strategy, fresh source/project, named `serial20` memory profile | Same bounded physical operations / spread placement / `NoTimingRelaxation` | Stopped during technology mapping by the 25 GiB combined-memory guard; no OOM/task rejection, completed synthesis or routed timing. |
 | `performance-bounded-r1` | `PerformanceOptimized`, rebuilt hierarchy, explicit retiming off; fresh source/project, `serial20` | Spread placement / bounded physical-operation sets / planned `NoTimingRelaxation` | Failed Oct19 00:55 EDT: Vivado SIGSEGV exporting the post-physical-optimization checkpoint. Synthesis, placement and physical optimization completed; routing never started. No routed timing result. |
-| `performance-route-first-r1` | `PerformanceOptimized`, rebuilt hierarchy, explicit retiming off; one synthesis thread | Spread placement / optional physical stages disabled / `NoTimingRelaxation`; four APR threads | Fresh full run launched Oct19 01:10:30 EDT; technology mapping entered around 02:52 EDT. Source admission and actual resource limits verified; no completed synthesis or routed timing result yet. |
+| `performance-route-first-r1` | `PerformanceOptimized`, rebuilt hierarchy, explicit retiming off; one synthesis thread | Spread placement / optional physical stages disabled / `NoTimingRelaxation`; four APR threads | Fresh synthesis completed in 2 h 09 min 25 s; propagated 40/100 MHz clocks verified. APR launched Oct19 03:24:08 EDT; native configuration audit passes. No routed timing result yet. |
 
 The first combination targets the measured long logic/routing path. The second
 tests a routing-oriented mapping and spread placement, if the first result
@@ -1344,6 +1344,68 @@ No inputs, limits or clock constraints were changed. Candidate gameplay IPC
 and physical standard-suite acceptance remain unmeasured/unproven; the older
 `2886d24c` baseline remains **0.496500 U+V**, cycles
 **625,021,130,428–629,480,208,865**.
+
+### Route-first synthesis complete and APR launched, Oct19 03:24 EDT
+
+Native `synth_design` completed successfully in **2 h 09 min 25 s elapsed /
+2 h 03 min 02 s CPU**, with **0 critical warnings / 0 errors**. Technology
+mapping finished at cumulative **2 h 06 min 34 s**; its phase took **26 min
+20 s**, versus 26 min 35 s in `performance-bounded-r1`. The native synthesis
+checksum is **`b06dfdfa`**, matching that previous independently synthesized
+trial. The source-only rebuild was not replaced with its checkpoint. This
+run's synthesis worker wrote its own output and exited before the owning
+project opened that new output for reports.
+
+The owning-project report passed with **clk_pl_0=10 ns, mmcm_fb=10 ns,
+mmcm_clk=25 ns** and `FRESH-SYNTH-CLOCKS-OK core=40MHz AXI=100MHz`.
+All **215 launch pins** were independently rechecked unchanged afterward,
+and the native synthesis configuration audit still passes. Synthesized counts
+are **186,064 LUTs / 54,917 FFs / 277.5 BRAM tiles / 47 DSPs**, unchanged from
+the previous performance-synthesis trials. These are not placed/routed counts.
+
+The **UNPLACED** core setup slack remains **−1.011 ns**, equivalent to a
+conditional **38.445273 MHz pre-placement estimate** at the unchanged 25 ns
+constraint. The worst ordinary full-cycle core path is still `q_pc_reg[0]`
+to shared-FPU `status_reg[10]`, with **90 logic levels**, 25.800 ns estimated
+data delay (5.882 ns logic / 19.918 ns estimated routing). Global unplaced
+WHS is **−0.455 ns**. This does not establish a routed improvement over the
+installed image or satisfy the **40 MHz routed** target. The unplaced report
+also retains **8 no-clock pins / 4 outputs without delays / 0 unconstrained
+internal endpoints**; final pin-identity/connectivity and exception review
+remain required. No count-based waiver or constraint relaxation was added.
+
+APR started at **03:24:08 EDT**, with a whole-APR deadline of **07:14:08 EDT**.
+New native worker **3408785** is confirmed in the same exclusive Vivado scope.
+The independent implementation-command/property audit passes:
+
+- `general.maxThreads=4`, `opt_design -directive RuntimeOptimized`,
+  `place_design -directive AltSpreadLogic_medium`, and
+  `route_design -directive NoTimingRelaxation`.
+- Both optional physical-optimization stages are disabled, with Default
+  directives and empty extra options; no `phys_opt_design` command is emitted.
+- IP cache is disabled; automatic incremental mode is off and the incremental
+  checkpoint is blank. The native implementation script loads only **this
+  trial's newly generated** `synth_1/rk_ao486_bd_wrapper.dcp` as its netlist input.
+
+The audited first **1,625 resource samples** show peak charged RAM/combined
+memory **21,398,241,280 bytes (19.93 GiB)**, zero swap, minimum free disk
+**5,414,543,360 bytes**, and at most 27 tasks. All sampled memory-event counters
+and task-rejection counters remain zero, with no safety-stop reason. These
+are prefix observations through APR startup, not final trial peaks. The
+20/6 GiB memory policy, 25 GiB combined early stop and 128-task limit remain
+unchanged. No candidate bitstream, routed timing or physical acceptance exists
+yet; candidate gameplay IPC remains unmeasured, with the older deployed
+**0.496500 U+V** baseline (`2886d24c`, cycles
+**625,021,130,428–629,480,208,865**) unchanged.
+
+Completed report/configuration SHA256 (paths relative to this trial's `build/`):
+
+- `synth-clocks.tsv`: `870f414ded70ac63dedb4a92d89b654237dac82f156e7bcb5871f0e452f55d81`.
+- `synth-timing.rpt`: `e6c720b9b176e5ed5b04698d772a691786a4f56e8142f73d91fc722151d0ff31`.
+- `synth-utilization.rpt`: `b1c93ce3a6f09657487fbf4ab5f8ae5d8c2eba3ffbb7d3ded94889559102f1e3`.
+- `impl_1-properties.rpt`: `f16a981dd03042bce579bdf404078fc71f4c17f62adbe67fb55a5e2c0ad37580`.
+- `rk_ao486_system/rk_ao486_system.runs/impl_1/rk_ao486_bd_wrapper.tcl`:
+  `5a5d310ef33f063074e690746ddd889448e6aa5e53eea866aedd9a50b41596b5`.
 
 ### Runtime accounting at 23:56 EDT Oct18
 
