@@ -47,7 +47,7 @@ window peak reaches 90.37% despite much lower whole-chip routing utilization.
 | `routability-r4` | `AlternateRoutability`, rebuilt hierarchy; one synthesis process | Same APR as r2; routing never reached | Synthesis and placement completed; stopped at 3 h 50 min APR limit in physical optimization. No routed timing result. |
 | `performance-retime-r1` | `PerformanceOptimized`, rebuilt hierarchy, explicit synthesis retiming | Planned spread placement / explicit physical-operation sets / `NoTimingRelaxation` | Stopped by the 21 GiB combined-memory guard during technology mapping. No OOM, completed synthesis/APR or timing result. |
 | `performance-retime-r2` | Same retiming strategy, fresh source/project, named `serial20` memory profile | Same bounded physical operations / spread placement / `NoTimingRelaxation` | Stopped during technology mapping by the 25 GiB combined-memory guard; no OOM/task rejection, completed synthesis or routed timing. |
-| `performance-bounded-r1` | `PerformanceOptimized`, rebuilt hierarchy, explicit retiming off; fresh source/project, `serial20` | Spread placement / bounded physical-operation sets / `NoTimingRelaxation` | Fresh synthesis and placement completed; 40/100 MHz clock checks passed. Placement took 52m23s; bounded pre-route physical optimization started at about 23:57 EDT Oct18. No routed timing result yet. |
+| `performance-bounded-r1` | `PerformanceOptimized`, rebuilt hierarchy, explicit retiming off; fresh source/project, `serial20` | Spread placement / bounded physical-operation sets / planned `NoTimingRelaxation` | Failed Oct19 00:55 EDT: Vivado SIGSEGV exporting the post-physical-optimization checkpoint. Synthesis, placement and physical optimization completed; routing never started. No routed timing result. |
 
 The first combination targets the measured long logic/routing path. The second
 tests a routing-oriented mapping and spread placement, if the first result
@@ -1093,6 +1093,69 @@ still has no gameplay IPC or physical acceptance.
 Stable placed utilization evidence:
 `build/rk_ao486_system/rk_ao486_system.runs/impl_1/rk_ao486_bd_wrapper_utilization_placed.rpt`,
 SHA256 `e6da354604dae83b9f71b9659ccd03ada468317d999f7db860ada6a6e0063771`.
+
+### Bounded trial: native checkpoint-writer crash, Oct19
+
+The run **closed unsuccessfully at 00:55 EDT Oct19**, native parent exit 1,
+after **14,784.939 s (4 h 06 min 24.9 s)** total. Native implementation ended
+at **00:55:14**, approximately 1 h 53 min 50 s after its recorded start.
+This was **not the deadline or a resource-guard stop**: `closed.json` has
+`reason=null`; all 2,952 resource samples have no stop reason, zero OOM/OOM-kill
+and zero task-cap rejections. Peak simultaneous charged RAM+swap was
+19,757,408,256 bytes; minimum sampled free disk was 5,577,216,000 bytes.
+All **214 pins** were independently rehashed unchanged after closure.
+The service is failed, its Vivado scope is inactive and no Vivado process
+remains. The earlier 01:45–02:45 completion estimate is superseded by this
+terminal failure; it was an estimate, not a completed or accepted result.
+
+`phys_opt_design` itself reported success in **57 min 50 s wall / 57 min
+48 s CPU**, with zero errors and zero critical warnings for that command.
+The completed physical-synthesis task's cumulative stamps yield:
+
+| Completed operation | Elapsed between phase stamps | Estimated WNS before → after (ns) | Estimated TNS after (ns) | Native phase detail |
+|---|---:|---:|---:|---|
+| Fanout | 12m03s | −1.385 → −1.376 | −2774.219 | 13 nets; 25 new instances |
+| Single-cell placement | 9m52s | −1.376 → −1.339 | −2718.507 | 39 nets; 39 moved instances |
+| Multi-cell placement | 10m04s | −1.339 → −1.306 | −3122.468 | 40 nets; 82 moved instances |
+| LUT restructuring | 19m21s | −1.306 → −1.291 | −2259.781 | 61 nets; phase detail reports 61 removed instances |
+| Equivalent-driver rewiring | 3m53s | −1.291 → −1.291 | −2242.315 | 141 nets; 27 deleted cells |
+
+These elapsed differences include per-phase sorting overhead; the native
+aggregate table separately reports 55m08s of optimization work. That table
+counts zero removed cells for LUT restructuring despite the phase detail
+reporting 61; do not reconcile those two counters into an invented total.
+Overall estimated WNS improved only **0.094 ns**. These are pre-route global
+estimates without a worst-path clock-pair attribution, **not routed core fmax**.
+
+The generated native script next calls
+`write_checkpoint -force rk_ao486_bd_wrapper_physopt.dcp`. After
+`Write ShapeDB Complete`, worker 3367708 received **SIGSEGV (11)**. The retained
+stack is in `libxv_constraints.so`, including
+`NetlistNameCache::getStoredName`, `HDPLPlaceDBImpl::SiteContents::writeToFile`,
+then `DcpWriter::exportXdef`. This localizes the observed failure to placement
+database/checkpoint serialization. It does **not** establish which preceding
+optimization created the bad state, nor that the netlist is functionally valid.
+Routing never started (`stages.tsv` contains only synthesis and implementation).
+There is no new bitstream, routed frequency, 40 MHz sign-off or physical pass.
+
+Closed evidence in `performance-bounded-r1/`:
+
+- `closed.json`: `e52022441ff28ddd01b238703fe967054a2be51c92d45d0dad013e2dcdc795b0`.
+- `native.log`: `51faa99c0c39e961f1d360c7767d88a6dd7c1517fcf5d7c47b36cf8daf8c3be0`.
+- `build/rk_ao486_system/rk_ao486_system.runs/impl_1/hs_err_pid3367708.log`:
+  `7557b765c93aabd43ac170d47fc8b1f82279134d9def49c14c4dbc7c3fa91ef9`.
+
+Next strategy decision: do **not** repeat this exact physical-operation mix
+or bypass checkpoint writing to conceal the failure. A fresh source-only
+route-first control can retain the successful performance synthesis/spread
+placement, omit optional pre/post-route physical optimization, and retain
+the 40/100 MHz constraints, final checkpoint and full timing/legality reports.
+Its purpose is to obtain an actual routed comparison, not to redefine success
+below 40 MHz. Separately validate a stage-specific thread policy (serial
+synthesis, parallel APR) before the next full launch; retain one Vivado family,
+fixed RAM/swap limits and independently audited native commands. Neither change
+has been implemented or launched at this entry. No old checkpoint is authorized
+as the next trial's input.
 
 ### Runtime accounting at 23:56 EDT Oct18
 
