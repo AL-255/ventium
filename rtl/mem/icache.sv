@@ -1,3 +1,4 @@
+`default_nettype wire  // Vivado project-flow: reset nettype (files compile as one unit; prevents `none` leak)
 // Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
 // SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
 
@@ -85,11 +86,26 @@ module icache #(
     input  logic [IC_WAYW-1:0]  fill_way,
     input  logic [4:0]  fill_off,
     input  logic [31:0] fill_data,
+    // REVIEW2 H-17: instruction cacheability. The I-cache previously had NO
+    // cacheable input at all and VALIDATED EVERY FILL, so instruction fetches from
+    // a disabled cache (CR0.CD) or from mutable / side-effecting regions were
+    // retained indefinitely with no reliable invalidator. Asserted for the duration
+    // of a fill whose line must NOT be retained; the line is still filled (so the
+    // fetch data flows through the normal path) but is never validated, so the next
+    // fetch of that address misses and re-reads memory -- the correct behaviour for
+    // non-cacheable instruction memory. Reuses the H-08 transactional poison rather
+    // than adding a second, separately-driftable kill path.
+    input  logic        fill_nocache,
 
     // ---- Fill complete (last word of an S_PF line, pf_word==7): allocate the
     // chosen victim way (tag/val) and mark it MRU. fill_done implies fill_en.
     input  logic        fill_done,
     input  logic [IC_TAGW-1:0] fill_tag,
+    // REVIEW1_Aug3 R2-H09: the filling line's PHYSICAL page tag (phys[31:12]).
+    // The lookup stays linear (VIPT: the set index is page-offset bits, identical
+    // in both domains), but every snoop invalidate matches on the PHYSICAL tag,
+    // so a store through ANY alias of a physical line drops every aliased copy.
+    input  logic [IC_TAGW-1:0] fill_ptag,
 
     // ---- Up to 3 confirmed-HIT LRU touch ports (U / U-straddle / V), applied in
     // textual order tch0 -> tch1 -> tch2 (LAST-WRITE-WINS for same-set touches).
@@ -110,7 +126,41 @@ module icache #(
     // bit if resident; harmless if absent. Tied 0 until DMA is a coherent requester
     // (Phase D) → the default build is byte-identical.
     input  logic        snoop_inv_valid,
-    input  logic [31:0] snoop_inv_addr
+    input  logic [31:0] snoop_inv_addr,
+
+    // REVIEW Aug-1 H-09: there is more than ONE invalidation event per clock. The
+    // integration (ventium_l1_axi) has to invalidate for a DMA/northbridge snoop AND
+    // for a self-modifying CPU store, and a CPU store that crosses a 32-byte
+    // instruction-line boundary dirties TWO lines. With a single address port those
+    // extra events were muxed away and silently lost, leaving executable stale bytes
+    // resident. Give each event its own port -- an invalidate is only a set decode
+    // plus per-way tag compares, so three of them is cheap, and it mirrors the
+    // existing tch0/tch1/tch2 idiom rather than adding a queue that can overflow.
+    input  logic        snoop_inv_valid1,
+    input  logic [31:0] snoop_inv_addr1,
+    input  logic        snoop_inv_valid2,
+    input  logic [31:0] snoop_inv_addr2,
+
+    // R2-H09: the CPU-snoop (ports 1/2) PHYSICAL-match results, combinational off
+    // the pre-edge arrays, so the uopcache can drop the same {set,way} on the same
+    // edge (decoded state dies under the same physical identity as the line).
+    output logic                  snoop1_hit,
+    output logic [IC_IDXW-1:0]    snoop1_hset,
+    output logic [IC_WAYW-1:0]    snoop1_hway,
+    output logic                  snoop2_hit,
+    output logic [IC_IDXW-1:0]    snoop2_hset,
+    output logic [IC_WAYW-1:0]    snoop2_hway,
+
+    // ---- GLOBAL invalidate (REVIEW_Jul29 H-12). The external `flush_all` pulse
+    // reached ONLY ven_l1d, so the I-cache kept whatever it had. The ao486 daemon
+    // uses that pulse for PS->PL coherence (ven_ao486_shim.sv:164-207) — i.e. the
+    // host writes guest RAM and then asks the core to drop stale copies — so a PS
+    // write that CHANGES CODE could leave a valid stale I-cache line and the core
+    // would keep executing the old bytes. That is especially dangerous here because
+    // this integration exists precisely to support host-modified guest memory.
+    // Clears every valid bit; tags/data/ages are left alone (a cleared valid bit is
+    // sufficient, exactly like the ven_l1d flush and the TLB's CR3 flush).
+    input  logic        flush_all
 );
 
   // Data array as packed 256-bit lines, FLAT-indexed {set,way} for clean RAM
@@ -165,6 +215,55 @@ module icache #(
   logic [IC_TAGW-1:0] ic_tag  [IC_SETS][IC_WAYS];   // addr[31:5+idx]
   logic               ic_val  [IC_SETS][IC_WAYS];
   logic [IC_WAYW-1:0] ic_age  [IC_SETS][IC_WAYS];   // recency rank: 0=MRU .. WAYS-1=LRU
+  // R2-H09: the PHYSICAL page tag per line, written at fill_done from fill_ptag.
+  // Snoop invalidates match on this (the linear ic_tag stays the LOOKUP key).
+  logic [IC_TAGW-1:0] ic_ptag [IC_SETS][IC_WAYS];
+
+  // REVIEW Aug-1 H-08: in-flight fill line + poison bit (see the fill block below).
+  // `fp_active_q` makes the fill a transaction rather than a sequence of
+  // adjacent returned words: an AXI/bridge response may have an inter-beat
+  // bubble, and a snoop or global flush in that bubble must still poison the
+  // later allocation.  `fpz` alone was sampled only under fill_en, so it could
+  // miss precisely that gap.  The active bit also prevents stale poison left
+  // by a completed/aborted fill from affecting an unusual single-word fill.
+  logic                fp_active_q;
+  logic                fpz;                          // this fill was invalidated
+  logic [IC_IDXW-1:0]  fpz_set;
+  logic [IC_TAGW-1:0]  fpz_tag;
+  logic [IC_TAGW-1:0]  fpz_ptag;                     // R2-H09: and its PHYSICAL tag
+  logic                snoop_hits_fill, snoop_hits_fill_now;
+  // REVIEW2 H-12: this checked ONLY port 0. Ports 1 and 2 carry the CPU
+  // self-modifying-store invalidations (ventium_l1_axi drives them from core_we and
+  // from the second line of a store that crosses an I-line boundary), so a CPU store
+  // to a line WHILE THAT LINE IS FILLING -- including on the final beat -- was
+  // overwritten by the fill and left VALID with stale instruction bytes. Exactly the
+  // stale-executable-bytes failure the SMC snoop exists to prevent. All three ports
+  // now feed the transactional poison, via one helper so they cannot drift apart.
+  // R2-H09: all snoop ports carry PHYSICAL addresses, so the poison compare runs
+  // against the fill's PHYSICAL tag (fpz_ptag). The set index is page-offset bits,
+  // identical in the linear and physical domains (VIPT).
+  function automatic logic snp_hits_line(
+      input logic en, input logic [31:0] a,
+      input logic [IC_IDXW-1:0] match_set,
+      input logic [IC_TAGW-1:0] match_ptag);
+    snp_hits_line = en && (a[5 +: IC_IDXW]         == match_set)
+                        && (a[5+IC_IDXW +: IC_TAGW] == match_ptag);
+  endfunction
+  // `snoop_hits_fill` is the registered transaction identity and stays valid
+  // through an inter-ACK gap.  The live form is needed for the interface's
+  // legal one-word fill: there is no pre-edge active identity in that case.
+  assign snoop_hits_fill = snp_hits_line(snoop_inv_valid,  snoop_inv_addr,
+                                          fpz_set, fpz_ptag)
+                        || snp_hits_line(snoop_inv_valid1, snoop_inv_addr1,
+                                         fpz_set, fpz_ptag)
+                        || snp_hits_line(snoop_inv_valid2, snoop_inv_addr2,
+                                         fpz_set, fpz_ptag);
+  assign snoop_hits_fill_now = snp_hits_line(snoop_inv_valid,  snoop_inv_addr,
+                                              fill_set, fill_ptag)
+                            || snp_hits_line(snoop_inv_valid1, snoop_inv_addr1,
+                                             fill_set, fill_ptag)
+                            || snp_hits_line(snoop_inv_valid2, snoop_inv_addr2,
+                                             fill_set, fill_ptag);
 
 `ifdef VEN_IC_BRAM
   always_ff @(posedge clk) begin
@@ -247,6 +346,48 @@ module icache #(
     end
   end
 
+  // REVIEW Aug-1 H-09: one invalidation port's body, so the three ports cannot
+  // drift apart the way the hand-copied fast-path predicates did (C-01/M-01).
+  // R2-H09: the match is PHYSICAL (ic_ptag) on every port. A store through any
+  // alias of a physical line lands in this same set (paging preserves the
+  // page-offset bits the set index comes from) and matches every aliased copy.
+  // VEN_IC_SNOOP_LINEAR exists ONLY as the alias gate's discrimination control
+  // (it restores the pre-fix linear compare, i.e. the H-05 hazard); never deploy.
+  task automatic do_snoop(input logic en, input logic [31:0] a);
+    logic [IC_IDXW-1:0] snp_set; logic [IC_TAGW-1:0] snp_ptag;
+    if (en) begin
+      snp_set  = a[5 +: IC_IDXW];
+      snp_ptag = a[5+IC_IDXW +: IC_TAGW];
+      for (int w=0; w<IC_WAYS; w++)
+`ifdef VEN_IC_SNOOP_LINEAR
+        if (ic_val[snp_set][w] && ic_tag[snp_set][w]==snp_ptag)  ic_val[snp_set][w] <= 1'b0;
+`else
+        if (ic_val[snp_set][w] && ic_ptag[snp_set][w]==snp_ptag) ic_val[snp_set][w] <= 1'b0;
+`endif
+    end
+  endtask
+
+  // R2-H09: combinational match outputs (pre-edge arrays) for ports 1/2, so the
+  // uopcache invalidates the same {set,way} on the same edge.
+  always_comb begin
+    snoop1_hit = 1'b0; snoop1_hset = '0; snoop1_hway = '0;
+    snoop2_hit = 1'b0; snoop2_hset = '0; snoop2_hway = '0;
+    for (int w=0; w<IC_WAYS; w++) begin
+      if (snoop_inv_valid1 && ic_val[snoop_inv_addr1[5 +: IC_IDXW]][w]
+          && (ic_ptag[snoop_inv_addr1[5 +: IC_IDXW]][w]
+              == snoop_inv_addr1[5+IC_IDXW +: IC_TAGW])) begin
+        snoop1_hit = 1'b1; snoop1_hset = snoop_inv_addr1[5 +: IC_IDXW];
+        snoop1_hway = IC_WAYW'(w);
+      end
+      if (snoop_inv_valid2 && ic_val[snoop_inv_addr2[5 +: IC_IDXW]][w]
+          && (ic_ptag[snoop_inv_addr2[5 +: IC_IDXW]][w]
+              == snoop_inv_addr2[5+IC_IDXW +: IC_TAGW])) begin
+        snoop2_hit = 1'b1; snoop2_hset = snoop_inv_addr2[5 +: IC_IDXW];
+        snoop2_hway = IC_WAYW'(w);
+      end
+    end
+  end
+
   // Recency update for an access (hit or fill) to way k of `set`: every way
   // more-recent than k ages by one, and k becomes MRU. Reduces to "ic_lru<=k"
   // at IC_WAYS==2.
@@ -269,12 +410,73 @@ module icache #(
       // I-cache empty out of reset (data left X — only val gates correctness).
       // age = way index => initial victim (max age) = way IC_WAYS-1, matching the
       // old reset (ic_lru=0 => victim=~0=way1) at 2-way.
+      fp_active_q <= 1'b0;
+      fpz <= 1'b0; fpz_set <= '0; fpz_tag <= '0; fpz_ptag <= '0;   // H-08
       for (int s=0;s<IC_SETS;s++)
         for (int w=0;w<IC_WAYS;w++) begin
-          ic_val[s][w]<=1'b0; ic_tag[s][w]<='0; ic_age[s][w]<=IC_WAYW'(w);
+          ic_val[s][w]<=1'b0; ic_tag[s][w]<='0; ic_ptag[s][w]<='0; ic_age[s][w]<=IC_WAYW'(w);
         end
     end else begin
+`ifndef SYNTHESIS
+      // ---- +ven_icflushlog probe (read-only; see the block at the bottom) --
+      // This MUST sit textually before any ic_val write in this process:
+      // the simulator assigns the arrays in place, so only a read earlier in
+      // this same process is guaranteed to see the PRE-edge occupancy. "pre" dumps
+      // the valid ways at the flush edge; "post" dumps the same sets one clock
+      // later (the contract: both old valid bits zero before any refill);
+      // "fill" dumps every line allocation so a gate can order pre->post->fill
+      // per case and tell WHICH WAY carried the stale line.
+      if (ven_icfl_en) begin
+        if (icfl_flush_q) begin
+          for (int s=0; s<IC_SETS; s++)
+            if (icfl_occ[s]) begin
+              automatic logic [IC_WAYS-1:0] vm;
+              for (int w=0; w<IC_WAYS; w++) vm[w] = ic_val[s][w];
+              $display("[ICFL] post set=%0d valid=%b", s, vm);
+            end
+        end
+        if (flush_all) begin
+          icfl_nflush <= icfl_nflush + 1;
+          $display("[ICFL] flush");
+          for (int s=0; s<IC_SETS; s++) begin
+            icfl_occ[s] <= 1'b0;
+            for (int w=0; w<IC_WAYS; w++)
+              if (ic_val[s][w]) begin
+                icfl_occ[s] <= 1'b1;
+                $display("[ICFL] pre set=%0d way=%0d tag=%05x ptag=%05x",
+                         s, w, ic_tag[s][w], ic_ptag[s][w]);
+              end
+          end
+        end else if (!icfl_flush_q) begin
+          icfl_occ <= '0;
+        end
+        if (fill_done)
+          $display("[ICFL] fill set=%0d way=%0d tag=%05x ptag=%05x",
+                   fill_set, fill_way, fill_tag, fill_ptag);
+      end
+      icfl_flush_q <= flush_all;
+`endif
       // ---- per-word line fill (S_PF + S_PIPE word-0 path; one/clock) ----
+      // Word 0 starts/reseeds the in-flight identity.  Thereafter, keep poison
+      // live on *every* clock until the final returned word, including cycles
+      // with fill_en=0.  A snoop loop can invalidate an already-valid line on a
+      // gap, but the allocation slot has no valid bit yet; without this state,
+      // the final beat would publish stale bytes as executable.
+      if (fill_en && (fill_off == 5'd0)) begin
+        fpz_set      <= fill_set;
+        fpz_tag      <= fill_tag;
+        fpz_ptag     <= fill_ptag;
+        fp_active_q  <= !fill_done;
+        // H-12: compare word 0 against its live identity because fpz_* update
+        // only at this edge.  A non-cacheable fill is likewise poison from its
+        // first beat; the line data still flows to the fetch bypass.
+        fpz <= flush_all || fill_nocache || snoop_hits_fill_now;
+      end else begin
+        if (fp_active_q && (flush_all || snoop_hits_fill || fill_nocache))
+          fpz <= 1'b1;
+        if (fp_active_q && fill_en && fill_done)
+          fp_active_q <= 1'b0;
+      end
       if (fill_en) begin
 `ifdef VEN_IC_BRAM
         // canonical UltraScale byte-write-enable template. ic_line_a uses the
@@ -289,10 +491,39 @@ module icache #(
 `else
         ic_line[{fill_set,fill_way}][{fill_off,3'b000} +: 32] <= fill_data;
 `endif
+        // REVIEW Aug-1 H-08: an invalidation arriving DURING the fill is lost. The
+        // victim's tag/valid are installed only on fill_done, so a snoop at any
+        // earlier beat has nothing to match; and a snoop on the fill_done clock
+        // itself is lost too, because the snoop block below guards on
+        // `ic_val[snp_set][w] && ic_tag[..]==snp_tag`, which reads the PRE-EDGE array
+        // -- still valid=0 for the line being allocated. So the "LAST in the FF so it
+        // wins over a same-cycle fill_done allocate" comment does not hold for a fill
+        // (repro: ICACHE_FILL_SNOOP_RACE line_remains_valid=1). Since the uop cache is
+        // populated around fill completion, this also amplifies stale instruction
+        // bytes into stale predecoded uops.
+        //
+        // Track the line being filled and poison the transaction on any matching
+        // invalidation between the first and last beat. Same shape as ven_l1d
+        // H-06/H-07. The fill's line is latched locally rather than trusting the
+        // driver to hold fill_set/fill_tag stable for all eight beats.
         if (fill_done) begin
           // oracle l1_access() miss path: val[victim]=1; tag[victim]=tag; MRU=victim.
+          // H-08: validate ONLY if nothing invalidated this line mid-flight. The
+          // same-clock terms cover an invalidation landing on the fill_done beat,
+          // which the poison register (pre-edge) cannot have seen yet.
           ic_tag[fill_set][fill_way]<=fill_tag;
-          ic_val[fill_set][fill_way]<=1'b1;
+          ic_ptag[fill_set][fill_way]<=fill_ptag;   // R2-H09: physical identity
+          // REVIEW2 H-17: fill_nocache is included HERE as well as in the poison
+          // register, for the same reason flush_all is: on a single-beat fill (or on
+          // the fill_done beat itself) the poison register is still pre-edge and has
+          // not yet seen this clock's value.
+          // The normal eight-word protocol has an active registered identity
+          // by the final word.  A generic one-word fill does not, so compare
+          // that edge against its live line rather than stale fpz_* identity.
+          ic_val[fill_set][fill_way]<= !((fp_active_q && fpz) || flush_all
+                                         || (fp_active_q ? snoop_hits_fill
+                                                         : snoop_hits_fill_now)
+                                         || fill_nocache);
           touch_way(fill_set, fill_way);
         end
       end
@@ -303,14 +534,90 @@ module icache #(
       // per-line snoop INVALIDATE — LAST in the FF so it wins over a same-cycle
       // fill_done allocate of that line (a DMA write must not leave stale code cached).
       // Gated by snoop_inv_valid (tied 0 in the default build → byte-identical).
-      if (snoop_inv_valid) begin
-        logic [IC_IDXW-1:0] snp_set; logic [IC_TAGW-1:0] snp_tag;
-        snp_set = snoop_inv_addr[5 +: IC_IDXW];
-        snp_tag = snoop_inv_addr[5+IC_IDXW +: IC_TAGW];
-        for (int w=0; w<IC_WAYS; w++)
-          if (ic_val[snp_set][w] && ic_tag[snp_set][w]==snp_tag) ic_val[snp_set][w] <= 1'b0;
+      // H-09: all three invalidation ports are applied, INDEPENDENTLY. They clear
+      // distinct valid bits (or the same one twice, which is idempotent), so unlike
+      // the LRU touches there is no ordering hazard between them.
+      do_snoop(snoop_inv_valid,  snoop_inv_addr);
+      do_snoop(snoop_inv_valid1, snoop_inv_addr1);
+      do_snoop(snoop_inv_valid2, snoop_inv_addr2);
+      // GLOBAL flush (REVIEW_Jul29 H-12) — LAST, so it also wins over a same-cycle
+      // fill_done allocate: after an external "flush all" nothing may stay resident.
+      //
+      // Aliasing: every line carries its PHYSICAL page tag (ic_ptag, captured at
+      // fill) and every snoop port presents a physical address, so a store
+      // through ANY alias of a physical line lands in this set and matches every
+      // aliased copy (paging preserves the page-offset bits the set index comes
+      // from). The old linear-tag hazard -- a store through alias A dropping only
+      // A's copy while a stale executable one stayed resident under alias B -- is
+      // closed by that physical match in the default configuration;
+      // VEN_IC_SNOOP_LINEAR restores the linear compare purely as the alias
+      // gate's discrimination control (never deploy).
+      //
+      // VEN_IC_ALIAS_SAFE (default OFF, experiment): every CPU store additionally
+      // flushes the whole I-cache -- correct under any aliasing and expensive
+      // (every store costs a full refill). Redundant since the physical snoop
+      // match; kept so run-ic-alias-gate.sh can still demonstrate the
+      // conservative fallback.
+      if (flush_all
+`ifdef VEN_IC_ALIAS_SAFE
+          || snoop_inv_valid1 || snoop_inv_valid2
+`endif
+         ) begin
+        for (int s=0; s<IC_SETS; s++)
+          for (int w=0; w<IC_WAYS; w++) ic_val[s][w] <= 1'b0;
       end
     end
   end
+
+`ifndef SYNTHESIS
+  // the invalidation contract: two valid ways in a set may never carry the
+  // same tag (a flush that refills one way while the stale copy stays valid
+  // would leave hit priority, not invalidation, deciding what executes).
+  logic flush_d1;
+  always_ff @(posedge clk) begin
+    if (rst_n) begin
+      for (int s=0; s<IC_SETS; s++) begin
+        for (int w0=0; w0<IC_WAYS; w0++)
+          for (int w1=w0+1; w1<IC_WAYS; w1++)
+            if (ic_val[s][w0] && ic_val[s][w1] && (ic_tag[s][w0] == ic_tag[s][w1]))
+              $error("ICACHE/DUP-TAG: set %0d has the same tag valid in ways %0d and %0d -- a flush left a stale copy resident",
+                     s, w0, w1);
+      end
+      // a global flush leaves NOTHING valid on the next clock
+      if (flush_d1)
+        for (int s=0; s<IC_SETS; s++)
+          for (int w=0; w<IC_WAYS; w++)
+            if (ic_val[s][w])
+              $error("ICACHE/FLUSH: set %0d way %0d still valid one clock after flush_all", s, w);
+      flush_d1 <= flush_all;
+    end else flush_d1 <= 1'b0;
+  end
+
+  // ------------------------------------------------------------------------
+  // +ven_icflushlog: invalidation-contract observability (read-only probe).
+  // The valid bits are the contract ("both old valid bits zero before the
+  // refill") and nothing outside this module can see them, so this logs, at
+  // every flush_all edge and one clock after it, exactly what the assertions
+  // above check -- which {set,way} held which tag at the flush edge (pre),
+  // that the same sets are empty on the next clock (post), and every line
+  // allocation (fill), so a gate can order pre -> post -> fill per case and
+  // also tell WHICH WAY carried the stale line (way-0 vs way-1 placement).
+  // The printing logic lives at the TOP of the main clocked process (reads
+  // must precede the array writes -- the simulator assigns them in place);
+  // only the declarations and the plusarg read are here. Sim-only, zero
+  // hardware cost.
+  logic            ven_icfl_en;
+  logic [IC_SETS-1:0] icfl_occ;    // sets that held a valid line at the flush edge
+  logic               icfl_flush_q;// flush_all, one clock delayed
+  int unsigned        icfl_nflush; // flush_all edges seen (sanity counter)
+  initial begin
+    ven_icfl_en  = $test$plusargs("ven_icflushlog") != 0;
+    icfl_occ     = '0;
+    icfl_flush_q = 1'b0;
+    icfl_nflush  = 0;
+  end
+  final if (ven_icfl_en)
+    $display("[ICFL] flush_all edges seen: %0d", icfl_nflush);
+`endif
 
 endmodule : icache

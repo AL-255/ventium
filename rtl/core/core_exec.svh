@@ -42,10 +42,16 @@
             // 0 so the TLBs are already empty, but the flush keeps it correct.
             flags_we=1'b0;
             unique case (q_sys_creg)
-              3'd0: creg0<=gpr_o[q_src_reg];
+              // REVIEW2 H-23: CLTS reuses this CR0 commit rather than adding a
+              // second one -- it clears TS (bit 3) and touches nothing else.
+              3'd0: creg0<=cr0_exec_value;
               3'd2: creg2<=gpr_o[q_src_reg];
               3'd3: begin
                 creg3<=gpr_o[q_src_reg];
+`ifdef VEN_DBG_WD
+                $display("[VEN-CR3] MOV CR3 <- %08h (was %08h) @ cs:eip=%04x:%08h src_reg=%0d",
+                         gpr_o[q_src_reg], creg3, seg_sel[SG_CS], eip, q_src_reg);
+`endif
                 // TLB flush (clear val bits only) now lands in u_itlb/u_dtlb via
                 // tlb_flush (driven combinationally from this exact MOV CR3
                 // condition; see the flush driver at the TLB instantiation).
@@ -94,6 +100,20 @@
             // writeback driver (core_gpr_wb.svh, SYS_STR arm).
             flags_we=1'b0;
           end
+          else if (q_sysop==SYS_SLDT) begin
+            // SLDT r/m16 (REVIEW_Aug3). Same shape as STR: the dst-reg<-LDTR-selector
+            // write is in the gpr writeback driver (SYS_SLDT arm).
+            flags_we=1'b0;
+          end
+          else if (q_sysop==SYS_INVLPG) begin
+            // INVLPG m (REVIEW_Jul29 H-05). Its ONLY architectural effect is the
+            // TLB invalidation, which the tlb_flush pulse in core.sv drives
+            // combinationally off exactly this {state==S_EXEC, q_sysop} pair. No
+            // GPR write, no flags, no memory access — so this arm just claims the
+            // instruction (keeping it out of the generic q_kind dispatch below)
+            // and lets the shared S_EXEC retire commit it.
+            flags_we=1'b0;
+          end
           else if (q_sysop==SYS_MOVSREG_TO && !sys_mode && proxy_en) begin
             // M7.1 USER+proxy MOV Sreg, r16 (linux-user, no GDT): selector :=
             // value; the hidden base is FLAT (0) EXCEPT a %gs load of the musl TLS
@@ -110,6 +130,7 @@
               seg_base[q_sys_sreg] <= 32'd0;            // flat
             seg_limit[q_sys_sreg]<= 32'hFFFF_FFFF;
             seg_attr [q_sys_sreg]<= 8'h93;
+            seg_pm_loaded[q_sys_sreg]<= 1'b0;   // R2-H07: user-mode proxy load
 `ifdef M7_PROXY_DEBUG
             $display("[M7DBG] mov sreg=%0d sel=0x%04x gs_base_r=0x%08x -> base=0x%08x",
                      q_sys_sreg, gpr_o[q_src_reg][15:0], gs_base_r,
@@ -125,6 +146,7 @@
             seg_base[q_sys_sreg] <= {12'd0, gpr_o[q_src_reg][15:0], 4'd0};
             seg_limit[q_sys_sreg]<= 32'h0000_FFFF;
             seg_attr [q_sys_sreg]<= 8'h93;
+            seg_pm_loaded[q_sys_sreg]<= 1'b0;   // R2-H07: real-mode load
           end
           else if (q_sysop==SYS_LJMP) begin
             // REAL-MODE far jump: CS.sel = sel, CS.base = sel<<4, EIP = off.
@@ -132,6 +154,7 @@
             seg_sel [SG_CS] <= q_ljmp_sel;
             seg_base[SG_CS] <= {12'd0, q_ljmp_sel, 4'd0};
             seg_attr[SG_CS] <= 8'h9B;
+            seg_pm_loaded[SG_CS] <= 1'b0;   // R2-H07: real-mode load
             new_eip = q_ljmp_off;
           end
           else begin
@@ -140,7 +163,21 @@
                 // R3: all GPR writes in this arm (XLATB AL, LEA dst, POP dst/ESP,
                 // ALU dst) moved to the gpr writeback driver (core_gpr_wb.svh,
                 // K_ALU arm). Only the flags/store/state/seg-load logic stays here.
-                if (q_xlat) begin
+                //
+                // REVIEW H-03 (task #32): `AAM imm8=0` is a DIVIDE, and imm8==0 must raise #DE
+                // BEFORE anything commits. uv_common.sv:92-95 previously substituted AH=AL=0 and
+                // the instruction retired normally, so a guest that relies on the fault ran on
+                // into whatever followed. Delivered through the SAME precise path DIV/IDIV use
+                // (core_exec.svh:376): sys_mode goes through the IDT via start_fault(vec 0,
+                // FAULT semantics = push the faulting EIP); user mode loud-HALTs. do_retire=0
+                // and flags_we=0 suppress the AX/flag/EIP commit. AAD is NOT affected — it
+                // multiplies, so base 0 is perfectly legal there.
+                if (q_alu_op == ALU_AAM && q_imm[7:0] == 8'd0) begin
+                  do_retire=1'b0; flags_we=1'b0;
+                  if (sys_mode) start_fault(8'd0, 1'b0, 32'd0, q_pc);
+                  else begin state<=S_HALT; `ifdef VEN_DBG_CORE int_vec<=8'hEF; `endif end
+                end
+                else if (q_xlat) begin
                   // XLATB: AL <- the byte loaded from [DS:(E)BX + AL]. No flags.
                   flags_we=1'b0;
                 end
@@ -163,6 +200,7 @@
                   if (seg_real) begin
                     seg_sel [q_sys_sreg] <= mem_load_data[15:0];
                     seg_base[q_sys_sreg] <= {12'd0, mem_load_data[15:0], 4'd0};
+                    seg_pm_loaded[q_sys_sreg] <= 1'b0;   // R2-H07: real-mode load
                   end else begin
                     // PM: latch the popped selector and walk the descriptor in
                     // S_SEGLD (target = q_lseg). Suppress this S_EXEC retire; the
@@ -180,8 +218,8 @@
                 // load the target segment register from the HIGH half of the SAME
                 // 4-byte far-pointer read (raw mem_load_data, not the width-masked
                 // alu_out). Real mode: base = sel<<4, the present R/W data default.
-                // Only decoded under seg_real + 16-bit operand (else HALT), so this
-                // real-mode load is the only path reached.
+                // Protected-mode loads defer both destinations to S_SEGLD; real/V86
+                // loads complete here with the ordinary MOV writeback.
                 if (q_seg_load) begin
                   if (!seg_real && q_seg_load_lo) begin
                     // PM MOV Sreg,[mem]: the loaded 2-byte value is a PROTECTED-mode
@@ -195,10 +233,10 @@
                     // PM far-ptr LSS/LFS/LGS (DOS-Quake go32 `lss esp,cs:[..]`): the
                     // selector is the HIGH half of the 4-byte read (16-bit m16:16 ptr)
                     // or the 2-byte 2nd read (32-bit m16:32 ptr, q_w==4). Walk the
-                    // GDT/LDT in S_SEGLD (target = q_lseg, e.g. SG_SS). The GPR (offset)
-                    // write ALREADY committed via q_writes_reg in THIS S_EXEC cycle
-                    // (gpr_wb runs in S_EXEC regardless of do_retire), so only the
-                    // segment load is deferred. Was real-mode-only -> PM HALTed here.
+                    // GDT/LDT in S_SEGLD (target = q_lseg, e.g. SG_SS). GPR
+                    // writeback is suppressed in S_EXEC and shares S_SEGLD's single
+                    // validated commit event with the segment hidden-cache update;
+                    // a descriptor fault therefore leaves BOTH destinations intact.
                     seg_mem_sel    <= (q_w==3'd4) ? mem_load_data2[15:0]
                                                   : mem_load_data[31:16];
                     q_seg_from_mem <= 1'b1;
@@ -219,11 +257,19 @@
                                                        : {12'd0, mem_load_data[31:16], 4'd0};
                     seg_limit[q_lseg] <= 32'h0000_FFFF;
                     seg_attr [q_lseg] <= 8'h93;
+                    seg_pm_loaded[q_lseg] <= 1'b0;   // R2-H07: real/V86-style load
                   end
                 end
               end
 
               K_SHIFT: begin
+                // Latch the store value NOW (S_EXEC), with eflags.CF still at the INCOMING carry.
+                // The `eflags<=fl` below overwrites CF with this shift's own cf_out this same edge, so a
+                // memory-dst RCL/RCR that stores in the later S_STORE would otherwise recompute st_data
+                // (=sh_out, combinational on eflags[0]) with the wrong post-commit cfin and drop the
+                // incoming carry. sh_out here is computed from the pre-edge eflags[0] (NBA reads pre-edge),
+                // so this captures the correct result. (SHL/SHR/SAR don't read cfin -> value-identical.)
+                sh_out_st_r <= sh_out;
                 // count masked to 0 -> NO flag change, NO value change (QEMU).
                 if (sh_cnt==6'd0) begin
                   flags_we=1'b0;
@@ -306,7 +352,9 @@
                     // U-pipe). The native `*` (now ex_mul_p) is the bit-exact result;
                     // the modeled occupancy is the deferred penalty occ-7 = 3 (same
                     // mechanism + measured slow-FSM base as the DIV occupancy below).
+`ifndef VEN_P54_INT_EXEC_OCC
                     pending_mem_pen <= 7'd3;
+`endif
                   end
                   3'd5: begin // IMUL one-operand (signed)
                     logic [31:0] lo; logic ovf; logic [31:0] fl;
@@ -319,7 +367,9 @@
                     fl[0]=ovf; fl[11]=ovf; fl[2]=parity8(lo[7:0]); fl[4]=1'b0;
                     fl[6]=(wmask(lo,q_w)==32'd0); fl[7]=sbit(lo,q_w);
                     eflags<=fl; flags_we=1'b0;
-                    pending_mem_pen <= 7'd3;   // P5 IMUL occupancy (occ=10, occ-7)
+`ifndef VEN_P54_INT_EXEC_OCC
+                    pending_mem_pen <= 7'd3;   // reference-profile occ-7
+`endif
                   end
                   3'd6: begin // DIV (unsigned) — with #DE (divide-by-zero / overflow)
 `ifdef VEN_IDIV_ITER
@@ -354,8 +404,8 @@
                       dbg_div_fault_q <= 1'b1;   // #DE delivered -> freeze the PC ring (freeze-on-#DE)
 `endif
                       if (sys_mode) start_fault(8'd0, 1'b0, 32'd0, q_pc);
-                      else          state<=S_HALT;
-                    end else
+                      else begin state<=S_HALT; `ifdef VEN_DBG_CORE int_vec<=8'hE9; `endif end
+                    end else begin
                       // P5 DIVIDE OCCUPANCY (cycle-modeled, p5model occ DIV
                       // 17/25/41 for r/m8/16/32). The native helper above produces
                       // the bit-exact quotient/remainder; the modeled non-pipelined
@@ -365,7 +415,10 @@
                       // (the same way a D-cache miss penalty is folded into the next
                       // insn's pipe_free_at). Holds the U pipe so a dependent EDX:EAX
                       // consumer cannot issue until the divide latency elapses.
+`ifndef VEN_P54_INT_EXEC_OCC
                       pending_mem_pen <= (q_w==3'd4) ? 7'd34 : (q_w==3'd2) ? 7'd18 : 7'd10;
+`endif
+                    end
 `endif
                   end
                   default: begin // IDIV /7 (signed) — with #DE (div-by-zero / overflow)
@@ -394,30 +447,30 @@
                       dbg_div_fault_q <= 1'b1;   // #DE delivered -> freeze the PC ring (freeze-on-#DE)
 `endif
                       if (sys_mode) start_fault(8'd0, 1'b0, 32'd0, q_pc);
-                      else          state<=S_HALT;
-                    end else
+                      else begin state<=S_HALT; `ifdef VEN_DBG_CORE int_vec<=8'hEA; `endif end
+                    end else begin
                       // P5 IDIV OCCUPANCY (cycle-modeled, p5model occ IDIV 22/30/46
                       // for r/m8/16/32 — a few clocks over DIV for the sign handling).
                       // Same deferred-penalty mechanism as DIV above (occ - 7).
+`ifndef VEN_P54_INT_EXEC_OCC
                       pending_mem_pen <= (q_w==3'd4) ? 7'd39 : (q_w==3'd2) ? 7'd23 : 7'd15;
+`endif
+                    end
 `endif
                   end
                 endcase
               end
 
               K_IMUL2: begin
-                logic [31:0] s1,s2,lo; logic ov; logic [31:0] fl;
-                s1 = q_mem_read ? wmask(mem_load_data,q_w) : reg_read(q_src_reg,q_w,1'b0);
-                s2 = q_imul_3op ? q_imul_imm : reg_read(q_dst_reg,q_w,1'b0);
-                // R3: the dst-reg IMUL2 result write moved to the gpr writeback
-                // driver (core_gpr_wb.svh, K_IMUL2 arm); lo/ov stay (feed flags).
-                if (q_w==3'd2) begin logic signed [31:0] pp;
-                  pp=$signed({{16{s1[15]}},s1[15:0]})*$signed({{16{s2[15]}},s2[15:0]});
-                  lo={16'd0,pp[15:0]};
-                  ov=(pp!=$signed({{16{pp[15]}},pp[15:0]}));
-                end else begin logic signed [63:0] pp; pp=$signed(s1)*$signed(s2);
-                  lo=pp[31:0];
-                  ov=(pp!=$signed({{32{pp[31]}},pp[31:0]}));
+                logic [31:0] lo; logic ov; logic [31:0] fl;
+                // The same signed product drives flags and the GPR writeback.
+                // The one-operand IMUL arm uses this multiplier on other clocks.
+                if (q_w==3'd2) begin
+                  lo={16'd0,ex_imul_p[15:0]};
+                  ov=(ex_imul_p!=$signed({{48{ex_imul_p[15]}},ex_imul_p[15:0]}));
+                end else begin
+                  lo=ex_imul_p[31:0];
+                  ov=(ex_imul_p!=$signed({{32{ex_imul_p[31]}},ex_imul_p[31:0]}));
                 end
                 // QEMU CC_OP_MUL: ZF/SF/PF from low result, AF=0, CF=OF=ov.
                 fl=eflags&32'hFFFF_F72A; fl[1]=1'b1;
@@ -425,7 +478,9 @@
                 fl[6]=(wmask(lo,q_w)==32'd0); fl[7]=sbit(lo,q_w);
                 eflags<=fl;
                 flags_we=1'b0;
-                pending_mem_pen <= 7'd3;   // P5 IMUL (2/3-operand) occupancy (occ=10)
+`ifndef VEN_P54_INT_EXEC_OCC
+                pending_mem_pen <= 7'd3;   // reference-profile occ-7
+`endif
               end
 
               K_EXT: begin
@@ -446,10 +501,9 @@
                 if (q_mem_write) begin do_store=1'b1; do_retire=1'b0; end
                 // Register-direct / immediate bit index is taken modulo the
                 // operand size: mod 16 for a 0x66-prefixed (16-bit) operand,
-                // mod 32 otherwise. (Memory-operand bit-string forms, which use
-                // the full index to address a different byte, are not decoded
-                // here — they HALT — so masking the index is correct for all
-                // forms reaching this block.)
+                // mod 32 otherwise. Memory register-index forms have already
+                // advanced q_ea by the signed whole-word/dword offset in the
+                // decoder; only the within-operand bit selector remains here.
                 cur=wmask(dst_cur,q_w);
                 // (Bind reg_read() to a temp first: IEEE 1800 forbids a
                 // bit-select directly on a function-call result; Vivado enforces.)
@@ -465,7 +519,11 @@
                 endcase
                 // Modify forms (BTS/BTR/BTC) write the destination — R3: that
                 // dst-reg write moved to the gpr writeback driver (K_BITTEST arm).
-                begin logic [31:0] fl; fl=eflags; fl[0]=bv; fl[1]=1'b1; eflags<=fl; end
+                // A memory RMW can still fault during S_STORE permission probes.
+                // Keep its CF private until the final write acknowledgement;
+                // register forms and read-only BT have no remaining store fault.
+                if (q_mem_write) bit_cf_r<=bv;
+                else begin logic [31:0] fl; fl=eflags; fl[0]=bv; fl[1]=1'b1; eflags<=fl; end
                 flags_we=1'b0;
               end
 
@@ -557,7 +615,7 @@
                   // (no IDT) — exactly the #DE policy. Carries no error code.
                   do_retire=1'b0;
                   if (sys_mode) start_fault(8'd5, 1'b0, 32'd0, q_pc);
-                  else          state<=S_HALT;
+                  else begin state<=S_HALT; `ifdef VEN_DBG_CORE int_vec<=8'hEB; `endif end
                 end
                 // in-bounds: do_retire stays 1 -> advance EIP, no state change.
               end
@@ -567,11 +625,12 @@
                 // Equal iff EDX:EAX == high:low. ONLY ZF is affected (CF/PF/AF/SF/OF
                 // unchanged). Equal -> store ECX:EBX to [mem]:[mem+4] (2 beats via
                 // S_USEQ) and ZF=1. Not equal -> EDX:EAX <- [mem64], ZF=0, no store.
-                logic eq;
-                eq = (mem_load_data == gpr_o[R_EAX]) && (mem_load_data2 == gpr_o[R_EDX]);
-                eflags <= (eflags & ~(32'd1 << 6)) | (eq ? (32'd1 << 6) : 32'd0);
+                // cx8b_equal is shared with the LOCK-session lifecycle so the
+                // no-write result releases the local reservation on this same edge.
+                eflags <= (eflags & ~(32'd1 << 6)) |
+                          (cx8b_equal ? (32'd1 << 6) : 32'd0);
                 flags_we=1'b0;
-                if (eq) begin
+                if (cx8b_equal) begin
                   do_retire=1'b0; state<=S_USEQ; step<=4'd0;   // conditional 2-word store
                 end
                 // R3: not-equal EDX:EAX <- [mem64] load moved to the gpr writeback
@@ -752,13 +811,32 @@
                   end
 
                   if (store_needed) begin do_store=1'b1; do_retire=1'b0; end
+                  else if (q_st==ST_OUTS) begin
+                    // OUTS: the [SI] element (just loaded via S_LOAD) goes OUT to port
+                    // DX via the S_IO handshake; S_IO retires with str_next_eip (loop
+                    // at q_pc under REP / next_eip on the last element). SI/ECX were
+                    // already updated by the gpr-wb K_STR arm this S_EXEC cycle.
+                    do_store=1'b0; do_retire=1'b0;
+                    // ins_data was captured SINGLE-HOP at the S_LOAD ack (core_load.svh) —
+                    // do NOT re-latch from the clobbable global mem_load_data here (the
+                    // MOVS-fix hazard; the re-latch fed a constant -> uniform-word writes).
+                    state <= S_IO;
+                  end
                   else do_retire=1'b1;
 
                   // latch pre-increment [EDI] + data for the store stage (EDI is
                   // being incremented this cycle via NBA, so S_STORE must not
                   // re-read gpr_o[EDI]).
-                  str_store_addr <= str_edi;   // F3: a16-masked DI
-                  str_store_data <= str_wdata;
+                  str_store_addr <= str_edi;   // F3: a16-masked DI (= pre-advance EDI)
+                  // FIX (Quake #20 2nd bug): snapshot FULL pre-advance ESI/EDI/ECX (gpr_o, high halves intact)
+                  // for the string-store #PF rollback (S_WALK arm in core_gpr_wb.svh).
+                  str_pre_esi <= gpr_o[R_ESI];
+                  str_pre_edi <= gpr_o[R_EDI];
+                  str_pre_ecx <= gpr_o[R_ECX];
+                  // VEN FIX: MOVS store data is captured single-hop at the load ack (core_load.svh); do
+                  // NOT re-latch it from the GLOBAL mem_load_data here (it may have been clobbered). STOS/
+                  // INS/etc keep the S_EXEC latch (their str_wdata is a register/IN value, not a load).
+                  if (q_st != ST_MOVS) str_store_data <= str_wdata;
                   // remember the eip we want after this element commit
                   str_next_eip <= new_eip;
                 end
@@ -810,34 +888,13 @@
           // commit (non-store, non-microseq path)
           if (do_retire) begin
             logic [31:0] cmt_eip;       // the EIP this instruction commits / fetches next
-            logic [3:0]  xbp;           // instruction-breakpoint hit on the committed EIP
             cmt_eip = (q_is_branch && q_branch_taken) ? (next_eip+q_rel) : new_eip;
             // M7.3b: a 16-bit-operand-size near branch masks the taken target to 16
             // bits (IA-32: a near JMP/Jcc under a 16-bit operand size truncates EIP
             // to IP). q_br16 is 0 in 32-bit mode, so every prior gate is unchanged.
             if (q_br16 && q_is_branch && q_branch_taken)
               cmt_eip = {16'd0, cmt_eip[15:0]};
-            if (flags_we) eflags<=flags_val;
-            eip<=cmt_eip;
-            // ---- M2S.6 #DB at the retire boundary (gated sys_mode). Checked in P5
-            // priority: an INSTRUCTION breakpoint on the NEXT eip (FAULT, restart)
-            // takes precedence over a TF single-step trap (so RF can be honoured);
-            // else a TF single-step trap (TRAP, resume at cmt_eip). The triggering
-            // instruction does NOT retire separately — arm_db fuses it (q_pc stamp).
-            xbp = (sys_mode && !rf_at_issue) ? dr_match(seg_base[SG_CS]+cmt_eip, 1'b1)
-                                             : 4'd0;
-            if (sys_mode && xbp != 4'd0) begin
-              // FAULT before cmt_eip; push cmt_eip (restart), stamp this insn's PC.
-              arm_db({28'd0, xbp}, q_pc, cmt_eip);
-            end
-            else if (sys_mode && tf_at_issue) begin
-              // TF single-step TRAP after this instruction; push cmt_eip (resume).
-              arm_db(32'd1 << DR6_BS, q_pc, cmt_eip);
-            end
-            else begin
-              retire_valid<=1'b1;
-              state<=S_PIPE;   // re-enter fast path
-            end
+            retire_reference_integer(cmt_eip,flags_we,flags_val);
           end else if (do_store) begin
             state<=S_STORE;
           end

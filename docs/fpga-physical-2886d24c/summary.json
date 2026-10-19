@@ -1,0 +1,4614 @@
+{
+  "schema": "ventium-map-v1",
+  "metadata": {
+    "schema": "ventium-physical-v1",
+    "part": "xczu15eg-ffvb1156-2-i",
+    "design": "checkpoint_routed",
+    "vivado": "2025.2",
+    "checkpoint": "/run/media/yukidama/f213d338-6002-424a-9968-584cf4aff9b6/tmp/ventium-fprem-sequence.iSZ9BAj4/programmable-clock-power-repair-r5/build/routed.dcp"
+  },
+  "groups": [
+    {
+      "path": "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_icache",
+      "primitives": 73123
+    },
+    {
+      "path": "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fp_shared/u_fp/u_trans",
+      "primitives": 35548
+    },
+    {
+      "path": "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_regfile",
+      "primitives": 34141
+    },
+    {
+      "path": "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fp_shared/u_fp/u_state",
+      "primitives": 26670
+    },
+    {
+      "path": "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_bpred_btb",
+      "primitives": 19615
+    },
+    {
+      "path": "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core",
+      "primitives": 17364
+    },
+    {
+      "path": "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fp_shared/u_fp/u_shared_fx",
+      "primitives": 11348
+    },
+    {
+      "path": "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fp_shared/u_fp/u_srt",
+      "primitives": 8945
+    },
+    {
+      "path": "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_dtlb",
+      "primitives": 8069
+    },
+    {
+      "path": "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d",
+      "primitives": 7572
+    },
+    {
+      "path": "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fp_shared/u_fp/u_trans/u_shared_widemul",
+      "primitives": 6193
+    },
+    {
+      "path": "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fp_shared/u_fp/u_misc",
+      "primitives": 5358
+    },
+    {
+      "path": "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fp_shared/u_fp/u_trans/u_shared_estdiv",
+      "primitives": 1698
+    },
+    {
+      "path": "rk_ao486_bd_i/u_soc/inst/u_soc/vga",
+      "primitives": 1670
+    },
+    {
+      "path": "(other retained hierarchies)",
+      "primitives": 36908
+    }
+  ],
+  "totals": {
+    "clb_sites": 42660,
+    "occupied_clb_sites": 33528,
+    "mixed_hierarchy_sites": 13006,
+    "mapped_clb_primitives": 294222,
+    "lut_slots": 186086,
+    "non_clb_primitives": {
+      "HDIOB_S": 3,
+      "HDIOB_M": 1,
+      "PS8": 1,
+      "BUFG_PS": 1,
+      "MMCM": 1,
+      "BUFGCE": 3,
+      "RAMB36": 276,
+      "RAMB180": 3,
+      "DSP48E2": 423
+    },
+    "unplaced_primitives": {
+      "GND": 247,
+      "VCC": 239
+    },
+    "occupied_non_clb_sites": {
+      "HDIOB_S": 3,
+      "HDIOB_M": 1,
+      "PS8": 1,
+      "BUFG_PS": 1,
+      "MMCM": 1,
+      "BUFGCE": 3,
+      "RAMB36": 276,
+      "RAMB180": 3,
+      "DSP48E2": 47
+    }
+  },
+  "congestion": {
+    "windows": [
+      {
+        "direction": "North",
+        "size": [
+          16,
+          16
+        ],
+        "peak_percent": 90.3737,
+        "lower_tile": "INT_X32Y324",
+        "upper_tile": "INT_X47Y339",
+        "box": [
+          196.5,
+          82.5,
+          262.5,
+          99.5
+        ]
+      },
+      {
+        "direction": "North",
+        "size": [
+          16,
+          16
+        ],
+        "peak_percent": 90.3737,
+        "lower_tile": "INT_X32Y323",
+        "upper_tile": "INT_X47Y338",
+        "box": [
+          196.5,
+          83.5,
+          262.5,
+          100.5
+        ]
+      },
+      {
+        "direction": "North",
+        "size": [
+          16,
+          16
+        ],
+        "peak_percent": 90.3737,
+        "lower_tile": "INT_X32Y322",
+        "upper_tile": "INT_X47Y337",
+        "box": [
+          196.5,
+          84.5,
+          262.5,
+          101.5
+        ]
+      },
+      {
+        "direction": "North",
+        "size": [
+          16,
+          16
+        ],
+        "peak_percent": 90.3737,
+        "lower_tile": "INT_X32Y321",
+        "upper_tile": "INT_X47Y336",
+        "box": [
+          196.5,
+          85.5,
+          262.5,
+          102.5
+        ]
+      },
+      {
+        "direction": "North",
+        "size": [
+          16,
+          16
+        ],
+        "peak_percent": 90.3737,
+        "lower_tile": "INT_X32Y320",
+        "upper_tile": "INT_X47Y335",
+        "box": [
+          196.5,
+          86.5,
+          262.5,
+          103.5
+        ]
+      },
+      {
+        "direction": "South",
+        "size": [
+          16,
+          16
+        ],
+        "peak_percent": 87.4944,
+        "lower_tile": "INT_X32Y339",
+        "upper_tile": "INT_X47Y354",
+        "box": [
+          196.5,
+          67.5,
+          262.5,
+          83.5
+        ]
+      },
+      {
+        "direction": "South",
+        "size": [
+          16,
+          16
+        ],
+        "peak_percent": 87.4944,
+        "lower_tile": "INT_X32Y338",
+        "upper_tile": "INT_X47Y353",
+        "box": [
+          196.5,
+          68.5,
+          262.5,
+          84.5
+        ]
+      },
+      {
+        "direction": "South",
+        "size": [
+          16,
+          16
+        ],
+        "peak_percent": 87.4944,
+        "lower_tile": "INT_X32Y337",
+        "upper_tile": "INT_X47Y352",
+        "box": [
+          196.5,
+          69.5,
+          262.5,
+          85.5
+        ]
+      },
+      {
+        "direction": "South",
+        "size": [
+          16,
+          16
+        ],
+        "peak_percent": 87.4944,
+        "lower_tile": "INT_X32Y336",
+        "upper_tile": "INT_X47Y351",
+        "box": [
+          196.5,
+          70.5,
+          262.5,
+          86.5
+        ]
+      },
+      {
+        "direction": "South",
+        "size": [
+          16,
+          16
+        ],
+        "peak_percent": 87.4944,
+        "lower_tile": "INT_X32Y335",
+        "upper_tile": "INT_X47Y350",
+        "box": [
+          196.5,
+          71.5,
+          262.5,
+          87.5
+        ]
+      },
+      {
+        "direction": "East",
+        "size": [
+          16,
+          16
+        ],
+        "peak_percent": 86.3732,
+        "lower_tile": "INT_X32Y337",
+        "upper_tile": "INT_X47Y352",
+        "box": [
+          196.5,
+          69.5,
+          262.5,
+          85.5
+        ]
+      },
+      {
+        "direction": "East",
+        "size": [
+          16,
+          16
+        ],
+        "peak_percent": 86.3732,
+        "lower_tile": "INT_X32Y336",
+        "upper_tile": "INT_X47Y351",
+        "box": [
+          196.5,
+          70.5,
+          262.5,
+          86.5
+        ]
+      },
+      {
+        "direction": "East",
+        "size": [
+          16,
+          16
+        ],
+        "peak_percent": 86.3732,
+        "lower_tile": "INT_X32Y335",
+        "upper_tile": "INT_X47Y350",
+        "box": [
+          196.5,
+          71.5,
+          262.5,
+          87.5
+        ]
+      },
+      {
+        "direction": "East",
+        "size": [
+          16,
+          16
+        ],
+        "peak_percent": 86.3732,
+        "lower_tile": "INT_X32Y334",
+        "upper_tile": "INT_X47Y349",
+        "box": [
+          196.5,
+          72.5,
+          262.5,
+          88.5
+        ]
+      },
+      {
+        "direction": "East",
+        "size": [
+          16,
+          16
+        ],
+        "peak_percent": 86.3732,
+        "lower_tile": "INT_X32Y333",
+        "upper_tile": "INT_X47Y348",
+        "box": [
+          196.5,
+          73.5,
+          262.5,
+          89.5
+        ]
+      },
+      {
+        "direction": "West",
+        "size": [
+          8,
+          8
+        ],
+        "peak_percent": 86.869,
+        "lower_tile": "INT_X40Y348",
+        "upper_tile": "INT_X47Y355",
+        "box": [
+          232.5,
+          66.5,
+          262.5,
+          74.5
+        ]
+      },
+      {
+        "direction": "West",
+        "size": [
+          8,
+          8
+        ],
+        "peak_percent": 86.869,
+        "lower_tile": "INT_X40Y347",
+        "upper_tile": "INT_X47Y354",
+        "box": [
+          232.5,
+          67.5,
+          262.5,
+          75.5
+        ]
+      },
+      {
+        "direction": "West",
+        "size": [
+          8,
+          8
+        ],
+        "peak_percent": 86.869,
+        "lower_tile": "INT_X40Y346",
+        "upper_tile": "INT_X47Y353",
+        "box": [
+          232.5,
+          68.5,
+          262.5,
+          76.5
+        ]
+      },
+      {
+        "direction": "West",
+        "size": [
+          8,
+          8
+        ],
+        "peak_percent": 86.869,
+        "lower_tile": "INT_X40Y345",
+        "upper_tile": "INT_X47Y352",
+        "box": [
+          232.5,
+          69.5,
+          262.5,
+          77.5
+        ]
+      },
+      {
+        "direction": "West",
+        "size": [
+          8,
+          8
+        ],
+        "peak_percent": 86.869,
+        "lower_tile": "INT_X40Y344",
+        "upper_tile": "INT_X47Y351",
+        "box": [
+          232.5,
+          70.5,
+          262.5,
+          78.5
+        ]
+      }
+    ],
+    "pin_windows": [
+      {
+        "lower_tile": "CLEL_R_X42Y358",
+        "upper_tile": "CLEL_R_X42Y355",
+        "box": [
+          242.5,
+          63.5,
+          243.5,
+          67.5
+        ]
+      },
+      {
+        "lower_tile": "CLEL_R_X77Y111",
+        "upper_tile": "CLEL_R_X77Y108",
+        "box": [
+          397.5,
+          318.5,
+          398.5,
+          322.5
+        ]
+      },
+      {
+        "lower_tile": "CLEL_R_X68Y113",
+        "upper_tile": "CLEL_R_X68Y110",
+        "box": [
+          355.5,
+          316.5,
+          356.5,
+          320.5
+        ]
+      },
+      {
+        "lower_tile": "CLEL_R_X61Y278",
+        "upper_tile": "CLEL_R_X61Y275",
+        "box": [
+          323.5,
+          145.5,
+          324.5,
+          149.5
+        ]
+      },
+      {
+        "lower_tile": "CLEM_X60Y130",
+        "upper_tile": "CLEM_X60Y127",
+        "box": [
+          317.5,
+          298.5,
+          318.5,
+          302.5
+        ]
+      },
+      {
+        "lower_tile": "CLEM_X60Y283",
+        "upper_tile": "CLEM_X60Y280",
+        "box": [
+          317.5,
+          140.5,
+          318.5,
+          144.5
+        ]
+      },
+      {
+        "lower_tile": "CLEM_X57Y283",
+        "upper_tile": "CLEM_X57Y280",
+        "box": [
+          303.5,
+          140.5,
+          304.5,
+          144.5
+        ]
+      },
+      {
+        "lower_tile": "CLEM_X52Y193",
+        "upper_tile": "CLEM_X52Y190",
+        "box": [
+          282.5,
+          233.5,
+          283.5,
+          237.5
+        ]
+      },
+      {
+        "lower_tile": "CLEM_X51Y193",
+        "upper_tile": "CLEM_X51Y190",
+        "box": [
+          278.5,
+          233.5,
+          279.5,
+          237.5
+        ]
+      },
+      {
+        "lower_tile": "CLEL_R_X49Y273",
+        "upper_tile": "CLEL_R_X49Y270",
+        "box": [
+          271.5,
+          150.5,
+          272.5,
+          154.5
+        ]
+      }
+    ],
+    "high_pin_clbs": 1439,
+    "global_vertical_percent": 28.3213,
+    "global_horizontal_percent": 27.5398
+  },
+  "region_hierarchies": [
+    {
+      "direction": "North",
+      "sites": 480,
+      "used_sites": 479,
+      "primitives": 4722,
+      "peak_percent": 90.3737,
+      "lut_slots": 2316,
+      "parents": [
+        [
+          "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_icache",
+          4344
+        ],
+        [
+          "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core",
+          131
+        ],
+        [
+          "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_regfile",
+          126
+        ],
+        [
+          "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d",
+          41
+        ],
+        [
+          "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way0_reg_r6_0_63_0_6",
+          8
+        ],
+        [
+          "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way0_reg_r6_0_63_7_13",
+          8
+        ],
+        [
+          "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way0_reg_r6_64_127_7_13",
+          8
+        ],
+        [
+          "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way1_reg_r6_64_127_7_13",
+          8
+        ],
+        [
+          "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way0_reg_r6_64_127_0_6",
+          8
+        ],
+        [
+          "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way1_reg_r6_0_63_14_19",
+          8
+        ],
+        [
+          "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way1_reg_r6_0_63_7_13",
+          8
+        ],
+        [
+          "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way0_reg_r6_0_63_14_19",
+          8
+        ]
+      ]
+    },
+    {
+      "direction": "South",
+      "sites": 480,
+      "used_sites": 480,
+      "primitives": 5519,
+      "peak_percent": 87.4944,
+      "lut_slots": 2150,
+      "parents": [
+        [
+          "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_icache",
+          5364
+        ],
+        [
+          "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_regfile",
+          96
+        ],
+        [
+          "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core",
+          59
+        ]
+      ]
+    },
+    {
+      "direction": "East",
+      "sites": 480,
+      "used_sites": 480,
+      "primitives": 5459,
+      "peak_percent": 86.3732,
+      "lut_slots": 2159,
+      "parents": [
+        [
+          "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_icache",
+          5273
+        ],
+        [
+          "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_regfile",
+          114
+        ],
+        [
+          "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core",
+          72
+        ]
+      ]
+    },
+    {
+      "direction": "West",
+      "sites": 144,
+      "used_sites": 144,
+      "primitives": 1777,
+      "peak_percent": 86.869,
+      "lut_slots": 645,
+      "parents": [
+        [
+          "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_icache",
+          1756
+        ],
+        [
+          "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_regfile",
+          21
+        ]
+      ]
+    }
+  ],
+  "high_pin_hierarchies": [
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_icache",
+      164
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fp_shared/u_fp/u_srt",
+      72
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fp_shared/u_fp/u_shared_fx",
+      72
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_regfile",
+      41
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fp_shared/u_fp/u_trans",
+      40
+    ]
+  ],
+  "all_hierarchies": [
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_icache",
+      73123
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fp_shared/u_fp/u_trans",
+      35548
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_regfile",
+      34141
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fp_shared/u_fp/u_state",
+      26670
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_bpred_btb",
+      19615
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core",
+      17364
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fp_shared/u_fp/u_shared_fx",
+      11348
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fp_shared/u_fp/u_srt",
+      8945
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_dtlb",
+      8069
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d",
+      7572
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fp_shared/u_fp/u_trans/u_shared_widemul",
+      6193
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fp_shared/u_fp/u_misc",
+      5358
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fp_shared/u_fp/u_trans/u_shared_estdiv",
+      1698
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/vga",
+      1670
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/floppy",
+      1502
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_mgmt",
+      1331
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache",
+      1215
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fp_shared/u_fp/u_bcd_load",
+      1176
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fp_shared/u_fp",
+      1159
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/iobus",
+      1142
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_axi",
+      1085
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_dbg",
+      1058
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_itlb",
+      1028
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_idiv",
+      970
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb",
+      875
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/sound/sound_dsp_inst",
+      734
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/rtc",
+      724
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_video_capture",
+      707
+    ],
+    [
+      "rk_ao486_bd_i/sc_ctrl/inst/s00_entry_pipeline/s00_si_converter/inst/gen_axilite_conv.axilite_conv_inst",
+      632
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/ps2",
+      627
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/ide0",
+      566
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/ide1",
+      540
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/sound",
+      536
+    ],
+    [
+      "rk_ao486_bd_i/dwc_mem/inst/gen_upsizer.gen_full_upsizer.axi_upsizer_inst/USE_WRITE.gen_non_fifo_w_upsizer.write_data_inst",
+      513
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/u_pair_return",
+      450
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_frame_plan",
+      426
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fp_shared/u_fp/u_bcd_store",
+      410
+    ],
+    [
+      "rk_ao486_bd_i/dwc_mem/inst/gen_upsizer.gen_full_upsizer.axi_upsizer_inst/USE_READ.gen_non_fifo_r_upsizer.mi_register_slice_inst/r.r_pipe",
+      400
+    ],
+    [
+      "rk_ao486_bd_i/u_clkdiv/inst/u_control",
+      344
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_mouse_mailbox",
+      260
+    ],
+    [
+      "rk_ao486_bd_i/dwc_mem/inst/gen_upsizer.gen_full_upsizer.axi_upsizer_inst/USE_READ.gen_non_fifo_r_upsizer.read_data_inst",
+      245
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fp_shared",
+      245
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_ddr",
+      243
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst",
+      242
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/floppy/fifo_to_floppy_inst",
+      233
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/pit",
+      211
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/pic/pic_mas",
+      204
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/dma/dma_sla/chan[1].dma_chan",
+      186
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_bridge",
+      182
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/dma/dma_mas/chan[1].dma_chan",
+      180
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/dma/dma_mas/chan[3].dma_chan",
+      178
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_ps2_mouse_device",
+      177
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/dma/dma_mas/chan[2].dma_chan",
+      177
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/pic/pic_sla",
+      175
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/pit/pit_counter_0",
+      173
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/dma/dma_mas/chan[0].dma_chan",
+      172
+    ],
+    [
+      "rk_ao486_bd_i/sc_ctrl/inst/s00_entry_pipeline/s00_mmu/inst/ar_reg_stall",
+      168
+    ],
+    [
+      "rk_ao486_bd_i/sc_ctrl/inst/s00_entry_pipeline/s00_mmu/inst/aw_reg_stall",
+      168
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/dma/dma_sla/chan[0].dma_chan",
+      168
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/pit/pit_counter_2",
+      168
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/dma/dma_sla/chan[3].dma_chan",
+      167
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/dma/dma_sla/chan[2].dma_chan",
+      161
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/pit/pit_counter_1",
+      161
+    ],
+    [
+      "rk_ao486_bd_i/dwc_mem/inst/gen_upsizer.gen_full_upsizer.axi_upsizer_inst/si_register_slice_inst/aw.aw_pipe",
+      157
+    ],
+    [
+      "rk_ao486_bd_i/dwc_mem/inst/gen_upsizer.gen_full_upsizer.axi_upsizer_inst/si_register_slice_inst/ar.ar_pipe",
+      150
+    ],
+    [
+      "rk_ao486_bd_i/dwc_mem/inst/gen_upsizer.gen_full_upsizer.axi_upsizer_inst/USE_WRITE.write_addr_inst/GEN_CMD_QUEUE.cmd_queue",
+      144
+    ],
+    [
+      "rk_ao486_bd_i/sc_ctrl/inst/s00_entry_pipeline/s00_mmu/inst/gen_endpoint.decerr_slave_inst",
+      117
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[0].ram/u_xpm/xpm_memory_base_inst",
+      115
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[1].ram/u_xpm/xpm_memory_base_inst",
+      115
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[2].ram/u_xpm/xpm_memory_base_inst",
+      115
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[3].ram/u_xpm/xpm_memory_base_inst",
+      115
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/vga/plane_ram_0",
+      112
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_axi_read_profiler",
+      110
+    ],
+    [
+      "rk_ao486_bd_i/dwc_mem/inst/gen_upsizer.gen_full_upsizer.axi_upsizer_inst/USE_READ.read_addr_inst/GEN_CMD_QUEUE.cmd_queue",
+      108
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_ps2_kbd_inject",
+      108
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/sound/opl/host_if/afifo",
+      105
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core",
+      104
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/vga/plane_ram_2",
+      104
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/ps2/keyb_fifo",
+      95
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/vga/plane_ram_1",
+      92
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/dma",
+      90
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/sound/opl/host_if/trick_sw_detection",
+      84
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwdch2.axi_wdch/grf.rf/gntv_or_sync_fifo.mem/gdm.dm_gen.dm",
+      79
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/vga/plane_ram_3",
+      77
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[3].tagram",
+      75
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/ps2/mouse_fifo",
+      74
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwdch2.axi_wdch/grf.rf/gntv_or_sync_fifo.mem",
+      73
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gread_ch.grdch2.axi_rdch/grf.rf/gntv_or_sync_fifo.mem/gdm.dm_gen.dm",
+      72
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gread_ch.grdch2.axi_rdch/grf.rf/gntv_or_sync_fifo.mem",
+      67
+    ],
+    [
+      "rk_ao486_bd_i/sc_ctrl/inst/s00_entry_pipeline/s00_mmu/inst",
+      62
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gread_ch.grach2.axi_rach/grf.rf/gntv_or_sync_fifo.mem/gdm.dm_gen.dm",
+      56
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/ide0/io_buf1",
+      54
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/ide1/io_buf1",
+      54
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwach2.axi_wach/grf.rf/gntv_or_sync_fifo.mem/gdm.dm_gen.dm",
+      53
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gread_ch.grach2.axi_rach/grf.rf/gntv_or_sync_fifo.mem",
+      52
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/dirtyram",
+      50
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/rtc/rtc_ram_inst",
+      50
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwach2.axi_wach/grf.rf/gntv_or_sync_fifo.mem",
+      49
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[1].ram",
+      46
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/vga/internal_palette_ram",
+      43
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi",
+      41
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[0].tagram",
+      40
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[1].tagram",
+      40
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[2].tagram",
+      40
+    ],
+    [
+      "rk_ao486_bd_i/sc_ctrl/inst/s00_nodes/s00_w_node/inst/inst_mi_handler/gen_normal_area.inst_fifo_node_payld/gen_reg_fifo.inst_reg_fifo",
+      39
+    ],
+    [
+      "rk_ao486_bd_i/sc_ctrl/inst/s00_nodes/s00_r_node/inst/inst_mi_handler/gen_normal_area.inst_fifo_node_payld/gen_reg_fifo.inst_reg_fifo",
+      38
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/sound/opl/timers/timer1_inst",
+      38
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/sound/opl/timers/timer2_inst",
+      37
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/dma/dma_sla",
+      32
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[0].ram",
+      28
+    ],
+    [
+      "rk_ao486_bd_i/dwc_mem/inst/gen_upsizer.gen_full_upsizer.axi_upsizer_inst/USE_READ.read_addr_inst/gen_id_queue.id_queue",
+      27
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/sound/opl/host_if",
+      27
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gread_ch.grach2.axi_rach/grf.rf/gntv_or_sync_fifo.gcx.clkx/rd_pntr_cdc_inst",
+      26
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gread_ch.grach2.axi_rach/grf.rf/gntv_or_sync_fifo.gcx.clkx/wr_pntr_cdc_inst",
+      26
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gread_ch.grdch2.axi_rdch/grf.rf/gntv_or_sync_fifo.gcx.clkx/rd_pntr_cdc_inst",
+      26
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gread_ch.grdch2.axi_rdch/grf.rf/gntv_or_sync_fifo.gcx.clkx/wr_pntr_cdc_inst",
+      26
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwach2.axi_wach/grf.rf/gntv_or_sync_fifo.gcx.clkx/rd_pntr_cdc_inst",
+      26
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwach2.axi_wach/grf.rf/gntv_or_sync_fifo.gcx.clkx/wr_pntr_cdc_inst",
+      26
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwdch2.axi_wdch/grf.rf/gntv_or_sync_fifo.gcx.clkx/rd_pntr_cdc_inst",
+      26
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwdch2.axi_wdch/grf.rf/gntv_or_sync_fifo.gcx.clkx/wr_pntr_cdc_inst",
+      26
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwrch2.axi_wrch/grf.rf/gntv_or_sync_fifo.gcx.clkx/rd_pntr_cdc_inst",
+      26
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwrch2.axi_wrch/grf.rf/gntv_or_sync_fifo.gcx.clkx/wr_pntr_cdc_inst",
+      26
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc",
+      24
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[3].LRUram",
+      24
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/dma/dma_mas",
+      24
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/sound/opl/timers",
+      24
+    ],
+    [
+      "rk_ao486_bd_i/dwc_mem/inst/gen_upsizer.gen_full_upsizer.axi_upsizer_inst/USE_WRITE.write_addr_inst/gen_id_queue.id_queue",
+      23
+    ],
+    [
+      "rk_ao486_bd_i/sc_ctrl/inst/s00_entry_pipeline/s00_transaction_regulator/inst/gen_endpoint.gen_w_singleorder.w_singleorder",
+      23
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/vga/dac_ram",
+      23
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gread_ch.grach2.axi_rach/grf.rf/rstblk",
+      22
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gread_ch.grdch2.axi_rdch/grf.rf/rstblk",
+      22
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwach2.axi_wach/grf.rf/rstblk",
+      22
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwdch2.axi_wdch/grf.rf/rstblk",
+      22
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwrch2.axi_wrch/grf.rf/rstblk",
+      22
+    ],
+    [
+      "rk_ao486_bd_i/sc_ctrl/inst/s00_entry_pipeline/s00_transaction_regulator/inst/gen_endpoint.gen_r_singleorder.r_singleorder",
+      22
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_regfile/u_pair_return/u_banks/i_",
+      20
+    ],
+    [
+      "rk_ao486_bd_i/sc_ctrl/inst/s00_nodes/s00_ar_node/inst/inst_mi_handler/gen_normal_area.inst_fifo_node_payld/gen_reg_fifo.inst_reg_fifo",
+      19
+    ],
+    [
+      "rk_ao486_bd_i/sc_ctrl/inst/s00_nodes/s00_aw_node/inst/inst_mi_handler/gen_normal_area.inst_fifo_node_payld/gen_reg_fifo.inst_reg_fifo",
+      19
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[1].LRUram",
+      19
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/sound/opl/timers/timer1_inst/start_timer_edge_detect",
+      19
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gread_ch.grach2.axi_rach/grf.rf/gntv_or_sync_fifo.gl0.rd/gr1.gr1_int.rfwft",
+      18
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gread_ch.grach2.axi_rach/grf.rf/gntv_or_sync_fifo.gl0.wr/wpntr",
+      18
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gread_ch.grdch2.axi_rdch/grf.rf/gntv_or_sync_fifo.gl0.rd/gr1.gr1_int.rfwft",
+      18
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gread_ch.grdch2.axi_rdch/grf.rf/gntv_or_sync_fifo.gl0.wr/wpntr",
+      18
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwach2.axi_wach/grf.rf/gntv_or_sync_fifo.gl0.rd/gr1.gr1_int.rfwft",
+      18
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwach2.axi_wach/grf.rf/gntv_or_sync_fifo.gl0.wr/wpntr",
+      18
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwdch2.axi_wdch/grf.rf/gntv_or_sync_fifo.gl0.rd/gr1.gr1_int.rfwft",
+      18
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwdch2.axi_wdch/grf.rf/gntv_or_sync_fifo.gl0.wr/wpntr",
+      18
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwrch2.axi_wrch/grf.rf/gntv_or_sync_fifo.gl0.rd/gr1.gr1_int.rfwft",
+      18
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwrch2.axi_wrch/grf.rf/gntv_or_sync_fifo.gl0.wr/wpntr",
+      18
+    ],
+    [
+      "rk_ao486_bd_i/rst0/U0/SEQ",
+      18
+    ],
+    [
+      "rk_ao486_bd_i/rst1/U0/SEQ",
+      18
+    ],
+    [
+      "rk_ao486_bd_i/sc_ctrl/inst/clk_map/psr_aclk/U0/SEQ",
+      18
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gread_ch.grach2.axi_rach/grf.rf/gntv_or_sync_fifo.mem/gdm.dm_gen.dm/RAM_reg_0_15_0_13",
+      16
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gread_ch.grach2.axi_rach/grf.rf/gntv_or_sync_fifo.mem/gdm.dm_gen.dm/RAM_reg_0_15_14_27",
+      16
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gread_ch.grach2.axi_rach/grf.rf/gntv_or_sync_fifo.mem/gdm.dm_gen.dm/RAM_reg_0_15_28_41",
+      16
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gread_ch.grach2.axi_rach/grf.rf/gntv_or_sync_fifo.mem/gdm.dm_gen.dm/RAM_reg_0_15_42_55",
+      16
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gread_ch.grdch2.axi_rdch/grf.rf/gntv_or_sync_fifo.mem/gdm.dm_gen.dm/RAM_reg_0_15_0_13",
+      16
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gread_ch.grdch2.axi_rdch/grf.rf/gntv_or_sync_fifo.mem/gdm.dm_gen.dm/RAM_reg_0_15_14_27",
+      16
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gread_ch.grdch2.axi_rdch/grf.rf/gntv_or_sync_fifo.mem/gdm.dm_gen.dm/RAM_reg_0_15_28_41",
+      16
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gread_ch.grdch2.axi_rdch/grf.rf/gntv_or_sync_fifo.mem/gdm.dm_gen.dm/RAM_reg_0_15_42_55",
+      16
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gread_ch.grdch2.axi_rdch/grf.rf/gntv_or_sync_fifo.mem/gdm.dm_gen.dm/RAM_reg_0_15_56_69",
+      16
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwach2.axi_wach/grf.rf/gntv_or_sync_fifo.mem/gdm.dm_gen.dm/RAM_reg_0_15_0_13",
+      16
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwach2.axi_wach/grf.rf/gntv_or_sync_fifo.mem/gdm.dm_gen.dm/RAM_reg_0_15_14_27",
+      16
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwach2.axi_wach/grf.rf/gntv_or_sync_fifo.mem/gdm.dm_gen.dm/RAM_reg_0_15_28_41",
+      16
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwach2.axi_wach/grf.rf/gntv_or_sync_fifo.mem/gdm.dm_gen.dm/RAM_reg_0_15_42_55",
+      16
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwdch2.axi_wdch/grf.rf/gntv_or_sync_fifo.mem/gdm.dm_gen.dm/RAM_reg_0_15_0_13",
+      16
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwdch2.axi_wdch/grf.rf/gntv_or_sync_fifo.mem/gdm.dm_gen.dm/RAM_reg_0_15_14_27",
+      16
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwdch2.axi_wdch/grf.rf/gntv_or_sync_fifo.mem/gdm.dm_gen.dm/RAM_reg_0_15_28_41",
+      16
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwdch2.axi_wdch/grf.rf/gntv_or_sync_fifo.mem/gdm.dm_gen.dm/RAM_reg_0_15_42_55",
+      16
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwdch2.axi_wdch/grf.rf/gntv_or_sync_fifo.mem/gdm.dm_gen.dm/RAM_reg_0_15_56_69",
+      16
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_ddr/addr_q_reg_0_15_0_13",
+      16
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_ddr/addr_q_reg_0_15_14_27",
+      16
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_ddr/data_q_reg_0_15_0_13",
+      16
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_ddr/data_q_reg_0_15_14_27",
+      16
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_ddr/data_q_reg_0_15_28_41",
+      16
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_ddr/data_q_reg_0_15_42_55",
+      16
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_ddr/data_q_reg_0_15_56_63",
+      16
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_ddr/strb_q_reg_0_15_0_7",
+      16
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/scw_head_data_reg_0_7_0_13",
+      16
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/scw_head_data_reg_0_7_14_27",
+      16
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/scw_head_data_reg_0_7_28_41",
+      16
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/scw_head_data_reg_0_7_42_55",
+      16
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/scw_head_data_reg_0_7_56_63",
+      16
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/floppy/media_cylinders_reg_0_1_0_7",
+      16
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/floppy/media_sectors_per_track_reg_0_1_0_7",
+      16
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/cg_params_reg_0_31_0_13",
+      16
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/cg_params_reg_0_31_14_27",
+      16
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/if_auth_multi_page_reg_0_15_0_13",
+      16
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[0].payload_reg_0_15_0_13",
+      16
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[0].payload_reg_0_15_14_24",
+      16
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[1].payload_reg_0_15_0_13",
+      16
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[1].payload_reg_0_15_14_24",
+      16
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[2].payload_reg_0_15_0_13",
+      16
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[2].payload_reg_0_15_14_24",
+      16
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[3].payload_reg_0_15_0_13",
+      16
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[3].payload_reg_0_15_14_24",
+      16
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gread_ch.grach2.axi_rach/grf.rf/gntv_or_sync_fifo.gl0.rd/rpntr",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gread_ch.grdch2.axi_rdch/grf.rf/gntv_or_sync_fifo.gl0.rd/rpntr",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwach2.axi_wach/grf.rf/gntv_or_sync_fifo.gl0.rd/rpntr",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwdch2.axi_wdch/grf.rf/gntv_or_sync_fifo.gl0.rd/rpntr",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwrch2.axi_wrch/grf.rf/gntv_or_sync_fifo.gl0.rd/rpntr",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[0].tagram/mem_reg_0_511_0_0",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[0].tagram/mem_reg_0_511_10_10",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[0].tagram/mem_reg_0_511_11_11",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[0].tagram/mem_reg_0_511_1_1",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[0].tagram/mem_reg_0_511_2_2",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[0].tagram/mem_reg_0_511_3_3",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[0].tagram/mem_reg_0_511_4_4",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[0].tagram/mem_reg_0_511_5_5",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[0].tagram/mem_reg_0_511_6_6",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[0].tagram/mem_reg_0_511_7_7",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[0].tagram/mem_reg_0_511_8_8",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[0].tagram/mem_reg_0_511_9_9",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[0].tagram/mem_reg_512_1023_0_0",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[0].tagram/mem_reg_512_1023_10_10",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[0].tagram/mem_reg_512_1023_11_11",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[0].tagram/mem_reg_512_1023_1_1",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[0].tagram/mem_reg_512_1023_2_2",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[0].tagram/mem_reg_512_1023_3_3",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[0].tagram/mem_reg_512_1023_4_4",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[0].tagram/mem_reg_512_1023_5_5",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[0].tagram/mem_reg_512_1023_6_6",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[0].tagram/mem_reg_512_1023_7_7",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[0].tagram/mem_reg_512_1023_8_8",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[0].tagram/mem_reg_512_1023_9_9",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[1].tagram/mem_reg_0_511_0_0",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[1].tagram/mem_reg_0_511_10_10",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[1].tagram/mem_reg_0_511_11_11",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[1].tagram/mem_reg_0_511_1_1",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[1].tagram/mem_reg_0_511_2_2",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[1].tagram/mem_reg_0_511_3_3",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[1].tagram/mem_reg_0_511_4_4",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[1].tagram/mem_reg_0_511_5_5",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[1].tagram/mem_reg_0_511_6_6",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[1].tagram/mem_reg_0_511_7_7",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[1].tagram/mem_reg_0_511_8_8",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[1].tagram/mem_reg_0_511_9_9",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[1].tagram/mem_reg_512_1023_0_0",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[1].tagram/mem_reg_512_1023_10_10",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[1].tagram/mem_reg_512_1023_11_11",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[1].tagram/mem_reg_512_1023_1_1",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[1].tagram/mem_reg_512_1023_2_2",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[1].tagram/mem_reg_512_1023_3_3",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[1].tagram/mem_reg_512_1023_4_4",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[1].tagram/mem_reg_512_1023_5_5",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[1].tagram/mem_reg_512_1023_6_6",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[1].tagram/mem_reg_512_1023_7_7",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[1].tagram/mem_reg_512_1023_8_8",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[1].tagram/mem_reg_512_1023_9_9",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[2].tagram/mem_reg_0_511_0_0",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[2].tagram/mem_reg_0_511_10_10",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[2].tagram/mem_reg_0_511_11_11",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[2].tagram/mem_reg_0_511_1_1",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[2].tagram/mem_reg_0_511_2_2",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[2].tagram/mem_reg_0_511_3_3",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[2].tagram/mem_reg_0_511_4_4",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[2].tagram/mem_reg_0_511_5_5",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[2].tagram/mem_reg_0_511_6_6",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[2].tagram/mem_reg_0_511_7_7",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[2].tagram/mem_reg_0_511_8_8",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[2].tagram/mem_reg_0_511_9_9",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[2].tagram/mem_reg_512_1023_0_0",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[2].tagram/mem_reg_512_1023_10_10",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[2].tagram/mem_reg_512_1023_11_11",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[2].tagram/mem_reg_512_1023_1_1",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[2].tagram/mem_reg_512_1023_2_2",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[2].tagram/mem_reg_512_1023_3_3",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[2].tagram/mem_reg_512_1023_4_4",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[2].tagram/mem_reg_512_1023_5_5",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[2].tagram/mem_reg_512_1023_6_6",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[2].tagram/mem_reg_512_1023_7_7",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[2].tagram/mem_reg_512_1023_8_8",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[2].tagram/mem_reg_512_1023_9_9",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[3].tagram/mem_reg_0_511_0_0",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[3].tagram/mem_reg_0_511_10_10",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[3].tagram/mem_reg_0_511_11_11",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[3].tagram/mem_reg_0_511_1_1",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[3].tagram/mem_reg_0_511_2_2",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[3].tagram/mem_reg_0_511_3_3",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[3].tagram/mem_reg_0_511_4_4",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[3].tagram/mem_reg_0_511_5_5",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[3].tagram/mem_reg_0_511_6_6",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[3].tagram/mem_reg_0_511_7_7",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[3].tagram/mem_reg_0_511_8_8",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[3].tagram/mem_reg_0_511_9_9",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[3].tagram/mem_reg_512_1023_0_0",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[3].tagram/mem_reg_512_1023_10_10",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[3].tagram/mem_reg_512_1023_11_11",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[3].tagram/mem_reg_512_1023_1_1",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[3].tagram/mem_reg_512_1023_2_2",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[3].tagram/mem_reg_512_1023_3_3",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[3].tagram/mem_reg_512_1023_4_4",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[3].tagram/mem_reg_512_1023_5_5",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[3].tagram/mem_reg_512_1023_6_6",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[3].tagram/mem_reg_512_1023_7_7",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[3].tagram/mem_reg_512_1023_8_8",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[3].tagram/mem_reg_512_1023_9_9",
+      15
+    ],
+    [
+      "rk_ao486_bd_i/rst0/U0/EXT_LPF",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/rst1/U0/EXT_LPF",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[0].LRUram",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[0].LRUram/mem_reg_0_255_0_0",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[0].LRUram/mem_reg_0_255_1_1",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[0].LRUram/mem_reg_256_511_0_0",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[0].LRUram/mem_reg_256_511_1_1",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[0].LRUram/mem_reg_512_767_0_0",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[0].LRUram/mem_reg_512_767_1_1",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[0].LRUram/mem_reg_768_1023_0_0",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[0].LRUram/mem_reg_768_1023_1_1",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[1].LRUram/mem_reg_0_255_0_0",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[1].LRUram/mem_reg_0_255_1_1",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[1].LRUram/mem_reg_256_511_0_0",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[1].LRUram/mem_reg_256_511_1_1",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[1].LRUram/mem_reg_512_767_0_0",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[1].LRUram/mem_reg_512_767_1_1",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[1].LRUram/mem_reg_768_1023_0_0",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[1].LRUram/mem_reg_768_1023_1_1",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[2].LRUram",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[2].LRUram/mem_reg_0_255_0_0",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[2].LRUram/mem_reg_0_255_1_1",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[2].LRUram/mem_reg_256_511_0_0",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[2].LRUram/mem_reg_256_511_1_1",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[2].LRUram/mem_reg_512_767_0_0",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[2].LRUram/mem_reg_512_767_1_1",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[2].LRUram/mem_reg_768_1023_0_0",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[2].LRUram/mem_reg_768_1023_1_1",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[3].LRUram/mem_reg_0_255_0_0",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[3].LRUram/mem_reg_0_255_1_1",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[3].LRUram/mem_reg_256_511_0_0",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[3].LRUram/mem_reg_256_511_1_1",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[3].LRUram/mem_reg_512_767_0_0",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[3].LRUram/mem_reg_512_767_1_1",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[3].LRUram/mem_reg_768_1023_0_0",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[3].LRUram/mem_reg_768_1023_1_1",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[3].ram",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[0].data_reg_0_255_0_0",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[0].data_reg_0_255_10_10",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[0].data_reg_0_255_11_11",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[0].data_reg_0_255_12_12",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[0].data_reg_0_255_13_13",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[0].data_reg_0_255_14_14",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[0].data_reg_0_255_15_15",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[0].data_reg_0_255_16_16",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[0].data_reg_0_255_17_17",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[0].data_reg_0_255_18_18",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[0].data_reg_0_255_19_19",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[0].data_reg_0_255_1_1",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[0].data_reg_0_255_20_20",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[0].data_reg_0_255_21_21",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[0].data_reg_0_255_22_22",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[0].data_reg_0_255_23_23",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[0].data_reg_0_255_24_24",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[0].data_reg_0_255_25_25",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[0].data_reg_0_255_26_26",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[0].data_reg_0_255_27_27",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[0].data_reg_0_255_28_28",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[0].data_reg_0_255_29_29",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[0].data_reg_0_255_2_2",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[0].data_reg_0_255_30_30",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[0].data_reg_0_255_31_31",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[0].data_reg_0_255_3_3",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[0].data_reg_0_255_4_4",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[0].data_reg_0_255_5_5",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[0].data_reg_0_255_6_6",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[0].data_reg_0_255_7_7",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[0].data_reg_0_255_8_8",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[0].data_reg_0_255_9_9",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[1].data_reg_0_255_0_0",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[1].data_reg_0_255_10_10",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[1].data_reg_0_255_11_11",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[1].data_reg_0_255_12_12",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[1].data_reg_0_255_13_13",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[1].data_reg_0_255_14_14",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[1].data_reg_0_255_15_15",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[1].data_reg_0_255_16_16",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[1].data_reg_0_255_17_17",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[1].data_reg_0_255_18_18",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[1].data_reg_0_255_19_19",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[1].data_reg_0_255_1_1",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[1].data_reg_0_255_20_20",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[1].data_reg_0_255_21_21",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[1].data_reg_0_255_22_22",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[1].data_reg_0_255_23_23",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[1].data_reg_0_255_24_24",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[1].data_reg_0_255_25_25",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[1].data_reg_0_255_26_26",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[1].data_reg_0_255_27_27",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[1].data_reg_0_255_28_28",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[1].data_reg_0_255_29_29",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[1].data_reg_0_255_2_2",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[1].data_reg_0_255_30_30",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[1].data_reg_0_255_31_31",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[1].data_reg_0_255_3_3",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[1].data_reg_0_255_4_4",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[1].data_reg_0_255_5_5",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[1].data_reg_0_255_6_6",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[1].data_reg_0_255_7_7",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[1].data_reg_0_255_8_8",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[1].data_reg_0_255_9_9",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[2].data_reg_0_255_0_0",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[2].data_reg_0_255_10_10",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[2].data_reg_0_255_11_11",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[2].data_reg_0_255_12_12",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[2].data_reg_0_255_13_13",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[2].data_reg_0_255_14_14",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[2].data_reg_0_255_15_15",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[2].data_reg_0_255_16_16",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[2].data_reg_0_255_17_17",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[2].data_reg_0_255_18_18",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[2].data_reg_0_255_19_19",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[2].data_reg_0_255_1_1",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[2].data_reg_0_255_20_20",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[2].data_reg_0_255_21_21",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[2].data_reg_0_255_22_22",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[2].data_reg_0_255_23_23",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[2].data_reg_0_255_24_24",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[2].data_reg_0_255_25_25",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[2].data_reg_0_255_26_26",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[2].data_reg_0_255_27_27",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[2].data_reg_0_255_28_28",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[2].data_reg_0_255_29_29",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[2].data_reg_0_255_2_2",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[2].data_reg_0_255_30_30",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[2].data_reg_0_255_31_31",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[2].data_reg_0_255_3_3",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[2].data_reg_0_255_4_4",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[2].data_reg_0_255_5_5",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[2].data_reg_0_255_6_6",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[2].data_reg_0_255_7_7",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[2].data_reg_0_255_8_8",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[2].data_reg_0_255_9_9",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[3].data_reg_0_255_0_0",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[3].data_reg_0_255_10_10",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[3].data_reg_0_255_11_11",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[3].data_reg_0_255_12_12",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[3].data_reg_0_255_13_13",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[3].data_reg_0_255_14_14",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[3].data_reg_0_255_15_15",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[3].data_reg_0_255_16_16",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[3].data_reg_0_255_17_17",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[3].data_reg_0_255_18_18",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[3].data_reg_0_255_19_19",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[3].data_reg_0_255_1_1",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[3].data_reg_0_255_20_20",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[3].data_reg_0_255_21_21",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[3].data_reg_0_255_22_22",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[3].data_reg_0_255_23_23",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[3].data_reg_0_255_24_24",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[3].data_reg_0_255_25_25",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[3].data_reg_0_255_26_26",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[3].data_reg_0_255_27_27",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[3].data_reg_0_255_28_28",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[3].data_reg_0_255_29_29",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[3].data_reg_0_255_2_2",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[3].data_reg_0_255_30_30",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[3].data_reg_0_255_31_31",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[3].data_reg_0_255_3_3",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[3].data_reg_0_255_4_4",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[3].data_reg_0_255_5_5",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[3].data_reg_0_255_6_6",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[3].data_reg_0_255_7_7",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[3].data_reg_0_255_8_8",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[3].data_reg_0_255_9_9",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[4].data_reg_0_255_0_0",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[4].data_reg_0_255_10_10",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[4].data_reg_0_255_11_11",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[4].data_reg_0_255_12_12",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[4].data_reg_0_255_13_13",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[4].data_reg_0_255_14_14",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[4].data_reg_0_255_15_15",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[4].data_reg_0_255_16_16",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[4].data_reg_0_255_17_17",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[4].data_reg_0_255_18_18",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[4].data_reg_0_255_19_19",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[4].data_reg_0_255_1_1",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[4].data_reg_0_255_20_20",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[4].data_reg_0_255_21_21",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[4].data_reg_0_255_22_22",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[4].data_reg_0_255_23_23",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[4].data_reg_0_255_24_24",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[4].data_reg_0_255_25_25",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[4].data_reg_0_255_26_26",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[4].data_reg_0_255_27_27",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[4].data_reg_0_255_28_28",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[4].data_reg_0_255_29_29",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[4].data_reg_0_255_2_2",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[4].data_reg_0_255_30_30",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[4].data_reg_0_255_31_31",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[4].data_reg_0_255_3_3",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[4].data_reg_0_255_4_4",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[4].data_reg_0_255_5_5",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[4].data_reg_0_255_6_6",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[4].data_reg_0_255_7_7",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[4].data_reg_0_255_8_8",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[4].data_reg_0_255_9_9",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[5].data_reg_0_255_0_0",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[5].data_reg_0_255_10_10",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[5].data_reg_0_255_11_11",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[5].data_reg_0_255_12_12",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[5].data_reg_0_255_13_13",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[5].data_reg_0_255_14_14",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[5].data_reg_0_255_15_15",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[5].data_reg_0_255_16_16",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[5].data_reg_0_255_17_17",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[5].data_reg_0_255_18_18",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[5].data_reg_0_255_19_19",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[5].data_reg_0_255_1_1",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[5].data_reg_0_255_20_20",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[5].data_reg_0_255_21_21",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[5].data_reg_0_255_22_22",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[5].data_reg_0_255_23_23",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[5].data_reg_0_255_24_24",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[5].data_reg_0_255_25_25",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[5].data_reg_0_255_26_26",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[5].data_reg_0_255_27_27",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[5].data_reg_0_255_28_28",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[5].data_reg_0_255_29_29",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[5].data_reg_0_255_2_2",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[5].data_reg_0_255_30_30",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[5].data_reg_0_255_31_31",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[5].data_reg_0_255_3_3",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[5].data_reg_0_255_4_4",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[5].data_reg_0_255_5_5",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[5].data_reg_0_255_6_6",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[5].data_reg_0_255_7_7",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[5].data_reg_0_255_8_8",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[5].data_reg_0_255_9_9",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[6].data_reg_0_255_0_0",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[6].data_reg_0_255_10_10",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[6].data_reg_0_255_11_11",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[6].data_reg_0_255_12_12",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[6].data_reg_0_255_13_13",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[6].data_reg_0_255_14_14",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[6].data_reg_0_255_15_15",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[6].data_reg_0_255_16_16",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[6].data_reg_0_255_17_17",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[6].data_reg_0_255_18_18",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[6].data_reg_0_255_19_19",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[6].data_reg_0_255_1_1",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[6].data_reg_0_255_20_20",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[6].data_reg_0_255_21_21",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[6].data_reg_0_255_22_22",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[6].data_reg_0_255_23_23",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[6].data_reg_0_255_24_24",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[6].data_reg_0_255_25_25",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[6].data_reg_0_255_26_26",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[6].data_reg_0_255_27_27",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[6].data_reg_0_255_28_28",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[6].data_reg_0_255_29_29",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[6].data_reg_0_255_2_2",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[6].data_reg_0_255_30_30",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[6].data_reg_0_255_31_31",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[6].data_reg_0_255_3_3",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[6].data_reg_0_255_4_4",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[6].data_reg_0_255_5_5",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[6].data_reg_0_255_6_6",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[6].data_reg_0_255_7_7",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[6].data_reg_0_255_8_8",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[6].data_reg_0_255_9_9",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[7].data_reg_0_255_0_0",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[7].data_reg_0_255_10_10",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[7].data_reg_0_255_11_11",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[7].data_reg_0_255_12_12",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[7].data_reg_0_255_13_13",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[7].data_reg_0_255_14_14",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[7].data_reg_0_255_15_15",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[7].data_reg_0_255_16_16",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[7].data_reg_0_255_17_17",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[7].data_reg_0_255_18_18",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[7].data_reg_0_255_19_19",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[7].data_reg_0_255_1_1",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[7].data_reg_0_255_20_20",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[7].data_reg_0_255_21_21",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[7].data_reg_0_255_22_22",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[7].data_reg_0_255_23_23",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[7].data_reg_0_255_24_24",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[7].data_reg_0_255_25_25",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[7].data_reg_0_255_26_26",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[7].data_reg_0_255_27_27",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[7].data_reg_0_255_28_28",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[7].data_reg_0_255_29_29",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[7].data_reg_0_255_2_2",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[7].data_reg_0_255_30_30",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[7].data_reg_0_255_31_31",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[7].data_reg_0_255_3_3",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[7].data_reg_0_255_4_4",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[7].data_reg_0_255_5_5",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[7].data_reg_0_255_6_6",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[7].data_reg_0_255_7_7",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[7].data_reg_0_255_8_8",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/g_banked_read[7].data_reg_0_255_9_9",
+      14
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/sound/opl/timers/timer2_inst/start_timer_edge_detect",
+      13
+    ],
+    [
+      "rk_ao486_bd_i/rst0/U0/SEQ/SEQ_COUNTER",
+      12
+    ],
+    [
+      "rk_ao486_bd_i/rst1/U0/SEQ/SEQ_COUNTER",
+      12
+    ],
+    [
+      "rk_ao486_bd_i/sc_ctrl/inst/clk_map/psr_aclk/U0/SEQ/SEQ_COUNTER",
+      12
+    ],
+    [
+      "rk_ao486_bd_i/sc_ctrl/inst/m00_exit_pipeline/m00_exit/inst/exit_inst",
+      12
+    ],
+    [
+      "rk_ao486_bd_i/sc_ctrl/inst/clk_map/psr_aclk/U0/EXT_LPF",
+      10
+    ],
+    [
+      "rk_ao486_bd_i/u_clkdiv/inst",
+      9
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwdch2.axi_wdch/grf.rf/gntv_or_sync_fifo.mem/gdm.dm_gen.dm/RAM_reg_0_15_70_72",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_ddr/addr_q_reg_0_15_28_31",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[2].ram",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/floppy/fifo_to_floppy_inst/mem_reg_0_63_0_6",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/floppy/fifo_to_floppy_inst/mem_reg_128_191_0_6",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/floppy/fifo_to_floppy_inst/mem_reg_192_255_0_6",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/floppy/fifo_to_floppy_inst/mem_reg_256_319_0_6",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/floppy/fifo_to_floppy_inst/mem_reg_320_383_0_6",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/floppy/fifo_to_floppy_inst/mem_reg_384_447_0_6",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/floppy/fifo_to_floppy_inst/mem_reg_448_511_0_6",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/floppy/fifo_to_floppy_inst/mem_reg_512_575_0_6",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/floppy/fifo_to_floppy_inst/mem_reg_576_639_0_6",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/floppy/fifo_to_floppy_inst/mem_reg_640_703_0_6",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/floppy/fifo_to_floppy_inst/mem_reg_64_127_0_6",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/floppy/fifo_to_floppy_inst/mem_reg_704_767_0_6",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/floppy/fifo_to_floppy_inst/mem_reg_768_831_0_6",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/floppy/fifo_to_floppy_inst/mem_reg_832_895_0_6",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/floppy/fifo_to_floppy_inst/mem_reg_896_959_0_6",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/floppy/fifo_to_floppy_inst/mem_reg_960_1023_0_6",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/pic",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/ps2/keyb_fifo/mem_reg_0_63_0_6",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/ps2/mouse_fifo/mem_reg_0_63_0_6",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/rtc/rtc_ram_inst/mem_reg_0_63_0_6",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/rtc/rtc_ram_inst/mem_reg_64_127_0_6",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/sound/opl/host_if/afifo/mem_reg_0_63_0_6",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/cg_params_reg_0_31_28_31",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/if_auth_multi_page_reg_0_15_14_19",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way0_reg_r3_0_63_0_6",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way0_reg_r3_0_63_14_19",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way0_reg_r3_0_63_7_13",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way0_reg_r3_64_127_0_6",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way0_reg_r3_64_127_14_19",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way0_reg_r3_64_127_7_13",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way0_reg_r4_0_63_0_6",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way0_reg_r4_0_63_14_19",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way0_reg_r4_0_63_7_13",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way0_reg_r4_64_127_0_6",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way0_reg_r4_64_127_14_19",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way0_reg_r4_64_127_7_13",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way0_reg_r5_0_63_0_6",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way0_reg_r5_0_63_14_19",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way0_reg_r5_0_63_7_13",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way0_reg_r5_64_127_0_6",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way0_reg_r5_64_127_14_19",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way0_reg_r5_64_127_7_13",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way0_reg_r6_0_63_0_6",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way0_reg_r6_0_63_14_19",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way0_reg_r6_0_63_7_13",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way0_reg_r6_64_127_0_6",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way0_reg_r6_64_127_14_19",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way0_reg_r6_64_127_7_13",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way0_reg_r7_0_63_0_6",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way0_reg_r7_0_63_14_19",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way0_reg_r7_0_63_7_13",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way0_reg_r7_64_127_0_6",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way0_reg_r7_64_127_14_19",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way0_reg_r7_64_127_7_13",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way1_reg_r2_0_63_0_6",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way1_reg_r2_0_63_14_19",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way1_reg_r2_0_63_7_13",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way1_reg_r2_64_127_0_6",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way1_reg_r2_64_127_14_19",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way1_reg_r2_64_127_7_13",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way1_reg_r3_0_63_0_6",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way1_reg_r3_0_63_14_19",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way1_reg_r3_0_63_7_13",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way1_reg_r3_64_127_0_6",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way1_reg_r3_64_127_14_19",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way1_reg_r3_64_127_7_13",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way1_reg_r4_0_63_0_6",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way1_reg_r4_0_63_14_19",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way1_reg_r4_0_63_7_13",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way1_reg_r4_64_127_0_6",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way1_reg_r4_64_127_14_19",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way1_reg_r4_64_127_7_13",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way1_reg_r5_0_63_0_6",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way1_reg_r5_0_63_14_19",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way1_reg_r5_0_63_7_13",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way1_reg_r5_64_127_0_6",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way1_reg_r5_64_127_14_19",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way1_reg_r5_64_127_7_13",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way1_reg_r6_0_63_0_6",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way1_reg_r6_0_63_14_19",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way1_reg_r6_0_63_7_13",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way1_reg_r6_64_127_0_6",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way1_reg_r6_64_127_14_19",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/dc_tag_way1_reg_r6_64_127_7_13",
+      8
+    ],
+    [
+      "rk_ao486_bd_i/sc_ctrl/inst/s00_nodes/s00_ar_node/inst/inst_mi_handler/gen_normal_area.inst_fifo_node_payld/gen_reg_fifo.inst_reg_fifo/gen_single_rank.inst_cntr",
+      6
+    ],
+    [
+      "rk_ao486_bd_i/sc_ctrl/inst/s00_nodes/s00_aw_node/inst/inst_mi_handler/gen_normal_area.inst_fifo_node_payld/gen_reg_fifo.inst_reg_fifo/gen_single_rank.inst_cntr",
+      6
+    ],
+    [
+      "rk_ao486_bd_i/sc_ctrl/inst/s00_nodes/s00_b_node/inst/inst_mi_handler/gen_normal_area.inst_fifo_node_payld/gen_reg_fifo.inst_reg_fifo",
+      6
+    ],
+    [
+      "rk_ao486_bd_i/sc_ctrl/inst/s00_nodes/s00_b_node/inst/inst_mi_handler/gen_normal_area.inst_fifo_node_payld/gen_reg_fifo.inst_reg_fifo/gen_single_rank.inst_cntr",
+      6
+    ],
+    [
+      "rk_ao486_bd_i/sc_ctrl/inst/s00_nodes/s00_r_node/inst/inst_mi_handler/gen_normal_area.inst_fifo_node_payld/gen_reg_fifo.inst_reg_fifo/gen_single_rank.inst_cntr",
+      6
+    ],
+    [
+      "rk_ao486_bd_i/sc_ctrl/inst/s00_nodes/s00_w_node/inst/inst_mi_handler/gen_normal_area.inst_fifo_node_payld/gen_reg_fifo.inst_reg_fifo/gen_single_rank.inst_cntr",
+      6
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gread_ch.grach2.axi_rach/grf.rf/gntv_or_sync_fifo.gl0.wr/gwas.wsts",
+      5
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gread_ch.grach2.axi_rach/grf.rf/rstblk/ngwrdrst.grst.g7serrst.gnsckt_wrst.gic_rst.xpm_cdc_single_inst_rrst_wr",
+      5
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gread_ch.grach2.axi_rach/grf.rf/rstblk/ngwrdrst.grst.g7serrst.gnsckt_wrst.gic_rst.xpm_cdc_single_inst_wrst_rd",
+      5
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gread_ch.grdch2.axi_rdch/grf.rf/gntv_or_sync_fifo.gl0.wr/gwas.wsts",
+      5
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gread_ch.grdch2.axi_rdch/grf.rf/rstblk/ngwrdrst.grst.g7serrst.gnsckt_wrst.gic_rst.xpm_cdc_single_inst_rrst_wr",
+      5
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gread_ch.grdch2.axi_rdch/grf.rf/rstblk/ngwrdrst.grst.g7serrst.gnsckt_wrst.gic_rst.xpm_cdc_single_inst_wrst_rd",
+      5
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwach2.axi_wach/grf.rf/gntv_or_sync_fifo.gl0.wr/gwas.wsts",
+      5
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwach2.axi_wach/grf.rf/rstblk/ngwrdrst.grst.g7serrst.gnsckt_wrst.gic_rst.xpm_cdc_single_inst_rrst_wr",
+      5
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwach2.axi_wach/grf.rf/rstblk/ngwrdrst.grst.g7serrst.gnsckt_wrst.gic_rst.xpm_cdc_single_inst_wrst_rd",
+      5
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwdch2.axi_wdch/grf.rf/gntv_or_sync_fifo.gl0.wr/gwas.wsts",
+      5
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwdch2.axi_wdch/grf.rf/rstblk/ngwrdrst.grst.g7serrst.gnsckt_wrst.gic_rst.xpm_cdc_single_inst_rrst_wr",
+      5
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwdch2.axi_wdch/grf.rf/rstblk/ngwrdrst.grst.g7serrst.gnsckt_wrst.gic_rst.xpm_cdc_single_inst_wrst_rd",
+      5
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwrch2.axi_wrch/grf.rf/gntv_or_sync_fifo.gl0.wr/gwas.wsts",
+      5
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwrch2.axi_wrch/grf.rf/rstblk/ngwrdrst.grst.g7serrst.gnsckt_wrst.gic_rst.xpm_cdc_single_inst_rrst_wr",
+      5
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwrch2.axi_wrch/grf.rf/rstblk/ngwrdrst.grst.g7serrst.gnsckt_wrst.gic_rst.xpm_cdc_single_inst_wrst_rd",
+      5
+    ],
+    [
+      "rk_ao486_bd_i/sc_ctrl/inst/m00_exit_pipeline/m00_exit/inst",
+      5
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwrch2.axi_wrch/grf.rf/gntv_or_sync_fifo.mem/gdm.dm_gen.dm",
+      4
+    ],
+    [
+      "rk_ao486_bd_i/rst0/U0/EXT_LPF/ACTIVE_LOW_AUX.ACT_LO_AUX",
+      4
+    ],
+    [
+      "rk_ao486_bd_i/rst0/U0/EXT_LPF/ACTIVE_LOW_EXT.ACT_LO_EXT",
+      4
+    ],
+    [
+      "rk_ao486_bd_i/rst1/U0/EXT_LPF/ACTIVE_LOW_AUX.ACT_LO_AUX",
+      4
+    ],
+    [
+      "rk_ao486_bd_i/rst1/U0/EXT_LPF/ACTIVE_LOW_EXT.ACT_LO_EXT",
+      4
+    ],
+    [
+      "rk_ao486_bd_i/sc_ctrl/inst/clk_map/psr_aclk/U0/EXT_LPF/ACTIVE_LOW_AUX.ACT_LO_AUX",
+      4
+    ],
+    [
+      "rk_ao486_bd_i/sc_ctrl/inst/clk_map/psr_aclk/U0/EXT_LPF/ACTIVE_LOW_EXT.ACT_LO_EXT",
+      4
+    ],
+    [
+      "rk_ao486_bd_i/sc_ctrl/inst/s00_nodes/s00_ar_node/inst",
+      4
+    ],
+    [
+      "rk_ao486_bd_i/sc_ctrl/inst/s00_nodes/s00_aw_node/inst",
+      4
+    ],
+    [
+      "rk_ao486_bd_i/sc_ctrl/inst/s00_nodes/s00_b_node/inst",
+      4
+    ],
+    [
+      "rk_ao486_bd_i/sc_ctrl/inst/s00_nodes/s00_r_node/inst",
+      4
+    ],
+    [
+      "rk_ao486_bd_i/sc_ctrl/inst/s00_nodes/s00_w_node/inst",
+      4
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/sound/opl/host_if/afifo/mem_reg_0_63_7_9",
+      4
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/sound/opl/reset_sync",
+      4
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu",
+      4
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_bridge/addr_q0_inferred__0",
+      4
+    ],
+    [
+      "rk_ao486_bd_i/sc_ctrl/inst/m00_exit_pipeline/m00_exit/inst/xpm_cdc_async_rst_inst",
+      3
+    ],
+    [
+      "rk_ao486_bd_i/sc_ctrl/inst/s00_entry_pipeline/s00_mmu/inst/xpm_cdc_async_rst_inst",
+      3
+    ],
+    [
+      "rk_ao486_bd_i/sc_ctrl/inst/s00_entry_pipeline/s00_si_converter/inst/xpm_cdc_async_rst_inst",
+      3
+    ],
+    [
+      "rk_ao486_bd_i/sc_ctrl/inst/s00_entry_pipeline/s00_transaction_regulator/inst/xpm_cdc_async_rst_inst",
+      3
+    ],
+    [
+      "rk_ao486_bd_i/sc_ctrl/inst/s00_nodes/s00_ar_node/inst/s_sc_xpm_cdc_async_rst_inst",
+      3
+    ],
+    [
+      "rk_ao486_bd_i/sc_ctrl/inst/s00_nodes/s00_aw_node/inst/s_sc_xpm_cdc_async_rst_inst",
+      3
+    ],
+    [
+      "rk_ao486_bd_i/sc_ctrl/inst/s00_nodes/s00_b_node/inst/s_sc_xpm_cdc_async_rst_inst",
+      3
+    ],
+    [
+      "rk_ao486_bd_i/sc_ctrl/inst/s00_nodes/s00_r_node/inst/s_sc_xpm_cdc_async_rst_inst",
+      3
+    ],
+    [
+      "rk_ao486_bd_i/sc_ctrl/inst/s00_nodes/s00_w_node/inst/s_sc_xpm_cdc_async_rst_inst",
+      3
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/sound/opl/host_if/dout_sync",
+      3
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gread_ch.grach2.axi_rach/grf.rf/gntv_or_sync_fifo.gcx.clkx",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gread_ch.grach2.axi_rach/grf.rf/gntv_or_sync_fifo.gl0.rd/gras.rsts",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gread_ch.grach2.axi_rach/grf.rf/rstblk/ngwrdrst.grst.g7serrst.gnsckt_wrst.gic_rst.rst_rd_reg2_inst",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gread_ch.grach2.axi_rach/grf.rf/rstblk/ngwrdrst.grst.g7serrst.gnsckt_wrst.rst_wr_reg2_inst",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gread_ch.grdch2.axi_rdch/grf.rf/gntv_or_sync_fifo.gcx.clkx",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gread_ch.grdch2.axi_rdch/grf.rf/gntv_or_sync_fifo.gl0.rd/gras.rsts",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gread_ch.grdch2.axi_rdch/grf.rf/rstblk/ngwrdrst.grst.g7serrst.gnsckt_wrst.gic_rst.rst_rd_reg2_inst",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gread_ch.grdch2.axi_rdch/grf.rf/rstblk/ngwrdrst.grst.g7serrst.gnsckt_wrst.rst_wr_reg2_inst",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwach2.axi_wach/grf.rf/gntv_or_sync_fifo.gcx.clkx",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwach2.axi_wach/grf.rf/gntv_or_sync_fifo.gl0.rd/gras.rsts",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwach2.axi_wach/grf.rf/rstblk/ngwrdrst.grst.g7serrst.gnsckt_wrst.gic_rst.rst_rd_reg2_inst",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwach2.axi_wach/grf.rf/rstblk/ngwrdrst.grst.g7serrst.gnsckt_wrst.rst_wr_reg2_inst",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwdch2.axi_wdch/grf.rf/gntv_or_sync_fifo.gcx.clkx",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwdch2.axi_wdch/grf.rf/gntv_or_sync_fifo.gl0.rd/gras.rsts",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwdch2.axi_wdch/grf.rf/rstblk/ngwrdrst.grst.g7serrst.gnsckt_wrst.gic_rst.rst_rd_reg2_inst",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwdch2.axi_wdch/grf.rf/rstblk/ngwrdrst.grst.g7serrst.gnsckt_wrst.rst_wr_reg2_inst",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwrch2.axi_wrch/grf.rf/gntv_or_sync_fifo.gcx.clkx",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwrch2.axi_wrch/grf.rf/gntv_or_sync_fifo.gl0.rd/gras.rsts",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwrch2.axi_wrch/grf.rf/gntv_or_sync_fifo.mem",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwrch2.axi_wrch/grf.rf/gntv_or_sync_fifo.mem/gdm.dm_gen.dm/RAM_reg_0_15_0_5",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwrch2.axi_wrch/grf.rf/gntv_or_sync_fifo.mem/gdm.dm_gen.dm/RAM_reg_0_15_0_5__0",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwrch2.axi_wrch/grf.rf/rstblk/ngwrdrst.grst.g7serrst.gnsckt_wrst.gic_rst.rst_rd_reg2_inst",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst/gen_clock_conv.gen_async_conv.asyncfifo_axi/inst_fifo_gen/gaxi_full_lite.gwrite_ch.gwrch2.axi_wrch/grf.rf/rstblk/ngwrdrst.grst.g7serrst.gnsckt_wrst.rst_wr_reg2_inst",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/dwc_mem/inst/gen_upsizer.gen_full_upsizer.axi_upsizer_inst/USE_READ.read_addr_inst",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/dwc_mem/inst/gen_upsizer.gen_full_upsizer.axi_upsizer_inst/USE_WRITE.write_addr_inst",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/sc_ctrl/inst/s00_entry_pipeline/s00_si_converter/inst",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/sc_ctrl/inst/s00_entry_pipeline/s00_transaction_regulator/inst",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/sc_ctrl/inst/s00_nodes/s00_ar_node/inst/inst_mi_handler",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/sc_ctrl/inst/s00_nodes/s00_aw_node/inst/inst_mi_handler",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/sc_ctrl/inst/s00_nodes/s00_b_node/inst/inst_mi_handler",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/sc_ctrl/inst/s00_nodes/s00_r_node/inst/inst_mi_handler",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/sc_ctrl/inst/s00_nodes/s00_w_node/inst/inst_mi_handler",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/floppy/fifo_to_floppy_inst/mem_reg_0_63_7_7",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/floppy/fifo_to_floppy_inst/mem_reg_128_191_7_7",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/floppy/fifo_to_floppy_inst/mem_reg_192_255_7_7",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/floppy/fifo_to_floppy_inst/mem_reg_256_319_7_7",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/floppy/fifo_to_floppy_inst/mem_reg_320_383_7_7",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/floppy/fifo_to_floppy_inst/mem_reg_384_447_7_7",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/floppy/fifo_to_floppy_inst/mem_reg_448_511_7_7",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/floppy/fifo_to_floppy_inst/mem_reg_512_575_7_7",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/floppy/fifo_to_floppy_inst/mem_reg_576_639_7_7",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/floppy/fifo_to_floppy_inst/mem_reg_640_703_7_7",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/floppy/fifo_to_floppy_inst/mem_reg_64_127_7_7",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/floppy/fifo_to_floppy_inst/mem_reg_704_767_7_7",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/floppy/fifo_to_floppy_inst/mem_reg_768_831_7_7",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/floppy/fifo_to_floppy_inst/mem_reg_832_895_7_7",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/floppy/fifo_to_floppy_inst/mem_reg_896_959_7_7",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/floppy/fifo_to_floppy_inst/mem_reg_960_1023_7_7",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/floppy/media_heads_reg_0_1_0_0",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/floppy/media_heads_reg_0_1_1_1",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/ide0/io_cnt0_inferred__0",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/ide1/io_cnt0_inferred__0",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/ps2/keyb_fifo/mem_reg_0_63_7_7",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/ps2/mouse_fifo/mem_reg_0_63_7_7",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/rtc/rtc_ram_inst/mem_reg_0_63_7_7",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/rtc/rtc_ram_inst/mem_reg_64_127_7_7",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/sound/opl/host_if/trick_sw_detection/force_timer_overflow_sync",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/if_auth_multi_user_reg_0_15_0_0",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[0].tags_reg_0_15_0_0",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[0].tags_reg_0_15_10_10",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[0].tags_reg_0_15_11_11",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[0].tags_reg_0_15_12_12",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[0].tags_reg_0_15_13_13",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[0].tags_reg_0_15_14_14",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[0].tags_reg_0_15_15_15",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[0].tags_reg_0_15_1_1",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[0].tags_reg_0_15_2_2",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[0].tags_reg_0_15_3_3",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[0].tags_reg_0_15_4_4",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[0].tags_reg_0_15_5_5",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[0].tags_reg_0_15_6_6",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[0].tags_reg_0_15_7_7",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[0].tags_reg_0_15_8_8",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[0].tags_reg_0_15_9_9",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[1].tags_reg_0_15_0_0",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[1].tags_reg_0_15_10_10",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[1].tags_reg_0_15_11_11",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[1].tags_reg_0_15_12_12",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[1].tags_reg_0_15_13_13",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[1].tags_reg_0_15_14_14",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[1].tags_reg_0_15_15_15",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[1].tags_reg_0_15_1_1",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[1].tags_reg_0_15_2_2",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[1].tags_reg_0_15_3_3",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[1].tags_reg_0_15_4_4",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[1].tags_reg_0_15_5_5",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[1].tags_reg_0_15_6_6",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[1].tags_reg_0_15_7_7",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[1].tags_reg_0_15_8_8",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[1].tags_reg_0_15_9_9",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[2].tags_reg_0_15_0_0",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[2].tags_reg_0_15_10_10",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[2].tags_reg_0_15_11_11",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[2].tags_reg_0_15_12_12",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[2].tags_reg_0_15_13_13",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[2].tags_reg_0_15_14_14",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[2].tags_reg_0_15_15_15",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[2].tags_reg_0_15_1_1",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[2].tags_reg_0_15_2_2",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[2].tags_reg_0_15_3_3",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[2].tags_reg_0_15_4_4",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[2].tags_reg_0_15_5_5",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[2].tags_reg_0_15_6_6",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[2].tags_reg_0_15_7_7",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[2].tags_reg_0_15_8_8",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[2].tags_reg_0_15_9_9",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[3].tags_reg_0_15_0_0",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[3].tags_reg_0_15_10_10",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[3].tags_reg_0_15_11_11",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[3].tags_reg_0_15_12_12",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[3].tags_reg_0_15_13_13",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[3].tags_reg_0_15_14_14",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[3].tags_reg_0_15_15_15",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[3].tags_reg_0_15_1_1",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[3].tags_reg_0_15_2_2",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[3].tags_reg_0_15_3_3",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[3].tags_reg_0_15_4_4",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[3].tags_reg_0_15_5_5",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[3].tags_reg_0_15_6_6",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[3].tags_reg_0_15_7_7",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[3].tags_reg_0_15_8_8",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fe_dtlb/g_bank[3].tags_reg_0_15_9_9",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_fp_shared/u_fp/u_bcd_store/ovf1_inferred__1",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/vga/internal_palette_ram/mem_reg_0_15_0_0",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/vga/internal_palette_ram/mem_reg_0_15_1_1",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/vga/internal_palette_ram/mem_reg_0_15_2_2",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/vga/internal_palette_ram/mem_reg_0_15_3_3",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/vga/internal_palette_ram/mem_reg_0_15_4_4",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/vga/internal_palette_ram/mem_reg_0_15_5_5",
+      2
+    ],
+    [
+      "rk_ao486_bd_i/acc_mem/inst",
+      1
+    ],
+    [
+      "rk_ao486_bd_i/rst0/U0",
+      1
+    ],
+    [
+      "rk_ao486_bd_i/rst1/U0",
+      1
+    ],
+    [
+      "rk_ao486_bd_i/sc_ctrl/inst/clk_map/psr_aclk/U0",
+      1
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[0].ram/u_xpm/xpm_memory_base_inst/gen_blk_box.gen_bb_sync.xpm_memory_base_inst",
+      1
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[1].ram/u_xpm/xpm_memory_base_inst/gen_blk_box.gen_bb_sync.xpm_memory_base_inst",
+      1
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[2].ram/u_xpm/xpm_memory_base_inst/gen_blk_box.gen_bb_sync.xpm_memory_base_inst",
+      1
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/cache/gcache[3].ram/u_xpm/xpm_memory_base_inst/gen_blk_box.gen_bb_sync.xpm_memory_base_inst",
+      1
+    ],
+    [
+      "rk_ao486_bd_i/u_soc/inst/u_soc/ide0/io_buf0",
+      1
+    ]
+  ],
+  "native_utilization": {
+    "luts": [
+      186086,
+      341280
+    ],
+    "clbs": [
+      33528,
+      42660
+    ]
+  },
+  "timing": {
+    "path_count": 20,
+    "source": "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/eip_reg[2]/C",
+    "destination": "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_l1axi/u_l1d/u_pair_return/data_q_reg[1][20]/D",
+    "setup_slack_ns": -9.841,
+    "period_ns": 25.0,
+    "conditional_period_budget_mhz": 28.70181682500502,
+    "data_delay_ns": 34.711,
+    "logic_ns": 8.771,
+    "route_ns": 25.94,
+    "route_percent": 74.731,
+    "logic_levels": 89,
+    "waypoints": [
+      {
+        "site": "SLICE_X53Y320",
+        "x": 216,
+        "y": 103
+      },
+      {
+        "site": "SLICE_X52Y320",
+        "x": 214,
+        "y": 103
+      },
+      {
+        "site": "SLICE_X68Y347",
+        "x": 258,
+        "y": 75
+      },
+      {
+        "site": "SLICE_X69Y344",
+        "x": 260,
+        "y": 78
+      },
+      {
+        "site": "SLICE_X58Y340",
+        "x": 232,
+        "y": 82
+      },
+      {
+        "site": "SLICE_X52Y335",
+        "x": 214,
+        "y": 87
+      },
+      {
+        "site": "SLICE_X52Y333",
+        "x": 214,
+        "y": 89
+      },
+      {
+        "site": "SLICE_X55Y332",
+        "x": 221,
+        "y": 90
+      },
+      {
+        "site": "SLICE_X55Y330",
+        "x": 221,
+        "y": 92
+      },
+      {
+        "site": "SLICE_X60Y332",
+        "x": 237,
+        "y": 90
+      },
+      {
+        "site": "SLICE_X65Y331",
+        "x": 252,
+        "y": 91
+      },
+      {
+        "site": "SLICE_X70Y330",
+        "x": 261,
+        "y": 92
+      },
+      {
+        "site": "SLICE_X74Y335",
+        "x": 272,
+        "y": 87
+      },
+      {
+        "site": "SLICE_X74Y337",
+        "x": 272,
+        "y": 85
+      },
+      {
+        "site": "SLICE_X86Y350",
+        "x": 306,
+        "y": 72
+      },
+      {
+        "site": "SLICE_X88Y351",
+        "x": 311,
+        "y": 71
+      },
+      {
+        "site": "SLICE_X89Y355",
+        "x": 315,
+        "y": 67
+      },
+      {
+        "site": "SLICE_X90Y360",
+        "x": 318,
+        "y": 61
+      },
+      {
+        "site": "SLICE_X90Y362",
+        "x": 318,
+        "y": 59
+      },
+      {
+        "site": "SLICE_X91Y366",
+        "x": 322,
+        "y": 55
+      },
+      {
+        "site": "SLICE_X92Y365",
+        "x": 324,
+        "y": 56
+      },
+      {
+        "site": "SLICE_X92Y349",
+        "x": 324,
+        "y": 73
+      },
+      {
+        "site": "SLICE_X89Y331",
+        "x": 315,
+        "y": 91
+      },
+      {
+        "site": "SLICE_X90Y331",
+        "x": 318,
+        "y": 91
+      },
+      {
+        "site": "SLICE_X91Y335",
+        "x": 322,
+        "y": 87
+      },
+      {
+        "site": "SLICE_X93Y345",
+        "x": 327,
+        "y": 77
+      },
+      {
+        "site": "SLICE_X94Y350",
+        "x": 331,
+        "y": 72
+      },
+      {
+        "site": "SLICE_X100Y363",
+        "x": 349,
+        "y": 58
+      },
+      {
+        "site": "SLICE_X99Y360",
+        "x": 345,
+        "y": 61
+      },
+      {
+        "site": "SLICE_X98Y359",
+        "x": 342,
+        "y": 63
+      },
+      {
+        "site": "SLICE_X97Y353",
+        "x": 340,
+        "y": 69
+      },
+      {
+        "site": "SLICE_X97Y348",
+        "x": 340,
+        "y": 74
+      },
+      {
+        "site": "SLICE_X96Y346",
+        "x": 336,
+        "y": 76
+      },
+      {
+        "site": "SLICE_X87Y316",
+        "x": 309,
+        "y": 107
+      },
+      {
+        "site": "SLICE_X80Y280",
+        "x": 292,
+        "y": 144
+      },
+      {
+        "site": "SLICE_X84Y324",
+        "x": 300,
+        "y": 99
+      },
+      {
+        "site": "SLICE_X85Y324",
+        "x": 304,
+        "y": 99
+      },
+      {
+        "site": "SLICE_X87Y324",
+        "x": 309,
+        "y": 99
+      },
+      {
+        "site": "SLICE_X88Y299",
+        "x": 311,
+        "y": 125
+      },
+      {
+        "site": "SLICE_X89Y293",
+        "x": 315,
+        "y": 131
+      },
+      {
+        "site": "SLICE_X90Y291",
+        "x": 318,
+        "y": 133
+      },
+      {
+        "site": "SLICE_X90Y276",
+        "x": 318,
+        "y": 148
+      },
+      {
+        "site": "SLICE_X90Y277",
+        "x": 318,
+        "y": 147
+      },
+      {
+        "site": "SLICE_X90Y278",
+        "x": 318,
+        "y": 146
+      },
+      {
+        "site": "SLICE_X90Y280",
+        "x": 318,
+        "y": 144
+      },
+      {
+        "site": "SLICE_X90Y281",
+        "x": 318,
+        "y": 143
+      },
+      {
+        "site": "SLICE_X94Y284",
+        "x": 331,
+        "y": 140
+      },
+      {
+        "site": "SLICE_X92Y276",
+        "x": 324,
+        "y": 148
+      },
+      {
+        "site": "SLICE_X104Y292",
+        "x": 360,
+        "y": 132
+      },
+      {
+        "site": "SLICE_X103Y290",
+        "x": 356,
+        "y": 134
+      },
+      {
+        "site": "SLICE_X97Y290",
+        "x": 340,
+        "y": 134
+      },
+      {
+        "site": "SLICE_X95Y291",
+        "x": 333,
+        "y": 133
+      },
+      {
+        "site": "SLICE_X91Y293",
+        "x": 322,
+        "y": 131
+      },
+      {
+        "site": "SLICE_X86Y293",
+        "x": 306,
+        "y": 131
+      },
+      {
+        "site": "SLICE_X80Y293",
+        "x": 292,
+        "y": 131
+      },
+      {
+        "site": "SLICE_X77Y284",
+        "x": 283,
+        "y": 140
+      },
+      {
+        "site": "SLICE_X75Y283",
+        "x": 276,
+        "y": 141
+      },
+      {
+        "site": "SLICE_X75Y281",
+        "x": 276,
+        "y": 143
+      },
+      {
+        "site": "SLICE_X74Y281",
+        "x": 272,
+        "y": 143
+      },
+      {
+        "site": "SLICE_X49Y289",
+        "x": 205,
+        "y": 135
+      },
+      {
+        "site": "SLICE_X49Y291",
+        "x": 205,
+        "y": 133
+      },
+      {
+        "site": "SLICE_X26Y294",
+        "x": 133,
+        "y": 130
+      },
+      {
+        "site": "SLICE_X26Y296",
+        "x": 133,
+        "y": 128
+      },
+      {
+        "site": "SLICE_X25Y297",
+        "x": 129,
+        "y": 127
+      },
+      {
+        "site": "SLICE_X23Y313",
+        "x": 122,
+        "y": 110
+      },
+      {
+        "site": "SLICE_X22Y313",
+        "x": 120,
+        "y": 110
+      },
+      {
+        "site": "SLICE_X20Y301",
+        "x": 115,
+        "y": 122
+      },
+      {
+        "site": "SLICE_X20Y295",
+        "x": 115,
+        "y": 129
+      },
+      {
+        "site": "SLICE_X18Y279",
+        "x": 108,
+        "y": 145
+      },
+      {
+        "site": "SLICE_X17Y254",
+        "x": 104,
+        "y": 171
+      },
+      {
+        "site": "SLICE_X14Y238",
+        "x": 97,
+        "y": 188
+      },
+      {
+        "site": "SLICE_X21Y259",
+        "x": 117,
+        "y": 166
+      },
+      {
+        "site": "SLICE_X22Y259",
+        "x": 120,
+        "y": 166
+      }
+    ],
+    "largest_fanouts": [
+      {
+        "fanout": 3024,
+        "delay_ns": 1.238,
+        "net": "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_icache/pf_fill_addr_reg[7]_16[5]"
+      },
+      {
+        "fanout": 734,
+        "delay_ns": 0.609,
+        "net": "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_dtlb/p_0_in30_out[13]"
+      },
+      {
+        "fanout": 269,
+        "delay_ns": 0.661,
+        "net": "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_icache/pipe_mem_v_q[alu_op][3]_i_4_n_0"
+      },
+      {
+        "fanout": 256,
+        "delay_ns": 0.908,
+        "net": "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_icache/ibuf[0][7]_i_69_n_0"
+      },
+      {
+        "fanout": 124,
+        "delay_ns": 0.498,
+        "net": "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_regfile/FSM_onehot_st_reg[1]_rep__1_0"
+      },
+      {
+        "fanout": 112,
+        "delay_ns": 0.183,
+        "net": "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_icache/pipe_mem_u_q[fp_kind][1]_i_5_n_0"
+      },
+      {
+        "fanout": 103,
+        "delay_ns": 0.482,
+        "net": "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_icache/pipe_mem_u_q[len][1]_i_2_0[0]"
+      },
+      {
+        "fanout": 78,
+        "delay_ns": 0.809,
+        "net": "rk_ao486_bd_i/u_soc/inst/u_soc/u_cpu/u_core/u_core/u_icache/offset[1]"
+      }
+    ],
+    "scope": "Worst reported setup path; waypoint lines are not routed wire shapes"
+  },
+  "measured_core_mhz": 39.99983043583838,
+  "provenance": {
+    "/home/yukidama/external/tmp/ventium-fprem-sequence.iSZ9BAj4/programmable-clock-power-repair-r5/native.log": "34e4d5cc3087f814b53cc17ea3e7affce84754620e669b5b081fd2e70bb621a4",
+    "/home/yukidama/external/tmp/ventium-physical-map-oct17.i4zRrr5l/export/cells.tsv": "97afb3fb410cac9e74ec8bbed2b1a025dc50643893ce119dd3ba4804c79726b0",
+    "/home/yukidama/external/tmp/ventium-physical-map-oct17.i4zRrr5l/export/complete.txt": "30a92c8df5e19e8ee3c6c7852e1856bb7cedc905b2a994b2e4631ab5d86a0603",
+    "/home/yukidama/external/tmp/ventium-physical-map-oct17.i4zRrr5l/export/congestion-status.txt": "a0a4dcdca6c5ac94b63bfc0e812f9af846fc4b54f0b8729dfb4df74dbd9b43bb",
+    "/home/yukidama/external/tmp/ventium-physical-map-oct17.i4zRrr5l/export/congestion.rpt": "175b2e025624900d5644ed67d04c2a4908351d8a6f001a97c22d8072130ea943",
+    "/home/yukidama/external/tmp/ventium-physical-map-oct17.i4zRrr5l/export/device.tsv": "769c6ec2e38ace6a909e6e1e60a7815ffb58f6317c2270a82d133ad4620d3442",
+    "/home/yukidama/external/tmp/ventium-physical-map-oct17.i4zRrr5l/export/hierarchy.rpt": "37b5166dd17eb6ec69e61c9c8aa3bbb3d5b111cdb4c8ced66998bd5defe0e6c7",
+    "/home/yukidama/external/tmp/ventium-physical-map-oct17.i4zRrr5l/export/route-status.rpt": "a3ab646281613a9820d5250c6f2c048bac8d0a2467135c6df38b2c5a78707397",
+    "/home/yukidama/external/tmp/ventium-physical-map-oct17.i4zRrr5l/export/sites.tsv": "4e73ba6959ecf36c06ad9e468ba19f7161344eb1fb70052de87c41b4635b3383",
+    "/home/yukidama/external/tmp/ventium-physical-map-oct17.i4zRrr5l/export/tiles.tsv": "76a253ff467b3f9b8574153ddbbef46d9475a78bd65a22111e2fafeaf15383dd",
+    "/home/yukidama/external/tmp/ventium-physical-map-oct17.i4zRrr5l/export/timing.rpt": "089bf1b7c27211a2b4711356069ad86d7b2d1d211d41fafb886e8633d7c71502",
+    "/home/yukidama/external/tmp/ventium-physical-map-oct17.i4zRrr5l/export/utilization.rpt": "1bf19ac079c6ef10ce19ddabe8171551a410f8dc4a99ef2cb21404225d60c722",
+    "/run/media/yukidama/f213d338-6002-424a-9968-584cf4aff9b6/tmp/ventium-fprem-sequence.iSZ9BAj4/programmable-clock-power-repair-r5/build/routed.dcp": "b38e8bd49d8327eb6497146016e252703f9e90235957e903ec85f932fec41d17"
+  },
+  "image_id": "2886d24c"
+}

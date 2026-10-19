@@ -12,10 +12,13 @@
         // offset[15:0]} @ idt_base + vec*4 (one beat). Latch the new CS:IP.
         // -------------------------------------------------------------------
         S_RMINT_RD: begin
-          if (mem_ack) begin
+          if (!rm_read_armed) begin
+            rm_read_armed <= 1'b1;
+          end else if (mem_ack) begin
             int_gate_off <= {16'd0, mem_rdata[15:0]};   // new IP
             int_gate_sel <= mem_rdata[31:16];            // new CS selector
             int_step     <= 4'd0;
+            rm_read_armed <= 1'b0;
             state        <= S_RMINT_PUSH;
           end
         end
@@ -35,12 +38,14 @@
               seg_sel [SG_CS] <= int_gate_sel;
               seg_base[SG_CS] <= {12'd0, int_gate_sel, 4'd0};
               seg_attr[SG_CS] <= 8'h9B;
+              seg_pm_loaded[SG_CS] <= 1'b0;   // R2-H07: real-mode load
               eip             <= int_gate_off;
               eflags          <= eflags & ~32'h0005_0300;   // clear IF|TF|RF|AC
               q_pc            <= int_src_pc;                 // stamp the INT's PC
               retire_valid    <= 1'b1;
               int_step        <= 4'd0;
               state           <= S_PIPE;
+              dlv_depth <= 2'd0; dlv_ctrb <= 1'b0; dlv_pf <= 1'b0;  // REVIEW_aug2 H-04
             end
           end
         end
@@ -51,22 +56,35 @@
         // bump SP by 6, and retire stamped at the IRET's PC.
         // -------------------------------------------------------------------
         S_RMIRET: begin
-          if (mem_ack) begin
+          if (!rm_read_armed) begin
+            rm_read_armed <= 1'b1;
+          end else if (mem_ack) begin
             unique case (int_step)
-              4'd0: begin iret_eip <= {16'd0, mem_rdata[15:0]}; int_step <= 4'd1; end
-              4'd1: begin iret_cs  <= mem_rdata[15:0];          int_step <= 4'd2; end
+              4'd0: begin
+                iret_eip <= {16'd0, mem_rdata[15:0]};
+                int_step <= 4'd1;
+                rm_read_armed <= 1'b0;
+              end
+              4'd1: begin
+                iret_cs  <= mem_rdata[15:0];
+                int_step <= 4'd2;
+                rm_read_armed <= 1'b0;
+              end
               default: begin
                 seg_sel [SG_CS] <= iret_cs;
                 seg_base[SG_CS] <= {12'd0, iret_cs, 4'd0};
                 seg_attr[SG_CS] <= 8'h9B;
+                seg_pm_loaded[SG_CS] <= 1'b0;   // R2-H07: real-mode load
                 eip             <= iret_eip;
                 // 16-bit IRET restores the low-16 settable flags (CF..NT incl IF/IOPL);
                 // bit1 reads 1; EFLAGS[31:16] (VM/AC/ID/...) are untouched by a 16-bit pop.
                 eflags          <= {eflags[31:16], ((mem_rdata[15:0] & 16'h7FD5) | 16'h0002)};
                 // R3: SP += 6 moved to the gpr writeback driver (S_RMIRET arm).
+                iret_retire_nmi();      // REVIEW_aug2 H-05 (real-mode commit)
                 q_pc            <= int_src_pc;
                 retire_valid    <= 1'b1;
                 int_step        <= 4'd0;
+                rm_read_armed   <= 1'b0;
                 state           <= S_PIPE;
               end
             endcase

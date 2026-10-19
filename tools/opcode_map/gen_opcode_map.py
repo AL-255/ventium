@@ -26,6 +26,7 @@ REPO = os.path.normpath(os.path.join(HERE, '..', '..'))
 DATA = os.path.join(HERE, 'coverage_data.json')
 CORE = os.path.join(REPO, 'rtl', 'core', 'core.sv')
 PKG  = os.path.join(REPO, 'rtl', 'core', 'ventium_decode_pkg.sv')
+DECODER = os.path.join(REPO, 'rtl', 'core', 'decode_stages.sv')
 RST  = os.path.join(REPO, 'docs', 'sphinx', 'isa', 'opcode-map.rst')
 
 GLYPH = {'implemented': 'I', 'over-implemented': '+', 'partial': '~', 'system-only': 'S',
@@ -323,19 +324,124 @@ def render(d):
     L.append('')
     return '\n'.join(L) + '\n'
 
-def decode_fingerprint():
-    """A comment/whitespace-insensitive fingerprint of the decoder's STRUCTURE.
+def _sv_without_comments(source):
+    """Remove comments without interpreting comment markers inside SV literals.
 
-    The multiset of decode-defining tokens across core.sv + the FX_/K_ enums:
-    every opcode/sub-opcode case label, every micro-op assignment, and every
-    d_unknown HALT. Adding/removing/retargeting ANY decode arm (primary, 0F,
-    x87, or group sub-form) changes this hash; comments and reflow do not. This
-    is the staleness tripwire: if the decoder changes, the hash moves, and CI
-    insists the opcode-map data be re-reviewed + the fingerprint refreshed.
+    Keep newlines for line-oriented compiler directives and token separators:
+    deleting a comment must not turn ``a/**/b`` into identifier ``ab``.
+    Escaped identifiers also end at whitespace, not at embedded ``//``.
+    """
+    out = []
+    i = 0
+    while i < len(source):
+        if source.startswith('//', i):
+            end = source.find('\n', i + 2)
+            if end < 0:
+                end = len(source)
+            out.append(' ')
+        elif source.startswith('/*', i):
+            close = source.find('*/', i + 2)
+            if close < 0:
+                raise ValueError('unterminated SystemVerilog block comment')
+            end = close + 2
+            out.append(' ' + '\n' * source[i:end].count('\n'))
+        elif source[i] == '"':
+            end = i + 1
+            while end < len(source):
+                if source[end] == '\\':
+                    end += 2
+                elif source[end] == '"':
+                    end += 1
+                    break
+                else:
+                    end += 1
+            else:
+                raise ValueError('unterminated SystemVerilog string literal')
+            out.append(source[i:end])
+        elif source[i] == '\\' and i + 1 < len(source) and not source[i + 1].isspace():
+            end = i + 1
+            while end < len(source) and not source[end].isspace():
+                end += 1
+            out.append(source[i:end])
+        else:
+            end = i + 1
+            out.append(source[i:end])
+        i = end
+    return ''.join(out)
+
+
+_SV_TOKEN = re.compile(
+    r'"(?:\\[\s\S]|[^"\\])*"|\\[^\s]+|'
+    r"(?:[0-9][0-9_]*[ \t]*)?'[sS]?[bBoOdDhH][ \t]*[0-9a-fA-F_xXzZ?]+|"
+    r"'[01xXzZ]|[0-9][0-9_]*(?:\.[0-9_]+)?(?:[eE][+-]?[0-9_]+)?|"
+    r'`?[A-Za-z_$][A-Za-z0-9_$]*|'
+    r'<<<\=|>>>\=|<<<|>>>|===|!==|==\?|!=\?|&&&|\|->|\|=>|<->|'
+    r'<<\=|>>\=|\+\+|--|\*\*|&&|\|\||<<|>>|<=|>=|==|!=|'
+    r'\+=|-=|\*=|/=|%=|&=|\|=|\^=|~&|~\||~\^|\^~|::|\+:|-:|->|##|\S'
+)
+_SV_DIRECTIVES = {
+    '`define', '`undef', '`undefineall', '`ifdef', '`ifndef', '`elsif', '`else',
+    '`endif', '`include', '`timescale', '`default_nettype', '`line',
+    '`begin_keywords', '`end_keywords', '`resetall', '`celldefine', '`endcelldefine',
+    '`unconnected_drive', '`nounconnected_drive', '`pragma',
+}
+
+
+def _sv_tokens(source):
+    """Ordered executable lexemes; preserve strings, operators and directive EOL.
+
+    This is lexical normalization, not preprocessing or an SV semantic parser.
+    Conditional branches and macro spellings all remain covered by the hash.
+    """
+    source = _sv_without_comments(source)
+    tokens = []
+    i = 0
+    directive = False
+    while i < len(source):
+        if directive and source.startswith('\\\n', i):
+            i += 2                 # continued directive, not its end
+            continue
+        if source[i].isspace():
+            if source[i] == '\n' and directive:
+                tokens.append('\n')
+                directive = False
+            i += 1
+            continue
+        match = _SV_TOKEN.match(source, i)
+        token = match.group()
+        if token[0].isdigit() or token[0] == "'":
+            token = re.sub(r'\s+', '', token)
+        tokens.append(token)
+        if token in _SV_DIRECTIVES:
+            directive = True
+        i = match.end()
+    if directive:
+        tokens.append('\n')        # final line need not have a literal newline
+    return tokens
+
+
+def decode_fingerprint():
+    """Fingerprint extracted decode semantics plus the original core/pkg checks.
+
+    Hash ALL ordered executable tokens in decode_stages.sv, including mode
+    predicates, ternary sysop selections, operand widths and literals. Retain
+    core.sv's selected decode signals and the package FX enum checks. Comments
+    and token-separating whitespace are ignored; literal contents and directive
+    line boundaries are not. Missing/empty decoder source or unterminated block
+    comments/string literals cannot produce a receipt; this is not an SV parser.
     """
     import hashlib
-    core = open(CORE).read()
-    pkg = open(PKG).read()
+    with open(CORE) as source:
+        core_tokens = _sv_tokens(source.read())
+    with open(PKG) as source:
+        pkg_tokens = _sv_tokens(source.read())
+    with open(DECODER) as source:
+        decoder_tokens = _sv_tokens(source.read())
+    if not decoder_tokens:
+        raise ValueError('extracted decoder has no executable tokens')
+    # String/escaped-identifier contents cannot impersonate selected signals.
+    core = ' '.join(t for t in core_tokens if not t.startswith(('"', '\\')))
+    pkg = ' '.join(t for t in pkg_tokens if not t.startswith(('"', '\\')))
     toks = []
     toks += re.findall(r"8'[hb][0-9a-fA-F_?]+\s*[:,]", core)        # case labels
     toks += re.findall(r"d_fxop\s*=\s*FX_[A-Z0-9_]+", core)         # x87 micro-ops
@@ -344,7 +450,8 @@ def decode_fingerprint():
     toks += re.findall(r"d_(?:unknown|halt|is_nop|int80|f00f)\s*=\s*1'b1", core)
     toks += re.findall(r"\bFX_[A-Z0-9_]+\b", pkg)                   # the enum itself
     norm = sorted(re.sub(r'\s+', '', t) for t in toks)
-    return hashlib.sha256('\n'.join(norm).encode()).hexdigest()
+    payload = {'core_pkg_signals': norm, 'decode_stages_tokens': decoder_tokens}
+    return hashlib.sha256(json.dumps(payload, separators=(',', ':')).encode()).hexdigest()
 
 def verify_rtl(d):
     """Cross-check the data against core.sv so the map cannot silently drift.
@@ -356,18 +463,22 @@ def verify_rtl(d):
          (catches any added/removed/retargeted decode arm -> re-review needed).
     Returns a list of human-readable drift complaints (empty == in sync).
     """
-    pkg = open(PKG).read()
     problems = []
-    enum = set(re.findall(r'\bFX_[A-Z0-9_]+\b', pkg))
+    try:
+        with open(PKG) as source:
+            pkg_tokens = _sv_tokens(source.read())
+        actual = decode_fingerprint()
+    except (OSError, ValueError) as error:
+        return [f'cannot fingerprint required RTL decoder source: {error}']
+    enum = {t for t in pkg_tokens if re.fullmatch(r'FX_[A-Z0-9_]+', t)}
     for mapname in ('primary', 'secondary'):
         for k, rec in d[mapname].items():
             for fx in re.findall(r'\bFX_[A-Z0-9_]+\b', rec.get('evidence', '') + ' ' + rec.get('detail', '')):
                 if fx not in enum:
                     problems.append(f'{mapname} {k}: evidence cites {fx} which is not in fxop_e')
     recorded = d.get('_decode_fingerprint')
-    actual = decode_fingerprint()
     if recorded != actual:
-        problems.append('core.sv decoder STRUCTURE changed since the opcode map was last '
+        problems.append('core.sv/decode_stages.sv decoder STRUCTURE changed since the opcode map was last '
                         f'regenerated (fingerprint {recorded} -> {actual}). Review the new/'
                         'changed decode arms, update tools/opcode_map/coverage_data.json, then '
                         'run: gen_opcode_map.py --update-fingerprint && gen_opcode_map.py')

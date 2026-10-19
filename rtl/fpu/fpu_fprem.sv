@@ -1,3 +1,4 @@
+`default_nettype wire  // Vivado project-flow: reset nettype (files compile as one unit; prevents `none` leak)
 // Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
 // SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
 // ===========================================================================

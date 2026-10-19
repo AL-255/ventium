@@ -35,14 +35,22 @@ module fpu_srt_div
     input  wire logic        start,      // 1-clk: begin (ignored if busy)
     input  wire logic [1:0]  mode,       // 0=divide, 1=square-root, 2=remainder
     input  wire logic        prem1,      // rem: 1 = FPREM1 (round-nearest Q)
+    input  wire logic        rem_underflow_mask, // accepted remainder CW.UM
     input  wire logic [79:0] a,          // dividend / radicand / ST0 (floatx80)
     input  wire logic [79:0] b,          // divisor / ST1 (floatx80; ignored for sqrt)
+`ifdef VEN_SRT_REM_OPERAND_SPLIT
+    // Used only by accepted FD_REM. The caller supplies the same architectural
+    // operands as a/b would contain, independently of the divide/memory mux.
+    input  wire logic [79:0] rem_a,
+    input  wire logic [79:0] rem_b,
+`endif
     input  wire logic [1:0]  rc,         // x87 rounding control (fctrl[11:10])
     input  wire logic [1:0]  pc,         // x87 precision control (fctrl[9:8]): 00=24b 10=53b 11=64b
     input  wire logic        buggy,      // 1 = buggy PLA (reproduce the FDIV flaw)
     output logic             busy,       // 1 while an op is in flight
     output logic             done,       // 1-clk strobe: result valid this clock
-    output logic [82:0]      result,     // {oe, ue, pe, floatx80}  (div/sqrt) | {2'b0, 1'b0, rem} (rem)
+    output logic [82:0]      result,     // {oe, ue, pe, floatx80}; remainder uses UE only
+    output logic             rounded_up, // div/sqrt C1; registered with result/done
     output logic [2:0]       rem_q012,   // rem: {q2,q1,q0} -> {C0,C3,C1}
     output logic             rem_c2,     // rem: 1 = partial (incomplete) reduction
     output logic             rem_ie      // rem: invalid-operation
@@ -75,6 +83,13 @@ module fpu_srt_div
   logic [6:0]          corrpos;
 
 `ifdef VEN_FPREM
+`ifdef VEN_SRT_REM_OPERAND_SPLIT
+  wire [79:0] rem_input_a = rem_a;
+  wire [79:0] rem_input_b = rem_b;
+`else
+  wire [79:0] rem_input_a = a;
+  wire [79:0] rem_input_b = b;
+`endif
   // ---- remainder (FPREM/FPREM1) state — radix-4 SRT integer divide D/mb on the
   // SHARED carry-save recurrence (D=ma<<nb; S/C/qacc reused from the divide). The
   // dividend D is streamed MSB-first 2 bits/clock from `dvd` (ma + nb trailing zeros,
@@ -84,7 +99,8 @@ module fpu_srt_div
   logic                rsa;             // sign of ST0 (remainder takes ST0's sign)
   logic signed [16:0]  reb;             // remainder exponent base
   logic [6:0]          rnsteps;         // total radix-4 steps = ceil((64+nb)/2)
-  logic                rc2, rprem1;
+  logic                rc2, rprem1, rum;
+  logic                rsmall_half; // small nearest quotient, exponent gap -1
   function automatic logic        rem_is_inf (input logic [79:0] v);
     return (v[78:64]==15'h7fff) && (v[63:0]==64'h8000000000000000); endfunction
   function automatic logic        rem_is_nan (input logic [79:0] v);
@@ -93,19 +109,125 @@ module fpu_srt_div
     return (v[78:64]==15'd0) && (v[63:0]==64'd0); endfunction
   function automatic logic [79:0] rem_quiet  (input logic [79:0] v);
     return {v[79], 15'h7fff, 2'b11, v[61:0]}; endfunction
-  function automatic logic [6:0]  rem_clz64(input logic [63:0] x);
-    logic [6:0] n; n = 7'd64;
-    for (int i=63;i>=0;i--) if (x[i] && n==7'd64) n = 7'd63 - i[6:0];
-    return n; endfunction
+  // Unsupported x80 encodings precede NaNs; a signaling operand raises IE
+  // even when the other operand supplies the quiet NaN result.
+  function automatic logic rem_unsupported(input logic [79:0] v);
+    return (v[78:64] != 15'd0) && !v[63];
+  endfunction
+  function automatic logic rem_snan(input logic [79:0] v);
+    return rem_is_nan(v) && !v[62];
+  endfunction
+  function automatic logic [79:0] rem_canonical(input logic [79:0] v);
+    // Pseudo-denormals are accepted, raise DE at the architectural shell,
+    // and become canonical normals even when quotient zero bypasses SRT.
+    return ((v[78:64] == 15'd0) && v[63]) ? {v[79], 15'd1, v[63:0]} : v;
+  endfunction
+  function automatic logic [79:0] rem_nan_result(input logic [79:0] x, y);
+    logic xn, yn, xs, ys;
+    xn = rem_is_nan(x); yn = rem_is_nan(y);
+    xs = rem_snan(x); ys = rem_snan(y);
+    if (!yn || (xn && !xs && ys)) return rem_quiet(x);
+    if (!xn || (yn && !ys && xs)) return rem_quiet(y);
+    // Same NaN kind: greatest significand; equal payload prefers positive.
+    if (x[63:0] > y[63:0]) return rem_quiet(x);
+    if (x[63:0] < y[63:0]) return rem_quiet(y);
+    return rem_quiet(x[79] ? y : x);
+  endfunction
+  // Six binary decisions, rather than a 64-entry first-match chain.
+  // Keep the all-zero result at 64; denormal exponent adjustment uses it.
+  function automatic logic [6:0] rem_clz64(input logic [63:0] x);
+    logic [31:0] w32;
+    logic [15:0] w16;
+    logic [7:0] w8;
+    logic [3:0] w4;
+    logic [1:0] w2;
+    logic [5:0] n;
+    n[5] = ~(|x[63:32]);
+    w32 = n[5] ? x[31:0] : x[63:32];
+    n[4] = ~(|w32[31:16]);
+    w16 = n[4] ? w32[15:0] : w32[31:16];
+    n[3] = ~(|w16[15:8]);
+    w8 = n[3] ? w16[7:0] : w16[15:8];
+    n[2] = ~(|w8[7:4]);
+    w4 = n[2] ? w8[3:0] : w8[7:4];
+    n[1] = ~(|w4[3:2]);
+    w2 = n[1] ? w4[1:0] : w4[3:2];
+    n[0] = ~w2[1];
+    return (x == 64'd0) ? 7'd64 : {1'b0, n};
+  endfunction
   localparam logic [79:0] RQNAN_INDEF = {1'b1, 15'h7fff, 1'b1, 63'h4000000000000000};
 `endif
+
+  // Highest known-one search in six binary decisions. Procedural if,
+  // rather than ?:, retains the old loop's treatment of X/Z test bits.
+  // The original divide ka/kb defaults and sqrt cz default mean that an
+  // all-zero (or no-known-one) mantissa must return ZERO, not 64.
+  function automatic logic [5:0] srt_input_clz64(input logic [63:0] x);
+    logic [31:0] w32;
+    logic [15:0] w16;
+    logic [7:0] w8;
+    logic [3:0] w4;
+    logic [1:0] w2;
+    logic [5:0] n;
+    n = 6'd0;
+    if (|x[63:32]) w32 = x[63:32];
+    else begin w32 = x[31:0]; n[5] = 1'b1; end
+    if (|w32[31:16]) w16 = w32[31:16];
+    else begin w16 = w32[15:0]; n[4] = 1'b1; end
+    if (|w16[15:8]) w8 = w16[15:8];
+    else begin w8 = w16[7:0]; n[3] = 1'b1; end
+    if (|w8[7:4]) w4 = w8[7:4];
+    else begin w4 = w8[3:0]; n[2] = 1'b1; end
+    if (|w4[3:2]) w2 = w4[3:2];
+    else begin w2 = w4[1:0]; n[1] = 1'b1; end
+    if (w2[1]) n[0] = 1'b0;
+    else n[0] = 1'b1;
+    if (|x) return n;
+    return 6'd0;
+  endfunction
+
+  // Divide normalization exponent is bounded: -16445..16384.
+  // Explicit narrow intermediate prevents 32-bit assignment context from
+  // widening the subtractors. Sign-extend into the unchanged ua/ub registers.
+  function automatic logic signed [31:0] srt_div_input_exp(
+      input logic [14:0] encoded, input logic [5:0] shift);
+    logic [14:0] effective;
+    logic signed [15:0] adjusted;
+    effective = (encoded == 15'd0) ? 15'd1 : encoded;
+    adjusted = $signed({1'b0, effective}) - 16'sd16383 - $signed({10'd0, shift});
+    return {{16{adjusted[15]}}, adjusted};
+  endfunction
 
   // ---- result --------------------------------------------------------------
   logic [82:0]         result_q;          // {oe, ue, pe, floatx80}
   logic                done_q;
+  // Final divide/root magnitude, selected at the last iterative step. Keeping
+  // this selection ahead of a register prevents mode_q from feeding the long
+  // leading-one/rounding cone while retaining one shared rounder.
+  logic [127:0]        round_uq_q;
+  logic signed [31:0] round_sh_q;
 
   assign busy   = (st != ST_IDLE);
   assign done   = done_q;
+
+`ifdef VEN_DBG_WD
+  // [VEN-FDIVHANG] stuck-detector: the SRT engine finishes in ~NSTEP+few cycles.
+  // If it stays out of ST_IDLE >256 cycles it is HUNG -> log state+latched operands.
+  logic [15:0] dbg_bcnt;
+  logic [79:0] dbg_a, dbg_b; logic [1:0] dbg_mode;
+  always_ff @(posedge clk) begin
+    if (!rst_n) dbg_bcnt <= 16'd0;
+    else if (st == ST_IDLE) begin
+      dbg_bcnt <= 16'd0;
+      if (start) begin dbg_a <= a; dbg_b <= b; dbg_mode <= mode; end
+    end else begin
+      dbg_bcnt <= dbg_bcnt + 16'd1;
+      if (dbg_bcnt == 16'd256)
+        $display("[VEN-FDIVHANG] SRT stuck st=%0d k=%0d mode=%0d a=%020x b=%020x rc=%0d pc=%0d",
+                 st, k, dbg_mode, dbg_a, dbg_b, rc, pc);
+    end
+  end
+`endif
   assign result = result_q;
 
   // ==========================================================================
@@ -203,7 +325,7 @@ module fpu_srt_div
   logic [80:0]         rsum;
   logic                rem_nz, rs_pos, rs_neg, up, down, inexact, resid_pos, resid_neg;
   logic [127:0]        uq, keep, remv, half;
-  int                  msb, extra;
+  int                  msb, floor_msb, extra;
   logic signed [31:0]  e, ebiased;
   // out-of-range pack: feed the SHARED fx_round_pack_f one UNROUNDED 64-bit window
   // (top-aligned) + a single residual sticky so it does ONE correct round across
@@ -215,7 +337,7 @@ module fpu_srt_div
   logic [127:0]        sigp, keepf;
   logic signed [31:0]  ep;
   logic                stickyp;
-  logic [82:0]         packed_oor;
+  logic [83:0]         packed_oor;
   always_comb begin
     rsum    = {1'b0, C} + {1'b0, S};
     // The partial remainder is TRUE-ZERO when the ones-complement carry-save sum
@@ -225,11 +347,12 @@ module fpu_srt_div
     rem_nz  = (rsum[79:0] != 80'd0) && (rsum[79:0] != {80{1'b1}});
     rs_neg  = rem_nz &&  rsum[79];
     rs_pos  = rem_nz && !rsum[79];
-    // divide: qacc (radix-4 quotient, SH=70). sqrt: root_int = R*2^72 = twoR>>1
-    // (R = twoR/2, on-the-fly; SH=72). Same remainder-sign rounding tail (sign=0).
-    uq      = (mode_q == FD_SQRT) ? 128'(twoR >> 1) : qacc;
+    // The final quotient/root choice was registered by the last iterative step:
+    // divide uses qacc with SH=70; sqrt uses root_int=(twoR>>1) with SH=72.
+    uq      = round_uq_q;
     msb     = 0;
     for (int i=127; i>=0; i--) if (uq[i]) begin msb=i; break; end
+    floor_msb = msb;                              // before the independent PC64 round
     extra   = msb - 63;
     keep    = uq >> extra;
     remv    = uq & ((128'd1 << extra) - 128'd1);
@@ -255,7 +378,7 @@ module fpu_srt_div
       keep = keep - 128'd1;                          // keep over-estimates by < 1 ULP
       if (!keep[63]) begin keep = {64'd0, 64'hFFFFFFFFFFFFFFFF}; msb = msb - 1; end
     end
-    e       = (msb - (mode_q == FD_SQRT ? 32'sd72 : 32'sd70)) + (ua - ub);
+    e       = (msb - round_sh_q) + (ua - ub);
     ebiased = e + 32'sd16383;
 
     // -------- out-of-range (over/underflow) pack via fx_round_pack_f ----------
@@ -263,22 +386,23 @@ module fpu_srt_div
     // significand keepf (top-aligned to bit127) + sticky go to the shared packer,
     // which applies gradual-underflow / overflow + the active RC in ONE round.
     keepf   = uq >> extra;                            // floor 64-bit window (unrounded)
+    ep      = ($signed(floor_msb) - round_sh_q) + (ua - ub);
     if (resid_neg) begin                             // SRT over-shot by < 1 ULP
       keepf = keepf - 128'd1;
-      if (!keepf[63]) keepf = {64'd0, 64'hFFFFFFFFFFFFFFFF};  // borrowed across pow2
+      if (!keepf[63]) begin
+        keepf = {64'd0, 64'hFFFFFFFFFFFFFFFF};         // borrowed across pow2
+        ep = ep - 32'sd1;
+      end
     end
     stickyp = (remv != 128'd0) || rs_pos || resid_neg;        // any residual below floor
     sigp    = keepf << 64;                            // window MSB (bit63) -> bit127
-    // weight of keepf's MSB (bit63) == weight of uq bit `msb` (the floor window top):
-    // (msb - SH) + (ua-ub), SH=70 (div) / 72 (sqrt). resid_neg's pow2-borrow drops
-    // the window MSB one position, but fx_round_pack_f re-finds the MSB of sigp and
-    // uses the passed weight as ITS top bit's exponent, so pass the floor MSB weight.
-    ep      = ($signed(msb) - (mode_q == FD_SQRT ? 32'sd72 : 32'sd70)) + (ua - ub);
-    if (resid_neg && !keepf[63]) ep = ep - 32'sd1;    // borrow crossed a power of two
+    // The packer owns its rounding carry/borrow. It must receive the FLOOR's
+    // exponent, not msb after PC64 rounding; otherwise an inline carry is
+    // counted twice at PC24/53. Apply a floor borrow before replacing its MSB.
     // Pass pc: the floor-window packer rounds to 24/53/64 bits. For pc<64 this also
     // serves the IN-RANGE result (single-round to PC; no double-round), so divide/
     // sqrt honor x87 precision control. PC=64 keeps the fast inline path below.
-    packed_oor = fx_round_pack_f(sign, ep, sigp, stickyp, rc, pc);
+    packed_oor = fx_round_pack_c1(sign, ep, sigp, stickyp, rc, pc);
     // route the engine through the packer when the quotient is over/underflowing the
     // floatx80 normal range (biased <= 0 -> underflow; >= 0x7FFF -> overflow). This
     // is the set fx_div used to send to fx_div_exact; the engine now owns it too.
@@ -291,48 +415,98 @@ module fpu_srt_div
   always_ff @(posedge clk) begin
     if (!rst_n) begin
       st <= ST_IDLE; done_q <= 1'b0; k <= '0;
+      round_uq_q <= 128'd0; round_sh_q <= 32'sd70;
       rem_q012 <= 3'd0; rem_c2 <= 1'b0; rem_ie <= 1'b0;
+      rounded_up <= 1'b0;
     end else begin
       done_q <= 1'b0;
       unique case (st)
         ST_IDLE: begin
+          // qacc is dead in IDLE/sqrt/special. Every consuming operation
+          // enters from IDLE, so zero it here without a late start-input CE.
+          qacc <= 128'sd0;
+`ifdef VEN_SRT_REM_OPERAND_SPLIT
+          // C is consumed only by iterative states. Every entry initializes
+          // it to zero here; special-result operations never consume it.
+          // Do not put input-dependent special classification on its CE.
+          C <= 80'd0;
+`endif
           if (start) begin
             mode_q <= mode;
+            // Special operands and remainder do not use arithmetic rounding
+            // C1. Remainder quotient bits have their separate output below.
+            rounded_up <= 1'b0;
 `ifdef VEN_FPREM
             if (mode == FD_REM) begin
               // ---- remainder setup (== fpu_fprem) --------------------------
               logic [14:0] rea, rebe; logic [63:0] rma, rmbb;
               logic signed [16:0] rea_a, reb_a, rexpd;
-              rea=a[78:64]; rebe=b[78:64]; rma=a[63:0]; rmbb=b[63:0];
-              rsa<=a[79]; rem_q012<=3'd0; rem_c2<=1'b0; rem_ie<=1'b0; rprem1<=prem1;
-              if (rem_is_nan(a) || rem_is_nan(b)) begin
-                result_q <= {3'b000, (rem_is_nan(a) ? rem_quiet(a) : rem_quiet(b))};
+              rea=rem_input_a[78:64]; rebe=rem_input_b[78:64]; rma=rem_input_a[63:0]; rmbb=rem_input_b[63:0];
+              rsa<=rem_input_a[79]; rem_q012<=3'd0; rem_c2<=1'b0; rem_ie<=1'b0; rprem1<=prem1;
+              rsmall_half <= 1'b0;
+              rum <= rem_underflow_mask;
+              if (rem_unsupported(rem_input_a) || rem_unsupported(rem_input_b)) begin
+                result_q <= {3'b000, RQNAN_INDEF}; rem_ie <= 1'b1; st <= ST_SPECIAL;
+              end else if (rem_is_nan(rem_input_a) || rem_is_nan(rem_input_b)) begin
+                result_q <= {3'b000, rem_nan_result(rem_input_a, rem_input_b)};
+                rem_ie <= rem_snan(rem_input_a) || rem_snan(rem_input_b);
                 st <= ST_SPECIAL;
-              end else if (rem_is_zero(b) || rem_is_inf(a)) begin
+              end else if (rem_is_zero(rem_input_b) || rem_is_inf(rem_input_a)) begin
                 result_q <= {3'b000, RQNAN_INDEF}; rem_ie<=1'b1; st <= ST_SPECIAL;
-              end else if (rem_is_zero(a) || rem_is_inf(b)) begin
-                result_q <= {3'b000, a}; st <= ST_SPECIAL;     // |a|<|b| or a==0
+              end else if (rem_is_zero(rem_input_a) || rem_is_inf(rem_input_b)) begin
+                if (!rem_underflow_mask && rem_input_a[78:64] == 15'd0 &&
+                    !rem_input_a[63] && rem_input_a[63:0] != 64'd0) begin
+                  S <= {16'd0, rem_input_a[63:0]}; reb <= 17'sd1;
+                  rc2 <= 1'b0; rprem1 <= 1'b0; st <= ST_RNORM;
+                end else begin
+                  result_q <= {3'b000, rem_canonical(rem_input_a)}; st <= ST_SPECIAL;
+                end
               end else begin
                 rea_a = (rea ==15'd0) ? (17'sd1 - {10'd0, rem_clz64(rma)})  : $signed({2'b0, rea});
                 reb_a = (rebe==15'd0) ? (17'sd1 - {10'd0, rem_clz64(rmbb)}) : $signed({2'b0, rebe});
+                // Exponents and significands must describe the same value.
+                // The old exponent-only adjustment mis-scaled subnormal inputs.
+                if (rea == 15'd0) rma = rma << rem_clz64(rma);
+                if (rebe == 15'd0) rmbb = rmbb << rem_clz64(rmbb);
                 rexpd = rea_a - reb_a;
                 if (rexpd < 0 || (rexpd==0 && rma < rmbb)) begin
-                  result_q <= {3'b000, a}; st <= ST_SPECIAL;   // remainder = a, Q=0
+                  // FPREM truncates Q to zero here. FPREM1 instead needs Q=1
+                  // when |A/B| > 1/2; exactly 1/2 still selects even Q=0.
+                  if (prem1 && ((rexpd == 0) ||
+                      (rexpd == -17'sd1 && rma > rmbb))) begin
+                    S <= {16'd0, rma};
+                    rmb <= rmbb;
+                    reb <= (rexpd == -17'sd1) ? rea_a : reb_a;
+                    rc2 <= 1'b0;
+                    rsmall_half <= (rexpd == -17'sd1);
+                    // qacc is already cleared in IDLE. Reuse the exact
+                    // remainder subtract/normalizer rather than add a datapath.
+                    st <= ST_RNORM;
+                  end else begin
+                    if (!rem_underflow_mask && rem_input_a[78:64] == 15'd0 &&
+                        !rem_input_a[63] && rem_input_a[63:0] != 64'd0) begin
+                      S <= {16'd0, rem_input_a[63:0]}; reb <= 17'sd1;
+                      rc2 <= 1'b0; rprem1 <= 1'b0; st <= ST_RNORM;
+                    end else begin
+                      result_q <= {3'b000, rem_canonical(rem_input_a)}; st <= ST_SPECIAL;
+                    end
+                  end
                 end else begin
                   // nb = alignment bits (D = ma<<nb): expdiff (complete) or the
                   // partial-reduction count (>=64 -> reduce 32..63 bits, C2=1).
                   logic [6:0] nb; logic signed [16:0] ebe; logic [65:0] dvd0;
-                  if (rexpd < 64) begin nb = rexpd[6:0];               ebe = $signed({2'b0,rebe}); rc2<=1'b0; end
-                  else            begin nb = 7'd32 + {2'b0,rexpd[4:0]}; ebe = $signed({2'b0,rebe}) + (rexpd - {10'd0,nb}); rc2<=1'b1; end
+                  if (rexpd < 64) begin nb = rexpd[6:0];               ebe = reb_a; rc2<=1'b0; end
+                  else            begin nb = 7'd32 + {2'b0,rexpd[4:0]}; ebe = reb_a + (rexpd - {10'd0,nb}); rc2<=1'b1; end
                   // SRT integer-divide setup: D = ma<<nb streamed MSB-first 2 bits/
                   // clk; parity-align (D's bitlen 64+nb -> even for radix-4 grouping).
                   dvd0 = nb[0] ? {1'b0, rma, 1'b0} : {rma, 2'b0};
                   rmb     <= rmbb;
                   reb     <= ebe;
                   S       <= {78'd0, dvd0[65:64]};    // inject first 2 dividend bits
+`ifndef VEN_SRT_REM_OPERAND_SPLIT
                   C       <= 80'd0;
+`endif
                   dvd     <= dvd0 << 2;
-                  qacc    <= 128'sd0;
                   k       <= 7'd0;
                   rnsteps <= 7'd32 + ((nb + {6'd0, nb[0]}) >> 1);   // ceil((64+nb)/2)
                   st      <= ST_RRUN;
@@ -354,7 +528,7 @@ module fpu_srt_div
                 automatic logic [79:0]        xenc;     // X*2^72, X in [1/4,1)
                 automatic logic signed [31:0] kexp;
                 if (fx_exp(a) == 15'd0) begin
-                  for (int i=63; i>=0; i--) if (manr[i]) begin cz = 63 - i; break; end
+                  cz = int'(srt_input_clz64(manr));
                   manr = manr << cz;
                   ee   = -32'sd16382 - cz;
                 end
@@ -364,7 +538,9 @@ module fpu_srt_div
                 else       begin xenc = {16'b0, manr} << 7; kexp = (ee >>> 1) + 32'sd1; end
                 // initial carry-save remainder = 4*(X-1) (NEGATIVE), two's-complement.
                 S       <= (xenc << 2) - (80'd1 << 74);
+`ifndef VEN_SRT_REM_OPERAND_SPLIT
                 C       <= 80'd0;
+`endif
                 twoR    <= (80'd1 << 73);     // 2R = 2 (R_0 = 1)
                 corrpos <= 7'd70;             // 72-2*1
                 ua      <= kexp; ub <= 32'sd0; sign <= 1'b0;
@@ -392,21 +568,18 @@ module fpu_srt_div
                 // divides here too, so the combinational fx_div_exact path is dead.
                 automatic logic [63:0] ma_ = fx_man(a);
                 automatic logic [63:0] mb_ = fx_man(b);
-                automatic int          ka  = 63;
-                automatic int          kb  = 63;
-                automatic logic signed [31:0] uae = fx_uexp_eff(a);
-                automatic logic signed [31:0] ube = fx_uexp_eff(b);
-                for (int i=63;i>=0;i--) if (ma_[i]) begin ka=i; break; end
-                for (int i=63;i>=0;i--) if (mb_[i]) begin kb=i; break; end
-                ma_  = ma_ << (63-ka);
-                mb_  = mb_ << (63-kb);
-                ua   <= uae - (63 - ka);
-                ub   <= ube - (63 - kb);
+                automatic logic [5:0] lza = srt_input_clz64(ma_);
+                automatic logic [5:0] lzb = srt_input_clz64(mb_);
+                ma_  = ma_ << lza;
+                mb_  = mb_ << lzb;
+                ua   <= srt_div_input_exp(a[78:64], lza);
+                ub   <= srt_div_input_exp(b[78:64], lzb);
                 d4   <= mb_[62:59];
                 dfx  <= {7'b0, mb_, 9'b0};
                 S    <= {7'b0, ma_, 9'b0};
+`ifndef VEN_SRT_REM_OPERAND_SPLIT
                 C    <= 80'd0;
-                qacc <= 128'sd0;
+`endif
                 k    <= '0;
                 st   <= ST_DRUN;
               end
@@ -418,12 +591,20 @@ module fpu_srt_div
           qacc <= qacc + (qext <<< (70 - 2*int'(k)));
           S    <= sxor << 2;
           C    <= cmaj << 2;
-          if (k == NSTEP-1) st <= ST_DFIN;
+          if (k == NSTEP-1) begin
+            round_uq_q <= qacc + (qext <<< (70 - 2*int'(k)));
+            round_sh_q <= 32'sd70;
+            st         <= ST_DFIN;
+          end
           k    <= k + 7'd1;
         end
         ST_DFIN: begin
           result_q <= (oor || pc==2'b00 || pc==2'b10) ? packed_oor[82:0]
                           : {2'b00, inexact, fx_make(sign, ebiased[14:0], keep[63:0])};
+          // Keeping an SRT overestimate with negative residual also rounds
+          // magnitude upward, even though the inline `up` add did not fire.
+          rounded_up <= (oor || pc==2'b00 || pc==2'b10) ? packed_oor[83]
+                          : (up || (resid_neg && !down));
           done_q   <= 1'b1;
           st       <= ST_IDLE;
         end
@@ -434,12 +615,20 @@ module fpu_srt_div
           // on-the-fly root: 2R += 2*r*4^-j -> r << (73-2j) == r << (corrpos+1).
           twoR    <= twoR + ($signed({{77{rsq[2]}}, rsq}) <<< (corrpos + 7'd1));
           corrpos <= corrpos - 7'd2;
-          if (k == NSTEP-1) st <= ST_QFIN;
+          if (k == NSTEP-1) begin
+            // Match twoR's 80-bit wrap before widening the captured root.
+            round_uq_q <= 128'((80'(twoR +
+                ($signed({{77{rsq[2]}}, rsq}) <<< (corrpos + 7'd1)))) >> 1);
+            round_sh_q <= 32'sd72;
+            st         <= ST_QFIN;
+          end
           k       <= k + 7'd1;
         end
         ST_QFIN: begin                          // shared remainder-sign rounder
           result_q <= (oor || pc==2'b00 || pc==2'b10) ? packed_oor[82:0]
                           : {2'b00, inexact, fx_make(1'b0, ebiased[14:0], keep[63:0])};
+          rounded_up <= (oor || pc==2'b00 || pc==2'b10) ? packed_oor[83]
+                          : (up || (resid_neg && !down));
           done_q   <= 1'b1;
           st       <= ST_IDLE;
         end
@@ -478,12 +667,15 @@ module fpu_srt_div
         // ---- REM round (FPREM1) + normalize the remainder into floatx80 ----
         ST_RNORM: begin
           logic [6:0] lz; logic signed [16:0] e; logic [63:0] mant;
-          logic [63:0] r, q_eff, rrem; logic s_eff; logic [64:0] two_r; logic rndup;
+          logic [63:0] r, q_eff, rrem; logic s_eff; logic [64:0] two_r, rsub; logic rndup;
           rrem  = S[63:0];                        // corrected remainder (< mb)
           two_r = {rrem, 1'b0};
-          rndup = rprem1 && !rc2 &&
-                  ((two_r > {1'b0, rmb}) || ((two_r == {1'b0, rmb}) && qacc[0]));
-          if (rndup) begin r = rmb - rrem; s_eff = ~rsa; q_eff = qacc[63:0] + 64'd1; end
+          rndup = rsmall_half || (rprem1 && !rc2 &&
+                  ((two_r > {1'b0, rmb}) || ((two_r == {1'b0, rmb}) && qacc[0])));
+          // For gap -1, use A's exponent: B's significand is doubled. The
+          // admission test guarantees 0 < 2*mb-ma < mb, so 64 result bits suffice.
+          rsub = (rsmall_half ? {rmb, 1'b0} : {1'b0, rmb}) - {1'b0, rrem};
+          if (rndup) begin r = rsub[63:0]; s_eff = ~rsa; q_eff = qacc[63:0] + 64'd1; end
           else       begin r = rrem;       s_eff =  rsa; q_eff = qacc[63:0];          end
           if (r==64'd0) begin
             result_q <= {3'b000, s_eff, 15'd0, 64'd0};       // signed zero
@@ -491,7 +683,13 @@ module fpu_srt_div
             lz   = rem_clz64(r);
             mant = r << lz;
             e    = reb - {10'd0, lz};
-            if (e <= 0) begin
+            if (e <= 0 && !rum) begin
+              logic signed [16:0] wrapped_e;
+              // Exact tiny results still raise unmasked UE. Stack results
+              // are scaled by 2^24576, without rounding or newly raised PE.
+              wrapped_e = e + 17'sd24576;
+              result_q <= {3'b010, s_eff, wrapped_e[14:0], mant};
+            end else if (e <= 0) begin
               logic signed [16:0] ome; logic [6:0] rsh;
               ome = 17'sd1 - e;
               rsh = (ome > 17'sd63) ? 7'd63 : ome[6:0];

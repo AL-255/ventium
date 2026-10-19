@@ -9,23 +9,33 @@
 
         // -------------------------------------------------------------------
         S_STORE: begin
+          // ---- REVIEW2 C-02 (store half): PROBE-2 -> WRITE-1 -> WRITE-2 --------
+          // A crossing store must not commit ANY byte until BOTH pages are known
+          // translatable and writable. Phase 0 probes the second page (translated,
+          // write-permission checked, mem_we=0 so nothing is written); phase 1 writes
+          // the first page's bytes; phase 2 writes the second page's. Nothing is
+          // retired until phase 2 acks, so the instruction is atomic with respect to
+          // a fault on either page. Detection is arm-first: latch xs_first from the
+          // pre-translate offset the moment the crossing store is seen.
+          // REVIEW1_Aug2 C-02: the probe no longer issues a bus transaction, so it
+          // cannot complete on mem_ack. It completes when the SECOND page's
+          // translation has RESOLVED and is permitted: a TLB hit with no permission
+          // or segment fault. On a miss the FSM diverts to S_WALK (driven by
+          // xlate_miss, not by mem_req) and returns here, where the lookup now hits.
+          // A fault on page 2 is delivered by the arms in core.sv and never reaches
+          // this point, so the store is still all-or-nothing.
+          if (xs_cross_now && !xs_act && !xlate_miss && !perm_fault
+              && !seg_access_fault && !fe_xlate_pend) begin
+            xs_act   <= 1'b1;
+            xs_first <= 3'(13'h1000 - {1'b0, st_lin_nat[11:0]});
+            xs_ph    <= 2'd1;          // page 2 validated -> write the first page
+          end else if (mem_ack && xs_act && (xs_ph == 2'd1)) begin
+            xs_ph    <= 2'd2;          // first page written -> write the second
+          end else
           if (mem_ack) begin
+            if (xs_act) begin xs_act <= 1'b0; xs_ph <= 2'd0; end
+            begin
             logic [3:0] wr_hit;   // M2S.6: data-write breakpoint hit (DR6.Bn) bits
-            // M2S.5 — SMI# source (gated sys_mode). The psmm corpus fires SMI by
-            // writing the local-APIC ICR-low (physical 0xFEE00300) with delivery
-            // mode = SMI (bits[10:8]==010). QEMU's APIC honours APIC_DM_SMI ->
-            // cpu_interrupt(CPU_INTERRUPT_SMI) (hw/intc/apic.c) and the SMI is taken
-            // at the next instruction boundary. We model that EXACTLY: on the ICR
-            // write whose value carries the SMI delivery mode, latch smi_pending so
-            // the SMI is recognised at the next S_DECODE boundary (it is NOT taken
-            // mid-instruction). This is the RTL SMI-sourcing path that lets the same
-            // bare-metal psmm.bin drive the RTL SMM round-trip (the gdbstub single-
-            // step oracle masks SMI, so this is structurally self-checked — README).
-            // mem_addr here is the post-translate physical address (paging off in
-            // the corpus => linear==physical), so comparing it directly is correct.
-            if (sys_mode && !smm_active && mem_we &&
-                mem_addr == 32'hFEE0_0300 && mem_wdata[10:8] == 3'b010)
-              smi_pending <= 1'b1;
             // M2S.6 — DATA-WRITE breakpoint detection (gated sys_mode). This store
             // is committing; if its LINEAR address matches an armed DR7 write
             // breakpoint (R/W=01 or 11), the store completes but a #DB TRAP fires
@@ -33,11 +43,12 @@
             // wr_hit selects the matched DR6.Bn bits; the default (K_ALU `mov
             // mem,reg`) retire path below diverts to arm_db instead of retiring,
             // fusing the store's record with the delivery (q_pc stamp, like the
-            // qemu gdbstub). mem_addr is post-translate physical, but paging is off
-            // in the corpus (linear==physical) and the breakpoint linear is the same
-            // cur_lin the access used, so compute it the same way.
+            // qemu gdbstub). Debug registers compare linear, not physical,
+            // addresses. Use the store destination's segment base: POP's
+            // implicit read uses SS (dbase), while its explicit write may
+            // use DS or a segment override (stbase).
             wr_hit = sys_mode ? dr_match((q_kind==K_STR) ? (dbase_edi+str_store_addr)
-                                                         : (dbase+st_addr), 1'b0)
+                                                         : (stbase+st_addr), 1'b0)
                               : 4'd0;
             // M5 finding [med]: a STORE mutates the D-cache (read-allocate write-back
             // allocates/updates LRU) but adds NO miss penalty (oracle p5_mem:
@@ -50,7 +61,8 @@
               // The LRU access is the dcache_timing posedge (dc_acc_valid driven
               // to this S_STORE access, dc_acc_addr == sa). Stores add no miss
               // penalty (skip the dc_lu_hit test) but a misaligned store costs +3.
-              if (sa[1:0] != 2'b00) pending_mem_pen <= pending_mem_pen + P5_MISALIGN;
+              if (p5_data_misaligned(sa, {1'b0,q_w}))
+                pending_mem_pen <= pending_mem_pen + P5_MISALIGN;
             end
             unique case (q_kind)
               K_CTRL: begin // CALL: push done, set EIP (width-aware ESP adjust)
@@ -122,12 +134,157 @@
                          q_pc, str_next_eip);
                   if (wr_hit != 4'd0) db_wp_extra <= 1'b1;
                 end
-                else begin retire_valid<=1'b1; state<=S_PIPE; end
+                else begin
+`ifdef VEN_REP_STOS_STREAM
+                  // A streamed descriptor is already the NEXT REP element: it
+                  // did not visit S_EXEC, so its GPR commit happens through the
+                  // S_STORE writeback mirror on this very ACK.  Build only one
+                  // further shadow from those post-current values; do not expose
+                  // them in gpr_o before this element's retire snapshot.
+                  if (rep_stos_stream_q && rep_stos_stream_continue) begin
+`ifndef SYNTHESIS
+                    if (ven_repstreamlog_en)
+                      $display("[REPSTREAM] ACK cyc=%0d pc=%08x addr=%08x ecx=%08x dec=%08x continue=1 arm=%0b shape=%0b valid=%0b align=%0b/%0b pen=%0d stall=%0d",
+                               core_cyc, q_pc, mem_addr, gpr_o[R_ECX], dec_cx,
+                               rep_stos_stream_arm, rep_stos_cont_shape,
+                               !rep_stos_cont_inval_now,
+                               (str_store_addr[1:0] == 2'b00),
+                               (st_lin_nat[1:0] == 2'b00), pending_mem_pen,
+                               stall_cnt);
+`endif
+                    rep_stos_cont_q <= 1'b0;
+                    rep_stos_cont_redecode_q <= 1'b0;
+                    rep_stos_stream_q <= 1'b1;
+                    rep_stos_stream_started_q <= 1'b0;
+                    str_store_addr <= gpr_o[R_EDI] + str_step;
+                    str_pre_esi <= gpr_o[R_ESI];
+                    str_pre_edi <= gpr_o[R_EDI] + str_step;
+                    str_pre_ecx <= dec_cx;
+                    str_store_data <= str_wdata;
+                    // `dec_cx` is the just-ACKed descriptor's post-count.  It
+                    // is the NEXT shadow's pre-count, so that next descriptor
+                    // is final exactly when dec_cx==1.
+                    str_next_eip <= (dec_cx == 32'd1) ? next_eip : q_pc;
+                    retire_valid<=1'b1;
+                    state<=S_STORE;
+                  end else if (!rep_stos_stream_q && rep_stos_stream_arm) begin
+                    // D0 followed the mature S_EXEC->S_STORE path and has
+                    // already advanced live EDI/ECX.  Retire D0, but capture D1
+                    // only in the existing store descriptor registers; this is
+                    // the one-entry shadow that enables one ACK per clock.
+                    rep_stos_cont_q <= 1'b0;
+                    rep_stos_cont_redecode_q <= 1'b0;
+                    rep_stos_stream_q <= 1'b1;
+                    rep_stos_stream_started_q <= 1'b0;
+                    str_store_addr <= gpr_o[R_EDI];
+                    str_pre_esi <= gpr_o[R_ESI];
+                    str_pre_edi <= gpr_o[R_EDI];
+                    str_pre_ecx <= gpr_o[R_ECX];
+                    str_store_data <= str_wdata;
+                    str_next_eip <= (gpr_o[R_ECX] == 32'd1) ? next_eip : q_pc;
+`ifndef SYNTHESIS
+                    if (ven_repstreamlog_en)
+                      $display("[REPSTREAM] PREP cyc=%0d pc=%08x addr=%08x ecx=%08x next=%08x",
+                               core_cyc, q_pc, gpr_o[R_EDI], gpr_o[R_ECX],
+                               (gpr_o[R_ECX] == 32'd1) ? next_eip : q_pc);
+`endif
+                    retire_valid<=1'b1;
+                    state<=S_STORE;
+                  end else begin
+                    // A started descriptor may have seen an event, debugger
+                    // park, timing debt, or executable invalidation.  It has
+                    // committed, so fall back to the ordinary S_PIPE boundary
+                    // rather than cancelling/replaying it.
+                    if (rep_stos_stream_q) begin
+`ifndef SYNTHESIS
+                      if (ven_repstreamlog_en)
+                        if (!rep_stos_cont_shape)
+                          $display("[REPSTREAM] END cyc=%0d pc=%08x addr=%08x ecx=%08x arm=%0b cont_arm=%0b shape=%0b eip_eq=%0b dbg=%0b smi=%0b nmi=%0b intr=%0b poison=%0b inval=%0b align=%0b/%0b xseff=%0b exec_ok=%0b pen=%0d stall=%0d pipe=%0b occ=%0b",
+                                   core_cyc, q_pc, mem_addr, gpr_o[R_ECX],
+                                   rep_stos_stream_arm, rep_stos_cont_arm,
+                                   rep_stos_cont_shape, (eip == q_pc), dbg_block_issue,
+                                   smi_take, nmi_take, intr_take,
+                                   rep_stos_cont_poison_q, rep_stos_cont_inval_now,
+                                   (str_store_addr[1:0] == 2'b00),
+                                   (st_lin_nat[1:0] == 2'b00), xs_eff_act,
+                                   exec_issue_ok, pending_mem_pen, stall_cnt,
+                                   pipe_mem_active_q, fp_occ_pending);
+                        else
+                          $display("[REPSTREAM] FALLBACK cyc=%0d pc=%08x addr=%08x ecx=%08x arm=%0b cont_arm=%0b shape=%0b eip_eq=%0b dbg=%0b smi=%0b nmi=%0b intr=%0b poison=%0b inval=%0b align=%0b/%0b xseff=%0b exec_ok=%0b pen=%0d stall=%0d pipe=%0b occ=%0b",
+                                   core_cyc, q_pc, mem_addr, gpr_o[R_ECX],
+                                   rep_stos_stream_arm, rep_stos_cont_arm,
+                                   rep_stos_cont_shape, (eip == q_pc), dbg_block_issue,
+                                   smi_take, nmi_take, intr_take,
+                                   rep_stos_cont_poison_q, rep_stos_cont_inval_now,
+                                   (str_store_addr[1:0] == 2'b00),
+                                   (st_lin_nat[1:0] == 2'b00), xs_eff_act,
+                                   exec_issue_ok, pending_mem_pen, stall_cnt,
+                                   pipe_mem_active_q, fp_occ_pending);
+`endif
+                      rep_stos_stream_q <= 1'b0;
+                      rep_stos_stream_started_q <= 1'b0;
+                    end
+`endif
+                  // The continuation is armed only AFTER this final store
+                  // acknowledgement and only for the audited non-final F3 AB
+                  // shape.  It still returns through S_PIPE, where events,
+                  // debug, flushes, and real memory/occupancy timing stalls
+                  // take priority before the next iteration enters S_EXEC.
+                  // A deferred branch-recovery count is deliberately carried
+                  // through the continuation and charged once after final REP.
+`ifndef SYNTHESIS
+                  // This site is inside the final S_STORE acknowledgement and
+                  // adjacent to the actual token write, so ARM cannot merely
+                  // describe an earlier combinationally eligible string shape.
+                  if (ven_repcontlog_en && !rep_movs_stream_arm &&
+                      (rep_stos_cont_arm || rep_movs_cont_arm))
+                    $display("[REPCONT] ARM cyc=%0d q_pc=%08x paddr=%08x store_ack=1 arm=1",
+                             core_cyc, q_pc, mem_addr);
+`endif
+                  rep_stos_cont_q <= rep_stos_cont_arm || rep_movs_cont_arm;
+                  // An invalidation can precede this terminal ACK by several
+                  // request clocks, so an unsafe candidate gets an explicit
+                  // one-shot slow-path recovery marker rather than falling into
+                  // the ordinary S_PIPE frontend with stale q_* provenance.
+                  rep_stos_cont_redecode_q <= rep_stos_cont_redecode_arm;
+                  retire_valid<=1'b1;
+                  state<=S_PIPE;
+                  if (rep_movs_stream_arm) begin
+                    // Only the previous element's final store ACK creates this
+                    // next source owner. Live ESI/EDI/ECX already describe the
+                    // precise boundary; do not advance them a second time.
+                    // S_LOAD's preissue gate still yields to events/SMC before
+                    // any read or page-walk side effect can occur.
+                    rep_stos_cont_q <= 1'b0;
+                    rep_stos_cont_redecode_q <= 1'b0;
+                    agi_wr0 <= 9'h100;
+                    agi_wr1 <= 9'h100;
+                    irq_shadow <= 1'b0;
+                    step <= 4'd0;
+                    f_step <= 4'd0;
+                    state <= S_LOAD;
+`ifndef SYNTHESIS
+                    if (ven_repcontlog_en)
+                      $display("[MOVSSTREAM] ARM cyc=%0d pc=%08x esi=%08x edi=%08x ecx=%08x",
+                               core_cyc, q_pc, gpr_o[R_ESI], gpr_o[R_EDI], gpr_o[R_ECX]);
+`endif
+                  end
+`ifdef VEN_REP_STOS_STREAM
+                  end
+`endif
+                end
               end
               default: begin
                 // R3: the push/pop ESP adjust moved to the gpr writeback driver
                 // (core_gpr_wb.svh, S_STORE/default arm).
                 if (q_writes_flags && q_kind==K_ALU) eflags<=flags_out;
+                else if (q_kind==K_BITTEST && q_mem_write) begin
+                  // This block is reached only on the final ACK, after both
+                  // page permissions and all split-store beats have completed.
+                  // Commit CF before the existing post-store #DB/retire route.
+                  logic [31:0] fl;
+                  fl=eflags; fl[0]=bit_cf_r; fl[1]=1'b1; eflags<=fl;
+                end
                 eip<=next_eip;
                 // M2S.6: a data-write breakpoint (TRAP, fires AFTER the store) or a
                 // TF single-step trap fuses this store's record with the #DB
@@ -145,6 +302,12 @@
                 end
               end
             endcase
+            // This is the final logical store ACK, after any full flags write
+            // above. Never consume on a probe or first split beat. REP uses
+            // its existing per-successful-element retirement contract; the
+            // current element must finish before consuming RF, even with #DB.
+            complete_reference_rf();
+            end   // REVIEW2 C-02: closes the phase-guard `begin`
           end
         end
 
@@ -155,18 +318,23 @@
             if (q_kind==K_CX8B) begin
               // CMPXCHG8B equal-case store: beat 0 = EBX@[mem], beat 1 = ECX@[mem+4].
               // ZF was already committed in S_EXEC; retire after the second beat.
-              if (step==4'd1) begin eip<=next_eip; retire_valid<=1'b1; state<=S_PIPE; end
+              if (step==4'd1) begin
+                complete_reference_rf();
+                eip<=next_eip; retire_valid<=1'b1; state<=S_PIPE;
+              end
               else step<=step+4'd1;
             end else if (q_sm==SM_PUSHA) begin
               // push order: EAX,ECX,EDX,EBX,ESP(orig),EBP,ESI,EDI
               // R3: the final ESP commit moved to the gpr writeback driver (S_USEQ).
               if (step==4'd7) begin
+                complete_reference_rf();
                 eip<=next_eip; retire_valid<=1'b1; state<=S_PIPE;
               end else step<=step+4'd1;
             end else begin // POPA: pop EDI,ESI,EBP,(skip ESP),EBX,EDX,ECX,EAX
               // R3: the per-beat GPR pops + the final ESP commit moved to the gpr
               // writeback driver (core_gpr_wb.svh, S_USEQ arm).
               if (step==4'd7) begin
+                complete_reference_rf();
                 eip<=next_eip; retire_valid<=1'b1; state<=S_PIPE;
               end else step<=step+4'd1;
             end
@@ -187,6 +355,7 @@
               ent_rd  <= 1'b0;
             end else if (({1'b0, q_imm[20:16]} + 6'd1) == ent_k) begin
               // just pushed FrameTemp (the (level+1)th push) -> done
+              complete_reference_rf();
               eip<=next_eip; retire_valid<=1'b1; state<=S_PIPE;
             end else begin
               ent_k <= ent_k + 6'd1;

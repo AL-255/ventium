@@ -1,0 +1,5 @@
+# Physical plots and the small README animation are intentional public assets.
+*.png binary
+*.gif binary
+# Keep the pinned third-party hardware's original text and licenses intact.
+3rd-party/ao486_MiSTer/** linguist-vendored

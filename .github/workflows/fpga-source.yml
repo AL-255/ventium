@@ -1,0 +1,42 @@
+name: Public FPGA source release
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  source-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        # No private submodule is needed for the public FPGA build.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: sudo apt-get update && sudo apt-get install -y tcl
+      - name: Frozen input hashes and portable Tcl expansion
+        run: |
+          python3 -B fpga/build_known_good.py --check
+          tclsh fpga/test_known_good_wrapper.tcl "$PWD"
+          python3 -B -m unittest discover -s fpga -p test_known_good.py -v
+          python3 -B -m unittest discover -s fpga/scripts -p test_render_device_view.py -v
+          python3 -B -m unittest discover -s fpga/board-tools -p 'test_ven_*.py' -v
+          python3 -B -m unittest discover -s tools/opcode_map -p test_decode_fingerprint.py -v
+          python3 -B tools/test_build_scope_vivado_limits.py -v
+          bash -n fpga/run_vivado_exclusive.sh tools/build_scope.sh
+          python3 tools/opcode_map/gen_opcode_map.py --verify-rtl
+      - name: No large blobs or disk/checkpoint artifacts
+        run: |
+          python3 - <<'PY'
+          import subprocess
+          forbidden = ('.vhd', '.vhdx', '.qcow2', '.iso', '.hdd', '.img', '.dcp', '.bit', '.bit.bin')
+          for row in subprocess.check_output(['git','ls-tree','-rl','HEAD'], text=True).splitlines():
+              metadata, path = row.split('\t', 1)
+              fields = metadata.split()
+              if fields[1] != 'blob':
+                  continue
+              assert int(fields[3]) <= 10_000_000, ('large Git blob', path)
+              assert not path.lower().endswith(forbidden), ('generated image/checkpoint', path)
+          PY

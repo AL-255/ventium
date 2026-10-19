@@ -29,7 +29,11 @@
         //   14..19 CS,SS,DS,ES,FS,GS selectors      20..25 seg base[0..5]
         //   26..31 seg limit[0..5]                  32..37 seg attr[0..5]
         //   38 GDT base  39 IDT base  40 {gdtl,idtl}
-        //   41 SMBASE slot  42 SMM rev id  43 auto-HALT  44 {cs_d,cpl}
+        //   41 SMBASE slot  42 SMM rev id  43 auto-HALT
+        //   REVIEW2 M-02 added 44..51 (debug + task state, previously ABSENT):
+        //   44 DR6  45 DR7  46 TR sel  47 LDTR sel      <- architectural P5 slots
+        //   48 TR base  49 TR limit  50 LDT base  51 {ldt_limit,tr_valid,tr_attr}
+        //   52 {cs_d,cpl}  <- MUST stay last (committed straight from mem_rdata)
         // ===================================================================
         S_SMI_SAVE: begin
           if (mem_ack) begin
@@ -50,10 +54,28 @@
                 seg_limit[s] <= 32'hFFFF_FFFF;
                 seg_attr [s] <= 8'h93;
               end
+              // R2-H07: SMM entry synthesizes real-mode-like state (and PE is
+              // being cleared above) -- no segment is PM-loaded in SMM.
+              // A4-H07: SHADOW the pre-SMI provenance + D/B metadata first --
+              // RSM restores these exact values, not a CR0.PE reconstruction.
+              for (int s = 0; s < NUM_SEG; s++) begin
+                smm_pml_q  [s] <= seg_pm_loaded[s];
+                smm_seg_b_q[s] <= seg_b[s];
+              end
+              smm_ss_b_q <= ss_b;
+              for (int s = 0; s < NUM_SEG; s++) seg_pm_loaded[s] <= 1'b0;
               cs_d      <= 1'b0;          // SMM default operand/addr size = 16-bit
               cpl_r     <= 2'd0;          // SMM runs at CPL0
               eip       <= 32'h0000_8000; // SMM entry point = SMBASE + 0x8000
               smm_active<= 1'b1;
+              // REVIEW2 M-02: DR7 is cleared on SMM entry (P5 Dev. Manual Vol.3 §20.1.4
+              // initial state: DR7 = 0x00000400 — bit 10 reads as 1, all Ln/Gn enables
+              // off). Saving DR7 above is only half the fix: without clearing it here
+              // the SMM handler would execute with the INTERRUPTED context's breakpoints
+              // still armed and take its debug exceptions. (It also keeps fp_dbg_active
+              // from forcing every SMM instruction onto the slow path.) DR6 is left
+              // alone — it is sticky status, and the entry beat has already saved it.
+              dr7       <= 32'h0000_0400;
               smm_step  <= 6'd0;
               // retire the SMI-entry: q_pc = the interrupted insn (the resume EIP).
               q_pc         <= smm_resume_eip;
@@ -91,7 +113,18 @@
               6'd41: rsm_smbase <= mem_rdata;
               6'd42: ;  // SMM revision id (read-only; not restored)
               6'd43: ;  // auto-HALT restart slot (no HALT in the corpus; ignored)
-              // beat 44 = {cs_d, cpl}: committed directly from mem_rdata in the
+              // ---- REVIEW2 M-02: debug + task state ----
+              6'd44: rsm_dr6     <= mem_rdata;
+              6'd45: rsm_dr7     <= mem_rdata;
+              6'd46: rsm_tr_sel  <= mem_rdata[15:0];
+              6'd47: rsm_ldt_sel <= mem_rdata[15:0];
+              6'd48: rsm_tr_base <= mem_rdata;
+              6'd49: rsm_tr_limit<= mem_rdata;
+              6'd50: rsm_ldt_base<= mem_rdata;
+              6'd51: begin rsm_ldt_limit <= mem_rdata[31:16];
+                           rsm_tr_valid  <= mem_rdata[8];
+                           rsm_tr_attr   <= mem_rdata[7:0]; end
+              // beat 52 = {cs_d, cpl}: committed directly from mem_rdata in the
               // final-beat block below (a latched copy here would be one clock late).
               default: ;
             endcase
@@ -108,10 +141,28 @@
                 seg_base [s] <= rsm_base [s];
                 seg_limit[s] <= rsm_limit[s];
                 seg_attr [s] <= rsm_attr [s];
+                // R2-H07 + A4-H07: the restored hidden state's provenance and
+                // D/B metadata are the PRE-SMI values (shadowed on entry), NOT
+                // a reconstruction from the restored CR0.PE: a PE-set-but-not-
+                // yet-reloaded window keeps its real-mode provenance even when
+                // RSM returns with PE set, and a mode-changing SMM handler
+                // cannot leak its D/B into the resumed context.
+                seg_pm_loaded[s] <= smm_pml_q[s];
+                seg_b        [s] <= smm_seg_b_q[s];
               end
+              ss_b    <= smm_ss_b_q;
               gdt_base <= rsm_gdtb; idt_base <= rsm_idtb;
               gdt_limit<= rsm_gdtl; idt_limit<= rsm_idtl;
               smbase   <= rsm_smbase;     // handler-relocatable SMBASE
+              // REVIEW2 M-02: restore the debug + task state the entry saved. Without
+              // this the resumed mainline kept whatever DR6/DR7/TR/LDTR the SMM handler
+              // left behind -- so a handler that used a breakpoint, or switched tasks,
+              // silently corrupted the interrupted context's debug and task registers.
+              dr6      <= rsm_dr6;      dr7       <= rsm_dr7;
+              tr_sel   <= rsm_tr_sel;   ldt_sel   <= rsm_ldt_sel;
+              tr_base  <= rsm_tr_base;  tr_limit  <= rsm_tr_limit;
+              tr_attr  <= rsm_tr_attr;  tr_valid  <= rsm_tr_valid;
+              ldt_base <= rsm_ldt_base; ldt_limit <= rsm_ldt_limit;
               // {cs_d, cpl} are committed straight from the freshly-read word on
               // THIS final beat (the read-back case above intentionally does NOT
               // stage beat 44 in a holding reg). A latched copy would not be

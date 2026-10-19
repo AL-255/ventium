@@ -1,3 +1,4 @@
+`default_nettype wire  // Vivado project-flow: reset nettype (files compile as one unit; prevents `none` leak)
 // Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
 // SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
 
@@ -26,6 +27,8 @@
 // U's RESULT flags, not the stale architectural eflags. Computes U's
 // post-commit flags (u_flags_eff, internal) from the u_pipe ALU/shift outputs
 // and uses them to resolve a paired conditional V branch (v_br_taken_eff).
+// Shift flags share the commit helper: narrow SF/OF and ROR preservation must
+// not differ between the committed EFLAGS and the branch's forwarded view.
 
 module uv_common
   import ventium_decode_pkg::*;
@@ -112,19 +115,16 @@ module uv_common
   end
 
   // ===========================================================================
-  // U->V EFLAGS forwarding (verbatim from core.sv)
+  // U->V EFLAGS forwarding
   // ===========================================================================
   always_comb begin
     logic [31:0] u_flags_eff;
     u_flags_eff = u_d.wflags ? u_flags : eflags;
     if (u_d.is_shift) begin
-      if (u_d.shimm!=5'd0) begin
-        // shift (SHL/SHR/SAL/SAR group) result flags, for a paired following jcc.
-        u_flags_eff = eflags & 32'hFFFF_F72A;
-        u_flags_eff[0]=u_shcf; u_flags_eff[2]=parity8(u_sh[7:0]); u_flags_eff[4]=1'b0;
-        u_flags_eff[6]=(u_sh==32'd0); u_flags_eff[7]=u_sh[31];
-        u_flags_eff[11]=u_shm1[31]^u_sh[31]; u_flags_eff[1]=1'b1;
-      end else u_flags_eff = eflags;   // count 0 => no flag change
+      // Only immediate/by-one shifts may lead a pair. CL forms are NP in the
+      // decoder, so shimm is the actual count for every consumed V decision.
+      u_flags_eff = fast_shift_flags(u_d.shrot, u_d.shimm, u_sh, u_shm1,
+                                    u_shcf, eflags, fp_operand_width(u_d));
     end
     // v_br_cc(v_d) == v_d.cc (the raw Jcc condition carried in the decode).
     v_br_taken_eff = v_d.br_cond ? cond_true(v_d.cc, u_flags_eff) : 1'b1;
