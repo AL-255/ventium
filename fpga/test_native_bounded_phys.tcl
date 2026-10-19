@@ -1,6 +1,8 @@
 # Fresh tiny-project capability probe, not processor/hardware acceptance.
-if {$argc != 1} {error "usage: new-output-directory"}
+if {$argc ni {1 2}} {error "usage: new-output-directory ?on|off?"}
 set out [file normalize [lindex $argv 0]]
+set retiming [expr {$argc == 2 ? [lindex $argv 1] : "on"}]
+if {$retiming ni {on off}} {error "retiming must be explicitly on or off"}
 if {[file exists $out]} {error "probe output must not exist"}
 if {[version -short] ne "2025.2"} {error "Vivado 2025.2 required"}
 source [file join [file dirname [info script]] fresh_bounded_phys.tcl]
@@ -33,7 +35,7 @@ foreach obj [list $synth $impl] {
     set_property INCREMENTAL_CHECKPOINT {} $obj
 }
 set_property STEPS.SYNTH_DESIGN.ARGS.DIRECTIVE PerformanceOptimized $synth
-set_property STEPS.SYNTH_DESIGN.ARGS.GLOBAL_RETIMING on $synth
+set_property STEPS.SYNTH_DESIGN.ARGS.GLOBAL_RETIMING $retiming $synth
 set_property STEPS.OPT_DESIGN.ARGS.DIRECTIVE RuntimeOptimized $impl
 set_property STEPS.PLACE_DESIGN.ARGS.DIRECTIVE AltSpreadLogic_medium $impl
 set_property STEPS.ROUTE_DESIGN.ARGS.DIRECTIVE NoTimingRelaxation $impl
@@ -65,8 +67,8 @@ foreach {obj step} [list $synth synth_design $impl post_route_phys_opt_design] {
     }
     set f [open [file join $dir bounded_probe.tcl] r]; set native [read $f]; close $f
     if {$step eq "synth_design"} {
-        if {![regexp -line {^synth_design .* -global_retiming on(?: |$)} $native]} {
-            error "native explicit synthesis retiming missing"
+        if {![regexp -line [format {^synth_design .* -global_retiming %s(?: |$)} $retiming] $native]} {
+            error "native explicit synthesis retiming policy missing: $retiming"
         }
         if {[regexp -line {^\s*(read_checkpoint|open_checkpoint)\s} $native]} {
             error "old checkpoint in synthesis"
@@ -80,5 +82,5 @@ foreach {obj step} [list $synth synth_design $impl post_route_phys_opt_design] {
         if {$actual ne $expected} {error "native physical commands differ: $actual"}
     }
 }
-puts "FRESH-BOUNDED-NATIVE-OK retiming=on explicit-phys-only threads=1 jobs=1 (tooling test only)"
+puts "FRESH-BOUNDED-NATIVE-OK retiming=$retiming explicit-phys-only threads=1 jobs=1 (tooling test only)"
 close_project

@@ -2,7 +2,7 @@
 if {$argc != 4} {error "usage: strategy frozen-source new-output-directory internal-threads"}
 lassign $argv strategy frozen out tool_threads
 if {$tool_threads ni {1 2}} {error "only one or two internal threads supported"}
-if {$strategy ni {performance-netdelay routability-spread performance-retime-bounded}} {error "unknown strategy"}
+if {$strategy ni {performance-netdelay routability-spread performance-retime-bounded performance-bounded}} {error "unknown strategy"}
 if {[version -short] ne "2025.2"} {error "Vivado 2025.2 required"}
 set out [file normalize $out]
 set frozen [file normalize $frozen]
@@ -81,6 +81,7 @@ proc launch_runs {run args} {
         close $f
         set directive [expr {$::strategy eq "routability-spread" ? "AlternateRoutability" : "PerformanceOptimized"}]
         set retiming [expr {$::strategy eq "performance-retime-bounded" ? "on" : "auto"}]
+        if {$::strategy eq "performance-bounded"} {set retiming off}
         set_property STEPS.SYNTH_DESIGN.ARGS.DIRECTIVE $directive $obj
         set_property STEPS.SYNTH_DESIGN.ARGS.GLOBAL_RETIMING $retiming $obj
         set_property STEPS.SYNTH_DESIGN.ARGS.FLATTEN_HIERARCHY rebuilt $obj
@@ -112,7 +113,7 @@ proc launch_runs {run args} {
         set_property STEPS.ROUTE_DESIGN.ARGS.DIRECTIVE $route $obj
         set_property STEPS.POST_ROUTE_PHYS_OPT_DESIGN.IS_ENABLED true $obj
         set_property STEPS.POST_ROUTE_PHYS_OPT_DESIGN.ARGS.DIRECTIVE Explore $obj
-        if {$::strategy eq "performance-retime-bounded"} {fresh_bounded_phys $obj}
+        if {$::strategy in {performance-retime-bounded performance-bounded}} {fresh_bounded_phys $obj}
         set_property STEPS.ROUTE_DESIGN.TCL.PRE [file join $::fresh_script_dir fresh_route_pre.tcl] $obj
     }
     fresh_run $run

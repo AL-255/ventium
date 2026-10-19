@@ -128,7 +128,8 @@ class FreshTests(unittest.TestCase):
         strategies = (
                 ('performance-netdelay', 'PerformanceOptimized', 'ExtraNetDelay_high', 'NoTimingRelaxation'),
                 ('routability-spread', 'AlternateRoutability', 'AltSpreadLogic_medium', 'AlternateCLBRouting'),
-                ('performance-retime-bounded', 'PerformanceOptimized', 'AltSpreadLogic_medium', 'NoTimingRelaxation'))
+                ('performance-retime-bounded', 'PerformanceOptimized', 'AltSpreadLogic_medium', 'NoTimingRelaxation'),
+                ('performance-bounded', 'PerformanceOptimized', 'AltSpreadLogic_medium', 'NoTimingRelaxation'))
         for (strategy, directive, place, route), threads in itertools.product(strategies, (1, 2)):
             with tempfile.TemporaryDirectory(prefix='fresh-tcl-test-') as td:
                 mock = '''
@@ -186,7 +187,7 @@ foreach run {{synth_1 impl_1}} {{
 if {{!$::evidence_called}} {{error "evidence procedure not called"}}
 foreach {{obj prop expected}} {{
  synth_1 STEPS.SYNTH_DESIGN.ARGS.DIRECTIVE {directive}
- synth_1 STEPS.SYNTH_DESIGN.ARGS.GLOBAL_RETIMING {'on' if strategy == 'performance-retime-bounded' else 'auto'}
+ synth_1 STEPS.SYNTH_DESIGN.ARGS.GLOBAL_RETIMING {'on' if strategy == 'performance-retime-bounded' else 'off' if strategy == 'performance-bounded' else 'auto'}
  synth_1 AUTO_INCREMENTAL_CHECKPOINT 0
  impl_1 INCREMENTAL_CHECKPOINT {{}}
  impl_1 STEPS.PLACE_DESIGN.ARGS.DIRECTIVE {place}
@@ -198,7 +199,7 @@ if {{![catch {{launch_runs impl_1 -jobs 1}}]}} {{error "duplicate launch allowed
 if {{[get_property STEPS.SYNTH_DESIGN.TCL.POST synth_1] ne ""}} {{error "native post hook retained"}}
 puts FRESH-TCL-OK
 '''
-                if strategy == 'performance-retime-bounded':
+                if strategy in ('performance-retime-bounded', 'performance-bounded'):
                     checks += '''
 if {[get_property STEPS.PHYS_OPT_DESIGN.ARGS.DIRECTIVE impl_1] ne "Default"} {error "directive retained"}
 if {[get_property {STEPS.PHYS_OPT_DESIGN.ARGS.MORE OPTIONS} impl_1] ne "-fanout_opt -placement_opt -restruct_opt -equ_drivers_opt"} {error "pre-route operations differ"}

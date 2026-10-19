@@ -24,7 +24,8 @@ CLOCK_HASHES = {
     'ven_pll_ctrl.sv': '02f1cd73c2d8a13181dc605a89850e0513c84a9fb2c510784ab5b56e830a1237',
     'ven_programmable_clock.v': 'cea6e80e4ca1240bfb2b1d3920c869458e21e30f19aa96fe77743be86109d2e9',
 }
-STRATEGIES = ('performance-netdelay', 'routability-spread', 'performance-retime-bounded')
+STRATEGIES = ('performance-netdelay', 'routability-spread', 'performance-retime-bounded',
+              'performance-bounded')
 # Fixed reviewed envelopes, not arbitrary numeric overrides. The larger one is
 # serial-only and remains inside build_scope.sh's existing 20 GiB RAM ceiling.
 MEMORY_PROFILES = {'standard16': (16, 6), 'serial20': (20, 6)}

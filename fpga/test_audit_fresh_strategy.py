@@ -15,6 +15,17 @@ STEPS.SYNTH_DESIGN.ARGS.MORE OPTIONS string false
 
 
 class AuditTests(unittest.TestCase):
+    def test_retiming_disabled_strategy_requires_explicit_off_evidence(self):
+        props = PROPS.replace('enum false auto', 'enum false off')
+        script = SCRIPT.rstrip()+' -global_retiming off\n'
+        audit_synth(script, props, 'performance-bounded')
+        for bad_script, bad_props in ((SCRIPT, props), (script, PROPS),
+                (script.replace('retiming off', 'retiming on'), props),
+                (script.rstrip()+' -global_retiming off\n', props),
+                (SCRIPT.rstrip()+' -no_retiming\n', props)):
+            with self.assertRaises(ValueError): audit_synth(bad_script, bad_props, 'performance-bounded')
+        with self.assertRaises(ValueError): audit_synth(script, props, 'performance-retime-bounded')
+
     def test_explicit_synthesis_retiming_requires_native_and_property_evidence(self):
         props = PROPS.replace('enum false auto', 'enum false on')
         script = SCRIPT.rstrip()+' -global_retiming on\n'
@@ -36,13 +47,14 @@ class AuditTests(unittest.TestCase):
                         f'STEPS.{step}.ARGS.DIRECTIVE enum false Default\n'
                         f'STEPS.{step}.ARGS.MORE OPTIONS string false {opts}\n'
                         for step, opts in (('PHYS_OPT_DESIGN', pre), ('POST_ROUTE_PHYS_OPT_DESIGN', post)))
-        audit_impl(script, props, 'performance-retime-bounded')
-        for bad in (script.replace(pre, '-directive Default '+pre), script+f'phys_opt_design {pre}\n',
-                    script.replace('-hold_fix', ''), script.replace('NoTimingRelaxation', 'Default')):
-            with self.assertRaises(ValueError): audit_impl(bad, props, 'performance-retime-bounded')
-        for bad in (props.replace('Default', 'Explore'), props.replace('bool false 1', 'bool false 0'),
-                    props.replace(pre, '-retime')):
-            with self.assertRaises(ValueError): audit_impl(script, bad, 'performance-retime-bounded')
+        for strategy in ('performance-retime-bounded', 'performance-bounded'):
+            audit_impl(script, props, strategy)
+            for bad in (script.replace(pre, '-directive Default '+pre), script+f'phys_opt_design {pre}\n',
+                        script.replace('-hold_fix', ''), script.replace('NoTimingRelaxation', 'Default')):
+                with self.assertRaises(ValueError): audit_impl(bad, props, strategy)
+            for bad in (props.replace('Default', 'Explore'), props.replace('bool false 1', 'bool false 0'),
+                        props.replace(pre, '-retime')):
+                with self.assertRaises(ValueError): audit_impl(script, bad, strategy)
 
     def test_internal_thread_cap_is_explicit_and_unique(self):
         for threads in (1, 2):

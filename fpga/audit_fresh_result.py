@@ -252,7 +252,7 @@ def audit_closed(run):
         impl_script = build/'rk_ao486_system/rk_ao486_system.runs/impl_1/rk_ao486_bd_wrapper.tcl'
         audit_threads(impl_script.read_text(), threads)
     impl = (build/'impl_1-properties.rpt').read_text()
-    if started['strategy'] == 'performance-retime-bounded':
+    if started['strategy'] in ('performance-retime-bounded', 'performance-bounded'):
         impl_script = build/'rk_ao486_system/rk_ao486_system.runs/impl_1/rk_ao486_bd_wrapper.tcl'
         audit_impl(impl_script.read_text(), impl, started['strategy'], threads)
     if property_value(impl, 'AUTO_INCREMENTAL_CHECKPOINT') != '0' or property_value(impl, 'INCREMENTAL_CHECKPOINT'):

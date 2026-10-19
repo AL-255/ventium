@@ -31,9 +31,11 @@ def audit_threads(script, threads=1):
 def audit_synth(script, properties, strategy, threads=1):
     audit_threads(script, threads)
     directives = {'performance-netdelay': 'PerformanceOptimized', 'routability-spread': 'AlternateRoutability',
-                  'performance-retime-bounded': 'PerformanceOptimized'}
+                  'performance-retime-bounded': 'PerformanceOptimized',
+                  'performance-bounded': 'PerformanceOptimized'}
     directive = directives[strategy]
     retiming = 'on' if strategy == 'performance-retime-bounded' else 'auto'
+    if strategy == 'performance-bounded': retiming = 'off'
     commands = re.findall(r'^synth_design [^\n]+', script, re.M)
     if len(commands) != 1:
         raise ValueError('missing/ambiguous native synth_design')
@@ -46,7 +48,7 @@ def audit_synth(script, properties, strategy, threads=1):
         raise ValueError('timing-disabled/incremental native synthesis')
     if any(a in ('-retiming', '-no_retiming') for a in args):
         raise ValueError('legacy retiming option not admitted')
-    if '-global_retiming' in args or retiming == 'on':
+    if '-global_retiming' in args or retiming in ('on', 'off'):
         if args.count('-global_retiming') != 1 or args[args.index('-global_retiming')+1:args.index('-global_retiming')+2] != [retiming]:
             raise ValueError('native retiming option mismatch')
     if '-flatten_hierarchy' in args:
@@ -83,6 +85,9 @@ def audit_impl(script, properties, strategy, threads=1):
         'performance-retime-bounded': ('AltSpreadLogic_medium', 'NoTimingRelaxation',
             ['-fanout_opt -placement_opt -restruct_opt -equ_drivers_opt',
              '-placement_opt -routing_opt -restruct_opt -hold_fix']),
+        'performance-bounded': ('AltSpreadLogic_medium', 'NoTimingRelaxation',
+            ['-fanout_opt -placement_opt -restruct_opt -equ_drivers_opt',
+             '-placement_opt -routing_opt -restruct_opt -hold_fix']),
     }
     place, route, phys = configs[strategy]
     for command, expected in (('opt_design', ['-directive RuntimeOptimized']),
@@ -94,7 +99,7 @@ def audit_impl(script, properties, strategy, threads=1):
     for step, options in zip(('PHYS_OPT_DESIGN', 'POST_ROUTE_PHYS_OPT_DESIGN'), phys):
         if property_value(properties, f'STEPS.{step}.IS_ENABLED') not in ('1', 'true'):
             raise ValueError('physical optimization disabled: '+step)
-        if strategy == 'performance-retime-bounded':
+        if strategy in ('performance-retime-bounded', 'performance-bounded'):
             if property_value(properties, f'STEPS.{step}.ARGS.DIRECTIVE') != 'Default' or \
                property_value(properties, f'STEPS.{step}.ARGS.MORE OPTIONS') != options:
                 raise ValueError('bounded physical optimization property mismatch: '+step)
