@@ -1278,6 +1278,23 @@ task-limit denial, OOM kill or safety-stop reason. APR has not started; its
 generated worker configuration remains to be audited. This is not a completed
 synthesis or timing result.
 
+While that synthesis remained live, a **read-only board readiness check at
+01:16 EDT Oct19** reached `riguke@rk-xczu15eg-f.local`. Boot ID is still
+`2861e4e8-cd4c-48cd-9f44-7f7d8a991ebb`. The effective
+`reserved-memory/guest-ram@60000000` node has 64-bit base `0x60000000`, size
+`0x10000000`, `no-map`, and no reusable/pool property. Authenticated root
+`/proc/iomem` explicitly lists `60000000-6fffffff : reserved`, with adjacent
+System RAM ending at `5fffffff` and resuming at `70000000`; the higher RAM
+range starts at `800000000` and does not overlap. The FPGA manager reports
+`operating`, and the process inventory shows no guest daemon. No programming,
+guest launch, reset/clock change or file deletion was performed.
+
+Board free space remains only **172 MiB on root / 374 MiB in `/dev/shm`**.
+Preserve current media and stream future captures off-board. Recheck boot ID,
+reservation, free space and active owners immediately before deploying a
+completed candidate; this preflight is not candidate acceptance and does not
+qualify the older installed image for this trial.
+
 ### Runtime accounting at 23:56 EDT Oct18
 
 The nine closed fresh-trial receipts sum to **85,701.723 s (23 h 48 min
