@@ -1295,6 +1295,18 @@ reservation, free space and active owners immediately before deploying a
 completed candidate; this preflight is not candidate acceptance and does not
 qualify the older installed image for this trial.
 
+At **01:37 EDT**, the same live synthesis entered **timing optimization**.
+Its native cumulative area-optimization completion is **24 min 56 s**, versus
+24 min 49 s for `performance-bounded-r1`; XDC timing application completes at
+**25 min 15 s**, versus 25 min 09 s. The earlier sparse logging therefore did
+not indicate a stall. The previous comparable timing-optimization stage took
+73 min 41 s; that is a runtime reference, not a deadline or completion claim.
+All **215 pins** were rechecked unchanged. The first **329** resource samples
+show peak charged RAM **10,024,255,488 bytes**, zero swap, at most 27 tasks,
+minimum free disk **6,851,514,368 bytes**, and no task rejection, OOM kill or
+safety-stop reason. Synthesis remains incomplete; APR has not launched and no
+current candidate frequency or gameplay IPC has been measured.
+
 ### Runtime accounting at 23:56 EDT Oct18
 
 The nine closed fresh-trial receipts sum to **85,701.723 s (23 h 48 min
