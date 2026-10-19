@@ -91,6 +91,23 @@ and remains on its original pinned contract; no restart or live script edit is
 made. The following numeric envelopes describe historical/current launches,
 not the policy for the next run. Launcher changes are still pending.
 
+At **04:39 EDT**, the six-file launcher/scope/auditor change is implemented and
+tested **only in a separate scratch copy**, not promoted into the live pinned
+checkout. Bundle:
+`/home/yukidama/external/tmp/ventium-uncapped-policy-oct19.DzZIc8Qp/`.
+Its `before/` and `candidate/` trees are bound by `verified.json`, SHA256
+`28d7206523a491aa76fa068752a5d2479f20f161e164fee28375c47c6d204a69`.
+**32 fresh-flow/audit tests + 25 scope-policy tests pass**, plus shell syntax.
+These are host-only mocked-command tests, not a native Vivado or CPU pass.
+New launches select `unbounded`, set both memory limits to `infinity`, and
+remove free-memory and combined-memory stop thresholds. Historical capped
+receipts remain independently checkable. Disk reserve, actual OOM, task limits,
+exclusive inherited-lock validation, source-only build admission and timing
+acceptance remain enforced. Before promotion: close and audit the current run
+against its original pins, verify every recorded `before` hash, apply only the
+six reviewed deltas, and rerun the tests in the repository. All **215 current
+launch pins** were rechecked unchanged while sealing this staged bundle.
+
 Historical resource limits: one Vivado family/one native worker. The `standard16`
 profile is **16 GiB RAM / 6 GiB swap**, with a 21 GiB combined early stop.
 Retiming-r2 uses the separately tested serial-only **20/6 GiB** profile and
@@ -1437,6 +1454,14 @@ timing optimization. These are current routing diagnostics, not final failure
 or sign-off. Phase 5.2 overlap counts declined **315,055 → 111,612 → 60,314**.
 Worker CPU time advanced to **2 h 11 min 27 s** at 04:18:36; the owner and
 exclusive scope remain live, with the original invocation IDs.
+
+At **04:39 EDT**, phase 5.2 reports a further decline to **40,187 overlapping
+nodes**. CPU time reaches **3 h 09 min 28 s**. This is intermediate routing
+progress, not a routed timing result. A 04:30 resource cross-check found CPU
+affinity `0-31`, no quota, zero recorded CPU throttling and zero sampled CPU
+pressure averages; no artificial CPU restriction was identified. The live
+run's original memory contract remains unchanged despite the policy update for
+future launches above.
 
 That resource sample reports **6,699,819,008 bytes charged RAM + 3,170,320,384
 bytes swap**, 28 tasks, **14,640,340,992 bytes external free disk**, no OOM or
