@@ -58,6 +58,18 @@ The read-only `inspect-routed-geometry.py` and hashed
 `routed-geometry-comparison.json` are retained in the Explore evidence root.
 No live build inputs were edited; the current routing comparison continues.
 
+**Constraint-source preflight:** all **19 generated XDC files** in the Explore
+project are byte-identical to the best control. Its native synthesis script/log
+does not load the legacy FPATAN multicycle XDC or the generated OOC placeholder
+clock constraints; the actual PS clock XDC specifies 10 ns. The frozen wrapper
+removes the obsolete FPATAN exception rather than applying it to the shared FPU.
+The saved control report contains 37 false paths and ten datapath-only maximum
+delays; its ten bus-skew constraints pass. The dynamic RAM-selector containment
+previously observed on the failed control is not current-candidate coverage.
+`constraint-source-preflight.json` retains hashes and the remaining checks;
+`exceptions_reviewed`, timing sign-off and hardware acceptance remain false.
+No checkpoint was opened and no live helper or constraint was changed.
+
 ## Timing placement rejected: 35.203830 MHz — Oct24 16:42 EDT
 
 Fresh `performance-retime-muxf-timing-route-first-r1` closed with native and
