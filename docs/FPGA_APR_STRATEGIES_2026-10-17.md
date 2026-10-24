@@ -942,7 +942,25 @@ active unmeasured candidate. Neither isolated option has a gameplay result.
 
 ### Isolated timing-focused placement option — not launched
 
-**Latest refresh, Oct24 09:10 EDT:** the placement-only option is now rebased
+**Latest refresh, Oct24 13:48 EDT:** the existing placement-only option was
+rebased onto current MUXF-aware tooling in
+`ventium-timing-place-refresh-oct24.3CVdQtJh/rebase-muxf.4XQArNwB/`
+under the configured scratch root. The base is commit `49945630`: 30 helper/test
+files are snapshotted and ten change. **95 flow/audit + 26 scope-policy tests
+pass (121 total)**; actual commands, output, import paths and before/candidate
+hashes are retained in `manifest.json`. Both remap families and their rejection
+tests remain intact, including rejection of either remap hook in the new
+placement-only strategy. All **218 live launch pins** rehash unchanged.
+
+This is preparation only: no repository helper/RTL changed, no second Vivado
+family or native probe was launched, and nothing is queued. The comparison is
+still `ExtraTimingOpt` versus `AltSpreadLogic_high` on the **34.293553 MHz**
+legally routed control, with synthesis, routing and 25/10 ns clocks unchanged.
+If the active MUXF trial becomes the better routed control, reconsider that
+comparison base before selection. A native probe and a new full-source build
+remain required; host tests establish neither timing nor hardware acceptance.
+
+**Earlier refresh, Oct24 09:10 EDT:** the placement-only option was rebased
 onto the current performance-strategy tooling in
 `/home/yukidama/external/tmp/ventium-timing-place-refresh-oct24.3CVdQtJh/`.
 Its 26-file base is commit `4ab21643`; nine candidate files change. It preserves
