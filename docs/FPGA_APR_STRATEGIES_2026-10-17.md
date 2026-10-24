@@ -1,5 +1,44 @@
 # APR strategy comparison — 40 MHz target
 
+## Explore router comparison launched — Oct24 16:52 EDT
+
+Fresh **`performance-retime-muxf-explore-route-first-r1`** started at
+**16:52:55 EDT**. Relative to the best **35.735982561 MHz** control, the only
+selected implementation change is **AlternateCLBRouting → Explore** routing.
+PerformanceOptimized synthesis, global retiming on, MUXF remapping,
+AltSpreadLogic_high placement, disabled standalone physical stages, eight
+threads per stage and one native job are retained. The rejected ExtraTimingOpt
+placement is not carried forward. Core/AXI constraints remain **25/10 ns**.
+This run is not complete and has no new frequency or hardware result.
+
+The strategy and strict audit tests are committed/pushed as **`d6b11e49`**.
+All **113 flow/path tests + 26 resource-policy tests** pass. The separate native
+Vivado 2025.2 tooling probe finished **16:50:53–16:52:31 EDT**, with actual
+retained owner/native exit **0**. It verified eight-thread worker readback,
+the exact synthesis/placement/routing commands, and MUXF7/8/9 counts
+**4/2/1 → 0/0/0**. All eight probe input hashes stayed unchanged. This small
+probe establishes flow operation only, not processor, full-core timing or
+hardware acceptance; none of its checkpoints is an input to the full build.
+
+The full launch audit verifies **218 unchanged pins**, **200 source/metadata
+files byte-identical to the best control**, 159 defines, `cycle_mode=1`, and
+`prior_checkpoint_inputs=[]`. Dirty checkout RTL remains excluded and intact.
+The live single Vivado scope has **MemoryMax/MemorySwapMax=infinity**,
+**TasksMax=256**, with zero OOM/task-limit events at launch. No application was
+killed. The retained owner is `ventium-fresh-muxf-explore-oct24-r1.service`,
+invocation `f721e54fae9244ca9995178d4dab9e41`; its scope invocation is
+`ff61e10361e1432b9e864ffca7819673`. Whole-run/APR safeguards remain 8h/3h50m.
+
+Evidence root:
+`/home/yukidama/external/tmp/ventium-muxf-explore-oct24.rwk8YxFW/`.
+It contains `probe-inputs.json`, `probe-closed.json`, `full-launch-audit.json`,
+and the fresh full run's source/started receipts and live logs. Do not launch
+another Vivado family while this run is active.
+
+Candidate gameplay is **unmeasured**. The older physical baseline is
+**0.496499864 total U+V IPC**, image **2886d24c**, cycles
+**625,021,130,428–629,480,208,865**; it predates this candidate.
+
 ## Timing placement rejected: 35.203830 MHz — Oct24 16:42 EDT
 
 Fresh `performance-retime-muxf-timing-route-first-r1` closed with native and
