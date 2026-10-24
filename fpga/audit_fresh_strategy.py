@@ -10,6 +10,10 @@ from pathlib import Path
 import re
 import shlex
 
+REMAP_STRATEGY = 'routability-retime-remap-route-first'
+ROUTE_FIRST_STRATEGIES = ('performance-route-first', 'routability-route-first',
+                          'routability-retime-route-first', REMAP_STRATEGY)
+
 
 def property_value(text, name):
     pattern = re.compile(re.escape(name)+r'[ \t]+\S+[ \t]+(?:true|false)[ \t]*(.*)$')
@@ -41,16 +45,17 @@ def audit_threads(script, threads=1, native_log=None):
 
 def audit_synth(script, properties, strategy, threads=1, native_log=None):
     audit_threads(script, threads, native_log)
-    if threads not in (1, 2, 8) or (strategy in ('performance-route-first', 'routability-route-first', 'routability-retime-route-first') and threads not in (1, 8)):
+    if threads not in (1, 2, 8) or (strategy in ROUTE_FIRST_STRATEGIES and threads not in (1, 8)):
         raise ValueError('unsupported synthesis thread count')
     directives = {'performance-netdelay': 'PerformanceOptimized', 'routability-spread': 'AlternateRoutability',
                   'performance-retime-bounded': 'PerformanceOptimized',
                   'performance-bounded': 'PerformanceOptimized',
                   'performance-route-first': 'PerformanceOptimized',
                   'routability-route-first': 'AlternateRoutability',
-                  'routability-retime-route-first': 'AlternateRoutability'}
+                  'routability-retime-route-first': 'AlternateRoutability',
+                  REMAP_STRATEGY: 'AlternateRoutability'}
     directive = directives[strategy]
-    retiming = 'on' if strategy in ('performance-retime-bounded', 'routability-retime-route-first') else 'auto'
+    retiming = 'on' if strategy in ('performance-retime-bounded', 'routability-retime-route-first', REMAP_STRATEGY) else 'auto'
     if strategy in ('performance-bounded', 'performance-route-first', 'routability-route-first'): retiming = 'off'
     commands = re.findall(r'^synth_design [^\n]+', script, re.M)
     if len(commands) != 1:
@@ -90,10 +95,45 @@ def audit_synth(script, properties, strategy, threads=1, native_log=None):
                 timing_driven=True, prior_checkpoint_input=False, configured_threads=threads)
 
 
+def audit_remap(script, properties, threads, native_log):
+    """Prove a sourced extra pass ran after normal optimization and before place."""
+    hook = property_value(properties, 'STEPS.OPT_DESIGN.TCL.POST')
+    if (not Path(hook).is_absolute() or Path(hook).name != 'fresh_opt_remap_post.tcl' or
+        property_value(properties, 'STEPS.OPT_DESIGN.ARGS.DIRECTIVE') != 'RuntimeOptimized' or
+        property_value(properties, 'STEPS.OPT_DESIGN.ARGS.MORE OPTIONS') != ''):
+        raise ValueError('remap post-hook/normal optimization property mismatch')
+    sources = []
+    for match in re.finditer(r'^[ \t]*source[ \t]+(?:\{([^}\r\n]+)\}|([^ \t\r\n]+))[ \t]*$', script, re.M):
+        name = match.group(1) or match.group(2)
+        if Path(name).name == 'fresh_opt_remap_post.tcl':
+            sources.append((name, match.start()))
+    opt = re.search(r'^[ \t]*opt_design[ \t]+-directive[ \t]+RuntimeOptimized[ \t]*$', script, re.M)
+    place = re.search(r'^[ \t]*place_design[ \t]', script, re.M)
+    if (len(sources) != 1 or sources[0][0] != hook or not opt or not place or
+        not opt.start() < sources[0][1] < place.start()):
+        raise ValueError('remap source missing, duplicated, mismatched or out of order')
+    expected = [
+        'Command: opt_design -directive RuntimeOptimized',
+        'opt_design completed successfully',
+        f'FRESH-LOGIC-REMAP-BEGIN threads={threads} command=opt_design-resynth_remap',
+        'Command: opt_design -resynth_remap',
+        'opt_design completed successfully',
+        'FRESH-LOGIC-REMAP-END',
+        'Command: place_design -directive AltSpreadLogic_high',
+        'Command: route_design -directive AlternateCLBRouting',
+    ]
+    events = [line for line in (native_log or '').splitlines()
+              if (re.match(r'^Command: (?:opt_design|place_design|route_design|phys_opt_design)\b', line) or
+                  line == 'opt_design completed successfully' or line.startswith('FRESH-LOGIC-REMAP-'))]
+    if events != expected or re.search(r'^ERROR:', native_log or '', re.M):
+        raise ValueError('native remap execution evidence missing, erroneous or out of order')
+    return ['-resynth_remap']
+
+
 def audit_impl(script, properties, strategy, threads=1, native_log=None):
     """Check the emitted operations, not merely the strategy label."""
     audit_threads(script, threads, native_log)
-    route_first = strategy in ('performance-route-first', 'routability-route-first', 'routability-retime-route-first')
+    route_first = strategy in ROUTE_FIRST_STRATEGIES
     if (route_first and threads not in (4, 8)) or (not route_first and threads == 4):
         raise ValueError('unsupported implementation thread count')
     configs = {
@@ -110,6 +150,7 @@ def audit_impl(script, properties, strategy, threads=1, native_log=None):
         'performance-route-first': ('AltSpreadLogic_medium', 'NoTimingRelaxation', []),
         'routability-route-first': ('AltSpreadLogic_high', 'AlternateCLBRouting', []),
         'routability-retime-route-first': ('AltSpreadLogic_high', 'AlternateCLBRouting', []),
+        REMAP_STRATEGY: ('AltSpreadLogic_high', 'AlternateCLBRouting', []),
     }
     place, route, phys = configs[strategy]
     for command, expected in (('opt_design', ['-directive RuntimeOptimized']),
@@ -132,7 +173,14 @@ def audit_impl(script, properties, strategy, threads=1, native_log=None):
                 property_value(properties, f'STEPS.{step}.ARGS.DIRECTIVE') != 'Default' or
                 property_value(properties, f'STEPS.{step}.ARGS.MORE OPTIONS') != ''):
                 raise ValueError('route-first physical stage property mismatch: '+step)
-    return dict(strategy=strategy, physical_operations=phys, completion_verified=False)
+    remap = []
+    if strategy == REMAP_STRATEGY:
+        remap = audit_remap(script, properties, threads, native_log)
+    elif ('fresh_opt_remap_post.tcl' in script or 'FRESH-LOGIC-REMAP-' in (native_log or '') or
+          re.search(r'^Command: opt_design -resynth_remap\b', native_log or '', re.M)):
+        raise ValueError('unexpected remap operation for strategy')
+    return dict(strategy=strategy, physical_operations=phys, logic_remap_operations=remap,
+                completion_verified=False)
 
 
 def main():

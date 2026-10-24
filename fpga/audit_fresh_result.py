@@ -149,7 +149,7 @@ def audit_task_monitoring(run, started, closed):
     fields = {'task_monitoring', 'task_profile', 'tasks_max', 'memory_profile', 'implementation_threads'}
     if (not fields.intersection(started) and not fields.intersection(closed) and
         'VENTIUM_VIVADO_TASK_PROFILE' not in started.get('env', {}) and
-        started.get('strategy') not in ('performance-route-first', 'routability-route-first', 'routability-retime-route-first') and
+        started.get('strategy') not in ('performance-route-first', 'routability-route-first', 'routability-retime-route-first', 'routability-retime-remap-route-first') and
         started.get('tool_threads') != 8):
         return None  # Historical receipts did not record task events.
     threads = started.get('tool_threads')
@@ -160,7 +160,7 @@ def audit_task_monitoring(run, started, closed):
                       (1, 4): ('serial_apr4', 128), (8, 8): ('parallel8', 256)}
     if type(impl_threads) is not int or (threads, impl_threads) not in stage_policies:
         raise ValueError('invalid implementation thread count')
-    route_first = started.get('strategy') in ('performance-route-first', 'routability-route-first', 'routability-retime-route-first')
+    route_first = started.get('strategy') in ('performance-route-first', 'routability-route-first', 'routability-retime-route-first', 'routability-retime-remap-route-first')
     if threads != 8 and route_first != ((threads, impl_threads) == (1, 4)):
         raise ValueError('stage thread policy disagrees with strategy')
     if 'implementation_threads' in started or 'implementation_threads' in closed or route_first or threads == 8:
@@ -278,7 +278,7 @@ def audit_closed(run):
         audit_threads(impl_script.read_text(), impl_threads, native_worker_log(impl_script))
     impl = (build/'impl_1-properties.rpt').read_text()
     if started['strategy'] in ('performance-retime-bounded', 'performance-bounded', 'performance-route-first',
-                               'routability-route-first', 'routability-retime-route-first'):
+                               'routability-route-first', 'routability-retime-route-first', 'routability-retime-remap-route-first'):
         impl_script = build/'rk_ao486_system/rk_ao486_system.runs/impl_1/rk_ao486_bd_wrapper.tcl'
         audit_impl(impl_script.read_text(), impl, started['strategy'], impl_threads, native_worker_log(impl_script))
     if property_value(impl, 'AUTO_INCREMENTAL_CHECKPOINT') != '0' or property_value(impl, 'INCREMENTAL_CHECKPOINT'):

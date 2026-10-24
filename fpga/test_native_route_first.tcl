@@ -19,19 +19,19 @@ proc route_first_check_status {run status directory} {
 }
 
 # Source-only tooling probe, NOT full-core timing or hardware acceptance.
-if {$argc ni {1 2 3}} {error "usage: new-output-directory ?performance-route-first|routability-route-first|routability-retime-route-first? ?serial_apr4|parallel8?"}
+if {$argc ni {1 2 3}} {error "usage: new-output-directory ?performance-route-first|routability-route-first|routability-retime-route-first|routability-retime-remap-route-first? ?serial_apr4|parallel8?"}
 set strategy performance-route-first
 if {$argc >= 2} {set strategy [lindex $argv 1]}
-if {$strategy ni {performance-route-first routability-route-first routability-retime-route-first}} {error "unknown probe strategy"}
+if {$strategy ni {performance-route-first routability-route-first routability-retime-route-first routability-retime-remap-route-first}} {error "unknown probe strategy"}
 set thread_profile serial_apr4
 if {$argc == 3} {set thread_profile [lindex $argv 2]}
 if {$thread_profile ni {serial_apr4 parallel8}} {error "unknown probe thread profile"}
 set synth_threads [expr {$thread_profile eq "parallel8" ? 8 : 1}]
 set apr_threads [expr {$thread_profile eq "parallel8" ? 8 : 4}]
-set synth_retiming [expr {$strategy eq "routability-retime-route-first" ? "on" : "off"}]
-set synth_directive [expr {$strategy in {routability-route-first routability-retime-route-first} ? "AlternateRoutability" : "PerformanceOptimized"}]
-set place_directive [expr {$strategy in {routability-route-first routability-retime-route-first} ? "AltSpreadLogic_high" : "AltSpreadLogic_medium"}]
-set route_directive [expr {$strategy in {routability-route-first routability-retime-route-first} ? "AlternateCLBRouting" : "NoTimingRelaxation"}]
+set synth_retiming [expr {$strategy in {routability-retime-route-first routability-retime-remap-route-first} ? "on" : "off"}]
+set synth_directive [expr {$strategy in {routability-route-first routability-retime-route-first routability-retime-remap-route-first} ? "AlternateRoutability" : "PerformanceOptimized"}]
+set place_directive [expr {$strategy in {routability-route-first routability-retime-route-first routability-retime-remap-route-first} ? "AltSpreadLogic_high" : "AltSpreadLogic_medium"}]
+set route_directive [expr {$strategy in {routability-route-first routability-retime-route-first routability-retime-remap-route-first} ? "AlternateCLBRouting" : "NoTimingRelaxation"}]
 set out [file normalize [lindex $argv 0]]
 if {[file exists $out]} {error "probe output must not exist"}
 if {[version -short] ne "2025.2"} {error "Vivado 2025.2 required"}
@@ -70,6 +70,11 @@ set_property STEPS.SYNTH_DESIGN.ARGS.DIRECTIVE $synth_directive $synth
 set_property STEPS.SYNTH_DESIGN.ARGS.GLOBAL_RETIMING $synth_retiming $synth
 set_property STEPS.SYNTH_DESIGN.ARGS.FLATTEN_HIERARCHY rebuilt $synth
 set_property STEPS.OPT_DESIGN.ARGS.DIRECTIVE RuntimeOptimized $impl
+set_property -name {STEPS.OPT_DESIGN.ARGS.MORE OPTIONS} -value {} -objects $impl
+set_property STEPS.OPT_DESIGN.TCL.POST {} $impl
+if {$strategy eq "routability-retime-remap-route-first"} {
+    set_property STEPS.OPT_DESIGN.TCL.POST [file join [file dirname [file normalize [info script]]] fresh_opt_remap_post.tcl] $impl
+}
 set_property STEPS.PLACE_DESIGN.ARGS.DIRECTIVE $place_directive $impl
 set_property STEPS.ROUTE_DESIGN.ARGS.DIRECTIVE $route_directive $impl
 fresh_route_first $impl
@@ -118,6 +123,25 @@ foreach {run threads} [list synth_1 $synth_threads impl_1 $apr_threads] {
             if {[llength $commands] != 1 || [string trim [lindex $commands 0]] ne "$command -directive $directive"} {
                 error "native command mismatch: $commands"
             }
+        }
+        # Native script contains only a source command for a post-hook. The
+        # independent Python auditor also requires both actual opt_design
+        # commands/completions and remap markers in order in runme.log.
+        if {$strategy eq "routability-retime-remap-route-first"} {
+            set audit_python {
+import json, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from audit_fresh_strategy import audit_impl, native_worker_log
+script = Path(sys.argv[2])
+result = audit_impl(script.read_text(), Path(sys.argv[3]).read_text(),
+                    sys.argv[4], int(sys.argv[5]), native_worker_log(script))
+print(json.dumps(result, sort_keys=True))
+}
+            puts [exec /usr/bin/python3 -B -c $audit_python \
+                [file dirname [file normalize [info script]]] \
+                [file join $dir route_first_probe.tcl] [file join $out impl-properties.rpt] \
+                $strategy $apr_threads]
         }
         set dcp [file join $dir route_first_probe_routed.dcp]
         if {![file isfile $dcp] || [file size $dcp] == 0} {error "routed checkpoint missing"}

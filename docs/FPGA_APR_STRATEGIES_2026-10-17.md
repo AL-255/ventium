@@ -1,5 +1,73 @@
 # APR strategy comparison — 40 MHz target
 
+## Retiming/eight-thread trial closed: 34.293553 MHz — Oct24 05:32 EDT
+
+`routability-retime-route-first-r1` completed from fresh source in **2 h 36 min
+44 s**, native exit 0, with all **216 launch pins unchanged**. Its owner and
+Vivado family have exited. The independent closure audit and an 18-file helper
+snapshot were retained before promoting any next-strategy tooling.
+
+The final conditional core timing estimate is **34.293552812 MHz**, versus
+31.028918952 MHz for the retiming-off/one-synthesis-thread/four-APR-thread
+control: **10.52% higher**, but **not a 40 MHz pass**. Synthesis retiming and
+thread counts changed together; the measured difference cannot be attributed
+solely to retiming. No clock relaxation, RTL change or prior checkpoint input
+was used. This is an STA-derived estimate, not a measured board frequency.
+
+| Clock pair | Setup slack (ns) | Hold slack (ns) |
+|---|---:|---:|
+| Core → core, 25 ns full-cycle requirement, no exception | −4.160 | 0.000 |
+| AXI → AXI, constrained 100 MHz | +3.205 | +0.015 |
+| Core → AXI | +1.470 | +0.191 |
+| AXI → core | +1.184 | +2.003 |
+
+Routing took **42 min 42 s**, 47.19% less than the control's 80 min 51 s.
+APR through final evidence took **1 h 2 min 39 s**, within the four-hour goal.
+All **253,658 routable nets** are fully routed with zero routing errors. DRC
+has no errors/critical warnings; native timing-miss warnings remain. Numeric
+hold and pulse-width checks pass, although the worst core hold margin rounds
+to zero. All ten bus-skew checks pass (minimum margin **9.516 ns**), and the
+unwaived CDC report says all paths are safely timed. Coverage has no missing
+clocks or unconstrained internal endpoints, only the four status LEDs without
+output delays. **57,846 setup endpoints still fail**, with TNS −127,969.484 ns.
+None of these checks establishes timing or physical functional acceptance.
+
+The final twenty worst paths now start at `q_pc[0]` (ten), `eip[2]` (eight),
+and `seg_base[0][0]` (two), rather than all at the control's `q_len[1]`.
+They retain **75–92 logic levels**. The two worst paths tie at −4.160 ns:
+
+- Segment base → EIP: 75 levels, 28.905 ns data delay, comprising 6.663 ns
+  logic and 22.242 ns routing. The reported chain crosses byte selection,
+  address generation/translation, cache data, ALU/flags and branch selection.
+- EIP → paired-load return: 91 levels, 29.071 ns data delay, comprising
+  7.985 ns logic and 21.086 ns routing. It still crosses `ref_prime_select`,
+  `mc_query_seg`, permission logic and `mc_prime_offer` before cache return.
+
+This selects **`routability-retime-remap-route-first`** as the next experiment:
+add only the separately documented `opt_design -resynth_remap` pass, with
+before/after unplaced path and area evidence. Keep the current synthesis,
+placement, routing, eight-thread policy and 25/10 ns clocks. The prepared
+ExtraTimingOpt placement variant remains unselected. After closure/base-hash
+checks, seven modified and three new helper/test files were promoted; **70
+flow/audit + 26 scope tests pass (96 total)**. A fresh native tooling probe
+must pass before the full next build; neither its DCP nor this run's DCP may
+be an input to that build. Frozen CPU/cache RTL and unrelated dirty files
+remain untouched.
+
+Final utilization is **192,601 LUTs, 55,163 FFs, 277.5 BRAM tiles and 47 DSPs**.
+All 1,878 resource samples have zero OOM/task-limit events; peak simultaneous
+RAM+swap was **44.04 GiB**, peak task count 79. Individual RAM/swap peaks are
+not additive.
+
+Run root: `/home/yukidama/external/tmp/ventium-retime-oct24.gdZ3iE0X/routability-retime-route-first-r1`.
+Raw image SHA256: `e3c01afd6c17d20b43bf68b02d84b4219f95c2a98a4b85f968bad4048439a8c1`.
+`timing.tsv` SHA256: `cede6b31760bd3f5b08ab56513b3c9fd24af993435288abb463abd268effe6ea`.
+`core-paths.rpt` SHA256: `5d67a7c037a3e5ee52f5368a33fccb2c8b1e53c8f60bc36c52b3f7ec78d15d17`.
+
+Verified gameplay baseline remains **0.496499864 total U+V IPC**, physical
+image **2886d24c**, cycles **625,021,130,428–629,480,208,865**. It predates
+these candidates. The new image is not deployed and has no gameplay result.
+
 ## Legal fresh route, 31.028919 MHz conditional estimate — 2026-10-24
 
 The Oct23 `routability-route-first-r1` has now closed cleanly: native exit 0,
@@ -224,6 +292,25 @@ physical synthesis reports 2,044 LUT-combining changes, 140 equivalent-driver
 rewirings, and zero retiming changes, with one blocked high-fanout optimization.
 These observations do not prove the critical core path is blocked by that
 attribute; broad preservation removal is not selected.
+
+The current trial's already-written placed checkpoint was inspected **as a ZIP
+archive for constraint text only**, without opening a Vivado design or feeding
+any checkpoint into a build. Its four XDC members serialize 37 false paths:
+19 through vendor asynchronous-reset inputs, 16 to first synchronizer stages,
+and two AXI-clock-converter RAM clock-to-output exceptions. Ten datapath-only
+max-delay commands and ten bus-skew commands cover the converter's Gray-pointer
+synchronizers. No multicycle, clock-group or disable-timing command appears in
+these members, and none of the exception commands is scoped to `u_soc`.
+The legacy FPATAN multicycle XDC is also absent from the actual native read list.
+This identifies the serialized exception intent; it is **not** a full evaluation
+of dynamic Tcl object selectors or final post-route exception/CDC sign-off.
+In particular, validate the clock-converter RAM fanout selectors against native
+coverage rather than assuming a file's IP scope alone proves every endpoint.
+
+Placed checkpoint SHA256:
+`c37ed49932bd1ea333a6fc93088ff8759dd960f967157ce2c5933ba4fca6bab5`.
+Its `rk_ao486_bd_wrapper_late.xdc` member SHA256:
+`cca11ee084ee9f6c0f21e4ba7f2ecc57ed3afa15610835be899ef75429a8a1d2`.
 
 Verified gameplay baseline remains **0.496499864 total U+V IPC**, physical
 image **2886d24c**, cycles **625,021,130,428–629,480,208,865**. It predates the
