@@ -102,9 +102,53 @@ The native probe's retained, process-free owner was stopped after its receipt
 was saved and before the full run launched. No full-run timing or gameplay
 result exists yet.
 
+**Read-only follow-up while synthesis runs (Oct24):** `RQS_CONG-9` names
+`rk_ao486_bd_i/u_soc/inst` and congestion windows, not an exact set of
+equivalent drivers. The saved complexity report is empty, so it does not
+quantify replication. No `MAX_FANOUT` or `EQUIVALENT_DRIVER_OPT` setting was
+found in the frozen Ventium RTL/FPGA or flow/hw source trees; this does not
+exclude replication introduced by synthesis or vendor IP. There is no basis
+yet for a blanket equivalent-driver merge. AMD documents that the MERGE
+property belongs on selected **driver cells**, including original and replicas;
+it is not a net property. A targeted candidate needs actual cell-set evidence
+and a native validation probe before a fresh full build.
+[AMD 2025.2 EQUIVALENT_DRIVER_OPT](https://docs.amd.com/r/2025.2-English/ug912-vivado-properties/EQUIVALENT_DRIVER_OPT).
+
+The frozen profile also enables `VEN_IC_BRAM`, whose source contains a
+word-reversal workaround for a historical RAM-equivalence/decloning failure.
+The preceding synthesis log reports all four `ic_line_a` and four `ic_line_b`
+BRAM instances. This is not a new reproduced bug or proof that driver merging
+would break them; preserve the workaround and do not infer that intentional
+memory duplication is disposable.
+
+The **best legally routed control's** twenty saved core paths were parsed with
+`analyze_setup_paths.py`, checking continuous data-path arrivals and footer
+arithmetic and excluding clock insertion. On its first worst path
+(`seg_base_reg[0][0]` to `eip_reg[4]`, slack −4.160 ns), the wire-delay split is:
+
+| Reported net fanout | Data-net arcs | Sum of printed wire delays |
+|---|---:|---:|
+| 1–4 | 55 | 12.346 ns |
+| 5–31 | 10 | 3.478 ns |
+| 32–127 | 7 | 3.173 ns |
+| 128+ | 4 | 3.241 ns |
+
+Printed increments sum to 22.238 ns versus the report's 22.242 ns wire total
+(rounding); cell delay is 6.663 ns. Across these twenty correlated worst paths,
+fanout 1–4 accounts for a mean **49.4% of wire delay**, versus **16.6%** for
+fanout 128+. These are path-delay shares, **not** whole-chip congestion or CPI
+shares. The slowest wire on the first path has fanout 32 (1.167 ns); a
+fanout-one wire costs 0.843 ns. Thus high-fanout-only optimization does not
+address most accumulated wire delay. Area reduction could still help those
+connections indirectly; this does not disprove the over-replication warning.
+Keep the current MUXF/locality experiment isolated and evaluate legal routed
+timing before selecting another pass. No active build inputs were changed.
+Source report: `ventium-retime-oct24.gdZ3iE0X/routability-retime-route-first-r1/build/core-paths.rpt`,
+SHA256 `5d67a7c037a3e5ee52f5368a33fccb2c8b1e53c8f60bc36c52b3f7ec78d15d17`.
+
 Verified gameplay remains **0.496499864 total U+V IPC**, image **2886d24c**,
 cycles **625,021,130,428–629,480,208,865**. This baseline predates the failed
-candidate, whose gameplay is **unmeasured**.
+performance candidate and the active MUXF candidate; both are **unmeasured**.
 
 ## Remap rejected; fresh performance-mapping run launched — Oct24 08:36 EDT
 
