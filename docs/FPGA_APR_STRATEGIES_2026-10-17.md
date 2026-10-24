@@ -127,11 +127,23 @@ AMD 2025.2 documents up to eight internal threads for both
 and [implementation](https://docs.amd.com/r/2025.2-English/ug904-vivado-implementation/Multithreading-with-the-Vivado-Tools).
 The candidate retains one build family, one native job, uncapped RAM/swap,
 fresh-source admission and all timing checks. It adds fixed 256-task helper
-headroom, not concurrent builds. **37 flow/audit + 26 mocked scope tests pass**;
-native capability and full-chip runtime remain unverified. The bundle records
+headroom, not concurrent builds. As of Oct24, **52 flow/audit + 26 mocked scope
+tests pass**. The expanded selection includes the existing clock, source-transfer
+and synthesis-evidence tests; a new argument-parser test checks all six strategy
+defaults and explicit thread overrides. The staged CLI now **defaults to eight
+threads per stage**, while preserving explicit historical controls. This avoids
+silently retaining serial synthesis on future uncapped runs. It is not applied
+to the repository launcher or the active build. Native capability and full-chip
+runtime remain unverified. The bundle records
 base/candidate files, hashes and promotion/probe requirements. It must not
 replace pinned helpers until the active trial closes; no extra Vivado was
 launched, and no throughput or frequency improvement is claimed.
+
+The active native synthesis and helper processes were also checked directly:
+both can use host CPUs **0–31**, and the owner/scope CPU quotas are unlimited.
+The configured one-thread synthesis policy, not an observed affinity/quota
+restriction, limits available internal parallelism. An eight-thread maximum
+does not promise eightfold speedup or parallel execution of every tool phase.
 
 ## Resumed on the migrated host — 2026-10-22
 
