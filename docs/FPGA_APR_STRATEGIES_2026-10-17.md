@@ -184,6 +184,23 @@ changed/new candidates; all **217 active-run pins** were rehashed unchanged.
 Nothing has been promoted or queued. Review the current route's completed
 evidence and physical-region membership before selecting the next experiment.
 
+**Synthesis locality cross-check:** the LUT reduction is not uniform. Matched
+rebuilt-hierarchy labels show `u_icache` 53,152→41,503 LUTs (−11,649),
+`u_regfile` 22,243→29,835 (+7,592), `u_fp_shared` 75,076→73,074 (−2,002),
+`u_dtlb` 4,035→5,249 (+1,214), and `u_bpred_btb` 9,208→7,809 (−1,399).
+These labels are not pure RTL ownership boundaries; changed hierarchy
+reconstruction can move attribution. Native physical membership is still needed.
+The candidate summary's one same-core-clock setup path contains three MUXF
+stages, totaling only **0.215 ns cell delay** out of 26.058 ns data delay.
+Two are labeled under `u_icache`, one under `u_l1axi/u_l1d`; this excludes
+adjacent net delay. The control's different worst path has no MUXF stages.
+Thus remapping is a **packing/routing hypothesis**, not an established direct
+critical-cell-delay saving. Do not extrapolate these single reported paths to
+the full design or subtract MUXF delay as a predicted timing gain. Hashed
+source reports, exact path rows and hierarchy deltas are retained in the
+active run's `synthesis-mapping-locality.json`. No checkpoint was opened or
+implementation modified for this read-only comparison.
+
 ## Retiming/eight-thread trial closed: 34.293553 MHz — Oct24 05:32 EDT
 
 `routability-retime-route-first-r1` completed from fresh source in **2 h 36 min
