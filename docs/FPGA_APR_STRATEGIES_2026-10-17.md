@@ -54,6 +54,17 @@ must pass before the full next build; neither its DCP nor this run's DCP may
 be an input to that build. Frozen CPU/cache RTL and unrelated dirty files
 remain untouched.
 
+The first native remap probe (`ventium-remap-oct24.FUH5sZcw/native-probe`,
+commit `164cb68b`) completed both optimization passes and routing, but exited
+1 in its final Python audit: Vivado exported `PYTHONHOME` for bundled Python
+3.13, which broke `/usr/bin/python3` before it could import `encodings`.
+All seven probe inputs were unchanged; an external isolated invocation confirms
+the native operations, but does not convert that failed probe into a pass.
+The repair invokes the embedded audit with **`/usr/bin/python3 -I -B`** and
+adds a poisoned-PYTHONHOME/PYTHONPATH regression. The explicit script directory
+is still inserted for the independent auditor. The next probe must rebuild
+its fixture in a new output directory; no old probe checkpoint is reused.
+
 Final utilization is **192,601 LUTs, 55,163 FFs, 277.5 BRAM tiles and 47 DSPs**.
 All 1,878 resource samples have zero OOM/task-limit events; peak simultaneous
 RAM+swap was **44.04 GiB**, peak task count 79. Individual RAM/swap peaks are

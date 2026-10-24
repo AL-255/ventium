@@ -138,7 +138,9 @@ result = audit_impl(script.read_text(), Path(sys.argv[3]).read_text(),
                     sys.argv[4], int(sys.argv[5]), native_worker_log(script))
 print(json.dumps(result, sort_keys=True))
 }
-            puts [exec /usr/bin/python3 -B -c $audit_python \
+            # Vivado exports its own PYTHONHOME/PYTHONPATH. Isolate the system
+            # interpreter, then add only our explicit audited module directory.
+            puts [exec /usr/bin/python3 -I -B -c $audit_python \
                 [file dirname [file normalize [info script]]] \
                 [file join $dir route_first_probe.tcl] [file join $out impl-properties.rpt] \
                 $strategy $apr_threads]

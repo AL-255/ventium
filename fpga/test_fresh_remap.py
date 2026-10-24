@@ -1,5 +1,6 @@
 """Remap strategy contracts, not native Vivado or hardware acceptance."""
 from pathlib import Path
+import os
 import subprocess
 import tempfile
 import unittest
@@ -145,6 +146,7 @@ proc get_property {p o} {return $::props($o,$p)}
     def test_probe_python_auditor_body_rejects_missing_native_pass(self):
         directory = Path(__file__).parent.resolve()
         probe = (directory/'test_native_route_first.tcl').read_text()
+        self.assertIn('exec /usr/bin/python3 -I -B -c $audit_python', probe)
         body = probe.split('set audit_python {\n', 1)[1].split('\n}\n', 1)[0]
         script, props, log = impl_fixture()
         with tempfile.TemporaryDirectory(prefix='remap-probe-audit-') as td:
@@ -155,9 +157,13 @@ proc get_property {p o} {return $::props($o,$p)}
             for evidence, valid in ((log, True), (log.replace('Command: opt_design -resynth_remap\n', ''), False)):
                 with self.subTest(valid=valid):
                     (root/'runme.log').write_text(evidence)
-                    result = subprocess.run(['/usr/bin/python3', '-B', '-c', body, str(directory),
+                    # Model the incompatible Python environment exported by
+                    # native Vivado; -I must ignore it before importing codecs.
+                    environment = dict(os.environ, PYTHONHOME=str(root/'vendor-python'),
+                                       PYTHONPATH=str(root/'vendor-site-packages'))
+                    result = subprocess.run(['/usr/bin/python3', '-I', '-B', '-c', body, str(directory),
                                              str(native), str(properties), STRATEGY, '8'],
-                                            capture_output=True, text=True, timeout=10)
+                                            capture_output=True, text=True, timeout=10, env=environment)
                     self.assertEqual(result.returncode == 0, valid, result.stdout+result.stderr)
                     if valid:
                         self.assertIn('"logic_remap_operations": ["-resynth_remap"]', result.stdout)
