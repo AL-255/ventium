@@ -82,6 +82,25 @@ Probe receipts and the active run live under
 `/home/yukidama/external/tmp/ventium-muxf-timing-oct24.xGYEEkFS/`.
 This new trial has no completed timing or gameplay result yet.
 
+**Fresh synthesis completed at 15:28:50 EDT; implementation started at
+15:29:45 EDT.** Synthesis took **58 min 48 s**, with native checksum
+**7765fc10**, 725 printed warnings and zero critical warnings/errors. The
+independent native-configuration audit passes. All nine compared synthesis
+resource counts, the warning-category histogram and the reported worst core
+setup path match the completed MUXF control: **185,897 LUTs, 54,922 FFs,
+3,682 CARRY8s, 17,814/6,840/96 MUXF7/8/9s, 2,409 control sets, 277.5 BRAM
+tiles and 47 DSPs**. The **unplaced** estimate remains **38.067684 MHz**,
+not a gain from the new placement directive or a routed timing result.
+
+All **218 launch pins** and **200 source files matching the control** were
+rehashed unchanged. There are no prior-checkpoint inputs. Through the audit,
+736 resource samples show zero OOM events/kills and a peak combined RAM/swap
+of **40.54 GiB**. No paging warning was printed in this synthesis log (seven
+in the control); this does not mean no paging occurred. Actual page faults
+and swap use were observed without stopping the build. The retained evidence
+is the active run's `post-synth-comparison.json`; placement, routing, final
+timing and hardware acceptance remain open.
+
 Closed evidence:
 `/home/yukidama/external/tmp/ventium-muxf-oct24.FLY6s5B5/performance-retime-muxf-route-first-r1/`:
 `closed.json`, `independent-closed-audit.json`, `pre-next-strategy-audit.json`
