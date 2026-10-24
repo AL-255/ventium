@@ -130,7 +130,7 @@ proc set_property {args} {
 proc get_property {p o} {return $::props($o,$p)}
 '''
         for strategy in ('performance-route-first', 'routability-route-first',
-                         'routability-retime-route-first', STRATEGY):
+                         'routability-retime-route-first', 'performance-retime-routability-route-first', STRATEGY):
             for profile, threads in (('serial_apr4', 4), ('parallel8', 8)):
                 with self.subTest(strategy=strategy, profile=profile), tempfile.TemporaryDirectory(prefix='remap-probe-config-') as td:
                     expected_hook = str(directory/'fresh_opt_remap_post.tcl') if strategy == STRATEGY else ''

@@ -3,10 +3,10 @@ if {$argc ni {4 5}} {error "usage: strategy frozen-source new-output-directory s
 lassign $argv strategy frozen out tool_threads implementation_threads
 if {$argc == 4} {set implementation_threads $tool_threads}
 if {$tool_threads ni {1 2 8}} {error "only one, two or eight internal threads supported"}
-if {$strategy ni {performance-netdelay routability-spread performance-retime-bounded performance-bounded performance-route-first routability-route-first routability-retime-route-first routability-retime-remap-route-first}} {error "unknown strategy"}
+if {$strategy ni {performance-netdelay routability-spread performance-retime-bounded performance-bounded performance-route-first routability-route-first routability-retime-route-first performance-retime-routability-route-first routability-retime-remap-route-first}} {error "unknown strategy"}
 if {$tool_threads eq "8"} {
     if {$implementation_threads ne "8"} {error "parallel8 requires synth=8 APR=8"}
-} elseif {$strategy in {performance-route-first routability-route-first routability-retime-route-first routability-retime-remap-route-first}} {
+} elseif {$strategy in {performance-route-first routability-route-first routability-retime-route-first performance-retime-routability-route-first routability-retime-remap-route-first}} {
     if {$tool_threads ne "1" || $implementation_threads ne "4"} {error "route-first requires synth=1 APR=4"}
 } elseif {$implementation_threads ne $tool_threads} {error "unequal stage threads only supported for route-first"}
 if {[version -short] ne "2025.2"} {error "Vivado 2025.2 required"}
@@ -87,7 +87,7 @@ proc launch_runs {run args} {
         }
         close $f
         set directive [expr {$::strategy in {routability-spread routability-route-first routability-retime-route-first routability-retime-remap-route-first} ? "AlternateRoutability" : "PerformanceOptimized"}]
-        set retiming [expr {$::strategy in {performance-retime-bounded routability-retime-route-first routability-retime-remap-route-first} ? "on" : "auto"}]
+        set retiming [expr {$::strategy in {performance-retime-bounded routability-retime-route-first performance-retime-routability-route-first routability-retime-remap-route-first} ? "on" : "auto"}]
         if {$::strategy in {performance-bounded performance-route-first routability-route-first}} {set retiming off}
         set_property STEPS.SYNTH_DESIGN.ARGS.DIRECTIVE $directive $obj
         set_property STEPS.SYNTH_DESIGN.ARGS.GLOBAL_RETIMING $retiming $obj
@@ -116,7 +116,7 @@ proc launch_runs {run args} {
             set place ExtraNetDelay_high; set phys AggressiveExplore; set route NoTimingRelaxation
         } elseif {$::strategy eq "routability-spread"} {
             set place AltSpreadLogic_medium; set phys Explore; set route AlternateCLBRouting
-        } elseif {$::strategy in {routability-route-first routability-retime-route-first routability-retime-remap-route-first}} {
+        } elseif {$::strategy in {routability-route-first routability-retime-route-first performance-retime-routability-route-first routability-retime-remap-route-first}} {
             set place AltSpreadLogic_high; set phys Default; set route AlternateCLBRouting
         } else {
             set place AltSpreadLogic_medium; set phys Default; set route NoTimingRelaxation
@@ -128,7 +128,7 @@ proc launch_runs {run args} {
         set_property STEPS.POST_ROUTE_PHYS_OPT_DESIGN.IS_ENABLED true $obj
         set_property STEPS.POST_ROUTE_PHYS_OPT_DESIGN.ARGS.DIRECTIVE Explore $obj
         if {$::strategy in {performance-retime-bounded performance-bounded}} {fresh_bounded_phys $obj}
-        if {$::strategy in {performance-route-first routability-route-first routability-retime-route-first routability-retime-remap-route-first}} {fresh_route_first $obj}
+        if {$::strategy in {performance-route-first routability-route-first routability-retime-route-first performance-retime-routability-route-first routability-retime-remap-route-first}} {fresh_route_first $obj}
         set_property STEPS.ROUTE_DESIGN.TCL.PRE [file join $::fresh_script_dir fresh_route_pre.tcl] $obj
     }
     # The source-only platform sets its own legacy thread default. Override

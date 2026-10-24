@@ -32,10 +32,13 @@ class ResultTests(unittest.TestCase):
                 ('routability-route-first', 'off', 8, 8, 'parallel8', 256),
                 ('routability-retime-route-first', 'on', 1, 4, 'serial_apr4', 128),
                 ('routability-retime-route-first', 'on', 8, 8, 'parallel8', 256),
+                ('performance-retime-routability-route-first', 'on', 1, 4, 'serial_apr4', 128),
+                ('performance-retime-routability-route-first', 'on', 8, 8, 'parallel8', 256),
                 (REMAP_STRATEGY, 'on', 1, 4, 'serial_apr4', 128),
                 (REMAP_STRATEGY, 'on', 8, 8, 'parallel8', 256)):
             with self.subTest(strategy=strategy), tempfile.TemporaryDirectory(prefix='closed-route-first-') as td:
                 run = Path(td)
+                directive = 'PerformanceOptimized' if strategy == 'performance-retime-routability-route-first' else 'AlternateRoutability'
                 build = run/'build'; build.mkdir()
                 source = run/'source.sv'; source.write_text('fixture source only\n')
                 (run/'prepared.json').write_text('{}\n')
@@ -59,8 +62,8 @@ class ResultTests(unittest.TestCase):
                 synth = runs/'synth_1/rk_ao486_bd_wrapper.tcl'
                 impl = runs/'impl_1/rk_ao486_bd_wrapper.tcl'
                 synth.parent.mkdir(parents=True); impl.parent.mkdir(parents=True)
-                synth.write_text(SCRIPT.replace('maxThreads 1', f'maxThreads {threads}').replace('PerformanceOptimized', 'AlternateRoutability').rstrip()+f' -global_retiming {retiming}\n')
-                (build/'synth_1-properties.rpt').write_text(PROPS.replace('PerformanceOptimized', 'AlternateRoutability').replace('enum false auto', 'enum false '+retiming))
+                synth.write_text(SCRIPT.replace('maxThreads 1', f'maxThreads {threads}').replace('PerformanceOptimized', directive).rstrip()+f' -global_retiming {retiming}\n')
+                (build/'synth_1-properties.rpt').write_text(PROPS.replace('PerformanceOptimized', directive).replace('enum false auto', 'enum false '+retiming))
                 native = (f'set_param general.maxThreads {apr}\nopt_design -directive RuntimeOptimized\n'
                           'place_design -directive AltSpreadLogic_high\nroute_design -directive AlternateCLBRouting\n')
                 remap_body = ''
@@ -134,6 +137,8 @@ class ResultTests(unittest.TestCase):
                     (8, 8, 'parallel8', 256, 'routability-route-first'),
                     (1, 4, 'serial_apr4', 128, 'routability-retime-route-first'),
                     (8, 8, 'parallel8', 256, 'routability-retime-route-first'),
+                    (1, 4, 'serial_apr4', 128, 'performance-retime-routability-route-first'),
+                    (8, 8, 'parallel8', 256, 'performance-retime-routability-route-first'),
                     (8, 8, 'parallel8', 256, 'performance-route-first'),
                     (8, 8, 'parallel8', 256, 'performance-retime-bounded'))
         for threads, impl, profile, tasks, strategy in policies:

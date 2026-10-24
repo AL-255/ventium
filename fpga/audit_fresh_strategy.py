@@ -12,7 +12,7 @@ import shlex
 
 REMAP_STRATEGY = 'routability-retime-remap-route-first'
 ROUTE_FIRST_STRATEGIES = ('performance-route-first', 'routability-route-first',
-                          'routability-retime-route-first', REMAP_STRATEGY)
+                          'routability-retime-route-first', 'performance-retime-routability-route-first', REMAP_STRATEGY)
 
 
 def property_value(text, name):
@@ -53,9 +53,10 @@ def audit_synth(script, properties, strategy, threads=1, native_log=None):
                   'performance-route-first': 'PerformanceOptimized',
                   'routability-route-first': 'AlternateRoutability',
                   'routability-retime-route-first': 'AlternateRoutability',
+                  'performance-retime-routability-route-first': 'PerformanceOptimized',
                   REMAP_STRATEGY: 'AlternateRoutability'}
     directive = directives[strategy]
-    retiming = 'on' if strategy in ('performance-retime-bounded', 'routability-retime-route-first', REMAP_STRATEGY) else 'auto'
+    retiming = 'on' if strategy in ('performance-retime-bounded', 'routability-retime-route-first', 'performance-retime-routability-route-first', REMAP_STRATEGY) else 'auto'
     if strategy in ('performance-bounded', 'performance-route-first', 'routability-route-first'): retiming = 'off'
     commands = re.findall(r'^synth_design [^\n]+', script, re.M)
     if len(commands) != 1:
@@ -150,6 +151,7 @@ def audit_impl(script, properties, strategy, threads=1, native_log=None):
         'performance-route-first': ('AltSpreadLogic_medium', 'NoTimingRelaxation', []),
         'routability-route-first': ('AltSpreadLogic_high', 'AlternateCLBRouting', []),
         'routability-retime-route-first': ('AltSpreadLogic_high', 'AlternateCLBRouting', []),
+        'performance-retime-routability-route-first': ('AltSpreadLogic_high', 'AlternateCLBRouting', []),
         REMAP_STRATEGY: ('AltSpreadLogic_high', 'AlternateCLBRouting', []),
     }
     place, route, phys = configs[strategy]

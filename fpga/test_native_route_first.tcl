@@ -19,19 +19,19 @@ proc route_first_check_status {run status directory} {
 }
 
 # Source-only tooling probe, NOT full-core timing or hardware acceptance.
-if {$argc ni {1 2 3}} {error "usage: new-output-directory ?performance-route-first|routability-route-first|routability-retime-route-first|routability-retime-remap-route-first? ?serial_apr4|parallel8?"}
+if {$argc ni {1 2 3}} {error "usage: new-output-directory ?performance-route-first|routability-route-first|routability-retime-route-first|performance-retime-routability-route-first|routability-retime-remap-route-first? ?serial_apr4|parallel8?"}
 set strategy performance-route-first
 if {$argc >= 2} {set strategy [lindex $argv 1]}
-if {$strategy ni {performance-route-first routability-route-first routability-retime-route-first routability-retime-remap-route-first}} {error "unknown probe strategy"}
+if {$strategy ni {performance-route-first routability-route-first routability-retime-route-first performance-retime-routability-route-first routability-retime-remap-route-first}} {error "unknown probe strategy"}
 set thread_profile serial_apr4
 if {$argc == 3} {set thread_profile [lindex $argv 2]}
 if {$thread_profile ni {serial_apr4 parallel8}} {error "unknown probe thread profile"}
 set synth_threads [expr {$thread_profile eq "parallel8" ? 8 : 1}]
 set apr_threads [expr {$thread_profile eq "parallel8" ? 8 : 4}]
-set synth_retiming [expr {$strategy in {routability-retime-route-first routability-retime-remap-route-first} ? "on" : "off"}]
+set synth_retiming [expr {$strategy in {routability-retime-route-first performance-retime-routability-route-first routability-retime-remap-route-first} ? "on" : "off"}]
 set synth_directive [expr {$strategy in {routability-route-first routability-retime-route-first routability-retime-remap-route-first} ? "AlternateRoutability" : "PerformanceOptimized"}]
-set place_directive [expr {$strategy in {routability-route-first routability-retime-route-first routability-retime-remap-route-first} ? "AltSpreadLogic_high" : "AltSpreadLogic_medium"}]
-set route_directive [expr {$strategy in {routability-route-first routability-retime-route-first routability-retime-remap-route-first} ? "AlternateCLBRouting" : "NoTimingRelaxation"}]
+set place_directive [expr {$strategy in {routability-route-first routability-retime-route-first performance-retime-routability-route-first routability-retime-remap-route-first} ? "AltSpreadLogic_high" : "AltSpreadLogic_medium"}]
+set route_directive [expr {$strategy in {routability-route-first routability-retime-route-first performance-retime-routability-route-first routability-retime-remap-route-first} ? "AlternateCLBRouting" : "NoTimingRelaxation"}]
 set out [file normalize [lindex $argv 0]]
 if {[file exists $out]} {error "probe output must not exist"}
 if {[version -short] ne "2025.2"} {error "Vivado 2025.2 required"}

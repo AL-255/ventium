@@ -1,5 +1,74 @@
 # APR strategy comparison — 40 MHz target
 
+## Remap rejected; performance mapping selected — Oct24 08:31 EDT
+
+The fresh `routability-retime-remap-route-first-r1` run closed successfully
+as a tool run, but **failed the 40 MHz timing target**. Its conditional routed
+core estimate is **31.919307989 MHz**, **6.92% below** the source-matched
+retiming control's **34.293552812 MHz**. Adding remapping improved the worst
+unplaced estimate but did not improve the implemented result. Keep the
+non-remap control as the best completed strategy; neither is timing sign-off.
+
+| Final measurement | Retiming control | With remap |
+|---|---:|---:|
+| Core setup slack, 25 ns requirement | −4.160 ns | −6.329 ns |
+| Core hold slack | 0.000 ns | +0.011 ns |
+| Setup-failing endpoints | 57,846 | 64,006 |
+| Total negative setup slack | −127,969.484 ns | −228,067.406 ns |
+| LUTs / registers | 192,601 / 55,163 | 193,043 / 55,097 |
+| Native routing time | 42 min 42 s | 55 min 10 s |
+| Implementation through final evidence | 1 h 2 min 39 s | 1 h 19 min 11 s |
+
+The full run took **2 h 47 min 14 s**, native/controller exit 0. All **217
+launch pins** remained unchanged. The owner and its entire Vivado family
+exited before any helper changes. Independent closure auditing passed:
+**254,014/254,014 nets fully routed**, zero routing errors, no DRC
+errors/critical warnings, numeric hold and pulse-width checks passing, all
+ten bus-skew checks passing (minimum **9.448 ns**), and CDC reporting all paths
+safely timed. The only coverage omissions remain the four status-LED output
+delays. AXI→AXI setup/hold is +5.769/+0.015 ns; core→AXI +1.354/+0.714 ns;
+AXI→core +1.562/+1.808 ns. These do not excuse the failing core setup timing.
+Across 2,004 resource samples there were no OOM or task-limit events; peak
+combined RAM/swap was **43.18 GiB**, with a sampled peak of 96 tasks.
+
+The worst twenty routed paths now start at `q_pc[0]` (13) and `eip[5]` (7),
+with **78–85 logic levels**. The worst is `q_pc[0]`→`eip[4]`: **31.165 ns**
+data delay, comprising **7.268 ns logic / 23.897 ns routing**. The changed
+critical paths do not establish a matched-path depth improvement or justify
+false-path exceptions. BRAM/DSP usage remains 277.5 tiles / 47 blocks.
+
+Evidence is under
+`/home/yukidama/external/tmp/ventium-remap-oct24.FUH5sZcw/routability-retime-remap-route-first-r1/`:
+`pre-next-strategy-audit.json`, `strategy-transition-evidence.json`, the
+18-file `closed-tool-snapshot/`, and all native/final reports. The transition
+receipt separately hashes the four nested remap reports. Final timing TSV
+SHA256 is `80f244b300d228dbb5099714baa32ac449393c4e4f4fe19f2783e296dd3a4723`;
+raw bitstream SHA256 is
+`6f93a77143ca5eb37e81ffd42d7255689e246d4a2820806eba96238734213072`.
+This bitstream is retained as evidence, not deployed or accepted.
+
+**Next: `performance-retime-routability-route-first`.** Change only synthesis
+mapping from `AlternateRoutability` to `PerformanceOptimized` relative to the
+34.293553 MHz control. Keep retiming on, rebuilt hierarchy, RuntimeOptimized,
+AltSpreadLogic_high, AlternateCLBRouting, optional physical stages disabled,
+eight threads per stage, one job, uncapped RAM/swap and unchanged 25/10 ns
+clocks. Do not retain the rejected remap pass. The earlier source-matched
+performance mapping had a better unplaced estimate, but failed routing under
+different APR settings; it motivates this combination without proving it.
+
+After closure, all 25 original preparation-base hashes were checked and only
+the eight reviewed helper/test changes plus one new test were promoted.
+**74 flow/audit + 26 scope-policy tests pass (100 total)**. A fresh source-only
+native probe is required before the full build; neither probe nor prior-run
+checkpoints may become inputs to it. No CPU/cache RTL, constraints, dirty local
+work or board state was changed. The placement-only alternatives remain
+unselected and their preparation bases must be refreshed before later use.
+
+Verified gameplay remains the **0.496499864 total U+V IPC baseline**, physical
+image **2886d24c**, cycles **625,021,130,428–629,480,208,865**. It predates these
+candidates; their gameplay is **unmeasured**. Timing sign-off, exception review
+and physical acceptance remain open.
+
 ## Retiming/eight-thread trial closed: 34.293553 MHz — Oct24 05:32 EDT
 
 `routability-retime-route-first-r1` completed from fresh source in **2 h 36 min
