@@ -191,8 +191,8 @@ for this explicit pass; its SHA256 is
 The initial hook passed four host tests. Its isolated candidate now integrates
 the named **`routability-retime-remap-route-first`** strategy, dependency pin,
 native probe and independent closed-run auditor. The base/candidate manifest
-records 22 base files, seven modified files and three additions. **93 host tests
-pass: 67 flow/audit and 26 scope-policy tests**, including both thread profiles,
+records 22 base files, seven modified files and three additions. **96 host tests
+pass: 70 flow/audit and 26 scope-policy tests**, including both thread profiles,
 actual Tcl configuration under stubs, failure propagation, duplicate refusal,
 the closed-run dispatcher and the probe's embedded Python auditor. The latter
 is exercised with paths containing spaces and missing native evidence.
@@ -206,6 +206,24 @@ All 216 live-build pins were rechecked unchanged during preparation.
 base-hash/promotion checks and the required fresh native probe after the live
 family exits. This and the timing-placement option below remain conditional
 alternatives selected from completed path evidence, not an automatic sweep.
+
+The candidate hook additionally records **before/after 20-path core timing
+and hierarchical utilization**, immediately around the remap pass. It requires
+a unique 25 ns clock and a core setup path at both stages, refuses stale report
+files, and propagates reporting failures rather than emitting a success marker.
+This is needed to distinguish merely executing the command from reducing logic
+depth or changing area; these are still unplaced estimates, not routed timing.
+The four `fresh-remap-*.rpt` files stay in the native implementation directory
+and require explicit hash retention during closure review. No native remap
+benefit is claimed. All 216 active-build pins remain unchanged at 05:08 EDT.
+
+The active retiming trial's own placer log also confirms the preservation
+preflight: the outer SoC `DONT_TOUCH` prevents reset-net replication/BUFG
+insertion, while internal transformations remain possible. Its in-placer
+physical synthesis reports 2,044 LUT-combining changes, 140 equivalent-driver
+rewirings, and zero retiming changes, with one blocked high-fanout optimization.
+These observations do not prove the critical core path is blocked by that
+attribute; broad preservation removal is not selected.
 
 Verified gameplay baseline remains **0.496499864 total U+V IPC**, physical
 image **2886d24c**, cycles **625,021,130,428–629,480,208,865**. It predates the
