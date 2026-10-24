@@ -148,6 +148,14 @@ Through the first 1,126 resource samples, combined charged RAM+swap peaked at
 **44.04 GiB**, with zero OOM-kill/task-limit events. The heavy mapping helpers
 exited after their work; they were children of the single build, not orphan runs.
 
+Placement subsequently completed in **13 min 14 s**, and routing started at
+**04:44:01 EDT**, using `AlternateCLBRouting` with a native maximum of eight
+CPUs. Placed LUTs fell from the control's 192,824 to **192,601**, but occupied
+CLBs rose from 33,388 to **33,723 (79.05%)** and unique control sets from 2,452
+to **2,526**. Registers are 55,163 and CARRY8s remain 3,379. Lower LUT count
+therefore has not translated into fewer occupied CLBs. These are placement
+results, not final routing legality, congestion or frequency measurements.
+
 Evidence under this trial's `build/`:
 
 - `synth-timing.rpt`, SHA256
@@ -180,13 +188,24 @@ installed 2025.2 `opt_design` manual documents timing-driven depth reduction
 for this explicit pass; its SHA256 is
 `07fe23847c2080edb7a446fcbf930c39a9b0e5cd57800016ef4bc5b4e5b3198f`.
 
-Four host tests pass, covering exact command/options, version/part/thread
-rejection, native-error propagation and duplicate-execution refusal. These
-stub Vivado; **the hook is not integrated, natively tested, promoted or queued**.
-Its README records the missing strategy/probe/pinning/auditor integration,
-including proof of both optimization passes in order. The timing-placement
-option below and this remap hook are conditional alternatives; choose from
-the current run's completed path evidence, not an automatic strategy sweep.
+The initial hook passed four host tests. Its isolated candidate now integrates
+the named **`routability-retime-remap-route-first`** strategy, dependency pin,
+native probe and independent closed-run auditor. The base/candidate manifest
+records 22 base files, seven modified files and three additions. **93 host tests
+pass: 67 flow/audit and 26 scope-policy tests**, including both thread profiles,
+actual Tcl configuration under stubs, failure propagation, duplicate refusal,
+the closed-run dispatcher and the probe's embedded Python auditor. The latter
+is exercised with paths containing spaces and missing native evidence.
+
+The auditor requires the hook property and actual source command to agree,
+plus both exact native `opt_design` commands/completions and hook markers in
+order before placement. A marker-only pass, missing native command, substituted
+options, unexpected extra pass or unselected strategy acquiring the hook fails.
+All 216 live-build pins were rechecked unchanged during preparation.
+**The option is not natively tested, promoted or queued.** Its README records
+base-hash/promotion checks and the required fresh native probe after the live
+family exits. This and the timing-placement option below remain conditional
+alternatives selected from completed path evidence, not an automatic sweep.
 
 Verified gameplay baseline remains **0.496499864 total U+V IPC**, physical
 image **2886d24c**, cycles **625,021,130,428–629,480,208,865**. It predates the
