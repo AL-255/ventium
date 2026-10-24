@@ -71,6 +71,24 @@ own log. **56 flow/audit + 26 scope tests pass (82 total)**, including closed-ru
 log propagation and a Tcl test that forbids silently changing the parameter.
 The next probe must rebuild its fixture from source in a fresh output directory.
 
+The repaired native probe **r2 passed** on commit `8ab52c99`, with native exit 0
+and both actual worker readbacks equal to eight. It completed fresh synthesis
+(five forward retiming moves) and routing with the expected directives, one job
+per stage, and no optional physical-optimization stages. Its evidence is under
+`ventium-retime-oct24.gdZ3iE0X/native-probe-r2`; the full build does **not** consume
+that probe's checkpoint. All processes exited before the next launch.
+
+At **02:55 EDT**, full fresh run **`routability-retime-route-first-r1`** started
+under `/home/yukidama/external/tmp/ventium-retime-oct24.gdZ3iE0X/`, owner
+`ventium-fresh-retime-oct24-r1.service`, invocation
+`88a7fabd3f9a44be8b8b905c9ed05159`. It has **216 input pins**, including the new
+native thread-readback hook, eight threads per stage, one native job/family,
+uncapped RAM/swap and 256-task headroom. Source preparation confirms the same
+159 defines, `cycle_mode=1`, byte-identical frozen CPU/cache RTL, 25/10 ns clocks,
+and an empty prior-checkpoint input list. It has no full-core retiming, timing
+or gameplay result yet. The preceding 31.028919 MHz result remains the latest
+completed strategy result, not this candidate's frequency.
+
 ## Congestion failure and next fresh strategy — 2026-10-23
 
 The Oct22 `performance-route-first-r1` ended at **22:17:56 EDT** with native
