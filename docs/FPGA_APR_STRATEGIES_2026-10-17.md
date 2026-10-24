@@ -41,6 +41,22 @@ deficit with the other cells, wires and clock skew fixed. The largest individual
 arc is 1.173 ns, on `g_ic_prefix_span[0].pos[5]` (fanout 1,357); low-fanout
 `mc_prime_offer` also costs 0.668 ns. This supports examining serial-depth and
 placement together, rather than attributing the full miss to one large fanout.
+
+Further comparison of the twenty **routed** paths finds an identical leading
+sequence of **35 data-net arcs**, ending at `q_md[1]_i_3_0`. On the worst path,
+this shared prefix consumes **14.078 ns from source Q** (16.042 ns arrival minus
+1.964 ns at Q), excluding clock-to-Q and the clock tree. It is not twenty
+independent endpoint problems. The frozen source explicitly computes
+`next_eip = q_pc + q_len`, then `p54_prefix_ex_flin = fbase + next_eip` for the
+successor-byte/prefix selection. Six of the reported paths subsequently traverse
+`mc_prime_offer`; on the worst path that net is reached **27.223 ns after Q**,
+before the cache-data lookup/return finishes. A cache-return-only improvement
+would therefore leave a substantial upstream timing problem. These are physical
+path observations, not proof of a false path or permission to change processor
+latency. Compare the retimed run's actual critical-path startpoints, shared
+prefix and transformation counts before deciding whether placement alone is
+the next useful experiment.
+
 The next trial will test the prepared
 **`routability-retime-route-first`** strategy: retain the successful routability
 mapping/place/router choices, enable synthesis retiming, and use eight internal
