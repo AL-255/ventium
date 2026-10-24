@@ -9,7 +9,7 @@ import math
 from pathlib import Path
 import re
 
-from audit_fresh_strategy import audit_synth, audit_impl, audit_threads, property_value
+from audit_fresh_strategy import audit_synth, audit_impl, audit_threads, property_value, native_worker_log
 from run_apr_trial import REPO, sha, validate_timing
 
 # Exact, reviewed reporting-only amendment for the already-running r2. These
@@ -269,17 +269,18 @@ def audit_closed(run):
     script = build/'rk_ao486_system/rk_ao486_system.runs/synth_1/rk_ao486_bd_wrapper.tcl'
     threads = started.get('tool_threads', 1)
     impl_threads = started.get('implementation_threads', threads)
-    synth = audit_synth(script.read_text(), (build/'synth_1-properties.rpt').read_text(), started['strategy'], threads)
+    synth = audit_synth(script.read_text(), (build/'synth_1-properties.rpt').read_text(),
+                        started['strategy'], threads, native_worker_log(script))
     if 'tool_threads' in started:
         # Legacy receipts predate the explicit field; newly configured runs
         # must prove the native implementation's thread cap too.
         impl_script = build/'rk_ao486_system/rk_ao486_system.runs/impl_1/rk_ao486_bd_wrapper.tcl'
-        audit_threads(impl_script.read_text(), impl_threads)
+        audit_threads(impl_script.read_text(), impl_threads, native_worker_log(impl_script))
     impl = (build/'impl_1-properties.rpt').read_text()
     if started['strategy'] in ('performance-retime-bounded', 'performance-bounded', 'performance-route-first',
                                'routability-route-first', 'routability-retime-route-first'):
         impl_script = build/'rk_ao486_system/rk_ao486_system.runs/impl_1/rk_ao486_bd_wrapper.tcl'
-        audit_impl(impl_script.read_text(), impl, started['strategy'], impl_threads)
+        audit_impl(impl_script.read_text(), impl, started['strategy'], impl_threads, native_worker_log(impl_script))
     if property_value(impl, 'AUTO_INCREMENTAL_CHECKPOINT') != '0' or property_value(impl, 'INCREMENTAL_CHECKPOINT'):
         raise ValueError('incremental implementation')
     result = final_reports(build)

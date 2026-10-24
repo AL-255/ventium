@@ -15,7 +15,7 @@ import time
 
 from run_apr_trial import GIB, REPO, SCRATCH, SCOPE, host, scope, sha, validate_timing
 from prepare_programmable_clock_repair import adapt
-from audit_fresh_strategy import audit_synth, audit_impl
+from audit_fresh_strategy import audit_synth, audit_impl, native_worker_log
 
 ANCESTOR = SCRATCH/'ventium-fprem-sequence.iSZ9BAj4/programmable-clock-r3'
 PREPARED_SHA = '5308f8044f35b387e833e1b62a52ec7605bb3a5e157096d9327b638d4b659a54'
@@ -93,7 +93,7 @@ def prepare(dest):
     # Pin launch dependencies too, including imported helper modules.
     for name in ('run_fresh_strategy.py', 'fresh_strategy.tcl', 'fresh_synth_post.tcl', 'fresh_synth_evidence.tcl',
                  'fresh_route_pre.tcl', 'fresh_reports.tcl', 'fresh_bounded_phys.tcl',
-                 'fresh_route_first.tcl', 'run_apr_trial.py',
+                 'fresh_route_first.tcl', 'fresh_threads8_pre.tcl', 'run_apr_trial.py',
                  'prepare_programmable_clock_repair.py', 'prepare_programmable_clock.py',
                  'audit_clock_reuse.py', 'audit_fresh_strategy.py', 'run_vivado_exclusive.sh'):
         pins[str(REPO/'fpga'/name)] = sha(REPO/'fpga'/name)
@@ -108,10 +108,10 @@ def prepare(dest):
     return pins
 
 
-def validate_native_synth(text, strategy, properties, threads=1):
+def validate_native_synth(text, strategy, properties, threads=1, native_log=None):
     # Vivado omits default-valued arguments from its generated command. The
     # actual property report, not the spelling of a default, is the authority.
-    return audit_synth(text, properties, strategy, threads)['command']
+    return audit_synth(text, properties, strategy, threads, native_log)['command']
 
 
 def stage_deadline(text, now):
@@ -331,10 +331,13 @@ def main():
     try:
         assert code == 0 and not reason and not failure and unchanged and owner
         assert 'FRESH-STRATEGY-COMPLETE '+args.strategy in (dest/'native.log').read_text()
-        native_synth = validate_native_synth((dest/'build/rk_ao486_system/rk_ao486_system.runs/synth_1/rk_ao486_bd_wrapper.tcl').read_text(), args.strategy,
-            (dest/'build/synth_1-properties.rpt').read_text(), args.threads)
-        audit_impl((dest/'build/rk_ao486_system/rk_ao486_system.runs/impl_1/rk_ao486_bd_wrapper.tcl').read_text(),
-            (dest/'build/impl_1-properties.rpt').read_text(), args.strategy, implementation_threads)
+        native_runs = dest/'build/rk_ao486_system/rk_ao486_system.runs'
+        synth_script = native_runs/'synth_1/rk_ao486_bd_wrapper.tcl'
+        impl_script = native_runs/'impl_1/rk_ao486_bd_wrapper.tcl'
+        native_synth = validate_native_synth(synth_script.read_text(), args.strategy,
+            (dest/'build/synth_1-properties.rpt').read_text(), args.threads, native_worker_log(synth_script))
+        audit_impl(impl_script.read_text(), (dest/'build/impl_1-properties.rpt').read_text(),
+            args.strategy, implementation_threads, native_worker_log(impl_script))
         measurements = validate_timing((dest/'build/timing.tsv').read_text())
         assert (dest/'build/fresh-routed.dcp').stat().st_size > 50_000_000
         assert (dest/'build/rk_ao486_system.bit.bin').stat().st_size > 10_000_000

@@ -126,10 +126,14 @@ proc launch_runs {run args} {
         if {$::strategy in {performance-route-first routability-route-first routability-retime-route-first}} {fresh_route_first $obj}
         set_property STEPS.ROUTE_DESIGN.TCL.PRE [file join $::fresh_script_dir fresh_route_pre.tcl] $obj
     }
-    fresh_run $run
     # The source-only platform sets its own legacy thread default. Override
     # immediately before each native launch without changing its -jobs 1.
     set threads [expr {$run eq "synth_1" ? $::tool_threads : $::implementation_threads}]
+    if {$threads == 8} {
+        set step [expr {$run eq "synth_1" ? "SYNTH_DESIGN" : "OPT_DESIGN"}]
+        set_property STEPS.${step}.TCL.PRE [file join $::fresh_script_dir fresh_threads8_pre.tcl] $obj
+    }
+    fresh_run $run
     set_param general.maxThreads $threads
     if {[get_param general.maxThreads] != $threads} {error "tool thread policy drift"}
     fresh_event $run

@@ -78,6 +78,23 @@ class ResultTests(unittest.TestCase):
                 (run/'closed.json').write_text(json.dumps(closed))
                 with patch('audit_fresh_result.final_reports', return_value={}):
                     self.assertTrue(audit_closed(run)['native_completion_verified'])
+                    if threads == 8:
+                        # Real Vivado omits its default general.maxThreads=8.
+                        # Exercise log propagation through the closed auditor.
+                        original_synth = synth.read_text()
+                        synth.write_text(original_synth.replace('set_param general.maxThreads 8\n', ''))
+                        impl.write_text(native.replace('set_param general.maxThreads 8\n', ''))
+                        marker = 'FRESH-NATIVE-THREADS-CHECK observed=8\n'
+                        logs = [p.with_name('runme.log') for p in (synth, impl)]
+                        for p in logs: p.write_text(marker)
+                        self.assertTrue(audit_closed(run)['native_completion_verified'])
+                        for p in logs:
+                            for bad_log in ('', marker*2, marker.replace('8', '4')):
+                                p.write_text(bad_log)
+                                with self.assertRaises(ValueError): audit_closed(run)
+                            p.write_text(marker)
+                        synth.write_text(original_synth)
+                        impl.write_text(native)
                     for bad in (native+'phys_opt_design\n',
                                 native.replace('AlternateCLBRouting', 'Default'),
                                 native.replace('AltSpreadLogic_high', 'AltSpreadLogic_medium')):

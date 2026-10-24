@@ -13,6 +13,20 @@ from test_audit_fresh_strategy import SCRIPT, PROPS
 
 
 class FreshTests(unittest.TestCase):
+    def test_native_thread_hook_checks_without_changing_worker_setting(self):
+        hook = Path(__file__).with_name('fresh_threads8_pre.tcl').read_text()
+        for version, observed in (('2025.2', '8'), ('2025.2', '4'),
+                                  ('2025.2', '8.0'), ('2025.1', '8')):
+            with self.subTest(version=version, observed=observed), tempfile.TemporaryDirectory(prefix='native-threads-') as td:
+                script = (f'proc version {{args}} {{return {version}}}\n'
+                          f'proc get_param {{p}} {{if {{$p ne "general.maxThreads"}} {{error "wrong parameter"}}; return {observed}}}\n'
+                          'proc set_param {args} {error "must not fix a mismatch silently"}\n'+hook)
+                runner = Path(td)/'hook.tcl'; runner.write_text(script)
+                result = subprocess.run(['tclsh', str(runner)], text=True, capture_output=True)
+                valid = version == '2025.2' and observed == '8'
+                self.assertEqual(result.returncode == 0, valid, result.stdout+result.stderr)
+                self.assertEqual(result.stdout.count('FRESH-NATIVE-THREADS-CHECK observed=8\n'), int(valid))
+
     def test_new_launch_defaults_to_eight_threads_without_launching(self):
         for strategy in STRATEGIES:
             with self.subTest(strategy=strategy):
@@ -365,6 +379,14 @@ foreach {{obj prop expected}} {{
 if {{![catch {{launch_runs impl_1 -jobs 1}}]}} {{error "duplicate launch allowed"}}
 if {{[get_property STEPS.SYNTH_DESIGN.TCL.POST synth_1] ne ""}} {{error "native post hook retained"}}
 puts FRESH-TCL-OK
+'''
+                if threads == 8:
+                    checks += '''
+foreach {obj step} {synth_1 SYNTH_DESIGN impl_1 OPT_DESIGN} {
+ if {[get_property STEPS.${step}.TCL.PRE $obj] ne [file join $::fresh_script_dir fresh_threads8_pre.tcl]} {
+  error "native thread readback hook missing"
+ }
+}
 '''
                 if strategy in ('performance-retime-bounded', 'performance-bounded'):
                     checks += '''

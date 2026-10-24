@@ -57,6 +57,20 @@ Verified gameplay baseline remains **0.496499864 total U+V IPC**, image
 **2886d24c**, cycles **625,021,130,428–629,480,208,865**. It predates this
 unmeasured candidate. The new bitstream has no gameplay measurement.
 
+The first native eight-thread probe (commit `af86c408`, artifact root
+`/home/yukidama/external/tmp/ventium-retime-oct24.gdZ3iE0X/native-probe`)
+completed synthesis with **five forward retiming moves**, then correctly stopped
+because the auditor could not prove the omitted `general.maxThreads` assignment.
+No implementation was launched. This is a tooling-evidence failure, not a full
+core retiming result. The repair adds a native synthesis/optimization pre-hook
+that reads and checks `get_param general.maxThreads`; it never changes a
+mismatched worker setting. An omitted default is accepted only with exactly one
+matching native-worker readback. Missing, duplicated, contradictory or non-eight
+readback is rejected. Both launcher and independent auditor consume each worker's
+own log. **56 flow/audit + 26 scope tests pass (82 total)**, including closed-run
+log propagation and a Tcl test that forbids silently changing the parameter.
+The next probe must rebuild its fixture from source in a fresh output directory.
+
 ## Congestion failure and next fresh strategy — 2026-10-23
 
 The Oct22 `performance-route-first-r1` ended at **22:17:56 EDT** with native

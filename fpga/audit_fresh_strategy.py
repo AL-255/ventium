@@ -19,17 +19,28 @@ def property_value(text, name):
     return values[0]
 
 
-def audit_threads(script, threads=1):
+def native_worker_log(script):
+    log = Path(script).with_name('runme.log')
+    return log.read_text() if log.is_file() else None
+
+
+def audit_threads(script, threads=1, native_log=None):
     if type(threads) is not int or threads not in (1, 2, 4, 8):
         raise ValueError('only one, two, four or eight internal threads supported')
     values = re.findall(r'^[ \t]*set_param[ \t]+general\.maxThreads[ \t]+(\S+)[ \t]*$', script, re.M)
+    observed = re.findall(r'^FRESH-NATIVE-THREADS-CHECK observed=([^\r\n]*)$', native_log or '', re.M)
+    if observed and observed != [str(threads)]:
+        raise ValueError('native worker thread readback disagrees')
     if values != [str(threads)]:
-        raise ValueError('native thread bound missing/ambiguous/mismatched')
+        # Only the observed default omission is admitted, with native worker
+        # get_param evidence. A requested eight is never sufficient by itself.
+        if values or threads != 8 or observed != ['8']:
+            raise ValueError('native thread bound missing/ambiguous/mismatched')
     return threads
 
 
-def audit_synth(script, properties, strategy, threads=1):
-    audit_threads(script, threads)
+def audit_synth(script, properties, strategy, threads=1, native_log=None):
+    audit_threads(script, threads, native_log)
     if threads not in (1, 2, 8) or (strategy in ('performance-route-first', 'routability-route-first', 'routability-retime-route-first') and threads not in (1, 8)):
         raise ValueError('unsupported synthesis thread count')
     directives = {'performance-netdelay': 'PerformanceOptimized', 'routability-spread': 'AlternateRoutability',
@@ -79,9 +90,9 @@ def audit_synth(script, properties, strategy, threads=1):
                 timing_driven=True, prior_checkpoint_input=False, configured_threads=threads)
 
 
-def audit_impl(script, properties, strategy, threads=1):
+def audit_impl(script, properties, strategy, threads=1, native_log=None):
     """Check the emitted operations, not merely the strategy label."""
-    audit_threads(script, threads)
+    audit_threads(script, threads, native_log)
     route_first = strategy in ('performance-route-first', 'routability-route-first', 'routability-retime-route-first')
     if (route_first and threads not in (4, 8)) or (not route_first and threads == 4):
         raise ValueError('unsupported implementation thread count')
@@ -132,7 +143,7 @@ def main():
     build = args.run/'build'
     script = build/'rk_ao486_system/rk_ao486_system.runs/synth_1/rk_ao486_bd_wrapper.tcl'
     result = audit_synth(script.read_text(), (build/'synth_1-properties.rpt').read_text(),
-                         started['strategy'], started.get('tool_threads', 1))
+                         started['strategy'], started.get('tool_threads', 1), native_worker_log(script))
     print(json.dumps(dict(native_synthesis_configuration=result,
                          completion_verified=False, timing_signoff=False, gameplay_ipc=None), indent=2))
 

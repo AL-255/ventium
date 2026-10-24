@@ -73,6 +73,11 @@ set_property STEPS.OPT_DESIGN.ARGS.DIRECTIVE RuntimeOptimized $impl
 set_property STEPS.PLACE_DESIGN.ARGS.DIRECTIVE $place_directive $impl
 set_property STEPS.ROUTE_DESIGN.ARGS.DIRECTIVE $route_directive $impl
 fresh_route_first $impl
+if {$thread_profile eq "parallel8"} {
+    set hook [file join [file dirname [file normalize [info script]]] fresh_threads8_pre.tcl]
+    set_property STEPS.SYNTH_DESIGN.TCL.PRE $hook $synth
+    set_property STEPS.OPT_DESIGN.TCL.PRE $hook $impl
+}
 report_property $synth -file [file join $out synth-properties.rpt]
 report_property $impl -file [file join $out impl-properties.rpt]
 foreach {run threads} [list synth_1 $synth_threads impl_1 $apr_threads] {
@@ -90,7 +95,14 @@ foreach {run threads} [list synth_1 $synth_threads impl_1 $apr_threads] {
     route_first_check_status $run [get_property STATUS $obj] $dir
     set f [open [file join $dir route_first_probe.tcl] r]; set native [read $f]; close $f
     set settings [regexp -all -inline -line {^[ \t]*set_param[ \t]+general\.maxThreads[ \t]+[^\r\n]+} $native]
-    if {[llength $settings] != 1 || [string trim [lindex $settings 0]] ne "set_param general.maxThreads $threads"} {
+    set f [open [file join $dir runme.log] r]; set native_log [read $f]; close $f
+    set observed [regexp -all -inline -line {^FRESH-NATIVE-THREADS-CHECK observed=[^\r\n]*} $native_log]
+    if {[llength $observed] && $observed ne [list "FRESH-NATIVE-THREADS-CHECK observed=$threads"]} {
+        error "native worker thread readback mismatch: $observed"
+    }
+    set observed_default [expr {$threads == 8 && ![llength $settings] &&
+        $observed eq [list "FRESH-NATIVE-THREADS-CHECK observed=8"]}]
+    if {!$observed_default && ([llength $settings] != 1 || [string trim [lindex $settings 0]] ne "set_param general.maxThreads $threads")} {
         error "native stage thread cap mismatch: $settings"
     }
     if {$run eq "synth_1"} {

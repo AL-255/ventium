@@ -15,6 +15,20 @@ STEPS.SYNTH_DESIGN.ARGS.MORE OPTIONS string false
 
 
 class AuditTests(unittest.TestCase):
+    def test_default_eight_threads_requires_native_worker_readback(self):
+        script = SCRIPT.replace('set_param general.maxThreads 1\n', '')
+        marker = 'FRESH-NATIVE-THREADS-CHECK observed=8\n'
+        self.assertEqual(audit_threads(script, 8, native_log=marker), 8)
+        for log in (None, '', marker*2, marker.replace('8', '4'),
+                    marker.replace('observed=8', 'observed=8.0')):
+            with self.subTest(log=log), self.assertRaises(ValueError):
+                audit_threads(script, 8, native_log=log)
+        for count in (1, 2, 4):
+            with self.subTest(count=count), self.assertRaises(ValueError):
+                audit_threads(script, count, native_log=marker)
+        with self.assertRaises(ValueError):
+            audit_threads(SCRIPT, 8, native_log=marker)
+
     def test_retiming_route_first_changes_only_retiming_and_keeps_phys_disabled(self):
         strategy = 'routability-retime-route-first'
         props = PROPS.replace('PerformanceOptimized', 'AlternateRoutability').replace('enum false auto', 'enum false on')
