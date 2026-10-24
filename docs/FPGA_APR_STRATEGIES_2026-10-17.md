@@ -1,6 +1,6 @@
 # APR strategy comparison — 40 MHz target
 
-## Performance mapping rejected; MUXF-only trial launched — Oct24
+## MUXF remap completed; placement running — Oct24
 
 The fresh `performance-retime-routability-route-first-r1` trial ended with
 native exit **1** after **3 h 14 min**. Vivado explicitly reports **2,294
@@ -99,10 +99,68 @@ The profile has 159 defines, `cycle_mode=1`, unchanged 40 MHz core / 100 MHz
 AXI constraints, eight threads per stage, one native job and uncapped RAM/swap.
 Prior-checkpoint inputs are empty; the dirty checkout's CPU RTL is not used.
 The native probe's retained, process-free owner was stopped after its receipt
-was saved and before the full run launched. No full-run timing or gameplay
-result exists yet.
+was saved and before the full run launched. No routed timing or candidate
+gameplay result exists yet.
 
-**Read-only follow-up while synthesis runs (Oct24):** `RQS_CONG-9` names
+**Fresh synthesis completed Oct24 13:15 EDT:** native synthesis succeeds in
+**59 min 17 s**, with 725 warnings, zero critical warnings and zero errors.
+Its checksum **7765fc10**, all nine compared resource counts and reported worst
+core setup path match the preceding performance-mapping trial. Counts are
+**185,897 LUTs, 54,922 registers, 3,682 CARRY8s, 17,814/6,840/96 MUXF7/8/9s,
+2,409 control sets, 277.5 BRAM tiles and 47 DSPs**. The **unplaced** estimate
+remains **38.067684 MHz** (25 ns requirement, −1.269 ns setup slack); it is
+not routed timing or a gain from remapping, which has not yet completed.
+The matched path remains `q_pc[0]` → shared-FPU `status[10]`, 93 logic levels,
+26.058 ns estimated data delay (5.847 ns logic / 20.211 ns estimated wire).
+
+Independent native-configuration auditing passes; all **218 launch pins** and
+all **200 source files matching the control** were rehashed unchanged.
+Implementation launched at **13:16:48 EDT**, using only this run's newly
+synthesized netlist. The normal RuntimeOptimized pass precedes MUXF remapping;
+placement, legal routing, final timing and hardware acceptance remain open.
+The warning histogram matches the control, but the new log additionally has
+**seven paging/thrashing notices**. These were not suppressed or treated as an
+OOM: 764 resource samples through 13:19 show no scope OOM, a peak combined
+RAM/swap of **40.71 GiB**, and no resource-stop reason. A five-second check
+during the earlier notices measured five CPU-seconds and zero new page faults;
+that sample does not rule out paging at other times. Evidence and report
+hashes are in the active run's `post-synth-comparison.json`. The active inputs
+were not amended, and no previous/probe checkpoint was used as a build input.
+
+**Full-design MUXF remap completed at 13:18 EDT; placement is running.** The
+explicit pass took **8 seconds**, converting **22,350 MUXFX primitives into
+LUT3s**. Its post-processing removed nine further cells; preservation
+constraints were not overridden. Native counts changed from
+**17,814/6,840/96 → 1,536/768/96 MUXF7/8/9s**: a **90.3%** reduction in total
+MUXFs, not their elimination.
+
+| Matched optimized stage | Before MUXF pass | After MUXF pass |
+|---|---:|---:|
+| Total LUTs | 184,996 | 207,337 |
+| Registers | 54,852 | 54,852 |
+| Total MUXFs | 24,750 | 2,400 |
+| Unplaced core setup estimate | 38.018477 MHz | 37.041153 MHz |
+| Setup slack at 25 ns | −1.303 ns | −1.997 ns |
+
+LUT cost is **+22,341 (+12.08%)**. LUTRAMs (4,282), SRLs (76), BRAM tiles
+(277.5) and DSPs (47) are unchanged. This is not a placed CLB-footprint result.
+Both reports contain the same twenty source/destination pairs, and all twenty
+have worse **unplaced estimates** after remapping. Seventeen EIP[0]→L1D-valid
+paths lose 0.869 ns: cell delay falls 0.036 ns but estimated wire delay rises
+0.905 ns. Three Q-PC[0]→FPU-status paths lose 0.474 ns: cell delay falls
+0.097 ns but estimated wire delay rises 0.571 ns. Each path gains two logic
+levels. These are correlated reported paths, not twenty independent causes.
+
+Keep this measured cost visible while testing whether routing freedom improves
+the final result. Neither fewer MUXFs nor these unplaced estimates establish
+congestion closure or a routed-frequency gain. The native command sequence
+through placement and all six count records were checked; the full
+implementation execution audit still awaits the route command and completion
+evidence. Its original checks were not weakened. Immutable before/after
+reports, hashes, a native-log prefix hash and matched-path data are retained in
+the active run's `post-muxf-comparison.json`.
+
+**Read-only follow-up performed during synthesis (Oct24):** `RQS_CONG-9` names
 `rk_ao486_bd_i/u_soc/inst` and congestion windows, not an exact set of
 equivalent drivers. The saved complexity report is empty, so it does not
 quantify replication. No `MAX_FANOUT` or `EQUIVALENT_DRIVER_OPT` setting was
