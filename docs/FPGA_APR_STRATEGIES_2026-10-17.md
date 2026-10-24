@@ -1,6 +1,67 @@
 # APR strategy comparison — 40 MHz target
 
-## Post-MUXF LUT remap active — Oct24 19:07 EDT
+## Concluded at the user's accepted 35 MHz result — Oct24 19:09 EDT
+
+The user accepted **35 MHz as sufficient** and requested conclusion, commit
+and push. Retain **`performance-retime-muxf-route-first-r1`**, the completed
+**35.735982561 MHz conditional core setup estimate**. The 40 MHz search is
+paused, not falsely marked achieved. **No Vivado/VRS build remains active;
+do not restart without a new instruction.** No simulation or board run was
+launched as part of this conclusion.
+
+The selected recipe is PerformanceOptimized synthesis with global retiming,
+rebuilt hierarchy, RuntimeOptimized ordinary optimization followed by explicit
+MUXF remapping, AltSpreadLogic_high placement, AlternateCLBRouting, and no
+standalone physical-optimization stages. Eight internal threads per stage,
+one native job, uncapped RAM/swap. All full runs began from frozen source;
+no previous or probe checkpoint was used as a build input. The CPU/cache RTL
+and the 40 MHz core / 100 MHz AXI constraints were not changed.
+
+| Completed strategy | Conditional routed core estimate | Disposition |
+|---|---:|---|
+| AlternateRoutability, no retiming | 31.028919 MHz | Superseded |
+| AlternateRoutability, retiming | 34.293553 MHz | Superseded |
+| Above plus resynth_remap | 31.919308 MHz | Rejected |
+| PerformanceOptimized, retiming, MUXF remap | **35.735983 MHz** | **Retain** |
+| Above with ExtraTimingOpt placement | 35.203830 MHz | Rejected |
+| Retained recipe with Explore routing | 35.735983 MHz | Identical programming binary; no gain |
+
+The retained build took **2h03m21s** overall, including **40m30s routing**.
+All **266,839 nets** route legally; final DRC has no errors/critical warnings.
+Utilization: **202,114 LUTs, 55,213 FFs, 277.5 BRAM tiles, 47 DSPs**;
+**35,034 CLBs (82.12%)** at placement. Core hold is +0.011 ns, but core setup
+is **−2.983 ns at 25 ns**. The estimate is `1000 / (25 + 2.983)`; it is not
+an independent 35 MHz STA run, a measured board clock, or 40 MHz timing sign-off.
+Manual exception review and physical candidate acceptance remain open.
+
+Retained local run:
+`/home/yukidama/external/tmp/ventium-muxf-oct24.FLY6s5B5/performance-retime-muxf-route-first-r1/`.
+Programming file: `build/rk_ao486_system.bit.bin`, SHA-256
+`7de7faf730a31b41eee6c7750b0e849f7cf23eef761d71a4126d5c9bcf3ce88c`.
+Its frozen sources, product hashes, closed audit and archived helpers were
+rechecked at conclusion. Keep these local artifacts; do not publish generated
+bitstreams/checkpoints, guest media or private references in Git.
+
+The newer aggressive-LUT-remap experiment was **cancelled during synthesis
+at 19:08:47 EDT**, before producing any full-core QoR result. Cancellation was
+requested by the user, not OOM: the controller recorded `controller signal`,
+native exit 143 / owner exit 1, unchanged 219 launch pins, and no task/OOM
+events. Both Vivado and VRS processes were verified absent and their scope
+inactive. Its 21 helpers, cancellation receipts and successful tooling probe
+are retained under `ventium-muxf-aggressive-oct24.rXWFrIdO/`, including
+`conclusion-audit.json`. The committed strategy is **tool-tested but not
+full-design qualified**, and is not the retained result.
+
+Flow changes passed **120 flow/path tests + 26 resource-policy tests** and the
+native Vivado probe. These are not CPU or physical standard-suite passes.
+No board was reprogrammed; `main` and pre-existing uncommitted experimental
+RTL/submodule work remain untouched. No generated blobs were committed.
+
+Candidate gameplay is **unmeasured**. The older physical baseline is
+**0.496499864 total U+V IPC**, image **2886d24c**, cycles
+**625,021,130,428–629,480,208,865**; it predates the retained candidate.
+
+## Post-MUXF LUT remap launch history — stopped at conclusion
 
 Fresh **`performance-retime-muxf-aggressive-remap-route-first-r1`** started
 **19:06:56 EDT**, after all **120 flow/path tests + 26 resource-policy tests**
@@ -11,7 +72,7 @@ zero, with zero remaining after LUT remapping. This is tooling verification,
 not a full-core QoR or CPU/FPGA acceptance result. The flow change is committed
 and pushed as **`e9e00de7`**; Explore closure is **`270fdd45`**.
 
-The full build uses **200 frozen source/metadata files identical to the best
+The cancelled full build used **200 frozen source/metadata files identical to the best
 control**, 159 defines, `cycle_mode=1`, and no old/probe checkpoint inputs.
 There are **219 launch pins**, including the new hook. Dirty checkout RTL
 remains untouched and excluded. One Vivado family uses uncapped RAM/swap,
@@ -24,7 +85,8 @@ Evidence root:
 `/home/yukidama/external/tmp/ventium-muxf-aggressive-oct24.rXWFrIdO/`.
 It retains `probe-inputs.json`, `probe-closed.json`, `source-preflight.json`,
 `full-launch-audit.json`, and the full run's source/started receipts and logs.
-Do not edit its pinned helpers or launch a second Vivado family while active.
+Its closed helper snapshot and cancellation receipt preserve the incomplete
+experiment. It is no longer active and must not be restarted automatically.
 
 Candidate gameplay is **unmeasured**. The older physical baseline is
 **0.496499864 total U+V IPC**, image **2886d24c**, cycles
@@ -51,7 +113,7 @@ archived before changing the flow. `independent-closed-audit.json`,
 `pre-next-strategy-audit.json`, and `closed-tool-snapshot/` are in the run leaf.
 Manual exception review, timing sign-off and hardware acceptance remain false.
 
-The next isolated strategy is
+The follow-up strategy selected before the user's stop request was
 **`performance-retime-muxf-aggressive-remap-route-first`**: retain the best
 control's synthesis, retiming, AltSpreadLogic_high placement and
 AlternateCLBRouting; add a separate **`opt_design -aggressive_remap` after

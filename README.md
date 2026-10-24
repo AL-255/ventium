@@ -195,6 +195,10 @@ route and a **35.735983 MHz conditional core setup estimate** on Oct24, using
 MUXF remapping. The bitstream was generated in **2 h 3 min**, with uncapped
 RAM/swap and one active build at a time. This is **not 40 MHz timing sign-off**
 (core setup slack −2.983 ns) and has no physical gameplay/Win95 acceptance.
+On Oct24 the user accepted the approximately **35 MHz** result and concluded
+the search. The subsequent Explore-routing trial produced the identical
+programming binary; the newer aggressive-LUT-remap experiment was cancelled
+during synthesis. No build is left running and no new image was deployed.
 The figures and benchmark results above still describe image `2886d24c`, not
 this new candidate. See the
 [fresh strategy log](docs/FPGA_APR_STRATEGIES_2026-10-17.md).
