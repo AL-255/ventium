@@ -33,7 +33,15 @@ All twenty worst core paths start at **`q_len_reg[1]`**, reaching distinct core,
 cache and FPU-state endpoints. The worst ends at paired-load
 `data_q_reg[1][11]`: **92 logic levels**, 32.502 ns data delay, split into
 8.490 ns logic and 24.012 ns routing. This is a different startpoint from the
-unplaced EIP path below. The next trial will test the prepared
+unplaced EIP path below. Its 93 data-net arcs include 66 with fanout at most four
+(13.440 ns) and 14 with fanout at least 64 (6.254 ns). The displayed arc delays
+sum to 24.010 ns versus the report's 24.012 ns, a rounding difference. Even
+eliminating every high-fanout arc's delay would not recover the 7.228 ns setup
+deficit with the other cells, wires and clock skew fixed. The largest individual
+arc is 1.173 ns, on `g_ic_prefix_span[0].pos[5]` (fanout 1,357); low-fanout
+`mc_prime_offer` also costs 0.668 ns. This supports examining serial-depth and
+placement together, rather than attributing the full miss to one large fanout.
+The next trial will test the prepared
 **`routability-retime-route-first`** strategy: retain the successful routability
 mapping/place/router choices, enable synthesis retiming, and use eight internal
 threads per stage with one native job/family. Thread count also changes, so a
