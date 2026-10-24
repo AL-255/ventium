@@ -113,6 +113,30 @@ and an empty prior-checkpoint input list. It has no full-core retiming, timing
 or gameplay result yet. The preceding 31.028919 MHz result remains the latest
 completed strategy result, not this candidate's frequency.
 
+### Isolated timing-focused placement option — not launched
+
+While the Oct24 retiming run remains active, a conditional next option is
+prepared under `/home/yukidama/external/tmp/ventium-timing-place-oct24.OlAQ33bY/`.
+`routability-retime-timing-route-first` changes only placement from
+`AltSpreadLogic_high` to `ExtraTimingOpt` relative to that live strategy.
+Synthesis retiming, mapping, router, disabled optional physical stages,
+eight-thread/one-job policy, uncapped RAM/swap, 25/10 ns clocks and fresh-source
+requirements remain unchanged. The installed Vivado 2025.2 `place_design`
+manual describes this as an alternate timing-driven algorithm with increased
+timing effort. This tests a possible wire-delay tradeoff after legal routing;
+it could worsen congestion or runtime, and is not a promised timing gain.
+
+The isolated bundle retains 22 base files, eight changed candidates and their
+hash manifest. New cases failed before implementation; **57 flow/audit tests
+plus 26 scope-policy tests pass (83 total)** afterward. The tests include exact
+probe/full-run directives and closed-run rejection of the old high-spread
+directive. All 216 live launch pins were unchanged at 03:43 EDT. No live helper
+was modified, no second Vivado was launched, and no native probe, full build or
+hardware result exists for this option. Inspect the current run's actual
+retiming/path/timing evidence before selecting it. Promotion still requires
+base-hash checks, test reruns and a fresh native probe after the active owner
+and its family have exited; no probe or prior-run checkpoint may feed a build.
+
 ## Congestion failure and next fresh strategy — 2026-10-23
 
 The Oct22 `performance-route-first-r1` ended at **22:17:56 EDT** with native
