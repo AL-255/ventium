@@ -23,6 +23,67 @@ DRC = 'Design State : Fully Routed\n| Warning |\n'
 
 
 class ResultTests(unittest.TestCase):
+    def test_closed_routability_run_requires_native_implementation_audit(self):
+        # Exercise audit_closed's dispatch, not only audit_impl in isolation.
+        # Numeric reports are separately tested; these fixtures are no FPGA pass.
+        with tempfile.TemporaryDirectory(prefix='closed-route-first-') as td:
+            run = Path(td)
+            build = run/'build'; build.mkdir()
+            source = run/'source.sv'; source.write_text('fixture source only\n')
+            (run/'prepared.json').write_text('{}\n')
+            limits = dict(MemoryMax='infinity', MemorySwapMax='infinity', TasksMax='128')
+            started = dict(strategy='routability-route-first', pins={str(source):sha(source)},
+                fresh_synthesis=True, prior_checkpoint_inputs=[], implementation_limit_seconds=13800,
+                tool_threads=1, implementation_threads=4, memory_profile='unbounded',
+                memory_max=None, swap_max=None, combined_limit=None,
+                task_monitoring=True, task_profile='serial_apr4', tasks_max=128,
+                host=dict(MemAvailable=0, SwapFree=0),
+                env=dict(VENTIUM_VIVADO_TASK_PROFILE='serial_apr4', VENTIUM_VIVADO_MEMORY_POLICY='unbounded',
+                         VENTIUM_VIVADO_MEMORY_MAX='infinity', VENTIUM_VIVADO_MEMORY_SWAP_MAX='infinity'))
+            (run/'started.json').write_text(json.dumps(started))
+            sample = dict(memory=1, swap=0, disk_free=4*1024**3, reason=None,
+                host=dict(MemAvailable=0, SwapFree=0), events=dict(oom='0', oom_kill='0'),
+                tasks=27, task_events={'max':0}, limits=limits)
+            (run/'watch.jsonl').write_text(json.dumps(sample)+'\n')
+            (run/'native.log').write_text('FRESH-STRATEGY-COMPLETE routability-route-first\n')
+            (build/'stages.tsv').write_text('synth_1\t100\nimpl_1\t200\nroute_design\t300\ncomplete\t400\n')
+            runs = build/'rk_ao486_system/rk_ao486_system.runs'
+            synth = runs/'synth_1/rk_ao486_bd_wrapper.tcl'
+            impl = runs/'impl_1/rk_ao486_bd_wrapper.tcl'
+            synth.parent.mkdir(parents=True); impl.parent.mkdir(parents=True)
+            synth.write_text(SCRIPT.replace('PerformanceOptimized', 'AlternateRoutability').rstrip()+' -global_retiming off\n')
+            (build/'synth_1-properties.rpt').write_text(PROPS.replace('PerformanceOptimized', 'AlternateRoutability').replace('enum false auto', 'enum false off'))
+            native = ('set_param general.maxThreads 4\nopt_design -directive RuntimeOptimized\n'
+                      'place_design -directive AltSpreadLogic_high\nroute_design -directive AlternateCLBRouting\n')
+            impl.write_text(native)
+            properties = ('AUTO_INCREMENTAL_CHECKPOINT bool false 0\nINCREMENTAL_CHECKPOINT file false\n'+
+                ''.join(f'STEPS.{step}.IS_ENABLED bool false 0\n'
+                        f'STEPS.{step}.ARGS.DIRECTIVE enum false Default\n'
+                        f'STEPS.{step}.ARGS.MORE OPTIONS string false\n'
+                        for step in ('PHYS_OPT_DESIGN', 'POST_ROUTE_PHYS_OPT_DESIGN')))
+            (build/'impl_1-properties.rpt').write_text(properties)
+            products = ('fresh-routed.dcp', 'rk_ao486_system.bit.bin', 'timing-summary.rpt',
+                        'timing.tsv', 'check-timing.rpt', 'route-status.rpt', 'drc.rpt',
+                        'bus-skew.rpt', 'cdc.rpt', 'exceptions.rpt')
+            for name in products: (build/name).write_text('fixture only\n')
+            closed = dict(native_exit=0, reason=None, inputs_unchanged=True, failure=None, elapsed=350,
+                products={name:sha(build/name) for name in products}, memory_profile='unbounded',
+                implementation_threads=4, task_profile='serial_apr4', tasks_max=128,
+                owner=limits, peak_tasks_sampled=27, task_limit_events=0)
+            (run/'closed.json').write_text(json.dumps(closed))
+            with patch('audit_fresh_result.final_reports', return_value={}):
+                self.assertTrue(audit_closed(run)['native_completion_verified'])
+                for bad in (native+'phys_opt_design\n',
+                            native.replace('AlternateCLBRouting', 'Default'),
+                            native.replace('AltSpreadLogic_high', 'AltSpreadLogic_medium')):
+                    impl.write_text(bad)
+                    with self.assertRaisesRegex(ValueError, 'implementation command mismatch'):
+                        audit_closed(run)
+                impl.write_text(native)
+                (build/'impl_1-properties.rpt').write_text(properties.replace('IS_ENABLED bool false 0', 'IS_ENABLED bool false 1'))
+                with self.assertRaisesRegex(ValueError, 'physical stage property mismatch'):
+                    audit_closed(run)
+
     def test_uncapped_memory_requires_explicit_contract_and_complete_monitoring(self):
         gib = 1024**3
         policies = ((1, 1, 'serial', 48, 'performance-bounded'),

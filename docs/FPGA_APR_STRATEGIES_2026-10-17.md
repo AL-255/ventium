@@ -260,6 +260,16 @@ receipts. Current gameplay baseline remains **0.496499864 total U+V IPC** on
 `2886d24c`, cycles **625,021,130,428–629,480,208,865**; it predates this
 unmeasured candidate.
 
+At **01:45 EDT**, the minimal independent-checker repair was applied to the
+repository, with its own failing-before/passing-after closed-run regression.
+These two files are neither launch pins nor imports of the live controller;
+all **215 active launch pins were rehashed unchanged**. The active strategy,
+thread counts and helpers were not modified. **49 repository flow/audit tests
++ 25 scope tests pass (74 total)**. This publishes the missing routability
+implementation-option check now; the retiming strategy and eight-thread
+launcher remain isolated and unlaunched. Their staged closure regression also
+covers the current one/four-thread profile, preserving this repair on promotion.
+
 ## Resumed on the migrated host — 2026-10-22
 
 The user authorized resuming **fresh synthesis plus APR**, with no previous
