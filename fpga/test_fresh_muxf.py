@@ -12,6 +12,7 @@ from test_audit_fresh_strategy import SCRIPT, PROPS
 STRATEGY = 'performance-retime-muxf-route-first'
 TIMING_STRATEGY = 'performance-retime-muxf-timing-route-first'
 EXPLORE_STRATEGY = 'performance-retime-muxf-explore-route-first'
+AGGRESSIVE_STRATEGY = 'performance-retime-muxf-aggressive-remap-route-first'
 HOOK = '/fixture/fpga/fresh_opt_muxf_post.tcl'
 
 
@@ -135,10 +136,11 @@ proc set_property {args} {
 proc get_property {p o} {return $::props($o,$p)}
 '''
         for strategy in ('performance-route-first', 'routability-route-first',
-                         'routability-retime-route-first', 'performance-retime-routability-route-first', STRATEGY, TIMING_STRATEGY):
+                         'routability-retime-route-first', 'performance-retime-routability-route-first', STRATEGY, TIMING_STRATEGY, AGGRESSIVE_STRATEGY):
             for profile, threads in (('serial_apr4', 4), ('parallel8', 8)):
                 with self.subTest(strategy=strategy, profile=profile), tempfile.TemporaryDirectory(prefix='remap-probe-config-') as td:
-                    expected_hook = str(directory/'fresh_opt_muxf_post.tcl') if strategy in (STRATEGY, TIMING_STRATEGY) else ''
+                    expected_hook = (str(directory/'fresh_opt_muxf_aggressive_post.tcl') if strategy == AGGRESSIVE_STRATEGY else
+                                     str(directory/'fresh_opt_muxf_post.tcl') if strategy in (STRATEGY, TIMING_STRATEGY) else '')
                     expected_place = 'ExtraTimingOpt' if strategy == TIMING_STRATEGY else 'AltSpreadLogic_medium' if strategy == 'performance-route-first' else 'AltSpreadLogic_high'
                     check = (f'\nif {{[get_property STEPS.OPT_DESIGN.TCL.POST impl_1] ne {{{expected_hook}}}}} {{error "probe remap hook drift"}}\n'
                              'if {[get_property STEPS.OPT_DESIGN.ARGS.DIRECTIVE impl_1] ne "RuntimeOptimized"} {error "normal pass drift"}\n'

@@ -11,7 +11,8 @@ HOOK = Path(__file__).with_name('fresh_opt_muxf_post.tcl')
 class MuxfHookTests(unittest.TestCase):
     def run_hook(self, *, version='2025.2', part='xczu15eg-ffvb1156-2-i',
                  threads='8', failure=False, twice=False, clocks='core axi',
-                 paths='one_path', report_failure='', stale=False, empty_muxes=False):
+                 paths='one_path', report_failure='', stale=False, empty_muxes=False,
+                 hook=HOOK, aggressive=False, aggressive_failure=False):
         code = f'''
 proc version {{args}} {{return {{{version}}}}}
 proc current_design {{}} {{return test_design}}
@@ -38,7 +39,7 @@ proc get_timing_paths {{args}} {{
     return {{{paths}}}
 }}
 proc report_timing {{args}} {{
-    set stage [expr {{[info exists ::test_optimized] ? "after" : "before"}}]
+    set stage [expr {{[info exists ::test_optimized] ? $::test_optimized : "before"}}]
     set expected [list -from core -to core -max_paths 20 -path_type full_clock_expanded \
         -file "fresh-muxf-$stage-core-paths.rpt"]
     if {{$args ne $expected}} {{error "wrong timing report"}}
@@ -46,7 +47,7 @@ proc report_timing {{args}} {{
     puts "TEST-TIMING $stage"
 }}
 proc report_utilization {{args}} {{
-    set stage [expr {{[info exists ::test_optimized] ? "after" : "before"}}]
+    set stage [expr {{[info exists ::test_optimized] ? $::test_optimized : "before"}}]
     if {{$args ne [list -hierarchical -file "fresh-muxf-$stage-utilization.rpt"]}} {{
         error "wrong utilization report"
     }}
@@ -68,19 +69,22 @@ proc set_property {{args}} {{error "no preservation or timing property changes a
 proc create_clock {{args}} {{error "no clock changes allowed"}}
 proc set_clock_groups {{args}} {{error "no timing waivers allowed"}}
 proc opt_design {{args}} {{
-    if {{$args ne "-muxf_remap"}} {{error "unexpected optimization options"}}
+    set expected [expr {{[info exists ::test_optimized] && {int(aggressive)} ? "-aggressive_remap" : "-muxf_remap"}}]
+    if {{$args ne $expected}} {{error "unexpected optimization options"}}
     puts "TEST-OPT-CALL $args"
     {'error "native-remap-failure"' if failure else ''}
-    set ::test_optimized 1
+    if {{$args eq "-aggressive_remap" && {int(aggressive_failure)}}} {{error "native-aggressive-failure"}}
+    set ::test_optimized [expr {{$args eq "-muxf_remap" ? "after" : "post_aggressive"}}]
 }}
-source {{{HOOK}}}
-{'source {' + str(HOOK) + '}' if twice else ''}
+source {{{hook}}}
+{'source {' + str(hook) + '}' if twice else ''}
 '''
         with tempfile.TemporaryDirectory(prefix='muxf-hook-test-') as directory:
             script = Path(directory)/'test.tcl'
             script.write_text(code)
             if stale:
-                (Path(directory)/'fresh-muxf-after-core-paths.rpt').write_text('old report')
+                stage = stale if isinstance(stale, str) else 'after'
+                (Path(directory)/f'fresh-muxf-{stage}-core-paths.rpt').write_text('old report')
             return subprocess.run(['tclsh', str(script)], text=True,
                                   capture_output=True, timeout=10, cwd=directory)
 

@@ -14,7 +14,8 @@ REMAP_STRATEGY = 'routability-retime-remap-route-first'
 MUXF_STRATEGY = 'performance-retime-muxf-route-first'
 MUXF_TIMING_STRATEGY = 'performance-retime-muxf-timing-route-first'
 MUXF_EXPLORE_STRATEGY = 'performance-retime-muxf-explore-route-first'
-MUXF_STRATEGIES = (MUXF_STRATEGY, MUXF_TIMING_STRATEGY, MUXF_EXPLORE_STRATEGY)
+MUXF_AGGRESSIVE_STRATEGY = 'performance-retime-muxf-aggressive-remap-route-first'
+MUXF_STRATEGIES = (MUXF_STRATEGY, MUXF_TIMING_STRATEGY, MUXF_EXPLORE_STRATEGY, MUXF_AGGRESSIVE_STRATEGY)
 ROUTE_FIRST_STRATEGIES = ('performance-route-first', 'routability-route-first',
                           'routability-retime-route-first', 'performance-retime-routability-route-first', *MUXF_STRATEGIES, REMAP_STRATEGY)
 
@@ -61,6 +62,7 @@ def audit_synth(script, properties, strategy, threads=1, native_log=None):
                   MUXF_STRATEGY: 'PerformanceOptimized',
                   MUXF_TIMING_STRATEGY: 'PerformanceOptimized',
                   MUXF_EXPLORE_STRATEGY: 'PerformanceOptimized',
+                  MUXF_AGGRESSIVE_STRATEGY: 'PerformanceOptimized',
                   REMAP_STRATEGY: 'AlternateRoutability'}
     directive = directives[strategy]
     retiming = 'on' if strategy in ('performance-retime-bounded', 'routability-retime-route-first', 'performance-retime-routability-route-first', *MUXF_STRATEGIES, REMAP_STRATEGY) else 'auto'
@@ -103,30 +105,34 @@ def audit_synth(script, properties, strategy, threads=1, native_log=None):
                 timing_driven=True, prior_checkpoint_input=False, configured_threads=threads)
 
 
-def muxf_count_evidence(native_log):
-    """Require six ordered numeric before/after counts; do not presume a gain."""
+def muxf_count_evidence(native_log, *, aggressive=False):
+    """Require every mode-specific ordered count; do not presume a gain."""
     lines = [line for line in (native_log or '').splitlines()
              if line.startswith('FRESH-MUXF-COUNTS')]
-    expected = [(stage, ref) for stage in ('before', 'after')
+    stages = ('before', 'after', 'post_aggressive') if aggressive else ('before', 'after')
+    expected = [(stage, ref) for stage in stages
                 for ref in ('MUXF7', 'MUXF8', 'MUXF9')]
     result = []
     if len(lines) != len(expected):
         raise ValueError('missing/duplicate MUXF count evidence')
     for line, (stage, ref) in zip(lines, expected):
         match = re.fullmatch(
-            r'FRESH-MUXF-COUNTS stage=(before|after) primitive=(MUXF[789]) count=(\d+)', line)
+            r'FRESH-MUXF-COUNTS stage=(before|after|post_aggressive) primitive=(MUXF[789]) count=(\d+)', line)
         if not match or match.groups()[:2] != (stage, ref):
             raise ValueError('malformed or out-of-order MUXF count evidence')
         result.append(dict(stage=stage, primitive=ref, count=int(match[3]), line=line))
     return result
 
 
-def audit_remap(script, properties, threads, native_log, *, place, route, muxf=False):
+def audit_remap(script, properties, threads, native_log, *, place, route, muxf=False, aggressive=False):
     """Prove a sourced extra pass ran after normal optimization and before place."""
     basename = 'fresh_opt_muxf_post.tcl' if muxf else 'fresh_opt_remap_post.tcl'
+    if aggressive:
+        if not muxf: raise ValueError('aggressive pass requires preceding MUXF remap')
+        basename = 'fresh_opt_muxf_aggressive_post.tcl'
     marker = 'FRESH-MUXF-REMAP' if muxf else 'FRESH-LOGIC-REMAP'
     option = '-muxf_remap' if muxf else '-resynth_remap'
-    counts = muxf_count_evidence(native_log) if muxf else []
+    counts = muxf_count_evidence(native_log, aggressive=aggressive) if muxf else []
     hook = property_value(properties, 'STEPS.OPT_DESIGN.TCL.POST')
     if (not Path(hook).is_absolute() or Path(hook).name != basename or
         property_value(properties, 'STEPS.OPT_DESIGN.ARGS.DIRECTIVE') != 'RuntimeOptimized' or
@@ -135,7 +141,7 @@ def audit_remap(script, properties, threads, native_log, *, place, route, muxf=F
     sources = []
     for match in re.finditer(r'^[ \t]*source[ \t]+(?:\{([^}\r\n]+)\}|([^ \t\r\n]+))[ \t]*$', script, re.M):
         name = match.group(1) or match.group(2)
-        if Path(name).name in ('fresh_opt_remap_post.tcl', 'fresh_opt_muxf_post.tcl') and Path(name).name != basename:
+        if Path(name).name in ('fresh_opt_remap_post.tcl', 'fresh_opt_muxf_post.tcl', 'fresh_opt_muxf_aggressive_post.tcl') and Path(name).name != basename:
             raise ValueError('mixed remap hooks are not admitted')
         if Path(name).name == basename:
             sources.append((name, match.start()))
@@ -151,8 +157,18 @@ def audit_remap(script, properties, threads, native_log, *, place, route, muxf=F
         f'{marker}-BEGIN threads={threads} command=opt_design{option}',
         f'Command: opt_design {option}',
         'opt_design completed successfully',
-        *[c['line'] for c in counts[3:]],
+        *[c['line'] for c in counts[3:6]],
         f'{marker}-END',
+    ]
+    if aggressive:
+        expected += [
+            f'FRESH-MUXF-AGGRESSIVE-BEGIN threads={threads} command=opt_design-aggressive_remap',
+            'Command: opt_design -aggressive_remap',
+            'opt_design completed successfully',
+            *[c['line'] for c in counts[6:]],
+            'FRESH-MUXF-AGGRESSIVE-END',
+        ]
+    expected += [
         'Command: place_design -directive '+place,
         'Command: route_design -directive '+route,
     ]
@@ -161,7 +177,7 @@ def audit_remap(script, properties, threads, native_log, *, place, route, muxf=F
                   line == 'opt_design completed successfully' or line.startswith(('FRESH-LOGIC-REMAP-', 'FRESH-MUXF-')))]
     if events != expected or re.search(r'^ERROR:', native_log or '', re.M):
         raise ValueError('native remap execution evidence missing, erroneous or out of order')
-    return [option]
+    return [option, '-aggressive_remap'] if aggressive else [option]
 
 
 def audit_impl(script, properties, strategy, threads=1, native_log=None):
@@ -188,6 +204,7 @@ def audit_impl(script, properties, strategy, threads=1, native_log=None):
         MUXF_STRATEGY: ('AltSpreadLogic_high', 'AlternateCLBRouting', []),
         MUXF_TIMING_STRATEGY: ('ExtraTimingOpt', 'AlternateCLBRouting', []),
         MUXF_EXPLORE_STRATEGY: ('AltSpreadLogic_high', 'Explore', []),
+        MUXF_AGGRESSIVE_STRATEGY: ('AltSpreadLogic_high', 'AlternateCLBRouting', []),
         REMAP_STRATEGY: ('AltSpreadLogic_high', 'AlternateCLBRouting', []),
     }
     place, route, phys = configs[strategy]
@@ -214,15 +231,16 @@ def audit_impl(script, properties, strategy, threads=1, native_log=None):
     remap = []
     if strategy in (REMAP_STRATEGY, *MUXF_STRATEGIES):
         remap = audit_remap(script, properties, threads, native_log,
-                            place=place, route=route, muxf=strategy in MUXF_STRATEGIES)
-    elif (any(h in script for h in ('fresh_opt_remap_post.tcl', 'fresh_opt_muxf_post.tcl')) or
+                            place=place, route=route, muxf=strategy in MUXF_STRATEGIES,
+                            aggressive=strategy == MUXF_AGGRESSIVE_STRATEGY)
+    elif (any(h in script for h in ('fresh_opt_remap_post.tcl', 'fresh_opt_muxf_post.tcl', 'fresh_opt_muxf_aggressive_post.tcl')) or
           any(m in (native_log or '') for m in ('FRESH-LOGIC-REMAP-', 'FRESH-MUXF-')) or
-          re.search(r'^Command: opt_design -(?:resynth_remap|muxf_remap)\b', native_log or '', re.M)):
+          re.search(r'^Command: opt_design -(?:resynth_remap|muxf_remap|aggressive_remap)\b', native_log or '', re.M)):
         raise ValueError('unexpected remap operation for strategy')
     result = dict(strategy=strategy, physical_operations=phys, logic_remap_operations=remap,
                   completion_verified=False)
     if strategy in MUXF_STRATEGIES:
-        result['muxf_counts'] = muxf_count_evidence(native_log)
+        result['muxf_counts'] = muxf_count_evidence(native_log, aggressive=strategy == MUXF_AGGRESSIVE_STRATEGY)
     return result
 
 

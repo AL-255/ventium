@@ -10,6 +10,7 @@ from test_audit_fresh_strategy import SCRIPT, PROPS
 from test_fresh_remap import STRATEGY as REMAP_STRATEGY, HOOK as REMAP_HOOK, remap_log
 from test_fresh_muxf import STRATEGY as MUXF_STRATEGY, HOOK as MUXF_HOOK, remap_log as muxf_log
 from test_fresh_muxf import TIMING_STRATEGY, EXPLORE_STRATEGY
+from test_fresh_muxf_aggressive import STRATEGY as AGGRESSIVE_STRATEGY, HOOK as AGGRESSIVE_HOOK, aggressive_log
 
 PASS = '''| Design Timing Summary
 0.150 0.000 0 200000 0.004 0.000 0 200000 2.000 0.000 0 60000
@@ -42,17 +43,19 @@ class ResultTests(unittest.TestCase):
                 (TIMING_STRATEGY, 'on', 8, 8, 'parallel8', 256),
                 (EXPLORE_STRATEGY, 'on', 1, 4, 'serial_apr4', 128),
                 (EXPLORE_STRATEGY, 'on', 8, 8, 'parallel8', 256),
+                (AGGRESSIVE_STRATEGY, 'on', 1, 4, 'serial_apr4', 128),
+                (AGGRESSIVE_STRATEGY, 'on', 8, 8, 'parallel8', 256),
                 (REMAP_STRATEGY, 'on', 1, 4, 'serial_apr4', 128),
                 (REMAP_STRATEGY, 'on', 8, 8, 'parallel8', 256)):
             with self.subTest(strategy=strategy), tempfile.TemporaryDirectory(prefix='closed-route-first-') as td:
                 run = Path(td)
-                muxf = strategy in (MUXF_STRATEGY, TIMING_STRATEGY, EXPLORE_STRATEGY)
+                muxf = strategy in (MUXF_STRATEGY, TIMING_STRATEGY, EXPLORE_STRATEGY, AGGRESSIVE_STRATEGY)
                 place = 'ExtraTimingOpt' if strategy == TIMING_STRATEGY else 'AltSpreadLogic_high'
                 route = 'Explore' if strategy == EXPLORE_STRATEGY else 'AlternateCLBRouting'
                 directive = 'PerformanceOptimized' if strategy == 'performance-retime-routability-route-first' or muxf else 'AlternateRoutability'
-                hook = MUXF_HOOK if muxf else REMAP_HOOK
-                remap_fixture = muxf_log if muxf else remap_log
-                remap_option = '-muxf_remap' if muxf else '-resynth_remap'
+                hook = AGGRESSIVE_HOOK if strategy == AGGRESSIVE_STRATEGY else MUXF_HOOK if muxf else REMAP_HOOK
+                remap_fixture = aggressive_log if strategy == AGGRESSIVE_STRATEGY else muxf_log if muxf else remap_log
+                remap_option = '-aggressive_remap' if strategy == AGGRESSIVE_STRATEGY else '-muxf_remap' if muxf else '-resynth_remap'
                 build = run/'build'; build.mkdir()
                 source = run/'source.sv'; source.write_text('fixture source only\n')
                 (run/'prepared.json').write_text('{}\n')
