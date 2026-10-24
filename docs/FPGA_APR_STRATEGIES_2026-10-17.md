@@ -85,6 +85,20 @@ The sole Vivado scope is uncapped in RAM/swap, with eight internal threads per
 stage, one native job and 256-task headroom. No candidate result exists yet;
 the completed 34.293553 MHz result above is its comparison baseline.
 
+The read-only `fpga/analyze_setup_paths.py` now accepts **explicit**
+`--state Optimized` and `--state Routed` reports, including located/wrapped
+primitive rows and the native default max-delay command. Every path must still
+prove Setup/Max, identical endpoint clocks, a single-period requirement and
+consistent data/arrival/required/slack arithmetic. Its default remains
+Synthesized, and its output never claims complete timing or hardware sign-off.
+Eleven parser/CLI tests pass. It parsed all 80 paths across the native probe's
+before/after reports and both closed full-core routed controls without modifying
+them. On the **tiny probe**, remapping changed neither the 21 LUTs/53 FFs nor
+its twenty path delays/depths: the probe proves execution/reporting, **not a
+performance improvement**. Full-core before/after evidence remains pending.
+These analysis-only files are not live build inputs; all **217 launch pins**
+were rehashed unchanged after the parser update.
+
 Final utilization is **192,601 LUTs, 55,163 FFs, 277.5 BRAM tiles and 47 DSPs**.
 All 1,878 resource samples have zero OOM/task-limit events; peak simultaneous
 RAM+swap was **44.04 GiB**, peak task count 79. Individual RAM/swap peaks are

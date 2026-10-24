@@ -3,8 +3,10 @@
 
 These are reported path delays, not RTL ownership or physically measured Fmax.
 Only same-clock, single-period paths are admitted for the frequency estimate.
-The input report is hashed and untouched. Optional regex markers partition the
-first path's *data* delay (not clock insertion delay), with an explicit remainder.
+The input report is hashed and untouched. Optional regex markers partition each
+path's *data* delay (not clock insertion delay), with an explicit remainder.
+Optimized/routed reports require an explicit expected state; even a routed
+report is not a complete timing, exception, or hardware acceptance audit.
 """
 import argparse
 from collections import Counter
@@ -15,6 +17,7 @@ import re
 
 
 NUMBER = r"[-+]?\d+\.\d+"
+STATES = ('Synthesized', 'Optimized', 'Routed')
 
 
 def require(pattern, text):
@@ -36,7 +39,10 @@ def parse_path(block, markers=()):
     requirement = float(require(r"^  Requirement:\s+(" + NUMBER + r")ns.*$", block))
     if period <= 0 or abs(period - requirement) > .001:
         raise ValueError("not a positive, single-period setup requirement")
-    slack = float(require(r"^Slack \((?:MET|VIOLATED)\)\s*:\s*(" + NUMBER + r")ns.*$", block))
+    verdict, slack = require(r"^Slack \((MET|VIOLATED)\)\s*:\s*(" + NUMBER + r")ns.*$", block)
+    slack = float(slack)
+    if (slack >= 0) != (verdict == 'MET'):
+        raise ValueError("slack sign disagrees with verdict")
     total, logic, route = map(float, require(
         r"^  Data Path Delay:\s+(" + NUMBER + r")ns\s+\(logic (" + NUMBER +
         r")ns \([^)]+\)\s+route (" + NUMBER + r")ns \([^)]+\)\)$", block))
@@ -64,7 +70,8 @@ def parse_path(block, markers=()):
             continue
         match = row_pattern.match(line)
         if not match:
-            if pending or not re.fullmatch(r"\s*\w+ \(Prop_[^)]+\)\s*", line):
+            if pending or not re.fullmatch(
+                    r"\s*(?:\w+_X\d+Y\d+\s+)?\w+ \(Prop_[^)]+\)\s*", line):
                 raise ValueError(f"unparsed data-path row: {line!r}")
             pending = line.strip()
             continue
@@ -111,13 +118,19 @@ def parse_path(block, markers=()):
         source_clock_delay_ns=scd, segments=segments, rows=rows)
 
 
-def analyze(text, markers=()):
+def analyze(text, markers=(), *, expected_state='Synthesized'):
+    if expected_state not in STATES:
+        raise ValueError("unsupported expected design state")
     state = require(r"^\| Design State\s*:\s*(.+)$", text).strip()
-    if state != 'Synthesized':
-        raise ValueError("this diagnostic accepts synthesized reports only")
+    if state != expected_state:
+        raise ValueError(f"expected {expected_state.lower()} report, got {state!r}")
     command = require(r"^\| Command\s*:\s*(.+)$", text)
-    if '-path_type full_clock_expanded' not in command or not (
-            '-delay_type max' in command or '-setup' in command):
+    # Native report_timing may omit its default max-delay option. Validate
+    # every path's explicit Setup/Max type below instead of assuming it.
+    if (not command.startswith('report_timing ') or
+        '-path_type full_clock_expanded' not in command or
+        re.search(r'(?:^|\s)-hold(?:\s|$)', command) or
+        re.search(r'(?:^|\s)-delay_type\s+(?!max(?:\s|$))', command)):
         raise ValueError("expected a full_clock_expanded setup report")
     blocks = re.split(r"(?=^Slack \((?:MET|VIOLATED)\)\s*:)", text, flags=re.M)[1:]
     if not blocks:
@@ -129,13 +142,18 @@ def analyze(text, markers=()):
     return dict(design_state=state, paths_reported=len(paths),
         worst_slack_ns=paths[0]['slack_ns'], estimated_fmax_mhz=paths[0]['estimate_mhz'],
         endpoint_families=dict(Counter(p['destination_family'] for p in paths)),
-        paths=paths, routed=False, physical_frequency_mhz=None,
-        caveat="Unplaced report estimate; listed paths are not all paths. Rebuilt hierarchy is not RTL ownership.")
+        paths=paths, routed=state == 'Routed', physical_frequency_mhz=None,
+        timing_signoff=False,
+        caveat=("Conditional routed setup estimate" if state == 'Routed' else "Unplaced report estimate") +
+               "; listed paths are not all paths. Rebuilt hierarchy is not RTL ownership. "
+               "Not complete timing/exception or hardware acceptance.")
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('report', type=Path)
+    parser.add_argument('--state', choices=STATES, default='Synthesized',
+                        help='required native design state (default: Synthesized)')
     parser.add_argument('--marker', action='append', default=[], metavar='NAME=REGEX')
     parser.add_argument('--include-rows', action='store_true')
     args = parser.parse_args()
@@ -147,7 +165,7 @@ def main():
         re.compile(pattern)
         markers.append((name, pattern))
     raw = args.report.read_bytes()
-    result = analyze(raw.decode('utf-8'), markers)
+    result = analyze(raw.decode('utf-8'), markers, expected_state=args.state)
     result.update(report=str(args.report.resolve()), report_sha256=hashlib.sha256(raw).hexdigest(),
                   marker_patterns=dict(markers))
     if not args.include_rows:

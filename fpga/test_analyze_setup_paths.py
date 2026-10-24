@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
 """Parser safety checks; no Vivado, RTL build, or generated run directory."""
+import json
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
 import unittest
 
 from analyze_setup_paths import analyze
@@ -55,6 +60,61 @@ class ReportTests(unittest.TestCase):
     def test_groups_bit_endpoints_not_independent_bottlenecks(self):
         result = analyze(HEADER + PATH + PATH.replace('result_reg[3]', 'result_reg[4]'))
         self.assertEqual(result['endpoint_families'], {'cpu/result_reg[*]/CE': 2})
+
+    def test_optimized_default_max_report_requires_explicit_state(self):
+        report = HEADER.replace('Synthesized', 'Optimized').replace(' -delay_type max', '') + PATH
+        with self.assertRaisesRegex(ValueError, 'expected synthesized'):
+            analyze(report)
+        result = analyze(report, expected_state='Optimized')
+        self.assertEqual(result['design_state'], 'Optimized')
+        self.assertEqual(result['paths'][0]['logic_levels'], 2)
+        self.assertFalse(result['routed'])
+        self.assertFalse(result['timing_signoff'])
+
+    def test_routed_locations_wrapped_and_unwrapped(self):
+        report = HEADER.replace('Synthesized', 'Routed') + PATH.replace(
+            '          CARRY8 (Prop_', '    SLICE_X72Y304 CARRY8 (Prop_').replace(
+            '          FDRE (Prop_', '    SLICE_X72Y304 FDRE (Prop_')
+        result = analyze(report, expected_state='Routed')
+        self.assertTrue(result['routed'])
+        self.assertFalse(result['timing_signoff'])
+        self.assertIsNone(result['physical_frequency_mhz'])
+        self.assertEqual(result['paths'][0]['data_delay_ns'], 26)
+        self.assertAlmostEqual(result['estimated_fmax_mhz'], 1000 / 26.25)
+
+    def test_explicit_state_must_match_and_be_supported(self):
+        for state in ('Optimized', 'Routed', 'Placed', ''):
+            with self.subTest(state=state), self.assertRaises(ValueError):
+                analyze(HEADER + PATH, expected_state=state)
+
+    def test_default_max_does_not_admit_hold_or_mixed_paths(self):
+        header = HEADER.replace(' -delay_type max', '')
+        with self.assertRaisesRegex(ValueError, 'Path Type'):
+            analyze(header + PATH + PATH.replace('Setup (Max', 'Hold (Min'))
+        for option in (' -hold', ' -delay_type min', ' -delay_type min_max'):
+            with self.subTest(option=option), self.assertRaisesRegex(ValueError, 'setup report'):
+                analyze(header.replace('report_timing', 'report_timing' + option) + PATH)
+
+    def test_verdict_must_agree_with_slack(self):
+        with self.assertRaisesRegex(ValueError, 'slack sign'):
+            analyze(HEADER + PATH.replace('Slack (VIOLATED)', 'Slack (MET)'))
+
+    def test_cli_requires_state_and_keeps_report_unchanged(self):
+        with tempfile.TemporaryDirectory() as root:
+            report = Path(root) / 'optimized paths.rpt'
+            raw = (HEADER.replace('Synthesized', 'Optimized') + PATH).encode()
+            report.write_bytes(raw)
+            command = [sys.executable, '-B', str(Path(__file__).with_name('analyze_setup_paths.py')),
+                       str(report)]
+            rejected = subprocess.run(command, text=True, capture_output=True)
+            self.assertNotEqual(rejected.returncode, 0)
+            accepted = subprocess.run(command + ['--state', 'Optimized'], text=True,
+                                      capture_output=True, check=True)
+            result = json.loads(accepted.stdout)
+            self.assertEqual(result['design_state'], 'Optimized')
+            self.assertEqual(result['paths_reported'], 1)
+            self.assertNotIn('rows', result['paths'][0])
+            self.assertEqual(report.read_bytes(), raw)
 
     def test_missing_marker_keeps_remainder(self):
         result = analyze(HEADER + PATH, [('absent', r'/absent$')])
