@@ -486,6 +486,35 @@ remain unchanged. Neither option is promoted, natively probed or queued. This
 prepares an isolated placement comparison without prematurely discarding the
 small unplaced remap gain; the completed routed outcome must select its base.
 
+**Mapping alternative rechecked, Oct24 07:42 EDT:** all 200 frozen source files
+were rehashed in the failed Oct22 performance run, the completed Oct24 retiming
+control and the live remap run; all three source maps match exactly. Parsing
+their actual same-clock 25 ns synthesis paths reconfirms **38.445273 MHz**
+unplaced for performance mapping (90 levels, 25.800 ns data delay), versus
+**34.456619 MHz** for the retimed routability mapping (99 levels, 28.811 ns).
+The performance run's native post-placement global WNS was −1.385 ns, but it
+subsequently failed routing legality. Synthesis retiming, threads and APR also
+differ across these old runs, so this is not a mapping-only causal comparison.
+`mapping-comparison.json` retains the parsed paths and report hashes. Performance
+mapping with the newer high-spread/alternate-CLB routing remains an untested
+alternative if placement-only changes cannot close timing; it is not selected
+or queued, and the failed image has no valid routed frequency.
+
+That alternative is now prepared independently as `candidate-performance/`
+under the same scratch root, with `manifest-performance.json` and
+`README-performance.md`. Its named **`performance-retime-routability-route-first`**
+strategy changes only the synthesis directive relative to the completed
+34.293553 MHz retiming control; it retains retiming on, high-spread placement,
+the alternate-CLB router, no extra remap/physical pass, eight-thread policy,
+25/10 ns clocks and fresh-source-only input rules. Eight existing helper/test
+files and one new test differ from the verified 25-file base. The independent
+option does not include either unpromoted placement variant. **74 flow/audit
++ 26 scope-policy tests pass (100 total)**, including full/probe Tcl, closure
+dispatch and explicit rejection of changed directives, old checkpoints and
+unintended remap/physical passes. Candidate imports and all **217 live pins**
+were checked. It remains unselected/unlaunched pending the current routed result,
+base review and a fresh native tooling probe; no timing gain is claimed.
+
 **Oct24 refresh:** the original bundle below is superseded by
 `/home/yukidama/external/tmp/ventium-timing-place-rebase-oct24.yuPDxJW4`, rebased
 on `465c427d` in isolation while the full remap build continues. It retains 25
