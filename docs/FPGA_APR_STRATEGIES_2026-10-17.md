@@ -1,6 +1,6 @@
 # APR strategy comparison — 40 MHz target
 
-## Performance mapping rejected: illegal routing — Oct24 11:50 EDT
+## Performance mapping rejected; MUXF-only trial launched — Oct24
 
 The fresh `performance-retime-routability-route-first-r1` trial ended with
 native exit **1** after **3 h 14 min**. Vivado explicitly reports **2,294
@@ -80,6 +80,27 @@ All 26 preparation-base files still matched; only ten reviewed helper/test
 files were promoted. **94 flow/audit + 26 scope tests pass (120 total)** in the
 repository. A fresh native tooling probe must pass before the full build;
 neither its checkpoint nor the failed route may become a build input.
+
+The **native MUXF probe passed**, with a retained owner exit status **0**,
+from **12:12:20–12:13:48 EDT**. Its MUXF7/8/9 populations changed **4/2/1 →
+0/0/0**, both native workers used eight threads, and routing completed. All
+eight pinned inputs remained unchanged. The independent audit checked the
+normal/pass ordering, native completion markers and count reduction. This
+qualifies the tooling mechanism, not full-core QoR or correctness. Evidence:
+`/home/yukidama/external/tmp/ventium-muxf-oct24.FLY6s5B5/probe-closed.json`.
+
+At **12:15:23 EDT**, full fresh **`performance-retime-muxf-route-first-r1`**
+started in that scratch parent, using helper commit **b23a49d0**. Owner
+`ventium-fresh-muxf-oct24-r1.service`, invocation
+`bed0fd3c480245a2885ba1fcc5855a96`; sole Vivado scope invocation
+`38d1a983464d49d1b2a8bff031df2dc7`. All **218 launch pins** were rehashed
+unchanged and all **200 frozen source/metadata files match the control**.
+The profile has 159 defines, `cycle_mode=1`, unchanged 40 MHz core / 100 MHz
+AXI constraints, eight threads per stage, one native job and uncapped RAM/swap.
+Prior-checkpoint inputs are empty; the dirty checkout's CPU RTL is not used.
+The native probe's retained, process-free owner was stopped after its receipt
+was saved and before the full run launched. No full-run timing or gameplay
+result exists yet.
 
 Verified gameplay remains **0.496499864 total U+V IPC**, image **2886d24c**,
 cycles **625,021,130,428–629,480,208,865**. This baseline predates the failed
