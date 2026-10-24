@@ -508,8 +508,8 @@ strategy changes only the synthesis directive relative to the completed
 the alternate-CLB router, no extra remap/physical pass, eight-thread policy,
 25/10 ns clocks and fresh-source-only input rules. Eight existing helper/test
 files and one new test differ from the verified 25-file base. The independent
-option does not include either unpromoted placement variant. **74 flow/audit
-+ 26 scope-policy tests pass (100 total)**, including full/probe Tcl, closure
+option does not include either unpromoted placement variant.
+**74 flow/audit + 26 scope-policy tests pass (100 total)**, including full/probe Tcl, closure
 dispatch and explicit rejection of changed directives, old checkpoints and
 unintended remap/physical passes. Candidate imports and all **217 live pins**
 were checked. It remains unselected/unlaunched pending the current routed result,
