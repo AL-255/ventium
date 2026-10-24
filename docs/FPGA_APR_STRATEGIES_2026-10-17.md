@@ -84,7 +84,43 @@ unchanged 40 MHz core / 100 MHz AXI constraints. Actual native synthesis is
 `PerformanceOptimized -global_retiming on`, with an eight-thread readback;
 its configuration audit passes. Prior-checkpoint inputs are empty, cache and
 incremental reuse are disabled, and only one synthesis/APR family is running.
-There is **no new synthesis/routed timing result yet**.
+**Post-synthesis, Oct24 09:39 EDT:** native synthesis completed in **1 h 0 min
+50 s**, with zero errors and zero critical warnings. All **217 launch pins**
+remain unchanged; all **200 frozen source/metadata files** were rehashed and
+still match the retiming control. The native configuration audit passes and
+the 25 ns core / 10 ns AXI clocks are present. The same controller started
+implementation at **09:39:24 EDT**, with a 3 h 50 min implementation limit.
+
+| Synthesis-only measurement | Retiming control | Performance mapping candidate |
+|---|---:|---:|
+| Unplaced conditional core estimate | 34.456619 MHz | **38.067684 MHz** |
+| Core setup slack, 25 ns requirement | −4.022 ns | −1.269 ns |
+| Setup-failing endpoints | 38,539 | 430 |
+| LUTs / registers | 194,049 / 54,876 | 185,897 / 54,922 |
+| F7 / F8 muxes | 1,536 / 768 | 17,814 / 6,840 |
+| CARRY8 | 3,389 | 3,682 |
+| BRAM tiles / DSPs | 277.5 / 47 | 277.5 / 47 |
+
+This is **4.20% fewer LUTs** and a **10.48% higher unplaced estimate**, not a
+routed improvement or 40 MHz pass. The worst candidate path is `q_pc[0]` to
+shared-FPU `status[10]`, **93 levels**, **26.058 ns** data delay: 5.847 ns logic
+and 20.211 ns estimated wire. The retiming control has different worst
+endpoints, so this is not a matched-path comparison. Against the earlier
+unroutable performance run's *same* endpoint pair, the candidate adds three
+levels and 0.258 ns estimated delay (38.445273 → 38.067684 MHz). The high F7/F8
+usage also persists; lower global LUT usage does not establish routability.
+Continue the planned high-spread/alternate-routing implementation to measure
+that tradeoff; do not substitute either unplaced result for routed evidence.
+
+The 50 printed retiming records report zero moves, including `core__GCB8`;
+this is not proof of behavior outside those records or a causal retiming gain.
+Printed warning occurrences fall from 752 to 725: constant-driven-port
+`Synth 8-3917` counts fall 67→41 and unused-sequential `Synth 8-3332` counts
+13→12. No warning-ID category was added; identical ID counts do not prove
+identical messages. The full reports and `post-synth-comparison.json` are
+retained in the active run. Synthesis timing SHA256:
+`4b3ba4b4709c41fd19c66e5aa022bb43c809724cbe722fafd1343433d6613a76`.
+**No routed candidate timing result or physical acceptance exists yet.**
 
 Verified gameplay remains the **0.496499864 total U+V IPC baseline**, physical
 image **2886d24c**, cycles **625,021,130,428–629,480,208,865**. It predates these
