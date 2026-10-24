@@ -559,6 +559,24 @@ active unmeasured candidate. Neither isolated option has a gameplay result.
 
 ### Isolated timing-focused placement option — not launched
 
+**Latest refresh, Oct24 09:10 EDT:** the placement-only option is now rebased
+onto the current performance-strategy tooling in
+`/home/yukidama/external/tmp/ventium-timing-place-refresh-oct24.3CVdQtJh/`.
+Its 26-file base is commit `4ab21643`; nine candidate files change. It preserves
+the running performance strategy and its tests. **75 flow/audit + 26 scope
+tests pass (101 total)**, with actual commands/output, import paths and
+before/candidate hashes in `manifest.json`. All 217 live launch pins were
+rehashed unchanged. No repository helper or RTL was changed, no second Vivado
+family was launched, and this alternative is not promoted or queued.
+
+The proposed comparison remains **placement only** against the 34.293553 MHz
+retiming control: ExtraTimingOpt instead of AltSpreadLogic_high, without remap.
+The active performance trial must finish before selecting the next strategy;
+if it establishes a better control, reconsider this option's comparison base.
+The older placement preparation below is historical and must not overwrite
+the current performance-strategy helpers. Native probing and fresh full-source
+implementation remain required before any QoR claim.
+
 **Oct24 07:29 EDT, remap-retaining alternative:** the same scratch root now
 also contains `candidate-remap/`, `manifest-remap.json` and `README-remap.md`.
 Its `routability-retime-remap-timing-route-first` option changes only placement
