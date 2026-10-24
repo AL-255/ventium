@@ -1,6 +1,6 @@
 # APR strategy comparison — 40 MHz target
 
-## MUXF remap completed; placement running — Oct24
+## MUXF placement completed; routing running — Oct24
 
 The fresh `performance-retime-routability-route-first-r1` trial ended with
 native exit **1** after **3 h 14 min**. Vivado explicitly reports **2,294
@@ -159,6 +159,71 @@ implementation execution audit still awaits the route command and completion
 evidence. Its original checks were not weakened. Immutable before/after
 reports, hashes, a native-log prefix hash and matched-path data are retained in
 the active run's `post-muxf-comparison.json`.
+
+**Placement completed; routing started Oct24 13:32:07 EDT.** Placement took
+**13 min 30 s**. The independent native implementation-configuration audit
+now passes the complete command sequence through route launch: normal
+optimization, the separate MUXF pass, high-spread placement and alternate-CLB
+routing, with eight native threads and no optional physical-optimization
+stage. This is not a completed-route audit. All **218 launch pins** rehash
+unchanged; no previous checkpoint is a build input.
+
+| Placed result | Matched performance run, no MUXF pass | MUXF candidate | Best legally routed control |
+|---|---:|---:|---:|
+| LUTs | 185,301 | 202,114 | 192,601 |
+| Occupied CLBs | 33,749 (79.11%) | 35,034 (82.12%) | 33,723 (79.05%) |
+| Registers | 55,107 | 55,213 | 55,163 |
+| Unique control sets | 2,400 | 2,420 | 2,526 |
+| Global placement slack | −3.236 ns | −2.282 ns | −3.470 ns |
+| Conditional **routed** core estimate | Failed, illegal route | Pending | 34.293553 MHz |
+
+The MUXF candidate improves global placement slack **0.954 ns** over the
+matched performance run, but costs **16,813 LUTs (+9.07%)** and **1,285 CLBs
+(+3.81%)** after placement. The global placement summary does not identify
+its clock pair, so no core frequency is inferred from it. BRAM/DSP usage
+remains **277.5/47**. The earlier unplaced timing regression therefore did
+not predict the direction of this placement change; routing must still decide.
+
+Estimated congestion is mixed: north global/long regions shrink from
+32×32/64×64 to **16×16/32×32**, and west global/long/short from
+32×32/32×32/32×32 to **8×8/16×16/16×16**. South global grows from 16×16 to
+**32×32**, while its short region shrinks from 16×16 to **8×8**; east is
+unchanged. The placer high-congestion warning and the router-initialization
+warning about 462 high-pin CLBs are absent in the candidate. Absence is not
+proof of zero high-pin CLBs, nor are region sizes routed congestion percentages.
+
+**Initial routing still reports congestion:** `Route 35-447` states that the
+router is prioritizing routing all nets over timing optimization. Global/short
+and timing congestion both remain **level 6 (64×64)**. The actual initial
+router table, distinct from the placer estimate, is also mixed:
+
+| Direction | Global congested tiles, no MUXF pass → candidate | Long congested tiles, no MUXF pass → candidate |
+|---|---:|---:|
+| North | 8.39% → 3.67% | 15.95% → 5.44% |
+| South | 5.36% → 9.20% | 8.65% → 12.59% |
+| East | 3.30% → 3.29% | 3.41% → 3.45% |
+| West | 7.05% → 4.55% | 8.55% → 5.31% |
+
+These directional/category percentages overlap; do not sum them. Both the
+best legally routed control and the failed comparator initially had level 6,
+so this is a warning, not a final routing verdict. Native-log-prefix hashes
+and the full table are retained in `initial-router-congestion.json`. Continue
+the current route; no legal-route or routed-frequency gain is yet established.
+
+A separate control-set check does not justify blanket control merging. In
+the best routed control, 659 of 2,526 sets have fewer than four loads, but
+they contain only **1,355 of 59,889 reported BEL loads (2.26%)**. These counts
+include LUTRAM/SRL loads, not just the 55,163 flip-flops; the totals reconcile
+with the utilization report. Control-set slice counts overlap and are not
+additive. The failed performance run already has fewer control sets than the
+best routed run. This is not proof that control remapping cannot help, but
+the aggregate count alone cannot explain or fix the congestion.
+
+The active run retains `post-place-comparison.json` and the read-only
+`post-place-inspect.py`, including three-way resource/congestion comparisons,
+control-set histograms, report and native-log-prefix hashes, unchanged-input
+checks and the independent native audit. No RTL, constraints or live build
+helpers were changed for this analysis.
 
 **Read-only follow-up performed during synthesis (Oct24):** `RQS_CONG-9` names
 `rk_ao486_bd_i/u_soc/inst` and congestion windows, not an exact set of
