@@ -1,6 +1,41 @@
 # APR strategy comparison — 40 MHz target
 
-## Explore routing active — Oct24 18:14 EDT
+## Explore closed: no gain; post-MUXF LUT remap next — Oct24 19:02 EDT
+
+Explore routing finished and the retained owner exited **0 at 19:00:58 EDT**.
+The independent closed-result audit confirms **35.735982561 MHz conditional**,
+core setup/hold **−2.983/+0.011 ns**, **266,839 fully routed nets, zero routing
+errors**, no error/critical DRC findings, ten passing bus-skew constraints
+(minimum +9.321 ns), and only the four known status LEDs without output delay.
+Setup still fails at 53,608/202,020 endpoints; hold and pulse-width pass.
+**40 MHz is not achieved.** Full runtime was **2h08m02s**, implementation
+**1h02m27s**. There were no observed OOM/task-limit events across 1,534 samples.
+
+The programming binary SHA-256 is
+`7de7faf730a31b41eee6c7750b0e849f7cf23eef761d71a4126d5c9bcf3ce88c`,
+**identical to the AlternateCLBRouting control**, as is `timing.tsv`. This is a
+zero-gain routing experiment, not a new accepted image. All 218 launch pins
+were unchanged; the 20 helpers/auditors and actual terminal owner receipt were
+archived before changing the flow. `independent-closed-audit.json`,
+`pre-next-strategy-audit.json`, and `closed-tool-snapshot/` are in the run leaf.
+Manual exception review, timing sign-off and hardware acceptance remain false.
+
+The next isolated strategy is
+**`performance-retime-muxf-aggressive-remap-route-first`**: retain the best
+control's synthesis, retiming, AltSpreadLogic_high placement and
+AlternateCLBRouting; add a separate **`opt_design -aggressive_remap` after
+`opt_design -muxf_remap`**. MUXF conversion exposed 22,341 extra LUTs before
+placement; combining newly exposed LUT functions may reduce depth/congestion,
+but no gain is assumed. This differs from the rejected resynth_remap experiment
+on a no-MUXF AlternateRoutability netlist. The installed Vivado 2025.2 manual
+describes aggressive_remap as exhaustive LUT-depth remapping. It is deliberately
+not the bundled ExploreWithRemap directive: the ordinary RuntimeOptimized pass
+and its BRAM-power crash workaround remain intact. No RTL, preservation,
+clock/exception change or old checkpoint input is part of this trial.
+
+The chronology below records observations made while Explore was active.
+
+### Explore launch and intermediate evidence
 
 Fresh **`performance-retime-muxf-explore-route-first-r1`** started at
 **16:52:55 EDT**. Relative to the best **35.735982561 MHz** control, the only
@@ -9,7 +44,7 @@ PerformanceOptimized synthesis, global retiming on, MUXF remapping,
 AltSpreadLogic_high placement, disabled standalone physical stages, eight
 threads per stage and one native job are retained. The rejected ExtraTimingOpt
 placement is not carried forward. Core/AXI constraints remain **25/10 ns**.
-This run is not complete and has no new frequency or hardware result.
+At launch the run had no new frequency or hardware result; closure is above.
 
 The strategy and strict audit tests are committed/pushed as **`d6b11e49`**.
 All **113 flow/path tests + 26 resource-policy tests** pass. The separate native
@@ -32,8 +67,8 @@ invocation `f721e54fae9244ca9995178d4dab9e41`; its scope invocation is
 Evidence root:
 `/home/yukidama/external/tmp/ventium-muxf-explore-oct24.rwk8YxFW/`.
 It contains `probe-inputs.json`, `probe-closed.json`, `full-launch-audit.json`,
-and the fresh full run's source/started receipts and live logs. Do not launch
-another Vivado family while this run is active.
+and the fresh full run's source/started receipts and logs. The family is now
+closed; its evidence is retained, and it must not be restarted.
 
 Candidate gameplay is **unmeasured**. The older physical baseline is
 **0.496499864 total U+V IPC**, image **2886d24c**, cycles
