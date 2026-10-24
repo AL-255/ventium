@@ -113,6 +113,85 @@ and an empty prior-checkpoint input list. It has no full-core retiming, timing
 or gameplay result yet. The preceding 31.028919 MHz result remains the latest
 completed strategy result, not this candidate's frequency.
 
+### Retiming trial: synthesis complete, APR started — Oct24 04:29 EDT
+
+Native synthesis completed successfully in **1 h 31 min 6 s**, with zero
+errors or critical warnings. This is about 16.3% shorter than the control's
+1 h 48 min 52 s, but the retiming option, internal thread count and host
+conditions changed together; it is not an isolated retiming speedup.
+All **216 launch pins** still match. Implementation started at **04:29:24 EDT**
+using only this trial's newly synthesized netlist; no earlier DCP is an input.
+
+The main synthesis log contains **50 per-module retiming count records, all
+zero forward/backward moves**, including the three reported core fragments.
+There is no separate aggregate retiming table in that log. Do not infer a
+full-core transformation merely from `GLOBAL_RETIMING=on`, nor infer an exact
+global count from incomplete per-module coverage. The actual unplaced worst
+path provides stronger evidence that the important depth has not been removed:
+
+| Same-stage synthesis metric | Retiming-off control | Current retiming trial |
+|---|---:|---:|
+| EIP[1] → pipe_mem_v_hit_q logic levels | 99 | 99 |
+| Core setup slack at 25 ns | −4.200 ns | −4.022 ns |
+| Data delay: logic / estimated wire | 5.226 / 23.763 ns | 5.293 / 23.518 ns |
+| Conditional **unplaced** core frequency estimate | 34.246575 MHz | 34.456619 MHz |
+| CLB LUTs | 194,204 | 194,049 |
+| Registers | 54,878 | 54,876 |
+| CARRY8 / unique control sets | 3,389 / 2,448 | 3,389 / 2,448 |
+
+The startpoint and endpoint match, but the mapped internal paths are not
+identical. This **0.178 ns** unplaced improvement is not a routed gain and
+does not establish 40 MHz closure. The current unplaced report also contains
+hold violations and eight no-clock pins; final post-route coverage, hold and
+all clock-pair checks remain mandatory. BRAM/DSP/MUXF counts are unchanged.
+Through the first 1,126 resource samples, combined charged RAM+swap peaked at
+**44.04 GiB**, with zero OOM-kill/task-limit events. The heavy mapping helpers
+exited after their work; they were children of the single build, not orphan runs.
+
+Evidence under this trial's `build/`:
+
+- `synth-timing.rpt`, SHA256
+  `a6ef66a094620896996cd9f45e66a5c321ba50466627b3cafd9064d0c7e2eb73`.
+- `rk_ao486_system/rk_ao486_system.runs/synth_1/runme.log`, SHA256
+  `ea5e80809a92f5d54b19a13d1906f2a06d5789cfa9eb48882b7007a1204ac39a`.
+- `rk_ao486_system/rk_ao486_system.runs/synth_1/rk_ao486_bd_wrapper_utilization_synth.rpt`,
+  SHA256 `678b039b203c9172475e3a08749c9134be45092e760be7fb730a03208b68b4c1`.
+
+### Shared-address logic coupling and isolated remap hook
+
+Closer inspection of the **completed control's routed** worst path identifies
+`ref_prime_select` at 21.196 ns arrival, then `mc_query_seg`, address translation
+and finally `mc_prime_offer` at 29.187 ns. The frozen source separately requires
+`mc_prime_offer -> !ref_prime_select`, although the shared query-address mux
+contains the reference client's `d_seg`/`d_ea` inputs. The successor-prefix
+bytes are selected in `S_EXEC`, while reference priming requires `S_PIPE`.
+These are concrete leads for factoring mutually exclusive logic, **not** a
+gate-level path-sensitization proof or permission to add false/multicycle paths.
+No source or exception is changed here. The core-source search found no explicit
+`DONT_TOUCH`/`KEEP_HIERARCHY`, but the outer SoC's historical `DONT_TOUCH` and vendor
+CDC attributes still exist; see the preservation preflight below.
+
+An isolated candidate post-hook now exists under
+`/home/yukidama/external/tmp/ventium-remap-prep-oct24.QByU7FQt/`.
+It would run a separate `opt_design -resynth_remap` **after** the verified
+`RuntimeOptimized` pass. This preserves the existing no-BRAM-power workaround;
+switching wholesale to `ExploreWithRemap` is not the same experiment. The
+installed 2025.2 `opt_design` manual documents timing-driven depth reduction
+for this explicit pass; its SHA256 is
+`07fe23847c2080edb7a446fcbf930c39a9b0e5cd57800016ef4bc5b4e5b3198f`.
+
+Four host tests pass, covering exact command/options, version/part/thread
+rejection, native-error propagation and duplicate-execution refusal. These
+stub Vivado; **the hook is not integrated, natively tested, promoted or queued**.
+Its README records the missing strategy/probe/pinning/auditor integration,
+including proof of both optimization passes in order. The timing-placement
+option below and this remap hook are conditional alternatives; choose from
+the current run's completed path evidence, not an automatic strategy sweep.
+
+Verified gameplay baseline remains **0.496499864 total U+V IPC**, physical
+image **2886d24c**, cycles **625,021,130,428–629,480,208,865**. It predates the
+active unmeasured candidate. Neither isolated option has a gameplay result.
+
 ### Isolated timing-focused placement option — not launched
 
 While the Oct24 retiming run remains active, a conditional next option is
