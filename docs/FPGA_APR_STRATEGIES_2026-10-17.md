@@ -169,6 +169,21 @@ all 217 active-run pins were rechecked unchanged. Select any next experiment
 from the active run's final timing/legality/congestion evidence, then use a
 fresh source-only probe and full build—not a prior checkpoint.
 
+**Oct24 isolated integration:** the follow-on preparation at
+`/home/yukidama/external/tmp/ventium-muxf-strategy-prep-oct24.5lWFc8xZ/`
+now integrates `performance-retime-muxf-route-first` into the full-flow
+interceptors, launch pins, native probe and closed-run auditor. Its only
+strategy delta from the active performance-mapping run is the extra
+`opt_design -muxf_remap` pass. **94 flow/audit + 26 scope-policy tests pass
+(120 total)**; these remain host tests, not native validation or QoR evidence.
+The probe explicitly instantiates MUXF7/8/9 and requires a nonzero before
+population plus reduced aggregate counts, so a no-op cannot pass that probe.
+The native audit rejects missing/misordered counts, mixed remap hooks and
+missing command/completion evidence. The manifest pins 26 base files and ten
+changed/new candidates; all **217 active-run pins** were rehashed unchanged.
+Nothing has been promoted or queued. Review the current route's completed
+evidence and physical-region membership before selecting the next experiment.
+
 ## Retiming/eight-thread trial closed: 34.293553 MHz — Oct24 05:32 EDT
 
 `routability-retime-route-first-r1` completed from fresh source in **2 h 36 min
