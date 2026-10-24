@@ -3,8 +3,8 @@ if {$argc ni {4 5}} {error "usage: strategy frozen-source new-output-directory s
 lassign $argv strategy frozen out tool_threads implementation_threads
 if {$argc == 4} {set implementation_threads $tool_threads}
 if {$tool_threads ni {1 2}} {error "only one or two internal threads supported"}
-if {$strategy ni {performance-netdelay routability-spread performance-retime-bounded performance-bounded performance-route-first}} {error "unknown strategy"}
-if {$strategy eq "performance-route-first"} {
+if {$strategy ni {performance-netdelay routability-spread performance-retime-bounded performance-bounded performance-route-first routability-route-first}} {error "unknown strategy"}
+if {$strategy in {performance-route-first routability-route-first}} {
     if {$tool_threads ne "1" || $implementation_threads ne "4"} {error "route-first requires synth=1 APR=4"}
 } elseif {$implementation_threads ne $tool_threads} {error "unequal stage threads only supported for route-first"}
 if {[version -short] ne "2025.2"} {error "Vivado 2025.2 required"}
@@ -84,9 +84,9 @@ proc launch_runs {run args} {
             puts $f $path
         }
         close $f
-        set directive [expr {$::strategy eq "routability-spread" ? "AlternateRoutability" : "PerformanceOptimized"}]
+        set directive [expr {$::strategy in {routability-spread routability-route-first} ? "AlternateRoutability" : "PerformanceOptimized"}]
         set retiming [expr {$::strategy eq "performance-retime-bounded" ? "on" : "auto"}]
-        if {$::strategy in {performance-bounded performance-route-first}} {set retiming off}
+        if {$::strategy in {performance-bounded performance-route-first routability-route-first}} {set retiming off}
         set_property STEPS.SYNTH_DESIGN.ARGS.DIRECTIVE $directive $obj
         set_property STEPS.SYNTH_DESIGN.ARGS.GLOBAL_RETIMING $retiming $obj
         set_property STEPS.SYNTH_DESIGN.ARGS.FLATTEN_HIERARCHY rebuilt $obj
@@ -109,6 +109,8 @@ proc launch_runs {run args} {
             set place ExtraNetDelay_high; set phys AggressiveExplore; set route NoTimingRelaxation
         } elseif {$::strategy eq "routability-spread"} {
             set place AltSpreadLogic_medium; set phys Explore; set route AlternateCLBRouting
+        } elseif {$::strategy eq "routability-route-first"} {
+            set place AltSpreadLogic_high; set phys Default; set route AlternateCLBRouting
         } else {
             set place AltSpreadLogic_medium; set phys Default; set route NoTimingRelaxation
         }
@@ -119,7 +121,7 @@ proc launch_runs {run args} {
         set_property STEPS.POST_ROUTE_PHYS_OPT_DESIGN.IS_ENABLED true $obj
         set_property STEPS.POST_ROUTE_PHYS_OPT_DESIGN.ARGS.DIRECTIVE Explore $obj
         if {$::strategy in {performance-retime-bounded performance-bounded}} {fresh_bounded_phys $obj}
-        if {$::strategy eq "performance-route-first"} {fresh_route_first $obj}
+        if {$::strategy in {performance-route-first routability-route-first}} {fresh_route_first $obj}
         set_property STEPS.ROUTE_DESIGN.TCL.PRE [file join $::fresh_script_dir fresh_route_pre.tcl] $obj
     }
     fresh_run $run

@@ -1,5 +1,169 @@
 # APR strategy comparison — 40 MHz target
 
+## Congestion failure and next fresh strategy — 2026-10-23
+
+The Oct22 `performance-route-first-r1` ended at **22:17:56 EDT** with native
+exit 1, after **3 h 55 min 7 s** total. It was **not** stopped for OOM, swap,
+the APR deadline or user cancellation. Native synthesis took **1:16:07**,
+placement **0:13:40**, routing **2:20:56**. The controller and Vivado scope are
+terminal; no surviving process family was found before preparing the next run.
+
+The router failed legality with **21,350 overlapping routing nodes** and
+**11,559 signals** affected (`Route 35-2` / `Route 35-162`). The earlier
+"zero unrouted nets" subtotal is not success: resource overlaps make the
+design illegal. Local southward routing usage reached **99.9943%** in windows
+around `INT_X48Y228`–`INT_X63Y259`, versus whole-device vertical/horizontal usage
+of **25.23% / 25.79%**. The listed conflicts include `ic_tag_o`, `ic_tch*_set`,
+`ic_age`, `pf_fill_addr` and segment-base nets under the rebuilt `u_icache`
+hierarchy. Thus the evidence points to local connectivity/pin density, not
+global memory exhaustion or simply a shortage of total routing resources.
+
+All **2,818 recorded resource samples** show zero OOM/OOM-kill and task-limit
+events. Sampled peaks were **14.34 GiB RAM**, **6.90 GiB swap**, and **20.00 GiB
+simultaneously combined** (the individual peaks must not be added).
+The error checkpoint is diagnostic evidence, not a valid routed result and
+never an input to a new trial. No bitstream or new Fmax was obtained. Before
+editing the tools, all **215 launch pins** were rehashed unchanged, with the
+15 launch-helper copies and a receipt saved inside the closed run as
+`closed-tool-snapshot/` and `pre-next-strategy-audit.json`.
+
+The new **`routability-route-first`** combination changes three settings while
+retaining the source/profile, retiming-off policy, rebuilt hierarchy, one
+synthesis job, serial synthesis / four-thread APR, and disabled optional
+physical-optimization stages:
+
+| Stage | Failed trial | New trial |
+|---|---|---|
+| Synthesis | PerformanceOptimized | AlternateRoutability |
+| Placement | AltSpreadLogic_medium | AltSpreadLogic_high |
+| Routing | NoTimingRelaxation | AlternateCLBRouting |
+
+AMD describes AlternateRoutability as reducing MUXF/carry usage and the alternate
+CLB router as a congestion-oriented algorithm for UltraScale devices.
+[Vivado 2025.2 synthesis reference](https://docs.amd.com/r/2025.2-English/ug835-vivado-tcl-commands/synth_design),
+[routing reference](https://docs.amd.com/r/2025.2-English/ug835-vivado-tcl-commands/route_design).
+Stronger spreading is a hypothesis for the observed local saturation, not a
+promised gain. This combined trial cannot attribute improvements separately
+to each setting. The router may use different internal timing tradeoffs;
+the actual **25 ns core / 10 ns AXI constraints and final timing acceptance
+remain unchanged**, with no false-path or multicycle relaxation.
+
+**48 fresh-flow/audit tests + 25 scope-policy tests pass**. New tests enforce
+the exact directives, disabled optional physical stages, one/four stage-thread
+policy, unchanged memory-monitoring contract, and rejection of old checkpoints
+or timing-disabled synthesis. The small fresh-source native probe completed
+successfully at **23:04:59 EDT**, with synthesis, placement, routing and the
+exact generated command checks passing. Its owner was
+under `ventium-congestion-probe-oct23-r1.service`, invocation
+`7276bfde077c43f0a592b4a50c2035cc`; logs are under
+`/home/yukidama/external/tmp/ventium-congestion-oct23.fCu7nVz2/`.
+All probe input hashes were unchanged and all its Vivado/VRS workers exited
+before the full-core launch. This is native tooling validation, not CPU or
+full-core timing acceptance.
+
+The full **fresh** trial started at **23:05:25 EDT** under
+`ventium-fresh-congestion-oct23-r1.service`, invocation
+`dcc9885e5d0945f586d95609e53aabe1`; the exclusive scope invocation is
+`6b7c88d9142f46f0a3f4a836e7cc5187`. Its output is
+`ventium-congestion-oct23.fCu7nVz2/routability-route-first-r1/` under scratch.
+The native synthesis command/property audit confirms `AlternateRoutability`,
+explicit retiming off, rebuilt hierarchy, one internal synthesis thread,
+disabled IP/incremental reuse, and no prior checkpoint input. All **215 pins**,
+200 source/metadata files and 159 defines were checked again at startup.
+Live scope limits are infinity for RAM, swap and memory.high, with 128 tasks;
+the first 40-second sample has zero OOM/task-limit events. The user's separate
+OS pressure-kill policy still reads `auto`. Only this one full build is active.
+No RTL change, old-checkpoint reuse, concurrent build or board operation occurs.
+
+Current verified gameplay remains **0.496499864 total U+V IPC**, deployed
+`2886d24c`, cycles **625,021,130,428–629,480,208,865**. Both new strategy
+candidates remain unmeasured; the last legal routed conditional estimate is
+still **28.701817 MHz**, not 40 MHz sign-off.
+
+## Resumed on the migrated host — 2026-10-22
+
+The user authorized resuming **fresh synthesis plus APR**, with no previous
+checkpoint/netlist/IP-cache inputs and no memory-usage-triggered kills. Host
+`al-ms790s-u24` has a Ryzen 9 7940HX (16 cores / 32 threads), about 29 GiB usable
+RAM and, after the user's upgrade, **64 GiB swap**. The existing explicit scratch
+path `/home/yukidama/external/tmp` now resides on the host's large ext4 root
+volume (about 742 GiB available at admission); this is the migrated layout,
+not an automatic fallback from an unmounted external volume.
+
+The previously staged six-file uncapped-memory change was hash-checked against
+its sealed Oct19 `before`/`candidate` bundle and promoted locally. New fresh
+launches use `MemoryMax=infinity`, `MemorySwapMax=infinity`, no combined-memory
+early stop and no free-memory admission threshold. Exclusive process ownership,
+one synthesis job, task limits, disk reserve, runtime limits and actual error/OOM
+monitoring remain. No unrelated application was killed. The launcher now sources
+`settings64.sh` from its selected installation. Scratch admission still rejects
+existing destinations, escapes and missing parents but no longer requires a
+different device from the repository. The historical fresh-pair preparation test
+also now rebases only its exact old mount prefix in generated copies, without
+rewriting pinned historical evidence or relaxing its content hashes.
+
+**47 fresh-flow/audit/migration tests and 25 scope-policy tests pass**, plus
+shell syntax and changed-file whitespace checks. All **200 frozen source files**
+and **159 defines** were rechecked against the original receipt. The full-width
+clock wrapper still matches the deployed ECO's exact port adaptation. No CPU or
+cache RTL was changed; the dirty experimental checkout is not the build source.
+
+A small source-only native probe started at **18:20:20 EDT** under
+`ventium-newhost-probe-oct22-r1.service`, invocation
+`83fe9426b8d542b0a9160bd450fbc54f`. Its source, logs and test logs are under
+`/home/yukidama/external/tmp/ventium-newhost-oct22.6rb7FSrh/`. Live readback confirms
+unlimited RAM/swap and `MemoryHigh=infinity`, with 128 tasks. This probe tests
+the migrated tool/launcher and serial-synthesis/four-thread-APR configuration;
+it is not a full-core frequency, CPU-correctness or FPGA acceptance result.
+The probe completed synthesis and routing at **18:22:28 EDT**, native exit 0,
+with both native stage/thread checks and routed-checkpoint serialization passing.
+All four probe input hashes were unchanged after closure. The owner became
+inactive with `MainPID=0`; no Vivado/VRS worker remained before the next launch.
+
+The host's separate `user@1000.service` systemd-oomd pressure-kill policy was
+still enabled at initial admission. The user changed it, and fresh readback
+before the full build confirms **`ManagedOOMMemoryPressure=auto`** and
+`ManagedOOMSwap=auto`. Unlimited cgroup memory and free swap alone must not be
+described as disabling that operating-system policy. Kernel exhaustion remains
+a possible failure; it is monitored rather than claimed impossible.
+
+The full-core trial restarted `performance-route-first` **from source**:
+`PerformanceOptimized`, rebuilt hierarchy, explicit synthesis retiming off;
+`RuntimeOptimized` logical optimization, `AltSpreadLogic_medium` placement and
+`NoTimingRelaxation` routing, with optional physical-optimization stages off.
+This retains the last interrupted strategy for a comparable first result on
+the new host; it does not resume its old design database. Targets stay **40 MHz
+core / 100 MHz AXI**. Subsequent strategy decisions require its actual native
+timing/congestion evidence. No new routed frequency or bitstream exists yet.
+
+Full-build owner: **`ventium-fresh-route-first-oct22-r1.service`**, started
+**18:22:56 EDT**, invocation `d34ac1e8f0224afcb9dbca076ce04e21`.
+Its exclusive scope invocation is `c8c9a38f86d04fcfa01166244063fbb4`.
+Output: `ventium-newhost-oct22.6rb7FSrh/performance-route-first-r1/` under scratch.
+Fresh receipts confirm **215 unchanged input/tool pins**, 200 source/metadata
+files, 159 defines, no prior checkpoint input, and no dirty-checkout CPU use.
+Only `ven_pll_ctrl.sv` differs from the original parent source closure, exactly
+as in the prior independently prepared fresh trials. The controller records
+uncapped memory and live readback agrees (`MemoryMax`, `MemorySwapMax` and
+`MemoryHigh` all infinity). One synthesis worker is allowed, with one internal
+synthesis thread and four APR threads; task headroom is 128, not 128 jobs.
+The eight-hour whole-run and 3 h 50 min APR limits remain. At the first resource
+check there were no OOM or task-limit events. The tiny probe's DCP is never an
+input to this full-core build. No second strategy is running or queued.
+
+The native synthesis command/property audit now passes: timing-driven
+`synth_design -top rk_ao486_bd_wrapper -part xczu15eg-ffvb1156-2-i
+-directive PerformanceOptimized -global_retiming off`, rebuilt hierarchy,
+one thread, automatic incremental mode off and an empty incremental checkpoint.
+`stages.tsv` records fresh `synth_1` start at epoch **1792707804**. At 85 seconds,
+charged RAM was 5,552,422,912 bytes with no scope swap or OOM/task-limit event;
+all 215 pins were rehashed unchanged. These are startup observations, not final
+resource peaks, synthesis completion or a timing result.
+
+Verified gameplay baseline remains **0.496499864 total U+V IPC**, deployed
+`2886d24c`, cycles **625,021,130,428–629,480,208,865**. New strategy candidates
+have no gameplay measurement or physical standard-suite acceptance.
+
 ## Stopped for host migration — 2026-10-19
 
 At the user's request, `performance-route-first-r1` was cancelled at about

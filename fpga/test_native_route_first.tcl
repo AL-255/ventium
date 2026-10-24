@@ -19,7 +19,13 @@ proc route_first_check_status {run status directory} {
 }
 
 # Source-only tooling probe, NOT full-core timing or hardware acceptance.
-if {$argc != 1} {error "usage: new-output-directory"}
+if {$argc ni {1 2}} {error "usage: new-output-directory ?performance-route-first|routability-route-first?"}
+set strategy performance-route-first
+if {$argc == 2} {set strategy [lindex $argv 1]}
+if {$strategy ni {performance-route-first routability-route-first}} {error "unknown probe strategy"}
+set synth_directive [expr {$strategy eq "routability-route-first" ? "AlternateRoutability" : "PerformanceOptimized"}]
+set place_directive [expr {$strategy eq "routability-route-first" ? "AltSpreadLogic_high" : "AltSpreadLogic_medium"}]
+set route_directive [expr {$strategy eq "routability-route-first" ? "AlternateCLBRouting" : "NoTimingRelaxation"}]
 set out [file normalize [lindex $argv 0]]
 if {[file exists $out]} {error "probe output must not exist"}
 if {[version -short] ne "2025.2"} {error "Vivado 2025.2 required"}
@@ -54,12 +60,12 @@ foreach obj [list $synth $impl] {
     if {[get_property AUTO_INCREMENTAL_CHECKPOINT $obj] ni {0 false} ||
         [get_property INCREMENTAL_CHECKPOINT $obj] ne ""} {error "incremental reuse enabled"}
 }
-set_property STEPS.SYNTH_DESIGN.ARGS.DIRECTIVE PerformanceOptimized $synth
+set_property STEPS.SYNTH_DESIGN.ARGS.DIRECTIVE $synth_directive $synth
 set_property STEPS.SYNTH_DESIGN.ARGS.GLOBAL_RETIMING off $synth
 set_property STEPS.SYNTH_DESIGN.ARGS.FLATTEN_HIERARCHY rebuilt $synth
 set_property STEPS.OPT_DESIGN.ARGS.DIRECTIVE RuntimeOptimized $impl
-set_property STEPS.PLACE_DESIGN.ARGS.DIRECTIVE AltSpreadLogic_medium $impl
-set_property STEPS.ROUTE_DESIGN.ARGS.DIRECTIVE NoTimingRelaxation $impl
+set_property STEPS.PLACE_DESIGN.ARGS.DIRECTIVE $place_directive $impl
+set_property STEPS.ROUTE_DESIGN.ARGS.DIRECTIVE $route_directive $impl
 fresh_route_first $impl
 report_property $synth -file [file join $out synth-properties.rpt]
 report_property $impl -file [file join $out impl-properties.rpt]
@@ -83,12 +89,13 @@ foreach {run threads} {synth_1 1 impl_1 4} {
     }
     if {$run eq "synth_1"} {
         if {![regexp -line {^synth_design .* -global_retiming off(?: |$)} $native] ||
+            ![regexp -line [format {^synth_design .* -directive %s(?: |$)} $synth_directive] $native] ||
             [regexp -line {^\s*(read_checkpoint|open_checkpoint)\s} $native]} {
             error "native synthesis policy drift"
         }
     } else {
         if {[regexp -line {^[ \t]*phys_opt_design(?:[ \t]|$)} $native]} {error "optional phys_opt still present"}
-        foreach {command directive} {opt_design RuntimeOptimized place_design AltSpreadLogic_medium route_design NoTimingRelaxation} {
+        foreach {command directive} [list opt_design RuntimeOptimized place_design $place_directive route_design $route_directive] {
             set commands [regexp -all -inline -line [format {^[ \t]*%s[^\r\n]*} $command] $native]
             if {[llength $commands] != 1 || [string trim [lindex $commands 0]] ne "$command -directive $directive"} {
                 error "native command mismatch: $commands"
@@ -102,4 +109,5 @@ foreach {run threads} {synth_1 1 impl_1 4} {
 # No bitstream for this unpinned-I/O fixture. Its routed checkpoint above must
 # serialize successfully; the real full build still writes its bitstream.
 puts "FRESH-ROUTE-FIRST-NATIVE-OK synth=1 apr=4 optional-phys=off fresh-source (tooling test only)"
+puts "FRESH-ROUTE-FIRST-STRATEGY-OK $strategy"
 close_project

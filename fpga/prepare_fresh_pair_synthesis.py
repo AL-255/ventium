@@ -16,6 +16,9 @@ from prepare_fragment_exact_timing import replace,sha,span
 from prepare_payload_current_synthesis import guarded
 
 ROOT=Path('/home/yukidama/external/tmp/ventium-load-read-ack.GyWDDtiI').resolve(strict=True)
+# Pinned historical templates retain the previous host's resolved mount path.
+# Rebase only that exact path in generated copies; never rewrite the evidence.
+TEMPLATE_ROOT=Path('/run/media/yukidama/f213d338-6002-424a-9968-584cf4aff9b6/tmp/ventium-load-read-ack.GyWDDtiI')
 PARENT_MANIFEST='90e4ec12f6d61699a175484366450a41d67a8d7b1717b3d228f8b5b0ab8bb87c'
 BEST_DCP='b03f67ee2a42326723a1f16ef0c529d546878cbbcdcbcee783c1086d3e4b2df8'
 TEMPLATES={
@@ -29,6 +32,7 @@ TEMPLATES={
 
 def derive(original,changes):
     assert sorted(changes)==['ventium/'+n for n in native.CHANGES]
+    original={name:text.replace(str(TEMPLATE_ROOT),str(ROOT)) for name,text in original.items()}
     result={}
     for phase in ('synthesis','clock'):
         name='read-owner-'+phase+'-r1/run.py'

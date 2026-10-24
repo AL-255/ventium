@@ -11,7 +11,7 @@ set -euo pipefail
 # The normal verification profile is deliberately fixed.  A generic environment
 # variable must not be able to turn a safe terminal command into an unbounded
 # generated-C++ build.  Vivado is the one reviewed exception and has its own
-# explicit profile below.
+# explicit profile below (uncapped RAM/swap by the user's Oct19 override).
 normal_memory_max="4G"
 normal_tasks_max="64"
 # Explicit four-compiler IPC development scope. The normal 4G/one-job profile
@@ -32,11 +32,9 @@ vivado_memory_max="20G"
 # or lock policy. serial_apr4 keeps serial synthesis with four-thread APR.
 vivado_tasks_max="48"
 vivado_parallel2_tasks_max="128"
-# Keep swap bounded separately from resident memory.  Vivado can retain a large
-# working set during synthesis, but allowing an unbounded swap backlog turns an
-# OOM into hours of host-wide thrashing. Keep the default at 2G. The explicit
-# 8G ceiling accommodates the measured synthesis-mapper burst without raising
-# resident memory; host admission below reserves RAM and swap for other apps.
+# Historical bounded-policy values, used only when explicitly selected for
+# reproduction. New Vivado launches default to uncapped RAM/swap; usage and
+# available memory are still observed, without a free-memory admission veto.
 vivado_swap_default="2G"
 vivado_swap_max="8G"
 # One fixed lock is part of the safety boundary.  Permitting a caller to choose
@@ -102,12 +100,18 @@ vivado_size_status() {
     return 3
 }
 
-# Return the effective Vivado resident-memory cap.  The public override is
+# Return the effective Vivado resident-memory cap. Under the historical bounded
+# policy, the numeric public override is
 # deliberately one-way: a valid positive value can lower the reviewed 20 GiB
 # ceiling, while an attempted increase is explicitly clamped rather than
 # silently expanding the scope.  Malformed and zero values are errors because
 # interpreting either as an unlimited cgroup would defeat the safety boundary.
 vivado_memory_limit() {
+    case "${VENTIUM_VIVADO_MEMORY_POLICY:-unbounded}" in
+        unbounded) printf '%s\n' infinity; return 0 ;;
+        bounded) ;; # Historical/reproducibility profile only.
+        *) echo "[build-scope] unknown Vivado memory policy" >&2; return 1 ;;
+    esac
     local requested="${VENTIUM_VIVADO_MEMORY_MAX:-$vivado_memory_max}"
     local size_status
 
@@ -129,11 +133,16 @@ vivado_memory_limit() {
     printf '%s\n' "$vivado_memory_max"
 }
 
-# Swap follows the same non-expanding policy, except zero is meaningful: it
+# Historical bounded swap follows the same non-expanding policy, except zero is meaningful: it
 # explicitly disables swap.  Keeping the parser shared with MemoryMax accepts
 # only unambiguous binary-unit sizes and makes an oversized request visibly
 # clamp to the explicit 8 GiB Vivado ceiling (the default remains 2 GiB).
 vivado_swap_limit() {
+    case "${VENTIUM_VIVADO_MEMORY_POLICY:-unbounded}" in
+        unbounded) printf '%s\n' infinity; return 0 ;;
+        bounded) ;; # Historical/reproducibility profile only.
+        *) echo "[build-scope] unknown Vivado memory policy" >&2; return 1 ;;
+    esac
     local requested="${VENTIUM_VIVADO_MEMORY_SWAP_MAX:-$vivado_swap_default}"
     local size_status
 
@@ -195,6 +204,10 @@ vivado_host_admission() {
         echo "[build-scope] incomplete host memory sample; refusing Vivado" >&2
         return 1
     fi
+    if [ "$memory_cap" = infinity ] && [ "$swap_cap" = infinity ]; then
+        echo "[build-scope] uncapped Vivado RAM/swap authorized: MemAvailable=${memory_available}, SwapFree=${swap_free} bytes (observation only)" >&2
+        return 0
+    fi
     memory_bytes="$(size_to_bytes "$memory_cap")" || return 1
     swap_bytes="$(size_to_bytes "$swap_cap")" || return 1
     if (( memory_available < memory_bytes + 2 * gib )); then
@@ -228,6 +241,18 @@ scope_has_cap() {
     [ -r "$cgroup_root/pids.max" ] || return 1
     actual_memory="$(<"$cgroup_root/memory.max")"
     actual_tasks="$(<"$cgroup_root/pids.max")"
+    if [ "$memory_cap" = infinity ] && [ "$swap_cap" = infinity ]; then
+        # No finite memory ceiling or soft reclaim throttle. Tasks and the
+        # inherited exclusive lock remain mandatory for nested invocations.
+        [ "$actual_memory" = max ] || return 1
+        [[ "$actual_tasks" =~ ^[0-9]+$ ]] || return 1
+        (( actual_tasks <= tasks_cap )) || return 1
+        [ -r "$cgroup_root/memory.swap.max" ] || return 1
+        [ "$(<"$cgroup_root/memory.swap.max")" = max ] || return 1
+        [ -r "$cgroup_root/memory.high" ] || return 1
+        [ "$(<"$cgroup_root/memory.high")" = max ] || return 1
+        return 0
+    fi
     limit_memory="$(size_to_bytes "$memory_cap")" || return 1
     [[ "$actual_memory" =~ ^[0-9]+$ ]] || return 1
     [[ "$actual_tasks" =~ ^[0-9]+$ ]] || return 1
@@ -467,10 +492,10 @@ if ! [[ "${scope_unit}" =~ ^ventium-[A-Za-z0-9_.@:-]+$ ]] || [[ "${scope_unit}" 
     echo "[build-scope] invalid scope unit name: ${scope_unit}" >&2
     exit 2
 fi
-# Only the exclusive Vivado launcher may use the larger reviewed profile.  The
+# Only the exclusive Vivado launcher may use the uncapped Vivado profile. The
 # ordinary profile ignores stale/malicious generic limit variables rather than
-# expanding a build's budget.  Keep both profiles fixed so `--is-active` can
-# verify their cgroup limits without trusting inherited configuration.
+# expanding a build's budget. `--is-active` verifies the selected profile's
+# cgroup limits and actual inherited lock; unbounded memory does not bypass it.
 scope_profile="${VENTIUM_BUILD_SCOPE_PROFILE:-default}"
 scope_swap=""
 case "$scope_profile" in
@@ -514,7 +539,7 @@ case "$scope_profile" in
         if [ "${VENTIUM_VIVADO_TASKS_MAX:-$scope_tasks}" != "$scope_tasks" ]; then
             echo "[build-scope] forcing reviewed Vivado TasksMax=${scope_tasks}" >&2
         fi
-        echo "[build-scope] Vivado limits: MemoryMax=${scope_mem} (ceiling ${vivado_memory_max}), MemorySwapMax=${scope_swap} (ceiling ${vivado_swap_max}), TasksMax=${scope_tasks}" >&2
+        echo "[build-scope] Vivado policy: ${VENTIUM_VIVADO_MEMORY_POLICY:-unbounded}; MemoryMax=${scope_mem}, MemorySwapMax=${scope_swap}, TasksMax=${scope_tasks}" >&2
         vivado_host_admission "$scope_mem" "$scope_swap" || exit 125
         ;;
     *)
@@ -611,8 +636,8 @@ if [ -n "${scope_swap}" ]; then
     scope_properties+=(-p "MemorySwapMax=${scope_swap}")
     # Keep memory.high at its default max. Early forced reclaim caused the
     # monitored user manager's PSI policy to kill the mapper below its hard
-    # RAM cap (2026-10-03). Admission reserves and MemoryMax/SwapMax remain
-    # the boundary; do not change oomd policy or prefer a sibling as victim.
+    # RAM cap (2026-10-03). The selected historical bounded or new unbounded
+    # policy remains explicit; do not change oomd policy or prefer a sibling as victim.
 fi
 systemd-run --expand-environment=no "${scope_args[@]}" "${scope_properties[@]}" \
     -- bash -c '

@@ -149,7 +149,7 @@ def audit_task_monitoring(run, started, closed):
     fields = {'task_monitoring', 'task_profile', 'tasks_max', 'memory_profile', 'implementation_threads'}
     if (not fields.intersection(started) and not fields.intersection(closed) and
         'VENTIUM_VIVADO_TASK_PROFILE' not in started.get('env', {}) and
-        started.get('strategy') != 'performance-route-first'):
+        started.get('strategy') not in ('performance-route-first', 'routability-route-first')):
         return None  # Historical receipts did not record task events.
     threads = started.get('tool_threads')
     if type(threads) is not int or threads not in (1, 2):
@@ -159,7 +159,7 @@ def audit_task_monitoring(run, started, closed):
                       (1, 4): ('serial_apr4', 128)}
     if type(impl_threads) is not int or (threads, impl_threads) not in stage_policies:
         raise ValueError('invalid implementation thread count')
-    route_first = started.get('strategy') == 'performance-route-first'
+    route_first = started.get('strategy') in ('performance-route-first', 'routability-route-first')
     if route_first != ((threads, impl_threads) == (1, 4)):
         raise ValueError('stage thread policy disagrees with strategy')
     if 'implementation_threads' in started or 'implementation_threads' in closed or route_first:
@@ -169,26 +169,32 @@ def audit_task_monitoring(run, started, closed):
             raise ValueError('stage thread receipts disagree')
     profile, maximum = stage_policies[threads, impl_threads]
     memory_profile = started.get('memory_profile', 'standard16')
-    if not isinstance(memory_profile, str) or memory_profile not in ('standard16', 'serial20'):
+    if not isinstance(memory_profile, str) or memory_profile not in ('standard16', 'serial20', 'unbounded'):
         raise ValueError('invalid memory profile')
-    if (memory_profile == 'serial20' and threads != 1) or (route_first and memory_profile != 'serial20'):
+    if (memory_profile == 'serial20' and threads != 1) or (route_first and memory_profile not in ('serial20', 'unbounded')):
         raise ValueError('memory profile disagrees with stage thread policy')
+    unbounded = memory_profile == 'unbounded'
     ram_gib, swap_gib, gib = (20 if memory_profile == 'serial20' else 16), 6, 1024**3
     named_memory = 'memory_profile' in started or 'memory_profile' in closed
     if named_memory:
-        expected = dict(memory_max=ram_gib*gib, swap_max=swap_gib*gib,
-                        combined_limit=(ram_gib+swap_gib-1)*gib)
+        expected = (dict(memory_max=None, swap_max=None, combined_limit=None) if unbounded else
+                    dict(memory_max=ram_gib*gib, swap_max=swap_gib*gib,
+                         combined_limit=(ram_gib+swap_gib-1)*gib))
         if (started.get('memory_profile') != memory_profile or
             closed.get('memory_profile') != memory_profile or
-            any(type(started.get(k)) is not int or started[k] != v for k,v in expected.items()) or
-            started.get('env', {}).get('VENTIUM_VIVADO_MEMORY_MAX') != f'{ram_gib}G' or
-            started.get('env', {}).get('VENTIUM_VIVADO_MEMORY_SWAP_MAX') != f'{swap_gib}G'):
+            any(k not in started or type(started[k]) is not type(v) or started[k] != v for k,v in expected.items()) or
+            started.get('env', {}).get('VENTIUM_VIVADO_MEMORY_MAX') != ('infinity' if unbounded else f'{ram_gib}G') or
+            started.get('env', {}).get('VENTIUM_VIVADO_MEMORY_SWAP_MAX') != ('infinity' if unbounded else f'{swap_gib}G')):
             raise ValueError('named memory-profile contract mismatch')
+        if unbounded and started.get('env', {}).get('VENTIUM_VIVADO_MEMORY_POLICY') != 'unbounded':
+            raise ValueError('uncapped launcher policy missing')
         admission = started.get('host', {})
         for key, reserve in (('MemAvailable', (ram_gib+2)*gib), ('SwapFree', (swap_gib+4)*gib)):
-            if type(admission.get(key)) is not int or admission[key] <= reserve:
-                raise ValueError('memory admission reserve missing')
-    limits = dict(MemoryMax=str(ram_gib*gib), MemorySwapMax=str(swap_gib*gib), TasksMax=str(maximum))
+            if (type(admission.get(key)) is not int or admission[key] < 0 or
+                (not unbounded and admission[key] <= reserve)):
+                raise ValueError('invalid memory admission evidence')
+    limits = dict(MemoryMax='infinity' if unbounded else str(ram_gib*gib),
+                  MemorySwapMax='infinity' if unbounded else str(swap_gib*gib), TasksMax=str(maximum))
     if (started.get('task_monitoring') is not True or started.get('task_profile') != profile or
         type(started.get('tasks_max')) is not int or started['tasks_max'] != maximum or
         started.get('env', {}).get('VENTIUM_VIVADO_TASK_PROFILE') != profile or
@@ -205,9 +211,9 @@ def audit_task_monitoring(run, started, closed):
                 raise ValueError('invalid memory monitor sample')
             resources, events = row.get('host', {}), row.get('events', {})
             if ('reason' not in row or row['reason'] is not None or row['disk_free'] < 4*gib or
-                row['memory']+row['swap'] > (ram_gib+swap_gib-1)*gib or
-                row['swap'] > swap_gib*gib or
-                any(type(resources.get(k)) is not int or resources[k] < 2*gib
+                (not unbounded and (row['memory']+row['swap'] > (ram_gib+swap_gib-1)*gib or
+                                    row['swap'] > swap_gib*gib)) or
+                any(type(resources.get(k)) is not int or resources[k] < (0 if unbounded else 2*gib)
                     for k in ('MemAvailable', 'SwapFree')) or
                 any(events.get(k) != '0' for k in ('oom', 'oom_kill'))):
                 raise ValueError('memory monitor violated safety reserve')

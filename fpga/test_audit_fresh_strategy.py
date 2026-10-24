@@ -15,6 +15,28 @@ STEPS.SYNTH_DESIGN.ARGS.MORE OPTIONS string false
 
 
 class AuditTests(unittest.TestCase):
+    def test_congestion_route_first_requires_exact_new_directives(self):
+        strategy = 'routability-route-first'
+        script = SCRIPT.replace('PerformanceOptimized', 'AlternateRoutability').rstrip()+' -global_retiming off\n'
+        props = PROPS.replace('PerformanceOptimized', 'AlternateRoutability').replace('enum false auto', 'enum false off')
+        audit_synth(script, props, strategy, 1)
+        for bad in (script.replace('AlternateRoutability', 'PerformanceOptimized'),
+                    script.replace(' -global_retiming off', ''), script+'read_checkpoint old.dcp\n'):
+            with self.assertRaises(ValueError): audit_synth(bad, props, strategy, 1)
+        impl = ('set_param general.maxThreads 4\nopt_design -directive RuntimeOptimized\n'
+                'place_design -directive AltSpreadLogic_high\nroute_design -directive AlternateCLBRouting\n')
+        properties = ''.join(f'STEPS.{step}.IS_ENABLED bool false 0\n'
+                            f'STEPS.{step}.ARGS.DIRECTIVE enum false Default\n'
+                            f'STEPS.{step}.ARGS.MORE OPTIONS string false\n'
+                            for step in ('PHYS_OPT_DESIGN', 'POST_ROUTE_PHYS_OPT_DESIGN'))
+        self.assertEqual(audit_impl(impl, properties, strategy, 4)['physical_operations'], [])
+        for bad in (impl.replace('AltSpreadLogic_high', 'AltSpreadLogic_medium'),
+                    impl.replace('AlternateCLBRouting', 'NoTimingRelaxation'), impl+'phys_opt_design\n'):
+            with self.assertRaises(ValueError): audit_impl(bad, properties, strategy, 4)
+        for count in (1, 2):
+            with self.assertRaises(ValueError): audit_impl(impl, properties, strategy, count)
+        with self.assertRaises(ValueError): audit_impl(impl, properties.replace('bool false 0', 'bool false 1'), strategy, 4)
+
     def test_route_first_requires_serial_synth_apr4_and_zero_optional_phys(self):
         props = PROPS.replace('enum false auto', 'enum false off')
         script = SCRIPT.rstrip()+' -global_retiming off\n'

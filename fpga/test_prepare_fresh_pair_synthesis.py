@@ -58,5 +58,16 @@ class PreparationTests(unittest.TestCase):
         for bad in ({},dict(self.changes,unreviewed='0'*64)):
             with self.assertRaises(AssertionError):prepare.derive(self.original,bad)
 
+    def test_migration_rebases_only_known_paths_without_editing_templates(self):
+        before=dict(self.original)
+        result=prepare.derive(self.original,self.changes)
+        self.assertEqual(self.original,before)
+        if prepare.ROOT != prepare.TEMPLATE_ROOT:
+            self.assertTrue(any(str(prepare.TEMPLATE_ROOT) in text for text in before.values()))
+            self.assertTrue(all(str(prepare.TEMPLATE_ROOT) not in text for text in result.values()))
+        drift={name:text.replace(str(prepare.TEMPLATE_ROOT),'/unexpected/prior-host')
+               for name,text in before.items()}
+        with self.assertRaises(AssertionError):prepare.derive(drift,self.changes)
+
 
 if __name__=='__main__':unittest.main()

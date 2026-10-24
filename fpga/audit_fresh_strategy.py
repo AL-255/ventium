@@ -30,15 +30,16 @@ def audit_threads(script, threads=1):
 
 def audit_synth(script, properties, strategy, threads=1):
     audit_threads(script, threads)
-    if threads not in (1, 2) or (strategy == 'performance-route-first' and threads != 1):
+    if threads not in (1, 2) or (strategy in ('performance-route-first', 'routability-route-first') and threads != 1):
         raise ValueError('unsupported synthesis thread count')
     directives = {'performance-netdelay': 'PerformanceOptimized', 'routability-spread': 'AlternateRoutability',
                   'performance-retime-bounded': 'PerformanceOptimized',
                   'performance-bounded': 'PerformanceOptimized',
-                  'performance-route-first': 'PerformanceOptimized'}
+                  'performance-route-first': 'PerformanceOptimized',
+                  'routability-route-first': 'AlternateRoutability'}
     directive = directives[strategy]
     retiming = 'on' if strategy == 'performance-retime-bounded' else 'auto'
-    if strategy in ('performance-bounded', 'performance-route-first'): retiming = 'off'
+    if strategy in ('performance-bounded', 'performance-route-first', 'routability-route-first'): retiming = 'off'
     commands = re.findall(r'^synth_design [^\n]+', script, re.M)
     if len(commands) != 1:
         raise ValueError('missing/ambiguous native synth_design')
@@ -80,7 +81,8 @@ def audit_synth(script, properties, strategy, threads=1):
 def audit_impl(script, properties, strategy, threads=1):
     """Check the emitted operations, not merely the strategy label."""
     audit_threads(script, threads)
-    if (strategy == 'performance-route-first' and threads != 4) or (strategy != 'performance-route-first' and threads == 4):
+    route_first = strategy in ('performance-route-first', 'routability-route-first')
+    if (route_first and threads != 4) or (not route_first and threads == 4):
         raise ValueError('unsupported implementation thread count')
     configs = {
         'performance-netdelay': ('ExtraNetDelay_high', 'NoTimingRelaxation',
@@ -94,6 +96,7 @@ def audit_impl(script, properties, strategy, threads=1):
             ['-fanout_opt -placement_opt -restruct_opt -equ_drivers_opt',
              '-placement_opt -routing_opt -restruct_opt -hold_fix']),
         'performance-route-first': ('AltSpreadLogic_medium', 'NoTimingRelaxation', []),
+        'routability-route-first': ('AltSpreadLogic_high', 'AlternateCLBRouting', []),
     }
     place, route, phys = configs[strategy]
     for command, expected in (('opt_design', ['-directive RuntimeOptimized']),
@@ -110,7 +113,7 @@ def audit_impl(script, properties, strategy, threads=1):
             if property_value(properties, f'STEPS.{step}.ARGS.DIRECTIVE') != 'Default' or \
                property_value(properties, f'STEPS.{step}.ARGS.MORE OPTIONS') != options:
                 raise ValueError('bounded physical optimization property mismatch: '+step)
-    if strategy == 'performance-route-first':
+    if route_first:
         for step in ('PHYS_OPT_DESIGN', 'POST_ROUTE_PHYS_OPT_DESIGN'):
             if (property_value(properties, f'STEPS.{step}.IS_ENABLED') not in ('0', 'false') or
                 property_value(properties, f'STEPS.{step}.ARGS.DIRECTIVE') != 'Default' or

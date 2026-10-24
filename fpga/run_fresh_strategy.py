@@ -25,10 +25,10 @@ CLOCK_HASHES = {
     'ven_programmable_clock.v': 'cea6e80e4ca1240bfb2b1d3920c869458e21e30f19aa96fe77743be86109d2e9',
 }
 STRATEGIES = ('performance-netdelay', 'routability-spread', 'performance-retime-bounded',
-              'performance-bounded', 'performance-route-first')
-# Fixed reviewed envelopes, not arbitrary numeric overrides. The larger one is
-# serial-synthesis-only and stays inside build_scope.sh's 20 GiB RAM ceiling.
-MEMORY_PROFILES = {'standard16': (16, 6), 'serial20': (20, 6)}
+              'performance-bounded', 'performance-route-first', 'routability-route-first')
+# Historical profiles remain interpretable; new launches use the user's Oct19
+# uncapped RAM/swap policy. None means no ceiling, not zero available memory.
+MEMORY_PROFILES = {'standard16': (16, 6), 'serial20': (20, 6), 'unbounded': (None, None)}
 WHOLE_LIMIT, IMPL_LIMIT = 8*3600, 3*3600+50*60
 
 
@@ -47,6 +47,23 @@ def source_inventory(root):
                 raise ValueError('non-source build product in freeze: '+str(p))
             result[str(p.relative_to(root))] = sha(p)
     return result
+
+
+def validate_output(dest, scratch=SCRATCH):
+    """Require an explicit scratch leaf; the new host may use one filesystem.
+
+    The old host required a separate external device. The migrated host keeps
+    the same scratch path on its large root volume, by explicit user choice.
+    Never select a fallback path or accept a directory outside scratch.
+    """
+    scratch = scratch.resolve(strict=True)
+    dest = dest.resolve()
+    if (not scratch.is_dir() or not dest.is_relative_to(scratch) or dest == scratch or
+        dest.exists() or not dest.parent.is_dir() or
+        dest.parent.stat().st_dev != scratch.stat().st_dev or
+        not os.access(scratch, os.W_OK)):
+        raise ValueError('output must be a new leaf on the configured scratch filesystem')
+    return dest
 
 
 def prepare(dest):
@@ -119,9 +136,9 @@ def implementation_policy(strategy, threads, memory_profile):
     memory_policy(memory_profile, threads)
     if strategy not in STRATEGIES:
         raise ValueError('unsupported strategy')
-    if strategy == 'performance-route-first':
-        if threads != 1 or memory_profile != 'serial20':
-            raise ValueError('route-first requires serial synthesis and serial20 memory')
+    if strategy in ('performance-route-first', 'routability-route-first'):
+        if threads != 1 or memory_profile not in ('serial20', 'unbounded'):
+            raise ValueError('route-first requires serial synthesis and serial20 or unbounded memory')
         return 4
     return threads
 
@@ -137,8 +154,11 @@ def memory_policy(profile, threads):
 
 def resource_stop(ram, swap, resources, free, events, limit_hit, ram_gib, swap_gib):
     if free < 4*GIB: return '4 GiB disk reserve'
-    if min(resources.values()) < 2*GIB: return '2 GiB host RAM/swap reserve'
-    if ram+swap > (ram_gib+swap_gib-1)*GIB: return 'combined memory early stop'
+    if (ram_gib is None) != (swap_gib is None):
+        raise ValueError('inconsistent uncapped memory policy')
+    if ram_gib is not None:
+        if min(resources.values()) < 2*GIB: return '2 GiB host RAM/swap reserve'
+        if ram+swap > (ram_gib+swap_gib-1)*GIB: return 'combined memory early stop'
     if int(events['oom']) or int(events['oom_kill']): return 'scope OOM'
     if limit_hit: return 'scope task limit'
     return None
@@ -153,7 +173,8 @@ def check_scope_limits(current, tasks_max, memory_profile='standard16', *,
     if task_policy(threads, implementation_threads)[1] != tasks_max:
         raise ValueError('task limit disagrees with stage threads')
     ram_gib, swap_gib = memory_policy(memory_profile, threads)
-    expected = dict(MemoryMax=str(ram_gib*GIB), MemorySwapMax=str(swap_gib*GIB),
+    expected = dict(MemoryMax='infinity' if ram_gib is None else str(ram_gib*GIB),
+                    MemorySwapMax='infinity' if swap_gib is None else str(swap_gib*GIB),
                     TasksMax=str(tasks_max))
     if any(current.get(key) != value for key, value in expected.items()):
         raise ValueError('live resource limits differ from launch contract')
@@ -185,28 +206,25 @@ def main():
     ap.add_argument('--output', type=Path, required=True)
     ap.add_argument('--threads', type=int, choices=(1, 2), default=1,
                     help='synthesis threads; route-first uses four APR threads; always -jobs 1')
-    ap.add_argument('--memory-profile', choices=MEMORY_PROFILES, default='standard16',
-                    help='fixed RAM/swap envelope; serial20 requires one synthesis thread')
+    ap.add_argument('--memory-profile', choices=('unbounded',), default='unbounded',
+                    help='Oct19 user policy: no RAM/swap or free-memory admission limits')
     args = ap.parse_args()
     implementation_threads = implementation_policy(args.strategy, args.threads, args.memory_profile)
     task_profile, tasks_max = task_policy(args.threads, implementation_threads)
     ram_gib, swap_gib = memory_policy(args.memory_profile, args.threads)
     assert __debug__ and os.environ['TMPDIR'] == str(SCRATCH)
     assert os.environ.get('INVOCATION_ID'), 'use a retained systemd owner'
-    dest = args.output.resolve()
-    assert dest.is_relative_to(SCRATCH.resolve()) and dest != SCRATCH.resolve() and not dest.exists()
-    assert dest.parent.is_dir() and dest.parent.stat().st_dev == SCRATCH.stat().st_dev != REPO.stat().st_dev
-    assert os.access(SCRATCH, os.W_OK)
+    dest = validate_output(args.output)
     assert scope()['ActiveState'] in ('inactive', 'failed')
     assert subprocess.run(['pgrep', '-x', 'vivado'], stdout=subprocess.DEVNULL).returncode == 1
-    assert host()['MemAvailable'] > (ram_gib+2)*GIB and host()['SwapFree'] > (swap_gib+4)*GIB
     assert shutil.disk_usage(SCRATCH).free > 7*GIB
     pins = prepare(dest)
     (dest/'tool-tmp').mkdir()
     source = dest/'source'
     env = {k:v for k,v in os.environ.items() if not k.startswith(('VEN_', 'VENTIUM_', 'TB_', 'AXI_'))}
     env.update(TMPDIR=str(dest/'tool-tmp'), VIVADO_BIN='/tools/Xilinx/2025.2/Vivado/bin/vivado',
-        VENTIUM_VIVADO_MEMORY_MAX=f'{ram_gib}G', VENTIUM_VIVADO_MEMORY_SWAP_MAX=f'{swap_gib}G',
+        VENTIUM_VIVADO_MEMORY_POLICY='unbounded',
+        VENTIUM_VIVADO_MEMORY_MAX='infinity', VENTIUM_VIVADO_MEMORY_SWAP_MAX='infinity',
         VENTIUM_VIVADO_TASK_PROFILE=task_profile,
         VENTIUM_VIVADO_LOCK_DIR=str(SCRATCH), VEN_FPGA_JOBS='1', VEN_FPGA_CORE_MHZ='40',
         VEN_FPGA_BUILD_PROFILE='balanced', VEN_FPGA_SKIP_PRESET='1',
@@ -222,8 +240,8 @@ def main():
     save(dest, 'started.json', dict(strategy=args.strategy, command=command, pins=pins,
         invocation=os.environ['INVOCATION_ID'], host=host(), disk_free=shutil.disk_usage(dest).free,
         env={k:v for k,v in env.items() if k.startswith(('VEN_', 'VENTIUM_')) or k == 'TMPDIR'},
-        memory_profile=args.memory_profile, memory_max=ram_gib*GIB, swap_max=swap_gib*GIB,
-        combined_limit=(ram_gib+swap_gib-1)*GIB, whole_limit_seconds=WHOLE_LIMIT,
+        memory_profile=args.memory_profile, memory_max=None, swap_max=None,
+        combined_limit=None, whole_limit_seconds=WHOLE_LIMIT,
         task_profile=task_profile, tasks_max=tasks_max, task_monitoring=True,
         implementation_limit_seconds=IMPL_LIMIT, prior_checkpoint_inputs=[],
         fresh_synthesis=True, tool_threads=args.threads, implementation_threads=implementation_threads,

@@ -8,11 +8,25 @@ import unittest
 
 from run_fresh_strategy import (source_inventory, stage_deadline, validate_native_synth,
     IMPL_LIMIT, task_policy, task_pressure, check_scope_limits, memory_policy,
-    implementation_policy, resource_stop, GIB)
+    implementation_policy, resource_stop, validate_output, GIB)
 from test_audit_fresh_strategy import SCRIPT, PROPS
 
 
 class FreshTests(unittest.TestCase):
+    def test_migrated_scratch_accepts_same_device_but_never_a_fallback(self):
+        with tempfile.TemporaryDirectory(prefix='fresh-scratch-test-') as td:
+            root = Path(td).resolve()
+            scratch = root/'scratch'
+            scratch.mkdir()
+            self.assertEqual(validate_output(scratch/'new-run', scratch), scratch/'new-run')
+            for invalid in (scratch, root/'outside', scratch/'missing'/'run'):
+                with self.assertRaises(ValueError): validate_output(invalid, scratch)
+            existing = scratch/'existing'
+            existing.mkdir()
+            with self.assertRaises(ValueError): validate_output(existing, scratch)
+            (scratch/'escape').symlink_to(root, target_is_directory=True)
+            with self.assertRaises(ValueError): validate_output(scratch/'escape'/'run', scratch)
+
     def test_route_probe_requires_native_route_completion(self):
         script = Path(__file__).with_name('test_native_route_first.tcl').read_text()
         prefix = script.split('# Source-only tooling probe')[0]
@@ -38,7 +52,8 @@ class FreshTests(unittest.TestCase):
         for strategy, synth, impl in (('performance-route-first', '1', '1'),
                 ('performance-route-first', '2', '4'), ('performance-route-first', 'true', '4'),
                 ('performance-route-first', '1', '4.0'), ('performance-bounded', '1', '4'),
-                ('performance-bounded', '2', '8')):
+                ('performance-bounded', '2', '8'), ('routability-route-first', '2', '4'),
+                ('routability-route-first', '1', '1')):
             with self.subTest(strategy=strategy, synth=synth, impl=impl):
                 code = f'set argc 5\nset argv [list {strategy} unused unused {synth} {impl}]\n'+prefix
                 # A file script is needed: tclsh stdin can continue after errors.
@@ -85,9 +100,43 @@ class FreshTests(unittest.TestCase):
             self.assertEqual(stop(events={**events, 'oom':'1'}), 'scope OOM')
             self.assertEqual(stop(events={**events, 'oom_kill':'1'}), 'scope OOM')
             self.assertEqual(stop(limit_hit=True), 'scope task limit')
-        for name, threads in (('serial20', 2), ('unbounded', 1), (None, 1), (True, 1), ('serial20', True)):
+        for name, threads in (('serial20', 2), ('unknown', 1), (None, 1), (True, 1), ('serial20', True)):
             with self.assertRaises(ValueError): memory_policy(name, threads)
         with self.assertRaises(ValueError): check_scope_limits({}, 128, 'serial20')
+
+    def test_uncapped_memory_preserves_disk_oom_and_task_checks(self):
+        self.assertEqual(memory_policy('unbounded', 1), (None, None))
+        self.assertEqual(memory_policy('unbounded', 2), (None, None))
+        self.assertEqual(implementation_policy('performance-route-first', 1, 'unbounded'), 4)
+        self.assertEqual(implementation_policy('routability-route-first', 1, 'unbounded'), 4)
+        with self.assertRaises(ValueError): implementation_policy('routability-route-first', 2, 'unbounded')
+        limits = dict(MemoryMax='infinity', MemorySwapMax='infinity', TasksMax='128')
+        self.assertEqual(check_scope_limits(limits, 128, 'unbounded', threads=1,
+                                          implementation_threads=4), limits)
+        for key in ('MemoryMax', 'MemorySwapMax', 'TasksMax'):
+            for value in ('max', '0', str(20*GIB)):
+                with self.assertRaises(ValueError):
+                    check_scope_limits({**limits, key:value}, 128, 'unbounded', threads=1,
+                                       implementation_threads=4)
+        args = dict(ram=100*GIB, swap=200*GIB, resources=dict(MemAvailable=0, SwapFree=0),
+                    free=4*GIB, events=dict(oom='0', oom_kill='0'), limit_hit=False,
+                    ram_gib=None, swap_gib=None)
+        self.assertIsNone(resource_stop(**args))
+        for delta, reason in (({'free':4*GIB-1}, '4 GiB disk reserve'),
+                              ({'events':dict(oom='1', oom_kill='0')}, 'scope OOM'),
+                              ({'events':dict(oom='0', oom_kill='1')}, 'scope OOM'),
+                              ({'limit_hit':True}, 'scope task limit')):
+            self.assertEqual(resource_stop(**{**args, **delta}), reason)
+        with self.assertRaises(ValueError): resource_stop(**{**args, 'swap_gib':6})
+
+    def test_new_launch_cli_only_accepts_uncapped_policy(self):
+        proc = subprocess.run(['python3', str(Path(__file__).with_name('run_fresh_strategy.py')),
+                               '--help'], text=True, capture_output=True)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn('--memory-profile {unbounded}', proc.stdout)
+        source = Path(__file__).with_name('run_fresh_strategy.py').read_text()
+        self.assertIn("default='unbounded'", source)
+        self.assertNotIn("assert host()['MemAvailable']", source)
 
     def test_task_profiles_are_fixed_and_limits_are_rechecked(self):
         for threads, profile, limit in ((1, 'serial', 48), (2, 'parallel2', 128)):
@@ -183,6 +232,7 @@ class FreshTests(unittest.TestCase):
                 ('performance-bounded', 'PerformanceOptimized', 'AltSpreadLogic_medium', 'NoTimingRelaxation'))
         cases = [(s, t, t) for s, t in itertools.product(strategies, (1, 2))]
         cases.append((('performance-route-first', 'PerformanceOptimized', 'AltSpreadLogic_medium', 'NoTimingRelaxation'), 1, 4))
+        cases.append((('routability-route-first', 'AlternateRoutability', 'AltSpreadLogic_high', 'AlternateCLBRouting'), 1, 4))
         for (strategy, directive, place, route), threads, impl_threads in cases:
             with tempfile.TemporaryDirectory(prefix='fresh-tcl-test-') as td:
                 mock = '''
@@ -240,7 +290,7 @@ foreach {{run expected_threads}} {{synth_1 {threads} impl_1 {impl_threads}}} {{
 if {{!$::evidence_called}} {{error "evidence procedure not called"}}
 foreach {{obj prop expected}} {{
  synth_1 STEPS.SYNTH_DESIGN.ARGS.DIRECTIVE {directive}
- synth_1 STEPS.SYNTH_DESIGN.ARGS.GLOBAL_RETIMING {'on' if strategy == 'performance-retime-bounded' else 'off' if strategy in ('performance-bounded', 'performance-route-first') else 'auto'}
+ synth_1 STEPS.SYNTH_DESIGN.ARGS.GLOBAL_RETIMING {'on' if strategy == 'performance-retime-bounded' else 'off' if strategy in ('performance-bounded', 'performance-route-first', 'routability-route-first') else 'auto'}
  synth_1 AUTO_INCREMENTAL_CHECKPOINT 0
  impl_1 INCREMENTAL_CHECKPOINT {{}}
  impl_1 STEPS.PLACE_DESIGN.ARGS.DIRECTIVE {place}
@@ -258,7 +308,7 @@ if {[get_property STEPS.PHYS_OPT_DESIGN.ARGS.DIRECTIVE impl_1] ne "Default"} {er
 if {[get_property {STEPS.PHYS_OPT_DESIGN.ARGS.MORE OPTIONS} impl_1] ne "-fanout_opt -placement_opt -restruct_opt -equ_drivers_opt"} {error "pre-route operations differ"}
 if {[get_property {STEPS.POST_ROUTE_PHYS_OPT_DESIGN.ARGS.MORE OPTIONS} impl_1] ne "-placement_opt -routing_opt -restruct_opt -hold_fix"} {error "post-route operations differ"}
 '''
-                if strategy == 'performance-route-first':
+                if strategy in ('performance-route-first', 'routability-route-first'):
                     checks += '''
 foreach step {PHYS_OPT_DESIGN POST_ROUTE_PHYS_OPT_DESIGN} {
  if {[get_property STEPS.${step}.IS_ENABLED impl_1] ni {0 false}} {error "phys still enabled"}
@@ -267,8 +317,8 @@ foreach step {PHYS_OPT_DESIGN POST_ROUTE_PHYS_OPT_DESIGN} {
 }
 '''
                 runner = Path(td)/'test.tcl'
-                stage_args = f'{threads} {impl_threads}' if strategy == 'performance-route-first' else str(threads)
-                argc = 5 if strategy == 'performance-route-first' else 4
+                stage_args = f'{threads} {impl_threads}' if strategy in ('performance-route-first', 'routability-route-first') else str(threads)
+                argc = 5 if strategy in ('performance-route-first', 'routability-route-first') else 4
                 runner.write_text(mock+f'\nset argc {argc}\nset argv [list {strategy} {{{td}/source}} {{{td}/build}} {stage_args}]\n'+prefix+checks)
                 result = subprocess.run(['tclsh', str(runner)], text=True, capture_output=True)
                 self.assertEqual(result.returncode, 0, result.stdout+result.stderr)

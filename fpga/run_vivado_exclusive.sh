@@ -208,7 +208,7 @@ echo "[vivado-exclusive] starting one Vivado run: vivado $*" >&2
 # PYTHONPATH) before defining them.  Keep strict shell checking for this
 # launcher, but disable nounset only while importing that vendor environment.
 set +u
-source /tools/Xilinx/2025.2/Vivado/settings64.sh
+source "$vivado_install/settings64.sh"
 set -u
 # Keep the sole Vivado parent and every synthesis/place/route descendant out of
 # the same resource pool used by Verilator/QEMU builds.  The Tcl flow further

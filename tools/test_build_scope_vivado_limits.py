@@ -21,6 +21,7 @@ SCRIPT = ROOT / "tools" / "build_scope.sh"
 class VivadoLimitPolicyTests(unittest.TestCase):
     def run_scope(
         self, *, memory=None, swap=None, tasks=None, task_profile=None, profile="vivado", unit=None,
+        memory_policy="bounded",
         memory_available_kib=32 * 1024 * 1024,
         swap_free_kib=32 * 1024 * 1024, meminfo_text=None,
     ):
@@ -84,6 +85,7 @@ class VivadoLimitPolicyTests(unittest.TestCase):
                 ("VENTIUM_BUILD_SCOPE_ACTIVE", None),
                 ("VENTIUM_VIVADO_MEMORY_MAX", memory),
                 ("VENTIUM_VIVADO_MEMORY_SWAP_MAX", swap),
+                ("VENTIUM_VIVADO_MEMORY_POLICY", memory_policy),
                 ("VENTIUM_VIVADO_TASKS_MAX", tasks),
                 ("VENTIUM_VIVADO_TASK_PROFILE", task_profile),
             ):
@@ -184,6 +186,27 @@ class VivadoLimitPolicyTests(unittest.TestCase):
             properties,
             ["MemoryMax=20G", "TasksMax=48", "KillMode=control-group", "MemorySwapMax=2G"],
         )
+
+    def test_uncapped_default_and_explicit_policy_ignore_old_numeric_caps(self):
+        for policy in (None, 'unbounded'):
+            for mem_kib, swap_kib in ((0, 0), (1, 0), (32*1024**2, 64*1024**2)):
+                result, properties = self.run_scope(memory_policy=policy, memory='12G', swap='1G',
+                    memory_available_kib=mem_kib, swap_free_kib=swap_kib)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(properties, ['MemoryMax=infinity', 'TasksMax=48',
+                    'KillMode=control-group', 'MemorySwapMax=infinity'])
+                self.assertIn('observation only', result.stderr)
+                self.assertFalse(any(p.startswith(('MemoryHigh=', 'ManagedOOM')) for p in properties))
+        result, properties = self.run_scope(memory_policy='unlimitd')
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertEqual(properties, [])
+
+    def test_uncapped_scope_requires_unlimited_ram_swap_and_no_soft_throttle(self):
+        base = dict(memory_cap='infinity', swap_cap='infinity', memory_max='max', swap_max='max')
+        self.assertEqual(self.run_scope_has_cap(**base).returncode, 0)
+        for key, value in (('memory_max',20*1024**3), ('swap_max',8*1024**3),
+                           ('memory_high',1024**3), ('pids_max','max'), ('pids_max','49')):
+            self.assertNotEqual(self.run_scope_has_cap(**{**base, key:value}).returncode, 0)
 
     def test_lower_memory_and_swap_are_applied_but_tasks_stay_fixed(self):
         result, properties = self.run_scope(memory="12G", swap="1G", tasks="128")
@@ -375,7 +398,12 @@ class VivadoLimitPolicyTests(unittest.TestCase):
                  ("max", True, "serial_apr4", 128, 0), ("max", False, "serial_apr4", 128, 1),
                  ("max", True, "serial_apr4", 129, 1),
                  ("max", True, "serial", 128, 1), ("max", True, "parallel2", 129, 1))
-        for high, inherited_lock, task_profile, tasks, expected in cases:
+        cases = [(*case, 'bounded') for case in cases] + [
+            ('max', True, 'serial_apr4', 128, 0, 'unbounded'),
+            ('max', False, 'serial_apr4', 128, 1, 'unbounded'),
+            (16*1024**3, True, 'serial_apr4', 128, 1, 'unbounded'),
+            ('max', True, 'serial_apr4', 129, 1, 'unbounded')]
+        for high, inherited_lock, task_profile, tasks, expected, memory_policy in cases:
             with self.subTest(memory_high=high, inherited_lock=inherited_lock, task_profile=task_profile, tasks=tasks):
                 with tempfile.TemporaryDirectory(prefix="ventium-build-scope-nested-test-") as temp_name:
                     # TMPDIR can be the external-storage symlink. The real
@@ -385,8 +413,8 @@ class VivadoLimitPolicyTests(unittest.TestCase):
                     leaf = temp / "cgroup" / "app.slice" / "ventium-vivado.scope"
                     leaf.mkdir(parents=True)
                     for name, value in (
-                        ("memory.max", 18 * 1024**3), ("pids.max", tasks),
-                        ("memory.swap.max", 8 * 1024**3), ("memory.high", high),
+                        ("memory.max", 'max' if memory_policy == 'unbounded' else 18 * 1024**3), ("pids.max", tasks),
+                        ("memory.swap.max", 'max' if memory_policy == 'unbounded' else 8 * 1024**3), ("memory.high", high),
                     ):
                         (leaf / name).write_text(f"{value}\n")
                     proc_cgroup = temp / "proc-cgroup"
@@ -400,6 +428,7 @@ class VivadoLimitPolicyTests(unittest.TestCase):
                         VENTIUM_BUILD_SCOPE_ACTIVE="1", VENTIUM_BUILD_SCOPE_UNIT="ventium-vivado",
                         VENTIUM_VIVADO_MEMORY_MAX="18G", VENTIUM_VIVADO_MEMORY_SWAP_MAX="8G",
                         VENTIUM_VIVADO_TASK_PROFILE=task_profile,
+                        VENTIUM_VIVADO_MEMORY_POLICY=memory_policy,
                     )
                     script = (
                         'set -euo pipefail\nvivado_memory_max=20G\nvivado_swap_default=2G\n'
