@@ -1,6 +1,37 @@
 # APR strategy comparison — 40 MHz target
 
-## Explore closed: no gain; post-MUXF LUT remap next — Oct24 19:02 EDT
+## Post-MUXF LUT remap active — Oct24 19:07 EDT
+
+Fresh **`performance-retime-muxf-aggressive-remap-route-first-r1`** started
+**19:06:56 EDT**, after all **120 flow/path tests + 26 resource-policy tests**
+passed and a native Vivado probe closed **0 at 19:06:55 EDT**. The probe proved
+the actual ordered normal/MUXF/aggressive operations, native eight-thread
+readbacks and all nine MUXF count records; its seven MUXF primitives became
+zero, with zero remaining after LUT remapping. This is tooling verification,
+not a full-core QoR or CPU/FPGA acceptance result. The flow change is committed
+and pushed as **`e9e00de7`**; Explore closure is **`270fdd45`**.
+
+The full build uses **200 frozen source/metadata files identical to the best
+control**, 159 defines, `cycle_mode=1`, and no old/probe checkpoint inputs.
+There are **219 launch pins**, including the new hook. Dirty checkout RTL
+remains untouched and excluded. One Vivado family uses uncapped RAM/swap,
+eight internal threads per stage and one native job; safeguards retain
+TasksMax=256, 8h whole-run and 3h50m implementation limits.
+The owner is `ventium-fresh-muxf-aggressive-oct24-r1.service`, invocation
+`e0fe7aca29b44a4fb378a6e148274c87`.
+
+Evidence root:
+`/home/yukidama/external/tmp/ventium-muxf-aggressive-oct24.rXWFrIdO/`.
+It retains `probe-inputs.json`, `probe-closed.json`, `source-preflight.json`,
+`full-launch-audit.json`, and the full run's source/started receipts and logs.
+Do not edit its pinned helpers or launch a second Vivado family while active.
+
+Candidate gameplay is **unmeasured**. The older physical baseline is
+**0.496499864 total U+V IPC**, image **2886d24c**, cycles
+**625,021,130,428–629,480,208,865**; it predates this candidate. The best completed
+conditional estimate remains **35.735982561 MHz**, not 40 MHz sign-off.
+
+### Explore closed: no gain; reason for the next trial
 
 Explore routing finished and the retained owner exited **0 at 19:00:58 EDT**.
 The independent closed-result audit confirms **35.735982561 MHz conditional**,
