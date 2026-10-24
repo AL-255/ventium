@@ -20,8 +20,8 @@ def property_value(text, name):
 
 
 def audit_threads(script, threads=1):
-    if type(threads) is not int or threads not in (1, 2, 4):
-        raise ValueError('only one, two or four internal threads supported')
+    if type(threads) is not int or threads not in (1, 2, 4, 8):
+        raise ValueError('only one, two, four or eight internal threads supported')
     values = re.findall(r'^[ \t]*set_param[ \t]+general\.maxThreads[ \t]+(\S+)[ \t]*$', script, re.M)
     if values != [str(threads)]:
         raise ValueError('native thread bound missing/ambiguous/mismatched')
@@ -30,15 +30,16 @@ def audit_threads(script, threads=1):
 
 def audit_synth(script, properties, strategy, threads=1):
     audit_threads(script, threads)
-    if threads not in (1, 2) or (strategy in ('performance-route-first', 'routability-route-first') and threads != 1):
+    if threads not in (1, 2, 8) or (strategy in ('performance-route-first', 'routability-route-first', 'routability-retime-route-first') and threads not in (1, 8)):
         raise ValueError('unsupported synthesis thread count')
     directives = {'performance-netdelay': 'PerformanceOptimized', 'routability-spread': 'AlternateRoutability',
                   'performance-retime-bounded': 'PerformanceOptimized',
                   'performance-bounded': 'PerformanceOptimized',
                   'performance-route-first': 'PerformanceOptimized',
-                  'routability-route-first': 'AlternateRoutability'}
+                  'routability-route-first': 'AlternateRoutability',
+                  'routability-retime-route-first': 'AlternateRoutability'}
     directive = directives[strategy]
-    retiming = 'on' if strategy == 'performance-retime-bounded' else 'auto'
+    retiming = 'on' if strategy in ('performance-retime-bounded', 'routability-retime-route-first') else 'auto'
     if strategy in ('performance-bounded', 'performance-route-first', 'routability-route-first'): retiming = 'off'
     commands = re.findall(r'^synth_design [^\n]+', script, re.M)
     if len(commands) != 1:
@@ -81,8 +82,8 @@ def audit_synth(script, properties, strategy, threads=1):
 def audit_impl(script, properties, strategy, threads=1):
     """Check the emitted operations, not merely the strategy label."""
     audit_threads(script, threads)
-    route_first = strategy in ('performance-route-first', 'routability-route-first')
-    if (route_first and threads != 4) or (not route_first and threads == 4):
+    route_first = strategy in ('performance-route-first', 'routability-route-first', 'routability-retime-route-first')
+    if (route_first and threads not in (4, 8)) or (not route_first and threads == 4):
         raise ValueError('unsupported implementation thread count')
     configs = {
         'performance-netdelay': ('ExtraNetDelay_high', 'NoTimingRelaxation',
@@ -97,6 +98,7 @@ def audit_impl(script, properties, strategy, threads=1):
              '-placement_opt -routing_opt -restruct_opt -hold_fix']),
         'performance-route-first': ('AltSpreadLogic_medium', 'NoTimingRelaxation', []),
         'routability-route-first': ('AltSpreadLogic_high', 'AlternateCLBRouting', []),
+        'routability-retime-route-first': ('AltSpreadLogic_high', 'AlternateCLBRouting', []),
     }
     place, route, phys = configs[strategy]
     for command, expected in (('opt_design', ['-directive RuntimeOptimized']),

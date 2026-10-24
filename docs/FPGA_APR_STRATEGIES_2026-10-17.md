@@ -1,5 +1,62 @@
 # APR strategy comparison — 40 MHz target
 
+## Legal fresh route, 31.028919 MHz conditional estimate — 2026-10-24
+
+The Oct23 `routability-route-first-r1` has now closed cleanly: native exit 0,
+all **215 launch pins unchanged**, no controller error and no surviving Vivado
+family. Total elapsed time was **3 h 37 min 21 s**. Placement took **15 min 15 s**,
+routing **1 h 20 min 51 s**, and implementation through the final evidence
+checkpoint **1 h 44 min 42 s**. The four-hour APR runtime target is met, but
+**40 MHz setup timing is not**. The generated image is not deployed or qualified.
+
+Final `timing.tsv` gives **31.028918952 MHz conditional core timing**, from
+25 ns minus −7.228 ns setup slack, with a full-cycle requirement and no exception
+on that worst path. This is an STA-derived period estimate, not measured hardware
+frequency or blanket sign-off at that lower clock.
+
+| Clock pair | Setup slack (ns) | Hold slack (ns) |
+|---|---:|---:|
+| Core → core, constrained 40 MHz | −7.228 | +0.010 |
+| AXI → AXI, constrained 100 MHz | +4.844 | +0.025 |
+| Core → AXI | +0.201 | +0.281 |
+| AXI → core | +1.170 | +2.012 |
+
+All **253,747 routable nets** are fully routed, with zero routing errors.
+DRC has no errors/critical warnings; ordinary DSP-pipelining/no-load warnings
+remain. All ten bus-skew constraints pass (worst margin **9.398 ns**), as do
+numeric hold/pulse-width checks. Verbose coverage has no missing clocks or
+unconstrained internal endpoints; its only four missing output delays identify
+the status LEDs exactly. Native CDC says all paths are safely timed. These
+checks do not turn the **66,619 setup-failing endpoints** into a timing pass.
+
+All twenty worst core paths start at **`q_len_reg[1]`**, reaching distinct core,
+cache and FPU-state endpoints. The worst ends at paired-load
+`data_q_reg[1][11]`: **92 logic levels**, 32.502 ns data delay, split into
+8.490 ns logic and 24.012 ns routing. This is a different startpoint from the
+unplaced EIP path below. The next trial will test the prepared
+**`routability-retime-route-first`** strategy: retain the successful routability
+mapping/place/router choices, enable synthesis retiming, and use eight internal
+threads per stage with one native job/family. Thread count also changes, so a
+future difference cannot be attributed solely to retiming. No CPU RTL, timing
+exception or clock-period change, and no prior checkpoint input is permitted.
+
+The closed run retains `pre-next-strategy-audit.json` and
+`closed-tool-snapshot/` before the next helper changes. All **2,605** resource
+samples show zero OOM and task-limit events; sampled combined RAM+swap peaked
+at **34.55 GiB**, and tasks at 59. Individual RAM/swap peaks are not additive.
+Run root: `/home/yukidama/external/tmp/ventium-congestion-oct23.fCu7nVz2/routability-route-first-r1`.
+Raw image SHA256: `e8632c3be959c41fe65d5383241f4c78a14ceed7884a24ead9acd558dc06994e`.
+`timing.tsv` SHA256: `795ae15dabb607c98cc446a45ff7dd55e43bafb993de8df3ab75d594ac7eb36a`.
+`core-paths.rpt` SHA256: `d3e78456ebc32685a654691d51309430644d0948197aa758b1f1d5a96eab6aed`.
+
+After closure, the ten previously isolated strategy/launcher/test files were
+promoted with base/candidate hash checks. **54 flow/audit + 26 scope tests pass**.
+A fresh native tooling probe is required before the full retiming run; these
+80 host tests are not native retiming, processor or hardware acceptance.
+Verified gameplay baseline remains **0.496499864 total U+V IPC**, image
+**2886d24c**, cycles **625,021,130,428–629,480,208,865**. It predates this
+unmeasured candidate. The new bitstream has no gameplay measurement.
+
 ## Congestion failure and next fresh strategy — 2026-10-23
 
 The Oct22 `performance-route-first-r1` ended at **22:17:56 EDT** with native

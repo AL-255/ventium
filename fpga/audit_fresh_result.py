@@ -149,20 +149,21 @@ def audit_task_monitoring(run, started, closed):
     fields = {'task_monitoring', 'task_profile', 'tasks_max', 'memory_profile', 'implementation_threads'}
     if (not fields.intersection(started) and not fields.intersection(closed) and
         'VENTIUM_VIVADO_TASK_PROFILE' not in started.get('env', {}) and
-        started.get('strategy') not in ('performance-route-first', 'routability-route-first')):
+        started.get('strategy') not in ('performance-route-first', 'routability-route-first', 'routability-retime-route-first') and
+        started.get('tool_threads') != 8):
         return None  # Historical receipts did not record task events.
     threads = started.get('tool_threads')
-    if type(threads) is not int or threads not in (1, 2):
+    if type(threads) is not int or threads not in (1, 2, 8):
         raise ValueError('invalid task-profile thread count')
     impl_threads = started.get('implementation_threads', threads)
     stage_policies = {(1, 1): ('serial', 48), (2, 2): ('parallel2', 128),
-                      (1, 4): ('serial_apr4', 128)}
+                      (1, 4): ('serial_apr4', 128), (8, 8): ('parallel8', 256)}
     if type(impl_threads) is not int or (threads, impl_threads) not in stage_policies:
         raise ValueError('invalid implementation thread count')
-    route_first = started.get('strategy') in ('performance-route-first', 'routability-route-first')
-    if route_first != ((threads, impl_threads) == (1, 4)):
+    route_first = started.get('strategy') in ('performance-route-first', 'routability-route-first', 'routability-retime-route-first')
+    if threads != 8 and route_first != ((threads, impl_threads) == (1, 4)):
         raise ValueError('stage thread policy disagrees with strategy')
-    if 'implementation_threads' in started or 'implementation_threads' in closed or route_first:
+    if 'implementation_threads' in started or 'implementation_threads' in closed or route_first or threads == 8:
         if (type(started.get('implementation_threads')) is not int or
             type(closed.get('implementation_threads')) is not int or
             started['implementation_threads'] != closed['implementation_threads']):
@@ -174,6 +175,8 @@ def audit_task_monitoring(run, started, closed):
     if (memory_profile == 'serial20' and threads != 1) or (route_first and memory_profile not in ('serial20', 'unbounded')):
         raise ValueError('memory profile disagrees with stage thread policy')
     unbounded = memory_profile == 'unbounded'
+    if threads == 8 and not unbounded:
+        raise ValueError('parallel8 requires unbounded memory')
     ram_gib, swap_gib, gib = (20 if memory_profile == 'serial20' else 16), 6, 1024**3
     named_memory = 'memory_profile' in started or 'memory_profile' in closed
     if named_memory:
@@ -274,7 +277,7 @@ def audit_closed(run):
         audit_threads(impl_script.read_text(), impl_threads)
     impl = (build/'impl_1-properties.rpt').read_text()
     if started['strategy'] in ('performance-retime-bounded', 'performance-bounded', 'performance-route-first',
-                               'routability-route-first'):
+                               'routability-route-first', 'routability-retime-route-first'):
         impl_script = build/'rk_ao486_system/rk_ao486_system.runs/impl_1/rk_ao486_bd_wrapper.tcl'
         audit_impl(impl_script.read_text(), impl, started['strategy'], impl_threads)
     if property_value(impl, 'AUTO_INCREMENTAL_CHECKPOINT') != '0' or property_value(impl, 'INCREMENTAL_CHECKPOINT'):

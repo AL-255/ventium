@@ -15,6 +15,66 @@ STEPS.SYNTH_DESIGN.ARGS.MORE OPTIONS string false
 
 
 class AuditTests(unittest.TestCase):
+    def test_retiming_route_first_changes_only_retiming_and_keeps_phys_disabled(self):
+        strategy = 'routability-retime-route-first'
+        props = PROPS.replace('PerformanceOptimized', 'AlternateRoutability').replace('enum false auto', 'enum false on')
+        properties = ''.join(f'STEPS.{step}.IS_ENABLED bool false 0\n'
+                            f'STEPS.{step}.ARGS.DIRECTIVE enum false Default\n'
+                            f'STEPS.{step}.ARGS.MORE OPTIONS string false\n'
+                            for step in ('PHYS_OPT_DESIGN', 'POST_ROUTE_PHYS_OPT_DESIGN'))
+        for synth_threads, apr_threads in ((1, 4), (8, 8)):
+            with self.subTest(synth=synth_threads, apr=apr_threads):
+                script = SCRIPT.replace('maxThreads 1', f'maxThreads {synth_threads}').replace('PerformanceOptimized', 'AlternateRoutability').rstrip()+' -global_retiming on\n'
+                result = audit_synth(script, props, strategy, synth_threads)
+                self.assertEqual(result['properties']['STEPS.SYNTH_DESIGN.ARGS.GLOBAL_RETIMING'], 'on')
+                for bad in (script.replace('retiming on', 'retiming off'),
+                            script.replace('retiming on', 'retiming auto'),
+                            script.replace(' -global_retiming on', ''),
+                            script.rstrip()+' -global_retiming on\n',
+                            script.replace('AlternateRoutability', 'PerformanceOptimized'),
+                            script+'read_checkpoint old.dcp\n',
+                            script+'set_param general.maxThreads 1\n'):
+                    with self.assertRaises(ValueError): audit_synth(bad, props, strategy, synth_threads)
+                for bad in (props.replace('enum false on', 'enum false off'),
+                            props.replace('enum false on', 'enum false auto'),
+                            props.replace('AlternateRoutability', 'PerformanceOptimized')):
+                    with self.assertRaises(ValueError): audit_synth(script, bad, strategy, synth_threads)
+                impl = (f'set_param general.maxThreads {apr_threads}\nopt_design -directive RuntimeOptimized\n'
+                        'place_design -directive AltSpreadLogic_high\nroute_design -directive AlternateCLBRouting\n')
+                self.assertEqual(audit_impl(impl, properties, strategy, apr_threads)['physical_operations'], [])
+                for bad in (impl+'phys_opt_design\n', impl+'phys_opt_design -retime\n',
+                            impl.replace('AltSpreadLogic_high', 'AltSpreadLogic_medium'),
+                            impl.replace('AlternateCLBRouting', 'NoTimingRelaxation'),
+                            impl.replace(f'maxThreads {apr_threads}', 'maxThreads 2')):
+                    with self.assertRaises(ValueError): audit_impl(bad, properties, strategy, apr_threads)
+                for bad in (properties.replace('bool false 0', 'bool false 1'),
+                            properties.replace('Default', 'Explore'),
+                            properties.replace('string false', 'string false -retime')):
+                    with self.assertRaises(ValueError): audit_impl(impl, bad, strategy, apr_threads)
+        with self.assertRaises(ValueError):
+            audit_synth(script.replace('maxThreads 8', 'maxThreads 2'), props, strategy, 2)
+
+    def test_parallel8_requires_exact_native_counts_and_unchanged_directives(self):
+        for strategy, directive, place, route in (
+                ('performance-route-first', 'PerformanceOptimized', 'AltSpreadLogic_medium', 'NoTimingRelaxation'),
+                ('routability-route-first', 'AlternateRoutability', 'AltSpreadLogic_high', 'AlternateCLBRouting')):
+            script = SCRIPT.replace('maxThreads 1', 'maxThreads 8').replace('PerformanceOptimized', directive).rstrip()+' -global_retiming off\n'
+            props = PROPS.replace('PerformanceOptimized', directive).replace('enum false auto', 'enum false off')
+            self.assertEqual(audit_synth(script, props, strategy, 8)['configured_threads'], 8)
+            for bad in (script.replace('maxThreads 8', 'maxThreads 1'),
+                        script+'set_param general.maxThreads 8\n', script+'read_checkpoint old.dcp\n'):
+                with self.assertRaises(ValueError): audit_synth(bad, props, strategy, 8)
+            impl = (f'set_param general.maxThreads 8\nopt_design -directive RuntimeOptimized\n'
+                    f'place_design -directive {place}\nroute_design -directive {route}\n')
+            properties = ''.join(f'STEPS.{step}.IS_ENABLED bool false 0\n'
+                                f'STEPS.{step}.ARGS.DIRECTIVE enum false Default\n'
+                                f'STEPS.{step}.ARGS.MORE OPTIONS string false\n'
+                                for step in ('PHYS_OPT_DESIGN', 'POST_ROUTE_PHYS_OPT_DESIGN'))
+            self.assertEqual(audit_impl(impl, properties, strategy, 8)['physical_operations'], [])
+            for bad in (impl.replace('maxThreads 8', 'maxThreads 4'), impl+'phys_opt_design\n'):
+                with self.assertRaises(ValueError): audit_impl(bad, properties, strategy, 8)
+        with self.assertRaises(ValueError): audit_threads(SCRIPT, 8)
+
     def test_congestion_route_first_requires_exact_new_directives(self):
         strategy = 'routability-route-first'
         script = SCRIPT.replace('PerformanceOptimized', 'AlternateRoutability').rstrip()+' -global_retiming off\n'
@@ -110,7 +170,7 @@ class AuditTests(unittest.TestCase):
                         script.replace('set_param general.maxThreads', '#set_param general.maxThreads')):
                 with self.assertRaises(ValueError): audit_threads(bad, threads)
         with self.assertRaises(ValueError): audit_threads(SCRIPT, 2)
-        for unsupported in (0, 3, 8, True, '1', None):
+        for unsupported in (0, 3, 9, True, '1', None):
             with self.assertRaises(ValueError): audit_threads(SCRIPT, unsupported)
 
     def test_omitted_native_default_needs_actual_property(self):

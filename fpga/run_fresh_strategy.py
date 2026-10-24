@@ -25,7 +25,8 @@ CLOCK_HASHES = {
     'ven_programmable_clock.v': 'cea6e80e4ca1240bfb2b1d3920c869458e21e30f19aa96fe77743be86109d2e9',
 }
 STRATEGIES = ('performance-netdelay', 'routability-spread', 'performance-retime-bounded',
-              'performance-bounded', 'performance-route-first', 'routability-route-first')
+              'performance-bounded', 'performance-route-first', 'routability-route-first',
+              'routability-retime-route-first')
 # Historical profiles remain interpretable; new launches use the user's Oct19
 # uncapped RAM/swap policy. None means no ceiling, not zero available memory.
 MEMORY_PROFILES = {'standard16': (16, 6), 'serial20': (20, 6), 'unbounded': (None, None)}
@@ -125,7 +126,7 @@ def task_policy(threads, implementation_threads=None):
     if implementation_threads is None:
         implementation_threads = threads
     policies = {(1, 1): ('serial', 48), (2, 2): ('parallel2', 128),
-                (1, 4): ('serial_apr4', 128)}
+                (1, 4): ('serial_apr4', 128), (8, 8): ('parallel8', 256)}
     if (type(threads) is not int or type(implementation_threads) is not int or
         (threads, implementation_threads) not in policies):
         raise ValueError('unsupported stage thread counts')
@@ -136,7 +137,9 @@ def implementation_policy(strategy, threads, memory_profile):
     memory_policy(memory_profile, threads)
     if strategy not in STRATEGIES:
         raise ValueError('unsupported strategy')
-    if strategy in ('performance-route-first', 'routability-route-first'):
+    if threads == 8:
+        return 8  # Explicit throughput profile; still one native job/family.
+    if strategy in ('performance-route-first', 'routability-route-first', 'routability-retime-route-first'):
         if threads != 1 or memory_profile not in ('serial20', 'unbounded'):
             raise ValueError('route-first requires serial synthesis and serial20 or unbounded memory')
         return 4
@@ -149,6 +152,8 @@ def memory_policy(profile, threads):
         raise ValueError('unsupported memory profile')
     if profile == 'serial20' and threads != 1:
         raise ValueError('serial20 requires one synthesis thread')
+    if threads == 8 and profile != 'unbounded':
+        raise ValueError('parallel8 requires unbounded memory')
     return MEMORY_PROFILES[profile]
 
 
@@ -166,9 +171,11 @@ def resource_stop(ram, swap, resources, free, events, limit_hit, ram_gib, swap_g
 
 def check_scope_limits(current, tasks_max, memory_profile='standard16', *,
                        threads=None, implementation_threads=None):
-    if type(tasks_max) is not int or tasks_max not in (48, 128):
+    if type(tasks_max) is not int or tasks_max not in (48, 128, 256):
         raise ValueError('unsupported task limit')
     if threads is None:
+        if tasks_max == 256:
+            raise ValueError('parallel8 requires explicit stage thread counts')
         threads = 1 if tasks_max == 48 else 2  # Legacy equal-stage policies.
     if task_policy(threads, implementation_threads)[1] != tasks_max:
         raise ValueError('task limit disagrees with stage threads')
@@ -200,15 +207,19 @@ def task_pressure(current_text, events_text, limit):
     return dict(current=current, events=events, limit_hit=events['max'] != 0)
 
 
-def main():
+def argument_parser():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--strategy', choices=STRATEGIES, required=True)
     ap.add_argument('--output', type=Path, required=True)
-    ap.add_argument('--threads', type=int, choices=(1, 2), default=1,
-                    help='synthesis threads; route-first uses four APR threads; always -jobs 1')
+    ap.add_argument('--threads', type=int, choices=(1, 2, 8), default=8,
+                    help='default: 8 per stage; explicit serial route-first uses four APR threads; always -jobs 1')
     ap.add_argument('--memory-profile', choices=('unbounded',), default='unbounded',
                     help='Oct19 user policy: no RAM/swap or free-memory admission limits')
-    args = ap.parse_args()
+    return ap
+
+
+def main():
+    args = argument_parser().parse_args()
     implementation_threads = implementation_policy(args.strategy, args.threads, args.memory_profile)
     task_profile, tasks_max = task_policy(args.threads, implementation_threads)
     ram_gib, swap_gib = memory_policy(args.memory_profile, args.threads)

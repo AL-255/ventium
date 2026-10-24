@@ -32,6 +32,9 @@ vivado_memory_max="20G"
 # or lock policy. serial_apr4 keeps serial synthesis with four-thread APR.
 vivado_tasks_max="48"
 vivado_parallel2_tasks_max="128"
+# Eight internal threads can create extra vendor worker/helper pools. This is
+# task headroom, not permission for eight builds or a numeric user override.
+vivado_parallel8_tasks_max="256"
 # Historical bounded-policy values, used only when explicitly selected for
 # reproduction. New Vivado launches default to uncapped RAM/swap; usage and
 # available memory are still observed, without a free-memory admission veto.
@@ -225,6 +228,13 @@ vivado_task_limit() {
     case "${VENTIUM_VIVADO_TASK_PROFILE:-serial}" in
         serial) printf '%s\n' "$vivado_tasks_max" ;;
         parallel2|serial_apr4) printf '%s\n' "$vivado_parallel2_tasks_max" ;;
+        parallel8)
+            if [[ "${VENTIUM_VIVADO_MEMORY_POLICY:-unbounded}" != unbounded ]]; then
+                echo "[build-scope] parallel8 requires unbounded memory policy" >&2
+                return 1
+            fi
+            printf '%s\n' "$vivado_parallel8_tasks_max"
+            ;;
         *)
             echo "[build-scope] unknown Vivado task profile: ${VENTIUM_VIVADO_TASK_PROFILE@Q}" >&2
             return 1
