@@ -11,6 +11,7 @@ from test_audit_fresh_strategy import SCRIPT, PROPS
 
 STRATEGY = 'performance-retime-muxf-route-first'
 TIMING_STRATEGY = 'performance-retime-muxf-timing-route-first'
+EXPLORE_STRATEGY = 'performance-retime-muxf-explore-route-first'
 HOOK = '/fixture/fpga/fresh_opt_muxf_post.tcl'
 
 

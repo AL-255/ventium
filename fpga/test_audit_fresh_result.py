@@ -9,7 +9,7 @@ from audit_fresh_result import (timing_summary, timing_coverage, route_and_drc, 
 from test_audit_fresh_strategy import SCRIPT, PROPS
 from test_fresh_remap import STRATEGY as REMAP_STRATEGY, HOOK as REMAP_HOOK, remap_log
 from test_fresh_muxf import STRATEGY as MUXF_STRATEGY, HOOK as MUXF_HOOK, remap_log as muxf_log
-from test_fresh_muxf import TIMING_STRATEGY
+from test_fresh_muxf import TIMING_STRATEGY, EXPLORE_STRATEGY
 
 PASS = '''| Design Timing Summary
 0.150 0.000 0 200000 0.004 0.000 0 200000 2.000 0.000 0 60000
@@ -40,12 +40,15 @@ class ResultTests(unittest.TestCase):
                 (MUXF_STRATEGY, 'on', 8, 8, 'parallel8', 256),
                 (TIMING_STRATEGY, 'on', 1, 4, 'serial_apr4', 128),
                 (TIMING_STRATEGY, 'on', 8, 8, 'parallel8', 256),
+                (EXPLORE_STRATEGY, 'on', 1, 4, 'serial_apr4', 128),
+                (EXPLORE_STRATEGY, 'on', 8, 8, 'parallel8', 256),
                 (REMAP_STRATEGY, 'on', 1, 4, 'serial_apr4', 128),
                 (REMAP_STRATEGY, 'on', 8, 8, 'parallel8', 256)):
             with self.subTest(strategy=strategy), tempfile.TemporaryDirectory(prefix='closed-route-first-') as td:
                 run = Path(td)
-                muxf = strategy in (MUXF_STRATEGY, TIMING_STRATEGY)
+                muxf = strategy in (MUXF_STRATEGY, TIMING_STRATEGY, EXPLORE_STRATEGY)
                 place = 'ExtraTimingOpt' if strategy == TIMING_STRATEGY else 'AltSpreadLogic_high'
+                route = 'Explore' if strategy == EXPLORE_STRATEGY else 'AlternateCLBRouting'
                 directive = 'PerformanceOptimized' if strategy == 'performance-retime-routability-route-first' or muxf else 'AlternateRoutability'
                 hook = MUXF_HOOK if muxf else REMAP_HOOK
                 remap_fixture = muxf_log if muxf else remap_log
@@ -76,11 +79,11 @@ class ResultTests(unittest.TestCase):
                 synth.write_text(SCRIPT.replace('maxThreads 1', f'maxThreads {threads}').replace('PerformanceOptimized', directive).rstrip()+f' -global_retiming {retiming}\n')
                 (build/'synth_1-properties.rpt').write_text(PROPS.replace('PerformanceOptimized', directive).replace('enum false auto', 'enum false '+retiming))
                 native = (f'set_param general.maxThreads {apr}\nopt_design -directive RuntimeOptimized\n'
-                          f'place_design -directive {place}\nroute_design -directive AlternateCLBRouting\n')
+                          f'place_design -directive {place}\nroute_design -directive {route}\n')
                 remap_body = ''
                 if strategy == REMAP_STRATEGY or muxf:
                     native = native.replace('place_design ', f'source {hook}\nplace_design ', 1)
-                    remap_body = remap_fixture(apr).split('\n', 1)[1].replace('AltSpreadLogic_high', place)
+                    remap_body = remap_fixture(apr).split('\n', 1)[1].replace('AltSpreadLogic_high', place).replace('AlternateCLBRouting', route)
                     impl.with_name('runme.log').write_text(remap_body)
                 impl.write_text(native)
                 properties = ('AUTO_INCREMENTAL_CHECKPOINT bool false 0\nINCREMENTAL_CHECKPOINT file false\n'+
@@ -129,7 +132,7 @@ class ResultTests(unittest.TestCase):
                             audit_closed(run)
                         log_path.write_text(good_log)
                     for bad in (native+'phys_opt_design\n',
-                                native.replace('AlternateCLBRouting', 'Default'),
+                                native.replace(route, 'Default'),
                                 native.replace(place, 'AltSpreadLogic_medium')):
                         impl.write_text(bad)
                         with self.assertRaisesRegex(ValueError, 'implementation command mismatch'):
