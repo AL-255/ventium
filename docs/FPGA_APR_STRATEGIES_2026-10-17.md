@@ -122,10 +122,52 @@ retained in the active run. Synthesis timing SHA256:
 `4b3ba4b4709c41fd19c66e5aa022bb43c809724cbe722fafd1343433d6613a76`.
 **No routed candidate timing result or physical acceptance exists yet.**
 
+**Placement complete, routing started Oct24 09:53:45 EDT:** placement took
+**12 min 40 s**, versus 13 min 14 s for the retiming control. The candidate
+uses **185,301 placed LUTs**, **55,107 registers** and **33,749 CLBs (79.11%)**.
+The control uses 192,601 LUTs / 55,163 registers / 33,723 CLBs (79.05%). Thus
+the **3.79% placed-LUT reduction did not reduce the CLB footprint**. Control
+sets fall 2,526→2,400; F7/F8 counts remain 17,814/6,840. These resource counts
+do not by themselves prove a congestion cause.
+
+The placer emits `Place 46-14` (high congestion); router initialization
+reports **462 high-pin-utilization CLBs**, versus 609 in the earlier failed
+performance trial. The best retiming control has no corresponding warning,
+which is not proof of zero high-pin CLBs. The candidate's estimated north
+long-congestion region is **64×64**, versus 16×16 in the retiming control and
+32×32 in the failed performance trial. The directional congestion tradeoffs
+are retained in `post-place-comparison.json`, together with stable native-log
+prefix hashes and placed-report hashes. The global placer WNS is −3.236 ns
+(control −3.470 ns), but its clock pair is not identified in that log line;
+**do not derive a frequency from it**. The last candidate frequency estimate
+remains the unplaced 38.067684 MHz above. Routing is still in progress, and
+initial unrouted/overlapping nets are not a completed route failure.
+
 Verified gameplay remains the **0.496499864 total U+V IPC baseline**, physical
 image **2886d24c**, cycles **625,021,130,428–629,480,208,865**. It predates these
 candidates; their gameplay is **unmeasured**. Timing sign-off, exception review
 and physical acceptance remain open.
+
+### MUXF-specific option — host-only prototype, not selected
+
+The performance mapping's 17,814 F7 / 6,840 F8 muxes motivate a separate
+congestion hypothesis. AMD documents [MUXF-to-LUT remapping](https://docs.amd.com/r/2025.2-English/ug949-vivado-design-methodology/Reduce-MUXF-Mapping)
+as a placement-flexibility tradeoff. This is **not** the rejected
+`-resynth_remap` trial, and high global MUX counts alone do not establish a
+congestion cause or justify selecting it before the active route finishes.
+
+An isolated `opt_design -muxf_remap` post-hook and **eight passing host-only
+tests** are retained at
+`/home/yukidama/external/tmp/ventium-muxf-hook-prep-oct24.gRKj1hcB/`.
+The hook reports before/after paths, utilization and MUXF7/8/9 counts, with
+failure, duplicate-pass and stale-report guards. It does not add `-remap`,
+resynthesis, timing exceptions or preservation overrides. Its operation is
+primitive-specific across the design, not localized to a congested region.
+The README and hash/test manifest record that native probing, full-strategy
+integration and QoR validation are **not done**. Nothing is promoted or queued;
+all 217 active-run pins were rechecked unchanged. Select any next experiment
+from the active run's final timing/legality/congestion evidence, then use a
+fresh source-only probe and full build—not a prior checkpoint.
 
 ## Retiming/eight-thread trial closed: 34.293553 MHz — Oct24 05:32 EDT
 
