@@ -1,6 +1,6 @@
 # APR strategy comparison — 40 MHz target
 
-## Explore router comparison launched — Oct24 16:52 EDT
+## Explore routing active — Oct24 18:14 EDT
 
 Fresh **`performance-retime-muxf-explore-route-first-r1`** started at
 **16:52:55 EDT**. Relative to the best **35.735982561 MHz** control, the only
@@ -83,6 +83,38 @@ normally, and the existing controller launched implementation at **17:58:18
 EDT**; this was not a restarted run. The same single Vivado scope remains live.
 The remaining parent and implementation worker allow CPUs 0–31; no memory/swap
 cap was introduced. Placement, routing and full-result acceptance remain open.
+
+**Pre-placement comparison:** both full hierarchy tables and all twenty
+reported core paths before/after MUXF remapping match the best control. MUXF
+counts again change **24,750 → 2,400**, and LUTs **184,996 → 207,337**; the
+post-remap unplaced estimate is **37.041153 MHz** in both runs. The retained
+`post-muxf-comparison.json` and `inspect-premuxf-comparison.py` check completed
+optimization only. The native script schedules Explore routing; that command
+had not executed at this observation, so it is not routed-result evidence.
+
+**Placement completed; Explore routing confirmed — Oct24 18:14 EDT:** placement
+finished without errors/critical warnings in **13m47s** (control: 13m30s).
+All **40 placement-phase/final checksums** and all utilization-table rows match
+the control, including **202,114 LUTs, 55,213 FFs, 35,034 CLBs, 2,420 control
+sets, 277.5 BRAM tiles and 47 DSPs**. This is matching reported evidence, not a
+claim that timestamped placed checkpoints are bit-identical. The actual router
+command/readback now confirms **Explore**, with eight threads. The strict native
+implementation-configuration audit passes; full-run completion remains false.
+All 218 launch pins remain unchanged. `post-place-comparison.json` and
+`inspect-placement-comparison.py` retain the results in the Explore evidence
+root. The current run has no routed frequency, timing sign-off or hardware pass.
+
+**Historical retiming cross-check:** the earlier retiming-off performance run
+has the same 200 source files and the same reported Q-PC[0] → FP-status[10]
+endpoints, but **90 logic levels / seven CARRY8 arcs / 38.445273 MHz unplaced**
+versus **93 / nine / 38.067684 MHz** with retiming on. The latter's 50 retiming
+records report zero forward/backward moves. The older run used one synthesis
+thread rather than eight, different APR settings and no MUXF remapping, and
+failed routing. These observations do not isolate retiming's effect or qualify
+that result. They motivate a possible matched retiming-off comparison if the
+current router experiment falls short; no next run is selected or launched.
+`retiming-history-comparison.json` and `inspect-retiming-history.py` retain the
+native commands, source comparison, parsed paths, utilization and report hashes.
 
 ## Timing placement rejected: 35.203830 MHz — Oct24 16:42 EDT
 
