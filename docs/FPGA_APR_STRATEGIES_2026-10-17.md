@@ -108,8 +108,49 @@ The native log proves RuntimeOptimized completed, then the separate
 `opt_design -resynth_remap` pass began with eight threads. Its before-report
 has **192,991 LUTs and 54,786 registers** after ordinary optimization, with the
 same −4.022 ns / 99-level worst path. The remap after-report and routed result
-are still pending. Before-path SHA256:
+were pending at that observation; the remap result is now available below.
+Before-path SHA256:
 `16f24a69212be2fd905c66aa3cfc984b838ee135f7c5f57a2d328b9f922e5b5d`.
+
+**Remap completed, Oct24 07:23 EDT:** the separate pass took **4 min 1 s**.
+The native log reports 314 replicated LUTs, 493 cells created and 41 removed.
+The after-reports were complete by 07:17:22, followed by
+`place_design -directive AltSpreadLogic_high`; placement is actively running.
+All **217 launch pins** were rehashed unchanged at 07:22:51. No additional
+Vivado family was launched, and all recorded OOM/task-limit events remain zero.
+
+| Unplaced measurement | Before remap | After remap |
+|---|---:|---:|
+| Worst setup slack | −4.022 ns | −3.448 ns |
+| Conditional core estimate | 34.456619 MHz | 35.151856 MHz |
+| Total LUTs | 192,991 | 193,443 |
+| Registers | 54,786 | 54,786 |
+| BRAM tiles / DSPs | 277.5 / 47 | 277.5 / 47 |
+
+This is **+0.574 ns** worst-slack improvement and **+2.018%** estimated
+frequency for **452 additional LUTs (+0.234%)**, not a routed result or a
+40 MHz pass. Crucially, this is **not a general reduction in critical-cone
+depth**: all fifteen identical source/destination pairs present in both
+twenty-path reports retain **96 logic levels** and regress by **0.038–0.041 ns**.
+The worst after-path is EIP → `dc_lru[81]`, with 28.237 ns data delay
+(5.154 logic / 23.083 estimated wire). The prior worst `pipe_mem_v_hit_q`
+endpoint leaves the worst twenty; its precise new delay is not reported here.
+The remapper also reports one constrained object preventing remap and 66 in
+post-processing; these counts alone do not identify those objects or justify
+removing constraints.
+
+`post-remap-comparison.json` retains all forty parsed paths, matched-endpoint
+deltas, resource counts, four report hashes, the verified native event sequence
+through placement start, and the input/resource checks. The full implementation
+audit and routed timing remain pending. The existing run should complete before
+selecting the next strategy: these results support a small localized remap gain,
+not an assumption that the prepared placement-only trial must discard remapping.
+
+Remap after-path SHA256:
+`956cf796ef6ca999341415e5e644eb01842559475da5863adc9487c8edf64654`.
+Before/after utilization SHA256:
+`bade3329032b4625e304a0b56981fcf77cbdef3258a6ffe67352eda160f0b335` /
+`938c65a0bb5da615b446581b7db96fdfac2de3683e82dc95b712b6eedc62b990`.
 
 The read-only `fpga/analyze_setup_paths.py` now accepts **explicit**
 `--state Optimized` and `--state Routed` reports, including located/wrapped
@@ -121,7 +162,7 @@ Eleven parser/CLI tests pass. It parsed all 80 paths across the native probe's
 before/after reports and both closed full-core routed controls without modifying
 them. On the **tiny probe**, remapping changed neither the 21 LUTs/53 FFs nor
 its twenty path delays/depths: the probe proves execution/reporting, **not a
-performance improvement**. Full-core before/after evidence remains pending.
+performance improvement**. Full-core before/after evidence is recorded above.
 These analysis-only files are not live build inputs; all **217 launch pins**
 were rehashed unchanged after the parser update.
 
