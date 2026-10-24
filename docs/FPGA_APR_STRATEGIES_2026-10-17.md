@@ -39,6 +39,20 @@ and did not remove this long control path. A timing-focused placement trial
 is therefore the next controlled experiment, not a claim that placement alone
 will recover the remaining 2.983 ns.
 
+**Routed-path follow-up while the next synthesis runs:** all twenty reported
+worst paths start at **Q-PC[1]** and share their first **14.754 ns** of data
+delay (85 reported cell/net rows, including 10.719 ns wire). Their endpoints
+span EIP, GPRs, FP state, string-state enables and DSP enables; these are not
+twenty independent bottlenecks. The two slowest nets on the worst path have
+fanouts 1,356 and 1,348 and contribute **1.100 + 0.944 = 2.044 ns**. Even
+idealized zero delay on those two alone would not remove the **2.983 ns**
+deficit if everything else stayed fixed. With cell/clock terms unchanged,
+40 MHz would require **14.32% less wire delay** on this worst path; that is a
+conditional target, not a prediction. `routed-common-prefix.json` records the
+hashed source report, exact shared rows and slowest nets. The existing parser's
+eleven tests pass. No timing exception, hierarchy-preservation override or
+active build input was changed.
+
 **Selected: `performance-retime-muxf-timing-route-first`.** Relative to this
 35.735983 MHz result, change only **AltSpreadLogic_high → ExtraTimingOpt**.
 Retain PerformanceOptimized synthesis, retiming on, normal RuntimeOptimized
