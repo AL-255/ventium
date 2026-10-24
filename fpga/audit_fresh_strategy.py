@@ -11,8 +11,9 @@ import re
 import shlex
 
 REMAP_STRATEGY = 'routability-retime-remap-route-first'
+MUXF_STRATEGY = 'performance-retime-muxf-route-first'
 ROUTE_FIRST_STRATEGIES = ('performance-route-first', 'routability-route-first',
-                          'routability-retime-route-first', 'performance-retime-routability-route-first', REMAP_STRATEGY)
+                          'routability-retime-route-first', 'performance-retime-routability-route-first', MUXF_STRATEGY, REMAP_STRATEGY)
 
 
 def property_value(text, name):
@@ -54,9 +55,10 @@ def audit_synth(script, properties, strategy, threads=1, native_log=None):
                   'routability-route-first': 'AlternateRoutability',
                   'routability-retime-route-first': 'AlternateRoutability',
                   'performance-retime-routability-route-first': 'PerformanceOptimized',
+                  MUXF_STRATEGY: 'PerformanceOptimized',
                   REMAP_STRATEGY: 'AlternateRoutability'}
     directive = directives[strategy]
-    retiming = 'on' if strategy in ('performance-retime-bounded', 'routability-retime-route-first', 'performance-retime-routability-route-first', REMAP_STRATEGY) else 'auto'
+    retiming = 'on' if strategy in ('performance-retime-bounded', 'routability-retime-route-first', 'performance-retime-routability-route-first', MUXF_STRATEGY, REMAP_STRATEGY) else 'auto'
     if strategy in ('performance-bounded', 'performance-route-first', 'routability-route-first'): retiming = 'off'
     commands = re.findall(r'^synth_design [^\n]+', script, re.M)
     if len(commands) != 1:
@@ -96,17 +98,41 @@ def audit_synth(script, properties, strategy, threads=1, native_log=None):
                 timing_driven=True, prior_checkpoint_input=False, configured_threads=threads)
 
 
-def audit_remap(script, properties, threads, native_log):
+def muxf_count_evidence(native_log):
+    """Require six ordered numeric before/after counts; do not presume a gain."""
+    lines = [line for line in (native_log or '').splitlines()
+             if line.startswith('FRESH-MUXF-COUNTS')]
+    expected = [(stage, ref) for stage in ('before', 'after')
+                for ref in ('MUXF7', 'MUXF8', 'MUXF9')]
+    result = []
+    if len(lines) != len(expected):
+        raise ValueError('missing/duplicate MUXF count evidence')
+    for line, (stage, ref) in zip(lines, expected):
+        match = re.fullmatch(
+            r'FRESH-MUXF-COUNTS stage=(before|after) primitive=(MUXF[789]) count=(\d+)', line)
+        if not match or match.groups()[:2] != (stage, ref):
+            raise ValueError('malformed or out-of-order MUXF count evidence')
+        result.append(dict(stage=stage, primitive=ref, count=int(match[3]), line=line))
+    return result
+
+
+def audit_remap(script, properties, threads, native_log, *, muxf=False):
     """Prove a sourced extra pass ran after normal optimization and before place."""
+    basename = 'fresh_opt_muxf_post.tcl' if muxf else 'fresh_opt_remap_post.tcl'
+    marker = 'FRESH-MUXF-REMAP' if muxf else 'FRESH-LOGIC-REMAP'
+    option = '-muxf_remap' if muxf else '-resynth_remap'
+    counts = muxf_count_evidence(native_log) if muxf else []
     hook = property_value(properties, 'STEPS.OPT_DESIGN.TCL.POST')
-    if (not Path(hook).is_absolute() or Path(hook).name != 'fresh_opt_remap_post.tcl' or
+    if (not Path(hook).is_absolute() or Path(hook).name != basename or
         property_value(properties, 'STEPS.OPT_DESIGN.ARGS.DIRECTIVE') != 'RuntimeOptimized' or
         property_value(properties, 'STEPS.OPT_DESIGN.ARGS.MORE OPTIONS') != ''):
         raise ValueError('remap post-hook/normal optimization property mismatch')
     sources = []
     for match in re.finditer(r'^[ \t]*source[ \t]+(?:\{([^}\r\n]+)\}|([^ \t\r\n]+))[ \t]*$', script, re.M):
         name = match.group(1) or match.group(2)
-        if Path(name).name == 'fresh_opt_remap_post.tcl':
+        if Path(name).name in ('fresh_opt_remap_post.tcl', 'fresh_opt_muxf_post.tcl') and Path(name).name != basename:
+            raise ValueError('mixed remap hooks are not admitted')
+        if Path(name).name == basename:
             sources.append((name, match.start()))
     opt = re.search(r'^[ \t]*opt_design[ \t]+-directive[ \t]+RuntimeOptimized[ \t]*$', script, re.M)
     place = re.search(r'^[ \t]*place_design[ \t]', script, re.M)
@@ -116,19 +142,21 @@ def audit_remap(script, properties, threads, native_log):
     expected = [
         'Command: opt_design -directive RuntimeOptimized',
         'opt_design completed successfully',
-        f'FRESH-LOGIC-REMAP-BEGIN threads={threads} command=opt_design-resynth_remap',
-        'Command: opt_design -resynth_remap',
+        *[c['line'] for c in counts[:3]],
+        f'{marker}-BEGIN threads={threads} command=opt_design{option}',
+        f'Command: opt_design {option}',
         'opt_design completed successfully',
-        'FRESH-LOGIC-REMAP-END',
+        *[c['line'] for c in counts[3:]],
+        f'{marker}-END',
         'Command: place_design -directive AltSpreadLogic_high',
         'Command: route_design -directive AlternateCLBRouting',
     ]
     events = [line for line in (native_log or '').splitlines()
               if (re.match(r'^Command: (?:opt_design|place_design|route_design|phys_opt_design)\b', line) or
-                  line == 'opt_design completed successfully' or line.startswith('FRESH-LOGIC-REMAP-'))]
+                  line == 'opt_design completed successfully' or line.startswith(('FRESH-LOGIC-REMAP-', 'FRESH-MUXF-')))]
     if events != expected or re.search(r'^ERROR:', native_log or '', re.M):
         raise ValueError('native remap execution evidence missing, erroneous or out of order')
-    return ['-resynth_remap']
+    return [option]
 
 
 def audit_impl(script, properties, strategy, threads=1, native_log=None):
@@ -152,6 +180,7 @@ def audit_impl(script, properties, strategy, threads=1, native_log=None):
         'routability-route-first': ('AltSpreadLogic_high', 'AlternateCLBRouting', []),
         'routability-retime-route-first': ('AltSpreadLogic_high', 'AlternateCLBRouting', []),
         'performance-retime-routability-route-first': ('AltSpreadLogic_high', 'AlternateCLBRouting', []),
+        MUXF_STRATEGY: ('AltSpreadLogic_high', 'AlternateCLBRouting', []),
         REMAP_STRATEGY: ('AltSpreadLogic_high', 'AlternateCLBRouting', []),
     }
     place, route, phys = configs[strategy]
@@ -176,13 +205,17 @@ def audit_impl(script, properties, strategy, threads=1, native_log=None):
                 property_value(properties, f'STEPS.{step}.ARGS.MORE OPTIONS') != ''):
                 raise ValueError('route-first physical stage property mismatch: '+step)
     remap = []
-    if strategy == REMAP_STRATEGY:
-        remap = audit_remap(script, properties, threads, native_log)
-    elif ('fresh_opt_remap_post.tcl' in script or 'FRESH-LOGIC-REMAP-' in (native_log or '') or
-          re.search(r'^Command: opt_design -resynth_remap\b', native_log or '', re.M)):
+    if strategy in (REMAP_STRATEGY, MUXF_STRATEGY):
+        remap = audit_remap(script, properties, threads, native_log, muxf=strategy == MUXF_STRATEGY)
+    elif (any(h in script for h in ('fresh_opt_remap_post.tcl', 'fresh_opt_muxf_post.tcl')) or
+          any(m in (native_log or '') for m in ('FRESH-LOGIC-REMAP-', 'FRESH-MUXF-')) or
+          re.search(r'^Command: opt_design -(?:resynth_remap|muxf_remap)\b', native_log or '', re.M)):
         raise ValueError('unexpected remap operation for strategy')
-    return dict(strategy=strategy, physical_operations=phys, logic_remap_operations=remap,
-                completion_verified=False)
+    result = dict(strategy=strategy, physical_operations=phys, logic_remap_operations=remap,
+                  completion_verified=False)
+    if strategy == MUXF_STRATEGY:
+        result['muxf_counts'] = muxf_count_evidence(native_log)
+    return result
 
 
 def main():

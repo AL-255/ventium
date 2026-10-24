@@ -37,6 +37,50 @@ That failed checkpoint is **inspection data only**, never a subsequent build
 input. The prepared MUXF-remapping experiment remains pending this inspection;
 every future full trial must start from frozen source again.
 
+**Inspection completed Oct24 12:03 EDT:** all twelve requested native-grid
+regions resolved. The independent route report confirms 219,451 of 222,136
+routable nets fully routed, with 2,685 resource conflicts. Vivado's
+`RQS_CONG-2_1` explicitly identifies high MUXF usage in congested regions;
+`RQS_CONG-9` separately identifies over-replication. No recommendation was
+applied to the inspected design. Automatic ML strategy generation is unavailable
+for this custom recipe (it requires a default/Explore implementation).
+
+The native primitive inventory contains **24,750 MUXFs**. Rebuilt parent labels
+attribute 13,823 to `u_icache`, 3,888 to `u_bpred_btb` and 1,739 to shared-FPU
+state; these labels do not establish pure RTL ownership. The final reported
+north/south/east peak routing windows contain respectively 1,220/401/257
+MUXFs among 3,679/1,457/855 primitives; the west window has only 74 among
+3,905. Regions overlap and are not additive. This supports a MUXF experiment,
+not a claim that MUXFs explain every congestion region. Logical LUT primitive
+counts in this inspection are not physical LUT-site utilization.
+
+Both exact dynamic vendor RAM selectors were resolved: **216** cells for
+`s_axi_aclk` and **84** for `m_axi_aclk`, with corresponding CLK/O pins.
+Every selected cell remains under `rk_ao486_bd_i/acc_mem/inst`; no CPU-side
+escape was observed. This is selector-containment evidence, not timing sign-off
+for the illegal route. Five inspection input hashes remained unchanged.
+Evidence is in
+`/home/yukidama/external/tmp/ventium-region-query-oct24.WBCFgZQZ/native-error-inspection-r1/closed.json`.
+The transient inspection owner was collected before its exit status was
+captured: the completion marker and outputs were independently validated,
+but **no explicit inspection exit-code pass is claimed**. Earlier probe
+receipts that captured a collected owner's default `ExecMainStatus=0` likewise
+do not establish that outer exit code by themselves. Full-build controller
+receipts are separate. Subsequent probe owners must retain their terminal
+state until the real exit status is captured.
+
+**Selected next: `performance-retime-muxf-route-first`.** Add only
+`opt_design -muxf_remap` after RuntimeOptimized, retaining the failed candidate's
+synthesis, retiming, placement, routing, eight-thread policy and 25/10 ns clocks.
+The vendor suggestion is region-selective; this controlled trial instead tests
+the explicit design-wide primitive-remapping pass. LUT growth or timing
+regression remains possible. Do not combine it with equivalent-driver merging,
+critical-net replication, clock tuning, `-remap`, or preservation overrides.
+All 26 preparation-base files still matched; only ten reviewed helper/test
+files were promoted. **94 flow/audit + 26 scope tests pass (120 total)** in the
+repository. A fresh native tooling probe must pass before the full build;
+neither its checkpoint nor the failed route may become a build input.
+
 Verified gameplay remains **0.496499864 total U+V IPC**, image **2886d24c**,
 cycles **625,021,130,428–629,480,208,865**. This baseline predates the failed
 candidate, whose gameplay is **unmeasured**.

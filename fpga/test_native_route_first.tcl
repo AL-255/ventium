@@ -19,19 +19,19 @@ proc route_first_check_status {run status directory} {
 }
 
 # Source-only tooling probe, NOT full-core timing or hardware acceptance.
-if {$argc ni {1 2 3}} {error "usage: new-output-directory ?performance-route-first|routability-route-first|routability-retime-route-first|performance-retime-routability-route-first|routability-retime-remap-route-first? ?serial_apr4|parallel8?"}
+if {$argc ni {1 2 3}} {error "usage: new-output-directory ?performance-route-first|routability-route-first|routability-retime-route-first|performance-retime-routability-route-first|performance-retime-muxf-route-first|routability-retime-remap-route-first? ?serial_apr4|parallel8?"}
 set strategy performance-route-first
 if {$argc >= 2} {set strategy [lindex $argv 1]}
-if {$strategy ni {performance-route-first routability-route-first routability-retime-route-first performance-retime-routability-route-first routability-retime-remap-route-first}} {error "unknown probe strategy"}
+if {$strategy ni {performance-route-first routability-route-first routability-retime-route-first performance-retime-routability-route-first performance-retime-muxf-route-first routability-retime-remap-route-first}} {error "unknown probe strategy"}
 set thread_profile serial_apr4
 if {$argc == 3} {set thread_profile [lindex $argv 2]}
 if {$thread_profile ni {serial_apr4 parallel8}} {error "unknown probe thread profile"}
 set synth_threads [expr {$thread_profile eq "parallel8" ? 8 : 1}]
 set apr_threads [expr {$thread_profile eq "parallel8" ? 8 : 4}]
-set synth_retiming [expr {$strategy in {routability-retime-route-first performance-retime-routability-route-first routability-retime-remap-route-first} ? "on" : "off"}]
+set synth_retiming [expr {$strategy in {routability-retime-route-first performance-retime-routability-route-first performance-retime-muxf-route-first routability-retime-remap-route-first} ? "on" : "off"}]
 set synth_directive [expr {$strategy in {routability-route-first routability-retime-route-first routability-retime-remap-route-first} ? "AlternateRoutability" : "PerformanceOptimized"}]
-set place_directive [expr {$strategy in {routability-route-first routability-retime-route-first performance-retime-routability-route-first routability-retime-remap-route-first} ? "AltSpreadLogic_high" : "AltSpreadLogic_medium"}]
-set route_directive [expr {$strategy in {routability-route-first routability-retime-route-first performance-retime-routability-route-first routability-retime-remap-route-first} ? "AlternateCLBRouting" : "NoTimingRelaxation"}]
+set place_directive [expr {$strategy in {routability-route-first routability-retime-route-first performance-retime-routability-route-first performance-retime-muxf-route-first routability-retime-remap-route-first} ? "AltSpreadLogic_high" : "AltSpreadLogic_medium"}]
+set route_directive [expr {$strategy in {routability-route-first routability-retime-route-first performance-retime-routability-route-first performance-retime-muxf-route-first routability-retime-remap-route-first} ? "AlternateCLBRouting" : "NoTimingRelaxation"}]
 set out [file normalize [lindex $argv 0]]
 if {[file exists $out]} {error "probe output must not exist"}
 if {[version -short] ne "2025.2"} {error "Vivado 2025.2 required"}
@@ -39,6 +39,33 @@ source [file join [file dirname [info script]] fresh_route_first.tcl]
 file mkdir $out
 set src [file join $out route_first_probe.v]
 set f [open $src {WRONLY CREAT EXCL}]
+if {$strategy eq "performance-retime-muxf-route-first"} {
+puts $f {`timescale 1ps/1ps
+module route_first_probe(input clk, input [15:0] d, output reg [15:0] q);
+reg [15:0] a, b;
+wire [7:0] leaf;
+wire [3:0] m7;
+wire [1:0] m8;
+wire m9;
+genvar i;
+generate for (i=0; i<8; i=i+1) begin: g_mux_probe
+ LUT6 #(.INIT(64'h6996966996696996 ^ (64'h0102040810204080 << i)))
+  lut(.I0(a[0]), .I1(a[1]), .I2(a[2]), .I3(a[3]), .I4(a[4]), .I5(a[5]), .O(leaf[i]));
+end
+for (i=0; i<4; i=i+1) begin: g_m7
+ MUXF7 mux(.I0(leaf[2*i]), .I1(leaf[2*i+1]), .S(b[0]), .O(m7[i]));
+end
+for (i=0; i<2; i=i+1) begin: g_m8
+ MUXF8 mux(.I0(m7[2*i]), .I1(m7[2*i+1]), .S(b[1]), .O(m8[i]));
+end endgenerate
+MUXF9 mux9(.I0(m8[0]), .I1(m8[1]), .S(b[2]), .O(m9));
+always @(posedge clk) begin
+ a <= d;
+ b <= a;
+ q <= (((b + 16'd131) ^ (b >> 3)) + (b << 2)) ^ {15'b0,m9};
+end
+endmodule}
+} else {
 puts $f {module route_first_probe(input clk, input [15:0] d, output reg [15:0] q);
 reg [15:0] a, b;
 always @(posedge clk) begin
@@ -47,6 +74,7 @@ always @(posedge clk) begin
  q <= ((b + 16'd131) ^ (b >> 3)) + (b << 2);
 end
 endmodule}
+}
 close $f
 set xdc [file join $out clocks.xdc]
 set f [open $xdc {WRONLY CREAT EXCL}]
@@ -74,6 +102,9 @@ set_property -name {STEPS.OPT_DESIGN.ARGS.MORE OPTIONS} -value {} -objects $impl
 set_property STEPS.OPT_DESIGN.TCL.POST {} $impl
 if {$strategy eq "routability-retime-remap-route-first"} {
     set_property STEPS.OPT_DESIGN.TCL.POST [file join [file dirname [file normalize [info script]]] fresh_opt_remap_post.tcl] $impl
+}
+if {$strategy eq "performance-retime-muxf-route-first"} {
+    set_property STEPS.OPT_DESIGN.TCL.POST [file join [file dirname [file normalize [info script]]] fresh_opt_muxf_post.tcl] $impl
 }
 set_property STEPS.PLACE_DESIGN.ARGS.DIRECTIVE $place_directive $impl
 set_property STEPS.ROUTE_DESIGN.ARGS.DIRECTIVE $route_directive $impl
@@ -127,7 +158,7 @@ foreach {run threads} [list synth_1 $synth_threads impl_1 $apr_threads] {
         # Native script contains only a source command for a post-hook. The
         # independent Python auditor also requires both actual opt_design
         # commands/completions and remap markers in order in runme.log.
-        if {$strategy eq "routability-retime-remap-route-first"} {
+        if {$strategy in {routability-retime-remap-route-first performance-retime-muxf-route-first}} {
             set audit_python {
 import json, sys
 from pathlib import Path
@@ -136,6 +167,12 @@ from audit_fresh_strategy import audit_impl, native_worker_log
 script = Path(sys.argv[2])
 result = audit_impl(script.read_text(), Path(sys.argv[3]).read_text(),
                     sys.argv[4], int(sys.argv[5]), native_worker_log(script))
+if sys.argv[4] == 'performance-retime-muxf-route-first':
+    counts = result['muxf_counts']
+    before = [c['count'] for c in counts if c['stage'] == 'before']
+    after = [c['count'] for c in counts if c['stage'] == 'after']
+    if not all(c > 0 for c in before) or sum(after) >= sum(before):
+        raise ValueError('native MUXF fixture did not exercise a reducing remap')
 print(json.dumps(result, sort_keys=True))
 }
             # Vivado exports its own PYTHONHOME/PYTHONPATH. Isolate the system
