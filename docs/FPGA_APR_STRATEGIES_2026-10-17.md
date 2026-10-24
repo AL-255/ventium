@@ -109,6 +109,30 @@ Current verified gameplay remains **0.496499864 total U+V IPC**, deployed
 candidates remain unmeasured; the last legal routed conditional estimate is
 still **28.701817 MHz**, not 40 MHz sign-off.
 
+### Runtime follow-up prepared while synthesis runs
+
+The Oct18 retiming-r1/r2 terminal receipts were rechecked: both record
+`combined memory early stop`, not a completed retiming comparison. The retained
+r2 native synthesis log contains **50 per-module retiming records, all with
+zero forward/backward moves**, before the mapping stop. This is only a partial
+run; it neither proves retiming is ineffective for the complete core nor
+establishes a gain. Native `synth_1/runme.log` SHA256:
+`0190a9816dc55c96c06c9de8d89528cf2dd80f4c09919a75c2d975c751cbb6eb`.
+
+The current run's serial synthesis/four-thread APR settings remain unchanged.
+For subsequent trials, an **unapplied** eight-thread-per-stage profile is prepared
+under `/home/yukidama/external/tmp/ventium-native8-prep-oct23.TdUtpy8O/`.
+AMD 2025.2 documents up to eight internal threads for both
+[RTL synthesis](https://docs.amd.com/r/2025.2-English/ug901-vivado-synthesis/Multi-Threading-in-RTL-Synthesis)
+and [implementation](https://docs.amd.com/r/2025.2-English/ug904-vivado-implementation/Multithreading-with-the-Vivado-Tools).
+The candidate retains one build family, one native job, uncapped RAM/swap,
+fresh-source admission and all timing checks. It adds fixed 256-task helper
+headroom, not concurrent builds. **37 flow/audit + 26 mocked scope tests pass**;
+native capability and full-chip runtime remain unverified. The bundle records
+base/candidate files, hashes and promotion/probe requirements. It must not
+replace pinned helpers until the active trial closes; no extra Vivado was
+launched, and no throughput or frequency improvement is claimed.
+
 ## Resumed on the migrated host — 2026-10-22
 
 The user authorized resuming **fresh synthesis plus APR**, with no previous
