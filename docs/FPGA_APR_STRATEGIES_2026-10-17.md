@@ -101,6 +101,48 @@ and swap use were observed without stopping the build. The retained evidence
 is the active run's `post-synth-comparison.json`; placement, routing, final
 timing and hardware acceptance remain open.
 
+**Pre-placement comparison:** both complete hierarchy-utilization tables and
+all twenty reported setup paths match the control before and after MUXF
+remapping. Native execution confirms both optimization passes completed and
+`place_design -directive ExtraTimingOpt` started; all launch pins remain
+unchanged. The post-remap unplaced estimate is the same **37.041153 MHz**,
+with 207,337 LUTs and 54,852 FFs. This isolates the placement experiment; it
+does not establish an identical entire netlist or any routed improvement.
+Receipt: `post-muxf-control-comparison.json` in the active run directory.
+
+**Placement completed; routing began at 15:43:21 EDT.** The independently
+audited native commands retain eight threads, MUXF remapping and
+AlternateCLBRouting, with no optional standalone physical-optimization stage
+or old checkpoint input. All 218 launch pins remain unchanged.
+
+| Placement metric | Completed MUXF control | ExtraTimingOpt candidate |
+|---|---:|---:|
+| Placement elapsed | 13m30s | 11m47s |
+| Occupied CLBs | 35,034 (82.12%) | 35,703 (83.69%) |
+| LUTs / FFs | 202,114 / 55,213 | 202,190 / 55,141 |
+| Unique control sets | 2,420 | 2,417 |
+| Global estimated placement slack | −2.282 ns | −2.831 ns |
+| Placer high-congestion warning | absent | present |
+
+The candidate occupies **669 more CLBs (+1.91%)** despite only 76 more LUTs.
+South long-congestion region grows from 32×32 to 64×64; east global/long
+regions grow from 8×8 to 16×16; west global improves from 8×8 to 4×4.
+These region sizes are not congestion percentages. The global placement slack
+has no identified clock pair, so it is **not converted into core frequency**.
+This is an unfavorable early comparison, not yet a final rejection: legal
+routing and final timing must determine the outcome. The independent partial
+configuration audit explicitly leaves completion false. Evidence:
+`post-place-control-comparison.json` in the active run directory.
+
+Further parsing of the **35.735983 MHz control's** worst routed path assigns
+**12.585 ns (60.44%)** of printed wire delay to 66 nets with fanout 1–4;
+seven nets with fanout 128+ contribute **3.973 ns (19.08%)**. Printed wire
+increments sum to 20.823 ns versus the report's 20.825 ns total (rounding).
+Across its twenty correlated reported paths, mean shares are 54.20% and
+20.04%, respectively. These are reported-path delay shares, not whole-chip
+congestion measurements. They support evaluating placement/routing broadly,
+rather than assuming a high-fanout-only pass will close timing.
+
 Closed evidence:
 `/home/yukidama/external/tmp/ventium-muxf-oct24.FLY6s5B5/performance-retime-muxf-route-first-r1/`:
 `closed.json`, `independent-closed-audit.json`, `pre-next-strategy-audit.json`
