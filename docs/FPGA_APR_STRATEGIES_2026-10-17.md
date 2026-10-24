@@ -85,6 +85,32 @@ The sole Vivado scope is uncapped in RAM/swap, with eight internal threads per
 stage, one native job and 256-task headroom. No candidate result exists yet;
 the completed 34.293553 MHz result above is its comparison baseline.
 
+**Full remap trial, Oct24 07:14 EDT:** fresh native synthesis completed in
+**1 h 25 min 28 s**, versus the control's 1 h 31 min 6 s. The reported synthesis
+checksum is `ca17db17` for both, with identical resources: **194,049 LUTs,
+54,876 registers, 277.5 BRAM tiles and 47 DSPs**. All twelve numeric fields of
+the unplaced timing summary match, including core setup **−4.022 ns** and
+overall hold **−0.455 ns**. The worst setup path remains EIP → paired-memory
+hit, **99 levels**, 28.811 ns data delay (5.293 logic / 23.518 estimated wire).
+Its **34.456619 MHz unplaced estimate is not routed timing or sign-off**.
+No optimization gain is inferred from the shorter synthesis runtime.
+
+Both native logs print the same 752 warning occurrences after normalizing run
+paths; their aggregate synthesizer warning totals differ (1,907 versus 1,959),
+so neither is described as warning-free. Both have zero native errors/critical
+warnings. The short native checksum is corroborating evidence, not a
+cryptographic equivalence proof. `post-synth-comparison.json` retains the
+independent native-options audit, report hashes and comparison; all **217 input
+pins** were rehashed unchanged, with no prior-checkpoint inputs.
+
+Implementation began at **07:11:58 EDT** (3 h 50 min deadline **11:01:58 EDT**).
+The native log proves RuntimeOptimized completed, then the separate
+`opt_design -resynth_remap` pass began with eight threads. Its before-report
+has **192,991 LUTs and 54,786 registers** after ordinary optimization, with the
+same −4.022 ns / 99-level worst path. The remap after-report and routed result
+are still pending. Before-path SHA256:
+`16f24a69212be2fd905c66aa3cfc984b838ee135f7c5f57a2d328b9f922e5b5d`.
+
 The read-only `fpga/analyze_setup_paths.py` now accepts **explicit**
 `--state Optimized` and `--state Routed` reports, including located/wrapped
 primitive rows and the native default max-delay command. Every path must still
@@ -99,7 +125,8 @@ performance improvement**. Full-core before/after evidence remains pending.
 These analysis-only files are not live build inputs; all **217 launch pins**
 were rehashed unchanged after the parser update.
 
-Final utilization is **192,601 LUTs, 55,163 FFs, 277.5 BRAM tiles and 47 DSPs**.
+The completed retiming control's final utilization is **192,601 LUTs,
+55,163 FFs, 277.5 BRAM tiles and 47 DSPs**.
 All 1,878 resource samples have zero OOM/task-limit events; peak simultaneous
 RAM+swap was **44.04 GiB**, peak task count 79. Individual RAM/swap peaks are
 not additive.
