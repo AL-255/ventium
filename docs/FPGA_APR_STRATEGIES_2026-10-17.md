@@ -27,6 +27,35 @@ editing the tools, all **215 launch pins** were rehashed unchanged, with the
 15 launch-helper copies and a receipt saved inside the closed run as
 `closed-tool-snapshot/` and `pre-next-strategy-audit.json`.
 
+The failed trial's completed reports provide the comparison baseline for the
+new mapping/spreading trial; these counts are **not** a legal routed result:
+
+| Resource | After synthesis | After placement |
+|---|---:|---:|
+| CLB LUTs | 186,064 | 185,011 |
+| Registers | 54,917 | 55,179 |
+| CARRY8 | 3,682 | 3,677 |
+| MUXF7 / MUXF8 / MUXF9 | 17,814 / 6,840 / 96 | 17,814 / 6,840 / 96 |
+| Unique control sets | 2,409 | 2,410 |
+| BRAM tiles | 277.5 | 277.5 |
+| Occupied CLBs | Not placed | 32,271 (75.65%) |
+
+Placed LUT utilization was only **54.21%**, yet local routing saturated.
+Lower total LUT or occupied-CLB counts therefore cannot by themselves establish
+an improvement. Compare the new trial's actual MUXF/carry mapping, placement
+pin-density warnings, regional congestion and legal-route outcome, then its
+clock-pair-specific timing. An increase in LUT count is not automatically a
+regression if connectivity improves, but neither is fewer MUXFs evidence of
+40 MHz closure. The rebuilt `u_icache` hierarchy accounts for 41,829 synthesis
+LUTs; as noted above, that hierarchy is not a pure cache-storage boundary.
+
+Evidence is in the failed trial's `build/rk_ao486_system/` run reports:
+
+- `rk_ao486_system.runs/synth_1/rk_ao486_bd_wrapper_utilization_synth.rpt`,
+  SHA256 `3191ce5f044c5dd81c9479e4493900e2d315c734faa04bebb8b8879ee554912d`.
+- `rk_ao486_system.runs/impl_1/rk_ao486_bd_wrapper_utilization_placed.rpt`,
+  SHA256 `47e579e11980fd7fcd215dda5f5e98bac604c4037f5f59667200d37809ec25a9`.
+
 The new **`routability-route-first`** combination changes three settings while
 retaining the source/profile, retiming-off policy, rebuilt hierarchy, one
 synthesis job, serial synthesis / four-thread APR, and disabled optional
