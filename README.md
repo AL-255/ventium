@@ -190,9 +190,13 @@ IPC includes REP-element retirement. This older deployed image does not qualify
 the experimental checkout or the cancelled APR candidate; those have no new
 gameplay result. The Oct19 fresh APR run was cancelled during routing;
 the Oct22 source-only retry failed routing legality with 21,350 node overlaps,
-without OOM or timeout. A congestion-oriented fresh strategy started at
-23:05 EDT Oct23, with uncapped RAM/swap and one active build at a time. No replacement
-bitstream or frequency gain has yet been obtained. See the
+without OOM or timeout. Subsequent fresh synthesis/APR trials obtained a legal
+route and a **35.735983 MHz conditional core setup estimate** on Oct24, using
+MUXF remapping. The bitstream was generated in **2 h 3 min**, with uncapped
+RAM/swap and one active build at a time. This is **not 40 MHz timing sign-off**
+(core setup slack −2.983 ns) and has no physical gameplay/Win95 acceptance.
+The figures and benchmark results above still describe image `2886d24c`, not
+this new candidate. See the
 [fresh strategy log](docs/FPGA_APR_STRATEGIES_2026-10-17.md).
 See [CoreMark/PLL sweep](fpga/PROGRAMMABLE_CLOCK.md),
 [Quake](docs/FPGA_QUAKE_TIMEDEMO_2026-10-17.md) and

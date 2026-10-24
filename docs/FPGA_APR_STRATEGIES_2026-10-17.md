@@ -1,6 +1,73 @@
 # APR strategy comparison — 40 MHz target
 
-## MUXF placement completed; routing running — Oct24
+## MUXF trial closed: 35.735983 MHz; timing-placement trial next — Oct24
+
+The fresh **`performance-retime-muxf-route-first-r1`** finished at **14:18:46
+EDT**, with both native and retained owner exit status **0**. The independent
+completed-run audit passes provenance, configuration, routing and reporting
+checks, but **40 MHz timing still fails**. The new best conditional routed
+core estimate is **35.735982561 MHz**, **4.21%** above the previous 34.293553
+MHz best. This is not a measured board frequency or hardware qualification.
+
+| Final clock pair | Setup slack | Hold slack |
+|---|---:|---:|
+| Core → core, 25 ns | **−2.983 ns** | +0.011 ns |
+| AXI → AXI, 10 ns | +6.013 ns | +0.019 ns |
+| Core → AXI, 5 ns relationship | +1.244 ns | +0.443 ns |
+| AXI → core, 5 ns relationship | +1.427 ns | +1.893 ns |
+
+All **266,839 routable nets are fully routed**, with zero routing errors;
+unwaived final DRC has no errors or critical warnings. Hold and pulse-width
+checks pass; all ten bus-skew constraints pass (minimum +9.321 ns), and native
+CDC reports all paths safely timed. Internal timing coverage is complete;
+the only missing output delays are the same four status LEDs. There remain
+**53,608 failing setup endpoints**, TNS **−69,191.828 ns**. Manual exception/
+source review and physical acceptance are separate and remain open.
+
+Full controller elapsed time was **2 h 3 min 21 s**; implementation through
+final reports took **1 h 1 min 49 s**, including a **40 min 30 s** route.
+All **218 launch pins** were unchanged at closure; the 200 frozen source files
+match the controls. The 1,478 resource samples have no OOM/task-limit events;
+peak combined RAM/swap was **40.71 GiB**. No applications were killed.
+Final hierarchy utilization is **202,114 LUTs, 55,213 FFs, 277.5 BRAM tiles
+and 47 DSPs**; placed footprint is **35,034 CLBs (82.12%)**.
+
+The worst path is **Q-PC[1] → EIP[0]**, 84 logic levels, **27.882 ns data
+delay = 7.057 ns logic + 20.825 ns wire (74.7%)**. MUXF remapping solved the
+matched performance run's routing-legality failure, but added LUT/CLB area
+and did not remove this long control path. A timing-focused placement trial
+is therefore the next controlled experiment, not a claim that placement alone
+will recover the remaining 2.983 ns.
+
+**Selected: `performance-retime-muxf-timing-route-first`.** Relative to this
+35.735983 MHz result, change only **AltSpreadLogic_high → ExtraTimingOpt**.
+Retain PerformanceOptimized synthesis, retiming on, normal RuntimeOptimized
+then explicit MUXF remapping, AlternateCLBRouting, optional physical stages
+off, eight threads, one job and unchanged 25/10 ns clocks. The earlier prepared
+AlternateRoutability timing-placement option is **not** being promoted: its
+comparison base differs. Every full run starts from source; no previous/probe
+checkpoint is an input. Helper commit **d229bb00** adds exact native-command,
+hook/count/order, thread, negative-case and closed-audit tests. **109 flow/path
+tests + 26 scope-policy tests pass (135 total)**; these are tooling tests, not
+CPU correctness or FPGA acceptance. A native small-design probe is running
+before the full build, under the single-Vivado rule.
+
+Closed evidence:
+`/home/yukidama/external/tmp/ventium-muxf-oct24.FLY6s5B5/performance-retime-muxf-route-first-r1/`:
+`closed.json`, `independent-closed-audit.json`, `pre-next-strategy-audit.json`
+and the **20-file `closed-tool-snapshot/`** preserved before helper changes.
+The process-free owner was stopped only after its real exit status was saved.
+Raw bitstream SHA256:
+`7de7faf730a31b41eee6c7750b0e849f7cf23eef761d71a4126d5c9bcf3ce88c`;
+final timing TSV:
+`3c61cbc05e85957802d278ae56d7a7c58127db5802dad4ea94e1f457295261ec`.
+Generated products remain local and are not published in Git.
+
+Verified gameplay remains the older **0.496499864 total U+V IPC baseline**,
+physical image **2886d24c**, cycles **625,021,130,428–629,480,208,865**.
+It predates these candidates; both candidates have **unmeasured gameplay IPC**.
+
+### Earlier MUXF trial observations (superseded by closure above)
 
 The fresh `performance-retime-routability-route-first-r1` trial ended with
 native exit **1** after **3 h 14 min**. Vivado explicitly reports **2,294
