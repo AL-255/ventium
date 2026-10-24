@@ -363,8 +363,21 @@ active unmeasured candidate. Neither isolated option has a gameplay result.
 
 ### Isolated timing-focused placement option — not launched
 
-While the Oct24 retiming run remains active, a conditional next option is
-prepared under `/home/yukidama/external/tmp/ventium-timing-place-oct24.OlAQ33bY/`.
+**Oct24 refresh:** the original bundle below is superseded by
+`/home/yukidama/external/tmp/ventium-timing-place-rebase-oct24.yuPDxJW4`, rebased
+on `465c427d` in isolation while the full remap build continues. It retains 25
+base helper/test files and nine changed candidates, preserving the remap
+integration and native Python `-I -B` repair. **71 flow/audit + 26 scope tests
+pass (97 total)**, with candidate imports independently checked. All **217**
+live-build input hashes still match. No live helper, RTL or build option was
+changed, and no second Vivado was launched. This option remains unselected:
+it changes only placement relative to the completed **34.293553 MHz retiming
+control**, not relative to the live remap candidate; its remap pass is disabled.
+Use the current remap result to choose the next comparison. Base-hash review,
+host-test reruns and a fresh native probe are still required before a full build.
+
+The original option was prepared while the Oct24 retiming run was active,
+under `/home/yukidama/external/tmp/ventium-timing-place-oct24.OlAQ33bY/`.
 `routability-retime-timing-route-first` changes only placement from
 `AltSpreadLogic_high` to `ExtraTimingOpt` relative to that live strategy.
 Synthesis retiming, mapping, router, disabled optional physical stages,
