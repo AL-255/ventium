@@ -152,6 +152,43 @@ Before/after utilization SHA256:
 `bade3329032b4625e304a0b56981fcf77cbdef3258a6ffe67352eda160f0b335` /
 `938c65a0bb5da615b446581b7db96fdfac2de3683e82dc95b712b6eedc62b990`.
 
+**Placement completed / routing started, Oct24 07:32 EDT:** placement took
+**13 min 11 s** versus the control's 13 min 14 s. Routing started at
+**07:30:50 EDT** with `AlternateCLBRouting`. The independent native-options
+audit now verifies the full executed sequence through route start: ordinary
+optimization, the separate remap pass, high-spread placement and the selected
+router, with eight-thread readback and no optional physical stages. This is
+not a completed-route audit. All **217 input pins** still match.
+
+The final native **placement** summary is **−4.373 ns global WNS**, versus
+**−3.470 ns** for the no-remap control. Its earlier internal placement estimates
+were −5.673 versus −5.076 ns. Thus the unplaced remap improvement has not become
+a placement timing improvement; final routing must decide its value. These
+global log lines do not identify the worst clock pair and are not converted
+into a claimed core frequency. The best completed routed core estimate remains
+**34.293553 MHz**, not a 40 MHz pass.
+
+| Placed resource | No-remap control | Remap candidate |
+|---|---:|---:|
+| LUTs | 192,601 | 193,043 |
+| Registers | 55,163 | 55,097 |
+| Occupied CLBs | 33,723 (79.05%) | 33,821 (79.28%) |
+| Unique control sets | 2,526 | 2,538 |
+| CARRY8 / BRAM tiles / DSPs | 3,379 / 277.5 / 47 | 3,379 / 277.5 / 47 |
+
+`post-place-comparison.json` retains the same-stage counts, native configuration
+audit and report hashes. Candidate placed-utilization SHA256:
+`561170ac3a934262c5c7615a82a4fdb2df3e06c8e0ad9b06e2340d4e2dfb3e6d`.
+
+Initial routing still reports **level-6 (64×64) congestion** and prioritizes
+legal routing over timing (`Route 35-447`), as did the completed control. This
+warning is not a terminal routing failure. The global-congestion tile fractions
+decrease from control to remap: north **4.62→3.94%**, south **7.53→6.47%**,
+east **7.48→7.04%**, west **7.44→4.81%**. However, the south/east short-congestion
+region sizes increase from 32×32 to 64×64. This mixed early result does not
+establish either routing legality or a timing gain. At 07:34 EDT the same native
+worker is live in rip-up/reroute, with zero recorded OOM/task-limit events.
+
 The read-only `fpga/analyze_setup_paths.py` now accepts **explicit**
 `--state Optimized` and `--state Routed` reports, including located/wrapped
 primitive rows and the native default max-delay command. Every path must still
@@ -430,6 +467,24 @@ image **2886d24c**, cycles **625,021,130,428–629,480,208,865**. It predates th
 active unmeasured candidate. Neither isolated option has a gameplay result.
 
 ### Isolated timing-focused placement option — not launched
+
+**Oct24 07:29 EDT, remap-retaining alternative:** the same scratch root now
+also contains `candidate-remap/`, `manifest-remap.json` and `README-remap.md`.
+Its `routability-retime-remap-timing-route-first` option changes only placement
+to `ExtraTimingOpt` relative to the live remap strategy, retaining the separate
+remap pass and its before/after evidence. The original `candidate/` and manifest
+are unchanged. Both options use the same verified 25-file base; nine files
+differ from that base, with no RTL changes or copies.
+
+All **78 flow/audit + 26 scope-policy host tests pass (104 total)**. The two
+remap variants share the complete rejection tests; the native operation audit
+requires the selected placer explicitly and still rejects missing, reordered,
+duplicated or substituted passes. Full/probe Tcl, closure dispatch, both thread
+profiles and the isolated-Python regression cover the new option. Module imports
+were checked against `candidate-remap/`, and all **217 active launch pins**
+remain unchanged. Neither option is promoted, natively probed or queued. This
+prepares an isolated placement comparison without prematurely discarding the
+small unplaced remap gain; the completed routed outcome must select its base.
 
 **Oct24 refresh:** the original bundle below is superseded by
 `/home/yukidama/external/tmp/ventium-timing-place-rebase-oct24.yuPDxJW4`, rebased
