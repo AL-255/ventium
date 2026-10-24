@@ -104,6 +104,27 @@ All 218 launch pins remain unchanged. `post-place-comparison.json` and
 `inspect-placement-comparison.py` retain the results in the Explore evidence
 root. The current run has no routed frequency, timing sign-off or hardware pass.
 
+**Initial routing comparison:** the entire initial congestion table and region
+block match the control, including level-6 global/timing congestion and **12.59%
+southbound long-wire congestion**. `initial-route-comparison.json` records this
+comparison. Intermediate overlap counts are not final route-legality evidence;
+Explore's completed timing result is still pending.
+
+**Current placement-archive exception review — Oct24 18:21 EDT:** read only the
+four XDC text members of this run's newly produced placement archive; no Tcl was
+executed, no Vivado process was started and no checkpoint became a build input.
+The archive stayed byte-identical. Its 37 false paths comprise **19 vendor
+asynchronous-reset paths, 16 vendor first-stage synchronizer paths and two
+dynamic RAM clock-to-output selectors**. All literal exception scopes are within
+the AXI converter, SmartConnect or reset IP, not the CPU. Ten Gray-pointer maximum
+delays retain five 10 ns and five 25 ns limits, with ten 10 ns bus-skew limits,
+matching the installed XPM source-period/minimum-period rules. No multicycle,
+clock-group, minimum-delay, disable-timing or case-analysis commands appear in
+these XDC members. `inspect-archive-exception-scope.py` and
+`placed-exception-scope.json` retain the checks and archive/member hashes.
+Dynamic RAM endpoint containment and final routed coverage remain unverified;
+this source/scope review is not complete exception review or timing sign-off.
+
 **Historical retiming cross-check:** the earlier retiming-off performance run
 has the same 200 source files and the same reported Q-PC[0] → FP-status[10]
 endpoints, but **90 logic levels / seven CARRY8 arcs / 38.445273 MHz unplaced**
