@@ -26,7 +26,7 @@ CLOCK_HASHES = {
 }
 STRATEGIES = ('performance-netdelay', 'routability-spread', 'performance-retime-bounded',
               'performance-bounded', 'performance-route-first', 'routability-route-first',
-              'routability-retime-route-first', 'performance-retime-routability-route-first', 'performance-retime-muxf-route-first', 'routability-retime-remap-route-first')
+              'routability-retime-route-first', 'performance-retime-routability-route-first', 'performance-retime-muxf-route-first', 'performance-retime-muxf-timing-route-first', 'routability-retime-remap-route-first')
 # Historical profiles remain interpretable; new launches use the user's Oct19
 # uncapped RAM/swap policy. None means no ceiling, not zero available memory.
 MEMORY_PROFILES = {'standard16': (16, 6), 'serial20': (20, 6), 'unbounded': (None, None)}
@@ -139,7 +139,7 @@ def implementation_policy(strategy, threads, memory_profile):
         raise ValueError('unsupported strategy')
     if threads == 8:
         return 8  # Explicit throughput profile; still one native job/family.
-    if strategy in ('performance-route-first', 'routability-route-first', 'routability-retime-route-first', 'performance-retime-routability-route-first', 'performance-retime-muxf-route-first', 'routability-retime-remap-route-first'):
+    if strategy in ('performance-route-first', 'routability-route-first', 'routability-retime-route-first', 'performance-retime-routability-route-first', 'performance-retime-muxf-route-first', 'performance-retime-muxf-timing-route-first', 'routability-retime-remap-route-first'):
         if threads != 1 or memory_profile not in ('serial20', 'unbounded'):
             raise ValueError('route-first requires serial synthesis and serial20 or unbounded memory')
         return 4

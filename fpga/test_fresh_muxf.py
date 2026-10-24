@@ -10,6 +10,7 @@ from run_fresh_strategy import implementation_policy
 from test_audit_fresh_strategy import SCRIPT, PROPS
 
 STRATEGY = 'performance-retime-muxf-route-first'
+TIMING_STRATEGY = 'performance-retime-muxf-timing-route-first'
 HOOK = '/fixture/fpga/fresh_opt_muxf_post.tcl'
 
 
@@ -133,14 +134,16 @@ proc set_property {args} {
 proc get_property {p o} {return $::props($o,$p)}
 '''
         for strategy in ('performance-route-first', 'routability-route-first',
-                         'routability-retime-route-first', 'performance-retime-routability-route-first', STRATEGY):
+                         'routability-retime-route-first', 'performance-retime-routability-route-first', STRATEGY, TIMING_STRATEGY):
             for profile, threads in (('serial_apr4', 4), ('parallel8', 8)):
                 with self.subTest(strategy=strategy, profile=profile), tempfile.TemporaryDirectory(prefix='remap-probe-config-') as td:
-                    expected_hook = str(directory/'fresh_opt_muxf_post.tcl') if strategy == STRATEGY else ''
+                    expected_hook = str(directory/'fresh_opt_muxf_post.tcl') if strategy in (STRATEGY, TIMING_STRATEGY) else ''
+                    expected_place = 'ExtraTimingOpt' if strategy == TIMING_STRATEGY else 'AltSpreadLogic_medium' if strategy == 'performance-route-first' else 'AltSpreadLogic_high'
                     check = (f'\nif {{[get_property STEPS.OPT_DESIGN.TCL.POST impl_1] ne {{{expected_hook}}}}} {{error "probe remap hook drift"}}\n'
                              'if {[get_property STEPS.OPT_DESIGN.ARGS.DIRECTIVE impl_1] ne "RuntimeOptimized"} {error "normal pass drift"}\n'
                              'if {[get_property {STEPS.OPT_DESIGN.ARGS.MORE OPTIONS} impl_1] ne ""} {error "extra opt switches"}\n'
-                             f'if {{$apr_threads != {threads}}} {{error "thread drift"}}\n')
+                             f'if {{$apr_threads != {threads}}} {{error "thread drift"}}\n'
+                             f'if {{[get_property STEPS.PLACE_DESIGN.ARGS.DIRECTIVE impl_1] ne "{expected_place}"}} {{error "placement drift"}}\n')
                     runner = Path(td)/'test.tcl'
                     runner.write_text(mocks+f'set argc 3\nset argv [list {{{td}/output}} {strategy} {profile}]\n'+prefix+check)
                     result = subprocess.run(['tclsh', str(runner)], capture_output=True, text=True, timeout=10)
