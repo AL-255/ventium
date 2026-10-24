@@ -1,6 +1,6 @@
 # APR strategy comparison — 40 MHz target
 
-## MUXF trial closed: 35.735983 MHz; timing-placement trial next — Oct24
+## MUXF trial closed: 35.735983 MHz; fresh timing-placement trial running — Oct24
 
 The fresh **`performance-retime-muxf-route-first-r1`** finished at **14:18:46
 EDT**, with both native and retained owner exit status **0**. The independent
@@ -49,8 +49,24 @@ comparison base differs. Every full run starts from source; no previous/probe
 checkpoint is an input. Helper commit **d229bb00** adds exact native-command,
 hook/count/order, thread, negative-case and closed-audit tests. **109 flow/path
 tests + 26 scope-policy tests pass (135 total)**; these are tooling tests, not
-CPU correctness or FPGA acceptance. A native small-design probe is running
-before the full build, under the single-Vivado rule.
+CPU correctness or FPGA acceptance.
+
+The **native small-design probe passed** at **14:28:10 EDT**: retained owner
+exit 0, eight unchanged input pins, exact ExtraTimingOpt/AlternateCLBRouting
+commands, eight threads per worker and MUXF7/8/9 counts **4/2/1 → 0/0/0**.
+Its process-free owner was closed after saving the real terminal status.
+No probe checkpoint becomes a full-build input.
+
+At **14:28:47 EDT**, fresh **`performance-retime-muxf-timing-route-first-r1`**
+started under `ventium-fresh-muxf-timing-oct24-r1.service`, invocation
+`a9cb4148d8304cb8b31bb1ad25c50281`. The sole Vivado scope invocation is
+`287a6d83222445c29f29665b2f0e729b`, RAM/swap infinity, task ceiling 256.
+All **218 launch pins** were rehashed unchanged; all **200 frozen files**
+match the completed MUXF comparator. The 159 defines, `cycle_mode=1`, UV-fast
+profile and CPU/cache RTL are unchanged; prior-checkpoint inputs are empty.
+Probe receipts and the active run live under
+`/home/yukidama/external/tmp/ventium-muxf-timing-oct24.xGYEEkFS/`.
+This new trial has no completed timing or gameplay result yet.
 
 Closed evidence:
 `/home/yukidama/external/tmp/ventium-muxf-oct24.FLY6s5B5/performance-retime-muxf-route-first-r1/`:
