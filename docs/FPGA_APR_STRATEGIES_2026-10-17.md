@@ -65,6 +65,26 @@ adds a poisoned-PYTHONHOME/PYTHONPATH regression. The explicit script directory
 is still inserted for the independent auditor. The next probe must rebuild
 its fixture in a new output directory; no old probe checkpoint is reused.
 
+The repaired **native probe r2 passed**, exit 0, from **05:40:52–05:42:26 EDT**,
+using commit `aacfb98f`. Both worker readbacks were eight, the actual two-pass
+optimization order passed the independent audit inside Vivado's environment,
+and all four before/after reports were retained and hashed. All seven probe
+inputs were unchanged. Its owner invocation was
+`3e4bb42d68614d36affa8e30cf69f311`; the family exited before the full build.
+Probe log SHA256: `db333e0bfc5ab0228e403ed4bd4e5d2c4722a747ff1530bb4b98cb25e47a4898`.
+This qualifies the tooling contract, not full-core remapping QoR or hardware.
+
+At **05:44:00 EDT**, full fresh **`routability-retime-remap-route-first-r1`**
+started under `/home/yukidama/external/tmp/ventium-remap-oct24.FUH5sZcw/`, owner
+`ventium-fresh-remap-oct24-r1.service`, invocation
+`45ab9c0aab3d4f79a86ce0117c746c94`. Its **217 launch pins** include the remap
+hook. All **200 frozen source/metadata hashes exactly match** the completed
+retiming control; there are 159 defines, `cycle_mode=1`, byte-identical CPU/cache
+RTL, 40 MHz core/100 MHz AXI constraints and an empty prior-checkpoint input list.
+The sole Vivado scope is uncapped in RAM/swap, with eight internal threads per
+stage, one native job and 256-task headroom. No candidate result exists yet;
+the completed 34.293553 MHz result above is its comparison baseline.
+
 Final utilization is **192,601 LUTs, 55,163 FFs, 277.5 BRAM tiles and 47 DSPs**.
 All 1,878 resource samples have zero OOM/task-limit events; peak simultaneous
 RAM+swap was **44.04 GiB**, peak task count 79. Individual RAM/swap peaks are
