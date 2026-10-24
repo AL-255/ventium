@@ -39,6 +39,25 @@ Candidate gameplay is **unmeasured**. The older physical baseline is
 **0.496499864 total U+V IPC**, image **2886d24c**, cycles
 **625,021,130,428–629,480,208,865**; it predates this candidate.
 
+**Saved-report geometry check during synthesis:** all twenty routed critical
+paths in each of the completed MUXF controls were parsed without running
+Vivado or loading a checkpoint. In the best control's worst path, fourteen
+connections with source-to-sink slice-grid L1 span above 16 account for
+**8.065 ns** of the **20.823 ns** sum of printed wire-delay rows; the remaining
+71 connections account for **12.758 ns**. The report's independently rounded
+wire summary is 20.825 ns. Long placement spans are therefore not the only
+source of accumulated wire delay.
+
+The rejected ExtraTimingOpt worst path has a smaller summed grid span
+(**755 → 712**) but greater reported wire delay (**20.825 → 21.311 ns**).
+Slice-grid coordinates are not physical micron distances or routed lengths,
+and these paths start at different Q-PC bits; this is not matched-arc causal
+attribution or a chip-wide congestion measure. It is another reason not to
+accept a compact placement or fanout count as a substitute for final timing.
+The read-only `inspect-routed-geometry.py` and hashed
+`routed-geometry-comparison.json` are retained in the Explore evidence root.
+No live build inputs were edited; the current routing comparison continues.
+
 ## Timing placement rejected: 35.203830 MHz — Oct24 16:42 EDT
 
 Fresh `performance-retime-muxf-timing-route-first-r1` closed with native and
