@@ -1,6 +1,6 @@
 # APR strategy comparison — 40 MHz target
 
-## Remap rejected; performance mapping selected — Oct24 08:31 EDT
+## Remap rejected; fresh performance-mapping run launched — Oct24 08:36 EDT
 
 The fresh `routability-retime-remap-route-first-r1` run closed successfully
 as a tool run, but **failed the 40 MHz timing target**. Its conditional routed
@@ -63,6 +63,28 @@ native probe is required before the full build; neither probe nor prior-run
 checkpoints may become inputs to it. No CPU/cache RTL, constraints, dirty local
 work or board state was changed. The placement-only alternatives remain
 unselected and their preparation bases must be refreshed before later use.
+
+The **native tooling probe passed** at **08:35:47 EDT**, exit 0, under
+`/home/yukidama/external/tmp/ventium-perf-route-oct24.TEHtcbXg/native-probe`.
+All seven inputs remained unchanged; the actual synthesis and implementation
+workers used eight threads and the intended directives. The independent probe
+receipt is `probe-closed.json`; log SHA256 is
+`10c6e6dc1fdf87a0d1e433d185e1cf69e7f5d20ea9a0e76a2288fde78a970a41`.
+This tiny fixture proves tooling configuration, not full-core QoR.
+
+At **08:36:36 EDT**, the full fresh
+`performance-retime-routability-route-first-r1` build started in the same
+scratch parent, using commit **3f71f008**. Owner:
+`ventium-fresh-perf-route-oct24-r1.service`, invocation
+`0608cca87ba74d14903ce112a7982f86`; the sole Vivado scope invocation is
+`078f2e6fcd5c4fd585cd170a9076b169`. All **217 launch pins** were rehashed
+unchanged, and all **200 frozen source/metadata hashes match the retiming
+control**. The profile retains 159 defines, `cycle_mode=1`, full P5 L1s and
+unchanged 40 MHz core / 100 MHz AXI constraints. Actual native synthesis is
+`PerformanceOptimized -global_retiming on`, with an eight-thread readback;
+its configuration audit passes. Prior-checkpoint inputs are empty, cache and
+incremental reuse are disabled, and only one synthesis/APR family is running.
+There is **no new synthesis/routed timing result yet**.
 
 Verified gameplay remains the **0.496499864 total U+V IPC baseline**, physical
 image **2886d24c**, cycles **625,021,130,428–629,480,208,865**. It predates these
