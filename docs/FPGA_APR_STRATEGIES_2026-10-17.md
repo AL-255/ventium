@@ -70,6 +70,20 @@ previously observed on the failed control is not current-candidate coverage.
 `exceptions_reviewed`, timing sign-off and hardware acceptance remain false.
 No checkpoint was opened and no live helper or constraint was changed.
 
+**Synthesis completed; implementation started — Oct24 17:58 EDT:** the native
+synthesis command finished successfully in **1h03m23s** (control: 59m17s),
+with zero errors/critical warnings and the same printed warning histogram.
+Its checksum **`7765fc10`**, nine reported utilization totals and reported
+unplaced core setup path all match the control. All **218 launch pins** remain
+unchanged and all **200 frozen source/metadata files** still match. The
+unplaced estimate remains **38.067684 MHz**, not a routed result or sign-off.
+`inspect-synthesis-comparison.py` and `post-synth-comparison.json` in the Explore
+evidence root retain the comparison and report hashes. Native synthesis exited
+normally, and the existing controller launched implementation at **17:58:18
+EDT**; this was not a restarted run. The same single Vivado scope remains live.
+The remaining parent and implementation worker allow CPUs 0–31; no memory/swap
+cap was introduced. Placement, routing and full-result acceptance remain open.
+
 ## Timing placement rejected: 35.203830 MHz — Oct24 16:42 EDT
 
 Fresh `performance-retime-muxf-timing-route-first-r1` closed with native and
