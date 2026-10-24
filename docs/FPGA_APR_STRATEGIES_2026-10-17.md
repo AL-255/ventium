@@ -229,6 +229,37 @@ The configured one-thread synthesis policy, not an observed affinity/quota
 restriction, limits available internal parallelism. An eight-thread maximum
 does not promise eightfold speedup or parallel execution of every tool phase.
 
+### Isolated retiming option and closure-audit correction — October 24
+
+While the existing router continues, a separate **unapplied, unlaunched**
+`routability-retime-route-first` option is prepared under
+`/home/yukidama/external/tmp/ventium-retime-route-first-oct24.Isgtz9ma/`.
+It retains the prepared eight-thread default and current routability
+synthesis/place/router settings, but explicitly enables synthesis retiming.
+Optional pre/post-route physical optimization stays disabled. No RTL, clock
+constraint, exception or source-checkpoint policy changes. Native option support,
+actual retiming moves and full-core benefit still require a fresh probe/run
+after the active family exits; this is not a frequency result.
+
+A new regression exposed an independent closure-checker omission:
+`audit_closed` did not call `audit_impl` for `routability-route-first`.
+The launcher already checks every strategy, and the live native options were
+rechecked directly, but the independent checker could accept changed
+implementation options. Two negative fixtures failed before the staged fix;
+they now reject extra physical operations, changed placement/router directives
+and enabled optional-stage properties. Both routability variants are covered.
+**54 flow/audit + 26 scope tests pass (80 total)**. These are host-tool tests,
+not native implementation or processor acceptance.
+
+At **01:24 EDT**, all **215 live launch pins** remained unchanged. The current
+router was active in rip-up/reroute, with intermediate overlaps decreasing
+261,135 → 58,455 → 16,110 → 5,820; congestion level 6 remained reported.
+This is not a legal-route result, and no 40 MHz sign-off is claimed. The staged
+fix can audit closure read-only without altering the running helpers or their
+receipts. Current gameplay baseline remains **0.496499864 total U+V IPC** on
+`2886d24c`, cycles **625,021,130,428–629,480,208,865**; it predates this
+unmeasured candidate.
+
 ## Resumed on the migrated host — 2026-10-22
 
 The user authorized resuming **fresh synthesis plus APR**, with no previous
