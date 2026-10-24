@@ -145,6 +145,22 @@ Clocks remain **25 ns core / 10 ns AXI**. Unplaced hold violations also remain;
 neither estimate is a routed Fmax or sign-off. Final timing, clock coverage,
 exceptions, routing legality and physical acceptance remain open.
 
+Inspection of this exact synthesis path on Oct24 identifies a long serial
+cone, not just one high-fanout net: EIP passes through fetch/decode and pairing,
+`mc_fresh_read_prime`, address/translation selection, `mc_prime_offer`, memory
+readiness and `pipe_v_pair_accept` before the V-owner register. Of its **100
+data-net arcs**, **64 have fanout at most four**, contributing **13.479 ns**
+of the **23.763 ns estimated net delay**. The 13 nets with fanout at least 64
+contribute 4.052 ns; maximum fanout is 1,700. Counts use the data section only,
+from the source Q through destination D in `synth-timing.rpt` (lines 424–627).
+Thus the 81.97% estimated wiring fraction is not, by itself, evidence that
+high-fanout replication or congestion relief will close this path. Many serial
+low-fanout hops also accumulate delay. The final routed paths must distinguish
+this from physical detours. Retiming remains an experiment, and must demonstrate
+actual register moves and improved timing; its option being enabled is not a
+result. This inspection does not prove a false path or authorize any exception,
+latency change, lost pairing, or CPU RTL modification.
+
 APR started at **00:57:02 EDT**. Its emitted native script and properties were
 independently checked: `RuntimeOptimized` optimization, `AltSpreadLogic_high`
 placement, `AlternateCLBRouting`, four internal threads, no optional pre/post
