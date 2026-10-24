@@ -154,6 +154,31 @@ synthesis, not any older trial. Worker PID 125693 is in the same exclusive
 scope and has affinity 0–31. At placement startup there are no OOM or task-limit
 events. No routed result, replacement bitstream or gameplay measurement exists.
 
+Placement subsequently completed in **15 min 15 s** and the same worker entered
+`AlternateCLBRouting` (four threads). Placed use is **192,824 LUTs**, **33,388
+occupied CLBs (78.27%)**, 55,177 registers, 3,379 CARRY8 and 2,452 control sets.
+The failed performance trial used 185,011 LUTs and 32,271 CLBs (75.65%).
+Post-placement global WNS is **−3.587 ns**, versus −1.385 ns in that failed trial;
+this clock-aggregated placer summary is **not** converted into a domain Fmax.
+The latest candidate clock-specific estimate remains the unplaced 34.246575 MHz
+above, not routed sign-off.
+
+Native post-placement estimated congestion region sizes (global / long / short):
+
+| Direction | Failed performance trial | Current routability trial |
+|---|---|---|
+| North | 32×32 / 32×32 / 16×16 | 16×16 / 32×32 / 16×16 |
+| South | 16×16 / 32×32 / 16×16 | 16×16 / 32×32 / 8×8 |
+| East | 32×32 / 32×32 / 32×32 | 16×16 / 32×32 / 32×32 |
+| West | 16×16 / 8×8 / 32×32 | 8×8 / 16×16 / 32×32 |
+
+The global regions are smaller in three directions, but westward long-wire
+congestion is worse. These are region-size indicators, not congestion
+percentages or a legal-route result. The changed synthesis/placement/router
+settings cannot be credited separately from this combined comparison. Router
+legality, runtime and final clock-pair timing must decide whether the tradeoff
+helps. No OOM or task-limit event was recorded through initial routing.
+
 Current-run evidence under `build/`:
 
 - `rk_ao486_system/rk_ao486_system.runs/synth_1/rk_ao486_bd_wrapper_utilization_synth.rpt`,
@@ -162,6 +187,8 @@ Current-run evidence under `build/`:
   `8b2eb5188038f412bddb734f1556bbe29b62203a7a48235fe32a250bb8be8773`.
 - `synth-clocks.tsv`, SHA256
   `870f414ded70ac63dedb4a92d89b654237dac82f156e7bcb5871f0e452f55d81`.
+- `rk_ao486_system/rk_ao486_system.runs/impl_1/rk_ao486_bd_wrapper_utilization_placed.rpt`,
+  SHA256 `713343fb3411a01f9337c34cb5d4b46c5b9f6d8f5b7b63400316938a041f2442`.
 
 Verified gameplay baseline remains **0.496499864 total U+V IPC**, `2886d24c`,
 cycles **625,021,130,428–629,480,208,865**. It predates this unmeasured candidate.
