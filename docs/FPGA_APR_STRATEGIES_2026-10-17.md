@@ -1,5 +1,61 @@
 # APR strategy comparison — 40 MHz target
 
+## Timing placement rejected: 35.203830 MHz — Oct24 16:42 EDT
+
+Fresh `performance-retime-muxf-timing-route-first-r1` closed with native and
+retained owner exit **0**. The independent closure audit verifies source,
+configuration, products, routing and coverage, but **40 MHz timing fails**.
+Its conditional routed core estimate is **35.203830177 MHz**, **1.49% below**
+the **35.735982561 MHz** high-spread MUXF control. Do not promote ExtraTimingOpt.
+
+| Final clock pair | Setup slack | Hold slack |
+|---|---:|---:|
+| Core → core, 25 ns | −3.406 ns | +0.001 ns |
+| AXI → AXI, 10 ns | +5.678 ns | +0.022 ns |
+| Core → AXI, 5 ns relationship | +1.721 ns | +0.594 ns |
+| AXI → core, 5 ns relationship | +1.242 ns | +1.942 ns |
+
+All **266,730 routable nets** are fully routed, with zero routing errors;
+unwaived final DRC has no errors/critical warnings. Hold and pulse checks pass,
+all ten bus-skew checks pass (minimum +9.506 ns), and native CDC reports all
+paths safely timed. Internal timing coverage is complete; the only missing
+output delays are the same four status LEDs. There are **54,633 failing setup
+endpoints**, TNS **−91,338.227 ns**. This is not timing or hardware acceptance.
+
+Full elapsed time was **2h13m17s**; implementation through final reports took
+**1h12m11s**. Routing took **52m46s**, versus 40m30s in the control. The final
+worst path is **Q-PC[2] → EIP[0]**, 85 logic levels: **28.249 ns data delay =
+6.939 ns logic + 21.311 ns wire**. The control's worst path starts at Q-PC[1],
+not the identical source bit: its corresponding totals are 27.882, 7.057 and
+20.825 ns. Thus these are worst-path comparisons, not a matched-arc attribution.
+
+All **218 launch pins** remain unchanged; all **200 frozen source/metadata
+files** match the control. The 1,597 resource samples record zero OOM/task-limit
+events and peak combined RAM/swap **40.54 GiB**. The owner was stopped only after
+capturing its real terminal status and verifying the Vivado family had exited.
+Twenty helper files were archived before any next-strategy edits. Evidence:
+`/home/yukidama/external/tmp/ventium-muxf-timing-oct24.xGYEEkFS/performance-retime-muxf-timing-route-first-r1/`,
+including `independent-closed-audit.json`, `pre-next-strategy-audit.json`,
+`native-routed-stage-comparison.json` and `closed-tool-snapshot/`.
+Raw bitstream SHA256:
+`51177534de1cb370a3f52532616486cbab040a23299b02277bc2e2be4a151709`.
+
+**Next selected experiment: timing-oriented routing.** Retain the best control's
+PerformanceOptimized synthesis, retiming, MUXF remapping, AltSpreadLogic_high
+placement, disabled standalone physical stages and eight-thread policy. Change
+only **AlternateCLBRouting → Explore**. The installed Vivado 2025.2 command
+reference describes Explore as trying timing-driven critical-path alternatives
+after initial routing. This is a hypothesis for the wire-dominated path, not a
+promised gain. Require tooling tests and a native probe, then a full fresh-source
+build with unchanged 25/10 ns clocks; no previous/probe checkpoint is an input.
+The RQS ML-strategy predictor is not a shortcut for this custom recipe: AMD
+requires a fully routed Default/Explore reference with physical optimization.
+[AMD ML strategy requirements](https://docs.amd.com/r/2025.2-English/ug906-vivado-design-analysis/ML-Strategy-Availability).
+
+Gameplay is **unmeasured** for this rejected candidate and any next candidate.
+The older physical baseline remains **0.496499864 total U+V IPC**, image
+**2886d24c**, cycles **625,021,130,428–629,480,208,865**; it predates these builds.
+
 ## MUXF trial closed: 35.735983 MHz; fresh timing-placement trial running — Oct24
 
 The fresh **`performance-retime-muxf-route-first-r1`** finished at **14:18:46
