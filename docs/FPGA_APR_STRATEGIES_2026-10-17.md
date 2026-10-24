@@ -1,5 +1,46 @@
 # APR strategy comparison — 40 MHz target
 
+## Performance mapping rejected: illegal routing — Oct24 11:50 EDT
+
+The fresh `performance-retime-routability-route-first-r1` trial ended with
+native exit **1** after **3 h 14 min**. Vivado explicitly reports **2,294
+overlapping routing nodes** and **2,685 signals affected by congestion**.
+Native routing took **1 h 56 min 29 s**, versus the best control's 42 min 42 s.
+There is **no valid routed frequency or accepted bitstream** for this trial.
+Its 38.067684 MHz synthesis estimate did not establish implementation closure.
+The best completed conditional estimate remains **34.293552812 MHz**, below
+the **40 MHz** goal; it is not timing or hardware sign-off.
+
+Final global vertical/horizontal routing utilization is only 30.6858%/28.9755%,
+but local directional peaks reach **96.2984% east**, **93.0257% south**,
+87.8901% west and 86.0548% north. This is a local congestion failure, not an
+OOM or controller deadline. The router's zero unrouted/partially-routed net
+counts and the subsequent generic DRC's zero errors do **not** override its
+explicit overlap/legality failure.
+
+All **217 launch pins** are unchanged; all **200 frozen source/metadata files**
+were rehashed and match the retiming control. Independent synthesis and
+implementation configuration audits confirm the intended eight-thread policy,
+retiming on, PerformanceOptimized mapping, high-spread placement and alternate
+CLB routing. The completed-run acceptance auditor correctly rejects this run
+as a native failure; it was not weakened. Across **2,325 resource samples**,
+peak combined RAM/swap was **40.78 GiB**, sampled peak tasks 65, with no OOM or
+task-limit events. The owner and entire Vivado family exited before inspection.
+
+Evidence in the run directory includes `pre-next-strategy-audit.json`, the
+**19-file `closed-tool-snapshot/`**, native logs and the diagnostic
+`rk_ao486_bd_wrapper_routed_error.dcp` (SHA256
+`39a8070af501fddc9b11f6152ec47d8476bbc15ab9d3159272c4fc6d0b825059`).
+A separately owned read-only inspection is collecting actual grid/cell
+membership, exception-selector coverage, congestion and QoR recommendations.
+That failed checkpoint is **inspection data only**, never a subsequent build
+input. The prepared MUXF-remapping experiment remains pending this inspection;
+every future full trial must start from frozen source again.
+
+Verified gameplay remains **0.496499864 total U+V IPC**, image **2886d24c**,
+cycles **625,021,130,428–629,480,208,865**. This baseline predates the failed
+candidate, whose gameplay is **unmeasured**.
+
 ## Remap rejected; fresh performance-mapping run launched — Oct24 08:36 EDT
 
 The fresh `routability-retime-remap-route-first-r1` run closed successfully
