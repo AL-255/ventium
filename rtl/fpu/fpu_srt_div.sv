@@ -75,6 +75,7 @@ module fpu_srt_div
   logic [79:0]         S, C;             // carry-save partial remainder
   logic signed [127:0] qacc;            // quotient accumulator
   logic [6:0]          k;                // divide step counter 0..NSTEP
+  logic [6:0]          div_last_k;       // PC-dependent terminal divide step (15/29/35)
 
   // ---- sqrt state (radix-4 SRT, shares S/C/k with the divide) ---------------
   // twoR = 2*R * 2^72: the on-the-fly partial root, doubled (the SRT "divisor").
@@ -414,7 +415,7 @@ module fpu_srt_div
   // ==========================================================================
   always_ff @(posedge clk) begin
     if (!rst_n) begin
-      st <= ST_IDLE; done_q <= 1'b0; k <= '0;
+      st <= ST_IDLE; done_q <= 1'b0; k <= '0; div_last_k <= 7'(NSTEP-1);
       round_uq_q <= 128'd0; round_sh_q <= 32'sd70;
       rem_q012 <= 3'd0; rem_c2 <= 1'b0; rem_ie <= 1'b0;
       rounded_up <= 1'b0;
@@ -580,6 +581,14 @@ module fpu_srt_div
 `ifndef VEN_SRT_REM_OPERAND_SPLIT
                 C    <= 80'd0;
 `endif
+                // Real Pentium P54C early-terminates FDIV according to FCW.PC:
+                //   PC=00 (24b single): 16 radix-4 steps -> 19 clocks (32 q bits)
+                //   PC=10 (53b double): 30 radix-4 steps -> 33 clocks (60 q bits)
+                //   PC=11/01 (64b ext): 36 radix-4 steps -> 39 clocks (72 q bits)
+                // ST_DFIN's floor-window + exact residual sign + fx_round_pack_c1
+                // produces bit-identical floatx80, C1, OE, UE, and PE across all RC.
+                div_last_k <= (pc == 2'b00) ? 7'd15 :
+                              (pc == 2'b10) ? 7'd29 : 7'(NSTEP-1);
                 k    <= '0;
                 st   <= ST_DRUN;
               end
@@ -591,7 +600,7 @@ module fpu_srt_div
           qacc <= qacc + (qext <<< (70 - 2*int'(k)));
           S    <= sxor << 2;
           C    <= cmaj << 2;
-          if (k == NSTEP-1) begin
+          if (k == div_last_k) begin
             round_uq_q <= qacc + (qext <<< (70 - 2*int'(k)));
             round_sh_q <= 32'sd70;
             st         <= ST_DFIN;

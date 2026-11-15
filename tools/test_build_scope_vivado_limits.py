@@ -256,6 +256,17 @@ class VivadoLimitPolicyTests(unittest.TestCase):
             self.assertEqual(properties, ['MemoryMax=20G', 'TasksMax=128',
                 'KillMode=control-group', 'MemorySwapMax=6G'])
 
+    def test_parallel8_uses_uncapped_memory_and_fixed_helper_headroom(self):
+        for tasks in (None, '48', '128', '256', 'max', '1000000'):
+            result, properties = self.run_scope(memory_policy='unbounded',
+                task_profile='parallel8', tasks=tasks)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(properties, ['MemoryMax=infinity', 'TasksMax=256',
+                'KillMode=control-group', 'MemorySwapMax=infinity'])
+        result, properties = self.run_scope(memory_policy='bounded', task_profile='parallel8')
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertEqual(properties, [])
+
     def test_oversized_and_huge_requests_are_visibly_clamped(self):
         result, properties = self.run_scope(memory="999999999999999999999G", swap="999999999999999999999G")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -402,7 +413,12 @@ class VivadoLimitPolicyTests(unittest.TestCase):
             ('max', True, 'serial_apr4', 128, 0, 'unbounded'),
             ('max', False, 'serial_apr4', 128, 1, 'unbounded'),
             (16*1024**3, True, 'serial_apr4', 128, 1, 'unbounded'),
-            ('max', True, 'serial_apr4', 129, 1, 'unbounded')]
+            ('max', True, 'serial_apr4', 129, 1, 'unbounded'),
+            ('max', True, 'parallel8', 256, 0, 'unbounded'),
+            ('max', False, 'parallel8', 256, 1, 'unbounded'),
+            ('max', True, 'parallel8', 257, 1, 'unbounded'),
+            (16*1024**3, True, 'parallel8', 256, 1, 'unbounded'),
+            ('max', True, 'parallel8', 256, 1, 'bounded')]
         for high, inherited_lock, task_profile, tasks, expected, memory_policy in cases:
             with self.subTest(memory_high=high, inherited_lock=inherited_lock, task_profile=task_profile, tasks=tasks):
                 with tempfile.TemporaryDirectory(prefix="ventium-build-scope-nested-test-") as temp_name:
@@ -433,6 +449,7 @@ class VivadoLimitPolicyTests(unittest.TestCase):
                     script = (
                         'set -euo pipefail\nvivado_memory_max=20G\nvivado_swap_default=2G\n'
                         'vivado_swap_max=8G\nvivado_tasks_max=48\nvivado_parallel2_tasks_max=128\n'
+                        'vivado_parallel8_tasks_max=256\n'
                         'lock_path="$BUILD_SCOPE_TEST_LOCK"\n' + functions + "\nscope_is_active\n"
                     )
                     with lock_path.open("w") as held_lock:

@@ -67,10 +67,20 @@ assign p54_prefix_ex_shape_ok = 1'b0;
 // Next full16B window is at most31B from the older start (old length<=15),
 // so the existing consecutive A/B ports suffice. Residency alone is never a
 // permit: verify returned set+way+collision identities on the CONSUME edge.
+`ifdef VEN_IC_RESIDENCY_SPAN
+`ifndef VEN_IC_PREFIX_SPAN
+  initial $fatal(1, "VEN_IC_RESIDENCY_SPAN with VEN_P54_PREFIX_EX_CHAIN requires VEN_IC_PREFIX_SPAN");
+`endif
+assign p54_prefix_ex_window_ok =
+    (p54_prefix_ex_flin[11:0] <= 12'(4096 - IWORDS*4)) &&
+    ic_prefix_a_buffered &&
+    ic_prefix_buffered_offset(6'(IWORDS*4 - 1));
+`else
 assign p54_prefix_ex_window_ok =
     (p54_prefix_ex_flin[11:0] <= 12'(4096 - IWORDS*4)) &&
     ic_buffered(p54_prefix_ex_flin) &&
     ic_buffered(p54_prefix_ex_flin + 32'(IWORDS*4 - 1));
+`endif
 `else
 assign p54_prefix_ex_window_ok = 1'b0;
 `endif

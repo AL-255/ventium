@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
-"""Check or build the source profile of the board-tested 2886d24c image.
+"""Check or build the source profile of the board-qualified c0e3fe43 FPGA image.
 
-Checking never invokes Vivado. Building creates a fresh project: the original
-physical layout is not distributed and a new implementation needs acceptance.
+Checking never invokes Vivado. Building creates a fresh source-only Vivado
+2025.2 project using the exact 161-define hardware profile and timing-closure
+strategy (PerformanceOptimized + global retiming + opt_design -muxf_remap +
+AltSpreadLogic_high + AlternateCLBRouting) that achieved 40.264 MHz post-route
+STA sign-off; any new build still requires its own timing/board audit.
 """
 import argparse
 import hashlib
@@ -14,7 +17,9 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parent.parent
-MANIFEST = ROOT / 'fpga/known_good_2886d24c.json'
+MANIFEST = ROOT / 'fpga/known_good_c0e3fe43.json'
+DEFINE_COUNT = 161
+TASK_PROFILES = {1: 'serial', 2: 'parallel2', 8: 'parallel8'}
 
 
 def sha(path):
@@ -42,27 +47,39 @@ def verify(root=ROOT, manifest=MANIFEST):
             if line not in data['files'] or not (root / line).is_file():
                 raise ValueError(f'unpinned filelist input: {line}')
     defines = (root / 'fpga/known_good_defines.txt').read_text().splitlines()
-    if len(defines) != 159 or len(set(defines)) != 159:
-        raise ValueError('expected the exact 159-define hardware profile')
-    required = {'VEN_FE_PIPE', 'VEN_SYS_FASTPATH', 'VEN_SYS_FASTPATH_RELOC',
-                'VEN_SYS_FASTLOAD_FLAT', 'VEN_SYS_FASTLOAD_BOUNDED',
-                'VEN_SYS_FASTSTORE_FLAT', 'VEN_FP_SHARED', 'VEN_FP_PIPE2'}
+    if len(defines) != DEFINE_COUNT or len(set(defines)) != DEFINE_COUNT:
+        raise ValueError(f'expected the exact {DEFINE_COUNT}-define hardware profile')
+    required = {
+        'VEN_FE_PIPE', 'VEN_SYS_FASTPATH', 'VEN_SYS_FASTPATH_RELOC',
+        'VEN_SYS_FASTLOAD_FLAT', 'VEN_SYS_FASTLOAD_BOUNDED',
+        'VEN_SYS_FASTSTORE_FLAT', 'VEN_FP_SHARED', 'VEN_FP_PIPE2',
+        'VEN_ITLB_ASSOC_4WAY', 'VEN_REP_STOS_STREAM', 'VEN_DDR_POSTED',
+    }
     if not required.issubset(defines) or {'VEN_CACHE_HALF', 'VEN_IC_NARROWB'} & set(defines):
         raise ValueError('UV/fast-pipe/full-P5-cache contract failed')
     return data
 
 
-def environment(root, output, vivado_root):
+def environment(root, output, vivado_root, threads=8):
+    if threads not in TASK_PROFILES:
+        raise ValueError(f'unsupported Vivado thread count: {threads}')
     env = {k: v for k, v in os.environ.items()
            if not k.startswith(('VEN_', 'VENTIUM_', 'TB_', 'AXI_'))}
-    env.update(TMPDIR=str(output / 'tmp'), VEN_FPGA_JOBS='1',
-               VEN_FPGA_CORE_MHZ='40', VEN_FPGA_BUILD_PROFILE='logic_only',
-               VEN_FPGA_SKIP_PRESET='1', VEN_FPGA_SOURCE_ROOT=str(root),
-               VEN_FPGA_FLOW_ROOT=str(root / 'fpga/rk'),
-               VEN_FPGA_DEFINE_FILE=str(root / 'fpga/known_good_defines.txt'),
-               VENTIUM_VIVADO_ROOT=str(vivado_root),
-               VENTIUM_VIVADO_MEMORY_POLICY='unbounded',
-               VENTIUM_VIVADO_LOCK_DIR=str(Path('/tmp')))
+    env.update(
+        TMPDIR=str(output / 'tmp'),
+        VEN_FPGA_JOBS='1',
+        VEN_FPGA_TOOL_THREADS=str(threads),
+        VEN_FPGA_CORE_MHZ='40',
+        VEN_FPGA_BUILD_PROFILE='retime_muxf_route_first',
+        VEN_FPGA_SKIP_PRESET='1',
+        VEN_FPGA_SOURCE_ROOT=str(root),
+        VEN_FPGA_FLOW_ROOT=str(root / 'fpga/rk'),
+        VEN_FPGA_DEFINE_FILE=str(root / 'fpga/known_good_defines.txt'),
+        VENTIUM_VIVADO_ROOT=str(vivado_root),
+        VENTIUM_VIVADO_MEMORY_POLICY='unbounded',
+        VENTIUM_VIVADO_TASK_PROFILE=TASK_PROFILES[threads],
+        VENTIUM_VIVADO_LOCK_DIR=str(Path('/tmp')),
+    )
     return env
 
 
@@ -73,9 +90,15 @@ def main():
     action.add_argument('--build', action='store_true', help='explicitly start fresh Vivado build')
     parser.add_argument('--output', type=Path, help='new output directory outside the checkout')
     parser.add_argument('--vivado-root', type=Path, help='Vivado 2025.2 directory containing settings64.sh')
+    parser.add_argument('--threads', type=int, choices=(1, 2, 8), default=8,
+                        help='Vivado maxThreads within the single guarded run (default: 8, matching c0e3fe43)')
     args = parser.parse_args()
     data = verify()
-    print(f"SOURCE-CHECK-OK: {len(data['files'])} pinned files, 159 defines, 40 MHz target", flush=True)
+    print(
+        f"SOURCE-CHECK-OK: {len(data['files'])} pinned files, {DEFINE_COUNT} defines, "
+        f"40 MHz target (reference image {data['reference_bitstream_sha256'][:8]})",
+        flush=True,
+    )
     if args.check:
         return
     if args.output is None or args.vivado_root is None:
@@ -97,10 +120,10 @@ def main():
     (output / 'tmp').mkdir()
     receipt = dict(command=command, source_manifest_sha256=sha(MANIFEST),
                    reference_image=data['reference_bitstream_sha256'],
-                   inputs=dict(data['files']), hardware_acceptance=False,
-                   timing_signoff=False, gameplay_ipc=None)
+                   threads=args.threads, inputs=dict(data['files']),
+                   hardware_acceptance=False, timing_signoff=False, gameplay_ipc=None)
     (output / 'started.json').write_text(json.dumps(receipt, indent=2) + '\n')
-    code = subprocess.call(command, cwd=output, env=environment(ROOT, output, vendor))
+    code = subprocess.call(command, cwd=output, env=environment(ROOT, output, vendor, args.threads))
     changed = [n for n, h in data['files'].items() if not (ROOT/n).is_file() or sha(ROOT/n) != h]
     products = {p.name: sha(p) for p in (output / 'build').glob('*.bit*') if p.is_file()}
     complete = (output / 'native.log').is_file() and 'PROGRAMMABLE-CLOCK-BUILD-COMPLETE' in (output / 'native.log').read_text(errors='replace')
@@ -108,7 +131,7 @@ def main():
     (output / 'closed.json').write_text(json.dumps(dict(native_exit=code,
         source_changed=changed, products=products, build_completed=passed,
         hardware_acceptance=False, timing_signoff=False, gameplay_ipc=None), indent=2) + '\n')
-    print('BUILD-COMPLETE; inspect timing and validate on board' if passed else 'BUILD-FAILED; retain native.log')
+    print('BUILD-COMPLETE; inspect timing_summary.rpt and validate on board' if passed else 'BUILD-FAILED; retain native.log')
     sys.exit(0 if passed else 1)
 
 

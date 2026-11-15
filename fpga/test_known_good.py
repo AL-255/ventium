@@ -11,7 +11,9 @@ import build_known_good as build
 
 class KnownGood(unittest.TestCase):
     def test_source_closure(self):
-        self.assertEqual(build.verify()['reference_bitstream_sha256'][:8], '2886d24c')
+        data = build.verify()
+        self.assertEqual(data['reference_bitstream_sha256'][:8], 'c0e3fe43')
+        self.assertEqual(data['defines'], 161)
 
     def test_drift_rejected(self):
         data = copy.deepcopy(json.loads(build.MANIFEST.read_text()))
@@ -32,13 +34,23 @@ class KnownGood(unittest.TestCase):
                 build.verify(manifest=manifest)
 
     def test_environment_does_not_inherit_experiments(self):
-        with patch.dict(build.os.environ, {'VEN_FPGA_FASTPATH':'0', 'VENTIUM_VIVADO_MEMORY_MAX':'1G'}):
+        with patch.dict(build.os.environ, {'VEN_FPGA_FASTPATH': '0', 'VENTIUM_VIVADO_MEMORY_MAX': '1G'}):
             env = build.environment(Path('/repo'), Path('/out'), Path('/vendor'))
         self.assertNotIn('VEN_FPGA_FASTPATH', env)
         self.assertNotIn('VENTIUM_VIVADO_MEMORY_MAX', env)
         self.assertEqual(env['VEN_FPGA_CORE_MHZ'], '40')
+        self.assertEqual(env['VEN_FPGA_BUILD_PROFILE'], 'retime_muxf_route_first')
+        self.assertEqual(env['VEN_FPGA_TOOL_THREADS'], '8')
+        self.assertEqual(env['VENTIUM_VIVADO_TASK_PROFILE'], 'parallel8')
         self.assertEqual(env['VENTIUM_VIVADO_MEMORY_POLICY'], 'unbounded')
         self.assertEqual(env['VEN_FPGA_DEFINE_FILE'], '/repo/fpga/known_good_defines.txt')
+
+    def test_environment_serial_thread_option(self):
+        env = build.environment(Path('/repo'), Path('/out'), Path('/vendor'), threads=1)
+        self.assertEqual(env['VEN_FPGA_TOOL_THREADS'], '1')
+        self.assertEqual(env['VENTIUM_VIVADO_TASK_PROFILE'], 'serial')
+        with self.assertRaisesRegex(ValueError, 'unsupported Vivado thread count'):
+            build.environment(Path('/repo'), Path('/out'), Path('/vendor'), threads=4)
 
 
 if __name__ == '__main__':

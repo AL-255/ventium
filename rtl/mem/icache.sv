@@ -75,7 +75,24 @@ module icache #(
     // (distributed-RAM) path, which has no registered read and no collision.
     output logic        rd_collA,
     output logic        rd_collB,
+`ifdef VEN_IC_RESIDENCY_SPAN
+    input  logic [IC_IDXW-1:0]              ic_q0_set_i,
+    input  logic [IC_IDXW-1:0]              ic_q1_set_i,
+    input  logic [IC_IDXW-1:0]              ic_q2_set_i,
+    input  logic [IC_IDXW-1:0]              ic_q3_set_i,
+    input  logic [IC_IDXW-1:0]              ic_q4_set_i,
+    input  logic [IC_IDXW-1:0]              ic_q5_set_i,
+    input  logic [IC_IDXW-1:0]              ic_q6_set_i,
+    output logic [IC_WAYS-1:0][IC_TAGW-1:0] ic_q0_tag_o,
+    output logic [IC_WAYS-1:0][IC_TAGW-1:0] ic_q1_tag_o,
+    output logic [IC_WAYS-1:0][IC_TAGW-1:0] ic_q2_tag_o,
+    output logic [IC_WAYS-1:0][IC_TAGW-1:0] ic_q3_tag_o,
+    output logic [IC_WAYS-1:0][IC_TAGW-1:0] ic_q4_tag_o,
+    output logic [IC_WAYS-1:0][IC_TAGW-1:0] ic_q5_tag_o,
+    output logic [IC_WAYS-1:0][IC_TAGW-1:0] ic_q6_tag_o,
+`else
     output logic [IC_TAGW-1:0] ic_tag_o   [IC_SETS][IC_WAYS],
+`endif
     output logic        ic_val_o   [IC_SETS][IC_WAYS],
     output logic [IC_WAYW-1:0] ic_victim_o [IC_SETS],   // replacement (LRU) way per set
 
@@ -212,12 +229,61 @@ module icache #(
   (* ram_style = "distributed" *)
   logic [IC_LINE*8-1:0] ic_line [IC_SETS*IC_WAYS];
 `endif
-  logic [IC_TAGW-1:0] ic_tag  [IC_SETS][IC_WAYS];   // addr[31:5+idx]
   logic               ic_val  [IC_SETS][IC_WAYS];
   logic [IC_WAYW-1:0] ic_age  [IC_SETS][IC_WAYS];   // recency rank: 0=MRU .. WAYS-1=LRU
+`ifdef VEN_IC_RESIDENCY_SPAN
+  // Unreset 1D distributed LUTRAM tag banks (<=4 async read ports per array,
+  // content-skewed to prevent Vivado RAM-equivalence merging above 8 ports).
+  // Validity (ic_val) remains in resettable flip-flops and gates every hit.
+  localparam logic [IC_TAGW-1:0] TAG_SKEW_TCH = IC_TAGW'('h5A5A5);
+  localparam logic [IC_TAGW-1:0] TAG_SKEW_QB  = IC_TAGW'('hA5A5A);
+  logic [IC_WAYS-1:0][IC_TAGW-1:0] tag_tch0_rd, tag_tch1_rd, tag_tch2_rd;
+  for (genvar gw = 0; gw < IC_WAYS; gw++) begin : g_ic_tag_way
+    (* ram_style = "distributed" *) logic [IC_TAGW-1:0] tag_ram_tch [IC_SETS];
+    (* ram_style = "distributed" *) logic [IC_TAGW-1:0] tag_ram_qa  [IC_SETS];
+    (* ram_style = "distributed" *) logic [IC_TAGW-1:0] tag_ram_qb  [IC_SETS];
+    always_ff @(posedge clk) begin
+      if (rst_n && fill_en && fill_done && (fill_way == IC_WAYW'(gw))) begin
+        tag_ram_tch[fill_set] <= fill_tag ^ TAG_SKEW_TCH;
+        tag_ram_qa [fill_set] <= fill_tag;
+        tag_ram_qb [fill_set] <= fill_tag ^ TAG_SKEW_QB;
+      end
+    end
+    assign tag_tch0_rd[gw] = tag_ram_tch[tch0_set] ^ TAG_SKEW_TCH;
+    assign tag_tch1_rd[gw] = tag_ram_tch[tch1_set] ^ TAG_SKEW_TCH;
+    assign tag_tch2_rd[gw] = tag_ram_tch[tch2_set] ^ TAG_SKEW_TCH;
+    assign ic_q0_tag_o[gw] = tag_ram_qa[ic_q0_set_i];
+    assign ic_q1_tag_o[gw] = tag_ram_qa[ic_q1_set_i];
+    assign ic_q2_tag_o[gw] = tag_ram_qa[ic_q2_set_i];
+    assign ic_q3_tag_o[gw] = tag_ram_qa[ic_q3_set_i];
+    assign ic_q4_tag_o[gw] = tag_ram_qb[ic_q4_set_i] ^ TAG_SKEW_QB;
+    assign ic_q5_tag_o[gw] = tag_ram_qb[ic_q5_set_i] ^ TAG_SKEW_QB;
+    assign ic_q6_tag_o[gw] = tag_ram_qb[ic_q6_set_i] ^ TAG_SKEW_QB;
+  end
+`else
+  logic [IC_TAGW-1:0] ic_tag  [IC_SETS][IC_WAYS];   // addr[31:5+idx]
+`endif
   // R2-H09: the PHYSICAL page tag per line, written at fill_done from fill_ptag.
   // Snoop invalidates match on this (the linear ic_tag stays the LOOKUP key).
+`ifdef VEN_IC_SNOOP_LINEAR
   logic [IC_TAGW-1:0] ic_ptag [IC_SETS][IC_WAYS];
+`else
+  logic [IC_WAYS-1:0][IC_TAGW-1:0] ptag_snp0_rd, ptag_snp1_rd, ptag_snp2_rd;
+  for (genvar gw = 0; gw < IC_WAYS; gw++) begin : g_ic_ptag_way
+    (* ram_style = "distributed" *) logic [IC_TAGW-1:0] ptag_ram [IC_SETS];
+    always_ff @(posedge clk) begin
+      if (rst_n && fill_en && fill_done && (fill_way == IC_WAYW'(gw)))
+        ptag_ram[fill_set] <= fill_ptag;
+    end
+    assign ptag_snp0_rd[gw] = ptag_ram[snoop_inv_addr [5 +: IC_IDXW]];
+    assign ptag_snp1_rd[gw] = ptag_ram[snoop_inv_addr1[5 +: IC_IDXW]];
+    assign ptag_snp2_rd[gw] = ptag_ram[snoop_inv_addr2[5 +: IC_IDXW]];
+  end
+`endif
+`ifndef SYNTHESIS
+  logic [IC_TAGW-1:0] ref_ic_tag  [IC_SETS][IC_WAYS];
+  logic [IC_TAGW-1:0] ref_ic_ptag [IC_SETS][IC_WAYS];
+`endif
 
   // REVIEW Aug-1 H-08: in-flight fill line + poison bit (see the fill block below).
   // `fp_active_q` makes the fill a transaction rather than a sequence of
@@ -339,7 +405,9 @@ module icache #(
     for (int s=0; s<IC_SETS; s++) begin
       ic_victim_o[s] = '0;
       for (int w=0; w<IC_WAYS; w++) begin
+`ifndef VEN_IC_RESIDENCY_SPAN
         ic_tag_o[s][w] = ic_tag[s][w];
+`endif
         ic_val_o[s][w] = ic_val[s][w];
         if (ic_age[s][w] == IC_WAYW'(IC_WAYS-1)) ic_victim_o[s] = IC_WAYW'(w);
       end
@@ -353,19 +421,29 @@ module icache #(
   // page-offset bits the set index comes from) and matches every aliased copy.
   // VEN_IC_SNOOP_LINEAR exists ONLY as the alias gate's discrimination control
   // (it restores the pre-fix linear compare, i.e. the H-05 hazard); never deploy.
+`ifdef VEN_IC_SNOOP_LINEAR
   task automatic do_snoop(input logic en, input logic [31:0] a);
     logic [IC_IDXW-1:0] snp_set; logic [IC_TAGW-1:0] snp_ptag;
     if (en) begin
       snp_set  = a[5 +: IC_IDXW];
       snp_ptag = a[5+IC_IDXW +: IC_TAGW];
       for (int w=0; w<IC_WAYS; w++)
-`ifdef VEN_IC_SNOOP_LINEAR
         if (ic_val[snp_set][w] && ic_tag[snp_set][w]==snp_ptag)  ic_val[snp_set][w] <= 1'b0;
-`else
-        if (ic_val[snp_set][w] && ic_ptag[snp_set][w]==snp_ptag) ic_val[snp_set][w] <= 1'b0;
-`endif
     end
   endtask
+`else
+  task automatic do_snoop_rd(
+      input logic en, input logic [31:0] a,
+      input logic [IC_WAYS-1:0][IC_TAGW-1:0] snp_rd);
+    logic [IC_IDXW-1:0] snp_set; logic [IC_TAGW-1:0] snp_ptag;
+    if (en) begin
+      snp_set  = a[5 +: IC_IDXW];
+      snp_ptag = a[5+IC_IDXW +: IC_TAGW];
+      for (int w=0; w<IC_WAYS; w++)
+        if (ic_val[snp_set][w] && snp_rd[w]==snp_ptag) ic_val[snp_set][w] <= 1'b0;
+    end
+  endtask
+`endif
 
   // R2-H09: combinational match outputs (pre-edge arrays) for ports 1/2, so the
   // uopcache invalidates the same {set,way} on the same edge.
@@ -374,13 +452,21 @@ module icache #(
     snoop2_hit = 1'b0; snoop2_hset = '0; snoop2_hway = '0;
     for (int w=0; w<IC_WAYS; w++) begin
       if (snoop_inv_valid1 && ic_val[snoop_inv_addr1[5 +: IC_IDXW]][w]
+`ifdef VEN_IC_SNOOP_LINEAR
           && (ic_ptag[snoop_inv_addr1[5 +: IC_IDXW]][w]
+`else
+          && (ptag_snp1_rd[w]
+`endif
               == snoop_inv_addr1[5+IC_IDXW +: IC_TAGW])) begin
         snoop1_hit = 1'b1; snoop1_hset = snoop_inv_addr1[5 +: IC_IDXW];
         snoop1_hway = IC_WAYW'(w);
       end
       if (snoop_inv_valid2 && ic_val[snoop_inv_addr2[5 +: IC_IDXW]][w]
+`ifdef VEN_IC_SNOOP_LINEAR
           && (ic_ptag[snoop_inv_addr2[5 +: IC_IDXW]][w]
+`else
+          && (ptag_snp2_rd[w]
+`endif
               == snoop_inv_addr2[5+IC_IDXW +: IC_TAGW])) begin
         snoop2_hit = 1'b1; snoop2_hset = snoop_inv_addr2[5 +: IC_IDXW];
         snoop2_hway = IC_WAYW'(w);
@@ -400,10 +486,19 @@ module icache #(
   endtask
 
   // LRU touch body (confirmed HIT): make the way holding `tag` the MRU.
+`ifdef VEN_IC_RESIDENCY_SPAN
+  task automatic do_touch_rd(
+      input logic [IC_IDXW-1:0] set, input logic [IC_TAGW-1:0] tag,
+      input logic [IC_WAYS-1:0][IC_TAGW-1:0] rd_tags);
+    for (int w=0; w<IC_WAYS; w++)
+      if (ic_val[set][w] && rd_tags[w]==tag) touch_way(set, IC_WAYW'(w));
+  endtask
+`else
   task automatic do_touch(input logic [IC_IDXW-1:0] set, input logic [IC_TAGW-1:0] tag);
     for (int w=0; w<IC_WAYS; w++)
       if (ic_val[set][w] && ic_tag[set][w]==tag) touch_way(set, IC_WAYW'(w));
   endtask
+`endif
 
   always_ff @(posedge clk) begin
     if (!rst_n) begin
@@ -414,7 +509,16 @@ module icache #(
       fpz <= 1'b0; fpz_set <= '0; fpz_tag <= '0; fpz_ptag <= '0;   // H-08
       for (int s=0;s<IC_SETS;s++)
         for (int w=0;w<IC_WAYS;w++) begin
-          ic_val[s][w]<=1'b0; ic_tag[s][w]<='0; ic_ptag[s][w]<='0; ic_age[s][w]<=IC_WAYW'(w);
+          ic_val[s][w]<=1'b0; ic_age[s][w]<=IC_WAYW'(w);
+`ifndef VEN_IC_RESIDENCY_SPAN
+          ic_tag[s][w]<='0;
+`endif
+`ifdef VEN_IC_SNOOP_LINEAR
+          ic_ptag[s][w]<='0;
+`endif
+`ifndef SYNTHESIS
+          ref_ic_tag[s][w]<='0; ref_ic_ptag[s][w]<='0;
+`endif
         end
     end else begin
 `ifndef SYNTHESIS
@@ -444,7 +548,7 @@ module icache #(
               if (ic_val[s][w]) begin
                 icfl_occ[s] <= 1'b1;
                 $display("[ICFL] pre set=%0d way=%0d tag=%05x ptag=%05x",
-                         s, w, ic_tag[s][w], ic_ptag[s][w]);
+                         s, w, ref_ic_tag[s][w], ref_ic_ptag[s][w]);
               end
           end
         end else if (!icfl_flush_q) begin
@@ -511,8 +615,16 @@ module icache #(
           // H-08: validate ONLY if nothing invalidated this line mid-flight. The
           // same-clock terms cover an invalidation landing on the fill_done beat,
           // which the poison register (pre-edge) cannot have seen yet.
+`ifndef VEN_IC_RESIDENCY_SPAN
           ic_tag[fill_set][fill_way]<=fill_tag;
+`endif
+`ifdef VEN_IC_SNOOP_LINEAR
           ic_ptag[fill_set][fill_way]<=fill_ptag;   // R2-H09: physical identity
+`endif
+`ifndef SYNTHESIS
+          ref_ic_tag[fill_set][fill_way]<=fill_tag;
+          ref_ic_ptag[fill_set][fill_way]<=fill_ptag;
+`endif
           // REVIEW2 H-17: fill_nocache is included HERE as well as in the poison
           // register, for the same reason flush_all is: on a single-beat fill (or on
           // the fill_done beat itself) the poison register is still pre-edge and has
@@ -528,18 +640,30 @@ module icache #(
         end
       end
       // ---- up to 3 LRU touches, textual LAST-WRITE-WINS (U then straddle then V).
+`ifdef VEN_IC_RESIDENCY_SPAN
+      if (tch0_en) do_touch_rd(tch0_set, tch0_tag, tag_tch0_rd);
+      if (tch1_en) do_touch_rd(tch1_set, tch1_tag, tag_tch1_rd);
+      if (tch2_en) do_touch_rd(tch2_set, tch2_tag, tag_tch2_rd);
+`else
       if (tch0_en) do_touch(tch0_set, tch0_tag);
       if (tch1_en) do_touch(tch1_set, tch1_tag);
       if (tch2_en) do_touch(tch2_set, tch2_tag);
+`endif
       // per-line snoop INVALIDATE — LAST in the FF so it wins over a same-cycle
       // fill_done allocate of that line (a DMA write must not leave stale code cached).
       // Gated by snoop_inv_valid (tied 0 in the default build → byte-identical).
       // H-09: all three invalidation ports are applied, INDEPENDENTLY. They clear
       // distinct valid bits (or the same one twice, which is idempotent), so unlike
       // the LRU touches there is no ordering hazard between them.
+`ifdef VEN_IC_SNOOP_LINEAR
       do_snoop(snoop_inv_valid,  snoop_inv_addr);
       do_snoop(snoop_inv_valid1, snoop_inv_addr1);
       do_snoop(snoop_inv_valid2, snoop_inv_addr2);
+`else
+      do_snoop_rd(snoop_inv_valid,  snoop_inv_addr,  ptag_snp0_rd);
+      do_snoop_rd(snoop_inv_valid1, snoop_inv_addr1, ptag_snp1_rd);
+      do_snoop_rd(snoop_inv_valid2, snoop_inv_addr2, ptag_snp2_rd);
+`endif
       // GLOBAL flush (REVIEW_Jul29 H-12) — LAST, so it also wins over a same-cycle
       // fill_done allocate: after an external "flush all" nothing may stay resident.
       //
@@ -576,10 +700,62 @@ module icache #(
   logic flush_d1;
   always_ff @(posedge clk) begin
     if (rst_n) begin
+`ifdef VEN_IC_RESIDENCY_SPAN
+      for (int w=0; w<IC_WAYS; w++) begin
+        if (!$isunknown(ic_q0_set_i) && ic_val[ic_q0_set_i][w])
+          assert (ic_q0_tag_o[w] === ref_ic_tag[ic_q0_set_i][w])
+            else $fatal(1, "ICACHE-LUTRAM: q0 diverged from FF reference");
+        if (!$isunknown(ic_q1_set_i) && ic_val[ic_q1_set_i][w])
+          assert (ic_q1_tag_o[w] === ref_ic_tag[ic_q1_set_i][w])
+            else $fatal(1, "ICACHE-LUTRAM: q1 diverged from FF reference");
+        if (!$isunknown(ic_q2_set_i) && ic_val[ic_q2_set_i][w])
+          assert (ic_q2_tag_o[w] === ref_ic_tag[ic_q2_set_i][w])
+            else $fatal(1, "ICACHE-LUTRAM: q2 diverged from FF reference");
+        if (!$isunknown(ic_q3_set_i) && ic_val[ic_q3_set_i][w])
+          assert (ic_q3_tag_o[w] === ref_ic_tag[ic_q3_set_i][w])
+            else $fatal(1, "ICACHE-LUTRAM: q3 diverged from FF reference");
+        if (!$isunknown(ic_q4_set_i) && ic_val[ic_q4_set_i][w])
+          assert (ic_q4_tag_o[w] === ref_ic_tag[ic_q4_set_i][w])
+            else $fatal(1, "ICACHE-LUTRAM: q4 diverged from FF reference");
+        if (!$isunknown(ic_q5_set_i) && ic_val[ic_q5_set_i][w])
+          assert (ic_q5_tag_o[w] === ref_ic_tag[ic_q5_set_i][w])
+            else $fatal(1, "ICACHE-LUTRAM: q5 diverged from FF reference");
+        if (!$isunknown(ic_q6_set_i) && ic_val[ic_q6_set_i][w])
+          assert (ic_q6_tag_o[w] === ref_ic_tag[ic_q6_set_i][w])
+            else $fatal(1, "ICACHE-LUTRAM: q6 diverged from FF reference");
+      end
+      for (int w=0; w<IC_WAYS; w++) begin
+        if (tch0_en && !$isunknown(tch0_set) && ic_val[tch0_set][w])
+          assert (tag_tch0_rd[w] === ref_ic_tag[tch0_set][w])
+            else $fatal(1, "ICACHE-LUTRAM: tch0 diverged from FF reference");
+        if (tch1_en && !$isunknown(tch1_set) && ic_val[tch1_set][w])
+          assert (tag_tch1_rd[w] === ref_ic_tag[tch1_set][w])
+            else $fatal(1, "ICACHE-LUTRAM: tch1 diverged from FF reference");
+        if (tch2_en && !$isunknown(tch2_set) && ic_val[tch2_set][w])
+          assert (tag_tch2_rd[w] === ref_ic_tag[tch2_set][w])
+            else $fatal(1, "ICACHE-LUTRAM: tch2 diverged from FF reference");
+      end
+`endif
+`ifndef VEN_IC_SNOOP_LINEAR
+      for (int w=0; w<IC_WAYS; w++) begin
+        if (snoop_inv_valid && !$isunknown(snoop_inv_addr[5 +: IC_IDXW])
+            && ic_val[snoop_inv_addr[5 +: IC_IDXW]][w])
+          assert (ptag_snp0_rd[w] === ref_ic_ptag[snoop_inv_addr[5 +: IC_IDXW]][w])
+            else $fatal(1, "ICACHE-LUTRAM: snoop0 ptag diverged from FF reference");
+        if (snoop_inv_valid1 && !$isunknown(snoop_inv_addr1[5 +: IC_IDXW])
+            && ic_val[snoop_inv_addr1[5 +: IC_IDXW]][w])
+          assert (ptag_snp1_rd[w] === ref_ic_ptag[snoop_inv_addr1[5 +: IC_IDXW]][w])
+            else $fatal(1, "ICACHE-LUTRAM: snoop1 ptag diverged from FF reference");
+        if (snoop_inv_valid2 && !$isunknown(snoop_inv_addr2[5 +: IC_IDXW])
+            && ic_val[snoop_inv_addr2[5 +: IC_IDXW]][w])
+          assert (ptag_snp2_rd[w] === ref_ic_ptag[snoop_inv_addr2[5 +: IC_IDXW]][w])
+            else $fatal(1, "ICACHE-LUTRAM: snoop2 ptag diverged from FF reference");
+      end
+`endif
       for (int s=0; s<IC_SETS; s++) begin
         for (int w0=0; w0<IC_WAYS; w0++)
           for (int w1=w0+1; w1<IC_WAYS; w1++)
-            if (ic_val[s][w0] && ic_val[s][w1] && (ic_tag[s][w0] == ic_tag[s][w1]))
+            if (ic_val[s][w0] && ic_val[s][w1] && (ref_ic_tag[s][w0] == ref_ic_tag[s][w1]))
               $error("ICACHE/DUP-TAG: set %0d has the same tag valid in ways %0d and %0d -- a flush left a stale copy resident",
                      s, w0, w1);
       end

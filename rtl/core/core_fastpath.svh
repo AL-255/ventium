@@ -216,14 +216,26 @@
             fetch_word <= 3'd0;
             sfetch_short_len_q <= 4'd0;
 `ifdef VEN_UOPCACHE
+`ifdef VEN_IC_RESIDENCY_SPAN
+            sfetch_uop_q <= !sfetch_boundary && cycle_mode && exec_issue_ok &&
+                            ic_res_a_buffered &&
+                            ic_res_buffered_offset(6'(IWORDS*4 - 1));
+`else
             sfetch_uop_q <= !sfetch_boundary && cycle_mode && exec_issue_ok &&
                             ic_buffered(flin) &&
                             ic_buffered(flin + 32'(IWORDS*4 - 1));
 `endif
+`endif
 `ifdef VEN_SFETCH_RESIDENT
+`ifdef VEN_IC_RESIDENCY_SPAN
+            sfetch_resident_q <= !sfetch_boundary && cycle_mode && exec_issue_ok &&
+                                 ic_res_a_buffered &&
+                                 ic_res_buffered_offset(6'(IWORDS*4 - 1));
+`else
             sfetch_resident_q <= !sfetch_boundary && cycle_mode && exec_issue_ok &&
                                  ic_buffered(flin) &&
                                  ic_buffered(flin + 32'(IWORDS*4 - 1));
+`endif
 `endif
             state <= S_FETCH;
           end else if (!pipe_mem_active_q && ((!pipe_bytes_ok || !exec_issue_ok)

@@ -64,15 +64,31 @@ module ven_ddram_axi_posted #(
     (* ram_style="distributed" *) reg [AXI_ADDR_W-1:0] addr_q [0:WRITE_SLOTS-1];
     (* ram_style="distributed" *) reg [63:0] data_q [0:WRITE_SLOTS-1];
     (* ram_style="distributed" *) reg [7:0] strb_q [0:WRITE_SLOTS-1];
-    reg [PTR_BITS-1:0] tail, aw_head, w_head;
+    reg [24:0] wbuf_qword [0:WRITE_SLOTS-1];
+    reg [WRITE_SLOTS-1:0] slot_valid;
+    reg [PTR_BITS-1:0] tail, aw_head, w_head, b_head;
     reg [PTR_BITS:0] occupied, aw_pending, w_pending;
     localparam [2:0] IDLE=0, AR=1, R=2, DRAIN=4;
     reg [2:0] st;
     reg rd_seen, primed;
     reg [7:0] read_left;
+    reg [24:0] rd_lo_q;
+    reg [25:0] rd_hi_q;
+    wire [7:0] rd_burst_m1 = (DDRAM_BURSTCNT == 8'd0) ? 8'd0 : (DDRAM_BURSTCNT - 8'd1);
     wire aw_hs = m_axi_awvalid && m_axi_awready;
     wire w_hs = m_axi_wvalid && m_axi_wready;
     wire b_hs = m_axi_bvalid && m_axi_bready;
+    reg rd_hazard;
+    integer hi;
+    always @* begin
+        rd_hazard = 1'b0;
+        for (hi = 0; hi < WRITE_SLOTS; hi = hi + 1) begin
+            if (slot_valid[hi] && !(b_hs && (b_head == hi[PTR_BITS-1:0])) &&
+                ({1'b0, wbuf_qword[hi]} >= {1'b0, rd_lo_q}) &&
+                ({1'b0, wbuf_qword[hi]} <= rd_hi_q))
+                rd_hazard = 1'b1;
+        end
+    end
     wire bad_input = DDRAM_RD && DDRAM_WE ||
                      DDRAM_WE && DDRAM_BURSTCNT > 1;
     wire push = !DDRAM_BUSY && DDRAM_WE && !bad_input;
@@ -104,9 +120,11 @@ module ven_ddram_axi_posted #(
 
     always @(posedge clk) begin
         if (!rst_n) begin
-            tail <= 0; aw_head <= 0; w_head <= 0;
+            tail <= 0; aw_head <= 0; w_head <= 0; b_head <= 0;
+            slot_valid <= 0;
             occupied <= 0; aw_pending <= 0; w_pending <= 0;
             st <= IDLE; rd_seen <= 0; primed <= 0; read_left <= 0;
+            rd_lo_q <= 0; rd_hi_q <= 0;
             m_axi_araddr <= 0; m_axi_arlen <= 0;
             DDRAM_DOUT <= 0; DDRAM_DOUT_READY <= 0; fault <= 0;
         end else begin
@@ -131,21 +149,29 @@ module ven_ddram_axi_posted #(
             endcase
             if (aw_hs) aw_head <= aw_head + 1'b1;
             if (w_hs) w_head <= w_head + 1'b1;
+            if (b_hs) begin
+                slot_valid[b_head] <= 1'b0;
+                b_head <= b_head + 1'b1;
+            end
             if (push) begin
                 addr_q[tail] <= {{(AXI_ADDR_W-28){1'b0}},DDRAM_ADDR,3'b000} + MEM_BASE;
+                wbuf_qword[tail] <= DDRAM_ADDR;
+                slot_valid[tail] <= 1'b1;
                 data_q[tail] <= DDRAM_DIN;
                 strb_q[tail] <= DDRAM_BE;
                 tail <= tail + 1'b1;
             end
             if (take_read) begin
                 m_axi_araddr <= {{(AXI_ADDR_W-28){1'b0}},DDRAM_ADDR,3'b000} + MEM_BASE;
-                m_axi_arlen <= DDRAM_BURSTCNT == 0 ? 0 : DDRAM_BURSTCNT - 1'b1;
+                m_axi_arlen <= rd_burst_m1;
+                rd_lo_q <= DDRAM_ADDR;
+                rd_hi_q <= {1'b0, DDRAM_ADDR} + {18'd0, rd_burst_m1};
                 rd_seen <= 1;
                 primed <= 0;
-                st <= DRAIN;
+                st <= ((occupied == 0) || ((occupied == 1) && b_hs)) ? AR : DRAIN;
             end
             case (st)
-                DRAIN: if (occupied == 0 && !fault) st <= AR;
+                DRAIN: if (!rd_hazard && !fault) st <= AR;
                 AR: if (m_axi_arready) begin
                     st <= R;
                     read_left <= m_axi_arlen + 1'b1;

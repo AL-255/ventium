@@ -731,6 +731,15 @@
     // otherwise feed shared cache/AXI/writeback logic even without a request.
     // All request, page/segment fault, translation and A20 checks are unchanged.
     mem_addr_pre = bd_addr;
+    // Write-qualified request for core-generated SMC snoop (smc_v1):
+    // algebraically identical to (bd_req && cur_is_w) without routing
+    // read-only request cones (sfetch_demand_req, pipe_load_req, pf_miss)
+    // into the I-cache snoop address/tag path.
+    unique case (state)
+      S_FETCH, S_PF: bd_smc_req = 1'b0;
+      S_PIPE:        bd_smc_req = pipe_store_req;
+      default:       bd_smc_req = bd_req && cur_is_w;
+    endcase
     // ---- paging post-translation: linear -> physical. EVERYTHING translatable
     // passes through here -- data/fetch, the descriptor/TSS-structure reads
     // (they are architecturally LINEAR structures), and the task-switch
@@ -762,8 +771,11 @@
       // Payload may be prepared while the request is cancelled. Only
       // bd_req authorizes a beat; retain every miss/permission guard below.
       // Do not put those guards in front of the address/data selection cone.
-      if (bd_req) bd_addr = mem_xlate(bd_addr, cur_is_d);
-      if (xlate_miss || fe_xlate_pend || perm_fault) bd_req = 1'b0;
+      bd_addr = mem_xlate(bd_addr, cur_is_d);
+      if (xlate_miss || fe_xlate_pend || perm_fault) begin
+        bd_req = 1'b0;
+        bd_smc_req = 1'b0;
+      end
     end
     // =========================================================================
     // REVIEW1_Aug2 C-01: a SEGMENT fault must suppress the faulting access.
@@ -794,6 +806,8 @@
     // the final bus pins are blanked below.
     mem_req_pre_sq = bd_req && !rep_stos_stream_preissue_block &&
                               !rep_movs_stream_preissue_block;
+    smc_req_pre_sq = bd_smc_req && !rep_stos_stream_preissue_block &&
+                                  !rep_movs_stream_preissue_block;
     if (sync_access_fault || rep_stos_stream_preissue_block ||
         rep_movs_stream_preissue_block) begin
       // A cancelled beat has no valid payload. Keep cancellation on VALID,
@@ -1636,8 +1650,13 @@
                  bus_payload_ref_mem_req_pre_sq, bus_payload_ref_c02_xpage_hits})
       else $fatal(1, "EARLY-BUS-PAYLOAD: request/control changed state=%0d", state);
     if (bd_req || bus_payload_ref_bd_req || fe_translatable) begin
-      assert (bd_addr === bus_payload_ref_bd_addr &&
-              mem_addr_pre === bus_payload_ref_mem_addr_pre)
+      assert (mem_addr_pre === bus_payload_ref_mem_addr_pre)
+        else $fatal(1, "EARLY-BUS-PAYLOAD: consumed pre-xlate address changed state=%0d old=%h new=%h",
+                    state, bus_payload_ref_mem_addr_pre, mem_addr_pre);
+    end
+    if (bd_req || bus_payload_ref_bd_req || bd_we || bus_payload_ref_bd_we ||
+        mem_req_pre_sq || bus_payload_ref_mem_req_pre_sq || smc_v1) begin
+      assert (bd_addr === bus_payload_ref_bd_addr)
         else $fatal(1, "EARLY-BUS-PAYLOAD: consumed address changed state=%0d old=%h new=%h",
                     state, bus_payload_ref_bd_addr, bd_addr);
     end

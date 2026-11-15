@@ -1,44 +1,22 @@
-# Build the board-tested Ventium FPGA profile
+# Build and Run the Board-Qualified Ventium FPGA Profile (`c0e3fe43`)
 
-This public `main` source release corresponds to the processor in FPGA image
-**`2886d24c`**, tested on RK-XCZU15EG-F on 2026-10-17. Experimental CPU/cache
-development stays on **`experimental/uv-fast-ipc-apr`**. Do not substitute that
-branch's RTL and call the result this image.
+This `main` source release publishes the complete hardware source closure and fresh-build recipe for FPGA image **`c0e3fe43`**, built with **Vivado 2025.2** and physically qualified on **RK-XCZU15EG-F** (`xczu15eg-ffvb1156-2-i`) on **2026-11-14**. Ongoing unqualified CPU/cache/APR development remains on **`experimental/uv-fast-ipc-apr`**; do not substitute experimental RTL into this release profile.
 
-## What is reproducible
+## What Is Reproducible
 
-The repository contains the frozen core/FPU/cache RTL, patched ao486 peripherals,
-PL top, AXI/DDR bridges, clock controller, constraints, ordered filelists and
-exact **159 hardware defines**. `fpga/known_good_2886d24c.json` hashes the input
-closure. The FPGA build requires **no private submodule**, guest disk, previous
-checkpoint, external ao486 checkout or developer home-directory tree.
+The repository contains the exact frozen P5/P54C core, shared pipelined x87 FPU, L1 caches/TLBs, patched `ao486` PC/AT peripherals, PL top-level wrapper, 16-slot RAW-bypass posted DDR4 bridge, MMCM DRP clock controller, XDC constraints, ordered `.f` filelists, post-`opt_design` MUXF remap hook (`fpga/fresh_opt_muxf_post.tcl`), and **161 hardware defines**.
 
-The deployed image was produced by an incremental physical-layout reuse followed
-by a clock-only repair. Its original routed checkpoint and bitstream are **not
-in Git**. The public recipe performs fresh synthesis/place/route using the same
-processor sources and repaired clock logic. It does **not** promise identical
-placement, timing, build duration or a byte-identical bitstream. The full-width
-clock wrapper is used for source synthesis; the deployed ECO used its narrowed
-post-synthesis port adapter. CPU/cache sources and defines are unchanged.
+`fpga/known_good_c0e3fe43.json` SHA-256 pins all **193 input files**. Building requires **no private submodule**, guest disk image, pre-existing `.dcp` checkpoint, Vivado IP cache, external `ao486` checkout, or maintainer home-directory paths.
 
-The portable recipe has source/hash, Tcl-expansion and host-unit checks. It has
-not been rerun through full Vivado or requalified on the board as part of this
-publication: the owner cancelled FPGA builds before moving computers. This is
-publication of the tested source profile, **not a new FPGA acceptance result**.
+Unlike the earlier `2886d24c` release (which relied on incremental placement reuse and had `-9.841 ns` setup slack), **`c0e3fe43` was built entirely from fresh sources** using the `retime_muxf_route_first` Vivado 2025.2 strategy (`PerformanceOptimized` synthesis with `GLOBAL_RETIMING on`, `RuntimeOptimized` `opt_design` followed by explicit `opt_design -muxf_remap`, `AltSpreadLogic_high` placement, and `AlternateCLBRouting`), achieving **true 40 MHz post-route static timing closure** (`40.264133 MHz`, `WNS = +0.164 ns`, `WHS = +0.010 ns`, `0` failing endpoints, `0` DRC/routing errors). Because Vivado multi-threading and host environments can still introduce small non-determinism across machines, any newly built bitstream should still have its own `timing_summary.rpt`, `route_status.rpt`, and physical board behavior verified before claiming hardware acceptance.
 
 ## Prerequisites
 
-- Linux x86-64 with Bash, Python 3.11+, Tcl, coreutils, `flock`, and a working
-  systemd user manager/cgroup v2.
-- AMD Vivado **2025.2**, Zynq UltraScale+ support, and a license for
-  **`xczu15eg-ffvb1156-2-i`**. AMD tools/IP are supplied by your installation,
-  not redistributed here.
-- Substantial RAM/swap and scratch disk. Recent runs used about 20 GiB resident
-  RAM plus swap; allow at least 16 GiB free disk as a practical starting point.
-  The entry point rejects less than 8 GiB free. RAM/swap are not artificially
-  capped; a build can still exhaust a machine. Monitor available disk/resources.
+- Linux x86-64 with Bash, Python 3.11+, Tcl (`tclsh`), coreutils, `flock`, and an active `systemd --user` manager (cgroup v2).
+- AMD Vivado **2025.2** with Zynq UltraScale+ device support and license for **`xczu15eg-ffvb1156-2-i`**.
+- Sufficient RAM/swap and scratch disk: the qualified `c0e3fe43` build (`--threads 8`) peaked at ~`14.6 GiB` resident RAM + ~`19.2 GiB` swap and completed in ~`2h 48m`. Provide at least **16 GiB** free scratch space (`build_known_good.py` refuses `< 8 GiB` free). On lower-memory hosts, pass `--threads 2` or `--threads 1` to reduce concurrent worker footprint.
 
-## Clean clone and source preflight
+## Clean Clone and Offline Source Preflight
 
 ```bash
 git clone https://github.com/AL-255/ventium.git
@@ -48,96 +26,49 @@ tclsh fpga/test_known_good_wrapper.tcl "$PWD"
 python3 -B -m unittest discover -s fpga -p test_known_good.py -v
 ```
 
-Do **not** use `--recursive` for this public FPGA build. `ventium-refs` is a
-private verification oracle and is unnecessary here. The exact patched ao486
-RTL used by this profile is vendored with its license; do not replace it by an
-unpatched upstream checkout. Historical verification targets may need that
-private oracle and are separate from FPGA source preflight.
+Do **not** pass `--recursive` for the public FPGA build: `ventium-refs` is a private differential-verification oracle submodule and is not needed for synthesis or board tooling. The exact patched `ao486` peripheral RTL is already vendored under `3rd-party/ao486_MiSTer/` with its licenses.
 
-## Build one 40 MHz image
+## Build One Fresh 40 MHz Programmable-Clock Image
 
-Choose paths on your own machine. The output leaf must not exist and must be
-outside the checkout. `TMPDIR` is explicitly set by the builder beneath it.
+Choose a new output directory **outside** the repository checkout on a scratch volume with ample free space (`TMPDIR` is automatically placed inside `<output>/tmp`):
 
 ```bash
 python3 -B fpga/build_known_good.py --build \
   --vivado-root /opt/AMD/2025.2/Vivado \
-  --output /path/to/scratch/ventium-2886d24c-build
+  --output /path/to/scratch/ventium-c0e3fe43-build
 ```
 
-The launcher sources that installation's `settings64.sh`; there is no mandatory
-`/home/yukidama` or `/tools` installation path. It uses one synthesis worker,
-40 MHz core / 100 MHz PS reference and HP0 AXI, the full P5 split 8 KiB L1s,
-shared pipelined x87, U/V issue (`cycle_mode=1`) and system fast load/store paths.
-The historical `logic_only` synthesis option disables synthesis timing-driven
-optimization, **not timing analysis or the 25 ns/10 ns constraints**.
+Optional concurrency flag: `--threads {1,2,8}` (default `8`, matching the qualified `c0e3fe43` build). Synthesis/implementation run fan-out (`-jobs 1`) stays strictly single-run, IP checkpoint caching (`IP_CACHE_PERMISSIONS disable`) and incremental checkpoints (`AUTO_INCREMENTAL_CHECKPOINT 0`) are disabled, and mandatory `U/V + system fast-pipe` (`cycle_mode=1'b1`) plus the 16-slot posted-DDR completion barrier are verified before synthesis launches.
 
-**Exclusive launch warning:** `fpga/run_vivado_exclusive.sh` stops the previous
-Ventium scope and other same-user Vivado/VRS processes under the selected vendor
-installation before starting. Do not run it alongside an unrelated Vivado job.
-The complete invocation has an eight-hour timeout; there are no automatic
-retries, clock-specific builds or board writes. Stop it deliberately if disk is
-running out. Keep `started.json`, `closed.json` and `native.log`.
+**Exclusive Vivado Process Rule:** `fpga/run_vivado_exclusive.sh` enforces a single Vivado process family per host user: launching a new build terminates any previous `ventium-vivado.scope` and same-user Vivado/VRS workers from that installation. Never launch a build alongside another active Vivado job you want to keep. A hard 8-hour timeout bounds the run; retain `started.json`, `closed.json`, and `native.log`.
 
-Outputs, after successful completion:
+Expected build products under `<output>/build/`:
 
 ```text
-build/rk_ao486_system.bit
-build/rk_ao486_system.bit.bin
-build/{clocks,route_status,timing_summary,utilization,drc,mmcm}.rpt
+rk_ao486_system.bit
+rk_ao486_system.bit.bin
+fresh-routed.dcp
+{clocks,route_status,timing_summary,utilization,utilization_hierarchy,congestion,cdc,drc,mmcm}.rpt
 ```
 
-Check native exit and completion marker, unchanged source hashes, complete
-routing, DRC, clock periods, setup/hold, timing coverage and CDC. Do not call
-bitgen success timing sign-off. The tested original had **−9.841 ns setup** at
-40 MHz: **28.701817 MHz conditional post-route period budget**, despite physical
-40 MHz workload passes. A new placement has no inherited hardware qualification.
+Audit `closed.json`, `route_status.rpt` (`0` unrouted/error nets), `drc.rpt` (`0` errors), `clocks.rpt` (`40.000 MHz` core / `100.000 MHz` PL/HP0), and `timing_summary.rpt` (`WNS >= 0`, `WHS >= 0`) before programming hardware.
 
-## Board preparation and deployment boundary
+## Board Preparation and Safe Deployment
 
-The flow is **PL-only PCAP**, assuming Linux/FSBL already initialized PS DDR/MIO
-and provides the 100 MHz PS reference. It deliberately skips the board preset;
-it is not an SD-card image, FSBL or standalone boot firmware generator. Use the
-[RK board template](https://github.com/AL-255/RK-XCZU15EG-F-Template) for Linux/BSP
-setup. No login credentials are supplied in this repository.
+The generated bitstream targets **PL-only PCAP** loading on a running ZynqMP Linux system that has already initialized PS DDR4, MIO, and the `100 MHz` `pl_clk0` reference (see [RK-XCZU15EG-F-Template](https://github.com/AL-255/RK-XCZU15EG-F-Template)). No credentials, SD-card images, or guest OS disks are included here.
 
-Before programming, stop the guest daemon, hold guest reset and verify the
-posted DDR bridge is drained. Reserve guest physical RAM **0x60000000–0x6fffffff**
-with a device-tree `reserved-memory` **`no-map`** region before Linux boots;
-confirm the active reservation. Never let `/dev/mem` guest writes overlap Linux
-RAM. Record the new bitstream SHA256 and board boot identity. Follow your Linux
-FPGA-manager driver's raw-bitstream loading procedure; don't blindly copy an
-old machine's deployment paths or permissions.
+1. **Reserve Guest DDR4 (`no-map`):** Ensure physical RAM **`0x60000000–0x6fffffff`** (`256 MiB`) is reserved via a Linux device-tree `reserved-memory` **`no-map`** node before booting Linux, and verify `/proc/iomem` / `/sys/firmware/devicetree` before starting any `/dev/mem` guest daemon.
+2. **Quiesce & Drain Before Programming:** Stop any running guest daemon, assert guest reset, and verify the posted-DDR bridge reports `drained=1, fault=0` before loading `rk_ao486_system.bit.bin` through Linux `fpga_manager`.
+3. **Debug & Runtime DRP Clock Utilities (`fpga/board-tools/`):**
+   - Management/debug MMIO resides at **`0xA0000000`**.
+   - `ven_pll_ctrl` operates on the always-on `100 MHz` reference over ZynqMP EMIO GPIO (`ven_pll_clock.py`). Runtime divider changes (`1000 MHz / N`, boot `N = 25` -> `40.000 MHz`) require guest reset asserted + posted DDR drained + zero DDR fault for 32 reference clocks. Keep `pl_clk0` fixed at `100 MHz`.
 
-The board debug window is at **0xA0000000**. The included Python helpers under
-`fpga/board-tools/` support register inspection, clock measurement and the
-programmable PLL. Run `--help` and check the debug ABI before register writes.
-Changing the PLL requires held guest reset, the actual external DDR drain,
-no DDR fault, and stable lock. Keep the 100 MHz reference/AXI clock unchanged.
-The core's boot divider is 25 (40 MHz); overclock qualification is workload-
-and image-specific, not a general guarantee.
+## Physical Acceptance Summary (`c0e3fe43`)
 
-Guest boot additionally requires a matching PS-side disk/BIOS/input service,
-properly licensed BIOS/media and operating-system configuration. Guest images,
-Windows files, Quake data, captures, checkpoints and proprietary documentation
-are intentionally not included. This source release guarantees neither a
-ready-to-boot SD card nor that historical absolute runtime paths exist.
+Reference image **`c0e3fe43`** (`rk_ao486_system.bit.bin` SHA-256 `c0e3fe43b2b7ce88e013df107be94d56c0fcfcae626ce4c262975fba92dcc3b7`) passed the complete three-part physical standard acceptance suite in `U/V + fast-pipe` mode:
 
-## Acceptance
+1. **CoreMark:** Both standard 4,000-iteration seeds pass with exact reference CRCs (`2.100128 / 2.106796 CM/MHz` at `40.000 MHz`).
+2. **Windows 95:** Cold boot to desktop, interactive PS/2 mouse & keyboard multi-application GUI session (`Calculator`, `Notepad`, `MS Paint`), and clean OS shutdown (`40.000 MHz` and warm-die `58.824 MHz`).
+3. **DOS Quake:** Complete `timedemo demo1` (`969` frames in `121.2 s` = **`8.0 FPS`** at `39.999802 MHz`) plus interactive `E1M1` gameplay (`40.000 MHz`, `58.824 MHz`, and `62.500 MHz`).
 
-For a new physical implementation, use U/V + fast-pipe (no STEP/breakpoint that
-suppresses pairing), demonstrate fresh V retirement, and retain logs/captures,
-source/image hashes and the measured core clock. The standard suite is:
-
-1. Both standard CoreMark seeds complete with correct data CRCs.
-2. Windows 95 cold-boots to a clean desktop and keyboard/mouse interaction works.
-3. Original FreeDOS/DOS Quake completes the full timedemo without error.
-
-The original `2886d24c` has both CoreMark seeds and a complete Quake timedemo
-passing at 40 MHz, plus Doom DEMO3. **Win95/full-suite qualification remains
-open for this programmable-clock image.** Earlier images' passes do not fill
-that gap. See [README results](README.md#verified-fpga-results).
-
-Current verified gameplay IPC: **0.496499864 total U+V**, original `2886d24c`,
-cycles **625,021,130,428–629,480,208,865**. Public rebuilds are unmeasured until
-separately tested; startup or CoreMark counters are not gameplay IPC.
+Current verified physical Quake gameplay IPC: **`0.515778001` total U+V IPC** (`0.397847833` primary/U-only IPC), image **`c0e3fe43`**, cycles **`28,696,827,616–32,989,404,795`** (counters include `REP`-element retirement; prior `2886d24c` baseline was `0.496499864` / `0.383002768`). Freshly compiled rebuilds remain unmeasured until independently validated on hardware.

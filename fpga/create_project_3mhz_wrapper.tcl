@@ -38,8 +38,15 @@ if {[info exists ::env(VEN_FPGA_JOBS)]} {
 if {![string is integer -strict $synth_jobs] || $synth_jobs != 1} {
     error "VEN_FPGA_JOBS must be exactly 1"
 }
-set_param general.maxThreads $synth_jobs
-puts "Vivado synthesis concurrency: $synth_jobs"
+set tool_threads 1
+if {[info exists ::env(VEN_FPGA_TOOL_THREADS)]} {
+  set tool_threads $::env(VEN_FPGA_TOOL_THREADS)
+}
+if {$tool_threads ni {1 2 4 8}} {
+    error "VEN_FPGA_TOOL_THREADS must be 1, 2, 4 or 8"
+}
+set_param general.maxThreads $tool_threads
+puts "Vivado synthesis concurrency: jobs=$synth_jobs maxThreads=$tool_threads"
 
 # Keep the recovered 3.125 MHz image as the default diagnostic fallback, but
 # permit a meaningful timing/bring-up candidate after an area reduction.  The
@@ -231,11 +238,12 @@ set build_profile legacy
 if {[info exists ::env(VEN_FPGA_BUILD_PROFILE)]} {
     set build_profile $::env(VEN_FPGA_BUILD_PROFILE)
 }
-if {$build_profile ni {legacy balanced logic_only}} {
-    error "VEN_FPGA_BUILD_PROFILE must be legacy, balanced or logic_only"
+if {$build_profile ni {legacy balanced logic_only retime_muxf_route_first}} {
+    error "VEN_FPGA_BUILD_PROFILE must be legacy, balanced, logic_only or retime_muxf_route_first"
 }
 set synth_directive AreaOptimized_high
 if {$build_profile in {balanced logic_only}} { set synth_directive Default }
+if {$build_profile eq "retime_muxf_route_first"} { set synth_directive PerformanceOptimized }
 puts "FPGA build profile: $build_profile (synthesis $synth_directive)"
 set area_synth "set_property STEPS.SYNTH_DESIGN.ARGS.DIRECTIVE $synth_directive \[get_runs synth_1\]\nlaunch_runs synth_1 -jobs $synth_jobs; wait_on_run synth_1"
 
@@ -250,6 +258,24 @@ set_property -name {STEPS.SYNTH_DESIGN.ARGS.MORE OPTIONS} -value {-no_timing_dri
 }
     set area_synth "$logic_only_synth\n$area_synth"
     puts "Diagnostic synthesis: -no_timing_driven; clock constraints and timing qualification unchanged"
+}
+
+if {$build_profile eq "retime_muxf_route_first"} {
+    set muxf_post [file join $source_root fpga fresh_opt_muxf_post.tcl]
+    if {![file isfile $muxf_post]} {
+        error "missing fresh_opt_muxf_post.tcl: $muxf_post"
+    }
+    set retime_muxf_cfg "set_property STEPS.SYNTH_DESIGN.ARGS.GLOBAL_RETIMING on \[get_runs synth_1\]
+set_property STEPS.SYNTH_DESIGN.ARGS.FLATTEN_HIERARCHY rebuilt \[get_runs synth_1\]
+set_property -name {STEPS.SYNTH_DESIGN.ARGS.MORE OPTIONS} -value {} -objects \[get_runs synth_1\]
+set_property STEPS.OPT_DESIGN.ARGS.DIRECTIVE RuntimeOptimized \[get_runs impl_1\]
+set_property STEPS.OPT_DESIGN.TCL.POST {$muxf_post} \[get_runs impl_1\]
+set_property STEPS.PLACE_DESIGN.ARGS.DIRECTIVE AltSpreadLogic_high \[get_runs impl_1\]
+set_property STEPS.PHYS_OPT_DESIGN.IS_ENABLED false \[get_runs impl_1\]
+set_property STEPS.ROUTE_DESIGN.ARGS.DIRECTIVE AlternateCLBRouting \[get_runs impl_1\]
+set_property STEPS.POST_ROUTE_PHYS_OPT_DESIGN.IS_ENABLED false \[get_runs impl_1\]"
+    set area_synth "$retime_muxf_cfg\n$area_synth"
+    puts "Timing-closure profile: PerformanceOptimized + global retiming + opt_design -muxf_remap + AltSpreadLogic_high + AlternateCLBRouting"
 }
 
 # Apply the implementation profile after upstream's historical overrides, but

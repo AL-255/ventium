@@ -3,10 +3,17 @@
 // Requires the existing VEN_IC_BRAM IC FRONT SPAN and returned-port signals.
 // All helpers preserve the procedural raw lookup's default-zero treatment of
 // an unknown arithmetic address. Do not turn their ordered ifs into ternaries.
+`ifndef VEN_IC_BRAM
+  initial $fatal(1, "VEN_IC_RESIDENCY_SPAN requires VEN_IC_BRAM");
+`endif
+`ifdef VEN_UOPCACHE
+  initial $fatal(1, "VEN_IC_RESIDENCY_SPAN requires raw frontend without VEN_UOPCACHE");
+`endif
 `ifdef VEN_IC_BRAM
   wire [31:0] ic_res_prev_addr = flin - 32'd1;
+  assign ic_q2_set = ic_res_prev_addr[5 +: IC_IDXW];
   // One static backwards query, shared by zero-length end-point consumers.
-  wire [IC_WAYW:0] ic_res_prev = ic_front_probe(ic_res_prev_addr);
+  wire [IC_WAYW:0] ic_res_prev = ic_front_probe_q(ic_q2_tag, ic_res_prev_addr);
 
   wire ic_res_a_buffered = ic_front_a[IC_WAYW] &&
       ((rdA_set_q == flin[5 +: IC_IDXW] &&

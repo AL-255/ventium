@@ -18,8 +18,13 @@
 
   always_comb begin
     // Same ordered cache-way/bypass priority as the generic ic_hit_way.
+`ifdef VEN_IC_RESIDENCY_SPAN
+    ic_prefix_a = ic_front_probe_q(ic_q5_tag, ic_prefix_base);
+    ic_prefix_b = ic_front_probe_q(ic_q6_tag, ic_prefix_next);
+`else
     ic_prefix_a = ic_front_probe(ic_prefix_base);
     ic_prefix_b = ic_front_probe(ic_prefix_next);
+`endif
     // Preserve A priority, collision rejection, stale-A fallback, and the
     // ternary's bitwise merge if a returned identity is unknown.
     ic_prefix_lineA =
@@ -33,6 +38,29 @@
         (rdB_set_q == ic_prefix_next[5 +: IC_IDXW] &&
          rdB_way_q == ic_prefix_b[IC_WAYW-1:0] && !ic_rd_collB) ? ic_rd_lineB : ic_rd_lineA;
   end
+`ifdef VEN_IC_RESIDENCY_SPAN
+  assign ic_q5_set = ic_prefix_base[5 +: IC_IDXW];
+  assign ic_q6_set = ic_prefix_next[5 +: IC_IDXW];
+  wire ic_prefix_a_buffered = ic_prefix_a[IC_WAYW] &&
+      ((rdA_set_q == ic_prefix_base[5 +: IC_IDXW] &&
+        rdA_way_q == ic_prefix_a[IC_WAYW-1:0] && !ic_rd_collA) ||
+       (rdB_set_q == ic_prefix_base[5 +: IC_IDXW] &&
+        rdB_way_q == ic_prefix_a[IC_WAYW-1:0] && !ic_rd_collB));
+  wire ic_prefix_b_buffered = ic_prefix_b[IC_WAYW] &&
+      ((rdA_set_q == ic_prefix_next[5 +: IC_IDXW] &&
+        rdA_way_q == ic_prefix_b[IC_WAYW-1:0] && !ic_rd_collA) ||
+       (rdB_set_q == ic_prefix_next[5 +: IC_IDXW] &&
+        rdB_way_q == ic_prefix_b[IC_WAYW-1:0] && !ic_rd_collB));
+  function automatic logic ic_prefix_buffered_offset(input logic [5:0] offset);
+    logic [5:0] pos;
+    begin
+      pos = {1'b0,ic_prefix_base[4:0]} + offset;
+      ic_prefix_buffered_offset = 1'b0;
+      if (pos < 6'd32) ic_prefix_buffered_offset = ic_prefix_a_buffered;
+      else if (pos >= 6'd32) ic_prefix_buffered_offset = ic_prefix_b_buffered;
+    end
+  endfunction
+`endif
   for (genvar prefix_i=0; prefix_i<IWORDS*4; prefix_i++) begin : g_ic_prefix_span
     wire [5:0] pos = {1'b0,ic_prefix_base[4:0]} + 6'(prefix_i);
     assign ic_prefix_bytes[prefix_i] = pos[5]

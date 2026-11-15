@@ -197,5 +197,31 @@ Reporting congestion hotspots
         self.assertEqual(len(result['largest_fanouts']),1)
         self.assertEqual(result['largest_fanouts'][0]['fanout'],9)
 
+    def test_resolved_final_route_parses_initial_global_windows(self):
+        clean_log = '''INFO: [Route 35-449] Initial Estimated Congestion
+| Direction | Size   | % Tiles  | Size   | % Tiles  | Size   | % Tiles  |
+|      NORTH|   16x16|      2.42|   32x32|      5.07|   16x16|      2.25|
+|      SOUTH|   32x32|      3.88|   64x64|      6.85|   16x16|      3.16|
+Congestion Report
+GLOBAL Congestion bounded by tiles (Lower Left Tile -> Upper Right Tile):
+NORTH
+\tINT_X0Y0->INT_X1Y1 (CLEL_R_X0Y0->CLEM_X1Y0)
+LONG Congestion bounded by tiles (Lower Left Tile -> Upper Right Tile):
+NORTH
+\tINT_X0Y0->INT_X1Y1 (CLEL_R_X0Y0->CLEM_X1Y0)
+Phase 8 Route finalize
+  Global Vertical Routing Utilization    = 22.4462 %
+  Global Horizontal Routing Utilization  = 21.0467 %
+'''
+        c = r.parse_congestion(clean_log, self.load()['tiles'])
+        self.assertEqual(c['stage'], 'initial_global_resolved')
+        self.assertEqual(c['final_global_over_85_windows'], 0)
+        self.assertEqual(len(c['windows']), 1)
+        self.assertEqual(c['windows'][0]['direction'], 'North')
+        self.assertEqual(c['windows'][0]['size'], [16, 16])
+        self.assertEqual(c['windows'][0]['peak_percent'], 2.42)
+        self.assertAlmostEqual(c['global_vertical_percent'], 22.4462)
+        self.assertAlmostEqual(c['global_horizontal_percent'], 21.0467)
+
 
 if __name__=='__main__':unittest.main()

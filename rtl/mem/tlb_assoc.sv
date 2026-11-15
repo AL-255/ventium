@@ -164,11 +164,11 @@ module tlb_assoc #(
     next_hit = 1'b0; next_phys = 32'd0; next_perm = 3'd0; next_dirty = 1'b0;
     for (int w = 0; w < TLB_WAYS; w++) begin
       ix = slot_of(set, w);
-      if (IS_D && !next_hit && tlb_val[ix] && (tlb_vpn[ix] == next_lin[31:12])) begin
+      if (!next_hit && tlb_val[ix] && (tlb_vpn[ix] == next_lin[31:12])) begin
         next_hit = 1'b1;
         next_phys = tlb_big[ix] ? {tlb_pfn[ix][19:10], next_lin[21:0]}
                                 : {tlb_pfn[ix], next_lin[11:0]};
-        next_perm = tlb_perm[ix]; next_dirty = tlb_dirty[ix];
+        next_perm = tlb_perm[ix]; next_dirty = IS_D ? tlb_dirty[ix] : 1'b0;
       end
     end
     if (P54_LARGE && IS_D) begin

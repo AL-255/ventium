@@ -889,9 +889,10 @@ module core
   // see the note at smc_a1 below), and cur_is_w marks the write.
   //
   // The second port covers a store whose bytes cross an I-cache line boundary.
+  logic        bd_smc_req, smc_req_pre_sq;
   logic        smc_v1, smc_v2;
   logic [31:0] smc_a1, smc_a2;
-  assign smc_v1 = mem_req_pre_sq && !sync_access_fault && cur_is_w && fe_translatable;
+  assign smc_v1 = smc_req_pre_sq && !sync_access_fault && fe_translatable;
   // REVIEW1_Aug3 R2-H09: the snoop now carries the beat's PHYSICAL address --
   // mem_addr is the post-translate bus address (the bus driver's tail runs
   // mem_xlate in place), per-fragment under the fx engine (a page-straddling
@@ -924,9 +925,18 @@ module core
   // A snoop that never fires is the bug this finding IS. Count it.
   int ven_smc_n; logic ven_smclog_en;
   initial begin ven_smclog_en = $test$plusargs("ven_smclog") != 0; ven_smc_n = 0; end
-  always_ff @(posedge clk) if (rst_n && smc_v1) ven_smc_n <= ven_smc_n + 1;
+  always_ff @(posedge clk) if (rst_n) begin
+    assert (smc_v1 === (mem_req_pre_sq && !sync_access_fault && cur_is_w && fe_translatable))
+      else $fatal(1, "SMC-SNOOP: smc_v1 diverged state=%0d", state);
+    if (smc_v1) ven_smc_n <= ven_smc_n + 1;
+  end
   final if (ven_smclog_en) $display("[SMCSNOOP] core-generated store snoops: %0d", ven_smc_n);
 `endif
+
+  // Dedicated ibuf-only slow-decode outputs for S_FETCH/S_DECODE consumers:
+  // cuts S_PIPE/S_EXEC refdecode_ibuf muxes out of S_FETCH/S_DECODE timing cones.
+  logic [3:0] ibuf_d_len;
+  logic       ibuf_d_cacheinv, ibuf_d_unknown, ibuf_d_int80;
 
   // REVIEW2_aug2 H-18: INVD/WBINVD retired as privileged NOPs, invalidating nothing.
   // QEMU's flat cache model is not an oracle for FPGA cache state: firmware and OSes
@@ -946,7 +956,7 @@ module core
   `include "core_cacheinv_local.svh"
   assign cache_inv_go = cache_inv_local && (state == S_DECODE);
 `else
-  assign cache_inv_go = d_cacheinv && (state == S_DECODE) && !d_unknown;
+  assign cache_inv_go = ibuf_d_cacheinv && (state == S_DECODE) && !ibuf_d_unknown;
 `endif
 `ifndef SYNTHESIS
   int ven_cinv_n; logic ven_cinvlog_en;
@@ -1719,6 +1729,14 @@ module core
   // I-TLB (instruction fetches) lookup outputs.
   logic        itlb_lk_hit;   logic [31:0] itlb_lk_phys;
   logic [2:0]  itlb_lk_perm;  logic        itlb_lk_dirty;
+`ifdef VEN_ITLB_ASSOC_4WAY
+`ifdef VEN_PIPE_MEM_CHAIN
+`ifdef VEN_IFETCH_AUTH_MULTI
+  logic        itlb_flin_hit;
+  logic [2:0]  itlb_flin_perm;
+`endif
+`endif
+`endif
   // D-TLB (data accesses) lookup outputs — Dirty tracked so a write marks D.
   logic        dtlb_lk_hit;   logic [31:0] dtlb_lk_phys;
   logic [2:0]  dtlb_lk_perm;  logic        dtlb_lk_dirty;
@@ -1752,6 +1770,12 @@ module core
   logic [2:0] fe_dtlb_perm;
   logic fe_d_capture, fe_d_capture_hit, fe_d_capture_dirty;
   logic [19:0] fe_d_capture_page, fe_d_capture_phys;
+`ifdef VEN_ITLB_ASSOC_4WAY
+  logic [2:0] fe_itlb_perm;
+  logic fe_itlb_dirty_unused;
+  logic fe_i_capture, fe_i_capture_hit;
+  logic [19:0] fe_i_capture_page, fe_i_capture_phys;
+`endif
 `endif
 `endif
 `ifdef VEN_FE_DTLB_PERM
@@ -2547,7 +2571,15 @@ module core
   logic        pf_redir;
   logic [31:0] pf_redir_tgt;
 `endif
+`ifdef VEN_IC_RESIDENCY_SPAN
+  logic [IC_IDXW-1:0]              ic_q0_set, ic_q1_set, ic_q2_set, ic_q3_set;
+  logic [IC_IDXW-1:0]              ic_q4_set, ic_q5_set, ic_q6_set;
+  logic [IC_WAYS-1:0][IC_TAGW-1:0] ic_q0_tag, ic_q1_tag, ic_q2_tag, ic_q3_tag;
+  logic [IC_WAYS-1:0][IC_TAGW-1:0] ic_q4_tag, ic_q5_tag, ic_q6_tag;
+  logic [31:0]                     ic_rd_addrA, ic_rd_addrB;
+`else
   logic [IC_TAGW-1:0] ic_tag_o  [IC_SETS][IC_WAYS];   // addr[31:5+idx]
+`endif
   logic        ic_val_o  [IC_SETS][IC_WAYS];
   logic [IC_WAYW-1:0] ic_victim_o [IC_SETS]; // replacement (LRU) way per set (== ~ic_lru @2-way)
   logic [31:0] pf_fill_addr;         // line base currently being filled
@@ -2935,14 +2967,198 @@ module core
     end
   end
 `endif
+`ifdef VEN_PIPE_SDISPATCH
+  // Dedicated ibuf-only decoder instance for S_FETCH/S_DECODE consumers.
+  // Eliminates S_PIPE/S_EXEC refdecode_ibuf byte muxes from S_FETCH/S_DECODE
+  // timing cones and allows u_decode_stages to constant-propagate ibuf_valid=16.
+  logic [2:0]  unused_ibuf_modrm_reg, unused_ibuf_d_dst_reg, unused_ibuf_d_src_reg;
+  logic [1:0]  unused_ibuf_pfx_rep;
+  logic        unused_ibuf_pfx_seg, unused_ibuf_pfx_lock, unused_ibuf_pfx_addr;
+  logic        unused_ibuf_eff_opsize, unused_ibuf_eff_addr;
+  logic        unused_ibuf_d_smsw, unused_ibuf_d_halt, unused_ibuf_d_int, unused_ibuf_d_int_imm;
+  logic [7:0]  unused_ibuf_d_int_vec, unused_ibuf_d_addr_mask, unused_ibuf_d_io_port_imm;
+  logic        unused_ibuf_d_int_cond_of, unused_ibuf_d_iret, unused_ibuf_d_ud2;
+  logic        unused_ibuf_d_rsm, unused_ibuf_d_f00f, unused_ibuf_d_is_branch, unused_ibuf_d_branch_taken;
+  logic [31:0] unused_ibuf_d_rel, unused_ibuf_d_imm, unused_ibuf_d_ea, unused_ibuf_d_imul_imm, unused_ibuf_d_ljmp_off;
+  logic [4:0]  unused_ibuf_d_alu_op, unused_ibuf_d_shift_imm;
+  logic        unused_ibuf_d_writes_reg, unused_ibuf_d_writes_flags;
+  logic        unused_ibuf_d_mem_read, unused_ibuf_d_mem_write, unused_ibuf_d_mem_dst;
+  logic        unused_ibuf_d_use_imm, unused_ibuf_d_is_push, unused_ibuf_d_is_pop;
+  logic        unused_ibuf_d_is_lea, unused_ibuf_d_is_mov, unused_ibuf_d_is_nop, unused_ibuf_d_is_fwait;
+  logic        unused_ibuf_d_addr_mask_known, unused_ibuf_d_dst_high8, unused_ibuf_d_src_high8;
+  logic [2:0]  unused_ibuf_d_w, unused_ibuf_d_shrot, unused_ibuf_d_md, unused_ibuf_d_ext_srcw, unused_ibuf_d_bit_op;
+  kind_e       unused_ibuf_d_kind;
+  logic        unused_ibuf_d_shift_cl, unused_ibuf_d_shift_one, unused_ibuf_d_shrd, unused_ibuf_d_imul_3op;
+  logic        unused_ibuf_d_ext_signed, unused_ibuf_d_bit_imm, unused_ibuf_d_conv_cdq;
+  logic [3:0]  unused_ibuf_d_cc, unused_ibuf_d_f_mbytes;
+  smk_e        unused_ibuf_d_sm;
+  st_e         unused_ibuf_d_st;
+  ctk_e        unused_ibuf_d_ct;
+  logic        unused_ibuf_d_str_loadsi, unused_ibuf_d_str_storedi, unused_ibuf_d_str_scandi;
+  logic [15:0] unused_ibuf_d_ret_imm, unused_ibuf_d_ljmp_sel;
+  logic        unused_ibuf_d_cld, unused_ibuf_d_std, unused_ibuf_d_clc, unused_ibuf_d_stc;
+  logic        unused_ibuf_d_cmc, unused_ibuf_d_cli, unused_ibuf_d_sti, unused_ibuf_d_cnt16, unused_ibuf_d_br16;
+  logic        unused_ibuf_d_io, unused_ibuf_d_lock, unused_ibuf_d_io_write, unused_ibuf_d_io_imm;
+  logic [2:0]  unused_ibuf_d_io_w, unused_ibuf_d_seg, unused_ibuf_d_sys_sreg, unused_ibuf_d_sys_creg;
+  sysop_e      unused_ibuf_d_sysop;
+  logic        unused_ibuf_d_clts, unused_ibuf_d_lmsw, unused_ibuf_d_seg_load;
+  logic [2:0]  unused_ibuf_d_lseg, unused_ibuf_d_pfx_seg_idx;
+  logic        unused_ibuf_d_push_sreg, unused_ibuf_d_pop_sreg, unused_ibuf_d_seg_load_lo, unused_ibuf_d_store_sreg;
+  logic        unused_ibuf_d_xlat, unused_ibuf_d_callf_mem, unused_ibuf_d_jmpf_mem, unused_ibuf_d_pfx_seg_en;
+  fxop_e       unused_ibuf_d_fxop;
+  logic        unused_ibuf_d_is_x87, unused_ibuf_d_f_mem_read, unused_ibuf_d_f_mem_write, unused_ibuf_d_f_pop, unused_ibuf_d_f_pop2;
+  logic [2:0]  unused_ibuf_d_f_msize, unused_ibuf_d_f_sti, unused_ibuf_d_f_aluop, unused_ibuf_d_f_const;
+  logic [4:0]  unused_ref_d_fetch_need, unused_ref_d_fetch_len, unused_ref_d_fetch_fault_len;
+  logic        unused_ref_d_fetch_meta_ready, unused_ref_d_fetch_overlong, unused_ref_d_fetch_modrm;
+  logic        unused_ref_d_fetch_header_ready, unused_ref_d_fetch_header_x87, unused_ref_d_fetch_header_cpl0;
+
+  (* keep_hierarchy = "yes" *)
+  decode_stages u_ibuf_decode_stages (
+    .ibuf          (ibuf),
+    .ibuf_valid    (refdecode_valid),
+    .gpr           (gpr_o),
+    .eflags        (eflags),
+    .sys_mode      (sys_mode),
+    .def16         (def16),
+    .seg_real      (seg_real),
+    .smm_active    (smm_active),
+    .paging_on     (paging_on),
+    .cosim_en      (cosim_en),
+    .soc_en        (soc_en),
+    .modrm_reg     (unused_ibuf_modrm_reg),
+    .pfx_rep       (unused_ibuf_pfx_rep),
+    .pfx_seg       (unused_ibuf_pfx_seg),
+    .pfx_lock      (unused_ibuf_pfx_lock),
+    .pfx_addr      (unused_ibuf_pfx_addr),
+    .eff_opsize    (unused_ibuf_eff_opsize),
+    .eff_addr      (unused_ibuf_eff_addr),
+    .d_len         (ibuf_d_len),
+    .d_fetch_need  (d_fetch_need),
+    .d_fetch_len   (d_fetch_len),
+    .d_fetch_fault_len (d_fetch_fault_len),
+    .d_fetch_meta_ready (d_fetch_meta_ready),
+    .d_fetch_overlong (d_fetch_overlong),
+    .d_fetch_modrm (d_fetch_modrm),
+    .d_fetch_header_ready (d_fetch_header_ready),
+    .d_fetch_header_x87 (d_fetch_header_x87),
+    .d_fetch_header_cpl0 (d_fetch_header_cpl0),
+    .d_smsw        (unused_ibuf_d_smsw),
+    .d_halt        (unused_ibuf_d_halt),
+    .d_cacheinv    (ibuf_d_cacheinv),
+    .d_int80       (ibuf_d_int80),
+    .d_unknown     (ibuf_d_unknown),
+    .d_int         (unused_ibuf_d_int),
+    .d_int_vec     (unused_ibuf_d_int_vec),
+    .d_int_imm     (unused_ibuf_d_int_imm),
+    .d_int_cond_of (unused_ibuf_d_int_cond_of),
+    .d_iret        (unused_ibuf_d_iret),
+    .d_ud2         (unused_ibuf_d_ud2),
+    .d_rsm         (unused_ibuf_d_rsm),
+    .d_f00f        (unused_ibuf_d_f00f),
+    .d_is_branch   (unused_ibuf_d_is_branch),
+    .d_branch_taken(unused_ibuf_d_branch_taken),
+    .d_rel         (unused_ibuf_d_rel),
+    .d_alu_op      (unused_ibuf_d_alu_op),
+    .d_writes_reg  (unused_ibuf_d_writes_reg),
+    .d_writes_flags(unused_ibuf_d_writes_flags),
+    .d_mem_read    (unused_ibuf_d_mem_read),
+    .d_mem_write   (unused_ibuf_d_mem_write),
+    .d_mem_dst     (unused_ibuf_d_mem_dst),
+    .d_dst_reg     (unused_ibuf_d_dst_reg),
+    .d_src_reg     (unused_ibuf_d_src_reg),
+    .d_imm         (unused_ibuf_d_imm),
+    .d_use_imm     (unused_ibuf_d_use_imm),
+    .d_is_push     (unused_ibuf_d_is_push),
+    .d_is_pop      (unused_ibuf_d_is_pop),
+    .d_is_lea      (unused_ibuf_d_is_lea),
+    .d_is_mov      (unused_ibuf_d_is_mov),
+    .d_is_nop      (unused_ibuf_d_is_nop),
+    .d_is_fwait    (unused_ibuf_d_is_fwait),
+    .d_ea          (unused_ibuf_d_ea),
+    .d_addr_mask   (unused_ibuf_d_addr_mask),
+    .d_addr_mask_known(unused_ibuf_d_addr_mask_known),
+    .d_w           (unused_ibuf_d_w),
+    .d_dst_high8   (unused_ibuf_d_dst_high8),
+    .d_src_high8   (unused_ibuf_d_src_high8),
+    .d_kind        (unused_ibuf_d_kind),
+    .d_shrot       (unused_ibuf_d_shrot),
+    .d_shift_cl    (unused_ibuf_d_shift_cl),
+    .d_shift_one   (unused_ibuf_d_shift_one),
+    .d_shift_imm   (unused_ibuf_d_shift_imm),
+    .d_shrd        (unused_ibuf_d_shrd),
+    .d_md          (unused_ibuf_d_md),
+    .d_imul_3op    (unused_ibuf_d_imul_3op),
+    .d_imul_imm    (unused_ibuf_d_imul_imm),
+    .d_ext_signed  (unused_ibuf_d_ext_signed),
+    .d_ext_srcw    (unused_ibuf_d_ext_srcw),
+    .d_cc          (unused_ibuf_d_cc),
+    .d_bit_imm     (unused_ibuf_d_bit_imm),
+    .d_bit_op      (unused_ibuf_d_bit_op),
+    .d_conv_cdq    (unused_ibuf_d_conv_cdq),
+    .d_sm          (unused_ibuf_d_sm),
+    .d_st          (unused_ibuf_d_st),
+    .d_str_loadsi  (unused_ibuf_d_str_loadsi),
+    .d_str_storedi (unused_ibuf_d_str_storedi),
+    .d_str_scandi  (unused_ibuf_d_str_scandi),
+    .d_ct          (unused_ibuf_d_ct),
+    .d_ret_imm     (unused_ibuf_d_ret_imm),
+    .d_cld         (unused_ibuf_d_cld),
+    .d_std         (unused_ibuf_d_std),
+    .d_clc         (unused_ibuf_d_clc),
+    .d_stc         (unused_ibuf_d_stc),
+    .d_cmc         (unused_ibuf_d_cmc),
+    .d_cli         (unused_ibuf_d_cli),
+    .d_sti         (unused_ibuf_d_sti),
+    .d_cnt16       (unused_ibuf_d_cnt16),
+    .d_br16        (unused_ibuf_d_br16),
+    .d_io          (unused_ibuf_d_io),
+    .d_lock        (unused_ibuf_d_lock),
+    .d_io_write    (unused_ibuf_d_io_write),
+    .d_io_imm      (unused_ibuf_d_io_imm),
+    .d_io_port_imm (unused_ibuf_d_io_port_imm),
+    .d_io_w        (unused_ibuf_d_io_w),
+    .d_seg         (unused_ibuf_d_seg),
+    .d_sysop       (unused_ibuf_d_sysop),
+    .d_sys_sreg    (unused_ibuf_d_sys_sreg),
+    .d_sys_creg    (unused_ibuf_d_sys_creg),
+    .d_clts        (unused_ibuf_d_clts),
+    .d_lmsw        (unused_ibuf_d_lmsw),
+    .d_ljmp_off    (unused_ibuf_d_ljmp_off),
+    .d_ljmp_sel    (unused_ibuf_d_ljmp_sel),
+    .d_seg_load    (unused_ibuf_d_seg_load),
+    .d_lseg        (unused_ibuf_d_lseg),
+    .d_push_sreg   (unused_ibuf_d_push_sreg),
+    .d_pop_sreg    (unused_ibuf_d_pop_sreg),
+    .d_seg_load_lo (unused_ibuf_d_seg_load_lo),
+    .d_store_sreg  (unused_ibuf_d_store_sreg),
+    .d_xlat        (unused_ibuf_d_xlat),
+    .d_callf_mem   (unused_ibuf_d_callf_mem),
+    .d_jmpf_mem    (unused_ibuf_d_jmpf_mem),
+    .d_pfx_seg_en  (unused_ibuf_d_pfx_seg_en),
+    .d_pfx_seg_idx (unused_ibuf_d_pfx_seg_idx),
+    .d_fxop        (unused_ibuf_d_fxop),
+    .d_is_x87      (unused_ibuf_d_is_x87),
+    .d_f_mem_read  (unused_ibuf_d_f_mem_read),
+    .d_f_mem_write (unused_ibuf_d_f_mem_write),
+    .d_f_msize     (unused_ibuf_d_f_msize),
+    .d_f_mbytes    (unused_ibuf_d_f_mbytes),
+    .d_f_pop       (unused_ibuf_d_f_pop),
+    .d_f_pop2      (unused_ibuf_d_f_pop2),
+    .d_f_sti       (unused_ibuf_d_f_sti),
+    .d_f_aluop     (unused_ibuf_d_f_aluop),
+    .d_f_const     (unused_ibuf_d_f_const)
+  );
+`endif
+
   decode_stages u_decode_stages (
     // inputs (architectural + fetch state the decoder reads)
 `ifdef VEN_PIPE_SDISPATCH
     .ibuf          (refdecode_ibuf),
+    .ibuf_valid    (5'd16),
 `else
     .ibuf          (ibuf),
-`endif
     .ibuf_valid    (refdecode_valid),
+`endif
     .gpr           (gpr_o),
     .eflags        (eflags),
     .sys_mode      (sys_mode),
@@ -2962,6 +3178,17 @@ module core
     .eff_addr      (eff_addr),
     // decoded fields (the d_* the q_* latch consumes)
     .d_len         (d_len),
+`ifdef VEN_PIPE_SDISPATCH
+    .d_fetch_need  (unused_ref_d_fetch_need),
+    .d_fetch_len   (unused_ref_d_fetch_len),
+    .d_fetch_fault_len (unused_ref_d_fetch_fault_len),
+    .d_fetch_meta_ready (unused_ref_d_fetch_meta_ready),
+    .d_fetch_overlong (unused_ref_d_fetch_overlong),
+    .d_fetch_modrm (unused_ref_d_fetch_modrm),
+    .d_fetch_header_ready (unused_ref_d_fetch_header_ready),
+    .d_fetch_header_x87 (unused_ref_d_fetch_header_x87),
+    .d_fetch_header_cpl0 (unused_ref_d_fetch_header_cpl0),
+`else
     .d_fetch_need  (d_fetch_need),
     .d_fetch_len   (d_fetch_len),
     .d_fetch_fault_len (d_fetch_fault_len),
@@ -2971,6 +3198,7 @@ module core
     .d_fetch_header_ready (d_fetch_header_ready),
     .d_fetch_header_x87 (d_fetch_header_x87),
     .d_fetch_header_cpl0 (d_fetch_header_cpl0),
+`endif
     .d_smsw        (d_smsw),
     .d_halt        (d_halt),
     .d_cacheinv    (d_cacheinv),
@@ -3077,6 +3305,31 @@ module core
     .d_f_aluop     (d_f_aluop),
     .d_f_const     (d_f_const)
   );
+`ifndef VEN_PIPE_SDISPATCH
+  assign ibuf_d_len      = d_len;
+  assign ibuf_d_cacheinv = d_cacheinv;
+  assign ibuf_d_unknown  = d_unknown;
+  assign ibuf_d_int80    = d_int80;
+`endif
+`ifndef SYNTHESIS
+`ifdef VEN_PIPE_SDISPATCH
+  always_ff @(posedge clk) if (rst_n) begin
+    if (state == S_FETCH || state == S_DECODE) begin
+      for (int bi = 0; bi < 16; bi++) begin
+        assert (refdecode_ibuf[bi] === ibuf[bi])
+          else $fatal(1, "IBUF-DECODE-SPLIT: refdecode_ibuf[%0d] != ibuf[%0d] in state=%0d",
+                      bi, bi, state);
+      end
+    end
+    if (state == S_DECODE) begin
+      assert (refdecode_valid === 5'd16 &&
+              {ibuf_d_len, ibuf_d_cacheinv, ibuf_d_unknown, ibuf_d_int80} ===
+              {d_len, d_cacheinv, d_unknown, d_int80})
+        else $fatal(1, "IBUF-DECODE-SPLIT: S_DECODE output mismatch");
+    end
+  end
+`endif
+`endif
 
 
   // M7.1: syscall_active pulses for the S_DECODE clock that proxies an int-0x80.
@@ -3084,7 +3337,7 @@ module core
   // (state==S_DECODE && d_int80 && proxy_en) makes this exactly the clock the
   // proxy applies its effects, so the TB samples the same edge. 0 in all
   // non-proxy runs (proxy_en==0).
-  assign syscall_active_c = (state==S_DECODE) && d_int80 && proxy_en;
+  assign syscall_active_c = (state==S_DECODE) && ibuf_d_int80 && proxy_en;
   assign syscall_active   = syscall_active_c;
 
 `ifdef VEN_FPTRAP
@@ -4450,6 +4703,7 @@ module core
   // (rtl/core/issue_uv.sv), instantiated as u_issue near the decode instances.
   // It takes the U decode + V candidate decode and drives `pipe_pair_ok`.
 
+`ifndef VEN_IC_RESIDENCY_SPAN
   // icache presence: is the 32-byte line containing `addr` resident in EITHER way
   // of its set? (2-way, mirrors the oracle / the RTL D-cache lookup.) Reads the
   // module's READ-ONLY array outputs (ic_val_o/ic_tag_o) — PRE-edge registered
@@ -4520,6 +4774,7 @@ module core
 `endif
     ic_byte = ln[{addr[4:0],3'b000} +: 8];
   endfunction
+`endif
 
   // BEGIN IC FRONT SPAN
 `ifdef VEN_IC_BRAM
@@ -4534,6 +4789,38 @@ module core
   logic [7:0] ic_front_bytes [IC_FRONT_BYTES];
   logic [IC_FRONT_BYTES-1:0] ic_front_present_bytes;
 
+`ifdef VEN_IC_RESIDENCY_SPAN
+  function automatic logic [IC_WAYW:0] ic_front_probe_q(
+      input logic [IC_WAYS-1:0][IC_TAGW-1:0] qtags, input logic [31:0] addr);
+    logic [IC_IDXW-1:0] set;
+    logic [IC_TAGW-1:0] tag;
+    logic [IC_WAYW:0] probe;
+    begin
+      set = addr[5 +: IC_IDXW]; tag = addr[5+IC_IDXW +: IC_TAGW];
+      probe = {1'b0, IC_WAYW'(IC_WAYS-1)};
+      // Preserve the executable priority, including duplicate valid tags:
+      // the last matching cache way wins, then the last matching bypass slot.
+      for (int w=0; w<IC_WAYS; w++)
+        if (ic_val_o[set][w] && qtags[w]==tag)
+          probe = {1'b1, IC_WAYW'(w)};
+`ifndef VEN_IC_NO_FETCH_BYPASS
+      for (int i=0; i<2; i++)
+        if (icbp_v[i] && (set == icbp_set[i]) && (tag == icbp_tag[i]))
+          probe = {1'b1, icbp_way[i]};
+`endif
+      ic_front_probe_q = probe;
+    end
+  endfunction
+
+  assign ic_q0_set  = flin[5 +: IC_IDXW];
+  assign ic_q1_set  = flin_nl[5 +: IC_IDXW];
+  assign ic_front_a = ic_front_probe_q(ic_q0_tag, flin);
+  assign ic_front_b = ic_front_probe_q(ic_q1_tag, flin_nl);
+`ifndef VEN_IC_PREFIX_SPAN
+  assign ic_q5_set = '0;
+  assign ic_q6_set = '0;
+`endif
+`else
   function automatic logic [IC_WAYW:0] ic_front_probe(input logic [31:0] addr);
     logic [IC_IDXW-1:0] set;
     logic [IC_TAGW-1:0] tag;
@@ -4557,6 +4844,7 @@ module core
 
   assign ic_front_a = ic_front_probe(flin);
   assign ic_front_b = ic_front_probe(flin_nl);
+`endif
   // The registered ports may have been redirected or may hold the same set.
   // Select by returned (set,way), not assumed sequential A/B ownership. A
   // collided/missing identity falls back to stale A exactly like ic_byte.
@@ -4599,6 +4887,7 @@ module core
   // to pass its already fetched bytes to the reference decoder.
   logic sfetch_uop_fast, sfetch_short_fast, sfetch_resident_fast;
   logic pipe_sdecode_window_ok;
+`ifndef VEN_IC_RESIDENCY_SPAN
 `ifdef VEN_IC_BRAM
   function automatic logic ic_buffered(input logic [31:0] addr);
     logic [IC_IDXW-1:0] ib_set;
@@ -4611,6 +4900,7 @@ module core
                   || (rdB_set_q == ib_set && rdB_way_q == ib_way && !ic_rd_collB));
     end
   endfunction
+`endif
 `endif
 `ifdef VEN_PIPE_SDECODE
 `ifdef VEN_IC_BRAM
@@ -5174,12 +5464,30 @@ module core
                  cn, eip, flin, fetch_word, mem_addr, mem_rdata);
         ven_fetchdbg_n <= ven_fetchdbg_n + 1;
       end else if ((state == S_FETCH) && sfetch_short_fast) begin
+`ifdef VEN_IC_BRAM
+        $display("[FETCHDBG:SHORT] cn=%0d eip=%08x flin=%08x len=%0d bytes=%02x%02x",
+                 cn, eip, flin, sfetch_short_len_q, ic_front_bytes[0],
+                 sfetch_short_len_q == 4'd1 ? 8'd0 : ic_front_bytes[1]);
+`else
         $display("[FETCHDBG:SHORT] cn=%0d eip=%08x flin=%08x len=%0d bytes=%02x%02x",
                  cn, eip, flin, sfetch_short_len_q, ic_byte(flin),
                  sfetch_short_len_q == 4'd1 ? 8'd0 : ic_byte(flin + 32'd1));
+`endif
         ven_fetchdbg_n <= ven_fetchdbg_n + 1;
       end else if ((state == S_FETCH)
                    && (sfetch_fast || sfetch_uop_fast || sfetch_resident_fast)) begin
+`ifdef VEN_IC_BRAM
+        $display("[FETCHDBG:CACHE] cn=%0d eip=%08x flin=%08x bytes=%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x",
+                 cn, eip, flin,
+                 ic_front_bytes[0],  ic_front_bytes[1],
+                 ic_front_bytes[2],  ic_front_bytes[3],
+                 ic_front_bytes[4],  ic_front_bytes[5],
+                 ic_front_bytes[6],  ic_front_bytes[7],
+                 ic_front_bytes[8],  ic_front_bytes[9],
+                 ic_front_bytes[10], ic_front_bytes[11],
+                 ic_front_bytes[12], ic_front_bytes[13],
+                 ic_front_bytes[14], ic_front_bytes[15]);
+`else
         $display("[FETCHDBG:CACHE] cn=%0d eip=%08x flin=%08x bytes=%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x",
                  cn, eip, flin,
                  ic_byte(flin + 32'd0),  ic_byte(flin + 32'd1),
@@ -5190,6 +5498,7 @@ module core
                  ic_byte(flin + 32'd10), ic_byte(flin + 32'd11),
                  ic_byte(flin + 32'd12), ic_byte(flin + 32'd13),
                  ic_byte(flin + 32'd14), ic_byte(flin + 32'd15));
+`endif
         ven_fetchdbg_n <= ven_fetchdbg_n + 1;
       end else if (state == S_DECODE) begin
         $display("[FETCHDBG:DECODE] cn=%0d eip=%08x flin=%08x bytes=%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x",
@@ -5511,6 +5820,33 @@ module core
   assign flin_nl    = {flin[31:5], 5'd0} + 32'd32;     // next aligned 32-byte line
 `ifdef VEN_P54_CTRL_TARGET_READ
   `include "core_ctrl_target_read.svh"
+`endif
+`ifdef VEN_IC_RESIDENCY_SPAN
+`ifdef VEN_P54_CTRL_TARGET_READ
+  assign ic_rd_addrA = p54_ctrl_target_read ? p54_ctrl_target_addr : flin;
+`else
+  assign ic_rd_addrA = flin;
+`endif
+`ifdef VEN_IC_BRAM
+`ifdef VEN_P54_CTRL_TARGET_READ
+  assign ic_rd_addrB = p54_ctrl_target_read ? p54_ctrl_target_next_line
+                                            : (pf_redir ? pf_redir_tgt : flin_nl);
+`else
+  assign ic_rd_addrB = pf_redir ? pf_redir_tgt : flin_nl;
+`endif
+`else
+  assign ic_rd_addrB = flin_nl;
+`endif
+  wire [IC_WAYW:0] ic_rd_probeA = ic_front_probe_q(ic_q3_tag, ic_rd_addrA);
+  wire [IC_WAYW:0] ic_rd_probeB = ic_front_probe_q(ic_q4_tag, ic_rd_addrB);
+  assign ic_q3_set  = ic_rd_addrA[5 +: IC_IDXW];
+  assign ic_q4_set  = ic_rd_addrB[5 +: IC_IDXW];
+  assign ic_rd_setA = ic_rd_addrA[5 +: IC_IDXW];
+  assign ic_rd_wayA = ic_rd_probeA[IC_WAYW-1:0];
+  assign ic_rd_setB = ic_rd_addrB[5 +: IC_IDXW];
+  assign ic_rd_wayB = ic_rd_probeB[IC_WAYW-1:0];
+`else
+`ifdef VEN_P54_CTRL_TARGET_READ
   // Two existing registered ports, no added SRAM port or retained descriptor.
   // Only a resolved slow owner can override these speculative read addresses.
   assign ic_rd_setA = p54_ctrl_target_read
@@ -5539,6 +5875,7 @@ module core
   assign ic_rd_setB = flin_nl[5 +: IC_IDXW];
   assign ic_rd_wayB = ic_hit_way(flin_nl);
 `endif
+`endif
 
 `ifdef VEN_IC_BRAM
   // Register the read ADDRESS as a tag, in lock-step with the icache module's
@@ -5563,8 +5900,15 @@ module core
   logic ic_fa_avail, ic_fb_avail, ic_win_straddle;
   always_comb begin
     logic [IC_IDXW-1:0] fa_set, fb_set; logic [IC_WAYW-1:0] fa_way, fb_way;
-    fa_set = flin[5 +: IC_IDXW];        fa_way = ic_hit_way(flin);
-    fb_set = flin_nl[5 +: IC_IDXW];     fb_way = ic_hit_way(flin_nl);
+    fa_set = flin[5 +: IC_IDXW];
+    fb_set = flin_nl[5 +: IC_IDXW];
+`ifdef VEN_IC_RESIDENCY_SPAN
+    fa_way = ic_front_a[IC_WAYW-1:0];
+    fb_way = ic_front_b[IC_WAYW-1:0];
+`else
+    fa_way = ic_hit_way(flin);
+    fb_way = ic_hit_way(flin_nl);
+`endif
     // A buffer whose registered read COLLIDED with a fill (rd_coll*) holds BRAM-garbage
     // on silicon — exclude it so the fetch stalls and re-reads cleanly next cycle.
     ic_fa_avail = (rdA_set_q==fa_set && rdA_way_q==fa_way && !ic_rd_collA)
@@ -10026,10 +10370,10 @@ module core
                   // a later raw uop/BRAM value while its memory seam is pending.
                   && ((state == S_PIPE && pipe_cs_issue_eligible
                        && (({1'b0, eip} + {28'd0, pipe_u_eff.len} - 33'd1) > {1'b0, seg_limit[SG_CS]}))
-                   || (state == S_DECODE && (d_len != 4'd0) &&
+                   || (state == S_DECODE && (ibuf_d_len != 4'd0) &&
                        (sfetch_header_fault_q == 2'd0)
                        && !sfetch_early_nm && !sfetch_early_gp
-                       && (({1'b0, eip} + {28'd0, d_len} - 33'd1) > {1'b0, seg_limit[SG_CS]})));
+                       && (({1'b0, eip} + {28'd0, ibuf_d_len} - 33'd1) > {1'b0, seg_limit[SG_CS]})));
     seg_access_fault = cur_is_d && cur_seg_rel && !seg_ext_skip
                     && (seg_off_over_limit || seg_null_sel || seg_not_present
                      || seg_type_fault);
@@ -10283,10 +10627,17 @@ module core
   // including their U/S and R/W bits -- stale-mapping execution across an address
   // space switch, which is about as bad as a paging bug gets.
   logic tlb_flush;
+  // IA-32 SDM Vol. 3 §4.10.4.1: CLTS (0F 06) and MOV CR0/CR4 writes that do not
+  // alter paging/protection/cache bits (CR0.{PG,CD,NW,WP,PE} or CR4.{PGE,PSE})
+  // must NOT flush TLBs or the 8 KB I-cache. MOV CR3 always flushes.
+  wire cr0_tlb_flush_chg = |((cr0_exec_value ^ creg0) & 32'hE001_0001);
+  wire cr4_tlb_flush_chg = |((gpr_o[q_src_reg] ^ creg4) & 32'h0000_0090);
   assign tlb_flush = ( (state==S_EXEC) &&
                        ( (q_sysop==SYS_INVLPG) ||
                          ((q_sysop==SYS_MOVCR_TO) &&
-                          ((q_sys_creg==3'd3) || (q_sys_creg==3'd0) || (q_sys_creg==3'd4))) ) )
+                          ((q_sys_creg==3'd3) ||
+                           ((q_sys_creg==3'd0) && cr0_tlb_flush_chg) ||
+                           ((q_sys_creg==3'd4) && cr4_tlb_flush_chg))) ) )
                    || tsw_cr3_commit      // H-01: task switch loads the new task's CR3
                    || rsm_ctx_restore;    // H-01: RSM restores CR0/CR3/CR4
 
@@ -10305,7 +10656,15 @@ module core
       .lk_lin(cur_lin),  .lk_hit(itlb_lk_hit), .lk_phys(itlb_lk_phys),
       .lk_perm(itlb_lk_perm), .lk_dirty(itlb_lk_dirty),
 `ifdef VEN_PIPE_MEM_CHAIN
+`ifdef VEN_ITLB_ASSOC_4WAY
+`ifdef VEN_IFETCH_AUTH_MULTI
+      .next_lin(flin), .next_hit(itlb_flin_hit), .next_phys(), .next_perm(itlb_flin_perm), .next_dirty(),
+`else
       .next_lin(32'd0), .next_hit(), .next_phys(), .next_perm(), .next_dirty(),
+`endif
+`else
+      .next_lin(32'd0), .next_hit(), .next_phys(), .next_perm(), .next_dirty(),
+`endif
 `endif
 `ifdef VEN_P54_DUAL_HIT
       .pair_lin(32'd0), .pair_hit(), .pair_phys(), .pair_perm(), .pair_dirty(),
@@ -10413,19 +10772,45 @@ module core
 `endif
 `endif
   end
+`ifdef VEN_ITLB_ASSOC_4WAY
+  // Multi-entry 32-page (8-set x 4-way) LUTRAM I-side FE micro-TLB matching
+  // u_itlb's geometry, eliminating cross-page fe_xlate_pend bubbles on S_PF/S_FETCH.
+  assign fe_itlb_page = cur_lin[31:12];
+  ven_fe_dtlb #(.SETS(8), .WAYS(4)) u_fe_itlb (
+      .clk(clk), .rst_n(rst_n),
+      .invalidate(tlb_flush || (tlb_fill_en && !tlb_fill_is_d)),
+      .query_page(cur_lin[31:12]), .query_valid(fe_itlb_v),
+      .query_hit(fe_itlb_hit), .query_dirty(fe_itlb_dirty_unused), .query_phys(fe_itlb_phys),
+      .query_perm(fe_itlb_perm), .capture_perm(itlb_lk_perm),
+      .capture(fe_i_capture), .capture_page(fe_i_capture_page),
+      .capture_phys(fe_i_capture_phys), .capture_hit(fe_i_capture_hit),
+      .capture_dirty(1'b0)
+  );
+  wire _unused_fe_itlb = &{1'b0, fe_itlb_perm, fe_itlb_dirty_unused};
+  always_comb begin
+    fe_i_capture = paging_on && fe_translatable && !cur_is_d && !fe_itlb_v;
+    fe_i_capture_page = cur_lin[31:12];
+    fe_i_capture_phys = itlb_lk_phys[31:12];
+    fe_i_capture_hit  = itlb_lk_hit;
+  end
+`else
+  always_ff @(posedge clk) begin
+    if (!rst_n || tlb_flush || (tlb_fill_en && !tlb_fill_is_d)) begin
+      fe_itlb_v <= 1'b0;
+    end else if (paging_on && fe_translatable && !cur_is_d &&
+                 (!fe_itlb_v || (fe_itlb_page != cur_lin[31:12]))) begin
+      fe_itlb_page <= cur_lin[31:12]; fe_itlb_phys <= itlb_lk_phys[31:12];
+      fe_itlb_hit  <= itlb_lk_hit;    fe_itlb_v    <= 1'b1;
+    end
+  end
 `endif
+`else
   always_ff @(posedge clk) begin
     if (!rst_n) begin
-      fe_itlb_v <= 1'b0;
-`ifndef VEN_FE_DTLB_MULTI
-      fe_dtlb_v <= 1'b0;
-`endif
+      fe_itlb_v <= 1'b0; fe_dtlb_v <= 1'b0;
     end else begin
       if (tlb_flush) begin
-        fe_itlb_v <= 1'b0;
-`ifndef VEN_FE_DTLB_MULTI
-        fe_dtlb_v <= 1'b0;
-`endif
+        fe_itlb_v <= 1'b0; fe_dtlb_v <= 1'b0;
       end
       else begin
         // Re-register ONLY from a genuine translatable access this clock
@@ -10446,7 +10831,6 @@ module core
           fe_itlb_hit  <= itlb_lk_hit;    fe_itlb_v    <= 1'b1;
         end
         // D-side
-`ifndef VEN_FE_DTLB_MULTI
         if (tlb_fill_en && tlb_fill_is_d) fe_dtlb_v <= 1'b0;
 `ifdef VEN_PIPE_MEM_CHAIN
 `ifdef VEN_PIPE_REG_LOAD_PRIME
@@ -10481,10 +10865,10 @@ module core
           fe_dtlb_hit   <= dtlb_lk_hit;    fe_dtlb_dirty <= dtlb_lk_dirty;
           fe_dtlb_v     <= 1'b1;
         end
-`endif
       end
     end
   end
+`endif
 `endif
 
   // M2S.3 — begin IDT delivery of a HARDWARE fault (#GP/#NP/#SS/#PF/#UD raised
@@ -12282,7 +12666,17 @@ module core
     .rd_lineB  (ic_rd_lineB),
     .rd_collA  (ic_rd_collA),
     .rd_collB  (ic_rd_collB),
+`ifdef VEN_IC_RESIDENCY_SPAN
+    .ic_q0_set_i (ic_q0_set), .ic_q0_tag_o (ic_q0_tag),
+    .ic_q1_set_i (ic_q1_set), .ic_q1_tag_o (ic_q1_tag),
+    .ic_q2_set_i (ic_q2_set), .ic_q2_tag_o (ic_q2_tag),
+    .ic_q3_set_i (ic_q3_set), .ic_q3_tag_o (ic_q3_tag),
+    .ic_q4_set_i (ic_q4_set), .ic_q4_tag_o (ic_q4_tag),
+    .ic_q5_set_i (ic_q5_set), .ic_q5_tag_o (ic_q5_tag),
+    .ic_q6_set_i (ic_q6_set), .ic_q6_tag_o (ic_q6_tag),
+`else
     .ic_tag_o  (ic_tag_o),
+`endif
     .ic_val_o  (ic_val_o),
     .ic_victim_o (ic_victim_o),
     .fill_en   (ic_fill_en),
@@ -15005,6 +15399,35 @@ module core
             // is_fp deliberately uses simple=0 to stay separate from integer
             // pairing; those instructions have already been accepted by the
             // compact x87 path and are not slow decoder work.
+`ifdef VEN_IC_BRAM
+            if (!u_d.is_fp) begin
+              pp_slowop[ic_front_bytes[0]] <= pp_slowop[ic_front_bytes[0]] + 64'd1;
+              if (ic_front_bytes[1][7:6] == 2'b11) begin
+                pp_slowop_rr[ic_front_bytes[0]] <= pp_slowop_rr[ic_front_bytes[0]] + 64'd1;
+                if (ic_front_bytes[1][5] || ic_front_bytes[1][2])
+                  pp_slowop_rr_hi8[ic_front_bytes[0]] <= pp_slowop_rr_hi8[ic_front_bytes[0]] + 64'd1;
+              end
+              if (ic_front_bytes[0] == 8'h0F) begin
+                pp_slowop_0f[ic_front_bytes[1]] <= pp_slowop_0f[ic_front_bytes[1]] + 64'd1;
+                if ((ic_front_bytes[1][7:4] == 4'h9)
+                    && (ic_front_bytes[2][7:6] == 2'b11)) begin
+                  pp_slowop_0f_setcc_rr[ic_front_bytes[1]]
+                    <= pp_slowop_0f_setcc_rr[ic_front_bytes[1]] + 64'd1;
+                  if (ic_front_bytes[2][2])
+                    pp_slowop_0f_setcc_rr_hi8[ic_front_bytes[1]]
+                      <= pp_slowop_0f_setcc_rr_hi8[ic_front_bytes[1]] + 64'd1;
+                end
+              end
+            end
+            if (pp_slowop[ic_front_bytes[0]] == 0) begin
+              pp_slowop_first_pc[ic_front_bytes[0]] <= flin;
+              pp_slowop_first_bytes[ic_front_bytes[0]] <= {
+                ic_front_bytes[5], ic_front_bytes[4],
+                ic_front_bytes[3], ic_front_bytes[2],
+                ic_front_bytes[1], ic_front_bytes[0]
+              };
+            end
+`else
             if (!u_d.is_fp) begin
               pp_slowop[ic_byte(flin)] <= pp_slowop[ic_byte(flin)] + 64'd1;
               // A register-only candidate avoids the data-side protocol entirely.
@@ -15041,6 +15464,7 @@ module core
                 ic_byte(flin + 32'd1), ic_byte(flin)
               };
             end
+`endif
 `endif
 `endif
           end

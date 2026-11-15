@@ -108,39 +108,70 @@ def tile_box(tiles, lower, upper):
 
 
 def parse_congestion(text, tiles):
-    """Final native GLOBAL windows, not guessed SLICE-to-INT coordinates.
+    """Native GLOBAL windows (final >=85% section, or Phase 4 initial when final has 0 >=85% hotspots).
 
-    Percentages are directional window maxima, NOT a measurement at every
+    Percentages are directional window summaries, NOT a measurement at every
     tile. Missing coverage means unknown. Pin clusters are a different stage.
     """
-    if '--GLOBAL Congestion:' not in text:
-        raise ValueError('native run log has no final global congestion section')
-    section = text.rsplit('--GLOBAL Congestion:', 1)[1].split('Reporting congestion hotspots', 1)[0]
-    header = re.compile(r'(North|South|East|West) Dir (\d+)x(\d+) Area, Max Cong = ([\d.]+)%')
     windows = []
-    direction = None
-    for line in section.splitlines():
-        match = header.search(line)
-        if match:
-            direction, w, h, peak = match.groups()
-            peak = float(peak)
-            if peak < 0:
-                raise ValueError('negative congestion')
-        elif direction:
-            match = re.fullmatch(r'\s*(\w+_X\d+Y\d+) -> (\w+_X\d+Y\d+)\s*', line)
+    stage = 'final_global'
+    direction_summary = {}
+    if '--GLOBAL Congestion:' in text:
+        section = text.rsplit('--GLOBAL Congestion:', 1)[1].split('Reporting congestion hotspots', 1)[0]
+        header = re.compile(r'(North|South|East|West) Dir (\d+)x(\d+) Area, Max Cong = ([\d.]+)%')
+        direction = None
+        for line in section.splitlines():
+            match = header.search(line)
             if match:
-                lo, hi = match.groups()
-                windows.append(dict(direction=direction, size=[int(w), int(h)], peak_percent=peak,
-                                    lower_tile=lo, upper_tile=hi, box=tile_box(tiles, lo, hi)))
+                direction, w, h, peak = match.groups()
+                peak = float(peak)
+                if peak < 0:
+                    raise ValueError('negative congestion')
+            elif direction:
+                match = re.fullmatch(r'\s*(\w+_X\d+Y\d+) -> (\w+_X\d+Y\d+)\s*', line)
+                if match:
+                    lo, hi = match.groups()
+                    windows.append(dict(direction=direction, size=[int(w), int(h)], peak_percent=peak,
+                                        lower_tile=lo, upper_tile=hi, box=tile_box(tiles, lo, hi)))
+    elif ('INFO: [Route 35-449] Initial Estimated Congestion' in text
+          and 'GLOBAL Congestion bounded by tiles (Lower Left Tile -> Upper Right Tile):' in text
+          and 'Phase 8 Route finalize' in text):
+        stage = 'initial_global_resolved'
+        est_sec = text.rsplit('INFO: [Route 35-449] Initial Estimated Congestion', 1)[1]
+        global_table = {}
+        row_re = re.compile(r'^\|\s*(NORTH|SOUTH|EAST|WEST)\|\s*(\d+)x(\d+)\|\s*([\d.]+)\|', re.M)
+        for d_up, w, h, pct in row_re.findall(est_sec.split('Congestion Report', 1)[0]):
+            global_table[d_up.capitalize()] = ([int(w), int(h)], float(pct))
+            direction_summary[d_up.capitalize()] = {'size': [int(w), int(h)], 'percent': float(pct)}
+        win_sec = est_sec.split('GLOBAL Congestion bounded by tiles (Lower Left Tile -> Upper Right Tile):', 1)[1]
+        win_sec = re.split(r'^(?:LONG|SHORT) Congestion bounded by tiles|^INFO: \[Route 35-', win_sec, maxsplit=1, flags=re.M)[0]
+        direction = None
+        for line in win_sec.splitlines():
+            stripped = line.strip()
+            if stripped in ('NORTH', 'SOUTH', 'EAST', 'WEST'):
+                direction = stripped.capitalize()
+            elif direction and stripped:
+                match = re.match(r'^(\w+_X\d+Y\d+)\s*->\s*(\w+_X\d+Y\d+)\b', stripped)
+                if match:
+                    lo, hi = match.groups()
+                    if direction not in global_table:
+                        raise ValueError(f'missing initial congestion summary row for {direction}')
+                    size, pct = global_table[direction]
+                    windows.append(dict(direction=direction, size=size, peak_percent=pct,
+                                        lower_tile=lo, upper_tile=hi, box=tile_box(tiles, lo, hi)))
+    else:
+        raise ValueError('native run log has no recognized congestion section')
     if not windows:
         raise ValueError('no recognized native congestion windows')
     pin_windows = []
     for lo, hi in re.findall(r'\[([A-Z0-9_]+_X\d+Y\d+) -> ([A-Z0-9_]+_X\d+Y\d+)\]', text):
         pin_windows.append(dict(lower_tile=lo, upper_tile=hi, box=tile_box(tiles, lo, hi)))
     pin_count = re.findall(r'At least (\d+) CLBs have high pin utilization', text)
-    vertical = re.findall(r'Global Vertical Routing Utilization\s*=\s*([\d.]+)', text)
-    horizontal = re.findall(r'Global Horizontal Routing Utilization\s*=\s*([\d.]+)', text)
-    return dict(windows=windows, pin_windows=pin_windows,
+    vertical = re.findall(r'Global Vertical Routing Utilization\s*=\s*([\d.eE+-]+)', text)
+    horizontal = re.findall(r'Global Horizontal Routing Utilization\s*=\s*([\d.eE+-]+)', text)
+    return dict(stage=stage, windows=windows, pin_windows=pin_windows,
+                direction_summary=direction_summary,
+                final_global_over_85_windows=len(windows) if stage == 'final_global' else 0,
                 high_pin_clbs=int(pin_count[-1]) if pin_count else None,
                 global_vertical_percent=float(vertical[-1]) if vertical else None,
                 global_horizontal_percent=float(horizontal[-1]) if horizontal else None)
@@ -289,6 +320,45 @@ def site_geometry(site, columns=None):
     return x-.5+site['tile_site_index']*width, site['y']-.5, width
 
 
+COMPONENT_ROLES = {
+    'u_core/u_icache': ('L1 I-Cache & Fetch', '#1f77b4'),
+    'u_fp/u_trans': ('x87 Transcendentals', '#ff7f0e'),
+    'u_fp/u_state': ('x87 Stack & FXCH', '#d62728'),
+    'u_core/u_regfile': ('GPRs, Decode & Dual AGU', '#2ca02c'),
+    'u_core/u_core': ('P54C U/V Pipeline Spine', '#8c564b'),
+    'u_fp/u_shared_fx': ('x87 Pipelined Adder', '#e377c2'),
+    'u_core/u_dtlb': ('64-Entry 4-Way D-TLB', '#bcbd22'),
+    'u_fp/u_srt': ('Radix-4 SRT FDIV/FSQRT', '#9467bd'),
+    'u_l1axi/u_l1d': ('8 KiB Dual-Port L1D', '#17becf'),
+    'u_trans/u_shared_widemul': ('x87 Wide Multiplier', '#f59e0b'),
+    'u_fp/u_misc': ('x87 Compare / BCD / Misc', '#fb923c'),
+    'u_core/u_itlb': ('32-Entry 4-Way I-TLB', '#3b82f6'),
+    'u_trans/u_shared_estdiv': ('x87 Reciprocal Est', '#65a30d'),
+    'inst/u_ddr': ('16-Slot Posted DDR4 Bridge', '#0f766e'),
+    'u_soc/vga': ('VGA / SVGA Controller', '#f43f5e'),
+    'u_soc/floppy': ('Floppy Controller', '#a855f7'),
+    'u_core/u_bpred_btb': ('256-Entry LUTRAM BTB', '#0284c7'),
+    'inst/u_mgmt': ('AXI-Lite Debug & PMU', '#475569'),
+    'u_core/u_ibuf_decode_stages': ('Instruction Buffer Decode', '#10b981'),
+}
+
+
+def format_legend_entry(short_label, primitives):
+    if short_label.startswith('('):
+        return f'Other SoC & Interconnect  ·  {primitives:,}'
+    role = COMPONENT_ROLES.get(short_label)
+    if role:
+        return f'{role[0]} ({short_label})  ·  {primitives:,}'
+    return f'{short_label}  ·  {primitives:,}'
+
+
+def short_endpoint(pin_path):
+    parts = pin_path.split('/')
+    if len(parts) >= 3:
+        return '/'.join(parts[-3:-1])
+    return parts[0]
+
+
 def plot(data, output, image_id):
     import numpy as np
     import matplotlib
@@ -305,12 +375,30 @@ def plot(data, output, image_id):
     xs, ys = [s['x'] for s in clbs], [s['y'] for s in clbs]
     bounds = [min(xs)-2, max(xs)+2, min(ys)-2, max(ys)+2]
     cmap = plt.get_cmap('tab20')
-    palette=list(range(0,20,2))+list(range(1,20,2))
-    colors = [cmap(palette[i]) for i in range(len(data['groups']))]
-    if data['groups'][-1]['path'].startswith('('):colors[-1] = '#7f8996'
+    palette = list(range(0, 20, 2)) + list(range(1, 20, 2))
     labels = short_labels([g['path'] for g in data['groups']])
+    colors = []
+    for i, label in enumerate(labels):
+        if data['groups'][i]['path'].startswith('('):
+            colors.append('#94a3b8')
+        elif label in COMPONENT_ROLES:
+            colors.append(COMPONENT_ROLES[label][1])
+        else:
+            colors.append(cmap(palette[i]))
     title = f"{data['metadata']['part']} • routed image {image_id}"
     total = data['totals']
+    lut_line = ''
+    if 'native_utilization' in data and 'luts' in data['native_utilization']:
+        lu, la = data['native_utilization']['luts']
+        lut_line = f"\n{lu:,} / {la:,} CLB LUTs ({100*lu/la:.2f}%)"
+    sta_line = ''
+    if 'timing' in data:
+        slk = data['timing']['setup_slack_ns']
+        fmax = data['timing']['conditional_period_budget_mhz']
+        if slk >= 0:
+            sta_line = f"\n40 MHz STA MET (+{slk:.3f} ns WNS · {fmax:.2f} MHz)"
+        else:
+            sta_line = f"\nConditional STA: {fmax:.2f} MHz ({slk:.3f} ns WNS)"
     plt.rcParams.update({'font.family': 'DejaVu Sans', 'font.size': 10, 'axes.titleweight': 'bold',
                          'axes.spines.top': False, 'axes.spines.right': False, 'savefig.facecolor': 'white'})
 
@@ -347,27 +435,27 @@ def plot(data, output, image_id):
                     polygons.append(rect(x,y,w,h));paint.append(colors[group]);y+=h
         ax.add_collection(PolyCollection(polygons,facecolors=paint,edgecolors='none',rasterized=True))
 
-    fig = plt.figure(figsize=(15.5, 11))
-    ax = fig.add_axes([.065,.11,.60,.78]); setup(ax); hierarchy(ax)
-    fig.suptitle('CLB placement by synthesized hierarchy', x=.065, ha='left', y=.98, fontsize=20, weight='bold')
-    fig.text(.065,.94,title,fontsize=11,color='#465366')
-    handles=[Patch(facecolor=c,label=f'{label}  ·  {g["primitives"]:,}') for c,label,g in zip(colors,labels,data['groups'])]
+    fig = plt.figure(figsize=(16.2, 11.2))
+    ax = fig.add_axes([.06,.11,.56,.78]); setup(ax); hierarchy(ax)
+    fig.suptitle('CLB placement by synthesized component hierarchy', x=.06, ha='left', y=.98, fontsize=20, weight='bold')
+    fig.text(.06,.94,title,fontsize=11,color='#465366')
+    handles=[Patch(facecolor=c,label=format_legend_entry(label, g['primitives'])) for c,label,g in zip(colors,labels,data['groups'])]
     handles += [Patch(facecolor='white',edgecolor='#aaa',label='Available, unoccupied CLB'),
                 Patch(facecolor='#f4f6f8',label='No CLB site / device gap')]
-    fig.legend(handles=handles,loc='upper left',bbox_to_anchor=(.68,.88),frameon=False,fontsize=9,
-               title='Exact hierarchy parent · placed primitives',labelspacing=1.0)
-    fig.text(.69,.20,f"{total['occupied_clb_sites']:,} / {total['clb_sites']:,} CLBs occupied\n"
-             f"{100*total['occupied_clb_sites']/total['clb_sites']:.2f}% site occupancy\n"
-             f"{total['mixed_hierarchy_sites']:,} sites have mixed ownership",fontsize=11,linespacing=1.8)
-    fig.text(.065,.035,'Each site is split by primitive-owner share; strip area is NOT LUT capacity.\n'
-             'DSP/BRAM coordinates are excluded. White = genuinely empty CLB; grey = non-CLB geography.',fontsize=10,color='#465366')
+    fig.legend(handles=handles,loc='upper left',bbox_to_anchor=(.635,.89),frameon=False,fontsize=8.6,
+               title='Component (exact hierarchy) · placed primitives',labelspacing=0.82)
+    fig.text(.645,.15,f"{total['occupied_clb_sites']:,} / {total['clb_sites']:,} CLBs ({100*total['occupied_clb_sites']/total['clb_sites']:.2f}%)"
+             f"{lut_line}\n{total['mixed_hierarchy_sites']:,} mixed-hierarchy CLB sites{sta_line}",
+             fontsize=10.2,linespacing=1.65)
+    fig.text(.06,.035,'Each site is split by primitive-owner share; strip area is NOT LUT capacity.\n'
+             'DSP/BRAM coordinates are excluded. White = genuinely empty CLB; grey = non-CLB geography.',fontsize=9.6,color='#465366')
     fig.savefig(output/'clb-hierarchy.png',dpi=220);plt.close(fig)
 
     # Readability companion: squeeze ONLY globally absent CLB columns. Empty
     # sites and partial-height holes remain, and the physical view is unchanged.
     columns = compact_columns(clbs)
-    fig = plt.figure(figsize=(15.5, 11))
-    ax = fig.add_axes([.065,.11,.60,.78]); setup(ax)
+    fig = plt.figure(figsize=(16.2, 11.2))
+    ax = fig.add_axes([.06,.11,.56,.78]); setup(ax)
     ax.set_xlim(-.5,len(columns)-.5)
     ax.set_aspect('auto')
     ticks = sorted(set(np.linspace(0,len(columns)-1,min(9,len(columns)),dtype=int)))
@@ -375,16 +463,16 @@ def plot(data, output, image_id):
     ax.set_xticks(ticks, [str(physical_x[i]) for i in ticks])
     ax.set_xlabel('Original physical tile-grid X · non-CLB columns removed')
     hierarchy(ax, columns)
-    fig.suptitle('CLB hierarchy — compact columns', x=.065, ha='left', y=.98, fontsize=20, weight='bold')
-    fig.text(.065,.94,title,fontsize=11,color='#465366')
-    fig.legend(handles=handles,loc='upper left',bbox_to_anchor=(.68,.88),frameon=False,fontsize=9,
-               title='Exact hierarchy parent · placed primitives',labelspacing=1.0)
-    fig.text(.69,.20,f"{total['occupied_clb_sites']:,} / {total['clb_sites']:,} CLBs occupied\n"
-             f"{len(columns)} CLB columns packed edge-to-edge\n"
-             'All sites and hierarchy shares retained',fontsize=11,linespacing=1.8)
-    fig.text(.065,.035,'Horizontal spacing is compressed, NOT physical distance; original X labels and physical Y are retained.\n'
-             'White = genuinely empty CLB; grey = a partial-height device gap. Owner strips are primitive shares, not LUT capacity.',
-             fontsize=10,color='#465366')
+    fig.suptitle('FPGA utilization map — colored CLB component hierarchy', x=.06, ha='left', y=.98, fontsize=20, weight='bold')
+    fig.text(.06,.94,title,fontsize=11,color='#465366')
+    fig.legend(handles=handles,loc='upper left',bbox_to_anchor=(.635,.89),frameon=False,fontsize=8.6,
+               title='Component (exact hierarchy) · placed primitives',labelspacing=0.82)
+    fig.text(.645,.15,f"{total['occupied_clb_sites']:,} / {total['clb_sites']:,} CLBs ({100*total['occupied_clb_sites']/total['clb_sites']:.2f}%)"
+             f"{lut_line}\n{len(columns)} CLB columns packed edge-to-edge{sta_line}",
+             fontsize=10.2,linespacing=1.65)
+    fig.text(.06,.035,'Horizontal spacing is compressed, NOT physical distance; original X labels and physical Y are retained.\n'
+             'White = genuinely empty CLB; grey = partial-height device gap. Owner strips are primitive shares, not LUT capacity.',
+             fontsize=9.6,color='#465366')
     fig.savefig(output/'clb-hierarchy-compact.png',dpi=220);plt.close(fig)
 
     # Current exporter targets UltraScale/UltraScale+ SLICEs (eight LUTs).
@@ -402,7 +490,29 @@ def plot(data, output, image_id):
     fig.tight_layout();fig.savefig(output/'clb-lut-density.png',dpi=220);plt.close(fig)
 
     fig,axes=plt.subplots(2,2,figsize=(14,12))
-    norm=Normalize(vmin=85,vmax=100);heat=plt.get_cmap('inferno')
+    stage = data['congestion'].get('stage', 'final_global')
+    if stage == 'initial_global_resolved':
+        max_pct = max((w['peak_percent'] for w in data['congestion']['windows']), default=5.0)
+        norm = Normalize(vmin=0, vmax=max(8.0, math.ceil(max_pct + 1.0)))
+        heat = plt.get_cmap('YlOrRd')
+        cbar_label = 'Phase 4 initial congested tiles (%)'
+        cong_title = 'Router congestion windows — final route resolved to 0 >=85% hotspots\n' + title
+        cong_footer = (
+            'Final routed design has ZERO global windows >=85% (Global V/H routing = '
+            f"{data['congestion'].get('global_vertical_percent', 0):.2f}% / {data['congestion'].get('global_horizontal_percent', 0):.2f}%).\n"
+            'Colored boxes show Phase 4 initial global congestion windows before rip-up & reroute; grey/outside = unreported, NOT 0%.\n'
+            'No interpolation or fabricated per-tile routing-utilization values.'
+        )
+    else:
+        norm = Normalize(vmin=85, vmax=100)
+        heat = plt.get_cmap('inferno')
+        cbar_label = 'Reported window maximum (%)'
+        cong_title = 'Native router congestion windows\n' + title
+        cong_footer = (
+            'Colored regions = final GLOBAL router windows; grey/outside = unreported, NOT 0% congestion.\n'
+            'Blue + = top-ten high-pin CLB clusters from pre-routing diagnostics (different metric/stage).\n'
+            'No interpolation or fabricated per-tile routing-utilization values.'
+        )
     for ax,direction in zip(axes.flat,('North','South','East','West')):
         setup(ax);backdrop(ax)
         wins=[w for w in data['congestion']['windows'] if w['direction']==direction]
@@ -414,21 +524,23 @@ def plot(data, output, image_id):
             for w in wins:
                 x0,y0,x1,y1=w['box']
                 ax.add_patch(Rectangle((x0,y0),x1-x0,y1-y0,fill=False,edgecolor='#ad3500',linewidth=.6,zorder=3))
-            ax.set_title(f'{direction} · reported peak {peak:.2f}% · {wins[0]["size"][0]}×{wins[0]["size"][1]} windows')
+            metric_lbl = 'initial tiles' if stage == 'initial_global_resolved' else 'reported peak'
+            ax.set_title(f'{direction} · {metric_lbl} {peak:.2f}% · {wins[0]["size"][0]}×{wins[0]["size"][1]} windows')
+        elif direction in data['congestion'].get('direction_summary', {}):
+            ds = data['congestion']['direction_summary'][direction]
+            ax.set_title(f'{direction} · initial tiles {ds["percent"]:.2f}% ({ds["size"][0]}×{ds["size"][1]}, no >=16×16 box)')
         else:ax.set_title(f'{direction} · no reported window (not a zero)')
         for w in data['congestion']['pin_windows']:
             x0,y0,x1,y1=w['box']
             ax.plot((x0+x1)/2,(y0+y1)/2,'+',color='#0074d9',ms=5,mew=.9,zorder=4)
-    fig.suptitle('Native router congestion windows\n'+title,fontsize=16,weight='bold')
+    fig.suptitle(cong_title,fontsize=15.5,weight='bold')
     fig.subplots_adjust(left=.07,right=.88,bottom=.13,top=.88,hspace=.30,wspace=.22)
-    cax=fig.add_axes([.91,.30,.015,.40]);fig.colorbar(ScalarMappable(norm=norm,cmap=heat),cax=cax,label='Reported window maximum (%)')
-    fig.text(.07,.035,'Colored regions = final GLOBAL router windows; grey/outside = unreported, NOT 0% congestion.\n'
-             'Blue + = top-ten high-pin CLB clusters from pre-routing diagnostics (different metric/stage).\n'
-             'No interpolation or fabricated per-tile routing-utilization values.',fontsize=10,color='#465366')
+    cax=fig.add_axes([.91,.30,.015,.40]);fig.colorbar(ScalarMappable(norm=norm,cmap=heat),cax=cax,label=cbar_label)
+    fig.text(.07,.035,cong_footer,fontsize=9.8,color='#465366')
     fig.savefig(output/'routing-congestion.png',dpi=200);plt.close(fig)
 
     if 'timing' in data:
-        fig=plt.figure(figsize=(15,7.5));ax=fig.add_axes([.07,.16,.58,.69])
+        fig=plt.figure(figsize=(15.5,7.8));ax=fig.add_axes([.07,.16,.57,.69])
         windows=data['congestion']['windows'];waypoints=data['timing']['waypoints']
         xlist=[v for w in windows for v in (w['box'][0],w['box'][2])]+[p['x'] for p in waypoints]
         ylist=[v for w in windows for v in (w['box'][1],w['box'][3])]+[p['y'] for p in waypoints]
@@ -450,21 +562,26 @@ def plot(data, output, image_id):
                 ax.add_patch(Rectangle((x0,y0),x1-x0,y1-y0,fill=False,edgecolor=color,lw=.8,zorder=3))
         ax.plot([p['x'] for p in waypoints],[p['y'] for p in waypoints],color='#15191c',lw=.8,alpha=.7,zorder=4)
         ax.scatter([waypoints[0]['x'],waypoints[-1]['x']],[waypoints[0]['y'],waypoints[-1]['y']],s=50,facecolors='white',edgecolors='black',zorder=5)
-        for p,label in ((waypoints[0],'EIP source'),(waypoints[-1],'paired-load return')):
+        timing=data['timing']
+        src_lbl = short_endpoint(timing['source'])
+        dst_lbl = short_endpoint(timing['destination'])
+        for p,label in ((waypoints[0],f'src: {src_lbl}'),(waypoints[-1],f'dst: {dst_lbl}')):
             ax.annotate(label,(p['x'],p['y']),xytext=(8,8),textcoords='offset points',fontsize=8,
                         bbox=dict(fc='white',ec='none',alpha=.9),zorder=6)
-        fig.suptitle('Optimization focus: routed hotspots and worst-path cell locations\n'+title,fontsize=16,weight='bold')
-        timing=data['timing']
+        fig.suptitle('Critical-path cell locations and congestion windows\n'+title,fontsize=16,weight='bold')
         measured=data.get('measured_core_mhz')
         measured_label=f'{measured:.3f} MHz measured hardware clock' if measured is not None else 'Measured hardware clock: not supplied'
-        fig.text(.69,.80,'Worst setup path',fontsize=14,weight='bold')
-        fig.text(.69,.72,f"{timing['logic_levels']} logic levels\n{timing['data_delay_ns']:.3f} ns data delay\n"
-                 f"{timing['route_percent']:.1f}% routing delay\n{timing['conditional_period_budget_mhz']:.2f} MHz conditional STA budget\n{measured_label}",
-                 fontsize=11,linespacing=1.8,va='top')
-        handles=[Patch(facecolor=c,label=l) for c,l in zip(colors,labels) if 'u_icache' in l or 'u_regfile' in l or 'u_l1d' in l or l=='u_core/u_core']
-        fig.legend(handles=handles,loc='upper left',bbox_to_anchor=(.68,.38),frameon=False,fontsize=9)
+        slack_status = f"+{timing['setup_slack_ns']:.3f} ns setup slack (MET)" if timing['setup_slack_ns'] >= 0 else f"{timing['setup_slack_ns']:.3f} ns setup slack"
+        fig.text(.665,.81,'Worst setup path',fontsize=14,weight='bold')
+        fig.text(.665,.73,f"{slack_status}\n{timing['logic_levels']} logic levels · {timing['data_delay_ns']:.3f} ns delay\n"
+                 f"{timing['route_percent']:.1f}% routing delay\n{timing['conditional_period_budget_mhz']:.2f} MHz post-route STA Fmax\n{measured_label}",
+                 fontsize=10.5,linespacing=1.75,va='top')
+        handles=[Patch(facecolor=c,label=format_legend_entry(l, g['primitives']))
+                 for c,l,g in zip(colors,labels,data['groups'])
+                 if any(k in l for k in ('u_icache','u_regfile','u_l1d','u_dtlb','u_itlb','u_core/u_core'))]
+        fig.legend(handles=handles,loc='upper left',bbox_to_anchor=(.655,.39),frameon=False,fontsize=8.6)
         fig.text(.07,.045,'Rectangle outlines: native directional congestion windows. Black line: consecutive timing-path CELL locations, not wire routes.\n'
-                 'Synthesized u_icache/u_regfile hierarchies include absorbed frontend, decode and address logic; names do not imply cache/GPR storage alone.',fontsize=10,color='#465366')
+                 'Synthesized u_icache/u_regfile hierarchies include absorbed frontend, decode and address logic; names do not imply cache/GPR storage alone.',fontsize=9.6,color='#465366')
         fig.savefig(output/'optimization-focus.png',dpi=220);plt.close(fig)
 
 
@@ -505,7 +622,7 @@ def main():
     raw=json.dumps(data,separators=(',',':'),sort_keys=True).encode()
     (args.output/'physical-map.json.gz').write_bytes(gzip.compress(raw,mtime=0))
     summary={k:v for k,v in data.items() if k!='clbs'}
-    (args.output/'summary.json').write_text(json.dumps(summary,indent=2)+'\n')
+    (args.output/'summary.json').write_text(json.dumps(summary,indent=2,sort_keys=True)+'\n')
     plot(data,args.output,args.image_id)
     print(json.dumps(data['totals'],indent=2))
 

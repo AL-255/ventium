@@ -57,29 +57,53 @@ module bpred_btb #(
     input  logic        resolve_taken
 );
 
-  logic [25:0] btb_tag [BTB_SETS][BTB_WAYS];   // pc/64
-  logic [1:0]  btb_ctr [BTB_SETS][BTB_WAYS];   // 2-bit saturating
-  logic        btb_val [BTB_SETS][BTB_WAYS];
-  logic [1:0]  btb_rr  [BTB_SETS];             // round-robin replacement ptr
+  localparam int BTB_IDXW = $clog2(BTB_SETS);
+  localparam int BTB_TAGW = 32 - BTB_IDXW;
+  localparam int BTB_WAYW = (BTB_WAYS > 1) ? $clog2(BTB_WAYS) : 1;
+
+  // Validity and replacement pointers stay in resettable flip-flops and gate
+  // every tag/counter lookup, allowing each way's {ctr[1:0], tag[25:0]} payload
+  // to map cleanly into unreset 1D distributed LUTRAM (3 async reads, 1 sync write).
+  logic                 btb_val [BTB_SETS][BTB_WAYS];
+  logic [BTB_WAYW-1:0]  btb_rr  [BTB_SETS];             // round-robin replacement ptr
+
+  logic [BTB_IDXW-1:0]  u_set, v_set, r_set;
+  logic [BTB_TAGW-1:0]  u_tag, v_tag, r_tag;
+  logic [BTB_WAYS-1:0][2+BTB_TAGW-1:0] u_entry_rd, v_entry_rd, r_entry_rd;
+  logic [BTB_WAYS-1:0]  way_we;
+  logic [2+BTB_TAGW-1:0] way_wdata;
+  logic                 r_hit;
+  logic [BTB_WAYW-1:0]  r_hit_way;
+  logic [1:0]           r_hit_ctr;
+
+  assign u_set = u_query_pc[BTB_IDXW-1:0];
+  assign u_tag = u_query_pc[31:BTB_IDXW];
+  assign v_set = v_query_pc[BTB_IDXW-1:0];
+  assign v_tag = v_query_pc[31:BTB_IDXW];
+
+  for (genvar gw = 0; gw < BTB_WAYS; gw++) begin : g_btb_way
+    (* ram_style = "distributed" *) logic [2+BTB_TAGW-1:0] entry_ram [BTB_SETS];
+    always_ff @(posedge clk) begin
+      if (way_we[gw]) entry_ram[r_set] <= way_wdata;
+    end
+    assign u_entry_rd[gw] = entry_ram[u_set];
+    assign v_entry_rd[gw] = entry_ram[v_set];
+    assign r_entry_rd[gw] = entry_ram[r_set];
+  end
 
   // BTB lookup: predicted-taken iff a valid matching entry has counter>=2.
   // Pure-comb off the registered arrays (does NOT mutate state). VERBATIM from
   // the inline btb_lookup() function, kept as a function so both predict ports
   // share the identical body.
-  function automatic logic btb_lookup(input logic [31:0] pc);
-    logic [5:0]  set; logic [25:0] tag; logic hit;
-    begin
-      set = pc[5:0]; tag = pc[31:6]; hit = 1'b0; btb_lookup = 1'b0;
-      for (int w=0; w<BTB_WAYS; w++)
-        if (btb_val[set][w] && btb_tag[set][w]==tag) begin
-          hit=1'b1; btb_lookup = (btb_ctr[set][w] >= 2'd2);
-        end
-    end
-  endfunction
-
   always_comb begin
-    u_predict_taken = btb_lookup(u_query_pc);
-    v_predict_taken = btb_lookup(v_query_pc);
+    u_predict_taken = 1'b0;
+    v_predict_taken = 1'b0;
+    for (int w=0; w<BTB_WAYS; w++) begin
+      if (btb_val[u_set][w] && (u_entry_rd[w][BTB_TAGW-1:0] == u_tag))
+        u_predict_taken = (u_entry_rd[w][BTB_TAGW +: 2] >= 2'd2);
+      if (btb_val[v_set][w] && (v_entry_rd[w][BTB_TAGW-1:0] == v_tag))
+        v_predict_taken = (v_entry_rd[w][BTB_TAGW +: 2] >= 2'd2);
+    end
   end
 
   // +VEN_BTB_PIPE: register the resolve inputs one clock so the BTB counter
@@ -102,6 +126,36 @@ module bpred_btb #(
   wire         rt_use  = resolve_taken;
 `endif
 
+  assign r_set = rpc_use[BTB_IDXW-1:0];
+  assign r_tag = rpc_use[31:BTB_IDXW];
+
+  always_comb begin
+    r_hit     = 1'b0;
+    r_hit_way = '0;
+    for (int w=0; w<BTB_WAYS; w++)
+      if (btb_val[r_set][w] && (r_entry_rd[w][BTB_TAGW-1:0] == r_tag)) begin
+        r_hit     = 1'b1;
+        r_hit_way = BTB_WAYW'(w);
+      end
+    r_hit_ctr = r_entry_rd[r_hit_way][BTB_TAGW +: 2];
+    way_we    = '0;
+    way_wdata = {2'd3, r_tag};
+    if (rst_n && rv_use) begin
+      if (r_hit) begin
+        if (rt_use && (r_hit_ctr != 2'd3)) begin
+          way_we[r_hit_way] = 1'b1;
+          way_wdata         = {r_hit_ctr + 2'd1, r_tag};
+        end else if (!rt_use && (r_hit_ctr != 2'd0)) begin
+          way_we[r_hit_way] = 1'b1;
+          way_wdata         = {r_hit_ctr - 2'd1, r_tag};
+        end
+      end else if (rt_use) begin
+        way_we[btb_rr[r_set]] = 1'b1;
+        way_wdata             = {2'd3, r_tag};
+      end
+    end
+  end
+
   // BTB update after a branch resolves (mirrors p5model btb_update): a hit
   // saturates its 2-bit counter toward taken/not-taken; a miss on a TAKEN
   // branch allocates a way (round-robin replacement) with a strongly-taken
@@ -110,30 +164,76 @@ module bpred_btb #(
   always_ff @(posedge clk) begin
     if (!rst_n) begin
       for (int s=0;s<BTB_SETS;s++) begin
-        btb_rr[s]<=2'd0;
+        btb_rr[s]<='0;
         for (int w=0;w<BTB_WAYS;w++) begin
-          btb_val[s][w]<=1'b0; btb_tag[s][w]<=26'd0; btb_ctr[s][w]<=2'd0;
+          btb_val[s][w]<=1'b0;
         end
       end
-    end else if (rv_use) begin
-      logic [5:0]  set; logic [25:0] tag; logic hit; logic [1:0] way;
-      set = rpc_use[5:0]; tag = rpc_use[31:6]; hit = 1'b0; way = 2'd0;
-      for (int w=0; w<BTB_WAYS; w++)
-        if (btb_val[set][w] && btb_tag[set][w]==tag) begin hit=1'b1; way=2'(w); end
-      if (hit) begin
-        if (rt_use && btb_ctr[set][way]!=2'd3) btb_ctr[set][way]<=btb_ctr[set][way]+2'd1;
-        if (!rt_use && btb_ctr[set][way]!=2'd0) btb_ctr[set][way]<=btb_ctr[set][way]-2'd1;
-      end else if (rt_use) begin
-        btb_val[set][btb_rr[set]]<=1'b1;
-        btb_tag[set][btb_rr[set]]<=tag;
-        // first-taken => STRONGLY taken (ctr=3), matching the p5model oracle
-        // (plugin/p5model.c:371 's->ctr[v]=3'). Allocating weakly-taken (2) would
-        // diverge after a loop-exit not-taken: 2->1 (predict not-taken) re-warms a
-        // mispredict on the next entry, whereas the oracle 3->2 stays predict-taken.
-        btb_ctr[set][btb_rr[set]]<=2'd3;     // allocate strongly-taken (oracle)
-        btb_rr[set]<=btb_rr[set]+2'd1;
+    end else if (rv_use && !r_hit && rt_use) begin
+      // first-taken => STRONGLY taken (ctr=3), matching the p5model oracle
+      // (plugin/p5model.c:371 's->ctr[v]=3'). Allocating weakly-taken (2) would
+      // diverge after a loop-exit not-taken: 2->1 (predict not-taken) re-warms a
+      // mispredict on the next entry, whereas the oracle 3->2 stays predict-taken.
+      btb_val[r_set][btb_rr[r_set]] <= 1'b1;
+      btb_rr[r_set]                 <= btb_rr[r_set] + BTB_WAYW'(1);
+    end
+  end
+
+`ifndef SYNTHESIS
+  logic [BTB_TAGW-1:0] ref_btb_tag [BTB_SETS][BTB_WAYS];
+  logic [1:0]          ref_btb_ctr [BTB_SETS][BTB_WAYS];
+  logic                ref_btb_val [BTB_SETS][BTB_WAYS];
+  logic [BTB_WAYW-1:0] ref_btb_rr  [BTB_SETS];
+  logic                ref_u_pred, ref_v_pred;
+
+  always_comb begin
+    ref_u_pred = 1'b0;
+    ref_v_pred = 1'b0;
+    for (int w=0; w<BTB_WAYS; w++) begin
+      if (ref_btb_val[u_set][w] && (ref_btb_tag[u_set][w] == u_tag))
+        ref_u_pred = (ref_btb_ctr[u_set][w] >= 2'd2);
+      if (ref_btb_val[v_set][w] && (ref_btb_tag[v_set][w] == v_tag))
+        ref_v_pred = (ref_btb_ctr[v_set][w] >= 2'd2);
+    end
+  end
+
+  always_ff @(posedge clk) begin
+    if (!rst_n) begin
+      for (int s=0; s<BTB_SETS; s++) begin
+        ref_btb_rr[s] <= '0;
+        for (int w=0; w<BTB_WAYS; w++) begin
+          ref_btb_val[s][w] <= 1'b0;
+          ref_btb_tag[s][w] <= '0;
+          ref_btb_ctr[s][w] <= 2'd0;
+        end
+      end
+    end else begin
+      assert ((u_predict_taken === ref_u_pred) && (v_predict_taken === ref_v_pred))
+        else $fatal(1, "BTB-LUTRAM: prediction diverged from FF reference");
+      if (rv_use) begin
+        logic hit;
+        logic [BTB_WAYW-1:0] way;
+        hit = 1'b0;
+        way = '0;
+        for (int w=0; w<BTB_WAYS; w++)
+          if (ref_btb_val[r_set][w] && (ref_btb_tag[r_set][w] == r_tag)) begin
+            hit = 1'b1;
+            way = BTB_WAYW'(w);
+          end
+        if (hit) begin
+          if (rt_use && (ref_btb_ctr[r_set][way] != 2'd3))
+            ref_btb_ctr[r_set][way] <= ref_btb_ctr[r_set][way] + 2'd1;
+          if (!rt_use && (ref_btb_ctr[r_set][way] != 2'd0))
+            ref_btb_ctr[r_set][way] <= ref_btb_ctr[r_set][way] - 2'd1;
+        end else if (rt_use) begin
+          ref_btb_val[r_set][ref_btb_rr[r_set]] <= 1'b1;
+          ref_btb_tag[r_set][ref_btb_rr[r_set]] <= r_tag;
+          ref_btb_ctr[r_set][ref_btb_rr[r_set]] <= 2'd3;
+          ref_btb_rr[r_set] <= ref_btb_rr[r_set] + BTB_WAYW'(1);
+        end
       end
     end
   end
+`endif
 
 endmodule : bpred_btb
