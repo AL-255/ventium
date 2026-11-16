@@ -1,5 +1,7 @@
 # M2S.4 — TSS / task switch / cross-privilege
 
+> **Current Status (Nov 2026 — COMPLETED for 32-bit TSS & Call Gates):** Cross-privilege interrupt/fault stack switching, inter-privilege `IRET`/`RETF`, 16/32-bit call gates (with 0–31 parameter copy), and 32-bit hardware TSS switches (`JMP`, `CALL`, and `NT-IRET`, `core_tss_priv.svh` / `core_tsw.svh`) are implemented and board-qualified on RK-XCZU15EG-F image **`c0e3fe43`**. Note: 16-bit (286) TSS and task-gate descriptors intentionally loud-halt (`0xD1`/`0xD3`/`0xD5`); see [`tsw-phase-model.md`](tsw-phase-model.md) and [`unsupported-isa.md`](unsupported-isa.md) §A.1–A.3.
+
 Fourth system-mode RTL stage. M2S.3 delivers faults/interrupts to **same-privilege
 (CPL0)** handlers; M2S.4 adds the **privilege machinery**: cross-privilege delivery
 (stack switch via the TSS), the inter-privilege `IRET`, the gate/CS protection

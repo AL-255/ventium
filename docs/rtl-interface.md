@@ -41,6 +41,12 @@ import "DPI-C" context function void vtm_retire(
 - The testbench **implements** `vtm_retire` (C++ linkage `extern "C"`) and emits
   one func-mode `.vtrace` line per call.
 - `n` is the core's own retire counter (starts at 0, +1 per retired insn).
+- With `--cycle-func`, integer U/V pairs carry distinct post-instruction states:
+  the DPI-only U snapshot captures actual U writeback before V's overrides;
+  V reports the live final state. Observation does not alter issue or clocks.
+  The snapshot is excluded under `SYNTHESIS`/`VTM_NO_DPI`. This qualification
+  does not cover the legacy `VEN_FXCH_FREE` folded x87-pair observer. See
+  [differential comparator guide](../verif/diff/README.md).
 - The core calls this from a single always_ff retire point; pairing (two retires
   in one cycle, M4+) means two calls in the same clock with consecutive `n`.
 - **x87** (M3+) uses a second optional import `vtm_retire_x87(...)` called
@@ -49,6 +55,48 @@ import "DPI-C" context function void vtm_retire(
   standalone lint.
 
 ### 2.1 x87 retire callback (M3+)
+
+Experimental `VEN_FP_ASYNC` builds additionally import
+`vtm_fp_async_event(event_kind, owner)`: kind 0 begins the pending FP record
+immediately before its ordinary retirement callbacks; kind 1 completes it
+after `vtm_retire_x87(owner, ...)` supplies the actual committed result.
+Only final functional x87 record formatting is deferred; live counters,
+diagnostics, integer state and cycle observations are not delayed. A second
+owner, missing completion snapshot or unfinished trace is an error. This
+default-off integration is not yet behaviorally qualified; see
+`verif/issue_uv/README.md` for its acceptance gates and limitations.
+The full-PC `ao486-sim/ven/vtm_dpi.cpp` observer does not format architectural
+x87 traces and leaves both valid events inert, just like its x87 snapshot
+callback. It must not delay live retirement counters or substitute FP results.
+Architectural x87 equivalence is checked by the differential testbench above,
+not by the full-PC observer.
+
+The experimental arithmetic-stream observer additionally accepts event kind 2
+to begin an ordered multi-owner record. It supports at most four outstanding
+owners, consumes completions strictly oldest-first, and applies each RTL-supplied
+completion state only to that owner's record and following integer records up
+to the next FP owner. Kind 0 retains the original single-owner rejection; the
+two begin modes cannot be mixed while work is pending. This is formatter-only
+bookkeeping: it neither supplies FP results nor delays live clocks, retire
+counters, syscalls or architectural debug observations. The full-PC observer
+accepts kind 2 statelessly. The experimental `VEN_FP_ASYNC_STREAM` core generates
+these events and retains an ordered four-entry DPI owner FIFO. This requires
+the shared arithmetic stream and checked early-command path; it is not a default
+configuration or a claim of full-system compatibility.
+
+`VEN_FP_FXCH_QUEUE` adds one ordered FXCH admission slot in front of the shared
+FPU (`fp_shared/ven_fp_fxch_queue.sv`) and pairs with `VEN_FP_ASYNC_STREAM` in the
+deployed `c0e3fe43` hardware profile (`161` defines; `0.515778001` total U+V /
+`0.397847833` primary/U physical Quake gameplay IPC across cycles
+`28,696,827,616–32,989,404,795`). A busy-leaf, masked FXCH can be accepted into
+that slot without changing the architectural stack yet. It generates the same
+kind-2 deferred owner as an asynchronous arithmetic command, and completes from
+the actual ordered leaf response. In particular, `cmd_accept_retire` is false for
+a queued exchange and remains false when that queued command is later dispatched
+internally. An idle, immediately executed exchange retains the original
+immediate-retirement contract. No synthetic FP snapshot or delayed live retirement
+counter is used. Interrupt/fault/debug drain gates remain in force; see
+`verif/issue_uv/README.md`.
 
 For x87 floating-point instructions the core calls `vtm_retire(...)` (integer
 state, unchanged) **and**, on the *same retirement* (same `n`), a second DPI-C
@@ -119,6 +167,57 @@ port is deliberately minimal at M0 and grows toward the real 64-bit P5 bus
 The testbench preloads the flat memory from the test image (§4) and services
 `mem_req` each cycle. This is a placeholder protocol; M2 adds instruction fetch
 width/lines, M5 replaces it with the modeled P5 bus FSM.
+
+### Backing memory replay policy
+
+`ventium_l1_axi` and `ven_axi_master` expose `LINE_REPLAY` (default 1).
+This integration policy controls the historical stale-first-burst workaround:
+1 discards a priming cache-line burst; 0 delivers the first burst. It does not
+change `NARROW_REPLAY_SAFE`, narrow access widths, posted-write ordering,
+response-ID checks or fatal error handling. Disable it only for a qualified
+backend; HP/HPC deployments retain replay. `ventium_top.AXI_LINE_REPLAY` passes
+this policy through. The ao486 shim's opt-in `VEN_AO486_SINGLE_FILL` sets it to
+zero for that backend only; it is not a default or gameplay-qualified profile.
+`VEN_SINGLE_FILL` remains a separate unsafe diagnostic
+override. `verif/l1/run-axi-line-replay-gate.sh` tests both healthy policies and
+requires the stale-response negative controls to fail visibly.
+
+### Cached-store effect policy
+
+`VEN_L1D_STORE_POLICY` adds an optional platform advisory, separate from memory
+access permission. `ventium_top.store_policy_addr` exposes the actual physical
+U request address; `store_policy_update_mask[3:0]` controls whether each
+producer-relative byte may update a resident cached copy. The independently
+qualified paired V store has its own address and mask. A mask bit applies only
+when the corresponding original write strobe is active.
+
+A disabled active byte does **not** drop, narrow or fault the bus write, change
+its acknowledgement, or suppress write-buffer admission/combining. It suppresses
+that cached byte update and invalidates the touched resident physical tag on
+the accepted edge. The next read misses, drains ordered older writes and refills
+the actual backing bytes. Both packed and banked arrays follow this rule, as do
+crossing U writes and independently acknowledged V stores. The policy must not
+depend on ACK or request shaping; query addresses are independent outputs.
+Without the define, the previous interface and update path are unchanged.
+
+The ao486 shim conservatively disables cached updates for effective backend
+bytes `C0000–FFFFF`, applying the existing 28-bit address fold and A20 gate
+**per byte**. These windows may discard ROM writes or become writable through
+UMA/shared-folder policy. Sampling that deferred policy at local posted ACK
+would be unsafe: an older queued enable can reach the backend first. Targeted
+invalidation handles either outcome without guessing, changing read cacheability,
+globally flushing the cache, or disabling ordinary RAM updates. The original
+ao486 backend remains the authority on the write's actual memory effect.
+
+The standalone `verif/tb` AXI slave has a different backing contract: flat
+`MemModel` RAM, with optional RAM-top/open-bus and option-ROM read overlays.
+Its `bfm_store_policy.h` driver describes that backing per byte, including
+the KV260 address fold when compiled, independently for U and paired V.
+It drives the ports during every AXI settle, before reset's first evaluation
+too. Leaving these optional inputs at Verilator's zero initialization causes
+every accepted store to invalidate its cached line. Do not reuse that undriven
+testbench as a cache-performance baseline or apply the ao486 ROM policy to
+otherwise ordinary flat test RAM. RTL and hardware policy are unchanged.
 
 ## 4. Image loading
 

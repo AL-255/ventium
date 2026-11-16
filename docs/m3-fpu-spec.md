@@ -1,6 +1,8 @@
 # M3 — x87 FPU spec
 
-M3 (PLAN §7) adds the **x87 floating-point unit** to the core and verifies it
+> **Current Status (Nov 2026 — COMPLETED & SUPERSEDED in Production by `fp_shared/`):** All M3 tiers—plus all rounding/precision (`RC`/`PC`) modes, architectural `C1` round-direction, `FRNDINT`/`FSCALE`, `FPREM`/`FPREM1` (`+VEN_FPREM`), `FBLD`/`FBSTP` (`+VEN_BCD_ITER`), 14/28/94/108-byte `FLDENV`/`FNSTENV`/`FRSTOR`/`FNSAVE`, all 8 transcendentals (`+VEN_TRANSCENDENTAL`), and zero-cycle `FXCH` queueing (`ven_fp_fxch_queue`)—are implemented in [`../fp_shared/`](../fp_shared/README.md) (`+VEN_FP_SHARED`) and board-qualified on **RK-XCZU15EG-F** image **`c0e3fe43`** (`72,204` LUTs, `38` DSP48E2, `40.264133 MHz` STA sign-off, `0.515778001` total U+V Quake gameplay IPC; cold Windows 95 Calculator + DOS Quake `demo1` passed). Only `FXTRACT` (`D9 F4`) and post-Pentium P6 `FCMOVcc`/`FCOMI` remain unimplemented. The spec below preserves the baseline `make m3` user-mode differential contract.
+
+M3 adds the **x87 floating-point unit** to the core and verifies it
 **diff-clean vs QEMU** on the x87 architectural state. Builds on M1/M2 (the
 integer core is unchanged). This is the hardest functional milestone: 80-bit
 extended precision, the FP stack, and the status/control/tag words.
@@ -103,9 +105,8 @@ compare.py --mode func build/m3/<p>_qemu.vtrace build/m3/<p>_rtl.vtrace   # exit
 func-diff-clean (exit 0), AND the M0/M1/M2 integer suites stay green (`make m2`
 exit 0). Tier-3 coverage and every deferred/HALT item are listed honestly in
 PROGRESS. Anything unimplemented HALTs the core — never silently mis-executes.
-```
 
-## Deferred x87 — machine-checkable boundary
+## Deferred x87 — historical baseline-build boundary
 
 The "DEFERRED — loud HALT" set above (transcendentals and the FP
 environment/state ops; **BCD load/store is now IMPLEMENTED in M10**, see the
@@ -193,4 +194,3 @@ is a normal differential-vs-QEMU func test (manifest at depth 2, `x87:true`,
 joined to the central `make verify` corpus): it loads `+inf`/`-inf`/`+QNaN`/
 `-QNaN`/`+SNaN` as m80 and checks the post-op `st0` (full 80-bit floatx80) bit-
 exact vs QEMU after each `FABS`/`FCHS`. No RTL change is required for it to pass.
-```

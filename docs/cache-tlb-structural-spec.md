@@ -1,153 +1,45 @@
-# P54C cache / TLB structural-fidelity spec (DEFERRED, multi-milestone)
+# P54C Cache & TLB Structural Architecture Spec
 
-Status: **SPEC ONLY — structural fidelity, multi-milestone, DEFERRED.** Captures
-REVIEW_Jun5.md Limit #3 and Recommended-Next-Step 3 ("If structural, add a real
-D-cache data/MESI/writeback model and a more P54C-shaped TLB"). This is a large
-structural change that replaces correctness/timing models with data-holding
-structures; it perturbs every cache/TLB-timing band and needs new microbenchmarks
-and (for MESI/writeback) a bus integration. NOT implemented now.
-
-Owner doc; touches no `rtl/` and no Makefile.
+> **Current Status (Nov 2026 — IMPLEMENTED in `VEN_L1_AXI` / `c0e3fe43`):** Both the set-associative P54C TLBs (`rtl/mem/tlb_assoc.sv`) and the real data-holding 8 KiB 2-way 8-bank L1 D-Cache (`rtl/mem/ven_l1d.sv` + `ven_p54_bank_arb.sv` + `ven_p54_hit_return.sv`) are implemented and board-qualified in RK-XCZU15EG-F image **`c0e3fe43`** (`40.264133 MHz` STA sign-off, `0.515778001` total U+V / `0.397847833` primary/U Quake gameplay IPC across cycles `28,696,827,616–32,989,404,795`). The earlier 16-entry direct-mapped `tlb.sv` and tag-only `dcache_timing.sv` remain only for legacy standalone unit-TB configurations.
 
 ---
 
-## 1. What exists today (verified against code)
+## 1. Documented Pentium (P5/P54C) Reference Organization
 
-### TLB — `rtl/mem/tlb.sv`
-- **16-entry, DIRECT-MAPPED**, indexed by `lin[15:12]` (`tlb_idx`, line 80–82),
-  one instance per side (`IS_D=0` I-TLB, `IS_D=1` D-TLB).
-- Correctness model only: the 2-level page-walk FSM (PDE/PTE reads, A/D
-  writeback, #PF/CR2/error-code) stays in the core spine; this module is just
-  the arrays + combinational lookup + pulsed fill + CR3 flush (header lines 4–11).
-- Supports 4 KiB and 4 MiB pages (`tlb_big`, `phys_of` overlay), D-bit re-walk.
+Primary Intel sources (`Pentium Processor Family Developer's Manual Vol. 1`, 241428-004 §2.5 & Ch. 3; Alpert & Avnon, *IEEE Micro* 1993, p. 15; AP-500, 241799 p. 3):
 
-### D-cache — `rtl/mem/dcache_timing.sv`
-- **8 KB, 2-way, 32-byte line, 128 sets, true LRU — TIMING ONLY.** Header lines
-  1–9: "there is NO data array — load data still comes from the BFM." It tracks
-  only tag/valid/LRU so the core can decide WHEN a load completes (miss adds
-  `dmiss`, misalign +3 per AP-500). No data, no MESI, no writeback, no write
-  buffers, no store/load corner behavior.
-
-Both are honest, validated approximations: the TLB is a correctness model, the
-D-cache is a timing model. Neither is structurally P54C-shaped.
+- **Split L1 Caches (non-MMX P54C):** Separate **8 KiB code + 8 KiB data** caches (`128` sets × `2` ways × `32` B lines), LRU replacement.
+  - **L1 D-Cache Banking:** 8 banks interleaved on 32-bit word boundaries (`addr[4:2]`), allowing simultaneous U-pipe and V-pipe accesses to distinct banks (`+1` clock V-pipe stall on bank conflict). Write-back with write-allocate by default (`PWT`/`PCD` and region cacheability honored).
+- **Split Set-Associative TLBs:**
+  - **I-TLB:** **32-entry, 4-way set-associative** (`8` sets × `4` ways) with 3-bit pseudo-LRU replacement (4 MiB pages cached as 4 KiB translations).
+  - **D-TLB:** **64-entry, 4-way set-associative** (`16` sets × `4` ways) with pseudo-LRU replacement (plus 4 MiB PSE support).
 
 ---
 
-## 2. Documented P54C cache/TLB organization (cited)
+## 2. Implemented Ventium Hardware (`rtl/mem/`)
 
-Authoritative sources (cross-checked in
-`ventium-refs/07-p5-emulation-harness/build/p5_timing_full.json:2319` and
-`p5_timing_canonical.json:1239`, themselves citing the primary docs):
+### 2.1 Set-Associative I-TLB & D-TLB (`tlb_assoc.sv`)
 
-- **Pentium Processor Family Developer's Manual Vol.1 (241428-004), sec 2.5 /
-  2.5.1** ("On-Chip Caches" / "Cache Organization"), index
-  `ventium-refs/00-index/241428-004_..._Volume_1_Jul95.md`.
-- **Alpert & Avnon, "Architecture of the Pentium Microprocessor," IEEE Micro
-  1993, p.15 Fig.7** (`ventium-refs/.../alpert-avnon-pentium-ieee-micro-1993.md`).
-- **AP-500 (241799), p.3** (`docs/ap500-pairing-table.md` derives from the same).
-- MESI tables: Dev Manual Vol.1 Ch.3, p.81 Tables 3-3..3-6 (per the index).
+- **Deployed Configuration (`c0e3fe43`):**
+  - **D-TLB (`VEN_DTLB_ASSOC_4WAY`):** 64-entry, 4-way set-associative (`16` sets × `4` ways), pseudo-LRU victim selection, supporting both 4 KiB pages and 4 MiB PSE large pages, dirty-bit write re-walk, and `CR3` / `INVLPG` invalidation.
+  - **I-TLB (`VEN_ITLB_ASSOC_4WAY`):** 32-entry, 4-way set-associative (`8` sets × `4` ways), pseudo-LRU replacement, eliminating direct-mapped code-page thrashing across Windows 95 and Quake working sets.
+  - **Registered Front-End Page Filters (`VEN_FE_PIPE`):** `fe_itlb_q` and `fe_dtlb_q` cache the active 4 KiB translation in registers so intra-page `S_PIPE` fetches and loads avoid combinational associative tag-compare cones on the 40 MHz critical path (`8,223` LUTs / `4,780` FFs combined across all TLB structures in `c0e3fe43`).
+- **2-Level Hardware Page Walker:** Resides in `rtl/core/core_walk.svh` (`S_WALK`), performing atomic `PDE`/`PTE` reads, `Accessed`/`Dirty` bit updates, and `#PF` (`CR2` + error code) generation while freezing split-page fragment shaping (`fx_walk_hold`).
+- **Legacy Unit-TB Baseline (`tlb.sv`):** Retains the 16-entry direct-mapped array when associative TLB defines are disabled in basic unit tests.
 
-### Caches (non-MMX P54C)
-- Separate **8 KB code + 8 KB data** L1 (16 KB total), each **2-way
-  set-associative, 128 sets × 2 lines × 32 bytes**, **true LRU** (MMX part uses
-  pseudo-LRU — do NOT apply to P54C).
-- D-cache is **8 banks interleaved on 4-byte boundaries**: both pipes can access
-  simultaneously if to DIFFERENT banks; a bank conflict (address bits 2–4 equal)
-  stalls the V-pipe access 1 clock, U-pipe priority (already modeled as a +1 in
-  the pairing rules, `docs/ap500-pairing-table.md` §5.6.5).
-- Cache tags **triple-ported** (1 snoop, 2 lookup); 64-bit external bus.
-- CONFLICT NOTE (carried verbatim from the canonical JSON): AP-500 (1994) and the
-  1997 Dev Manual both state **2-way** for the original P54C; some later steppings
-  shipped 4-way I/D — the canonical original value is **2-way**.
+### 2.2 Split 8 KiB L1 I-Cache (`icache.sv`) & 8 KiB L1 D-Cache (`ven_l1d.sv`)
 
-### TLBs (Dev Manual sec 2.5, PDF p.49)
-- **D-cache TLB:** **4-way set-associative, 64-entry** for 4 KB pages, **PLUS a
-  separate 4-way set-associative 8-entry** TLB for 4 MB pages.
-- **Code-cache TLB:** **one 4-way set-associative 32-entry** TLB for 4 KB pages
-  (4 MB pages cached in 4 KB increments).
-- **TLB replacement = pseudo-LRU** (3 bits per set, Intel486-style).
-- (MMX part uses fully-associative TLBs — NOT P54C.)
+- **L1 I-Cache (`icache.sv`):** 8 KiB, 2-way, 32 B lines (`8` RAMB36 tiles + LUTRAM tags under `VEN_IC_BRAM`). Stores physical page tags (`ic_ptag`) on every line so CPU stores and DMA writes snoop-invalidate all linear aliases (`run-ic-alias-gate.sh`), honors `CR0.CD` and `ven_cachemap` cacheability, and replicates `pf_fill_addr_rep[0..3]` for congestion-free routing.
+- **L1 D-Cache (`ven_l1d.sv` + `ven_p54_bank_arb.sv` + `ven_p54_hit_return.sv`):**
+  - **Geometry & Banking:** 8 KiB, 2-way, 32 B lines (`128` sets), with 8-way 32-bit word-interleaved bank arbitration (`ven_p54_bank_arb`) and dual-port U+V read hit return (`ven_p54_hit_return`) enforcing the AP-500 `addr[4:2]` bank-conflict rule (`ven_p54_bram_bank.sv` / `ven_p54_bram_data.sv` provide dedicated BRAM bank wrappers).
+  - **Write Policy & Coherence:** Supports write-back / write-allocate dirty-line eviction as well as write-through/uncacheable bypass, `CR0.CD` + `ven_cachemap` (`KEN#` equivalent) region attributes, per-byte cached-store policy (`VEN_L1D_STORE_POLICY` for `0xC0000–0xFFFFF` ROM/UMA windows), and physical snoop invalidation.
+  - **Backing Fabric (`ventium_l1_axi.sv` + `ven_axi_master.sv`):** Bridges cache line fills, dirty evictions, and byte-exact fragmented non-cacheable MMIO reads/writes (`ARSIZE`-exact, never crossing 4 KiB) onto a 64-bit AXI4 master (`8,412` LUTs / `2,105` FFs in `c0e3fe43`). Outer MiSTer L2 is disabled/bypassed on FPGA; DDR4 traffic flows through `ven_ddram_axi_posted` (16-slot posted write queue with CAM RAW hazard bypass and architectural external-drain barrier).
+- **Legacy Unit-TB Model (`dcache_timing.sv`):** Tag/LRU-only cycle-penalty estimator compiled **only** when `VEN_L1_AXI` is off in standalone core unit tests.
 
 ---
 
-## 3. What a P54C-shaped `tlb.sv` would look like
+## 3. Remaining Out-of-Scope Multi-Socket Bus Items
 
-Replace the 16-entry direct-mapped array with parameterised set-associative
-structures matching §2:
-
-- **I-TLB:** 32 entries, 4-way → **8 sets × 4 ways**. Index = `lin[?]` chosen so
-  8 sets (3 index bits) select the set; tag = remaining `lin[31:15]`-ish bits
-  (exact split per the entry count). 4 KB pages only.
-- **D-TLB (4 KB):** 64 entries, 4-way → **16 sets × 4 ways**. Index = 4 bits.
-- **D-TLB (4 MB):** separate 8-entry, 4-way → **2 sets × 4 ways**, keyed on
-  `lin[31:22]`. A linear address checks BOTH the 4 KB and 4 MB D-TLB structures
-  (the 4 MB hit wins for a large page).
-- **Replacement:** pseudo-LRU, 3 bits/set (replaces the current direct-mapped
-  no-replacement scheme — a set-associative TLB must pick a victim way).
-- **Keep the page-walk FSM in the spine** (unchanged) — only the array shape and
-  fill/lookup change. The fill must now choose a victim way (pseudo-LRU) instead
-  of overwriting the single direct-mapped slot.
-- **CR3 flush** still clears non-global val bits (IA-32 §4.10).
-
-Observable fidelity gain: TLB-miss timing patterns and conflict behavior would
-match a real P54C (a hot set of >1 page no longer self-evicts as it does in a
-direct-mapped 16-entry array). This is structural fidelity, not just
-correctness — so it needs NEW TLB-pressure microbenchmarks (a working set that
-exercises set conflicts and 4 MB vs 4 KB).
-
----
-
-## 4. D-cache data / MESI / writeback model sketch
-
-Promote `dcache_timing.sv` from a timing-only tag array to a real data cache.
-This is the large, multi-milestone part:
-
-1. **Data array:** add `8 KB` of storage (128 sets × 2 ways × 32 bytes). Loads
-   read from the cache (on hit) instead of the BFM; the BFM becomes the
-   *backing* memory reached on a miss/fill — this is the structural change the
-   review asks for (`rtl/mem/dcache_timing.sv:3-9` "no data array").
-2. **MESI state per line:** Modified / Exclusive / Shared / Invalid (Dev Manual
-   Vol.1 Ch.3, Tables 3-3..3-6). Replaces the bare `val` bit. State transitions
-   on local read/write and on bus snoop (inquire cycle).
-3. **Write policy:** P54C default is **write-back with write-allocate**, also
-   supporting write-through per-line via PWT/PCD and WB/WT# (Dev Manual sec 2.5).
-   A store to a Modified/Exclusive line updates the cache; a dirty line is
-   written back on eviction or snoop-hit (HITM#).
-4. **Write buffers:** the P5 has write buffers between the pipes and the cache
-   (Dev Manual Ch.3, "write buffers"). Model the buffer depth and the
-   store-to-load forwarding / ordering corner cases.
-5. **Bus integration:** writeback, snoop, inquire, and WB/WT# all require a real
-   external bus path. The integrated BIU is currently a *protocol exerciser*
-   only (REVIEW_Jun5.md Limit #4; `rtl/bus/biu.sv` — the core consumes
-   combinational back-side memory independent of the BIU). A MESI/writeback
-   D-cache therefore depends on FIRST closing the integrated-bus data-path gap,
-   making this **multi-milestone**: (M-a) D-cache data array + LRU read; (M-b)
-   MESI + write-back to BFM; (M-c) write buffers + ordering; (M-d) snoop/inquire
-   over a real integrated bus.
-
-Observable fidelity gain: real load data from the cache, dirty-line writeback
-traffic on the pins, snoop/MESI behavior, and store/load ordering — none of which
-the current timing-only model can show. Each sub-milestone needs its own
-microbenchmarks (load-hit data correctness, writeback-on-eviction traffic,
-store→load forwarding, snoop-induced state change) and must stay diff-clean vs
-QEMU for the architectural load/store result.
-
----
-
-## 5. Classification + RISK (Action 9 / Recommended-Step 3)
-
-- **Until landed, label both blocks "timing model" / "correctness model," NOT
-  "structurally faithful"** — exactly as the code comments already do. The README
-  / sphinx claims should say "cache/TLB timing- and correctness-modeled, not
-  structurally P54C-shaped" until §3/§4 land.
-- **RISK — band perturbation.** A set-associative TLB and a real data D-cache
-  change miss patterns, so the `dmiss`/`imiss` bands (`verif/m5_metrics.py`,
-  `MISS_CPI_MIN`) and any cache-sensitive kernel must be re-baselined. New
-  conflict/pressure microbenchmarks are required to gate the new structure.
-- **RISK — bus dependency.** MESI/writeback is blocked on the integrated-bus
-  data-path gap (Limit #4); attempting MESI before the bus carries real data
-  would be unverifiable. Sequence §4 strictly after the bus work.
-- **RISK — scope.** This is the single largest deferred item: a data cache +
-  MESI + write buffers + snoop is effectively a new subsystem. Gate each
-  sub-milestone (M-a..M-d) independently with `make verify`, the cache bands, the
-  bus SVA corpus, and a progress note (Action 10).
+Ventium models a **uniprocessor PC/AT SoC** (`ao486-sim` and `RK-XCZU15EG-F`):
+- Local DMA/self-modifying-code coherence is enforced via physical snoop invalidations and posted-DDR drain barriers rather than multi-CPU socket-to-socket `EADS#`/`HITM#` cache-to-cache interventions on external package pins (`rtl/bus/biu_p5.sv` verifies the pin-level P5 inquire/HITM# protocol standalone under `make bus`).
+- Separate 8-entry dedicated 4 MiB D-TLB array: 4 MiB PSE translations are served directly by `tlb_assoc.sv` rather than a physically separate 8-entry CAM.

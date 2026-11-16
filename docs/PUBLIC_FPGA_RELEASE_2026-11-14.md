@@ -12,7 +12,7 @@ This release updates `main` to publish the complete, self-contained hardware sou
   `2bd41907b5f87343078d47d1a62895129dcf511a804442c5e876cf9d2f9ce44b`
 - **Original source-preparation receipt (`prepared.json`) SHA-256:**
   `47682f66fbd09eccd6d5efa3bac2c3f5bfc7b4b4a5bbd3b219f3608514d33dfa` (recorded in `fpga/known_good_c0e3fe43.json`)
-- **Hash-pinned manifest:** [`fpga/known_good_c0e3fe43.json`](../fpga/known_good_c0e3fe43.json) — **193 pinned files** (**186** RTL, constraint, ordered filelist, and define files byte-for-byte identical to the `apr-r1` build freeze + **7** portable public build/entry wrappers) and **161 hardware defines** (`fpga/known_good_defines.txt`, SHA-256 `1d40a25641a10ba87012c9f159e6a50427f3bc188c66f249be80b012a4a7c8dc`).
+- **Hash-pinned manifest (`main`):** [`fpga/known_good_c0e3fe43.json`](https://github.com/AL-255/ventium/blob/main/fpga/known_good_c0e3fe43.json) — **193 pinned files** (**186** RTL, constraint, ordered filelist, and define files byte-for-byte identical to the `apr-r1` build freeze + **7** portable public build/entry wrappers) and **161 hardware defines** (`fpga/known_good_defines.txt`, SHA-256 `1d40a25641a10ba87012c9f159e6a50427f3bc188c66f249be80b012a4a7c8dc`).
 
 ## Summary of Architectural & Physical Improvements Over `2886d24c`
 

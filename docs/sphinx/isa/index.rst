@@ -54,17 +54,23 @@ fills behind a U-pipe instruction). When two adjacent instructions satisfy the
 pairing rules they *dual-issue* and retire together (up to 2/clock); otherwise
 the instruction issues alone in U with the V slot idle.
 
-Not every instruction takes this **fast path**. Byte-operand forms, memory
-read-modify-write forms, immediate+ModR/M forms, all 0F-prefixed (two-byte)
-opcodes, string primitives, the x87 escapes, and every system/microcoded op
-instead decode on the **slow multi-cycle FSM** in ``core.sv``
-(``S_DECODE → S_LOAD → S_EXEC → S_STORE`` and friends, plus the ``S_USEQ``
-microsequencer for multi-beat ops). The slow path is functionally identical
-where the fast path also exists (it shares the same ``alu_result`` /
-``flags_next`` combinational logic), but it *serializes*: an instruction on the
-slow FSM issues alone, holding the in-order pipe until it retires. Many
-instructions are therefore "AP-500 pairable by class" yet, in *this* RTL, only
-ever run on the slow path — the catalog records both facts honestly.
+Not every instruction takes this **fast path** in the zero-define unit-test
+baseline. In that baseline, byte-operand forms, memory read-modify-write forms,
+immediate+ModR/M forms, ``0F``-prefixed (two-byte) opcodes, string primitives,
+x87 escapes, and system/microcoded ops decode on the **slow multi-cycle FSM**
+in ``core.sv`` / ``decode_stages.sv`` (``S_DECODE → S_LOAD → S_EXEC → S_STORE``
+plus ``S_USEQ``). In the **deployed c0e3fe43 P54C hardware profile**
+(``161`` defines on RK-XCZU15EG-F; :doc:`/build-flags`, ``0.515778001`` total
+U+V Quake gameplay IPC across cycles ``28,696,827,616–32,989,404,795``),
+``decode.sv`` and ``S_PIPE`` additionally fast-path protected-mode flat,
+relocated, and bounded memory loads/stores (``VEN_SYS_FASTPATH*``), 8-bit
+register ALU/shifts (``VEN_FAST_BYTE_ALU`` / ``_SHIFT``), ``PUSH``/``POP``,
+``0x66`` operand-size prefixes, ``REP STOS``/``REP MOVS`` cacheable streaming
+(``VEN_REP_STOS_STREAM``), and asynchronous shared x87 execution with a
+zero-cycle ``FXCH`` rename queue (``fp_shared/``), while ``VEN_FAST_MEM_EXT``
+(on ``experimental/uv-fast-ipc-apr``) admits 32-bit ``MOVZX``/``MOVSX`` memory
+loads directly into ``S_PIPE``. Where baseline and ``c0e3fe43`` fast-path
+coverage differ, the tables below note both clearly.
 
 
 .. _legend:
@@ -253,8 +259,8 @@ they simply do not pair.
    * - ``TEST r/m, imm``
      - ``F6 /0,/1 ib``; ``F7 /0,/1 iz``
      - **NP**
-     - group3 slow FSM; reg-form only — memory form sets ``d_unknown`` (deferred).
-     - partial
+     - group3 slow FSM (``/0`` + ``/1`` alias); reg or mem load → ALU_TEST (EFLAGS only).
+     - implemented (slow FSM, NP)
    * - ``INC r``
      - ``40+r`` (40..47)
      - UV
@@ -297,7 +303,7 @@ ADD (``ADD r/m,r`` ``00/01``; ``ADD r,r/m`` ``02/03``)
     serialized.
 
 ADD with immediate (``04/05`` acc; ``80/81 /0``; ``83 /0``)
-    ``dst <- dst + imm``, same flags. Only the **``83 /0``** sign-extended-imm8
+    ``dst <- dst + imm``, same flags. Only the ``83 /0`` sign-extended-imm8
     *register* form is fast-pathed and pairable: it is imm-only (no
     displacement), so the ``disp_imm`` pairing veto does not fire, and it runs
     single-cycle in U or V. The accumulator forms (``04``/``05``) and the
@@ -340,8 +346,8 @@ CMP / TEST (``38–3B``, ``3C/3D``, ``83 /7``; ``84/85``, ``A8/A9``, ``F6/F7 /0,
     reusing the AND result), EFLAGS only. Only the ``A9 eAX,imm32`` form is
     fast-pathed UV; ``84``/``85`` and ``A8`` run on the slow FSM. ``TEST
     r/m,imm`` (``F6/F7 /0,/1``) is **NP** per AP-500 (only the
-    reg,reg/mem,reg/imm,acc forms are UV); its register form runs on the slow
-    FSM, and its *memory* form is marked ``d_unknown`` and deferred.
+    reg,reg/mem,reg/imm,acc forms are UV); both its register and memory forms
+    run on the slow FSM.
 
 INC / DEC (``40+r``, ``48+r``; ``FE/FF /0,/1``)
     ``dst <- dst ± 1`` with **CF preserved** — distinct from the unary
@@ -370,11 +376,13 @@ DATA-MOV — data movement
 ========================
 
 Data movement spans the simplest pairable op in the machine (``NOP``) and the
-most microcoded (segment-register loads). The plain register ``MOV`` and
-load-immediate forms are fast-pathed UV; register-base loads and ``LEA [base]``
-are fast-pathed but interact with the AGU (and the AGI interlock); ``MOVZX`` /
-``MOVSX`` / ``XCHG`` / ``LAHF`` / ``CBW`` are NP slow-FSM ops; segment-register
-``MOV`` is a microcoded system path; and ``XLAT`` is undecoded.
+most microcoded (segment-register descriptor loads). Plain register ``MOV`` and
+load-immediate forms are fast-pathed UV; register-base/displaced loads and
+``LEA`` interact with the dual AGU (and the AGI interlock); ``MOVZX`` /
+``MOVSX`` / ``XCHG`` / ``LAHF`` / ``CBW`` / ``XLAT`` are NP ops (with
+``VEN_FAST_MEM_EXT`` admitting 32-bit ``MOVZX``/``MOVSX`` loads into ``S_PIPE``
+and ``VEN_FAST_XCHG_R`` fast-pathing register ``XCHG``); and segment-register
+``MOV`` runs through the system descriptor-validation path.
 
 .. list-table::
    :header-rows: 1
@@ -388,48 +396,48 @@ are fast-pathed but interact with the AGU (and the AGI interlock); ``MOVZX`` /
    * - ``MOV r/m, r``
      - ``88 /r``; ``89 /r``
      - UV
-     - Reg-form ``89`` single-cycle ALU_MOV (no flags); ``88``/16-bit/mem on slow FSM.
+     - Reg & flat/reloc ``S_PIPE`` store fast-pathed in ``c0e3fe43``; cross-page on ``S_STORE``.
      - implemented
    * - ``MOV r, r/m``
      - ``8A /r``; ``8B /r``
      - UV
-     - ``8B`` reg-form & reg-base load fast-pathed (load is U-member only); ``8A``/disp/SIB slow FSM.
+     - Reg & flat/bounded/reloc ``S_PIPE`` loads fast-pathed (dual-load pairable in ``c0e3fe43``).
      - implemented
    * - ``MOV r, imm``
      - ``B0+rb``; ``B8+rd``
      - UV
-     - ``B8+r`` imm32 single-cycle (no operand read → never an AGI source); ``B0-B7``/16-bit slow FSM.
+     - ``B8+r`` imm32 single-cycle (no operand read → never an AGI source); ``B0-B7`` byte fast-pathed under ``VEN_FAST_BYTE_ALU``.
      - implemented
    * - ``MOV r/m, imm``
      - ``C6 /0 ib``; ``C7 /0 iz``
      - UV (AP-500)
-     - No fast-path arm → slow FSM only (the disp+imm form the checker excludes); issues alone.
+     - Slow FSM group11 (disp+imm excluded from pairing); reg write or mem store.
      - implemented (slow FSM)
    * - ``MOV AL/eAX, moffs`` / ``moffs, AL/eAX``
      - ``A0`` ``A1`` (load); ``A2`` ``A3`` (store)
      - UV (+ erratum)
-     - Slow-FSM functional; ``A2``/``A3`` modeled in cycle-mode for pairing + Erratum 59.
+     - 16/32-bit effective-address ``moffs``; ``A2``/``A3`` modeled for pairing + Erratum 59 (``VEN_FAST_MOFFS_STORE``).
      - implemented
    * - ``MOV r/m16, Sreg``
      - ``8C /r``
      - **NP**
-     - System path (``SYS_MOVSREG_FROM``); reg-form only, mem dst deferred.
-     - partial
+     - System path (``SYS_MOVSREG_FROM``); zero-extends selector to reg (32b) or writes 16b mem.
+     - implemented
    * - ``MOV Sreg, r/m16``
      - ``8E /r``
      - **NP**
-     - System path (``SYS_MOVSREG_TO``); reg-form source only, mem source deferred.
-     - partial
+     - System path (``SYS_MOVSREG_TO`` / ``S_SEGLD``); real/V86 ``sel<<4`` or full PM GDT/LDT descriptor load.
+     - implemented
    * - ``MOVZX`` / ``MOVSX``
      - ``0F B6/B7`` (zx); ``0F BE/BF`` (sx)
      - **NP**
-     - 0F-prefixed slow FSM (``K_EXT``); zero/sign-extend then reg_merge; never paired.
-     - implemented (slow FSM, NP)
+     - ``K_EXT`` zero/sign-extend (32b mem loads fast-pathed in ``S_PIPE`` under ``VEN_FAST_MEM_EXT``; always NP).
+     - implemented (NP)
    * - ``XCHG``
      - ``86 /r``; ``87 /r``; ``90+rd``
      - **NP**
-     - Read-modify-write swap (``K_XCHG``); two writes / locked mem RMW; slow FSM.
-     - implemented (slow FSM, NP)
+     - Swap (``K_XCHG``; reg forms fast-pathed NP under ``VEN_FAST_XCHG_R``, mem forms locked RMW).
+     - implemented (NP)
    * - ``NOP``
      - ``90`` (no 66h)
      - UV
@@ -438,7 +446,7 @@ are fast-pathed but interact with the AGU (and the AGI interlock); ``MOVZX`` /
    * - ``LEA r, m``
      - ``8D /r``
      - UV
-     - ``[base]`` form fast-pathed: AGU writes ``gpr[base]`` to dst, no mem port; AGI-aware. SIB/disp on slow FSM.
+     - AGU writes effective address to dst with no memory access or flags; AGI-aware.
      - implemented
    * - ``LAHF`` / ``SAHF``
      - ``9F``; ``9E``
@@ -453,8 +461,8 @@ are fast-pathed but interact with the AGU (and the AGI interlock); ``MOVZX`` /
    * - ``XLAT`` / ``XLATB``
      - ``D7``
      - **NP**
-     - Table-lookup load — *not decoded*; falls to ``d_unknown`` → HALT.
-     - deferred / HALTs
+     - Table-lookup byte load ``AL <- [seg:(E)BX + zero_ext(AL)]`` (``d_xlat``); slow FSM.
+     - implemented (slow FSM, NP)
    * - Segment-override prefixes
      - ``2E 36 3E 26 64 65``
      - PU/NP
@@ -508,27 +516,26 @@ MOV moffs (``A0-A3``) and the Erratum-59 model
 MOV to/from segment registers (``8C``, ``8E``)
     **NP** — AP-500 excludes seg-register ``MOV`` from the UV data-MOV class. A
     selector access is a microcoded **system** datapath, not the simple ALU.
-    ``8C`` (``SYS_MOVSREG_FROM``) writes the zero-extended 16-bit selector of
-    ``Sreg`` into ``r/m16``; ``8E`` (``SYS_MOVSREG_TO``) loads ``Sreg`` from
-    ``r/m16`` (real/flat mode: ``base=sel<<4``, ``limit=0xFFFF``,
-    ``attr=0x93``; the protected-mode descriptor-load fault is *computed* but
-    delivery is a later milestone, so a fault can only HALT). Both are
-    reg-form-only — a memory operand raises ``d_unknown`` and HALTs.
+    ``8C`` (``SYS_MOVSREG_FROM``) writes the 16-bit selector of ``Sreg`` (zero-
+    extended for a 32-bit register destination, or 16-bit for memory); ``8E``
+    (``SYS_MOVSREG_TO`` / ``S_SEGLD``) loads ``Sreg`` from register or memory
+    (real/V86 mode: ``base = sel << 4``; protected mode: full GDT/LDT descriptor
+    fetch, type/DPL/presence validation, ``#GP``/``#SS``/``#NP`` fault delivery,
+    and ``MOV SS`` interrupt-shadow arming; ``MOV CS`` raises ``#UD``).
 
 MOVZX / MOVSX (``0F B6/B7/BE/BF``)
-    **NP** — AP-500 lists these as not-pairable (0F-prefixed, 3+ cycles), and
-    the two-byte ``0F`` escape is not in the fast-path decoder, so they always
-    run on the slow FSM (``K_EXT``). They load ``r/m8`` or ``r/m16`` into a
-    16/32-bit register, zero-extended (``B6``/``B7``) or sign-extended
-    (``BE``/``BF``); ``d_ext_srcw`` selects source width and ``d_ext_signed``
-    the extension, with ``reg_merge`` into the destination at the operand width.
-    No flags; high-8 byte sources handled via ``d_src_high8``.
+    **NP** — AP-500 lists these as not-pairable (``0F``-prefixed). They load
+    ``r/m8`` or ``r/m16`` into a 16/32-bit register, zero-extended (``B6``/``B7``)
+    or sign-extended (``BE``/``BF``), with no flag changes. On the zero-define
+    baseline they run on the slow FSM (``K_EXT``); under ``VEN_FAST_MEM_EXT``
+    (``experimental/uv-fast-ipc-apr``), unprefixed 32-bit memory forms up to 7
+    bytes execute directly in ``S_PIPE`` as single-issue ``NP`` loads.
 
 XCHG / NOP (``86/87``, ``90+r``, ``90``)
     ``XCHG`` is **NP**: a read-modify-write *swap* (two register/memory writes,
     an implicit ``LOCK`` on memory forms), not a simple single-write ALU op, so
     it runs on the slow FSM (``K_XCHG``) — reg-form cross-writes both GPRs, mem-
-    form does a locked load+store. **``NOP``** (``90`` with no ``0x66``) is the
+    form does a locked load+store. ``NOP`` (``90`` with no ``0x66``) is the
     exception: it is **UV**, ``is_nop=1``, fast-pathed, and writes *nothing* (no
     register, memory, or flag), so it pairs trivially in either slot; being
     1-byte it also satisfies the I-cache-split pairing exception.
@@ -552,10 +559,10 @@ LAHF / SAHF and CBW/CWDE / CWD/CDQ (``9F/9E``, ``98/99``)
     flag transfers on the slow FSM, serializing.
 
 XLAT (``D7``)
-    **NP** and **not decoded** — a table-lookup load (``AL <- [(E)BX + AL]``,
-    implicit addressing) that has no opcode arm at all; ``D7`` falls through to
-    the one-byte default ``d_unknown`` and HALTs loudly, so it never reaches an
-    execute datapath.
+    **NP** — table-lookup byte load ``AL <- [seg:(E)BX + zero_ext(AL)]``
+    (honoring ``eff_addr`` for ``BX`` vs. ``EBX`` and optional segment override
+    prefixes, defaulting to ``DS``), executed as a single-byte load on the slow
+    FSM (``d_xlat``) with ``EAX[31:8]`` and flags preserved.
 
 Prefixes (segment-override ``2E/36/3E/26/64/65``; ``66``/``67``)
     A prefix is **PU** on the slow path (AP-500 §5.6.2.3 makes a prefixed
@@ -576,16 +583,14 @@ STACK — push, pop, and frame management
 =======================================
 
 The stack group exercises the store/load AGU with the implicit ``ESP``
-register. A subtlety threads the whole group: the decoder *masks ``ESP`` out*
+register. A subtlety threads the whole group: the decoder *masks* ``ESP`` *out*
 of the reads/writes bitmasks (``_onehot`` returns 0 for ``R_ESP``), so a
 ``push/push`` or ``push/call`` sequence never trips a false ``ESP`` RAW/WAW —
 the AP-500 §5.6.4 special-pair rule. Consequently ``PUSH``/``POP`` of a register
-or immediate are **UV by class**. *However*, none of the stack ops are
-whitelisted by the fast-path decoder (``decode.sv`` does not decode them), so in
-*this* Ventium they all run on the slow FSM and do **not** emergently dual-issue
-— the catalog records the AP-500 class, not a realized pairing. The
-memory-form, multi-register, and flags/segment forms are genuinely NP /
-microcoded.
+or immediate are **UV by class** (executed on the slow FSM in the zero-define
+baseline and fast-pathed in ``S_PIPE`` in the deployed ``c0e3fe43`` profile).
+The memory-form, multi-register, frame, and flags/segment forms are genuinely
+**NP** / microcoded.
 
 .. list-table::
    :header-rows: 1
@@ -598,19 +603,19 @@ microcoded.
      - Status
    * - ``PUSH r16/r32``
      - ``50+rd`` (66h → r16)
-     - UV (AP-500)
-     - Pre-decrement ESP store; SS-based AGU; slow-FSM single store (not fast-pathed).
-     - implemented (slow FSM)
+     - UV
+     - Pre-decrement ESP store; SS-based AGU (``S_PIPE`` fast-path in ``c0e3fe43``, slow FSM baseline).
+     - implemented
    * - ``POP r16/r32``
      - ``58+rd`` (66h → r16)
-     - UV (AP-500)
-     - Load from [SS:ESP] then ESP += w; slow-FSM single load (not fast-pathed).
-     - implemented (slow FSM)
+     - UV
+     - Load from [SS:ESP] then ESP += w (``S_PIPE`` fast-path in ``c0e3fe43``, slow FSM baseline).
+     - implemented
    * - ``PUSH imm``
      - ``68 id``; ``6A ib`` (sign-ext)
-     - UV (AP-500)
-     - Pre-decrement ESP store of the latched immediate; slow-FSM single store.
-     - implemented (slow FSM)
+     - UV
+     - Pre-decrement ESP store of immediate (``S_PIPE`` fast-path in ``c0e3fe43``, slow FSM baseline).
+     - implemented
    * - ``PUSH r/m32``
      - ``FF /6``
      - **NP**
@@ -649,18 +654,18 @@ microcoded.
    * - ``ENTER imm16, imm8``
      - ``C8 iw ib``
      - **NP**
-     - Microcoded frame-build — *not decoded*; ``d_unknown`` → HALT.
-     - deferred / HALTs
+     - Frame build (push (E)BP, frame-ptr display copy, ``(E)SP -= imm16``); slow FSM.
+     - implemented (slow FSM, NP)
    * - ``PUSH sreg`` (ES/CS/SS/DS/FS/GS)
      - ``06 0E 16 1E``; ``0F A0/A8``
      - **NP**
-     - Segment-selector push — *not decoded*; ``d_unknown`` → HALT.
-     - deferred / HALTs
+     - Segment-selector stack push (16/32-bit slot); slow FSM.
+     - implemented (slow FSM, NP)
    * - ``POP sreg`` (ES/SS/DS/FS/GS)
      - ``07 17 1F``; ``0F A1/A9``
      - **NP**
-     - Descriptor-reloading segment pop — *not decoded*; ``d_unknown`` → HALT.
-     - deferred / HALTs
+     - Stack pop + real/PM segment descriptor reload (``S_SEGLD``; ``POP SS`` arms IRQ shadow).
+     - implemented (slow FSM, NP)
 
 PUSH / POP register and immediate (``50+r``, ``58+r``, ``68``/``6A``)
     ``PUSH`` pre-decrements ``ESP`` by the operand width then stores the source
@@ -668,13 +673,10 @@ PUSH / POP register and immediate (``50+r``, ``58+r``, ``68``/``6A``)
     post-increments ``ESP`` (a ``POP`` into ``ESP`` itself suppresses the
     ``+w``). ``PUSH imm`` stores the decode-latched immediate (``6A`` sign-
     extends its imm8). **Datapath:** the AGU forms the descending store address
-    ``gpr[ESP] - w`` (pre-decrement adder in D2) or the ascending load address
-    ``gpr[ESP]``, with the ``SS`` base applied; ``ESP`` is rewritten at WB. These
-    are **UV by AP-500 class** (``ESP`` masked from contention), but because
-    ``decode.sv`` does not decode them, ``simple`` stays 0 and ``S_PIPE`` hands
-    them to the slow FSM (``S_DECODE → S_EXEC → S_STORE``, or ``→ S_LOAD →
-    S_EXEC``) — a single ~1-cycle memory access that **serializes**. So they are
-    pairable by class but do not emergently dual-issue in this RTL.
+    ``gpr[ESP] - w`` or the ascending load address ``gpr[ESP]`` with the ``SS``
+    base applied, and ``ESP`` updates at WB. In the zero-define baseline they
+    run on the slow FSM; in the deployed ``c0e3fe43`` P54C profile they execute
+    on ``S_PIPE`` with ``ESP`` masked out of RAW/WAW contention per AP-500 §5.6.4.
 
 PUSH / POP r/m (``FF /6``, ``8F /0``)
     Both **NP**. ``PUSH r/m32`` for a *memory* operand needs *two* memory
@@ -691,7 +693,7 @@ PUSHA / POPA (``60``, ``61``)
     ``pusha_esp`` on entry so every descending address (and the pushed ``ESP``
     slot) is computed off the fixed value, and at step 7 it commits
     ``ESP <= original - 32``. ``POPA`` is the inverse: 8 ascending loads into
-    ``EDI,ESI,EBP,`` (skip ``ESP``)``,EBX,EDX,ECX,EAX``, then ``ESP += 32``. Each
+    ``EDI,ESI,EBP`` (skip ``ESP``), ``EBX,EDX,ECX,EAX``, then ``ESP += 32``. Each
     is ~8+ cycles gated on ``mem_ack`` and holds the in-order pipe for the whole
     run.
 
@@ -706,19 +708,18 @@ PUSHF / POPF (``9C``, ``9D``)
     step-trap decision.
 
 LEAVE / ENTER (``C9``, ``C8``)
-    ``LEAVE`` is **NP**: a fused two-step frame teardown — ``ESP <- EBP`` then
-    ``POP EBP`` — with an ``EBP``-based load (``SM_LEAVE``: read ``[EBP]``, write
-    ``EBP`` and ``ESP <= old-EBP + slot``), serializing on the slow FSM (both
-    32-bit and 66h 16-bit forms). ``ENTER`` is **NP** *and not implemented*:
-    opcode ``0xC8`` has no decode arm, so it hits ``d_unknown`` and HALTs loudly;
-    there is no frame-build / display-copy micro-sequence.
+    Both **NP**. ``LEAVE`` performs fused frame teardown — ``(E)SP <- (E)BP``
+    then ``POP (E)BP`` (``SM_LEAVE``, 16- and 32-bit stack/operand-size aware).
+    ``ENTER imm16, imm8`` builds a stack frame (pushes ``(E)BP``, handles
+    nesting-level display copies when ``imm8 & 31 != 0``, sets ``(E)BP`` to the
+    frame pointer, and subtracts ``imm16`` from ``(E)SP``) on the slow FSM.
 
 PUSH / POP segment registers (``06/0E/16/1E``, ``07/17/1F``, ``0F A0/A1/A8/A9``)
-    **NP** by class and *unimplemented* — none of these one-byte or 0F-prefixed
-    forms have a decode arm, so they resolve to ``d_unknown`` and HALT. A
-    segment-register push is a special-source store the P5 does not pair, and a
-    segment *pop* triggers a descriptor reload (a microcoded system action);
-    neither datapath exists for these opcodes here.
+    **NP** — ``PUSH ES/CS/SS/DS/FS/GS`` pushes the selector onto the stack at the
+    effective operand width; ``POP ES/SS/DS/FS/GS`` pops a 16-bit selector and
+    executes the full real/V86 or protected-mode ``S_SEGLD`` descriptor-reload
+    and privilege/presence validation path (``POP SS`` also arms the 1-instruction
+    interrupt shadow).
 
 .. note::
 
@@ -790,33 +791,33 @@ by class), so they serialize.
    * - ``SHLD r/m, r, imm8/CL``
      - ``0F A4 /r ib``; ``0F A5 /r``
      - **NP**
-     - Double-precision two-source shift; slow ``K_SHLDRD``; reg-dst only (mem → HALT).
-     - implemented (reg dst)
+     - Double-precision two-source shift; slow ``K_SHLDRD``; reg dst & mem RMW implemented.
+     - implemented (NP)
    * - ``SHRD r/m, r, imm8/CL``
      - ``0F AC /r ib``; ``0F AD /r``
      - **NP**
-     - Double-precision right; slow ``K_SHLDRD``; reg-dst only (mem → HALT).
-     - implemented (reg dst)
+     - Double-precision right; slow ``K_SHLDRD``; reg dst & mem RMW implemented.
+     - implemented (NP)
    * - ``BT r/m, r/imm8``
      - ``0F A3 /r``; ``0F BA /4 ib``
      - **NP**
-     - Bit test → CF, no write; slow ``K_BITTEST``; reg-direct only (mem → HALT).
-     - implemented (reg dst)
+     - Bit test → CF, no write; slow ``K_BITTEST``; reg & signed bit-string mem load.
+     - implemented (NP)
    * - ``BTS r/m, r/imm8``
      - ``0F AB /r``; ``0F BA /5 ib``
      - **NP**
-     - Test-and-set; slow ``K_BITTEST`` (``cur | 1<<idx``); reg-direct only.
-     - implemented (reg dst)
+     - Test-and-set; slow ``K_BITTEST`` (``cur | 1<<idx``); reg & signed bit-string mem RMW.
+     - implemented (NP)
    * - ``BTR r/m, r/imm8``
      - ``0F B3 /r``; ``0F BA /6 ib``
      - **NP**
-     - Test-and-reset; slow ``K_BITTEST`` (``cur & ~(1<<idx)``); reg-direct only.
-     - implemented (reg dst)
+     - Test-and-reset; slow ``K_BITTEST`` (``cur & ~(1<<idx)``); reg & signed bit-string mem RMW.
+     - implemented (NP)
    * - ``BTC r/m, r/imm8``
      - ``0F BB /r``; ``0F BA /7 ib``
      - **NP**
-     - Test-and-complement; slow ``K_BITTEST`` (``cur ^ 1<<idx``); reg-direct only.
-     - implemented (reg dst)
+     - Test-and-complement; slow ``K_BITTEST`` (``cur ^ 1<<idx``); reg & signed bit-string mem RMW.
+     - implemented (NP)
    * - ``BSF r, r/m``
      - ``0F BC /r``
      - **NP**
@@ -875,23 +876,22 @@ ROL / ROR / RCL / RCR (``C0/C1``, ``D0-D3`` ``/0-/3``)
 
 SHLD / SHRD (``0F A4/A5``, ``0F AC/AD``)
     **NP** — double-precision shifts read *two* source registers plus a count
-    and drive a wide multi-bit shifter, outside the simple/pairable set, and the
-    ``0F`` escape is not in the fast-path decoder anyway. ``SHLD`` shifts ``dst``
-    left by ``cnt`` filling from the top of ``src``; ``SHRD`` shifts right
-    filling from the bottom. CF is the last bit shifted out of ``dst``; SF/ZF/PF
-    from the result, AF=0. Implemented on the slow ``K_SHLDRD`` FSM for a
-    **register destination** only (imm8 and CL counts); a *memory* destination
-    sets ``d_unknown`` and HALTs (deferred).
+    and drive a wide multi-bit shifter. ``SHLD`` shifts ``dst`` left by ``cnt``
+    filling from the top of ``src``; ``SHRD`` shifts right filling from the
+    bottom. CF is the last bit shifted out of ``dst``; SF/ZF/PF from the result,
+    AF=0. Implemented on the slow ``K_SHLDRD`` FSM for both **register
+    destinations** and **memory read-modify-write** operands (``imm8`` and ``CL``
+    counts).
 
 BT / BTS / BTR / BTC (``0F A3``, ``0F AB/B3/BB``, ``0F BA /4-/7``)
-    **NP** — 0F-prefixed single-bit select-and-test, not in the simple set.
-    All copy the selected bit (``index mod operand-size``) into CF and define
-    *only* CF (SF/ZF/PF/OF/AF unchanged). ``BT`` does not modify the
-    destination; ``BTS``/``BTR``/``BTC`` then set / reset / complement the bit
-    and write the destination at operand width. Implemented on the slow
-    ``K_BITTEST`` FSM for a **register-direct destination** only; the *memory*
-    bit-string form (which would need full-index byte addressing) sets
-    ``d_unknown`` and HALTs.
+    **NP** — ``0F``-prefixed bit test and bit read-modify-write. All copy the
+    selected bit into CF and leave SF/ZF/PF/OF/AF unchanged; ``BTS``/``BTR``/
+    ``BTC`` also set / reset / complement the selected bit. Both **register**
+    and **memory** forms are implemented on ``K_BITTEST``: for register-indexed
+    memory operands, ``decode_stages.sv`` adds the **signed word/dword bit-string
+    byte displacement** (with 16-bit ``eff_addr`` wrap applied prior to segment
+    relocation) so both ``S_LOAD`` and ``S_STORE`` translate and permission-check
+    the exact target word/dword (essential for Windows 95 kernel bitmaps).
 
 BSF / BSR / BSWAP (``0F BC``, ``0F BD``, ``0F C8+r``)
     All **NP**. ``BSF``/``BSR`` scan for the lowest / highest set bit of the
@@ -915,16 +915,14 @@ SETcc (``0F 90+cc``)
 MULDIV-BCD — multiply / divide and BCD/ASCII adjust
 ===================================================
 
-Every instruction in this group is **NP**. The multiplies and divides are
-microcoded, produce or consume the implicit ``EDX:EAX`` double-width pair (which
-has no V-pipe writeback path), and are never whitelisted by the fast-path
-decoder — ``issue_uv.fp_can_pair()`` returns 0 immediately on ``!u.simple``, so
-they hold the U pipe alone. They execute on the slow FSM in a single
-combinational ``S_EXEC`` arm (the arithmetic uses native Verilog ``*`` / ``/``
-/ ``%``, *not* an iterative shift-add or SRT hardware loop, and *not* the
-``S_USEQ`` microsequencer — the multi-cycle character is the per-instruction
-``FETCH/DECODE/LOAD/EXEC`` FSM stepping). The BCD/ASCII adjusts (``AAA``,
-``AAS``, ``AAM``, ``AAD``, ``DAA``, ``DAS``) are **not decoded at all** and HALT.
+Every instruction in this group is **NP**. The multiplies and divides produce or
+consume the implicit ``EDX:EAX`` double-width pair (no V-pipe writeback path)
+and execute on the slow FSM — using ``ven_idiv.sv`` (multi-cycle restoring
+radix-2 integer divider under ``+define+VEN_IDIV_ITER`` in ``c0e3fe43``, or
+native ``/`` / ``%`` in the zero-define simulation baseline) with architectural
+``#DE`` divide-error delivery. All six BCD and ASCII adjust instructions
+(``AAA``, ``AAS``, ``AAM``, ``AAD``, ``DAA``, ``DAS``) are implemented in
+``uv_common.sv`` / ``decode_stages.sv``.
 
 .. list-table::
    :header-rows: 1
@@ -963,43 +961,43 @@ combinational ``S_EXEC`` arm (the arithmetic uses native Verilog ``*`` / ``/``
    * - ``DIV r/m8|16|32``
      - ``F6 /6``; ``F7 /6``
      - **NP**
-     - Unsigned ``EDX:EAX / r/m`` → quotient EAX/AL, remainder EDX/AH; native ``/`` / ``%``.
-     - implemented (slow FSM)
+     - Unsigned ``EDX:EAX / r/m`` → quotient EAX/AL, remainder EDX/AH (``ven_idiv.sv`` under ``VEN_IDIV_ITER``; ``#DE`` on 0/overflow).
+     - implemented (NP)
    * - ``IDIV r/m8|16|32``
      - ``F6 /7``; ``F7 /7``
      - **NP**
-     - Signed divide; ``$signed`` operands; remainder takes dividend sign.
-     - implemented (slow FSM)
+     - Signed divide (``ven_idiv.sv`` under ``VEN_IDIV_ITER``; remainder takes dividend sign; ``#DE`` on 0/overflow).
+     - implemented (NP)
    * - ``AAA``
      - ``37``
      - **NP**
-     - ASCII-adjust-after-add — *not decoded*; ``d_unknown`` → HALT.
-     - deferred / HALTs
+     - Unpacked BCD adjust after add (``ALU_AAA`` on ``AL``/``AH``); slow FSM.
+     - implemented (slow FSM)
    * - ``AAS``
      - ``3F``
      - **NP**
-     - ASCII-adjust-after-sub — *not decoded*; ``d_unknown`` → HALT.
-     - deferred / HALTs
+     - Unpacked BCD adjust after subtract (``ALU_AAS`` on ``AL``/``AH``); slow FSM.
+     - implemented (slow FSM)
    * - ``AAM``
      - ``D4 ib``
      - **NP**
-     - ASCII-adjust-after-mul — *not decoded*; ``d_unknown`` → HALT.
-     - deferred / HALTs
+     - Unpacked BCD adjust after multiply by base ``imm8`` (``ALU_AAM``; ``#DE`` on base 0 in sys mode).
+     - implemented (slow FSM)
    * - ``AAD``
      - ``D5 ib``
      - **NP**
-     - ASCII-adjust-before-div — *not decoded*; ``d_unknown`` → HALT.
-     - deferred / HALTs
+     - Unpacked BCD pack before divide by base ``imm8`` (``ALU_AAD``); slow FSM.
+     - implemented (slow FSM)
    * - ``DAA``
      - ``27``
      - **NP**
-     - Decimal-adjust-after-add — *not decoded*; ``d_unknown`` → HALT.
-     - deferred / HALTs
+     - Packed decimal adjust after add on ``AL`` (``ALU_DAA``); slow FSM.
+     - implemented (slow FSM)
    * - ``DAS``
      - ``2F``
      - **NP**
-     - Decimal-adjust-after-sub — *not decoded*; ``d_unknown`` → HALT.
-     - deferred / HALTs
+     - Packed decimal adjust after subtract on ``AL`` (``ALU_DAS``); slow FSM.
+     - implemented (slow FSM)
 
 MUL / IMUL one-operand (``F6/F7 /4``, ``F6/F7 /5``)
     Multiply the accumulator by ``r/m`` into the implicit double-width result:
@@ -1030,35 +1028,20 @@ IMUL two- and three-operand (``0F AF``, ``69``, ``6B``)
 DIV / IDIV (``F6/F7 /6``, ``F6/F7 /7``)
     Divide the implicit double-width dividend by ``r/m``: quotient → ``EAX``/
     ``AL`` (or ``AX``), remainder → ``EDX``/``AH`` (or ``DX``). ``DIV`` is
-    unsigned, ``IDIV`` signed (operands ``$signed``-extended, remainder takes the
-    dividend's sign). #DE on divide-by-zero or quotient overflow; all status
-    flags are undefined and the RTL leaves EFLAGS unchanged (``flags_we=0``).
-    **Datapath:** slow path, one combinational ``S_EXEC`` arm using native ``/``
-    and ``%`` — *not* an iterative non-restoring / SRT radix-4 hardware loop and
-    *not* in ``S_USEQ``. The longest-latency integer ops, microcoded,
-    ``EDX:EAX``-coupled, hence **NP**.
-
-    .. note::
-
-       The famous Pentium **SRT-radix-4 divider** (and the **FDIV erratum**)
-       live in the *x87* path, not here: ``decode.sv`` models x87 ``FDIV``/
-       ``FDIVR`` (``D8 /6,/7``) at latency/occupancy 39 with the ``fdiv_err``
-       (Erratum 23) hook, and the genuine radix-4 SRT engine itself
-       (``fx_srt_div``) is an optional, compile-time division datapath — see
-       :doc:`../microarch/srt-divider`. The **integer** ``DIV``/``IDIV`` above do
-       not touch that SRT datapath. A ``#DE`` is expected to be avoided by the test
-       corpus (which keeps divisors safe); on real hardware user-mode QEMU would
-       deliver ``SIGFPE``.
+    unsigned, ``IDIV`` signed (remainder takes the dividend's sign), raising
+    ``#DE`` (vector 0) in system mode on divide-by-zero or quotient overflow and
+    leaving ``EFLAGS`` unchanged. **Datapath:** in the deployed ``c0e3fe43``
+    hardware build (``+define+VEN_IDIV_ITER``), ``ven_idiv.sv`` executes an
+    iterative restoring radix-2 divide; the zero-define unit-TB baseline uses
+    behavioral ``/`` and ``%``. (The Pentium **radix-4 SRT divider** and FDIV
+    erratum belong strictly to x87 ``FDIV``; see :doc:`../microarch/srt-divider`.)
 
 BCD / ASCII adjusts (``AAA`` ``37``, ``AAS`` ``3F``, ``AAM`` ``D4``, ``AAD`` ``D5``, ``DAA`` ``27``, ``DAS`` ``2F``)
-    All **NP** and **not implemented**. None of these opcodes has a decode arm
-    in either the fast-path decoder or the slow one-byte / two-byte casez; each
-    falls through to ``default: d_unknown=1`` and the FSM goes to ``S_HALT``
-    (a loud, out-of-scope HALT rather than a mis-execution). Architecturally they
-    adjust ``AL``/``AX`` to valid (unpacked or packed) BCD digits after an
-    add/subtract/multiply/before a divide, but no EX-stage BCD-adjust datapath
-    exists — they never reach an execute arm and never pair. The test corpus is
-    advised to avoid them.
+    All **NP** and implemented on the slow ``K_ALU`` FSM via ``uv_common.sv`` /
+    ``ventium_alu_pkg.sv``: ``AAA``/``AAS`` adjust unpacked BCD in ``AL``/``AH``
+    setting ``AF``/``CF``; ``DAA``/``DAS`` adjust packed BCD in ``AL``; and
+    ``AAM``/``AAD`` unpack/pack ``AX`` using the ``imm8`` base byte (default
+    ``0x0A``).
 
 
 .. _control-flow:
@@ -1125,15 +1108,15 @@ so it is NP or NP-effective in this RTL.
      - Push + data-dependent target (store + load) (``CT_CALLIND``); slow FSM.
      - implemented (slow FSM)
    * - ``CALL ptr16:16/32`` (far)
-     - ``9A cp``
+     - ``9A cp``; ``FF /3``
      - **NP**
-     - Far call — *not decoded*; ``d_unknown`` → HALT (deferred to M2S).
-     - deferred / HALTs
+     - Far call (real/V86 CS:IP push, PM code segment, 16/32b call gates & 32b TSS switch).
+     - implemented (system mode)
    * - ``RET``
      - ``C3``
      - **NP**
-     - Pops return IP (load) then redirects (``CT_RETN``); slow FSM.
-     - implemented (slow FSM)
+     - Pops return IP (load) then redirects (``CT_RETN``, 4-entry RAS); slow/fast-retire.
+     - implemented
    * - ``RET imm16``
      - ``C2 iw``
      - **NP**
@@ -1142,8 +1125,8 @@ so it is NP or NP-effective in this RTL.
    * - ``RETF`` / ``RETF imm16`` (far)
      - ``CB``; ``CA iw``
      - **NP**
-     - Far return — *not decoded*; ``d_unknown`` → HALT (deferred to M2S).
-     - deferred / HALTs
+     - Far return (``SYS_RETF``; real/V86 & same/cross-privilege PM return + stack switch).
+     - implemented (system mode)
    * - ``LOOP rel8``
      - ``E2 cb``
      - **NP**
@@ -1187,8 +1170,8 @@ so it is NP or NP-effective in this RTL.
    * - ``BOUND r, m``
      - ``62 /r``
      - **NP**
-     - Bounds-check + conditional #BR — *not decoded*; ``d_unknown`` → HALT.
-     - deferred / HALTs
+     - Signed two-word ``[lower, upper]`` bounds check; raises ``#BR`` (vector 5) out of range.
+     - implemented (system mode)
 
 Jcc rel8 — the PV branch (``70-7F``)
     Tests EFLAGS per the condition nibble (``cond_true`` against
@@ -1239,18 +1222,19 @@ CALL (``E8`` near direct, ``FF /2`` indirect, ``9A`` far)
     The 0x66 form truncates the target to 16 bits. ``CALL r/m`` (``FF /2``,
     ``CT_CALLIND``) is genuinely **NP** — it both pushes (store) *and* takes a
     data-dependent target (register read or load), two serialized memory
-    micro-ops, with the AGU used twice. ``CALL ptr16:16/32`` (``9A``) is **NP**
-    and *not decoded* (deferred to the M2S system milestone) → ``d_unknown`` →
-    HALT.
+    micro-ops, with the AGU used twice. ``CALL ptr16:16/32`` (``9A`` and ``FF /3``)
+    is **NP** and implemented in ``core_seg_ljmp.svh`` across real/V86 mode,
+    protected-mode conforming/non-conforming code segments, 16/32-bit call gates
+    (same- and cross-privilege with parameter copy ``S_CG_PRD``), and 32-bit TSS
+    task switches (task gates and 16-bit TSS halt loudly; see ``docs/unsupported-isa.md``).
 
 RET / RET imm16 / RETF (``C3``, ``C2``, ``CB``/``CA``)
-    ``RET`` is **NP**: it pops the return IP from ``[ESP]`` (a load) and
-    redirects, with no return-stack predictor in Ventium, on the slow FSM
-    (``CT_RETN``: ``S_LOAD [ESP]`` → ``S_EXEC`` sets EIP from the popped word,
-    ``ESP += w``). ``RET imm16`` adds the decode-latched ``imm16`` to the ``ESP``
-    increment (releasing caller args). ``RETF``/``RETF imm16`` (far) would pop
-    ``CS:EIP`` and reload the code segment — **NP** and *not decoded* (deferred
-    to M2S) → ``d_unknown`` → HALT.
+    ``RET`` is **NP**: it pops the return IP from ``[ESP]`` and redirects
+    (predicted by the 4-entry return-address stack in ``c0e3fe43``). ``RET imm16``
+    adds ``imm16`` to ``ESP`` to release caller arguments. ``RETF``/``RETF imm16``
+    (``CB``/``CA``, ``SYS_RETF``) pops ``CS:EIP`` and executes real/V86 or
+    same-/outer-privilege protected-mode descriptor validation and stack
+    restoration.
 
 LOOP / LOOPE / LOOPNE / JCXZ (``E0-E3``)
     All **NP** — microcoded read-modify-write on ``(E)CX`` plus a conditional
@@ -1275,10 +1259,10 @@ INT3 / INT n / INTO / IRET (``CC``, ``CD``, ``CE``, ``CF``)
     preserving the M0-M6 user-gate bit-identity.
 
 BOUND (``62 /r``)
-    **NP** and *not decoded* — it would read a two-word bounds pair from memory,
-    do two compares, and conditionally raise ``#BR`` through the IDT (a
-    microcoded compare-and-maybe-fault sequence). Opcode ``62`` has no decode
-    arm, so it hits the top-level default ``d_unknown`` and HALTs.
+    **NP** — reads a signed ``(lower, upper)`` pair from memory (16- or 32-bit)
+    and compares the index register against ``lower <= reg <= upper``, raising
+    ``#BR`` (vector 5) through the IDT in system mode on an out-of-bounds value
+    (register ModR/M forms raise ``#UD``).
 
 
 .. _string:
@@ -1286,16 +1270,17 @@ BOUND (``62 /r``)
 STRING — string primitives and REP prefixes
 ===========================================
 
-Every string primitive is **NP**: ``decode.sv`` never sets ``simple`` for the
-``A4-AF`` string opcodes, so ``issue_uv`` (which requires ``u.simple`` /
-``v.simple``) can never make one a U-member or V-candidate. They are microcoded,
-multi-cycle ops on the ``K_STR`` slow path that hold the in-order pipe for their
-whole run. Each ``REP`` element is its own retire record at the *same* PC: a
-non-final iteration sets ``new_eip = q_pc`` so the FSM re-enters the same
-instruction. Direction is from ``DF`` (``EFLAGS[10]``): ``str_step = DF ? -w :
-+w``. The ``REP``/``REPE``/``REPNE`` prefixes are themselves NP (a prefixed
-``K_STR`` op). The port-I/O string forms (``INS``/``OUTS``) and the register
-port-I/O ops are *not decoded* (no I/O space is modelled) and HALT.
+Every string primitive is **NP** (never paired across U+V). Each ``REP``
+element produces its own retirement event (hardware retirement counters on
+``c0e3fe43`` likewise count ``REP`` elements). Direction follows ``DF``
+(``EFLAGS[10]``): ``str_step = DF ? -w : +w``. In the **deployed c0e3fe43
+P54C profile**, ``VEN_REP_STOS_STREAM`` and ``VEN_REP_MOVS_STREAM`` /
+``_LOAD_FUSE`` / ``_CONT`` stream cacheable ``REP STOS`` (1 element/clock
+steady state) and ``REP MOVS`` iterations without re-entering full decode,
+while preserving exact page-crossing, segment-limit, and interrupt boundaries.
+Port-I/O instructions (``IN``, ``OUT``, ``INS``, ``OUTS``) execute through the
+``S_IO`` bus seam in system/SoC mode (with ``CPL <= IOPL`` and TSS I/O
+permission bitmap checks).
 
 .. list-table::
    :header-rows: 1
@@ -1309,7 +1294,7 @@ port-I/O ops are *not decoded* (no I/O space is modelled) and HALT.
    * - ``MOVS`` (MOVSB)
      - ``A4``
      - **NP**
-     - Copy DS:[ESI]→ES:[EDI], advance both per DF; ``S_LOAD``→``S_STORE``; REP via ECX.
+     - Copy DS:[ESI]→ES:[EDI], advance both per DF; ``S_LOAD → S_STORE``; REP via ECX.
      - implemented (slow FSM)
    * - ``MOVS`` (MOVSW/MOVSD)
      - ``A5``
@@ -1319,13 +1304,13 @@ port-I/O ops are *not decoded* (no I/O space is modelled) and HALT.
    * - ``STOS`` (STOSB)
      - ``AA``
      - **NP**
-     - Store AL→ES:[EDI] (no load), advance EDI; ``S_EXEC``→``S_STORE``; REP via ECX.
-     - implemented (slow FSM)
+     - Store AL→ES:[EDI], advance EDI; 1-cyc/elem cacheable ``REP`` stream under ``VEN_REP_STOS_STREAM``.
+     - implemented
    * - ``STOS`` (STOSW/STOSD)
      - ``AB``
      - **NP**
-     - Store AX/EAX→ES:[EDI]; store-only microsequence (``w=2``/``4``).
-     - implemented (slow FSM)
+     - Store AX/EAX→ES:[EDI]; 1-cyc/elem cacheable ``REP`` stream under ``VEN_REP_STOS_STREAM``.
+     - implemented
    * - ``LODS`` (LODSB)
      - ``AC``
      - **NP**
@@ -1374,18 +1359,18 @@ port-I/O ops are *not decoded* (no I/O space is modelled) and HALT.
    * - ``INS`` (INSB/W/D)
      - ``6C`` / ``6D``
      - **NP**
-     - Port-I/O input — *not decoded*; ``d_unknown`` → HALT (no I/O space).
-     - deferred / HALTs
+     - Port-I/O string read DX → ES:[(E)DI] (``S_INS`` + IOPL/TSS bitmap check in sys/SoC mode).
+     - implemented (sys/SoC)
    * - ``OUTS`` (OUTSB/W/D)
      - ``6E`` / ``6F``
      - **NP**
-     - Port-I/O output — *not decoded*; ``d_unknown`` → HALT.
-     - deferred / HALTs
+     - Port-I/O string write DS:[(E)SI] → DX (``S_OUTS`` + IOPL/TSS bitmap check in sys/SoC mode).
+     - implemented (sys/SoC)
    * - ``IN`` / ``OUT`` (port)
      - ``E4-E7`` ``EC-EF``
      - **NP**
-     - Register port-I/O — *not decoded*; ``d_unknown`` → HALT.
-     - deferred / HALTs
+     - Register port-I/O via ``S_IO`` (``imm8`` or ``DX`` port, IOPL/TSS bitmap check in sys/SoC mode).
+     - implemented (sys/SoC)
 
 MOVS (``A4``/``A5``)
     Copies one element from ``DS:[ESI]`` to ``ES:[EDI]`` then advances both
@@ -1433,14 +1418,12 @@ REP / REPE / REPNE (``F3``, ``F3``, ``F2``)
     whole run.
 
 INS / OUTS and IN / OUT (``6C-6F``, ``E4-E7``, ``EC-EF``)
-    All **NP** by AP-500 (I/O instructions) and *not decoded* — Ventium models a
-    flat user environment with **no I/O port space**. None of these opcodes
-    appears in the opcode case, so each falls through to ``default:
-    d_unknown=1`` and the core HALTs loudly rather than mis-execute; no
-    ``K_STR`` microsequence is generated. (Note: the hex values ``E4``/``E5``/
-    ``EC``/``ED`` only have meaning elsewhere as the *second* byte of a ``D9``
-    x87 escape — e.g. ``D9 E4 = FTST`` — but the standalone primary opcodes are
-    undecoded.)
+    All **NP** I/O instructions. In system/SoC mode (``soc_en || cosim_en``),
+    ``IN``/``OUT`` (``imm8`` and ``DX`` forms) and ``INS``/``OUTS`` (including
+    ``REP`` string transfers) enforce protected/V86 ``CPL <= IOPL`` and 32-bit
+    TSS I/O permission bitmap checks before driving the ``io_*`` port seam in
+    ``S_IO`` (after draining any posted DDR4 writes on hardware). In bare
+    user-mode unit tests without an I/O bus, non-exit ports halt cleanly.
 
 
 .. _system:
@@ -1493,58 +1476,60 @@ the pre-system bit-identity), and several are deferred (undecoded → HALT).
    * - ``SGDT`` / ``SIDT``
      - ``0F 01 /0``; ``0F 01 /1``
      - **NP**
-     - Store GDTR/IDTR — not matched (only /2,/3); ``d_unknown`` → HALT.
-     - deferred / HALTs
-   * - ``SMSW`` / ``LMSW``
-     - ``0F 01 /4``; ``0F 01 /6``
+     - 6-byte pseudo-descriptor store (``S_SGDT``, two translated/fragmented beats).
+     - implemented
+   * - ``SMSW`` / ``INVLPG`` / ``LMSW``
+     - ``0F 01 /4``; ``/7``; ``/6``
      - **NP**
-     - CR0-alias store/load — not matched; ``d_unknown`` → HALT.
-     - deferred / HALTs
+     - ``SMSW r16/32`` & ``INVLPG m`` (full TLB flush) implemented; ``LMSW`` / ``SMSW m16`` partial/deferred.
+     - partial
    * - ``LTR r/m16``
      - ``0F 00 /3``
      - **NP**
-     - TSS-descriptor read microsequence (``S_LTR``); reg-form only; sys-mode.
+     - TSS-descriptor read microsequence (``S_LTR``); reg-form, sys-mode.
      - implemented (sys mode, reg)
    * - ``STR r/m16``
      - ``0F 00 /1``
      - **NP**
-     - TR-selector store (``SYS_STR``); one ``S_EXEC`` mux; reg-form only; sys-mode.
+     - TR-selector store (``SYS_STR``); reg-form, sys-mode.
      - implemented (sys mode, reg)
    * - ``LLDT`` / ``SLDT``
      - ``0F 00 /2``; ``0F 00 /0``
      - **NP**
-     - LDTR load/store — not matched (only /1,/3); ``d_unknown`` → HALT.
-     - deferred / HALTs
+     - LDTR load (``SYS_LLDT``) & selector store (``SYS_SLDT``); reg-form, sys-mode.
+     - implemented (sys mode, reg)
    * - ``CLTS``
      - ``0F 06``
      - **NP**
-     - Clear CR0.TS — not decoded; ``d_unknown`` → HALT.
-     - deferred / HALTs
+     - CPL0 clear of ``CR0.TS`` via ``SYS_MOVCR_TO`` (for ``#NM`` lazy-FPU handlers); sys-mode.
+     - implemented (sys mode)
    * - ``LAR`` / ``LSL``
      - ``0F 02``; ``0F 03``
      - **NP**
-     - Access-rights / limit query — not decoded; ``d_unknown`` → HALT.
-     - deferred / HALTs
+     - Descriptor access-rights / segment-limit query setting ZF on valid visible selector; sys-mode.
+     - implemented (sys mode)
    * - ``VERR`` / ``VERW``
      - ``0F 00 /4``; ``0F 00 /5``
      - **NP**
-     - Segment-verify — not matched; ``d_unknown`` → HALT.
-     - deferred / HALTs
+     - Segment read/write accessibility verify → ZF (reg & mem forms); sys-mode.
+     - implemented (sys mode)
    * - ``ARPL r/m16, r16``
      - ``63 /r``
      - **NP**
-     - RPL adjust — not decoded; ``d_unknown`` → HALT.
-     - deferred / HALTs
+     - RPL adjust — unimplemented; ``d_unknown`` → loud HALT.
+     - unimplemented (HALTs)
    * - ``LDS`` / ``LES``
      - ``C5 /r``; ``C4 /r``
      - **NP**
-     - Far-pointer load into DS/ES — not decoded; ``d_unknown`` → HALT.
-     - deferred / HALTs
+     - Far-pointer load into DS/ES; m16:16 and m16:32 memory forms. Protected
+       loads share the validated, atomic descriptor-load transaction.
+     - implemented
    * - ``LSS`` / ``LFS`` / ``LGS``
      - ``0F B2/B4/B5``
      - **NP**
-     - Far-pointer load into SS/FS/GS — not decoded; ``d_unknown`` → HALT.
-     - deferred / HALTs
+     - Far-pointer load into SS/FS/GS; m16:16 and m16:32 memory forms in
+       real/V86/protected modes. Register encodings remain invalid.
+     - implemented
    * - ``CLI`` / ``STI``
      - ``FA``; ``FB``
      - **NP**
@@ -1573,23 +1558,33 @@ the pre-system bit-identity), and several are deferred (undecoded → HALT).
    * - ``WAIT / FWAIT``
      - ``9B``
      - **NP**
-     - FP-sync barrier — standalone 0x9B not decoded; ``d_unknown`` → HALT.
-     - deferred / HALTs
+     - x87 synchronization & pending-``#MF`` exception check barrier.
+     - implemented
    * - ``CPUID``
      - ``0F A2``
      - **NP**
-     - CPU-ID leaf dispatch — not decoded; ``d_unknown`` → HALT.
-     - deferred / HALTs
+     - Pentium Family 5 leaf dispatch into ``EAX/EBX/ECX/EDX`` (``K_CPUID`` in sys/SoC mode).
+     - implemented (sys/SoC)
    * - ``RDTSC``
      - ``0F 31``
      - **NP**
-     - Time-stamp read — not decoded; ``d_unknown`` → HALT.
-     - deferred / HALTs
+     - Reads 64-bit cycle counter ``tsc`` into ``EDX:EAX`` (``K_RDTSC`` in sys/SoC mode).
+     - implemented (sys/SoC)
+   * - ``INVD`` / ``WBINVD``
+     - ``0F 08``; ``0F 09``
+     - **NP**
+     - CPL0 cache invalidation / write-back flush (``d_cacheinv`` in sys/SoC mode).
+     - implemented (sys/SoC)
+   * - ``CMPXCHG`` / ``CMPXCHG8B``
+     - ``0F B0/B1``; ``0F C7 /1``
+     - **NP**
+     - Atomic compare-and-swap (8/16/32b & 64b ``K_CX8B``; locked reg ``0F C7 /1`` models F00F Erratum 81).
+     - implemented
    * - ``RDMSR`` / ``WRMSR``
      - ``0F 32``; ``0F 30``
      - **NP**
-     - MSR read/write — not decoded (no MSR file); ``d_unknown`` → HALT.
-     - deferred / HALTs
+     - MSR read/write — unimplemented (no MSR file); ``d_unknown`` → loud HALT.
+     - unimplemented (HALTs)
    * - ``RSM``
      - ``0F AA``
      - **NP**
@@ -1627,31 +1622,29 @@ MOV to/from DRn (``0F 21``, ``0F 23``)
     ``DR7.GD`` ``#DB`` is decoded but gated off (``DBG_GD_ENABLE=0``) to match the
     QEMU golden.
 
-LGDT / LIDT and the rest of the 0F 01 group (``0F 01 /2,/3``; ``/0,/1,/4,/6``)
-    ``LGDT``/``LIDT`` are **NP** microcoded: they read a 6-byte in-memory
-    pseudo-descriptor (2-byte limit + 4-byte base) across **two** bus beats in
-    the ``S_LGDT`` microsequence (``S_LGDT`` beat-0 reads the low word, beat-1 at
-    ``+4`` supplies the high base bits) and load the hidden ``GDTR``/``IDTR``,
-    then retire once. Only ``/2`` and ``/3`` of the ``0F 01`` group are decoded;
-    ``SGDT``/``SIDT`` (``/0``/``/1``) and ``SMSW``/``LMSW`` (``/4``/``/6``) fall
-    to the else-arm ``d_unknown`` and HALT (explicitly deferred).
+LGDT / LIDT / SGDT / SIDT / SMSW / INVLPG (``0F 01`` group)
+    ``LGDT`` (``/2``) and ``LIDT`` (``/3``) read a 6-byte pseudo-descriptor
+    across two beats in ``S_LGDT`` (masking the base to 24 bits under 16-bit
+    operand size). ``SGDT`` (``/0``) and ``SIDT`` (``/1``) store the 6-byte
+    pseudo-descriptor through preflighted/fragmented stores in ``S_SGDT``.
+    ``SMSW r16/r32`` (``/4`` reg) reads ``CR0`` via ``SYS_MOVCR_FROM``, and
+    ``INVLPG m`` (``/7``) flushes I/D TLBs alongside ``MOV CR3``.
 
-LTR / STR and the rest of the 0F 00 group (``0F 00 /1,/3``; ``/0,/2,/4,/5``)
-    ``LTR`` (``/3``, **NP**, ``sys_mode``-gated, reg-form only) loads the task
-    register ``TR`` from a GDT TSS selector — a multi-beat ``S_LTR`` descriptor
-    read that populates ``tr_base``/``tr_limit`` and sets the busy bit. ``STR``
-    (``/1``, **NP**, sys-mode, reg-form only) stores the current ``TR`` selector
-    (zero-extended) into ``r/m16`` via one ``S_EXEC`` ``reg_merge``. The other
-    ``0F 00`` sub-ops — ``SLDT``/``LLDT`` (``/0``/``/2``) and ``VERR``/``VERW``
-    (``/4``/``/5``) — and any memory form are not matched and HALT (deferred).
+LTR / STR / LLDT / SLDT / VERR / VERW (``0F 00`` group)
+    All ``sys_mode`` protected-mode operations: ``LTR`` (``/3``) and ``LLDT``
+    (``/2``) read GDT TSS/LDT descriptors; ``STR`` (``/1``) and ``SLDT`` (``/0``)
+    store the zero-extended ``TR``/``LDTR`` selector to a register; and ``VERR``
+    (``/4``) / ``VERW`` (``/5``) test segment read/write accessibility (register
+    or memory selector) into ``EFLAGS.ZF``.
 
-Undecoded protection ops (``CLTS`` ``0F 06``, ``LAR``/``LSL`` ``0F 02/03``, ``ARPL`` ``63``, ``LDS``/``LES`` ``C5/C4``, ``LSS``/``LFS``/``LGS`` ``0F B2/B4/B5``)
-    All **NP** by class and *not decoded* — ``CLTS`` (clear ``CR0.TS``),
-    ``LAR``/``LSL`` (load access-rights / segment-limit), ``ARPL`` (adjust RPL),
-    and the far-pointer segment loads ``LDS``/``LES``/``LSS``/``LFS``/``LGS`` —
-    each is absent from its decode casez and resolves to ``d_unknown`` → ``S_HALT``
-    rather than mis-execute. (Segment state itself is reachable via ``MOV Sreg``
-    and far ``JMP``, but these far-pointer-load opcodes are not implemented.)
+Protection ops and far-pointer segment loads
+    ``CLTS`` (``0F 06``) clears ``CR0.TS`` at CPL0; ``LAR`` (``0F 02``) and
+    ``LSL`` (``0F 03``) query GDT/LDT descriptor access rights and scaled byte
+    limits into the destination GPR while setting ``ZF=1`` on valid visible
+    selectors (``ARPL`` ``63`` remains unimplemented and halts loudly). The
+    **NP** far-pointer loads ``LDS``/``LES``/``LSS``/``LFS``/``LGS`` are
+    implemented for every legal m16:16/m16:32 form, committing GPR + descriptor
+    atomically after ``S_SEGLD`` validation (register forms raise ``#UD``).
 
 Flag-bit mutators (``CLI``/``STI`` ``FA/FB``, ``CLD``/``STD`` ``FC/FD``, ``CLC``/``STC``/``CMC`` ``F8/F9/F5``)
     All **NP** single-byte ops decoded by the slow FSM (never ``simple``, so
@@ -1675,14 +1668,14 @@ HLT and NOP (``F4``, ``90``)
     RAW/WAW/disp+imm conflict), and retires at up to 2/clock. It is implemented
     in both the fast path and the slow FSM.
 
-Serializing / privileged ops (``WAIT`` ``9B``, ``CPUID`` ``0F A2``, ``RDTSC`` ``0F 31``, ``RDMSR``/``WRMSR`` ``0F 32/30``)
-    All **NP**. ``WAIT``/``FWAIT`` (standalone ``0x9B``) is an FP-sync barrier
-    that is *not* in the top-level opcode decoder, so it HALTs (``d_unknown``);
-    the ``FX_FWAIT`` x87 sub-op handles the FP-escape case as a no-op, but that
-    is a different decode path. ``CPUID`` (``0F A2`` — distinct from the
-    single-byte ``A2 = MOV moffs8,AL``), ``RDTSC`` (``0F 31``), and ``RDMSR``/
-    ``WRMSR`` (``0F 32``/``0F 30``) are all absent from the two-byte casez and
-    HALT as ``d_unknown`` (no MSR file is modelled).
+Serializing / privileged ops (``WAIT`` ``9B``, ``CPUID`` ``0F A2``, ``RDTSC`` ``0F 31``, ``INVD``/``WBINVD`` ``0F 08/09``, ``RDMSR``/``WRMSR`` ``0F 32/30``)
+    All **NP**. Standalone ``WAIT``/``FWAIT`` (``0x9B``) drains asynchronous x87
+    work and checks pending unmasked ``#MF`` exceptions (enabling wait-prefixed
+    ``FINIT``, ``FCLEX``, ``FSTCW``, ``FSTSW``, ``FSTENV``, and ``FSAVE``). In
+    system/SoC mode, ``CPUID`` (``0F A2``) returns Pentium Family 5 feature
+    leaves, ``RDTSC`` (``0F 31``) reads the 64-bit cycle counter into
+    ``EDX:EAX``, and CPL0 ``INVD``/``WBINVD`` flush caches; ``RDMSR``/``WRMSR``
+    (``0F 32``/``0F 30``) remain unimplemented and halt loudly.
 
 RSM / UD2 (``0F AA``, ``0F 0B``)
     ``RSM`` is **NP** and heavily microcoded: it leaves SMM and restores the
@@ -1702,12 +1695,12 @@ LOCK prefix (``F0``)
     outright (NP-effective). A locked atomic RMW must hold the U pipe through its
     memory access. As a prefix it only adjusts ``pfx_len``/``m_idx``; the
     instruction it guards runs on the slow FSM. The one special architectural
-    model is **Erratum 81 (F00F)**: a ``LOCK CMPXCHG8B`` with a register
-    destination (``0F C7 /1``, ``mod==11``) sets ``d_f00f`` and, with
-    ``errata_en[ERR_F00F]`` and ``pfx_lock``, enters the documented bus-lock hang
-    ``S_F00F_HANG`` instead of a clean HALT. ``CMPXCHG8B`` itself is **not
-    implemented** (both forms are ``d_unknown``; the locked reg-dst form
-    additionally hangs under errata).
+    model is **Erratum 81 (F00F)**: while valid memory-form ``CMPXCHG8B m64``
+    (``0F C7 /1``, ``mod != 11``) executes normally on ``K_CX8B`` (64-bit
+    ``EDX:EAX`` compare / ``ECX:EBX`` conditional store), an invalid
+    register-destination ``LOCK CMPXCHG8B`` (``mod == 11``) sets ``d_f00f`` and,
+    with ``errata_en[ERR_F00F]`` and ``pfx_lock``, enters the documented bus-lock
+    hang ``S_F00F_HANG``.
 
 
 .. _x87-fpu:
@@ -1715,18 +1708,24 @@ LOCK prefix (``F0``)
 X87-FPU — floating-point stack
 ==============================
 
-Every x87 escape runs alone in the U pipe: ``issue_uv`` only pairs ``simple``
-integer uops, and an x87 escape is never ``simple``, so in the functional FSM
-they are all **NP**. The engine is the core's slow microsequenced path
-(``S_FLOAD → S_FEXEC → S_FSTORE``) plus the ``fpu_x87_pkg`` helpers operating on
-an 80-bit (``floatx80``) stack file (``fpr[8]`` + ``ftop``, with
-``st(i) = fpr[(ftop+i)&7]``); the ``fpu_top.sv`` 8-stage pipe is an M0 stub.
-AP-500 classes many of these as **FX** (pair with a trailing ``FXCH``), but the
-RTL does **not** implement that parallel-pairing case — the divergence is noted
-per instruction. In cycle-mode a small whitelist (``FK_*``) models result
-latency and occupancy (e.g. ``FADD`` lat 3 / ``FDIV`` lat 39) but still issues
-U-alone. Tier markers (Tier-1/2/3) follow the FPU spec's accuracy tiers; any
-non-extended precision control (``PC != 11``) HALTs.
+In the **deployed c0e3fe43 hardware profile** (``+define+VEN_FP_SHARED``;
+see :doc:`/microarch/fp-commit-pipeline` and :doc:`/microarch/srt-divider`), the
+**shared pipelined 80-bit x87 FPU** (``fp_shared/ven_fp_top.sv``, ``72,204``
+LUTs, ``38`` DSP48E2 slices) owns the pointer-mapped ``8 × 80-bit`` ``floatx80``
+register stack (``ven_fp_state.sv``) with a **zero-cycle FXCH rename queue**
+(``ven_fp_fxch_queue.sv``), 2-stage pipelined ``FADD``/``FSUB``/``FMUL``
+(``VEN_FP_PIPE`` + ``VEN_FP_PIPE2``), asynchronous integer/FP execution overlap
+(``VEN_FP_ASYNC*``), unified multi-cycle radix-4 SRT ``FDIV``/``FSQRT``/
+``FPREM``/``FPREM1`` (``fpu_srt_div.sv``), iterative packed-BCD
+``FBLD``/``FBSTP`` (``ven_bcd_to_fp.sv`` / ``ven_bcd.sv``), full 14/28-byte
+environment and 94/108-byte state save/restore, and all 8 polynomial
+transcendental instructions (``ven_fp_trans.sv``). In the zero-define unit-test
+baseline, x87 instructions run sequentially through ``S_FLOAD → S_FEXEC →
+S_FSTORE`` using ``fpu_x87_pkg`` (where ``VEN_FP_PC_RELAX`` is off by default;
+``c0e3fe43`` enables ``VEN_FP_PC_RELAX`` for single/double/extended precision
+control). P6-era conditional FP moves/compares (``FCMOVcc``, ``FCOMI``/
+``FUCOMI``) are intentionally unimplemented on this non-MMX P54C core and raise
+architectural ``#UD``.
 
 .. list-table::
    :header-rows: 1
@@ -1740,128 +1739,128 @@ non-extended precision control (``PC != 11``) HALTs.
    * - ``FLD m32/m64/m80/ST(i)``
      - ``D9 /0``; ``DD /0``; ``DB /5``; ``D9 C0+i``
      - **NP**
-     - Push: pre-dec TOP, load ST(0); ``S_FLOAD``→``S_FEXEC``; mem converts to floatx80.
-     - implemented (Tier-1)
+     - Push ``floatx80`` (queued 32/64b loads under ``VEN_FP_MEM_LOADS`` in ``c0e3fe43``).
+     - implemented
    * - ``FST/FSTP m32/m64/m80/ST(i)``
      - ``D9 /2,/3``; ``DD /2,/3``; ``DB /7``; ``DD D0+i/D8+i``
      - **NP**
-     - Store ST(0) (convert/round), FSTP pops; ``S_FEXEC``→``S_FSTORE`` beats.
-     - implemented (Tier-1/2)
+     - Store ``ST(0)`` rounded per RC/PC, ``FSTP`` pops; 1–3 memory beats.
+     - implemented
    * - ``FILD`` / ``FIST/FISTP``
      - ``DF/DB /0``; ``DF/DB /2,/3``; ``DF /5,/7``
      - **NP**
-     - Integer-mem load/store with exact/rounded int↔floatx80; FIST overflow-errata hook.
-     - implemented (Tier-1)
+     - Signed 16/32/64b int ↔ ``floatx80`` load/store + optional FIST overflow erratum hook.
+     - implemented
    * - ``FBLD`` / ``FBSTP m80``
      - ``DF /4``; ``DF /6``
      - **NP**
-     - Packed-BCD load/store — not routed (DF /4,/6); ``d_unknown`` → HALT.
-     - deferred / HALTs
+     - 18-digit packed-BCD load/store via iterative ``ven_bcd_to_fp`` / ``ven_bcd`` (``VEN_BCD_ITER``).
+     - implemented
    * - ``FXCH ST(i)``
      - ``D9 C8+i``
-     - **NP**
-     - Real 80-bit regfile cross-swap in one clock; *parallel-FXCH bypass not modeled*.
-     - implemented (Tier-1)
+     - **FX / PV**
+     - Zero-cycle pointer rename queue in ``c0e3fe43`` (``ven_fp_fxch_queue.sv``); 1-cyc swap in baseline.
+     - implemented
    * - ``FFREE`` · ``FINCSTP`` · ``FDECSTP`` · ``FNOP``
      - ``DD C0+i``; ``D9 F7``; ``D9 F6``; ``D9 D0``
      - **NP**
-     - Stack-management (tag/TOP) ops, no data move; one ``S_FEXEC`` step.
-     - implemented (Tier-1)
+     - Stack-management (tag/TOP) ops, no data move.
+     - implemented
    * - ``FADD/FSUB/FSUBR/FMUL/FDIV/FDIVR``
      - ``D8/DC C0+i``; ``D8 /r``; ``DC /r``; ``DA/DE`` (int); ``DE C0+i`` (pop)
      - **NP**
-     - Arith via ``f_eval`` (fx_add/mul/div); models lat/occ; FDIV erratum anchor + optional genuine radix-4 SRT engine.
-     - implemented (Tier-2)
+     - 2-stage pipelined ``ven_fp_alu`` (add/sub/mul) + radix-4 SRT ``fpu_srt_div`` (div + FDIV bug opt-in).
+     - implemented
    * - ``FSQRT``
      - ``D9 FA``
      - **NP**
-     - sqrt(ST0) via ``fx_isqrt`` + round; negative → QNaN+IE; long microsequence.
-     - implemented (Tier-2/3)
+     - IEEE-exact ``sqrt(ST0)`` via iterative ``fpu_srt_div`` (``VEN_SRT_ITER``); negative → QNaN+IE.
+     - implemented
    * - ``FABS`` · ``FCHS``
      - ``D9 E1``; ``D9 E0``
      - **NP**
-     - Exact sign-bit clear / toggle on ST(0); one ``S_FEXEC`` step, no IE.
-     - implemented (Tier-1)
+     - Exact sign-bit clear / toggle on ``ST(0)``, no IE.
+     - implemented
    * - ``FPREM/FPREM1`` · ``FRNDINT`` · ``FSCALE`` · ``FXTRACT``
      - ``D9 F8/F5/FC/FD/F4``
      - **NP**
-     - Not enumerated in the D9 reg-form case; ``d_unknown`` → HALT.
-     - deferred / HALTs
+     - Exact IEEE/x87 partial remainder (``VEN_FPREM`` / ``fpu_srt_div``), round-to-int, ``2^n`` scale, & exponent/significand split.
+     - implemented
    * - ``FCOM/FCOMP/FCOMPP``
      - ``D8 /2,/3``; ``DC /2,/3``; ``D8 D0+i/D8+i``; ``DE D9``
      - **NP**
-     - Ordered (signaling) compare → C3/C2/C0, IE on any NaN; ``apply_cmp``.
-     - implemented (Tier-1)
+     - Ordered (signaling) compare → C3/C2/C0, IE on any NaN.
+     - implemented
    * - ``FUCOM/FUCOMP/FUCOMPP``
      - ``DD E0+i``; ``DD E8+i``; ``DA E9``
      - **NP**
-     - Unordered (quiet) compare; IE only on SNaN; ``apply_cmp``.
-     - implemented (Tier-1)
+     - Unordered (quiet) compare → C3/C2/C0, IE only on SNaN.
+     - implemented
    * - ``FTST``
      - ``D9 E4``
      - **NP**
-     - Signaling compare of ST(0) vs +0.0 → C3/C2/C0; one ``S_FEXEC`` step.
-     - implemented (Tier-1)
+     - Signaling compare of ``ST(0)`` vs ``+0.0`` → C3/C2/C0.
+     - implemented
    * - ``FXAM``
      - ``D9 E5``
      - **NP**
-     - Classify ST(0) (sign + class) into C3/C2/C1/C0 from value + tag.
-     - implemented (Tier-1)
+     - Classify ``ST(0)`` (sign + tag/value class) into C3/C2/C1/C0.
+     - implemented
    * - ``FICOM/FICOMP``
      - ``DA /2,/3``; ``DE /2,/3``
      - **NP**
-     - Integer-mem signaling compare → C3/C2/C0; ``S_FLOAD`` then ``apply_cmp``.
-     - implemented (Tier-1)
+     - Integer-mem signaling compare → C3/C2/C0.
+     - implemented
    * - ``FLD1/FLDL2T/FLDL2E/FLDPI/FLDLG2/FLDLN2/FLDZ``
      - ``D9 E8..EE``
      - **NP**
-     - Push an 80-bit ROM constant (``fconst``); pre-dec TOP; one ``S_FEXEC`` step.
-     - implemented (Tier-1)
+     - Push 80-bit ROM constant onto x87 stack.
+     - implemented
    * - ``FINIT / FNINIT``
      - ``9B DB E3`` / ``DB E3``
      - **NP**
-     - Reset FPU state (TOP/ctrl/status/tags); FNINIT works, FINIT's 0x9B HALTs.
-     - implemented (FNINIT)
+     - Reset FPU state (``TOP=0``, ``FCW=0x037F``, ``FSW=0``, tags empty); both wait & no-wait forms.
+     - implemented
    * - ``FCLEX / FNCLEX``
      - ``9B DB E2`` / ``DB E2``
      - **NP**
-     - Clear exception/busy bits, keep C0-C3 + TOP; FNCLEX works, FCLEX 0x9B HALTs.
-     - implemented (FNCLEX)
+     - Clear exception/busy bits preserving C0–C3 + TOP; both wait & no-wait forms.
+     - implemented
    * - ``FLDCW m16``
      - ``D9 /5``
      - **NP**
-     - Load 16-bit control word (RC/PC/masks); ``S_FLOAD`` one beat.
-     - implemented (Tier-1)
-   * - ``FNSTCW m16`` / ``FSTCW``
+     - Load 16-bit control word (RC/PC/exception masks).
+     - implemented
+   * - ``FNSTCW / FSTCW m16``
      - ``D9 /7`` / ``9B D9 /7``
      - **NP**
-     - Store control word; ``S_FSTORE`` one beat; FSTCW's 0x9B HALTs.
-     - implemented (FNSTCW)
-   * - ``FNSTSW AX/m16`` / ``FSTSW``
+     - Store 16-bit control word (wait & no-wait forms).
+     - implemented
+   * - ``FNSTSW / FSTSW AX/m16``
      - ``DF E0`` / ``DD /7`` / ``9B``-prefixed
      - **NP**
-     - Store status word (TOP overlaid) to AX or mem; FSTSW's 0x9B HALTs.
+     - Store status word (with live ``TOP``) to ``AX`` or ``m16`` (wait & no-wait forms).
      - implemented
    * - ``FWAIT / WAIT``
      - ``9B``
      - **NP**
-     - Standalone 0x9B not decoded; ``d_unknown`` → HALT (FX_FWAIT is dead code).
-     - deferred / HALTs
-   * - ``FLDENV / FNSTENV``
-     - ``D9 /4``; ``D9 /6``
+     - Drain in-flight async x87 operations & check unmasked pending ``#MF``.
+     - implemented
+   * - ``FLDENV / FNSTENV / FSTENV``
+     - ``D9 /4``; ``D9 /6``; ``9B D9 /6``
      - **NP**
-     - 14/28-byte environment image — not enumerated; ``d_unknown`` → HALT.
-     - deferred / HALTs
-   * - ``FSAVE/FNSAVE/FRSTOR``
-     - ``DD /6``; ``DD /4``; ``9B``-prefixed
+     - Load/store 14-byte (16-bit) or 28-byte (32-bit) x87 environment image (``S_FENV_*``).
+     - implemented
+   * - ``FSAVE / FNSAVE / FRSTOR``
+     - ``9B DD /6``; ``DD /6``; ``DD /4``
      - **NP**
-     - 94/108-byte full state image — not routed (DD /4,/6); ``d_unknown`` → HALT.
-     - deferred / HALTs
-   * - Transcendentals (``F2XM1`` etc.)
+     - Save/restore full 94-byte (16-bit) or 108-byte (32-bit) x87 environment + 8×80b stack image.
+     - implemented
+   * - Transcendentals (``F2XM1``, ``FYL2X``, ``FYL2XP1``, ``FSIN``, ``FCOS``, ``FSINCOS``, ``FPTAN``, ``FPATAN``)
      - ``D9 F0/F1/F9/FE/FF/FB/F2/F3``
      - **NP**
-     - Polynomial/constant-ROM engine — not enumerated; ``d_unknown`` → HALT.
-     - deferred / HALTs
+     - Shared polynomial/ROM transcendental engine (``ven_fp_trans.sv``, ``+define+VEN_TRANSCENDENTAL``).
+     - implemented
 
 FLD / FST / FSTP (``D9/DD /0``, ``DB /5``, ``D9 C0+i``; ``D9/DD /2,/3``, ``DB /7``, ``DD D0+i/D8+i``)
     ``FLD`` **pushes** a value: ``TOP`` is pre-decremented and the new ``ST(0)``
@@ -1878,24 +1877,24 @@ FLD / FST / FSTP (``D9/DD /0``, ``DB /5``, ``D9 C0+i``; ``D9/DD /2,/3``, ``DB /7
     functional FSM; AP-500 rates ``FLD m32/m64/ST(i)`` and ``FST``/``FSTP`` as
     FX, but the parallel-pairing case is not implemented.
 
-FILD / FIST / FISTP (``DF/DB /0``, ``DF/DB /2,/3``, ``DF /5,/7``)
+FILD / FIST / FISTP and FBLD / FBSTP (``DF/DB /0,/2,/3``, ``DF /4,/5,/6,/7``)
     ``FILD`` pushes a signed 16/32/64-bit integer converted **exactly** to
     ``floatx80`` (``fx_from_int``); ``FIST``/``FISTP`` convert ``ST(0)`` to a
     signed integer (rounded per RC), store it, and (``FISTP``) pop, with the
     documented **Pentium FIST overflow erratum** hook
     (``fist_errata_overflow``/``fx_to_int_errata``) gated behind ``errata_en``.
-    All **NP** (AP-500 explicitly classes ``FILD``/``FIST``/``FISTP`` as NP, not
-    FX).
+    Under ``VEN_BCD_ITER`` (enabled in ``c0e3fe43``), ``FBLD m80`` (``DF /4``)
+    and ``FBSTP m80`` (``DF /6``) convert 18-digit packed decimal values
+    iteratively via ``ven_bcd_to_fp.sv`` and ``ven_bcd.sv``. All **NP**.
 
-FXCH (``D9 C8+i``) — the documented divergence
-    Exchanges ``ST(0)`` with ``ST(i)`` (default ``ST(1)``) — no flags/arith, just
-    a swap. **Datapath:** a *real* 80-bit register-file cross-write
-    (``fpr[ftop] <= fst(i); fpr[fri(i)] <= fst(0)``) in one U-pipe clock, no
-    AGU/ALU/flag/TOP change. On a real P5, ``FXCH`` is **PV/FX** and executes
-    *for free* in the WF stage paired with a preceding FX op (giving 0 effective
-    latency). Ventium does **not** model that parallel-FXCH bypass — it does a
-    plain 1-cycle U-pipe swap. The swap value is correct (Tier-1); the
-    cycle-level free-pairing special case is the noted divergence.
+FXCH (``D9 C8+i``)
+    Exchanges ``ST(0)`` with ``ST(i)`` (default ``ST(1)``) — no flags or
+    arithmetic. In the **deployed c0e3fe43 profile** (``VEN_FP_SHARED`` +
+    ``VEN_FP_FXCH_QUEUE``), ``fp_shared/ven_fp_fxch_queue.sv`` renames the
+    pointer-mapped stack entries with **zero execution latency** behind in-flight
+    x87 arithmetic — reproducing the overlapped ``FXCH`` throughput DOS Quake
+    relies upon. In the zero-define unit-TB baseline, ``FXCH`` executes a plain
+    1-cycle ``fpr`` swap.
 
 FFREE / FINCSTP / FDECSTP / FNOP (``DD C0+i``, ``D9 F7/F6/D0``)
     All **NP** stack-management ops with no data move and no memory: ``FFREE``
@@ -1953,29 +1952,20 @@ FLD-constants (``D9 E8..EE``)
     (a hard-coded ``floatx80`` ROM). All **NP**; the cycle model gives them
     occ/lat 2 (vs 1 for ``FLD ST(i)``/mem) to match the oracle.
 
-FPU control ops (``FNINIT`` ``DB E3``, ``FNCLEX`` ``DB E2``, ``FLDCW`` ``D9 /5``, ``FNSTCW`` ``D9 /7``, ``FNSTSW`` ``DF E0`` / ``DD /7``)
-    All **NP**. ``FNINIT`` resets the FPU (``TOP=0``, control word ``0x037F``,
-    status ``0``, tag word all-empty). ``FNCLEX`` clears the exception/busy bits
-    while preserving C0-C3 and TOP (``fstat &= 0x7f00``). ``FLDCW`` loads the
-    16-bit control word from memory (feeding ``f_rc`` and the ``f_pc_bad``
-    check). ``FNSTCW`` stores it. ``FNSTSW`` stores the status word with the live
-    ``TOP`` overlaid — to ``AX`` (a cross-unit write into the integer GPR file,
-    preserving ``EAX[31:16]``; the canonical post-compare flag read) or to a
-    16-bit memory operand. The ``FWAIT``-prefixed wait-forms (``FINIT``,
-    ``FCLEX``, ``FSTCW``, ``FSTSW``, ``FSTENV``, ``FSAVE``) all require the
-    standalone ``0x9B`` byte, which is undecoded → HALT, so only the no-wait
-    ``FN*`` siblings execute.
-
-Deferred x87 (``FBLD``/``FBSTP``, ``FXTRACT`` family, ``FWAIT``, ``FLDENV``/``FNSTENV``, ``FSAVE``/``FRSTOR``, transcendentals)
-    All **NP** and **not reached**. The packed-BCD ``FBLD``/``FBSTP`` (``DF
-    /4``/``/6``), the ``FPREM``/``FPREM1``/``FRNDINT``/``FSCALE``/``FXTRACT``
-    family (``D9 F4/F5/F8/FC/FD``), the standalone ``FWAIT`` (``0x9B``, with the
-    ``FX_FWAIT`` execute arm as dead code), the environment ops
-    ``FLDENV``/``FNSTENV`` (``D9 /4``/``/6``), the full-state ops
-    ``FSAVE``/``FNSAVE``/``FRSTOR`` (``DD /4``/``/6``), and the transcendentals
-    ``F2XM1``/``FYL2X``/``FYL2XP1``/``FSIN``/``FCOS``/``FSINCOS``/``FPTAN``/
-    ``FPATAN`` (``D9 F0-F3/F9/FB/FE/FF``) are each absent from their decode case
-    (or hit a ``default: d_unknown``), so an assembled instance clears
-    ``d_is_x87`` and takes the loud unknown-opcode HALT rather than mis-execute.
-    These are spec'd as later-milestone work (BCD, environment/state, and an
-    ulp-tolerance transcendental oracle).
+FPU control, environment & transcendental ops
+    ``FNINIT``/``FINIT`` reset the FPU (``TOP=0``, ``FCW=0x037F``, ``FSW=0``,
+    tags all-empty); ``FNCLEX``/``FCLEX`` clear sticky exception/busy bits while
+    preserving ``C0–C3`` and ``TOP``; ``FLDCW`` and ``FNSTCW``/``FSTCW`` load
+    and store the 16-bit control word (in ``c0e3fe43``, ``VEN_FP_PC_RELAX``
+    supports single/double/extended ``FCW.PC`` precision); and ``FNSTSW``/``FSTSW``
+    store the status word (with live ``TOP``) to ``AX`` or ``m16``. Standalone
+    ``FWAIT`` (``0x9B``) synchronizes in-flight async x87 execution and checks
+    unmasked ``#MF`` exceptions before both barriers and wait-prefixed forms.
+    ``FLDENV``/``FNSTENV``/``FSTENV`` (``D9 /4,/6``) and ``FRSTOR``/``FNSAVE``/
+    ``FSAVE`` (``DD /4,/6``) transfer full 16-bit and 32-bit x87 environment and
+    8×80-bit register-stack images via ``core_fenv.svh``. ``FRNDINT``,
+    ``FSCALE``, ``FXTRACT``, ``FPREM``/``FPREM1`` (``VEN_FPREM`` /
+    ``fpu_srt_div.sv``), and all eight x87 transcendentals (``F2XM1``,
+    ``FYL2X``, ``FYL2XP1``, ``FSIN``, ``FCOS``, ``FSINCOS``, ``FPTAN``,
+    ``FPATAN`` via ``ven_fp_trans.sv`` under ``VEN_TRANSCENDENTAL``) are
+    implemented in ``c0e3fe43``.

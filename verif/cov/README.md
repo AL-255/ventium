@@ -1,250 +1,70 @@
 <!-- Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com) -->
 <!-- SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1 -->
 
-# Ventium coverage suite (`verif/cov/`)
+# Ventium Coverage Suite (`verif/cov/`)
 
-A code-coverage + ISA-execution harness that drives the **full user-mode ISA
-assembly suite** through a Verilator **`--coverage`** build of the core, measures
-how much of the RTL is exercised and how correct it is, and surfaces every
-problem so the suite can be iterated toward 100 %.
+`verif/cov/` drives Verilator `--coverage` (`--coverage-line --coverage-toggle`) builds of the Ventium core and leaf subsystems across complementary execution lanes while checking retired-instruction opcode execution and QEMU functional equivalence.
 
-It answers four questions in one run:
+The coverage build always uses private object directories (`obj_dir_cov`, `obj_dir_cov_feat`, etc.), keeping the canonical `verif/tb/obj_dir/tb_ventium` binary untouched.
 
-1. **How much RTL is covered?** — per-file Verilator **line + toggle** coverage
-   (`cov_summary.py`), with the least-covered files ranked so you know where to
-   aim next.
-2. **What ISA is actually executed?** — the executed-opcode histogram is built
-   from **retired instructions** (one record per committed instruction in the
-   RTL trace), *not* from a static disassembly of the image. Retired ==
-   genuinely executed on the silicon model.
-3. **What is unimplemented / broken?** — for every test the RTL retire stream is
-   diffed against the QEMU golden. The first instruction the core **fails to
-   retire** (the `d_unknown → S_HALT` "stopped-short" signature) or where it
-   **diverges** is decoded and named — that is the exact gap to fix.
-4. **Are the caches covered?** — a dedicated memory-subsystem run
-   (`run-mem-cov.sh`) coverage-instruments the faithful standalone cache/bus
-   testbenches.
-
-The coverage build lives in its own `obj_dir_cov`, so `make verify` and every
-existing gate keep using the byte-identical default `obj_dir/tb_ventium`.
-
-## Quick start
+## Quick Start
 
 ```sh
-make coverage-all    # every lane + the combined CORE (ISA+SYS) headline
-# or run a single lane:
-make coverage        # user-mode ISA suite -> core coverage + ISA report + correctness
-make coverage-sys    # bare-metal images in --system mode (privileged paths)
-make coverage-mem    # cache/bus subsystem coverage (ven_l1d / axi / l2)
-make coverage-unit   # optional engines (idiv / srt / sqrt / bcd / fbld) + biu_p5
+make coverage-all    # run every lane and merge the combined CORE headline
+make coverage        # user-mode ISA corpus -> line/toggle % + retired-ISA histogram + QEMU diff
+make coverage-sys    # bare-metal --system images (real/PM/V86/paging/TSS/SMM/debug)
+make coverage-mem    # standalone cache/AXI testbenches (ven_l1d / ven_axi_master / ventium_l1_axi)
+make coverage-unit   # standalone arithmetic/bus engines (idiv / srt / sqrt / bcd / fbld / biu_p5)
+make opgen           # per-opcode P54C regression suite (555 opcodes)
+make opgen-modes     # real-mode / PM32-CPL0 per-opcode mode streams
 ```
 
-## Four complementary lanes
-
-Verilator only instruments the modules a build **instantiates**, so no single
-run can cover everything. Coverage is gathered in four lanes and rolled up:
-
-| lane | runner | covers | top |
-|------|--------|--------|-----|
-| ISA  | `run-cov.sh`      | the core under the user-mode ISA corpus | `ventium_top` |
-| SYS  | `run-sys-cov.sh`  | the core under bare-metal `--system` images (int/IRET/seg/TSS/SMM/paging/TLB) | `ventium_top` |
-| MEM  | `run-mem-cov.sh`  | `ven_l1d` / `ven_axi_master` / `ventium_l1_axi` / `ven_l2` | standalone TBs |
-| UNIT | `run-unit-cov.sh` | optional iterative engines (`ven_idiv`, `fpu_srt_div`, `fpu_sqrt_iter`, `ven_bcd`, `ven_bcd_to_fp`) + `biu_p5` | standalone gates |
-
-ISA + SYS share the `ventium_top` hierarchy, so they **merge** into the
-authoritative CORE coverage number (`run-all-cov.sh` does this:
-`build/cov/combined/cov_summary.txt`). MEM/UNIT cover leaf modules under their
-own tops and are reported separately.
-
-### Eight lanes
-
-| lane | runner | covers | top |
-|------|--------|--------|-----|
-| ISA   | `run-cov.sh`      | core under the user-mode ISA corpus | `ventium_top` |
-| SYS   | `run-sys-cov.sh`  | core under bare-metal `--system` images (incl. real-mode `psoc*`: far CALL/RETF, LSS/LFS/LGS, INT/exc, SGDT) | `ventium_top` |
-| CYC   | `run-cyc-cov.sh`  | the dual-issue **fast path** (corpus re-run in `--cycle`) | `ventium_top` |
-| HALT  | `run-halt-cov.sh` | the defensive `d_unknown`/HALT default arms (invalid-opcode images) | `ventium_top` |
-| COSIM | `run-cosim-cov.sh`| **CPUID / RDTSC / INVD / WBINVD** (gated on `cosim_en\|\|soc_en`, run via `--cosim`) | `ventium_top` |
-| FLAGS | `run-flags-cov.sh`| the `ifdef VEN_*` feature gates + their modules (FE_PIPE, UOPCACHE, FP_PIPE, **TRANSCENDENTAL** f2xm1/fpatan/..., FPREM, iter engines) | `ventium_top` |
-| MEM   | `run-mem-cov.sh`  | `ven_l1d` / `ven_axi_master` / `ventium_l1_axi` / `ven_l2` | standalone |
-| UNIT  | `run-unit-cov.sh` | `ven_idiv` / `fpu_srt_div` / `fpu_sqrt_iter` / `ven_bcd*` / `biu_p5` | standalone |
-
-ISA+SYS+CYC+HALT+COSIM+FLAGS all share the `ventium_top` hierarchy and **merge**
-into the authoritative CORE number (`build/cov/combined/cov_summary.txt`).
-`run-soc-cov.sh` is the proper `ventium_soc` lane for CPUID/RDTSC + the SoC
-peripherals/device IN-OUT paths; it is a SEPARATE pool (the SoC core hierarchy
-differs, so it doesn't merge) and currently needs `ventium_soc.sv` to be updated
-to connect the new `dbg_de_*` core ports before it compiles.
-
-### Measured CORE line coverage (this checkout)
-
-The assembly-test loop (`verif/tests` + `verif/cov/tests`) raised CORE line
-coverage in three rounds:
-
-| stage | core line % |
-|-------|-------------|
-| user-mode ISA only           | 55.2 % |
-| + system-mode                | 80.6 % |
-| + round-1/2 gap tests        | 83.9 % |
-| + cycle-mode                 | 85.3 % |
-| + HALT arms + real-mode `psoc*` + CPUID/RDTSC (`--cosim`) | **90.0 %** |
-
-Two views of the CORE (both authoritative — they measure different point sets):
-
-| view | points | line | toggle |
-|------|-------:|-----:|-------:|
-| **default core** (the `make verify` feature set) | 1341 | **92.0 %** | 59.7 % |
-| **full-featured core** (all `VEN_*` flags via the FLAGS lane) | 2028 | **85.1 %** | 63.3 % |
-
-> Merge note: `verilator_coverage` fails past ~a few hundred input `.dat`s
-> (~GBs), so merge in batches (feed the running aggregate back in). Coverage from
-> two BUILD configs (default vs feature) has different point sets — keep them in
-> separate aggregates rather than one cross-config merge.
-
-### Chasing the `rtl/core` ceiling (default config)
-
-`rtl/core` default-config line coverage reached **~92 %**; the ~81 still-
-uncovered lines break down as (these are *not* reachable by more ISA tests
-against the default `ventium_top`):
-
-| ~count | category | what would cover it |
-|------:|----------|---------------------|
-| 12 | CPUID **soc-arm** leaf table | the real `soc_en` → the SoC lane (`run-soc-cov.sh`, separate pool) covers it |
-| 20 | special-mode (`proxy_en`, `cosim`, `VEN_DBG_CORE`, `fe_xlate`, `nmi`/`intr`, `soc_en`, `S_HLTWAIT`, `S_F00F`) | the corresponding build/run modes (proxy/dbg builds, HW-interrupt injection, HLT in system mode, errata flag) |
-| 9 | system faults (#NP/#GP gate, DPL violation, `!pde[0]` #PF-on-PDE, far-jmp `seg_load_fault`, error-code push, `RETF imm`) | new bare-metal fault images under `verif/sys/tests` |
-| 9 | defensive `default: d_unknown`/`;` dead arms | unreachable by valid stimulus (only invalid opcodes already in the HALT lane) |
-| ~31 | feature-config / FP-corner / niche decode (`fri/fst/fp_bop/v_br_cc`, FSCALE exp over/underflow, SNaN, `callw`, rel16 Jcc) | the FLAGS lane (feature build) + crafted FP-exception operands |
-
-User/cosim-reachable gaps closed this round: REP-with-CX=0 (`t_repzero`, also
-in `make verify`), IN/OUT/INS + REP-INS-CX=0 (`covio`), CPUID/RDTSC/INVD
-(`--cosim`).
-
-The FLAGS lane builds a feature-rich `ventium_top` (FE_PIPE, UOPCACHE, BTB_PIPE,
-FP_PIPE/2, FP_OVERLAP, FXCH_FREE, **TRANSCENDENTAL**, SRT/IDIV/BCD_ITER, FPTRAP,
-FP_PC_RELAX) and runs the whole corpus + the FP exercisers (`tx_transc`,
-`tx_unifdiv`) through it. It lights up modules that are 0%/absent in every other
-lane: `uopcache.sv` 90 %, `fpu_top.sv` 100 %, `fpu_fsincos.sv` 95 %,
-`fpu_fyl2x.sv` 84 %, `fpu_fpatan.sv` 72 %, `fpu_f2xm1.sv` 70 %.
-
-**FPU overhaul (2026-06).** The FPU was reworked: FDIV/FSQRT/FPREM were unified
-onto **one carry-save datapath** (`fpu_srt_div.sv`), the transcendentals moved to
-DSP48 + a shared 128-bit multiply (`fpu_trsc_wideint.svh`), and `VEN_FPREM` is now
-**default-on** (in the build's base `VL_FLAGS`). Coverage-flow consequences:
-* `tx_fprem` now **passes** (FPREM is no longer deferred) — it left `KNOWN_FAIL`
-  and is a plain `make verify` test, so `make verify` is now fully green.
-* `tx_unifdiv` (new, passes) exercises the unified datapath — exact/inexact FDIV,
-  perfect/non-perfect FSQRT, FPREM/FPREM1 — driving `fpu_srt_div.sv` to **84 %**
-  line / 88 % toggle (vs 65 % from the divide-only standalone gate; its sqrt+rem
-  paths are only reached **in-core**, via the FLAGS lane).
-* `fpu_trsc_wideint.svh` (the shared wide-int kit) now appears in coverage (52 %).
-* The standalone `sqrt_iter` UNIT gate still validates the legacy `fpu_sqrt_iter.sv`,
-  which the core no longer instantiates (sqrt is now the unified `fpu_srt_div`).
-
-The SoC lane (`run-soc-cov.sh`, a separate pool) covers the SoC peripherals the
-core lanes never touch: `ven_i8237` 90 %, `ven_uart16550` 85 %, `ven_rtc` 75 %,
-`ven_i8272` 57 %, `ven_pit`/`ven_pic`/`ven_i8042`/`ven_vga*`, plus CPUID/RDTSC
-under the real `soc_en`.
-
-MEM lane: ven_l1d 75 / axi 74 / l2 95 % line. UNIT lane: ven_idiv 92 / bcd 83 /
-sqrt 78 / srt 68 / biu_p5 90 % line.
-
-### The remaining ~15 % (the ceiling)
-
-The 167 still-uncovered CORE lines are dominated by code that **assembly tests
-against `ventium_top` cannot reach**, not by missing tests:
-
-| count | category | why unreachable by ASM |
-|------:|----------|------------------------|
-| ~19 | defensive `default: d_unknown`/HALT arms | only fire on *invalid* opcodes (would HALT) |
-| ~15 | CPUID / RDTSC leaf tables | gated off in `ventium_top`; live only in the SoC (`make verify-soc` / `psoccpuid`) |
-| ~20 | special build-modes (`VEN_PS_PROXY`, cosim, `VEN_DBG_CORE`, `fe_xlate`, `soc_en`, F00F) | compiled out / require non-default defines |
-| ~44 | deeper system paths (far CALL/RETF, IN/OUT, HLT, LLDT/LGDT, more IDT/SMM/paging) | need new bare-metal images beyond the current `verif/sys/tests` |
-| ~14 | x87 exception/flag corners (unmasked exceptions, FSCALE PE flag) | some diverge from QEMU (fidelity gaps, see findings) |
-| ~55 | gated/selector/16-bit-addr/system-push misc | MOV-moffs, LES/LDS/POP-seg (selector model), `addr16`, INVD/LSS |
-
-**Findings surfaced by the loop** (real, not test bugs):
-* `POP FS`/`POP GS` (0F A1/A9) are **unimplemented** — the core HALTs.
-* `POP DS`/`POP ES` are selector **no-ops** in user mode (flat-model simplification).
-* `FSCALE` overflow→Inf does **not set the x87 PE flag** that QEMU sets (`fstat 0x3008` vs `0x3028`).
-* `MOV moffs` (A0–A3) and CPUID/RDTSC are not decoded by the plain user-mode core.
-
-Going beyond ~85 % needs work that is *not* "writing assembly tests": core RTL
-changes (POP FS/GS, MOV-moffs), a `ventium_soc` coverage build (CPUID/RDTSC), and
-additional bare-metal system images — all tracked as follow-ups.
-
-or directly:
+Or invoke a runner directly:
 
 ```sh
-bash verif/cov/run-cov.sh                 # whole suite
-bash verif/cov/run-cov.sh t_shift t_mul   # just these programs
-GOLDEN=0 bash verif/cov/run-cov.sh        # coverage only, skip the QEMU oracle
-COV_DEFS="+define+VEN_UOPCACHE" bash verif/cov/run-cov.sh   # widen RTL features
+bash verif/cov/run-cov.sh                                  # full user-mode corpus
+bash verif/cov/run-cov.sh t_shift t_mul                    # selected programs only
+GOLDEN=0 bash verif/cov/run-cov.sh                         # coverage only (skip QEMU diff)
+COV_DEFS="+define+VEN_UOPCACHE" bash verif/cov/run-cov.sh  # widen feature flags
 ```
 
-## What runs, per program
+## Coverage Lanes
 
-`run-cov.sh` discovers every `verif/tests/**/manifest.json` and, for each:
+Verilator only instruments modules **instantiated** in a given elaboration, and `.dat` files from builds with different `ifdef VEN_*` point sets must be aggregated into matching pools rather than cross-merged blindly. `verif/cov/` organizes coverage into complementary lanes:
 
-1. builds the ELF (`gcc -m32`, GNU as — no nasm),
-2. `isa_verify`s it (pure original-Pentium ISA),
-3. flattens it to a raw image (`elf2flat.py`),
-4. generates the **QEMU golden** functional trace (the correctness oracle),
-5. runs the **coverage TB** on the image, dumping a per-test `coverage.dat`
-   (via `$VEN_COV_DAT`) plus the RTL retire `.vtrace`,
-6. `compare.py --mode func` → **correctness** verdict vs QEMU,
-7. `isa_coverage.py analyze` → executed-opcode histogram + the first
-   unimplemented/diverging instruction.
+| Lane | Runner | Build / Top | What It Exercises |
+| --- | --- | --- | --- |
+| **ISA** | `run-cov.sh` | `ventium_top` (`obj_dir_cov`) | User-mode integer + x87 corpus (`verif/tests/**/manifest.json`) + retired-opcode histogram (`isa_coverage.py`). |
+| **SYS** | `run-sys-cov.sh` | `ventium_top` (`--system`) | Bare-metal privileged paths: real↔PM↔V86 transitions, 4 KiB/4 MiB paging, TLB walks, IDT/TSS/call-gates, SMM/RSM, debug registers. |
+| **CYC** | `run-cyc-cov.sh` | `ventium_top` (`--cycle`) | Dual-issue U+V fast pipeline (`S_PIPE`, `issue_uv`, `u_pipe`, `v_pipe`, `bpred_btb`). |
+| **HALT** | `run-halt-cov.sh` | `ventium_top` | Defensive `d_unknown → S_HALT` / `#UD` default decoder arms (`verif/cov/halt/`). |
+| **COSIM** | `run-cosim-cov.sh` | `ventium_top` (`--cosim`) | `CPUID`, `RDTSC`, `INVD`, `WBINVD`, and port `IN`/`OUT`/`INS`/`OUTS` (`verif/cov/cosim/`). |
+| **FLAGS** | `run-flags-cov.sh` | `ventium_top` (`obj_dir_cov_feat`) | Feature-gated RTL (`VEN_UOPCACHE`, `VEN_BTB_PIPE`, `VEN_TRANSCENDENTAL`, `VEN_FPREM`, `VEN_SRT_ITER`, `VEN_IDIV_ITER`, `VEN_BCD_ITER`). |
+| **FPPIPE** | `run-fppipe-cov.sh` | `ventium_top` (`+VEN_FP_PIPE/+VEN_FP_PIPE2`) | Pipelined x87 arithmetic & transcendental datapaths (`fpp2_s1`, `fpu_fpatan`, `fp_shared/` sweeps). |
+| **MEM** | `run-mem-cov.sh` | Standalone `verif/l1/tb_*` + `tb_cov_l1d_sweep.sv` | `ven_l1d` (all 128 sets × 2 ways + eviction/snoop/flush), `ven_axi_master`, `ventium_l1_axi`, `ven_cachemap`, `ven_axi_cdc`. |
+| **UNIT** | `run-unit-cov.sh` | Standalone unit TBs | `ven_idiv`, `fpu_srt_div`, `fpu_sqrt_iter`, `ven_bcd`, `ven_bcd_to_fp`, and `biu_p5`. |
+| **SOC** | `run-soc-cov.sh` | Separate SoC pool | Legacy SoC peripheral wrappers (`ven_i8237`, `ven_uart16550`, `ven_rtc`, `ven_pit`, `ven_pic`, `ven_i8042`). |
 
-Then it merges every `coverage.dat` (`verilator_coverage`), annotates the
-sources, and prints the coverage + ISA reports.
+> **Shared FPU (`fp_shared/`) Note:** On the deployed hardware profile (`c0e3fe43`, `VEN_FP_SHARED` + `VEN_FP_SHARED_DIRECT`), `fp_shared/ven_fp_top.sv` (`u_fp_shared`) and `rtl/fpu/fpu_srt_div.sv` (`u_srt`) own x87 execution; dedicated unit and system sweeps live in `fp_shared/tb/`, `verif/fppipe/`, `verif/srt/`, `verif/fpu87/`, and `verif/trsc/`.
 
-## Outputs (`build/cov/`)
+## Per-Program Workflow (`run-cov.sh`)
 
-| path | contents |
-|------|----------|
-| `cov_summary.txt` / `.json` | per-file line/toggle %, least-covered ranking |
-| `isa.txt` / `.json`         | executed-opcode histogram + unimplemented list |
-| `annotated/`                | Verilator-annotated sources (`%`/`~` = uncovered lines) |
-| `merged.dat`                | merged coverage database |
-| `work/`                     | per-test ELF/flat/vtrace/compare logs |
-| `dat/`                      | per-test `.dat` + `.isa.json` |
-| `mem/`                      | memory-subsystem coverage (from `run-mem-cov.sh`) |
+1. Assemble the 32-bit ELF (`gcc -m32 -nostdlib -static`) and verify P5-only encodings (`isa_verify.py`).
+2. Flatten to a raw memory blob (`elf2flat.py`) and generate/reuse the pinned QEMU golden `.vtrace`.
+3. Execute `obj_dir_cov/tb_ventium` with `VEN_COV_DAT=<out>.dat` (`#if VM_COVERAGE` in `tb_main.cpp`, inert in non-coverage builds).
+4. Run `verif/diff/compare.py --mode func` against the QEMU golden.
+5. Run `isa_coverage.py analyze` on **retired** RTL trace records to build the executed-opcode histogram and flag any unimplemented/diverging instruction.
+6. Batch-merge `.dat` files via `verilator_coverage` and emit `cov_summary.txt`/`.json`, `isa.txt`/`.json`, and annotated RTL under `build/cov/`.
 
-## Components
+## Directory Contents
 
-| file | role |
-|------|------|
-| `run-cov.sh`            | top orchestrator (build → per-test → merge → report) |
-| `run-sys-cov.sh`        | system-mode coverage (bare-metal images via `--system`) |
-| `run-cyc-cov.sh`        | cycle-mode coverage (corpus re-run in `--cycle` for the fast path) |
-| `run-mem-cov.sh`        | dedicated cache/bus coverage (instruments `verif/l1/tb_*`) |
-| `run-unit-cov.sh`       | optional arithmetic-engine coverage (idiv/srt/sqrt/bcd gates, --coverage) |
-| `run-all-cov.sh`        | runs all five lanes + the combined CORE headline |
-| `uncovered.py`          | lists the exact uncovered source lines/toggles (drives the loop) |
-| `tests/`                | coverage-only tests that intentionally diverge (not in `make verify`) |
-| `isa_coverage.py`       | retired-instruction decoder: opcode histogram + unimplemented/diverge detection (capstone) |
-| `cov_summary.py`        | parses a Verilator `.dat` → per-file/overall line+toggle % |
-| `tb_cov_l1d_sweep.sv`   | breadth sweep of `ven_l1d` (all 128 sets × 2 ways + evict + write-through + flush) |
-| `verif/tb` `make cov`   | the `--coverage` core build (separate `obj_dir_cov`) |
+| Path | Purpose |
+| --- | --- |
+| `run-cov.sh`, `run-sys-cov.sh`, `run-cyc-cov.sh`, `run-halt-cov.sh`, `run-cosim-cov.sh`, `run-flags-cov.sh`, `run-fppipe-cov.sh`, `run-mem-cov.sh`, `run-unit-cov.sh`, `run-all-cov.sh` | Per-lane and umbrella orchestrators. |
+| `cov_summary.py` / `uncovered.py` | Parse Verilator `.dat` aggregates into per-file line/toggle tables and exact uncovered line/signal lists. |
+| `isa_coverage.py` | Capstone-based retired-instruction decoder and opcode-cell histogrammer. |
+| `tb_cov_l1d_sweep.sv` | Full-geometry `ven_l1d` set/way/evict/snoop/flush sweep testbench. |
+| `COVERAGE_CAMPAIGN.md` | Baseline toggle/line coverage campaign methodology and reproducibility notes. |
+| `opgen/` | Script-generated 555-opcode P54C differential suite (`make opgen`, `make opgen-modes`). |
 
-The `tb_main.cpp` coverage dump is guarded by `#if VM_COVERAGE` and keyed off
-`$VEN_COV_DAT`, so it is inert in every non-coverage build.
-
-## Iterating toward 100 %
-
-The honest baseline from the user-mode integer+x87 corpus is **partial**: the
-large untouched regions are the **system-mode** paths (`core_smm.svh`,
-`core_iret.svh`, `core_int_deliver.svh`, `core_tss_priv.svh`, paging/TLB) and
-parts of the FP/transcendental datapath that the user-mode corpus never reaches.
-To climb:
-
-1. Read `cov_summary.txt`'s least-covered list and the `annotated/` sources.
-2. Add an assembly test under `verif/tests/<name>/` (`.s` + `manifest.json`) that
-   exercises the uncovered lines — it is auto-discovered, no Makefile edit.
-3. For privileged/paging coverage, extend the runner to the system-mode images
-   under `verif/sys/tests/` (run in `--system` mode) — a documented follow-up.
-4. Re-run `make coverage`; confirm the % rose and no new divergence appeared.
-
-Any instruction the core can't execute shows up in the `isa.txt`
-"UNIMPLEMENTED / DIVERGING INSTRUCTIONS" section with its opcode-map cell,
-mnemonic and the test + PC where it was hit.
+> **Safeguard:** Coverage percentages measure structural RTL exercise, **never** architectural acceptance or gameplay performance. Keep `TMPDIR=/home/yukidama/external/tmp` and `VENTIUM_VERILATOR_BIN=/tools/verilator/v5.046/bin/verilator` set on the maintainer host.

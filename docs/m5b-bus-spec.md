@@ -1,6 +1,8 @@
 # M5B — pin-level 64-bit external Bus Interface Unit (BIU) spec
 
-M5B (PLAN §6/§9) is the **pin-level external bus interface** of the Pentium
+> **Current Status (Nov 2026 — COMPLETED in `rtl/bus/biu_p5.sv` & `biu.sv`):** `biu_p5.sv` lives in its canonical RTL home `rtl/bus/biu_p5.sv` alongside the optional `bus_mode=1` wrapper `rtl/bus/biu.sv`, verified by `make bus` (76 directed checks + 19 SVA invariants) and `make bus-sva` (12-program live integrated SVA corpus). On full-PC simulation (`ao486-sim/`) and RK-XCZU15EG-F FPGA (`c0e3fe43`, `40.264133 MHz` STA sign-off, `0.515778001` total U+V Quake gameplay IPC), actual backing memory traffic uses the 64-bit AXI4 hierarchy (`ventium_l1_axi` → `ven_axi_master` → `ven_ao486_shim` / `ven_ddram_axi_posted`), while `biu_p5` serves as the standalone/SVA Socket 5/7 pin-protocol reference (see §5.4).
+
+M5B is the **pin-level external bus interface** of the Pentium
 (P5/P54C): the FSM that turns internal memory requests into the external
 ADS#/BRDY#/NA#/burst/locked/pipelined/snoop protocol on the 64-bit data bus.
 
@@ -244,12 +246,9 @@ sequencing, LOCK#, BOFF# restart and AHOLD/EADS# from the core — the core sees
 
 ---
 
-## 5. INTEGRATION NOTE (for the orchestrator — do AFTER M5 lands)
+## 5. Historical Integration Record & Live SVA Caveats
 
-This block is **complete and standalone in `verif/bus/` only**. It has **not**
-been integrated into `rtl/` and this workflow does **not** touch `rtl/`,
-`ventium_top.sv`, `intcore.sv`, the top `Makefile`, or `PROGRESS.md`. The steps
-below are the orchestrator's later job.
+> **Note:** Steps 5.1–5.2 below record the completed migration of `biu_p5.sv` into `rtl/bus/biu_p5.sv` and `rtl/bus/biu.sv` (`rtl/ventium.f` & `rtl_ven_core.f`). Read **§5.3–§5.4** for the active verification boundaries of `make bus` and `make bus-sva`.
 
 ### 5.1 What exists today (M0 stub)
 

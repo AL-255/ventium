@@ -1,8 +1,10 @@
 # M2S.3 — interrupts / exceptions (IDT delivery)
 
-Third system-mode RTL stage. M2S.1 (segmentation) and M2S.2 (paging) **compute**
-fault decisions (`#GP/#NP/#SS` selector checks; `#PF` + `CR2` + error code) but
-currently **HALT** instead of vectoring. M2S.3 turns those decisions — plus
+> **Current Status (Nov 2026 — COMPLETED):** Full real-mode IVT, V86, and protected-mode IDT interrupt/trap/fault delivery (`core_int_deliver.svh`, `core_iret.svh`, `core_rmint.svh`, `ven_frame_plan.sv`), including cross-privilege TSS stack probes and nested `#DF` escalation, are implemented, gated in `make verify-sys`, and board-qualified on RK-XCZU15EG-F image **`c0e3fe43`**. See [`int-delivery-transactions.md`](int-delivery-transactions.md) for the exact transactional frame contract.
+
+Third system-mode RTL stage. M2S.1 (segmentation) and M2S.2 (paging) compute
+fault decisions (`#GP/#NP/#SS` selector checks; `#PF` + `CR2` + error code);
+M2S.3 turns those decisions — plus
 software `INT` — into real **IDT-delivered** faults/interrupts, with the exception
 frame, gate dispatch, and `IRET` return. Gated against `qemu-system-i386`.
 

@@ -1,35 +1,19 @@
 # M5 DIV/IDIV iterative-divider design spec
 
-Status: **OCCUPANCY + `#DE` IMPLEMENTED + GATED (2026-06-05).** The integer
-divide family (REVIEW_Jun5.md Limit #5, Actions 3/4/7/8) is now both cycle-
-faithful (occupancy) and architecturally complete (`#DE`). What remains for the
-family is purely structural (a real iterative SRT datapath instead of the native
-`/` helper — no architectural or timing observable, lowest priority).
+> **Current Status (Nov 2026 — COMPLETED, Including Synthesizable `ven_idiv.sv`):**
+> 1. **Hardware Iterative Divider (`rtl/core/ven_idiv.sv`, `+VEN_IDIV_ITER`):** Synthesizable radix-2 iterative integer `DIV`/`IDIV` engine deployed in RK-XCZU15EG-F image **`c0e3fe43`** (`40.264133 MHz` STA sign-off, `0.515778001` total U+V Quake gameplay IPC).
+> 2. **Architectural `#DE` (Vector 0):** Both divide-by-zero and quotient-overflow raise `#DE` with exact fault semantics (skipping writeback/flag mutation), differentially verified against `qemu-system-i386` in `verif/sys/tests/pde` (`make verify-sys`).
+> 3. **Modeled P5 Occupancy (`make verify` / `make m5`):** In standalone cycle-band mode, `DIV`/`IDIV` charge P5 occupancy (`17`/`25`/`41` `DIV`, `22`/`30`/`46` `IDIV`), gated by `mb_div8`, `mb_div16`, `mb_div32`, and `mb_idiv32` in `verif/m5_metrics.py`.
 
-- **DONE — P5 divide OCCUPANCY (Actions 3/7/8).** DIV/IDIV now charge the modeled
+Status: **OCCUPANCY + `#DE` + `ven_idiv.sv` IMPLEMENTED + GATED.**
+- **DONE — P5 divide OCCUPANCY.** DIV/IDIV charge the modeled
   p5model occupancy (17/25/41 DIV, 22/30/46 IDIV) as a deferred penalty
-  (`pending_mem_pen`, the same mechanism that folds a D-cache miss into the next
-  insn's `pipe_free_at`), holding the U pipe so a dependent EDX:EAX consumer
-  stalls the latency. `rtl/core/core_exec.svh` K_MULDIV DIV/IDIV arms set
-  `pending_mem_pen <= occ - 7` (7 = the measured slow-FSM cost of one reg-form
-  divide). NEW gated bands `mb_div8/mb_div16/mb_div32/mb_idiv32` (abs-cyc within
-  10% of the p5model golden + CPI-elevation) all PASS (+0.20 / −3.31 / +0.09 /
-  +0.08 %). The native `/`/`%` helper is retained for the bit-exact result
-  (Action 8 — architectural vs timing separated).
-- **DONE — `#DE` divide-error (Action 4).** DIV/IDIV now raise `#DE` (vector 0) on
-  **divide-by-zero** (`srcv==0`) AND on **quotient overflow** (DIV: the quotient's
-  high bits are nonzero; IDIV: the quotient falls outside the signed destination
-  range), in `rtl/core/core_exec.svh`. The result write is skipped and EFLAGS left
-  unchanged; in `sys_mode` the fault DELIVERS through the verified `S_INT_GATE`
-  IDT FSM (FAULT semantics — `start_fault(8'd0, ...)` pushes the faulting EIP); in
-  user mode (no IDT) it loud-HALTs. Gated by the NEW system-mode test
-  `verif/sys/tests/pde` (div-by-zero + quotient-overflow → IDT[0] → handler →
-  resume), a **per-record differential** vs qemu-system-i386 (`#DE` is synchronous,
-  so the gdbstub single-step golden delivers it): RTL `--system` trace EQUIVALENT,
-  78/78 records. Registered in `verify-sys` + `INTR_TESTS` + `RTL_SYS_TESTS`.
-
-Owner doc; the occupancy edits are in `rtl/core/core_exec.svh` + the bands in
-`verif/m5_metrics.py` + `verif/tests/mb_div*`.
+  (`pending_mem_pen`), holding the U pipe so a dependent EDX:EAX consumer
+  stalls the latency (`mb_div8/mb_div16/mb_div32/mb_idiv32` all PASS within 10%).
+- **DONE — `#DE` divide-error.** DIV/IDIV raise `#DE` (vector 0) on
+  **divide-by-zero** (`srcv==0`) AND on **quotient overflow** in `rtl/core/core_exec.svh`,
+  gated by `verif/sys/tests/pde` (78/78 records EQUIVALENT vs `qemu-system-i386`).
+- **DONE — Synthesizable Hardware Engine (`rtl/core/ven_idiv.sv`).** Replaces behavioral `/` and `%` under `+define+VEN_IDIV_ITER` on FPGA.
 
 ---
 

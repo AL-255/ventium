@@ -1,157 +1,65 @@
-# `verif/diff` — the differential trace comparator (Consumer)
+# `verif/diff/` — `.vtrace` Contract & Differential Comparator (Consumer)
 
-This directory holds the **Consumer** side of the Ventium differential-testing
-stack (see [`../../PLAN.md`](../../PLAN.md) §4.3 and
-[`../../docs/trace-format.md`](../../docs/trace-format.md) §3):
+`verif/diff/` owns the canonical trace parser/emitter and the differential comparator used across `make verify`, `make verify-sys`, `make bus-sva`, `verif/fpu87/`, and directed core gates (`docs/trace-format.md`).
 
-| file | role |
-|---|---|
-| `tracefmt.py` | shared `.vtrace` parser/emitter — the executable definition of the format. **Owned by the format; imported, never duplicated.** |
-| `compare.py`  | the comparator: reads two `.vtrace` files and diffs them in `func` or `cycle` mode. |
-| `README.md`   | this file. |
-
-`compare.py` only ever *imports* `tracefmt.py`; field names, hex formatting and
-the EFLAGS mask tables all come from there so producer and consumer never drift.
+| File | Role |
+| --- | --- |
+| `tracefmt.py` | **Single executable definition of `.vtrace`.** All trace producers (`verif/qemu-trace/gen_trace.py`, `verif/tb/dpi_retire.cpp` schema) and consumers (`compare.py`, coverage/audit tools) must format and parse `.vtrace` through `tracefmt.py` — **never emit hand-formatted JSON**. |
+| `compare.py` | Aligns golden (`A`) and RTL (`C`) `.vtrace` streams by retire sequence `n` and compares them in `func` or `cycle` mode. |
 
 ---
 
 ## Usage
 
+```sh
+python3 verif/diff/compare.py --mode func|cycle [--all] [--tol-pct P] \
+    [--eflags-mask 0xM] [--max-report N] <golden.vtrace> <rtl.vtrace>
 ```
-compare.py --mode func|cycle [--all] [--tol-pct P] [--eflags-mask 0xM]
-           [--max-report N] <A.vtrace> <C.vtrace>
-```
 
-Per the spec, `A` is always the **golden** trace and `C` is the **device under
-test (RTL)**:
+- **`--mode func`**: Compares per-instruction post-commit architectural state (`A` = QEMU gdbstub golden from `gen_trace.py`, `C` = Verilator RTL trace).
+  - **User mode:** `pc`, `eax..edi`, `eflags`, `cs..gs`.
+  - **x87 (`x87:true` in both headers):** Adds 80-bit `st0..st7` and `fctrl`, `fstat`, `ftag`, `fiseg`, `fioff`, `foseg`, `fooff`, `fop`.
+  - **System mode (`sys:true` in both headers):** Intersects present system registers (`cr0`, `cr2`, `cr3`, `cr4`, plus optional hidden segment bases when emitted by both sides).
+- **`--mode cycle`**: Compares `pc` lockstep (`pc` mismatch is a hard control-flow failure, exit `1`), derives per-instruction clock deltas `cyc[n] - cyc[n-1]`, checks `--tol-pct` (default `0.0`), and summarizes total cycles, CPI, pairing %, and U/V pipe mix (`A` = `p5trace.so` plugin trace, `C` = RTL `--cycle` trace).
 
-- **`--mode func`** — `A` = QEMU **gdbstub** golden, `C` = RTL.
-- **`--mode cycle`** — `A` = QEMU **plugin** golden (`p5model`-derived), `C` = RTL.
+### Exit Codes
 
-### Options
-- `--all` — list divergences instead of stopping at the first (capped by
-  `--max-report`, default 20).
-- `--max-report N` — with `--all`, the maximum number of divergences to print.
-- `--tol-pct P` — **cycle mode only**: per-instruction cost tolerance band, in
-  percent. Default `0.0` = exact (microbench gates). Loosen for whole
-  benchmarks (the cycle oracle is itself an estimate — PLAN.md §8).
-- `--eflags-mask 0xM` — **func mode only**: override the EFLAGS compare mask.
-  Default is `tracefmt.EFLAGS_DEFAULT_MASK` (`0x003f7fd5`).
-
-### Exit status (the machine verdict — `docs/trace-format.md` §3)
-| code | meaning |
-|---|---|
-| `0` | traces equivalent under the selected mode/tolerance |
-| `1` | divergence found (incl. length/control-flow mismatch) |
-| `2` | malformed input / header-incompatible (wrong mode, no header, missing `cyc`) |
-
-The human-readable summary goes to **stdout**; warnings go to **stderr**. The
-verdict lives in the exit code so scripts can gate on it.
+| Exit | Verdict |
+| ---: | --- |
+| `0` | Equivalent under the selected mode and tolerance. |
+| `1` | Architectural, control-flow (`pc`), trace-length, or cycle-tolerance divergence. |
+| `2` | Malformed `.vtrace`, missing header, or incompatible `mode`. |
 
 ---
 
-## What it checks
+## Comparison & Masking Discipline
 
-### Functional mode (`--mode func`)
-Records are aligned by `n` (with a cross-check that the sequence numbers agree).
-For each pair the fields are compared in the order returned by
-`tracefmt.func_compare_keys()`:
-
-```
-pc, eax,ecx,edx,ebx,esp,ebp,esi,edi, eflags, cs,ss,ds,es,fs,gs [, x87…]
-```
-
-- **EFLAGS masking.** EFLAGS is compared as `(A ^ C) & mask == 0`, where
-  `mask = (--eflags-mask or EFLAGS_DEFAULT_MASK) & ~undefined`. The
-  `undefined` part comes from `tracefmt.eflags_undefined_mask(mnemonic)` — the
-  flags an instruction leaves *architecturally undefined* (e.g. `IMUL` leaves
-  AF/SF/ZF/PF undefined). The mnemonic is recovered by decoding the record's
-  `bytes` field with **capstone** (CS_ARCH_X86 / CS_MODE_32). If `bytes` is
-  absent or capstone is unavailable, the full mask is used.
-- **x87.** x87 fields are compared **only when both headers declare `x87:true`**.
-  If exactly one does, the comparator warns and compares the common integer/seg
-  fields only.
-- **First-divergence report.** Reports `{n, pc, field, expected (A), got (C)}`
-  and stops. `--all` lists up to `--max-report` divergences instead.
-- **Length mismatch** (one trace shorter) is reported clearly and counts as a
-  divergence (exit `1`).
-
-### Cycle mode (`--mode cycle`)
-Records are aligned by `n`; `pc` is a sanity check (a `pc` mismatch means the
-two runs executed *different* instructions — a control-flow divergence, exit
-`1`, regardless of cycle tolerance). Per-instruction cost is derived from the
-cumulative counter as `cyc[n] - cyc[n-1]` for both sides. The comparator:
-
-- compares **total cycles** A vs C and the **% diff**,
-- flags **per-instruction deltas beyond `--tol-pct`**,
-- prints an aggregate summary: total cycles, overall **CPI**, **pairing%** and
-  **pipe mix** (from records that carry `pipe`/`paired`), and the count of
-  out-of-tolerance instructions.
+1. **Differential Authority:** Never weaken `EFLAGS_DEFAULT_MASK` (`0x003f7fd5`), add ad-hoc field waivers, filter terminal records, or convert regressions into expected-failure pins.
+2. **Architecturally Undefined EFLAGS:** In `func` mode, `compare.py` decodes each record's optional `bytes` field with Capstone (`CS_ARCH_X86`) and masks only the flags that `tracefmt.eflags_undefined_mask(mnemonic)` marks architecturally undefined on Pentium (e.g., `AF/SF/ZF/PF` after `MUL`/`IMUL`, `OF` on multi-bit shifts). If `bytes` or Capstone is absent, the full defined mask is enforced.
+3. **Record-Scoped x87 Oracle Masks:** Where pinned QEMU 8.2.2 omits x87 stack-fault responses or `FPREM1` quotient condition codes in canonical `make verify`, test manifests (`verif/tests/*/manifest.json`) may specify **closed `[lo, hi]` record ranges** (`x87_stkflt_fstat_ranges`, `x87_stkflt_fpr_ranges`). Open-ended (`null` upper-bound) ranges are forbidden and mechanically rejected by `make docs-status` (`verif/sys/run-docs-status-gate.sh`).
+4. **Dual-Issue `--cycle-func` Traces:** In `--cycle-func` runs (`cycle_mode=1` with functional records), paired U+V retirements share the post-pair register snapshot; group-aware drivers compare state at completed issue-group boundaries while keeping full record counts intact.
+5. **Golden-Cache Isolation (`verif/lib/verify_worker.sh`):** Cached functional goldens under `build/golden-cache/` key on source SHA, built ELF SHA, QEMU binary SHA, normalized `VTM_QEMU_GDB_PREEXIT` mode (`.preexit0` vs `.preexit1`), `x87`/`max_insn` settings, and producer/transport hashes (`gen_trace.py`, `owned_gdb.py`, `tracefmt.py`). Cycle workers look up initial `ESP` using that exact functional cache key so observer-mode or binary changes never cross-contaminate cached goldens.
 
 ---
 
-## Self-test / examples
-
-There is no separate test harness file; the fixtures are tiny and synthesized
-on the fly with `tracefmt`. To reproduce the self-tests:
+## Quick Self-Test
 
 ```sh
-cd verif/diff
 python3 - <<'PY'
-import tracefmt as tf
-def gpr(**k): b={x:0 for x in tf.GPR_KEYS}; b.update(k); return b
-def seg(**k): b={x:0 for x in tf.SEG_KEYS}; b.update(k); return b
-def w(p,h,rs):
-    with open(p,"w") as f:
-        f.write(tf.dumps(h)+"\n")
-        for r in rs: f.write(tf.dumps(r)+"\n")
+import sys; sys.path.insert(0, "verif/diff")
+import tempfile, subprocess, tracefmt as tf
 
-recs=[tf.func_record(i,0x8048000+3*i,0x202,gpr(eax=i),
-                     seg(cs=0x23,ss=0x2b,ds=0x2b,es=0x2b),bytes_="83c001")
-      for i in range(3)]
-w("/tmp/a.vtrace", tf.header("qemu-gdbstub","func"), recs)
-w("/tmp/c_same.vtrace", tf.header("rtl","func"), recs)
-div=[dict(r) for r in recs]; div[1]=dict(div[1]); div[1]["ecx"]=tf.h32(0xdead)
-w("/tmp/c_div.vtrace", tf.header("rtl","func"), div)
+gpr = {k: 0 for k in tf.GPR_KEYS}; gpr["eax"] = 1
+seg = {k: 0 for k in tf.SEG_KEYS}; seg.update(cs=0x23, ss=0x2b, ds=0x2b, es=0x2b)
+rec = tf.func_record(0, 0x08048000, 0x202, gpr, seg, bytes_="83c001")
+
+with tempfile.NamedTemporaryFile("w", suffix=".vtrace", delete=False) as fa, \
+     tempfile.NamedTemporaryFile("w", suffix=".vtrace", delete=False) as fc:
+    fa.write(tf.dumps(tf.header("qemu-gdbstub", "func")) + "\n" + tf.dumps(rec) + "\n")
+    fc.write(tf.dumps(tf.header("rtl", "func")) + "\n" + tf.dumps(rec) + "\n")
+    a_path, c_path = fa.name, fc.name
+
+rc = subprocess.call(["python3", "verif/diff/compare.py", "--mode", "func", a_path, c_path])
+assert rc == 0
 PY
-
-python3 compare.py --mode func /tmp/a.vtrace /tmp/c_same.vtrace ; echo "exit=$?"  # -> 0
-python3 compare.py --mode func /tmp/a.vtrace /tmp/c_div.vtrace  ; echo "exit=$?"  # -> 1, n=1 ecx
 ```
-
-The self-test matrix that was run to validate this component:
-
-1. func identical pair -> exit `0`.
-2. func single-field divergence at `n=1` (`ecx`) -> exit `1`, reports exactly
-   `n=1 field=ecx`.
-3. cycle identical pair -> exit `0`.
-4. cycle per-instruction cost divergence at `n=2` (tol 0) -> exit `1`.
-5. malformed (no header) -> exit `2`.
-6. mode mismatch (cycle file fed to `--mode func`) -> exit `2`.
-7. producer mismatch -> **warning only**, still exits on the data verdict.
-8. length mismatch (A=3, C=2) -> exit `1`, reported clearly.
-9. x87 header mismatch -> warns, compares common fields, exit per data.
-10. `IMUL` with a differing **undefined** ZF -> tolerated (exit `0`); the same
-    ZF difference under `ADD` (ZF **defined**) -> exit `1`. (capstone masking.)
-11. `--all` / `--max-report`, `--eflags-mask 0x0`, `--tol-pct` loose band — all
-    behave as specified.
-
----
-
-## Integration notes
-
-- **Import path.** `compare.py` inserts its own directory on `sys.path`, so it
-  imports the sibling `tracefmt.py` regardless of the caller's CWD. It can be
-  run from anywhere as `python3 verif/diff/compare.py …`.
-- **capstone is optional at runtime.** It is used purely for EFLAGS
-  undefined-flag masking via the `bytes` field. If it is missing the comparator
-  still runs and just uses the full EFLAGS mask (a stricter, never-wrong-but-
-  occasionally-noisy compare). capstone 5.0.7 is present in this environment.
-- **M0 expectation.** At M0 the RTL is a NOP stub, so `func` mode is *expected*
-  to report a divergence. The gate is that the comparator runs end-to-end and
-  reports a **coherent** first divergence (correct `n`/`field`, sensible
-  expected-vs-got) — see `docs/trace-format.md` §4. Real agreement begins at M1.
-- **Producers must align by `n` in retire order.** The comparator pairs records
-  positionally and cross-checks `n`; producers that drop/reorder/duplicate
-  records will be flagged (func: an `n` field divergence; cycle: a retire-order
-  note that forces a `1` verdict).

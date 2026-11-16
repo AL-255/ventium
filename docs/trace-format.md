@@ -1,7 +1,7 @@
 # Ventium trace format (v1) — the differential-testing contract
 
 This is the **central interface** of the verification stack (see
-[`../PLAN.md`](../PLAN.md) §4). Three producers and one consumer must agree on it:
+[`../README.md`](../README.md)). Three producers and one consumer must agree on it:
 
 - **Producer A — functional/architectural trace:** the QEMU **gdbstub** golden
   generator (`verif/qemu-trace/gen_trace.py`). QEMU 8.2.2's *plugin* API cannot

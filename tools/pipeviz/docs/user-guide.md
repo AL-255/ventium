@@ -1,0 +1,744 @@
+<!--
+Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+-->
+# Pipeline visualizer user guide
+
+Pipeviz is most useful when it answers a concrete performance question.  Load a
+program, run far enough to establish a pattern, then use the linked timeline,
+trace, analysis tabs, and register history to explain *why* it occurred.
+Press `F1` for the in-application indexed guide. Its focused **Assembly and
+source editing** and **C compiler workbench** topics keep the C→Assembly/U-V
+experiment separate from the longer shared editor reference.
+The guide sizes to the monitor's logical work area at high DPI; its topic index
+narrows with intentional right ellipses and full-title tooltips, while content
+wraps/scrolls instead of forcing the dialog off-screen.
+
+## Start a session
+
+From the repository root, build and launch with a supplied program:
+
+```sh
+tools/pipeviz/run.sh build/verify/mb_brloop.cycle.flat
+```
+
+The launcher uses `python3` by default. To use a particular environment:
+
+```sh
+PIPEVIZ_PYTHON="$HOME/miniconda3/bin/python" \
+  tools/pipeviz/run.sh build/verify/mb_brloop.cycle.flat
+```
+
+If PySide6 or Capstone is missing, the launcher prints the exact
+`pip install -r tools/pipeviz/requirements.txt` command before exiting and
+before spending time on a backend build.
+
+The launcher also rebuilds when the bridge/ctypes ABI, RTL sources, file
+lists/includes, or memory BFM is newer than the ignored backend. Run
+`tools/pipeviz/run.sh --check` for a non-mutating readiness report that names a
+stale input without building or opening the GUI.
+Add `--soc` to check both native variants. `run.sh --build --soc` builds the SoC
+variant and also launches the GUI in SoC mode; a missing SoC RTL file list is
+reported explicitly instead of treating an old library as ready.
+`run.sh --help` is also non-building: it checks Python imports, then prints
+usage without requiring a backend.
+
+`Open…` accepts raw `.flat`/`.bin`/`.img`/`.rom` images and little-endian
+32-bit x86 ELF files. Empty files and DOS/PE executables are rejected with a
+clear format error. For a raw
+image, set **entry**, **load**, and **esp** before Reset when its layout differs
+from the default.  ELF `PT_LOAD` addresses and its entry point are used
+automatically. Dropping a file on the window does the same thing. Successful
+program, example, and snapshot loads reveal the Visualizer even when they start
+from Assembly/C; source-file drops instead open their matching workbench. A
+failed load leaves the current workspace and live session intact. After its
+modal explanation closes, an eight-second red action summary retains the
+filename and reason; hover it for the full attempted path.
+Opening the example menu or beginning any program/snapshot load first pauses
+continuous Run, including failures that occur before Reset; pipeviz never
+auto-resumes behind a menu, chooser, or error dialog. Dropped source files also
+pause before any unsaved-source confirmation.
+A flat image may use a sibling `manifest.json`; its `entry` and `load_addr`
+accept either JSON integers or `0x…` strings. It can fully describe a
+repeatable launch:
+
+```json
+{
+  "entry": "0x00100000",
+  "load_addr": "0x00100000",
+  "esp": "0x001ff000",
+  "uv_issue": true,
+  "system": false,
+  "soc": false
+}
+```
+
+Mode values must be JSON booleans; `soc: true` implies system boot and cannot
+be combined with `system: false`. A malformed manifest is ignored as one unit,
+so a valid early field cannot leak out of a later error. A new program without
+`esp` starts from Pipeviz's default stack instead of inheriting the previous
+program's custom value. The program still loads from its own metadata, and an
+eight-second amber `manifest ignored` action retains the validation reason and
+manifest path after the modal warning closes. The `.bin` suffix alone never
+forces BIOS boot; set
+`system: true`, use `--system`, or toggle **system** explicitly.
+**Open snapshot…** accepts a matching host-testbench `.aux`/`.vlt` pair. The
+architectural clock remains absolute, but Trace retirement IDs, IPC, Pipeline,
+sparkline, and Cycles attribution begin a fresh visible epoch at the restore
+point because the checkpoint does not contain earlier visual history.
+Use the arrow beside the toolbar’s **Open…** split button, or
+**File → Open example**, to load an available verification workload without
+locating its build path. Clicking the main Open face still opens the normal
+file chooser; with the split button focused, Down or Alt+Down opens its example
+menu. Both example-menu routes rescan whenever they open, so an example built
+after pipeviz starts becomes available immediately. If an entry is disabled,
+hover it to see the exact repository build path(s) pipeviz expects. After
+recompiling the current program,
+**Ctrl+Shift+R** re-reads it from disk while preserving the displayed reset
+addresses and mode switches.
+Changing entry/load/ESP or a mode switch marks the control **Apply + Reset**;
+the running backend is unchanged until you apply it. If you change the setup
+back to the values already running, the amber warning clears without resetting.
+The Apply + Reset tooltip and last-action message list the exact pending
+fields/modes; system boot transitions omit disabled entry/load/ESP fields.
+Invalid addresses are
+highlighted and rejected instead of silently falling back to a default;
+reload also leaves the current session intact until its preserved setup
+validates. An invalid reload focuses and red-outlines the blocking field and
+retains an eight-second amber correction in the action row. Apply + Reset does
+the same, and a corrected reset replaces that stale warning with a neutral
+completion notice. ELF/system mismatch, oversized BIOS placement, and
+out-of-range segments likewise preserve the live session and retain an amber
+reason after their dialog closes. A backend-construction failure retains a red
+reason; if it happened while opening a replacement program, Pipeviz rolls the
+workload controls back without losing that explanation.
+System boot disables entry/load/ESP because the architectural reset vector,
+BIOS top-alignment, and firmware stack setup determine those values.
+If a requested SoC model is unavailable, Pipeviz warns and uses the core model.
+The checkbox changes only after that fallback is constructed; if both
+constructions fail, the old live session and its requested mode remain intact.
+The action row stays amber and says **using core model** after a successful
+fallback, or red if both models failed, so the active model is never implied
+only by a dismissed dialog.
+
+Use **Clock** (`.`) for an individual clock, **Insn** (`I` or Space) for the
+next retirement, and **Step N** for a useful analysis window. Insn feedback
+reports the actual clocks elapsed and the retirement/terminal/safety-limit stop
+reason separately. `F5` runs and
+pauses. Entering Assembly/C pauses continuous Run synchronously before its
+transport controls are hidden; returning to Visualizer does not resume without
+an explicit Run/F5. Opening a program/snapshot chooser or Help also pauses
+before obscuring live feedback, and cancel/close never auto-resumes. Choose an
+event class (any, mispredict, stall, I-fill, or page-walk). The selector reports
+the number of matching events in the captured window; unavailable arrows are
+disabled when that class is absent or the playhead is already at the
+corresponding edge. `[` and `]` jump among only those visible events and report
+an empty search without moving the playhead.
+The compact status row prioritizes cycle/state/EIP before performance and cache
+groups so the execution point survives narrow windows. Hover the status or
+last-action text for its complete untruncated message.
+Muted semantic text—including axes, source line numbers, zero/empty register
+values, and empty-state instructions—still meets normal-text contrast; color is
+never the only carrier for an error, warning, lane, or pinned-state meaning.
+The upper U/V/FP stage board is live: hover an occupied cell to see its lane and
+PC, then click it to highlight that in-flight instruction's linked Assembly
+line. From the keyboard, Tab to the blue-outlined board, use arrows or Home/End
+to choose an occupied lane, and press Enter. The Visualizer remains in
+place and the Assembly tab gains `L…`; use `Alt+A` to inspect the marked line.
+Double-click an occupied lane when you want to mark and open its Assembly line
+in one gesture.
+When the live PC is mapped, its hover text names the destination line before
+you click. Auto-generated wrapper/fall-through instructions instead say they
+have no editor source line and keep the normal inspection cursor.
+For an externally loaded ELF or flat image, the lane and PC remain available
+for inspection, but the board explicitly says that no authored Assembly source
+map is active instead of promising a source jump it cannot provide.
+That live mark describes the current clock only, so Clock, Insn, Step N, Run,
+and Apply + Reset clear it before the machine moves. The assembled address map
+stays active, and clicking the next live or retired instruction creates a fresh
+line mark.
+`[paired]` means U and V are issuing
+together now; `[blocked]` means a legal candidate is currently held by a
+hazard, and the grey `stall · …` cell names the held instruction (not
+necessarily the older instruction or memory request causing the hazard).
+Click a retired Trace row or timing cell to
+additionally pin the registers to that retirement; use Shift-click on a second
+timing row to measure the cycle distance. Trace-to-timing selection follows the
+retirement ID rather than only the cycle, so the exact U or V row remains
+selected when a pair commits together. `F1` lists all shortcuts.
+In a pinned register view, GPRs, EFLAGS, segment selectors, and x87 are the
+post-commit state. `PC*`, segment `base*`, and CR0/CR3/CR4 are starred because
+they are the pre-execution instruction/translation context used to find the
+linked bytes. Segment limits and CR2 read `n/a` because the retirement record
+does not capture them; hover a starred heading or value for the time-point
+explanation; the same explanation is exposed to assistive technology. Control
+/ mode shows the captured pre-execution USER/SYS, CPL, and
+SMM state rather than duplicating the pin banner. The page-independent strip
+above the register bank always says
+**LIVE** or **PINNED n=… · retire cyc=…**. Check it before interpreting values,
+especially in compact mode where the Segments page may not be open. Its compact
+**Segments + control** title stays readable; hover it for the
+selector/base/limit column order. Click the strip's
+**Unpin** button to return to the current live state and clear the cycle
+playhead without advancing the model. It also clears the selected Trace/timing
+row, dependency edges, PC-group shading, and Assembly line marker while keeping
+the source map ready for the next selection. A Mem-map-originated pin also
+clears its selected point and the clicked-byte Memory highlight; stepping also
+unpins automatically.
+
+In x87, `empty=xx` is a logical ST mask: bit *i*=1 means ST(*i*) is empty.
+Pinned values are labeled `logical` because the retirement record already
+rotates the physical stack by TOP; hover the header or an ST row for the exact
+interpretation. The current bridge records this snapshot on every retirement,
+including integer instructions. If a partial or older backend record lacks one,
+its pinned x87 page says `n/a` instead of preserving unrelated live or prior
+values. Unpin returns to the current live stack.
+
+The timing diagram itself is keyboard accessible: Up/Down selects adjacent
+retirements, Page Up/Page Down moves ten rows, and Home/End reaches the capture
+edges. `Ctrl+-` and `Ctrl+=` zoom the cycle axis around the selected cycle.
+In the retired Trace and analysis tables, arrow keys navigate content;
+`Tab` / `Shift+Tab` leave the table in one press rather than visiting every
+cell.
+Its mnemonic and producer/consumer analysis use the bytes captured with each
+retirement, not a later read through the current memory map. This keeps old rows
+faithful across self-modifying code and segment/page-table transitions.
+
+The register bank automatically changes from three simultaneous columns to
+indexed **Integer / Segments / x87** pages when the right pane becomes narrow.
+The LIVE/PINNED strip remains visible while switching pages, and the selected
+page survives a wide/compact transition. This keeps every value readable and
+its time point explicit at 1280×800. **View → Reset panel layout**
+(`Ctrl+0`) restores the recommended proportions after exploratory resizing.
+`Alt+1` through `Alt+0` jump directly among Code$, Data$, TLB, Prefetch,
+Hotspots, Branches, Mix, Cycles, Memory, and Mem map and focus the active
+table/control. They also return from Assembly/C to the Visualizer, so the
+shortcut never changes an invisible background tab. When all ten tab names do
+not fit, the scrolling tab strip becomes a complete **Alt+1 · Code$ … Alt+0 ·
+Mem map** selector; choosing an item or using its arrow keys selects the same
+view. Display-only Prefetch/Cycles pages focus whichever local navigator is
+visible. An empty Mem map likewise keeps focus on that navigator until a
+traversable access exists.
+Hover any Trace or analysis-table column header for its complete semantics,
+including units/denominators, cache address meaning, TLB `U/W/P` bit order,
+`big`/`D` flags, and histogram/bar normalization.
+The display-only Prefetch page exposes a single coherent description containing
+its fetch address, EIP, fetch word, all 16 bytes, and idle/decode interpretation;
+its component labels also have stable names.
+
+Trace filters are space-separated AND terms: free text plus exact-field
+`pc:08048`, retirement `n>=100` / `n<=200` / `n=150`, cycle
+`cyc>=133`, `pipe:U` / `pipe:V` / `pipe:FP`, `stall`, and `@` for memory
+accesses. The lane column and Pipeline gutter say **FP** for x87 execution
+instead of exposing its underlying U dispatch slot; hover an FP Trace cell to
+see that dispatch detail. U/V statistics continue to count physical issue
+slots, so this display label does not inflate or redefine dual-issue results.
+The gold `@…` value is the instruction’s effective offset—the same address
+domain used by the timing D-cache. Memory drill-down separately retains its
+segment-linear and translated physical address.
+Use `/` from anywhere, then Enter/F3, Shift+F3, and Escape to focus, traverse,
+and clear results. With the Pipeline diagram focused and the filter already
+empty, Escape instead returns a pinned retirement to LIVE without advancing.
+If you only inspected a filter, clearing it restores the
+newest live rows; if you selected a result, that historical context remains.
+Malformed structured terms (for example `n>200` or `pc:xyz`) turn red, explain
+the accepted syntax inline and in full on hover, and leave the trace visible
+while you correct them. Inline fixes distinguish comparison operators, lane
+names, non-negative values, field separators, and hexadecimal PCs; a valid
+free-text query with no hits still shows an ordinary zero-result
+state.
+The Trace table's description distinguishes no program, no retirement yet, and
+its current populated row count. Filter results likewise announce exact
+visible/total counts; structured syntax errors announce the correction while
+keeping every row visible.
+Hotspots and Branches rows activate with Enter as well as the mouse. They
+normally select the nearest matching Trace row. Because their analysis window
+is longer than Trace, an older-only PC falls back to its nearest retained
+Pipeline retirement and says so in the action row instead of silently doing
+nothing.
+Large steps remain bounded and honest: Trace labels its newest 6,000
+retirements, Pipeline labels its newest 50,000-cycle window, and the compact
+IPC strip retains the newest 12,000 cycles.
+The IPC strip is also a playhead scrubber and keyboard navigator: click or
+left-drag across it to seek continuously, or Tab to its blue outline and use
+Left/Right for one cycle, Page Up/Page Down for 64 cycles, or Home/End for the
+captured edges. Enter reopens its selected cycle in the Pipeline view. Seeking
+moves only the cycle playhead; it never guesses U or V from a dual-retire cycle
+or changes an exact Trace/Register retirement pin.
+The action line confirms that distinction: a cycle seek names its cycle and
+whether the retirement pin stayed unchanged, while an instruction selection
+reports the exact retirement, cycle, lane, PC, and linked Assembly line.
+A long architectural HLT tail is labeled **waiting for interrupt** while
+transport remains available; only backend quiescence changes it to **program
+stopped** and disables stepping. This keeps the strip consistent with Run
+instead of presenting a resumable wait as terminal.
+If Clock or Step N reaches that terminal state before consuming its requested
+count, the last-action line reports both the clocks actually advanced and
+**program stopped**, making the short step explicit.
+**Cycles** classifies every captured clock exactly once. **front end** combines
+fetch/decode, while **slow path** combines the integer execute, load/store,
+string, and I/O micro-operation states; neither label pretends `S_EXEC` is
+always a memory access.
+
+## Write and run an assembly experiment
+
+Select the **Assembly** workspace (`Alt+A`). The initial GNU Intel-syntax
+template is immediately runnable. Workspace shortcuts also place keyboard focus
+where it is useful: `Alt+A` in Assembly, `Alt+C` in C, and `Alt+V` on the
+Pipeline timing diagram.
+
+```asm
+.intel_syntax noprefix
+.section .text
+.global _start
+_start:
+    mov eax, 0
+    mov ecx, 10
+.sum:
+    add eax, ecx
+    dec ecx
+    jnz .sum
+    hlt
+```
+
+**Assemble** (`Ctrl+B`) checks and links the source; **Assemble + Run**
+(`Ctrl+Enter`) also loads the resulting ELF into the Visualizer. In C,
+`Ctrl+B` and `Ctrl+Enter` both perform **Compile → Assembly**. Diagnostics name and
+highlight the failing line. Their first line is an actionable jump: focus the
+diagnostic and press Enter, or double-click it, to return to that editor line.
+If assembly/linking succeeds but the new RTL session cannot load or reset, the
+Assembly status stays amber and distinguishes that partial success: the run did
+not start and the previous Visualizer session was preserved transactionally.
+Tool output uses compact `Assembly:` and `C source:` locations in place of the
+internal generated-file path while retaining the original line and column.
+Successful GCC/GNU-as warnings still emit runnable Assembly, but use an amber
+source mark and the same Enter/double-click jump rather than appearing as a
+clean green build. After a warning-producing C compile switches to Assembly,
+its amber status says to use `Alt+C` for the source diagnostic.
+`Ctrl+Space` opens completion over the complete
+Ventium/P54C mnemonic catalogue. Selecting an entry shows its operand form,
+description, mode/build availability, approximate latency, pairing class
+(`UV`, `PU`, `PV`, `NP`, `FP`, or `SYS`), and a miniature stage diagram.
+Common ALU and no-op descriptions name the selected operation itself rather
+than showing a family sentence about a different mnemonic. Conditional jumps
+and SETcc aliases spell out their exact CF/ZF/SF/OF/PF predicate; LOOP and
+JCXZ variants explain which counter and ZF state they test. x87 entries call
+out reverse arithmetic direction, pop count, integer conversion, the selected
+constant, stack/tag effect, and whether a control form includes WAIT. String
+and I/O-string entries identify element width and DS:SI/ES:DI/port direction,
+while flag and REP/LOCK prefixes name the exact state they change or test.
+Integer descriptions distinguish carry versus borrow, signed versus unsigned
+multiply/divide/extension, bit-test mutation, shift/rotate direction, and the
+exact register/flag stack order. System/control entries state load/store and
+near/far interrupt/return direction; x87 environment and transcendental entries
+state WAIT, save/restore, stack-pop, and mathematical operand direction.
+Ordinary `user` availability is neutral; system, build-flag, SMM, and
+co-simulation restrictions turn amber so the color signals a real constraint.
+The completion list does not repeat the mnemonic inside its operand form; the
+adjacent detail pane still shows the complete signature.
+The footer changes from `292 opcodes` to the live prefix-match count while
+keeping selection, insertion, pointer, and close controls visible.
+If a prefix has no supported Ventium/P54C opcode, the popup closes and the
+Assembly status names that token in amber. Continue editing freely; only
+**Assemble** creates a build diagnostic.
+With no opcode selected, the persistent sidebar uses one compact empty state
+and points to caret placement or `Ctrl+Space`.
+The empty Build diagnostics box also collapses to a shallow placeholder so the
+instruction description and pipeline preview receive the sidebar's space; it
+expands automatically when a build produces output.
+Use Up/Down or Page Up/Page Down to choose, Home/End for the first/last entry,
+Enter/Tab or a double-click to insert, and Escape to close; the popup keeps
+these controls visible at its foot.
+At a directive, comment, or operand it remains a reference-only catalogue, so
+accepting an entry cannot corrupt non-opcode text. In that reference mode,
+typing searches across mnemonics, operands, descriptions, lane classes,
+latencies, and availability without changing the editor; Backspace edits the
+query and Delete clears it. A zero-match query keeps the popup open with an
+explicit empty result instead of silently disappearing. Exact mnemonic matches
+rank first, then mnemonic prefixes and signature hits, before broader metadata
+matches.
+Clicking or scrolling the source editor dismisses completion so it cannot
+remain detached from the caret; scrolling inside the popup still browses its
+list. At edge carets the rich popup flips above and clamps within the Pipeviz
+window whenever it fits, falling back to monitor bounds only for an unusually
+small host window. If high-DPI screen coordinates are smaller than an already
+visible Pipeviz window, owner containment takes priority so the popup cannot
+drift outside the workbench.
+Accepted mnemonics preserve the token's existing convention: `AD` completes as
+`ADD`, `Ad` as `Add`, and lowercase source remains lowercase. This also works
+when completion replaces the remainder of a token after the cursor. Digit-bearing
+opcodes continue filtering as they are typed (for example, `cmpxchg8` narrows to
+`cmpxchg8b`); Backspace/Delete refresh the matches instead of closing the popup.
+`Ctrl+Shift+R` is disabled in Assembly/C because it re-reads an already-built
+program rather than compiling current editor text. Use **Assemble + Run** (or
+**Compile → Assembly**, then run) so edits and PC links stay coherent.
+GNU as semicolons separate statements, so completion and the instruction
+preview also follow a second opcode on the same source line. Statement scanning
+respects quoted data: a semicolon or `#`/`//` inside `.asciz "…"` is never
+mistaken for a separator or comment.
+Enter preserves the current indentation and advances one level after an
+assembly label or C opening brace. Typing a closing C brace on an otherwise
+blank indented line dedents one level first. Plain `Tab` indents source;
+`Ctrl+Tab` and `Ctrl+Shift+Tab` leave either editor without changing it.
+With lines selected, `Tab`/`Shift+Tab` indent or outdent the whole block as one
+undoable edit; a caret-only Tab inserts spaces to the next four-column stop.
+Backspace in leading whitespace returns to the previous stop in one edit.
+`Ctrl+/` toggles indentation-preserving `#` Assembly or `//` C comments across
+the current line or selected block as one undoable edit.
+`Home` toggles between the first non-whitespace column and column zero;
+`Shift+Home` extends the selection, while `Ctrl+Home` remains document-start.
+In Assembly/C, `Ctrl+-`/`Ctrl+=` scales source text and line numbers from
+8–24 pt, `Ctrl+wheel` uses the same bounds, and `Ctrl+0` restores 10 pt.
+Moving the caret immediately before or after `()`, `[]`, or `{}` highlights
+the structurally matching pair; an unmatched delimiter is marked red.
+Delimiters in quoted text and `#`, `//`, or `/* … */` comments are ignored.
+Clicking a gutter line number selects its complete line; dragging up/down or
+Shift-clicking another number extends a whole-line range ready for `Tab`,
+`Shift+Tab`, or `Ctrl+/`.
+In Visualizer, the zoom/reset keys retain Pipeline-axis zoom and panel-layout
+reset.
+A bare list of instructions is also accepted: pipeviz supplies Intel-syntax,
+`_start`, and a fall-through HLT boilerplate. A source that declares its own
+`_start:` remains exact.
+
+`Ctrl+N` creates the active language's runnable template, `Ctrl+O` opens
+Assembly source, `Ctrl+S` saves it, and `Ctrl+Shift+S` saves it under a new
+name. The visible **Save** button follows the same rule: it opens Save As for an
+unnamed source, then writes directly to that known path on later clicks; explicit
+Save As remains in File.
+The Assembly tab gains `*` while changes are unsaved. A persistent source badge
+at the lower right keeps the filename, built-in
+template, or C-compiler origin visible after transient build messages replace
+the status text; hover it for the full path, and `*` still marks edits. In the C
+workspace the same shortcuts open/save C, and its tab uses the
+same dirty marker. When the typed-file filter is selected, a bare Save As name
+receives `.s` or `.c` automatically. A successful save clears the dirty marker
+and reports the final on-disk filename in both the workbench and global action
+row. If a save or open/read fails, the old source text, identity, and dirty state
+remain unchanged while diagnostics, persistent status,
+tooltip/accessibility text, and the global action row all switch to a red
+`Save failed` or `Open failed` explanation. The footer keeps this to the
+filename and reason so a long path cannot crowd out the cursor and source
+identity; hover it or read diagnostics for the full path. Retrying the same source at a
+writable destination clears that obsolete red file-I/O diagnostic and reports
+the successful path; unrelated assembler/compiler warnings are not cleared
+merely by saving. Opening
+likewise identifies the real filename—an Assembly file is never
+mislabelled as compiler-generated—and clears any obsolete PC map before the
+new source can be linked. Visualizer restores Ctrl+O to opening executable programs.
+Dropping `.s`/`.S`/`.asm` or `.c`/`.h` routes the file to its source workspace;
+it is never mistaken for a raw executable.
+The adjacent one-based `Ln · Col` readout tracks the active caret independently
+of build/source status; when text is selected, an `nL` suffix confirms its line
+span. The full location and selection count are exposed to assistive
+technology. Click it or press `Ctrl+G` to enter a validated line number, center
+that line, and return typing focus to the editor.
+Each workbench remembers its most recent source folder for later Open/Save As
+dialogs, including after starting a new template.
+New/Open, generated C-to-Assembly replacement, and application close never
+silently discard a dirty editor: choose Save, Discard, or Cancel.
+Choosing Save and then canceling an unnamed source's Save As chooser is treated
+as cancellation, not an I/O failure. For New/Open/replacement, the global
+action row confirms that the source was kept without erasing the local build
+status or diagnostics. If close is canceled or a protective save
+fails while continuous execution was active, execution resumes but the global
+notice retains the close-canceled/blocked reason instead of reverting to a
+generic running message.
+The source badge visually elides long names but exposes the complete saved path
+or generated/template origin, not-saved state, and unsaved-change state through
+both its tooltip and accessible description.
+The adjacent Assembly/C status uses a visible right ellipsis for long build,
+stale-map, PC/line, or filename messages while retaining the full value in its
+tooltip and accessible description.
+The **Edit** menu appears between File and View and targets only the active
+Assembly or C workspace. It exposes Undo/Redo, Cut/Copy/Paste, Select All,
+Find, and Go to Line with their familiar shortcuts; every action is disabled
+in Visualizer so an editing command cannot mutate a hidden source buffer. While
+the inline Find field has focus, editing actions follow that query instead of
+the source buffer, matching direct keyboard behavior. Selected diagnostics
+similarly route Copy/Select All to their read-only text while Cut/Paste remain
+disabled.
+Both authoring command rows, editors, preview/diagnostics, and status areas are
+regression-rendered at 900×620—the window's practical minimum-size range—as
+well as the normal wide layout.
+The Visualizer is also regression-rendered there: its three toolbars remain
+overflow-free, the critical cycle/state/EIP status survives, the narrow
+analysis side exposes all ten destinations through its compact selector, the
+register side remains usable through its indexed pages, and Alt+1…Alt+0 still
+reaches views that are not currently painted.
+For longer generated files, `Ctrl+F` opens an inline search with highlighted
+matches and a current/total counter. Enter/F3 advances, Shift+Enter/Shift+F3
+moves backward, and Escape closes it. Click a line number to select that whole
+source line and return typing focus to the editor.
+Search is a case-insensitive literal match. Navigation stays unavailable for an
+empty query or no matches; the live current/total result is announced to
+assistive technology and caps highlighting at 2,000 matches for responsiveness.
+At that cap the grouped counter reads `2,000 / 2,000+`, with `+` making the
+truncation explicit.
+
+The assembler emits a DWARF line table. After running, click any occupied live
+U/V/FP stage cell, authored Trace row, or Pipeline timing row: the Assembly tab
+becomes **Assembly · L…** and that exact source line is highlighted. Live U and
+V issue slots and U/V retirements sharing a cycle retain separate line
+identities. Live-cell navigation does not require the instruction to have
+retired, and it does not steal focus from the Visualizer. Editing the source
+invalidates the old map until it is assembled again, so a stale build cannot
+highlight the wrong line. A terminal HLT remains visible and clickable after
+the run stops, which makes the experiment's exact stopping instruction clear.
+When the current built source has not been saved, both states remain visible as
+**Assembly * · L…** rather than one label hiding the other.
+The editor's accessible description announces the same lane, PC, and source
+line. It also announces build-error and build-warning line marks; obsolete
+context clears when the source changes or execution advances.
+Instructions synthesized outside the editor, such as a bare snippet's
+fall-through HLT, explicitly clear the prior line marker instead of leaving a
+stale source association. When the selected retirement came from U or V, the
+Assembly-side status retains that lane identity; inspecting the source never
+turns a same-cycle pair into an ambiguous generic retirement. Retired x87
+instructions say `FP-lane` rather than leaking the integer dispatch slot into
+the source context.
+
+GNU `as`, `ld`, and `objdump` must be available in `PATH`. Generated source,
+object, and ELF files stay in `tools/pipeviz/.generated/`, which Git ignores.
+
+## Compile C into editable assembly
+
+Select **C** (`Alt+C`) and write a freestanding `int main(void)`. Standard
+library calls and hosted headers are intentionally unavailable; the point is a
+small, inspectable microarchitecture experiment. Choose `-O0`, `-O1`, `-O2`,
+or `-Os`, then press **Compile → Assembly** (`Ctrl+B` or `Ctrl+Enter`). Pipeviz
+invokes:
+
+- GCC's 32-bit Pentium target;
+- Intel assembly syntax with SSE/MMX excluded by the P5 target;
+- GNU C11, freestanding, non-PIE, stack-protector-free code;
+- no builtin calls or loop-to-`memset` substitutions, so generated snippets
+  remain self-contained;
+- line-linked errors for implicit function calls rather than deferred link
+  failures, including fatal errors such as a missing header; and
+- a tiny `_start` wrapper that calls `main` and halts.
+
+Hover an optimization entry for its intent: `-O0` gives the most direct,
+source-like output, `-O1` applies basic optimization, `-O2` is the
+performance-oriented default recommended for U/V scheduling experiments, and
+`-Os` favors compact code. The selected entry exposes the same explanation to
+assistive technology. Changing it after a compile marks that result stale and
+asks for a fresh compile.
+
+The generated source opens in Assembly rather than running immediately. This
+lets you compare optimization levels, edit scheduling or register choices,
+inspect completion previews, and only then assemble and run it. Compiler errors
+remain in C and highlight their responsible line; assembler errors remain in
+Assembly. Press Enter on the focused diagnostic, or double-click it, to jump
+to the marked C/Assembly line. The empty C diagnostics affordance stays shallow
+to maximize editor height, expands for a warning or error, and collapses again
+when an edit clears the stale result.
+If dirty Assembly blocks replacement, choosing Cancel keeps both buffers and
+reports cancellation. Choosing Save when that protective save fails also keeps
+both buffers, but C and the global notice explicitly say the Assembly save
+failed while the hidden Assembly workbench retains the full red I/O diagnostic.
+Long paths and GCC messages wrap at the
+pane edge; internal generated paths are shortened to `Assembly:` or
+`C source:` before display. Vertical scrolling remains available, with no hidden
+horizontal-scroll requirement. Empty and warning states use Compiler
+terminology in C, distinct from Assembly's Build diagnostics. Build/compiler diagnostics
+belong to the exact source revision that produced them: editing either source
+clears the prior result, and changing C's optimization level clears the old
+compiler result and prompts you to compile again.
+
+The C toolbar's **New U/V demo** is itself a reproducible demonstration. It advances
+two independent Fibonacci recurrences for a runtime-loaded 120 iterations;
+`volatile` input and result storage prevent `-O2` from replacing the work with
+constants. Its first two comments preserve the same-ELF procedure and expected
+EAX inside any saved copy. Compile it at `-O2`, assemble and run it, then return
+to Visualizer:
+
+1. Leave **U/V issue** enabled, apply/reset, and run to HLT. Adjacent independent
+   adds and moves retire through both U and V.
+2. Untick **U/V issue**, apply/reset, and run the exact same ELF again. Every
+   retirement now uses U.
+3. Compare the `cyc`, `ret`, IPC, and `pair%` fields. Both runs must return EAX
+   `0x198c09a0`; only their scheduling and timing may differ.
+
+The authoring regression observed 1,759 clocks with U/V versus 2,233 clocks
+without it (26.9% more clocks in single-issue mode), with 483 V-pipe
+retirements. It enforces identical results, more than 400 V retirements, and a
+minimum 20% cycle advantage so future compiler or RTL changes cannot silently
+turn the template into a decorative example.
+
+Run the dedicated regression for the entire authoring path:
+
+```sh
+QT_QPA_PLATFORM=offscreen ~/miniconda3/bin/python \
+  tools/pipeviz/verify_authoring.py
+```
+
+It verifies the 292-mnemonic catalogue against every current RTL decoder family
+and all 121 exact 32-bit mnemonics named by the P5 timing classifier,
+syntax highlighting, opcode-scoped completion and its description/pipeline
+preview, compact layout, transactional load failure, build errors, ELF/DWARF
+mapping, exact live and retired U/V source identity, a hand-written assembly result, and
+C → assembly → RTL execution including the dual-Fibonacci U/V performance
+contract. It also compiles an array loop without hidden
+library calls and runs floating-point C through generated x87 assembly on the
+RTL, verifying EAX = 3 and exact assembly-line navigation.
+
+## Worked examples
+
+All commands below are run from the repository root.  The supplied fixture
+examples are checked by `tools/pipeviz/verify_examples.py`; the compiled
+dual-Fibonacci comparison and GUI interactions are checked by
+`tools/pipeviz/verify_interactions.py`.
+
+### 1. U–V advantage with dual Fibonacci
+
+`examples/fibonacci_uv.c` is a freestanding C program containing two independent
+Fibonacci recurrences. Build it and open the resulting ELF:
+
+```sh
+gcc -m32 -march=pentium -O2 -ffreestanding -fno-pic -fno-pie \
+  -fno-stack-protector -nostdlib -static -Wl,--build-id=none \
+  -Wl,-Ttext=0x08048000 -Wl,-e,_start -DDUAL=1 \
+  -o "${TMPDIR:-/home/yukidama/external/tmp}/fibonacci_dual.elf" tools/pipeviz/examples/fibonacci_uv.c
+tools/pipeviz/run.sh "${TMPDIR:-/home/yukidama/external/tmp}/fibonacci_dual.elf"
+```
+
+First untick **U/V issue**, apply/reset, and advance 600 clocks: every retirement
+is in the U lane. Then tick **U/V issue**, apply/reset, and advance the same
+amount: the Trace and timing diagram show adjacent arithmetic in U/V pairs. Continue each run to
+completion to compare the status line. In the July 29 acceptance run, the same
+two-chain result took 2,451 clocks at 0.461 IPC without U–V issue and 1,984
+clocks at 0.571 IPC with it; 85.3% of the instructions were paired. The
+interactive regression verifies both the computed Fibonacci values and a
+minimum 20% IPC advantage:
+
+```sh
+QT_QPA_PLATFORM=offscreen ~/miniconda3/bin/python \
+  tools/pipeviz/verify_interactions.py
+```
+
+### 2. Dual issue and branch recovery
+
+```sh
+tools/pipeviz/run.sh build/verify/mb_brloop.cycle.flat
+```
+
+Step **120 clocks**.  In the status row, look for a high `pair%` and nonzero
+`mispred`.  The U/V rows in the timing view form a dense diagonal.  Select a
+`jne` row near the bottom: the dependency overlay highlights the EFLAGS
+producer, while same-PC highlighting makes repeated loop iterations obvious.
+Open **Branches** to compare the branch’s resolved taken rate and bias with the
+mispredict event markers in the sparkline. A branch at the capture tail has no
+next retired PC yet, so it remains a hit but is excluded from the taken-rate
+denominator. The self-defining **taken/resolved**, **taken %**, and ten-slot
+**bias bar** columns expose that distinction directly. Shift-click two loop
+iterations to measure the steady-state iteration cost.
+
+This is the fastest way to distinguish a branch-limited loop from one that is
+simply not finding V-pipe pairings.
+
+### 3. D-cache pressure, latency, and address stride
+
+```sh
+tools/pipeviz/run.sh build/verify/mb_dmiss.cycle.flat
+```
+
+Step **160 clocks**, then jump among events with `]`.  Select a long-latency
+load in the timing view: its stretched stall cells and the amber dependency
+edge show which consumer was held back.  In **Data$**, inspect the resident
+lines and replayed miss-rate. The bracketed origin says whether replay
+started `[empty]` or was `[seed N]` from the resident tags and MRU order of a
+restored snapshot; hover it for hit/cold/conflict totals. This prevents the
+visualization boundary from looking like a cold cache. Code$/Data$ occupancy
+maps expose their resident count and exact set/way/MRU geometry textually as
+well as visually. Hover any map cell for its exact set, way, residency/MRU,
+tag, and line address; a resident cell highlights and centers the corresponding
+table row until the pointer leaves. The **Cycles** chart likewise announces every non-empty
+category's clock count and percentage, total retirement, and IPC. In
+all analysis tables, a painted empty-state explanation is also exposed
+textually and is replaced with the current row count when data appears. In
+**Memory**, choose
+`→ access` to follow the most recent load/store
+and see its physical bytes outlined in gold. Pipeviz resolves the retired
+instruction’s effective offset through its pre-execution segment base and
+legacy 4 KiB/4 MiB page tables; `→ EIP` and `→ ESP` do the same for the live
+state. Page Up/Page Down (or the adjacent arrows) moves the inspector by 256
+physical bytes and leaves follow mode. Those navigators remain disabled until
+a program is loaded. The custom-painted dump also exposes its visible physical
+range, every hex/ASCII row, and any EIP/ESP/access marker as a textual
+description for assistive technology. **Mem map** deliberately keeps the effective offset—the address used by
+the timing D-cache—so this workload’s stride appears as a diagonal scatter;
+click an outlier, or focus the plot and use arrows, Page Up/Page Down, Home, or
+End, to jump directly to its trace row, pinned architectural state, and
+translated physical bytes. Enter/Space reopens the selected point. An
+untranslated point clears any prior physical-byte highlight rather than
+leaving a stale one. These captured/replayed points cover explicit
+Capstone memory operands; implicit stack and repeated-string traffic remains
+visible in cycle timing but is not claimed in the scatter or replay rate.
+
+Use **Hotspots** after this drill-down to identify where latency accumulates,
+rather than merely observing that the global IPC fell. **Σ lat** is the sum of
+fetch-to-retire latency for every dynamic instruction at that PC. A held
+instruction can be waiting on an older operation, so compare it with **D$
+miss/access**, which identifies the memory PC that generated replayed misses. In-flight
+instructions overlap, so the instruction-cycle sum can be larger than the
+retired-lifecycle span printed beside it; **share** compares PCs within that
+summed latency, not against wall time. The header also shows that retired span
+against the full captured cycle window, so an in-flight tail is explicit rather
+than silently attributed to the last retirement. The separate **Σlat bar** is
+normalized to the largest visible Σ-latency PC; it is not a
+D-cache miss-cost bar.
+
+### 4. x87 throughput and architectural results
+
+```sh
+tools/pipeviz/run.sh build/verify/mb_fpindep.cycle.flat
+```
+
+Step **420 clocks**.  The FP lane on the stage board, purple timing cells, and
+**FP** labels in the Trace and Pipeline gutter show when x87 work overlaps
+integer issue. Filter with `pipe:FP`, then click an FP retirement near the end
+of the trace. The lane tooltip notes that x87 dispatches through U while the
+display consistently describes where it executes. The Registers panel becomes
+pinned and displays that
+instruction’s post-commit x87 stack, control word, status word, tags, and the
+80-bit representation of ST values.  Compare its cycle with adjacent integer
+rows in the timeline to see whether the FP pipe is the limiting resource or is
+overlapping successfully.
+
+### 5. System boot, translation, and cache warm-up
+
+```sh
+tools/pipeviz/run.sh verif/sys/tests/ppage/ppage.bin
+```
+
+Pipeviz automatically selects **system** mode for this BIOS-style image.  Step
+**1200 clocks**—the early setup code has not enabled paging yet at 240 clocks.
+Watch the status row for fill/walk activity, then inspect the **TLB** tab and
+the Code$/Data$ occupancy heatmaps.  The trace uses the live
+16/32-bit code-segment mode for disassembly, so it remains readable while the
+boot code changes execution mode.  Use the **Cycles** tab to separate page
+walk or fill time from ordinary issue/retirement time.
+
+## Reproducible verification
+
+Run the guide’s offscreen checks with the requested Python environment:
+
+```sh
+QT_QPA_PLATFORM=offscreen ~/miniconda3/bin/python \
+  tools/pipeviz/verify_examples.py
+```
+
+The script loads each example through the real GUI, advances its documented
+clock budget, and asserts that the trace/timing data and the expected cache or
+memory evidence are present.  It writes no repository artifacts.  For a broad
+visual regression sweep (including all analysis tabs and PNG captures), run:
+
+```sh
+QT_QPA_PLATFORM=offscreen ~/miniconda3/bin/python \
+  tools/pipeviz/gen_review_shots.py "${TMPDIR:-/home/yukidama/external/tmp}/pipeviz_review"
+```
+
+The optional `test386` workload needs a current `libventium_viz_soc.so` built
+with `tools/pipeviz/build.sh --soc`.  The visual sweep reports and safely skips
+an old incompatible SoC library instead of crashing the GUI process.

@@ -1,5 +1,7 @@
 # M2S.2 — paging + TLBs + MMU
 
+> **Current Status (Nov 2026 — COMPLETED & UPGRADED):** 2-level hardware page walking (`core_walk.svh`), `CR0.PG`/`CR0.WP`/`CR3`/`CR4.PSE` (4 KiB & 4 MiB pages), `INVLPG`, `#PF` IDT delivery, **32-entry 4-way I-TLB + 64-entry 4-way D-TLB** (`rtl/mem/tlb_assoc.sv`), and registered front-end page filters (`VEN_FE_PIPE`) are implemented and board-qualified in RK-XCZU15EG-F image **`c0e3fe43`** (`0.515778001` total U+V Quake gameplay IPC). See [`cache-tlb-structural-spec.md`](cache-tlb-structural-spec.md).
+
 Second system-mode RTL stage, building on M2S.1 (real mode + protected-mode
 segmentation). Adds the **2-level paging MMU** so linear→physical translation
 works, gated against the `qemu-system-i386` golden. The gate is largely already

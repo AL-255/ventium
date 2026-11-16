@@ -2,100 +2,52 @@
 Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
 SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
 -->
-# RTL Coverage Campaign — Session Report
+# RTL Structural Coverage Campaign (`verif/cov/`)
 
-A focused campaign to raise Verilator **toggle** coverage of the Ventium P54C core
-and its standalone modules, by driving each module's datapaths with input diversity
-**matched to the module's actual geometry** (cache set/way/tag, descriptor fields,
-register widths, AXI burst/straddle structure), as pure stimulus (no value checks
-that would fail gates). Every change is verified `EQUIVALENT` vs qemu-system-i386 (or
-its module gate's self-check) before commit; the user's in-progress RTL is untouched.
+Historical baseline record of the Verilator line and toggle coverage campaign on the Ventium P5/P54C core and standalone memory/bus/FPU testbenches (`make coverage-all`). Every stimulus addition was verified `EQUIVALENT` against the pinned QEMU Pentium oracle (or its standalone module self-check) without modifying in-progress RTL or weakening comparator masks.
 
-## Headline result (REPRODUCIBLE — re-derived by `run-all-cov.sh`)
-- **Combined-core toggle: 70.58% → 77.54% (+6.96 points)**, line 89.28→89.85%.
-- **12 standalone-TB RTL modules** lifted from 14–69% to 60–100% toggle (reproduce via their own gates).
-- **2 new standalone TBs authored** for previously TB-less core-internal modules.
-- **~96 commits**, all gates green / differentials EQUIVALENT.
+> **Scope Note (Nov 2026):** Structural coverage complements — and never replaces — differential correctness (`make verify`, `make verify-sys`, `make l1`, `make bus bus-sva`, `make lint`) and the physical standard suite on `main` (`c0e3fe43`: CoreMark `2.100128 / 2.106796 CM/MHz`, cold Win95 OSR2 GUI + shutdown, cold DOS Quake `demo1` `8.0 FPS` at **`0.515778001` total U+V / `0.397847833` primary/U gameplay IPC** across cycles `28,696,827,616–32,989,404,795`).
 
-### Reproducibility audit + correction (important)
-An earlier in-session figure of **77.46% (+6.88)** was reached by *ad-hoc folding* mode/FP
-dats at full sweep length / on a custom FP_PIPE build. A clean `run-all-cov.sh` first
-re-derived only **74.08%** — the standard harness wasn't capturing the full sweeps. Two
-root causes, one now FIXED:
-- ✅ **FIXED — run-modes truncated long sweeps at `--max-insn 120`.** My mode sweeps run
-  hundreds of insns; only their first ~120 reproduced (seg_base 328→113, creg4 12→1).
-  qemu stops on out-0xf4 so golden/RTL lengths still match at the natural exit — each long
-  sweep verified EQUIVALENT at 4000. Patched run-modes to a **per-test budget** (4000 for
-  pm32_segbase/sysregs/intsweep/paging4k, 120 for the rest). Recovers seg_base→328,
-  creg4→12, dr0→46, idt_base, tr_base, int_gate_off → **+0.86% combined (74.08→74.94%)**.
-- ✅ **FIXED — run-transc/run-flags use the cov-feat build (no `VEN_FP_PIPE`)**, so FPATAN
-  took the non-pipe path → `fpu_fpatan` reproduced at 42.6% and `fpp2_s1` (split-pipe) was
-  dark. Added **`run-fppipe-cov.sh`** (LANE 11): builds the `+VEN_FP_PIPE/+VEN_FP_PIPE2`
-  (no FPTRAP) variant and runs the transc + fparith sweeps on it; wired into run-all-cov
-  with its dats folded. fpu_fpatan 42.6→**77.4%** → **+2.60% combined (74.94→77.54%)**.
+## Reproducible Baseline (`run-all-cov.sh`)
 
-Lesson: an over-claim (77.46%) was caught by re-running the clean suite, traced to two
-harness gaps, and BOTH FIXED (per-test max-insn + the FP_PIPE lane). The reproducible
-number is now **77.54% (+6.96)** — and durable: a clean `run-all-cov.sh` reproduces it.
+- **Combined-core toggle coverage:** `70.58%` → **`77.54%`** (`+6.96` pp); **line coverage:** `89.28%` → **`89.85%`** (`~92.0%` on default `rtl/core`).
+- **12 standalone-TB RTL modules** raised from `14–69%` to **`60–100%` toggle** via geometry-matched sweeps.
+- **2 dedicated unit testbenches added** (`tb_tlb`, `tb_btb`) for core-internal arrays.
 
-## Per-area wins
-| Area | Result | Method |
-|---|---|---|
-| ven_l1d | 30.7→92.7% | walking-data set/way/tag + fill/invalidate/snoop sweep |
-| biu_p5 | 63.3→93.0% | pipelined/BOFF/snoop-model sweep |
-| ven_l2 | 63.6→86.7% | buffer + cross-line straddle (second-line write path) |
-| ven_axi_master | 36.9→68.9% | dirty-evict burst + misaligned-NC straddle (beat B) |
-| ven_cachemap | 36.5→87.5% | 430FX config-bit (PAM/TOM/SMRAM/DRAMC) diversity |
-| ven_hostbridge_cfg | 19.9→90.4% | PCI config-write sweep |
-| icache | 14.5→75.6% | full fill+read+touch+snoop breadth |
-| ven_i8237_dma / ven_northbridge / ventium_l1_axi | +33–42% | diverse DMA transfers + core traffic |
-| ven_axi_cdc / ven_cdc_afifo | 68.9→86.1 / 86.6→96.8% | walking addr/data across clock ratios |
-| **tlb.sv** (NEW tb_tlb) | 47→91.8% | fill/lookup/flush, walking vpn/pfn/perm |
-| **bpred_btb.sv** (NEW tb_btb) | 55→75.2% | rich-tag alloc + counter saturation both ways |
-| fpu_fpatan | 42.6→77.4% | dense atan2(y,x) sweep (CORDIC + ROM) |
-| core.sv datapaths | tsw_gpr 43→506, seg_base 76→328, fpp2_s1 358→404, +CR3/CR4/IDT/GDT/DR/TR/seg_sel/IRET | system-register / descriptor / debug / task / interrupt sweeps |
+### Harness Fixes Required for Clean Reproducibility
 
-New mode streams added to `verif/cov/opgen/gen_modes.py`: pm32_segbase, pm32_sysregs
-(CR3/CR4/LIDT/LGDT/MOV-DR0-7), pm32_segsel, pm32_ltr, pm32_intsweep.
+1. **Per-test `--max-insn` budgets in `verif/cov/opgen/run-modes.sh`:** Long protected-mode sweeps (`pm32_segbase`, `pm32_sysregs`, `pm32_intsweep`, `pm32_paging4k`) previously truncated at `--max-insn 120`; raising their budget to `4000` (with natural `out 0xf4` exit parity) recovered `+0.86%` combined core toggle (`74.08%` → `74.94%`).
+2. **Dedicated `FP_PIPE` lane (`verif/cov/run-fppipe-cov.sh`):** `cov-feat` omitted `+VEN_FP_PIPE`, leaving split-pipe registers (`fpp2_s1`) and pipelined `fpu_fpatan` paths dark (`42.6%` → `77.4%`, adding `+2.60%` combined toggle to `77.54%`).
 
-## ⚠ Core/qemu divergence findings (for the core owner — NOT coverage bugs)
-These surfaced while extending tests into less-common paths; each is a genuine
-core-vs-qemu behavioural mismatch (left unapplied to keep gates EQUIVALENT):
+## Per-Module Coverage Gains
 
-1. **Task-switch CR3 reload under PG=0.** On a JMP task switch with paging off, the
-   core loads `TSS.CR3` into CR3 unconditionally; qemu keeps CR3=0 (skips the reload
-   when CR0.PG=0). Reproduce: set a diverse `TSS.CR3` in `verif/sys/tests/ptask` →
-   diverges at the switch (`field=cr3`).
-2. **Repeated #PF restart PC drift.** A single #PF restart is EQUIVALENT, but after
-   ~30 fault/restart cycles the core's restarted-instruction PC trace drifts from
-   qemu by one instruction. Reproduce: a CR2-generic handler + diverse-address #PF
-   sweep on `verif/sys/tests/pfault`.
-3. **Iterative BCD/FBLD + FPATAN-FPTRAP engine stalls.** In the feature build with
-   `VEN_BCD_ITER`/`VEN_FPTRAP` but no PS proxy, FBLD enters `S_FBLD_BUSY` and never
-   completes (quiescent); under `--cosim` the PS bypasses the in-RTL engine, so
-   `eng_bcd_result`/`eng_fbld_result`/`fptrap_result` stay 0 in all configs.
+| Subsystem / Module | Toggle % | Stimulus Strategy |
+| --- | --- | --- |
+| `ven_l1d` | `30.7% → 92.7%` | Walking-data set/way/tag + fill/invalidate/snoop sweep (`tb_cov_l1d_sweep.sv`) |
+| `biu_p5` | `63.3% → 93.0%` | Pipelined ADS/NA, `BOFF#`, and snoop-writeback sweep |
+| `ven_l2` (legacy standalone) | `63.6% → 86.7%` | Buffer + cross-line straddle second-line write path |
+| `ven_axi_master` | `36.9% → 68.9%` | Dirty-eviction bursts + misaligned non-cacheable straddles |
+| `ven_cachemap` | `36.5% → 87.5%` | 430FX PAM/TOM/SMRAM/DRAMC region-attribute diversity |
+| `ven_hostbridge_cfg` | `19.9% → 90.4%` | PCI configuration-space write sweep |
+| `icache` | `14.5% → 75.6%` | Full fill, read, touch, and physical-tag snoop breadth |
+| `ven_axi_cdc` / `ven_cdc_afifo` | `68.9% → 86.1%` / `86.6% → 96.8%` | Walking address/data patterns across asynchronous clock ratios |
+| `tlb.sv` (`tb_tlb`) | `47.0% → 91.8%` | Fill/lookup/flush with walking VPN, PFN, and permission bits |
+| `bpred_btb.sv` (`tb_btb`) | `55.0% → 75.2%` | Diverse tag allocation + 2-bit bimodal counter saturation both ways |
+| `fpu_fpatan` | `42.6% → 77.4%` | Dense `atan2(y, x)` octant/CORDIC/ROM sweep under `FP_PIPE` |
+| `core.sv` system datapaths | `+6.96` pp core | `pm32_segbase`, `pm32_sysregs` (`CR3`/`CR4`/`LGDT`/`LIDT`/`DR0–DR7`), `pm32_segsel`, `pm32_ltr`, `pm32_intsweep` |
 
-## Structurally unreachable residual (measured, not assumed)
-- **No runtime-flush valid bits** (dc_val, btb_val, ic_val_o 1→0): reset-only clear.
-- **Perf-counter / TSC high bits**: need 2^N events.
-- **Code-segment-constant high bits** of FIP / gate offsets / EIP, reserved EFLAGS/DRn bits.
-- **async SMM** (`rsm_*`): SMI-entry save-state timing not deterministically capturable.
-- **SoC/cosim ports** (cosim_en, soc_en, io_*, intr/nmi, syscall_*): feature/SoC-lane (active WIP).
+## Historical Findings & Subsequent Disposition
 
-## Reusable methodology
-1. Survey: merge all dats, list per-module/per-signal untoggled clusters.
-2. For each cluster, identify the RTL mechanism that writes it (array fill, register
-   load, descriptor field, datapath beat).
-3. Drive it with diversity matched to that mechanism (walking bits, both directions,
-   boundary-crossing, valid-but-diverse descriptors).
-4. **Build and measure** — never assume "exhausted" or "divergent"; verify. This
-   repeatedly converted false-negatives (tsw_gpr, seg_base, fpu_fpatan, debug regs)
-   into real wins, and caught duds (diverse-CR3, repeated-#PF) before commit.
-5. Yield bottoms out when the survey's remaining clusters are all structural — at
-   which point further "wins" are churn that dilutes the suite.
+1. **Task-switch `CR3` reload under `CR0.PG=0`:** Surfaced an oracle difference where QEMU softmmu skips `TSS.CR3` reload when paging is disabled while RTL loads `TSS.CR3`; tracked across `ptask` / `ptaskpg`.
+2. **Page-fault restart & cross-page fragment precision:** Addressed in the dedicated fragment-engine and fetch-boundary suites (`pxfrag`, `pxc04*`, `pfetchpc`, `pfetchbound`, `pv86movrestart`).
+3. **Iterative `BCD`/`FBLD` & shared x87 FPU coverage:** In the deployed hardware architecture (`VEN_FP_SHARED`), `fp_shared/ven_fp_top.sv` (`u_fp_shared`) owns `FBLD`/`FBSTP`, `FRNDINT`, `FPREM`/`FPREM1`, `fpu_srt_div`, and polynomial transcendentals (`ven_fp_trans`), verified by `make verify-bcd`, `make verify-fbld`, `fp_shared/tb/`, `verif/fppipe/`, and `verif/srt/`.
 
-## State at report time
-The cleanly-reachable, coverage-only frontier is exhausted (verified via both the
-toggle-yield trajectory +180→+10 and a line-coverage cross-check showing the same
-structural signals). Further coverage requires a **core change** (the 3 findings) or
-is structurally unreachable. The 30-minute cron `907917fe` continues the cadence.
+## Structurally Unreachable Residual in Plain `ventium_top`
+
+- Reset-only valid clears without runtime invalidation (`btb_val` 1→0 outside reset), high TSC/PMU counter bits (`2^N` cycles), constant high code-segment/EIP bits in small flat binaries, reserved architectural `EFLAGS`/`DRn` bits, and compile-time mutually exclusive `ifdef VEN_*` arms.
+
+## Methodology
+
+1. Merge per-lane `.dat` files (`run-all-cov.sh`) and rank untoggled signal clusters with `cov_summary.py` and `uncovered.py`.
+2. Match stimulus geometry to the RTL storage/datapath (walking bit patterns, set/way/bank indices, cross-line/cross-page boundaries, valid descriptor diversity).
+3. Verify every added test `EQUIVALENT` against the pinned QEMU Pentium oracle (or SDM witness gate) before keeping it.

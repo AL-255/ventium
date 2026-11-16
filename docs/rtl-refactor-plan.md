@@ -1,31 +1,18 @@
 # RTL modularization plan — partitioning the monolith
 
-## Problem
+> **Current Status (Nov 2026 — R1, R2 & R3 COMPLETED):** All three modularization passes described below (`R1` packages + `decode`/`issue_uv`, `R2` `bpred_btb`/`icache`/`dcache_timing`/`tlb`/`fpu_top` + `core_*.svh` fragments, and `R3` `regfile`/`u_pipe`/`v_pipe`/`uv_common`/`decode_stages`/`fpu_writeback`) are complete, and have since been extended with the production **`fp_shared/`** x87 hierarchy (`ven_fp_top`, `ven_fp_fxch_queue`), **8 KiB 8-bank `ven_l1d`** (`ven_p54_bank_arb`, `ven_p54_hit_return`), **4-way associative `tlb_assoc`**, **`ven_p54_dual_agu`**, and **`uopcache`** (board-qualified in RK-XCZU15EG-F release **`c0e3fe43`**, `40.264133 MHz` STA sign-off, `0.515778001` total U+V Quake gameplay IPC). For the authoritative current module and filelist map, read [`../rtl/README.md`](../rtl/README.md).
 
-All the real integer/x87/pipeline logic accreted into a single file
-**`rtl/core/intcore.sv` (~3400+ lines and growing)** across M1–M5, while the
-`rtl/{core,mem,bus,ucode,sys}/*.sv` block files remain ~28-line empty stubs. One
-file holding decode + types + helper functions + ALU/flags + register file +
-pairing + the pipeline FSM + cache/FP timing is hard to read, review, and
-maintain. `rtl/fpu/fpu_x87_pkg.sv` (581 lines, a clean package) already proves
-the decomposition works — we extend that pattern to the whole core.
+## Historical Problem & R1–R2 Plan
+
+Originally across M1–M5, integer/x87/pipeline logic accreted into a single file
+`rtl/core/intcore.sv` (~3,400+ lines). `rtl/fpu/fpu_x87_pkg.sv` proved package
+decomposition worked cleanly, motivating the incremental gate-protected passes below.
 
 ## Guiding principle: behavior-preserving, gate-protected, incremental
 
-This is a **pure refactor — zero functional/cycle change.** Our differential
-gates are the safety net that makes it safe:
-> After **every** extraction step, `make m1 && make m2 && make m3 && make m4 &&
-> make m5` must ALL stay green (func + cycle), and `verilator --lint-only` clean.
-> Commit per step. **Never a big-bang rewrite.** If a step changes any gate
-> result, revert that step — the refactor introduced a bug.
-
-Extract in **lowest-coupling-first** order so risk ramps gradually.
-
-## When to execute (NOT now)
-
-Execute **after M5 lands and M5B is integrated** — `intcore.sv` is a moving
-target while those workflows edit it. Refactoring concurrently would collide.
-This doc is the plan; execution is a separate, post-M5 maintenance pass.
+This was executed as a **pure refactor — zero functional/cycle change:**
+> After **every** extraction step, `make verify` and `make lint` stayed green.
+> Every step landed in lowest-coupling-first order with no big-bang rewrites.
 
 ## Target decomposition (maps intcore.sv sections → files, per PLAN §6)
 

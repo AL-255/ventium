@@ -1,6 +1,8 @@
 # M1 — single-issue in-order integer core spec
 
-The M1 milestone (PLAN §7) replaces the M0 NOP stub with a **real** integer core
+> **Current Status (Nov 2026 — COMPLETED):** M1 is implemented and permanently gated in `make m1` / `make verify`. In production (`c0e3fe43` on RK-XCZU15EG-F, `40.264133 MHz` STA sign-off, `0.515778001` total U+V / `0.397847833` primary/U Quake gameplay IPC), these instructions execute in the superscalar U+V `S_PIPE` fast path (`rtl/core/decode.sv`, `u_pipe.sv`, `v_pipe.sv`). Retain this spec as the baseline `boot_mode=user` functional contract.
+
+The M1 milestone replaces the M0 NOP stub with a **real** integer core
 that decodes and executes IA-32 instructions and is **diff-clean vs QEMU**
 (`verif/diff/compare.py --mode func` exits 0) on the smoke corpus and the M1 test
 programs. This document is the milestone contract.

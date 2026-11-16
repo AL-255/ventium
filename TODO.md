@@ -1,125 +1,54 @@
-# Ventium — Status & TODO
+# Ventium — Project Status & Open Experimental Work
 
-_Last updated: 2026-06-18_
+_Last updated: 2026-11-15_
 
-## Current focus: F4A — first DOS Quake frame on the KV260 (under FreeDOS)
+## 1. Current Verified Physical Baseline (`c0e3fe43` on `main`)
 
-DOS Quake = DJGPP/go32 + CWSDPMI, booted under FreeDOS via SeaBIOS on the
-PS-assisted Ventium SoC (real PL core + A53 peripheral models / soft devices).
+The published **`main`** branch (`v0.2.0-c0e3fe43`, commit `64e567a6`) holds the self-contained, hash-pinned hardware source closure (`fpga/known_good_c0e3fe43.json`, `193` files, `161` defines in `fpga/known_good_defines.txt`) for board-qualified image **`c0e3fe43`** on **RK-XCZU15EG-F** (`xczu15eg-ffvb1156-2-i`, AMD Vivado **2025.2**):
+
+- **Verified Physical Quake Gameplay IPC:** **`0.515778001` total U+V IPC** (**`0.397847833` primary/U-only IPC**) across interior gameplay cycles **`28,696,827,616–32,989,404,795`** (`2,214,014,744` U+V events, `506,223,958` paired V retirements; hardware counters include `REP`-element retirement). Prior release baseline `2886d24c` (2026-10-17): `0.496499864` total U+V / `0.383002768` primary/U across cycles `625,021,130,428–629,480,208,865` (`+3.88%`).
+- **Physical Standard Acceptance Suite (`40.000 MHz`, `U/V + system fast-pipe`, `cycle_mode=1`):**
+  1. **CoreMark:** Both standard 4,000-iteration seeds pass with all 5 reference CRCs matched (`2.100128 / 2.106796 CM/MHz`).
+  2. **Windows 95 OSR2 GUI:** Cold boot to clean desktop, interactive PS/2 mouse & keyboard session across Calculator (`355/113`), Notepad, and MS Paint, plus clean OS shutdown.
+  3. **DOS Quake `timedemo demo1` + Gameplay:** **`8.0 FPS`** (`969` frames in `121.2 s` at measured `39.999802 MHz`, zero errors) plus interactive single-player gameplay.
+- **Post-Route Static Timing & Congestion Sign-Off:** Closed at **`40.264133 MHz`** (`WNS = +0.164 ns`, `WHS = +0.010 ns`, `0` failing endpoints, `0` DRC/routing errors, `0` `>=85%` global routing hotspots; `171,819` LUTs / `50.35%`, `30,703` CLBs / `71.97%`, `39,520` FFs / `5.79%`, `277.5` BRAM36-eq / `37.30%`, `47` DSP48E2 / `1.33%`).
+- **Empirical Single-Board Runtime MMCM DRP Overclocking (Not STA Sign-Off Above 40 MHz):** `58.824 MHz` (`N = 17`, cold Win95 GUI + Quake pass) and `62.500 MHz` (`N = 16`, cold DOS Quake `demo1` `11.6 FPS` + interactive `E1M1` pass; `66.667 MHz` `N = 15` exceeds setup margin).
+
+> **Experimental Branch Boundary (`experimental/uv-fast-ipc-apr`):** Working RTL and post-freeze commits on `experimental/uv-fast-ipc-apr` (`HEAD` `5c630403` + local harness/RTL edits) are **unmeasured** on physical gameplay and do **not** inherit `c0e3fe43` qualification until separately verified through the differential gates and full physical standard suite.
 
 ---
 
-## DONE this session: real-mode stack-pointer 16-bit wrap fix (committed `1a64426`)
+## 2. Completed Major Milestones
 
-A genuine RTL bug, found + fixed + verified — **but it turned out NOT to be the
-F4A blocker** (see below).
+- [x] **M0–M4 — Dual-Issue P5/P54C Core & QEMU Lockstep Harness:** Full non-MMX P5 integer ISA, protected/V86/paged/SMM system modes, AP-500 U+V pairing, dual AGUs, 256-entry 4-way dual-ported BTB + 4-entry RAS, and Verilator/QEMU `.vtrace` lockstep verification.
+- [x] **M5–M11 — Split 8 KiB L1 Caches, 4-Way TLBs & Shared Pipelined x87 FPU:** 8 KiB L1 I-Cache, 8-bank dual-port-read 8 KiB L1 D-Cache (`ven_l1d` + `ven_p54_hit_return` + `ven_axi_master`), 32-entry 4-way I-TLB (`VEN_ITLB_ASSOC_4WAY`) + 64-entry 4-way D-TLB, hardware radix-2 `ven_idiv`, and `fp_shared/` 80-bit x87 FPU with zero-cycle `FXCH` rename queue, 38-DSP polynomial transcendentals, and radix-4 SRT div/sqrt.
+- [x] **Tier-1 IPC & 40 MHz STA Closure (`c0e3fe43`, 2026-11-14):** 4-way I-TLB, dual-ported 256-entry BTB, pipelined `REP STOS` cacheable store streaming (`VEN_REP_STOS_STREAM`), fast-path `MOVZX`/`MOVSX` loads, 16-slot posted-DDR4 CAM read-after-write bypass, `pf_fill_addr_rep[0..3]` fanout replication, and `retime_muxf_route_first` closure at `40.264133 MHz`.
+- [x] **Public Hardware Release & Physical Floorplan Documentation:** Self-contained 193-file `main` build (`fpga/build_known_good.py`), vector SoC architecture diagram (`docs/ventium-architecture.svg`), and exact per-CLB component/congestion floorplans (`docs/FPGA_PHYSICAL_MAP_2026-11-14.md`).
 
-- **Bug:** in real mode the stack pointer is 16-bit, but the core computed every
-  stack address and ESP writeback from the full 32-bit ESP with no wrap. At SP=0 a
-  push computed `ss_base+0xFFFFFFFE` = `ss_base-2` instead of `ss_base+0xFFFE`
-  (top of the 64K SS segment). RTL-confirmed in `core_bus_driver.svh` + the
-  centralized `core_gpr_wb.svh`.
-- **Fix:** `stk16()` helper masks a stack-address offset to 16 bits when
-  `real_mode`; one post-mask wraps the ESP writeback. Gated on `real_mode`
-  (=`sys_mode && !CR0.PE`) ⇒ pure identity in user/PM ⇒ `make verify` byte-identical.
-- **Verified working:** a sim trace shows the DOS reentrant trampoline now wraps
-  SP `0xfffe → 0xfffc → …` (zero `0xffffffff` underflows). SeaBIOS POSTs; a
-  low-cluster `.COM` EXECs fine from AUTOEXEC.
+---
 
-## ✅ ROOT-CAUSED + FIXED: F4A blocker = `xchg ch,cl` (XCHG of two byte-halves of one reg)
+## 3. Active & Open Experimental Tracks (`experimental/uv-fast-ipc-apr`)
 
-**The bug:** `XCHG r/m8,r8` where both operands are byte-halves of the **same**
-16-bit register (`xchg ch,cl`, `xchg ah,al`, …) only swapped ONE half. The
-writeback (`core_gpr_wb.svh` K_XCHG) did two independent
-`reg_merge(gpr_o[reg], …)` writes; when dst==src reg the second started from the
-ORIGINAL `gpr_o`, discarding the first byte-write. So `xchg ch,cl` on `cx=0x0025`
-gave `0x2525` (only ch←cl) instead of `0x2500` (ch↔cl).
+### 3.1 Branch Reconciliation & Differential Gate Unification
+- [ ] **Port `main` (`c0e3fe43`) RTL closure back into `experimental/uv-fast-ipc-apr`:** Reconcile `c0e3fe43`'s 161-define hardware fixes (including the 9 x87 correctness fixes, 7 `ven_l1d` LUTRAM/hit-under-ifill upgrades, 4-way I-TLB, dual-ported BTB, `REP STOS` streaming, `MOVZX`/`MOVSX` fast loads, posted-DDR CAM bypass, and `pf_fill_addr_rep` fanout relief) with `experimental/uv-fast-ipc-apr`'s verification harness without losing local `Makefile` / `verif/` / `ao486-sim/` improvements.
+- [ ] **First-class 161-define FPGA-profile differential target:** Add an isolated `VTM_VERIFY_BIN_DIR` Verilator regression mode (`--cycle-func --l1-axi`) exercising the exact `fpga/known_good_defines.txt` hardware profile against the pinned QEMU Pentium oracle.
 
-**Why it broke F4A:** FreeDOS's INT 13h wrapper packs the cylinder with
-`xchg ch,cl; ror cl,1; ror cl,1`. For **cylinder 0** the low byte is 0x00 so the
-broken swap is harmless; for **any cylinder ≥ 1** the stale low byte corrupted
-CL[7:6] → wrong cylinder (e.g. 37→293) → off-disk LBA → SeaBIOS rejects → the
-kernel reset/retry-spins forever. Exactly the observed cyl-0-works / cyl-≥1-fails
-boundary, and it never reached `ven_ide` (highest LBA stayed ~432).
+### 3.2 APR Timing Closure & Area Optimization on Experimental RTL
+- [ ] **Bridge the experimental-vs-release STA gap (`35.736 MHz` vs. `40.264 MHz`):** On the heavier post-freeze `experimental/uv-fast-ipc-apr` RTL tree (`HEAD` `5c630403`), isolated fresh-source APR exploration concluded at the accepted legal **`35.736 MHz`** MUXF route (`a8e5d6bf` / `5c630403`). Re-apply `c0e3fe43`'s front-end fanout/mux reductions and audit LUT/MUXF growth before re-qualifying any post-freeze core, `uopcache`, or FPU candidates at `40 MHz`.
+- [ ] **Consolidate `u_fp_shared` LUT footprint (`72,204` LUTs in `c0e3fe43`):** Share wide barrel shifters and normalization/rounding cones in `ven_fp_trans.sv` and stream `FNSAVE`/`FRSTOR` state transfers instead of wide combinational crossbars.
+- [ ] **Pipeline separation toward `>50 MHz` STA:** Continue breaking long `S_PIPE` fetch-to-DTLB-to-L1D combinational cones across true registered `PF / D1 / D2 / EX / WB` boundaries using BRAM-backed data/BTB arrays (`ven_p54_bram_data.sv` experiments).
 
-**Fix:** in K_XCHG, when `q_dst_reg == q_src_reg`, CHAIN the second `reg_merge`
-off the first's result (one write, both byte-halves swapped). Pure addition;
-the cross-register path is unchanged.
+### 3.3 Next-Wave P54C IPC & Microarchitectural Fidelity Candidates
+- [ ] **Precision-gated early termination in `fpu_srt_div.sv`:** Terminate radix-4 SRT `FDIV` by `FCW.PC` (`~19` clocks for single-precision `PC=00` and `~33` clocks for double-precision `PC=10`, down from `38–39` clocks) to match P54C latency on Quake perspective divides.
+- [ ] **VIPT physical-tag lookup in `icache.sv` & selective TLB invalidation:** Lookup `ic_ptag` directly so `MOV CR3` context switches preserve the 8 KiB I-Cache, and prevent `CLTS`, non-paging `MOV CR0` (`TS` toggles), and single-page `INVLPG` from triggering global TLB/I-Cache flushes.
+- [ ] **Inner `ven_axi_master` read-around-write & dedicated I-Cache refill:** Allow cacheable read misses in `ven_axi_master.sv` to bypass non-conflicting buffered writes (matching `ven_ddram_axi_posted.sv`'s outer CAM bypass) and burst-commit 256-bit code lines into `icache.sv` without stepping `S_PF` words serially.
+- [ ] **Expanded AP-500 U/V pairing & `S_PIPE` coverage:** Evaluate admitting `Reg-ALU/MOV (U) + Store (V)`, `PUSH imm8/imm32`, `MOV [base], imm32`, register `FCOM`/`FNSTSW AX`, and V-pipe `FXCH` pairing without regressing `40 MHz` setup slack, plus MESI write-back L1D evaluation.
 
-**Validated (sim):** rebuilt `l1axi_kv_dos_q`, re-ran the KHI@cluster-4646
-(cyl-37) repro → `ven_ide` now serves **LBA 37304** (was capped at 432), KHI's
-sector loads correctly (`be1101ac` = its real code), and KHI **executes** at
-`cs=2182` outputting `[ K H I - R A N`  (al=5b 4b 48 49 2d 52 41 4e). The
-standing-goal F4A bug is fixed. (Pending: `make verify` regression + an
-`xchg ch,cl` gate test for the coverage gap + a clean trace-off contiguous
-`[KHI-RAN]` confirmation + commit.)
-
-The SP wrap was a **red herring** for F4A; so was the earlier "stack-check loop
-at `cs=10ef:0x108c`" (read against the wrong-size kernel's map). Evidence trail
-that led to the XCHG instruction:
-
-- **Symptom:** a `.COM` whose data is in **cylinder 0** EXECs fine from AUTOEXEC
-  (`[KLO-RAN]` prints); a `.COM` whose data is in **cylinder ≥ 1** does NOT
-  (`[KHI-RAN]` never prints). The kernel spins issuing INT 13h **resets (AH=00),
-  status (AH=01), never a read (AH=02)** → highest LBA stays ~432. Deterministic
-  (sim confirmed deterministic: `ven_rtc` is fixed-seed; `l1axi_kv_dos_q` is NOT
-  X-randomized) ⇒ a real CPU bug.
-- **Bisection (reliable, fixed grep + verified clusters):** `KLO@cluster36`→
-  dataLBA 424→**cyl 0 WORKS**. `KHI` fails at cluster 200 (LBA 1736, cyl 1), 256,
-  512, 4500 — i.e. **fails whenever dataLBA ≥ 1008** (`cyl = LBA/(16·63) ≥ 1`).
-  Threshold is the **cylinder-0→1 boundary (LBA 1008)**, NOT the cluster number,
-  NOT the FAT-sector (KHI@200 is FAT sector 0 and still fails).
-- **Reliable repro = the MAP-MATCHING 46290 kernel** (`unzip ke2045_86f16.zip
-  bin/kernel.sys` → `verif/freedos/f4a/k46.sys`). It reproduces the bug AND its
-  layout matches `kwc8616.map`, so symbols are trustworthy. INT handlers at
-  `cs=00d9` (load base 0x60). Boot reaches AUTOEXEC ~cyc 70M (the early "stall at
-  cyc 11.6M" was just checking before SeaBIOS POST finished — NOT a hang).
-- **Disk path located in the 46290 runtime dump** (`/tmp/sim_lowmem.bin`, linear =
-  phys): the kernel's INT 13h wrapper (`fl_rw`) is at **linear ~0xfca6** —
-  `mov ah,2` (read) @0xfc9c → common path @0xfca6 does the **CHS packing**
-  (`mov cx,[bp+0xc]; cmp ch,3; ja…; xchg ch,cl; ror cl,1…` = pack cyl into CH +
-  CL[7:6] + sector). The **LBA→CHS conversion** (`cyl = LBA/1008`, head, sector)
-  is in the *caller* of `fl_rw` — that conversion (or the cyl≥1 CHS packing) is
-  where the core diverges. (`int 13h` cluster: linear 0xfc7a/88/c8/e2/f9/0xfd11.)
-
-## NEXT STEPS
-
-1. **Pin the instruction (on the 46290 kernel).** Either (a) sentinel-armed
-   per-commit trace with `VEN_F4A_CYC_LO` ≈ the cyl-1 read cycle, then map the
-   diverging `cs:eip` through `kwc8616.map`; or (b) a **minimal standalone
-   real-mode test** (loaded via `--image`, like the SoC gates) that runs the
-   LBA→CHS math + CHS-packing for an LBA ≥ 1008 and checks the result — fully
-   deterministic, no FreeDOS boot, no recovered-kernel disasm. (b) is now the
-   cleaner path given the cylinder-boundary characterization. Note: `make verify`
-   div16/div32 pass, so the bug is likely NOT a plain DIV — suspect the CHS
-   pack/`xchg/ror` path or a cyl≥1-specific branch.
-2. Fix it; re-run the `fdhi.img` KLO/KHI test until `[KHI-RAN]` prints.
-3. Keep the SP-wrap fix (correct + safe); `make verify` stays byte-identical.
-4. **Pre-existing regression:** `tx_fprem` (FPREM) — broken by the R3
-   `fpu_writeback.sv` extraction (`de67eca`), the only `make verify` failure,
-   independent of the above. FPREM is on the Quake render path.
-5. After F4A EXEC works: QUAKE.EXE load → CWSDPMI → PAK0.PAK → first mode-13h frame.
-6. [#41 F5] tyrquake interactive — PARKED (board-only synth fetch-bit[2] bug).
-
-## Harness notes (STABLE, in-repo — survives `/tmp` clears)
-
-- **`verif/freedos/f4a/`** holds everything now (`/tmp` was cleared twice, losing
-  the original 70142-B kernel + earlier disks; do NOT keep harness state in /tmp).
-  - `build_f4a_disk.sh` — rebuilds `fdhi.img` (KLO low + filler + KHI high).
-    Selectable: `KERNEL=<path>` (default `ventium-refs/freedos/kernel.sys`; use
-    `k46.sys` = the map-matching 46290 kernel) and filler size via `filler.dat`
-    (set its byte size first to place KHI at a target cluster/cyl; the script
-    prints/verifies KHI's start cluster + dataLBA + cyl).
-  - `k46.sys` (46290, map-matching), `kwc8616.map` (in /tmp/kmap or re-extract).
-- **Markers:** `KLO.COM`/`KHI.COM` print `[KLO-RAN]`/`[KHI-RAN]` to port 0xE9
-  (→ sim stdout); KLO also emits a **0x07 sentinel** that arms the f4a trace.
-  GREP THEM LITERALLY (`grep -c KLO-RAN`) — `[K[LH]I-RAN]` does NOT match `KLO`.
-- `tb_main` debug (uncommitted): 0xB8000 VGA text dump at `--dos` exit;
-  `VEN_F4A_ARM_LBA` / `VEN_F4A_CYC_LO/HI` per-commit `cs/eip/GPR` trace; the
-  0x07-sentinel arm (guarded by `#ifdef VEN_DOS_MODELS`).
-- Sim run (EXE `obj_dir_l1axi_kvdosq/tb_ventium`): `--image bios.bin --dos --disk
-  verif/freedos/f4a/fdhi.img --no-trace --quiesce 30000000 --max-cycles 120000000
-  --max-insn 250000000`, `VEN_IDE_LOG=1`. AUTOEXEC ~cyc 70M; ~8 min wall. **Wait
-  for `SIM_EXIT` before judging** (POST is INT-less until ~cyc 30M). Use clean
-  grep-on-logfile waiters (NOT `pgrep` of a name in the waiter's own cmdline →
-  self-match hang) and a *fresh* logfile name (rm/recreate races the waiter).
+### 3.4 Platform SoC, Simulation Harness & Deferred ISA Edge Cases
+- [ ] **8237 ISA DMA bridge in `ven_ao486_shim.sv`:** Route `dma_*` read/write cycles to memory with physical L1I/L1D invalidation snoops so Sound Blaster 16 audio DMA and Floppy DMA work in DOS Quake (currently run with `-nosound`) and Windows 95.
+- [ ] **ISA & privilege corner-case tightening (see [`docs/isa-coverage.md`](docs/isa-coverage.md) & [`docs/modeled-by-effect.md`](docs/modeled-by-effect.md)):**
+  - Gate `INVD`/`WBINVD` cache-flush side effects strictly on `CPL == 0 && !VM` prior to `#GP(0)`.
+  - Unify A20 masking and `ven_l1d` physical-alias invalidation across `core_io.svh` and `ven_ao486_shim.sv`; extend PS DMA flushes across the outer platform cache.
+  - Align `CPUID` leaf 1 feature bits (`EDX`/`ECX`) strictly with non-MMX P54C hardware (clear `MMX`/`Hypervisor`; gate `MSR`/`MCE` on P54C MSR `0x00..0x13` implementation).
+  - Enforce `SS.B` stack-pointer width on `0x66 ENTER` in 32-bit segments, conforming-code `DS/ES/FS/GS` loads, `PTE.PCD`/`PWT` cacheability propagation, IDT/call task gates, and legacy `CR0.NE=0` (`FERR#`/`IGNNE#`/IRQ13) + unmasked x87 exception corner cases.
+- [ ] **Verilator full-PC harness (`ao486-sim/`) maintenance:** Keep `ao486-sim/` define profiles synchronized with `fpga/known_good_defines.txt` and evaluate decoupling the C++ HPS management service onto an asynchronous scheduler.

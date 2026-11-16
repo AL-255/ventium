@@ -1,91 +1,38 @@
-# Ventium — radix-4 SRT divider gate (the genuine Pentium division datapath)
+# Radix-4 SRT Divider, Square-Root & Remainder Verification (`verif/srt/`)
 
-`make verify-srt` (or `bash verif/srt/run-srt-gate.sh`) is a standalone Verilator
-unit gate for **`fpu_x87_pkg::fx_srt_div`** — the real base-4 SRT divider the
-Pentium implements in silicon, and Ventium's **default** division datapath
-(since commit `3791e46`). The gate drives `fx_srt_div` directly, so it is
-independent of the core/SoC build (it touches only `rtl/fpu/fpu_x87_pkg.sv`)
-and validates **both** PLAs regardless of which build defines are set.
+`verif/srt/` verifies Ventium's genuine Pentium radix-4 SRT floating-point division, square-root, and exact `FPREM`/`FPREM1` engines, both as standalone unit testbenches and integrated inside the core / shared x87 FPU (`fp_shared/`).
 
-## What it is
+## Hardware & Simulation Architecture (Nov 2026)
 
-Plain behavioral division (`fx_div_exact`, the `+define+VEN_DIV_EXACT` opt-out)
-just computes a wide integer quotient. `fx_srt_div` — the **default** divider —
-runs the **actual algorithm**, reverse-
-engineered from the Pentium die photo (Ken Shirriff, *"Intel's $475 million
-error: the silicon behind the Pentium division bug"*, righto.com, Dec 2024) and
-formalised by Tim Coe & Ping Tak Peter Tang and Alan Edelman (*"The Mathematics
-of the Pentium Division Bug"*, SIAM Rev. 39(1), 1997):
+Both SRT implementations are **IEEE-754 correctly rounded** across all four rounding modes (`RC`) and all three x87 precision controls (`PC24`/`PC53`/`PC64`), and both reproduce the documented 1994 Pentium `FDIV` PLA flaw from first principles when `buggy=1`:
 
-* radix-4, two quotient bits/step, digit set `{-2,-1,0,1,2}`;
-* the partial remainder kept in **ones-complement carry-save** (sum word + carry
-  word) exactly as the chip does, with the delayed `+1` correction injected into
-  the carry LSB after a complemented (positive-digit) subtract;
-* the quotient digit chosen from a **4-integer-bit truncated index** (`xxxx.yyy`)
-  into the reverse-engineered selection PLA — and that truncation, with the
-  ones-complement modular wraparound, is exactly what lets a divide land on a
-  *missing* PLA cell;
-* a remainder-sign-aware final rounding to the 64-bit floatx80 significand.
+1. **`fpu_x87_pkg::fx_srt_div` (`make verify-srt`):** Unrolled combinational radix-4 SRT reference function used by the minimal default simulation build (`make verify` when `+VEN_SRT_ITER` is off).
+2. **`rtl/fpu/fpu_srt_div.sv` (`make verify-srt-iter`, `make verify-fprem`):** Synthesizable 1-step-per-clock iterative carry-save radix-4 SRT engine unifying **`FDIV`**, **`FSQRT`**, and **`FPREM`/`FPREM1`**. Instantiated as **`u_srt` inside `fp_shared/ven_fp_top.sv` (`u_fp_shared`)** in the deployed **40 MHz STA-closed `c0e3fe43` FPGA image** (`+define+VEN_FP_SHARED +define+VEN_SRT_ITER +define+VEN_FPREM`), and as `u_srt_div` in `rtl/core/core.sv` in non-shared `+VEN_SRT_ITER` builds.
 
-### The FDIV bug, from first principles
+### Pentium Radix-4 SRT Datapath & First-Principles `FDIV` Bug
 
-Five PLA cells that should hold `+2` were never programmed and read `0` — Edelman
-§4: `8·P_Bad ∈ {23,27,31,35,39}` in the five divisor columns `D ∈
-{17,20,23,26,29}/16` (significand prefixes `1.0001 / 1.0100 / 1.0111 / 1.1010 /
-1.1101`). With the buggy PLA those cells return `0` and the flaw **emerges from
-the algorithm** — no operand is special-cased:
+Modeled after the reverse-engineered Pentium P5 silicon PLA (Ken Shirriff, Dec 2024; Coe, Tang & Edelman, *SIAM Review* 39(1), 1997):
 
-| pair | divisor col | result |
-|------|-------------|--------|
-| `4195835 / 3145727` | `1.0111…` (D=23) | flawed `0x3FFF_AAB7F6392A768638` → double `0x3FF556FEC7254ED1` = `1.3337390689…` (wrong at the 13th significant bit) |
-| `5505001 / 294911`  | `1.0001…` (D=17) | also flaws (bug hit at iteration 8) |
-| `7654321 / 3145727` | `1.0111…` (D=23) | **clean** — a triggering *divisor* is necessary but not sufficient (Edelman §5: reaching the foothold is rare) |
-| `4195835 / 3.0`     | `1.1000…`        | clean — non-triggering divisor |
+- **Radix-4 carry-save recurrence:** 2 quotient bits/step from digit set `{-2, -1, 0, +1, +2}`, partial remainder held in ones-complement `(sum, carry)` form with delayed `+1` carry-LSB injection on complemented subtracts, and remainder-sign-aware final sticky/rounding to 64-bit `floatx80`.
+- **Clean vs Buggy PLA:** With `buggy=0` (hardware default), all PLA entries are populated and results are **bit-exact vs Berkeley SoftFloat-3e and QEMU**. With `buggy=1` (`+define+VEN_SRT_FDIV_BUG`), the five unprogrammed `+2 → 0` cells (`8·P_Bad ∈ {23,27,31,35,39}` in divisor columns `D ∈ {17,20,23,26,29}/16`) emerge naturally at iteration 8 without special-casing any operand:
+  - `4195835 / 3145727` (`D=23`): clean `0x3FFF_AABAA0E3E35A14BD` (`1.3338204491...`) vs buggy `0x3FFF_AAB7F6392A768638` (`1.3337390689...`).
+  - `5505001 / 294911` (`D=17`): reproduces the second famous PLA-foothold flaw; non-foothold pairs (`7654321 / 3145727`, `4195835 / 3.0`) remain bit-exact.
 
-The bug is hit at iteration 8 (Edelman §7, *"at least nine steps to failure"*).
+## Primary Make Gates
 
-## How it is selected (compile-time)
+| Make Target | Script | What It Verifies |
+| --- | --- | --- |
+| `make verify-srt` | `run-srt-gate.sh` (`tb_srt.sv`) | Regenerates golden vectors from `tools/srt/srt_model.py` (`gen_vectors.py`) and checks `fpu_x87_pkg::fx_srt_div` bit-exact across both clean and buggy PLAs (`SRT-GATE-OK`). |
+| `make verify-srt-iter` | `run-srt-iter-gate.sh` + `run-sqrt-iter-gate.sh` | Clocked Verilator `--timing` gates proving `rtl/fpu/fpu_srt_div.sv` (`tb_srt_iter.sv`, both PLAs) and `tb_sqrt_iter.sv` are bit-exact against the golden model (`SRT-ITER-GATE-OK`, `SQRT-ITER-GATE-OK`). |
+| `make verify-fprem` | `run-fprem-gate.sh` | Full-core `tx_fprem` differential vs pinned QEMU across all 3 remainder configurations: default `fpu_fprem`, unified `+VEN_SRT_ITER +VEN_FPREM`, and deployed full-P5 `l1axi_kv_full` (`--l1-axi`). |
 
-```
-(no define)               # DEFAULT: genuine SRT engine, CORRECT PLA (bit-exact)
-+define+VEN_SRT_FDIV_BUG  # SRT engine, buggy PLA -> the FDIV flaw, all operands
-+define+VEN_DIV_EXACT     # opt OUT to the fast behavioral fx_div_exact divider
-```
+## Extended Shared-FPU Remainder & Waiting-`#MF` Suites
 
-With no defines the divider is the genuine `fx_srt_div` with the **correct**
-PLA — the unconditional hardware default since commit `3791e46` — and the whole
-project stays bit-exact vs QEMU (`make verify`, `make verify-soc`). Adding
-`VEN_SRT_FDIV_BUG` reproduces the FDIV flaw for all operands; `VEN_DIV_EXACT`
-opts back to the fast behavioral `fx_div_exact` (a sim-only escape hatch, also
-bit-exact vs QEMU) and takes precedence over `VEN_SRT_FDIV_BUG`.
+`verif/srt/` also contains the October 2026 miter and whole-core harnesses that qualified `fpu_srt_div.sv` inside `u_fp_shared` before `c0e3fe43` hardware sign-off:
 
-## How the gate validates it
+- **Exact `FPREM`/`FPREM1` & Subnormal Normalization (`run_remainder_exact.py`, `tb_remainder_exact.sv`):** Verifies `8,448` multi-step partial/complete reduction sequences (`266,880` steps), including `|A| < |B|` nearest-quotient `Q=1` (`FPREM1(1.5, 2.0) = -0.5`) and normalized subnormal mantissa/exponent alignment.
+- **Operand-Exception Priority (`run_remainder_exceptions.py`, `tb_remainder_exceptions.sv`):** Verifies `9,552` cases covering unsupported `floatx80` encodings, `SNaN`/`QNaN` payload selection, `IE` before `DE` priority, masked `DE`, unmasked `IE`/`DE` operand/quotient-flag preservation (`C1=0`, prior `C0/C2/C3` kept), and masked empty-stack `C2=0`.
+- **Exact Tiny-Result Underflow (`run_remainder_underflow.py`, `run_remainder_underflow_sequences.py`):** Verifies Intel Vol. 3 exact-remainder underflow rules (`7,104` single-step + `2,880` partial-reduction cases): when `UM=0`, nonzero tiny remainders scale by `2^24576` in `ST_RNORM` and raise `UE` (without spurious `PE`), including zero-quotient tiny-`A` bypasses.
+- **Strict Waiting-Instruction `#MF` Delivery (`run_underflow_delivery.py`, `run_strict_mf_waiters.py`, `audit_strict_mf_waiters.py`):** Under `+define+VEN_X87_MF_STRICT` (also gated by `make x87trap`), verifies pending `#MF` delivery and `#NM > #MF` priority (`CR0.TS`/`EM`) across **29 waiting x87 instruction forms** (`FWAIT`, `FNOP`, `FLD*`, `FILD*`, `FST*`, `FIST*`, `FADD`/`FSUB`/`FMUL`/`FDIV`, `FCOM`/`FUCOM`/`FTST`, `FLDCW`, `FCHS`/`FABS`/`FXCH`/`FFREE`/`FINCSTP`/`FDECSTP`) at AXI delays `0/7/31` in `--system --cosim --cycle-func --l1-axi --x87` mode with active U+V pairing.
 
-`tools/srt/srt_model.py` is the single-source golden model (a faithful Python
-implementation of the same datapath, validated to be correctly-rounded against
-exact rational division over a 10 000-divide corpus). The gate:
-
-1. regenerates golden vectors (`verif/srt/gen_vectors.py` → `build/srt/vec_*.hex`)
-   — the famous FDIV pairs, the negative controls, and a random corpus;
-2. builds a Verilator TB (`tb_srt.sv`) against the real `fpu_x87_pkg`;
-3. asserts `fx_srt_div` is **bit-exact** vs the golden for *both* PLAs.
-
-`SRT-GATE-OK` ⇒ every vector matches.
-
-## Files
-
-| file | role |
-|------|------|
-| `tools/srt/srt_model.py` | single-source golden model; `python3 … pla` re-emits the SV PLA case block; run directly for the self-test |
-| `verif/srt/gen_vectors.py` | emit golden vectors from the model |
-| `verif/srt/tb_srt.sv` | Verilator testbench driving `fx_srt_div` |
-| `verif/srt/run-srt-gate.sh` | the gate (regen → build → run → assert) |
-
-## Relationship to M6 Erratum 23
-
-The M6 runtime FDIV erratum (`fx_div_errata`, errata bit 0) is unchanged — it
-returns the **documented** flawed value for the one published vector and is the
-honest fallback when there is no oracle. The SRT engine *supplies that oracle*:
-it bit-reproduces the documented flaw (and a second famous pair) from first
-principles, which the M6 model's own comments noted "would require bit-
-reproducing Intel's exact buggy SRT iteration."
+> **Safeguard:** Use private scratch directories under `/home/yukidama/external/tmp` (`TMPDIR`) and `/tools/verilator/v5.046/bin/verilator` inside `tools/build_scope.sh`; never overwrite canonical `verif/tb/obj_dir`.

@@ -1,24 +1,27 @@
-# FPGA Quake timedemo — 2026-10-17
+# FPGA Quake timedemo — `c0e3fe43` (2026-11-14) & `2886d24c` (2026-10-17)
+
+## Latest Physical Release Result — Image `c0e3fe43` (2026-11-14)
+
+**PASS: `969` frames in `121.2 s`, `8.0 FPS`** on the physical **RK-XCZU15EG-F** (`xczu15eg-ffvb1156-2-i`, Vivado 2025.2) at measured **`39.999802 MHz`** (`40.264133 MHz` post-route STA sign-off, `WNS +0.164 ns`, `WHS +0.010 ns`), running cold FreeDOS + DOS Quake `timedemo demo1` (`320×200`, sound off) in mandatory **`U/V + system fast-pipe`** mode (`cycle_mode=1`, `161` defines).
+
+- **Current Verified Gameplay IPC (`c0e3fe43`):** **`0.515778001` total U+V IPC** (`0.397847833` primary/U-only IPC) across interior gameplay cycles **`28,696,827,616–32,989,404,795`** (`2,214,014,744` total U+V events, `506,223,958` paired V retirements; `+3.88%` over the `2886d24c` `0.496499864` / `0.383002768` baseline). Counters include `REP`-element retirement.
+- ** Artifacts & Full-Suite Qualification:** Raw bitstream SHA-256 `c0e3fe43b2b7ce88e013df107be94d56c0fcfcae626ce4c262975fba92dcc3b7`; `3,075`-frame raw `320×200` VGA capture (`15 fps` playback, palette compression only): [`quake-timedemo-c0e3fe43.gif`](quake-timedemo-c0e3fe43.gif). Unlike `2886d24c`, image `c0e3fe43` also closes 40 MHz slow-corner STA and passes the entire physical standard acceptance suite (both CoreMark seeds + cold Windows 95 GUI + interactive Quake gameplay; empirical single-board DRP runs also completed `demo1` at `58.824 MHz` and `11.6 FPS` wall-clock at `62.500 MHz`). See [`PUBLIC_FPGA_RELEASE_2026-11-14.md`](PUBLIC_FPGA_RELEASE_2026-11-14.md).
+
+---
+
+## Prior Baseline Run — Image `2886d24c` (2026-10-17)
 
 **PASS: 969 frames in 125.8 seconds, 7.7 FPS**, on the physical
 RK-XCZU15EG-F at measured **39.999826 MHz**, with **U/V + fast-pipe** enabled.
 This is a cold FreeDOS boot running DOS Quake's original `demo1`, not a
 simulation, snapshot restore, startup-only measurement or overclock projection.
 
-Current verified gameplay IPC: **0.496499864 total U+V**, image **`2886d24c`**,
+Prior baseline gameplay IPC: **0.496499864 total U+V**, image **`2886d24c`**,
 cycles **625,021,130,428–629,480,208,865**. Primary/U alone is **0.383002768**.
 These counters include the existing REP-element retirement events; they are not
 a separately deduplicated macroinstruction count.
 
 ## Movie
-
-Public README version: [complete 15 fps GIF](quake-timedemo.gif), **5,634,798
-bytes**, 2,814 frames at native 320×200, 187.6 seconds. The GIF uses a 64-entry
-palette budget (including transparency), no dithering and no brightness,
-contrast or gamma adjustment; no frames or dimensions were removed. GIF delay
-quantization uses 60/70 ms intervals to represent 15 fps. The original lossless
-MP4 and raw capture below are retained local evidence, not Git assets.
-GIF SHA256: `b982faa714960850a3f87572ae4235db36ef84a1c16491b8db364cf9ac6721d6`.
 
 [Full recording, MP4 (18.3 MB)](/home/yukidama/external/tmp/ventium-quake-pll40-oct17.SJTmlsl0/movie/recording-15fps.mp4)
 

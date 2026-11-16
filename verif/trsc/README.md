@@ -1,40 +1,30 @@
-# verif/trsc — x87 transcendental gates (#11)
+# `verif/trsc/` — x87 Transcendental Verification Gates
 
-Verification for the 8 x87 transcendental engines (`+VEN_TRANSCENDENTAL`). See
-`docs/m11-transcendental-spec.md` for the design. Each op is graded two ways:
-the standalone engine vs a C reference, and through the core vs an oracle.
+`verif/trsc/` verifies Ventium's eight x87 transcendental instructions (`+define+VEN_TRANSCENDENTAL`, `docs/m11-transcendental-spec.md`) both at the engine leaf level and end-to-end through the core.
 
-## The oracle split
+> **Hardware Architecture Note:** In the board-qualified **`c0e3fe43`** FPGA configuration (`VEN_FP_SHARED` + `VEN_TRANSCENDENTAL`), transcendental operations execute on the shared 38-DSP polynomial & wide-multiply engine **`fp_shared/ven_fp_trans.sv`** + **`fp_shared/ven_fp_widemul.sv`** inside `u_fp_shared` (additionally covered by `fp_shared/tb/` and `verif/fppipe/`). In non-shared `+VEN_TRANSCENDENTAL` simulation builds, `rtl/core/core.sv` instantiates `rtl/fpu/fpu_{f2xm1,fpatan,fyl2x,fsincos}.sv` atop `fpu_fx_ppl` / `fpu_estdiv`. In the minimal default `make verify` build (without `+VEN_TRANSCENDENTAL`), transcendental opcodes halt loudly (`make x87b`).
 
-- **Group B — F2XM1 / FPATAN / FYL2X / FYL2XP1** — qemu computes these with
-  deterministic softfloat, so they are **bit-exact vs qemu-i386**. The reference
-  `tools/p5xtrans/qref.c` is a verbatim port of qemu's helpers; `qref_validate.py`
-  proves it reproduces the *actual* pinned `qemu-i386` bit-for-bit (asm sweep →
-  `gen_trace --x87`, all 4 rounding modes).
-- **Group A — FSIN / FCOS / FSINCOS / FPTAN** — qemu computes these via the host's
-  glibc at **double precision**, so qemu is not the oracle. They are **bit-exact vs
-  a shared-polynomial silicon model** (`qref` octant reduction + Taylor, all
-  floatx80 ops), whose accuracy is ~1.8 ulp vs `__float128` quad (`qref --validate-trig`).
+## Dual-Group Oracle Split
 
-## Gates
+- **Group B — `F2XM1`, `FPATAN`, `FYL2X`, `FYL2XP1`:** Pinned `qemu-i386` evaluates these deterministically in SoftFloat, so RTL is checked **bit-exact vs QEMU** across all 4 rounding modes (`RC`). `tools/p5xtrans/qref.c` ports QEMU's exact helper algorithms (`make -C tools/p5xtrans qref-validate` proves bit-for-bit parity against `qemu-i386`).
+- **Group A — `FSIN`, `FCOS`, `FSINCOS`, `FPTAN`:** QEMU 8.2.2 evaluates trigonometric ops via host `libm` at 53-bit `double` precision (`~1000` ulp error in `floatx80`), so QEMU cannot serve as an 80-bit trig oracle. Instead, RTL is verified **bit-exact against `qref`'s `floatx80` octant-reduction + polynomial silicon model**, whose accuracy is validated to `~1.8` ulp against `__float128` (`qref --validate-trig`).
 
-| Script | What it checks |
-|--------|----------------|
-| `run-f2xm1-gate.sh` / `run-fpatan-gate.sh` / `run-fyl2x-gate.sh` | standalone engine vs `qref` (qemu-bit-exact), all 4 RC |
-| `run-fsincos-gate.sh` | standalone FSIN/FCOS engine vs the qref shared-poly model (+ re-checks model accuracy) |
-| `run-f2xm1-core-gate.sh` / `run-fpatan-core-gate.sh` / `run-fyl2x-core-gate.sh` | the op THROUGH the core (decode → `S_TRSC_BUSY` → commit), func-exact vs the qemu gdbstub golden (`compare.py --mode func`: st0..st7 / fctrl / fstat / ftag) |
-| `run-fsincos-core-gate.sh` (`fsincos_core_check.py`) | FSIN/FCOS/FSINCOS/FPTAN through the core, st0(+st1) bit-exact vs the model; reports the core-vs-qemu spread (≈1000 ulp — qemu's double precision) |
+## Gate Scripts
 
-The `*-gate.sh` scripts build a small Verilator TB (`tb_*.sv`); the `*-core-gate.sh`
-scripts build the cosim TB with `+VEN_TRANSCENDENTAL` (`make -C verif/tb
-VL_EXTRA_DEFINES=+define+VEN_TRANSCENDENTAL OBJDIR=obj_dir_trsc`) and run
-`tests/tx_*`. The default build never decodes these ops (they stay `d_unknown` →
-HALT), so `make verify` stays 77/77 byte-identical.
+| Script | Scope |
+| --- | --- |
+| `run-f2xm1-gate.sh` / `run-fpatan-gate.sh` / `run-fyl2x-gate.sh` | Standalone Verilator leaf TB (`tb_*.sv`) vs `qref` across all 4 rounding modes. |
+| `run-fsincos-gate.sh` | Standalone `FSIN`/`FCOS`/`FSINCOS`/`FPTAN` engine TB vs `qref` polynomial model (+ `__float128` accuracy self-check). |
+| `run-f2xm1-core-gate.sh` / `run-fpatan-core-gate.sh` / `run-fyl2x-core-gate.sh` | In-core execution (`OBJDIR=obj_dir_trsc`, `+define+VEN_TRANSCENDENTAL`) diffed bit-exact against `qemu-i386 --x87` (`compare.py --mode func`: `st0..st7`, `fctrl`, `fstat`, `ftag`). |
+| `run-fsincos-core-gate.sh` (`fsincos_core_check.py`) | In-core `FSIN`/`FCOS`/`FSINCOS`/`FPTAN` verified bit-exact (`st0` and `st1`) against `qref`. |
 
-## Quick run
+## Quick Run
 
 ```sh
-bash verif/trsc/run-f2xm1-gate.sh        # + fpatan / fyl2x / fsincos
-bash verif/trsc/run-fpatan-core-gate.sh  # in-core, vs qemu golden
-make -C tools/p5xtrans qref-validate     # qref C refs vs qemu-i386 (F2XM1 + FPATAN)
+bash verif/trsc/run-f2xm1-gate.sh
+bash verif/trsc/run-fpatan-gate.sh
+bash verif/trsc/run-fyl2x-gate.sh
+bash verif/trsc/run-fsincos-gate.sh
+bash verif/trsc/run-fpatan-core-gate.sh
+make -C tools/p5xtrans qref-validate
 ```

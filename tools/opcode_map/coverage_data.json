@@ -1515,8 +1515,8 @@
   "D9": {
    "mnem": "FLD/FST/FLDCW/FNSTCW + D9 reg group",
    "status": "partial",
-   "detail": "Known-good FPGA source: FRNDINT/FSCALE and the configured transcendental/remainder paths are present. FNSTENV is marked as a write so the environment engine probes write permission before masking exceptions. Other profiles retain conditional admission; publication is not a new per-opcode acceptance run.",
-   "evidence": "decode_stages.sv D9 register/control arms; FNSTENV sets d_f_mem_write before the environment engine. Frozen 2886d24c source profile.",
+   "detail": "FLD/FST/FSTP m32, FLDENV/FNSTENV (14/28-byte), FLDCW/FNSTCW, FLD st(i), FXCH (zero-cycle rename under VEN_FP_FXCH_QUEUE), FNOP, FCHS, FABS, FTST, FXAM, FLD1..FLDZ, FDECSTP, FINCSTP, FSQRT, FRNDINT (FC), and FSCALE (FD) implemented; under deployed VEN_FPREM + VEN_TRANSCENDENTAL (c0e3fe43 u_fp_shared), FPREM (F8), FPREM1 (F5), and all 8 transcendentals (F2XM1, FYL2X, FPTAN, FPATAN, FYL2XP1, FSINCOS, FSIN, FCOS) are also implemented. FXTRACT (F4) and mem /1 stay d_unknown->S_HALT.",
+   "evidence": "decode_stages.sv:D9 mem (/0..7 except /1) and reg (FLD_STI, FXCH, FNOP..FSQRT, FX_FRNDINT, FX_FSCALE, VEN_FPREM FX_FPREM/FX_FPREM1, VEN_TRANSCENDENTAL FX_F2XM1..FX_FCOS); fp_shared/ven_fp_top.sv + fpu_srt_div.sv + ven_fp_trans.sv.",
    "desc": "x87 load/store real, control word, and constants",
    "experiment": "VEN_FP_MEM_LOADS: unverified default-off FLD m32 admission via the existing shared-FP operand-load path. Requires VEN_FP_MEM_ADMIT."
   },
@@ -1545,8 +1545,8 @@
   "DD": {
    "mnem": "FLD/FST m64; FFREE/FUCOM; FRSTOR/FNSAVE",
    "status": "partial",
-   "detail": "Known-good FPGA source includes FRSTOR/FNSAVE environment-engine handling. FNSAVE sets d_f_mem_write so write access is probed before FNINIT side effects. Memory /1,/5 and unsupported register forms remain rejected. Publication is not a new per-opcode acceptance run.",
-   "evidence": "core.sv:2481-2502. Mem: /0 FLD_M64,/2 FST,/3 FSTP,/4 FRSTOR,/6 FNSAVE,/7 FNSTSW_M; default d_unknown. Reg: FFREE(C0+),FST st(i)(D0+),FSTP st(i)(D8+),FUCOM(E0+),FUCOMP(E8+); default d_unknown.",
+   "detail": "FLD/FST/FSTP m64, 94/108-byte FRSTOR (/4) and FNSAVE (/6), FNSTSW m16 (/7), and reg FFREE/FST/FSTP/FUCOM/FUCOMP implemented; reserved/non-P54C mem /1,/5 (FISTTP is SSE3) and reg F0+/F8+ set d_unknown->S_HALT.",
+   "evidence": "decode_stages.sv:DD mem (/0 FLD_M64, /2,/3 FST_M64, /4 FX_FRSTOR, /6 FX_FNSAVE, /7 FX_FNSTSW_M) and reg (FX_FFREE, FX_FST_STI, FX_FUCOM_STI); core_fenv.svh + fp_shared/ven_fp_state.sv.",
    "desc": "x87 load/store real; FFREE/FUCOM; FRSTOR/FNSAVE",
    "experiment": "VEN_FP_MEM_LOADS: unverified default-off FLD m64 admission via the existing shared-FP operand-load path. Requires VEN_FP_MEM_ADMIT."
   },
@@ -1801,8 +1801,8 @@
   "01": {
    "mnem": "GRP7 (SGDT/SIDT/LGDT/LIDT/SMSW/LMSW/INVLPG)",
    "status": "partial",
-   "detail": "Known-good source: memory SGDT/SIDT/LGDT/LIDT, unprivileged SMSW register/m16, privileged LMSW r/m16 and memory INVLPG. SMSW memory and every LMSW source are always 16-bit; LMSW preserves high CR0 bits and sticky PE with privilege and precise memory checks. Register descriptor forms and reserved /5 are rejected. Source descriptions, not new gate results.",
-   "evidence": "decode_stages.sv 0F 01 group: SYS_SGDT/SIDT/LGDT/LIDT, d_smsw/SYS_MOVCR_FROM, d_lmsw/SYS_MOVCR_TO, SYS_INVLPG; core system commit paths. Imported from the 2886d24c frozen closure.",
+   "detail": "ModRM.reg group. Implemented: /0 SGDT and /1 SIDT (mem 6-byte pseudo-descriptor store at any CPL via translated/fragmented S_SGDT); /2 LGDT and /3 LIDT (mem 6-byte pseudo-descriptor load at CPL0, 16/32-bit operand-size aware); /4 SMSW r16/r32 (register form mod==11 via SYS_MOVCR_FROM + d_smsw=1, unprivileged at any CPL); /7 INVLPG m (CPL0 full TLB flush via SYS_INVLPG). Register LGDT/LIDT (/2,/3 mod==11, rejected after ModR/M without EA consumption), /4 SMSW mem, and /6 LMSW remain d_unknown->S_HALT.",
+   "evidence": "decode_stages.sv:0F 01 (SYS_LGDT/SYS_LIDT/SYS_SGDT/SYS_SIDT, SYS_MOVCR_FROM+d_smsw, SYS_INVLPG, d_fetch_header_cpl0); core.sv (!d_smsw CPL0 exemption, tlb_flush); core_seg_ljmp.svh (S_LGDT/S_SGDT)",
    "desc": "Group 7 (SGDT/SIDT/LGDT/LIDT/SMSW/LMSW/INVLPG)"
   },
   "02": {
@@ -1834,9 +1834,9 @@
   },
   "06": {
    "mnem": "CLTS",
-   "status": "gap",
-   "detail": "Valid P54C system instr (clear CR0.TS); no Ventium decode arm. Two-byte default d_unknown->S_HALT.",
-   "evidence": "core.sv:1668 (default d_unknown); core_fetch_decode.svh:351",
+   "status": "system-only",
+   "detail": "Clear CR0.TS at CPL0 in system mode (sys_mode=1) via SYS_MOVCR_TO with d_clts=1'b1; raises #GP(0) when CPL!=0 via d_fetch_header_cpl0 / priv_fault. User-mode TB (sys_mode=0) keeps d_unknown->S_HALT.",
+   "evidence": "decode_stages.sv:0F 06 (if sys_mode: SYS_MOVCR_TO, d_sys_creg=0, d_clts=1'b1; else d_unknown); core_exec.svh CR0.TS clear",
    "desc": "Clear Task-Switched Flag in CR0"
   },
   "07": {
