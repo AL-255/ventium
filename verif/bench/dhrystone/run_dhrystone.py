@@ -29,7 +29,10 @@ import time
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]
 sys.path.insert(0, str(REPO / "verif/sys"))
-import check_faultlog  # noqa: E402
+try:
+    import check_faultlog  # type: ignore[import-not-found]
+except ModuleNotFoundError:
+    check_faultlog = None
 
 VAX_11_780_DHRY_PER_SEC = 1757.0
 
@@ -457,7 +460,10 @@ def run_verilator(
     log_text = stdout_text + "\n" + stderr_text
     if re.search(r"%Error|%Fatal|Assertion failed|tb: FLT", log_text):
         raise RuntimeError(f"RTL fault/error detected in {log_path}")
-    check_faultlog.check_counts(check_faultlog.read_counts(stdout_text.splitlines()), {})
+    if check_faultlog is not None:
+        check_faultlog.check_counts(check_faultlog.read_counts(stdout_text.splitlines()), {})
+    elif re.search(r"VEN[-_]FAULT", stdout_text):
+        raise RuntimeError(f"Unexpected faultlog event in {log_path}")
 
     guest_lines = [
         line
